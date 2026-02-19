@@ -107,10 +107,13 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <AdditionalIncludeDirectories>$(SolutionDir)Apps\App.Base\Include;$(SolutionDir)Engine\Engine.RendererDX12\Include;$(SolutionDir)Engine\Engine.Core\Include;$(SolutionDir)Engine\Engine.RHI\Include;$(SolutionDir)Engine\Engine.UI\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.RHI\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.UI\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\App.Base\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.RHI.lib;Engine.UI.lib;App.Base.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
