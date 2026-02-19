@@ -107,7 +107,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)Apps\App.Base\Include;$(SolutionDir)Engine\Engine.RendererDX12\Include;$(SolutionDir)Engine\Engine.Core\Include;$(SolutionDir)Engine\Engine.RHI\Include;$(SolutionDir)Engine\Engine.UI\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Apps\App.Base\Include;$(SolutionDir)Engine\Engine.RendererDX12\Include;$(SolutionDir)Engine\Engine.Core\Include;$(SolutionDir)Engine\Engine.RHI\Include;$(SolutionDir)Engine\Engine.UI\Include;$(SolutionDir)Apps\App.Editor\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
