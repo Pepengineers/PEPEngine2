@@ -15,12 +15,12 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Include\App.Base\d3dApp.h">
+    <ClInclude Include="Include\App.Base\AppBase.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\d3dApp.cpp">
+    <ClCompile Include="src\AppBase.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

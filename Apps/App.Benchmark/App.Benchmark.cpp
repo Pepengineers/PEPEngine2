@@ -1,6 +1,6 @@
-#include <App.Base/d3dApp.h>
+#include <App.Base/AppBase.h>
 
-class BenchmarkApp : public D3DApp
+class BenchmarkApp : public AppBase
 {
 public:
 	BenchmarkApp(HINSTANCE hInstance);
@@ -45,19 +45,18 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
 }
 
 BenchmarkApp::BenchmarkApp(HINSTANCE hInstance)
-	: D3DApp(hInstance)
+	: AppBase(hInstance)
 {
 }
 
 BenchmarkApp::~BenchmarkApp()
 {
-	if (md3dDevice != nullptr)
-		FlushCommandQueue();
+
 }
 
 bool BenchmarkApp::Initialize()
 {
-	if (!D3DApp::Initialize())
+	if (!AppBase::Initialize())
 		return false;
 
 	return true;
@@ -65,7 +64,7 @@ bool BenchmarkApp::Initialize()
 
 void BenchmarkApp::OnResize()
 {
-	D3DApp::OnResize();
+	AppBase::OnResize();
 
 }
 
@@ -82,7 +81,7 @@ void BenchmarkApp::Draw(const GameTimer& gt)
 void BenchmarkApp::OnMouseDown(WPARAM btnState, int x, int y)
 {
 
-	SetCapture(mhMainWnd);
+	SetCapture(hMainWnd);
 }
 
 void BenchmarkApp::OnMouseUp(WPARAM btnState, int x, int y)
