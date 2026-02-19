@@ -107,7 +107,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;SOLUTION_DIR=LR"($(SolutionDir))";PROJECT_DIR=LR"($(ProjectDir))";SHADERS_DIR=LR"($(SolutionDir)Shaders)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)Engine\Engine.Core\Include;$(SolutionDir)Engine\Engine.RendererDX12\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Engine\Engine.Core\Include;$(SolutionDir)Engine\Engine.RendererDX12\Include;$(SolutionDir)Apps\App.Base\Include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
