@@ -142,13 +142,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\GameTimer.cpp" />
-    <ClCompile Include="src\GeometryGenerator.cpp" />
-    <ClCompile Include="src\MathHelper.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.Core\GameTimer.h" />
-    <ClInclude Include="Include\Engine.Core\GeometryGenerator.h" />
-    <ClInclude Include="Include\Engine.Core\MathHelper.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -1,6 +1,5 @@
-#include <WindowsX.h>
-
 #include <App.Base/AppBase.h>
+#include <WindowsX.h>
 
 using Microsoft::WRL::ComPtr;
 using namespace std;

@@ -1,17 +1,13 @@
-//***************************************************************************************
-// GameTimer.cpp by Frank Luna (C) 2011 All Rights Reserved.
-//***************************************************************************************
-
 #include <windows.h>
 #include <Engine.Core/GameTimer.h>
 
 GameTimer::GameTimer()
-: mSecondsPerCount(0.0), mDeltaTime(-1.0), mBaseTime(0), 
-  mPausedTime(0), mPrevTime(0), mCurrTime(0), mStopped(false)
+: SecondsPerCount(0.0), TimeDelta(-1.0), BaseTime(0),
+  PausedTime(0), PrevTime(0), CurrTime(0), Stopped(false)
 {
 	__int64 countsPerSec;
 	QueryPerformanceFrequency((LARGE_INTEGER*)&countsPerSec);
-	mSecondsPerCount = 1.0 / (double)countsPerSec;
+	SecondsPerCount = 1.0 / (double)countsPerSec;
 }
 
 // Returns the total time elapsed since Reset() was called, NOT counting any
@@ -27,9 +23,9 @@ float GameTimer::TotalTime()const
 	// ----*---------------*-----------------*------------*------------*------> time
 	//  mBaseTime       mStopTime        startTime     mStopTime    mCurrTime
 
-	if( mStopped )
+	if(Stopped)
 	{
-		return (float)(((mStopTime - mPausedTime)-mBaseTime)*mSecondsPerCount);
+		return (float)(((StopTime - PausedTime)-BaseTime)*SecondsPerCount);
 	}
 
 	// The distance mCurrTime - mBaseTime includes paused time,
@@ -44,13 +40,13 @@ float GameTimer::TotalTime()const
 	
 	else
 	{
-		return (float)(((mCurrTime-mPausedTime)-mBaseTime)*mSecondsPerCount);
+		return (float)(((CurrTime-PausedTime)-BaseTime)*SecondsPerCount);
 	}
 }
 
 float GameTimer::DeltaTime()const
 {
-	return (float)mDeltaTime;
+	return (float)TimeDelta;
 }
 
 void GameTimer::Reset()
@@ -58,10 +54,10 @@ void GameTimer::Reset()
 	__int64 currTime;
 	QueryPerformanceCounter((LARGE_INTEGER*)&currTime);
 
-	mBaseTime = currTime;
-	mPrevTime = currTime;
-	mStopTime = 0;
-	mStopped  = false;
+	BaseTime = currTime;
+	PrevTime = currTime;
+	StopTime = 0;
+	Stopped  = false;
 }
 
 void GameTimer::Start()
@@ -76,51 +72,48 @@ void GameTimer::Start()
 	// ----*---------------*-----------------*------------> time
 	//  mBaseTime       mStopTime        startTime     
 
-	if( mStopped )
+	if(Stopped)
 	{
-		mPausedTime += (startTime - mStopTime);	
+		PausedTime += (startTime - StopTime);	
 
-		mPrevTime = startTime;
-		mStopTime = 0;
-		mStopped  = false;
+		PrevTime = startTime;
+		StopTime = 0;
+		Stopped  = false;
 	}
 }
 
 void GameTimer::Stop()
 {
-	if( !mStopped )
+	if(!Stopped)
 	{
 		__int64 currTime;
 		QueryPerformanceCounter((LARGE_INTEGER*)&currTime);
 
-		mStopTime = currTime;
-		mStopped  = true;
+		StopTime = currTime;
+		Stopped  = true;
 	}
 }
 
 void GameTimer::Tick()
 {
-	if( mStopped )
+	if( Stopped )
 	{
-		mDeltaTime = 0.0;
+		TimeDelta = 0.0;
 		return;
 	}
 
 	__int64 currTime;
 	QueryPerformanceCounter((LARGE_INTEGER*)&currTime);
-	mCurrTime = currTime;
+	CurrTime = currTime;
 
 	// Time difference between this frame and the previous.
-	mDeltaTime = (mCurrTime - mPrevTime)*mSecondsPerCount;
+	TimeDelta = (CurrTime - PrevTime)*SecondsPerCount;
 
 	// Prepare for next frame.
-	mPrevTime = mCurrTime;
+	PrevTime = CurrTime;
 
 	// Force nonnegative.  The DXSDK's CDXUTTimer mentions that if the 
 	// processor goes into a power save mode or we get shuffled to another
 	// processor, then mDeltaTime can be negative.
-	if(mDeltaTime < 0.0)
-	{
-		mDeltaTime = 0.0;
-	}
+	if(TimeDelta < 0.0) TimeDelta = 0.0;
 }

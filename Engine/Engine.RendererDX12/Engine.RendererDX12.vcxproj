@@ -19,18 +19,11 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Include\Engine.RendererDX12\Camera.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\d3dUtil.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
     <ClInclude Include="Include\Engine.RendererDX12\d3dx12.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\DDSTextureLoader.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\FrameResource.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\UploadBuffer.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\Camera.cpp" />
-    <ClCompile Include="src\d3dUtil.cpp" />
-    <ClCompile Include="src\DDSTextureLoader.cpp" />
-    <ClCompile Include="src\FrameResource.cpp" />
+    <ClCompile Include="src\D3DHelpers.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>

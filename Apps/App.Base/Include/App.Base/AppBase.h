@@ -1,7 +1,3 @@
-//***************************************************************************************
-// d3dApp.h by Frank Luna (C) 2015 All Rights Reserved.
-//***************************************************************************************
-
 #pragma once
 
 #if defined(DEBUG) || defined(_DEBUG)
@@ -10,7 +6,7 @@
 #endif
 
 #include <Engine.Core/GameTimer.h>
-#include <Engine.RendererDX12/d3dUtil.h>
+#include <Engine.RendererDX12/D3DHelpers.h>
 
 // Link necessary d3d12 libraries.
 #pragma comment(lib,"d3dcompiler.lib")

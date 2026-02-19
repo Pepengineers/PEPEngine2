@@ -1,9 +1,4 @@
-//***************************************************************************************
-// GameTimer.h by Frank Luna (C) 2011 All Rights Reserved.
-//***************************************************************************************
-
-#ifndef GAMETIMER_H
-#define GAMETIMER_H
+#pragma once
 
 class GameTimer
 {
@@ -19,16 +14,14 @@ public:
 	void Tick();  // Call every frame.
 
 private:
-	double mSecondsPerCount;
-	double mDeltaTime;
+	double SecondsPerCount;
+	double TimeDelta;
 
-	__int64 mBaseTime;
-	__int64 mPausedTime;
-	__int64 mStopTime;
-	__int64 mPrevTime;
-	__int64 mCurrTime;
+	__int64 BaseTime;
+	__int64 PausedTime;
+	__int64 StopTime;
+	__int64 PrevTime;
+	__int64 CurrTime;
 
-	bool mStopped;
+	bool Stopped;
 };
-
-#endif // GAMETIMER_H
