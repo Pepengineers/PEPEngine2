@@ -1,4 +1,5 @@
 #include <App.Base/AppBase.h>
+#include <Engine.UI/EngineUI.h>
 
 class BenchmarkApp : public AppBase
 {
@@ -58,6 +59,8 @@ bool BenchmarkApp::Initialize()
 {
 	if (!AppBase::Initialize())
 		return false;
+
+	InitializeImgui();
 
 	return true;
 }

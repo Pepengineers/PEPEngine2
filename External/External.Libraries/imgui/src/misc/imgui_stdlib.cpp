@@ -19,9 +19,9 @@
 // See more C++ related extension (fmt, RAII, syntactic sugar) on Wiki:
 //   https://github.com/ocornut/imgui/wiki/Useful-Extensions#cness
 
-#include "imgui.h"
+#include <imgui/imgui.h>
 #ifndef IMGUI_DISABLE
-#include "imgui_stdlib.h"
+#include <imgui/misc/imgui_stdlib.h>
 
 // Clang warnings with -Weverything
 #if defined(__clang__)
