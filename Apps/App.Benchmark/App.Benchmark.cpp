@@ -1,3 +1,5 @@
+// App.Benchmark.cpp
+
 #include <App.Base/AppBase.h>
 
 class BenchmarkApp : public AppBase
@@ -62,7 +64,7 @@ bool BenchmarkApp::Initialize()
 	Engine::UI::Initialize();
 	Engine::UI::ShutdownUI();
 
-	Engine::RendererDX12::InitializeDXC();
+	Engine::RendererDX12::InitializeDXC(nullptr);
 	Engine::RendererDX12::ShutdownDXC();
 
 	return true;

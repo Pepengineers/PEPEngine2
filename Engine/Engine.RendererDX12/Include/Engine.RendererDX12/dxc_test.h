@@ -18,6 +18,6 @@ namespace Engine::RendererDX12
     extern D3D_SHADER_MODEL MaxSupportedShaderModel;
     extern std::wstring mAdapterName;
 
-    void InitializeDXC();
+    void InitializeDXC(ID3D12GraphicsCommandList* cmdList);
     void ShutdownDXC();
 }

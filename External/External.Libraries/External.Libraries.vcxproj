@@ -148,6 +148,11 @@
     <ClInclude Include="imgui\Include\imgui\imstb_truetype.h" />
     <ClInclude Include="imgui\Include\imgui\misc\imgui_single_file.h" />
     <ClInclude Include="imgui\Include\imgui\misc\imgui_stdlib.h" />
+    <ClInclude Include="pix\Include\pix\pix3.h" />
+    <ClInclude Include="pix\Include\pix\pix3_win.h" />
+    <ClInclude Include="pix\Include\pix\PIXEvents.h" />
+    <ClInclude Include="pix\Include\pix\PIXEventsCommon.h" />
+    <ClInclude Include="pix\Include\pix\PIXEventsLegacy.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="imgui\src\backends\imgui_impl_dx12.cpp" />
