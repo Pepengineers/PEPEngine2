@@ -7,6 +7,7 @@
 
 #include <Engine.Core/GameTimer.h>
 #include <Engine.RendererDX12/D3DHelpers.h>
+#include <Engine.UI/UI_test.h>
 
 // Link necessary d3d12 libraries.
 #pragma comment(lib,"d3dcompiler.lib")
@@ -52,12 +53,12 @@ protected:
     static AppBase* mApp;
 
     HINSTANCE hAppInst = nullptr; // application instance handle
-    HWND      hMainWnd = nullptr; // main window handle
-	bool      AppPaused = false;  // is the application paused?
-	bool      Minimized = false;  // is the application minimized?
-	bool      Maximized = false;  // is the application maximized?
-	bool      Resizing = false;   // are the resize bars being dragged?
-    bool      FullscreenState = false;// fullscreen enabled
+    HWND hMainWnd = nullptr; // main window handle
+	bool AppPaused = false;  // is the application paused?
+	bool Minimized = false;  // is the application minimized?
+	bool Maximized = false;  // is the application maximized?
+	bool Resizing = false;   // are the resize bars being dragged?
+    bool FullscreenState = false;// fullscreen enabled
 
 	GameTimer Timer;
 
