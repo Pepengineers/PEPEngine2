@@ -107,7 +107,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;SOLUTION_DIR=LR"($(SolutionDir))";PROJECT_DIR=LR"($(ProjectDir))";SHADERS_DIR=LR"($(SolutionDir)Shaders)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>$(SolutionDir)Engine\Engine.Core\Include;$(SolutionDir)Engine\Engine.RendererDX12\Include;$(SolutionDir)Apps\App.Base\Include;$(SolutionDir)Engine\Engine.RHI\Include;$(SolutionDir)Engine\Engine.UI\Include;$(SolutionDir)Apps\App.Benchmark\Include;$(SolutionDir)External\External.Libraries\Include;$(SolutionDir)External\External.Libraries\dxc\Include;$(SolutionDir)External\External.Libraries\pix\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Engine\Engine.Core\Include;$(SolutionDir)Engine\Engine.RendererDX12\Include;$(SolutionDir)Apps\App.Base\Include;$(SolutionDir)Engine\Engine.RHI\Include;$(SolutionDir)Engine\Engine.UI\Include;$(SolutionDir)Apps\App.Benchmark\Include;$(SolutionDir)External\External.Libraries\Include</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
