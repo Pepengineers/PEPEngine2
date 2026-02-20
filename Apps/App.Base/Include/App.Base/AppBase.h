@@ -8,6 +8,7 @@
 #include <Engine.Core/GameTimer.h>
 #include <Engine.RendererDX12/D3DHelpers.h>
 #include <Engine.UI/UI_test.h>
+#include <Engine.RendererDX12/dxc_test.h>
 
 // Link necessary d3d12 libraries.
 #pragma comment(lib,"d3dcompiler.lib")

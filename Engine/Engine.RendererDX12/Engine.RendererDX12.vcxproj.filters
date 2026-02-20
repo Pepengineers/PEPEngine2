@@ -21,9 +21,15 @@
     <ClInclude Include="Include\Engine.RendererDX12\d3dx12.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\dxc_test.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\dxc_test.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

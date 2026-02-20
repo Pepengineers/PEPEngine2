@@ -62,6 +62,9 @@ bool BenchmarkApp::Initialize()
 	Engine::UI::Initialize();
 	Engine::UI::ShutdownUI();
 
+	Engine::RendererDX12::InitializeDXC();
+	Engine::RendererDX12::ShutdownDXC();
+
 	return true;
 }
 

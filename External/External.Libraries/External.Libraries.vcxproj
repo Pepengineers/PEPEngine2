@@ -129,6 +129,15 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="dxc\Include\dxc\d3d12shader.h" />
+    <ClInclude Include="dxc\Include\dxc\dxcapi.h" />
+    <ClInclude Include="dxc\Include\dxc\dxcerrors.h" />
+    <ClInclude Include="dxc\Include\dxc\dxcisense.h" />
+    <ClInclude Include="dxc\Include\dxc\hlsl\dx\linalg.h" />
+    <ClInclude Include="dxc\Include\dxc\hlsl\vk\khr\cooperative_matrix.h" />
+    <ClInclude Include="dxc\Include\dxc\hlsl\vk\opcode_selector.h" />
+    <ClInclude Include="dxc\Include\dxc\hlsl\vk\spirv.h" />
+    <ClInclude Include="dxc\Include\dxc\Support\ErrorCodes.h" />
     <ClInclude Include="imgui\Include\imgui\backends\imgui_impl_dx12.h" />
     <ClInclude Include="imgui\Include\imgui\backends\imgui_impl_win32.h" />
     <ClInclude Include="imgui\Include\imgui\imconfig.h" />
