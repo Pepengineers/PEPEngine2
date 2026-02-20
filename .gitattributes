@@ -1,5 +1,102 @@
-*.dds filter=lfs diff=lfs merge=lfs -text
-*.bmp filter=lfs diff=lfs merge=lfs -text
-*.png filter=lfs diff=lfs merge=lfs -text
+* text=auto eol=lf
+
+# Source code
+*.h text diff=cpp
+*.hpp text diff=cpp
+*.hh text diff=cpp
+*.inl text diff=cpp
+*.c text diff=cpp
+*.cc text diff=cpp
+*.cpp text diff=cpp
+*.cxx text diff=cpp
+*.ixx text diff=cpp
+*.m text
+*.mm text
+*.natvis text
+*.asm text
+*.s text
+# Build/meta/project files
+*.sln text eol=crlf
+*.vcxproj text eol=crlf
+*.vcxproj.filters text eol=crlf
+*.vcxproj.user text eol=crlf
+*.cmake text
+CMakeLists.txt text
+*.ninja text
+*.make text
+Makefile text
+*.props text eol=crlf
+*.targets text eol=crlf
+*.csproj text eol=crlf
+*.cs text
+# Scripts/configs
+*.py text
+*.sh text eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.json text
+*.yml text
+*.yaml text
+*.toml text
+*.ini text
+*.cfg text
+*.conf text
+*.xml text
+*.md text
+*.txt text
+*.csv text
+# Shaders
+*.hlsl text
+*.hlsli text
+*.fx text
+*.glsl text
+*.vert text
+*.frag text
+*.comp text
+# In general, these files should not end up in the repository thanks to .gitignore,
+# but just in case, we will mark them all as binary
+#*.exe     binary
+*.dll filter=lfs diff=lfs merge=lfs -text
+#*.lib     binary
+#*.pdb     binary
+#*.obj     binary (commented cause we have 3D-models *.obj)
+#*.ilk     binary
+#*.bin     binary
+#*.dat     binary
+#*.pak     binary
+# Images/audio/video/models/archives/fonts -> Git LFS
+*.tga filter=lfs diff=lfs merge=lfs -text
+*.tif filter=lfs diff=lfs merge=lfs -text
 *.jpg filter=lfs diff=lfs merge=lfs -text
 *.jpeg filter=lfs diff=lfs merge=lfs -text
+*.png filter=lfs diff=lfs merge=lfs -text
+*.gif filter=lfs diff=lfs merge=lfs -text
+*.psd filter=lfs diff=lfs merge=lfs -text
+*.ai filter=lfs diff=lfs merge=lfs -text
+*.tiff filter=lfs diff=lfs merge=lfs -text
+*.bmp filter=lfs diff=lfs merge=lfs -text
+*.cubemap filter=lfs diff=lfs merge=lfs -text
+*.pak filter=lfs diff=lfs merge=lfs -text
+*.raw filter=lfs diff=lfs merge=lfs -text
+*.hdr filter=lfs diff=lfs merge=lfs -text
+*.mp3 filter=lfs diff=lfs merge=lfs -text
+*.wav filter=lfs diff=lfs merge=lfs -text
+*.ogg filter=lfs diff=lfs merge=lfs -text
+*.flac filter=lfs diff=lfs merge=lfs -text
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+*.mov filter=lfs diff=lfs merge=lfs -text
+*.avi filter=lfs diff=lfs merge=lfs -text
+*.FBX filter=lfs diff=lfs merge=lfs -text
+*.fbx filter=lfs diff=lfs merge=lfs -text
+*.blend filter=lfs diff=lfs merge=lfs -text
+*.obj filter=lfs diff=lfs merge=lfs -text
+*.mb filter=lfs diff=lfs merge=lfs -text
+*.stl filter=lfs diff=lfs merge=lfs -text
+*.gltf filter=lfs diff=lfs merge=lfs -text
+*.glb filter=lfs diff=lfs merge=lfs -text
+*.zip filter=lfs diff=lfs merge=lfs -text
+*.7z filter=lfs diff=lfs merge=lfs -text
+*.rar filter=lfs diff=lfs merge=lfs -text
+*.otf filter=lfs diff=lfs merge=lfs -text
+*.ttf filter=lfs diff=lfs merge=lfs -text
+*.dds filter=lfs diff=lfs merge=lfs -text
