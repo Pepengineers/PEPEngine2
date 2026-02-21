@@ -7,7 +7,13 @@
 #include <dxc/d3d12shader.h>
 
 #include <pix/pix3.h>
-//#include <pix/PIXEvents.h>
+
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+
+#include <filesystem>
+
 
 namespace Engine::RendererDX12
 {
@@ -37,5 +43,23 @@ namespace Engine::RendererDX12
 	void ShutdownDXC()
 	{
 
+	}
+
+	void CheckAssimp()
+	{
+		Assimp::Importer Importer;
+
+		std::filesystem::path ModelPath = MODELS_FOLDER;
+		ModelPath /= "african_head.obj";
+		const aiScene* Scene = Importer.ReadFile(ModelPath.string(), aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenNormals | aiProcess_CalcTangentSpace);
+
+		if (!Scene)
+		{
+			OutputDebugStringA(Importer.GetErrorString());
+		}
+		else
+		{
+			OutputDebugStringA("Scene was loaded!");
+		}
 	}
 }

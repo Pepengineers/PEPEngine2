@@ -20,4 +20,6 @@ namespace Engine::RendererDX12
 
     void InitializeDXC(ID3D12GraphicsCommandList* cmdList);
     void ShutdownDXC();
+
+    void CheckAssimp();
 }

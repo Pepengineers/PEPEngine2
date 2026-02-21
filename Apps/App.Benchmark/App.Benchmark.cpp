@@ -67,6 +67,8 @@ bool BenchmarkApp::Initialize()
 	Engine::RendererDX12::InitializeDXC(nullptr);
 	Engine::RendererDX12::ShutdownDXC();
 
+	Engine::RendererDX12::CheckAssimp();
+
 	return true;
 }
 
