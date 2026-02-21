@@ -117,6 +117,9 @@
       <OptimizeReferences>false</OptimizeReferences>
       <AdditionalLibraryDirectories>$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.RHI\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.UI\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\App.Base\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\External.Libraries\;$(SolutionDir)External\External.Libraries\dxc\lib\$(Platform)\;$(SolutionDir)External\External.Libraries\pix\lib\;$(SolutionDir)External\External.Libraries\assimp\lib\$(Configuration)\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
+    <PostBuildEvent>
+      <Command>xcopy /Y /D "$(SolutionDir)External\Runtime\*.dll" "$(TargetDir)"</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
