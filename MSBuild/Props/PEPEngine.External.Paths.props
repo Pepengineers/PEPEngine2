@@ -11,5 +11,6 @@
     <PEPExternalDirectXTexInclude Condition="'$(PEPExternalDirectXTexInclude)'==''">$(PEPExternalRoot)directxtex\Include</PEPExternalDirectXTexInclude>
     <PEPExternalDebugDrawerInclude Condition="'$(PEPExternalDebugDrawerInclude)'==''">$(PEPExternalRoot)debugdrawer\Include</PEPExternalDebugDrawerInclude>
     <PEPExternalFfxApiInclude Condition="'$(PEPExternalFfxApiInclude)'==''">$(PEPExternalRoot)ffx-api\Include</PEPExternalFfxApiInclude>
+    <PEPExternalNvidiaSDKInclude Condition="'$(PEPExternalNvidiaSDKInclude)'==''">$(PEPExternalRoot)nvidia-sdk\Include</PEPExternalNvidiaSDKInclude>
   </PropertyGroup>
 </Project>

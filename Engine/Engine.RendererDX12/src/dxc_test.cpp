@@ -25,6 +25,8 @@
 #include <ffx-api/ffx_upscale.h>
 #include <ffx-api/dx12/ffx_api_dx12.h>
 
+#include <nvidia-sdk/sl.h>
+
 #include <filesystem>
 
 static_assert(sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS21) > 0, "No D3D12_OPTIONS21 (Work Graphs) in headers");
@@ -36,8 +38,9 @@ namespace Engine::RendererDX12
 	Microsoft::WRL::ComPtr<IDxcIncludeHandler> mDxcIncludeHandler;
 	D3D_SHADER_MODEL MaxSupportedShaderModel;
 	std::wstring mAdapterName;
+	static bool gStreamlineInitialized = false;
 
-	void InitializeDXC(ID3D12GraphicsCommandList* cmdList)
+	void InitializeLibraries(ID3D12GraphicsCommandList* cmdList)
 	{
 		if (cmdList)
 		{
@@ -59,6 +62,7 @@ namespace Engine::RendererDX12
 		D3D12_RESOURCE_DESC d{};
 		d.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
 
+		// DirectXTex
 		DirectX::ScratchImage img;
 		auto hr = img.Initialize2D(DXGI_FORMAT_R8G8B8A8_UNORM, 1, 1, 1, 1);
 		ThrowIfFailed(hr);
@@ -114,11 +118,72 @@ namespace Engine::RendererDX12
 			std::string errorMsg = "ERROR: FSR3 CONTEXT NOT CREATED\n";
 			OutputDebugStringA(errorMsg.c_str());
 		}*/
+
+		// Streamline smoke-test: request one concrete feature and verify it was loaded.
+		if (!gStreamlineInitialized)
+		{
+			const sl::Feature featuresToLoad[] = { sl::kFeatureNIS };
+
+			sl::Preferences pref = {};
+			pref.showConsole = true;
+			pref.logLevel = sl::LogLevel::eVerbose;
+			pref.featuresToLoad = featuresToLoad;
+			pref.numFeaturesToLoad = static_cast<uint32_t>(sizeof(featuresToLoad) / sizeof(featuresToLoad[0]));
+			pref.renderAPI = sl::RenderAPI::eD3D12;
+			pref.engine = sl::EngineType::eCustom;
+			pref.engineVersion = "0.1.0";
+
+			sl::Result res = slInit(pref);
+			if (res != sl::Result::eOk)
+			{
+				std::string message = "FAILED: slInit() = " + std::to_string((int)res) + "\n";
+				OutputDebugStringA(message.c_str());
+			}
+			else
+			{
+				gStreamlineInitialized = true;
+				OutputDebugStringA("OK: Streamline initialized successfully\n");
+
+				bool isNisLoaded = false;
+				sl::Result loadedResult = slIsFeatureLoaded(sl::kFeatureNIS, isNisLoaded);
+				if (loadedResult == sl::Result::eOk && isNisLoaded)
+				{
+					OutputDebugStringA("OK: Streamline feature loaded: kFeatureNIS\n");
+
+					sl::FeatureVersion nisVersion = {};
+					sl::Result versionResult = slGetFeatureVersion(sl::kFeatureNIS, nisVersion);
+					if (versionResult == sl::Result::eOk)
+					{
+						std::string versionMessage = "OK: kFeatureNIS SL version = " + nisVersion.versionSL.toStr() + "\n";
+						OutputDebugStringA(versionMessage.c_str());
+					}
+				}
+				else
+				{
+					std::string message = "FAILED: slIsFeatureLoaded(kFeatureNIS) = " + std::to_string((int)loadedResult) + "\n";
+					OutputDebugStringA(message.c_str());
+				}
+			}
+		}
 	}
 
-	void ShutdownDXC()
+	void ShutdownLibraries()
 	{
+		if (gStreamlineInitialized)
+		{
+			sl::Result res = slShutdown();
+			if (res != sl::Result::eOk)
+			{
+				std::string message = "FAILED: slShutdown() = " + std::to_string((int)res) + "\n";
+				OutputDebugStringA(message.c_str());
+			}
+			else
+			{
+				OutputDebugStringA("OK: Streamline shutdown\n");
+			}
 
+			gStreamlineInitialized = false;
+		}
 	}
 
 	void CheckAssimp()
