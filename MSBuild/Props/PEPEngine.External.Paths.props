@@ -9,5 +9,6 @@
     <PEPExternalDirectXTKInclude Condition="'$(PEPExternalDirectXTKInclude)'==''">$(PEPExternalRoot)directxtk\Include</PEPExternalDirectXTKInclude>
     <PEPExternalDirectX-HeadersInclude Condition="'$(PEPExternalDirectX-HeadersInclude)'==''">$(PEPExternalRoot)directx-headers\Include</PEPExternalDirectX-HeadersInclude>
     <PEPExternalDirectXTexInclude Condition="'$(PEPExternalDirectXTexInclude)'==''">$(PEPExternalRoot)directxtex\Include</PEPExternalDirectXTexInclude>
+    <PEPExternalDebugDrawerInclude Condition="'$(PEPExternalDebugDrawerInclude)'==''">$(PEPExternalRoot)debugdrawer\Include</PEPExternalDebugDrawerInclude>
   </PropertyGroup>
 </Project>

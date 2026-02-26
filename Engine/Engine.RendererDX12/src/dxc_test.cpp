@@ -18,6 +18,7 @@
 #include <directxtk/SimpleMath.h>
 
 #include <directxtex/DirectXTex.h>
+#include <debugdrawer/DebugRenderSysImpl.h>
 
 #include <filesystem>
 
@@ -62,6 +63,9 @@ namespace Engine::RendererDX12
 		{
 			OutputDebugStringA("DirectXTex ScratchImage::Initialize2D OK");
 		}
+
+		// The debugdrawer cannot be tested yet because the engine lacks the necessary functionality.
+		// As development progresses, the debugdrawer will be rewritten to match the new functionality
 	}
 
 	void ShutdownDXC()
