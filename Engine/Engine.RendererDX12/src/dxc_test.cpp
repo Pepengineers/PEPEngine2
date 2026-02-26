@@ -27,6 +27,8 @@
 
 #include <nvidia-sdk/sl.h>
 
+#include <directstorage/dstorage.h>
+
 #include <filesystem>
 
 static_assert(sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS21) > 0, "No D3D12_OPTIONS21 (Work Graphs) in headers");
@@ -164,6 +166,15 @@ namespace Engine::RendererDX12
 					OutputDebugStringA(message.c_str());
 				}
 			}
+		}
+
+		// DirectStorage
+		IDStorageFactory* factory = nullptr;
+		HRESULT hr2 = DStorageGetFactory(IID_PPV_ARGS(&factory));
+		if (SUCCEEDED(hr2) && factory)
+		{
+			OutputDebugStringA("DiretStorage success");
+			factory->Release();
 		}
 	}
 
