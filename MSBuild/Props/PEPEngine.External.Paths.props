@@ -7,5 +7,6 @@
     <PEPExternalDxcInclude Condition="'$(PEPExternalDxcInclude)'==''">$(PEPExternalRoot)dxc\Include</PEPExternalDxcInclude>
     <PEPExternalPixInclude Condition="'$(PEPExternalPixInclude)'==''">$(PEPExternalRoot)pix\Include</PEPExternalPixInclude>
     <PEPExternalDirectXTKInclude Condition="'$(PEPExternalDirectXTKInclude)'==''">$(PEPExternalRoot)directxtk\Include</PEPExternalDirectXTKInclude>
+    <PEPExternalDirectX-HeadersInclude Condition="'$(PEPExternalDirectX-HeadersInclude)'==''">$(PEPExternalRoot)directx-headers\Include</PEPExternalDirectX-HeadersInclude>
   </PropertyGroup>
 </Project>

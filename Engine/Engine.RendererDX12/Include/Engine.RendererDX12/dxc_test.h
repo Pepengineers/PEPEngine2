@@ -4,11 +4,12 @@
 
 #include <wrl/client.h>
 #include <string>
-#include <d3d12.h>
 
 struct IDxcCompiler3;
 struct IDxcUtils;
 struct IDxcIncludeHandler;
+enum D3D_SHADER_MODEL;
+struct ID3D12GraphicsCommandList;
 
 namespace Engine::RendererDX12
 {

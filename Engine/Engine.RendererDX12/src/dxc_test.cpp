@@ -6,6 +6,9 @@
 #include <dxc/dxcapi.h>
 #include <dxc/d3d12shader.h>
 
+#include <directx-headers/directx/d3d12.h>
+#include <directx-headers/directx/d3dx12.h>
+
 #include <pix/pix3.h>
 
 #include <assimp/Importer.hpp>
@@ -15,6 +18,8 @@
 #include <directxtk/SimpleMath.h>
 
 #include <filesystem>
+
+static_assert(sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS21) > 0, "No D3D12_OPTIONS21 (Work Graphs) in headers");
 
 namespace Engine::RendererDX12
 {
@@ -42,6 +47,9 @@ namespace Engine::RendererDX12
 
 		DirectX::SimpleMath::Vector3 a(1, 2, 3);
 		auto b = a.Length();
+
+		D3D12_RESOURCE_DESC d{};
+		d.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
 	}
 
 	void ShutdownDXC()
