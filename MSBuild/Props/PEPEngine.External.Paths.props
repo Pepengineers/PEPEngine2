@@ -8,5 +8,6 @@
     <PEPExternalPixInclude Condition="'$(PEPExternalPixInclude)'==''">$(PEPExternalRoot)pix\Include</PEPExternalPixInclude>
     <PEPExternalDirectXTKInclude Condition="'$(PEPExternalDirectXTKInclude)'==''">$(PEPExternalRoot)directxtk\Include</PEPExternalDirectXTKInclude>
     <PEPExternalDirectX-HeadersInclude Condition="'$(PEPExternalDirectX-HeadersInclude)'==''">$(PEPExternalRoot)directx-headers\Include</PEPExternalDirectX-HeadersInclude>
+    <PEPExternalDirectXTexInclude Condition="'$(PEPExternalDirectXTexInclude)'==''">$(PEPExternalRoot)directxtex\Include</PEPExternalDirectXTexInclude>
   </PropertyGroup>
 </Project>

@@ -2,6 +2,7 @@
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.DirectXTK.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.DirectXTK.props')" />
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.DirectX-Headers.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.DirectX-Headers.props')" />
+  <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.DirectXTex.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.DirectXTex.props')" />
   <ItemDefinitionGroup>
     <ClCompile>
       <AdditionalIncludeDirectories>$(SolutionDir)Engine\Engine.Core\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>

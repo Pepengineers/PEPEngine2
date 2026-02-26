@@ -17,6 +17,8 @@
 
 #include <directxtk/SimpleMath.h>
 
+#include <directxtex/DirectXTex.h>
+
 #include <filesystem>
 
 static_assert(sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS21) > 0, "No D3D12_OPTIONS21 (Work Graphs) in headers");
@@ -50,6 +52,16 @@ namespace Engine::RendererDX12
 
 		D3D12_RESOURCE_DESC d{};
 		d.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+
+		DirectX::ScratchImage img;
+		auto hr = img.Initialize2D(DXGI_FORMAT_R8G8B8A8_UNORM, 1, 1, 1, 1);
+		ThrowIfFailed(hr);
+
+		const auto& texMeta = img.GetMetadata();
+		if (texMeta.width == 1 && texMeta.height == 1 && texMeta.format == DXGI_FORMAT_R8G8B8A8_UNORM)
+		{
+			OutputDebugStringA("DirectXTex ScratchImage::Initialize2D OK");
+		}
 	}
 
 	void ShutdownDXC()
