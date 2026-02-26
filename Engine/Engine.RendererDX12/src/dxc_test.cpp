@@ -12,8 +12,9 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 
-#include <filesystem>
+#include <directxtk/SimpleMath.h>
 
+#include <filesystem>
 
 namespace Engine::RendererDX12
 {
@@ -38,6 +39,9 @@ namespace Engine::RendererDX12
 		{
 			PIXEndEvent(cmdList);
 		}
+
+		DirectX::SimpleMath::Vector3 a(1, 2, 3);
+		auto b = a.Length();
 	}
 
 	void ShutdownDXC()

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PEPExternalRoot Condition="'$(PEPExternalRoot)'==''">$(SolutionDir)External\External.Libraries\</PEPExternalRoot>
+    <PEPExternalAssimpInclude Condition="'$(PEPExternalAssimpInclude)'==''">$(PEPExternalRoot)assimp\Include</PEPExternalAssimpInclude>
+    <PEPExternalImGuiInclude Condition="'$(PEPExternalImGuiInclude)'==''">$(PEPExternalRoot)imgui\Include</PEPExternalImGuiInclude>
+    <PEPExternalDxcInclude Condition="'$(PEPExternalDxcInclude)'==''">$(PEPExternalRoot)dxc\Include</PEPExternalDxcInclude>
+    <PEPExternalPixInclude Condition="'$(PEPExternalPixInclude)'==''">$(PEPExternalRoot)pix\Include</PEPExternalPixInclude>
+    <PEPExternalDirectXTKInclude Condition="'$(PEPExternalDirectXTKInclude)'==''">$(PEPExternalRoot)directxtk\Include</PEPExternalDirectXTKInclude>
+  </PropertyGroup>
+</Project>

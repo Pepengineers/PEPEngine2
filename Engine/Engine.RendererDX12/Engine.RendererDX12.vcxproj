@@ -77,10 +77,18 @@
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\..\GlobalSettings.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.Module.Engine.RendererDX12.Public.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Dxc.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Pix.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Assimp.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\..\GlobalSettings.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.Module.Engine.RendererDX12.Public.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Dxc.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Pix.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Assimp.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />
@@ -124,7 +132,6 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <AdditionalIncludeDirectories>$(SolutionDir)Engine\Engine.Core\Include;$(SolutionDir)Engine\Engine.RendererDX12\Include;$(SolutionDir)External\External.Libraries\dxc\Include;$(SolutionDir)External\External.Libraries\pix\Include;$(SolutionDir)External\External.Libraries\assimp\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
@@ -154,3 +161,4 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
+
