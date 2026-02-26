@@ -18,7 +18,12 @@
 #include <directxtk/SimpleMath.h>
 
 #include <directxtex/DirectXTex.h>
-#include <debugdrawer/DebugRenderSysImpl.h>
+
+//#include <debugdrawer/DebugRenderSysImpl.h>
+
+#include <ffx-api/ffx_api.h>
+#include <ffx-api/ffx_upscale.h>
+#include <ffx-api/dx12/ffx_api_dx12.h>
 
 #include <filesystem>
 
@@ -66,6 +71,49 @@ namespace Engine::RendererDX12
 
 		// The debugdrawer cannot be tested yet because the engine lacks the necessary functionality.
 		// As development progresses, the debugdrawer will be rewritten to match the new functionality
+
+		// FSR
+		ffxContext mFFXContext;
+
+		ffxCreateBackendDX12Desc backendDesc = {};
+		backendDesc.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;
+		backendDesc.device = nullptr;
+
+		ffxCreateContextDescUpscale upscaleDesc = {};
+		upscaleDesc.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
+		upscaleDesc.header.pNext = &backendDesc.header;
+		upscaleDesc.maxRenderSize = { static_cast<uint32_t>(1920), static_cast<uint32_t>(1080) };
+		upscaleDesc.maxUpscaleSize = { static_cast<uint32_t>(1920), static_cast<uint32_t>(1080) };
+		upscaleDesc.flags = FFX_UPSCALE_ENABLE_DEBUG_CHECKING;
+		upscaleDesc.fpMessage = [](uint32_t type, const wchar_t* message)
+			{
+				std::wstring wideMessage(message);
+				std::string narrowMessage(wideMessage.begin(), wideMessage.end());
+
+				std::string prefix;
+				switch (type) {
+				case FFX_API_MESSAGE_TYPE_ERROR:
+					prefix = "[FFX ERROR] ";
+					break;
+				case FFX_API_MESSAGE_TYPE_WARNING:
+					prefix = "[FFX WARNING] ";
+					break;
+				default:
+					prefix = "[FFX DEBUG] ";
+					break;
+				}
+
+				std::string fullMessage = prefix + narrowMessage + "\n";
+				OutputDebugStringA(fullMessage.c_str());
+			};
+
+		// It crashes now because there is no device
+		/*ffxReturnCode_t errorCode = ffxCreateContext(&mFFXContext, &upscaleDesc.header, nullptr);
+		if (errorCode != FFX_API_RETURN_OK)
+		{
+			std::string errorMsg = "ERROR: FSR3 CONTEXT NOT CREATED\n";
+			OutputDebugStringA(errorMsg.c_str());
+		}*/
 	}
 
 	void ShutdownDXC()
