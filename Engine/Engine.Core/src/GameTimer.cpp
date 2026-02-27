@@ -1,18 +1,24 @@
 #include <windows.h>
 #include <Engine.Core/GameTimer.h>
 
-GameTimer::GameTimer()
-: SecondsPerCount(0.0), TimeDelta(-1.0), BaseTime(0),
-  PausedTime(0), PrevTime(0), CurrTime(0), Stopped(false)
+GameTimer::GameTimer ()
+	: _secondsPerCount(0.0)
+	, _timeDelta(-1.0)
+	, _baseTime(0)
+	, _pausedTime(0)
+	, _stopTime(0)
+	, _prevTime(0)
+	, _currTime(0)
+	, _bStopped(false)
 {
-	__int64 countsPerSec;
-	QueryPerformanceFrequency((LARGE_INTEGER*)&countsPerSec);
-	SecondsPerCount = 1.0 / (double)countsPerSec;
+	__int64 CountsPerSec;
+	QueryPerformanceFrequency((LARGE_INTEGER*)&CountsPerSec);
+	_secondsPerCount = 1.0 / static_cast<double>(CountsPerSec);
 }
 
 // Returns the total time elapsed since Reset() was called, NOT counting any
 // time when the clock is stopped.
-float GameTimer::TotalTime()const
+float GameTimer::TotalTime () const
 {
 	// If we are stopped, do not count the time that has passed since we stopped.
 	// Moreover, if we previously already had a pause, the distance 
@@ -23,9 +29,9 @@ float GameTimer::TotalTime()const
 	// ----*---------------*-----------------*------------*------------*------> time
 	//  mBaseTime       mStopTime        startTime     mStopTime    mCurrTime
 
-	if(Stopped)
+	if (_bStopped)
 	{
-		return (float)(((StopTime - PausedTime)-BaseTime)*SecondsPerCount);
+		return static_cast<float>(((_stopTime - _pausedTime) - _baseTime) * _secondsPerCount);
 	}
 
 	// The distance mCurrTime - mBaseTime includes paused time,
@@ -40,30 +46,30 @@ float GameTimer::TotalTime()const
 	
 	else
 	{
-		return (float)(((CurrTime-PausedTime)-BaseTime)*SecondsPerCount);
+		return static_cast<float>(((_currTime - _pausedTime) - _baseTime) * _secondsPerCount);
 	}
 }
 
-float GameTimer::DeltaTime()const
+float GameTimer::DeltaTime () const
 {
-	return (float)TimeDelta;
+	return static_cast<float>(_timeDelta);
 }
 
-void GameTimer::Reset()
+void GameTimer::Reset ()
 {
-	__int64 currTime;
-	QueryPerformanceCounter((LARGE_INTEGER*)&currTime);
+	__int64 CurrTime;
+	QueryPerformanceCounter((LARGE_INTEGER*)&CurrTime);
 
-	BaseTime = currTime;
-	PrevTime = currTime;
-	StopTime = 0;
-	Stopped  = false;
+	_baseTime = CurrTime;
+	_prevTime = CurrTime;
+	_stopTime = 0;
+	_bStopped = false;
 }
 
-void GameTimer::Start()
+void GameTimer::Start ()
 {
-	__int64 startTime;
-	QueryPerformanceCounter((LARGE_INTEGER*)&startTime);
+	__int64 StartTime;
+	QueryPerformanceCounter((LARGE_INTEGER*)&StartTime);
 
 
 	// Accumulate the time elapsed between stop and start pairs.
@@ -72,48 +78,51 @@ void GameTimer::Start()
 	// ----*---------------*-----------------*------------> time
 	//  mBaseTime       mStopTime        startTime     
 
-	if(Stopped)
+	if (_bStopped)
 	{
-		PausedTime += (startTime - StopTime);	
+		_pausedTime += (StartTime - _stopTime);
 
-		PrevTime = startTime;
-		StopTime = 0;
-		Stopped  = false;
+		_prevTime = StartTime;
+		_stopTime = 0;
+		_bStopped = false;
 	}
 }
 
-void GameTimer::Stop()
+void GameTimer::Stop ()
 {
-	if(!Stopped)
+	if (!_bStopped)
 	{
-		__int64 currTime;
-		QueryPerformanceCounter((LARGE_INTEGER*)&currTime);
+		__int64 CurrTime;
+		QueryPerformanceCounter((LARGE_INTEGER*)&CurrTime);
 
-		StopTime = currTime;
-		Stopped  = true;
+		_stopTime = CurrTime;
+		_bStopped = true;
 	}
 }
 
-void GameTimer::Tick()
+void GameTimer::Tick ()
 {
-	if( Stopped )
+	if (_bStopped)
 	{
-		TimeDelta = 0.0;
+		_timeDelta = 0.0;
 		return;
 	}
 
-	__int64 currTime;
-	QueryPerformanceCounter((LARGE_INTEGER*)&currTime);
-	CurrTime = currTime;
+	__int64 CurrTime;
+	QueryPerformanceCounter((LARGE_INTEGER*)&CurrTime);
+	_currTime = CurrTime;
 
 	// Time difference between this frame and the previous.
-	TimeDelta = (CurrTime - PrevTime)*SecondsPerCount;
+	_timeDelta = (_currTime - _prevTime) * _secondsPerCount;
 
 	// Prepare for next frame.
-	PrevTime = CurrTime;
+	_prevTime = _currTime;
 
 	// Force nonnegative.  The DXSDK's CDXUTTimer mentions that if the 
 	// processor goes into a power save mode or we get shuffled to another
 	// processor, then mDeltaTime can be negative.
-	if(TimeDelta < 0.0) TimeDelta = 0.0;
+	if (_timeDelta < 0.0)
+	{
+		_timeDelta = 0.0;
+	}
 }
