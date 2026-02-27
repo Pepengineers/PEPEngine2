@@ -4,8 +4,8 @@
 
 namespace Engine::UI
 {
-    void Initialize();
-    void BeginFrame();
-    void Render();
-    void ShutdownUI();
+	void Initialize ();
+	void BeginFrame ();
+	void Render ();
+	void ShutdownUI ();
 }

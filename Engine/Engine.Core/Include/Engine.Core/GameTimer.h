@@ -2,26 +2,26 @@
 
 class GameTimer
 {
-public:
-	GameTimer();
-
-	float TotalTime()const; // in seconds
-	float DeltaTime()const; // in seconds
-
-	void Reset(); // Call before message loop.
-	void Start(); // Call when unpaused.
-	void Stop();  // Call when paused.
-	void Tick();  // Call every frame.
-
 private:
-	double SecondsPerCount;
-	double TimeDelta;
+	double _secondsPerCount;
+	double _timeDelta;
 
-	__int64 BaseTime;
-	__int64 PausedTime;
-	__int64 StopTime;
-	__int64 PrevTime;
-	__int64 CurrTime;
+	__int64 _baseTime;
+	__int64 _pausedTime;
+	__int64 _stopTime;
+	__int64 _prevTime;
+	__int64 _currTime;
 
-	bool Stopped;
+	bool _bStopped;
+
+public:
+	GameTimer ();
+
+	float TotalTime () const; // in seconds
+	float DeltaTime () const; // in seconds
+
+	void Reset (); // Call before message loop.
+	void Start (); // Call when unpaused.
+	void Stop ();  // Call when paused.
+	void Tick ();  // Call every frame.
 };

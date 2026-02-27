@@ -8,31 +8,31 @@
 
 namespace Engine::UI
 {
-    void Initialize()
-    {
-        IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        ImGuiIO& io = ImGui::GetIO();
-        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-        io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+	void Initialize ()
+	{
+		IMGUI_CHECKVERSION();
+		ImGui::CreateContext();
+		ImGuiIO& Io = ImGui::GetIO();
+		Io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+		Io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 
-        // Enable DPI awareness for fonts
-        io.ConfigFlags |= ImGuiConfigFlags_DpiEnableScaleFonts;
-        // Enable DPI awareness for windows/viewports
-        io.ConfigFlags |= ImGuiConfigFlags_DpiEnableScaleViewports;
+		// Enable DPI awareness for fonts.
+		Io.ConfigFlags |= ImGuiConfigFlags_DpiEnableScaleFonts;
+		// Enable DPI awareness for windows/viewports.
+		Io.ConfigFlags |= ImGuiConfigFlags_DpiEnableScaleViewports;
 
+		ImGui::StyleColorsDark();
 
-        ImGui::StyleColorsDark();
+		ImGuiStyle& Style = ImGui::GetStyle();
+		if (Io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+		{
+			Style.WindowRounding = 0.0f;
+			Style.Colors[ImGuiCol_WindowBg].w = 1.0f;
+		}
+	}
 
-        ImGuiStyle& style = ImGui::GetStyle();
-        if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
-            style.WindowRounding = 0.0f;
-            style.Colors[ImGuiCol_WindowBg].w = 1.0f;
-        }
-    }
-
-    void ShutdownUI()
-    {
-        ImGui::DestroyContext();
-    }
+	void ShutdownUI ()
+	{
+		ImGui::DestroyContext();
+	}
 }

@@ -3,39 +3,43 @@
 class EditorApp : public AppBase
 {
 public:
-	EditorApp(HINSTANCE hInstance);
-	EditorApp(const EditorApp& rhs) = delete;
-	EditorApp& operator=(const EditorApp& rhs) = delete;
-	~EditorApp();
+	EditorApp (HINSTANCE hInstance);
+	EditorApp (const EditorApp& rhs) = delete;
+	EditorApp& operator = (const EditorApp& rhs) = delete;
+	~EditorApp ();
 
-	virtual bool Initialize()override;
+	virtual bool Initialize () override;
 
 private:
-	virtual void OnResize()override;
-	virtual void Update(const GameTimer& gt)override;
-	virtual void Draw(const GameTimer& gt)override;
+	virtual void OnResize () override;
+	virtual void Update (const GameTimer& gameTimer) override;
+	virtual void Draw (const GameTimer& gameTimer) override;
 
-	virtual void OnMouseDown(WPARAM btnState, int x, int y)override;
-	virtual void OnMouseUp(WPARAM btnState, int x, int y)override;
-	virtual void OnMouseMove(WPARAM btnState, int x, int y)override;
-
+	virtual void OnMouseDown (WPARAM btnState, int x, int y) override;
+	virtual void OnMouseUp (WPARAM btnState, int x, int y) override;
+	virtual void OnMouseMove (WPARAM btnState, int x, int y) override;
 };
 
-int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
-	PSTR cmdLine, int showCmd)
+int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, int showCmd)
 {
 	// Enable run-time memory check for debug builds.
 #if defined(DEBUG) | defined(_DEBUG)
 	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
 #endif
 
+	UNREFERENCED_PARAMETER(prevInstance);
+	UNREFERENCED_PARAMETER(cmdLine);
+	UNREFERENCED_PARAMETER(showCmd);
+
 	try
 	{
-		EditorApp theApp(hInstance);
-		if (!theApp.Initialize())
+		EditorApp TheApp(hInstance);
+		if (!TheApp.Initialize ())
+		{
 			return 0;
+		}
 
-		return theApp.Run();
+		return TheApp.Run ();
 	}
 	catch (DxException& e)
 	{
@@ -44,53 +48,61 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance,
 	}
 }
 
-EditorApp::EditorApp(HINSTANCE hInstance)
+EditorApp::EditorApp (HINSTANCE hInstance)
 	: AppBase(hInstance)
 {
 }
 
-EditorApp::~EditorApp()
+EditorApp::~EditorApp ()
 {
-
 }
 
-bool EditorApp::Initialize()
+bool EditorApp::Initialize ()
 {
-	if (!AppBase::Initialize())
+	if (!AppBase::Initialize ())
+	{
 		return false;
+	}
 
 	return true;
 }
 
-void EditorApp::OnResize()
+void EditorApp::OnResize ()
 {
-	AppBase::OnResize();
-
+	AppBase::OnResize ();
 }
 
-void EditorApp::Update(const GameTimer& gt)
+void EditorApp::Update (const GameTimer& gameTimer)
 {
-
+	UNREFERENCED_PARAMETER(gameTimer);
 }
 
-void EditorApp::Draw(const GameTimer& gt)
+void EditorApp::Draw (const GameTimer& gameTimer)
 {
-
+	UNREFERENCED_PARAMETER(gameTimer);
 }
 
-void EditorApp::OnMouseDown(WPARAM btnState, int x, int y)
+void EditorApp::OnMouseDown (WPARAM btnState, int x, int y)
 {
+	UNREFERENCED_PARAMETER(btnState);
+	UNREFERENCED_PARAMETER(x);
+	UNREFERENCED_PARAMETER(y);
 
-	SetCapture(hMainWnd);
+	SetCapture(MainWndHandle);
 }
 
-void EditorApp::OnMouseUp(WPARAM btnState, int x, int y)
+void EditorApp::OnMouseUp (WPARAM btnState, int x, int y)
 {
+	UNREFERENCED_PARAMETER(btnState);
+	UNREFERENCED_PARAMETER(x);
+	UNREFERENCED_PARAMETER(y);
+
 	ReleaseCapture();
 }
 
-void EditorApp::OnMouseMove(WPARAM btnState, int x, int y)
+void EditorApp::OnMouseMove (WPARAM btnState, int x, int y)
 {
-
+	UNREFERENCED_PARAMETER(btnState);
+	UNREFERENCED_PARAMETER(x);
+	UNREFERENCED_PARAMETER(y);
 }
-

@@ -20,7 +20,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\d3dx12.h" />
     <ClInclude Include="Include\Engine.RendererDX12\dxc_test.h" />
   </ItemGroup>
   <ItemGroup>
@@ -161,4 +160,3 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
-

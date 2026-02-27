@@ -16,10 +16,7 @@
 #include <assimp/postprocess.h>
 
 #include <directxtk/SimpleMath.h>
-
 #include <directxtex/DirectXTex.h>
-
-//#include <debugdrawer/DebugRenderSysImpl.h>
 
 #include <ffx-api/ffx_api.h>
 #include <ffx-api/ffx_upscale.h>
@@ -28,96 +25,98 @@
 #include <nvidia-sdk/sl.h>
 
 #include <directstorage/dstorage.h>
-
 #include <directxmesh/DirectXMesh.h>
 
 #include <wwise/AK/SoundEngine/Common/AkSoundEngine.h>
 #include <wwise/AK/SoundEngine/Common/AkMemoryMgrModule.h>
 #include <wwise/AK/SoundEngine/Common/AkStreamMgrModule.h>
 
+#include <cmath>
 #include <filesystem>
 
 static_assert(sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS21) > 0, "No D3D12_OPTIONS21 (Work Graphs) in headers");
 
 namespace Engine::RendererDX12
 {
-	Microsoft::WRL::ComPtr<IDxcCompiler3> mDxcCompiler;
-	Microsoft::WRL::ComPtr<IDxcUtils> mDxcUtils;
-	Microsoft::WRL::ComPtr<IDxcIncludeHandler> mDxcIncludeHandler;
-	D3D_SHADER_MODEL MaxSupportedShaderModel;
-	std::wstring mAdapterName;
-	static bool gStreamlineInitialized = false;
+	Microsoft::WRL::ComPtr<IDxcCompiler3> gDxcCompiler;
+	Microsoft::WRL::ComPtr<IDxcUtils> gDxcUtils;
+	Microsoft::WRL::ComPtr<IDxcIncludeHandler> gDxcIncludeHandler;
+	D3D_SHADER_MODEL gMaxSupportedShaderModel;
+	std::wstring gAdapterName;
+	static bool gBStreamlineInitialized = false;
 
-	void InitializeLibraries(ID3D12GraphicsCommandList* cmdList)
+	void InitializeLibraries (ID3D12GraphicsCommandList* cmdList)
 	{
 		if (cmdList)
 		{
 			PIXBeginEvent(cmdList, 0x00FF00, "Initialize DXC");
 		}
 
-		ThrowIfFailed(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&mDxcUtils)));
-		ThrowIfFailed(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&mDxcCompiler)));
-		ThrowIfFailed(mDxcUtils->CreateDefaultIncludeHandler(&mDxcIncludeHandler));
+		ThrowIfFailed(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&gDxcUtils)));
+		ThrowIfFailed(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&gDxcCompiler)));
+		ThrowIfFailed(gDxcUtils->CreateDefaultIncludeHandler(&gDxcIncludeHandler));
 
 		if (cmdList)
 		{
 			PIXEndEvent(cmdList);
 		}
 
-		DirectX::SimpleMath::Vector3 a(1, 2, 3);
-		auto b = a.Length();
+		DirectX::SimpleMath::Vector3 VectorA(1, 2, 3);
+		float VectorLength = VectorA.Length();
+		UNREFERENCED_PARAMETER(VectorLength);
 
-		D3D12_RESOURCE_DESC d{};
-		d.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+		D3D12_RESOURCE_DESC ResourceDesc = {};
+		ResourceDesc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+		UNREFERENCED_PARAMETER(ResourceDesc);
 
 		// DirectXTex
-		DirectX::ScratchImage img;
-		auto hr = img.Initialize2D(DXGI_FORMAT_R8G8B8A8_UNORM, 1, 1, 1, 1);
-		ThrowIfFailed(hr);
+		DirectX::ScratchImage TextureImage;
+		HRESULT TextureInitResult = TextureImage.Initialize2D(DXGI_FORMAT_R8G8B8A8_UNORM, 1, 1, 1, 1);
+		ThrowIfFailed(TextureInitResult);
 
-		const auto& texMeta = img.GetMetadata();
-		if (texMeta.width == 1 && texMeta.height == 1 && texMeta.format == DXGI_FORMAT_R8G8B8A8_UNORM)
+		const auto& TextureMetadata = TextureImage.GetMetadata();
+		if (TextureMetadata.width == 1 && TextureMetadata.height == 1 && TextureMetadata.format == DXGI_FORMAT_R8G8B8A8_UNORM)
 		{
-			OutputDebugStringA("DirectXTex ScratchImage::Initialize2D OK");
+			OutputDebugStringA("DirectXTex ScratchImage::Initialize2D OK\n");
 		}
 
 		// The debugdrawer cannot be tested yet because the engine lacks the necessary functionality.
 		// As development progresses, the debugdrawer will be rewritten to match the new functionality
 
 		// FSR
-		ffxContext mFFXContext;
+		ffxContext FfxContext = nullptr;
+		ffxCreateBackendDX12Desc BackendDesc = {};
+		BackendDesc.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;
+		BackendDesc.device = nullptr;
 
-		ffxCreateBackendDX12Desc backendDesc = {};
-		backendDesc.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;
-		backendDesc.device = nullptr;
+		ffxCreateContextDescUpscale UpscaleDesc = {};
+		UpscaleDesc.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
+		UpscaleDesc.header.pNext = &BackendDesc.header;
+		UpscaleDesc.maxRenderSize = { static_cast<uint32_t>(1920), static_cast<uint32_t>(1080) };
+		UpscaleDesc.maxUpscaleSize = { static_cast<uint32_t>(1920), static_cast<uint32_t>(1080) };
+		UpscaleDesc.flags = FFX_UPSCALE_ENABLE_DEBUG_CHECKING;
+		UpscaleDesc.fpMessage = [](uint32_t type, const wchar_t* message)
+		{
+			std::wstring WideMessage(message);
+			std::string NarrowMessage(WideMessage.begin(), WideMessage.end());
 
-		ffxCreateContextDescUpscale upscaleDesc = {};
-		upscaleDesc.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE;
-		upscaleDesc.header.pNext = &backendDesc.header;
-		upscaleDesc.maxRenderSize = { static_cast<uint32_t>(1920), static_cast<uint32_t>(1080) };
-		upscaleDesc.maxUpscaleSize = { static_cast<uint32_t>(1920), static_cast<uint32_t>(1080) };
-		upscaleDesc.flags = FFX_UPSCALE_ENABLE_DEBUG_CHECKING;
-		upscaleDesc.fpMessage = [](uint32_t type, const wchar_t* message)
+			std::string Prefix;
+			switch (type)
 			{
-				std::wstring wideMessage(message);
-				std::string narrowMessage(wideMessage.begin(), wideMessage.end());
+			case FFX_API_MESSAGE_TYPE_ERROR:
+				Prefix = "[FFX ERROR] ";
+				break;
+			case FFX_API_MESSAGE_TYPE_WARNING:
+				Prefix = "[FFX WARNING] ";
+				break;
+			default:
+				Prefix = "[FFX DEBUG] ";
+				break;
+			}
 
-				std::string prefix;
-				switch (type) {
-				case FFX_API_MESSAGE_TYPE_ERROR:
-					prefix = "[FFX ERROR] ";
-					break;
-				case FFX_API_MESSAGE_TYPE_WARNING:
-					prefix = "[FFX WARNING] ";
-					break;
-				default:
-					prefix = "[FFX DEBUG] ";
-					break;
-				}
-
-				std::string fullMessage = prefix + narrowMessage + "\n";
-				OutputDebugStringA(fullMessage.c_str());
-			};
+			std::string FullMessage = Prefix + NarrowMessage + "\n";
+			OutputDebugStringA(FullMessage.c_str());
+		};
 
 		// It crashes now because there is no device
 		/*ffxReturnCode_t errorCode = ffxCreateContext(&mFFXContext, &upscaleDesc.header, nullptr);
@@ -127,165 +126,164 @@ namespace Engine::RendererDX12
 			OutputDebugStringA(errorMsg.c_str());
 		}*/
 
-		// Streamline smoke-test: request one concrete feature and verify it was loaded.
-		if (!gStreamlineInitialized)
+		// nvidiaSDK
+		if (!gBStreamlineInitialized)
 		{
-			const sl::Feature featuresToLoad[] = { sl::kFeatureNIS };
+			const sl::Feature FeaturesToLoad[] = { sl::kFeatureNIS };
 
-			sl::Preferences pref = {};
-			pref.showConsole = true;
-			pref.logLevel = sl::LogLevel::eVerbose;
-			pref.featuresToLoad = featuresToLoad;
-			pref.numFeaturesToLoad = static_cast<uint32_t>(sizeof(featuresToLoad) / sizeof(featuresToLoad[0]));
-			pref.renderAPI = sl::RenderAPI::eD3D12;
-			pref.engine = sl::EngineType::eCustom;
-			pref.engineVersion = "0.1.0";
+			sl::Preferences Preferences = {};
+			Preferences.showConsole = true;
+			Preferences.logLevel = sl::LogLevel::eVerbose;
+			Preferences.featuresToLoad = FeaturesToLoad;
+			Preferences.numFeaturesToLoad = static_cast<uint32_t>(sizeof(FeaturesToLoad) / sizeof(FeaturesToLoad[0]));
+			Preferences.renderAPI = sl::RenderAPI::eD3D12;
+			Preferences.engine = sl::EngineType::eCustom;
+			Preferences.engineVersion = "0.1.0";
 
-			sl::Result res = slInit(pref);
-			if (res != sl::Result::eOk)
+			sl::Result InitResult = slInit(Preferences);
+			if (InitResult != sl::Result::eOk)
 			{
-				std::string message = "FAILED: slInit() = " + std::to_string((int)res) + "\n";
-				OutputDebugStringA(message.c_str());
+				std::string Message = "FAILED: slInit() = " + std::to_string(static_cast<int>(InitResult)) + "\n";
+				OutputDebugStringA(Message.c_str());
 			}
 			else
 			{
-				gStreamlineInitialized = true;
+				gBStreamlineInitialized = true;
 				OutputDebugStringA("OK: Streamline initialized successfully\n");
 
-				bool isNisLoaded = false;
-				sl::Result loadedResult = slIsFeatureLoaded(sl::kFeatureNIS, isNisLoaded);
-				if (loadedResult == sl::Result::eOk && isNisLoaded)
+				bool bIsNisLoaded = false;
+				sl::Result IsLoadedResult = slIsFeatureLoaded(sl::kFeatureNIS, bIsNisLoaded);
+				if (IsLoadedResult == sl::Result::eOk && bIsNisLoaded)
 				{
 					OutputDebugStringA("OK: Streamline feature loaded: kFeatureNIS\n");
 
-					sl::FeatureVersion nisVersion = {};
-					sl::Result versionResult = slGetFeatureVersion(sl::kFeatureNIS, nisVersion);
-					if (versionResult == sl::Result::eOk)
+					sl::FeatureVersion NisVersion = {};
+					sl::Result VersionResult = slGetFeatureVersion(sl::kFeatureNIS, NisVersion);
+					if (VersionResult == sl::Result::eOk)
 					{
-						std::string versionMessage = "OK: kFeatureNIS SL version = " + nisVersion.versionSL.toStr() + "\n";
-						OutputDebugStringA(versionMessage.c_str());
+						std::string VersionMessage = "OK: kFeatureNIS SL version = " + NisVersion.versionSL.toStr() + "\n";
+						OutputDebugStringA(VersionMessage.c_str());
 					}
 				}
 				else
 				{
-					std::string message = "FAILED: slIsFeatureLoaded(kFeatureNIS) = " + std::to_string((int)loadedResult) + "\n";
-					OutputDebugStringA(message.c_str());
+					std::string Message = "FAILED: slIsFeatureLoaded(kFeatureNIS) = " + std::to_string(static_cast<int>(IsLoadedResult)) + "\n";
+					OutputDebugStringA(Message.c_str());
 				}
 			}
 		}
 
 		// DirectStorage
-		IDStorageFactory* factory = nullptr;
-		HRESULT hr2 = DStorageGetFactory(IID_PPV_ARGS(&factory));
-		if (SUCCEEDED(hr2) && factory)
+		IDStorageFactory* StorageFactory = nullptr;
+		HRESULT StorageResult = DStorageGetFactory(IID_PPV_ARGS(&StorageFactory));
+		if (SUCCEEDED(StorageResult) && StorageFactory)
 		{
-			OutputDebugStringA("DiretStorage success");
-			factory->Release();
+			OutputDebugStringA("DirectStorage success\n");
+			StorageFactory->Release();
 		}
 
 		// DirectXMesh
-		const uint32_t indices[3] = { 0u, 1u, 2u };
-		const DirectX::XMFLOAT3 positions[3] =
+		const uint32_t Indices[3] = { 0u, 1u, 2u };
+		const DirectX::XMFLOAT3 Positions[3] =
 		{
 			{ 0.0f, 0.0f, 0.0f },
 			{ 1.0f, 0.0f, 0.0f },
 			{ 0.0f, 1.0f, 0.0f }
 		};
-		DirectX::XMFLOAT3 normals[3] = {};
+		DirectX::XMFLOAT3 Normals[3] = {};
 
-		const HRESULT hrMesh = DirectX::ComputeNormals(
-			indices,
-			1, // nFaces
-			positions,
-			3, // nVerts
-			DirectX::CNORM_DEFAULT,
-			normals);
+		HRESULT MeshResult = DirectX::ComputeNormals(Indices, 1, Positions, 3, DirectX::CNORM_DEFAULT, Normals);
 
-		const auto isAlmost = [](float a, float b) { return std::fabs(a - b) < 1e-3f; };
+		auto IsAlmost = [](float leftValue, float rightValue)
+		{
+			return std::fabs(leftValue - rightValue) < 1e-3f;
+		};
 
-		if (SUCCEEDED(hrMesh)
-			&& isAlmost(normals[0].x, 0.0f) && isAlmost(normals[0].y, 0.0f) && normals[0].z > 0.99f
-			&& isAlmost(normals[1].x, 0.0f) && isAlmost(normals[1].y, 0.0f) && normals[1].z > 0.99f
-			&& isAlmost(normals[2].x, 0.0f) && isAlmost(normals[2].y, 0.0f) && normals[2].z > 0.99f)
+		if (SUCCEEDED(MeshResult)
+			&& IsAlmost(Normals[0].x, 0.0f) && IsAlmost(Normals[0].y, 0.0f) && Normals[0].z > 0.99f
+			&& IsAlmost(Normals[1].x, 0.0f) && IsAlmost(Normals[1].y, 0.0f) && Normals[1].z > 0.99f
+			&& IsAlmost(Normals[2].x, 0.0f) && IsAlmost(Normals[2].y, 0.0f) && Normals[2].z > 0.99f)
 		{
 			OutputDebugStringA("DirectXMesh test OK: ComputeNormals\n");
 		}
 		else
 		{
-			std::string msg = "DirectXMesh test FAILED, hr=" + std::to_string(static_cast<long>(hrMesh)) + "\n";
-			OutputDebugStringA(msg.c_str());
+			std::string Message = "DirectXMesh test FAILED, hr=" + std::to_string(static_cast<long>(MeshResult)) + "\n";
+			OutputDebugStringA(Message.c_str());
 		}
 
 		// Wwise smoke-test
-		AkMemSettings memSettings = {};
-		AK::MemoryMgr::GetDefaultSettings(memSettings);
-		AKRESULT akResult = AK::MemoryMgr::Init(&memSettings);
-		if (akResult != AK_Success)
+		AkMemSettings MemorySettings = {};
+		AK::MemoryMgr::GetDefaultSettings(MemorySettings);
+		AKRESULT WwiseResult = AK::MemoryMgr::Init(&MemorySettings);
+		if (WwiseResult != AK_Success)
 		{
-			std::string msg = "Wwise FAILED: MemoryMgr::Init, code=" + std::to_string(static_cast<int>(akResult)) + "\n";
-			OutputDebugStringA(msg.c_str());
+			std::string Message = "Wwise FAILED: MemoryMgr::Init, code=" + std::to_string(static_cast<int>(WwiseResult)) + "\n";
+			OutputDebugStringA(Message.c_str());
 		}
 		else
 		{
-			AkStreamMgrSettings stmSettings = {};
-			AK::StreamMgr::GetDefaultSettings(stmSettings);
-			AK::IAkStreamMgr* pStreamMgr = AK::StreamMgr::Create(stmSettings);
-			if (!pStreamMgr)
+			AkStreamMgrSettings StreamSettings = {};
+			AK::StreamMgr::GetDefaultSettings(StreamSettings);
+			AK::IAkStreamMgr* StreamManager = AK::StreamMgr::Create(StreamSettings);
+			if (!StreamManager)
 			{
 				OutputDebugStringA("Wwise FAILED: StreamMgr::Create returned nullptr\n");
 				AK::MemoryMgr::Term();
 			}
 			else
 			{
-				AkInitSettings initSettings = {};
-				AkPlatformInitSettings platformInitSettings = {};
-				AK::SoundEngine::GetDefaultInitSettings(initSettings);
-				AK::SoundEngine::GetDefaultPlatformInitSettings(platformInitSettings);
+				AkInitSettings InitSettings = {};
+				AkPlatformInitSettings PlatformInitSettings = {};
+				AK::SoundEngine::GetDefaultInitSettings(InitSettings);
+				AK::SoundEngine::GetDefaultPlatformInitSettings(PlatformInitSettings);
 
-				akResult = AK::SoundEngine::Init(&initSettings, &platformInitSettings);
-				if (akResult == AK_Success)
+				WwiseResult = AK::SoundEngine::Init(&InitSettings, &PlatformInitSettings);
+				if (WwiseResult == AK_Success)
 				{
 					OutputDebugStringA("Wwise smoke-test OK: MemoryMgr/StreamMgr/SoundEngine initialized\n");
 					AK::SoundEngine::Term();
 				}
 				else
 				{
-					std::string msg = "Wwise FAILED: SoundEngine::Init, code=" + std::to_string(static_cast<int>(akResult)) + "\n";
-					OutputDebugStringA(msg.c_str());
+					std::string Message = "Wwise FAILED: SoundEngine::Init, code=" + std::to_string(static_cast<int>(WwiseResult)) + "\n";
+					OutputDebugStringA(Message.c_str());
 				}
 
-				pStreamMgr->Destroy();
+				StreamManager->Destroy();
 				AK::MemoryMgr::Term();
 			}
 		}
 	}
 
-	void ShutdownLibraries()
+	void ShutdownLibraries ()
 	{
-		if (gStreamlineInitialized)
+		if (gBStreamlineInitialized)
 		{
-			sl::Result res = slShutdown();
-			if (res != sl::Result::eOk)
+			sl::Result ShutdownResult = slShutdown();
+			if (ShutdownResult != sl::Result::eOk)
 			{
-				std::string message = "FAILED: slShutdown() = " + std::to_string((int)res) + "\n";
-				OutputDebugStringA(message.c_str());
+				std::string Message = "FAILED: slShutdown() = " + std::to_string(static_cast<int>(ShutdownResult)) + "\n";
+				OutputDebugStringA(Message.c_str());
 			}
 			else
 			{
 				OutputDebugStringA("OK: Streamline shutdown\n");
 			}
 
-			gStreamlineInitialized = false;
+			gBStreamlineInitialized = false;
 		}
 	}
 
-	void CheckAssimp()
+	void CheckAssimp ()
 	{
 		Assimp::Importer Importer;
 
 		std::filesystem::path ModelPath = MODELS_FOLDER;
 		ModelPath /= "african_head.obj";
-		const aiScene* Scene = Importer.ReadFile(ModelPath.string(), aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenNormals | aiProcess_CalcTangentSpace);
+		const aiScene* Scene = Importer.ReadFile(
+			ModelPath.string(),
+			aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenNormals | aiProcess_CalcTangentSpace);
 
 		if (!Scene)
 		{
