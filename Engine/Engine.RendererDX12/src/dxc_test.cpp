@@ -29,6 +29,8 @@
 
 #include <directstorage/dstorage.h>
 
+#include <directxmesh/DirectXMesh.h>
+
 #include <filesystem>
 
 static_assert(sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS21) > 0, "No D3D12_OPTIONS21 (Work Graphs) in headers");
@@ -175,6 +177,39 @@ namespace Engine::RendererDX12
 		{
 			OutputDebugStringA("DiretStorage success");
 			factory->Release();
+		}
+
+		// DirectXMesh
+		const uint32_t indices[3] = { 0u, 1u, 2u };
+		const DirectX::XMFLOAT3 positions[3] =
+		{
+			{ 0.0f, 0.0f, 0.0f },
+			{ 1.0f, 0.0f, 0.0f },
+			{ 0.0f, 1.0f, 0.0f }
+		};
+		DirectX::XMFLOAT3 normals[3] = {};
+
+		const HRESULT hrMesh = DirectX::ComputeNormals(
+			indices,
+			1, // nFaces
+			positions,
+			3, // nVerts
+			DirectX::CNORM_DEFAULT,
+			normals);
+
+		const auto isAlmost = [](float a, float b) { return std::fabs(a - b) < 1e-3f; };
+
+		if (SUCCEEDED(hrMesh)
+			&& isAlmost(normals[0].x, 0.0f) && isAlmost(normals[0].y, 0.0f) && normals[0].z > 0.99f
+			&& isAlmost(normals[1].x, 0.0f) && isAlmost(normals[1].y, 0.0f) && normals[1].z > 0.99f
+			&& isAlmost(normals[2].x, 0.0f) && isAlmost(normals[2].y, 0.0f) && normals[2].z > 0.99f)
+		{
+			OutputDebugStringA("DirectXMesh test OK: ComputeNormals\n");
+		}
+		else
+		{
+			std::string msg = "DirectXMesh test FAILED, hr=" + std::to_string(static_cast<long>(hrMesh)) + "\n";
+			OutputDebugStringA(msg.c_str());
 		}
 	}
 
