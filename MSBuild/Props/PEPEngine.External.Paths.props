@@ -14,5 +14,7 @@
     <PEPExternalNvidiaSDKInclude Condition="'$(PEPExternalNvidiaSDKInclude)'==''">$(PEPExternalRoot)nvidia-sdk\Include</PEPExternalNvidiaSDKInclude>
     <PEPExternalDirectStorageInclude Condition="'$(PEPExternalDirectStorageInclude)'==''">$(PEPExternalRoot)directstorage\Include</PEPExternalDirectStorageInclude>
     <PEPExternalDirectXMeshInclude Condition="'$(PEPExternalDirectXMeshInclude)'==''">$(PEPExternalRoot)directxmesh\Include</PEPExternalDirectXMeshInclude>
+    <PEPExternalWwiseInclude Condition="'$(PEPExternalWwiseInclude)'==''">$(PEPExternalRoot)wwise\Include</PEPExternalWwiseInclude>
+    <PEPExternalWwiseSDKInclude Condition="'$(PEPExternalWwiseSDKInclude)'==''">$(PEPExternalRoot)wwise\Include\wwise</PEPExternalWwiseSDKInclude>
   </PropertyGroup>
 </Project>

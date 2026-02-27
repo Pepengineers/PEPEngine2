@@ -8,6 +8,7 @@
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.NvidiaSDK.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.NvidiaSDK.props')" />
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.DirectStorage.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.DirectStorage.props')" />
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.DirectXMesh.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.DirectXMesh.props')" />
+  <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.Wwise.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.Wwise.props')" />
   <ItemDefinitionGroup>
     <ClCompile>
       <AdditionalIncludeDirectories>$(SolutionDir)Engine\Engine.Core\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>

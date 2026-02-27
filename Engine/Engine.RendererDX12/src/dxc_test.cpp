@@ -31,6 +31,10 @@
 
 #include <directxmesh/DirectXMesh.h>
 
+#include <wwise/AK/SoundEngine/Common/AkSoundEngine.h>
+#include <wwise/AK/SoundEngine/Common/AkMemoryMgrModule.h>
+#include <wwise/AK/SoundEngine/Common/AkStreamMgrModule.h>
+
 #include <filesystem>
 
 static_assert(sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS21) > 0, "No D3D12_OPTIONS21 (Work Graphs) in headers");
@@ -210,6 +214,49 @@ namespace Engine::RendererDX12
 		{
 			std::string msg = "DirectXMesh test FAILED, hr=" + std::to_string(static_cast<long>(hrMesh)) + "\n";
 			OutputDebugStringA(msg.c_str());
+		}
+
+		// Wwise smoke-test
+		AkMemSettings memSettings = {};
+		AK::MemoryMgr::GetDefaultSettings(memSettings);
+		AKRESULT akResult = AK::MemoryMgr::Init(&memSettings);
+		if (akResult != AK_Success)
+		{
+			std::string msg = "Wwise FAILED: MemoryMgr::Init, code=" + std::to_string(static_cast<int>(akResult)) + "\n";
+			OutputDebugStringA(msg.c_str());
+		}
+		else
+		{
+			AkStreamMgrSettings stmSettings = {};
+			AK::StreamMgr::GetDefaultSettings(stmSettings);
+			AK::IAkStreamMgr* pStreamMgr = AK::StreamMgr::Create(stmSettings);
+			if (!pStreamMgr)
+			{
+				OutputDebugStringA("Wwise FAILED: StreamMgr::Create returned nullptr\n");
+				AK::MemoryMgr::Term();
+			}
+			else
+			{
+				AkInitSettings initSettings = {};
+				AkPlatformInitSettings platformInitSettings = {};
+				AK::SoundEngine::GetDefaultInitSettings(initSettings);
+				AK::SoundEngine::GetDefaultPlatformInitSettings(platformInitSettings);
+
+				akResult = AK::SoundEngine::Init(&initSettings, &platformInitSettings);
+				if (akResult == AK_Success)
+				{
+					OutputDebugStringA("Wwise smoke-test OK: MemoryMgr/StreamMgr/SoundEngine initialized\n");
+					AK::SoundEngine::Term();
+				}
+				else
+				{
+					std::string msg = "Wwise FAILED: SoundEngine::Init, code=" + std::to_string(static_cast<int>(akResult)) + "\n";
+					OutputDebugStringA(msg.c_str());
+				}
+
+				pStreamMgr->Destroy();
+				AK::MemoryMgr::Term();
+			}
 		}
 	}
 
