@@ -51,3 +51,7 @@ Debug/
 Release/
 
 Build/
+
+!External/**/Debug/
+External/**/Debug/**
+!External/**/Debug/**/*.lib
