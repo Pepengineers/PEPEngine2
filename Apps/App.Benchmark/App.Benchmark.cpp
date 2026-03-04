@@ -15,7 +15,7 @@ public:
 private:
 	virtual void OnResize () override;
 	virtual void Update (const GameTimer& gameTimer) override;
-	virtual void Draw (const GameTimer& gameTimer) override;
+	virtual void Render (const GameTimer& gameTimer) override;
 
 	virtual void OnMouseDown (WPARAM btnState, int x, int y) override;
 	virtual void OnMouseUp (WPARAM btnState, int x, int y) override;
@@ -87,7 +87,7 @@ void BenchmarkApp::Update (const GameTimer& gameTimer)
 	UNREFERENCED_PARAMETER(gameTimer);
 }
 
-void BenchmarkApp::Draw (const GameTimer& gameTimer)
+void BenchmarkApp::Render (const GameTimer& gameTimer)
 {
 	UNREFERENCED_PARAMETER(gameTimer);
 }

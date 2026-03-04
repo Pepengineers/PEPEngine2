@@ -11,6 +11,7 @@
 #include <Engine.RendererDX12/D3DHelpers.h>
 #include <Engine.UI/UI_test.h>
 #include <Engine.RendererDX12/dxc_test.h>
+#include <Engine.RendererDX12/GDX12DeviceFactory.h>
 
 // Link necessary d3d12 libraries.
 #pragma comment(lib,"d3dcompiler.lib")
@@ -50,7 +51,7 @@ protected:
 
 	virtual void OnResize ();
 	virtual void Update (const GameTimer& gameTimer) = 0;
-	virtual void Draw (const GameTimer& gameTimer) = 0;
+	virtual void Render (const GameTimer& gameTimer) = 0;
 
 	// Convenience overrides for handling mouse input.
 	virtual void OnMouseDown (WPARAM btnState, int x, int y) { }

@@ -3,24 +3,24 @@
 class EditorApp : public AppBase
 {
 public:
-	EditorApp (HINSTANCE hInstance);
-	EditorApp (const EditorApp& rhs) = delete;
+	EditorApp(HINSTANCE hInstance);
+	EditorApp(const EditorApp& rhs) = delete;
 	EditorApp& operator = (const EditorApp& rhs) = delete;
-	~EditorApp ();
+	~EditorApp();
 
-	virtual bool Initialize () override;
+	virtual bool Initialize() override;
 
 private:
-	virtual void OnResize () override;
-	virtual void Update (const GameTimer& gameTimer) override;
-	virtual void Draw (const GameTimer& gameTimer) override;
+	virtual void OnResize() override;
+	virtual void Update(const GameTimer& gameTimer) override;
+	virtual void Render(const GameTimer& gameTimer) override;
 
-	virtual void OnMouseDown (WPARAM btnState, int x, int y) override;
-	virtual void OnMouseUp (WPARAM btnState, int x, int y) override;
-	virtual void OnMouseMove (WPARAM btnState, int x, int y) override;
+	virtual void OnMouseDown(WPARAM btnState, int x, int y) override;
+	virtual void OnMouseUp(WPARAM btnState, int x, int y) override;
+	virtual void OnMouseMove(WPARAM btnState, int x, int y) override;
 };
 
-int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, int showCmd)
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, int showCmd)
 {
 	// Enable run-time memory check for debug builds.
 #if defined(DEBUG) | defined(_DEBUG)
@@ -34,12 +34,12 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, i
 	try
 	{
 		EditorApp TheApp(hInstance);
-		if (!TheApp.Initialize ())
+		if (!TheApp.Initialize())
 		{
 			return 0;
 		}
 
-		return TheApp.Run ();
+		return TheApp.Run();
 	}
 	catch (DxException& e)
 	{
@@ -48,41 +48,50 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, i
 	}
 }
 
-EditorApp::EditorApp (HINSTANCE hInstance)
+EditorApp::EditorApp(HINSTANCE hInstance)
 	: AppBase(hInstance)
 {
 }
 
-EditorApp::~EditorApp ()
+EditorApp::~EditorApp()
 {
 }
 
-bool EditorApp::Initialize ()
+bool EditorApp::Initialize()
 {
-	if (!AppBase::Initialize ())
+	if (!AppBase::Initialize())
 	{
 		return false;
+	}
+
+	int k = 1;
+	for (auto DeviceDesc : GDX12DeviceFactory::GetDeviceDescriptors())
+	{
+		std::wstring output = std::to_wstring(k) + L": " + DeviceDesc.Name + L", "
+			+ std::to_wstring(DeviceDesc.DedicatedVideoMemory / (1024 * 1024)) + L" MB memory\n";
+		OutputDebugStringW(output.c_str());
+		k++;
 	}
 
 	return true;
 }
 
-void EditorApp::OnResize ()
+void EditorApp::OnResize()
 {
-	AppBase::OnResize ();
+	AppBase::OnResize();
 }
 
-void EditorApp::Update (const GameTimer& gameTimer)
-{
-	UNREFERENCED_PARAMETER(gameTimer);
-}
-
-void EditorApp::Draw (const GameTimer& gameTimer)
+void EditorApp::Update(const GameTimer& gameTimer)
 {
 	UNREFERENCED_PARAMETER(gameTimer);
 }
 
-void EditorApp::OnMouseDown (WPARAM btnState, int x, int y)
+void EditorApp::Render(const GameTimer& gameTimer)
+{
+	UNREFERENCED_PARAMETER(gameTimer);
+}
+
+void EditorApp::OnMouseDown(WPARAM btnState, int x, int y)
 {
 	UNREFERENCED_PARAMETER(btnState);
 	UNREFERENCED_PARAMETER(x);
@@ -91,7 +100,7 @@ void EditorApp::OnMouseDown (WPARAM btnState, int x, int y)
 	SetCapture(MainWndHandle);
 }
 
-void EditorApp::OnMouseUp (WPARAM btnState, int x, int y)
+void EditorApp::OnMouseUp(WPARAM btnState, int x, int y)
 {
 	UNREFERENCED_PARAMETER(btnState);
 	UNREFERENCED_PARAMETER(x);
@@ -100,7 +109,7 @@ void EditorApp::OnMouseUp (WPARAM btnState, int x, int y)
 	ReleaseCapture();
 }
 
-void EditorApp::OnMouseMove (WPARAM btnState, int x, int y)
+void EditorApp::OnMouseMove(WPARAM btnState, int x, int y)
 {
 	UNREFERENCED_PARAMETER(btnState);
 	UNREFERENCED_PARAMETER(x);

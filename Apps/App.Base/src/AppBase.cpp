@@ -71,7 +71,7 @@ int AppBase::Run ()
 			{
 				CalculateFrameStats ();
 				Update (Timer);
-				Draw (Timer);
+				Render (Timer);
 			}
 			else
 			{
