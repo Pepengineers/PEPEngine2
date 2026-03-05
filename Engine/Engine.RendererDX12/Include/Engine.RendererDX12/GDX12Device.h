@@ -26,12 +26,12 @@ public:
 	HRESULT Initialize(IDXGIAdapter4* adapter = nullptr);
 	void Reset();
 
-	ComPtr<ID3D12Device5> GetDevice() const;
+	ComPtr<ID3D12Device14> GetDevice() const;
 	const DeviceSpecs& GetDeviceFeatures() const;
 	const bool IsInitialized() const;
 
 private:
-	ComPtr<ID3D12Device5> _device;
+	ComPtr<ID3D12Device14> _device;
 	bool _isInitialized;
 
 	UINT _rtvDescriptorSize;

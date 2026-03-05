@@ -127,7 +127,7 @@ void GDX12Device::Reset()
     ZeroMemory(&_specs, sizeof(_specs));
 }
 
-ComPtr<ID3D12Device5> GDX12Device::GetDevice() const
+ComPtr<ID3D12Device14> GDX12Device::GetDevice() const
 {
     return _device;
 }

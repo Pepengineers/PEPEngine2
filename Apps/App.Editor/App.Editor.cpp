@@ -64,51 +64,9 @@ bool EditorApp::Initialize()
 		return false;
 	}
 
-	//GDX12DeviceFactory example
-	std::vector<DeviceDesc> DeviceDescs = GDX12DeviceFactory::GetDeviceDescriptors();
-	int k = 1;
-	for (auto DeviceDesc : DeviceDescs)
-	{
-		std::wstring output = std::to_wstring(k) + L": " + DeviceDesc.Name + L", "
-			+ std::to_wstring(DeviceDesc.DedicatedVideoMemory / (1024 * 1024)) + L" MB memory\n";
-		OutputDebugStringW(output.c_str());
-		k++;
-	}
 
-	//GDX12DeviceFactory example
-	GDX12Device mGPUPrimaryDevice;
-	GDX12Device mGPUSecondaryDevice;
-
-	//adapters will be selected via UI
-	mGPUPrimaryDevice.Initialize(DeviceDescs[0].Adapter.Get());
-	mGPUSecondaryDevice.Initialize(DeviceDescs[1].Adapter.Get());
-
-	std::vector<GDX12Device*> devices = { &mGPUPrimaryDevice, &mGPUSecondaryDevice };
-
-	for (auto& device : devices)
-	{
-		const auto& specs = device->GetDeviceFeatures();
-
-		std::string output = "\n========================================\n";
-		output += specs.Name + "\n";
-		output += "========================================\n";
-
-		output += "Memory:\n";
-		output += "  Dedicated Video Memory: " + std::to_string(specs.DedicatedVideoMemory / (1024 * 1024)) + " MB\n";
-		output += "  Dedicated System Memory: " + std::to_string(specs.DedicatedSystemMemory / (1024 * 1024)) + " MB\n";
-		output += "  Shared System Memory: " + std::to_string(specs.SharedSystemMemory / (1024 * 1024)) + " MB\n";
-		output += "\nDirect3D Capabilities:\n";
-		output += "  Max Feature Level: " + FeatureLevelToString(specs.MaxFeatureLevel) + "\n";
-		output += "  Max Shader Model: " + ShaderModelToString(specs.MaxShaderModel) + "\n";
-		output += "\nFeature Support:\n";
-		output += "  Raytracing: " + std::string(specs.RaytracingSupport ? "Yes" : "No") + "\n";
-		output += "  Mesh Shaders: " + std::string(specs.MeshShadersSupport ? "Yes" : "No") + "\n";
-		output += "  Variable Rate Shading: " + std::string(specs.VariableRateShadingSupport ? "Yes" : "No") + "\n";
-		output += "  Enhanced Barriers: " + std::string(specs.EnhancedBarriersSupport ? "Yes" : "No") + "\n";
-		output += "========================================\n\n";
-
-		OutputDebugStringA(output.c_str());
-	}
+	GDX12Device defaultDeivce;
+	defaultDeivce.Initialize(GDX12DeviceFactory::GetDefaultAdapter().Get());
 
 	return true;
 }
