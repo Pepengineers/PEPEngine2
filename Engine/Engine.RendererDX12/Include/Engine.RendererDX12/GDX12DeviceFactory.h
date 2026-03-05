@@ -23,7 +23,10 @@ public:
 	static HRESULT Initialize();
 	static ComPtr<IDXGIFactory7> GetFactory();
 	static void Reset();
+
+    // Gets all device adapters. First element is the default device
     static std::vector<DeviceDesc> GetDeviceDescriptors();
+    static ComPtr<IDXGIAdapter4> GetDefaultAdapter();
 
 private:
 

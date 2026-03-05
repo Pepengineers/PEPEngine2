@@ -86,3 +86,10 @@ std::vector<DeviceDesc> GDX12DeviceFactory::GetDeviceDescriptors()
 
     return devices;
 }
+
+ComPtr<IDXGIAdapter4> GDX12DeviceFactory::GetDefaultAdapter()
+{
+    ComPtr<IDXGIAdapter4> defaultAdapter;
+    _dxgiFactory->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_UNSPECIFIED, IID_PPV_ARGS(&defaultAdapter));
+    return defaultAdapter;
+}
