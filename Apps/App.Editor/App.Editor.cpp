@@ -67,6 +67,36 @@ bool EditorApp::Initialize()
 	std::shared_ptr<GDX12Device> defaultDeivce = std::make_shared<GDX12Device>();
 	defaultDeivce->Initialize(GDX12DeviceFactory::GetDefaultAdapter().Get());
 
+
+	DXGI_FORMAT BackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
+	swapChainDesc.Width = WindowWidth;
+	swapChainDesc.Height = WindowHeight;
+	swapChainDesc.Format = BackBufferFormat;
+	swapChainDesc.Stereo = FALSE;
+	swapChainDesc.SampleDesc = { 1, 0 };
+	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	swapChainDesc.BufferCount = 2;
+	swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
+	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+
+	swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+
+	ComPtr<IDXGISwapChain4> mSwapChain = GDX12DeviceFactory::CreateSwapChain(defaultDeivce.get(), swapChainDesc, MainWndHandle);
+
+	auto cmdList1 = defaultDeivce->GetCommandQueue()->GetCommandList();
+	cmdList1->GetCommandList();
+	defaultDeivce->GetCommandQueue()->ExecuteCommandList(cmdList1);
+
+	auto cmdList2 = defaultDeivce->GetCommandQueue()->GetCommandList();
+	cmdList2->GetCommandList();
+	defaultDeivce->GetCommandQueue()->ExecuteCommandList(cmdList2);
+
+	auto cmdList3 = defaultDeivce->GetCommandQueue()->GetCommandList();
+	cmdList3->GetCommandList();
+	defaultDeivce->GetCommandQueue()->ExecuteCommandList(cmdList3);
 	return true;
 }
 

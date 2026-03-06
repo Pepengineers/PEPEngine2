@@ -16,6 +16,7 @@
 #include <Engine.RendererDX12/GDX12DeviceFactory.h>
 #include <Engine.RendererDX12/GDX12Device.h>
 #include <Engine.RendererDX12/GDX12CommandQueue.h>
+#include <Engine.RendererDX12/GDX12CommandList.h>
 
 // Link necessary d3d12 libraries.
 #pragma comment(lib,"d3dcompiler.lib")

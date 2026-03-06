@@ -1,5 +1,8 @@
 #include "Engine.RendererDX12/GDX12DeviceFactory.h"
 
+#include "Engine.RendererDX12/GDX12Device.h"
+#include "Engine.RendererDX12/GDX12CommandQueue.h"
+
 ComPtr<IDXGIFactory7> GDX12DeviceFactory::_dxgiFactory = nullptr;
 bool GDX12DeviceFactory::_isInitialized = false;
 
@@ -94,4 +97,17 @@ ComPtr<IDXGIAdapter4> GDX12DeviceFactory::GetDefaultAdapter()
     ComPtr<IDXGIAdapter4> defaultAdapter;
     _dxgiFactory->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_UNSPECIFIED, IID_PPV_ARGS(&defaultAdapter));
     return defaultAdapter;
+}
+
+ComPtr<IDXGISwapChain4> GDX12DeviceFactory::CreateSwapChain(GDX12Device* device, DXGI_SWAP_CHAIN_DESC1& desc, HWND hwnd)
+{
+    ComPtr<IDXGISwapChain4> swapChain4;
+
+    ComPtr<IDXGISwapChain1> swapChain1;
+    ThrowIfFailed(_dxgiFactory->CreateSwapChainForHwnd(device->GetCommandQueue()->GetCommandQueue().Get(),
+        hwnd, &desc, nullptr, nullptr, &swapChain1));
+
+    ThrowIfFailed(swapChain1.As(&swapChain4));
+
+    return swapChain4;
 }

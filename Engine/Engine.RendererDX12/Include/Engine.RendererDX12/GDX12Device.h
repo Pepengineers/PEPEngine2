@@ -19,7 +19,7 @@ struct DeviceSpecs
 	size_t SharedSystemMemory;    // in bytes
 };
 
-class GDX12Device
+class GDX12Device : public std::enable_shared_from_this<GDX12Device>
 {
 public:
 	GDX12Device();
@@ -29,6 +29,7 @@ public:
 	void Reset();
 
 	ComPtr<ID3D12Device14> GetDevice();
+	std::shared_ptr<GDX12CommandQueue> GetCommandQueue();
 	const DeviceSpecs& GetDeviceFeatures() const;
 	const bool IsInitialized() const;
 

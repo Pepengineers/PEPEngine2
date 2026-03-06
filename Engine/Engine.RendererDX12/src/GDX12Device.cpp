@@ -137,6 +137,11 @@ ComPtr<ID3D12Device14> GDX12Device::GetDevice()
     return _device;
 }
 
+std::shared_ptr<GDX12CommandQueue> GDX12Device::GetCommandQueue()
+{
+    return _commandQueue;
+}
+
 const DeviceSpecs& GDX12Device::GetDeviceFeatures() const
 {
     return _specs;

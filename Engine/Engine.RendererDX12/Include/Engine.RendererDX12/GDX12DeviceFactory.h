@@ -17,6 +17,8 @@ struct DeviceDesc
         {}
 };
 
+class GDX12Device;
+
 class GDX12DeviceFactory
 {
 public:
@@ -27,6 +29,9 @@ public:
     // Gets all device adapters. First element is the default device
     static std::vector<DeviceDesc> GetDeviceDescriptors();
     static ComPtr<IDXGIAdapter4> GetDefaultAdapter();
+
+    static ComPtr<IDXGISwapChain4> CreateSwapChain(GDX12Device* device, 
+        DXGI_SWAP_CHAIN_DESC1& desc, HWND hwnd);
 
 private:
 
