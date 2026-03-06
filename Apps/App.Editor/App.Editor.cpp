@@ -64,9 +64,8 @@ bool EditorApp::Initialize()
 		return false;
 	}
 
-
-	GDX12Device defaultDeivce;
-	defaultDeivce.Initialize(GDX12DeviceFactory::GetDefaultAdapter().Get());
+	std::shared_ptr<GDX12Device> defaultDeivce = std::make_shared<GDX12Device>();
+	defaultDeivce->Initialize(GDX12DeviceFactory::GetDefaultAdapter().Get());
 
 	return true;
 }

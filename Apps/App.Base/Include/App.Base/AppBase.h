@@ -10,11 +10,12 @@
 #include <Engine.Core/GameTimer.h>
 #include <Engine.UI/UI_test.h>
 
-//replace with #include "RenderingSystem.h" later
+//replace with #include "Engine.RHI/RenderingSystem.h" later
 #include <Engine.RendererDX12/D3DHelpers.h>
 #include <Engine.RendererDX12/dxc_test.h>
 #include <Engine.RendererDX12/GDX12DeviceFactory.h>
 #include <Engine.RendererDX12/GDX12Device.h>
+#include <Engine.RendererDX12/GDX12CommandQueue.h>
 
 // Link necessary d3d12 libraries.
 #pragma comment(lib,"d3dcompiler.lib")

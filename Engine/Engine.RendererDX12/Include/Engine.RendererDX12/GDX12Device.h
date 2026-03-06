@@ -2,6 +2,8 @@
 
 #include "Engine.RendererDX12\D3DHelpers.h"
 
+class GDX12CommandQueue;
+
 //info on device capabilities
 struct DeviceSpecs
 {
@@ -23,15 +25,21 @@ public:
 	GDX12Device();
 	~GDX12Device();
 
-	HRESULT Initialize(IDXGIAdapter4* adapter = nullptr);
+	HRESULT Initialize(ComPtr<IDXGIAdapter4> adapter);
 	void Reset();
 
-	ComPtr<ID3D12Device14> GetDevice() const;
+	ComPtr<ID3D12Device14> GetDevice();
 	const DeviceSpecs& GetDeviceFeatures() const;
 	const bool IsInitialized() const;
 
 private:
+	void CollectDeviceFeatures();
+
+	ComPtr<IDXGIAdapter4> _adapter;
 	ComPtr<ID3D12Device14> _device;
+
+	std::shared_ptr<GDX12CommandQueue> _commandQueue;
+
 	bool _isInitialized;
 
 	UINT _rtvDescriptorSize;

@@ -21,12 +21,14 @@
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
     <ClInclude Include="Include\Engine.RendererDX12\dxc_test.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12CommandQueue.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Device.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceFactory.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp" />
     <ClCompile Include="src\dxc_test.cpp" />
+    <ClCompile Include="src\GDX12CommandQueue.cpp" />
     <ClCompile Include="src\GDX12Device.cpp" />
     <ClCompile Include="src\GDX12DeviceFactory.cpp" />
   </ItemGroup>
