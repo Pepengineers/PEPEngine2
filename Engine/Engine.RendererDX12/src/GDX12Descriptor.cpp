@@ -1,0 +1,87 @@
+#include "Engine.RendererDX12/GDX12Descriptor.h"
+
+#include "Engine.RendererDX12/GDX12DescriptorHeap.h"
+#include "Engine.RendererDX12/GDX12Device.h"
+
+GDX12Descriptor::GDX12Descriptor() : HeapIndex(-1), CPUHandle{0}, GPUHandle{0}
+{
+}
+
+GDX12Descriptor::~GDX12Descriptor()
+{
+}
+
+void GDX12Descriptor::InitAsSRV(ID3D12Resource* resource, D3D12_SHADER_RESOURCE_VIEW_DESC* srvDesc, std::shared_ptr<GDX12DescriptorHeap> inHeap)
+{
+    _heap = inHeap;
+    
+    if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+    {
+        HeapIndex = _heap->GetAvalibleIndex();
+        CPUHandle = _heap->GetCPUHandle(HeapIndex);
+        GPUHandle = _heap->GetGPUHandle(HeapIndex);
+
+        _heap->_device->GetDevice()->CreateShaderResourceView(resource, srvDesc, CPUHandle);
+    }
+    else { OutputDebugStringA("ERROR: Cannot create SRV in a non-CBV_SRV_UAV heap\n"); }
+}
+
+void GDX12Descriptor::InitAsCBV(D3D12_CONSTANT_BUFFER_VIEW_DESC* cbvDesc, std::shared_ptr<GDX12DescriptorHeap> inHeap)
+{
+    _heap = inHeap;
+
+    if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+    {
+        HeapIndex = _heap->GetAvalibleIndex();
+        CPUHandle = _heap->GetCPUHandle(HeapIndex);
+        GPUHandle = _heap->GetGPUHandle(HeapIndex);
+
+        _heap->_device->GetDevice()->CreateConstantBufferView(cbvDesc, CPUHandle);
+    }
+    else { OutputDebugStringA("ERROR: Cannot create CBV in a non-CBV_SRV_UAV heap\n"); }
+}
+
+void GDX12Descriptor::InitAsUAV(ID3D12Resource* resource, D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc, std::shared_ptr<GDX12DescriptorHeap> inHeap)
+{
+    _heap = inHeap;
+
+    if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
+    {
+        HeapIndex = _heap->GetAvalibleIndex();
+        CPUHandle = _heap->GetCPUHandle(HeapIndex);
+        GPUHandle = _heap->GetGPUHandle(HeapIndex);
+
+        _heap->_device->GetDevice()->CreateUnorderedAccessView(resource, nullptr, uavDesc, CPUHandle);
+    }
+    else { OutputDebugStringA("ERROR: Cannot create UAV in a non-CBV_SRV_UAV heap\n"); }
+}
+
+void GDX12Descriptor::InitAsDSV(ID3D12Resource* resource, D3D12_DEPTH_STENCIL_VIEW_DESC* dsvDesc, std::shared_ptr<GDX12DescriptorHeap> inHeap)
+{
+    _heap = inHeap;
+
+    if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_DSV)
+    {
+        HeapIndex = _heap->GetAvalibleIndex();
+        CPUHandle = _heap->GetCPUHandle(HeapIndex);
+        GPUHandle = _heap->GetGPUHandle(HeapIndex);
+
+        _heap->_device->GetDevice()->CreateDepthStencilView(resource, dsvDesc, CPUHandle);
+    }
+    else { OutputDebugStringA("ERROR: Cannot create DSV in a non-DSV heap\n"); }
+}
+
+void GDX12Descriptor::InitAsRTV(ID3D12Resource* resource, D3D12_RENDER_TARGET_VIEW_DESC* rtvDesc, std::shared_ptr<GDX12DescriptorHeap> inHeap)
+{
+    _heap = inHeap;
+
+    if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_RTV)
+    {
+        HeapIndex = _heap->GetAvalibleIndex();
+        CPUHandle = _heap->GetCPUHandle(HeapIndex);
+        GPUHandle = _heap->GetGPUHandle(HeapIndex);
+
+        _heap->_device->GetDevice()->CreateRenderTargetView(resource, rtvDesc, CPUHandle);
+    }
+    else { OutputDebugStringA("ERROR: Cannot create DSV in a non-DSV heap\n"); }
+}

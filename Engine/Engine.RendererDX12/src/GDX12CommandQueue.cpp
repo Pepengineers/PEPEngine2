@@ -67,6 +67,27 @@ void GDX12CommandQueue::ExecuteCommandList(std::shared_ptr<GDX12CommandList> com
     _executorCondition.notify_one();
 }
 
+void GDX12CommandQueue::ExecuteCommandLists(std::shared_ptr<GDX12CommandList>* commandLists, UINT count)
+{
+    std::vector<ID3D12CommandList*> ppLists;
+    ppLists.reserve(count);
+
+    for (UINT i = 0; i < count; ++i)
+    {
+        commandLists[i]->GetCommandList()->Close();
+        ppLists.push_back(commandLists[i]->GetCommandList().Get());
+    }
+
+    _commandQueue->ExecuteCommandLists(count, ppLists.data());
+
+    FenceValue++;
+    _commandQueue->Signal(_fence.Get(), FenceValue);
+
+    for (UINT i = 0; i < count; ++i) { commandLists[i]->FenceValue = FenceValue; }
+
+    _executorCondition.notify_one();
+}
+
 ComPtr<ID3D12Fence> GDX12CommandQueue::GetFence()
 {
     return _fence;

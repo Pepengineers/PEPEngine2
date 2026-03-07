@@ -91,12 +91,14 @@ bool EditorApp::Initialize()
 	defaultDeivce->GetCommandQueue()->ExecuteCommandList(cmdList1);
 
 	auto cmdList2 = defaultDeivce->GetCommandQueue()->GetCommandList();
-	cmdList2->GetCommandList();
-	defaultDeivce->GetCommandQueue()->ExecuteCommandList(cmdList2);
-
 	auto cmdList3 = defaultDeivce->GetCommandQueue()->GetCommandList();
+
+	cmdList2->GetCommandList();
 	cmdList3->GetCommandList();
-	defaultDeivce->GetCommandQueue()->ExecuteCommandList(cmdList3);
+
+	std::shared_ptr<GDX12CommandList> lists[] = { cmdList1, cmdList2 };
+	defaultDeivce->GetCommandQueue()->ExecuteCommandLists(lists, std::size(lists));
+
 	return true;
 }
 

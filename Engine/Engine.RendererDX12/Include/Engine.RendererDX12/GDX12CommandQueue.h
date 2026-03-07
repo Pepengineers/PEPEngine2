@@ -21,6 +21,7 @@ public:
 	// If all lists are busy - new will be created
 	std::shared_ptr<GDX12CommandList>& GetCommandList();
 	void ExecuteCommandList(std::shared_ptr<GDX12CommandList> commandList);
+	void ExecuteCommandLists(std::shared_ptr<GDX12CommandList>* lists, UINT count);
 
 	void WaitForFenceValue(uint64_t fenceValue);
 
