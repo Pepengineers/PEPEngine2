@@ -64,47 +64,17 @@ bool EditorApp::Initialize()
 		return false;
 	}
 
-	std::shared_ptr<GDX12Device> defaultDeivce = std::make_shared<GDX12Device>();
-	defaultDeivce->Initialize(GDX12DeviceFactory::GetDefaultAdapter().Get());
+	std::shared_ptr<GDX12Device> defaultDevice = std::make_shared<GDX12Device>();
+	defaultDevice->Initialize(GDX12DeviceFactory::GetDefaultAdapter().Get());
 
+	std::unordered_map<std::string, ComPtr<ID3DBlob>> shaders;
 
-	DXGI_FORMAT BackBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+	shaders["testVS"] = GDX12ShaderCompiler::GetInstance().CompileShader(defaultDevice,
+		SHADERS_FOLDER "DeferredGeometryPass.hlsl", nullptr, "VS", "vs");
 
-	DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
-	swapChainDesc.Width = WindowWidth;
-	swapChainDesc.Height = WindowHeight;
-	swapChainDesc.Format = BackBufferFormat;
-	swapChainDesc.Stereo = FALSE;
-	swapChainDesc.SampleDesc = { 1, 0 };
-	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-	swapChainDesc.BufferCount = 2;
-	swapChainDesc.Scaling = DXGI_SCALING_STRETCH;
-	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-	swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
+	//DONT FORGET TO PUT ME AT ENGINE SHUTDOWN
+	GDX12ShaderCompiler::GetInstance().Shutdown();
 
-	swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-
-	ComPtr<IDXGISwapChain4> mSwapChain = GDX12DeviceFactory::CreateSwapChain(defaultDeivce.get(), swapChainDesc, MainWndHandle);
-
-	auto cmdList1 = defaultDeivce->GetCommandQueue()->GetCommandList();
-	cmdList1->GetCommandList();
-	defaultDeivce->GetCommandQueue()->ExecuteCommandList(cmdList1);
-
-	auto cmdList2 = defaultDeivce->GetCommandQueue()->GetCommandList();
-	auto cmdList3 = defaultDeivce->GetCommandQueue()->GetCommandList();
-
-	cmdList2->GetCommandList();
-	cmdList3->GetCommandList();
-
-	std::shared_ptr<GDX12CommandList> lists[] = { cmdList1, cmdList2 };
-	defaultDeivce->GetCommandQueue()->ExecuteCommandLists(lists, std::size(lists));
-
-	std::unordered_map<std::string, std::shared_ptr<GDX12RootSignature>> RootSignatures;
-	GDX12RootSignatureDesc desc;
-	desc.NumCBVSlots = 2;
-	desc.NumSRVSlots = 3;
-	desc.NumUAVSlots = 1;
-	RootSignatures["test"] = std::make_shared<GDX12RootSignature>(defaultDeivce, desc);
 	return true;
 }
 
