@@ -99,6 +99,12 @@ bool EditorApp::Initialize()
 	std::shared_ptr<GDX12CommandList> lists[] = { cmdList1, cmdList2 };
 	defaultDeivce->GetCommandQueue()->ExecuteCommandLists(lists, std::size(lists));
 
+	std::unordered_map<std::string, std::shared_ptr<GDX12RootSignature>> RootSignatures;
+	GDX12RootSignatureDesc desc;
+	desc.NumCBVSlots = 2;
+	desc.NumSRVSlots = 3;
+	desc.NumUAVSlots = 1;
+	RootSignatures["test"] = std::make_shared<GDX12RootSignature>(defaultDeivce, desc);
 	return true;
 }
 
