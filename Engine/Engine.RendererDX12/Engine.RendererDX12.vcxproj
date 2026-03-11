@@ -29,6 +29,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceFactory.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RootSignature.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ShaderCompiler.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12Texture.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp" />
@@ -41,6 +42,7 @@
     <ClCompile Include="src\GDX12DeviceFactory.cpp" />
     <ClCompile Include="src\GDX12RootSignature.cpp" />
     <ClCompile Include="src\GDX12ShaderCompiler.cpp" />
+    <ClCompile Include="src\GDX12Texture.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>

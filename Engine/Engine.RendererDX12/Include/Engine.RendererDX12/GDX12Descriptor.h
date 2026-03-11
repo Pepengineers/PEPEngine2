@@ -14,7 +14,7 @@ public:
 	void InitAsCBV(D3D12_CONSTANT_BUFFER_VIEW_DESC* cbvDesc, std::shared_ptr<GDX12DescriptorHeap> inHeap);
 	void InitAsUAV(ID3D12Resource* resource, D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc, std::shared_ptr<GDX12DescriptorHeap> inHeap);
 	void InitAsDSV(ID3D12Resource* resource, D3D12_DEPTH_STENCIL_VIEW_DESC* dsvDesc, std::shared_ptr<GDX12DescriptorHeap> inHeap);
-	void InitAsRTV(ID3D12Resource* resource, D3D12_RENDER_TARGET_VIEW_DESC* dsvDesc, std::shared_ptr<GDX12DescriptorHeap> inHeap);
+	void InitAsRTV(ID3D12Resource* resource, D3D12_RENDER_TARGET_VIEW_DESC* rtvDesc, std::shared_ptr<GDX12DescriptorHeap> inHeap);
 
 	UINT HeapIndex;
 	D3D12_CPU_DESCRIPTOR_HANDLE CPUHandle;

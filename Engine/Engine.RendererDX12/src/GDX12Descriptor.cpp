@@ -83,5 +83,5 @@ void GDX12Descriptor::InitAsRTV(ID3D12Resource* resource, D3D12_RENDER_TARGET_VI
 
         _heap->_device->GetDevice()->CreateRenderTargetView(resource, rtvDesc, CPUHandle);
     }
-    else { OutputDebugStringA("ERROR: Cannot create DSV in a non-DSV heap\n"); }
+    else { OutputDebugStringA("ERROR: Cannot create RTV in a non-DSV heap\n"); }
 }

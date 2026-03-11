@@ -7,6 +7,7 @@ class GDX12Device;
 class GDX12DescriptorHeap
 {
     friend class GDX12Descriptor;
+    friend class GDX12Texture;
 
 public:
     GDX12DescriptorHeap(GDX12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT numDescriptors, D3D12_DESCRIPTOR_HEAP_FLAGS flags);

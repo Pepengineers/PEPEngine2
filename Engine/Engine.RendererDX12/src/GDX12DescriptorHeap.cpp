@@ -41,8 +41,9 @@ UINT GDX12DescriptorHeap::GetNumDescriptors()
 UINT GDX12DescriptorHeap::GetAvalibleIndex()
 {
     if (_heapHeadIndex + 1 > _numDescriptors) { OutputDebugStringA("ERROR: DESCRIPTOR HEAP IS FULL\n"); }
+    UINT res = _heapHeadIndex;
     _heapHeadIndex++;
-    return _heapHeadIndex;
+    return res;
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE GDX12DescriptorHeap::GetCPUHandle(UINT index) const
