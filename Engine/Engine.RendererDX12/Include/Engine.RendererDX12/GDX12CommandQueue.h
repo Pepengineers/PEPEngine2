@@ -18,7 +18,7 @@ public:
 	ComPtr<ID3D12Fence> GetFence();
 
 	// Returns a CommandList that you can work with.
-	// If all lists are busy - a new one will be created.
+	// If all previously created lists are busy - a new one will be created.
 	std::shared_ptr<GDX12CommandList> GetCommandList();
 	void ExecuteCommandList(std::shared_ptr<GDX12CommandList> commandList);
 	void ExecuteCommandLists(std::shared_ptr<GDX12CommandList>* lists, UINT count);
@@ -32,7 +32,7 @@ public:
 	UINT64 FenceValue;
 
 private:
-	//TODO: Make this function work in a separate thread
+	// We can probably make it work in a separate thread
 	//Imported PEPEngine::Utils::LockThreadQueue in case it helps
 	void ClearCompletedLists();
 

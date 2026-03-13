@@ -85,3 +85,18 @@ GDX12RootSignature::~GDX12RootSignature()
 {
     _rootSignature.Reset();
 }
+
+int GDX12RootSignature::GetTRootParamIndex(int registerIndex)
+{
+    return registerIndex + _srv0ParamIndex;
+}
+
+int GDX12RootSignature::GetBRootParamIndex(int registerIndex)
+{
+    return registerIndex + _cbv0ParamIndex;
+}
+
+int GDX12RootSignature::GetURootParamIndex(int registerIndex)
+{
+    return registerIndex + _uav0ParamIndex;
+}

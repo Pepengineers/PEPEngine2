@@ -80,6 +80,11 @@ D3D12_CLEAR_VALUE& GDX12Texture::GetClearValue()
     return _clearValue;
 }
 
+ComPtr<ID3D12Resource> GDX12Texture::GetD3DResource()
+{
+    return _resource;
+}
+
 void GDX12Texture::CreateResource()
 {
     D3D12_RESOURCE_DESC resourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(

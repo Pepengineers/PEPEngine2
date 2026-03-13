@@ -21,6 +21,11 @@ public:
 	ComPtr<ID3D12RootSignature> GetRootSignature() const { return _rootSignature; }
 	const GDX12RootSignatureDesc& GetDesc() const { return _desc; }
 
+	int GetTRootParamIndex(int registerIndex);
+	int GetBRootParamIndex(int registerIndex);
+	int GetURootParamIndex(int registerIndex);
+
+
 private:
 	std::shared_ptr<GDX12Device> _device;
 	ComPtr<ID3D12RootSignature> _rootSignature;

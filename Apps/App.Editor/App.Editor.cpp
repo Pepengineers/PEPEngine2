@@ -93,20 +93,19 @@ void EditorApp::Update(const GameTimer& gameTimer)
 
 void EditorApp::Render(const GameTimer& gameTimer)
 {
-	UNREFERENCED_PARAMETER(gameTimer);
-
 	auto cmdQueue = defaultDevice->GetCommandQueue();
 
 	cmdQueue->Flush();
 
-	auto cmdList = defaultDevice->GetCommandQueue()->GetCommandList();
+	auto cmdList = cmdQueue->GetCommandList();
 	auto backBuffer = testBackBuffer->GetCurrentBuffer();
 
 	float clearColor[] = { 0.5 + 0.5 * cos(gameTimer.TotalTime()), 0.5 + 0.5 * sin(gameTimer.TotalTime()), 
 		0.5 + 0.5 * cos(gameTimer.TotalTime()), 1.0f };
+
 	cmdList->GetCommandList()->ClearRenderTargetView(backBuffer->GetRTV()->CPUHandle, clearColor, 0, nullptr);
 
-	defaultDevice->GetCommandQueue()->ExecuteCommandList(cmdList);
+	cmdQueue->ExecuteCommandList(cmdList);
 
 	testBackBuffer->Present();
 }

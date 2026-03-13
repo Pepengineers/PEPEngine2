@@ -45,6 +45,7 @@ public:
 	GDX12Descriptor* GetUAV();
 	GDX12Descriptor* GetDSV();
 	D3D12_CLEAR_VALUE& GetClearValue();
+	ComPtr<ID3D12Resource> GetD3DResource();
 
 private:
 	void CreateResource();
