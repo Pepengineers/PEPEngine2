@@ -29,5 +29,6 @@ ComPtr<ID3D12CommandAllocator> GDX12CommandList::GetCommandAllocator()
 
 void GDX12CommandList::Reset()
 {
-
+	_commandAllocator->Reset();
+	_commandList->Reset(_commandAllocator.Get(), nullptr);
 }

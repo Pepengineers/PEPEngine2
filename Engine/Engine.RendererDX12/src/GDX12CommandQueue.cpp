@@ -13,8 +13,6 @@ GDX12CommandQueue::GDX12CommandQueue(GDX12Device* device)
 
     ThrowIfFailed(device->GetDevice()->CreateCommandQueue(&desc, IID_PPV_ARGS(&_commandQueue)));
     ThrowIfFailed(device->GetDevice()->CreateFence(FenceValue, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&_fence)));
-
-    _commandListExecutorThread = std::thread(&GDX12CommandQueue::ProcessInFlightCommandLists, this);
 }
 
 void GDX12CommandQueue::Reset()
@@ -23,15 +21,10 @@ void GDX12CommandQueue::Reset()
     _fence.Reset();
 
     std::shared_ptr<GDX12CommandList> list;
-    while (_availableCommandLists.TryPop(list)) {}
-    while (_workingCommandLists.TryPop(list)) {}
 }
 
 GDX12CommandQueue::~GDX12CommandQueue()
 {
-    _isExecutorAlive = false;
-    _executorCondition.notify_one();
-    _commandListExecutorThread.join();
     Reset();
 }
 
@@ -40,19 +33,23 @@ ComPtr<ID3D12CommandQueue> GDX12CommandQueue::GetCommandQueue()
     return _commandQueue;
 }
 
-std::shared_ptr<GDX12CommandList>& GDX12CommandQueue::GetCommandList()
+std::shared_ptr<GDX12CommandList> GDX12CommandQueue::GetCommandList()
 {
     std::shared_ptr<GDX12CommandList> commandList;
 
-    if (_availableCommandLists.TryPop(commandList))
+    ClearCompletedLists();
+
+    if (!_availableCommandLists.empty())
     {
+        commandList = _availableCommandLists.back();
+        _availableCommandLists.pop_back();
         commandList->Reset();
-        _workingCommandLists.Push(commandList);
+        _workingCommandLists.push_back(commandList);
         return commandList;
     }
 
     commandList = std::make_shared<GDX12CommandList>(_device);
-    _workingCommandLists.Push(commandList);
+    _workingCommandLists.push_back(commandList);
     return commandList;
 }
 
@@ -64,7 +61,7 @@ void GDX12CommandQueue::ExecuteCommandList(std::shared_ptr<GDX12CommandList> com
     FenceValue++;
     _commandQueue->Signal(_fence.Get(), FenceValue);
     commandList->FenceValue = FenceValue;
-    _executorCondition.notify_one();
+    _lastDispatchedList = commandList;
 }
 
 void GDX12CommandQueue::ExecuteCommandLists(std::shared_ptr<GDX12CommandList>* commandLists, UINT count)
@@ -84,8 +81,7 @@ void GDX12CommandQueue::ExecuteCommandLists(std::shared_ptr<GDX12CommandList>* c
     _commandQueue->Signal(_fence.Get(), FenceValue);
 
     for (UINT i = 0; i < count; ++i) { commandLists[i]->FenceValue = FenceValue; }
-
-    _executorCondition.notify_one();
+    if (count > 0) { _lastDispatchedList = commandLists[count - 1]; }
 }
 
 ComPtr<ID3D12Fence> GDX12CommandQueue::GetFence()
@@ -104,28 +100,21 @@ void GDX12CommandQueue::WaitForFenceValue(uint64_t fenceValue)
     CloseHandle(event);
 }
 
-void GDX12CommandQueue::ProcessInFlightCommandLists()
+void GDX12CommandQueue::Flush()
 {
-    while (_isExecutorAlive)
+    if (_lastDispatchedList) { WaitForFenceValue(_lastDispatchedList->FenceValue); }
+}
+
+void GDX12CommandQueue::ClearCompletedLists()
+{
+    auto it = _workingCommandLists.begin();
+    while (it != _workingCommandLists.end())
     {
-        std::unique_lock<std::mutex> lock(_executorMutex);
-        _executorCondition.wait(lock, [this] { return !_workingCommandLists.Empty() || !_isExecutorAlive; });
-
-        std::shared_ptr<GDX12CommandList> commandList;
-
-        if (_workingCommandLists.TryPop(commandList))
+        if (_fence->GetCompletedValue() >= (*it)->FenceValue)
         {
-            if (_fence->GetCompletedValue() >= commandList->FenceValue)
-            {
-                commandList->Reset();
-                _availableCommandLists.Push(commandList);
-            }
-            else
-            {
-                WaitForFenceValue(commandList->FenceValue);
-                commandList->Reset();
-                _availableCommandLists.Push(commandList);
-            }
+            _availableCommandLists.push_back(*it);
+            it = _workingCommandLists.erase(it);
         }
+        else { ++it; }
     }
 }

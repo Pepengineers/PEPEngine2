@@ -17,19 +17,24 @@ public:
 	ComPtr<ID3D12CommandQueue> GetCommandQueue();
 	ComPtr<ID3D12Fence> GetFence();
 
-	// Returns a CommandList that you can work with
-	// If all lists are busy - new will be created
-	std::shared_ptr<GDX12CommandList>& GetCommandList();
+	// Returns a CommandList that you can work with.
+	// If all lists are busy - a new one will be created.
+	std::shared_ptr<GDX12CommandList> GetCommandList();
 	void ExecuteCommandList(std::shared_ptr<GDX12CommandList> commandList);
 	void ExecuteCommandLists(std::shared_ptr<GDX12CommandList>* lists, UINT count);
 
 	void WaitForFenceValue(uint64_t fenceValue);
 
+	//Waits for execution of all active lists
+	void Flush();
+
 	// Do I even need this?
 	UINT64 FenceValue;
 
 private:
-	void ProcessInFlightCommandLists();
+	//TODO: Make this function work in a separate thread
+	//Imported PEPEngine::Utils::LockThreadQueue in case it helps
+	void ClearCompletedLists();
 
 	ComPtr<ID3D12CommandQueue> _commandQueue;
 	ComPtr<ID3D12Fence> _fence;
@@ -39,12 +44,8 @@ private:
 	// It returns any list from avalible vector
 	// If ther are no avalible lists - new will be created and returned(and placed into working lists)
 	// When working list finishes execution - it is moved to avalible lists
-	PEPEngine::Utils::LockThreadQueue<std::shared_ptr<GDX12CommandList>> _workingCommandLists;
-	PEPEngine::Utils::LockThreadQueue<std::shared_ptr<GDX12CommandList>> _availableCommandLists;
+	std::vector<std::shared_ptr<GDX12CommandList>> _workingCommandLists;
+	std::vector<std::shared_ptr<GDX12CommandList>> _availableCommandLists;
 
-	// working -> avalible list movement is done in a separate while(true) thread
-	std::thread _commandListExecutorThread;
-	std::atomic_bool _isExecutorAlive{ true };
-	std::mutex _executorMutex;
-	std::condition_variable _executorCondition;
+	std::shared_ptr<GDX12CommandList> _lastDispatchedList;
 };

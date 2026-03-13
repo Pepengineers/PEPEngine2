@@ -22,6 +22,7 @@
 #include <Engine.RendererDX12/GDX12Descriptor.h>
 #include <Engine.RendererDX12/GDX12DescriptorHeap.h>
 #include <Engine.RendererDX12/GDX12Texture.h>
+#include <Engine.RendererDX12/GDX12BackBuffer.h>
 
 // Link necessary d3d12 libraries.
 #pragma comment(lib,"d3dcompiler.lib")

@@ -12,17 +12,17 @@ GDX12Texture::GDX12Texture(GDX12TextureDesc desc) :
 	_dsv(nullptr),
     _resourceFlags(D3D12_RESOURCE_FLAG_NONE)
 {
-    if (_desc.CreateRTV && _desc.CreateDSV) { OutputDebugStringA("ERROR: It is impossible RTV and DSV on the same texture."); }
-    if (_desc.CreateUAV && _desc.CreateDSV) { OutputDebugStringA("ERROR: It is impossible DSV and UAV on the same texture."); }
+    if (_desc.CreateRTV && _desc.CreateDSV) { OutputDebugStringA("ERROR: It is impossible to create RTV and DSV on the same texture."); }
+    if (_desc.CreateUAV && _desc.CreateDSV) { OutputDebugStringA("ERROR: It is impossible to create DSV and UAV on the same texture."); }
 
     //grab device pointer from any avalible heap
-    if (_desc.SRV_UAV_Heap) _device = _desc.SRV_UAV_Heap->_device;
-    if (_desc.RTVHeap) _device = _desc.RTVHeap->_device;
-    if (_desc.DSVHeap) _device = _desc.DSVHeap->_device;
+    if (_desc.SRV_UAV_Heap) { _device = _desc.SRV_UAV_Heap->_device; }
+    if (_desc.RTVHeap) { _device = _desc.RTVHeap->_device; }
+    if (_desc.DSVHeap) { _device = _desc.DSVHeap->_device; }
 
-    if (_desc.CreateRTV) _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-    if (_desc.CreateDSV) _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
-    if (_desc.CreateUAV) _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    if (_desc.CreateRTV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET; }
+    if (_desc.CreateDSV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL; }
+    if (_desc.CreateUAV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS; }
 
     if (_desc.CreateRTV)
     {
@@ -39,42 +39,51 @@ GDX12Texture::GDX12Texture(GDX12TextureDesc desc) :
 
     _clearValue.Format = _desc.Format;
 
-    CreateResource();
+    if (_desc.ExternalResource != nullptr) { _resource = _desc.ExternalResource; }
+    else { CreateResource(); }
+    
     CreateViews();
 }
 
 void GDX12Texture::Resize(UINT Width, UINT Height)
 {
-    CreateResource();
+    if (_desc.ExternalResource != nullptr) { CreateResource(); }
     CreateViews();
 }
 
 GDX12Descriptor* GDX12Texture::GetSRV()
 {
+    if (!_desc.CreateSRV) { OutputDebugStringA("ERROR: Can't get Texture SRV: SRV not created."); }
     return _srv.get();
 }
 
 GDX12Descriptor* GDX12Texture::GetRTV()
 {
+    if (!_desc.CreateRTV) { OutputDebugStringA("ERROR: Can't get Texture RTV: RTV not created."); }
     return _rtv.get();
 }
 
 GDX12Descriptor* GDX12Texture::GetUAV()
 {
+    if (!_desc.CreateUAV) { OutputDebugStringA("ERROR: Can't get Texture UAV: UAV not created."); }
     return _uav.get();
 }
 
 GDX12Descriptor* GDX12Texture::GetDSV()
 {
+    if (!_desc.CreateDSV) { OutputDebugStringA("ERROR: Can't get Texture DSV: DSV not created."); }
     return _dsv.get();
+}
+
+D3D12_CLEAR_VALUE& GDX12Texture::GetClearValue()
+{
+    return _clearValue;
 }
 
 void GDX12Texture::CreateResource()
 {
     D3D12_RESOURCE_DESC resourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-        _desc.Format,
-        _desc.Width,
-        _desc.Height,
+        _desc.Format, _desc.Width, _desc.Height,
         1,  // array size
         1,  // mip levels
         1,  // sample count
