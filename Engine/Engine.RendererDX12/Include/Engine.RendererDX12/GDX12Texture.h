@@ -39,7 +39,7 @@ public:
 
 	//Recreates resources with new size and same descriptors
 	//This will wipe all data on said resources, unless ExternalResource is provided
-	void Resize(UINT Width, UINT Height);
+	void Resize(UINT width, UINT height);
 
 	GDX12Descriptor* GetSRV();
 	GDX12Descriptor* GetRTV();

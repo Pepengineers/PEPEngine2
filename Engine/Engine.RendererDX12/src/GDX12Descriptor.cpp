@@ -3,7 +3,11 @@
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
 #include "Engine.RendererDX12/GDX12Device.h"
 
-GDX12Descriptor::GDX12Descriptor() : HeapIndex(-1), CPUHandle{0}, GPUHandle{0}
+GDX12Descriptor::GDX12Descriptor() : 
+    HeapIndex(-1), 
+    CPUHandle{0}, 
+    GPUHandle{0},
+    _heap(nullptr)
 {
 }
 
@@ -17,7 +21,7 @@ void GDX12Descriptor::InitAsSRV(ID3D12Resource* resource, D3D12_SHADER_RESOURCE_
     
     if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
     {
-        HeapIndex = _heap->GetAvalibleIndex();
+        if (HeapIndex == -1) { HeapIndex = _heap->GetAvalibleIndex(); }
         CPUHandle = _heap->GetCPUHandle(HeapIndex);
         GPUHandle = _heap->GetGPUHandle(HeapIndex);
 
@@ -32,7 +36,7 @@ void GDX12Descriptor::InitAsCBV(D3D12_CONSTANT_BUFFER_VIEW_DESC* cbvDesc, GDX12D
 
     if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
     {
-        HeapIndex = _heap->GetAvalibleIndex();
+        if (HeapIndex == -1) { HeapIndex = _heap->GetAvalibleIndex(); }
         CPUHandle = _heap->GetCPUHandle(HeapIndex);
         GPUHandle = _heap->GetGPUHandle(HeapIndex);
 
@@ -47,7 +51,7 @@ void GDX12Descriptor::InitAsUAV(ID3D12Resource* resource, D3D12_UNORDERED_ACCESS
 
     if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
     {
-        HeapIndex = _heap->GetAvalibleIndex();
+        if (HeapIndex == -1) { HeapIndex = _heap->GetAvalibleIndex(); }
         CPUHandle = _heap->GetCPUHandle(HeapIndex);
         if (_heap->GetFlags() & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) { GPUHandle = _heap->GetGPUHandle(HeapIndex); }
 
@@ -62,7 +66,7 @@ void GDX12Descriptor::InitAsDSV(ID3D12Resource* resource, D3D12_DEPTH_STENCIL_VI
 
     if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_DSV)
     {
-        HeapIndex = _heap->GetAvalibleIndex();
+        if (HeapIndex == -1) { HeapIndex = _heap->GetAvalibleIndex(); }
         CPUHandle = _heap->GetCPUHandle(HeapIndex);
         if (_heap->GetFlags() & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) { GPUHandle = _heap->GetGPUHandle(HeapIndex); }
 
@@ -77,7 +81,7 @@ void GDX12Descriptor::InitAsRTV(ID3D12Resource* resource, D3D12_RENDER_TARGET_VI
 
     if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_RTV)
     {
-        HeapIndex = _heap->GetAvalibleIndex();
+        if (HeapIndex == -1) { HeapIndex = _heap->GetAvalibleIndex(); }
         CPUHandle = _heap->GetCPUHandle(HeapIndex);
         if (_heap->GetFlags() & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) { GPUHandle = _heap->GetGPUHandle(HeapIndex); }
         

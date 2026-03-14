@@ -85,19 +85,17 @@ void GDX12BackBuffer::Resize(UINT width, UINT height)
 {
     if (_width == width && _height == height) { return; }
 
+    _width = width;
+    _height = height;
+
     _buffers.clear();
 
     DXGI_SWAP_CHAIN_DESC desc;
     _swapChain->GetDesc(&desc);
 
-    HRESULT hr = _swapChain->ResizeBuffers(
-        _bufferCount, width, height,
+    _swapChain->ResizeBuffers(
+        _bufferCount, _width, _height,
         desc.BufferDesc.Format, desc.Flags);
-
-    if (FAILED(hr)) { OutputDebugStringA("ERROR: Failed to resize swap chain buffers\n"); }
-
-    _width = width;
-    _height = height;
 
     CreateBuffers();
     _currentBufferIndex = _swapChain->GetCurrentBackBufferIndex();

@@ -19,9 +19,9 @@ public:
 
 	// Returns a CommandList that you can work with.
 	// If all previously created lists are busy - a new one will be created.
-	std::shared_ptr<GDX12CommandList> GetCommandList();
-	void ExecuteCommandList(std::shared_ptr<GDX12CommandList> commandList);
-	void ExecuteCommandLists(std::shared_ptr<GDX12CommandList>* lists, UINT count);
+	GDX12CommandList* GetCommandList();
+	void ExecuteCommandList(GDX12CommandList* commandList);
+	void ExecuteCommandLists(GDX12CommandList** lists, UINT count);
 
 	void WaitForFenceValue(uint64_t fenceValue);
 
@@ -44,8 +44,8 @@ private:
 	// It returns any list from avalible vector
 	// If ther are no avalible lists - new will be created and returned(and placed into working lists)
 	// When working list finishes execution - it is moved to avalible lists
-	std::vector<std::shared_ptr<GDX12CommandList>> _workingCommandLists;
-	std::vector<std::shared_ptr<GDX12CommandList>> _availableCommandLists;
+	std::vector<std::unique_ptr<GDX12CommandList>> _workingCommandLists;
+	std::vector<std::unique_ptr<GDX12CommandList>> _availableCommandLists;
 
-	std::shared_ptr<GDX12CommandList> _lastDispatchedList;
+	uint64_t _lastDispatchedFenceValue;
 };

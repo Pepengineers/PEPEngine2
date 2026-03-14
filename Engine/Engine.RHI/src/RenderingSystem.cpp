@@ -54,6 +54,8 @@ void RenderingSystem::Initialize(ComPtr<IDXGIAdapter4> primaryDeviceAdapter, Com
 
 void RenderingSystem::OnResize()
 {
+	_primaryDevice->GetCommandQueue()->Flush();
+
 	_backBuffer->Resize(_windowWidth, _windowHeight);
 	_depthStencil->Resize(_windowWidth, _windowHeight);
 }
