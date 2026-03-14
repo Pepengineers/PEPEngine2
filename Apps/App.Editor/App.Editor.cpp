@@ -84,6 +84,14 @@ bool EditorApp::Initialize()
 void EditorApp::OnResize()
 {
 	AppBase::OnResize();
+
+	//WinApi unintentionally calls OnResize() once during window creation.
+	//It happens during AppBase::Initialize(), 
+	//so none of the systems are currently initialized.
+	//This effectively ignores the first OnResize() call.
+	if (!testBackBuffer) return;
+
+	testBackBuffer->Resize(WindowWidth, WindowHeight);
 }
 
 void EditorApp::Update(const GameTimer& gameTimer)

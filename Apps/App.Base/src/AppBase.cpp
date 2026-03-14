@@ -7,21 +7,21 @@ using Microsoft::WRL::ComPtr;
 using namespace std;
 using namespace DirectX;
 
-LRESULT CALLBACK MainWndProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	// Forward hwnd on because we can get messages (e.g., WM_CREATE)
 	// before CreateWindow returns, and thus before MainWndHandle is valid.
-	return AppBase::GetApp ()->MsgProc (hwnd, msg, wParam, lParam);
+	return AppBase::GetApp()->MsgProc (hwnd, msg, wParam, lParam);
 }
 
 AppBase* AppBase::_app = nullptr;
 
-AppBase* AppBase::GetApp ()
+AppBase* AppBase::GetApp()
 {
 	return _app;
 }
 
-AppBase::AppBase (HINSTANCE hInstance)
+AppBase::AppBase(HINSTANCE hInstance)
 	: AppInstance(hInstance)
 {
 	// Only one AppBase can be constructed.
@@ -33,26 +33,26 @@ AppBase::~AppBase ()
 {
 }
 
-HINSTANCE AppBase::AppInst () const
+HINSTANCE AppBase::AppInst() const
 {
 	return AppInstance;
 }
 
-HWND AppBase::MainWnd () const
+HWND AppBase::MainWnd() const
 {
 	return MainWndHandle;
 }
 
-float AppBase::AspectRatio () const
+float AppBase::AspectRatio() const
 {
 	return static_cast<float>(WindowWidth) / WindowHeight;
 }
 
-int AppBase::Run ()
+int AppBase::Run()
 {
 	MSG Msg = { 0 };
 
-	Timer.Reset ();
+	Timer.Reset();
 
 	while (Msg.message != WM_QUIT)
 	{
@@ -65,13 +65,13 @@ int AppBase::Run ()
 		// Otherwise, do animation/game stuff.
 		else
 		{
-			Timer.Tick ();
+			Timer.Tick();
 
 			if (!bAppPaused)
 			{
-				CalculateFrameStats ();
-				Update (Timer);
-				Render (Timer);
+				CalculateFrameStats();
+				Update(Timer);
+				Render(Timer);
 			}
 			else
 			{
@@ -83,23 +83,23 @@ int AppBase::Run ()
 	return static_cast<int>(Msg.wParam);
 }
 
-bool AppBase::Initialize ()
+bool AppBase::Initialize()
 {
-	if (!InitMainWindow ())
+	if (!InitMainWindow())
 	{
 		return false;
 	}
 
-	OnResize ();
+	OnResize();
 
 	return true;
 }
 
-void AppBase::OnResize ()
+void AppBase::OnResize()
 {
 }
 
-LRESULT AppBase::MsgProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+LRESULT AppBase::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg)
 	{
@@ -169,7 +169,7 @@ LRESULT AppBase::MsgProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 				}
 				else // API call such as SetWindowPos or mSwapChain->SetFullscreenState.
 				{
-					OnResize ();
+					OnResize();
 				}
 			}
 		}
@@ -187,8 +187,8 @@ LRESULT AppBase::MsgProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	case WM_EXITSIZEMOVE:
 		bAppPaused = false;
 		bResizing = false;
-		Timer.Start ();
-		OnResize ();
+		Timer.Start();
+		OnResize();
 		return 0;
 
 	// WM_DESTROY is sent when the window is being destroyed.
@@ -211,17 +211,17 @@ LRESULT AppBase::MsgProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	case WM_LBUTTONDOWN:
 	case WM_MBUTTONDOWN:
 	case WM_RBUTTONDOWN:
-		OnMouseDown (wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+		OnMouseDown(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 		return 0;
 
 	case WM_LBUTTONUP:
 	case WM_MBUTTONUP:
 	case WM_RBUTTONUP:
-		OnMouseUp (wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+		OnMouseUp(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 		return 0;
 
 	case WM_MOUSEMOVE:
-		OnMouseMove (wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+		OnMouseMove(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 		return 0;
 
 	case WM_KEYUP:
@@ -235,7 +235,7 @@ LRESULT AppBase::MsgProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
-bool AppBase::InitMainWindow ()
+bool AppBase::InitMainWindow()
 {
 	WNDCLASS WindowClass;
 	WindowClass.style = CS_HREDRAW | CS_VREDRAW;
@@ -285,7 +285,7 @@ bool AppBase::InitMainWindow ()
 	return true;
 }
 
-void AppBase::CalculateFrameStats ()
+void AppBase::CalculateFrameStats()
 {
 	// Code computes the average frames per second, and also the
 	// average time it takes to render one frame. These stats
@@ -297,7 +297,7 @@ void AppBase::CalculateFrameStats ()
 	FrameCount++;
 
 	// Compute averages over one second period.
-	if ((Timer.TotalTime () - TimeElapsed) >= 1.0f)
+	if ((Timer.TotalTime() - TimeElapsed) >= 1.0f)
 	{
 		float Fps = static_cast<float>(FrameCount);
 		float MsPerFrame = 1000.0f / Fps;
