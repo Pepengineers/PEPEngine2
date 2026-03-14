@@ -66,6 +66,9 @@ public:
 	void Dispatch(UINT threadGroupCountX, UINT threadGroupCountY, UINT threadGroupCountZ);
 	void DispatchRays(const D3D12_DISPATCH_RAYS_DESC* pDesc);
 
+	//Enhanced Barriers
+	void EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTURE_BARRIER> textureBarriers);
+
 
 	//Misc
 	void BeginPixEvent(const std::string& name, const float color[4]);

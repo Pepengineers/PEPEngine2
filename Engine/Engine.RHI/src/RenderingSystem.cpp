@@ -88,12 +88,8 @@ void RenderingSystem::Render()
 	cmdList->SetViewport(_backBuffer->GetViewport());
 	cmdList->SetScissorRect(_backBuffer->GetScissorRect());
 
-	//TODO: Replace with enhanced barriers
-	// Add easy-to-use wrapper class
-	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-		CurrentBackBuffer->GetD3DResource().Get(),
-		D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-	cmdList->GetCommandList()->ResourceBarrier(1, &barrier);
+	cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetRenderTargetBarrier(),
+		_depthStencil->GetResource()->GetDepthWriteBarrier() });
 
 	cmdList->SetRenderTargets({ CurrentBackBuffer }, _depthStencil.get());
 	cmdList->ClearRenderTargetView(CurrentBackBuffer);
@@ -106,12 +102,8 @@ void RenderingSystem::Render()
 	cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 	cmdList->DrawInstanced(6, 1, 0, 0);
 
-	//TODO: Replace with enhanced barriers
-	// Add easy-to-use wrapper class
-	auto counterBarrier = CD3DX12_RESOURCE_BARRIER::Transition(
-		CurrentBackBuffer->GetD3DResource().Get(),
-		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-	cmdList->GetCommandList()->ResourceBarrier(1, &counterBarrier);
+	cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetPresentBarrier(),
+		_depthStencil->GetResource()->GetCommonBarrier() });
 
 	cmdQueue->ExecuteCommandList(cmdList);
 	CurrentFrameConsts->FenceValue = cmdQueue->GetFence()->GetCompletedValue();

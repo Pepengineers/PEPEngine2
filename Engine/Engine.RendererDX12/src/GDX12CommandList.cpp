@@ -230,6 +230,20 @@ void GDX12CommandList::DispatchRays(const D3D12_DISPATCH_RAYS_DESC* pDesc)
 	_commandList->DispatchRays(pDesc);
 }
 
+void GDX12CommandList::EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTURE_BARRIER> textureBarriers)
+{
+	std::vector<D3D12_BARRIER_GROUP> barrierGroups;
+	barrierGroups.reserve(1);
+
+	D3D12_BARRIER_GROUP barrierGroup = {};
+	barrierGroup.Type = D3D12_BARRIER_TYPE_TEXTURE;
+	barrierGroup.NumBarriers = static_cast<UINT>(textureBarriers.size());
+	barrierGroup.pTextureBarriers = textureBarriers.begin();
+	barrierGroups.push_back(barrierGroup);
+
+	_commandList->Barrier(static_cast<UINT>(barrierGroups.size()), barrierGroups.data());
+}
+
 void GDX12CommandList::BeginPixEvent(const std::string& name, const float color[4])
 {
 	BeginPixEvent(name, color);

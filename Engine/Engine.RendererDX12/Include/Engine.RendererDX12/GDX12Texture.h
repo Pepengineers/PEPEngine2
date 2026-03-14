@@ -6,6 +6,7 @@ class GDX12Descriptor;
 class GDX12DescriptorHeap;
 class GDX12Device;
 class GDX12CommandList;
+class GDX12TextureResource;
 
 struct GDX12TextureDesc
 {
@@ -46,7 +47,7 @@ public:
 	GDX12Descriptor* GetUAV();
 	GDX12Descriptor* GetDSV();
 	D3D12_CLEAR_VALUE& GetClearValue();
-	ComPtr<ID3D12Resource> GetD3DResource();
+	GDX12TextureResource* GetResource();
 	DXGI_FORMAT GetFormat();
 
 
@@ -54,7 +55,7 @@ private:
 	void CreateResource();
 	void CreateViews();
 
-	ComPtr<ID3D12Resource> _resource;
+	std::unique_ptr<GDX12TextureResource> _resource;
 	D3D12_RESOURCE_FLAGS _resourceFlags;
 	GDX12Device* _device;
 	GDX12TextureDesc _desc;

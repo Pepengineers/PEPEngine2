@@ -4,6 +4,7 @@
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
+#include "Engine.RendererDX12/GDX12TextureResource.h"
 
 GDX12Texture::GDX12Texture(GDX12TextureDesc desc) :
     _desc(desc),
@@ -40,7 +41,7 @@ GDX12Texture::GDX12Texture(GDX12TextureDesc desc) :
 
     _clearValue.Format = _desc.Format;
 
-    if (_desc.ExternalResource != nullptr) { _resource = _desc.ExternalResource; }
+    if (_desc.ExternalResource != nullptr) { _resource = std::make_unique<GDX12TextureResource>(_desc.ExternalResource); }
     else { CreateResource(); }
     
     CreateViews();
@@ -83,9 +84,9 @@ D3D12_CLEAR_VALUE& GDX12Texture::GetClearValue()
     return _clearValue;
 }
 
-ComPtr<ID3D12Resource> GDX12Texture::GetD3DResource()
+GDX12TextureResource* GDX12Texture::GetResource()
 {
-    return _resource;
+    return _resource.get();
 }
 
 DXGI_FORMAT GDX12Texture::GetFormat()
@@ -105,13 +106,17 @@ void GDX12Texture::CreateResource()
     
     CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
 
+    ComPtr<ID3D12Resource> d3dResource;
     _device->GetDevice()->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
         &resourceDesc,
         D3D12_RESOURCE_STATE_COMMON,
         (_desc.CreateRTV || _desc.CreateDSV) ? &_clearValue : nullptr,
-        IID_PPV_ARGS(&_resource));
+        IID_PPV_ARGS(&d3dResource));
+
+    if (!_resource) { _resource = std::make_unique<GDX12TextureResource>(d3dResource); }
+    else { _resource->D3DResource = d3dResource; }
 }
 
 void GDX12Texture::CreateViews()
@@ -120,34 +125,34 @@ void GDX12Texture::CreateViews()
     {
         if (!_desc.SRV_UAV_Heap) { OutputDebugStringA("ERROR: No Texture SRV_UAV Heap specified"); }
         if(!_srv) _srv = std::make_unique<GDX12Descriptor>();
-        _srv->InitAsSRV(_resource.Get(), &_desc.SRVDesc, _desc.SRV_UAV_Heap);
+        _srv->InitAsSRV(_resource->D3DResource.Get(), &_desc.SRVDesc, _desc.SRV_UAV_Heap);
     }
 
     if (_desc.CreateUAV)
     {
         if (!_desc.SRV_UAV_Heap) { OutputDebugStringA("ERROR: No Texture SRV_UAV Heap specified"); }
         if (!_uav) _uav = std::make_unique<GDX12Descriptor>();
-        _uav->InitAsUAV(_resource.Get(), &_desc.UAVDesc, _desc.SRV_UAV_Heap);
+        _uav->InitAsUAV(_resource->D3DResource.Get(), &_desc.UAVDesc, _desc.SRV_UAV_Heap);
     }
 
     if (_desc.CreateRTV)
     {
         if (!_desc.RTVHeap) { OutputDebugStringA("ERROR: No Texture RTV Heap specified"); }
         if (!_rtv) _rtv = std::make_unique<GDX12Descriptor>();
-        _rtv->InitAsRTV(_resource.Get(), &_desc.RTVDesc, _desc.RTVHeap);
+        _rtv->InitAsRTV(_resource->D3DResource.Get(), &_desc.RTVDesc, _desc.RTVHeap);
     }
 
     if (_desc.CreateDSV)
     {
         if (!_desc.DSVHeap) { OutputDebugStringA("ERROR: No Texture DSV Heap specified"); }
         if (!_dsv) _dsv = std::make_unique<GDX12Descriptor>();
-        _dsv->InitAsDSV(_resource.Get(), &_desc.DSVDesc, _desc.DSVHeap);
+        _dsv->InitAsDSV(_resource->D3DResource.Get(), &_desc.DSVDesc, _desc.DSVHeap);
     }
 }
 
 GDX12Texture::~GDX12Texture()
 {
-    _resource.Reset();
+    _resource.reset();
     _srv.reset();
     _rtv.reset();
     _uav.reset();

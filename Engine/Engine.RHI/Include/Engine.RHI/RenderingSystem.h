@@ -16,6 +16,7 @@
 #include "Engine.RendererDX12/GDX12BackBuffer.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
+#include "Engine.RendererDX12/GDX12TextureResource.h"
 
 class RenderingSystem
 {
