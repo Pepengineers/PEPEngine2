@@ -54,7 +54,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12UploadBuffer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameResource.h">
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameConstants.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ConstantStructures.h">
@@ -99,6 +99,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\GDX12UploadBuffer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GDX12FrameConstants.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

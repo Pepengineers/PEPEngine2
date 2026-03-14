@@ -29,7 +29,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DescriptorHeap.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Device.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceFactory.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameResource.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameConstants.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RootSignature.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ShaderCompiler.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Texture.h" />
@@ -45,6 +45,7 @@
     <ClCompile Include="src\GDX12DescriptorHeap.cpp" />
     <ClCompile Include="src\GDX12Device.cpp" />
     <ClCompile Include="src\GDX12DeviceFactory.cpp" />
+    <ClCompile Include="src\GDX12FrameConstants.cpp" />
     <ClCompile Include="src\GDX12RootSignature.cpp" />
     <ClCompile Include="src\GDX12ShaderCompiler.cpp" />
     <ClCompile Include="src\GDX12Texture.cpp" />
