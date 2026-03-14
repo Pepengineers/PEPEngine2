@@ -20,13 +20,13 @@ public:
 
 	void Initialize();
 
-	ComPtr<ID3DBlob> CompileShader(std::shared_ptr<GDX12Device> device, const std::wstring& filename, const D3D_SHADER_MACRO* defines, 
+	ComPtr<ID3DBlob> CompileShader(GDX12Device* device, const std::wstring& filename, const D3D_SHADER_MACRO* defines, 
 		const std::string& entrypoint, const std::string& shaderType);
 
 private:
 	GDX12ShaderCompiler();
 
-	std::string GetShaderTargetForModel(std::shared_ptr<GDX12Device> device, const std::string& shaderType);
+	std::string GetShaderTargetForModel(GDX12Device* device, const std::string& shaderType);
 
 	ComPtr<ID3DBlob> CompileShaderDXC(const std::wstring& filename, const D3D_SHADER_MACRO* defines,
 		const std::string& entrypoint, const std::string& shaderType);

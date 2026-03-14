@@ -3,7 +3,7 @@
 #include "Engine.RendererDX12/GDX12Device.h"
 
 
-GDX12RootSignature::GDX12RootSignature(std::shared_ptr<GDX12Device> device, const GDX12RootSignatureDesc& desc)
+GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSignatureDesc& desc)
     : _device(device)
     , _desc(desc)
     , _cbv0ParamIndex(-1)

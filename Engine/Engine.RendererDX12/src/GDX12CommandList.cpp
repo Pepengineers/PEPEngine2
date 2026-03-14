@@ -62,14 +62,14 @@ void GDX12CommandList::SetPipelineState1(ComPtr<ID3D12StateObject> stateObject)
 	_commandList->SetPipelineState1(stateObject.Get());
 }
 
-void GDX12CommandList::SetGraphicsRootSignature(std::shared_ptr<GDX12RootSignature> rootSignature)
+void GDX12CommandList::SetGraphicsRootSignature(GDX12RootSignature* rootSignature)
 {
 	if (_currentRootSignature == rootSignature) { return; }
 	_currentRootSignature = rootSignature;
 	_commandList->SetGraphicsRootSignature(rootSignature->GetRootSignature().Get());
 }
 
-void GDX12CommandList::SetComputeRootSignature(std::shared_ptr<GDX12RootSignature> rootSignature)
+void GDX12CommandList::SetComputeRootSignature(GDX12RootSignature* rootSignature)
 {
 	if (_currentRootSignature == rootSignature) { return; }
 	_currentRootSignature = rootSignature;
@@ -83,7 +83,7 @@ void GDX12CommandList::SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY topology)
 	_commandList->IASetPrimitiveTopology(topology);
 }
 
-void GDX12CommandList::SetDescriptorHeaps(std::initializer_list<std::shared_ptr<GDX12DescriptorHeap>> heaps)
+void GDX12CommandList::SetDescriptorHeaps(std::initializer_list<std::unique_ptr<GDX12DescriptorHeap>> heaps)
 {
 	std::vector<ID3D12DescriptorHeap*> rawHeaps;
 	rawHeaps.reserve(heaps.size());
@@ -122,8 +122,8 @@ void GDX12CommandList::SetScissorRect(const D3D12_RECT& scissorRect)
 	_commandList->RSSetScissorRects(1, &scissorRect);
 }
 
-void GDX12CommandList::SetRenderTargets(std::initializer_list<std::shared_ptr<GDX12Texture>> rtvTextures,
-	std::shared_ptr<GDX12Texture> dsvTexture)
+void GDX12CommandList::SetRenderTargets(std::initializer_list<GDX12Texture*> rtvTextures,
+	GDX12Texture* dsvTexture)
 {
 	std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvHandles;
 	rtvHandles.reserve(rtvTextures.size());
@@ -139,13 +139,13 @@ void GDX12CommandList::SetRenderTargets(std::initializer_list<std::shared_ptr<GD
 		(dsvHandle.ptr != 0) ? &dsvHandle : nullptr );
 }
 
-void GDX12CommandList::ClearRenderTargetView(std::shared_ptr<GDX12Texture> texture)
+void GDX12CommandList::ClearRenderTargetView(GDX12Texture* texture)
 {
 	_commandList->ClearRenderTargetView(texture->GetRTV()->CPUHandle, 
 		texture->GetClearValue().Color, 0, nullptr);
 }
 
-void GDX12CommandList::ClearDepthStencilView(std::shared_ptr<GDX12Texture> texture)
+void GDX12CommandList::ClearDepthStencilView(GDX12Texture* texture)
 {
 	_commandList->ClearDepthStencilView(texture->GetDSV()->CPUHandle, 
 		D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, texture->GetClearValue().DepthStencil.Depth, 0, 0, nullptr);

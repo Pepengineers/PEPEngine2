@@ -44,8 +44,8 @@ private:
 	HWND _windowHandle;
 	GameTimer* _gameTimer;
 
-	std::shared_ptr<GDX12Device> _primaryDevice;
-	std::shared_ptr<GDX12Device> _secondaryDevice;
+	std::unique_ptr<GDX12Device> _primaryDevice;
+	std::unique_ptr<GDX12Device> _secondaryDevice;
 	bool _dualGPUMode;
 
 	UINT _windowWidth;
@@ -55,7 +55,7 @@ private:
 
 	// These two resources are made on _primaryDevice only
 	std::unique_ptr<GDX12BackBuffer> _backBuffer;
-	std::shared_ptr<GDX12Texture> _depthStencil;
+	std::unique_ptr<GDX12Texture> _depthStencil;
 
 	static constexpr UINT _numFrameConstants = 3;
 
@@ -65,11 +65,11 @@ private:
 	UINT _currFrameConstantsIndex;
 
 	// All heaps created in one high-capacity instance
-	std::shared_ptr<GDX12DescriptorHeap> _rtvHeap;
-	std::shared_ptr<GDX12DescriptorHeap> _srvuavHeap;
-	std::shared_ptr<GDX12DescriptorHeap> _dsvHeap;
+	std::unique_ptr<GDX12DescriptorHeap> _rtvHeap;
+	std::unique_ptr<GDX12DescriptorHeap> _srvuavHeap;
+	std::unique_ptr<GDX12DescriptorHeap> _dsvHeap;
 
 	std::unordered_map<std::string, ComPtr<ID3DBlob>> _shaders;
 	std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> _PSOs;
-	std::unordered_map<std::string, std::shared_ptr<GDX12RootSignature>> _rootSignatures;
+	std::unordered_map<std::string, std::unique_ptr<GDX12RootSignature>> _rootSignatures;
 };

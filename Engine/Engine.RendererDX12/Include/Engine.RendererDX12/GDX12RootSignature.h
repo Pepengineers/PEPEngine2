@@ -15,7 +15,7 @@ struct GDX12RootSignatureDesc
 class GDX12RootSignature
 {
 public:
-	GDX12RootSignature(std::shared_ptr<GDX12Device> device, const GDX12RootSignatureDesc& desc);
+	GDX12RootSignature(GDX12Device* device, const GDX12RootSignatureDesc& desc);
 	~GDX12RootSignature();
 
 	ComPtr<ID3D12RootSignature> GetRootSignature() const { return _rootSignature; }
@@ -27,7 +27,7 @@ public:
 
 
 private:
-	std::shared_ptr<GDX12Device> _device;
+	GDX12Device* _device;
 	ComPtr<ID3D12RootSignature> _rootSignature;
 	GDX12RootSignatureDesc _desc;
 

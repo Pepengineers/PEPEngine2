@@ -22,18 +22,18 @@ public:
 	// State Management
 	void SetPipelineState(ComPtr<ID3D12PipelineState> pso);
 	void SetPipelineState1(ComPtr<ID3D12StateObject> stateObject);
-	void SetGraphicsRootSignature(std::shared_ptr<GDX12RootSignature> rootSignature);
-	void SetComputeRootSignature(std::shared_ptr<GDX12RootSignature> rootSignature);
+	void SetGraphicsRootSignature(GDX12RootSignature* rootSignature);
+	void SetComputeRootSignature(GDX12RootSignature* rootSignature);
 	void SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY topology);
-	void SetDescriptorHeaps(std::initializer_list<std::shared_ptr<GDX12DescriptorHeap>> heaps);
+	void SetDescriptorHeaps(std::initializer_list<std::unique_ptr<GDX12DescriptorHeap>> heaps);
 	void SetViewport(const D3D12_VIEWPORT& viewport);
 	void SetScissorRect(const D3D12_RECT& scissorRect);
 
     // View management
-	void SetRenderTargets(std::initializer_list<std::shared_ptr<GDX12Texture>> rtvTextures,
-		std::shared_ptr<GDX12Texture> dsvTexture);
-    void ClearRenderTargetView(std::shared_ptr<GDX12Texture> texture);
-    void ClearDepthStencilView(std::shared_ptr<GDX12Texture> texture);
+	void SetRenderTargets(std::initializer_list<GDX12Texture*> rtvTextures,
+		GDX12Texture* dsvTexture);
+    void ClearRenderTargetView(GDX12Texture* texture);
+    void ClearDepthStencilView(GDX12Texture* texture);
     void ClearUnorderedAccessViewFloat(const D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle,
         const D3D12_CPU_DESCRIPTOR_HANDLE& cpuHandle,
         ID3D12Resource* resource, const float values[4]);
@@ -79,7 +79,7 @@ private:
 	ComPtr<ID3D12CommandAllocator> _commandAllocator;
 
 	//Cached states
-	std::shared_ptr<GDX12RootSignature> _currentRootSignature;
+	GDX12RootSignature* _currentRootSignature;
 	ComPtr<ID3D12PipelineState> _currentPSO;
 	D3D_PRIMITIVE_TOPOLOGY _currentTopology;
 	std::vector<ID3D12DescriptorHeap*> _currentDescriptorHeaps;

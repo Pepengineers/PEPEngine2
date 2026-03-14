@@ -8,7 +8,7 @@ template<typename T>
 class GDX12UploadBuffer
 {
 public:
-	GDX12UploadBuffer(std::shared_ptr<GDX12Device> device, UINT elementCount, bool isConstantBuffer = true);
+	GDX12UploadBuffer(GDX12Device* device, UINT elementCount, bool isConstantBuffer = true);
 	~GDX12UploadBuffer();
 
 	ComPtr<ID3D12Resource> GetResource();
@@ -25,7 +25,7 @@ public:
     D3D12_GPU_VIRTUAL_ADDRESS GetElementAddress(UINT elementIndex);
 
 private:
-    std::shared_ptr<GDX12Device> _device;
+    GDX12Device* _device;
     ComPtr<ID3D12Resource> _uploadBuffer;
     BYTE* _mappedData = nullptr;
 
@@ -38,7 +38,7 @@ private:
 //Can't move template class definitions into .cpp cuz it'll throw linking errors
 
 template<typename T>
-GDX12UploadBuffer<T>::GDX12UploadBuffer(std::shared_ptr<GDX12Device> device, UINT elementCount, bool isConstantBuffer)
+GDX12UploadBuffer<T>::GDX12UploadBuffer(GDX12Device* device, UINT elementCount, bool isConstantBuffer)
     : _device(device)
     , _elementCount(elementCount)
     , _isConstantBuffer(isConstantBuffer)

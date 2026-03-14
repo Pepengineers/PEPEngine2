@@ -10,7 +10,7 @@ class GDX12Device;
 class GDX12FrameConstants
 {
 public:
-    GDX12FrameConstants(std::shared_ptr<GDX12Device> device, UINT meshCount, UINT materialCount, UINT lightCount);
+    GDX12FrameConstants(GDX12Device* device, UINT meshCount, UINT materialCount, UINT lightCount);
     ~GDX12FrameConstants();
 
     bool IsInUseByGPU(UINT64 currentFence);
@@ -25,5 +25,5 @@ public:
     UINT64 FenceValue;
     
 private:
-    std::shared_ptr<GDX12Device> _device;
+    GDX12Device* _device;
 };

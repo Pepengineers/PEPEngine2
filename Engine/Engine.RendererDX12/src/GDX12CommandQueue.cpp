@@ -19,8 +19,6 @@ void GDX12CommandQueue::Reset()
 {
     _commandQueue.Reset();
     _fence.Reset();
-
-    std::shared_ptr<GDX12CommandList> list;
 }
 
 GDX12CommandQueue::~GDX12CommandQueue()

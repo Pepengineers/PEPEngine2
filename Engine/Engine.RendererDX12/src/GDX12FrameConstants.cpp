@@ -2,7 +2,7 @@
 
 #include "Engine.RendererDX12/GDX12Device.h"
 
-GDX12FrameConstants::GDX12FrameConstants(std::shared_ptr<GDX12Device> device, UINT meshCount,
+GDX12FrameConstants::GDX12FrameConstants(GDX12Device* device, UINT meshCount,
     UINT materialCount, UINT lightCount)
     : _device(device)
     , FenceValue(0)

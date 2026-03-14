@@ -32,7 +32,7 @@ void GDX12ShaderCompiler::Initialize()
     _dxcUtils->CreateDefaultIncludeHandler(&_dxcIncludeHandler);
 }
 
-ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShader(std::shared_ptr<GDX12Device> device, const std::wstring& filename, const D3D_SHADER_MACRO* defines, const std::string& entrypoint, const std::string& shaderType)
+ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShader(GDX12Device* device, const std::wstring& filename, const D3D_SHADER_MACRO* defines, const std::string& entrypoint, const std::string& shaderType)
 {
     std::string target = GetShaderTargetForModel(device, shaderType);
 
@@ -55,7 +55,7 @@ void GDX12ShaderCompiler::Shutdown()
     _instance = nullptr;
 }
 
-std::string GDX12ShaderCompiler::GetShaderTargetForModel(std::shared_ptr<GDX12Device> device, const std::string& shaderType)
+std::string GDX12ShaderCompiler::GetShaderTargetForModel(GDX12Device* device, const std::string& shaderType)
 {
     D3D_SHADER_MODEL targetModel = device->GetDeviceFeatures().MaxShaderModel;
 

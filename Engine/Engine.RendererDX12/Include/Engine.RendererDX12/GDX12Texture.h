@@ -9,9 +9,9 @@ class GDX12CommandList;
 
 struct GDX12TextureDesc
 {
-	std::shared_ptr<GDX12DescriptorHeap> SRV_UAV_Heap = nullptr;
-	std::shared_ptr<GDX12DescriptorHeap> RTVHeap = nullptr;
-	std::shared_ptr<GDX12DescriptorHeap> DSVHeap = nullptr;
+	GDX12DescriptorHeap* SRV_UAV_Heap = nullptr;
+	GDX12DescriptorHeap* RTVHeap = nullptr;
+	GDX12DescriptorHeap* DSVHeap = nullptr;
 	UINT Width = 0;
 	UINT Height = 0;
 	DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
@@ -54,9 +54,6 @@ private:
 	void CreateResource();
 	void CreateViews();
 
-	D3D12_TEXTURE_BARRIER CreateBarrier(D3D12_BARRIER_SYNC syncAfter, 
-		D3D12_BARRIER_ACCESS accessAfter, D3D12_BARRIER_LAYOUT layoutAfter);
-
 	ComPtr<ID3D12Resource> _resource;
 	D3D12_RESOURCE_FLAGS _resourceFlags;
 	GDX12Device* _device;
@@ -66,8 +63,4 @@ private:
 	std::unique_ptr<GDX12Descriptor> _uav;
 	std::unique_ptr<GDX12Descriptor> _dsv;
 	D3D12_CLEAR_VALUE _clearValue;
-
-	D3D12_BARRIER_SYNC _currentSync;
-	D3D12_BARRIER_ACCESS _currentAccess;
-	D3D12_BARRIER_LAYOUT _currentLayout;
 };

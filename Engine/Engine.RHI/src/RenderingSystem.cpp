@@ -34,12 +34,12 @@ void RenderingSystem::Initialize(ComPtr<IDXGIAdapter4> primaryDeviceAdapter, Com
 	_windowWidth = width;
 	_windowHeight = height;
 
-	_primaryDevice = std::make_shared<GDX12Device>();
+	_primaryDevice = std::make_unique<GDX12Device>();
 	_primaryDevice->Initialize(primaryDeviceAdapter.Get());
 
 	if (secondaryDeviceAdapter)
 	{
-		_secondaryDevice = std::make_shared<GDX12Device>();
+		_secondaryDevice = std::make_unique<GDX12Device>();
 		_secondaryDevice->Initialize(secondaryDeviceAdapter.Get());
 
 		_dualGPUMode = true;
@@ -93,10 +93,10 @@ void RenderingSystem::Render()
 		D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 	cmdList->GetCommandList()->ResourceBarrier(1, &barrier);
 
-	cmdList->SetRenderTargets({ CurrentBackBuffer }, _depthStencil);
+	cmdList->SetRenderTargets({ CurrentBackBuffer }, _depthStencil.get());
 	cmdList->ClearRenderTargetView(CurrentBackBuffer);
 
-	cmdList->SetGraphicsRootSignature(_rootSignatures["Test"]);
+	cmdList->SetGraphicsRootSignature(_rootSignatures["Test"].get());
 	cmdList->SetGraphicsRootConstantBufferView(0, CurrentFrameConsts->MainCB->GetElementAddress(0));
 
 	cmdList->SetPipelineState(_PSOs["Test"]);
@@ -119,21 +119,21 @@ void RenderingSystem::Render()
 
 void RenderingSystem::BuildDescHeapsAndBackBuffer()
 {
-	_rtvHeap = std::make_shared<GDX12DescriptorHeap>(_primaryDevice.get(),
+	_rtvHeap = std::make_unique<GDX12DescriptorHeap>(_primaryDevice.get(),
 		D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1000, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
-	_srvuavHeap = std::make_shared<GDX12DescriptorHeap>(_primaryDevice.get(),
+	_srvuavHeap = std::make_unique<GDX12DescriptorHeap>(_primaryDevice.get(),
 		D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1000000, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
 
-	_dsvHeap = std::make_shared<GDX12DescriptorHeap>(_primaryDevice.get(),
+	_dsvHeap = std::make_unique<GDX12DescriptorHeap>(_primaryDevice.get(),
 		D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1000, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
-	_backBuffer = std::make_unique<GDX12BackBuffer>(_primaryDevice, _windowHandle,
-		DXGI_FORMAT_R8G8B8A8_UNORM, 2, _windowWidth, _windowHeight, _rtvHeap);
+	_backBuffer = std::make_unique<GDX12BackBuffer>(_primaryDevice.get(), _windowHandle,
+		DXGI_FORMAT_R8G8B8A8_UNORM, 2, _windowWidth, _windowHeight, _rtvHeap.get());
 
 	GDX12TextureDesc desc;
 	desc.CreateSRV = false;
-	desc.DSVHeap = _dsvHeap;
+	desc.DSVHeap = _dsvHeap.get();
 
 	desc.CreateDSV = true;
 	desc.Format = desc.DSVDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
@@ -144,7 +144,7 @@ void RenderingSystem::BuildDescHeapsAndBackBuffer()
 	desc.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
 	desc.DSVDesc.Texture2D.MipSlice = 0;
 
-	_depthStencil = std::make_shared<GDX12Texture>(desc);
+	_depthStencil = std::make_unique<GDX12Texture>(desc);
 }
 
 void RenderingSystem::BuildRootSignatures()
@@ -152,15 +152,15 @@ void RenderingSystem::BuildRootSignatures()
 	GDX12RootSignatureDesc desc;
 	desc.NumCBVSlots = 1;
 
-	_rootSignatures["Test"] = std::make_shared<GDX12RootSignature>(_primaryDevice, desc);
+	_rootSignatures["Test"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc);
 }
 
 void RenderingSystem::BuildShaders()
 {
 	auto& Compiler = GDX12ShaderCompiler::GetInstance();
 
-	_shaders["TestVS"] = Compiler.CompileShader(_primaryDevice, SHADERS_FOLDER "Test.hlsl", nullptr, "VS_FSQuad", "vs");
-	_shaders["TestPS"] = Compiler.CompileShader(_primaryDevice, SHADERS_FOLDER "Test.hlsl", nullptr, "PS", "ps");
+	_shaders["TestVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "VS_FSQuad", "vs");
+	_shaders["TestPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "PS", "ps");
 }
 
 void RenderingSystem::BuildPSOs()
@@ -199,7 +199,7 @@ void RenderingSystem::BuildFrameConstants()
 {
 	for (int i = 0; i < _numFrameConstants; i++)
 	{
-		_frameConstants[i] = std::make_unique<GDX12FrameConstants>(_primaryDevice, 1, 1, 1);
+		_frameConstants[i] = std::make_unique<GDX12FrameConstants>(_primaryDevice.get(), 1, 1, 1);
 	}
 }
 

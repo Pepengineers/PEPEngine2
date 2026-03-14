@@ -5,8 +5,8 @@
 #include <Engine.RendererDX12/GDX12Texture.h>
 #include <Engine.RendererDX12/GDX12DescriptorHeap.h>
 
-GDX12BackBuffer::GDX12BackBuffer(std::shared_ptr<GDX12Device> device, HWND hwnd,
-    DXGI_FORMAT format, UINT bufferCount, UINT width, UINT height, std::shared_ptr<GDX12DescriptorHeap> rtvHeap)
+GDX12BackBuffer::GDX12BackBuffer(GDX12Device* device, HWND hwnd,
+    DXGI_FORMAT format, UINT bufferCount, UINT width, UINT height, GDX12DescriptorHeap* rtvHeap)
     : _device(device)
     , _hwnd(hwnd)
     , _format(format)
@@ -32,14 +32,14 @@ GDX12BackBuffer::GDX12BackBuffer(std::shared_ptr<GDX12Device> device, HWND hwnd,
     swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
     swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
-    _swapChain = GDX12DeviceFactory::CreateSwapChain(_device.get(), swapChainDesc, _hwnd);
+    _swapChain = GDX12DeviceFactory::CreateSwapChain(_device, swapChainDesc, _hwnd);
 
     CreateBuffers();
 
     _screenViewport.TopLeftX = 0;
     _screenViewport.TopLeftY = 0;
-    _screenViewport.Width = _width;
-    _screenViewport.Height = _height;
+    _screenViewport.Width = static_cast<FLOAT>(_width);
+    _screenViewport.Height = static_cast<FLOAT>(_height);
     _screenViewport.MinDepth = 0.0f;
     _screenViewport.MaxDepth = 1.0f;
 
@@ -77,9 +77,7 @@ void GDX12BackBuffer::CreateBuffers()
 
         textureDesc.ExternalResource = backBuffer;
 
-        auto texture = std::make_shared<GDX12Texture>(textureDesc);
-
-        _buffers.push_back(texture);
+        _buffers.push_back(std::make_unique<GDX12Texture>(textureDesc));
     }
 }
 
@@ -106,8 +104,8 @@ void GDX12BackBuffer::Resize(UINT width, UINT height)
 
     _screenViewport.TopLeftX = 0;
     _screenViewport.TopLeftY = 0;
-    _screenViewport.Width = _width;
-    _screenViewport.Height = _height;
+    _screenViewport.Width = static_cast<FLOAT>(_width);
+    _screenViewport.Height = static_cast<FLOAT>(_height);
     _screenViewport.MinDepth = 0.0f;
     _screenViewport.MaxDepth = 1.0f;
 
@@ -145,12 +143,12 @@ UINT GDX12BackBuffer::GetCurrentBufferIndex()
     return _currentBufferIndex;
 }
 
-std::shared_ptr<GDX12Texture> GDX12BackBuffer::GetCurrentBuffer()
+GDX12Texture* GDX12BackBuffer::GetCurrentBuffer()
 {
-    return _buffers[_currentBufferIndex];
+    return _buffers[_currentBufferIndex].get();
 }
 
-std::shared_ptr<GDX12Texture> GDX12BackBuffer::GetBuffer(UINT index)
+GDX12Texture* GDX12BackBuffer::GetBuffer(UINT index)
 {
     if (index >= _buffers.size())
     {
@@ -158,7 +156,7 @@ std::shared_ptr<GDX12Texture> GDX12BackBuffer::GetBuffer(UINT index)
         return nullptr;
     }
 
-    return _buffers[index];
+    return _buffers[index].get();
 }
 
 ComPtr<IDXGISwapChain4> GDX12BackBuffer::GetSwapChain()
