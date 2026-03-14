@@ -15,7 +15,10 @@ public:
 
     bool IsInUseByGPU(UINT64 currentFence);
 
+    //Always updating
     std::unique_ptr<GDX12UploadBuffer<GDX12MainConstants>> MainCB;
+
+    //Dirty flag notify updating
     std::unique_ptr<GDX12UploadBuffer<GDX12MeshConstants>> MeshCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12MaterialConstants>> MaterialCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12LightConstants>> LightCB;

@@ -5,19 +5,30 @@ RenderingSystem::RenderingSystem() :
 	_dualGPUMode(false),
 	_windowHandle(nullptr),
 	_windowWidth(0),
-	_windowHeight(0)
+	_windowHeight(0),
+	_gameTimer(nullptr)
 {
 
 }
 
 RenderingSystem::~RenderingSystem()
 {
+	_primaryDevice->GetCommandQueue()->Flush();
+
 	GDX12ShaderCompiler::Shutdown();
 }
 
 void RenderingSystem::Initialize(ComPtr<IDXGIAdapter4> primaryDeviceAdapter, ComPtr<IDXGIAdapter4> secondaryDeviceAdapter, 
 	HWND windowHandle, GameTimer* gt, UINT width, UINT height)
 {
+#if defined(DEBUG) || defined(_DEBUG) 
+	// Enable the D3D12 debug layer.
+	ComPtr<ID3D12Debug> debugController;
+	ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)));
+	debugController->EnableDebugLayer();
+#endif
+
+
 	_windowHandle = windowHandle;
 	_gameTimer = gt;
 	_windowWidth = width;
@@ -34,6 +45,80 @@ void RenderingSystem::Initialize(ComPtr<IDXGIAdapter4> primaryDeviceAdapter, Com
 		_dualGPUMode = true;
 	}
 
+	BuildDescHeapsAndBackBuffer();
+	BuildRootSignatures();
+	BuildShaders();
+	BuildPSOs();
+	BuildFrameConstants();
+}
+
+void RenderingSystem::OnResize()
+{
+	_backBuffer->Resize(_windowWidth, _windowHeight);
+	_depthStencil->Resize(_windowWidth, _windowHeight);
+}
+
+void RenderingSystem::Update()
+{
+	_currFrameConstantsIndex = (_currFrameConstantsIndex + 1) % _numFrameConstants;
+
+	auto cmdQueue = _primaryDevice->GetCommandQueue();
+	auto& frameConsts = _frameConstants[_currFrameConstantsIndex];
+
+	if (frameConsts->FenceValue > cmdQueue->GetFence()->GetCompletedValue())
+	{
+		cmdQueue->WaitForFenceValue(frameConsts->FenceValue);
+	}
+
+	UpdateMainCB();
+}
+
+void RenderingSystem::Render()
+{
+	auto cmdQueue = _primaryDevice->GetCommandQueue();
+
+	cmdQueue->Flush();
+
+	auto cmdList = cmdQueue->GetCommandList();
+	auto CurrentBackBuffer = _backBuffer->GetCurrentBuffer();
+	auto& CurrentFrameConsts = _frameConstants[_currFrameConstantsIndex];
+
+	cmdList->SetViewport(_backBuffer->GetViewport());
+	cmdList->SetScissorRect(_backBuffer->GetScissorRect());
+
+	//TODO: Replace with enhanced barriers
+	// Add easy-to-use wrapper class
+	auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+		CurrentBackBuffer->GetD3DResource().Get(),
+		D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+	cmdList->GetCommandList()->ResourceBarrier(1, &barrier);
+
+	cmdList->SetRenderTargets({ CurrentBackBuffer }, _depthStencil);
+	cmdList->ClearRenderTargetView(CurrentBackBuffer);
+
+	cmdList->SetGraphicsRootSignature(_rootSignatures["Test"]);
+	cmdList->SetGraphicsRootConstantBufferView(0, CurrentFrameConsts->MainCB->GetElementAddress(0));
+
+	cmdList->SetPipelineState(_PSOs["Test"]);
+
+	cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	cmdList->DrawInstanced(6, 1, 0, 0);
+
+	//TODO: Replace with enhanced barriers
+	// Add easy-to-use wrapper class
+	auto counterBarrier = CD3DX12_RESOURCE_BARRIER::Transition(
+		CurrentBackBuffer->GetD3DResource().Get(),
+		D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+	cmdList->GetCommandList()->ResourceBarrier(1, &counterBarrier);
+
+	cmdQueue->ExecuteCommandList(cmdList);
+	CurrentFrameConsts->FenceValue = cmdQueue->GetFence()->GetCompletedValue();
+
+	_backBuffer->Present();
+}
+
+void RenderingSystem::BuildDescHeapsAndBackBuffer()
+{
 	_rtvHeap = std::make_shared<GDX12DescriptorHeap>(_primaryDevice.get(),
 		D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1000, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
@@ -49,7 +134,7 @@ void RenderingSystem::Initialize(ComPtr<IDXGIAdapter4> primaryDeviceAdapter, Com
 	GDX12TextureDesc desc;
 	desc.CreateSRV = false;
 	desc.DSVHeap = _dsvHeap;
-	
+
 	desc.CreateDSV = true;
 	desc.Format = desc.DSVDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
 	desc.Width = _windowWidth;
@@ -59,37 +144,76 @@ void RenderingSystem::Initialize(ComPtr<IDXGIAdapter4> primaryDeviceAdapter, Com
 	desc.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
 	desc.DSVDesc.Texture2D.MipSlice = 0;
 
-	_depthStencil = std::make_unique<GDX12Texture>(desc);
+	_depthStencil = std::make_shared<GDX12Texture>(desc);
 }
 
-void RenderingSystem::OnResize()
+void RenderingSystem::BuildRootSignatures()
 {
-	_backBuffer->Resize(_windowWidth, _windowHeight);
-	_depthStencil->Resize(_windowWidth, _windowHeight);
+	GDX12RootSignatureDesc desc;
+	desc.NumCBVSlots = 1;
+
+	_rootSignatures["Test"] = std::make_shared<GDX12RootSignature>(_primaryDevice, desc);
 }
 
-void RenderingSystem::Update()
+void RenderingSystem::BuildShaders()
 {
+	auto& Compiler = GDX12ShaderCompiler::GetInstance();
 
+	_shaders["TestVS"] = Compiler.CompileShader(_primaryDevice, SHADERS_FOLDER "Test.hlsl", nullptr, "VS_FSQuad", "vs");
+	_shaders["TestPS"] = Compiler.CompileShader(_primaryDevice, SHADERS_FOLDER "Test.hlsl", nullptr, "PS", "ps");
 }
 
-void RenderingSystem::Render()
+void RenderingSystem::BuildPSOs()
 {
-	auto cmdQueue = _primaryDevice->GetCommandQueue();
+	D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
 
-	cmdQueue->Flush();
+	desc.InputLayout = { nullptr, 0 };
+	desc.pRootSignature = _rootSignatures["Test"]->GetRootSignature().Get();
+	desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+	desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+	desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+	desc.DepthStencilState.DepthEnable = false;
+	desc.DepthStencilState.StencilEnable = false;
+	desc.SampleMask = UINT_MAX;
+	desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	desc.NumRenderTargets = 1;
+	desc.RTVFormats[0] = _backBuffer->GetFormat();
+	desc.SampleDesc.Count = 1;
+	desc.SampleDesc.Quality = 0;
+	desc.DSVFormat = _depthStencil->GetFormat();
 
-	auto cmdList = cmdQueue->GetCommandList();
-	auto backBuffer = _backBuffer->GetCurrentBuffer();
+	desc.VS =
+	{
+		reinterpret_cast<BYTE*>(_shaders["TestVS"]->GetBufferPointer()),
+		_shaders["TestVS"]->GetBufferSize()
+	};
+	desc.PS =
+	{
+		reinterpret_cast<BYTE*>(_shaders["TestPS"]->GetBufferPointer()),
+		_shaders["TestPS"]->GetBufferSize()
+	};
+	ThrowIfFailed(_primaryDevice->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_PSOs["Test"])));
+}
 
-	float clearColor[] = { 0.5 + 0.5 * cos(_gameTimer->TotalTime()), 0.5 + 0.5 * sin(_gameTimer->TotalTime()),
-		0.5 + 0.5 * cos(_gameTimer->TotalTime()), 1.0f };
+void RenderingSystem::BuildFrameConstants()
+{
+	for (int i = 0; i < _numFrameConstants; i++)
+	{
+		_frameConstants[i] = std::make_unique<GDX12FrameConstants>(_primaryDevice, 1, 1, 1);
+	}
+}
 
-	cmdList->GetCommandList()->ClearRenderTargetView(backBuffer->GetRTV()->CPUHandle, clearColor, 0, nullptr);
+void RenderingSystem::UpdateMainCB()
+{
+	auto& frameRes = _frameConstants[_currFrameConstantsIndex];
 
-	cmdQueue->ExecuteCommandList(cmdList);
+	GDX12MainConstants mainConstants;
 
-	_backBuffer->Present();
+	mainConstants.RenderTargetSize = { static_cast<float>(_windowWidth), static_cast<float>(_windowHeight) };
+	mainConstants.TotalTime = _gameTimer->TotalTime();
+	mainConstants.DeltaTime = _gameTimer->DeltaTime();
+
+	frameRes->MainCB->CopyData(0, mainConstants);
 }
 
 void RenderingSystem::SetWindowDimensions(UINT width, UINT height)

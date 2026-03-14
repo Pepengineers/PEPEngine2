@@ -102,6 +102,8 @@ void GDX12CommandQueue::WaitForFenceValue(uint64_t fenceValue)
 
 void GDX12CommandQueue::Flush()
 {
+    FenceValue++;
+    _commandQueue->Signal(_fence.Get(), FenceValue);
     if (_lastDispatchedList) { WaitForFenceValue(_lastDispatchedList->FenceValue); }
 }
 

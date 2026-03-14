@@ -17,6 +17,7 @@ public:
 
     // Get heap properties
     D3D12_DESCRIPTOR_HEAP_TYPE GetType();
+    D3D12_DESCRIPTOR_HEAP_FLAGS GetFlags();
     UINT GetNumDescriptors();
     
     //returns index of the first non-taken slot in the heap
@@ -30,6 +31,7 @@ public:
 private:
     GDX12Device* _device;
     ComPtr<ID3D12DescriptorHeap> _heap;
+    D3D12_DESCRIPTOR_HEAP_FLAGS _flags;
 
     D3D12_DESCRIPTOR_HEAP_TYPE _type;
     UINT _numDescriptors;

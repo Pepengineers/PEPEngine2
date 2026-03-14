@@ -49,7 +49,7 @@ void GDX12Descriptor::InitAsUAV(ID3D12Resource* resource, D3D12_UNORDERED_ACCESS
     {
         HeapIndex = _heap->GetAvalibleIndex();
         CPUHandle = _heap->GetCPUHandle(HeapIndex);
-        GPUHandle = _heap->GetGPUHandle(HeapIndex);
+        if (_heap->GetFlags() & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) { GPUHandle = _heap->GetGPUHandle(HeapIndex); }
 
         _heap->_device->GetDevice()->CreateUnorderedAccessView(resource, nullptr, uavDesc, CPUHandle);
     }
@@ -64,7 +64,7 @@ void GDX12Descriptor::InitAsDSV(ID3D12Resource* resource, D3D12_DEPTH_STENCIL_VI
     {
         HeapIndex = _heap->GetAvalibleIndex();
         CPUHandle = _heap->GetCPUHandle(HeapIndex);
-        GPUHandle = _heap->GetGPUHandle(HeapIndex);
+        if (_heap->GetFlags() & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) { GPUHandle = _heap->GetGPUHandle(HeapIndex); }
 
         _heap->_device->GetDevice()->CreateDepthStencilView(resource, dsvDesc, CPUHandle);
     }
@@ -79,8 +79,8 @@ void GDX12Descriptor::InitAsRTV(ID3D12Resource* resource, D3D12_RENDER_TARGET_VI
     {
         HeapIndex = _heap->GetAvalibleIndex();
         CPUHandle = _heap->GetCPUHandle(HeapIndex);
-        GPUHandle = _heap->GetGPUHandle(HeapIndex);
-
+        if (_heap->GetFlags() & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) { GPUHandle = _heap->GetGPUHandle(HeapIndex); }
+        
         _heap->_device->GetDevice()->CreateRenderTargetView(resource, rtvDesc, CPUHandle);
     }
     else { OutputDebugStringA("ERROR: Cannot create RTV in a non-DSV heap\n"); }

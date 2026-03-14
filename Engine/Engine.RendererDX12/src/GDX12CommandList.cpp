@@ -9,7 +9,11 @@
 
 #include <pix/pix3.h>
 
-GDX12CommandList::GDX12CommandList(GDX12Device* device) : FenceValue(0)
+GDX12CommandList::GDX12CommandList(GDX12Device* device) : 
+	FenceValue(0),
+	_currentTopology(D3D_PRIMITIVE_TOPOLOGY_UNDEFINED),
+	_currentScissorRect({}),
+	_currentViewport({})
 {
 	ThrowIfFailed(device->GetDevice()->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&_commandAllocator)));
 
@@ -37,11 +41,18 @@ void GDX12CommandList::Reset()
 {
 	_commandAllocator->Reset();
 	_commandList->Reset(_commandAllocator.Get(), nullptr);
+
+	_currentRootSignature = nullptr;
+	_currentPSO = nullptr;
+	_currentTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
+	for (auto& cachedDescriptorHeap : _currentDescriptorHeaps) cachedDescriptorHeap = nullptr;
+	_currentViewport = {};
+	_currentScissorRect = {};
 }
 
 void GDX12CommandList::SetPipelineState(ComPtr<ID3D12PipelineState> pso)
 {
-	if (pso == _currentPSO) return;
+	if (pso == _currentPSO) { return; }
 	_commandList->SetPipelineState(pso.Get());
 	_currentPSO = pso;
 }
@@ -53,21 +64,21 @@ void GDX12CommandList::SetPipelineState1(ComPtr<ID3D12StateObject> stateObject)
 
 void GDX12CommandList::SetGraphicsRootSignature(std::shared_ptr<GDX12RootSignature> rootSignature)
 {
-	if (_currentRootSignature == rootSignature) return;
+	if (_currentRootSignature == rootSignature) { return; }
 	_currentRootSignature = rootSignature;
 	_commandList->SetGraphicsRootSignature(rootSignature->GetRootSignature().Get());
 }
 
 void GDX12CommandList::SetComputeRootSignature(std::shared_ptr<GDX12RootSignature> rootSignature)
 {
-	if (_currentRootSignature == rootSignature) return;
+	if (_currentRootSignature == rootSignature) { return; }
 	_currentRootSignature = rootSignature;
 	_commandList->SetComputeRootSignature(rootSignature->GetRootSignature().Get());
 }
 
 void GDX12CommandList::SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY topology)
 {
-	if (_currentTopology == topology) return;
+	if (_currentTopology == topology) { return; }
 	_currentTopology = topology;
 	_commandList->IASetPrimitiveTopology(topology);
 }
@@ -90,11 +101,24 @@ void GDX12CommandList::SetDescriptorHeaps(std::initializer_list<std::shared_ptr<
 
 void GDX12CommandList::SetViewport(const D3D12_VIEWPORT& viewport)
 {
+	if (_currentViewport == viewport) return;
+
+	_currentViewport = viewport;
 	_commandList->RSSetViewports(1, &viewport);
 }
 
 void GDX12CommandList::SetScissorRect(const D3D12_RECT& scissorRect)
 {
+	if (_currentScissorRect.left == scissorRect.left &&
+		_currentScissorRect.top == scissorRect.top &&
+		_currentScissorRect.right == scissorRect.right &&
+		_currentScissorRect.bottom == scissorRect.bottom)
+	{
+		return;
+	}
+
+	_currentScissorRect = scissorRect;
+
 	_commandList->RSSetScissorRects(1, &scissorRect);
 }
 

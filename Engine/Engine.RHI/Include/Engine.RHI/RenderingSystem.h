@@ -33,8 +33,16 @@ public:
 	void Render();
 
 private:
+	void BuildDescHeapsAndBackBuffer();
+	void BuildRootSignatures();
+	void BuildShaders();
+	void BuildPSOs();
+	void BuildFrameConstants();
+
+	void UpdateMainCB();
+
 	HWND _windowHandle;
-	GameTimer* _gameTimer = nullptr;
+	GameTimer* _gameTimer;
 
 	std::shared_ptr<GDX12Device> _primaryDevice;
 	std::shared_ptr<GDX12Device> _secondaryDevice;
@@ -47,12 +55,12 @@ private:
 
 	// These two resources are made on _primaryDevice only
 	std::unique_ptr<GDX12BackBuffer> _backBuffer;
-	std::unique_ptr<GDX12Texture> _depthStencil;
+	std::shared_ptr<GDX12Texture> _depthStencil;
 
 	static constexpr UINT _numFrameConstants = 3;
 
 	// All of class members below should probably be put into DeviceResources class, and made for each device
-	// Since all of these resources are currently made for _primaryDevice only
+	// Since all of these resources are currently existing on _primaryDevice only
 	std::array<std::unique_ptr<GDX12FrameConstants>, _numFrameConstants> _frameConstants;
 	UINT _currFrameConstantsIndex;
 
@@ -63,5 +71,5 @@ private:
 
 	std::unordered_map<std::string, ComPtr<ID3DBlob>> _shaders;
 	std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> _PSOs;
-	std::unordered_map<std::string, std::unique_ptr<GDX12RootSignature>> _rootSignatures;
+	std::unordered_map<std::string, std::shared_ptr<GDX12RootSignature>> _rootSignatures;
 };

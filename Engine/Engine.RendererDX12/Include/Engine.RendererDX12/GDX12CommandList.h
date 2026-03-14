@@ -83,4 +83,6 @@ private:
 	ComPtr<ID3D12PipelineState> _currentPSO;
 	D3D_PRIMITIVE_TOPOLOGY _currentTopology;
 	std::vector<ID3D12DescriptorHeap*> _currentDescriptorHeaps;
+	D3D12_VIEWPORT _currentViewport;
+	D3D12_RECT _currentScissorRect;
 };

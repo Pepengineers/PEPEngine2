@@ -3,14 +3,18 @@
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
+#include "Engine.RendererDX12/GDX12CommandList.h"
 
 GDX12Texture::GDX12Texture(GDX12TextureDesc desc) :
-	_desc(desc),
-	_srv(nullptr),
-	_rtv(nullptr),
-	_uav(nullptr),
-	_dsv(nullptr),
-    _resourceFlags(D3D12_RESOURCE_FLAG_NONE)
+    _desc(desc),
+    _srv(nullptr),
+    _rtv(nullptr),
+    _uav(nullptr),
+    _dsv(nullptr),
+    _resourceFlags(D3D12_RESOURCE_FLAG_NONE),
+    _currentLayout(D3D12_BARRIER_LAYOUT_COMMON),
+    _currentAccess(D3D12_BARRIER_ACCESS_COMMON),
+    _currentSync(D3D12_BARRIER_SYNC_NONE)
 {
     if (_desc.CreateRTV && _desc.CreateDSV) { OutputDebugStringA("ERROR: It is impossible to create RTV and DSV on the same texture."); }
     if (_desc.CreateUAV && _desc.CreateDSV) { OutputDebugStringA("ERROR: It is impossible to create DSV and UAV on the same texture."); }
@@ -85,6 +89,11 @@ ComPtr<ID3D12Resource> GDX12Texture::GetD3DResource()
     return _resource;
 }
 
+DXGI_FORMAT GDX12Texture::GetFormat()
+{
+    return _desc.Format;
+}
+
 void GDX12Texture::CreateResource()
 {
     D3D12_RESOURCE_DESC resourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(
@@ -142,6 +151,39 @@ void GDX12Texture::CreateViews()
         _dsv = std::make_unique<GDX12Descriptor>();
         _dsv->InitAsDSV(_resource.Get(), &_desc.DSVDesc, _desc.DSVHeap);
     }
+}
+
+D3D12_TEXTURE_BARRIER GDX12Texture::CreateBarrier(D3D12_BARRIER_SYNC syncAfter, D3D12_BARRIER_ACCESS accessAfter, D3D12_BARRIER_LAYOUT layoutAfter)
+{
+    D3D12_TEXTURE_BARRIER barrier = {};
+
+    if (_currentSync == D3D12_BARRIER_SYNC_NONE && _currentAccess == D3D12_BARRIER_ACCESS_COMMON)
+    {
+        barrier.SyncBefore = D3D12_BARRIER_SYNC_ALL;
+    }
+    else
+    {
+        barrier.SyncBefore = _currentSync;
+    }
+
+    barrier.SyncAfter = syncAfter;
+    barrier.AccessBefore = _currentAccess;
+    barrier.AccessAfter = accessAfter;
+    barrier.LayoutBefore = _currentLayout;
+    barrier.LayoutAfter = layoutAfter;
+    barrier.pResource = _resource.Get();
+
+    // All subresources
+    barrier.Subresources.IndexOrFirstMipLevel = 0;
+    barrier.Subresources.NumMipLevels = 1;
+    barrier.Subresources.FirstArraySlice = 0;
+    barrier.Subresources.NumArraySlices = 1;
+    barrier.Subresources.FirstPlane = 0;
+    barrier.Subresources.NumPlanes = 1;
+
+    barrier.Flags = D3D12_TEXTURE_BARRIER_FLAG_NONE;
+
+    return barrier;
 }
 
 GDX12Texture::~GDX12Texture()

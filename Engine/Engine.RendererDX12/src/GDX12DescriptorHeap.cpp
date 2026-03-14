@@ -6,6 +6,7 @@ GDX12DescriptorHeap::GDX12DescriptorHeap(GDX12Device* device, D3D12_DESCRIPTOR_H
     , _type(type)
     , _numDescriptors(numDescriptors)
     , _heapHeadIndex(0)
+    , _flags(flags)
 {
     D3D12_DESCRIPTOR_HEAP_DESC desc = {};
     desc.Type = type;
@@ -31,6 +32,11 @@ ComPtr<ID3D12DescriptorHeap> GDX12DescriptorHeap::GetHeap()
 D3D12_DESCRIPTOR_HEAP_TYPE GDX12DescriptorHeap::GetType()
 {
     return _type;
+}
+
+D3D12_DESCRIPTOR_HEAP_FLAGS GDX12DescriptorHeap::GetFlags()
+{
+    return _flags;
 }
 
 UINT GDX12DescriptorHeap::GetNumDescriptors()
