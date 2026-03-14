@@ -20,9 +20,11 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RHI\EngineRHI.h" />
+    <ClInclude Include="Include\Engine.RHI\RenderingSystem.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\EngineRHI.cpp" />
+    <ClCompile Include="src\RenderingSystem.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
@@ -152,4 +154,3 @@
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
-

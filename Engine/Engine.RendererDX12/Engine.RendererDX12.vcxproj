@@ -49,7 +49,6 @@
     <ClCompile Include="src\GDX12RootSignature.cpp" />
     <ClCompile Include="src\GDX12ShaderCompiler.cpp" />
     <ClCompile Include="src\GDX12Texture.cpp" />
-    <ClCompile Include="src\GDX12UploadBuffer.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>

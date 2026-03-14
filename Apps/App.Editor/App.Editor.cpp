@@ -19,9 +19,6 @@ private:
 	virtual void OnMouseUp(WPARAM btnState, int x, int y) override;
 	virtual void OnMouseMove(WPARAM btnState, int x, int y) override;
 
-	std::unique_ptr<GDX12BackBuffer> testBackBuffer;
-	std::shared_ptr<GDX12Device> defaultDevice;
-	std::shared_ptr<GDX12DescriptorHeap> RTVHeap;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, int showCmd)
@@ -68,16 +65,6 @@ bool EditorApp::Initialize()
 		return false;
 	}
 
-	defaultDevice = std::make_shared<GDX12Device>();
-	defaultDevice->Initialize(GDX12DeviceFactory::GetDefaultAdapter().Get());
-
-	RTVHeap = std::make_shared<GDX12DescriptorHeap>(defaultDevice.get(),
-		D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 20, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
-	
-	testBackBuffer = std::make_unique<GDX12BackBuffer>(defaultDevice, MainWndHandle, 
-		DXGI_FORMAT_R8G8B8A8_UNORM, 2,
-		WindowWidth, WindowHeight, RTVHeap);
-
 	return true;
 }
 
@@ -85,37 +72,18 @@ void EditorApp::OnResize()
 {
 	AppBase::OnResize();
 
-	//WinApi unintentionally calls OnResize() once during window creation.
-	//It happens during AppBase::Initialize(), 
-	//so none of the systems are currently initialized.
-	//This effectively ignores the first OnResize() call.
-	if (!testBackBuffer) return;
-
-	testBackBuffer->Resize(WindowWidth, WindowHeight);
 }
 
 void EditorApp::Update(const GameTimer& gameTimer)
 {
-	UNREFERENCED_PARAMETER(gameTimer);
+	AppBase::Update(gameTimer);
+
 }
 
 void EditorApp::Render(const GameTimer& gameTimer)
 {
-	auto cmdQueue = defaultDevice->GetCommandQueue();
+	AppBase::Render(gameTimer);
 
-	cmdQueue->Flush();
-
-	auto cmdList = cmdQueue->GetCommandList();
-	auto backBuffer = testBackBuffer->GetCurrentBuffer();
-
-	float clearColor[] = { 0.5 + 0.5 * cos(gameTimer.TotalTime()), 0.5 + 0.5 * sin(gameTimer.TotalTime()), 
-		0.5 + 0.5 * cos(gameTimer.TotalTime()), 1.0f };
-
-	cmdList->GetCommandList()->ClearRenderTargetView(backBuffer->GetRTV()->CPUHandle, clearColor, 0, nullptr);
-
-	cmdQueue->ExecuteCommandList(cmdList);
-
-	testBackBuffer->Present();
 }
 
 void EditorApp::OnMouseDown(WPARAM btnState, int x, int y)

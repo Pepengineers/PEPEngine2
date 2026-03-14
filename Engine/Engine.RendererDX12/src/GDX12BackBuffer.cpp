@@ -35,6 +35,15 @@ GDX12BackBuffer::GDX12BackBuffer(std::shared_ptr<GDX12Device> device, HWND hwnd,
     _swapChain = GDX12DeviceFactory::CreateSwapChain(_device.get(), swapChainDesc, _hwnd);
 
     CreateBuffers();
+
+    _screenViewport.TopLeftX = 0;
+    _screenViewport.TopLeftY = 0;
+    _screenViewport.Width = _width;
+    _screenViewport.Height = _height;
+    _screenViewport.MinDepth = 0.0f;
+    _screenViewport.MaxDepth = 1.0f;
+
+    _screenScissorRect = { 0, 0, static_cast<int>(_width), static_cast<int>(_height) };
 }
 
 GDX12BackBuffer::~GDX12BackBuffer()
@@ -94,12 +103,31 @@ void GDX12BackBuffer::Resize(UINT width, UINT height)
 
     CreateBuffers();
     _currentBufferIndex = _swapChain->GetCurrentBackBufferIndex();
+
+    _screenViewport.TopLeftX = 0;
+    _screenViewport.TopLeftY = 0;
+    _screenViewport.Width = _width;
+    _screenViewport.Height = _height;
+    _screenViewport.MinDepth = 0.0f;
+    _screenViewport.MaxDepth = 1.0f;
+
+    _screenScissorRect = { 0, 0, static_cast<int>(_width), static_cast<int>(_height) };
 }
 
 void GDX12BackBuffer::Present()
 {
     _swapChain->Present(0u, DXGI_PRESENT_ALLOW_TEARING);
     _currentBufferIndex = (_currentBufferIndex + 1) % _bufferCount;
+}
+
+D3D12_VIEWPORT GDX12BackBuffer::GetViewport()
+{
+    return _screenViewport;
+}
+
+D3D12_RECT GDX12BackBuffer::GetScissorRect()
+{
+    return _screenScissorRect;
 }
 
 DXGI_FORMAT GDX12BackBuffer::GetFormat()

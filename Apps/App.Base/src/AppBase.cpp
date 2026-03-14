@@ -90,13 +90,32 @@ bool AppBase::Initialize()
 		return false;
 	}
 
-	OnResize();
+	RenderSystem = std::make_unique<RenderingSystem>();
+	RenderSystem->Initialize(GDX12DeviceFactory::GetDefaultAdapter().Get(), nullptr,
+		MainWndHandle, &Timer, WindowWidth, WindowHeight);
 
 	return true;
 }
 
+void AppBase::Update(const GameTimer& gameTimer)
+{
+	RenderSystem->Update();
+}
+
+void AppBase::Render(const GameTimer& gameTimer)
+{
+	RenderSystem->Render();
+}
+
 void AppBase::OnResize()
 {
+	//WinApi unintentionally calls OnResize() once during window creation.
+	//It happens during AppBase::Initialize(), 
+	//so none of the systems are currently initialized.
+	//This effectively ignores the first OnResize() call.
+	if (!RenderSystem) return;
+
+	RenderSystem->OnResize();
 }
 
 LRESULT AppBase::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -124,6 +143,7 @@ LRESULT AppBase::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		// Save the new client area dimensions.
 		WindowWidth = LOWORD(lParam);
 		WindowHeight = HIWORD(lParam);
+		if (RenderSystem) RenderSystem->SetWindowDimensions(WindowWidth, WindowHeight);
 		if (true) // TODO if(DEVICE) HERE
 		{
 			if (wParam == SIZE_MINIMIZED)

@@ -98,9 +98,6 @@
     <ClCompile Include="src\GDX12BackBuffer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\GDX12UploadBuffer.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\GDX12FrameConstants.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

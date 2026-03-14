@@ -50,6 +50,7 @@ GDX12ShaderCompiler::GDX12ShaderCompiler()
 
 void GDX12ShaderCompiler::Shutdown()
 {
+    if (_instance == nullptr) return;
     delete _instance;
     _instance = nullptr;
 }

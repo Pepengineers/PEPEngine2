@@ -23,6 +23,8 @@ public:
 
     std::shared_ptr<GDX12Texture> GetCurrentBuffer();
     std::shared_ptr<GDX12Texture> GetBuffer(UINT index);
+    D3D12_VIEWPORT GetViewport();
+    D3D12_RECT GetScissorRect();
 
     ComPtr<IDXGISwapChain4> GetSwapChain();
 
@@ -43,4 +45,7 @@ private:
     UINT _height;
 
     std::vector<std::shared_ptr<GDX12Texture>> _buffers;
+
+    D3D12_VIEWPORT _screenViewport;
+    D3D12_RECT _screenScissorRect;
 };
