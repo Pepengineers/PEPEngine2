@@ -193,6 +193,7 @@ void RenderingSystem::BuildFrameConstants()
 {
 	for (int i = 0; i < _numFrameConstants; i++)
 	{
+		//TODO: fix zero element upload buffer crash
 		_frameConstants[i] = std::make_unique<GDX12FrameConstants>(_primaryDevice.get(), 1, 1, 1);
 	}
 }
