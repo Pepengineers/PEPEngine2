@@ -48,7 +48,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Texture.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12BackBuffer.h">
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12SwapChain.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12UploadBuffer.h">
@@ -98,7 +98,7 @@
     <ClCompile Include="src\GDX12Texture.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\GDX12BackBuffer.cpp">
+    <ClCompile Include="src\GDX12SwapChain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\GDX12FrameConstants.cpp">

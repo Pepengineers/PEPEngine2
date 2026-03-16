@@ -8,7 +8,7 @@ template<typename T>
 class GDX12UploadBuffer
 {
 public:
-	GDX12UploadBuffer(GDX12Device* device, UINT elementCount, bool isConstantBuffer = true);
+    inline GDX12UploadBuffer(GDX12Device* device, UINT elementCount, bool useConstantBufferSizeAlignment = true);
 	~GDX12UploadBuffer();
 
 	ComPtr<ID3D12Resource> GetResource();
@@ -32,21 +32,21 @@ private:
     UINT _elementCount;
     UINT _elementByteSize;
     UINT _totalBufferSize;
-    bool _isConstantBuffer;
+    bool _useConstantBufferSizeAlignment;
 };
 
 //Can't move template class definitions into .cpp cuz it'll throw linking errors
 
 template<typename T>
-GDX12UploadBuffer<T>::GDX12UploadBuffer(GDX12Device* device, UINT elementCount, bool isConstantBuffer)
+inline GDX12UploadBuffer<T>::GDX12UploadBuffer(GDX12Device* device, UINT elementCount, bool useConstantBufferSizeAlignment)
     : _device(device)
     , _elementCount(elementCount)
-    , _isConstantBuffer(isConstantBuffer)
+    , _useConstantBufferSizeAlignment(useConstantBufferSizeAlignment)
 {
     _elementByteSize = sizeof(T);
 
     // constant buffer size should be a multiple of 255
-    if (_isConstantBuffer) { _elementByteSize = (_elementByteSize + 255) & ~255; }
+    if (_useConstantBufferSizeAlignment) { _elementByteSize = (_elementByteSize + 255) & ~255; }
 
     _totalBufferSize = _elementByteSize * _elementCount;
 

@@ -8,29 +8,29 @@ namespace PEPEngine::Utils
     class LockThreadQueue final
     {
     public:
-        LockThreadQueue();
-        LockThreadQueue(const LockThreadQueue& copy);
+        inline LockThreadQueue();
+        inline LockThreadQueue(const LockThreadQueue& copy);
 
         /**
              * Push a value into the back of the queue.
              */
-        void Push(T value);
+        inline void Push(T value);
 
         /**
              * Try to pop a value from the front of the queue.
              * @returns false if the queue is empty.
              */
-        bool TryPop(T& value);
+        inline bool TryPop(T& value);
 
         /**
              * Check to see if there are any items in the queue.
              */
-        bool Empty() const;
+        inline bool Empty() const;
 
         /**
              * Retrieve the number of items in the queue.
              */
-        size_t Size() const;
+        inline size_t Size() const;
 
     private:
         std::queue<T> m_Queue;
@@ -38,26 +38,26 @@ namespace PEPEngine::Utils
     };
 
     template <typename T>
-    LockThreadQueue<T>::LockThreadQueue()
+    inline LockThreadQueue<T>::LockThreadQueue()
     {
     }
 
     template <typename T>
-    LockThreadQueue<T>::LockThreadQueue(const LockThreadQueue<T>& copy)
+    inline LockThreadQueue<T>::LockThreadQueue(const LockThreadQueue<T>& copy)
     {
         std::lock_guard<std::mutex> lock(copy.m_Mutex);
         m_Queue = copy.m_Queue;
     }
 
     template <typename T>
-    void LockThreadQueue<T>::Push(T value)
+    inline void LockThreadQueue<T>::Push(T value)
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
         m_Queue.emplace(value);
     }
 
     template <typename T>
-    bool LockThreadQueue<T>::TryPop(T& value)
+    inline bool LockThreadQueue<T>::TryPop(T& value)
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
         if (m_Queue.empty())
@@ -70,14 +70,14 @@ namespace PEPEngine::Utils
     }
 
     template <typename T>
-    bool LockThreadQueue<T>::Empty() const
+    inline bool LockThreadQueue<T>::Empty() const
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
         return m_Queue.empty();
     }
 
     template <typename T>
-    size_t LockThreadQueue<T>::Size() const
+    inline size_t LockThreadQueue<T>::Size() const
     {
         std::lock_guard<std::mutex> lock(m_Mutex);
         return m_Queue.size();

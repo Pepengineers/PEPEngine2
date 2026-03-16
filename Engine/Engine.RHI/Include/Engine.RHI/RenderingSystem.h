@@ -13,7 +13,7 @@
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12RootSignature.h"
-#include "Engine.RendererDX12/GDX12BackBuffer.h"
+#include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
@@ -55,7 +55,7 @@ private:
 	std::unordered_map<std::string, std::vector<D3D12_INPUT_ELEMENT_DESC>> _inputLayouts;
 
 	// These two resources are made on _primaryDevice only
-	std::unique_ptr<GDX12BackBuffer> _backBuffer;
+	std::unique_ptr<GDX12SwapChain> _backBuffer;
 	std::unique_ptr<GDX12Texture> _depthStencil;
 
 	static constexpr UINT _numFrameConstants = 3;

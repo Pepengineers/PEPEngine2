@@ -1,11 +1,11 @@
-#include <Engine.RendererDX12/GDX12BackBuffer.h>
+#include <Engine.RendererDX12/GDX12SwapChain.h>
 
 #include <Engine.RendererDX12/GDX12DeviceFactory.h>
 #include <Engine.RendererDX12/GDX12Device.h>
 #include <Engine.RendererDX12/GDX12Texture.h>
 #include <Engine.RendererDX12/GDX12DescriptorHeap.h>
 
-GDX12BackBuffer::GDX12BackBuffer(GDX12Device* device, HWND hwnd,
+GDX12SwapChain::GDX12SwapChain(GDX12Device* device, HWND hwnd,
     DXGI_FORMAT format, UINT bufferCount, UINT width, UINT height, GDX12DescriptorHeap* rtvHeap)
     : _device(device)
     , _hwnd(hwnd)
@@ -46,12 +46,12 @@ GDX12BackBuffer::GDX12BackBuffer(GDX12Device* device, HWND hwnd,
     _screenScissorRect = { 0, 0, static_cast<int>(_width), static_cast<int>(_height) };
 }
 
-GDX12BackBuffer::~GDX12BackBuffer()
+GDX12SwapChain::~GDX12SwapChain()
 {
     Reset();
 }
 
-void GDX12BackBuffer::CreateBuffers()
+void GDX12SwapChain::CreateBuffers()
 {
     _buffers.clear();
     _buffers.reserve(_bufferCount);
@@ -81,7 +81,7 @@ void GDX12BackBuffer::CreateBuffers()
     }
 }
 
-void GDX12BackBuffer::Resize(UINT width, UINT height)
+void GDX12SwapChain::Resize(UINT width, UINT height)
 {
     if (_width == width && _height == height) { return; }
 
@@ -110,43 +110,43 @@ void GDX12BackBuffer::Resize(UINT width, UINT height)
     _screenScissorRect = { 0, 0, static_cast<int>(_width), static_cast<int>(_height) };
 }
 
-void GDX12BackBuffer::Present()
+void GDX12SwapChain::Present()
 {
     _swapChain->Present(0u, DXGI_PRESENT_ALLOW_TEARING);
     _currentBufferIndex = (_currentBufferIndex + 1) % _bufferCount;
 }
 
-D3D12_VIEWPORT GDX12BackBuffer::GetViewport()
+D3D12_VIEWPORT GDX12SwapChain::GetViewport()
 {
     return _screenViewport;
 }
 
-D3D12_RECT GDX12BackBuffer::GetScissorRect()
+D3D12_RECT GDX12SwapChain::GetScissorRect()
 {
     return _screenScissorRect;
 }
 
-DXGI_FORMAT GDX12BackBuffer::GetFormat()
+DXGI_FORMAT GDX12SwapChain::GetFormat()
 {
     return _format;
 }
 
-UINT GDX12BackBuffer::GetBufferCount()
+UINT GDX12SwapChain::GetBufferCount()
 {
     return _bufferCount;
 }
 
-UINT GDX12BackBuffer::GetCurrentBufferIndex()
+UINT GDX12SwapChain::GetCurrentBufferIndex()
 {
     return _currentBufferIndex;
 }
 
-GDX12Texture* GDX12BackBuffer::GetCurrentBuffer()
+GDX12Texture* GDX12SwapChain::GetCurrentBuffer()
 {
     return _buffers[_currentBufferIndex].get();
 }
 
-GDX12Texture* GDX12BackBuffer::GetBuffer(UINT index)
+GDX12Texture* GDX12SwapChain::GetBuffer(UINT index)
 {
     if (index >= _buffers.size())
     {
@@ -157,12 +157,12 @@ GDX12Texture* GDX12BackBuffer::GetBuffer(UINT index)
     return _buffers[index].get();
 }
 
-ComPtr<IDXGISwapChain4> GDX12BackBuffer::GetSwapChain()
+ComPtr<IDXGISwapChain4> GDX12SwapChain::GetSwapChain()
 {
     return _swapChain;
 }
 
-void GDX12BackBuffer::Reset()
+void GDX12SwapChain::Reset()
 {
     _buffers.clear();
     _swapChain.Reset();

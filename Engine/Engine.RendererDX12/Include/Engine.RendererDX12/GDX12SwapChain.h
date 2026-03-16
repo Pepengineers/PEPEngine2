@@ -6,13 +6,13 @@ class GDX12Device;
 class GDX12Texture;
 class GDX12DescriptorHeap;
 
-class GDX12BackBuffer
+class GDX12SwapChain
 {
 public:
-    GDX12BackBuffer(GDX12Device* device, HWND hwnd,
+    GDX12SwapChain(GDX12Device* device, HWND hwnd,
         DXGI_FORMAT format, UINT bufferCount, UINT width, UINT height, 
         GDX12DescriptorHeap* rtvHeap);
-    ~GDX12BackBuffer();
+    ~GDX12SwapChain();
 
     void Resize(UINT width, UINT height);
     void Present();

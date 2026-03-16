@@ -122,7 +122,7 @@ void RenderingSystem::BuildDescHeapsAndBackBuffer()
 	_dsvHeap = std::make_unique<GDX12DescriptorHeap>(_primaryDevice.get(),
 		D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1000, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
-	_backBuffer = std::make_unique<GDX12BackBuffer>(_primaryDevice.get(), _windowHandle,
+	_backBuffer = std::make_unique<GDX12SwapChain>(_primaryDevice.get(), _windowHandle,
 		DXGI_FORMAT_R8G8B8A8_UNORM, 2, _windowWidth, _windowHeight, _rtvHeap.get());
 
 	GDX12TextureDesc desc;
