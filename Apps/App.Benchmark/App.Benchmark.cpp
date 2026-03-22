@@ -66,14 +66,6 @@ bool BenchmarkApp::Initialize ()
 		return false;
 	}
 
-	Engine::UI::Initialize ();
-	Engine::UI::ShutdownUI ();
-
-	Engine::RendererDX12::InitializeLibraries (nullptr);
-	Engine::RendererDX12::ShutdownLibraries ();
-
-	Engine::RendererDX12::CheckAssimp ();
-
 	return true;
 }
 
