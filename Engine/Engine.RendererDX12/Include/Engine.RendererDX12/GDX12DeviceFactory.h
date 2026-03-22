@@ -26,9 +26,14 @@ public:
 	static ComPtr<IDXGIFactory7> GetFactory();
 	static void Reset();
 
-    // Gets all device adapters. First element is the default device
+    // Gets all device adapters
+    // In order from more to less performance
     static std::vector<DeviceDesc> GetDeviceDescriptors();
     static ComPtr<IDXGIAdapter4> GetDefaultAdapter();
+
+    // Gets best adapter the system has
+    // Basically does GetDeviceDescriptors[0]
+    static ComPtr<IDXGIAdapter4> GetMostPerformantAdapter();
 
     static ComPtr<IDXGISwapChain4> CreateSwapChain(GDX12Device* device, 
         DXGI_SWAP_CHAIN_DESC1& desc, HWND hwnd);

@@ -91,7 +91,7 @@ bool AppBase::Initialize()
 	}
 
 	RenderSystem = std::make_unique<RenderingSystem>();
-	RenderSystem->Initialize(GDX12DeviceFactory::GetDefaultAdapter().Get(), nullptr,
+	RenderSystem->Initialize(GDX12DeviceFactory::GetMostPerformantAdapter().Get(), nullptr,
 		MainWndHandle, &Timer, WindowWidth, WindowHeight);
 
 	return true;
