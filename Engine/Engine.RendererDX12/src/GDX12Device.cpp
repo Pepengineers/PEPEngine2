@@ -121,6 +121,13 @@ void GDX12Device::CollectDeviceFeatures()
     {
         _specs.EnhancedBarriersSupport = options12.EnhancedBarriersSupported;
     }
+
+    // Query cross adapter row-major texture support
+    D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
+    if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options))))
+    {
+        _specs.CrossAdapterRowMajorTextureSupport = options.CrossAdapterRowMajorTextureSupported;
+    }
 }
 
 void GDX12Device::Reset()

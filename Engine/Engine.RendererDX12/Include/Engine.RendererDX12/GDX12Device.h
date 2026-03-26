@@ -13,6 +13,7 @@ struct DeviceSpecs
 	bool MeshShadersSupport;
 	bool VariableRateShadingSupport;
 	bool EnhancedBarriersSupport;
+	bool CrossAdapterRowMajorTextureSupport;
 	std::string Name;
 	size_t DedicatedVideoMemory;  // in bytes
 	size_t DedicatedSystemMemory; // in bytes
