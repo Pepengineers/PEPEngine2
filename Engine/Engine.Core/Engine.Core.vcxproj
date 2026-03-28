@@ -144,9 +144,18 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\GameTimer.cpp" />
+    <ClCompile Include="src\SceneManager.cpp" />
+    <ClCompile Include="src\World.cpp" />
+    <ClCompile Include="src\WorldLoader.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.Core\Components.h" />
+    <ClInclude Include="Include\Engine.Core\ECSStorage.h" />
     <ClInclude Include="Include\Engine.Core\GameTimer.h" />
+    <ClInclude Include="Include\Engine.Core\SceneManager.h" />
+    <ClInclude Include="Include\Engine.Core\System.h" />
+    <ClInclude Include="Include\Engine.Core\World.h" />
+    <ClInclude Include="Include\Engine.Core\WorldLoader.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
