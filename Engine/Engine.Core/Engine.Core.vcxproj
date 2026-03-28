@@ -144,9 +144,11 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\GameTimer.cpp" />
+    <ClCompile Include="src\MeshTypes.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.Core\GameTimer.h" />
+    <ClInclude Include="Include\Engine.Core\MeshTypes.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
