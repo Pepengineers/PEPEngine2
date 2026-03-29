@@ -29,6 +29,9 @@
     <ClInclude Include="Include\Engine.Core\GameTimer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.Core\AssetHandles.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.Core\MeshTypes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
