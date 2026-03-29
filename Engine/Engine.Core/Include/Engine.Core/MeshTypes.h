@@ -33,9 +33,9 @@ namespace Engine::Core
 		std::uint32_t StartVertexLocation = 0;
 		std::uint32_t StartIndexLocation = 0;
 
-		size_t GetVertexCount() const;
-		size_t GetIndexCount() const;
-		bool HasIndices() const;
+		[[nodiscard]] size_t GetVertexCount() const;
+		[[nodiscard]] size_t GetIndexCount() const;
+		[[nodiscard]] bool HasIndices() const;
 	};
 #pragma endregion SubMesh
 
@@ -52,12 +52,12 @@ namespace Engine::Core
 		Mesh() = default;
 		Mesh(std::vector<SubMesh> subMeshes, const DirectX::BoundingBox& bounds);
 
-		size_t GetSubMeshCount() const;
-		bool IsEmpty() const;
+		[[nodiscard]] size_t GetSubMeshCount() const;
+		[[nodiscard]] bool IsEmpty() const;
 
-		const DirectX::BoundingBox& GetBounds() const;
-		const std::vector<SubMesh>& GetSubMeshes() const;
-		const SubMesh& GetSubMesh(size_t subMeshIndex) const;
+		[[nodiscard]] const DirectX::BoundingBox& GetBounds() const;
+		[[nodiscard]] const std::vector<SubMesh>& GetSubMeshes() const;
+		[[nodiscard]] const SubMesh& GetSubMesh(const size_t subMeshIndex) const;
 	};
 #pragma endregion Mesh
 }

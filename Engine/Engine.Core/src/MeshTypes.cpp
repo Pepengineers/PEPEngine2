@@ -46,7 +46,7 @@ namespace Engine::Core
 		return _subMeshes;
 	}
 	
-	const SubMesh& Mesh::GetSubMesh(size_t subMeshIndex) const
+	const SubMesh& Mesh::GetSubMesh(const size_t subMeshIndex) const
 	{
 		assert(subMeshIndex < _subMeshes.size());
 		return _subMeshes[subMeshIndex];
