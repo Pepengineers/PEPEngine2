@@ -36,8 +36,16 @@ namespace Engine::Core
 		AssetManager() = default;
 		~AssetManager() = default;
 
-		/// Builds a normalized cache key for mesh lookup.
+		/// Resolves a relative or absolute mesh path to a normalized absolute path.
+		/// Relative paths are prepended with MODELS_FOLDER before normalization.
+		static std::filesystem::path ResolveMeshSourcePath(const std::filesystem::path& meshPath);
+		
+		/// Builds a lowercase, normalized cache key from a mesh path.
 		static std::wstring BuildMeshCacheKey(const std::filesystem::path& meshPath);
+
+		/// Loads and parses a mesh file using Assimp, applying full node hierarchy transforms.
+		/// Returns nullptr if the file is missing, unreadable, or contains no valid geometry.
+		static std::shared_ptr<Mesh> ImportMeshFromFile(const std::filesystem::path& meshPath);
 #pragma endregion Private Methods
 
 	public:
@@ -54,6 +62,10 @@ namespace Engine::Core
 		/// Returns the global asset manager instance.
 		static AssetManager& GetInstance();
 
+		/// Loads a mesh from cache or imports it from disk.
+		/// Relative paths are resolved against MODELS_FOLDER.
+		[[nodiscard]] std::shared_ptr<const Mesh> LoadMesh(const std::filesystem::path& meshPath);
+		
 		/// Returns true if a mesh with the same normalized path is already cached.
 		[[nodiscard]] bool IsMeshLoaded(const std::filesystem::path& meshPath) const;
 
@@ -61,7 +73,7 @@ namespace Engine::Core
 		[[nodiscard]] std::shared_ptr<const Mesh> FindMesh(const std::filesystem::path& meshPath) const;
 
 		/// Stores mesh data in cache or returns the existing cached entry.
-		std::shared_ptr<const Mesh> CacheMesh(const std::filesystem::path& meshPath, std::shared_ptr<Mesh> meshData);
+		[[nodiscard]] std::shared_ptr<const Mesh> CacheMesh(const std::filesystem::path& meshPath, std::shared_ptr<Mesh> meshData);
 
 		/// Returns the number of currently cached meshes.
 		[[nodiscard]] size_t GetLoadedMeshCount() const;
