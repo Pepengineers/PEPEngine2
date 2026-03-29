@@ -33,8 +33,8 @@ namespace PEPEngine::Utils
         inline size_t Size() const;
 
     private:
-        std::queue<T> m_Queue;
-        mutable std::mutex m_Mutex;
+        std::queue<T> _queue;
+        mutable std::mutex _mutex;
     };
 
     template <typename T>
@@ -45,26 +45,26 @@ namespace PEPEngine::Utils
     template <typename T>
     inline LockThreadQueue<T>::LockThreadQueue(const LockThreadQueue<T>& copy)
     {
-        std::lock_guard<std::mutex> lock(copy.m_Mutex);
-        m_Queue = copy.m_Queue;
+        std::lock_guard<std::mutex> lock(copy._mutex);
+        _queue = copy._queue;
     }
 
     template <typename T>
     inline void LockThreadQueue<T>::Push(T value)
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        m_Queue.emplace(value);
+        std::lock_guard<std::mutex> lock(_mutex);
+        _queue.emplace(value);
     }
 
     template <typename T>
     inline bool LockThreadQueue<T>::TryPop(T& value)
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        if (m_Queue.empty())
+        std::lock_guard<std::mutex> lock(_mutex);
+        if (_queue.empty())
             return false;
 
-        value = m_Queue.front();
-        m_Queue.pop();
+        value = _queue.front();
+        _queue.pop();
 
         return true;
     }
@@ -72,14 +72,14 @@ namespace PEPEngine::Utils
     template <typename T>
     inline bool LockThreadQueue<T>::Empty() const
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        return m_Queue.empty();
+        std::lock_guard<std::mutex> lock(_mutex);
+        return _queue.empty();
     }
 
     template <typename T>
     inline size_t LockThreadQueue<T>::Size() const
     {
-        std::lock_guard<std::mutex> lock(m_Mutex);
-        return m_Queue.size();
+        std::lock_guard<std::mutex> lock(_mutex);
+        return _queue.size();
     }
 }

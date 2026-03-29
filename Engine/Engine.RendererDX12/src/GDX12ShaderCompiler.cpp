@@ -27,9 +27,9 @@ GDX12ShaderCompiler::~GDX12ShaderCompiler()
 
 void GDX12ShaderCompiler::Initialize()
 {
-    DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&_dxcCompiler));
-    DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&_dxcUtils));
-    _dxcUtils->CreateDefaultIncludeHandler(&_dxcIncludeHandler);
+    ThrowIfFailed(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&_dxcCompiler)));
+    ThrowIfFailed(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&_dxcUtils)));
+    ThrowIfFailed(_dxcUtils->CreateDefaultIncludeHandler(&_dxcIncludeHandler));
 }
 
 ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShader(GDX12Device* device, const std::wstring& filename, const D3D_SHADER_MACRO* defines, const std::string& entrypoint, const std::string& shaderType)
@@ -136,12 +136,8 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
     sourceBuffer.Encoding = DXC_CP_UTF8;
 
     ComPtr<IDxcResult> results;
-    HRESULT hr = _dxcCompiler->Compile(
-        &sourceBuffer,
-        arguments.data(),
-        (UINT32)arguments.size(),
-        _dxcIncludeHandler.Get(),
-        IID_PPV_ARGS(&results));
+    HRESULT hr = _dxcCompiler->Compile(&sourceBuffer, arguments.data(), (UINT32)arguments.size(), 
+        _dxcIncludeHandler.Get(), IID_PPV_ARGS(&results));
 
     ComPtr<IDxcBlobUtf8> errors;
     if (SUCCEEDED(hr)) results->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&errors), nullptr);

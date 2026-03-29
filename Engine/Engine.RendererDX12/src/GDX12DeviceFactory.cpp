@@ -16,9 +16,9 @@ HRESULT GDX12DeviceFactory::Initialize()
     return hr;
 }
 
-ComPtr<IDXGIFactory7> GDX12DeviceFactory::GetFactory()
+const ComPtr<IDXGIFactory7>& GDX12DeviceFactory::GetFactory()
 {
-    if (!_isInitialized) { Initialize(); }
+    if (!_isInitialized) { ThrowIfFailed(Initialize()); }
     return _dxgiFactory;
 }
 
@@ -30,49 +30,48 @@ void GDX12DeviceFactory::Reset()
 
 std::vector<DeviceDesc> GDX12DeviceFactory::GetDeviceDescriptors()
 {
-    if (!_isInitialized) { Initialize(); }
+    if (!_isInitialized) { ThrowIfFailed(Initialize()); }
 
-    std::vector<DeviceDesc> Devices;
-    std::vector<UINT> AddedAdapters;
+    std::vector<DeviceDesc> devices;
+    std::vector<UINT> addedAdapters;
 
-    ComPtr<IDXGIAdapter1> Adapter1;
+    ComPtr<IDXGIAdapter1> adapter1;
     UINT AdapterIndex = 0;
 
     while (_dxgiFactory->EnumAdapterByGpuPreference(AdapterIndex, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
-        IID_PPV_ARGS(&Adapter1)) != DXGI_ERROR_NOT_FOUND)
+        IID_PPV_ARGS(&adapter1)) != DXGI_ERROR_NOT_FOUND)
     {
-        ComPtr<IDXGIAdapter4> Adapter4;
-        DXGI_ADAPTER_DESC1 AdapterDesc;
+        ComPtr<IDXGIAdapter4> adapter4;
+        DXGI_ADAPTER_DESC1 adapterDesc;
 
-        if (FAILED(Adapter1.As(&Adapter4)) || 
-            FAILED(Adapter4->GetDesc1(&AdapterDesc)) || 
-            AdapterDesc.Flags == DXGI_ADAPTER_FLAG3_SOFTWARE || 
-            std::find(AddedAdapters.begin(), AddedAdapters.end(), AdapterDesc.DeviceId) != AddedAdapters.end())
+        if (FAILED(adapter1.As(&adapter4)) || 
+            FAILED(adapter4->GetDesc1(&adapterDesc)) || 
+            adapterDesc.Flags == DXGI_ADAPTER_FLAG3_SOFTWARE || 
+            std::find(addedAdapters.begin(), addedAdapters.end(), adapterDesc.DeviceId) != addedAdapters.end())
         {
             AdapterIndex++;
             continue;
         }
 
-        DeviceDesc desc;
-        desc.Adapter = Adapter4;
-        desc.Name = AdapterDesc.Description;
-        desc.DedicatedVideoMemory = AdapterDesc.DedicatedVideoMemory;
-        desc.DedicatedSystemMemory = AdapterDesc.DedicatedSystemMemory;
-        desc.SharedSystemMemory = AdapterDesc.SharedSystemMemory;
+        DeviceDesc desc = {};
+        desc.Adapter = adapter4;
+        desc.Name = adapterDesc.Description;
+        desc.DedicatedVideoMemory = adapterDesc.DedicatedVideoMemory;
+        desc.DedicatedSystemMemory = adapterDesc.DedicatedSystemMemory;
+        desc.SharedSystemMemory = adapterDesc.SharedSystemMemory;
 
-        Devices.push_back(desc);
-        AddedAdapters.push_back(AdapterDesc.DeviceId);
+        devices.push_back(desc);
+        addedAdapters.push_back(adapterDesc.DeviceId);
 
-        Adapter1.Reset();
         AdapterIndex++;
     }
 
-    return Devices;
+    return devices;
 }
 
 ComPtr<IDXGIAdapter4> GDX12DeviceFactory::GetDefaultAdapter()
 {
-    if (!_isInitialized) { Initialize(); }
+    if (!_isInitialized) { ThrowIfFailed(Initialize()); }
 
     ComPtr<IDXGIAdapter4> defaultAdapter;
     _dxgiFactory->EnumAdapterByGpuPreference(0, DXGI_GPU_PREFERENCE_UNSPECIFIED, IID_PPV_ARGS(&defaultAdapter));
@@ -81,6 +80,8 @@ ComPtr<IDXGIAdapter4> GDX12DeviceFactory::GetDefaultAdapter()
 
 ComPtr<IDXGIAdapter4> GDX12DeviceFactory::GetMostPerformantAdapter()
 {
+    auto descs = GetDeviceDescriptors();
+    if (descs.empty()) { OutputDebugStringA("ERROR: No suitable devices found.\n"); }
     return GetDeviceDescriptors()[0].Adapter;
 }
 

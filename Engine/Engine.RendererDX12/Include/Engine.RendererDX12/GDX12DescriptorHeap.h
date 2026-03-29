@@ -13,16 +13,15 @@ public:
     GDX12DescriptorHeap(GDX12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT numDescriptors, D3D12_DESCRIPTOR_HEAP_FLAGS flags);
     ~GDX12DescriptorHeap();
 
-    ComPtr<ID3D12DescriptorHeap> GetHeap();
+    const ComPtr<ID3D12DescriptorHeap>& GetHeap();
 
     // Get heap properties
     D3D12_DESCRIPTOR_HEAP_TYPE GetType();
     D3D12_DESCRIPTOR_HEAP_FLAGS GetFlags();
     UINT GetNumDescriptors();
     
-    //returns index of the first non-taken slot in the heap
-    //next call returns current returned value + 1
-    UINT GetAvalibleIndex();
+    // Returns index of the first non-taken slot in the heap
+    UINT GetAvailableIndex();
     D3D12_CPU_DESCRIPTOR_HANDLE GetCPUHandle(UINT index = 0) const;
     D3D12_GPU_DESCRIPTOR_HANDLE GetGPUHandle(UINT index = 0) const;
 
@@ -37,6 +36,10 @@ private:
     UINT _numDescriptors;
     UINT _descriptorSize;
 
-    //index of the first non-taken element in the heap
+    // Index of the first non-taken element in the heap
     UINT _heapHeadIndex;
+
+    // Contains indices of recently freed slots
+    // GetAvalibleIndex() will first take indices from here
+    std::vector<UINT> _avaliableIndices;
 };

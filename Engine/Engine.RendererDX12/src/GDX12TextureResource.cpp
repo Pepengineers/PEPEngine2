@@ -42,7 +42,7 @@ D3D12_BARRIER_ACCESS GDX12TextureResource::GetCurrentAccess()
 
 D3D12_BARRIER_LAYOUT GDX12TextureResource::GetCurrentLayout()
 {
-	return _currentLayout;;
+	return _currentLayout;
 }
 
 D3D12_TEXTURE_BARRIER GDX12TextureResource::CreateBarrier(D3D12_BARRIER_SYNC syncAfter, D3D12_BARRIER_ACCESS accessAfter, D3D12_BARRIER_LAYOUT layoutAfter)

@@ -45,6 +45,9 @@ private:
 	HWND _windowHandle;
 	GameTimer* _gameTimer;
 
+	// Make sure that the declaration order is Lower level(basic structures) structures to higher(made of lower)
+	// This defines destruction order and may break if done incorrectly
+
 	std::unique_ptr<GDX12Device> _primaryDevice;
 	std::unique_ptr<GDX12Device> _secondaryDevice;
 	bool _dualGPUMode;
@@ -53,10 +56,6 @@ private:
 	UINT _windowHeight;
 
 	std::unordered_map<std::string, std::vector<D3D12_INPUT_ELEMENT_DESC>> _inputLayouts;
-
-	// These two resources are made on _primaryDevice only
-	std::unique_ptr<GDX12SwapChain> _backBuffer;
-	std::unique_ptr<GDX12Texture> _depthStencil;
 
 	static constexpr UINT _numFrameConstants = 3;
 
@@ -73,4 +72,8 @@ private:
 	std::unordered_map<std::string, ComPtr<ID3DBlob>> _shaders;
 	std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> _PSOs;
 	std::unordered_map<std::string, std::unique_ptr<GDX12RootSignature>> _rootSignatures;
+
+	// These two resources are made on _primaryDevice only
+	std::unique_ptr<GDX12SwapChain> _backBuffer;
+	std::unique_ptr<GDX12Texture> _depthStencil;
 };

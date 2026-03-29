@@ -23,7 +23,7 @@ class GDX12DeviceFactory
 {
 public:
 	static HRESULT Initialize();
-	static ComPtr<IDXGIFactory7> GetFactory();
+	static const ComPtr<IDXGIFactory7>& GetFactory();
 	static void Reset();
 
     // Gets all device adapters
@@ -33,6 +33,7 @@ public:
 
     // Gets best adapter the system has
     // Basically does GetDeviceDescriptors[0]
+    // Prefers dGPU over iGPUs but may confuse between 2 dGPUs
     static ComPtr<IDXGIAdapter4> GetMostPerformantAdapter();
 
     static ComPtr<IDXGISwapChain4> CreateSwapChain(GDX12Device* device, 

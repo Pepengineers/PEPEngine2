@@ -4,6 +4,8 @@
 
 class GDX12DescriptorHeap;
 
+enum GDX12DescriptorType { DESC_TYPE_NONE, DESC_TYPE_SRV, DESC_TYPE_CBV, DESC_TYPE_UAV, DESC_TYPE_DSV, DESC_TYPE_RTV };
+
 class GDX12Descriptor
 {
 public:
@@ -15,9 +17,12 @@ public:
 	void InitAsUAV(ID3D12Resource* resource, D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc, GDX12DescriptorHeap* inHeap);
 	void InitAsDSV(ID3D12Resource* resource, D3D12_DEPTH_STENCIL_VIEW_DESC* dsvDesc, GDX12DescriptorHeap* inHeap);
 	void InitAsRTV(ID3D12Resource* resource, D3D12_RENDER_TARGET_VIEW_DESC* rtvDesc, GDX12DescriptorHeap* inHeap);
-
+	
+	GDX12DescriptorType DescType;
 	UINT HeapIndex;
 	D3D12_CPU_DESCRIPTOR_HANDLE CPUHandle;
 	D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle;
+
+private:
 	GDX12DescriptorHeap* _heap;
 };

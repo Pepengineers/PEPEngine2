@@ -113,7 +113,7 @@ void AppBase::OnResize()
 	//It happens during AppBase::Initialize(), 
 	//so none of the systems are currently initialized.
 	//This effectively ignores the first OnResize() call.
-	if (!RenderSystem) return;
+	if (!RenderSystem) { return; }
 
 	RenderSystem->OnResize();
 }
@@ -129,12 +129,12 @@ LRESULT AppBase::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		if (LOWORD(wParam) == WA_INACTIVE)
 		{
 			bAppPaused = true;
-			Timer.Stop ();
+			Timer.Stop();
 		}
 		else
 		{
 			bAppPaused = false;
-			Timer.Start ();
+			Timer.Start();
 		}
 		return 0;
 
@@ -143,54 +143,51 @@ LRESULT AppBase::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		// Save the new client area dimensions.
 		WindowWidth = LOWORD(lParam);
 		WindowHeight = HIWORD(lParam);
-		if (RenderSystem) RenderSystem->SetWindowDimensions(WindowWidth, WindowHeight);
-		if (true) // TODO if(DEVICE) HERE
+		if (RenderSystem) { RenderSystem->SetWindowDimensions(WindowWidth, WindowHeight); }
+		if (wParam == SIZE_MINIMIZED)
 		{
-			if (wParam == SIZE_MINIMIZED)
-			{
-				bAppPaused = true;
-				bMinimized = true;
-				bMaximized = false;
-			}
-			else if (wParam == SIZE_MAXIMIZED)
+			bAppPaused = true;
+			bMinimized = true;
+			bMaximized = false;
+		}
+		else if (wParam == SIZE_MAXIMIZED)
+		{
+			bAppPaused = false;
+			bMinimized = false;
+			bMaximized = true;
+			OnResize();
+		}
+		else if (wParam == SIZE_RESTORED)
+		{
+			// Restoring from minimized state?
+			if (bMinimized)
 			{
 				bAppPaused = false;
 				bMinimized = false;
-				bMaximized = true;
-				OnResize ();
+				OnResize();
 			}
-			else if (wParam == SIZE_RESTORED)
-			{
-				// Restoring from minimized state?
-				if (bMinimized)
-				{
-					bAppPaused = false;
-					bMinimized = false;
-					OnResize ();
-				}
 
-				// Restoring from maximized state?
-				else if (bMaximized)
-				{
-					bAppPaused = false;
-					bMaximized = false;
-					OnResize ();
-				}
-				else if (bResizing)
-				{
-					// If user is dragging the resize bars, we do not resize
-					// the buffers here because as the user continuously
-					// drags the resize bars, a stream of WM_SIZE messages are
-					// sent to the window, and it would be pointless (and slow)
-					// to resize for each WM_SIZE message received from dragging
-					// the resize bars. So instead, we reset after the user is
-					// done resizing the window and releases the resize bars, which
-					// sends a WM_EXITSIZEMOVE message.
-				}
-				else // API call such as SetWindowPos or mSwapChain->SetFullscreenState.
-				{
-					OnResize();
-				}
+			// Restoring from maximized state?
+			else if (bMaximized)
+			{
+				bAppPaused = false;
+				bMaximized = false;
+				OnResize();
+			}
+			else if (bResizing)
+			{
+				// If user is dragging the resize bars, we do not resize
+				// the buffers here because as the user continuously
+				// drags the resize bars, a stream of WM_SIZE messages are
+				// sent to the window, and it would be pointless (and slow)
+				// to resize for each WM_SIZE message received from dragging
+				// the resize bars. So instead, we reset after the user is
+				// done resizing the window and releases the resize bars, which
+				// sends a WM_EXITSIZEMOVE message.
+			}
+			else // API call such as SetWindowPos or mSwapChain->SetFullscreenState.
+			{
+				OnResize();
 			}
 		}
 		return 0;
@@ -199,7 +196,7 @@ LRESULT AppBase::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	case WM_ENTERSIZEMOVE:
 		bAppPaused = true;
 		bResizing = true;
-		Timer.Stop ();
+		Timer.Stop();
 		return 0;
 
 	// WM_EXITSIZEMOVE is sent when the user releases the resize bars.
@@ -257,7 +254,7 @@ LRESULT AppBase::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 bool AppBase::InitMainWindow()
 {
-	WNDCLASS WindowClass;
+	WNDCLASS WindowClass = {};
 	WindowClass.style = CS_HREDRAW | CS_VREDRAW;
 	WindowClass.lpfnWndProc = MainWndProc;
 	WindowClass.cbClsExtra = 0;
@@ -329,7 +326,7 @@ void AppBase::CalculateFrameStats()
 			L"    fps: " + FpsString +
 			L"   mspf: " + MsPerFrameString;
 
-		SetWindowText(MainWndHandle, WindowText.c_str ());
+		SetWindowText(MainWndHandle, WindowText.c_str());
 
 		// Reset for next average.
 		FrameCount = 0;

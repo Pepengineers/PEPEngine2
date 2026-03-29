@@ -26,7 +26,7 @@ public:
     D3D12_VIEWPORT GetViewport();
     D3D12_RECT GetScissorRect();
 
-    ComPtr<IDXGISwapChain4> GetSwapChain();
+    const ComPtr<IDXGISwapChain4>& GetSwapChain();
 
     void Reset();
 

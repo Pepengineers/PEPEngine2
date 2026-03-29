@@ -21,6 +21,8 @@ void GDX12CommandQueue::Reset()
 {
     _commandQueue.Reset();
     _fence.Reset();
+    _workingCommandLists.clear();
+    _availableCommandLists.clear();
 }
 
 GDX12CommandQueue::~GDX12CommandQueue()
@@ -28,7 +30,7 @@ GDX12CommandQueue::~GDX12CommandQueue()
     Reset();
 }
 
-ComPtr<ID3D12CommandQueue> GDX12CommandQueue::GetCommandQueue()
+const ComPtr<ID3D12CommandQueue>& GDX12CommandQueue::GetCommandQueue()
 {
     return _commandQueue;
 }
@@ -85,7 +87,7 @@ void GDX12CommandQueue::ExecuteCommandLists(GDX12CommandList** commandLists, UIN
     _lastDispatchedFenceValue = FenceValue;
 }
 
-ComPtr<ID3D12Fence> GDX12CommandQueue::GetFence()
+const ComPtr<ID3D12Fence>& GDX12CommandQueue::GetFence()
 {
     return _fence;
 }
@@ -95,8 +97,7 @@ void GDX12CommandQueue::WaitForFenceValue(uint64_t fenceValue)
     if (_fence->GetCompletedValue() >= fenceValue) { return; }
 
     HANDLE event = CreateEventEx(nullptr, nullptr, 0, EVENT_ALL_ACCESS);
-
-    HRESULT hr = _fence->SetEventOnCompletion(fenceValue, event);
+    _fence->SetEventOnCompletion(fenceValue, event);
     WaitForSingleObjectEx(event, INFINITE, FALSE);
     CloseHandle(event);
 }

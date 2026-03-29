@@ -2,11 +2,11 @@
 #include "Engine.RendererDX12/GDX12Device.h"
 
 GDX12DescriptorHeap::GDX12DescriptorHeap(GDX12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT numDescriptors, D3D12_DESCRIPTOR_HEAP_FLAGS flags)
-    : _device(device)
-    , _type(type)
-    , _numDescriptors(numDescriptors)
-    , _heapHeadIndex(0)
-    , _flags(flags)
+    : _device(device), 
+    _type(type), 
+    _numDescriptors(numDescriptors), 
+    _heapHeadIndex(0), 
+    _flags(flags)
 {
     D3D12_DESCRIPTOR_HEAP_DESC desc = {};
     desc.Type = type;
@@ -24,7 +24,7 @@ GDX12DescriptorHeap::~GDX12DescriptorHeap()
     Reset();
 }
 
-ComPtr<ID3D12DescriptorHeap> GDX12DescriptorHeap::GetHeap()
+const ComPtr<ID3D12DescriptorHeap>& GDX12DescriptorHeap::GetHeap()
 {
     return _heap;
 }
@@ -44,9 +44,17 @@ UINT GDX12DescriptorHeap::GetNumDescriptors()
     return _numDescriptors;
 }
 
-UINT GDX12DescriptorHeap::GetAvalibleIndex()
+UINT GDX12DescriptorHeap::GetAvailableIndex()
 {
-    if (_heapHeadIndex + 1 > _numDescriptors) { OutputDebugStringA("ERROR: DESCRIPTOR HEAP IS FULL\n"); }
+    if (_avaliableIndices.empty() && _heapHeadIndex + 1 > _numDescriptors) { OutputDebugStringA("ERROR: DESCRIPTOR HEAP IS FULL\n"); }
+
+    if (!_avaliableIndices.empty())
+    {
+        UINT value = _avaliableIndices.back();
+        _avaliableIndices.pop_back();
+        return value;
+    }
+
     UINT res = _heapHeadIndex;
     _heapHeadIndex++;
     return res;

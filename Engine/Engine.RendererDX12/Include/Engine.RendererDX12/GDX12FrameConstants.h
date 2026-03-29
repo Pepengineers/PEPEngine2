@@ -19,6 +19,7 @@ public:
     std::unique_ptr<GDX12UploadBuffer<GDX12MainConstants>> MainCB;
 
     //Dirty flag notify updating
+    //Probably should move those to components
     std::unique_ptr<GDX12UploadBuffer<GDX12MeshConstants>> MeshCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12MaterialConstants>> MaterialCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12LightConstants>> LightCB;

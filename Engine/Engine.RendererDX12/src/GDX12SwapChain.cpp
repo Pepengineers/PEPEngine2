@@ -157,7 +157,7 @@ GDX12Texture* GDX12SwapChain::GetBuffer(UINT index)
     return _buffers[index].get();
 }
 
-ComPtr<IDXGISwapChain4> GDX12SwapChain::GetSwapChain()
+const ComPtr<IDXGISwapChain4>& GDX12SwapChain::GetSwapChain()
 {
     return _swapChain;
 }

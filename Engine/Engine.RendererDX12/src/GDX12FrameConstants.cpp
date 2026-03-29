@@ -23,5 +23,5 @@ GDX12FrameConstants::~GDX12FrameConstants()
 
 bool GDX12FrameConstants::IsInUseByGPU(UINT64 currentFence)
 {
-    return FenceValue <= currentFence;
+    return currentFence < FenceValue;
 }

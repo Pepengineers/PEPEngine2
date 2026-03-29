@@ -29,8 +29,8 @@ public:
 	HRESULT Initialize(ComPtr<IDXGIAdapter4> adapter);
 	void Reset();
 
-	ComPtr<ID3D12Device14> GetDevice();
-	std::shared_ptr<GDX12CommandQueue> GetCommandQueue();
+	const ComPtr<ID3D12Device14>& GetDevice();
+	GDX12CommandQueue* GetCommandQueue();
 	const DeviceSpecs& GetDeviceFeatures() const;
 	const bool IsInitialized() const;
 
@@ -40,7 +40,7 @@ private:
 	ComPtr<IDXGIAdapter4> _adapter;
 	ComPtr<ID3D12Device14> _device;
 
-	std::shared_ptr<GDX12CommandQueue> _commandQueue;
+	std::unique_ptr<GDX12CommandQueue> _commandQueue;
 
 	bool _isInitialized;
 

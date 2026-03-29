@@ -17,8 +17,6 @@ GDX12Device::~GDX12Device()
 
 HRESULT GDX12Device::Initialize(ComPtr<IDXGIAdapter4> adapter)
 {
-    Reset();
-
     HRESULT hr = E_FAIL;
     D3D_FEATURE_LEVEL testFeatureLevels[] = 
     {
@@ -43,15 +41,15 @@ HRESULT GDX12Device::Initialize(ComPtr<IDXGIAdapter4> adapter)
 
     CollectDeviceFeatures();
 
-    _commandQueue = std::make_shared<GDX12CommandQueue>(this);
+    _commandQueue = std::make_unique<GDX12CommandQueue>(this);
+
+    _isInitialized = true;
 
     return hr;
 }
 
 void GDX12Device::CollectDeviceFeatures()
 {
-    _isInitialized = true;
-
     _rtvDescriptorSize = _device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
     _dsvDescriptorSize = _device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
     _cbvSrvUavDescriptorSize = _device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
@@ -133,20 +131,19 @@ void GDX12Device::CollectDeviceFeatures()
 void GDX12Device::Reset()
 {
     _device.Reset();
+    _adapter.Reset();
+    _commandQueue.reset();
     _isInitialized = false;
-    _rtvDescriptorSize = 0;
-    _dsvDescriptorSize = 0;
-    _cbvSrvUavDescriptorSize = 0;
 }
 
-ComPtr<ID3D12Device14> GDX12Device::GetDevice()
+const ComPtr<ID3D12Device14>& GDX12Device::GetDevice()
 {
     return _device;
 }
 
-std::shared_ptr<GDX12CommandQueue> GDX12Device::GetCommandQueue()
+GDX12CommandQueue* GDX12Device::GetCommandQueue()
 {
-    return _commandQueue;
+    return _commandQueue.get();
 }
 
 const DeviceSpecs& GDX12Device::GetDeviceFeatures() const

@@ -13,8 +13,8 @@ public:
 	GDX12CommandList(GDX12Device* device);
 	~GDX12CommandList();
 
-	ComPtr<ID3D12GraphicsCommandList10> GetCommandList();
-	ComPtr<ID3D12CommandAllocator> GetCommandAllocator();
+	const ComPtr<ID3D12GraphicsCommandList10>& GetCommandList();
+	const ComPtr<ID3D12CommandAllocator>& GetCommandAllocator();
 	void Reset();
 
 	UINT64 FenceValue;
@@ -25,7 +25,7 @@ public:
 	void SetGraphicsRootSignature(GDX12RootSignature* rootSignature);
 	void SetComputeRootSignature(GDX12RootSignature* rootSignature);
 	void SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY topology);
-	void SetDescriptorHeaps(std::initializer_list<std::unique_ptr<GDX12DescriptorHeap>> heaps);
+	void SetDescriptorHeaps(std::initializer_list<GDX12DescriptorHeap*> heaps);
 	void SetViewport(const D3D12_VIEWPORT& viewport);
 	void SetScissorRect(const D3D12_RECT& scissorRect);
 
@@ -71,7 +71,7 @@ public:
 
 
 	//Misc
-	void BeginPixEvent(const std::string& name, const float color[4]);
+	void BeginPixEvent(const std::string& name, XMFLOAT4 Color);
 	void EndPixEvent();
 
 	void BuildRaytracingAccelerationStructure(const D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC* pDesc);

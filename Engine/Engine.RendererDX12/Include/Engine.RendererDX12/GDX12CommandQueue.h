@@ -14,8 +14,8 @@ public:
 
 	void Reset();
 
-	ComPtr<ID3D12CommandQueue> GetCommandQueue();
-	ComPtr<ID3D12Fence> GetFence();
+	const ComPtr<ID3D12CommandQueue>& GetCommandQueue();
+	const ComPtr<ID3D12Fence>& GetFence();
 
 	// Returns a CommandList that you can work with.
 	// If all previously created lists are busy - a new one will be created.
