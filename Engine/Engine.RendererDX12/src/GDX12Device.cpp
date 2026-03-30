@@ -146,12 +146,12 @@ GDX12CommandQueue* GDX12Device::GetCommandQueue()
     return _commandQueue.get();
 }
 
-const DeviceSpecs& GDX12Device::GetDeviceFeatures() const
+const DeviceSpecs& GDX12Device::GetDeviceFeatures()
 {
     return _specs;
 }
 
-const bool GDX12Device::IsInitialized() const
+const bool GDX12Device::IsInitialized()
 {
     return _isInitialized;
 }

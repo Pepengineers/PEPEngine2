@@ -40,6 +40,6 @@ private:
     UINT _heapHeadIndex;
 
     // Contains indices of recently freed slots
-    // GetAvalibleIndex() will first take indices from here
-    std::vector<UINT> _avaliableIndices;
+    // GetAvailableIndex() will first take indices from here
+    std::vector<UINT> _availableIndices;
 };

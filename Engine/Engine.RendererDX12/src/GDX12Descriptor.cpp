@@ -14,7 +14,7 @@ GDX12Descriptor::GDX12Descriptor() :
 
 GDX12Descriptor::~GDX12Descriptor()
 {
-    _heap->_avaliableIndices.push_back(HeapIndex);
+    _heap->_availableIndices.push_back(HeapIndex);
 }
 
 void GDX12Descriptor::InitAsSRV(ID3D12Resource* resource, D3D12_SHADER_RESOURCE_VIEW_DESC* srvDesc, GDX12DescriptorHeap* inHeap)

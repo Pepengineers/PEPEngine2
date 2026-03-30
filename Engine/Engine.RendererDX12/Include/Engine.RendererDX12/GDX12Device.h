@@ -31,8 +31,8 @@ public:
 
 	const ComPtr<ID3D12Device14>& GetDevice();
 	GDX12CommandQueue* GetCommandQueue();
-	const DeviceSpecs& GetDeviceFeatures() const;
-	const bool IsInitialized() const;
+	const DeviceSpecs& GetDeviceFeatures();
+	const bool IsInitialized();
 
 private:
 	void CollectDeviceFeatures();

@@ -36,9 +36,9 @@ std::vector<DeviceDesc> GDX12DeviceFactory::GetDeviceDescriptors()
     std::vector<UINT> addedAdapters;
 
     ComPtr<IDXGIAdapter1> adapter1;
-    UINT AdapterIndex = 0;
+    UINT adapterIndex = 0;
 
-    while (_dxgiFactory->EnumAdapterByGpuPreference(AdapterIndex, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
+    while (_dxgiFactory->EnumAdapterByGpuPreference(adapterIndex, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,
         IID_PPV_ARGS(&adapter1)) != DXGI_ERROR_NOT_FOUND)
     {
         ComPtr<IDXGIAdapter4> adapter4;
@@ -49,7 +49,7 @@ std::vector<DeviceDesc> GDX12DeviceFactory::GetDeviceDescriptors()
             adapterDesc.Flags == DXGI_ADAPTER_FLAG3_SOFTWARE || 
             std::find(addedAdapters.begin(), addedAdapters.end(), adapterDesc.DeviceId) != addedAdapters.end())
         {
-            AdapterIndex++;
+            adapterIndex++;
             continue;
         }
 
@@ -63,7 +63,7 @@ std::vector<DeviceDesc> GDX12DeviceFactory::GetDeviceDescriptors()
         devices.push_back(desc);
         addedAdapters.push_back(adapterDesc.DeviceId);
 
-        AdapterIndex++;
+        adapterIndex++;
     }
 
     return devices;

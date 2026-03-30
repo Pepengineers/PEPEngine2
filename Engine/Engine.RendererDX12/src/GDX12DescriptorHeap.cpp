@@ -46,12 +46,12 @@ UINT GDX12DescriptorHeap::GetNumDescriptors()
 
 UINT GDX12DescriptorHeap::GetAvailableIndex()
 {
-    if (_avaliableIndices.empty() && _heapHeadIndex + 1 > _numDescriptors) { OutputDebugStringA("ERROR: DESCRIPTOR HEAP IS FULL\n"); }
+    if (_availableIndices.empty() && _heapHeadIndex + 1 > _numDescriptors) { OutputDebugStringA("ERROR: DESCRIPTOR HEAP IS FULL\n"); }
 
-    if (!_avaliableIndices.empty())
+    if (!_availableIndices.empty())
     {
-        UINT value = _avaliableIndices.back();
-        _avaliableIndices.pop_back();
+        UINT value = _availableIndices.back();
+        _availableIndices.pop_back();
         return value;
     }
 
