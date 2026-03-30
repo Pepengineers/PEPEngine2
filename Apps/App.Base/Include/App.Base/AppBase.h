@@ -8,9 +8,9 @@
 #endif
 
 #include <Engine.Core/GameTimer.h>
-#include <Engine.RendererDX12/D3DHelpers.h>
 #include <Engine.UI/UI_test.h>
-#include <Engine.RendererDX12/dxc_test.h>
+
+#include "Engine.RHI/RenderingSystem.h"
 
 // Link necessary d3d12 libraries.
 #pragma comment(lib,"d3dcompiler.lib")
@@ -20,15 +20,15 @@
 class AppBase
 {
 public:
-	static AppBase* GetApp ();
+	static AppBase* GetApp();
 
-	HINSTANCE AppInst () const;
-	HWND MainWnd () const;
-	float AspectRatio () const;
+	HINSTANCE AppInst() const;
+	HWND MainWnd() const;
+	float AspectRatio() const;
 
 	int Run ();
-	virtual bool Initialize ();
-	virtual LRESULT MsgProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+	virtual bool Initialize();
+	virtual LRESULT MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 protected:
 	HINSTANCE AppInstance = nullptr;
@@ -43,22 +43,24 @@ protected:
 	int WindowWidth = 1280;
 	int WindowHeight = 800;
 
-	AppBase (HINSTANCE hInstance);
-	AppBase (const AppBase& rhs) = delete;
-	AppBase& operator = (const AppBase& rhs) = delete;
-	virtual ~AppBase ();
+	std::unique_ptr<RenderingSystem> RenderSystem;
 
-	virtual void OnResize ();
-	virtual void Update (const GameTimer& gameTimer) = 0;
-	virtual void Draw (const GameTimer& gameTimer) = 0;
+	AppBase(HINSTANCE hInstance);
+	AppBase(const AppBase& rhs) = delete;
+	AppBase& operator = (const AppBase& rhs) = delete;
+	virtual ~AppBase();
+
+	virtual void OnResize();
+	virtual void Update(const GameTimer& gameTimer);
+	virtual void Render(const GameTimer& gameTimer);
 
 	// Convenience overrides for handling mouse input.
-	virtual void OnMouseDown (WPARAM btnState, int x, int y) { }
-	virtual void OnMouseUp (WPARAM btnState, int x, int y) { }
-	virtual void OnMouseMove (WPARAM btnState, int x, int y) { }
+	virtual void OnMouseDown(WPARAM btnState, int x, int y) { }
+	virtual void OnMouseUp(WPARAM btnState, int x, int y) { }
+	virtual void OnMouseMove(WPARAM btnState, int x, int y) { }
 
-	bool InitMainWindow ();
-	void CalculateFrameStats ();
+	bool InitMainWindow();
+	void CalculateFrameStats();
 
 private:
 	static AppBase* _app;

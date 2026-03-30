@@ -7,21 +7,21 @@ using Microsoft::WRL::ComPtr;
 using namespace std;
 using namespace DirectX;
 
-LRESULT CALLBACK MainWndProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK MainWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	// Forward hwnd on because we can get messages (e.g., WM_CREATE)
 	// before CreateWindow returns, and thus before MainWndHandle is valid.
-	return AppBase::GetApp ()->MsgProc (hwnd, msg, wParam, lParam);
+	return AppBase::GetApp()->MsgProc(hwnd, msg, wParam, lParam);
 }
 
 AppBase* AppBase::_app = nullptr;
 
-AppBase* AppBase::GetApp ()
+AppBase* AppBase::GetApp()
 {
 	return _app;
 }
 
-AppBase::AppBase (HINSTANCE hInstance)
+AppBase::AppBase(HINSTANCE hInstance)
 	: AppInstance(hInstance)
 {
 	// Only one AppBase can be constructed.
@@ -33,26 +33,26 @@ AppBase::~AppBase ()
 {
 }
 
-HINSTANCE AppBase::AppInst () const
+HINSTANCE AppBase::AppInst() const
 {
 	return AppInstance;
 }
 
-HWND AppBase::MainWnd () const
+HWND AppBase::MainWnd() const
 {
 	return MainWndHandle;
 }
 
-float AppBase::AspectRatio () const
+float AppBase::AspectRatio() const
 {
 	return static_cast<float>(WindowWidth) / WindowHeight;
 }
 
-int AppBase::Run ()
+int AppBase::Run()
 {
 	MSG Msg = { 0 };
 
-	Timer.Reset ();
+	Timer.Reset();
 
 	while (Msg.message != WM_QUIT)
 	{
@@ -65,13 +65,13 @@ int AppBase::Run ()
 		// Otherwise, do animation/game stuff.
 		else
 		{
-			Timer.Tick ();
+			Timer.Tick();
 
 			if (!bAppPaused)
 			{
-				CalculateFrameStats ();
-				Update (Timer);
-				Draw (Timer);
+				CalculateFrameStats();
+				Update(Timer);
+				Render(Timer);
 			}
 			else
 			{
@@ -83,23 +83,42 @@ int AppBase::Run ()
 	return static_cast<int>(Msg.wParam);
 }
 
-bool AppBase::Initialize ()
+bool AppBase::Initialize()
 {
-	if (!InitMainWindow ())
+	if (!InitMainWindow())
 	{
 		return false;
 	}
 
-	OnResize ();
+	RenderSystem = std::make_unique<RenderingSystem>();
+	RenderSystem->Initialize(GDX12DeviceFactory::GetMostPerformantAdapter().Get(), nullptr,
+		MainWndHandle, &Timer, WindowWidth, WindowHeight);
 
 	return true;
 }
 
-void AppBase::OnResize ()
+void AppBase::Update(const GameTimer& gameTimer)
 {
+	RenderSystem->Update();
 }
 
-LRESULT AppBase::MsgProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+void AppBase::Render(const GameTimer& gameTimer)
+{
+	RenderSystem->Render();
+}
+
+void AppBase::OnResize()
+{
+	//WinApi unintentionally calls OnResize() once during window creation.
+	//It happens during AppBase::Initialize(), 
+	//so none of the systems are currently initialized.
+	//This effectively ignores the first OnResize() call.
+	if (!RenderSystem) { return; }
+
+	RenderSystem->OnResize();
+}
+
+LRESULT AppBase::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
 	switch (msg)
 	{
@@ -110,12 +129,12 @@ LRESULT AppBase::MsgProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		if (LOWORD(wParam) == WA_INACTIVE)
 		{
 			bAppPaused = true;
-			Timer.Stop ();
+			Timer.Stop();
 		}
 		else
 		{
 			bAppPaused = false;
-			Timer.Start ();
+			Timer.Start();
 		}
 		return 0;
 
@@ -124,53 +143,51 @@ LRESULT AppBase::MsgProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		// Save the new client area dimensions.
 		WindowWidth = LOWORD(lParam);
 		WindowHeight = HIWORD(lParam);
-		if (true) // TODO if(DEVICE) HERE
+		if (RenderSystem) { RenderSystem->SetWindowDimensions(WindowWidth, WindowHeight); }
+		if (wParam == SIZE_MINIMIZED)
 		{
-			if (wParam == SIZE_MINIMIZED)
-			{
-				bAppPaused = true;
-				bMinimized = true;
-				bMaximized = false;
-			}
-			else if (wParam == SIZE_MAXIMIZED)
+			bAppPaused = true;
+			bMinimized = true;
+			bMaximized = false;
+		}
+		else if (wParam == SIZE_MAXIMIZED)
+		{
+			bAppPaused = false;
+			bMinimized = false;
+			bMaximized = true;
+			OnResize();
+		}
+		else if (wParam == SIZE_RESTORED)
+		{
+			// Restoring from minimized state?
+			if (bMinimized)
 			{
 				bAppPaused = false;
 				bMinimized = false;
-				bMaximized = true;
-				OnResize ();
+				OnResize();
 			}
-			else if (wParam == SIZE_RESTORED)
-			{
-				// Restoring from minimized state?
-				if (bMinimized)
-				{
-					bAppPaused = false;
-					bMinimized = false;
-					OnResize ();
-				}
 
-				// Restoring from maximized state?
-				else if (bMaximized)
-				{
-					bAppPaused = false;
-					bMaximized = false;
-					OnResize ();
-				}
-				else if (bResizing)
-				{
-					// If user is dragging the resize bars, we do not resize
-					// the buffers here because as the user continuously
-					// drags the resize bars, a stream of WM_SIZE messages are
-					// sent to the window, and it would be pointless (and slow)
-					// to resize for each WM_SIZE message received from dragging
-					// the resize bars. So instead, we reset after the user is
-					// done resizing the window and releases the resize bars, which
-					// sends a WM_EXITSIZEMOVE message.
-				}
-				else // API call such as SetWindowPos or mSwapChain->SetFullscreenState.
-				{
-					OnResize ();
-				}
+			// Restoring from maximized state?
+			else if (bMaximized)
+			{
+				bAppPaused = false;
+				bMaximized = false;
+				OnResize();
+			}
+			else if (bResizing)
+			{
+				// If user is dragging the resize bars, we do not resize
+				// the buffers here because as the user continuously
+				// drags the resize bars, a stream of WM_SIZE messages are
+				// sent to the window, and it would be pointless (and slow)
+				// to resize for each WM_SIZE message received from dragging
+				// the resize bars. So instead, we reset after the user is
+				// done resizing the window and releases the resize bars, which
+				// sends a WM_EXITSIZEMOVE message.
+			}
+			else // API call such as SetWindowPos or mSwapChain->SetFullscreenState.
+			{
+				OnResize();
 			}
 		}
 		return 0;
@@ -179,7 +196,7 @@ LRESULT AppBase::MsgProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	case WM_ENTERSIZEMOVE:
 		bAppPaused = true;
 		bResizing = true;
-		Timer.Stop ();
+		Timer.Stop();
 		return 0;
 
 	// WM_EXITSIZEMOVE is sent when the user releases the resize bars.
@@ -187,8 +204,8 @@ LRESULT AppBase::MsgProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	case WM_EXITSIZEMOVE:
 		bAppPaused = false;
 		bResizing = false;
-		Timer.Start ();
-		OnResize ();
+		Timer.Start();
+		OnResize();
 		return 0;
 
 	// WM_DESTROY is sent when the window is being destroyed.
@@ -211,17 +228,17 @@ LRESULT AppBase::MsgProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	case WM_LBUTTONDOWN:
 	case WM_MBUTTONDOWN:
 	case WM_RBUTTONDOWN:
-		OnMouseDown (wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+		OnMouseDown(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 		return 0;
 
 	case WM_LBUTTONUP:
 	case WM_MBUTTONUP:
 	case WM_RBUTTONUP:
-		OnMouseUp (wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+		OnMouseUp(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 		return 0;
 
 	case WM_MOUSEMOVE:
-		OnMouseMove (wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+		OnMouseMove(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
 		return 0;
 
 	case WM_KEYUP:
@@ -235,9 +252,9 @@ LRESULT AppBase::MsgProc (HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 	return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
-bool AppBase::InitMainWindow ()
+bool AppBase::InitMainWindow()
 {
-	WNDCLASS WindowClass;
+	WNDCLASS WindowClass = {};
 	WindowClass.style = CS_HREDRAW | CS_VREDRAW;
 	WindowClass.lpfnWndProc = MainWndProc;
 	WindowClass.cbClsExtra = 0;
@@ -285,7 +302,7 @@ bool AppBase::InitMainWindow ()
 	return true;
 }
 
-void AppBase::CalculateFrameStats ()
+void AppBase::CalculateFrameStats()
 {
 	// Code computes the average frames per second, and also the
 	// average time it takes to render one frame. These stats
@@ -297,7 +314,7 @@ void AppBase::CalculateFrameStats ()
 	FrameCount++;
 
 	// Compute averages over one second period.
-	if ((Timer.TotalTime () - TimeElapsed) >= 1.0f)
+	if ((Timer.TotalTime() - TimeElapsed) >= 1.0f)
 	{
 		float Fps = static_cast<float>(FrameCount);
 		float MsPerFrame = 1000.0f / Fps;
@@ -309,7 +326,7 @@ void AppBase::CalculateFrameStats ()
 			L"    fps: " + FpsString +
 			L"   mspf: " + MsPerFrameString;
 
-		SetWindowText(MainWndHandle, WindowText.c_str ());
+		SetWindowText(MainWndHandle, WindowText.c_str());
 
 		// Reset for next average.
 		FrameCount = 0;

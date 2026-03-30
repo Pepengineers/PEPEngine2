@@ -5,24 +5,24 @@
 class BenchmarkApp : public AppBase
 {
 public:
-	BenchmarkApp (HINSTANCE hInstance);
-	BenchmarkApp (const BenchmarkApp& rhs) = delete;
-	BenchmarkApp& operator = (const BenchmarkApp& rhs) = delete;
-	~BenchmarkApp ();
+	BenchmarkApp(HINSTANCE hInstance);
+	BenchmarkApp(const BenchmarkApp& rhs) = delete;
+	BenchmarkApp& operator =(const BenchmarkApp& rhs) = delete;
+	~BenchmarkApp();
 
-	virtual bool Initialize () override;
+	virtual bool Initialize() override;
 
 private:
-	virtual void OnResize () override;
-	virtual void Update (const GameTimer& gameTimer) override;
-	virtual void Draw (const GameTimer& gameTimer) override;
+	virtual void OnResize() override;
+	virtual void Update(const GameTimer& gameTimer) override;
+	virtual void Render(const GameTimer& gameTimer) override;
 
-	virtual void OnMouseDown (WPARAM btnState, int x, int y) override;
-	virtual void OnMouseUp (WPARAM btnState, int x, int y) override;
-	virtual void OnMouseMove (WPARAM btnState, int x, int y) override;
+	virtual void OnMouseDown(WPARAM btnState, int x, int y) override;
+	virtual void OnMouseUp(WPARAM btnState, int x, int y) override;
+	virtual void OnMouseMove(WPARAM btnState, int x, int y) override;
 };
 
-int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, int showCmd)
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, int showCmd)
 {
 	// Enable run-time memory check for debug builds.
 #if defined(DEBUG) | defined(_DEBUG)
@@ -36,12 +36,12 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, i
 	try
 	{
 		BenchmarkApp TheApp(hInstance);
-		if (!TheApp.Initialize ())
+		if (!TheApp.Initialize())
 		{
 			return 0;
 		}
 
-		return TheApp.Run ();
+		return TheApp.Run();
 	}
 	catch (DxException& e)
 	{
@@ -50,49 +50,41 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, i
 	}
 }
 
-BenchmarkApp::BenchmarkApp (HINSTANCE hInstance)
+BenchmarkApp::BenchmarkApp(HINSTANCE hInstance)
 	: AppBase(hInstance)
 {
 }
 
-BenchmarkApp::~BenchmarkApp ()
+BenchmarkApp::~BenchmarkApp()
 {
 }
 
-bool BenchmarkApp::Initialize ()
+bool BenchmarkApp::Initialize()
 {
-	if (!AppBase::Initialize ())
+	if (!AppBase::Initialize())
 	{
 		return false;
 	}
 
-	Engine::UI::Initialize ();
-	Engine::UI::ShutdownUI ();
-
-	Engine::RendererDX12::InitializeLibraries (nullptr);
-	Engine::RendererDX12::ShutdownLibraries ();
-
-	Engine::RendererDX12::CheckAssimp ();
-
 	return true;
 }
 
-void BenchmarkApp::OnResize ()
+void BenchmarkApp::OnResize()
 {
-	AppBase::OnResize ();
+	AppBase::OnResize();
 }
 
-void BenchmarkApp::Update (const GameTimer& gameTimer)
+void BenchmarkApp::Update(const GameTimer& gameTimer)
 {
-	UNREFERENCED_PARAMETER(gameTimer);
+	AppBase::Update(gameTimer);
 }
 
-void BenchmarkApp::Draw (const GameTimer& gameTimer)
+void BenchmarkApp::Render(const GameTimer& gameTimer)
 {
-	UNREFERENCED_PARAMETER(gameTimer);
+	AppBase::Render(gameTimer);
 }
 
-void BenchmarkApp::OnMouseDown (WPARAM btnState, int x, int y)
+void BenchmarkApp::OnMouseDown(WPARAM btnState, int x, int y)
 {
 	UNREFERENCED_PARAMETER(btnState);
 	UNREFERENCED_PARAMETER(x);
@@ -101,7 +93,7 @@ void BenchmarkApp::OnMouseDown (WPARAM btnState, int x, int y)
 	SetCapture(MainWndHandle);
 }
 
-void BenchmarkApp::OnMouseUp (WPARAM btnState, int x, int y)
+void BenchmarkApp::OnMouseUp(WPARAM btnState, int x, int y)
 {
 	UNREFERENCED_PARAMETER(btnState);
 	UNREFERENCED_PARAMETER(x);
@@ -110,7 +102,7 @@ void BenchmarkApp::OnMouseUp (WPARAM btnState, int x, int y)
 	ReleaseCapture();
 }
 
-void BenchmarkApp::OnMouseMove (WPARAM btnState, int x, int y)
+void BenchmarkApp::OnMouseMove(WPARAM btnState, int x, int y)
 {
 	UNREFERENCED_PARAMETER(btnState);
 	UNREFERENCED_PARAMETER(x);
