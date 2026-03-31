@@ -12,11 +12,12 @@
 
 class App;
 
+
 class ModuleLocator final
 {
 public:
-    typedef std::shared_ptr<AppModule> ModulePtr;
-    typedef std::function<ModulePtr()> Factory;
+    using ModulePtr = std::shared_ptr<AppModule>;
+    using Factory = std::function<ModulePtr()>;
 
     template <typename T, typename = std::enable_if_t<std::is_base_of_v<AppModule, T>>>
     std::shared_ptr<T> GetModule()

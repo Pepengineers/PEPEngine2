@@ -10,13 +10,13 @@ using Microsoft::WRL::ComPtr;
 using namespace std;
 using namespace DirectX;
 
-App* App::AppInstance = nullptr;
+App* App::Instance = nullptr;
 
 namespace Private
 {
     static LRESULT CALLBACK MainWndProc(const HWND hwnd, const UINT msg, const WPARAM wParam, const LPARAM lParam)
     {
-        return App::GetApp()->MsgProc(hwnd, msg, wParam, lParam);
+        return App::GetInstance()->MsgProc(hwnd, msg, wParam, lParam);
     }
 }
 
@@ -53,15 +53,20 @@ void App::CalculateFrameStats() const
     }
 }
 
-App* App::GetApp()
+ModuleLocator& App::GetLocator()
 {
-    return AppInstance;
+    return GetInstance()->locator;
+}
+
+App* App::GetInstance()
+{
+    return Instance;
 }
 
 App::App(HINSTANCE hInstance)
     : AppHandler(hInstance)
 {
-    AppInstance = this;
+    Instance = this;
 }
 
 App::~App() = default;
@@ -75,12 +80,6 @@ Window* App::GetWindow() const
 {
     return window.get();
 }
-
-ModuleLocator& App::GetLocator()
-{
-    return locator;
-}
-
 
 int App::Run()
 {

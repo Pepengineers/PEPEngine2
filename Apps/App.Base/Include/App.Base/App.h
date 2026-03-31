@@ -23,15 +23,15 @@ class Window;
 class App
 {
 public:
+    static ModuleLocator& GetLocator();
+    static App* GetInstance();
     
-    void CalculateFrameStats() const;
-    static App* GetApp();
     HINSTANCE GetAppHandler() const;
     Window* GetWindow() const;
-    ModuleLocator& GetLocator();
     int Run();
     virtual bool Initialize();
-
+    void CalculateFrameStats() const;
+    
     LRESULT MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 protected:
@@ -71,6 +71,6 @@ protected:
 
 private:
     ModuleLocator locator;
-    static App* AppInstance;
+    static App* Instance;
     std::unique_ptr<Window> window;
 };
