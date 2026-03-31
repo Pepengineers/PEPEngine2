@@ -19,10 +19,8 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Include\Engine.RHI\RenderingSystem.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="src\RenderingSystem.cpp" />
+    <Folder Include="Include\Engine.RHI\" />
+    <Folder Include="src\" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
