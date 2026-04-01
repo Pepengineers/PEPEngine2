@@ -31,8 +31,7 @@ bool SceneManager::SaveWorld(World* world, const std::filesystem::path& path)
 
 World* SceneManager::GetWorld(size_t index)
 {
-    if (index >= _worldVector.size())
-        return nullptr;
+    if (index >= _worldVector.size()) { return nullptr; }
 
     return _worldVector[index].get();
 }

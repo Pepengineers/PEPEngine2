@@ -38,20 +38,17 @@ public:
 
     bool Has(Entity entity) const
     {
-        if (entity >= _sparse.size())
-            return false;
+        if (entity >= _sparse.size()) { return false; }
 
         size_t denseIndex = _sparse[entity];
-        if (denseIndex == InvalidIndex)
-            return false;
+        if (denseIndex == InvalidIndex) { return false; }
 
         return denseIndex < _denseEntities.size() && _denseEntities[denseIndex] == entity;
     }
 
     T& Add(Entity entity, const T& value = T{})
     {
-        if (entity >= _sparse.size())
-            _sparse.resize(static_cast<size_t>(entity) + 1, InvalidIndex);
+        if (entity >= _sparse.size()) { _sparse.resize(static_cast<size_t>(entity) + 1, InvalidIndex); }
 
         if (Has(entity))
         {
@@ -69,8 +66,7 @@ public:
     template<typename... Args>
     T& Emplace(Entity entity, Args&&... args)
     {
-        if (entity >= _sparse.size())
-            _sparse.resize(static_cast<size_t>(entity) + 1, InvalidIndex);
+        if (entity >= _sparse.size()) { _sparse.resize(static_cast<size_t>(entity) + 1, InvalidIndex); }
 
         if (Has(entity))
         {
@@ -87,8 +83,7 @@ public:
 
     void Remove(Entity entity)
     {
-        if (!Has(entity))
-            return;
+        if (!Has(entity)) { return; }
 
         size_t removeIndex = _sparse[entity];
         size_t lastIndex = _denseComponents.size() - 1;
@@ -176,8 +171,7 @@ public:
 
     void DestroyEntity(Entity entity)
     {
-        if (!IsAlive(entity))
-            return;
+        if (!IsAlive(entity)) { return; }
 
         RemoveAllComponents<0>(entity);
         _aliveList[entity] = false;
@@ -194,8 +188,7 @@ public:
         size_t count = 0;
         for (size_t i = 0; i < _aliveList.size(); ++i)
         {
-            if (_aliveList[i])
-                ++count;
+            if (_aliveList[i]) { ++count; }
         }
         return count;
     }
@@ -279,11 +272,7 @@ public:
         {
             Entity entity = entities[i];
 
-            if (!Has<Second>(entity))
-                continue;
-
-            if (!(Has<Rest>(entity) && ...))
-                continue;
+            if (!Has<Second>(entity) || !(Has<Rest>(entity) && ...)) { continue; }
 
             func(entity, firstData[i], Get<Second>(entity), Get<Rest>(entity)...);
         }
