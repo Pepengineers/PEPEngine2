@@ -7,9 +7,7 @@
 #include <crtdbg.h>
 #endif
 
-#include <Engine.Core/GameTimer.h>
-
-#include "ModuleLocator.h"
+#include "Engine.Core/Engine.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 // Link necessary d3d12 libraries.
@@ -20,20 +18,18 @@
 class RenderModule;
 class Window;
 
-class App
+class App : public Engine
 {
 public:
-    static ModuleLocator& GetLocator();
-    static App* GetInstance();
-    
     HINSTANCE GetAppHandler() const;
     Window* GetWindow() const;
     int Run();
-    virtual bool Initialize();
+    bool Initialize() override;
     void CalculateFrameStats() const;
-    
+
     LRESULT MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+    static App* GetInstance();
 protected:
     HINSTANCE AppHandler = nullptr;
 
@@ -43,17 +39,14 @@ protected:
     bool bResizing = false;
     bool bFullscreenState = false;
 
-    GameTimer Timer;
 
     App(HINSTANCE hInstance);
     App(const App& rhs) = delete;
     App& operator =(const App& rhs) = delete;
-    virtual ~App();
+    virtual ~App() override;
 
     virtual void OnResize();
-    virtual void Update(const GameTimer& gameTimer);
-    virtual void Render(const GameTimer& gameTimer);
-
+    
     // Convenience overrides for handling mouse input.
     virtual void OnMouseDown(WPARAM btnState, int x, int y)
     {
@@ -68,9 +61,8 @@ protected:
     }
 
     bool InitMainWindow();
+    bool AddModules() override;
 
 private:
-    ModuleLocator locator;
-    static App* Instance;
     std::unique_ptr<Window> window;
 };

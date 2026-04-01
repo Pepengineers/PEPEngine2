@@ -1,5 +1,6 @@
 // App.Benchmark.cpp
 
+#include <Engine.Core/Engine.h>
 #include <App.Base/App.h>
 
 #include "Window.h"

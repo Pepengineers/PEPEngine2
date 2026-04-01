@@ -2,7 +2,6 @@
 
 #include "Engine.RendererDX12/GDX12Device.h"
 
-#include "Engine.Core/LockThreadQueue.h"
 
 class GDX12CommandList;
 

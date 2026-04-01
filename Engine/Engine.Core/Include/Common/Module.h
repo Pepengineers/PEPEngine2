@@ -1,10 +1,10 @@
 ﻿#pragma once
 #include "Stopwatch.h"
 
-class AppModule
+class Module
 {
 public:
-    virtual ~AppModule() = default;
+    virtual ~Module() = default;
     virtual void Initialize() = 0;
     virtual void Uninitialize() = 0;
 
