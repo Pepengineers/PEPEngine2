@@ -1,8 +1,6 @@
 ﻿#pragma once
 
-#include "AppModule.h"
 #include "App.Base/App.h"
-#include "Engine.Core/GameTimer.h"
 
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include "Engine.RendererDX12/GDX12Device.h"
@@ -12,7 +10,7 @@
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
 
-class RenderModule final : public AppModule
+class RenderModule final : public Module
 {
 public:
     RenderModule(Window* window);
@@ -54,11 +52,9 @@ private:
     std::unordered_map<std::string, std::vector<D3D12_INPUT_ELEMENT_DESC>> _inputLayouts;
     Window* window;
 
-    static constexpr UINT _numFrameConstants = 3;
-
     // All of class members below should probably be put into DeviceResources class, and made for each device
     // Since all of these resources are currently existing on _primaryDevice only
-    std::array<std::unique_ptr<GDX12FrameConstants>, _numFrameConstants> _frameConstants;
+    std::vector<std::unique_ptr<GDX12FrameConstants>> _frameConstants;
     UINT _currFrameConstantsIndex;
 
     // All heaps created in one high-capacity instance

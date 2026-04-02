@@ -7,19 +7,15 @@
 #include <typeindex>
 #include <typeinfo>
 #include <unordered_map>
-
-#include "AppModule.h"
-
-class App;
-
+#include "Common/Module.h"
 
 class ModuleLocator final
 {
 public:
-    using ModulePtr = std::shared_ptr<AppModule>;
+    using ModulePtr = std::shared_ptr<Module>;
     using Factory = std::function<ModulePtr()>;
 
-    template <typename T, typename = std::enable_if_t<std::is_base_of_v<AppModule, T>>>
+    template <typename T, typename = std::enable_if_t<std::is_base_of_v<Module, T>>>
     std::shared_ptr<T> GetModule()
     {
         const auto typeKey = std::type_index(typeid(T));
@@ -46,14 +42,14 @@ public:
         return std::dynamic_pointer_cast<T>(registeredModules[typeKey]);
     }
 
-    template <typename T, typename = std::enable_if_t<std::is_base_of_v<AppModule, T>>>
+    template <typename T, typename = std::enable_if_t<std::is_base_of_v<Module, T>>>
     ModuleLocator& GetModule(std::shared_ptr<T>& value)
     {
         value = GetModule<T>();
         return *this;
     }
 
-    template <typename T, typename = std::enable_if_t<std::is_base_of_v<AppModule, T>>>
+    template <typename T, typename = std::enable_if_t<std::is_base_of_v<Module, T>>>
     ModuleLocator& BindModule(Factory resolver)
     {
         assert(static_cast<bool>(resolver));
@@ -63,7 +59,7 @@ public:
         return *this;
     }
 
-    template <typename T, typename = std::enable_if_t<std::is_base_of_v<AppModule, T>>>
+    template <typename T, typename = std::enable_if_t<std::is_base_of_v<Module, T>>>
     void UnbindModule()
     {
         const auto typeKey = std::type_index(typeid(T));
@@ -71,7 +67,7 @@ public:
         RemoveRegisteredType(typeKey);
     }
 
-    template <typename T, typename = std::enable_if_t<std::is_base_of_v<AppModule, T>>>
+    template <typename T, typename = std::enable_if_t<std::is_base_of_v<Module, T>>>
     ModuleLocator& RegisterModule(std::shared_ptr<T> subsystem)
     {
         assert(subsystem != nullptr);
@@ -87,7 +83,7 @@ public:
         return *this;
     }
 
-    template <typename T, typename = std::enable_if_t<std::is_base_of_v<AppModule, T>>>
+    template <typename T, typename = std::enable_if_t<std::is_base_of_v<Module, T>>>
     void UnregisterModule()
     {
         const auto typeKey = std::type_index(typeid(T));
@@ -95,8 +91,6 @@ public:
     }
 
 private:
-    friend class App;
-
     void Clear()
     {
         for (auto& pair : registeredModules)
@@ -136,6 +130,8 @@ private:
         registeredModules.erase(it);
     }
 
+
+    friend class Engine;
     std::unordered_map<std::type_index, ModulePtr> registeredModules;
     std::unordered_map<std::type_index, Factory> factories;
 };

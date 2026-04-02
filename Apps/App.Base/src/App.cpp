@@ -10,8 +10,6 @@ using Microsoft::WRL::ComPtr;
 using namespace std;
 using namespace DirectX;
 
-App* App::Instance = nullptr;
-
 namespace Private
 {
     static LRESULT CALLBACK MainWndProc(const HWND hwnd, const UINT msg, const WPARAM wParam, const LPARAM lParam)
@@ -53,14 +51,10 @@ void App::CalculateFrameStats() const
     }
 }
 
-ModuleLocator& App::GetLocator()
-{
-    return GetInstance()->locator;
-}
 
 App* App::GetInstance()
 {
-    return Instance;
+    return static_cast<App*>(Instance);
 }
 
 App::App(HINSTANCE hInstance)
@@ -141,15 +135,7 @@ bool App::Initialize()
         return false;
     }
 
-    locator.RegisterModule(std::make_shared<RenderModule>(window.get()));
-
-
-    for (auto& pair : locator.registeredModules)
-    {
-        pair.second->Initialize();
-    }
-
-    return true;
+    return Engine::Initialize();
 }
 
 LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -293,22 +279,6 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
-void App::Update(const GameTimer& gameTimer)
-{
-    for (const auto& pair : locator.registeredModules)
-    {
-        pair.second->Update();
-    }
-}
-
-void App::Render(const GameTimer& gameTimer)
-{
-    for (const auto& pair : locator.registeredModules)
-    {
-        pair.second->Render();
-    }
-}
-
 void App::OnResize()
 {
     //WinApi unintentionally calls OnResize() once during window creation.
@@ -316,7 +286,7 @@ void App::OnResize()
     //so none of the systems are currently initialized.
     //This effectively ignores the first OnResize() call.
 
-    auto RenderSystem = locator.GetModule<RenderModule>();
+    auto RenderSystem = Locator.GetModule<RenderModule>();
     if (!RenderSystem) { return; }
 
     RenderSystem->OnResize();
@@ -326,4 +296,10 @@ bool App::InitMainWindow()
 {
     window = std::make_unique<Window>(1920, 1080, AppHandler);
     return window->Initialize();
+}
+
+bool App::AddModules()
+{
+    Locator.RegisterModule(std::make_shared<RenderModule>(window.get()));
+    return Engine::AddModules();
 }

@@ -143,11 +143,20 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="Include\Engine.Core\Engine.cpp" />
+    <ClCompile Include="src\ConsoleModule.cpp">
+    </ClCompile>
     <ClCompile Include="src\GameTimer.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Include\Engine.Core\GameTimer.h" />
-    <ClInclude Include="Include\Engine.Core\LockThreadQueue.h" />
+    <ClInclude Include="Include\Common\ConsoleVariables.h" />
+    <ClInclude Include="Include\Common\GameTimer.h" />
+    <ClInclude Include="Include\Common\LockThreadQueue.h" />
+    <ClInclude Include="Include\Common\Module.h" />
+    <ClInclude Include="Include\Common\Stopwatch.h" />
+    <ClInclude Include="Include\Engine.Core\ConsoleModule.h" />
+    <ClInclude Include="Include\Engine.Core\Engine.h" />
+    <ClInclude Include="Include\Engine.Core\ModuleLocator.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

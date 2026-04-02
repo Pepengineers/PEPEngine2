@@ -2,16 +2,27 @@
 
 #include "Window.h"
 #include "App.Base/App.h"
+#include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12DeviceFactory.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 
+
+
+static UINT _numFrameConstants = 3;
+
+static AutoConsoleVariableRef NumFrameConstantVariable(
+    L"Render.NumFrames",
+    _numFrameConstants,
+    L"How many deferred frames was rendered");
+
 RenderModule::RenderModule(Window* window) :
     _dualGPUMode(false), window(window),
     _currFrameConstantsIndex(0)
 {
+    
 }
 
 RenderModule::~RenderModule()
@@ -69,7 +80,7 @@ void RenderModule::OnResize() const
 void RenderModule::OnUpdate()
 {
     timer.Tick();
-    _currFrameConstantsIndex = (_currFrameConstantsIndex + 1) % _numFrameConstants;
+    _currFrameConstantsIndex = (_currFrameConstantsIndex + 1) % NumFrameConstantVariable.GetValue();
 
     auto cmdQueue = _primaryDevice->GetCommandQueue();
     auto& frameConsts = _frameConstants[_currFrameConstantsIndex];
@@ -209,10 +220,10 @@ void RenderModule::BuildPSOs()
 
 void RenderModule::BuildFrameConstants()
 {
-    for (int i = 0; i < _numFrameConstants; i++)
+    for (int i = 0; i < NumFrameConstantVariable.GetValue(); i++)
     {
         //TODO: fix zero element upload buffer crash
-        _frameConstants[i] = std::make_unique<GDX12FrameConstants>(_primaryDevice.get(), 1, 1, 1);
+        _frameConstants.emplace_back(std::make_unique<GDX12FrameConstants>(_primaryDevice.get(), 1, 1, 1));
     }
 }
 
