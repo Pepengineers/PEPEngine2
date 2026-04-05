@@ -27,6 +27,8 @@ namespace Engine::Core
 		/// Returns the global asset manager instance.
 		static AssetManager& GetInstance();
 
+		[[nodiscard]] std::shared_ptr<const Mesh> LoadMesh(const std::filesystem::path& path);
+
 		/// Returns the mesh registry.
 		[[nodiscard]] MeshRegistry& Meshes();
 		/// Returns the mesh registry.

@@ -1,4 +1,7 @@
-﻿#include <Engine.Core/Registries/MeshRegistry.h>
+// MeshRegistry.cpp
+
+#include <Engine.Core/Registries/MeshRegistry.h>
+#include <Engine.Core/IO/MeshImporter.h>
 
 namespace Engine::Core
 {
@@ -48,7 +51,7 @@ namespace Engine::Core
 
 		return cacheKey;
 	}
-
+	
 	MeshHandle MeshRegistry::Register(const MeshAssetLocator& locator)
 	{
 		if (locator.SourcePath.empty())
@@ -100,15 +103,146 @@ namespace Engine::Core
 		return GetMesh(FindHandle(locator));
 	}
 
-	std::shared_ptr<const Mesh> MeshRegistry::Cache(const MeshAssetLocator& locator, std::shared_ptr<Mesh> data)
+	std::shared_ptr<const Mesh> MeshRegistry::Load(const std::filesystem::path& path)
 	{
+		MeshAssetLocator locator;
+		locator.SourcePath = path;
+		return Load(locator);
+	}
+
+	std::shared_ptr<const Mesh> MeshRegistry::Load(const MeshAssetLocator& locator)
+	{
+		if (locator.SourcePath.empty())
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to load mesh: empty source path.\n");
+			return nullptr;
+		}
+
+		const std::shared_ptr<const Mesh> cachedMesh = FindMesh(locator);
+		if (cachedMesh != nullptr)
+		{
+			MeshAssetLocator resolvedLocator = locator;
+			resolvedLocator.SourcePath = ResolveSourcePath(locator.SourcePath);
+
+			if (resolvedLocator.HasSubAssetIndex())
+			{
+				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Reusing cached mesh sub-asset " +
+					std::to_wstring(resolvedLocator.SubAssetIndex) + L" from path: " + resolvedLocator.SourcePath.generic_wstring() + L"\n");
+			}
+			else
+			{
+				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Reusing cached mesh for path: " +
+					resolvedLocator.SourcePath.generic_wstring() + L"\n");
+			}
+
+			return cachedMesh;
+		}
+
 		const MeshHandle meshHandle = Register(locator);
 		if (!meshHandle.IsValid())
 		{
 			return nullptr;
 		}
 
-		return TypedAssetRegistry<Mesh, MeshHandle, MeshAssetLocator>::Cache(meshHandle, std::move(data));
+		const MeshAssetLocator resolvedLocator = GetLocator(meshHandle);
+		if (resolvedLocator.SourcePath.empty())
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to load mesh: could not resolve locator.\n");
+			return nullptr;
+		}
+
+		std::shared_ptr<Mesh> importedMesh;
+		if (resolvedLocator.HasSubAssetIndex())
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Importing mesh sub-asset " +
+				std::to_wstring(resolvedLocator.SubAssetIndex) + L" from path: " + resolvedLocator.SourcePath.generic_wstring() + L"\n");
+
+			importedMesh = MeshImporter::ImportMeshSubAsset(resolvedLocator.SourcePath, resolvedLocator.SubAssetIndex);
+		}
+		else
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Importing mesh from path: " +
+				resolvedLocator.SourcePath.generic_wstring() + L"\n");
+
+			importedMesh = MeshImporter::ImportSingleMeshAsset(resolvedLocator.SourcePath);
+		}
+
+		if (importedMesh == nullptr)
+		{
+			if (resolvedLocator.HasSubAssetIndex())
+			{
+				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to import mesh sub-asset " +
+					std::to_wstring(resolvedLocator.SubAssetIndex) + L" from path: " +
+					resolvedLocator.SourcePath.generic_wstring() + L"\n");
+			}
+			else
+			{
+				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to import mesh from path: " +
+					resolvedLocator.SourcePath.generic_wstring() + L"\n");
+			}
+
+			return nullptr;
+		}
+
+		if (resolvedLocator.HasSubAssetIndex())
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Imported mesh sub-asset " +
+				std::to_wstring(resolvedLocator.SubAssetIndex) + L" with " + std::to_wstring(importedMesh->GetSubMeshCount()) +
+				L" submeshes from path: " + resolvedLocator.SourcePath.generic_wstring() + L"\n");
+		}
+		else
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Imported mesh with " +
+				std::to_wstring(importedMesh->GetSubMeshCount()) + L" submeshes from path: " +
+				resolvedLocator.SourcePath.generic_wstring() + L"\n");
+		}
+
+		return Cache(meshHandle, std::move(importedMesh));
+	}
+
+	std::shared_ptr<const Mesh> MeshRegistry::Cache(const MeshHandle handle, std::shared_ptr<Mesh> data)
+	{
+		assert(handle.IsValid());
+		assert(data != nullptr);
+
+		if (!handle.IsValid() || data == nullptr)
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to cache mesh: invalid handle or null mesh data.\n");
+			return nullptr;
+		}
+
+		const size_t meshIndex = static_cast<size_t>(handle.Value);
+		if (meshIndex >= _meshAssets.size())
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to cache mesh: handle index out of range: " + std::to_wstring(handle.Value) + L"\n");
+			return nullptr;
+		}
+
+		Record& record = _meshAssets[meshIndex];
+		if (record.MeshData != nullptr)
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Mesh data already cached for handle " + std::to_wstring(handle.Value) + L".\n");
+			return record.MeshData;
+		}
+
+		record.MeshData = std::move(data);
+
+		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Cached mesh data for handle " + std::to_wstring(handle.Value) + L". Path: " + record.Locator.SourcePath.generic_wstring() + L"\n");
+
+		return record.MeshData;
+	}
+
+	std::shared_ptr<const Mesh> MeshRegistry::Cache(const std::filesystem::path& path, std::shared_ptr<Mesh> data)
+	{
+		const MeshHandle meshHandle = Register(path);
+		if (!meshHandle.IsValid())
+		{
+			return nullptr;
+		}
+
+		return Cache(meshHandle, std::move(data));
+	}
+
 	}
 
 	MeshAssetLocator MeshRegistry::GetLocator(const MeshHandle handle) const

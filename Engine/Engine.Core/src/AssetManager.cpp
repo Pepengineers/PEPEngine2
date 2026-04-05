@@ -28,6 +28,11 @@ namespace Engine::Core
 		return instance;
 	}
 
+	std::shared_ptr<const Mesh> AssetManager::LoadMesh(const std::filesystem::path& path)
+	{
+		return _meshRegistry.Load(path);
+	}
+
 #pragma region Accessors
 	MeshRegistry& AssetManager::Meshes()
 	{

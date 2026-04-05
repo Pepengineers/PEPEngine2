@@ -36,6 +36,9 @@
     <ClInclude Include="src\Registries\TextureRegistry.cpp">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\IO\MeshImporter.cpp">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.Core\GameTimer.h">
@@ -66,6 +69,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.Core\Registries\TextureRegistry.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\IO\ImportPolicies.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\IO\MeshImporter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
