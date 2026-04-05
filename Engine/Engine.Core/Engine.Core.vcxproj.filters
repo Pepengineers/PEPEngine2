@@ -18,10 +18,10 @@
     <ClCompile Include="src\GameTimer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\MeshTypes.cpp">
+    <ClCompile Include="src\Types\MeshTypes.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\AssetManager.cpp">
+    <ClCompile Include="src\Types\TextureTypes.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -32,10 +32,10 @@
     <ClInclude Include="Include\Engine.Core\AssetHandles.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.Core\MeshTypes.h">
+    <ClInclude Include="Include\Engine.Core\Types\MeshTypes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.Core\AssetManager.h">
+    <ClInclude Include="Include\Engine.Core\Types\TextureTypes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

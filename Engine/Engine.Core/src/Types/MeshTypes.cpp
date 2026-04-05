@@ -1,6 +1,6 @@
 ﻿// MeshTypes.cpp
 
-#include <Engine.Core/MeshTypes.h>
+#include <Engine.Core/Types/MeshTypes.h>
 
 #include <cassert>
 

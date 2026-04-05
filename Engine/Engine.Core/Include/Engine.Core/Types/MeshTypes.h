@@ -26,8 +26,13 @@ namespace Engine::Core
 		std::uint32_t StartVertexLocation = 0;
 		std::uint32_t StartIndexLocation = 0;
 
+		/// Returns the number of vertices in this submesh.
 		[[nodiscard]] size_t GetVertexCount() const;
+		
+		/// Returns the number of indices in this submesh.
 		[[nodiscard]] size_t GetIndexCount() const;
+
+		/// Returns true if this submesh has an index buffer.
 		[[nodiscard]] bool HasIndices() const;
 	};
 
@@ -45,11 +50,16 @@ namespace Engine::Core
 		/// Returns true if the mesh has no subresources.
 		[[nodiscard]] bool IsEmpty() const;
 
-		/// Returns the total number of subresources.
+		/// Returns the number of submeshes.
 		[[nodiscard]] size_t GetSubMeshCount() const;
 
+		/// Returns the bounding box enclosing all submeshes.
 		[[nodiscard]] const DirectX::BoundingBox& GetBounds() const;
+
+		/// Returns all submeshes as a flat array.
 		[[nodiscard]] const std::vector<SubMesh>& GetSubMeshes() const;
+
+		/// Returns the submesh at the given index.
 		[[nodiscard]] const SubMesh& GetSubMesh(const size_t subMeshIndex) const;
 	};
 }
