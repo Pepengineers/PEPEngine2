@@ -7,7 +7,6 @@
 
 namespace Engine::Core
 {
-#pragma region Mesh Handle
 	/// Stable identifier of a mesh entry inside AssetManager storage.
 	struct MeshHandle
 	{
@@ -20,10 +19,7 @@ namespace Engine::Core
 			return Value != InvalidValue;
 		}
 	};
-#pragma endregion Mesh Handle
-
-#pragma region Texture Handle
-
+	
 	/// Stable identifier of a texture entry inside AssetManager storage.
 	struct TextureHandle
 	{
@@ -36,6 +32,4 @@ namespace Engine::Core
 			return Value != InvalidValue;
 		}
 	};
-
-#pragma endregion Texture Handle
 }

@@ -24,7 +24,11 @@ namespace Engine::Core
 #pragma endregion SubMesh
 
 #pragma region Mesh
-	Mesh::Mesh(std::vector<SubMesh> subMeshes, const DirectX::BoundingBox& bounds) : _subMeshes(std::move(subMeshes)), _bounds(bounds) {}
+	Mesh::Mesh(std::vector<SubMesh> subMeshes, const DirectX::BoundingBox& bounds)
+	{
+		_subMeshes = std::move(subMeshes);
+		_bounds = bounds;
+	}
 
 	size_t Mesh::GetSubMeshCount() const
 	{

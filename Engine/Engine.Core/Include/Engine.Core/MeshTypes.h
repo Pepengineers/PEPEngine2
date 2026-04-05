@@ -9,21 +9,14 @@
 
 namespace Engine::Core
 {
-	namespace SimpleMath = DirectX::SimpleMath;
-	
-#pragma region Vertex
 	struct Vertex
 	{
-		SimpleMath::Vector3 Position = {0.0f, 0.0f, 0.0f};
-		SimpleMath::Vector3 Normal = {0.0f, 0.0f, 0.0f};
-		SimpleMath::Vector2 TexCoord = {0.0f, 0.0f};
-		SimpleMath::Vector3 Tangent = {1.0f, 0.0f, 0.0f};
+		DirectX::SimpleMath::Vector3 Position = {0.0f, 0.0f, 0.0f};
+		DirectX::SimpleMath::Vector3 Normal = {0.0f, 0.0f, 0.0f};
+		DirectX::SimpleMath::Vector2 TexCoord = {0.0f, 0.0f};
+		DirectX::SimpleMath::Vector3 Tangent = {1.0f, 0.0f, 0.0f};
 	};
-#pragma endregion Vertex
 
-#pragma region SubMesh
-	// Materials are not owned by the mesh asset itself.
-	// Each submesh stores only material slot index that can be resolved later.
 	struct SubMesh
 	{
 		std::vector<Vertex> Vertices;
@@ -37,11 +30,8 @@ namespace Engine::Core
 		[[nodiscard]] size_t GetIndexCount() const;
 		[[nodiscard]] bool HasIndices() const;
 	};
-#pragma endregion SubMesh
 
-#pragma region Mesh
-	// Mesh stores CPU-side geometry only.
-	// GPU buffers and upload details remain renderer-side concerns.
+	/// CPU-side mesh representation.
 	class Mesh
 	{
 	private:
@@ -52,12 +42,14 @@ namespace Engine::Core
 		Mesh() = default;
 		Mesh(std::vector<SubMesh> subMeshes, const DirectX::BoundingBox& bounds);
 
-		[[nodiscard]] size_t GetSubMeshCount() const;
+		/// Returns true if the mesh has no subresources.
 		[[nodiscard]] bool IsEmpty() const;
+
+		/// Returns the total number of subresources.
+		[[nodiscard]] size_t GetSubMeshCount() const;
 
 		[[nodiscard]] const DirectX::BoundingBox& GetBounds() const;
 		[[nodiscard]] const std::vector<SubMesh>& GetSubMeshes() const;
 		[[nodiscard]] const SubMesh& GetSubMesh(const size_t subMeshIndex) const;
 	};
-#pragma endregion Mesh
 }
