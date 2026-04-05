@@ -167,6 +167,8 @@
     <ClInclude Include="Include\Engine.Core\IO\MeshImporter.h" />
     <ClInclude Include="Include\Engine.Core\IO\SceneImporter.h" />
     <ClInclude Include="Include\Engine.Core\IO\TextureLoader.h" />
+    <ClInclude Include="Include\Engine.Core\IO\ImportPolicies.h" />
+    <ClInclude Include="Include\Engine.Core\IO\MeshImporter.h" />
     <ClInclude Include="Include\Engine.Core\Registries\AssetRegistryBase.h" />
     <ClInclude Include="Include\Engine.Core\Registries\MeshRegistry.h" />
     <ClInclude Include="Include\Engine.Core\Registries\SceneRegistry.h" />
