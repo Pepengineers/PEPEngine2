@@ -42,7 +42,6 @@
     <ClInclude Include="src\Registries\TextureRegistry.cpp">
       <Filter>Source Files</Filter>
     </ClInclude>
-<<<<<<< HEAD
     <ClInclude Include="src\Registries\SceneRegistry.cpp">
       <Filter>Source Files</Filter>
     </ClInclude>
@@ -55,11 +54,9 @@
     <ClInclude Include="src\IO\SceneImporter.cpp">
       <Filter>Source Files</Filter>
     </ClInclude>
-=======
     <ClInclude Include="src\IO\MeshImporter.cpp">
       <Filter>Source Files</Filter>
     </ClInclude>
->>>>>>> 2b6acde (Add mesh importer and mesh loading)
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.Core\GameTimer.h">
