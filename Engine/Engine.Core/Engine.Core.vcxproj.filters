@@ -18,6 +18,9 @@
     <ClCompile Include="src\GameTimer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\AssetManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\Types\MeshTypes.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -30,9 +33,15 @@
     <ClInclude Include="src\Registries\MeshRegistry.cpp">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\Registries\TextureRegistry.cpp">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.Core\GameTimer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\AssetManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.Core\AssetHandles.h">
@@ -51,6 +60,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.Core\Registries\MeshRegistry.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\Registries\TextureRegistry.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
