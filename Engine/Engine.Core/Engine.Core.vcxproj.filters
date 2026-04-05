@@ -24,6 +24,9 @@
     <ClCompile Include="src\Types\TextureTypes.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClInclude Include="src\Registries\AssetRegistryBase.cpp">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.Core\GameTimer.h">
@@ -32,10 +35,16 @@
     <ClInclude Include="Include\Engine.Core\AssetHandles.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.Core\AssetLocators.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.Core\Types\MeshTypes.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.Core\Types\TextureTypes.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\Registries\AssetRegistryBase.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

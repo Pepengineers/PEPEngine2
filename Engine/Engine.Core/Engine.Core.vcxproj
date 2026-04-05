@@ -144,12 +144,15 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\GameTimer.cpp" />
+    <ClCompile Include="src\Registries\AssetRegistryBase.cpp" />
     <ClCompile Include="src\Types\MeshTypes.cpp" />
     <ClCompile Include="src\Types\TextureTypes.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.Core\AssetHandles.h" />
+    <ClInclude Include="Include\Engine.Core\AssetLocators.h" />
     <ClInclude Include="Include\Engine.Core\GameTimer.h" />
+    <ClInclude Include="Include\Engine.Core\Registries\AssetRegistryBase.h" />
     <ClInclude Include="Include\Engine.Core\Types\MeshTypes.h" />
     <ClInclude Include="Include\Engine.Core\Types\TextureTypes.h" />
   </ItemGroup>
