@@ -9,8 +9,6 @@
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
 
-namespace SimpleMath = DirectX::SimpleMath;
-
 namespace
 {
 	void LogSceneImporterMessage(const std::wstring& message)
@@ -18,6 +16,9 @@ namespace
 		OutputDebugStringW(message.c_str());
 	}
 
+	/// Creates a SceneNode from an Assimp node, decomposing its local transform
+	/// into separate translation, rotation and scale components.
+	/// parentIndex is -1 for root nodes.
 	Engine::Core::SceneNode CreateSceneNode(const aiNode& assimpNode, const std::int32_t parentIndex)
 	{
 		Engine::Core::SceneNode importedNode;
@@ -29,13 +30,17 @@ namespace
 		aiVector3D translation;
 		assimpNode.mTransformation.Decompose(scaling, rotation, translation);
 
-		importedNode.LocalTranslation = SimpleMath::Vector3(translation.x, translation.y, translation.z);
-		importedNode.LocalRotation = SimpleMath::Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
-		importedNode.LocalScale = SimpleMath::Vector3(scaling.x, scaling.y, scaling.z);
+		importedNode.LocalTranslation = DirectX::SimpleMath::Vector3(translation.x, translation.y, translation.z);
+		importedNode.LocalRotation = DirectX::SimpleMath::Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
+		importedNode.LocalScale = DirectX::SimpleMath::Vector3(scaling.x, scaling.y, scaling.z);
 
 		return importedNode;
 	}
 
+	/// Recursively imports an Assimp node and all its children into importedNodes.
+	/// For each mesh referenced by the node, registers and loads the corresponding
+	/// sub-asset into meshRegistry and records the resulting MeshHandle on the node.
+	/// Returns the index of the newly created node within importedNodes.
 	std::uint32_t ImportSceneNode(
 		const aiScene& assimpScene,
 		const aiNode& assimpNode,
@@ -116,12 +121,7 @@ namespace Engine::Core
 		Assimp::Importer importer;
 		const std::string sourcePathUtf8 = sourcePath.u8string();
 
-		const aiScene* assimpScene = importer.ReadFile(
-			sourcePathUtf8.c_str(),
-			aiProcess_Triangulate |
-			aiProcess_FlipUVs |
-			aiProcess_GenNormals |
-			aiProcess_CalcTangentSpace);
+		const aiScene* assimpScene = importer.ReadFile(sourcePathUtf8.c_str(), aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenNormals | aiProcess_CalcTangentSpace);
 
 		if (assimpScene == nullptr || assimpScene->mRootNode == nullptr || (assimpScene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) != 0)
 		{

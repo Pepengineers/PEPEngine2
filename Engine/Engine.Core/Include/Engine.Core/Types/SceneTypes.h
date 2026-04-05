@@ -8,8 +8,6 @@
 
 #include <directxtk/SimpleMath.h>
 
-namespace SimpleMath = DirectX::SimpleMath;
-
 namespace Engine::Core
 {
 	/// A single node in a scene hierarchy tree.
@@ -20,9 +18,9 @@ namespace Engine::Core
 		std::int32_t ParentIndex = -1;
 		std::vector<std::uint32_t> ChildrenIndices;
 		std::vector<MeshHandle> Meshes;
-		SimpleMath::Vector3 LocalTranslation = {0.0f, 0.0f, 0.0f};
-		SimpleMath::Quaternion LocalRotation = {0.0f, 0.0f, 0.0f, 1.0f};
-		SimpleMath::Vector3 LocalScale = {1.0f, 1.0f, 1.0f};
+		DirectX::SimpleMath::Vector3 LocalTranslation = {0.0f, 0.0f, 0.0f};
+		DirectX::SimpleMath::Quaternion LocalRotation = {0.0f, 0.0f, 0.0f, 1.0f};
+		DirectX::SimpleMath::Vector3 LocalScale = {1.0f, 1.0f, 1.0f};
 
 		/// Returns true if this node has a parent node.
 		[[nodiscard]] bool HasParent() const;
@@ -65,7 +63,6 @@ namespace Engine::Core
 		[[nodiscard]] const std::vector<std::uint32_t>& GetRootNodeIndices() const;
 
 		/// Returns the node at the given index.
-		/// Returns a default-constructed node if the index is out of range.
 		[[nodiscard]] const SceneNode& GetNode(const size_t nodeIndex) const;
 	};
 }

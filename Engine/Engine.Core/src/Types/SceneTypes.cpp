@@ -22,11 +22,7 @@ namespace Engine::Core
 #pragma endregion SceneNode
 
 #pragma region SceneAsset
-	SceneAsset::SceneAsset(std::vector<SceneNode> nodes, std::vector<std::uint32_t> rootNodeIndices)
-	{
-		_nodes = std::move(nodes);
-		_rootNodeIndices = std::move(rootNodeIndices);
-	}
+	SceneAsset::SceneAsset(std::vector<SceneNode> nodes, std::vector<std::uint32_t> rootNodeIndices) : _nodes(std::move(nodes)), _rootNodeIndices(std::move(rootNodeIndices)) {}
 
 	bool SceneAsset::IsEmpty() const
 	{
@@ -56,13 +52,7 @@ namespace Engine::Core
 	const SceneNode& SceneAsset::GetNode(const size_t nodeIndex) const
 	{
 		assert(nodeIndex < _nodes.size());
-		if (nodeIndex >= _nodes.size())
-		{
-			static const SceneNode invalidNode;
-			return invalidNode;
-		}
-		
-		return _nodes[nodeIndex];
+		return _nodes.at(nodeIndex);
 	}
 #pragma endregion SceneAsset
 }
