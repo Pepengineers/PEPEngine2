@@ -7,29 +7,25 @@
 
 namespace Engine::Core
 {
+	/// Stable identifier of a asset entry inside AssetManager storage.
+	template<typename Tag>
+	struct AssetHandle
+	{
+		static constexpr std::uint32_t InvalidValue = (std::numeric_limits<std::uint32_t>::max)();
+		std::uint32_t Value = InvalidValue;
+
+		[[nodiscard]] bool IsValid() const
+		{
+			return Value != InvalidValue;
+		}
+	};
+
+	struct MeshTag{};
+	struct TextureTag{};
+
 	/// Stable identifier of a mesh entry inside AssetManager storage.
-	struct MeshHandle
-	{
-		static constexpr std::uint32_t InvalidValue = (std::numeric_limits<std::uint32_t>::max)();
+	using MeshHandle = AssetHandle<MeshTag>;
 
-		std::uint32_t Value = InvalidValue;
-
-		[[nodiscard]] bool IsValid() const
-		{
-			return Value != InvalidValue;
-		}
-	};
-	
 	/// Stable identifier of a texture entry inside AssetManager storage.
-	struct TextureHandle
-	{
-		static constexpr std::uint32_t InvalidValue = (std::numeric_limits<std::uint32_t>::max)();
-
-		std::uint32_t Value = InvalidValue;
-
-		[[nodiscard]] bool IsValid() const
-		{
-			return Value != InvalidValue;
-		}
-	};
+	using TextureHandle = AssetHandle<TextureTag>;
 }

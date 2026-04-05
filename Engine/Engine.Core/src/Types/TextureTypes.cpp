@@ -7,18 +7,9 @@
 namespace Engine::Core
 {
 	Texture::Texture(const TextureDesc& desc, std::vector<SubTexture> subresources)
-	{
-		_dimension = desc.Dimension;
-		_format = desc.Format;
-		_width = desc.Width;
-		_height = desc.Height;
-		_depth = desc.Depth;
-		_arraySize = desc.ArraySize;
-		_mipLevels = desc.MipLevels;
-		_bIsCubeMap = desc.bIsCubeMap;
-
-		_subresources = std::move(subresources);
-	}
+		: _dimension(desc.Dimension), _format(desc.Format), _width(desc.Width), _height(desc.Height),
+		_depth(desc.Depth), _arraySize(desc.ArraySize), _mipLevels (desc.MipLevels),
+		_bIsCubeMap(desc.bIsCubeMap), _subresources(std::move(subresources)) {}
 
 	ETextureDimension Texture::GetDimension() const
 	{
@@ -77,10 +68,10 @@ namespace Engine::Core
 
 	const SubTexture& Texture::GetSubresource(const std::uint32_t mipLevel, const std::uint32_t arraySlice) const
 	{
+		assert(mipLevel < _mipLevels);
+		assert(arraySlice < _arraySize);
 		const size_t index = static_cast<size_t>(arraySlice) * _mipLevels + mipLevel;
-
 		assert(index < _subresources.size());
-
-		return _subresources[index];
+		return _subresources.at(index);
 	}
 }
