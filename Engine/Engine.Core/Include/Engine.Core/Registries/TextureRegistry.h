@@ -1,4 +1,6 @@
-﻿#pragma once
+﻿// TextureRegistry.h
+
+#pragma once
 
 #include <Engine.Core/Types/TextureTypes.h>
 #include <Engine.Core/AssetHandles.h>
@@ -29,6 +31,12 @@ namespace Engine::Core
 
 		/// Loads a texture from cache or from disk and caches the result.
 		[[nodiscard]] std::shared_ptr<const Texture> Load(const std::filesystem::path& path);
+
+		/// Loads a texture from cache or from disk and returns the default texture on failure.
+		[[nodiscard]] std::shared_ptr<const Texture> LoadOrDefault(const std::filesystem::path& path);
+
+		/// Returns the lazily-created default error texture.
+		[[nodiscard]] std::shared_ptr<const Texture> GetDefaultTexture();
 		
 	protected:
 		/// Returns the display name of this registry, used in log messages.
@@ -46,5 +54,10 @@ namespace Engine::Core
 
 		/// Returns the singular asset type name used in log messages.
 		[[nodiscard]] const wchar_t* GetAssetTypeName() const override;
+
+	private:
+		/// Fallback texture returned when a requested texture is missing or failed to load.
+		/// Created once on first use and reused for all subsequent fallback requests.
+		std::shared_ptr<Texture> _defaultTexture;
 	};
 }

@@ -98,4 +98,58 @@ namespace Engine::Core
 
 		return Cache(textureHandle, std::move(loadedTexture));
 	}
+
+	std::shared_ptr<const Texture> TextureRegistry::LoadOrDefault(const std::filesystem::path& path)
+	{
+		const std::shared_ptr<const Texture> loadedTexture = Load(path);
+		if (loadedTexture != nullptr)
+		{
+			return loadedTexture;
+		}
+
+		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Falling back to default texture for path: " +
+			ResolveSourcePath(path).generic_wstring() + L"\n");
+
+		return GetDefaultTexture();
+	}
+
+	std::shared_ptr<const Texture> TextureRegistry::GetDefaultTexture()
+	{
+		if (_defaultTexture != nullptr)
+		{
+			return _defaultTexture;
+		}
+
+		const std::filesystem::path defaultTexturePath = L"missing_texture.dds";
+
+		TextureHandle defaultTextureHandle = FindHandle(defaultTexturePath);
+		if (!defaultTextureHandle.IsValid())
+		{
+			defaultTextureHandle = Register(defaultTexturePath);
+		}
+
+		if (defaultTextureHandle.IsValid())
+		{
+			const std::shared_ptr<const Texture> loadedDefaultTexture = Load(defaultTexturePath);
+			if (loadedDefaultTexture != nullptr)
+			{
+				_defaultTexture = std::const_pointer_cast<Texture>(loadedDefaultTexture);
+
+				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Loaded default texture from path: " +
+					GetSourcePath(defaultTextureHandle).generic_wstring() + L"\n");
+
+				return _defaultTexture;
+			}
+		}
+
+		_defaultTexture = TextureLoader::CreateDefaultTexture();
+		if (_defaultTexture == nullptr)
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to create fallback default texture.\n");
+			return nullptr;
+		}
+
+		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Using built-in fallback default texture.\n");
+		return _defaultTexture;
+	}
 }

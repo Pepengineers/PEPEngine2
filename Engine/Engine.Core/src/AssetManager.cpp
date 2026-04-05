@@ -38,6 +38,11 @@ namespace Engine::Core
 		return _textureRegistry.Load(path);
 	}
 
+	std::shared_ptr<const Texture> AssetManager::LoadTextureOrDefault(const std::filesystem::path& path)
+	{
+		return _textureRegistry.LoadOrDefault(path);
+	}
+
 #pragma region Accessors
 	MeshRegistry& AssetManager::Meshes()
 	{
