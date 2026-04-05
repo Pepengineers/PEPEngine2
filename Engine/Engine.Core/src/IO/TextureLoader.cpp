@@ -18,11 +18,16 @@ namespace
 	public:
 		ScopedComInitialization()
 		{
+			// CoInitializeEx must be called before any COM objects (e.g. WIC) can be created.
+			// COINIT_MULTITHREADED - this thread uses the free-threaded COM apartment model.
 			_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 		}
 
 		~ScopedComInitialization()
 		{
+			// CoUninitialize must be called once for each successful CoInitializeEx call.
+			// If CoInitializeEx returned RPC_E_CHANGED_MODE, COM was already initialized
+			// by someone else - we must not call CoUninitialize in that case.
 			if (SUCCEEDED(_result))
 			{
 				CoUninitialize();
@@ -31,10 +36,15 @@ namespace
 
 		[[nodiscard]] bool IsUsable() const
 		{
+			// S_OK - COM was initialized successfully by this call.
+			// S_FALSE - COM was already initialized on this thread with the same apartment model.
+			// RPC_E_CHANGED_MODE - COM was already initialized with a different apartment model.
+			// This is not an error - COM is still usable, we just don't own it.
 			return SUCCEEDED(_result) || _result == RPC_E_CHANGED_MODE;
 		}
 
 	private:
+		// Stores the result of CoInitializeEx to determine ownership and usability.
 		HRESULT _result = E_FAIL;
 	};
 
@@ -55,11 +65,15 @@ namespace
 		return extension;
 	}
 
+	/// Returns true if text begins with the given prefix.
 	bool StartsWith(const std::string& text, const std::string_view prefix)
 	{
 		return text.size() >= prefix.size() && text.compare(0, prefix.size(), prefix) == 0;
 	}
 
+	/// Reads up to maxBytes bytes from the beginning of the file at sourcePath.
+	/// Returns fewer bytes if the file is smaller than maxBytes.
+	/// The returned string contains raw binary data, not a null-terminated string.
 	std::string ReadFilePrefix(const std::filesystem::path& sourcePath, const size_t maxBytes)
 	{
 		std::ifstream inputFile(sourcePath, std::ios::binary);
@@ -77,6 +91,7 @@ namespace
 		return prefix;
 	}
 
+	/// Returns true if the file at sourcePath is a Git LFS pointer rather than real asset data.
 	bool IsGitLfsPointerFile(const std::filesystem::path& sourcePath)
 	{
 		static constexpr std::string_view GitLfsPointerPrefix = "version https://git-lfs.github.com/spec/v1";
@@ -85,6 +100,8 @@ namespace
 		return StartsWith(filePrefix, GitLfsPointerPrefix);
 	}
 
+	/// Returns true if the file at sourcePath begins with the DDS magic bytes ("DDS ").
+	/// Used to guard against files that have a .dds extension but invalid or missing content.
 	bool HasDdsMagic(const std::filesystem::path& sourcePath)
 	{
 		static constexpr std::string_view DdsMagic = "DDS ";
@@ -93,131 +110,147 @@ namespace
 		return StartsWith(filePrefix, DdsMagic);
 	}
 
+	/// Loads a texture from a WIC-compatible format (PNG, JPG, BMP, etc.) into a CPU Texture.
+	/// The decoded pixels are always converted to DXGI_FORMAT_R8G8B8A8_UNORM regardless
+	/// of the source pixel format.
+	/// Returns nullptr on any failure.
 	std::shared_ptr<Engine::Core::Texture> LoadTextureFromWicFile(const std::filesystem::path& sourcePath)
+    {
+    	using Microsoft::WRL::ComPtr;
+
+		// Creating a WIC factory.
+    	ComPtr<IWICImagingFactory> imagingFactory;
+		// CoCreateInstance is the standard way to create a COM object.
+		// CLSID_WICImagingFactory tells it to create specifically a WIC factory.
+		// CLSCTX_INPROC_SERVER means the object lives in the same process.
+		// IID_PPV_ARGS is a macro that automatically supplies the correct interface and the pointer where the result should be stored.
+    	HRESULT hr = CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(imagingFactory.GetAddressOf()));
+
+    	if (FAILED(hr))
     	{
-    		using Microsoft::WRL::ComPtr;
-    
-    		ComPtr<IWICImagingFactory> imagingFactory;
-    		HRESULT hr = CoCreateInstance(
-    			CLSID_WICImagingFactory,
-    			nullptr,
-    			CLSCTX_INPROC_SERVER,
-    			IID_PPV_ARGS(imagingFactory.GetAddressOf()));
-    
-    		if (FAILED(hr))
-    		{
-    			return nullptr;
-    		}
-    
-    		ComPtr<IWICBitmapDecoder> decoder;
-    		hr = imagingFactory->CreateDecoderFromFilename(
-    			sourcePath.c_str(),
-    			nullptr,
-    			GENERIC_READ,
-    			WICDecodeMetadataCacheOnDemand,
-    			decoder.GetAddressOf());
-    
-    		if (FAILED(hr))
-    		{
-    			return nullptr;
-    		}
-    
-    		ComPtr<IWICBitmapFrameDecode> frame;
-    		hr = decoder->GetFrame(0, frame.GetAddressOf());
-    		if (FAILED(hr))
-    		{
-    			return nullptr;
-    		}
-    
-    		UINT width = 0;
-    		UINT height = 0;
-    		hr = frame->GetSize(&width, &height);
-    		if (FAILED(hr) || width == 0 || height == 0)
-    		{
-    			return nullptr;
-    		}
-    
-    		ComPtr<IWICBitmapSource> bitmapSource;
-    
-    		WICPixelFormatGUID pixelFormat = {};
-    		hr = frame->GetPixelFormat(&pixelFormat);
-    		if (FAILED(hr))
-    		{
-    			return nullptr;
-    		}
-    
-    		if (pixelFormat == GUID_WICPixelFormat32bppRGBA)
-    		{
-    			hr = frame.As(&bitmapSource);
-    			if (FAILED(hr))
-    			{
-    				return nullptr;
-    			}
-    		}
-    		else
-    		{
-    			ComPtr<IWICFormatConverter> formatConverter;
-    			hr = imagingFactory->CreateFormatConverter(formatConverter.GetAddressOf());
-    			if (FAILED(hr))
-    			{
-    				return nullptr;
-    			}
-    
-    			hr = formatConverter->Initialize(
-    				frame.Get(),
-    				GUID_WICPixelFormat32bppRGBA,
-    				WICBitmapDitherTypeNone,
-    				nullptr,
-    				0.0,
-    				WICBitmapPaletteTypeCustom);
-    
-    			if (FAILED(hr))
-    			{
-    				return nullptr;
-    			}
-    
-    			hr = formatConverter.As(&bitmapSource);
-    			if (FAILED(hr))
-    			{
-    				return nullptr;
-    			}
-    		}
-    
-    		Engine::Core::TextureDesc textureDesc;
-    		textureDesc.Dimension = Engine::Core::ETextureDimension::Texture2D;
-    		textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    		textureDesc.Width = static_cast<std::uint32_t>(width);
-    		textureDesc.Height = static_cast<std::uint32_t>(height);
-    		textureDesc.Depth = 1;
-    		textureDesc.ArraySize = 1;
-    		textureDesc.MipLevels = 1;
-    		textureDesc.bIsCubeMap = false;
-    
-    		Engine::Core::SubTexture subresource;
-    		subresource.Width = textureDesc.Width;
-    		subresource.Height = textureDesc.Height;
-    		subresource.Depth = 1;
-    		subresource.RowPitch = static_cast<size_t>(width) * 4u;
-    		subresource.SlicePitch = subresource.RowPitch * static_cast<size_t>(height);
-    		subresource.Data.resize(subresource.SlicePitch);
-    
-    		hr = bitmapSource->CopyPixels(
-    			nullptr,
-    			static_cast<UINT>(subresource.RowPitch),
-    			static_cast<UINT>(subresource.SlicePitch),
-    			reinterpret_cast<BYTE*>(subresource.Data.data()));
-    
-    		if (FAILED(hr))
-    		{
-    			return nullptr;
-    		}
-    
-    		std::vector<Engine::Core::SubTexture> subresources;
-    		subresources.push_back(std::move(subresource));
-    
-    		return std::make_shared<Engine::Core::Texture>(textureDesc, std::move(subresources));
+    		return nullptr;
     	}
 
+		// Creating a decoder.
+    	ComPtr<IWICBitmapDecoder> decoder;
+		// WIC automatically detects the file format (PNG, JPG, BMP, etc.) and creates the appropriate decoder.
+		// WICDecodeMetadataCacheOnDemand means metadata is loaded lazily, only when needed.
+    	hr = imagingFactory->CreateDecoderFromFilename(sourcePath.c_str(), nullptr, GENERIC_READ, WICDecodeMetadataCacheOnDemand, decoder.GetAddressOf());
+
+    	if (FAILED(hr))
+    	{
+    		return nullptr;
+    	}
+
+		// Getting a frame.
+    	ComPtr<IWICBitmapFrameDecode> frame;
+		// Some formats (e.g. GIF) can contain multiple frames.
+		// Here, the first one is always taken - index 0.
+    	hr = decoder->GetFrame(0, frame.GetAddressOf());
+		
+    	if (FAILED(hr))
+    	{
+    		return nullptr;
+    	}
+
+    	UINT width = 0;
+    	UINT height = 0;
+    	hr = frame->GetSize(&width, &height);
+    	if (FAILED(hr) || width == 0 || height == 0)
+    	{
+    		return nullptr;
+    	}
+
+		// Converting the pixel format.
+    	ComPtr<IWICBitmapSource> bitmapSource;
+
+		// Different files store pixels differently - RGB without alpha, 16 bits per channel, palettes, etc.
+		// The GPU expects R8G8B8A8_UNORM - 4 bytes per pixel.
+    	WICPixelFormatGUID pixelFormat = {};
+    	hr = frame->GetPixelFormat(&pixelFormat);
+		
+    	if (FAILED(hr))
+    	{
+    		return nullptr;
+    	}
+
+		// If the format is already correct, we use the frame directly via As
+		// (this is a COM QueryInterface - getting another interface of the same object).
+    	if (pixelFormat == GUID_WICPixelFormat32bppRGBA)
+    	{
+    		hr = frame.As(&bitmapSource);
+    		if (FAILED(hr))
+    		{
+    			return nullptr;
+    		}
+    	}
+		// Otherwise, we create a converter that transforms the pixels into the required format on the fly.
+    	else
+    	{
+    		ComPtr<IWICFormatConverter> formatConverter;
+    		hr = imagingFactory->CreateFormatConverter(formatConverter.GetAddressOf());
+    		if (FAILED(hr))
+    		{
+    			return nullptr;
+    		}
+
+    		hr = formatConverter->Initialize(
+    			frame.Get(),
+    			GUID_WICPixelFormat32bppRGBA,
+    			WICBitmapDitherTypeNone,
+    			nullptr,
+    			0.0,
+    			WICBitmapPaletteTypeCustom);
+
+    		if (FAILED(hr))
+    		{
+    			return nullptr;
+    		}
+
+    		hr = formatConverter.As(&bitmapSource);
+    		if (FAILED(hr))
+    		{
+    			return nullptr;
+    		}
+    	}
+
+    	Engine::Core::TextureDesc textureDesc;
+    	textureDesc.Dimension = Engine::Core::ETextureDimension::Texture2D;
+    	textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    	textureDesc.Width = static_cast<std::uint32_t>(width);
+    	textureDesc.Height = static_cast<std::uint32_t>(height);
+    	textureDesc.Depth = 1;
+    	textureDesc.ArraySize = 1;
+    	textureDesc.MipLevels = 1;
+    	textureDesc.bIsCubeMap = false;
+
+    	Engine::Core::SubTexture subresource;
+    	subresource.Width = textureDesc.Width;
+    	subresource.Height = textureDesc.Height;
+    	subresource.Depth = 1;
+    	subresource.RowPitch = static_cast<size_t>(width) * 4u;
+    	subresource.SlicePitch = subresource.RowPitch * static_cast<size_t>(height);
+    	subresource.Data.resize(subresource.SlicePitch);
+
+    	hr = bitmapSource->CopyPixels(
+    		nullptr,
+    		static_cast<UINT>(subresource.RowPitch),
+    		static_cast<UINT>(subresource.SlicePitch),
+    		reinterpret_cast<BYTE*>(subresource.Data.data()));
+
+    	if (FAILED(hr))
+    	{
+    		return nullptr;
+    	}
+
+    	std::vector<Engine::Core::SubTexture> subresources;
+    	subresources.push_back(std::move(subresource));
+
+    	return std::make_shared<Engine::Core::Texture>(textureDesc, std::move(subresources));
+    }
+
+	/// Loads a DDS, TGA or HDR file into a DirectXTex ScratchImage.
+	/// Returns a failing HRESULT if the extension is not recognized or loading fails.
 	HRESULT LoadScratchImageFromFile(const std::filesystem::path& sourcePath, DirectX::TexMetadata& metadata, DirectX::ScratchImage& scratchImage)
 	{
 		const std::wstring extension = ToLowerExtension(sourcePath);
@@ -240,6 +273,8 @@ namespace
 		return HRESULT_FROM_WIN32(ERROR_NOT_SUPPORTED);
 	}
 
+	/// Maps a DirectXTex texture dimension to the engine's ETextureDimension enum.
+	/// Cubemaps are detected via metadata.IsCubemap() and returned as TextureCube.
 	Engine::Core::ETextureDimension ConvertTextureDimension(const DirectX::TexMetadata& metadata)
 	{
 		switch (metadata.dimension)
@@ -258,6 +293,10 @@ namespace
 		}
 	}
 
+	/// Converts a loaded DirectXTex ScratchImage into a CPU Texture by copying
+	/// each subresource (mip level / array slice) into a SubTexture.
+	/// 3D textures are not supported and return nullptr.
+	/// Returns nullptr if any subresource has missing pixel data.
 	std::shared_ptr<Engine::Core::Texture> CreateTextureFromScratchImage(const DirectX::TexMetadata& metadata, const DirectX::ScratchImage& scratchImage)
 	{
 		if (metadata.dimension == DirectX::TEX_DIMENSION_TEXTURE3D)
@@ -331,7 +370,6 @@ namespace Engine::Core
 			LogTextureLoaderMessage(L"[TextureLoader] Failed to load texture: file is a Git LFS pointer, not real texture data: " + sourcePath.generic_wstring() + L"\n");
 			return nullptr;
 		}
-
 
 		const std::wstring extension = ToLowerExtension(sourcePath);
 		if (extension == L".dds" && !HasDdsMagic(sourcePath))

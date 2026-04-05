@@ -10,6 +10,7 @@ namespace SimpleMath = DirectX::SimpleMath;
 
 namespace 
 {
+	/// Converts engine-side MeshImportOptions into Assimp post-process flags bitmask.
 	std::uint32_t BuildAssimpPostProcessFlags(const Engine::Core::MeshImportOptions& options)
 	{
 		std::uint32_t assimpFlags = 0;
@@ -36,7 +37,9 @@ namespace
 
 		return assimpFlags;
 	}
-	
+
+	/// Constructs a BoundingBox from explicit min/max corner points.
+	/// Center and Extents are computed as the midpoint and half-size of the AABB.
 	DirectX::BoundingBox CreateBoundsFromMinMax(const SimpleMath::Vector3& minPoint, const SimpleMath::Vector3& maxPoint)
 	{
 		DirectX::BoundingBox bounds;
@@ -56,6 +59,8 @@ namespace
 		return bounds;
 	}
 
+	/// Computes a tight axis-aligned bounding box enclosing all given vertices.
+	/// Returns a default-constructed BoundingBox if the vertex list is empty.
 	DirectX::BoundingBox CalculateVertexBounds(const std::vector<Engine::Core::Vertex>& vertices)
 	{
 		if (vertices.empty())
@@ -80,6 +85,9 @@ namespace
 		return CreateBoundsFromMinMax(minPoint, maxPoint);
 	}
 
+	/// Computes a tight axis-aligned bounding box enclosing all given submeshes.
+	/// Each submesh's Bounds is unpacked into min/max corners and merged into a single AABB.
+	/// Returns a default-constructed BoundingBox if the submesh list is empty.
 	DirectX::BoundingBox CalculateMeshBounds(const std::vector<Engine::Core::SubMesh>& subMeshes)
 	{
 		if (subMeshes.empty())
@@ -133,6 +141,7 @@ namespace
 		return CreateBoundsFromMinMax(minPoint, maxPoint);
 	}
 
+	/// Transforms a position vector by a 4x4 matrix, including the translation component (w=1).
 	aiVector3D TransformPosition(const aiMatrix4x4& transform, const aiVector3D& position)
 	{
 		return
@@ -143,6 +152,8 @@ namespace
 		};
 	}
 
+	/// Transforms a direction vector (normal, tangent) by the inverse-transpose of the given matrix.
+	/// The result is re-normalized to unit length.
 	aiVector3D TransformDirection(const aiMatrix4x4& transform, const aiVector3D& direction)
 	{
 		aiMatrix4x4 normalTransform = transform;
@@ -162,7 +173,11 @@ namespace
 
 		return transformedDirection;
 	}
-
+	
+	/// Converts a single Assimp mesh into an engine SubMesh.
+	/// Vertex positions, normals, UVs and tangents are read from the Assimp mesh and
+	/// baked into world space using nodeTransform.
+	/// startVertexLocation and startIndexLocation are recorded for use in merged GPU buffers.
 	Engine::Core::SubMesh ImportSubMesh(const aiMesh& assimpMesh, const aiMatrix4x4& nodeTransform, const std::uint32_t startVertexLocation, const std::uint32_t startIndexLocation)
 	{
 		Engine::Core::SubMesh importedSubMesh;
@@ -220,6 +235,11 @@ namespace
 		return importedSubMesh;
 	}
 
+	/// Recursively walks the Assimp node tree and imports all meshes into importedSubMeshes.
+	/// nodeTransform accumulates the full chain of transforms from the root to the current node,
+	/// so that each mesh is baked into a common world space.
+	/// startVertexLocation and startIndexLocation are updated after each imported submesh
+	/// to maintain correct offsets for a merged GPU vertex/index buffer.
 	void ImportNodeMeshes(
 		const aiScene& assimpScene,
 		const aiNode& assimpNode,
