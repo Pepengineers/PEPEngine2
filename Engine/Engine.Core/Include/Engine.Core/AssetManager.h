@@ -28,6 +28,7 @@ namespace Engine::Core
 		static AssetManager& GetInstance();
 
 		[[nodiscard]] std::shared_ptr<const Mesh> LoadMesh(const std::filesystem::path& path);
+		[[nodiscard]] std::shared_ptr<const Texture> LoadTexture(const std::filesystem::path& path);
 
 		/// Returns the mesh registry.
 		[[nodiscard]] MeshRegistry& Meshes();

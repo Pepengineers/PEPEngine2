@@ -39,6 +39,9 @@
     <ClInclude Include="src\IO\MeshImporter.cpp">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\IO\TextureLoader.cpp">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.Core\GameTimer.h">
@@ -75,6 +78,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.Core\IO\MeshImporter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\IO\TextureLoader.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

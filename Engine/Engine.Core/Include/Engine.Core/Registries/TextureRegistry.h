@@ -27,6 +27,9 @@ namespace Engine::Core
 		/// or nullptr if the path is not registered or the texture has not been cached.
 		[[nodiscard]] std::shared_ptr<const Texture> FindTexture(const std::filesystem::path& path) const;
 
+		/// Loads a texture from cache or from disk and caches the result.
+		[[nodiscard]] std::shared_ptr<const Texture> Load(const std::filesystem::path& path);
+		
 	protected:
 		/// Returns the display name of this registry, used in log messages.
 		[[nodiscard]] const wchar_t* GetRegistryName() const override;

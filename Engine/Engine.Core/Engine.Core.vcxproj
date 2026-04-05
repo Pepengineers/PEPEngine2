@@ -146,6 +146,7 @@
     <ClCompile Include="src\AssetManager.cpp" />
     <ClCompile Include="src\GameTimer.cpp" />
     <ClCompile Include="src\IO\MeshImporter.cpp" />
+    <ClCompile Include="src\IO\TextureLoader.cpp" />
     <ClCompile Include="src\Registries\AssetRegistryBase.cpp" />
     <ClCompile Include="src\Registries\MeshRegistry.cpp" />
     <ClCompile Include="src\Registries\TextureRegistry.cpp" />
@@ -159,6 +160,7 @@
     <ClInclude Include="Include\Engine.Core\GameTimer.h" />
     <ClInclude Include="Include\Engine.Core\IO\ImportPolicies.h" />
     <ClInclude Include="Include\Engine.Core\IO\MeshImporter.h" />
+    <ClInclude Include="Include\Engine.Core\IO\TextureLoader.h" />
     <ClInclude Include="Include\Engine.Core\Registries\AssetRegistryBase.h" />
     <ClInclude Include="Include\Engine.Core\Registries\MeshRegistry.h" />
     <ClInclude Include="Include\Engine.Core\Registries\TextureRegistry.h" />
