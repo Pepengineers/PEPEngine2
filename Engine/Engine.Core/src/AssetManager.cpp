@@ -54,6 +54,16 @@ namespace Engine::Core
 		return _meshRegistry;
 	}
 
+	SceneRegistry& AssetManager::Scenes()
+	{
+		return _sceneRegistry;
+	}
+
+	const SceneRegistry& AssetManager::Scenes() const
+	{
+		return _sceneRegistry;
+	}
+
 	TextureRegistry& AssetManager::Textures()
 	{
 		return _textureRegistry;

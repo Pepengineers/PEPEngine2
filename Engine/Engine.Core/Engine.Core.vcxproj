@@ -149,8 +149,10 @@
     <ClCompile Include="src\IO\TextureLoader.cpp" />
     <ClCompile Include="src\Registries\AssetRegistryBase.cpp" />
     <ClCompile Include="src\Registries\MeshRegistry.cpp" />
+    <ClCompile Include="src\Registries\SceneRegistry.cpp" />
     <ClCompile Include="src\Registries\TextureRegistry.cpp" />
     <ClCompile Include="src\Types\MeshTypes.cpp" />
+    <ClCompile Include="src\Types\SceneTypes.cpp" />
     <ClCompile Include="src\Types\TextureTypes.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -163,9 +165,11 @@
     <ClInclude Include="Include\Engine.Core\IO\TextureLoader.h" />
     <ClInclude Include="Include\Engine.Core\Registries\AssetRegistryBase.h" />
     <ClInclude Include="Include\Engine.Core\Registries\MeshRegistry.h" />
+    <ClInclude Include="Include\Engine.Core\Registries\SceneRegistry.h" />
     <ClInclude Include="Include\Engine.Core\Registries\TextureRegistry.h" />
     <ClInclude Include="Include\Engine.Core\Registries\TypedAssetRegistry.h" />
     <ClInclude Include="Include\Engine.Core\Types\MeshTypes.h" />
+    <ClInclude Include="Include\Engine.Core\Types\SceneTypes.h" />
     <ClInclude Include="Include\Engine.Core\Types\TextureTypes.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
