@@ -57,3 +57,8 @@ External/**/Debug/**
 !External/**/Debug/**/*.lib
 
 .idea/
+
+*.pdb
+
+# ReSharper/Rider user settings
+*.DotSettings.user
