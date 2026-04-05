@@ -1,9 +1,13 @@
-// App.Benchmark.cpp
+﻿// AssetManagerSmokeTests.cpp
 
+#include <App.Benchmark/AssetManagerSmokeTests.h>
+
+#include <cstdio>
+#include <filesystem>
 #include <iostream>
 #include <set>
-
-#include <App.Base/AppBase.h>
+#include <string>
+#include <windows.h>
 
 #include <Engine.Core/AssetManager.h>
 
@@ -11,21 +15,30 @@ namespace
 {
 	void OpenConsole()
 	{
+		// Do nothing if a console is already attached (e.g. launched from a terminal).
 		if (GetConsoleWindow() != nullptr)
 		{
 			return;
 		}
 
+		// Allocate a new console window for this process.
 		AllocConsole();
 
+		// Redirect stdout, stderr and stdin to the new console window.
+		// CONOUT$ and CONIN$ are special Windows device names for the console output and input.
 		FILE* fileStream = nullptr;
 		freopen_s(&fileStream, "CONOUT$", "w", stdout);
 		freopen_s(&fileStream, "CONOUT$", "w", stderr);
 		freopen_s(&fileStream, "CONIN$", "r", stdin);
 
+		// Sync C++ streams (std::wcout) with C streams (stdout) after redirection.
 		std::ios::sync_with_stdio();
+
+		// Print booleans as "true"/"false" instead of "1"/"0".
 		std::wcout << std::boolalpha;
 		std::wcerr << std::boolalpha;
+
+		// Print floating point numbers with 3 decimal places in fixed notation (e.g. 1.234).
 		std::wcout.precision(3);
 		std::wcout << std::fixed;
 	}
@@ -372,79 +385,8 @@ namespace
 	}
 }
 
-
-class BenchmarkApp : public AppBase
+void RunAssetManagerSmokeTests()
 {
-public:
-	BenchmarkApp(HINSTANCE hInstance);
-	BenchmarkApp(const BenchmarkApp& rhs) = delete;
-	BenchmarkApp& operator =(const BenchmarkApp& rhs) = delete;
-	~BenchmarkApp();
-
-	virtual bool Initialize() override;
-
-private:
-	virtual void OnResize() override;
-	virtual void Update(const GameTimer& gameTimer) override;
-	virtual void Draw(const GameTimer& gameTimer) override;
-
-	virtual void OnMouseDown(WPARAM btnState, int x, int y) override;
-	virtual void OnMouseUp(WPARAM btnState, int x, int y) override;
-	virtual void OnMouseMove(WPARAM btnState, int x, int y) override;
-};
-
-int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, int showCmd)
-{
-	// Enable run-time memory check for debug builds.
-#if defined(DEBUG) | defined(_DEBUG)
-	_CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
-#endif
-
-	UNREFERENCED_PARAMETER(prevInstance);
-	UNREFERENCED_PARAMETER(cmdLine);
-	UNREFERENCED_PARAMETER(showCmd);
-
-	try
-	{
-		BenchmarkApp TheApp(hInstance);
-		if (!TheApp.Initialize())
-		{
-			return 0;
-		}
-
-		return TheApp.Run();
-	}
-	catch (DxException& e)
-	{
-		MessageBox(nullptr, e.ToString().c_str(), L"App Init Failed", MB_OK);
-		return 0;
-	}
-}
-
-BenchmarkApp::BenchmarkApp (HINSTANCE hInstance)
-	: AppBase(hInstance)
-{
-}
-
-BenchmarkApp::~BenchmarkApp()
-{
-}
-
-bool BenchmarkApp::Initialize()
-{
-	if (!AppBase::Initialize())
-	{
-		return false;
-	}
-
-	//Engine::UI::Initialize();
-	//Engine::UI::ShutdownUI();
-
-	//Engine::RendererDX12::InitializeLibraries(nullptr);
-	//Engine::RendererDX12::ShutdownLibraries();
-
-	//Engine::RendererDX12::CheckAssimp();
-
 	OpenConsole();
 	RunAssetImportSmokeTest();
 	RunTextureImportSmokeTest();
@@ -452,48 +394,4 @@ bool BenchmarkApp::Initialize()
 	std::wcout << L"\nPress Enter to close...\n";
 	std::wstring line;
 	std::getline(std::wcin, line);
-
-	return false;
-
-	return true;
-}
-
-void BenchmarkApp::OnResize()
-{
-	AppBase::OnResize();
-}
-
-void BenchmarkApp::Update(const GameTimer& gameTimer)
-{
-	UNREFERENCED_PARAMETER(gameTimer);
-}
-
-void BenchmarkApp::Draw(const GameTimer& gameTimer)
-{
-	UNREFERENCED_PARAMETER(gameTimer);
-}
-
-void BenchmarkApp::OnMouseDown(WPARAM btnState, int x, int y)
-{
-	UNREFERENCED_PARAMETER(btnState);
-	UNREFERENCED_PARAMETER(x);
-	UNREFERENCED_PARAMETER(y);
-
-	SetCapture(MainWndHandle);
-}
-
-void BenchmarkApp::OnMouseUp(WPARAM btnState, int x, int y)
-{
-	UNREFERENCED_PARAMETER(btnState);
-	UNREFERENCED_PARAMETER(x);
-	UNREFERENCED_PARAMETER(y);
-
-	ReleaseCapture();
-}
-
-void BenchmarkApp::OnMouseMove(WPARAM btnState, int x, int y)
-{
-	UNREFERENCED_PARAMETER(btnState);
-	UNREFERENCED_PARAMETER(x);
-	UNREFERENCED_PARAMETER(y);
 }
