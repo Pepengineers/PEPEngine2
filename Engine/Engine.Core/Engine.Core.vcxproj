@@ -152,6 +152,7 @@
     <ClCompile Include="src\Registries\MeshRegistry.cpp" />
     <ClCompile Include="src\Registries\SceneRegistry.cpp" />
     <ClCompile Include="src\Registries\TextureRegistry.cpp" />
+    <ClCompile Include="src\SceneTraversal.cpp" />
     <ClCompile Include="src\Types\MeshTypes.cpp" />
     <ClCompile Include="src\Types\SceneTypes.cpp" />
     <ClCompile Include="src\Types\TextureTypes.cpp" />
@@ -170,6 +171,7 @@
     <ClInclude Include="Include\Engine.Core\Registries\SceneRegistry.h" />
     <ClInclude Include="Include\Engine.Core\Registries\TextureRegistry.h" />
     <ClInclude Include="Include\Engine.Core\Registries\TypedAssetRegistry.h" />
+    <ClInclude Include="Include\Engine.Core\SceneTraversal.h" />
     <ClInclude Include="Include\Engine.Core\Types\MeshTypes.h" />
     <ClInclude Include="Include\Engine.Core\Types\SceneTypes.h" />
     <ClInclude Include="Include\Engine.Core\Types\TextureTypes.h" />
