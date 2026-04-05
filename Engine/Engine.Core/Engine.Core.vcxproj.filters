@@ -27,6 +27,9 @@
     <ClInclude Include="src\Registries\AssetRegistryBase.cpp">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="src\Registries\MeshRegistry.cpp">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.Core\GameTimer.h">
@@ -45,6 +48,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.Core\Registries\AssetRegistryBase.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\Registries\MeshRegistry.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
