@@ -8,6 +8,8 @@
 
 namespace Engine::Core
 {
+	class MeshRegistry;
+	
 	/// Concrete asset registry for scene resources.
 	///
 	/// Extends AssetRegistryBase with storage for loaded scene data.
@@ -22,7 +24,7 @@ namespace Engine::Core
 	/// This allows paths to be pre-registered at startup while actual scene data
 	/// is loaded lazily or asynchronously on demand.
 	class SceneRegistry : public AssetRegistryBase
-	{
+	{		
 	private:
 #pragma region Internal Types
 		/// Internal storage record for a single scene asset.
@@ -68,6 +70,14 @@ namespace Engine::Core
 		/// Looks up a scene by file path and returns its data,
 		/// or nullptr if the path is not registered or the scene has not been cached.
 		[[nodiscard]] std::shared_ptr<const SceneAsset> FindScene(const std::filesystem::path& path) const;
+
+		/// Loads the scene from the given path, importing it from disk if needed.
+		/// If the scene is already cached, returns the existing instance without re-importing.
+		/// Registers the path automatically if it has not been registered yet.
+		/// The provided MeshRegistry is forwarded to the scene importer, which registers
+		/// and loads any meshes referenced by the scene during import.
+		/// Returns nullptr if the path is empty, registration fails, or import fails.
+		[[nodiscard]] std::shared_ptr<const SceneAsset> Load(const std::filesystem::path& path, MeshRegistry& meshRegistry);
 
 		/// Stores loaded scene data into the slot identified by the given handle.
 		/// Returns the stored scene pointer, allowing use in assignment expressions.

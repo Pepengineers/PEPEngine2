@@ -2,6 +2,7 @@
 
 #include <Engine.Core/Registries/SceneRegistry.h>
 #include <Engine.Core/Registries/MeshRegistry.h>
+#include "Engine.Core/IO/SceneImporter.h"
 
 namespace Engine::Core
 {
@@ -79,6 +80,49 @@ namespace Engine::Core
 	std::shared_ptr<const SceneAsset> SceneRegistry::FindScene(const std::filesystem::path& path) const
 	{
 		return GetScene(FindHandle(path));
+	}
+
+	std::shared_ptr<const SceneAsset> SceneRegistry::Load(const std::filesystem::path& path, MeshRegistry& meshRegistry)
+	{
+		if (path.empty())
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to load scene: empty path.\n");
+			return nullptr;
+		}
+
+		const std::shared_ptr<const SceneAsset> cachedScene = FindScene(path);
+		if (cachedScene != nullptr)
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Reusing cached scene for path: " + ResolveSourcePath(path).generic_wstring() + L"\n");
+			return cachedScene;
+		}
+
+		const SceneHandle sceneHandle = Register(path);
+		if (!sceneHandle.IsValid())
+		{
+			return nullptr;
+		}
+
+		const std::filesystem::path sourcePath = GetSourcePath(sceneHandle);
+		if (sourcePath.empty())
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to load scene: could not resolve source path.\n");
+			return nullptr;
+		}
+
+		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Importing scene from path: " + sourcePath.generic_wstring() + L"\n");
+
+		std::shared_ptr<SceneAsset> importedScene = SceneImporter::ImportSceneAsset(sourcePath, meshRegistry);
+		if (importedScene == nullptr)
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to import scene from path: " + sourcePath.generic_wstring() + L"\n");
+			return nullptr;
+		}
+
+		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Imported scene with " +
+			std::to_wstring(importedScene->GetNodeCount()) + L" nodes from path: " + sourcePath.generic_wstring() + L"\n");
+
+		return Cache(sceneHandle, std::move(importedScene));
 	}
 
 	std::shared_ptr<const SceneAsset> SceneRegistry::Cache(const SceneHandle handle, std::shared_ptr<SceneAsset> data)
