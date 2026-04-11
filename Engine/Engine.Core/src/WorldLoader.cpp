@@ -14,15 +14,21 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     /* example creating entities 
     
     WorldECS& ecs = world.GetECS();
+    const std::string worldName = path.stem().string();
 
-    Entity e1 = ecs.CreateEntity();
-    ecs.Add<NameComponent>(e1, NameComponent{ "Entity_A" });
-    ecs.Add<TranslateComponent>(e1, TranslateComponent{ 0.0f, 1.0f, 2.0f });
-    ecs.Add<VelocityComponent>(e1, VelocityComponent{ 1.0f, 0.0f, 0.0f });
+    auto player = ecs.CreateEntity();
+    player.AddComponent<NameComponent>(worldName + "_Player");
+    player.AddComponent<TranslateComponent>(0.0f, 1.0f, 2.0f);
+    player.AddComponent<VelocityComponent>(1.0f, 0.0f, 0.0f);
 
-    Entity e2 = ecs.CreateEntity();
-    ecs.Add<NameComponent>(e2, NameComponent{ "Entity_B" });
-    ecs.Add<TranslateComponent>(e2, TranslateComponent{ 10.0f, 20.0f, 30.0f });
+    auto enemy = ecs.CreateEntity();
+    enemy.AddComponent<NameComponent>(worldName + "_Enemy");
+    enemy.AddComponent<TranslateComponent>(10.0f, 0.0f, 5.0f);
+    enemy.AddComponent<VelocityComponent>(-0.5f, 0.0f, 0.25f);
+
+    auto marker = ecs.CreateEntity();
+    marker.AddComponent<NameComponent>(worldName + "_Marker");
+    marker.AddComponent<TranslateComponent>(3.0f, 7.0f, -1.0f);
     */
     return true;
 }

@@ -141,6 +141,67 @@ template<typename... Components>
 class ECSStorage
 {
 public:
+    class EntityHandle 
+    {
+    public:
+        EntityHandle() = default;
+
+        Entity GetId() const
+        {
+            return _entity;
+        }
+
+        explicit operator bool() const
+        {
+            return _storage != nullptr && _storage->IsAlive(_entity);
+        }
+
+        operator Entity() const
+        {
+            return _entity;
+        }
+
+        template<typename T, typename... Args>
+        T& AddComponent(Args&&... args)
+        {
+            return _storage->template Add<T>(_entity, std::forward<Args>(args)...);
+        }
+
+        template<typename T>
+        void RemoveComponent()
+        {
+            _storage->Remove<T>(_entity);
+        }
+
+        template<typename T>
+        bool HasComponent() const
+        {
+            return _storage->Has<T>(_entity);
+        }
+
+        template<typename T>
+        T& GetComponent()
+        {
+            return _storage->Get<T>(_entity);
+        }
+
+        template<typename T>
+        const T& GetComponent() const
+        {
+            return _storage->Get<T>(_entity);
+        }
+
+    private:
+        friend class ECSStorage<Components...>;
+
+        EntityHandle(ECSStorage* storage, Entity entity)
+            : _storage(storage), _entity(entity)
+        {}
+
+        ECSStorage* _storage = nullptr;
+        Entity _entity = InvalidEntity;
+    };
+
     ECSStorage()
     {
         _aliveList.push_back(false);
@@ -154,7 +215,7 @@ public:
         ClearPools<0>();
     }
 
-    Entity CreateEntity()
+    Entity AllocateEntitySlot()
     {
         if (!_freeList.empty())
         {
@@ -167,6 +228,16 @@ public:
         Entity created = static_cast<Entity>(_aliveList.size());
         _aliveList.push_back(true);
         return created;
+    }
+
+    EntityHandle CreateEntity()
+    {
+        return EntityHandle(this, AllocateEntitySlot());
+    }
+
+    EntityHandle GetEntityHandle(Entity entity)
+    {
+        return EntityHandle(this, entity);
     }
 
     void DestroyEntity(Entity entity)
