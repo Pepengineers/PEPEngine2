@@ -8,7 +8,7 @@ bool World::Load()
 
 bool World::Save(std::filesystem::path path)
 {
-    return WorldLoader::SaveToFile(*this, _desc.WorldFilePath);
+    return WorldLoader::SaveToFile(*this, path);
 }
 
 void World::Tick(float dt) // not implemented
