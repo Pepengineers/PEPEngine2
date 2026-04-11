@@ -27,7 +27,7 @@ public:
     };
 
     template<typename T, typename... Args>
-    void AddSystem(World* world, int priority, Args&&... args) {
+    void AddSystem(World* world, uint8_t priority, Args&&... args) {
         SystemEntry entry;
         entry.priority = priority;
         entry.world = world;
