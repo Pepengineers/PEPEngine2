@@ -50,24 +50,11 @@ namespace Engine::Core
 		std::uint32_t Depth = 1;
 		std::uint32_t ArraySize = 1;
 		std::uint32_t MipLevels = 1;
-		bool bIsCubeMap = false;
 	};
 
 	/// CPU-side texture representation.
 	class Texture
-    {
-	private:
-		ETextureDimension _dimension = ETextureDimension::Unknown;
-		DXGI_FORMAT _format = DXGI_FORMAT_UNKNOWN;
-		std::uint32_t _width = 0;
-		std::uint32_t _height = 0;
-		std::uint32_t _depth = 1;
-		std::uint32_t _arraySize = 1;
-		std::uint32_t _mipLevels = 1;
-		bool _bIsCubeMap = false;
-
-		std::vector<SubTexture> _subresources;
-
+	{
 	public:
 		Texture() = default;
 		Texture(const TextureDesc& desc, std::vector<SubTexture> subresources);
@@ -109,5 +96,9 @@ namespace Engine::Core
 		/// Parameter order matches D3D12CalcSubresource: mip is the inner index, array slice is the outer.
 		/// Subresource index is computed as: arraySlice * MipLevels + mipLevel.
 		[[nodiscard]] const SubTexture& GetSubresource(const std::uint32_t mipLevel, const std::uint32_t arraySlice) const;
+
+	private:
+		TextureDesc _desc;
+		std::vector<SubTexture> _subresources;
     };
 }

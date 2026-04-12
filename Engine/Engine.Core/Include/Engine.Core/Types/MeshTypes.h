@@ -39,10 +39,6 @@ namespace Engine::Core
 	/// CPU-side mesh representation.
 	class Mesh
 	{
-	private:
-		std::vector<SubMesh> _subMeshes;
-		DirectX::BoundingBox _bounds = {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
-
 	public:
 		Mesh() = default;
 		Mesh(std::vector<SubMesh> subMeshes, const DirectX::BoundingBox& bounds);
@@ -61,5 +57,9 @@ namespace Engine::Core
 
 		/// Returns the submesh at the given index.
 		[[nodiscard]] const SubMesh& GetSubMesh(const size_t subMeshIndex) const;
+
+	private:
+		std::vector<SubMesh> _subMeshes;
+		DirectX::BoundingBox _bounds = {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
 	};
 }

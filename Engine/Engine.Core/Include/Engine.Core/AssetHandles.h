@@ -12,12 +12,35 @@ namespace Engine::Core
 	struct AssetHandle
 	{
 		static constexpr std::uint32_t InvalidValue = (std::numeric_limits<std::uint32_t>::max)();
-		std::uint32_t Value = InvalidValue;
 
-		[[nodiscard]] bool IsValid() const
+		constexpr AssetHandle() noexcept = default;
+		explicit constexpr AssetHandle(const std::uint32_t value) noexcept
+			: _value(value)
 		{
-			return Value != InvalidValue;
 		}
+
+		[[nodiscard]] constexpr bool IsValid() const noexcept
+		{
+			return _value != InvalidValue;
+		}
+
+		[[nodiscard]] constexpr std::uint32_t GetValue() const noexcept
+		{
+			return _value;
+		}
+
+		[[nodiscard]] constexpr bool operator==(const AssetHandle& other) const noexcept
+		{
+			return _value == other._value;
+		}
+
+		[[nodiscard]] constexpr bool operator!=(const AssetHandle& other) const noexcept
+		{
+			return !(*this == other);
+		}
+
+	private:
+		std::uint32_t _value = InvalidValue;
 	};
 
 	struct MeshTag{};
