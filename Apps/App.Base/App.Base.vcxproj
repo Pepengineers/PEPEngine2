@@ -19,10 +19,14 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Include\App.Base\AppBase.h" />
+    <ClInclude Include="Include\App.Base\App.h" />
+    <ClInclude Include="Include\RenderModule.h" />
+    <ClInclude Include="Include\Window.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\AppBase.cpp" />
+    <ClCompile Include="src\App.cpp" />
+    <ClCompile Include="src\RenderModule.cpp" />
+    <ClCompile Include="src\Window.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>

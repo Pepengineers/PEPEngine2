@@ -19,10 +19,8 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Include\Engine.RHI\EngineRHI.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="src\EngineRHI.cpp" />
+    <Folder Include="Include\Engine.RHI\" />
+    <Folder Include="src\" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>

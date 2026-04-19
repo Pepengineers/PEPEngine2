@@ -48,6 +48,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.Core\WorldLoader.h">
+    <ClInclude Include="Include\Engine.Core\LockThreadQueue.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
