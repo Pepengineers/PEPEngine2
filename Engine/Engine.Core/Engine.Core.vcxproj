@@ -152,7 +152,6 @@
   <ItemGroup>
     <ClInclude Include="Include\Engine.Core\Components.h" />
     <ClInclude Include="Include\Engine.Core\ECSStorage.h" />
-    <ClInclude Include="Include\Engine.Core\GameTimer.h" />
     <ClInclude Include="Include\Engine.Core\SceneManager.h" />
     <ClInclude Include="Include\Engine.Core\System.h" />
     <ClInclude Include="Include\Engine.Core\World.h" />
