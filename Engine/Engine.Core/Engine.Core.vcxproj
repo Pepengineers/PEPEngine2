@@ -135,6 +135,7 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -147,8 +148,17 @@
     <ClCompile Include="src\ConsoleModule.cpp">
     </ClCompile>
     <ClCompile Include="src\GameTimer.cpp" />
+    <ClCompile Include="src\SceneManager.cpp" />
+    <ClCompile Include="src\World.cpp" />
+    <ClCompile Include="src\WorldLoader.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.Core\Components.h" />
+    <ClInclude Include="Include\Engine.Core\ECSStorage.h" />
+    <ClInclude Include="Include\Engine.Core\SceneManager.h" />
+    <ClInclude Include="Include\Engine.Core\System.h" />
+    <ClInclude Include="Include\Engine.Core\World.h" />
+    <ClInclude Include="Include\Engine.Core\WorldLoader.h" />
     <ClInclude Include="Include\Common\ConsoleVariables.h" />
     <ClInclude Include="Include\Common\GameTimer.h" />
     <ClInclude Include="Include\Common\LockThreadQueue.h" />
