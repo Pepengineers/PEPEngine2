@@ -225,7 +225,7 @@ namespace Engine::Core
 			{
 				assert(_records.size() == static_cast<size_t>(registrationResult.HandleValue));
 
-				Record record;
+				Record record = {};
 				record.Metadata = std::move(metadata);
 
 				_records.push_back(std::move(record));

@@ -21,7 +21,7 @@ namespace Engine::Core
 
 	MeshAssetLocator MeshRegistry::MakeMetadataForRegisteredPath(const std::filesystem::path& resolvedSourcePath) const
 	{
-		MeshAssetLocator locator;
+		MeshAssetLocator locator = {};
 		locator.SourcePath = resolvedSourcePath;
 		return locator;
 	}

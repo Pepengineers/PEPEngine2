@@ -39,7 +39,7 @@ namespace Engine::Core
 
 	AssetRegistryBase::RegistrationResult AssetRegistryBase::RegisterResolvedPath(const std::filesystem::path& sourcePath, const std::wstring& cacheKey)
 	{
-		RegistrationResult registrationResult;
+		RegistrationResult registrationResult = {};
 		registrationResult.SourcePath = sourcePath;
 		registrationResult.CacheKey = cacheKey;
 
