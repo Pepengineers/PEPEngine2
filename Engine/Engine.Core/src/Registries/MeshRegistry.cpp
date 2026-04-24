@@ -197,52 +197,7 @@ namespace Engine::Core
 				resolvedLocator.SourcePath.generic_wstring() + L"\n");
 		}
 
-		return Cache(meshHandle, std::move(importedMesh));
-	}
-
-	std::shared_ptr<const Mesh> MeshRegistry::Cache(const MeshHandle handle, std::shared_ptr<Mesh> data)
-	{
-		assert(handle.IsValid());
-		assert(data != nullptr);
-
-		if (!handle.IsValid() || data == nullptr)
-		{
-			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to cache mesh: invalid handle or null mesh data.\n");
-			return nullptr;
-		}
-
-		const size_t meshIndex = static_cast<size_t>(handle.Value);
-		if (meshIndex >= _meshAssets.size())
-		{
-			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to cache mesh: handle index out of range: " + std::to_wstring(handle.Value) + L"\n");
-			return nullptr;
-		}
-
-		Record& record = _meshAssets[meshIndex];
-		if (record.MeshData != nullptr)
-		{
-			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Mesh data already cached for handle " + std::to_wstring(handle.Value) + L".\n");
-			return record.MeshData;
-		}
-
-		record.MeshData = std::move(data);
-
-		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Cached mesh data for handle " + std::to_wstring(handle.Value) + L". Path: " + record.Locator.SourcePath.generic_wstring() + L"\n");
-
-		return record.MeshData;
-	}
-
-	std::shared_ptr<const Mesh> MeshRegistry::Cache(const std::filesystem::path& path, std::shared_ptr<Mesh> data)
-	{
-		const MeshHandle meshHandle = Register(path);
-		if (!meshHandle.IsValid())
-		{
-			return nullptr;
-		}
-
-		return Cache(meshHandle, std::move(data));
-	}
-
+		return TypedAssetRegistry<Mesh, MeshHandle, MeshAssetLocator>::Cache(meshHandle, std::move(importedMesh));
 	}
 
 	MeshAssetLocator MeshRegistry::GetLocator(const MeshHandle handle) const

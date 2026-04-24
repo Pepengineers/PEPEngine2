@@ -3,9 +3,6 @@
 #include <Engine.Core/Registries/TextureRegistry.h>
 #include <Engine.Core/IO/TextureLoader.h>
 
-#include <cassert>
-#include <windows.h>
-
 namespace Engine::Core
 {
 	const wchar_t* TextureRegistry::GetRegistryName() const
@@ -58,7 +55,7 @@ namespace Engine::Core
 			return nullptr;
 		}
 
-		const std::shared_ptr<const Texture> cachedTexture = FindTexture(path);
+		std::shared_ptr<const Texture> cachedTexture = FindTexture(path);
 		if (cachedTexture != nullptr)
 		{
 			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Reusing cached texture for path: " +
@@ -101,7 +98,7 @@ namespace Engine::Core
 
 	std::shared_ptr<const Texture> TextureRegistry::LoadOrDefault(const std::filesystem::path& path)
 	{
-		const std::shared_ptr<const Texture> loadedTexture = Load(path);
+		std::shared_ptr<const Texture> loadedTexture = Load(path);
 		if (loadedTexture != nullptr)
 		{
 			return loadedTexture;

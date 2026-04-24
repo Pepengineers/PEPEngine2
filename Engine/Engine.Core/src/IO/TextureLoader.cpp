@@ -222,7 +222,6 @@ namespace
     	textureDesc.Depth = 1;
     	textureDesc.ArraySize = 1;
     	textureDesc.MipLevels = 1;
-    	textureDesc.bIsCubeMap = false;
 
     	Engine::Core::SubTexture subresource;
     	subresource.Width = textureDesc.Width;
@@ -320,7 +319,6 @@ namespace
 		textureDesc.Depth = static_cast<std::uint32_t>(metadata.depth);
 		textureDesc.ArraySize = static_cast<std::uint32_t>(metadata.arraySize);
 		textureDesc.MipLevels = static_cast<std::uint32_t>(metadata.mipLevels);
-		textureDesc.bIsCubeMap = metadata.IsCubemap();
 
 		std::vector<Engine::Core::SubTexture> subresources;
 		subresources.reserve(imageCount);
@@ -428,7 +426,6 @@ namespace Engine::Core
 		textureDesc.Depth = 1;
 		textureDesc.ArraySize = 1;
 		textureDesc.MipLevels = 1;
-		textureDesc.bIsCubeMap = false;
 
 		SubTexture subresource;
 		subresource.Width = 2;

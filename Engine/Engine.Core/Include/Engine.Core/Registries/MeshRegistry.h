@@ -54,12 +54,6 @@ namespace Engine::Core
         /// If locator contains SubAssetIndex, loads only that mesh sub-asset from the source file.
         [[nodiscard]] std::shared_ptr<const Mesh> Load(const MeshAssetLocator& locator);
 
-		/// Registers the given locator (if not already registered) and stores
-		/// the provided mesh data into the resulting slot in a single call.
-		/// Equivalent to calling Register(locator) followed by Cache(handle, data).
-		/// Returns the stored mesh pointer, or nullptr if registration fails.
-		[[nodiscard]] std::shared_ptr<const Mesh> Cache(const MeshAssetLocator& locator, std::shared_ptr<Mesh> data);
-
 		/// Returns the resolved mesh locator associated with the given handle.
 		/// The handle must have been obtained from a prior call to Register().
 		/// Returns a default-constructed locator if the handle is invalid or out of range.
