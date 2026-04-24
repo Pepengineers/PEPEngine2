@@ -20,74 +20,6 @@ namespace Engine::Core
 	/// Moving is allowed to support registry relocation (e.g. storing in containers).
 	class AssetRegistryBase
 	{
-	protected:
-#pragma region Internal Types
-		/// Sentinel value indicating an uninitialized or invalid handle.
-		static constexpr std::uint32_t InvalidHandleValue = (std::numeric_limits<std::uint32_t>::max)();
-
-		/// Result returned by RegisterPath(), describing the outcome of a registration attempt.
-		struct RegistrationResult
-		{
-			/// The handle value assigned to the registered path,
-			/// or InvalidHandleValue if registration failed.
-			std::uint32_t HandleValue = InvalidHandleValue;
-
-			/// The resolved, normalized source path used for the actual asset lookup.
-			std::filesystem::path SourcePath;
-
-			/// The normalized wide-string key used to look up this entry in the internal handle map.
-			/// Derived from the resolved source path via BuildCacheKey().
-			std::wstring CacheKey;
-
-			/// True if the path was already registered before this call.
-			/// When true, the existing handle is returned rather than a new one being allocated.
-			bool bAlreadyRegistered = false;
-		};
-#pragma endregion Internal Types
-
-#pragma region Fields
-		/// Maps normalized path strings to their assigned handle values.
-		std::unordered_map<std::wstring, std::uint32_t> _handlesByPath;
-#pragma endregion Fields
-
-		/// Default constructor. Initializes an empty registry.
-		/// Only callable from derived classes.
-		AssetRegistryBase() = default;
-
-		/// Returns a human-readable name for this registry, used in log messages.
-		/// Must be implemented by each derived registry (e.g. L"MeshRegistry").
-		[[nodiscard]] virtual const wchar_t* GetRegistryName() const = 0;
-
-		/// Resolves a raw input path to a normalized source path suitable for loading.
-		[[nodiscard]] virtual std::filesystem::path ResolveSourcePath(const std::filesystem::path& path) const = 0;
-
-		/// Writes a formatted message to the registry-specific log output.
-		static void WriteRegistryLog(const std::wstring& message);
-
-		/// Builds a normalized wide-string cache key from a given path.
-		/// The key is used as the lookup key in the internal handle map.
-		[[nodiscard]] std::wstring BuildCacheKey(const std::filesystem::path& path) const;
-
-		/// Registers a resolved, already-normalized path directly, bypassing the resolution step.
-		/// Use this when the source path and cache key have already been computed.
-		[[nodiscard]] RegistrationResult RegisterResolvedPath(const std::filesystem::path& sourcePath, const std::wstring& cacheKey);
-
-		/// Registers a path and assigns it a new handle if not already registered.
-		/// Returns a RegistrationResult describing the assigned handle, resolved path,
-		/// and whether the path was already present in the registry.
-		[[nodiscard]] RegistrationResult RegisterPath(const std::filesystem::path& path);
-
-		/// Returns true if the given cache key is already present in the internal handle map.
-		[[nodiscard]] bool IsRegisteredKey(const std::wstring& cacheKey) const;
-
-		/// Returns the handle value assigned to the given cache key,
-		/// or InvalidHandleValue if the key has not been registered.
-		[[nodiscard]] std::uint32_t FindHandleValueByKey(const std::wstring& cacheKey) const;
-
-		/// Removes all registered path-to-handle mappings from the registry.
-		/// Does not unload any underlying assets - use UnloadAll() for that.
-		void ClearRegistry();
-
 	public:
 		/// Virtual destructor. Ensures correct cleanup when deleting through a base pointer.
 		virtual ~AssetRegistryBase() = default;
@@ -118,5 +50,79 @@ namespace Engine::Core
 		/// Unloads all assets tracked by this registry and clears its internal state.
 		/// Must be implemented by derived classes to perform type-specific cleanup.
 		virtual void UnloadAll() = 0;
+
+		protected:
+#pragma region Internal Types
+		/// Sentinel value indicating an uninitialized or invalid handle.
+		static constexpr std::uint32_t InvalidHandleValue = (std::numeric_limits<std::uint32_t>::max)();
+
+		/// Result returned by RegisterPath(), describing the outcome of a registration attempt.
+		struct RegistrationResult
+		{
+			/// The handle value assigned to the registered path,
+			/// or InvalidHandleValue if registration failed.
+			std::uint32_t HandleValue = InvalidHandleValue;
+
+			/// The resolved, normalized source path used for the actual asset lookup.
+			std::filesystem::path SourcePath;
+
+			/// The normalized wide-string key used to look up this entry in the internal handle map.
+			/// Derived from the resolved source path via BuildCacheKey().
+			std::wstring CacheKey;
+
+			/// True if the path was already registered before this call.
+			/// When true, the existing handle is returned rather than a new one being allocated.
+			bool bAlreadyRegistered = false;
+		};
+#pragma endregion Internal Types
+
+#pragma region Fields
+		/// Maps normalized path strings to their assigned handle values.
+		std::unordered_map<std::wstring, std::uint32_t> _handlesByPath;
+
+		/// Monotonic counter used to issue new handle values.
+        std::uint32_t _nextHandleValue = 0;
+#pragma endregion Fields
+
+		/// Default constructor. Initializes an empty registry.
+		/// Only callable from derived classes.
+		AssetRegistryBase() = default;
+
+		/// Returns a human-readable name for this registry, used in log messages.
+		/// Must be implemented by each derived registry (e.g. L"MeshRegistry").
+		[[nodiscard]] virtual const wchar_t* GetRegistryName() const = 0;
+
+		/// Resolves a raw input path to a normalized source path suitable for loading.
+		[[nodiscard]] virtual std::filesystem::path ResolveSourcePath(const std::filesystem::path& path) const = 0;
+
+		/// Writes a formatted message to the registry-specific log output.
+		static void WriteRegistryLog(const std::wstring& message);
+
+		/// Builds a normalized wide-string cache key from a given path.
+		/// The key is used as the lookup key in the internal handle map.
+		[[nodiscard]] std::wstring BuildCacheKey(const std::filesystem::path& path) const;
+
+		/// Builds a normalized wide-string cache key from an already resolved source path.
+        [[nodiscard]] static std::wstring BuildCacheKeyFromResolvedPath(const std::filesystem::path& resolvedSourcePath);
+
+		/// Registers a resolved, already-normalized path directly, bypassing the resolution step.
+		/// Use this when the source path and cache key have already been computed.
+		[[nodiscard]] RegistrationResult RegisterResolvedPath(const std::filesystem::path& sourcePath, const std::wstring& cacheKey);
+
+		/// Registers a path and assigns it a new handle if not already registered.
+		/// Returns a RegistrationResult describing the assigned handle, resolved path,
+		/// and whether the path was already present in the registry.
+		[[nodiscard]] RegistrationResult RegisterPath(const std::filesystem::path& path);
+
+		/// Returns true if the given cache key is already present in the internal handle map.
+		[[nodiscard]] bool IsRegisteredKey(const std::wstring& cacheKey) const;
+
+		/// Returns the handle value assigned to the given cache key,
+		/// or InvalidHandleValue if the key has not been registered.
+		[[nodiscard]] std::uint32_t FindHandleValueByKey(const std::wstring& cacheKey) const;
+
+		/// Removes all registered path-to-handle mappings from the registry.
+		/// Does not unload any underlying assets - use UnloadAll() for that.
+		void ClearRegistry();
 	};
 }

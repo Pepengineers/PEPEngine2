@@ -59,6 +59,9 @@
     <ClInclude Include="Include\Engine.Core\Registries\AssetRegistryBase.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.Core\Registries\TypedAssetRegistry.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.Core\Registries\MeshRegistry.h">
       <Filter>Header Files</Filter>
     </ClInclude>

@@ -14,15 +14,6 @@ namespace Engine::Core
 	/// Central cache for CPU-side asset data.
 	class AssetManager
 	{
-	private:
-#pragma region Fields
-		MeshRegistry _meshRegistry;
-		TextureRegistry _textureRegistry;
-#pragma endregion Fields
-
-		AssetManager() = default;
-		~AssetManager() = default;
-
 	public:
 		// Prevents copying (AssetManager manager = AssetManager::GetInstance(); -> error)
 		AssetManager(const AssetManager& rhs) = delete;
@@ -45,5 +36,14 @@ namespace Engine::Core
 		[[nodiscard]] TextureRegistry& Textures();
 		/// Returns the texture registry.
 		[[nodiscard]] const TextureRegistry& Textures() const;
+
+	private:
+#pragma region Fields
+		MeshRegistry _meshRegistry;
+		TextureRegistry _textureRegistry;
+#pragma endregion Fields
+
+		AssetManager() = default;
+		~AssetManager() = default;
 	};
 }

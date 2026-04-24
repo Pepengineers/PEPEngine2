@@ -159,6 +159,7 @@
     <ClInclude Include="Include\Engine.Core\Registries\AssetRegistryBase.h" />
     <ClInclude Include="Include\Engine.Core\Registries\MeshRegistry.h" />
     <ClInclude Include="Include\Engine.Core\Registries\TextureRegistry.h" />
+    <ClInclude Include="Include\Engine.Core\Registries\TypedAssetRegistry.h" />
     <ClInclude Include="Include\Engine.Core\Types\MeshTypes.h" />
     <ClInclude Include="Include\Engine.Core\Types\TextureTypes.h" />
   </ItemGroup>

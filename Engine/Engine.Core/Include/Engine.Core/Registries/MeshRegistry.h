@@ -6,73 +6,31 @@
 #include <Engine.Core/AssetHandles.h>
 #include <Engine.Core/AssetLocators.h>
 #include <Engine.Core/Registries/AssetRegistryBase.h>
+#include <Engine.Core/Registries/TypedAssetRegistry.h>
 
 namespace Engine::Core
 {
 	/// Concrete asset registry for mesh resources.
 	///
-	/// Extends AssetRegistryBase with storage for loaded mesh data.
-	/// Each registered path is assigned a MeshHandle whose underlying value
-	/// serves as a direct index into the internal record array, allowing O(1)
-	/// lookup by handle.
+	/// Builds on TypedAssetRegistry to reuse the common typed storage and lifecycle logic:
+	///   - path registration;
+	///   - handle-to-record lookup;
+	///   - caching and unloading loaded mesh data;
+	///   - source-path queries and loaded-count tracking.
 	///
-	/// Registration and loading are intentionally decoupled:
-	///   - Register() - allocates a handle and a slot, but does not load any data.
-	///   - Cache() - stores already-loaded mesh data into a registered slot.
-	///
-	/// This allows paths to be pre-registered at startup while actual mesh data
-	/// is loaded lazily or asynchronously on demand.
-	class MeshRegistry : public AssetRegistryBase
+	/// MeshRegistry extends that common behavior with mesh-specific functionality:
+	///   - MeshAssetLocator-based registration and lookup;
+	///   - support for addressing sub-assets inside multi-mesh files;
+	///   - mesh-specific cache key construction.
+	class MeshRegistry : public TypedAssetRegistry<Mesh, MeshHandle, MeshAssetLocator>
 	{
-	private:
-#pragma region Internal Types
-		/// Internal storage record for a single mesh asset.
-		struct Record
-		{
-			/// The resolved locator identifying the source file and sub-asset index.
-			/// Set during Register() and never modified afterwards.
-			MeshAssetLocator Locator;
-
-			/// The loaded mesh data, or nullptr if the mesh has not been loaded yet
-			/// (registered but not cached) or has been unloaded.
-			std::shared_ptr<Mesh> MeshData;
-		};
-#pragma endregion Internal Types
-
-#pragma region Fields
-		/// Contiguous array of mesh records. The index of each element corresponds
-		/// to the handle value assigned during registration.
-		std::vector<Record> _meshAssets;
-#pragma endregion Fields
-
-		/// Builds a normalized wide-string cache key from a mesh asset locator.
-		/// Appends a "#mesh:<index>" suffix for locators with a sub-asset index,
-		/// ensuring that different sub-assets from the same file get distinct keys.
-		[[nodiscard]] std::wstring BuildMeshCacheKey(const MeshAssetLocator& locator) const;
-
-	protected:
-		/// Returns the display name of this registry, used in log messages.
-		[[nodiscard]] const wchar_t* GetRegistryName() const override;
-
-		/// Resolves a raw input path to a normalized source path suitable for loading.
-		[[nodiscard]] std::filesystem::path ResolveSourcePath(const std::filesystem::path& path) const override;
-
 	public:
-		/// Registers a mesh path and returns a stable handle for it.
-		/// If the path is already registered, returns the existing handle without
-		/// allocating a new slot. Does not load any mesh data.
-		[[nodiscard]] MeshHandle Register(const std::filesystem::path& path);
-
 		/// Registers a mesh locator and returns a stable handle for it.
-		/// If the locator is already registered, returns the existing handle without
-		/// allocating a new slot. Does not load any mesh data.
+		/// If the locator is already registered, returns the existing handle
+		/// without allocating a new slot. Does not load any mesh data.
 		[[nodiscard]] MeshHandle Register(const MeshAssetLocator& locator);
 
-		/// Returns the handle assigned to the given path,
-		/// or an invalid handle if the path has not been registered.
-		[[nodiscard]] MeshHandle FindHandle(const std::filesystem::path& path) const;
-
-		/// Returns the handle assigned to the given locator,
+		/// Returns the handle assigned to the given mesh locator,
 		/// or an invalid handle if the locator has not been registered.
 		[[nodiscard]] MeshHandle FindHandle(const MeshAssetLocator& locator) const;
 
@@ -88,48 +46,38 @@ namespace Engine::Core
 		/// or nullptr if the locator is not registered or the mesh has not been cached.
 		[[nodiscard]] std::shared_ptr<const Mesh> FindMesh(const MeshAssetLocator& locator) const;
 
-		/// Stores loaded mesh data into the slot identified by the given handle.
-		/// Returns the stored mesh pointer, allowing use in assignment expressions.
-		/// The handle must have been obtained from a prior call to Register().
-		[[nodiscard]] std::shared_ptr<const Mesh> Cache(const MeshHandle handle, std::shared_ptr<Mesh> data);
-
-		/// Registers the given path (if not already registered) and stores
-		/// the provided mesh data into the resulting slot in a single call.
-		/// Equivalent to calling Register() followed by Cache().
-		/// Returns the stored mesh pointer.
-		[[nodiscard]] std::shared_ptr<const Mesh> Cache(const std::filesystem::path& path, std::shared_ptr<Mesh> data);
-
 		/// Registers the given locator (if not already registered) and stores
 		/// the provided mesh data into the resulting slot in a single call.
-		/// Equivalent to calling Register() followed by Cache().
+		/// Equivalent to calling Register(locator) followed by Cache(handle, data).
 		/// Returns the stored mesh pointer, or nullptr if registration fails.
 		[[nodiscard]] std::shared_ptr<const Mesh> Cache(const MeshAssetLocator& locator, std::shared_ptr<Mesh> data);
 
-		/// Returns the source path associated with the given handle.
-		/// The handle must have been obtained from a prior call to Register().
-		/// Returns an empty path if the handle is invalid or out of range.
-		[[nodiscard]] std::filesystem::path GetSourcePath(MeshHandle handle) const;
-
-		/// Returns the resolved locator associated with the given handle.
+		/// Returns the resolved mesh locator associated with the given handle.
 		/// The handle must have been obtained from a prior call to Register().
 		/// Returns a default-constructed locator if the handle is invalid or out of range.
 		[[nodiscard]] MeshAssetLocator GetLocator(MeshHandle handle) const;
 
-		/// Returns true if the mesh at the given path has been registered
-		/// and its data is currently loaded in memory.
-		[[nodiscard]] bool IsLoaded(const std::filesystem::path& path) const;
+	protected:
+		/// Returns the display name of this registry, used in log messages.
+		[[nodiscard]] const wchar_t* GetRegistryName() const override;
 
-		/// Returns the number of mesh slots that currently have data loaded in memory.
-		/// This may be less than GetRegisteredCount() if some meshes are registered
-		/// but not yet cached, or have been unloaded.
-		[[nodiscard]] size_t GetLoadedCount() const;
+		/// Resolves a raw mesh path to a normalized source path suitable for loading.
+		[[nodiscard]] std::filesystem::path ResolveSourcePath(const std::filesystem::path& path) const override;
 
-		/// Releases the mesh data associated with the given handle,
-		/// freeing its memory while keeping the handle and path registration intact.
-		/// The slot can be re-populated later via Cache().
-		void Unload(MeshHandle handle);
+		/// Creates mesh metadata for a newly registered path.
+		/// For plain path-based registration this produces a locator without a sub-asset index.
+		[[nodiscard]] MeshAssetLocator MakeMetadataForRegisteredPath(const std::filesystem::path& resolvedSourcePath) const override;
 
-		/// Releases all mesh data and clears all mesh registrations.
-		void UnloadAll() override;
+		/// Extracts the canonical source path from stored mesh metadata.
+		[[nodiscard]] std::filesystem::path GetSourcePathFromMetadata(const MeshAssetLocator& metadata) const override;
+
+		/// Returns the singular asset type name used in log messages.
+		[[nodiscard]] const wchar_t* GetAssetTypeName() const override;
+
+	private:
+		/// Builds a normalized wide-string cache key from a mesh asset locator.
+		/// Appends a "#mesh:<index>" suffix for locators with a sub-asset index,
+		/// ensuring that different sub-assets from the same file get distinct keys.
+		[[nodiscard]] static std::wstring BuildMeshCacheKey(const MeshAssetLocator& locator);
 	};
 }

@@ -23,7 +23,11 @@ namespace Engine::Core
 	
 	std::wstring AssetRegistryBase::BuildCacheKey(const std::filesystem::path& path) const
 	{
-		const std::filesystem::path resolvedSourcePath = ResolveSourcePath(path);
+		return BuildCacheKeyFromResolvedPath(ResolveSourcePath(path));
+	}
+
+	std::wstring AssetRegistryBase::BuildCacheKeyFromResolvedPath(const std::filesystem::path& resolvedSourcePath)
+	{
 		// generic_wstring - converts the path to a string with a unified slash format (with '/' instead of '\')
 		// (e.g. "models\\cube.fbx" -> "models/cube.fbx")
 		std::wstring cacheKey = resolvedSourcePath.generic_wstring();
@@ -57,16 +61,7 @@ namespace Engine::Core
 			return registrationResult;
 		}
 
-		if (_handlesByPath.size() >= static_cast<size_t>(InvalidHandleValue))
-		{
-			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to register asset: registry is full. Key: " +
-				registrationResult.CacheKey + L"\n");
-
-			assert(false);
-			return registrationResult;
-		}
-
-		registrationResult.HandleValue = static_cast<std::uint32_t>(_handlesByPath.size());
+		registrationResult.HandleValue = _nextHandleValue++;
 		_handlesByPath.emplace(registrationResult.CacheKey, registrationResult.HandleValue);
 
 		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Registered handle " +
@@ -84,7 +79,7 @@ namespace Engine::Core
 		}
 
 		const std::filesystem::path resolvedSourcePath = ResolveSourcePath(path);
-		const std::wstring cacheKey = BuildCacheKey(resolvedSourcePath);
+		const std::wstring cacheKey = BuildCacheKeyFromResolvedPath(resolvedSourcePath);
 		return RegisterResolvedPath(resolvedSourcePath, cacheKey);
 	}
 
@@ -117,6 +112,7 @@ namespace Engine::Core
 	void AssetRegistryBase::ClearRegistry()
 	{
 		_handlesByPath.clear();
+		_nextHandleValue = 0;
 	}
 
 	bool AssetRegistryBase::IsRegistered(const std::filesystem::path& path) const
