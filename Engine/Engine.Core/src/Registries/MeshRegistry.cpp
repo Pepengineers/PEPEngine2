@@ -105,7 +105,7 @@ namespace Engine::Core
 
 	std::shared_ptr<const Mesh> MeshRegistry::Load(const std::filesystem::path& path)
 	{
-		MeshAssetLocator locator;
+		MeshAssetLocator locator = {};
 		locator.SourcePath = path;
 		return Load(locator);
 	}

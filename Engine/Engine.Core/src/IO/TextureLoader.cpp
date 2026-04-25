@@ -91,23 +91,31 @@ namespace
 		return prefix;
 	}
 
+	/// Returns true if the already-read file prefix is a Git LFS pointer rather than real asset data.
+	bool IsGitLfsPointerFile(const std::string& filePrefix)
+	{
+		static constexpr std::string_view GitLfsPointerPrefix = "version https://git-lfs.github.com/spec/v1";
+		return StartsWith(filePrefix, GitLfsPointerPrefix);
+	}
+
 	/// Returns true if the file at sourcePath is a Git LFS pointer rather than real asset data.
 	bool IsGitLfsPointerFile(const std::filesystem::path& sourcePath)
 	{
-		static constexpr std::string_view GitLfsPointerPrefix = "version https://git-lfs.github.com/spec/v1";
+		return IsGitLfsPointerFile(ReadFilePrefix(sourcePath, 128));
+	}
 
-		const std::string filePrefix = ReadFilePrefix(sourcePath, 128);
-		return StartsWith(filePrefix, GitLfsPointerPrefix);
+	/// Returns true if the already-read file prefix begins with the DDS magic bytes ("DDS ").
+	bool HasDdsMagic(const std::string& filePrefix)
+	{
+		static constexpr std::string_view DdsMagic = "DDS ";
+		return StartsWith(filePrefix, DdsMagic);
 	}
 
 	/// Returns true if the file at sourcePath begins with the DDS magic bytes ("DDS ").
 	/// Used to guard against files that have a .dds extension but invalid or missing content.
 	bool HasDdsMagic(const std::filesystem::path& sourcePath)
 	{
-		static constexpr std::string_view DdsMagic = "DDS ";
-
-		const std::string filePrefix = ReadFilePrefix(sourcePath, DdsMagic.size());
-		return StartsWith(filePrefix, DdsMagic);
+		return HasDdsMagic(ReadFilePrefix(sourcePath, 4));
 	}
 
 	/// Loads a texture from a WIC-compatible format (PNG, JPG, BMP, etc.) into a CPU Texture.
@@ -214,7 +222,7 @@ namespace
     		}
     	}
 
-    	Engine::Core::TextureDesc textureDesc;
+    	Engine::Core::TextureDesc textureDesc = {};
     	textureDesc.Dimension = Engine::Core::ETextureDimension::Texture2D;
     	textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     	textureDesc.Width = static_cast<std::uint32_t>(width);
@@ -223,7 +231,7 @@ namespace
     	textureDesc.ArraySize = 1;
     	textureDesc.MipLevels = 1;
 
-    	Engine::Core::SubTexture subresource;
+    	Engine::Core::SubTexture subresource = {};
     	subresource.Width = textureDesc.Width;
     	subresource.Height = textureDesc.Height;
     	subresource.Depth = 1;
@@ -295,7 +303,8 @@ namespace
 	/// Converts a loaded DirectXTex ScratchImage into a CPU Texture by copying
 	/// each subresource (mip level / array slice) into a SubTexture.
 	/// 3D textures are not supported and return nullptr.
-	/// Returns nullptr if any subresource has missing pixel data.
+	/// Returns nullptr if the subresource set is incomplete
+    /// or if any subresource has missing pixel data.
 	std::shared_ptr<Engine::Core::Texture> CreateTextureFromScratchImage(const DirectX::TexMetadata& metadata, const DirectX::ScratchImage& scratchImage)
 	{
 		if (metadata.dimension == DirectX::TEX_DIMENSION_TEXTURE3D)
@@ -311,7 +320,7 @@ namespace
 			return nullptr;
 		}
 
-		Engine::Core::TextureDesc textureDesc;
+		Engine::Core::TextureDesc textureDesc = {};
 		textureDesc.Dimension = ConvertTextureDimension(metadata);
 		textureDesc.Format = metadata.format;
 		textureDesc.Width = static_cast<std::uint32_t>(metadata.width);
@@ -319,6 +328,31 @@ namespace
 		textureDesc.Depth = static_cast<std::uint32_t>(metadata.depth);
 		textureDesc.ArraySize = static_cast<std::uint32_t>(metadata.arraySize);
 		textureDesc.MipLevels = static_cast<std::uint32_t>(metadata.mipLevels);
+		
+		// ScratchImage must contain the full dense subresource set described by TextureDesc
+		// (all mip levels for all array slices). Reject incomplete images here so we do not
+		// build a partial Texture or rely on constructor asserts to catch the mismatch.
+		const size_t expectedSubresourceCount = static_cast<size_t>(textureDesc.ArraySize) * textureDesc.MipLevels;
+        if (imageCount != expectedSubresourceCount)
+        {
+        	LogTextureLoaderMessage(L"[TextureLoader] Failed to create texture from scratch image: expected " +
+        		std::to_wstring(expectedSubresourceCount) + L" subresources, got " + std::to_wstring(imageCount) + L".\n");
+        	return nullptr;
+        }
+
+		// Validate the full subresource set up front.
+		// A Texture is expected to contain every mip level / array slice described by TextureDesc,
+		// so partial textures are rejected before any data is copied.
+		for (size_t imageIndex = 0; imageIndex < imageCount; ++imageIndex)
+		{
+			const DirectX::Image& image = images[imageIndex];
+			if (image.pixels == nullptr || image.slicePitch == 0)
+			{
+				LogTextureLoaderMessage(L"[TextureLoader] Failed to create texture from scratch image: subresource " +
+					std::to_wstring(imageIndex) + L" has missing pixel data.\n");
+				return nullptr;
+			}
+		}
 
 		std::vector<Engine::Core::SubTexture> subresources;
 		subresources.reserve(imageCount);
@@ -326,12 +360,8 @@ namespace
 		for (size_t imageIndex = 0; imageIndex < imageCount; ++imageIndex)
 		{
 			const DirectX::Image& image = images[imageIndex];
-			if (image.pixels == nullptr || image.slicePitch == 0)
-			{
-				return nullptr;
-			}
 
-			Engine::Core::SubTexture subresource;
+			Engine::Core::SubTexture subresource = {};
 			subresource.Width = static_cast<std::uint32_t>(image.width);
 			subresource.Height = static_cast<std::uint32_t>(image.height);
 			subresource.Depth = 1;
@@ -363,14 +393,16 @@ namespace Engine::Core
 			return nullptr;
 		}
 
-		if (IsGitLfsPointerFile(sourcePath))
+		const std::string filePrefix = ReadFilePrefix(sourcePath, 128);
+
+		if (IsGitLfsPointerFile(filePrefix))
 		{
 			LogTextureLoaderMessage(L"[TextureLoader] Failed to load texture: file is a Git LFS pointer, not real texture data: " + sourcePath.generic_wstring() + L"\n");
 			return nullptr;
 		}
 
 		const std::wstring extension = ToLowerExtension(sourcePath);
-		if (extension == L".dds" && !HasDdsMagic(sourcePath))
+		if (extension == L".dds" && !HasDdsMagic(filePrefix))
 		{
 			LogTextureLoaderMessage(L"[TextureLoader] Failed to load texture: invalid DDS header in file: " + sourcePath.generic_wstring() + L"\n");
 			return nullptr;
@@ -418,7 +450,7 @@ namespace Engine::Core
 
 	std::shared_ptr<Texture> TextureLoader::CreateDefaultTexture()
 	{
-		TextureDesc textureDesc;
+		TextureDesc textureDesc = {};
 		textureDesc.Dimension = ETextureDimension::Texture2D;
 		textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		textureDesc.Width = 2;
@@ -427,7 +459,7 @@ namespace Engine::Core
 		textureDesc.ArraySize = 1;
 		textureDesc.MipLevels = 1;
 
-		SubTexture subresource;
+		SubTexture subresource = {};
 		subresource.Width = 2;
 		subresource.Height = 2;
 		subresource.Depth = 1;

@@ -5,6 +5,7 @@
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
+#include <assimp/matrix3x3.h>
 
 namespace SimpleMath = DirectX::SimpleMath;
 
@@ -42,7 +43,7 @@ namespace
 	/// Center and Extents are computed as the midpoint and half-size of the AABB.
 	DirectX::BoundingBox CreateBoundsFromMinMax(const SimpleMath::Vector3& minPoint, const SimpleMath::Vector3& maxPoint)
 	{
-		DirectX::BoundingBox bounds;
+		DirectX::BoundingBox bounds = {};
 		bounds.Center =
 		{
 			(minPoint.x + maxPoint.x) * 0.5f,
@@ -144,27 +145,23 @@ namespace
 	/// Transforms a position vector by a 4x4 matrix, including the translation component (w=1).
 	aiVector3D TransformPosition(const aiMatrix4x4& transform, const aiVector3D& position)
 	{
-		return
-		{
-			transform.a1 * position.x + transform.a2 * position.y + transform.a3 * position.z + transform.a4,
-			transform.b1 * position.x + transform.b2 * position.y + transform.b3 * position.z + transform.b4,
-			transform.c1 * position.x + transform.c2 * position.y + transform.c3 * position.z + transform.c4
-		};
+		return transform * position;
 	}
 
-	/// Transforms a direction vector (normal, tangent) by the inverse-transpose of the given matrix.
-	/// The result is re-normalized to unit length.
-	aiVector3D TransformDirection(const aiMatrix4x4& transform, const aiVector3D& direction)
+	/// Builds the inverse-transpose 3x3 matrix used to transform direction vectors
+	/// (normals, tangents) correctly under non-uniform scaling.
+	aiMatrix3x3 BuildNormalTransform(const aiMatrix4x4& transform)
 	{
-		aiMatrix4x4 normalTransform = transform;
+		aiMatrix3x3 normalTransform(transform);
 		normalTransform.Inverse().Transpose();
+		return normalTransform;
+	}
 
-		aiVector3D transformedDirection =
-		{
-			normalTransform.a1 * direction.x + normalTransform.a2 * direction.y + normalTransform.a3 * direction.z,
-			normalTransform.b1 * direction.x + normalTransform.b2 * direction.y + normalTransform.b3 * direction.z,
-			normalTransform.c1 * direction.x + normalTransform.c2 * direction.y + normalTransform.c3 * direction.z
-		};
+	/// Transforms a direction vector (normal, tangent) by a precomputed inverse-transpose matrix.
+	/// The result is re-normalized to unit length.
+	aiVector3D TransformDirection(const aiMatrix3x3& normalTransform, const aiVector3D& direction)
+	{
+		aiVector3D transformedDirection = normalTransform * direction;
 
 		if (transformedDirection.SquareLength() > 0.0f)
 		{
@@ -180,23 +177,25 @@ namespace
 	/// startVertexLocation and startIndexLocation are recorded for use in merged GPU buffers.
 	Engine::Core::SubMesh ImportSubMesh(const aiMesh& assimpMesh, const aiMatrix4x4& nodeTransform, const std::uint32_t startVertexLocation, const std::uint32_t startIndexLocation)
 	{
-		Engine::Core::SubMesh importedSubMesh;
+		Engine::Core::SubMesh importedSubMesh = {};
 		importedSubMesh.Vertices.reserve(assimpMesh.mNumVertices);
 		importedSubMesh.Indices.reserve(assimpMesh.mNumFaces * 3u);
 		importedSubMesh.MaterialIndex = assimpMesh.mMaterialIndex;
 		importedSubMesh.StartVertexLocation = startVertexLocation;
 		importedSubMesh.StartIndexLocation = startIndexLocation;
 
+		const aiMatrix3x3 normalTransform = BuildNormalTransform(nodeTransform);
+
 		for (unsigned int vertexIndex = 0; vertexIndex < assimpMesh.mNumVertices; ++vertexIndex)
 		{
 			const aiVector3D transformedPosition = TransformPosition(nodeTransform, assimpMesh.mVertices[vertexIndex]);
 
-			Engine::Core::Vertex importedVertex;
+			Engine::Core::Vertex importedVertex = {};
 			importedVertex.Position = SimpleMath::Vector3(transformedPosition.x, transformedPosition.y, transformedPosition.z);
 
 			if (assimpMesh.HasNormals())
 			{
-				const aiVector3D transformedNormal = TransformDirection(nodeTransform, assimpMesh.mNormals[vertexIndex]);
+				const aiVector3D transformedNormal = TransformDirection(normalTransform, assimpMesh.mNormals[vertexIndex]);
 				importedVertex.Normal = SimpleMath::Vector3(transformedNormal.x, transformedNormal.y, transformedNormal.z);
 			}
 
@@ -208,7 +207,7 @@ namespace
 
 			if (assimpMesh.HasTangentsAndBitangents())
 			{
-				const aiVector3D transformedTangent = TransformDirection(nodeTransform, assimpMesh.mTangents[vertexIndex]);
+				const aiVector3D transformedTangent = TransformDirection(normalTransform, assimpMesh.mTangents[vertexIndex]);
 				importedVertex.Tangent = SimpleMath::Vector3(transformedTangent.x, transformedTangent.y, transformedTangent.z);
 			}
 
