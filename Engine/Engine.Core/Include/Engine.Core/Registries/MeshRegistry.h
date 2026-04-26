@@ -47,7 +47,7 @@ namespace Engine::Core
 		[[nodiscard]] std::shared_ptr<const Mesh> FindMesh(const MeshAssetLocator& locator) const;
 		
 		/// Loads one standalone mesh asset from path.
-        /// Equivalent to Load() with a locator that does not specify SubAssetIndex.
+		/// Equivalent to Load() with a locator that does not specify SubAssetIndex.
         [[nodiscard]] std::shared_ptr<const Mesh> Load(const std::filesystem::path& path);
 
         /// Loads one logical mesh asset addressed by locator.

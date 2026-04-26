@@ -304,7 +304,7 @@ namespace
 	/// each subresource (mip level / array slice) into a SubTexture.
 	/// 3D textures are not supported and return nullptr.
 	/// Returns nullptr if the subresource set is incomplete
-    /// or if any subresource has missing pixel data.
+	/// or if any subresource has missing pixel data.
 	std::shared_ptr<Engine::Core::Texture> CreateTextureFromScratchImage(const DirectX::TexMetadata& metadata, const DirectX::ScratchImage& scratchImage)
 	{
 		if (metadata.dimension == DirectX::TEX_DIMENSION_TEXTURE3D)

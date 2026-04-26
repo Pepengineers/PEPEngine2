@@ -21,7 +21,7 @@ namespace
 	/// parentIndex is -1 for root nodes.
 	Engine::Core::SceneNode CreateSceneNode(const aiNode& assimpNode, const std::int32_t parentIndex)
 	{
-		Engine::Core::SceneNode importedNode;
+		Engine::Core::SceneNode importedNode = {};
 		importedNode.Name = assimpNode.mName.C_Str();
 		importedNode.ParentIndex = parentIndex;
 
@@ -60,7 +60,7 @@ namespace
 				continue;
 			}
 
-			Engine::Core::MeshAssetLocator locator;
+			Engine::Core::MeshAssetLocator locator = {};
 			locator.SourcePath = sourcePath;
 			locator.SubAssetIndex = sceneMeshIndex;
 

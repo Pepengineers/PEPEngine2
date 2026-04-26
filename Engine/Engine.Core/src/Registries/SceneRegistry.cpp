@@ -35,15 +35,13 @@ namespace Engine::Core
 		{
 			assert(_sceneAssets.size() == static_cast<size_t>(registrationResult.HandleValue));
 
-			Record record;
+			Record record = {};
 			record.SourcePath = registrationResult.SourcePath;
 
 			_sceneAssets.push_back(std::move(record));
 		}
 
-		SceneHandle sceneHandle;
-		sceneHandle.Value = registrationResult.HandleValue;
-		return sceneHandle;
+		return SceneHandle(registrationResult.HandleValue);
 	}
 
 	SceneHandle SceneRegistry::FindHandle(const std::filesystem::path& path) const
@@ -54,9 +52,7 @@ namespace Engine::Core
 			return {};
 		}
 
-		SceneHandle sceneHandle;
-		sceneHandle.Value = handleValue;
-		return sceneHandle;
+		return SceneHandle(handleValue);
 	}
 
 	std::shared_ptr<const SceneAsset> SceneRegistry::GetScene(const SceneHandle handle) const
@@ -67,10 +63,10 @@ namespace Engine::Core
 			return nullptr;
 		}
 
-		const size_t sceneIndex = static_cast<size_t>(handle.Value);
+		const size_t sceneIndex = static_cast<size_t>(handle.GetValue());
 		if (sceneIndex >= _sceneAssets.size())
 		{
-			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to get scene: handle index out of range: " + std::to_wstring(handle.Value) + L"\n");
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to get scene: handle index out of range: " + std::to_wstring(handle.GetValue()) + L"\n");
 			return nullptr;
 		}
 
@@ -136,23 +132,23 @@ namespace Engine::Core
 			return nullptr;
 		}
 
-		const size_t sceneIndex = static_cast<size_t>(handle.Value);
+		const size_t sceneIndex = static_cast<size_t>(handle.GetValue());
 		if (sceneIndex >= _sceneAssets.size())
 		{
-			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to cache scene: handle index out of range: " + std::to_wstring(handle.Value) + L"\n");
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to cache scene: handle index out of range: " + std::to_wstring(handle.GetValue()) + L"\n");
 			return nullptr;
 		}
 
 		Record& record = _sceneAssets[sceneIndex];
 		if (record.SceneData != nullptr)
 		{
-			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Scene data already cached for handle " + std::to_wstring(handle.Value) + L".\n");
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Scene data already cached for handle " + std::to_wstring(handle.GetValue()) + L".\n");
 			return record.SceneData;
 		}
 
 		record.SceneData = std::move(data);
 
-		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Cached scene data for handle " + std::to_wstring(handle.Value) + L". Path: " + record.SourcePath.generic_wstring() + L"\n");
+		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Cached scene data for handle " + std::to_wstring(handle.GetValue()) + L". Path: " + record.SourcePath.generic_wstring() + L"\n");
 		return record.SceneData;
 	}
 
@@ -171,14 +167,14 @@ namespace Engine::Core
 	{
 		if (!handle.IsValid())
 		{
-			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to get source path to the scene handle " + std::to_wstring(handle.Value) + L": invalid handle.\n");
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to get source path to the scene handle " + std::to_wstring(handle.GetValue()) + L": invalid handle.\n");
 			return {};
 		}
 
-		const size_t sceneIndex = static_cast<size_t>(handle.Value);
+		const size_t sceneIndex = static_cast<size_t>(handle.GetValue());
 		if (sceneIndex >= _sceneAssets.size())
 		{
-			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to get source path to the scene handle: handle index out of range: " + std::to_wstring(handle.Value) + L"\n");
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to get source path to the scene handle: handle index out of range: " + std::to_wstring(handle.GetValue()) + L"\n");
 			return {};
 		}
 
@@ -219,23 +215,23 @@ namespace Engine::Core
 			return;
 		}
 
-		const size_t sceneIndex = static_cast<size_t>(handle.Value);
+		const size_t sceneIndex = static_cast<size_t>(handle.GetValue());
 		if (sceneIndex >= _sceneAssets.size())
 		{
-			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to unload scene: handle index out of range: " + std::to_wstring(handle.Value) + L"\n");
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to unload scene: handle index out of range: " + std::to_wstring(handle.GetValue()) + L"\n");
 			return;
 		}
 
 		Record& record = _sceneAssets[sceneIndex];
 		if (record.SceneData == nullptr)
 		{
-			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Scene handle " + std::to_wstring(handle.Value) + L" has no cached data to unload.\n");
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Scene handle " + std::to_wstring(handle.GetValue()) + L" has no cached data to unload.\n");
 			return;
 		}
 
 		record.SceneData.reset();
 
-		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Unloaded scene data for handle " + std::to_wstring(handle.Value) + L".\n");
+		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Unloaded scene data for handle " + std::to_wstring(handle.GetValue()) + L".\n");
 	}
 
 	void SceneRegistry::UnloadAll()

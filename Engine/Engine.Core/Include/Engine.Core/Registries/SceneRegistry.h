@@ -24,35 +24,7 @@ namespace Engine::Core
 	/// This allows paths to be pre-registered at startup while actual scene data
 	/// is loaded lazily or asynchronously on demand.
 	class SceneRegistry : public AssetRegistryBase
-	{		
-	private:
-#pragma region Internal Types
-		/// Internal storage record for a single scene asset.
-		struct Record
-		{
-			/// The resolved, normalized path to the scene source file.
-			/// Set during Register() and never modified afterward.
-			std::filesystem::path SourcePath;
-
-			/// The loaded scene data, or nullptr if the scene has not been loaded yet
-			/// (registered but not cached) or has been unloaded.
-			std::shared_ptr<SceneAsset> SceneData;
-		};
-#pragma endregion Internal Types
-
-#pragma region Fields
-		/// Contiguous array of scene records. The index of each element corresponds
-		/// to the handle value assigned during registration.
-		std::vector<Record> _sceneAssets;
-#pragma endregion Fields
-
-	protected:
-		/// Returns the display name of this registry, used in log messages.
-		[[nodiscard]] const wchar_t* GetRegistryName() const override;
-
-		/// Resolves a raw input path to a normalized source path suitable for loading.
-		[[nodiscard]] std::filesystem::path ResolveSourcePath(const std::filesystem::path& path) const override;
-
+	{
 	public:
 		/// Registers a scene path and returns a stable handle for it.
 		/// If the path is already registered, returns the existing handle without
@@ -111,5 +83,33 @@ namespace Engine::Core
 
 		/// Releases all scene data and clears all scene registrations.
 		void UnloadAll() override;
+
+	protected:
+		/// Returns the display name of this registry, used in log messages.
+		[[nodiscard]] const wchar_t* GetRegistryName() const override;
+
+		/// Resolves a raw input path to a normalized source path suitable for loading.
+		[[nodiscard]] std::filesystem::path ResolveSourcePath(const std::filesystem::path& path) const override;
+
+	private:
+#pragma region Internal Types
+		/// Internal storage record for a single scene asset.
+		struct Record
+		{
+			/// The resolved, normalized path to the scene source file.
+			/// Set during Register() and never modified afterward.
+			std::filesystem::path SourcePath;
+
+			/// The loaded scene data, or nullptr if the scene has not been loaded yet
+			/// (registered but not cached) or has been unloaded.
+			std::shared_ptr<SceneAsset> SceneData;
+		};
+#pragma endregion Internal Types
+
+#pragma region Fields
+		/// Contiguous array of scene records. The index of each element corresponds
+		/// to the handle value assigned during registration.
+		std::vector<Record> _sceneAssets;
+#pragma endregion Fields
 	};
 }
