@@ -95,6 +95,9 @@
     <ClInclude Include="Include\Engine.Core\Registries\SceneRegistry.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.Core\IO\AssimpImportHelpers.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.Core\IO\ImportPolicies.h">
       <Filter>Header Files</Filter>
     </ClInclude>

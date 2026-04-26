@@ -1,6 +1,7 @@
 ﻿// SceneImporter.cpp
 
 #include <Engine.Core/IO/SceneImporter.h>
+#include <Engine.Core/IO/AssimpImportHelpers.h>
 
 #include <Engine.Core/AssetLocators.h>
 #include <Engine.Core/Registries/MeshRegistry.h>
@@ -64,7 +65,8 @@ namespace
 			locator.SourcePath = sourcePath;
 			locator.SubAssetIndex = sceneMeshIndex;
 
-			const std::shared_ptr<const Engine::Core::Mesh> loadedMesh = meshRegistry.Load(locator);
+			Engine::Core::MeshHandle meshHandle;
+			const std::shared_ptr<const Engine::Core::Mesh> loadedMesh = meshRegistry.Load(locator, meshHandle);
 			if (loadedMesh == nullptr)
 			{
 				LogSceneImporterMessage(L"[SceneImporter] Failed to load mesh sub-asset " + std::to_wstring(locator.SubAssetIndex) +
@@ -72,7 +74,6 @@ namespace
 				continue;
 			}
 
-			const Engine::Core::MeshHandle meshHandle = meshRegistry.FindHandle(locator);
 			if (!meshHandle.IsValid())
 			{
 				LogSceneImporterMessage(L"[SceneImporter] Failed to resolve mesh handle for sub-asset " +
@@ -121,7 +122,8 @@ namespace Engine::Core
 		Assimp::Importer importer;
 		const std::string sourcePathUtf8 = sourcePath.u8string();
 
-		const aiScene* assimpScene = importer.ReadFile(sourcePathUtf8.c_str(), aiProcess_Triangulate | aiProcess_FlipUVs | aiProcess_GenNormals | aiProcess_CalcTangentSpace);
+		const std::uint32_t assimpFlags = BuildDefaultSceneAssimpPostProcessFlags();
+		const aiScene* assimpScene = importer.ReadFile(sourcePathUtf8.c_str(), assimpFlags);
 
 		if (assimpScene == nullptr || assimpScene->mRootNode == nullptr || (assimpScene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) != 0)
 		{

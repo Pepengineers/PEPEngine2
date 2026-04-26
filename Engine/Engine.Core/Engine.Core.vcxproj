@@ -162,6 +162,7 @@
     <ClInclude Include="Include\Engine.Core\AssetLocators.h" />
     <ClInclude Include="Include\Engine.Core\AssetManager.h" />
     <ClInclude Include="Include\Engine.Core\GameTimer.h" />
+    <ClInclude Include="Include\Engine.Core\IO\AssimpImportHelpers.h" />
     <ClInclude Include="Include\Engine.Core\IO\ImportPolicies.h" />
     <ClInclude Include="Include\Engine.Core\IO\MeshImporter.h" />
     <ClInclude Include="Include\Engine.Core\IO\SceneImporter.h" />

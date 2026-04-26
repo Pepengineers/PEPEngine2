@@ -35,14 +35,6 @@ namespace Engine::Core
 	/// CPU-side scene representation.
 	class SceneAsset
 	{
-	private:
-		/// Flat array of all nodes in the scene.
-		/// Parent-child relationships are encoded via index references within the nodes themselves.
-		std::vector<SceneNode> _nodes;
-
-		/// Indices of the top-level nodes that have no parent.
-		std::vector<std::uint32_t> _rootNodeIndices;
-
 	public:
 		SceneAsset() = default;
 		SceneAsset(std::vector<SceneNode> nodes, std::vector<std::uint32_t> rootNodeIndices);
@@ -64,5 +56,13 @@ namespace Engine::Core
 
 		/// Returns the node at the given index.
 		[[nodiscard]] const SceneNode& GetNode(const size_t nodeIndex) const;
+
+	private:
+		/// Flat array of all nodes in the scene.
+		/// Parent-child relationships are encoded via index references within the nodes themselves.
+		std::vector<SceneNode> _nodes;
+
+		/// Indices of the top-level nodes that have no parent.
+		std::vector<std::uint32_t> _rootNodeIndices;
 	};
 }
