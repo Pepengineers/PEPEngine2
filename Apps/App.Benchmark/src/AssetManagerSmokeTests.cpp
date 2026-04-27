@@ -172,7 +172,7 @@ namespace
 			{
 				if (meshHandle.IsValid())
 				{
-					uniqueMeshHandleValues.insert(meshHandle.Value);
+					uniqueMeshHandleValues.insert(meshHandle.GetValue());
 				}
 			}
 
@@ -214,8 +214,7 @@ namespace
 
 		for (std::uint32_t handleValue : uniqueMeshHandleValues)
 		{
-			Engine::Core::MeshHandle meshHandle;
-			meshHandle.Value = handleValue;
+			const Engine::Core::MeshHandle meshHandle(handleValue);
 
 			const Engine::Core::MeshAssetLocator locator = assetManager.Meshes().GetLocator(meshHandle);
 			const std::shared_ptr<const Engine::Core::Mesh> mesh = assetManager.Meshes().GetMesh(meshHandle);
