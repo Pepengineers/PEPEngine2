@@ -45,12 +45,19 @@ namespace Engine::Core
 		/// Looks up a mesh by locator and returns its data,
 		/// or nullptr if the locator is not registered or the mesh has not been cached.
 		[[nodiscard]] std::shared_ptr<const Mesh> FindMesh(const MeshAssetLocator& locator) const;
+		
+		/// Loads one standalone mesh asset from path.
+		/// Equivalent to Load() with a locator that does not specify SubAssetIndex.
+        [[nodiscard]] std::shared_ptr<const Mesh> Load(const std::filesystem::path& path);
 
-		/// Registers the given locator (if not already registered) and stores
-		/// the provided mesh data into the resulting slot in a single call.
-		/// Equivalent to calling Register(locator) followed by Cache(handle, data).
-		/// Returns the stored mesh pointer, or nullptr if registration fails.
-		[[nodiscard]] std::shared_ptr<const Mesh> Cache(const MeshAssetLocator& locator, std::shared_ptr<Mesh> data);
+        /// Loads one logical mesh asset addressed by locator.
+        /// If locator contains SubAssetIndex, loads only that mesh sub-asset from the source file.
+        [[nodiscard]] std::shared_ptr<const Mesh> Load(const MeshAssetLocator& locator);
+
+		/// Loads one logical mesh asset addressed by locator and returns its handle via outHandle.
+		/// If the asset is already registered, outHandle receives the existing handle.
+		/// On failure returns nullptr and resets outHandle to an invalid handle.
+		[[nodiscard]] std::shared_ptr<const Mesh> Load(const MeshAssetLocator& locator, MeshHandle& outHandle);
 
 		/// Returns the resolved mesh locator associated with the given handle.
 		/// The handle must have been obtained from a prior call to Register().

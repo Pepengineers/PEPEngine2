@@ -28,6 +28,26 @@ namespace Engine::Core
 		return instance;
 	}
 
+	std::shared_ptr<const Mesh> AssetManager::LoadMesh(const std::filesystem::path& path)
+	{
+		return _meshRegistry.Load(path);
+	}
+
+	std::shared_ptr<const SceneAsset> AssetManager::LoadScene(const std::filesystem::path& path)
+	{
+		return _sceneRegistry.Load(path, _meshRegistry);
+	}
+
+	std::shared_ptr<const Texture> AssetManager::LoadTexture(const std::filesystem::path& path)
+	{
+		return _textureRegistry.Load(path);
+	}
+
+	std::shared_ptr<const Texture> AssetManager::LoadTextureOrDefault(const std::filesystem::path& path)
+	{
+		return _textureRegistry.LoadOrDefault(path);
+	}
+
 #pragma region Accessors
 	MeshRegistry& AssetManager::Meshes()
 	{
@@ -37,6 +57,16 @@ namespace Engine::Core
 	const MeshRegistry& AssetManager::Meshes() const
 	{
 		return _meshRegistry;
+	}
+
+	SceneRegistry& AssetManager::Scenes()
+	{
+		return _sceneRegistry;
+	}
+
+	const SceneRegistry& AssetManager::Scenes() const
+	{
+		return _sceneRegistry;
 	}
 
 	TextureRegistry& AssetManager::Textures()
