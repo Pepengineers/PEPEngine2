@@ -33,6 +33,11 @@ namespace Engine::Core
 		return _meshRegistry.Load(path);
 	}
 
+	std::shared_ptr<const SceneAsset> AssetManager::LoadScene(const std::filesystem::path& path)
+	{
+		return _sceneRegistry.Load(path, _meshRegistry);
+	}
+
 	std::shared_ptr<const Texture> AssetManager::LoadTexture(const std::filesystem::path& path)
 	{
 		return _textureRegistry.Load(path);
@@ -52,6 +57,16 @@ namespace Engine::Core
 	const MeshRegistry& AssetManager::Meshes() const
 	{
 		return _meshRegistry;
+	}
+
+	SceneRegistry& AssetManager::Scenes()
+	{
+		return _sceneRegistry;
+	}
+
+	const SceneRegistry& AssetManager::Scenes() const
+	{
+		return _sceneRegistry;
 	}
 
 	TextureRegistry& AssetManager::Textures()

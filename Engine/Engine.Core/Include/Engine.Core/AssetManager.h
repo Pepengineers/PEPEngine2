@@ -3,6 +3,7 @@
 #pragma once
 
 #include <Engine.Core/Registries/MeshRegistry.h>
+#include <Engine.Core/Registries/SceneRegistry.h>
 #include <Engine.Core/Registries/TextureRegistry.h>
 
 #include <filesystem>
@@ -28,6 +29,7 @@ namespace Engine::Core
 		static AssetManager& GetInstance();
 
 		[[nodiscard]] std::shared_ptr<const Mesh> LoadMesh(const std::filesystem::path& path);
+		[[nodiscard]] std::shared_ptr<const SceneAsset> LoadScene(const std::filesystem::path& path);
 		[[nodiscard]] std::shared_ptr<const Texture> LoadTexture(const std::filesystem::path& path);
 		[[nodiscard]] std::shared_ptr<const Texture> LoadTextureOrDefault(const std::filesystem::path& path);
 
@@ -35,6 +37,11 @@ namespace Engine::Core
 		[[nodiscard]] MeshRegistry& Meshes();
 		/// Returns the mesh registry.
 		[[nodiscard]] const MeshRegistry& Meshes() const;
+
+		/// Returns the scene registry.
+		[[nodiscard]] SceneRegistry& Scenes();
+		/// Returns the scene registry.
+		[[nodiscard]] const SceneRegistry& Scenes() const;
 
 		/// Returns the texture registry.
 		[[nodiscard]] TextureRegistry& Textures();
@@ -44,6 +51,7 @@ namespace Engine::Core
 	private:
 #pragma region Fields
 		MeshRegistry _meshRegistry;
+		SceneRegistry _sceneRegistry;
 		TextureRegistry _textureRegistry;
 #pragma endregion Fields
 

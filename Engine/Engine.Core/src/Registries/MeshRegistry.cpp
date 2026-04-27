@@ -112,30 +112,18 @@ namespace Engine::Core
 
 	std::shared_ptr<const Mesh> MeshRegistry::Load(const MeshAssetLocator& locator)
 	{
+		MeshHandle loadedHandle;
+		return Load(locator, loadedHandle);
+	}
+
+	std::shared_ptr<const Mesh> MeshRegistry::Load(const MeshAssetLocator& locator, MeshHandle& outHandle)
+	{
+		outHandle = {};
+
 		if (locator.SourcePath.empty())
 		{
 			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to load mesh: empty source path.\n");
 			return nullptr;
-		}
-
-		const std::shared_ptr<const Mesh> cachedMesh = FindMesh(locator);
-		if (cachedMesh != nullptr)
-		{
-			MeshAssetLocator resolvedLocator = locator;
-			resolvedLocator.SourcePath = ResolveSourcePath(locator.SourcePath);
-
-			if (resolvedLocator.HasSubAssetIndex())
-			{
-				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Reusing cached mesh sub-asset " +
-					std::to_wstring(resolvedLocator.SubAssetIndex) + L" from path: " + resolvedLocator.SourcePath.generic_wstring() + L"\n");
-			}
-			else
-			{
-				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Reusing cached mesh for path: " +
-					resolvedLocator.SourcePath.generic_wstring() + L"\n");
-			}
-
-			return cachedMesh;
 		}
 
 		const MeshHandle meshHandle = Register(locator);
@@ -149,6 +137,24 @@ namespace Engine::Core
 		{
 			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to load mesh: could not resolve locator.\n");
 			return nullptr;
+		}
+
+		std::shared_ptr<const Mesh> cachedMesh = GetMesh(meshHandle);
+		if (cachedMesh != nullptr)
+		{
+			if (resolvedLocator.HasSubAssetIndex())
+			{
+				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Reusing cached mesh sub-asset " +
+					std::to_wstring(resolvedLocator.SubAssetIndex) + L" from path: " + resolvedLocator.SourcePath.generic_wstring() + L"\n");
+			}
+			else
+			{
+				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Reusing cached mesh for path: " +
+					resolvedLocator.SourcePath.generic_wstring() + L"\n");
+			}
+
+			outHandle = meshHandle;
+			return cachedMesh;
 		}
 
 		std::shared_ptr<Mesh> importedMesh;
@@ -197,6 +203,7 @@ namespace Engine::Core
 				resolvedLocator.SourcePath.generic_wstring() + L"\n");
 		}
 
+		outHandle = meshHandle;
 		return TypedAssetRegistry<Mesh, MeshHandle, MeshAssetLocator>::Cache(meshHandle, std::move(importedMesh));
 	}
 

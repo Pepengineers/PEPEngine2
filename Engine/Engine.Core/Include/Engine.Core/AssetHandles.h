@@ -45,10 +45,14 @@ namespace Engine::Core
 
 	struct MeshTag{};
 	struct TextureTag{};
+	struct SceneTag{};
 
 	/// Stable identifier of a mesh entry inside AssetManager storage.
 	using MeshHandle = AssetHandle<MeshTag>;
 
 	/// Stable identifier of a texture entry inside AssetManager storage.
 	using TextureHandle = AssetHandle<TextureTag>;
+
+	/// Stable identifier of a scene entry inside AssetManager storage.
+	using SceneHandle = AssetHandle<SceneTag>;
 }

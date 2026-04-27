@@ -1,6 +1,7 @@
 ﻿// MeshImporter.cpp
 
 #include <Engine.Core/IO/MeshImporter.h>
+#include <Engine.Core/IO/AssimpImportHelpers.h>
 
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
@@ -11,34 +12,6 @@ namespace SimpleMath = DirectX::SimpleMath;
 
 namespace 
 {
-	/// Converts engine-side MeshImportOptions into Assimp post-process flags bitmask.
-	std::uint32_t BuildAssimpPostProcessFlags(const Engine::Core::MeshImportOptions& options)
-	{
-		std::uint32_t assimpFlags = 0;
-
-		if (options.bTriangulate)
-		{
-			assimpFlags |= aiProcess_Triangulate;
-		}
-
-		if (options.bFlipUVs)
-		{
-			assimpFlags |= aiProcess_FlipUVs;
-		}
-
-		if (options.bGenerateNormals)
-		{
-			assimpFlags |= aiProcess_GenNormals;
-		}
-
-		if (options.bGenerateTangents)
-		{
-			assimpFlags |= aiProcess_CalcTangentSpace;
-		}
-
-		return assimpFlags;
-	}
-
 	/// Constructs a BoundingBox from explicit min/max corner points.
 	/// Center and Extents are computed as the midpoint and half-size of the AABB.
 	DirectX::BoundingBox CreateBoundsFromMinMax(const SimpleMath::Vector3& minPoint, const SimpleMath::Vector3& maxPoint)
