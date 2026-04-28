@@ -2,6 +2,7 @@
 
 #include <Engine.Core/Engine.h>
 #include <App.Base/App.h>
+#include <App.Benchmark/AssetManagerSmokeTests.h>
 
 #include "Window.h"
 
@@ -67,6 +68,8 @@ bool BenchmarkApp::Initialize()
     {
         return false;
     }
+
+    RunAssetManagerSmokeTests();
 
     return true;
 }

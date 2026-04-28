@@ -144,15 +144,43 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Include\Engine.Core\Engine.cpp" />
-    <ClCompile Include="src\ConsoleModule.cpp">
-    </ClCompile>
+    <ClCompile Include="src\AssetManager.cpp" />
     <ClCompile Include="src\GameTimer.cpp" />
+    <ClCompile Include="src\IO\MeshImporter.cpp" />
+    <ClCompile Include="src\IO\SceneImporter.cpp" />
+    <ClCompile Include="src\IO\TextureLoader.cpp" />
+    <ClCompile Include="src\Registries\AssetRegistryBase.cpp" />
+    <ClCompile Include="src\Registries\MeshRegistry.cpp" />
+    <ClCompile Include="src\Registries\SceneRegistry.cpp" />
+    <ClCompile Include="src\Registries\TextureRegistry.cpp" />
+    <ClCompile Include="src\SceneTraversal.cpp" />
+    <ClCompile Include="src\Types\MeshTypes.cpp" />
+    <ClCompile Include="src\Types\SceneTypes.cpp" />
+    <ClCompile Include="src\Types\TextureTypes.cpp" />
+    <ClCompile Include="Include\Engine.Core\Engine.cpp" />
+    <ClCompile Include="src\ConsoleModule.cpp" />
     <ClCompile Include="src\SceneManager.cpp" />
     <ClCompile Include="src\World.cpp" />
     <ClCompile Include="src\WorldLoader.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.Core\AssetHandles.h" />
+    <ClInclude Include="Include\Engine.Core\AssetLocators.h" />
+    <ClInclude Include="Include\Engine.Core\AssetManager.h" />
+    <ClInclude Include="Include\Engine.Core\IO\AssimpImportHelpers.h" />
+    <ClInclude Include="Include\Engine.Core\IO\MeshImporter.h" />
+    <ClInclude Include="Include\Engine.Core\IO\SceneImporter.h" />
+    <ClInclude Include="Include\Engine.Core\IO\TextureLoader.h" />
+    <ClInclude Include="Include\Engine.Core\IO\ImportPolicies.h" />
+    <ClInclude Include="Include\Engine.Core\Registries\AssetRegistryBase.h" />
+    <ClInclude Include="Include\Engine.Core\Registries\MeshRegistry.h" />
+    <ClInclude Include="Include\Engine.Core\Registries\SceneRegistry.h" />
+    <ClInclude Include="Include\Engine.Core\Registries\TextureRegistry.h" />
+    <ClInclude Include="Include\Engine.Core\Registries\TypedAssetRegistry.h" />
+    <ClInclude Include="Include\Engine.Core\SceneTraversal.h" />
+    <ClInclude Include="Include\Engine.Core\Types\MeshTypes.h" />
+    <ClInclude Include="Include\Engine.Core\Types\SceneTypes.h" />
+    <ClInclude Include="Include\Engine.Core\Types\TextureTypes.h" />
     <ClInclude Include="Include\Engine.Core\Components.h" />
     <ClInclude Include="Include\Engine.Core\ECSStorage.h" />
     <ClInclude Include="Include\Engine.Core\SceneManager.h" />
@@ -160,10 +188,10 @@
     <ClInclude Include="Include\Engine.Core\World.h" />
     <ClInclude Include="Include\Engine.Core\WorldLoader.h" />
     <ClInclude Include="Include\Common\ConsoleVariables.h" />
-    <ClInclude Include="Include\Common\GameTimer.h" />
     <ClInclude Include="Include\Common\LockThreadQueue.h" />
     <ClInclude Include="Include\Common\Module.h" />
     <ClInclude Include="Include\Common\Stopwatch.h" />
+    <ClInclude Include="Include\Common\GameTimer.h" />
     <ClInclude Include="Include\Engine.Core\ConsoleModule.h" />
     <ClInclude Include="Include\Engine.Core\Engine.h" />
     <ClInclude Include="Include\Engine.Core\ModuleLocator.h" />
