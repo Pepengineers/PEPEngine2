@@ -392,5 +392,5 @@ void RunAssetManagerSmokeTests()
 
 	std::wcout << L"\nPress Enter to close...\n";
 	std::wstring line;
-	std::getline(std::wcin, line);
+	//std::getline(std::wcin, line);
 }
