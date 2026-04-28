@@ -135,6 +135,7 @@
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>Use</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <Link>
       <SubSystem>
@@ -156,12 +157,16 @@
     <ClCompile Include="src\Types\MeshTypes.cpp" />
     <ClCompile Include="src\Types\SceneTypes.cpp" />
     <ClCompile Include="src\Types\TextureTypes.cpp" />
+    <ClCompile Include="Include\Engine.Core\Engine.cpp" />
+    <ClCompile Include="src\ConsoleModule.cpp" />
+    <ClCompile Include="src\SceneManager.cpp" />
+    <ClCompile Include="src\World.cpp" />
+    <ClCompile Include="src\WorldLoader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.Core\AssetHandles.h" />
     <ClInclude Include="Include\Engine.Core\AssetLocators.h" />
     <ClInclude Include="Include\Engine.Core\AssetManager.h" />
-    <ClInclude Include="Include\Engine.Core\GameTimer.h" />
     <ClInclude Include="Include\Engine.Core\IO\AssimpImportHelpers.h" />
     <ClInclude Include="Include\Engine.Core\IO\MeshImporter.h" />
     <ClInclude Include="Include\Engine.Core\IO\SceneImporter.h" />
@@ -176,6 +181,20 @@
     <ClInclude Include="Include\Engine.Core\Types\MeshTypes.h" />
     <ClInclude Include="Include\Engine.Core\Types\SceneTypes.h" />
     <ClInclude Include="Include\Engine.Core\Types\TextureTypes.h" />
+    <ClInclude Include="Include\Engine.Core\Components.h" />
+    <ClInclude Include="Include\Engine.Core\ECSStorage.h" />
+    <ClInclude Include="Include\Engine.Core\SceneManager.h" />
+    <ClInclude Include="Include\Engine.Core\System.h" />
+    <ClInclude Include="Include\Engine.Core\World.h" />
+    <ClInclude Include="Include\Engine.Core\WorldLoader.h" />
+    <ClInclude Include="Include\Common\ConsoleVariables.h" />
+    <ClInclude Include="Include\Common\LockThreadQueue.h" />
+    <ClInclude Include="Include\Common\Module.h" />
+    <ClInclude Include="Include\Common\Stopwatch.h" />
+    <ClInclude Include="Include\Common\GameTimer.h" />
+    <ClInclude Include="Include\Engine.Core\ConsoleModule.h" />
+    <ClInclude Include="Include\Engine.Core\Engine.h" />
+    <ClInclude Include="Include\Engine.Core\ModuleLocator.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
