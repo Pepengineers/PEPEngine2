@@ -122,7 +122,7 @@ namespace
 	/// The decoded pixels are always converted to DXGI_FORMAT_R8G8B8A8_UNORM regardless
 	/// of the source pixel format.
 	/// Returns nullptr on any failure.
-	std::shared_ptr<Engine::Core::Texture> LoadTextureFromWicFile(const std::filesystem::path& sourcePath)
+	std::unique_ptr<Engine::Core::Texture> LoadTextureFromWicFile(const std::filesystem::path& sourcePath)
     {
     	using Microsoft::WRL::ComPtr;
 
@@ -253,7 +253,7 @@ namespace
     	std::vector<Engine::Core::SubTexture> subresources;
     	subresources.push_back(std::move(subresource));
 
-    	return std::make_shared<Engine::Core::Texture>(textureDesc, std::move(subresources));
+    	return std::make_unique<Engine::Core::Texture>(textureDesc, std::move(subresources));
     }
 
 	/// Loads a DDS, TGA or HDR file into a DirectXTex ScratchImage.
@@ -305,7 +305,7 @@ namespace
 	/// 3D textures are not supported and return nullptr.
 	/// Returns nullptr if the subresource set is incomplete
 	/// or if any subresource has missing pixel data.
-	std::shared_ptr<Engine::Core::Texture> CreateTextureFromScratchImage(const DirectX::TexMetadata& metadata, const DirectX::ScratchImage& scratchImage)
+	std::unique_ptr<Engine::Core::Texture> CreateTextureFromScratchImage(const DirectX::TexMetadata& metadata, const DirectX::ScratchImage& scratchImage)
 	{
 		if (metadata.dimension == DirectX::TEX_DIMENSION_TEXTURE3D)
 		{
@@ -373,13 +373,13 @@ namespace
 			subresources.push_back(std::move(subresource));
 		}
 
-		return std::make_shared<Engine::Core::Texture>(textureDesc, std::move(subresources));
+		return std::make_unique<Engine::Core::Texture>(textureDesc, std::move(subresources));
 	}
 }
 
 namespace Engine::Core
 {
-	std::shared_ptr<Texture> TextureLoader::LoadTextureAsset(const std::filesystem::path& sourcePath)
+	std::unique_ptr<Texture> TextureLoader::LoadTextureAsset(const std::filesystem::path& sourcePath)
 	{
 		if (sourcePath.empty())
 		{
@@ -415,7 +415,7 @@ namespace Engine::Core
 			return nullptr;
 		}
 
-		std::shared_ptr<Texture> loadedTexture;
+		std::unique_ptr<Texture> loadedTexture;
 
 		if (extension == L".dds" || extension == L".tga" || extension == L".hdr")
 		{
@@ -448,7 +448,7 @@ namespace Engine::Core
 		return loadedTexture;
 	}
 
-	std::shared_ptr<Texture> TextureLoader::CreateDefaultTexture()
+	std::unique_ptr<Texture> TextureLoader::CreateDefaultTexture()
 	{
 		TextureDesc textureDesc = {};
 		textureDesc.Dimension = ETextureDimension::Texture2D;
@@ -477,6 +477,6 @@ namespace Engine::Core
 		subresources.push_back(std::move(subresource));
 
 		LogTextureLoaderMessage(L"[TextureLoader] Created default error texture.\n");
-		return std::make_shared<Texture>(textureDesc, std::move(subresources));
+		return std::make_unique<Texture>(textureDesc, std::move(subresources));
 	}
 }

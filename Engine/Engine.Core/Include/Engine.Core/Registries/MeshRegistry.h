@@ -36,28 +36,28 @@ namespace Engine::Core
 
 		/// Returns the mesh data associated with the given handle,
 		/// or nullptr if the handle is invalid or the mesh has not been cached yet.
-		[[nodiscard]] std::shared_ptr<const Mesh> GetMesh(MeshHandle handle) const;
+		[[nodiscard]] const Mesh* GetMesh(MeshHandle handle) const;
 
 		/// Looks up a mesh by file path and returns its data,
 		/// or nullptr if the path is not registered or the mesh has not been cached.
-		[[nodiscard]] std::shared_ptr<const Mesh> FindMesh(const std::filesystem::path& path) const;
+		[[nodiscard]] const Mesh* FindMesh(const std::filesystem::path& path) const;
 
 		/// Looks up a mesh by locator and returns its data,
 		/// or nullptr if the locator is not registered or the mesh has not been cached.
-		[[nodiscard]] std::shared_ptr<const Mesh> FindMesh(const MeshAssetLocator& locator) const;
+		[[nodiscard]] const Mesh* FindMesh(const MeshAssetLocator& locator) const;
 		
 		/// Loads one standalone mesh asset from path.
 		/// Equivalent to Load() with a locator that does not specify SubAssetIndex.
-        [[nodiscard]] std::shared_ptr<const Mesh> Load(const std::filesystem::path& path);
+        [[nodiscard]] const Mesh* Load(const std::filesystem::path& path);
 
         /// Loads one logical mesh asset addressed by locator.
         /// If locator contains SubAssetIndex, loads only that mesh sub-asset from the source file.
-        [[nodiscard]] std::shared_ptr<const Mesh> Load(const MeshAssetLocator& locator);
+        [[nodiscard]] const Mesh* Load(const MeshAssetLocator& locator);
 
 		/// Loads one logical mesh asset addressed by locator and returns its handle via outHandle.
 		/// If the asset is already registered, outHandle receives the existing handle.
 		/// On failure returns nullptr and resets outHandle to an invalid handle.
-		[[nodiscard]] std::shared_ptr<const Mesh> Load(const MeshAssetLocator& locator, MeshHandle& outHandle);
+		[[nodiscard]] const Mesh* Load(const MeshAssetLocator& locator, MeshHandle& outHandle);
 
 		/// Returns the resolved mesh locator associated with the given handle.
 		/// The handle must have been obtained from a prior call to Register().

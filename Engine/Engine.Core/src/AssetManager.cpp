@@ -28,22 +28,22 @@ namespace Engine::Core
 		return instance;
 	}
 
-	std::shared_ptr<const Mesh> AssetManager::LoadMesh(const std::filesystem::path& path)
+	const Mesh* AssetManager::LoadMesh(const std::filesystem::path& path)
 	{
 		return _meshRegistry.Load(path);
 	}
 
-	std::shared_ptr<const SceneAsset> AssetManager::LoadScene(const std::filesystem::path& path)
+	const SceneAsset* AssetManager::LoadScene(const std::filesystem::path& path)
 	{
 		return _sceneRegistry.Load(path, _meshRegistry);
 	}
 
-	std::shared_ptr<const Texture> AssetManager::LoadTexture(const std::filesystem::path& path)
+	const Texture* AssetManager::LoadTexture(const std::filesystem::path& path)
 	{
 		return _textureRegistry.Load(path);
 	}
 
-	std::shared_ptr<const Texture> AssetManager::LoadTextureOrDefault(const std::filesystem::path& path)
+	const Texture* AssetManager::LoadTextureOrDefault(const std::filesystem::path& path)
 	{
 		return _textureRegistry.LoadOrDefault(path);
 	}

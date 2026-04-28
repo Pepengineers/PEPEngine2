@@ -13,6 +13,6 @@ namespace Engine::Core
 	class SceneImporter
 	{
 	public:
-		[[nodiscard]] static std::shared_ptr<SceneAsset> ImportSceneAsset(const std::filesystem::path& sourcePath, MeshRegistry& meshRegistry);
+		[[nodiscard]] static std::unique_ptr<SceneAsset> ImportSceneAsset(const std::filesystem::path& sourcePath, MeshRegistry& meshRegistry);
 	};
 }

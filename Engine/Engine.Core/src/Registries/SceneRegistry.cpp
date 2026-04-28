@@ -38,17 +38,17 @@ namespace Engine::Core
 		return L"scene";
 	}
 
-	std::shared_ptr<const SceneAsset> SceneRegistry::GetScene(const SceneHandle handle) const
+	const SceneAsset* SceneRegistry::GetScene(const SceneHandle handle) const
 	{
 		return GetAsset(handle);
 	}
 
-	std::shared_ptr<const SceneAsset> SceneRegistry::FindScene(const std::filesystem::path& path) const
+	const SceneAsset* SceneRegistry::FindScene(const std::filesystem::path& path) const
 	{
 		return GetScene(FindHandle(path));
 	}
 
-	std::shared_ptr<const SceneAsset> SceneRegistry::Load(const std::filesystem::path& path, MeshRegistry& meshRegistry)
+	const SceneAsset* SceneRegistry::Load(const std::filesystem::path& path, MeshRegistry& meshRegistry)
 	{
 		if (path.empty())
 		{
@@ -56,7 +56,7 @@ namespace Engine::Core
 			return nullptr;
 		}
 
-		std::shared_ptr<const SceneAsset> cachedScene = FindScene(path);
+		const SceneAsset* cachedScene = FindScene(path);
 		if (cachedScene != nullptr)
 		{
 			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Reusing cached scene for path: " +
@@ -81,7 +81,7 @@ namespace Engine::Core
 		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Importing scene from path: " +
 			sourcePath.generic_wstring() + L"\n");
 
-		std::shared_ptr<SceneAsset> importedScene = SceneImporter::ImportSceneAsset(sourcePath, meshRegistry);
+		std::unique_ptr<SceneAsset> importedScene = SceneImporter::ImportSceneAsset(sourcePath, meshRegistry);
 		if (importedScene == nullptr)
 		{
 			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to import scene from path: " +

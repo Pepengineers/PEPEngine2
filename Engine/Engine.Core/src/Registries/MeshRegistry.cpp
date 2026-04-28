@@ -88,35 +88,35 @@ namespace Engine::Core
 		return MeshHandle(handleValue);
 	}
 
-	std::shared_ptr<const Mesh> MeshRegistry::GetMesh(const MeshHandle handle) const
+	const Mesh* MeshRegistry::GetMesh(const MeshHandle handle) const
 	{
 		return GetAsset(handle);
 	}
 
-	std::shared_ptr<const Mesh> MeshRegistry::FindMesh(const std::filesystem::path& path) const
+	const Mesh* MeshRegistry::FindMesh(const std::filesystem::path& path) const
 	{
 		return GetMesh(TypedAssetRegistry<Mesh, MeshHandle, MeshAssetLocator>::FindHandle(path));
 	}
 
-	std::shared_ptr<const Mesh> MeshRegistry::FindMesh(const MeshAssetLocator& locator) const
+	const Mesh* MeshRegistry::FindMesh(const MeshAssetLocator& locator) const
 	{
 		return GetMesh(FindHandle(locator));
 	}
 
-	std::shared_ptr<const Mesh> MeshRegistry::Load(const std::filesystem::path& path)
+	const Mesh* MeshRegistry::Load(const std::filesystem::path& path)
 	{
 		MeshAssetLocator locator = {};
 		locator.SourcePath = path;
 		return Load(locator);
 	}
 
-	std::shared_ptr<const Mesh> MeshRegistry::Load(const MeshAssetLocator& locator)
+	const Mesh* MeshRegistry::Load(const MeshAssetLocator& locator)
 	{
 		MeshHandle loadedHandle;
 		return Load(locator, loadedHandle);
 	}
 
-	std::shared_ptr<const Mesh> MeshRegistry::Load(const MeshAssetLocator& locator, MeshHandle& outHandle)
+	const Mesh* MeshRegistry::Load(const MeshAssetLocator& locator, MeshHandle& outHandle)
 	{
 		outHandle = {};
 
@@ -139,7 +139,7 @@ namespace Engine::Core
 			return nullptr;
 		}
 
-		std::shared_ptr<const Mesh> cachedMesh = GetMesh(meshHandle);
+		const Mesh* cachedMesh = GetMesh(meshHandle);
 		if (cachedMesh != nullptr)
 		{
 			if (resolvedLocator.HasSubAssetIndex())
@@ -157,7 +157,7 @@ namespace Engine::Core
 			return cachedMesh;
 		}
 
-		std::shared_ptr<Mesh> importedMesh;
+		std::unique_ptr<Mesh> importedMesh;
 		if (resolvedLocator.HasSubAssetIndex())
 		{
 			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Importing mesh sub-asset " +

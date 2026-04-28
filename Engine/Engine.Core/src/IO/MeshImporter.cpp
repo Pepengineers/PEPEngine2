@@ -263,7 +263,7 @@ namespace
 
 namespace Engine::Core
 {
-	std::shared_ptr<Mesh> MeshImporter::ImportSingleMeshAsset(const std::filesystem::path& sourcePath, const MeshImportOptions& options)
+	std::unique_ptr<Mesh> MeshImporter::ImportSingleMeshAsset(const std::filesystem::path& sourcePath, const MeshImportOptions& options)
 	{
 		if (sourcePath.empty())
 		{
@@ -294,10 +294,10 @@ namespace Engine::Core
 		}
 
 		const DirectX::BoundingBox meshBounds = CalculateMeshBounds(importedSubMeshes);
-		return std::make_shared<Mesh>(std::move(importedSubMeshes), meshBounds);
+		return std::make_unique<Mesh>(std::move(importedSubMeshes), meshBounds);
 	}
 
-	std::shared_ptr<Mesh> MeshImporter::ImportMeshSubAsset(const std::filesystem::path& sourcePath, const std::uint32_t subAssetIndex, const MeshImportOptions& options)
+	std::unique_ptr<Mesh> MeshImporter::ImportMeshSubAsset(const std::filesystem::path& sourcePath, const std::uint32_t subAssetIndex, const MeshImportOptions& options)
 	{
 		if (sourcePath.empty())
 		{
@@ -337,6 +337,6 @@ namespace Engine::Core
 		importedSubMeshes.push_back(std::move(importedSubMesh));
 
 		const DirectX::BoundingBox meshBounds = CalculateMeshBounds(importedSubMeshes);
-		return std::make_shared<Mesh>(std::move(importedSubMeshes), meshBounds);
+		return std::make_unique<Mesh>(std::move(importedSubMeshes), meshBounds);
 	}
 }

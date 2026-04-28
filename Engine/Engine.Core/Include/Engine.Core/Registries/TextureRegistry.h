@@ -23,20 +23,20 @@ namespace Engine::Core
 	public:
 		/// Returns the texture data associated with the given handle,
 		/// or nullptr if the handle is invalid or the texture has not been cached yet.
-		[[nodiscard]] std::shared_ptr<const Texture> GetTexture(TextureHandle handle) const;
+		[[nodiscard]] const Texture* GetTexture(TextureHandle handle) const;
 
 		/// Looks up a texture by file path and returns its data,
 		/// or nullptr if the path is not registered or the texture has not been cached.
-		[[nodiscard]] std::shared_ptr<const Texture> FindTexture(const std::filesystem::path& path) const;
+		[[nodiscard]] const Texture* FindTexture(const std::filesystem::path& path) const;
 
 		/// Loads a texture from cache or from disk and caches the result.
-		[[nodiscard]] std::shared_ptr<const Texture> Load(const std::filesystem::path& path);
+		[[nodiscard]] const Texture* Load(const std::filesystem::path& path);
 
 		/// Loads a texture from cache or from disk and returns the default texture on failure.
-		[[nodiscard]] std::shared_ptr<const Texture> LoadOrDefault(const std::filesystem::path& path);
+		[[nodiscard]] const Texture* LoadOrDefault(const std::filesystem::path& path);
 
 		/// Returns the lazily-created default error texture.
-		[[nodiscard]] std::shared_ptr<const Texture> GetDefaultTexture();
+		[[nodiscard]] const Texture* GetDefaultTexture();
 		
 	protected:
 		/// Returns the display name of this registry, used in log messages.
@@ -56,8 +56,11 @@ namespace Engine::Core
 		[[nodiscard]] const wchar_t* GetAssetTypeName() const override;
 
 	private:
-		/// Fallback texture returned when a requested texture is missing or failed to load.
-		/// Created once on first use and reused for all subsequent fallback requests.
-		std::shared_ptr<Texture> _defaultTexture;
+		/// Handle of the file-backed default texture if it was loaded through the registry.
+		TextureHandle _defaultTextureHandle;
+
+		/// Built-in fallback texture returned when even the file-backed default texture
+		/// is missing or failed to load. Owned locally because it is not registered.
+		std::unique_ptr<Texture> _fallbackDefaultTexture;
 	};
 }

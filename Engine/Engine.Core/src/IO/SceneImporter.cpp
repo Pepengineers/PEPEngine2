@@ -66,7 +66,7 @@ namespace
 			locator.SubAssetIndex = sceneMeshIndex;
 
 			Engine::Core::MeshHandle meshHandle;
-			const std::shared_ptr<const Engine::Core::Mesh> loadedMesh = meshRegistry.Load(locator, meshHandle);
+			const Engine::Core::Mesh* loadedMesh = meshRegistry.Load(locator, meshHandle);
 			if (loadedMesh == nullptr)
 			{
 				LogSceneImporterMessage(L"[SceneImporter] Failed to load mesh sub-asset " + std::to_wstring(locator.SubAssetIndex) +
@@ -109,7 +109,7 @@ namespace
 
 namespace Engine::Core
 {
-	std::shared_ptr<SceneAsset> SceneImporter::ImportSceneAsset(const std::filesystem::path& sourcePath, MeshRegistry& meshRegistry)
+	std::unique_ptr<SceneAsset> SceneImporter::ImportSceneAsset(const std::filesystem::path& sourcePath, MeshRegistry& meshRegistry)
 	{
 		if (sourcePath.empty())
 		{
@@ -153,6 +153,6 @@ namespace Engine::Core
 		LogSceneImporterMessage(L"[SceneImporter] Imported scene with " + std::to_wstring(importedNodes.size()) +
 			L" nodes from path: " + sourcePath.generic_wstring() + L"\n");
 
-		return std::make_shared<SceneAsset>(std::move(importedNodes), std::move(rootNodeIndices));
+		return std::make_unique<SceneAsset>(std::move(importedNodes), std::move(rootNodeIndices));
 	}
 }

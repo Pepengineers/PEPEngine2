@@ -60,7 +60,7 @@ namespace Engine::Core
 		/// Stores loaded asset data into the slot identified by the given handle.
 		/// Returns the stored pointer, allowing use in assignment expressions.
 		/// The handle must have been obtained from a prior call to Register().
-		[[nodiscard]] std::shared_ptr<const TAsset> Cache(const THandle handle, std::shared_ptr<TAsset> data)
+		[[nodiscard]] const TAsset* Cache(const THandle handle, std::unique_ptr<TAsset> data)
 		{
 			const std::wstring assetName = GetAssetName();
 
@@ -82,7 +82,7 @@ namespace Engine::Core
 			{
 				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] " + assetName + L" data already cached for handle " +
 					std::to_wstring(handle.GetValue()) + L".\n");
-				return record->AssetData;
+				return record->AssetData.get();
 			}
 
 			record->AssetData = std::move(data);
@@ -91,14 +91,14 @@ namespace Engine::Core
 			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Cached " + assetName + L" data for handle " +
 				std::to_wstring(handle.GetValue()) + L". Path: " + GetSourcePathFromMetadata(record->Metadata).generic_wstring() + L"\n");
 
-			return record->AssetData;
+			return record->AssetData.get();
 		}
 
 		/// Registers the given path (if not already registered) and stores
 		/// the provided asset data into the resulting slot in a single call.
 		/// Equivalent to calling Register() followed by Cache().
 		/// Returns the stored pointer, or nullptr if registration fails.
-		[[nodiscard]] std::shared_ptr<const TAsset> Cache(const std::filesystem::path& path, std::shared_ptr<TAsset> data)
+		[[nodiscard]] const TAsset* Cache(const std::filesystem::path& path, std::unique_ptr<TAsset> data)
 		{
 			const THandle handle = Register(path);
 			if (!handle.IsValid())
@@ -194,14 +194,14 @@ namespace Engine::Core
 
 			/// The loaded asset data, or nullptr if the asset has not been loaded yet
 			/// (registered but not cached) or has been unloaded.
-			std::shared_ptr<TAsset> AssetData;
+			std::unique_ptr<TAsset> AssetData;
 		};
 
 		TypedAssetRegistry() = default;
 
 		/// Returns the loaded asset data associated with the given handle,
 		/// or nullptr if the handle is invalid or the asset has not been cached yet.
-		[[nodiscard]] std::shared_ptr<const TAsset> GetAsset(const THandle handle) const
+		[[nodiscard]] const TAsset* GetAsset(const THandle handle) const
 		{
 			const Record* record = TryGetRecord(handle, L"get " + GetAssetName());
 			if (record == nullptr)
@@ -209,7 +209,7 @@ namespace Engine::Core
 				return nullptr;
 			}
 
-			return record->AssetData;
+			return record->AssetData.get();
 		}
 
 		/// Completes registration by creating a typed record for a newly assigned handle.

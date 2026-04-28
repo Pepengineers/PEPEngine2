@@ -37,17 +37,17 @@ namespace Engine::Core
 		return L"texture";
 	}
 
-	std::shared_ptr<const Texture> TextureRegistry::GetTexture(const TextureHandle handle) const
+	const Texture* TextureRegistry::GetTexture(const TextureHandle handle) const
 	{
 		return GetAsset(handle);
 	}
 
-	std::shared_ptr<const Texture> TextureRegistry::FindTexture(const std::filesystem::path& path) const
+	const Texture* TextureRegistry::FindTexture(const std::filesystem::path& path) const
 	{
 		return GetTexture(FindHandle(path));
 	}
 
-	std::shared_ptr<const Texture> TextureRegistry::Load(const std::filesystem::path& path)
+	const Texture* TextureRegistry::Load(const std::filesystem::path& path)
 	{
 		if (path.empty())
 		{
@@ -55,7 +55,7 @@ namespace Engine::Core
 			return nullptr;
 		}
 
-		std::shared_ptr<const Texture> cachedTexture = FindTexture(path);
+		const Texture* cachedTexture = FindTexture(path);
 		if (cachedTexture != nullptr)
 		{
 			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Reusing cached texture for path: " +
@@ -80,7 +80,7 @@ namespace Engine::Core
 		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Loading texture from path: " +
 			sourcePath.generic_wstring() + L"\n");
 
-		std::shared_ptr<Texture> loadedTexture = TextureLoader::LoadTextureAsset(sourcePath);
+		std::unique_ptr<Texture> loadedTexture = TextureLoader::LoadTextureAsset(sourcePath);
 		if (loadedTexture == nullptr)
 		{
 			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to load texture from path: " +
@@ -96,9 +96,9 @@ namespace Engine::Core
 		return Cache(textureHandle, std::move(loadedTexture));
 	}
 
-	std::shared_ptr<const Texture> TextureRegistry::LoadOrDefault(const std::filesystem::path& path)
+	const Texture* TextureRegistry::LoadOrDefault(const std::filesystem::path& path)
 	{
-		std::shared_ptr<const Texture> loadedTexture = Load(path);
+		const Texture* loadedTexture = Load(path);
 		if (loadedTexture != nullptr)
 		{
 			return loadedTexture;
@@ -110,43 +110,46 @@ namespace Engine::Core
 		return GetDefaultTexture();
 	}
 
-	std::shared_ptr<const Texture> TextureRegistry::GetDefaultTexture()
+	const Texture* TextureRegistry::GetDefaultTexture()
 	{
-		if (_defaultTexture != nullptr)
+		if (_defaultTextureHandle.IsValid())
 		{
-			return _defaultTexture;
+			const Texture* defaultTexture = GetTexture(_defaultTextureHandle);
+			if (defaultTexture != nullptr)
+			{
+				return defaultTexture;
+			}
+
+			_defaultTextureHandle = {};
+		}
+
+		if (_fallbackDefaultTexture != nullptr)
+		{
+			return _fallbackDefaultTexture.get();
 		}
 
 		const std::filesystem::path defaultTexturePath = L"missing_texture.dds";
-
-		TextureHandle defaultTextureHandle = FindHandle(defaultTexturePath);
-		if (!defaultTextureHandle.IsValid())
+		const Texture* loadedDefaultTexture = Load(defaultTexturePath);
+		if (loadedDefaultTexture != nullptr)
 		{
-			defaultTextureHandle = Register(defaultTexturePath);
-		}
-
-		if (defaultTextureHandle.IsValid())
-		{
-			const std::shared_ptr<const Texture> loadedDefaultTexture = Load(defaultTexturePath);
-			if (loadedDefaultTexture != nullptr)
+			_defaultTextureHandle = FindHandle(defaultTexturePath);
+			if (_defaultTextureHandle.IsValid())
 			{
-				_defaultTexture = std::const_pointer_cast<Texture>(loadedDefaultTexture);
-
 				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Loaded default texture from path: " +
-					GetSourcePath(defaultTextureHandle).generic_wstring() + L"\n");
-
-				return _defaultTexture;
+					GetSourcePath(_defaultTextureHandle).generic_wstring() + L"\n");
 			}
+
+			return loadedDefaultTexture;
 		}
 
-		_defaultTexture = TextureLoader::CreateDefaultTexture();
-		if (_defaultTexture == nullptr)
+		_fallbackDefaultTexture = TextureLoader::CreateDefaultTexture();
+		if (_fallbackDefaultTexture == nullptr)
 		{
 			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to create fallback default texture.\n");
 			return nullptr;
 		}
 
 		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Using built-in fallback default texture.\n");
-		return _defaultTexture;
+		return _fallbackDefaultTexture.get();
 	}
 }

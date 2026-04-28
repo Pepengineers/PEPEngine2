@@ -25,11 +25,11 @@ namespace Engine::Core
 	public:
 		/// Returns the scene data associated with the given handle,
 		/// or nullptr if the handle is invalid or the scene has not been cached yet.
-		[[nodiscard]] std::shared_ptr<const SceneAsset> GetScene(SceneHandle handle) const;
+		[[nodiscard]] const SceneAsset* GetScene(SceneHandle handle) const;
 
 		/// Looks up a scene by file path and returns its data,
 		/// or nullptr if the path is not registered or the scene has not been cached.
-		[[nodiscard]] std::shared_ptr<const SceneAsset> FindScene(const std::filesystem::path& path) const;
+		[[nodiscard]] const SceneAsset* FindScene(const std::filesystem::path& path) const;
 
 		/// Loads the scene from the given path, importing it from disk if needed.
 		/// If the scene is already cached, returns the existing instance without re-importing.
@@ -37,7 +37,7 @@ namespace Engine::Core
 		/// The provided MeshRegistry is forwarded to the scene importer, which registers
 		/// and loads any meshes referenced by the scene during import.
 		/// Returns nullptr if the path is empty, registration fails, or import fails.
-		[[nodiscard]] std::shared_ptr<const SceneAsset> Load(const std::filesystem::path& path, MeshRegistry& meshRegistry);
+		[[nodiscard]] const SceneAsset* Load(const std::filesystem::path& path, MeshRegistry& meshRegistry);
 
 	protected:
 		/// Returns the display name of this registry, used in log messages.

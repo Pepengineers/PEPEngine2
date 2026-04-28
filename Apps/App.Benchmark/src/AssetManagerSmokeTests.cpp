@@ -94,7 +94,7 @@ namespace
 		PrintSeparator();
 		std::wcout << L"[Mesh Import] " << path.generic_wstring() << L"\n";
 
-		const std::shared_ptr<const Engine::Core::Mesh> mesh = assetManager.LoadMesh(path);
+		const Engine::Core::Mesh* mesh = assetManager.LoadMesh(path);
 		if (mesh == nullptr)
 		{
 			std::wcout << L"Result: FAILED\n";
@@ -102,7 +102,7 @@ namespace
 			return;
 		}
 
-		const std::shared_ptr<const Engine::Core::Mesh> cachedMesh = assetManager.LoadMesh(path);
+		const Engine::Core::Mesh* cachedMesh = assetManager.LoadMesh(path);
 
 		size_t totalVertices = 0;
 		size_t totalIndices = 0;
@@ -131,7 +131,7 @@ namespace
 		std::wcout << L"Total vertices: " << totalVertices << L"\n";
 		std::wcout << L"Total indices: " << totalIndices << L"\n";
 		PrintBounds(L"Mesh bounds:", mesh->GetBounds());
-		std::wcout << L"Cache reuse: " << (mesh.get() == cachedMesh.get()) << L"\n";
+		std::wcout << L"Cache reuse: " << (mesh == cachedMesh) << L"\n";
 
 		PrintRegistryStats();
 	}
@@ -143,7 +143,7 @@ namespace
 		PrintSeparator();
 		std::wcout << L"[Scene Import] " << path.generic_wstring() << L"\n";
 
-		const std::shared_ptr<const Engine::Core::SceneAsset> scene = assetManager.LoadScene(path);
+		const Engine::Core::SceneAsset* scene = assetManager.LoadScene(path);
 		if (scene == nullptr)
 		{
 			std::wcout << L"Result: FAILED\n";
@@ -151,7 +151,7 @@ namespace
 			return;
 		}
 
-		const std::shared_ptr<const Engine::Core::SceneAsset> cachedScene = assetManager.LoadScene(path);
+		const Engine::Core::SceneAsset* cachedScene = assetManager.LoadScene(path);
 
 		size_t nodesWithMeshes = 0;
 		size_t totalMeshRefs = 0;
@@ -210,14 +210,14 @@ namespace
 		std::wcout << L"Nodes with meshes: " << nodesWithMeshes << L"\n";
 		std::wcout << L"Total mesh references: " << totalMeshRefs << L"\n";
 		std::wcout << L"Unique mesh handles: " << uniqueMeshHandleValues.size() << L"\n";
-		std::wcout << L"Cache reuse: " << (scene.get() == cachedScene.get()) << L"\n";
+		std::wcout << L"Cache reuse: " << (scene == cachedScene) << L"\n";
 
 		for (std::uint32_t handleValue : uniqueMeshHandleValues)
 		{
 			const Engine::Core::MeshHandle meshHandle(handleValue);
 
 			const Engine::Core::MeshAssetLocator locator = assetManager.Meshes().GetLocator(meshHandle);
-			const std::shared_ptr<const Engine::Core::Mesh> mesh = assetManager.Meshes().GetMesh(meshHandle);
+			const Engine::Core::Mesh* mesh = assetManager.Meshes().GetMesh(meshHandle);
 
 			std::wcout << L"MeshHandle[" << handleValue << L"]";
 			std::wcout << L": path=" << locator.SourcePath.generic_wstring();
@@ -273,7 +273,7 @@ namespace
 		PrintSeparator();
 		std::wcout << L"[Texture Import] " << path.generic_wstring() << L"\n";
 
-		const std::shared_ptr<const Engine::Core::Texture> texture = assetManager.LoadTexture(path);
+		const Engine::Core::Texture* texture = assetManager.LoadTexture(path);
 		if (texture == nullptr)
 		{
 			std::wcout << L"Result: FAILED\n";
@@ -281,8 +281,8 @@ namespace
 			return;
 		}
 
-		const std::shared_ptr<const Engine::Core::Texture> cachedTexture = assetManager.LoadTexture(path);
-		const std::shared_ptr<const Engine::Core::Texture> fallbackTexture = assetManager.LoadTextureOrDefault(path);
+		const Engine::Core::Texture* cachedTexture = assetManager.LoadTexture(path);
+		const Engine::Core::Texture* fallbackTexture = assetManager.LoadTextureOrDefault(path);
 
 		std::wcout << L"Result: SUCCESS\n";
 		std::wcout << L"Dimension: " << TextureDimensionToString(texture->GetDimension()) << L"\n";
@@ -294,8 +294,8 @@ namespace
 		std::wcout << L"Mip levels: " << texture->GetMipLevels() << L"\n";
 		std::wcout << L"Cube map: " << texture->IsCubeMap() << L"\n";
 		std::wcout << L"Subresource count: " << texture->GetSubresourceCount() << L"\n";
-		std::wcout << L"Cache reuse: " << (texture.get() == cachedTexture.get()) << L"\n";
-		std::wcout << L"Fallback path returns same texture: " << (texture.get() == fallbackTexture.get()) << L"\n";
+		std::wcout << L"Cache reuse: " << (texture == cachedTexture) << L"\n";
+		std::wcout << L"Fallback path returns same texture: " << (texture == fallbackTexture) << L"\n";
 
 		if (texture->GetSubresourceCount() > 0)
 		{
@@ -318,13 +318,13 @@ namespace
 		PrintSeparator();
 		std::wcout << L"[Missing Texture] " << path.generic_wstring() << L"\n";
 
-		const std::shared_ptr<const Engine::Core::Texture> strictTexture = assetManager.LoadTexture(path);
-		const std::shared_ptr<const Engine::Core::Texture> fallbackTexture = assetManager.LoadTextureOrDefault(path);
-		const std::shared_ptr<const Engine::Core::Texture> defaultTexture = assetManager.Textures().GetDefaultTexture();
+		const Engine::Core::Texture* strictTexture = assetManager.LoadTexture(path);
+		const Engine::Core::Texture* fallbackTexture = assetManager.LoadTextureOrDefault(path);
+		const Engine::Core::Texture* defaultTexture = assetManager.Textures().GetDefaultTexture();
 
 		std::wcout << L"Strict load returned nullptr: " << (strictTexture == nullptr) << L"\n";
 		std::wcout << L"Fallback returned nullptr: " << (fallbackTexture == nullptr) << L"\n";
-		std::wcout << L"Fallback returned default texture: " << (fallbackTexture.get() == defaultTexture.get()) << L"\n";
+		std::wcout << L"Fallback returned default texture: " << (fallbackTexture == defaultTexture) << L"\n";
 
 		if (fallbackTexture != nullptr)
 		{

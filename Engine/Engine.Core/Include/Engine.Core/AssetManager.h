@@ -28,10 +28,10 @@ namespace Engine::Core
 		/// Returns the global asset manager instance.
 		static AssetManager& GetInstance();
 
-		[[nodiscard]] std::shared_ptr<const Mesh> LoadMesh(const std::filesystem::path& path);
-		[[nodiscard]] std::shared_ptr<const SceneAsset> LoadScene(const std::filesystem::path& path);
-		[[nodiscard]] std::shared_ptr<const Texture> LoadTexture(const std::filesystem::path& path);
-		[[nodiscard]] std::shared_ptr<const Texture> LoadTextureOrDefault(const std::filesystem::path& path);
+		[[nodiscard]] const Mesh* LoadMesh(const std::filesystem::path& path);
+		[[nodiscard]] const SceneAsset* LoadScene(const std::filesystem::path& path);
+		[[nodiscard]] const Texture* LoadTexture(const std::filesystem::path& path);
+		[[nodiscard]] const Texture* LoadTextureOrDefault(const std::filesystem::path& path);
 
 		/// Returns the mesh registry.
 		[[nodiscard]] MeshRegistry& Meshes();
