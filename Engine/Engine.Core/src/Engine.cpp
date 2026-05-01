@@ -1,6 +1,5 @@
-﻿#include "Engine.h"
-
-#include "ConsoleModule.h"
+﻿#include "Engine.Core/Engine.h"
+#include "Engine.Core/ConsoleModule.h"
 
 Engine* Engine::Instance = nullptr;
 

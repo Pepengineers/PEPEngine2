@@ -64,5 +64,5 @@ protected:
     bool AddModules() override;
 
 private:
-    std::unique_ptr<Window> window;
+    std::unique_ptr<Window> _window;
 };

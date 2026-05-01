@@ -33,27 +33,6 @@
     <ClCompile Include="src\Types\SceneTypes.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClInclude Include="src\Registries\AssetRegistryBase.cpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\Registries\MeshRegistry.cpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\Registries\TextureRegistry.cpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\Registries\SceneRegistry.cpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\IO\MeshImporter.cpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\IO\TextureLoader.cpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
-    <ClInclude Include="src\IO\SceneImporter.cpp">
-      <Filter>Source Files</Filter>
-    </ClInclude>
     <ClInclude Include="src\IO\MeshImporter.cpp">
       <Filter>Source Files</Filter>
     </ClInclude>
@@ -66,11 +45,35 @@
     <ClCompile Include="src\WorldLoader.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\IO\MeshImporter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\IO\SceneImporter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\IO\TextureLoader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Registries\AssetRegistryBase.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Registries\MeshRegistry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Registries\SceneRegistry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Registries\TextureRegistry.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ConsoleModule.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\Engine.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Include\Engine.Core\GameTimer.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\Engine.Core\AssetManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -140,7 +143,28 @@
     <ClInclude Include="Include\Engine.Core\WorldLoader.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.Core\LockThreadQueue.h">
+    <ClInclude Include="Include\Common\ConsoleVariables.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Common\LockThreadQueue.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Common\Module.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Common\Stopwatch.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Common\GameTimer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\ConsoleModule.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\Engine.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\ModuleLocator.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

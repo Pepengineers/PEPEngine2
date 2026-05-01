@@ -39,11 +39,11 @@ void App::CalculateFrameStats() const
         std::wstring FpsString = std::to_wstring(Fps);
         std::wstring MsPerFrameString = std::to_wstring(MsPerFrame);
 
-        std::wstring WindowText = window->GetWindowTitle() +
+        std::wstring WindowText = _window->GetWindowTitle() +
             L"    fps: " + FpsString +
             L"   mspf: " + MsPerFrameString;
 
-        SetWindowText(window->GetWindowHandle(), WindowText.c_str());
+        SetWindowText(_window->GetWindowHandle(), WindowText.c_str());
 
         // Reset for next average.
         FrameCount = 0;
@@ -72,7 +72,7 @@ HINSTANCE App::GetAppHandler() const
 
 Window* App::GetWindow() const
 {
-    return window.get();
+    return _window.get();
 }
 
 int App::Run()
@@ -162,14 +162,14 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_SIZE:
         {
             // Save the new client area dimensions.
-            if (window == nullptr)
+            if (_window == nullptr)
             {
                 return 0;
             }
 
             auto newWindowWidth = LOWORD(lParam);
             auto newWindowHeight = HIWORD(lParam);
-            window->SetWindowSize(newWindowWidth, newWindowHeight);
+            _window->SetWindowSize(newWindowWidth, newWindowHeight);
 
             if (wParam == SIZE_MINIMIZED)
             {
@@ -294,12 +294,12 @@ void App::OnResize()
 
 bool App::InitMainWindow()
 {
-    window = std::make_unique<Window>(1920, 1080, AppHandler);
-    return window->Initialize();
+    _window = std::make_unique<Window>(1280, 800, AppHandler);
+    return _window->Initialize();
 }
 
 bool App::AddModules()
 {
-    Locator.RegisterModule(std::make_shared<RenderModule>(window.get()));
+    Locator.RegisterModule(std::make_shared<RenderModule>(_window.get(), &Timer));
     return Engine::AddModules();
 }

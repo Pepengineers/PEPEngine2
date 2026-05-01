@@ -18,9 +18,9 @@ static AutoConsoleVariableRef NumFrameConstantVariable(
     _numFrameConstants,
     L"How many deferred frames was rendered");
 
-RenderModule::RenderModule(Window* window) :
-    _dualGPUMode(false), window(window),
-    _currFrameConstantsIndex(0)
+RenderModule::RenderModule(Window* window, GameTimer* timer) :
+    _dualGPUMode(false), _window(window),
+    _currFrameConstantsIndex(0), _timer(timer)
 {
     
 }
@@ -34,7 +34,7 @@ RenderModule::~RenderModule()
 
 void RenderModule::Initialize()
 {
-    timer.Reset();
+
 #if defined(DEBUG) || defined(_DEBUG)
     // Enable the D3D12 debug layer.
     ComPtr<ID3D12Debug> debugController;
@@ -71,7 +71,7 @@ void RenderModule::OnResize() const
     _primaryDevice->GetCommandQueue()->Flush();
 
     uint16_t width, height;
-    window->GetWindowSize(width, height);
+    _window->GetWindowSize(width, height);
 
     _backBuffer->Resize(width, height);
     _depthStencil->Resize(width, height);
@@ -79,7 +79,6 @@ void RenderModule::OnResize() const
 
 void RenderModule::OnUpdate()
 {
-    timer.Tick();
     _currFrameConstantsIndex = (_currFrameConstantsIndex + 1) % NumFrameConstantVariable.GetValue();
 
     auto cmdQueue = _primaryDevice->GetCommandQueue();
@@ -148,9 +147,9 @@ void RenderModule::BuildDescHeapsAndBackBuffer()
                                                      D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
     uint16_t width, height;
-    window->GetWindowSize(width, height);
+    _window->GetWindowSize(width, height);
 
-    _backBuffer = std::make_unique<GDX12SwapChain>(_primaryDevice.get(), window->GetWindowHandle(),
+    _backBuffer = std::make_unique<GDX12SwapChain>(_primaryDevice.get(), _window->GetWindowHandle(),
                                                    DXGI_FORMAT_R8G8B8A8_UNORM, 2, width, height, _rtvHeap.get());
 
     GDX12TextureDesc desc;
@@ -234,11 +233,11 @@ void RenderModule::UpdateMainCB() const
     GDX12MainConstants mainConstants;
 
     uint16_t width, height;
-    window->GetWindowSize(width, height);
+    _window->GetWindowSize(width, height);
 
     mainConstants.RenderTargetSize = {static_cast<float>(width), static_cast<float>(height)};
-    mainConstants.TotalTime = timer.TotalTime();
-    mainConstants.DeltaTime = timer.DeltaTime();
+    mainConstants.TotalTime = _timer->TotalTime();
+    mainConstants.DeltaTime = _timer->DeltaTime();
 
     frameRes->MainCB->CopyData(0, mainConstants);
 }

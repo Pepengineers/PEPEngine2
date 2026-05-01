@@ -13,7 +13,7 @@
 class RenderModule final : public Module
 {
 public:
-    RenderModule(Window* window);
+    RenderModule(Window* window, GameTimer* timer);
     ~RenderModule() override;
 
     void Initialize() override;
@@ -40,7 +40,7 @@ protected:
     bool ShouldRender() override;
 
 private:
-    GameTimer timer;
+    GameTimer* _timer;
 
     // Make sure that the declaration order is Lower level(basic structures) structures to higher(made of lower)
     // This defines destruction order and may break if done incorrectly
@@ -50,7 +50,7 @@ private:
     bool _dualGPUMode;
 
     std::unordered_map<std::string, std::vector<D3D12_INPUT_ELEMENT_DESC>> _inputLayouts;
-    Window* window;
+    Window* _window;
 
     // All of class members below should probably be put into DeviceResources class, and made for each device
     // Since all of these resources are currently existing on _primaryDevice only

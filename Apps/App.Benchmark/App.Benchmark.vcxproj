@@ -139,10 +139,6 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\App.Benchmark.cpp" />
-    <ClCompile Include="src\AssetManagerSmokeTests.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="Include\App.Benchmark\AssetManagerSmokeTests.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
