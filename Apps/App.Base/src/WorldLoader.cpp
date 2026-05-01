@@ -1,6 +1,6 @@
-#include "Engine.Core/WorldLoader.h"
-#include "Engine.Core/World.h"
-#include "Engine.Core/Components.h"
+#include "App.Base/WorldLoader.h"
+#include "App.Base/World.h"
+#include "App.Base/Components.h"
 
 bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 {

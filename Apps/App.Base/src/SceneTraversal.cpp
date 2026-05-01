@@ -1,6 +1,6 @@
 ﻿// SceneTraversal.cpp
 
-#include <Engine.Core/SceneTraversal.h>
+#include <App.Base/SceneTraversal.h>
 
 namespace
 {

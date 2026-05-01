@@ -3,8 +3,8 @@
 #include <App.Base/App.h>
 #include <WindowsX.h>
 
-#include "RenderModule.h"
-#include "Window.h"
+#include "App.Base/RenderModule.h"
+#include "App.Base/Window.h"
 
 using Microsoft::WRL::ComPtr;
 using namespace std;

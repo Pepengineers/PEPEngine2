@@ -1,5 +1,5 @@
-#include "Engine.Core/SceneManager.h"
-#include "Engine.Core/World.h"
+#include "App.Base/SceneManager.h"
+#include "App.Base/World.h"
 #include "Engine.Core/System.h"
 
 bool SceneManager::LoadWorld(const std::filesystem::path& path)
