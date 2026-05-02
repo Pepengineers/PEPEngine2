@@ -1,6 +1,7 @@
-﻿#pragma once
+#pragma once
 
-#include "App.Base/App.h"
+#include "Engine.Core/System.h"
+#include "App.Base/Window.h"
 
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include "Engine.RendererDX12/GDX12Device.h"
@@ -10,21 +11,19 @@
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
 
-class RenderModule final : public Module
+class SceneRenderingSystem : public System
 {
 public:
-    RenderModule(Window* window, GameTimer* timer);
-    ~RenderModule() override;
+    SceneRenderingSystem(Window* window, GameTimer* timer);
+    ~SceneRenderingSystem();
 
-    void Initialize() override;
-    void Uninitialize() override;
+    void Initialize();
+    void OnResize();
 
-    void OnResize() const;
+    void Update();
+    void Render();
 
-
-protected:
-    void OnUpdate() override;
-    void OnRender() override;
+    virtual void Tick(World& world, float dt) override {};
 
 private:
     void BuildDescHeapsAndBackBuffer();
@@ -35,11 +34,6 @@ private:
 
     void UpdateMainCB() const;
 
-protected:
-    bool ShouldTick() override;
-    bool ShouldRender() override;
-
-private:
     GameTimer* _timer;
 
     // Make sure that the declaration order is Lower level(basic structures) structures to higher(made of lower)

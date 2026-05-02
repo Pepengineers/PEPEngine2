@@ -27,9 +27,6 @@
     <ClInclude Include="Include\App.Base\Components.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\App.Base\RenderModule.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\App.Base\Window.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -46,6 +43,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\App.Base\WorldLoader.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\Modules\RenderModule.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\Systems\SceneRenderingSystem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -69,6 +72,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\World.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\SceneRenderingSystem.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

@@ -3,7 +3,7 @@
 #include <App.Base/App.h>
 #include <WindowsX.h>
 
-#include "App.Base/RenderModule.h"
+#include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Window.h"
 
 using Microsoft::WRL::ComPtr;
