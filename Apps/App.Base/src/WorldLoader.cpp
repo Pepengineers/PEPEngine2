@@ -30,6 +30,22 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     marker.AddComponent<NameComponent>(worldName + "_Marker");
     marker.AddComponent<TranslateComponent>(3.0f, 7.0f, -1.0f);
     */
+    WorldECS& ecs = world.GetECS();
+    
+    auto en1 = ecs.CreateEntity();
+    en1.AddComponent<NameComponent>("en1");
+    en1.AddComponent<TranslateComponent>(0.0f, 1.0f, 2.0f);
+    en1.AddComponent<VelocityComponent>(1.0f, 0.0f, 0.0f);
+
+    auto en2 = ecs.CreateEntity();
+    en2.AddComponent<NameComponent>("en2");
+    en2.AddComponent<TranslateComponent>(10.0f, 0.0f, 5.0f);
+    en2.AddComponent<VelocityComponent>(-0.5f, 0.0f, 0.25f);
+
+    auto marker = ecs.CreateEntity();
+    marker.AddComponent<NameComponent>("marker");
+    marker.AddComponent<TranslateComponent>(3.0f, 7.0f, -1.0f);
+    
     return true;
 }
 
