@@ -14,12 +14,43 @@ struct TransformComponent : ComponentTag
     }
 };
 
+struct TranslateComponent : ComponentTag
+{
+    Vector3 Position;
+
+    TranslateComponent()
+        : Position(Vector3(0.f, 0.f, 0.f))
+    {
+    }
+
+    TranslateComponent(float x, float y, float z)
+        : Position(Vector3(x, y, z))
+    {
+    }
+
+    explicit TranslateComponent(const Vector3& position)
+        : Position(position)
+    {
+    }
+};
+
 //This should probably be remade into a PhysicsComponent
 struct VelocityComponent : ComponentTag
 {
     Vector3 Velocity;
 
-    VelocityComponent() : Velocity(Vector3(0.f, 0.f, 0.f))
+    VelocityComponent()
+        : Velocity(Vector3(0.f, 0.f, 0.f))
+    {
+    }
+
+    VelocityComponent(float x, float y, float z)
+        : Velocity(Vector3(x, y, z))
+    {
+    }
+
+    explicit VelocityComponent(const Vector3& velocity)
+        : Velocity(velocity)
     {
     }
 };
