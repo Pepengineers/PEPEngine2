@@ -25,6 +25,8 @@
     <ClInclude Include="Include\App.Base\Modules\RenderModule.h" />
     <ClInclude Include="Include\App.Base\SceneManager.h" />
     <ClInclude Include="Include\App.Base\SceneTraversal.h" />
+    <ClInclude Include="Include\App.Base\Systems\MovementSystem.h" />
+    <ClInclude Include="Include\App.Base\Systems\RenderCullingSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\SceneRenderingSystem.h" />
     <ClInclude Include="Include\App.Base\Window.h" />
     <ClInclude Include="Include\App.Base\World.h" />
