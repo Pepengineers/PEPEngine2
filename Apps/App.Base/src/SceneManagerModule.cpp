@@ -1,0 +1,127 @@
+#include "App.Base/Modules/SceneManagerModule.h"
+
+#include "App.Base/Systems/MovementSystem.h"
+#include "App.Base/Systems/RenderCullingSystem.h"
+#include "App.Base/World.h"
+#include "Common/ConsoleVariables.h"
+#include "Engine.Core/System.h"
+
+SceneManagerModule::SceneManagerModule(GameTimer* timer) :
+    _timer(timer)
+{
+    
+}
+
+SceneManagerModule::~SceneManagerModule()
+{
+    
+}
+
+// todo implement world loading from file
+void SceneManagerModule::Initialize()
+{
+    Uninitialize();
+
+    if (!LoadWorld("world1.yaml"))
+    {
+        // todo runtime error or log 
+    }
+
+    World* world = GetWorld(0);
+    if (!world)
+    {
+        // todo runtime error or log 
+    }
+
+    AddSystem<MovementSystem>(world, 0);
+    AddSystem<RenderCullingSystem>(world, 100);
+}
+
+void SceneManagerModule::Uninitialize()
+{
+    _systemVector.clear();
+    _worldVector.clear();
+}
+
+bool SceneManagerModule::LoadWorld(const std::filesystem::path& path)
+{
+    WorldDesc desc;
+    desc.WorldFilePath = path;
+
+    auto world = std::make_unique<World>(desc);
+    if (!world->Load())
+    {
+        return false;
+    }
+
+    _worldVector.push_back(std::move(world));
+    return true;
+}
+
+bool SceneManagerModule::UnloadWorld(size_t index)
+{
+    if (index >= _worldVector.size()) { return false; }
+    
+    World* worldToRemove = _worldVector[index].get();
+    _systemVector.erase(std::remove_if(_systemVector.begin(), _systemVector.end(),
+            [worldToRemove](const SystemEntry& entry)
+            {
+                return entry.world == worldToRemove;
+            }),
+        _systemVector.end());
+
+    _worldVector.erase(_worldVector.begin() + index);
+    return true;
+}
+
+bool SceneManagerModule::SaveWorld(World* world, const std::filesystem::path& path)
+{
+    if (!world)
+    {
+        return false;
+    }
+
+    return world->Save(path);
+}
+
+World* SceneManagerModule::GetWorld(size_t index)
+{
+    if (index >= _worldVector.size())
+    {
+        return nullptr;
+    }
+
+    return _worldVector[index].get();
+}
+
+void SceneManagerModule::OnUpdate()
+{
+    Tick(_timer->DeltaTime());
+}
+
+void SceneManagerModule::OnRender()
+{
+}
+
+bool SceneManagerModule::ShouldTick()
+{
+    return true;
+}
+
+bool SceneManagerModule::ShouldRender()
+{
+    return false;
+}
+
+void SceneManagerModule::Tick(float dt)
+{
+    for (auto& entry : _systemVector)
+    {
+        if (!entry.world || entry.world->IsPaused())
+        {
+            continue;
+        }
+
+        entry.system->Tick(*entry.world, dt);
+    }
+}
