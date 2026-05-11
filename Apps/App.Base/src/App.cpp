@@ -4,6 +4,7 @@
 #include <WindowsX.h>
 
 #include "App.Base/Modules/RenderModule.h"
+#include "App.Base/Modules/SceneManagerModule.h"
 #include "App.Base/Window.h"
 
 using Microsoft::WRL::ComPtr;
@@ -300,6 +301,7 @@ bool App::InitMainWindow()
 
 bool App::AddModules()
 {
+    Locator.RegisterModule(std::make_shared<SceneManagerModule>(&Timer));
     Locator.RegisterModule(std::make_shared<RenderModule>(_window.get(), &Timer));
     return Engine::AddModules();
 }

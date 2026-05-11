@@ -23,6 +23,7 @@
     <ClInclude Include="Include\App.Base\Components.h" />
     <ClInclude Include="Include\App.Base\ECSStorage.h" />
     <ClInclude Include="Include\App.Base\Modules\RenderModule.h" />
+    <ClInclude Include="Include\App.Base\Modules\SceneManagerModule.h" />
     <ClInclude Include="Include\App.Base\SceneManager.h" />
     <ClInclude Include="Include\App.Base\SceneTraversal.h" />
     <ClInclude Include="Include\App.Base\Systems\MovementSystem.h" />
@@ -38,6 +39,7 @@
     <ClCompile Include="src\App.cpp" />
     <ClCompile Include="src\RenderModule.cpp" />
     <ClCompile Include="src\SceneManager.cpp" />
+    <ClCompile Include="src\SceneManagerModule.cpp" />
     <ClCompile Include="src\SceneRenderingSystem.cpp" />
     <ClCompile Include="src\SceneTraversal.cpp" />
     <ClCompile Include="src\Window.cpp" />
