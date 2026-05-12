@@ -12,12 +12,10 @@ struct TransformCB
 
 struct MaterialCB
 {
-    float3 Color;
     float Roughness;
     float Metallic;
     float _pad1;
     float _pad2;
-    float _pad3;
 };
 
 struct LightCB

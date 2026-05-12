@@ -301,7 +301,15 @@ bool App::InitMainWindow()
 
 bool App::AddModules()
 {
-    Locator.RegisterModule(std::make_shared<SceneManagerModule>(&Timer));
     Locator.RegisterModule(std::make_shared<RenderModule>(_window.get(), &Timer));
+    Locator.RegisterModule(std::make_shared<SceneManagerModule>(&Timer));
     return BenchmarkEngine::AddModules();
+}
+
+void App::Update(const GameTimer& gameTimer)
+{
+    //explicitly specifying update order since it is not the same
+    // as the initialization order (that is used by the locator)
+    Locator.GetModule<SceneManagerModule>()->Update();
+    Locator.GetModule<RenderModule>()->Update();
 }

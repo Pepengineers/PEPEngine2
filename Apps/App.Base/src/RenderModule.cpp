@@ -74,6 +74,39 @@ void RenderModule::OnResize() const
     _depthStencil->Resize(width, height);
 }
 
+GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
+{
+    auto it = _materials.find(name);
+    if (it != _materials.end()) { return it->second.get(); }
+
+    std::string errorMsg = "ERROR: Material " + name + " not found in materials directory.\n";
+    OutputDebugStringA(errorMsg.c_str());
+    return nullptr;
+}
+
+GDX12Material* RenderModule::CreateMaterial(const std::string& name)
+{
+    if (_materials.find(name) != _materials.end()) 
+    {
+        std::string errorMsg = "ERROR: Material with name " + name + " already exists in materials directory.\n";
+        OutputDebugStringA(errorMsg.c_str());
+        return nullptr;
+    }
+
+    _materials[name] = std::unique_ptr<GDX12Material>(new GDX12Material());
+
+    _materials[name]->Name = name;
+    _materials[name]->_CBufferIndex = _frameConstants[0]->MaterialCB->GetElementCount();
+
+    for (auto& constants : _frameConstants)
+    {
+        auto& CBuffer = constants->MaterialCB;
+        CBuffer->Resize(CBuffer->GetElementCount() + 1);
+    }
+
+    return _materials[name].get();
+}
+
 void RenderModule::OnUpdate()
 {
     _currFrameConstantsIndex = (_currFrameConstantsIndex + 1) % NumFrameConstantVariable.GetValue();
@@ -87,6 +120,7 @@ void RenderModule::OnUpdate()
     }
 
     UpdateMainCB();
+    UpdateMaterialCB();
 }
 
 void RenderModule::OnRender()
@@ -223,7 +257,7 @@ void RenderModule::BuildFrameConstants()
     }
 }
 
-void RenderModule::UpdateMainCB() const
+void RenderModule::UpdateMainCB()
 {
     auto& frameRes = _frameConstants[_currFrameConstantsIndex];
 
@@ -237,6 +271,31 @@ void RenderModule::UpdateMainCB() const
     mainConstants.DeltaTime = _timer->DeltaTime();
 
     frameRes->MainCB->CopyData(0, mainConstants);
+}
+
+void RenderModule::UpdateMaterialCB()
+{
+    auto currMaterialCB = _frameConstants[_currFrameConstantsIndex]->MaterialCB.get();
+    for (auto& i : _materials)
+    {
+        GDX12Material* material = i.second.get();
+
+        if (material->DirtyFlag)
+        { 
+            material->DirtyFlag = false;
+            material->_numFramesDirty = _numFrameConstants;
+        }
+
+        if (material->_numFramesDirty > 0)
+        {
+            GDX12MaterialConstants materialConstants;
+            materialConstants.Roughness = material->Roughness;
+            materialConstants.Metallic = material->Metallic;
+
+            currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
+            material->_numFramesDirty--;
+        }
+    }
 }
 
 bool RenderModule::ShouldTick()

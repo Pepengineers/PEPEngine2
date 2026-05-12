@@ -16,12 +16,10 @@ struct GDX12TransformConstants
 
 struct GDX12MaterialConstants
 {
-    DirectX::XMFLOAT3 Color = { 1.f, 1.f, 1.f };
     float Roughness = 0.5f;
     float Metallic = 0.5f;
     float _pad1;
     float _pad2;
-    float _pad3;
 };
 
 struct GDX12LightConstants

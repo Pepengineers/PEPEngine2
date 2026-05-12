@@ -3,6 +3,8 @@
 #include "App.Base/Components.h"
 
 #include "Engine.Core/AssetManager.h"
+#include "Engine.Core/BenchmarkEngine.h"
+#include "App.Base/Modules/RenderModule.h"
 
 bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 {
@@ -35,10 +37,18 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 
     //Loading Neccessary Assets
     auto& assetManager = Engine::Core::AssetManager::GetInstance();
+    auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+
+    auto material1 = renderModule->CreateMaterial("test1");
+    material1->Metallic = 1.f;
+    material1->Roughness = 0.f;
+
+    auto material2 = renderModule->CreateMaterial("test2");
+    material2->Metallic = 0.f;
+    material2->Roughness = 1.f;
 
     //These will be automatically uploaded onto GPU
-    auto head = assetManager.LoadMesh("african_head.obj");
-    
+    auto HeadMesh = assetManager.LoadMesh("african_head.obj");
 
     // Creating Entities and components
     WorldECS& ecs = world.GetECS();

@@ -9,6 +9,7 @@
 #include "Engine.RendererDX12/GDX12RootSignature.h"
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
+#include "Engine.RendererDX12/GDX12Material.h"
 
 #include "Engine.Core/Types/MeshTypes.h"
 
@@ -25,6 +26,11 @@ public:
 
     void OnResize() const;
 
+    GDX12Material* GetMaterialByName(const std::string& name);
+
+    //returns a pointer to a fully initialized structure that you can fill with data
+    GDX12Material* CreateMaterial(const std::string& name);
+
 protected:
     void OnUpdate() override;
     void OnRender() override;
@@ -39,7 +45,8 @@ private:
     void BuildPSOs();
     void BuildFrameConstants();
 
-    void UpdateMainCB() const;
+    void UpdateMainCB();
+    void UpdateMaterialCB();
 
     GameTimer* _timer;
     Window* _window;
@@ -49,6 +56,7 @@ private:
     bool _dualGPUMode;
 
     std::unordered_map<std::string, std::vector<D3D12_INPUT_ELEMENT_DESC>> _inputLayouts;
+    std::unordered_map<std::string, std::unique_ptr<GDX12Material>> _materials;
 
     // All of class members below should probably be put into DeviceResources class, and made for each device
     // Since all of these resources are currently existing on _primaryDevice only

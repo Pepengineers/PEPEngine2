@@ -1,8 +1,10 @@
 #pragma once
 
 #include "Engine.RendererDX12/D3DHelpers.h"
-#include "Engine.RendererDX12/GDX12ConstantStructures.h"
-#include "Engine.RendererDX12/GDX12UploadBuffer.h"
+
+#include "Engine.Core/Types/MeshTypes.h"
+#include "DirectXCollision.h"
+#include "Engine.RendererDX12/GDX12Material.h"
 
 struct TransformComponent : ComponentTag
 {
@@ -18,6 +20,18 @@ struct TransformComponent : ComponentTag
     }
 
     UINT _CBufferIndex;
+};
+
+struct StaticMeshRenderComponent : ComponentTag
+{
+    Engine::Core::Mesh* Mesh;
+    std::vector<GDX12Material*> Materials;
+    BoundingBox Bounds;
+
+    StaticMeshRenderComponent(Engine::Core::Mesh* mesh, const std::vector<GDX12Material*>& materials)
+        : Mesh(mesh), Materials(materials) 
+    {
+    }
 };
 
 //This should probably be remade into a PhysicsComponent

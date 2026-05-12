@@ -15,7 +15,8 @@ struct WorldDesc {
 using WorldECS = ECSStorage<
     TransformComponent,
     VelocityComponent,
-    NameComponent
+    NameComponent,
+    StaticMeshRenderComponent
 >;
 
 class World {

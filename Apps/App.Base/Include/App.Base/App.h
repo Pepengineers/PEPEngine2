@@ -62,6 +62,7 @@ protected:
 
     bool InitMainWindow();
     bool AddModules() override;
+    void Update(const GameTimer& gameTimer) override;
 
 private:
     std::unique_ptr<Window> _window;
