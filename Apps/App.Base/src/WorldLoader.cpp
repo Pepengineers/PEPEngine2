@@ -14,36 +14,21 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     */
     world.SetName(path.string()); 
 
-    
-    /* example creating entities 
-    
-    WorldECS& ecs = world.GetECS();
-    const std::string worldName = path.stem().string();
-
-    auto player = ecs.CreateEntity();
-    player.AddComponent<NameComponent>(worldName + "_Player");
-    player.AddComponent<TranslateComponent>(0.0f, 1.0f, 2.0f);
-    player.AddComponent<VelocityComponent>(1.0f, 0.0f, 0.0f);
-
-    auto enemy = ecs.CreateEntity();
-    enemy.AddComponent<NameComponent>(worldName + "_Enemy");
-    enemy.AddComponent<TranslateComponent>(10.0f, 0.0f, 5.0f);
-    enemy.AddComponent<VelocityComponent>(-0.5f, 0.0f, 0.25f);
-
-    auto marker = ecs.CreateEntity();
-    marker.AddComponent<NameComponent>(worldName + "_Marker");
-    marker.AddComponent<TranslateComponent>(3.0f, 7.0f, -1.0f);
-    */
-
     //Loading Neccessary Assets
     auto& assetManager = Engine::Core::AssetManager::GetInstance();
     auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
 
-    auto material1 = renderModule->CreateMaterial("test1");
-    material1->Metallic = 1.f;
-    material1->Roughness = 0.f;
+    auto HeadTexture = assetManager.LoadTexture("african_head_diffuse.dds");
+    
+    //this should be automated via events
+    renderModule->CreateTexture("HeadTexture", HeadTexture);
 
-    auto material2 = renderModule->CreateMaterial("test2");
+    auto HeadMaterial = renderModule->CreateMaterial("HeadMaterial");
+    HeadMaterial->Metallic = 0.f;
+    HeadMaterial->Roughness = 0.8f;
+    HeadMaterial->Diffuse = renderModule->GetTextureByName("HeadTexture");
+
+    auto material2 = renderModule->CreateMaterial("test1");
     material2->Metallic = 0.f;
     material2->Roughness = 1.f;
 

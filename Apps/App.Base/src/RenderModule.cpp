@@ -107,6 +107,57 @@ GDX12Material* RenderModule::CreateMaterial(const std::string& name)
     return _materials[name].get();
 }
 
+GDX12Texture* RenderModule::GetTextureByName(const std::string& name)
+{
+    auto it = _textures.find(name);
+    if (it != _textures.end()) { return it->second.get(); }
+
+    std::string errorMsg = "ERROR: Texture " + name + " not found in textures directory.\n";
+    OutputDebugStringA(errorMsg.c_str());
+    return nullptr;
+}
+
+GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture* texture)
+{
+    if (_textures.find(name) != _textures.end())
+    {
+        std::string errorMsg = "ERROR: Material with name " + name + " already exists in materials directory.\n";
+        OutputDebugStringA(errorMsg.c_str());
+        return nullptr;
+    }
+
+    GDX12TextureDesc desc;
+    desc.SRV_UAV_Heap = _srvuavHeap.get();
+    desc.Format = desc.SRVDesc.Format = texture->GetFormat();
+    desc.Width = texture->GetWidth();
+    desc.Height = texture->GetHeight();
+
+    desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    desc.SRVDesc.Texture2D.MipLevels = 1;
+
+    auto subresource = texture->GetSubresource(0, 0);
+    
+
+    ComPtr<ID3D12Resource> textureResource = nullptr;
+    auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(desc.Format, desc.Width, desc.Height);
+    CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
+
+    _primaryDevice->GetDevice()->CreateCommittedResource(
+        &heapProps,
+        D3D12_HEAP_FLAG_NONE,
+        &texDesc,
+        D3D12_RESOURCE_STATE_COMMON,
+        nullptr,
+        IID_PPV_ARGS(&textureResource));
+
+    desc.ExternalResource = textureResource;
+
+    _textures[name] = std::make_unique<GDX12Texture>(desc);
+
+    return _textures[name].get();
+}
+
 void RenderModule::OnUpdate()
 {
     _currFrameConstantsIndex = (_currFrameConstantsIndex + 1) % NumFrameConstantVariable.GetValue();

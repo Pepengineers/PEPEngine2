@@ -14,8 +14,8 @@ GDX12Texture::GDX12Texture(GDX12TextureDesc desc) :
     _dsv(nullptr),
     _resourceFlags(D3D12_RESOURCE_FLAG_NONE)
 {
-    if (_desc.CreateRTV && _desc.CreateDSV) { OutputDebugStringA("ERROR: It is impossible to create RTV and DSV on the same texture."); }
-    if (_desc.CreateUAV && _desc.CreateDSV) { OutputDebugStringA("ERROR: It is impossible to create DSV and UAV on the same texture."); }
+    if (_desc.CreateRTV && _desc.CreateDSV) { OutputDebugStringA("ERROR: It is impossible to create RTV and DSV on the same texture.\n"); }
+    if (_desc.CreateUAV && _desc.CreateDSV) { OutputDebugStringA("ERROR: It is impossible to create DSV and UAV on the same texture.\n"); }
 
     //grab device pointer from any avalible heap
     if (_desc.SRV_UAV_Heap) { _device = _desc.SRV_UAV_Heap->_device; }
@@ -57,25 +57,25 @@ void GDX12Texture::Resize(UINT width, UINT height)
 
 GDX12Descriptor* GDX12Texture::GetSRV()
 {
-    if (!_desc.CreateSRV) { OutputDebugStringA("ERROR: Can't get Texture SRV: SRV not created."); }
+    if (!_desc.CreateSRV) { OutputDebugStringA("ERROR: Can't get Texture SRV: SRV not created.\n"); }
     return _srv.get();
 }
 
 GDX12Descriptor* GDX12Texture::GetRTV()
 {
-    if (!_desc.CreateRTV) { OutputDebugStringA("ERROR: Can't get Texture RTV: RTV not created."); }
+    if (!_desc.CreateRTV) { OutputDebugStringA("ERROR: Can't get Texture RTV: RTV not created.\n"); }
     return _rtv.get();
 }
 
 GDX12Descriptor* GDX12Texture::GetUAV()
 {
-    if (!_desc.CreateUAV) { OutputDebugStringA("ERROR: Can't get Texture UAV: UAV not created."); }
+    if (!_desc.CreateUAV) { OutputDebugStringA("ERROR: Can't get Texture UAV: UAV not created.\n"); }
     return _uav.get();
 }
 
 GDX12Descriptor* GDX12Texture::GetDSV()
 {
-    if (!_desc.CreateDSV) { OutputDebugStringA("ERROR: Can't get Texture DSV: DSV not created."); }
+    if (!_desc.CreateDSV) { OutputDebugStringA("ERROR: Can't get Texture DSV: DSV not created.\n"); }
     return _dsv.get();
 }
 
@@ -123,28 +123,28 @@ void GDX12Texture::CreateViews()
 {
     if (_desc.CreateSRV)
     {
-        if (!_desc.SRV_UAV_Heap) { OutputDebugStringA("ERROR: No Texture SRV_UAV Heap specified"); }
+        if (!_desc.SRV_UAV_Heap) { OutputDebugStringA("ERROR: No Texture SRV_UAV Heap specified\n"); }
         if(!_srv) _srv = std::make_unique<GDX12Descriptor>();
         _srv->InitAsSRV(_resource->D3DResource.Get(), &_desc.SRVDesc, _desc.SRV_UAV_Heap);
     }
 
     if (_desc.CreateUAV)
     {
-        if (!_desc.SRV_UAV_Heap) { OutputDebugStringA("ERROR: No Texture SRV_UAV Heap specified"); }
+        if (!_desc.SRV_UAV_Heap) { OutputDebugStringA("ERROR: No Texture SRV_UAV Heap specified\n"); }
         if (!_uav) _uav = std::make_unique<GDX12Descriptor>();
         _uav->InitAsUAV(_resource->D3DResource.Get(), &_desc.UAVDesc, _desc.SRV_UAV_Heap);
     }
 
     if (_desc.CreateRTV)
     {
-        if (!_desc.RTVHeap) { OutputDebugStringA("ERROR: No Texture RTV Heap specified"); }
+        if (!_desc.RTVHeap) { OutputDebugStringA("ERROR: No Texture RTV Heap specified\n"); }
         if (!_rtv) _rtv = std::make_unique<GDX12Descriptor>();
         _rtv->InitAsRTV(_resource->D3DResource.Get(), &_desc.RTVDesc, _desc.RTVHeap);
     }
 
     if (_desc.CreateDSV)
     {
-        if (!_desc.DSVHeap) { OutputDebugStringA("ERROR: No Texture DSV Heap specified"); }
+        if (!_desc.DSVHeap) { OutputDebugStringA("ERROR: No Texture DSV Heap specified\n"); }
         if (!_dsv) _dsv = std::make_unique<GDX12Descriptor>();
         _dsv->InitAsDSV(_resource->D3DResource.Get(), &_desc.DSVDesc, _desc.DSVHeap);
     }

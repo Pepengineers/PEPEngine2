@@ -12,6 +12,7 @@
 #include "Engine.RendererDX12/GDX12Material.h"
 
 #include "Engine.Core/Types/MeshTypes.h"
+#include "Engine.Core/Types/TextureTypes.h"
 
 using namespace Engine::Core;
 
@@ -30,6 +31,11 @@ public:
 
     //returns a pointer to a fully initialized structure that you can fill with data
     GDX12Material* CreateMaterial(const std::string& name);
+
+    GDX12Texture* GetTextureByName(const std::string& name);
+
+    //returns a pointer to a fully initialized structure that you can specify in materials
+    GDX12Texture* CreateTexture(const std::string& name, const Texture* texture);
 
 protected:
     void OnUpdate() override;
@@ -71,6 +77,8 @@ private:
     std::unordered_map<std::string, ComPtr<ID3DBlob>> _shaders;
     std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> _PSOs;
     std::unordered_map<std::string, std::unique_ptr<GDX12RootSignature>> _rootSignatures;
+
+    std::unordered_map<std::string, std::unique_ptr<GDX12Texture>> _textures;
 
     // These two resources are made on _primaryDevice only
     std::unique_ptr<GDX12SwapChain> _backBuffer;
