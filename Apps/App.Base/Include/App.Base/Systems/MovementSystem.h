@@ -9,11 +9,10 @@ public:
     void Tick(World& world, float dt) override
     {
         WorldECS& ecs = world.GetECS();
-
-        ecs.ForEach<TranslateComponent, VelocityComponent>(
-            [dt](Entity entity, TranslateComponent& translate, VelocityComponent& velocity)
+        ecs.ForEach<TransformComponent, VelocityComponent>(
+            [dt](Entity entity, TransformComponent& transform, VelocityComponent& velocity)
             {
-                translate.Position += velocity.Velocity * dt;
+                transform.Location += velocity.Velocity * dt;
             });
     }
 

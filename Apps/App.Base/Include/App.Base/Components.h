@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Engine.RendererDX12/D3DHelpers.h"
+#include "Engine.RendererDX12/GDX12ConstantStructures.h"
+#include "Engine.RendererDX12/GDX12UploadBuffer.h"
 
 struct TransformComponent : ComponentTag
 {
@@ -8,30 +10,14 @@ struct TransformComponent : ComponentTag
     Vector3 Rotation;
     Vector3 Scale;
 
-    TransformComponent() : Location(Vector3(0.f, 0.f, 0.f)), 
-        Rotation(Vector3(0.f, 0.f, 0.f)), Scale(Vector3(1.f, 1.f, 1.f))
-    {
-    }
-};
-
-struct TranslateComponent : ComponentTag
-{
-    Vector3 Position;
-
-    TranslateComponent()
-        : Position(Vector3(0.f, 0.f, 0.f))
+    TransformComponent(Vector3 location = Vector3(0.f, 0.f, 0.f), 
+        Vector3 rotation = Vector3(0.f, 0.f, 0.f), Vector3 scale = Vector3(1.f, 1.f, 1.f)) 
+        : Location(location),
+        Rotation(rotation), Scale(scale), _CBufferIndex(0)
     {
     }
 
-    TranslateComponent(float x, float y, float z)
-        : Position(Vector3(x, y, z))
-    {
-    }
-
-    explicit TranslateComponent(const Vector3& position)
-        : Position(position)
-    {
-    }
+    UINT _CBufferIndex;
 };
 
 //This should probably be remade into a PhysicsComponent

@@ -9,7 +9,7 @@ struct GDX12MainConstants
     float DeltaTime = 0.0f;
 };
 
-struct GDX12MeshConstants
+struct GDX12TransformConstants
 {
     DirectX::XMFLOAT4X4 WorldMatrix = Identity4x4();
 };

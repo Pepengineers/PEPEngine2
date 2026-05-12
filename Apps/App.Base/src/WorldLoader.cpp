@@ -2,6 +2,8 @@
 #include "App.Base/World.h"
 #include "App.Base/Components.h"
 
+#include "Engine.Core/AssetManager.h"
+
 bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 {
     /* todo if file not found return 0;
@@ -30,21 +32,30 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     marker.AddComponent<NameComponent>(worldName + "_Marker");
     marker.AddComponent<TranslateComponent>(3.0f, 7.0f, -1.0f);
     */
+
+    //Loading Neccessary Assets
+    auto& assetManager = Engine::Core::AssetManager::GetInstance();
+
+    //These will be automatically uploaded onto GPU
+    auto head = assetManager.LoadMesh("african_head.obj");
+    
+
+    // Creating Entities and components
     WorldECS& ecs = world.GetECS();
     
     auto en1 = ecs.CreateEntity();
     en1.AddComponent<NameComponent>("en1");
-    en1.AddComponent<TranslateComponent>(0.0f, 1.0f, 2.0f);
+    en1.AddComponent<TransformComponent>(Vector3(0.f, 1.f, 2.f));
     en1.AddComponent<VelocityComponent>(1.0f, 0.0f, 0.0f);
 
     auto en2 = ecs.CreateEntity();
     en2.AddComponent<NameComponent>("en2");
-    en2.AddComponent<TranslateComponent>(10.0f, 0.0f, 5.0f);
+    en2.AddComponent<TransformComponent>(Vector3(10.f, 0.f, 5.f));
     en2.AddComponent<VelocityComponent>(-0.5f, 0.0f, 0.25f);
 
     auto marker = ecs.CreateEntity();
     marker.AddComponent<NameComponent>("marker");
-    marker.AddComponent<TranslateComponent>(3.0f, 7.0f, -1.0f);
+    marker.AddComponent<TransformComponent>(Vector3(3.f, 7.f, -1.f));
     
     return true;
 }

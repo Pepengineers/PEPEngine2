@@ -28,7 +28,6 @@
     <ClInclude Include="Include\App.Base\SceneTraversal.h" />
     <ClInclude Include="Include\App.Base\Systems\MovementSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\RenderCullingSystem.h" />
-    <ClInclude Include="Include\App.Base\Systems\SceneRenderingSystem.h" />
     <ClInclude Include="Include\App.Base\Window.h" />
     <ClInclude Include="Include\App.Base\World.h" />
     <ClInclude Include="Include\App.Base\WorldLoader.h" />
@@ -40,7 +39,6 @@
     <ClCompile Include="src\RenderModule.cpp" />
     <ClCompile Include="src\SceneManager.cpp" />
     <ClCompile Include="src\SceneManagerModule.cpp" />
-    <ClCompile Include="src\SceneRenderingSystem.cpp" />
     <ClCompile Include="src\SceneTraversal.cpp" />
     <ClCompile Include="src\Window.cpp" />
     <ClCompile Include="src\World.cpp" />

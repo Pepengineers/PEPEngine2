@@ -5,7 +5,7 @@ struct MainCB
     float DeltaTime;
 };
 
-struct MeshCB
+struct TransformCB
 {
     float4x4 World;
 };
