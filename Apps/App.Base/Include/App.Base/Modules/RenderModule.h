@@ -10,6 +10,10 @@
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
 
+#include "Engine.Core/Types/MeshTypes.h"
+
+using namespace Engine::Core;
+
 class RenderModule final : public Module
 {
 public:

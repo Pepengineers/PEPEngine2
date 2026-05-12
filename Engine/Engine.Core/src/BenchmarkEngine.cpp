@@ -1,24 +1,24 @@
-﻿#include "Engine.Core/Engine.h"
+﻿#include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/ConsoleModule.h"
 
-Engine* Engine::Instance = nullptr;
+BenchmarkEngine* BenchmarkEngine::Instance = nullptr;
 
-ModuleLocator& Engine::GetLocator()
+ModuleLocator& BenchmarkEngine::GetLocator()
 {
     return Instance->Locator;
 }
 
-Engine* Engine::GetInstance()
+BenchmarkEngine* BenchmarkEngine::GetInstance()
 {
     return Instance;
 }
 
-Engine::Engine()
+BenchmarkEngine::BenchmarkEngine()
 {
     Instance = this;
 }
 
-bool Engine::Initialize()
+bool BenchmarkEngine::Initialize()
 {
     AddModules();
     for (auto& pair : Locator.registeredModules)
@@ -29,7 +29,7 @@ bool Engine::Initialize()
     return true;
 }
 
-void Engine::Update(const GameTimer& gameTimer)
+void BenchmarkEngine::Update(const GameTimer& gameTimer)
 {
     for (const auto& [type, module] : Locator.registeredModules)
     {
@@ -37,7 +37,7 @@ void Engine::Update(const GameTimer& gameTimer)
     }
 }
 
-void Engine::Render(const GameTimer& gameTimer)
+void BenchmarkEngine::Render(const GameTimer& gameTimer)
 {
     for (const auto& [type, module] : Locator.registeredModules)
     {
@@ -45,7 +45,7 @@ void Engine::Render(const GameTimer& gameTimer)
     }
 }
 
-bool Engine::AddModules()
+bool BenchmarkEngine::AddModules()
 {
     Locator.RegisterModule(std::make_shared<ConsoleModule>());
     return true;

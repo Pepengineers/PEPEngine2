@@ -2,14 +2,14 @@
 #include "ModuleLocator.h"
 #include "Common/GameTimer.h"
 
-class Engine
+class BenchmarkEngine
 {
 public:
     static ModuleLocator& GetLocator();
-    static Engine* GetInstance();
+    static BenchmarkEngine* GetInstance();
 
-    Engine();
-    virtual ~Engine() = default;
+    BenchmarkEngine();
+    virtual ~BenchmarkEngine() = default;
     virtual bool Initialize();
 
     virtual void Update(const GameTimer& gameTimer);
@@ -20,5 +20,5 @@ protected:
 
     GameTimer Timer;
     ModuleLocator Locator;
-    static Engine* Instance;
+    static BenchmarkEngine* Instance;
 };

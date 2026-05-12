@@ -131,7 +131,7 @@ private:
     }
 
 
-    friend class Engine;
+    friend class BenchmarkEngine;
     std::unordered_map<std::type_index, ModulePtr> registeredModules;
     std::unordered_map<std::type_index, Factory> factories;
 };

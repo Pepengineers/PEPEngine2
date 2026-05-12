@@ -7,7 +7,7 @@
 #include <crtdbg.h>
 #endif
 
-#include "Engine.Core/Engine.h"
+#include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 // Link necessary d3d12 libraries.
@@ -18,7 +18,7 @@
 class RenderModule;
 class Window;
 
-class App : public Engine
+class App : public BenchmarkEngine
 {
 public:
     HINSTANCE GetAppHandler() const;

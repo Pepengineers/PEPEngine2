@@ -136,7 +136,7 @@ bool App::Initialize()
         return false;
     }
 
-    return Engine::Initialize();
+    return BenchmarkEngine::Initialize();
 }
 
 LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -303,5 +303,5 @@ bool App::AddModules()
 {
     Locator.RegisterModule(std::make_shared<SceneManagerModule>(&Timer));
     Locator.RegisterModule(std::make_shared<RenderModule>(_window.get(), &Timer));
-    return Engine::AddModules();
+    return BenchmarkEngine::AddModules();
 }

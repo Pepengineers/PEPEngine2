@@ -145,7 +145,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\AssetManager.cpp" />
-    <ClCompile Include="src\Engine.cpp" />
+    <ClCompile Include="src\BenchmarkEngine.cpp" />
     <ClCompile Include="src\GameTimer.cpp" />
     <ClCompile Include="src\IO\MeshImporter.cpp" />
     <ClCompile Include="src\IO\SceneImporter.cpp" />
@@ -183,7 +183,7 @@
     <ClInclude Include="Include\Common\Stopwatch.h" />
     <ClInclude Include="Include\Common\GameTimer.h" />
     <ClInclude Include="Include\Engine.Core\ConsoleModule.h" />
-    <ClInclude Include="Include\Engine.Core\Engine.h" />
+    <ClInclude Include="Include\Engine.Core\BenchmarkEngine.h" />
     <ClInclude Include="Include\Engine.Core\ModuleLocator.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
