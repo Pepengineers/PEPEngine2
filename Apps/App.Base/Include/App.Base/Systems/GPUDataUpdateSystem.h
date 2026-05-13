@@ -22,6 +22,43 @@ public:
         consoleModule->TryFindConsoleVariable(L"Render.NumFrames", ICVNumframes);
         int numFrames = ICVNumframes->GetInt();
 
+        ecs.ForEach<TransformComponent, CameraComponent>(
+            [&ecs, &renderModule, &numFrames](Entity entity, TransformComponent& transform, CameraComponent& camera)
+            {
+                if (camera.DirtyFlag || transform.DirtyFlag)
+                {
+                    camera.DirtyFlag = false;
+                    camera._numFramesDirty = numFrames;
+                }
+
+                if (camera._numFramesDirty > 0)
+                {
+                    Vector3 CameraLocation = transform.Location;
+                    Vector3 CameraRotation = transform.Rotation;
+                    float FOV = camera.FOV;
+
+                    Matrix rotMatrix = Matrix::CreateFromYawPitchRoll(transform.Rotation.y,
+                        transform.Rotation.x, transform.Rotation.z);
+
+                    Vector3 forward = Vector3::Transform(Vector3::Forward, rotMatrix);
+                    Vector3 up = Vector3::Transform(Vector3::Up, rotMatrix);
+                    Vector3 cameraTarget = CameraLocation + forward;
+
+                    Matrix view = Matrix::CreateLookAt(CameraLocation, cameraTarget, up);
+                    Matrix proj = Matrix::CreatePerspectiveFieldOfView(camera.FOV, 
+                        renderModule->GetAspectRatio(), camera.NearPlane, camera.FarPlane);
+
+                    GDX12CameraConstants objConstants;
+                    XMStoreFloat4x4(&objConstants.ViewProj, XMMatrixTranspose(view * proj));
+                    objConstants.CameraLocation = transform.Location;
+
+                    auto& CBuffer = renderModule->GetCurrentFrameConstants()->CameraCB;
+                    CBuffer->CopyData(camera._CBufferIndex, objConstants);
+
+                    camera._numFramesDirty--;
+                }
+            });
+
         ecs.ForEach<TransformComponent>(
             [&ecs, &renderModule, &numFrames](Entity entity, TransformComponent& transform)
             {
@@ -34,9 +71,8 @@ public:
 				if (transform._numFramesDirty > 0)
 				{
 					Matrix world = Matrix::CreateScale(transform.Scale) * 
-                        Matrix::CreateRotationX(transform.Rotation.x) * 
-                        Matrix::CreateRotationY(transform.Rotation.y) *
-                        Matrix::CreateRotationZ(transform.Rotation.z) * 
+                        Matrix::CreateFromYawPitchRoll(transform.Rotation.y, 
+                            transform.Rotation.x, transform.Rotation.z) *
                         Matrix::CreateTranslation(transform.Location);
 
 					GDX12TransformConstants objConstants;

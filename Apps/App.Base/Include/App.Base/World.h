@@ -16,7 +16,8 @@ using WorldECS = ECSStorage<
     TransformComponent,
     VelocityComponent,
     NameComponent,
-    StaticMeshRenderComponent
+    StaticMeshRenderComponent,
+    CameraComponent
 >;
 
 class World {

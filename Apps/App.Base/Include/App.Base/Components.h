@@ -25,6 +25,24 @@ struct TransformComponent : ComponentTag
     UINT _numFramesDirty;
 };
 
+struct CameraComponent : ComponentTag
+{
+    float FOV;
+    float NearPlane;
+    float FarPlane;
+
+    bool DirtyFlag;
+
+    CameraComponent()
+        : DirtyFlag(true), _numFramesDirty(0), _CBufferIndex(0), 
+        FOV(90), NearPlane(0.1f), FarPlane(10000.f)
+    {
+    }
+
+    UINT _CBufferIndex;
+    UINT _numFramesDirty;
+};
+
 struct StaticMeshRenderComponent : ComponentTag
 {
     Engine::Core::MeshHandle MeshHandler;

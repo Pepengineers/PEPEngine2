@@ -22,6 +22,13 @@ struct GDX12MaterialConstants
     float _pad2;
 };
 
+struct GDX12CameraConstants
+{
+    DirectX::XMFLOAT4X4 ViewProj = Identity4x4();
+    DirectX::XMFLOAT3 CameraLocation = { 0.f, 0.f, 0.f };
+    float _pad1;
+};
+
 struct GDX12LightConstants
 {
     int LightType = 0; //0 - directional; 1 - point; 2 - spot

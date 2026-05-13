@@ -192,6 +192,22 @@ void RenderModule::OnTransformComponentCreated(TransformComponent& component)
     }
 }
 
+void RenderModule::OnCameraComponentCreated(CameraComponent& component)
+{
+    component._CBufferIndex = _frameConstants[0]->CameraCB->GetElementCount();
+
+    for (auto& constants : _frameConstants)
+    {
+        auto& CBuffer = constants->CameraCB;
+        CBuffer->Resize(CBuffer->GetElementCount() + 1);
+    }
+}
+
+const float RenderModule::GetAspectRatio()
+{
+    return _window->GetAspectRatio();
+}
+
 void RenderModule::OnUpdate()
 {
     _currFrameConstantsIndex = (_currFrameConstantsIndex + 1) % NumFrameConstantVariable.GetValue();
@@ -338,7 +354,7 @@ void RenderModule::BuildFrameConstants()
     for (int i = 0; i < NumFrameConstantVariable.GetValue(); i++)
     {
         //TODO: fix zero element upload buffer crash
-        _frameConstants.emplace_back(std::make_unique<GDX12FrameConstants>(_primaryDevice.get(), 1, 1, 1));
+        _frameConstants.emplace_back(std::make_unique<GDX12FrameConstants>(_primaryDevice.get()));
     }
 }
 

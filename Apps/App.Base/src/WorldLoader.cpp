@@ -14,12 +14,15 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     */
     world.SetName(path.string()); 
 
+    //
     //Loading Neccessary Assets
+    //
     auto& assetManager = Engine::Core::AssetManager::GetInstance();
     auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
 
     //Textures: 
     auto HeadTexture = assetManager.LoadTexture("african_head_diffuse.dds");
+
     //this should be automated via events
     renderModule->CreateTexture("HeadTexture", HeadTexture);
 
@@ -39,6 +42,7 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 
     Engine::Core::MeshHandle HeadMeshHandle;
     const Engine::Core::Mesh* HeadMesh = assetManager.Meshes().Load(locator, HeadMeshHandle);
+
     //this should be automated via events
     renderModule->SubmitMesh(HeadMesh, HeadMeshHandle);
 
@@ -46,17 +50,22 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 
     Engine::Core::MeshHandle SvMeshHandle;
     const Engine::Core::Mesh* SvMesh = assetManager.Meshes().Load(locator, SvMeshHandle);
+
     //this should be automated via events
     renderModule->SubmitMesh(SvMesh, SvMeshHandle);
 
+    //
     // Creating Entities and components
+    //
     WorldECS& ecs = world.GetECS();
     
     auto en1 = ecs.CreateEntity();
     en1.AddComponent<NameComponent>("en1");
     en1.AddComponent<TransformComponent>(Vector3(0.f, 1.f, 2.f));
+
     //this should be automated via events
     renderModule->OnTransformComponentCreated(en1.GetComponent<TransformComponent>());
+
     en1.AddComponent<VelocityComponent>(1.0f, 0.0f, 0.0f);
 
     std::vector<GDX12Material*> Materials = { HeadMaterial };
@@ -65,15 +74,30 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     auto en2 = ecs.CreateEntity();
     en2.AddComponent<NameComponent>("en2");
     en2.AddComponent<TransformComponent>(Vector3(10.f, 0.f, 5.f));
+
     //this should be automated via events
     renderModule->OnTransformComponentCreated(en2.GetComponent<TransformComponent>());
+
     en2.AddComponent<VelocityComponent>(-0.5f, 0.0f, 0.25f);
 
     auto marker = ecs.CreateEntity();
     marker.AddComponent<NameComponent>("marker");
     marker.AddComponent<TransformComponent>(Vector3(3.f, 7.f, -1.f));
+
     //this should be automated via events
     renderModule->OnTransformComponentCreated(marker.GetComponent<TransformComponent>());
+
+    auto camera = ecs.CreateEntity();
+    camera.AddComponent<NameComponent>("MainCamera");
+    camera.AddComponent<TransformComponent>(Vector3(10.f, 0.f, 5.f));
+
+    //this should be automated via events
+    renderModule->OnTransformComponentCreated(camera.GetComponent<TransformComponent>());
+
+    camera.AddComponent<CameraComponent>();
+
+    //this should be automated via events
+    renderModule->OnCameraComponentCreated(camera.GetComponent<CameraComponent>());
     
     return true;
 }

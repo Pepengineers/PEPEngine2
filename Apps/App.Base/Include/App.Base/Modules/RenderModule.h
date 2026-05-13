@@ -15,6 +15,7 @@
 #include "Engine.Core/Types/TextureTypes.h"
 
 class TransformComponent;
+class CameraComponent;
 
 using namespace Engine::Core;
 
@@ -45,6 +46,9 @@ public:
 
     //event functions
     void OnTransformComponentCreated(TransformComponent& component);
+    void OnCameraComponentCreated(CameraComponent& component);
+
+    const float GetAspectRatio();
 
 protected:
     void OnUpdate() override;
