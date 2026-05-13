@@ -208,6 +208,11 @@ const float RenderModule::GetAspectRatio()
     return _window->GetAspectRatio();
 }
 
+GDX12RenderCommandRecorder* RenderModule::GetCommandRecorder()
+{
+    return &_commandRecorder;
+}
+
 void RenderModule::OnUpdate()
 {
     _currFrameConstantsIndex = (_currFrameConstantsIndex + 1) % NumFrameConstantVariable.GetValue();

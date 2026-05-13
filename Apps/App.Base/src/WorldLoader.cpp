@@ -99,7 +99,7 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     //this should be automated via events
     renderModule->OnCameraComponentCreated(camera.GetComponent<CameraComponent>());
 
-    world.ActiveCamera = &camera.GetComponent<CameraComponent>();
+    world.ActiveCamera = camera;
     
     return true;
 }

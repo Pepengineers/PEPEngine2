@@ -11,6 +11,7 @@
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12Material.h"
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
+#include "Engine.RendererDX12/GDX12RenderCommandRecorder.h"
 
 #include "Engine.Core/Types/TextureTypes.h"
 
@@ -49,6 +50,7 @@ public:
     void OnCameraComponentCreated(CameraComponent& component);
 
     const float GetAspectRatio();
+    GDX12RenderCommandRecorder* GetCommandRecorder();
 
 protected:
     void OnUpdate() override;
@@ -69,6 +71,8 @@ private:
 
     GameTimer* _timer;
     Window* _window;
+
+    GDX12RenderCommandRecorder _commandRecorder;
 
     std::unique_ptr<GDX12Device> _primaryDevice;
     std::unique_ptr<GDX12Device> _secondaryDevice;
