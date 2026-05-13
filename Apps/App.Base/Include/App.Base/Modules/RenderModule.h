@@ -14,6 +14,8 @@
 
 #include "Engine.Core/Types/TextureTypes.h"
 
+class TransformComponent;
+
 using namespace Engine::Core;
 
 class RenderModule final : public Module
@@ -33,12 +35,16 @@ public:
     GDX12Material* CreateMaterial(const std::string& name);
 
     GDX12Texture* GetTextureByName(const std::string& name);
-
     //returns a pointer to a fully initialized structure that you can specify in materials
     GDX12Texture* CreateTexture(const std::string& name, const Texture* texture);
 
     //Uploads Mesh geometry to GPU
     void SubmitMesh(const Mesh* mesh, MeshHandle handle);
+
+    GDX12FrameConstants* GetCurrentFrameConstants();
+
+    //event functions
+    void OnTransformComponentCreated(TransformComponent& component);
 
 protected:
     void OnUpdate() override;

@@ -20,7 +20,7 @@ public:
 
     //Dirty flag notify updating
     //Probably should move those to components
-    std::unique_ptr<GDX12UploadBuffer<GDX12TransformConstants>> MeshCB;
+    std::unique_ptr<GDX12UploadBuffer<GDX12TransformConstants>> TransformCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12MaterialConstants>> MaterialCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12LightConstants>> LightCB;
     UINT64 FenceValue;

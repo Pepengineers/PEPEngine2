@@ -2,7 +2,7 @@
 
 #include "Engine.RendererDX12/D3DHelpers.h"
 
-#include "Engine.Core/Types/MeshTypes.h"
+#include "Engine.Core/AssetHandles.h"
 #include "DirectXCollision.h"
 #include "Engine.RendererDX12/GDX12Material.h"
 
@@ -12,24 +12,27 @@ struct TransformComponent : ComponentTag
     Vector3 Rotation;
     Vector3 Scale;
 
+    bool DirtyFlag;
+
     TransformComponent(Vector3 location = Vector3(0.f, 0.f, 0.f), 
         Vector3 rotation = Vector3(0.f, 0.f, 0.f), Vector3 scale = Vector3(1.f, 1.f, 1.f)) 
-        : Location(location),
+        : Location(location), DirtyFlag(true), _numFramesDirty(0),
         Rotation(rotation), Scale(scale), _CBufferIndex(0)
     {
     }
 
     UINT _CBufferIndex;
+    UINT _numFramesDirty;
 };
 
 struct StaticMeshRenderComponent : ComponentTag
 {
-    Engine::Core::Mesh* Mesh;
+    Engine::Core::MeshHandle MeshHandler;
     std::vector<GDX12Material*> Materials;
     BoundingBox Bounds;
 
-    StaticMeshRenderComponent(Engine::Core::Mesh* mesh, const std::vector<GDX12Material*>& materials)
-        : Mesh(mesh), Materials(materials) 
+    StaticMeshRenderComponent(Engine::Core::MeshHandle meshHandle, std::vector<GDX12Material*> materials)
+        : MeshHandler(meshHandle), Materials(materials)
     {
     }
 };

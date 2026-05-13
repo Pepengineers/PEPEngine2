@@ -154,8 +154,6 @@ namespace
 		importedSubMesh.Vertices.reserve(assimpMesh.mNumVertices);
 		importedSubMesh.Indices.reserve(assimpMesh.mNumFaces * 3u);
 		importedSubMesh.MaterialIndex = assimpMesh.mMaterialIndex;
-		importedSubMesh.StartVertexLocation = startVertexLocation;
-		importedSubMesh.StartIndexLocation = startIndexLocation;
 
 		const aiMatrix3x3 normalTransform = BuildNormalTransform(nodeTransform);
 

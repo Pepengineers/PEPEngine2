@@ -9,6 +9,9 @@
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 
+#include "App.Base/ECSStorage.h"
+#include "App.Base/Components.h"
+
 static UINT _numFrameConstants = 3;
 
 static AutoConsoleVariableRef NumFrameConstantVariable(
@@ -171,6 +174,22 @@ GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture
 void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
 {
     _geometryBuffer->AddMesh(mesh, handle);
+}
+
+GDX12FrameConstants* RenderModule::GetCurrentFrameConstants()
+{
+    return _frameConstants[_currFrameConstantsIndex].get();
+}
+
+void RenderModule::OnTransformComponentCreated(TransformComponent& component)
+{
+    component._CBufferIndex = _frameConstants[0]->TransformCB->GetElementCount();
+
+    for (auto& constants : _frameConstants)
+    {
+        auto& CBuffer = constants->TransformCB;
+        CBuffer->Resize(CBuffer->GetElementCount() + 1);
+    }
 }
 
 void RenderModule::OnUpdate()

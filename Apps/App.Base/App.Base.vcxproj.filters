@@ -57,6 +57,12 @@
     <ClInclude Include="Include\App.Base\Systems\RenderCullingSystem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\App.Base\Systems\RenderSubmitSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\Systems\GPUDataUpdateSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\App.cpp">

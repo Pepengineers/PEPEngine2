@@ -2,6 +2,8 @@
 
 #include "App.Base/Systems/MovementSystem.h"
 #include "App.Base/Systems/RenderCullingSystem.h"
+#include "App.Base/Systems/RenderSubmitSystem.h"
+#include "App.Base/Systems/GPUDataUpdateSystem.h"
 #include "App.Base/World.h"
 #include "Common/ConsoleVariables.h"
 #include "Engine.Core/System.h"
@@ -35,6 +37,8 @@ void SceneManagerModule::Initialize()
 
     AddSystem<MovementSystem>(world, 0);
     AddSystem<RenderCullingSystem>(world, 100);
+    AddSystem<GPUDataUpdateSystem>(world, 101);
+    AddSystem<RenderSubmitSystem>(world, 102);
 }
 
 void SceneManagerModule::Uninitialize()

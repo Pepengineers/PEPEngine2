@@ -13,6 +13,7 @@ public:
             [dt](Entity entity, TransformComponent& transform, VelocityComponent& velocity)
             {
                 transform.Location += velocity.Velocity * dt;
+                transform.DirtyFlag = true;
             });
     }
 

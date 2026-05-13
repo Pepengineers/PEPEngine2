@@ -26,8 +26,10 @@
     <ClInclude Include="Include\App.Base\Modules\SceneManagerModule.h" />
     <ClInclude Include="Include\App.Base\SceneManager.h" />
     <ClInclude Include="Include\App.Base\SceneTraversal.h" />
+    <ClInclude Include="Include\App.Base\Systems\GPUDataUpdateSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\MovementSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\RenderCullingSystem.h" />
+    <ClInclude Include="Include\App.Base\Systems\RenderSubmitSystem.h" />
     <ClInclude Include="Include\App.Base\Window.h" />
     <ClInclude Include="Include\App.Base\World.h" />
     <ClInclude Include="Include\App.Base\WorldLoader.h" />

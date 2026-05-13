@@ -3,6 +3,9 @@
 #include "Engine.Core/System.h"
 #include "App.Base/World.h"
 
+#include "Engine.Core/BenchmarkEngine.h"
+#include "App.Base/Modules/RenderModule.h"
+
 class RenderCullingSystem final : public System
 {
 public:
@@ -10,8 +13,9 @@ public:
     {
         // todo:
         // get active camera from world
-        // build frustum // vrode bi tut
         // traverse octree
         // write visible  items to render
+
+        // just pass all RenderComponents with transforms for now
     }
 };

@@ -55,16 +55,25 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     auto en1 = ecs.CreateEntity();
     en1.AddComponent<NameComponent>("en1");
     en1.AddComponent<TransformComponent>(Vector3(0.f, 1.f, 2.f));
+    //this should be automated via events
+    renderModule->OnTransformComponentCreated(en1.GetComponent<TransformComponent>());
     en1.AddComponent<VelocityComponent>(1.0f, 0.0f, 0.0f);
+
+    std::vector<GDX12Material*> Materials = { HeadMaterial };
+    en1.AddComponent<StaticMeshRenderComponent>(HeadMeshHandle, Materials);
 
     auto en2 = ecs.CreateEntity();
     en2.AddComponent<NameComponent>("en2");
     en2.AddComponent<TransformComponent>(Vector3(10.f, 0.f, 5.f));
+    //this should be automated via events
+    renderModule->OnTransformComponentCreated(en2.GetComponent<TransformComponent>());
     en2.AddComponent<VelocityComponent>(-0.5f, 0.0f, 0.25f);
 
     auto marker = ecs.CreateEntity();
     marker.AddComponent<NameComponent>("marker");
     marker.AddComponent<TransformComponent>(Vector3(3.f, 7.f, -1.f));
+    //this should be automated via events
+    renderModule->OnTransformComponentCreated(marker.GetComponent<TransformComponent>());
     
     return true;
 }
