@@ -46,6 +46,8 @@ public:
 
     const std::filesystem::path& GetPath() const;
 
+    Entity ActiveCamera;
+
 private:
     
     WorldDesc _desc;

@@ -14,10 +14,12 @@ public:
         WorldECS& ecs = world.GetECS();
         auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
 
+        CameraComponent* activeCamera = &ecs.Get<CameraComponent>(world.ActiveCamera);
+
         // since we don't have culling for now, we'll just grab all RenderComponents
         // in the future, this should source the list of visible components from RenderCullingSystem
         ecs.ForEach<StaticMeshRenderComponent, TransformComponent>(
-            [&ecs, &renderModule](Entity entity, StaticMeshRenderComponent& renderer, TransformComponent& transform)
+            [&ecs, &renderModule, &activeCamera](Entity entity, StaticMeshRenderComponent& renderer, TransformComponent& transform)
             {
 
             });

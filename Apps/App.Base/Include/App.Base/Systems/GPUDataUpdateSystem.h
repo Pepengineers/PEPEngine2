@@ -37,8 +37,8 @@ public:
                     Vector3 CameraRotation = transform.Rotation;
                     float FOV = camera.FOV;
 
-                    Matrix rotMatrix = Matrix::CreateFromYawPitchRoll(transform.Rotation.y,
-                        transform.Rotation.x, transform.Rotation.z);
+                    Matrix rotMatrix = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(transform.Rotation.y),
+                        XMConvertToRadians(transform.Rotation.x), XMConvertToRadians(transform.Rotation.z));
 
                     Vector3 forward = Vector3::Transform(Vector3::Forward, rotMatrix);
                     Vector3 up = Vector3::Transform(Vector3::Up, rotMatrix);
@@ -71,8 +71,8 @@ public:
 				if (transform._numFramesDirty > 0)
 				{
 					Matrix world = Matrix::CreateScale(transform.Scale) * 
-                        Matrix::CreateFromYawPitchRoll(transform.Rotation.y, 
-                            transform.Rotation.x, transform.Rotation.z) *
+                        Matrix::CreateFromYawPitchRoll(XMConvertToRadians(transform.Rotation.y),
+                            XMConvertToRadians(transform.Rotation.x), XMConvertToRadians(transform.Rotation.z)) *
                         Matrix::CreateTranslation(transform.Location);
 
 					GDX12TransformConstants objConstants;
