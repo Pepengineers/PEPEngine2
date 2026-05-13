@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12GeometryBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Material.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12SwapChain.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12CommandList.h" />
@@ -38,6 +39,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp" />
+    <ClCompile Include="src\GDX12GeometryBuffer.cpp" />
     <ClCompile Include="src\GDX12SwapChain.cpp" />
     <ClCompile Include="src\GDX12CommandList.cpp" />
     <ClCompile Include="src\GDX12CommandQueue.cpp" />

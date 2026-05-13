@@ -10,8 +10,8 @@
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12Material.h"
+#include "Engine.RendererDX12/GDX12GeometryBuffer.h"
 
-#include "Engine.Core/Types/MeshTypes.h"
 #include "Engine.Core/Types/TextureTypes.h"
 
 using namespace Engine::Core;
@@ -29,13 +29,16 @@ public:
 
     GDX12Material* GetMaterialByName(const std::string& name);
 
-    //returns a pointer to a fully initialized structure that you can fill with data
+    //returns a pointer to a fully initialized structure that you can specify in components
     GDX12Material* CreateMaterial(const std::string& name);
 
     GDX12Texture* GetTextureByName(const std::string& name);
 
     //returns a pointer to a fully initialized structure that you can specify in materials
     GDX12Texture* CreateTexture(const std::string& name, const Texture* texture);
+
+    //Uploads Mesh geometry to GPU
+    void SubmitMesh(const Mesh* mesh, MeshHandle handle);
 
 protected:
     void OnUpdate() override;
@@ -68,6 +71,8 @@ private:
     // Since all of these resources are currently existing on _primaryDevice only
     std::vector<std::unique_ptr<GDX12FrameConstants>> _frameConstants;
     UINT _currFrameConstantsIndex;
+
+    std::unique_ptr<GDX12GeometryBuffer> _geometryBuffer;
 
     // All heaps created in one high-capacity instance
     std::unique_ptr<GDX12DescriptorHeap> _rtvHeap;

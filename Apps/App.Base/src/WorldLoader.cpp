@@ -18,11 +18,12 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     auto& assetManager = Engine::Core::AssetManager::GetInstance();
     auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
 
+    //Textures: 
     auto HeadTexture = assetManager.LoadTexture("african_head_diffuse.dds");
-    
     //this should be automated via events
     renderModule->CreateTexture("HeadTexture", HeadTexture);
 
+    //Materials: 
     auto HeadMaterial = renderModule->CreateMaterial("HeadMaterial");
     HeadMaterial->Metallic = 0.f;
     HeadMaterial->Roughness = 0.8f;
@@ -32,8 +33,21 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     material2->Metallic = 0.f;
     material2->Roughness = 1.f;
 
-    //These will be automatically uploaded onto GPU
-    auto HeadMesh = assetManager.LoadMesh("african_head.obj");
+    //Meshes: 
+    Engine::Core::MeshAssetLocator locator = {};
+    locator.SourcePath = "african_head.obj";
+
+    Engine::Core::MeshHandle HeadMeshHandle;
+    const Engine::Core::Mesh* HeadMesh = assetManager.Meshes().Load(locator, HeadMeshHandle);
+    //this should be automated via events
+    renderModule->SubmitMesh(HeadMesh, HeadMeshHandle);
+
+    locator.SourcePath = "Svidetel.fbx";
+
+    Engine::Core::MeshHandle SvMeshHandle;
+    const Engine::Core::Mesh* SvMesh = assetManager.Meshes().Load(locator, SvMeshHandle);
+    //this should be automated via events
+    renderModule->SubmitMesh(SvMesh, SvMeshHandle);
 
     // Creating Entities and components
     WorldECS& ecs = world.GetECS();
