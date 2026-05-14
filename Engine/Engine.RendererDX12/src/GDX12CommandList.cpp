@@ -6,6 +6,7 @@
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
+#include "Engine.RendererDX12/GDX12GeometryBuffer.h"
 
 #include <pix/pix3.h>
 
@@ -14,7 +15,8 @@ GDX12CommandList::GDX12CommandList(GDX12Device* device) :
 	_currentTopology(D3D_PRIMITIVE_TOPOLOGY_UNDEFINED),
 	_currentScissorRect({}),
 	_currentViewport({}),
-	_currentRootSignature(nullptr)
+	_currentRootSignature(nullptr),
+	_currentGeometryBuffer(nullptr)
 {
 	device->GetDevice()->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&_commandAllocator));
 
@@ -49,6 +51,7 @@ void GDX12CommandList::Reset()
 	for (auto& cachedDescriptorHeap : _currentDescriptorHeaps) { cachedDescriptorHeap = nullptr; }
 	_currentViewport = {};
 	_currentScissorRect = {};
+	_currentGeometryBuffer = nullptr;
 }
 
 void GDX12CommandList::SetPipelineState(ComPtr<ID3D12PipelineState> pso)
@@ -123,6 +126,15 @@ void GDX12CommandList::SetScissorRect(const D3D12_RECT& scissorRect)
 	_commandList->RSSetScissorRects(1, &scissorRect);
 }
 
+void GDX12CommandList::SetGeometryBuffer(GDX12GeometryBuffer* buffer)
+{
+	if (_currentGeometryBuffer == buffer) { return; }
+
+	_currentGeometryBuffer = buffer;
+	_commandList->IASetVertexBuffers(0, 1, &buffer->_vertexBufferView);
+	_commandList->IASetIndexBuffer(&buffer->_indexBufferView);
+}
+
 void GDX12CommandList::SetRenderTargets(std::initializer_list<GDX12Texture*> rtvTextures,
 	GDX12Texture* dsvTexture)
 {
@@ -186,6 +198,14 @@ void GDX12CommandList::SetGraphicsRootDescriptorTable(UINT registerIndex, D3D12_
 	_commandList->SetGraphicsRootDescriptorTable(registerIndex, baseDescriptor);
 }
 
+void GDX12CommandList::SetTextureAsSRV(UINT registerIndex, GDX12Texture* texture)
+{
+	if (!_currentRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
+
+	_commandList->SetGraphicsRootDescriptorTable(_currentRootSignature->GetTRootParamIndex(registerIndex)
+		, texture->GetSRV()->GPUHandle);
+}
+
 void GDX12CommandList::SetComputeRootConstantBufferView(UINT CregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation)
 {
 	if (!_currentRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
@@ -245,12 +265,12 @@ void GDX12CommandList::EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTUR
 	_commandList->Barrier(static_cast<UINT>(barrierGroups.size()), barrierGroups.data());
 }
 
-void GDX12CommandList::BeginPixEvent(const std::string& name, XMFLOAT4 Color)
+void GDX12CommandList::BeginPixEvent(const std::string& name, XMVECTOR color)
 {
-	UINT64 pixColor = (static_cast<UINT64>(Color.w * 255.0f) << 24) |
-		(static_cast<UINT64>(Color.z * 255.0f) << 16) |
-		(static_cast<UINT64>(Color.y * 255.0f) << 8) |
-		(static_cast<UINT64>(Color.x * 255.0f));
+	UINT64 pixColor = (static_cast<UINT64>(XMVectorGetW(color) * 255.0f) << 24) |
+		(static_cast<UINT64>(XMVectorGetZ(color) * 255.0f) << 16) |
+		(static_cast<UINT64>(XMVectorGetY(color) * 255.0f) << 8) |
+		(static_cast<UINT64>(XMVectorGetX(color) * 255.0f));
 
 	PIXBeginEvent(_commandList.Get(), pixColor, name.c_str());
 }

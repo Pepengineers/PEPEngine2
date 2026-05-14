@@ -170,7 +170,7 @@ void GDX12GeometryBuffer::AddMesh(const Mesh* mesh, MeshHandle handle)
         OutputDebugStringA(errorMsg.c_str());
         return;
     }
-
+    
     _meshCache[handle.GetValue()] = std::make_unique<GPUMesh>(mesh);
 
     UINT totalNewVertices = 0;

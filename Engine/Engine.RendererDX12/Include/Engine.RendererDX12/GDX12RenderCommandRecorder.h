@@ -33,6 +33,8 @@ public:
 	void ClearCommands();
 
 private:
+	friend class RenderModule;
+
 	std::vector<DrawMeshCommand> _drawMeshCommands;
 	int _cameraCBIndex;
 };

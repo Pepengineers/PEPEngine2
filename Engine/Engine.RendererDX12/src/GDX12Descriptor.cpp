@@ -28,7 +28,7 @@ void GDX12Descriptor::InitAsSRV(ID3D12Resource* resource, D3D12_SHADER_RESOURCE_
         GPUHandle = _heap->GetGPUHandle(HeapIndex);
 
         _heap->_device->GetDevice()->CreateShaderResourceView(resource, srvDesc, CPUHandle);
-        DescType == DESC_TYPE_SRV;
+        DescType = DESC_TYPE_SRV;
     }
     else { OutputDebugStringA("ERROR: Cannot create SRV in a non-CBV_SRV_UAV heap\n"); }
 }

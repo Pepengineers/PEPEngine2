@@ -54,12 +54,6 @@ void RenderModule::Initialize()
     // 	_dualGPUMode = true;
     // }
 
-    BuildDescHeapsAndBackBuffer();
-    BuildRootSignatures();
-    BuildShaders();
-    BuildPSOs();
-    BuildFrameConstants();
-
     _inputLayouts["Default"] =
     {
         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
@@ -67,6 +61,12 @@ void RenderModule::Initialize()
         { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
         { "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
     };
+
+    BuildDescHeapsAndBackBuffer();
+    BuildRootSignatures();
+    BuildShaders();
+    BuildPSOs();
+    BuildFrameConstants();
 
     _geometryBuffer = std::make_unique<GDX12GeometryBuffer>(_primaryDevice.get());
 }
@@ -239,6 +239,7 @@ void RenderModule::OnRender()
     auto CurrentBackBuffer = _backBuffer->GetCurrentBuffer();
     auto& CurrentFrameConsts = _frameConstants[_currFrameConstantsIndex];
 
+    cmdList->BeginPixEvent("Clear Back Buffer", Colors::Aqua);
     cmdList->SetViewport(_backBuffer->GetViewport());
     cmdList->SetScissorRect(_backBuffer->GetScissorRect());
 
@@ -249,14 +250,40 @@ void RenderModule::OnRender()
 
     cmdList->SetRenderTargets({ CurrentBackBuffer }, _depthStencil.get());
     cmdList->ClearRenderTargetView(CurrentBackBuffer);
+    cmdList->EndPixEvent();
 
+    cmdList->BeginPixEvent("Test Render Pass", Colors::ForestGreen);
     cmdList->SetGraphicsRootSignature(_rootSignatures["Test"].get());
     cmdList->SetGraphicsRootConstantBufferView(0, CurrentFrameConsts->MainCB->GetElementAddress(0));
-
+    cmdList->SetGraphicsRootConstantBufferView(1, CurrentFrameConsts->CameraCB->
+        GetElementAddress(_commandRecorder._cameraCBIndex));
     cmdList->SetPipelineState(_PSOs["Test"]);
 
+    cmdList->SetGeometryBuffer(_geometryBuffer.get());
     cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    cmdList->DrawInstanced(6, 1, 0, 0);
+    cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
+
+    for (DrawMeshCommand& renderCommand : _commandRecorder._drawMeshCommands)
+    {
+        cmdList->SetGraphicsRootConstantBufferView(2, CurrentFrameConsts->TransformCB->
+            GetElementAddress(renderCommand.TransformCBIndex));
+
+        auto& MeshGPUData = _geometryBuffer->_meshCache[renderCommand.Mesh.GetValue()];
+
+        for (GPUSubMesh& SubMesh : MeshGPUData->SubMeshes)
+        {
+            auto material = renderCommand.Materials[SubMesh.MaterialIndex];
+
+            cmdList->SetGraphicsRootConstantBufferView(3, CurrentFrameConsts->MaterialCB->
+                GetElementAddress(material->_CBufferIndex));
+            cmdList->SetTextureAsSRV(0, material->Diffuse);
+
+            cmdList->DrawIndexedInstanced(SubMesh.IndexCount, 1, 
+                SubMesh.StartIndexLocation, SubMesh.StartVertexLocation, 0);
+        }
+    }
+
+    cmdList->EndPixEvent();
 
     cmdList->EnhancedTextureBarrier({
         CurrentBackBuffer->GetResource()->GetPresentBarrier(),
@@ -308,8 +335,9 @@ void RenderModule::BuildDescHeapsAndBackBuffer()
 void RenderModule::BuildRootSignatures()
 {
     GDX12RootSignatureDesc desc;
-    desc.NumCBVSlots = 1;
-
+    desc.NumCBVSlots = 4;
+    desc.NumSRVSlots = 3;
+    desc.StaticSamplers = GetStaticSamplers();
     _rootSignatures["Test"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc);
 }
 
@@ -317,8 +345,7 @@ void RenderModule::BuildShaders()
 {
     auto& Compiler = GDX12ShaderCompiler::GetInstance();
 
-    _shaders["TestVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "VS_FSQuad",
-        "vs");
+    _shaders["TestVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "VS", "vs");
     _shaders["TestPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "PS", "ps");
 }
 
@@ -326,13 +353,11 @@ void RenderModule::BuildPSOs()
 {
     D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
 
-    desc.InputLayout = { nullptr, 0 };
+    desc.InputLayout = { _inputLayouts["Default"].data(), (UINT)_inputLayouts["Default"].size() };
     desc.pRootSignature = _rootSignatures["Test"]->GetRootSignature().Get();
     desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
     desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    desc.DepthStencilState.DepthEnable = false;
-    desc.DepthStencilState.StencilEnable = false;
     desc.SampleMask = UINT_MAX;
     desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     desc.NumRenderTargets = 1;
@@ -402,6 +427,59 @@ void RenderModule::UpdateMaterialCB()
             material->_numFramesDirty--;
         }
     }
+}
+
+std::vector<CD3DX12_STATIC_SAMPLER_DESC> RenderModule::GetStaticSamplers()
+{
+    CD3DX12_STATIC_SAMPLER_DESC pointWrap(
+        0, // shaderRegister
+        D3D12_FILTER_MIN_MAG_MIP_POINT, // filter
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressU
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressV
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP); // addressW
+
+    CD3DX12_STATIC_SAMPLER_DESC pointClamp(
+        1,
+        D3D12_FILTER_MIN_MAG_MIP_POINT,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+
+    CD3DX12_STATIC_SAMPLER_DESC linearWrap(
+        2,
+        D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+
+    CD3DX12_STATIC_SAMPLER_DESC linearClamp(
+        3,
+        D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+
+    CD3DX12_STATIC_SAMPLER_DESC anisotropicWrap(
+        4,
+        D3D12_FILTER_ANISOTROPIC,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  
+        0.0f, // mipLODBias     
+        8);   // maxAnisotropy     
+    CD3DX12_STATIC_SAMPLER_DESC anisotropicClamp(
+        5,
+        D3D12_FILTER_ANISOTROPIC, 
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  
+        0.0f,                              
+        8);                                
+
+    return {
+        pointWrap, pointClamp,
+        linearWrap, linearClamp,
+        anisotropicWrap, anisotropicClamp };
 }
 
 bool RenderModule::ShouldTick()

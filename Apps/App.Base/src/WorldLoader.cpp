@@ -21,6 +21,7 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
 
     //Textures: 
+    //this should probably be done via TextureHandle
     auto HeadTexture = assetManager.LoadTexture("african_head_diffuse.dds");
 
     //this should be automated via events
@@ -61,15 +62,15 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     
     auto en1 = ecs.CreateEntity();
     en1.AddComponent<NameComponent>("en1");
-    en1.AddComponent<TransformComponent>(Vector3(0.f, 1.f, 2.f));
+    en1.AddComponent<TransformComponent>(Vector3(0.f, 0.f, 0.f));
 
     //this should be automated via events
     renderModule->OnTransformComponentCreated(en1.GetComponent<TransformComponent>());
 
-    en1.AddComponent<VelocityComponent>(1.0f, 0.0f, 0.0f);
+    //en1.AddComponent<VelocityComponent>(1.0f, 0.0f, 0.0f);
 
-    std::vector<GDX12Material*> Materials = { HeadMaterial };
-    en1.AddComponent<StaticMeshRenderComponent>(HeadMeshHandle, Materials);
+    std::vector<GDX12Material*> HeadMaterials = { HeadMaterial };
+    en1.AddComponent<StaticMeshRenderComponent>(HeadMeshHandle, HeadMaterials);
 
     auto en2 = ecs.CreateEntity();
     en2.AddComponent<NameComponent>("en2");
@@ -89,7 +90,7 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 
     auto camera = ecs.CreateEntity();
     camera.AddComponent<NameComponent>("MainCamera");
-    camera.AddComponent<TransformComponent>(Vector3(10.f, 0.f, 5.f));
+    camera.AddComponent<TransformComponent>(Vector3(0.f, 0.f, 10.f), Vector3(0.f, 180.f, 0.f));
 
     //this should be automated via events
     renderModule->OnTransformComponentCreated(camera.GetComponent<TransformComponent>());

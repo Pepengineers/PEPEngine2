@@ -43,14 +43,13 @@ public:
     //Uploads Mesh geometry to GPU
     void SubmitMesh(const Mesh* mesh, MeshHandle handle);
 
-    GDX12FrameConstants* GetCurrentFrameConstants();
-
     //event functions
     void OnTransformComponentCreated(TransformComponent& component);
     void OnCameraComponentCreated(CameraComponent& component);
 
     const float GetAspectRatio();
     GDX12RenderCommandRecorder* GetCommandRecorder();
+    GDX12FrameConstants* GetCurrentFrameConstants();
 
 protected:
     void OnUpdate() override;
@@ -68,6 +67,7 @@ private:
 
     void UpdateMainCB();
     void UpdateMaterialCB();
+    std::vector<CD3DX12_STATIC_SAMPLER_DESC> GetStaticSamplers();
 
     GameTimer* _timer;
     Window* _window;

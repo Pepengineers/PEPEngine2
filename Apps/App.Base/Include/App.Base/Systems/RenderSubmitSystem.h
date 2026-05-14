@@ -21,8 +21,8 @@ public:
 
         commandRecorder->DrawFromCamera(activeCamera->_CBufferIndex);
 
-        // since we don't have culling for now, we'll just grab all RenderComponents
-        // in the future, this should source the list of visible components from RenderCullingSystem
+        // Since we don't have culling for now, we'll just grab all RenderComponents.
+        // In the future, this should source the list of visible components from RenderCullingSystem
         ecs.ForEach<StaticMeshRenderComponent, TransformComponent>(
             [&ecs, &commandRecorder](Entity entity, StaticMeshRenderComponent& renderer, TransformComponent& transform)
             {

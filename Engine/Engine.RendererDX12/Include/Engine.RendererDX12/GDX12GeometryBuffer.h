@@ -50,6 +50,9 @@ public:
 	const GPUMesh* GetGPUMeshByHandle(MeshHandle handle);
 
 private:
+	friend class RenderModule;
+	friend class GDX12CommandList;
+
 	void ResizeVertexBuffer(UINT newSize);
 	void ResizeIndexBuffer(UINT newSize);
 

@@ -18,6 +18,13 @@ struct MaterialCB
     float _pad2;
 };
 
+struct CameraCB
+{
+    float4x4 ViewProj;
+    float3 CameraLocation;
+    float _pad1;
+};
+
 struct LightCB
 {
     int LightType; //0 - directional; 1 - point; 2 - spot
