@@ -1,7 +1,7 @@
 ﻿#pragma once
 
-#include "App.Base/Window.h"
-
+#include "Common/GameTimer.h"
+#include "Common/Module.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
@@ -15,8 +15,10 @@
 
 #include "Engine.Core/Types/TextureTypes.h"
 
-class TransformComponent;
-class CameraComponent;
+struct TransformComponent;
+struct CameraComponent;
+
+class Window;
 
 using namespace Engine::Core;
 

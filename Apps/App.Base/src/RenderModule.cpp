@@ -160,7 +160,7 @@ GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture
     ComPtr<ID3D12Resource> textureResource = nullptr;
     auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
         desc.Format, desc.Width, desc.Height,
-        numMipLevels, numArraySlices);
+        numArraySlices, numMipLevels);
     CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
     CD3DX12_HEAP_PROPERTIES uploadHeap(D3D12_HEAP_TYPE_UPLOAD);
 
