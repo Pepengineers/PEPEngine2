@@ -35,7 +35,7 @@ struct CameraComponent : ComponentTag
 
     CameraComponent()
         : DirtyFlag(true), _numFramesDirty(0), _CBufferIndex(0), 
-        FOV(90), NearPlane(0.1f), FarPlane(10000.f)
+        FOV(45), NearPlane(0.1f), FarPlane(10000.f)
     {
     }
 

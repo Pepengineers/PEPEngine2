@@ -251,6 +251,11 @@ void GDX12CommandList::DispatchRays(const D3D12_DISPATCH_RAYS_DESC* pDesc)
 	_commandList->DispatchRays(pDesc);
 }
 
+void GDX12CommandList::ResourceBarrier(std::initializer_list<CD3DX12_RESOURCE_BARRIER> barriers)
+{
+	_commandList->ResourceBarrier(barriers.size(), barriers.begin());
+}
+
 void GDX12CommandList::EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTURE_BARRIER> textureBarriers)
 {
 	std::vector<D3D12_BARRIER_GROUP> barrierGroups;

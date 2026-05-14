@@ -23,6 +23,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GeometryBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Material.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderCommandRecorder.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12SwapChain.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12CommandList.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12CommandQueue.h" />
@@ -42,6 +43,7 @@
     <ClCompile Include="src\D3DHelpers.cpp" />
     <ClCompile Include="src\GDX12GeometryBuffer.cpp" />
     <ClCompile Include="src\GDX12RenderCommandRecorder.cpp" />
+    <ClCompile Include="src\GDX12Resource.cpp" />
     <ClCompile Include="src\GDX12SwapChain.cpp" />
     <ClCompile Include="src\GDX12CommandList.cpp" />
     <ClCompile Include="src\GDX12CommandQueue.cpp" />

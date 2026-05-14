@@ -147,7 +147,8 @@ void EditorApp::OnKeyboardInput(const GameTimer& gameTimer)
     auto world = GetLocator().GetModule<SceneManagerModule>()->GetWorld();
     auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
 
-    Matrix rotMatrix = Matrix::CreateFromYawPitchRoll(camera.Rotation.y, camera.Rotation.x, camera.Rotation.z);
+    Matrix rotMatrix = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(camera.Rotation.y), 
+        XMConvertToRadians(camera.Rotation.x), XMConvertToRadians(camera.Rotation.z));
 
     //local space
     Vector3 forward = rotMatrix.Forward();
@@ -156,10 +157,10 @@ void EditorApp::OnKeyboardInput(const GameTimer& gameTimer)
     //world space
     Vector3 up = Vector3::Up;
 
-    if (GetAsyncKeyState('W') & 0x8000) { camera.Location += forward * speed * dt; }
-    if (GetAsyncKeyState('S') & 0x8000) { camera.Location -= forward * speed * dt; }
-    if (GetAsyncKeyState('A') & 0x8000) { camera.Location -= right * speed * dt; }
-    if (GetAsyncKeyState('D') & 0x8000) { camera.Location += right * speed * dt; }
+    if (GetAsyncKeyState('W') & 0x8000) { camera.Location -= forward * speed * dt; }
+    if (GetAsyncKeyState('S') & 0x8000) { camera.Location += forward * speed * dt; }
+    if (GetAsyncKeyState('A') & 0x8000) { camera.Location += right * speed * dt; }
+    if (GetAsyncKeyState('D') & 0x8000) { camera.Location -= right * speed * dt; }
     if (GetAsyncKeyState('Q') & 0x8000) { camera.Location -= up * speed * dt * 0.5f; }
     if (GetAsyncKeyState('E') & 0x8000) { camera.Location += up * speed * dt * 0.5f; }
 

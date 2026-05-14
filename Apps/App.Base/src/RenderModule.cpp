@@ -330,10 +330,8 @@ void RenderModule::OnRender()
     cmdList->SetViewport(_backBuffer->GetViewport());
     cmdList->SetScissorRect(_backBuffer->GetScissorRect());
 
-    cmdList->EnhancedTextureBarrier({
-        CurrentBackBuffer->GetResource()->GetRenderTargetBarrier(),
-        _depthStencil->GetResource()->GetDepthWriteBarrier()
-        });
+    cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetRenderTargetEnhBarrier() });
+    cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetDepthWriteBarrier() });
 
     cmdList->SetRenderTargets({ CurrentBackBuffer }, _depthStencil.get());
     cmdList->ClearRenderTargetView(CurrentBackBuffer);
@@ -373,10 +371,8 @@ void RenderModule::OnRender()
 
     cmdList->EndPixEvent();
 
-    cmdList->EnhancedTextureBarrier({
-        CurrentBackBuffer->GetResource()->GetPresentBarrier(),
-        _depthStencil->GetResource()->GetCommonBarrier()
-        });
+    cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetPresentEnhBarrier() });
+    cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetCommonBarrier() });
 
     cmdQueue->ExecuteCommandList(cmdList);
     CurrentFrameConsts->FenceValue = cmdQueue->GetFence()->GetCompletedValue();
@@ -446,6 +442,7 @@ void RenderModule::BuildPSOs()
     desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
     desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    desc.RasterizerState.FrontCounterClockwise = TRUE;
     desc.SampleMask = UINT_MAX;
     desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     desc.NumRenderTargets = 1;

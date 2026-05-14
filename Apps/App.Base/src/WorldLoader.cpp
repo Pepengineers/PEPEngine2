@@ -27,15 +27,21 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     //this should be automated via events
     renderModule->CreateTexture("HeadTexture", HeadTexture);
 
+    auto SvTexture = assetManager.LoadTexture("friazino_diff.png");
+
+    //this should be automated via events
+    renderModule->CreateTexture("SvTexture", SvTexture);
+
     //Materials: 
     auto HeadMaterial = renderModule->CreateMaterial("HeadMaterial");
     HeadMaterial->Metallic = 0.f;
     HeadMaterial->Roughness = 0.8f;
     HeadMaterial->Diffuse = renderModule->GetTextureByName("HeadTexture");
 
-    auto material2 = renderModule->CreateMaterial("test1");
-    material2->Metallic = 0.f;
-    material2->Roughness = 1.f;
+    auto SvMaterial = renderModule->CreateMaterial("SvMaterial");
+    SvMaterial->Metallic = 0.1f;
+    SvMaterial->Roughness = 1.f;
+    SvMaterial->Diffuse = renderModule->GetTextureByName("SvTexture");
 
     //Meshes: 
     Engine::Core::MeshAssetLocator locator = {};
@@ -74,12 +80,16 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 
     auto en2 = ecs.CreateEntity();
     en2.AddComponent<NameComponent>("en2");
-    en2.AddComponent<TransformComponent>(Vector3(10.f, 0.f, 5.f));
+    en2.AddComponent<TransformComponent>(Vector3(10.f, 0.f, 5.f), Vector3(0.f, 0.f, 0.f),
+    Vector3(0.01f, 0.01f, 0.01f));
 
     //this should be automated via events
     renderModule->OnTransformComponentCreated(en2.GetComponent<TransformComponent>());
 
-    en2.AddComponent<VelocityComponent>(-0.5f, 0.0f, 0.25f);
+    std::vector<GDX12Material*> SvMaterials = { SvMaterial };
+    en2.AddComponent<StaticMeshRenderComponent>(SvMeshHandle, SvMaterials);
+
+    en2.AddComponent<VelocityComponent>(-0.5f, 0.0f, 0.f);
 
     auto marker = ecs.CreateEntity();
     marker.AddComponent<NameComponent>("marker");

@@ -41,49 +41,28 @@ void GDX12GeometryBuffer::ResizeVertexBuffer(UINT newSize)
         nullptr,
         IID_PPV_ARGS(&newBuffer));
 
-    // Copy old data if it exists
-    if (_vertexBuffer)
-    {
-        ComPtr<ID3D12Resource> uploadBuffer;
-        _device->GetDevice()->CreateCommittedResource(
-            &heapPropsUpload,
-            D3D12_HEAP_FLAG_NONE,
-            &desc,
-            D3D12_RESOURCE_STATE_COMMON,
-            nullptr,
-            IID_PPV_ARGS(&uploadBuffer));
+    auto uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(newSize * VERTEX_SIZE);
+    ComPtr<ID3D12Resource> uploadBuffer;
+    _device->GetDevice()->CreateCommittedResource(
+        &heapPropsUpload,
+        D3D12_HEAP_FLAG_NONE,
+        &uploadDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&uploadBuffer));
 
-        void* mapped = nullptr;
-        uploadBuffer->Map(0, nullptr, &mapped);
-        memcpy(mapped, _vertexDataCPU.data(), _totalVertices * VERTEX_SIZE);
-        uploadBuffer->Unmap(0, nullptr);
+    void* mapped = nullptr;
+    uploadBuffer->Map(0, nullptr, &mapped);
+    memcpy(mapped, _vertexDataCPU.data(), newSize * VERTEX_SIZE);
+    uploadBuffer->Unmap(0, nullptr);
 
-        auto cmdQueue = _device->GetCommandQueue();
-        auto cmdList = cmdQueue->GetCommandList();
+    auto cmdQueue = _device->GetCommandQueue();
+    auto cmdList = cmdQueue->GetCommandList();
 
-        CD3DX12_RESOURCE_BARRIER Barriers[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(
-                _vertexBuffer.Get(),
-                D3D12_RESOURCE_STATE_COMMON,
-                D3D12_RESOURCE_STATE_COPY_SOURCE)
-        };
+    cmdList->GetCommandList()->CopyResource(newBuffer.Get(), uploadBuffer.Get());
 
-        cmdList->GetCommandList()->ResourceBarrier(1, Barriers);
-
-        cmdList->GetCommandList()->CopyResource(newBuffer.Get(), uploadBuffer.Get());
-
-        CD3DX12_RESOURCE_BARRIER antiBarriers[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(
-                _vertexBuffer.Get(),
-                D3D12_RESOURCE_STATE_COPY_SOURCE,
-                D3D12_RESOURCE_STATE_COMMON)
-        };
-
-        cmdList->GetCommandList()->ResourceBarrier(1, antiBarriers);
-
-        cmdQueue->ExecuteCommandList(cmdList);
-        cmdQueue->Flush();
-    }
+    cmdQueue->ExecuteCommandList(cmdList);
+    cmdQueue->Flush();
 
     _vertexBuffer = newBuffer;
     _totalVertices = newSize;
@@ -108,50 +87,28 @@ void GDX12GeometryBuffer::ResizeIndexBuffer(UINT newSize)
         nullptr,
         IID_PPV_ARGS(&newBuffer));
 
-    // Copy old data if it exists
-    if (_indexBuffer)
-    {
-        ComPtr<ID3D12Resource> uploadBuffer;
-        auto desc = CD3DX12_RESOURCE_DESC::Buffer(_totalIndices * INDEX_SIZE);
-        _device->GetDevice()->CreateCommittedResource(
-            &heapPropsUpload,
-            D3D12_HEAP_FLAG_NONE,
-            &desc,
-            D3D12_RESOURCE_STATE_COMMON,
-            nullptr,
-            IID_PPV_ARGS(&uploadBuffer));
+    auto uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(newSize * INDEX_SIZE);
+    ComPtr<ID3D12Resource> uploadBuffer;
+    _device->GetDevice()->CreateCommittedResource(
+        &heapPropsUpload,
+        D3D12_HEAP_FLAG_NONE,
+        &uploadDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&uploadBuffer));
 
-        void* mapped = nullptr;
-        uploadBuffer->Map(0, nullptr, &mapped);
-        memcpy(mapped, _indexDataCPU.data(), _totalIndices * INDEX_SIZE);
-        uploadBuffer->Unmap(0, nullptr);
+    void* mapped = nullptr;
+    uploadBuffer->Map(0, nullptr, &mapped);
+    memcpy(mapped, _indexDataCPU.data(), newSize * INDEX_SIZE);
+    uploadBuffer->Unmap(0, nullptr);
 
-        auto cmdQueue = _device->GetCommandQueue();
-        auto cmdList = cmdQueue->GetCommandList();
+    auto cmdQueue = _device->GetCommandQueue();
+    auto cmdList = cmdQueue->GetCommandList();
 
-        CD3DX12_RESOURCE_BARRIER Barriers[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(
-                _indexBuffer.Get(),
-                D3D12_RESOURCE_STATE_COMMON,
-                D3D12_RESOURCE_STATE_COPY_SOURCE)
-        };
+    cmdList->GetCommandList()->CopyResource(newBuffer.Get(), uploadBuffer.Get());
 
-        cmdList->GetCommandList()->ResourceBarrier(1, Barriers);
-
-        cmdList->GetCommandList()->CopyResource(newBuffer.Get(), uploadBuffer.Get());
-
-        CD3DX12_RESOURCE_BARRIER antiBarriers[] = {
-            CD3DX12_RESOURCE_BARRIER::Transition(
-                _indexBuffer.Get(),
-                D3D12_RESOURCE_STATE_COPY_SOURCE,
-                D3D12_RESOURCE_STATE_COMMON)
-        };
-
-        cmdList->GetCommandList()->ResourceBarrier(1, antiBarriers);
-
-        cmdQueue->ExecuteCommandList(cmdList);
-        cmdQueue->Flush();
-    }
+    cmdQueue->ExecuteCommandList(cmdList);
+    cmdQueue->Flush();
 
     _indexBuffer = newBuffer;
     _totalIndices = newSize;
@@ -198,7 +155,7 @@ void GDX12GeometryBuffer::AddMesh(const Mesh* mesh, MeshHandle handle)
 
         for (size_t idx = 0; idx < CPUSubMesh.Indices.size(); ++idx)
         {
-            _indexDataCPU[currentIndexOffset + idx] = CPUSubMesh.Indices[idx] + currentVertexOffset;
+            _indexDataCPU[currentIndexOffset + idx] = CPUSubMesh.Indices[idx];
         }
 
         GPUSubMesh.StartVertexLocation = currentVertexOffset;

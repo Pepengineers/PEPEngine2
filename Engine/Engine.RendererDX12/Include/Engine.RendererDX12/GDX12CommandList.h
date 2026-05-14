@@ -70,7 +70,8 @@ public:
 	void Dispatch(UINT threadGroupCountX, UINT threadGroupCountY, UINT threadGroupCountZ);
 	void DispatchRays(const D3D12_DISPATCH_RAYS_DESC* pDesc);
 
-	//Enhanced Barriers
+	//Resource Barriers
+	void ResourceBarrier(std::initializer_list<CD3DX12_RESOURCE_BARRIER> barriers);
 	void EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTURE_BARRIER> textureBarriers);
 
 

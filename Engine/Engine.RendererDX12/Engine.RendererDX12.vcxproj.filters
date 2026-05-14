@@ -69,6 +69,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderCommandRecorder.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp">
@@ -114,6 +117,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\GDX12RenderCommandRecorder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GDX12Resource.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

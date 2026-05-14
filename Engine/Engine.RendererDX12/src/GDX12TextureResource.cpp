@@ -1,11 +1,11 @@
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 
 GDX12TextureResource::GDX12TextureResource(ComPtr<ID3D12Resource> resource) :
-	D3DResource(resource),
 	_currentSync(D3D12_BARRIER_SYNC_NONE),
 	_currentAccess(D3D12_BARRIER_ACCESS_COMMON),
 	_currentLayout(D3D12_BARRIER_LAYOUT_COMMON)
 {
+    D3DResource = resource;
 	_desc = D3DResource->GetDesc();
 }
 
@@ -75,78 +75,78 @@ D3D12_TEXTURE_BARRIER GDX12TextureResource::CreateBarrier(D3D12_BARRIER_SYNC syn
     return barrier;
 }
 
-D3D12_TEXTURE_BARRIER GDX12TextureResource::GetRenderTargetBarrier()
+D3D12_TEXTURE_BARRIER GDX12TextureResource::GetRenderTargetEnhBarrier()
 {
     return GetBarrier(D3D12_BARRIER_SYNC_RENDER_TARGET, D3D12_BARRIER_ACCESS_RENDER_TARGET,
         D3D12_BARRIER_LAYOUT_RENDER_TARGET);
 }
 
-D3D12_TEXTURE_BARRIER GDX12TextureResource::GetPixelShaderResourceBarrier()
+D3D12_TEXTURE_BARRIER GDX12TextureResource::GetPixelShaderResourceEnhBarrier()
 {
     return GetBarrier(D3D12_BARRIER_SYNC_PIXEL_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
         D3D12_BARRIER_LAYOUT_SHADER_RESOURCE);
 }
 
-D3D12_TEXTURE_BARRIER GDX12TextureResource::GetNonPixelShaderResourceBarrier()
+D3D12_TEXTURE_BARRIER GDX12TextureResource::GetNonPixelShaderResourceEnhBarrier()
 {
     return GetBarrier(D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_SHADER_RESOURCE,
         D3D12_BARRIER_LAYOUT_SHADER_RESOURCE);
 }
 
-D3D12_TEXTURE_BARRIER GDX12TextureResource::GetUnorderedAccessBarrier()
+D3D12_TEXTURE_BARRIER GDX12TextureResource::GetUnorderedAccessEnhBarrier()
 {
     return GetBarrier(D3D12_BARRIER_SYNC_COMPUTE_SHADING, D3D12_BARRIER_ACCESS_UNORDERED_ACCESS,
         D3D12_BARRIER_LAYOUT_UNORDERED_ACCESS);
 }
 
-D3D12_TEXTURE_BARRIER GDX12TextureResource::GetCopyDestBarrier()
+D3D12_TEXTURE_BARRIER GDX12TextureResource::GetCopyDestEnhBarrier()
 {
     return GetBarrier(D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_COPY_DEST,
         D3D12_BARRIER_LAYOUT_COPY_DEST);
 }
 
-D3D12_TEXTURE_BARRIER GDX12TextureResource::GetCopySourceBarrier()
+D3D12_TEXTURE_BARRIER GDX12TextureResource::GetCopySourceEnhBarrier()
 {
     return GetBarrier(D3D12_BARRIER_SYNC_COPY, D3D12_BARRIER_ACCESS_COPY_SOURCE,
         D3D12_BARRIER_LAYOUT_COPY_SOURCE);
 }
 
-D3D12_TEXTURE_BARRIER GDX12TextureResource::GetPresentBarrier()
+D3D12_TEXTURE_BARRIER GDX12TextureResource::GetPresentEnhBarrier()
 {
     return GetBarrier(D3D12_BARRIER_SYNC_ALL, D3D12_BARRIER_ACCESS_COMMON, D3D12_BARRIER_LAYOUT_PRESENT);
 }
 
-D3D12_TEXTURE_BARRIER GDX12TextureResource::GetCommonBarrier()
+D3D12_TEXTURE_BARRIER GDX12TextureResource::GetCommonEnhBarrier()
 {
     return GetBarrier(D3D12_BARRIER_SYNC_ALL, D3D12_BARRIER_ACCESS_COMMON,
         D3D12_BARRIER_LAYOUT_COMMON);
 }
 
-D3D12_TEXTURE_BARRIER GDX12TextureResource::GetDepthWriteBarrier()
+D3D12_TEXTURE_BARRIER GDX12TextureResource::GetDepthWriteEnhBarrier()
 {
     return GetBarrier(D3D12_BARRIER_SYNC_DEPTH_STENCIL, D3D12_BARRIER_ACCESS_DEPTH_STENCIL_WRITE,
         D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_WRITE);
 }
 
-D3D12_TEXTURE_BARRIER GDX12TextureResource::GetDepthReadBarrier()
+D3D12_TEXTURE_BARRIER GDX12TextureResource::GetDepthReadEnhBarrier()
 {
     return GetBarrier(D3D12_BARRIER_SYNC_DEPTH_STENCIL, D3D12_BARRIER_ACCESS_DEPTH_STENCIL_READ, 
         D3D12_BARRIER_LAYOUT_DEPTH_STENCIL_READ);
 }
 
-D3D12_TEXTURE_BARRIER GDX12TextureResource::GetResolveSourceBarrier()
+D3D12_TEXTURE_BARRIER GDX12TextureResource::GetResolveSourceEnhBarrier()
 {
     return GetBarrier(D3D12_BARRIER_SYNC_RESOLVE, D3D12_BARRIER_ACCESS_RESOLVE_SOURCE, 
         D3D12_BARRIER_LAYOUT_RESOLVE_SOURCE);
 }
 
-D3D12_TEXTURE_BARRIER GDX12TextureResource::GetResolveDestBarrier()
+D3D12_TEXTURE_BARRIER GDX12TextureResource::GetResolveDestEnhBarrier()
 {
     return GetBarrier(D3D12_BARRIER_SYNC_RESOLVE, D3D12_BARRIER_ACCESS_RESOLVE_DEST, 
         D3D12_BARRIER_LAYOUT_RESOLVE_DEST);
 }
 
-D3D12_TEXTURE_BARRIER GDX12TextureResource::GetGenericReadBarrier()
+D3D12_TEXTURE_BARRIER GDX12TextureResource::GetGenericReadEnhBarrier()
 {
     return GetBarrier(D3D12_BARRIER_SYNC_ALL, D3D12_BARRIER_ACCESS_COMMON,
        D3D12_BARRIER_LAYOUT_COMMON);
