@@ -52,6 +52,6 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
 
 float4 PS(VS_OUTPUT_PS_INPUT pin) : SV_Target
 {
-    return float4(1.f, 1.f, 1.f, 1.f);
+    //return float4(1.f, 1.f, 1.f, 1.f);
     return DiffuseMap.Sample(samAnisotropicWrap, pin.TexC);
 }

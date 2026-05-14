@@ -3,10 +3,6 @@
 #include <App.Base/App.h>
 #include <WindowsX.h>
 
-#include "App.Base/Modules/RenderModule.h"
-#include "App.Base/Modules/SceneManagerModule.h"
-#include "App.Base/Window.h"
-
 using Microsoft::WRL::ComPtr;
 using namespace std;
 using namespace DirectX;
@@ -269,6 +265,10 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         OnMouseMove(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
         return 0;
 
+    case WM_MOUSEWHEEL:
+        OnMouseWheelMove(wParam);
+        return 0;
+
     case WM_KEYUP:
         if (wParam == VK_ESCAPE)
         {
@@ -308,6 +308,7 @@ bool App::AddModules()
 
 void App::Update(const GameTimer& gameTimer)
 {
+    OnKeyboardInput(gameTimer);
     //explicitly specifying update order since it is not the same
     // as the initialization order (that is used by the locator)
     Locator.GetModule<SceneManagerModule>()->Update();

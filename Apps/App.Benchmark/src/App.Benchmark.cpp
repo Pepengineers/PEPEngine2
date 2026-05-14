@@ -3,8 +3,6 @@
 #include <Engine.Core/BenchmarkEngine.h>
 #include <App.Base/App.h>
 
-#include "App.Base/Window.h"
-
 class BenchmarkApp final : public App
 {
 public:

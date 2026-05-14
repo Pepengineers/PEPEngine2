@@ -90,7 +90,7 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 
     auto camera = ecs.CreateEntity();
     camera.AddComponent<NameComponent>("MainCamera");
-    camera.AddComponent<TransformComponent>(Vector3(0.f, 0.f, 10.f), Vector3(0.f, 180.f, 0.f));
+    camera.AddComponent<TransformComponent>(Vector3(0.f, 0.f, 3.f), Vector3(0.f, 180.f, 0.f));
 
     //this should be automated via events
     renderModule->OnTransformComponentCreated(camera.GetComponent<TransformComponent>());

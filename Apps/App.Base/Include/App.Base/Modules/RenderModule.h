@@ -1,6 +1,6 @@
 ﻿#pragma once
 
-#include "App.Base/App.h"
+#include "App.Base/Window.h"
 
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include "Engine.RendererDX12/GDX12Device.h"

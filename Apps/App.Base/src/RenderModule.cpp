@@ -148,21 +148,108 @@ GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture
     desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
     desc.SRVDesc.Texture2D.MipLevels = 1;
+    desc.SRVDesc.Texture2D.MipLevels = texture->GetMipLevels();
+    desc.SRVDesc.Texture2D.MostDetailedMip = 0;
+    desc.SRVDesc.Texture2D.PlaneSlice = 0;
+    desc.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
 
-    auto subresource = texture->GetSubresource(0, 0);
-    
+    auto& subresources = texture->GetSubresources();
+    uint32_t numMipLevels = texture->GetMipLevels();
+    uint32_t numArraySlices = texture->GetArraySize();
 
     ComPtr<ID3D12Resource> textureResource = nullptr;
-    auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(desc.Format, desc.Width, desc.Height);
-    CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
+    auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+        desc.Format, desc.Width, desc.Height,
+        numMipLevels, numArraySlices);
+    CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
+    CD3DX12_HEAP_PROPERTIES uploadHeap(D3D12_HEAP_TYPE_UPLOAD);
 
     _primaryDevice->GetDevice()->CreateCommittedResource(
-        &heapProps,
+        &defaultHeap,
         D3D12_HEAP_FLAG_NONE,
         &texDesc,
         D3D12_RESOURCE_STATE_COMMON,
         nullptr,
         IID_PPV_ARGS(&textureResource));
+
+    UINT64 totalSize = 0;
+    std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(numMipLevels * numArraySlices);
+    std::vector<UINT> rowCounts(numMipLevels * numArraySlices);
+    std::vector<UINT64> rowSizes(numMipLevels * numArraySlices);
+
+    _primaryDevice->GetDevice()->GetCopyableFootprints(
+        &texDesc, 0, numMipLevels * numArraySlices,
+        0, footprints.data(), rowCounts.data(), rowSizes.data(), &totalSize);
+
+    auto uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(totalSize);
+
+    ComPtr<ID3D12Resource> uploadBuffer;
+    _primaryDevice->GetDevice()->CreateCommittedResource(
+        &uploadHeap,
+        D3D12_HEAP_FLAG_NONE,
+        &uploadDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&uploadBuffer));
+
+    void* mappedData = nullptr;
+    uploadBuffer->Map(0, nullptr, &mappedData);
+
+    for (uint32_t arraySlice = 0; arraySlice < numArraySlices; arraySlice++)
+    {
+        for (uint32_t mipLevel = 0; mipLevel < numMipLevels; mipLevel++)
+        {
+            uint32_t subresourceIndex = arraySlice * numMipLevels + mipLevel;
+            auto& subresource = texture->GetSubresource(mipLevel, arraySlice);
+
+            uint8_t* dest = static_cast<uint8_t*>(mappedData) + footprints[subresourceIndex].Offset;
+            const uint8_t* src = reinterpret_cast<const uint8_t*>(subresource.Data.data());
+
+            size_t srcRowPitch = subresource.RowPitch;
+            size_t dstRowPitch = footprints[subresourceIndex].Footprint.RowPitch;
+            size_t numRows = rowCounts[subresourceIndex];
+            size_t sliceSize = rowSizes[subresourceIndex];
+
+            for (size_t row = 0; row < numRows; row++)
+            {
+                memcpy(dest + row * dstRowPitch, src + row * srcRowPitch, std::min(srcRowPitch, dstRowPitch));
+            }
+        }
+    }
+    uploadBuffer->Unmap(0, nullptr);
+
+    auto cmdQueue = _primaryDevice->GetCommandQueue();
+    auto cmdList = cmdQueue->GetCommandList();
+
+    for (uint32_t arraySlice = 0; arraySlice < numArraySlices; arraySlice++)
+    {
+        for (uint32_t mipLevel = 0; mipLevel < numMipLevels; mipLevel++)
+        {
+            uint32_t subresourceIndex = arraySlice * numMipLevels + mipLevel;
+
+            D3D12_TEXTURE_COPY_LOCATION destLocation = {};
+            destLocation.pResource = textureResource.Get();
+            destLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            destLocation.SubresourceIndex = subresourceIndex;
+
+            D3D12_TEXTURE_COPY_LOCATION srcLocation = {};
+            srcLocation.pResource = uploadBuffer.Get();
+            srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+            srcLocation.PlacedFootprint = footprints[subresourceIndex];
+
+            cmdList->GetCommandList()->CopyTextureRegion(&destLocation, 0, 0, 0, &srcLocation, nullptr);
+        }
+    }
+
+    auto Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+        textureResource.Get(),
+        D3D12_RESOURCE_STATE_COMMON,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+    cmdList->GetCommandList()->ResourceBarrier(1, &Barrier);
+
+    cmdQueue->ExecuteCommandList(cmdList);
+    cmdQueue->Flush();
 
     desc.ExternalResource = textureResource;
 
@@ -250,6 +337,7 @@ void RenderModule::OnRender()
 
     cmdList->SetRenderTargets({ CurrentBackBuffer }, _depthStencil.get());
     cmdList->ClearRenderTargetView(CurrentBackBuffer);
+    cmdList->ClearDepthStencilView(_depthStencil.get());
     cmdList->EndPixEvent();
 
     cmdList->BeginPixEvent("Test Render Pass", Colors::ForestGreen);

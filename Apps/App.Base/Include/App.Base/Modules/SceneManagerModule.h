@@ -9,6 +9,9 @@
 
 #include "Common/GameTimer.h"
 #include "Common/Module.h"
+#include "Common/ConsoleVariables.h"
+
+#include "App.Base/World.h"
 
 class World;
 class System;

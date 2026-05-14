@@ -37,14 +37,17 @@ public:
                     Vector3 CameraRotation = transform.Rotation;
                     float FOV = camera.FOV;
 
-                    Matrix rotMatrix = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(transform.Rotation.y),
-                        XMConvertToRadians(transform.Rotation.x), XMConvertToRadians(transform.Rotation.z));
+                    Matrix rotMatrix = Matrix::CreateFromYawPitchRoll(
+                        XMConvertToRadians(CameraRotation.y),
+                        XMConvertToRadians(CameraRotation.x),
+                        XMConvertToRadians(CameraRotation.z));
 
-                    Vector3 forward = Vector3::Transform(Vector3::Forward, rotMatrix);
-                    Vector3 up = Vector3::Transform(Vector3::Up, rotMatrix);
-                    Vector3 cameraTarget = CameraLocation + forward;
+                    Vector3 forward = rotMatrix.Forward();
+                    Vector3 CameraTarget = CameraLocation - forward;
 
-                    Matrix view = Matrix::CreateLookAt(CameraLocation, cameraTarget, up);
+
+                    Matrix view = Matrix::CreateLookAt(CameraLocation, CameraTarget, Vector3::Up);
+
                     Matrix proj = Matrix::CreatePerspectiveFieldOfView(camera.FOV, 
                         renderModule->GetAspectRatio(), camera.NearPlane, camera.FarPlane);
 
@@ -71,8 +74,10 @@ public:
 				if (transform._numFramesDirty > 0)
 				{
 					Matrix world = Matrix::CreateScale(transform.Scale) * 
-                        Matrix::CreateFromYawPitchRoll(XMConvertToRadians(transform.Rotation.y),
-                            XMConvertToRadians(transform.Rotation.x), XMConvertToRadians(transform.Rotation.z)) *
+                        Matrix::CreateFromYawPitchRoll(
+                            XMConvertToRadians(transform.Rotation.y),
+                            XMConvertToRadians(transform.Rotation.x), 
+                            XMConvertToRadians(transform.Rotation.z)) *
                         Matrix::CreateTranslation(transform.Location);
 
 					GDX12TransformConstants objConstants;

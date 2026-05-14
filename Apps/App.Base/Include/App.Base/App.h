@@ -10,6 +10,13 @@
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
 
+#include "App.Base/Modules/RenderModule.h"
+#include "App.Base/Modules/SceneManagerModule.h"
+#include "App.Base/Window.h"
+
+#undef min
+#undef max
+
 // Link necessary d3d12 libraries.
 #pragma comment(lib,"d3dcompiler.lib")
 #pragma comment(lib, "D3D12.lib")
@@ -57,6 +64,15 @@ protected:
     }
 
     virtual void OnMouseMove(WPARAM btnState, int x, int y)
+    {
+    }
+
+    virtual void OnMouseWheelMove(WPARAM rotation)
+    {
+    }
+
+    //this should probably be replaced with an InputSystem
+    virtual void OnKeyboardInput(const GameTimer& gameTimer)
     {
     }
 

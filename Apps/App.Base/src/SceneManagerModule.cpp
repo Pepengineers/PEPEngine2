@@ -4,8 +4,6 @@
 #include "App.Base/Systems/RenderCullingSystem.h"
 #include "App.Base/Systems/RenderSubmitSystem.h"
 #include "App.Base/Systems/GPUDataUpdateSystem.h"
-#include "App.Base/World.h"
-#include "Common/ConsoleVariables.h"
 #include "Engine.Core/System.h"
 
 SceneManagerModule::SceneManagerModule(GameTimer* timer) :
