@@ -153,10 +153,8 @@ void GDX12GeometryBuffer::AddMesh(const Mesh* mesh, MeshHandle handle)
         std::copy(CPUSubMesh.Vertices.begin(), CPUSubMesh.Vertices.end(),
             _vertexDataCPU.begin() + currentVertexOffset);
 
-        for (size_t idx = 0; idx < CPUSubMesh.Indices.size(); ++idx)
-        {
-            _indexDataCPU[currentIndexOffset + idx] = CPUSubMesh.Indices[idx];
-        }
+        std::copy(CPUSubMesh.Indices.begin(), CPUSubMesh.Indices.end(),
+            _indexDataCPU.begin() + currentIndexOffset);
 
         GPUSubMesh.StartVertexLocation = currentVertexOffset;
         GPUSubMesh.StartIndexLocation = currentIndexOffset;
