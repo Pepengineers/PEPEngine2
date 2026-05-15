@@ -243,7 +243,7 @@ GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture
 
     auto Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
         textureResource.Get(),
-        D3D12_RESOURCE_STATE_COMMON,
+        D3D12_RESOURCE_STATE_COPY_DEST,
         D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
     cmdList->GetCommandList()->ResourceBarrier(1, &Barrier);
