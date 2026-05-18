@@ -20,7 +20,12 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\App.Base\App.h" />
-    <ClInclude Include="Include\App.Base\Components.h" />
+    <ClInclude Include="Include\App.Base\Components\CameraComponent.h" />
+    <ClInclude Include="Include\App.Base\Components\Component.h" />
+    <ClInclude Include="Include\App.Base\Components\NameComponent.h" />
+    <ClInclude Include="Include\App.Base\Components\StaticMeshRenderComponent.h" />
+    <ClInclude Include="Include\App.Base\Components\TransformComponent.h" />
+    <ClInclude Include="Include\App.Base\Components\VelocityComponent.h" />
     <ClInclude Include="Include\App.Base\ECSStorage.h" />
     <ClInclude Include="Include\App.Base\Event.h" />
     <ClInclude Include="Include\App.Base\Modules\RenderModule.h" />

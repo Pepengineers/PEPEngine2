@@ -5,16 +5,13 @@
 #include <cstdint>
 #include <type_traits>
 #include <utility>
+#include <App.Base/Components/Component.h>
 
 #undef max;
 
 using Entity = uint32_t;
 static constexpr Entity InvalidEntity = 0;
 static constexpr size_t InvalidIndex = std::numeric_limits<size_t>::max();
-
-struct ComponentTag
-{
-};
 
 template<typename T, typename... Ts>
 struct IsOneOf : std::false_type

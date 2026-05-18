@@ -10,7 +10,6 @@
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 
 #include "App.Base/ECSStorage.h"
-#include "App.Base/Components.h"
 
 static UINT _numFrameConstants = 3;
 

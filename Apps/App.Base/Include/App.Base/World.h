@@ -4,7 +4,11 @@
 #include <cstdint>
 
 #include "App.Base/ECSStorage.h"
-#include "App.Base/Components.h"
+#include "App.Base/Components/TransformComponent.h"
+#include "App.Base/Components/VelocityComponent.h"
+#include "App.Base/Components/NameComponent.h"
+#include "App.Base/Components/StaticMeshRenderComponent.h"
+#include "App.Base/Components/CameraComponent.h"
 
 struct WorldDesc {
     std::filesystem::path WorldFilePath;

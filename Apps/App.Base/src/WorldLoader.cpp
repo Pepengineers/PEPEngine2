@@ -1,6 +1,5 @@
 #include "App.Base/WorldLoader.h"
 #include "App.Base/World.h"
-#include "App.Base/Components.h"
 
 #include "Engine.Core/AssetManager.h"
 #include "Engine.Core/BenchmarkEngine.h"
