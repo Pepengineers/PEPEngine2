@@ -44,7 +44,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
-    <ClCompile Include="src\Event.cpp" />
     <ClCompile Include="src\RenderModule.cpp" />
     <ClCompile Include="src\SceneManager.cpp" />
     <ClCompile Include="src\SceneManagerModule.cpp" />
