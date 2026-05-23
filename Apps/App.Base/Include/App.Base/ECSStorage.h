@@ -231,6 +231,12 @@ public:
         {
             return _storage->Get<T>(_entity);
         }
+        
+        template<typename T>
+        void MarkComponentUpdated()
+        {
+            _storage->template MarkComponentUpdated<T>(_entity);
+        }
 
     private:
         friend class ECSStorage<Components...>;
@@ -398,6 +404,7 @@ public:
     template<typename T>
     void MarkComponentUpdated(Entity entity)
     {
+        static_assert(IsOneOf<T, Components...>::value, "T is not registered in ECSStorage");
         GetPool<T>().MarkComponentUpdated(entity);
     }
 
