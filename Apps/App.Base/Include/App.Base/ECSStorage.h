@@ -5,12 +5,12 @@
 #include <cstdint>
 #include <type_traits>
 #include <utility>
+#include <App.Base/Entity.h>
 #include <App.Base/Components/Component.h>
 #include <App.Base/Event.h>
 
 #undef max;
 
-using Entity = uint32_t;
 static constexpr Entity InvalidEntity = 0;
 static constexpr size_t InvalidIndex = std::numeric_limits<size_t>::max();
 
@@ -229,7 +229,7 @@ public:
         template<typename T>
         const T& GetComponent() const
         {
-            return _storage->Get<T>(_entity);
+            return static_cast<const ECSStorage*>(_storage)->template Get<T>(_entity);
         }
         
         template<typename T>

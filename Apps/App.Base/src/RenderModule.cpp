@@ -262,12 +262,67 @@ void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
     _geometryBuffer->AddMesh(mesh, handle);
 }
 
+void RenderModule::SubscribeToWorld(World& world)
+{
+    auto& ecs = world.GetECS();
+
+    auto& transformPool = ecs.GetPool<TransformComponent>();
+
+    WorldRenderSubscriptions subscriptions;
+
+    subscriptions.TransformCreated =
+        transformPool.OnComponentCreated.AddListener(
+            [this, &world](Entity entity, TransformComponent& component)
+            {
+                OnTransformComponentCreated(world, entity, component);
+            });
+
+    subscriptions.TransformDestroyed =
+        transformPool.OnComponentDestroyed.AddListener(
+            [this, &world](Entity entity, TransformComponent& component)
+            {
+                OnTransformComponentDestroyed(world, entity, component);
+            });
+
+    subscriptions.TransformUpdated =
+        transformPool.OnComponentUpdated.AddListener(
+            [this, &world](Entity entity, TransformComponent& component)
+            {
+                OnTransformComponentUpdated(world, entity, component);
+            });
+
+    _worldSubscriptions[&world] = subscriptions;
+}
+
+void RenderModule::UnsubscribeFromWorld(World& world)
+{
+    auto it = _worldSubscriptions.find(&world);
+
+    if (it == _worldSubscriptions.end())
+    {
+        return;
+    }
+
+    auto& subscriptions = it->second;
+
+    auto& ecs = world.GetECS();
+    auto& transformPool = ecs.GetPool<TransformComponent>();
+
+    transformPool.OnComponentCreated.RemoveListener(subscriptions.TransformCreated);
+
+    transformPool.OnComponentDestroyed.RemoveListener(subscriptions.TransformDestroyed);
+
+    transformPool.OnComponentUpdated.RemoveListener(subscriptions.TransformUpdated);
+
+    _worldSubscriptions.erase(it);
+}
+
 GDX12FrameConstants* RenderModule::GetCurrentFrameConstants()
 {
     return _frameConstants[_currFrameConstantsIndex].get();
 }
 
-void RenderModule::OnTransformComponentCreated(TransformComponent& component)
+void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
 {
     component._CBufferIndex = _frameConstants[0]->TransformCB->GetElementCount();
 
@@ -278,7 +333,7 @@ void RenderModule::OnTransformComponentCreated(TransformComponent& component)
     }
 }
 
-void RenderModule::OnCameraComponentCreated(CameraComponent& component)
+void RenderModule::OnCameraComponentCreated(World& world, Entity entity, CameraComponent& component)
 {
     component._CBufferIndex = _frameConstants[0]->CameraCB->GetElementCount();
 

@@ -14,6 +14,9 @@
 #include "Engine.RendererDX12/GDX12RenderCommandRecorder.h"
 
 #include "Engine.Core/Types/TextureTypes.h"
+#include <App.Base/Entity.h>
+#include <App.Base/Event.h>
+#include <App.Base/World.h>
 
 struct TransformComponent;
 struct CameraComponent;
@@ -44,10 +47,32 @@ public:
 
     //Uploads Mesh geometry to GPU
     void SubmitMesh(const Mesh* mesh, MeshHandle handle);
+    
+    struct WorldRenderSubscriptions
+    {
+        ListenerHandle TransformCreated;
+        ListenerHandle TransformDestroyed;
+        ListenerHandle TransformUpdated;
 
-    //event functions
-    void OnTransformComponentCreated(TransformComponent& component);
-    void OnCameraComponentCreated(CameraComponent& component);
+        ListenerHandle CameraCreated;
+        ListenerHandle CameraDestroyed;
+        ListenerHandle CameraUpdated;
+    };
+    
+    // this function adds listeners to new world
+    void SubscribeToWorld(World& world);
+    // unsubscribing if world is removed
+    void UnsubscribeFromWorld(World& world);
+    
+    // transform events
+    void OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component);
+    void OnTransformComponentDestroyed(World& world, Entity entity, TransformComponent& component);
+    void OnTransformComponentUpdated(World& world, Entity entity, TransformComponent& component);
+
+    // camera events
+    void OnCameraComponentCreated(World& world, Entity entity, CameraComponent& component);
+    void OnCameraComponentDestroyed(World& world, Entity entity, CameraComponent& component);
+    void OnCameraComponentUpdated(World& world, Entity entity, CameraComponent& component);
 
     const float GetAspectRatio();
     GDX12RenderCommandRecorder* GetCommandRecorder();
@@ -73,6 +98,9 @@ private:
 
     GameTimer* _timer;
     Window* _window;
+    
+    // todo mb WorldID instead of ECSStorage*
+    std::unordered_map<ECSStorage*, WorldRenderSubscriptions> _worldSubscriptions;
 
     GDX12RenderCommandRecorder _commandRecorder;
 
