@@ -28,6 +28,7 @@
     <ClInclude Include="Include\App.Base\Components\VelocityComponent.h" />
     <ClInclude Include="Include\App.Base\ECSStorage.h" />
     <ClInclude Include="Include\App.Base\Event.h" />
+    <ClInclude Include="Include\App.Base\Modules\EventManagerModule.h" />
     <ClInclude Include="Include\App.Base\Modules\RenderModule.h" />
     <ClInclude Include="Include\App.Base\Modules\SceneManagerModule.h" />
     <ClInclude Include="Include\App.Base\SceneManager.h" />
