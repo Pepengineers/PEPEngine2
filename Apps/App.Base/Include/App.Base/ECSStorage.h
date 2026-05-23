@@ -134,7 +134,7 @@ public:
         _sparse[entity] = InvalidIndex;
     }
 
-    void MarkUpdated(Entity entity)
+    void MarkComponentUpdated(Entity entity)
     {
         if (!Has(entity)) { return; }
 
@@ -388,6 +388,17 @@ public:
 
             func(entity, firstData[i], Get<Second>(entity), Get<Rest>(entity)...);
         }
+    }
+    
+    // todo 
+    // auto renderComponent = ecs.GetComponent<RenderComponent>(entity);
+    // renderComponent.Material = newMaterial;
+    // ecs.MarkCompomentUpdated<RenderComponent>(entity);
+    
+    template<typename T>
+    void MarkComponentUpdated(Entity entity)
+    {
+        GetPool<T>().MarkComponentUpdated(entity);
     }
 
 private:
