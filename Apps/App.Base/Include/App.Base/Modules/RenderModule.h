@@ -18,6 +18,8 @@
 #include <App.Base/Event.h>
 #include <App.Base/World.h>
 
+class SceneManagerModule;
+
 struct TransformComponent;
 struct CameraComponent;
 
@@ -50,13 +52,13 @@ public:
     
     struct WorldRenderSubscriptions
     {
-        ListenerHandle TransformCreated;
-        ListenerHandle TransformDestroyed;
-        ListenerHandle TransformUpdated;
+        ListenerHandle TransformCreated = 0;
+        ListenerHandle TransformDestroyed = 0;
+        ListenerHandle TransformUpdated = 0;
 
-        ListenerHandle CameraCreated;
-        ListenerHandle CameraDestroyed;
-        ListenerHandle CameraUpdated;
+        ListenerHandle CameraCreated = 0;
+        ListenerHandle CameraDestroyed = 0;
+        ListenerHandle CameraUpdated = 0;
     };
     
     // this function adds listeners to new world
@@ -95,12 +97,19 @@ private:
     void UpdateMainCB();
     void UpdateMaterialCB();
     std::vector<CD3DX12_STATIC_SAMPLER_DESC> GetStaticSamplers();
+    
+    void SubscribeToSceneManager();
+    void UnsubscribeFromSceneManager();
+    void UnsubscribeFromAllWorlds();
 
     GameTimer* _timer;
     Window* _window;
     
-    // todo mb WorldID instead of ECSStorage*
-    std::unordered_map<ECSStorage*, WorldRenderSubscriptions> _worldSubscriptions;
+    ListenerHandle _worldCreatedListener = 0;
+    ListenerHandle _worldDestroyedListener = 0;
+    
+    
+    std::unordered_map<World*, WorldRenderSubscriptions> _worldSubscriptions;
 
     GDX12RenderCommandRecorder _commandRecorder;
 

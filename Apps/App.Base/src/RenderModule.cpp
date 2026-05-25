@@ -9,7 +9,7 @@
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 
-#include "App.Base/ECSStorage.h"
+#include "App.Base/Modules/SceneManagerModule.h"
 
 static UINT _numFrameConstants = 3;
 
@@ -68,11 +68,12 @@ void RenderModule::Initialize()
     BuildFrameConstants();
 
     _geometryBuffer = std::make_unique<GDX12GeometryBuffer>(_primaryDevice.get());
+    SubscribeToSceneManager();
 }
 
 void RenderModule::Uninitialize()
 {
-
+    UnsubscribeFromSceneManager();
 }
 
 void RenderModule::OnResize() const
@@ -264,9 +265,15 @@ void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
 
 void RenderModule::SubscribeToWorld(World& world)
 {
+    if (_worldSubscriptions.find(&world) != _worldSubscriptions.end())
+    {
+        return;
+    }
+
     auto& ecs = world.GetECS();
 
     auto& transformPool = ecs.GetPool<TransformComponent>();
+    auto& cameraPool = ecs.GetPool<CameraComponent>();
 
     WorldRenderSubscriptions subscriptions;
 
@@ -291,6 +298,27 @@ void RenderModule::SubscribeToWorld(World& world)
                 OnTransformComponentUpdated(world, entity, component);
             });
 
+    subscriptions.CameraCreated =
+        cameraPool.OnComponentCreated.AddListener(
+            [this, &world](Entity entity, CameraComponent& component)
+            {
+                OnCameraComponentCreated(world, entity, component);
+            });
+
+    subscriptions.CameraDestroyed =
+        cameraPool.OnComponentDestroyed.AddListener(
+            [this, &world](Entity entity, CameraComponent& component)
+            {
+                OnCameraComponentDestroyed(world, entity, component);
+            });
+
+    subscriptions.CameraUpdated =
+        cameraPool.OnComponentUpdated.AddListener(
+            [this, &world](Entity entity, CameraComponent& component)
+            {
+                OnCameraComponentUpdated(world, entity, component);
+            });
+
     _worldSubscriptions[&world] = subscriptions;
 }
 
@@ -303,16 +331,19 @@ void RenderModule::UnsubscribeFromWorld(World& world)
         return;
     }
 
-    auto& subscriptions = it->second;
+    const WorldRenderSubscriptions subscriptions = it->second;
 
     auto& ecs = world.GetECS();
     auto& transformPool = ecs.GetPool<TransformComponent>();
+    auto& cameraPool = ecs.GetPool<CameraComponent>();
 
     transformPool.OnComponentCreated.RemoveListener(subscriptions.TransformCreated);
-
     transformPool.OnComponentDestroyed.RemoveListener(subscriptions.TransformDestroyed);
-
     transformPool.OnComponentUpdated.RemoveListener(subscriptions.TransformUpdated);
+
+    cameraPool.OnComponentCreated.RemoveListener(subscriptions.CameraCreated);
+    cameraPool.OnComponentDestroyed.RemoveListener(subscriptions.CameraDestroyed);
+    cameraPool.OnComponentUpdated.RemoveListener(subscriptions.CameraUpdated);
 
     _worldSubscriptions.erase(it);
 }
@@ -333,6 +364,14 @@ void RenderModule::OnTransformComponentCreated(World& world, Entity entity, Tran
     }
 }
 
+void RenderModule::OnTransformComponentDestroyed(World& world, Entity entity, TransformComponent& component)
+{
+}
+
+void RenderModule::OnTransformComponentUpdated(World& world, Entity entity, TransformComponent& component)
+{
+}
+
 void RenderModule::OnCameraComponentCreated(World& world, Entity entity, CameraComponent& component)
 {
     component._CBufferIndex = _frameConstants[0]->CameraCB->GetElementCount();
@@ -342,6 +381,14 @@ void RenderModule::OnCameraComponentCreated(World& world, Entity entity, CameraC
         auto& CBuffer = constants->CameraCB;
         CBuffer->Resize(CBuffer->GetElementCount() + 1);
     }
+}
+
+void RenderModule::OnCameraComponentDestroyed(World& world, Entity entity, CameraComponent& component)
+{
+}
+
+void RenderModule::OnCameraComponentUpdated(World& world, Entity entity, CameraComponent& component)
+{
 }
 
 const float RenderModule::GetAspectRatio()
@@ -619,6 +666,80 @@ std::vector<CD3DX12_STATIC_SAMPLER_DESC> RenderModule::GetStaticSamplers()
         pointWrap, pointClamp,
         linearWrap, linearClamp,
         anisotropicWrap, anisotropicClamp };
+}
+
+void RenderModule::SubscribeToSceneManager()
+{
+    auto sceneManager = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
+
+    if (sceneManager)
+    {
+        _worldCreatedListener =
+            sceneManager->OnWorldCreated.AddListener(
+                [this](World& world)
+                {
+                    SubscribeToWorld(world);
+                });
+
+        _worldDestroyedListener =
+            sceneManager->OnWorldDestroyed.AddListener(
+                [this](World& world)
+                {
+                    UnsubscribeFromWorld(world);
+                });
+
+        // just in case
+        for (size_t i = 0; i < sceneManager->GetWorldCount(); ++i)
+        {
+            World* world = sceneManager->GetWorld(i);
+
+            if (world)
+            {
+                SubscribeToWorld(*world);
+            }
+        }
+    }
+}
+
+void RenderModule::UnsubscribeFromSceneManager()
+{
+    auto sceneManager = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
+
+    if (sceneManager)
+    {
+        if (_worldCreatedListener != 0)
+        {
+            sceneManager->OnWorldCreated.RemoveListener(_worldCreatedListener);
+            _worldCreatedListener = 0;
+        }
+
+        if (_worldDestroyedListener != 0)
+        {
+            sceneManager->OnWorldDestroyed.RemoveListener(_worldDestroyedListener);
+            _worldDestroyedListener = 0;
+        }
+    }
+
+    UnsubscribeFromAllWorlds();
+}
+
+void RenderModule::UnsubscribeFromAllWorlds()
+{
+    std::vector<World*> worlds;
+    worlds.reserve(_worldSubscriptions.size());
+
+    for (const auto& pair : _worldSubscriptions)
+    {
+        worlds.push_back(pair.first);
+    }
+
+    for (World* world : worlds)
+    {
+        if (world)
+        {
+            UnsubscribeFromWorld(*world);
+        }
+    }
 }
 
 bool RenderModule::ShouldTick()

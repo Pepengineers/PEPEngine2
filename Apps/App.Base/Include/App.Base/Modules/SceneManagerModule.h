@@ -12,6 +12,7 @@
 #include "Common/ConsoleVariables.h"
 
 #include "App.Base/World.h"
+#include "App.Base/Event.h"
 
 class World;
 class System;
@@ -25,6 +26,9 @@ public:
         World* world = nullptr;
         std::unique_ptr<System> system;
     };
+    
+    Event<World&> OnWorldCreated;
+    Event<World&> OnWorldDestroyed;
 
     SceneManagerModule(GameTimer* timer);
     ~SceneManagerModule() override;
@@ -36,6 +40,8 @@ public:
     bool UnloadWorld(size_t index);
     bool SaveWorld(World* world, const std::filesystem::path& path);
     World* GetWorld(size_t index = 0);
+    
+    size_t GetWorldCount() const;
 
     template<typename T, typename... Args>
     void AddSystem(World* world, uint8_t priority, Args&&... args) {

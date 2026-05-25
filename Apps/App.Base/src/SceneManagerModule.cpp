@@ -44,6 +44,15 @@ void SceneManagerModule::Initialize()
 void SceneManagerModule::Uninitialize()
 {
     _systemVector.clear();
+
+    for (auto& world : _worldVector)
+    {
+        if (world)
+        {
+            OnWorldDestroyed.Broadcast(*world);
+        }
+    }
+
     _worldVector.clear();
 }
 
@@ -53,8 +62,13 @@ bool SceneManagerModule::LoadWorld(const std::filesystem::path& path)
     desc.WorldFilePath = path;
 
     auto world = std::make_unique<World>(desc);
+
+    World& worldRef = *world;
+    OnWorldCreated.Broadcast(worldRef);
+
     if (!world->Load())
     {
+        OnWorldDestroyed.Broadcast(worldRef);
         return false;
     }
 
@@ -73,6 +87,8 @@ bool SceneManagerModule::UnloadWorld(size_t index)
                 return entry.world == worldToRemove;
             }),
         _systemVector.end());
+
+    OnWorldDestroyed.Broadcast(*worldToRemove);
 
     _worldVector.erase(_worldVector.begin() + index);
     return true;
@@ -96,6 +112,11 @@ World* SceneManagerModule::GetWorld(size_t index)
     }
 
     return _worldVector[index].get();
+}
+
+size_t SceneManagerModule::GetWorldCount() const
+{
+    return _worldVector.size();
 }
 
 void SceneManagerModule::OnUpdate()
