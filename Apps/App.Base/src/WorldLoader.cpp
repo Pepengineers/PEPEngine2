@@ -67,23 +67,16 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     
     auto en1 = ecs.CreateEntity();
     en1.AddComponent<NameComponent>("en1");
-    en1.AddComponent<TransformComponent>(Vector3(0.f, 0.f, 0.f));
-
-    //this should be automated via events
-    renderModule->OnTransformComponentCreated(en1.GetComponent<TransformComponent>());
-
-    //en1.AddComponent<VelocityComponent>(1.0f, 0.0f, 0.0f);
+    en1.AddComponent<TransformComponent>(Vector3(0.0f, 0.f, 0.f));
+    en1.AddComponent<CircleMovementComponent>(1,1);
 
     std::vector<GDX12Material*> HeadMaterials = { HeadMaterial };
     en1.AddComponent<StaticMeshRenderComponent>(HeadMeshHandle, HeadMaterials);
 
     auto en2 = ecs.CreateEntity();
     en2.AddComponent<NameComponent>("en2");
-    en2.AddComponent<TransformComponent>(Vector3(10.f, 0.f, 5.f), Vector3(0.f, 0.f, 0.f),
-    Vector3(0.01f, 0.01f, 0.01f));
-
-    //this should be automated via events
-    renderModule->OnTransformComponentCreated(en2.GetComponent<TransformComponent>());
+    en2.AddComponent<TransformComponent>(Vector3(10.f, -5.f, -20.f), Vector3(0.f, 0.f, 0.f),
+    Vector3(0.1f, 0.1f, 0.1f));
 
     std::vector<GDX12Material*> SvMaterials = { SvMaterial };
     en2.AddComponent<StaticMeshRenderComponent>(SvMeshHandle, SvMaterials);
@@ -94,20 +87,11 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     marker.AddComponent<NameComponent>("marker");
     marker.AddComponent<TransformComponent>(Vector3(3.f, 7.f, -1.f));
 
-    //this should be automated via events
-    renderModule->OnTransformComponentCreated(marker.GetComponent<TransformComponent>());
-
     auto camera = ecs.CreateEntity();
     camera.AddComponent<NameComponent>("MainCamera");
     camera.AddComponent<TransformComponent>(Vector3(0.f, 0.f, 3.f), Vector3(0.f, 180.f, 0.f));
 
-    //this should be automated via events
-    renderModule->OnTransformComponentCreated(camera.GetComponent<TransformComponent>());
-
     camera.AddComponent<CameraComponent>();
-
-    //this should be automated via events
-    renderModule->OnCameraComponentCreated(camera.GetComponent<CameraComponent>());
 
     world.ActiveCamera = camera;
     
