@@ -9,6 +9,7 @@
 #include "App.Base/Components/NameComponent.h"
 #include "App.Base/Components/StaticMeshRenderComponent.h"
 #include "App.Base/Components/CameraComponent.h"
+#include "App.Base/Components/CircleMovementComponent.h"
 
 struct WorldDesc {
     std::filesystem::path WorldFilePath;
@@ -21,7 +22,8 @@ using WorldECS = ECSStorage<
     VelocityComponent,
     NameComponent,
     StaticMeshRenderComponent,
-    CameraComponent
+    CameraComponent,
+    CircleMovementComponent
 >;
 
 class World {
