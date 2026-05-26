@@ -1,7 +1,5 @@
 #include <App.Base/App.h>
 
-#include "Window.h"
-
 class EditorApp : public App
 {
 public:
@@ -20,6 +18,14 @@ protected:
     void OnMouseDown(WPARAM btnState, int x, int y) override;
     void OnMouseUp(WPARAM btnState, int x, int y) override;
     void OnMouseMove(WPARAM btnState, int x, int y) override;
+    void OnMouseWheelMove(WPARAM rotation) override;
+    void OnKeyboardInput(const GameTimer& gameTimer) override;
+
+private:
+    POINT _lastMousePos = {};
+    float _cameraSpeed = 10.0f;
+    float _minCameraSpeed = 0.1f;
+    float _maxCameraSpeed = 10000.0f;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, int showCmd)
@@ -104,7 +110,59 @@ void EditorApp::OnMouseUp(WPARAM btnState, int x, int y)
 
 void EditorApp::OnMouseMove(WPARAM btnState, int x, int y)
 {
-    UNREFERENCED_PARAMETER(btnState);
-    UNREFERENCED_PARAMETER(x);
-    UNREFERENCED_PARAMETER(y);
+    if ((btnState & MK_RBUTTON) != 0)
+    {
+        float dx = XMConvertToRadians(static_cast<float>(x - _lastMousePos.x));
+        float dy = XMConvertToRadians(static_cast<float>(y - _lastMousePos.y));
+
+        auto world = GetLocator().GetModule<SceneManagerModule>()->GetWorld();
+        auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
+
+        camera.Rotation.x += dy * 10.f;
+        camera.Rotation.y -= dx * 10.f;
+
+        camera.DirtyFlag = true;
+    }
+
+    _lastMousePos.x = x;
+    _lastMousePos.y = y;
+}
+
+void EditorApp::OnMouseWheelMove(WPARAM rotation)
+{
+    short wheelDelta = GET_WHEEL_DELTA_WPARAM(rotation);
+
+    float speed = _cameraSpeed;
+    if (wheelDelta > 0) speed = std::min(speed + 4.0f, _maxCameraSpeed);
+    else if (wheelDelta < 0) speed = (std::max)(speed - 4.0f, _minCameraSpeed);
+
+    _cameraSpeed = speed;
+}
+
+void EditorApp::OnKeyboardInput(const GameTimer& gameTimer)
+{
+    const float dt = gameTimer.DeltaTime();
+    const float speed = _cameraSpeed;
+
+    auto world = GetLocator().GetModule<SceneManagerModule>()->GetWorld();
+    auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
+
+    Matrix rotMatrix = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(camera.Rotation.y), 
+        XMConvertToRadians(camera.Rotation.x), XMConvertToRadians(camera.Rotation.z));
+
+    //local space
+    Vector3 forward = rotMatrix.Forward();
+    Vector3 right = rotMatrix.Right();
+
+    //world space
+    Vector3 up = Vector3::Up;
+
+    if (GetAsyncKeyState('W') & 0x8000) { camera.Location -= forward * speed * dt; }
+    if (GetAsyncKeyState('S') & 0x8000) { camera.Location += forward * speed * dt; }
+    if (GetAsyncKeyState('A') & 0x8000) { camera.Location += right * speed * dt; }
+    if (GetAsyncKeyState('D') & 0x8000) { camera.Location -= right * speed * dt; }
+    if (GetAsyncKeyState('Q') & 0x8000) { camera.Location -= up * speed * dt * 0.5f; }
+    if (GetAsyncKeyState('E') & 0x8000) { camera.Location += up * speed * dt * 0.5f; }
+
+    camera.DirtyFlag = true;
 }

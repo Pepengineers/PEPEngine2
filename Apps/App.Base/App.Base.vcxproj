@@ -20,13 +20,41 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\App.Base\App.h" />
+    <ClInclude Include="Include\App.Base\Components\CameraComponent.h" />
+    <ClInclude Include="Include\App.Base\Components\CircleMovementComponent.h" />
+    <ClInclude Include="Include\App.Base\Components\Component.h" />
+    <ClInclude Include="Include\App.Base\Components\NameComponent.h" />
+    <ClInclude Include="Include\App.Base\Components\StaticMeshRenderComponent.h" />
+    <ClInclude Include="Include\App.Base\Components\TransformComponent.h" />
+    <ClInclude Include="Include\App.Base\Components\VelocityComponent.h" />
+    <ClInclude Include="Include\App.Base\ECSStorage.h" />
+    <ClInclude Include="Include\App.Base\Entity.h" />
+    <ClInclude Include="Include\App.Base\Event.h" />
+    <ClInclude Include="Include\App.Base\Modules\EventManagerModule.h" />
+    <ClInclude Include="Include\App.Base\Modules\RenderModule.h" />
+    <ClInclude Include="Include\App.Base\Modules\SceneManagerModule.h" />
+    <ClInclude Include="Include\App.Base\SceneManager.h" />
+    <ClInclude Include="Include\App.Base\SceneTraversal.h" />
+    <ClInclude Include="Include\App.Base\Systems\CircleMovementSystem.h" />
+    <ClInclude Include="Include\App.Base\Systems\GPUDataUpdateSystem.h" />
+    <ClInclude Include="Include\App.Base\Systems\MovementSystem.h" />
+    <ClInclude Include="Include\App.Base\Systems\RenderCullingSystem.h" />
+    <ClInclude Include="Include\App.Base\Systems\RenderSubmitSystem.h" />
+    <ClInclude Include="Include\App.Base\Window.h" />
+    <ClInclude Include="Include\App.Base\World.h" />
+    <ClInclude Include="Include\App.Base\WorldLoader.h" />
     <ClInclude Include="Include\RenderModule.h" />
     <ClInclude Include="Include\Window.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
     <ClCompile Include="src\RenderModule.cpp" />
+    <ClCompile Include="src\SceneManager.cpp" />
+    <ClCompile Include="src\SceneManagerModule.cpp" />
+    <ClCompile Include="src\SceneTraversal.cpp" />
     <ClCompile Include="src\Window.cpp" />
+    <ClCompile Include="src\World.cpp" />
+    <ClCompile Include="src\WorldLoader.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>

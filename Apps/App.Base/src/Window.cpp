@@ -1,4 +1,4 @@
-﻿#include "Window.h"
+﻿#include "App.Base/Window.h"
 
 Window::Window(uint16_t width, uint16_t height, HINSTANCE hinstance) : WindowWidth(width), WindowHeight(height),
                                                                        AppInstance(hinstance)

@@ -9,19 +9,24 @@ struct GDX12MainConstants
     float DeltaTime = 0.0f;
 };
 
-struct GDX12MeshConstants
+struct GDX12TransformConstants
 {
     DirectX::XMFLOAT4X4 WorldMatrix = Identity4x4();
 };
 
 struct GDX12MaterialConstants
 {
-    DirectX::XMFLOAT3 Color = { 1.f, 1.f, 1.f };
     float Roughness = 0.5f;
     float Metallic = 0.5f;
     float _pad1;
     float _pad2;
-    float _pad3;
+};
+
+struct GDX12CameraConstants
+{
+    DirectX::XMFLOAT4X4 ViewProj = Identity4x4();
+    DirectX::XMFLOAT3 CameraLocation = { 0.f, 0.f, 0.f };
+    float _pad1;
 };
 
 struct GDX12LightConstants

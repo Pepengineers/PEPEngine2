@@ -1,10 +1,7 @@
 // App.Benchmark.cpp
 
-#include <Engine.Core/Engine.h>
+#include <Engine.Core/BenchmarkEngine.h>
 #include <App.Base/App.h>
-#include <App.Benchmark/AssetManagerSmokeTests.h>
-
-#include "Window.h"
 
 class BenchmarkApp final : public App
 {
@@ -68,8 +65,6 @@ bool BenchmarkApp::Initialize()
     {
         return false;
     }
-
-    RunAssetManagerSmokeTests();
 
     return true;
 }

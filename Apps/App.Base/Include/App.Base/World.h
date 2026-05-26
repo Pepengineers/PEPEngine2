@@ -3,8 +3,13 @@
 #include <filesystem>
 #include <cstdint>
 
-#include "Engine.Core/ECSStorage.h"
-#include "Engine.Core/Components.h"
+#include "App.Base/ECSStorage.h"
+#include "App.Base/Components/TransformComponent.h"
+#include "App.Base/Components/VelocityComponent.h"
+#include "App.Base/Components/NameComponent.h"
+#include "App.Base/Components/StaticMeshRenderComponent.h"
+#include "App.Base/Components/CameraComponent.h"
+#include "App.Base/Components/CircleMovementComponent.h"
 
 struct WorldDesc {
     std::filesystem::path WorldFilePath;
@@ -13,9 +18,12 @@ struct WorldDesc {
 };
 
 using WorldECS = ECSStorage<
-    TranslateComponent,
+    TransformComponent,
     VelocityComponent,
-    NameComponent
+    NameComponent,
+    StaticMeshRenderComponent,
+    CameraComponent,
+    CircleMovementComponent
 >;
 
 class World {
@@ -43,6 +51,8 @@ public:
     void SetName(std::string name);
 
     const std::filesystem::path& GetPath() const;
+
+    Entity ActiveCamera;
 
 private:
     

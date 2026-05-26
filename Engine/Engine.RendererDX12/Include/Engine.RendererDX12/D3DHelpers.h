@@ -21,8 +21,10 @@
 #include <fstream>
 #include <sstream>
 #include <cassert>
+#include "directxtk/SimpleMath.h"
 
 using namespace DirectX;
+using namespace DirectX::SimpleMath;
 using Microsoft::WRL::ComPtr;
 
 static XMFLOAT4X4 Identity4x4 ()

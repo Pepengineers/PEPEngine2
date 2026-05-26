@@ -1,29 +1,28 @@
 #pragma once
 
 #include "Engine.RendererDX12\D3DHelpers.h"
+#include "Engine.RendererDX12/GDX12Resource.h"
 
-class GDX12TextureResource
+class GDX12TextureResource : public GDX12Resource
 {
 public:
     GDX12TextureResource(ComPtr<ID3D12Resource> resource);
     ~GDX12TextureResource();
 
-    ComPtr<ID3D12Resource> D3DResource;
-
     // Enhanced texture barrier transition getters
-    D3D12_TEXTURE_BARRIER GetRenderTargetBarrier();
-    D3D12_TEXTURE_BARRIER GetPixelShaderResourceBarrier();
-    D3D12_TEXTURE_BARRIER GetNonPixelShaderResourceBarrier();
-    D3D12_TEXTURE_BARRIER GetUnorderedAccessBarrier();
-    D3D12_TEXTURE_BARRIER GetCopyDestBarrier();
-    D3D12_TEXTURE_BARRIER GetCopySourceBarrier();
-    D3D12_TEXTURE_BARRIER GetDepthWriteBarrier();
-    D3D12_TEXTURE_BARRIER GetDepthReadBarrier();
-    D3D12_TEXTURE_BARRIER GetResolveSourceBarrier();
-    D3D12_TEXTURE_BARRIER GetResolveDestBarrier();
-    D3D12_TEXTURE_BARRIER GetGenericReadBarrier();
-    D3D12_TEXTURE_BARRIER GetCommonBarrier();
-    D3D12_TEXTURE_BARRIER GetPresentBarrier();
+    D3D12_TEXTURE_BARRIER GetRenderTargetEnhBarrier();
+    D3D12_TEXTURE_BARRIER GetPixelShaderResourceEnhBarrier();
+    D3D12_TEXTURE_BARRIER GetNonPixelShaderResourceEnhBarrier();
+    D3D12_TEXTURE_BARRIER GetUnorderedAccessEnhBarrier();
+    D3D12_TEXTURE_BARRIER GetCopyDestEnhBarrier();
+    D3D12_TEXTURE_BARRIER GetCopySourceEnhBarrier();
+    D3D12_TEXTURE_BARRIER GetDepthWriteEnhBarrier();
+    D3D12_TEXTURE_BARRIER GetDepthReadEnhBarrier();
+    D3D12_TEXTURE_BARRIER GetResolveSourceEnhBarrier();
+    D3D12_TEXTURE_BARRIER GetResolveDestEnhBarrier();
+    D3D12_TEXTURE_BARRIER GetGenericReadEnhBarrier();
+    D3D12_TEXTURE_BARRIER GetCommonEnhBarrier();
+    D3D12_TEXTURE_BARRIER GetPresentEnhBarrier();
 
     D3D12_TEXTURE_BARRIER GetBarrier(D3D12_BARRIER_SYNC syncAfter, 
         D3D12_BARRIER_ACCESS accessAfter, D3D12_BARRIER_LAYOUT layoutAfter);

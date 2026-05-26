@@ -1,6 +1,6 @@
-﻿#include "RenderModule.h"
+﻿#include "App.Base/Modules/RenderModule.h"
 
-#include "Window.h"
+#include "App.Base/Window.h"
 #include "App.Base/App.h"
 #include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
@@ -9,7 +9,7 @@
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 
-
+#include "App.Base/Modules/SceneManagerModule.h"
 
 static UINT _numFrameConstants = 3;
 
@@ -18,11 +18,11 @@ static AutoConsoleVariableRef NumFrameConstantVariable(
     _numFrameConstants,
     L"How many deferred frames was rendered");
 
-RenderModule::RenderModule(Window* window) :
-    _dualGPUMode(false), window(window),
-    _currFrameConstantsIndex(0)
+
+RenderModule::RenderModule(Window* window, GameTimer* timer) :
+    _dualGPUMode(false), _window(window),
+    _currFrameConstantsIndex(0), _timer(timer)
 {
-    
 }
 
 RenderModule::~RenderModule()
@@ -34,7 +34,6 @@ RenderModule::~RenderModule()
 
 void RenderModule::Initialize()
 {
-    timer.Reset();
 #if defined(DEBUG) || defined(_DEBUG)
     // Enable the D3D12 debug layer.
     ComPtr<ID3D12Debug> debugController;
@@ -54,16 +53,27 @@ void RenderModule::Initialize()
     // 	_dualGPUMode = true;
     // }
 
+    _inputLayouts["Default"] =
+    {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+        { "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+    };
+
     BuildDescHeapsAndBackBuffer();
     BuildRootSignatures();
     BuildShaders();
     BuildPSOs();
     BuildFrameConstants();
+
+    _geometryBuffer = std::make_unique<GDX12GeometryBuffer>(_primaryDevice.get());
+    SubscribeToSceneManager();
 }
 
 void RenderModule::Uninitialize()
 {
-    _primaryDevice->GetCommandQueue()->Flush();
+    UnsubscribeFromSceneManager();
 }
 
 void RenderModule::OnResize() const
@@ -71,15 +81,328 @@ void RenderModule::OnResize() const
     _primaryDevice->GetCommandQueue()->Flush();
 
     uint16_t width, height;
-    window->GetWindowSize(width, height);
+    _window->GetWindowSize(width, height);
 
     _backBuffer->Resize(width, height);
     _depthStencil->Resize(width, height);
 }
 
+GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
+{
+    auto it = _materials.find(name);
+    if (it != _materials.end()) { return it->second.get(); }
+
+    std::string errorMsg = "ERROR: Material " + name + " not found in materials directory.\n";
+    OutputDebugStringA(errorMsg.c_str());
+    return nullptr;
+}
+
+GDX12Material* RenderModule::CreateMaterial(const std::string& name)
+{
+    if (_materials.find(name) != _materials.end()) 
+    {
+        std::string errorMsg = "ERROR: Material with name " + name + " already exists in materials directory.\n";
+        OutputDebugStringA(errorMsg.c_str());
+        return nullptr;
+    }
+
+    _materials[name] = std::unique_ptr<GDX12Material>(new GDX12Material());
+
+    _materials[name]->Name = name;
+    _materials[name]->_CBufferIndex = _frameConstants[0]->MaterialCB->GetElementCount();
+
+    for (auto& constants : _frameConstants)
+    {
+        auto& CBuffer = constants->MaterialCB;
+        CBuffer->Resize(CBuffer->GetElementCount() + 1);
+    }
+
+    return _materials[name].get();
+}
+
+GDX12Texture* RenderModule::GetTextureByName(const std::string& name)
+{
+    auto it = _textures.find(name);
+    if (it != _textures.end()) { return it->second.get(); }
+
+    std::string errorMsg = "ERROR: Texture " + name + " not found in textures directory.\n";
+    OutputDebugStringA(errorMsg.c_str());
+    return nullptr;
+}
+
+GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture* texture)
+{
+    if (_textures.find(name) != _textures.end())
+    {
+        std::string errorMsg = "ERROR: Material with name " + name + " already exists in materials directory.\n";
+        OutputDebugStringA(errorMsg.c_str());
+        return nullptr;
+    }
+
+    GDX12TextureDesc desc;
+    desc.SRV_UAV_Heap = _srvuavHeap.get();
+    desc.Format = desc.SRVDesc.Format = texture->GetFormat();
+    desc.Width = texture->GetWidth();
+    desc.Height = texture->GetHeight();
+
+    desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    desc.SRVDesc.Texture2D.MipLevels = 1;
+    desc.SRVDesc.Texture2D.MipLevels = texture->GetMipLevels();
+    desc.SRVDesc.Texture2D.MostDetailedMip = 0;
+    desc.SRVDesc.Texture2D.PlaneSlice = 0;
+    desc.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+
+    auto& subresources = texture->GetSubresources();
+    uint32_t numMipLevels = texture->GetMipLevels();
+    uint32_t numArraySlices = texture->GetArraySize();
+
+    ComPtr<ID3D12Resource> textureResource = nullptr;
+    auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+        desc.Format, desc.Width, desc.Height,
+        numArraySlices, numMipLevels);
+    CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
+    CD3DX12_HEAP_PROPERTIES uploadHeap(D3D12_HEAP_TYPE_UPLOAD);
+
+    _primaryDevice->GetDevice()->CreateCommittedResource(
+        &defaultHeap,
+        D3D12_HEAP_FLAG_NONE,
+        &texDesc,
+        D3D12_RESOURCE_STATE_COMMON,
+        nullptr,
+        IID_PPV_ARGS(&textureResource));
+
+    UINT64 totalSize = 0;
+    std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(numMipLevels * numArraySlices);
+    std::vector<UINT> rowCounts(numMipLevels * numArraySlices);
+    std::vector<UINT64> rowSizes(numMipLevels * numArraySlices);
+
+    _primaryDevice->GetDevice()->GetCopyableFootprints(
+        &texDesc, 0, numMipLevels * numArraySlices,
+        0, footprints.data(), rowCounts.data(), rowSizes.data(), &totalSize);
+
+    auto uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(totalSize);
+
+    ComPtr<ID3D12Resource> uploadBuffer;
+    _primaryDevice->GetDevice()->CreateCommittedResource(
+        &uploadHeap,
+        D3D12_HEAP_FLAG_NONE,
+        &uploadDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ,
+        nullptr,
+        IID_PPV_ARGS(&uploadBuffer));
+
+    void* mappedData = nullptr;
+    uploadBuffer->Map(0, nullptr, &mappedData);
+
+    for (uint32_t arraySlice = 0; arraySlice < numArraySlices; arraySlice++)
+    {
+        for (uint32_t mipLevel = 0; mipLevel < numMipLevels; mipLevel++)
+        {
+            uint32_t subresourceIndex = arraySlice * numMipLevels + mipLevel;
+            auto& subresource = texture->GetSubresource(mipLevel, arraySlice);
+
+            uint8_t* dest = static_cast<uint8_t*>(mappedData) + footprints[subresourceIndex].Offset;
+            const uint8_t* src = reinterpret_cast<const uint8_t*>(subresource.Data.data());
+
+            size_t srcRowPitch = subresource.RowPitch;
+            size_t dstRowPitch = footprints[subresourceIndex].Footprint.RowPitch;
+            size_t numRows = rowCounts[subresourceIndex];
+            size_t sliceSize = rowSizes[subresourceIndex];
+
+            for (size_t row = 0; row < numRows; row++)
+            {
+                memcpy(dest + row * dstRowPitch, src + row * srcRowPitch, std::min(srcRowPitch, dstRowPitch));
+            }
+        }
+    }
+    uploadBuffer->Unmap(0, nullptr);
+
+    auto cmdQueue = _primaryDevice->GetCommandQueue();
+    auto cmdList = cmdQueue->GetCommandList();
+
+    for (uint32_t arraySlice = 0; arraySlice < numArraySlices; arraySlice++)
+    {
+        for (uint32_t mipLevel = 0; mipLevel < numMipLevels; mipLevel++)
+        {
+            uint32_t subresourceIndex = arraySlice * numMipLevels + mipLevel;
+
+            D3D12_TEXTURE_COPY_LOCATION destLocation = {};
+            destLocation.pResource = textureResource.Get();
+            destLocation.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+            destLocation.SubresourceIndex = subresourceIndex;
+
+            D3D12_TEXTURE_COPY_LOCATION srcLocation = {};
+            srcLocation.pResource = uploadBuffer.Get();
+            srcLocation.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+            srcLocation.PlacedFootprint = footprints[subresourceIndex];
+
+            cmdList->GetCommandList()->CopyTextureRegion(&destLocation, 0, 0, 0, &srcLocation, nullptr);
+        }
+    }
+
+    auto Barrier = CD3DX12_RESOURCE_BARRIER::Transition(
+        textureResource.Get(),
+        D3D12_RESOURCE_STATE_COPY_DEST,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+    cmdList->GetCommandList()->ResourceBarrier(1, &Barrier);
+
+    cmdQueue->ExecuteCommandList(cmdList);
+    cmdQueue->Flush();
+
+    desc.ExternalResource = textureResource;
+
+    _textures[name] = std::make_unique<GDX12Texture>(desc);
+
+    return _textures[name].get();
+}
+
+void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
+{
+    _geometryBuffer->AddMesh(mesh, handle);
+}
+
+void RenderModule::SubscribeToWorld(World& world)
+{
+    if (_worldSubscriptions.find(&world) != _worldSubscriptions.end())
+    {
+        return;
+    }
+
+    auto& ecs = world.GetECS();
+
+    auto& transformPool = ecs.GetPool<TransformComponent>();
+    auto& cameraPool = ecs.GetPool<CameraComponent>();
+
+    WorldRenderSubscriptions subscriptions;
+
+    subscriptions.TransformCreated =
+        transformPool.OnComponentCreated.AddListener(
+            [this, &world](Entity entity, TransformComponent& component)
+            {
+                OnTransformComponentCreated(world, entity, component);
+            });
+
+    subscriptions.TransformDestroyed =
+        transformPool.OnComponentDestroyed.AddListener(
+            [this, &world](Entity entity, TransformComponent& component)
+            {
+                OnTransformComponentDestroyed(world, entity, component);
+            });
+
+    subscriptions.TransformUpdated =
+        transformPool.OnComponentUpdated.AddListener(
+            [this, &world](Entity entity, TransformComponent& component)
+            {
+                OnTransformComponentUpdated(world, entity, component);
+            });
+
+    subscriptions.CameraCreated =
+        cameraPool.OnComponentCreated.AddListener(
+            [this, &world](Entity entity, CameraComponent& component)
+            {
+                OnCameraComponentCreated(world, entity, component);
+            });
+
+    subscriptions.CameraDestroyed =
+        cameraPool.OnComponentDestroyed.AddListener(
+            [this, &world](Entity entity, CameraComponent& component)
+            {
+                OnCameraComponentDestroyed(world, entity, component);
+            });
+
+    subscriptions.CameraUpdated =
+        cameraPool.OnComponentUpdated.AddListener(
+            [this, &world](Entity entity, CameraComponent& component)
+            {
+                OnCameraComponentUpdated(world, entity, component);
+            });
+
+    _worldSubscriptions[&world] = subscriptions;
+}
+
+void RenderModule::UnsubscribeFromWorld(World& world)
+{
+    auto it = _worldSubscriptions.find(&world);
+
+    if (it == _worldSubscriptions.end())
+    {
+        return;
+    }
+
+    const WorldRenderSubscriptions subscriptions = it->second;
+
+    auto& ecs = world.GetECS();
+    auto& transformPool = ecs.GetPool<TransformComponent>();
+    auto& cameraPool = ecs.GetPool<CameraComponent>();
+
+    transformPool.OnComponentCreated.RemoveListener(subscriptions.TransformCreated);
+    transformPool.OnComponentDestroyed.RemoveListener(subscriptions.TransformDestroyed);
+    transformPool.OnComponentUpdated.RemoveListener(subscriptions.TransformUpdated);
+
+    cameraPool.OnComponentCreated.RemoveListener(subscriptions.CameraCreated);
+    cameraPool.OnComponentDestroyed.RemoveListener(subscriptions.CameraDestroyed);
+    cameraPool.OnComponentUpdated.RemoveListener(subscriptions.CameraUpdated);
+
+    _worldSubscriptions.erase(it);
+}
+
+GDX12FrameConstants* RenderModule::GetCurrentFrameConstants()
+{
+    return _frameConstants[_currFrameConstantsIndex].get();
+}
+
+void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
+{
+    component._CBufferIndex = _frameConstants[0]->TransformCB->GetElementCount();
+
+    for (auto& constants : _frameConstants)
+    {
+        auto& CBuffer = constants->TransformCB;
+        CBuffer->Resize(CBuffer->GetElementCount() + 1);
+    }
+}
+
+void RenderModule::OnTransformComponentDestroyed(World& world, Entity entity, TransformComponent& component)
+{
+}
+
+void RenderModule::OnTransformComponentUpdated(World& world, Entity entity, TransformComponent& component)
+{
+}
+
+void RenderModule::OnCameraComponentCreated(World& world, Entity entity, CameraComponent& component)
+{
+    component._CBufferIndex = _frameConstants[0]->CameraCB->GetElementCount();
+
+    for (auto& constants : _frameConstants)
+    {
+        auto& CBuffer = constants->CameraCB;
+        CBuffer->Resize(CBuffer->GetElementCount() + 1);
+    }
+}
+
+void RenderModule::OnCameraComponentDestroyed(World& world, Entity entity, CameraComponent& component)
+{
+}
+
+void RenderModule::OnCameraComponentUpdated(World& world, Entity entity, CameraComponent& component)
+{
+}
+
+const float RenderModule::GetAspectRatio()
+{
+    return _window->GetAspectRatio();
+}
+
+GDX12RenderCommandRecorder* RenderModule::GetCommandRecorder()
+{
+    return &_commandRecorder;
+}
+
 void RenderModule::OnUpdate()
 {
-    timer.Tick();
     _currFrameConstantsIndex = (_currFrameConstantsIndex + 1) % NumFrameConstantVariable.GetValue();
 
     auto cmdQueue = _primaryDevice->GetCommandQueue();
@@ -91,6 +414,7 @@ void RenderModule::OnUpdate()
     }
 
     UpdateMainCB();
+    UpdateMaterialCB();
 }
 
 void RenderModule::OnRender()
@@ -103,29 +427,53 @@ void RenderModule::OnRender()
     auto CurrentBackBuffer = _backBuffer->GetCurrentBuffer();
     auto& CurrentFrameConsts = _frameConstants[_currFrameConstantsIndex];
 
+    cmdList->BeginPixEvent("Clear Back Buffer", Colors::Aqua);
     cmdList->SetViewport(_backBuffer->GetViewport());
     cmdList->SetScissorRect(_backBuffer->GetScissorRect());
 
-    cmdList->EnhancedTextureBarrier({
-        CurrentBackBuffer->GetResource()->GetRenderTargetBarrier(),
-        _depthStencil->GetResource()->GetDepthWriteBarrier()
-    });
+    cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetRenderTargetEnhBarrier() });
+    cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetDepthWriteBarrier() });
 
-    cmdList->SetRenderTargets({CurrentBackBuffer}, _depthStencil.get());
+    cmdList->SetRenderTargets({ CurrentBackBuffer }, _depthStencil.get());
     cmdList->ClearRenderTargetView(CurrentBackBuffer);
+    cmdList->ClearDepthStencilView(_depthStencil.get());
+    cmdList->EndPixEvent();
 
+    cmdList->BeginPixEvent("Test Render Pass", Colors::ForestGreen);
     cmdList->SetGraphicsRootSignature(_rootSignatures["Test"].get());
     cmdList->SetGraphicsRootConstantBufferView(0, CurrentFrameConsts->MainCB->GetElementAddress(0));
-
+    cmdList->SetGraphicsRootConstantBufferView(1, CurrentFrameConsts->CameraCB->
+        GetElementAddress(_commandRecorder._cameraCBIndex));
     cmdList->SetPipelineState(_PSOs["Test"]);
 
+    cmdList->SetGeometryBuffer(_geometryBuffer.get());
     cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    cmdList->DrawInstanced(6, 1, 0, 0);
+    cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
 
-    cmdList->EnhancedTextureBarrier({
-        CurrentBackBuffer->GetResource()->GetPresentBarrier(),
-        _depthStencil->GetResource()->GetCommonBarrier()
-    });
+    for (DrawMeshCommand& renderCommand : _commandRecorder._drawMeshCommands)
+    {
+        cmdList->SetGraphicsRootConstantBufferView(2, CurrentFrameConsts->TransformCB->
+            GetElementAddress(renderCommand.TransformCBIndex));
+
+        auto& MeshGPUData = _geometryBuffer->_meshCache[renderCommand.Mesh.GetValue()];
+
+        for (GPUSubMesh& SubMesh : MeshGPUData->SubMeshes)
+        {
+            auto material = renderCommand.Materials[SubMesh.MaterialIndex];
+
+            cmdList->SetGraphicsRootConstantBufferView(3, CurrentFrameConsts->MaterialCB->
+                GetElementAddress(material->_CBufferIndex));
+            cmdList->SetTextureAsSRV(0, material->Diffuse);
+
+            cmdList->DrawIndexedInstanced(SubMesh.IndexCount, 1, 
+                SubMesh.StartIndexLocation, SubMesh.StartVertexLocation, 0);
+        }
+    }
+
+    cmdList->EndPixEvent();
+
+    cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetPresentEnhBarrier() });
+    cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetCommonBarrier() });
 
     cmdQueue->ExecuteCommandList(cmdList);
     CurrentFrameConsts->FenceValue = cmdQueue->GetFence()->GetCompletedValue();
@@ -136,22 +484,22 @@ void RenderModule::OnRender()
 void RenderModule::BuildDescHeapsAndBackBuffer()
 {
     _rtvHeap = std::make_unique<GDX12DescriptorHeap>(_primaryDevice.get(),
-                                                     D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1000,
-                                                     D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+        D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1000,
+        D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
     _srvuavHeap = std::make_unique<GDX12DescriptorHeap>(_primaryDevice.get(),
-                                                        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1000000,
-                                                        D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1000000,
+        D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
 
     _dsvHeap = std::make_unique<GDX12DescriptorHeap>(_primaryDevice.get(),
-                                                     D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1000,
-                                                     D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+        D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1000,
+        D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
     uint16_t width, height;
-    window->GetWindowSize(width, height);
+    _window->GetWindowSize(width, height);
 
-    _backBuffer = std::make_unique<GDX12SwapChain>(_primaryDevice.get(), window->GetWindowHandle(),
-                                                   DXGI_FORMAT_R8G8B8A8_UNORM, 2, width, height, _rtvHeap.get());
+    _backBuffer = std::make_unique<GDX12SwapChain>(_primaryDevice.get(), _window->GetWindowHandle(),
+        DXGI_FORMAT_R8G8B8A8_UNORM, 2, width, height, _rtvHeap.get());
 
     GDX12TextureDesc desc;
     desc.CreateSRV = false;
@@ -161,7 +509,7 @@ void RenderModule::BuildDescHeapsAndBackBuffer()
     desc.Format = desc.DSVDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
     desc.Width = width;
     desc.Height = height;
-    desc.ClearValue = {1.f, 1.f, 1.f, 1.f};
+    desc.ClearValue = { 1.f, 1.f, 1.f, 1.f };
 
     desc.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     desc.DSVDesc.Texture2D.MipSlice = 0;
@@ -172,8 +520,9 @@ void RenderModule::BuildDescHeapsAndBackBuffer()
 void RenderModule::BuildRootSignatures()
 {
     GDX12RootSignatureDesc desc;
-    desc.NumCBVSlots = 1;
-
+    desc.NumCBVSlots = 4;
+    desc.NumSRVSlots = 3;
+    desc.StaticSamplers = GetStaticSamplers();
     _rootSignatures["Test"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc);
 }
 
@@ -181,8 +530,7 @@ void RenderModule::BuildShaders()
 {
     auto& Compiler = GDX12ShaderCompiler::GetInstance();
 
-    _shaders["TestVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "VS_FSQuad",
-                                                "vs");
+    _shaders["TestVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "VS", "vs");
     _shaders["TestPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "PS", "ps");
 }
 
@@ -190,13 +538,12 @@ void RenderModule::BuildPSOs()
 {
     D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
 
-    desc.InputLayout = {nullptr, 0};
+    desc.InputLayout = { _inputLayouts["Default"].data(), (UINT)_inputLayouts["Default"].size() };
     desc.pRootSignature = _rootSignatures["Test"]->GetRootSignature().Get();
     desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
     desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-    desc.DepthStencilState.DepthEnable = false;
-    desc.DepthStencilState.StencilEnable = false;
+    desc.RasterizerState.FrontCounterClockwise = TRUE;
     desc.SampleMask = UINT_MAX;
     desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     desc.NumRenderTargets = 1;
@@ -223,24 +570,176 @@ void RenderModule::BuildFrameConstants()
     for (int i = 0; i < NumFrameConstantVariable.GetValue(); i++)
     {
         //TODO: fix zero element upload buffer crash
-        _frameConstants.emplace_back(std::make_unique<GDX12FrameConstants>(_primaryDevice.get(), 1, 1, 1));
+        _frameConstants.emplace_back(std::make_unique<GDX12FrameConstants>(_primaryDevice.get()));
     }
 }
 
-void RenderModule::UpdateMainCB() const
+void RenderModule::UpdateMainCB()
 {
     auto& frameRes = _frameConstants[_currFrameConstantsIndex];
 
     GDX12MainConstants mainConstants;
 
     uint16_t width, height;
-    window->GetWindowSize(width, height);
+    _window->GetWindowSize(width, height);
 
-    mainConstants.RenderTargetSize = {static_cast<float>(width), static_cast<float>(height)};
-    mainConstants.TotalTime = timer.TotalTime();
-    mainConstants.DeltaTime = timer.DeltaTime();
+    mainConstants.RenderTargetSize = { static_cast<float>(width), static_cast<float>(height) };
+    mainConstants.TotalTime = _timer->TotalTime();
+    mainConstants.DeltaTime = _timer->DeltaTime();
 
     frameRes->MainCB->CopyData(0, mainConstants);
+}
+
+void RenderModule::UpdateMaterialCB()
+{
+    auto currMaterialCB = _frameConstants[_currFrameConstantsIndex]->MaterialCB.get();
+    for (auto& i : _materials)
+    {
+        GDX12Material* material = i.second.get();
+
+        if (material->DirtyFlag)
+        { 
+            material->DirtyFlag = false;
+            material->_numFramesDirty = _numFrameConstants;
+        }
+
+        if (material->_numFramesDirty > 0)
+        {
+            GDX12MaterialConstants materialConstants;
+            materialConstants.Roughness = material->Roughness;
+            materialConstants.Metallic = material->Metallic;
+
+            currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
+            material->_numFramesDirty--;
+        }
+    }
+}
+
+std::vector<CD3DX12_STATIC_SAMPLER_DESC> RenderModule::GetStaticSamplers()
+{
+    CD3DX12_STATIC_SAMPLER_DESC pointWrap(
+        0, // shaderRegister
+        D3D12_FILTER_MIN_MAG_MIP_POINT, // filter
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressU
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressV
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP); // addressW
+
+    CD3DX12_STATIC_SAMPLER_DESC pointClamp(
+        1,
+        D3D12_FILTER_MIN_MAG_MIP_POINT,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+
+    CD3DX12_STATIC_SAMPLER_DESC linearWrap(
+        2,
+        D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+
+    CD3DX12_STATIC_SAMPLER_DESC linearClamp(
+        3,
+        D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
+
+    CD3DX12_STATIC_SAMPLER_DESC anisotropicWrap(
+        4,
+        D3D12_FILTER_ANISOTROPIC,
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  
+        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  
+        0.0f, // mipLODBias     
+        8);   // maxAnisotropy     
+    CD3DX12_STATIC_SAMPLER_DESC anisotropicClamp(
+        5,
+        D3D12_FILTER_ANISOTROPIC, 
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  
+        0.0f,                              
+        8);                                
+
+    return {
+        pointWrap, pointClamp,
+        linearWrap, linearClamp,
+        anisotropicWrap, anisotropicClamp };
+}
+
+void RenderModule::SubscribeToSceneManager()
+{
+    auto sceneManager = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
+
+    if (sceneManager)
+    {
+        _worldCreatedListener =
+            sceneManager->OnWorldCreated.AddListener(
+                [this](World& world)
+                {
+                    SubscribeToWorld(world);
+                });
+
+        _worldDestroyedListener =
+            sceneManager->OnWorldDestroyed.AddListener(
+                [this](World& world)
+                {
+                    UnsubscribeFromWorld(world);
+                });
+
+        // just in case
+        for (size_t i = 0; i < sceneManager->GetWorldCount(); ++i)
+        {
+            World* world = sceneManager->GetWorld(i);
+
+            if (world)
+            {
+                SubscribeToWorld(*world);
+            }
+        }
+    }
+}
+
+void RenderModule::UnsubscribeFromSceneManager()
+{
+    auto sceneManager = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
+
+    if (sceneManager)
+    {
+        if (_worldCreatedListener != 0)
+        {
+            sceneManager->OnWorldCreated.RemoveListener(_worldCreatedListener);
+            _worldCreatedListener = 0;
+        }
+
+        if (_worldDestroyedListener != 0)
+        {
+            sceneManager->OnWorldDestroyed.RemoveListener(_worldDestroyedListener);
+            _worldDestroyedListener = 0;
+        }
+    }
+
+    UnsubscribeFromAllWorlds();
+}
+
+void RenderModule::UnsubscribeFromAllWorlds()
+{
+    std::vector<World*> worlds;
+    worlds.reserve(_worldSubscriptions.size());
+
+    for (const auto& pair : _worldSubscriptions)
+    {
+        worlds.push_back(pair.first);
+    }
+
+    for (World* world : worlds)
+    {
+        if (world)
+        {
+            UnsubscribeFromWorld(*world);
+        }
+    }
 }
 
 bool RenderModule::ShouldTick()

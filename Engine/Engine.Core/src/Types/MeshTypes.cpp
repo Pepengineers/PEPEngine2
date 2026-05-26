@@ -51,5 +51,6 @@ namespace Engine::Core
 		assert(subMeshIndex < _subMeshes.size());
 		return _subMeshes.at(subMeshIndex);
 	}
+
 #pragma endregion Mesh
 }

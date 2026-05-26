@@ -10,7 +10,7 @@ class GDX12Device;
 class GDX12FrameConstants
 {
 public:
-    GDX12FrameConstants(GDX12Device* device, UINT meshCount, UINT materialCount, UINT lightCount);
+    GDX12FrameConstants(GDX12Device* device);
     ~GDX12FrameConstants();
 
     bool IsInUseByGPU(UINT64 currentFence);
@@ -20,9 +20,10 @@ public:
 
     //Dirty flag notify updating
     //Probably should move those to components
-    std::unique_ptr<GDX12UploadBuffer<GDX12MeshConstants>> MeshCB;
+    std::unique_ptr<GDX12UploadBuffer<GDX12TransformConstants>> TransformCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12MaterialConstants>> MaterialCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12LightConstants>> LightCB;
+    std::unique_ptr<GDX12UploadBuffer<GDX12CameraConstants>> CameraCB;
     UINT64 FenceValue;
     
 private:

@@ -6,6 +6,7 @@ class GDX12Device;
 class GDX12RootSignature;
 class GDX12DescriptorHeap;
 class GDX12Texture;
+class GDX12GeometryBuffer;
 
 class GDX12CommandList
 {
@@ -28,6 +29,7 @@ public:
 	void SetDescriptorHeaps(std::initializer_list<GDX12DescriptorHeap*> heaps);
 	void SetViewport(const D3D12_VIEWPORT& viewport);
 	void SetScissorRect(const D3D12_RECT& scissorRect);
+	void SetGeometryBuffer(GDX12GeometryBuffer* buffer);
 
     // View management
 	void SetRenderTargets(std::initializer_list<GDX12Texture*> rtvTextures,
@@ -49,6 +51,8 @@ public:
 	//GDX12RootSignature stores SRVs & UAVs via single-slot desc tables
 	//Use this to bind GDX12Texture SRVs & UAVs
 	void SetGraphicsRootDescriptorTable(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE baseDescriptor);
+	
+	void SetTextureAsSRV(UINT registerIndex, GDX12Texture* texture);
 
     void SetComputeRootConstantBufferView(UINT CregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation);
     void SetComputeRootShaderResourceView(UINT TregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation);
@@ -66,12 +70,13 @@ public:
 	void Dispatch(UINT threadGroupCountX, UINT threadGroupCountY, UINT threadGroupCountZ);
 	void DispatchRays(const D3D12_DISPATCH_RAYS_DESC* pDesc);
 
-	//Enhanced Barriers
+	//Resource Barriers
+	void ResourceBarrier(std::initializer_list<CD3DX12_RESOURCE_BARRIER> barriers);
 	void EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTURE_BARRIER> textureBarriers);
 
 
 	//Misc
-	void BeginPixEvent(const std::string& name, XMFLOAT4 Color);
+	void BeginPixEvent(const std::string& name, XMVECTOR color);
 	void EndPixEvent();
 
 	void BuildRaytracingAccelerationStructure(const D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC* pDesc);
@@ -88,4 +93,5 @@ private:
 	std::vector<ID3D12DescriptorHeap*> _currentDescriptorHeaps;
 	D3D12_VIEWPORT _currentViewport;
 	D3D12_RECT _currentScissorRect;
+	GDX12GeometryBuffer* _currentGeometryBuffer;
 };

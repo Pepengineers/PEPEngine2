@@ -23,8 +23,6 @@ namespace Engine::Core
 		std::vector<std::uint32_t> Indices;
 		std::uint32_t MaterialIndex = 0;
 		DirectX::BoundingBox Bounds = {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
-		std::uint32_t StartVertexLocation = 0;
-		std::uint32_t StartIndexLocation = 0;
 
 		/// Returns the number of vertices in this submesh.
 		[[nodiscard]] size_t GetVertexCount() const;

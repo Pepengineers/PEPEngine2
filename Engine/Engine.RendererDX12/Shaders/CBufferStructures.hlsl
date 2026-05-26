@@ -5,19 +5,24 @@ struct MainCB
     float DeltaTime;
 };
 
-struct MeshCB
+struct TransformCB
 {
     float4x4 World;
 };
 
 struct MaterialCB
 {
-    float3 Color;
     float Roughness;
     float Metallic;
     float _pad1;
     float _pad2;
-    float _pad3;
+};
+
+struct CameraCB
+{
+    float4x4 ViewProj;
+    float3 CameraLocation;
+    float _pad1;
 };
 
 struct LightCB

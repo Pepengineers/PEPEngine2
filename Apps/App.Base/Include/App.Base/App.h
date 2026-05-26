@@ -7,8 +7,15 @@
 #include <crtdbg.h>
 #endif
 
-#include "Engine.Core/Engine.h"
+#include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
+
+#include "App.Base/Modules/RenderModule.h"
+#include "App.Base/Modules/SceneManagerModule.h"
+#include "App.Base/Window.h"
+
+#undef min
+#undef max
 
 // Link necessary d3d12 libraries.
 #pragma comment(lib,"d3dcompiler.lib")
@@ -18,7 +25,7 @@
 class RenderModule;
 class Window;
 
-class App : public Engine
+class App : public BenchmarkEngine
 {
 public:
     HINSTANCE GetAppHandler() const;
@@ -60,9 +67,19 @@ protected:
     {
     }
 
+    virtual void OnMouseWheelMove(WPARAM rotation)
+    {
+    }
+
+    //this should probably be replaced with an InputSystem
+    virtual void OnKeyboardInput(const GameTimer& gameTimer)
+    {
+    }
+
     bool InitMainWindow();
     bool AddModules() override;
+    void Update(const GameTimer& gameTimer) override;
 
 private:
-    std::unique_ptr<Window> window;
+    std::unique_ptr<Window> _window;
 };

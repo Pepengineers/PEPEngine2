@@ -5,14 +5,14 @@
 #include <cstdint>
 #include <type_traits>
 #include <utility>
+#include <App.Base/Entity.h>
+#include <App.Base/Components/Component.h>
+#include <App.Base/Event.h>
 
-using Entity = uint32_t;
+#undef max;
+
 static constexpr Entity InvalidEntity = 0;
 static constexpr size_t InvalidIndex = std::numeric_limits<size_t>::max();
-
-struct ComponentTag
-{
-};
 
 template<typename T, typename... Ts>
 struct IsOneOf : std::false_type
@@ -29,8 +29,17 @@ template<typename T>
 class ComponentPool
 {
 public:
+    Event<Entity, T&> OnComponentCreated;
+    Event<Entity, T&> OnComponentDestroyed;
+    Event<Entity, T&> OnComponentUpdated;
+    
     void Clear()
     {
+        for (size_t i = 0; i < _denseComponents.size(); ++i)
+        {
+            OnComponentDestroyed.Broadcast(_denseEntities[i], _denseComponents[i]);
+        }
+
         _sparse.clear();
         _denseEntities.clear();
         _denseComponents.clear();
@@ -52,33 +61,54 @@ public:
 
         if (Has(entity))
         {
-            _denseComponents[_sparse[entity]] = value;
-            return _denseComponents[_sparse[entity]];
+            T& existingComponent = _denseComponents[_sparse[entity]];
+            existingComponent = value;
+
+            OnComponentUpdated.Broadcast(entity, existingComponent);
+
+            return existingComponent;
         }
 
         size_t newIndex = _denseComponents.size();
         _sparse[entity] = newIndex;
         _denseEntities.push_back(entity);
         _denseComponents.push_back(value);
-        return _denseComponents.back();
+
+        T& createdComponent = _denseComponents.back();
+
+        OnComponentCreated.Broadcast(entity, createdComponent);
+
+        return createdComponent;
     }
 
     template<typename... Args>
     T& Emplace(Entity entity, Args&&... args)
     {
-        if (entity >= _sparse.size()) { _sparse.resize(static_cast<size_t>(entity) + 1, InvalidIndex); }
+        if (entity >= _sparse.size())
+        {
+            _sparse.resize(static_cast<size_t>(entity) + 1, InvalidIndex);
+        }
 
         if (Has(entity))
         {
-            _denseComponents[_sparse[entity]] = T(std::forward<Args>(args)...);
-            return _denseComponents[_sparse[entity]];
+            T& existingComponent = _denseComponents[_sparse[entity]];
+            existingComponent = T(std::forward<Args>(args)...);
+
+            OnComponentUpdated.Broadcast(entity, existingComponent);
+
+            return existingComponent;
         }
 
         size_t newIndex = _denseComponents.size();
         _sparse[entity] = newIndex;
         _denseEntities.push_back(entity);
         _denseComponents.emplace_back(std::forward<Args>(args)...);
-        return _denseComponents.back();
+
+        T& createdComponent = _denseComponents.back();
+
+        OnComponentCreated.Broadcast(entity, createdComponent);
+
+        return createdComponent;
     }
 
     void Remove(Entity entity)
@@ -86,6 +116,9 @@ public:
         if (!Has(entity)) { return; }
 
         size_t removeIndex = _sparse[entity];
+        
+        OnComponentDestroyed.Broadcast(entity, _denseComponents[removeIndex]);
+
         size_t lastIndex = _denseComponents.size() - 1;
         Entity lastEntity = _denseEntities[lastIndex];
 
@@ -99,6 +132,14 @@ public:
         _denseComponents.pop_back();
         _denseEntities.pop_back();
         _sparse[entity] = InvalidIndex;
+    }
+
+    void MarkComponentUpdated(Entity entity)
+    {
+        if (!Has(entity)) { return; }
+
+        T& component = Get(entity);
+        OnComponentUpdated.Broadcast(entity, component);
     }
 
     T& Get(Entity entity)
@@ -188,7 +229,13 @@ public:
         template<typename T>
         const T& GetComponent() const
         {
-            return _storage->Get<T>(_entity);
+            return static_cast<const ECSStorage*>(_storage)->template Get<T>(_entity);
+        }
+        
+        template<typename T>
+        void MarkComponentUpdated()
+        {
+            _storage->template MarkComponentUpdated<T>(_entity);
         }
 
     private:
@@ -347,6 +394,18 @@ public:
 
             func(entity, firstData[i], Get<Second>(entity), Get<Rest>(entity)...);
         }
+    }
+    
+    // todo 
+    // auto renderComponent = ecs.GetComponent<RenderComponent>(entity);
+    // renderComponent.Material = newMaterial;
+    // ecs.MarkCompomentUpdated<RenderComponent>(entity);
+    
+    template<typename T>
+    void MarkComponentUpdated(Entity entity)
+    {
+        static_assert(IsOneOf<T, Components...>::value, "T is not registered in ECSStorage");
+        GetPool<T>().MarkComponentUpdated(entity);
     }
 
 private:
