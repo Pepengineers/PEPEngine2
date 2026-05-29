@@ -5,6 +5,8 @@
 #include "App.Base/Systems/RenderCullingSystem.h"
 #include "App.Base/Systems/RenderSubmitSystem.h"
 #include "App.Base/Systems/GPUDataUpdateSystem.h"
+#include "App.Base/Systems/LookAtTargetSystem.h"
+#include "App.Base/Systems/SplineFollowSystem.h"
 #include "Engine.Core/System.h"
 
 SceneManagerModule::SceneManagerModule(GameTimer* timer) :
@@ -36,6 +38,8 @@ void SceneManagerModule::Initialize()
 
     AddSystem<MovementSystem>(world, 0);
     AddSystem<CircleMovementSystem>(world, 1);
+    AddSystem<SplineFollowSystem>(world, 2);
+    AddSystem<LookAtTargetSystem>(world, 3);
     AddSystem<RenderCullingSystem>(world, 100);
     AddSystem<GPUDataUpdateSystem>(world, 101);
     AddSystem<RenderSubmitSystem>(world, 102);
