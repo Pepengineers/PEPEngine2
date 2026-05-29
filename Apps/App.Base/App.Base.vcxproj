@@ -23,6 +23,7 @@
     <ClInclude Include="Include\App.Base\Components\CameraComponent.h" />
     <ClInclude Include="Include\App.Base\Components\CircleMovementComponent.h" />
     <ClInclude Include="Include\App.Base\Components\Component.h" />
+    <ClInclude Include="Include\App.Base\Components\LookAtTargetComponent.h" />
     <ClInclude Include="Include\App.Base\Components\NameComponent.h" />
     <ClInclude Include="Include\App.Base\Components\StaticMeshRenderComponent.h" />
     <ClInclude Include="Include\App.Base\Components\TransformComponent.h" />
@@ -37,6 +38,7 @@
     <ClInclude Include="Include\App.Base\SceneTraversal.h" />
     <ClInclude Include="Include\App.Base\Systems\CircleMovementSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\GPUDataUpdateSystem.h" />
+    <ClInclude Include="Include\App.Base\Systems\LookAtTargetSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\MovementSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\RenderCullingSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\RenderSubmitSystem.h" />
