@@ -11,9 +11,6 @@
 
 #undef max;
 
-static constexpr Entity InvalidEntity = 0;
-static constexpr size_t InvalidIndex = std::numeric_limits<size_t>::max();
-
 template<typename T, typename... Ts>
 struct IsOneOf : std::false_type
 {
