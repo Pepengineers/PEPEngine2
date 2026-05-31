@@ -14,8 +14,9 @@ namespace Engine::Core
 		static constexpr std::uint32_t InvalidValue = (std::numeric_limits<std::uint32_t>::max)();
 
 		constexpr AssetHandle() noexcept = default;
-		explicit constexpr AssetHandle(const std::uint32_t value) noexcept
+		explicit constexpr AssetHandle(const std::uint32_t value, const std::uint32_t generation = 0) noexcept
 			: _value(value)
+			, _generation(generation)
 		{
 		}
 
@@ -29,9 +30,14 @@ namespace Engine::Core
 			return _value;
 		}
 
+		[[nodiscard]] constexpr std::uint32_t GetGeneration() const noexcept
+		{
+			return _generation;
+		}
+
 		[[nodiscard]] constexpr bool operator==(const AssetHandle& other) const noexcept
 		{
-			return _value == other._value;
+			return _value == other._value && _generation == other._generation;
 		}
 
 		[[nodiscard]] constexpr bool operator!=(const AssetHandle& other) const noexcept
@@ -41,6 +47,7 @@ namespace Engine::Core
 
 	private:
 		std::uint32_t _value = InvalidValue;
+		std::uint32_t _generation = 0;
 	};
 
 	struct MeshTag{};

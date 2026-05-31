@@ -34,6 +34,11 @@ namespace Engine::Core
 		return metadata.SourcePath;
 	}
 
+	std::wstring MeshRegistry::GetCacheKeyFromMetadata(const MeshAssetLocator& metadata) const
+	{
+		return BuildMeshCacheKey(metadata);
+	}
+
 	const wchar_t* MeshRegistry::GetAssetTypeName() const
 	{
 		return L"mesh";
@@ -85,7 +90,7 @@ namespace Engine::Core
 			return {};
 		}
 
-		return MeshHandle(handleValue);
+		return MakeHandleFromValue(handleValue, L"find mesh handle by locator");
 	}
 
 	const Mesh* MeshRegistry::GetMesh(const MeshHandle handle) const
@@ -105,9 +110,15 @@ namespace Engine::Core
 
 	const Mesh* MeshRegistry::Load(const std::filesystem::path& path)
 	{
+		MeshHandle loadedHandle = {};
+		return Load(path, loadedHandle);
+	}
+
+	const Mesh* MeshRegistry::Load(const std::filesystem::path& path, MeshHandle& outHandle)
+	{
 		MeshAssetLocator locator = {};
 		locator.SourcePath = path;
-		return Load(locator);
+		return Load(locator, outHandle);
 	}
 
 	const Mesh* MeshRegistry::Load(const MeshAssetLocator& locator)
