@@ -32,8 +32,19 @@ namespace Engine::Core
 		/// Loads a texture from cache or from disk and caches the result.
 		[[nodiscard]] const Texture* Load(const std::filesystem::path& path);
 
+		/// Loads a texture from cache or from disk and returns its handle via outHandle.
+		/// If the texture is already registered, outHandle receives the existing handle.
+		/// On failure returns nullptr and resets outHandle to an invalid handle.
+		[[nodiscard]] const Texture* Load(const std::filesystem::path& path, TextureHandle& outHandle);
+
 		/// Loads a texture from cache or from disk and returns the default texture on failure.
 		[[nodiscard]] const Texture* LoadOrDefault(const std::filesystem::path& path);
+
+		/// Loads a texture and returns its handle via outHandle.
+		/// If the requested texture fails to load but the registry-backed default texture is returned,
+		/// outHandle receives the default texture handle. If a built-in fallback texture is returned,
+		/// outHandle is reset to an invalid handle because that texture is not registered.
+		[[nodiscard]] const Texture* LoadOrDefault(const std::filesystem::path& path, TextureHandle& outHandle);
 
 		/// Returns the lazily-created default error texture.
 		[[nodiscard]] const Texture* GetDefaultTexture();

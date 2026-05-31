@@ -50,6 +50,11 @@ namespace Engine::Core
 		/// Equivalent to Load() with a locator that does not specify SubAssetIndex.
         [[nodiscard]] const Mesh* Load(const std::filesystem::path& path);
 
+		/// Loads one standalone mesh asset from path and returns its handle via outHandle.
+		/// Equivalent to Load() with a locator that does not specify SubAssetIndex.
+		/// On failure returns nullptr and resets outHandle to an invalid handle.
+		[[nodiscard]] const Mesh* Load(const std::filesystem::path& path, MeshHandle& outHandle);
+
         /// Loads one logical mesh asset addressed by locator.
         /// If locator contains SubAssetIndex, loads only that mesh sub-asset from the source file.
         [[nodiscard]] const Mesh* Load(const MeshAssetLocator& locator);

@@ -5,6 +5,7 @@
 
 #include <Engine.Core/Registries/MeshRegistry.h>
 #include <Engine.Core/Registries/TextureRegistry.h>
+#include <Engine.Core/AssetManager.h>
 
 namespace
 {
@@ -102,20 +103,86 @@ namespace
 		return true;
 	}
 
-	void RunAllocatorSmokeTests()
+	bool RunAssetManagerTextureHandleSmokeTest()
 	{
-		if (!RunTextureRegistryAllocatorTest())
+		Engine::Core::AssetManager& assetManager = Engine::Core::AssetManager::GetInstance();
+
+		const std::filesystem::path existingTexturePath = L"african_head_diffuse.dds";
+
+		Engine::Core::TextureHandle textureHandle = {};
+		const Engine::Core::Texture* texture = assetManager.LoadTexture(existingTexturePath, textureHandle);
+		if (!CheckOrReport(texture != nullptr, L"AssetManager::LoadTexture(existingTexturePath, outHandle) must return a texture.")) return false;
+		if (!CheckOrReport(textureHandle.IsValid(), L"AssetManager::LoadTexture(existingTexturePath, outHandle) must return a valid texture handle.")) return false;
+		if (!CheckOrReport(assetManager.Textures().GetTexture(textureHandle) == texture, L"Returned texture handle must resolve to the loaded texture.")) return false;
+
+		Engine::Core::TextureHandle cachedHandle = {};
+		const Engine::Core::Texture* cachedTexture = assetManager.LoadTexture(existingTexturePath, cachedHandle);
+		if (!CheckOrReport(cachedTexture == texture, L"Repeated AssetManager::LoadTexture(...) must reuse the cached texture.")) return false;
+		if (!CheckOrReport(cachedHandle == textureHandle, L"Repeated AssetManager::LoadTexture(...) must return the same texture handle.")) return false;
+
+		const std::filesystem::path missingTexturePath = L"definitely_missing_texture.png";
+
+		Engine::Core::TextureHandle fallbackHandle = {};
+		const Engine::Core::Texture* fallbackTexture = assetManager.LoadTextureOrDefault(missingTexturePath, fallbackHandle);
+		if (!CheckOrReport(fallbackTexture != nullptr, L"AssetManager::LoadTextureOrDefault(missingTexturePath, outHandle) must return a fallback texture.")) return false;
+		if (!CheckOrReport(fallbackTexture == assetManager.Textures().GetDefaultTexture(), L"Missing texture fallback must match the registry default texture.")) return false;
+
+		if (fallbackHandle.IsValid())
 		{
-			return;
+			if (!CheckOrReport(assetManager.Textures().GetTexture(fallbackHandle) == fallbackTexture, L"If fallback handle is valid, it must resolve to the returned fallback texture.")) return false;
+		}
+		else
+		{
+			if (!CheckOrReport(!assetManager.Textures().FindHandle(L"missing_texture.dds").IsValid(), L"If fallback handle is invalid, the registry-backed default texture must not be registered.")) return false;
 		}
 
-		if (!RunMeshRegistryAllocatorTest())
-		{
-			return;
-		}
-
-		OutputDebugStringW(L"[AllocatorTest] All allocator/generation tests passed.\n");
+		return true;
 	}
+
+	bool RunAssetManagerMeshHandleSmokeTest()
+	{
+		Engine::Core::AssetManager& assetManager = Engine::Core::AssetManager::GetInstance();
+
+		const std::filesystem::path existingMeshPath = L"african_head.obj";
+
+		Engine::Core::MeshHandle meshHandle = {};
+		const Engine::Core::Mesh* mesh = assetManager.LoadMesh(existingMeshPath, meshHandle);
+		if (!CheckOrReport(mesh != nullptr, L"AssetManager::LoadMesh(existingMeshPath, outHandle) must return a mesh.")) return false;
+		if (!CheckOrReport(meshHandle.IsValid(), L"AssetManager::LoadMesh(existingMeshPath, outHandle) must return a valid mesh handle.")) return false;
+		if (!CheckOrReport(assetManager.Meshes().GetMesh(meshHandle) == mesh, L"Returned mesh handle must resolve to the loaded mesh.")) return false;
+
+		Engine::Core::MeshHandle cachedHandle = {};
+		const Engine::Core::Mesh* cachedMesh = assetManager.LoadMesh(existingMeshPath, cachedHandle);
+		if (!CheckOrReport(cachedMesh == mesh, L"Repeated AssetManager::LoadMesh(...) must reuse the cached mesh.")) return false;
+		if (!CheckOrReport(cachedHandle == meshHandle, L"Repeated AssetManager::LoadMesh(...) must return the same mesh handle.")) return false;
+
+		return true;
+	}
+
+	void RunAllocatorSmokeTests()
+    {
+    	if (!RunTextureRegistryAllocatorTest())
+    	{
+    		return;
+    	}
+
+    	if (!RunMeshRegistryAllocatorTest())
+    	{
+    		return;
+    	}
+
+    	if (!RunAssetManagerMeshHandleSmokeTest())
+    	{
+    		return;
+    	}
+
+    	if (!RunAssetManagerTextureHandleSmokeTest())
+    	{
+    		return;
+    	}
+
+		OutputDebugStringW(L"[AllocatorTest] All allocator/generation, mesh-handle and texture-handle tests passed.\n");
+    }
 }
 
 class BenchmarkApp final : public App

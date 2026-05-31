@@ -110,9 +110,15 @@ namespace Engine::Core
 
 	const Mesh* MeshRegistry::Load(const std::filesystem::path& path)
 	{
+		MeshHandle loadedHandle = {};
+		return Load(path, loadedHandle);
+	}
+
+	const Mesh* MeshRegistry::Load(const std::filesystem::path& path, MeshHandle& outHandle)
+	{
 		MeshAssetLocator locator = {};
 		locator.SourcePath = path;
-		return Load(locator);
+		return Load(locator, outHandle);
 	}
 
 	const Mesh* MeshRegistry::Load(const MeshAssetLocator& locator)

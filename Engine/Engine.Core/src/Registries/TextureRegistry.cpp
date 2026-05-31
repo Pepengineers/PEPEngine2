@@ -54,19 +54,18 @@ namespace Engine::Core
 
 	const Texture* TextureRegistry::Load(const std::filesystem::path& path)
 	{
+		TextureHandle loadedHandle = {};
+		return Load(path, loadedHandle);
+	}
+
+	const Texture* TextureRegistry::Load(const std::filesystem::path& path, TextureHandle& outHandle)
+	{
+		outHandle = {};
+
 		if (path.empty())
 		{
 			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to load texture: empty path.\n");
 			return nullptr;
-		}
-
-		const Texture* cachedTexture = FindTexture(path);
-		if (cachedTexture != nullptr)
-		{
-			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Reusing cached texture for path: " +
-				ResolveSourcePath(path).generic_wstring() + L"\n");
-
-			return cachedTexture;
 		}
 
 		const TextureHandle textureHandle = Register(path);
@@ -82,15 +81,21 @@ namespace Engine::Core
 			return nullptr;
 		}
 
-		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Loading texture from path: " +
-			sourcePath.generic_wstring() + L"\n");
+		const Texture* cachedTexture = GetTexture(textureHandle);
+		if (cachedTexture != nullptr)
+		{
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Reusing cached texture for path: " + sourcePath.generic_wstring() + L"\n");
+
+			outHandle = textureHandle;
+			return cachedTexture;
+		}
+
+		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Loading texture from path: " + sourcePath.generic_wstring() + L"\n");
 
 		std::unique_ptr<Texture> loadedTexture = TextureLoader::LoadTextureAsset(sourcePath);
 		if (loadedTexture == nullptr)
 		{
-			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to load texture from path: " +
-				sourcePath.generic_wstring() + L"\n");
-
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to load texture from path: " + sourcePath.generic_wstring() + L"\n");
 			return nullptr;
 		}
 
@@ -98,12 +103,19 @@ namespace Engine::Core
 			std::to_wstring(loadedTexture->GetSubresourceCount()) + L" subresources from path: " +
 			sourcePath.generic_wstring() + L"\n");
 
+		outHandle = textureHandle;
 		return Cache(textureHandle, std::move(loadedTexture));
 	}
 
 	const Texture* TextureRegistry::LoadOrDefault(const std::filesystem::path& path)
 	{
-		const Texture* loadedTexture = Load(path);
+		TextureHandle loadedHandle = {};
+		return LoadOrDefault(path, loadedHandle);
+	}
+
+	const Texture* TextureRegistry::LoadOrDefault(const std::filesystem::path& path, TextureHandle& outHandle)
+	{
+		const Texture* loadedTexture = Load(path, outHandle);
 		if (loadedTexture != nullptr)
 		{
 			return loadedTexture;
@@ -112,7 +124,23 @@ namespace Engine::Core
 		WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Falling back to default texture for path: " +
 			ResolveSourcePath(path).generic_wstring() + L"\n");
 
-		return GetDefaultTexture();
+		const Texture* defaultTexture = GetDefaultTexture();
+		if (defaultTexture == nullptr)
+		{
+			outHandle = {};
+			return nullptr;
+		}
+
+		if (_defaultTextureHandle.IsValid())
+		{
+			outHandle = _defaultTextureHandle;
+		}
+		else
+		{
+			outHandle = {};
+		}
+
+		return defaultTexture;
 	}
 
 	const Texture* TextureRegistry::GetDefaultTexture()
@@ -134,10 +162,11 @@ namespace Engine::Core
 		}
 
 		const std::filesystem::path defaultTexturePath = L"missing_texture.dds";
-		const Texture* loadedDefaultTexture = Load(defaultTexturePath);
+		TextureHandle defaultTextureHandle = {};
+		const Texture* loadedDefaultTexture = Load(defaultTexturePath, defaultTextureHandle);
 		if (loadedDefaultTexture != nullptr)
 		{
-			_defaultTextureHandle = FindHandle(defaultTexturePath);
+			_defaultTextureHandle = defaultTextureHandle;
 			if (_defaultTextureHandle.IsValid())
 			{
 				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Loaded default texture from path: " +
