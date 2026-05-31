@@ -32,6 +32,11 @@ namespace Engine::Core
 		return metadata;
 	}
 
+	std::wstring TextureRegistry::GetCacheKeyFromMetadata(const std::filesystem::path& metadata) const
+	{
+		return BuildCacheKeyFromResolvedPath(metadata);
+	}
+
 	const wchar_t* TextureRegistry::GetAssetTypeName() const
 	{
 		return L"texture";

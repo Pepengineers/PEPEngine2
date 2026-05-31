@@ -78,6 +78,10 @@ namespace Engine::Core
 		/// Extracts the canonical source path from stored mesh metadata.
 		[[nodiscard]] std::filesystem::path GetSourcePathFromMetadata(const MeshAssetLocator& metadata) const override;
 
+		/// Rebuilds the registry cache key from stored mesh metadata.
+        /// Includes the sub-asset suffix when metadata references a mesh inside a multi-mesh file.
+		[[nodiscard]] std::wstring GetCacheKeyFromMetadata(const MeshAssetLocator& metadata) const override;
+
 		/// Returns the singular asset type name used in log messages.
 		[[nodiscard]] const wchar_t* GetAssetTypeName() const override;
 

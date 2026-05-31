@@ -53,6 +53,10 @@ namespace Engine::Core
 		/// Extracts the canonical source path from stored scene metadata.
 		[[nodiscard]] std::filesystem::path GetSourcePathFromMetadata(const std::filesystem::path& metadata) const override;
 
+		/// Rebuilds the registry cache key from stored scene metadata.
+		/// For scenes this is just the normalized source path key.
+		[[nodiscard]] std::wstring GetCacheKeyFromMetadata(const std::filesystem::path& metadata) const override;
+
 		/// Returns the singular asset type name used in log messages.
 		[[nodiscard]] const wchar_t* GetAssetTypeName() const override;
 	};
