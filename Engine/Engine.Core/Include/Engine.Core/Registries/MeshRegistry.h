@@ -50,6 +50,11 @@ namespace Engine::Core
 		/// Equivalent to Load() with a locator that does not specify SubAssetIndex.
         [[nodiscard]] const Mesh* Load(const std::filesystem::path& path);
 
+		/// Loads one standalone mesh asset from path and returns its handle via outHandle.
+		/// Equivalent to Load() with a locator that does not specify SubAssetIndex.
+		/// On failure returns nullptr and resets outHandle to an invalid handle.
+		[[nodiscard]] const Mesh* Load(const std::filesystem::path& path, MeshHandle& outHandle);
+
         /// Loads one logical mesh asset addressed by locator.
         /// If locator contains SubAssetIndex, loads only that mesh sub-asset from the source file.
         [[nodiscard]] const Mesh* Load(const MeshAssetLocator& locator);
@@ -77,6 +82,10 @@ namespace Engine::Core
 
 		/// Extracts the canonical source path from stored mesh metadata.
 		[[nodiscard]] std::filesystem::path GetSourcePathFromMetadata(const MeshAssetLocator& metadata) const override;
+
+		/// Rebuilds the registry cache key from stored mesh metadata.
+        /// Includes the sub-asset suffix when metadata references a mesh inside a multi-mesh file.
+		[[nodiscard]] std::wstring GetCacheKeyFromMetadata(const MeshAssetLocator& metadata) const override;
 
 		/// Returns the singular asset type name used in log messages.
 		[[nodiscard]] const wchar_t* GetAssetTypeName() const override;

@@ -54,7 +54,7 @@ namespace Engine::Core
 				return {};
 			}
 
-			return THandle(handleValue);
+			return MakeHandleFromValue(handleValue, L"find " + GetAssetName() + L" handle");
 		}
 
 		/// Stores loaded asset data into the slot identified by the given handle.
@@ -171,6 +171,48 @@ namespace Engine::Core
 				std::to_wstring(handle.GetValue()) + L".\n");
 		}
 
+		/// Removes the registered asset entry associated with the given handle.
+		/// Releases loaded data, removes the path-to-handle mapping, marks the slot free for reuse
+		/// and increments its generation so stale handles become invalid.
+		[[nodiscard]] bool Unregister(const THandle handle)
+		{
+			const std::wstring assetName = GetAssetName();
+
+			Record* record = TryGetRecord(handle, L"unregister " + assetName);
+			if (record == nullptr)
+			{
+				return false;
+			}
+
+			const std::wstring cacheKey = GetCacheKeyFromMetadata(record->Metadata);
+			if (cacheKey.empty())
+			{
+				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to unregister " + assetName + L": empty cache key.\n");
+				return false;
+			}
+
+			if (!UnregisterKey(cacheKey))
+			{
+				return false;
+			}
+
+			if (record->AssetData != nullptr)
+			{
+				--_loadedCount;
+				record->AssetData.reset();
+			}
+
+			record->Metadata = TMetadata{};
+			record->bRegistered = false;
+			++record->Generation;
+
+			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Unregistered " + assetName +
+				L" handle " + std::to_wstring(handle.GetValue()) +
+				L". New generation: " + std::to_wstring(record->Generation) + L"\n");
+
+			return true;
+		}
+
 		/// Releases all loaded asset data and clears all path registrations
 		/// managed by this typed registry.
 		void UnloadAll() override
@@ -195,6 +237,13 @@ namespace Engine::Core
 			/// The loaded asset data, or nullptr if the asset has not been loaded yet
 			/// (registered but not cached) or has been unloaded.
 			std::unique_ptr<TAsset> AssetData;
+
+			/// True if this slot is currently occupied by a registered asset.
+			bool bRegistered = false;
+
+			/// Generation of this slot.
+			/// Incremented when the slot is recycled so old handles become stale.
+			std::uint32_t Generation = 0;
 		};
 
 		TypedAssetRegistry() = default;
@@ -223,15 +272,30 @@ namespace Engine::Core
 
 			if (!registrationResult.bAlreadyRegistered)
 			{
-				assert(_records.size() == static_cast<size_t>(registrationResult.HandleValue));
+				const size_t recordIndex = static_cast<size_t>(registrationResult.HandleValue);
 
-				Record record = {};
-				record.Metadata = std::move(metadata);
+				if (recordIndex == _records.size())
+				{
+					Record record = {};
+					record.Metadata = std::move(metadata);
+					record.bRegistered = true;
 
-				_records.push_back(std::move(record));
+					_records.push_back(std::move(record));
+				}
+				else
+				{
+					assert(recordIndex < _records.size());
+
+					Record& record = _records[recordIndex];
+					assert(!record.bRegistered);
+					assert(record.AssetData == nullptr);
+
+					record.Metadata = std::move(metadata);
+					record.bRegistered = true;
+				}
 			}
 
-			return THandle(registrationResult.HandleValue);
+			return MakeHandleFromValue(registrationResult.HandleValue, L"finalize " + GetAssetName() + L" registration");
 		}
 
 		/// Completes registration using metadata produced from the resolved source path
@@ -265,7 +329,25 @@ namespace Engine::Core
 				return nullptr;
 			}
 
-			return &_records[recordIndex];
+			const Record* record = &_records[recordIndex];
+
+			if (!record->bRegistered)
+			{
+				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to " + operation +
+					L": handle points to an unregistered slot: " + std::to_wstring(handle.GetValue()) + L"\n");
+				return nullptr;
+			}
+			
+			if (handle.GetGeneration() != record->Generation)
+			{
+				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to " + operation +
+					L": stale handle generation mismatch for index " + std::to_wstring(handle.GetValue()) +
+                    L". Expected " + std::to_wstring(record->Generation) +
+                    L", got " + std::to_wstring(handle.GetGeneration()) + L"\n");
+				return nullptr;
+			}
+			
+			return record;
 		}
 
 		/// Mutable overload of TryGetRecord().
@@ -275,6 +357,34 @@ namespace Engine::Core
 			return const_cast<Record*>(static_cast<const TypedAssetRegistry&>(*this).TryGetRecord(handle, operation));
 		}
 
+		/// Builds a typed handle with the current slot generation from a raw handle value.
+		/// Returns an invalid handle if the value is invalid or out of range.
+		[[nodiscard]] THandle MakeHandleFromValue(const std::uint32_t handleValue, const std::wstring& operation) const
+		{
+			if (handleValue == InvalidHandleValue)
+			{
+				return {};
+			}
+
+			const size_t recordIndex = static_cast<size_t>(handleValue);
+			if (recordIndex >= _records.size())
+			{
+				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to " + operation +
+					L": handle index out of range: " + std::to_wstring(handleValue) + L"\n");
+				return {};
+			}
+
+			const Record& record = _records[recordIndex];
+			if (!record.bRegistered)
+			{
+				WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Failed to " + operation +
+					L": handle points to an unregistered slot: " + std::to_wstring(handleValue) + L"\n");
+				return {};
+			}
+
+			return THandle(handleValue, _records[recordIndex].Generation);
+		}
+
 		/// Creates registry-specific metadata for a newly registered path.
 		/// The input path is already resolved and normalized.
 		[[nodiscard]] virtual TMetadata MakeMetadataForRegisteredPath(const std::filesystem::path& resolvedSourcePath) const = 0;
@@ -282,6 +392,10 @@ namespace Engine::Core
 		/// Extracts the canonical source path from stored metadata.
 		/// Used by the common typed layer for logging and GetSourcePath().
 		[[nodiscard]] virtual std::filesystem::path GetSourcePathFromMetadata(const TMetadata& metadata) const = 0;
+
+		/// Builds the registry cache key for the given metadata.
+		/// Used when unregistering an existing slot so the base path->handle map can be updated.
+		[[nodiscard]] virtual std::wstring GetCacheKeyFromMetadata(const TMetadata& metadata) const = 0;
 
 		/// Returns the singular asset type name used in log messages,
 		/// for example L"mesh" or L"texture".

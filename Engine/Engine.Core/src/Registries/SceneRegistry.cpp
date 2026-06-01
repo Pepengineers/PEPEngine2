@@ -33,6 +33,11 @@ namespace Engine::Core
 		return metadata;
 	}
 
+	std::wstring SceneRegistry::GetCacheKeyFromMetadata(const std::filesystem::path& metadata) const
+	{
+		return BuildCacheKeyFromResolvedPath(metadata);
+	}
+
 	const wchar_t* SceneRegistry::GetAssetTypeName() const
 	{
 		return L"scene";

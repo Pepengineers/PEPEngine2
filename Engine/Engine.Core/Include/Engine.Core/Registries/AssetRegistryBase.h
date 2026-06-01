@@ -82,6 +82,9 @@ namespace Engine::Core
 
 		/// Monotonic counter used to issue new handle values.
         std::uint32_t _nextHandleValue = 0;
+
+		/// Stack of previously freed handle values that can be reused by future registrations.
+		std::vector<std::uint32_t> _freeHandleValues;
 #pragma endregion Fields
 
 		/// Default constructor. Initializes an empty registry.
@@ -113,6 +116,10 @@ namespace Engine::Core
 		/// Returns a RegistrationResult describing the assigned handle, resolved path,
 		/// and whether the path was already present in the registry.
 		[[nodiscard]] RegistrationResult RegisterPath(const std::filesystem::path& path);
+
+		/// Removes the given cache key from the registry and marks its handle value as reusable.
+		/// Returns false if the key is empty or was not registered.
+		[[nodiscard]] bool UnregisterKey(const std::wstring& cacheKey);
 
 		/// Returns true if the given cache key is already present in the internal handle map.
 		[[nodiscard]] bool IsRegisteredKey(const std::wstring& cacheKey) const;

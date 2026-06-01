@@ -28,11 +28,32 @@ namespace Engine::Core
 		/// Returns the global asset manager instance.
 		static AssetManager& GetInstance();
 
+		/// Loads a mesh asset by path.
 		[[nodiscard]] const Mesh* LoadMesh(const std::filesystem::path& path);
+
+		/// Loads a mesh asset by path and returns its handle via outHandle.
+		/// On failure returns nullptr and resets outHandle to an invalid handle.
+		[[nodiscard]] const Mesh* LoadMesh(const std::filesystem::path& path, MeshHandle& outHandle);
+		
+		/// Loads a scene asset by path together with any meshes referenced by it.
 		[[nodiscard]] const SceneAsset* LoadScene(const std::filesystem::path& path);
+
+		/// Loads a texture asset by path.
 		[[nodiscard]] const Texture* LoadTexture(const std::filesystem::path& path);
+
+		/// Loads a texture asset by path and returns its handle via outHandle.
+		/// On failure returns nullptr and resets outHandle to an invalid handle.
+		[[nodiscard]] const Texture* LoadTexture(const std::filesystem::path& path, TextureHandle& outHandle);
+
+		/// Loads a texture asset by path or returns the default texture on failure.
 		[[nodiscard]] const Texture* LoadTextureOrDefault(const std::filesystem::path& path);
 
+		/// Loads a texture asset by path or returns the default texture on failure,
+		/// and reports the resulting registered texture handle via outHandle.
+		/// If a built-in fallback texture is returned, outHandle is reset to an invalid handle.
+		[[nodiscard]] const Texture* LoadTextureOrDefault(const std::filesystem::path& path, TextureHandle& outHandle);
+
+		
 		/// Returns the mesh registry.
 		[[nodiscard]] MeshRegistry& Meshes();
 		/// Returns the mesh registry.

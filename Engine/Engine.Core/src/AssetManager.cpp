@@ -33,6 +33,11 @@ namespace Engine::Core
 		return _meshRegistry.Load(path);
 	}
 
+	const Mesh* AssetManager::LoadMesh(const std::filesystem::path& path, MeshHandle& outHandle)
+	{
+		return _meshRegistry.Load(path, outHandle);
+	}
+
 	const SceneAsset* AssetManager::LoadScene(const std::filesystem::path& path)
 	{
 		return _sceneRegistry.Load(path, _meshRegistry);
@@ -43,9 +48,19 @@ namespace Engine::Core
 		return _textureRegistry.Load(path);
 	}
 
+	const Texture* AssetManager::LoadTexture(const std::filesystem::path& path, TextureHandle& outHandle)
+	{
+		return _textureRegistry.Load(path, outHandle);
+	}
+
 	const Texture* AssetManager::LoadTextureOrDefault(const std::filesystem::path& path)
 	{
 		return _textureRegistry.LoadOrDefault(path);
+	}
+
+	const Texture* AssetManager::LoadTextureOrDefault(const std::filesystem::path& path, TextureHandle& outHandle)
+	{
+		return _textureRegistry.LoadOrDefault(path, outHandle);
 	}
 
 #pragma region Accessors
