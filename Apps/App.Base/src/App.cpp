@@ -40,6 +40,19 @@ void App::CalculateFrameStats() const
             L"    fps: " + FpsString +
             L"   mspf: " + MsPerFrameString;
 
+        if (auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>())
+        {
+            const RenderModule::RenderFrameStats& stats = renderModule->GetLastFrameStats();
+            WindowText +=
+                L"   draws: " + std::to_wstring(stats.DrawCalls) +
+                L"   tris: " + std::to_wstring(stats.DrawnTriangles) +
+                L"   submeshes: " + std::to_wstring(stats.DrawnSubMeshes) +
+                L"/" + std::to_wstring(stats.SubmittedSubMeshes) +
+                L"   culled: " + std::to_wstring(stats.CulledSubMeshes) +
+                L"   materials: " + std::to_wstring(stats.LoadedMaterials) +
+                L"   textures: " + std::to_wstring(stats.LoadedTextures);
+        }
+
         SetWindowText(_window->GetWindowHandle(), WindowText.c_str());
 
         // Reset for next average.
@@ -311,6 +324,6 @@ void App::Update(const GameTimer& gameTimer)
     OnKeyboardInput(gameTimer);
     //explicitly specifying update order since it is not the same
     // as the initialization order (that is used by the locator)
-    Locator.GetModule<SceneManagerModule>()->Update();
     Locator.GetModule<RenderModule>()->Update();
+    Locator.GetModule<SceneManagerModule>()->Update();
 }

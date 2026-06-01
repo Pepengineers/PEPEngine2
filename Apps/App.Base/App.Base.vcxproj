@@ -43,8 +43,6 @@
     <ClInclude Include="Include\App.Base\Window.h" />
     <ClInclude Include="Include\App.Base\World.h" />
     <ClInclude Include="Include\App.Base\WorldLoader.h" />
-    <ClInclude Include="Include\RenderModule.h" />
-    <ClInclude Include="Include\Window.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
@@ -84,7 +82,7 @@
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>

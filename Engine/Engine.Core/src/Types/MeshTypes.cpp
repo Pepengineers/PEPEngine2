@@ -24,7 +24,13 @@ namespace Engine::Core
 #pragma endregion SubMesh
 
 #pragma region Mesh
-	Mesh::Mesh(std::vector<SubMesh> subMeshes, const DirectX::BoundingBox& bounds) : _subMeshes(std::move(subMeshes)), _bounds(bounds) {}
+	Mesh::Mesh(
+		std::vector<SubMesh> subMeshes,
+		const DirectX::BoundingBox& bounds,
+		std::vector<MeshMaterial> materials)
+		: _subMeshes(std::move(subMeshes)), _materials(std::move(materials)), _bounds(bounds)
+	{
+	}
 
 	size_t Mesh::GetSubMeshCount() const
 	{
@@ -45,11 +51,22 @@ namespace Engine::Core
 	{
 		return _subMeshes;
 	}
+
+	const std::vector<MeshMaterial>& Mesh::GetMaterials() const
+	{
+		return _materials;
+	}
 	
 	const SubMesh& Mesh::GetSubMesh(const size_t subMeshIndex) const
 	{
 		assert(subMeshIndex < _subMeshes.size());
 		return _subMeshes.at(subMeshIndex);
+	}
+
+	const MeshMaterial& Mesh::GetMaterial(const size_t materialIndex) const
+	{
+		assert(materialIndex < _materials.size());
+		return _materials.at(materialIndex);
 	}
 
 #pragma endregion Mesh

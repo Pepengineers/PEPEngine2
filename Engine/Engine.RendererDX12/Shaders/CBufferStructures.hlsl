@@ -14,8 +14,14 @@ struct MaterialCB
 {
     float Roughness;
     float Metallic;
-    float _pad1;
-    float _pad2;
+    float HasNormalMap;
+    float HasSpecularMap;
+    float3 SpecularColor;
+    float HasRoughnessMap;
+    float3 EmissiveColor;
+    float HasEmissiveMap;
+    float UseBakedLighting;
+    float3 _pad0;
 };
 
 struct CameraCB
