@@ -141,6 +141,9 @@ GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture
 
     GDX12TextureDesc desc;
     desc.SRV_UAV_Heap = _srvuavHeap.get();
+    desc.SRVHeapIndex = _srvuavHeap->GetAvailableIndex(
+        static_cast<UINT>(GDX12SRVHeapIndexAllocation::Texture2D_StartIndex),
+        static_cast<UINT>(GDX12SRVHeapIndexAllocation::Texture2D_RangeLength));
     desc.Format = desc.SRVDesc.Format = texture->GetFormat();
     desc.Width = texture->GetWidth();
     desc.Height = texture->GetHeight();
@@ -486,7 +489,7 @@ void RenderModule::BuildDescHeapsAndBackBuffer()
     _rtvHeap = std::make_unique<GDX12DescriptorHeap>(_primaryDevice.get(),
         D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1000,
         D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
-
+    
     _srvuavHeap = std::make_unique<GDX12DescriptorHeap>(_primaryDevice.get(),
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1000000,
         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
@@ -506,6 +509,7 @@ void RenderModule::BuildDescHeapsAndBackBuffer()
     desc.DSVHeap = _dsvHeap.get();
 
     desc.CreateDSV = true;
+    desc.DSVHeapIndex = _dsvHeap->GetAvailableIndex();
     desc.Format = desc.DSVDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
     desc.Width = width;
     desc.Height = height;

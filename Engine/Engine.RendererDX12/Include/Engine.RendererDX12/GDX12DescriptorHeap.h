@@ -21,7 +21,8 @@ public:
     UINT GetNumDescriptors();
     
     // Returns index of the first non-taken slot in the heap
-    UINT GetAvailableIndex();
+    // maxRange == 0 means no range
+    UINT GetAvailableIndex(UINT startIndex = 0, UINT maxRange = 0);
     D3D12_CPU_DESCRIPTOR_HANDLE GetCPUHandle(UINT index = 0) const;
     D3D12_GPU_DESCRIPTOR_HANDLE GetGPUHandle(UINT index = 0) const;
 
@@ -39,7 +40,27 @@ private:
     // Index of the first non-taken element in the heap
     UINT _heapHeadIndex;
 
-    // Contains indices of recently freed slots
-    // GetAvailableIndex() will first take indices from here
-    std::vector<UINT> _availableIndices;
+    // Contains bool IsSlotOccupied for each slot in heap
+    std::vector<bool> _occupanceRegistry;
 };
+
+enum class GDX12SRVHeapIndexAllocation
+{
+    GBuffer_Color = 0,
+    GBuffer_Normal = 1,
+    GBuffer_Depth = 2,
+    GBuffer_RangeLength = 3,
+
+    TLAS = 10,
+
+    ShadowMaps_StartIndex = 100,
+    ShadowMaps_RangeLength = 400,
+
+    Texture2D_StartIndex = 1000,
+    Texture2D_RangeLength = 99000,
+
+    TextureCube_StartIndex = 100000,
+    TextureCube_RangeLength = 5000,
+};
+
+// Might need to add DSV and RTV heap allocators later

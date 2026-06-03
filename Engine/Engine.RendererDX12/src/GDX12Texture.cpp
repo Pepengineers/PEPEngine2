@@ -124,29 +124,37 @@ void GDX12Texture::CreateViews()
     if (_desc.CreateSRV)
     {
         if (!_desc.SRV_UAV_Heap) { OutputDebugStringA("ERROR: No Texture SRV_UAV Heap specified\n"); }
+        if (_desc.SRVHeapIndex == -1) { OutputDebugStringA("ERROR: No Texture SRVHeapIndex specified\n"); }
+
         if(!_srv) _srv = std::make_unique<GDX12Descriptor>();
-        _srv->InitAsSRV(_resource->D3DResource.Get(), &_desc.SRVDesc, _desc.SRV_UAV_Heap);
+        _srv->InitAsSRV(_resource->D3DResource.Get(), &_desc.SRVDesc, _desc.SRV_UAV_Heap, _desc.SRVHeapIndex);
     }
 
     if (_desc.CreateUAV)
     {
         if (!_desc.SRV_UAV_Heap) { OutputDebugStringA("ERROR: No Texture SRV_UAV Heap specified\n"); }
+        if (_desc.UAVHeapIndex == -1) { OutputDebugStringA("ERROR: No Texture UAVHeapIndex specified\n"); }
+
         if (!_uav) _uav = std::make_unique<GDX12Descriptor>();
-        _uav->InitAsUAV(_resource->D3DResource.Get(), &_desc.UAVDesc, _desc.SRV_UAV_Heap);
+        _uav->InitAsUAV(_resource->D3DResource.Get(), &_desc.UAVDesc, _desc.SRV_UAV_Heap, _desc.UAVHeapIndex);
     }
 
     if (_desc.CreateRTV)
     {
         if (!_desc.RTVHeap) { OutputDebugStringA("ERROR: No Texture RTV Heap specified\n"); }
+        if (_desc.RTVHeapIndex == -1) { OutputDebugStringA("ERROR: No Texture RTVHeapIndex specified\n"); }
+
         if (!_rtv) _rtv = std::make_unique<GDX12Descriptor>();
-        _rtv->InitAsRTV(_resource->D3DResource.Get(), &_desc.RTVDesc, _desc.RTVHeap);
+        _rtv->InitAsRTV(_resource->D3DResource.Get(), &_desc.RTVDesc, _desc.RTVHeap, _desc.RTVHeapIndex);
     }
 
     if (_desc.CreateDSV)
     {
         if (!_desc.DSVHeap) { OutputDebugStringA("ERROR: No Texture DSV Heap specified\n"); }
+        if (_desc.DSVHeapIndex == -1) { OutputDebugStringA("ERROR: No Texture DSVHeapIndex specified\n"); }
+
         if (!_dsv) _dsv = std::make_unique<GDX12Descriptor>();
-        _dsv->InitAsDSV(_resource->D3DResource.Get(), &_desc.DSVDesc, _desc.DSVHeap);
+        _dsv->InitAsDSV(_resource->D3DResource.Get(), &_desc.DSVDesc, _desc.DSVHeap, _desc.DSVHeapIndex);
     }
 }
 

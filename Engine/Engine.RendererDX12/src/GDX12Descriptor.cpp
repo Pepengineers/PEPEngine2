@@ -3,8 +3,8 @@
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
 #include "Engine.RendererDX12/GDX12Device.h"
 
-GDX12Descriptor::GDX12Descriptor() : 
-    HeapIndex(-1), 
+GDX12Descriptor::GDX12Descriptor() :
+    HeapIndex(-1),
     CPUHandle{0}, 
     GPUHandle{0},
     _heap(nullptr),
@@ -14,16 +14,16 @@ GDX12Descriptor::GDX12Descriptor() :
 
 GDX12Descriptor::~GDX12Descriptor()
 {
-    _heap->_availableIndices.push_back(HeapIndex);
+    _heap->_occupanceRegistry[HeapIndex] = false;
 }
 
-void GDX12Descriptor::InitAsSRV(ID3D12Resource* resource, D3D12_SHADER_RESOURCE_VIEW_DESC* srvDesc, GDX12DescriptorHeap* inHeap)
+void GDX12Descriptor::InitAsSRV(ID3D12Resource* resource, D3D12_SHADER_RESOURCE_VIEW_DESC* srvDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex)
 {
     _heap = inHeap;
+    HeapIndex = heapIndex;
     
     if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
     {
-        if (HeapIndex == -1) { HeapIndex = _heap->GetAvailableIndex(); }
         CPUHandle = _heap->GetCPUHandle(HeapIndex);
         GPUHandle = _heap->GetGPUHandle(HeapIndex);
 
@@ -33,13 +33,13 @@ void GDX12Descriptor::InitAsSRV(ID3D12Resource* resource, D3D12_SHADER_RESOURCE_
     else { OutputDebugStringA("ERROR: Cannot create SRV in a non-CBV_SRV_UAV heap\n"); }
 }
 
-void GDX12Descriptor::InitAsCBV(D3D12_CONSTANT_BUFFER_VIEW_DESC* cbvDesc, GDX12DescriptorHeap* inHeap)
+void GDX12Descriptor::InitAsCBV(D3D12_CONSTANT_BUFFER_VIEW_DESC* cbvDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex)
 {
     _heap = inHeap;
+    HeapIndex = heapIndex;
 
     if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
     {
-        if (HeapIndex == -1) { HeapIndex = _heap->GetAvailableIndex(); }
         CPUHandle = _heap->GetCPUHandle(HeapIndex);
         GPUHandle = _heap->GetGPUHandle(HeapIndex);
 
@@ -49,13 +49,13 @@ void GDX12Descriptor::InitAsCBV(D3D12_CONSTANT_BUFFER_VIEW_DESC* cbvDesc, GDX12D
     else { OutputDebugStringA("ERROR: Cannot create CBV in a non-CBV_SRV_UAV heap\n"); }
 }
 
-void GDX12Descriptor::InitAsUAV(ID3D12Resource* resource, D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc, GDX12DescriptorHeap* inHeap)
+void GDX12Descriptor::InitAsUAV(ID3D12Resource* resource, D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex)
 {
     _heap = inHeap;
+    HeapIndex = heapIndex;
 
     if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV)
     {
-        if (HeapIndex == -1) { HeapIndex = _heap->GetAvailableIndex(); }
         CPUHandle = _heap->GetCPUHandle(HeapIndex);
         if (_heap->GetFlags() & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) { GPUHandle = _heap->GetGPUHandle(HeapIndex); }
 
@@ -65,13 +65,13 @@ void GDX12Descriptor::InitAsUAV(ID3D12Resource* resource, D3D12_UNORDERED_ACCESS
     else { OutputDebugStringA("ERROR: Cannot create UAV in a non-CBV_SRV_UAV heap\n"); }
 }
 
-void GDX12Descriptor::InitAsDSV(ID3D12Resource* resource, D3D12_DEPTH_STENCIL_VIEW_DESC* dsvDesc, GDX12DescriptorHeap* inHeap)
+void GDX12Descriptor::InitAsDSV(ID3D12Resource* resource, D3D12_DEPTH_STENCIL_VIEW_DESC* dsvDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex)
 {
     _heap = inHeap;
+    HeapIndex = heapIndex;
 
     if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_DSV)
     {
-        if (HeapIndex == -1) { HeapIndex = _heap->GetAvailableIndex(); }
         CPUHandle = _heap->GetCPUHandle(HeapIndex);
         if (_heap->GetFlags() & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) { GPUHandle = _heap->GetGPUHandle(HeapIndex); }
 
@@ -81,13 +81,13 @@ void GDX12Descriptor::InitAsDSV(ID3D12Resource* resource, D3D12_DEPTH_STENCIL_VI
     else { OutputDebugStringA("ERROR: Cannot create DSV in a non-DSV heap\n"); }
 }
 
-void GDX12Descriptor::InitAsRTV(ID3D12Resource* resource, D3D12_RENDER_TARGET_VIEW_DESC* rtvDesc, GDX12DescriptorHeap* inHeap)
+void GDX12Descriptor::InitAsRTV(ID3D12Resource* resource, D3D12_RENDER_TARGET_VIEW_DESC* rtvDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex)
 {
     _heap = inHeap;
+    HeapIndex = heapIndex;
 
     if (_heap->GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_RTV)
     {
-        if (HeapIndex == -1) { HeapIndex = _heap->GetAvailableIndex(); }
         CPUHandle = _heap->GetCPUHandle(HeapIndex);
         if (_heap->GetFlags() & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) { GPUHandle = _heap->GetGPUHandle(HeapIndex); }
         
