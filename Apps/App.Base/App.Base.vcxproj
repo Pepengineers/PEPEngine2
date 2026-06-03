@@ -151,8 +151,8 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.RHI\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.UI\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.RHI.lib;Engine.UI.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.UI\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.UI.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
