@@ -18,8 +18,12 @@ struct GDX12MaterialConstants
 {
     float Roughness = 0.5f;
     float Metallic = 0.5f;
+    UINT DiffuseIndex;
+    UINT NormalIndex;
+    UINT DisplacementIndex;
     float _pad1;
     float _pad2;
+    float _pad3;
 };
 
 struct GDX12CameraConstants

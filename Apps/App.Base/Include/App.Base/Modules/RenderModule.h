@@ -96,7 +96,6 @@ private:
 
     void UpdateMainCB();
     void UpdateMaterialCB();
-    std::vector<CD3DX12_STATIC_SAMPLER_DESC> GetStaticSamplers();
     
     void SubscribeToSceneManager();
     void UnsubscribeFromSceneManager();

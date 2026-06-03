@@ -1,3 +1,8 @@
+//Values are copied from GDX12DescriptorHeap.h/GDX12SRVHeapIndexAllocation class
+#define TEXTURE2D_RANGE_LENGTH 99000
+#define TEXTURECUBE_RANGE_LENGTH 5000
+#define SHADOWMAP_RANGE_LENGTH 400
+
 struct MainCB
 {
     float2 RenderTargetSize;
@@ -14,8 +19,12 @@ struct MaterialCB
 {
     float Roughness;
     float Metallic;
+    uint DiffuseIndex;
+    uint NormalIndex;
+    uint DisplacementIndex;
     float _pad1;
     float _pad2;
+    float _pad3;
 };
 
 struct CameraCB

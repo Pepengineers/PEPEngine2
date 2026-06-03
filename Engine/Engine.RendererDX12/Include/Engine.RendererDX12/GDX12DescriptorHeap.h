@@ -44,6 +44,7 @@ private:
     std::vector<bool> _occupanceRegistry;
 };
 
+// Don't forget to update these values in CBufferStructures.hlsl
 enum GDX12SRVHeapIndexAllocation
 {
     GBuffer_Color = 0,

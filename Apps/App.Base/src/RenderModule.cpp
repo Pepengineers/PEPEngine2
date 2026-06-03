@@ -8,6 +8,7 @@
 #include "Engine.RendererDX12/GDX12DeviceFactory.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
+#include "Engine.RendererDX12/GDX12Descriptor.h"
 
 #include "App.Base/Modules/SceneManagerModule.h"
 
@@ -134,7 +135,7 @@ GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture
 {
     if (_textures.find(name) != _textures.end())
     {
-        std::string errorMsg = "ERROR: Material with name " + name + " already exists in materials directory.\n";
+        std::string errorMsg = "ERROR: Texture with name " + name + " already exists in Textures directory.\n";
         OutputDebugStringA(errorMsg.c_str());
         return nullptr;
     }
@@ -451,7 +452,7 @@ void RenderModule::OnRender()
     cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
 
-    cmdList->SetSRV(3, _srvuavHeap->GetGPUHandle(Texture2D_StartIndex));
+    cmdList->SetSRV(0, _srvuavHeap->GetGPUHandle(Texture2D_StartIndex));
 
     for (DrawMeshCommand& renderCommand : _commandRecorder._drawMeshCommands)
     {
@@ -466,7 +467,6 @@ void RenderModule::OnRender()
 
             cmdList->SetGraphicsRootConstantBufferView(3, CurrentFrameConsts->MaterialCB->
                 GetElementAddress(material->_CBufferIndex));
-            cmdList->SetTextureAsSRV(0, material->Diffuse);
 
             cmdList->DrawIndexedInstanced(SubMesh.IndexCount, 1, 
                 SubMesh.StartIndexLocation, SubMesh.StartVertexLocation, 0);
@@ -525,7 +525,6 @@ void RenderModule::BuildRootSignatures()
 {
     GDX12RootSignatureDesc desc;
     desc.NumSingleCBVSlots = 4;
-    desc.NumSingleSRVSlots = 3;
     desc.StaticSamplers = GetStaticSamplers();
     desc.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
     _rootSignatures["Test"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc);
@@ -613,64 +612,24 @@ void RenderModule::UpdateMaterialCB()
             GDX12MaterialConstants materialConstants;
             materialConstants.Roughness = material->Roughness;
             materialConstants.Metallic = material->Metallic;
+            
+            if (material->Diffuse)
+            {
+                materialConstants.DiffuseIndex = material->Diffuse->GetSRV()->HeapIndex - Texture2D_StartIndex;
+            }
+            if (material->Normal)
+            {
+                materialConstants.NormalIndex = material->Normal->GetSRV()->HeapIndex - Texture2D_StartIndex;
+            }
+            if (material->Displacement)
+            {
+                materialConstants.DisplacementIndex = material->Displacement->GetSRV()->HeapIndex - Texture2D_StartIndex;
+            }
 
             currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
             material->_numFramesDirty--;
         }
     }
-}
-
-std::vector<CD3DX12_STATIC_SAMPLER_DESC> RenderModule::GetStaticSamplers()
-{
-    CD3DX12_STATIC_SAMPLER_DESC pointWrap(
-        0, // shaderRegister
-        D3D12_FILTER_MIN_MAG_MIP_POINT, // filter
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressU
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressV
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP); // addressW
-
-    CD3DX12_STATIC_SAMPLER_DESC pointClamp(
-        1,
-        D3D12_FILTER_MIN_MAG_MIP_POINT,
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-
-    CD3DX12_STATIC_SAMPLER_DESC linearWrap(
-        2,
-        D3D12_FILTER_MIN_MAG_MIP_LINEAR,
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP);
-
-    CD3DX12_STATIC_SAMPLER_DESC linearClamp(
-        3,
-        D3D12_FILTER_MIN_MAG_MIP_LINEAR,
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-
-    CD3DX12_STATIC_SAMPLER_DESC anisotropicWrap(
-        4,
-        D3D12_FILTER_ANISOTROPIC,
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  
-        0.0f, // mipLODBias     
-        8);   // maxAnisotropy     
-    CD3DX12_STATIC_SAMPLER_DESC anisotropicClamp(
-        5,
-        D3D12_FILTER_ANISOTROPIC, 
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  
-        0.0f,                              
-        8);                                
-
-    return {
-        pointWrap, pointClamp,
-        linearWrap, linearClamp,
-        anisotropicWrap, anisotropicClamp };
 }
 
 void RenderModule::SubscribeToSceneManager()
