@@ -20,7 +20,7 @@ public:
     D3D12_DESCRIPTOR_HEAP_FLAGS GetFlags();
     UINT GetNumDescriptors();
     
-    // Returns index of the first non-taken slot in the heap
+    // Returns index of the first non-taken slot in the heap, starting from given index
     // maxRange == 0 means no range
     UINT GetAvailableIndex(UINT startIndex = 0, UINT maxRange = 0);
     D3D12_CPU_DESCRIPTOR_HANDLE GetCPUHandle(UINT index = 0) const;
@@ -53,6 +53,8 @@ enum GDX12SRVHeapIndexAllocation
     GBuffer_RangeLength = 3,
 
     TLAS = 10,
+    //this + numFrameConstants is occupied
+    MaterialCacheBuffer = 11,
 
     ShadowMaps_StartIndex = 100,
     ShadowMaps_RangeLength = 400,

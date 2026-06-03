@@ -121,15 +121,15 @@ private:
 
     // All of class members below should probably be put into DeviceResources class, and made for each device
     // Since all of these resources are currently existing on _primaryDevice only
-    std::vector<std::unique_ptr<GDX12FrameConstants>> _frameConstants;
-    UINT _currFrameConstantsIndex;
-
     std::unique_ptr<GDX12GeometryBuffer> _geometryBuffer;
 
     // All heaps created in one high-capacity instance
     std::unique_ptr<GDX12DescriptorHeap> _rtvHeap;
     std::unique_ptr<GDX12DescriptorHeap> _srvuavHeap;
     std::unique_ptr<GDX12DescriptorHeap> _dsvHeap;
+
+    std::vector<std::unique_ptr<GDX12FrameConstants>> _frameConstants;
+    UINT _currFrameConstantsIndex;
 
     std::unordered_map<std::string, ComPtr<ID3DBlob>> _shaders;
     std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> _PSOs;

@@ -452,7 +452,8 @@ void RenderModule::OnRender()
     cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
 
-    cmdList->SetSRV(0, _srvuavHeap->GetGPUHandle(Texture2D_StartIndex));
+    cmdList->SetSRV(0, CurrentFrameConsts->MaterialCB->GetSRV()->GPUHandle);
+    cmdList->SetSRV(1, _srvuavHeap->GetGPUHandle(Texture2D_StartIndex));
 
     for (DrawMeshCommand& renderCommand : _commandRecorder._drawMeshCommands)
     {
@@ -463,11 +464,6 @@ void RenderModule::OnRender()
 
         for (GPUSubMesh& SubMesh : MeshGPUData->SubMeshes)
         {
-            auto material = renderCommand.Materials[SubMesh.MaterialIndex];
-
-            cmdList->SetGraphicsRootConstantBufferView(3, CurrentFrameConsts->MaterialCB->
-                GetElementAddress(material->_CBufferIndex));
-
             cmdList->DrawIndexedInstanced(SubMesh.IndexCount, 1, 
                 SubMesh.StartIndexLocation, SubMesh.StartVertexLocation, 0);
         }
@@ -525,6 +521,7 @@ void RenderModule::BuildRootSignatures()
 {
     GDX12RootSignatureDesc desc;
     desc.NumSingleCBVSlots = 4;
+    desc.NumSingleSRVSlots = 1;
     desc.StaticSamplers = GetStaticSamplers();
     desc.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
     _rootSignatures["Test"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc);
@@ -573,8 +570,9 @@ void RenderModule::BuildFrameConstants()
 {
     for (int i = 0; i < NumFrameConstantVariable.GetValue(); i++)
     {
-        //TODO: fix zero element upload buffer crash
-        _frameConstants.emplace_back(std::make_unique<GDX12FrameConstants>(_primaryDevice.get()));
+        _frameConstants.push_back(std::make_unique<GDX12FrameConstants>(_primaryDevice.get()));
+
+        _frameConstants[i]->MaterialCB->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(MaterialCacheBuffer));
     }
 }
 

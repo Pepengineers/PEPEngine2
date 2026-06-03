@@ -12,7 +12,8 @@ SamplerState samLinearClamp : register(s3);
 SamplerState samAnisotropicWrap : register(s4);
 SamplerState samAnisotropicClamp : register(s5);
 
-Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t0);
+StructuredBuffer<MaterialCB> MaterialCache : register(t0);
+Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t1);
 
 struct VS_INPUT
 {
@@ -50,5 +51,5 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
 
 float4 PS(VS_OUTPUT_PS_INPUT pin) : SV_Target
 {
-    return Texture2DCache[CBMaterial.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
+    return Texture2DCache[MaterialCache[2].DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
 }

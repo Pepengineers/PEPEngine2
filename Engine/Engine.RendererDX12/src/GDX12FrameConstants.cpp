@@ -8,7 +8,7 @@ GDX12FrameConstants::GDX12FrameConstants(GDX12Device* device)
 {
     MainCB = std::make_unique<GDX12UploadBuffer<GDX12MainConstants>>(device, 1, true);
     TransformCB = std::make_unique<GDX12UploadBuffer<GDX12TransformConstants>>(device, 1, true);
-    MaterialCB = std::make_unique<GDX12UploadBuffer<GDX12MaterialConstants>>(device, 1, true);
+    MaterialCB = std::make_unique<GDX12UploadBuffer<GDX12MaterialConstants>>(device, 1, false);
     LightCB = std::make_unique<GDX12UploadBuffer<GDX12LightConstants>>(device, 1, true);
     CameraCB = std::make_unique<GDX12UploadBuffer<GDX12CameraConstants>>(device, 1, true);
 }

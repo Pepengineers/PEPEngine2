@@ -57,7 +57,7 @@ UINT GDX12DescriptorHeap::GetAvailableIndex(UINT startIndex, UINT maxRange)
             _occupanceRegistry[startIndex + k] = true;
             return startIndex + k;
         }
-        if (maxRange != -1 && k > maxRange) { OutputDebugStringA("ERROR: GetAvailableIndex is out of specified range\n"); }
+        if ((maxRange != 0) && k > maxRange) { OutputDebugStringA("ERROR: GetAvailableIndex is out of specified range\n"); }
         k++;
     }
 }
