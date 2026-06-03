@@ -141,9 +141,7 @@ GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture
 
     GDX12TextureDesc desc;
     desc.SRV_UAV_Heap = _srvuavHeap.get();
-    desc.SRVHeapIndex = _srvuavHeap->GetAvailableIndex(
-        static_cast<UINT>(GDX12SRVHeapIndexAllocation::Texture2D_StartIndex),
-        static_cast<UINT>(GDX12SRVHeapIndexAllocation::Texture2D_RangeLength));
+    desc.SRVHeapIndex = _srvuavHeap->GetAvailableIndex(Texture2D_StartIndex, Texture2D_RangeLength);
     desc.Format = desc.SRVDesc.Format = texture->GetFormat();
     desc.Width = texture->GetWidth();
     desc.Height = texture->GetHeight();
@@ -453,7 +451,7 @@ void RenderModule::OnRender()
     cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
 
-    cmdList->SetSRV(3, _srvuavHeap->GetGPUHandle(UINT(GDX12SRVHeapIndexAllocation::Texture2D_StartIndex)));
+    cmdList->SetSRV(3, _srvuavHeap->GetGPUHandle(Texture2D_StartIndex));
 
     for (DrawMeshCommand& renderCommand : _commandRecorder._drawMeshCommands)
     {
@@ -529,8 +527,7 @@ void RenderModule::BuildRootSignatures()
     desc.NumSingleCBVSlots = 4;
     desc.NumSingleSRVSlots = 3;
     desc.StaticSamplers = GetStaticSamplers();
-    desc.SRVRanges.push_back(GDX12RootSignatureRange(
-        static_cast<UINT>(GDX12SRVHeapIndexAllocation::Texture2D_RangeLength)));
+    desc.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
     _rootSignatures["Test"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc);
 }
 

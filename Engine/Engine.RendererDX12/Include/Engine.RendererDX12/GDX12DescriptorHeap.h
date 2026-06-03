@@ -44,7 +44,7 @@ private:
     std::vector<bool> _occupanceRegistry;
 };
 
-enum class GDX12SRVHeapIndexAllocation : UINT
+enum GDX12SRVHeapIndexAllocation
 {
     GBuffer_Color = 0,
     GBuffer_Normal = 1,
