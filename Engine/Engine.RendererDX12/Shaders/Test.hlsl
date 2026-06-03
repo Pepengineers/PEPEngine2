@@ -16,6 +16,8 @@ Texture2D DiffuseMap : register(t0);
 Texture2D NormalMap : register(t1);
 Texture2D DisplacementMap : register(t2);
 
+Texture2D Textures[99000] : register(t3);
+
 struct VS_INPUT
 {
     float3 Pos : POSITION;

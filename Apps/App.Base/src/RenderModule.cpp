@@ -453,6 +453,8 @@ void RenderModule::OnRender()
     cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
 
+    cmdList->SetSRV(3, _srvuavHeap->GetGPUHandle(UINT(GDX12SRVHeapIndexAllocation::Texture2D_StartIndex)));
+
     for (DrawMeshCommand& renderCommand : _commandRecorder._drawMeshCommands)
     {
         cmdList->SetGraphicsRootConstantBufferView(2, CurrentFrameConsts->TransformCB->
@@ -524,9 +526,11 @@ void RenderModule::BuildDescHeapsAndBackBuffer()
 void RenderModule::BuildRootSignatures()
 {
     GDX12RootSignatureDesc desc;
-    desc.NumCBVSlots = 4;
-    desc.NumSRVSlots = 3;
+    desc.NumSingleCBVSlots = 4;
+    desc.NumSingleSRVSlots = 3;
     desc.StaticSamplers = GetStaticSamplers();
+    desc.SRVRanges.push_back(GDX12RootSignatureRange(
+        static_cast<UINT>(GDX12SRVHeapIndexAllocation::Texture2D_RangeLength)));
     _rootSignatures["Test"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc);
 }
 

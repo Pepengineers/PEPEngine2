@@ -53,6 +53,7 @@ public:
 	void SetGraphicsRootDescriptorTable(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE baseDescriptor);
 	
 	void SetTextureAsSRV(UINT registerIndex, GDX12Texture* texture);
+	void SetSRV(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle);
 
     void SetComputeRootConstantBufferView(UINT CregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation);
     void SetComputeRootShaderResourceView(UINT TregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation);

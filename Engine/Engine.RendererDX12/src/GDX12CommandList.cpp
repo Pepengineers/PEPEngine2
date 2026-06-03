@@ -202,8 +202,14 @@ void GDX12CommandList::SetTextureAsSRV(UINT registerIndex, GDX12Texture* texture
 {
 	if (!_currentRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
 
-	_commandList->SetGraphicsRootDescriptorTable(_currentRootSignature->GetTRootParamIndex(registerIndex)
-		, texture->GetSRV()->GPUHandle);
+	_commandList->SetGraphicsRootDescriptorTable(_currentRootSignature->GetTRootParamIndex(registerIndex), 
+		texture->GetSRV()->GPUHandle);
+}
+
+void GDX12CommandList::SetSRV(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle)
+{
+	_commandList->SetGraphicsRootDescriptorTable(_currentRootSignature->GetTRootParamIndex(registerIndex), 
+		GPUHandle);
 }
 
 void GDX12CommandList::SetComputeRootConstantBufferView(UINT CregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation)
