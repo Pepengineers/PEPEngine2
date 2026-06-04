@@ -17,17 +17,7 @@ public:
         CameraComponent* activeCamera = &ecs.Get<CameraComponent>(world.ActiveCamera);
 
         auto commandRecorder = renderModule->GetCommandRecorder();
-        commandRecorder->ClearCommands();
 
         commandRecorder->DrawFromCamera(activeCamera->_CBufferIndex);
-
-        // Since we don't have culling for now, we'll just grab all RenderComponents.
-        // In the future, this should source the list of visible components from RenderCullingSystem
-        ecs.ForEach<StaticMeshRenderComponent, TransformComponent>(
-            [&ecs, &commandRecorder](Entity entity, StaticMeshRenderComponent& renderer, TransformComponent& transform)
-            {
-                commandRecorder->DrawMesh(renderer.MeshHandler, renderer.Materials, transform._CBufferIndex);
-            });
-        
     }
 };

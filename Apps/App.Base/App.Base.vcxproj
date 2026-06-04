@@ -38,7 +38,6 @@
     <ClInclude Include="Include\App.Base\Systems\CircleMovementSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\GPUDataUpdateSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\MovementSystem.h" />
-    <ClInclude Include="Include\App.Base\Systems\RenderCullingSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\RenderSubmitSystem.h" />
     <ClInclude Include="Include\App.Base\Window.h" />
     <ClInclude Include="Include\App.Base\World.h" />
