@@ -50,3 +50,20 @@ struct GDX12LightConstants
     DirectX::XMFLOAT4X4 ShadowTransform[6] = { Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4() };
     DirectX::XMFLOAT4 CascadeDistances = { 10.0f, 50.0f, 150.0f, 400.0f };
 };
+
+struct GDX12InstanceData
+{
+    UINT TransformIndex;
+    UINT MaterialIndex;
+    UINT _pad1;
+    UINT _pad2;
+};
+
+struct GDX12IndirectDrawArgs
+{
+    UINT IndexCountPerInstance;
+    UINT InstanceCount;
+    UINT StartIndexLocation;
+    UINT  BaseVertexLocation;
+    UINT StartInstanceLocation;
+};

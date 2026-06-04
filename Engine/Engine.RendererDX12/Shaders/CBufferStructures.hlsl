@@ -51,3 +51,20 @@ struct LightCB
     float4x4 ShadowTransform[6];
     float4 CascadeDistances;
 };
+
+struct InstanceData
+{
+    uint TransformIndex;
+    uint MaterialIndex;
+    uint _pad1;
+    uint _pad2;
+};
+
+struct IndirectDrawArgs
+{
+    uint IndexCountPerInstance;
+    uint InstanceCount;
+    uint StartIndexLocation;
+    uint BaseVertexLocation;
+    uint StartInstanceLocation;
+};

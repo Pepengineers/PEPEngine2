@@ -12,8 +12,14 @@ struct StaticMeshRenderComponent : ComponentTag
     std::vector<GDX12Material*> Materials;
     BoundingBox Bounds;
 
+    bool DirtyFlag;
+
+    //we are creating an instance buffer for each submesh
+    std::vector<UINT> _CBufferIndices;
+    UINT _numFramesDirty;
+
     StaticMeshRenderComponent(Engine::Core::MeshHandle meshHandle, std::vector<GDX12Material*> materials)
-        : MeshHandler(meshHandle), Materials(materials)
+        : MeshHandler(meshHandle), Materials(materials), _numFramesDirty(0), DirtyFlag(true)
     {
     }
 };
