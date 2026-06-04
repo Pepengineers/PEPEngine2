@@ -14,6 +14,7 @@ public:
 	GDX12Texture* Specular;
 	GDX12Texture* RoughnessMap;
 	GDX12Texture* Emissive;
+	GDX12Texture* Displacement;
 
 	float Metallic;
 	float Roughness;
