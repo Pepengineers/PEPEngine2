@@ -582,8 +582,11 @@ void RenderModule::BuildRootSignatures()
     desc2.ByteStride = sizeof(GDX12IndirectDrawArgs);
     desc2.NumArgumentDescs = 1;
     desc2.pArgumentDescs = &arg;
+    desc2.NodeMask = 0;
 
     _primaryDevice->GetDevice()->CreateCommandSignature(&desc2, nullptr, IID_PPV_ARGS(&_commandSignature));
+
+
 }
 
 void RenderModule::BuildShaders()
@@ -635,8 +638,8 @@ void RenderModule::BuildFrameConstants()
         _frameConstants[i]->TransformCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(TransformCacheBuffer));
     }
 
-    _instanceCache = std::make_unique<GDX12UploadBuffer<GDX12InstanceData>>(_primaryDevice.get(), 1, false);
-    _IndirectCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), 1, false);
+    _instanceCache = std::make_unique<GDX12UploadBuffer<GDX12InstanceData>>(_primaryDevice.get(), 0, false);
+    _IndirectCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), 0, false);
 
     _instanceCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(InstanceCacheBuffer));
     _IndirectCommandsCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(IndirectCommandsBuffer));

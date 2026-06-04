@@ -47,14 +47,22 @@ private:
 
 template<typename T>
 inline GDX12UploadBuffer<T>::GDX12UploadBuffer(GDX12Device* device, UINT elementCount, bool useConstantBufferSizeAlignment)
-    : _device(device)
-    , _elementCount(elementCount)
-    , _useConstantBufferSizeAlignment(useConstantBufferSizeAlignment)
+    : _device(device), 
+    _elementCount(elementCount), 
+    _useConstantBufferSizeAlignment(useConstantBufferSizeAlignment),
+    _heap(nullptr)
 {
     _elementByteSize = sizeof(T);
-
     // constant buffer size should be a multiple of 255
     if (_useConstantBufferSizeAlignment) { _elementByteSize = (_elementByteSize + 255) & ~255; }
+
+    if (elementCount == 0)
+    {
+        _uploadBuffer = nullptr;
+        _mappedData = nullptr;
+        _totalBufferSize = 0;
+        return;
+    }
 
     _totalBufferSize = _elementByteSize * _elementCount;
 
@@ -118,6 +126,7 @@ ComPtr<ID3D12Resource> GDX12UploadBuffer<T>::GetResource()
 template<typename T>
 void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T& data)
 {
+    if (!_uploadBuffer) return;
     if (elementIndex >= _elementCount) return;
     memcpy(&_mappedData[elementIndex * _elementByteSize], &data, sizeof(T));
 }
@@ -125,6 +134,7 @@ void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T& data)
 template<typename T>
 void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T* data, UINT count)
 {
+    if (!_uploadBuffer) return;
     if (elementIndex + count > _elementCount) return;
     memcpy(&_mappedData[elementIndex * _elementByteSize], data, sizeof(T) * count);
 }

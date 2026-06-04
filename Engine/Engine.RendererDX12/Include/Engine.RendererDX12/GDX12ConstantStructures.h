@@ -64,6 +64,6 @@ struct GDX12IndirectDrawArgs
     UINT IndexCountPerInstance;
     UINT InstanceCount;
     UINT StartIndexLocation;
-    UINT  BaseVertexLocation;
+    INT  BaseVertexLocation;
     UINT StartInstanceLocation;
 };

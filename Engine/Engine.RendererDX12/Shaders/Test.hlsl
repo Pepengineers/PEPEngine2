@@ -10,8 +10,8 @@ SamplerState samLinearClamp : register(s3);
 SamplerState samAnisotropicWrap : register(s4);
 SamplerState samAnisotropicClamp : register(s5);
 
-StructuredBuffer<MaterialCB> MaterialCache : register(t0);
-StructuredBuffer<TransformCB> TransformCache : register(t1);
+StructuredBuffer<Material> MaterialCache : register(t0);
+StructuredBuffer<Transform> TransformCache : register(t1);
 StructuredBuffer<InstanceData> InstanceCache : register(t2);
 Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t3);
 
@@ -33,12 +33,11 @@ struct VS_OUTPUT_PS_INPUT
     uint MaterialIndex : TEXCOORD1;
 };
 
-
-VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint instanceID : SV_InstanceID)
+VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint instanceID : SV_StartInstanceLocation)
 {
     VS_OUTPUT_PS_INPUT vout = (VS_OUTPUT_PS_INPUT) 0.0f;
 	
-    InstanceData instance = InstanceCache[instanceID + 1];
+    InstanceData instance = InstanceCache[instanceID];
     float4x4 World = TransformCache[instance.TransformIndex].World;
     
     float4 posW = mul(float4(vin.Pos, 1.0f), World);
@@ -57,7 +56,7 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint instanceID : SV_InstanceID)
 
 float4 PS(VS_OUTPUT_PS_INPUT pin) : SV_Target
 {
-    MaterialCB material = MaterialCache[pin.MaterialIndex];
+    Material material = MaterialCache[pin.MaterialIndex];
     
     return Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
 }

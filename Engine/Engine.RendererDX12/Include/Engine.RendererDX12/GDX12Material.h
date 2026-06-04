@@ -17,6 +17,7 @@ public:
 	float Roughness;
 
 	bool DirtyFlag;
+	UINT _CBufferIndex;
 
 private:
 
@@ -27,7 +28,5 @@ private:
 	{
 
 	}
-
-	UINT _CBufferIndex;
 	UINT _numFramesDirty;
 };

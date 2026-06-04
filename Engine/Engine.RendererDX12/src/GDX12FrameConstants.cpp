@@ -7,10 +7,10 @@ GDX12FrameConstants::GDX12FrameConstants(GDX12Device* device)
     , FenceValue(0)
 {
     MainCB = std::make_unique<GDX12UploadBuffer<GDX12MainConstants>>(device, 1, true);
-    TransformCache = std::make_unique<GDX12UploadBuffer<GDX12TransformConstants>>(device, 1, false);
-    MaterialCache = std::make_unique<GDX12UploadBuffer<GDX12MaterialConstants>>(device, 1, false);
-    LightCB = std::make_unique<GDX12UploadBuffer<GDX12LightConstants>>(device, 1, true);
-    CameraCB = std::make_unique<GDX12UploadBuffer<GDX12CameraConstants>>(device, 1, true);
+    TransformCache = std::make_unique<GDX12UploadBuffer<GDX12TransformConstants>>(device, 0, false);
+    MaterialCache = std::make_unique<GDX12UploadBuffer<GDX12MaterialConstants>>(device, 0, false);
+    LightCB = std::make_unique<GDX12UploadBuffer<GDX12LightConstants>>(device, 0, true);
+    CameraCB = std::make_unique<GDX12UploadBuffer<GDX12CameraConstants>>(device, 0, true);
 }
 
 GDX12FrameConstants::~GDX12FrameConstants()

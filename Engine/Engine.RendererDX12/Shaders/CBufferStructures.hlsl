@@ -10,12 +10,12 @@ struct MainCB
     float DeltaTime;
 };
 
-struct TransformCB
+struct Transform
 {
     float4x4 World;
 };
 
-struct MaterialCB
+struct Material
 {
     float Roughness;
     float Metallic;
@@ -58,13 +58,4 @@ struct InstanceData
     uint MaterialIndex;
     uint _pad1;
     uint _pad2;
-};
-
-struct IndirectDrawArgs
-{
-    uint IndexCountPerInstance;
-    uint InstanceCount;
-    uint StartIndexLocation;
-    uint BaseVertexLocation;
-    uint StartInstanceLocation;
 };
