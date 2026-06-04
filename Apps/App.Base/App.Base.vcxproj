@@ -23,7 +23,10 @@
     <ClInclude Include="Include\App.Base\Components\CameraComponent.h" />
     <ClInclude Include="Include\App.Base\Components\CircleMovementComponent.h" />
     <ClInclude Include="Include\App.Base\Components\Component.h" />
+    <ClInclude Include="Include\App.Base\Components\LookAtTargetComponent.h" />
     <ClInclude Include="Include\App.Base\Components\NameComponent.h" />
+    <ClInclude Include="Include\App.Base\Components\SplineCurveComponent.h" />
+    <ClInclude Include="Include\App.Base\Components\SplineFollowComponent.h" />
     <ClInclude Include="Include\App.Base\Components\StaticMeshRenderComponent.h" />
     <ClInclude Include="Include\App.Base\Components\TransformComponent.h" />
     <ClInclude Include="Include\App.Base\Components\VelocityComponent.h" />
@@ -37,13 +40,13 @@
     <ClInclude Include="Include\App.Base\SceneTraversal.h" />
     <ClInclude Include="Include\App.Base\Systems\CircleMovementSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\GPUDataUpdateSystem.h" />
+    <ClInclude Include="Include\App.Base\Systems\LookAtTargetSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\MovementSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\RenderSubmitSystem.h" />
+    <ClInclude Include="Include\App.Base\Systems\SplineFollowSystem.h" />
     <ClInclude Include="Include\App.Base\Window.h" />
     <ClInclude Include="Include\App.Base\World.h" />
     <ClInclude Include="Include\App.Base\WorldLoader.h" />
-    <ClInclude Include="Include\RenderModule.h" />
-    <ClInclude Include="Include\Window.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
@@ -83,7 +86,7 @@
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
@@ -150,8 +153,8 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.RHI\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.UI\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.RHI.lib;Engine.UI.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.UI\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.UI.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">

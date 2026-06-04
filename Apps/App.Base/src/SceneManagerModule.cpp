@@ -4,6 +4,8 @@
 #include "App.Base/Systems/MovementSystem.h"
 #include "App.Base/Systems/RenderSubmitSystem.h"
 #include "App.Base/Systems/GPUDataUpdateSystem.h"
+#include "App.Base/Systems/LookAtTargetSystem.h"
+#include "App.Base/Systems/SplineFollowSystem.h"
 #include "Engine.Core/System.h"
 
 SceneManagerModule::SceneManagerModule(GameTimer* timer) :
@@ -22,7 +24,24 @@ void SceneManagerModule::Initialize()
 {
     Uninitialize();
 
-    if (!LoadWorld("world1.yaml"))
+    /*if (!LoadWorld("world1.yaml"))
+    {
+        // todo runtime error or log
+    }*/
+
+    //const std::filesystem::path scenePath =
+    //std::filesystem::path(ASSETS_FOLDER) /
+    //"Scenes" /
+    //"Gallery";
+
+    const std::filesystem::path scenePath =
+    std::filesystem::path(ASSETS_FOLDER) /
+    "Scenes" /
+    "Amazon Lumberyard Bistro" /
+    "Interior" /
+    "interior.obj";
+
+    if (!LoadWorld(scenePath))
     {
         // todo runtime error or log 
     }
@@ -35,6 +54,8 @@ void SceneManagerModule::Initialize()
 
     AddSystem<MovementSystem>(world, 0);
     AddSystem<CircleMovementSystem>(world, 1);
+    AddSystem<SplineFollowSystem>(world, 2);
+    AddSystem<LookAtTargetSystem>(world, 3);
     AddSystem<GPUDataUpdateSystem>(world, 101);
     AddSystem<RenderSubmitSystem>(world, 102);
 }

@@ -93,8 +93,9 @@ void EditorApp::Render(const GameTimer& gameTimer)
 void EditorApp::OnMouseDown(WPARAM btnState, int x, int y)
 {
     UNREFERENCED_PARAMETER(btnState);
-    UNREFERENCED_PARAMETER(x);
-    UNREFERENCED_PARAMETER(y);
+
+    _lastMousePos.x = x;
+    _lastMousePos.y = y;
 
     SetCapture(GetWindow()->GetWindowHandle());
 }
@@ -112,14 +113,34 @@ void EditorApp::OnMouseMove(WPARAM btnState, int x, int y)
 {
     if ((btnState & MK_RBUTTON) != 0)
     {
-        float dx = XMConvertToRadians(static_cast<float>(x - _lastMousePos.x));
-        float dy = XMConvertToRadians(static_cast<float>(y - _lastMousePos.y));
+        constexpr float mouseSensitivity = 0.15f;
+
+        const float dx = static_cast<float>(x - _lastMousePos.x) * mouseSensitivity;
+        const float dy = static_cast<float>(y - _lastMousePos.y) * mouseSensitivity;
 
         auto world = GetLocator().GetModule<SceneManagerModule>()->GetWorld();
         auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
 
-        camera.Rotation.x += dy * 10.f;
-        camera.Rotation.y -= dx * 10.f;
+        camera.Rotation.x += dy;
+        camera.Rotation.y -= dx;
+
+        if (camera.Rotation.x > 89.0f)
+        {
+            camera.Rotation.x = 89.0f;
+        }
+        if (camera.Rotation.x < -89.0f)
+        {
+            camera.Rotation.x = -89.0f;
+        }
+
+        if (camera.Rotation.y > 180.0f)
+        {
+            camera.Rotation.y -= 360.0f;
+        }
+        if (camera.Rotation.y < -180.0f)
+        {
+            camera.Rotation.y += 360.0f;
+        }
 
         camera.DirtyFlag = true;
     }
@@ -157,12 +178,17 @@ void EditorApp::OnKeyboardInput(const GameTimer& gameTimer)
     //world space
     Vector3 up = Vector3::Up;
 
-    if (GetAsyncKeyState('W') & 0x8000) { camera.Location -= forward * speed * dt; }
-    if (GetAsyncKeyState('S') & 0x8000) { camera.Location += forward * speed * dt; }
-    if (GetAsyncKeyState('A') & 0x8000) { camera.Location += right * speed * dt; }
-    if (GetAsyncKeyState('D') & 0x8000) { camera.Location -= right * speed * dt; }
-    if (GetAsyncKeyState('Q') & 0x8000) { camera.Location -= up * speed * dt * 0.5f; }
-    if (GetAsyncKeyState('E') & 0x8000) { camera.Location += up * speed * dt * 0.5f; }
+    bool moved = false;
 
-    camera.DirtyFlag = true;
+    if (GetAsyncKeyState('W') & 0x8000) { camera.Location -= forward * speed * dt; moved = true; }
+    if (GetAsyncKeyState('S') & 0x8000) { camera.Location += forward * speed * dt; moved = true; }
+    if (GetAsyncKeyState('A') & 0x8000) { camera.Location += right * speed * dt; moved = true; }
+    if (GetAsyncKeyState('D') & 0x8000) { camera.Location -= right * speed * dt; moved = true; }
+    if (GetAsyncKeyState('Q') & 0x8000) { camera.Location -= up * speed * dt * 0.5f; moved = true; }
+    if (GetAsyncKeyState('E') & 0x8000) { camera.Location += up * speed * dt * 0.5f; moved = true; }
+
+    if (moved)
+    {
+        camera.DirtyFlag = true;
+    }
 }
