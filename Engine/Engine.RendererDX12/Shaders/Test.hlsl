@@ -57,52 +57,6 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint instanceID : SV_StartInstanceLocation)
 float4 PS(VS_OUTPUT_PS_INPUT pin) : SV_Target
 {
     Material material = MaterialCache[pin.MaterialIndex];
-
-    float4 diffuseSample = Texture2DCache[NonUniformResourceIndex(material.DiffuseIndex)].Sample(samAnisotropicWrap, pin.TexC);
-    if (material.UseBakedLighting > 0.5f)
-    {
-        return diffuseSample;
-    }
-
-    float3 normalW = normalize(pin.Normal);
-    if (material.HasNormalMap > 0.5f)
-    {
-        float3 tangentW = normalize(pin.Tangent - normalW * dot(pin.Tangent, normalW));
-        float3 bitangentW = normalize(cross(normalW, tangentW));
-        float3 normalT = Texture2DCache[NonUniformResourceIndex(material.NormalIndex)].Sample(samLinearWrap, pin.TexC).xyz * 2.0f - 1.0f;
-        normalW = normalize(normalT.x * tangentW + normalT.y * bitangentW + normalT.z * normalW);
-    }
-
-    float roughness = saturate(material.Roughness);
-    if (material.HasRoughnessMap > 0.5f)
-    {
-        roughness = saturate(Texture2DCache[NonUniformResourceIndex(material.RoughnessIndex)].Sample(samLinearWrap, pin.TexC).r);
-    }
-    roughness = max(roughness, 0.04f);
-
-    float3 specularColor = material.SpecularColor;
-    if (material.HasSpecularMap > 0.5f)
-    {
-        specularColor = Texture2DCache[NonUniformResourceIndex(material.SpecularIndex)].Sample(samLinearWrap, pin.TexC).rgb;
-    }
-
-    float3 emissive = material.EmissiveColor;
-    if (material.HasEmissiveMap > 0.5f)
-    {
-        emissive = Texture2DCache[NonUniformResourceIndex(material.EmissiveIndex)].Sample(samLinearWrap, pin.TexC).rgb * material.EmissiveColor;
-    }
-
-    float3 lightDirectionW = normalize(float3(-0.35f, 0.85f, -0.45f));
-    float3 viewDirectionW = normalize(CBCamera.CameraLocation - pin.PosW);
-    float3 halfVectorW = normalize(lightDirectionW + viewDirectionW);
-
-    float ndotl = saturate(dot(normalW, lightDirectionW));
-    float shininess = max(2.0f / (roughness * roughness) - 2.0f, 1.0f);
-    float specularPower = pow(saturate(dot(normalW, halfVectorW)), shininess);
-
-    float3 ambient = diffuseSample.rgb * 0.22f;
-    float3 diffuse = diffuseSample.rgb * ndotl;
-    float3 specular = specularColor * specularPower * (1.0f - roughness) * ndotl;
-
-    return float4(ambient + diffuse + specular + emissive, diffuseSample.a);
+    
+    return Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
 }

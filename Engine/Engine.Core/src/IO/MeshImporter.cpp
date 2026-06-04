@@ -1,17 +1,12 @@
-// MeshImporter.cpp
+﻿// MeshImporter.cpp
 
 #include <Engine.Core/IO/MeshImporter.h>
 #include <Engine.Core/IO/AssimpImportHelpers.h>
 
 #include <assimp/Importer.hpp>
-#include <assimp/material.h>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 #include <assimp/matrix3x3.h>
-
-#include <algorithm>
-#include <cctype>
-#include <cmath>
 
 namespace SimpleMath = DirectX::SimpleMath;
 
@@ -118,129 +113,6 @@ namespace
 		}
 
 		return CreateBoundsFromMinMax(minPoint, maxPoint);
-	}
-
-	std::filesystem::path ResolveAssimpTexturePath(const std::filesystem::path& sourcePath, const aiString& assimpTexturePath)
-	{
-		const std::string texturePathText = assimpTexturePath.C_Str();
-		if (texturePathText.empty() || texturePathText.front() == '*' /* '*' means embedded texture */)
-		{
-			return {};
-		}
-
-		const std::filesystem::path texturePath = std::filesystem::path(texturePathText);
-		if (texturePath.is_absolute())
-		{
-			return texturePath.lexically_normal();
-		}
-
-		return (sourcePath.parent_path() / texturePath).lexically_normal();
-	}
-
-	std::string BuildTexturePathKey(const std::filesystem::path& texturePath)
-	{
-		std::string key = texturePath.lexically_normal().generic_string();
-		std::transform(key.begin(), key.end(), key.begin(), [](const unsigned char character) { return static_cast<char>(std::tolower(character)); });
-		return key;
-	}
-
-	bool AreSameTexturePath(const std::filesystem::path& left, const std::filesystem::path& right)
-	{
-		if (left.empty() || right.empty())
-		{
-			return false;
-		}
-
-		return BuildTexturePathKey(left) == BuildTexturePathKey(right);
-	}
-
-	float ConvertShininessToRoughness(const float shininess)
-	{
-		if (shininess <= 0.0f)
-		{
-			return 1.0f;
-		}
-
-		const float roughness = std::sqrt(2.0f / (shininess + 2.0f));
-		return (std::max)(0.04f, (std::min)(roughness, 1.0f));
-	}
-
-	void TryImportTexturePath(
-		const aiMaterial& assimpMaterial,
-		const aiTextureType textureType,
-		const std::filesystem::path& sourcePath,
-		std::filesystem::path& outTexturePath)
-	{
-		aiString texturePath;
-		if (assimpMaterial.GetTexture(textureType, 0, &texturePath) == AI_SUCCESS)
-		{
-			outTexturePath = ResolveAssimpTexturePath(sourcePath, texturePath);
-		}
-	}
-
-	std::vector<Engine::Core::MeshMaterial> ImportMaterials(const aiScene& assimpScene, const std::filesystem::path& sourcePath)
-	{
-		std::vector<Engine::Core::MeshMaterial> importedMaterials;
-		importedMaterials.reserve(assimpScene.mNumMaterials);
-
-		for (unsigned int materialIndex = 0; materialIndex < assimpScene.mNumMaterials; ++materialIndex)
-		{
-			const aiMaterial* assimpMaterial = assimpScene.mMaterials[materialIndex];
-			if (assimpMaterial == nullptr)
-			{
-				importedMaterials.emplace_back();
-				continue;
-			}
-
-			Engine::Core::MeshMaterial importedMaterial = {};
-
-			aiString materialName;
-			if (assimpMaterial->Get(AI_MATKEY_NAME, materialName) == AI_SUCCESS)
-			{
-				importedMaterial.Name = materialName.C_Str();
-			}
-
-			aiColor3D diffuseColor(1.0f, 1.0f, 1.0f);
-			if (assimpMaterial->Get(AI_MATKEY_COLOR_DIFFUSE, diffuseColor) == AI_SUCCESS)
-			{
-				importedMaterial.DiffuseColor = SimpleMath::Vector3(diffuseColor.r, diffuseColor.g, diffuseColor.b);
-			}
-
-			aiColor3D specularColor(0.0f, 0.0f, 0.0f);
-			if (assimpMaterial->Get(AI_MATKEY_COLOR_SPECULAR, specularColor) == AI_SUCCESS)
-			{
-				importedMaterial.SpecularColor = SimpleMath::Vector3(specularColor.r, specularColor.g, specularColor.b);
-			}
-
-			aiColor3D emissiveColor(0.0f, 0.0f, 0.0f);
-			if (assimpMaterial->Get(AI_MATKEY_COLOR_EMISSIVE, emissiveColor) == AI_SUCCESS)
-			{
-				importedMaterial.EmissiveColor = SimpleMath::Vector3(emissiveColor.r, emissiveColor.g, emissiveColor.b);
-			}
-
-			float shininess = 0.0f;
-			if (assimpMaterial->Get(AI_MATKEY_SHININESS, shininess) == AI_SUCCESS)
-			{
-				importedMaterial.Roughness = ConvertShininessToRoughness(shininess);
-			}
-
-			float roughness = importedMaterial.Roughness;
-			if (assimpMaterial->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughness) == AI_SUCCESS)
-			{
-				importedMaterial.Roughness = (std::max)(0.04f, (std::min)(roughness, 1.0f));
-			}
-
-			TryImportTexturePath(*assimpMaterial, aiTextureType_DIFFUSE, sourcePath, importedMaterial.DiffuseTexturePath);
-			TryImportTexturePath(*assimpMaterial, aiTextureType_SPECULAR, sourcePath, importedMaterial.SpecularTexturePath);
-			TryImportTexturePath(*assimpMaterial, aiTextureType_NORMALS, sourcePath, importedMaterial.NormalTexturePath);
-			TryImportTexturePath(*assimpMaterial, aiTextureType_DIFFUSE_ROUGHNESS, sourcePath, importedMaterial.RoughnessTexturePath);
-			TryImportTexturePath(*assimpMaterial, aiTextureType_EMISSIVE, sourcePath, importedMaterial.EmissiveTexturePath);
-			importedMaterial.UseBakedLighting = AreSameTexturePath(importedMaterial.DiffuseTexturePath, importedMaterial.EmissiveTexturePath);
-
-			importedMaterials.push_back(std::move(importedMaterial));
-		}
-
-		return importedMaterials;
 	}
 
 	/// Transforms a position vector by a 4x4 matrix, including the translation component (w=1).
@@ -420,7 +292,7 @@ namespace Engine::Core
 		}
 
 		const DirectX::BoundingBox meshBounds = CalculateMeshBounds(importedSubMeshes);
-		return std::make_unique<Mesh>(std::move(importedSubMeshes), meshBounds, ImportMaterials(*assimpScene, sourcePath));
+		return std::make_unique<Mesh>(std::move(importedSubMeshes), meshBounds);
 	}
 
 	std::unique_ptr<Mesh> MeshImporter::ImportMeshSubAsset(const std::filesystem::path& sourcePath, const std::uint32_t subAssetIndex, const MeshImportOptions& options)
@@ -463,6 +335,6 @@ namespace Engine::Core
 		importedSubMeshes.push_back(std::move(importedSubMesh));
 
 		const DirectX::BoundingBox meshBounds = CalculateMeshBounds(importedSubMeshes);
-		return std::make_unique<Mesh>(std::move(importedSubMeshes), meshBounds, ImportMaterials(*assimpScene, sourcePath));
+		return std::make_unique<Mesh>(std::move(importedSubMeshes), meshBounds);
 	}
 }

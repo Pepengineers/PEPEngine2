@@ -23,24 +23,7 @@ void SceneManagerModule::Initialize()
 {
     Uninitialize();
 
-    /*if (!LoadWorld("world1.yaml"))
-    {
-        // todo runtime error or log
-    }*/
-
-    //const std::filesystem::path scenePath =
-    //std::filesystem::path(ASSETS_FOLDER) /
-    //"Scenes" /
-    //"Gallery";
-
-    const std::filesystem::path scenePath =
-    std::filesystem::path(ASSETS_FOLDER) /
-    "Scenes" /
-    "Amazon Lumberyard Bistro" /
-    "Interior" /
-    "interior.obj";
-
-    if (!LoadWorld(scenePath))
+    if (!LoadWorld("world1.yaml"))
     {
         // todo runtime error or log 
     }
