@@ -6,7 +6,7 @@
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.DirectXTex.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.DirectXTex.props')" />
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.DebugDrawer.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.DebugDrawer.props')" />
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.Ffx-api.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.Ffx-api.props')" />
-  <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.NvidiaSDK.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.NvidiaSDK.props')" />
+  <!-- <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.NvidiaSDK.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.NvidiaSDK.props')" /> -->
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.DirectStorage.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.DirectStorage.props')" />
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.DirectXMesh.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.DirectXMesh.props')" />
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.Wwise.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.Wwise.props')" />
