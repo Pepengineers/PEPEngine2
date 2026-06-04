@@ -21,10 +21,17 @@ struct Material
     float Metallic;
     uint DiffuseIndex;
     uint NormalIndex;
-    uint DisplacementIndex;
-    float _pad1;
-    float _pad2;
-    float _pad3;
+    uint SpecularIndex;
+    uint RoughnessIndex;
+    uint EmissiveIndex;
+    float HasNormalMap;
+    float HasSpecularMap;
+    float3 SpecularColor;
+    float HasRoughnessMap;
+    float3 EmissiveColor;
+    float HasEmissiveMap;
+    float UseBakedLighting;
+    float2 _pad0;
 };
 
 struct CameraCB

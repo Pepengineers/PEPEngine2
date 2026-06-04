@@ -688,10 +688,25 @@ void RenderModule::UpdateMaterialCB()
             {
                 materialConstants.NormalIndex = material->Normal->GetSRV()->HeapIndex - Texture2D_StartIndex;
             }
-            if (material->Displacement)
+            if (material->Specular)
             {
-                materialConstants.DisplacementIndex = material->Displacement->GetSRV()->HeapIndex - Texture2D_StartIndex;
+                materialConstants.SpecularIndex = material->Specular->GetSRV()->HeapIndex - Texture2D_StartIndex;
             }
+            if (material->RoughnessMap)
+            {
+                materialConstants.RoughnessIndex = material->RoughnessMap->GetSRV()->HeapIndex - Texture2D_StartIndex;
+            }
+            if (material->Emissive)
+            {
+                materialConstants.EmissiveIndex = material->Emissive->GetSRV()->HeapIndex - Texture2D_StartIndex;
+            }
+            materialConstants.HasNormalMap = material->HasNormalMap ? 1.0f : 0.0f;
+            materialConstants.HasSpecularMap = material->HasSpecularMap ? 1.0f : 0.0f;
+            materialConstants.HasRoughnessMap = material->HasRoughnessMap ? 1.0f : 0.0f;
+            materialConstants.HasEmissiveMap = material->HasEmissiveMap ? 1.0f : 0.0f;
+            materialConstants.UseBakedLighting = material->UseBakedLighting ? 1.0f : 0.0f;
+            materialConstants.SpecularColor = { material->SpecularColor.x, material->SpecularColor.y, material->SpecularColor.z };
+            materialConstants.EmissiveColor = { material->EmissiveColor.x, material->EmissiveColor.y, material->EmissiveColor.z };
 
             currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
             material->_numFramesDirty--;

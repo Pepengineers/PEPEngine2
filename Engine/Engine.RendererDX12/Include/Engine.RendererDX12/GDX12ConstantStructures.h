@@ -18,12 +18,19 @@ struct GDX12MaterialConstants
 {
     float Roughness = 0.5f;
     float Metallic = 0.5f;
-    UINT DiffuseIndex;
-    UINT NormalIndex;
-    UINT DisplacementIndex;
-    float _pad1;
-    float _pad2;
-    float _pad3;
+    UINT DiffuseIndex = 0;
+    UINT NormalIndex = 0;
+    UINT SpecularIndex = 0;
+    UINT RoughnessIndex = 0;
+    UINT EmissiveIndex = 0;
+    float HasNormalMap = 0.0f;
+    float HasSpecularMap = 0.0f;
+    DirectX::XMFLOAT3 SpecularColor = { 0.0f, 0.0f, 0.0f };
+    float HasRoughnessMap = 0.0f;
+    DirectX::XMFLOAT3 EmissiveColor = { 0.0f, 0.0f, 0.0f };
+    float HasEmissiveMap = 0.0f;
+    float UseBakedLighting = 0.0f;
+    DirectX::XMFLOAT2 _pad0 = { 0.0f, 0.0f };
 };
 
 struct GDX12CameraConstants

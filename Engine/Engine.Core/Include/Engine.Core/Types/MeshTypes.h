@@ -2,6 +2,8 @@
 
 #pragma once
 
+#include <filesystem>
+#include <string>
 #include <vector>
 
 #include <DirectXCollision.h>
@@ -34,12 +36,27 @@ namespace Engine::Core
 		[[nodiscard]] bool HasIndices() const;
 	};
 
+	struct MeshMaterial
+	{
+		std::string Name;
+		std::filesystem::path DiffuseTexturePath;
+		std::filesystem::path NormalTexturePath;
+		std::filesystem::path SpecularTexturePath;
+		std::filesystem::path RoughnessTexturePath;
+		std::filesystem::path EmissiveTexturePath;
+		DirectX::SimpleMath::Vector3 DiffuseColor = {1.0f, 1.0f, 1.0f};
+		DirectX::SimpleMath::Vector3 SpecularColor = {0.0f, 0.0f, 0.0f};
+		DirectX::SimpleMath::Vector3 EmissiveColor = {0.0f, 0.0f, 0.0f};
+		float Roughness = 1.0f;
+		bool UseBakedLighting = false;
+	};
+
 	/// CPU-side mesh representation.
 	class Mesh
 	{
 	public:
 		Mesh() = default;
-		Mesh(std::vector<SubMesh> subMeshes, const DirectX::BoundingBox& bounds);
+		Mesh(std::vector<SubMesh> subMeshes, const DirectX::BoundingBox& bounds, std::vector<MeshMaterial> materials = {});
 
 		/// Returns true if the mesh has no subresources.
 		[[nodiscard]] bool IsEmpty() const;
@@ -53,11 +70,18 @@ namespace Engine::Core
 		/// Returns all submeshes as a flat array.
 		[[nodiscard]] const std::vector<SubMesh>& GetSubMeshes() const;
 
+		/// Returns imported material metadata in the same order used by SubMesh::MaterialIndex.
+		[[nodiscard]] const std::vector<MeshMaterial>& GetMaterials() const;
+
 		/// Returns the submesh at the given index.
 		[[nodiscard]] const SubMesh& GetSubMesh(const size_t subMeshIndex) const;
 
+		/// Returns material metadata at the given index.
+		[[nodiscard]] const MeshMaterial& GetMaterial(const size_t materialIndex) const;
+
 	private:
 		std::vector<SubMesh> _subMeshes;
+		std::vector<MeshMaterial> _materials;
 		DirectX::BoundingBox _bounds = {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
 	};
 }
