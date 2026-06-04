@@ -29,10 +29,10 @@ void SceneManagerModule::Initialize()
         // todo runtime error or log
     }*/
 
-    //const std::filesystem::path scenePath =
-    //std::filesystem::path(ASSETS_FOLDER) /
-    //"Scenes" /
-    //"Gallery";
+    /*const std::filesystem::path scenePath =
+    std::filesystem::path(ASSETS_FOLDER) /
+    "Scenes" /
+    "Gallery";*/
 
     const std::filesystem::path scenePath =
     std::filesystem::path(ASSETS_FOLDER) /

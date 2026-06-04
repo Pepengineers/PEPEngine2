@@ -4,12 +4,14 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <PEPRepoRoot Condition="'$(PEPRepoRoot)'==''">$(MSBuildThisFileDirectory)</PEPRepoRoot>
+    <PEPEnableAssetDebugLogs Condition="'$(PEPEnableAssetDebugLogs)'==''">0</PEPEnableAssetDebugLogs>
     <OutDir>$(PEPRepoRoot)Build\bin\$(PlatformName)\$(Configuration)\$(ProjectName)\</OutDir>
     <IntDir>$(PEPRepoRoot)Build\obj\$(PlatformName)\$(Configuration)\$(ProjectName)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <PreprocessorDefinitions>
+          PEP_ENABLE_ASSET_DEBUG_LOGS=$(PEPEnableAssetDebugLogs);
           SOLUTION_DIR=LR"($(PEPRepoRoot))";
           PROJECT_DIR=LR"($(ProjectDir))";
           ASSETS_FOLDER=LR"($(PEPRepoRoot)Assets\\)";

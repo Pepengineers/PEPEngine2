@@ -35,7 +35,7 @@ public:
                 {
                     Vector3 CameraLocation = transform.Location;
                     Vector3 CameraRotation = transform.Rotation;
-                    float FOV = camera.FOV;
+                    float FOV = DirectX::XMConvertToRadians(camera.FOV);
 
                     Matrix rotMatrix = Matrix::CreateFromYawPitchRoll(
                         XMConvertToRadians(CameraRotation.y),
@@ -48,7 +48,7 @@ public:
 
                     Matrix view = Matrix::CreateLookAt(CameraLocation, CameraTarget, Vector3::Up);
 
-                    Matrix proj = Matrix::CreatePerspectiveFieldOfView(camera.FOV, 
+                    Matrix proj = Matrix::CreatePerspectiveFieldOfView(FOV,
                         renderModule->GetAspectRatio(), camera.NearPlane, camera.FarPlane);
 
                     GDX12CameraConstants objConstants;

@@ -1,24 +1,17 @@
 ﻿// AssetRegistryBase.cpp
 
 #include <Engine.Core/Registries/AssetRegistryBase.h>
+#include "Common/AssetDebugLog.h"
 
 #include <cwctype>
 #include <cassert>
 #include <Windows.h>
 
-namespace
-{
-	void WriteLogLine(const std::wstring& message)
-	{
-		OutputDebugStringW(message.c_str());
-	}
-}
-
 namespace Engine::Core
 {
 	void AssetRegistryBase::WriteRegistryLog(const std::wstring& message)
 	{
-		WriteLogLine(message);
+		LOG(message);
 	}
 	
 	std::wstring AssetRegistryBase::BuildCacheKey(const std::filesystem::path& path) const

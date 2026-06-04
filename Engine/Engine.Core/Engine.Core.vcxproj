@@ -160,6 +160,7 @@
     <ClCompile Include="src\ConsoleModule.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Common\AssetDebugLog.h" />
     <ClInclude Include="Include\Engine.Core\AssetHandles.h" />
     <ClInclude Include="Include\Engine.Core\AssetLocators.h" />
     <ClInclude Include="Include\Engine.Core\AssetManager.h" />

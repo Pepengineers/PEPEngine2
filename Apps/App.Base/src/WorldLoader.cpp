@@ -529,7 +529,7 @@ namespace
         camera.AddComponent<TransformComponent>(cameraLocation, Vector3(0.0f, 0.0f, 0.0f));
         
         auto& cameraComponent = camera.AddComponent<CameraComponent>();
-        cameraComponent.FOV = DirectX::XMConvertToRadians(60.0f);
+        cameraComponent.FOV = 60.0f;
         cameraComponent.NearPlane = 0.1f;
         cameraComponent.FarPlane = 10000.0f;
         cameraComponent.DirtyFlag = true;

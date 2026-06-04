@@ -2,6 +2,8 @@
 
 #include <Engine.Core/IO/TextureLoader.h>
 
+#include <Common/AssetDebugLog.h>
+
 #include <cwctype>
 #include <fstream>
 #include <string>
@@ -50,7 +52,7 @@ namespace
 
 	void LogTextureLoaderMessage(const std::wstring& message)
 	{
-		OutputDebugStringW(message.c_str());
+		LOG(message);
 	}
 
 	std::wstring ToLowerExtension(const std::filesystem::path& sourcePath)

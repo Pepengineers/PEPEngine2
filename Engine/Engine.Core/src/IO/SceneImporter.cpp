@@ -6,6 +6,8 @@
 #include <Engine.Core/AssetLocators.h>
 #include <Engine.Core/Registries/MeshRegistry.h>
 
+#include <Common/AssetDebugLog.h>
+
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
@@ -14,7 +16,7 @@ namespace
 {
 	void LogSceneImporterMessage(const std::wstring& message)
 	{
-		OutputDebugStringW(message.c_str());
+		LOG(message);
 	}
 
 	/// Creates a SceneNode from an Assimp node, decomposing its local transform
