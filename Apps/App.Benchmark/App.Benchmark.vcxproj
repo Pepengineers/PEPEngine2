@@ -107,7 +107,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;SOLUTION_DIR=LR"($(SolutionDir))";PROJECT_DIR=LR"($(ProjectDir))";SHADERS_DIR=LR"($(SolutionDir)Shaders)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;SOLUTION_DIR=LR"($(PEPRepoRoot))";PROJECT_DIR=LR"($(ProjectDir))";SHADERS_DIR=LR"($(PEPRepoRoot)Shaders)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
@@ -116,10 +116,10 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.UI.lib;App.Base.lib;External.Libraries.lib;dxcompiler.lib;dxil.lib;WinPixEventRuntime.lib;assimp-vc143-mtd.lib;DirectXTK12.lib;DirectXTex.lib;amd_fidelityfx_dx12.lib;sl.interposer.lib;sl.common.lib;sl.compute.lib;sl.dlss.lib;sl.reflex.lib;sl.directsr.lib;sl.nis.lib;dstorage.lib;DirectXMesh.lib;AkSoundEngine.lib;AkMemoryMgr.lib;AkStreamMgr.lib;CommunicationCentral.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OptimizeReferences>false</OptimizeReferences>
-      <AdditionalLibraryDirectories>$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.UI\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\App.Base\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\External.Libraries\;$(SolutionDir)External\External.Libraries\dxc\lib\$(Platform)\;$(SolutionDir)External\External.Libraries\pix\lib\;$(SolutionDir)External\External.Libraries\assimp\lib\$(Configuration)\;$(SolutionDir)External\External.Libraries\directxtk\lib\$(Platform)\$(Configuration)\;$(SolutionDir)External\External.Libraries\directxtex\lib\$(Platform)\$(Configuration)\;$(SolutionDir)External\External.Libraries\ffx-api\lib\;$(SolutionDir)External\External.Libraries\nvidia-sdk\lib\;$(SolutionDir)External\External.Libraries\directstorage\lib\;$(SolutionDir)External\External.Libraries\directxmesh\lib\;$(SolutionDir)External\External.Libraries\wwise\lib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.UI\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\App.Base\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\External.Libraries\;$(PEPRepoRoot)External\External.Libraries\dxc\lib\$(Platform)\;$(PEPRepoRoot)External\External.Libraries\pix\lib\;$(PEPRepoRoot)External\External.Libraries\assimp\lib\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtk\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtex\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\ffx-api\lib\;$(PEPRepoRoot)External\External.Libraries\nvidia-sdk\lib\;$(PEPRepoRoot)External\External.Libraries\directstorage\lib\;$(PEPRepoRoot)External\External.Libraries\directxmesh\lib\;$(PEPRepoRoot)External\External.Libraries\wwise\lib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy /Y /D "$(SolutionDir)External\Runtime\*.dll" "$(TargetDir)"</Command>
+      <Command>xcopy /Y /D "$(PEPRepoRoot)External\Runtime\*.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -135,11 +135,11 @@
     <Link>
   <SubSystem>Windows</SubSystem>
   <GenerateDebugInformation>true</GenerateDebugInformation>
-  <AdditionalLibraryDirectories>$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\Engine.UI\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\App.Base\;$(SolutionDir)Build\bin\$(Platform)\$(Configuration)\External.Libraries\;$(SolutionDir)External\External.Libraries\dxc\lib\$(Platform)\;$(SolutionDir)External\External.Libraries\pix\lib\;$(SolutionDir)External\External.Libraries\assimp\lib\$(Configuration)\;$(SolutionDir)External\External.Libraries\directxtk\lib\$(Platform)\$(Configuration)\;$(SolutionDir)External\External.Libraries\directxtex\lib\$(Platform)\$(Configuration)\;$(SolutionDir)External\External.Libraries\ffx-api\lib\;$(SolutionDir)External\External.Libraries\nvidia-sdk\lib\;$(SolutionDir)External\External.Libraries\directstorage\lib\;$(SolutionDir)External\External.Libraries\directxmesh\lib\;$(SolutionDir)External\External.Libraries\wwise\lib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+  <AdditionalLibraryDirectories>$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.UI\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\App.Base\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\External.Libraries\;$(PEPRepoRoot)External\External.Libraries\dxc\lib\$(Platform)\;$(PEPRepoRoot)External\External.Libraries\pix\lib\;$(PEPRepoRoot)External\External.Libraries\assimp\lib\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtk\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtex\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\ffx-api\lib\;$(PEPRepoRoot)External\External.Libraries\nvidia-sdk\lib\;$(PEPRepoRoot)External\External.Libraries\directstorage\lib\;$(PEPRepoRoot)External\External.Libraries\directxmesh\lib\;$(PEPRepoRoot)External\External.Libraries\wwise\lib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
   <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.UI.lib;App.Base.lib;External.Libraries.lib;dxcompiler.lib;dxil.lib;WinPixEventRuntime.lib;assimp-vc143-mt.lib;DirectXTK12.lib;DirectXTex.lib;amd_fidelityfx_dx12.lib;sl.interposer.lib;sl.common.lib;sl.compute.lib;sl.dlss.lib;sl.reflex.lib;sl.directsr.lib;sl.nis.lib;dstorage.lib;DirectXMesh.lib;AkSoundEngine.lib;AkMemoryMgr.lib;AkStreamMgr.lib;CommunicationCentral.lib;%(AdditionalDependencies)</AdditionalDependencies>
 </Link>
 <PostBuildEvent>
-  <Command>xcopy /Y /D "$(SolutionDir)External\Runtime\*.dll" "$(TargetDir)"</Command>
+  <Command>xcopy /Y /D "$(PEPRepoRoot)External\Runtime\*.dll" "$(TargetDir)"</Command>
 </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>

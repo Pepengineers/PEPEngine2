@@ -12,7 +12,7 @@
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.Wwise.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.Wwise.props')" />
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)Engine\Engine.Core\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(PEPRepoRoot)Engine\Engine.Core\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
 </Project>

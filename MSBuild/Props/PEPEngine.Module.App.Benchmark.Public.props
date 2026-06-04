@@ -3,7 +3,7 @@
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.Module.App.Base.Public.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.Module.App.Base.Public.props')" />
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(SolutionDir)Apps\App.Benchmark\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(PEPRepoRoot)Apps\App.Benchmark\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
 </Project>

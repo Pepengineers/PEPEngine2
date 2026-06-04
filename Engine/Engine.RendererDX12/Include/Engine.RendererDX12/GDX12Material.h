@@ -3,7 +3,6 @@
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 class GDX12Texture;
-
 class GDX12Material
 {
 public:

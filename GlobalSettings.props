@@ -3,12 +3,21 @@
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
-    <OutDir>$(SolutionDir)Build\bin\$(PlatformName)\$(Configuration)\$(ProjectName)\</OutDir>
-    <IntDir>$(SolutionDir)Build\obj\$(PlatformName)\$(Configuration)\$(ProjectName)\</IntDir>
+    <PEPRepoRoot Condition="'$(PEPRepoRoot)'==''">$(MSBuildThisFileDirectory)</PEPRepoRoot>
+    <OutDir>$(PEPRepoRoot)Build\bin\$(PlatformName)\$(Configuration)\$(ProjectName)\</OutDir>
+    <IntDir>$(PEPRepoRoot)Build\obj\$(PlatformName)\$(Configuration)\$(ProjectName)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <PreprocessorDefinitions>SOLUTION_DIR=LR"($(SolutionDir))";PROJECT_DIR=LR"($(ProjectDir))";ASSETS_FOLDER=LR"($(SolutionDir)Assets\\)";TEXTURES_FOLDER=LR"($(SolutionDir)Assets\Textures\\)";MODELS_FOLDER=LR"($(SolutionDir)Assets\Models\\)";SHADERS_FOLDER=LR"($(SolutionDir)Engine\Engine.RendererDX12\Shaders\\)";%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>
+          SOLUTION_DIR=LR"($(PEPRepoRoot))";
+          PROJECT_DIR=LR"($(ProjectDir))";
+          ASSETS_FOLDER=LR"($(PEPRepoRoot)Assets\\)";
+          TEXTURES_FOLDER=LR"($(PEPRepoRoot)Assets\Textures\\)";
+          MODELS_FOLDER=LR"($(PEPRepoRoot)Assets\Models\\)";
+          SHADERS_FOLDER=LR"($(PEPRepoRoot)Engine\Engine.RendererDX12\Shaders\\)";
+          %(PreprocessorDefinitions)
+      </PreprocessorDefinitions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
     </ClCompile>
   </ItemDefinitionGroup>
