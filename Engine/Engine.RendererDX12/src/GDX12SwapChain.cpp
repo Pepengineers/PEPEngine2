@@ -70,6 +70,7 @@ void GDX12SwapChain::CreateBuffers()
         textureDesc.ClearValue = { 0.f, 0.f, 0.f, 1.f };
 
         textureDesc.CreateRTV = true;
+        textureDesc.RTVHeapIndex = _rtvHeap->GetAvailableIndex();
         textureDesc.RTVDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
         textureDesc.RTVDesc.Format = _format;
         textureDesc.RTVDesc.Texture2D.PlaneSlice = 0;

@@ -4,12 +4,23 @@
 
 class GDX12Device;
 
+struct GDX12RootSignatureRange
+{
+	GDX12RootSignatureRange(UINT numDescs, UINT descOffset = 0) 
+		: NumDescriptors(numDescs), DescriptorOffset(descOffset) {}
+	UINT NumDescriptors = 0;
+	UINT DescriptorOffset = 0;
+};
+
 struct GDX12RootSignatureDesc
 {
-	int NumCBVSlots = 0;
-	int NumSRVSlots = 0;
-	int NumUAVSlots = 0;
+	UINT NumSingleCBVSlots = 0;
+	UINT NumSingleSRVSlots = 0;
+	UINT NumSingleUAVSlots = 0;
 	std::vector<CD3DX12_STATIC_SAMPLER_DESC> StaticSamplers;
+	std::vector<GDX12RootSignatureRange> SRVRanges;
+	std::vector<GDX12RootSignatureRange> UAVRanges;
+	std::vector<GDX12RootSignatureRange> CBVRanges;
 };
 
 class GDX12RootSignature

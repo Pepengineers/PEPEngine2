@@ -12,54 +12,105 @@ GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSigna
 {
     std::vector<CD3DX12_ROOT_PARAMETER1> rootParameters;
     std::vector<CD3DX12_DESCRIPTOR_RANGE1> ranges;
-    ranges.reserve(desc.NumSRVSlots + desc.NumUAVSlots);
+    ranges.reserve(desc.NumSingleSRVSlots + desc.NumSingleUAVSlots + desc.SRVRanges.size() + desc.UAVRanges.size());
 
     UINT currentParamIndex = 0;
 
-    if (desc.NumCBVSlots > 0)
+    if (desc.NumSingleCBVSlots > 0 || !desc.CBVRanges.empty())
     {
         _cbv0ParamIndex = currentParamIndex;
-        for (UINT i = 0; i < desc.NumCBVSlots; i++)
+        UINT currentRegister = 0;
+
+        for (UINT i = 0; i < desc.NumSingleCBVSlots; i++)
         {
             CD3DX12_ROOT_PARAMETER1 param;
-            param.InitAsConstantBufferView(i);
+            param.InitAsConstantBufferView(currentRegister);
             rootParameters.push_back(param);
             currentParamIndex++;
+            currentRegister++;
+        }
+
+        for (const auto& cbvRange : desc.CBVRanges)
+        {
+            CD3DX12_DESCRIPTOR_RANGE1 range;
+            range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, cbvRange.NumDescriptors, currentRegister,
+                0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
+            ranges.push_back(range);
+
+            CD3DX12_ROOT_PARAMETER1 param;
+            param.InitAsDescriptorTable(1, &ranges.back());
+            rootParameters.push_back(param);
+            currentParamIndex++;
+            currentRegister += cbvRange.NumDescriptors;
         }
     }
 
-    if (desc.NumSRVSlots > 0)
+    if (desc.NumSingleSRVSlots > 0 || !desc.SRVRanges.empty())
     {
         _srv0ParamIndex = currentParamIndex;
-        for (UINT i = 0; i < desc.NumSRVSlots; i++)
+        UINT currentRegister = 0;
+
+        for (UINT i = 0; i < desc.NumSingleSRVSlots; i++)
         {
             CD3DX12_DESCRIPTOR_RANGE1 range;
-            range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, i);
+            range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, currentRegister);
             ranges.push_back(range);
 
             CD3DX12_ROOT_PARAMETER1 param;
             param.InitAsDescriptorTable(1, &ranges.back());
             rootParameters.push_back(param);
             currentParamIndex++;
+            currentRegister++;
+        }
+
+        for (const auto& srvRange : desc.SRVRanges)
+        {
+            CD3DX12_DESCRIPTOR_RANGE1 range;
+            range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, srvRange.NumDescriptors, currentRegister,
+                0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
+            ranges.push_back(range);
+
+            CD3DX12_ROOT_PARAMETER1 param;
+            param.InitAsDescriptorTable(1, &ranges.back());
+            rootParameters.push_back(param);
+            currentParamIndex++;
+            currentRegister += srvRange.NumDescriptors;
         }
     }
 
-    if (desc.NumUAVSlots > 0)
+    if (desc.NumSingleUAVSlots > 0 || !desc.UAVRanges.empty())
     {
         _uav0ParamIndex = currentParamIndex;
-        for (UINT i = 0; i < desc.NumUAVSlots; i++)
+        UINT currentRegister = 0;
+
+        for (UINT i = 0; i < desc.NumSingleUAVSlots; i++)
         {
             CD3DX12_DESCRIPTOR_RANGE1 range;
-            range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, i);
+            range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 1, currentRegister,
+                0, D3D12_DESCRIPTOR_RANGE_FLAG_DESCRIPTORS_VOLATILE);
             ranges.push_back(range);
 
             CD3DX12_ROOT_PARAMETER1 param;
             param.InitAsDescriptorTable(1, &ranges.back());
             rootParameters.push_back(param);
             currentParamIndex++;
+            currentRegister++;
+        }
+
+        for (const auto& uavRange : desc.UAVRanges)
+        {
+            CD3DX12_DESCRIPTOR_RANGE1 range;
+            range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, uavRange.NumDescriptors, currentRegister);
+            ranges.push_back(range);
+
+            CD3DX12_ROOT_PARAMETER1 param;
+            param.InitAsDescriptorTable(1, &ranges.back());
+            rootParameters.push_back(param);
+            currentParamIndex++;
+            currentRegister += uavRange.NumDescriptors;
         }
     }
-    
+
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
     rootSignatureDesc.Init_1_1(
         static_cast<UINT>(rootParameters.size()),

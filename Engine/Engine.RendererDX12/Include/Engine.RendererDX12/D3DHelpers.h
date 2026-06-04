@@ -116,3 +116,5 @@ inline std::string ShaderModelToString(D3D_SHADER_MODEL model)
     default: return "Unknown";
     }
 }
+
+std::vector<CD3DX12_STATIC_SAMPLER_DESC> GetStaticSamplers();

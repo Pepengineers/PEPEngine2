@@ -18,14 +18,12 @@ struct GDX12MaterialConstants
 {
     float Roughness = 0.5f;
     float Metallic = 0.5f;
-    float HasNormalMap = 0.0f;
-    float HasSpecularMap = 0.0f;
-    DirectX::XMFLOAT3 SpecularColor = { 0.0f, 0.0f, 0.0f };
-    float HasRoughnessMap = 0.0f;
-    DirectX::XMFLOAT3 EmissiveColor = { 0.0f, 0.0f, 0.0f };
-    float HasEmissiveMap = 0.0f;
-    float UseBakedLighting = 0.0f;
-    DirectX::XMFLOAT3 _pad0 = { 0.0f, 0.0f, 0.0f };
+    UINT DiffuseIndex;
+    UINT NormalIndex;
+    UINT DisplacementIndex;
+    float _pad1;
+    float _pad2;
+    float _pad3;
 };
 
 struct GDX12CameraConstants
@@ -51,4 +49,21 @@ struct GDX12LightConstants
     DirectX::XMFLOAT4X4 ViewProj[6] = { Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4() };
     DirectX::XMFLOAT4X4 ShadowTransform[6] = { Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4() };
     DirectX::XMFLOAT4 CascadeDistances = { 10.0f, 50.0f, 150.0f, 400.0f };
+};
+
+struct GDX12InstanceData
+{
+    UINT TransformIndex;
+    UINT MaterialIndex;
+    UINT _pad1;
+    UINT _pad2;
+};
+
+struct GDX12IndirectDrawArgs
+{
+    UINT IndexCountPerInstance;
+    UINT InstanceCount;
+    UINT StartIndexLocation;
+    INT  BaseVertexLocation;
+    UINT StartInstanceLocation;
 };

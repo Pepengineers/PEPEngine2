@@ -18,12 +18,16 @@ struct GDX12TextureDesc
 	DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
 	bool CreateSRV = true;
 	D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
+	UINT SRVHeapIndex = -1;
 	bool CreateRTV = false;
 	D3D12_RENDER_TARGET_VIEW_DESC RTVDesc = {};
+	UINT RTVHeapIndex = -1;
 	bool CreateUAV = false;
 	D3D12_UNORDERED_ACCESS_VIEW_DESC UAVDesc = {};
+	UINT UAVHeapIndex = -1;
 	bool CreateDSV = false;
 	D3D12_DEPTH_STENCIL_VIEW_DESC DSVDesc = {};
+	UINT DSVHeapIndex = -1;
 	XMFLOAT4 ClearValue = { 0.f, 0.f, 0.f, 1.f };
 
 	//If this is specified, it will be used as texture resource

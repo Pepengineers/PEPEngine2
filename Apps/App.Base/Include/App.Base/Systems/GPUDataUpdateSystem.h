@@ -83,11 +83,40 @@ public:
 					GDX12TransformConstants objConstants;
 					XMStoreFloat4x4(&objConstants.WorldMatrix, XMMatrixTranspose(world));
 
-                    auto& CBuffer = renderModule->GetCurrentFrameConstants()->TransformCB;
+                    auto& CBuffer = renderModule->GetCurrentFrameConstants()->TransformCache;
                     CBuffer->CopyData(transform._CBufferIndex, objConstants);
 
                     transform._numFramesDirty--;
 				}
+            });
+
+        ecs.ForEach<TransformComponent, StaticMeshRenderComponent>(
+            [&ecs, &renderModule, &numFrames](Entity entity, TransformComponent& transform, StaticMeshRenderComponent& renderer)
+            {
+                if (!renderer.DirtyFlag) { return; }
+                renderer.DirtyFlag = false;
+
+                auto instanceCache = renderModule->GetInstanceCache();
+                auto indirectCommandsCache = renderModule->GetIndirectCommandsCache();
+                auto gpuMesh = renderModule->GetGPUMesh(renderer.MeshHandler);
+
+                for (int i = 0; i < gpuMesh->SubMeshes.size(); i++)
+                {
+                    const auto& subMesh = gpuMesh->SubMeshes[i];
+
+                    GDX12InstanceData instanceData;
+                    instanceData.TransformIndex = transform._CBufferIndex;
+                    instanceData.MaterialIndex = renderer.Materials[subMesh.MaterialIndex]->_CBufferIndex;
+                    GDX12IndirectDrawArgs drawCommand;
+                    drawCommand.IndexCountPerInstance = subMesh.IndexCount;
+                    drawCommand.InstanceCount = 1;
+                    drawCommand.StartIndexLocation = subMesh.StartIndexLocation;
+                    drawCommand.BaseVertexLocation = subMesh.StartVertexLocation;
+                    drawCommand.StartInstanceLocation = renderer._CBufferIndices[i];
+
+                    instanceCache->CopyData(renderer._CBufferIndices[i], instanceData);
+                    indirectCommandsCache->CopyData(renderer._CBufferIndices[i], drawCommand);
+                }
             });
 
     }

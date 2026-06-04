@@ -1,3 +1,8 @@
+//Values are copied from GDX12DescriptorHeap.h/GDX12SRVHeapIndexAllocation class
+#define TEXTURE2D_RANGE_LENGTH 99000
+#define TEXTURECUBE_RANGE_LENGTH 5000
+#define SHADOWMAP_RANGE_LENGTH 400
+
 struct MainCB
 {
     float2 RenderTargetSize;
@@ -5,23 +10,21 @@ struct MainCB
     float DeltaTime;
 };
 
-struct TransformCB
+struct Transform
 {
     float4x4 World;
 };
 
-struct MaterialCB
+struct Material
 {
     float Roughness;
     float Metallic;
-    float HasNormalMap;
-    float HasSpecularMap;
-    float3 SpecularColor;
-    float HasRoughnessMap;
-    float3 EmissiveColor;
-    float HasEmissiveMap;
-    float UseBakedLighting;
-    float3 _pad0;
+    uint DiffuseIndex;
+    uint NormalIndex;
+    uint DisplacementIndex;
+    float _pad1;
+    float _pad2;
+    float _pad3;
 };
 
 struct CameraCB
@@ -47,4 +50,12 @@ struct LightCB
     float4x4 ViewProj[6];
     float4x4 ShadowTransform[6];
     float4 CascadeDistances;
+};
+
+struct InstanceData
+{
+    uint TransformIndex;
+    uint MaterialIndex;
+    uint _pad1;
+    uint _pad2;
 };

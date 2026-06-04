@@ -28,13 +28,11 @@ class GDX12RenderCommandRecorder
 public:
 	GDX12RenderCommandRecorder();
 
-	void DrawMesh(MeshHandle mesh, std::vector<GDX12Material*> materials, int transformCBIndex);
 	void DrawFromCamera(int cameraCBIndex);
 	void ClearCommands();
 
 private:
 	friend class RenderModule;
 
-	std::vector<DrawMeshCommand> _drawMeshCommands;
 	int _cameraCBIndex;
 };

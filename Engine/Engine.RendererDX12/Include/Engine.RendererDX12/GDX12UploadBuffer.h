@@ -3,6 +3,8 @@
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 #include "Engine.RendererDX12/GDX12Device.h"
+#include "Engine.RendererDX12/GDX12Descriptor.h"
+#include "Engine.RendererDX12/GDX12DescriptorHeap.h"
 
 template<typename T>
 class GDX12UploadBuffer
@@ -24,6 +26,9 @@ public:
     // 0'th element is the buffer's address
     D3D12_GPU_VIRTUAL_ADDRESS GetElementAddress(UINT elementIndex);
 
+    GDX12Descriptor* GetSRV();
+    void CreateSRV(GDX12DescriptorHeap* inHeap, UINT HeapIndex);
+
 private:
     GDX12Device* _device;
     ComPtr<ID3D12Resource> _uploadBuffer;
@@ -33,20 +38,31 @@ private:
     UINT _elementByteSize;
     UINT _totalBufferSize;
     bool _useConstantBufferSizeAlignment;
+
+    std::unique_ptr<GDX12Descriptor> _srv;
+    GDX12DescriptorHeap* _heap;
 };
 
 //Can't move template class definitions into .cpp cuz it'll throw linking errors
 
 template<typename T>
 inline GDX12UploadBuffer<T>::GDX12UploadBuffer(GDX12Device* device, UINT elementCount, bool useConstantBufferSizeAlignment)
-    : _device(device)
-    , _elementCount(elementCount)
-    , _useConstantBufferSizeAlignment(useConstantBufferSizeAlignment)
+    : _device(device), 
+    _elementCount(elementCount), 
+    _useConstantBufferSizeAlignment(useConstantBufferSizeAlignment),
+    _heap(nullptr)
 {
     _elementByteSize = sizeof(T);
-
     // constant buffer size should be a multiple of 255
     if (_useConstantBufferSizeAlignment) { _elementByteSize = (_elementByteSize + 255) & ~255; }
+
+    if (elementCount == 0)
+    {
+        _uploadBuffer = nullptr;
+        _mappedData = nullptr;
+        _totalBufferSize = 0;
+        return;
+    }
 
     _totalBufferSize = _elementByteSize * _elementCount;
 
@@ -76,6 +92,32 @@ GDX12UploadBuffer<T>::~GDX12UploadBuffer()
 }
 
 template<typename T>
+void GDX12UploadBuffer<T>::CreateSRV(GDX12DescriptorHeap* inHeap, UINT HeapIndex)
+{
+    if (!_srv) 
+    { 
+        _srv = std::make_unique<GDX12Descriptor>(); 
+        _heap = inHeap;
+    }
+
+    D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+    srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    srvDesc.Format = DXGI_FORMAT_UNKNOWN;
+    srvDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+    srvDesc.Buffer.FirstElement = 0;
+    srvDesc.Buffer.NumElements = _elementCount;
+    srvDesc.Buffer.StructureByteStride = sizeof(T);
+
+    _srv->InitAsSRV(_uploadBuffer.Get(), &srvDesc, inHeap, HeapIndex);
+}
+
+template<typename T>
+GDX12Descriptor* GDX12UploadBuffer<T>::GetSRV()
+{
+    return _srv.get();
+}
+
+template<typename T>
 ComPtr<ID3D12Resource> GDX12UploadBuffer<T>::GetResource()
 {
     return _uploadBuffer.Get();
@@ -84,6 +126,7 @@ ComPtr<ID3D12Resource> GDX12UploadBuffer<T>::GetResource()
 template<typename T>
 void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T& data)
 {
+    if (!_uploadBuffer) return;
     if (elementIndex >= _elementCount) return;
     memcpy(&_mappedData[elementIndex * _elementByteSize], &data, sizeof(T));
 }
@@ -91,6 +134,7 @@ void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T& data)
 template<typename T>
 void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T* data, UINT count)
 {
+    if (!_uploadBuffer) return;
     if (elementIndex + count > _elementCount) return;
     memcpy(&_mappedData[elementIndex * _elementByteSize], data, sizeof(T) * count);
 }
@@ -127,6 +171,8 @@ void GDX12UploadBuffer<T>::Resize(UINT newElementCount)
     _mappedData = newMappedData;
     _elementCount = newElementCount;
     _totalBufferSize = newTotalSize;
+
+    if (_srv) CreateSRV(_heap, _srv->HeapIndex);
 }
 
 template<typename T>

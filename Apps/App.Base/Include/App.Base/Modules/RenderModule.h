@@ -59,6 +59,10 @@ public:
         ListenerHandle CameraCreated = 0;
         ListenerHandle CameraDestroyed = 0;
         ListenerHandle CameraUpdated = 0;
+
+        ListenerHandle RenderCompCreated = 0;
+        ListenerHandle RenderCompDestroyed = 0;
+        ListenerHandle RenderCompUpdated = 0;
     };
     
     // this function adds listeners to new world
@@ -66,19 +70,27 @@ public:
     // unsubscribing if world is removed
     void UnsubscribeFromWorld(World& world);
     
-    // transform events
+    // TransformComponent events
     void OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component);
     void OnTransformComponentDestroyed(World& world, Entity entity, TransformComponent& component);
     void OnTransformComponentUpdated(World& world, Entity entity, TransformComponent& component);
 
-    // camera events
+    // CameraComponent events
     void OnCameraComponentCreated(World& world, Entity entity, CameraComponent& component);
     void OnCameraComponentDestroyed(World& world, Entity entity, CameraComponent& component);
     void OnCameraComponentUpdated(World& world, Entity entity, CameraComponent& component);
 
+    // RenderComponent events
+    void OnRenderComponentCreated(World& world, Entity entity, StaticMeshRenderComponent& component);
+    void OnRenderComponentDestroyed(World& world, Entity entity, StaticMeshRenderComponent& component);
+    void OnRenderComponentUpdated(World& world, Entity entity, StaticMeshRenderComponent& component);
+
     const float GetAspectRatio();
     GDX12RenderCommandRecorder* GetCommandRecorder();
     GDX12FrameConstants* GetCurrentFrameConstants();
+    const GPUMesh* GetGPUMesh(MeshHandle handle);
+    GDX12UploadBuffer<GDX12InstanceData>* GetInstanceCache();
+    GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetIndirectCommandsCache();
 
 protected:
     void OnUpdate() override;
@@ -96,7 +108,6 @@ private:
 
     void UpdateMainCB();
     void UpdateMaterialCB();
-    std::vector<CD3DX12_STATIC_SAMPLER_DESC> GetStaticSamplers();
     
     void SubscribeToSceneManager();
     void UnsubscribeFromSceneManager();
@@ -122,15 +133,19 @@ private:
 
     // All of class members below should probably be put into DeviceResources class, and made for each device
     // Since all of these resources are currently existing on _primaryDevice only
-    std::vector<std::unique_ptr<GDX12FrameConstants>> _frameConstants;
-    UINT _currFrameConstantsIndex;
-
     std::unique_ptr<GDX12GeometryBuffer> _geometryBuffer;
 
     // All heaps created in one high-capacity instance
     std::unique_ptr<GDX12DescriptorHeap> _rtvHeap;
     std::unique_ptr<GDX12DescriptorHeap> _srvuavHeap;
     std::unique_ptr<GDX12DescriptorHeap> _dsvHeap;
+
+    std::vector<std::unique_ptr<GDX12FrameConstants>> _frameConstants;
+    UINT _currFrameConstantsIndex;
+
+    std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> _instanceCache;
+    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> _IndirectCommandsCache;
+    ComPtr<ID3D12CommandSignature> _commandSignature;
 
     std::unordered_map<std::string, ComPtr<ID3DBlob>> _shaders;
     std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> _PSOs;

@@ -26,6 +26,7 @@ public:
 	bool UseBakedLighting;
 
 	bool DirtyFlag;
+	UINT _CBufferIndex;
 
 private:
 
@@ -39,7 +40,5 @@ private:
 	{
 
 	}
-
-	UINT _CBufferIndex;
 	UINT _numFramesDirty;
 };

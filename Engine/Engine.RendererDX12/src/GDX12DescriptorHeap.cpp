@@ -17,6 +17,8 @@ GDX12DescriptorHeap::GDX12DescriptorHeap(GDX12Device* device, D3D12_DESCRIPTOR_H
     ThrowIfFailed(device->GetDevice()->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&_heap)));
 
     _descriptorSize = device->GetDevice()->GetDescriptorHandleIncrementSize(type);
+
+    _occupanceRegistry.resize(numDescriptors, false);
 }
 
 GDX12DescriptorHeap::~GDX12DescriptorHeap()
@@ -44,20 +46,20 @@ UINT GDX12DescriptorHeap::GetNumDescriptors()
     return _numDescriptors;
 }
 
-UINT GDX12DescriptorHeap::GetAvailableIndex()
+UINT GDX12DescriptorHeap::GetAvailableIndex(UINT startIndex, UINT maxRange)
 {
-    if (_availableIndices.empty() && _heapHeadIndex + 1 > _numDescriptors) { OutputDebugStringA("ERROR: DESCRIPTOR HEAP IS FULL\n"); }
-
-    if (!_availableIndices.empty())
+    UINT k = 0;
+    while (true)
     {
-        UINT value = _availableIndices.back();
-        _availableIndices.pop_back();
-        return value;
+        if (startIndex + k > _numDescriptors) { OutputDebugStringA("ERROR: GetAvailableIndex is out of heap capacity\n"); }
+        if (_occupanceRegistry[startIndex + k] == false)
+        {
+            _occupanceRegistry[startIndex + k] = true;
+            return startIndex + k;
+        }
+        if ((maxRange != 0) && k > maxRange) { OutputDebugStringA("ERROR: GetAvailableIndex is out of specified range\n"); }
+        k++;
     }
-
-    UINT res = _heapHeadIndex;
-    _heapHeadIndex++;
-    return res;
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE GDX12DescriptorHeap::GetCPUHandle(UINT index) const

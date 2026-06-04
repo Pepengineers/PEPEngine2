@@ -8,6 +8,7 @@
 #include "Engine.RendererDX12/GDX12DeviceFactory.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
+#include "Engine.RendererDX12/GDX12Descriptor.h"
 
 #include "App.Base/Modules/SceneManagerModule.h"
 
@@ -109,11 +110,11 @@ GDX12Material* RenderModule::CreateMaterial(const std::string& name)
     _materials[name] = std::unique_ptr<GDX12Material>(new GDX12Material());
 
     _materials[name]->Name = name;
-    _materials[name]->_CBufferIndex = _frameConstants[0]->MaterialCB->GetElementCount();
+    _materials[name]->_CBufferIndex = _frameConstants[0]->MaterialCache->GetElementCount();
 
     for (auto& constants : _frameConstants)
     {
-        auto& CBuffer = constants->MaterialCB;
+        auto& CBuffer = constants->MaterialCache;
         CBuffer->Resize(CBuffer->GetElementCount() + 1);
     }
 
@@ -134,20 +135,20 @@ GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture
 {
     if (_textures.find(name) != _textures.end())
     {
-        std::string errorMsg = "ERROR: Material with name " + name + " already exists in materials directory.\n";
+        std::string errorMsg = "ERROR: Texture with name " + name + " already exists in Textures directory.\n";
         OutputDebugStringA(errorMsg.c_str());
         return nullptr;
     }
 
     GDX12TextureDesc desc;
     desc.SRV_UAV_Heap = _srvuavHeap.get();
+    desc.SRVHeapIndex = _srvuavHeap->GetAvailableIndex(Texture2D_StartIndex, Texture2D_RangeLength);
     desc.Format = desc.SRVDesc.Format = texture->GetFormat();
     desc.Width = texture->GetWidth();
     desc.Height = texture->GetHeight();
 
     desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
     desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    desc.SRVDesc.Texture2D.MipLevels = 1;
     desc.SRVDesc.Texture2D.MipLevels = texture->GetMipLevels();
     desc.SRVDesc.Texture2D.MostDetailedMip = 0;
     desc.SRVDesc.Texture2D.PlaneSlice = 0;
@@ -274,6 +275,7 @@ void RenderModule::SubscribeToWorld(World& world)
 
     auto& transformPool = ecs.GetPool<TransformComponent>();
     auto& cameraPool = ecs.GetPool<CameraComponent>();
+    auto& renderCompPool = ecs.GetPool<StaticMeshRenderComponent>();
 
     WorldRenderSubscriptions subscriptions;
 
@@ -319,6 +321,27 @@ void RenderModule::SubscribeToWorld(World& world)
                 OnCameraComponentUpdated(world, entity, component);
             });
 
+    subscriptions.RenderCompCreated =
+        renderCompPool.OnComponentCreated.AddListener(
+            [this, &world](Entity entity, StaticMeshRenderComponent& component)
+            {
+                OnRenderComponentCreated(world, entity, component);
+            });
+
+    subscriptions.RenderCompDestroyed =
+        renderCompPool.OnComponentDestroyed.AddListener(
+            [this, &world](Entity entity, StaticMeshRenderComponent& component)
+            {
+                OnRenderComponentDestroyed(world, entity, component);
+            });
+
+    subscriptions.RenderCompUpdated =
+        renderCompPool.OnComponentUpdated.AddListener(
+            [this, &world](Entity entity, StaticMeshRenderComponent& component)
+            {
+                OnRenderComponentUpdated(world, entity, component);
+            });
+
     _worldSubscriptions[&world] = subscriptions;
 }
 
@@ -353,13 +376,28 @@ GDX12FrameConstants* RenderModule::GetCurrentFrameConstants()
     return _frameConstants[_currFrameConstantsIndex].get();
 }
 
+const GPUMesh* RenderModule::GetGPUMesh(MeshHandle handle)
+{
+    return _geometryBuffer->GetGPUMeshByHandle(handle);
+}
+
+GDX12UploadBuffer<GDX12InstanceData>* RenderModule::GetInstanceCache()
+{
+    return _instanceCache.get();
+}
+
+GDX12UploadBuffer<GDX12IndirectDrawArgs>* RenderModule::GetIndirectCommandsCache()
+{
+    return _IndirectCommandsCache.get();
+}
+
 void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
 {
-    component._CBufferIndex = _frameConstants[0]->TransformCB->GetElementCount();
+    component._CBufferIndex = _frameConstants[0]->TransformCache->GetElementCount();
 
     for (auto& constants : _frameConstants)
     {
-        auto& CBuffer = constants->TransformCB;
+        auto& CBuffer = constants->TransformCache;
         CBuffer->Resize(CBuffer->GetElementCount() + 1);
     }
 }
@@ -388,6 +426,27 @@ void RenderModule::OnCameraComponentDestroyed(World& world, Entity entity, Camer
 }
 
 void RenderModule::OnCameraComponentUpdated(World& world, Entity entity, CameraComponent& component)
+{
+}
+
+void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticMeshRenderComponent& component)
+{
+    auto& MeshGPUData = _geometryBuffer->_meshCache[component.MeshHandler.GetValue()];
+    
+    for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
+    {
+        component._CBufferIndices.push_back(_instanceCache->GetElementCount());
+        _instanceCache->Resize(_instanceCache->GetElementCount() + 1);
+        _IndirectCommandsCache->Resize(_IndirectCommandsCache->GetElementCount() + 1);
+
+    }
+}
+
+void RenderModule::OnRenderComponentDestroyed(World& world, Entity entity, StaticMeshRenderComponent& component)
+{
+}
+
+void RenderModule::OnRenderComponentUpdated(World& world, Entity entity, StaticMeshRenderComponent& component)
 {
 }
 
@@ -450,25 +509,14 @@ void RenderModule::OnRender()
     cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
 
-    for (DrawMeshCommand& renderCommand : _commandRecorder._drawMeshCommands)
-    {
-        cmdList->SetGraphicsRootConstantBufferView(2, CurrentFrameConsts->TransformCB->
-            GetElementAddress(renderCommand.TransformCBIndex));
+    cmdList->SetSRV(0, CurrentFrameConsts->MaterialCache->GetSRV()->GPUHandle);
+    cmdList->SetSRV(1, CurrentFrameConsts->TransformCache->GetSRV()->GPUHandle);
+    cmdList->SetSRV(2, _instanceCache->GetSRV()->GPUHandle);
+    cmdList->SetSRV(3, _srvuavHeap->GetGPUHandle(Texture2D_StartIndex));
 
-        auto& MeshGPUData = _geometryBuffer->_meshCache[renderCommand.Mesh.GetValue()];
-
-        for (GPUSubMesh& SubMesh : MeshGPUData->SubMeshes)
-        {
-            auto material = renderCommand.Materials[SubMesh.MaterialIndex];
-
-            cmdList->SetGraphicsRootConstantBufferView(3, CurrentFrameConsts->MaterialCB->
-                GetElementAddress(material->_CBufferIndex));
-            cmdList->SetTextureAsSRV(0, material->Diffuse);
-
-            cmdList->DrawIndexedInstanced(SubMesh.IndexCount, 1, 
-                SubMesh.StartIndexLocation, SubMesh.StartVertexLocation, 0);
-        }
-    }
+    cmdList->GetCommandList()->
+        ExecuteIndirect(_commandSignature.Get(), _IndirectCommandsCache->GetElementCount()
+            , _IndirectCommandsCache->GetResource().Get(), 0, nullptr, 0);
 
     cmdList->EndPixEvent();
 
@@ -486,7 +534,7 @@ void RenderModule::BuildDescHeapsAndBackBuffer()
     _rtvHeap = std::make_unique<GDX12DescriptorHeap>(_primaryDevice.get(),
         D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 1000,
         D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
-
+    
     _srvuavHeap = std::make_unique<GDX12DescriptorHeap>(_primaryDevice.get(),
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1000000,
         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
@@ -506,6 +554,7 @@ void RenderModule::BuildDescHeapsAndBackBuffer()
     desc.DSVHeap = _dsvHeap.get();
 
     desc.CreateDSV = true;
+    desc.DSVHeapIndex = _dsvHeap->GetAvailableIndex();
     desc.Format = desc.DSVDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
     desc.Width = width;
     desc.Height = height;
@@ -520,10 +569,24 @@ void RenderModule::BuildDescHeapsAndBackBuffer()
 void RenderModule::BuildRootSignatures()
 {
     GDX12RootSignatureDesc desc;
-    desc.NumCBVSlots = 4;
-    desc.NumSRVSlots = 3;
+    desc.NumSingleCBVSlots = 2;
+    desc.NumSingleSRVSlots = 3;
     desc.StaticSamplers = GetStaticSamplers();
+    desc.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
     _rootSignatures["Test"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc);
+
+    D3D12_INDIRECT_ARGUMENT_DESC arg = {};
+    arg.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
+
+    D3D12_COMMAND_SIGNATURE_DESC desc2 = {};
+    desc2.ByteStride = sizeof(GDX12IndirectDrawArgs);
+    desc2.NumArgumentDescs = 1;
+    desc2.pArgumentDescs = &arg;
+    desc2.NodeMask = 0;
+
+    _primaryDevice->GetDevice()->CreateCommandSignature(&desc2, nullptr, IID_PPV_ARGS(&_commandSignature));
+
+
 }
 
 void RenderModule::BuildShaders()
@@ -569,9 +632,17 @@ void RenderModule::BuildFrameConstants()
 {
     for (int i = 0; i < NumFrameConstantVariable.GetValue(); i++)
     {
-        //TODO: fix zero element upload buffer crash
-        _frameConstants.emplace_back(std::make_unique<GDX12FrameConstants>(_primaryDevice.get()));
+        _frameConstants.push_back(std::make_unique<GDX12FrameConstants>(_primaryDevice.get()));
+
+        _frameConstants[i]->MaterialCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(MaterialCacheBuffer));
+        _frameConstants[i]->TransformCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(TransformCacheBuffer));
     }
+
+    _instanceCache = std::make_unique<GDX12UploadBuffer<GDX12InstanceData>>(_primaryDevice.get(), 0, false);
+    _IndirectCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), 0, false);
+
+    _instanceCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(InstanceCacheBuffer));
+    _IndirectCommandsCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(IndirectCommandsBuffer));
 }
 
 void RenderModule::UpdateMainCB()
@@ -592,7 +663,7 @@ void RenderModule::UpdateMainCB()
 
 void RenderModule::UpdateMaterialCB()
 {
-    auto currMaterialCB = _frameConstants[_currFrameConstantsIndex]->MaterialCB.get();
+    auto currMaterialCB = _frameConstants[_currFrameConstantsIndex]->MaterialCache.get();
     for (auto& i : _materials)
     {
         GDX12Material* material = i.second.get();
@@ -608,64 +679,24 @@ void RenderModule::UpdateMaterialCB()
             GDX12MaterialConstants materialConstants;
             materialConstants.Roughness = material->Roughness;
             materialConstants.Metallic = material->Metallic;
+            
+            if (material->Diffuse)
+            {
+                materialConstants.DiffuseIndex = material->Diffuse->GetSRV()->HeapIndex - Texture2D_StartIndex;
+            }
+            if (material->Normal)
+            {
+                materialConstants.NormalIndex = material->Normal->GetSRV()->HeapIndex - Texture2D_StartIndex;
+            }
+            if (material->Displacement)
+            {
+                materialConstants.DisplacementIndex = material->Displacement->GetSRV()->HeapIndex - Texture2D_StartIndex;
+            }
 
             currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
             material->_numFramesDirty--;
         }
     }
-}
-
-std::vector<CD3DX12_STATIC_SAMPLER_DESC> RenderModule::GetStaticSamplers()
-{
-    CD3DX12_STATIC_SAMPLER_DESC pointWrap(
-        0, // shaderRegister
-        D3D12_FILTER_MIN_MAG_MIP_POINT, // filter
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressU
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  // addressV
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP); // addressW
-
-    CD3DX12_STATIC_SAMPLER_DESC pointClamp(
-        1,
-        D3D12_FILTER_MIN_MAG_MIP_POINT,
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-
-    CD3DX12_STATIC_SAMPLER_DESC linearWrap(
-        2,
-        D3D12_FILTER_MIN_MAG_MIP_LINEAR,
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP);
-
-    CD3DX12_STATIC_SAMPLER_DESC linearClamp(
-        3,
-        D3D12_FILTER_MIN_MAG_MIP_LINEAR,
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
-
-    CD3DX12_STATIC_SAMPLER_DESC anisotropicWrap(
-        4,
-        D3D12_FILTER_ANISOTROPIC,
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  
-        D3D12_TEXTURE_ADDRESS_MODE_WRAP,  
-        0.0f, // mipLODBias     
-        8);   // maxAnisotropy     
-    CD3DX12_STATIC_SAMPLER_DESC anisotropicClamp(
-        5,
-        D3D12_FILTER_ANISOTROPIC, 
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  
-        D3D12_TEXTURE_ADDRESS_MODE_CLAMP,  
-        0.0f,                              
-        8);                                
-
-    return {
-        pointWrap, pointClamp,
-        linearWrap, linearClamp,
-        anisotropicWrap, anisotropicClamp };
 }
 
 void RenderModule::SubscribeToSceneManager()
