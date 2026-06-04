@@ -10,6 +10,9 @@
 #include "App.Base/Components/StaticMeshRenderComponent.h"
 #include "App.Base/Components/CameraComponent.h"
 #include "App.Base/Components/CircleMovementComponent.h"
+#include "App.Base/Components/SplineCurveComponent.h"
+#include "App.Base/Components/SplineFollowComponent.h"
+#include "App.Base/Components/LookAtTargetComponent.h"
 
 struct WorldDesc {
     std::filesystem::path WorldFilePath;
@@ -23,7 +26,10 @@ using WorldECS = ECSStorage<
     NameComponent,
     StaticMeshRenderComponent,
     CameraComponent,
-    CircleMovementComponent
+    CircleMovementComponent,
+    SplineCurveComponent,
+    SplineFollowComponent,
+    LookAtTargetComponent
 >;
 
 class World {

@@ -682,6 +682,43 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 
     std::vector<GDX12Material*> HeadMaterials = { HeadMaterial };
     en1.AddComponent<StaticMeshRenderComponent>(HeadMeshHandle, HeadMaterials);
+    
+    auto splineEntity = ecs.CreateEntity();
+    splineEntity.AddComponent<NameComponent>("en2_spline");
+
+    std::vector<SplinePoint> splinePoints =
+    {
+        {
+            Vector3(10.f, -5.f, -20.f),
+            Vector3(0.f, 0.f, 0.f),
+            Vector3(-5.f, 0.f, 8.f)
+        },
+        {
+            Vector3(0.f, -2.f, -12.f),
+            Vector3(5.f, 0.f, -8.f),
+            Vector3(-5.f, 6.f, 8.f)
+        },
+        {
+            Vector3(-10.f, 2.f, -22.f),
+            Vector3(5.f, -6.f, -8.f),
+            Vector3(-5.f, 4.f, -8.f)
+        },
+        {
+            Vector3(-20.f, -3.f, -16.f),
+            Vector3(5.f, -4.f, 8.f),
+            Vector3(-5.f, 0.f, 6.f)
+        },
+        {
+            Vector3(-30.f, -5.f, -25.f),
+            Vector3(5.f, 0.f, -6.f),
+            Vector3(0.f, 0.f, 0.f)
+        }
+    };
+
+    splineEntity.AddComponent<SplineCurveComponent>(
+        false,
+        splinePoints
+    );
 
     auto en2 = ecs.CreateEntity();
     en2.AddComponent<NameComponent>("en2");
@@ -691,7 +728,12 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     std::vector<GDX12Material*> SvMaterials = { SvMaterial };
     en2.AddComponent<StaticMeshRenderComponent>(SvMeshHandle, SvMaterials);
 
-    en2.AddComponent<VelocityComponent>(-0.5f, 0.0f, 0.f);
+    en2.AddComponent<SplineFollowComponent>(
+        splineEntity.GetId(),
+        8.0f,   // duration
+        false,  // bLoop
+        true    // bPlaying
+    );
 
     auto marker = ecs.CreateEntity();
     marker.AddComponent<NameComponent>("marker");
@@ -702,6 +744,7 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     camera.AddComponent<TransformComponent>(Vector3(0.f, 0.f, 3.f), Vector3(0.f, 180.f, 0.f));
 
     camera.AddComponent<CameraComponent>();
+    camera.AddComponent<LookAtTargetComponent>(en1.GetId());
 
     world.ActiveCamera = camera;
     
