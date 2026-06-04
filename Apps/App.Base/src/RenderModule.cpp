@@ -353,11 +353,6 @@ GDX12FrameConstants* RenderModule::GetCurrentFrameConstants()
     return _frameConstants[_currFrameConstantsIndex].get();
 }
 
-const RenderModule::RenderFrameStats& RenderModule::GetLastFrameStats() const
-{
-    return _lastFrameStats;
-}
-
 void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
 {
     component._CBufferIndex = _frameConstants[0]->TransformCB->GetElementCount();
@@ -426,17 +421,11 @@ void RenderModule::OnRender()
 {
     auto cmdQueue = _primaryDevice->GetCommandQueue();
 
+    cmdQueue->Flush();
+
     auto cmdList = cmdQueue->GetCommandList();
     auto CurrentBackBuffer = _backBuffer->GetCurrentBuffer();
     auto& CurrentFrameConsts = _frameConstants[_currFrameConstantsIndex];
-
-    _lastFrameStats = {};
-    _lastFrameStats.MeshCommands = _commandRecorder._drawMeshCommands.size();
-    _lastFrameStats.LoadedMeshes = _geometryBuffer ? _geometryBuffer->_meshCache.size() : 0;
-    _lastFrameStats.LoadedMaterials = _materials.size();
-    _lastFrameStats.LoadedTextures = _textures.size();
-
-    cmdList->BeginPixEvent("Frame", Colors::White);
 
     cmdList->BeginPixEvent("Clear Back Buffer", Colors::Aqua);
     cmdList->SetViewport(_backBuffer->GetViewport());
@@ -450,12 +439,12 @@ void RenderModule::OnRender()
     cmdList->ClearDepthStencilView(_depthStencil.get());
     cmdList->EndPixEvent();
 
-    cmdList->BeginPixEvent("Opaque Geometry Pass", Colors::ForestGreen);
-    cmdList->SetGraphicsRootSignature(_rootSignatures["LitMesh"].get());
+    cmdList->BeginPixEvent("Test Render Pass", Colors::ForestGreen);
+    cmdList->SetGraphicsRootSignature(_rootSignatures["Test"].get());
     cmdList->SetGraphicsRootConstantBufferView(0, CurrentFrameConsts->MainCB->GetElementAddress(0));
     cmdList->SetGraphicsRootConstantBufferView(1, CurrentFrameConsts->CameraCB->
         GetElementAddress(_commandRecorder._cameraCBIndex));
-    cmdList->SetPipelineState(_PSOs["LitMesh"]);
+    cmdList->SetPipelineState(_PSOs["Test"]);
 
     cmdList->SetGeometryBuffer(_geometryBuffer.get());
     cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -463,92 +452,31 @@ void RenderModule::OnRender()
 
     for (DrawMeshCommand& renderCommand : _commandRecorder._drawMeshCommands)
     {
-        const std::vector<GDX12Material*>& materials = *renderCommand.Materials;
-
         cmdList->SetGraphicsRootConstantBufferView(2, CurrentFrameConsts->TransformCB->
             GetElementAddress(renderCommand.TransformCBIndex));
 
-        const auto meshIterator = _geometryBuffer->_meshCache.find(renderCommand.Mesh.GetValue());
-        if (meshIterator == _geometryBuffer->_meshCache.end() || meshIterator->second == nullptr)
-        {
-            continue;
-        }
-
-        cmdList->BeginPixEvent("Draw Mesh " + std::to_string(renderCommand.Mesh.GetValue()), Colors::Orange);
-
-        auto& MeshGPUData = meshIterator->second;
-        GDX12Material* lastBoundMaterial = nullptr;
+        auto& MeshGPUData = _geometryBuffer->_meshCache[renderCommand.Mesh.GetValue()];
 
         for (GPUSubMesh& SubMesh : MeshGPUData->SubMeshes)
         {
-            _lastFrameStats.SubmittedSubMeshes++;
-            _lastFrameStats.SubmittedTriangles += SubMesh.IndexCount / 3;
+            auto material = renderCommand.Materials[SubMesh.MaterialIndex];
 
-            if (_commandRecorder._hasCameraFrustum)
-            {
-                BoundingBox worldBounds = {};
-                SubMesh.CPUSubmesh->Bounds.Transform(worldBounds, renderCommand.World);
-                if (!_commandRecorder._cameraFrustum.Intersects(worldBounds))
-                {
-                    _lastFrameStats.CulledSubMeshes++;
-                    _lastFrameStats.CulledTriangles += SubMesh.IndexCount / 3;
-                    continue;
-                }
-            }
-
-            if (SubMesh.MaterialIndex >= materials.size())
-            {
-                _lastFrameStats.SkippedSubMeshes++;
-                continue;
-            }
-
-            auto material = materials[SubMesh.MaterialIndex];
-            if (material == nullptr || material->Diffuse == nullptr)
-            {
-                _lastFrameStats.SkippedSubMeshes++;
-                continue;
-            }
-
-            GDX12Texture* normalTexture = material->Normal != nullptr ? material->Normal : material->Diffuse;
-            GDX12Texture* specularTexture = material->Specular != nullptr ? material->Specular : material->Diffuse;
-            GDX12Texture* roughnessTexture = material->RoughnessMap != nullptr ? material->RoughnessMap : material->Diffuse;
-            GDX12Texture* emissiveTexture = material->Emissive != nullptr ? material->Emissive : material->Diffuse;
-
-            if (material != lastBoundMaterial)
-            {
-                cmdList->SetGraphicsRootConstantBufferView(3, CurrentFrameConsts->MaterialCB->
-                    GetElementAddress(material->_CBufferIndex));
-                cmdList->SetTextureAsSRV(0, material->Diffuse);
-                cmdList->SetTextureAsSRV(1, normalTexture);
-                cmdList->SetTextureAsSRV(2, specularTexture);
-                cmdList->SetTextureAsSRV(3, roughnessTexture);
-                cmdList->SetTextureAsSRV(4, emissiveTexture);
-                lastBoundMaterial = material;
-                _lastFrameStats.MaterialBinds++;
-                _lastFrameStats.TextureBinds += 5;
-            }
+            cmdList->SetGraphicsRootConstantBufferView(3, CurrentFrameConsts->MaterialCB->
+                GetElementAddress(material->_CBufferIndex));
+            cmdList->SetTextureAsSRV(0, material->Diffuse);
 
             cmdList->DrawIndexedInstanced(SubMesh.IndexCount, 1, 
                 SubMesh.StartIndexLocation, SubMesh.StartVertexLocation, 0);
-            _lastFrameStats.DrawnSubMeshes++;
-            _lastFrameStats.DrawCalls++;
-            _lastFrameStats.DrawnTriangles += SubMesh.IndexCount / 3;
         }
-
-        cmdList->EndPixEvent();
     }
 
     cmdList->EndPixEvent();
 
-    cmdList->BeginPixEvent("Present Transition", Colors::Yellow);
     cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetPresentEnhBarrier() });
     cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetCommonBarrier() });
-    cmdList->EndPixEvent();
-
-    cmdList->EndPixEvent();
 
     cmdQueue->ExecuteCommandList(cmdList);
-    CurrentFrameConsts->FenceValue = cmdQueue->FenceValue;
+    CurrentFrameConsts->FenceValue = cmdQueue->GetFence()->GetCompletedValue();
 
     _backBuffer->Present();
 }
@@ -593,17 +521,17 @@ void RenderModule::BuildRootSignatures()
 {
     GDX12RootSignatureDesc desc;
     desc.NumCBVSlots = 4;
-    desc.NumSRVSlots = 5;
+    desc.NumSRVSlots = 3;
     desc.StaticSamplers = GetStaticSamplers();
-    _rootSignatures["LitMesh"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc);
+    _rootSignatures["Test"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc);
 }
 
 void RenderModule::BuildShaders()
 {
     auto& Compiler = GDX12ShaderCompiler::GetInstance();
 
-    _shaders["LitMeshVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "LitMesh.hlsl", nullptr, "VS", "vs");
-    _shaders["LitMeshPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "LitMesh.hlsl", nullptr, "PS", "ps");
+    _shaders["TestVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "VS", "vs");
+    _shaders["TestPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "PS", "ps");
 }
 
 void RenderModule::BuildPSOs()
@@ -611,12 +539,11 @@ void RenderModule::BuildPSOs()
     D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
 
     desc.InputLayout = { _inputLayouts["Default"].data(), (UINT)_inputLayouts["Default"].size() };
-    desc.pRootSignature = _rootSignatures["LitMesh"]->GetRootSignature().Get();
+    desc.pRootSignature = _rootSignatures["Test"]->GetRootSignature().Get();
     desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
     desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
     desc.RasterizerState.FrontCounterClockwise = TRUE;
-    //desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
     desc.SampleMask = UINT_MAX;
     desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
     desc.NumRenderTargets = 1;
@@ -627,15 +554,15 @@ void RenderModule::BuildPSOs()
 
     desc.VS =
     {
-        reinterpret_cast<BYTE*>(_shaders["LitMeshVS"]->GetBufferPointer()),
-        _shaders["LitMeshVS"]->GetBufferSize()
+        reinterpret_cast<BYTE*>(_shaders["TestVS"]->GetBufferPointer()),
+        _shaders["TestVS"]->GetBufferSize()
     };
     desc.PS =
     {
-        reinterpret_cast<BYTE*>(_shaders["LitMeshPS"]->GetBufferPointer()),
-        _shaders["LitMeshPS"]->GetBufferSize()
+        reinterpret_cast<BYTE*>(_shaders["TestPS"]->GetBufferPointer()),
+        _shaders["TestPS"]->GetBufferSize()
     };
-    ThrowIfFailed(_primaryDevice->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_PSOs["LitMesh"])));
+    ThrowIfFailed(_primaryDevice->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_PSOs["Test"])));
 }
 
 void RenderModule::BuildFrameConstants()
@@ -681,23 +608,6 @@ void RenderModule::UpdateMaterialCB()
             GDX12MaterialConstants materialConstants;
             materialConstants.Roughness = material->Roughness;
             materialConstants.Metallic = material->Metallic;
-            materialConstants.HasNormalMap = material->HasNormalMap ? 1.0f : 0.0f;
-            materialConstants.HasSpecularMap = material->HasSpecularMap ? 1.0f : 0.0f;
-            materialConstants.HasRoughnessMap = material->HasRoughnessMap ? 1.0f : 0.0f;
-            materialConstants.HasEmissiveMap = material->HasEmissiveMap ? 1.0f : 0.0f;
-            materialConstants.UseBakedLighting = material->UseBakedLighting ? 1.0f : 0.0f;
-            materialConstants.SpecularColor =
-            {
-                material->SpecularColor.x,
-                material->SpecularColor.y,
-                material->SpecularColor.z
-            };
-            materialConstants.EmissiveColor =
-            {
-                material->EmissiveColor.x,
-                material->EmissiveColor.y,
-                material->EmissiveColor.z
-            };
 
             currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
             material->_numFramesDirty--;

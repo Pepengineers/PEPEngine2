@@ -30,27 +30,6 @@ using namespace Engine::Core;
 class RenderModule final : public Module
 {
 public:
-    struct RenderFrameStats
-    {
-        std::uint64_t MeshCommands = 0;
-        std::uint64_t LoadedMeshes = 0;
-        std::uint64_t LoadedMaterials = 0;
-        std::uint64_t LoadedTextures = 0;
-
-        std::uint64_t SubmittedSubMeshes = 0;
-        std::uint64_t DrawnSubMeshes = 0;
-        std::uint64_t CulledSubMeshes = 0;
-        std::uint64_t SkippedSubMeshes = 0;
-
-        std::uint64_t DrawCalls = 0;
-        std::uint64_t SubmittedTriangles = 0;
-        std::uint64_t DrawnTriangles = 0;
-        std::uint64_t CulledTriangles = 0;
-
-        std::uint64_t MaterialBinds = 0;
-        std::uint64_t TextureBinds = 0;
-    };
-
     RenderModule(Window* window, GameTimer* timer);
     ~RenderModule() override;
 
@@ -100,7 +79,6 @@ public:
     const float GetAspectRatio();
     GDX12RenderCommandRecorder* GetCommandRecorder();
     GDX12FrameConstants* GetCurrentFrameConstants();
-    [[nodiscard]] const RenderFrameStats& GetLastFrameStats() const;
 
 protected:
     void OnUpdate() override;
@@ -134,7 +112,6 @@ private:
     std::unordered_map<World*, WorldRenderSubscriptions> _worldSubscriptions;
 
     GDX12RenderCommandRecorder _commandRecorder;
-    RenderFrameStats _lastFrameStats;
 
     std::unique_ptr<GDX12Device> _primaryDevice;
     std::unique_ptr<GDX12Device> _secondaryDevice;
