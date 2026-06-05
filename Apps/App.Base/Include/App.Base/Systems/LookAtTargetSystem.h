@@ -29,8 +29,8 @@ public:
     {
         WorldECS& ecs = world.GetECS();
 
-        ecs.ForEach<TransformComponent, LookAtTargetComponent>(
-            [&](Entity entity, TransformComponent& transform, LookAtTargetComponent& lookAt)
+        ecs.ForEach<LookAtTargetComponent, TransformComponent>(
+            [&](Entity entity, LookAtTargetComponent& lookAt,  TransformComponent& transform)
             {
                 if (!lookAt.bEnabled || lookAt.TargetEntity == InvalidEntity) { return; }
 
