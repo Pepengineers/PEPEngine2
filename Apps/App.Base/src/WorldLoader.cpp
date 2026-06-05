@@ -625,8 +625,8 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
             return false;
         }
 
-        CreateCameraForBounds(world, sceneBounds);
-        return true;
+        //CreateCameraForBounds(world, sceneBounds);
+        //return true;
     }
 
     //Textures: 
@@ -734,17 +734,122 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
         false,  // bLoop
         true    // bPlaying
     );
+    
+    auto markerSpline = ecs.CreateEntity();
+    markerSpline.AddComponent<NameComponent>("MarkerSpline");
 
+    std::vector<SplinePoint> markerSplinePoints =
+    {
+        {
+            Vector3(491.f, 200.f, -661.f),
+            Vector3(0.f, 0.f, 0.f),
+            Vector3(-127.f, -23.333f, 46.f)
+        },
+        {
+            Vector3(110.f, 130.f, -523.f),
+            Vector3(84.667f, 11.667f, -73.f),
+            Vector3(-84.667f, -11.667f, 73.f)
+        },
+        {
+            Vector3(-17.f, 130.f, -223.f),
+            Vector3(-11.f, 0.f, -101.833f),
+            Vector3(11.f, 0.f, 101.833f)
+        },
+        {
+            Vector3(176.f, 130.f, 88.f),
+            Vector3(-82.667f, -8.333f, -48.333f),
+            Vector3(82.667f, 8.333f, 48.333f)
+        },
+        {
+            Vector3(479.f, 180.f, 67.f),
+            Vector3(-109.f, -11.667f, 11.833f),
+            Vector3(109.f, 11.667f, -11.833f)
+        },
+        {
+            Vector3(830.f, 200.f, 17.f),
+            Vector3(-5.667f, 5.f, 55.833f),
+            Vector3(5.667f, -5.f, -55.833f)
+        },
+        {
+            Vector3(513.f, 150.f, -268.f),
+            Vector3(105.667f, 16.667f, 95.f),
+            Vector3(0.f, 0.f, 0.f)
+        }
+    };
+
+    markerSpline.AddComponent<SplineCurveComponent>(
+        false,
+        markerSplinePoints
+    );    
+    
     auto marker = ecs.CreateEntity();
     marker.AddComponent<NameComponent>("marker");
-    marker.AddComponent<TransformComponent>(Vector3(3.f, 7.f, -1.f));
+    marker.AddComponent<TransformComponent>(Vector3(491.f, 200.f, -661.f));
+    marker.AddComponent<SplineFollowComponent>(
+        markerSpline.GetId(),
+        18.0f,  // Duration
+        true,  // bLoop
+        true    // bPlaying
+    );
+
+    auto cameraSpline = ecs.CreateEntity();
+    cameraSpline.AddComponent<NameComponent>("MainCameraSpline");
+
+    std::vector<SplinePoint> cameraSplinePoints =
+    {
+        {
+            Vector3(769.f, 200.f, -914.f),
+            Vector3(0.f, 0.f, 0.f),
+            Vector3(-96.f, 0.f, 87.333f)
+        },
+        {
+            Vector3(481.f, 200.f, -652.f),
+            Vector3(84.5f, 0.f, -63.333f),
+            Vector3(-84.5f, 0.f, 63.333f)
+        },
+        {
+            Vector3(262.f, 200.f, -534.f),
+            Vector3(57.333f, 0.f, -67.667f),
+            Vector3(-57.333f, 0.f, 67.667f)
+        },
+        {
+            Vector3(137.f, 200.f, -246.f),
+            Vector3(-0.333f, 0.f, -82.333f),
+            Vector3(0.333f, 0.f, 82.333f)
+        },
+        {
+            Vector3(264.f, 200.f, -40.f),
+            Vector3(-76.5f, 0.f, -60.f),
+            Vector3(76.5f, 0.f, 60.f)
+        },
+        {
+            Vector3(596.f, 200.f, 114.f),
+            Vector3(-108.f, 0.f, -52.167f),
+            Vector3(108.f, 0.f, 52.167f)
+        },
+        {
+            Vector3(912.f, 200.f, 273.f),
+            Vector3(-105.333f, 0.f, -53.f),
+            Vector3(0.f, 0.f, 0.f)
+        }
+    };
+
+    cameraSpline.AddComponent<SplineCurveComponent>(
+        false,
+        cameraSplinePoints
+    );
 
     auto camera = ecs.CreateEntity();
     camera.AddComponent<NameComponent>("MainCamera");
-    camera.AddComponent<TransformComponent>(Vector3(0.f, 0.f, 3.f), Vector3(0.f, 180.f, 0.f));
-
+    camera.AddComponent<TransformComponent>(Vector3(769.f, 200.f, -914.f), Vector3(0.f, 180.f, 0.f));
     camera.AddComponent<CameraComponent>();
-    camera.AddComponent<LookAtTargetComponent>(en1.GetId());
+    camera.AddComponent<LookAtTargetComponent>(marker.GetId());
+    camera.AddComponent<SplineFollowComponent>(
+        cameraSpline.GetId(),
+        18.0f,  // Duration
+        true,  // bLoop
+        true    // bPlaying
+    );
 
     world.ActiveCamera = camera;
     
