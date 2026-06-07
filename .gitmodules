@@ -1,0 +1,3 @@
+[submodule "External/External.Libraries/rapidyaml"]
+	path = External/External.Libraries/rapidyaml
+	url = https://github.com/biojppm/rapidyaml.git

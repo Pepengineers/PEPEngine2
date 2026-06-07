@@ -16,5 +16,7 @@
     <PEPExternalDirectXMeshInclude Condition="'$(PEPExternalDirectXMeshInclude)'==''">$(PEPExternalRoot)directxmesh\Include</PEPExternalDirectXMeshInclude>
     <PEPExternalWwiseInclude Condition="'$(PEPExternalWwiseInclude)'==''">$(PEPExternalRoot)wwise\Include</PEPExternalWwiseInclude>
     <PEPExternalWwiseSDKInclude Condition="'$(PEPExternalWwiseSDKInclude)'==''">$(PEPExternalRoot)wwise\Include\wwise</PEPExternalWwiseSDKInclude>
+    <PEPExternalRapidYamlInclude Condition="'$(PEPExternalRapidYamlInclude)'==''">$(PEPExternalRoot)rapidyaml\src</PEPExternalRapidYamlInclude>
+    <PEPExternalRapidYamlC4CoreInclude Condition="'$(PEPExternalRapidYamlC4CoreInclude)'==''">$(PEPExternalRoot)rapidyaml\ext\c4core\src</PEPExternalRapidYamlC4CoreInclude>
   </PropertyGroup>
 </Project>
