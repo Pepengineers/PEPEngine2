@@ -13,9 +13,16 @@
 #include <system_error>
 #include <unordered_map>
 #include <vector>
+#include <Windows.h>
 
 namespace
 {
+    void ShowDebugMessage(const std::string& title, const std::string& message)
+    {
+        //todo spdlog here
+        //MessageBoxA(nullptr, message.c_str(), title.c_str(), MB_OK);
+    }
+
     /// Converts an ASCII string to lowercase.
     std::string ToLowerAscii(std::string value)
     {
@@ -460,18 +467,34 @@ namespace
         const Engine::Core::Mesh* sceneMesh = assetManager.LoadMesh(objPath, sceneMeshHandle);
         if (sceneMesh == nullptr || !sceneMeshHandle.IsValid())
         {
+            ShowDebugMessage(
+                "LoadObjSceneEntity failed",
+                "AssetManager::LoadMesh() failed for path:\n" + objPath.string() +
+                "\nCurrent working directory:\n" + std::filesystem::current_path().string() +
+                "\nMesh pointer is null: " + std::string(sceneMesh == nullptr ? "true" : "false") +
+                "\nMesh handle is valid: " + std::string(sceneMeshHandle.IsValid() ? "true" : "false"));
             return false;
         }
         
         const SceneDefaultMaterialTextures defaultMaterialTextures = CreateSceneDefaultMaterialTextures(renderModule, sceneName);
         if (!defaultMaterialTextures.IsValid())
         {
+            ShowDebugMessage(
+                "LoadObjSceneEntity failed",
+                "CreateSceneDefaultMaterialTextures() returned incomplete defaults for scene '" + sceneName +
+                "'.\nFlatNormal: " + std::string(defaultMaterialTextures.FlatNormal != nullptr ? "true" : "false") +
+                "\nWhite: " + std::string(defaultMaterialTextures.White != nullptr ? "true" : "false") +
+                "\nBlack: " + std::string(defaultMaterialTextures.Black != nullptr ? "true" : "false"));
             return false;
         }
         
         GDX12Material* fallbackMaterial = CreateSceneFallbackMaterial(renderModule, assetManager, sceneName, defaultMaterialTextures);
         if (fallbackMaterial == nullptr)
         {
+            ShowDebugMessage(
+                "LoadObjSceneEntity failed",
+                "CreateSceneFallbackMaterial() failed for scene '" + sceneName +
+                "'.\nOBJ path:\n" + objPath.string());
             return false;
         }
         
@@ -547,6 +570,9 @@ namespace
     {
         if (objPaths.empty())
         {
+            ShowDebugMessage(
+                "LoadObjSceneFiles failed",
+                "No .obj files found under directory:\n" + sceneRoot.string());
             return false;
         }
         
@@ -582,6 +608,9 @@ namespace
         
         if (!loadedAnyObject)
         {
+            ShowDebugMessage(
+                "LoadObjSceneFiles failed",
+                "Found .obj files, but none of them loaded successfully under directory:\n" + sceneRoot.string());
             return false;
         }
         
@@ -592,15 +621,21 @@ namespace
 
 bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 {
-    /* todo if file not found return 0;
-    rapid yaml parsing
-    create entities and components
-    */
-    world.SetName(path.string()); 
+    if (path.empty())
+    {
+        ShowDebugMessage("WorldLoader::LoadFromFile", "World file path is empty.");
+        return false;
+    }
 
-    //
-    //Loading Neccessary Assets
-    //
+    if (!std::filesystem::exists(path))
+    {
+        ShowDebugMessage(
+            "World source path not found",
+            "Path: " + path.string() +
+            "\nCurrent working directory: " + std::filesystem::current_path().string());
+        return false;
+    }
+
     auto& assetManager = Engine::Core::AssetManager::GetInstance();
     auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
     

@@ -2,6 +2,10 @@
 
 #include <App.Base/App.h>
 #include <WindowsX.h>
+#include "App.Base/AppConfigLoader.h"
+
+#include <filesystem>
+#include <string>
 
 using Microsoft::WRL::ComPtr;
 using namespace std;
@@ -12,6 +16,15 @@ namespace Private
     static LRESULT CALLBACK MainWndProc(const HWND hwnd, const UINT msg, const WPARAM wParam, const LPARAM lParam)
     {
         return App::GetInstance()->MsgProc(hwnd, msg, wParam, lParam);
+    }
+}
+
+namespace
+{
+    void ShowDebugMessage(const std::string& title, const std::string& message)
+    {
+        //todo spdlog here
+        //MessageBoxA(nullptr, message.c_str(), title.c_str(), MB_OK);
     }
 }
 
@@ -109,21 +122,26 @@ int App::Run()
 
 bool App::Initialize()
 {
-    WNDCLASS WindowClass = {};
-    WindowClass.style = CS_HREDRAW | CS_VREDRAW;
-    WindowClass.lpfnWndProc = Private::MainWndProc;
-    WindowClass.cbClsExtra = 0;
-    WindowClass.cbWndExtra = 0;
-    WindowClass.hInstance = AppHandler;
-    WindowClass.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
-    WindowClass.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    WindowClass.hbrBackground = static_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
-    WindowClass.lpszMenuName = nullptr;
-    WindowClass.lpszClassName = L"MainWnd";
+    try {
+        _AppConfig = AppConfigLoader::LoadAppConfig(GetAppConfigPath());
+    }
+    catch (const std::exception& exception) {
+        ShowDebugMessage("LoadAppConfig failed", exception.what());
+        return false;
+    }
 
-    if (!RegisterClass(&WindowClass))
+    ShowDebugMessage(
+        "App::Initialize",
+        "After LoadAppConfig:\nStartScene = " + _AppConfig.StartScene);
+
+    if (_AppConfig.StartScene.empty())
     {
-        MessageBox(nullptr, L"RegisterClass Failed.", nullptr, 0);
+        ShowDebugMessage("App::Initialize", "App config StartScene is empty.");
+        return false;
+    }
+
+    if (!InitWindowClass())
+    {
         return false;
     }
 
@@ -132,7 +150,21 @@ bool App::Initialize()
         return false;
     }
 
-    return BenchmarkEngine::Initialize();
+    ShowDebugMessage("App::Initialize", "Before BenchmarkEngine::Initialize");
+
+    if (!BenchmarkEngine::Initialize())
+    {
+        return false;
+    }
+
+    ShowDebugMessage("App::Initialize", "Before LoadStartScene");
+
+    if (!LoadStartScene())
+    {
+        return false;
+    }
+
+    return true;
 }
 
 LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -291,6 +323,42 @@ void App::OnResize()
     if (!RenderSystem) { return; }
 
     RenderSystem->OnResize();
+}
+
+bool App::InitWindowClass()
+{
+    WNDCLASS WindowClass = {};
+    WindowClass.style = CS_HREDRAW | CS_VREDRAW;
+    WindowClass.lpfnWndProc = Private::MainWndProc;
+    WindowClass.cbClsExtra = 0;
+    WindowClass.cbWndExtra = 0;
+    WindowClass.hInstance = AppHandler;
+    WindowClass.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+    WindowClass.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    WindowClass.hbrBackground = static_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
+    WindowClass.lpszMenuName = nullptr;
+    WindowClass.lpszClassName = L"MainWnd";
+
+    if (!RegisterClass(&WindowClass))
+    {
+        MessageBox(nullptr, L"RegisterClass Failed.", nullptr, 0);
+        return false;
+    }
+
+    return true;
+}
+
+bool App::LoadStartScene()
+{
+    auto sceneManager = Locator.GetModule<SceneManagerModule>();
+
+    if (!sceneManager)
+    {
+        MessageBox(nullptr, L"SceneManagerModule not found.", nullptr, 0);
+        return false;
+    }
+
+    return sceneManager->LoadScene(_AppConfig.StartScene, _AppConfig);
 }
 
 bool App::InitMainWindow()

@@ -1,5 +1,7 @@
 #include "App.Base/Modules/SceneManagerModule.h"
 
+#include "App.Base/AppConfigLoader.h"
+
 #include "App.Base/Systems/CircleMovementSystem.h"
 #include "App.Base/Systems/MovementSystem.h"
 #include "App.Base/Systems/RenderSubmitSystem.h"
@@ -8,10 +10,22 @@
 #include "App.Base/Systems/SplineFollowSystem.h"
 #include "Engine.Core/System.h"
 
-SceneManagerModule::SceneManagerModule(GameTimer* timer) :
-    _timer(timer)
+#include <exception>
+#include <string>
+#include <Windows.h>
+
+namespace
 {
-    
+    void ShowDebugMessage(const std::string& title, const std::string& message)
+    {
+        //todo spdlog here
+        //MessageBoxA(nullptr, message.c_str(), title.c_str(), MB_OK);
+    }
+}
+
+SceneManagerModule::SceneManagerModule(GameTimer* timer)
+    : _timer(timer)
+{
 }
 
 SceneManagerModule::~SceneManagerModule()
@@ -19,45 +33,9 @@ SceneManagerModule::~SceneManagerModule()
     
 }
 
-// todo implement world loading from file
 void SceneManagerModule::Initialize()
 {
-    Uninitialize();
-
-    /*if (!LoadWorld("world1.yaml"))
-    {
-        // todo runtime error or log
-    }*/
-
-    /*const std::filesystem::path scenePath =
-    std::filesystem::path(ASSETS_FOLDER) /
-    "Scenes" /
-    "Gallery";*/
-
-    const std::filesystem::path scenePath =
-    std::filesystem::path(ASSETS_FOLDER) /
-    "Scenes" /
-    "Amazon Lumberyard Bistro" /
-    "Interior" /
-    "interior.obj";
-
-    if (!LoadWorld(scenePath))
-    {
-        // todo runtime error or log 
-    }
-
-    World* world = GetWorld(0);
-    if (!world)
-    {
-        // todo runtime error or log 
-    }
-
-    AddSystem<MovementSystem>(world, 0);
-    AddSystem<CircleMovementSystem>(world, 1);
-    AddSystem<SplineFollowSystem>(world, 2);
-    AddSystem<LookAtTargetSystem>(world, 3);
-    AddSystem<GPUDataUpdateSystem>(world, 101);
-    AddSystem<RenderSubmitSystem>(world, 102);
+    
 }
 
 void SceneManagerModule::Uninitialize()
@@ -73,6 +51,216 @@ void SceneManagerModule::Uninitialize()
     }
 
     _worldVector.clear();
+}
+
+bool SceneManagerModule::LoadScene(
+    const std::string& scenePath,
+    const AppConfig& appConfig)
+{
+    ShowDebugMessage("SceneManagerModule::LoadScene", "scenePath:\n" + scenePath);
+
+    Uninitialize();
+
+    SceneConfig sceneConfig;
+
+    try
+    {
+        sceneConfig = AppConfigLoader::LoadSceneConfig(scenePath);
+    }
+    catch (const std::exception& exception)
+    {
+        ShowDebugMessage("Scene yaml load failed", exception.what());
+        return false;
+    }
+
+    ShowDebugMessage(
+        "SceneManagerModule::LoadScene",
+        "World count: " + std::to_string(sceneConfig.Worlds.size()));
+
+    std::vector<SceneWorldConfig> worlds = sceneConfig.Worlds;
+
+    for (const SceneWorldConfig& sceneWorldConfig : worlds)
+    {
+        ShowDebugMessage(
+            "SceneManagerModule::LoadScene",
+            "Loading world yaml:\n" + sceneWorldConfig.Path);
+
+        if (!LoadConfiguredWorld(sceneWorldConfig, appConfig))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool SceneManagerModule::LoadConfiguredWorld(
+    const SceneWorldConfig& sceneWorldConfig,
+    const AppConfig& appConfig)
+{
+    ShowDebugMessage(
+        "LoadConfiguredWorld",
+        "sceneWorldConfig.Path:\n" + sceneWorldConfig.Path);
+
+    WorldConfig worldConfig;
+
+    try
+    {
+        worldConfig = AppConfigLoader::LoadWorldConfig(sceneWorldConfig.Path);
+    }
+    catch (const std::exception& exception)
+    {
+        ShowDebugMessage("World yaml load failed", exception.what());
+        return false;
+    }
+
+    ShowDebugMessage(
+        "LoadConfiguredWorld",
+        "worldConfig.SourcePath:\n" + worldConfig.SourcePath);
+
+    WorldDesc desc;
+    desc.Name = !worldConfig.Name.empty()
+        ? worldConfig.Name
+        : sceneWorldConfig.Name;
+
+    desc.WorldFilePath = !worldConfig.SourcePath.empty()
+        ? std::filesystem::path(worldConfig.SourcePath)
+        : std::filesystem::path(sceneWorldConfig.Path);
+
+    auto world = std::make_unique<World>(desc);
+    World* worldPtr = world.get();
+
+    OnWorldCreated.Broadcast(*worldPtr);
+
+    if (!world->Load())
+    {
+        ShowDebugMessage(
+            "World::Load failed",
+            desc.WorldFilePath.string());
+        OnWorldDestroyed.Broadcast(*worldPtr);
+        return false;
+    }
+
+    _worldVector.push_back(std::move(world));
+
+    if (!AddSystemsFromConfig(worldPtr, worldConfig, appConfig))
+    {
+        UnloadWorld(_worldVector.size() - 1);
+        return false;
+    }
+
+    return true;
+}
+
+bool SceneManagerModule::AddSystemsFromConfig(
+    World* world,
+    const WorldConfig& worldConfig,
+    const AppConfig& appConfig)
+{
+    if (!world)
+    {
+        return false;
+    }
+
+    std::vector<SystemConfig> systems = worldConfig.Systems;
+
+    std::stable_sort(
+        systems.begin(),
+        systems.end(),
+        [](const SystemConfig& a, const SystemConfig& b)
+        {
+            return a.Priority < b.Priority;
+        }
+    );
+
+    for (const SystemConfig& systemConfig : systems)
+    {
+        if (!AddSystemByName(world, systemConfig, appConfig))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool SceneManagerModule::AddSystemByName(
+    World* world,
+    const SystemConfig& systemConfig,
+    const AppConfig& appConfig)
+{
+    if (!world)
+    {
+        return false;
+    }
+
+    if (systemConfig.Name.empty())
+    {
+        return false;
+    }
+
+    if (appConfig.IsSystemBanned(systemConfig.Name))
+    {
+        return true;
+    }
+
+    const uint8_t priority = ToSystemPriority(systemConfig.Priority);
+
+    if (systemConfig.Name == "MovementSystem")
+    {
+        AddSystem<MovementSystem>(world, priority);
+        return true;
+    }
+
+    if (systemConfig.Name == "CircleMovementSystem")
+    {
+        AddSystem<CircleMovementSystem>(world, priority);
+        return true;
+    }
+
+    if (systemConfig.Name == "SplineFollowSystem")
+    {
+        AddSystem<SplineFollowSystem>(world, priority);
+        return true;
+    }
+
+    if (systemConfig.Name == "LookAtTargetSystem")
+    {
+        AddSystem<LookAtTargetSystem>(world, priority);
+        return true;
+    }
+
+    if (systemConfig.Name == "GPUDataUpdateSystem")
+    {
+        AddSystem<GPUDataUpdateSystem>(world, priority);
+        return true;
+    }
+
+    if (systemConfig.Name == "RenderSubmitSystem")
+    {
+        AddSystem<RenderSubmitSystem>(world, priority);
+        return true;
+    }
+
+    ShowDebugMessage(
+        "Unknown system name",
+        systemConfig.Name);
+    return false;
+}
+
+uint8_t SceneManagerModule::ToSystemPriority(int priority)
+{
+    if (priority < 0)
+    {
+        return 0;
+    }
+
+    if (priority > 255)
+    {
+        return 255;
+    }
+
+    return static_cast<uint8_t>(priority);
 }
 
 bool SceneManagerModule::LoadWorld(const std::filesystem::path& path)
@@ -104,8 +292,10 @@ bool SceneManagerModule::UnloadWorld(size_t index)
             [worldToRemove](const SystemEntry& entry)
             {
                 return entry.world == worldToRemove;
-            }),
-        _systemVector.end());
+            }
+        ),
+        _systemVector.end()
+    );
 
     OnWorldDestroyed.Broadcast(*worldToRemove);
 
