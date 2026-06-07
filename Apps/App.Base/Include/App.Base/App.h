@@ -13,6 +13,7 @@
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "App.Base/Window.h"
+#include "App.Base/AppConfig.h"
 
 #undef min
 #undef max
@@ -45,6 +46,9 @@ protected:
     bool bMaximized = false;
     bool bResizing = false;
     bool bFullscreenState = false;
+    
+    virtual std::string GetAppConfigPath() const = 0;
+    AppConfig _AppConfig;
 
 
     App(HINSTANCE hInstance);
@@ -75,7 +79,8 @@ protected:
     virtual void OnKeyboardInput(const GameTimer& gameTimer)
     {
     }
-
+    bool InitWindowClass();
+    bool LoadStartScene();
     bool InitMainWindow();
     bool AddModules() override;
     void Update(const GameTimer& gameTimer) override;
