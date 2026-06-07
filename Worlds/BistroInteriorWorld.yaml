@@ -1,0 +1,23 @@
+World:
+  Name: BistroInteriorWorld
+
+  SourcePath: Assets/Scenes/Amazon Lumberyard Bistro/Interior/interior.obj
+
+  Systems:
+    - Name: MovementSystem
+      Priority: 0
+
+    - Name: CircleMovementSystem
+      Priority: 1
+
+    - Name: SplineFollowSystem
+      Priority: 2
+
+    - Name: LookAtTargetSystem
+      Priority: 3
+
+    - Name: GPUDataUpdateSystem
+      Priority: 101
+
+    - Name: RenderSubmitSystem
+      Priority: 102
