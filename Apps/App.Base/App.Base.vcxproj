@@ -20,6 +20,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\App.Base\App.h" />
+    <ClInclude Include="Include\App.Base\AppConfig.h" />
+    <ClInclude Include="Include\App.Base\AppConfigLoader.h" />
     <ClInclude Include="Include\App.Base\Components\CameraComponent.h" />
     <ClInclude Include="Include\App.Base\Components\CircleMovementComponent.h" />
     <ClInclude Include="Include\App.Base\Components\Component.h" />
@@ -50,6 +52,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
+    <ClCompile Include="src\AppConfigLoader.cpp" />
     <ClCompile Include="src\RenderModule.cpp" />
     <ClCompile Include="src\SceneManager.cpp" />
     <ClCompile Include="src\SceneManagerModule.cpp" />
