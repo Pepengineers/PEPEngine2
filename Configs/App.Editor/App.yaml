@@ -4,3 +4,5 @@ App:
   StartScene: Scenes/EditorScene.yaml
 
   SystemsBanlist:
+    - SplineFollowSystem
+    - LookAtTargetSystem
