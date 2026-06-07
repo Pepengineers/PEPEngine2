@@ -1,0 +1,7 @@
+Scene:
+  Name: BenchmarkScene
+
+  Worlds:
+    - Name: MainWorld
+      Path: Worlds/BistroInteriorWorld.yaml
+      Priority: 0
