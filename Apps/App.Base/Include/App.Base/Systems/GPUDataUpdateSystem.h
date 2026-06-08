@@ -48,8 +48,12 @@ public:
 
                     Matrix view = Matrix::CreateLookAt(CameraLocation, CameraTarget, Vector3::Up);
 
-                    Matrix proj = Matrix::CreatePerspectiveFieldOfView(FOV,
-                        renderModule->GetAspectRatio(), camera.NearPlane, camera.FarPlane);
+                    //reserved-Z proj matrix
+                    Matrix proj = Matrix::CreatePerspectiveFieldOfView(FOV, renderModule->GetAspectRatio(), 
+                        camera.NearPlane, camera.FarPlane);
+                    const float range = camera.NearPlane / (camera.FarPlane - camera.NearPlane);
+                    proj._33 = range;
+                    proj._43 = range * camera.FarPlane;
 
                     GDX12CameraConstants objConstants;
                     XMStoreFloat4x4(&objConstants.ViewProj, XMMatrixTranspose(view * proj));

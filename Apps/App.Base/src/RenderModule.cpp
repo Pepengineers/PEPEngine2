@@ -555,10 +555,10 @@ void RenderModule::BuildDescHeapsAndBackBuffer()
 
     desc.CreateDSV = true;
     desc.DSVHeapIndex = _dsvHeap->GetAvailableIndex();
-    desc.Format = desc.DSVDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    desc.Format = desc.DSVDesc.Format = DXGI_FORMAT_D32_FLOAT;
     desc.Width = width;
     desc.Height = height;
-    desc.ClearValue = { 1.f, 1.f, 1.f, 1.f };
+    desc.ClearValue = { 0.f, 0.f, 0.f, 0.f };
 
     desc.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     desc.DSVDesc.Texture2D.MipSlice = 0;
@@ -606,6 +606,8 @@ void RenderModule::BuildPSOs()
     desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
     desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    //reversed-Z
+    desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
     desc.RasterizerState.FrontCounterClockwise = TRUE;
     desc.SampleMask = UINT_MAX;
     desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
