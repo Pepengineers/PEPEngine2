@@ -123,4 +123,8 @@
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Shaders\Test.hlsl" />
+    <None Include="Shaders\Test.hlsl" />
+  </ItemGroup>
 </Project>

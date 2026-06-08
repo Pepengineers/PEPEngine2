@@ -25,6 +25,7 @@ public:
     std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> InstanceCache;
     std::unique_ptr<GDX12UploadBuffer<GDX12LightConstants>> LightCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12CameraConstants>> CameraCB;
+    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> VisibleCommandsCache;
     UINT64 FenceValue;
     
 private:

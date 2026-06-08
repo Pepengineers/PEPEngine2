@@ -506,6 +506,19 @@ void RenderModule::OnRender()
     cmdList->ClearDepthStencilView(_depthStencil.get());
     cmdList->EndPixEvent();
 
+    /*cmdList->BeginPixEvent("GPU Culling", Colors::Aqua);
+    cmdList->SetComputeRootSignature(_rootSignatures["Culling"].get());
+    cmdList->SetPipelineState(_PSOs["Culling"]);
+    cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
+    cmdList->SetComputeSRV(0, _IndirectCommandsCache->GetSRV()->GPUHandle);
+    cmdList->SetComputeUAV(0, CurrentFrameConsts->VisibleCommandsCache->GetUAV()->GPUHandle);
+
+    UINT numDraws = _IndirectCommandsCache->GetElementCount();
+    UINT threadGroups = (numDraws + 63) / 64;
+    cmdList->GetCommandList()->Dispatch(threadGroups, 1, 1);
+    cmdList->EndPixEvent();*/
+
+
     cmdList->BeginPixEvent("Test Render Pass", Colors::ForestGreen);
     cmdList->SetGraphicsRootSignature(_rootSignatures["Test"].get());
     cmdList->SetGraphicsRootConstantBufferView(0, CurrentFrameConsts->MainCB->GetElementAddress(0));
@@ -517,10 +530,10 @@ void RenderModule::OnRender()
     cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
 
-    cmdList->SetSRV(0, CurrentFrameConsts->MaterialCache->GetSRV()->GPUHandle);
-    cmdList->SetSRV(1, CurrentFrameConsts->TransformCache->GetSRV()->GPUHandle);
-    cmdList->SetSRV(2, CurrentFrameConsts->InstanceCache->GetSRV()->GPUHandle);
-    cmdList->SetSRV(3, _srvuavHeap->GetGPUHandle(Texture2D_StartIndex));
+    cmdList->SetGraphicsSRV(0, CurrentFrameConsts->MaterialCache->GetSRV()->GPUHandle);
+    cmdList->SetGraphicsSRV(1, CurrentFrameConsts->TransformCache->GetSRV()->GPUHandle);
+    cmdList->SetGraphicsSRV(2, CurrentFrameConsts->InstanceCache->GetSRV()->GPUHandle);
+    cmdList->SetGraphicsSRV(3, _srvuavHeap->GetGPUHandle(Texture2D_StartIndex));
 
     cmdList->GetCommandList()->
         ExecuteIndirect(_commandSignature.Get(), _IndirectCommandsCache->GetElementCount()
@@ -585,7 +598,6 @@ void RenderModule::BuildRootSignatures()
 
     D3D12_INDIRECT_ARGUMENT_DESC arg = {};
     arg.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
-
     D3D12_COMMAND_SIGNATURE_DESC desc2 = {};
     desc2.ByteStride = sizeof(GDX12IndirectDrawArgs);
     desc2.NumArgumentDescs = 1;
@@ -594,12 +606,18 @@ void RenderModule::BuildRootSignatures()
 
     _primaryDevice->GetDevice()->CreateCommandSignature(&desc2, nullptr, IID_PPV_ARGS(&_commandSignature));
 
-
+    GDX12RootSignatureDesc desc3;
+    desc3.NumSingleCBVSlots = 1;
+    desc3.NumSingleSRVSlots = 2;
+    desc3.NumSingleUAVSlots = 1;
+    _rootSignatures["Culling"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc3);
 }
 
 void RenderModule::BuildShaders()
 {
     auto& Compiler = GDX12ShaderCompiler::GetInstance();
+
+    _shaders["CullingCS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Culling.hlsl", nullptr, "CS", "cs");
 
     _shaders["TestVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "VS", "vs");
     _shaders["TestPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "PS", "ps");
@@ -636,6 +654,18 @@ void RenderModule::BuildPSOs()
         _shaders["TestPS"]->GetBufferSize()
     };
     ThrowIfFailed(_primaryDevice->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_PSOs["Test"])));
+
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC desc2 = {};
+    desc2.pRootSignature = _rootSignatures["Culling"]->GetRootSignature().Get();
+    desc2.CS =
+    {
+        reinterpret_cast<BYTE*>(_shaders["CullingCS"]->GetBufferPointer()),
+        _shaders["CullingCS"]->GetBufferSize()
+    };
+
+    ThrowIfFailed(_primaryDevice->GetDevice()->CreateComputePipelineState(
+        &desc2, IID_PPV_ARGS(&_PSOs["Culling"])));
 }
 
 void RenderModule::BuildFrameConstants()

@@ -63,3 +63,12 @@ struct InstanceData
     float3 BoundingBoxExtents;
     uint _pad4;
 };
+
+struct IndirectDrawArgs
+{
+    uint IndexCountPerInstance;
+    uint InstanceCount;
+    uint StartIndexLocation;
+    int BaseVertexLocation;
+    uint StartInstanceLocation;
+};

@@ -120,7 +120,7 @@
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Assimp.props" />
   </ImportGroup>
   <ItemGroup>
-    <None Include="Shaders\**\*.hlsl" />
+    <None Include="Shaders\Culling.hlsl" />
   </ItemGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />

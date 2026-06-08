@@ -59,6 +59,7 @@ enum GDX12SRVHeapIndexAllocation
     TransformCacheBuffer = 20,
     InstanceCacheBuffer = 25,
     IndirectCommandsBuffer = 30,
+    VisibleIndirectCommandsBuffer = 35,
 
     ShadowMaps_StartIndex = 100,
     ShadowMaps_RangeLength = 400,
