@@ -386,11 +386,6 @@ const GPUMesh* RenderModule::GetGPUMesh(MeshHandle handle)
     return _geometryBuffer->GetGPUMeshByHandle(handle);
 }
 
-GDX12UploadBuffer<GDX12InstanceData>* RenderModule::GetInstanceCache()
-{
-    return _instanceCache.get();
-}
-
 GDX12UploadBuffer<GDX12IndirectDrawArgs>* RenderModule::GetIndirectCommandsCache()
 {
     return _IndirectCommandsCache.get();
@@ -443,9 +438,14 @@ void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticM
     
     for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
     {
-        component._CBufferIndices.push_back(_instanceCache->GetElementCount());
-        _instanceCache->Resize(_instanceCache->GetElementCount() + 1);
+        component._CBufferIndices.push_back(_frameConstants[0]->InstanceCache->GetElementCount());
         _IndirectCommandsCache->Resize(_IndirectCommandsCache->GetElementCount() + 1);
+
+        for (auto& constants : _frameConstants)
+        {
+            auto& CBuffer = constants->InstanceCache;
+            CBuffer->Resize(CBuffer->GetElementCount() + 1);
+        }
 
     }
 }
@@ -519,7 +519,7 @@ void RenderModule::OnRender()
 
     cmdList->SetSRV(0, CurrentFrameConsts->MaterialCache->GetSRV()->GPUHandle);
     cmdList->SetSRV(1, CurrentFrameConsts->TransformCache->GetSRV()->GPUHandle);
-    cmdList->SetSRV(2, _instanceCache->GetSRV()->GPUHandle);
+    cmdList->SetSRV(2, CurrentFrameConsts->InstanceCache->GetSRV()->GPUHandle);
     cmdList->SetSRV(3, _srvuavHeap->GetGPUHandle(Texture2D_StartIndex));
 
     cmdList->GetCommandList()->
@@ -646,12 +646,10 @@ void RenderModule::BuildFrameConstants()
 
         _frameConstants[i]->MaterialCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(MaterialCacheBuffer));
         _frameConstants[i]->TransformCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(TransformCacheBuffer));
+        _frameConstants[i]->InstanceCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(InstanceCacheBuffer));
     }
 
-    _instanceCache = std::make_unique<GDX12UploadBuffer<GDX12InstanceData>>(_primaryDevice.get(), 0, false);
     _IndirectCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), 0, false);
-
-    _instanceCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(InstanceCacheBuffer));
     _IndirectCommandsCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(IndirectCommandsBuffer));
 }
 

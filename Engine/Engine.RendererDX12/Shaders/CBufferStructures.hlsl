@@ -58,4 +58,8 @@ struct InstanceData
     uint MaterialIndex;
     uint _pad1;
     uint _pad2;
+    float3 BoundingBoxCenter;
+    uint _pad3;
+    float3 BoundingBoxExtents;
+    uint _pad4;
 };

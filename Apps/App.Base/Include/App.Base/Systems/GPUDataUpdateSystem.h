@@ -85,6 +85,8 @@ public:
                             XMConvertToRadians(transform.Rotation.z)) *
                         Matrix::CreateTranslation(transform.Location);
 
+                    GPUData.World = world;
+
 					GDX12TransformConstants objConstants;
 					XMStoreFloat4x4(&objConstants.WorldMatrix, XMMatrixTranspose(world));
 
@@ -98,30 +100,52 @@ public:
         ecs.ForEach<TransformComponent, StaticMeshRenderComponent>(
             [&ecs, &renderModule, &numFrames](Entity entity, TransformComponent& transform, StaticMeshRenderComponent& renderer)
             {
-                if (!renderer.DirtyFlag) { return; }
-                renderer.DirtyFlag = false;
-
-                auto instanceCache = renderModule->GetInstanceCache();
+                auto& instanceCache = renderModule->GetCurrentFrameConstants()->InstanceCache;
                 auto indirectCommandsCache = renderModule->GetIndirectCommandsCache();
                 auto gpuMesh = renderModule->GetGPUMesh(renderer.MeshHandler);
                 auto& transformGPUData = renderModule->GetTransformGPUData(entity);
 
-                for (int i = 0; i < gpuMesh->SubMeshes.size(); i++)
+                if (renderer.DirtyFlag || transform.DirtyFlag)
                 {
-                    const auto& subMesh = gpuMesh->SubMeshes[i];
+                    renderer.DirtyFlag = false;
+                    renderer._numFramesDirty = numFrames;
 
-                    GDX12InstanceData instanceData;
-                    instanceData.TransformIndex = transformGPUData.CBufferIndex;
-                    instanceData.MaterialIndex = renderer.Materials[subMesh.MaterialIndex]->_CBufferIndex;
-                    GDX12IndirectDrawArgs drawCommand;
-                    drawCommand.IndexCountPerInstance = subMesh.IndexCount;
-                    drawCommand.InstanceCount = 1;
-                    drawCommand.StartIndexLocation = subMesh.StartIndexLocation;
-                    drawCommand.BaseVertexLocation = subMesh.StartVertexLocation;
-                    drawCommand.StartInstanceLocation = renderer._CBufferIndices[i];
+                    gpuMesh->CPUMesh->GetBounds().Transform(renderer.Bounds, XMLoadFloat4x4(&transformGPUData.World));
 
-                    instanceCache->CopyData(renderer._CBufferIndices[i], instanceData);
-                    indirectCommandsCache->CopyData(renderer._CBufferIndices[i], drawCommand);
+                    for (int i = 0; i < gpuMesh->SubMeshes.size(); i++)
+                    {
+                        const auto& subMesh = gpuMesh->SubMeshes[i];
+
+                        GDX12IndirectDrawArgs drawCommand;
+                        drawCommand.IndexCountPerInstance = subMesh.IndexCount;
+                        drawCommand.InstanceCount = 1;
+                        drawCommand.StartIndexLocation = subMesh.StartIndexLocation;
+                        drawCommand.BaseVertexLocation = subMesh.StartVertexLocation;
+                        drawCommand.StartInstanceLocation = renderer._CBufferIndices[i];
+
+                        indirectCommandsCache->CopyData(renderer._CBufferIndices[i], drawCommand);
+                    }
+                }
+
+                if (renderer._numFramesDirty > 0)
+                {
+                    for (int i = 0; i < gpuMesh->SubMeshes.size(); i++)
+                    {
+                        const auto& subMesh = gpuMesh->SubMeshes[i];
+                        const auto& subMeshBounds = gpuMesh->CPUMesh->GetSubMesh(i).Bounds;
+
+                        BoundingBox bounds;
+                        subMeshBounds.Transform(bounds, XMLoadFloat4x4(&transformGPUData.World));
+
+                        GDX12InstanceData instanceData;
+                        instanceData.TransformIndex = transformGPUData.CBufferIndex;
+                        instanceData.MaterialIndex = renderer.Materials[subMesh.MaterialIndex]->_CBufferIndex;
+                        instanceData.BoundingBoxCenter = bounds.Center;
+                        instanceData.BoundingBoxExtents = bounds.Extents;
+
+                        instanceCache->CopyData(renderer._CBufferIndices[i], instanceData);
+                    }
+                    renderer._numFramesDirty--;
                 }
             });
 

@@ -31,6 +31,7 @@ struct TransformCompGPUData
 {
     UINT CBufferIndex;
     UINT NumFramesDirty;
+    Matrix World;
 };
 
 class RenderModule final : public Module
@@ -97,7 +98,6 @@ public:
     GDX12RenderCommandRecorder* GetCommandRecorder();
     GDX12FrameConstants* GetCurrentFrameConstants();
     const GPUMesh* GetGPUMesh(MeshHandle handle);
-    GDX12UploadBuffer<GDX12InstanceData>* GetInstanceCache();
     GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetIndirectCommandsCache();
 
 protected:
@@ -151,7 +151,6 @@ private:
     std::vector<std::unique_ptr<GDX12FrameConstants>> _frameConstants;
     UINT _currFrameConstantsIndex;
 
-    std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> _instanceCache;
     std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> _IndirectCommandsCache;
     ComPtr<ID3D12CommandSignature> _commandSignature;
 
