@@ -524,7 +524,7 @@ void RenderModule::OnRender()
     cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetCommonBarrier() });
 
     cmdQueue->ExecuteCommandList(cmdList);
-    CurrentFrameConsts->FenceValue = cmdQueue->GetFence()->GetCompletedValue();
+    CurrentFrameConsts->FenceValue = cmdList->FenceValue;
 
     _backBuffer->Present();
 }
