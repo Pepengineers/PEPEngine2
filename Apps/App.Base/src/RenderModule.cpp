@@ -264,6 +264,11 @@ void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
     _geometryBuffer->AddMesh(mesh, handle);
 }
 
+TransformCompGPUData& RenderModule::GetTransformGPUData(Entity entity)
+{
+    return _transformGPUData.at(entity);
+}
+
 void RenderModule::SubscribeToWorld(World& world)
 {
     if (_worldSubscriptions.find(&world) != _worldSubscriptions.end())
@@ -393,7 +398,9 @@ GDX12UploadBuffer<GDX12IndirectDrawArgs>* RenderModule::GetIndirectCommandsCache
 
 void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
 {
-    component._CBufferIndex = _frameConstants[0]->TransformCache->GetElementCount();
+    TransformCompGPUData gpuData;
+    gpuData.CBufferIndex = _frameConstants[0]->TransformCache->GetElementCount();
+    _transformGPUData[entity] = gpuData;
 
     for (auto& constants : _frameConstants)
     {
@@ -404,6 +411,7 @@ void RenderModule::OnTransformComponentCreated(World& world, Entity entity, Tran
 
 void RenderModule::OnTransformComponentDestroyed(World& world, Entity entity, TransformComponent& component)
 {
+    _transformGPUData.erase(entity);
 }
 
 void RenderModule::OnTransformComponentUpdated(World& world, Entity entity, TransformComponent& component)

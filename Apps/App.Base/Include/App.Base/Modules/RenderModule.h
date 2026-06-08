@@ -27,6 +27,12 @@ class Window;
 
 using namespace Engine::Core;
 
+struct TransformCompGPUData
+{
+    UINT CBufferIndex;
+    UINT NumFramesDirty;
+};
+
 class RenderModule final : public Module
 {
 public:
@@ -64,7 +70,9 @@ public:
         ListenerHandle RenderCompDestroyed = 0;
         ListenerHandle RenderCompUpdated = 0;
     };
-    
+
+    TransformCompGPUData& GetTransformGPUData(Entity entity);
+
     // this function adds listeners to new world
     void SubscribeToWorld(World& world);
     // unsubscribing if world is removed
@@ -119,7 +127,7 @@ private:
     ListenerHandle _worldCreatedListener = 0;
     ListenerHandle _worldDestroyedListener = 0;
     
-    
+    std::unordered_map<Entity, TransformCompGPUData> _transformGPUData;
     std::unordered_map<World*, WorldRenderSubscriptions> _worldSubscriptions;
 
     GDX12RenderCommandRecorder _commandRecorder;

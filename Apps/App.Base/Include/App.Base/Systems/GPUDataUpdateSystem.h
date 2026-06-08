@@ -69,13 +69,14 @@ public:
         ecs.ForEach<TransformComponent>(
             [&ecs, &renderModule, &numFrames](Entity entity, TransformComponent& transform)
             {
+                auto& GPUData = renderModule->GetTransformGPUData(entity);
                 if (transform.DirtyFlag)
                 {
                     transform.DirtyFlag = false;
-                    transform._numFramesDirty = numFrames;
+                    GPUData.NumFramesDirty = numFrames;
                 }
 
-				if (transform._numFramesDirty > 0)
+				if (GPUData.NumFramesDirty > 0)
 				{
 					Matrix world = Matrix::CreateScale(transform.Scale) * 
                         Matrix::CreateFromYawPitchRoll(
@@ -88,9 +89,9 @@ public:
 					XMStoreFloat4x4(&objConstants.WorldMatrix, XMMatrixTranspose(world));
 
                     auto& CBuffer = renderModule->GetCurrentFrameConstants()->TransformCache;
-                    CBuffer->CopyData(transform._CBufferIndex, objConstants);
+                    CBuffer->CopyData(GPUData.CBufferIndex, objConstants);
 
-                    transform._numFramesDirty--;
+                    GPUData.NumFramesDirty--;
 				}
             });
 
@@ -103,13 +104,14 @@ public:
                 auto instanceCache = renderModule->GetInstanceCache();
                 auto indirectCommandsCache = renderModule->GetIndirectCommandsCache();
                 auto gpuMesh = renderModule->GetGPUMesh(renderer.MeshHandler);
+                auto& transformGPUData = renderModule->GetTransformGPUData(entity);
 
                 for (int i = 0; i < gpuMesh->SubMeshes.size(); i++)
                 {
                     const auto& subMesh = gpuMesh->SubMeshes[i];
 
                     GDX12InstanceData instanceData;
-                    instanceData.TransformIndex = transform._CBufferIndex;
+                    instanceData.TransformIndex = transformGPUData.CBufferIndex;
                     instanceData.MaterialIndex = renderer.Materials[subMesh.MaterialIndex]->_CBufferIndex;
                     GDX12IndirectDrawArgs drawCommand;
                     drawCommand.IndexCountPerInstance = subMesh.IndexCount;
