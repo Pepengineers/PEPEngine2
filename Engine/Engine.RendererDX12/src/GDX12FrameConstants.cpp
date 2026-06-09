@@ -12,6 +12,7 @@ GDX12FrameConstants::GDX12FrameConstants(GDX12Device* device)
     MaterialCache = std::make_unique<GDX12UploadBuffer<GDX12MaterialConstants>>(device, 0, false);
     LightCB = std::make_unique<GDX12UploadBuffer<GDX12LightConstants>>(device, 0, true);
     CameraCB = std::make_unique<GDX12UploadBuffer<GDX12CameraConstants>>(device, 0, true);
+    VisibleCommandsCache = std::make_unique<GDX12AppendBuffer<GDX12IndirectDrawArgs>>(device, 10000);
 }
 
 GDX12FrameConstants::~GDX12FrameConstants()

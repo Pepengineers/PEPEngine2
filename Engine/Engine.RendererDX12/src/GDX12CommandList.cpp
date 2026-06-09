@@ -269,6 +269,11 @@ void GDX12CommandList::DispatchRays(const D3D12_DISPATCH_RAYS_DESC* pDesc)
 	_commandList->DispatchRays(pDesc);
 }
 
+void GDX12CommandList::ExecuteIndirect(ID3D12CommandSignature* pCommandSignature, UINT MaxCommandCount, ID3D12Resource* pArgumentBuffer, UINT64 ArgumentBufferOffset, ID3D12Resource* pCountBuffer, UINT64 CountBufferOffset)
+{
+	_commandList->ExecuteIndirect(pCommandSignature, MaxCommandCount, pArgumentBuffer, ArgumentBufferOffset, pCountBuffer, CountBufferOffset);
+}
+
 void GDX12CommandList::ResourceBarrier(std::initializer_list<CD3DX12_RESOURCE_BARRIER> barriers)
 {
 	_commandList->ResourceBarrier(barriers.size(), barriers.begin());

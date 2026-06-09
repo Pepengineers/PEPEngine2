@@ -136,7 +136,7 @@ void GDX12Texture::CreateViews()
         if (_desc.UAVHeapIndex == -1) { OutputDebugStringA("ERROR: No Texture UAVHeapIndex specified\n"); }
 
         if (!_uav) _uav = std::make_unique<GDX12Descriptor>();
-        _uav->InitAsUAV(_resource->D3DResource.Get(), &_desc.UAVDesc, _desc.SRV_UAV_Heap, _desc.UAVHeapIndex);
+        _uav->InitAsUAV(_resource->D3DResource.Get(), nullptr, &_desc.UAVDesc, _desc.SRV_UAV_Heap, _desc.UAVHeapIndex);
     }
 
     if (_desc.CreateRTV)

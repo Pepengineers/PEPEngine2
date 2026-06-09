@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 #include "Engine.RendererDX12/GDX12UploadBuffer.h"
+#include "Engine.RendererDX12/GDX12AppendBuffer.h"
 #include "Engine.RendererDX12/GDX12ConstantStructures.h"
 
 class GDX12Device;
@@ -19,13 +20,15 @@ public:
     std::unique_ptr<GDX12UploadBuffer<GDX12MainConstants>> MainCB;
 
     //Dirty flag notify updating
-    //Probably should move those to components
     std::unique_ptr<GDX12UploadBuffer<GDX12TransformConstants>> TransformCache;
     std::unique_ptr<GDX12UploadBuffer<GDX12MaterialConstants>> MaterialCache;
     std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> InstanceCache;
     std::unique_ptr<GDX12UploadBuffer<GDX12LightConstants>> LightCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12CameraConstants>> CameraCB;
-    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> VisibleCommandsCache;
+
+    // Append buffer for visible indirect commands
+    std::unique_ptr<GDX12AppendBuffer<GDX12IndirectDrawArgs>> VisibleCommandsCache;
+
     UINT64 FenceValue;
     
 private:

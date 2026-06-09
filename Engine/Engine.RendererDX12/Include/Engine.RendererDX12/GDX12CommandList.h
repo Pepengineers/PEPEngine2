@@ -73,6 +73,9 @@ public:
 		UINT startIndexLocation, INT baseVertexLocation, UINT startInstanceLocation);
 	void Dispatch(UINT threadGroupCountX, UINT threadGroupCountY, UINT threadGroupCountZ);
 	void DispatchRays(const D3D12_DISPATCH_RAYS_DESC* pDesc);
+	void ExecuteIndirect(ID3D12CommandSignature* pCommandSignature, UINT MaxCommandCount,
+		ID3D12Resource* pArgumentBuffer, UINT64 ArgumentBufferOffset, ID3D12Resource* pCountBuffer,
+		UINT64 CountBufferOffset = 0);
 
 	//Resource Barriers
 	void ResourceBarrier(std::initializer_list<CD3DX12_RESOURCE_BARRIER> barriers);

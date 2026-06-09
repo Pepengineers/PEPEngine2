@@ -14,7 +14,7 @@ public:
 
 	void InitAsSRV(ID3D12Resource* resource, D3D12_SHADER_RESOURCE_VIEW_DESC* srvDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex);
 	void InitAsCBV(D3D12_CONSTANT_BUFFER_VIEW_DESC* cbvDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex);
-	void InitAsUAV(ID3D12Resource* resource, D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex);
+	void InitAsUAV(ID3D12Resource* resource, ID3D12Resource* counterResource, D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex);
 	void InitAsDSV(ID3D12Resource* resource, D3D12_DEPTH_STENCIL_VIEW_DESC* dsvDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex);
 	void InitAsRTV(ID3D12Resource* resource, D3D12_RENDER_TARGET_VIEW_DESC* rtvDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex);
 	
@@ -22,7 +22,5 @@ public:
 	UINT HeapIndex;
 	D3D12_CPU_DESCRIPTOR_HANDLE CPUHandle;
 	D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle;
-
-private:
 	GDX12DescriptorHeap* _heap;
 };

@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GeometryBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Material.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderCommandRecorder.h" />
@@ -119,9 +120,6 @@
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Pix.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Assimp.props" />
   </ImportGroup>
-  <ItemGroup>
-    <None Include="Shaders\Culling.hlsl" />
-  </ItemGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
