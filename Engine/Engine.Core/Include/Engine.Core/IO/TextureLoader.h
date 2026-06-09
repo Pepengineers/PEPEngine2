@@ -15,9 +15,12 @@ namespace Engine::Core
 		///
 		/// Supports two loading paths depending on the file format:
 		///   - DDS, TGA, HDR: loaded via DirectXTex, preserving GPU-native formats,
-		///     mip chains, array slices and cubemap faces as stored in the file.
+		///     array slices and cubemap faces as stored in the file.
 		///   - All other formats (PNG, JPG, BMP, etc.): loaded via WIC and converted
-		///     to DXGI_FORMAT_R8G8B8A8_UNORM with a single mip level.
+		///     to DXGI_FORMAT_R8G8B8A8_UNORM.
+		///
+		/// Generates a full mip chain for supported 2D textures that only contain
+		/// the base mip level. Existing mip chains are preserved.
 		///
 		/// Performs the following validation before loading:
 		///   - Rejects empty paths.
