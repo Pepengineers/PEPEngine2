@@ -109,6 +109,20 @@ CD3DX12_RESOURCE_BARRIER GDX12Resource::GetPresentBarrier()
 	return transition;
 }
 
+CD3DX12_RESOURCE_BARRIER GDX12Resource::GetIndirectArgsBarrier()
+{
+	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
+		_currentState, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+	_currentState = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+	return transition;
+}
+
+CD3DX12_RESOURCE_BARRIER GDX12Resource::GetUAVBarrier()
+{
+	auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(D3DResource.Get());
+	return barrier;
+}
+
 void GDX12Resource::SetCurrentState(D3D12_RESOURCE_STATES newState)
 {
 	_currentState = newState;

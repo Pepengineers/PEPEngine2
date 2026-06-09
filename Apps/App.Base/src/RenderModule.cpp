@@ -445,6 +445,7 @@ void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticM
         {
             auto& CBuffer = constants->InstanceCache;
             CBuffer->Resize(CBuffer->GetElementCount() + 1);
+            constants->VisibleCommandsCache->Resize(constants->VisibleCommandsCache->GetElementCount() + 1);
         }
 
     }
@@ -504,7 +505,18 @@ void RenderModule::OnRender()
     cmdList->ClearDepthStencilView(_depthStencil.get());
     cmdList->EndPixEvent();
 
-    cmdList->BeginPixEvent("GPU Mesh Culling", Colors::Aqua);
+    cmdList->BeginPixEvent("GPU Mesh Culling", Colors::Blue);
+
+    cmdList->ResourceBarrier({ 
+        CurrentFrameConsts->VisibleCommandsCache->GetResource().GetUnorderedAccessBarrier(),
+        CurrentFrameConsts->DrawCounter->GetResource().GetUnorderedAccessBarrier() });
+
+    cmdList->SetComputeRootSignature(_rootSignatures["BufferClear"].get());
+    cmdList->SetPipelineState(_PSOs["BufferClear"]);
+    cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
+    cmdList->SetComputeUAV(0, CurrentFrameConsts->DrawCounter->GetUAV()->GPUHandle);
+    cmdList->Dispatch(1, 1, 1);
+
     cmdList->SetComputeRootSignature(_rootSignatures["Culling"].get());
     cmdList->SetPipelineState(_PSOs["Culling"]);
     cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
@@ -512,11 +524,18 @@ void RenderModule::OnRender()
         GetElementAddress(_commandRecorder._cameraCBIndex));
     cmdList->SetComputeSRV(0, CurrentFrameConsts->InstanceCache->GetSRV()->GPUHandle);
     cmdList->SetComputeSRV(1, _IndirectCommandsCache->GetSRV()->GPUHandle);
+    cmdList->SetComputeSRV(2, CurrentFrameConsts->MaterialCache->GetSRV()->GPUHandle);
     cmdList->SetComputeUAV(0, CurrentFrameConsts->VisibleCommandsCache->GetUAV()->GPUHandle);
     cmdList->SetComputeUAV(1, CurrentFrameConsts->DrawCounter->GetUAV()->GPUHandle);
     UINT numDraws = _IndirectCommandsCache->GetElementCount();
     UINT threadGroups = (numDraws + 63) / 64;
     cmdList->Dispatch(threadGroups, 1, 1);
+
+    cmdList->ResourceBarrier({
+        CurrentFrameConsts->VisibleCommandsCache->GetResource().GetUAVBarrier(),
+        CurrentFrameConsts->DrawCounter->GetResource().GetUAVBarrier(),
+        CurrentFrameConsts->VisibleCommandsCache->GetResource().GetIndirectArgsBarrier(),
+        CurrentFrameConsts->DrawCounter->GetResource().GetIndirectArgsBarrier() });
     cmdList->EndPixEvent();
 
 
@@ -534,8 +553,8 @@ void RenderModule::OnRender()
     cmdList->SetGraphicsSRV(2, CurrentFrameConsts->InstanceCache->GetSRV()->GPUHandle);
     cmdList->SetGraphicsSRV(3, _srvuavHeap->GetGPUHandle(Texture2D_StartIndex));
     cmdList->ExecuteIndirect(_commandSignature.Get(), _IndirectCommandsCache->GetElementCount(),
-        CurrentFrameConsts->VisibleCommandsCache->GetResource(), 0, 
-        CurrentFrameConsts->DrawCounter->GetResource().Get(), 
+        CurrentFrameConsts->VisibleCommandsCache->GetResource().D3DResource.Get(), 0,
+        CurrentFrameConsts->DrawCounter->GetResource().D3DResource.Get(),
         0);
     cmdList->EndPixEvent();
     
@@ -606,9 +625,13 @@ void RenderModule::BuildRootSignatures()
 
     GDX12RootSignatureDesc desc3;
     desc3.NumSingleCBVSlots = 1;
-    desc3.NumSingleSRVSlots = 2;
+    desc3.NumSingleSRVSlots = 3;
     desc3.NumSingleUAVSlots = 2;
     _rootSignatures["Culling"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc3);
+
+    GDX12RootSignatureDesc desc4;
+    desc4.NumSingleUAVSlots = 1;
+    _rootSignatures["BufferClear"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc4);
 }
 
 void RenderModule::BuildShaders()
@@ -616,6 +639,7 @@ void RenderModule::BuildShaders()
     auto& Compiler = GDX12ShaderCompiler::GetInstance();
 
     _shaders["CullingCS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Culling.hlsl", nullptr, "CS", "cs");
+    _shaders["BufferClearCS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "BufferClear.hlsl", nullptr, "CS", "cs");
 
     _shaders["TestVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "VS", "vs");
     _shaders["TestPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "PS", "ps");
@@ -664,6 +688,17 @@ void RenderModule::BuildPSOs()
 
     ThrowIfFailed(_primaryDevice->GetDevice()->CreateComputePipelineState(
         &desc2, IID_PPV_ARGS(&_PSOs["Culling"])));
+
+    D3D12_COMPUTE_PIPELINE_STATE_DESC desc3 = {};
+    desc3.pRootSignature = _rootSignatures["BufferClear"]->GetRootSignature().Get();
+    desc3.CS =
+    {
+        reinterpret_cast<BYTE*>(_shaders["BufferClearCS"]->GetBufferPointer()),
+        _shaders["BufferClearCS"]->GetBufferSize()
+    };
+
+    ThrowIfFailed(_primaryDevice->GetDevice()->CreateComputePipelineState(
+        &desc3, IID_PPV_ARGS(&_PSOs["BufferClear"])));
 }
 
 void RenderModule::BuildFrameConstants()
@@ -675,7 +710,7 @@ void RenderModule::BuildFrameConstants()
         _frameConstants[i]->MaterialCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
         _frameConstants[i]->TransformCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
         _frameConstants[i]->InstanceCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
-        _frameConstants[i]->VisibleCommandsCache->CreateUAVs(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
+        _frameConstants[i]->VisibleCommandsCache->CreateUAV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
         _frameConstants[i]->DrawCounter->CreateUAV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
     }
 

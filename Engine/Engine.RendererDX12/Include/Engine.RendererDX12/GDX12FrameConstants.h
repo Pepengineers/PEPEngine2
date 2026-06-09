@@ -27,7 +27,7 @@ public:
     std::unique_ptr<GDX12UploadBuffer<GDX12CameraConstants>> CameraCB;
 
     // Append buffer for visible indirect commands
-    std::unique_ptr<GDX12AppendBuffer<GDX12IndirectDrawArgs>> VisibleCommandsCache;
+    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> VisibleCommandsCache;
     //Indirect draw Arguments
     std::unique_ptr<GDX12UploadBuffer<UINT>> DrawCounter;
 
