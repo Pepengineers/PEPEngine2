@@ -28,6 +28,8 @@ public:
 
     // Append buffer for visible indirect commands
     std::unique_ptr<GDX12AppendBuffer<GDX12IndirectDrawArgs>> VisibleCommandsCache;
+    //Indirect draw Arguments
+    std::unique_ptr<GDX12UploadBuffer<UINT>> DrawCounter;
 
     UINT64 FenceValue;
     

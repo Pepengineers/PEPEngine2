@@ -54,12 +54,8 @@ enum GDX12SRVHeapIndexAllocation
 
     TLAS = 10,
 
-    //this + numFrameConstants is occupied
-    MaterialCacheBuffer = 11,
-    TransformCacheBuffer = 20,
-    InstanceCacheBuffer = 25,
-    IndirectCommandsBuffer = 30,
-    VisibleIndirectCommandsBuffer = 35,
+    //this one will be really difficult to count
+    ConstantsResources = 11,
 
     ShadowMaps_StartIndex = 100,
     ShadowMaps_RangeLength = 400,

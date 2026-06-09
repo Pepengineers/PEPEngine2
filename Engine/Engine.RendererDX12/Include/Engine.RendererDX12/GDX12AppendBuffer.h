@@ -13,6 +13,7 @@ public:
     GDX12AppendBuffer(GDX12Device* device, UINT maxElementCount);
     ~GDX12AppendBuffer();
 
+    //takes 2 slots from the heap: one for the resource, one for the counter
     void CreateUAVs(GDX12DescriptorHeap* shaderVisibleHeap, UINT heapIndex);
 
     ID3D12Resource* GetResource() const { return _buffer.Get(); }

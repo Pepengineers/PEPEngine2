@@ -71,3 +71,11 @@ struct GDX12IndirectDrawArgs
     INT  BaseVertexLocation;
     UINT StartInstanceLocation;
 };
+
+struct GDX12IndirectArgs
+{
+    UINT DrawCount;
+    UINT Stride;
+    UINT StartOffset;
+    UINT Padding;
+};
