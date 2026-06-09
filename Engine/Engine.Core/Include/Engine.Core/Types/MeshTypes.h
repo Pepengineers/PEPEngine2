@@ -36,6 +36,13 @@ namespace Engine::Core
 		[[nodiscard]] bool HasIndices() const;
 	};
 
+	/// Describes how an imported material should be routed by the renderer.
+	enum class EMaterialType : std::uint8_t
+	{
+		Opaque = 0,
+		Transparent = 1,
+	};
+
 	struct MeshMaterial
 	{
 		std::string Name;
@@ -44,10 +51,13 @@ namespace Engine::Core
 		std::filesystem::path SpecularTexturePath;
 		std::filesystem::path RoughnessTexturePath;
 		std::filesystem::path EmissiveTexturePath;
+		std::filesystem::path OpacityTexturePath;
 		DirectX::SimpleMath::Vector3 DiffuseColor = {1.0f, 1.0f, 1.0f};
 		DirectX::SimpleMath::Vector3 SpecularColor = {0.0f, 0.0f, 0.0f};
 		DirectX::SimpleMath::Vector3 EmissiveColor = {0.0f, 0.0f, 0.0f};
 		float Roughness = 1.0f;
+		float Opacity = 1.0f;
+		EMaterialType Type = EMaterialType::Opaque;
 		bool UseBakedLighting = false;
 	};
 

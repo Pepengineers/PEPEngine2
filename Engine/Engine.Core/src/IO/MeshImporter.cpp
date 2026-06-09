@@ -4,6 +4,7 @@
 #include <Engine.Core/IO/AssimpImportHelpers.h>
 
 #include <assimp/Importer.hpp>
+#include <assimp/GltfMaterial.h>
 #include <assimp/material.h>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
@@ -165,6 +166,51 @@ namespace
 		return (std::max)(0.04f, (std::min)(roughness, 1.0f));
 	}
 
+	/// Converts an ASCII string to lowercase.
+	std::string ToLowerAscii(std::string value)
+	{
+		std::transform(value.begin(), value.end(), value.begin(), [](const unsigned char character) { return static_cast<char>(std::tolower(character)); });
+		return value;
+	}
+
+	/// Returns true if the material declares a glTF alpha mode that requires non-opaque rendering.
+	bool HasTransparentAlphaMode(const aiMaterial& assimpMaterial)
+	{
+		aiString alphaMode;
+		if (assimpMaterial.Get(AI_MATKEY_GLTF_ALPHAMODE, alphaMode) != AI_SUCCESS)
+		{
+			return false;
+		}
+
+		const std::string alphaModeText = ToLowerAscii(alphaMode.C_Str());
+		return alphaModeText == "blend" || alphaModeText == "mask";
+	}
+
+	/// Determines the renderer-facing material type from imported transparency metadata.
+	Engine::Core::EMaterialType DetermineMaterialType(
+		const aiMaterial& assimpMaterial,
+		const float opacity,
+		const std::filesystem::path& opacityTexturePath)
+	{
+		if (opacity < 0.999f || !opacityTexturePath.empty())
+		{
+			return Engine::Core::EMaterialType::Transparent;
+		}
+
+		int blendMode = aiBlendMode_Default;
+		if (assimpMaterial.Get(AI_MATKEY_BLEND_FUNC, blendMode) == AI_SUCCESS && blendMode == aiBlendMode_Additive)
+		{
+			return Engine::Core::EMaterialType::Transparent;
+		}
+
+		if (HasTransparentAlphaMode(assimpMaterial))
+		{
+			return Engine::Core::EMaterialType::Transparent;
+		}
+
+		return Engine::Core::EMaterialType::Opaque;
+	}
+
 	void TryImportTexturePath(
 		const aiMaterial& assimpMaterial,
 		const aiTextureType textureType,
@@ -229,12 +275,20 @@ namespace
 			{
 				importedMaterial.Roughness = (std::max)(0.04f, (std::min)(roughness, 1.0f));
 			}
+
+			float opacity = importedMaterial.Opacity;
+			if (assimpMaterial->Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS)
+			{
+				importedMaterial.Opacity = (std::max)(0.0f, (std::min)(opacity, 1.0f));
+			}
 			
 			TryImportTexturePath(*assimpMaterial, aiTextureType_DIFFUSE, sourcePath, importedMaterial.DiffuseTexturePath);
 			TryImportTexturePath(*assimpMaterial, aiTextureType_SPECULAR, sourcePath, importedMaterial.SpecularTexturePath);
 			TryImportTexturePath(*assimpMaterial, aiTextureType_NORMALS, sourcePath, importedMaterial.NormalTexturePath);
 			TryImportTexturePath(*assimpMaterial, aiTextureType_DIFFUSE_ROUGHNESS, sourcePath, importedMaterial.RoughnessTexturePath);
 			TryImportTexturePath(*assimpMaterial, aiTextureType_EMISSIVE, sourcePath, importedMaterial.EmissiveTexturePath);
+			TryImportTexturePath(*assimpMaterial, aiTextureType_OPACITY, sourcePath, importedMaterial.OpacityTexturePath);
+			importedMaterial.Type = DetermineMaterialType(*assimpMaterial, importedMaterial.Opacity, importedMaterial.OpacityTexturePath);
 			importedMaterial.UseBakedLighting = AreSameTexturePath(importedMaterial.DiffuseTexturePath, importedMaterial.EmissiveTexturePath);
 				
 			importedMaterials.push_back(std::move(importedMaterial));

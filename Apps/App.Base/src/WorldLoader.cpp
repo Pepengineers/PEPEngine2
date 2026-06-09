@@ -317,6 +317,7 @@ namespace
 		material->HasRoughnessMap = false;
 		material->HasEmissiveMap = false;
 		material->UseBakedLighting = false;
+		material->Type = MaterialType::Opaque;
 		material->DirtyFlag = true;
 		return material;
 	}
@@ -363,6 +364,7 @@ namespace
 		material->HasRoughnessMap = textures.HasRoughnessMap;
 		material->HasEmissiveMap = textures.HasEmissiveMap;
 		material->UseBakedLighting = sourceMaterial.UseBakedLighting;
+		material->Type = sourceMaterial.Type == Engine::Core::EMaterialType::Transparent ? MaterialType::Transparent : MaterialType::Opaque;
 		material->DirtyFlag = true;
 		return material;
 	}
