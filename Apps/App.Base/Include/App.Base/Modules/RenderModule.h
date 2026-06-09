@@ -152,15 +152,20 @@ private:
     UINT _currFrameConstantsIndex;
 
     std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> _IndirectCommandsCache;
-    ComPtr<ID3D12CommandSignature> _commandSignature;
 
     std::unordered_map<std::string, ComPtr<ID3DBlob>> _shaders;
     std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> _PSOs;
     std::unordered_map<std::string, std::unique_ptr<GDX12RootSignature>> _rootSignatures;
+    std::unordered_map <std::string, ComPtr<ID3D12CommandSignature>> _commandSignatures;
 
     std::unordered_map<std::string, std::unique_ptr<GDX12Texture>> _textures;
 
     // These two resources are made on _primaryDevice only
     std::unique_ptr<GDX12SwapChain> _backBuffer;
     std::unique_ptr<GDX12Texture> _depthStencil;
+
+    std::unique_ptr<GDX12Texture> _opaqueAccumTexture;
+    std::unique_ptr<GDX12Texture> _transparencyAccumTexture;
+    std::unique_ptr<GDX12Texture> _transparencyRevealageTexture;
+    std::unique_ptr<GDX12Texture> _compositionTexture;
 };

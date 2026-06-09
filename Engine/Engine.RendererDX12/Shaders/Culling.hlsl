@@ -61,6 +61,7 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
             uint writeIndex;
             InterlockedAdd(OpaqueCounterBuffer[0], 1, writeIndex);
             OpaqueVisibleCommands[writeIndex] = InputCommands[drawIndex];
+            return;
         }
         //transparent
         if (mat.RenderLayer == 1)
@@ -68,6 +69,7 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
             uint writeIndex;
             InterlockedAdd(TransparentCounterBuffer[0], 1, writeIndex);
             TransparentVisibleCommands[writeIndex] = InputCommands[drawIndex];
+            return;
         }
     }
 }

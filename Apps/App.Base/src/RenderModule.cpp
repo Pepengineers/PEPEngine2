@@ -535,9 +535,7 @@ void RenderModule::OnRender()
     cmdList->SetComputeUAV(1, CurrentFrameConsts->OpaqueDrawCounter->GetUAV()->GPUHandle);
     cmdList->SetComputeUAV(2, CurrentFrameConsts->VisibleTransparentCommandsCache->GetUAV()->GPUHandle);
     cmdList->SetComputeUAV(3, CurrentFrameConsts->TransparentDrawCounter->GetUAV()->GPUHandle);
-    UINT numDraws = _IndirectCommandsCache->GetElementCount();
-    UINT threadGroups = (numDraws + 63) / 64;
-    cmdList->Dispatch(threadGroups, 1, 1);
+    cmdList->Dispatch((_IndirectCommandsCache->GetElementCount() + 63) / 64, 1, 1);
 
     cmdList->ResourceBarrier({
         CurrentFrameConsts->VisibleOpaqueCommandsCache->GetResource().GetUAVBarrier(),
@@ -549,12 +547,12 @@ void RenderModule::OnRender()
     cmdList->EndPixEvent();
 
 
-    cmdList->BeginPixEvent("Test Render Pass", Colors::ForestGreen);
-    cmdList->SetGraphicsRootSignature(_rootSignatures["Test"].get());
+    cmdList->BeginPixEvent("Opaque Render Pass", Colors::ForestGreen);
+    cmdList->SetGraphicsRootSignature(_rootSignatures["OpaquePass"].get());
     cmdList->SetGraphicsRootConstantBufferView(1, CurrentFrameConsts->MainCB->GetElementAddress(0));
     cmdList->SetGraphicsRootConstantBufferView(2, CurrentFrameConsts->CameraCB->
         GetElementAddress(_commandRecorder._cameraCBIndex));
-    cmdList->SetPipelineState(_PSOs["Test"]);
+    cmdList->SetPipelineState(_PSOs["OpaquePass"]);
     cmdList->SetGeometryBuffer(_geometryBuffer.get());
     cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
@@ -562,10 +560,9 @@ void RenderModule::OnRender()
     cmdList->SetGraphicsSRV(1, CurrentFrameConsts->TransformCache->GetSRV()->GPUHandle);
     cmdList->SetGraphicsSRV(2, CurrentFrameConsts->InstanceCache->GetSRV()->GPUHandle);
     cmdList->SetGraphicsSRV(3, _srvuavHeap->GetGPUHandle(Texture2D_StartIndex));
-    cmdList->ExecuteIndirect(_commandSignature.Get(), _IndirectCommandsCache->GetElementCount(),
+    cmdList->ExecuteIndirect(_commandSignatures["OpaquePass"].Get(), _IndirectCommandsCache->GetElementCount(),
         CurrentFrameConsts->VisibleOpaqueCommandsCache->GetResource().D3DResource.Get(), 0,
-        CurrentFrameConsts->OpaqueDrawCounter->GetResource().D3DResource.Get(),
-        0);
+        CurrentFrameConsts->OpaqueDrawCounter->GetResource().D3DResource.Get(), 0);
     cmdList->EndPixEvent();
     
     cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetPresentEnhBarrier() });
@@ -622,7 +619,7 @@ void RenderModule::BuildRootSignatures()
     desc.StaticSamplers = GetStaticSamplers();
     desc.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
     desc.Constants.push_back(1);
-    _rootSignatures["Test"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc);
+    _rootSignatures["OpaquePass"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc);
 
     std::vector<D3D12_INDIRECT_ARGUMENT_DESC> args;
     D3D12_INDIRECT_ARGUMENT_DESC argConst = {};
@@ -640,8 +637,8 @@ void RenderModule::BuildRootSignatures()
     cmdSigDesc.NodeMask = 0;
 
     _primaryDevice->GetDevice()->CreateCommandSignature(&cmdSigDesc,
-        _rootSignatures["Test"]->GetRootSignature().Get(),
-        IID_PPV_ARGS(&_commandSignature));
+        _rootSignatures["OpaquePass"]->GetRootSignature().Get(),
+        IID_PPV_ARGS(&_commandSignatures["OpaquePass"]));
 
     GDX12RootSignatureDesc desc3;
     desc3.NumSingleCBVSlots = 1;
@@ -661,8 +658,8 @@ void RenderModule::BuildShaders()
     _shaders["CullingCS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Culling.hlsl", nullptr, "CS", "cs");
     _shaders["BufferClearCS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "BufferClear.hlsl", nullptr, "CS", "cs");
 
-    _shaders["TestVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "VS", "vs");
-    _shaders["TestPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "PS", "ps");
+    _shaders["OpaquePassVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "VS", "vs");
+    _shaders["OpaquePassPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "PS", "ps");
 }
 
 void RenderModule::BuildPSOs()
@@ -670,7 +667,7 @@ void RenderModule::BuildPSOs()
     D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
 
     desc.InputLayout = { _inputLayouts["Default"].data(), (UINT)_inputLayouts["Default"].size() };
-    desc.pRootSignature = _rootSignatures["Test"]->GetRootSignature().Get();
+    desc.pRootSignature = _rootSignatures["OpaquePass"]->GetRootSignature().Get();
     desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
     desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
     desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
@@ -687,15 +684,15 @@ void RenderModule::BuildPSOs()
 
     desc.VS =
     {
-        reinterpret_cast<BYTE*>(_shaders["TestVS"]->GetBufferPointer()),
-        _shaders["TestVS"]->GetBufferSize()
+        reinterpret_cast<BYTE*>(_shaders["OpaquePassVS"]->GetBufferPointer()),
+        _shaders["OpaquePassVS"]->GetBufferSize()
     };
     desc.PS =
     {
-        reinterpret_cast<BYTE*>(_shaders["TestPS"]->GetBufferPointer()),
-        _shaders["TestPS"]->GetBufferSize()
+        reinterpret_cast<BYTE*>(_shaders["OpaquePassPS"]->GetBufferPointer()),
+        _shaders["OpaquePassPS"]->GetBufferSize()
     };
-    ThrowIfFailed(_primaryDevice->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_PSOs["Test"])));
+    ThrowIfFailed(_primaryDevice->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_PSOs["OpaquePass"])));
 
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC desc2 = {};
