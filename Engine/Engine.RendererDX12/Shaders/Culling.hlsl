@@ -4,9 +4,11 @@ ConstantBuffer<CameraCB> CBCamera : register(b0);
 
 StructuredBuffer<InstanceData> InstanceCache : register(t0);
 StructuredBuffer<IndirectDrawArgs> InputCommands : register(t1);
-StructuredBuffer<Material> MaterialCache : register(t3);
-RWStructuredBuffer<IndirectDrawArgs> VisibleCommands : register(u0);
-RWStructuredBuffer<uint> CounterBuffer : register(u1);
+StructuredBuffer<Material> MaterialCache : register(t2);
+RWStructuredBuffer<IndirectDrawArgs> OpaqueVisibleCommands : register(u0);
+RWStructuredBuffer<uint> OpaqueCounterBuffer : register(u1);
+RWStructuredBuffer<IndirectDrawArgs> TransparentVisibleCommands : register(u2);
+RWStructuredBuffer<uint> TransparentCounterBuffer : register(u3);
 
 bool IsBoxVisible(uint instanceIndex)
 {
@@ -47,10 +49,25 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
     if (drawIndex >= numDraws)
         return;
     
-    if (IsBoxVisible(InputCommands[drawIndex].StartInstanceLocation))
+    uint instanceID = InputCommands[drawIndex].StartInstanceLocation;
+    
+    if (IsBoxVisible(instanceID))
     {
-        uint writeIndex;
-        InterlockedAdd(CounterBuffer[0], 1, writeIndex);
-        VisibleCommands[writeIndex] = InputCommands[drawIndex];
+        Material mat = MaterialCache[InstanceCache[instanceID].MaterialIndex];
+        
+        //opaque
+        if(mat.RenderLayer == 0)
+        {
+            uint writeIndex;
+            InterlockedAdd(OpaqueCounterBuffer[0], 1, writeIndex);
+            OpaqueVisibleCommands[writeIndex] = InputCommands[drawIndex];
+        }
+        //transparent
+        if (mat.RenderLayer == 1)
+        {
+            uint writeIndex;
+            InterlockedAdd(TransparentCounterBuffer[0], 1, writeIndex);
+            TransparentVisibleCommands[writeIndex] = InputCommands[drawIndex];
+        }
     }
 }

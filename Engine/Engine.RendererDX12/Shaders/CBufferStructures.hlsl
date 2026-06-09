@@ -22,9 +22,9 @@ struct Material
     uint DiffuseIndex;
     uint NormalIndex;
     uint DisplacementIndex;
+    uint RenderLayer; // 0 - opaque, 1 - transparent
     float _pad1;
     float _pad2;
-    float _pad3;
 };
 
 struct CameraCB

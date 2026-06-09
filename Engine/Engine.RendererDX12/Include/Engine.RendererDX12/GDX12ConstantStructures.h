@@ -21,9 +21,9 @@ struct GDX12MaterialConstants
     UINT DiffuseIndex;
     UINT NormalIndex;
     UINT DisplacementIndex;
+    UINT RenderLayer; // 0 - opaque, 1 - transparent
     float _pad1;
     float _pad2;
-    float _pad3;
 };
 
 struct GDX12CameraConstants

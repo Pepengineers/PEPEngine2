@@ -3,6 +3,13 @@
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 class GDX12Texture;
+
+enum class MaterialType
+{
+	Opaque = 0,
+	Transparent = 1,
+};
+
 class GDX12Material
 {
 public:
@@ -24,19 +31,18 @@ public:
 	bool HasRoughnessMap;
 	bool HasEmissiveMap;
 	bool UseBakedLighting;
-
+	MaterialType Type;
 	bool DirtyFlag;
 	UINT _CBufferIndex;
 
 private:
-
 	friend class RenderModule;
 
 	GDX12Material() : Name(""), Diffuse(nullptr), Normal(nullptr), Specular(nullptr), RoughnessMap(nullptr),
-		Emissive(nullptr), Metallic(0.f), Roughness(1.f),
+		Emissive(nullptr), Displacement(nullptr), Metallic(0.f), Roughness(1.f),
 		SpecularColor(0.0f, 0.0f, 0.0f), EmissiveColor(0.0f, 0.0f, 0.0f),
 		HasNormalMap(false), HasSpecularMap(false), HasRoughnessMap(false), HasEmissiveMap(false),
-		UseBakedLighting(false), DirtyFlag(true), _CBufferIndex(0), _numFramesDirty(0)
+		UseBakedLighting(false), DirtyFlag(true), _CBufferIndex(0), _numFramesDirty(0), Type(MaterialType::Opaque)
 	{
 
 	}

@@ -445,7 +445,8 @@ void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticM
         {
             auto& CBuffer = constants->InstanceCache;
             CBuffer->Resize(CBuffer->GetElementCount() + 1);
-            constants->VisibleCommandsCache->Resize(constants->VisibleCommandsCache->GetElementCount() + 1);
+            constants->VisibleOpaqueCommandsCache->Resize(constants->VisibleOpaqueCommandsCache->GetElementCount() + 1);
+            constants->VisibleTransparentCommandsCache->Resize(constants->VisibleTransparentCommandsCache->GetElementCount() + 1);
         }
 
     }
@@ -508,13 +509,18 @@ void RenderModule::OnRender()
     cmdList->BeginPixEvent("GPU Mesh Culling", Colors::Blue);
 
     cmdList->ResourceBarrier({ 
-        CurrentFrameConsts->VisibleCommandsCache->GetResource().GetUnorderedAccessBarrier(),
-        CurrentFrameConsts->DrawCounter->GetResource().GetUnorderedAccessBarrier() });
+        CurrentFrameConsts->VisibleOpaqueCommandsCache->GetResource().GetUnorderedAccessBarrier(),
+        CurrentFrameConsts->OpaqueDrawCounter->GetResource().GetUnorderedAccessBarrier(),
+        CurrentFrameConsts->VisibleTransparentCommandsCache->GetResource().GetUnorderedAccessBarrier(),
+        CurrentFrameConsts->TransparentDrawCounter->GetResource().GetUnorderedAccessBarrier() });
 
     cmdList->SetComputeRootSignature(_rootSignatures["BufferClear"].get());
     cmdList->SetPipelineState(_PSOs["BufferClear"]);
     cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
-    cmdList->SetComputeUAV(0, CurrentFrameConsts->DrawCounter->GetUAV()->GPUHandle);
+    //should probably make this into a foreach
+    cmdList->SetComputeUAV(0, CurrentFrameConsts->OpaqueDrawCounter->GetUAV()->GPUHandle);
+    cmdList->Dispatch(1, 1, 1);
+    cmdList->SetComputeUAV(0, CurrentFrameConsts->TransparentDrawCounter->GetUAV()->GPUHandle);
     cmdList->Dispatch(1, 1, 1);
 
     cmdList->SetComputeRootSignature(_rootSignatures["Culling"].get());
@@ -525,17 +531,21 @@ void RenderModule::OnRender()
     cmdList->SetComputeSRV(0, CurrentFrameConsts->InstanceCache->GetSRV()->GPUHandle);
     cmdList->SetComputeSRV(1, _IndirectCommandsCache->GetSRV()->GPUHandle);
     cmdList->SetComputeSRV(2, CurrentFrameConsts->MaterialCache->GetSRV()->GPUHandle);
-    cmdList->SetComputeUAV(0, CurrentFrameConsts->VisibleCommandsCache->GetUAV()->GPUHandle);
-    cmdList->SetComputeUAV(1, CurrentFrameConsts->DrawCounter->GetUAV()->GPUHandle);
+    cmdList->SetComputeUAV(0, CurrentFrameConsts->VisibleOpaqueCommandsCache->GetUAV()->GPUHandle);
+    cmdList->SetComputeUAV(1, CurrentFrameConsts->OpaqueDrawCounter->GetUAV()->GPUHandle);
+    cmdList->SetComputeUAV(2, CurrentFrameConsts->VisibleTransparentCommandsCache->GetUAV()->GPUHandle);
+    cmdList->SetComputeUAV(3, CurrentFrameConsts->TransparentDrawCounter->GetUAV()->GPUHandle);
     UINT numDraws = _IndirectCommandsCache->GetElementCount();
     UINT threadGroups = (numDraws + 63) / 64;
     cmdList->Dispatch(threadGroups, 1, 1);
 
     cmdList->ResourceBarrier({
-        CurrentFrameConsts->VisibleCommandsCache->GetResource().GetUAVBarrier(),
-        CurrentFrameConsts->DrawCounter->GetResource().GetUAVBarrier(),
-        CurrentFrameConsts->VisibleCommandsCache->GetResource().GetIndirectArgsBarrier(),
-        CurrentFrameConsts->DrawCounter->GetResource().GetIndirectArgsBarrier() });
+        CurrentFrameConsts->VisibleOpaqueCommandsCache->GetResource().GetUAVBarrier(),
+        CurrentFrameConsts->OpaqueDrawCounter->GetResource().GetUAVBarrier(),
+        CurrentFrameConsts->VisibleOpaqueCommandsCache->GetResource().GetIndirectArgsBarrier(),
+        CurrentFrameConsts->OpaqueDrawCounter->GetResource().GetIndirectArgsBarrier(),
+        CurrentFrameConsts->VisibleTransparentCommandsCache->GetResource().GetIndirectArgsBarrier(),
+        CurrentFrameConsts->TransparentDrawCounter->GetResource().GetIndirectArgsBarrier() });
     cmdList->EndPixEvent();
 
 
@@ -553,8 +563,8 @@ void RenderModule::OnRender()
     cmdList->SetGraphicsSRV(2, CurrentFrameConsts->InstanceCache->GetSRV()->GPUHandle);
     cmdList->SetGraphicsSRV(3, _srvuavHeap->GetGPUHandle(Texture2D_StartIndex));
     cmdList->ExecuteIndirect(_commandSignature.Get(), _IndirectCommandsCache->GetElementCount(),
-        CurrentFrameConsts->VisibleCommandsCache->GetResource().D3DResource.Get(), 0,
-        CurrentFrameConsts->DrawCounter->GetResource().D3DResource.Get(),
+        CurrentFrameConsts->VisibleOpaqueCommandsCache->GetResource().D3DResource.Get(), 0,
+        CurrentFrameConsts->OpaqueDrawCounter->GetResource().D3DResource.Get(),
         0);
     cmdList->EndPixEvent();
     
@@ -636,7 +646,7 @@ void RenderModule::BuildRootSignatures()
     GDX12RootSignatureDesc desc3;
     desc3.NumSingleCBVSlots = 1;
     desc3.NumSingleSRVSlots = 3;
-    desc3.NumSingleUAVSlots = 2;
+    desc3.NumSingleUAVSlots = 4;
     _rootSignatures["Culling"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc3);
 
     GDX12RootSignatureDesc desc4;
@@ -720,8 +730,10 @@ void RenderModule::BuildFrameConstants()
         _frameConstants[i]->MaterialCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
         _frameConstants[i]->TransformCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
         _frameConstants[i]->InstanceCache->CreateSRV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
-        _frameConstants[i]->VisibleCommandsCache->CreateUAV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
-        _frameConstants[i]->DrawCounter->CreateUAV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
+        _frameConstants[i]->VisibleOpaqueCommandsCache->CreateUAV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
+        _frameConstants[i]->OpaqueDrawCounter->CreateUAV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
+        _frameConstants[i]->VisibleTransparentCommandsCache->CreateUAV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
+        _frameConstants[i]->TransparentDrawCounter->CreateUAV(_srvuavHeap.get(), _srvuavHeap->GetAvailableIndex(ConstantsResources));
     }
 
     _IndirectCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), 0, EBufferType::Upload, false);
@@ -762,6 +774,7 @@ void RenderModule::UpdateMaterialCB()
             GDX12MaterialConstants materialConstants;
             materialConstants.Roughness = material->Roughness;
             materialConstants.Metallic = material->Metallic;
+            materialConstants.RenderLayer = UINT(material->Type);
             
             if (material->Diffuse)
             {
