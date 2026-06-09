@@ -122,6 +122,7 @@ public:
                         drawCommand.StartIndexLocation = subMesh.StartIndexLocation;
                         drawCommand.BaseVertexLocation = subMesh.StartVertexLocation;
                         drawCommand.StartInstanceLocation = renderer._CBufferIndices[i];
+                        drawCommand.InstanceID = renderer._CBufferIndices[i];
 
                         indirectCommandsCache->CopyData(renderer._CBufferIndices[i], drawCommand);
                     }

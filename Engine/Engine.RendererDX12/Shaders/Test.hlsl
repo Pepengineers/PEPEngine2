@@ -1,7 +1,8 @@
 #include "CBufferStructures.hlsl"
 
-ConstantBuffer<MainCB> CBMain : register(b0);
-ConstantBuffer<CameraCB> CBCamera : register(b1);
+ConstantBuffer<IndirectConstants> CBIndirectConstants : register(b0);
+ConstantBuffer<MainCB> CBMain : register(b1);
+ConstantBuffer<CameraCB> CBCamera : register(b2);
 
 SamplerState samPointWrap : register(s0);
 SamplerState samPointClamp : register(s1);
@@ -33,11 +34,11 @@ struct VS_OUTPUT_PS_INPUT
     uint MaterialIndex : TEXCOORD1;
 };
 
-VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint instanceID : SV_StartInstanceLocation)
+VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
 {
     VS_OUTPUT_PS_INPUT vout = (VS_OUTPUT_PS_INPUT) 0.0f;
 	
-    InstanceData instance = InstanceCache[instanceID];
+    InstanceData instance = InstanceCache[CBIndirectConstants.InstanceID];
     float4x4 World = TransformCache[instance.TransformIndex].World;
     
     float4 posW = mul(float4(vin.Pos, 1.0f), World);

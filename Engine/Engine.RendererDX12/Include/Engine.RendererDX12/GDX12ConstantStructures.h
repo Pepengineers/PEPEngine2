@@ -65,6 +65,7 @@ struct GDX12InstanceData
 
 struct GDX12IndirectDrawArgs
 {
+    UINT InstanceID;
     UINT IndexCountPerInstance;
     UINT InstanceCount;
     UINT StartIndexLocation;

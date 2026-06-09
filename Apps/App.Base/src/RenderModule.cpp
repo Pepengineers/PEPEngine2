@@ -541,8 +541,8 @@ void RenderModule::OnRender()
 
     cmdList->BeginPixEvent("Test Render Pass", Colors::ForestGreen);
     cmdList->SetGraphicsRootSignature(_rootSignatures["Test"].get());
-    cmdList->SetGraphicsRootConstantBufferView(0, CurrentFrameConsts->MainCB->GetElementAddress(0));
-    cmdList->SetGraphicsRootConstantBufferView(1, CurrentFrameConsts->CameraCB->
+    cmdList->SetGraphicsRootConstantBufferView(1, CurrentFrameConsts->MainCB->GetElementAddress(0));
+    cmdList->SetGraphicsRootConstantBufferView(2, CurrentFrameConsts->CameraCB->
         GetElementAddress(_commandRecorder._cameraCBIndex));
     cmdList->SetPipelineState(_PSOs["Test"]);
     cmdList->SetGeometryBuffer(_geometryBuffer.get());
@@ -611,17 +611,27 @@ void RenderModule::BuildRootSignatures()
     desc.NumSingleSRVSlots = 3;
     desc.StaticSamplers = GetStaticSamplers();
     desc.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
+    desc.Constants.push_back(1);
     _rootSignatures["Test"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc);
 
-    D3D12_INDIRECT_ARGUMENT_DESC arg = {};
-    arg.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
-    D3D12_COMMAND_SIGNATURE_DESC desc2 = {};
-    desc2.ByteStride = sizeof(GDX12IndirectDrawArgs);
-    desc2.NumArgumentDescs = 1;
-    desc2.pArgumentDescs = &arg;
-    desc2.NodeMask = 0;
+    std::vector<D3D12_INDIRECT_ARGUMENT_DESC> args;
+    D3D12_INDIRECT_ARGUMENT_DESC argConst = {};
+    argConst.Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
+    argConst.Constant.DestOffsetIn32BitValues = 0;
+    argConst.Constant.Num32BitValuesToSet = 1;
+    args.push_back(argConst);
+    D3D12_INDIRECT_ARGUMENT_DESC argDraw = {};
+    argDraw.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
+    args.push_back(argDraw);
+    D3D12_COMMAND_SIGNATURE_DESC cmdSigDesc = {};
+    cmdSigDesc.ByteStride = sizeof(GDX12IndirectDrawArgs);
+    cmdSigDesc.NumArgumentDescs = args.size();
+    cmdSigDesc.pArgumentDescs = args.data();
+    cmdSigDesc.NodeMask = 0;
 
-    _primaryDevice->GetDevice()->CreateCommandSignature(&desc2, nullptr, IID_PPV_ARGS(&_commandSignature));
+    _primaryDevice->GetDevice()->CreateCommandSignature(&cmdSigDesc,
+        _rootSignatures["Test"]->GetRootSignature().Get(),
+        IID_PPV_ARGS(&_commandSignature));
 
     GDX12RootSignatureDesc desc3;
     desc3.NumSingleCBVSlots = 1;
