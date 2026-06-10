@@ -94,6 +94,11 @@ DXGI_FORMAT GDX12Texture::GetFormat()
     return _desc.Format;
 }
 
+ETextureSemantic GDX12Texture::GetSemantic() const
+{
+    return _desc.Semantic;
+}
+
 void GDX12Texture::CreateResource()
 {
     D3D12_RESOURCE_DESC resourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(

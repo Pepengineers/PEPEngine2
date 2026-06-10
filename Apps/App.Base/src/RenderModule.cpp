@@ -18,6 +18,21 @@ static AutoConsoleVariableRef NumFrameConstantVariable(
     _numFrameConstants,
     L"How many deferred frames was rendered");
 
+namespace
+{
+    ETextureSemantic ConvertTextureSemantic(const Engine::Core::ETextureType textureType)
+    {
+        switch (textureType)
+        {
+        case Engine::Core::ETextureType::Color:
+            return ETextureSemantic::Color;
+        case Engine::Core::ETextureType::Data:
+            return ETextureSemantic::Data;
+        default:
+            return ETextureSemantic::Unknown;
+        }
+    }
+}
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
     _dualGPUMode(false), _window(window),
@@ -146,6 +161,7 @@ GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture
     GDX12TextureDesc desc;
     desc.SRV_UAV_Heap = _srvuavHeap.get();
     desc.Format = desc.SRVDesc.Format = texture->GetFormat();
+    desc.Semantic = ConvertTextureSemantic(texture->GetType());
     desc.Width = texture->GetWidth();
     desc.Height = texture->GetHeight();
 

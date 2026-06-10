@@ -21,6 +21,18 @@ namespace Engine::Core
 		return _desc.Dimension;
 	}
 
+	ETextureType Texture::GetType() const
+	{
+		return _desc.Type;
+	}
+
+	Texture Texture::WithType(const ETextureType type) const
+	{
+		Texture texture = *this;
+		texture._desc.Type = type;
+		return texture;
+	}
+
 	DXGI_FORMAT Texture::GetFormat() const
 	{
 		return _desc.Format;

@@ -5,6 +5,7 @@
 
 #include <assimp/Importer.hpp>
 #include <assimp/GltfMaterial.h>
+#include <assimp/ObjMaterial.h>
 #include <assimp/material.h>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
@@ -13,11 +14,22 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <fstream>
+#include <sstream>
+#include <unordered_map>
 
 namespace SimpleMath = DirectX::SimpleMath;
 
 namespace 
 {
+	struct ObjMtlTransparencyInfo
+	{
+		bool HasOpacity = false;
+		float Opacity = 1.0f;
+		bool HasTransparentIlluminationModel = false;
+		std::filesystem::path OpacityTexturePath;
+	};
+
 	/// Constructs a BoundingBox from explicit min/max corner points.
 	/// Center and Extents are computed as the midpoint and half-size of the AABB.
 	DirectX::BoundingBox CreateBoundsFromMinMax(const SimpleMath::Vector3& minPoint, const SimpleMath::Vector3& maxPoint)
@@ -166,11 +178,250 @@ namespace
 		return (std::max)(0.04f, (std::min)(roughness, 1.0f));
 	}
 
+	float Clamp01(const float value)
+	{
+		return (std::max)(0.0f, (std::min)(value, 1.0f));
+	}
+
+	bool IsTransparentObjIlluminationModel(const int illuminationModel)
+	{
+		return illuminationModel == 4 || illuminationModel == 6 || illuminationModel == 7 || illuminationModel == 9;
+	}
+
+	/// Returns true for OBJ illumination models that describe glass/refraction transparency.
+	bool HasTransparentObjIlluminationModel(const aiMaterial& assimpMaterial)
+	{
+		int illuminationModel = 0;
+		if (assimpMaterial.Get(AI_MATKEY_OBJ_ILLUM, illuminationModel) != AI_SUCCESS)
+		{
+			return false;
+		}
+
+		return IsTransparentObjIlluminationModel(illuminationModel);
+	}
+
+	/// Reads OBJ/Assimp transparency factor and converts it to opacity.
+	/// OBJ Tr is transparency, while the renderer expects opacity.
+	bool TryReadTransparencyFactorOpacity(const aiMaterial& assimpMaterial, float& outOpacity)
+	{
+		float transparencyFactor = 0.0f;
+		if (assimpMaterial.Get(AI_MATKEY_TRANSPARENCYFACTOR, transparencyFactor) != AI_SUCCESS)
+		{
+			return false;
+		}
+
+		outOpacity = Clamp01(1.0f - transparencyFactor);
+		return true;
+	}
+
 	/// Converts an ASCII string to lowercase.
 	std::string ToLowerAscii(std::string value)
 	{
 		std::transform(value.begin(), value.end(), value.begin(), [](const unsigned char character) { return static_cast<char>(std::tolower(character)); });
 		return value;
+	}
+
+	std::string TrimWhitespace(const std::string& value)
+	{
+		const std::size_t first = value.find_first_not_of(" \t\r\n");
+		if (first == std::string::npos)
+		{
+			return {};
+		}
+
+		const std::size_t last = value.find_last_not_of(" \t\r\n");
+		return value.substr(first, last - first + 1);
+	}
+
+	/// Skips common OBJ texture map options so the remaining tokens can be read as the texture path.
+	void SkipObjTextureOptionArguments(std::istringstream& stream, const std::string& option)
+	{
+		int argumentCount = 1;
+		if (option == "-mm")
+		{
+			argumentCount = 2;
+		}
+		else if (option == "-o" || option == "-s" || option == "-t")
+		{
+			argumentCount = 3;
+		}
+
+		std::string ignoredToken;
+		for (int argumentIndex = 0; argumentIndex < argumentCount && stream >> ignoredToken; ++argumentIndex)
+		{
+		}
+	}
+
+	/// Extracts a texture path from an OBJ MTL map_* statement.
+	std::string ReadObjTexturePathFromMapStatement(const std::string& line, const std::string& keyword)
+	{
+		std::istringstream stream(line.substr(keyword.size()));
+		std::string texturePathText;
+		std::string token;
+		while (stream >> token)
+		{
+			if (!token.empty() && token.front() == '-')
+			{
+				SkipObjTextureOptionArguments(stream, ToLowerAscii(token));
+				continue;
+			}
+
+			if (!texturePathText.empty())
+			{
+				texturePathText += ' ';
+			}
+			texturePathText += token;
+		}
+
+		return TrimWhitespace(texturePathText);
+	}
+
+	/// Resolves an OBJ MTL texture reference relative to the .mtl file that declared it.
+	std::filesystem::path ResolveObjMtlTexturePath(const std::filesystem::path& mtlPath, const std::string& texturePathText)
+	{
+		if (texturePathText.empty() || texturePathText.front() == '*')
+		{
+			return {};
+		}
+
+		const std::filesystem::path texturePath(texturePathText);
+		if (texturePath.is_absolute())
+		{
+			return texturePath.lexically_normal();
+		}
+
+		return (mtlPath.parent_path() / texturePath).lexically_normal();
+	}
+
+	/// Reads transparency data that Assimp does not always expose consistently for OBJ materials.
+	void ParseObjMtlTransparencyFile(
+		const std::filesystem::path& mtlPath,
+		std::unordered_map<std::string, ObjMtlTransparencyInfo>& outTransparencyInfos)
+	{
+		std::ifstream file(mtlPath);
+		if (!file.is_open())
+		{
+			return;
+		}
+
+		std::string currentMaterialName;
+		std::string line;
+		while (std::getline(file, line))
+		{
+			const std::size_t commentPosition = line.find('#');
+			if (commentPosition != std::string::npos)
+			{
+				line.erase(commentPosition);
+			}
+
+			line = TrimWhitespace(line);
+			if (line.empty())
+			{
+				continue;
+			}
+
+			std::istringstream stream(line);
+			std::string keyword;
+			stream >> keyword;
+			keyword = ToLowerAscii(keyword);
+
+			if (keyword == "newmtl")
+			{
+				currentMaterialName = TrimWhitespace(line.substr(std::string("newmtl").size()));
+				if (!currentMaterialName.empty())
+				{
+					outTransparencyInfos.try_emplace(ToLowerAscii(currentMaterialName));
+				}
+				continue;
+			}
+
+			if (currentMaterialName.empty())
+			{
+				continue;
+			}
+
+			ObjMtlTransparencyInfo& info = outTransparencyInfos[ToLowerAscii(currentMaterialName)];
+			if (keyword == "d")
+			{
+				float opacity = 1.0f;
+				if (stream >> opacity)
+				{
+					info.Opacity = Clamp01(opacity);
+					info.HasOpacity = true;
+				}
+			}
+			else if (keyword == "tr")
+			{
+				float transparency = 0.0f;
+				if (stream >> transparency)
+				{
+					info.Opacity = Clamp01(1.0f - transparency);
+					info.HasOpacity = true;
+				}
+			}
+			else if (keyword == "illum")
+			{
+				int illuminationModel = 0;
+				if (stream >> illuminationModel)
+				{
+					info.HasTransparentIlluminationModel = IsTransparentObjIlluminationModel(illuminationModel);
+				}
+			}
+			else if (keyword == "map_d")
+			{
+				info.OpacityTexturePath = ResolveObjMtlTexturePath(mtlPath, ReadObjTexturePathFromMapStatement(line, keyword));
+			}
+		}
+	}
+
+	/// Loads transparency metadata from every .mtl file referenced by the given OBJ file.
+	std::unordered_map<std::string, ObjMtlTransparencyInfo> LoadObjMtlTransparencyInfos(const std::filesystem::path& sourcePath)
+	{
+		std::unordered_map<std::string, ObjMtlTransparencyInfo> transparencyInfos;
+		if (ToLowerAscii(sourcePath.extension().string()) != ".obj")
+		{
+			return transparencyInfos;
+		}
+
+		std::ifstream file(sourcePath);
+		if (!file.is_open())
+		{
+			return transparencyInfos;
+		}
+
+		std::string line;
+		while (std::getline(file, line))
+		{
+			const std::size_t commentPosition = line.find('#');
+			if (commentPosition != std::string::npos)
+			{
+				line.erase(commentPosition);
+			}
+
+			line = TrimWhitespace(line);
+			if (line.empty())
+			{
+				continue;
+			}
+
+			std::istringstream stream(line);
+			std::string keyword;
+			stream >> keyword;
+			if (ToLowerAscii(keyword) != "mtllib")
+			{
+				continue;
+			}
+
+			const std::string mtlName = TrimWhitespace(line.substr(std::string("mtllib").size()));
+			if (mtlName.empty())
+			{
+				continue;
+			}
+
+			ParseObjMtlTransparencyFile((sourcePath.parent_path() / std::filesystem::path(mtlName)).lexically_normal(), transparencyInfos);
+		}
+
+		return transparencyInfos;
 	}
 
 	/// Returns true if the material declares a glTF alpha mode that requires non-opaque rendering.
@@ -208,6 +459,11 @@ namespace
 			return Engine::Core::EMaterialType::Transparent;
 		}
 
+		if (HasTransparentObjIlluminationModel(assimpMaterial))
+		{
+			return Engine::Core::EMaterialType::Transparent;
+		}
+
 		return Engine::Core::EMaterialType::Opaque;
 	}
 
@@ -226,6 +482,7 @@ namespace
 
 	std::vector<Engine::Core::MeshMaterial> ImportMaterials(const aiScene& assimpScene, const std::filesystem::path& sourcePath)
 	{
+		const std::unordered_map<std::string, ObjMtlTransparencyInfo> objMtlTransparencyInfos = LoadObjMtlTransparencyInfos(sourcePath);
 		std::vector<Engine::Core::MeshMaterial> importedMaterials;
 		importedMaterials.reserve(assimpScene.mNumMaterials);
 		
@@ -244,6 +501,16 @@ namespace
 			if (assimpMaterial->Get(AI_MATKEY_NAME, materialName) == AI_SUCCESS)
 			{
 				importedMaterial.Name = materialName.C_Str();
+			}
+
+			const ObjMtlTransparencyInfo* objMtlTransparencyInfo = nullptr;
+			if (!importedMaterial.Name.empty())
+			{
+				const auto transparencyInfoIt = objMtlTransparencyInfos.find(ToLowerAscii(importedMaterial.Name));
+				if (transparencyInfoIt != objMtlTransparencyInfos.end())
+				{
+					objMtlTransparencyInfo = &transparencyInfoIt->second;
+				}
 			}
 			
 			aiColor3D diffuseColor(1.0f, 1.0f, 1.0f);
@@ -279,7 +546,17 @@ namespace
 			float opacity = importedMaterial.Opacity;
 			if (assimpMaterial->Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS)
 			{
-				importedMaterial.Opacity = (std::max)(0.0f, (std::min)(opacity, 1.0f));
+				importedMaterial.Opacity = Clamp01(opacity);
+			}
+
+			if (TryReadTransparencyFactorOpacity(*assimpMaterial, opacity))
+			{
+				importedMaterial.Opacity = opacity;
+			}
+
+			if (objMtlTransparencyInfo != nullptr && objMtlTransparencyInfo->HasOpacity)
+			{
+				importedMaterial.Opacity = objMtlTransparencyInfo->Opacity;
 			}
 			
 			TryImportTexturePath(*assimpMaterial, aiTextureType_DIFFUSE, sourcePath, importedMaterial.DiffuseTexturePath);
@@ -288,7 +565,16 @@ namespace
 			TryImportTexturePath(*assimpMaterial, aiTextureType_DIFFUSE_ROUGHNESS, sourcePath, importedMaterial.RoughnessTexturePath);
 			TryImportTexturePath(*assimpMaterial, aiTextureType_EMISSIVE, sourcePath, importedMaterial.EmissiveTexturePath);
 			TryImportTexturePath(*assimpMaterial, aiTextureType_OPACITY, sourcePath, importedMaterial.OpacityTexturePath);
+			if (importedMaterial.OpacityTexturePath.empty() && objMtlTransparencyInfo != nullptr)
+			{
+				importedMaterial.OpacityTexturePath = objMtlTransparencyInfo->OpacityTexturePath;
+			}
 			importedMaterial.Type = DetermineMaterialType(*assimpMaterial, importedMaterial.Opacity, importedMaterial.OpacityTexturePath);
+			if (objMtlTransparencyInfo != nullptr && objMtlTransparencyInfo->HasTransparentIlluminationModel)
+			{
+				importedMaterial.Type = Engine::Core::EMaterialType::Transparent;
+			}
+			
 			importedMaterial.UseBakedLighting = AreSameTexturePath(importedMaterial.DiffuseTexturePath, importedMaterial.EmissiveTexturePath);
 				
 			importedMaterials.push_back(std::move(importedMaterial));
@@ -330,7 +616,11 @@ namespace
 	/// Vertex positions, normals, UVs and tangents are read from the Assimp mesh and
 	/// baked into world space using nodeTransform.
 	/// startVertexLocation and startIndexLocation are recorded for use in merged GPU buffers.
-	Engine::Core::SubMesh ImportSubMesh(const aiMesh& assimpMesh, const aiMatrix4x4& nodeTransform, const std::uint32_t startVertexLocation, const std::uint32_t startIndexLocation)
+	Engine::Core::SubMesh ImportSubMesh(
+		const aiMesh& assimpMesh,
+		const aiMatrix4x4& nodeTransform,
+		const std::uint32_t startVertexLocation,
+		const std::uint32_t startIndexLocation)
 	{
 		Engine::Core::SubMesh importedSubMesh = {};
 		importedSubMesh.Vertices.reserve(assimpMesh.mNumVertices);
@@ -474,7 +764,9 @@ namespace Engine::Core
 		}
 
 		const DirectX::BoundingBox meshBounds = CalculateMeshBounds(importedSubMeshes);
-		return std::make_unique<Mesh>(std::move(importedSubMeshes), meshBounds, ImportMaterials(*assimpScene, sourcePath));
+		std::vector<MeshMaterial> importedMaterials = ImportMaterials(*assimpScene, sourcePath);
+		std::unique_ptr<Mesh> mesh = std::make_unique<Mesh>(std::move(importedSubMeshes), meshBounds, std::move(importedMaterials));
+		return mesh;
 	}
 
 	std::unique_ptr<Mesh> MeshImporter::ImportMeshSubAsset(const std::filesystem::path& sourcePath, const std::uint32_t subAssetIndex, const MeshImportOptions& options)

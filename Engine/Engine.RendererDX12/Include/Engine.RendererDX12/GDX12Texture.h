@@ -8,6 +8,13 @@ class GDX12Device;
 class GDX12CommandList;
 class GDX12TextureResource;
 
+enum class ETextureSemantic
+{
+	Unknown,
+	Color,
+	Data,
+};
+
 struct GDX12TextureDesc
 {
 	GDX12DescriptorHeap* SRV_UAV_Heap = nullptr;
@@ -16,6 +23,7 @@ struct GDX12TextureDesc
 	UINT Width = 0;
 	UINT Height = 0;
 	DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
+	ETextureSemantic Semantic = ETextureSemantic::Unknown;
 	bool CreateSRV = true;
 	D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
 	UINT SRVHeapIndex = -1;
@@ -53,6 +61,7 @@ public:
 	D3D12_CLEAR_VALUE& GetClearValue();
 	GDX12TextureResource* GetResource();
 	DXGI_FORMAT GetFormat();
+	ETextureSemantic GetSemantic() const;
 
 
 private:

@@ -120,10 +120,12 @@ namespace
         const std::uint8_t red,
         const std::uint8_t green,
         const std::uint8_t blue,
-        const std::uint8_t alpha)
+        const std::uint8_t alpha,
+        const Engine::Core::ETextureType textureType)
     {
         Engine::Core::TextureDesc textureDesc = {};
         textureDesc.Dimension = Engine::Core::ETextureDimension::Texture2D;
+        textureDesc.Type = textureType;
         textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         textureDesc.Width = 1;
         textureDesc.Height = 1;
@@ -157,9 +159,10 @@ namespace
         const std::uint8_t red,
         const std::uint8_t green,
         const std::uint8_t blue,
-        const std::uint8_t alpha)
+        const std::uint8_t alpha,
+        const Engine::Core::ETextureType textureType)
     {
-        Engine::Core::Texture texture = CreateSingleColorTexture(red, green, blue, alpha);
+        Engine::Core::Texture texture = CreateSingleColorTexture(red, green, blue, alpha, textureType);
 
         GDX12Texture* gpuTexture = renderModule.CreateTexture(textureName, &texture);
         if (gpuTexture == nullptr)
@@ -189,7 +192,7 @@ namespace
 
         const std::string textureName = sceneName + "_DiffuseColor_" + std::to_string(red) + "_" + std::to_string(green) + "_" + std::to_string(blue);
 
-        return CreateSolidGpuTexture(renderModule, textureName, red, green, blue, 255);
+        return CreateSolidGpuTexture(renderModule, textureName, red, green, blue, 255, Engine::Core::ETextureType::Color);
     }
 
     struct SceneDefaultMaterialTextures
@@ -209,9 +212,9 @@ namespace
     SceneDefaultMaterialTextures CreateSceneDefaultMaterialTextures(RenderModule& renderModule, const std::string& sceneName)
     {
         SceneDefaultMaterialTextures textures = {};
-        textures.FlatNormal = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultFlatNormal", 128, 128, 255, 255);
-        textures.White = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultWhite", 255, 255, 255, 255);
-        textures.Black = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultBlack", 0, 0, 0, 255);
+        textures.FlatNormal = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultFlatNormal", 128, 128, 255, 255, Engine::Core::ETextureType::Data);
+        textures.White = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultWhite", 255, 255, 255, 255, Engine::Core::ETextureType::Data);
+        textures.Black = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultBlack", 0, 0, 0, 255, Engine::Core::ETextureType::Data);
         return textures;
     }
 
@@ -222,18 +225,30 @@ namespace
         GDX12Texture* Specular = nullptr;
         GDX12Texture* Roughness = nullptr;
         GDX12Texture* Emissive = nullptr;
+        GDX12Texture* Opacity = nullptr;
         bool HasNormalMap = false;
         bool HasSpecularMap = false;
         bool HasRoughnessMap = false;
         bool HasEmissiveMap = false;
+        bool HasOpacityMap = false;
     };
 
-    /// Loads a texture through AssetManager, creates the corresponding GPU texture and caches it by normalized path.
+    /// Builds a GPU texture cache key from source path and texture semantic type.
+    std::wstring BuildTextureCacheKey(const std::filesystem::path& texturePath, const Engine::Core::ETextureType textureType)
+    {
+        std::wstring textureKey = texturePath.lexically_normal().generic_wstring();
+        textureKey += L"#type:";
+        textureKey += std::to_wstring(static_cast<std::uint32_t>(textureType));
+        return textureKey;
+    }
+
+    /// Loads a texture through AssetManager, creates the corresponding GPU texture and caches it by normalized path and semantic type.
     /// Returns an already created GPU texture when the same source texture is requested again.
     GDX12Texture* LoadSceneGpuTexture(
         RenderModule& renderModule,
         Engine::Core::AssetManager& assetManager,
         const std::filesystem::path& texturePath,
+        const Engine::Core::ETextureType textureType,
         const std::string& sceneName,
         std::unordered_map<std::wstring, GDX12Texture*>& gpuTexturesByPath)
     {
@@ -242,7 +257,7 @@ namespace
             return nullptr;
         }
 
-        const std::wstring textureKey = texturePath.lexically_normal().generic_wstring();
+        const std::wstring textureKey = BuildTextureCacheKey(texturePath, textureType);
         const auto cachedTextureIterator = gpuTexturesByPath.find(textureKey);
         if (cachedTextureIterator != gpuTexturesByPath.end())
         {
@@ -256,7 +271,8 @@ namespace
         }
 
         const std::string textureName = sceneName + "_Texture_" + std::to_string(gpuTexturesByPath.size());
-        GDX12Texture* gpuTexture = renderModule.CreateTexture(textureName, texture);
+        const Engine::Core::Texture typedTexture = texture->WithType(textureType);
+        GDX12Texture* gpuTexture = renderModule.CreateTexture(textureName, &typedTexture);
         if (gpuTexture == nullptr)
         {
             gpuTexture = renderModule.GetTextureByName(textureName);
@@ -305,6 +321,7 @@ namespace
 
         material->Metallic = 0.0f;
         material->Roughness = 1.0f;
+        material->Opacity = 1.0f;
         material->SpecularColor = Vector3(0.0f, 0.0f, 0.0f);
         material->EmissiveColor = Vector3(0.0f, 0.0f, 0.0f);
         material->Diffuse = gpuTexture;
@@ -312,10 +329,12 @@ namespace
         material->Specular = defaultTextures.White;
         material->RoughnessMap = defaultTextures.White;
         material->Emissive = defaultTextures.Black;
+        material->OpacityMap = defaultTextures.White;
         material->HasNormalMap = false;
 		material->HasSpecularMap = false;
 		material->HasRoughnessMap = false;
 		material->HasEmissiveMap = false;
+		material->HasOpacityMap = false;
 		material->UseBakedLighting = false;
 		material->Type = MaterialType::Opaque;
 		material->DirtyFlag = true;
@@ -340,13 +359,15 @@ namespace
             textures.Normal == nullptr ||
             textures.Specular == nullptr ||
             textures.Roughness == nullptr ||
-            textures.Emissive == nullptr)
+            textures.Emissive == nullptr ||
+            textures.Opacity == nullptr)
         {
             return nullptr;
         }
 
         material->Metallic = 0.0f;
         material->Roughness = (std::max)(0.04f, (std::min)(sourceMaterial.Roughness, 1.0f));
+        material->Opacity = (std::max)(0.0f, (std::min)(sourceMaterial.Opacity, 1.0f));
         material->SpecularColor = Vector3(sourceMaterial.SpecularColor.x, sourceMaterial.SpecularColor.y, sourceMaterial.SpecularColor.z);
         Vector3 emissiveColor(sourceMaterial.EmissiveColor.x, sourceMaterial.EmissiveColor.y, sourceMaterial.EmissiveColor.z);
         if (textures.HasEmissiveMap && emissiveColor.LengthSquared() < 0.000001f)
@@ -359,10 +380,12 @@ namespace
         material->Specular = textures.Specular;
         material->RoughnessMap = textures.Roughness;
         material->Emissive = textures.Emissive;
+        material->OpacityMap = textures.Opacity;
         material->HasNormalMap = textures.HasNormalMap;
 		material->HasSpecularMap = textures.HasSpecularMap;
 		material->HasRoughnessMap = textures.HasRoughnessMap;
 		material->HasEmissiveMap = textures.HasEmissiveMap;
+		material->HasOpacityMap = textures.HasOpacityMap;
 		material->UseBakedLighting = sourceMaterial.UseBakedLighting;
 		material->Type = sourceMaterial.Type == Engine::Core::EMaterialType::Transparent ? MaterialType::Transparent : MaterialType::Opaque;
 		material->DirtyFlag = true;
@@ -391,7 +414,7 @@ namespace
             MaterialTextureSet textures = {};
             if (!diffuseTexturePath.empty())
             {
-                textures.Diffuse = LoadSceneGpuTexture(renderModule, assetManager, diffuseTexturePath, sceneName, gpuTexturesByPath);
+                textures.Diffuse = LoadSceneGpuTexture(renderModule, assetManager, diffuseTexturePath, Engine::Core::ETextureType::Color, sceneName, gpuTexturesByPath);
             }
 
             if (textures.Diffuse == nullptr)
@@ -403,33 +426,41 @@ namespace
             textures.Specular = defaultTextures.White;
             textures.Roughness = defaultTextures.White;
             textures.Emissive = defaultTextures.Black;
+            textures.Opacity = defaultTextures.White;
 
-            GDX12Texture* normalTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].NormalTexturePath, sceneName, gpuTexturesByPath);
+            GDX12Texture* normalTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].NormalTexturePath, Engine::Core::ETextureType::Data, sceneName, gpuTexturesByPath);
             if (normalTexture != nullptr)
             {
                 textures.Normal = normalTexture;
                 textures.HasNormalMap = true;
             }
 
-            GDX12Texture* specularTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].SpecularTexturePath, sceneName, gpuTexturesByPath);
+            GDX12Texture* specularTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].SpecularTexturePath, Engine::Core::ETextureType::Data, sceneName, gpuTexturesByPath);
             if (specularTexture != nullptr)
             {
                 textures.Specular = specularTexture;
                 textures.HasSpecularMap = true;
             }
 
-            GDX12Texture* roughnessTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].RoughnessTexturePath, sceneName, gpuTexturesByPath);
+            GDX12Texture* roughnessTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].RoughnessTexturePath, Engine::Core::ETextureType::Data, sceneName, gpuTexturesByPath);
             if (roughnessTexture != nullptr)
             {
                 textures.Roughness = roughnessTexture;
                 textures.HasRoughnessMap = true;
             }
             
-            GDX12Texture* emissiveTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].EmissiveTexturePath, sceneName, gpuTexturesByPath);
+            GDX12Texture* emissiveTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].EmissiveTexturePath, Engine::Core::ETextureType::Color, sceneName, gpuTexturesByPath);
             if (emissiveTexture != nullptr)
             {
                 textures.Emissive = emissiveTexture;
                 textures.HasEmissiveMap = true;
+            }
+
+            GDX12Texture* opacityTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].OpacityTexturePath, Engine::Core::ETextureType::Data, sceneName, gpuTexturesByPath);
+            if (opacityTexture != nullptr)
+            {
+                textures.Opacity = opacityTexture;
+                textures.HasOpacityMap = true;
             }
             
             if (textures.Diffuse == nullptr)

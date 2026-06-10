@@ -219,7 +219,13 @@ namespace
 			return nullptr;
 		}
 
-		return CreateTextureFromScratchImage(mipChain.GetMetadata(), mipChain);
+		std::unique_ptr<Engine::Core::Texture> generatedTexture = CreateTextureFromScratchImage(mipChain.GetMetadata(), mipChain);
+		if (generatedTexture == nullptr)
+		{
+			return nullptr;
+		}
+
+		return std::make_unique<Engine::Core::Texture>(generatedTexture->WithType(texture.GetType()));
 	}
 
 	/// Loads a texture from a WIC-compatible format (PNG, JPG, BMP, etc.) into a CPU Texture.
@@ -328,6 +334,7 @@ namespace
 
     	Engine::Core::TextureDesc textureDesc = {};
     	textureDesc.Dimension = Engine::Core::ETextureDimension::Texture2D;
+		textureDesc.Type = Engine::Core::ETextureType::Unknown;
     	textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     	textureDesc.Width = static_cast<std::uint32_t>(width);
     	textureDesc.Height = static_cast<std::uint32_t>(height);
@@ -433,6 +440,7 @@ namespace
 
 		Engine::Core::TextureDesc textureDesc = {};
 		textureDesc.Dimension = ConvertTextureDimension(metadata);
+		textureDesc.Type = Engine::Core::ETextureType::Unknown;
 		textureDesc.Format = metadata.format;
 		textureDesc.Width = static_cast<std::uint32_t>(metadata.width);
 		textureDesc.Height = static_cast<std::uint32_t>(metadata.height);
@@ -579,6 +587,7 @@ namespace Engine::Core
 	{
 		TextureDesc textureDesc = {};
 		textureDesc.Dimension = ETextureDimension::Texture2D;
+		textureDesc.Type = ETextureType::Color;
 		textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		textureDesc.Width = 2;
 		textureDesc.Height = 2;
