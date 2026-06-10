@@ -8,20 +8,11 @@
 #include "App.Base/Systems/GPUDataUpdateSystem.h"
 #include "App.Base/Systems/LookAtTargetSystem.h"
 #include "App.Base/Systems/SplineFollowSystem.h"
+#include "Common/Logger.h"
 #include "Engine.Core/System.h"
 
 #include <exception>
 #include <string>
-#include <Windows.h>
-
-namespace
-{
-    void ShowDebugMessage(const std::string& title, const std::string& message)
-    {
-        //todo spdlog here
-        //MessageBoxA(nullptr, message.c_str(), title.c_str(), MB_OK);
-    }
-}
 
 SceneManagerModule::SceneManagerModule(GameTimer* timer)
     : _timer(timer)
@@ -57,7 +48,7 @@ bool SceneManagerModule::LoadScene(
     const std::string& scenePath,
     const AppConfig& appConfig)
 {
-    ShowDebugMessage("SceneManagerModule::LoadScene", "scenePath:\n" + scenePath);
+    Logger::Info("SceneManagerModule::LoadScene path:\n{}", scenePath);
 
     Uninitialize();
 
@@ -69,21 +60,17 @@ bool SceneManagerModule::LoadScene(
     }
     catch (const std::exception& exception)
     {
-        ShowDebugMessage("Scene yaml load failed", exception.what());
+        Logger::Error("Scene yaml load failed: {}", exception.what());
         return false;
     }
 
-    ShowDebugMessage(
-        "SceneManagerModule::LoadScene",
-        "World count: " + std::to_string(sceneConfig.Worlds.size()));
+    Logger::Info("SceneManagerModule::LoadScene world count: {}", sceneConfig.Worlds.size());
 
     std::vector<SceneWorldConfig> worlds = sceneConfig.Worlds;
 
     for (const SceneWorldConfig& sceneWorldConfig : worlds)
     {
-        ShowDebugMessage(
-            "SceneManagerModule::LoadScene",
-            "Loading world yaml:\n" + sceneWorldConfig.Path);
+        Logger::Info("SceneManagerModule::LoadScene loading world yaml:\n{}", sceneWorldConfig.Path);
 
         if (!LoadConfiguredWorld(sceneWorldConfig, appConfig))
         {
@@ -98,9 +85,7 @@ bool SceneManagerModule::LoadConfiguredWorld(
     const SceneWorldConfig& sceneWorldConfig,
     const AppConfig& appConfig)
 {
-    ShowDebugMessage(
-        "LoadConfiguredWorld",
-        "sceneWorldConfig.Path:\n" + sceneWorldConfig.Path);
+    Logger::Info("LoadConfiguredWorld sceneWorldConfig.Path:\n{}", sceneWorldConfig.Path);
 
     WorldConfig worldConfig;
 
@@ -110,13 +95,11 @@ bool SceneManagerModule::LoadConfiguredWorld(
     }
     catch (const std::exception& exception)
     {
-        ShowDebugMessage("World yaml load failed", exception.what());
+        Logger::Error("World yaml load failed: {}", exception.what());
         return false;
     }
 
-    ShowDebugMessage(
-        "LoadConfiguredWorld",
-        "worldConfig.SourcePath:\n" + worldConfig.SourcePath);
+    Logger::Info("LoadConfiguredWorld worldConfig.SourcePath:\n{}", worldConfig.SourcePath);
 
     WorldDesc desc;
     desc.Name = !worldConfig.Name.empty()
@@ -134,9 +117,7 @@ bool SceneManagerModule::LoadConfiguredWorld(
 
     if (!world->Load())
     {
-        ShowDebugMessage(
-            "World::Load failed",
-            desc.WorldFilePath.string());
+        Logger::Error("World::Load failed: {}", desc.WorldFilePath.string());
         OnWorldDestroyed.Broadcast(*worldPtr);
         return false;
     }
@@ -242,9 +223,7 @@ bool SceneManagerModule::AddSystemByName(
         return true;
     }
 
-    ShowDebugMessage(
-        "Unknown system name",
-        systemConfig.Name);
+    Logger::Error("Unknown system name: {}", systemConfig.Name);
     return false;
 }
 

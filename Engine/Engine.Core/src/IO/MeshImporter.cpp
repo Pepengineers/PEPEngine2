@@ -3,6 +3,8 @@
 #include <Engine.Core/IO/MeshImporter.h>
 #include <Engine.Core/IO/AssimpImportHelpers.h>
 
+#include <Common/Logger.h>
+
 #include <assimp/Importer.hpp>
 #include <assimp/material.h>
 #include <assimp/scene.h>
@@ -13,18 +15,11 @@
 #include <cctype>
 #include <cmath>
 #include <string>
-#include <Windows.h>
 
 namespace SimpleMath = DirectX::SimpleMath;
 
 namespace 
 {
-	void ShowImportDebugMessage(const std::string& title, const std::string& message)
-	{
-		//todo spdlog here
-		//MessageBoxA(nullptr, message.c_str(), title.c_str(), MB_OK);
-	}
-
 	/// Constructs a BoundingBox from explicit min/max corner points.
 	/// Center and Extents are computed as the midpoint and half-size of the AABB.
 	DirectX::BoundingBox CreateBoundsFromMinMax(const SimpleMath::Vector3& minPoint, const SimpleMath::Vector3& maxPoint)
@@ -401,7 +396,7 @@ namespace Engine::Core
 	{
 		if (sourcePath.empty())
 		{
-			ShowImportDebugMessage("MeshImporter::ImportSingleMeshAsset failed", "Source path is empty.");
+			Logger::Error("MeshImporter::ImportSingleMeshAsset failed: Source path is empty.");
 			return nullptr;
 		}
 
@@ -415,14 +410,20 @@ namespace Engine::Core
 		{
 			const unsigned int sceneFlags = assimpScene != nullptr ? assimpScene->mFlags : 0u;
 			const unsigned int meshCount = assimpScene != nullptr ? assimpScene->mNumMeshes : 0u;
-			ShowImportDebugMessage(
-				"MeshImporter::ImportSingleMeshAsset failed",
-				"Assimp failed to parse mesh:\n" + sourcePath.string() +
-				"\nAssimp error: " + importer.GetErrorString() +
-				"\nScene is null: " + std::string(assimpScene == nullptr ? "true" : "false") +
-				"\nRoot node is null: " + std::string(assimpScene != nullptr && assimpScene->mRootNode == nullptr ? "true" : "false") +
-				"\nScene flags: " + std::to_string(sceneFlags) +
-				"\nMesh count: " + std::to_string(meshCount));
+			Logger::Error(
+				"MeshImporter::ImportSingleMeshAsset failed.\n"
+				"Path: {}\n"
+				"Assimp error: {}\n"
+				"Scene is null: {}\n"
+				"Root node is null: {}\n"
+				"Scene flags: {}\n"
+				"Mesh count: {}",
+				sourcePath.string(),
+				importer.GetErrorString(),
+				assimpScene == nullptr ? "true" : "false",
+				assimpScene != nullptr && assimpScene->mRootNode == nullptr ? "true" : "false",
+				sceneFlags,
+				meshCount);
 			return nullptr;
 		}
 
@@ -435,10 +436,13 @@ namespace Engine::Core
 
 		if (importedSubMeshes.empty())
 		{
-			ShowImportDebugMessage(
-				"MeshImporter::ImportSingleMeshAsset failed",
-				"Assimp loaded scene, but no valid submeshes were produced:\n" + sourcePath.string() +
-				"\nAssimp mesh count: " + std::to_string(assimpScene->mNumMeshes));
+			Logger::Error(
+				"MeshImporter::ImportSingleMeshAsset failed.\n"
+				"Assimp loaded scene, but no valid submeshes were produced.\n"
+				"Path: {}\n"
+				"Assimp mesh count: {}",
+				sourcePath.string(),
+				assimpScene->mNumMeshes);
 			return nullptr;
 		}
 
@@ -450,7 +454,7 @@ namespace Engine::Core
 	{
 		if (sourcePath.empty())
 		{
-			ShowImportDebugMessage("MeshImporter::ImportMeshSubAsset failed", "Source path is empty.");
+			Logger::Error("MeshImporter::ImportMeshSubAsset failed: Source path is empty.");
 			return nullptr;
 		}
 
@@ -463,33 +467,45 @@ namespace Engine::Core
 		if (assimpScene == nullptr || assimpScene->mRootNode == nullptr || (assimpScene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) != 0)
 		{
 			const unsigned int sceneFlags = assimpScene != nullptr ? assimpScene->mFlags : 0u;
-			ShowImportDebugMessage(
-				"MeshImporter::ImportMeshSubAsset failed",
-				"Assimp failed to parse mesh sub-asset source:\n" + sourcePath.string() +
-				"\nAssimp error: " + importer.GetErrorString() +
-				"\nScene is null: " + std::string(assimpScene == nullptr ? "true" : "false") +
-				"\nRoot node is null: " + std::string(assimpScene != nullptr && assimpScene->mRootNode == nullptr ? "true" : "false") +
-				"\nScene flags: " + std::to_string(sceneFlags));
+			Logger::Error(
+				"MeshImporter::ImportMeshSubAsset failed.\n"
+				"Path: {}\n"
+				"Assimp error: {}\n"
+				"Scene is null: {}\n"
+				"Root node is null: {}\n"
+				"Scene flags: {}",
+				sourcePath.string(),
+				importer.GetErrorString(),
+				assimpScene == nullptr ? "true" : "false",
+				assimpScene != nullptr && assimpScene->mRootNode == nullptr ? "true" : "false",
+				sceneFlags);
 			return nullptr;
 		}
 
 		if (subAssetIndex >= assimpScene->mNumMeshes)
 		{
-			ShowImportDebugMessage(
-				"MeshImporter::ImportMeshSubAsset failed",
-				"Requested sub-asset index is out of range.\nPath: " + sourcePath.string() +
-				"\nRequested index: " + std::to_string(subAssetIndex) +
-				"\nAssimp mesh count: " + std::to_string(assimpScene->mNumMeshes));
+			Logger::Error(
+				"MeshImporter::ImportMeshSubAsset failed.\n"
+				"Requested sub-asset index is out of range.\n"
+				"Path: {}\n"
+				"Requested index: {}\n"
+				"Assimp mesh count: {}",
+				sourcePath.string(),
+				subAssetIndex,
+				assimpScene->mNumMeshes);
 			return nullptr;
 		}
 
 		const aiMesh* assimpMesh = assimpScene->mMeshes[subAssetIndex];
 		if (assimpMesh == nullptr)
 		{
-			ShowImportDebugMessage(
-				"MeshImporter::ImportMeshSubAsset failed",
-				"Assimp returned nullptr mesh for sub-asset.\nPath: " + sourcePath.string() +
-				"\nRequested index: " + std::to_string(subAssetIndex));
+			Logger::Error(
+				"MeshImporter::ImportMeshSubAsset failed.\n"
+				"Assimp returned nullptr mesh for sub-asset.\n"
+				"Path: {}\n"
+				"Requested index: {}",
+				sourcePath.string(),
+				subAssetIndex);
 			return nullptr;
 		}
 
@@ -497,12 +513,17 @@ namespace Engine::Core
 		SubMesh importedSubMesh = ImportSubMesh(*assimpMesh, identityTransform, 0u, 0u);
 		if (importedSubMesh.GetVertexCount() == 0 || importedSubMesh.GetIndexCount() == 0)
 		{
-			ShowImportDebugMessage(
-				"MeshImporter::ImportMeshSubAsset failed",
-				"Imported sub-asset has no vertices or indices.\nPath: " + sourcePath.string() +
-				"\nRequested index: " + std::to_string(subAssetIndex) +
-				"\nVertex count: " + std::to_string(importedSubMesh.GetVertexCount()) +
-				"\nIndex count: " + std::to_string(importedSubMesh.GetIndexCount()));
+			Logger::Error(
+				"MeshImporter::ImportMeshSubAsset failed.\n"
+				"Imported sub-asset has no vertices or indices.\n"
+				"Path: {}\n"
+				"Requested index: {}\n"
+				"Vertex count: {}\n"
+				"Index count: {}",
+				sourcePath.string(),
+				subAssetIndex,
+				importedSubMesh.GetVertexCount(),
+				importedSubMesh.GetIndexCount());
 			return nullptr;
 		}
 

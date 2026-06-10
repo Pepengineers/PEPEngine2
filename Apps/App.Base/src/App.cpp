@@ -3,6 +3,7 @@
 #include <App.Base/App.h>
 #include <WindowsX.h>
 #include "App.Base/AppConfigLoader.h"
+#include "Common/Logger.h"
 
 #include <filesystem>
 #include <string>
@@ -16,15 +17,6 @@ namespace Private
     static LRESULT CALLBACK MainWndProc(const HWND hwnd, const UINT msg, const WPARAM wParam, const LPARAM lParam)
     {
         return App::GetInstance()->MsgProc(hwnd, msg, wParam, lParam);
-    }
-}
-
-namespace
-{
-    void ShowDebugMessage(const std::string& title, const std::string& message)
-    {
-        //todo spdlog here
-        //MessageBoxA(nullptr, message.c_str(), title.c_str(), MB_OK);
     }
 }
 
@@ -122,21 +114,21 @@ int App::Run()
 
 bool App::Initialize()
 {
+    Logger::Init();
+    
     try {
         _AppConfig = AppConfigLoader::LoadAppConfig(GetAppConfigPath());
     }
     catch (const std::exception& exception) {
-        ShowDebugMessage("LoadAppConfig failed", exception.what());
+        Logger::Error("LoadAppConfig failed: {}", exception.what());
         return false;
     }
 
-    ShowDebugMessage(
-        "App::Initialize",
-        "After LoadAppConfig:\nStartScene = " + _AppConfig.StartScene);
+    Logger::Info("App::Initialize after LoadAppConfig.\nStartScene = {}", _AppConfig.StartScene);
 
     if (_AppConfig.StartScene.empty())
     {
-        ShowDebugMessage("App::Initialize", "App config StartScene is empty.");
+        Logger::Error("App::Initialize failed: App config StartScene is empty.");
         return false;
     }
 
@@ -150,14 +142,14 @@ bool App::Initialize()
         return false;
     }
 
-    ShowDebugMessage("App::Initialize", "Before BenchmarkEngine::Initialize");
+    Logger::Info("App::Initialize before BenchmarkEngine::Initialize");
 
     if (!BenchmarkEngine::Initialize())
     {
         return false;
     }
 
-    ShowDebugMessage("App::Initialize", "Before LoadStartScene");
+    Logger::Info("App::Initialize before LoadStartScene");
 
     if (!LoadStartScene())
     {
