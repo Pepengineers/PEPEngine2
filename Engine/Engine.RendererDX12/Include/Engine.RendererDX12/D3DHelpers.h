@@ -118,3 +118,4 @@ inline std::string ShaderModelToString(D3D_SHADER_MODEL model)
 }
 
 std::vector<CD3DX12_STATIC_SAMPLER_DESC> GetStaticSamplers();
+DXGI_FORMAT FormatToSRGB(DXGI_FORMAT format);

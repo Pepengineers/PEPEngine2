@@ -143,8 +143,6 @@ void GDX12CommandList::SetRenderTargets(std::initializer_list<GDX12Texture*> rtv
 
 	for (auto& texture : rtvTextures) { rtvHandles.push_back(texture->GetRTV()->CPUHandle); }
 
-	if (rtvHandles.empty()) { return; }
-
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = {};
 	if (dsvTexture && dsvTexture->GetDSV()) { dsvHandle = dsvTexture->GetDSV()->CPUHandle; }
 

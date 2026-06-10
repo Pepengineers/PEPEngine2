@@ -57,8 +57,11 @@ enum GDX12SRVHeapIndexAllocation
     //this one will be really difficult to count
     ConstantsResources = 11,
 
-    ShadowMaps_StartIndex = 100,
-    ShadowMaps_RangeLength = 400,
+    TextureResources_StartIndex = 100,
+    TextureResources_RangeLength = 399,
+
+    ShadowMaps_StartIndex = 500,
+    ShadowMaps_RangeLength = 999,
 
     Texture2D_StartIndex = 1000,
     Texture2D_RangeLength = 99000,
