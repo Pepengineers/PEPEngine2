@@ -57,7 +57,10 @@ public:
 
                     GDX12CameraConstants objConstants;
                     XMStoreFloat4x4(&objConstants.ViewProj, XMMatrixTranspose(view * proj));
+                    XMStoreFloat4x4(&objConstants.View, XMMatrixTranspose(view));
                     objConstants.CameraLocation = transform.Location;
+                    objConstants.NearPlane = camera.NearPlane;
+                    objConstants.FarPlane = camera.FarPlane;
 
                     auto& CBuffer = renderModule->GetCurrentFrameConstants()->CameraCB;
                     CBuffer->CopyData(camera._CBufferIndex, objConstants);

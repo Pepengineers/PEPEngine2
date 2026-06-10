@@ -85,6 +85,10 @@ void RenderModule::OnResize() const
 
     _backBuffer->Resize(width, height);
     _depthStencil->Resize(width, height);
+
+    _opaqueAccumTexture->Resize(width, height);
+    _transparencyAccumTexture->Resize(width, height);
+    _transparencyRevealageTexture->Resize(width, height);
 }
 
 GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
@@ -552,7 +556,7 @@ void RenderModule::OnRender()
     cmdList->SetComputeRootSignature(_rootSignatures["BufferClear"].get());
     cmdList->SetPipelineState(_PSOs["BufferClear"]);
     cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
-    //should probably make this into a foreach
+    //should probably make this into a foreach or clear multiple counters per dispatch
     cmdList->SetComputeUAV(0, CurrentFrameConsts->OpaqueDrawCounter->GetUAV()->GPUHandle);
     cmdList->Dispatch(1, 1, 1);
     cmdList->SetComputeUAV(0, CurrentFrameConsts->TransparentDrawCounter->GetUAV()->GPUHandle);
@@ -584,10 +588,13 @@ void RenderModule::OnRender()
 
     cmdList->BeginPixEvent("Opaque Render Pass", Colors::ForestGreen);
     cmdList->SetGraphicsRootSignature(_rootSignatures["OpaquePass"].get());
+    cmdList->SetPipelineState(_PSOs["OpaquePass"]);
     cmdList->SetGraphicsRootConstantBufferView(1, CurrentFrameConsts->MainCB->GetElementAddress(0));
     cmdList->SetGraphicsRootConstantBufferView(2, CurrentFrameConsts->CameraCB->
         GetElementAddress(_commandRecorder._cameraCBIndex));
-    cmdList->SetPipelineState(_PSOs["OpaquePass"]);
+    cmdList->EnhancedTextureBarrier({ _opaqueAccumTexture->GetResource()->GetRenderTargetEnhBarrier() });
+    cmdList->SetRenderTargets({ _opaqueAccumTexture.get() }, _depthStencil.get());
+    cmdList->ClearRenderTargetView(_opaqueAccumTexture.get());
     cmdList->SetGeometryBuffer(_geometryBuffer.get());
     cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
@@ -598,6 +605,48 @@ void RenderModule::OnRender()
     cmdList->ExecuteIndirect(_commandSignatures["OpaquePass"].Get(), _IndirectCommandsCache->GetElementCount(),
         CurrentFrameConsts->VisibleOpaqueCommandsCache->GetResource().D3DResource.Get(), 0,
         CurrentFrameConsts->OpaqueDrawCounter->GetResource().D3DResource.Get(), 0);
+    cmdList->EnhancedTextureBarrier({ _opaqueAccumTexture->GetResource()->GetPixelShaderResourceEnhBarrier() });
+    cmdList->EndPixEvent();
+
+    cmdList->BeginPixEvent("Transparent Render Pass", Colors::Aqua);
+    cmdList->SetGraphicsRootSignature(_rootSignatures["OpaquePass"].get());
+    cmdList->SetPipelineState(_PSOs["OpaquePass"]);
+    cmdList->SetGraphicsRootConstantBufferView(1, CurrentFrameConsts->MainCB->GetElementAddress(0));
+    cmdList->SetGraphicsRootConstantBufferView(2, CurrentFrameConsts->CameraCB->
+        GetElementAddress(_commandRecorder._cameraCBIndex));
+    cmdList->EnhancedTextureBarrier({ _transparencyAccumTexture->GetResource()->GetRenderTargetEnhBarrier(),
+    _transparencyRevealageTexture->GetResource()->GetRenderTargetEnhBarrier() });
+
+    cmdList->SetRenderTargets({ _transparencyAccumTexture.get(), _transparencyRevealageTexture.get() }, 
+        _depthStencil.get());
+    cmdList->ClearRenderTargetView(_transparencyAccumTexture.get());
+    cmdList->ClearRenderTargetView(_transparencyRevealageTexture.get());
+
+    cmdList->SetGeometryBuffer(_geometryBuffer.get());
+    cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
+    cmdList->SetGraphicsSRV(0, CurrentFrameConsts->MaterialCache->GetSRV()->GPUHandle);
+    cmdList->SetGraphicsSRV(1, CurrentFrameConsts->TransformCache->GetSRV()->GPUHandle);
+    cmdList->SetGraphicsSRV(2, CurrentFrameConsts->InstanceCache->GetSRV()->GPUHandle);
+    cmdList->SetGraphicsSRV(3, _srvuavHeap->GetGPUHandle(Texture2D_StartIndex));
+    cmdList->ExecuteIndirect(_commandSignatures["OpaquePass"].Get(), _IndirectCommandsCache->GetElementCount(),
+        CurrentFrameConsts->VisibleTransparentCommandsCache->GetResource().D3DResource.Get(), 0,
+        CurrentFrameConsts->TransparentDrawCounter->GetResource().D3DResource.Get(), 0);
+    cmdList->EnhancedTextureBarrier({ _transparencyAccumTexture->GetResource()->GetPixelShaderResourceEnhBarrier(),
+    _transparencyRevealageTexture->GetResource()->GetPixelShaderResourceEnhBarrier() });
+    cmdList->EndPixEvent();
+
+
+    cmdList->BeginPixEvent("Composition Render Pass", Colors::Bisque);
+    cmdList->SetGraphicsRootSignature(_rootSignatures["CompositionPass"].get());
+    cmdList->SetPipelineState(_PSOs["CompositionPass"]);
+    cmdList->SetRenderTargets({ CurrentBackBuffer }, _depthStencil.get());
+    cmdList->SetDescriptorHeaps({ _srvuavHeap.get() });
+    cmdList->SetGraphicsSRV(0, _opaqueAccumTexture->GetSRV()->GPUHandle);
+    cmdList->SetGraphicsSRV(1, _transparencyAccumTexture->GetSRV()->GPUHandle);
+    cmdList->SetGraphicsSRV(2, _transparencyRevealageTexture->GetSRV()->GPUHandle);
+    cmdList->GetCommandList()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    cmdList->GetCommandList()->DrawInstanced(3, 1, 0, 0);
     cmdList->EndPixEvent();
     
     cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetPresentEnhBarrier() });
@@ -644,6 +693,40 @@ void RenderModule::BuildDescHeapsAndBackBuffer()
     desc.DSVDesc.Texture2D.MipSlice = 0;
 
     _depthStencil = std::make_unique<GDX12Texture>(desc);
+
+    //MOVE THESE TO RENDER PASSES
+    GDX12TextureDesc desc2;
+    desc2.Format = desc2.RTVDesc.Format = desc2.SRVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    desc2.Width = width;
+    desc2.Height = height;
+
+    desc2.CreateSRV = true;
+    desc2.SRV_UAV_Heap = _srvuavHeap.get();
+    desc2.SRVHeapIndex = _srvuavHeap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+    desc2.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    desc2.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    desc2.SRVDesc.Texture2D.MipLevels = 1;
+    desc2.SRVDesc.Texture2D.MostDetailedMip = 0;
+    desc2.SRVDesc.Texture2D.PlaneSlice = 0;
+    desc2.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+
+    desc2.CreateRTV = true;
+    desc2.RTVHeap = _rtvHeap.get();
+    desc2.RTVHeapIndex = _rtvHeap->GetAvailableIndex();
+    desc2.RTVDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+    desc2.RTVDesc.Texture2D.PlaneSlice = 0;
+    desc2.RTVDesc.Texture2D.MipSlice = 0;
+
+    _opaqueAccumTexture = std::make_unique<GDX12Texture>(desc2);
+
+    desc2.SRVHeapIndex = _srvuavHeap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+    desc2.RTVHeapIndex = _rtvHeap->GetAvailableIndex();
+    _transparencyAccumTexture = std::make_unique<GDX12Texture>(desc2);
+
+    desc2.Format = desc2.RTVDesc.Format = desc2.SRVDesc.Format = DXGI_FORMAT_R16_FLOAT;
+    desc2.SRVHeapIndex = _srvuavHeap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+    desc2.RTVHeapIndex = _rtvHeap->GetAvailableIndex();
+    _transparencyRevealageTexture = std::make_unique<GDX12Texture>(desc2);
 }
 
 void RenderModule::BuildRootSignatures()
@@ -684,6 +767,11 @@ void RenderModule::BuildRootSignatures()
     GDX12RootSignatureDesc desc4;
     desc4.NumSingleUAVSlots = 1;
     _rootSignatures["BufferClear"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc4);
+
+    GDX12RootSignatureDesc desc5;
+    desc5.NumSingleSRVSlots = 3;
+    desc5.StaticSamplers = GetStaticSamplers();
+    _rootSignatures["CompositionPass"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc5);
 }
 
 void RenderModule::BuildShaders()
@@ -693,8 +781,14 @@ void RenderModule::BuildShaders()
     _shaders["CullingCS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Culling.hlsl", nullptr, "CS", "cs");
     _shaders["BufferClearCS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "BufferClear.hlsl", nullptr, "CS", "cs");
 
-    _shaders["OpaquePassVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "VS", "vs");
-    _shaders["OpaquePassPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Test.hlsl", nullptr, "PS", "ps");
+    _shaders["OpaquePassVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "OpaquePass.hlsl", nullptr, "VS", "vs");
+    _shaders["OpaquePassPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "OpaquePass.hlsl", nullptr, "PS", "ps");
+
+    _shaders["TransparentPassVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "TransparentPass.hlsl", nullptr, "VS", "vs");
+    _shaders["TransparentPassPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "TransparentPass.hlsl", nullptr, "PS", "ps");
+
+    _shaders["VS_FSQuad"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "FullScreenVS.hlsl", nullptr, "VS", "vs");
+    _shaders["CompositionPassPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "CompositionPass.hlsl", nullptr, "PS", "ps");
 }
 
 void RenderModule::BuildPSOs()
@@ -728,6 +822,65 @@ void RenderModule::BuildPSOs()
         _shaders["OpaquePassPS"]->GetBufferSize()
     };
     ThrowIfFailed(_primaryDevice->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_PSOs["OpaquePass"])));
+
+    desc.InputLayout = { nullptr, 0 };
+    desc.pRootSignature = _rootSignatures["CompositionPass"]->GetRootSignature().Get();
+    desc.DepthStencilState.DepthEnable = false;
+    desc.DepthStencilState.StencilEnable = false;
+    desc.VS =
+    {
+        reinterpret_cast<BYTE*>(_shaders["VS_FSQuad"]->GetBufferPointer()),
+        _shaders["VS_FSQuad"]->GetBufferSize()
+    };
+    desc.PS =
+    {
+        reinterpret_cast<BYTE*>(_shaders["CompositionPassPS"]->GetBufferPointer()),
+        _shaders["CompositionPassPS"]->GetBufferSize()
+    };
+    ThrowIfFailed(_primaryDevice->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_PSOs["CompositionPass"])));
+
+    desc.InputLayout = { _inputLayouts["Default"].data(), (UINT)_inputLayouts["Default"].size() };
+    desc.pRootSignature = _rootSignatures["OpaquePass"]->GetRootSignature().Get();
+    desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    // Accumulation
+    desc.BlendState.RenderTarget[0].BlendEnable = true;
+    desc.BlendState.RenderTarget[0].SrcBlend = D3D12_BLEND_ONE;
+    desc.BlendState.RenderTarget[0].DestBlend = D3D12_BLEND_ONE;
+    desc.BlendState.RenderTarget[0].BlendOp = D3D12_BLEND_OP_ADD;
+    desc.BlendState.RenderTarget[0].SrcBlendAlpha = D3D12_BLEND_ONE;
+    desc.BlendState.RenderTarget[0].DestBlendAlpha = D3D12_BLEND_ONE;
+    desc.BlendState.RenderTarget[0].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    desc.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    // Revealage
+    desc.BlendState.RenderTarget[1].BlendEnable = true;
+    desc.BlendState.RenderTarget[1].SrcBlend = D3D12_BLEND_ONE;
+    desc.BlendState.RenderTarget[1].DestBlend = D3D12_BLEND_ONE;
+    desc.BlendState.RenderTarget[1].BlendOp = D3D12_BLEND_OP_ADD;
+    desc.BlendState.RenderTarget[1].SrcBlendAlpha = D3D12_BLEND_ONE;
+    desc.BlendState.RenderTarget[1].DestBlendAlpha = D3D12_BLEND_ONE;
+    desc.BlendState.RenderTarget[1].BlendOpAlpha = D3D12_BLEND_OP_ADD;
+    desc.BlendState.RenderTarget[1].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
+    // Disable depth write
+    desc.DepthStencilState.DepthEnable = true;
+    desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
+    desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    desc.DepthStencilState.StencilEnable = false;
+
+    desc.NumRenderTargets = 2;
+    desc.RTVFormats[0] = _transparencyAccumTexture->GetFormat();
+    desc.RTVFormats[1] = _transparencyRevealageTexture->GetFormat();
+    desc.DSVFormat = _depthStencil->GetFormat();
+    desc.VS =
+    {
+        reinterpret_cast<BYTE*>(_shaders["TransparentPassVS"]->GetBufferPointer()),
+        _shaders["TransparentPassVS"]->GetBufferSize()
+    };
+    desc.PS =
+    {
+        reinterpret_cast<BYTE*>(_shaders["TransparentPassPS"]->GetBufferPointer()),
+        _shaders["TransparentPassPS"]->GetBufferSize()
+    };
+    ThrowIfFailed(_primaryDevice->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_PSOs["TransparentPass"])));
 
 
     D3D12_COMPUTE_PIPELINE_STATE_DESC desc2 = {};

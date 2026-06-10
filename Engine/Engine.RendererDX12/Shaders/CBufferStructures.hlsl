@@ -30,8 +30,13 @@ struct Material
 struct CameraCB
 {
     float4x4 ViewProj;
+    float4x4 View;
     float3 CameraLocation;
+    float NearPlane;
+    float FarPlane;
     float _pad1;
+    float _pad2;
+    float _pad3;
 };
 
 struct LightCB

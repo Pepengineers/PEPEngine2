@@ -167,5 +167,4 @@ private:
     std::unique_ptr<GDX12Texture> _opaqueAccumTexture;
     std::unique_ptr<GDX12Texture> _transparencyAccumTexture;
     std::unique_ptr<GDX12Texture> _transparencyRevealageTexture;
-    std::unique_ptr<GDX12Texture> _compositionTexture;
 };
