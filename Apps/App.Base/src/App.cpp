@@ -333,7 +333,7 @@ bool App::InitWindowClass()
 
     if (!RegisterClass(&WindowClass))
     {
-        MessageBox(nullptr, L"RegisterClass Failed.", nullptr, 0);
+        Logger::Error("RegisterClass failed.");
         return false;
     }
 
@@ -346,7 +346,7 @@ bool App::LoadStartScene()
 
     if (!sceneManager)
     {
-        MessageBox(nullptr, L"SceneManagerModule not found.", nullptr, 0);
+        Logger::Error("SceneManagerModule not found.");
         return false;
     }
 
