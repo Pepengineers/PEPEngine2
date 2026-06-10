@@ -9,7 +9,6 @@
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
-
 #include "App.Base/Modules/SceneManagerModule.h"
 
 static UINT _numFrameConstants = 3;
@@ -142,44 +141,81 @@ GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture
 
     GDX12TextureDesc desc;
     desc.SRV_UAV_Heap = _srvuavHeap.get();
-    desc.SRVHeapIndex = _srvuavHeap->GetAvailableIndex(Texture2D_StartIndex, Texture2D_RangeLength);
     desc.Format = desc.SRVDesc.Format = texture->GetFormat();
     desc.Width = texture->GetWidth();
     desc.Height = texture->GetHeight();
 
     desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    desc.SRVDesc.Texture2D.MipLevels = texture->GetMipLevels();
-    desc.SRVDesc.Texture2D.MostDetailedMip = 0;
-    desc.SRVDesc.Texture2D.PlaneSlice = 0;
-    desc.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
 
-    auto& subresources = texture->GetSubresources();
     uint32_t numMipLevels = texture->GetMipLevels();
     uint32_t numArraySlices = texture->GetArraySize();
 
     ComPtr<ID3D12Resource> textureResource = nullptr;
-    auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
-        desc.Format, desc.Width, desc.Height,
-        numArraySlices, numMipLevels);
     CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
     CD3DX12_HEAP_PROPERTIES uploadHeap(D3D12_HEAP_TYPE_UPLOAD);
 
-    _primaryDevice->GetDevice()->CreateCommittedResource(
-        &defaultHeap,
-        D3D12_HEAP_FLAG_NONE,
-        &texDesc,
-        D3D12_RESOURCE_STATE_COMMON,
-        nullptr,
-        IID_PPV_ARGS(&textureResource));
+    // TODO: add IsDiffuseTexture/useSRGB flag to Texture
+    bool convertToSRGB = false;
+    if (convertToSRGB) { desc.Format = desc.SRVDesc.Format = FormatToSRGB(texture->GetFormat()); }
+
+    if (texture->IsCubeMap())
+    {
+        // CubeMap: 6 faces, array size is multiple of 6
+        desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+        desc.SRVDesc.TextureCube.MipLevels = numMipLevels;
+        desc.SRVDesc.TextureCube.MostDetailedMip = 0;
+        desc.SRVDesc.TextureCube.ResourceMinLODClamp = 0.0f;
+        desc.SRVHeapIndex = _srvuavHeap->GetAvailableIndex(Texture2D_StartIndex, Texture2D_RangeLength);
+
+        auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+            desc.Format, desc.Width, desc.Height,
+            numArraySlices, numMipLevels, 1, 0,
+            D3D12_RESOURCE_FLAG_NONE,
+            D3D12_TEXTURE_LAYOUT_UNKNOWN,
+            D3D12_RESOURCE_DIMENSION_TEXTURE2D);
+
+        _primaryDevice->GetDevice()->CreateCommittedResource(
+            &defaultHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &texDesc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&textureResource));
+    }
+    else
+    {
+        // 2D Texture
+        desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        desc.SRVDesc.Texture2D.MipLevels = numMipLevels;
+        desc.SRVDesc.Texture2D.MostDetailedMip = 0;
+        desc.SRVDesc.Texture2D.PlaneSlice = 0;
+        desc.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+        desc.SRVHeapIndex = _srvuavHeap->GetAvailableIndex(TextureCube_StartIndex, TextureCube_RangeLength);
+
+        auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
+            desc.Format, desc.Width, desc.Height,
+            numArraySlices, numMipLevels);
+
+        _primaryDevice->GetDevice()->CreateCommittedResource(
+            &defaultHeap,
+            D3D12_HEAP_FLAG_NONE,
+            &texDesc,
+            D3D12_RESOURCE_STATE_COMMON,
+            nullptr,
+            IID_PPV_ARGS(&textureResource));
+    }
+
+    auto& subresources = texture->GetSubresources();
+    UINT totalSubresources = numMipLevels * numArraySlices;
 
     UINT64 totalSize = 0;
-    std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(numMipLevels * numArraySlices);
-    std::vector<UINT> rowCounts(numMipLevels * numArraySlices);
-    std::vector<UINT64> rowSizes(numMipLevels * numArraySlices);
+    std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(totalSubresources);
+    std::vector<UINT> rowCounts(totalSubresources);
+    std::vector<UINT64> rowSizes(totalSubresources);
 
+    auto texDesc = textureResource->GetDesc();
     _primaryDevice->GetDevice()->GetCopyableFootprints(
-        &texDesc, 0, numMipLevels * numArraySlices,
+        &texDesc, 0, totalSubresources,
         0, footprints.data(), rowCounts.data(), rowSizes.data(), &totalSize);
 
     auto uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(totalSize);
@@ -209,7 +245,6 @@ GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture
             size_t srcRowPitch = subresource.RowPitch;
             size_t dstRowPitch = footprints[subresourceIndex].Footprint.RowPitch;
             size_t numRows = rowCounts[subresourceIndex];
-            size_t sliceSize = rowSizes[subresourceIndex];
 
             for (size_t row = 0; row < numRows; row++)
             {
