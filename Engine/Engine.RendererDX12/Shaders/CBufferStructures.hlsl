@@ -19,12 +19,16 @@ struct Material
 {
     float Roughness;
     float Metallic;
+    float Opacity;
     uint DiffuseIndex;
     uint NormalIndex;
     uint DisplacementIndex;
-    uint RenderLayer; // 0 - opaque, 1 - transparent
+    uint RenderLayer; // 0 - opaque, 1 - masked, 2 - transparent
+    float _pad0;
     float _pad1;
     float _pad2;
+    float _pad3;
+    float _pad4;
 };
 
 struct CameraCB

@@ -185,7 +185,7 @@ GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture
         desc.SRVDesc.TextureCube.MipLevels = numMipLevels;
         desc.SRVDesc.TextureCube.MostDetailedMip = 0;
         desc.SRVDesc.TextureCube.ResourceMinLODClamp = 0.0f;
-        desc.SRVHeapIndex = _srvuavHeap->GetAvailableIndex(Texture2D_StartIndex, Texture2D_RangeLength);
+        desc.SRVHeapIndex = _srvuavHeap->GetAvailableIndex(TextureCube_StartIndex, TextureCube_RangeLength);
 
         auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
             desc.Format, desc.Width, desc.Height,
@@ -210,7 +210,7 @@ GDX12Texture* RenderModule::CreateTexture(const std::string& name, const Texture
         desc.SRVDesc.Texture2D.MostDetailedMip = 0;
         desc.SRVDesc.Texture2D.PlaneSlice = 0;
         desc.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
-        desc.SRVHeapIndex = _srvuavHeap->GetAvailableIndex(TextureCube_StartIndex, TextureCube_RangeLength);
+        desc.SRVHeapIndex = _srvuavHeap->GetAvailableIndex(Texture2D_StartIndex, Texture2D_RangeLength);
 
         auto texDesc = CD3DX12_RESOURCE_DESC::Tex2D(
             desc.Format, desc.Width, desc.Height,
@@ -626,7 +626,7 @@ void RenderModule::OnRender()
 
     cmdList->BeginPixEvent("Transparent Render Pass", Colors::Aqua);
     cmdList->SetGraphicsRootSignature(_rootSignatures["OpaquePass"].get());
-    cmdList->SetPipelineState(_PSOs["OpaquePass"]);
+    cmdList->SetPipelineState(_PSOs["TransparentPass"]);
     cmdList->SetGraphicsRootConstantBufferView(1, CurrentFrameConsts->MainCB->GetElementAddress(0));
     cmdList->SetGraphicsRootConstantBufferView(2, CurrentFrameConsts->CameraCB->
         GetElementAddress(_commandRecorder._cameraCBIndex));
@@ -879,7 +879,7 @@ void RenderModule::BuildPSOs()
     // Disable depth write
     desc.DepthStencilState.DepthEnable = true;
     desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
-    desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+    desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
     desc.DepthStencilState.StencilEnable = false;
 
     desc.NumRenderTargets = 2;
@@ -975,6 +975,7 @@ void RenderModule::UpdateMaterialCB()
             GDX12MaterialConstants materialConstants;
             materialConstants.Roughness = material->Roughness;
             materialConstants.Metallic = material->Metallic;
+            materialConstants.Opacity = material->Opacity;
             materialConstants.RenderLayer = UINT(material->Type);
             
             if (material->Diffuse)

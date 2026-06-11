@@ -424,8 +424,8 @@ namespace
 		return transparencyInfos;
 	}
 
-	/// Returns true if the material declares a glTF alpha mode that requires non-opaque rendering.
-	bool HasTransparentAlphaMode(const aiMaterial& assimpMaterial)
+	/// Returns true if the material declares the given glTF alpha mode.
+	bool HasGltfAlphaMode(const aiMaterial& assimpMaterial, const char* expectedAlphaMode)
 	{
 		aiString alphaMode;
 		if (assimpMaterial.Get(AI_MATKEY_GLTF_ALPHAMODE, alphaMode) != AI_SUCCESS)
@@ -434,7 +434,7 @@ namespace
 		}
 
 		const std::string alphaModeText = ToLowerAscii(alphaMode.C_Str());
-		return alphaModeText == "blend" || alphaModeText == "mask";
+		return alphaModeText == expectedAlphaMode;
 	}
 
 	/// Determines the renderer-facing material type from imported transparency metadata.
@@ -443,7 +443,7 @@ namespace
 		const float opacity,
 		const std::filesystem::path& opacityTexturePath)
 	{
-		if (opacity < 0.999f || !opacityTexturePath.empty())
+		if (opacity < 0.999f)
 		{
 			return Engine::Core::EMaterialType::Transparent;
 		}
@@ -454,7 +454,7 @@ namespace
 			return Engine::Core::EMaterialType::Transparent;
 		}
 
-		if (HasTransparentAlphaMode(assimpMaterial))
+		if (HasGltfAlphaMode(assimpMaterial, "blend"))
 		{
 			return Engine::Core::EMaterialType::Transparent;
 		}
@@ -462,6 +462,11 @@ namespace
 		if (HasTransparentObjIlluminationModel(assimpMaterial))
 		{
 			return Engine::Core::EMaterialType::Transparent;
+		}
+
+		if (!opacityTexturePath.empty() || HasGltfAlphaMode(assimpMaterial, "mask"))
+		{
+			return Engine::Core::EMaterialType::Masked;
 		}
 
 		return Engine::Core::EMaterialType::Opaque;

@@ -58,6 +58,13 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
 float4 PS(VS_OUTPUT_PS_INPUT pin) : SV_Target
 {
     Material material = MaterialCache[pin.MaterialIndex];
+    float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
     
-    return Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
+    if (material.RenderLayer == 1)
+    {
+        float alpha = color.a * material.Opacity;
+        clip(alpha - 0.5f);
+    }
+
+    return float4(color.rgb, 1.0f);
 }

@@ -57,15 +57,6 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
     return vout;
 }
 
-float ComputeWeight(float alpha, float linearDepth, float farPlane)
-{
-    float power = 2.0f;
-    float weight = alpha * (1.0 - alpha);
-    float normalizedDepth = saturate(linearDepth / farPlane);
-    float depthFactor = pow(1.0 - normalizedDepth, power);
-    return weight * depthFactor;
-}
-
 struct PSOutput
 {
     float4 AccumColor : SV_TARGET0;
@@ -78,11 +69,12 @@ PSOutput PS(VS_OUTPUT_PS_INPUT pin)
     
     Material material = MaterialCache[pin.MaterialIndex];
     float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
+    float alpha = saturate(color.a * material.Opacity);
     
-    float weight = ComputeWeight(color.a, pin.LinearDepth, CBCamera.FarPlane);
+    clip(alpha - 0.001f);
     
-    output.AccumColor = float4(color.rgb * weight, weight);
-    output.Revealage = weight;
+    output.AccumColor = float4(color.rgb * alpha, alpha);
+    output.Revealage = alpha;
     
     return output;
 }

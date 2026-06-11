@@ -58,6 +58,15 @@
     <ClCompile Include="src\GDX12ShaderCompiler.cpp" />
     <ClCompile Include="src\GDX12Texture.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="Shaders\BufferClear.hlsl" />
+    <None Include="Shaders\CBufferStructures.hlsl" />
+    <None Include="Shaders\CompositionPass.hlsl" />
+    <None Include="Shaders\Culling.hlsl" />
+    <None Include="Shaders\FullScreenVS.hlsl" />
+    <None Include="Shaders\OpaquePass.hlsl" />
+    <None Include="Shaders\TransparentPass.hlsl" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>

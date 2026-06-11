@@ -40,7 +40,8 @@ namespace Engine::Core
 	enum class EMaterialType : std::uint8_t
 	{
 		Opaque = 0,
-		Transparent = 1,
+		Masked = 1,
+		Transparent = 2,
 	};
 
 	struct MeshMaterial
