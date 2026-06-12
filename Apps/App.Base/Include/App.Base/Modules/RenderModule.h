@@ -96,6 +96,14 @@ public:
     void OnRenderComponentUpdated(World& world, Entity entity, StaticMeshRenderComponent& component);
 
     const float GetAspectRatio();
+
+    // Editor support
+    [[nodiscard]] GDX12Device* GetPrimaryDevice() const;
+    [[nodiscard]] GDX12DescriptorHeap* GetSrvHeap() const;
+    [[nodiscard]] DXGI_FORMAT GetBackBufferFormat() const;
+    [[nodiscard]] UINT GetFrameConstantsCount() const;
+    std::function<void(GDX12CommandList*, GDX12Texture*)> OnImguiRender;
+    
     GDX12RenderCommandRecorder* GetCommandRecorder();
     GDX12FrameConstants* GetCurrentFrameConstants();
     const GPUMesh* GetGPUMesh(MeshHandle handle);

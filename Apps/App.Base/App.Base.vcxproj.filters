@@ -54,6 +54,15 @@
     <ClInclude Include="Include\App.Base\Systems\CircleMovementSystem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\App.Base\Components\LookAtTargetComponent.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\Components\SplineCurveComponent.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\Components\SplineFollowComponent.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\App.Base\Systems\LookAtTargetSystem.h">
       <Filter>Header Files</Filter>
     </ClInclude>

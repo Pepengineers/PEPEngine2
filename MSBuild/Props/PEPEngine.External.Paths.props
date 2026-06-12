@@ -19,5 +19,6 @@
     <PEPExternalWwiseSDKInclude Condition="'$(PEPExternalWwiseSDKInclude)'==''">$(PEPExternalRoot)wwise\Include\wwise</PEPExternalWwiseSDKInclude>
     <PEPExternalRapidYamlInclude Condition="'$(PEPExternalRapidYamlInclude)'==''">$(PEPExternalRoot)rapidyaml\src</PEPExternalRapidYamlInclude>
     <PEPExternalRapidYamlC4CoreInclude Condition="'$(PEPExternalRapidYamlC4CoreInclude)'==''">$(PEPExternalRoot)rapidyaml\ext\c4core\src</PEPExternalRapidYamlC4CoreInclude>
+    <PEPExternalImGuizmoInclude Condition="'$(PEPExternalImGuizmoInclude)'==''">$(PEPExternalRoot)imguizmo\src</PEPExternalImGuizmoInclude>
   </PropertyGroup>
 </Project>

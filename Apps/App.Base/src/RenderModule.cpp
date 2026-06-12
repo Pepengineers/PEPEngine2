@@ -520,6 +520,26 @@ const float RenderModule::GetAspectRatio()
     return _window->GetAspectRatio();
 }
 
+GDX12Device* RenderModule::GetPrimaryDevice() const
+{
+    return _primaryDevice.get();
+}
+
+GDX12DescriptorHeap* RenderModule::GetSrvHeap() const
+{
+    return _srvuavHeap.get();
+}
+
+DXGI_FORMAT RenderModule::GetBackBufferFormat() const
+{
+    return _backBuffer->GetFormat();
+}
+
+UINT RenderModule::GetFrameConstantsCount() const
+{
+    return static_cast<UINT>(_frameConstants.size());
+}
+
 GDX12RenderCommandRecorder* RenderModule::GetCommandRecorder()
 {
     return &_commandRecorder;

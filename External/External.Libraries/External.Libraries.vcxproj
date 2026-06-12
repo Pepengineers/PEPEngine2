@@ -29,26 +29,26 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -472,6 +472,14 @@
     <ClInclude Include="spdlog\include\spdlog\stopwatch.h" />
     <ClInclude Include="spdlog\include\spdlog\tweakme.h" />
     <ClInclude Include="spdlog\include\spdlog\version.h" />
+    <ClInclude Include="imguizmo\src\GraphEditor.h" />
+    <ClInclude Include="imguizmo\src\ImCurveEdit.h" />
+    <ClInclude Include="imguizmo\src\ImGradient.h" />
+    <ClInclude Include="imguizmo\src\ImGuizmo.h" />
+    <ClInclude Include="imguizmo\src\ImSequencer.h" />
+    <ClInclude Include="imguizmo\src\ImVectorEditor.h" />
+    <ClInclude Include="imguizmo\src\ImZoomSlider.h" />
+    <ClInclude Include="imguizmo\src\ImLightRig.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="imgui\src\backends\imgui_impl_dx12.cpp" />
@@ -506,6 +514,15 @@
       <ObjectFileName>$(IntDir)rapidyaml.ryml.version.obj</ObjectFileName>
     </ClCompile>
   </ItemGroup>
+<ItemGroup>
+    <ClCompile Include="imguizmo\src\GraphEditor.cpp" />
+    <ClCompile Include="imguizmo\src\ImCurveEdit.cpp" />
+    <ClCompile Include="imguizmo\src\ImGradient.cpp" />
+    <ClCompile Include="imguizmo\src\ImGuizmo.cpp" />
+    <ClCompile Include="imguizmo\src\ImSequencer.cpp" />
+    <ClCompile Include="imguizmo\src\ImVectorEditor.cpp" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Include="assimp\Include\assimp\.editorconfig" />
     <None Include="assimp\Include\assimp\color4.inl" />
