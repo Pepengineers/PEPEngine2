@@ -339,6 +339,390 @@
     <ClInclude Include="pix\Include\pix\PIXEventsLegacy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="rapidyaml\bm\bm_common.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\bm\libyaml.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\bm\bm_charconv.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\cmake\compat\c4\gcc-4.8.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\alloc.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\allocator.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\base64.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\bitmask.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\blob.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\c4_pop.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\c4_push.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\charconv.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\char_traits.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\common.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\compiler.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\config.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\cpu.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ctor_dtor.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\dump.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\enum.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\error.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\export.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\debugbreak\debugbreak.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\fast_float.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\fast_float\include\fast_float\ascii_number.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\fast_float\include\fast_float\bigint.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\fast_float\include\fast_float\constexpr_feature_detect.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\fast_float\include\fast_float\decimal_to_binary.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\fast_float\include\fast_float\digit_comparison.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\fast_float\include\fast_float\fast_float.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\fast_float\include\fast_float\fast_table.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\fast_float\include\fast_float\float_common.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\fast_float\include\fast_float\parse_number.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\fast_float\tests\build_tests\issue72\test.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\fast_float_all.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\rng\rng.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\ext\sg14\inplace_function.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\format.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\format_base64.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\gcc-4.8.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\hash.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\language.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\memory_resource.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\memory_util.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\platform.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\preprocessor.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\restrict.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\span.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\std\span.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\std\span_fwd.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\std\std.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\std\std_fwd.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\std\string.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\std\string_fwd.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\std\string_view.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\std\string_view_fwd.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\std\tuple.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\std\vector.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\std\vector_fwd.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\substr.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\substr_fwd.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\szconv.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\types.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\type_name.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\unrestrict.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\utf.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\version.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\windows.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\windows_pop.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\src\c4\windows_push.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\test\c4\libtest\archetypes.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\test\c4\libtest\supprwarn_pop.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\test\c4\libtest\supprwarn_push.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\test\c4\test.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\test\test_enum_common.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\test\test_numbers.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\ext\c4core\test\utfchars.inc">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\common.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\detail\checks.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\detail\dbgprint.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\detail\print.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\detail\stack.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\emit.def.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\emit.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\error.def.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\error.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\escape_scalar.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\event_handler_stack.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\event_handler_tree.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\export.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\file.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\filter_processor.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\fwd.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\node.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\node_type.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\parse.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\parser_state.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\parse_engine.def.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\parse_engine.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\preprocess.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\reference_resolver.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\std\map.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\std\std.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\std\string.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\std\vector.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\tag.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\tree.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\version.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\writer.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\c4\yml\yml.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\ryml.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src\ryml_std.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src_extra\c4\yml\extra\event_handler_ints.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src_extra\c4\yml\extra\ints_to_testsuite.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\src_extra\c4\yml\extra\ints_utils.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\test\testsuite\testsuite_common.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\test\testsuite\testsuite_events.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\test\testsuite\testsuite_parts.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\test\test_fuzz\test_fuzz_common.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\test\test_lib\callbacks_tester.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\test\test_lib\string.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\test\test_lib\test_case.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\test\test_lib\test_case_node.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\test\test_lib\test_engine.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\test\test_lib\test_events_ints_helpers.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\test\test_lib\test_group.def.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\test\test_lib\test_group.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rapidyaml\test\test_lib\test_main.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="imgui\src\backends\imgui_impl_dx12.cpp">
@@ -366,6 +750,60 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="imgui\src\imgui_widgets.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\ext\c4core\src\c4\alloc.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\ext\c4core\src\c4\base64.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\ext\c4core\src\c4\char_traits.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\ext\c4core\src\c4\error.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\ext\c4core\src\c4\format.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\ext\c4core\src\c4\language.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\ext\c4core\src\c4\memory_resource.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\ext\c4core\src\c4\memory_util.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\ext\c4core\src\c4\utf.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\ext\c4core\src\c4\version.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\src\c4\yml\common.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\src\c4\yml\node_type.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\src\c4\yml\parse.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\src\c4\yml\preprocess.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\src\c4\yml\reference_resolver.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\src\c4\yml\tag.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\src\c4\yml\tree.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="rapidyaml\src\c4\yml\version.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -398,5 +836,9 @@
     <None Include="assimp\Include\assimp\vector3.inl">
       <Filter>Header Files</Filter>
     </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Natvis Include="rapidyaml\ext\c4core\src\c4\c4core.natvis" />
+    <Natvis Include="rapidyaml\src\ryml.natvis" />
   </ItemGroup>
 </Project>
