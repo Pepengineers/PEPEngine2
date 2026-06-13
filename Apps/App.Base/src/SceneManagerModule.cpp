@@ -96,8 +96,7 @@ bool SceneManagerModule::LoadConfiguredWorld(
         Logger::Error("World yaml load failed: {}", exception.what());
         return false;
     }
-
-    Logger::Info("LoadConfiguredWorld worldConfig.SourcePath:\n{}", worldConfig.SourcePath);
+    
 
     WorldDesc desc;
     desc.Name = !worldConfig.Name.empty()
