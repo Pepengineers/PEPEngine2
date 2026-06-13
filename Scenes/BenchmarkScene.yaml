@@ -3,5 +3,4 @@ Scene:
 
   Worlds:
     - Name: MainWorld
-      Path: Worlds/BistroInteriorWorld.yaml
-      Priority: 0
+      Path: Worlds/BistroBenchmark.world
