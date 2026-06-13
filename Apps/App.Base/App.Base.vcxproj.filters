@@ -66,6 +66,12 @@
     <ClInclude Include="Include\App.Base\ECS\WorldLoader.h">
       <Filter>Header Files\ECS</Filter>
     </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\WorldConfig.h">
+      <Filter>Header Files\ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\WorldLoadContext.h">
+      <Filter>Header Files\ECS</Filter>
+    </ClInclude>
     <ClInclude Include="Include\App.Base\ECS\AppConfig.h">
       <Filter>Header Files\ECS</Filter>
     </ClInclude>

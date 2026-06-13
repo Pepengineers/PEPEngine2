@@ -32,6 +32,8 @@
     <ClInclude Include="Include\App.Base\ECS\Components\TransformComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\VelocityComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\World.h" />
+    <ClInclude Include="Include\App.Base\ECS\WorldConfig.h" />
+    <ClInclude Include="Include\App.Base\ECS\WorldLoadContext.h" />
     <ClInclude Include="Include\App.Base\ECS\WorldLoader.h" />
     <ClInclude Include="Include\App.Base\Modules\EventManagerModule.h" />
     <ClInclude Include="Include\App.Base\Modules\RenderModule.h" />
