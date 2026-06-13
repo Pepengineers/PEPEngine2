@@ -1,7 +1,7 @@
 // AppConfigLoader.h
 #pragma once
 
-#include "AppConfig.h"
+#include "App.Base/ECS/AppConfig.h"
 
 #include <string>
 

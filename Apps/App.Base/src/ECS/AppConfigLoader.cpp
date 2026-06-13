@@ -1,4 +1,4 @@
-#include "App.Base/AppConfigLoader.h"
+#include "App.Base/ECS/AppConfigLoader.h"
 
 #include <ryml.hpp>
 #include <ryml_std.hpp>

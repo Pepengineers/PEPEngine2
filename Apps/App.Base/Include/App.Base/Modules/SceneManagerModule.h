@@ -13,7 +13,7 @@
 
 #include "Engine.Core/ECS/Event.h"
 #include "App.Base/ECS/World.h"
-#include "App.Base/AppConfig.h"
+#include "App.Base/ECS/AppConfig.h"
 
 class World;
 class System;

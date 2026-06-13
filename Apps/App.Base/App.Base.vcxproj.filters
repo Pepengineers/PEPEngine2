@@ -66,6 +66,12 @@
     <ClInclude Include="Include\App.Base\ECS\WorldLoader.h">
       <Filter>Header Files\ECS</Filter>
     </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\AppConfig.h">
+      <Filter>Header Files\ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\AppConfigLoader.h">
+      <Filter>Header Files\ECS</Filter>
+    </ClInclude>
     <ClInclude Include="Include\App.Base\ECS\Components\CameraComponent.h">
       <Filter>Header Files\ECS\Components</Filter>
     </ClInclude>
@@ -114,6 +120,9 @@
       <Filter>Source Files\ECS</Filter>
     </ClCompile>
     <ClCompile Include="src\ECS\WorldLoader.cpp">
+      <Filter>Source Files\ECS</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ECS\AppConfigLoader.cpp">
       <Filter>Source Files\ECS</Filter>
     </ClCompile>
   </ItemGroup>

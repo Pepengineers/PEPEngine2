@@ -1,6 +1,6 @@
 #include "App.Base/Modules/SceneManagerModule.h"
 
-#include "App.Base/AppConfigLoader.h"
+#include "App.Base/ECS/AppConfigLoader.h"
 
 #include "App.Base/Systems/CircleMovementSystem.h"
 #include "App.Base/Systems/MovementSystem.h"

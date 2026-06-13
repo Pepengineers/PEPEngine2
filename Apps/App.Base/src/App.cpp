@@ -2,7 +2,7 @@
 
 #include <App.Base/App.h>
 #include <WindowsX.h>
-#include "App.Base/AppConfigLoader.h"
+#include "App.Base/ECS/AppConfigLoader.h"
 #include "Common/Logger.h"
 
 #include <filesystem>
