@@ -153,7 +153,6 @@ WorldConfig AppConfigLoader::LoadWorldConfig(const std::string& path)
 
     WorldConfig config;
     config.Name = ReadString(worldNode, "Name");
-    config.SourcePath = ReadString(worldNode, "SourcePath");
 
     if (HasChild(worldNode, "Systems"))
     {

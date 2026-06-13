@@ -46,7 +46,5 @@ struct SystemConfig
 struct WorldConfig
 {
     std::string Name;
-    std::string SourcePath;
-
     std::vector<SystemConfig> Systems;
 };

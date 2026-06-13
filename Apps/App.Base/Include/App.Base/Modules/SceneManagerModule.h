@@ -85,8 +85,7 @@ private:
 
     bool AddSystemByName(
         World* world,
-        const SystemConfig& systemConfig,
-        const AppConfig& appConfig
+        const SystemConfig& systemConfig
     );
 
     static uint8_t ToSystemPriority(int priority);

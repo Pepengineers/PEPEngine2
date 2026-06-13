@@ -66,9 +66,7 @@ bool SceneManagerModule::LoadScene(
 
     Logger::Info("SceneManagerModule::LoadScene world count: {}", sceneConfig.Worlds.size());
 
-    std::vector<SceneWorldConfig> worlds = sceneConfig.Worlds;
-
-    for (const SceneWorldConfig& sceneWorldConfig : worlds)
+    for (const SceneWorldConfig& sceneWorldConfig : sceneConfig.Worlds)
     {
         Logger::Info("SceneManagerModule::LoadScene loading world yaml:\n{}", sceneWorldConfig.Path);
 
@@ -105,10 +103,7 @@ bool SceneManagerModule::LoadConfiguredWorld(
     desc.Name = !worldConfig.Name.empty()
         ? worldConfig.Name
         : sceneWorldConfig.Name;
-
-    desc.WorldFilePath = !worldConfig.SourcePath.empty()
-        ? std::filesystem::path(worldConfig.SourcePath)
-        : std::filesystem::path(sceneWorldConfig.Path);
+    desc.WorldFilePath = sceneWorldConfig.Path;
 
     auto world = std::make_unique<World>(desc);
     World* worldPtr = world.get();
@@ -156,7 +151,12 @@ bool SceneManagerModule::AddSystemsFromConfig(
 
     for (const SystemConfig& systemConfig : systems)
     {
-        if (!AddSystemByName(world, systemConfig, appConfig))
+        if (appConfig.IsSystemBanned(systemConfig.Name))
+        {
+            continue;
+        }
+
+        if (!AddSystemByName(world, systemConfig))
         {
             return false;
         }
@@ -167,8 +167,7 @@ bool SceneManagerModule::AddSystemsFromConfig(
 
 bool SceneManagerModule::AddSystemByName(
     World* world,
-    const SystemConfig& systemConfig,
-    const AppConfig& appConfig)
+    const SystemConfig& systemConfig)
 {
     if (!world)
     {
@@ -178,11 +177,6 @@ bool SceneManagerModule::AddSystemByName(
     if (systemConfig.Name.empty())
     {
         return false;
-    }
-
-    if (appConfig.IsSystemBanned(systemConfig.Name))
-    {
-        return true;
     }
 
     const uint8_t priority = ToSystemPriority(systemConfig.Priority);
