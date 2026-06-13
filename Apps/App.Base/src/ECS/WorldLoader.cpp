@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <system_error>
 #include <unordered_map>
@@ -120,10 +121,12 @@ namespace
         const std::uint8_t red,
         const std::uint8_t green,
         const std::uint8_t blue,
-        const std::uint8_t alpha)
+        const std::uint8_t alpha,
+        const Engine::Core::ETextureType textureType)
     {
         Engine::Core::TextureDesc textureDesc = {};
         textureDesc.Dimension = Engine::Core::ETextureDimension::Texture2D;
+        textureDesc.Type = textureType;
         textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
         textureDesc.Width = 1;
         textureDesc.Height = 1;
@@ -157,9 +160,10 @@ namespace
         const std::uint8_t red,
         const std::uint8_t green,
         const std::uint8_t blue,
-        const std::uint8_t alpha)
+        const std::uint8_t alpha,
+        const Engine::Core::ETextureType textureType)
     {
-        Engine::Core::Texture texture = CreateSingleColorTexture(red, green, blue, alpha);
+        Engine::Core::Texture texture = CreateSingleColorTexture(red, green, blue, alpha, textureType);
 
         GDX12Texture* gpuTexture = renderModule.CreateTexture(textureName, &texture);
         if (gpuTexture == nullptr)
@@ -189,7 +193,7 @@ namespace
 
         const std::string textureName = sceneName + "_DiffuseColor_" + std::to_string(red) + "_" + std::to_string(green) + "_" + std::to_string(blue);
 
-        return CreateSolidGpuTexture(renderModule, textureName, red, green, blue, 255);
+        return CreateSolidGpuTexture(renderModule, textureName, red, green, blue, 255, Engine::Core::ETextureType::Color);
     }
 
     struct SceneDefaultMaterialTextures
@@ -209,9 +213,9 @@ namespace
     SceneDefaultMaterialTextures CreateSceneDefaultMaterialTextures(RenderModule& renderModule, const std::string& sceneName)
     {
         SceneDefaultMaterialTextures textures = {};
-        textures.FlatNormal = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultFlatNormal", 128, 128, 255, 255);
-        textures.White = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultWhite", 255, 255, 255, 255);
-        textures.Black = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultBlack", 0, 0, 0, 255);
+        textures.FlatNormal = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultFlatNormal", 128, 128, 255, 255, Engine::Core::ETextureType::Data);
+        textures.White = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultWhite", 255, 255, 255, 255, Engine::Core::ETextureType::Data);
+        textures.Black = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultBlack", 0, 0, 0, 255, Engine::Core::ETextureType::Data);
         return textures;
     }
 
@@ -228,12 +232,127 @@ namespace
         bool HasEmissiveMap = false;
     };
 
-    /// Loads a texture through AssetManager, creates the corresponding GPU texture and caches it by normalized path.
+    /// Builds a GPU texture cache key from source path and texture semantic type.
+    std::wstring BuildTextureCacheKey(const std::filesystem::path& texturePath, const Engine::Core::ETextureType textureType)
+    {
+        std::wstring textureKey = texturePath.lexically_normal().generic_wstring();
+        textureKey += L"#type:";
+        textureKey += std::to_wstring(static_cast<std::uint32_t>(textureType));
+        return textureKey;
+    }
+
+    /// Builds a GPU texture cache key for a diffuse texture with an opacity mask packed into its alpha channel.
+    std::wstring BuildMergedOpacityTextureCacheKey(
+        const std::filesystem::path& diffuseTexturePath,
+        const std::filesystem::path& opacityTexturePath)
+    {
+        std::wstring textureKey = BuildTextureCacheKey(diffuseTexturePath, Engine::Core::ETextureType::Color);
+        textureKey += L"#opacity:";
+        textureKey += opacityTexturePath.lexically_normal().generic_wstring();
+        return textureKey;
+    }
+
+    /// Returns true if both textures can be merged as CPU-side RGBA8 images.
+    bool CanMergeOpacityIntoDiffuse(const Engine::Core::Texture& diffuseTexture, const Engine::Core::Texture& opacityTexture)
+    {
+        return diffuseTexture.GetDimension() == Engine::Core::ETextureDimension::Texture2D &&
+            opacityTexture.GetDimension() == Engine::Core::ETextureDimension::Texture2D &&
+            diffuseTexture.GetFormat() == DXGI_FORMAT_R8G8B8A8_UNORM &&
+            opacityTexture.GetFormat() == DXGI_FORMAT_R8G8B8A8_UNORM &&
+            diffuseTexture.GetDepth() == 1 &&
+            opacityTexture.GetDepth() == 1 &&
+            diffuseTexture.GetArraySize() >= 1 &&
+            opacityTexture.GetArraySize() >= 1 &&
+            diffuseTexture.GetMipLevels() >= 1 &&
+            opacityTexture.GetMipLevels() >= 1;
+    }
+
+    /// Creates a copy of diffuseTexture with opacityTexture packed into the alpha channel.
+    /// The opacity texture is sampled from its red channel and multiplied with the existing diffuse alpha.
+    std::unique_ptr<Engine::Core::Texture> TryCreateDiffuseTextureWithOpacityAlpha(
+        const Engine::Core::Texture& diffuseTexture,
+        const Engine::Core::Texture& opacityTexture)
+    {
+        if (!CanMergeOpacityIntoDiffuse(diffuseTexture, opacityTexture))
+        {
+            return nullptr;
+        }
+
+        Engine::Core::TextureDesc textureDesc = {};
+        textureDesc.Dimension = Engine::Core::ETextureDimension::Texture2D;
+        textureDesc.Type = Engine::Core::ETextureType::Color;
+        textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        textureDesc.Width = diffuseTexture.GetWidth();
+        textureDesc.Height = diffuseTexture.GetHeight();
+        textureDesc.Depth = 1;
+        textureDesc.ArraySize = diffuseTexture.GetArraySize();
+        textureDesc.MipLevels = diffuseTexture.GetMipLevels();
+
+        std::vector<Engine::Core::SubTexture> subresources;
+        subresources.reserve(diffuseTexture.GetSubresourceCount());
+
+        for (std::uint32_t arraySlice = 0; arraySlice < diffuseTexture.GetArraySize(); ++arraySlice)
+        {
+            const std::uint32_t opacityArraySlice = (std::min)(arraySlice, opacityTexture.GetArraySize() - 1);
+            for (std::uint32_t mipLevel = 0; mipLevel < diffuseTexture.GetMipLevels(); ++mipLevel)
+            {
+                const Engine::Core::SubTexture& diffuseSubresource = diffuseTexture.GetSubresource(mipLevel, arraySlice);
+                const std::uint32_t opacityMipLevel = (std::min)(mipLevel, opacityTexture.GetMipLevels() - 1);
+                const Engine::Core::SubTexture& opacitySubresource = opacityTexture.GetSubresource(opacityMipLevel, opacityArraySlice);
+
+                if (diffuseSubresource.Width == 0 ||
+                    diffuseSubresource.Height == 0 ||
+                    opacitySubresource.Width == 0 ||
+                    opacitySubresource.Height == 0 ||
+                    diffuseSubresource.RowPitch < static_cast<size_t>(diffuseSubresource.Width) * 4u ||
+                    opacitySubresource.RowPitch < static_cast<size_t>(opacitySubresource.Width) * 4u)
+                {
+                    return nullptr;
+                }
+
+                Engine::Core::SubTexture mergedSubresource = diffuseSubresource;
+                for (std::uint32_t y = 0; y < diffuseSubresource.Height; ++y)
+                {
+                    const std::uint32_t opacityY = (std::min)(
+                        static_cast<std::uint32_t>((static_cast<std::uint64_t>(y) * opacitySubresource.Height) / diffuseSubresource.Height),
+                        opacitySubresource.Height - 1);
+
+                    for (std::uint32_t x = 0; x < diffuseSubresource.Width; ++x)
+                    {
+                        const std::uint32_t opacityX = (std::min)(
+                            static_cast<std::uint32_t>((static_cast<std::uint64_t>(x) * opacitySubresource.Width) / diffuseSubresource.Width),
+                            opacitySubresource.Width - 1);
+
+                        const size_t diffusePixelOffset = static_cast<size_t>(y) * diffuseSubresource.RowPitch + static_cast<size_t>(x) * 4u;
+                        const size_t opacityPixelOffset = static_cast<size_t>(opacityY) * opacitySubresource.RowPitch + static_cast<size_t>(opacityX) * 4u;
+                        if (diffusePixelOffset + 3 >= mergedSubresource.Data.size() ||
+                            opacityPixelOffset >= opacitySubresource.Data.size())
+                        {
+                            return nullptr;
+                        }
+
+                        const std::uint8_t diffuseAlpha = std::to_integer<std::uint8_t>(mergedSubresource.Data[diffusePixelOffset + 3]);
+                        const std::uint8_t opacityAlpha = std::to_integer<std::uint8_t>(opacitySubresource.Data[opacityPixelOffset]);
+                        const std::uint8_t mergedAlpha = static_cast<std::uint8_t>(
+                            (static_cast<std::uint32_t>(diffuseAlpha) * opacityAlpha + 127u) / 255u);
+                        mergedSubresource.Data[diffusePixelOffset + 3] = static_cast<std::byte>(mergedAlpha);
+                    }
+                }
+
+                subresources.push_back(std::move(mergedSubresource));
+            }
+        }
+
+        return std::make_unique<Engine::Core::Texture>(textureDesc, std::move(subresources));
+    }
+
+    /// Loads a texture through AssetManager, creates the corresponding GPU texture and caches it by normalized path and semantic type.
     /// Returns an already created GPU texture when the same source texture is requested again.
     GDX12Texture* LoadSceneGpuTexture(
         RenderModule& renderModule,
         Engine::Core::AssetManager& assetManager,
         const std::filesystem::path& texturePath,
+        const Engine::Core::ETextureType textureType,
         const std::string& sceneName,
         std::unordered_map<std::wstring, GDX12Texture*>& gpuTexturesByPath)
     {
@@ -242,7 +361,7 @@ namespace
             return nullptr;
         }
 
-        const std::wstring textureKey = texturePath.lexically_normal().generic_wstring();
+        const std::wstring textureKey = BuildTextureCacheKey(texturePath, textureType);
         const auto cachedTextureIterator = gpuTexturesByPath.find(textureKey);
         if (cachedTextureIterator != gpuTexturesByPath.end())
         {
@@ -256,7 +375,63 @@ namespace
         }
 
         const std::string textureName = sceneName + "_Texture_" + std::to_string(gpuTexturesByPath.size());
-        GDX12Texture* gpuTexture = renderModule.CreateTexture(textureName, texture);
+        const Engine::Core::Texture typedTexture = texture->WithType(textureType);
+        GDX12Texture* gpuTexture = renderModule.CreateTexture(textureName, &typedTexture);
+        if (gpuTexture == nullptr)
+        {
+            gpuTexture = renderModule.GetTextureByName(textureName);
+        }
+
+        if (gpuTexture != nullptr)
+        {
+            gpuTexturesByPath.emplace(textureKey, gpuTexture);
+        }
+
+        return gpuTexture;
+    }
+
+    /// Loads a diffuse texture and packs an optional opacity mask into its alpha channel before GPU upload.
+    /// Falls back to the original diffuse texture if the opacity texture is missing or cannot be merged.
+    GDX12Texture* LoadSceneDiffuseGpuTexture(
+        RenderModule& renderModule,
+        Engine::Core::AssetManager& assetManager,
+        const std::filesystem::path& diffuseTexturePath,
+        const std::filesystem::path& opacityTexturePath,
+        const std::string& sceneName,
+        std::unordered_map<std::wstring, GDX12Texture*>& gpuTexturesByPath)
+    {
+        if (diffuseTexturePath.empty())
+        {
+            return nullptr;
+        }
+
+        if (opacityTexturePath.empty())
+        {
+            return LoadSceneGpuTexture(renderModule, assetManager, diffuseTexturePath, Engine::Core::ETextureType::Color, sceneName, gpuTexturesByPath);
+        }
+
+        const std::wstring textureKey = BuildMergedOpacityTextureCacheKey(diffuseTexturePath, opacityTexturePath);
+        const auto cachedTextureIterator = gpuTexturesByPath.find(textureKey);
+        if (cachedTextureIterator != gpuTexturesByPath.end())
+        {
+            return cachedTextureIterator->second;
+        }
+
+        const Engine::Core::Texture* diffuseTexture = assetManager.LoadTexture(diffuseTexturePath);
+        const Engine::Core::Texture* opacityTexture = assetManager.LoadTexture(opacityTexturePath);
+        if (diffuseTexture == nullptr || opacityTexture == nullptr)
+        {
+            return LoadSceneGpuTexture(renderModule, assetManager, diffuseTexturePath, Engine::Core::ETextureType::Color, sceneName, gpuTexturesByPath);
+        }
+
+        std::unique_ptr<Engine::Core::Texture> mergedTexture = TryCreateDiffuseTextureWithOpacityAlpha(*diffuseTexture, *opacityTexture);
+        if (mergedTexture == nullptr)
+        {
+            return LoadSceneGpuTexture(renderModule, assetManager, diffuseTexturePath, Engine::Core::ETextureType::Color, sceneName, gpuTexturesByPath);
+        }
+
+        const std::string textureName = sceneName + "_Texture_" + std::to_string(gpuTexturesByPath.size());
+        GDX12Texture* gpuTexture = renderModule.CreateTexture(textureName, mergedTexture.get());
         if (gpuTexture == nullptr)
         {
             gpuTexture = renderModule.GetTextureByName(textureName);
@@ -305,6 +480,7 @@ namespace
 
         material->Metallic = 0.0f;
         material->Roughness = 1.0f;
+        material->Opacity = 1.0f;
         material->SpecularColor = Vector3(0.0f, 0.0f, 0.0f);
         material->EmissiveColor = Vector3(0.0f, 0.0f, 0.0f);
         material->Diffuse = gpuTexture;
@@ -317,6 +493,7 @@ namespace
 		material->HasRoughnessMap = false;
 		material->HasEmissiveMap = false;
 		material->UseBakedLighting = false;
+		material->Type = MaterialType::Opaque;
 		material->DirtyFlag = true;
 		return material;
 	}
@@ -346,6 +523,7 @@ namespace
 
         material->Metallic = 0.0f;
         material->Roughness = (std::max)(0.04f, (std::min)(sourceMaterial.Roughness, 1.0f));
+        material->Opacity = (std::max)(0.0f, (std::min)(sourceMaterial.Opacity, 1.0f));
         material->SpecularColor = Vector3(sourceMaterial.SpecularColor.x, sourceMaterial.SpecularColor.y, sourceMaterial.SpecularColor.z);
         Vector3 emissiveColor(sourceMaterial.EmissiveColor.x, sourceMaterial.EmissiveColor.y, sourceMaterial.EmissiveColor.z);
         if (textures.HasEmissiveMap && emissiveColor.LengthSquared() < 0.000001f)
@@ -363,6 +541,18 @@ namespace
 		material->HasRoughnessMap = textures.HasRoughnessMap;
 		material->HasEmissiveMap = textures.HasEmissiveMap;
 		material->UseBakedLighting = sourceMaterial.UseBakedLighting;
+		if (sourceMaterial.Type == Engine::Core::EMaterialType::Transparent)
+		{
+			material->Type = MaterialType::Transparent;
+		}
+		else if (sourceMaterial.Type == Engine::Core::EMaterialType::Masked)
+		{
+			material->Type = MaterialType::Masked;
+		}
+		else
+		{
+			material->Type = MaterialType::Opaque;
+		}
 		material->DirtyFlag = true;
 		return material;
 	}
@@ -389,7 +579,13 @@ namespace
             MaterialTextureSet textures = {};
             if (!diffuseTexturePath.empty())
             {
-                textures.Diffuse = LoadSceneGpuTexture(renderModule, assetManager, diffuseTexturePath, sceneName, gpuTexturesByPath);
+                textures.Diffuse = LoadSceneDiffuseGpuTexture(
+                    renderModule,
+                    assetManager,
+                    diffuseTexturePath,
+                    materials[materialIndex].OpacityTexturePath,
+                    sceneName,
+                    gpuTexturesByPath);
             }
 
             if (textures.Diffuse == nullptr)
@@ -402,28 +598,28 @@ namespace
             textures.Roughness = defaultTextures.White;
             textures.Emissive = defaultTextures.Black;
 
-            GDX12Texture* normalTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].NormalTexturePath, sceneName, gpuTexturesByPath);
+            GDX12Texture* normalTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].NormalTexturePath, Engine::Core::ETextureType::Data, sceneName, gpuTexturesByPath);
             if (normalTexture != nullptr)
             {
                 textures.Normal = normalTexture;
                 textures.HasNormalMap = true;
             }
 
-            GDX12Texture* specularTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].SpecularTexturePath, sceneName, gpuTexturesByPath);
+            GDX12Texture* specularTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].SpecularTexturePath, Engine::Core::ETextureType::Data, sceneName, gpuTexturesByPath);
             if (specularTexture != nullptr)
             {
                 textures.Specular = specularTexture;
                 textures.HasSpecularMap = true;
             }
 
-            GDX12Texture* roughnessTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].RoughnessTexturePath, sceneName, gpuTexturesByPath);
+            GDX12Texture* roughnessTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].RoughnessTexturePath, Engine::Core::ETextureType::Data, sceneName, gpuTexturesByPath);
             if (roughnessTexture != nullptr)
             {
                 textures.Roughness = roughnessTexture;
                 textures.HasRoughnessMap = true;
             }
             
-            GDX12Texture* emissiveTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].EmissiveTexturePath, sceneName, gpuTexturesByPath);
+            GDX12Texture* emissiveTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].EmissiveTexturePath, Engine::Core::ETextureType::Color, sceneName, gpuTexturesByPath);
             if (emissiveTexture != nullptr)
             {
                 textures.Emissive = emissiveTexture;

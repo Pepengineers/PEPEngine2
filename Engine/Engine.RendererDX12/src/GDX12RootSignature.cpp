@@ -16,10 +16,19 @@ GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSigna
 
     UINT currentParamIndex = 0;
 
-    if (desc.NumSingleCBVSlots > 0 || !desc.CBVRanges.empty())
+    if (desc.NumSingleCBVSlots > 0 || !desc.CBVRanges.empty() || !desc.Constants.empty())
     {
         _cbv0ParamIndex = currentParamIndex;
         UINT currentRegister = 0;
+
+        for (const auto& constant : desc.Constants)
+        {
+            CD3DX12_ROOT_PARAMETER1 param;
+            param.InitAsConstants(constant, currentRegister);
+            rootParameters.push_back(param);
+            currentParamIndex++;
+            currentRegister++;
+        }
 
         for (UINT i = 0; i < desc.NumSingleCBVSlots; i++)
         {

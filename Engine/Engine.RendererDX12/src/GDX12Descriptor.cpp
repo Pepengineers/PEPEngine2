@@ -49,7 +49,7 @@ void GDX12Descriptor::InitAsCBV(D3D12_CONSTANT_BUFFER_VIEW_DESC* cbvDesc, GDX12D
     else { OutputDebugStringA("ERROR: Cannot create CBV in a non-CBV_SRV_UAV heap\n"); }
 }
 
-void GDX12Descriptor::InitAsUAV(ID3D12Resource* resource, D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex)
+void GDX12Descriptor::InitAsUAV(ID3D12Resource* resource, ID3D12Resource* counterResource, D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex)
 {
     _heap = inHeap;
     HeapIndex = heapIndex;
@@ -59,7 +59,7 @@ void GDX12Descriptor::InitAsUAV(ID3D12Resource* resource, D3D12_UNORDERED_ACCESS
         CPUHandle = _heap->GetCPUHandle(HeapIndex);
         if (_heap->GetFlags() & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) { GPUHandle = _heap->GetGPUHandle(HeapIndex); }
 
-        _heap->_device->GetDevice()->CreateUnorderedAccessView(resource, nullptr, uavDesc, CPUHandle);
+        _heap->_device->GetDevice()->CreateUnorderedAccessView(resource, counterResource, uavDesc, CPUHandle);
         DescType = DESC_TYPE_UAV;
     }
     else { OutputDebugStringA("ERROR: Cannot create UAV in a non-CBV_SRV_UAV heap\n"); }

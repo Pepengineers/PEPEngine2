@@ -6,11 +6,16 @@ GDX12FrameConstants::GDX12FrameConstants(GDX12Device* device)
     : _device(device)
     , FenceValue(0)
 {
-    MainCB = std::make_unique<GDX12UploadBuffer<GDX12MainConstants>>(device, 1, true);
-    TransformCache = std::make_unique<GDX12UploadBuffer<GDX12TransformConstants>>(device, 0, false);
-    MaterialCache = std::make_unique<GDX12UploadBuffer<GDX12MaterialConstants>>(device, 0, false);
-    LightCB = std::make_unique<GDX12UploadBuffer<GDX12LightConstants>>(device, 0, true);
-    CameraCB = std::make_unique<GDX12UploadBuffer<GDX12CameraConstants>>(device, 0, true);
+    MainCB = std::make_unique<GDX12UploadBuffer<GDX12MainConstants>>(device, 1, EBufferType::Upload, true);
+    TransformCache = std::make_unique<GDX12UploadBuffer<GDX12TransformConstants>>(device, 0, EBufferType::Upload, false);
+    InstanceCache = std::make_unique<GDX12UploadBuffer<GDX12InstanceData>>(device, 0, EBufferType::Upload, false);
+    MaterialCache = std::make_unique<GDX12UploadBuffer<GDX12MaterialConstants>>(device, 0, EBufferType::Upload, false);
+    LightCB = std::make_unique<GDX12UploadBuffer<GDX12LightConstants>>(device, 0, EBufferType::Upload, true);
+    CameraCB = std::make_unique<GDX12UploadBuffer<GDX12CameraConstants>>(device, 0, EBufferType::Upload, true);
+    VisibleOpaqueCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(device, 0, EBufferType::Default, false);
+    OpaqueDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(device, 1, EBufferType::Default, false);
+    VisibleTransparentCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(device, 0, EBufferType::Default, false);
+    TransparentDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(device, 1, EBufferType::Default, false);
 }
 
 GDX12FrameConstants::~GDX12FrameConstants()

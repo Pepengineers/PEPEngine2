@@ -24,10 +24,10 @@ void SceneManagerModule::Initialize()
 {
     Uninitialize();
 
-    /*if (!LoadWorld("world1.yaml"))
-    {
-        // todo runtime error or log
-    }*/
+    //if (!LoadWorld("world1.yaml"))
+    //{
+    //    // todo runtime error or log
+    //}
 
     /*const std::filesystem::path scenePath =
     std::filesystem::path(ASSETS_FOLDER) /

@@ -53,11 +53,14 @@ public:
 	void SetGraphicsRootDescriptorTable(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE baseDescriptor);
 	
 	void SetTextureAsSRV(UINT registerIndex, GDX12Texture* texture);
-	void SetSRV(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle);
+	void SetGraphicsSRV(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle);
 
     void SetComputeRootConstantBufferView(UINT CregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation);
     void SetComputeRootShaderResourceView(UINT TregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation);
     void SetComputeRootUnorderedAccessView(UINT UregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation);
+
+	void SetComputeSRV(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle);
+	void SetComputeUAV(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle);
 
 	//GDX12RootSignature stores SRVs & UAVs via single-slot desc tables
 	//Use this to bind GDX12Texture SRVs & UAVs
@@ -70,6 +73,9 @@ public:
 		UINT startIndexLocation, INT baseVertexLocation, UINT startInstanceLocation);
 	void Dispatch(UINT threadGroupCountX, UINT threadGroupCountY, UINT threadGroupCountZ);
 	void DispatchRays(const D3D12_DISPATCH_RAYS_DESC* pDesc);
+	void ExecuteIndirect(ID3D12CommandSignature* pCommandSignature, UINT MaxCommandCount,
+		ID3D12Resource* pArgumentBuffer, UINT64 ArgumentBufferOffset, ID3D12Resource* pCountBuffer,
+		UINT64 CountBufferOffset = 0);
 
 	//Resource Barriers
 	void ResourceBarrier(std::initializer_list<CD3DX12_RESOURCE_BARRIER> barriers);
