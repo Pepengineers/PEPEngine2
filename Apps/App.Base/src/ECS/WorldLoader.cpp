@@ -1,23 +1,73 @@
+// TODO move helpers to separate utility libs
 #include "App.Base/ECS/WorldLoader.h"
-#include "App.Base/ECS/World.h"
 
+#include <ryml.hpp>
+#include <ryml_std.hpp>
+
+#include "App.Base/ECS/World.h"
+#include "App.Base/ECS/WorldLoadContext.h"
+#include "App.Base/Modules/RenderModule.h"
+#include "Common/Logger.h"
 #include "Engine.Core/AssetManager.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/Types/TextureTypes.h"
-#include "App.Base/Modules/RenderModule.h"
-#include "Common/Logger.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 #include <Windows.h>
 
 namespace
 {
+    std::string ReadTextFile(const std::filesystem::path& path)
+    {
+        std::ifstream file(path, std::ios::binary);
+        if (!file.is_open())
+        {
+            throw std::runtime_error("Failed to open world file: " + path.string());
+        }
+
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+        return buffer.str();
+    }
+
+    std::filesystem::path ResolveWorldResourcePath(
+        const WorldLoadContext& context,
+        const std::filesystem::path& sourcePath)
+    {
+        if (sourcePath.empty() || sourcePath.is_absolute())
+        {
+            return sourcePath.lexically_normal();
+        }
+
+        std::error_code errorCode;
+        if (std::filesystem::exists(sourcePath, errorCode))
+        {
+            return std::filesystem::absolute(sourcePath, errorCode).lexically_normal();
+        }
+
+        const std::filesystem::path worldRelativePath =
+            (context.WorldDirectory / sourcePath).lexically_normal();
+        errorCode.clear();
+        if (std::filesystem::exists(worldRelativePath, errorCode))
+        {
+            return std::filesystem::absolute(worldRelativePath, errorCode).lexically_normal();
+        }
+
+        // Asset registries apply their own conventional roots to unresolved relative paths.
+        return sourcePath.lexically_normal();
+    }
+
     /// Converts an ASCII string to lowercase.
     std::string ToLowerAscii(std::string value)
     {
@@ -623,6 +673,114 @@ namespace
     }
 }
 
+static bool LoadWorldResources(WorldLoadContext& context, ryml::NodeRef resourcesNode);
+static bool CreateWorldEntities(WorldLoadContext& context, ryml::NodeRef entitiesNode);
+static bool LoadEntityComponentsWithoutRefs(WorldLoadContext& context, ryml::NodeRef entitiesNode);
+static bool LoadEntityComponentsWithRefs(WorldLoadContext& context, ryml::NodeRef entitiesNode);
+static Vector3 ReadVector3(ryml::NodeRef node);
+
+static bool LoadYamlWorld(World& world, const std::filesystem::path& path)
+{
+    auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+    if (!renderModule)
+    {
+        return false;
+    }
+
+    auto& assetManager = Engine::Core::AssetManager::GetInstance();
+
+    WorldLoadContext context;
+    context.World = &world;
+    context.Render = renderModule.get();
+    context.AssetManager = &assetManager;
+    context.WorldFilePath = std::filesystem::absolute(path).lexically_normal();
+    context.WorldDirectory = context.WorldFilePath.parent_path();
+
+    ryml::Tree tree;
+
+    try
+    {
+        const std::string yamlText = ReadTextFile(context.WorldFilePath);
+        tree = ryml::parse_in_arena(
+            ryml::to_csubstr(context.WorldFilePath.string()),
+            ryml::to_csubstr(yamlText));
+    }
+    catch (const std::exception& exception)
+    {
+        Logger::Error(
+            "Failed to load world yaml '{}': {}",
+            context.WorldFilePath.string(),
+            exception.what());
+        return false;
+    }
+
+    ryml::NodeRef root = tree.rootref();
+
+    if (!root.has_child("World"))
+    {
+        Logger::Error(
+            "World yaml does not contain root node 'World': {}",
+            context.WorldFilePath.string());
+        return false;
+    }
+
+    ryml::NodeRef worldNode = root["World"];
+
+    if (worldNode.has_child("Name"))
+    {
+        std::string worldName;
+        worldNode["Name"] >> worldName;
+        world.SetName(worldName);
+    }
+
+    if (worldNode.has_child("Resources"))
+    {
+        if (!LoadWorldResources(context, worldNode["Resources"]))
+        {
+            return false;
+        }
+    }
+
+    if (worldNode.has_child("Entities"))
+    {
+        if (!CreateWorldEntities(context, worldNode["Entities"]))
+        {
+            return false;
+        }
+
+        if (!LoadEntityComponentsWithoutRefs(context, worldNode["Entities"]))
+        {
+            return false;
+        }
+
+        if (!LoadEntityComponentsWithRefs(context, worldNode["Entities"]))
+        {
+            return false;
+        }
+    }
+
+    if (worldNode.has_child("ActiveCamera"))
+    {
+        std::string activeCameraId;
+        worldNode["ActiveCamera"] >> activeCameraId;
+
+        const Entity activeCamera = context.ResolveEntity(activeCameraId);
+        if (activeCamera == InvalidEntity)
+        {
+            Logger::Error(
+                "World ActiveCamera references unknown entity '{}': {}",
+                activeCameraId,
+                context.WorldFilePath.string());
+            return false;
+        }
+
+        world.ActiveCamera = activeCamera;
+    }
+
+    return true;
+}
+
+
 bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 {
     if (path.empty())
@@ -642,23 +800,44 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
         return false;
     }
 
-    auto& assetManager = Engine::Core::AssetManager::GetInstance();
-    auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
-    
+    const std::string extension = ToLowerAscii(path.extension().string());
+
+    if (extension == ".yaml" || extension == ".world")
+    {
+        return LoadYamlWorld(world, path);
+    }
+
     if (std::filesystem::is_directory(path))
     {
+        auto& assetManager = Engine::Core::AssetManager::GetInstance();
+        auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+
+        if (!renderModule)
+        {
+            return false;
+        }
+
         return LoadObjSceneFiles(world, *renderModule, assetManager, path, CollectSceneObjPaths(path));
     }
-    
+
     if (IsObjPath(path))
     {
+        auto& assetManager = Engine::Core::AssetManager::GetInstance();
+        auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+
+        if (!renderModule)
+        {
+            return false;
+        }
+
         DirectX::BoundingBox sceneBounds = {};
         std::unordered_map<std::wstring, GDX12Texture*> gpuTexturesByPath;
+
         if (!LoadObjSceneEntity(
             world,
             *renderModule,
             assetManager,
-            path,
+            std::filesystem::absolute(path),
             BuildScenePartName(path.parent_path(), path),
             gpuTexturesByPath,
             sceneBounds))
@@ -666,234 +845,656 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
             return false;
         }
 
-        //CreateCameraForBounds(world, sceneBounds);
-        //return true;
+        CreateCameraForBounds(world, sceneBounds);
+        return true;
     }
 
-    //Textures: 
-    //this should probably be done via TextureHandle
-    auto HeadTexture = assetManager.LoadTexture("african_head_diffuse.dds");
+    return false;
+}
 
-    //this should be automated via events
-    renderModule->CreateTexture("HeadTexture", HeadTexture);
-
-    auto SvTexture = assetManager.LoadTexture("friazino_diff.png");
-
-    //this should be automated via events
-    renderModule->CreateTexture("SvTexture", SvTexture);
-
-    //Materials: 
-    auto HeadMaterial = renderModule->CreateMaterial("HeadMaterial");
-    HeadMaterial->Metallic = 0.f;
-    HeadMaterial->Roughness = 0.8f;
-    HeadMaterial->Diffuse = renderModule->GetTextureByName("HeadTexture");
-
-    auto SvMaterial = renderModule->CreateMaterial("SvMaterial");
-    SvMaterial->Metallic = 0.1f;
-    SvMaterial->Roughness = 1.f;
-    SvMaterial->Diffuse = renderModule->GetTextureByName("SvTexture");
-
-    //Meshes: 
-    Engine::Core::MeshAssetLocator locator = {};
-    locator.SourcePath = "african_head.obj";
-
-    Engine::Core::MeshHandle HeadMeshHandle;
-    const Engine::Core::Mesh* HeadMesh = assetManager.Meshes().Load(locator, HeadMeshHandle);
-
-    //this should be automated via events
-    renderModule->SubmitMesh(HeadMesh, HeadMeshHandle);
-
-    locator.SourcePath = "Svidetel.fbx";
-
-    Engine::Core::MeshHandle SvMeshHandle;
-    const Engine::Core::Mesh* SvMesh = assetManager.Meshes().Load(locator, SvMeshHandle);
-
-    //this should be automated via events
-    renderModule->SubmitMesh(SvMesh, SvMeshHandle);
-
-    //
-    // Creating Entities and components
-    //
-    WorldECS& ecs = world.GetECS();
-    
-    auto en1 = ecs.CreateEntity();
-    en1.AddComponent<NameComponent>("en1");
-    en1.AddComponent<TransformComponent>(Vector3(0.0f, 0.f, 0.f));
-    en1.AddComponent<CircleMovementComponent>(1,1);
-
-    std::vector<GDX12Material*> HeadMaterials = { HeadMaterial };
-    en1.AddComponent<StaticMeshRenderComponent>(HeadMeshHandle, HeadMaterials);
-    
-    auto splineEntity = ecs.CreateEntity();
-    splineEntity.AddComponent<NameComponent>("en2_spline");
-
-    std::vector<SplinePoint> splinePoints =
+static bool LoadTextures(WorldLoadContext& context, ryml::NodeRef texturesNode)
+{
+    for (ryml::NodeRef textureNode : texturesNode.children())
     {
+        if (!textureNode.has_child("Id") || !textureNode.has_child("Source"))
         {
-            Vector3(10.f, -5.f, -20.f),
-            Vector3(0.f, 0.f, 0.f),
-            Vector3(-5.f, 0.f, 8.f)
-        },
-        {
-            Vector3(0.f, -2.f, -12.f),
-            Vector3(5.f, 0.f, -8.f),
-            Vector3(-5.f, 6.f, 8.f)
-        },
-        {
-            Vector3(-10.f, 2.f, -22.f),
-            Vector3(5.f, -6.f, -8.f),
-            Vector3(-5.f, 4.f, -8.f)
-        },
-        {
-            Vector3(-20.f, -3.f, -16.f),
-            Vector3(5.f, -4.f, 8.f),
-            Vector3(-5.f, 0.f, 6.f)
-        },
-        {
-            Vector3(-30.f, -5.f, -25.f),
-            Vector3(5.f, 0.f, -6.f),
-            Vector3(0.f, 0.f, 0.f)
+            Logger::Error("World texture resource requires Id and Source.");
+            return false;
         }
-    };
 
-    splineEntity.AddComponent<SplineCurveComponent>(
-        false,
-        splinePoints
-    );
+        std::string id;
+        std::string source;
 
-    auto en2 = ecs.CreateEntity();
-    en2.AddComponent<NameComponent>("en2");
-    en2.AddComponent<TransformComponent>(Vector3(10.f, -5.f, -20.f), Vector3(0.f, 0.f, 0.f),
-    Vector3(0.1f, 0.1f, 0.1f));
+        textureNode["Id"] >> id;
+        textureNode["Source"] >> source;
 
-    std::vector<GDX12Material*> SvMaterials = { SvMaterial };
-    en2.AddComponent<StaticMeshRenderComponent>(SvMeshHandle, SvMaterials);
+        if (id.empty() || context.TexturesById.find(id) != context.TexturesById.end())
+        {
+            Logger::Error("Invalid or duplicate world texture resource id: '{}'", id);
+            return false;
+        }
 
-    en2.AddComponent<SplineFollowComponent>(
-        splineEntity.GetId(),
-        8.0f,   // duration
-        false,  // bLoop
-        true    // bPlaying
-    );
-    
-    auto markerSpline = ecs.CreateEntity();
-    markerSpline.AddComponent<NameComponent>("MarkerSpline");
+        const std::filesystem::path texturePath =
+            ResolveWorldResourcePath(context, source);
+        const Engine::Core::Texture* cpuTexture =
+            context.AssetManager->LoadTexture(texturePath);
 
-    std::vector<SplinePoint> markerSplinePoints =
+        if (!cpuTexture)
+        {
+            Logger::Error(
+                "Failed to load world texture resource '{}': {}",
+                id,
+                texturePath.string());
+            return false;
+        }
+
+        GDX12Texture* gpuTexture = context.Render->CreateTexture(id, cpuTexture);
+        if (!gpuTexture)
+        {
+            gpuTexture = context.Render->GetTextureByName(id);
+        }
+
+        if (!gpuTexture)
+        {
+            return false;
+        }
+
+        context.TexturesById.emplace(id, gpuTexture);
+    }
+
+    return true;
+}
+
+static bool LoadMaterials(WorldLoadContext& context, ryml::NodeRef materialsNode)
+{
+    for (ryml::NodeRef materialNode : materialsNode.children())
     {
+        if (!materialNode.has_child("Id"))
         {
-            Vector3(491.f, 200.f, -661.f),
-            Vector3(0.f, 0.f, 0.f),
-            Vector3(-127.f, -23.333f, 46.f)
-        },
-        {
-            Vector3(110.f, 130.f, -523.f),
-            Vector3(84.667f, 11.667f, -73.f),
-            Vector3(-84.667f, -11.667f, 73.f)
-        },
-        {
-            Vector3(-17.f, 130.f, -223.f),
-            Vector3(-11.f, 0.f, -101.833f),
-            Vector3(11.f, 0.f, 101.833f)
-        },
-        {
-            Vector3(176.f, 130.f, 88.f),
-            Vector3(-82.667f, -8.333f, -48.333f),
-            Vector3(82.667f, 8.333f, 48.333f)
-        },
-        {
-            Vector3(479.f, 180.f, 67.f),
-            Vector3(-109.f, -11.667f, 11.833f),
-            Vector3(109.f, 11.667f, -11.833f)
-        },
-        {
-            Vector3(830.f, 200.f, 17.f),
-            Vector3(-5.667f, 5.f, 55.833f),
-            Vector3(5.667f, -5.f, -55.833f)
-        },
-        {
-            Vector3(513.f, 150.f, -268.f),
-            Vector3(105.667f, 16.667f, 95.f),
-            Vector3(0.f, 0.f, 0.f)
+            Logger::Error("World material resource requires Id.");
+            return false;
         }
-    };
 
-    markerSpline.AddComponent<SplineCurveComponent>(
-        false,
-        markerSplinePoints
-    );    
-    
-    auto marker = ecs.CreateEntity();
-    marker.AddComponent<NameComponent>("marker");
-    marker.AddComponent<TransformComponent>(Vector3(491.f, 200.f, -661.f));
-    marker.AddComponent<SplineFollowComponent>(
-        markerSpline.GetId(),
-        18.0f,  // Duration
-        true,  // bLoop
-        true    // bPlaying
-    );
+        std::string id;
+        materialNode["Id"] >> id;
 
-    auto cameraSpline = ecs.CreateEntity();
-    cameraSpline.AddComponent<NameComponent>("MainCameraSpline");
+        if (id.empty() || context.MaterialsById.find(id) != context.MaterialsById.end())
+        {
+            Logger::Error("Invalid or duplicate world material resource id: '{}'", id);
+            return false;
+        }
 
-    std::vector<SplinePoint> cameraSplinePoints =
+        GDX12Material* material = context.Render->CreateMaterial(id);
+        if (!material)
+        {
+            material = context.Render->GetMaterialByName(id);
+        }
+
+        if (!material)
+        {
+            return false;
+        }
+
+        if (materialNode.has_child("Metallic"))
+        {
+            materialNode["Metallic"] >> material->Metallic;
+        }
+
+        if (materialNode.has_child("Roughness"))
+        {
+            materialNode["Roughness"] >> material->Roughness;
+        }
+
+        if (materialNode.has_child("Diffuse"))
+        {
+            std::string textureId;
+            materialNode["Diffuse"] >> textureId;
+            material->Diffuse = context.ResolveTexture(textureId);
+            if (!material->Diffuse)
+            {
+                Logger::Error(
+                    "World material '{}' references unknown diffuse texture '{}'.",
+                    id,
+                    textureId);
+                return false;
+            }
+        }
+
+        material->DirtyFlag = true;
+
+        context.MaterialsById.emplace(id, material);
+    }
+
+    return true;
+}
+
+static bool LoadMeshes(WorldLoadContext& context, ryml::NodeRef meshesNode)
+{
+    for (ryml::NodeRef meshNode : meshesNode.children())
     {
+        if (!meshNode.has_child("Id") || !meshNode.has_child("Source"))
         {
-            Vector3(769.f, 200.f, -914.f),
-            Vector3(0.f, 0.f, 0.f),
-            Vector3(-96.f, 0.f, 87.333f)
-        },
-        {
-            Vector3(481.f, 200.f, -652.f),
-            Vector3(84.5f, 0.f, -63.333f),
-            Vector3(-84.5f, 0.f, 63.333f)
-        },
-        {
-            Vector3(262.f, 200.f, -534.f),
-            Vector3(57.333f, 0.f, -67.667f),
-            Vector3(-57.333f, 0.f, 67.667f)
-        },
-        {
-            Vector3(137.f, 200.f, -246.f),
-            Vector3(-0.333f, 0.f, -82.333f),
-            Vector3(0.333f, 0.f, 82.333f)
-        },
-        {
-            Vector3(264.f, 200.f, -40.f),
-            Vector3(-76.5f, 0.f, -60.f),
-            Vector3(76.5f, 0.f, 60.f)
-        },
-        {
-            Vector3(596.f, 200.f, 114.f),
-            Vector3(-108.f, 0.f, -52.167f),
-            Vector3(108.f, 0.f, 52.167f)
-        },
-        {
-            Vector3(912.f, 200.f, 273.f),
-            Vector3(-105.333f, 0.f, -53.f),
-            Vector3(0.f, 0.f, 0.f)
+            Logger::Error("World mesh resource requires Id and Source.");
+            return false;
         }
-    };
 
-    cameraSpline.AddComponent<SplineCurveComponent>(
-        false,
-        cameraSplinePoints
+        std::string id;
+        std::string source;
+
+        meshNode["Id"] >> id;
+        meshNode["Source"] >> source;
+
+        if (id.empty() || context.MeshesById.find(id) != context.MeshesById.end())
+        {
+            Logger::Error("Invalid or duplicate world mesh resource id: '{}'", id);
+            return false;
+        }
+
+        const std::filesystem::path meshPath =
+            ResolveWorldResourcePath(context, source);
+        Engine::Core::MeshHandle meshHandle = {};
+        const Engine::Core::Mesh* cpuMesh =
+            context.AssetManager->LoadMesh(meshPath, meshHandle);
+
+        if (!cpuMesh || !meshHandle.IsValid())
+        {
+            Logger::Error(
+                "Failed to load world mesh resource '{}': {}",
+                id,
+                meshPath.string());
+            return false;
+        }
+
+        bool submitToRenderer = true;
+        if (meshNode.has_child("SubmitToRenderer"))
+        {
+            meshNode["SubmitToRenderer"] >> submitToRenderer;
+        }
+
+        bool importMaterials = false;
+        if (meshNode.has_child("ImportMaterials"))
+        {
+            meshNode["ImportMaterials"] >> importMaterials;
+        }
+
+        if (submitToRenderer)
+        {
+            context.Render->SubmitMesh(cpuMesh, meshHandle);
+        }
+
+        context.MeshesById.emplace(id, meshHandle);
+        context.CpuMeshesById.emplace(id, cpuMesh);
+
+        if (importMaterials)
+        {
+            const SceneDefaultMaterialTextures defaultTextures =
+                CreateSceneDefaultMaterialTextures(*context.Render, id);
+            if (!defaultTextures.IsValid())
+            {
+                Logger::Error(
+                    "Failed to create default textures for imported mesh materials '{}'.",
+                    id);
+                return false;
+            }
+
+            GDX12Material* fallbackMaterial = CreateSceneFallbackMaterial(
+                *context.Render,
+                *context.AssetManager,
+                id,
+                defaultTextures);
+            if (!fallbackMaterial)
+            {
+                Logger::Error(
+                    "Failed to create fallback material for imported mesh '{}'.",
+                    id);
+                return false;
+            }
+
+            std::vector<GDX12Material*> importedMaterials = BuildObjMaterialSlots(
+                *context.Render,
+                *context.AssetManager,
+                *cpuMesh,
+                id,
+                fallbackMaterial,
+                defaultTextures,
+                context.ImportedTexturesByPath);
+
+            if (importedMaterials.empty())
+            {
+                Logger::Error("Imported mesh '{}' produced no material slots.", id);
+                return false;
+            }
+
+            context.MeshMaterialsById.emplace(id, std::move(importedMaterials));
+        }
+    }
+
+    return true;
+}
+
+static bool LoadWorldResources(WorldLoadContext& context, ryml::NodeRef resourcesNode)
+{
+    if (resourcesNode.has_child("Textures"))
+    {
+        if (!LoadTextures(context, resourcesNode["Textures"]))
+        {
+            return false;
+        }
+    }
+
+    if (resourcesNode.has_child("Materials"))
+    {
+        if (!LoadMaterials(context, resourcesNode["Materials"]))
+        {
+            return false;
+        }
+    }
+
+    if (resourcesNode.has_child("Meshes"))
+    {
+        if (!LoadMeshes(context, resourcesNode["Meshes"]))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool CreateWorldEntities(WorldLoadContext& context, ryml::NodeRef entitiesNode)
+{
+    WorldECS& ecs = context.World->GetECS();
+
+    for (ryml::NodeRef entityNode : entitiesNode.children())
+    {
+        if (!entityNode.has_child("Id"))
+        {
+            Logger::Error("World entity requires Id.");
+            return false;
+        }
+
+        std::string id;
+        entityNode["Id"] >> id;
+
+        if (id.empty() || context.EntitiesById.find(id) != context.EntitiesById.end())
+        {
+            Logger::Error("Invalid or duplicate world entity id: '{}'", id);
+            return false;
+        }
+
+        auto entity = ecs.CreateEntity();
+
+        context.EntitiesById.emplace(id, entity.GetId());
+    }
+
+    return true;
+}
+
+static bool ParseTransform(WorldECS::EntityHandle& entity, ryml::NodeRef node)
+{
+    Vector3 location = Vector3(0.0f, 0.0f, 0.0f);
+    Vector3 rotation = Vector3(0.0f, 0.0f, 0.0f);
+    Vector3 scale = Vector3(1.0f, 1.0f, 1.0f);
+
+    if (node.has_child("Location"))
+    {
+        location = ReadVector3(node["Location"]);
+    }
+
+    if (node.has_child("Rotation"))
+    {
+        rotation = ReadVector3(node["Rotation"]);
+    }
+
+    if (node.has_child("Scale"))
+    {
+        scale = ReadVector3(node["Scale"]);
+    }
+
+    entity.AddComponent<TransformComponent>(location, rotation, scale);
+    return true;
+}
+
+static bool ParseStaticMeshRender(
+    WorldLoadContext& context,
+    WorldECS::EntityHandle& entity,
+    ryml::NodeRef node)
+{
+    std::string meshId;
+    node["Mesh"] >> meshId;
+
+    Engine::Core::MeshHandle meshHandle = context.ResolveMesh(meshId);
+    if (!meshHandle.IsValid())
+    {
+        return false;
+    }
+
+    std::vector<GDX12Material*> materials;
+
+    if (node.has_child("Materials"))
+    {
+        ryml::NodeRef materialsNode = node["Materials"];
+
+        for (ryml::NodeRef materialNode : materialsNode.children())
+        {
+            std::string materialId;
+            materialNode >> materialId;
+
+            GDX12Material* material = context.ResolveMaterial(materialId);
+            if (!material)
+            {
+                return false;
+            }
+
+            materials.push_back(material);
+        }
+    }
+    else if (const std::vector<GDX12Material*>* importedMaterials =
+        context.ResolveMeshMaterials(meshId))
+    {
+        materials = *importedMaterials;
+    }
+
+    if (materials.empty())
+    {
+        return false;
+    }
+
+    if (const Engine::Core::Mesh* cpuMesh = context.ResolveCpuMesh(meshId))
+    {
+        const size_t requiredMaterialCount = GetMaterialSlotCount(*cpuMesh);
+        if (materials.size() < requiredMaterialCount)
+        {
+            materials.resize(requiredMaterialCount, materials.back());
+        }
+    }
+
+    auto& component = entity.AddComponent<StaticMeshRenderComponent>(
+        meshHandle,
+        materials
     );
 
-    auto camera = ecs.CreateEntity();
-    camera.AddComponent<NameComponent>("MainCamera");
-    camera.AddComponent<TransformComponent>(Vector3(769.f, 200.f, -914.f), Vector3(0.f, 180.f, 0.f));
-    camera.AddComponent<CameraComponent>();
-    camera.AddComponent<LookAtTargetComponent>(marker.GetId());
-    camera.AddComponent<SplineFollowComponent>(
-        cameraSpline.GetId(),
-        18.0f,  // Duration
-        true,  // bLoop
-        true    // bPlaying
-    );
+    if (const Engine::Core::Mesh* cpuMesh = context.ResolveCpuMesh(meshId))
+    {
+        component.Bounds = cpuMesh->GetBounds();
+    }
 
-    world.ActiveCamera = camera;
-    
+    return true;
+}
+
+static bool LoadEntityComponentsWithoutRefs(
+    WorldLoadContext& context,
+    ryml::NodeRef entitiesNode)
+{
+    WorldECS& ecs = context.World->GetECS();
+
+    for (ryml::NodeRef entityNode : entitiesNode.children())
+    {
+        std::string id;
+        entityNode["Id"] >> id;
+
+        const Entity runtimeEntity = context.ResolveEntity(id);
+        if (runtimeEntity == InvalidEntity)
+        {
+            return false;
+        }
+
+        auto entity = ecs.GetEntityHandle(runtimeEntity);
+
+        if (!entityNode.has_child("Components"))
+        {
+            continue;
+        }
+
+        ryml::NodeRef components = entityNode["Components"];
+
+        if (components.has_child("Name"))
+        {
+            std::string name = id;
+
+            ryml::NodeRef nameNode = components["Name"];
+            if (nameNode.has_child("Value"))
+            {
+                nameNode["Value"] >> name;
+            }
+
+            entity.AddComponent<NameComponent>(name);
+        }
+
+        if (components.has_child("Transform"))
+        {
+            if (!ParseTransform(entity, components["Transform"]))
+            {
+                return false;
+            }
+        }
+
+        if (components.has_child("Camera"))
+        {
+            auto& camera = entity.AddComponent<CameraComponent>();
+
+            ryml::NodeRef cameraNode = components["Camera"];
+
+            if (cameraNode.has_child("FOV"))
+            {
+                cameraNode["FOV"] >> camera.FOV;
+            }
+
+            if (cameraNode.has_child("NearPlane"))
+            {
+                cameraNode["NearPlane"] >> camera.NearPlane;
+            }
+
+            if (cameraNode.has_child("FarPlane"))
+            {
+                cameraNode["FarPlane"] >> camera.FarPlane;
+            }
+
+            camera.DirtyFlag = true;
+        }
+
+        if (components.has_child("Velocity"))
+        {
+            Vector3 velocity = ReadVector3(components["Velocity"]);
+            entity.AddComponent<VelocityComponent>(velocity);
+        }
+
+        if (components.has_child("CircleMovement"))
+        {
+            ryml::NodeRef node = components["CircleMovement"];
+
+            float radius = 100.0f;
+            float speed = 100.0f;
+
+            if (node.has_child("Radius"))
+            {
+                node["Radius"] >> radius;
+            }
+
+            if (node.has_child("Speed"))
+            {
+                node["Speed"] >> speed;
+            }
+
+            entity.AddComponent<CircleMovementComponent>(radius, speed);
+        }
+
+        if (components.has_child("StaticMeshRender"))
+        {
+            if (!ParseStaticMeshRender(context, entity, components["StaticMeshRender"]))
+            {
+                return false;
+            }
+        }
+
+        if (components.has_child("SplineCurve"))
+        {
+            ryml::NodeRef node = components["SplineCurve"];
+
+            bool loop = false;
+            if (node.has_child("Loop"))
+            {
+                node["Loop"] >> loop;
+            }
+
+            std::vector<SplinePoint> points;
+
+            if (node.has_child("Points"))
+            {
+                for (ryml::NodeRef pointNode : node["Points"].children())
+                {
+                    SplinePoint point;
+                    point.Position = ReadVector3(pointNode["Position"]);
+                    point.ArriveTangent = ReadVector3(pointNode["ArriveTangent"]);
+                    point.LeaveTangent = ReadVector3(pointNode["LeaveTangent"]);
+                    points.push_back(point);
+                }
+            }
+
+            entity.AddComponent<SplineCurveComponent>(loop, points);
+        }
+    }
+
+    return true;
+}
+
+static Vector3 ReadVector3(ryml::NodeRef node)
+{
+    if (!node.is_seq() || node.num_children() < 3)
+    {
+        return Vector3::Zero;
+    }
+
+    float x = 0.0f;
+    float y = 0.0f;
+    float z = 0.0f;
+
+    node[0] >> x;
+    node[1] >> y;
+    node[2] >> z;
+
+    return Vector3(x, y, z);
+}
+
+static bool LoadEntityComponentsWithRefs(
+    WorldLoadContext& context,
+    ryml::NodeRef entitiesNode)
+{
+    WorldECS& ecs = context.World->GetECS();
+
+    for (ryml::NodeRef entityNode : entitiesNode.children())
+    {
+        std::string id;
+        entityNode["Id"] >> id;
+
+        const Entity runtimeEntity = context.ResolveEntity(id);
+        if (runtimeEntity == InvalidEntity)
+        {
+            return false;
+        }
+
+        auto entity = ecs.GetEntityHandle(runtimeEntity);
+
+        if (!entityNode.has_child("Components"))
+        {
+            continue;
+        }
+
+        ryml::NodeRef components = entityNode["Components"];
+
+        if (components.has_child("LookAtTarget"))
+        {
+            ryml::NodeRef node = components["LookAtTarget"];
+
+            std::string targetId;
+            node["Target"] >> targetId;
+
+            const Entity targetEntity = context.ResolveEntity(targetId);
+            if (targetEntity == InvalidEntity)
+            {
+                return false;
+            }
+
+            Vector3 targetOffset = Vector3(0.0f, 0.0f, 0.0f);
+            Vector3 worldUp = Vector3(0.0f, 1.0f, 0.0f);
+            bool enabled = true;
+
+            if (node.has_child("TargetOffset"))
+            {
+                targetOffset = ReadVector3(node["TargetOffset"]);
+            }
+
+            if (node.has_child("WorldUp"))
+            {
+                worldUp = ReadVector3(node["WorldUp"]);
+            }
+
+            if (node.has_child("Enabled"))
+            {
+                node["Enabled"] >> enabled;
+            }
+
+            auto& component = entity.AddComponent<LookAtTargetComponent>(
+                targetEntity,
+                targetOffset,
+                worldUp,
+                enabled
+            );
+
+            if (node.has_child("LocalForward"))
+            {
+                component.LocalForward = ReadVector3(node["LocalForward"]);
+            }
+        }
+
+        if (components.has_child("SplineFollow"))
+        {
+            ryml::NodeRef node = components["SplineFollow"];
+
+            std::string curveId;
+            node["Curve"] >> curveId;
+
+            const Entity curveEntity = context.ResolveEntity(curveId);
+            if (curveEntity == InvalidEntity)
+            {
+                return false;
+            }
+
+            float duration = 5.0f;
+            bool loop = false;
+            bool playing = true;
+            float time = 0.0f;
+
+            if (node.has_child("Duration"))
+            {
+                node["Duration"] >> duration;
+            }
+
+            if (node.has_child("Loop"))
+            {
+                node["Loop"] >> loop;
+            }
+
+            if (node.has_child("Playing"))
+            {
+                node["Playing"] >> playing;
+            }
+
+            if (node.has_child("Time"))
+            {
+                node["Time"] >> time;
+            }
+
+            entity.AddComponent<SplineFollowComponent>(
+                curveEntity,
+                duration,
+                loop,
+                playing,
+                time
+            );
+        }
+    }
+
     return true;
 }
 
