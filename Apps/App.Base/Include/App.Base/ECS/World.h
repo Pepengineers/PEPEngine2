@@ -3,16 +3,16 @@
 #include <filesystem>
 #include <cstdint>
 
-#include "App.Base/ECSStorage.h"
-#include "App.Base/Components/TransformComponent.h"
-#include "App.Base/Components/VelocityComponent.h"
-#include "App.Base/Components/NameComponent.h"
-#include "App.Base/Components/StaticMeshRenderComponent.h"
-#include "App.Base/Components/CameraComponent.h"
-#include "App.Base/Components/CircleMovementComponent.h"
-#include "App.Base/Components/SplineCurveComponent.h"
-#include "App.Base/Components/SplineFollowComponent.h"
-#include "App.Base/Components/LookAtTargetComponent.h"
+#include "Engine.Core/ECS/ECSStorage.h"
+#include "App.Base/ECS/Components/CameraComponent.h"
+#include "App.Base/ECS/Components/CircleMovementComponent.h"
+#include "App.Base/ECS/Components/LookAtTargetComponent.h"
+#include "App.Base/ECS/Components/NameComponent.h"
+#include "App.Base/ECS/Components/SplineCurveComponent.h"
+#include "App.Base/ECS/Components/SplineFollowComponent.h"
+#include "App.Base/ECS/Components/StaticMeshRenderComponent.h"
+#include "App.Base/ECS/Components/TransformComponent.h"
+#include "App.Base/ECS/Components/VelocityComponent.h"
 
 struct WorldDesc {
     std::filesystem::path WorldFilePath;

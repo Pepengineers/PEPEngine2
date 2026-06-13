@@ -1,7 +1,10 @@
 #pragma once
 
-#include "Component.h"
-#include "Engine.RendererDX12/D3DHelpers.h"
+#include "Engine.Core/ECS/Component.h"
+#include <directxtk/SimpleMath.h>
+#include <cstdint>
+
+using DirectX::SimpleMath::Vector3;
 
 struct TransformComponent : ComponentTag
 {
@@ -18,6 +21,6 @@ struct TransformComponent : ComponentTag
     {
     }
 
-    UINT _CBufferIndex;
-    UINT _numFramesDirty;
+    std::uint32_t _CBufferIndex;
+    std::uint32_t _numFramesDirty;
 };

@@ -164,6 +164,10 @@
     <ClInclude Include="Include\Engine.Core\AssetHandles.h" />
     <ClInclude Include="Include\Engine.Core\AssetLocators.h" />
     <ClInclude Include="Include\Engine.Core\AssetManager.h" />
+    <ClInclude Include="Include\Engine.Core\ECS\Component.h" />
+    <ClInclude Include="Include\Engine.Core\ECS\ECSStorage.h" />
+    <ClInclude Include="Include\Engine.Core\ECS\Entity.h" />
+    <ClInclude Include="Include\Engine.Core\ECS\Event.h" />
     <ClInclude Include="Include\Engine.Core\IO\AssimpImportHelpers.h" />
     <ClInclude Include="Include\Engine.Core\IO\MeshImporter.h" />
     <ClInclude Include="Include\Engine.Core\IO\SceneImporter.h" />
@@ -174,10 +178,10 @@
     <ClInclude Include="Include\Engine.Core\Registries\SceneRegistry.h" />
     <ClInclude Include="Include\Engine.Core\Registries\TextureRegistry.h" />
     <ClInclude Include="Include\Engine.Core\Registries\TypedAssetRegistry.h" />
+    <ClInclude Include="Include\Engine.Core\System.h" />
     <ClInclude Include="Include\Engine.Core\Types\MeshTypes.h" />
     <ClInclude Include="Include\Engine.Core\Types\SceneTypes.h" />
     <ClInclude Include="Include\Engine.Core\Types\TextureTypes.h" />
-    <ClInclude Include="Include\Engine.Core\System.h" />
     <ClInclude Include="Include\Common\ConsoleVariables.h" />
     <ClInclude Include="Include\Common\LockThreadQueue.h" />
     <ClInclude Include="Include\Common\Module.h" />

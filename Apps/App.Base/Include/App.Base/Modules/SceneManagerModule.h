@@ -11,8 +11,8 @@
 #include "Common/Module.h"
 #include "Common/ConsoleVariables.h"
 
-#include "App.Base/World.h"
-#include "App.Base/Event.h"
+#include "Engine.Core/ECS/Event.h"
+#include "App.Base/ECS/World.h"
 
 class World;
 class System;

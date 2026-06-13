@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Engine.Core/System.h"
-#include "App.Base/World.h"
+#include "App.Base/ECS/World.h"
 
 class MovementSystem : public System
 {

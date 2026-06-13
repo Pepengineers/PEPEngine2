@@ -1,5 +1,5 @@
-#include "App.Base/World.h"
-#include "App.Base/WorldLoader.h"
+#include "App.Base/ECS/World.h"
+#include "App.Base/ECS/WorldLoader.h"
 
 bool World::Load()
 {
