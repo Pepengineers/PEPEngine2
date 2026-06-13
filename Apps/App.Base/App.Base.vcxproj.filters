@@ -13,33 +13,24 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Header Files\ECS">
+      <UniqueIdentifier>{067A775D-4FFD-49A9-B655-43B0FA7AA8A0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\ECS\Components">
+      <UniqueIdentifier>{50A2CB95-7E60-43EE-86C1-6D86D4425BFC}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\ECS">
+      <UniqueIdentifier>{11029EBF-77E9-4BDE-BD90-C4830622AA0B}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\App.Base\App.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\RenderModule.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\Window.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\App.Base\Window.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\App.Base\ECSStorage.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\App.Base\World.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\App.Base\SceneTraversal.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\App.Base\SceneManager.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\App.Base\WorldLoader.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\App.Base\Modules\RenderModule.h">
@@ -57,38 +48,50 @@
     <ClInclude Include="Include\App.Base\Systems\GPUDataUpdateSystem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\App.Base\Components\CameraComponent.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\App.Base\Components\CircleMovementComponent.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\App.Base\Components\Component.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\App.Base\Components\NameComponent.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\App.Base\Components\StaticMeshRenderComponent.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\App.Base\Components\TransformComponent.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\App.Base\Components\VelocityComponent.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\App.Base\Entity.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\App.Base\Event.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\App.Base\Modules\EventManagerModule.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\App.Base\Systems\CircleMovementSystem.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\Systems\LookAtTargetSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\Systems\SplineFollowSystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\World.h">
+      <Filter>Header Files\ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\WorldLoader.h">
+      <Filter>Header Files\ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\Components\CameraComponent.h">
+      <Filter>Header Files\ECS\Components</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\Components\CircleMovementComponent.h">
+      <Filter>Header Files\ECS\Components</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\Components\LookAtTargetComponent.h">
+      <Filter>Header Files\ECS\Components</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\Components\NameComponent.h">
+      <Filter>Header Files\ECS\Components</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\Components\SplineCurveComponent.h">
+      <Filter>Header Files\ECS\Components</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\Components\SplineFollowComponent.h">
+      <Filter>Header Files\ECS\Components</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\Components\StaticMeshRenderComponent.h">
+      <Filter>Header Files\ECS\Components</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\Components\TransformComponent.h">
+      <Filter>Header Files\ECS\Components</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\App.Base\ECS\Components\VelocityComponent.h">
+      <Filter>Header Files\ECS\Components</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -101,20 +104,17 @@
     <ClCompile Include="src\Window.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\SceneManager.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\SceneTraversal.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\WorldLoader.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\World.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\SceneManagerModule.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ECS\World.cpp">
+      <Filter>Source Files\ECS</Filter>
+    </ClCompile>
+    <ClCompile Include="src\ECS\WorldLoader.cpp">
+      <Filter>Source Files\ECS</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

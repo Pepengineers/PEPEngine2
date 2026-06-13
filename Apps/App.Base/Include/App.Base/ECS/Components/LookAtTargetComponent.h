@@ -1,8 +1,10 @@
-    #pragma once
+#pragma once
 
-#include "Component.h"
-#include "Engine.RendererDX12/D3DHelpers.h"
-#include "App.Base/Entity.h"
+#include "Engine.Core/ECS/Component.h"
+#include "Engine.Core/ECS/Entity.h"
+#include <directxtk/SimpleMath.h>
+
+using DirectX::SimpleMath::Vector3;
 
 struct LookAtTargetComponent : ComponentTag
 {

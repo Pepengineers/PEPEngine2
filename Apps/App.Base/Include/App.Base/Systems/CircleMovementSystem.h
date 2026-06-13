@@ -2,9 +2,8 @@
 
 #include <cmath>
 
-#include "App.Base/Components/CircleMovementComponent.h"
 #include "Engine.Core/System.h"
-#include "App.Base/World.h"
+#include "App.Base/ECS/World.h"
 
 class CircleMovementSystem : public System
 {

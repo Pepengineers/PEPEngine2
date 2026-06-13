@@ -14,14 +14,15 @@
 #include "Engine.RendererDX12/GDX12RenderCommandRecorder.h"
 
 #include "Engine.Core/Types/TextureTypes.h"
-#include <App.Base/Entity.h>
-#include <App.Base/Event.h>
-#include <App.Base/World.h>
+#include "Engine.Core/ECS/Entity.h"
+#include "Engine.Core/ECS/Event.h"
 
 class SceneManagerModule;
+class World;
 
 struct TransformComponent;
 struct CameraComponent;
+struct StaticMeshRenderComponent;
 
 class Window;
 

@@ -1,6 +1,7 @@
 #pragma once
 
-#include "Component.h"
+#include "Engine.Core/ECS/Component.h"
+#include <string>
 
 struct NameComponent : ComponentTag
 {
