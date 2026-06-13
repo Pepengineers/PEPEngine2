@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Component.h"
-#include "Engine.RendererDX12/D3DHelpers.h"
+#include "Engine.Core/ECS/Component.h"
+#include <cstdint>
 
 struct CameraComponent : ComponentTag
 {
@@ -17,6 +17,6 @@ struct CameraComponent : ComponentTag
     {
     }
 
-    UINT _CBufferIndex;
-    UINT _numFramesDirty;
+    std::uint32_t _CBufferIndex;
+    std::uint32_t _numFramesDirty;
 };

@@ -1,7 +1,9 @@
 #pragma once
 
-#include "Component.h"
-#include "Engine.RendererDX12/D3DHelpers.h"
+#include "Engine.Core/ECS/Component.h"
+#include <directxtk/SimpleMath.h>
+
+using DirectX::SimpleMath::Vector3;
 
 struct CircleMovementComponent : ComponentTag
 {

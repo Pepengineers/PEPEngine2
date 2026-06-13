@@ -5,11 +5,11 @@
 #include <cstdint>
 #include <type_traits>
 #include <utility>
-#include <App.Base/Entity.h>
-#include <App.Base/Components/Component.h>
-#include <App.Base/Event.h>
+#include "Engine.Core/ECS/Component.h"
+#include "Engine.Core/ECS/Entity.h"
+#include "Engine.Core/ECS/Event.h"
 
-#undef max;
+#undef max
 
 template<typename T, typename... Ts>
 struct IsOneOf : std::false_type

@@ -4,7 +4,7 @@
 #include "Common/Module.h"
 #include "Common/ConsoleVariables.h"
 
-#include "App.Base/Event.h"
+#include "Engine.Core/ECS/Event.h"
 
 class EventManagerModule final : public Module
 {

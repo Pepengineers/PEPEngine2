@@ -13,6 +13,9 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Header Files\ECS">
+      <UniqueIdentifier>{713EB706-A8C2-4637-B7B5-4685DAE24A47}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\GameTimer.cpp">
@@ -59,6 +62,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Common\AssetDebugLog.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.Core\AssetManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -81,6 +87,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.Core\Registries\TypedAssetRegistry.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\System.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.Core\Registries\MeshRegistry.h">
@@ -107,9 +116,6 @@
     <ClInclude Include="Include\Engine.Core\IO\SceneImporter.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.Core\System.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\Common\ConsoleVariables.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -133,6 +139,18 @@
     </ClInclude>
     <ClInclude Include="Include\Engine.Core\ModuleLocator.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\ECS\Component.h">
+      <Filter>Header Files\ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\ECS\ECSStorage.h">
+      <Filter>Header Files\ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\ECS\Entity.h">
+      <Filter>Header Files\ECS</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\ECS\Event.h">
+      <Filter>Header Files\ECS</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
