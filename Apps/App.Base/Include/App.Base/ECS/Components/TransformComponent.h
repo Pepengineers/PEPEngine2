@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Component.h"
+#include "Engine.Core/ECS/Component.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 struct TransformComponent : ComponentTag
