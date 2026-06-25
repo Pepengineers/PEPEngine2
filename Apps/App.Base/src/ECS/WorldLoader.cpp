@@ -1048,6 +1048,7 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     );
 
     world.ActiveCamera = camera;
+    renderModule->SetActiveCamera(camera.GetComponent<CameraComponent>());
     
     return true;
 }

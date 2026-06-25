@@ -2,7 +2,6 @@
 
 #include "App.Base/Systems/CircleMovementSystem.h"
 #include "App.Base/Systems/MovementSystem.h"
-#include "App.Base/Systems/RenderSubmitSystem.h"
 #include "App.Base/Systems/GPUDataUpdateSystem.h"
 #include "App.Base/Systems/LookAtTargetSystem.h"
 #include "App.Base/Systems/SplineFollowSystem.h"
@@ -57,7 +56,6 @@ void SceneManagerModule::Initialize()
     AddSystem<SplineFollowSystem>(world, 2);
     AddSystem<LookAtTargetSystem>(world, 3);
     AddSystem<GPUDataUpdateSystem>(world, 101);
-    AddSystem<RenderSubmitSystem>(world, 102);
 }
 
 void SceneManagerModule::Uninitialize()

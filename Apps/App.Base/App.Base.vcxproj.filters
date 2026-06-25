@@ -42,9 +42,6 @@
     <ClInclude Include="Include\App.Base\Systems\MovementSystem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\App.Base\Systems\RenderSubmitSystem.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\App.Base\Systems\GPUDataUpdateSystem.h">
       <Filter>Header Files</Filter>
     </ClInclude>

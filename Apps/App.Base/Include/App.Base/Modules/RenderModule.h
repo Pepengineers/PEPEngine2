@@ -6,7 +6,6 @@
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.RendererDX12/GDX12DeviceResources.h"
 #include "Engine.RendererDX12/GDX12SwapChain.h"
-#include "Engine.RendererDX12/GDX12RenderCommandRecorder.h"
 
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
@@ -51,6 +50,8 @@ public:
 
     //Uploads Mesh geometry to GPU
     void SubmitMesh(const Mesh* mesh, MeshHandle handle);
+
+    void SetActiveCamera(CameraComponent& camera);
     
     struct WorldRenderSubscriptions
     {
@@ -90,7 +91,6 @@ public:
     void OnRenderComponentUpdated(World& world, Entity entity, StaticMeshRenderComponent& component);
 
     const float GetAspectRatio();
-    GDX12RenderCommandRecorder* GetCommandRecorder();
     GDX12FrameConstants* GetCurrentPrimaryFrameConstants();
     GDX12FrameConstants* GetCurrentSecondaryFrameConstants();
     const GPUMesh* GetPrimaryGPUMesh(MeshHandle handle);
@@ -125,8 +125,7 @@ private:
     
     std::unordered_map<Entity, TransformCompGPUData> _transformGPUData;
     std::unordered_map<World*, WorldRenderSubscriptions> _worldSubscriptions;
-
-    GDX12RenderCommandRecorder _commandRecorder;
+    UINT _activeCameraCBIndex;
 
     std::unique_ptr<GDX12Device> _primaryDevice;
     std::unique_ptr<GDX12Device> _secondaryDevice;

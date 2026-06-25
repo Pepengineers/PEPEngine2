@@ -12,7 +12,7 @@
 #include "Common/ConsoleVariables.h"
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
-    _dualGPUMode(false), _window(window), _timer(timer)
+    _dualGPUMode(false), _window(window), _timer(timer), _activeCameraCBIndex(0)
 {
 }
 
@@ -297,6 +297,11 @@ void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
     if (_secondaryDevice) _secondaryResources.GeometryBuffer->AddMesh(mesh, handle);
 }
 
+void RenderModule::SetActiveCamera(CameraComponent& camera)
+{
+    _activeCameraCBIndex = camera._CBufferIndex;
+}
+
 TransformCompGPUData& RenderModule::GetTransformGPUData(Entity entity)
 {
     return _transformGPUData.at(entity);
@@ -528,11 +533,6 @@ const float RenderModule::GetAspectRatio()
     return _window->GetAspectRatio();
 }
 
-GDX12RenderCommandRecorder* RenderModule::GetCommandRecorder()
-{
-    return &_commandRecorder;
-}
-
 void RenderModule::OnUpdate()
 {
     uint16_t width, height;
@@ -616,7 +616,7 @@ void RenderModule::OnRender()
     cmdList->SetPipelineState(_primaryResources.PSOs["Culling"]);
     cmdList->SetDescriptorHeaps({ _primaryResources.SRV_UAV_Heap.get() });
     cmdList->SetComputeRootConstantBufferView(0, CurrentFrameConsts->CameraCB->
-        GetElementAddress(_commandRecorder._cameraCBIndex));
+        GetElementAddress(_activeCameraCBIndex));
     cmdList->SetComputeSRV(0, CurrentFrameConsts->InstanceCache->GetSRV()->GPUHandle);
     cmdList->SetComputeSRV(1, _primaryResources.IndirectCommandsCache->GetSRV()->GPUHandle);
     cmdList->SetComputeSRV(2, CurrentFrameConsts->MaterialCache->GetSRV()->GPUHandle);
@@ -641,7 +641,7 @@ void RenderModule::OnRender()
     cmdList->SetPipelineState(_primaryResources.PSOs["OpaquePass"]);
     cmdList->SetGraphicsRootConstantBufferView(1, CurrentFrameConsts->MainCB->GetElementAddress(0));
     cmdList->SetGraphicsRootConstantBufferView(2, CurrentFrameConsts->CameraCB->
-        GetElementAddress(_commandRecorder._cameraCBIndex));
+        GetElementAddress(_activeCameraCBIndex));
     cmdList->EnhancedTextureBarrier({ _opaqueAccumTexture->GetResource()->GetRenderTargetEnhBarrier() });
     cmdList->SetRenderTargets({ _opaqueAccumTexture.get() }, _depthStencil.get());
     cmdList->ClearRenderTargetView(_opaqueAccumTexture.get());
@@ -663,7 +663,7 @@ void RenderModule::OnRender()
     cmdList->SetPipelineState(_primaryResources.PSOs["TransparentPass"]);
     cmdList->SetGraphicsRootConstantBufferView(1, CurrentFrameConsts->MainCB->GetElementAddress(0));
     cmdList->SetGraphicsRootConstantBufferView(2, CurrentFrameConsts->CameraCB->
-        GetElementAddress(_commandRecorder._cameraCBIndex));
+        GetElementAddress(_activeCameraCBIndex));
     cmdList->EnhancedTextureBarrier({ _transparencyAccumTexture->GetResource()->GetRenderTargetEnhBarrier(),
     _transparencyRevealageTexture->GetResource()->GetRenderTargetEnhBarrier() });
 
