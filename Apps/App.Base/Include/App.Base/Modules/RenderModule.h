@@ -4,16 +4,10 @@
 #include "Common/Module.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include "Engine.RendererDX12/GDX12Device.h"
-#include "Engine.RendererDX12/GDX12DescriptorHeap.h"
-#include "Engine.RendererDX12/GDX12FrameConstants.h"
-#include "Engine.RendererDX12/GDX12RootSignature.h"
+#include "Engine.RendererDX12/GDX12DeviceResources.h"
 #include "Engine.RendererDX12/GDX12SwapChain.h"
-#include "Engine.RendererDX12/GDX12Texture.h"
-#include "Engine.RendererDX12/GDX12Material.h"
-#include "Engine.RendererDX12/GDX12GeometryBuffer.h"
 #include "Engine.RendererDX12/GDX12RenderCommandRecorder.h"
 
-#include "Engine.Core/Types/TextureTypes.h"
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
 
@@ -51,9 +45,9 @@ public:
     //returns a pointer to a fully initialized structure that you can specify in components
     GDX12Material* CreateMaterial(const std::string& name);
 
-    GDX12Texture* GetTextureByName(const std::string& name);
+    GPUTexture* GetTextureByName(const std::string& name);
     //returns a pointer to a fully initialized structure that you can specify in materials
-    GDX12Texture* CreateTexture(const std::string& name, const Texture* texture);
+    GPUTexture* CreateTexture(const std::string& name, const Texture* texture);
 
     //Uploads Mesh geometry to GPU
     void SubmitMesh(const Mesh* mesh, MeshHandle handle);
@@ -97,9 +91,12 @@ public:
 
     const float GetAspectRatio();
     GDX12RenderCommandRecorder* GetCommandRecorder();
-    GDX12FrameConstants* GetCurrentFrameConstants();
-    const GPUMesh* GetGPUMesh(MeshHandle handle);
-    GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetIndirectCommandsCache();
+    GDX12FrameConstants* GetCurrentPrimaryFrameConstants();
+    GDX12FrameConstants* GetCurrentSecondaryFrameConstants();
+    const GPUMesh* GetPrimaryGPUMesh(MeshHandle handle);
+    const GPUMesh* GetSecondaryGPUMesh(MeshHandle handle);
+    GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetPrimaryIndirectCommandsCache();
+    GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetSecondaryIndirectCommandsCache();
 
 protected:
     void OnUpdate() override;
@@ -109,18 +106,16 @@ protected:
     bool ShouldRender() override;
 
 private:
-    void BuildDescHeapsAndBackBuffer();
+    void BuildBackBuffer();
     void BuildRootSignatures();
     void BuildShaders();
     void BuildPSOs();
-    void BuildFrameConstants();
-
-    void UpdateMainCB();
-    void UpdateMaterialCB();
     
     void SubscribeToSceneManager();
     void UnsubscribeFromSceneManager();
     void UnsubscribeFromAllWorlds();
+
+    GDX12Texture* CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture);
 
     GameTimer* _timer;
     Window* _window;
@@ -137,29 +132,10 @@ private:
     std::unique_ptr<GDX12Device> _secondaryDevice;
     bool _dualGPUMode;
 
-    std::unordered_map<std::string, std::vector<D3D12_INPUT_ELEMENT_DESC>> _inputLayouts;
+    GDX12DeviceResources _primaryResources;
+    GDX12DeviceResources _secondaryResources;
+    std::unordered_map<std::string, std::unique_ptr<GPUTexture>> _textures;
     std::unordered_map<std::string, std::unique_ptr<GDX12Material>> _materials;
-
-    // All of class members below should probably be put into DeviceResources class, and made for each device
-    // Since all of these resources are currently existing on _primaryDevice only
-    std::unique_ptr<GDX12GeometryBuffer> _geometryBuffer;
-
-    // All heaps created in one high-capacity instance
-    std::unique_ptr<GDX12DescriptorHeap> _rtvHeap;
-    std::unique_ptr<GDX12DescriptorHeap> _srvuavHeap;
-    std::unique_ptr<GDX12DescriptorHeap> _dsvHeap;
-
-    std::vector<std::unique_ptr<GDX12FrameConstants>> _frameConstants;
-    UINT _currFrameConstantsIndex;
-
-    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> _IndirectCommandsCache;
-
-    std::unordered_map<std::string, ComPtr<ID3DBlob>> _shaders;
-    std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> _PSOs;
-    std::unordered_map<std::string, std::unique_ptr<GDX12RootSignature>> _rootSignatures;
-    std::unordered_map <std::string, ComPtr<ID3D12CommandSignature>> _commandSignatures;
-
-    std::unordered_map<std::string, std::unique_ptr<GDX12Texture>> _textures;
 
     // These two resources are made on _primaryDevice only
     std::unique_ptr<GDX12SwapChain> _backBuffer;

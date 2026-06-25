@@ -2,6 +2,8 @@
 
 #include "Engine.RendererDX12\D3DHelpers.h"
 
+#include "Engine.Core/Types/TextureTypes.h"
+
 class GDX12Descriptor;
 class GDX12DescriptorHeap;
 class GDX12Device;
@@ -14,6 +16,22 @@ enum class ETextureSemantic
 	Color,
 	Data,
 };
+
+namespace
+{
+	ETextureSemantic ConvertTextureSemantic(const Engine::Core::ETextureType textureType)
+	{
+		switch (textureType)
+		{
+		case Engine::Core::ETextureType::Color:
+			return ETextureSemantic::Color;
+		case Engine::Core::ETextureType::Data:
+			return ETextureSemantic::Data;
+		default:
+			return ETextureSemantic::Unknown;
+		}
+	}
+}
 
 struct GDX12TextureDesc
 {

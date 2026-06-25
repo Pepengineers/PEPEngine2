@@ -21,6 +21,7 @@
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GeometryBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Material.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderCommandRecorder.h" />
@@ -42,6 +43,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp" />
+    <ClCompile Include="src\GDX12DeviceResources.cpp" />
     <ClCompile Include="src\GDX12GeometryBuffer.cpp" />
     <ClCompile Include="src\GDX12RenderCommandRecorder.cpp" />
     <ClCompile Include="src\GDX12Resource.cpp" />

@@ -20,6 +20,12 @@ struct DeviceSpecs
 	size_t SharedSystemMemory;    // in bytes
 };
 
+enum EDeviceRole
+{
+	DEVICE_ROLE_PRIMARY,
+	DEVICE_ROLE_SECONDARY
+};
+
 class GDX12Device : public std::enable_shared_from_this<GDX12Device>
 {
 public:
@@ -34,6 +40,7 @@ public:
 	const DeviceSpecs& GetDeviceFeatures();
 	const bool IsInitialized();
 
+	EDeviceRole Role;
 private:
 	void CollectDeviceFeatures();
 

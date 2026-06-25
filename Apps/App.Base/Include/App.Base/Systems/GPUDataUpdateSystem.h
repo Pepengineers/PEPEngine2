@@ -62,7 +62,7 @@ public:
                     objConstants.NearPlane = camera.NearPlane;
                     objConstants.FarPlane = camera.FarPlane;
 
-                    auto& CBuffer = renderModule->GetCurrentFrameConstants()->CameraCB;
+                    auto& CBuffer = renderModule->GetCurrentPrimaryFrameConstants()->CameraCB;
                     CBuffer->CopyData(camera._CBufferIndex, objConstants);
 
                     camera._numFramesDirty--;
@@ -93,7 +93,7 @@ public:
 					GDX12TransformConstants objConstants;
 					XMStoreFloat4x4(&objConstants.WorldMatrix, XMMatrixTranspose(world));
 
-                    auto& CBuffer = renderModule->GetCurrentFrameConstants()->TransformCache;
+                    auto& CBuffer = renderModule->GetCurrentPrimaryFrameConstants()->TransformCache;
                     CBuffer->CopyData(GPUData.CBufferIndex, objConstants);
 
                     GPUData.NumFramesDirty--;
@@ -103,9 +103,9 @@ public:
         ecs.ForEach<TransformComponent, StaticMeshRenderComponent>(
             [&ecs, &renderModule, &numFrames](Entity entity, TransformComponent& transform, StaticMeshRenderComponent& renderer)
             {
-                auto& instanceCache = renderModule->GetCurrentFrameConstants()->InstanceCache;
-                auto indirectCommandsCache = renderModule->GetIndirectCommandsCache();
-                auto gpuMesh = renderModule->GetGPUMesh(renderer.MeshHandler);
+                auto& instanceCache = renderModule->GetCurrentPrimaryFrameConstants()->InstanceCache;
+                auto indirectCommandsCache = renderModule->GetPrimaryIndirectCommandsCache();
+                auto gpuMesh = renderModule->GetPrimaryGPUMesh(renderer.MeshHandler);
                 auto& transformGPUData = renderModule->GetTransformGPUData(entity);
 
                 if (renderer.DirtyFlag || transform.DirtyFlag)
@@ -143,7 +143,7 @@ public:
 
                         GDX12InstanceData instanceData;
                         instanceData.TransformIndex = transformGPUData.CBufferIndex;
-                        instanceData.MaterialIndex = renderer.Materials[subMesh.MaterialIndex]->_CBufferIndex;
+                        instanceData.MaterialIndex = renderer.Materials[subMesh.MaterialIndex]->_PrimaryCBufferIndex;
                         instanceData.BoundingBoxCenter = bounds.Center;
                         instanceData.BoundingBoxExtents = bounds.Extents;
 

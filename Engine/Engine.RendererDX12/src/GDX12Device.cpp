@@ -6,7 +6,8 @@ GDX12Device::GDX12Device() :
     _isInitialized(false),
     _rtvDescriptorSize(0),
     _dsvDescriptorSize(0),
-    _cbvSrvUavDescriptorSize(0)
+    _cbvSrvUavDescriptorSize(0),
+    Role(DEVICE_ROLE_PRIMARY)
 {
 }
 

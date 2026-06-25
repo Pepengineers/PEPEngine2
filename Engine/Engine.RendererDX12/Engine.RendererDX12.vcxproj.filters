@@ -75,6 +75,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceResources.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp">
@@ -125,5 +128,17 @@
     <ClCompile Include="src\GDX12Resource.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\GDX12DeviceResources.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Shaders\BufferClear.hlsl" />
+    <None Include="Shaders\CBufferStructures.hlsl" />
+    <None Include="Shaders\CompositionPass.hlsl" />
+    <None Include="Shaders\Culling.hlsl" />
+    <None Include="Shaders\FullScreenVS.hlsl" />
+    <None Include="Shaders\OpaquePass.hlsl" />
+    <None Include="Shaders\TransparentPass.hlsl" />
   </ItemGroup>
 </Project>
