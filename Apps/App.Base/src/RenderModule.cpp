@@ -2,12 +2,7 @@
 
 #include "App.Base/Window.h"
 #include "App.Base/App.h"
-#include "Engine.RendererDX12/GDX12CommandList.h"
-#include "Engine.RendererDX12/GDX12CommandQueue.h"
-#include "Engine.RendererDX12/GDX12DeviceFactory.h"
-#include "Engine.RendererDX12/GDX12ShaderCompiler.h"
-#include "Engine.RendererDX12/GDX12TextureResource.h"
-#include "Engine.RendererDX12/GDX12Descriptor.h"
+
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Common/ConsoleVariables.h"
 

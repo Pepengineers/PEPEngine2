@@ -55,6 +55,8 @@ void GDX12Device::CollectDeviceFeatures()
     _dsvDescriptorSize = _device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
     _cbvSrvUavDescriptorSize = _device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
+    _specs.Features.Init(_device.Get());
+
     DXGI_ADAPTER_DESC1 adapterDesc;
     _adapter.Get()->GetDesc1(&adapterDesc);
 
@@ -62,71 +64,6 @@ void GDX12Device::CollectDeviceFeatures()
     _specs.DedicatedVideoMemory = adapterDesc.DedicatedVideoMemory;
     _specs.DedicatedSystemMemory = adapterDesc.DedicatedSystemMemory;
     _specs.SharedSystemMemory = adapterDesc.SharedSystemMemory;
-
-    // Query shader model support
-    D3D12_FEATURE_DATA_SHADER_MODEL shaderModel;
-    D3D_SHADER_MODEL testModels[] =
-    {
-        D3D_SHADER_MODEL_6_10, // these two versions
-        D3D_SHADER_MODEL_6_9,  // may not be compilable by DXC, so we might ditch them later
-        D3D_SHADER_MODEL_6_8,
-        D3D_SHADER_MODEL_6_7,
-        D3D_SHADER_MODEL_6_6,
-        D3D_SHADER_MODEL_6_5,
-        D3D_SHADER_MODEL_6_4,
-        D3D_SHADER_MODEL_6_3,
-        D3D_SHADER_MODEL_6_2,
-        D3D_SHADER_MODEL_6_1,
-        D3D_SHADER_MODEL_6_0,
-        D3D_SHADER_MODEL_5_1 };
-
-    for (auto model : testModels)
-    {
-        shaderModel.HighestShaderModel = model;
-        if (SUCCEEDED(_device->CheckFeatureSupport(
-            D3D12_FEATURE_SHADER_MODEL,
-            &shaderModel,
-            sizeof(shaderModel))))
-        {
-            _specs.MaxShaderModel = model;
-            break;
-        }
-    }
-
-    // Query raytracing support
-    D3D12_FEATURE_DATA_D3D12_OPTIONS5 options5 = {};
-    if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &options5, sizeof(options5))))
-    {
-        _specs.RaytracingSupport = (options5.RaytracingTier != D3D12_RAYTRACING_TIER_NOT_SUPPORTED);
-    }
-
-    // Query mesh shaders support
-    D3D12_FEATURE_DATA_D3D12_OPTIONS7 options7 = {};
-    if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &options7, sizeof(options7))))
-    {
-        _specs.MeshShadersSupport = (options7.MeshShaderTier != D3D12_MESH_SHADER_TIER_NOT_SUPPORTED);
-    }
-
-    // Query variable rate shading support
-    D3D12_FEATURE_DATA_D3D12_OPTIONS6 options6 = {};
-    if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS6, &options6, sizeof(options6))))
-    {
-        _specs.VariableRateShadingSupport = (options6.VariableShadingRateTier != D3D12_VARIABLE_SHADING_RATE_TIER_NOT_SUPPORTED);
-    }
-
-    // Query enhanced barriers support
-    D3D12_FEATURE_DATA_D3D12_OPTIONS12 options12 = {};
-    if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS12, &options12, sizeof(options12))))
-    {
-        _specs.EnhancedBarriersSupport = options12.EnhancedBarriersSupported;
-    }
-
-    // Query cross adapter row-major texture support
-    D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
-    if (SUCCEEDED(_device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options))))
-    {
-        _specs.CrossAdapterRowMajorTextureSupport = options.CrossAdapterRowMajorTextureSupported;
-    }
 }
 
 void GDX12Device::Reset()

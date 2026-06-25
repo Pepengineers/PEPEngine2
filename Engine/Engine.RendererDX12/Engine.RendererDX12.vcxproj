@@ -24,6 +24,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GeometryBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Material.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12SwapChain.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12CommandList.h" />

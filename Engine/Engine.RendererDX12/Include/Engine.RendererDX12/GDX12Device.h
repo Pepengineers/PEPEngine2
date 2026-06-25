@@ -8,16 +8,11 @@ class GDX12CommandQueue;
 struct DeviceSpecs
 {
 	D3D_FEATURE_LEVEL MaxFeatureLevel;
-	D3D_SHADER_MODEL MaxShaderModel;
-	bool RaytracingSupport;
-	bool MeshShadersSupport;
-	bool VariableRateShadingSupport;
-	bool EnhancedBarriersSupport;
-	bool CrossAdapterRowMajorTextureSupport;
 	std::string Name;
 	size_t DedicatedVideoMemory;  // in bytes
 	size_t DedicatedSystemMemory; // in bytes
 	size_t SharedSystemMemory;    // in bytes
+	CD3DX12FeatureSupport Features;
 };
 
 enum EDeviceRole

@@ -2,10 +2,9 @@
 
 #include "Common/GameTimer.h"
 #include "Common/Module.h"
-#include "Engine.RendererDX12/D3DHelpers.h"
-#include "Engine.RendererDX12/GDX12Device.h"
-#include "Engine.RendererDX12/GDX12DeviceResources.h"
+
 #include "Engine.RendererDX12/GDX12SwapChain.h"
+#include "Engine.RendererDX12/GDX12RenderPass.h"
 
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
