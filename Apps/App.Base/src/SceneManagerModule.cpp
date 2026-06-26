@@ -23,10 +23,10 @@ void SceneManagerModule::Initialize()
 {
     Uninitialize();
 
-    if (!LoadWorld("world1.yaml"))
-    {
-        // todo runtime error or log
-    }
+    //if (!LoadWorld("world1.yaml"))
+    //{
+    //    // todo runtime error or log
+    //}
 
     /*const std::filesystem::path scenePath =
     std::filesystem::path(ASSETS_FOLDER) /
@@ -40,10 +40,10 @@ void SceneManagerModule::Initialize()
     "Interior" /
     "interior.obj";
 
-    //if (!LoadWorld(scenePath))
-    //{
-    //    // todo runtime error or log 
-    //}
+    if (!LoadWorld(scenePath))
+    {
+        // todo runtime error or log 
+    }
 
     World* world = GetWorld(0);
     if (!world)

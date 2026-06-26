@@ -5,6 +5,7 @@
 
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
@@ -22,9 +23,9 @@ using namespace Engine::Core;
 
 struct TransformCompGPUData
 {
-    UINT CBufferIndex;
-    UINT NumFramesDirty;
-    Matrix World;
+    UINT CBufferIndex = -1;
+    UINT NumFramesDirty = -1;
+    Matrix World = Identity4x4();
 };
 
 class RenderModule final : public Module
@@ -109,6 +110,7 @@ private:
     void BuildRootSignatures();
     void BuildShaders();
     void BuildPSOs();
+    void ConfigureRenderPipeline();
     
     void SubscribeToSceneManager();
     void UnsubscribeFromSceneManager();
@@ -142,4 +144,6 @@ private:
     std::unique_ptr<GDX12Texture> _opaqueAccumTexture;
     std::unique_ptr<GDX12Texture> _transparencyAccumTexture;
     std::unique_ptr<GDX12Texture> _transparencyRevealageTexture;
+
+    GDX12GPUCullingPass _gpuCullingPass;
 };

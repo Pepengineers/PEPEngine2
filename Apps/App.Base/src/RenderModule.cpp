@@ -48,6 +48,8 @@ void RenderModule::Initialize()
     BuildPSOs();
 
     SubscribeToSceneManager();
+
+    ConfigureRenderPipeline();
 }
 
 void RenderModule::Uninitialize()
@@ -474,12 +476,22 @@ void RenderModule::OnCameraComponentCreated(World& world, Entity entity, CameraC
     {
         auto& CBuffer = constants->CameraCB;
         CBuffer->Resize(CBuffer->GetElementCount() + 1);
+
+        constants->CameraVisibilityCommands.push_back(GDX12VisibilityBuffers());
+
+        auto& buffers = constants->CameraVisibilityCommands[component._CBufferIndex];
+        buffers.VisibleOpaqueCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), GetPrimaryIndirectCommandsCache()->GetElementCount(), EBufferType::Default, false);
+        buffers.OpaqueDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(_primaryDevice.get(), 1, EBufferType::Default, false);
+        buffers.VisibleTransparentCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), GetPrimaryIndirectCommandsCache()->GetElementCount(), EBufferType::Default, false);
+        buffers.TransparentDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(_primaryDevice.get(), 1, EBufferType::Default, false);
+
+        buffers.VisibleOpaqueCommandsCache->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        buffers.OpaqueDrawCounter->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        buffers.VisibleTransparentCommandsCache->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        buffers.TransparentDrawCounter->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
     }
 
-    if (_secondaryDevice)
-    {
-
-    }
+    
 }
 
 void RenderModule::OnCameraComponentDestroyed(World& world, Entity entity, CameraComponent& component)
@@ -503,8 +515,12 @@ void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticM
         {
             auto& CBuffer = constants->InstanceCache;
             CBuffer->Resize(CBuffer->GetElementCount() + 1);
-            constants->VisibleOpaqueCommandsCache->Resize(constants->VisibleOpaqueCommandsCache->GetElementCount() + 1);
-            constants->VisibleTransparentCommandsCache->Resize(constants->VisibleTransparentCommandsCache->GetElementCount() + 1);
+
+            for (auto& buffers : constants->CameraVisibilityCommands)
+            {
+                buffers.VisibleOpaqueCommandsCache->Resize(buffers.VisibleOpaqueCommandsCache->GetElementCount() + 1);
+                buffers.VisibleTransparentCommandsCache->Resize(buffers.VisibleTransparentCommandsCache->GetElementCount() + 1);
+            }
         }
 
     }
@@ -590,48 +606,16 @@ void RenderModule::OnRender()
     cmdList->ClearDepthStencilView(_depthStencil.get());
     cmdList->EndPixEvent();
 
-    cmdList->BeginPixEvent("GPU Mesh Culling", Colors::Blue);
+    _gpuCullingPass.Execute(cmdList, _activeCamera->_CBufferIndex);
 
-    cmdList->ResourceBarrier({ 
-        CurrentFrameConsts->VisibleOpaqueCommandsCache->GetResource().GetUnorderedAccessBarrier(),
-        CurrentFrameConsts->OpaqueDrawCounter->GetResource().GetUnorderedAccessBarrier(),
-        CurrentFrameConsts->VisibleTransparentCommandsCache->GetResource().GetUnorderedAccessBarrier(),
-        CurrentFrameConsts->TransparentDrawCounter->GetResource().GetUnorderedAccessBarrier() });
-
-    cmdList->SetComputeRootSignature(_primaryResources.RootSignatures["BufferClear"].get());
-    cmdList->SetPipelineState(_primaryResources.PSOs["BufferClear"]);
-    cmdList->SetDescriptorHeaps({ _primaryResources.SRV_UAV_Heap.get() });
-    //should probably make this into a foreach or clear multiple counters per dispatch
-    cmdList->SetComputeUAV(0, CurrentFrameConsts->OpaqueDrawCounter->GetUAV()->GPUHandle);
-    cmdList->Dispatch(1, 1, 1);
-    cmdList->SetComputeUAV(0, CurrentFrameConsts->TransparentDrawCounter->GetUAV()->GPUHandle);
-    cmdList->Dispatch(1, 1, 1);
-
-    cmdList->SetComputeRootSignature(_primaryResources.RootSignatures["Culling"].get());
-    cmdList->SetPipelineState(_primaryResources.PSOs["Culling"]);
-    cmdList->SetDescriptorHeaps({ _primaryResources.SRV_UAV_Heap.get() });
-    cmdList->SetComputeRootConstantBufferView(0, CurrentFrameConsts->CameraCB->
-        GetElementAddress(_activeCamera->_CBufferIndex));
-    cmdList->SetComputeSRV(0, CurrentFrameConsts->InstanceCache->GetSRV()->GPUHandle);
-    cmdList->SetComputeSRV(1, _primaryResources.IndirectCommandsCache->GetSRV()->GPUHandle);
-    cmdList->SetComputeSRV(2, CurrentFrameConsts->MaterialCache->GetSRV()->GPUHandle);
-    cmdList->SetComputeUAV(0, CurrentFrameConsts->VisibleOpaqueCommandsCache->GetUAV()->GPUHandle);
-    cmdList->SetComputeUAV(1, CurrentFrameConsts->OpaqueDrawCounter->GetUAV()->GPUHandle);
-    cmdList->SetComputeUAV(2, CurrentFrameConsts->VisibleTransparentCommandsCache->GetUAV()->GPUHandle);
-    cmdList->SetComputeUAV(3, CurrentFrameConsts->TransparentDrawCounter->GetUAV()->GPUHandle);
-    cmdList->Dispatch((_primaryResources.IndirectCommandsCache->GetElementCount() + 63) / 64, 1, 1);
-
-    cmdList->ResourceBarrier({
-        CurrentFrameConsts->VisibleOpaqueCommandsCache->GetResource().GetUAVBarrier(),
-        CurrentFrameConsts->OpaqueDrawCounter->GetResource().GetUAVBarrier(),
-        CurrentFrameConsts->VisibleOpaqueCommandsCache->GetResource().GetIndirectArgsBarrier(),
-        CurrentFrameConsts->OpaqueDrawCounter->GetResource().GetIndirectArgsBarrier(),
-        CurrentFrameConsts->VisibleTransparentCommandsCache->GetResource().GetIndirectArgsBarrier(),
-        CurrentFrameConsts->TransparentDrawCounter->GetResource().GetIndirectArgsBarrier() });
-    cmdList->EndPixEvent();
-
+    auto& currentCameraVisBuffers = CurrentFrameConsts->CameraVisibilityCommands[_activeCamera->_CBufferIndex];
 
     cmdList->BeginPixEvent("Opaque Render Pass", Colors::ForestGreen);
+    cmdList->ResourceBarrier({
+        currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().GetIndirectArgsBarrier(),
+        currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetIndirectArgsBarrier(),
+        currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetIndirectArgsBarrier(),
+        currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetIndirectArgsBarrier() });
     cmdList->SetGraphicsRootSignature(_primaryResources.RootSignatures["OpaquePass"].get());
     cmdList->SetPipelineState(_primaryResources.PSOs["OpaquePass"]);
     cmdList->SetGraphicsRootConstantBufferView(1, CurrentFrameConsts->MainCB->GetElementAddress(0));
@@ -648,8 +632,8 @@ void RenderModule::OnRender()
     cmdList->SetGraphicsSRV(2, CurrentFrameConsts->InstanceCache->GetSRV()->GPUHandle);
     cmdList->SetGraphicsSRV(3, _primaryResources.SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
     cmdList->ExecuteIndirect(_primaryResources.CommandSignatures["OpaquePass"].Get(), _primaryResources.IndirectCommandsCache->GetElementCount(),
-        CurrentFrameConsts->VisibleOpaqueCommandsCache->GetResource().D3DResource.Get(), 0,
-        CurrentFrameConsts->OpaqueDrawCounter->GetResource().D3DResource.Get(), 0);
+        currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().D3DResource.Get(), 0,
+        currentCameraVisBuffers.OpaqueDrawCounter->GetResource().D3DResource.Get(), 0);
     cmdList->EnhancedTextureBarrier({ _opaqueAccumTexture->GetResource()->GetPixelShaderResourceEnhBarrier() });
     cmdList->EndPixEvent();
 
@@ -675,8 +659,8 @@ void RenderModule::OnRender()
     cmdList->SetGraphicsSRV(2, CurrentFrameConsts->InstanceCache->GetSRV()->GPUHandle);
     cmdList->SetGraphicsSRV(3, _primaryResources.SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
     cmdList->ExecuteIndirect(_primaryResources.CommandSignatures["OpaquePass"].Get(), _primaryResources.IndirectCommandsCache->GetElementCount(),
-        CurrentFrameConsts->VisibleTransparentCommandsCache->GetResource().D3DResource.Get(), 0,
-        CurrentFrameConsts->TransparentDrawCounter->GetResource().D3DResource.Get(), 0);
+        currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().D3DResource.Get(), 0,
+        currentCameraVisBuffers.TransparentDrawCounter->GetResource().D3DResource.Get(), 0);
     cmdList->EnhancedTextureBarrier({ _transparencyAccumTexture->GetResource()->GetPixelShaderResourceEnhBarrier(),
     _transparencyRevealageTexture->GetResource()->GetPixelShaderResourceEnhBarrier() });
     cmdList->EndPixEvent();
@@ -791,16 +775,6 @@ void RenderModule::BuildRootSignatures()
         _primaryResources.RootSignatures["OpaquePass"]->GetRootSignature().Get(),
         IID_PPV_ARGS(&_primaryResources.CommandSignatures["OpaquePass"]));
 
-    GDX12RootSignatureDesc desc3;
-    desc3.NumSingleCBVSlots = 1;
-    desc3.NumSingleSRVSlots = 3;
-    desc3.NumSingleUAVSlots = 4;
-    _primaryResources.RootSignatures["Culling"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc3);
-
-    GDX12RootSignatureDesc desc4;
-    desc4.NumSingleUAVSlots = 1;
-    _primaryResources.RootSignatures["BufferClear"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc4);
-
     GDX12RootSignatureDesc desc5;
     desc5.NumSingleSRVSlots = 3;
     desc5.StaticSamplers = GetStaticSamplers();
@@ -810,9 +784,6 @@ void RenderModule::BuildRootSignatures()
 void RenderModule::BuildShaders()
 {
     auto& Compiler = GDX12ShaderCompiler::GetInstance();
-
-    _primaryResources.Shaders["CullingCS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "Culling.hlsl", nullptr, "CS", "cs");
-    _primaryResources.Shaders["BufferClearCS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "BufferClear.hlsl", nullptr, "CS", "cs");
 
     _primaryResources.Shaders["OpaquePassVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "OpaquePass.hlsl", nullptr, "VS", "vs");
     _primaryResources.Shaders["OpaquePassPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "OpaquePass.hlsl", nullptr, "PS", "ps");
@@ -914,29 +885,11 @@ void RenderModule::BuildPSOs()
         _primaryResources.Shaders["TransparentPassPS"]->GetBufferSize()
     };
     ThrowIfFailed(_primaryDevice->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_primaryResources.PSOs["TransparentPass"])));
+}
 
-
-    D3D12_COMPUTE_PIPELINE_STATE_DESC desc2 = {};
-    desc2.pRootSignature = _primaryResources.RootSignatures["Culling"]->GetRootSignature().Get();
-    desc2.CS =
-    {
-        reinterpret_cast<BYTE*>(_primaryResources.Shaders["CullingCS"]->GetBufferPointer()),
-        _primaryResources.Shaders["CullingCS"]->GetBufferSize()
-    };
-
-    ThrowIfFailed(_primaryDevice->GetDevice()->CreateComputePipelineState(
-        &desc2, IID_PPV_ARGS(&_primaryResources.PSOs["Culling"])));
-
-    D3D12_COMPUTE_PIPELINE_STATE_DESC desc3 = {};
-    desc3.pRootSignature = _primaryResources.RootSignatures["BufferClear"]->GetRootSignature().Get();
-    desc3.CS =
-    {
-        reinterpret_cast<BYTE*>(_primaryResources.Shaders["BufferClearCS"]->GetBufferPointer()),
-        _primaryResources.Shaders["BufferClearCS"]->GetBufferSize()
-    };
-
-    ThrowIfFailed(_primaryDevice->GetDevice()->CreateComputePipelineState(
-        &desc3, IID_PPV_ARGS(&_primaryResources.PSOs["BufferClear"])));
+void RenderModule::ConfigureRenderPipeline()
+{
+    _gpuCullingPass.Initialize(&_primaryResources);
 }
 
 void RenderModule::SubscribeToSceneManager()

@@ -8,6 +8,16 @@
 
 class GDX12Device;
 
+// Used for collecting & using GPU culling results
+// This structured is used by any object that uses culling(cameras, shadowmaps)
+struct GDX12VisibilityBuffers
+{
+    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> VisibleOpaqueCommandsCache;
+    std::unique_ptr<GDX12UploadBuffer<UINT>> OpaqueDrawCounter;
+    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> VisibleTransparentCommandsCache;
+    std::unique_ptr<GDX12UploadBuffer<UINT>> TransparentDrawCounter;
+};
+
 class GDX12FrameConstants
 {
 public:
@@ -25,13 +35,7 @@ public:
     std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> InstanceCache;
     std::unique_ptr<GDX12UploadBuffer<GDX12LightConstants>> LightCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12CameraConstants>> CameraCB;
-
-    // Append buffer for visible indirect commands
-    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> VisibleOpaqueCommandsCache;
-    std::unique_ptr<GDX12UploadBuffer<UINT>> OpaqueDrawCounter;
-
-    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> VisibleTransparentCommandsCache;
-    std::unique_ptr<GDX12UploadBuffer<UINT>> TransparentDrawCounter;
+    std::vector<GDX12VisibilityBuffers> CameraVisibilityCommands;
 
     UINT64 FenceValue;
     
