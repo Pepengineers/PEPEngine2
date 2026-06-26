@@ -25,15 +25,15 @@ class GDX12RenderPass
 public:
     GDX12RenderPass() : _flags(RENDER_PASS_FLAG_NONE) {}
 
-	virtual void Initialize(GDX12Device* device);
-	virtual void Execute(GDX12CommandList* cmdList);
-	virtual void Resize(UINT width, UINT height);
+    virtual void Initialize(GDX12Device* device) {};
+    virtual void Execute(GDX12CommandList* cmdList) {};
+    virtual void Resize(UINT width, UINT height) {};
 
-    ERenderPassFlags GetFlags() { return _flags; }
+    uint32_t GetFlags() { return _flags; }
 
 private:
-    // This will define what resources will be loaded onto respective GPU
-    // For example: if no RenderPasses use USE_TEXTURES, then GPU texture upload
+    // This will define which resources will be loaded onto respective GPU
+    // For example: if no RenderPasses has USE_TEXTURES, then GPU texture upload
     // will be skipped entirely for this GPU
-    ERenderPassFlags _flags;
+    uint32_t _flags;
 };

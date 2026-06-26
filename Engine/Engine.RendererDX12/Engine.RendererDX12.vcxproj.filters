@@ -75,7 +75,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceResources.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderPass.h">
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12RenderPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

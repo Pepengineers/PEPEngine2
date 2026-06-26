@@ -60,7 +60,12 @@ App::App(HINSTANCE hInstance)
     Instance = this;
 }
 
-App::~App() = default;
+App::~App()
+{
+    //ordering is important
+    Locator.UnregisterModule<SceneManagerModule>();
+    Locator.UnregisterModule<RenderModule>();   
+}
 
 HINSTANCE App::GetAppHandler() const
 {

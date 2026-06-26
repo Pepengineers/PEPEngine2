@@ -4,7 +4,7 @@
 #include "Common/Module.h"
 
 #include "Engine.RendererDX12/GDX12SwapChain.h"
-#include "Engine.RendererDX12/GDX12RenderPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
@@ -50,7 +50,7 @@ public:
     //Uploads Mesh geometry to GPU
     void SubmitMesh(const Mesh* mesh, MeshHandle handle);
 
-    void SetActiveCamera(CameraComponent& camera);
+    void SetActiveCamera(CameraComponent* camera);
     
     struct WorldRenderSubscriptions
     {
@@ -124,7 +124,7 @@ private:
     
     std::unordered_map<Entity, TransformCompGPUData> _transformGPUData;
     std::unordered_map<World*, WorldRenderSubscriptions> _worldSubscriptions;
-    UINT _activeCameraCBIndex;
+    CameraComponent* _activeCamera;
 
     std::unique_ptr<GDX12Device> _primaryDevice;
     std::unique_ptr<GDX12Device> _secondaryDevice;
