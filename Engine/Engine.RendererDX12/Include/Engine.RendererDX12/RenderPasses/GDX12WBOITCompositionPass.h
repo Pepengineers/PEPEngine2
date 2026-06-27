@@ -45,14 +45,14 @@ public:
 	}
 
 	void Execute(GDX12CommandList* cmdList, GDX12Texture* IN_OpaqueScene, GDX12Texture* IN_TransparencyAccum,
-		GDX12Texture* IN_Revealage, GDX12Texture* OUT_Result)
+		GDX12Texture* IN_Revealage, GDX12Texture* IN_OUT_Result)
 	{
 		cmdList->BeginPixEvent("Composition Render Pass", Colors::Bisque);
-		cmdList->SetViewport(OUT_Result->GetViewport());
-		cmdList->SetScissorRect(OUT_Result->GetScissorRect());
+		cmdList->SetViewport(IN_OUT_Result->GetViewport());
+		cmdList->SetScissorRect(IN_OUT_Result->GetScissorRect());
 		cmdList->SetGraphicsRootSignature(_compositionRS.get());
 		cmdList->SetPipelineState(_compositionPSO.Get());
-		cmdList->SetRenderTargets({ OUT_Result }, nullptr);
+		cmdList->SetRenderTargets({ IN_OUT_Result }, nullptr);
 		cmdList->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
 		cmdList->SetGraphicsSRV(0, IN_OpaqueScene->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(1, IN_TransparencyAccum->GetSRV()->GPUHandle);

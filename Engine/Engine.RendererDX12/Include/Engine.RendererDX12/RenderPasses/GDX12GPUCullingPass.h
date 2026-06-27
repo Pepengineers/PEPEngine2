@@ -43,10 +43,10 @@ public:
 	}
 
 	// automatically uses IN_OUT_CameraVisibilityBuffers from cameraCBIndex
-	void Execute(GDX12CommandList* cmdList, UINT cameraCBIndex)
+	void Execute(GDX12CommandList* cmdList, UINT IN_CameraCBIndex)
 	{
 		auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[cameraCBIndex];
+		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[IN_CameraCBIndex];
 
 		cmdList->BeginPixEvent("GPU Mesh Culling", Colors::Blue);
 		cmdList->ResourceBarrier({
@@ -65,7 +65,7 @@ public:
 		cmdList->SetComputeRootSignature(_cullingRS.get());
 		cmdList->SetPipelineState(_cullingPSO);
 		cmdList->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-		cmdList->SetComputeRootConstantBufferView(0, currentFrameConstants->CameraCB->GetElementAddress(cameraCBIndex));
+		cmdList->SetComputeRootConstantBufferView(0, currentFrameConstants->CameraCB->GetElementAddress(IN_CameraCBIndex));
 		cmdList->SetComputeSRV(0, currentFrameConstants->InstanceCache->GetSRV()->GPUHandle);
 		cmdList->SetComputeSRV(1, _resources->IndirectCommandsCache->GetSRV()->GPUHandle);
 		cmdList->SetComputeSRV(2, currentFrameConstants->MaterialCache->GetSRV()->GPUHandle);

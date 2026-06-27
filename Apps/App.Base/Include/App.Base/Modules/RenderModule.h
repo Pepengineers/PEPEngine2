@@ -5,8 +5,10 @@
 
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12BackBufferClearPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
 
 #include "Engine.Core/ECS/Entity.h"
@@ -109,9 +111,6 @@ protected:
 
 private:
     void BuildBackBuffer();
-    void BuildRootSignatures();
-    void BuildShaders();
-    void BuildPSOs();
     void ConfigureRenderPipeline();
     
     void SubscribeToSceneManager();
@@ -143,11 +142,13 @@ private:
     std::unique_ptr<GDX12SwapChain> _backBuffer;
     std::unique_ptr<GDX12Texture> _depthStencil;
 
-    std::unique_ptr<GDX12Texture> _opaqueAccumTexture;
-    std::unique_ptr<GDX12Texture> _transparencyAccumTexture;
-    std::unique_ptr<GDX12Texture> _transparencyRevealageTexture;
-
-    GDX12GPUCullingPass _gpuCullingPass;
     GDX12BackBufferClearPass _backBufferClearPass;
+    GDX12GPUCullingPass _gpuCullingPass;
+    GDX12OpaquePass _opaquePass;
+    GDX12WBOITTransparencyPass _WBOITTransparencyPass;
     GDX12WBOITCompositionPass _WBOITCompositionPass;
+    
+    // in case we need a foreach
+    std::vector<GDX12RenderPass*> _renderPassPtrs = { &_backBufferClearPass, &_gpuCullingPass, &_opaquePass,
+        &_WBOITTransparencyPass, &_WBOITCompositionPass };
 };
