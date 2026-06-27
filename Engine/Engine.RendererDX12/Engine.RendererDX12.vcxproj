@@ -24,6 +24,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GeometryBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Material.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12BackBufferClearPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GPUCullingPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12RenderPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h" />
@@ -41,6 +42,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ShaderCompiler.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Texture.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12UploadBuffer.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITCompositionPass.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp" />

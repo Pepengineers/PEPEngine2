@@ -80,6 +80,8 @@ public:
 	GDX12TextureResource* GetResource();
 	DXGI_FORMAT GetFormat();
 	ETextureSemantic GetSemantic() const;
+	D3D12_VIEWPORT GetViewport();
+	D3D12_RECT GetScissorRect();
 
 
 private:
@@ -95,4 +97,7 @@ private:
 	std::unique_ptr<GDX12Descriptor> _uav;
 	std::unique_ptr<GDX12Descriptor> _dsv;
 	D3D12_CLEAR_VALUE _clearValue;
+
+	D3D12_VIEWPORT _viewport;
+	D3D12_RECT _scissorRect;
 };

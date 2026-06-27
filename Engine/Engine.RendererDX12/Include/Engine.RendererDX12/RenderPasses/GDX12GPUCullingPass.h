@@ -4,9 +4,9 @@
 class GDX12GPUCullingPass : public GDX12RenderPass
 {
 public:
-	GDX12GPUCullingPass() {}
+	GDX12GPUCullingPass() { _flags = RENDER_PASS_FLAG_USE_CAMERAS; }
 
-	void Initialize(GDX12DeviceResources* resources) override
+	void Initialize(GDX12DeviceResources* resources)
 	{
 		_resources = resources;
 
@@ -16,31 +16,33 @@ public:
 		_bufferClearCS = shaderCompiler.CompileShader(resources->Device, SHADERS_FOLDER "BufferClear.hlsl", nullptr, "CS", "cs");
 
 		// Root Signatures
-		GDX12RootSignatureDesc desc1;
-		desc1.NumSingleCBVSlots = 1;
-		desc1.NumSingleSRVSlots = 3;
-		desc1.NumSingleUAVSlots = 4;
-		_cullingRS = std::make_unique<GDX12RootSignature>(resources->Device, desc1);
+		GDX12RootSignatureDesc RSDesc1;
+		RSDesc1.NumSingleCBVSlots = 1;
+		RSDesc1.NumSingleSRVSlots = 3;
+		RSDesc1.NumSingleUAVSlots = 4;
+		_cullingRS = std::make_unique<GDX12RootSignature>(resources->Device, RSDesc1);
 
-		GDX12RootSignatureDesc desc2;
-		desc2.NumSingleUAVSlots = 2;
-		_bufferClearRS = std::make_unique<GDX12RootSignature>(resources->Device, desc2);
+		GDX12RootSignatureDesc RSDesc2;
+		RSDesc2.NumSingleUAVSlots = 2;
+		_bufferClearRS = std::make_unique<GDX12RootSignature>(resources->Device, RSDesc2);
 
 		// Pipeline State Objects
-		D3D12_COMPUTE_PIPELINE_STATE_DESC desc3 = {};
-		desc3.pRootSignature = _cullingRS->GetRootSignature().Get();
-		desc3.CS = { reinterpret_cast<BYTE*>(_cullingCS->GetBufferPointer()), _cullingCS->GetBufferSize() };
+		D3D12_COMPUTE_PIPELINE_STATE_DESC PSODesc1 = {};
+		PSODesc1.pRootSignature = _cullingRS->GetRootSignature().Get();
+		PSODesc1.CS = { reinterpret_cast<BYTE*>(_cullingCS->GetBufferPointer()), _cullingCS->GetBufferSize() };
 
 		ThrowIfFailed(resources->Device->GetDevice()->CreateComputePipelineState(
-			&desc3, IID_PPV_ARGS(&_cullingPSO)));
+			&PSODesc1, IID_PPV_ARGS(&_cullingPSO)));
 
-		desc3.pRootSignature = _bufferClearRS->GetRootSignature().Get();
-		desc3.CS = { reinterpret_cast<BYTE*>(_bufferClearCS->GetBufferPointer()), _bufferClearCS->GetBufferSize() };
+		D3D12_COMPUTE_PIPELINE_STATE_DESC PSODesc2 = {};
+		PSODesc2.pRootSignature = _bufferClearRS->GetRootSignature().Get();
+		PSODesc2.CS = { reinterpret_cast<BYTE*>(_bufferClearCS->GetBufferPointer()), _bufferClearCS->GetBufferSize() };
 
 		ThrowIfFailed(resources->Device->GetDevice()->CreateComputePipelineState(
-			&desc3, IID_PPV_ARGS(&_bufferClearPSO)));
+			&PSODesc2, IID_PPV_ARGS(&_bufferClearPSO)));
 	}
 
+	// automatically uses IN_OUT_CameraVisibilityBuffers from cameraCBIndex
 	void Execute(GDX12CommandList* cmdList, UINT cameraCBIndex)
 	{
 		auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];

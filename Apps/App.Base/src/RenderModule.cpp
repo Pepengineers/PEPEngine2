@@ -42,14 +42,12 @@ void RenderModule::Initialize()
     }
 
     BuildBackBuffer();
-
     BuildRootSignatures();
     BuildShaders();
     BuildPSOs();
+    ConfigureRenderPipeline();
 
     SubscribeToSceneManager();
-
-    ConfigureRenderPipeline();
 }
 
 void RenderModule::Uninitialize()
@@ -596,16 +594,7 @@ void RenderModule::OnRender()
     auto CurrentBackBuffer = _backBuffer->GetCurrentBuffer();
     auto CurrentFrameConsts = GetCurrentPrimaryFrameConstants();
 
-    cmdList->BeginPixEvent("Clear Back Buffer", Colors::Aqua);
-    cmdList->SetViewport(_backBuffer->GetViewport());
-    cmdList->SetScissorRect(_backBuffer->GetScissorRect());
-    cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetRenderTargetEnhBarrier() });
-    cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetDepthWriteBarrier() });
-    cmdList->SetRenderTargets({ CurrentBackBuffer }, _depthStencil.get());
-    cmdList->ClearRenderTargetView(CurrentBackBuffer);
-    cmdList->ClearDepthStencilView(_depthStencil.get());
-    cmdList->EndPixEvent();
-
+    _backBufferClearPass.Execute(cmdList, CurrentBackBuffer, _depthStencil.get());
     _gpuCullingPass.Execute(cmdList, _activeCamera->_CBufferIndex);
 
     auto& currentCameraVisBuffers = CurrentFrameConsts->CameraVisibilityCommands[_activeCamera->_CBufferIndex];
@@ -665,18 +654,8 @@ void RenderModule::OnRender()
     _transparencyRevealageTexture->GetResource()->GetPixelShaderResourceEnhBarrier() });
     cmdList->EndPixEvent();
 
-
-    cmdList->BeginPixEvent("Composition Render Pass", Colors::Bisque);
-    cmdList->SetGraphicsRootSignature(_primaryResources.RootSignatures["CompositionPass"].get());
-    cmdList->SetPipelineState(_primaryResources.PSOs["CompositionPass"]);
-    cmdList->SetRenderTargets({ CurrentBackBuffer }, _depthStencil.get());
-    cmdList->SetDescriptorHeaps({ _primaryResources.SRV_UAV_Heap.get() });
-    cmdList->SetGraphicsSRV(0, _opaqueAccumTexture->GetSRV()->GPUHandle);
-    cmdList->SetGraphicsSRV(1, _transparencyAccumTexture->GetSRV()->GPUHandle);
-    cmdList->SetGraphicsSRV(2, _transparencyRevealageTexture->GetSRV()->GPUHandle);
-    cmdList->GetCommandList()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    cmdList->GetCommandList()->DrawInstanced(3, 1, 0, 0);
-    cmdList->EndPixEvent();
+    _WBOITCompositionPass.Execute(cmdList, _opaqueAccumTexture.get(), _transparencyAccumTexture.get(),
+        _transparencyRevealageTexture.get(), CurrentBackBuffer);
     
     cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetPresentEnhBarrier() });
     cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetCommonBarrier() });
@@ -774,11 +753,6 @@ void RenderModule::BuildRootSignatures()
     _primaryDevice->GetDevice()->CreateCommandSignature(&cmdSigDesc,
         _primaryResources.RootSignatures["OpaquePass"]->GetRootSignature().Get(),
         IID_PPV_ARGS(&_primaryResources.CommandSignatures["OpaquePass"]));
-
-    GDX12RootSignatureDesc desc5;
-    desc5.NumSingleSRVSlots = 3;
-    desc5.StaticSamplers = GetStaticSamplers();
-    _primaryResources.RootSignatures["CompositionPass"] = std::make_unique<GDX12RootSignature>(_primaryDevice.get(), desc5);
 }
 
 void RenderModule::BuildShaders()
@@ -790,9 +764,6 @@ void RenderModule::BuildShaders()
 
     _primaryResources.Shaders["TransparentPassVS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "TransparentPass.hlsl", nullptr, "VS", "vs");
     _primaryResources.Shaders["TransparentPassPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "TransparentPass.hlsl", nullptr, "PS", "ps");
-
-    _primaryResources.Shaders["VS_FSQuad"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "FullScreenVS.hlsl", nullptr, "VS", "vs");
-    _primaryResources.Shaders["CompositionPassPS"] = Compiler.CompileShader(_primaryDevice.get(), SHADERS_FOLDER "CompositionPass.hlsl", nullptr, "PS", "ps");
 }
 
 void RenderModule::BuildPSOs()
@@ -826,22 +797,6 @@ void RenderModule::BuildPSOs()
         _primaryResources.Shaders["OpaquePassPS"]->GetBufferSize()
     };
     ThrowIfFailed(_primaryDevice->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_primaryResources.PSOs["OpaquePass"])));
-
-    desc.InputLayout = { nullptr, 0 };
-    desc.pRootSignature = _primaryResources.RootSignatures["CompositionPass"]->GetRootSignature().Get();
-    desc.DepthStencilState.DepthEnable = false;
-    desc.DepthStencilState.StencilEnable = false;
-    desc.VS =
-    {
-        reinterpret_cast<BYTE*>(_primaryResources.Shaders["VS_FSQuad"]->GetBufferPointer()),
-        _primaryResources.Shaders["VS_FSQuad"]->GetBufferSize()
-    };
-    desc.PS =
-    {
-        reinterpret_cast<BYTE*>(_primaryResources.Shaders["CompositionPassPS"]->GetBufferPointer()),
-        _primaryResources.Shaders["CompositionPassPS"]->GetBufferSize()
-    };
-    ThrowIfFailed(_primaryDevice->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_primaryResources.PSOs["CompositionPass"])));
 
     desc.InputLayout = { _primaryResources.InputLayouts["Default"].data(), (UINT)_primaryResources.InputLayouts["Default"].size() };
     desc.pRootSignature = _primaryResources.RootSignatures["OpaquePass"]->GetRootSignature().Get();
@@ -890,6 +845,8 @@ void RenderModule::BuildPSOs()
 void RenderModule::ConfigureRenderPipeline()
 {
     _gpuCullingPass.Initialize(&_primaryResources);
+    _backBufferClearPass.Initialize(&_primaryResources);
+    _WBOITCompositionPass.Initialize(&_primaryResources, _backBuffer->GetFormat());
 }
 
 void RenderModule::SubscribeToSceneManager()

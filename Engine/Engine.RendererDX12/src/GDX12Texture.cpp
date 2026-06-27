@@ -45,6 +45,15 @@ GDX12Texture::GDX12Texture(GDX12TextureDesc desc) :
     else { CreateResource(); }
     
     CreateViews();
+
+    _viewport.TopLeftX = 0;
+    _viewport.TopLeftY = 0;
+    _viewport.Width = static_cast<FLOAT>(_desc.Width);
+    _viewport.Height = static_cast<FLOAT>(_desc.Height);
+    _viewport.MinDepth = 0.0f;
+    _viewport.MaxDepth = 1.0f;
+
+    _scissorRect = { 0, 0, static_cast<int>(_desc.Width), static_cast<int>(_desc.Height) };
 }
 
 void GDX12Texture::Resize(UINT width, UINT height)
@@ -53,6 +62,15 @@ void GDX12Texture::Resize(UINT width, UINT height)
     _desc.Height = height;
     if (_desc.ExternalResource == nullptr) { CreateResource(); }
     CreateViews();
+
+    _viewport.TopLeftX = 0;
+    _viewport.TopLeftY = 0;
+    _viewport.Width = static_cast<FLOAT>(width);
+    _viewport.Height = static_cast<FLOAT>(height);
+    _viewport.MinDepth = 0.0f;
+    _viewport.MaxDepth = 1.0f;
+
+    _scissorRect = { 0, 0, static_cast<int>(width), static_cast<int>(height) };
 }
 
 GDX12Descriptor* GDX12Texture::GetSRV()
@@ -97,6 +115,16 @@ DXGI_FORMAT GDX12Texture::GetFormat()
 ETextureSemantic GDX12Texture::GetSemantic() const
 {
     return _desc.Semantic;
+}
+
+D3D12_VIEWPORT GDX12Texture::GetViewport()
+{
+    return _viewport;
+}
+
+D3D12_RECT GDX12Texture::GetScissorRect()
+{
+    return _scissorRect;
 }
 
 void GDX12Texture::CreateResource()

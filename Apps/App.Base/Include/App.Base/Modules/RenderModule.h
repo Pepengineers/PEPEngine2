@@ -6,6 +6,8 @@
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12BackBufferClearPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
 
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
@@ -146,4 +148,6 @@ private:
     std::unique_ptr<GDX12Texture> _transparencyRevealageTexture;
 
     GDX12GPUCullingPass _gpuCullingPass;
+    GDX12BackBufferClearPass _backBufferClearPass;
+    GDX12WBOITCompositionPass _WBOITCompositionPass;
 };

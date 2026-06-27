@@ -25,7 +25,6 @@ class GDX12RenderPass
 public:
     GDX12RenderPass() : _flags(RENDER_PASS_FLAG_NONE), _resources(nullptr) {}
 
-    virtual void Initialize(GDX12DeviceResources* resources) {};
     virtual void Resize(UINT width, UINT height) {};
 
     uint32_t GetFlags() { return _flags; }
