@@ -120,9 +120,117 @@ namespace
 		return HasDdsMagic(ReadFilePrefix(sourcePath, 4));
 	}
 
+	/// Returns true if DirectXTex can build a mip chain for the given texture metadata.
+	bool CanGenerateMipMaps(const DirectX::TexMetadata& metadata)
+	{
+		if (metadata.mipLevels != 1 || (metadata.width <= 1 && metadata.height <= 1))
+		{
+			return false;
+		}
+
+		if (metadata.dimension != DirectX::TEX_DIMENSION_TEXTURE2D)
+		{
+			return false;
+		}
+
+		if (metadata.format == DXGI_FORMAT_UNKNOWN || DirectX::IsCompressed(metadata.format) || DirectX::IsPacked(metadata.format) ||
+			DirectX::IsTypeless(metadata.format) || DirectX::IsVideo(metadata.format))
+		{
+			return false;
+		}
+
+		return true;
+	}
+
+	/// Generates a full mip chain from the provided DirectXTex image set when possible.
+	bool TryGenerateMipMaps(
+		const DirectX::TexMetadata& metadata,
+		const DirectX::Image* images,
+		const size_t imageCount,
+		DirectX::ScratchImage& mipChain,
+		const std::filesystem::path& sourcePath)
+	{
+		if (images == nullptr || imageCount == 0 || !CanGenerateMipMaps(metadata))
+		{
+			return false;
+		}
+
+		const HRESULT generateResult = DirectX::GenerateMipMaps(
+			images,
+			imageCount,
+			metadata,
+			DirectX::TEX_FILTER_DEFAULT,
+			0,
+			mipChain);
+
+		if (FAILED(generateResult))
+		{
+			LogTextureLoaderMessage(L"[TextureLoader] Failed to generate mip maps for path: " + sourcePath.generic_wstring() + L"\n");
+			return false;
+		}
+
+		const DirectX::TexMetadata& mipMetadata = mipChain.GetMetadata();
+		if (mipMetadata.mipLevels <= 1)
+		{
+			return false;
+		}
+
+		LogTextureLoaderMessage(L"[TextureLoader] Generated " + std::to_wstring(mipMetadata.mipLevels) + L" mip levels for path: " + sourcePath.generic_wstring() + L"\n");
+
+		return true;
+	}
+
+	std::unique_ptr<Engine::Core::Texture> CreateTextureFromScratchImage(const DirectX::TexMetadata& metadata, const DirectX::ScratchImage& scratchImage);
+
+	/// Builds a generated mip chain from a single-mip CPU texture.
+	std::unique_ptr<Engine::Core::Texture> GenerateMipMapsForTexture(const Engine::Core::Texture& texture, const std::filesystem::path& sourcePath)
+	{
+		if (texture.IsEmpty() || texture.GetArraySize() != 1 || texture.GetMipLevels() != 1)
+		{
+			return nullptr;
+		}
+
+		const Engine::Core::SubTexture& baseSubresource = texture.GetSubresource(0, 0);
+		if (baseSubresource.Data.empty())
+		{
+			return nullptr;
+		}
+
+		DirectX::TexMetadata metadata = {};
+		metadata.width = texture.GetWidth();
+		metadata.height = texture.GetHeight();
+		metadata.depth = texture.GetDepth();
+		metadata.arraySize = texture.GetArraySize();
+		metadata.mipLevels = texture.GetMipLevels();
+		metadata.format = texture.GetFormat();
+		metadata.dimension = DirectX::TEX_DIMENSION_TEXTURE2D;
+
+		DirectX::Image baseImage = {};
+		baseImage.width = texture.GetWidth();
+		baseImage.height = texture.GetHeight();
+		baseImage.format = texture.GetFormat();
+		baseImage.rowPitch = baseSubresource.RowPitch;
+		baseImage.slicePitch = baseSubresource.SlicePitch;
+		baseImage.pixels = const_cast<std::uint8_t*>(reinterpret_cast<const std::uint8_t*>(baseSubresource.Data.data()));
+
+		DirectX::ScratchImage mipChain;
+		if (!TryGenerateMipMaps(metadata, &baseImage, 1, mipChain, sourcePath))
+		{
+			return nullptr;
+		}
+
+		std::unique_ptr<Engine::Core::Texture> generatedTexture = CreateTextureFromScratchImage(mipChain.GetMetadata(), mipChain);
+		if (generatedTexture == nullptr)
+		{
+			return nullptr;
+		}
+
+		return std::make_unique<Engine::Core::Texture>(generatedTexture->WithType(texture.GetType()));
+	}
+
 	/// Loads a texture from a WIC-compatible format (PNG, JPG, BMP, etc.) into a CPU Texture.
 	/// The decoded pixels are always converted to DXGI_FORMAT_R8G8B8A8_UNORM regardless
-	/// of the source pixel format.
+	/// of the source pixel format. A full mip chain is generated when supported.
 	/// Returns nullptr on any failure.
 	std::unique_ptr<Engine::Core::Texture> LoadTextureFromWicFile(const std::filesystem::path& sourcePath)
     {
@@ -226,6 +334,7 @@ namespace
 
     	Engine::Core::TextureDesc textureDesc = {};
     	textureDesc.Dimension = Engine::Core::ETextureDimension::Texture2D;
+		textureDesc.Type = Engine::Core::ETextureType::Unknown;
     	textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     	textureDesc.Width = static_cast<std::uint32_t>(width);
     	textureDesc.Height = static_cast<std::uint32_t>(height);
@@ -255,7 +364,14 @@ namespace
     	std::vector<Engine::Core::SubTexture> subresources;
     	subresources.push_back(std::move(subresource));
 
-    	return std::make_unique<Engine::Core::Texture>(textureDesc, std::move(subresources));
+		auto baseTexture = std::make_unique<Engine::Core::Texture>(textureDesc, std::move(subresources));
+		std::unique_ptr<Engine::Core::Texture> textureWithMipMaps = GenerateMipMapsForTexture(*baseTexture, sourcePath);
+		if (textureWithMipMaps != nullptr)
+		{
+			return textureWithMipMaps;
+		}
+
+		return baseTexture;
     }
 
 	/// Loads a DDS, TGA or HDR file into a DirectXTex ScratchImage.
@@ -324,6 +440,7 @@ namespace
 
 		Engine::Core::TextureDesc textureDesc = {};
 		textureDesc.Dimension = ConvertTextureDimension(metadata);
+		textureDesc.Type = Engine::Core::ETextureType::Unknown;
 		textureDesc.Format = metadata.format;
 		textureDesc.Width = static_cast<std::uint32_t>(metadata.width);
 		textureDesc.Height = static_cast<std::uint32_t>(metadata.height);
@@ -431,7 +548,17 @@ namespace Engine::Core
 				return nullptr;
 			}
 
-			loadedTexture = CreateTextureFromScratchImage(metadata, scratchImage);
+			DirectX::ScratchImage mipChain;
+			const DirectX::ScratchImage* textureImage = &scratchImage;
+			DirectX::TexMetadata textureMetadata = metadata;
+
+			if (TryGenerateMipMaps(metadata, scratchImage.GetImages(), scratchImage.GetImageCount(), mipChain, sourcePath))
+			{
+				textureImage = &mipChain;
+				textureMetadata = mipChain.GetMetadata();
+			}
+
+			loadedTexture = CreateTextureFromScratchImage(textureMetadata, *textureImage);
 		}
 		else
 		{
@@ -445,7 +572,13 @@ namespace Engine::Core
 		}
 
 		LogTextureLoaderMessage(L"[TextureLoader] Loaded texture with " + std::to_wstring(loadedTexture->GetSubresourceCount()) +
-			L" subresources from path: " + sourcePath.generic_wstring() + L"\n");
+			L" subresources and " + std::to_wstring(loadedTexture->GetMipLevels()) + L" mip levels from path: " + sourcePath.generic_wstring() + L"\n");
+
+		if (loadedTexture->GetMipLevels() > 1)
+		{
+			LogTextureLoaderMessage(L"[TextureLoader] Mip chain check passed: " + sourcePath.generic_wstring() + L" has " +
+				std::to_wstring(loadedTexture->GetMipLevels()) + L" mip levels.\n");
+		}
 
 		return loadedTexture;
 	}
@@ -454,6 +587,7 @@ namespace Engine::Core
 	{
 		TextureDesc textureDesc = {};
 		textureDesc.Dimension = ETextureDimension::Texture2D;
+		textureDesc.Type = ETextureType::Color;
 		textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		textureDesc.Width = 2;
 		textureDesc.Height = 2;

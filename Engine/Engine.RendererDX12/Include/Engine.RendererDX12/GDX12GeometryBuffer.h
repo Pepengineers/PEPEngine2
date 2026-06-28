@@ -14,7 +14,6 @@ struct GPUSubMesh
 	std::uint32_t StartIndexLocation = 0;
 	std::int32_t StartVertexLocation = 0;
 	std::uint32_t MaterialIndex = 0;
-
 	const SubMesh* CPUSubmesh;
 
 	GPUSubMesh(const SubMesh& subMesh) : CPUSubmesh(&subMesh)
@@ -26,7 +25,6 @@ struct GPUSubMesh
 struct GPUMesh
 {
 	std::vector<GPUSubMesh> SubMeshes;
-
 	const Mesh* CPUMesh;
 
 	GPUMesh(const Mesh* mesh) : CPUMesh(mesh)

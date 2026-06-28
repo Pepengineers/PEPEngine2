@@ -1,7 +1,8 @@
 #include "CBufferStructures.hlsl"
 
-ConstantBuffer<MainCB> CBMain : register(b0);
-ConstantBuffer<CameraCB> CBCamera : register(b1);
+ConstantBuffer<IndirectConstants> CBIndirectConstants : register(b0);
+ConstantBuffer<MainCB> CBMain : register(b1);
+ConstantBuffer<CameraCB> CBCamera : register(b2);
 
 SamplerState samPointWrap : register(s0);
 SamplerState samPointClamp : register(s1);
@@ -31,13 +32,14 @@ struct VS_OUTPUT_PS_INPUT
     float3 Normal : NORMAL;
     float3 Tangent : TANGENT;
     uint MaterialIndex : TEXCOORD1;
+    float LinearDepth : TEXCOORD2;
 };
 
-VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint instanceID : SV_StartInstanceLocation)
+VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
 {
     VS_OUTPUT_PS_INPUT vout = (VS_OUTPUT_PS_INPUT) 0.0f;
 	
-    InstanceData instance = InstanceCache[instanceID];
+    InstanceData instance = InstanceCache[CBIndirectConstants.InstanceID];
     float4x4 World = TransformCache[instance.TransformIndex].World;
     
     float4 posW = mul(float4(vin.Pos, 1.0f), World);
@@ -48,15 +50,31 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint instanceID : SV_StartInstanceLocation)
     vout.Tangent = normalize(mul(vin.Tangent, (float3x3) World));
     vout.PosCS = mul(posW, CBCamera.ViewProj);
     vout.TexC = vin.TexC;
-    
+    float3 viewPos = mul(posW, CBCamera.View).xyz;
+    vout.LinearDepth = abs(viewPos.z);
     vout.MaterialIndex = instance.MaterialIndex;
     
     return vout;
 }
 
-float4 PS(VS_OUTPUT_PS_INPUT pin) : SV_Target
+struct PSOutput
 {
-    Material material = MaterialCache[pin.MaterialIndex];
+    float4 AccumColor : SV_TARGET0;
+    float Revealage : SV_TARGET1;
+};
+
+PSOutput PS(VS_OUTPUT_PS_INPUT pin)
+{
+    PSOutput output;
     
-    return Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
+    Material material = MaterialCache[pin.MaterialIndex];
+    float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
+    float alpha = saturate(color.a * material.Opacity);
+    
+    clip(alpha - 0.001f);
+    
+    output.AccumColor = float4(color.rgb * alpha, alpha);
+    output.Revealage = alpha;
+    
+    return output;
 }

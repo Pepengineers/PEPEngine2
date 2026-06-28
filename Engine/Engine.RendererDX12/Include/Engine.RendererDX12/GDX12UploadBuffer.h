@@ -4,89 +4,111 @@
 
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
+#include "Engine.RendererDX12/GDX12Resource.h"
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
+
+enum class EBufferType
+{
+    Upload,
+    Default
+};
 
 template<typename T>
 class GDX12UploadBuffer
 {
 public:
-    inline GDX12UploadBuffer(GDX12Device* device, UINT elementCount, bool useConstantBufferSizeAlignment = true);
-	~GDX12UploadBuffer();
+    inline GDX12UploadBuffer(GDX12Device* device, UINT elementCount, EBufferType bufferType = EBufferType::Upload, bool useConstantBufferSizeAlignment = true);
+    ~GDX12UploadBuffer();
 
-	ComPtr<ID3D12Resource> GetResource();
+    GDX12Resource& GetResource();
 
     void CopyData(UINT elementIndex, const T& data);
     void CopyData(UINT elementIndex, const T* data, UINT count);
 
-    //Creates new buffer and copies old data into it(if possible)
     void Resize(UINT newElementCount);
     UINT GetElementCount();
     UINT GetElementSize();
 
-    // 0'th element is the buffer's address
     D3D12_GPU_VIRTUAL_ADDRESS GetElementAddress(UINT elementIndex);
 
     GDX12Descriptor* GetSRV();
     void CreateSRV(GDX12DescriptorHeap* inHeap, UINT HeapIndex);
 
+    GDX12Descriptor* GetUAV();
+    void CreateUAV(GDX12DescriptorHeap* inHeap, UINT HeapIndex);
+
 private:
+    void CreateBuffer();
+
     GDX12Device* _device;
-    ComPtr<ID3D12Resource> _uploadBuffer;
+    GDX12Resource _buffer;
     BYTE* _mappedData = nullptr;
 
     UINT _elementCount;
     UINT _elementByteSize;
     UINT _totalBufferSize;
+    EBufferType _bufferType;
     bool _useConstantBufferSizeAlignment;
 
     std::unique_ptr<GDX12Descriptor> _srv;
+    std::unique_ptr<GDX12Descriptor> _uav;
     GDX12DescriptorHeap* _heap;
+    UINT _SRVheapIndex;
+    UINT _UAVheapIndex;
 };
 
-//Can't move template class definitions into .cpp cuz it'll throw linking errors
-
 template<typename T>
-inline GDX12UploadBuffer<T>::GDX12UploadBuffer(GDX12Device* device, UINT elementCount, bool useConstantBufferSizeAlignment)
-    : _device(device), 
-    _elementCount(elementCount), 
-    _useConstantBufferSizeAlignment(useConstantBufferSizeAlignment),
-    _heap(nullptr)
+inline GDX12UploadBuffer<T>::GDX12UploadBuffer(GDX12Device* device, UINT elementCount, EBufferType bufferType, bool useConstantBufferSizeAlignment)
+    : _device(device), _elementCount(elementCount), _bufferType(bufferType), 
+    _useConstantBufferSizeAlignment(useConstantBufferSizeAlignment), _heap(nullptr), 
+    _SRVheapIndex(0), _UAVheapIndex(0)
 {
     _elementByteSize = sizeof(T);
-    // constant buffer size should be a multiple of 255
-    if (_useConstantBufferSizeAlignment) { _elementByteSize = (_elementByteSize + 255) & ~255; }
+    if (_useConstantBufferSizeAlignment && _bufferType == EBufferType::Upload)
+    {
+        _elementByteSize = (_elementByteSize + 255) & ~255;
+    }
 
     if (elementCount == 0)
     {
-        _uploadBuffer = nullptr;
         _mappedData = nullptr;
         _totalBufferSize = 0;
         return;
     }
 
+    CreateBuffer();
+}
+
+template<typename T>
+void GDX12UploadBuffer<T>::CreateBuffer()
+{
     _totalBufferSize = _elementByteSize * _elementCount;
-
     D3D12_RESOURCE_DESC resourceDesc = CD3DX12_RESOURCE_DESC::Buffer(_totalBufferSize);
-    CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
 
-    ThrowIfFailed(device->GetDevice()->CreateCommittedResource(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &resourceDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&_uploadBuffer)));
-
-    //keep the resource mapped for quick access
-    ThrowIfFailed(_uploadBuffer->Map(0, nullptr, reinterpret_cast<void**>(&_mappedData)));
+    if (_bufferType == EBufferType::Default)
+    {
+        resourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+        CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
+        ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE, &resourceDesc,
+            D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&_buffer.D3DResource)));
+    }
+    else
+    {
+        CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
+        ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(
+            &heapProps, D3D12_HEAP_FLAG_NONE, &resourceDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&_buffer.D3DResource)));
+        ThrowIfFailed(_buffer.D3DResource->Map(0, nullptr, reinterpret_cast<void**>(&_mappedData)));
+    }
 }
 
 template<typename T>
 GDX12UploadBuffer<T>::~GDX12UploadBuffer()
 {
-    if (_uploadBuffer && _mappedData)
+    if (_buffer.D3DResource && _mappedData)
     {
-        _uploadBuffer->Unmap(0, nullptr);
+        _buffer.D3DResource->Unmap(0, nullptr);
         _mappedData = nullptr;
     }
 }
@@ -94,10 +116,11 @@ GDX12UploadBuffer<T>::~GDX12UploadBuffer()
 template<typename T>
 void GDX12UploadBuffer<T>::CreateSRV(GDX12DescriptorHeap* inHeap, UINT HeapIndex)
 {
-    if (!_srv) 
-    { 
-        _srv = std::make_unique<GDX12Descriptor>(); 
+    if (!_srv)
+    {
+        _srv = std::make_unique<GDX12Descriptor>();
         _heap = inHeap;
+        _SRVheapIndex = HeapIndex;
     }
 
     D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
@@ -108,7 +131,7 @@ void GDX12UploadBuffer<T>::CreateSRV(GDX12DescriptorHeap* inHeap, UINT HeapIndex
     srvDesc.Buffer.NumElements = _elementCount;
     srvDesc.Buffer.StructureByteStride = sizeof(T);
 
-    _srv->InitAsSRV(_uploadBuffer.Get(), &srvDesc, inHeap, HeapIndex);
+    _srv->InitAsSRV(_buffer.D3DResource.Get(), &srvDesc, inHeap, HeapIndex);
 }
 
 template<typename T>
@@ -118,25 +141,61 @@ GDX12Descriptor* GDX12UploadBuffer<T>::GetSRV()
 }
 
 template<typename T>
-ComPtr<ID3D12Resource> GDX12UploadBuffer<T>::GetResource()
+void GDX12UploadBuffer<T>::CreateUAV(GDX12DescriptorHeap* inHeap, UINT HeapIndex)
 {
-    return _uploadBuffer.Get();
+    if (!_uav)
+    {
+        _uav = std::make_unique<GDX12Descriptor>();
+        _heap = inHeap;
+        _UAVheapIndex = HeapIndex;
+    }
+
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+    uavDesc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+    uavDesc.Buffer.FirstElement = 0;
+    uavDesc.Buffer.NumElements = _elementCount;
+    uavDesc.Buffer.StructureByteStride = sizeof(T);
+    uavDesc.Buffer.CounterOffsetInBytes = 0;
+    uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
+    uavDesc.Format = DXGI_FORMAT_UNKNOWN;
+
+    _uav->InitAsUAV(_buffer.D3DResource.Get(), nullptr, &uavDesc, inHeap, HeapIndex);
+}
+
+template<typename T>
+GDX12Descriptor* GDX12UploadBuffer<T>::GetUAV()
+{
+    return _uav.get();
+}
+
+template<typename T>
+GDX12Resource& GDX12UploadBuffer<T>::GetResource()
+{
+    return _buffer;
 }
 
 template<typename T>
 void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T& data)
 {
-    if (!_uploadBuffer) return;
+    if (!_buffer.D3DResource) return;
     if (elementIndex >= _elementCount) return;
-    memcpy(&_mappedData[elementIndex * _elementByteSize], &data, sizeof(T));
+
+    if (_bufferType == EBufferType::Upload && _mappedData)
+    {
+        memcpy(&_mappedData[elementIndex * _elementByteSize], &data, sizeof(T));
+    }
 }
 
 template<typename T>
 void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T* data, UINT count)
 {
-    if (!_uploadBuffer) return;
+    if (!_buffer.D3DResource) return;
     if (elementIndex + count > _elementCount) return;
-    memcpy(&_mappedData[elementIndex * _elementByteSize], data, sizeof(T) * count);
+
+    if (_bufferType == EBufferType::Upload && _mappedData)
+    {
+        memcpy(&_mappedData[elementIndex * _elementByteSize], data, sizeof(T) * count);
+    }
 }
 
 template<typename T>
@@ -144,35 +203,19 @@ void GDX12UploadBuffer<T>::Resize(UINT newElementCount)
 {
     if (newElementCount <= _elementCount) return;
 
-    UINT newTotalSize = _elementByteSize * newElementCount;
+    UINT oldElementCount = _elementCount;
+    _elementCount = newElementCount;
 
-    D3D12_RESOURCE_DESC resourceDesc = CD3DX12_RESOURCE_DESC::Buffer(newTotalSize);
-    CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
-
-    ComPtr<ID3D12Resource> newBuffer;
-    ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &resourceDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&newBuffer)));
-
-    BYTE* newMappedData = nullptr;
-    ThrowIfFailed(newBuffer->Map(0, nullptr, reinterpret_cast<void**>(&newMappedData)));
-
-    if (_uploadBuffer && _mappedData)
+    if (_bufferType == EBufferType::Upload && _mappedData)
     {
-        memcpy(newMappedData, _mappedData, _elementByteSize * _elementCount);
-        _uploadBuffer->Unmap(0, nullptr);
+        _buffer.D3DResource->Unmap(0, nullptr);
+        _mappedData = nullptr;
     }
 
-    _uploadBuffer = std::move(newBuffer);
-    _mappedData = newMappedData;
-    _elementCount = newElementCount;
-    _totalBufferSize = newTotalSize;
+    CreateBuffer();
 
-    if (_srv) CreateSRV(_heap, _srv->HeapIndex);
+    if (_srv) CreateSRV(_heap, _SRVheapIndex);
+    if (_uav) CreateUAV(_heap, _UAVheapIndex);
 }
 
 template<typename T>
@@ -190,5 +233,6 @@ UINT GDX12UploadBuffer<T>::GetElementSize()
 template<typename T>
 D3D12_GPU_VIRTUAL_ADDRESS GDX12UploadBuffer<T>::GetElementAddress(UINT elementIndex)
 {
-    return _uploadBuffer->GetGPUVirtualAddress() + elementIndex * _elementByteSize;
+    if (!_buffer.D3DResource) return 0;
+    return _buffer.D3DResource->GetGPUVirtualAddress() + elementIndex * _elementByteSize;
 }

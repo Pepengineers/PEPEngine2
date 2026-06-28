@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GeometryBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Material.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderCommandRecorder.h" />
@@ -56,6 +57,15 @@
     <ClCompile Include="src\GDX12RootSignature.cpp" />
     <ClCompile Include="src\GDX12ShaderCompiler.cpp" />
     <ClCompile Include="src\GDX12Texture.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Shaders\BufferClear.hlsl" />
+    <None Include="Shaders\CBufferStructures.hlsl" />
+    <None Include="Shaders\CompositionPass.hlsl" />
+    <None Include="Shaders\Culling.hlsl" />
+    <None Include="Shaders\FullScreenVS.hlsl" />
+    <None Include="Shaders\OpaquePass.hlsl" />
+    <None Include="Shaders\TransparentPass.hlsl" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
@@ -119,9 +129,6 @@
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Pix.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Assimp.props" />
   </ImportGroup>
-  <ItemGroup>
-    <None Include="Shaders\**\*.hlsl" />
-  </ItemGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">

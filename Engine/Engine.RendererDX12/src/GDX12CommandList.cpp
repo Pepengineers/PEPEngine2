@@ -143,8 +143,6 @@ void GDX12CommandList::SetRenderTargets(std::initializer_list<GDX12Texture*> rtv
 
 	for (auto& texture : rtvTextures) { rtvHandles.push_back(texture->GetRTV()->CPUHandle); }
 
-	if (rtvHandles.empty()) { return; }
-
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = {};
 	if (dsvTexture && dsvTexture->GetDSV()) { dsvHandle = dsvTexture->GetDSV()->CPUHandle; }
 
@@ -206,7 +204,7 @@ void GDX12CommandList::SetTextureAsSRV(UINT registerIndex, GDX12Texture* texture
 		texture->GetSRV()->GPUHandle);
 }
 
-void GDX12CommandList::SetSRV(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle)
+void GDX12CommandList::SetGraphicsSRV(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle)
 {
 	_commandList->SetGraphicsRootDescriptorTable(_currentRootSignature->GetTRootParamIndex(registerIndex), 
 		GPUHandle);
@@ -228,6 +226,18 @@ void GDX12CommandList::SetComputeRootUnorderedAccessView(UINT UregisterIndex, D3
 {
 	if (!_currentRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
 	_commandList->SetComputeRootUnorderedAccessView(_currentRootSignature->GetURootParamIndex(UregisterIndex), bufferLocation);
+}
+
+void GDX12CommandList::SetComputeSRV(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle)
+{
+	_commandList->SetComputeRootDescriptorTable(_currentRootSignature->GetTRootParamIndex(registerIndex),
+		GPUHandle);
+}
+
+void GDX12CommandList::SetComputeUAV(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle)
+{
+	_commandList->SetComputeRootDescriptorTable(_currentRootSignature->GetURootParamIndex(registerIndex),
+		GPUHandle);
 }
 
 void GDX12CommandList::SetComputeRootDescriptorTable(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE baseDescriptor)
@@ -255,6 +265,11 @@ void GDX12CommandList::Dispatch(UINT threadGroupCountX, UINT threadGroupCountY, 
 void GDX12CommandList::DispatchRays(const D3D12_DISPATCH_RAYS_DESC* pDesc)
 {
 	_commandList->DispatchRays(pDesc);
+}
+
+void GDX12CommandList::ExecuteIndirect(ID3D12CommandSignature* pCommandSignature, UINT MaxCommandCount, ID3D12Resource* pArgumentBuffer, UINT64 ArgumentBufferOffset, ID3D12Resource* pCountBuffer, UINT64 CountBufferOffset)
+{
+	_commandList->ExecuteIndirect(pCommandSignature, MaxCommandCount, pArgumentBuffer, ArgumentBufferOffset, pCountBuffer, CountBufferOffset);
 }
 
 void GDX12CommandList::ResourceBarrier(std::initializer_list<CD3DX12_RESOURCE_BARRIER> barriers)

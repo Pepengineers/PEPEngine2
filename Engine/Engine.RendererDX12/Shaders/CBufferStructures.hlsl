@@ -19,19 +19,28 @@ struct Material
 {
     float Roughness;
     float Metallic;
+    float Opacity;
     uint DiffuseIndex;
     uint NormalIndex;
     uint DisplacementIndex;
+    uint RenderLayer; // 0 - opaque, 1 - masked, 2 - transparent
+    float _pad0;
     float _pad1;
     float _pad2;
     float _pad3;
+    float _pad4;
 };
 
 struct CameraCB
 {
     float4x4 ViewProj;
+    float4x4 View;
     float3 CameraLocation;
+    float NearPlane;
+    float FarPlane;
     float _pad1;
+    float _pad2;
+    float _pad3;
 };
 
 struct LightCB
@@ -58,4 +67,23 @@ struct InstanceData
     uint MaterialIndex;
     uint _pad1;
     uint _pad2;
+    float3 BoundingBoxCenter;
+    uint _pad3;
+    float3 BoundingBoxExtents;
+    uint _pad4;
+};
+
+struct IndirectDrawArgs
+{
+    uint InstanceID;
+    uint IndexCountPerInstance;
+    uint InstanceCount;
+    uint StartIndexLocation;
+    int BaseVertexLocation;
+    uint StartInstanceLocation;
+};
+
+struct IndirectConstants
+{
+    uint InstanceID;
 };

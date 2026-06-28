@@ -21,6 +21,8 @@ public:
     CD3DX12_RESOURCE_BARRIER GetGenericReadBarrier();
     CD3DX12_RESOURCE_BARRIER GetCommonBarrier();
     CD3DX12_RESOURCE_BARRIER GetPresentBarrier();
+    CD3DX12_RESOURCE_BARRIER GetIndirectArgsBarrier();
+    CD3DX12_RESOURCE_BARRIER GetUAVBarrier();
 
     void SetCurrentState(D3D12_RESOURCE_STATES newState);
     D3D12_RESOURCE_STATES GetCurrentState();

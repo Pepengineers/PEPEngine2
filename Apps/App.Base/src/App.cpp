@@ -371,6 +371,6 @@ void App::Update(const GameTimer& gameTimer)
     OnKeyboardInput(gameTimer);
     //explicitly specifying update order since it is not the same
     // as the initialization order (that is used by the locator)
-    Locator.GetModule<SceneManagerModule>()->Update();
     Locator.GetModule<RenderModule>()->Update();
+    Locator.GetModule<SceneManagerModule>()->Update();
 }

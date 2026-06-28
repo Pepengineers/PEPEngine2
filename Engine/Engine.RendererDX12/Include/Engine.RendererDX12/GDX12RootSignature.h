@@ -21,6 +21,7 @@ struct GDX12RootSignatureDesc
 	std::vector<GDX12RootSignatureRange> SRVRanges;
 	std::vector<GDX12RootSignatureRange> UAVRanges;
 	std::vector<GDX12RootSignatureRange> CBVRanges;
+	std::vector<UINT> Constants;
 };
 
 class GDX12RootSignature

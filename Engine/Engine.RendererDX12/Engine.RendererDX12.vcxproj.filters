@@ -72,6 +72,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp">

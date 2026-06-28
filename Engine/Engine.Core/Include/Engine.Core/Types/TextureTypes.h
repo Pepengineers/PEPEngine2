@@ -19,6 +19,14 @@ namespace Engine::Core
 		TextureCube = 4,
 	};
 
+	/// Describes how texture pixels should be interpreted by the renderer.
+	enum class ETextureType : std::uint8_t
+	{
+		Unknown = 0,
+		Color = 1,
+		Data = 2,
+	};
+
 	/// Raw data for one texture subresource.
 	/// One subresource corresponds to exactly one mip level of one array slice.
 	struct SubTexture
@@ -44,6 +52,7 @@ namespace Engine::Core
 	struct TextureDesc
 	{
 		ETextureDimension Dimension = ETextureDimension::Unknown;
+		ETextureType Type = ETextureType::Unknown;
 		DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
 		std::uint32_t Width = 0;
 		std::uint32_t Height = 0;
@@ -61,6 +70,12 @@ namespace Engine::Core
 
 		/// Returns the logical shape of the texture.
 		[[nodiscard]] ETextureDimension GetDimension() const;
+
+		/// Returns how texture pixels should be interpreted by the renderer.
+		[[nodiscard]] ETextureType GetType() const;
+
+		/// Returns a copy of this texture with the given semantic type.
+		[[nodiscard]] Texture WithType(ETextureType type) const;
 
 		/// Returns the DXGI pixel format of the texture.
 		[[nodiscard]] DXGI_FORMAT GetFormat() const;

@@ -28,6 +28,13 @@ class Window;
 
 using namespace Engine::Core;
 
+struct TransformCompGPUData
+{
+    UINT CBufferIndex;
+    UINT NumFramesDirty;
+    Matrix World;
+};
+
 class RenderModule final : public Module
 {
 public:
@@ -65,7 +72,9 @@ public:
         ListenerHandle RenderCompDestroyed = 0;
         ListenerHandle RenderCompUpdated = 0;
     };
-    
+
+    TransformCompGPUData& GetTransformGPUData(Entity entity);
+
     // this function adds listeners to new world
     void SubscribeToWorld(World& world);
     // unsubscribing if world is removed
@@ -90,7 +99,6 @@ public:
     GDX12RenderCommandRecorder* GetCommandRecorder();
     GDX12FrameConstants* GetCurrentFrameConstants();
     const GPUMesh* GetGPUMesh(MeshHandle handle);
-    GDX12UploadBuffer<GDX12InstanceData>* GetInstanceCache();
     GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetIndirectCommandsCache();
 
 protected:
@@ -120,7 +128,7 @@ private:
     ListenerHandle _worldCreatedListener = 0;
     ListenerHandle _worldDestroyedListener = 0;
     
-    
+    std::unordered_map<Entity, TransformCompGPUData> _transformGPUData;
     std::unordered_map<World*, WorldRenderSubscriptions> _worldSubscriptions;
 
     GDX12RenderCommandRecorder _commandRecorder;
@@ -144,17 +152,20 @@ private:
     std::vector<std::unique_ptr<GDX12FrameConstants>> _frameConstants;
     UINT _currFrameConstantsIndex;
 
-    std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> _instanceCache;
     std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> _IndirectCommandsCache;
-    ComPtr<ID3D12CommandSignature> _commandSignature;
 
     std::unordered_map<std::string, ComPtr<ID3DBlob>> _shaders;
     std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> _PSOs;
     std::unordered_map<std::string, std::unique_ptr<GDX12RootSignature>> _rootSignatures;
+    std::unordered_map <std::string, ComPtr<ID3D12CommandSignature>> _commandSignatures;
 
     std::unordered_map<std::string, std::unique_ptr<GDX12Texture>> _textures;
 
     // These two resources are made on _primaryDevice only
     std::unique_ptr<GDX12SwapChain> _backBuffer;
     std::unique_ptr<GDX12Texture> _depthStencil;
+
+    std::unique_ptr<GDX12Texture> _opaqueAccumTexture;
+    std::unique_ptr<GDX12Texture> _transparencyAccumTexture;
+    std::unique_ptr<GDX12Texture> _transparencyRevealageTexture;
 };
