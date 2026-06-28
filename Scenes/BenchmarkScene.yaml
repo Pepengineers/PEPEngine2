@@ -1,0 +1,6 @@
+Scene:
+  Name: BenchmarkScene
+
+  Worlds:
+    - Name: MainWorld
+      Path: Worlds/BistroBenchmark.world

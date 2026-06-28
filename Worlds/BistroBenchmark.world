@@ -1,0 +1,158 @@
+World:
+  Name: BistroBenchmarkWorld
+
+  Systems:
+    - Name: MovementSystem
+      Priority: 0
+
+    - Name: CircleMovementSystem
+      Priority: 1
+
+    - Name: SplineFollowSystem
+      Priority: 2
+
+    - Name: LookAtTargetSystem
+      Priority: 3
+
+    - Name: GPUDataUpdateSystem
+      Priority: 101
+
+    - Name: RenderSubmitSystem
+      Priority: 102
+
+  Resources:
+    Meshes:
+      - Id: BistroInteriorMesh
+        Source: Assets/Scenes/Amazon Lumberyard Bistro/Interior/interior.obj
+        SubmitToRenderer: true
+        ImportMaterials: true
+
+  Entities:
+    - Id: BistroInterior
+      Components:
+        Name:
+          Value: BistroInterior
+
+        Transform:
+          Location: [0.0, 0.0, 0.0]
+          Rotation: [0.0, 0.0, 0.0]
+          Scale: [1.0, 1.0, 1.0]
+
+        StaticMeshRender:
+          Mesh: BistroInteriorMesh
+
+    - Id: MarkerSpline
+      Components:
+        Name:
+          Value: MarkerSpline
+
+        SplineCurve:
+          Loop: false
+          Points:
+            - Position: [491.0, 200.0, -661.0]
+              ArriveTangent: [0.0, 0.0, 0.0]
+              LeaveTangent: [-127.0, -23.333, 46.0]
+
+            - Position: [110.0, 130.0, -523.0]
+              ArriveTangent: [84.667, 11.667, -73.0]
+              LeaveTangent: [-84.667, -11.667, 73.0]
+
+            - Position: [-17.0, 130.0, -223.0]
+              ArriveTangent: [-11.0, 0.0, -101.833]
+              LeaveTangent: [11.0, 0.0, 101.833]
+
+            - Position: [176.0, 130.0, 88.0]
+              ArriveTangent: [-82.667, -8.333, -48.333]
+              LeaveTangent: [82.667, 8.333, 48.333]
+
+            - Position: [479.0, 180.0, 67.0]
+              ArriveTangent: [-109.0, -11.667, 11.833]
+              LeaveTangent: [109.0, 11.667, -11.833]
+
+            - Position: [830.0, 200.0, 17.0]
+              ArriveTangent: [-5.667, 5.0, 55.833]
+              LeaveTangent: [5.667, -5.0, -55.833]
+
+            - Position: [513.0, 150.0, -268.0]
+              ArriveTangent: [105.667, 16.667, 95.0]
+              LeaveTangent: [0.0, 0.0, 0.0]
+
+    - Id: marker
+      Components:
+        Name:
+          Value: marker
+
+        Transform:
+          Location: [491.0, 200.0, -661.0]
+          Rotation: [0.0, 0.0, 0.0]
+          Scale: [1.0, 1.0, 1.0]
+
+        SplineFollow:
+          Curve: MarkerSpline
+          Duration: 18.0
+          Loop: true
+          Playing: true
+          Time: 0.0
+
+    - Id: MainCameraSpline
+      Components:
+        Name:
+          Value: MainCameraSpline
+
+        SplineCurve:
+          Loop: false
+          Points:
+            - Position: [769.0, 200.0, -914.0]
+              ArriveTangent: [0.0, 0.0, 0.0]
+              LeaveTangent: [-96.0, 0.0, 87.333]
+
+            - Position: [481.0, 200.0, -652.0]
+              ArriveTangent: [84.5, 0.0, -63.333]
+              LeaveTangent: [-84.5, 0.0, 63.333]
+
+            - Position: [262.0, 200.0, -534.0]
+              ArriveTangent: [57.333, 0.0, -67.667]
+              LeaveTangent: [-57.333, 0.0, 67.667]
+
+            - Position: [137.0, 200.0, -246.0]
+              ArriveTangent: [-0.333, 0.0, -82.333]
+              LeaveTangent: [0.333, 0.0, 82.333]
+
+            - Position: [264.0, 200.0, -40.0]
+              ArriveTangent: [-76.5, 0.0, -60.0]
+              LeaveTangent: [76.5, 0.0, 60.0]
+
+            - Position: [596.0, 200.0, 114.0]
+              ArriveTangent: [-108.0, 0.0, -52.167]
+              LeaveTangent: [108.0, 0.0, 52.167]
+
+            - Position: [912.0, 200.0, 273.0]
+              ArriveTangent: [-105.333, 0.0, -53.0]
+              LeaveTangent: [0.0, 0.0, 0.0]
+
+    - Id: MainCamera
+      Components:
+        Name:
+          Value: MainCamera
+
+        Transform:
+          Location: [769.0, 200.0, -914.0]
+          Rotation: [0.0, 180.0, 0.0]
+          Scale: [1.0, 1.0, 1.0]
+
+        Camera:
+          FOV: 60.0
+          NearPlane: 0.1
+          FarPlane: 10000.0
+
+        LookAtTarget:
+          Target: marker
+
+        SplineFollow:
+          Curve: MainCameraSpline
+          Duration: 18.0
+          Loop: true
+          Playing: true
+          Time: 0.0
+
+  ActiveCamera: MainCamera

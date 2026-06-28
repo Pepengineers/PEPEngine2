@@ -51,6 +51,7 @@ Debug/
 Release/
 
 Build/
+Saved/
 
 !External/**/Debug/
 External/**/Debug/**

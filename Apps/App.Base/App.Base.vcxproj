@@ -20,6 +20,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\App.Base\App.h" />
+    <ClInclude Include="Include\App.Base\ECS\AppConfig.h" />
+    <ClInclude Include="Include\App.Base\ECS\AppConfigLoader.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\CameraComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\CircleMovementComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\LookAtTargetComponent.h" />
@@ -30,6 +32,8 @@
     <ClInclude Include="Include\App.Base\ECS\Components\TransformComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\VelocityComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\World.h" />
+    <ClInclude Include="Include\App.Base\ECS\WorldConfig.h" />
+    <ClInclude Include="Include\App.Base\ECS\WorldLoadContext.h" />
     <ClInclude Include="Include\App.Base\ECS\WorldLoader.h" />
     <ClInclude Include="Include\App.Base\Modules\EventManagerModule.h" />
     <ClInclude Include="Include\App.Base\Modules\RenderModule.h" />
@@ -45,6 +49,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
+    <ClCompile Include="src\ECS\AppConfigLoader.cpp" />
     <ClCompile Include="src\RenderModule.cpp" />
     <ClCompile Include="src\SceneManagerModule.cpp" />
     <ClCompile Include="src\SceneTraversal.cpp" />

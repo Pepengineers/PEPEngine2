@@ -25,6 +25,11 @@ protected:
     void OnMouseDown(WPARAM btnState, int x, int y) override;
     void OnMouseUp(WPARAM btnState, int x, int y) override;
     void OnMouseMove(WPARAM btnState, int x, int y) override;
+    
+    std::string GetAppConfigPath() const override
+    {
+        return "Configs/App.Benchmark/App.yaml";
+    }
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, int showCmd)

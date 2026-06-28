@@ -1,0 +1,8 @@
+App:
+  Name: App.Benchmark
+  Type: Benchmark
+  StartScene: Scenes/BenchmarkScene.yaml
+
+  SystemsBanlist:
+    - FreeCameraSystem
+    - InputSystem

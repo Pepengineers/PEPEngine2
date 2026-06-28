@@ -2,6 +2,11 @@
 
 #include <App.Base/App.h>
 #include <WindowsX.h>
+#include "App.Base/ECS/AppConfigLoader.h"
+#include "Common/Logger.h"
+
+#include <filesystem>
+#include <string>
 
 using Microsoft::WRL::ComPtr;
 using namespace std;
@@ -109,21 +114,26 @@ int App::Run()
 
 bool App::Initialize()
 {
-    WNDCLASS WindowClass = {};
-    WindowClass.style = CS_HREDRAW | CS_VREDRAW;
-    WindowClass.lpfnWndProc = Private::MainWndProc;
-    WindowClass.cbClsExtra = 0;
-    WindowClass.cbWndExtra = 0;
-    WindowClass.hInstance = AppHandler;
-    WindowClass.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
-    WindowClass.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    WindowClass.hbrBackground = static_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
-    WindowClass.lpszMenuName = nullptr;
-    WindowClass.lpszClassName = L"MainWnd";
+    Logger::Init();
+    
+    try {
+        _AppConfig = AppConfigLoader::LoadAppConfig(GetAppConfigPath());
+    }
+    catch (const std::exception& exception) {
+        Logger::Error("LoadAppConfig failed: {}", exception.what());
+        return false;
+    }
 
-    if (!RegisterClass(&WindowClass))
+    Logger::Info("App::Initialize after LoadAppConfig.\nStartScene = {}", _AppConfig.StartScene);
+
+    if (_AppConfig.StartScene.empty())
     {
-        MessageBox(nullptr, L"RegisterClass Failed.", nullptr, 0);
+        Logger::Error("App::Initialize failed: App config StartScene is empty.");
+        return false;
+    }
+
+    if (!InitWindowClass())
+    {
         return false;
     }
 
@@ -132,7 +142,21 @@ bool App::Initialize()
         return false;
     }
 
-    return BenchmarkEngine::Initialize();
+    Logger::Info("App::Initialize before BenchmarkEngine::Initialize");
+
+    if (!BenchmarkEngine::Initialize())
+    {
+        return false;
+    }
+
+    Logger::Info("App::Initialize before LoadStartScene");
+
+    if (!LoadStartScene())
+    {
+        return false;
+    }
+
+    return true;
 }
 
 LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -291,6 +315,42 @@ void App::OnResize()
     if (!RenderSystem) { return; }
 
     RenderSystem->OnResize();
+}
+
+bool App::InitWindowClass()
+{
+    WNDCLASS WindowClass = {};
+    WindowClass.style = CS_HREDRAW | CS_VREDRAW;
+    WindowClass.lpfnWndProc = Private::MainWndProc;
+    WindowClass.cbClsExtra = 0;
+    WindowClass.cbWndExtra = 0;
+    WindowClass.hInstance = AppHandler;
+    WindowClass.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+    WindowClass.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    WindowClass.hbrBackground = static_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
+    WindowClass.lpszMenuName = nullptr;
+    WindowClass.lpszClassName = L"MainWnd";
+
+    if (!RegisterClass(&WindowClass))
+    {
+        Logger::Error("RegisterClass failed.");
+        return false;
+    }
+
+    return true;
+}
+
+bool App::LoadStartScene()
+{
+    auto sceneManager = Locator.GetModule<SceneManagerModule>();
+
+    if (!sceneManager)
+    {
+        Logger::Error("SceneManagerModule not found.");
+        return false;
+    }
+
+    return sceneManager->LoadScene(_AppConfig.StartScene, _AppConfig);
 }
 
 bool App::InitMainWindow()
