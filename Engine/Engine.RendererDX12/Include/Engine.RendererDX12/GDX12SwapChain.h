@@ -12,7 +12,7 @@ class GDX12SwapChain : public IRenderPassLink
 public:
     GDX12SwapChain(GDX12Device* device, HWND hwnd,
         DXGI_FORMAT format, UINT bufferCount, UINT width, UINT height, 
-        GDX12DescriptorHeap* rtvHeap, bool VSync);
+        GDX12DescriptorHeap* rtvHeap);
     ~GDX12SwapChain();
 
     void Resize(UINT width, UINT height);
@@ -32,6 +32,8 @@ public:
 
     void Reset();
 
+    bool bVSyncEnabled;
+
 private:
     void CreateBuffers();
 
@@ -50,5 +52,4 @@ private:
 
     D3D12_VIEWPORT _screenViewport;
     D3D12_RECT _screenScissorRect;
-    bool _VSync;
 };
