@@ -609,7 +609,7 @@ void RenderModule::BuildBackBuffer()
     _window->GetWindowSize(width, height);
 
     _backBuffer = std::make_unique<GDX12SwapChain>(_primaryDevice.get(), _window->GetWindowHandle(),
-        DXGI_FORMAT_R8G8B8A8_UNORM, 2, width, height, _primaryResources.RTVHeap.get());
+        DXGI_FORMAT_R8G8B8A8_UNORM, 2, width, height, _primaryResources.RTVHeap.get(), false);
 
     GDX12TextureDesc desc;
     desc.CreateSRV = false;

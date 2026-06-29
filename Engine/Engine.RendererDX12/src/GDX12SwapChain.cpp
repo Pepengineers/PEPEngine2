@@ -6,10 +6,10 @@
 #include <Engine.RendererDX12/GDX12DescriptorHeap.h>
 
 GDX12SwapChain::GDX12SwapChain(GDX12Device* device, HWND hwnd,
-    DXGI_FORMAT format, UINT bufferCount, UINT width, UINT height, GDX12DescriptorHeap* rtvHeap)
+    DXGI_FORMAT format, UINT bufferCount, UINT width, UINT height, GDX12DescriptorHeap* rtvHeap, bool vSync)
     : _device(device), _hwnd(hwnd),
     _format(format), _bufferCount(bufferCount), _currentBufferIndex(0),
-    _width(width), _height(height), _rtvHeap(rtvHeap)
+    _width(width), _height(height), _rtvHeap(rtvHeap), _VSync(vSync)
 {
     Reset();
 
@@ -108,7 +108,9 @@ void GDX12SwapChain::Resize(UINT width, UINT height)
 
 void GDX12SwapChain::Present()
 {
-    _swapChain->Present(0u, DXGI_PRESENT_ALLOW_TEARING);
+    UINT syncInterval = _VSync ? 1 : 0;
+    UINT presentFlags = _VSync ? 0 : DXGI_PRESENT_ALLOW_TEARING;
+    _swapChain->Present(syncInterval, presentFlags);
     _currentBufferIndex = (_currentBufferIndex + 1) % _bufferCount;
 }
 
