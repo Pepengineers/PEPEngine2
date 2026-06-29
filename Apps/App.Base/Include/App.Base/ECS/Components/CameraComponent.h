@@ -2,12 +2,15 @@
 
 #include "Engine.Core/ECS/Component.h"
 #include <cstdint>
+#include "Engine.RendererDX12/D3DHelpers.h"
 
 struct CameraComponent : ComponentTag
 {
     float FOV;
     float NearPlane;
     float FarPlane;
+    XMFLOAT4X4 ViewProj;
+    XMFLOAT4X4 PrevViewProj;
 
     bool DirtyFlag;
 

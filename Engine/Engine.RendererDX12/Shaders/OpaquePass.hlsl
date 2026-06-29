@@ -27,6 +27,7 @@ struct VS_INPUT
 struct VS_OUTPUT_PS_INPUT
 {
     float4 PosCS : SV_POSITION;
+    float4 PrevPosCS : TEXCOORD2;
     float3 PosW : POSITION;
     float2 TexC : TEXCOORD;
     float3 Normal : NORMAL;
@@ -39,32 +40,44 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
     VS_OUTPUT_PS_INPUT vout = (VS_OUTPUT_PS_INPUT) 0.0f;
 	
     InstanceData instance = InstanceCache[CBIndirectConstants.InstanceID];
-    float4x4 World = TransformCache[instance.TransformIndex].World;
+    Transform transform = TransformCache[instance.TransformIndex];
     
-    float4 posW = mul(float4(vin.Pos, 1.0f), World);
+    float4 posW = mul(float4(vin.Pos, 1.0f), transform.World);
     vout.PosW = posW.xyz;
 
     // Assumes nonuniform scaling; otherwise, need to use inverse-transpose of world matrix.
-    vout.Normal = normalize(mul(vin.Normal, (float3x3) World));
-    vout.Tangent = normalize(mul(vin.Tangent, (float3x3) World));
+    vout.Normal = normalize(mul(vin.Normal, (float3x3) transform.World));
+    vout.Tangent = normalize(mul(vin.Tangent, (float3x3) transform.World));
     vout.PosCS = mul(posW, CBCamera.ViewProj);
-    vout.TexC = vin.TexC;
     
+    float4 prevPosW = mul(float4(vin.Pos, 1.0f), transform.PrevWorld);
+    vout.PrevPosCS = mul(prevPosW, CBCamera.PrevViewProj);
+    
+    vout.TexC = vin.TexC;
     vout.MaterialIndex = instance.MaterialIndex;
     
     return vout;
 }
 
-float4 PS(VS_OUTPUT_PS_INPUT pin) : SV_Target
+struct PS_OUTPUT
 {
+    float4 Color : SV_TARGET0;
+    float2 Velocity : SV_TARGET1;
+};
+
+PS_OUTPUT PS(VS_OUTPUT_PS_INPUT pin)
+{
+    PS_OUTPUT output;
+    
     Material material = MaterialCache[pin.MaterialIndex];
     float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
     
-    if (material.RenderLayer == 1)
-    {
-        float alpha = color.a * material.Opacity;
-        clip(alpha - 0.5f);
-    }
+    float2 currentNDC = pin.PosCS.xy / pin.PosCS.w;
+    float2 prevNDC = pin.PrevPosCS.xy / pin.PrevPosCS.w;
+    float2 velocity = currentNDC - prevNDC;
 
-    return float4(color.rgb, 1.0f);
+    output.Color = float4(color.rgb, 1.0f);
+    output.Velocity = velocity;
+    
+    return output;
 }

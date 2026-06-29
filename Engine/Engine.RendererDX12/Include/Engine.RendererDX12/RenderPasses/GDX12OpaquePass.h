@@ -9,7 +9,7 @@ public:
 		_flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_GEOMETRY | RENDER_PASS_FLAG_USE_MATERIALS;
 	}
 
-	void Initialize(GDX12DeviceResources* resources, DXGI_FORMAT outRTVformat, DXGI_FORMAT outDSVFormat, UINT outWidth, UINT outHeight)
+	void Initialize(GDX12DeviceResources* resources, DXGI_FORMAT outDSVFormat, UINT outWidth, UINT outHeight)
 	{
 		_resources = resources;
 
@@ -37,6 +37,12 @@ public:
 		TextureDesc1.RTVDesc.Texture2D.MipSlice = 0;
 
 		_accumulationTexture = std::make_unique<GDX12Texture>(TextureDesc1);
+
+		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R16G16_FLOAT;
+		TextureDesc1.RTVHeapIndex = _resources->RTVHeap->GetAvailableIndex();
+		TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+
+		_velocityBuffer = std::make_unique<GDX12Texture>(TextureDesc1);
 
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
@@ -86,8 +92,9 @@ public:
 		PSODesc1.RasterizerState.FrontCounterClockwise = TRUE;
 		PSODesc1.SampleMask = UINT_MAX;
 		PSODesc1.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-		PSODesc1.NumRenderTargets = 1;
-		PSODesc1.RTVFormats[0] = outRTVformat;
+		PSODesc1.NumRenderTargets = 2;
+		PSODesc1.RTVFormats[0] = _accumulationTexture->GetFormat();
+		PSODesc1.RTVFormats[1] = _velocityBuffer->GetFormat();
 		PSODesc1.SampleDesc.Count = 1;
 		PSODesc1.SampleDesc.Quality = 0;
 		PSODesc1.DSVFormat = outDSVFormat;
@@ -99,7 +106,7 @@ public:
 	// VisibilityBuffers will automatically be selected from CameraCBIndex
 	// It requires GPUCullingPass to be executed beforehand
 	void Execute(GDX12CommandList* cmdList, UINT IN_CameraCBIndex, GDX12Texture* IN_DepthStencil,
-		GDX12Texture*& OUT_Accumulation)
+		GDX12Texture*& OUT_Accumulation, GDX12Texture*& OUT_Velocity)
 	{
 		auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
 		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[IN_CameraCBIndex];
@@ -113,9 +120,11 @@ public:
 		cmdList->SetGraphicsRootConstantBufferView(1, currentFrameConstants->MainCB->GetElementAddress(0));
 		cmdList->SetGraphicsRootConstantBufferView(2, currentFrameConstants->CameraCB->
 			GetElementAddress(IN_CameraCBIndex));
-		cmdList->ResourceBarrier({ _accumulationTexture->GetResource()->GetRenderTargetBarrier() });
-		cmdList->SetRenderTargets({ _accumulationTexture.get() }, IN_DepthStencil);
+		cmdList->ResourceBarrier({ _accumulationTexture->GetResource()->GetRenderTargetBarrier(),
+			_velocityBuffer->GetResource()->GetRenderTargetBarrier() });
+		cmdList->SetRenderTargets({ _accumulationTexture.get(), _velocityBuffer.get() }, IN_DepthStencil);
 		cmdList->ClearRenderTargetView(_accumulationTexture.get());
+		cmdList->ClearRenderTargetView(_velocityBuffer.get());
 		cmdList->SetGeometryBuffer(_resources->GeometryBuffer.get());
 		cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		cmdList->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
@@ -126,15 +135,18 @@ public:
 		cmdList->ExecuteIndirect(_opaqueCS.Get(), _resources->IndirectCommandsCache->GetElementCount(),
 			currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().D3DResource.Get(), 0,
 			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().D3DResource.Get(), 0);
-		cmdList->ResourceBarrier({ _accumulationTexture->GetResource()->GetSRVBarrier() });
+		cmdList->ResourceBarrier({ _accumulationTexture->GetResource()->GetSRVBarrier(),
+			_velocityBuffer->GetResource()->GetSRVBarrier() });
 		cmdList->EndPixEvent();
 
 		OUT_Accumulation = _accumulationTexture.get();
+		OUT_Velocity = _velocityBuffer.get();
 	}
 
 	void Resize(UINT width, UINT height) override
 	{
 		_accumulationTexture->Resize(width, height);
+		_velocityBuffer->Resize(width, height);
 	}
 
 private:
@@ -145,4 +157,5 @@ private:
 	ComPtr<ID3D12PipelineState> _opaquePSO;
 
 	std::unique_ptr<GDX12Texture> _accumulationTexture;
+	std::unique_ptr<GDX12Texture> _velocityBuffer;
 };

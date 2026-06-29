@@ -16,8 +16,6 @@ public:
 		cmdList->BeginPixEvent("Clear Back Buffer", Colors::Aqua);
 		cmdList->SetViewport(IN_OUT_currentBackBuffer->GetViewport());
 		cmdList->SetScissorRect(IN_OUT_currentBackBuffer->GetScissorRect());
-		cmdList->EnhancedTextureBarrier({ IN_OUT_currentBackBuffer->GetResource()->GetRenderTargetEnhBarrier() });
-		cmdList->ResourceBarrier({ IN_OUT_depthStencil->GetResource()->GetDepthWriteBarrier() });
 		cmdList->SetRenderTargets({ IN_OUT_currentBackBuffer }, IN_OUT_depthStencil);
 		cmdList->ClearRenderTargetView(IN_OUT_currentBackBuffer);
 		cmdList->ClearDepthStencilView(IN_OUT_depthStencil);

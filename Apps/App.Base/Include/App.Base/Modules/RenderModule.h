@@ -30,6 +30,7 @@ struct TransformCompGPUData
     UINT CBufferIndex = -1;
     UINT NumFramesDirty = -1;
     Matrix World = Identity4x4();
+    Matrix PrevWorld = Identity4x4();
 };
 
 class RenderModule final : public Module

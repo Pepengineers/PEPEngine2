@@ -12,6 +12,7 @@ struct GDX12MainConstants
 struct GDX12TransformConstants
 {
     XMFLOAT4X4 WorldMatrix = Identity4x4();
+    XMFLOAT4X4 PrevWorldMatrix = Identity4x4();
 };
 
 struct GDX12MaterialConstants
@@ -34,6 +35,7 @@ struct GDX12CameraConstants
 {
     XMFLOAT4X4 ViewProj = Identity4x4();
     XMFLOAT4X4 View = Identity4x4();
+    XMFLOAT4X4 PrevViewProj = Identity4x4();
     XMFLOAT3 CameraLocation = { 0.f, 0.f, 0.f };
     float NearPlane;
     float FarPlane;

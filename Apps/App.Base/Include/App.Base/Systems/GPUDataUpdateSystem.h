@@ -55,12 +55,16 @@ public:
                     proj._33 = range;
                     proj._43 = range * camera.FarPlane;
 
+                    camera.ViewProj = view * proj;
+
                     GDX12CameraConstants objConstants;
                     XMStoreFloat4x4(&objConstants.ViewProj, XMMatrixTranspose(view * proj));
                     XMStoreFloat4x4(&objConstants.View, XMMatrixTranspose(view));
                     objConstants.CameraLocation = transform.Location;
                     objConstants.NearPlane = camera.NearPlane;
                     objConstants.FarPlane = camera.FarPlane;
+                    objConstants.PrevViewProj = camera.PrevViewProj;
+                    XMStoreFloat4x4(&camera.PrevViewProj, XMMatrixTranspose(view * proj));
 
                     auto& CBuffer = renderModule->GetCurrentPrimaryFrameConstants()->CameraCB;
                     CBuffer->CopyData(camera._CBufferIndex, objConstants);
@@ -92,6 +96,9 @@ public:
 
 					GDX12TransformConstants objConstants;
 					XMStoreFloat4x4(&objConstants.WorldMatrix, XMMatrixTranspose(world));
+                    XMStoreFloat4x4(&objConstants.PrevWorldMatrix, XMMatrixTranspose(GPUData.PrevWorld));
+
+                    XMStoreFloat4x4(&GPUData.PrevWorld, world);
 
                     auto& CBuffer = renderModule->GetCurrentPrimaryFrameConstants()->TransformCache;
                     CBuffer->CopyData(GPUData.CBufferIndex, objConstants);

@@ -13,6 +13,7 @@ struct MainCB
 struct Transform
 {
     float4x4 World;
+    float4x4 PrevWorld;
 };
 
 struct Material
@@ -35,6 +36,7 @@ struct CameraCB
 {
     float4x4 ViewProj;
     float4x4 View;
+    float4x4 PrevViewProj;
     float3 CameraLocation;
     float NearPlane;
     float FarPlane;
