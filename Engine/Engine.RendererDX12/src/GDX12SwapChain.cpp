@@ -7,14 +7,9 @@
 
 GDX12SwapChain::GDX12SwapChain(GDX12Device* device, HWND hwnd,
     DXGI_FORMAT format, UINT bufferCount, UINT width, UINT height, GDX12DescriptorHeap* rtvHeap)
-    : _device(device)
-    , _hwnd(hwnd)
-    , _format(format)
-    , _bufferCount(bufferCount)
-    , _currentBufferIndex(0)
-    , _width(width)
-    , _height(height)
-    , _rtvHeap(rtvHeap)
+    : _device(device), _hwnd(hwnd),
+    _format(format), _bufferCount(bufferCount), _currentBufferIndex(0),
+    _width(width), _height(height), _rtvHeap(rtvHeap)
 {
     Reset();
 
@@ -125,6 +120,11 @@ D3D12_VIEWPORT GDX12SwapChain::GetViewport()
 D3D12_RECT GDX12SwapChain::GetScissorRect()
 {
     return _screenScissorRect;
+}
+
+GDX12Texture* GDX12SwapChain::GetTexture()
+{
+    return GetCurrentBuffer();
 }
 
 DXGI_FORMAT GDX12SwapChain::GetFormat()

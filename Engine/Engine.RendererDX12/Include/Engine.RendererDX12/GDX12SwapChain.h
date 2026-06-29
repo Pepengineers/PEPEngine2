@@ -1,12 +1,13 @@
 #pragma once
 
 #include "Engine.RendererDX12/D3DHelpers.h"
+#include "Engine.RendererDX12/IRenderPassLink.h"
 
 class GDX12Device;
 class GDX12Texture;
 class GDX12DescriptorHeap;
 
-class GDX12SwapChain
+class GDX12SwapChain : public IRenderPassLink
 {
 public:
     GDX12SwapChain(GDX12Device* device, HWND hwnd,
@@ -25,6 +26,7 @@ public:
     GDX12Texture* GetBuffer(UINT index);
     D3D12_VIEWPORT GetViewport();
     D3D12_RECT GetScissorRect();
+    GDX12Texture* GetTexture() override;
 
     const ComPtr<IDXGISwapChain4>& GetSwapChain();
 

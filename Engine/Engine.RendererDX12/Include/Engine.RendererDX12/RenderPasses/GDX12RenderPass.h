@@ -9,6 +9,7 @@
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
+#include "Engine.RendererDX12/IRenderPassLink.h"
 
 enum ERenderPassFlags : uint32_t
 {
@@ -24,8 +25,9 @@ class GDX12RenderPass
 {
 public:
     GDX12RenderPass() : _flags(RENDER_PASS_FLAG_NONE), _resources(nullptr) {}
-
+    virtual void Initialize(GDX12DeviceResources* resources, UINT width, UINT height) {};
     virtual void Resize(UINT width, UINT height) {};
+    virtual void Execute(GDX12CommandList* cmdList) {};
 
     uint32_t GetFlags() { return _flags; }
 

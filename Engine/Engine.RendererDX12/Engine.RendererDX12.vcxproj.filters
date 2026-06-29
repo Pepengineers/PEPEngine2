@@ -93,6 +93,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OpaquePass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\IRenderPassLink.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp">

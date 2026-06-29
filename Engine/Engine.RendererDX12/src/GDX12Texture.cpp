@@ -127,6 +127,21 @@ D3D12_RECT GDX12Texture::GetScissorRect()
     return _scissorRect;
 }
 
+UINT GDX12Texture::GetWidth()
+{
+    return _desc.Width;
+}
+
+UINT GDX12Texture::GetHeight()
+{
+    return _desc.Height;
+}
+
+GDX12Texture* GDX12Texture::GetTexture()
+{
+    return this;
+}
+
 void GDX12Texture::CreateResource()
 {
     D3D12_RESOURCE_DESC resourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(

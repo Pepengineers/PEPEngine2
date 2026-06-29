@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12\D3DHelpers.h"
 
 #include "Engine.Core/Types/TextureTypes.h"
+#include "Engine.RendererDX12/IRenderPassLink.h"
 
 class GDX12Descriptor;
 class GDX12DescriptorHeap;
@@ -62,7 +63,7 @@ struct GDX12TextureDesc
 	ComPtr<ID3D12Resource> ExternalResource = nullptr;
 };
 
-class GDX12Texture
+class GDX12Texture : public IRenderPassLink
 {
 public:
 	GDX12Texture(GDX12TextureDesc desc);
@@ -82,7 +83,9 @@ public:
 	ETextureSemantic GetSemantic() const;
 	D3D12_VIEWPORT GetViewport();
 	D3D12_RECT GetScissorRect();
-
+	UINT GetWidth();
+	UINT GetHeight();
+	GDX12Texture* GetTexture() override;
 
 private:
 	void CreateResource();

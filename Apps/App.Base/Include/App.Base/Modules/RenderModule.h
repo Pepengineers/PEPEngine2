@@ -128,7 +128,7 @@ private:
     
     std::unordered_map<Entity, TransformCompGPUData> _transformGPUData;
     std::unordered_map<World*, WorldRenderSubscriptions> _worldSubscriptions;
-    CameraComponent* _activeCamera;
+    UINT _activeCamera;
 
     std::unique_ptr<GDX12Device> _primaryDevice;
     std::unique_ptr<GDX12Device> _secondaryDevice;
@@ -149,7 +149,6 @@ private:
     GDX12WBOITTransparencyPass _WBOITTransparencyPass;
     GDX12WBOITCompositionPass _WBOITCompositionPass;
     
-    // in case we need a foreach
-    std::vector<GDX12RenderPass*> _renderPassPtrs = { &_backBufferClearPass, &_gpuCullingPass, &_opaquePass,
-        &_WBOITTransparencyPass, &_WBOITCompositionPass };
+    // sorted in execution order
+    std::vector<GDX12RenderPass*> _renderPassExecutionList;
 };

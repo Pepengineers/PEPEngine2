@@ -7,7 +7,7 @@
 #include "Common/ConsoleVariables.h"
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
-    _dualGPUMode(false), _window(window), _timer(timer), _activeCamera(nullptr)
+    _dualGPUMode(false), _window(window), _timer(timer), _activeCamera(0)
 {
 }
 
@@ -62,7 +62,7 @@ void RenderModule::OnResize() const
     _backBuffer->Resize(width, height);
     _depthStencil->Resize(width, height);
 
-    for (auto& renderPass : _renderPassPtrs) { renderPass->Resize(width, height); }
+    for (auto& renderPass : _renderPassExecutionList) { renderPass->Resize(width, height); }
 }
 
 GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
@@ -289,7 +289,7 @@ void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
 
 void RenderModule::SetActiveCamera(CameraComponent* camera)
 {
-    _activeCamera = camera;
+    _activeCamera = camera->_CBufferIndex;
 }
 
 TransformCompGPUData& RenderModule::GetTransformGPUData(Entity entity)
@@ -591,21 +591,8 @@ void RenderModule::OnRender()
 
     cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetRenderTargetEnhBarrier() });
     cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetDepthWriteBarrier() });
-    _backBufferClearPass.Execute(cmdList, CurrentBackBuffer, _depthStencil.get());
-
-    _gpuCullingPass.Execute(cmdList, _activeCamera->_CBufferIndex);
-    GDX12Texture* opaqueAccum;
-    GDX12Texture* velocityBuf;
-    _opaquePass.Execute(cmdList, _activeCamera->_CBufferIndex, _depthStencil.get(),
-        opaqueAccum, velocityBuf);
-
-    GDX12Texture* transparencyAccum;
-    GDX12Texture* transparencyRevealage;
-    _WBOITTransparencyPass.Execute(cmdList, _activeCamera->_CBufferIndex, _depthStencil.get(),
-        transparencyAccum, transparencyRevealage);
-
-    _WBOITCompositionPass.Execute(cmdList, opaqueAccum, transparencyAccum,
-        transparencyRevealage, CurrentBackBuffer);
+    
+    for (auto& renderPass : _renderPassExecutionList) { renderPass->Execute(cmdList); }
     
     cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetPresentEnhBarrier() });
     cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetCommonBarrier() });
@@ -645,11 +632,29 @@ void RenderModule::ConfigureRenderPipeline()
 {
     uint16_t width, height;
     _window->GetWindowSize(width, height);
-    _backBufferClearPass.Initialize(&_primaryResources);
-    _gpuCullingPass.Initialize(&_primaryResources);
-    _opaquePass.Initialize(&_primaryResources, _depthStencil->GetFormat(), width, height);
-    _WBOITTransparencyPass.Initialize(&_primaryResources, _backBuffer->GetFormat(), _depthStencil->GetFormat(), width, height);
-    _WBOITCompositionPass.Initialize(&_primaryResources, _backBuffer->GetFormat());
+
+    _backBufferClearPass.Initialize(&_primaryResources, width, height);
+    _backBufferClearPass.LinkDependancies(_backBuffer.get(), _depthStencil.get());
+
+    _gpuCullingPass.Initialize(&_primaryResources, width, height);
+    _gpuCullingPass.LinkDependancies(&_activeCamera);
+
+    IRenderPassLink* opaqueAccum;
+    IRenderPassLink* opaqueVelocity;
+    _opaquePass.Initialize(&_primaryResources, width, height);
+    _opaquePass.LinkDependancies(&_activeCamera, _depthStencil.get(), opaqueAccum, opaqueVelocity);
+
+    IRenderPassLink* transparencyAccum;
+    IRenderPassLink* transparencyRevealage;
+    _WBOITTransparencyPass.Initialize(&_primaryResources, width, height);
+    _WBOITTransparencyPass.LinkDependancies(&_activeCamera, _depthStencil.get(),
+        transparencyAccum, transparencyRevealage);
+
+    _WBOITCompositionPass.Initialize(&_primaryResources, width, height);
+    _WBOITCompositionPass.LinkDependancies(opaqueAccum, transparencyAccum, transparencyRevealage, _backBuffer.get());
+
+    _renderPassExecutionList = { &_backBufferClearPass, &_gpuCullingPass, &_opaquePass,
+        &_WBOITTransparencyPass, &_WBOITCompositionPass };
 }
 
 void RenderModule::SubscribeToSceneManager()
