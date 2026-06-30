@@ -149,6 +149,12 @@ private:
     GDX12WBOITTransparencyPass _WBOITTransparencyPass;
     GDX12WBOITCompositionPass _WBOITCompositionPass;
     
-    // sorted in execution order
-    std::vector<GDX12RenderPass*> _renderPassExecutionList;
+    // Sorted in execution order
+    std::vector<GDX12RenderPass*> _primaryRenderPassExecutionList;
+    std::vector<GDX12RenderPass*> _secondaryRenderPassExecutionList;
+
+    // Flags that are accumulated from every active RenderPass on the device
+    // Defines which resources should be uploaded onto respective GPU
+    uint32_t _primaryPipelineFlags;
+    uint32_t _secondaryPipelineFlags;
 };

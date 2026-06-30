@@ -5,7 +5,7 @@ class GDX12BackBufferClearPass : public GDX12RenderPass
 {
 public:
 	GDX12BackBufferClearPass() : IN_OUT_currentBackBuffer(nullptr), IN_OUT_depthStencil(nullptr)
-	{ _flags = RENDER_PASS_FLAG_PRESENTING; }
+	{ _flags = RENDER_PASS_FLAG_NONE; }
 
 	void LinkDependancies(IRenderPassLink* IN_OUT_currentBackBuffer,
 		IRenderPassLink* IN_OUT_depthStencil)

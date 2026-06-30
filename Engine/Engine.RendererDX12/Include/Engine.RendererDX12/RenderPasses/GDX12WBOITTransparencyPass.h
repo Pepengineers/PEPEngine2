@@ -5,7 +5,8 @@ class GDX12WBOITTransparencyPass : public GDX12RenderPass
 {
 public:
 	GDX12WBOITTransparencyPass() : IN_DepthStencil(nullptr), IN_CameraCBIndex(nullptr)
-	{ _flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_GEOMETRY | RENDER_PASS_FLAG_USE_MATERIALS; }
+	{ _flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_GEOMETRY | RENDER_PASS_FLAG_USE_MATERIALS | 
+		RENDER_PASS_FLAG_USE_INSTANCES; }
 
 	void LinkDependancies(UINT* IN_CameraCBIndex, IRenderPassLink* IN_DepthStencil,
 		IRenderPassLink*& OUT_Accumulation, IRenderPassLink*& OUT_Revealage)

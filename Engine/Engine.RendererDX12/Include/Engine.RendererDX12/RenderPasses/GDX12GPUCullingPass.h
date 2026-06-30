@@ -5,7 +5,7 @@ class GDX12GPUCullingPass : public GDX12RenderPass
 {
 public:
 	GDX12GPUCullingPass() : IN_CameraCBIndex(nullptr)
-	{ _flags = RENDER_PASS_FLAG_USE_CAMERAS; }
+	{ _flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_INSTANCES; }
 
 	void LinkDependancies(UINT* IN_CameraCBIndex)
 	{

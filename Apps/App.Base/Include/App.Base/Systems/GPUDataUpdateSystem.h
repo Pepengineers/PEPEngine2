@@ -150,7 +150,7 @@ public:
 
                         GDX12InstanceData instanceData;
                         instanceData.TransformIndex = transformGPUData.CBufferIndex;
-                        instanceData.MaterialIndex = renderer.Materials[subMesh.MaterialIndex]->_PrimaryCBufferIndex;
+                        instanceData.MaterialIndex = renderer.Materials[subMesh.MaterialIndex]->_CBufferIndex;
                         instanceData.BoundingBoxCenter = bounds.Center;
                         instanceData.BoundingBoxExtents = bounds.Extents;
 

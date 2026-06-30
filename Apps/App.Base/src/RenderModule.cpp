@@ -7,7 +7,8 @@
 #include "Common/ConsoleVariables.h"
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
-    _dualGPUMode(false), _window(window), _timer(timer), _activeCamera(0)
+    _dualGPUMode(false), _window(window), _timer(timer), _activeCamera(0),
+    _primaryPipelineFlags(0), _secondaryPipelineFlags(0)
 {
 }
 
@@ -62,7 +63,7 @@ void RenderModule::OnResize() const
     _backBuffer->Resize(width, height);
     _depthStencil->Resize(width, height);
 
-    for (auto& renderPass : _renderPassExecutionList) { renderPass->Resize(width, height); }
+    for (auto& renderPass : _primaryRenderPassExecutionList) { renderPass->Resize(width, height); }
 }
 
 GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
@@ -87,12 +88,26 @@ GDX12Material* RenderModule::CreateMaterial(const std::string& name)
     _materials[name] = std::unique_ptr<GDX12Material>(new GDX12Material());
 
     _materials[name]->Name = name;
-    _materials[name]->_PrimaryCBufferIndex = _primaryResources.FrameConstants[0]->MaterialCache->GetElementCount();
-
-    for (auto& constants : _primaryResources.FrameConstants)
+    
+    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS)
     {
-        auto& CBuffer = constants->MaterialCache;
-        CBuffer->Resize(CBuffer->GetElementCount() + 1);
+        _materials[name]->_CBufferIndex = _primaryResources.FrameConstants[0]->MaterialCache->GetElementCount();
+
+        for (auto& constants : _primaryResources.FrameConstants)
+        {
+            auto& CBuffer = constants->MaterialCache;
+            CBuffer->Resize(CBuffer->GetElementCount() + 1);
+        }
+    }
+    if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS)
+    {
+        _materials[name]->_CBufferIndex = _secondaryResources.FrameConstants[0]->MaterialCache->GetElementCount();
+
+        for (auto& constants : _secondaryResources.FrameConstants)
+        {
+            auto& CBuffer = constants->MaterialCache;
+            CBuffer->Resize(CBuffer->GetElementCount() + 1);
+        }
     }
 
     return _materials[name].get();
@@ -119,8 +134,10 @@ GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* 
 
     _textures[name] = std::make_unique<GPUTexture>();
     _textures[name]->Name = name;
-    _textures[name]->PrimaryDeviceTexture = CreateDX12Texture(name, &_primaryResources, texture);
-    if (_secondaryDevice) { _textures[name]->SecondaryDeviceTexture = CreateDX12Texture(name, &_secondaryResources, texture); }
+    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS)
+    { _textures[name]->PrimaryDeviceTexture = CreateDX12Texture(name, &_primaryResources, texture); }
+    if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS)
+    { _textures[name]->SecondaryDeviceTexture = CreateDX12Texture(name, &_secondaryResources, texture); }
 }
 
 GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture)
@@ -283,8 +300,10 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
 
 void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
 {
-    _primaryResources.GeometryBuffer->AddMesh(mesh, handle);
-    if (_secondaryDevice) _secondaryResources.GeometryBuffer->AddMesh(mesh, handle);
+    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_GEOMETRY) 
+    { _primaryResources.GeometryBuffer->AddMesh(mesh, handle); }
+    if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_GEOMETRY)
+    { _secondaryResources.GeometryBuffer->AddMesh(mesh, handle); }
 }
 
 void RenderModule::SetActiveCamera(CameraComponent* camera)
@@ -437,18 +456,26 @@ GDX12UploadBuffer<GDX12IndirectDrawArgs>* RenderModule::GetSecondaryIndirectComm
 void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
 {
     TransformCompGPUData gpuData;
-    gpuData.CBufferIndex = _primaryResources.FrameConstants[0]->TransformCache->GetElementCount();
     _transformGPUData[entity] = gpuData;
 
-    for (auto& constants : _primaryResources.FrameConstants)
+    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_INSTANCES)
     {
-        auto& CBuffer = constants->TransformCache;
-        CBuffer->Resize(CBuffer->GetElementCount() + 1);
+        _transformGPUData[entity].CBufferIndex = _primaryResources.FrameConstants[0]->TransformCache->GetElementCount();
+        for (auto& constants : _primaryResources.FrameConstants)
+        {
+            auto& CBuffer = constants->TransformCache;
+            CBuffer->Resize(CBuffer->GetElementCount() + 1);
+        }
     }
 
-    if (_secondaryDevice)
+    if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_INSTANCES)
     {
-
+        _transformGPUData[entity].CBufferIndex = _secondaryResources.FrameConstants[0]->TransformCache->GetElementCount();
+        for (auto& constants : _secondaryResources.FrameConstants)
+        {
+            auto& CBuffer = constants->TransformCache;
+            CBuffer->Resize(CBuffer->GetElementCount() + 1);
+        }
     }
 }
 
@@ -499,28 +526,46 @@ void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticM
 {
     auto& MeshGPUData = _primaryResources.GeometryBuffer->_meshCache[component.MeshHandler.GetValue()];
     
-    for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
+    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_INSTANCES)
     {
-        component._CBufferIndices.push_back(_primaryResources.FrameConstants[0]->InstanceCache->GetElementCount());
-        _primaryResources.IndirectCommandsCache->Resize(_primaryResources.IndirectCommandsCache->GetElementCount() + 1);
-
-        for (auto& constants : _primaryResources.FrameConstants)
+        for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
         {
-            auto& CBuffer = constants->InstanceCache;
-            CBuffer->Resize(CBuffer->GetElementCount() + 1);
+            component._CBufferIndices.push_back(_primaryResources.FrameConstants[0]->InstanceCache->GetElementCount());
+            _primaryResources.IndirectCommandsCache->Resize(_primaryResources.IndirectCommandsCache->GetElementCount() + 1);
 
-            for (auto& buffers : constants->CameraVisibilityCommands)
+            for (auto& constants : _primaryResources.FrameConstants)
             {
-                buffers.VisibleOpaqueCommandsCache->Resize(buffers.VisibleOpaqueCommandsCache->GetElementCount() + 1);
-                buffers.VisibleTransparentCommandsCache->Resize(buffers.VisibleTransparentCommandsCache->GetElementCount() + 1);
+                auto& CBuffer = constants->InstanceCache;
+                CBuffer->Resize(CBuffer->GetElementCount() + 1);
+
+                for (auto& buffers : constants->CameraVisibilityCommands)
+                {
+                    buffers.VisibleOpaqueCommandsCache->Resize(buffers.VisibleOpaqueCommandsCache->GetElementCount() + 1);
+                    buffers.VisibleTransparentCommandsCache->Resize(buffers.VisibleTransparentCommandsCache->GetElementCount() + 1);
+                }
             }
         }
-
     }
 
-    if (_secondaryDevice)
+    if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_INSTANCES)
     {
+        for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
+        {
+            component._CBufferIndices.push_back(_secondaryResources.FrameConstants[0]->InstanceCache->GetElementCount());
+            _secondaryResources.IndirectCommandsCache->Resize(_primaryResources.IndirectCommandsCache->GetElementCount() + 1);
 
+            for (auto& constants : _secondaryResources.FrameConstants)
+            {
+                auto& CBuffer = constants->InstanceCache;
+                CBuffer->Resize(CBuffer->GetElementCount() + 1);
+
+                for (auto& buffers : constants->CameraVisibilityCommands)
+                {
+                    buffers.VisibleOpaqueCommandsCache->Resize(buffers.VisibleOpaqueCommandsCache->GetElementCount() + 1);
+                    buffers.VisibleTransparentCommandsCache->Resize(buffers.VisibleTransparentCommandsCache->GetElementCount() + 1);
+                }
+            }
+        }
     }
 }
 
@@ -592,7 +637,7 @@ void RenderModule::OnRender()
     cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetRenderTargetEnhBarrier() });
     cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetDepthWriteBarrier() });
     
-    for (auto& renderPass : _renderPassExecutionList) { renderPass->Execute(cmdList); }
+    for (auto& renderPass : _primaryRenderPassExecutionList) { renderPass->Execute(cmdList); }
     
     cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetPresentEnhBarrier() });
     cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetCommonBarrier() });
@@ -635,25 +680,30 @@ void RenderModule::ConfigureRenderPipeline()
 
     _backBufferClearPass.Initialize(&_primaryResources, width, height);
     _backBufferClearPass.LinkDependancies(_backBuffer.get(), _depthStencil.get());
+    _primaryPipelineFlags |= _backBufferClearPass.GetFlags();
 
     _gpuCullingPass.Initialize(&_primaryResources, width, height);
     _gpuCullingPass.LinkDependancies(&_activeCamera);
+    _primaryPipelineFlags |= _gpuCullingPass.GetFlags();
 
     IRenderPassLink* opaqueAccum;
     IRenderPassLink* opaqueVelocity;
     _opaquePass.Initialize(&_primaryResources, width, height);
     _opaquePass.LinkDependancies(&_activeCamera, _depthStencil.get(), opaqueAccum, opaqueVelocity);
+    _primaryPipelineFlags |= _opaquePass.GetFlags();
 
     IRenderPassLink* transparencyAccum;
     IRenderPassLink* transparencyRevealage;
     _WBOITTransparencyPass.Initialize(&_primaryResources, width, height);
     _WBOITTransparencyPass.LinkDependancies(&_activeCamera, _depthStencil.get(),
         transparencyAccum, transparencyRevealage);
+    _primaryPipelineFlags |= _WBOITTransparencyPass.GetFlags();
 
     _WBOITCompositionPass.Initialize(&_primaryResources, width, height);
     _WBOITCompositionPass.LinkDependancies(opaqueAccum, transparencyAccum, transparencyRevealage, _backBuffer.get());
+    _primaryPipelineFlags |= _WBOITCompositionPass.GetFlags();
 
-    _renderPassExecutionList = { &_backBufferClearPass, &_gpuCullingPass, &_opaquePass,
+    _primaryRenderPassExecutionList = { &_backBufferClearPass, &_gpuCullingPass, &_opaquePass,
         &_WBOITTransparencyPass, &_WBOITCompositionPass };
 }
 

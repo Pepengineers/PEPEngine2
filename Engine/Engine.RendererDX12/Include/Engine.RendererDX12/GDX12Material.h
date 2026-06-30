@@ -44,8 +44,7 @@ public:
 	bool UseBakedLighting;
 	MaterialType Type;
 	bool DirtyFlag;
-	UINT _PrimaryCBufferIndex;
-	UINT _SecondaryCBufferIndex;
+	UINT _CBufferIndex;
 
 private:
 	friend class RenderModule;
@@ -55,7 +54,7 @@ private:
 		Emissive(nullptr), Displacement(nullptr), Metallic(0.f), Roughness(1.f), Opacity(1.f),
 		SpecularColor(0.0f, 0.0f, 0.0f), EmissiveColor(0.0f, 0.0f, 0.0f),
 		HasNormalMap(false), HasSpecularMap(false), HasRoughnessMap(false), HasEmissiveMap(false),
-		UseBakedLighting(false), DirtyFlag(true), _PrimaryCBufferIndex(0), _SecondaryCBufferIndex(0), _numFramesDirty(0), Type(MaterialType::Opaque)
+		UseBakedLighting(false), DirtyFlag(true), _CBufferIndex(0), _numFramesDirty(0), Type(MaterialType::Opaque)
 	{
 
 	}
