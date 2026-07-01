@@ -9,6 +9,10 @@ GDX12TextureResource::GDX12TextureResource(ComPtr<ID3D12Resource> resource) :
 	_desc = D3DResource->GetDesc();
 }
 
+GDX12TextureResource::GDX12TextureResource()
+{
+}
+
 GDX12TextureResource::~GDX12TextureResource()
 {
 }

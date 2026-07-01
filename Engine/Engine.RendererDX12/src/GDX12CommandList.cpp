@@ -306,6 +306,11 @@ void GDX12CommandList::EndPixEvent()
 	PIXEndEvent(_commandList.Get());
 }
 
+void GDX12CommandList::CopyResource(ID3D12Resource* destResource, ID3D12Resource* sourceResource)
+{
+	_commandList->CopyResource(destResource, sourceResource);
+}
+
 void GDX12CommandList::BuildRaytracingAccelerationStructure(const D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC* pDesc)
 {
 	_commandList->BuildRaytracingAccelerationStructure(pDesc, 0, nullptr);

@@ -28,6 +28,8 @@ public:
     void SetCurrentState(D3D12_RESOURCE_STATES newState);
     D3D12_RESOURCE_STATES GetCurrentState();
 
+    void Reset();
+
 	ComPtr<ID3D12Resource> D3DResource;
 
 private:

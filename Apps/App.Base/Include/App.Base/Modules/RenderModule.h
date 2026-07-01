@@ -10,6 +10,8 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyFromSharedMemoryPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyToSharedMemoryPass.h"
 
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
@@ -103,6 +105,9 @@ public:
     GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetPrimaryIndirectCommandsCache();
     GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetSecondaryIndirectCommandsCache();
 
+    uint32_t GetPrimaryPipelineFlags();
+    uint32_t GetSecondaryPipelineFlags();
+
 protected:
     void OnUpdate() override;
     void OnRender() override;
@@ -148,6 +153,9 @@ private:
     GDX12OpaquePass _opaquePass;
     GDX12WBOITTransparencyPass _WBOITTransparencyPass;
     GDX12WBOITCompositionPass _WBOITCompositionPass;
+    GDX12TextureCopyFromSharedMemoryPass _textureCopyFromSharedMemoryPass;
+    GDX12TextureCopyToSharedMemoryPass _textureCopyToSharedMemoryPass;
+
     
     // Sorted in execution order
     std::vector<GDX12RenderPass*> _primaryRenderPassExecutionList;

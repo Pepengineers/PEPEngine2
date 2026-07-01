@@ -15,6 +15,7 @@ RenderModule::RenderModule(Window* window, GameTimer* timer) :
 RenderModule::~RenderModule()
 {
     _primaryDevice->GetCommandQueue()->Flush();
+    if (_dualGPUMode) { _secondaryDevice->GetCommandQueue()->Flush(); }
 
     GDX12ShaderCompiler::Shutdown();
 }
@@ -33,12 +34,12 @@ void RenderModule::Initialize()
     _primaryDevice->Role = DEVICE_ROLE_PRIMARY;
     _primaryResources.Initialize(_primaryDevice.get());
 
-    if (false)
+    if (true)
     {
         _secondaryDevice = std::make_unique<GDX12Device>();
-        _secondaryDevice->Initialize(GDX12DeviceFactory::GetMostPerformantAdapter().Get());
+        _secondaryDevice->Initialize(GDX12DeviceFactory::GetDeviceDescriptors()[1].Adapter.Get());
         _secondaryDevice->Role = DEVICE_ROLE_SECONDARY;
-        _secondaryResources.Initialize(_primaryDevice.get());
+        _secondaryResources.Initialize(_secondaryDevice.get());
         _dualGPUMode = true;
     }
 
@@ -453,6 +454,16 @@ GDX12UploadBuffer<GDX12IndirectDrawArgs>* RenderModule::GetSecondaryIndirectComm
     return _secondaryResources.IndirectCommandsCache.get();
 }
 
+uint32_t RenderModule::GetPrimaryPipelineFlags()
+{
+    return _primaryPipelineFlags;
+}
+
+uint32_t RenderModule::GetSecondaryPipelineFlags()
+{
+    return _secondaryPipelineFlags;
+}
+
 void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
 {
     TransformCompGPUData gpuData;
@@ -604,10 +615,11 @@ void RenderModule::OnUpdate()
     }
 
     _primaryResources.UpdateMainCB(width, height, _timer);
-    _primaryResources.UpdateMaterialCB(_materials);
+    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS)
+    { _primaryResources.UpdateMaterialCB(_materials); }
 
     //SecondaryDevice
-    if (_secondaryDevice)
+    if (_dualGPUMode)
     {
         _secondaryResources.CurrFrameConstantsIndex = (_secondaryResources.CurrFrameConstantsIndex + 1) % numFrames;
 
@@ -620,7 +632,8 @@ void RenderModule::OnUpdate()
         }
 
         _secondaryResources.UpdateMainCB(width, height, _timer);
-        _secondaryResources.UpdateMaterialCB(_materials);
+        if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS) 
+        { _secondaryResources.UpdateMaterialCB(_materials); }
     }
 }
 
@@ -702,6 +715,17 @@ void RenderModule::ConfigureRenderPipeline()
     _WBOITCompositionPass.Initialize(&_primaryResources, width, height);
     _WBOITCompositionPass.LinkDependancies(opaqueAccum, transparencyAccum, transparencyRevealage, _backBuffer.get());
     _primaryPipelineFlags |= _WBOITCompositionPass.GetFlags();
+
+    // Texture transfer example
+    //IRenderPassLink* sharedMemoryVelocityBuffer;
+    //_textureCopyToSharedMemoryPass.Initialize(&_primaryResources, width, height);
+    //_textureCopyToSharedMemoryPass.LinkDependancies(&_secondaryResources, opaqueVelocity, sharedMemoryVelocityBuffer);
+    //_primaryPipelineFlags |= _textureCopyToSharedMemoryPass.GetFlags();
+
+    //IRenderPassLink* transferredVelocityBuffer;
+    //_textureCopyFromSharedMemoryPass.Initialize(&_secondaryResources, width, height);
+    //_textureCopyFromSharedMemoryPass.LinkDependancies(sharedMemoryVelocityBuffer, transferredVelocityBuffer);
+    //_secondaryPipelineFlags |= _textureCopyFromSharedMemoryPass.GetFlags();
 
     _primaryRenderPassExecutionList = { &_backBufferClearPass, &_gpuCullingPass, &_opaquePass,
         &_WBOITTransparencyPass, &_WBOITCompositionPass };
