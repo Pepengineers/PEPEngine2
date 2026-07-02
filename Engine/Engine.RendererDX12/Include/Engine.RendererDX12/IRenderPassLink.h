@@ -17,9 +17,4 @@ public:
 		OutputDebugStringA("ERROR: Forbidden interface call\n");
 		return nullptr;
 	}
-	virtual RenderPipelineCommonData* GetCommonData() 
-	{
-		OutputDebugStringA("ERROR: Forbidden interface call\n");
-		return nullptr;
-	}
 };

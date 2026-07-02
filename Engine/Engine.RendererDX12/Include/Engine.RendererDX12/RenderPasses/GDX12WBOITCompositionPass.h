@@ -19,9 +19,9 @@ public:
 		PostLinkInitialize();
 	}
 
-	void Initialize(GDX12DeviceResources* resources, UINT width, UINT height) override
+	void Initialize(GDX12DeviceResources* resources, RenderPipelineCommonData* commonData) override
 	{
-		_resources = resources;
+		GDX12RenderPass::Initialize(resources, commonData);
 
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();

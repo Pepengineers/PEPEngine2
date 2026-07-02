@@ -68,7 +68,7 @@ void RenderModule::OnResize()
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
 
-    for (auto& renderPass : _primaryRenderPassExecutionList) { renderPass->Resize(width, height); }
+    for (auto& renderPass : _primaryRenderPassExecutionList) { renderPass->Resize(); }
 }
 
 GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
@@ -691,46 +691,45 @@ void RenderModule::BuildBackBuffer()
     desc.DSVDesc.Texture2D.MipSlice = 0;
 
     _depthStencil = std::make_unique<GDX12Texture>(desc);
+
+    _RPcommonData.WindowWidth = width;
+    _RPcommonData.WindowHeight = height;
 }
 
 void RenderModule::ConfigureRenderPipeline()
 {
-    uint16_t width, height;
-    _window->GetWindowSize(width, height);
-
-    _backBufferClearPass.Initialize(&_primaryResources, width, height);
+    _backBufferClearPass.Initialize(&_primaryResources, &_RPcommonData);
     _backBufferClearPass.LinkDependancies(_backBuffer.get(), _depthStencil.get());
     _primaryPipelineFlags |= _backBufferClearPass.GetFlags();
 
-    _gpuCullingPass.Initialize(&_primaryResources, width, height);
-    _gpuCullingPass.LinkDependancies(&_RPcommonData);
+    _gpuCullingPass.Initialize(&_primaryResources, &_RPcommonData);
     _primaryPipelineFlags |= _gpuCullingPass.GetFlags();
 
     IRenderPassLink* opaqueAccum;
     IRenderPassLink* opaqueVelocity;
-    _opaquePass.Initialize(&_primaryResources, width, height);
-    _opaquePass.LinkDependancies(&_RPcommonData, _depthStencil.get(), opaqueAccum, opaqueVelocity);
+    _opaquePass.Initialize(&_primaryResources, &_RPcommonData);
+    _opaquePass.LinkDependancies(_depthStencil.get(), opaqueAccum, opaqueVelocity);
     _primaryPipelineFlags |= _opaquePass.GetFlags();
 
     IRenderPassLink* transparencyAccum;
     IRenderPassLink* transparencyRevealage;
-    _WBOITTransparencyPass.Initialize(&_primaryResources, width, height);
-    _WBOITTransparencyPass.LinkDependancies(&_RPcommonData, _depthStencil.get(),
+    _WBOITTransparencyPass.Initialize(&_primaryResources, &_RPcommonData);
+    _WBOITTransparencyPass.LinkDependancies(_depthStencil.get(),
         transparencyAccum, transparencyRevealage);
     _primaryPipelineFlags |= _WBOITTransparencyPass.GetFlags();
 
-    _WBOITCompositionPass.Initialize(&_primaryResources, width, height);
+    _WBOITCompositionPass.Initialize(&_primaryResources, &_RPcommonData);
     _WBOITCompositionPass.LinkDependancies(opaqueAccum, transparencyAccum, transparencyRevealage, _backBuffer.get());
     _primaryPipelineFlags |= _WBOITCompositionPass.GetFlags();
 
     // Texture transfer example
     //IRenderPassLink* sharedMemoryVelocityBuffer;
-    //_textureCopyToSharedMemoryPass.Initialize(&_primaryResources, width, height);
+    //_textureCopyToSharedMemoryPass.Initialize(&_primaryResources, &_RPcommonData);
     //_textureCopyToSharedMemoryPass.LinkDependancies(&_secondaryResources, opaqueVelocity, sharedMemoryVelocityBuffer);
     //_primaryPipelineFlags |= _textureCopyToSharedMemoryPass.GetFlags();
 
     //IRenderPassLink* transferredVelocityBuffer;
-    //_textureCopyFromSharedMemoryPass.Initialize(&_secondaryResources, width, height);
+    //_textureCopyFromSharedMemoryPass.Initialize(&_secondaryResources, &_RPcommonData);
     //_textureCopyFromSharedMemoryPass.LinkDependancies(sharedMemoryVelocityBuffer, transferredVelocityBuffer);
     //_secondaryPipelineFlags |= _textureCopyFromSharedMemoryPass.GetFlags();
 

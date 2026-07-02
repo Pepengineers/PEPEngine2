@@ -13,11 +13,9 @@
 
 class GameTimer;
 
-class RenderPipelineCommonData : public IRenderPassLink
+class RenderPipelineCommonData
 {
 public:
-    virtual RenderPipelineCommonData* GetCommonData() override { return this; }
-
     UINT ActiveCameraCBufferIndex = -1;
     float ActiveCameraFOV = 0;
     float ActiveCameraNearPlane = 0;
@@ -25,8 +23,8 @@ public:
     GameTimer* GameTimer = nullptr;
     UINT WindowWidth = 0;
     UINT WindowHeight = 0;
-    UINT DownscaledResX = 0;
-    UINT DownscaledResY = 0;
+    UINT DownscaledWidth = 0;
+    UINT DownscaledHeight = 0;
 };
 
 enum ERenderPassFlags : uint32_t
@@ -43,9 +41,13 @@ enum ERenderPassFlags : uint32_t
 class GDX12RenderPass
 {
 public:
-    GDX12RenderPass() : _flags(RENDER_PASS_FLAG_NONE), _resources(nullptr) {}
-    virtual void Initialize(GDX12DeviceResources* resources, UINT width, UINT height) {};
-    virtual void Resize(UINT width, UINT height) {};
+    GDX12RenderPass() : _flags(RENDER_PASS_FLAG_NONE), _resources(nullptr), _commonData(nullptr) {}
+    virtual void Initialize(GDX12DeviceResources* resources, RenderPipelineCommonData* commonData) 
+    {
+        _resources = resources;
+        _commonData = commonData;
+    };
+    virtual void Resize() {};
     virtual void Execute(GDX12CommandList* cmdList) {};
 
     uint32_t GetFlags() { return _flags; }
@@ -61,5 +63,6 @@ protected:
     // For example: if no RenderPasses has USE_TEXTURES, then GPU texture upload
     // will be skipped entirely for this GPU
     uint32_t _flags;
+    RenderPipelineCommonData* _commonData;
     GDX12DeviceResources* _resources;
 };

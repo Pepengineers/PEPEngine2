@@ -34,9 +34,9 @@ public:
 		OUT_Texture = this->OUT_Texture.get();
 	}
 
-	void Initialize(GDX12DeviceResources* resources, UINT width, UINT height) override
+	void Initialize(GDX12DeviceResources* resources, RenderPipelineCommonData* commonData) override
 	{
-		_resources = resources;
+		GDX12RenderPass::Initialize(resources, commonData);
 	}
 
 	// Copies texture from shared memory onto device the pass was initialized on
@@ -55,9 +55,11 @@ public:
 		cmdList->EndPixEvent();
 	}
 
-	void Resize(UINT width, UINT height) override
+	void Resize() override
 	{
-		OUT_Texture->Resize(width, height);
+		UINT newWidth = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
+		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
+		OUT_Texture->Resize(newWidth, newHeight);
 	}
 
 private:

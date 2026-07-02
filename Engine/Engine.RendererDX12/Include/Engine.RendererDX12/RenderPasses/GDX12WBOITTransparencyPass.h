@@ -4,14 +4,13 @@
 class GDX12WBOITTransparencyPass : public GDX12RenderPass
 {
 public:
-	GDX12WBOITTransparencyPass() : IN_DepthStencil(nullptr), IN_CommonData(nullptr)
+	GDX12WBOITTransparencyPass() : IN_DepthStencil(nullptr)
 	{ _flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_GEOMETRY | RENDER_PASS_FLAG_USE_MATERIALS | 
 		RENDER_PASS_FLAG_USE_INSTANCES; }
 
-	void LinkDependancies(IRenderPassLink* IN_CommonData, IRenderPassLink* IN_DepthStencil,
-		IRenderPassLink*& OUT_Accumulation, IRenderPassLink*& OUT_Revealage)
+	void LinkDependancies(IRenderPassLink* IN_DepthStencil, IRenderPassLink*& OUT_Accumulation, 
+		IRenderPassLink*& OUT_Revealage)
 	{
-		this->IN_CommonData = IN_CommonData;
 		this->IN_DepthStencil = IN_DepthStencil;
 
 		PostLinkInitialize();
@@ -20,15 +19,15 @@ public:
 		OUT_Revealage = _revealageTexture.get();
 	}
 
-	void Initialize(GDX12DeviceResources* resources, UINT width, UINT height) override
+	void Initialize(GDX12DeviceResources* resources, RenderPipelineCommonData* commonData) override
 	{
-		_resources = resources;
+		GDX12RenderPass::Initialize(resources, commonData);
 
 		// Textures
 		GDX12TextureDesc TextureDesc1;
 		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-		TextureDesc1.Width = width;
-		TextureDesc1.Height = height;
+		TextureDesc1.Width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;;
+		TextureDesc1.Height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;;
 
 		TextureDesc1.CreateSRV = true;
 		TextureDesc1.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
@@ -94,9 +93,8 @@ public:
 	// It requires GPUCullingPass to be executed beforehand
 	void Execute(GDX12CommandList* cmdList)
 	{
-		UINT cameraCBIndex = IN_CommonData->GetCommonData()->ActiveCameraCBufferIndex;
 		auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[cameraCBIndex];
+		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[_commonData->ActiveCameraCBufferIndex];
 		GDX12Texture* depthStencil = IN_DepthStencil->GetTexture();
 
 		cmdList->BeginPixEvent("Transparent Render Pass", Colors::Aqua);
@@ -109,7 +107,7 @@ public:
 		cmdList->SetPipelineState(_transparencyPSO);
 		cmdList->SetGraphicsRootConstantBufferView(1, currentFrameConstants->MainCB->GetElementAddress(0));
 		cmdList->SetGraphicsRootConstantBufferView(2, currentFrameConstants->CameraCB->
-			GetElementAddress(cameraCBIndex));
+			GetElementAddress(_commonData->ActiveCameraCBufferIndex));
 		cmdList->ResourceBarrier({ _accumulationTexture->GetResource()->GetRenderTargetBarrier(),
 		_revealageTexture->GetResource()->GetRenderTargetBarrier() });
 
@@ -133,10 +131,12 @@ public:
 		cmdList->EndPixEvent();
 	}
 
-	void Resize(UINT width, UINT height) override
+	void Resize() override
 	{
-		_accumulationTexture->Resize(width, height);
-		_revealageTexture->Resize(width, height);
+		UINT newWidth = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
+		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
+		_accumulationTexture->Resize(newWidth, newHeight);
+		_revealageTexture->Resize(newWidth, newHeight);
 	}
 
 private:
@@ -199,6 +199,5 @@ private:
 	std::unique_ptr<GDX12Texture> _accumulationTexture;
 	std::unique_ptr<GDX12Texture> _revealageTexture;
 
-	IRenderPassLink* IN_CommonData;
 	IRenderPassLink* IN_DepthStencil;
 };

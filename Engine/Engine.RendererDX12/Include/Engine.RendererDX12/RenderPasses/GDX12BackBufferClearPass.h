@@ -14,9 +14,9 @@ public:
 		this->IN_OUT_depthStencil = IN_OUT_depthStencil;
 	}
 
-	void Initialize(GDX12DeviceResources* resources, UINT width, UINT height) override
+	void Initialize(GDX12DeviceResources* resources, RenderPipelineCommonData* commonData) override
 	{
-		_resources = resources;
+		GDX12RenderPass::Initialize(resources, commonData);
 	}
 
 	void Execute(GDX12CommandList* cmdList) override
