@@ -19,15 +19,62 @@ public:
 		OUT_Revealage = _revealageTexture.get();
 	}
 
-	void Initialize(GDX12DeviceResources* resources, RenderPipelineCommonData* commonData) override
+	// VisibilityBuffers will automatically be selected from CameraCBIndex
+	// It requires GPUCullingPass to be executed beforehand
+	void Execute(GDX12CommandList* cmdList)
 	{
-		GDX12RenderPass::Initialize(resources, commonData);
+		auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[_commonData->ActiveCameraCBufferIndex];
+		GDX12Texture* depthStencil = IN_DepthStencil->GetTexture();
 
+		cmdList->BeginPixEvent("Transparent Render Pass", Colors::Aqua);
+		cmdList->SetViewport(_accumulationTexture->GetViewport());
+		cmdList->SetScissorRect(_accumulationTexture->GetScissorRect());
+		cmdList->SetGraphicsRootSignature(_transparencyRS.get());
+		cmdList->SetPipelineState(_transparencyPSO);
+		cmdList->SetGraphicsRootConstantBufferView(1, currentFrameConstants->MainCB->GetElementAddress(0));
+		cmdList->SetGraphicsRootConstantBufferView(2, currentFrameConstants->CameraCB->
+			GetElementAddress(_commonData->ActiveCameraCBufferIndex));
+		cmdList->SetGeometryBuffer(_resources->GeometryBuffer.get());
+		cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		cmdList->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
+		cmdList->SetGraphicsSRV(0, currentFrameConstants->MaterialCache->GetSRV()->GPUHandle);
+		cmdList->SetGraphicsSRV(1, currentFrameConstants->TransformCache->GetSRV()->GPUHandle);
+		cmdList->SetGraphicsSRV(2, currentFrameConstants->InstanceCache->GetSRV()->GPUHandle);
+		cmdList->SetGraphicsSRV(3, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
+
+		cmdList->ResourceBarrier({ currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetIndirectArgsBarrier(),
+		currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetIndirectArgsBarrier(),
+		_accumulationTexture->GetResource()->GetRenderTargetBarrier(),
+		_revealageTexture->GetResource()->GetRenderTargetBarrier() });
+		cmdList->SetRenderTargets({ _accumulationTexture.get(), _revealageTexture.get() },
+			depthStencil);
+		cmdList->ClearRenderTargetView(_accumulationTexture.get());
+		cmdList->ClearRenderTargetView(_revealageTexture.get());
+		cmdList->ExecuteIndirect(_transparencyCS.Get(), _resources->IndirectCommandsCache->GetElementCount(),
+			currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().D3DResource.Get(), 0,
+			currentCameraVisBuffers.TransparentDrawCounter->GetResource().D3DResource.Get(), 0);
+		cmdList->ResourceBarrier({ _accumulationTexture->GetResource()->GetSRVBarrier(),
+		_revealageTexture->GetResource()->GetSRVBarrier() });
+		cmdList->EndPixEvent();
+	}
+
+	void Resize() override
+	{
+		UINT newWidth = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
+		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
+		_accumulationTexture->Resize(newWidth, newHeight);
+		_revealageTexture->Resize(newWidth, newHeight);
+	}
+
+private:
+	void PostLinkInitialize()
+	{
 		// Textures
 		GDX12TextureDesc TextureDesc1;
 		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-		TextureDesc1.Width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;;
-		TextureDesc1.Height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;;
+		TextureDesc1.Width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
+		TextureDesc1.Height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
 
 		TextureDesc1.CreateSRV = true;
 		TextureDesc1.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
@@ -55,8 +102,8 @@ public:
 
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
-		_transparencyVS = shaderCompiler.CompileShader(resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", nullptr, "VS", "vs");
-		_transparencyPS = shaderCompiler.CompileShader(resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", nullptr, "PS", "ps");
+		_transparencyVS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", nullptr, "VS", "vs");
+		_transparencyPS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", nullptr, "PS", "ps");
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
@@ -65,7 +112,7 @@ public:
 		RSDesc1.StaticSamplers = GetStaticSamplers();
 		RSDesc1.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
 		RSDesc1.Constants.push_back(1);
-		_transparencyRS = std::make_unique<GDX12RootSignature>(resources->Device, RSDesc1);
+		_transparencyRS = std::make_unique<GDX12RootSignature>(_resources->Device, RSDesc1);
 
 		//Command Signatures
 		std::vector<D3D12_INDIRECT_ARGUMENT_DESC> args;
@@ -84,64 +131,10 @@ public:
 		CSDesc1.pArgumentDescs = args.data();
 		CSDesc1.NodeMask = 0;
 
-		resources->Device->GetDevice()->CreateCommandSignature(&CSDesc1,
+		_resources->Device->GetDevice()->CreateCommandSignature(&CSDesc1,
 			_transparencyRS->GetRootSignature().Get(),
 			IID_PPV_ARGS(&_transparencyCS));
-	}
 
-	// VisibilityBuffers will automatically be selected from CameraCBIndex
-	// It requires GPUCullingPass to be executed beforehand
-	void Execute(GDX12CommandList* cmdList)
-	{
-		auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[_commonData->ActiveCameraCBufferIndex];
-		GDX12Texture* depthStencil = IN_DepthStencil->GetTexture();
-
-		cmdList->BeginPixEvent("Transparent Render Pass", Colors::Aqua);
-		cmdList->SetViewport(depthStencil->GetViewport());
-		cmdList->SetScissorRect(depthStencil->GetScissorRect());
-		cmdList->ResourceBarrier({
-	currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetIndirectArgsBarrier(),
-	currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetIndirectArgsBarrier() });
-		cmdList->SetGraphicsRootSignature(_transparencyRS.get());
-		cmdList->SetPipelineState(_transparencyPSO);
-		cmdList->SetGraphicsRootConstantBufferView(1, currentFrameConstants->MainCB->GetElementAddress(0));
-		cmdList->SetGraphicsRootConstantBufferView(2, currentFrameConstants->CameraCB->
-			GetElementAddress(_commonData->ActiveCameraCBufferIndex));
-		cmdList->ResourceBarrier({ _accumulationTexture->GetResource()->GetRenderTargetBarrier(),
-		_revealageTexture->GetResource()->GetRenderTargetBarrier() });
-
-		cmdList->SetRenderTargets({ _accumulationTexture.get(), _revealageTexture.get() },
-			depthStencil);
-		cmdList->ClearRenderTargetView(_accumulationTexture.get());
-		cmdList->ClearRenderTargetView(_revealageTexture.get());
-
-		cmdList->SetGeometryBuffer(_resources->GeometryBuffer.get());
-		cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		cmdList->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-		cmdList->SetGraphicsSRV(0, currentFrameConstants->MaterialCache->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(1, currentFrameConstants->TransformCache->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(2, currentFrameConstants->InstanceCache->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(3, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
-		cmdList->ExecuteIndirect(_transparencyCS.Get(), _resources->IndirectCommandsCache->GetElementCount(),
-			currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().D3DResource.Get(), 0,
-			currentCameraVisBuffers.TransparentDrawCounter->GetResource().D3DResource.Get(), 0);
-		cmdList->ResourceBarrier({ _accumulationTexture->GetResource()->GetSRVBarrier(),
-		_revealageTexture->GetResource()->GetSRVBarrier() });
-		cmdList->EndPixEvent();
-	}
-
-	void Resize() override
-	{
-		UINT newWidth = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
-		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
-		_accumulationTexture->Resize(newWidth, newHeight);
-		_revealageTexture->Resize(newWidth, newHeight);
-	}
-
-private:
-	void PostLinkInitialize()
-	{
 		// Pipeline State Objects
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC PSODesc1 = {};
 		PSODesc1.InputLayout = { _resources->InputLayouts["Default"].data(), (UINT)_resources->InputLayouts["Default"].size() };

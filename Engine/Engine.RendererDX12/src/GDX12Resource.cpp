@@ -146,3 +146,8 @@ void GDX12Resource::Reset()
 	D3DResource.Reset();
 	_currentState = D3D12_RESOURCE_STATE_COMMON;
 }
+
+void GDX12Resource::ResetState()
+{
+	_currentState = D3D12_RESOURCE_STATE_COMMON;
+}

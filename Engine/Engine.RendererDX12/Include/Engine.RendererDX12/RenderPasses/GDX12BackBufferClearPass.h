@@ -14,11 +14,6 @@ public:
 		this->IN_OUT_depthStencil = IN_OUT_depthStencil;
 	}
 
-	void Initialize(GDX12DeviceResources* resources, RenderPipelineCommonData* commonData) override
-	{
-		GDX12RenderPass::Initialize(resources, commonData);
-	}
-
 	void Execute(GDX12CommandList* cmdList) override
 	{
 		GDX12Texture* currentBackBuffer = IN_OUT_currentBackBuffer->GetTexture();

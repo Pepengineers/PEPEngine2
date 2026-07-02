@@ -12,6 +12,8 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyFromSharedMemoryPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyToSharedMemoryPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12OutputToScreenPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12FSRUpscalePass.h"
 
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
@@ -155,7 +157,11 @@ private:
     GDX12WBOITCompositionPass _WBOITCompositionPass;
     GDX12TextureCopyFromSharedMemoryPass _textureCopyFromSharedMemoryPass;
     GDX12TextureCopyToSharedMemoryPass _textureCopyToSharedMemoryPass;
+    GDX12FSRUpscalePass _FSRUpscalePass;
+    GDX12OutputToScreenPass _outputPass;
 
+    // To be able to know where to get render target resolution when resizing
+    GDX12RenderPass* _upscaler;
     
     // Sorted in execution order
     std::vector<GDX12RenderPass*> _primaryRenderPassExecutionList;

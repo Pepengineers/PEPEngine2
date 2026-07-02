@@ -8,7 +8,7 @@
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
     _dualGPUMode(false), _window(window), _timer(timer),
-    _primaryPipelineFlags(0), _secondaryPipelineFlags(0)
+    _primaryPipelineFlags(0), _secondaryPipelineFlags(0), _upscaler(nullptr)
 {
     _RPcommonData.GameTimer = _timer;
 }
@@ -67,6 +67,7 @@ void RenderModule::OnResize()
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
+    if (_upscaler) { _upscaler->QueryRenderTargetResolution(); }
 
     for (auto& renderPass : _primaryRenderPassExecutionList) { renderPass->Resize(); }
 }
@@ -132,7 +133,7 @@ GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* 
 {
     if (_textures.find(name) != _textures.end())
     {
-        std::string errorMsg = "ERROR: Texture with name " + name + " already exists in Textures directory.\n";
+        std::string errorMsg = "WARNING: Texture with name " + name + " already exists in Textures directory. Texture creation Skipped\n";
         OutputDebugStringA(errorMsg.c_str());
         return nullptr;
     }
@@ -698,29 +699,51 @@ void RenderModule::BuildBackBuffer()
 
 void RenderModule::ConfigureRenderPipeline()
 {
-    _backBufferClearPass.Initialize(&_primaryResources, &_RPcommonData);
-    _backBufferClearPass.LinkDependancies(_backBuffer.get(), _depthStencil.get());
-    _primaryPipelineFlags |= _backBufferClearPass.GetFlags();
+    std::vector<GDX12RenderPass*> _primaryRenderPassList =
+    { &_backBufferClearPass, &_gpuCullingPass, &_opaquePass, &_WBOITTransparencyPass,
+    &_WBOITCompositionPass, &_outputPass, &_FSRUpscalePass };
 
-    _gpuCullingPass.Initialize(&_primaryResources, &_RPcommonData);
-    _primaryPipelineFlags |= _gpuCullingPass.GetFlags();
+    std::vector<GDX12RenderPass*> _secondaryRenderPassList =
+    {  };
+
+    for (auto& primaryRenderPass : _primaryRenderPassList)
+    {
+        primaryRenderPass->Initialize(&_primaryResources, &_RPcommonData);
+        _primaryPipelineFlags |= primaryRenderPass->GetFlags();
+    }
+
+    _upscaler = &_FSRUpscalePass;
+    _upscaler->QueryRenderTargetResolution();
+
+    _backBufferClearPass.LinkDependancies(_backBuffer.get(), _depthStencil.get());
+    _primaryRenderPassExecutionList.push_back(&_backBufferClearPass);
+
+    _primaryRenderPassExecutionList.push_back(&_gpuCullingPass);
 
     IRenderPassLink* opaqueAccum;
     IRenderPassLink* opaqueVelocity;
-    _opaquePass.Initialize(&_primaryResources, &_RPcommonData);
+    //_opaquePass.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
     _opaquePass.LinkDependancies(_depthStencil.get(), opaqueAccum, opaqueVelocity);
-    _primaryPipelineFlags |= _opaquePass.GetFlags();
+    _primaryRenderPassExecutionList.push_back(&_opaquePass);
 
     IRenderPassLink* transparencyAccum;
     IRenderPassLink* transparencyRevealage;
-    _WBOITTransparencyPass.Initialize(&_primaryResources, &_RPcommonData);
+    //_WBOITTransparencyPass.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
     _WBOITTransparencyPass.LinkDependancies(_depthStencil.get(),
         transparencyAccum, transparencyRevealage);
-    _primaryPipelineFlags |= _WBOITTransparencyPass.GetFlags();
+    _primaryRenderPassExecutionList.push_back(&_WBOITTransparencyPass);
 
-    _WBOITCompositionPass.Initialize(&_primaryResources, &_RPcommonData);
-    _WBOITCompositionPass.LinkDependancies(opaqueAccum, transparencyAccum, transparencyRevealage, _backBuffer.get());
-    _primaryPipelineFlags |= _WBOITCompositionPass.GetFlags();
+    IRenderPassLink* composition;
+    //_WBOITCompositionPass.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    _WBOITCompositionPass.LinkDependancies(opaqueAccum, transparencyAccum, transparencyRevealage, composition);
+    _primaryRenderPassExecutionList.push_back(&_WBOITCompositionPass);
+
+    //IRenderPassLink* upscaledOutput;
+    //_FSRUpscalePass.LinkDependancies(composition, _depthStencil.get(), opaqueVelocity, upscaledOutput);
+    //_primaryRenderPassExecutionList.push_back(&_FSRUpscalePass);
+
+    _outputPass.LinkDependancies(composition, _backBuffer.get());
+    _primaryRenderPassExecutionList.push_back(&_outputPass);
 
     // Texture transfer example
     //IRenderPassLink* sharedMemoryVelocityBuffer;
@@ -732,9 +755,6 @@ void RenderModule::ConfigureRenderPipeline()
     //_textureCopyFromSharedMemoryPass.Initialize(&_secondaryResources, &_RPcommonData);
     //_textureCopyFromSharedMemoryPass.LinkDependancies(sharedMemoryVelocityBuffer, transferredVelocityBuffer);
     //_secondaryPipelineFlags |= _textureCopyFromSharedMemoryPass.GetFlags();
-
-    _primaryRenderPassExecutionList = { &_backBufferClearPass, &_gpuCullingPass, &_opaquePass,
-        &_WBOITTransparencyPass, &_WBOITCompositionPass };
 }
 
 void RenderModule::SubscribeToSceneManager()

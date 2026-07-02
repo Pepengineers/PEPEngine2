@@ -30,6 +30,8 @@ public:
 
     void Reset();
 
+    virtual void ResetState();
+
 	ComPtr<ID3D12Resource> D3DResource;
 
 private:

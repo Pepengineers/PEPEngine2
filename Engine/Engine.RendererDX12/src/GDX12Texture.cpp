@@ -22,9 +22,10 @@ GDX12Texture::GDX12Texture(GDX12TextureDesc desc) :
     if (_desc.RTVHeap) { _device = _desc.RTVHeap->_device; }
     if (_desc.DSVHeap) { _device = _desc.DSVHeap->_device; }
 
-    if (_desc.CreateRTV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET; }
+    if (_desc.CreateRTV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS; }
     if (_desc.CreateDSV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL; }
     if (_desc.CreateUAV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS; }
+    if (_desc.CreateSRV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS; }
 
     if (_desc.CreateRTV)
     {
@@ -165,6 +166,7 @@ void GDX12Texture::CreateResource()
 
     if (!_resource) { _resource = std::make_unique<GDX12TextureResource>(d3dResource); }
     else { _resource->D3DResource = d3dResource; }
+    _resource->ResetState();
 }
 
 void GDX12Texture::CreateViews()

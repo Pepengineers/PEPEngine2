@@ -34,11 +34,6 @@ public:
 		OUT_Texture = this->OUT_Texture.get();
 	}
 
-	void Initialize(GDX12DeviceResources* resources, RenderPipelineCommonData* commonData) override
-	{
-		GDX12RenderPass::Initialize(resources, commonData);
-	}
-
 	// Copies texture from shared memory onto device the pass was initialized on
 	// It required CopyFromSharedMemory pass to be executed beforehand on the TransferFrom device
 	// Resulting texture can be used as SRV on the device the texture was transferred to

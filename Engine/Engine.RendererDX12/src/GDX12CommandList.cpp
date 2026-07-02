@@ -274,7 +274,17 @@ void GDX12CommandList::ExecuteIndirect(ID3D12CommandSignature* pCommandSignature
 
 void GDX12CommandList::ResourceBarrier(std::initializer_list<CD3DX12_RESOURCE_BARRIER> barriers)
 {
-	_commandList->ResourceBarrier(barriers.size(), barriers.begin());
+	std::vector<CD3DX12_RESOURCE_BARRIER> filteredBarriers;
+	for (auto& barrier : barriers)
+	{
+		//skip transition with equal before and after states
+		const D3D12_RESOURCE_BARRIER& baseBarrier = barrier;
+		if (baseBarrier.Transition.StateBefore != baseBarrier.Transition.StateAfter)
+		{
+			filteredBarriers.push_back(barrier);
+		}
+	}
+	if (!filteredBarriers.empty()) { _commandList->ResourceBarrier(filteredBarriers.size(), filteredBarriers.data()); }
 }
 
 void GDX12CommandList::EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTURE_BARRIER> textureBarriers)

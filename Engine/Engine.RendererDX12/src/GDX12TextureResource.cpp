@@ -34,6 +34,15 @@ void GDX12TextureResource::SetCurrentState(D3D12_BARRIER_SYNC sync, D3D12_BARRIE
     _currentLayout = layout;
 }
 
+void GDX12TextureResource::ResetState()
+{
+    GDX12Resource::ResetState();
+
+    _currentSync = D3D12_BARRIER_SYNC_NONE;
+    _currentAccess = D3D12_BARRIER_ACCESS_COMMON;
+    _currentLayout = D3D12_BARRIER_LAYOUT_COMMON;
+}
+
 D3D12_BARRIER_SYNC GDX12TextureResource::GetCurrentSync()
 {
 	return _currentSync;

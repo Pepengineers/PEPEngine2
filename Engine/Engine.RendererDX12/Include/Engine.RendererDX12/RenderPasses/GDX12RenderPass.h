@@ -35,7 +35,8 @@ enum ERenderPassFlags : uint32_t
     RENDER_PASS_FLAG_USE_CAMERAS = 1 << 2,
     RENDER_PASS_FLAG_USE_LIGHTING = 1 << 3,
     RENDER_PASS_FLAG_USE_INSTANCES = 1 << 4,
-    RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION = 1 << 5
+    RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION = 1 << 5,
+    RENDER_PASS_FLAG_UPSCALER = 1 << 6
 };
 
 class GDX12RenderPass
@@ -49,6 +50,9 @@ public:
     };
     virtual void Resize() {};
     virtual void Execute(GDX12CommandList* cmdList) {};
+    // Used by upscalers to determine downscaled render target size
+    // And share it with all other passes
+    virtual void QueryRenderTargetResolution() {};
 
     uint32_t GetFlags() { return _flags; }
     void SetFlag(uint32_t flag, bool value)

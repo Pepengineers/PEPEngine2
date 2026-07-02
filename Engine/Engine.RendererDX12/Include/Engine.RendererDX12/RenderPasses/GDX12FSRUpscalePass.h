@@ -8,11 +8,12 @@
 
 class GDX12FSRUpscalePass : public GDX12RenderPass
 {
+public:
 	GDX12FSRUpscalePass() : IN_Texture(nullptr), IN_DepthBuffer(nullptr), 
 		IN_MotionVectors(nullptr), OUT_UpscaledTexture(nullptr), _FFXContext(nullptr)
-	{ _flags = RENDER_PASS_FLAG_NONE; }
+	{ _flags = RENDER_PASS_FLAG_UPSCALER; }
 	
-	~GDX12FSRUpscalePass() { ffxDestroyContext(&_FFXContext, nullptr); }
+	~GDX12FSRUpscalePass() { if (_FFXContext) { ffxDestroyContext(&_FFXContext, nullptr); } }
 
 	void LinkDependancies(IRenderPassLink* IN_Texture, IRenderPassLink* IN_DepthBuffer,
 		IRenderPassLink* IN_MotionVectors, IRenderPassLink*& OUT_UpscaledTexture)
@@ -25,8 +26,8 @@ class GDX12FSRUpscalePass : public GDX12RenderPass
 
 		GDX12TextureDesc TextureDesc1;
 		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = inputTexture->GetFormat();
-		TextureDesc1.Width = inputTexture->GetWidth();
-		TextureDesc1.Height = inputTexture->GetHeight();
+		TextureDesc1.Width = _commonData->WindowWidth;
+		TextureDesc1.Height = _commonData->WindowHeight;
 
 		TextureDesc1.CreateSRV = true;
 		TextureDesc1.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
@@ -49,6 +50,7 @@ class GDX12FSRUpscalePass : public GDX12RenderPass
 		GDX12RenderPass::Initialize(resources, commonData);
 
 		BuildFSRContext();
+		QueryRenderTargetResolution();
 	}
 
 	void Execute(GDX12CommandList* cmdList) override
@@ -57,6 +59,7 @@ class GDX12FSRUpscalePass : public GDX12RenderPass
 		GDX12Texture* depthStencil = IN_DepthBuffer->GetTexture();
 		GDX12Texture* motionVectors = IN_MotionVectors->GetTexture();
 
+		cmdList->BeginPixEvent("FSR Upscale Pass", Colors::Blue);
 		ffxDispatchDescUpscale dispatchDesc;
 		dispatchDesc.header.type = FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
 		dispatchDesc.commandList = cmdList->GetCommandList().Get();
@@ -69,14 +72,16 @@ class GDX12FSRUpscalePass : public GDX12RenderPass
 		dispatchDesc.upscaleSize = { _commonData->WindowWidth, _commonData->WindowHeight };
 		dispatchDesc.cameraNear = _commonData->ActiveCameraNearPlane;
 		dispatchDesc.cameraFar = _commonData->ActiveCameraFarPlane;
-		dispatchDesc.cameraFovAngleVertical = _commonData->ActiveCameraFOV;
+		dispatchDesc.cameraFovAngleVertical = XMConvertToRadians(_commonData->ActiveCameraFOV);
 
 		dispatchDesc.jitterOffset.x = 0;
 		dispatchDesc.jitterOffset.y = 0;
 
 		dispatchDesc.enableSharpening = false;
 		dispatchDesc.sharpness = 0.8f;
-		dispatchDesc.frameTimeDelta = _commonData->GameTimer->DeltaTime() * 1000.f; //expects milliseconds
+		// for whatever reason, it doesnt like it when frame time is lower than 1.f
+		float clampedTime = max(_commonData->GameTimer->DeltaTime() * 1000.f, 1.f);
+		dispatchDesc.frameTimeDelta = clampedTime; //expects milliseconds
 		dispatchDesc.reset = false; // set to true if camera teleports or moves not smoothly
 		
 		dispatchDesc.preExposure = 1.f;
@@ -96,9 +101,9 @@ class GDX12FSRUpscalePass : public GDX12RenderPass
 			std::string errorMsg = "FSR DISPATCH ERROR: " + std::to_string(dispatchError) + " \n";
 			OutputDebugStringA(errorMsg.c_str());
 		}
+		cmdList->EndPixEvent();
 	}
 
-	// Resize with window size
 	void Resize() override
 	{
 		OUT_UpscaledTexture->Resize(_commonData->WindowWidth, _commonData->WindowHeight);
@@ -106,6 +111,26 @@ class GDX12FSRUpscalePass : public GDX12RenderPass
 		ffxDestroyContext(&_FFXContext, nullptr);
 		BuildFSRContext();
 	}
+
+	void QueryRenderTargetResolution() override
+	{
+		ffxQueryDescUpscaleGetRenderResolutionFromQualityMode queryDesc = {};
+		queryDesc.header.type = FFX_API_QUERY_DESC_TYPE_UPSCALE_GETRENDERRESOLUTIONFROMQUALITYMODE;
+		queryDesc.displayHeight = _commonData->WindowHeight;
+		queryDesc.displayWidth = _commonData->WindowWidth;
+		queryDesc.qualityMode = FSRQualityMode;
+		queryDesc.pOutRenderHeight = &_commonData->DownscaledHeight;
+		queryDesc.pOutRenderWidth = &_commonData->DownscaledWidth;
+		ffxQuery(&_FFXContext, &queryDesc.header);
+	}
+
+	FfxApiUpscaleQualityMode FSRQualityMode = FFX_UPSCALE_QUALITY_MODE_QUALITY;
+private:
+	IRenderPassLink* IN_Texture;
+	IRenderPassLink* IN_DepthBuffer;
+	IRenderPassLink* IN_MotionVectors;
+	ffxContext _FFXContext;
+	std::unique_ptr<GDX12Texture> OUT_UpscaledTexture;
 
 	void BuildFSRContext()
 	{
@@ -147,29 +172,5 @@ class GDX12FSRUpscalePass : public GDX12RenderPass
 			std::string errorMsg = "ERROR: FSR3 CONTEXT CREATION FAILED\n";
 			OutputDebugStringA(errorMsg.c_str());
 		}
-
-		QueryRenderTargetResolution(&_commonData->DownscaledWidth, &_commonData->DownscaledHeight);
 	}
-
-	// Function requires the pass to be initialized
-	// Returns renderTarget resolution based on internal FSRQualityMode parameter
-	void QueryRenderTargetResolution(UINT* ResolutionX, UINT* ResolutionY)
-	{
-		ffxQueryDescUpscaleGetRenderResolutionFromQualityMode queryDesc = {};
-		queryDesc.header.type = FFX_API_QUERY_DESC_TYPE_UPSCALE_GETRENDERRESOLUTIONFROMQUALITYMODE;
-		queryDesc.displayHeight = _commonData->WindowHeight;
-		queryDesc.displayWidth = _commonData->WindowWidth;
-		queryDesc.qualityMode = FSRQualityMode;
-		queryDesc.pOutRenderHeight = ResolutionX;
-		queryDesc.pOutRenderWidth = ResolutionY;
-		ffxQuery(&_FFXContext, &queryDesc.header);
-	}
-
-	FfxApiUpscaleQualityMode FSRQualityMode = FFX_UPSCALE_QUALITY_MODE_QUALITY;
-private:
-	IRenderPassLink* IN_Texture;
-	IRenderPassLink* IN_DepthBuffer;
-	IRenderPassLink* IN_MotionVectors;
-	ffxContext _FFXContext;
-	std::unique_ptr<GDX12Texture> OUT_UpscaledTexture;
 };
