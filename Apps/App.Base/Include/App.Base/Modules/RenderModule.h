@@ -44,7 +44,7 @@ public:
     void Initialize() override;
     void Uninitialize() override;
 
-    void OnResize() const;
+    void OnResize();
 
     GDX12Material* GetMaterialByName(const std::string& name);
 
@@ -133,7 +133,7 @@ private:
     
     std::unordered_map<Entity, TransformCompGPUData> _transformGPUData;
     std::unordered_map<World*, WorldRenderSubscriptions> _worldSubscriptions;
-    UINT _activeCamera;
+    RenderPipelineCommonData _RPcommonData;
 
     std::unique_ptr<GDX12Device> _primaryDevice;
     std::unique_ptr<GDX12Device> _secondaryDevice;

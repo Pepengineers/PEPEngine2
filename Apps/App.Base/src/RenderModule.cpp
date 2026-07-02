@@ -7,9 +7,10 @@
 #include "Common/ConsoleVariables.h"
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
-    _dualGPUMode(false), _window(window), _timer(timer), _activeCamera(0),
+    _dualGPUMode(false), _window(window), _timer(timer),
     _primaryPipelineFlags(0), _secondaryPipelineFlags(0)
 {
+    _RPcommonData.GameTimer = _timer;
 }
 
 RenderModule::~RenderModule()
@@ -34,7 +35,7 @@ void RenderModule::Initialize()
     _primaryDevice->Role = DEVICE_ROLE_PRIMARY;
     _primaryResources.Initialize(_primaryDevice.get());
 
-    if (true)
+    if (false)
     {
         _secondaryDevice = std::make_unique<GDX12Device>();
         _secondaryDevice->Initialize(GDX12DeviceFactory::GetDeviceDescriptors()[1].Adapter.Get());
@@ -54,7 +55,7 @@ void RenderModule::Uninitialize()
     UnsubscribeFromSceneManager();
 }
 
-void RenderModule::OnResize() const
+void RenderModule::OnResize()
 {
     _primaryDevice->GetCommandQueue()->Flush();
 
@@ -63,6 +64,9 @@ void RenderModule::OnResize() const
 
     _backBuffer->Resize(width, height);
     _depthStencil->Resize(width, height);
+
+    _RPcommonData.WindowWidth = width;
+    _RPcommonData.WindowHeight = height;
 
     for (auto& renderPass : _primaryRenderPassExecutionList) { renderPass->Resize(width, height); }
 }
@@ -309,7 +313,10 @@ void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
 
 void RenderModule::SetActiveCamera(CameraComponent* camera)
 {
-    _activeCamera = camera->_CBufferIndex;
+    _RPcommonData.ActiveCameraCBufferIndex = camera->_CBufferIndex;
+    _RPcommonData.ActiveCameraFOV = camera->FOV;
+    _RPcommonData.ActiveCameraNearPlane = camera->NearPlane;
+    _RPcommonData.ActiveCameraFarPlane = camera->FarPlane;
 }
 
 TransformCompGPUData& RenderModule::GetTransformGPUData(Entity entity)
@@ -641,7 +648,7 @@ void RenderModule::OnRender()
 {
     auto cmdQueue = _primaryDevice->GetCommandQueue();
 
-    cmdQueue->Flush();
+    //cmdQueue->Flush();
 
     auto cmdList = cmdQueue->GetCommandList();
     auto CurrentBackBuffer = _backBuffer->GetCurrentBuffer();
@@ -696,19 +703,19 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryPipelineFlags |= _backBufferClearPass.GetFlags();
 
     _gpuCullingPass.Initialize(&_primaryResources, width, height);
-    _gpuCullingPass.LinkDependancies(&_activeCamera);
+    _gpuCullingPass.LinkDependancies(&_RPcommonData);
     _primaryPipelineFlags |= _gpuCullingPass.GetFlags();
 
     IRenderPassLink* opaqueAccum;
     IRenderPassLink* opaqueVelocity;
     _opaquePass.Initialize(&_primaryResources, width, height);
-    _opaquePass.LinkDependancies(&_activeCamera, _depthStencil.get(), opaqueAccum, opaqueVelocity);
+    _opaquePass.LinkDependancies(&_RPcommonData, _depthStencil.get(), opaqueAccum, opaqueVelocity);
     _primaryPipelineFlags |= _opaquePass.GetFlags();
 
     IRenderPassLink* transparencyAccum;
     IRenderPassLink* transparencyRevealage;
     _WBOITTransparencyPass.Initialize(&_primaryResources, width, height);
-    _WBOITTransparencyPass.LinkDependancies(&_activeCamera, _depthStencil.get(),
+    _WBOITTransparencyPass.LinkDependancies(&_RPcommonData, _depthStencil.get(),
         transparencyAccum, transparencyRevealage);
     _primaryPipelineFlags |= _WBOITTransparencyPass.GetFlags();
 

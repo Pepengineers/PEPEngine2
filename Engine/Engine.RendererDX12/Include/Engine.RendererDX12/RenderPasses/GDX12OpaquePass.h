@@ -4,14 +4,14 @@
 class GDX12OpaquePass : public GDX12RenderPass
 {
 public:
-	GDX12OpaquePass() : IN_DepthStencil(nullptr), IN_CameraCBIndex(nullptr)
+	GDX12OpaquePass() : IN_DepthStencil(nullptr), IN_CommonData(nullptr)
 	{ _flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_GEOMETRY | RENDER_PASS_FLAG_USE_MATERIALS
 		| RENDER_PASS_FLAG_USE_INSTANCES; }
 
-	void LinkDependancies(UINT* IN_CameraCBIndex, IRenderPassLink* IN_DepthStencil,
+	void LinkDependancies(IRenderPassLink* IN_CommonData, IRenderPassLink* IN_DepthStencil,
 		IRenderPassLink*& OUT_Accumulation, IRenderPassLink*& OUT_Velocity)
 	{
-		this->IN_CameraCBIndex = IN_CameraCBIndex;
+		this->IN_CommonData = IN_CommonData;
 		this->IN_DepthStencil = IN_DepthStencil;
 
 		PostLinkInitialize();
@@ -95,8 +95,10 @@ public:
 	// It requires GPUCullingPass to be executed beforehand
 	void Execute(GDX12CommandList* cmdList)
 	{
+		UINT cameraCBIndex = IN_CommonData->GetCommonData()->ActiveCameraCBufferIndex;
+
 		auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[*IN_CameraCBIndex];
+		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[cameraCBIndex];
 		GDX12Texture* depthStencil = IN_DepthStencil->GetTexture();
 
 		cmdList->BeginPixEvent("Opaque Render Pass", Colors::ForestGreen);
@@ -107,7 +109,7 @@ public:
 		cmdList->SetPipelineState(_opaquePSO.Get());
 		cmdList->SetGraphicsRootConstantBufferView(1, currentFrameConstants->MainCB->GetElementAddress(0));
 		cmdList->SetGraphicsRootConstantBufferView(2, currentFrameConstants->CameraCB->
-			GetElementAddress(*IN_CameraCBIndex));
+			GetElementAddress(cameraCBIndex));
 		cmdList->ResourceBarrier({ _accumulationTexture->GetResource()->GetRenderTargetBarrier(),
 			_velocityBuffer->GetResource()->GetRenderTargetBarrier() });
 		cmdList->SetRenderTargets({ _accumulationTexture.get(), _velocityBuffer.get() }, depthStencil);
@@ -170,6 +172,6 @@ private:
 	std::unique_ptr<GDX12Texture> _accumulationTexture;
 	std::unique_ptr<GDX12Texture> _velocityBuffer;
 
-	UINT* IN_CameraCBIndex;
+	IRenderPassLink* IN_CommonData;
 	IRenderPassLink* IN_DepthStencil;
 };
