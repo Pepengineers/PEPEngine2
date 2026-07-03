@@ -149,6 +149,8 @@ GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* 
     { _textures[name]->PrimaryDeviceTexture = CreateDX12Texture(name, &_primaryResources, texture); }
     if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS)
     { _textures[name]->SecondaryDeviceTexture = CreateDX12Texture(name, &_secondaryResources, texture); }
+
+    return _textures[name].get();
 }
 
 GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture)
@@ -574,7 +576,30 @@ void RenderModule::OnCameraComponentUpdated(World& world, Entity entity, CameraC
 
 void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticMeshRenderComponent& component)
 {
-    auto& MeshGPUData = _primaryResources.GeometryBuffer->_meshCache[component.MeshHandler.GetValue()];
+    const GPUMesh* MeshGPUData = nullptr;
+
+    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_GEOMETRY)
+    {
+        auto it = _primaryResources.GeometryBuffer->_meshCache.find(component.MeshHandler.GetValue());
+        if (it != _primaryResources.GeometryBuffer->_meshCache.end())
+        {
+            MeshGPUData = it->second.get();
+        }
+    }
+
+    if (MeshGPUData == nullptr && (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_GEOMETRY))
+    {
+        auto it = _secondaryResources.GeometryBuffer->_meshCache.find(component.MeshHandler.GetValue());
+        if (it != _secondaryResources.GeometryBuffer->_meshCache.end())
+        {
+            MeshGPUData = it->second.get();
+        }
+    }
+
+    if (MeshGPUData == nullptr)
+    {
+        return;
+    }
     
     if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_INSTANCES)
     {
@@ -599,11 +624,10 @@ void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticM
 
     if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_INSTANCES)
     {
-        auto& MeshGPUData = _secondaryResources.GeometryBuffer->_meshCache[component.MeshHandler.GetValue()];
         for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
         {
             component._CBufferIndices.push_back(_secondaryResources.FrameConstants[0]->InstanceCache->GetElementCount());
-            _secondaryResources.IndirectCommandsCache->Resize(_primaryResources.IndirectCommandsCache->GetElementCount() + 1);
+            _secondaryResources.IndirectCommandsCache->Resize(_secondaryResources.IndirectCommandsCache->GetElementCount() + 1);
 
             for (auto& constants : _secondaryResources.FrameConstants)
             {

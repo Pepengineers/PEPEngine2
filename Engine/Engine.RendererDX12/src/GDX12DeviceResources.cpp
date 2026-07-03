@@ -93,9 +93,9 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
             }
             else
             {
-                if (material->Diffuse && material->Diffuse->PrimaryDeviceTexture) { materialConstants.DiffuseIndex = material->Diffuse->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
-                if (material->Normal && material->Normal->PrimaryDeviceTexture) { materialConstants.NormalIndex = material->Normal->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
-                if (material->Displacement && material->Displacement->PrimaryDeviceTexture) { materialConstants.DisplacementIndex = material->Displacement->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
+                if (material->Diffuse && material->Diffuse->SecondaryDeviceTexture) { materialConstants.DiffuseIndex = material->Diffuse->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
+                if (material->Normal && material->Normal->SecondaryDeviceTexture) { materialConstants.NormalIndex = material->Normal->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
+                if (material->Displacement && material->Displacement->SecondaryDeviceTexture) { materialConstants.DisplacementIndex = material->Displacement->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
                 currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
             }
             material->_numFramesDirty--;
