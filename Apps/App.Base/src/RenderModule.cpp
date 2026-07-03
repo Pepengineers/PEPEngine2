@@ -35,7 +35,7 @@ void RenderModule::Initialize()
     _primaryDevice->Role = DEVICE_ROLE_PRIMARY;
     _primaryResources.Initialize(_primaryDevice.get());
 
-    if (false)
+    if (true)
     {
         _secondaryDevice = std::make_unique<GDX12Device>();
         _secondaryDevice->Initialize(GDX12DeviceFactory::GetDeviceDescriptors()[1].Adapter.Get());
@@ -45,6 +45,7 @@ void RenderModule::Initialize()
     }
 
     BuildBackBuffer();
+    if (_dualGPUMode) { ShareFences(); }
     ConfigureRenderPipeline();
 
     SubscribeToSceneManager();
@@ -619,14 +620,14 @@ void RenderModule::OnUpdate()
 
     if (frameConsts->FenceValue > cmdQueue->GetFence()->GetCompletedValue())
     {
-        cmdQueue->WaitForFenceValue(frameConsts->FenceValue);
+        cmdQueue->CPUWaitForFenceValue(frameConsts->FenceValue);
     }
 
     _primaryResources.UpdateMainCB(width, height, _timer);
     if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS)
     { _primaryResources.UpdateMaterialCB(_materials); }
 
-    //SecondaryDevice
+    // same for SecondaryDevice
     if (_dualGPUMode)
     {
         _secondaryResources.CurrFrameConstantsIndex = (_secondaryResources.CurrFrameConstantsIndex + 1) % numFrames;
@@ -636,7 +637,7 @@ void RenderModule::OnUpdate()
 
         if (frameConsts->FenceValue > cmdQueue->GetFence()->GetCompletedValue())
         {
-            cmdQueue->WaitForFenceValue(frameConsts->FenceValue);
+            cmdQueue->CPUWaitForFenceValue(frameConsts->FenceValue);
         }
 
         _secondaryResources.UpdateMainCB(width, height, _timer);
@@ -647,24 +648,46 @@ void RenderModule::OnUpdate()
 
 void RenderModule::OnRender()
 {
-    auto cmdQueue = _primaryDevice->GetCommandQueue();
+    auto primarycmdQueue = _primaryDevice->GetCommandQueue();
+    auto primarycmdList = primarycmdQueue->GetCommandList();
+    auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
+    for (auto& renderPass : _primaryRenderPassExecutionList) 
+    { 
+        if (renderPass->GetFlagValue(RENDER_PASS_FLAG_SYNC_DEVICES) && _dualGPUMode)
+        {
+            primarycmdQueue->ExecuteCommandList(primarycmdList);
+            primarycmdQueue->WaitForOtherFence(primarycmdList->FenceValue);
+            primarycmdList = primarycmdQueue->GetCommandList();
+        }
+        else
+        {
+            renderPass->Execute(primarycmdList);
+        }
+    }
+    primarycmdQueue->ExecuteCommandList(primarycmdList);
+    primaryCurrentFrameConsts->FenceValue = primarycmdList->FenceValue;
 
-    //cmdQueue->Flush();
-
-    auto cmdList = cmdQueue->GetCommandList();
-    auto CurrentBackBuffer = _backBuffer->GetCurrentBuffer();
-    auto CurrentFrameConsts = GetCurrentPrimaryFrameConstants();
-
-    cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetRenderTargetEnhBarrier() });
-    cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetDepthWriteBarrier() });
-    
-    for (auto& renderPass : _primaryRenderPassExecutionList) { renderPass->Execute(cmdList); }
-    
-    cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetPresentEnhBarrier() });
-    cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetCommonBarrier() });
-
-    cmdQueue->ExecuteCommandList(cmdList);
-    CurrentFrameConsts->FenceValue = cmdList->FenceValue;
+    if (_dualGPUMode)
+    {
+        auto secondarycmdQueue = _secondaryDevice->GetCommandQueue();
+        auto secondarycmdList = secondarycmdQueue->GetCommandList();
+        auto secondaryCurrentFrameConsts = GetCurrentSecondaryFrameConstants();
+        for (auto& renderPass : _secondaryRenderPassExecutionList)
+        {
+            if (renderPass->GetFlagValue(RENDER_PASS_FLAG_SYNC_DEVICES))
+            {
+                secondarycmdQueue->ExecuteCommandList(secondarycmdList);
+                secondarycmdQueue->WaitForOtherFence(secondarycmdList->FenceValue);
+                secondarycmdList = secondarycmdQueue->GetCommandList();
+            }
+            else
+            {
+                renderPass->Execute(secondarycmdList);
+            }
+        }
+        secondarycmdQueue->ExecuteCommandList(secondarycmdList);
+        secondaryCurrentFrameConsts->FenceValue = secondarycmdList->FenceValue;
+    }
 
     _backBuffer->Present();
 }
@@ -697,14 +720,33 @@ void RenderModule::BuildBackBuffer()
     _RPcommonData.WindowHeight = height;
 }
 
+void RenderModule::ShareFences()
+{
+    HANDLE primaryhandle;
+    ThrowIfFailed(_primaryDevice->GetDevice()->CreateSharedHandle(
+        _primaryDevice->GetCommandQueue()->GetFence().Get(),
+        nullptr, GENERIC_ALL, nullptr, &primaryhandle));
+
+    ThrowIfFailed(_secondaryDevice->GetDevice()->OpenSharedHandle(
+        primaryhandle,
+        IID_PPV_ARGS(&_secondaryDevice->GetCommandQueue()->GetOtherFence())));
+
+    HANDLE secondaryhandle;
+    ThrowIfFailed(_secondaryDevice->GetDevice()->CreateSharedHandle(
+        _secondaryDevice->GetCommandQueue()->GetFence().Get(),
+        nullptr, GENERIC_ALL, nullptr, &secondaryhandle));
+
+    ThrowIfFailed(_primaryDevice->GetDevice()->OpenSharedHandle(
+        secondaryhandle,
+        IID_PPV_ARGS(&_primaryDevice->GetCommandQueue()->GetOtherFence())));
+}
+
 void RenderModule::ConfigureRenderPipeline()
 {
+    // Primary device pipeline
     std::vector<GDX12RenderPass*> _primaryRenderPassList =
     { &_backBufferClearPass, &_gpuCullingPass, &_opaquePass, &_WBOITTransparencyPass,
     &_WBOITCompositionPass, &_outputPass, &_FSRUpscalePass };
-
-    std::vector<GDX12RenderPass*> _secondaryRenderPassList =
-    {  };
 
     for (auto& primaryRenderPass : _primaryRenderPassList)
     {
@@ -712,8 +754,14 @@ void RenderModule::ConfigureRenderPipeline()
         _primaryPipelineFlags |= primaryRenderPass->GetFlags();
     }
 
-    _upscaler = &_FSRUpscalePass;
-    _upscaler->QueryRenderTargetResolution();
+    std::vector<GDX12RenderPass*> _secondaryRenderPassList =
+    {  };
+
+    for (auto& secondaryRenderPass : _secondaryRenderPassList)
+    {
+        secondaryRenderPass->Initialize(&_secondaryResources, &_primaryResources, &_RPcommonData);
+        _secondaryPipelineFlags |= secondaryRenderPass->GetFlags();
+    }
 
     std::vector<IRenderPassLink*> clearPassInputs = { _backBuffer.get(), _depthStencil.get() };
     std::vector<IRenderPassLink*> clearPassOutputs;
@@ -744,10 +792,13 @@ void RenderModule::ConfigureRenderPipeline()
     //IRenderPassLink* upscaledOutput;
     //_FSRUpscalePass.LinkDependancies(composition, _depthStencil.get(), opaqueVelocity, upscaledOutput);
     //_primaryRenderPassExecutionList.push_back(&_FSRUpscalePass);
+    //_upscaler = &_FSRUpscalePass;
 
     std::vector<IRenderPassLink*> outputPassInputs = { compositionPassOutputs[0], _backBuffer.get() };
     _outputPass.LinkDependancies(outputPassInputs, nullptr);
     _primaryRenderPassExecutionList.push_back(&_outputPass);
+
+    // SecondaryDevice pipeline
 
     // Texture transfer example
     //IRenderPassLink* sharedMemoryVelocityBuffer;

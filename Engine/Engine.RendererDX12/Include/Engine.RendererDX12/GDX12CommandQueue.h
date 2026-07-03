@@ -15,14 +15,16 @@ public:
 
 	const ComPtr<ID3D12CommandQueue>& GetCommandQueue();
 	const ComPtr<ID3D12Fence>& GetFence();
+	ComPtr<ID3D12Fence>& GetOtherFence();
 
 	// Returns a CommandList that you can work with.
 	// If all previously created lists are busy - a new one will be created.
 	GDX12CommandList* GetCommandList();
 	void ExecuteCommandList(GDX12CommandList* commandList);
-	void ExecuteCommandLists(GDX12CommandList** lists, UINT count);
+	void ExecuteCommandLists(std::vector<GDX12CommandList*>& commandLists);
 
-	void WaitForFenceValue(uint64_t fenceValue);
+	void CPUWaitForFenceValue(uint64_t fenceValue);
+	void WaitForOtherFence(uint64_t otherFenceValue);
 
 	//Waits for execution of all active lists
 	void Flush();
@@ -37,6 +39,10 @@ private:
 
 	ComPtr<ID3D12CommandQueue> _commandQueue;
 	ComPtr<ID3D12Fence> _fence;
+	//shared fence from another device
+	//null if _dualGPUMode is false
+	ComPtr<ID3D12Fence> _otherFence;
+
 	GDX12Device* _device;
 
 	// Command Lists can be requested via GetCommandList()

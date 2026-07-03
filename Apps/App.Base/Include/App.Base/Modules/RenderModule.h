@@ -14,6 +14,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyToSharedMemoryPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OutputToScreenPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12FSRUpscalePass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12SyncPass.h"
 
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
@@ -119,6 +120,7 @@ protected:
 
 private:
     void BuildBackBuffer();
+    void ShareFences();
     void ConfigureRenderPipeline();
     
     void SubscribeToSceneManager();
@@ -159,6 +161,8 @@ private:
     GDX12TextureCopyToSharedMemoryPass _textureCopyToSharedMemoryPass;
     GDX12FSRUpscalePass _FSRUpscalePass;
     GDX12OutputToScreenPass _outputPass;
+    GDX12SyncPass _primarySyncPass;
+    GDX12SyncPass _secondarySyncPass;
 
     // To be able to know where to get render target resolution when resizing
     GDX12RenderPass* _upscaler;

@@ -23,7 +23,7 @@ public:
 
 	// VisibilityBuffers will automatically be selected from CameraCBIndex
 	// It requires GPUCullingPass to be executed beforehand
-	void Execute(GDX12CommandList* cmdList)
+	void Execute(GDX12CommandList* cmdList) override
 	{
 		auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
 		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[_commonData->ActiveCameraCBufferIndex];

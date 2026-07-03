@@ -16,7 +16,7 @@ public:
 		IN_OUT_BackBuffer = inputs[1];
 	}
 
-	void Execute(GDX12CommandList* cmdList)
+	void Execute(GDX12CommandList* cmdList) override
 	{
 		GDX12Texture* inputTexture = IN_Texture->GetTexture();
 		GDX12Texture* backBuffer = IN_OUT_BackBuffer->GetTexture();
@@ -24,9 +24,9 @@ public:
 		cmdList->BeginPixEvent("Copy To Screen Pass", Colors::Aqua);
 		cmdList->ResourceBarrier({ inputTexture->GetResource()->GetCopySourceBarrier() });
 		cmdList->EnhancedTextureBarrier({ backBuffer->GetResource()->GetCopyDestEnhBarrier() });
-
 		cmdList->CopyResource(backBuffer->GetResource()->D3DResource.Get(),
 			inputTexture->GetResource()->D3DResource.Get());
+		cmdList->EnhancedTextureBarrier({ backBuffer->GetResource()->GetPresentEnhBarrier() });
 		cmdList->EndPixEvent();
 	}
 
