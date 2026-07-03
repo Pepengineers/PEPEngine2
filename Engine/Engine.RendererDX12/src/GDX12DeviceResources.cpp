@@ -86,16 +86,16 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
 
             if (Device->Role == DEVICE_ROLE_PRIMARY)
             {
-                if (material->Diffuse) { materialConstants.DiffuseIndex = material->Diffuse->PrimaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
-                if (material->Normal) { materialConstants.NormalIndex = material->Normal->PrimaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
-                if (material->Displacement) { materialConstants.DisplacementIndex = material->Displacement->PrimaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
+                if (material->Diffuse && material->Diffuse->PrimaryDeviceTexture) { materialConstants.DiffuseIndex = material->Diffuse->PrimaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
+                if (material->Normal && material->Normal->PrimaryDeviceTexture) { materialConstants.NormalIndex = material->Normal->PrimaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
+                if (material->Displacement && material->Displacement->PrimaryDeviceTexture) { materialConstants.DisplacementIndex = material->Displacement->PrimaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
                 currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
             }
             else
             {
-                if (material->Diffuse) { materialConstants.DiffuseIndex = material->Diffuse->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
-                if (material->Normal) { materialConstants.NormalIndex = material->Normal->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
-                if (material->Displacement) { materialConstants.DisplacementIndex = material->Displacement->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
+                if (material->Diffuse && material->Diffuse->PrimaryDeviceTexture) { materialConstants.DiffuseIndex = material->Diffuse->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
+                if (material->Normal && material->Normal->PrimaryDeviceTexture) { materialConstants.NormalIndex = material->Normal->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
+                if (material->Displacement && material->Displacement->PrimaryDeviceTexture) { materialConstants.DisplacementIndex = material->Displacement->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
                 currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
             }
             material->_numFramesDirty--;

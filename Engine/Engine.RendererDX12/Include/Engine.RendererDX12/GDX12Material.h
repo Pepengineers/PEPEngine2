@@ -16,8 +16,8 @@ enum class MaterialType
 struct GPUTexture
 {
 	std::string Name;
-	GDX12Texture* PrimaryDeviceTexture;
-	GDX12Texture* SecondaryDeviceTexture;
+	GDX12Texture* PrimaryDeviceTexture = nullptr;
+	GDX12Texture* SecondaryDeviceTexture = nullptr;
 };
 
 class GDX12Material

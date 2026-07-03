@@ -19,7 +19,6 @@ float4 PS(VSOutput input) : SV_TARGET
     float4 opaqueColor = OpaqueTexture.Sample(samPointClamp, uv);
     float4 accumColor = AccumTexture.Sample(samPointClamp, uv);
     float revealage = saturate(RevealageTexture.Sample(samPointClamp, uv));
-  
     
     float3 finalColor = opaqueColor.rgb * (1.0 - revealage) + accumColor.rgb;
     float finalAlpha = max(opaqueColor.a, revealage);

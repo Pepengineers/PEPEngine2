@@ -74,6 +74,7 @@ void RenderModule::OnResize()
     if (_upscaler) { _upscaler->QueryRenderTargetResolution(); }
 
     for (auto& renderPass : _primaryRenderPassExecutionList) { renderPass->Resize(); }
+    for (auto& renderPass : _secondaryRenderPassExecutionList) { renderPass->Resize(); }
 }
 
 GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
@@ -513,27 +514,53 @@ void RenderModule::OnTransformComponentUpdated(World& world, Entity entity, Tran
 
 void RenderModule::OnCameraComponentCreated(World& world, Entity entity, CameraComponent& component)
 {
-    component._CBufferIndex = _primaryResources.FrameConstants[0]->CameraCB->GetElementCount();
-
-    for (auto& constants : _primaryResources.FrameConstants)
+    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_CAMERAS)
     {
-        auto& CBuffer = constants->CameraCB;
-        CBuffer->Resize(CBuffer->GetElementCount() + 1);
+        component._CBufferIndex = _primaryResources.FrameConstants[0]->CameraCB->GetElementCount();
 
-        constants->CameraVisibilityCommands.push_back(GDX12VisibilityBuffers());
+        for (auto& constants : _primaryResources.FrameConstants)
+        {
+            auto& CBuffer = constants->CameraCB;
+            CBuffer->Resize(CBuffer->GetElementCount() + 1);
 
-        auto& buffers = constants->CameraVisibilityCommands[component._CBufferIndex];
-        buffers.VisibleOpaqueCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), GetPrimaryIndirectCommandsCache()->GetElementCount(), EBufferType::Default, false);
-        buffers.OpaqueDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(_primaryDevice.get(), 1, EBufferType::Default, false);
-        buffers.VisibleTransparentCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), GetPrimaryIndirectCommandsCache()->GetElementCount(), EBufferType::Default, false);
-        buffers.TransparentDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(_primaryDevice.get(), 1, EBufferType::Default, false);
+            constants->CameraVisibilityCommands.push_back(GDX12VisibilityBuffers());
 
-        buffers.VisibleOpaqueCommandsCache->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-        buffers.OpaqueDrawCounter->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-        buffers.VisibleTransparentCommandsCache->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-        buffers.TransparentDrawCounter->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+            auto& buffers = constants->CameraVisibilityCommands[component._CBufferIndex];
+            buffers.VisibleOpaqueCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), GetPrimaryIndirectCommandsCache()->GetElementCount(), EBufferType::Default, false);
+            buffers.OpaqueDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(_primaryDevice.get(), 1, EBufferType::Default, false);
+            buffers.VisibleTransparentCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), GetPrimaryIndirectCommandsCache()->GetElementCount(), EBufferType::Default, false);
+            buffers.TransparentDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(_primaryDevice.get(), 1, EBufferType::Default, false);
+
+            buffers.VisibleOpaqueCommandsCache->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+            buffers.OpaqueDrawCounter->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+            buffers.VisibleTransparentCommandsCache->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+            buffers.TransparentDrawCounter->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        }
     }
 
+    if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_CAMERAS)
+    {
+        component._CBufferIndex = _secondaryResources.FrameConstants[0]->CameraCB->GetElementCount();
+
+        for (auto& constants : _secondaryResources.FrameConstants)
+        {
+            auto& CBuffer = constants->CameraCB;
+            CBuffer->Resize(CBuffer->GetElementCount() + 1);
+
+            constants->CameraVisibilityCommands.push_back(GDX12VisibilityBuffers());
+
+            auto& buffers = constants->CameraVisibilityCommands[component._CBufferIndex];
+            buffers.VisibleOpaqueCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_secondaryDevice.get(), GetSecondaryIndirectCommandsCache()->GetElementCount(), EBufferType::Default, false);
+            buffers.OpaqueDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(_secondaryDevice.get(), 1, EBufferType::Default, false);
+            buffers.VisibleTransparentCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_secondaryDevice.get(), GetSecondaryIndirectCommandsCache()->GetElementCount(), EBufferType::Default, false);
+            buffers.TransparentDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(_secondaryDevice.get(), 1, EBufferType::Default, false);
+
+            buffers.VisibleOpaqueCommandsCache->CreateUAV(_secondaryResources.SRV_UAV_Heap.get(), _secondaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+            buffers.OpaqueDrawCounter->CreateUAV(_secondaryResources.SRV_UAV_Heap.get(), _secondaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+            buffers.VisibleTransparentCommandsCache->CreateUAV(_secondaryResources.SRV_UAV_Heap.get(), _secondaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+            buffers.TransparentDrawCounter->CreateUAV(_secondaryResources.SRV_UAV_Heap.get(), _secondaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        }
+    }
     
 }
 
@@ -572,6 +599,7 @@ void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticM
 
     if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_INSTANCES)
     {
+        auto& MeshGPUData = _secondaryResources.GeometryBuffer->_meshCache[component.MeshHandler.GetValue()];
         for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
         {
             component._CBufferIndices.push_back(_secondaryResources.FrameConstants[0]->InstanceCache->GetElementCount());
@@ -635,7 +663,7 @@ void RenderModule::OnUpdate()
     {
         _secondaryResources.CurrFrameConstantsIndex = (_secondaryResources.CurrFrameConstantsIndex + 1) % numFrames;
 
-        auto cmdQueue = _primaryDevice->GetCommandQueue();
+        auto cmdQueue = _secondaryDevice->GetCommandQueue();
         auto& frameConsts = _secondaryResources.FrameConstants[_secondaryResources.CurrFrameConstantsIndex];
 
         if (frameConsts->FenceValue > cmdQueue->GetFence()->GetCompletedValue())
@@ -747,63 +775,72 @@ void RenderModule::ShareFences()
 void RenderModule::ConfigureRenderPipeline()
 {
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12BackBufferClearPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureCopyFromSharedMemoryPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
 
-    for (auto& primaryRenderPass : _primaryRenderPassExecutionList)
+    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
+    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
+    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
+    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
+    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureCopyToSharedMemoryPass>());
+
+    for (auto& pass : _primaryRenderPassExecutionList)
     {
-        primaryRenderPass->Initialize(&_primaryResources, &_secondaryResources, &_RPcommonData);
-        _primaryPipelineFlags |= primaryRenderPass->GetFlags();
+        pass->Initialize(&_primaryResources, &_secondaryResources, &_RPcommonData);
+        _primaryPipelineFlags |= pass->GetFlags();
     }
 
-    //add secondary passes here
-
-    for (auto& secondaryRenderPass : _secondaryRenderPassExecutionList)
+    for (auto& pass : _secondaryRenderPassExecutionList)
     {
-        secondaryRenderPass->Initialize(&_secondaryResources, &_primaryResources, &_RPcommonData);
-        _secondaryPipelineFlags |= secondaryRenderPass->GetFlags();
+        pass->Initialize(&_secondaryResources, &_primaryResources, &_RPcommonData);
+        _secondaryPipelineFlags |= pass->GetFlags();
     }
 
     GDX12RenderPass* clearPass = _primaryRenderPassExecutionList[0].get();
+    GDX12RenderPass* copyFromShared = _primaryRenderPassExecutionList[1].get();
+    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[2].get();
+
+    GDX12RenderPass* cullingPass = _secondaryRenderPassExecutionList[0].get();
+    GDX12RenderPass* opaquePass = _secondaryRenderPassExecutionList[1].get();
+    GDX12RenderPass* transparencyPass = _secondaryRenderPassExecutionList[2].get();
+    GDX12RenderPass* compositionPass = _secondaryRenderPassExecutionList[3].get();
+    GDX12RenderPass* copyToShared = _secondaryRenderPassExecutionList[4].get();
+
     std::vector<IRenderPassLink*> clearPassInputs = { _backBuffer.get(), _depthStencil.get() };
     std::vector<IRenderPassLink*> clearPassOutputs;
     clearPass->LinkDependencies(clearPassInputs, &clearPassOutputs);
 
-    GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[2].get();
-    std::vector<IRenderPassLink*> opaquePassInputs = { _depthStencil.get() };
+    std::vector<IRenderPassLink*> copyFromInputs;
+    std::vector<IRenderPassLink*> copyFromOutputs;
+
+    std::vector<IRenderPassLink*> outputPassInputs;
+
+    std::vector<IRenderPassLink*> cullingPassInputs;
+    std::vector<IRenderPassLink*> cullingPassOutputs;
+    cullingPass->LinkDependencies(cullingPassInputs, &cullingPassOutputs);
+
+    std::vector<IRenderPassLink*> opaquePassInputs;
     std::vector<IRenderPassLink*> opaquePassOutputs;
     opaquePass->LinkDependencies(opaquePassInputs, &opaquePassOutputs);
 
-    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[3].get();
-    std::vector<IRenderPassLink*> transparencyPassInputs = { _depthStencil.get() };
+    std::vector<IRenderPassLink*> transparencyPassInputs = { opaquePassOutputs[2] };
     std::vector<IRenderPassLink*> transparencyPassOutputs;
     transparencyPass->LinkDependencies(transparencyPassInputs, &transparencyPassOutputs);
 
-    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[4].get();
     std::vector<IRenderPassLink*> compositionPassInputs = 
-    { opaquePassOutputs[0], transparencyPassOutputs[0], transparencyPassOutputs[1] };
+    { opaquePassOutputs[0], transparencyPassOutputs[0], transparencyPassOutputs[1]  };
     std::vector<IRenderPassLink*> compositionPassOutputs;
     compositionPass->LinkDependencies(compositionPassInputs, &compositionPassOutputs);
 
-    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[5].get();
-    std::vector<IRenderPassLink*> outputPassInputs = { compositionPassOutputs[0], _backBuffer.get() };
+    std::vector<IRenderPassLink*> copyToInputs = { compositionPassOutputs[0] };
+    std::vector<IRenderPassLink*> copyToOutputs;
+    copyToShared->LinkDependencies(copyToInputs, &copyToOutputs);
+
+    copyFromInputs = { copyToOutputs[0] };
+    copyFromShared->LinkDependencies(copyFromInputs, &copyFromOutputs);
+
+    outputPassInputs = { copyFromOutputs[0], _backBuffer.get() };
     outputPass->LinkDependencies(outputPassInputs, nullptr);
-
-    // SecondaryDevice pipeline
-
-    // Texture transfer example
-    //IRenderPassLink* sharedMemoryVelocityBuffer;
-    //_textureCopyToSharedMemoryPass.Initialize(&_primaryResources, &_RPcommonData);
-    //_textureCopyToSharedMemoryPass.LinkDependancies(&_secondaryResources, opaqueVelocity, sharedMemoryVelocityBuffer);
-    //_primaryPipelineFlags |= _textureCopyToSharedMemoryPass.GetFlags();
-
-    //IRenderPassLink* transferredVelocityBuffer;
-    //_textureCopyFromSharedMemoryPass.Initialize(&_secondaryResources, &_RPcommonData);
-    //_textureCopyFromSharedMemoryPass.LinkDependancies(sharedMemoryVelocityBuffer, transferredVelocityBuffer);
-    //_secondaryPipelineFlags |= _textureCopyFromSharedMemoryPass.GetFlags();
 }
 
 void RenderModule::SubscribeToSceneManager()
