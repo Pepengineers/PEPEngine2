@@ -128,6 +128,7 @@ public:
 	}
 
 	FfxApiUpscaleQualityMode FSRQualityMode = FFX_UPSCALE_QUALITY_MODE_QUALITY;
+
 private:
 	IRenderPassLink* IN_Texture;
 	IRenderPassLink* IN_DepthBuffer;

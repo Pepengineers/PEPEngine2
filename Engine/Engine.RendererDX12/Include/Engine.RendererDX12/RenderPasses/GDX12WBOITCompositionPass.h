@@ -55,6 +55,7 @@ public:
 		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
 		OUT_Result->Resize(newWidth, newHeight);
 	}
+
 private:
 	ComPtr<ID3DBlob> _compositionVS;
 	ComPtr<ID3DBlob> _compositionPS;

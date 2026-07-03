@@ -70,6 +70,17 @@ public:
 	}
 
 private:
+	ComPtr<ID3DBlob> _transparencyVS;
+	ComPtr<ID3DBlob> _transparencyPS;
+	std::unique_ptr<GDX12RootSignature> _transparencyRS;
+	ComPtr<ID3D12CommandSignature> _transparencyCS;
+	ComPtr<ID3D12PipelineState> _transparencyPSO;
+
+	std::unique_ptr<GDX12Texture> OUT_Accumulation;
+	std::unique_ptr<GDX12Texture> OUT_Revealage;
+
+	IRenderPassLink* IN_DepthStencil;
+
 	void PostLinkInitialize()
 	{
 		// Textures
@@ -184,15 +195,4 @@ private:
 		PSODesc1.PS = { reinterpret_cast<BYTE*>(_transparencyPS->GetBufferPointer()), _transparencyPS->GetBufferSize() };
 		ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&PSODesc1, IID_PPV_ARGS(&_transparencyPSO)));
 	}
-
-	ComPtr<ID3DBlob> _transparencyVS;
-	ComPtr<ID3DBlob> _transparencyPS;
-	std::unique_ptr<GDX12RootSignature> _transparencyRS;
-	ComPtr<ID3D12CommandSignature> _transparencyCS;
-	ComPtr<ID3D12PipelineState> _transparencyPSO;
-
-	std::unique_ptr<GDX12Texture> OUT_Accumulation;
-	std::unique_ptr<GDX12Texture> OUT_Revealage;
-
-	IRenderPassLink* IN_DepthStencil;
 };

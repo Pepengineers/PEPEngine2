@@ -152,24 +152,12 @@ private:
     std::unique_ptr<GDX12SwapChain> _backBuffer;
     std::unique_ptr<GDX12Texture> _depthStencil;
 
-    GDX12BackBufferClearPass _backBufferClearPass;
-    GDX12GPUCullingPass _gpuCullingPass;
-    GDX12OpaquePass _opaquePass;
-    GDX12WBOITTransparencyPass _WBOITTransparencyPass;
-    GDX12WBOITCompositionPass _WBOITCompositionPass;
-    GDX12TextureCopyFromSharedMemoryPass _textureCopyFromSharedMemoryPass;
-    GDX12TextureCopyToSharedMemoryPass _textureCopyToSharedMemoryPass;
-    GDX12FSRUpscalePass _FSRUpscalePass;
-    GDX12OutputToScreenPass _outputPass;
-    GDX12SyncPass _primarySyncPass;
-    GDX12SyncPass _secondarySyncPass;
-
     // To be able to know where to get render target resolution when resizing
     GDX12RenderPass* _upscaler;
     
     // Sorted in execution order
-    std::vector<GDX12RenderPass*> _primaryRenderPassExecutionList;
-    std::vector<GDX12RenderPass*> _secondaryRenderPassExecutionList;
+    std::vector<std::unique_ptr<GDX12RenderPass>> _primaryRenderPassExecutionList;
+    std::vector<std::unique_ptr<GDX12RenderPass>> _secondaryRenderPassExecutionList;
 
     // Flags that are accumulated from every active RenderPass on the device
     // Defines which resources should be uploaded onto respective GPU
