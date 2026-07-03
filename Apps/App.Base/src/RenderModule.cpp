@@ -576,33 +576,9 @@ void RenderModule::OnCameraComponentUpdated(World& world, Entity entity, CameraC
 
 void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticMeshRenderComponent& component)
 {
-    const GPUMesh* MeshGPUData = nullptr;
-
-    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_GEOMETRY)
-    {
-        auto it = _primaryResources.GeometryBuffer->_meshCache.find(component.MeshHandler.GetValue());
-        if (it != _primaryResources.GeometryBuffer->_meshCache.end())
-        {
-            MeshGPUData = it->second.get();
-        }
-    }
-
-    if (MeshGPUData == nullptr && (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_GEOMETRY))
-    {
-        auto it = _secondaryResources.GeometryBuffer->_meshCache.find(component.MeshHandler.GetValue());
-        if (it != _secondaryResources.GeometryBuffer->_meshCache.end())
-        {
-            MeshGPUData = it->second.get();
-        }
-    }
-
-    if (MeshGPUData == nullptr)
-    {
-        return;
-    }
-    
     if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_INSTANCES)
     {
+        auto& MeshGPUData = _primaryResources.GeometryBuffer->_meshCache[component.MeshHandler.GetValue()];
         for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
         {
             component._CBufferIndices.push_back(_primaryResources.FrameConstants[0]->InstanceCache->GetElementCount());
@@ -624,6 +600,7 @@ void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticM
 
     if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_INSTANCES)
     {
+        auto& MeshGPUData = _secondaryResources.GeometryBuffer->_meshCache[component.MeshHandler.GetValue()];
         for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
         {
             component._CBufferIndices.push_back(_secondaryResources.FrameConstants[0]->InstanceCache->GetElementCount());
