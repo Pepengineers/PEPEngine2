@@ -42,10 +42,11 @@ enum ERenderPassFlags : uint32_t
 class GDX12RenderPass
 {
 public:
-    GDX12RenderPass() : _flags(RENDER_PASS_FLAG_NONE), _resources(nullptr), _commonData(nullptr) {}
-    virtual void Initialize(GDX12DeviceResources* resources, RenderPipelineCommonData* commonData) 
+    GDX12RenderPass() : _flags(RENDER_PASS_FLAG_NONE), _resources(nullptr), _otherResources(nullptr), _commonData(nullptr) {}
+    virtual void Initialize(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData)
     {
-        _resources = resources;
+        _resources = initOnResources;
+        _otherResources = otherResources;
         _commonData = commonData;
     };
     virtual void Resize() {};
@@ -53,6 +54,8 @@ public:
     // Used by upscalers to determine downscaled render target size
     // And share it with all other passes
     virtual void QueryRenderTargetResolution() {};
+    // Used by all passes to link inputs and outputs with other passes
+    virtual void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) {};
 
     uint32_t GetFlags() { return _flags; }
     void SetFlag(uint32_t flag, bool value)
@@ -68,5 +71,10 @@ protected:
     // will be skipped entirely for this GPU
     uint32_t _flags;
     RenderPipelineCommonData* _commonData;
+
+    // These are the resources the pass was initialized on
     GDX12DeviceResources* _resources;
+    // These are the other resources, that might be needed in mGPU passes
+    // Might be null
+    GDX12DeviceResources* _otherResources;
 };

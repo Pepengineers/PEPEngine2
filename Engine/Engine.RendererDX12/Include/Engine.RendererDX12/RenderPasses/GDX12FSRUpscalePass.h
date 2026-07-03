@@ -15,12 +15,15 @@ public:
 	
 	~GDX12FSRUpscalePass() { if (_FFXContext) { ffxDestroyContext(&_FFXContext, nullptr); } }
 
-	void LinkDependancies(IRenderPassLink* IN_Texture, IRenderPassLink* IN_DepthBuffer,
-		IRenderPassLink* IN_MotionVectors, IRenderPassLink*& OUT_UpscaledTexture)
+	// Input 0 - InputTexture
+	// Input 1 - DepthStencil
+	// Input 2 - MotionVectors
+	// Output 0 - UpscaledTexture
+	void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
 	{
-		this->IN_Texture = IN_Texture;
-		this->IN_DepthBuffer = IN_DepthBuffer;
-		this->IN_MotionVectors = IN_MotionVectors;
+		IN_Texture = inputs[0];
+		IN_DepthBuffer = inputs[1];
+		IN_MotionVectors = inputs[2];
 
 		GDX12Texture* inputTexture = IN_Texture->GetTexture();
 
@@ -39,15 +42,15 @@ public:
 		TextureDesc1.SRVDesc.Texture2D.PlaneSlice = 0;
 		TextureDesc1.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
 
-		this->OUT_UpscaledTexture = std::make_unique<GDX12Texture>(TextureDesc1);
+		OUT_UpscaledTexture = std::make_unique<GDX12Texture>(TextureDesc1);
 
-		OUT_UpscaledTexture = this->OUT_UpscaledTexture.get();
+		outputs->push_back(OUT_UpscaledTexture.get());
 	}
 
 	// Init with window size
-	void Initialize(GDX12DeviceResources* resources, RenderPipelineCommonData* commonData) override
+	void Initialize(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData) override
 	{
-		GDX12RenderPass::Initialize(resources, commonData);
+		GDX12RenderPass::Initialize(initOnResources, otherResources, commonData);
 
 		BuildFSRContext();
 		QueryRenderTargetResolution();

@@ -708,41 +708,45 @@ void RenderModule::ConfigureRenderPipeline()
 
     for (auto& primaryRenderPass : _primaryRenderPassList)
     {
-        primaryRenderPass->Initialize(&_primaryResources, &_RPcommonData);
+        primaryRenderPass->Initialize(&_primaryResources, &_secondaryResources, &_RPcommonData);
         _primaryPipelineFlags |= primaryRenderPass->GetFlags();
     }
 
     _upscaler = &_FSRUpscalePass;
     _upscaler->QueryRenderTargetResolution();
 
-    _backBufferClearPass.LinkDependancies(_backBuffer.get(), _depthStencil.get());
+    std::vector<IRenderPassLink*> clearPassInputs = { _backBuffer.get(), _depthStencil.get() };
+    std::vector<IRenderPassLink*> clearPassOutputs;
+    _backBufferClearPass.LinkDependancies(clearPassInputs, &clearPassOutputs);
     _primaryRenderPassExecutionList.push_back(&_backBufferClearPass);
 
     _primaryRenderPassExecutionList.push_back(&_gpuCullingPass);
 
-    IRenderPassLink* opaqueAccum;
-    IRenderPassLink* opaqueVelocity;
+    std::vector<IRenderPassLink*> opaquePassInputs = { _depthStencil.get() };
+    std::vector<IRenderPassLink*> opaquePassOutputs;
     //_opaquePass.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    _opaquePass.LinkDependancies(_depthStencil.get(), opaqueAccum, opaqueVelocity);
+    _opaquePass.LinkDependancies(opaquePassInputs, &opaquePassOutputs);
     _primaryRenderPassExecutionList.push_back(&_opaquePass);
 
-    IRenderPassLink* transparencyAccum;
-    IRenderPassLink* transparencyRevealage;
+    std::vector<IRenderPassLink*> transparencyPassInputs = { _depthStencil.get() };
+    std::vector<IRenderPassLink*> transparencyPassOutputs;
     //_WBOITTransparencyPass.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    _WBOITTransparencyPass.LinkDependancies(_depthStencil.get(),
-        transparencyAccum, transparencyRevealage);
+    _WBOITTransparencyPass.LinkDependancies(transparencyPassInputs, &transparencyPassOutputs);
     _primaryRenderPassExecutionList.push_back(&_WBOITTransparencyPass);
 
-    IRenderPassLink* composition;
+    std::vector<IRenderPassLink*> compositionPassInputs = 
+    { opaquePassOutputs[0], transparencyPassOutputs[0], transparencyPassOutputs[1] };
+    std::vector<IRenderPassLink*> compositionPassOutputs;
     //_WBOITCompositionPass.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    _WBOITCompositionPass.LinkDependancies(opaqueAccum, transparencyAccum, transparencyRevealage, composition);
+    _WBOITCompositionPass.LinkDependancies(compositionPassInputs, &compositionPassOutputs);
     _primaryRenderPassExecutionList.push_back(&_WBOITCompositionPass);
 
     //IRenderPassLink* upscaledOutput;
     //_FSRUpscalePass.LinkDependancies(composition, _depthStencil.get(), opaqueVelocity, upscaledOutput);
     //_primaryRenderPassExecutionList.push_back(&_FSRUpscalePass);
 
-    _outputPass.LinkDependancies(composition, _backBuffer.get());
+    std::vector<IRenderPassLink*> outputPassInputs = { compositionPassOutputs[0], _backBuffer.get() };
+    _outputPass.LinkDependancies(outputPassInputs, nullptr);
     _primaryRenderPassExecutionList.push_back(&_outputPass);
 
     // Texture transfer example

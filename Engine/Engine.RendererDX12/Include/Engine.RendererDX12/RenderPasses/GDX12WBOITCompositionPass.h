@@ -8,16 +8,19 @@ public:
 		IN_Revealage(nullptr), OUT_Result(nullptr)
 	{ _flags = RENDER_PASS_FLAG_NONE; }
 
-	void LinkDependancies(IRenderPassLink* IN_OpaqueScene, IRenderPassLink* IN_TransparencyAccum,
-		IRenderPassLink* IN_Revealage, IRenderPassLink*& OUT_Result)
+	// Input 0 - OpaqueScene
+	// Input 1 - TransparencyAccumulation
+	// Input 2 - RevealageTexture
+	// Output 0 - CompositionResult
+	void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
 	{
-		this->IN_OpaqueScene = IN_OpaqueScene;
-		this->IN_TransparencyAccum = IN_TransparencyAccum;
-		this->IN_Revealage = IN_Revealage;
+		IN_OpaqueScene = inputs[0];
+		IN_TransparencyAccum = inputs[1];
+		IN_Revealage = inputs[2];
 
 		PostLinkInitialize();
 
-		OUT_Result = this->OUT_Result.get();
+		outputs->push_back(OUT_Result.get());
 	}
 
 	void Execute(GDX12CommandList* cmdList) override

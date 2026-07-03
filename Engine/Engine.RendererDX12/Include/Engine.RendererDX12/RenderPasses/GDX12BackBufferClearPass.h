@@ -7,11 +7,17 @@ public:
 	GDX12BackBufferClearPass() : IN_OUT_currentBackBuffer(nullptr), IN_OUT_depthStencil(nullptr)
 	{ _flags = RENDER_PASS_FLAG_NONE; }
 
-	void LinkDependancies(IRenderPassLink* IN_OUT_currentBackBuffer,
-		IRenderPassLink* IN_OUT_depthStencil)
+	// Input 0 - back buffer
+	// Input 1 - depth stencil
+	// Output 0 - back buffer
+	// Output 1 - depth stencil
+	void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
 	{
-		this->IN_OUT_currentBackBuffer = IN_OUT_currentBackBuffer;
-		this->IN_OUT_depthStencil = IN_OUT_depthStencil;
+		IN_OUT_currentBackBuffer = inputs[0];
+		IN_OUT_depthStencil = inputs[1];
+
+		outputs->push_back(IN_OUT_currentBackBuffer);
+		outputs->push_back(IN_OUT_depthStencil);
 	}
 
 	void Execute(GDX12CommandList* cmdList) override

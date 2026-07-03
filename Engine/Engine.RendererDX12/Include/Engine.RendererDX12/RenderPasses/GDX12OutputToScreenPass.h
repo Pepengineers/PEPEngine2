@@ -8,15 +8,12 @@ public:
 	GDX12OutputToScreenPass() : IN_Texture(nullptr), IN_OUT_BackBuffer(nullptr)
 	{ _flags = RENDER_PASS_FLAG_NONE; }
 
-	void LinkDependancies(IRenderPassLink* IN_Texture, IRenderPassLink* IN_OUT_BackBuffer)
+	// Input 0 - InputTexture
+	// Input 1 - BackBuffer
+	void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
 	{
-		this->IN_Texture = IN_Texture;
-		this->IN_OUT_BackBuffer = IN_OUT_BackBuffer;
-	}
-
-	void Initialize(GDX12DeviceResources* resources, RenderPipelineCommonData* commonData) override
-	{
-		GDX12RenderPass::Initialize(resources, commonData);
+		IN_Texture = inputs[0];
+		IN_OUT_BackBuffer = inputs[1];
 	}
 
 	void Execute(GDX12CommandList* cmdList)

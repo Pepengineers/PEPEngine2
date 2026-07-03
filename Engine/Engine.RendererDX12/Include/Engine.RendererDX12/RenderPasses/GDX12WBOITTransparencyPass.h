@@ -8,15 +8,17 @@ public:
 	{ _flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_GEOMETRY | RENDER_PASS_FLAG_USE_MATERIALS | 
 		RENDER_PASS_FLAG_USE_INSTANCES; }
 
-	void LinkDependancies(IRenderPassLink* IN_DepthStencil, IRenderPassLink*& OUT_Accumulation, 
-		IRenderPassLink*& OUT_Revealage)
+	// Input 0 - DepthStencil
+	// Output 0 - TransparencyAccumulation
+	// Output 1 - RevealageTexture
+	void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
 	{
-		this->IN_DepthStencil = IN_DepthStencil;
+		IN_DepthStencil = inputs[0];
 
 		PostLinkInitialize();
 
-		OUT_Accumulation = _accumulationTexture.get();
-		OUT_Revealage = _revealageTexture.get();
+		outputs->push_back(OUT_Accumulation.get());
+		outputs->push_back(OUT_Revealage.get());
 	}
 
 	// VisibilityBuffers will automatically be selected from CameraCBIndex
@@ -28,8 +30,8 @@ public:
 		GDX12Texture* depthStencil = IN_DepthStencil->GetTexture();
 
 		cmdList->BeginPixEvent("Transparent Render Pass", Colors::Aqua);
-		cmdList->SetViewport(_accumulationTexture->GetViewport());
-		cmdList->SetScissorRect(_accumulationTexture->GetScissorRect());
+		cmdList->SetViewport(OUT_Accumulation->GetViewport());
+		cmdList->SetScissorRect(OUT_Accumulation->GetScissorRect());
 		cmdList->SetGraphicsRootSignature(_transparencyRS.get());
 		cmdList->SetPipelineState(_transparencyPSO);
 		cmdList->SetGraphicsRootConstantBufferView(1, currentFrameConstants->MainCB->GetElementAddress(0));
@@ -45,17 +47,17 @@ public:
 
 		cmdList->ResourceBarrier({ currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetIndirectArgsBarrier(),
 		currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetIndirectArgsBarrier(),
-		_accumulationTexture->GetResource()->GetRenderTargetBarrier(),
-		_revealageTexture->GetResource()->GetRenderTargetBarrier() });
-		cmdList->SetRenderTargets({ _accumulationTexture.get(), _revealageTexture.get() },
+		OUT_Accumulation->GetResource()->GetRenderTargetBarrier(),
+		OUT_Revealage->GetResource()->GetRenderTargetBarrier() });
+		cmdList->SetRenderTargets({ OUT_Accumulation.get(), OUT_Revealage.get() },
 			depthStencil);
-		cmdList->ClearRenderTargetView(_accumulationTexture.get());
-		cmdList->ClearRenderTargetView(_revealageTexture.get());
+		cmdList->ClearRenderTargetView(OUT_Accumulation.get());
+		cmdList->ClearRenderTargetView(OUT_Revealage.get());
 		cmdList->ExecuteIndirect(_transparencyCS.Get(), _resources->IndirectCommandsCache->GetElementCount(),
 			currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().D3DResource.Get(), 0,
 			currentCameraVisBuffers.TransparentDrawCounter->GetResource().D3DResource.Get(), 0);
-		cmdList->ResourceBarrier({ _accumulationTexture->GetResource()->GetSRVBarrier(),
-		_revealageTexture->GetResource()->GetSRVBarrier() });
+		cmdList->ResourceBarrier({ OUT_Accumulation->GetResource()->GetSRVBarrier(),
+		OUT_Revealage->GetResource()->GetSRVBarrier() });
 		cmdList->EndPixEvent();
 	}
 
@@ -63,8 +65,8 @@ public:
 	{
 		UINT newWidth = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
 		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
-		_accumulationTexture->Resize(newWidth, newHeight);
-		_revealageTexture->Resize(newWidth, newHeight);
+		OUT_Accumulation->Resize(newWidth, newHeight);
+		OUT_Revealage->Resize(newWidth, newHeight);
 	}
 
 private:
@@ -93,12 +95,12 @@ private:
 		TextureDesc1.RTVDesc.Texture2D.PlaneSlice = 0;
 		TextureDesc1.RTVDesc.Texture2D.MipSlice = 0;
 
-		_accumulationTexture = std::make_unique<GDX12Texture>(TextureDesc1);
+		OUT_Accumulation = std::make_unique<GDX12Texture>(TextureDesc1);
 
 		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R16_FLOAT;
 		TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
 		TextureDesc1.RTVHeapIndex = _resources->RTVHeap->GetAvailableIndex();
-		_revealageTexture = std::make_unique<GDX12Texture>(TextureDesc1);
+		OUT_Revealage = std::make_unique<GDX12Texture>(TextureDesc1);
 
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
@@ -176,8 +178,8 @@ private:
 		PSODesc1.DepthStencilState.StencilEnable = false;
 
 		PSODesc1.NumRenderTargets = 2;
-		PSODesc1.RTVFormats[0] = _accumulationTexture->GetFormat();
-		PSODesc1.RTVFormats[1] = _revealageTexture->GetFormat();
+		PSODesc1.RTVFormats[0] = OUT_Accumulation->GetFormat();
+		PSODesc1.RTVFormats[1] = OUT_Revealage->GetFormat();
 		PSODesc1.VS = { reinterpret_cast<BYTE*>(_transparencyVS->GetBufferPointer()), _transparencyVS->GetBufferSize() };
 		PSODesc1.PS = { reinterpret_cast<BYTE*>(_transparencyPS->GetBufferPointer()), _transparencyPS->GetBufferSize() };
 		ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&PSODesc1, IID_PPV_ARGS(&_transparencyPSO)));
@@ -189,8 +191,8 @@ private:
 	ComPtr<ID3D12CommandSignature> _transparencyCS;
 	ComPtr<ID3D12PipelineState> _transparencyPSO;
 
-	std::unique_ptr<GDX12Texture> _accumulationTexture;
-	std::unique_ptr<GDX12Texture> _revealageTexture;
+	std::unique_ptr<GDX12Texture> OUT_Accumulation;
+	std::unique_ptr<GDX12Texture> OUT_Revealage;
 
 	IRenderPassLink* IN_DepthStencil;
 };

@@ -7,39 +7,39 @@ public:
 	GDX12GPUCullingPass()
 	{ _flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_INSTANCES; }
 
-	void Initialize(GDX12DeviceResources* resources, RenderPipelineCommonData* commonData) override
+	void Initialize(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData) override
 	{
-		GDX12RenderPass::Initialize(resources, commonData);
+		GDX12RenderPass::Initialize(initOnResources, otherResources, commonData);
 
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
-		_cullingCS = shaderCompiler.CompileShader(resources->Device, SHADERS_FOLDER "Culling.hlsl", nullptr, "CS", "cs");
-		_bufferClearCS = shaderCompiler.CompileShader(resources->Device, SHADERS_FOLDER "BufferClear.hlsl", nullptr, "CS", "cs");
+		_cullingCS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "Culling.hlsl", nullptr, "CS", "cs");
+		_bufferClearCS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "BufferClear.hlsl", nullptr, "CS", "cs");
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
 		RSDesc1.NumSingleCBVSlots = 1;
 		RSDesc1.NumSingleSRVSlots = 3;
 		RSDesc1.NumSingleUAVSlots = 4;
-		_cullingRS = std::make_unique<GDX12RootSignature>(resources->Device, RSDesc1);
+		_cullingRS = std::make_unique<GDX12RootSignature>(_resources->Device, RSDesc1);
 
 		GDX12RootSignatureDesc RSDesc2;
 		RSDesc2.NumSingleUAVSlots = 2;
-		_bufferClearRS = std::make_unique<GDX12RootSignature>(resources->Device, RSDesc2);
+		_bufferClearRS = std::make_unique<GDX12RootSignature>(_resources->Device, RSDesc2);
 
 		// Pipeline State Objects
 		D3D12_COMPUTE_PIPELINE_STATE_DESC PSODesc1 = {};
 		PSODesc1.pRootSignature = _cullingRS->GetRootSignature().Get();
 		PSODesc1.CS = { reinterpret_cast<BYTE*>(_cullingCS->GetBufferPointer()), _cullingCS->GetBufferSize() };
 
-		ThrowIfFailed(resources->Device->GetDevice()->CreateComputePipelineState(
+		ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(
 			&PSODesc1, IID_PPV_ARGS(&_cullingPSO)));
 
 		D3D12_COMPUTE_PIPELINE_STATE_DESC PSODesc2 = {};
 		PSODesc2.pRootSignature = _bufferClearRS->GetRootSignature().Get();
 		PSODesc2.CS = { reinterpret_cast<BYTE*>(_bufferClearCS->GetBufferPointer()), _bufferClearCS->GetBufferSize() };
 
-		ThrowIfFailed(resources->Device->GetDevice()->CreateComputePipelineState(
+		ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(
 			&PSODesc2, IID_PPV_ARGS(&_bufferClearPSO)));
 	}
 

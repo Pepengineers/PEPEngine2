@@ -5,21 +5,21 @@
 class GDX12TextureCopyToSharedMemoryPass : public GDX12RenderPass
 {
 public:
-	GDX12TextureCopyToSharedMemoryPass() : IN_Texture(nullptr) , _transferToResources(nullptr)
+	GDX12TextureCopyToSharedMemoryPass() : IN_Texture(nullptr)
 	{ _flags = RENDER_PASS_FLAG_NONE; }
 
-	void LinkDependancies(GDX12DeviceResources* transferToResources, IRenderPassLink* IN_Texture,
-        IRenderPassLink*& OUT_SharedTexture)
+	// Input 0 - InputTexture
+	// Output 0 - SharedTexture
+	void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
 	{
-		_transferToResources = transferToResources;
-		this->IN_Texture = IN_Texture;
+		IN_Texture = inputs[0];
 
-		this->OUT_SharedTexture = std::make_unique<GDX12SharedTexture>();
-		this->OUT_SharedTexture->Initialize(_resources->Device, _transferToResources->Device,
+		OUT_SharedTexture = std::make_unique<GDX12SharedTexture>();
+		OUT_SharedTexture->Initialize(_resources->Device, _otherResources->Device,
 			IN_Texture->GetTexture()->GetWidth(), IN_Texture->GetTexture()->GetHeight(),
 			IN_Texture->GetTexture()->GetFormat());
 
-		OUT_SharedTexture = this->OUT_SharedTexture.get();
+		outputs->push_back(OUT_SharedTexture.get());
 	}
 
 	// Copies texture from device the pass was initialized at to shared memory
@@ -45,7 +45,6 @@ public:
 	}
 
 private:
-	GDX12DeviceResources* _transferToResources;
     IRenderPassLink* IN_Texture;
 	std::unique_ptr<GDX12SharedTexture> OUT_SharedTexture;
 };

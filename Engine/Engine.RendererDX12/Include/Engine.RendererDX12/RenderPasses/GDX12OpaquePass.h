@@ -8,15 +8,17 @@ public:
 	{ _flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_GEOMETRY | RENDER_PASS_FLAG_USE_MATERIALS
 		| RENDER_PASS_FLAG_USE_INSTANCES; }
 
-	void LinkDependancies(IRenderPassLink* IN_DepthStencil,
-		IRenderPassLink*& OUT_Accumulation, IRenderPassLink*& OUT_Velocity)
+	// Input 0 - DepthStencil
+	// Output 0 - AccumulationTexture
+	// Output 1 - MotionVectors
+	void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
 	{
-		this->IN_DepthStencil = IN_DepthStencil;
+		IN_DepthStencil = inputs[0];
 
 		PostLinkInitialize();
 
-		OUT_Accumulation = _accumulationTexture.get();
-		OUT_Velocity = _velocityBuffer.get();
+		outputs->push_back(OUT_Accumulation.get());
+		outputs->push_back(OUT_VelocityBuffer.get());
 	}
 
 	// VisibilityBuffers will automatically be selected from CameraCBIndex
@@ -28,8 +30,8 @@ public:
 		GDX12Texture* depthStencil = IN_DepthStencil->GetTexture();
 
 		cmdList->BeginPixEvent("Opaque Render Pass", Colors::ForestGreen);
-		cmdList->SetViewport(_accumulationTexture->GetViewport());
-		cmdList->SetScissorRect(_accumulationTexture->GetScissorRect());
+		cmdList->SetViewport(OUT_Accumulation->GetViewport());
+		cmdList->SetScissorRect(OUT_Accumulation->GetScissorRect());
 		cmdList->SetGraphicsRootSignature(_opaqueRS.get());
 		cmdList->SetPipelineState(_opaquePSO.Get());
 		cmdList->SetGraphicsRootConstantBufferView(1, currentFrameConstants->MainCB->GetElementAddress(0));
@@ -45,11 +47,11 @@ public:
 		cmdList->ResourceBarrier({ 
 			currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().GetIndirectArgsBarrier(),
 			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetIndirectArgsBarrier(),
-			_accumulationTexture->GetResource()->GetRenderTargetBarrier(),
-			_velocityBuffer->GetResource()->GetRenderTargetBarrier() });
-		cmdList->SetRenderTargets({ _accumulationTexture.get(), _velocityBuffer.get() }, depthStencil);
-		cmdList->ClearRenderTargetView(_accumulationTexture.get());
-		cmdList->ClearRenderTargetView(_velocityBuffer.get());
+			OUT_Accumulation->GetResource()->GetRenderTargetBarrier(),
+			OUT_VelocityBuffer->GetResource()->GetRenderTargetBarrier() });
+		cmdList->SetRenderTargets({ OUT_Accumulation.get(), OUT_VelocityBuffer.get() }, depthStencil);
+		cmdList->ClearRenderTargetView(OUT_Accumulation.get());
+		cmdList->ClearRenderTargetView(OUT_VelocityBuffer.get());
 		cmdList->ExecuteIndirect(_opaqueCS.Get(), _resources->IndirectCommandsCache->GetElementCount(),
 			currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().D3DResource.Get(), 0,
 			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().D3DResource.Get(), 0);
@@ -60,8 +62,8 @@ public:
 	{
 		UINT newWidth = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
 		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
-		_accumulationTexture->Resize(newWidth, newHeight);
-		_velocityBuffer->Resize(newWidth, newHeight);
+		OUT_Accumulation->Resize(newWidth, newHeight);
+		OUT_VelocityBuffer->Resize(newWidth, newHeight);
 	}
 
 private:
@@ -89,13 +91,13 @@ private:
 		TextureDesc1.RTVDesc.Texture2D.PlaneSlice = 0;
 		TextureDesc1.RTVDesc.Texture2D.MipSlice = 0;
 
-		_accumulationTexture = std::make_unique<GDX12Texture>(TextureDesc1);
+		OUT_Accumulation = std::make_unique<GDX12Texture>(TextureDesc1);
 
 		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R16G16_FLOAT;
 		TextureDesc1.RTVHeapIndex = _resources->RTVHeap->GetAvailableIndex();
 		TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
 
-		_velocityBuffer = std::make_unique<GDX12Texture>(TextureDesc1);
+		OUT_VelocityBuffer = std::make_unique<GDX12Texture>(TextureDesc1);
 
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
@@ -146,8 +148,8 @@ private:
 		PSODesc1.SampleMask = UINT_MAX;
 		PSODesc1.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 		PSODesc1.NumRenderTargets = 2;
-		PSODesc1.RTVFormats[0] = _accumulationTexture->GetFormat();
-		PSODesc1.RTVFormats[1] = _velocityBuffer->GetFormat();
+		PSODesc1.RTVFormats[0] = OUT_Accumulation->GetFormat();
+		PSODesc1.RTVFormats[1] = OUT_VelocityBuffer->GetFormat();
 		PSODesc1.SampleDesc.Count = 1;
 		PSODesc1.SampleDesc.Quality = 0;
 		PSODesc1.DSVFormat = IN_DepthStencil->GetTexture()->GetFormat();
@@ -162,8 +164,8 @@ private:
 	ComPtr<ID3D12CommandSignature> _opaqueCS;
 	ComPtr<ID3D12PipelineState> _opaquePSO;
 
-	std::unique_ptr<GDX12Texture> _accumulationTexture;
-	std::unique_ptr<GDX12Texture> _velocityBuffer;
+	std::unique_ptr<GDX12Texture> OUT_Accumulation;
+	std::unique_ptr<GDX12Texture> OUT_VelocityBuffer;
 
 	IRenderPassLink* IN_DepthStencil;
 };
