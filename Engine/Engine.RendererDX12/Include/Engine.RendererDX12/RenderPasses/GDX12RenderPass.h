@@ -56,7 +56,8 @@ public:
     // And share it with all other passes
     virtual void QueryRenderTargetResolution() {};
     // Used by all passes to link inputs and outputs with other passes
-    virtual void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) {};
+    virtual void LinkDependencies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) {};
+    virtual void ClearDenendencies() {}
 
     uint32_t GetFlags() { return _flags; }
     void SetFlag(uint32_t flag, bool value)

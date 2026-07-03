@@ -12,7 +12,7 @@ public:
 	// Input 1 - TransparencyAccumulation
 	// Input 2 - RevealageTexture
 	// Output 0 - CompositionResult
-	void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
+	void LinkDependencies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
 	{
 		IN_OpaqueScene = inputs[0];
 		IN_TransparencyAccum = inputs[1];
@@ -54,6 +54,18 @@ public:
 		UINT newWidth = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
 		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
 		OUT_Result->Resize(newWidth, newHeight);
+	}
+
+	void ClearDenendencies() override
+	{
+		IN_OpaqueScene = nullptr;
+		IN_TransparencyAccum = nullptr;
+		IN_Revealage = nullptr;
+		OUT_Result.reset();
+		_compositionVS.Reset();
+		_compositionPS.Reset();
+		_compositionRS.reset();
+		_compositionPSO.Reset();
 	}
 
 private:

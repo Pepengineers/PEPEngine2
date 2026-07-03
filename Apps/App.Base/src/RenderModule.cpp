@@ -18,9 +18,8 @@ RenderModule::~RenderModule()
     _primaryDevice->GetCommandQueue()->Flush();
     if (_dualGPUMode) { _secondaryDevice->GetCommandQueue()->Flush(); }
 
-
-    while (!_primaryRenderPassExecutionList.empty()) { _primaryRenderPassExecutionList.pop_back(); }
-    while (!_secondaryRenderPassExecutionList.empty()) { _secondaryRenderPassExecutionList.pop_back(); }
+    for (auto& renderpass : _primaryRenderPassExecutionList) { renderpass->ClearDenendencies(); }
+    for (auto& renderpass : _secondaryRenderPassExecutionList) { renderpass->ClearDenendencies(); }
 
     GDX12ShaderCompiler::Shutdown();
 }
@@ -771,27 +770,27 @@ void RenderModule::ConfigureRenderPipeline()
     GDX12RenderPass* clearPass = _primaryRenderPassExecutionList[0].get();
     std::vector<IRenderPassLink*> clearPassInputs = { _backBuffer.get(), _depthStencil.get() };
     std::vector<IRenderPassLink*> clearPassOutputs;
-    clearPass->LinkDependancies(clearPassInputs, &clearPassOutputs);
+    clearPass->LinkDependencies(clearPassInputs, &clearPassOutputs);
 
     GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[2].get();
     std::vector<IRenderPassLink*> opaquePassInputs = { _depthStencil.get() };
     std::vector<IRenderPassLink*> opaquePassOutputs;
-    opaquePass->LinkDependancies(opaquePassInputs, &opaquePassOutputs);
+    opaquePass->LinkDependencies(opaquePassInputs, &opaquePassOutputs);
 
     GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[3].get();
     std::vector<IRenderPassLink*> transparencyPassInputs = { _depthStencil.get() };
     std::vector<IRenderPassLink*> transparencyPassOutputs;
-    transparencyPass->LinkDependancies(transparencyPassInputs, &transparencyPassOutputs);
+    transparencyPass->LinkDependencies(transparencyPassInputs, &transparencyPassOutputs);
 
     GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[4].get();
     std::vector<IRenderPassLink*> compositionPassInputs = 
     { opaquePassOutputs[0], transparencyPassOutputs[0], transparencyPassOutputs[1] };
     std::vector<IRenderPassLink*> compositionPassOutputs;
-    compositionPass->LinkDependancies(compositionPassInputs, &compositionPassOutputs);
+    compositionPass->LinkDependencies(compositionPassInputs, &compositionPassOutputs);
 
     GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[5].get();
     std::vector<IRenderPassLink*> outputPassInputs = { compositionPassOutputs[0], _backBuffer.get() };
-    outputPass->LinkDependancies(outputPassInputs, nullptr);
+    outputPass->LinkDependencies(outputPassInputs, nullptr);
 
     // SecondaryDevice pipeline
 

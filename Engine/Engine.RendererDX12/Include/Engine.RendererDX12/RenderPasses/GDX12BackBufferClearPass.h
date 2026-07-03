@@ -11,7 +11,7 @@ public:
 	// Input 1 - depth stencil
 	// Output 0 - back buffer
 	// Output 1 - depth stencil
-	void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
+	void LinkDependencies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
 	{
 		IN_OUT_currentBackBuffer = inputs[0];
 		IN_OUT_depthStencil = inputs[1];
@@ -34,6 +34,12 @@ public:
 		cmdList->ClearRenderTargetView(currentBackBuffer);
 		cmdList->ClearDepthStencilView(depthStencil);
 		cmdList->EndPixEvent();
+	}
+
+	void ClearDenendencies() override
+	{
+		IN_OUT_currentBackBuffer = nullptr;
+		IN_OUT_depthStencil = nullptr;
 	}
 
 private:

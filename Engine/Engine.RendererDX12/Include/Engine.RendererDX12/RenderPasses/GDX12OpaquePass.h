@@ -11,7 +11,7 @@ public:
 	// Input 0 - DepthStencil
 	// Output 0 - AccumulationTexture
 	// Output 1 - MotionVectors
-	void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
+	void LinkDependencies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
 	{
 		IN_DepthStencil = inputs[0];
 
@@ -66,7 +66,30 @@ public:
 		OUT_VelocityBuffer->Resize(newWidth, newHeight);
 	}
 
+	void ClearDenendencies() override
+	{
+		OUT_Accumulation.reset();
+		OUT_VelocityBuffer.reset();
+		IN_DepthStencil = nullptr;
+		_opaqueVS.Reset();
+		_opaquePS.Reset();
+		_opaqueRS.reset();
+		_opaqueCS.Reset();
+		_opaquePSO.Reset();
+	}
+
 private:
+	ComPtr<ID3DBlob> _opaqueVS;
+	ComPtr<ID3DBlob> _opaquePS;
+	std::unique_ptr<GDX12RootSignature> _opaqueRS;
+	ComPtr<ID3D12CommandSignature> _opaqueCS;
+	ComPtr<ID3D12PipelineState> _opaquePSO;
+
+	std::unique_ptr<GDX12Texture> OUT_Accumulation;
+	std::unique_ptr<GDX12Texture> OUT_VelocityBuffer;
+
+	IRenderPassLink* IN_DepthStencil;
+
 	void PostLinkInitialize()
 	{
 		GDX12TextureDesc TextureDesc1;
@@ -157,15 +180,4 @@ private:
 		PSODesc1.PS = { reinterpret_cast<BYTE*>(_opaquePS->GetBufferPointer()), _opaquePS->GetBufferSize() };
 		ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&PSODesc1, IID_PPV_ARGS(&_opaquePSO)));
 	}
-
-	ComPtr<ID3DBlob> _opaqueVS;
-	ComPtr<ID3DBlob> _opaquePS;
-	std::unique_ptr<GDX12RootSignature> _opaqueRS;
-	ComPtr<ID3D12CommandSignature> _opaqueCS;
-	ComPtr<ID3D12PipelineState> _opaquePSO;
-
-	std::unique_ptr<GDX12Texture> OUT_Accumulation;
-	std::unique_ptr<GDX12Texture> OUT_VelocityBuffer;
-
-	IRenderPassLink* IN_DepthStencil;
 };

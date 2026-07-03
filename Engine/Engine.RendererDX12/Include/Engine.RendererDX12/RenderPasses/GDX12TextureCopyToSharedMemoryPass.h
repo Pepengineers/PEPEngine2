@@ -10,7 +10,7 @@ public:
 
 	// Input 0 - InputTexture
 	// Output 0 - SharedTexture
-	void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
+	void LinkDependencies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
 	{
 		IN_Texture = inputs[0];
 
@@ -42,6 +42,12 @@ public:
 		UINT newWidth = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
 		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
 		OUT_SharedTexture->Resize(newWidth, newHeight);
+	}
+
+	void ClearDenendencies() override
+	{
+		IN_Texture = nullptr;
+		OUT_SharedTexture.reset();
 	}
 
 private:

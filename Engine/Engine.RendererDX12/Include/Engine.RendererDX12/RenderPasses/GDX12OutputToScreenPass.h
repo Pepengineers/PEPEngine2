@@ -10,7 +10,7 @@ public:
 
 	// Input 0 - InputTexture
 	// Input 1 - BackBuffer
-	void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
+	void LinkDependencies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
 	{
 		IN_Texture = inputs[0];
 		IN_OUT_BackBuffer = inputs[1];
@@ -28,6 +28,12 @@ public:
 			inputTexture->GetResource()->D3DResource.Get());
 		cmdList->EnhancedTextureBarrier({ backBuffer->GetResource()->GetPresentEnhBarrier() });
 		cmdList->EndPixEvent();
+	}
+
+	void ClearDenendencies() override
+	{
+		IN_Texture = nullptr;
+		IN_OUT_BackBuffer = nullptr;
 	}
 
 private:

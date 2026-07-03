@@ -12,14 +12,12 @@ public:
 	GDX12FSRUpscalePass() : IN_Texture(nullptr), IN_DepthBuffer(nullptr), 
 		IN_MotionVectors(nullptr), OUT_UpscaledTexture(nullptr), _FFXContext(nullptr)
 	{ _flags = RENDER_PASS_FLAG_UPSCALER; }
-	
-	~GDX12FSRUpscalePass() { if (_FFXContext) { ffxDestroyContext(&_FFXContext, nullptr); } }
 
 	// Input 0 - InputTexture
 	// Input 1 - DepthStencil
 	// Input 2 - MotionVectors
 	// Output 0 - UpscaledTexture
-	void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
+	void LinkDependencies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
 	{
 		IN_Texture = inputs[0];
 		IN_DepthBuffer = inputs[1];
@@ -128,6 +126,15 @@ public:
 	}
 
 	FfxApiUpscaleQualityMode FSRQualityMode = FFX_UPSCALE_QUALITY_MODE_QUALITY;
+
+	void ClearDenendencies() override
+	{
+		if (_FFXContext) { ffxDestroyContext(&_FFXContext, nullptr); }
+		IN_Texture = nullptr;
+		IN_DepthBuffer = nullptr;
+		IN_MotionVectors = nullptr;
+		OUT_UpscaledTexture.reset();
+	}
 
 private:
 	IRenderPassLink* IN_Texture;

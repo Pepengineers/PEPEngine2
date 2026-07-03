@@ -11,7 +11,7 @@ public:
 	// Input 0 - DepthStencil
 	// Output 0 - TransparencyAccumulation
 	// Output 1 - RevealageTexture
-	void LinkDependancies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
+	void LinkDependencies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
 	{
 		IN_DepthStencil = inputs[0];
 
@@ -67,6 +67,18 @@ public:
 		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
 		OUT_Accumulation->Resize(newWidth, newHeight);
 		OUT_Revealage->Resize(newWidth, newHeight);
+	}
+
+	void ClearDenendencies() override
+	{
+		OUT_Accumulation.reset();
+		OUT_Revealage.reset();
+		IN_DepthStencil = nullptr;
+		_transparencyVS.Reset();
+		_transparencyPS.Reset();
+		_transparencyRS.reset();
+		_transparencyCS.Reset();
+		_transparencyPSO.Reset();
 	}
 
 private:

@@ -82,6 +82,15 @@ public:
 		cmdList->EndPixEvent();
 	}
 
+	void ClearDenendencies() override
+	{
+		_cullingRS.reset();
+		_cullingPSO.Reset();
+		_bufferClearCS.Reset();
+		_bufferClearRS.reset();
+		_bufferClearPSO.Reset();
+	}
+
 private:
 	ComPtr<ID3DBlob> _cullingCS;
 	std::unique_ptr<GDX12RootSignature> _cullingRS;
