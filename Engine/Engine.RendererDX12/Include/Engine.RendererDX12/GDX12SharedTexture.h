@@ -49,6 +49,7 @@ public:
     {
         _sharedTexturePrimary.Reset();
         _sharedTextureSecondary.Reset();
+        _sharedHeap.Reset();
         _width = 0;
         _height = 0;
         _format = DXGI_FORMAT_UNKNOWN;

@@ -5,40 +5,59 @@
 class GDX12TextureCopyToSharedMemoryPass : public GDX12RenderPass
 {
 public:
-	GDX12TextureCopyToSharedMemoryPass() : IN_Texture(nullptr)
-	{ 
-		_flags = RENDER_PASS_FLAG_NONE; 
-		_numInputs = 1;
-		_numOutputs = 1;
-		OUT_SharedTexture = std::make_unique<GDX12SharedTexture>();
-		_outputs.push_back(OUT_SharedTexture.get());
+	GDX12TextureCopyToSharedMemoryPass()
+	{
+		_flags = RENDER_PASS_FLAG_NONE;
 	}
 
-	// Input 0 - InputTexture
-	// Output 0 - SharedTexture
+	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
+	{
+		_inputs = inputs;
+		_numInputs = _numOutputs = inputs.size();
+
+		OUT_SharedTextures.clear();
+		_outputs.clear();
+		OUT_SharedTextures.resize(_numOutputs);
+		_outputs.resize(_numOutputs);
+		for (int i = 0; i < _numInputs; i++)
+		{
+			OUT_SharedTextures[i] = std::make_unique<GDX12SharedTexture>();
+			_outputs[i] = OUT_SharedTextures[i].get();
+		}
+	}
+
+	// Input N - InputTexture
+	// Output N - OutputSharedTexture
 	void Initialize() override
 	{
 		GDX12RenderPass::Initialize();
 
-		IN_Texture = _inputs[0];
-
-		OUT_SharedTexture->Initialize(_resources->Device, _otherResources->Device,
-			IN_Texture->GetTexture()->GetWidth(), IN_Texture->GetTexture()->GetHeight(),
-			IN_Texture->GetTexture()->GetFormat());
+		IN_Textures.resize(_numInputs);
+		for (int i = 0; i < _numInputs; i++)
+		{
+			IN_Textures[i] = _inputs[i];
+			OUT_SharedTextures[i]->Initialize(_resources->Device, _otherResources->Device,
+				IN_Textures[i]->GetTexture()->GetWidth(), IN_Textures[i]->GetTexture()->GetHeight(),
+				IN_Textures[i]->GetTexture()->GetFormat());
+		}
 	}
 
-	// Copies texture from device the pass was initialized at to shared memory
-	// Can be later used to read it on another device with CopyFromSharedMemoryPass
+	// Copies textures from device the pass was initialized at to shared memory
+	// Can be later used to read them on another device with CopyFromSharedMemoryPass
 	void Execute(GDX12CommandList* cmdList) override
 	{
-		GDX12Texture* inTexture = IN_Texture->GetTexture();
-
 		cmdList->BeginPixEvent("Texture Transfer To Shared Memory pass", Colors::ForestGreen);
-		cmdList->ResourceBarrier({ inTexture->GetResource()->GetCopySourceBarrier(),
-		OUT_SharedTexture->GetPrimaryResource()->GetCopyDestBarrier() });
-		cmdList->CopyResource(OUT_SharedTexture->GetPrimaryResource()->D3DResource.Get(), 
-			inTexture->GetResource()->D3DResource.Get());
-		cmdList->ResourceBarrier({ OUT_SharedTexture->GetPrimaryResource()->GetCommonBarrier() });
+		for (int i = 0; i < _numInputs; i++)
+		{
+			GDX12Texture* inTexture = IN_Textures[i]->GetTexture();
+			GDX12SharedTexture* outSharedTexture = OUT_SharedTextures[i]->GetSharedTexture();
+
+			cmdList->ResourceBarrier({ inTexture->GetResource()->GetCopySourceBarrier(),
+		outSharedTexture->GetPrimaryResource()->GetCopyDestBarrier() });
+			cmdList->CopyResource(outSharedTexture->GetPrimaryResource()->D3DResource.Get(),
+				inTexture->GetResource()->D3DResource.Get());
+			cmdList->ResourceBarrier({ outSharedTexture->GetPrimaryResource()->GetCommonBarrier() });
+		}
 		cmdList->EndPixEvent();
 	}
 
@@ -46,17 +65,17 @@ public:
 	{
 		UINT newWidth = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
 		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
-		OUT_SharedTexture->Resize(newWidth, newHeight);
+		for (auto& texture : OUT_SharedTextures) { texture->Resize(newWidth, newHeight); }
 	}
 
 	void ClearDenendencies() override
 	{
 		GDX12RenderPass::ClearDenendencies();
-		IN_Texture = nullptr;
-		OUT_SharedTexture.reset();
+		IN_Textures.clear();
+		OUT_SharedTextures.clear();
 	}
 
 private:
-    IRenderPassLink* IN_Texture;
-	std::unique_ptr<GDX12SharedTexture> OUT_SharedTexture;
+	std::vector<IRenderPassLink*> IN_Textures;
+	std::vector<std::unique_ptr<GDX12SharedTexture>> OUT_SharedTextures;
 };

@@ -45,6 +45,7 @@ class GDX12RenderPass
 public:
     GDX12RenderPass() : _flags(RENDER_PASS_FLAG_NONE), _resources(nullptr), 
         _otherResources(nullptr), _commonData(nullptr), _numInputs(0), _numOutputs(0) {}
+
     virtual void Setup(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData)
     {
         _resources = initOnResources;
@@ -76,7 +77,7 @@ public:
     void SetInputs(std::initializer_list<IRenderPassLink*> inputs) { SetInputs(std::vector<IRenderPassLink*>(inputs)); }
     virtual void SetInputs(std::vector<IRenderPassLink*> inputs)
     {
-        if (_inputs.size() < _numInputs) { OutputDebugStringA("ERROR: Not enough inputs provided into render pass\n"); }
+        if (inputs.size() < _numInputs) { OutputDebugStringA("ERROR: Not enough inputs provided into render pass\n"); }
         _inputs = inputs;
     }
     // returns true if all inputs are initialized
