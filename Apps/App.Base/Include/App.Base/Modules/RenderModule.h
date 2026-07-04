@@ -122,6 +122,8 @@ private:
     void BuildBackBuffer();
     void ShareFences();
     void ConfigureRenderPipeline();
+    void SetupRenderPasses();
+    void InitializeRenderPasses();
     
     void SubscribeToSceneManager();
     void UnsubscribeFromSceneManager();

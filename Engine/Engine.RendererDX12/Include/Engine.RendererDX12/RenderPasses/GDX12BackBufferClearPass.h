@@ -4,26 +4,27 @@
 class GDX12BackBufferClearPass : public GDX12RenderPass
 {
 public:
-	GDX12BackBufferClearPass() : IN_OUT_currentBackBuffer(nullptr), IN_OUT_depthStencil(nullptr)
-	{ _flags = RENDER_PASS_FLAG_NONE; }
+	GDX12BackBufferClearPass() : IN_currentBackBuffer(nullptr), IN_depthStencil(nullptr)
+	{  
+		_flags = RENDER_PASS_FLAG_NONE; 
+		_numInputs = 2;
+		_numOutputs = 0;
+	}
 
 	// Input 0 - back buffer
 	// Input 1 - depth stencil
-	// Output 0 - back buffer
-	// Output 1 - depth stencil
-	void LinkDependencies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
+	void Initialize() override
 	{
-		IN_OUT_currentBackBuffer = inputs[0];
-		IN_OUT_depthStencil = inputs[1];
+		GDX12RenderPass::Initialize();
 
-		outputs->push_back(IN_OUT_currentBackBuffer);
-		outputs->push_back(IN_OUT_depthStencil);
+		IN_currentBackBuffer = Inputs[0];
+		IN_depthStencil = Inputs[1];
 	}
 
 	void Execute(GDX12CommandList* cmdList) override
 	{
-		GDX12Texture* currentBackBuffer = IN_OUT_currentBackBuffer->GetTexture();
-		GDX12Texture* depthStencil = IN_OUT_depthStencil->GetTexture();
+		GDX12Texture* currentBackBuffer = IN_currentBackBuffer->GetTexture();
+		GDX12Texture* depthStencil = IN_depthStencil->GetTexture();
 
 		cmdList->BeginPixEvent("Clear Back Buffer", Colors::Aqua);
 		cmdList->SetViewport(currentBackBuffer->GetViewport());
@@ -38,11 +39,13 @@ public:
 
 	void ClearDenendencies() override
 	{
-		IN_OUT_currentBackBuffer = nullptr;
-		IN_OUT_depthStencil = nullptr;
+		GDX12RenderPass::ClearDenendencies();
+
+		IN_currentBackBuffer = nullptr;
+		IN_depthStencil = nullptr;
 	}
 
 private:
-	IRenderPassLink* IN_OUT_currentBackBuffer;
-	IRenderPassLink* IN_OUT_depthStencil;
+	IRenderPassLink* IN_currentBackBuffer;
+	IRenderPassLink* IN_depthStencil;
 };

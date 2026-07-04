@@ -7,9 +7,9 @@ public:
 	GDX12GPUCullingPass()
 	{ _flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_INSTANCES; }
 
-	void Initialize(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData) override
+	void Setup(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData) override
 	{
-		GDX12RenderPass::Initialize(initOnResources, otherResources, commonData);
+		GDX12RenderPass::Setup(initOnResources, otherResources, commonData);
 
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
@@ -84,6 +84,8 @@ public:
 
 	void ClearDenendencies() override
 	{
+		GDX12RenderPass::ClearDenendencies();
+
 		_cullingRS.reset();
 		_cullingPSO.Reset();
 		_bufferClearCS.Reset();

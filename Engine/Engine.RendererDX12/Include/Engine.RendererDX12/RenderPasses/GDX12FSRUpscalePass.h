@@ -11,17 +11,25 @@ class GDX12FSRUpscalePass : public GDX12RenderPass
 public:
 	GDX12FSRUpscalePass() : IN_Texture(nullptr), IN_DepthBuffer(nullptr), 
 		IN_MotionVectors(nullptr), OUT_UpscaledTexture(nullptr), _FFXContext(nullptr)
-	{ _flags = RENDER_PASS_FLAG_UPSCALER; }
+	{ 
+		_flags = RENDER_PASS_FLAG_UPSCALER; 
+		_numInputs = 3;
+		_numOutputs = 1;
+		OUT_UpscaledTexture = std::make_unique<GDX12Texture>();
+		Outputs.push_back(OUT_UpscaledTexture.get());
+	}
 
 	// Input 0 - InputTexture
 	// Input 1 - DepthStencil
 	// Input 2 - MotionVectors
 	// Output 0 - UpscaledTexture
-	void LinkDependencies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
+	void Initialize() override
 	{
-		IN_Texture = inputs[0];
-		IN_DepthBuffer = inputs[1];
-		IN_MotionVectors = inputs[2];
+		GDX12RenderPass::Initialize();
+
+		IN_Texture = Inputs[0];
+		IN_DepthBuffer = Inputs[1];
+		IN_MotionVectors = Inputs[2];
 
 		GDX12Texture* inputTexture = IN_Texture->GetTexture();
 
@@ -40,15 +48,13 @@ public:
 		TextureDesc1.SRVDesc.Texture2D.PlaneSlice = 0;
 		TextureDesc1.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
 
-		OUT_UpscaledTexture = std::make_unique<GDX12Texture>(TextureDesc1);
-
-		outputs->push_back(OUT_UpscaledTexture.get());
+		OUT_UpscaledTexture->Initialize(TextureDesc1);
 	}
 
 	// Init with window size
-	void Initialize(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData) override
+	void Setup(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData) override
 	{
-		GDX12RenderPass::Initialize(initOnResources, otherResources, commonData);
+		GDX12RenderPass::Setup(initOnResources, otherResources, commonData);
 
 		BuildFSRContext();
 		QueryRenderTargetResolution();
@@ -129,6 +135,8 @@ public:
 
 	void ClearDenendencies() override
 	{
+		GDX12RenderPass::ClearDenendencies();
+
 		if (_FFXContext) { ffxDestroyContext(&_FFXContext, nullptr); }
 		IN_Texture = nullptr;
 		IN_DepthBuffer = nullptr;

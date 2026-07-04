@@ -43,8 +43,9 @@ enum ERenderPassFlags : uint32_t
 class GDX12RenderPass
 {
 public:
-    GDX12RenderPass() : _flags(RENDER_PASS_FLAG_NONE), _resources(nullptr), _otherResources(nullptr), _commonData(nullptr) {}
-    virtual void Initialize(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData)
+    GDX12RenderPass() : _flags(RENDER_PASS_FLAG_NONE), _resources(nullptr), 
+        _otherResources(nullptr), _commonData(nullptr), _numInputs(0), _numOutputs(0) {}
+    virtual void Setup(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData)
     {
         _resources = initOnResources;
         _otherResources = otherResources;
@@ -55,9 +56,17 @@ public:
     // Used by upscalers to determine downscaled render target size
     // And share it with all other passes
     virtual void QueryRenderTargetResolution() {};
-    // Used by all passes to link inputs and outputs with other passes
-    virtual void LinkDependencies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) {};
-    virtual void ClearDenendencies() {}
+
+    virtual void ClearDenendencies() 
+    {
+        Inputs.clear();
+        Outputs.clear();
+    }
+    // Called after linking with other passes
+    virtual void Initialize() 
+    {
+        if (Inputs.size() < _numInputs) { OutputDebugStringA("ERROR: Not enough inputs provided into render pass\n"); }
+    }
 
     uint32_t GetFlags() { return _flags; }
     void SetFlag(uint32_t flag, bool value)
@@ -66,6 +75,11 @@ public:
         else { _flags &= ~flag; }
     }
     bool GetFlagValue(uint32_t flag) { return _flags & flag; }
+
+    std::vector<IRenderPassLink*> Inputs;
+    std::vector<IRenderPassLink*> Outputs;
+    UINT GetNumInputs() { return _numInputs; }
+    UINT GetNumOutputs() { return _numOutputs; }
 
 protected:
     // This will define which resources will be loaded onto respective GPU
@@ -79,4 +93,7 @@ protected:
     // These are the other resources, that might be needed in mGPU passes
     // Might be null
     GDX12DeviceResources* _otherResources;
+
+    UINT _numInputs;
+    UINT _numOutputs;
 };

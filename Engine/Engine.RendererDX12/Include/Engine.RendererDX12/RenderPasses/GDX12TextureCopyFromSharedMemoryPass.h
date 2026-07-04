@@ -7,13 +7,21 @@ class GDX12TextureCopyFromSharedMemoryPass : public GDX12RenderPass
 {
 public:
 	GDX12TextureCopyFromSharedMemoryPass() : IN_SharedTexture(nullptr), OUT_Texture(nullptr)
-	{ _flags = RENDER_PASS_FLAG_NONE; }
+	{ 
+		_flags = RENDER_PASS_FLAG_NONE; 
+		_numInputs = 1;
+		_numOutputs = 1;
+		OUT_Texture = std::make_unique<GDX12Texture>();
+		Outputs.push_back(OUT_Texture.get());
+	}
 
 	// Input 0 - SharedTexture
 	// Output 0 - OutputTexture
-	void LinkDependencies(std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*>* outputs) override
+	void Initialize() override
 	{
-		IN_SharedTexture = inputs[0];
+		GDX12RenderPass::Initialize();
+
+		IN_SharedTexture = Inputs[0];
 
 		GDX12SharedTexture* sharedTexture = IN_SharedTexture->GetSharedTexture();
 
@@ -32,9 +40,7 @@ public:
 		TextureDesc1.SRVDesc.Texture2D.PlaneSlice = 0;
 		TextureDesc1.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
 
-		this->OUT_Texture = std::make_unique<GDX12Texture>(TextureDesc1);
-
-		outputs->push_back(OUT_Texture.get());
+		OUT_Texture->Initialize(TextureDesc1);
 	}
 
 	// Copies texture from shared memory onto device the pass was initialized on
@@ -62,6 +68,7 @@ public:
 
 	void ClearDenendencies() override
 	{
+		GDX12RenderPass::ClearDenendencies();
 		IN_SharedTexture = nullptr;
 		OUT_Texture.reset();
 	}

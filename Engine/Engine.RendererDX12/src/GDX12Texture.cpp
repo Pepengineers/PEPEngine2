@@ -6,55 +6,10 @@
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 
-GDX12Texture::GDX12Texture(GDX12TextureDesc desc) :
-    _desc(desc),
-    _srv(nullptr),
-    _rtv(nullptr),
-    _uav(nullptr),
-    _dsv(nullptr),
-    _resourceFlags(D3D12_RESOURCE_FLAG_NONE)
+GDX12Texture::GDX12Texture() :
+    _srv(nullptr), _rtv(nullptr), _uav(nullptr), _dsv(nullptr),
+    _resourceFlags(D3D12_RESOURCE_FLAG_NONE), _isInitialized(false), _device(nullptr)
 {
-    if (_desc.CreateRTV && _desc.CreateDSV) { OutputDebugStringA("ERROR: It is impossible to create RTV and DSV on the same texture.\n"); }
-    if (_desc.CreateUAV && _desc.CreateDSV) { OutputDebugStringA("ERROR: It is impossible to create DSV and UAV on the same texture.\n"); }
-
-    //grab device pointer from any avalible heap
-    if (_desc.SRV_UAV_Heap) { _device = _desc.SRV_UAV_Heap->_device; }
-    if (_desc.RTVHeap) { _device = _desc.RTVHeap->_device; }
-    if (_desc.DSVHeap) { _device = _desc.DSVHeap->_device; }
-
-    if (_desc.CreateRTV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS; }
-    if (_desc.CreateDSV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL; }
-    if (_desc.CreateUAV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS; }
-    if (_desc.CreateSRV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS; }
-
-    if (_desc.CreateRTV)
-    {
-        _clearValue.Color[0] = _desc.ClearValue.x;
-        _clearValue.Color[1] = _desc.ClearValue.y;
-        _clearValue.Color[2] = _desc.ClearValue.z;
-        _clearValue.Color[3] = _desc.ClearValue.w;
-    }
-    else if (_desc.CreateDSV)
-    {
-        _clearValue.DepthStencil.Depth = _desc.ClearValue.x;
-        _clearValue.DepthStencil.Stencil = _desc.ClearValue.y;
-    }
-
-    _clearValue.Format = _desc.Format;
-
-    if (_desc.ExternalResource != nullptr) { _resource = std::make_unique<GDX12TextureResource>(_desc.ExternalResource); }
-    else { CreateResource(); }
-    
-    CreateViews();
-
-    _viewport.TopLeftX = 0;
-    _viewport.TopLeftY = 0;
-    _viewport.Width = static_cast<FLOAT>(_desc.Width);
-    _viewport.Height = static_cast<FLOAT>(_desc.Height);
-    _viewport.MinDepth = 0.0f;
-    _viewport.MaxDepth = 1.0f;
-
-    _scissorRect = { 0, 0, static_cast<int>(_desc.Width), static_cast<int>(_desc.Height) };
 }
 
 void GDX12Texture::Resize(UINT width, UINT height)
@@ -143,6 +98,11 @@ GDX12Texture* GDX12Texture::GetTexture()
     return this;
 }
 
+bool GDX12Texture::IsInitialized()
+{
+    return _isInitialized;
+}
+
 void GDX12Texture::CreateResource()
 {
     D3D12_RESOURCE_DESC resourceDesc = CD3DX12_RESOURCE_DESC::Tex2D(
@@ -215,4 +175,52 @@ GDX12Texture::~GDX12Texture()
     _rtv.reset();
     _uav.reset();
     _dsv.reset();
+}
+
+void GDX12Texture::Initialize(GDX12TextureDesc desc)
+{
+    _desc = desc;
+    if (_desc.CreateRTV && _desc.CreateDSV) { OutputDebugStringA("ERROR: It is impossible to create RTV and DSV on the same texture.\n"); }
+    if (_desc.CreateUAV && _desc.CreateDSV) { OutputDebugStringA("ERROR: It is impossible to create DSV and UAV on the same texture.\n"); }
+
+    //grab device pointer from any avalible heap
+    if (_desc.SRV_UAV_Heap) { _device = _desc.SRV_UAV_Heap->_device; }
+    if (_desc.RTVHeap) { _device = _desc.RTVHeap->_device; }
+    if (_desc.DSVHeap) { _device = _desc.DSVHeap->_device; }
+
+    if (_desc.CreateRTV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS; }
+    if (_desc.CreateDSV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL; }
+    if (_desc.CreateUAV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS; }
+    if (_desc.CreateSRV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS; }
+
+    if (_desc.CreateRTV)
+    {
+        _clearValue.Color[0] = _desc.ClearValue.x;
+        _clearValue.Color[1] = _desc.ClearValue.y;
+        _clearValue.Color[2] = _desc.ClearValue.z;
+        _clearValue.Color[3] = _desc.ClearValue.w;
+    }
+    else if (_desc.CreateDSV)
+    {
+        _clearValue.DepthStencil.Depth = _desc.ClearValue.x;
+        _clearValue.DepthStencil.Stencil = _desc.ClearValue.y;
+    }
+
+    _clearValue.Format = _desc.Format;
+
+    if (_desc.ExternalResource != nullptr) { _resource = std::make_unique<GDX12TextureResource>(_desc.ExternalResource); }
+    else { CreateResource(); }
+
+    CreateViews();
+
+    _viewport.TopLeftX = 0;
+    _viewport.TopLeftY = 0;
+    _viewport.Width = static_cast<FLOAT>(_desc.Width);
+    _viewport.Height = static_cast<FLOAT>(_desc.Height);
+    _viewport.MinDepth = 0.0f;
+    _viewport.MaxDepth = 1.0f;
+
+    _scissorRect = { 0, 0, static_cast<int>(_desc.Width), static_cast<int>(_desc.Height) };
+
+    _isInitialized = true;
 }

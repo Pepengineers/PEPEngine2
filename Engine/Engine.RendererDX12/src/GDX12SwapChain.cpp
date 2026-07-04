@@ -73,7 +73,8 @@ void GDX12SwapChain::CreateBuffers()
 
         textureDesc.ExternalResource = backBuffer;
 
-        _buffers.push_back(std::make_unique<GDX12Texture>(textureDesc));
+        _buffers.push_back(std::make_unique<GDX12Texture>());
+        _buffers[i]->Initialize(textureDesc);
     }
 }
 
@@ -127,6 +128,11 @@ D3D12_RECT GDX12SwapChain::GetScissorRect()
 GDX12Texture* GDX12SwapChain::GetTexture()
 {
     return GetCurrentBuffer();
+}
+
+bool GDX12SwapChain::IsInitialized()
+{
+    return true;
 }
 
 DXGI_FORMAT GDX12SwapChain::GetFormat()

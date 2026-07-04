@@ -66,8 +66,10 @@ struct GDX12TextureDesc
 class GDX12Texture : public IRenderPassLink
 {
 public:
-	GDX12Texture(GDX12TextureDesc desc);
+	GDX12Texture();
 	~GDX12Texture();
+
+	void Initialize(GDX12TextureDesc desc);
 
 	//Recreates resources with new size and same descriptors
 	//This will wipe all data on said resources, unless ExternalResource is provided
@@ -86,6 +88,7 @@ public:
 	UINT GetWidth();
 	UINT GetHeight();
 	GDX12Texture* GetTexture() override;
+	bool IsInitialized() override;
 
 private:
 	void CreateResource();
@@ -103,4 +106,6 @@ private:
 
 	D3D12_VIEWPORT _viewport;
 	D3D12_RECT _scissorRect;
+
+	bool _isInitialized;
 };

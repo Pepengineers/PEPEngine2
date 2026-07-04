@@ -11,7 +11,8 @@ class GDX12SharedTexture : public IRenderPassLink
 {
 public:
     GDX12SharedTexture() : _width(0) , _height(0),
-		_format(DXGI_FORMAT_UNKNOWN), _heapSize(0), _transferFromDeivce(nullptr), _transferToDevice(nullptr)
+		_format(DXGI_FORMAT_UNKNOWN), _heapSize(0), _transferFromDeivce(nullptr), 
+        _transferToDevice(nullptr), _isInitiliazed(false)
     {
     }
 
@@ -40,6 +41,8 @@ public:
         CreateSharedHeap();
         CreatePlacedResources();
         ShareResources();
+
+        _isInitiliazed = true;
     }
 
     void Release()
@@ -66,6 +69,7 @@ public:
     UINT GetHeight() { return _height; }
     DXGI_FORMAT GetFormat() { return _format; }
     GDX12SharedTexture* GetSharedTexture() override { return this; }
+    bool IsInitialized() override { return _isInitiliazed; }
 
 private:
 	GDX12Device* _transferFromDeivce;
@@ -77,6 +81,7 @@ private:
 	DXGI_FORMAT _format;
 	UINT _width;
 	UINT _height;
+    bool _isInitiliazed;
 
     void CreateSharedHeap()
     {

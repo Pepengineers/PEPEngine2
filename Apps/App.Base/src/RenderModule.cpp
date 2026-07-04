@@ -306,7 +306,8 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
 
     desc.ExternalResource = textureResource;
 
-    resources->Textures[name] = std::make_unique<GDX12Texture>(desc);
+    resources->Textures[name] = std::make_unique<GDX12Texture>();
+    resources->Textures[name]->Initialize(desc);
 
     return resources->Textures[name].get();
 }
@@ -746,7 +747,8 @@ void RenderModule::BuildBackBuffer()
     desc.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
     desc.DSVDesc.Texture2D.MipSlice = 0;
 
-    _depthStencil = std::make_unique<GDX12Texture>(desc);
+    _depthStencil = std::make_unique<GDX12Texture>();
+    _depthStencil->Initialize(desc);
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
@@ -775,6 +777,8 @@ void RenderModule::ShareFences()
 
 void RenderModule::ConfigureRenderPipeline()
 {
+    // Setup render passes you would like to execute
+    // Add in execution order
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12BackBufferClearPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureCopyFromSharedMemoryPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
@@ -785,18 +789,9 @@ void RenderModule::ConfigureRenderPipeline()
     _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
     _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureCopyToSharedMemoryPass>());
 
-    for (auto& pass : _primaryRenderPassExecutionList)
-    {
-        pass->Initialize(&_primaryResources, &_secondaryResources, &_RPcommonData);
-        _primaryPipelineFlags |= pass->GetFlags();
-    }
+    SetupRenderPasses();
 
-    for (auto& pass : _secondaryRenderPassExecutionList)
-    {
-        pass->Initialize(&_secondaryResources, &_primaryResources, &_RPcommonData);
-        _secondaryPipelineFlags |= pass->GetFlags();
-    }
-
+    // Link inputs & outputs for each pass that needs it
     GDX12RenderPass* clearPass = _primaryRenderPassExecutionList[0].get();
     GDX12RenderPass* copyFromShared = _primaryRenderPassExecutionList[1].get();
     GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[2].get();
@@ -807,41 +802,73 @@ void RenderModule::ConfigureRenderPipeline()
     GDX12RenderPass* compositionPass = _secondaryRenderPassExecutionList[3].get();
     GDX12RenderPass* copyToShared = _secondaryRenderPassExecutionList[4].get();
 
-    std::vector<IRenderPassLink*> clearPassInputs = { _backBuffer.get(), _depthStencil.get() };
-    std::vector<IRenderPassLink*> clearPassOutputs;
-    clearPass->LinkDependencies(clearPassInputs, &clearPassOutputs);
+    clearPass->Inputs = { _backBuffer.get(), _depthStencil.get() };
+    cullingPass->Inputs = {};
+    opaquePass->Inputs = {};
+    transparencyPass->Inputs = { opaquePass->Outputs[2] };
+    compositionPass->Inputs = { opaquePass->Outputs[0], transparencyPass->Outputs[0], transparencyPass->Outputs[1] };
+    copyToShared->Inputs = { compositionPass->Outputs[0] };
+    copyFromShared->Inputs = { copyToShared->Outputs[0] };
+    outputPass->Inputs = { copyFromShared->Outputs[0], _backBuffer.get() };
 
-    std::vector<IRenderPassLink*> copyFromInputs;
-    std::vector<IRenderPassLink*> copyFromOutputs;
+    InitializeRenderPasses();
+}
 
-    std::vector<IRenderPassLink*> outputPassInputs;
+void RenderModule::SetupRenderPasses()
+{
+    for (auto& pass : _primaryRenderPassExecutionList)
+    {
+        pass->Setup(&_primaryResources, &_secondaryResources, &_RPcommonData);
+        _primaryPipelineFlags |= pass->GetFlags();
+    }
 
-    std::vector<IRenderPassLink*> cullingPassInputs;
-    std::vector<IRenderPassLink*> cullingPassOutputs;
-    cullingPass->LinkDependencies(cullingPassInputs, &cullingPassOutputs);
+    for (auto& pass : _secondaryRenderPassExecutionList)
+    {
+        pass->Setup(&_secondaryResources, &_primaryResources, &_RPcommonData);
+        _secondaryPipelineFlags |= pass->GetFlags();
+    }
+}
 
-    std::vector<IRenderPassLink*> opaquePassInputs;
-    std::vector<IRenderPassLink*> opaquePassOutputs;
-    opaquePass->LinkDependencies(opaquePassInputs, &opaquePassOutputs);
-
-    std::vector<IRenderPassLink*> transparencyPassInputs = { opaquePassOutputs[2] };
-    std::vector<IRenderPassLink*> transparencyPassOutputs;
-    transparencyPass->LinkDependencies(transparencyPassInputs, &transparencyPassOutputs);
-
-    std::vector<IRenderPassLink*> compositionPassInputs = 
-    { opaquePassOutputs[0], transparencyPassOutputs[0], transparencyPassOutputs[1]  };
-    std::vector<IRenderPassLink*> compositionPassOutputs;
-    compositionPass->LinkDependencies(compositionPassInputs, &compositionPassOutputs);
-
-    std::vector<IRenderPassLink*> copyToInputs = { compositionPassOutputs[0] };
-    std::vector<IRenderPassLink*> copyToOutputs;
-    copyToShared->LinkDependencies(copyToInputs, &copyToOutputs);
-
-    copyFromInputs = { copyToOutputs[0] };
-    copyFromShared->LinkDependencies(copyFromInputs, &copyFromOutputs);
-
-    outputPassInputs = { copyFromOutputs[0], _backBuffer.get() };
-    outputPass->LinkDependencies(outputPassInputs, nullptr);
+void RenderModule::InitializeRenderPasses()
+{
+    std::vector<GDX12RenderPass*> allRenderPasses;
+    for (auto& pass : _primaryRenderPassExecutionList)
+        allRenderPasses.push_back(pass.get());
+    for (auto& pass : _secondaryRenderPassExecutionList)
+        allRenderPasses.push_back(pass.get());
+    const int MAX_ITERATIONS = 100;
+    int iteration = 0;
+    while (!allRenderPasses.empty())
+    {
+        if (iteration > MAX_ITERATIONS)
+        {
+            OutputDebugStringA("ERROR: RenderPassLinking failed after 100 attempts.\n");
+            break;
+        }
+        for (auto it = allRenderPasses.begin(); it != allRenderPasses.end();)
+        {
+            GDX12RenderPass* renderPass = *it;
+            bool allInputsInitialized = true;
+            for (auto* input : renderPass->Inputs)
+            {
+                if (!input->IsInitialized())
+                {
+                    allInputsInitialized = false;
+                    break;
+                }
+            }
+            if (allInputsInitialized)
+            {
+                renderPass->Initialize();
+                it = allRenderPasses.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        iteration++;
+    }
 }
 
 void RenderModule::SubscribeToSceneManager()

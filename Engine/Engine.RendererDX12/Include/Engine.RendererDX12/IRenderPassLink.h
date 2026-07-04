@@ -17,4 +17,5 @@ public:
 		OutputDebugStringA("ERROR: Forbidden interface call\n");
 		return nullptr;
 	}
+	virtual bool IsInitialized() { return false; }
 };
