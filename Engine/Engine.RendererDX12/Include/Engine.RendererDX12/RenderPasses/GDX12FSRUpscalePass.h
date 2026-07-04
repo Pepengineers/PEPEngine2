@@ -16,7 +16,7 @@ public:
 		_numInputs = 3;
 		_numOutputs = 1;
 		OUT_UpscaledTexture = std::make_unique<GDX12Texture>();
-		Outputs.push_back(OUT_UpscaledTexture.get());
+		_outputs.push_back(OUT_UpscaledTexture.get());
 	}
 
 	// Input 0 - InputTexture
@@ -27,9 +27,9 @@ public:
 	{
 		GDX12RenderPass::Initialize();
 
-		IN_Texture = Inputs[0];
-		IN_DepthBuffer = Inputs[1];
-		IN_MotionVectors = Inputs[2];
+		IN_Texture = _inputs[0];
+		IN_DepthBuffer = _inputs[1];
+		IN_MotionVectors = _inputs[2];
 
 		GDX12Texture* inputTexture = IN_Texture->GetTexture();
 

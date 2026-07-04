@@ -802,14 +802,14 @@ void RenderModule::ConfigureRenderPipeline()
     GDX12RenderPass* compositionPass = _secondaryRenderPassExecutionList[3].get();
     GDX12RenderPass* copyToShared = _secondaryRenderPassExecutionList[4].get();
 
-    clearPass->Inputs = { _backBuffer.get(), _depthStencil.get() };
-    cullingPass->Inputs = {};
-    opaquePass->Inputs = {};
-    transparencyPass->Inputs = { opaquePass->Outputs[2] };
-    compositionPass->Inputs = { opaquePass->Outputs[0], transparencyPass->Outputs[0], transparencyPass->Outputs[1] };
-    copyToShared->Inputs = { compositionPass->Outputs[0] };
-    copyFromShared->Inputs = { copyToShared->Outputs[0] };
-    outputPass->Inputs = { copyFromShared->Outputs[0], _backBuffer.get() };
+    clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
+    cullingPass->SetInputs({});
+    opaquePass->SetInputs({});
+    transparencyPass->SetInputs({ opaquePass->GetOutputs()[2] });
+    compositionPass->SetInputs({ opaquePass->GetOutputs()[0], transparencyPass->GetOutputs()[0], transparencyPass->GetOutputs()[1] });
+    copyToShared->SetInputs({ compositionPass->GetOutputs()[0] });
+    copyFromShared->SetInputs({ copyToShared->GetOutputs()[0] });
+    outputPass->SetInputs({ copyFromShared->GetOutputs()[0], _backBuffer.get() });
 
     InitializeRenderPasses();
 }
@@ -842,30 +842,18 @@ void RenderModule::InitializeRenderPasses()
     {
         if (iteration > MAX_ITERATIONS)
         {
-            OutputDebugStringA("ERROR: RenderPassLinking failed after 100 attempts.\n");
+            OutputDebugStringA("ERROR: RenderPass linking failed after 100 attempts. This can be caused by wrong render pass inputs\n");
             break;
         }
         for (auto it = allRenderPasses.begin(); it != allRenderPasses.end();)
         {
             GDX12RenderPass* renderPass = *it;
-            bool allInputsInitialized = true;
-            for (auto* input : renderPass->Inputs)
-            {
-                if (!input->IsInitialized())
-                {
-                    allInputsInitialized = false;
-                    break;
-                }
-            }
-            if (allInputsInitialized)
+            if (renderPass->ValidateInputs())
             {
                 renderPass->Initialize();
                 it = allRenderPasses.erase(it);
             }
-            else
-            {
-                ++it;
-            }
+            else { ++it; }
         }
         iteration++;
     }

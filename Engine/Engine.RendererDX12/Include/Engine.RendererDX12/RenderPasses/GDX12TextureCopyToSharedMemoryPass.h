@@ -11,7 +11,7 @@ public:
 		_numInputs = 1;
 		_numOutputs = 1;
 		OUT_SharedTexture = std::make_unique<GDX12SharedTexture>();
-		Outputs.push_back(OUT_SharedTexture.get());
+		_outputs.push_back(OUT_SharedTexture.get());
 	}
 
 	// Input 0 - InputTexture
@@ -20,7 +20,7 @@ public:
 	{
 		GDX12RenderPass::Initialize();
 
-		IN_Texture = Inputs[0];
+		IN_Texture = _inputs[0];
 
 		OUT_SharedTexture->Initialize(_resources->Device, _otherResources->Device,
 			IN_Texture->GetTexture()->GetWidth(), IN_Texture->GetTexture()->GetHeight(),

@@ -59,14 +59,11 @@ public:
 
     virtual void ClearDenendencies() 
     {
-        Inputs.clear();
-        Outputs.clear();
+        _inputs.clear();
+        _outputs.clear();
     }
     // Called after linking with other passes
-    virtual void Initialize() 
-    {
-        if (Inputs.size() < _numInputs) { OutputDebugStringA("ERROR: Not enough inputs provided into render pass\n"); }
-    }
+    virtual void Initialize() {}
 
     uint32_t GetFlags() { return _flags; }
     void SetFlag(uint32_t flag, bool value)
@@ -76,8 +73,22 @@ public:
     }
     bool GetFlagValue(uint32_t flag) { return _flags & flag; }
 
-    std::vector<IRenderPassLink*> Inputs;
-    std::vector<IRenderPassLink*> Outputs;
+    void SetInputs(std::initializer_list<IRenderPassLink*> inputs) { SetInputs(std::vector<IRenderPassLink*>(inputs)); }
+    virtual void SetInputs(std::vector<IRenderPassLink*> inputs)
+    {
+        if (_inputs.size() < _numInputs) { OutputDebugStringA("ERROR: Not enough inputs provided into render pass\n"); }
+        _inputs = inputs;
+    }
+    // returns true if all inputs are initialized
+    bool ValidateInputs()
+    {
+        for (auto* input : _inputs)
+        {
+            if (!input->IsInitialized()) { return false; }
+        }
+        return true;
+    }
+    std::vector<IRenderPassLink*>& GetOutputs() { return _outputs; }
     UINT GetNumInputs() { return _numInputs; }
     UINT GetNumOutputs() { return _numOutputs; }
 
@@ -94,6 +105,8 @@ protected:
     // Might be null
     GDX12DeviceResources* _otherResources;
 
+    std::vector<IRenderPassLink*> _inputs;
+    std::vector<IRenderPassLink*> _outputs;
     UINT _numInputs;
     UINT _numOutputs;
 };

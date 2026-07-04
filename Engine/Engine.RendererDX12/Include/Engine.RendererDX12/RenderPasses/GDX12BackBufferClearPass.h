@@ -17,8 +17,8 @@ public:
 	{
 		GDX12RenderPass::Initialize();
 
-		IN_currentBackBuffer = Inputs[0];
-		IN_depthStencil = Inputs[1];
+		IN_currentBackBuffer = _inputs[0];
+		IN_depthStencil = _inputs[1];
 	}
 
 	void Execute(GDX12CommandList* cmdList) override

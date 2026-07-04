@@ -14,9 +14,9 @@ public:
 		OUT_VelocityBuffer = std::make_unique<GDX12Texture>();
 		OUT_DepthStencil = std::make_unique<GDX12Texture>();
 
-		Outputs.push_back(OUT_Accumulation.get());
-		Outputs.push_back(OUT_VelocityBuffer.get());
-		Outputs.push_back(OUT_DepthStencil.get());
+		_outputs.push_back(OUT_Accumulation.get());
+		_outputs.push_back(OUT_VelocityBuffer.get());
+		_outputs.push_back(OUT_DepthStencil.get());
 	}
 
 	// Output 0 - AccumulationTexture

@@ -12,8 +12,8 @@ public:
 		_numOutputs = 2;
 		OUT_Accumulation = std::make_unique<GDX12Texture>();
 		OUT_Revealage = std::make_unique<GDX12Texture>();
-		Outputs.push_back(OUT_Accumulation.get());
-		Outputs.push_back(OUT_Revealage.get());
+		_outputs.push_back(OUT_Accumulation.get());
+		_outputs.push_back(OUT_Revealage.get());
 	}
 
 	// Input 0 - DepthStencil
@@ -23,7 +23,7 @@ public:
 	{
 		GDX12RenderPass::Initialize();
 
-		IN_DepthStencil = Inputs[0];
+		IN_DepthStencil = _inputs[0];
 
 		// Textures
 		GDX12TextureDesc TextureDesc1;

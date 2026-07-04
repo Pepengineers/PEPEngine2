@@ -11,7 +11,7 @@ public:
 		_numInputs = 3;
 		_numOutputs = 1;
 		OUT_Result = std::make_unique<GDX12Texture>();
-		Outputs.push_back(OUT_Result.get());
+		_outputs.push_back(OUT_Result.get());
 	}
 
 	// Input 0 - OpaqueScene
@@ -22,9 +22,9 @@ public:
 	{
 		GDX12RenderPass::Initialize();
 
-		IN_OpaqueScene = Inputs[0];
-		IN_TransparencyAccum = Inputs[1];
-		IN_Revealage = Inputs[2];
+		IN_OpaqueScene = _inputs[0];
+		IN_TransparencyAccum = _inputs[1];
+		IN_Revealage = _inputs[2];
 
 		// Textures
 		GDX12TextureDesc TextureDesc1;
