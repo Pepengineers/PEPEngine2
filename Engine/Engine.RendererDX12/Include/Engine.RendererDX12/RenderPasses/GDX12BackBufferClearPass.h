@@ -15,8 +15,6 @@ public:
 	// Input 1 - depth stencil
 	void Initialize() override
 	{
-		GDX12RenderPass::Initialize();
-
 		IN_currentBackBuffer = _inputs[0];
 		IN_depthStencil = _inputs[1];
 	}

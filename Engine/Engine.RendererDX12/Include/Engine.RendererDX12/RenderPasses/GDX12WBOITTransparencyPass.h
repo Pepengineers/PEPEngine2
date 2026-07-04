@@ -21,8 +21,6 @@ public:
 	// Output 1 - RevealageTexture
 	void Initialize() override
 	{
-		GDX12RenderPass::Initialize();
-
 		IN_DepthStencil = _inputs[0];
 
 		// Textures

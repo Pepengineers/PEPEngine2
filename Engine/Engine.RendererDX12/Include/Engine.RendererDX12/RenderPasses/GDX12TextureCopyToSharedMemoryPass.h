@@ -6,9 +6,7 @@ class GDX12TextureCopyToSharedMemoryPass : public GDX12RenderPass
 {
 public:
 	GDX12TextureCopyToSharedMemoryPass()
-	{
-		_flags = RENDER_PASS_FLAG_NONE;
-	}
+	{ _flags = RENDER_PASS_FLAG_NONE; }
 
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
 	{
@@ -19,7 +17,7 @@ public:
 		_outputs.clear();
 		OUT_SharedTextures.resize(_numOutputs);
 		_outputs.resize(_numOutputs);
-		for (int i = 0; i < _numInputs; i++)
+		for (int i = 0; i < _numOutputs; i++)
 		{
 			OUT_SharedTextures[i] = std::make_unique<GDX12SharedTexture>();
 			_outputs[i] = OUT_SharedTextures[i].get();
@@ -30,8 +28,6 @@ public:
 	// Output N - OutputSharedTexture
 	void Initialize() override
 	{
-		GDX12RenderPass::Initialize();
-
 		IN_Textures.resize(_numInputs);
 		for (int i = 0; i < _numInputs; i++)
 		{

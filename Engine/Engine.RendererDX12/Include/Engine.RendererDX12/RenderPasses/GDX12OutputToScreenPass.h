@@ -16,8 +16,6 @@ public:
 	// Input 1 - BackBuffer
 	void Initialize() override
 	{
-		GDX12RenderPass::Initialize();
-
 		IN_Texture = _inputs[0];
 		IN_BackBuffer = _inputs[1];
 	}

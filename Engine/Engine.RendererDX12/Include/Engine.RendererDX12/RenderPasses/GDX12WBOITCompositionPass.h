@@ -20,8 +20,6 @@ public:
 	// Output 0 - CompositionResult
 	void Initialize() override
 	{
-		GDX12RenderPass::Initialize();
-
 		IN_OpaqueScene = _inputs[0];
 		IN_TransparencyAccum = _inputs[1];
 		IN_Revealage = _inputs[2];

@@ -9,38 +9,41 @@
 class GDX12FSRUpscalePass : public GDX12RenderPass
 {
 public:
-	GDX12FSRUpscalePass() : IN_Texture(nullptr), IN_DepthBuffer(nullptr), 
-		IN_MotionVectors(nullptr), OUT_UpscaledTexture(nullptr), _FFXContext(nullptr)
-	{ 
-		_flags = RENDER_PASS_FLAG_UPSCALER; 
-		_numInputs = 3;
-		_numOutputs = 1;
-		OUT_UpscaledTexture = std::make_unique<GDX12Texture>();
-		_outputs.push_back(OUT_UpscaledTexture.get());
+	GDX12FSRUpscalePass() : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _FFXContext(nullptr)
+	{ _flags = RENDER_PASS_FLAG_UPSCALER; }
+
+	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
+	{
+		_inputs = inputs;
+		_numInputs = 2;
+		_numOutputs = inputs.size() - 2;
+
+		OUT_UpscaledTextures.clear();
+		_outputs.clear();
+		OUT_UpscaledTextures.resize(_numOutputs);
+		_outputs.resize(_numOutputs);
+		for (int i = 0; i < _numOutputs; i++)
+		{
+			OUT_UpscaledTextures[i] = std::make_unique<GDX12Texture>();
+			_outputs[i] = OUT_UpscaledTextures[i].get();
+		}
 	}
 
-	// Input 0 - InputTexture
-	// Input 1 - DepthStencil
-	// Input 2 - MotionVectors
-	// Output 0 - UpscaledTexture
+	// Input 0 - DepthStencil
+	// Input 1 - MotionVectors
+	// Input N - Input Texture
+	// Output N - UpscaledTexture
 	void Initialize() override
 	{
-		GDX12RenderPass::Initialize();
-
-		IN_Texture = _inputs[0];
-		IN_DepthBuffer = _inputs[1];
-		IN_MotionVectors = _inputs[2];
-
-		GDX12Texture* inputTexture = IN_Texture->GetTexture();
+		IN_DepthBuffer = _inputs[0];
+		IN_MotionVectors = _inputs[1];
 
 		GDX12TextureDesc TextureDesc1;
-		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = inputTexture->GetFormat();
 		TextureDesc1.Width = _commonData->WindowWidth;
 		TextureDesc1.Height = _commonData->WindowHeight;
 
 		TextureDesc1.CreateSRV = true;
 		TextureDesc1.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
-		TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
 		TextureDesc1.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 		TextureDesc1.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 		TextureDesc1.SRVDesc.Texture2D.MipLevels = 1;
@@ -48,7 +51,15 @@ public:
 		TextureDesc1.SRVDesc.Texture2D.PlaneSlice = 0;
 		TextureDesc1.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
 
-		OUT_UpscaledTexture->Initialize(TextureDesc1);
+		for (int i = 0; i < _numOutputs; i++)
+		{
+			IN_Textures[i] = _inputs[i + 2];
+			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
+			TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = inputTexture->GetFormat();
+			TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+			OUT_UpscaledTextures[i]->Initialize(TextureDesc1);
+		}
+
 	}
 
 	// Init with window size
@@ -62,7 +73,6 @@ public:
 
 	void Execute(GDX12CommandList* cmdList) override
 	{
-		GDX12Texture* inputTexture = IN_Texture->GetTexture();
 		GDX12Texture* depthStencil = IN_DepthBuffer->GetTexture();
 		GDX12Texture* motionVectors = IN_MotionVectors->GetTexture();
 
@@ -70,7 +80,6 @@ public:
 		ffxDispatchDescUpscale dispatchDesc;
 		dispatchDesc.header.type = FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
 		dispatchDesc.commandList = cmdList->GetCommandList().Get();
-		dispatchDesc.color = ffxApiGetResourceDX12(inputTexture->GetResource()->D3DResource.Get(), FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		dispatchDesc.depth = ffxApiGetResourceDX12(depthStencil->GetResource()->D3DResource.Get(), FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		dispatchDesc.motionVectors = ffxApiGetResourceDX12(motionVectors->GetResource()->D3DResource.Get(), FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		// Resolution before upscaling
@@ -94,27 +103,31 @@ public:
 		dispatchDesc.preExposure = 1.f;
 		dispatchDesc.viewSpaceToMetersFactor = 1.f;
 
-		dispatchDesc.output = ffxApiGetResourceDX12(OUT_UpscaledTexture->GetResource()->D3DResource.Get(), FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
-
 		dispatchDesc.exposure = ffxApiGetResourceDX12(nullptr, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		dispatchDesc.reactive = ffxApiGetResourceDX12(nullptr, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		dispatchDesc.transparencyAndComposition = ffxApiGetResourceDX12(nullptr, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		//dispatchDesc.flags = FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW;
 
-
-		ffxReturnCode_t dispatchError = ffxDispatch(&_FFXContext, &dispatchDesc.header);
-		if (dispatchError != FFX_API_RETURN_OK)
+		for (int i = 0; i < _numOutputs; i++)
 		{
-			std::string errorMsg = "FSR DISPATCH ERROR: " + std::to_string(dispatchError) + " \n";
-			OutputDebugStringA(errorMsg.c_str());
+			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
+			GDX12Texture* upscaledTexture = OUT_UpscaledTextures[i].get();
+			dispatchDesc.color = ffxApiGetResourceDX12(inputTexture->GetResource()->D3DResource.Get(), FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
+			dispatchDesc.output = ffxApiGetResourceDX12(upscaledTexture->GetResource()->D3DResource.Get(), FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
+
+			ffxReturnCode_t dispatchError = ffxDispatch(&_FFXContext, &dispatchDesc.header);
+			if (dispatchError != FFX_API_RETURN_OK)
+			{
+				std::string errorMsg = "FSR DISPATCH ERROR: " + std::to_string(dispatchError) + " \n";
+				OutputDebugStringA(errorMsg.c_str());
+			}
 		}
 		cmdList->EndPixEvent();
 	}
 
 	void Resize() override
 	{
-		OUT_UpscaledTexture->Resize(_commonData->WindowWidth, _commonData->WindowHeight);
-
+		for (auto& texture : OUT_UpscaledTextures) { texture->Resize(_commonData->WindowWidth, _commonData->WindowHeight); }
 		ffxDestroyContext(&_FFXContext, nullptr);
 		BuildFSRContext();
 	}
@@ -138,18 +151,18 @@ public:
 		GDX12RenderPass::ClearDenendencies();
 
 		if (_FFXContext) { ffxDestroyContext(&_FFXContext, nullptr); }
-		IN_Texture = nullptr;
 		IN_DepthBuffer = nullptr;
 		IN_MotionVectors = nullptr;
-		OUT_UpscaledTexture.reset();
+		IN_Textures.clear();
+		OUT_UpscaledTextures.clear();
 	}
 
 private:
-	IRenderPassLink* IN_Texture;
 	IRenderPassLink* IN_DepthBuffer;
 	IRenderPassLink* IN_MotionVectors;
+	std::vector<IRenderPassLink*> IN_Textures;
+	std::vector<std::unique_ptr<GDX12Texture>> OUT_UpscaledTextures;
 	ffxContext _FFXContext;
-	std::unique_ptr<GDX12Texture> OUT_UpscaledTexture;
 
 	void BuildFSRContext()
 	{
