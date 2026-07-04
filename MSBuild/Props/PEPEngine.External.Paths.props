@@ -12,6 +12,7 @@
     <PEPExternalDebugDrawerInclude Condition="'$(PEPExternalDebugDrawerInclude)'==''">$(PEPExternalRoot)debugdrawer\Include</PEPExternalDebugDrawerInclude>
     <PEPExternalFfxApiInclude Condition="'$(PEPExternalFfxApiInclude)'==''">$(PEPExternalRoot)ffx-api\Include</PEPExternalFfxApiInclude>
     <PEPExternalNvidiaSDKInclude Condition="'$(PEPExternalNvidiaSDKInclude)'==''">$(PEPExternalRoot)nvidia-sdk\Include</PEPExternalNvidiaSDKInclude>
+    <PEPExternalXeSSInclude Condition="'$(PEPExternalXeSSInclude)'==''">$(PEPExternalRoot)xess\Include</PEPExternalXeSSInclude>
     <PEPExternalDirectStorageInclude Condition="'$(PEPExternalDirectStorageInclude)'==''">$(PEPExternalRoot)directstorage\Include</PEPExternalDirectStorageInclude>
     <PEPExternalDirectXMeshInclude Condition="'$(PEPExternalDirectXMeshInclude)'==''">$(PEPExternalRoot)directxmesh\Include</PEPExternalDirectXMeshInclude>
     <PEPExternalWwiseInclude Condition="'$(PEPExternalWwiseInclude)'==''">$(PEPExternalRoot)wwise\Include</PEPExternalWwiseInclude>
