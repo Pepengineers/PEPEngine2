@@ -45,7 +45,7 @@ class GDX12RenderPass
 public:
     GDX12RenderPass() : _flags(RENDER_PASS_FLAG_NONE), _resources(nullptr), 
         _otherResources(nullptr), _commonData(nullptr), _numInputs(0), _numOutputs(0) {}
-
+    virtual ~GDX12RenderPass() = default;
     virtual void Setup(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData)
     {
         _resources = initOnResources;
