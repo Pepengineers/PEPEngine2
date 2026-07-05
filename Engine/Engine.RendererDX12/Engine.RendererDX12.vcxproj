@@ -52,6 +52,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Texture.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12UploadBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITCompositionPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp" />

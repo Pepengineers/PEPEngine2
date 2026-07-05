@@ -38,7 +38,7 @@ void RenderModule::Initialize()
     _primaryDevice->Role = DEVICE_ROLE_PRIMARY;
     _primaryResources.Initialize(_primaryDevice.get());
 
-    if (true)
+    if (false)
     {
         _secondaryDevice = std::make_unique<GDX12Device>();
         _secondaryDevice->Initialize(GDX12DeviceFactory::GetDeviceDescriptors()[1].Adapter.Get());
@@ -780,36 +780,28 @@ void RenderModule::ConfigureRenderPipeline()
     // Setup render passes you would like to execute
     // Add in execution order
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12BackBufferClearPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureCopyFromSharedMemoryPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
-
-    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
-    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
-    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
-    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
-    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureCopyToSharedMemoryPass>());
 
     SetupRenderPasses();
 
     // Link inputs & outputs for each pass that needs it
     GDX12RenderPass* clearPass = _primaryRenderPassExecutionList[0].get();
-    GDX12RenderPass* copyFromShared = _primaryRenderPassExecutionList[1].get();
-    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[2].get();
-
-    GDX12RenderPass* cullingPass = _secondaryRenderPassExecutionList[0].get();
-    GDX12RenderPass* opaquePass = _secondaryRenderPassExecutionList[1].get();
-    GDX12RenderPass* transparencyPass = _secondaryRenderPassExecutionList[2].get();
-    GDX12RenderPass* compositionPass = _secondaryRenderPassExecutionList[3].get();
-    GDX12RenderPass* copyToShared = _secondaryRenderPassExecutionList[4].get();
+    GDX12RenderPass* cullingPass = _primaryRenderPassExecutionList[1].get();
+    GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[2].get();
+    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[3].get();
+    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[4].get();
+    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[5].get();
 
     clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
     cullingPass->SetInputs({});
     opaquePass->SetInputs({});
     transparencyPass->SetInputs({ opaquePass->GetOutputs()[2] });
     compositionPass->SetInputs({ opaquePass->GetOutputs()[0], transparencyPass->GetOutputs()[0], transparencyPass->GetOutputs()[1] });
-    copyToShared->SetInputs({ compositionPass->GetOutputs()[0] });
-    copyFromShared->SetInputs({ copyToShared->GetOutputs()[0] });
-    outputPass->SetInputs({ copyFromShared->GetOutputs()[0], _backBuffer.get() });
+    outputPass->SetInputs({ compositionPass->GetOutputs()[0], _backBuffer.get() });
 
     InitializeRenderPasses();
 }
