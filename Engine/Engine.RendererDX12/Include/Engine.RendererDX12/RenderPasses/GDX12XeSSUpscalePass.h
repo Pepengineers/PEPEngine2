@@ -8,7 +8,7 @@
 class GDX12XeSSUpscalePass : public GDX12RenderPass
 {
 public:
-	GDX12XeSSUpscalePass() : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr)
+	GDX12XeSSUpscalePass() : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _XeSSContext(nullptr)
 	{ _flags = RENDER_PASS_FLAG_UPSCALER; }
 
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
@@ -50,6 +50,7 @@ public:
 		TextureDesc1.SRVDesc.Texture2D.PlaneSlice = 0;
 		TextureDesc1.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
 
+		IN_Textures.resize(_numInputs);
 		for (int i = 0; i < _numOutputs; i++)
 		{
 			IN_Textures[i] = _inputs[i + 2];
@@ -77,11 +78,39 @@ public:
 
 		cmdList->BeginPixEvent("XeSS Upscale Pass", Colors::Blue);
 
+		cmdList->ResourceBarrier({ depthStencil->GetResource()->GetNonPixelShaderResourceBarrier(),
+			motionVectors->GetResource()->GetNonPixelShaderResourceBarrier() });
+
+		xess_d3d12_execute_params_t execParams = {};
+		execParams.pDepthTexture = depthStencil->GetResource()->D3DResource.Get();
+		execParams.pVelocityTexture = motionVectors->GetResource()->D3DResource.Get();
+		execParams.jitterOffsetX = 0.f;
+		execParams.jitterOffsetY = 0.f;
+		execParams.inputWidth = _commonData->DownscaledWidth;
+		execParams.inputHeight = _commonData->DownscaledHeight;
+		execParams.resetHistory = false;
+
+		execParams.exposureScale = 1;
+		execParams.inputColorBase = { 0,0 };
+		execParams.inputDepthBase = { 0,0 };
+
 		for (int i = 0; i < _numOutputs; i++)
 		{
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
 			GDX12Texture* upscaledTexture = OUT_UpscaledTextures[i].get();
 
+			execParams.pColorTexture = inputTexture->GetResource()->D3DResource.Get();
+			execParams.pOutputTexture = upscaledTexture->GetResource()->D3DResource.Get();
+			
+			cmdList->ResourceBarrier({ inputTexture->GetResource()->GetNonPixelShaderResourceBarrier(),
+			upscaledTexture->GetResource()->GetUnorderedAccessBarrier() });
+
+			xess_result_t execResult = xessD3D12Execute(_XeSSContext, cmdList->GetCommandList().Get(), &execParams);
+			if (execResult != XESS_RESULT_SUCCESS)
+			{
+				std::string msg = "ERROR: XeSS execute failed: " + XeSSResultToString(execResult) + "\n";
+				OutputDebugStringA(msg.c_str());
+			}
 		}
 		cmdList->EndPixEvent();
 	}
@@ -89,19 +118,31 @@ public:
 	void Resize() override
 	{
 		for (auto& texture : OUT_UpscaledTextures) { texture->Resize(_commonData->WindowWidth, _commonData->WindowHeight); }
+		xessDestroyContext(_XeSSContext);
+		BuildXeSSContext();
 	}
 
 	void QueryRenderTargetResolution() override
 	{
 		xess_2d_t targetResolution = { _commonData->WindowWidth, _commonData->WindowHeight } ;
 		xess_2d_t downscaledResolution;
-		//xessGetOptimalInputResolution(_XeSSContext, &targetResolution, XeSSQualityMode, &downscaledResolution);
+		xess_2d_t minResolution;
+		xess_2d_t maxResolution;
+		xess_result_t queryResolutionResult = xessGetOptimalInputResolution(_XeSSContext, 
+			&targetResolution, XeSSQualityMode, &downscaledResolution, &minResolution, &maxResolution);
+		if (queryResolutionResult != XESS_RESULT_SUCCESS)
+		{
+			std::string msg = "ERROR: XeSS query resolution failed: " + XeSSResultToString(queryResolutionResult) + "\n";
+			OutputDebugStringA(msg.c_str());
+		}
+		_commonData->DownscaledWidth = downscaledResolution.x;
+		_commonData->DownscaledHeight = downscaledResolution.y;
 	}
 
 	void ClearDenendencies() override
 	{
 		GDX12RenderPass::ClearDenendencies();
-
+		xessDestroyContext(_XeSSContext);
 		IN_DepthBuffer = nullptr;
 		IN_MotionVectors = nullptr;
 		IN_Textures.clear();
@@ -130,6 +171,7 @@ private:
 		initParams.outputResolution.x = _commonData->WindowWidth;
 		initParams.outputResolution.y = _commonData->WindowHeight;
 		initParams.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH;
+		initParams.qualitySetting = XeSSQualityMode;
 
 		xess_result_t initResult = xessD3D12Init(_XeSSContext, &initParams);
 		if (initResult != XESS_RESULT_SUCCESS) 

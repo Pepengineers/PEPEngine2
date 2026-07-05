@@ -51,6 +51,7 @@ public:
 		TextureDesc1.SRVDesc.Texture2D.PlaneSlice = 0;
 		TextureDesc1.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
 
+		IN_Textures.resize(_numInputs);
 		for (int i = 0; i < _numOutputs; i++)
 		{
 			IN_Textures[i] = _inputs[i + 2];
@@ -86,8 +87,8 @@ public:
 		dispatchDesc.renderSize = { _commonData->DownscaledWidth, _commonData->DownscaledHeight };
 		dispatchDesc.motionVectorScale = { 1.f, 1.f };
 		dispatchDesc.upscaleSize = { _commonData->WindowWidth, _commonData->WindowHeight };
-		dispatchDesc.cameraNear = _commonData->ActiveCameraNearPlane;
-		dispatchDesc.cameraFar = _commonData->ActiveCameraFarPlane;
+		dispatchDesc.cameraNear = _commonData->ActiveCameraFarPlane;
+		dispatchDesc.cameraFar = _commonData->ActiveCameraNearPlane;
 		dispatchDesc.cameraFovAngleVertical = XMConvertToRadians(_commonData->ActiveCameraFOV);
 
 		dispatchDesc.jitterOffset.x = 0;

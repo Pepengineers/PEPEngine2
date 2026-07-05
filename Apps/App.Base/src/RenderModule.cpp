@@ -784,6 +784,7 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12XeSSUpscalePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
 
     SetupRenderPasses();
@@ -794,14 +795,22 @@ void RenderModule::ConfigureRenderPipeline()
     GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[2].get();
     GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[3].get();
     GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[4].get();
-    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[5].get();
+    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[5].get();
+    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[6].get();
+
+    _upscaler = upscalePass;
 
     clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
     cullingPass->SetInputs({});
     opaquePass->SetInputs({});
     transparencyPass->SetInputs({ opaquePass->GetOutputs()[2] });
     compositionPass->SetInputs({ opaquePass->GetOutputs()[0], transparencyPass->GetOutputs()[0], transparencyPass->GetOutputs()[1] });
-    outputPass->SetInputs({ compositionPass->GetOutputs()[0], _backBuffer.get() });
+    upscalePass->SetInputs({ opaquePass->GetOutputs()[2], opaquePass->GetOutputs()[1], compositionPass->GetOutputs()[0] });
+    outputPass->SetInputs({ upscalePass->GetOutputs()[0], _backBuffer.get()});
+
+    opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    transparencyPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    compositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 
     InitializeRenderPasses();
 }
