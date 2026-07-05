@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "Engine.Core/ECS/Entity.h"
 #include "AssetBrowserPanel.h"
 #include "HierarchyPanel.h"
 #include "InspectorPanel.h"

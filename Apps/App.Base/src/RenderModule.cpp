@@ -684,6 +684,14 @@ void RenderModule::OnRender()
     cmdList->GetCommandList()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     cmdList->GetCommandList()->DrawInstanced(3, 1, 0, 0);
     cmdList->EndPixEvent();
+
+    if (OnImguiRender)
+    {
+        cmdList->BeginPixEvent("ImGui Render Pass", Colors::White);
+        cmdList->SetRenderTargets({ CurrentBackBuffer }, nullptr);
+        OnImguiRender(cmdList, CurrentBackBuffer);
+        cmdList->EndPixEvent();
+    }
     
     cmdList->EnhancedTextureBarrier({ CurrentBackBuffer->GetResource()->GetPresentEnhBarrier() });
     cmdList->ResourceBarrier({ _depthStencil->GetResource()->GetCommonBarrier() });

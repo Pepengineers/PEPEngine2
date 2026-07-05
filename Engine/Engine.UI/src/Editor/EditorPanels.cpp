@@ -1,5 +1,5 @@
 ﻿#include <Engine.UI/Editor/EditorPanels.h>
-#include <App.Base/Entity.h>
+#include <Engine.Core/ECS/Entity.h>
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Engine.UI/EditorUI.h"
 #include "imgui/imgui.h"

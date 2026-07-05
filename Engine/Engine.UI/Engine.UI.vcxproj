@@ -27,275 +27,12 @@
     <ClInclude Include="Include\Engine.UI\UI_test.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="src\EditorUI.cpp">
-      <RuntimeLibrary>MultiThreadedDebugDll</RuntimeLibrary>
-      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
-      <Optimization>Disabled</Optimization>
-      <SupportJustMyCode>true</SupportJustMyCode>
-      <AssemblerOutput>NoListing</AssemblerOutput>
-      <AssemblerListingLocation>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</AssemblerListingLocation>
-      <UndefineAllPreprocessorDefinitions>false</UndefineAllPreprocessorDefinitions>
-      <BrowseInformation>false</BrowseInformation>
-      <BrowseInformationFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</BrowseInformationFile>
-      <CompileAs>Default</CompileAs>
-      <UseDynamicDebugging>false</UseDynamicDebugging>
-      <ConformanceMode>true</ConformanceMode>
-      <DiagnosticsFormat>Column</DiagnosticsFormat>
-      <DisableLanguageExtensions>false</DisableLanguageExtensions>
-      <ErrorReporting>Prompt</ErrorReporting>
-      <ExpandAttributedSource>false</ExpandAttributedSource>
-      <ExceptionHandling>Sync</ExceptionHandling>
-      <EnableASAN>false</EnableASAN>
-      <EnableFuzzer>false</EnableFuzzer>
-      <EnableFiberSafeOptimizations>false</EnableFiberSafeOptimizations>
-      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
-      <EnableVectorLength>NotSet</EnableVectorLength>
-      <FloatingPointModel>Precise</FloatingPointModel>
-      <ForceConformanceInForLoopScope>true</ForceConformanceInForLoopScope>
-      <GenerateModuleDependencies>false</GenerateModuleDependencies>
-      <GenerateSourceDependencies>false</GenerateSourceDependencies>
-      <GenerateXMLDocumentationFiles>false</GenerateXMLDocumentationFiles>
-      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
-      <IntrinsicFunctions>false</IntrinsicFunctions>
-      <IgnoreStandardIncludePath>false</IgnoreStandardIncludePath>
-      <LanguageStandard>stdcpp17</LanguageStandard>
-      <LanguageStandard_C>Default</LanguageStandard_C>
-      <MinimalRebuild>false</MinimalRebuild>
-      <ModuleDependenciesFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</ModuleDependenciesFile>
-      <ModuleOutputFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</ModuleOutputFile>
-      <OmitDefaultLibName>false</OmitDefaultLibName>
-      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
-      <WholeProgramOptimization>false</WholeProgramOptimization>
-      <ObjectFileName>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</ObjectFileName>
-      <CallingConvention>Cdecl</CallingConvention>
-      <ProgramDataBaseFileName>I:\Projects\Graphics Projects\PEPEngine2\Build\bin\x64\Debug\Engine.UI\Engine.UI.pdb</ProgramDataBaseFileName>
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderOutputFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\Engine.UI.pch</PrecompiledHeaderOutputFile>
-      <PreprocessToFile>false</PreprocessToFile>
-      <PreprocessKeepComments>false</PreprocessKeepComments>
-      <PreprocessSuppressLineNumbers>false</PreprocessSuppressLineNumbers>
-      <RemoveUnreferencedCodeData>true</RemoveUnreferencedCodeData>
-      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
-      <ShowIncludes>false</ShowIncludes>
-      <SourceDependenciesFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</SourceDependenciesFile>
-      <SuppressStartupBanner>true</SuppressStartupBanner>
-      <BufferSecurityCheck>true</BufferSecurityCheck>
-      <SmallerTypeCheck>false</SmallerTypeCheck>
-      <SpectreMitigation>false</SpectreMitigation>
-      <StructMemberAlignment>Default</StructMemberAlignment>
-      <TrackerLogDirectory>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\Engine.UI.tlog\</TrackerLogDirectory>
-      <TranslateIncludes>false</TranslateIncludes>
-      <MinimalRebuildFromTracking>true</MinimalRebuildFromTracking>
-      <TreatWarningAsError>false</TreatWarningAsError>
-      <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
-      <UseFullPaths>true</UseFullPaths>
-      <WarningLevel>Level3</WarningLevel>
-      <XMLDocumentationFileName>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</XMLDocumentationFileName>
-      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
-      <IntelJCCErratum>false</IntelJCCErratum>
-      <BuildStlModules>false</BuildStlModules>
-      <TreatAngleIncludeAsExternal>false</TreatAngleIncludeAsExternal>
-      <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
-      <TreatExternalTemplatesAsInternal>true</TreatExternalTemplatesAsInternal>
-      <DisableAnalyzeExternal>false</DisableAnalyzeExternal>
-      <PreprocessorDefinitions>_DEBUG;_LIB;
-          PEP_ENABLE_ASSET_DEBUG_LOGS=0;
-          SOLUTION_DIR=LR"(I:\Projects\Graphics Projects\PEPEngine2\)";
-          PROJECT_DIR=LR"(I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.UI\)";
-          ASSETS_FOLDER=LR"(I:\Projects\Graphics Projects\PEPEngine2\Assets\\)";
-          TEXTURES_FOLDER=LR"(I:\Projects\Graphics Projects\PEPEngine2\Assets\Textures\\)";
-          MODELS_FOLDER=LR"(I:\Projects\Graphics Projects\PEPEngine2\Assets\Models\\)";
-          SHADERS_FOLDER=LR"(I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.RendererDX12\Shaders\\)";
-          _UNICODE;UNICODE;
-      </PreprocessorDefinitions>
-      <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalIncludeDirectories>I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\imgui\Include;I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.UI\Include;I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.RendererDX12\Include;I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.Core\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\wwise\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\wwise\Include\wwise;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directxmesh\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directstorage\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\ffx-api\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\debugdrawer\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directxtex\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directx-headers\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directxtk\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\assimp\Include;</AdditionalIncludeDirectories>
-      <SDLCheck>true</SDLCheck>
-      <LibCompiled>true</LibCompiled>
-    </ClCompile>
-    <ClCompile Include="src\Editor\AssetBrowserPanel.cpp">
-      <RuntimeLibrary>MultiThreadedDebugDll</RuntimeLibrary>
-      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
-      <Optimization>Disabled</Optimization>
-      <SupportJustMyCode>true</SupportJustMyCode>
-      <AssemblerOutput>NoListing</AssemblerOutput>
-      <AssemblerListingLocation>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</AssemblerListingLocation>
-      <UndefineAllPreprocessorDefinitions>false</UndefineAllPreprocessorDefinitions>
-      <BrowseInformation>false</BrowseInformation>
-      <BrowseInformationFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</BrowseInformationFile>
-      <CompileAs>Default</CompileAs>
-      <UseDynamicDebugging>false</UseDynamicDebugging>
-      <ConformanceMode>true</ConformanceMode>
-      <DiagnosticsFormat>Column</DiagnosticsFormat>
-      <DisableLanguageExtensions>false</DisableLanguageExtensions>
-      <ErrorReporting>Prompt</ErrorReporting>
-      <ExpandAttributedSource>false</ExpandAttributedSource>
-      <ExceptionHandling>Sync</ExceptionHandling>
-      <EnableASAN>false</EnableASAN>
-      <EnableFuzzer>false</EnableFuzzer>
-      <EnableFiberSafeOptimizations>false</EnableFiberSafeOptimizations>
-      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
-      <EnableVectorLength>NotSet</EnableVectorLength>
-      <FloatingPointModel>Precise</FloatingPointModel>
-      <ForceConformanceInForLoopScope>true</ForceConformanceInForLoopScope>
-      <GenerateModuleDependencies>false</GenerateModuleDependencies>
-      <GenerateSourceDependencies>false</GenerateSourceDependencies>
-      <GenerateXMLDocumentationFiles>false</GenerateXMLDocumentationFiles>
-      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
-      <IntrinsicFunctions>false</IntrinsicFunctions>
-      <IgnoreStandardIncludePath>false</IgnoreStandardIncludePath>
-      <LanguageStandard>stdcpp17</LanguageStandard>
-      <LanguageStandard_C>Default</LanguageStandard_C>
-      <MinimalRebuild>false</MinimalRebuild>
-      <ModuleDependenciesFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</ModuleDependenciesFile>
-      <ModuleOutputFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</ModuleOutputFile>
-      <OmitDefaultLibName>false</OmitDefaultLibName>
-      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
-      <WholeProgramOptimization>false</WholeProgramOptimization>
-      <ObjectFileName>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</ObjectFileName>
-      <CallingConvention>Cdecl</CallingConvention>
-      <ProgramDataBaseFileName>I:\Projects\Graphics Projects\PEPEngine2\Build\bin\x64\Debug\Engine.UI\Engine.UI.pdb</ProgramDataBaseFileName>
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderOutputFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\Engine.UI.pch</PrecompiledHeaderOutputFile>
-      <PreprocessToFile>false</PreprocessToFile>
-      <PreprocessKeepComments>false</PreprocessKeepComments>
-      <PreprocessSuppressLineNumbers>false</PreprocessSuppressLineNumbers>
-      <RemoveUnreferencedCodeData>true</RemoveUnreferencedCodeData>
-      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
-      <ShowIncludes>false</ShowIncludes>
-      <SourceDependenciesFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</SourceDependenciesFile>
-      <SuppressStartupBanner>true</SuppressStartupBanner>
-      <BufferSecurityCheck>true</BufferSecurityCheck>
-      <SmallerTypeCheck>false</SmallerTypeCheck>
-      <SpectreMitigation>false</SpectreMitigation>
-      <StructMemberAlignment>Default</StructMemberAlignment>
-      <TrackerLogDirectory>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\Engine.UI.tlog\</TrackerLogDirectory>
-      <TranslateIncludes>false</TranslateIncludes>
-      <MinimalRebuildFromTracking>true</MinimalRebuildFromTracking>
-      <TreatWarningAsError>false</TreatWarningAsError>
-      <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
-      <UseFullPaths>true</UseFullPaths>
-      <WarningLevel>Level3</WarningLevel>
-      <XMLDocumentationFileName>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</XMLDocumentationFileName>
-      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
-      <IntelJCCErratum>false</IntelJCCErratum>
-      <BuildStlModules>false</BuildStlModules>
-      <TreatAngleIncludeAsExternal>false</TreatAngleIncludeAsExternal>
-      <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
-      <TreatExternalTemplatesAsInternal>true</TreatExternalTemplatesAsInternal>
-      <DisableAnalyzeExternal>false</DisableAnalyzeExternal>
-      <PreprocessorDefinitions>_DEBUG;_LIB;
-          PEP_ENABLE_ASSET_DEBUG_LOGS=0;
-          SOLUTION_DIR=LR"(I:\Projects\Graphics Projects\PEPEngine2\)";
-          PROJECT_DIR=LR"(I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.UI\)";
-          ASSETS_FOLDER=LR"(I:\Projects\Graphics Projects\PEPEngine2\Assets\\)";
-          TEXTURES_FOLDER=LR"(I:\Projects\Graphics Projects\PEPEngine2\Assets\Textures\\)";
-          MODELS_FOLDER=LR"(I:\Projects\Graphics Projects\PEPEngine2\Assets\Models\\)";
-          SHADERS_FOLDER=LR"(I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.RendererDX12\Shaders\\)";
-          _UNICODE;UNICODE;
-      </PreprocessorDefinitions>
-      <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalIncludeDirectories>I:\Projects\Graphics Projects\PEPEngine2\Apps\App.Base\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\imgui\Include;I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.UI\Include;I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.RendererDX12\Include;I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.Core\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\wwise\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\wwise\Include\wwise;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directxmesh\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directstorage\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\ffx-api\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\debugdrawer\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directxtex\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directx-headers\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directxtk\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\assimp\Include;</AdditionalIncludeDirectories>
-      <SDLCheck>true</SDLCheck>
-      <LibCompiled>true</LibCompiled>
-    </ClCompile>
+    <ClCompile Include="src\EditorUI.cpp" />
+    <ClCompile Include="src\Editor\AssetBrowserPanel.cpp" />
     <ClCompile Include="src\Editor\EditorPanels.cpp" />
-    <ClCompile Include="src\Editor\InspectorPanel.cpp">
-      <RuntimeLibrary>MultiThreadedDebugDll</RuntimeLibrary>
-      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
-      <Optimization>Disabled</Optimization>
-      <SupportJustMyCode>true</SupportJustMyCode>
-      <AssemblerOutput>NoListing</AssemblerOutput>
-      <AssemblerListingLocation>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</AssemblerListingLocation>
-      <UndefineAllPreprocessorDefinitions>false</UndefineAllPreprocessorDefinitions>
-      <BrowseInformation>false</BrowseInformation>
-      <BrowseInformationFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</BrowseInformationFile>
-      <CompileAs>Default</CompileAs>
-      <UseDynamicDebugging>false</UseDynamicDebugging>
-      <ConformanceMode>true</ConformanceMode>
-      <DiagnosticsFormat>Column</DiagnosticsFormat>
-      <DisableLanguageExtensions>false</DisableLanguageExtensions>
-      <ErrorReporting>Prompt</ErrorReporting>
-      <ExpandAttributedSource>false</ExpandAttributedSource>
-      <ExceptionHandling>Sync</ExceptionHandling>
-      <EnableASAN>false</EnableASAN>
-      <EnableFuzzer>false</EnableFuzzer>
-      <EnableFiberSafeOptimizations>false</EnableFiberSafeOptimizations>
-      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
-      <EnableVectorLength>NotSet</EnableVectorLength>
-      <FloatingPointModel>Precise</FloatingPointModel>
-      <ForceConformanceInForLoopScope>true</ForceConformanceInForLoopScope>
-      <GenerateModuleDependencies>false</GenerateModuleDependencies>
-      <GenerateSourceDependencies>false</GenerateSourceDependencies>
-      <GenerateXMLDocumentationFiles>false</GenerateXMLDocumentationFiles>
-      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
-      <IntrinsicFunctions>false</IntrinsicFunctions>
-      <IgnoreStandardIncludePath>false</IgnoreStandardIncludePath>
-      <LanguageStandard>stdcpp17</LanguageStandard>
-      <LanguageStandard_C>Default</LanguageStandard_C>
-      <MinimalRebuild>false</MinimalRebuild>
-      <ModuleDependenciesFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</ModuleDependenciesFile>
-      <ModuleOutputFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</ModuleOutputFile>
-      <OmitDefaultLibName>false</OmitDefaultLibName>
-      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
-      <WholeProgramOptimization>false</WholeProgramOptimization>
-      <ObjectFileName>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</ObjectFileName>
-      <CallingConvention>Cdecl</CallingConvention>
-      <ProgramDataBaseFileName>I:\Projects\Graphics Projects\PEPEngine2\Build\bin\x64\Debug\Engine.UI\Engine.UI.pdb</ProgramDataBaseFileName>
-      <PrecompiledHeader>NotUsing</PrecompiledHeader>
-      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
-      <PrecompiledHeaderOutputFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\Engine.UI.pch</PrecompiledHeaderOutputFile>
-      <PreprocessToFile>false</PreprocessToFile>
-      <PreprocessKeepComments>false</PreprocessKeepComments>
-      <PreprocessSuppressLineNumbers>false</PreprocessSuppressLineNumbers>
-      <RemoveUnreferencedCodeData>true</RemoveUnreferencedCodeData>
-      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
-      <ShowIncludes>false</ShowIncludes>
-      <SourceDependenciesFile>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</SourceDependenciesFile>
-      <SuppressStartupBanner>true</SuppressStartupBanner>
-      <BufferSecurityCheck>true</BufferSecurityCheck>
-      <SmallerTypeCheck>false</SmallerTypeCheck>
-      <SpectreMitigation>false</SpectreMitigation>
-      <StructMemberAlignment>Default</StructMemberAlignment>
-      <TrackerLogDirectory>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\Engine.UI.tlog\</TrackerLogDirectory>
-      <TranslateIncludes>false</TranslateIncludes>
-      <MinimalRebuildFromTracking>true</MinimalRebuildFromTracking>
-      <TreatWarningAsError>false</TreatWarningAsError>
-      <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
-      <UseFullPaths>true</UseFullPaths>
-      <WarningLevel>Level3</WarningLevel>
-      <XMLDocumentationFileName>I:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\Engine.UI\</XMLDocumentationFileName>
-      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
-      <IntelJCCErratum>false</IntelJCCErratum>
-      <BuildStlModules>false</BuildStlModules>
-      <TreatAngleIncludeAsExternal>false</TreatAngleIncludeAsExternal>
-      <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
-      <TreatExternalTemplatesAsInternal>true</TreatExternalTemplatesAsInternal>
-      <DisableAnalyzeExternal>false</DisableAnalyzeExternal>
-      <PreprocessorDefinitions>_DEBUG;_LIB;
-          PEP_ENABLE_ASSET_DEBUG_LOGS=0;
-          SOLUTION_DIR=LR"(I:\Projects\Graphics Projects\PEPEngine2\)";
-          PROJECT_DIR=LR"(I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.UI\)";
-          ASSETS_FOLDER=LR"(I:\Projects\Graphics Projects\PEPEngine2\Assets\\)";
-          TEXTURES_FOLDER=LR"(I:\Projects\Graphics Projects\PEPEngine2\Assets\Textures\\)";
-          MODELS_FOLDER=LR"(I:\Projects\Graphics Projects\PEPEngine2\Assets\Models\\)";
-          SHADERS_FOLDER=LR"(I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.RendererDX12\Shaders\\)";
-          _UNICODE;UNICODE;
-      </PreprocessorDefinitions>
-      <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <AdditionalIncludeDirectories>I:\Projects\Graphics Projects\PEPEngine2\Apps\App.Base\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\imguizmo\src;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\imgui\Include;I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.UI\Include;I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.RendererDX12\Include;I:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.Core\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\wwise\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\wwise\Include\wwise;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directxmesh\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directstorage\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\ffx-api\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\debugdrawer\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directxtex\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directx-headers\Include;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\imguizmo\src;I:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\assimp\Include;</AdditionalIncludeDirectories>
-      <SDLCheck>true</SDLCheck>
-      <LibCompiled>true</LibCompiled>
-    </ClCompile>
+    <ClCompile Include="src\Editor\HierarchyPanel.cpp" />
+    <ClCompile Include="src\Editor\InspectorPanel.cpp" />
     <ClCompile Include="src\UI_test.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\..\Apps\App.Base\App.Base.vcxproj">
-      <Project>{748beb74-a374-45cc-bd7d-7456dfd9ad83}</Project>
-      <Name>App.Base</Name>
-    </ProjectReference>
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
@@ -308,26 +45,26 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v145</PlatformToolset>
+    <PlatformToolset>v143</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -399,6 +136,7 @@
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(PEPRepoRoot)Apps\App.Base\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
@@ -417,6 +155,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(PEPRepoRoot)Apps\App.Base\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <ConformanceMode>true</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>

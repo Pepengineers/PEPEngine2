@@ -5,7 +5,7 @@
 
     <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
         <ClCompile>
-            <AdditionalIncludeDirectories>$(PEPExternalImGuizmoInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+            <AdditionalIncludeDirectories>$(PEPExternalDirectXTKInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
         </ClCompile>
     </ItemDefinitionGroup>
 </Project>

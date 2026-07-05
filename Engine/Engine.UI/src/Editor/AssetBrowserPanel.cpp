@@ -1,5 +1,10 @@
 ﻿#include "Engine.UI/Editor/AssetBrowserPanel.h"
 
+#include <algorithm>
+#include <string>
+#include <system_error>
+#include <vector>
+
 #include "imgui/imgui.h"
 
 namespace Engine::UI
@@ -177,9 +182,12 @@ namespace Engine::UI
 
         for (const auto& dir : dirs)
         {
-            ImGui::PushID(dir.path().filename().c_str());
+            const std::string folderName = dir.path().filename().string();
+            const std::string folderLabel = "[Folder]\n" + folderName;
 
-            if (ImGui::Button(("[Folder]\n" + dir.path().filename()).c_str(), thumbSize))
+            ImGui::PushID(folderName.c_str());
+
+            if (ImGui::Button(folderLabel.c_str(), ImVec2(thumbSize, thumbSize)))
             {
                 _currentDirectory = dir.path();
             }
@@ -190,7 +198,10 @@ namespace Engine::UI
 
         for (const auto& file : files)
         {
-            ImGui::PushID(file.path().c_str());
+            const std::string fileId = file.path().string();
+            const std::string fileName = file.path().filename().string();
+
+            ImGui::PushID(fileId.c_str());
 
             const bool isSelected = (file.path() == _selectedPath);
             if (isSelected)
@@ -198,7 +209,7 @@ namespace Engine::UI
                 ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyle().Colors[ImGuiCol_ButtonActive]);
             }
 
-            if (ImGui::Button(file.path().filename().string().c_str(), thumbSize))
+            if (ImGui::Button(fileName.c_str(), ImVec2(thumbSize, thumbSize)))
             {
                 _selectedPath = file.path();
             }
