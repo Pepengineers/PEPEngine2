@@ -25,6 +25,11 @@ public:
         ecs.ForEach<TransformComponent, CameraComponent>(
             [&ecs, &renderModule, &numFrames](Entity entity, TransformComponent& transform, CameraComponent& camera)
             {
+                // Active camera requires constant update due to jittering
+                auto pipelineCommonData = renderModule->GetRenderPipelineCommonData();
+                bool isActiveCamera = pipelineCommonData->ActiveCameraCBufferIndex == camera._CBufferIndex;
+                if (isActiveCamera) { camera.DirtyFlag = true; }
+
                 if (camera.DirtyFlag || transform.DirtyFlag)
                 {
                     camera.DirtyFlag = false;
@@ -33,6 +38,8 @@ public:
 
                 if (camera._numFramesDirty > 0)
                 {
+                    GDX12CameraConstants objConstants;
+
                     Vector3 CameraLocation = transform.Location;
                     Vector3 CameraRotation = transform.Rotation;
                     float FOV = DirectX::XMConvertToRadians(camera.FOV);
@@ -49,22 +56,50 @@ public:
                     Matrix view = Matrix::CreateLookAt(CameraLocation, CameraTarget, Vector3::Up);
 
                     //reserved-Z proj matrix
-                    Matrix proj = Matrix::CreatePerspectiveFieldOfView(FOV, renderModule->GetAspectRatio(), 
+                    Matrix proj = Matrix::CreatePerspectiveFieldOfView(FOV, renderModule->GetAspectRatio(),
                         camera.NearPlane, camera.FarPlane);
                     const float range = camera.NearPlane / (camera.FarPlane - camera.NearPlane);
                     proj._33 = range;
                     proj._43 = range * camera.FarPlane;
 
+                    Matrix unjitteredViewProj = view * proj;
+
+                    XMStoreFloat4x4(&objConstants.ViewProjNoJitter, XMMatrixTranspose(unjitteredViewProj));
+                    objConstants.PrevViewProjNoJitter = camera.PrevViewProjNoJitter;
+                    XMStoreFloat4x4(&camera.PrevViewProjNoJitter, XMMatrixTranspose(unjitteredViewProj));
+
+
+                    pipelineCommonData->CameraViewToClip = unjitteredViewProj;
+                    pipelineCommonData->ClipToCameraView = pipelineCommonData->CameraViewToClip.Invert();
+
+                    pipelineCommonData->ClipToPrevClip = unjitteredViewProj.Invert() * camera.PrevViewProjNoJitter;
+                    pipelineCommonData->PrevClipToClip = pipelineCommonData->ClipToPrevClip.Invert();
+
+                    // Jitter current camera proj matrix if it is needed
+                    if (isActiveCamera &&
+                        ((renderModule->GetPrimaryPipelineFlags() & RENDER_PASS_FLAG_USE_JITTER) ||
+                            (renderModule->GetSecondaryPipelineFlags() & RENDER_PASS_FLAG_USE_JITTER)))
+                    {
+                        static uint32_t frameIndex = 0;
+                        frameIndex++;
+
+                        float jitterX = HaltonSequence(frameIndex, 2) - 0.5f;
+                        float jitterY = HaltonSequence(frameIndex, 3) - 0.5f;
+                        float inputWidth = static_cast<float>(pipelineCommonData->DownscaledWidth);
+                        float inputHeight = static_cast<float>(pipelineCommonData->DownscaledHeight);
+                        proj._31 += jitterX * 2.0f / inputWidth;
+                        proj._32 -= jitterY * 2.0f / inputHeight;
+                        pipelineCommonData->ActiveCameraJitterOffsetX = jitterX;
+                        pipelineCommonData->ActiveCameraJitterOffsetY = jitterY;
+                    }
+
                     camera.ViewProj = view * proj;
 
-                    GDX12CameraConstants objConstants;
                     XMStoreFloat4x4(&objConstants.ViewProj, XMMatrixTranspose(view * proj));
                     XMStoreFloat4x4(&objConstants.View, XMMatrixTranspose(view));
                     objConstants.CameraLocation = transform.Location;
                     objConstants.NearPlane = camera.NearPlane;
                     objConstants.FarPlane = camera.FarPlane;
-                    objConstants.PrevViewProj = camera.PrevViewProj;
-                    XMStoreFloat4x4(&camera.PrevViewProj, XMMatrixTranspose(view * proj));
 
                     if (renderModule->GetPrimaryPipelineFlags() & RENDER_PASS_FLAG_USE_CAMERAS)
                     {
@@ -227,4 +262,20 @@ public:
             });
 
     }
+
+private:
+        static float HaltonSequence(uint32_t index, uint32_t base)
+        {
+            float f = 1.0f;
+            float result = 0.0f;
+
+            while (index > 0)
+            {
+                f /= static_cast<float>(base);
+                result += f * static_cast<float>(index % base);
+                index = static_cast<uint32_t>(floorf(static_cast<float>(index) / static_cast<float>(base)));
+            }
+
+            return result;
+        }
 };

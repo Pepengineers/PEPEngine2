@@ -35,8 +35,9 @@ struct Material
 struct CameraCB
 {
     float4x4 ViewProj;
+    float4x4 ViewProjNoJitter;
     float4x4 View;
-    float4x4 PrevViewProj;
+    float4x4 PrevViewProjNoJitter;
     float3 CameraLocation;
     float NearPlane;
     float FarPlane;

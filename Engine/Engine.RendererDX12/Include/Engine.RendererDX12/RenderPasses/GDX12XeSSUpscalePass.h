@@ -8,8 +8,9 @@
 class GDX12XeSSUpscalePass : public GDX12RenderPass
 {
 public:
-	GDX12XeSSUpscalePass() : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _XeSSContext(nullptr)
-	{ _flags = RENDER_PASS_FLAG_UPSCALER; }
+	GDX12XeSSUpscalePass() : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _XeSSContext(nullptr),
+		_XeSSQualityMode(XESS_QUALITY_SETTING_QUALITY)
+	{ _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_JITTER; }
 
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
 	{
@@ -34,6 +35,8 @@ public:
 	// Output N - UpscaledTexture
 	void Initialize() override
 	{
+		_commonData->Upscaler = this;
+
 		IN_DepthBuffer = _inputs[0];
 		IN_MotionVectors = _inputs[1];
 
@@ -83,8 +86,8 @@ public:
 		xess_d3d12_execute_params_t execParams = {};
 		execParams.pDepthTexture = depthStencil->GetResource()->D3DResource.Get();
 		execParams.pVelocityTexture = motionVectors->GetResource()->D3DResource.Get();
-		execParams.jitterOffsetX = 0.f;
-		execParams.jitterOffsetY = 0.f;
+		execParams.jitterOffsetX = _commonData->ActiveCameraJitterOffsetX;
+		execParams.jitterOffsetY = _commonData->ActiveCameraJitterOffsetY;
 		execParams.inputWidth = _commonData->DownscaledWidth;
 		execParams.inputHeight = _commonData->DownscaledHeight;
 		execParams.resetHistory = false;
@@ -128,7 +131,7 @@ public:
 		xess_2d_t minResolution;
 		xess_2d_t maxResolution;
 		xess_result_t queryResolutionResult = xessGetOptimalInputResolution(_XeSSContext, 
-			&targetResolution, XeSSQualityMode, &downscaledResolution, &minResolution, &maxResolution);
+			&targetResolution, _XeSSQualityMode, &downscaledResolution, &minResolution, &maxResolution);
 		if (queryResolutionResult != XESS_RESULT_SUCCESS)
 		{
 			std::string msg = "ERROR: XeSS query resolution failed: " + XeSSResultToString(queryResolutionResult) + "\n";
@@ -148,14 +151,13 @@ public:
 		OUT_UpscaledTextures.clear();
 	}
 
-	xess_quality_settings_t XeSSQualityMode = XESS_QUALITY_SETTING_QUALITY;
-
 private:
 	IRenderPassLink* IN_DepthBuffer;
 	IRenderPassLink* IN_MotionVectors;
 	std::vector<IRenderPassLink*> IN_Textures;
 	std::vector<std::unique_ptr<GDX12Texture>> OUT_UpscaledTextures;
 	xess_context_handle_t _XeSSContext;
+	xess_quality_settings_t _XeSSQualityMode;
 
 	void BuildXeSSContext()
 	{
@@ -170,7 +172,7 @@ private:
 		initParams.outputResolution.x = _commonData->WindowWidth;
 		initParams.outputResolution.y = _commonData->WindowHeight;
 		initParams.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH;
-		initParams.qualitySetting = XeSSQualityMode;
+		initParams.qualitySetting = _XeSSQualityMode;
 
 		xess_result_t initResult = xessD3D12Init(_XeSSContext, &initParams);
 		if (initResult != XESS_RESULT_SUCCESS) 

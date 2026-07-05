@@ -9,8 +9,9 @@
 class GDX12FSRUpscalePass : public GDX12RenderPass
 {
 public:
-	GDX12FSRUpscalePass() : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _FFXContext(nullptr)
-	{ _flags = RENDER_PASS_FLAG_UPSCALER; }
+	GDX12FSRUpscalePass() : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _FFXContext(nullptr),
+		_FSRQualityMode(FFX_UPSCALE_QUALITY_MODE_QUALITY)
+	{ _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_JITTER; }
 
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
 	{
@@ -35,6 +36,8 @@ public:
 	// Output N - UpscaledTexture
 	void Initialize() override
 	{
+		_commonData->Upscaler = this;
+
 		IN_DepthBuffer = _inputs[0];
 		IN_MotionVectors = _inputs[1];
 
@@ -91,8 +94,8 @@ public:
 		dispatchDesc.cameraFar = _commonData->ActiveCameraNearPlane;
 		dispatchDesc.cameraFovAngleVertical = XMConvertToRadians(_commonData->ActiveCameraFOV);
 
-		dispatchDesc.jitterOffset.x = 0;
-		dispatchDesc.jitterOffset.y = 0;
+		dispatchDesc.jitterOffset.x = _commonData->ActiveCameraJitterOffsetX;
+		dispatchDesc.jitterOffset.y = _commonData->ActiveCameraJitterOffsetY;
 
 		dispatchDesc.enableSharpening = false;
 		dispatchDesc.sharpness = 0.8f;
@@ -139,13 +142,11 @@ public:
 		queryDesc.header.type = FFX_API_QUERY_DESC_TYPE_UPSCALE_GETRENDERRESOLUTIONFROMQUALITYMODE;
 		queryDesc.displayHeight = _commonData->WindowHeight;
 		queryDesc.displayWidth = _commonData->WindowWidth;
-		queryDesc.qualityMode = FSRQualityMode;
+		queryDesc.qualityMode = _FSRQualityMode;
 		queryDesc.pOutRenderHeight = &_commonData->DownscaledHeight;
 		queryDesc.pOutRenderWidth = &_commonData->DownscaledWidth;
 		ffxQuery(&_FFXContext, &queryDesc.header);
 	}
-
-	FfxApiUpscaleQualityMode FSRQualityMode = FFX_UPSCALE_QUALITY_MODE_QUALITY;
 
 	void ClearDenendencies() override
 	{
@@ -164,6 +165,7 @@ private:
 	std::vector<IRenderPassLink*> IN_Textures;
 	std::vector<std::unique_ptr<GDX12Texture>> OUT_UpscaledTextures;
 	ffxContext _FFXContext;
+	FfxApiUpscaleQualityMode _FSRQualityMode;
 
 	void BuildFSRContext()
 	{

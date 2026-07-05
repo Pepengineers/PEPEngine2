@@ -10,13 +10,13 @@ struct CameraComponent : ComponentTag
     float NearPlane;
     float FarPlane;
     XMFLOAT4X4 ViewProj;
-    XMFLOAT4X4 PrevViewProj;
+    XMFLOAT4X4 PrevViewProjNoJitter;
 
     bool DirtyFlag;
 
     CameraComponent()
         : DirtyFlag(true), _numFramesDirty(0), _CBufferIndex(0), 
-        FOV(60.0f), NearPlane(0.1f), FarPlane(10000.f), ViewProj(Identity4x4()), PrevViewProj(Identity4x4())
+        FOV(60.0f), NearPlane(0.1f), FarPlane(10000.f), ViewProj(Identity4x4()), PrevViewProjNoJitter(Identity4x4())
     {
     }
 

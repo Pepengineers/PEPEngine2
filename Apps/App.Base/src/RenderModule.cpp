@@ -8,7 +8,7 @@
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
     _dualGPUMode(false), _window(window), _timer(timer),
-    _primaryPipelineFlags(0), _secondaryPipelineFlags(0), _upscaler(nullptr)
+    _primaryPipelineFlags(0), _secondaryPipelineFlags(0)
 {
     _RPcommonData.GameTimer = _timer;
 }
@@ -71,7 +71,7 @@ void RenderModule::OnResize()
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
-    if (_upscaler) { _upscaler->QueryRenderTargetResolution(); }
+    if (_RPcommonData.Upscaler) { _RPcommonData.Upscaler->QueryRenderTargetResolution(); }
 
     for (auto& renderPass : _primaryRenderPassExecutionList) { renderPass->Resize(); }
     for (auto& renderPass : _secondaryRenderPassExecutionList) { renderPass->Resize(); }
@@ -480,6 +480,11 @@ uint32_t RenderModule::GetSecondaryPipelineFlags()
     return _secondaryPipelineFlags;
 }
 
+RenderPipelineCommonData* RenderModule::GetRenderPipelineCommonData()
+{
+    return &_RPcommonData;
+}
+
 void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
 {
     TransformCompGPUData gpuData;
@@ -797,8 +802,6 @@ void RenderModule::ConfigureRenderPipeline()
     GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[4].get();
     GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[5].get();
     GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[6].get();
-
-    _upscaler = upscalePass;
 
     clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
     cullingPass->SetInputs({});

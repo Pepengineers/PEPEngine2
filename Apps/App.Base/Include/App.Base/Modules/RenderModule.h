@@ -111,6 +111,7 @@ public:
 
     uint32_t GetPrimaryPipelineFlags();
     uint32_t GetSecondaryPipelineFlags();
+    RenderPipelineCommonData* GetRenderPipelineCommonData();
 
 protected:
     void OnUpdate() override;
@@ -154,9 +155,6 @@ private:
     // These two resources are made on _primaryDevice only
     std::unique_ptr<GDX12SwapChain> _backBuffer;
     std::unique_ptr<GDX12Texture> _depthStencil;
-
-    // To be able to know where to get render target resolution when resizing
-    GDX12RenderPass* _upscaler;
     
     // Sorted in execution order
     std::vector<std::unique_ptr<GDX12RenderPass>> _primaryRenderPassExecutionList;

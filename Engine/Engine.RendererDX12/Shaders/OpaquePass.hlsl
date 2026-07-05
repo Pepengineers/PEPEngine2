@@ -27,8 +27,9 @@ struct VS_INPUT
 struct VS_OUTPUT_PS_INPUT
 {
     float4 PosCS : SV_POSITION;
-    float4 PrevPosCS : TEXCOORD2;
+    float4 PrevPosCSNoJitter : TEXCOORD2;
     float3 PosW : POSITION;
+    float4 PosCSNoJitter : POSITION2;
     float2 TexC : TEXCOORD;
     float3 Normal : NORMAL;
     float3 Tangent : TANGENT;
@@ -50,8 +51,9 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
     vout.Tangent = normalize(mul(vin.Tangent, (float3x3) transform.World));
     vout.PosCS = mul(posW, CBCamera.ViewProj);
     
+    vout.PosCSNoJitter = mul(posW, CBCamera.ViewProjNoJitter);
     float4 prevPosW = mul(float4(vin.Pos, 1.0f), transform.PrevWorld);
-    vout.PrevPosCS = mul(prevPosW, CBCamera.PrevViewProj);
+    vout.PrevPosCSNoJitter = mul(prevPosW, CBCamera.PrevViewProjNoJitter);
     
     vout.TexC = vin.TexC;
     vout.MaterialIndex = instance.MaterialIndex;
@@ -72,8 +74,8 @@ PS_OUTPUT PS(VS_OUTPUT_PS_INPUT pin)
     Material material = MaterialCache[pin.MaterialIndex];
     float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
     
-    float2 currentNDC = pin.PosCS.xy / pin.PosCS.w;
-    float2 prevNDC = pin.PrevPosCS.xy / pin.PrevPosCS.w;
+    float2 currentNDC = pin.PosCSNoJitter.xy / pin.PosCSNoJitter.w;
+    float2 prevNDC = pin.PrevPosCSNoJitter.xy / pin.PrevPosCSNoJitter.w;
     float2 velocity = currentNDC - prevNDC;
 
     output.Color = float4(color.rgb, 1.0f);

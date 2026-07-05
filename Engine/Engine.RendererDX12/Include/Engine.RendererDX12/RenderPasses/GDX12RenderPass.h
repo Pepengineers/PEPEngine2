@@ -13,20 +13,6 @@
 
 class GameTimer;
 
-class RenderPipelineCommonData
-{
-public:
-    UINT ActiveCameraCBufferIndex = -1;
-    float ActiveCameraFOV = 0;
-    float ActiveCameraNearPlane = 0;
-    float ActiveCameraFarPlane = 0;
-    GameTimer* GameTimer = nullptr;
-    UINT WindowWidth = 0;
-    UINT WindowHeight = 0;
-    UINT DownscaledWidth = 0;
-    UINT DownscaledHeight = 0;
-};
-
 enum ERenderPassFlags : uint32_t
 {
     RENDER_PASS_FLAG_NONE = 0,
@@ -37,8 +23,11 @@ enum ERenderPassFlags : uint32_t
     RENDER_PASS_FLAG_USE_INSTANCES = 1 << 4,
     RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION = 1 << 5,
     RENDER_PASS_FLAG_UPSCALER = 1 << 6,
-    RENDER_PASS_FLAG_SYNC_DEVICES = 1 << 7
+    RENDER_PASS_FLAG_SYNC_DEVICES = 1 << 7,
+    RENDER_PASS_FLAG_USE_JITTER = 1 << 8
 };
+
+class RenderPipelineCommonData;
 
 class GDX12RenderPass
 {
@@ -110,4 +99,25 @@ protected:
     std::vector<IRenderPassLink*> _outputs;
     UINT _numInputs;
     UINT _numOutputs;
+};
+
+class RenderPipelineCommonData
+{
+public:
+    UINT ActiveCameraCBufferIndex = -1;
+    float ActiveCameraFOV = 0;
+    float ActiveCameraNearPlane = 0;
+    float ActiveCameraFarPlane = 0;
+    float ActiveCameraJitterOffsetX = 0;
+    float ActiveCameraJitterOffsetY = 0;
+    Matrix CameraViewToClip = Identity4x4();
+    Matrix ClipToCameraView = Identity4x4();
+    Matrix ClipToPrevClip = Identity4x4();
+    Matrix PrevClipToClip = Identity4x4();
+    GameTimer* GameTimer = nullptr;
+    UINT WindowWidth = 0;
+    UINT WindowHeight = 0;
+    UINT DownscaledWidth = 0;
+    UINT DownscaledHeight = 0;
+    GDX12RenderPass* Upscaler = nullptr;
 };
