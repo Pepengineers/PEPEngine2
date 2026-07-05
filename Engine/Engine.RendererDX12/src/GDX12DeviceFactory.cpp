@@ -2,30 +2,17 @@
 
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
-#include "Engine.RendererDX12/GDX12Streamline.h"
 
 ComPtr<IDXGIFactory7> GDX12DeviceFactory::_dxgiFactory = nullptr;
-ComPtr<IDXGIFactory7> GDX12DeviceFactory::_dxgiFactoryProxy = nullptr;
 bool GDX12DeviceFactory::_isInitialized = false;
 
 HRESULT GDX12DeviceFactory::Initialize()
 {
-    if (_isInitialized)
-    {
-        if (!_dxgiFactoryProxy && GDX12Streamline::Get().IsEnabled())
-        {
-            _dxgiFactoryProxy = GDX12Streamline::Get().CreateProxyFactory(_dxgiFactory);
-        }
-        return S_OK;
-    }
+    if (_isInitialized) { return S_OK; }
 
     HRESULT hr = CreateDXGIFactory2(D3D12_DEVICE_FACTORY_FLAG_ALLOW_RETURNING_EXISTING_DEVICE, IID_PPV_ARGS(&_dxgiFactory));
 
-    if (SUCCEEDED(hr))
-    {
-        _dxgiFactoryProxy = GDX12Streamline::Get().CreateProxyFactory(_dxgiFactory);
-        _isInitialized = true;
-    }
+    if (SUCCEEDED(hr)) { _isInitialized = true; }
     return hr;
 }
 
@@ -37,7 +24,6 @@ const ComPtr<IDXGIFactory7>& GDX12DeviceFactory::GetFactory()
 
 void GDX12DeviceFactory::Reset()
 {
-    _dxgiFactoryProxy.Reset();
     _dxgiFactory.Reset();
     _isInitialized = false;
 }
@@ -102,10 +88,9 @@ ComPtr<IDXGIAdapter4> GDX12DeviceFactory::GetMostPerformantAdapter()
 ComPtr<IDXGISwapChain4> GDX12DeviceFactory::CreateSwapChain(GDX12Device* device, DXGI_SWAP_CHAIN_DESC1& desc, HWND hwnd)
 {
     ComPtr<IDXGISwapChain4> swapChain4;
-    const ComPtr<IDXGIFactory7>& factory = _dxgiFactoryProxy ? _dxgiFactoryProxy : _dxgiFactory;
 
     ComPtr<IDXGISwapChain1> swapChain1;
-    ThrowIfFailed(factory->CreateSwapChainForHwnd(device->GetCommandQueue()->GetPresentCommandQueue().Get(),
+    ThrowIfFailed(_dxgiFactory->CreateSwapChainForHwnd(device->GetCommandQueue()->GetCommandQueue().Get(),
         hwnd, &desc, nullptr, nullptr, &swapChain1));
 
     ThrowIfFailed(swapChain1.As(&swapChain4));

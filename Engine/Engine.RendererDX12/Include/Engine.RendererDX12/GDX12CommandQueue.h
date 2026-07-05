@@ -14,7 +14,6 @@ public:
 	void Reset();
 
 	const ComPtr<ID3D12CommandQueue>& GetCommandQueue();
-    const ComPtr<ID3D12CommandQueue>& GetPresentCommandQueue();
 	const ComPtr<ID3D12Fence>& GetFence();
 	ComPtr<ID3D12Fence>& GetOtherFence();
 
@@ -39,7 +38,6 @@ private:
 	void ClearCompletedLists();
 
 	ComPtr<ID3D12CommandQueue> _commandQueue;
-    ComPtr<ID3D12CommandQueue> _proxyCommandQueue;
 	ComPtr<ID3D12Fence> _fence;
 	//shared fence from another device
 	//null if _dualGPUMode is false

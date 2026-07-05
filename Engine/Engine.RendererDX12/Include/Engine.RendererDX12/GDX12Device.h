@@ -31,7 +31,6 @@ public:
 	void Reset();
 
 	const ComPtr<ID3D12Device14>& GetDevice();
-    const ComPtr<ID3D12Device14>& GetCommandQueueCreationDevice();
 	GDX12CommandQueue* GetCommandQueue();
 	const DeviceSpecs& GetDeviceFeatures();
 	const bool IsInitialized();
@@ -42,7 +41,6 @@ private:
 
 	ComPtr<IDXGIAdapter4> _adapter;
 	ComPtr<ID3D12Device14> _device;
-    ComPtr<ID3D12Device14> _proxyDevice;
 
 	std::unique_ptr<GDX12CommandQueue> _commandQueue;
 

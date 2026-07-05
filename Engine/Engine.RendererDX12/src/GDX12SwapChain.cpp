@@ -4,7 +4,6 @@
 #include <Engine.RendererDX12/GDX12Device.h>
 #include <Engine.RendererDX12/GDX12Texture.h>
 #include <Engine.RendererDX12/GDX12DescriptorHeap.h>
-#include <Engine.RendererDX12/GDX12Streamline.h>
 
 GDX12SwapChain::GDX12SwapChain(GDX12Device* device, HWND hwnd,
     DXGI_FORMAT format, UINT bufferCount, UINT width, UINT height, GDX12DescriptorHeap* rtvHeap)
@@ -28,11 +27,9 @@ GDX12SwapChain::GDX12SwapChain(GDX12Device* device, HWND hwnd,
     swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
     swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
-    _proxySwapChain = GDX12DeviceFactory::CreateSwapChain(_device, swapChainDesc, _hwnd);
-    _swapChain = GDX12Streamline::Get().GetNativeSwapChain(_proxySwapChain);
+    _swapChain = GDX12DeviceFactory::CreateSwapChain(_device, swapChainDesc, _hwnd);
 
     CreateBuffers();
-    _currentBufferIndex = GetPresentationSwapChain()->GetCurrentBackBufferIndex();
 
     _screenViewport.TopLeftX = 0;
     _screenViewport.TopLeftY = 0;
@@ -57,8 +54,7 @@ void GDX12SwapChain::CreateBuffers()
     for (UINT i = 0; i < _bufferCount; i++)
     {
         ComPtr<ID3D12Resource> backBuffer;
-        GetPresentationSwapChain()->GetBuffer(i, IID_PPV_ARGS(&backBuffer));
-        backBuffer = GDX12Streamline::Get().GetNativeResource(backBuffer);
+       _swapChain->GetBuffer(i, IID_PPV_ARGS(&backBuffer));
 
         GDX12TextureDesc textureDesc;
         textureDesc.RTVHeap = _rtvHeap;
@@ -92,14 +88,14 @@ void GDX12SwapChain::Resize(UINT width, UINT height)
     _buffers.clear();
 
     DXGI_SWAP_CHAIN_DESC desc;
-    GetPresentationSwapChain()->GetDesc(&desc);
+    _swapChain->GetDesc(&desc);
 
-    GetPresentationSwapChain()->ResizeBuffers(
+    _swapChain->ResizeBuffers(
         _bufferCount, _width, _height,
         desc.BufferDesc.Format, desc.Flags);
 
     CreateBuffers();
-    _currentBufferIndex = GetPresentationSwapChain()->GetCurrentBackBufferIndex();
+    _currentBufferIndex = _swapChain->GetCurrentBackBufferIndex();
 
     _screenViewport.TopLeftX = 0;
     _screenViewport.TopLeftY = 0;
@@ -115,8 +111,8 @@ void GDX12SwapChain::Present()
 {
     UINT syncInterval = bVSyncEnabled ? 1 : 0;
     UINT presentFlags = bVSyncEnabled ? 0 : DXGI_PRESENT_ALLOW_TEARING;
-    GetPresentationSwapChain()->Present(syncInterval, presentFlags);
-    _currentBufferIndex = GetPresentationSwapChain()->GetCurrentBackBufferIndex();
+    _swapChain->Present(syncInterval, presentFlags);
+    _currentBufferIndex = (_currentBufferIndex + 1) % _bufferCount;
 }
 
 D3D12_VIEWPORT GDX12SwapChain::GetViewport()
@@ -178,12 +174,6 @@ const ComPtr<IDXGISwapChain4>& GDX12SwapChain::GetSwapChain()
 void GDX12SwapChain::Reset()
 {
     _buffers.clear();
-    _proxySwapChain.Reset();
     _swapChain.Reset();
     _currentBufferIndex = 0;
-}
-
-IDXGISwapChain4* GDX12SwapChain::GetPresentationSwapChain() const
-{
-    return (_proxySwapChain ? _proxySwapChain : _swapChain).Get();
 }
