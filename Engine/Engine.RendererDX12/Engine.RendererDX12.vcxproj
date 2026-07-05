@@ -26,6 +26,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Material.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12SharedTexture.h" />
     <ClInclude Include="Include\Engine.RendererDX12\IRenderPassLink.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DLSSUpscalePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FSRUpscalePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OpaquePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OutputToScreenPass.h" />

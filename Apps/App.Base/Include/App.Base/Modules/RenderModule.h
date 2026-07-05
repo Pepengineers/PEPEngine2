@@ -16,7 +16,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12FSRUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12SyncPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12XeSSUpscalePass.h"
-
+#include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
 

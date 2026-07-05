@@ -116,8 +116,7 @@ private:
         heapDesc.Flags = D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER;
 
         ThrowIfFailed(_transferFromDeivce->GetDevice()->CreateHeap(
-            &heapDesc, IID_PPV_ARGS(&_sharedHeap)),
-            "Failed to create shared heap for cross-adapter texture");
+            &heapDesc, IID_PPV_ARGS(&_sharedHeap)));
     }
 
     void CreatePlacedResources()
@@ -145,7 +144,7 @@ private:
         HANDLE heapHandle = nullptr;
         ThrowIfFailed(_transferFromDeivce->GetDevice()->CreateSharedHandle(
             _sharedHeap.Get(), nullptr, GENERIC_ALL, nullptr,
-            &heapHandle), "Failed to create shared handle for heap");
+            &heapHandle));
 
         if (!heapHandle) throw std::runtime_error("Failed to create shared handle (handle is null)");
 
@@ -155,7 +154,7 @@ private:
             IID_PPV_ARGS(&sharedHeapOnSecondary));
 
         CloseHandle(heapHandle);
-        ThrowIfFailed(hr, "Failed to open shared heap handle on secondary device");
+        ThrowIfFailed(hr);
 
         D3D12_RESOURCE_DESC desc = {};
         desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -172,7 +171,6 @@ private:
 
         ThrowIfFailed(_transferToDevice->GetDevice()->CreatePlacedResource(
             sharedHeapOnSecondary.Get(), 0, &desc, D3D12_RESOURCE_STATE_COMMON,
-            nullptr, IID_PPV_ARGS(&_sharedTextureSecondary.D3DResource)),
-            "Failed to create placed resource on secondary device");
+            nullptr, IID_PPV_ARGS(&_sharedTextureSecondary.D3DResource)));
     }
 };

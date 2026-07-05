@@ -63,7 +63,6 @@ public:
 
 	}
 
-	// Init with window size
 	void Setup(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData) override
 	{
 		GDX12RenderPass::Setup(initOnResources, otherResources, commonData);
@@ -87,6 +86,7 @@ public:
 		dispatchDesc.renderSize = { _commonData->DownscaledWidth, _commonData->DownscaledHeight };
 		dispatchDesc.motionVectorScale = { 1.f, 1.f };
 		dispatchDesc.upscaleSize = { _commonData->WindowWidth, _commonData->WindowHeight };
+		// We use inverted depth, this is not a mistake
 		dispatchDesc.cameraNear = _commonData->ActiveCameraFarPlane;
 		dispatchDesc.cameraFar = _commonData->ActiveCameraNearPlane;
 		dispatchDesc.cameraFovAngleVertical = XMConvertToRadians(_commonData->ActiveCameraFOV);

@@ -62,7 +62,6 @@ public:
 
 	}
 
-	// Init with window size
 	void Setup(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData) override
 	{
 		GDX12RenderPass::Setup(initOnResources, otherResources, commonData);

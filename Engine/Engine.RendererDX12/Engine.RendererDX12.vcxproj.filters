@@ -117,6 +117,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DLSSUpscalePass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp">
