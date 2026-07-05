@@ -1,8 +1,14 @@
 ﻿#include "Engine.UI/Editor/InspectorPanel.h"
 
-#include "imgui/imgui.h"
+#include <cstring>
 
-struct NameComponent;
+#include "App.Base/ECS/Components/NameComponent.h"
+#include "App.Base/ECS/Components/StaticMeshRenderComponent.h"
+#include "App.Base/ECS/Components/TransformComponent.h"
+#include "App.Base/ECS/World.h"
+
+#include "imgui/imgui.h"
+#include <ImGuizmo.h>
 
 namespace Engine::UI
 {
@@ -91,7 +97,7 @@ namespace Engine::UI
         ImGui::End();
     }
 
-    void InspectorPanel::DrawGizmo(World* world, __resharper_unknown_type selectedEntity, const float* viewMatrix, const float* projectionMatrix, float viewportX, float viewportY, float viewportWidth, float viewportHeight)
+    void InspectorPanel::DrawGizmo(World* world, Entity selectedEntity, const float* viewMatrix, const float* projectionMatrix, float viewportX, float viewportY, float viewportWidth, float viewportHeight)
     {
         _isUsingGizmo = false;
 
@@ -140,14 +146,14 @@ namespace Engine::UI
                                                         projectionMatrix,
                                                         operation,
                                                         ImGuizmo::WORLD,
-                                                        &worldMatrix);
+                                                        &worldMatrix._11);
 
         _isUsingGizmo = ImGuizmo::IsUsing();
 
         if (manipulated)
         {
             float translation[3], rotation[3], scale[3];
-            ImGuizmo::DecomposeMatrixToComponents(&worldMatrix, translation, rotation, scale);
+            ImGuizmo::DecomposeMatrixToComponents(&worldMatrix._11, translation, rotation, scale);
 
             transformComponent.Location = Vector3(translation[0], translation[1], translation[2]);
             transformComponent.Rotation = Vector3(rotation[0], rotation[1], rotation[2]);

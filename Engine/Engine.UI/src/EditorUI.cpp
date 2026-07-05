@@ -104,6 +104,8 @@ namespace Engine::UI
         ImGui::SetNextWindowSize(viewport->WorkSize);
         ImGui::SetNextWindowViewport(viewport->ID);
 
+        constexpr ImGuiDockNodeFlags dockFlags = ImGuiDockNodeFlags_PassthruCentralNode;
+
         ImGuiWindowFlags hostFlags = ImGuiWindowFlags_NoDocking
                                         | ImGuiWindowFlags_NoTitleBar
                                         | ImGuiWindowFlags_NoResize
@@ -113,15 +115,20 @@ namespace Engine::UI
                                         | ImGuiWindowFlags_NoNavFocus
                                         | ImGuiWindowFlags_MenuBar;
 
+        if (dockFlags & ImGuiDockNodeFlags_PassthruCentralNode)
+        {
+            hostFlags |= ImGuiWindowFlags_NoBackground;
+        }
+
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
         ImGui::Begin("EditorDockspace", nullptr, hostFlags);
         ImGui::PopStyleVar(3);
 
         ImGuiID dockID = ImGui::GetID("EditorDockspace");
-        ImGui::DockSpace(dockID, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None);
+        ImGui::DockSpace(dockID, ImVec2(0.0f, 0.0f), dockFlags);
     }
 
     void EndDockspace()
@@ -132,6 +139,8 @@ namespace Engine::UI
     void Render(GDX12CommandList* cmdList, GDX12Texture* backBuffer)
     {
         ImGui::Render();
+
+        cmdList->SetRenderTargets({ backBuffer }, nullptr);
 
         ID3D12DescriptorHeap* heaps[] = {_srvHeap->GetHeap().Get()};
         cmdList->GetCommandList()->SetDescriptorHeaps(1, heaps);

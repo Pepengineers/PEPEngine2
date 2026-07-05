@@ -3,7 +3,7 @@
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.Paths.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.Paths.props')" />
   <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(PEPExternalImGuiInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(PEPExternalImGuiInclude);$(PEPExternalImGuiInclude)\imgui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
 </Project>

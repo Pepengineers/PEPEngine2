@@ -1,8 +1,9 @@
 ﻿#pragma once
 #include <cstdint>
 
+#include "Engine.Core/ECS/Entity.h"
+
 class World;
-class Entity;
 
 namespace Engine::UI
 {
