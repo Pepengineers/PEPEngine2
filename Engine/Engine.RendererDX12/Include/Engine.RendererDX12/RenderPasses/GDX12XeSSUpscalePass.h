@@ -95,7 +95,7 @@ public:
 	{
 		xess_2d_t targetResolution = { _commonData->WindowWidth, _commonData->WindowHeight } ;
 		xess_2d_t downscaledResolution;
-		xessGetOptimalInputResolution(_XeSSContext, &targetResolution, XeSSQualityMode, &downscaledResolution);
+		//xessGetOptimalInputResolution(_XeSSContext, &targetResolution, XeSSQualityMode, &downscaledResolution);
 	}
 
 	void ClearDenendencies() override
