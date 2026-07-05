@@ -1,6 +1,7 @@
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 
 #include "Engine.RendererDX12/GDX12CommandList.h"
+#include "Engine.RendererDX12/GDX12Streamline.h"
 
 GDX12CommandQueue::GDX12CommandQueue(GDX12Device* device)
     : FenceValue(0),  _device(device),  _lastDispatchedFenceValue(0)
@@ -11,13 +12,15 @@ GDX12CommandQueue::GDX12CommandQueue(GDX12Device* device)
     desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
     desc.NodeMask = 0;
 
-    ThrowIfFailed(device->GetDevice()->CreateCommandQueue(&desc, IID_PPV_ARGS(&_commandQueue)));
+    ThrowIfFailed(device->GetCommandQueueCreationDevice()->CreateCommandQueue(&desc, IID_PPV_ARGS(&_proxyCommandQueue)));
+    _commandQueue = GDX12Streamline::Get().GetNativeCommandQueue(_proxyCommandQueue);
     ThrowIfFailed(device->GetDevice()->CreateFence(FenceValue, 
         D3D12_FENCE_FLAG_SHARED | D3D12_FENCE_FLAG_SHARED_CROSS_ADAPTER, IID_PPV_ARGS(&_fence)));
 }
 
 void GDX12CommandQueue::Reset()
 {
+    _proxyCommandQueue.Reset();
     _commandQueue.Reset();
     _fence.Reset();
     _workingCommandLists.clear();
@@ -33,6 +36,11 @@ GDX12CommandQueue::~GDX12CommandQueue()
 const ComPtr<ID3D12CommandQueue>& GDX12CommandQueue::GetCommandQueue()
 {
     return _commandQueue;
+}
+
+const ComPtr<ID3D12CommandQueue>& GDX12CommandQueue::GetPresentCommandQueue()
+{
+    return _proxyCommandQueue ? _proxyCommandQueue : _commandQueue;
 }
 
 GDX12CommandList* GDX12CommandQueue::GetCommandList()

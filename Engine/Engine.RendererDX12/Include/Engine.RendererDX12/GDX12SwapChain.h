@@ -36,9 +36,11 @@ public:
 
 private:
     void CreateBuffers();
+    IDXGISwapChain4* GetPresentationSwapChain() const;
 
     GDX12Device* _device;
     ComPtr<IDXGISwapChain4> _swapChain;
+    ComPtr<IDXGISwapChain4> _proxySwapChain;
     GDX12DescriptorHeap* _rtvHeap;
 
     DXGI_FORMAT _format;

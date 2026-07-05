@@ -1,6 +1,7 @@
 #include "Engine.RendererDX12/GDX12Device.h"
 
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
+#include "Engine.RendererDX12/GDX12Streamline.h"
 
 GDX12Device::GDX12Device() :
     _isInitialized(false),
@@ -42,6 +43,8 @@ HRESULT GDX12Device::Initialize(ComPtr<IDXGIAdapter4> adapter)
 
     CollectDeviceFeatures();
 
+    _proxyDevice = GDX12Streamline::Get().CreateProxyDevice(_device, Role == DEVICE_ROLE_PRIMARY);
+
     _commandQueue = std::make_unique<GDX12CommandQueue>(this);
 
     _isInitialized = true;
@@ -68,6 +71,7 @@ void GDX12Device::CollectDeviceFeatures()
 
 void GDX12Device::Reset()
 {
+    _proxyDevice.Reset();
     _device.Reset();
     _adapter.Reset();
     _commandQueue.reset();
@@ -77,6 +81,11 @@ void GDX12Device::Reset()
 const ComPtr<ID3D12Device14>& GDX12Device::GetDevice()
 {
     return _device;
+}
+
+const ComPtr<ID3D12Device14>& GDX12Device::GetCommandQueueCreationDevice()
+{
+    return _proxyDevice ? _proxyDevice : _device;
 }
 
 GDX12CommandQueue* GDX12Device::GetCommandQueue()
