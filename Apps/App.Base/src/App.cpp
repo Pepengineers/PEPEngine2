@@ -67,6 +67,8 @@ App::~App()
     //ordering is important
     Locator.UnregisterModule<SceneManagerModule>();
     Locator.UnregisterModule<RenderModule>();
+    // can't be put into RenderModule since it is required 
+    // to call it after all module entities are destroyed
     GDX12StreamlineSDK::Get().Shutdown();
 }
 

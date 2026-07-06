@@ -27,6 +27,7 @@ RenderModule::~RenderModule()
 
 void RenderModule::Initialize()
 {
+    // Streamline is initialized on the primary device only
     GDX12StreamlineSDK::Get().Initialize();
 
 #if defined(DEBUG) || defined(_DEBUG)
@@ -700,10 +701,7 @@ void RenderModule::OnRender()
             primarycmdQueue->WaitForOtherFence(primarycmdList->FenceValue);
             primarycmdList = primarycmdQueue->GetCommandList();
         }
-        else
-        {
-            renderPass->Execute(primarycmdList);
-        }
+        else { renderPass->Execute(primarycmdList); }
     }
     primarycmdQueue->ExecuteCommandList(primarycmdList);
     primaryCurrentFrameConsts->FenceValue = primarycmdList->FenceValue;
@@ -721,10 +719,7 @@ void RenderModule::OnRender()
                 secondarycmdQueue->WaitForOtherFence(secondarycmdList->FenceValue);
                 secondarycmdList = secondarycmdQueue->GetCommandList();
             }
-            else
-            {
-                renderPass->Execute(secondarycmdList);
-            }
+            else { renderPass->Execute(secondarycmdList); }
         }
         secondarycmdQueue->ExecuteCommandList(secondarycmdList);
         secondaryCurrentFrameConsts->FenceValue = secondarycmdList->FenceValue;
