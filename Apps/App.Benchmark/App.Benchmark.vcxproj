@@ -114,12 +114,14 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.UI.lib;App.Base.lib;External.Libraries.lib;dxcompiler.lib;dxil.lib;WinPixEventRuntime.lib;assimp-vc143-mtd.lib;DirectXTK12.lib;DirectXTex.lib;amd_fidelityfx_dx12.lib;libxess.lib;sl.interposer.lib;dstorage.lib;DirectXMesh.lib;AkSoundEngine.lib;AkMemoryMgr.lib;AkStreamMgr.lib;CommunicationCentral.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.UI.lib;App.Base.lib;External.Libraries.lib;dxcompiler.lib;dxil.lib;WinPixEventRuntime.lib;assimp-vc143-mtd.lib;DirectXTK12.lib;DirectXTex.lib;amd_fidelityfx_dx12.lib;libxess.lib;dstorage.lib;DirectXMesh.lib;AkSoundEngine.lib;AkMemoryMgr.lib;AkStreamMgr.lib;CommunicationCentral.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OptimizeReferences>false</OptimizeReferences>
       <AdditionalLibraryDirectories>$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.UI\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\App.Base\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\External.Libraries\;$(PEPRepoRoot)External\External.Libraries\dxc\lib\$(Platform)\;$(PEPRepoRoot)External\External.Libraries\pix\lib\;$(PEPRepoRoot)External\External.Libraries\assimp\lib\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtk\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtex\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\ffx-api\lib\;$(PEPRepoRoot)External\External.Libraries\xess\lib\;$(PEPRepoRoot)External\External.Libraries\directstorage\lib\;$(PEPRepoRoot)External\External.Libraries\directxmesh\lib\;$(PEPRepoRoot)External\External.Libraries\wwise\lib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy /Y /D "$(PEPRepoRoot)External\Runtime\*.dll" "$(TargetDir)"</Command>
+      <Command>xcopy /Y /D "$(PEPRepoRoot)External\Runtime\*.dll" "$(TargetDir)"
+if exist "$(PEPRepoRoot)External\Runtime\sl*.dll" xcopy /Y "$(PEPRepoRoot)External\Runtime\sl*.dll" "$(TargetDir)"
+if exist "$(PEPRepoRoot)External\Runtime\nvngx*.dll" xcopy /Y "$(PEPRepoRoot)External\Runtime\nvngx*.dll" "$(TargetDir)"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -136,10 +138,12 @@
   <SubSystem>Windows</SubSystem>
   <GenerateDebugInformation>true</GenerateDebugInformation>
   <AdditionalLibraryDirectories>$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.UI\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\App.Base\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\External.Libraries\;$(PEPRepoRoot)External\External.Libraries\dxc\lib\$(Platform)\;$(PEPRepoRoot)External\External.Libraries\pix\lib\;$(PEPRepoRoot)External\External.Libraries\assimp\lib\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtk\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtex\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\ffx-api\lib\;$(PEPRepoRoot)External\External.Libraries\xess\lib\;$(PEPRepoRoot)External\External.Libraries\directstorage\lib\;$(PEPRepoRoot)External\External.Libraries\directxmesh\lib\;$(PEPRepoRoot)External\External.Libraries\wwise\lib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-  <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.UI.lib;App.Base.lib;External.Libraries.lib;dxcompiler.lib;dxil.lib;WinPixEventRuntime.lib;assimp-vc143-mt.lib;DirectXTK12.lib;DirectXTex.lib;amd_fidelityfx_dx12.lib;libxess.lib;sl.interposer.lib;DirectXMesh.lib;AkSoundEngine.lib;AkMemoryMgr.lib;AkStreamMgr.lib;CommunicationCentral.lib;%(AdditionalDependencies)</AdditionalDependencies>
+  <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.UI.lib;App.Base.lib;External.Libraries.lib;dxcompiler.lib;dxil.lib;WinPixEventRuntime.lib;assimp-vc143-mt.lib;DirectXTK12.lib;DirectXTex.lib;amd_fidelityfx_dx12.lib;libxess.lib;DirectXMesh.lib;AkSoundEngine.lib;AkMemoryMgr.lib;AkStreamMgr.lib;CommunicationCentral.lib;%(AdditionalDependencies)</AdditionalDependencies>
 </Link>
 <PostBuildEvent>
-  <Command>xcopy /Y /D "$(PEPRepoRoot)External\Runtime\*.dll" "$(TargetDir)"</Command>
+  <Command>xcopy /Y /D "$(PEPRepoRoot)External\Runtime\*.dll" "$(TargetDir)"
+if exist "$(PEPRepoRoot)External\Runtime\sl*.dll" xcopy /Y "$(PEPRepoRoot)External\Runtime\sl*.dll" "$(TargetDir)"
+if exist "$(PEPRepoRoot)External\Runtime\nvngx*.dll" xcopy /Y "$(PEPRepoRoot)External\Runtime\nvngx*.dll" "$(TargetDir)"</Command>
 </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>

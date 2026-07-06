@@ -25,6 +25,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GeometryBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Material.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12SharedTexture.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12StreamlineSDK.h" />
     <ClInclude Include="Include\Engine.RendererDX12\IRenderPassLink.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DLSSUpscalePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FSRUpscalePass.h" />
@@ -61,6 +62,7 @@
     <ClCompile Include="src\GDX12GeometryBuffer.cpp" />
     <ClCompile Include="src\GDX12Resource.cpp" />
     <ClCompile Include="src\GDX12SwapChain.cpp" />
+    <ClCompile Include="src\GDX12StreamlineSDK.cpp" />
     <ClCompile Include="src\GDX12CommandList.cpp" />
     <ClCompile Include="src\GDX12CommandQueue.cpp" />
     <ClCompile Include="src\GDX12Descriptor.cpp" />

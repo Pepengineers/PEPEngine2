@@ -5,6 +5,7 @@
 
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
     _dualGPUMode(false), _window(window), _timer(timer),
@@ -21,11 +22,14 @@ RenderModule::~RenderModule()
     for (auto& renderpass : _primaryRenderPassExecutionList) { renderpass->ClearDenendencies(); }
     for (auto& renderpass : _secondaryRenderPassExecutionList) { renderpass->ClearDenendencies(); }
 
+    GDX12StreamlineSDK::Get().Shutdown();
     GDX12ShaderCompiler::Shutdown();
 }
 
 void RenderModule::Initialize()
 {
+    GDX12StreamlineSDK::Get().Initialize();
+
 #if defined(DEBUG) || defined(_DEBUG)
     // Enable the D3D12 debug layer.
     ComPtr<ID3D12Debug> debugController;
@@ -34,15 +38,15 @@ void RenderModule::Initialize()
 #endif
 
     _primaryDevice = std::make_unique<GDX12Device>();
-    _primaryDevice->Initialize(GDX12DeviceFactory::GetMostPerformantAdapter().Get());
     _primaryDevice->Role = DEVICE_ROLE_PRIMARY;
+    _primaryDevice->Initialize(GDX12DeviceFactory::GetMostPerformantAdapter().Get());
     _primaryResources.Initialize(_primaryDevice.get());
 
     if (false)
     {
         _secondaryDevice = std::make_unique<GDX12Device>();
-        _secondaryDevice->Initialize(GDX12DeviceFactory::GetDeviceDescriptors()[1].Adapter.Get());
         _secondaryDevice->Role = DEVICE_ROLE_SECONDARY;
+        _secondaryDevice->Initialize(GDX12DeviceFactory::GetDeviceDescriptors()[1].Adapter.Get());
         _secondaryResources.Initialize(_secondaryDevice.get());
         _dualGPUMode = true;
     }
@@ -789,7 +793,7 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12FSRUpscalePass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DLSSUpscalePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
 
     SetupRenderPasses();

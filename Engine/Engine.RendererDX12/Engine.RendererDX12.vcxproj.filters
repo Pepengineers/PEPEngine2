@@ -102,6 +102,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12SharedTexture.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12StreamlineSDK.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureCopyFromSharedMemoryPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -153,6 +156,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\GDX12SwapChain.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GDX12StreamlineSDK.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\GDX12FrameConstants.cpp">
