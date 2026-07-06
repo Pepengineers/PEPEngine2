@@ -78,6 +78,7 @@ void GDX12StreamlineSDK::Shutdown()
     _slUpgradeInterface = nullptr;
     _slGetNativeInterface = nullptr;
     _slSetD3DDevice = nullptr;
+    _slIsFeatureSupported = nullptr;
     _slGetFeatureFunction = nullptr;
     _slEvaluateFeature = nullptr;
     _slFreeResources = nullptr;
@@ -109,9 +110,7 @@ ComPtr<IDXGIFactory7> GDX12StreamlineSDK::CreateProxyFactory(const ComPtr<IDXGIF
 {
     const ComPtr<IDXGIFactory7> resolvedNativeFactory = UnwrapInterface(nativeFactory);
     if (resolvedNativeFactory && resolvedNativeFactory.Get() != nativeFactory.Get())
-    {
-        return nativeFactory;
-    }
+    { return nativeFactory; }
 
     return UpgradeInterface(nativeFactory, "slUpgradeInterface(IDXGIFactory7)");
 }
@@ -172,53 +171,33 @@ ComPtr<ID3D12Resource> GDX12StreamlineSDK::GetNativeResource(const ComPtr<ID3D12
     return UnwrapInterface(resource);
 }
 
+sl::Result GDX12StreamlineSDK::IsFeatureSupported(sl::Feature feature, const sl::AdapterInfo& adapterInfo) const
+{
+    return _slIsFeatureSupported(feature, adapterInfo);
+}
+
 sl::Result GDX12StreamlineSDK::GetNewFrameToken(sl::FrameToken*& token, const uint32_t* frameIndex) const
 {
-    if (!_initialized || !_slGetNewFrameToken)
-    {
-        return sl::Result::eErrorInvalidState;
-    }
-
     return _slGetNewFrameToken(token, frameIndex);
 }
 
 sl::Result GDX12StreamlineSDK::SetTagForFrame(const sl::FrameToken& frame, const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer) const
 {
-    if (!_initialized || !_slSetTagForFrame)
-    {
-        return sl::Result::eErrorInvalidState;
-    }
-
     return _slSetTagForFrame(frame, viewport, tags, numTags, cmdBuffer);
 }
 
 sl::Result GDX12StreamlineSDK::EvaluateFeature(sl::Feature feature, const sl::FrameToken& frame, const sl::BaseStructure** inputs, uint32_t numInputs, sl::CommandBuffer* cmdBuffer) const
 {
-    if (!_initialized || !_slEvaluateFeature)
-    {
-        return sl::Result::eErrorInvalidState;
-    }
-
     return _slEvaluateFeature(feature, frame, inputs, numInputs, cmdBuffer);
 }
 
 sl::Result GDX12StreamlineSDK::FreeResources(sl::Feature feature, const sl::ViewportHandle& viewport) const
 {
-    if (!_initialized || !_slFreeResources)
-    {
-        return sl::Result::eErrorInvalidState;
-    }
-
     return _slFreeResources(feature, viewport);
 }
 
 sl::Result GDX12StreamlineSDK::SetConstants(const sl::Constants& values, const sl::FrameToken& frame, const sl::ViewportHandle& viewport) const
 {
-    if (!_initialized || !_slSetConstants)
-    {
-        return sl::Result::eErrorInvalidState;
-    }
-
     return _slSetConstants(values, frame, viewport);
 }
 
@@ -279,6 +258,7 @@ void GDX12StreamlineSDK::LoadFunctions()
     _slUpgradeInterface = reinterpret_cast<PFun_slUpgradeInterface*>(GetProcAddress(_interposerModule, "slUpgradeInterface"));
     _slGetNativeInterface = reinterpret_cast<PFun_slGetNativeInterface*>(GetProcAddress(_interposerModule, "slGetNativeInterface"));
     _slSetD3DDevice = reinterpret_cast<PFun_slSetD3DDevice*>(GetProcAddress(_interposerModule, "slSetD3DDevice"));
+    _slIsFeatureSupported = reinterpret_cast<PFun_slIsFeatureSupported*>(GetProcAddress(_interposerModule, "slIsFeatureSupported"));
     _slGetFeatureFunction = reinterpret_cast<PFun_slGetFeatureFunction*>(GetProcAddress(_interposerModule, "slGetFeatureFunction"));
     _slEvaluateFeature = reinterpret_cast<PFun_slEvaluateFeature*>(GetProcAddress(_interposerModule, "slEvaluateFeature"));
     _slFreeResources = reinterpret_cast<PFun_slFreeResources*>(GetProcAddress(_interposerModule, "slFreeResources"));
@@ -287,6 +267,7 @@ void GDX12StreamlineSDK::LoadFunctions()
     _slGetNewFrameToken = reinterpret_cast<PFun_slGetNewFrameToken*>(GetProcAddress(_interposerModule, "slGetNewFrameToken"));
 
     if (!_slInit || !_slShutdown || !_slUpgradeInterface || !_slGetNativeInterface || !_slSetD3DDevice
+        || !_slIsFeatureSupported
         || !_slGetFeatureFunction || !_slEvaluateFeature || !_slFreeResources || !_slSetTagForFrame
         || !_slSetConstants || !_slGetNewFrameToken)
     { LogWarning("Required Streamline exports are missing, Streamline is disabled."); }

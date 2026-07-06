@@ -3,6 +3,8 @@
 #include <App.Base/App.h>
 #include <WindowsX.h>
 
+#include "Engine.RendererDX12/GDX12StreamlineSDK.h"
+
 using Microsoft::WRL::ComPtr;
 using namespace std;
 using namespace DirectX;
@@ -64,7 +66,8 @@ App::~App()
 {
     //ordering is important
     Locator.UnregisterModule<SceneManagerModule>();
-    Locator.UnregisterModule<RenderModule>();   
+    Locator.UnregisterModule<RenderModule>();
+    GDX12StreamlineSDK::Get().Shutdown();
 }
 
 HINSTANCE App::GetAppHandler() const

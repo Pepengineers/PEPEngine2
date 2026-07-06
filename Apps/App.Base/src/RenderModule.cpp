@@ -5,7 +5,6 @@
 
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Common/ConsoleVariables.h"
-#include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
     _dualGPUMode(false), _window(window), _timer(timer),
@@ -22,8 +21,8 @@ RenderModule::~RenderModule()
     for (auto& renderpass : _primaryRenderPassExecutionList) { renderpass->ClearDenendencies(); }
     for (auto& renderpass : _secondaryRenderPassExecutionList) { renderpass->ClearDenendencies(); }
 
-    GDX12StreamlineSDK::Get().Shutdown();
     GDX12ShaderCompiler::Shutdown();
+    GDX12DeviceFactory::Reset();
 }
 
 void RenderModule::Initialize()

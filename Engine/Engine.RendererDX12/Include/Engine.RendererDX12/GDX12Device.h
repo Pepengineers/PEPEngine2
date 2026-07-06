@@ -34,6 +34,7 @@ public:
 	const ComPtr<ID3D12Device14>& GetCommandQueueCreationDevice();
 	GDX12CommandQueue* GetCommandQueue();
 	const DeviceSpecs& GetDeviceFeatures();
+	LUID GetAdapterLuid() const;
 	const bool IsInitialized();
 
 	EDeviceRole Role;

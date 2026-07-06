@@ -37,6 +37,7 @@ public:
     ComPtr<ID3D12CommandQueue> GetNativeCommandQueue(const ComPtr<ID3D12CommandQueue>& commandQueue) const;
     ComPtr<IDXGISwapChain4> GetNativeSwapChain(const ComPtr<IDXGISwapChain4>& swapChain) const;
     ComPtr<ID3D12Resource> GetNativeResource(const ComPtr<ID3D12Resource>& resource) const;
+    sl::Result IsFeatureSupported(sl::Feature feature, const sl::AdapterInfo& adapterInfo) const;
     sl::Result GetNewFrameToken(sl::FrameToken*& token, const uint32_t* frameIndex = nullptr) const;
     sl::Result SetTagForFrame(const sl::FrameToken& frame, const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer) const;
     sl::Result EvaluateFeature(sl::Feature feature, const sl::FrameToken& frame, const sl::BaseStructure** inputs, uint32_t numInputs, sl::CommandBuffer* cmdBuffer) const;
@@ -117,6 +118,7 @@ private:
     PFun_slUpgradeInterface* _slUpgradeInterface = nullptr;
     PFun_slGetNativeInterface* _slGetNativeInterface = nullptr;
     PFun_slSetD3DDevice* _slSetD3DDevice = nullptr;
+    PFun_slIsFeatureSupported* _slIsFeatureSupported = nullptr;
     PFun_slGetFeatureFunction* _slGetFeatureFunction = nullptr;
     PFun_slEvaluateFeature* _slEvaluateFeature = nullptr;
     PFun_slFreeResources* _slFreeResources = nullptr;

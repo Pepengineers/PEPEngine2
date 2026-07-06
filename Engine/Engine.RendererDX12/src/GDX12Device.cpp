@@ -71,10 +71,10 @@ void GDX12Device::CollectDeviceFeatures()
 
 void GDX12Device::Reset()
 {
+    _commandQueue.reset();
     _proxyDevice.Reset();
     _device.Reset();
     _adapter.Reset();
-    _commandQueue.reset();
     _isInitialized = false;
 }
 
@@ -96,6 +96,17 @@ GDX12CommandQueue* GDX12Device::GetCommandQueue()
 const DeviceSpecs& GDX12Device::GetDeviceFeatures()
 {
     return _specs;
+}
+
+LUID GDX12Device::GetAdapterLuid() const
+{
+    LUID luid = {};
+    if (!_adapter) { return luid; }
+
+    DXGI_ADAPTER_DESC1 adapterDesc = {};
+    if (FAILED(_adapter->GetDesc1(&adapterDesc))) { return luid; }
+
+    return adapterDesc.AdapterLuid;
 }
 
 const bool GDX12Device::IsInitialized()

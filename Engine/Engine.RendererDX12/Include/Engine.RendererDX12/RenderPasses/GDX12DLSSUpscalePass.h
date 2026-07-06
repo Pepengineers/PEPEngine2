@@ -82,6 +82,7 @@ public:
 	{
 		GDX12RenderPass::Setup(initOnResources, otherResources, commonData);
 
+		CheckDLSSSupport();
 		QueryRenderTargetResolution();
 		CreateDLSSFeature();
 	}
@@ -107,16 +108,13 @@ public:
 		GDX12Texture* depthStencil = IN_DepthBuffer->GetTexture();
 		GDX12Texture* motionVectors = IN_MotionVectors->GetTexture();
 
-		cmdList->ResourceBarrier({ depthStencil->GetResource()->GetDepthReadBarrier(),
-			motionVectors->GetResource()->GetPixelShaderResourceBarrier() });
-
 		Resource depthResource = Resource{ ResourceType::eTex2d,
 		depthStencil->GetResource()->D3DResource.Get(),
-		nullptr, nullptr, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_DEPTH_READ };
+		nullptr, nullptr, static_cast<uint32_t>(depthStencil->GetResource()->GetCurrentState()) };
 
 		Resource mvecResource = Resource{ ResourceType::eTex2d,
 			motionVectors->GetResource()->D3DResource.Get(),
-			nullptr, nullptr, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE };
+			nullptr, nullptr, static_cast<uint32_t>(motionVectors->GetResource()->GetCurrentState()) };
 
 		Extent fullExtent{};
 		fullExtent.top = 0;
@@ -138,16 +136,13 @@ public:
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
 			GDX12Texture* upscaledTexture = OUT_UpscaledTextures[i].get();
 
-			cmdList->ResourceBarrier({ inputTexture->GetResource()->GetPixelShaderResourceBarrier(),
-				upscaledTexture->GetResource()->GetUnorderedAccessBarrier() });
-
 			Resource inputResource = Resource{ ResourceType::eTex2d,
 				inputTexture->GetResource()->D3DResource.Get(),
-				nullptr, nullptr, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE };
+				nullptr, nullptr, static_cast<uint32_t>(inputTexture->GetResource()->GetCurrentState()) };
 
 			Resource outputResource = Resource{ ResourceType::eTex2d,
 				upscaledTexture->GetResource()->D3DResource.Get(),
-				nullptr, nullptr, D3D12_RESOURCE_STATE_UNORDERED_ACCESS };
+				nullptr, nullptr, static_cast<uint32_t>(upscaledTexture->GetResource()->GetCurrentState()) };
 
 			ResourceTag inputTag{ &inputResource, kBufferTypeScalingInputColor, ResourceLifecycle::eValidUntilEvaluate, &fullExtent };
 			ResourceTag outputTag{ &outputResource, kBufferTypeScalingOutputColor, ResourceLifecycle::eValidUntilEvaluate, &outputExtent };
@@ -229,6 +224,23 @@ private:
 	std::vector<std::unique_ptr<GDX12Texture>> OUT_UpscaledTextures;
 	sl::ViewportHandle _viewportHandle;
 	sl::DLSSMode _DLSSQualityMode;
+
+	bool CheckDLSSSupport()
+	{
+		using namespace sl;
+
+		LUID adapterLuid = _resources->Device->GetDevice()->GetAdapterLuid();
+		AdapterInfo adapterInfo = {};
+		adapterInfo.deviceLUID = reinterpret_cast<uint8_t*>(&adapterLuid);
+		adapterInfo.deviceLUIDSizeInBytes = sizeof(adapterLuid);
+
+		Result result = GDX12StreamlineSDK::Get().IsFeatureSupported(kFeatureDLSS, adapterInfo);
+		if (result == Result::eOk) { return true; }
+
+		std::string errorMsg = "ERROR: DLSS Feature is not supported on the current adapter: " + SLResultToString(result) + "\n";
+		OutputDebugStringA(errorMsg.c_str());
+		return false;
+	}
 
 	void SetConstants(sl::FrameToken* currentFrameToken)
 	{
