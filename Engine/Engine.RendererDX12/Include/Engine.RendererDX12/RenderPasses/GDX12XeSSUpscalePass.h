@@ -9,7 +9,7 @@ class GDX12XeSSUpscalePass : public GDX12RenderPass
 {
 public:
 	GDX12XeSSUpscalePass() : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _XeSSContext(nullptr),
-		_XeSSQualityMode(XESS_QUALITY_SETTING_QUALITY)
+		_XeSSQualityMode(XESS_QUALITY_SETTING_ULTRA_QUALITY_PLUS)
 	{ _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_JITTER; }
 
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
@@ -86,8 +86,9 @@ public:
 		xess_d3d12_execute_params_t execParams = {};
 		execParams.pDepthTexture = depthStencil->GetResource()->D3DResource.Get();
 		execParams.pVelocityTexture = motionVectors->GetResource()->D3DResource.Get();
-		execParams.jitterOffsetX = _commonData->ActiveCameraJitterOffsetX;
-		execParams.jitterOffsetY = _commonData->ActiveCameraJitterOffsetY;
+		// I have no idea why, but the minus sign fixes bluriness
+		execParams.jitterOffsetX = -_commonData->ActiveCameraJitterOffsetX;
+		execParams.jitterOffsetY = -_commonData->ActiveCameraJitterOffsetY;
 		execParams.inputWidth = _commonData->DownscaledWidth;
 		execParams.inputHeight = _commonData->DownscaledHeight;
 		execParams.resetHistory = false;
@@ -95,6 +96,7 @@ public:
 		execParams.exposureScale = 1;
 		execParams.inputColorBase = { 0,0 };
 		execParams.inputDepthBase = { 0,0 };
+		
 
 		for (int i = 0; i < _numOutputs; i++)
 		{
@@ -171,7 +173,8 @@ private:
 		xess_d3d12_init_params_t initParams = {};
 		initParams.outputResolution.x = _commonData->WindowWidth;
 		initParams.outputResolution.y = _commonData->WindowHeight;
-		initParams.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH;
+		initParams.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH | 
+			XESS_INIT_FLAG_LDR_INPUT_COLOR | XESS_INIT_FLAG_USE_NDC_VELOCITY;
 		initParams.qualitySetting = _XeSSQualityMode;
 
 		xess_result_t initResult = xessD3D12Init(_XeSSContext, &initParams);

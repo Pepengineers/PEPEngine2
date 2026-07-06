@@ -94,11 +94,11 @@ public:
 		dispatchDesc.cameraFar = _commonData->ActiveCameraNearPlane;
 		dispatchDesc.cameraFovAngleVertical = XMConvertToRadians(_commonData->ActiveCameraFOV);
 
-		dispatchDesc.jitterOffset.x = _commonData->ActiveCameraJitterOffsetX;
-		dispatchDesc.jitterOffset.y = _commonData->ActiveCameraJitterOffsetY;
+		dispatchDesc.jitterOffset.x = -_commonData->ActiveCameraJitterOffsetX;
+		dispatchDesc.jitterOffset.y = -_commonData->ActiveCameraJitterOffsetY;
 
-		dispatchDesc.enableSharpening = false;
-		dispatchDesc.sharpness = 0.8f;
+		dispatchDesc.enableSharpening = true;
+		dispatchDesc.sharpness = 1.f;
 		// for whatever reason, it doesnt like it when frame time is lower than 1.f
 		float clampedTime = max(_commonData->GameTimer->DeltaTime() * 1000.f, 1.f);
 		dispatchDesc.frameTimeDelta = clampedTime; //expects milliseconds
@@ -111,7 +111,7 @@ public:
 		dispatchDesc.reactive = ffxApiGetResourceDX12(nullptr, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		dispatchDesc.transparencyAndComposition = ffxApiGetResourceDX12(nullptr, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		//dispatchDesc.flags = FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW;
-
+		dispatchDesc.flags = 0;
 		for (int i = 0; i < _numOutputs; i++)
 		{
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();

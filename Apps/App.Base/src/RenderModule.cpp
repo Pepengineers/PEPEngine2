@@ -789,7 +789,7 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12XeSSUpscalePass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12FSRUpscalePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
 
     SetupRenderPasses();
