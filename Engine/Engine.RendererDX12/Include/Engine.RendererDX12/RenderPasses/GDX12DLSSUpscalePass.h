@@ -23,7 +23,7 @@ class GDX12DLSSUpscalePass : public GDX12RenderPass
 public:
 	GDX12DLSSUpscalePass() : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _viewportHandle(1337),
 		_DLSSQualityMode(sl::DLSSMode::eMaxQuality)
-	{ _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_JITTER; }
+	{ _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_JITTER | RENDER_PASS_FLAG_USE_STREAMLINE; }
 
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
 	{

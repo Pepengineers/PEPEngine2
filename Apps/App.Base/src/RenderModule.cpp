@@ -41,8 +41,11 @@ RenderModule::~RenderModule()
 
 void RenderModule::Initialize()
 {
+    // This value will later be provided from external pipeline config
+    bool useStreamlineSDK = false;
+
     // Streamline is initialized on the primary device only
-    GDX12StreamlineSDK::Get().Initialize();
+    if (useStreamlineSDK) { GDX12StreamlineSDK::Get().Initialize(); }
 
 #if defined(DEBUG) || defined(_DEBUG)
     // Enable the D3D12 debug layer.
@@ -53,7 +56,7 @@ void RenderModule::Initialize()
 
     _primaryDevice = std::make_unique<GDX12Device>();
     _primaryDevice->Role = DEVICE_ROLE_PRIMARY;
-    _primaryDevice->Initialize(GDX12DeviceFactory::GetMostPerformantAdapter().Get());
+    _primaryDevice->Initialize(GDX12DeviceFactory::GetDeviceDescriptors()[1].Adapter.Get());
     _primaryResources.Initialize(_primaryDevice.get());
 
     if (false)
@@ -811,7 +814,7 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DLSSUpscalePass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12FSRUpscalePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
 
     SetupRenderPasses();

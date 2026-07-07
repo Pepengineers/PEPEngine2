@@ -76,7 +76,7 @@ PS_OUTPUT PS(VS_OUTPUT_PS_INPUT pin)
     
     float2 currentNDC = pin.PosCSNoJitter.xy / pin.PosCSNoJitter.w;
     float2 prevNDC = pin.PrevPosCSNoJitter.xy / pin.PrevPosCSNoJitter.w;
-    float2 velocity = currentNDC - prevNDC;
+    float2 velocity = prevNDC - currentNDC;
 
     output.Color = float4(color.rgb, 1.0f);
     output.Velocity = velocity;
