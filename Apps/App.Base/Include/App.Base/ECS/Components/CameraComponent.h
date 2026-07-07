@@ -9,8 +9,8 @@ struct CameraComponent : ComponentTag
     float FOV;
     float NearPlane;
     float FarPlane;
-    XMFLOAT4X4 ViewProj;
-    XMFLOAT4X4 PrevViewProjNoJitter;
+    Matrix ViewProj;
+    Matrix PrevViewProjNoJitter;
 
     bool DirtyFlag;
 

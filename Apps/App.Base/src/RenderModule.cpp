@@ -6,6 +6,20 @@
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Common/ConsoleVariables.h"
 
+#include "Engine.RendererDX12/GDX12SwapChain.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12TextureClearPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyFromSharedMemoryPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyToSharedMemoryPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12OutputToScreenPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12FSRUpscalePass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12SyncPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12XeSSUpscalePass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
+
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
     _dualGPUMode(false), _window(window), _timer(timer),
     _primaryPipelineFlags(0), _secondaryPipelineFlags(0)
@@ -489,12 +503,22 @@ RenderPipelineCommonData* RenderModule::GetRenderPipelineCommonData()
     return &_RPcommonData;
 }
 
+bool RenderModule::PrimaryPipelineHasFlag(uint32_t flag)
+{
+    return _primaryPipelineFlags & flag;
+}
+
+bool RenderModule::SecondaryPipelineHasFlag(uint32_t flag)
+{
+    return _secondaryPipelineFlags & flag;
+}
+
 void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
 {
     TransformCompGPUData gpuData;
     _transformGPUData[entity] = gpuData;
 
-    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_INSTANCES)
+    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
     {
         _transformGPUData[entity].CBufferIndex = _primaryResources.FrameConstants[0]->TransformCache->GetElementCount();
         for (auto& constants : _primaryResources.FrameConstants)
@@ -504,7 +528,7 @@ void RenderModule::OnTransformComponentCreated(World& world, Entity entity, Tran
         }
     }
 
-    if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_INSTANCES)
+    if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
     {
         _transformGPUData[entity].CBufferIndex = _secondaryResources.FrameConstants[0]->TransformCache->GetElementCount();
         for (auto& constants : _secondaryResources.FrameConstants)
@@ -526,7 +550,7 @@ void RenderModule::OnTransformComponentUpdated(World& world, Entity entity, Tran
 
 void RenderModule::OnCameraComponentCreated(World& world, Entity entity, CameraComponent& component)
 {
-    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_CAMERAS)
+    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS))
     {
         component._CBufferIndex = _primaryResources.FrameConstants[0]->CameraCB->GetElementCount();
 
@@ -550,7 +574,7 @@ void RenderModule::OnCameraComponentCreated(World& world, Entity entity, CameraC
         }
     }
 
-    if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_CAMERAS)
+    if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS))
     {
         component._CBufferIndex = _secondaryResources.FrameConstants[0]->CameraCB->GetElementCount();
 
@@ -586,7 +610,7 @@ void RenderModule::OnCameraComponentUpdated(World& world, Entity entity, CameraC
 
 void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticMeshRenderComponent& component)
 {
-    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_INSTANCES)
+    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
     {
         auto& MeshGPUData = _primaryResources.GeometryBuffer->_meshCache[component.MeshHandler.GetValue()];
         for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
@@ -608,7 +632,7 @@ void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticM
         }
     }
 
-    if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_INSTANCES)
+    if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
     {
         auto& MeshGPUData = _secondaryResources.GeometryBuffer->_meshCache[component.MeshHandler.GetValue()];
         for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
@@ -666,7 +690,7 @@ void RenderModule::OnUpdate()
     }
 
     _primaryResources.UpdateMainCB(width, height, _timer);
-    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS)
+    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
     { _primaryResources.UpdateMaterialCB(_materials); }
 
     // same for SecondaryDevice
@@ -683,7 +707,7 @@ void RenderModule::OnUpdate()
         }
 
         _secondaryResources.UpdateMainCB(width, height, _timer);
-        if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS) 
+        if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
         { _secondaryResources.UpdateMaterialCB(_materials); }
     }
 }
@@ -782,7 +806,7 @@ void RenderModule::ConfigureRenderPipeline()
 {
     // Setup render passes you would like to execute
     // Add in execution order
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12BackBufferClearPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureClearPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());

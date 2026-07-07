@@ -102,7 +102,7 @@ private:
         D3D12_RESOURCE_ALLOCATION_INFO primaryInfo = _transferFromDeivce->GetDevice()->GetResourceAllocationInfo(0, 1, &desc);
         D3D12_RESOURCE_ALLOCATION_INFO secondaryInfo = _transferToDevice->GetDevice()->GetResourceAllocationInfo(0, 1, &desc);
 
-        _heapSize = max(primaryInfo.SizeInBytes, secondaryInfo.SizeInBytes);
+        _heapSize = std::max(primaryInfo.SizeInBytes, secondaryInfo.SizeInBytes);
         _heapSize = (_heapSize + D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT - 1) & ~(D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT - 1);
 
         D3D12_HEAP_DESC heapDesc = {};

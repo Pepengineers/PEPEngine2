@@ -79,6 +79,10 @@ public:
 	GDX12Descriptor* GetRTV();
 	GDX12Descriptor* GetUAV();
 	GDX12Descriptor* GetDSV();
+	bool HasDSV();
+	bool HasSRV();
+	bool HasUAV();
+	bool HasRTV();
 	D3D12_CLEAR_VALUE& GetClearValue();
 	GDX12TextureResource* GetResource();
 	DXGI_FORMAT GetFormat();

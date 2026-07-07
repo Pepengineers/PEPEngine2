@@ -31,26 +31,46 @@ void GDX12Texture::Resize(UINT width, UINT height)
 
 GDX12Descriptor* GDX12Texture::GetSRV()
 {
-    if (!_desc.CreateSRV) { OutputDebugStringA("ERROR: Can't get Texture SRV: SRV not created.\n"); }
+    if (!HasSRV()) { OutputDebugStringA("ERROR: Can't get Texture SRV: SRV not created.\n"); }
     return _srv.get();
 }
 
 GDX12Descriptor* GDX12Texture::GetRTV()
 {
-    if (!_desc.CreateRTV) { OutputDebugStringA("ERROR: Can't get Texture RTV: RTV not created.\n"); }
+    if (!HasRTV()) { OutputDebugStringA("ERROR: Can't get Texture RTV: RTV not created.\n"); }
     return _rtv.get();
 }
 
 GDX12Descriptor* GDX12Texture::GetUAV()
 {
-    if (!_desc.CreateUAV) { OutputDebugStringA("ERROR: Can't get Texture UAV: UAV not created.\n"); }
+    if (!HasUAV()) { OutputDebugStringA("ERROR: Can't get Texture UAV: UAV not created.\n"); }
     return _uav.get();
 }
 
 GDX12Descriptor* GDX12Texture::GetDSV()
 {
-    if (!_desc.CreateDSV) { OutputDebugStringA("ERROR: Can't get Texture DSV: DSV not created.\n"); }
+    if (!HasDSV()) { OutputDebugStringA("ERROR: Can't get Texture DSV: DSV not created.\n"); }
     return _dsv.get();
+}
+
+bool GDX12Texture::HasDSV()
+{
+    return _desc.CreateDSV;
+}
+
+bool GDX12Texture::HasSRV()
+{
+    return _desc.CreateSRV;
+}
+
+bool GDX12Texture::HasUAV()
+{
+    return _desc.CreateUAV;
+}
+
+bool GDX12Texture::HasRTV()
+{
+    return _desc.CreateRTV;
 }
 
 D3D12_CLEAR_VALUE& GDX12Texture::GetClearValue()

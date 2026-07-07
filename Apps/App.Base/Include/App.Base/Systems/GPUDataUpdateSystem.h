@@ -77,8 +77,8 @@ public:
 
                     // Jitter current camera proj matrix if it is needed
                     if (isActiveCamera &&
-                        ((renderModule->GetPrimaryPipelineFlags() & RENDER_PASS_FLAG_USE_JITTER) ||
-                            (renderModule->GetSecondaryPipelineFlags() & RENDER_PASS_FLAG_USE_JITTER)))
+                        (renderModule->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_JITTER) ||
+                            renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_JITTER)))
                     {
                         static uint32_t frameIndex = 0;
                         frameIndex++;
@@ -101,13 +101,13 @@ public:
                     objConstants.NearPlane = camera.NearPlane;
                     objConstants.FarPlane = camera.FarPlane;
 
-                    if (renderModule->GetPrimaryPipelineFlags() & RENDER_PASS_FLAG_USE_CAMERAS)
+                    if (renderModule->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS))
                     {
                         auto& CBuffer = renderModule->GetCurrentPrimaryFrameConstants()->CameraCB;
                         CBuffer->CopyData(camera._CBufferIndex, objConstants);
                     }
 
-                    if (renderModule->GetSecondaryPipelineFlags() & RENDER_PASS_FLAG_USE_CAMERAS)
+                    if (renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS))
                     {
                         auto& CBuffer = renderModule->GetCurrentSecondaryFrameConstants()->CameraCB;
                         CBuffer->CopyData(camera._CBufferIndex, objConstants);
@@ -144,12 +144,12 @@ public:
 
                     XMStoreFloat4x4(&GPUData.PrevWorld, world);
 
-                    if (renderModule->GetPrimaryPipelineFlags() & RENDER_PASS_FLAG_USE_INSTANCES)
+                    if (renderModule->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
                     {
                         auto& CBuffer = renderModule->GetCurrentPrimaryFrameConstants()->TransformCache;
                         CBuffer->CopyData(GPUData.CBufferIndex, objConstants);
                     }
-                    if (renderModule->GetSecondaryPipelineFlags() & RENDER_PASS_FLAG_USE_INSTANCES)
+                    if (renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
                     {
                         auto& CBuffer = renderModule->GetCurrentSecondaryFrameConstants()->TransformCache;
                         CBuffer->CopyData(GPUData.CBufferIndex, objConstants);
@@ -190,7 +190,7 @@ public:
                         }
                     }
 
-                    if (renderModule->GetSecondaryPipelineFlags() & RENDER_PASS_FLAG_USE_INSTANCES)
+                    if (renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
                     {
                         auto gpuMesh = renderModule->GetSecondaryGPUMesh(renderer.MeshHandler);
                         gpuMesh->CPUMesh->GetBounds().Transform(renderer.Bounds, XMLoadFloat4x4(&transformGPUData.World));
@@ -214,7 +214,7 @@ public:
 
                 if (renderer._numFramesDirty > 0)
                 {
-                    if (renderModule->GetPrimaryPipelineFlags() & RENDER_PASS_FLAG_USE_INSTANCES)
+                    if (renderModule->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
                     {
                         auto& instanceCache = renderModule->GetCurrentPrimaryFrameConstants()->InstanceCache;
                         auto gpuMesh = renderModule->GetPrimaryGPUMesh(renderer.MeshHandler);
@@ -235,7 +235,7 @@ public:
                             instanceCache->CopyData(renderer._CBufferIndices[i], instanceData);
                         }
                     }
-                    if (renderModule->GetSecondaryPipelineFlags() & RENDER_PASS_FLAG_USE_INSTANCES)
+                    if (renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
                     {
                         auto& instanceCache = renderModule->GetCurrentSecondaryFrameConstants()->InstanceCache;
                         auto gpuMesh = renderModule->GetSecondaryGPUMesh(renderer.MeshHandler);

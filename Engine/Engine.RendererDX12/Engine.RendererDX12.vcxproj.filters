@@ -81,9 +81,6 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GPUCullingPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12BackBufferClearPass.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITCompositionPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -121,6 +118,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DLSSUpscalePass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureClearPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

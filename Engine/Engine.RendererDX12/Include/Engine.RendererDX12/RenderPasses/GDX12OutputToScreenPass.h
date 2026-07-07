@@ -27,10 +27,10 @@ public:
 
 		cmdList->BeginPixEvent("Copy To Screen Pass", Colors::Aqua);
 		cmdList->ResourceBarrier({ inputTexture->GetResource()->GetCopySourceBarrier() });
-		cmdList->EnhancedTextureBarrier({ backBuffer->GetResource()->GetCopyDestEnhBarrier() });
+		cmdList->ResourceBarrier({ backBuffer->GetResource()->GetCopyDestBarrier() });
 		cmdList->CopyResource(backBuffer->GetResource()->D3DResource.Get(),
 			inputTexture->GetResource()->D3DResource.Get());
-		cmdList->EnhancedTextureBarrier({ backBuffer->GetResource()->GetPresentEnhBarrier() });
+		cmdList->ResourceBarrier({ backBuffer->GetResource()->GetPresentBarrier() });
 		cmdList->EndPixEvent();
 	}
 

@@ -100,7 +100,7 @@ public:
 		dispatchDesc.enableSharpening = true;
 		dispatchDesc.sharpness = 1.f;
 		// for whatever reason, it doesnt like it when frame time is lower than 1.f
-		float clampedTime = max(_commonData->GameTimer->DeltaTime() * 1000.f, 1.f);
+		float clampedTime = std::max(_commonData->GameTimer->DeltaTime() * 1000.f, 1.f);
 		dispatchDesc.frameTimeDelta = clampedTime; //expects milliseconds
 		dispatchDesc.reset = false; // set to true if camera teleports or moves not smoothly
 		

@@ -32,10 +32,10 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OpaquePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OutputToScreenPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SyncPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureClearPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureCopyFromSharedMemoryPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureCopyToSharedMemoryPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITTransparencyPass.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12BackBufferClearPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GPUCullingPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12RenderPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h" />

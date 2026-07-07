@@ -3,25 +3,13 @@
 #include "Common/GameTimer.h"
 #include "Common/Module.h"
 
-#include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12BackBufferClearPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyFromSharedMemoryPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyToSharedMemoryPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12OutputToScreenPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12FSRUpscalePass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12SyncPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12XeSSUpscalePass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
 
 class SceneManagerModule;
 class World;
+class GDX12SwapChain;
 
 struct TransformComponent;
 struct CameraComponent;
@@ -112,6 +100,8 @@ public:
     uint32_t GetPrimaryPipelineFlags();
     uint32_t GetSecondaryPipelineFlags();
     RenderPipelineCommonData* GetRenderPipelineCommonData();
+    bool PrimaryPipelineHasFlag(uint32_t flag);
+    bool SecondaryPipelineHasFlag(uint32_t flag);
 
 protected:
     void OnUpdate() override;
