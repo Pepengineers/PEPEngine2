@@ -75,11 +75,24 @@ public:
     {
         for (auto* input : _inputs)
         {
+            if (!input)
+            {
+                OutputDebugStringA("ERROR: Render pass has a null input link\n");
+                return false;
+            }
             if (!input->IsInitialized()) { return false; }
         }
         return true;
     }
-    std::vector<IRenderPassLink*>& GetOutputs() { return _outputs; }
+    virtual IRenderPassLink* GetOutput(UINT index) 
+    { 
+        if (index >= _numOutputs || index >= _outputs.size() || _outputs[index] == nullptr)
+        {
+            OutputDebugStringA("ERROR: Trying to access unexisting render pass output\n");
+            return nullptr;
+        }
+        return _outputs[index]; 
+    }
     UINT GetNumInputs() { return _numInputs; }
     UINT GetNumOutputs() { return _numOutputs; }
 

@@ -12,17 +12,14 @@ public:
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
 	{
 		_inputs = inputs;
-		_numInputs = _numOutputs = inputs.size();
+		_numInputs = inputs.size();
+		MatchOutputCount(_numInputs);
+	}
 
-		OUT_Textures.clear();
-		_outputs.clear();
-		OUT_Textures.resize(_numOutputs);
-		_outputs.resize(_numOutputs);
-		for (int i = 0; i < _numInputs; i++)
-		{
-			OUT_Textures[i] = std::make_unique<GDX12Texture>();
-			_outputs[i] = OUT_Textures[i].get();
-		}
+	IRenderPassLink* GetOutput(UINT index) override
+	{
+		if (_inputs.empty()) { MatchOutputCount(index + 1); }
+		return GDX12RenderPass::GetOutput(index);
 	}
 
 	// Input N - SharedTexture
@@ -90,4 +87,18 @@ public:
 private:
 	std::vector<IRenderPassLink*> IN_SharedTextures;
 	std::vector<std::unique_ptr<GDX12Texture>> OUT_Textures;
+
+	void MatchOutputCount(UINT outputCount)
+	{
+		if (OUT_Textures.size() < outputCount) { OUT_Textures.resize(outputCount); }
+		if (_outputs.size() < outputCount) { _outputs.resize(outputCount, nullptr); }
+
+		for (UINT i = 0; i < outputCount; i++)
+		{
+			if (!OUT_Textures[i]) { OUT_Textures[i] = std::make_unique<GDX12Texture>(); }
+			_outputs[i] = OUT_Textures[i].get();
+		}
+
+		_numOutputs = outputCount;
+	}
 };

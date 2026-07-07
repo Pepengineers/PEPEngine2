@@ -16,17 +16,13 @@ public:
 	{
 		_inputs = inputs;
 		_numInputs = 2;
-		_numOutputs = inputs.size() - 2;
+		MatchOutputCount(inputs.size() > 2 ? inputs.size() - 2 : 0);
+	}
 
-		OUT_UpscaledTextures.clear();
-		_outputs.clear();
-		OUT_UpscaledTextures.resize(_numOutputs);
-		_outputs.resize(_numOutputs);
-		for (int i = 0; i < _numOutputs; i++)
-		{
-			OUT_UpscaledTextures[i] = std::make_unique<GDX12Texture>();
-			_outputs[i] = OUT_UpscaledTextures[i].get();
-		}
+	IRenderPassLink* GetOutput(UINT index) override
+	{
+		if (_inputs.empty()) { MatchOutputCount(index + 1); }
+		return GDX12RenderPass::GetOutput(index);
 	}
 
 	// Input 0 - DepthStencil
@@ -53,8 +49,8 @@ public:
 		TextureDesc1.SRVDesc.Texture2D.PlaneSlice = 0;
 		TextureDesc1.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
 
-		IN_Textures.resize(_numInputs);
-		for (int i = 0; i < _numOutputs; i++)
+		IN_Textures.resize(_numOutputs);
+		for (UINT i = 0; i < _numOutputs; i++)
 		{
 			IN_Textures[i] = _inputs[i + 2];
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
@@ -96,7 +92,6 @@ public:
 		execParams.exposureScale = 1;
 		execParams.inputColorBase = { 0,0 };
 		execParams.inputDepthBase = { 0,0 };
-		
 
 		for (int i = 0; i < _numOutputs; i++)
 		{
@@ -160,6 +155,20 @@ private:
 	std::vector<std::unique_ptr<GDX12Texture>> OUT_UpscaledTextures;
 	xess_context_handle_t _XeSSContext;
 	xess_quality_settings_t _XeSSQualityMode;
+
+	void MatchOutputCount(UINT outputCount)
+	{
+		if (OUT_UpscaledTextures.size() < outputCount) { OUT_UpscaledTextures.resize(outputCount); }
+		if (_outputs.size() < outputCount) { _outputs.resize(outputCount, nullptr); }
+
+		for (UINT i = 0; i < outputCount; i++)
+		{
+			if (!OUT_UpscaledTextures[i]) { OUT_UpscaledTextures[i] = std::make_unique<GDX12Texture>(); }
+			_outputs[i] = OUT_UpscaledTextures[i].get();
+		}
+
+		_numOutputs = outputCount;
+	}
 
 	void BuildXeSSContext()
 	{
