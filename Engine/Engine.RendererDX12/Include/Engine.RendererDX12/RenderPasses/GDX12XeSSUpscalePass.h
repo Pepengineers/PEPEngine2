@@ -48,6 +48,10 @@ public:
 		TextureDesc1.SRVDesc.Texture2D.MostDetailedMip = 0;
 		TextureDesc1.SRVDesc.Texture2D.PlaneSlice = 0;
 		TextureDesc1.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+		TextureDesc1.CreateUAV = true;
+		TextureDesc1.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+		TextureDesc1.UAVDesc.Texture2D.MipSlice = 0;
+		TextureDesc1.UAVDesc.Texture2D.PlaneSlice = 0;
 
 		IN_Textures.resize(_numOutputs);
 		for (UINT i = 0; i < _numOutputs; i++)
@@ -56,6 +60,8 @@ public:
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
 			TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = inputTexture->GetFormat();
 			TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+			TextureDesc1.UAVDesc.Format = TextureDesc1.Format;
+			TextureDesc1.UAVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
 			OUT_UpscaledTextures[i]->Initialize(TextureDesc1);
 		}
 

@@ -26,8 +26,8 @@ public:
 	{
 		GDX12TextureDesc TextureDesc1;
 		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-		TextureDesc1.Width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
-		TextureDesc1.Height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
+		TextureDesc1.Width = GetRenderWidth();
+		TextureDesc1.Height = GetRenderHeight();
 
 		TextureDesc1.CreateSRV = true;
 		TextureDesc1.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
@@ -55,14 +55,24 @@ public:
 		OUT_VelocityBuffer->Initialize(TextureDesc1);
 
 		GDX12TextureDesc desc;
-		desc.CreateSRV = false;
+		desc.CreateSRV = true;
+		desc.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
+		desc.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+		desc.SRVDesc.Format = DXGI_FORMAT_R32_FLOAT;
+		desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		desc.SRVDesc.Texture2D.MipLevels = 1;
+		desc.SRVDesc.Texture2D.MostDetailedMip = 0;
+		desc.SRVDesc.Texture2D.PlaneSlice = 0;
+		desc.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
 		desc.DSVHeap = _resources->DSVHeap.get();
 
 		desc.CreateDSV = true;
 		desc.DSVHeapIndex = _resources->DSVHeap->GetAvailableIndex();
-		desc.Format = desc.DSVDesc.Format = DXGI_FORMAT_D32_FLOAT;
-		desc.Width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;;
-		desc.Height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;;
+		desc.Format = DXGI_FORMAT_R32_TYPELESS;
+		desc.DSVDesc.Format = DXGI_FORMAT_D32_FLOAT;
+		desc.Width = GetRenderWidth();
+		desc.Height = GetRenderHeight();
 		desc.ClearValue = { 0.f, 0.f, 0.f, 0.f };
 
 		desc.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
@@ -123,7 +133,7 @@ public:
 		PSODesc1.RTVFormats[1] = OUT_VelocityBuffer->GetFormat();
 		PSODesc1.SampleDesc.Count = 1;
 		PSODesc1.SampleDesc.Quality = 0;
-		PSODesc1.DSVFormat = OUT_DepthStencil->GetTexture()->GetFormat();
+		PSODesc1.DSVFormat = OUT_DepthStencil->GetTexture()->GetDSVFormat();
 		PSODesc1.VS = { reinterpret_cast<BYTE*>(_opaqueVS->GetBufferPointer()), _opaqueVS->GetBufferSize() };
 		PSODesc1.PS = { reinterpret_cast<BYTE*>(_opaquePS->GetBufferPointer()), _opaquePS->GetBufferSize() };
 		ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&PSODesc1, IID_PPV_ARGS(&_opaquePSO)));
@@ -170,8 +180,8 @@ public:
 
 	void Resize() override
 	{
-		UINT newWidth = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
-		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
+		UINT newWidth = GetRenderWidth();
+		UINT newHeight = GetRenderHeight();
 		OUT_Accumulation->Resize(newWidth, newHeight);
 		OUT_VelocityBuffer->Resize(newWidth, newHeight);
 		OUT_DepthStencil->Resize(newWidth, newHeight);
@@ -192,6 +202,20 @@ public:
 	}
 
 private:
+	UINT GetRenderWidth()
+	{
+		UINT width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
+		UINT multiplier = _commonData->SSAAmultiplier > 0 ? _commonData->SSAAmultiplier : 1;
+		return width * multiplier;
+	}
+
+	UINT GetRenderHeight()
+	{
+		UINT height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
+		UINT multiplier = _commonData->SSAAmultiplier > 0 ? _commonData->SSAAmultiplier : 1;
+		return height * multiplier;
+	}
+
 	ComPtr<ID3DBlob> _opaqueVS;
 	ComPtr<ID3DBlob> _opaquePS;
 	std::unique_ptr<GDX12RootSignature> _opaqueRS;

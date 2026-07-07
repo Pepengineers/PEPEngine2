@@ -86,6 +86,7 @@ public:
 	D3D12_CLEAR_VALUE& GetClearValue();
 	GDX12TextureResource* GetResource();
 	DXGI_FORMAT GetFormat();
+	DXGI_FORMAT GetDSVFormat();
 	ETextureSemantic GetSemantic() const;
 	D3D12_VIEWPORT GetViewport();
 	D3D12_RECT GetScissorRect();

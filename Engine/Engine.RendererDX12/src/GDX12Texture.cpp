@@ -88,6 +88,12 @@ DXGI_FORMAT GDX12Texture::GetFormat()
     return _desc.Format;
 }
 
+DXGI_FORMAT GDX12Texture::GetDSVFormat()
+{
+    if (_desc.CreateDSV && _desc.DSVDesc.Format != DXGI_FORMAT_UNKNOWN) { return _desc.DSVDesc.Format; }
+    return _desc.Format;
+}
+
 ETextureSemantic GDX12Texture::GetSemantic() const
 {
     return _desc.Semantic;
@@ -211,7 +217,6 @@ void GDX12Texture::Initialize(GDX12TextureDesc desc)
     if (_desc.CreateRTV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS; }
     if (_desc.CreateDSV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL; }
     if (_desc.CreateUAV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS; }
-    if (_desc.CreateSRV) { _resourceFlags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS; }
 
     if (_desc.CreateRTV)
     {
@@ -226,7 +231,7 @@ void GDX12Texture::Initialize(GDX12TextureDesc desc)
         _clearValue.DepthStencil.Stencil = _desc.ClearValue.y;
     }
 
-    _clearValue.Format = _desc.Format;
+    _clearValue.Format = (_desc.CreateDSV && _desc.DSVDesc.Format != DXGI_FORMAT_UNKNOWN) ? _desc.DSVDesc.Format : _desc.Format;
 
     if (_desc.ExternalResource != nullptr) { _resource = std::make_unique<GDX12TextureResource>(_desc.ExternalResource); }
     else { CreateResource(); }

@@ -853,8 +853,9 @@ void RenderModule::ConfigureRenderPipeline()
     cullingPass->SetInputs({});
     opaquePass->SetInputs({});
     transparencyPass->SetInputs({ opaquePass->GetOutput(2) });
-    compositionPass->SetInputs({ opaquePass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
-    upscalePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1), compositionPass->GetOutput(0) });
+    compositionPass->SetInputs({ opaquePass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1),
+        opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
+    upscalePass->SetInputs({ compositionPass->GetOutput(1), compositionPass->GetOutput(2), compositionPass->GetOutput(0) });
     outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get()});
 
     opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);

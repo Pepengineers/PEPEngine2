@@ -26,8 +26,8 @@ public:
 		// Textures
 		GDX12TextureDesc TextureDesc1;
 		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-		TextureDesc1.Width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
-		TextureDesc1.Height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
+		TextureDesc1.Width = GetRenderWidth();
+		TextureDesc1.Height = GetRenderHeight();
 
 		TextureDesc1.CreateSRV = true;
 		TextureDesc1.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
@@ -103,7 +103,7 @@ public:
 		PSODesc1.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 		PSODesc1.SampleDesc.Count = 1;
 		PSODesc1.SampleDesc.Quality = 0;
-		PSODesc1.DSVFormat = IN_DepthStencil->GetTexture()->GetFormat();
+		PSODesc1.DSVFormat = IN_DepthStencil->GetTexture()->GetDSVFormat();
 
 		// Accumulation
 		PSODesc1.BlendState.RenderTarget[0].BlendEnable = true;
@@ -179,8 +179,8 @@ public:
 
 	void Resize() override
 	{
-		UINT newWidth = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
-		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
+		UINT newWidth = GetRenderWidth();
+		UINT newHeight = GetRenderHeight();
 		OUT_Accumulation->Resize(newWidth, newHeight);
 		OUT_Revealage->Resize(newWidth, newHeight);
 	}
@@ -199,6 +199,20 @@ public:
 	}
 
 private:
+	UINT GetRenderWidth()
+	{
+		UINT width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
+		UINT multiplier = _commonData->SSAAmultiplier > 0 ? _commonData->SSAAmultiplier : 1;
+		return width * multiplier;
+	}
+
+	UINT GetRenderHeight()
+	{
+		UINT height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
+		UINT multiplier = _commonData->SSAAmultiplier > 0 ? _commonData->SSAAmultiplier : 1;
+		return height * multiplier;
+	}
+
 	ComPtr<ID3DBlob> _transparencyVS;
 	ComPtr<ID3DBlob> _transparencyPS;
 	std::unique_ptr<GDX12RootSignature> _transparencyRS;
