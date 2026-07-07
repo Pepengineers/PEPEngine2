@@ -20,6 +20,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12SyncPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12XeSSUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
+#include "Engine.RendererDX12/GDX12StatsLogger.h"
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
     _dualGPUMode(false), _window(window), _timer(timer),
@@ -38,10 +39,19 @@ RenderModule::~RenderModule()
 
     GDX12ShaderCompiler::Shutdown();
     GDX12DeviceFactory::Reset();
+    GDX12StatsLogger::GetInstance()->GenerateReport(_primaryDevice.get(), _secondaryDevice.get(), 0);
+    GDX12StatsLogger::GetInstance()->Shutdown();
 }
 
 void RenderModule::Initialize()
 {
+    int primaryGPUIndex;
+    int secondaryGPUIndex;
+    int SSAAmultiplier;
+    GDX12StatsLogger::GetInstance()->ReadInitConfig(primaryGPUIndex, secondaryGPUIndex, SSAAmultiplier);
+
+    _RPcommonData.SSAAmultiplier = SSAAmultiplier;
+
     // This value will be later provided by external pipeline config
     bool useStreamlineSDK = false;
     // Streamline is initialized on the primary device only
@@ -56,7 +66,7 @@ void RenderModule::Initialize()
 
     _primaryDevice = std::make_unique<GDX12Device>();
     _primaryDevice->Role = DEVICE_ROLE_PRIMARY;
-    _primaryDevice->Initialize(GDX12DeviceFactory::GetMostPerformantAdapter().Get());
+    _primaryDevice->Initialize(GDX12DeviceFactory::GetDeviceDescriptors()[primaryGPUIndex].Adapter.Get());
     _primaryResources.Initialize(_primaryDevice.get());
     _primaryGPUTimer = std::make_unique<GDX12GPUTimer>(_primaryDevice.get());
 
@@ -64,7 +74,7 @@ void RenderModule::Initialize()
     {
         _secondaryDevice = std::make_unique<GDX12Device>();
         _secondaryDevice->Role = DEVICE_ROLE_SECONDARY;
-        _secondaryDevice->Initialize(GDX12DeviceFactory::GetDeviceDescriptors()[1].Adapter.Get());
+        _secondaryDevice->Initialize(GDX12DeviceFactory::GetDeviceDescriptors()[secondaryGPUIndex].Adapter.Get());
         _secondaryResources.Initialize(_secondaryDevice.get());
         _secondaryGPUTimer = std::make_unique<GDX12GPUTimer>(_secondaryDevice.get());
         _dualGPUMode = true;

@@ -4,6 +4,7 @@
 #include <WindowsX.h>
 
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
+#include "Engine.RendererDX12/GDX12StatsLogger.h"
 
 using Microsoft::WRL::ComPtr;
 using namespace std;
@@ -37,6 +38,8 @@ void App::CalculateFrameStats() const
 
         std::wstring FpsString = std::to_wstring(Fps);
         std::wstring MsPerFrameString = std::to_wstring(MsPerFrame);
+
+        GDX12StatsLogger::GetInstance()->RecordMspf(MsPerFrame);
 
         std::wstring WindowText = _window->GetWindowTitle() +
             L"    fps: " + FpsString +

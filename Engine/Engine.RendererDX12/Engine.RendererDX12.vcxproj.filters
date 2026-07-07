@@ -126,6 +126,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureClearPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12StatsLogger.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp">
@@ -180,6 +183,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\GDX12GPUTimer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GDX12StatsLogger.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
