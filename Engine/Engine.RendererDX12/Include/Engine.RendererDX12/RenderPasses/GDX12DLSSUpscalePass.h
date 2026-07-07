@@ -263,7 +263,7 @@ private:
 		constants.mvecScale = { 1.f, 1.f };
 
 		constants.depthInverted = Boolean::eTrue;
-		constants.cameraMotionIncluded = Boolean::eFalse;
+		constants.cameraMotionIncluded = Boolean::eTrue;
 		constants.motionVectors3D = Boolean::eFalse;
 		constants.reset = Boolean::eFalse;
 		constants.orthographicProjection = Boolean::eFalse;

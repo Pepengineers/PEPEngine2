@@ -87,7 +87,8 @@ public:
 		dispatchDesc.motionVectors = ffxApiGetResourceDX12(motionVectors->GetResource()->D3DResource.Get(), FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		// Resolution before upscaling
 		dispatchDesc.renderSize = { _commonData->DownscaledWidth, _commonData->DownscaledHeight };
-		dispatchDesc.motionVectorScale = { 1.f, 1.f };
+		dispatchDesc.motionVectorScale = { static_cast<float>(_commonData->DownscaledWidth), 
+			static_cast<float>(_commonData->DownscaledHeight) };
 		dispatchDesc.upscaleSize = { _commonData->WindowWidth, _commonData->WindowHeight };
 		// We use inverted depth, this is not a mistake
 		dispatchDesc.cameraNear = _commonData->ActiveCameraFarPlane;
