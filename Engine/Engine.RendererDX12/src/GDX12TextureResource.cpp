@@ -9,7 +9,8 @@ GDX12TextureResource::GDX12TextureResource(ComPtr<ID3D12Resource> resource) :
 	_desc = D3DResource->GetDesc();
 }
 
-GDX12TextureResource::GDX12TextureResource()
+GDX12TextureResource::GDX12TextureResource() : _currentAccess(D3D12_BARRIER_ACCESS_COMMON),
+    _currentLayout(D3D12_BARRIER_LAYOUT_COMMON), _currentSync(D3D12_BARRIER_SYNC_ALL), _desc({})
 {
 }
 
