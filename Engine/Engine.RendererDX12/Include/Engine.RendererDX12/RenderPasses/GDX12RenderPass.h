@@ -128,6 +128,15 @@ public:
     Matrix ClipToCameraView = Identity4x4();
     Matrix ClipToPrevClip = Identity4x4();
     Matrix PrevClipToClip = Identity4x4();
+    float PrevFrameActiveCameraFOV = 0;
+    float PrevFrameActiveCameraNearPlane = 0;
+    float PrevFrameActiveCameraFarPlane = 0;
+    float PrevFrameActiveCameraJitterOffsetX = 0;
+    float PrevFrameActiveCameraJitterOffsetY = 0;
+    Matrix PrevFrameCameraViewToClip = Identity4x4();
+    Matrix PrevFrameClipToCameraView = Identity4x4();
+    Matrix PrevFrameClipToPrevClip = Identity4x4();
+    Matrix PrevFramePrevClipToClip = Identity4x4();
     GameTimer* GameTimer = nullptr;
     UINT WindowWidth = 0;
     UINT WindowHeight = 0;

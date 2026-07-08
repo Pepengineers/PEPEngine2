@@ -265,17 +265,24 @@ private:
 		Constants constants = {};
 
 		//expects row major unjittered matrices
-		constants.cameraViewToClip = *reinterpret_cast<sl::float4x4*>(&_commonData->CameraViewToClip);
-		constants.clipToCameraView = *reinterpret_cast<sl::float4x4*>(&_commonData->ClipToCameraView);
-		constants.clipToPrevClip = *reinterpret_cast<sl::float4x4*>(&_commonData->ClipToPrevClip);
-		constants.prevClipToClip = *reinterpret_cast<sl::float4x4*>(&_commonData->PrevClipToClip);
+		const Matrix& cameraViewToClip = _commonData->PrevFrameCameraViewToClip;
+		const Matrix& clipToCameraView = _commonData->PrevFrameClipToCameraView;
+		const Matrix& clipToPrevClip = _commonData->PrevFrameClipToPrevClip;
+		const Matrix& prevClipToClip = _commonData->PrevFramePrevClipToClip;
 
-		constants.cameraNear = _commonData->ActiveCameraNearPlane;
-		constants.cameraFar = _commonData->ActiveCameraFarPlane;
-		constants.cameraFOV = XMConvertToRadians(_commonData->ActiveCameraFOV);
+		constants.cameraViewToClip = *reinterpret_cast<const sl::float4x4*>(&cameraViewToClip);
+		constants.clipToCameraView = *reinterpret_cast<const sl::float4x4*>(&clipToCameraView);
+		constants.clipToPrevClip = *reinterpret_cast<const sl::float4x4*>(&clipToPrevClip);
+		constants.prevClipToClip = *reinterpret_cast<const sl::float4x4*>(&prevClipToClip);
+
+		constants.cameraNear = _commonData->PrevFrameActiveCameraNearPlane;
+		constants.cameraFar = _commonData->PrevFrameActiveCameraFarPlane;
+		constants.cameraFOV = XMConvertToRadians(_commonData->PrevFrameActiveCameraFOV);
 		constants.cameraAspectRatio = static_cast<float>(_commonData->WindowWidth) / _commonData->WindowHeight;
 
-		constants.jitterOffset = { -_commonData->ActiveCameraJitterOffsetX, -_commonData->ActiveCameraJitterOffsetY };
+		constants.jitterOffset = {
+			-_commonData->PrevFrameActiveCameraJitterOffsetX,
+			-_commonData->PrevFrameActiveCameraJitterOffsetY };
 		constants.mvecScale = { 1.f, 1.f };
 
 		constants.depthInverted = Boolean::eTrue;

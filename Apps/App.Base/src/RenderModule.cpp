@@ -39,7 +39,7 @@ RenderModule::~RenderModule()
 
     GDX12ShaderCompiler::Shutdown();
     GDX12DeviceFactory::Reset();
-    GDX12StatsLogger::GetInstance()->GenerateReport(_primaryDevice.get(), _secondaryDevice.get(), 1);
+    GDX12StatsLogger::GetInstance()->GenerateReport(_primaryDevice.get(), _secondaryDevice.get(), 2);
     GDX12StatsLogger::GetInstance()->Shutdown();
 }
 
@@ -53,7 +53,7 @@ void RenderModule::Initialize()
     _RPcommonData.SSAAmultiplier = SSAAmultiplier;
 
     // This value will be later provided by external pipeline config
-    bool useStreamlineSDK = true;
+    bool useStreamlineSDK = false;
     // Streamline is initialized on the primary device only
     if (useStreamlineSDK) { GDX12StreamlineSDK::Get().Initialize(); }
 
@@ -832,7 +832,7 @@ void RenderModule::ConfigureRenderPipeline()
     // Add in execution order
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureClearPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureCopyFromSharedMemoryPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DLSSUpscalePass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12XeSSUpscalePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
 
     _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());

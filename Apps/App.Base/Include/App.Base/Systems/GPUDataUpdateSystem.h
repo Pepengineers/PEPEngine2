@@ -68,14 +68,9 @@ public:
                     objConstants.PrevViewProjNoJitter = camera.PrevViewProjNoJitter;
                     XMStoreFloat4x4(&camera.PrevViewProjNoJitter, XMMatrixTranspose(unjitteredViewProj));
 
-
-                    pipelineCommonData->CameraViewToClip = unjitteredViewProj;
-                    pipelineCommonData->ClipToCameraView = pipelineCommonData->CameraViewToClip.Invert();
-
-                    pipelineCommonData->ClipToPrevClip = unjitteredViewProj.Invert() * camera.PrevViewProjNoJitter;
-                    pipelineCommonData->PrevClipToClip = pipelineCommonData->ClipToPrevClip.Invert();
-
                     // Jitter current camera proj matrix if it is needed
+                    float jitterX = 0.0f;
+                    float jitterY = 0.0f;
                     if (isActiveCamera &&
                         (renderModule->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_JITTER) ||
                             renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_JITTER)))
@@ -83,14 +78,35 @@ public:
                         static uint32_t frameIndex = 0;
                         frameIndex++;
 
-                        float jitterX = HaltonSequence(frameIndex, 2) - 0.5f;
-                        float jitterY = HaltonSequence(frameIndex, 3) - 0.5f;
+                        jitterX = HaltonSequence(frameIndex, 2) - 0.5f;
+                        jitterY = HaltonSequence(frameIndex, 3) - 0.5f;
                         float inputWidth = static_cast<float>(pipelineCommonData->DownscaledWidth);
                         float inputHeight = static_cast<float>(pipelineCommonData->DownscaledHeight);
                         proj._31 += jitterX * 2.0f / inputWidth;
                         proj._32 -= jitterY * 2.0f / inputHeight;
+                    }
+
+                    if (isActiveCamera)
+                    {
+                        pipelineCommonData->PrevFrameActiveCameraFOV = pipelineCommonData->ActiveCameraFOV;
+                        pipelineCommonData->PrevFrameActiveCameraNearPlane = pipelineCommonData->ActiveCameraNearPlane;
+                        pipelineCommonData->PrevFrameActiveCameraFarPlane = pipelineCommonData->ActiveCameraFarPlane;
+                        pipelineCommonData->PrevFrameActiveCameraJitterOffsetX = pipelineCommonData->ActiveCameraJitterOffsetX;
+                        pipelineCommonData->PrevFrameActiveCameraJitterOffsetY = pipelineCommonData->ActiveCameraJitterOffsetY;
+                        pipelineCommonData->PrevFrameCameraViewToClip = pipelineCommonData->CameraViewToClip;
+                        pipelineCommonData->PrevFrameClipToCameraView = pipelineCommonData->ClipToCameraView;
+                        pipelineCommonData->PrevFrameClipToPrevClip = pipelineCommonData->ClipToPrevClip;
+                        pipelineCommonData->PrevFramePrevClipToClip = pipelineCommonData->PrevClipToClip;
+
+                        pipelineCommonData->ActiveCameraFOV = camera.FOV;
+                        pipelineCommonData->ActiveCameraNearPlane = camera.NearPlane;
+                        pipelineCommonData->ActiveCameraFarPlane = camera.FarPlane;
                         pipelineCommonData->ActiveCameraJitterOffsetX = jitterX;
                         pipelineCommonData->ActiveCameraJitterOffsetY = jitterY;
+                        pipelineCommonData->CameraViewToClip = unjitteredViewProj;
+                        pipelineCommonData->ClipToCameraView = pipelineCommonData->CameraViewToClip.Invert();
+                        pipelineCommonData->ClipToPrevClip = unjitteredViewProj.Invert() * camera.PrevViewProjNoJitter;
+                        pipelineCommonData->PrevClipToClip = pipelineCommonData->ClipToPrevClip.Invert();
                     }
 
                     camera.ViewProj = view * proj;

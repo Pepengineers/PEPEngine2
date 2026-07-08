@@ -17,6 +17,9 @@ public:
     static GDX12StatsLogger* GetInstance();
 
     void RecordMspf(float mspf);
+    // 0 - FSR
+    // 1 - DLSS
+    // 2 - XeSS
     void GenerateReport(GDX12Device* primaryDevice, GDX12Device* secondaryDevice, int upscaletype);
     void Shutdown();
     int GetNumLogs() const;
@@ -34,9 +37,6 @@ private:
     static GDX12StatsLogger* _instance;
     std::vector<float> _frameTimes;
 
-    // 0 - FSR
-    // 1 - DLSS
-    // 2 - XeSS
     std::unordered_map<int, std::string> upscaleTypeToString = 
     {   {0, "FSR"},
         {1, "DLSS"},

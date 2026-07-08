@@ -93,12 +93,12 @@ public:
 			static_cast<float>(_commonData->DownscaledHeight) };
 		dispatchDesc.upscaleSize = { _commonData->WindowWidth, _commonData->WindowHeight };
 		// We use inverted depth, this is not a mistake
-		dispatchDesc.cameraNear = _commonData->ActiveCameraFarPlane;
-		dispatchDesc.cameraFar = _commonData->ActiveCameraNearPlane;
-		dispatchDesc.cameraFovAngleVertical = XMConvertToRadians(_commonData->ActiveCameraFOV);
+		dispatchDesc.cameraNear = _commonData->PrevFrameActiveCameraFarPlane;
+		dispatchDesc.cameraFar = _commonData->PrevFrameActiveCameraNearPlane;
+		dispatchDesc.cameraFovAngleVertical = XMConvertToRadians(_commonData->PrevFrameActiveCameraFOV);
 
-		dispatchDesc.jitterOffset.x = -_commonData->ActiveCameraJitterOffsetX;
-		dispatchDesc.jitterOffset.y = -_commonData->ActiveCameraJitterOffsetY;
+		dispatchDesc.jitterOffset.x = -_commonData->PrevFrameActiveCameraJitterOffsetX;
+		dispatchDesc.jitterOffset.y = -_commonData->PrevFrameActiveCameraJitterOffsetY;
 
 		dispatchDesc.enableSharpening = true;
 		dispatchDesc.sharpness = 1.f;
