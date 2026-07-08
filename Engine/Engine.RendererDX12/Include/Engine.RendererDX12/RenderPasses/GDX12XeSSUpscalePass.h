@@ -89,8 +89,8 @@ public:
 		execParams.pDepthTexture = depthStencil->GetResource()->D3DResource.Get();
 		execParams.pVelocityTexture = motionVectors->GetResource()->D3DResource.Get();
 		// I have no idea why, but the minus sign fixes bluriness
-		execParams.jitterOffsetX = -_commonData->PrevFrameActiveCameraJitterOffsetX;
-		execParams.jitterOffsetY = -_commonData->PrevFrameActiveCameraJitterOffsetY;
+		execParams.jitterOffsetX = _commonData->DualGPUMode ? -_commonData->PrevFrameActiveCameraJitterOffsetX : -_commonData->ActiveCameraJitterOffsetX;
+		execParams.jitterOffsetY = _commonData->DualGPUMode ? -_commonData->PrevFrameActiveCameraJitterOffsetY : -_commonData->ActiveCameraJitterOffsetY;
 		execParams.inputWidth = _commonData->DownscaledWidth;
 		execParams.inputHeight = _commonData->DownscaledHeight;
 		execParams.resetHistory = false;

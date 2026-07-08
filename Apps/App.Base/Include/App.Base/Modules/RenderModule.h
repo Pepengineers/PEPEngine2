@@ -140,6 +140,7 @@ private:
     bool _dualGPUMode;
     std::unique_ptr<GDX12GPUTimer> _primaryGPUTimer;
     std::unique_ptr<GDX12GPUTimer> _secondaryGPUTimer;
+    int _upscaleType;
 
     GDX12DeviceResources _primaryResources;
     GDX12DeviceResources _secondaryResources;

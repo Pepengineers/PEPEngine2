@@ -2,6 +2,7 @@
 
 #include <sstream>
 #include <iomanip>
+#include <filesystem>
 
 #include "Engine.RendererDX12/GDX12Device.h"
 
@@ -28,7 +29,7 @@ void GDX12StatsLogger::GenerateReport(GDX12Device* primaryDevice, GDX12Device* s
     
     fileName += "_" + upscaleTypeToString[upscaletype] + ".txt";
 
-    std::ofstream reportFile(fileName);
+    std::ofstream reportFile(GetProjectRootPath() / fileName);
 
     reportFile << "CPU: " + GetCPUName() << "\n";
     reportFile << "Total RAM: " + std::to_string(GetTotalRAMMB()) << " MB" << "\n";
@@ -91,33 +92,31 @@ uint64_t GDX12StatsLogger::GetTotalRAMMB() const
     return memoryStatus.ullTotalPhys / (1024 * 1024);
 }
 
-void GDX12StatsLogger::ReadInitConfig(int& primaryGPUIndex, int& secondaryGPUIndex, int& ssaaMultiplier)
+std::filesystem::path GDX12StatsLogger::GetProjectRootPath() const
 {
-    std::ifstream configFile("SUPER_INIT_CONFIG.txt");
+    return std::filesystem::path(SOLUTION_DIR);
+}
+
+int GDX12StatsLogger::ReadConfigValue(const std::string& line) const
+{
+    return std::stoi(line.substr(line.find(':') + 1));
+}
+
+void GDX12StatsLogger::ReadInitConfig(int& primaryGPUIndex, int& secondaryGPUIndex, int& ssaaMultiplier, int& upscaleType, bool& singleGPUMode)
+{
+    std::ifstream configFile(GetProjectRootPath() / "SUPER_INIT_CONFIG.txt");
     std::string line;
 
-    while (std::getline(configFile, line))
-    {
-        // Remove whitespace
-        line.erase(0, line.find_first_not_of(" \t\r\n"));
-        line.erase(line.find_last_not_of(" \t\r\n") + 1);
+    std::getline(configFile, line);
+    primaryGPUIndex = ReadConfigValue(line);
 
-        if (line.empty() || line[0] == '#') { continue; }
+    std::getline(configFile, line);
+    secondaryGPUIndex = ReadConfigValue(line);
+    singleGPUMode = secondaryGPUIndex == -1;
 
-        size_t colonPos = line.find(':');
-        if (colonPos == std::string::npos) { continue; }
+    std::getline(configFile, line);
+    ssaaMultiplier = ReadConfigValue(line);
 
-        std::string key = line.substr(0, colonPos);
-        std::string value = line.substr(colonPos + 1);
-
-        // Trim whitespace from key and value
-        key.erase(0, key.find_first_not_of(" \t\r\n"));
-        key.erase(key.find_last_not_of(" \t\r\n") + 1);
-        value.erase(0, value.find_first_not_of(" \t\r\n"));
-        value.erase(value.find_last_not_of(" \t\r\n") + 1);
-
-        if (key == "PrimaryGPUIndex") { primaryGPUIndex = std::stoi(value); }
-        else if (key == "SecondaryGPUIndex") { secondaryGPUIndex = std::stoi(value); }
-        else if (key == "SSAA multiplier") { ssaaMultiplier = std::stoi(value); }
-    }
+    std::getline(configFile, line);
+    upscaleType = ReadConfigValue(line);
 }

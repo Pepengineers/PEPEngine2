@@ -22,9 +22,31 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
 #include "Engine.RendererDX12/GDX12StatsLogger.h"
 
+namespace
+{
+    constexpr int UPSCALE_TYPE_FSR = 0;
+    constexpr int UPSCALE_TYPE_DLSS = 1;
+    constexpr int UPSCALE_TYPE_XESS = 2;
+
+    std::unique_ptr<GDX12RenderPass> CreateUpscalePass(int upscaleType)
+    {
+        switch (upscaleType)
+        {
+        case UPSCALE_TYPE_FSR:
+            return std::make_unique<GDX12FSRUpscalePass>();
+        case UPSCALE_TYPE_DLSS:
+            return std::make_unique<GDX12DLSSUpscalePass>();
+        case UPSCALE_TYPE_XESS:
+            return std::make_unique<GDX12XeSSUpscalePass>();
+        default:
+            return std::make_unique<GDX12XeSSUpscalePass>();
+        }
+    }
+}
+
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
     _dualGPUMode(false), _window(window), _timer(timer),
-    _primaryPipelineFlags(0), _secondaryPipelineFlags(0)
+    _primaryPipelineFlags(0), _secondaryPipelineFlags(0), _upscaleType(UPSCALE_TYPE_XESS)
 {
     _RPcommonData.GameTimer = _timer;
 }
@@ -39,7 +61,7 @@ RenderModule::~RenderModule()
 
     GDX12ShaderCompiler::Shutdown();
     GDX12DeviceFactory::Reset();
-    GDX12StatsLogger::GetInstance()->GenerateReport(_primaryDevice.get(), _secondaryDevice.get(), 2);
+    GDX12StatsLogger::GetInstance()->GenerateReport(_primaryDevice.get(), _dualGPUMode ? _secondaryDevice.get() : nullptr, _upscaleType);
     GDX12StatsLogger::GetInstance()->Shutdown();
 }
 
@@ -48,12 +70,13 @@ void RenderModule::Initialize()
     int primaryGPUIndex;
     int secondaryGPUIndex;
     int SSAAmultiplier;
-    GDX12StatsLogger::GetInstance()->ReadInitConfig(primaryGPUIndex, secondaryGPUIndex, SSAAmultiplier);
+    bool singleGPUMode;
+    GDX12StatsLogger::GetInstance()->ReadInitConfig(primaryGPUIndex, secondaryGPUIndex, SSAAmultiplier, _upscaleType, singleGPUMode);
 
     _RPcommonData.SSAAmultiplier = SSAAmultiplier;
-
+    _RPcommonData.DualGPUMode = !singleGPUMode;
     // This value will be later provided by external pipeline config
-    bool useStreamlineSDK = false;
+    bool useStreamlineSDK = _upscaleType == UPSCALE_TYPE_DLSS;
     // Streamline is initialized on the primary device only
     if (useStreamlineSDK) { GDX12StreamlineSDK::Get().Initialize(); }
 
@@ -70,7 +93,7 @@ void RenderModule::Initialize()
     _primaryResources.Initialize(_primaryDevice.get());
     _primaryGPUTimer = std::make_unique<GDX12GPUTimer>(_primaryDevice.get());
 
-    if (true)
+    if (!singleGPUMode)
     {
         _secondaryDevice = std::make_unique<GDX12Device>();
         _secondaryDevice->Role = DEVICE_ROLE_SECONDARY;
@@ -831,47 +854,86 @@ void RenderModule::ConfigureRenderPipeline()
     // Setup render passes you would like to execute
     // Add in execution order
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureClearPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureCopyFromSharedMemoryPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12XeSSUpscalePass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
 
-    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
-    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
-    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
-    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
-    _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureCopyToSharedMemoryPass>());
+    if (_dualGPUMode)
+    {
+        _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureCopyFromSharedMemoryPass>());
+        _primaryRenderPassExecutionList.push_back(CreateUpscalePass(_upscaleType));
+        _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
+
+        _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
+        _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
+        _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
+        _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
+        _secondaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureCopyToSharedMemoryPass>());
+    }
+    else
+    {
+        _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
+        _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
+        _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
+        _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
+        _primaryRenderPassExecutionList.push_back(CreateUpscalePass(_upscaleType));
+        _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
+    }
 
     SetupRenderPasses();
 
     // Link inputs & outputs for each pass that needs it
-    GDX12RenderPass* clearPass = _primaryRenderPassExecutionList[0].get();
-    GDX12RenderPass* copyFromPass = _primaryRenderPassExecutionList[1].get();
-    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[2].get();
-    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[3].get();
+    if (_dualGPUMode)
+    {
+        GDX12RenderPass* clearPass = _primaryRenderPassExecutionList[0].get();
+        GDX12RenderPass* copyFromPass = _primaryRenderPassExecutionList[1].get();
+        GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[2].get();
+        GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[3].get();
 
-    GDX12RenderPass* cullingPass = _secondaryRenderPassExecutionList[0].get();
-    GDX12RenderPass* opaquePass = _secondaryRenderPassExecutionList[1].get();
-    GDX12RenderPass* transparencyPass = _secondaryRenderPassExecutionList[2].get();
-    GDX12RenderPass* compositionPass = _secondaryRenderPassExecutionList[3].get();
-    GDX12RenderPass* copyToPass = _secondaryRenderPassExecutionList[4].get();
+        GDX12RenderPass* cullingPass = _secondaryRenderPassExecutionList[0].get();
+        GDX12RenderPass* opaquePass = _secondaryRenderPassExecutionList[1].get();
+        GDX12RenderPass* transparencyPass = _secondaryRenderPassExecutionList[2].get();
+        GDX12RenderPass* compositionPass = _secondaryRenderPassExecutionList[3].get();
+        GDX12RenderPass* copyToPass = _secondaryRenderPassExecutionList[4].get();
 
-    clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
-    copyFromPass->SetInputs({ copyToPass->GetOutput(0), copyToPass->GetOutput(1), copyToPass->GetOutput(2) });
-    upscalePass->SetInputs({ copyFromPass->GetOutput(0), copyFromPass->GetOutput(1), copyFromPass->GetOutput(2) });
-    outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get() });
+        clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
+        copyFromPass->SetInputs({ copyToPass->GetOutput(0), copyToPass->GetOutput(1), copyToPass->GetOutput(2) });
+        upscalePass->SetInputs({ copyFromPass->GetOutput(0), copyFromPass->GetOutput(1), copyFromPass->GetOutput(2) });
+        outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get() });
 
-    cullingPass->SetInputs({});
-    opaquePass->SetInputs({});
-    transparencyPass->SetInputs({ opaquePass->GetOutput(2) });
-    compositionPass->SetInputs({ opaquePass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1),
-        opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
-    copyToPass->SetInputs({ compositionPass->GetOutput(1), compositionPass->GetOutput(2), compositionPass->GetOutput(0) });
+        cullingPass->SetInputs({});
+        opaquePass->SetInputs({});
+        transparencyPass->SetInputs({ opaquePass->GetOutput(2) });
+        compositionPass->SetInputs({ opaquePass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1),
+            opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
+        copyToPass->SetInputs({ compositionPass->GetOutput(1), compositionPass->GetOutput(2), compositionPass->GetOutput(0) });
 
-    copyFromPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    copyToPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    transparencyPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    compositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+        copyFromPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+        copyToPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+        opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+        transparencyPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+        compositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    }
+    else
+    {
+        GDX12RenderPass* clearPass = _primaryRenderPassExecutionList[0].get();
+        GDX12RenderPass* cullingPass = _primaryRenderPassExecutionList[1].get();
+        GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[2].get();
+        GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[3].get();
+        GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[4].get();
+        GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[5].get();
+        GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[6].get();
+
+        clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
+        cullingPass->SetInputs({});
+        opaquePass->SetInputs({});
+        transparencyPass->SetInputs({ opaquePass->GetOutput(2) });
+        compositionPass->SetInputs({ opaquePass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1),
+            opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
+        upscalePass->SetInputs({ compositionPass->GetOutput(1), compositionPass->GetOutput(2), compositionPass->GetOutput(0) });
+        outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get() });
+
+        opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+        transparencyPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+        compositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    }
 
     InitializeRenderPasses();
 }

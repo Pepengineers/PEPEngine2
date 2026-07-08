@@ -281,8 +281,8 @@ private:
 		constants.cameraAspectRatio = static_cast<float>(_commonData->WindowWidth) / _commonData->WindowHeight;
 
 		constants.jitterOffset = {
-			-_commonData->PrevFrameActiveCameraJitterOffsetX,
-			-_commonData->PrevFrameActiveCameraJitterOffsetY };
+			_commonData->DualGPUMode ? -_commonData->PrevFrameActiveCameraJitterOffsetX : -_commonData->ActiveCameraJitterOffsetX,
+			_commonData->DualGPUMode ? -_commonData->PrevFrameActiveCameraJitterOffsetY : -_commonData->ActiveCameraJitterOffsetY };
 		constants.mvecScale = { 1.f, 1.f };
 
 		constants.depthInverted = Boolean::eTrue;

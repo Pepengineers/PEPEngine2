@@ -1,3 +1,0 @@
-PrimaryGPUIndex: 0
-SecondaryGPUIndex: 1
-SSAA multiplier: 4

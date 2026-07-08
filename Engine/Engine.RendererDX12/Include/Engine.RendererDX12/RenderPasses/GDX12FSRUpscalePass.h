@@ -96,9 +96,9 @@ public:
 		dispatchDesc.cameraNear = _commonData->PrevFrameActiveCameraFarPlane;
 		dispatchDesc.cameraFar = _commonData->PrevFrameActiveCameraNearPlane;
 		dispatchDesc.cameraFovAngleVertical = XMConvertToRadians(_commonData->PrevFrameActiveCameraFOV);
-
-		dispatchDesc.jitterOffset.x = -_commonData->PrevFrameActiveCameraJitterOffsetX;
-		dispatchDesc.jitterOffset.y = -_commonData->PrevFrameActiveCameraJitterOffsetY;
+		
+		dispatchDesc.jitterOffset.x = _commonData->DualGPUMode ? -_commonData->PrevFrameActiveCameraJitterOffsetX : -_commonData->ActiveCameraJitterOffsetX;
+		dispatchDesc.jitterOffset.y = _commonData->DualGPUMode ? -_commonData->PrevFrameActiveCameraJitterOffsetY : -_commonData->ActiveCameraJitterOffsetY;
 
 		dispatchDesc.enableSharpening = true;
 		dispatchDesc.sharpness = 1.f;

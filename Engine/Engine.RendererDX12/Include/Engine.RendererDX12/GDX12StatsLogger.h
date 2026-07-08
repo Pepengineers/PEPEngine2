@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <fstream>
+#include <filesystem>
 #include <windows.h>
 #include <intrin.h>
 #include <sysinfoapi.h>
@@ -23,7 +24,7 @@ public:
     void GenerateReport(GDX12Device* primaryDevice, GDX12Device* secondaryDevice, int upscaletype);
     void Shutdown();
     int GetNumLogs() const;
-    void ReadInitConfig(int& primaryGPUIndex, int& secondaryGPUIndex, int& ssaaMultiplier);
+    void ReadInitConfig(int& primaryGPUIndex, int& secondaryGPUIndex, int& ssaaMultiplier, int& upscaleType, bool& singleGPUMode);
 
 private:
     GDX12StatsLogger() = default;
@@ -33,6 +34,8 @@ private:
 
     std::string GetCPUName() const;
     uint64_t GetTotalRAMMB() const;
+    std::filesystem::path GetProjectRootPath() const;
+    int ReadConfigValue(const std::string& line) const;
 
     static GDX12StatsLogger* _instance;
     std::vector<float> _frameTimes;

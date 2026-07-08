@@ -1,0 +1,4 @@
+PrimaryGPUIndex: 0
+SecondaryGPUIndex: 1	// -1 for single GPU mode
+SSAA multiplier: 4
+UpscaleType : 2 // 0 - FSR, 1 - DLSS, 2 - XeSS

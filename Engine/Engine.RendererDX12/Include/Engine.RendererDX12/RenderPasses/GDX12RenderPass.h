@@ -144,4 +144,5 @@ public:
     UINT DownscaledHeight = 0;
     GDX12RenderPass* Upscaler = nullptr;
     UINT SSAAmultiplier = 1;
+    bool DualGPUMode = false;
 };
