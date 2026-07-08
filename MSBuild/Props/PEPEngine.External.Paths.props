@@ -19,5 +19,8 @@
     <PEPExternalWwiseSDKInclude Condition="'$(PEPExternalWwiseSDKInclude)'==''">$(PEPExternalRoot)wwise\Include\wwise</PEPExternalWwiseSDKInclude>
     <PEPExternalRapidYamlInclude Condition="'$(PEPExternalRapidYamlInclude)'==''">$(PEPExternalRoot)rapidyaml\src</PEPExternalRapidYamlInclude>
     <PEPExternalRapidYamlC4CoreInclude Condition="'$(PEPExternalRapidYamlC4CoreInclude)'==''">$(PEPExternalRoot)rapidyaml\ext\c4core\src</PEPExternalRapidYamlC4CoreInclude>
+    <PEPExternalJoltRoot Condition="'$(PEPExternalJoltRoot)'==''">$(PEPExternalRoot)jolt\</PEPExternalJoltRoot>
+    <PEPExternalJoltSourceDir Condition="'$(PEPExternalJoltSourceDir)'==''">$(PEPExternalJoltRoot)JoltPhysics\</PEPExternalJoltSourceDir>
+    <PEPExternalJoltLibDir Condition="'$(PEPExternalJoltLibDir)'==''">$(PEPExternalJoltRoot)lib\Win64\$(Configuration)\</PEPExternalJoltLibDir>
   </PropertyGroup>
 </Project>

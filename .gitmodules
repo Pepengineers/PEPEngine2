@@ -1,3 +1,6 @@
 [submodule "External/External.Libraries/rapidyaml"]
 	path = External/External.Libraries/rapidyaml
 	url = https://github.com/biojppm/rapidyaml.git
+[submodule "External/External.Libraries/jolt/JoltPhysics"]
+	path = External/External.Libraries/jolt/JoltPhysics
+	url = https://github.com/jrouwe/JoltPhysics.git

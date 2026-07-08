@@ -521,6 +521,9 @@
     <None Include="assimp\Include\assimp\vector3.inl" />
   </ItemGroup>
   <ItemGroup>
+    <Content Include="jolt\lib\Win64\Debug\Jolt.lib" />
+    <Content Include="jolt\lib\Win64\Distribution\Jolt.lib" />
+    <Content Include="jolt\lib\Win64\Release\Jolt.lib" />
     <Content Include="rapidyaml\.clang-tidy" />
     <Content Include="rapidyaml\.git" />
     <Content Include="rapidyaml\.github\cancel_workflows.sh" />
