@@ -30,7 +30,7 @@ GDX12CommandList::~GDX12CommandList()
 	_commandAllocator.Reset();
 }
 
-const ComPtr<ID3D12GraphicsCommandList10>& GDX12CommandList::GetCommandList()
+const ComPtr<ID3D12GraphicsCommandList7>& GDX12CommandList::GetCommandList()
 {
 	return _commandList;
 }

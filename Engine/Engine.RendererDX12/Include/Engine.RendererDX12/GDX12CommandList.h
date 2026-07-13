@@ -14,7 +14,7 @@ public:
 	GDX12CommandList(GDX12Device* device);
 	~GDX12CommandList();
 
-	const ComPtr<ID3D12GraphicsCommandList10>& GetCommandList();
+	const ComPtr<ID3D12GraphicsCommandList7>& GetCommandList();
 	const ComPtr<ID3D12CommandAllocator>& GetCommandAllocator();
 	void Reset();
 
@@ -90,7 +90,7 @@ public:
 
 
 private:
-	ComPtr<ID3D12GraphicsCommandList10> _commandList;
+	ComPtr<ID3D12GraphicsCommandList7> _commandList;
 	ComPtr<ID3D12CommandAllocator> _commandAllocator;
 
 	//Cached states
