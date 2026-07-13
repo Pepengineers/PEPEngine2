@@ -698,9 +698,6 @@ void RenderModule::OnUpdate()
     if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
     { _primaryResources.UpdateMaterialCB(_materials); }
 
-    std::string msg = "Primary GPU Time: " + std::to_string(_primaryGPUTimer->GetTimeMS()) + "\n";
-    OutputDebugStringA(msg.c_str());
-
     // same for SecondaryDevice
     if (_dualGPUMode)
     {
