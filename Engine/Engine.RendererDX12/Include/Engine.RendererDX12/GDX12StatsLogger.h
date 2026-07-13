@@ -17,7 +17,7 @@ class GDX12StatsLogger
 public:
     static GDX12StatsLogger* GetInstance();
 
-    void RecordMspf(float mspf);
+    void RecordFrameStats(float mspf, double primaryGPUTimeMS, double secondaryGPUTimeMS);
     // 0 - FSR
     // 1 - DLSS
     // 2 - XeSS
@@ -38,7 +38,9 @@ private:
     int ReadConfigValue(const std::string& line) const;
 
     static GDX12StatsLogger* _instance;
-    std::vector<float> _frameTimes;
+    std::vector<float> _mspfLogs;
+    std::vector<double> _primaryGPUTimeLogs;
+    std::vector<double> _secondaryGPUTimeLogs;
 
     std::unordered_map<int, std::string> upscaleTypeToString = 
     {   {0, "FSR"},

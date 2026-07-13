@@ -551,6 +551,16 @@ bool RenderModule::SecondaryPipelineHasFlag(uint32_t flag)
     return _secondaryPipelineFlags & flag;
 }
 
+double RenderModule::GetPrimaryGPUTimeMS()
+{
+    return _primaryGPUTimer ? _primaryGPUTimer->GetTimeMS() : -1.0;
+}
+
+double RenderModule::GetSecondaryGPUTimeMS()
+{
+    return _secondaryGPUTimer ? _secondaryGPUTimer->GetTimeMS() : -1.0;
+}
+
 void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
 {
     TransformCompGPUData gpuData;

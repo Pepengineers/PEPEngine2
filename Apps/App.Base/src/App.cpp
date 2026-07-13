@@ -5,6 +5,7 @@
 
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 #include "Engine.RendererDX12/GDX12StatsLogger.h"
+#include "App.Base/Modules/RenderModule.h"
 
 using Microsoft::WRL::ComPtr;
 using namespace std;
@@ -38,8 +39,11 @@ void App::CalculateFrameStats() const
 
         std::wstring FpsString = std::to_wstring(Fps);
         std::wstring MsPerFrameString = std::to_wstring(MsPerFrame);
-
-        GDX12StatsLogger::GetInstance()->RecordMspf(MsPerFrame);
+        
+        auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+        const double primaryGPUTimeMS = renderModule ? renderModule->GetPrimaryGPUTimeMS() : -1.0;
+        const double secondaryGPUTimeMS = renderModule ? renderModule->GetSecondaryGPUTimeMS() : -1.0;
+        GDX12StatsLogger::GetInstance()->RecordFrameStats(MsPerFrame, primaryGPUTimeMS, secondaryGPUTimeMS);
 
         std::wstring WindowText = _window->GetWindowTitle() +
             L"    fps: " + FpsString +

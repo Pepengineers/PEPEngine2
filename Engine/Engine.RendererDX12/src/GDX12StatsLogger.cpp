@@ -15,10 +15,13 @@ GDX12StatsLogger* GDX12StatsLogger::GetInstance()
     return _instance;
 }
 
-void GDX12StatsLogger::RecordMspf(float mspf)
+void GDX12StatsLogger::RecordFrameStats(float mspf, double primaryGPUTimeMS, double secondaryGPUTimeMS)
 {
-    _frameTimes.push_back(mspf);
-    if (_frameTimes.size() == 200) { PostQuitMessage(0); }
+    _mspfLogs.push_back(mspf);
+    _primaryGPUTimeLogs.push_back(primaryGPUTimeMS);
+    _secondaryGPUTimeLogs.push_back(secondaryGPUTimeMS);
+
+    if (_mspfLogs.size() == 200) { PostQuitMessage(0); }
 }
 
 void GDX12StatsLogger::GenerateReport(GDX12Device* primaryDevice, GDX12Device* secondaryDevice, int upscaletype)
@@ -36,9 +39,15 @@ void GDX12StatsLogger::GenerateReport(GDX12Device* primaryDevice, GDX12Device* s
     reportFile << "Primary GPU: " + primaryDevice->GetDeviceFeatures().Name << "\n";
     reportFile << "Secondary GPU: " << (secondaryDevice ? secondaryDevice->GetDeviceFeatures().Name : "NONE");
     reportFile << "\n";
-    reportFile << _frameTimes.size() << "\n";
-    for (float mspf : _frameTimes)
+    reportFile << "mspfLogs: " << _mspfLogs.size() << "\n";
+    for (float mspf : _mspfLogs)
         reportFile << std::fixed << std::setprecision(6) << mspf << "\n";
+    reportFile << "primaryGpuTimeLogs: " << _primaryGPUTimeLogs.size() << "\n";
+    for (double primaryGPUTimeMS : _primaryGPUTimeLogs)
+        reportFile << std::fixed << std::setprecision(6) << primaryGPUTimeMS << "\n";
+    reportFile << "secondaryGpuTimeLogs: " << _secondaryGPUTimeLogs.size() << "\n";
+    for (double secondaryGPUTimeMS : _secondaryGPUTimeLogs)
+        reportFile << std::fixed << std::setprecision(6) << secondaryGPUTimeMS << "\n";
 
     reportFile.close();
 }
@@ -54,7 +63,7 @@ void GDX12StatsLogger::Shutdown()
 
 int GDX12StatsLogger::GetNumLogs() const
 {
-    return static_cast<int>(_frameTimes.size());
+    return static_cast<int>(_mspfLogs.size());
 }
 
 std::string GDX12StatsLogger::GetCPUName() const

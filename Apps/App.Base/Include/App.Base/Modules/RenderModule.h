@@ -104,6 +104,8 @@ public:
     RenderPipelineCommonData* GetRenderPipelineCommonData();
     bool PrimaryPipelineHasFlag(uint32_t flag);
     bool SecondaryPipelineHasFlag(uint32_t flag);
+    double GetPrimaryGPUTimeMS();
+    double GetSecondaryGPUTimeMS();
 
 protected:
     void OnUpdate() override;
