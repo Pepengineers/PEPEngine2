@@ -23,20 +23,24 @@ public:
     double GetTimeMS();
 
 private:
+    struct GPUTimerFrame
+    {
+        ComPtr<ID3D12QueryHeap> QueryHeap;
+        ComPtr<ID3D12Resource> ReadbackBuffer;
+        UINT64* MappedReadbackData = nullptr;
+        UINT64 FenceValue = 0;
+    };
+
     void UpdateResolvedFrames();
-    UINT GetStartQueryIndex(UINT frameIndex) const;
-    UINT GetEndQueryIndex(UINT frameIndex) const;
-    UINT64 GetReadbackOffset(UINT frameIndex) const;
 
     static constexpr UINT BufferedFrameCount = 3;
     static constexpr UINT QueryCount = 2;
+    static constexpr UINT StartQueryIndex = 0;
+    static constexpr UINT EndQueryIndex = 1;
 
     GDX12CommandQueue* _commandQueue;
-    ComPtr<ID3D12QueryHeap> _queryHeap;
-    ComPtr<ID3D12Resource> _readbackBuffer;
-    UINT64* _mappedReadbackData;
     UINT64 _timestampFrequency;
     double _timeMS;
     UINT _activeFrameIndex;
-    std::array<UINT64, BufferedFrameCount> _frameFenceValues;
+    std::array<GPUTimerFrame, BufferedFrameCount> _frames;
 };

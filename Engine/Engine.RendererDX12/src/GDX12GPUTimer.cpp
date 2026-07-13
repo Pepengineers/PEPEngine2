@@ -6,11 +6,9 @@
 
 GDX12GPUTimer::GDX12GPUTimer()
     : _commandQueue(nullptr)
-    , _mappedReadbackData(nullptr)
     , _timestampFrequency(0)
     , _timeMS(-1.0)
     , _activeFrameIndex(0)
-    , _frameFenceValues{}
 {
 }
 
@@ -34,36 +32,49 @@ void GDX12GPUTimer::Initialize(GDX12Device* device)
     _commandQueue = device->GetCommandQueue();
     ThrowIfFailed(_commandQueue->GetCommandQueue()->GetTimestampFrequency(&_timestampFrequency));
 
-    D3D12_QUERY_HEAP_DESC queryHeapDesc = {};
-    queryHeapDesc.Count = BufferedFrameCount * QueryCount;
-    queryHeapDesc.NodeMask = 0;
-    queryHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+    for (auto& frame : _frames)
+    {
+        D3D12_QUERY_HEAP_DESC queryHeapDesc = {};
+        queryHeapDesc.Count = QueryCount;
+        queryHeapDesc.NodeMask = 0;
+        queryHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
 
-    ThrowIfFailed(device->GetDevice()->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&_queryHeap)));
+        ThrowIfFailed(device->GetDevice()->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&frame.QueryHeap)));
 
-    CD3DX12_HEAP_PROPERTIES readbackHeapProperties(D3D12_HEAP_TYPE_READBACK);
-    CD3DX12_RESOURCE_DESC readbackBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(UINT64) * BufferedFrameCount * QueryCount);
+        CD3DX12_HEAP_PROPERTIES readbackHeapProperties(D3D12_HEAP_TYPE_READBACK);
+        CD3DX12_RESOURCE_DESC readbackBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(UINT64) * QueryCount);
 
-    ThrowIfFailed(device->GetDevice()->CreateCommittedResource(
-        &readbackHeapProperties, D3D12_HEAP_FLAG_NONE,
-        &readbackBufferDesc, D3D12_RESOURCE_STATE_COPY_DEST,
-        nullptr, IID_PPV_ARGS(&_readbackBuffer)));
+        ThrowIfFailed(device->GetDevice()->CreateCommittedResource(
+            &readbackHeapProperties,
+            D3D12_HEAP_FLAG_NONE,
+            &readbackBufferDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(&frame.ReadbackBuffer)));
 
-    ThrowIfFailed(_readbackBuffer->Map(0, nullptr, reinterpret_cast<void**>(&_mappedReadbackData)));
+        ThrowIfFailed(frame.ReadbackBuffer->Map(0, nullptr, reinterpret_cast<void**>(&frame.MappedReadbackData)));
+    }
 }
 
 void GDX12GPUTimer::Reset()
 {
-    if (_readbackBuffer && _mappedReadbackData) { _readbackBuffer->Unmap(0, nullptr); }
+    for (auto& frame : _frames)
+    {
+        if (frame.ReadbackBuffer && frame.MappedReadbackData)
+        {
+            frame.ReadbackBuffer->Unmap(0, nullptr);
+        }
+
+        frame.QueryHeap.Reset();
+        frame.ReadbackBuffer.Reset();
+        frame.MappedReadbackData = nullptr;
+        frame.FenceValue = 0;
+    }
 
     _commandQueue = nullptr;
-    _queryHeap.Reset();
-    _readbackBuffer.Reset();
-    _mappedReadbackData = nullptr;
     _timestampFrequency = 0;
     _timeMS = -1.0;
     _activeFrameIndex = 0;
-    _frameFenceValues.fill(0);
 }
 
 void GDX12GPUTimer::Start(GDX12CommandList* commandList)
@@ -72,33 +83,38 @@ void GDX12GPUTimer::Start(GDX12CommandList* commandList)
 
     UpdateResolvedFrames();
 
-    if (!_queryHeap) { return; }
+    auto& frame = _frames[_activeFrameIndex];
+    if (!frame.QueryHeap) { return; }
 
-    if (_frameFenceValues[_activeFrameIndex] != 0 && _commandQueue && _commandQueue->GetFence()->GetCompletedValue() < _frameFenceValues[_activeFrameIndex])
+    if (frame.FenceValue != 0 && _commandQueue && _commandQueue->GetFence()->GetCompletedValue() < frame.FenceValue)
     {
-        _commandQueue->CPUWaitForFenceValue(_frameFenceValues[_activeFrameIndex]);
+        _commandQueue->CPUWaitForFenceValue(frame.FenceValue);
         UpdateResolvedFrames();
     }
 
-    commandList->GetCommandList()->EndQuery(_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, GetStartQueryIndex(_activeFrameIndex));
+    commandList->GetCommandList()->EndQuery(frame.QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, StartQueryIndex);
 }
 
 void GDX12GPUTimer::Stop(GDX12CommandList* commandList)
 {
     if (!commandList) { return; }
 
-    if (!_queryHeap || !_readbackBuffer) { return; }
+    auto& frame = _frames[_activeFrameIndex];
+    if (!frame.QueryHeap || !frame.ReadbackBuffer) { return; }
 
-    commandList->GetCommandList()->EndQuery(_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, GetEndQueryIndex(_activeFrameIndex));
+    commandList->GetCommandList()->EndQuery(frame.QueryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, EndQueryIndex);
     commandList->GetCommandList()->ResolveQueryData(
-        _queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP,
-        GetStartQueryIndex(_activeFrameIndex), QueryCount,
-        _readbackBuffer.Get(), GetReadbackOffset(_activeFrameIndex));
+        frame.QueryHeap.Get(),
+        D3D12_QUERY_TYPE_TIMESTAMP,
+        0,
+        QueryCount,
+        frame.ReadbackBuffer.Get(),
+        0);
 }
 
 void GDX12GPUTimer::OnCommandListExecuted(UINT64 fenceValue)
 {
-    _frameFenceValues[_activeFrameIndex] = fenceValue;
+    _frames[_activeFrameIndex].FenceValue = fenceValue;
     _activeFrameIndex = (_activeFrameIndex + 1) % BufferedFrameCount;
 }
 
@@ -110,47 +126,35 @@ double GDX12GPUTimer::GetTimeMS()
 
 void GDX12GPUTimer::UpdateResolvedFrames()
 {
-    if (!_commandQueue || !_mappedReadbackData || _timestampFrequency == 0) { return; }
+    if (!_commandQueue || _timestampFrequency == 0) { return; }
 
     const UINT64 completedFenceValue = _commandQueue->GetFence()->GetCompletedValue();
     UINT64 latestResolvedFenceValue = 0;
     double latestResolvedTimeMS = _timeMS;
 
-    for (UINT frameIndex = 0; frameIndex < BufferedFrameCount; ++frameIndex)
+    for (auto& frame : _frames)
     {
-        const UINT64 fenceValue = _frameFenceValues[frameIndex];
-        if (fenceValue == 0 || completedFenceValue < fenceValue) { continue; }
+        if (frame.FenceValue == 0 || !frame.MappedReadbackData || completedFenceValue < frame.FenceValue)
+        {
+            continue;
+        }
 
-        const UINT startQueryIndex = GetStartQueryIndex(frameIndex);
-        const UINT endQueryIndex = GetEndQueryIndex(frameIndex);
-        const UINT64 startTimestamp = _mappedReadbackData[startQueryIndex];
-        const UINT64 endTimestamp = _mappedReadbackData[endQueryIndex];
+        const UINT64 startTimestamp = frame.MappedReadbackData[StartQueryIndex];
+        const UINT64 endTimestamp = frame.MappedReadbackData[EndQueryIndex];
         const UINT64 elapsedTicks = endTimestamp > startTimestamp ? endTimestamp - startTimestamp : 0;
         const double resolvedTimeMS = static_cast<double>(elapsedTicks) * 1000.0 / static_cast<double>(_timestampFrequency);
 
-        if (fenceValue >= latestResolvedFenceValue)
+        if (frame.FenceValue >= latestResolvedFenceValue)
         {
-            latestResolvedFenceValue = fenceValue;
+            latestResolvedFenceValue = frame.FenceValue;
             latestResolvedTimeMS = resolvedTimeMS;
         }
 
-        _frameFenceValues[frameIndex] = 0;
+        frame.FenceValue = 0;
     }
 
-    if (latestResolvedFenceValue != 0) { _timeMS = latestResolvedTimeMS; }
-}
-
-UINT GDX12GPUTimer::GetStartQueryIndex(UINT frameIndex) const
-{
-    return frameIndex * QueryCount;
-}
-
-UINT GDX12GPUTimer::GetEndQueryIndex(UINT frameIndex) const
-{
-    return GetStartQueryIndex(frameIndex) + 1;
-}
-
-UINT64 GDX12GPUTimer::GetReadbackOffset(UINT frameIndex) const
-{
-    return static_cast<UINT64>(GetStartQueryIndex(frameIndex)) * sizeof(UINT64);
+    if (latestResolvedFenceValue != 0)
+    {
+        _timeMS = latestResolvedTimeMS;
+    }
 }
