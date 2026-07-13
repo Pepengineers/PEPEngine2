@@ -14,7 +14,7 @@ public:
 	GDX12CommandList(GDX12Device* device);
 	~GDX12CommandList();
 
-	const ComPtr<ID3D12GraphicsCommandList7>& GetCommandList();
+	const ComPtr<ID3D12GraphicsCommandList5>& GetCommandList();
 	const ComPtr<ID3D12CommandAllocator>& GetCommandAllocator();
 	void Reset();
 
@@ -79,7 +79,6 @@ public:
 
 	//Resource Barriers
 	void ResourceBarrier(std::initializer_list<CD3DX12_RESOURCE_BARRIER> barriers);
-	void EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTURE_BARRIER> textureBarriers);
 
 
 	//Misc
@@ -90,7 +89,7 @@ public:
 
 
 private:
-	ComPtr<ID3D12GraphicsCommandList7> _commandList;
+	ComPtr<ID3D12GraphicsCommandList5> _commandList;
 	ComPtr<ID3D12CommandAllocator> _commandAllocator;
 
 	//Cached states

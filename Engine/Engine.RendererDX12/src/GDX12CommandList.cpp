@@ -30,7 +30,7 @@ GDX12CommandList::~GDX12CommandList()
 	_commandAllocator.Reset();
 }
 
-const ComPtr<ID3D12GraphicsCommandList7>& GDX12CommandList::GetCommandList()
+const ComPtr<ID3D12GraphicsCommandList5>& GDX12CommandList::GetCommandList()
 {
 	return _commandList;
 }
@@ -285,20 +285,6 @@ void GDX12CommandList::ResourceBarrier(std::initializer_list<CD3DX12_RESOURCE_BA
 		}
 	}
 	if (!filteredBarriers.empty()) { _commandList->ResourceBarrier(filteredBarriers.size(), filteredBarriers.data()); }
-}
-
-void GDX12CommandList::EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTURE_BARRIER> textureBarriers)
-{
-	std::vector<D3D12_BARRIER_GROUP> barrierGroups;
-	barrierGroups.reserve(1);
-
-	D3D12_BARRIER_GROUP barrierGroup = {};
-	barrierGroup.Type = D3D12_BARRIER_TYPE_TEXTURE;
-	barrierGroup.NumBarriers = static_cast<UINT>(textureBarriers.size());
-	barrierGroup.pTextureBarriers = textureBarriers.begin();
-	barrierGroups.push_back(barrierGroup);
-
-	_commandList->Barrier(static_cast<UINT>(barrierGroups.size()), barrierGroups.data());
 }
 
 void GDX12CommandList::BeginPixEvent(const std::string& name, XMVECTOR color)
