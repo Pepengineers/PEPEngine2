@@ -48,6 +48,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Device.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceFactory.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameConstants.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12GPUTimer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12TextureResource.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RootSignature.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ShaderCompiler.h" />
@@ -59,6 +60,7 @@
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp" />
     <ClCompile Include="src\GDX12DeviceResources.cpp" />
+    <ClCompile Include="src\GDX12GPUTimer.cpp" />
     <ClCompile Include="src\GDX12GeometryBuffer.cpp" />
     <ClCompile Include="src\GDX12Resource.cpp" />
     <ClCompile Include="src\GDX12SwapChain.cpp" />

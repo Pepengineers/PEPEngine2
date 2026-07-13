@@ -10,6 +10,8 @@
 class SceneManagerModule;
 class World;
 class GDX12SwapChain;
+class GDX12Device;
+class GDX12GPUTimer;
 
 struct TransformComponent;
 struct CameraComponent;
@@ -136,6 +138,8 @@ private:
     std::unique_ptr<GDX12Device> _primaryDevice;
     std::unique_ptr<GDX12Device> _secondaryDevice;
     bool _dualGPUMode;
+    std::unique_ptr<GDX12GPUTimer> _primaryGPUTimer;
+    std::unique_ptr<GDX12GPUTimer> _secondaryGPUTimer;
 
     GDX12DeviceResources _primaryResources;
     GDX12DeviceResources _secondaryResources;
