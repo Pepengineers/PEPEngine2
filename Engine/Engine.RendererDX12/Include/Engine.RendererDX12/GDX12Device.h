@@ -30,8 +30,8 @@ public:
 	HRESULT Initialize(ComPtr<IDXGIAdapter4> adapter);
 	void Reset();
 
-	const ComPtr<ID3D12Device14>& GetDevice();
-	const ComPtr<ID3D12Device14>& GetCommandQueueCreationDevice();
+	const ComPtr<ID3D12Device7>& GetDevice();
+	const ComPtr<ID3D12Device7>& GetCommandQueueCreationDevice();
 	GDX12CommandQueue* GetCommandQueue();
 	const DeviceSpecs& GetDeviceFeatures();
 	LUID GetAdapterLuid() const;
@@ -42,8 +42,8 @@ private:
 	void CollectDeviceFeatures();
 
 	ComPtr<IDXGIAdapter4> _adapter;
-	ComPtr<ID3D12Device14> _device;
-	ComPtr<ID3D12Device14> _proxyDevice;
+	ComPtr<ID3D12Device7> _device;
+	ComPtr<ID3D12Device7> _proxyDevice;
 
 	std::unique_ptr<GDX12CommandQueue> _commandQueue;
 

@@ -78,12 +78,12 @@ void GDX12Device::Reset()
     _isInitialized = false;
 }
 
-const ComPtr<ID3D12Device14>& GDX12Device::GetDevice()
+const ComPtr<ID3D12Device7>& GDX12Device::GetDevice()
 {
     return _device;
 }
 
-const ComPtr<ID3D12Device14>& GDX12Device::GetCommandQueueCreationDevice()
+const ComPtr<ID3D12Device7>& GDX12Device::GetCommandQueueCreationDevice()
 {
     return _proxyDevice ? _proxyDevice : _device;
 }

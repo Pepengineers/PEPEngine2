@@ -31,9 +31,9 @@ public:
     static std::string ResultToString(sl::Result result);
 
     ComPtr<IDXGIFactory7> CreateProxyFactory(const ComPtr<IDXGIFactory7>& nativeFactory) const;
-    ComPtr<ID3D12Device14> CreateProxyDevice(const ComPtr<ID3D12Device14>& nativeDevice, bool setAsMainDevice) const;
+    ComPtr<ID3D12Device7> CreateProxyDevice(const ComPtr<ID3D12Device7>& nativeDevice, bool setAsMainDevice) const;
     ComPtr<IDXGIFactory7> GetNativeFactory(const ComPtr<IDXGIFactory7>& factory) const;
-    ComPtr<ID3D12Device14> GetNativeDevice(const ComPtr<ID3D12Device14>& device) const;
+    ComPtr<ID3D12Device7> GetNativeDevice(const ComPtr<ID3D12Device7>& device) const;
     ComPtr<ID3D12CommandQueue> GetNativeCommandQueue(const ComPtr<ID3D12CommandQueue>& commandQueue) const;
     ComPtr<IDXGISwapChain4> GetNativeSwapChain(const ComPtr<IDXGISwapChain4>& swapChain) const;
     ComPtr<ID3D12Resource> GetNativeResource(const ComPtr<ID3D12Resource>& resource) const;

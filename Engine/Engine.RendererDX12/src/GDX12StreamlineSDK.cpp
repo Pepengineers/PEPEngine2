@@ -115,16 +115,16 @@ ComPtr<IDXGIFactory7> GDX12StreamlineSDK::CreateProxyFactory(const ComPtr<IDXGIF
     return UpgradeInterface(nativeFactory, "slUpgradeInterface(IDXGIFactory7)");
 }
 
-ComPtr<ID3D12Device14> GDX12StreamlineSDK::CreateProxyDevice(const ComPtr<ID3D12Device14>& nativeDevice, bool setAsMainDevice) const
+ComPtr<ID3D12Device7> GDX12StreamlineSDK::CreateProxyDevice(const ComPtr<ID3D12Device7>& nativeDevice, bool setAsMainDevice) const
 {
     if (!_initialized || !nativeDevice)
     {
         return nativeDevice;
     }
 
-    const ComPtr<ID3D12Device14> resolvedNativeDevice = UnwrapInterface(nativeDevice);
+    const ComPtr<ID3D12Device7> resolvedNativeDevice = UnwrapInterface(nativeDevice);
     const bool inputAlreadyProxy = resolvedNativeDevice && resolvedNativeDevice.Get() != nativeDevice.Get();
-    const ComPtr<ID3D12Device14>& deviceToRegister = inputAlreadyProxy ? resolvedNativeDevice : nativeDevice;
+    const ComPtr<ID3D12Device7>& deviceToRegister = inputAlreadyProxy ? resolvedNativeDevice : nativeDevice;
 
     if (setAsMainDevice && !_mainDeviceWasSet)
     {
@@ -151,7 +151,7 @@ ComPtr<IDXGIFactory7> GDX12StreamlineSDK::GetNativeFactory(const ComPtr<IDXGIFac
     return UnwrapInterface(factory);
 }
 
-ComPtr<ID3D12Device14> GDX12StreamlineSDK::GetNativeDevice(const ComPtr<ID3D12Device14>& device) const
+ComPtr<ID3D12Device7> GDX12StreamlineSDK::GetNativeDevice(const ComPtr<ID3D12Device7>& device) const
 {
     return UnwrapInterface(device);
 }
