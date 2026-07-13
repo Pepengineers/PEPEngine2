@@ -54,9 +54,6 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameConstants.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12GPUTimer.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ConstantStructures.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -177,9 +174,6 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\GDX12DeviceResources.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="src\GDX12GPUTimer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

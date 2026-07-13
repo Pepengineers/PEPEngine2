@@ -7,7 +7,6 @@
 #include "Common/ConsoleVariables.h"
 
 #include "Engine.RendererDX12/GDX12SwapChain.h"
-#include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureClearPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
@@ -58,7 +57,6 @@ void RenderModule::Initialize()
     _primaryDevice->Role = DEVICE_ROLE_PRIMARY;
     _primaryDevice->Initialize(GDX12DeviceFactory::GetMostPerformantAdapter().Get());
     _primaryResources.Initialize(_primaryDevice.get());
-    _primaryGPUTimer = std::make_unique<GDX12GPUTimer>(_primaryDevice.get());
 
     if (false)
     {
@@ -66,7 +64,6 @@ void RenderModule::Initialize()
         _secondaryDevice->Role = DEVICE_ROLE_SECONDARY;
         _secondaryDevice->Initialize(GDX12DeviceFactory::GetDeviceDescriptors()[1].Adapter.Get());
         _secondaryResources.Initialize(_secondaryDevice.get());
-        _secondaryGPUTimer = std::make_unique<GDX12GPUTimer>(_secondaryDevice.get());
         _dualGPUMode = true;
     }
 
@@ -698,9 +695,6 @@ void RenderModule::OnUpdate()
     if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
     { _primaryResources.UpdateMaterialCB(_materials); }
 
-    std::string msg = "Primary GPU Time: " + std::to_string(_primaryGPUTimer->GetTimeMS()) + "\n";
-    OutputDebugStringA(msg.c_str());
-
     // same for SecondaryDevice
     if (_dualGPUMode)
     {
@@ -724,31 +718,24 @@ void RenderModule::OnRender()
 {
     auto primarycmdQueue = _primaryDevice->GetCommandQueue();
     auto primarycmdList = primarycmdQueue->GetCommandList();
-    _primaryGPUTimer->Start(primarycmdList);
-
     auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
     for (auto& renderPass : _primaryRenderPassExecutionList) 
     { 
         if (renderPass->GetFlagValue(RENDER_PASS_FLAG_SYNC_DEVICES) && _dualGPUMode)
         {
             primarycmdQueue->ExecuteCommandList(primarycmdList);
-                primarycmdQueue->WaitForOtherFence(primarycmdList->FenceValue);
-                primarycmdList = primarycmdQueue->GetCommandList();
-            }
+            primarycmdQueue->WaitForOtherFence(primarycmdList->FenceValue);
+            primarycmdList = primarycmdQueue->GetCommandList();
+        }
         else { renderPass->Execute(primarycmdList); }
     }
-
-    _primaryGPUTimer->Stop(primarycmdList);
     primarycmdQueue->ExecuteCommandList(primarycmdList);
     primaryCurrentFrameConsts->FenceValue = primarycmdList->FenceValue;
-    _primaryGPUTimer->OnCommandListExecuted(primarycmdList->FenceValue);
 
     if (_dualGPUMode)
     {
         auto secondarycmdQueue = _secondaryDevice->GetCommandQueue();
         auto secondarycmdList = secondarycmdQueue->GetCommandList();
-        _secondaryGPUTimer->Start(secondarycmdList);
-
         auto secondaryCurrentFrameConsts = GetCurrentSecondaryFrameConstants();
         for (auto& renderPass : _secondaryRenderPassExecutionList)
         {
@@ -760,10 +747,8 @@ void RenderModule::OnRender()
             }
             else { renderPass->Execute(secondarycmdList); }
         }
-        _secondaryGPUTimer->Stop(secondarycmdList);
         secondarycmdQueue->ExecuteCommandList(secondarycmdList);
         secondaryCurrentFrameConsts->FenceValue = secondarycmdList->FenceValue;
-        _secondaryGPUTimer->OnCommandListExecuted(secondarycmdList->FenceValue);
     }
 
     _backBuffer->Present();
