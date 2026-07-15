@@ -41,7 +41,7 @@ bool GDX12StreamlineSDK::Initialize()
         | sl::PreferenceFlags::eUseDXGIFactoryProxy
         | sl::PreferenceFlags::eUseFrameBasedResourceTagging;
 
-    sl::Feature FeaturestoLoad[] = { sl::kFeatureDLSS };
+    sl::Feature FeaturestoLoad[] = { sl::kFeatureDLSS, sl::kFeatureNIS };
     preferences.featuresToLoad = FeaturestoLoad;
     preferences.numFeaturesToLoad = _countof(FeaturestoLoad);
     preferences.engine = sl::EngineType::eCustom;
@@ -87,6 +87,7 @@ void GDX12StreamlineSDK::Shutdown()
     _slGetNewFrameToken = nullptr;
     _slDLSSGetOptimalSettings = nullptr;
     _slDLSSSetOptions = nullptr;
+    _slNISSetOptions = nullptr;
 
     if (_interposerModule)
     {
@@ -223,6 +224,17 @@ sl::Result GDX12StreamlineSDK::DLSSSetOptions(const sl::ViewportHandle& viewport
     return _slDLSSSetOptions(viewport, options);
 }
 
+sl::Result GDX12StreamlineSDK::NISSetOptions(const sl::ViewportHandle& viewport, const sl::NISOptions& options) const
+{
+    const sl::Result loadResult = LoadNISFunctions();
+    if (loadResult != sl::Result::eOk || !_slNISSetOptions)
+    {
+        return loadResult;
+    }
+
+    return _slNISSetOptions(viewport, options);
+}
+
 void GDX12StreamlineSDK::StreamlineLog(sl::LogType type, const char* message)
 {
     const char* level = "INFO";
@@ -280,6 +292,11 @@ sl::Result GDX12StreamlineSDK::LoadDLSSFunctions() const
 
     result = LoadFeatureFunction(sl::kFeatureDLSS, "slDLSSSetOptions", _slDLSSSetOptions);
     return result;
+}
+
+sl::Result GDX12StreamlineSDK::LoadNISFunctions() const
+{
+    return LoadFeatureFunction(sl::kFeatureNIS, "slNISSetOptions", _slNISSetOptions);
 }
 
 void GDX12StreamlineSDK::Log(const std::string& message) const

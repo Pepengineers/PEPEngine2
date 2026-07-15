@@ -12,6 +12,7 @@
 #include "nvidia-sdk/sl.h"
 #include "nvidia-sdk/sl_consts.h"
 #include "nvidia-sdk/sl_dlss.h"
+#include "nvidia-sdk/sl_nis.h"
 #include "nvidia-sdk/sl_helpers.h"
 #ifdef PEP_RESTORE_FREE_MACRO_STREAMLINE
 #pragma pop_macro("free")
@@ -45,6 +46,7 @@ public:
     sl::Result SetConstants(const sl::Constants& values, const sl::FrameToken& frame, const sl::ViewportHandle& viewport) const;
     sl::Result DLSSGetOptimalSettings(const sl::DLSSOptions& options, sl::DLSSOptimalSettings& settings) const;
     sl::Result DLSSSetOptions(const sl::ViewportHandle& viewport, const sl::DLSSOptions& options) const;
+    sl::Result NISSetOptions(const sl::ViewportHandle& viewport, const sl::NISOptions& options) const;
 
 private:
     GDX12StreamlineSDK() = default;
@@ -55,6 +57,7 @@ private:
     void LoadInterposer();
     void LoadFunctions();
     sl::Result LoadDLSSFunctions() const;
+    sl::Result LoadNISFunctions() const;
 
     void Log(const std::string& message) const;
     void LogWarning(const std::string& message) const;
@@ -127,4 +130,5 @@ private:
     PFun_slGetNewFrameToken* _slGetNewFrameToken = nullptr;
     mutable PFun_slDLSSGetOptimalSettings* _slDLSSGetOptimalSettings = nullptr;
     mutable PFun_slDLSSSetOptions* _slDLSSSetOptions = nullptr;
+    mutable PFun_slNISSetOptions* _slNISSetOptions = nullptr;
 };

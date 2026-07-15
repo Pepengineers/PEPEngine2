@@ -17,6 +17,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyToSharedMemoryPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OutputToScreenPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12FSRUpscalePass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12NISUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12SyncPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12XeSSUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
@@ -43,7 +44,7 @@ RenderModule::~RenderModule()
 void RenderModule::Initialize()
 {
     // This value will be later provided by external pipeline config
-    bool useStreamlineSDK = false;
+    bool useStreamlineSDK = true;
     // Streamline is initialized on the primary device only
     if (useStreamlineSDK) { GDX12StreamlineSDK::Get().Initialize(); }
 
@@ -825,7 +826,7 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12XeSSUpscalePass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12NISUpscalePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
 
     SetupRenderPasses();

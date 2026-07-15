@@ -29,6 +29,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\IRenderPassLink.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DLSSUpscalePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FSRUpscalePass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12NISUpscalePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OpaquePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OutputToScreenPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SyncPass.h" />
