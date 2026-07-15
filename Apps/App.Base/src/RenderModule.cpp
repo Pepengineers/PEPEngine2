@@ -44,7 +44,7 @@ RenderModule::~RenderModule()
 void RenderModule::Initialize()
 {
     // This value will be later provided by external pipeline config
-    bool useStreamlineSDK = true;
+    bool useStreamlineSDK = false;
     // Streamline is initialized on the primary device only
     if (useStreamlineSDK) { GDX12StreamlineSDK::Get().Initialize(); }
 
@@ -826,7 +826,7 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12NISUpscalePass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12XeSSUpscalePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
 
     SetupRenderPasses();
