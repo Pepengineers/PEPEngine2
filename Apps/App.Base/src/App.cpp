@@ -363,6 +363,7 @@ bool App::AddModules()
 {
     Locator.RegisterModule(std::make_shared<RenderModule>(_window.get(), &Timer));
     Locator.RegisterModule(std::make_shared<SceneManagerModule>(&Timer));
+    Locator.RegisterModule(std::make_shared<PhysicsModule>(&Timer));
     return BenchmarkEngine::AddModules();
 }
 
@@ -373,4 +374,5 @@ void App::Update(const GameTimer& gameTimer)
     // as the initialization order (that is used by the locator)
     Locator.GetModule<RenderModule>()->Update();
     Locator.GetModule<SceneManagerModule>()->Update();
+    Locator.GetModule<PhysicsModule>()->Update();
 }

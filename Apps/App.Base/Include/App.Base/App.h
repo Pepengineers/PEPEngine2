@@ -12,6 +12,7 @@
 
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Modules/SceneManagerModule.h"
+#include "App.Base/Modules/PhysicsModule.h"
 #include "App.Base/Window.h"
 #include "App.Base/ECS/AppConfig.h"
 
