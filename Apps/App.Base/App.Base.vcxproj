@@ -109,12 +109,14 @@
     <Import Project="..\..\GlobalSettings.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.Module.App.Base.Public.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.RapidYaml.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Jolt.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\..\GlobalSettings.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.Module.App.Base.Public.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.RapidYaml.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Jolt.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
