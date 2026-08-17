@@ -1,24 +1,40 @@
 #pragma once
 
-#include <Jolt/Jolt.h>
-#include <Jolt/Physics/PhysicsSystem.h>
-#include <Jolt/Core/JobSystemThreadPool.h>
+#include <memory>
+
+namespace JPH
+{
+    class PhysicsSystem;
+    class TempAllocatorImpl;
+    class JobSystemThreadPool;
+}
+
+class BroadPhaseLayerInterfaceImpl;
+class ObjectVsBroadPhaseLayerFilterImpl;
+class ObjectLayerPairFilterImpl;
+
 class JoltPhysicsBackend
 {
 public:
+    JoltPhysicsBackend() = default;
+    ~JoltPhysicsBackend();
+    
     void Initialize();
     void Uninitialize();
 
     void Step(float dt);
 
 private:
-    JPH::PhysicsSystem _physicsSystem;
+    bool _bInitialized = false;
     
-    std::unique_ptr<JPH::TempAllocator> _tempAllocator;
+    std::unique_ptr<JPH::PhysicsSystem> _physicsSystem;
+    
+    std::unique_ptr<JPH::TempAllocatorImpl> _tempAllocator;
     std::unique_ptr<JPH::JobSystemThreadPool> _jobSystem; // tmp
     
-    JPH::BodyID _floorBody;
-    JPH::BodyID _boxBody;
+    std::unique_ptr<BroadPhaseLayerInterfaceImpl> _broadPhaseLayerInterface;
+    std::unique_ptr<ObjectVsBroadPhaseLayerFilterImpl> _objectVsBroadPhaseLayerFilter;
+    std::unique_ptr<ObjectLayerPairFilterImpl> _objectLayerPairFilter;
 };
 
 
