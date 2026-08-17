@@ -16,7 +16,7 @@ class ObjectLayerPairFilterImpl;
 class JoltPhysicsBackend
 {
 public:
-    JoltPhysicsBackend() = default;
+    JoltPhysicsBackend();
     ~JoltPhysicsBackend();
     
     void Initialize();

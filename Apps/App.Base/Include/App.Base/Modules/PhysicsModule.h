@@ -9,6 +9,7 @@ class JoltPhysicsBackend;
 
 class PhysicsModule final : public Module
 {
+public:
     explicit PhysicsModule(GameTimer* gt);
     ~PhysicsModule() override;
     
