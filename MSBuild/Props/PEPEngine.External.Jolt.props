@@ -4,6 +4,7 @@
   <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
     <ClCompile>
       <AdditionalIncludeDirectories>$(PEPExternalJoltSourceDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>JPH_OBJECT_STREAM;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(PEPExternalJoltLibDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -12,7 +13,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Platform)'=='x64' and ('$(Configuration)'=='Debug' or '$(Configuration)'=='Release')">
     <ClCompile>
-      <PreprocessorDefinitions>JPH_DEBUG_RENDERER;JPH_PROFILE_ENABLED;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>JPH_DEBUG_RENDERER;JPH_PROFILE_ENABLED;JPH_FLOATING_POINT_EXCEPTIONS_ENABLED;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
 </Project>
