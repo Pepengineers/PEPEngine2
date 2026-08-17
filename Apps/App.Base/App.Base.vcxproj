@@ -36,8 +36,10 @@
     <ClInclude Include="Include\App.Base\ECS\WorldLoadContext.h" />
     <ClInclude Include="Include\App.Base\ECS\WorldLoader.h" />
     <ClInclude Include="Include\App.Base\Modules\EventManagerModule.h" />
+    <ClInclude Include="Include\App.Base\Modules\PhysicsModule.h" />
     <ClInclude Include="Include\App.Base\Modules\RenderModule.h" />
     <ClInclude Include="Include\App.Base\Modules\SceneManagerModule.h" />
+    <ClInclude Include="Include\App.Base\Physics\JoltPhysicsBackend.h" />
     <ClInclude Include="Include\App.Base\SceneTraversal.h" />
     <ClInclude Include="Include\App.Base\Systems\CircleMovementSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\GPUDataUpdateSystem.h" />
@@ -50,6 +52,184 @@
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
     <ClCompile Include="src\ECS\AppConfigLoader.cpp" />
+    <ClCompile Include="src\PhysicsModule.cpp">
+      <AssemblerOutput>NoListing</AssemblerOutput>
+      <AssemblerListingLocation>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\</AssemblerListingLocation>
+      <UndefineAllPreprocessorDefinitions>false</UndefineAllPreprocessorDefinitions>
+      <BrowseInformation>false</BrowseInformation>
+      <BrowseInformationFile>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\</BrowseInformationFile>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <CompileAs>Default</CompileAs>
+      <UseDynamicDebugging>false</UseDynamicDebugging>
+      <ConformanceMode>true</ConformanceMode>
+      <DiagnosticsFormat>Column</DiagnosticsFormat>
+      <DisableLanguageExtensions>false</DisableLanguageExtensions>
+      <ErrorReporting>Prompt</ErrorReporting>
+      <ExpandAttributedSource>false</ExpandAttributedSource>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <EnableASAN>false</EnableASAN>
+      <EnableFuzzer>false</EnableFuzzer>
+      <EnableFiberSafeOptimizations>false</EnableFiberSafeOptimizations>
+      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
+      <EnableVectorLength>NotSet</EnableVectorLength>
+      <FloatingPointModel>Precise</FloatingPointModel>
+      <ForceConformanceInForLoopScope>true</ForceConformanceInForLoopScope>
+      <GenerateModuleDependencies>false</GenerateModuleDependencies>
+      <GenerateSourceDependencies>false</GenerateSourceDependencies>
+      <GenerateXMLDocumentationFiles>false</GenerateXMLDocumentationFiles>
+      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <IgnoreStandardIncludePath>false</IgnoreStandardIncludePath>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard_C>Default</LanguageStandard_C>
+      <MinimalRebuild>false</MinimalRebuild>
+      <ModuleDependenciesFile>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\</ModuleDependenciesFile>
+      <ModuleOutputFile>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\</ModuleOutputFile>
+      <OmitDefaultLibName>false</OmitDefaultLibName>
+      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+      <Optimization>MaxSpeed</Optimization>
+      <ObjectFileName>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\</ObjectFileName>
+      <CallingConvention>Cdecl</CallingConvention>
+      <ProgramDataBaseFileName>C:\stuff\git repos\PEPEngine2\Build\bin\x64\Release\App.Base\App.Base.pdb</ProgramDataBaseFileName>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\App.Base.pch</PrecompiledHeaderOutputFile>
+      <PreprocessToFile>false</PreprocessToFile>
+      <PreprocessKeepComments>false</PreprocessKeepComments>
+      <PreprocessSuppressLineNumbers>false</PreprocessSuppressLineNumbers>
+      <RemoveUnreferencedCodeData>true</RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDll</RuntimeLibrary>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+      <ShowIncludes>false</ShowIncludes>
+      <SourceDependenciesFile>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\</SourceDependenciesFile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
+      <SmallerTypeCheck>false</SmallerTypeCheck>
+      <SpectreMitigation>false</SpectreMitigation>
+      <StructMemberAlignment>Default</StructMemberAlignment>
+      <SupportJustMyCode>false</SupportJustMyCode>
+      <TrackerLogDirectory>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\App.Base.tlog\</TrackerLogDirectory>
+      <TranslateIncludes>false</TranslateIncludes>
+      <MinimalRebuildFromTracking>true</MinimalRebuildFromTracking>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
+      <UseFullPaths>true</UseFullPaths>
+      <WarningLevel>Level3</WarningLevel>
+      <XMLDocumentationFileName>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\</XMLDocumentationFileName>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <IntelJCCErratum>false</IntelJCCErratum>
+      <BuildStlModules>false</BuildStlModules>
+      <TreatAngleIncludeAsExternal>false</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
+      <TreatExternalTemplatesAsInternal>true</TreatExternalTemplatesAsInternal>
+      <DisableAnalyzeExternal>false</DisableAnalyzeExternal>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;
+          PEP_ENABLE_ASSET_DEBUG_LOGS=0;
+          SOLUTION_DIR=LR"(C:\stuff\git repos\PEPEngine2\)";
+          PROJECT_DIR=LR"(C:\stuff\git repos\PEPEngine2\Apps\App.Base\)";
+          ASSETS_FOLDER=LR"(C:\stuff\git repos\PEPEngine2\Assets\\)";
+          TEXTURES_FOLDER=LR"(C:\stuff\git repos\PEPEngine2\Assets\Textures\\)";
+          MODELS_FOLDER=LR"(C:\stuff\git repos\PEPEngine2\Assets\Models\\)";
+          SHADERS_FOLDER=LR"(C:\stuff\git repos\PEPEngine2\Engine\Engine.RendererDX12\Shaders\\)";
+          _UNICODE;UNICODE;
+      </PreprocessorDefinitions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalIncludeDirectories>C:\stuff\git repos\PEPEngine2\External\External.Libraries\rapidyaml\src;C:\stuff\git repos\PEPEngine2\External\External.Libraries\rapidyaml\ext\c4core\src;C:\stuff\git repos\PEPEngine2\Apps\App.Base\Include;C:\stuff\git repos\PEPEngine2\Engine\Engine.UI\Include;C:\stuff\git repos\PEPEngine2\Engine\Engine.RendererDX12\Include;C:\stuff\git repos\PEPEngine2\Engine\Engine.Core\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\wwise\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\wwise\Include\wwise;C:\stuff\git repos\PEPEngine2\External\External.Libraries\directxmesh\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\directstorage\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\ffx-api\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\debugdrawer\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\directxtex\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\directx-headers\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\directxtk\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\spdlog\include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\assimp\Include;</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 </AdditionalOptions>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <SDLCheck>true</SDLCheck>
+      <LibCompiled>true</LibCompiled>
+    </ClCompile>
+    <ClCompile Include="src\Physics\JoltPhysicsBackend.cpp">
+      <AssemblerOutput>NoListing</AssemblerOutput>
+      <AssemblerListingLocation>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\</AssemblerListingLocation>
+      <UndefineAllPreprocessorDefinitions>false</UndefineAllPreprocessorDefinitions>
+      <BrowseInformation>false</BrowseInformation>
+      <BrowseInformationFile>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\</BrowseInformationFile>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <CompileAs>Default</CompileAs>
+      <UseDynamicDebugging>false</UseDynamicDebugging>
+      <ConformanceMode>true</ConformanceMode>
+      <DiagnosticsFormat>Column</DiagnosticsFormat>
+      <DisableLanguageExtensions>false</DisableLanguageExtensions>
+      <ErrorReporting>Prompt</ErrorReporting>
+      <ExpandAttributedSource>false</ExpandAttributedSource>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <EnableASAN>false</EnableASAN>
+      <EnableFuzzer>false</EnableFuzzer>
+      <EnableFiberSafeOptimizations>false</EnableFiberSafeOptimizations>
+      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
+      <EnableVectorLength>NotSet</EnableVectorLength>
+      <FloatingPointModel>Precise</FloatingPointModel>
+      <ForceConformanceInForLoopScope>true</ForceConformanceInForLoopScope>
+      <GenerateModuleDependencies>false</GenerateModuleDependencies>
+      <GenerateSourceDependencies>false</GenerateSourceDependencies>
+      <GenerateXMLDocumentationFiles>false</GenerateXMLDocumentationFiles>
+      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <IgnoreStandardIncludePath>false</IgnoreStandardIncludePath>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard_C>Default</LanguageStandard_C>
+      <MinimalRebuild>false</MinimalRebuild>
+      <ModuleDependenciesFile>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\</ModuleDependenciesFile>
+      <ModuleOutputFile>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\</ModuleOutputFile>
+      <OmitDefaultLibName>false</OmitDefaultLibName>
+      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+      <Optimization>MaxSpeed</Optimization>
+      <ObjectFileName>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\</ObjectFileName>
+      <CallingConvention>Cdecl</CallingConvention>
+      <ProgramDataBaseFileName>C:\stuff\git repos\PEPEngine2\Build\bin\x64\Release\App.Base\App.Base.pdb</ProgramDataBaseFileName>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\App.Base.pch</PrecompiledHeaderOutputFile>
+      <PreprocessToFile>false</PreprocessToFile>
+      <PreprocessKeepComments>false</PreprocessKeepComments>
+      <PreprocessSuppressLineNumbers>false</PreprocessSuppressLineNumbers>
+      <RemoveUnreferencedCodeData>true</RemoveUnreferencedCodeData>
+      <RuntimeLibrary>MultiThreadedDll</RuntimeLibrary>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+      <ShowIncludes>false</ShowIncludes>
+      <SourceDependenciesFile>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\</SourceDependenciesFile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
+      <SmallerTypeCheck>false</SmallerTypeCheck>
+      <SpectreMitigation>false</SpectreMitigation>
+      <StructMemberAlignment>Default</StructMemberAlignment>
+      <SupportJustMyCode>false</SupportJustMyCode>
+      <TrackerLogDirectory>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\App.Base.tlog\</TrackerLogDirectory>
+      <TranslateIncludes>false</TranslateIncludes>
+      <MinimalRebuildFromTracking>true</MinimalRebuildFromTracking>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
+      <UseFullPaths>true</UseFullPaths>
+      <WarningLevel>Level3</WarningLevel>
+      <XMLDocumentationFileName>C:\stuff\git repos\PEPEngine2\Build\obj\x64\Release\App.Base\</XMLDocumentationFileName>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <IntelJCCErratum>false</IntelJCCErratum>
+      <BuildStlModules>false</BuildStlModules>
+      <TreatAngleIncludeAsExternal>false</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
+      <TreatExternalTemplatesAsInternal>true</TreatExternalTemplatesAsInternal>
+      <DisableAnalyzeExternal>false</DisableAnalyzeExternal>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;JPH_DEBUG_RENDERER;JPH_PROFILE_ENABLED;
+          PEP_ENABLE_ASSET_DEBUG_LOGS=0;
+          SOLUTION_DIR=LR"(C:\stuff\git repos\PEPEngine2\)";
+          PROJECT_DIR=LR"(C:\stuff\git repos\PEPEngine2\Apps\App.Base\)";
+          ASSETS_FOLDER=LR"(C:\stuff\git repos\PEPEngine2\Assets\\)";
+          TEXTURES_FOLDER=LR"(C:\stuff\git repos\PEPEngine2\Assets\Textures\\)";
+          MODELS_FOLDER=LR"(C:\stuff\git repos\PEPEngine2\Assets\Models\\)";
+          SHADERS_FOLDER=LR"(C:\stuff\git repos\PEPEngine2\Engine\Engine.RendererDX12\Shaders\\)";
+          _UNICODE;UNICODE;
+      </PreprocessorDefinitions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalIncludeDirectories>C:\stuff\git repos\PEPEngine2\External\External.Libraries\jolt\JoltPhysics\;C:\stuff\git repos\PEPEngine2\External\External.Libraries\rapidyaml\src;C:\stuff\git repos\PEPEngine2\External\External.Libraries\rapidyaml\ext\c4core\src;C:\stuff\git repos\PEPEngine2\Apps\App.Base\Include;C:\stuff\git repos\PEPEngine2\Engine\Engine.UI\Include;C:\stuff\git repos\PEPEngine2\Engine\Engine.RendererDX12\Include;C:\stuff\git repos\PEPEngine2\Engine\Engine.Core\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\wwise\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\wwise\Include\wwise;C:\stuff\git repos\PEPEngine2\External\External.Libraries\directxmesh\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\directstorage\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\ffx-api\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\debugdrawer\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\directxtex\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\directx-headers\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\directxtk\Include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\spdlog\include;C:\stuff\git repos\PEPEngine2\External\External.Libraries\assimp\Include;</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 </AdditionalOptions>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <SDLCheck>true</SDLCheck>
+      <LibCompiled>true</LibCompiled>
+    </ClCompile>
     <ClCompile Include="src\RenderModule.cpp" />
     <ClCompile Include="src\SceneManagerModule.cpp" />
     <ClCompile Include="src\SceneTraversal.cpp" />
