@@ -7,6 +7,8 @@
 #include <crtdbg.h>
 #endif
 
+#include <future>
+
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
 
@@ -86,5 +88,11 @@ protected:
     void Update(const GameTimer& gameTimer) override;
 
 private:
+    bool PollSceneLoad();
+    
     std::unique_ptr<Window> _window;
+    
+    std::future<bool> _sceneLoadFuture;
+    bool _sceneLoadFinished = false;
+    bool _sceneLoadSucceeded = false;
 };
