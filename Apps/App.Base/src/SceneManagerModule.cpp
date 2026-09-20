@@ -295,6 +295,12 @@ World* SceneManagerModule::GetWorld(size_t index)
     return _worldVector[index].get();
 }
 
+bool SceneManagerModule::ReplaceScene(std::vector<std::unique_ptr<World>>& worlds,
+    const std::vector<WorldConfig>& worldConfigs, const AppConfig& appConfig)
+{
+    return false;
+}
+
 size_t SceneManagerModule::GetWorldCount() const
 {
     return _worldVector.size();

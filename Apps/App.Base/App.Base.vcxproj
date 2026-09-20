@@ -31,6 +31,8 @@
     <ClInclude Include="Include\App.Base\ECS\Components\StaticMeshRenderComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\TransformComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\VelocityComponent.h" />
+    <ClInclude Include="Include\App.Base\ECS\PreparedScene.h" />
+    <ClInclude Include="Include\App.Base\ECS\SceneLoadTask.h" />
     <ClInclude Include="Include\App.Base\ECS\World.h" />
     <ClInclude Include="Include\App.Base\ECS\WorldConfig.h" />
     <ClInclude Include="Include\App.Base\ECS\WorldLoadContext.h" />
@@ -50,6 +52,94 @@
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
     <ClCompile Include="src\ECS\AppConfigLoader.cpp" />
+    <ClCompile Include="src\ECS\SceneLoadTask.cpp">
+      <RuntimeLibrary>MultiThreadedDebugDll</RuntimeLibrary>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <Optimization>Disabled</Optimization>
+      <SupportJustMyCode>true</SupportJustMyCode>
+      <AssemblerOutput>NoListing</AssemblerOutput>
+      <AssemblerListingLocation>C:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\App.Base\</AssemblerListingLocation>
+      <UndefineAllPreprocessorDefinitions>false</UndefineAllPreprocessorDefinitions>
+      <BrowseInformation>false</BrowseInformation>
+      <BrowseInformationFile>C:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\App.Base\</BrowseInformationFile>
+      <CompileAs>Default</CompileAs>
+      <UseDynamicDebugging>false</UseDynamicDebugging>
+      <ConformanceMode>true</ConformanceMode>
+      <DiagnosticsFormat>Column</DiagnosticsFormat>
+      <DisableLanguageExtensions>false</DisableLanguageExtensions>
+      <ErrorReporting>Prompt</ErrorReporting>
+      <ExpandAttributedSource>false</ExpandAttributedSource>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <EnableASAN>false</EnableASAN>
+      <EnableFuzzer>false</EnableFuzzer>
+      <EnableFiberSafeOptimizations>false</EnableFiberSafeOptimizations>
+      <EnableEnhancedInstructionSet>NotSet</EnableEnhancedInstructionSet>
+      <EnableVectorLength>NotSet</EnableVectorLength>
+      <FloatingPointModel>Precise</FloatingPointModel>
+      <ForceConformanceInForLoopScope>true</ForceConformanceInForLoopScope>
+      <GenerateModuleDependencies>false</GenerateModuleDependencies>
+      <GenerateSourceDependencies>false</GenerateSourceDependencies>
+      <GenerateXMLDocumentationFiles>false</GenerateXMLDocumentationFiles>
+      <InlineFunctionExpansion>Default</InlineFunctionExpansion>
+      <IntrinsicFunctions>false</IntrinsicFunctions>
+      <IgnoreStandardIncludePath>false</IgnoreStandardIncludePath>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard_C>Default</LanguageStandard_C>
+      <MinimalRebuild>false</MinimalRebuild>
+      <ModuleDependenciesFile>C:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\App.Base\</ModuleDependenciesFile>
+      <ModuleOutputFile>C:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\App.Base\</ModuleOutputFile>
+      <OmitDefaultLibName>false</OmitDefaultLibName>
+      <FavorSizeOrSpeed>Neither</FavorSizeOrSpeed>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+      <ObjectFileName>C:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\App.Base\</ObjectFileName>
+      <CallingConvention>Cdecl</CallingConvention>
+      <ProgramDataBaseFileName>C:\Projects\Graphics Projects\PEPEngine2\Build\bin\x64\Debug\App.Base\App.Base.pdb</ProgramDataBaseFileName>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeaderFile>stdafx.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>C:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\App.Base\App.Base.pch</PrecompiledHeaderOutputFile>
+      <PreprocessToFile>false</PreprocessToFile>
+      <PreprocessKeepComments>false</PreprocessKeepComments>
+      <PreprocessSuppressLineNumbers>false</PreprocessSuppressLineNumbers>
+      <RemoveUnreferencedCodeData>true</RemoveUnreferencedCodeData>
+      <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
+      <ShowIncludes>false</ShowIncludes>
+      <SourceDependenciesFile>C:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\App.Base\</SourceDependenciesFile>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
+      <SmallerTypeCheck>false</SmallerTypeCheck>
+      <SpectreMitigation>false</SpectreMitigation>
+      <StructMemberAlignment>Default</StructMemberAlignment>
+      <TrackerLogDirectory>C:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\App.Base\App.Base.tlog\</TrackerLogDirectory>
+      <TranslateIncludes>false</TranslateIncludes>
+      <MinimalRebuildFromTracking>true</MinimalRebuildFromTracking>
+      <TreatWarningAsError>false</TreatWarningAsError>
+      <TreatWChar_tAsBuiltInType>true</TreatWChar_tAsBuiltInType>
+      <UseFullPaths>true</UseFullPaths>
+      <WarningLevel>Level3</WarningLevel>
+      <XMLDocumentationFileName>C:\Projects\Graphics Projects\PEPEngine2\Build\obj\x64\Debug\App.Base\</XMLDocumentationFileName>
+      <DebugInformationFormat>EditAndContinue</DebugInformationFormat>
+      <IntelJCCErratum>false</IntelJCCErratum>
+      <BuildStlModules>false</BuildStlModules>
+      <TreatAngleIncludeAsExternal>false</TreatAngleIncludeAsExternal>
+      <ExternalWarningLevel>InheritWarningLevel</ExternalWarningLevel>
+      <TreatExternalTemplatesAsInternal>true</TreatExternalTemplatesAsInternal>
+      <DisableAnalyzeExternal>false</DisableAnalyzeExternal>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;
+          PEP_ENABLE_ASSET_DEBUG_LOGS=0;
+          SOLUTION_DIR=LR"(C:\Projects\Graphics Projects\PEPEngine2\)";
+          PROJECT_DIR=LR"(C:\Projects\Graphics Projects\PEPEngine2\Apps\App.Base\)";
+          ASSETS_FOLDER=LR"(C:\Projects\Graphics Projects\PEPEngine2\Assets\\)";
+          TEXTURES_FOLDER=LR"(C:\Projects\Graphics Projects\PEPEngine2\Assets\Textures\\)";
+          MODELS_FOLDER=LR"(C:\Projects\Graphics Projects\PEPEngine2\Assets\Models\\)";
+          SHADERS_FOLDER=LR"(C:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.RendererDX12\Shaders\\)";
+          _UNICODE;UNICODE;
+      </PreprocessorDefinitions>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <AdditionalIncludeDirectories>C:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\rapidyaml\src;C:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\rapidyaml\ext\c4core\src;C:\Projects\Graphics Projects\PEPEngine2\Apps\App.Base\Include;C:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.UI\Include;C:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.RendererDX12\Include;C:\Projects\Graphics Projects\PEPEngine2\Engine\Engine.Core\Include;C:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\wwise\Include;C:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\wwise\Include\wwise;C:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directxmesh\Include;C:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directstorage\Include;C:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\ffx-api\Include;C:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\debugdrawer\Include;C:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directxtex\Include;C:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directx-headers\Include;C:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\directxtk\Include;C:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\spdlog\include;C:\Projects\Graphics Projects\PEPEngine2\External\External.Libraries\assimp\Include;</AdditionalIncludeDirectories>
+      <AdditionalOptions>/utf-8 </AdditionalOptions>
+      <SDLCheck>true</SDLCheck>
+      <LibCompiled>true</LibCompiled>
+    </ClCompile>
     <ClCompile Include="src\RenderModule.cpp" />
     <ClCompile Include="src\SceneManagerModule.cpp" />
     <ClCompile Include="src\SceneTraversal.cpp" />

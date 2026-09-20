@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <string>
 
+#include "App.Base/ECS/SceneLoadTask.h"
+
 using Microsoft::WRL::ComPtr;
 using namespace std;
 using namespace DirectX;
@@ -91,9 +93,14 @@ int App::Run()
             TranslateMessage(&Msg);
             DispatchMessage(&Msg);
         }
-        else if (!PollSceneLoad())
+        else if (!TickSceneLoad())
         {
-            Sleep(1);
+            auto renderModule = Locator.GetModule<RenderModule>();
+            renderModule->RenderLoadingScreen(_sceneLoadTask->GetProgress());
+            
+            const std::wstring title = _window->GetWindowTitle() + L" - Loading " + std::to_wstring(static_cast<int>(_sceneLoadTask->GetProgress() * 100.0f)) + L"%";
+            
+            SetWindowText(_window->GetWindowHandle(), title.c_str());
         }
         // Otherwise, do animation/game stuff.
         else
@@ -156,8 +163,9 @@ bool App::Initialize()
     Logger::Info("Starting asynchronous start-scene loading");
     SetWindowText(_window->GetWindowHandle(), (_window->GetWindowTitle() + L" - Loading...").c_str());
     
-    _sceneLoadFuture = std::async(std::launch::async, [this]() {return LoadStartScene();});
-
+    _sceneLoadTask = std::make_unique<SceneLoadTask>(_AppConfig.StartScene, _AppConfig, *Locator.GetModule<SceneManagerModule>(), *Locator.GetModule<RenderModule>());
+    _sceneLoadTask->Start();
+    
     return true;
 }
 
@@ -278,7 +286,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_LBUTTONDOWN:
     case WM_MBUTTONDOWN:
     case WM_RBUTTONDOWN:
-        if (!_sceneLoadSucceeded)
+        if (_sceneLoadTask)
         {
             return 0;
         }
@@ -289,7 +297,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_LBUTTONUP:
     case WM_MBUTTONUP:
     case WM_RBUTTONUP:
-        if (!_sceneLoadSucceeded)
+        if (_sceneLoadTask)
         {
             return 0;
         }
@@ -298,7 +306,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_MOUSEMOVE:
-        if (!_sceneLoadSucceeded)
+        if (_sceneLoadTask)
         {
             return 0;
         }
@@ -307,7 +315,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_MOUSEWHEEL:
-        if (!_sceneLoadSucceeded)
+        if (_sceneLoadTask)
         {
             return 0;
         }
@@ -328,11 +336,6 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 void App::OnResize()
 {
-    if (!_sceneLoadFinished || !_sceneLoadSucceeded)
-    {
-        return;
-    }
-    
     //WinApi unintentionally calls OnResize() once during window creation.
     //It happens during AppBase::Initialize(), 
     //so none of the systems are currently initialized.
@@ -402,41 +405,29 @@ void App::Update(const GameTimer& gameTimer)
     Locator.GetModule<SceneManagerModule>()->Update();
 }
 
-bool App::PollSceneLoad()
+bool App::TickSceneLoad()
 {
-    if (_sceneLoadFinished)
+    if (!_sceneLoadTask)
     {
-        return _sceneLoadSucceeded;
+        return true;
     }
     
-    if (!_sceneLoadFuture.valid())
-    {
-        return false;
-    }
+    _sceneLoadTask->TickMainThread(std::chrono::milliseconds(4));
     
-    if (_sceneLoadFuture.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+    if (_sceneLoadTask->HasFailed())
     {
-        return false;
-    }
-    
-    _sceneLoadSucceeded = _sceneLoadFuture.get();
-    _sceneLoadFinished = true;
-    
-    if (!_sceneLoadSucceeded)
-    {
-        Logger::Error("Asynchronous start-scene load failed.");
+        Logger::Error("Scene load failed: {}", _sceneLoadTask->GetError());
+        
         PostQuitMessage(EXIT_FAILURE);
         return false;
     }
     
-    Logger::Info("Asynchronous start-scene loading completed");
-    SetWindowText(_window->GetWindowHandle(), _window->GetWindowTitle().c_str());
-    
-    //resize, because onload GPU resize were suppressed
-    if (!bMinimized)
+    if (!_sceneLoadTask->IsComplete())
     {
-        OnResize();
+        return false;
     }
+    
+    SetWindowText(_window->GetWindowHandle(), _window->GetWindowTitle().c_str());
     
     Timer.Reset();
     if (bAppPaused)
@@ -444,5 +435,6 @@ bool App::PollSceneLoad()
         Timer.Stop();
     }
     
+    _sceneLoadTask.reset();
     return true;
 }

@@ -58,6 +58,9 @@ public:
     //Uploads Mesh geometry to GPU
     void SubmitMesh(const Mesh* mesh, MeshHandle handle);
     
+    //show screen while loading. does not access scene or ECS state
+    void RenderLoadingScreen(float progress);
+    
     struct WorldRenderSubscriptions
     {
         ListenerHandle TransformCreated = 0;

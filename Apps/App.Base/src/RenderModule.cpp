@@ -319,6 +319,55 @@ void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
     _geometryBuffer->AddMesh(mesh, handle);
 }
 
+void RenderModule::RenderLoadingScreen(float progress)
+{
+    progress = (std::max)(0.0f, (std::min)(progress, 1.0f));
+    
+    auto* commandQueue = _primaryDevice->GetCommandQueue();
+    auto cmdList = commandQueue->GetCommandList();
+    auto* backBuffer = _backBuffer->GetCurrentBuffer();
+    
+    cmdList->EnhancedTextureBarrier({backBuffer->GetResource()->GetRenderTargetEnhBarrier()});
+    
+    ID3D12GraphicsCommandList* nativeList = cmdList->GetCommandList().Get();
+    
+    const float bgColor[4] = {0.025f, 0.035f, 0.055f, 1.0f};
+    const float trackColor[4] = {0.1f, 0.12f, 0.16f, 1.0f};
+    const float fillColor[4] = {0.15f, 0.72f, 0.85f, 1.0f};
+    
+    const D3D12_CPU_DESCRIPTOR_HANDLE rtv = backBuffer->GetRTV()->CPUHandle;
+    
+    nativeList->ClearRenderTargetView(rtv, bgColor, 0, nullptr);
+    
+    //make progress bar rect
+    uint16_t width = 0;
+    uint16_t height = 0;
+    _window->GetWindowSize(width, height);
+    
+    const long horizontalMargin = (std::max)(32L, static_cast<long>(width / 8));
+    const long barTop = static_cast<long>(height / 2) - 10;
+    const long barBottom = barTop + 20;
+    const long barRight = (std::max)(horizontalMargin + 1, static_cast<long>(width - horizontalMargin));
+    
+    const D3D12_RECT trackRect = {horizontalMargin, barTop, barRight, barBottom};
+    
+    nativeList->ClearRenderTargetView(rtv, trackColor, 1, &trackRect);
+    
+    //fill progress
+    D3D12_RECT fillRect = trackRect;
+    fillRect.right = fillRect.left + static_cast<long>(static_cast<float>(fillRect.right - fillRect.left) * progress);
+    
+    if (fillRect.right > fillRect.left)
+    {
+        nativeList->ClearRenderTargetView(rtv, fillColor, 1, &fillRect);
+    }
+    
+    cmdList->EnhancedTextureBarrier({backBuffer->GetResource()->GetPresentEnhBarrier()});
+    
+    commandQueue->ExecuteCommandList(cmdList);
+    _backBuffer->Present();
+}
+
 TransformCompGPUData& RenderModule::GetTransformGPUData(Entity entity)
 {
     return _transformGPUData.at(entity);
