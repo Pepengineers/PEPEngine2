@@ -54,6 +54,9 @@ public:
 
     void SetActiveCamera(CameraComponent* camera);
     
+    //show screen while loading. does not access scene or ECS state
+    void RenderLoadingScreen(float progress);
+    
     struct WorldRenderSubscriptions
     {
         ListenerHandle TransformCreated = 0;

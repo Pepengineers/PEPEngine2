@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <string>
 
+#include "App.Base/ECS/SceneLoadTask.h"
+
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 
 using Microsoft::WRL::ComPtr;
@@ -67,15 +69,7 @@ App::App(HINSTANCE hInstance)
     Instance = this;
 }
 
-App::~App()
-{
-    //ordering is important
-    Locator.UnregisterModule<SceneManagerModule>();
-    Locator.UnregisterModule<RenderModule>();
-    // can't be put into RenderModule since it is required 
-    // to call it after all module entities are destroyed
-    GDX12StreamlineSDK::Get().Shutdown();
-}
+App::~App() = default;
 
 HINSTANCE App::GetAppHandler() const
 {

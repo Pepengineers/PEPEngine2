@@ -25,6 +25,7 @@
 #pragma comment(lib, "D3D12.lib")
 #pragma comment(lib, "dxgi.lib")
 
+class SceneLoadTask;
 class RenderModule;
 class Window;
 
@@ -88,11 +89,9 @@ protected:
     void Update(const GameTimer& gameTimer) override;
 
 private:
-    bool PollSceneLoad();
+    bool TickSceneLoad();
     
     std::unique_ptr<Window> _window;
     
-    std::future<bool> _sceneLoadFuture;
-    bool _sceneLoadFinished = false;
-    bool _sceneLoadSucceeded = false;
+    std::unique_ptr<SceneLoadTask> _sceneLoadTask;
 };
