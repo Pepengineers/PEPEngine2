@@ -91,6 +91,10 @@ int App::Run()
             TranslateMessage(&Msg);
             DispatchMessage(&Msg);
         }
+        else if (!PollSceneLoad())
+        {
+            Sleep(1);
+        }
         // Otherwise, do animation/game stuff.
         else
         {
@@ -149,12 +153,10 @@ bool App::Initialize()
         return false;
     }
 
-    Logger::Info("App::Initialize before LoadStartScene");
-
-    if (!LoadStartScene())
-    {
-        return false;
-    }
+    Logger::Info("Starting asynchronous start-scene loading");
+    SetWindowText(_window->GetWindowHandle(), (_window->GetWindowTitle() + L" - Loading...").c_str());
+    
+    _sceneLoadFuture = std::async(std::launch::async, [this]() {return LoadStartScene();});
 
     return true;
 }
@@ -276,20 +278,40 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_LBUTTONDOWN:
     case WM_MBUTTONDOWN:
     case WM_RBUTTONDOWN:
+        if (!_sceneLoadSucceeded)
+        {
+            return 0;
+        }
+        
         OnMouseDown(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
         return 0;
 
     case WM_LBUTTONUP:
     case WM_MBUTTONUP:
     case WM_RBUTTONUP:
+        if (!_sceneLoadSucceeded)
+        {
+            return 0;
+        }
+        
         OnMouseUp(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
         return 0;
 
     case WM_MOUSEMOVE:
+        if (!_sceneLoadSucceeded)
+        {
+            return 0;
+        }
+        
         OnMouseMove(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
         return 0;
 
     case WM_MOUSEWHEEL:
+        if (!_sceneLoadSucceeded)
+        {
+            return 0;
+        }
+        
         OnMouseWheelMove(wParam);
         return 0;
 
@@ -306,6 +328,11 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 void App::OnResize()
 {
+    if (!_sceneLoadFinished || !_sceneLoadSucceeded)
+    {
+        return;
+    }
+    
     //WinApi unintentionally calls OnResize() once during window creation.
     //It happens during AppBase::Initialize(), 
     //so none of the systems are currently initialized.
@@ -373,4 +400,49 @@ void App::Update(const GameTimer& gameTimer)
     // as the initialization order (that is used by the locator)
     Locator.GetModule<RenderModule>()->Update();
     Locator.GetModule<SceneManagerModule>()->Update();
+}
+
+bool App::PollSceneLoad()
+{
+    if (_sceneLoadFinished)
+    {
+        return _sceneLoadSucceeded;
+    }
+    
+    if (!_sceneLoadFuture.valid())
+    {
+        return false;
+    }
+    
+    if (_sceneLoadFuture.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+    {
+        return false;
+    }
+    
+    _sceneLoadSucceeded = _sceneLoadFuture.get();
+    _sceneLoadFinished = true;
+    
+    if (!_sceneLoadSucceeded)
+    {
+        Logger::Error("Asynchronous start-scene load failed.");
+        PostQuitMessage(EXIT_FAILURE);
+        return false;
+    }
+    
+    Logger::Info("Asynchronous start-scene loading completed");
+    SetWindowText(_window->GetWindowHandle(), _window->GetWindowTitle().c_str());
+    
+    //resize, because onload GPU resize were suppressed
+    if (!bMinimized)
+    {
+        OnResize();
+    }
+    
+    Timer.Reset();
+    if (bAppPaused)
+    {
+        Timer.Stop();
+    }
+    
+    return true;
 }
