@@ -8,6 +8,9 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "App.Base/ECS/WorldDocument.h"
+#include "App.Base/ECS/YamlReadUtils.h"
+
 namespace
 {
     std::string ReadTextFile(const std::string& path)
@@ -25,35 +28,6 @@ namespace
         buffer << file.rdbuf();
 
         return buffer.str();
-    }
-
-    bool HasChild(const ryml::NodeRef& node, const char* name)
-    {
-        return node.has_child(ryml::to_csubstr(name));
-    }
-
-    std::string ReadString(const ryml::NodeRef& node, const char* name, const std::string& defaultValue = "")
-    {
-        if (!HasChild(node, name))
-        {
-            return defaultValue;
-        }
-
-        std::string value;
-        node[ryml::to_csubstr(name)] >> value;
-        return value;
-    }
-
-    int ReadInt(const ryml::NodeRef& node, const char* name, int defaultValue = 0)
-    {
-        if (!HasChild(node, name))
-        {
-            return defaultValue;
-        }
-
-        int value = defaultValue;
-        node[ryml::to_csubstr(name)] >> value;
-        return value;
     }
 
     ryml::Tree ParseYamlTree(const std::string& path)
@@ -80,7 +54,7 @@ AppConfig AppConfigLoader::LoadAppConfig(const std::string& path)
     ryml::Tree tree = ParseYamlTree(path);
     ryml::NodeRef root = tree.rootref();
 
-    if (!HasChild(root, "App"))
+    if (!AppYaml::HasChild(root, "App"))
     {
         throw std::runtime_error("App config does not contain root node 'App': " + path);
     }
@@ -88,11 +62,11 @@ AppConfig AppConfigLoader::LoadAppConfig(const std::string& path)
     ryml::NodeRef appNode = root["App"];
 
     AppConfig config;
-    config.Name = ReadString(appNode, "Name");
-    config.Type = ReadString(appNode, "Type");
-    config.StartScene = ReadString(appNode, "StartScene");
+    config.Name = AppYaml::ReadString(appNode, "Name");
+    config.Type = AppYaml::ReadString(appNode, "Type");
+    config.StartScene = AppYaml::ReadString(appNode, "StartScene");
 
-    if (HasChild(appNode, "SystemsBanlist"))
+    if (AppYaml::HasChild(appNode, "SystemsBanlist"))
     {
         ryml::NodeRef banlistNode = appNode["SystemsBanlist"];
 
@@ -112,7 +86,7 @@ SceneConfig AppConfigLoader::LoadSceneConfig(const std::string& path)
     ryml::Tree tree = ParseYamlTree(path);
     ryml::NodeRef root = tree.rootref();
 
-    if (!HasChild(root, "Scene"))
+    if (!AppYaml::HasChild(root, "Scene"))
     {
         throw std::runtime_error("Scene config does not contain root node 'Scene': " + path);
     }
@@ -120,17 +94,25 @@ SceneConfig AppConfigLoader::LoadSceneConfig(const std::string& path)
     ryml::NodeRef sceneNode = root["Scene"];
 
     SceneConfig config;
-    config.Name = ReadString(sceneNode, "Name");
+    config.Name = AppYaml::ReadString(sceneNode, "Name");
 
-    if (HasChild(sceneNode, "Worlds"))
+    if (AppYaml::HasChild(sceneNode, "Worlds"))
     {
         ryml::NodeRef worldsNode = sceneNode["Worlds"];
 
         for (ryml::NodeRef worldNode : worldsNode.children())
         {
             SceneWorldConfig worldConfig;
-            worldConfig.Name = ReadString(worldNode, "Name");
-            worldConfig.Path = ReadString(worldNode, "Path");
+            worldConfig.Name = AppYaml::ReadString(worldNode, "Name");
+            const std::filesystem::path sceneDirectory = std::filesystem::absolute(path).parent_path();
+
+            std::filesystem::path worldPath = AppYaml::ReadString(worldNode, "Path");
+            if (worldPath.is_relative())
+            {
+                worldPath = sceneDirectory / worldPath;
+            }
+
+            worldConfig.Path = worldPath.lexically_normal().string();
 
             config.Worlds.push_back(worldConfig);
         }
@@ -141,32 +123,6 @@ SceneConfig AppConfigLoader::LoadSceneConfig(const std::string& path)
 
 WorldConfig AppConfigLoader::LoadWorldConfig(const std::string& path)
 {
-    ryml::Tree tree = ParseYamlTree(path);
-    ryml::NodeRef root = tree.rootref();
-
-    if (!HasChild(root, "World"))
-    {
-        throw std::runtime_error("World config does not contain root node 'World': " + path);
-    }
-
-    ryml::NodeRef worldNode = root["World"];
-
-    WorldConfig config;
-    config.Name = ReadString(worldNode, "Name");
-
-    if (HasChild(worldNode, "Systems"))
-    {
-        ryml::NodeRef systemsNode = worldNode["Systems"];
-
-        for (ryml::NodeRef systemNode : systemsNode.children())
-        {
-            SystemConfig systemConfig;
-            systemConfig.Name = ReadString(systemNode, "Name");
-            systemConfig.Priority = ReadInt(systemNode, "Priority", 0);
-
-            config.Systems.push_back(systemConfig);
-        }
-    }
-
-    return config;
+    WorldDocument document = ParseWorldDocument(path);
+    return std::move(document.Config);
 }
