@@ -45,6 +45,7 @@ public:
     //returns a pointer to a fully initialized structure that you can specify in components
     GDX12Material* CreateMaterial(const std::string& name);
 
+    [[nodiscard]] GPUTexture* FindTextureByName(const std::string& name) const noexcept;
     GPUTexture* GetTextureByName(const std::string& name);
     //returns a pointer to a fully initialized structure that you can specify in materials
     GPUTexture* CreateTexture(const std::string& name, const Texture* texture);
