@@ -95,10 +95,17 @@ int App::Run()
         }
         else if (!TickSceneLoad())
         {
+            const float progress = _sceneLoadTask->GetProgress();
+            const std::string status = _sceneLoadTask->GetStatus();
+            
             auto renderModule = Locator.GetModule<RenderModule>();
             renderModule->RenderLoadingScreen(_sceneLoadTask->GetProgress());
             
-            const std::wstring title = _window->GetWindowTitle() + L" - Loading " + std::to_wstring(static_cast<int>(_sceneLoadTask->GetProgress() * 100.0f)) + L"%";
+            const std::wstring wideStatus(status.begin(), status.end());
+            
+            const std::wstring title = _window->GetWindowTitle() 
+                                    + L" - " + wideStatus 
+                                    + L" (" + std::to_wstring(static_cast<int>(_sceneLoadTask->GetProgress() * 100.0f)) + L"%)";
             
             SetWindowText(_window->GetWindowHandle(), title.c_str());
         }

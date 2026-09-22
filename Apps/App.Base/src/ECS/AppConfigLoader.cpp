@@ -104,15 +104,10 @@ SceneConfig AppConfigLoader::LoadSceneConfig(const std::string& path)
         {
             SceneWorldConfig worldConfig;
             worldConfig.Name = AppYaml::ReadString(worldNode, "Name");
-            const std::filesystem::path sceneDirectory = std::filesystem::absolute(path).parent_path();
 
             std::filesystem::path worldPath = AppYaml::ReadString(worldNode, "Path");
-            if (worldPath.is_relative())
-            {
-                worldPath = sceneDirectory / worldPath;
-            }
 
-            worldConfig.Path = worldPath.lexically_normal().string();
+            worldConfig.Path = std::filesystem::absolute(worldPath).lexically_normal().string();
 
             config.Worlds.push_back(worldConfig);
         }

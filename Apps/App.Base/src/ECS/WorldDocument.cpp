@@ -20,24 +20,19 @@ namespace
         return buffer.str();
     }
     
-    std::filesystem::path ResolveResourcePath(const std::filesystem::path& worldDirectory, const std::filesystem::path& sourcePath)
+    std::filesystem::path ResolveResourcePath(const std::filesystem::path& sourcePath)
     {
         if (sourcePath.empty())
         {
             return {};
         }
         
-        if (sourcePath.is_absolute())
-        {
-            return sourcePath.lexically_normal();
-        }
-        
-        return std::filesystem::path(worldDirectory / sourcePath).lexically_normal();
+        return std::filesystem::absolute(sourcePath).lexically_normal();
     }
 }
 
 
-WorldTextureResource ParseTextureResource(ryml::NodeRef textureNode, const std::filesystem::path& worldDirectory)
+WorldTextureResource ParseTextureResource(ryml::NodeRef textureNode)
 {
     if (!textureNode.has_child("Id") || !textureNode.has_child("Source"))
     {
@@ -60,12 +55,12 @@ WorldTextureResource ParseTextureResource(ryml::NodeRef textureNode, const std::
         textureNode["Required"] >> resource.Required;
     }
     
-    resource.SourcePath = ResolveResourcePath(worldDirectory, source);
+    resource.SourcePath = ResolveResourcePath(source);
     
     return resource;
 }
 
-WorldMeshResource ParseMeshResource(ryml::NodeRef meshNode, const std::filesystem::path& worldDirectory)
+WorldMeshResource ParseMeshResource(ryml::NodeRef meshNode)
 {
     if (!meshNode.has_child("Id") || !meshNode.has_child("Source"))
     {
@@ -93,7 +88,7 @@ WorldMeshResource ParseMeshResource(ryml::NodeRef meshNode, const std::filesyste
         meshNode["ImportMaterials"] >> resource.ImportMaterials;
     }
     
-    resource.SourcePath = ResolveResourcePath(worldDirectory, source);
+    resource.SourcePath = ResolveResourcePath(source);
     
     return resource;
 }
@@ -153,7 +148,7 @@ WorldDocument ParseWorldDocument(const std::filesystem::path& path)
         {
             for (ryml::NodeRef textureNode : resourcesNode["Textures"].children())
             {
-                document.Textures.push_back(ParseTextureResource(textureNode, document.SourcePath.parent_path()));
+                document.Textures.push_back(ParseTextureResource(textureNode));
             }
         }
         
@@ -161,7 +156,7 @@ WorldDocument ParseWorldDocument(const std::filesystem::path& path)
         {
             for (ryml::NodeRef meshNode : resourcesNode["Meshes"].children())
             {
-                document.Meshes.push_back(ParseMeshResource(meshNode, document.SourcePath.parent_path()));
+                document.Meshes.push_back(ParseMeshResource(meshNode));
             }
         }
     }

@@ -43,5 +43,5 @@ struct WorldDocument
 };
 
 [[nodiscard]] WorldDocument ParseWorldDocument(const std::filesystem::path& path);
-[[nodiscard]] WorldMeshResource ParseMeshResource(ryml::NodeRef meshNode, const std::filesystem::path& worldDirectory);
-[[nodiscard]] WorldTextureResource ParseTextureResource(ryml::NodeRef textureNode, const std::filesystem::path& worldDirectory);
+[[nodiscard]] WorldMeshResource ParseMeshResource(ryml::NodeRef meshNode);
+[[nodiscard]] WorldTextureResource ParseTextureResource(ryml::NodeRef textureNode);
