@@ -141,8 +141,10 @@ GDX12Material* RenderModule::CreateMaterial(const std::string& name)
 
 GDX12Texture* RenderModule::GetTextureByName(const std::string& name)
 {
-    auto it = _textures.find(name);
-    if (it != _textures.end()) { return it->second.get(); }
+    if (GDX12Texture* texture = FindTextureByName(name))
+    {
+        return texture;
+    }
 
     std::string errorMsg = "ERROR: Texture " + name + " not found in textures directory.\n";
     OutputDebugStringA(errorMsg.c_str());
@@ -452,6 +454,20 @@ void RenderModule::SubscribeToWorld(World& world)
             });
 
     _worldSubscriptions[&world] = subscriptions;
+    
+    //a world can already contain components before subscription, so we should make GPU resources for that too
+    ecs.ForEach<TransformComponent>([this, &world](Entity entity, TransformComponent& component)
+    {
+        OnTransformComponentCreated(world, entity, component);
+    });
+    ecs.ForEach<CameraComponent>([this, &world](Entity entity, CameraComponent& component)
+    {
+        OnCameraComponentCreated(world, entity, component);
+    });
+    ecs.ForEach<StaticMeshRenderComponent>([this, &world](Entity entity, StaticMeshRenderComponent& component)
+    {
+        OnRenderComponentCreated(world, entity, component);
+    });
 }
 
 void RenderModule::UnsubscribeFromWorld(World& world)
@@ -468,6 +484,7 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     auto& ecs = world.GetECS();
     auto& transformPool = ecs.GetPool<TransformComponent>();
     auto& cameraPool = ecs.GetPool<CameraComponent>();
+    auto& renderCompPool = ecs.GetPool<StaticMeshRenderComponent>();
 
     transformPool.OnComponentCreated.RemoveListener(subscriptions.TransformCreated);
     transformPool.OnComponentDestroyed.RemoveListener(subscriptions.TransformDestroyed);
@@ -476,6 +493,10 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     cameraPool.OnComponentCreated.RemoveListener(subscriptions.CameraCreated);
     cameraPool.OnComponentDestroyed.RemoveListener(subscriptions.CameraDestroyed);
     cameraPool.OnComponentUpdated.RemoveListener(subscriptions.CameraUpdated);
+    
+    renderCompPool.OnComponentCreated.RemoveListener(subscriptions.RenderCompCreated);
+    renderCompPool.OnComponentDestroyed.RemoveListener(subscriptions.RenderCompDestroyed);
+    renderCompPool.OnComponentUpdated.RemoveListener(subscriptions.RenderCompUpdated);
 
     _worldSubscriptions.erase(it);
 }
@@ -497,8 +518,11 @@ GDX12UploadBuffer<GDX12IndirectDrawArgs>* RenderModule::GetIndirectCommandsCache
 
 void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
 {
-    TransformCompGPUData gpuData;
+    TransformCompGPUData gpuData{};
     gpuData.CBufferIndex = _frameConstants[0]->TransformCache->GetElementCount();
+    gpuData.NumFramesDirty = _numFrameConstants;
+    gpuData.World = Matrix::Identity;
+    
     _transformGPUData[entity] = gpuData;
 
     for (auto& constants : _frameConstants)
@@ -1118,6 +1142,12 @@ void RenderModule::UnsubscribeFromAllWorlds()
             UnsubscribeFromWorld(*world);
         }
     }
+}
+
+GDX12Texture* RenderModule::FindTextureByName(const std::string& name) const noexcept
+{
+    const auto it = _textures.find(name);
+    return (it != _textures.end()) ? it->second.get() : nullptr;
 }
 
 bool RenderModule::ShouldTick()

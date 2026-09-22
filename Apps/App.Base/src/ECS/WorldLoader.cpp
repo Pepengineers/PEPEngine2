@@ -209,15 +209,14 @@ namespace
         const std::uint8_t alpha,
         const Engine::Core::ETextureType textureType)
     {
+        if (GDX12Texture* existing = renderModule.FindTextureByName(textureName))
+        {
+            return existing;
+        }
+        
         Engine::Core::Texture texture = CreateSingleColorTexture(red, green, blue, alpha, textureType);
 
-        GDX12Texture* gpuTexture = renderModule.CreateTexture(textureName, &texture);
-        if (gpuTexture == nullptr)
-        {
-            gpuTexture = renderModule.GetTextureByName(textureName);
-        }
-
-        return gpuTexture;
+        return renderModule.CreateTexture(textureName, &texture);
     }
 
     /// Converts a normalized color component to an 8-bit texture channel value.
@@ -1107,7 +1106,7 @@ bool WorldLoader::Committer::Tick(std::chrono::milliseconds budget)
                 _impl->ItemIndex = 0;
                 _impl->Phase = CommitPhase::LoadTextures;
                 _impl->Status = "Creating world " + desc.Name;
-                _impl->CompletedOperations;
+                _impl->CompletedOperations++;
                 break;
             }
         case CommitPhase::LoadTextures:
@@ -1235,11 +1234,11 @@ bool WorldLoader::Committer::Tick(std::chrono::milliseconds budget)
                 } else if (_impl->Phase == CommitPhase::LoadComponentsWithoutRefs)
                 {
                     _impl->Status = "Loading entity components";
-                    succeeded = LoadEntityComponentsWithoutRefs(*_impl->CurrentContext, entityNode);
+                    succeeded = LoadEntityComponentWithoutRefs(*_impl->CurrentContext, entityNode);
                 } else
                 {
                     _impl->Status = "Resolving entity references";
-                    succeeded = LoadEntityComponentsWithRefs(*_impl->CurrentContext, entityNode);
+                    succeeded = LoadEntityComponentWithRefs(*_impl->CurrentContext, entityNode);
                 }
                 
                 if (!succeeded)
@@ -1303,9 +1302,9 @@ bool WorldLoader::Committer::Tick(std::chrono::milliseconds budget)
                 break;
             }
         }
-        
-        return !_impl->Failed;
     }
+    
+    return !_impl->Failed;
 }
 
 bool WorldLoader::Committer::IsComplete() const
@@ -1837,6 +1836,12 @@ static bool LoadWorldResources(WorldLoadContext& context, WorldDocument& documen
 
 static bool CreateWorldEntity(WorldLoadContext& context, ryml::NodeRef entityNode)
 {
+    if (!entityNode.is_map())
+    {
+        Logger::Error("Expected an entity map while loading world entities.");
+        return false;
+    }
+    
     WorldECS& ecs = context.World->GetECS();
 
     if (!entityNode.has_child("Id"))
@@ -1974,131 +1979,137 @@ static bool LoadEntityComponentWithoutRefs(
     WorldLoadContext& context,
     ryml::NodeRef entityNode)
 {
+    if (!entityNode.is_map())
+    {
+        Logger::Error("Expected an entity map while loading world entities.");
+        return false;
+    }
+    
     WorldECS& ecs = context.World->GetECS();
 
     std::string id;
-        entityNode["Id"] >> id;
+    entityNode["Id"] >> id;
 
-        const Entity runtimeEntity = context.ResolveEntity(id);
-        if (runtimeEntity == InvalidEntity)
+    const Entity runtimeEntity = context.ResolveEntity(id);
+    if (runtimeEntity == InvalidEntity)
+    {
+        return false;
+    }
+
+    auto entity = ecs.GetEntityHandle(runtimeEntity);
+
+    if (!entityNode.has_child("Components"))
+    {
+        return true;
+    }
+
+    ryml::NodeRef components = entityNode["Components"];
+
+    if (components.has_child("Name"))
+    {
+        std::string name = id;
+
+        ryml::NodeRef nameNode = components["Name"];
+        if (nameNode.has_child("Value"))
+        {
+            nameNode["Value"] >> name;
+        }
+
+        entity.AddComponent<NameComponent>(name);
+    }
+
+    if (components.has_child("Transform"))
+    {
+        if (!ParseTransform(entity, components["Transform"]))
         {
             return false;
         }
+    }
 
-        auto entity = ecs.GetEntityHandle(runtimeEntity);
+    if (components.has_child("Camera"))
+    {
+        auto& camera = entity.AddComponent<CameraComponent>();
 
-        if (!entityNode.has_child("Components"))
+        ryml::NodeRef cameraNode = components["Camera"];
+
+        if (cameraNode.has_child("FOV"))
         {
-            return true;
+            cameraNode["FOV"] >> camera.FOV;
         }
 
-        ryml::NodeRef components = entityNode["Components"];
-
-        if (components.has_child("Name"))
+        if (cameraNode.has_child("NearPlane"))
         {
-            std::string name = id;
-
-            ryml::NodeRef nameNode = components["Name"];
-            if (nameNode.has_child("Value"))
-            {
-                nameNode["Value"] >> name;
-            }
-
-            entity.AddComponent<NameComponent>(name);
+            cameraNode["NearPlane"] >> camera.NearPlane;
         }
 
-        if (components.has_child("Transform"))
+        if (cameraNode.has_child("FarPlane"))
         {
-            if (!ParseTransform(entity, components["Transform"]))
-            {
-                return false;
-            }
+            cameraNode["FarPlane"] >> camera.FarPlane;
         }
 
-        if (components.has_child("Camera"))
+        camera.DirtyFlag = true;
+    }
+
+    if (components.has_child("Velocity"))
+    {
+        Vector3 velocity = ReadVector3(components["Velocity"]);
+        entity.AddComponent<VelocityComponent>(velocity);
+    }
+
+    if (components.has_child("CircleMovement"))
+    {
+        ryml::NodeRef node = components["CircleMovement"];
+
+        float radius = 100.0f;
+        float speed = 100.0f;
+
+        if (node.has_child("Radius"))
         {
-            auto& camera = entity.AddComponent<CameraComponent>();
-
-            ryml::NodeRef cameraNode = components["Camera"];
-
-            if (cameraNode.has_child("FOV"))
-            {
-                cameraNode["FOV"] >> camera.FOV;
-            }
-
-            if (cameraNode.has_child("NearPlane"))
-            {
-                cameraNode["NearPlane"] >> camera.NearPlane;
-            }
-
-            if (cameraNode.has_child("FarPlane"))
-            {
-                cameraNode["FarPlane"] >> camera.FarPlane;
-            }
-
-            camera.DirtyFlag = true;
+            node["Radius"] >> radius;
         }
 
-        if (components.has_child("Velocity"))
+        if (node.has_child("Speed"))
         {
-            Vector3 velocity = ReadVector3(components["Velocity"]);
-            entity.AddComponent<VelocityComponent>(velocity);
+            node["Speed"] >> speed;
         }
 
-        if (components.has_child("CircleMovement"))
+        entity.AddComponent<CircleMovementComponent>(radius, speed);
+    }
+
+    if (components.has_child("StaticMeshRender"))
+    {
+        if (!ParseStaticMeshRender(context, entity, components["StaticMeshRender"]))
         {
-            ryml::NodeRef node = components["CircleMovement"];
+            return false;
+        }
+    }
 
-            float radius = 100.0f;
-            float speed = 100.0f;
+    if (components.has_child("SplineCurve"))
+    {
+        ryml::NodeRef node = components["SplineCurve"];
 
-            if (node.has_child("Radius"))
-            {
-                node["Radius"] >> radius;
-            }
-
-            if (node.has_child("Speed"))
-            {
-                node["Speed"] >> speed;
-            }
-
-            entity.AddComponent<CircleMovementComponent>(radius, speed);
+        bool loop = false;
+        if (node.has_child("Loop"))
+        {
+            node["Loop"] >> loop;
         }
 
-        if (components.has_child("StaticMeshRender"))
+        std::vector<SplinePoint> points;
+
+        if (node.has_child("Points"))
         {
-            if (!ParseStaticMeshRender(context, entity, components["StaticMeshRender"]))
+            for (ryml::NodeRef pointNode : node["Points"].children())
             {
-                return false;
+                SplinePoint point;
+                point.Position = ReadVector3(pointNode["Position"]);
+                point.ArriveTangent = ReadVector3(pointNode["ArriveTangent"]);
+                point.LeaveTangent = ReadVector3(pointNode["LeaveTangent"]);
+                points.push_back(point);
             }
         }
 
-        if (components.has_child("SplineCurve"))
-        {
-            ryml::NodeRef node = components["SplineCurve"];
-
-            bool loop = false;
-            if (node.has_child("Loop"))
-            {
-                node["Loop"] >> loop;
-            }
-
-            std::vector<SplinePoint> points;
-
-            if (node.has_child("Points"))
-            {
-                for (ryml::NodeRef pointNode : node["Points"].children())
-                {
-                    SplinePoint point;
-                    point.Position = ReadVector3(pointNode["Position"]);
-                    point.ArriveTangent = ReadVector3(pointNode["ArriveTangent"]);
-                    point.LeaveTangent = ReadVector3(pointNode["LeaveTangent"]);
-                    points.push_back(point);
-                }
-            }
-
-            entity.AddComponent<SplineCurveComponent>(loop, points);
-        }
+        entity.AddComponent<SplineCurveComponent>(loop, points);
+    }
 
     return true;
 }
@@ -2142,6 +2153,12 @@ static bool LoadEntityComponentWithRefs(
     WorldLoadContext& context,
     ryml::NodeRef entityNode)
 {
+    if (!entityNode.is_map())
+    {
+        Logger::Error("Expected an entity map while loading world entities.");
+        return false;
+    }
+    
     WorldECS& ecs = context.World->GetECS();
     
     std::string id;
