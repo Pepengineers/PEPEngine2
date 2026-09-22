@@ -5,30 +5,26 @@
 #include <string>
 
 #include "AppConfig.h"
+#include "WorldDocument.h"
 #include "Engine.Core/Types/TextureTypes.h"
 #include "Engine.Core/Types/MeshTypes.h"
 
 struct PreparedMesh
 {
-    std::string Id;
-    std::filesystem::path SourcePath;
-    bool SubmitToRenderer = true;
-    bool ImportMaterials = false;
+    WorldMeshResource Resource;
     std::unique_ptr<Engine::Core::Mesh> Data;
 };
 
 struct PreparedTexture
 {
-    std::filesystem::path SourcePath;
-    bool Required = false;
+    WorldTextureResource Resource;
     std::unique_ptr<Engine::Core::Texture> Data;
 };
 
 struct PreparedWorld
 {
     SceneWorldConfig Config;
-    
-    std::string YamlText;
+    WorldDocument Document;
     
     std::vector<PreparedMesh> Meshes;
     std::vector<PreparedTexture> Textures;

@@ -295,10 +295,43 @@ World* SceneManagerModule::GetWorld(size_t index)
     return _worldVector[index].get();
 }
 
-bool SceneManagerModule::ReplaceScene(std::vector<std::unique_ptr<World>>& worlds,
+bool SceneManagerModule::ReplaceScene(std::vector<std::unique_ptr<World>> worlds,
     const std::vector<WorldConfig>& worldConfigs, const AppConfig& appConfig)
 {
-    return false;
+    if (worlds.size() != worldConfigs.size())
+    {
+        Logger::Error("ReplaceScene received mismatched world/config counts");
+        return false;
+    }
+    
+    for (const auto& world : worlds)
+    {
+        if (!world)
+        {
+            Logger::Error("ReplaceScene received a null world");
+            return false;
+        }
+    }
+    
+    Uninitialize();
+    
+    for (size_t i = 0; i < worldConfigs.size(); ++i)
+    {
+        World* world = worlds[i].get();
+        
+        _worldVector.push_back(std::move(worlds[i]));
+        OnWorldCreated.Broadcast(*world);
+        
+        if (!AddSystemsFromConfig(world, worldConfigs[i], appConfig))
+        {
+            Logger::Error("Failed to install systems for staged world {}", i);
+            
+            Uninitialize();
+            return false;
+        }
+    }
+    
+    return true;
 }
 
 size_t SceneManagerModule::GetWorldCount() const

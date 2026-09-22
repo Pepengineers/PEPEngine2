@@ -21,6 +21,8 @@
 #include <sstream>
 #include <unordered_map>
 
+#include "assimp/ProgressHandler.hpp"
+
 namespace SimpleMath = DirectX::SimpleMath;
 
 namespace 
@@ -737,11 +739,48 @@ namespace
 			ImportNodeMeshes(assimpScene, *childNode, nodeTransform, importedSubMeshes, startVertexLocation, startIndexLocation);
 		}
 	}
+	
+	void ReportMeshProgress(const Engine::Core::MeshImportProgressCallback& progressCallback, float progress) noexcept
+	{
+		if (!progressCallback)
+		{
+			return;
+		}
+
+		try
+		{
+			progressCallback((std::max)(0.0f, (std::min)(progress, 1.0f)));
+		}
+		catch (...)
+		{
+			//don't throw
+		}
+	}
+	
+	class CallbackProgressHandler final : public Assimp::ProgressHandler
+	{
+	public:
+		explicit CallbackProgressHandler(Engine::Core::MeshImportProgressCallback progressCallback): _callback(std::move(progressCallback)) {}
+		
+		bool Update(float percentage = -1.0f) override
+		{
+			if (percentage >= 0.0f)
+			{
+				//remaining 0.2 for conversion/material
+				ReportMeshProgress(_callback, percentage * 0.8f);
+			}
+			
+			return true;
+		}
+		
+	private:
+		Engine::Core::MeshImportProgressCallback _callback;
+	};
 }
 
 namespace Engine::Core
 {
-	std::unique_ptr<Mesh> MeshImporter::ImportSingleMeshAsset(const std::filesystem::path& sourcePath, const MeshImportOptions& options)
+	std::unique_ptr<Mesh> MeshImporter::ImportSingleMeshAsset(const std::filesystem::path& sourcePath, const MeshImportOptions& options, MeshImportProgressCallback progressCallback)
 	{
 		if (sourcePath.empty())
 		{
@@ -750,6 +789,13 @@ namespace Engine::Core
 		}
 
 		Assimp::Importer importer;
+		
+		ReportMeshProgress(progressCallback, 0.0f);
+		if (progressCallback)
+		{
+			importer.SetProgressHandler(new CallbackProgressHandler(progressCallback));
+		}
+		
 		const std::string sourcePathUtf8 = sourcePath.u8string();
 
 		const std::uint32_t assimpFlags = BuildAssimpPostProcessFlags(options);
@@ -775,6 +821,8 @@ namespace Engine::Core
 				meshCount);
 			return nullptr;
 		}
+		
+		ReportMeshProgress(progressCallback, 0.8);
 
 		std::vector<SubMesh> importedSubMeshes;
 		std::uint32_t startVertexLocation = 0;
@@ -782,6 +830,8 @@ namespace Engine::Core
 
 		const aiMatrix4x4 identityTransform;
 		ImportNodeMeshes(*assimpScene, *assimpScene->mRootNode, identityTransform, importedSubMeshes, startVertexLocation, startIndexLocation);
+		
+		ReportMeshProgress(progressCallback, 0.93f);
 
 		if (importedSubMeshes.empty())
 		{
@@ -797,7 +847,12 @@ namespace Engine::Core
 
 		const DirectX::BoundingBox meshBounds = CalculateMeshBounds(importedSubMeshes);
 		std::vector<MeshMaterial> importedMaterials = ImportMaterials(*assimpScene, sourcePath);
+		
+		ReportMeshProgress(progressCallback, 0.99f);
+		
 		std::unique_ptr<Mesh> mesh = std::make_unique<Mesh>(std::move(importedSubMeshes), meshBounds, std::move(importedMaterials));
+		
+		ReportMeshProgress(progressCallback, 1.f);
 		return mesh;
 	}
 
