@@ -27,6 +27,7 @@ void SceneLoadTask::Start()
     
     _preparedFuture = std::async(std::launch::async, [this]()
     {
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
         return WorldLoader::PrepareScene(_scenePath, [this](float progress, const std::string& status)
         {
             //cpu preparation is only the first 75%
