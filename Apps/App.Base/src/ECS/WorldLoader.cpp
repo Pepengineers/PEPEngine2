@@ -1341,8 +1341,36 @@ WorldLoader::Committer::Committer(std::unique_ptr<Impl> impl)
 
 
 std::unique_ptr<PreparedScene> WorldLoader::PrepareScene(const std::string& scenePath,
-    SceneLoadProgressCallback progressCallback)
+    SceneLoadProgressCallback progressCallback,
+    SceneLoadCancellationCallback cancellationCallback)
 {
+    const auto isCancelled = [&]() noexcept
+    {
+        if (!cancellationCallback)
+        {
+            return false;
+        }
+
+        try
+        {
+            return cancellationCallback();
+        }
+        catch (...)
+        {
+            return true;
+        }
+    };
+    
+    const auto throwIfCancelled = [&]()
+    {
+        if (isCancelled())
+        {
+            throw std::runtime_error("Scene loading cancelled");
+        }
+    };
+    
+    throwIfCancelled();
+    
     if (scenePath.empty())
     {
         throw std::invalid_argument("scenePath cannot be empty");
@@ -1369,6 +1397,8 @@ std::unique_ptr<PreparedScene> WorldLoader::PrepareScene(const std::string& scen
     
     for (size_t i = 0; i < worldCount; ++i)
     {
+        throwIfCancelled();
+        
         const float worldBegin = static_cast<float>(i) / worldCount;
         const float worldSpan = 1.0f / worldCount;
         
@@ -1394,6 +1424,8 @@ std::unique_ptr<PreparedScene> WorldLoader::PrepareScene(const std::string& scen
         
         for (size_t meshIndex = 0; meshIndex < meshCount; meshIndex++)
         {
+            throwIfCancelled();
+            
             const WorldMeshResource& meshResource = preparedWorld.Document.Meshes[meshIndex];
             
             PreparedMesh preparedMesh;
@@ -1407,10 +1439,11 @@ std::unique_ptr<PreparedScene> WorldLoader::PrepareScene(const std::string& scen
                 const float clamped = (std::max)(0.0f, (std::min)(meshProgress, 1.0f));
                 
                 reportWorldProgress(meshBegin + (meshEnd - meshBegin) * clamped, "Importing mesh " + meshResource.Id);
-            });
+            }, isCancelled);
             
             if (!preparedMesh.Data)
             {
+                throwIfCancelled();
                 throw std::runtime_error("Failed to prepare mesh '" + meshResource.Id + "': " + meshResource.SourcePath.string());
             }
             
@@ -1450,6 +1483,7 @@ std::unique_ptr<PreparedScene> WorldLoader::PrepareScene(const std::string& scen
         
         for (size_t i = 0; i < textureCount; ++i)
         {
+            throwIfCancelled();
             WorldTextureResource resource = std::move(texturesToPrepare[i]);
             
             reportWorldProgress(0.65f + 0.3 * static_cast<float>(i + 1) / static_cast<float>((std::max)(size_t{1}, textureCount)),
@@ -1464,6 +1498,8 @@ std::unique_ptr<PreparedScene> WorldLoader::PrepareScene(const std::string& scen
             }
             
             std::unique_ptr<Engine::Core::Texture> texture = Engine::Core::TextureLoader::LoadTextureAsset(resource.SourcePath);
+            
+            throwIfCancelled();
             
             if (!texture)
             {
