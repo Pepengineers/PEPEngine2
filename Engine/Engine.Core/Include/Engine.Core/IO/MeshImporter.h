@@ -10,6 +10,7 @@
 namespace Engine::Core
 {
 	using MeshImportProgressCallback = std::function<void(float)>;
+	using MeshImportCancellationCallback = std::function<bool()>;
 	
 	class MeshImporter
 	{
@@ -17,8 +18,10 @@ namespace Engine::Core
 		/// Imports one logical mesh asset from sourcePath.
 		/// This path is intended for files that represent a single model asset,
 		/// not a whole scene with multiple independent objects.
-		[[nodiscard]] static std::unique_ptr<Mesh> ImportSingleMeshAsset(const std::filesystem::path& sourcePath, const MeshImportOptions& options = {}, MeshImportProgressCallback
-		                                                                 progressCallback = {});
+		[[nodiscard]] static std::unique_ptr<Mesh> ImportSingleMeshAsset(const std::filesystem::path& sourcePath, 
+																		const MeshImportOptions& options = {}, 
+																		MeshImportProgressCallback progressCallback = {},
+																		MeshImportCancellationCallback cancellationCallback = {});
 
 		/// Imports one mesh sub-asset from sourcePath in local mesh space.
 		/// Node hierarchy transforms are intentionally not baked in this mode,

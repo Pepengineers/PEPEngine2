@@ -10,10 +10,19 @@ SceneLoadTask::SceneLoadTask(std::string const& scenePath, AppConfig const& conf
 {
 }
 
-SceneLoadTask::~SceneLoadTask() = default;
+SceneLoadTask::~SceneLoadTask()
+{
+    Cancel();
+    
+    if (_preparedFuture.valid())
+    {
+        _preparedFuture.wait();
+    }
+}
 
 void SceneLoadTask::Start()
 {
+    _cancelRequested.store(false, std::memory_order_release);
     SetStatus(0.0f, "Preparing scene");
     
     _preparedFuture = std::async(std::launch::async, [this]()
@@ -22,8 +31,17 @@ void SceneLoadTask::Start()
         {
             //cpu preparation is only the first 75%
             SetStatus(progress * 0.75f, status);
+        },
+        [this]() noexcept
+        {
+            return _cancelRequested.load(std::memory_order_acquire);
         });
     });
+}
+
+void SceneLoadTask::Cancel() noexcept
+{
+    _cancelRequested.store(true, std::memory_order_release);
 }
 
 void SceneLoadTask::TickMainThread(std::chrono::milliseconds const& budget)
@@ -68,19 +86,30 @@ void SceneLoadTask::TickMainThread(std::chrono::milliseconds const& budget)
             return;
         }
     }
-    
-    if (!_committer->Tick(budget) || _committer->HasFailed())
+
+    try
     {
-        Fail(_committer->GetError());
-        return;
+        if (!_committer->Tick(budget) || _committer->HasFailed())
+        {
+            Fail(_committer->GetError());
+            return;
+        }
+        
+        SetStatus(0.75f + _committer->GetProgress() * 0.25f, _committer->GetStatus());
+        
+        if (_committer->IsComplete())
+        {
+            SetStatus(1.0f, "Complete");
+            _complete.store(true);
+        }
     }
-    
-    SetStatus(0.75f + _committer->GetProgress() * 0.25f, _committer->GetStatus());
-    
-    if (_committer->IsComplete())
+    catch (const std::exception& exception)
     {
-        SetStatus(1.0f, "Complete");
-        _complete.store(true);
+        Fail(exception.what());
+    }
+    catch (...)
+    {
+        Fail("Unknown exception while committing the scene");
     }
 }
 

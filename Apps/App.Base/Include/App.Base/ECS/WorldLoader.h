@@ -9,11 +9,14 @@ class SceneManagerModule;
 class World;
 
 using SceneLoadProgressCallback = std::function<void(float, const std::string&)>;
+using SceneLoadCancellationCallback = std::function<bool()>;
 
 class WorldLoader
 {
 public:
-    static std::unique_ptr<PreparedScene> PrepareScene(const std::string& scenePath, SceneLoadProgressCallback progressCallback);
+    static std::unique_ptr<PreparedScene> PrepareScene(const std::string& scenePath, 
+                                                        SceneLoadProgressCallback progressCallback, 
+                                                        SceneLoadCancellationCallback cancellationCallback = {});
     
     class Committer
     {

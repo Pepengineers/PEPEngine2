@@ -19,6 +19,7 @@ public:
     ~SceneLoadTask();
     
     void Start();
+    void Cancel() noexcept;
     void TickMainThread(std::chrono::milliseconds const& budget);
     
     bool IsComplete() const;
@@ -38,6 +39,7 @@ private:
     SceneManagerModule* _sceneManagerModule = nullptr;
     RenderModule* _renderModule = nullptr;
     
+    std::atomic<bool> _cancelRequested{false};
     std::atomic<float> _progress{0.0f};
     std::atomic<bool> _complete{false};
     std::atomic<bool> _failed{false};
