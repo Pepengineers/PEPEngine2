@@ -30,9 +30,9 @@ using namespace Engine::Core;
 
 struct TransformCompGPUData
 {
-    UINT CBufferIndex;
-    UINT NumFramesDirty;
-    Matrix World;
+    UINT CBufferIndex = 0;
+    UINT NumFramesDirty = 0;
+    Matrix World = Matrix::Identity;
 };
 
 class RenderModule final : public Module
@@ -45,18 +45,23 @@ public:
     void Uninitialize() override;
 
     void OnResize() const;
+    
 
     GDX12Material* GetMaterialByName(const std::string& name);
 
     //returns a pointer to a fully initialized structure that you can specify in components
     GDX12Material* CreateMaterial(const std::string& name);
 
+    [[nodiscard]] GDX12Texture* FindTextureByName(const std::string& name) const noexcept;
     GDX12Texture* GetTextureByName(const std::string& name);
     //returns a pointer to a fully initialized structure that you can specify in materials
     GDX12Texture* CreateTexture(const std::string& name, const Texture* texture);
 
     //Uploads Mesh geometry to GPU
     void SubmitMesh(const Mesh* mesh, MeshHandle handle);
+    
+    //show screen while loading. does not access scene or ECS state
+    void RenderLoadingScreen(float progress);
     
     struct WorldRenderSubscriptions
     {
@@ -121,7 +126,7 @@ private:
     void SubscribeToSceneManager();
     void UnsubscribeFromSceneManager();
     void UnsubscribeFromAllWorlds();
-
+    
     GameTimer* _timer;
     Window* _window;
     

@@ -43,6 +43,7 @@ public:
     bool UnloadWorld(size_t index);
     bool SaveWorld(World* world, const std::filesystem::path& path);
     World* GetWorld(size_t index = 0);
+    bool ReplaceScene(std::vector<std::unique_ptr<World>> worlds, const std::vector<WorldConfig>& worldConfigs, const AppConfig& appConfig);
     
     size_t GetWorldCount() const;
 

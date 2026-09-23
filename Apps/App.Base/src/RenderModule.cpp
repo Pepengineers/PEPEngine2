@@ -141,8 +141,10 @@ GDX12Material* RenderModule::CreateMaterial(const std::string& name)
 
 GDX12Texture* RenderModule::GetTextureByName(const std::string& name)
 {
-    auto it = _textures.find(name);
-    if (it != _textures.end()) { return it->second.get(); }
+    if (GDX12Texture* texture = FindTextureByName(name))
+    {
+        return texture;
+    }
 
     std::string errorMsg = "ERROR: Texture " + name + " not found in textures directory.\n";
     OutputDebugStringA(errorMsg.c_str());
@@ -319,6 +321,55 @@ void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
     _geometryBuffer->AddMesh(mesh, handle);
 }
 
+void RenderModule::RenderLoadingScreen(float progress)
+{
+    progress = (std::max)(0.0f, (std::min)(progress, 1.0f));
+    
+    auto* commandQueue = _primaryDevice->GetCommandQueue();
+    auto cmdList = commandQueue->GetCommandList();
+    auto* backBuffer = _backBuffer->GetCurrentBuffer();
+    
+    cmdList->EnhancedTextureBarrier({backBuffer->GetResource()->GetRenderTargetEnhBarrier()});
+    
+    ID3D12GraphicsCommandList* nativeList = cmdList->GetCommandList().Get();
+    
+    const float bgColor[4] = {0.025f, 0.035f, 0.055f, 1.0f};
+    const float trackColor[4] = {0.1f, 0.12f, 0.16f, 1.0f};
+    const float fillColor[4] = {0.15f, 0.72f, 0.85f, 1.0f};
+    
+    const D3D12_CPU_DESCRIPTOR_HANDLE rtv = backBuffer->GetRTV()->CPUHandle;
+    
+    nativeList->ClearRenderTargetView(rtv, bgColor, 0, nullptr);
+    
+    //make progress bar rect
+    uint16_t width = 0;
+    uint16_t height = 0;
+    _window->GetWindowSize(width, height);
+    
+    const long horizontalMargin = (std::max)(32L, static_cast<long>(width / 8));
+    const long barTop = static_cast<long>(height / 2) - 10;
+    const long barBottom = barTop + 20;
+    const long barRight = (std::max)(horizontalMargin + 1, static_cast<long>(width - horizontalMargin));
+    
+    const D3D12_RECT trackRect = {horizontalMargin, barTop, barRight, barBottom};
+    
+    nativeList->ClearRenderTargetView(rtv, trackColor, 1, &trackRect);
+    
+    //fill progress
+    D3D12_RECT fillRect = trackRect;
+    fillRect.right = fillRect.left + static_cast<long>(static_cast<float>(fillRect.right - fillRect.left) * progress);
+    
+    if (fillRect.right > fillRect.left)
+    {
+        nativeList->ClearRenderTargetView(rtv, fillColor, 1, &fillRect);
+    }
+    
+    cmdList->EnhancedTextureBarrier({backBuffer->GetResource()->GetPresentEnhBarrier()});
+    
+    commandQueue->ExecuteCommandList(cmdList);
+    _backBuffer->Present();
+}
+
 TransformCompGPUData& RenderModule::GetTransformGPUData(Entity entity)
 {
     return _transformGPUData.at(entity);
@@ -403,6 +454,20 @@ void RenderModule::SubscribeToWorld(World& world)
             });
 
     _worldSubscriptions[&world] = subscriptions;
+    
+    //a world can already contain components before subscription, so we should make GPU resources for that too
+    ecs.ForEach<TransformComponent>([this, &world](Entity entity, TransformComponent& component)
+    {
+        OnTransformComponentCreated(world, entity, component);
+    });
+    ecs.ForEach<CameraComponent>([this, &world](Entity entity, CameraComponent& component)
+    {
+        OnCameraComponentCreated(world, entity, component);
+    });
+    ecs.ForEach<StaticMeshRenderComponent>([this, &world](Entity entity, StaticMeshRenderComponent& component)
+    {
+        OnRenderComponentCreated(world, entity, component);
+    });
 }
 
 void RenderModule::UnsubscribeFromWorld(World& world)
@@ -419,6 +484,7 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     auto& ecs = world.GetECS();
     auto& transformPool = ecs.GetPool<TransformComponent>();
     auto& cameraPool = ecs.GetPool<CameraComponent>();
+    auto& renderCompPool = ecs.GetPool<StaticMeshRenderComponent>();
 
     transformPool.OnComponentCreated.RemoveListener(subscriptions.TransformCreated);
     transformPool.OnComponentDestroyed.RemoveListener(subscriptions.TransformDestroyed);
@@ -427,6 +493,10 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     cameraPool.OnComponentCreated.RemoveListener(subscriptions.CameraCreated);
     cameraPool.OnComponentDestroyed.RemoveListener(subscriptions.CameraDestroyed);
     cameraPool.OnComponentUpdated.RemoveListener(subscriptions.CameraUpdated);
+    
+    renderCompPool.OnComponentCreated.RemoveListener(subscriptions.RenderCompCreated);
+    renderCompPool.OnComponentDestroyed.RemoveListener(subscriptions.RenderCompDestroyed);
+    renderCompPool.OnComponentUpdated.RemoveListener(subscriptions.RenderCompUpdated);
 
     _worldSubscriptions.erase(it);
 }
@@ -448,8 +518,11 @@ GDX12UploadBuffer<GDX12IndirectDrawArgs>* RenderModule::GetIndirectCommandsCache
 
 void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
 {
-    TransformCompGPUData gpuData;
+    TransformCompGPUData gpuData{};
     gpuData.CBufferIndex = _frameConstants[0]->TransformCache->GetElementCount();
+    gpuData.NumFramesDirty = _numFrameConstants;
+    gpuData.World = Matrix::Identity;
+    
     _transformGPUData[entity] = gpuData;
 
     for (auto& constants : _frameConstants)
@@ -1069,6 +1142,12 @@ void RenderModule::UnsubscribeFromAllWorlds()
             UnsubscribeFromWorld(*world);
         }
     }
+}
+
+GDX12Texture* RenderModule::FindTextureByName(const std::string& name) const noexcept
+{
+    const auto it = _textures.find(name);
+    return (it != _textures.end()) ? it->second.get() : nullptr;
 }
 
 bool RenderModule::ShouldTick()

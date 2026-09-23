@@ -7,6 +7,8 @@
 #include <crtdbg.h>
 #endif
 
+#include <future>
+
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
 
@@ -23,6 +25,7 @@
 #pragma comment(lib, "D3D12.lib")
 #pragma comment(lib, "dxgi.lib")
 
+class SceneLoadTask;
 class RenderModule;
 class Window;
 
@@ -86,5 +89,9 @@ protected:
     void Update(const GameTimer& gameTimer) override;
 
 private:
+    bool TickSceneLoad();
+    
     std::unique_ptr<Window> _window;
+    
+    std::unique_ptr<SceneLoadTask> _sceneLoadTask;
 };

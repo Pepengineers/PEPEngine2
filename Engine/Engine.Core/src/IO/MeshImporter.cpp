@@ -21,6 +21,8 @@
 #include <sstream>
 #include <unordered_map>
 
+#include "assimp/ProgressHandler.hpp"
+
 namespace SimpleMath = DirectX::SimpleMath;
 
 namespace 
@@ -620,6 +622,26 @@ namespace
 		return transformedDirection;
 	}
 	
+	
+	bool IsMeshImportCancelled(const Engine::Core::MeshImportCancellationCallback& callback) noexcept
+	{
+		if (!callback)
+		{
+			return false;
+		}
+
+		try
+		{
+			return callback();
+		}
+		catch (...)
+		{
+			//a broken cancellation callback should stop the operation safely
+			return true;
+		}
+	}
+	
+	
 	/// Converts a single Assimp mesh into an engine SubMesh.
 	/// Vertex positions, normals, UVs and tangents are read from the Assimp mesh and
 	/// baked into world space using nodeTransform.
@@ -628,7 +650,8 @@ namespace
 		const aiMesh& assimpMesh,
 		const aiMatrix4x4& nodeTransform,
 		const std::uint32_t startVertexLocation,
-		const std::uint32_t startIndexLocation)
+		const std::uint32_t startIndexLocation,
+		const Engine::Core::MeshImportCancellationCallback& cancellationCallback = {})
 	{
 		Engine::Core::SubMesh importedSubMesh = {};
 		importedSubMesh.Vertices.reserve(assimpMesh.mNumVertices);
@@ -639,6 +662,11 @@ namespace
 
 		for (unsigned int vertexIndex = 0; vertexIndex < assimpMesh.mNumVertices; ++vertexIndex)
 		{
+			if ((vertexIndex & 0xFFFu) == 0u && IsMeshImportCancelled(cancellationCallback))
+			{
+				return {};
+			}
+			
 			const aiVector3D transformedPosition = TransformPosition(nodeTransform, assimpMesh.mVertices[vertexIndex]);
 
 			Engine::Core::Vertex importedVertex = {};
@@ -667,6 +695,11 @@ namespace
 
 		for (unsigned int faceIndex = 0; faceIndex < assimpMesh.mNumFaces; ++faceIndex)
 		{
+			if ((faceIndex & 0xFFFu) == 0u && IsMeshImportCancelled(cancellationCallback))
+			{
+				return {};
+			}
+			
 			const aiFace& assimpFace = assimpMesh.mFaces[faceIndex];
 
 			assert(assimpFace.mNumIndices == 3);
@@ -681,6 +714,11 @@ namespace
 			}
 		}
 
+		if (IsMeshImportCancelled(cancellationCallback))
+		{
+			return {};
+		}
+		
 		importedSubMesh.Bounds = CalculateVertexBounds(importedSubMesh.Vertices);
 		return importedSubMesh;
 	}
@@ -690,18 +728,29 @@ namespace
 	/// so that each mesh is baked into a common world space.
 	/// startVertexLocation and startIndexLocation are updated after each imported submesh
 	/// to maintain correct offsets for a merged GPU vertex/index buffer.
-	void ImportNodeMeshes(
+	bool ImportNodeMeshes(
 		const aiScene& assimpScene,
 		const aiNode& assimpNode,
 		const aiMatrix4x4& parentTransform,
 		std::vector<Engine::Core::SubMesh>& importedSubMeshes,
 		std::uint32_t& startVertexLocation,
-		std::uint32_t& startIndexLocation)
+		std::uint32_t& startIndexLocation,
+		const Engine::Core::MeshImportCancellationCallback& cancellationCallback)
 	{
+		if (IsMeshImportCancelled(cancellationCallback))
+		{
+			return false;
+		}
+		
 		const aiMatrix4x4 nodeTransform = parentTransform * assimpNode.mTransformation;
 
 		for (unsigned int nodeMeshIndex = 0; nodeMeshIndex < assimpNode.mNumMeshes; ++nodeMeshIndex)
 		{
+			if (IsMeshImportCancelled(cancellationCallback))
+			{
+				return false;
+			}
+			
 			const unsigned int sceneMeshIndex = assimpNode.mMeshes[nodeMeshIndex];
 			if (sceneMeshIndex >= assimpScene.mNumMeshes)
 			{
@@ -714,7 +763,13 @@ namespace
 				continue;
 			}
 
-			Engine::Core::SubMesh importedSubMesh = ImportSubMesh(*assimpMesh, nodeTransform, startVertexLocation, startIndexLocation);
+			Engine::Core::SubMesh importedSubMesh = ImportSubMesh(*assimpMesh, nodeTransform, startVertexLocation, startIndexLocation, cancellationCallback);
+			
+			if (IsMeshImportCancelled(cancellationCallback))
+			{
+				return false;
+			}
+			
 			if (importedSubMesh.GetVertexCount() == 0 || importedSubMesh.GetIndexCount() == 0)
 			{
 				continue;
@@ -734,15 +789,74 @@ namespace
 				continue;
 			}
 
-			ImportNodeMeshes(assimpScene, *childNode, nodeTransform, importedSubMeshes, startVertexLocation, startIndexLocation);
+			if (!ImportNodeMeshes(assimpScene, *childNode, nodeTransform, importedSubMeshes, startVertexLocation, startIndexLocation, cancellationCallback))
+			{
+				return false;
+			}
+		}
+		
+		return true;
+	}
+	
+	void ReportMeshProgress(const Engine::Core::MeshImportProgressCallback& progressCallback, float progress) noexcept
+	{
+		if (!progressCallback)
+		{
+			return;
+		}
+
+		try
+		{
+			progressCallback((std::max)(0.0f, (std::min)(progress, 1.0f)));
+		}
+		catch (...)
+		{
+			//don't throw
 		}
 	}
+	
+	class CallbackProgressHandler final : public Assimp::ProgressHandler
+	{
+	public:
+		CallbackProgressHandler(Engine::Core::MeshImportProgressCallback progressCallback, Engine::Core::MeshImportCancellationCallback cancellationCallback)
+		: _progressCallback(std::move(progressCallback)),
+		  _cancellationCallback(std::move(cancellationCallback))
+		{}
+		
+		bool Update(float percentage = -1.0f) override
+		{
+			if (IsMeshImportCancelled(_cancellationCallback))
+			{
+				return false;
+			}
+			
+			if (percentage >= 0.0f)
+			{
+				//remaining 0.2 for conversion/material
+				ReportMeshProgress(_progressCallback, percentage * 0.8f);
+			}
+			
+			return !IsMeshImportCancelled(_cancellationCallback);
+		}
+		
+	private:
+		Engine::Core::MeshImportProgressCallback _progressCallback;
+		Engine::Core::MeshImportCancellationCallback _cancellationCallback;
+	};
 }
 
 namespace Engine::Core
 {
-	std::unique_ptr<Mesh> MeshImporter::ImportSingleMeshAsset(const std::filesystem::path& sourcePath, const MeshImportOptions& options)
+	std::unique_ptr<Mesh> MeshImporter::ImportSingleMeshAsset(const std::filesystem::path& sourcePath, 
+																const MeshImportOptions& options, 
+																MeshImportProgressCallback progressCallback,
+																MeshImportCancellationCallback cancellationCallback)
 	{
+		if (IsMeshImportCancelled(cancellationCallback))
+		{
+			return nullptr;
+		}
+		
 		if (sourcePath.empty())
 		{
 			Logger::Error("MeshImporter::ImportSingleMeshAsset failed: Source path is empty.");
@@ -750,10 +864,23 @@ namespace Engine::Core
 		}
 
 		Assimp::Importer importer;
+		
+		ReportMeshProgress(progressCallback, 0.0f);
+		if (progressCallback || cancellationCallback)
+		{
+			importer.SetProgressHandler(new CallbackProgressHandler(progressCallback, cancellationCallback));
+		}
+		
 		const std::string sourcePathUtf8 = sourcePath.u8string();
 
 		const std::uint32_t assimpFlags = BuildAssimpPostProcessFlags(options);
 		const aiScene* assimpScene = importer.ReadFile(sourcePathUtf8.c_str(), assimpFlags);
+		
+		//during shutdown we get nullptr, no need to log that
+		if (IsMeshImportCancelled(cancellationCallback))
+		{
+			return nullptr;
+		}
 		
 		if (assimpScene == nullptr || assimpScene->mRootNode == nullptr || (assimpScene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) != 0)
 		{
@@ -775,13 +902,25 @@ namespace Engine::Core
 				meshCount);
 			return nullptr;
 		}
+		
+		ReportMeshProgress(progressCallback, 0.8);
 
 		std::vector<SubMesh> importedSubMeshes;
 		std::uint32_t startVertexLocation = 0;
 		std::uint32_t startIndexLocation = 0;
 
 		const aiMatrix4x4 identityTransform;
-		ImportNodeMeshes(*assimpScene, *assimpScene->mRootNode, identityTransform, importedSubMeshes, startVertexLocation, startIndexLocation);
+		if (!ImportNodeMeshes(*assimpScene, *assimpScene->mRootNode, identityTransform, importedSubMeshes, startVertexLocation, startIndexLocation, cancellationCallback))
+		{
+			return nullptr;
+		}
+		
+		if (IsMeshImportCancelled(cancellationCallback))
+		{
+			return nullptr;
+		}
+		
+		ReportMeshProgress(progressCallback, 0.93f);
 
 		if (importedSubMeshes.empty())
 		{
@@ -797,7 +936,17 @@ namespace Engine::Core
 
 		const DirectX::BoundingBox meshBounds = CalculateMeshBounds(importedSubMeshes);
 		std::vector<MeshMaterial> importedMaterials = ImportMaterials(*assimpScene, sourcePath);
+		
+		if (IsMeshImportCancelled(cancellationCallback))
+		{
+			return nullptr;
+		}
+		
+		ReportMeshProgress(progressCallback, 0.99f);
+		
 		std::unique_ptr<Mesh> mesh = std::make_unique<Mesh>(std::move(importedSubMeshes), meshBounds, std::move(importedMaterials));
+		
+		ReportMeshProgress(progressCallback, 1.f);
 		return mesh;
 	}
 

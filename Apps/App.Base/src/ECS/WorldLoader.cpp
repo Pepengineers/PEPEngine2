@@ -13,59 +13,54 @@
 #include "Engine.Core/Types/TextureTypes.h"
 
 #include <algorithm>
-#include <cctype>
 #include <cstddef>
-#include <cstdint>
-#include <fstream>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include <Windows.h>
 
+#include "App.Base/ECS/AppConfig.h"
+#include "App.Base/ECS/AppConfigLoader.h"
+#include "App.Base/ECS/PreparedScene.h"
+#include "App.Base/Modules/SceneManagerModule.h"
+#include "Engine.Core/IO/MeshImporter.h"
+#include "Engine.Core/IO/TextureLoader.h"
+
 namespace
 {
-    std::string ReadTextFile(const std::filesystem::path& path)
+    std::filesystem::path ResolveResourcePath(const std::filesystem::path& worldDirectory, const std::filesystem::path& sourcePath)
     {
-        std::ifstream file(path, std::ios::binary);
-        if (!file.is_open())
+        if (sourcePath.empty() || sourcePath.is_absolute())
         {
-            throw std::runtime_error("Failed to open world file: " + path.string());
+            return sourcePath.lexically_normal();
         }
-
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-        return buffer.str();
+        
+        std::error_code errorCode;
+        if (std::filesystem::exists(sourcePath, errorCode))
+        {
+            return std::filesystem::absolute(sourcePath, errorCode).lexically_normal();
+        }
+        
+        const std::filesystem::path worldRelativePath = (worldDirectory / sourcePath).lexically_normal();
+        
+        errorCode.clear();
+        if (std::filesystem::exists(worldRelativePath, errorCode))
+        {
+            return std::filesystem::absolute(worldRelativePath, errorCode).lexically_normal();
+        }
+        
+        return sourcePath.lexically_normal();
     }
 
     std::filesystem::path ResolveWorldResourcePath(
         const WorldLoadContext& context,
         const std::filesystem::path& sourcePath)
     {
-        if (sourcePath.empty() || sourcePath.is_absolute())
-        {
-            return sourcePath.lexically_normal();
-        }
-
-        std::error_code errorCode;
-        if (std::filesystem::exists(sourcePath, errorCode))
-        {
-            return std::filesystem::absolute(sourcePath, errorCode).lexically_normal();
-        }
-
-        const std::filesystem::path worldRelativePath =
-            (context.WorldDirectory / sourcePath).lexically_normal();
-        errorCode.clear();
-        if (std::filesystem::exists(worldRelativePath, errorCode))
-        {
-            return std::filesystem::absolute(worldRelativePath, errorCode).lexically_normal();
-        }
-
-        // Asset registries apply their own conventional roots to unresolved relative paths.
-        return sourcePath.lexically_normal();
+        return ResolveResourcePath(context.WorldDirectory, sourcePath);
     }
 
     /// Converts an ASCII string to lowercase.
@@ -214,15 +209,14 @@ namespace
         const std::uint8_t alpha,
         const Engine::Core::ETextureType textureType)
     {
+        if (GDX12Texture* existing = renderModule.FindTextureByName(textureName))
+        {
+            return existing;
+        }
+        
         Engine::Core::Texture texture = CreateSingleColorTexture(red, green, blue, alpha, textureType);
 
-        GDX12Texture* gpuTexture = renderModule.CreateTexture(textureName, &texture);
-        if (gpuTexture == nullptr)
-        {
-            gpuTexture = renderModule.GetTextureByName(textureName);
-        }
-
-        return gpuTexture;
+        return renderModule.CreateTexture(textureName, &texture);
     }
 
     /// Converts a normalized color component to an 8-bit texture channel value.
@@ -607,7 +601,7 @@ namespace
 		material->DirtyFlag = true;
 		return material;
 	}
-
+    
     /// Builds renderer material slots for every material referenced by an obj mesh.
     /// Missing material textures are replaced with scene defaults or solid-color fallbacks.
     std::vector<GDX12Material*> BuildObjMaterialSlots(
@@ -868,7 +862,14 @@ namespace
     }
 }
 
-static bool LoadWorldResources(WorldLoadContext& context, ryml::NodeRef resourcesNode);
+#pragma region Helpers
+static bool LoadTexture(WorldLoadContext& context, const WorldTextureResource& resource);
+static bool LoadMaterial(WorldLoadContext& context, ryml::NodeRef materialNode);
+static bool LoadMesh(WorldLoadContext& context, const WorldMeshResource& resource);
+static bool CreateWorldEntity(WorldLoadContext& context, ryml::NodeRef entityNode);
+static bool LoadEntityComponentWithoutRefs(WorldLoadContext& context, ryml::NodeRef entityNode);
+static bool LoadEntityComponentWithRefs(WorldLoadContext& context, ryml::NodeRef entityNode);
+static bool LoadWorldResources(WorldLoadContext& context, WorldDocument& document);
 static bool CreateWorldEntities(WorldLoadContext& context, ryml::NodeRef entitiesNode);
 static bool LoadEntityComponentsWithoutRefs(WorldLoadContext& context, ryml::NodeRef entitiesNode);
 static bool LoadEntityComponentsWithRefs(WorldLoadContext& context, ryml::NodeRef entitiesNode);
@@ -884,97 +885,690 @@ static bool LoadYamlWorld(World& world, const std::filesystem::path& path)
 
     auto& assetManager = Engine::Core::AssetManager::GetInstance();
 
-    WorldLoadContext context;
-    context.World = &world;
-    context.Render = renderModule.get();
-    context.AssetManager = &assetManager;
-    context.WorldFilePath = std::filesystem::absolute(path).lexically_normal();
-    context.WorldDirectory = context.WorldFilePath.parent_path();
-
-    ryml::Tree tree;
-
     try
     {
-        const std::string yamlText = ReadTextFile(context.WorldFilePath);
-        tree = ryml::parse_in_arena(
-            ryml::to_csubstr(context.WorldFilePath.string()),
-            ryml::to_csubstr(yamlText));
+        WorldDocument document = ParseWorldDocument(path);
+        ryml::NodeRef worldNode = document.GetWorldNode();
+        
+        WorldLoadContext context;
+        context.World = &world;
+        context.Render = renderModule.get();
+        context.AssetManager = &assetManager;
+        context.WorldFilePath = std::filesystem::absolute(path).lexically_normal();
+        context.WorldDirectory = context.WorldFilePath.parent_path();
+        
+        if (!document.Config.Name.empty())
+        {
+            world.SetName(document.Config.Name);
+        }
+        
+        if (!LoadWorldResources(context, document))
+        {
+            return false;
+        }
+        
+        if (worldNode.has_child("Entities"))
+        {
+            ryml::NodeRef entitiesNode = worldNode["Entities"];
+            
+            if (!CreateWorldEntities(context, entitiesNode) 
+            || !LoadEntityComponentsWithoutRefs(context, entitiesNode) 
+            || !LoadEntityComponentsWithRefs(context, entitiesNode))
+            {
+                return false;
+            }
+        }
+        
+        if (worldNode.has_child("ActiveCamera"))
+        {
+            std::string activeCameraId;
+            worldNode["ActiveCamera"] >> activeCameraId;
+            
+            world.ActiveCamera = context.ResolveEntity(activeCameraId);
+            if (world.ActiveCamera == InvalidEntity)
+            {
+                return false;
+            }
+        }
+        
+        return true;
     }
     catch (const std::exception& exception)
     {
         Logger::Error(
             "Failed to load world yaml '{}': {}",
-            context.WorldFilePath.string(),
+            path.string(),
             exception.what());
         return false;
     }
-
-    ryml::NodeRef root = tree.rootref();
-
-    if (!root.has_child("World"))
-    {
-        Logger::Error(
-            "World yaml does not contain root node 'World': {}",
-            context.WorldFilePath.string());
-        return false;
-    }
-
-    ryml::NodeRef worldNode = root["World"];
-
-    if (worldNode.has_child("Name"))
-    {
-        std::string worldName;
-        worldNode["Name"] >> worldName;
-        world.SetName(worldName);
-    }
-
-    if (worldNode.has_child("Resources"))
-    {
-        if (!LoadWorldResources(context, worldNode["Resources"]))
-        {
-            return false;
-        }
-    }
-
-    if (worldNode.has_child("Entities"))
-    {
-        if (!CreateWorldEntities(context, worldNode["Entities"]))
-        {
-            return false;
-        }
-
-        if (!LoadEntityComponentsWithoutRefs(context, worldNode["Entities"]))
-        {
-            return false;
-        }
-
-        if (!LoadEntityComponentsWithRefs(context, worldNode["Entities"]))
-        {
-            return false;
-        }
-    }
-
-    if (worldNode.has_child("ActiveCamera"))
-    {
-        std::string activeCameraId;
-        worldNode["ActiveCamera"] >> activeCameraId;
-
-        const Entity activeCamera = context.ResolveEntity(activeCameraId);
-        if (activeCamera == InvalidEntity)
-        {
-            Logger::Error(
-                "World ActiveCamera references unknown entity '{}': {}",
-                activeCameraId,
-                context.WorldFilePath.string());
-            return false;
-        }
-
-        world.ActiveCamera = activeCamera;
-    }
-
-    return true;
 }
 
+#pragma region Committer
+
+enum class CommitPhase
+{
+    AdoptMeshes,
+    AdoptTextures,
+    BeginWorld,
+    LoadTextures,
+    LoadMaterials,
+    LoadMeshes,
+    CreateEntities,
+    LoadComponentsWithoutRefs,
+    LoadComponentsWithRefs,
+    FinishWorld,
+    ReplaceScene,
+    Complete
+};
+
+struct WorldLoader::Committer::Impl
+{
+    std::unique_ptr<PreparedScene> PreparedScene;
+    SceneManagerModule* SceneManagerModule = nullptr;
+    RenderModule* RenderModule = nullptr;
+    AppConfig AppConfig;
+    
+    CommitPhase Phase = CommitPhase::AdoptMeshes;
+    size_t WorldIndex = 0;
+    size_t ItemIndex = 0;
+    
+    std::unique_ptr<World> CurrentWorld;
+    std::unique_ptr<WorldLoadContext> CurrentContext;
+    
+    std::vector<std::unique_ptr<World>> StagedWorlds;
+    std::vector<WorldConfig> WorldConfigs;
+    
+    size_t CompletedOperations = 0;
+    size_t TotalOperations = 1;
+    
+    bool Complete = false;
+    bool Failed = false;
+    
+    std::string Status = "Adopting CPU assets";
+    std::string Error;
+};
+
+WorldLoader::Committer::~Committer() = default;
+
+WorldLoader::Committer::Committer(Committer&&) noexcept = default;
+
+WorldLoader::Committer& WorldLoader::Committer::operator=(Committer&&) noexcept = default;
+
+bool WorldLoader::Committer::Tick(std::chrono::milliseconds budget)
+{
+    const auto deadline = std::chrono::steady_clock::now() + budget;
+    auto& assets = Engine::Core::AssetManager::GetInstance();
+    
+    const auto fail = [this](std::string message)
+    {
+        _impl->Failed = true;
+        _impl->Error = std::move(message);
+        _impl->Status = "Failed";
+    };
+    
+    while (!_impl->Complete && !_impl->Failed && std::chrono::steady_clock::now() < deadline)
+    {
+        switch (_impl->Phase)
+        {
+        case CommitPhase::AdoptMeshes:
+            {
+                if (_impl->WorldIndex >= _impl->PreparedScene->Worlds.size())
+                {
+                    _impl->WorldIndex = 0;
+                    _impl->ItemIndex = 0;
+                    _impl->Phase = CommitPhase::AdoptTextures;
+                    _impl->Status = "Adopting prepared textures";
+                    continue;
+                }
+            
+                PreparedWorld& preparedWorld = _impl->PreparedScene->Worlds[_impl->WorldIndex];
+            
+                if (_impl->ItemIndex >= preparedWorld.Meshes.size())
+                {
+                    _impl->WorldIndex++;
+                    _impl->ItemIndex = 0;
+                    continue;
+                }
+            
+                PreparedMesh& mesh = preparedWorld.Meshes[_impl->ItemIndex];
+            
+                Engine::Core::MeshAssetLocator meshLocator{};
+                meshLocator.SourcePath = mesh.Resource.SourcePath;
+            
+                const auto handle = assets.Meshes().Register(meshLocator);
+                if (!handle.IsValid() || !assets.Meshes().Cache(handle, std::move(mesh.Data)))
+                {
+                    fail("Failed to adopt mesh: " + mesh.Resource.SourcePath.string());
+                    break;
+                }
+            
+                _impl->ItemIndex++;
+                _impl->CompletedOperations++;
+                break;
+            }
+        case CommitPhase::AdoptTextures:
+            {
+                if (_impl->WorldIndex >= _impl->PreparedScene->Worlds.size())
+                {
+                    _impl->WorldIndex = 0;
+                    _impl->ItemIndex = 0;
+                    _impl->Phase = CommitPhase::BeginWorld;
+                    continue;
+                }
+            
+                PreparedWorld& preparedWorld = _impl->PreparedScene->Worlds[_impl->WorldIndex];
+            
+                if (_impl->ItemIndex >= preparedWorld.Textures.size())
+                {
+                    _impl->WorldIndex++;
+                    _impl->ItemIndex = 0;
+                    continue;
+                }
+            
+                PreparedTexture& texture = preparedWorld.Textures[_impl->ItemIndex];
+            
+                const auto handle = assets.Textures().Register(texture.Resource.SourcePath);
+            
+                if (!handle.IsValid() || !assets.Textures().Cache(handle, std::move(texture.Data)))
+                {
+                    fail("Failed to adopt texture: " + texture.Resource.SourcePath.string());
+                    break;
+                }
+            
+                _impl->ItemIndex++;
+                _impl->CompletedOperations++;
+                break;
+            }
+        case CommitPhase::BeginWorld:
+            {
+                if (_impl->WorldIndex >= _impl->PreparedScene->Worlds.size())
+                {
+                    _impl->Phase = CommitPhase::ReplaceScene;
+                    continue;
+                }
+                
+                PreparedWorld& preparedWorld = _impl->PreparedScene->Worlds[_impl->WorldIndex];
+                
+                WorldDesc desc;
+                desc.Name = !preparedWorld.Document.Config.Name.empty() ? preparedWorld.Document.Config.Name : preparedWorld.Config.Name;
+                desc.WorldFilePath = preparedWorld.Document.SourcePath;
+                
+                _impl->CurrentWorld = std::make_unique<World>(desc);
+                _impl->CurrentWorld->SetName(desc.Name);
+                
+                _impl->CurrentContext = std::make_unique<WorldLoadContext>();
+                _impl->CurrentContext->World = _impl->CurrentWorld.get();
+                _impl->CurrentContext->Render = _impl->RenderModule;
+                _impl->CurrentContext->AssetManager = &assets;
+                _impl->CurrentContext->WorldFilePath = preparedWorld.Document.SourcePath;
+                _impl->CurrentContext->WorldDirectory = preparedWorld.Document.SourcePath.parent_path();
+                
+                _impl->ItemIndex = 0;
+                _impl->Phase = CommitPhase::LoadTextures;
+                _impl->Status = "Creating world " + desc.Name;
+                _impl->CompletedOperations++;
+                break;
+            }
+        case CommitPhase::LoadTextures:
+            {
+                PreparedWorld& preparedWorld = _impl->PreparedScene->Worlds[_impl->WorldIndex];
+                
+                if (_impl->ItemIndex >= preparedWorld.Document.Textures.size())
+                {
+                    _impl->ItemIndex = 0;
+                    _impl->Phase = CommitPhase::LoadMaterials;
+                    continue;
+                }
+                
+                const WorldTextureResource& resource = preparedWorld.Document.Textures[_impl->ItemIndex];
+                
+                _impl->Status = "Uploading texture " + resource.Id;
+                
+                if (!LoadTexture(*_impl->CurrentContext, resource))
+                {
+                    fail("Failed to load texture: " + resource.Id);
+                    break;
+                }
+                
+                _impl->ItemIndex++;
+                _impl->CompletedOperations++;
+                break;
+            }
+        case CommitPhase::LoadMaterials:
+            {
+                WorldDocument& document = _impl->PreparedScene->Worlds[_impl->WorldIndex].Document;
+                ryml::NodeRef worldNode = document.GetWorldNode();
+                
+                if (!worldNode.has_child("Resources") || !worldNode["Resources"].has_child("Materials"))
+                {
+                    _impl->ItemIndex = 0;
+                    _impl->Phase = CommitPhase::LoadMeshes;
+                    continue;
+                }
+                
+                ryml::NodeRef materialsNode = worldNode["Resources"]["Materials"];
+
+                if (_impl->ItemIndex >= materialsNode.num_children())
+                {
+                    _impl->ItemIndex = 0;
+                    _impl->Phase = CommitPhase::LoadMeshes;
+                    continue;
+                }
+                
+                _impl->Status = "Creating materials";
+                
+                if (!LoadMaterial(*_impl->CurrentContext, materialsNode.child(_impl->ItemIndex)))
+                {
+                    fail("Failed to create world material");
+                    break;
+                }
+                
+                _impl->ItemIndex++;
+                _impl->CompletedOperations++;
+                break;
+            }
+        case CommitPhase::LoadMeshes:
+            {
+                PreparedWorld& preparedWorld = _impl->PreparedScene->Worlds[_impl->WorldIndex];
+                
+                if (_impl->ItemIndex >= preparedWorld.Document.Meshes.size())
+                {
+                    _impl->ItemIndex = 0;
+                    _impl->Phase = CommitPhase::CreateEntities;
+                    continue;
+                }
+                
+                const WorldMeshResource& resource = preparedWorld.Document.Meshes[_impl->ItemIndex];
+                
+                _impl->Status = "Uploading mesh " + resource.Id;
+                
+                if (!LoadMesh(*_impl->CurrentContext, resource))
+                {
+                    fail("Failed to load mesh: " + resource.Id);
+                    break;
+                }
+                
+                _impl->ItemIndex++;
+                _impl->CompletedOperations++;
+                break;
+            }
+        case CommitPhase::CreateEntities:
+        case CommitPhase::LoadComponentsWithoutRefs:
+        case CommitPhase::LoadComponentsWithRefs:
+            {
+                WorldDocument& document = _impl->PreparedScene->Worlds[_impl->WorldIndex].Document;
+                ryml::NodeRef worldNode = document.GetWorldNode();
+                
+                if (!worldNode.has_child("Entities"))
+                {
+                    _impl->ItemIndex = 0;
+                    _impl->Phase = _impl->Phase == CommitPhase::CreateEntities 
+                                                    ? CommitPhase::LoadComponentsWithoutRefs 
+                                                    : _impl->Phase == CommitPhase::LoadComponentsWithoutRefs
+                                                        ? CommitPhase::LoadComponentsWithRefs
+                                                        : CommitPhase::FinishWorld;
+                    continue;
+                }
+                
+                ryml::NodeRef entitiesNode = worldNode["Entities"];
+                
+                if (_impl->ItemIndex >= entitiesNode.num_children())
+                {
+                    _impl->ItemIndex = 0;
+                    _impl->Phase = _impl->Phase == CommitPhase::CreateEntities 
+                                                    ? CommitPhase::LoadComponentsWithoutRefs 
+                                                    : _impl->Phase == CommitPhase::LoadComponentsWithoutRefs
+                                                        ? CommitPhase::LoadComponentsWithRefs
+                                                        : CommitPhase::FinishWorld;
+                    continue;
+                }
+                
+                ryml::NodeRef entityNode = entitiesNode.child(_impl->ItemIndex);
+                
+                bool succeeded = false;
+                
+                if (_impl->Phase == CommitPhase::CreateEntities)
+                {
+                    _impl->Status = "Creating entities";
+                    succeeded = CreateWorldEntity(*_impl->CurrentContext, entityNode);
+                } else if (_impl->Phase == CommitPhase::LoadComponentsWithoutRefs)
+                {
+                    _impl->Status = "Loading entity components";
+                    succeeded = LoadEntityComponentWithoutRefs(*_impl->CurrentContext, entityNode);
+                } else
+                {
+                    _impl->Status = "Resolving entity references";
+                    succeeded = LoadEntityComponentWithRefs(*_impl->CurrentContext, entityNode);
+                }
+                
+                if (!succeeded)
+                {
+                    fail("Failed while creating world entities");
+                    break;
+                }
+                
+                _impl->ItemIndex++;
+                _impl->CompletedOperations++;
+                break;
+            }
+        case CommitPhase::FinishWorld:
+            {
+                PreparedWorld& preparedWorld = _impl->PreparedScene->Worlds[_impl->WorldIndex];
+                ryml::NodeRef worldNode = preparedWorld.Document.GetWorldNode();
+                
+                if (worldNode.has_child("ActiveCamera"))
+                {
+                    std::string activeCameraId;
+                    worldNode["ActiveCamera"] >> activeCameraId;
+                    
+                    _impl->CurrentWorld->ActiveCamera = _impl->CurrentContext->ResolveEntity(activeCameraId);
+                    
+                    if (_impl->CurrentWorld->ActiveCamera == InvalidEntity)
+                    {
+                        fail("Unknown active camera: " + activeCameraId);
+                        break;
+                    }
+                }
+                
+                _impl->WorldConfigs.push_back(preparedWorld.Document.Config);
+                _impl->StagedWorlds.push_back(std::move(_impl->CurrentWorld));
+                _impl->CurrentContext.reset();
+                
+                _impl->WorldIndex++;
+                _impl->ItemIndex = 0;
+                _impl->Phase = CommitPhase::BeginWorld;
+                _impl->CompletedOperations++;
+                break;
+            }
+        case CommitPhase::ReplaceScene:
+            {
+                _impl->Status = "Activating scene";
+                
+                if (!_impl->SceneManagerModule->ReplaceScene(std::move(_impl->StagedWorlds), _impl->WorldConfigs, _impl->AppConfig))
+                {
+                    fail("SceneManagerModule::ReplaceScene failed");
+                    break;
+                }
+                
+                _impl->CompletedOperations++;
+                _impl->Complete = true;
+                _impl->Phase = CommitPhase::Complete;
+                _impl->Status = "Complete";
+                break;
+            }
+        case CommitPhase::Complete:
+            {
+                _impl->Complete = true;
+                break;
+            }
+        }
+    }
+    
+    return !_impl->Failed;
+}
+
+bool WorldLoader::Committer::IsComplete() const
+{
+    return _impl->Complete;
+}
+
+bool WorldLoader::Committer::HasFailed() const
+{
+    return _impl->Failed;
+}
+
+float WorldLoader::Committer::GetProgress() const
+{
+    return _impl->TotalOperations == 0 ? 1.0f : static_cast<float>(_impl->CompletedOperations) / static_cast<float>(_impl->TotalOperations);
+}
+
+std::string WorldLoader::Committer::GetStatus() const
+{
+    return _impl->Status;
+}
+
+std::string WorldLoader::Committer::GetError() const
+{
+    return _impl->Error;
+}
+
+WorldLoader::Committer::Committer(std::unique_ptr<Impl> impl)
+    : _impl(std::move(impl))
+{
+}
+
+#pragma endregion
+
+
+std::unique_ptr<PreparedScene> WorldLoader::PrepareScene(const std::string& scenePath,
+    SceneLoadProgressCallback progressCallback,
+    SceneLoadCancellationCallback cancellationCallback)
+{
+    const auto isCancelled = [&]() noexcept
+    {
+        if (!cancellationCallback)
+        {
+            return false;
+        }
+
+        try
+        {
+            return cancellationCallback();
+        }
+        catch (...)
+        {
+            return true;
+        }
+    };
+    
+    const auto throwIfCancelled = [&]()
+    {
+        if (isCancelled())
+        {
+            throw std::runtime_error("Scene loading cancelled");
+        }
+    };
+    
+    throwIfCancelled();
+    
+    if (scenePath.empty())
+    {
+        throw std::invalid_argument("scenePath cannot be empty");
+    }
+    
+    const auto reportProgress = [&progressCallback](const float progress, const std::string& status)
+    {
+        if (progressCallback)
+        {
+            progressCallback((std::max)(0.0f, (std::min)(progress, 1.0f)), status);
+        }
+    };
+    
+    reportProgress(0.0f, "Reading scene configuration");
+    
+    auto preparedScene = std::make_unique<PreparedScene>();
+    preparedScene->SourcePath = scenePath;
+    preparedScene->Config = AppConfigLoader::LoadSceneConfig(scenePath);
+    preparedScene->Worlds.reserve(preparedScene->Config.Worlds.size());
+    
+    std::unordered_set<std::wstring> preparedTexturePaths;
+    
+    const size_t worldCount = preparedScene->Config.Worlds.size();
+    
+    for (size_t i = 0; i < worldCount; ++i)
+    {
+        throwIfCancelled();
+        
+        const float worldBegin = static_cast<float>(i) / worldCount;
+        const float worldSpan = 1.0f / worldCount;
+        
+        auto reportWorldProgress = [&](float localProgress, const std::string& status)
+        {
+            reportProgress(worldBegin + worldSpan * localProgress, status);
+        };
+        
+        const SceneWorldConfig& worldConfig = preparedScene->Config.Worlds[i];
+        
+        if (worldConfig.Path.empty())
+        {
+            throw std::runtime_error("Scene contains a world with an empty path");
+        }
+        
+        PreparedWorld preparedWorld;
+        preparedWorld.Config = worldConfig;
+        preparedWorld.Document = ParseWorldDocument(worldConfig.Path);
+        
+        std::vector<WorldTextureResource> texturesToPrepare = preparedWorld.Document.Textures;
+        
+        const size_t meshCount = preparedWorld.Document.Meshes.size();
+        
+        for (size_t meshIndex = 0; meshIndex < meshCount; meshIndex++)
+        {
+            throwIfCancelled();
+            
+            const WorldMeshResource& meshResource = preparedWorld.Document.Meshes[meshIndex];
+            
+            PreparedMesh preparedMesh;
+            preparedMesh.Resource = meshResource;
+            
+            const float meshBegin = 0.05f + 0.6 * static_cast<float>(meshIndex) / static_cast<float>((std::max)(size_t{1}, meshCount));
+            const float meshEnd = 0.05f + 0.6 * static_cast<float>(meshIndex + 1) / ((std::max)(size_t{1}, meshCount));
+            
+            preparedMesh.Data = Engine::Core::MeshImporter::ImportSingleMeshAsset(meshResource.SourcePath, {}, [&](float meshProgress)
+            {
+                const float clamped = (std::max)(0.0f, (std::min)(meshProgress, 1.0f));
+                
+                reportWorldProgress(meshBegin + (meshEnd - meshBegin) * clamped, "Importing mesh " + meshResource.Id);
+            }, isCancelled);
+            
+            if (!preparedMesh.Data)
+            {
+                throwIfCancelled();
+                throw std::runtime_error("Failed to prepare mesh '" + meshResource.Id + "': " + meshResource.SourcePath.string());
+            }
+            
+            if (meshResource.ImportMaterials)
+            {
+                for (const Engine::Core::MeshMaterial& material : preparedMesh.Data->GetMaterials())
+                {
+                    const std::filesystem::path texturePaths[] = 
+                    {
+                        material.DiffuseTexturePath,
+                        material.NormalTexturePath,
+                        material.SpecularTexturePath,
+                        material.RoughnessTexturePath,
+                        material.EmissiveTexturePath,
+                        material.OpacityTexturePath
+                    };
+                    
+                    for (const auto& texturePath : texturePaths)
+                    {
+                        if (texturePath.empty())
+                        {
+                            continue;
+                        }
+                        
+                        WorldTextureResource textureResource;
+                        textureResource.SourcePath = texturePath;
+                        textureResource.Required = false;
+                        texturesToPrepare.push_back(std::move(textureResource));
+                    }
+                }
+            }
+            
+            preparedWorld.Meshes.push_back(std::move(preparedMesh));
+        }
+        
+        const size_t textureCount = texturesToPrepare.size();
+        
+        for (size_t i = 0; i < textureCount; ++i)
+        {
+            throwIfCancelled();
+            WorldTextureResource resource = std::move(texturesToPrepare[i]);
+            
+            reportWorldProgress(0.65f + 0.3 * static_cast<float>(i + 1) / static_cast<float>((std::max)(size_t{1}, textureCount)),
+                "Loading texture " + resource.SourcePath.filename().string());
+            
+            resource.SourcePath = resource.SourcePath.lexically_normal();
+            const std::wstring cacheKey = resource.SourcePath.generic_wstring();
+            
+            if (preparedTexturePaths.find(cacheKey) != preparedTexturePaths.end())
+            {
+                continue;
+            }
+            
+            std::unique_ptr<Engine::Core::Texture> texture = Engine::Core::TextureLoader::LoadTextureAsset(resource.SourcePath);
+            
+            throwIfCancelled();
+            
+            if (!texture)
+            {
+                if (resource.Required)
+                {
+                    throw std::runtime_error("Failed to prepare required texture: " + resource.SourcePath.string());
+                }
+                
+                continue;
+            }
+            
+            PreparedTexture preparedTexture;
+            preparedTexture.Resource = std::move(resource);
+            preparedTexture.Data = std::move(texture);
+            
+            preparedWorld.Textures.push_back(std::move(preparedTexture));
+            preparedTexturePaths.emplace(cacheKey);
+        }
+        
+        reportWorldProgress(1.0f, "World prepared");
+        preparedScene->Worlds.push_back(std::move(preparedWorld));
+    }
+    
+    reportProgress(1.0f, "Scene preparation complete");
+    return preparedScene;
+}
+
+std::unique_ptr<WorldLoader::Committer> WorldLoader::Committer::Create(std::unique_ptr<PreparedScene> preparedScene,
+                                                                       SceneManagerModule& sceneManagerModule, RenderModule& renderModule, const AppConfig& config)
+{
+    if (!preparedScene)
+    {
+        return nullptr;
+    }
+    
+    auto impl = std::make_unique<Impl>();
+    impl->SceneManagerModule = &sceneManagerModule;
+    impl->RenderModule = &renderModule;
+    impl->AppConfig = config;
+    
+    //replace scene
+    impl->TotalOperations = 1;
+    
+    for (PreparedWorld& w : preparedScene->Worlds)
+    {
+        //cpu assets adoption
+        impl->TotalOperations += w.Meshes.size() + w.Textures.size();
+        //beginworld + finishworld
+        impl->TotalOperations += 2;
+        //runtime resources
+        impl->TotalOperations += w.Document.Textures.size() + w.Document.Meshes.size();
+        
+        ryml::NodeRef worldNode = w.Document.GetWorldNode();
+        
+        if (worldNode.has_child("Resources") && worldNode["Resources"].has_child("Materials"))
+        {
+            impl->TotalOperations += worldNode["Resources"]["Materials"].num_children();
+        }
+        
+        if (worldNode.has_child("Entities"))
+        {
+            //create, comps without refts, comps with refs
+            impl->TotalOperations += worldNode["Entities"].num_children() * 3;
+        }
+    }
+    
+    impl->PreparedScene = std::move(preparedScene);
+    return std::unique_ptr<Committer>(new Committer(std::move(impl)));
+}
 
 bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 {
@@ -1047,55 +1641,110 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     return false;
 }
 
-static bool LoadTextures(WorldLoadContext& context, ryml::NodeRef texturesNode)
+static bool LoadTexture(WorldLoadContext& context, const WorldTextureResource& resource)
 {
-    for (ryml::NodeRef textureNode : texturesNode.children())
+    if (resource.Id.empty())
     {
-        if (!textureNode.has_child("Id") || !textureNode.has_child("Source"))
+        return false;
+    }
+    
+    if (context.TexturesById.find(resource.Id) != context.TexturesById.end())
+    {
+        Logger::Error("Duplicate world texture id: '{}'", resource.Id);
+        return false;
+    }
+    
+    const Engine::Core::Texture* cpuTexture =
+        context.AssetManager->LoadTexture(resource.SourcePath);
+
+    if (!cpuTexture)
+    {
+        if (!resource.Required)
         {
-            Logger::Error("World texture resource requires Id and Source.");
-            return false;
+            Logger::Warn("Optional world texture '{}' was not found: {}", resource.Id, resource.SourcePath.string());
+            return true;
         }
+        
+        Logger::Error(
+            "Failed to load world texture '{}': {}",
+            resource.Id,
+            resource.SourcePath.string());
+        
+        return false;
+    }
 
-        std::string id;
-        std::string source;
+    GDX12Texture* gpuTexture = context.Render->CreateTexture(resource.Id, cpuTexture);
+    if (!gpuTexture)
+    {
+        gpuTexture = context.Render->GetTextureByName(resource.Id);
+    }
 
-        textureNode["Id"] >> id;
-        textureNode["Source"] >> source;
+    if (!gpuTexture)
+    {
+        return false;
+    }
 
-        if (id.empty() || context.TexturesById.find(id) != context.TexturesById.end())
-        {
-            Logger::Error("Invalid or duplicate world texture resource id: '{}'", id);
-            return false;
-        }
+    context.TexturesById.emplace(resource.Id, gpuTexture);
 
-        const std::filesystem::path texturePath =
-            ResolveWorldResourcePath(context, source);
-        const Engine::Core::Texture* cpuTexture =
-            context.AssetManager->LoadTexture(texturePath);
+    return true;
+}
 
-        if (!cpuTexture)
+static bool LoadMaterial(WorldLoadContext& context, ryml::NodeRef materialNode)
+{
+    if (!materialNode.has_child("Id"))
+    {
+        Logger::Error("World material resource requires Id.");
+        return false;
+    }
+
+    std::string id;
+    materialNode["Id"] >> id;
+
+    if (id.empty() || context.MaterialsById.find(id) != context.MaterialsById.end())
+    {
+        Logger::Error("Invalid or duplicate world material resource id: '{}'", id);
+        return false;
+    }
+
+    GDX12Material* material = context.Render->CreateMaterial(id);
+    if (!material)
+    {
+        material = context.Render->GetMaterialByName(id);
+    }
+
+    if (!material)
+    {
+        return false;
+    }
+
+    if (materialNode.has_child("Metallic"))
+    {
+        materialNode["Metallic"] >> material->Metallic;
+    }
+
+    if (materialNode.has_child("Roughness"))
+    {
+        materialNode["Roughness"] >> material->Roughness;
+    }
+
+    if (materialNode.has_child("Diffuse"))
+    {
+        std::string textureId;
+        materialNode["Diffuse"] >> textureId;
+        material->Diffuse = context.ResolveTexture(textureId);
+        if (!material->Diffuse)
         {
             Logger::Error(
-                "Failed to load world texture resource '{}': {}",
+                "World material '{}' references unknown diffuse texture '{}'.",
                 id,
-                texturePath.string());
+                textureId);
             return false;
         }
-
-        GDX12Texture* gpuTexture = context.Render->CreateTexture(id, cpuTexture);
-        if (!gpuTexture)
-        {
-            gpuTexture = context.Render->GetTextureByName(id);
-        }
-
-        if (!gpuTexture)
-        {
-            return false;
-        }
-
-        context.TexturesById.emplace(id, gpuTexture);
     }
+
+    material->DirtyFlag = true;
+
+    context.MaterialsById.emplace(id, material);
 
     return true;
 }
@@ -1104,197 +1753,155 @@ static bool LoadMaterials(WorldLoadContext& context, ryml::NodeRef materialsNode
 {
     for (ryml::NodeRef materialNode : materialsNode.children())
     {
-        if (!materialNode.has_child("Id"))
-        {
-            Logger::Error("World material resource requires Id.");
-            return false;
-        }
-
-        std::string id;
-        materialNode["Id"] >> id;
-
-        if (id.empty() || context.MaterialsById.find(id) != context.MaterialsById.end())
-        {
-            Logger::Error("Invalid or duplicate world material resource id: '{}'", id);
-            return false;
-        }
-
-        GDX12Material* material = context.Render->CreateMaterial(id);
-        if (!material)
-        {
-            material = context.Render->GetMaterialByName(id);
-        }
-
-        if (!material)
+        if (!LoadMaterial(context, materialNode))
         {
             return false;
         }
-
-        if (materialNode.has_child("Metallic"))
-        {
-            materialNode["Metallic"] >> material->Metallic;
-        }
-
-        if (materialNode.has_child("Roughness"))
-        {
-            materialNode["Roughness"] >> material->Roughness;
-        }
-
-        if (materialNode.has_child("Diffuse"))
-        {
-            std::string textureId;
-            materialNode["Diffuse"] >> textureId;
-            material->Diffuse = context.ResolveTexture(textureId);
-            if (!material->Diffuse)
-            {
-                Logger::Error(
-                    "World material '{}' references unknown diffuse texture '{}'.",
-                    id,
-                    textureId);
-                return false;
-            }
-        }
-
-        material->DirtyFlag = true;
-
-        context.MaterialsById.emplace(id, material);
     }
 
     return true;
 }
 
-static bool LoadMeshes(WorldLoadContext& context, ryml::NodeRef meshesNode)
+static bool LoadMesh(WorldLoadContext& context, const WorldMeshResource& resource)
 {
-    for (ryml::NodeRef meshNode : meshesNode.children())
+    if (resource.Id.empty() || context.MeshesById.find(resource.Id) != context.MeshesById.end())
     {
-        if (!meshNode.has_child("Id") || !meshNode.has_child("Source"))
-        {
-            Logger::Error("World mesh resource requires Id and Source.");
-            return false;
-        }
+        return false;
+    }
 
-        std::string id;
-        std::string source;
+    Engine::Core::MeshHandle meshHandle = {};
+    const Engine::Core::Mesh* cpuMesh =
+        context.AssetManager->LoadMesh(resource.SourcePath, meshHandle);
 
-        meshNode["Id"] >> id;
-        meshNode["Source"] >> source;
+    if (!cpuMesh || !meshHandle.IsValid())
+    {
+        Logger::Error(
+            "Failed to load world mesh resource '{}': {}",
+            resource.Id,
+            resource.SourcePath.string());
+        return false;
+    }
 
-        if (id.empty() || context.MeshesById.find(id) != context.MeshesById.end())
-        {
-            Logger::Error("Invalid or duplicate world mesh resource id: '{}'", id);
-            return false;
-        }
+    if (resource.SubmitToRenderer)
+    {
+        context.Render->SubmitMesh(cpuMesh, meshHandle);
+    }
 
-        const std::filesystem::path meshPath =
-            ResolveWorldResourcePath(context, source);
-        Engine::Core::MeshHandle meshHandle = {};
-        const Engine::Core::Mesh* cpuMesh =
-            context.AssetManager->LoadMesh(meshPath, meshHandle);
+    context.MeshesById.emplace(resource.Id, meshHandle);
+    context.CpuMeshesById.emplace(resource.Id, cpuMesh);
 
-        if (!cpuMesh || !meshHandle.IsValid())
+    if (resource.ImportMaterials)
+    {
+        const SceneDefaultMaterialTextures defaultTextures =
+            CreateSceneDefaultMaterialTextures(*context.Render, resource.Id);
+        if (!defaultTextures.IsValid())
         {
             Logger::Error(
-                "Failed to load world mesh resource '{}': {}",
-                id,
-                meshPath.string());
+                "Failed to create default textures for imported mesh materials '{}'.",
+                resource.Id);
             return false;
         }
 
-        bool submitToRenderer = true;
-        if (meshNode.has_child("SubmitToRenderer"))
+        GDX12Material* fallbackMaterial = CreateSceneFallbackMaterial(
+            *context.Render,
+            *context.AssetManager,
+            resource.Id,
+            defaultTextures);
+        if (!fallbackMaterial)
         {
-            meshNode["SubmitToRenderer"] >> submitToRenderer;
+            Logger::Error(
+                "Failed to create fallback material for imported mesh '{}'.",
+                resource.Id);
+            return false;
         }
 
-        bool importMaterials = false;
-        if (meshNode.has_child("ImportMaterials"))
+        std::vector<GDX12Material*> importedMaterials = BuildObjMaterialSlots(
+            *context.Render,
+            *context.AssetManager,
+            *cpuMesh,
+            resource.Id,
+            fallbackMaterial,
+            defaultTextures,
+            context.ImportedTexturesByPath);
+
+        if (importedMaterials.empty())
         {
-            meshNode["ImportMaterials"] >> importMaterials;
+            Logger::Error("Imported mesh '{}' produced no material slots.", resource.Id);
+            return false;
         }
 
-        if (submitToRenderer)
-        {
-            context.Render->SubmitMesh(cpuMesh, meshHandle);
-        }
-
-        context.MeshesById.emplace(id, meshHandle);
-        context.CpuMeshesById.emplace(id, cpuMesh);
-
-        if (importMaterials)
-        {
-            const SceneDefaultMaterialTextures defaultTextures =
-                CreateSceneDefaultMaterialTextures(*context.Render, id);
-            if (!defaultTextures.IsValid())
-            {
-                Logger::Error(
-                    "Failed to create default textures for imported mesh materials '{}'.",
-                    id);
-                return false;
-            }
-
-            GDX12Material* fallbackMaterial = CreateSceneFallbackMaterial(
-                *context.Render,
-                *context.AssetManager,
-                id,
-                defaultTextures);
-            if (!fallbackMaterial)
-            {
-                Logger::Error(
-                    "Failed to create fallback material for imported mesh '{}'.",
-                    id);
-                return false;
-            }
-
-            std::vector<GDX12Material*> importedMaterials = BuildObjMaterialSlots(
-                *context.Render,
-                *context.AssetManager,
-                *cpuMesh,
-                id,
-                fallbackMaterial,
-                defaultTextures,
-                context.ImportedTexturesByPath);
-
-            if (importedMaterials.empty())
-            {
-                Logger::Error("Imported mesh '{}' produced no material slots.", id);
-                return false;
-            }
-
-            context.MeshMaterialsById.emplace(id, std::move(importedMaterials));
-        }
+        context.MeshMaterialsById.emplace(resource.Id, std::move(importedMaterials));
     }
 
     return true;
 }
 
-static bool LoadWorldResources(WorldLoadContext& context, ryml::NodeRef resourcesNode)
+static bool LoadWorldResources(WorldLoadContext& context, WorldDocument& document)
 {
-    if (resourcesNode.has_child("Textures"))
+    for (const WorldTextureResource& textureResource : document.Textures)
     {
-        if (!LoadTextures(context, resourcesNode["Textures"]))
+        if (!LoadTexture(context, textureResource))
         {
             return false;
         }
+    }
+    
+    ryml::NodeRef worldNode = document.GetWorldNode();
+    
+    if (worldNode.has_child("Resources"))
+    {
+        ryml::NodeRef resources = worldNode["Resources"];
+        
+        if (resources.has_child("Materials") && !LoadMaterials(context, resources["Materials"]))
+        {
+            return false;
+        }
+    }
+    
+    for (const WorldMeshResource& meshResource : document.Meshes)
+    {
+        if (!LoadMesh(context, meshResource))
+        {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+
+static bool CreateWorldEntity(WorldLoadContext& context, ryml::NodeRef entityNode)
+{
+    if (!entityNode.is_map())
+    {
+        Logger::Error("Expected an entity map while loading world entities.");
+        return false;
+    }
+    
+    WorldECS& ecs = context.World->GetECS();
+
+    if (!entityNode.has_child("Id"))
+    {
+        Logger::Error("World entity requires Id.");
+        return false;
     }
 
-    if (resourcesNode.has_child("Materials"))
+    std::string id;
+    entityNode["Id"] >> id;
+
+    if (id.empty() || context.EntitiesById.find(id) != context.EntitiesById.end())
     {
-        if (!LoadMaterials(context, resourcesNode["Materials"]))
-        {
-            return false;
-        }
+        Logger::Error("Invalid or duplicate world entity id: '{}'", id);
+        return false;
     }
 
-    if (resourcesNode.has_child("Meshes"))
-    {
-        if (!LoadMeshes(context, resourcesNode["Meshes"]))
-        {
-            return false;
-        }
-    }
+    auto entity = ecs.CreateEntity();
+
+    context.EntitiesById.emplace(id, entity.GetId());
 
     return true;
 }
+
 
 static bool CreateWorldEntities(WorldLoadContext& context, ryml::NodeRef entitiesNode)
 {
@@ -1302,24 +1909,10 @@ static bool CreateWorldEntities(WorldLoadContext& context, ryml::NodeRef entitie
 
     for (ryml::NodeRef entityNode : entitiesNode.children())
     {
-        if (!entityNode.has_child("Id"))
+        if (!CreateWorldEntity(context, entityNode))
         {
-            Logger::Error("World entity requires Id.");
             return false;
         }
-
-        std::string id;
-        entityNode["Id"] >> id;
-
-        if (id.empty() || context.EntitiesById.find(id) != context.EntitiesById.end())
-        {
-            Logger::Error("Invalid or duplicate world entity id: '{}'", id);
-            return false;
-        }
-
-        auto entity = ecs.CreateEntity();
-
-        context.EntitiesById.emplace(id, entity.GetId());
     }
 
     return true;
@@ -1417,136 +2010,156 @@ static bool ParseStaticMeshRender(
     return true;
 }
 
+
+static bool LoadEntityComponentWithoutRefs(
+    WorldLoadContext& context,
+    ryml::NodeRef entityNode)
+{
+    if (!entityNode.is_map())
+    {
+        Logger::Error("Expected an entity map while loading world entities.");
+        return false;
+    }
+    
+    WorldECS& ecs = context.World->GetECS();
+
+    std::string id;
+    entityNode["Id"] >> id;
+
+    const Entity runtimeEntity = context.ResolveEntity(id);
+    if (runtimeEntity == InvalidEntity)
+    {
+        return false;
+    }
+
+    auto entity = ecs.GetEntityHandle(runtimeEntity);
+
+    if (!entityNode.has_child("Components"))
+    {
+        return true;
+    }
+
+    ryml::NodeRef components = entityNode["Components"];
+
+    if (components.has_child("Name"))
+    {
+        std::string name = id;
+
+        ryml::NodeRef nameNode = components["Name"];
+        if (nameNode.has_child("Value"))
+        {
+            nameNode["Value"] >> name;
+        }
+
+        entity.AddComponent<NameComponent>(name);
+    }
+
+    if (components.has_child("Transform"))
+    {
+        if (!ParseTransform(entity, components["Transform"]))
+        {
+            return false;
+        }
+    }
+
+    if (components.has_child("Camera"))
+    {
+        auto& camera = entity.AddComponent<CameraComponent>();
+
+        ryml::NodeRef cameraNode = components["Camera"];
+
+        if (cameraNode.has_child("FOV"))
+        {
+            cameraNode["FOV"] >> camera.FOV;
+        }
+
+        if (cameraNode.has_child("NearPlane"))
+        {
+            cameraNode["NearPlane"] >> camera.NearPlane;
+        }
+
+        if (cameraNode.has_child("FarPlane"))
+        {
+            cameraNode["FarPlane"] >> camera.FarPlane;
+        }
+
+        camera.DirtyFlag = true;
+    }
+
+    if (components.has_child("Velocity"))
+    {
+        Vector3 velocity = ReadVector3(components["Velocity"]);
+        entity.AddComponent<VelocityComponent>(velocity);
+    }
+
+    if (components.has_child("CircleMovement"))
+    {
+        ryml::NodeRef node = components["CircleMovement"];
+
+        float radius = 100.0f;
+        float speed = 100.0f;
+
+        if (node.has_child("Radius"))
+        {
+            node["Radius"] >> radius;
+        }
+
+        if (node.has_child("Speed"))
+        {
+            node["Speed"] >> speed;
+        }
+
+        entity.AddComponent<CircleMovementComponent>(radius, speed);
+    }
+
+    if (components.has_child("StaticMeshRender"))
+    {
+        if (!ParseStaticMeshRender(context, entity, components["StaticMeshRender"]))
+        {
+            return false;
+        }
+    }
+
+    if (components.has_child("SplineCurve"))
+    {
+        ryml::NodeRef node = components["SplineCurve"];
+
+        bool loop = false;
+        if (node.has_child("Loop"))
+        {
+            node["Loop"] >> loop;
+        }
+
+        std::vector<SplinePoint> points;
+
+        if (node.has_child("Points"))
+        {
+            for (ryml::NodeRef pointNode : node["Points"].children())
+            {
+                SplinePoint point;
+                point.Position = ReadVector3(pointNode["Position"]);
+                point.ArriveTangent = ReadVector3(pointNode["ArriveTangent"]);
+                point.LeaveTangent = ReadVector3(pointNode["LeaveTangent"]);
+                points.push_back(point);
+            }
+        }
+
+        entity.AddComponent<SplineCurveComponent>(loop, points);
+    }
+
+    return true;
+}
+
+
 static bool LoadEntityComponentsWithoutRefs(
     WorldLoadContext& context,
     ryml::NodeRef entitiesNode)
 {
-    WorldECS& ecs = context.World->GetECS();
-
     for (ryml::NodeRef entityNode : entitiesNode.children())
     {
-        std::string id;
-        entityNode["Id"] >> id;
-
-        const Entity runtimeEntity = context.ResolveEntity(id);
-        if (runtimeEntity == InvalidEntity)
+        if (!LoadEntityComponentWithoutRefs(context, entityNode))
         {
             return false;
-        }
-
-        auto entity = ecs.GetEntityHandle(runtimeEntity);
-
-        if (!entityNode.has_child("Components"))
-        {
-            continue;
-        }
-
-        ryml::NodeRef components = entityNode["Components"];
-
-        if (components.has_child("Name"))
-        {
-            std::string name = id;
-
-            ryml::NodeRef nameNode = components["Name"];
-            if (nameNode.has_child("Value"))
-            {
-                nameNode["Value"] >> name;
-            }
-
-            entity.AddComponent<NameComponent>(name);
-        }
-
-        if (components.has_child("Transform"))
-        {
-            if (!ParseTransform(entity, components["Transform"]))
-            {
-                return false;
-            }
-        }
-
-        if (components.has_child("Camera"))
-        {
-            auto& camera = entity.AddComponent<CameraComponent>();
-
-            ryml::NodeRef cameraNode = components["Camera"];
-
-            if (cameraNode.has_child("FOV"))
-            {
-                cameraNode["FOV"] >> camera.FOV;
-            }
-
-            if (cameraNode.has_child("NearPlane"))
-            {
-                cameraNode["NearPlane"] >> camera.NearPlane;
-            }
-
-            if (cameraNode.has_child("FarPlane"))
-            {
-                cameraNode["FarPlane"] >> camera.FarPlane;
-            }
-
-            camera.DirtyFlag = true;
-        }
-
-        if (components.has_child("Velocity"))
-        {
-            Vector3 velocity = ReadVector3(components["Velocity"]);
-            entity.AddComponent<VelocityComponent>(velocity);
-        }
-
-        if (components.has_child("CircleMovement"))
-        {
-            ryml::NodeRef node = components["CircleMovement"];
-
-            float radius = 100.0f;
-            float speed = 100.0f;
-
-            if (node.has_child("Radius"))
-            {
-                node["Radius"] >> radius;
-            }
-
-            if (node.has_child("Speed"))
-            {
-                node["Speed"] >> speed;
-            }
-
-            entity.AddComponent<CircleMovementComponent>(radius, speed);
-        }
-
-        if (components.has_child("StaticMeshRender"))
-        {
-            if (!ParseStaticMeshRender(context, entity, components["StaticMeshRender"]))
-            {
-                return false;
-            }
-        }
-
-        if (components.has_child("SplineCurve"))
-        {
-            ryml::NodeRef node = components["SplineCurve"];
-
-            bool loop = false;
-            if (node.has_child("Loop"))
-            {
-                node["Loop"] >> loop;
-            }
-
-            std::vector<SplinePoint> points;
-
-            if (node.has_child("Points"))
-            {
-                for (ryml::NodeRef pointNode : node["Points"].children())
-                {
-                    SplinePoint point;
-                    point.Position = ReadVector3(pointNode["Position"]);
-                    point.ArriveTangent = ReadVector3(pointNode["ArriveTangent"]);
-                    point.LeaveTangent = ReadVector3(pointNode["LeaveTangent"]);
-                    points.push_back(point);
-                }
-            }
-
-            entity.AddComponent<SplineCurveComponent>(loop, points);
         }
     }
 
@@ -1571,28 +2184,33 @@ static Vector3 ReadVector3(ryml::NodeRef node)
     return Vector3(x, y, z);
 }
 
-static bool LoadEntityComponentsWithRefs(
+
+static bool LoadEntityComponentWithRefs(
     WorldLoadContext& context,
-    ryml::NodeRef entitiesNode)
+    ryml::NodeRef entityNode)
 {
-    WorldECS& ecs = context.World->GetECS();
-
-    for (ryml::NodeRef entityNode : entitiesNode.children())
+    if (!entityNode.is_map())
     {
-        std::string id;
-        entityNode["Id"] >> id;
+        Logger::Error("Expected an entity map while loading world entities.");
+        return false;
+    }
+    
+    WorldECS& ecs = context.World->GetECS();
+    
+    std::string id;
+    entityNode["Id"] >> id;
 
-        const Entity runtimeEntity = context.ResolveEntity(id);
-        if (runtimeEntity == InvalidEntity)
+    const Entity runtimeEntity = context.ResolveEntity(id);
+    if (runtimeEntity == InvalidEntity)
+    {
+        return false;
+    }
+
+    auto entity = ecs.GetEntityHandle(runtimeEntity);
+
+    if (!entityNode.has_child("Components"))
         {
-            return false;
-        }
-
-        auto entity = ecs.GetEntityHandle(runtimeEntity);
-
-        if (!entityNode.has_child("Components"))
-        {
-            continue;
+            return true;
         }
 
         ryml::NodeRef components = entityNode["Components"];
@@ -1688,6 +2306,23 @@ static bool LoadEntityComponentsWithRefs(
                 time
             );
         }
+
+    return true;
+}
+
+
+static bool LoadEntityComponentsWithRefs(
+    WorldLoadContext& context,
+    ryml::NodeRef entitiesNode)
+{
+    WorldECS& ecs = context.World->GetECS();
+
+    for (ryml::NodeRef entityNode : entitiesNode.children())
+    {
+        if (!LoadEntityComponentWithRefs(context, entityNode))
+        {
+            return false;
+        }
     }
 
     return true;
@@ -1698,3 +2333,5 @@ bool WorldLoader::SaveToFile(World& world, const std::filesystem::path& path)
     // todo construct yaml and save
     return true;
 }
+
+#pragma endregion 
