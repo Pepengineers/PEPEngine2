@@ -1,6 +1,6 @@
 // This file is part of the FidelityFX SDK.
 //
-// Copyright (C) 2024 Advanced Micro Devices, Inc.
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files(the "Software"), to deal
@@ -27,6 +27,7 @@ extern "C" {
 #endif  // #if defined(__cplusplus)
 
 #define FFX_API_ENTRY __declspec(dllexport)
+
 #include <stdint.h>
 
 enum FfxApiReturnCodes
@@ -38,13 +39,15 @@ enum FfxApiReturnCodes
     FFX_API_RETURN_NO_PROVIDER            = 4, ///< No provider was found for the given structure type. This is likely a programming error.
     FFX_API_RETURN_ERROR_MEMORY           = 5, ///< A memory allocation failed.
     FFX_API_RETURN_ERROR_PARAMETER        = 6, ///< A parameter was invalid, e.g. a null pointer, empty resource or out-of-bounds enum value.
+    FFX_API_RETURN_PROVIDER_NO_SUPPORT_NEW_DESCTYPE = 7, ///< The structure type given is new and not supported in the old provider. This is likely fixed with driver upgrade or effect DLL upgrade.
 };
 
 typedef void* ffxContext;
 typedef uint32_t ffxReturnCode_t;
 
-#define FFX_API_EFFECT_MASK 0xffff0000u
-#define FFX_API_EFFECT_ID_GENERAL 0x00000000u
+#define FFX_API_EFFECT_MASK         0x00ff0000u
+#define FFX_API_BACKEND_MASK        0xff000000u
+#define FFX_API_EFFECT_ID_GENERAL   0x00000000u
 
 // Base Descriptor types
 typedef uint64_t ffxStructType_t;
@@ -79,6 +82,15 @@ struct ffxConfigureDescGlobalDebug1
 {
     ffxConfigureDescHeader header;
     ffxApiMessage          fpMessage;
+    uint32_t               debugLevel;
+};
+
+#define FFX_API_CONFIGURE_DESC_TYPE_GLOBALDEBUG 7u
+struct ffxConfigureDescGlobalDebug
+{
+    ffxConfigureDescHeader header;
+    uint64_t               effectId;
+    ffxApiMessage          fpMessage;  ///< A pointer to a function that can receive messages from the runtime. May be null.
     uint32_t               debugLevel;
 };
 
@@ -152,6 +164,49 @@ typedef ffxReturnCode_t (*PfnFfxQuery)(ffxContext* context, ffxQueryDescHeader* 
 // Non-zero return indicates error code.
 FFX_API_ENTRY ffxReturnCode_t ffxDispatch(ffxContext* context, const ffxDispatchDescHeader* desc);
 typedef ffxReturnCode_t (*PfnFfxDispatch)(ffxContext* context, const ffxDispatchDescHeader* desc);
+
+// FFX_API_EFFECT_IDs
+#define FFX_API_EFFECT_ID_UPSCALE                       	0x00010000u
+#define FFX_API_EFFECT_ID_FRAMEGENERATION               	0x00020000u
+#define FFX_API_EFFECT_ID_FRAMEGENERATIONSWAPCHAIN      	0x00030000u
+// Need to keep this ID around for the deprecated VK frame gen swapchain
+#define FFX_API_EFFECT_ID_FRAMEGENERATIONSWAPCHAIN_VK       0x00040000u
+// Need to keep this ID around for the deprecated VK frame gen swapchain
+#define FFX_API_EFFECT_ID_DENOISER                      	0x00050000u
+#define FFX_API_EFFECT_ID_RADIANCECACHE                   	0x00060000u
+
+#define FFX_API_MAKE_EFFECT_SUB_ID(effectId, subversion) ((effectId & FFX_API_EFFECT_MASK) | (subversion & ~FFX_API_EFFECT_MASK))
+
+// FFX_APID_BACKEND_IDs
+#define FFX_API_BACKEND_ID_DX12               0x00000000u
+#define FFX_API_BACKEND_ID_XBOX               0x01000000u
+#define FFX_API_BACKEND_ID_VK                 0x02000000u // For new effects going forward, please use this backend ID for vulkan specifics
+
+#define FFX_API_MAKE_BACKEND_SUB_ID(backendId, subversion) ((backendId & FFX_API_BACKEND_MASK) | (subversion & ~FFX_API_BACKEND_MASK))
+
+// Combiner for BACKEND-specific EFFECT sub-Ids
+#define FFX_API_MAKE_BACKEND_EFFECT_SUB_ID(backendId, effectId, subversion) ((subversion & ~FFX_API_EFFECT_MASK) | (effectId & FFX_API_EFFECT_MASK) | (backendId & FFX_API_BACKEND_MASK) | (subversion & ~(FFX_API_BACKEND_MASK | FFX_API_EFFECT_MASK)))
+
+// Pragma macros for controlling warnings so that deprecations take affect externally but can be suppressed internally.
+// This is so we can maintain the API/ABI until we are ready to make the breaking change.
+// These are sadly compiler specific.
+#if defined(_MSC_VER) && !defined(__clang__) && !defined(__GNUC__) && !defined(__INTEL_COMPILER)
+#define FFX_PRAGMA_WARNING_PUSH warning( push )
+#define FFX_PRAGMA_WARNING_POP warning( pop )
+#define FFX_PRAGMA_WARNING_DISABLE_DEPRECATIONS warning( disable: 4996 )
+#define FFX_PRAGMA_WARNING_WARN_DEPRECATIONS warning( default: 4996 )
+#elif defined(__clang__) || defined(__GNUC__)
+#define FFX_PRAGMA_WARNING_PUSH GCC diagnostic push
+#define FFX_PRAGMA_WARNING_POP GCC diagnostic pop
+#define FFX_PRAGMA_WARNING_DISABLE_DEPRECATIONS GCC diagnostic ignored "-Wdeprecated"
+#define FFX_PRAGMA_WARNING_WARN_DEPRECATIONS GCC diagnostic warning "-Wdeprecated"
+#else
+#define FFX_PRAGMA_WARNING_PUSH 
+#define FFX_PRAGMA_WARNING_POP 
+#define FFX_PRAGMA_WARNING_DISABLE_DEPRECATIONS 
+#endif
+
+#define FFX_DEPRECATION(message) [[deprecated(message)]]
 
 #if defined(__cplusplus)
 }
