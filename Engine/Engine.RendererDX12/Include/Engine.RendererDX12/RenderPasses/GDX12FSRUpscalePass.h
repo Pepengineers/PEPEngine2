@@ -195,7 +195,7 @@ private:
 		upscaleDesc.header.pNext = &backendDesc.header;
 		upscaleDesc.maxRenderSize = { static_cast<uint32_t>(_commonData->WindowWidth), static_cast<uint32_t>(_commonData->WindowHeight) };
 		upscaleDesc.maxUpscaleSize = { static_cast<uint32_t>(_commonData->WindowWidth), static_cast<uint32_t>(_commonData->WindowHeight) };
-		upscaleDesc.flags = FFX_UPSCALE_ENABLE_DEBUG_CHECKING | FFX_UPSCALE_ENABLE_DEPTH_INVERTED;
+		upscaleDesc.flags = FFX_UPSCALE_ENABLE_DEBUG_CHECKING | FFX_UPSCALE_ENABLE_DEPTH_INVERTED | FFX_UPSCALE_ENABLE_AUTO_EXPOSURE;
 		upscaleDesc.fpMessage = [](uint32_t type, const wchar_t* message)
 			{
 				std::wstring wideMessage(message);
