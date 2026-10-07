@@ -2,6 +2,10 @@
 
 #include <memory>
 
+// test
+#include <Jolt/Jolt.h>
+#include <Jolt/Physics/Body/BodyID.h>
+
 namespace JPH
 {
     class PhysicsSystem;
@@ -35,6 +39,13 @@ private:
     std::unique_ptr<BroadPhaseLayerInterfaceImpl> _broadPhaseLayerInterface;
     std::unique_ptr<ObjectVsBroadPhaseLayerFilterImpl> _objectVsBroadPhaseLayerFilter;
     std::unique_ptr<ObjectLayerPairFilterImpl> _objectLayerPairFilter;
+
+    // test
+    void CreateFloor();
+    void CreateBox();
+    void ReadBoxPosition();
+    JPH::BodyID _floorBodyID;
+    JPH::BodyID _boxBodyID;
 };
 
 
