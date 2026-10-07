@@ -4,6 +4,7 @@
 
 #include "Common/GameTimer.h"
 #include "Common/Module.h"
+#include "App.Base/Physics/PhysicsTypes.h"
 
 class JoltPhysicsBackend;
 
@@ -15,6 +16,12 @@ public:
     
     void Initialize() override;
     void Uninitialize() override;
+    
+    // create bodies
+    PhysicsBodyHandle CreateBoxBody(const PhysicsBoxBodyDesc& desc);
+    
+    // destroy bodies
+    void DestroyBody(PhysicsBodyHandle handle);
     
 protected:
     void OnUpdate() override;

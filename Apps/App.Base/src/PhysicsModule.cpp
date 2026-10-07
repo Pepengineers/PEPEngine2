@@ -24,6 +24,18 @@ void PhysicsModule::Uninitialize()
     }
 }
 
+PhysicsBodyHandle PhysicsModule::CreateBoxBody(const PhysicsBoxBodyDesc& desc)
+{
+    if (!_cpuPhysics) { return {}; }
+    return _cpuPhysics->CreateBoxBody(desc);
+}
+
+void PhysicsModule::DestroyBody(PhysicsBodyHandle handle)
+{
+    if (!_cpuPhysics || !handle.IsValid()) { return; }
+    _cpuPhysics->DestroyBody(handle);
+}
+
 void PhysicsModule::OnUpdate()
 {
     Tick(_gt->DeltaTime());

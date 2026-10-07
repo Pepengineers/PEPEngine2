@@ -13,6 +13,8 @@
 #include "App.Base/ECS/Components/StaticMeshRenderComponent.h"
 #include "App.Base/ECS/Components/TransformComponent.h"
 #include "App.Base/ECS/Components/VelocityComponent.h"
+#include "App.Base/ECS/Components/RigidBodyComponent.h"
+#include "App.Base/ECS/Components/BoxColliderComponent.h"
 
 struct WorldDesc {
     std::filesystem::path WorldFilePath;
@@ -29,7 +31,9 @@ using WorldECS = ECSStorage<
     CircleMovementComponent,
     SplineCurveComponent,
     SplineFollowComponent,
-    LookAtTargetComponent
+    LookAtTargetComponent,
+    RigidBodyComponent,
+    BoxColliderComponent
 >;
 
 class World {
