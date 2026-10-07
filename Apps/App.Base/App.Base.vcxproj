@@ -40,6 +40,7 @@
     <ClInclude Include="Include\App.Base\Modules\RenderModule.h" />
     <ClInclude Include="Include\App.Base\Modules\SceneManagerModule.h" />
     <ClInclude Include="Include\App.Base\Physics\JoltPhysicsBackend.h" />
+    <ClInclude Include="Include\App.Base\Physics\PhysicsTypes.h" />
     <ClInclude Include="Include\App.Base\SceneTraversal.h" />
     <ClInclude Include="Include\App.Base\Systems\CircleMovementSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\GPUDataUpdateSystem.h" />

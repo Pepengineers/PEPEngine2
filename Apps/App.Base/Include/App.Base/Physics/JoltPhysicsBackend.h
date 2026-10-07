@@ -6,6 +6,8 @@
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Body/BodyID.h>
 
+#include <App.Base/Physics/PhysicsTypes.h>
+
 namespace JPH
 {
     class PhysicsSystem;
@@ -27,6 +29,12 @@ public:
     void Uninitialize();
 
     void Step(float dt);
+    
+    // create bodies
+    PhysicsBodyHandle CreateBoxBody(const PhysicsBoxBodyDesc& desc);
+    
+    // destroy bodies
+    void DestroyBody(PhysicsBodyHandle handle);
 
 private:
     bool _bInitialized = false;
@@ -44,8 +52,8 @@ private:
     void CreateFloor();
     void CreateBox();
     void ReadBoxPosition();
-    JPH::BodyID _floorBodyID;
-    JPH::BodyID _boxBodyID;
+    PhysicsBodyHandle _floorBody;
+    PhysicsBodyHandle _boxBody;
 };
 
 

@@ -196,13 +196,11 @@ void JoltPhysicsBackend::Uninitialize()
     if (!_bInitialized) { return; }
 
     // test
-    if (!_floorBodyID.IsInvalid() && _physicsSystem)
-    {
-        JPH::BodyInterface& bodyInterface = _physicsSystem->GetBodyInterface();
-        bodyInterface.RemoveBody(_floorBodyID);
-        bodyInterface.DestroyBody(_floorBodyID);
-        _floorBodyID = JPH::BodyID();
-    }
+    DestroyBody(_boxBody);
+    _boxBody = {};
+
+    DestroyBody(_floorBody);
+    _floorBody = {};
 
     _physicsSystem.reset(); // tmp. its better to RemoveBody -> DestroyBody
     _objectLayerPairFilter.reset();
@@ -241,56 +239,110 @@ void JoltPhysicsBackend::Step(float dt)
     ReadBoxPosition();
 }
 
+PhysicsBodyHandle JoltPhysicsBackend::CreateBoxBody(const PhysicsBoxBodyDesc& desc)
+{
+    if (!_bInitialized || !_physicsSystem)
+    {
+        Logger::Error("CreateBoxBody(): backend isnt initialized");
+        return {};
+    }
+    
+    JPH::EMotionType motionType;
+
+    switch (desc.MotionType)
+    {
+    case PhysicsMotionType::Static:
+        motionType = JPH::EMotionType::Static;
+        break;
+    case PhysicsMotionType::Dynamic:
+        motionType = JPH::EMotionType::Dynamic;
+        break;
+    case PhysicsMotionType::Kinematic:
+        motionType = JPH::EMotionType::Kinematic;
+        break;
+        
+    default:
+        Logger::Error("CreateBoxBody(): invalid motion type");
+        return {};
+    }
+    
+    const bool isStatic = desc.MotionType == PhysicsMotionType::Static;
+    
+    JPH::BodyCreationSettings settings(
+        new JPH::BoxShape(JPH::Vec3(desc.HalfExtent.x, desc.HalfExtent.y, desc.HalfExtent.z)),
+        JPH::RVec3(desc.Position.x, desc.Position.y, desc.Position.z),
+        JPH::Quat(desc.Rotation.x, desc.Rotation.y, desc.Rotation.z, desc.Rotation.w),
+        motionType,
+        isStatic ? ObjectLayers::Static : ObjectLayers::Dynamic
+    );
+    
+    JPH::BodyInterface& bodyInterface = _physicsSystem->GetBodyInterface();
+    
+    JPH::Body* body = bodyInterface.CreateBody(settings);
+    if (!body)
+    {
+        Logger::Error("CreateBoxBody(): failed to create");
+        return {};
+    }
+    
+    const JPH::BodyID& bodyID = body->GetID();
+    bodyInterface.AddBody(bodyID, isStatic ? JPH::EActivation::DontActivate : JPH::EActivation::Activate);
+    
+    return PhysicsBodyHandle{ bodyID.GetIndexAndSequenceNumber() };
+}
+
+void JoltPhysicsBackend::DestroyBody(PhysicsBodyHandle handle)
+{
+    if (!_bInitialized || !_physicsSystem || !handle.IsValid())
+    {
+        Logger::Error("DestroyBody(): backend isn't initialized or invalid handle");
+        return;
+    }
+    
+    const JPH::BodyID bodID(handle.Value);
+    
+    JPH::BodyInterface& bodyInterface = _physicsSystem->GetBodyInterface();
+    
+    bodyInterface.RemoveBody(bodID);
+    bodyInterface.DestroyBody(bodID);
+}
+
 // test
 void JoltPhysicsBackend::CreateFloor()
 {
-    JPH::BodyInterface& bodyInterface = _physicsSystem->GetBodyInterface();
-    JPH::BodyCreationSettings floorCreationSettings(
-        new JPH::BoxShape(JPH::Vec3(20, 1, 20)),
-        JPH::RVec3(0, -1, 0),
-        JPH::Quat::sIdentity(),
-        JPH::EMotionType::Static,
-        ObjectLayers::Dynamic
-    );
-
-    JPH::Body* floorBody = bodyInterface.CreateBody(floorCreationSettings);
-    JPH_ASSERT(floorBody != nullptr);
-    if (!floorBody)
-    {
-        Logger::Error("Failed to create physics test floor body");
-        return;
-    }
-
-    _floorBodyID = floorBody->GetID();
-    bodyInterface.AddBody(_floorBodyID, JPH::EActivation::DontActivate);
+    PhysicsBoxBodyDesc desc;
+    desc.HalfExtent = DirectX::SimpleMath::Vector3{ 20.0f, 1.0f, 20.0f };
+    desc.Position = DirectX::SimpleMath::Vector3{ 0.0f, -1.0f, 0.0f };
+    desc.MotionType = PhysicsMotionType::Static;
+    
+    _floorBody = CreateBoxBody(desc);
 }
 
 void JoltPhysicsBackend::CreateBox()
 {
-    JPH::BodyInterface& bodyInterface = _physicsSystem->GetBodyInterface();
-    JPH::BodyCreationSettings boxCreationSettings(
-        new JPH::BoxShape(JPH::Vec3(1, 1, 1)),
-        JPH::RVec3(0, 20, 0),
-        JPH::Quat::sIdentity(),
-        JPH::EMotionType::Dynamic,
-        ObjectLayers::Dynamic
-        );
-    
-    JPH::Body* boxBody = bodyInterface.CreateBody(boxCreationSettings);
-    JPH_ASSERT (boxBody != nullptr);
-    _boxBodyID = boxBody->GetID();
-    
-    bodyInterface.AddBody(_boxBodyID, JPH::EActivation::Activate);
+    PhysicsBoxBodyDesc desc;
+    desc.HalfExtent = DirectX::SimpleMath::Vector3{ 1.0f, 1.0f, 1.0f };
+    desc.Position = DirectX::SimpleMath::Vector3{ 0.0f, 20.0f, 0.0f };
+    desc.MotionType = PhysicsMotionType::Dynamic;
+
+    _boxBody = CreateBoxBody(desc);
 }
 
 void JoltPhysicsBackend::ReadBoxPosition()
 {
+    if (!_boxBody.IsValid())
+    {
+        return;
+    }
+
+    const JPH::BodyID boxBodyID(_boxBody.Value);
+    
     JPH::BodyInterface& bodyInterface = _physicsSystem->GetBodyInterface();
     
-    JPH::RVec3 boxPosition = bodyInterface.GetPosition(_boxBodyID);
-    JPH::RVec3 outLinearVelocity;
-    JPH::RVec3 outRotationalVelocity;
-    bodyInterface.GetLinearAndAngularVelocity(_boxBodyID, outLinearVelocity, outRotationalVelocity);
+    JPH::RVec3 boxPosition = bodyInterface.GetPosition(boxBodyID);
+    JPH::Vec3 outLinearVelocity;
+    JPH::Vec3 outRotationalVelocity;
+    bodyInterface.GetLinearAndAngularVelocity(boxBodyID, outLinearVelocity, outRotationalVelocity);
     
     Logger::Info(
         "Box:\n"
