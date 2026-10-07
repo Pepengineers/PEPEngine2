@@ -374,5 +374,5 @@ void App::Update(const GameTimer& gameTimer)
     // as the initialization order (that is used by the locator)
     Locator.GetModule<RenderModule>()->Update();
     Locator.GetModule<SceneManagerModule>()->Update();
-    Locator.GetModule<PhysicsModule>()->Update();
+    // Locator.GetModule<PhysicsModule>()->Update(); // rn its ticking in SceneManagerModule
 }

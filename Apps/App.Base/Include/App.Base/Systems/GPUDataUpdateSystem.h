@@ -154,4 +154,9 @@ public:
             });
 
     }
+    
+    SystemUpdatePhase GetUpdatePhase() const override
+    {
+        return SystemUpdatePhase::RenderPrep;
+    }
 };

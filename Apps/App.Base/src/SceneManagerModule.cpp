@@ -11,6 +11,12 @@
 #include "Common/Logger.h"
 #include "Engine.Core/System.h"
 
+#include "Engine.Core/BenchmarkEngine.h"
+#include <stdexcept>
+
+#include "App.Base/Modules/PhysicsModule.h"
+#include <cassert>
+
 #include <exception>
 #include <string>
 
@@ -26,7 +32,13 @@ SceneManagerModule::~SceneManagerModule()
 
 void SceneManagerModule::Initialize()
 {
-    
+    _physics = BenchmarkEngine::GetLocator().GetModule<PhysicsModule>();
+
+    if (!_physics)
+    {
+        Logger::Error("PhysicsModule is not registered");
+        throw std::runtime_error("SceneManagerModule requires PhysicsModule");
+    }
 }
 
 void SceneManagerModule::Uninitialize()
@@ -302,7 +314,13 @@ size_t SceneManagerModule::GetWorldCount() const
 
 void SceneManagerModule::OnUpdate()
 {
-    Tick(_timer->DeltaTime());
+    const float dt = _timer->DeltaTime();
+
+    TickPhase(SystemUpdatePhase::FrameUpdate, dt);
+
+    _physics->Update();
+
+    TickPhase(SystemUpdatePhase::RenderPrep, dt);
 }
 
 void SceneManagerModule::OnRender()
@@ -319,14 +337,15 @@ bool SceneManagerModule::ShouldRender()
     return false;
 }
 
-void SceneManagerModule::Tick(float dt)
+void SceneManagerModule::TickPhase(SystemUpdatePhase phase, float dt)
 {
     for (auto& entry : _systemVector)
     {
-        if (!entry.world || entry.world->IsPaused())
-        {
-            continue;
-        }
+        if (!entry.world) { continue; }
+
+        if (entry.system->GetUpdatePhase() != phase) { continue; }
+
+        if (entry.world->IsPaused() && phase != SystemUpdatePhase::RenderPrep) { continue; }
 
         entry.system->Tick(*entry.world, dt);
     }

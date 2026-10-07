@@ -20,4 +20,9 @@ public:
 
         commandRecorder->DrawFromCamera(activeCamera->_CBufferIndex);
     }
+    
+    SystemUpdatePhase GetUpdatePhase() const override
+    {
+        return SystemUpdatePhase::RenderPrep;
+    }
 };

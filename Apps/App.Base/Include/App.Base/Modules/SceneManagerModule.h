@@ -11,12 +11,13 @@
 #include "Common/Module.h"
 #include "Common/ConsoleVariables.h"
 
+#include "Engine.Core/System.h"
 #include "Engine.Core/ECS/Event.h"
 #include "App.Base/ECS/World.h"
 #include "App.Base/ECS/AppConfig.h"
 
 class World;
-class System;
+class PhysicsModule;
 
 class SceneManagerModule final : public Module
 {
@@ -70,7 +71,7 @@ protected:
     bool ShouldRender() override;
 
 private:
-    void Tick(float dt);
+    void TickPhase(SystemUpdatePhase phase, float dt);
 
     bool LoadConfiguredWorld(
         const SceneWorldConfig& sceneWorldConfig,
@@ -92,6 +93,7 @@ private:
 
 private:
     GameTimer* _timer;
+    std::shared_ptr<PhysicsModule> _physics;
     std::vector<std::unique_ptr<World>> _worldVector;
     std::vector<SystemEntry> _systemVector;
 };
