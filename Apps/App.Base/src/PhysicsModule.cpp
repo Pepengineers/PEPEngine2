@@ -5,6 +5,7 @@
 
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Engine.Core/BenchmarkEngine.h"
+#include "Common/Logger.h"
 
 PhysicsModule::PhysicsModule(GameTimer* gt) : _gt(gt)
 {
@@ -60,7 +61,6 @@ bool PhysicsModule::TryGetBodyTransform(PhysicsBodyHandle handle, DirectX::Simpl
 
 void PhysicsModule::OnUpdate()
 {
-    Tick(_gt->DeltaTime());
 }
 
 void PhysicsModule::OnRender()
@@ -104,6 +104,16 @@ void PhysicsModule::TryCreateBody(World& world, Entity entity)
     desc.MotionType = rigidBody.MotionType;
     
     rigidBody.Body = CreateBoxBody(desc);
+    
+    // TODO remove later
+    if (rigidBody.Body.IsValid())   
+    {
+        Logger::Info("Created physics body: entity={}, handle={}", entity, rigidBody.Body.Value);
+    }
+    else
+    {
+        Logger::Error("Failed to create physics body for entity={}", entity);
+    }
 }
 
 void PhysicsModule::TryDestroyBody(World& world, Entity entity)
