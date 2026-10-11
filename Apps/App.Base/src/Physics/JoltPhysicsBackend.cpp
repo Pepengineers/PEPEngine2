@@ -177,8 +177,8 @@ void JoltPhysicsBackend::Initialize()
 
     constexpr uint32_t MaxBodies = 1024;
     constexpr uint32_t NumBodyMutexes = 0;
-    constexpr uint32_t MaxBodyPairs = 1024;
-    constexpr uint32_t MaxContactConstraints = 1024;
+    constexpr uint32_t MaxBodyPairs = 16384;
+    constexpr uint32_t MaxContactConstraints = 16384;
 
     _physicsSystem = std::make_unique<JPH::PhysicsSystem>();
 
