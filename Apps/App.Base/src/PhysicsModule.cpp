@@ -102,7 +102,7 @@ void PhysicsModule::TryDestroyBody(World& world, Entity entity)
     auto& ecs = world.GetECS();
     if (!ecs.Has<RigidBodyComponent>(entity)) { return; }
     auto& rigidBody = ecs.Get<RigidBodyComponent>(entity);
-    if (rigidBody.Body.IsValid()) { return; }
+    if (!rigidBody.Body.IsValid()) { return; }
     DestroyBody(rigidBody.Body);
     rigidBody.Body = {};
 }
