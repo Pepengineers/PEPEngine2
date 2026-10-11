@@ -8,6 +8,7 @@
 #include "App.Base/Systems/GPUDataUpdateSystem.h"
 #include "App.Base/Systems/LookAtTargetSystem.h"
 #include "App.Base/Systems/SplineFollowSystem.h"
+#include "App.Base/Systems/PhysicsSystem.h"
 #include "Common/Logger.h"
 #include "Engine.Core/System.h"
 
@@ -215,6 +216,12 @@ bool SceneManagerModule::AddSystemByName(
         AddSystem<LookAtTargetSystem>(world, priority);
         return true;
     }
+    
+    if (systemConfig.Name == "PhysicsSystem")
+    {
+        AddSystem<PhysicsSystem>(world, priority, *_physics);
+        return true;
+    }
 
     if (systemConfig.Name == "GPUDataUpdateSystem")
     {
@@ -320,6 +327,7 @@ void SceneManagerModule::OnUpdate()
 
     _physics->Update();
 
+    TickPhase(SystemUpdatePhase::FixedPostPhysics, dt);
     TickPhase(SystemUpdatePhase::RenderPrep, dt);
 }
 
