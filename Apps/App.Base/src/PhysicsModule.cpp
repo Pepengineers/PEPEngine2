@@ -3,6 +3,9 @@
 #include "App.Base/ECS/World.h"
 #include "App.Base/Physics/JoltPhysicsBackend.h"
 
+#include "App.Base/Modules/SceneManagerModule.h"
+#include "Engine.Core/BenchmarkEngine.h"
+
 PhysicsModule::PhysicsModule(GameTimer* gt) : _gt(gt)
 {
 }
@@ -15,10 +18,14 @@ void PhysicsModule::Initialize()
 {
     _cpuPhysics = std::make_unique<JoltPhysicsBackend>();
     _cpuPhysics->Initialize();
+    
+    SubscribeToSceneManager();
 }
 
 void PhysicsModule::Uninitialize()
 {
+    UnsubscribeFromSceneManager();
+    
     if (_cpuPhysics)
     {
         _cpuPhysics->Uninitialize();
@@ -105,4 +112,122 @@ void PhysicsModule::TryDestroyBody(World& world, Entity entity)
     if (!rigidBody.Body.IsValid()) { return; }
     DestroyBody(rigidBody.Body);
     rigidBody.Body = {};
+}
+
+void PhysicsModule::SubscribeToSceneManager()
+{
+    auto sceneManager = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
+    if (!sceneManager) { return; }
+    
+    if (_worldCreatedListener != 0 || _worldDestroyedListener != 0) { return; }
+    
+    _worldCreatedListener = sceneManager->OnWorldCreated.AddListener([this](World& world)
+    {
+       SubscribeToWorld(world); 
+    });
+    
+    _worldDestroyedListener = sceneManager->OnWorldDestroyed.AddListener([this](World& world)
+    {
+       UnsubscribeFromWorld(world); 
+    });
+    
+    for (size_t i = 0; i < sceneManager->GetWorldCount(); ++i)
+    {
+        if (World* world = sceneManager->GetWorld(i))
+        {
+            SubscribeToWorld(*world);
+        }
+    }
+}
+
+void PhysicsModule::UnsubscribeFromSceneManager()
+{
+    auto sceneManager = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
+
+    if (sceneManager)
+    {
+        if (_worldCreatedListener != 0)
+        {
+            sceneManager->OnWorldCreated.RemoveListener(_worldCreatedListener);
+        }
+
+        if (_worldDestroyedListener != 0)
+        {
+            sceneManager->OnWorldDestroyed.RemoveListener(_worldDestroyedListener);
+        }
+
+        for (size_t i = 0; i < sceneManager->GetWorldCount(); ++i)
+        {
+            if (World* world = sceneManager->GetWorld(i))
+            {
+                UnsubscribeFromWorld(*world);
+            }
+        }
+    }
+
+    _worldCreatedListener = 0;
+    _worldDestroyedListener = 0;
+    _worldSubscriptions.clear();
+}
+
+void PhysicsModule::SubscribeToWorld(World& world)
+{
+    if (_worldSubscriptions.find(&world) != _worldSubscriptions.end()) { return; }
+    
+    auto& ecs = world.GetECS();
+    
+    auto& rigidBodyPool = ecs.GetPool<RigidBodyComponent>();
+    auto& colliderPool = ecs.GetPool<BoxColliderComponent>();
+    
+    WorldPhysicsSubscriptions subscriptions;
+    
+    auto onCreated = [this, &world](Entity entity, auto&)
+    {
+        TryCreateBody(world, entity);
+    };
+    
+    auto onDestroyed = [this, &world](Entity entity, auto&)
+    {
+        TryDestroyBody(world, entity);
+    };
+    
+    subscriptions.RigidBodyCreated = rigidBodyPool.OnComponentCreated.AddListener(onCreated);
+    subscriptions.RigidBodyDestroyed = rigidBodyPool.OnComponentDestroyed.AddListener(onDestroyed);
+    
+    subscriptions.ColliderCreated = colliderPool.OnComponentCreated.AddListener(onCreated);
+    subscriptions.ColliderDestroyed = colliderPool.OnComponentDestroyed.AddListener(onDestroyed);
+    
+    _worldSubscriptions.emplace(&world, subscriptions);
+    
+    // TODO tmp
+    ecs.ForEach<RigidBodyComponent>([this, &world](Entity entity, RigidBodyComponent&)
+    {
+       TryCreateBody(world, entity); 
+    });
+}
+
+void PhysicsModule::UnsubscribeFromWorld(World& world)
+{
+    auto it = _worldSubscriptions.find(&world);
+    if (it == _worldSubscriptions.end()) { return; }
+    
+    auto& ecs = world.GetECS();
+    
+    ecs.ForEach<RigidBodyComponent>([this, &world](Entity entity, RigidBodyComponent&)
+    {
+        TryDestroyBody(world, entity);
+    });
+    
+    const auto& subscriptions = it->second;
+
+    auto& rigidBodyPool = ecs.GetPool<RigidBodyComponent>();
+    auto& colliderPool = ecs.GetPool<BoxColliderComponent>();
+    
+    rigidBodyPool.OnComponentCreated.RemoveListener(subscriptions.RigidBodyCreated);
+    rigidBodyPool.OnComponentDestroyed.RemoveListener(subscriptions.RigidBodyDestroyed);
+    
+    colliderPool.OnComponentCreated.RemoveListener(subscriptions.ColliderCreated);
+    colliderPool.OnComponentDestroyed.RemoveListener(subscriptions.ColliderDestroyed);
+    
+    _worldSubscriptions.erase(it);
 }

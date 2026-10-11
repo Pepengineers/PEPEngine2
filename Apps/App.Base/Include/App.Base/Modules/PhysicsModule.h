@@ -1,5 +1,7 @@
 #pragma once
 
+#define NOMINMAX
+
 #include <memory>
 
 #include "Common/GameTimer.h"
@@ -7,7 +9,11 @@
 #include "Engine.Core/ECS/Entity.h"
 #include "App.Base/Physics/PhysicsTypes.h"
 
-class  World;
+#include <unordered_map>
+#include "Engine.Core/ECS/Event.h"
+
+class World;
+class SceneManagerModule;
 
 class JoltPhysicsBackend;
 
@@ -38,6 +44,26 @@ private:
     
     void TryCreateBody(World& world, Entity entity);
     void TryDestroyBody(World& world, Entity entity);
+    
+    struct WorldPhysicsSubscriptions
+    {
+        ListenerHandle RigidBodyCreated = 0;
+        ListenerHandle RigidBodyDestroyed = 0;
+
+        ListenerHandle ColliderCreated = 0;
+        ListenerHandle ColliderDestroyed = 0;
+    };
+    
+    void SubscribeToSceneManager();
+    void UnsubscribeFromSceneManager();
+    
+    void SubscribeToWorld(World& world);
+    void UnsubscribeFromWorld(World& world);
+    
+    ListenerHandle _worldCreatedListener = 0;
+    ListenerHandle _worldDestroyedListener = 0;
+    
+    std::unordered_map<World*, WorldPhysicsSubscriptions> _worldSubscriptions;
     
     GameTimer* _gt;
     std::unique_ptr<JoltPhysicsBackend> _cpuPhysics;
