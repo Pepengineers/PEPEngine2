@@ -17,6 +17,7 @@
 // test
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Body/BodyLock.h>
 
 #include <Windows.h>
 
@@ -305,6 +306,34 @@ void JoltPhysicsBackend::DestroyBody(PhysicsBodyHandle handle)
     
     bodyInterface.RemoveBody(bodID);
     bodyInterface.DestroyBody(bodID);
+}
+
+bool JoltPhysicsBackend::TryGetBodyTransform(PhysicsBodyHandle handle, DirectX::SimpleMath::Vector3& outPosition,
+    DirectX::SimpleMath::Quaternion& outRotation) const
+{
+    if (!_bInitialized || !_physicsSystem || !handle.IsValid()) { return false; }
+    
+    const JPH::BodyID bodID(handle.Value);
+    JPH::BodyLockRead lock(_physicsSystem->GetBodyLockInterface(), bodID);
+    
+    if (!lock.Succeeded()) { return false; }
+    
+    const JPH::Body& body = lock.GetBody();
+    const JPH::RVec3 position = body.GetPosition();
+    const JPH::Quat rotation = body.GetRotation();
+    
+    outPosition = DirectX::SimpleMath::Vector3(
+        static_cast<float>(position.GetX()),
+        static_cast<float>(position.GetY()),
+        static_cast<float>(position.GetZ()));
+    
+    outRotation = DirectX::SimpleMath::Quaternion(
+       rotation.GetX(),
+       rotation.GetY(),
+       rotation.GetZ(),
+       rotation.GetW());
+    
+    return true;
 }
 
 // test

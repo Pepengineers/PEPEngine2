@@ -32,6 +32,8 @@ public:
     // destroy bodies
     void DestroyBody(PhysicsBodyHandle handle);
     
+    bool TryGetBodyTransform(PhysicsBodyHandle handle, DirectX::SimpleMath::Vector3& outPosition, DirectX::SimpleMath::Quaternion& outRotation) const;
+    
 protected:
     void OnUpdate() override;
     void OnRender() override;

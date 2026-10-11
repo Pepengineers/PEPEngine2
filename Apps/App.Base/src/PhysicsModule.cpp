@@ -45,6 +45,13 @@ void PhysicsModule::DestroyBody(PhysicsBodyHandle handle)
     _cpuPhysics->DestroyBody(handle);
 }
 
+bool PhysicsModule::TryGetBodyTransform(PhysicsBodyHandle handle, DirectX::SimpleMath::Vector3& outPosition,
+    DirectX::SimpleMath::Quaternion& outRotation) const
+{
+    if (!_cpuPhysics) { return false; }
+    return _cpuPhysics->TryGetBodyTransform(handle, outPosition, outRotation);
+}
+
 void PhysicsModule::OnUpdate()
 {
     Tick(_gt->DeltaTime());
