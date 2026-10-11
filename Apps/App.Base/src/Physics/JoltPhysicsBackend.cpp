@@ -14,7 +14,6 @@
 #include <Jolt/Physics/PhysicsSystem.h>
 
 #include "Common/Logger.h"
-// test
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Body/BodyLock.h>
@@ -186,22 +185,11 @@ void JoltPhysicsBackend::Initialize()
     _physicsSystem->Init(MaxBodies, NumBodyMutexes, MaxBodyPairs, MaxContactConstraints, *_broadPhaseLayerInterface, *_objectVsBroadPhaseLayerFilter, *_objectLayerPairFilter);
     _bInitialized = true;
     Logger::Info("Jolt physics backend initialized");
-
-    // test
-    CreateFloor();
-    CreateBox();
 }
 
 void JoltPhysicsBackend::Uninitialize()
 {
     if (!_bInitialized) { return; }
-
-    // test
-    DestroyBody(_boxBody);
-    _boxBody = {};
-
-    DestroyBody(_floorBody);
-    _floorBody = {};
 
     _physicsSystem.reset(); // tmp. its better to RemoveBody -> DestroyBody
     _objectLayerPairFilter.reset();
@@ -236,8 +224,6 @@ void JoltPhysicsBackend::Step(float dt)
     constexpr int CollisionSteps = 1;
     _physicsSystem->Update(dt, CollisionSteps, _tempAllocator.get(), _jobSystem.get());
     
-    // test
-    ReadBoxPosition();
 }
 
 PhysicsBodyHandle JoltPhysicsBackend::CreateBoxBody(const PhysicsBoxBodyDesc& desc)
@@ -334,59 +320,4 @@ bool JoltPhysicsBackend::TryGetBodyTransform(PhysicsBodyHandle handle, DirectX::
        rotation.GetW());
     
     return true;
-}
-
-// test
-void JoltPhysicsBackend::CreateFloor()
-{
-    PhysicsBoxBodyDesc desc;
-    desc.HalfExtent = DirectX::SimpleMath::Vector3{ 20.0f, 1.0f, 20.0f };
-    desc.Position = DirectX::SimpleMath::Vector3{ 0.0f, -1.0f, 0.0f };
-    desc.MotionType = PhysicsMotionType::Static;
-    
-    _floorBody = CreateBoxBody(desc);
-}
-
-void JoltPhysicsBackend::CreateBox()
-{
-    PhysicsBoxBodyDesc desc;
-    desc.HalfExtent = DirectX::SimpleMath::Vector3{ 1.0f, 1.0f, 1.0f };
-    desc.Position = DirectX::SimpleMath::Vector3{ 0.0f, 20.0f, 0.0f };
-    desc.MotionType = PhysicsMotionType::Dynamic;
-
-    _boxBody = CreateBoxBody(desc);
-}
-
-void JoltPhysicsBackend::ReadBoxPosition()
-{
-    if (!_boxBody.IsValid())
-    {
-        return;
-    }
-
-    const JPH::BodyID boxBodyID(_boxBody.Value);
-    
-    JPH::BodyInterface& bodyInterface = _physicsSystem->GetBodyInterface();
-    
-    JPH::RVec3 boxPosition = bodyInterface.GetPosition(boxBodyID);
-    JPH::Vec3 outLinearVelocity;
-    JPH::Vec3 outRotationalVelocity;
-    bodyInterface.GetLinearAndAngularVelocity(boxBodyID, outLinearVelocity, outRotationalVelocity);
-    
-    Logger::Info(
-        "Box:\n"
-        "x={}, y={}, z={}\n"
-        "vx={}, vy={}, vz={}\n"
-        "ax={}, ay={}, az={}\n",
-        static_cast<float>(boxPosition.GetX()),
-        static_cast<float>(boxPosition.GetY()),
-        static_cast<float>(boxPosition.GetZ()),
-        static_cast<float>(outLinearVelocity.GetX()),
-        static_cast<float>(outLinearVelocity.GetY()),
-        static_cast<float>(outLinearVelocity.GetZ()),
-        static_cast<float>(outRotationalVelocity.GetX()),
-        static_cast<float>(outRotationalVelocity.GetY()),
-        static_cast<float>(outRotationalVelocity.GetZ())
-        );
-    
 }

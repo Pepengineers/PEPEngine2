@@ -49,13 +49,6 @@ private:
     std::unique_ptr<BroadPhaseLayerInterfaceImpl> _broadPhaseLayerInterface;
     std::unique_ptr<ObjectVsBroadPhaseLayerFilterImpl> _objectVsBroadPhaseLayerFilter;
     std::unique_ptr<ObjectLayerPairFilterImpl> _objectLayerPairFilter;
-
-    // test
-    void CreateFloor();
-    void CreateBox();
-    void ReadBoxPosition();
-    PhysicsBodyHandle _floorBody;
-    PhysicsBodyHandle _boxBody;
 };
 
 
