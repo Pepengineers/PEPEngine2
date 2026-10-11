@@ -1,0 +1,6 @@
+Scene:
+  Name: PhysicsSandbox
+
+  Worlds:
+    - Name: PhysicsSandboxWorld
+      Path: Worlds/PhysicsSandbox.world
