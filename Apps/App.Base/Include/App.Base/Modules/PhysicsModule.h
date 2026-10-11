@@ -26,6 +26,8 @@ public:
     void Initialize() override;
     void Uninitialize() override;
     
+    void Step(float dt);
+    
     // create bodies
     PhysicsBodyHandle CreateBoxBody(const PhysicsBoxBodyDesc& desc);
     
@@ -42,8 +44,6 @@ protected:
     bool ShouldRender() override;
 
 private:
-    void Tick(float dt);
-    
     void TryCreateBody(World& world, Entity entity);
     void TryDestroyBody(World& world, Entity entity);
     
@@ -69,6 +69,4 @@ private:
     
     GameTimer* _gt;
     std::unique_ptr<JoltPhysicsBackend> _cpuPhysics;
-    float _accumulatedTime = 0.0f;
-    static constexpr float FixedDeltaTime = 1.0f / 60.0f;
 };

@@ -33,6 +33,12 @@ void PhysicsModule::Uninitialize()
     }
 }
 
+void PhysicsModule::Step(float dt)
+{
+    if (!_cpuPhysics) { return; }
+    _cpuPhysics->Step(dt);
+}
+
 PhysicsBodyHandle PhysicsModule::CreateBoxBody(const PhysicsBoxBodyDesc& desc)
 {
     if (!_cpuPhysics) { return {}; }
@@ -63,23 +69,12 @@ void PhysicsModule::OnRender()
 
 bool PhysicsModule::ShouldTick()
 {
-    return true;
+    return false;
 }
 
 bool PhysicsModule::ShouldRender()
 {
     return false;
-}
-
-void PhysicsModule::Tick(float dt)
-{
-    _accumulatedTime += dt;
-
-    while (_accumulatedTime >= FixedDeltaTime)
-    {
-        _cpuPhysics->Step(FixedDeltaTime);
-        _accumulatedTime -= FixedDeltaTime;
-    }
 }
 
 // TODO make generalized, not only for box bodies

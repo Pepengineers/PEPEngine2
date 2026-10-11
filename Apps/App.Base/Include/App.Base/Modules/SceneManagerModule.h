@@ -93,6 +93,8 @@ private:
 
 private:
     GameTimer* _timer;
+    float _accumulatedTime = 0.0f;
+    static constexpr float FixedDeltaTime = 1.0f / 60.0f;
     std::shared_ptr<PhysicsModule> _physics;
     std::vector<std::unique_ptr<World>> _worldVector;
     std::vector<SystemEntry> _systemVector;

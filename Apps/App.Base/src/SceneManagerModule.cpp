@@ -53,7 +53,8 @@ void SceneManagerModule::Uninitialize()
             OnWorldDestroyed.Broadcast(*world);
         }
     }
-
+    
+    _accumulatedTime = 0.0f;
     _worldVector.clear();
 }
 
@@ -325,9 +326,16 @@ void SceneManagerModule::OnUpdate()
 
     TickPhase(SystemUpdatePhase::FrameUpdate, dt);
 
-    _physics->Update();
+    _accumulatedTime += dt;
 
-    TickPhase(SystemUpdatePhase::FixedPostPhysics, dt);
+    while (_accumulatedTime >= FixedDeltaTime)
+    {
+        TickPhase(SystemUpdatePhase::FixedPrePhysics, FixedDeltaTime);
+        _physics->Step(FixedDeltaTime);
+        TickPhase(SystemUpdatePhase::FixedPostPhysics, FixedDeltaTime);
+        _accumulatedTime -= FixedDeltaTime;
+    }
+
     TickPhase(SystemUpdatePhase::RenderPrep, dt);
 }
 
