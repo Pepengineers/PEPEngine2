@@ -24,6 +24,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <cmath>
 #include <Windows.h>
 
 namespace
@@ -1350,6 +1351,67 @@ static bool ParseTransform(WorldECS::EntityHandle& entity, ryml::NodeRef node)
     return true;
 }
 
+static bool ParseRigidBody(WorldECS::EntityHandle& entity, ryml::NodeRef node)
+{   
+    RigidBodyComponent component;
+
+    std::string motionType = "Static";
+
+    if (node.has_child("MotionType"))
+    {
+        node["MotionType"] >> motionType;
+    }
+
+    if (motionType == "Static")
+    {
+        component.MotionType = PhysicsMotionType::Static;
+    }
+    else if (motionType == "Dynamic")
+    {
+        component.MotionType = PhysicsMotionType::Dynamic;
+    }
+    else if (motionType == "Kinematic")
+    {
+        component.MotionType = PhysicsMotionType::Kinematic;
+    }
+    else
+    {
+        Logger::Error("Unknown physics motion type: {}", motionType);
+        return false;
+    }
+
+    entity.AddComponent<RigidBodyComponent>(component);
+    return true;
+}
+
+static bool ParseBoxCollider(
+    WorldECS::EntityHandle& entity,
+    ryml::NodeRef node)
+{
+    BoxColliderComponent component;
+
+    if (node.has_child("HalfExtent"))
+    {
+        component.HalfExtent = ReadVector3(node["HalfExtent"]);
+    }
+
+    const auto& extent = component.HalfExtent;
+
+    if (!std::isfinite(extent.x) ||
+        !std::isfinite(extent.y) ||
+        !std::isfinite(extent.z) ||
+        extent.x <= 0.0f ||
+        extent.y <= 0.0f ||
+        extent.z <= 0.0f)
+    {
+        Logger::Error("BoxCollider requires finite positive half extents");
+        return false;
+    }
+
+    entity.AddComponent<BoxColliderComponent>(component);
+    return true;
+}
+
 static bool ParseStaticMeshRender(
     WorldLoadContext& context,
     WorldECS::EntityHandle& entity,
@@ -1462,6 +1524,25 @@ static bool LoadEntityComponentsWithoutRefs(
             {
                 return false;
             }
+        }
+        
+        const bool hasRigidBody = components.has_child("RigidBody");
+        const bool hasBoxCollider = components.has_child("BoxCollider");
+        if ((hasRigidBody || hasBoxCollider) &&
+            !entity.HasComponent<TransformComponent>())
+        {
+            Logger::Error("Physics entity '{}' need Transform to create Physics body", id);
+            return false;
+        }
+
+        if (hasRigidBody)
+        {
+            if (!ParseRigidBody(entity, components["RigidBody"])) { return false; }
+        }
+
+        if (hasBoxCollider)
+        {
+            if (!ParseBoxCollider(entity, components["BoxCollider"])) { return false; }
         }
 
         if (components.has_child("Camera"))
