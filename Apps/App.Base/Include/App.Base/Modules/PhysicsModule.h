@@ -4,7 +4,10 @@
 
 #include "Common/GameTimer.h"
 #include "Common/Module.h"
+#include "Engine.Core/ECS/Entity.h"
 #include "App.Base/Physics/PhysicsTypes.h"
+
+class  World;
 
 class JoltPhysicsBackend;
 
@@ -32,6 +35,9 @@ protected:
 
 private:
     void Tick(float dt);
+    
+    void TryCreateBody(World& world, Entity entity);
+    void TryDestroyBody(World& world, Entity entity);
     
     GameTimer* _gt;
     std::unique_ptr<JoltPhysicsBackend> _cpuPhysics;

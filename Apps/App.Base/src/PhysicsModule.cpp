@@ -1,4 +1,6 @@
 #include "App.Base/Modules/PhysicsModule.h"
+
+#include "App.Base/ECS/World.h"
 #include "App.Base/Physics/JoltPhysicsBackend.h"
 
 PhysicsModule::PhysicsModule(GameTimer* gt) : _gt(gt)
@@ -64,4 +66,43 @@ void PhysicsModule::Tick(float dt)
         _cpuPhysics->Step(FixedDeltaTime);
         _accumulatedTime -= FixedDeltaTime;
     }
+}
+
+// TODO make generalized, not only for box bodies
+void PhysicsModule::TryCreateBody(World& world, Entity entity)
+{
+    auto& ecs = world.GetECS();
+    
+    if (!ecs.Has<RigidBodyComponent>(entity) || !ecs.Has<BoxColliderComponent>(entity) || !ecs.Has<TransformComponent>(entity)) { return; }
+    
+    auto& rigidBody = ecs.Get<RigidBodyComponent>(entity);
+    auto& transform = ecs.Get<TransformComponent>(entity);
+    auto& collider = ecs.Get<BoxColliderComponent>(entity);
+
+    if (rigidBody.Body.IsValid()) { return; }
+    
+    PhysicsBoxBodyDesc desc;
+    desc.Position = transform.Location;
+    // TODO make quats everywhere in engine
+    desc.Rotation = DirectX::SimpleMath::Quaternion::CreateFromYawPitchRoll(
+        DirectX::XMConvertToRadians(transform.Rotation.y),
+        DirectX::XMConvertToRadians(transform.Rotation.x),
+        DirectX::XMConvertToRadians(transform.Rotation.z));
+    desc.HalfExtent = DirectX::SimpleMath::Vector3(
+        collider.HalfExtent.x * transform.Scale.x,
+        collider.HalfExtent.y * transform.Scale.y,
+        collider.HalfExtent.z * transform.Scale.z);
+    desc.MotionType = rigidBody.MotionType;
+    
+    rigidBody.Body = CreateBoxBody(desc);
+}
+
+void PhysicsModule::TryDestroyBody(World& world, Entity entity)
+{
+    auto& ecs = world.GetECS();
+    if (!ecs.Has<RigidBodyComponent>(entity)) { return; }
+    auto& rigidBody = ecs.Get<RigidBodyComponent>(entity);
+    if (rigidBody.Body.IsValid()) { return; }
+    DestroyBody(rigidBody.Body);
+    rigidBody.Body = {};
 }
