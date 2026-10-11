@@ -75,6 +75,10 @@ public:
                 auto& GPUData = renderModule->GetTransformGPUData(entity);
                 if (transform.DirtyFlag)
                 {
+                    if (ecs.Has<StaticMeshRenderComponent>(entity))
+                    {
+                        ecs.Get<StaticMeshRenderComponent>(entity).DirtyFlag = true;
+                    }
                     transform.DirtyFlag = false;
                     GPUData.NumFramesDirty = numFrames;
                 }
