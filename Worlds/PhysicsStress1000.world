@@ -1,7 +1,8 @@
-# Physics stress test: 1000 dynamic unit cubes and 16 static obstacles.
+# Physics stress test: 1000 dynamic cubes, 16 static obstacles and 6 kinematic cubes.
 # Cascade: steep ramp -> corner-up bumpers -> opposite ramp -> repeat -> catch floor.
 # Cubes start in a separated 10 x 10 x 10 grid; all meshes share two resources.
-# 1016 scene bodies + 2 legacy backend test bodies = 1018 / 1024 body capacity.
+# 1022 scene bodies / 1024 body capacity.
+# Six floor lanes traverse a two-point closed spline: 3 seconds each way.
 # Set backend MaxBodyPairs and MaxContactConstraints to 16384 for this workload.
 # A 12-second headless Jolt run overflowed the current 1024 caches; 16384 passed.
 World:
@@ -10,6 +11,10 @@ World:
   Systems:
     - Name: PhysicsSystem
       Priority: 0
+    - Name: FixedSplineFollowSystem
+      Priority: 10
+    - Name: KinematicBodySystem
+      Priority: 100
     - Name: GPUDataUpdateSystem
       Priority: 101
     - Name: RenderSubmitSystem
@@ -266,6 +271,212 @@ World:
           HalfExtent: [0.5, 0.5, 0.5]
         StaticMeshRender:
           Mesh: StressCubeMesh
+
+    # Lane centers split CatchFloor's 80-unit width into six equal strips.
+    # Zero tangents ease to rest at each end before reversing direction.
+    - Id: FloorKinematicPath01
+      Components:
+        SplineCurve:
+          Loop: true
+          Points:
+            - Position: [66, -39.5, -33.333333]
+              ArriveTangent: [0, 0, 0]
+              LeaveTangent: [0, 0, 0]
+            - Position: [150, -39.5, -33.333333]
+              ArriveTangent: [0, 0, 0]
+              LeaveTangent: [0, 0, 0]
+
+    - Id: FloorKinematicCube01
+      Components:
+        Name:
+          Value: FloorKinematicCube01
+        Transform:
+          Location: [66, -39.5, -33.333333]
+          Rotation: [0, 0, 0]
+          Scale: [6, 6, 6]
+        RigidBody:
+          MotionType: Kinematic
+        BoxCollider:
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressCubeMesh
+        SplineFollow:
+          Curve: FloorKinematicPath01
+          Duration: 6.0
+          Loop: true
+          Playing: true
+          Time: 0.0
+          UpdateMode: Fixed
+
+    - Id: FloorKinematicPath02
+      Components:
+        SplineCurve:
+          Loop: true
+          Points:
+            - Position: [150, -39.5, -20]
+              ArriveTangent: [0, 0, 0]
+              LeaveTangent: [0, 0, 0]
+            - Position: [66, -39.5, -20]
+              ArriveTangent: [0, 0, 0]
+              LeaveTangent: [0, 0, 0]
+
+    - Id: FloorKinematicCube02
+      Components:
+        Name:
+          Value: FloorKinematicCube02
+        Transform:
+          Location: [150, -39.5, -20]
+          Rotation: [0, 0, 0]
+          Scale: [6, 6, 6]
+        RigidBody:
+          MotionType: Kinematic
+        BoxCollider:
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressCubeMesh
+        SplineFollow:
+          Curve: FloorKinematicPath02
+          Duration: 6.0
+          Loop: true
+          Playing: true
+          Time: 0.0
+          UpdateMode: Fixed
+
+    - Id: FloorKinematicPath03
+      Components:
+        SplineCurve:
+          Loop: true
+          Points:
+            - Position: [66, -39.5, -6.666667]
+              ArriveTangent: [0, 0, 0]
+              LeaveTangent: [0, 0, 0]
+            - Position: [150, -39.5, -6.666667]
+              ArriveTangent: [0, 0, 0]
+              LeaveTangent: [0, 0, 0]
+
+    - Id: FloorKinematicCube03
+      Components:
+        Name:
+          Value: FloorKinematicCube03
+        Transform:
+          Location: [66, -39.5, -6.666667]
+          Rotation: [0, 0, 0]
+          Scale: [6, 6, 6]
+        RigidBody:
+          MotionType: Kinematic
+        BoxCollider:
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressCubeMesh
+        SplineFollow:
+          Curve: FloorKinematicPath03
+          Duration: 6.0
+          Loop: true
+          Playing: true
+          Time: 0.0
+          UpdateMode: Fixed
+
+    - Id: FloorKinematicPath04
+      Components:
+        SplineCurve:
+          Loop: true
+          Points:
+            - Position: [150, -39.5, 6.666667]
+              ArriveTangent: [0, 0, 0]
+              LeaveTangent: [0, 0, 0]
+            - Position: [66, -39.5, 6.666667]
+              ArriveTangent: [0, 0, 0]
+              LeaveTangent: [0, 0, 0]
+
+    - Id: FloorKinematicCube04
+      Components:
+        Name:
+          Value: FloorKinematicCube04
+        Transform:
+          Location: [150, -39.5, 6.666667]
+          Rotation: [0, 0, 0]
+          Scale: [6, 6, 6]
+        RigidBody:
+          MotionType: Kinematic
+        BoxCollider:
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressCubeMesh
+        SplineFollow:
+          Curve: FloorKinematicPath04
+          Duration: 6.0
+          Loop: true
+          Playing: true
+          Time: 0.0
+          UpdateMode: Fixed
+
+    - Id: FloorKinematicPath05
+      Components:
+        SplineCurve:
+          Loop: true
+          Points:
+            - Position: [66, -39.5, 20]
+              ArriveTangent: [0, 0, 0]
+              LeaveTangent: [0, 0, 0]
+            - Position: [150, -39.5, 20]
+              ArriveTangent: [0, 0, 0]
+              LeaveTangent: [0, 0, 0]
+
+    - Id: FloorKinematicCube05
+      Components:
+        Name:
+          Value: FloorKinematicCube05
+        Transform:
+          Location: [66, -39.5, 20]
+          Rotation: [0, 0, 0]
+          Scale: [6, 6, 6]
+        RigidBody:
+          MotionType: Kinematic
+        BoxCollider:
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressCubeMesh
+        SplineFollow:
+          Curve: FloorKinematicPath05
+          Duration: 6.0
+          Loop: true
+          Playing: true
+          Time: 0.0
+          UpdateMode: Fixed
+
+    - Id: FloorKinematicPath06
+      Components:
+        SplineCurve:
+          Loop: true
+          Points:
+            - Position: [150, -39.5, 33.333333]
+              ArriveTangent: [0, 0, 0]
+              LeaveTangent: [0, 0, 0]
+            - Position: [66, -39.5, 33.333333]
+              ArriveTangent: [0, 0, 0]
+              LeaveTangent: [0, 0, 0]
+
+    - Id: FloorKinematicCube06
+      Components:
+        Name:
+          Value: FloorKinematicCube06
+        Transform:
+          Location: [150, -39.5, 33.333333]
+          Rotation: [0, 0, 0]
+          Scale: [6, 6, 6]
+        RigidBody:
+          MotionType: Kinematic
+        BoxCollider:
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressCubeMesh
+        SplineFollow:
+          Curve: FloorKinematicPath06
+          Duration: 6.0
+          Loop: true
+          Playing: true
+          Time: 0.0
+          UpdateMode: Fixed
 
     - Id: FallingCube0000
       Components:
