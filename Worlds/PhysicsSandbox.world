@@ -5,7 +5,7 @@ World:
   Name: PhysicsSandboxWorld
 
   Systems:
-    - Name: PhysicsSystem
+    - Name: DynamicBodyUpdateSystem
       Priority: 0
     - Name: GPUDataUpdateSystem
       Priority: 101

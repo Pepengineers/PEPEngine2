@@ -4,10 +4,10 @@
 #include "App.Base/ECS/World.h"
 #include "App.Base/Modules/PhysicsModule.h"
 
-class PhysicsSystem final : public System
+class DynamicBodyUpdateSystem final : public System
 {
 public:
-    explicit PhysicsSystem(PhysicsModule& physics)
+    explicit DynamicBodyUpdateSystem(PhysicsModule& physics)
         : _physics(physics)
     {
     }

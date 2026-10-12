@@ -8,7 +8,7 @@
 #include "App.Base/Systems/GPUDataUpdateSystem.h"
 #include "App.Base/Systems/LookAtTargetSystem.h"
 #include "App.Base/Systems/SplineFollowSystem.h"
-#include "App.Base/Systems/PhysicsSystem.h"
+#include "App.Base/Systems/DynamicBodyUpdateSystem.h"
 #include "Common/Logger.h"
 #include "Engine.Core/System.h"
 
@@ -21,7 +21,7 @@
 #include <exception>
 #include <string>
 
-#include "App.Base/Systems/KinematicBodySystem.h"
+#include "App.Base/Systems/KinematicBodyUpdateSystem.h"
 
 SceneManagerModule::SceneManagerModule(GameTimer* timer)
     : _timer(timer)
@@ -226,15 +226,15 @@ bool SceneManagerModule::AddSystemByName(
         return true;
     }
     
-    if (systemConfig.Name == "PhysicsSystem")
+    if (systemConfig.Name == "DynamicBodyUpdateSystem")
     {
-        AddSystem<PhysicsSystem>(world, priority, *_physics);
+        AddSystem<DynamicBodyUpdateSystem>(world, priority, *_physics);
         return true;
     }
     
-    if (systemConfig.Name == "KinematicBodySystem")
+    if (systemConfig.Name == "KinematicBodyUpdateSystem")
     {
-        AddSystem<KinematicBodySystem>(world, priority, *_physics);
+        AddSystem<KinematicBodyUpdateSystem>(world, priority, *_physics);
         return true;
     }
 

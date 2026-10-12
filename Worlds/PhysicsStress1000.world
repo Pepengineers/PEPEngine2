@@ -9,11 +9,11 @@ World:
   Name: PhysicsStress1000World
 
   Systems:
-    - Name: PhysicsSystem
+    - Name: DynamicBodyUpdateSystem
       Priority: 0
     - Name: FixedSplineFollowSystem
       Priority: 10
-    - Name: KinematicBodySystem
+    - Name: KinematicBodyUpdateSystem
       Priority: 100
     - Name: GPUDataUpdateSystem
       Priority: 101

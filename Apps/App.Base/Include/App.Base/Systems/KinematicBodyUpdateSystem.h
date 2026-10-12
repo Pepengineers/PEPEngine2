@@ -4,10 +4,10 @@
 #include "App.Base/ECS/World.h"
 #include "App.Base/Modules/PhysicsModule.h"
 
-class KinematicBodySystem final : public System
+class KinematicBodyUpdateSystem final : public System
 {
 public:
-    explicit KinematicBodySystem(PhysicsModule& physics)
+    explicit KinematicBodyUpdateSystem(PhysicsModule& physics)
         : _physics(physics)
     {
     }
