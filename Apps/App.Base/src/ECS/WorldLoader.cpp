@@ -1761,12 +1761,47 @@ static bool LoadEntityComponentsWithRefs(
                 node["Time"] >> time;
             }
 
+            SplineUpdateMode updateMode = SplineUpdateMode::Frame;
+            if (node.has_child("UpdateMode"))
+            {
+                std::string mode;
+                node["UpdateMode"] >> mode;
+
+                if (mode == "Fixed")
+                {
+                    updateMode = SplineUpdateMode::Fixed;
+                }
+                else if (mode != "Frame")
+                {
+                    Logger::Error("Unknown spline update mode: {}", mode);
+                    return false;
+                }
+            }
+
+            if (!std::isfinite(duration) || duration <= 0.0f || !std::isfinite(time) || time < 0.0f)
+            {
+                Logger::Error("Invalid spline timing for entity '{}'", id);
+                return false;
+            }
+
+            if (entity.HasComponent<RigidBodyComponent>())
+            {
+                const auto& rigidBody = entity.GetComponent<RigidBodyComponent>();
+
+                if (rigidBody.MotionType != PhysicsMotionType::Kinematic || updateMode != SplineUpdateMode::Fixed)
+                {
+                    Logger::Error("Spline movement of entity '{}' requires kinematic motion type and fixed update mode", id);
+                    return false;
+                }
+            }
+
             entity.AddComponent<SplineFollowComponent>(
                 curveEntity,
                 duration,
                 loop,
                 playing,
-                time
+                time,
+                updateMode
             );
         }
     }

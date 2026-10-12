@@ -214,6 +214,12 @@ bool SceneManagerModule::AddSystemByName(
         return true;
     }
 
+    if (systemConfig.Name == "FixedSplineFollowSystem")
+    {
+        AddSystem<SplineFollowSystem>(world, priority, SplineUpdateMode::Fixed);
+        return true;
+    }
+
     if (systemConfig.Name == "LookAtTargetSystem")
     {
         AddSystem<LookAtTargetSystem>(world, priority);
