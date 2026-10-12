@@ -59,6 +59,14 @@ bool PhysicsModule::TryGetBodyTransform(PhysicsBodyHandle handle, DirectX::Simpl
     return _cpuPhysics->TryGetBodyTransform(handle, outPosition, outRotation);
 }
 
+void PhysicsModule::MoveKinematicBody(PhysicsBodyHandle handle, const DirectX::SimpleMath::Vector3& targetPosition,
+    const DirectX::SimpleMath::Quaternion& targetRotation, float dt)
+{
+    if (!_cpuPhysics) { return; }
+    
+    _cpuPhysics->MoveKinematicBody(handle, targetPosition, targetRotation, dt);
+}
+
 void PhysicsModule::OnUpdate()
 {
 }

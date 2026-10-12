@@ -21,6 +21,8 @@
 #include <exception>
 #include <string>
 
+#include "App.Base/Systems/KinematicBodySystem.h"
+
 SceneManagerModule::SceneManagerModule(GameTimer* timer)
     : _timer(timer)
 {
@@ -221,6 +223,12 @@ bool SceneManagerModule::AddSystemByName(
     if (systemConfig.Name == "PhysicsSystem")
     {
         AddSystem<PhysicsSystem>(world, priority, *_physics);
+        return true;
+    }
+    
+    if (systemConfig.Name == "KinematicBodySystem")
+    {
+        AddSystem<KinematicBodySystem>(world, priority, *_physics);
         return true;
     }
 

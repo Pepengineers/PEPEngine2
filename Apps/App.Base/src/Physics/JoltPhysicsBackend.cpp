@@ -4,6 +4,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <thread>
+#include <cmath>
 
 #include <Jolt/Jolt.h>
 #include <Jolt/RegisterTypes.h>
@@ -12,11 +13,11 @@
 #include <Jolt/Core/TempAllocator.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
 #include <Jolt/Physics/PhysicsSystem.h>
-
-#include "Common/Logger.h"
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
 #include <Jolt/Physics/Body/BodyLock.h>
+
+#include "Common/Logger.h"
 
 #include <Windows.h>
 
@@ -320,4 +321,28 @@ bool JoltPhysicsBackend::TryGetBodyTransform(PhysicsBodyHandle handle, DirectX::
        rotation.GetW());
     
     return true;
+}
+
+void JoltPhysicsBackend::MoveKinematicBody(PhysicsBodyHandle handle, const DirectX::SimpleMath::Vector3& targetPosition,
+    const DirectX::SimpleMath::Quaternion& targetRotation, float dt)
+{
+    if (!_bInitialized || !_physicsSystem || !handle.IsValid() || !std::isfinite(dt)) { return; }
+    
+    const JPH::BodyID bodID(handle.Value);
+    auto& bodyInterface = _physicsSystem->GetBodyInterface();
+    
+    if (bodyInterface.GetMotionType(bodID) != JPH::EMotionType::Kinematic) { return; }
+    
+    bodyInterface.MoveKinematic(
+        bodID, 
+        JPH::RVec3(
+            targetPosition.x,
+            targetPosition.y,
+            targetPosition.z),
+        JPH::Quat(
+            targetRotation.x,
+            targetRotation.y,
+            targetRotation.z,
+            targetRotation.w), 
+        dt);
 }

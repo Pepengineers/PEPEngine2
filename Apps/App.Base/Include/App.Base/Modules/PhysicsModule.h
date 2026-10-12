@@ -35,7 +35,7 @@ public:
     void DestroyBody(PhysicsBodyHandle handle);
     
     bool TryGetBodyTransform(PhysicsBodyHandle handle, DirectX::SimpleMath::Vector3& outPosition, DirectX::SimpleMath::Quaternion& outRotation) const;
-    
+    void MoveKinematicBody(PhysicsBodyHandle handle, const DirectX::SimpleMath::Vector3& targetPosition, const DirectX::SimpleMath::Quaternion& targetRotation, float dt);
 protected:
     void OnUpdate() override;
     void OnRender() override;
