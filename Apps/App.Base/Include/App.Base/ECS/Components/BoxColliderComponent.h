@@ -8,6 +8,7 @@ enum class ColliderType : uint8_t
     Box
 };
 
+// deprecated
 struct BoxColliderComponent : ComponentTag
 {
     DirectX::SimpleMath::Vector3 HalfExtent{ 0.5f, 0.5f, 0.5f };

@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <directxtk/SimpleMath.h>
+#include <variant>
+#include "Engine.Core/ECS/Component.h"
 
 struct PhysicsBodyHandle
 {
@@ -20,6 +22,39 @@ enum class PhysicsMotionType : uint8_t
     Kinematic
 };
 
+struct BoxShapeDesc
+{
+    DirectX::SimpleMath::Vector3 HalfExtent{ 0.5f, 0.5f, 0.5f };
+};
+
+struct SphereShapeDesc
+{
+    float Radius = 0.5f;
+};
+
+struct CapsuleShapeDesc
+{
+    float Radius = 0.5f;
+    float HalfCylinderHeight = 0.5f;
+};
+
+struct CylinderShapeDesc
+{
+    float Radius = 0.5f;
+    float HalfHeight = 0.5f;
+};
+
+using PhysicsShapeDesc = std::variant<BoxShapeDesc, SphereShapeDesc, CapsuleShapeDesc, CylinderShapeDesc>;
+
+struct PhysicsBodyDesc
+{
+    PhysicsShapeDesc Shape = BoxShapeDesc{};
+    DirectX::SimpleMath::Vector3 Position{ 0.0f, 0.0f, 0.0f };
+    DirectX::SimpleMath::Quaternion Rotation{ 0.0f, 0.0f, 0.0f, 1.0f };
+    PhysicsMotionType MotionType = PhysicsMotionType::Static;
+};
+
+// deprecated
 struct PhysicsBoxBodyDesc
 {
     DirectX::SimpleMath::Vector3 HalfExtent{ 0.5f, 0.5f, 0.5f };
