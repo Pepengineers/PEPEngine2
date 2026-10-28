@@ -56,7 +56,7 @@ void GDX12SwapChain::CreateBuffers()
     for (UINT i = 0; i < _bufferCount; i++)
     {
         ComPtr<ID3D12Resource> backBuffer;
-        GetPresentationSwapChain()->GetBuffer(i, IID_PPV_ARGS(&backBuffer));
+        ThrowIfFailed(GetPresentationSwapChain()->GetBuffer(i, IID_PPV_ARGS(&backBuffer)));
         backBuffer = GDX12StreamlineSDK::Get().GetNativeResource(backBuffer);
 
         GDX12TextureDesc textureDesc;
@@ -91,11 +91,11 @@ void GDX12SwapChain::Resize(UINT width, UINT height)
     _buffers.clear();
 
     DXGI_SWAP_CHAIN_DESC desc;
-    GetPresentationSwapChain()->GetDesc(&desc);
+    ThrowIfFailed(GetPresentationSwapChain()->GetDesc(&desc));
 
-    GetPresentationSwapChain()->ResizeBuffers(
+    ThrowIfFailed(GetPresentationSwapChain()->ResizeBuffers(
         _bufferCount, _width, _height,
-        desc.BufferDesc.Format, desc.Flags);
+        desc.BufferDesc.Format, desc.Flags));
 
     CreateBuffers();
     _currentBufferIndex = GetPresentationSwapChain()->GetCurrentBackBufferIndex();
@@ -114,7 +114,7 @@ void GDX12SwapChain::Present()
 {
     UINT syncInterval = bVSyncEnabled ? 1 : 0;
     UINT presentFlags = bVSyncEnabled ? 0 : DXGI_PRESENT_ALLOW_TEARING;
-    GetPresentationSwapChain()->Present(syncInterval, presentFlags);
+    ThrowIfFailed(GetPresentationSwapChain()->Present(syncInterval, presentFlags));
     _currentBufferIndex = GetPresentationSwapChain()->GetCurrentBackBufferIndex();
 }
 
@@ -128,10 +128,6 @@ D3D12_RECT GDX12SwapChain::GetScissorRect()
     return _screenScissorRect;
 }
 
-GDX12Texture* GDX12SwapChain::GetTexture()
-{
-    return GetCurrentBuffer();
-}
 
 bool GDX12SwapChain::IsInitialized()
 {

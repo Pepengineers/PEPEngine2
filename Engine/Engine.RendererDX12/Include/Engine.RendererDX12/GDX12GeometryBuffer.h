@@ -50,6 +50,7 @@ public:
 private:
 	friend class RenderModule;
 	friend class GDX12CommandList;
+	friend class GDX12RenderPass;
 
 	void ResizeVertexBuffer(UINT newSize);
 	void ResizeIndexBuffer(UINT newSize);

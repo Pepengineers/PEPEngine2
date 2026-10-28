@@ -2,13 +2,23 @@
 
 #include "Engine.RendererDX12/GDX12Device.h"
 
-
 class GDX12CommandList;
+class GDX12CommandQueue;
+
+struct GDX12CompletionPoint
+{
+	GDX12Device* Device = nullptr;
+	GDX12CommandQueue* Queue = nullptr;
+	ComPtr<ID3D12Fence> Fence;
+	UINT64 Value = 0;
+
+	explicit operator bool() const { return Fence && Value != 0; }
+};
 
 class GDX12CommandQueue
 {
 public:
-	GDX12CommandQueue(GDX12Device* device);
+	GDX12CommandQueue(GDX12Device* device, D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT);
 	~GDX12CommandQueue();
 
 	void Reset();
@@ -16,7 +26,11 @@ public:
 	const ComPtr<ID3D12CommandQueue>& GetCommandQueue();
 	const ComPtr<ID3D12CommandQueue>& GetPresentCommandQueue();
 	const ComPtr<ID3D12Fence>& GetFence();
-	ComPtr<ID3D12Fence>& GetOtherFence();
+	D3D12_COMMAND_LIST_TYPE GetType() const;
+	GDX12CompletionPoint Signal();
+	GDX12CompletionPoint GetCompletionPoint() const;
+	void GPUWait(const GDX12CompletionPoint& point);
+	static void CPUwait(const GDX12CompletionPoint& point);
 
 	// Returns a CommandList that you can work with.
 	// If all previously created lists are busy - a new one will be created.
@@ -25,13 +39,9 @@ public:
 	void ExecuteCommandLists(std::vector<GDX12CommandList*>& commandLists);
 
 	void CPUWaitForFenceValue(uint64_t fenceValue);
-	void WaitForOtherFence(uint64_t otherFenceValue);
 
 	//Waits for execution of all active lists
 	void Flush();
-
-	// Do I even need this?
-	UINT64 FenceValue;
 
 private:
 	// We can probably make it work in a separate thread
@@ -41,11 +51,16 @@ private:
 	ComPtr<ID3D12CommandQueue> _commandQueue;
 	ComPtr<ID3D12CommandQueue> _proxyCommandQueue;
 	ComPtr<ID3D12Fence> _fence;
-	//shared fence from another device
-	//null if _dualGPUMode is false
-	ComPtr<ID3D12Fence> _otherFence;
 
 	GDX12Device* _device;
+	D3D12_COMMAND_LIST_TYPE _type;
+
+	struct OpenedFence
+	{
+		ComPtr<ID3D12Fence> Source;
+		ComPtr<ID3D12Fence> Local;
+	};
+	std::vector<OpenedFence> _openedFences;
 
 	// Command Lists can be requested via GetCommandList()
 	// It returns any list from avalible vector
@@ -54,5 +69,5 @@ private:
 	std::vector<std::unique_ptr<GDX12CommandList>> _workingCommandLists;
 	std::vector<std::unique_ptr<GDX12CommandList>> _availableCommandLists;
 
-	uint64_t _lastDispatchedFenceValue;
+	uint64_t _lastSubmittedFenceValue;
 };

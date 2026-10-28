@@ -1,12 +1,15 @@
 #pragma once
 
 #include "Engine.RendererDX12/D3DHelpers.h"
+#include <memory>
 
 class GDX12Resource
 {
 public:
 	GDX12Resource();
 	~GDX12Resource() = default;
+
+    CD3DX12_RESOURCE_BARRIER GetTransitionBarrier(D3D12_RESOURCE_STATES newState);
 
     CD3DX12_RESOURCE_BARRIER GetRenderTargetBarrier();
     CD3DX12_RESOURCE_BARRIER GetPixelShaderResourceBarrier();
@@ -35,5 +38,7 @@ public:
 	ComPtr<ID3D12Resource> D3DResource;
 
 private:
-	D3D12_RESOURCE_STATES _currentState;
+    struct ResourceState;
+    std::shared_ptr<ResourceState> _state;
+    ResourceState& State();
 };

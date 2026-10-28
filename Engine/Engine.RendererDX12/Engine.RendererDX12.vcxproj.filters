@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -18,6 +18,16 @@
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraph.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraphResources.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\PassContext.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\PassDescription.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraphCompiler.h"><Filter>Header Files</Filter></ClInclude>
+    <ClCompile Include="src\GDX12RenderPass.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\FrameGraph\FrameGraph.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\FrameGraph\FrameGraphResources.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\FrameGraph\PassDescription.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\FrameGraph\FrameGraphCompiler.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceFactory.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -93,19 +103,10 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OpaquePass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\IRenderPassLink.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureCopyToSharedMemoryPass.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12SharedTexture.h">
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12SharedAllocation.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12StreamlineSDK.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureCopyFromSharedMemoryPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FSRUpscalePass.h">
@@ -115,9 +116,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OutputToScreenPass.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SyncPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h">

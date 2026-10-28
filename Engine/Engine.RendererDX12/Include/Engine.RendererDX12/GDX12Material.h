@@ -16,6 +16,8 @@ enum class MaterialType
 struct GPUTexture
 {
 	std::string Name;
+	// Keep the pixels for a later pipeline that needs a copy on another device.
+	Engine::Core::Texture Source;
 	GDX12Texture* PrimaryDeviceTexture = nullptr;
 	GDX12Texture* SecondaryDeviceTexture = nullptr;
 };
@@ -54,9 +56,10 @@ private:
 		Emissive(nullptr), Displacement(nullptr), Metallic(0.f), Roughness(1.f), Opacity(1.f),
 		SpecularColor(0.0f, 0.0f, 0.0f), EmissiveColor(0.0f, 0.0f, 0.0f),
 		HasNormalMap(false), HasSpecularMap(false), HasRoughnessMap(false), HasEmissiveMap(false),
-		UseBakedLighting(false), DirtyFlag(true), _CBufferIndex(0), _numFramesDirty(0), Type(MaterialType::Opaque)
+		UseBakedLighting(false), DirtyFlag(true), _CBufferIndex(0), _primaryFramesDirty(0), _secondaryFramesDirty(0), Type(MaterialType::Opaque)
 	{
 
 	}
-	UINT _numFramesDirty;
+	UINT _primaryFramesDirty;
+	UINT _secondaryFramesDirty;
 };

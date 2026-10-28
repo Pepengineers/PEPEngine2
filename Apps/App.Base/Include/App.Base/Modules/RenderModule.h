@@ -1,9 +1,10 @@
-﻿#pragma once
+#pragma once
 
 #include "Common/GameTimer.h"
 #include "Common/Module.h"
 
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/FrameGraph/FrameGraph.h"
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
 
@@ -11,7 +12,6 @@ class SceneManagerModule;
 class World;
 class GDX12SwapChain;
 class GDX12Device;
-class GDX12GPUTimer;
 
 struct TransformComponent;
 struct CameraComponent;
@@ -92,18 +92,13 @@ public:
     void OnRenderComponentUpdated(World& world, Entity entity, StaticMeshRenderComponent& component);
 
     const float GetAspectRatio();
-    GDX12FrameConstants* GetCurrentPrimaryFrameConstants();
-    GDX12FrameConstants* GetCurrentSecondaryFrameConstants();
-    const GPUMesh* GetPrimaryGPUMesh(MeshHandle handle);
-    const GPUMesh* GetSecondaryGPUMesh(MeshHandle handle);
-    GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetPrimaryIndirectCommandsCache();
-    GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetSecondaryIndirectCommandsCache();
-
-    uint32_t GetPrimaryPipelineFlags();
-    uint32_t GetSecondaryPipelineFlags();
+    GDX12FrameConstants* GetCurrentFrameConstants(EDeviceRole role);
+    const GPUMesh* GetGPUMesh(EDeviceRole role, MeshHandle handle);
+    GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetIndirectCommandsCache(EDeviceRole role);
+    uint32_t GetDevicePassFlags(EDeviceRole role) const;
+    bool PipelineHasFlag(EDeviceRole role, uint32_t flag) const;
     RenderPipelineCommonData* GetRenderPipelineCommonData();
-    bool PrimaryPipelineHasFlag(uint32_t flag);
-    bool SecondaryPipelineHasFlag(uint32_t flag);
+    uint32_t GetFrameSlotCount() const { return static_cast<uint32_t>(_primaryResources.FrameConstants.size()); }
 
 protected:
     void OnUpdate() override;
@@ -113,11 +108,14 @@ protected:
     bool ShouldRender() override;
 
 private:
+    GDX12DeviceResources& GetDeviceResources(EDeviceRole role);
     void BuildBackBuffer();
-    void ShareFences();
-    void ConfigureRenderPipeline();
-    void SetupRenderPasses();
-    void InitializeRenderPasses();
+    void ConfigureRenderPipeline(FrameGraph& graph);
+    void CompileFrameGraph(FrameGraph& graph);
+    void BindRenderTargets(FrameGraph& graph);
+    void PrepareSceneResources(GDX12DeviceResources& resources, uint32_t flags);
+    void ResizeSceneBuffers(GDX12DeviceResources& resources, uint32_t flags);
+    void MarkSceneDataDirty();
     
     void SubscribeToSceneManager();
     void UnsubscribeFromSceneManager();
@@ -127,35 +125,31 @@ private:
 
     GameTimer* _timer;
     Window* _window;
+    bool _renderingSuspended = false;
     
     ListenerHandle _worldCreatedListener = 0;
     ListenerHandle _worldDestroyedListener = 0;
     
     std::unordered_map<Entity, TransformCompGPUData> _transformGPUData;
     std::unordered_map<World*, WorldRenderSubscriptions> _worldSubscriptions;
+    uint32_t _transformCount = 0;
+    uint32_t _cameraCount = 0;
+    uint32_t _instanceCount = 0;
     RenderPipelineCommonData _RPcommonData;
 
     std::unique_ptr<GDX12Device> _primaryDevice;
     std::unique_ptr<GDX12Device> _secondaryDevice;
-    bool _dualGPUMode;
-    std::unique_ptr<GDX12GPUTimer> _primaryGPUTimer;
-    std::unique_ptr<GDX12GPUTimer> _secondaryGPUTimer;
 
     GDX12DeviceResources _primaryResources;
     GDX12DeviceResources _secondaryResources;
     std::unordered_map<std::string, std::unique_ptr<GPUTexture>> _textures;
     std::unordered_map<std::string, std::unique_ptr<GDX12Material>> _materials;
+    std::unordered_map<uint32_t, const Mesh*> _meshes;
 
-    // These two resources are made on _primaryDevice only
+    // The swap chain and display depth belong to the primary device.
     std::unique_ptr<GDX12SwapChain> _backBuffer;
     std::unique_ptr<GDX12Texture> _depthStencil;
     
-    // Sorted in execution order
-    std::vector<std::unique_ptr<GDX12RenderPass>> _primaryRenderPassExecutionList;
-    std::vector<std::unique_ptr<GDX12RenderPass>> _secondaryRenderPassExecutionList;
+    std::unique_ptr<CompiledFrameGraph> _frameGraph;
 
-    // Flags that are accumulated from every active RenderPass on the device
-    // Defines which resources should be uploaded onto respective GPU
-    uint32_t _primaryPipelineFlags;
-    uint32_t _secondaryPipelineFlags;
 };

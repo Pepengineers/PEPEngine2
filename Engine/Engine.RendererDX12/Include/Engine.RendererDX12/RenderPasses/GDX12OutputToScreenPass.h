@@ -1,48 +1,36 @@
 #pragma once
-
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 
 class GDX12OutputToScreenPass : public GDX12RenderPass
 {
 public:
-	GDX12OutputToScreenPass() : IN_Texture(nullptr), IN_BackBuffer(nullptr)
-	{  
-		_flags = RENDER_PASS_FLAG_NONE; 
-		_numInputs = 2;
-		_numOutputs = 0;
+	static constexpr const char* Color = "Color";
+	static constexpr const char* Target = "Target";
+	static constexpr const char* Presented = "Presented";
+
+	void Describe(PassDescription& s) const override
+	{
+		auto& color = s.AddInputTexture(Color);
+		color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+		color.Usages = ResourceUsage::CopySource;
+		color.AllowShared = true;
+		auto& target = s.AddInputTexture(Target);
+		target.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
+		target.Access = DataAccess::WriteOnly;
+		target.Usages = ResourceUsage::CopyDest;
+		auto& presented = s.AddOutputTexture(Presented);
+		presented.AliasInput = Target;
+		presented.Usages = ResourceUsage::Present;
+		s.RequireSameTextureSize({Color, Target});
 	}
 
-	// Input 0 - InputTexture
-	// Input 1 - BackBuffer
-	void Initialize() override
+	void Execute(PassExecutionContext& context) override
 	{
-		IN_Texture = _inputs[0];
-		IN_BackBuffer = _inputs[1];
-	}
-
-	void Execute(GDX12CommandList* cmdList) override
-	{
-		GDX12Texture* inputTexture = IN_Texture->GetTexture();
-		GDX12Texture* backBuffer = IN_BackBuffer->GetTexture();
-
-		cmdList->BeginPixEvent("Copy To Screen Pass", Colors::Aqua);
-		cmdList->ResourceBarrier({ inputTexture->GetResource()->GetCopySourceBarrier() });
-		cmdList->ResourceBarrier({ backBuffer->GetResource()->GetCopyDestBarrier() });
-		cmdList->CopyResource(backBuffer->GetResource()->D3DResource.Get(),
-			inputTexture->GetResource()->D3DResource.Get());
-		cmdList->ResourceBarrier({ backBuffer->GetResource()->GetPresentBarrier() });
+		auto* cmdList = context.GetCommandList();
+		auto* source = context.GetInputTexture(Color).GetTexture();
+		auto* target = context.GetInputTexture(Target).GetTexture();
+		cmdList->BeginPixEvent("Copy to Screen", Colors::Aqua);
+		cmdList->CopyResource(target->GetResource()->D3DResource.Get(), source->GetResource()->D3DResource.Get());
 		cmdList->EndPixEvent();
 	}
-
-	void ClearDenendencies() override
-	{
-		GDX12RenderPass::ClearDenendencies();
-
-		IN_Texture = nullptr;
-		IN_BackBuffer = nullptr;
-	}
-
-private:
-	IRenderPassLink* IN_Texture;
-	IRenderPassLink* IN_BackBuffer;
 };

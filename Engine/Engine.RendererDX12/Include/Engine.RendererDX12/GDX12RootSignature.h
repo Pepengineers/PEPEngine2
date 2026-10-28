@@ -16,6 +16,7 @@ struct GDX12RootSignatureDesc
 {
 	UINT NumSingleCBVSlots = 0;
 	UINT NumSingleSRVSlots = 0;
+	D3D12_SHADER_VISIBILITY SingleSRVVisibility = D3D12_SHADER_VISIBILITY_ALL;
 	UINT NumSingleUAVSlots = 0;
 	std::vector<CD3DX12_STATIC_SAMPLER_DESC> StaticSamplers;
 	std::vector<GDX12RootSignatureRange> SRVRanges;

@@ -14,7 +14,9 @@ GDX12Device::GDX12Device() :
 
 GDX12Device::~GDX12Device()
 {
-    Reset();
+    try { Reset(); }
+    catch (const DxException& error) { OutputDebugStringW(error.ToString().c_str()); }
+    catch (const std::exception& error) { OutputDebugStringA(error.what()); }
 }
 
 HRESULT GDX12Device::Initialize(ComPtr<IDXGIAdapter4> adapter)
@@ -39,13 +41,18 @@ HRESULT GDX12Device::Initialize(ComPtr<IDXGIAdapter4> adapter)
             break; 
         }
     }
-    if (FAILED(hr)) { OutputDebugStringA("ERROR: FAILED TO CREATE DX12DEVICE\n"); }
+    if (FAILED(hr))
+    {
+        OutputDebugStringA("ERROR: FAILED TO CREATE DX12DEVICE\n");
+        return hr;
+    }
 
     _proxyDevice = GDX12StreamlineSDK::Get().CreateProxyDevice(_device, Role == DEVICE_ROLE_PRIMARY);
     _device = GDX12StreamlineSDK::Get().GetNativeDevice(_proxyDevice ? _proxyDevice : _device);
     CollectDeviceFeatures();
 
     _commandQueue = std::make_unique<GDX12CommandQueue>(this);
+    _copyCommandQueue = std::make_unique<GDX12CommandQueue>(this, D3D12_COMMAND_LIST_TYPE_COPY);
 
     _isInitialized = true;
 
@@ -71,6 +78,8 @@ void GDX12Device::CollectDeviceFeatures()
 
 void GDX12Device::Reset()
 {
+    Flush();
+    _copyCommandQueue.reset();
     _commandQueue.reset();
     _proxyDevice.Reset();
     _device.Reset();
@@ -91,6 +100,17 @@ const ComPtr<ID3D12Device14>& GDX12Device::GetCommandQueueCreationDevice()
 GDX12CommandQueue* GDX12Device::GetCommandQueue()
 {
     return _commandQueue.get();
+}
+
+GDX12CommandQueue* GDX12Device::GetCopyCommandQueue()
+{
+    return _copyCommandQueue.get();
+}
+
+void GDX12Device::Flush()
+{
+    if (_commandQueue) { _commandQueue->Flush(); }
+    if (_copyCommandQueue) { _copyCommandQueue->Flush(); }
 }
 
 const DeviceSpecs& GDX12Device::GetDeviceFeatures()

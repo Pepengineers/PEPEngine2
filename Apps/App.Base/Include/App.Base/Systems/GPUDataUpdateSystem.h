@@ -16,14 +16,16 @@ public:
 
         WorldECS& ecs = world.GetECS();
         auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
-        auto consoleModule = BenchmarkEngine::GetLocator().GetModule<ConsoleModule>();
-
-        IConsoleVariable* ICVNumframes;
-        consoleModule->TryFindConsoleVariable(L"Render.NumFrames", ICVNumframes);
-        int numFrames = ICVNumframes->GetInt();
+        int numFrames = static_cast<int>(renderModule->GetFrameSlotCount());
+        const auto primaryFlags = renderModule->GetDevicePassFlags(DEVICE_ROLE_PRIMARY);
+        const auto secondaryFlags = renderModule->GetDevicePassFlags(DEVICE_ROLE_SECONDARY);
+        const auto devices = {
+            std::pair{DEVICE_ROLE_PRIMARY, primaryFlags},
+            std::pair{DEVICE_ROLE_SECONDARY, secondaryFlags}};
+        const auto pipelineFlags = primaryFlags | secondaryFlags;
 
         ecs.ForEach<TransformComponent, CameraComponent>(
-            [&ecs, &renderModule, &numFrames](Entity entity, TransformComponent& transform, CameraComponent& camera)
+            [&ecs, &renderModule, &numFrames, &devices, pipelineFlags](Entity entity, TransformComponent& transform, CameraComponent& camera)
             {
                 // Active camera requires constant update due to jittering
                 auto pipelineCommonData = renderModule->GetRenderPipelineCommonData();
@@ -76,9 +78,7 @@ public:
                     pipelineCommonData->PrevClipToClip = pipelineCommonData->ClipToPrevClip.Invert();
 
                     // Jitter current camera proj matrix if it is needed
-                    if (isActiveCamera &&
-                        (renderModule->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_JITTER) ||
-                            renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_JITTER)))
+                    if (isActiveCamera && (pipelineFlags & RENDER_PASS_FLAG_USE_JITTER))
                     {
                         static uint32_t frameIndex = 0;
                         frameIndex++;
@@ -101,15 +101,10 @@ public:
                     objConstants.NearPlane = camera.NearPlane;
                     objConstants.FarPlane = camera.FarPlane;
 
-                    if (renderModule->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS))
+                    for (const auto& [role, flags] : devices)
                     {
-                        auto& CBuffer = renderModule->GetCurrentPrimaryFrameConstants()->CameraCB;
-                        CBuffer->CopyData(camera._CBufferIndex, objConstants);
-                    }
-
-                    if (renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS))
-                    {
-                        auto& CBuffer = renderModule->GetCurrentSecondaryFrameConstants()->CameraCB;
+                        if (!(flags & RENDER_PASS_FLAG_USE_CAMERAS)) { continue; }
+                        auto& CBuffer = renderModule->GetCurrentFrameConstants(role)->CameraCB;
                         CBuffer->CopyData(camera._CBufferIndex, objConstants);
                     }
 
@@ -118,7 +113,7 @@ public:
             });
 
         ecs.ForEach<TransformComponent>(
-            [&ecs, &renderModule, &numFrames](Entity entity, TransformComponent& transform)
+            [&ecs, &renderModule, &numFrames, &devices](Entity entity, TransformComponent& transform)
             {
                 auto& GPUData = renderModule->GetTransformGPUData(entity);
                 if (transform.DirtyFlag)
@@ -144,14 +139,10 @@ public:
 
                     XMStoreFloat4x4(&GPUData.PrevWorld, world);
 
-                    if (renderModule->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
+                    for (const auto& [role, flags] : devices)
                     {
-                        auto& CBuffer = renderModule->GetCurrentPrimaryFrameConstants()->TransformCache;
-                        CBuffer->CopyData(GPUData.CBufferIndex, objConstants);
-                    }
-                    if (renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
-                    {
-                        auto& CBuffer = renderModule->GetCurrentSecondaryFrameConstants()->TransformCache;
+                        if (!(flags & RENDER_PASS_FLAG_USE_INSTANCES)) { continue; }
+                        auto& CBuffer = renderModule->GetCurrentFrameConstants(role)->TransformCache;
                         CBuffer->CopyData(GPUData.CBufferIndex, objConstants);
                     }
 
@@ -160,7 +151,7 @@ public:
             });
 
         ecs.ForEach<TransformComponent, StaticMeshRenderComponent>(
-            [&ecs, &renderModule, &numFrames](Entity entity, TransformComponent& transform, StaticMeshRenderComponent& renderer)
+            [&ecs, &renderModule, &numFrames, &devices](Entity entity, TransformComponent& transform, StaticMeshRenderComponent& renderer)
             {
                 auto& transformGPUData = renderModule->GetTransformGPUData(entity);
 
@@ -169,32 +160,12 @@ public:
                     renderer.DirtyFlag = false;
                     renderer._numFramesDirty = numFrames;
 
-                    if (renderModule->GetPrimaryPipelineFlags() & RENDER_PASS_FLAG_USE_INSTANCES)
+                    for (const auto& [role, flags] : devices)
                     {
-                        auto gpuMesh = renderModule->GetPrimaryGPUMesh(renderer.MeshHandler);
+                        if (!(flags & RENDER_PASS_FLAG_USE_INSTANCES)) { continue; }
+                        auto gpuMesh = renderModule->GetGPUMesh(role, renderer.MeshHandler);
                         gpuMesh->CPUMesh->GetBounds().Transform(renderer.Bounds, XMLoadFloat4x4(&transformGPUData.World));
-                        auto indirectCommandsCache = renderModule->GetPrimaryIndirectCommandsCache();
-                        for (int i = 0; i < gpuMesh->SubMeshes.size(); i++)
-                        {
-                            const auto& subMesh = gpuMesh->SubMeshes[i];
-
-                            GDX12IndirectDrawArgs drawCommand;
-                            drawCommand.IndexCountPerInstance = subMesh.IndexCount;
-                            drawCommand.InstanceCount = 1;
-                            drawCommand.StartIndexLocation = subMesh.StartIndexLocation;
-                            drawCommand.BaseVertexLocation = subMesh.StartVertexLocation;
-                            drawCommand.StartInstanceLocation = renderer._CBufferIndices[i];
-                            drawCommand.InstanceID = renderer._CBufferIndices[i];
-
-                            indirectCommandsCache->CopyData(renderer._CBufferIndices[i], drawCommand);
-                        }
-                    }
-
-                    if (renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
-                    {
-                        auto gpuMesh = renderModule->GetSecondaryGPUMesh(renderer.MeshHandler);
-                        gpuMesh->CPUMesh->GetBounds().Transform(renderer.Bounds, XMLoadFloat4x4(&transformGPUData.World));
-                        auto indirectCommandsCache = renderModule->GetSecondaryIndirectCommandsCache();
+                        auto indirectCommandsCache = renderModule->GetIndirectCommandsCache(role);
                         for (int i = 0; i < gpuMesh->SubMeshes.size(); i++)
                         {
                             const auto& subMesh = gpuMesh->SubMeshes[i];
@@ -214,31 +185,11 @@ public:
 
                 if (renderer._numFramesDirty > 0)
                 {
-                    if (renderModule->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
+                    for (const auto& [role, flags] : devices)
                     {
-                        auto& instanceCache = renderModule->GetCurrentPrimaryFrameConstants()->InstanceCache;
-                        auto gpuMesh = renderModule->GetPrimaryGPUMesh(renderer.MeshHandler);
-                        for (int i = 0; i < gpuMesh->SubMeshes.size(); i++)
-                        {
-                            const auto& subMesh = gpuMesh->SubMeshes[i];
-                            const auto& subMeshBounds = gpuMesh->CPUMesh->GetSubMesh(i).Bounds;
-
-                            BoundingBox bounds;
-                            subMeshBounds.Transform(bounds, XMLoadFloat4x4(&transformGPUData.World));
-
-                            GDX12InstanceData instanceData;
-                            instanceData.TransformIndex = transformGPUData.CBufferIndex;
-                            instanceData.MaterialIndex = renderer.Materials[subMesh.MaterialIndex]->_CBufferIndex;
-                            instanceData.BoundingBoxCenter = bounds.Center;
-                            instanceData.BoundingBoxExtents = bounds.Extents;
-
-                            instanceCache->CopyData(renderer._CBufferIndices[i], instanceData);
-                        }
-                    }
-                    if (renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
-                    {
-                        auto& instanceCache = renderModule->GetCurrentSecondaryFrameConstants()->InstanceCache;
-                        auto gpuMesh = renderModule->GetSecondaryGPUMesh(renderer.MeshHandler);
+                        if (!(flags & RENDER_PASS_FLAG_USE_INSTANCES)) { continue; }
+                        auto& instanceCache = renderModule->GetCurrentFrameConstants(role)->InstanceCache;
+                        auto gpuMesh = renderModule->GetGPUMesh(role, renderer.MeshHandler);
                         for (int i = 0; i < gpuMesh->SubMeshes.size(); i++)
                         {
                             const auto& subMesh = gpuMesh->SubMeshes[i];

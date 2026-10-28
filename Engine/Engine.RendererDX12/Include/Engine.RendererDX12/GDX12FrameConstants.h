@@ -3,28 +3,15 @@
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 #include "Engine.RendererDX12/GDX12UploadBuffer.h"
-#include "Engine.RendererDX12/GDX12AppendBuffer.h"
 #include "Engine.RendererDX12/GDX12ConstantStructures.h"
 
 class GDX12Device;
-
-// Used for collecting & using GPU culling results
-// This structured is used by any object that uses culling(cameras, shadowmaps)
-struct GDX12VisibilityBuffers
-{
-    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> VisibleOpaqueCommandsCache;
-    std::unique_ptr<GDX12UploadBuffer<UINT>> OpaqueDrawCounter;
-    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> VisibleTransparentCommandsCache;
-    std::unique_ptr<GDX12UploadBuffer<UINT>> TransparentDrawCounter;
-};
 
 class GDX12FrameConstants
 {
 public:
     GDX12FrameConstants(GDX12Device* device);
     ~GDX12FrameConstants();
-
-    bool IsInUseByGPU(UINT64 currentFence);
 
     //Always updating
     std::unique_ptr<GDX12UploadBuffer<GDX12MainConstants>> MainCB;
@@ -35,10 +22,5 @@ public:
     std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> InstanceCache;
     std::unique_ptr<GDX12UploadBuffer<GDX12LightConstants>> LightCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12CameraConstants>> CameraCB;
-    std::vector<GDX12VisibilityBuffers> CameraVisibilityCommands;
 
-    UINT64 FenceValue;
-    
-private:
-    GDX12Device* _device;
 };

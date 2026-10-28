@@ -1,4 +1,4 @@
-﻿#include "App.Base/Modules/RenderModule.h"
+#include "App.Base/Modules/RenderModule.h"
 
 #include "App.Base/Window.h"
 #include "App.Base/App.h"
@@ -7,35 +7,29 @@
 #include "Common/ConsoleVariables.h"
 
 #include "Engine.RendererDX12/GDX12SwapChain.h"
-#include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureClearPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyFromSharedMemoryPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyToSharedMemoryPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OutputToScreenPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12FSRUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12NISUpscalePass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12SyncPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12XeSSUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
-    _dualGPUMode(false), _window(window), _timer(timer),
-    _primaryPipelineFlags(0), _secondaryPipelineFlags(0)
+    _window(window), _timer(timer)
 {
     _RPcommonData.GameTimer = _timer;
 }
 
 RenderModule::~RenderModule()
 {
-    _primaryDevice->GetCommandQueue()->Flush();
-    if (_dualGPUMode) { _secondaryDevice->GetCommandQueue()->Flush(); }
-
-    for (auto& renderpass : _primaryRenderPassExecutionList) { renderpass->ClearDenendencies(); }
-    for (auto& renderpass : _secondaryRenderPassExecutionList) { renderpass->ClearDenendencies(); }
+    if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
+    _frameGraph.reset();
+    if (_primaryDevice) { _primaryDevice->Flush(); }
+    if (_secondaryDevice) { _secondaryDevice->Flush(); }
 
     GDX12ShaderCompiler::Shutdown();
     GDX12DeviceFactory::Reset();
@@ -43,38 +37,17 @@ RenderModule::~RenderModule()
 
 void RenderModule::Initialize()
 {
-    // This value will be later provided by external pipeline config
-    bool useStreamlineSDK = false;
-    // Streamline is initialized on the primary device only
-    if (useStreamlineSDK) { GDX12StreamlineSDK::Get().Initialize(); }
-
 #if defined(DEBUG) || defined(_DEBUG)
-    // Enable the D3D12 debug layer.
     ComPtr<ID3D12Debug> debugController;
     ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)));
     debugController->EnableDebugLayer();
 #endif
 
     _primaryDevice = std::make_unique<GDX12Device>();
-    _primaryDevice->Role = DEVICE_ROLE_PRIMARY;
-    _primaryDevice->Initialize(GDX12DeviceFactory::GetMostPerformantAdapter().Get());
-    _primaryResources.Initialize(_primaryDevice.get());
-    _primaryGPUTimer = std::make_unique<GDX12GPUTimer>(_primaryDevice.get());
-
-    if (false)
-    {
-        _secondaryDevice = std::make_unique<GDX12Device>();
-        _secondaryDevice->Role = DEVICE_ROLE_SECONDARY;
-        _secondaryDevice->Initialize(GDX12DeviceFactory::GetDeviceDescriptors()[1].Adapter.Get());
-        _secondaryResources.Initialize(_secondaryDevice.get());
-        _secondaryGPUTimer = std::make_unique<GDX12GPUTimer>(_secondaryDevice.get());
-        _dualGPUMode = true;
-    }
-
-    BuildBackBuffer();
-    if (_dualGPUMode) { ShareFences(); }
-    ConfigureRenderPipeline();
-
+    _secondaryDevice = std::make_unique<GDX12Device>();
+    FrameGraph graph(_primaryDevice.get(), _secondaryDevice.get());
+    ConfigureRenderPipeline(graph);
+    CompileFrameGraph(graph);
     SubscribeToSceneManager();
 }
 
@@ -85,20 +58,20 @@ void RenderModule::Uninitialize()
 
 void RenderModule::OnResize()
 {
-    _primaryDevice->GetCommandQueue()->Flush();
-
     uint16_t width, height;
     _window->GetWindowSize(width, height);
 
+    _renderingSuspended = !width || !height;
+    if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
+    if (_renderingSuspended) { return; }
+
+    if (_frameGraph) { _frameGraph->ReleaseFrameResourcesForResize(); }
     _backBuffer->Resize(width, height);
     _depthStencil->Resize(width, height);
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
-    if (_RPcommonData.Upscaler) { _RPcommonData.Upscaler->QueryRenderTargetResolution(); }
-
-    for (auto& renderPass : _primaryRenderPassExecutionList) { renderPass->Resize(); }
-    for (auto& renderPass : _secondaryRenderPassExecutionList) { renderPass->Resize(); }
+    if (_frameGraph) { _frameGraph->ResizeResources({width, height}); }
 }
 
 GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
@@ -120,30 +93,14 @@ GDX12Material* RenderModule::CreateMaterial(const std::string& name)
         return nullptr;
     }
 
-    _materials[name] = std::unique_ptr<GDX12Material>(new GDX12Material());
+    if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
 
-    _materials[name]->Name = name;
-    
-    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS)
-    {
-        _materials[name]->_CBufferIndex = _primaryResources.FrameConstants[0]->MaterialCache->GetElementCount();
-
-        for (auto& constants : _primaryResources.FrameConstants)
-        {
-            auto& CBuffer = constants->MaterialCache;
-            CBuffer->Resize(CBuffer->GetElementCount() + 1);
-        }
-    }
-    if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS)
-    {
-        _materials[name]->_CBufferIndex = _secondaryResources.FrameConstants[0]->MaterialCache->GetElementCount();
-
-        for (auto& constants : _secondaryResources.FrameConstants)
-        {
-            auto& CBuffer = constants->MaterialCache;
-            CBuffer->Resize(CBuffer->GetElementCount() + 1);
-        }
-    }
+    auto material = std::unique_ptr<GDX12Material>(new GDX12Material());
+    material->Name = name;
+    material->_CBufferIndex = static_cast<uint32_t>(_materials.size());
+    _materials[name] = std::move(material);
+    ResizeSceneBuffers(_primaryResources, GetDevicePassFlags(DEVICE_ROLE_PRIMARY));
+    ResizeSceneBuffers(_secondaryResources, GetDevicePassFlags(DEVICE_ROLE_SECONDARY));
 
     return _materials[name].get();
 }
@@ -169,9 +126,10 @@ GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* 
 
     _textures[name] = std::make_unique<GPUTexture>();
     _textures[name]->Name = name;
-    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS)
+    _textures[name]->Source = *texture;
+    if (GetDevicePassFlags(DEVICE_ROLE_PRIMARY) & RENDER_PASS_FLAG_USE_MATERIALS)
     { _textures[name]->PrimaryDeviceTexture = CreateDX12Texture(name, &_primaryResources, texture); }
-    if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_MATERIALS)
+    if (GetDevicePassFlags(DEVICE_ROLE_SECONDARY) & RENDER_PASS_FLAG_USE_MATERIALS)
     { _textures[name]->SecondaryDeviceTexture = CreateDX12Texture(name, &_secondaryResources, texture); }
 
     return _textures[name].get();
@@ -190,6 +148,9 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
 
     uint32_t numMipLevels = texture->GetMipLevels();
     uint32_t numArraySlices = texture->GetArraySize();
+    desc.MipLevels = numMipLevels;
+    desc.ArraySize = numArraySlices;
+    desc.IsCube = texture->IsCubeMap() && numArraySlices == 6;
 
     ComPtr<ID3D12Resource> textureResource = nullptr;
     CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
@@ -338,9 +299,11 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
 
 void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
 {
-    if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_GEOMETRY) 
+    if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
+    _meshes[handle.GetValue()] = mesh;
+    if (GetDevicePassFlags(DEVICE_ROLE_PRIMARY) & RENDER_PASS_FLAG_USE_GEOMETRY)
     { _primaryResources.GeometryBuffer->AddMesh(mesh, handle); }
-    if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_GEOMETRY)
+    if (GetDevicePassFlags(DEVICE_ROLE_SECONDARY) & RENDER_PASS_FLAG_USE_GEOMETRY)
     { _secondaryResources.GeometryBuffer->AddMesh(mesh, handle); }
 }
 
@@ -464,44 +427,39 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     _worldSubscriptions.erase(it);
 }
 
-GDX12FrameConstants* RenderModule::GetCurrentPrimaryFrameConstants()
+GDX12DeviceResources& RenderModule::GetDeviceResources(EDeviceRole role)
 {
-    return _primaryResources.FrameConstants[_primaryResources.CurrFrameConstantsIndex].get();
+    if (role == DEVICE_ROLE_PRIMARY) { return _primaryResources; }
+    if (role == DEVICE_ROLE_SECONDARY) { return _secondaryResources; }
+    throw std::invalid_argument("ERROR: Given render device role is unsupported. Use DEVICE_ROLE_PRIMARY or DEVICE_ROLE_SECONDARY.");
 }
 
-GDX12FrameConstants* RenderModule::GetCurrentSecondaryFrameConstants()
+GDX12FrameConstants* RenderModule::GetCurrentFrameConstants(EDeviceRole role)
 {
-    return _secondaryResources.FrameConstants[_secondaryResources.CurrFrameConstantsIndex].get();
+    auto& resources = GetDeviceResources(role);
+    return resources.FrameConstants.at(resources.CurrFrameConstantsIndex).get();
 }
 
-const GPUMesh* RenderModule::GetPrimaryGPUMesh(MeshHandle handle)
+const GPUMesh* RenderModule::GetGPUMesh(EDeviceRole role, MeshHandle handle)
 {
-    return _primaryResources.GeometryBuffer->GetGPUMeshByHandle(handle);
+    return GetDeviceResources(role).GeometryBuffer->GetGPUMeshByHandle(handle);
 }
 
-const GPUMesh* RenderModule::GetSecondaryGPUMesh(MeshHandle handle)
+GDX12UploadBuffer<GDX12IndirectDrawArgs>* RenderModule::GetIndirectCommandsCache(EDeviceRole role)
 {
-    return _secondaryResources.GeometryBuffer->GetGPUMeshByHandle(handle);
+    // This upload buffer is shared by all frame slots; callers update it on the CPU.
+    if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
+    return GetDeviceResources(role).IndirectCommandsCache.get();
 }
 
-GDX12UploadBuffer<GDX12IndirectDrawArgs>* RenderModule::GetPrimaryIndirectCommandsCache()
+uint32_t RenderModule::GetDevicePassFlags(EDeviceRole role) const
 {
-    return _primaryResources.IndirectCommandsCache.get();
+    return _frameGraph ? _frameGraph->GetDevicePassFlags(role) : RENDER_PASS_FLAG_NONE;
 }
 
-GDX12UploadBuffer<GDX12IndirectDrawArgs>* RenderModule::GetSecondaryIndirectCommandsCache()
+bool RenderModule::PipelineHasFlag(EDeviceRole role, uint32_t flag) const
 {
-    return _secondaryResources.IndirectCommandsCache.get();
-}
-
-uint32_t RenderModule::GetPrimaryPipelineFlags()
-{
-    return _primaryPipelineFlags;
-}
-
-uint32_t RenderModule::GetSecondaryPipelineFlags()
-{
-    return _secondaryPipelineFlags;
+    return (GetDevicePassFlags(role) & flag) != 0;
 }
 
 RenderPipelineCommonData* RenderModule::GetRenderPipelineCommonData()
@@ -509,40 +467,14 @@ RenderPipelineCommonData* RenderModule::GetRenderPipelineCommonData()
     return &_RPcommonData;
 }
 
-bool RenderModule::PrimaryPipelineHasFlag(uint32_t flag)
-{
-    return _primaryPipelineFlags & flag;
-}
-
-bool RenderModule::SecondaryPipelineHasFlag(uint32_t flag)
-{
-    return _secondaryPipelineFlags & flag;
-}
-
 void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
 {
-    TransformCompGPUData gpuData;
-    _transformGPUData[entity] = gpuData;
-
-    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
-    {
-        _transformGPUData[entity].CBufferIndex = _primaryResources.FrameConstants[0]->TransformCache->GetElementCount();
-        for (auto& constants : _primaryResources.FrameConstants)
-        {
-            auto& CBuffer = constants->TransformCache;
-            CBuffer->Resize(CBuffer->GetElementCount() + 1);
-        }
-    }
-
-    if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
-    {
-        _transformGPUData[entity].CBufferIndex = _secondaryResources.FrameConstants[0]->TransformCache->GetElementCount();
-        for (auto& constants : _secondaryResources.FrameConstants)
-        {
-            auto& CBuffer = constants->TransformCache;
-            CBuffer->Resize(CBuffer->GetElementCount() + 1);
-        }
-    }
+    if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
+    auto& data = _transformGPUData[entity];
+    data.CBufferIndex = _transformCount++;
+    data.NumFramesDirty = GetFrameSlotCount();
+    ResizeSceneBuffers(_primaryResources, GetDevicePassFlags(DEVICE_ROLE_PRIMARY));
+    ResizeSceneBuffers(_secondaryResources, GetDevicePassFlags(DEVICE_ROLE_SECONDARY));
 }
 
 void RenderModule::OnTransformComponentDestroyed(World& world, Entity entity, TransformComponent& component)
@@ -556,54 +488,10 @@ void RenderModule::OnTransformComponentUpdated(World& world, Entity entity, Tran
 
 void RenderModule::OnCameraComponentCreated(World& world, Entity entity, CameraComponent& component)
 {
-    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS))
-    {
-        component._CBufferIndex = _primaryResources.FrameConstants[0]->CameraCB->GetElementCount();
-
-        for (auto& constants : _primaryResources.FrameConstants)
-        {
-            auto& CBuffer = constants->CameraCB;
-            CBuffer->Resize(CBuffer->GetElementCount() + 1);
-
-            constants->CameraVisibilityCommands.push_back(GDX12VisibilityBuffers());
-
-            auto& buffers = constants->CameraVisibilityCommands[component._CBufferIndex];
-            buffers.VisibleOpaqueCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), GetPrimaryIndirectCommandsCache()->GetElementCount(), EBufferType::Default, false);
-            buffers.OpaqueDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(_primaryDevice.get(), 1, EBufferType::Default, false);
-            buffers.VisibleTransparentCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_primaryDevice.get(), GetPrimaryIndirectCommandsCache()->GetElementCount(), EBufferType::Default, false);
-            buffers.TransparentDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(_primaryDevice.get(), 1, EBufferType::Default, false);
-
-            buffers.VisibleOpaqueCommandsCache->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-            buffers.OpaqueDrawCounter->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-            buffers.VisibleTransparentCommandsCache->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-            buffers.TransparentDrawCounter->CreateUAV(_primaryResources.SRV_UAV_Heap.get(), _primaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-        }
-    }
-
-    if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS))
-    {
-        component._CBufferIndex = _secondaryResources.FrameConstants[0]->CameraCB->GetElementCount();
-
-        for (auto& constants : _secondaryResources.FrameConstants)
-        {
-            auto& CBuffer = constants->CameraCB;
-            CBuffer->Resize(CBuffer->GetElementCount() + 1);
-
-            constants->CameraVisibilityCommands.push_back(GDX12VisibilityBuffers());
-
-            auto& buffers = constants->CameraVisibilityCommands[component._CBufferIndex];
-            buffers.VisibleOpaqueCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_secondaryDevice.get(), GetSecondaryIndirectCommandsCache()->GetElementCount(), EBufferType::Default, false);
-            buffers.OpaqueDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(_secondaryDevice.get(), 1, EBufferType::Default, false);
-            buffers.VisibleTransparentCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_secondaryDevice.get(), GetSecondaryIndirectCommandsCache()->GetElementCount(), EBufferType::Default, false);
-            buffers.TransparentDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(_secondaryDevice.get(), 1, EBufferType::Default, false);
-
-            buffers.VisibleOpaqueCommandsCache->CreateUAV(_secondaryResources.SRV_UAV_Heap.get(), _secondaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-            buffers.OpaqueDrawCounter->CreateUAV(_secondaryResources.SRV_UAV_Heap.get(), _secondaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-            buffers.VisibleTransparentCommandsCache->CreateUAV(_secondaryResources.SRV_UAV_Heap.get(), _secondaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-            buffers.TransparentDrawCounter->CreateUAV(_secondaryResources.SRV_UAV_Heap.get(), _secondaryResources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-        }
-    }
-    
+    if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
+    component._CBufferIndex = _cameraCount++;
+    ResizeSceneBuffers(_primaryResources, GetDevicePassFlags(DEVICE_ROLE_PRIMARY));
+    ResizeSceneBuffers(_secondaryResources, GetDevicePassFlags(DEVICE_ROLE_SECONDARY));
 }
 
 void RenderModule::OnCameraComponentDestroyed(World& world, Entity entity, CameraComponent& component)
@@ -616,49 +504,15 @@ void RenderModule::OnCameraComponentUpdated(World& world, Entity entity, CameraC
 
 void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticMeshRenderComponent& component)
 {
-    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
+    if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
+    const auto* mesh = _meshes.at(component.MeshHandler.GetValue());
+    component._CBufferIndices.clear();
+    for (size_t i = 0; i < mesh->GetSubMeshCount(); i++)
     {
-        auto& MeshGPUData = _primaryResources.GeometryBuffer->_meshCache[component.MeshHandler.GetValue()];
-        for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
-        {
-            component._CBufferIndices.push_back(_primaryResources.FrameConstants[0]->InstanceCache->GetElementCount());
-            _primaryResources.IndirectCommandsCache->Resize(_primaryResources.IndirectCommandsCache->GetElementCount() + 1);
-
-            for (auto& constants : _primaryResources.FrameConstants)
-            {
-                auto& CBuffer = constants->InstanceCache;
-                CBuffer->Resize(CBuffer->GetElementCount() + 1);
-
-                for (auto& buffers : constants->CameraVisibilityCommands)
-                {
-                    buffers.VisibleOpaqueCommandsCache->Resize(buffers.VisibleOpaqueCommandsCache->GetElementCount() + 1);
-                    buffers.VisibleTransparentCommandsCache->Resize(buffers.VisibleTransparentCommandsCache->GetElementCount() + 1);
-                }
-            }
-        }
+        component._CBufferIndices.push_back(_instanceCount++);
     }
-
-    if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
-    {
-        auto& MeshGPUData = _secondaryResources.GeometryBuffer->_meshCache[component.MeshHandler.GetValue()];
-        for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
-        {
-            component._CBufferIndices.push_back(_secondaryResources.FrameConstants[0]->InstanceCache->GetElementCount());
-            _secondaryResources.IndirectCommandsCache->Resize(_secondaryResources.IndirectCommandsCache->GetElementCount() + 1);
-
-            for (auto& constants : _secondaryResources.FrameConstants)
-            {
-                auto& CBuffer = constants->InstanceCache;
-                CBuffer->Resize(CBuffer->GetElementCount() + 1);
-
-                for (auto& buffers : constants->CameraVisibilityCommands)
-                {
-                    buffers.VisibleOpaqueCommandsCache->Resize(buffers.VisibleOpaqueCommandsCache->GetElementCount() + 1);
-                    buffers.VisibleTransparentCommandsCache->Resize(buffers.VisibleTransparentCommandsCache->GetElementCount() + 1);
-                }
-            }
-        }
-    }
+    ResizeSceneBuffers(_primaryResources, GetDevicePassFlags(DEVICE_ROLE_PRIMARY));
+    ResizeSceneBuffers(_secondaryResources, GetDevicePassFlags(DEVICE_ROLE_SECONDARY));
 }
 
 void RenderModule::OnRenderComponentDestroyed(World& world, Entity entity, StaticMeshRenderComponent& component)
@@ -676,94 +530,27 @@ const float RenderModule::GetAspectRatio()
 
 void RenderModule::OnUpdate()
 {
-    uint16_t width, height;
-    _window->GetWindowSize(width, height);
-
-    auto consoleModule = BenchmarkEngine::GetLocator().GetModule<ConsoleModule>();
-    IConsoleVariable* ICVNumframes;
-    consoleModule->TryFindConsoleVariable(L"Render.NumFrames", ICVNumframes);
-    int numFrames = ICVNumframes->GetInt();
-
-    //sync & update Primary Device
-    _primaryResources.CurrFrameConstantsIndex = (_primaryResources.CurrFrameConstantsIndex + 1) % numFrames;
-
-    auto cmdQueue = _primaryDevice->GetCommandQueue();
-    auto& frameConsts = _primaryResources.FrameConstants[_primaryResources.CurrFrameConstantsIndex];
-
-    if (frameConsts->FenceValue > cmdQueue->GetFence()->GetCompletedValue())
-    {
-        cmdQueue->CPUWaitForFenceValue(frameConsts->FenceValue);
-    }
-
-    _primaryResources.UpdateMainCB(width, height, _timer);
-    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
+    if (!_frameGraph || _renderingSuspended) { return; }
+    _frameGraph->WaitForCurrentFrameSlot();
+    const auto slot = _frameGraph->GetCurrentFrameSlotIndex();
+    _primaryResources.CurrFrameConstantsIndex = slot;
+    _primaryResources.UpdateMainCB(_RPcommonData.WindowWidth, _RPcommonData.WindowHeight, _timer);
+    if (PipelineHasFlag(DEVICE_ROLE_PRIMARY, RENDER_PASS_FLAG_USE_MATERIALS))
     { _primaryResources.UpdateMaterialCB(_materials); }
 
-    // same for SecondaryDevice
-    if (_dualGPUMode)
+    if (_frameGraph->UsesDevice(DEVICE_ROLE_SECONDARY))
     {
-        _secondaryResources.CurrFrameConstantsIndex = (_secondaryResources.CurrFrameConstantsIndex + 1) % numFrames;
-
-        auto cmdQueue = _secondaryDevice->GetCommandQueue();
-        auto& frameConsts = _secondaryResources.FrameConstants[_secondaryResources.CurrFrameConstantsIndex];
-
-        if (frameConsts->FenceValue > cmdQueue->GetFence()->GetCompletedValue())
-        {
-            cmdQueue->CPUWaitForFenceValue(frameConsts->FenceValue);
-        }
-
-        _secondaryResources.UpdateMainCB(width, height, _timer);
-        if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
+        _secondaryResources.CurrFrameConstantsIndex = slot;
+        _secondaryResources.UpdateMainCB(_RPcommonData.WindowWidth, _RPcommonData.WindowHeight, _timer);
+        if (PipelineHasFlag(DEVICE_ROLE_SECONDARY, RENDER_PASS_FLAG_USE_MATERIALS))
         { _secondaryResources.UpdateMaterialCB(_materials); }
     }
 }
 
 void RenderModule::OnRender()
 {
-    auto primarycmdQueue = _primaryDevice->GetCommandQueue();
-    auto primarycmdList = primarycmdQueue->GetCommandList();
-    _primaryGPUTimer->Start(primarycmdList);
-
-    auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
-    for (auto& renderPass : _primaryRenderPassExecutionList) 
-    { 
-        if (renderPass->GetFlagValue(RENDER_PASS_FLAG_SYNC_DEVICES) && _dualGPUMode)
-        {
-            primarycmdQueue->ExecuteCommandList(primarycmdList);
-                primarycmdQueue->WaitForOtherFence(primarycmdList->FenceValue);
-                primarycmdList = primarycmdQueue->GetCommandList();
-            }
-        else { renderPass->Execute(primarycmdList); }
-    }
-
-    _primaryGPUTimer->Stop(primarycmdList);
-    primarycmdQueue->ExecuteCommandList(primarycmdList);
-    primaryCurrentFrameConsts->FenceValue = primarycmdList->FenceValue;
-    _primaryGPUTimer->OnCommandListExecuted(primarycmdList->FenceValue);
-
-    if (_dualGPUMode)
-    {
-        auto secondarycmdQueue = _secondaryDevice->GetCommandQueue();
-        auto secondarycmdList = secondarycmdQueue->GetCommandList();
-        _secondaryGPUTimer->Start(secondarycmdList);
-
-        auto secondaryCurrentFrameConsts = GetCurrentSecondaryFrameConstants();
-        for (auto& renderPass : _secondaryRenderPassExecutionList)
-        {
-            if (renderPass->GetFlagValue(RENDER_PASS_FLAG_SYNC_DEVICES))
-            {
-                secondarycmdQueue->ExecuteCommandList(secondarycmdList);
-                secondarycmdQueue->WaitForOtherFence(secondarycmdList->FenceValue);
-                secondarycmdList = secondarycmdQueue->GetCommandList();
-            }
-            else { renderPass->Execute(secondarycmdList); }
-        }
-        _secondaryGPUTimer->Stop(secondarycmdList);
-        secondarycmdQueue->ExecuteCommandList(secondarycmdList);
-        secondaryCurrentFrameConsts->FenceValue = secondarycmdList->FenceValue;
-        _secondaryGPUTimer->OnCommandListExecuted(secondarycmdList->FenceValue);
-    }
-
+    if (!_frameGraph || _renderingSuspended) { return; }
+    _frameGraph->ExecuteFrame(_RPcommonData);
     _backBuffer->Present();
 }
 
@@ -771,6 +558,9 @@ void RenderModule::BuildBackBuffer()
 {
     uint16_t width, height;
     _window->GetWindowSize(width, height);
+    _renderingSuspended = !width || !height;
+    width = (std::max)(uint16_t(1), width);
+    height = (std::max)(uint16_t(1), height);
 
     _backBuffer = std::make_unique<GDX12SwapChain>(_primaryDevice.get(), _window->GetWindowHandle(),
         DXGI_FORMAT_R8G8B8A8_UNORM, 2, width, height, _primaryResources.RTVHeap.get());
@@ -796,108 +586,170 @@ void RenderModule::BuildBackBuffer()
     _RPcommonData.WindowHeight = height;
 }
 
-void RenderModule::ShareFences()
+void RenderModule::CompileFrameGraph(FrameGraph& graph)
 {
-    HANDLE primaryhandle;
-    ThrowIfFailed(_primaryDevice->GetDevice()->CreateSharedHandle(
-        _primaryDevice->GetCommandQueue()->GetFence().Get(),
-        nullptr, GENERIC_ALL, nullptr, &primaryhandle));
-
-    ThrowIfFailed(_secondaryDevice->GetDevice()->OpenSharedHandle(
-        primaryhandle,
-        IID_PPV_ARGS(&_secondaryDevice->GetCommandQueue()->GetOtherFence())));
-
-    HANDLE secondaryhandle;
-    ThrowIfFailed(_secondaryDevice->GetDevice()->CreateSharedHandle(
-        _secondaryDevice->GetCommandQueue()->GetFence().Get(),
-        nullptr, GENERIC_ALL, nullptr, &secondaryhandle));
-
-    ThrowIfFailed(_primaryDevice->GetDevice()->OpenSharedHandle(
-        secondaryhandle,
-        IID_PPV_ARGS(&_primaryDevice->GetCommandQueue()->GetOtherFence())));
-}
-
-void RenderModule::ConfigureRenderPipeline()
-{
-    // Setup render passes you would like to execute
-    // Add in execution order
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureClearPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12XeSSUpscalePass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
-
-    SetupRenderPasses();
-
-    // Link inputs & outputs for each pass that needs it
-    GDX12RenderPass* clearPass = _primaryRenderPassExecutionList[0].get();
-    GDX12RenderPass* cullingPass = _primaryRenderPassExecutionList[1].get();
-    GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[2].get();
-    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[3].get();
-    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[4].get();
-    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[5].get();
-    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[6].get();
-
-    clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
-    cullingPass->SetInputs({});
-    opaquePass->SetInputs({});
-    transparencyPass->SetInputs({ opaquePass->GetOutput(2) });
-    compositionPass->SetInputs({ opaquePass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
-    upscalePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1), compositionPass->GetOutput(0) });
-    outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get()});
-
-    opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    transparencyPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    compositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-
-    InitializeRenderPasses();
-}
-
-void RenderModule::SetupRenderPasses()
-{
-    for (auto& pass : _primaryRenderPassExecutionList)
+    if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
+    const auto primaryFlags = graph.GetDevicePassFlags(DEVICE_ROLE_PRIMARY);
+    const auto secondaryFlags = graph.GetDevicePassFlags(DEVICE_ROLE_SECONDARY);
+    if ((primaryFlags | secondaryFlags) & RENDER_PASS_FLAG_USE_STREAMLINE)
     {
-        pass->Setup(&_primaryResources, &_secondaryResources, &_RPcommonData);
-        _primaryPipelineFlags |= pass->GetFlags();
+        auto& sdk = GDX12StreamlineSDK::Get();
+        sdk.Initialize();
+        if (_primaryDevice->IsInitialized()) { sdk.CreateProxyDevice(_primaryDevice->GetDevice(), true); }
     }
 
-    for (auto& pass : _secondaryRenderPassExecutionList)
+    if (!_primaryDevice->IsInitialized())
     {
-        pass->Setup(&_secondaryResources, &_primaryResources, &_RPcommonData);
-        _secondaryPipelineFlags |= pass->GetFlags();
+        _primaryDevice->Role = DEVICE_ROLE_PRIMARY;
+        ThrowIfFailed(_primaryDevice->Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
+        _primaryResources.Initialize(_primaryDevice.get());
     }
-}
 
-void RenderModule::InitializeRenderPasses()
-{
-    std::vector<GDX12RenderPass*> allRenderPasses;
-    for (auto& pass : _primaryRenderPassExecutionList)
-        allRenderPasses.push_back(pass.get());
-    for (auto& pass : _secondaryRenderPassExecutionList)
-        allRenderPasses.push_back(pass.get());
-    const int MAX_ITERATIONS = 100;
-    int iteration = 0;
-    while (!allRenderPasses.empty())
+    const bool dualGPUMode = graph.UsesDevice(DEVICE_ROLE_SECONDARY);
+    if (dualGPUMode && !_secondaryDevice->IsInitialized())
     {
-        if (iteration > MAX_ITERATIONS)
+        auto adapters = GDX12DeviceFactory::GetDeviceDescriptors();
+        auto secondary = std::find_if(adapters.begin(), adapters.end(), [this](const auto& adapter)
         {
-            OutputDebugStringA("ERROR: RenderPass linking failed after 100 attempts. This can be caused by wrong render pass inputs\n");
-            break;
-        }
-        for (auto it = allRenderPasses.begin(); it != allRenderPasses.end();)
-        {
-            GDX12RenderPass* renderPass = *it;
-            if (renderPass->ValidateInputs())
-            {
-                renderPass->Initialize();
-                it = allRenderPasses.erase(it);
-            }
-            else { ++it; }
-        }
-        iteration++;
+            DXGI_ADAPTER_DESC3 desc = {};
+            ThrowIfFailed(adapter.Adapter->GetDesc3(&desc));
+            const auto primaryLuid = _primaryDevice->GetAdapterLuid();
+            return desc.AdapterLuid.LowPart != primaryLuid.LowPart || desc.AdapterLuid.HighPart != primaryLuid.HighPart;
+        });
+        if (secondary == adapters.end()) { throw std::runtime_error("ERROR: Given FrameGraph assigns passes to the secondary GPU, but no second adapter is available. Use "
+            "AddPrimaryPass() for these passes or provide a second compatible GPU."); }
+        _secondaryDevice->Role = DEVICE_ROLE_SECONDARY;
+        ThrowIfFailed(_secondaryDevice->Initialize(secondary->Adapter));
+        _secondaryResources.Initialize(_secondaryDevice.get());
     }
+
+    if (!_backBuffer) { BuildBackBuffer(); }
+
+    PrepareSceneResources(_primaryResources, primaryFlags);
+    if (dualGPUMode) { PrepareSceneResources(_secondaryResources, secondaryFlags); }
+
+    graph.SetDeviceResources(&_primaryResources, dualGPUMode ? &_secondaryResources : nullptr, &_RPcommonData);
+    BindRenderTargets(graph);
+
+    const UInt2 previousRenderSize = {_RPcommonData.DownscaledWidth, _RPcommonData.DownscaledHeight};
+    try { _frameGraph = graph.Compile(); }
+    catch (...)
+    {
+        _RPcommonData.DownscaledWidth = previousRenderSize.x;
+        _RPcommonData.DownscaledHeight = previousRenderSize.y;
+        throw;
+    }
+    MarkSceneDataDirty();
+    OutputDebugStringA(_frameGraph->GetDebugReport().c_str());
+}
+
+void RenderModule::ResizeSceneBuffers(GDX12DeviceResources& resources, uint32_t flags)
+{
+    auto grow = [](auto& buffer, uint32_t count)
+    {
+        if (buffer->GetElementCount() < count) { buffer->Resize(count); }
+    };
+    for (auto& frame : resources.FrameConstants)
+    {
+        if (flags & RENDER_PASS_FLAG_USE_MATERIALS)
+        { grow(frame->MaterialCache, static_cast<uint32_t>(_materials.size())); }
+        if (flags & RENDER_PASS_FLAG_USE_CAMERAS) { grow(frame->CameraCB, _cameraCount); }
+        if (flags & RENDER_PASS_FLAG_USE_INSTANCES)
+        {
+            grow(frame->TransformCache, _transformCount);
+            grow(frame->InstanceCache, _instanceCount);
+        }
+    }
+    if (flags & RENDER_PASS_FLAG_USE_INSTANCES) { grow(resources.IndirectCommandsCache, _instanceCount); }
+}
+
+void RenderModule::PrepareSceneResources(GDX12DeviceResources& resources, uint32_t flags)
+{
+    ResizeSceneBuffers(resources, flags);
+    if (flags & RENDER_PASS_FLAG_USE_GEOMETRY)
+    {
+        for (const auto& mesh : _meshes)
+        {
+            if (!resources.GeometryBuffer->_meshCache.count(mesh.first))
+            { resources.GeometryBuffer->AddMesh(mesh.second, MeshHandle(mesh.first)); }
+        }
+    }
+    if (flags & RENDER_PASS_FLAG_USE_MATERIALS)
+    {
+        for (auto& entry : _textures)
+        {
+            auto& texture = *entry.second;
+            auto*& gpuTexture = resources.Device == _primaryDevice.get()
+                ? texture.PrimaryDeviceTexture : texture.SecondaryDeviceTexture;
+            if (!gpuTexture) { gpuTexture = CreateDX12Texture(entry.first, &resources, &texture.Source); }
+        }
+    }
+}
+
+void RenderModule::MarkSceneDataDirty()
+{
+    for (auto& material : _materials) { material.second->DirtyFlag = true; }
+    for (auto& transform : _transformGPUData) { transform.second.NumFramesDirty = GetFrameSlotCount(); }
+    for (const auto& subscription : _worldSubscriptions)
+    {
+        auto& ecs = subscription.first->GetECS();
+        ecs.ForEach<CameraComponent>([](Entity, CameraComponent& camera) { camera.DirtyFlag = true; });
+        ecs.ForEach<StaticMeshRenderComponent>([](Entity, StaticMeshRenderComponent& renderer) { renderer.DirtyFlag = true; });
+    }
+}
+
+void RenderModule::BindRenderTargets(FrameGraph& graph)
+{
+    const auto backBuffer = graph.ImportTexture("back-buffer", [this]() { return _backBuffer->GetCurrentBuffer(); });
+    const auto depthTarget = graph.ImportTexture("display-depth", [this]() { return _depthStencil.get(); });
+    for (const auto& clear : graph.GetPassNodes<GDX12TextureClearPass>())
+    {
+        graph.ConnectNodes(backBuffer, clear.GetInput(GDX12TextureClearPass::Target));
+        graph.ConnectNodes(depthTarget, clear.GetInput(GDX12TextureClearPass::DepthTarget));
+    }
+    bool hasPresentation = false;
+    for (const auto& entry : graph.GetDefinition().Nodes)
+    {
+        const auto& node = entry.second;
+        auto handle = graph.GetNode(node.Id);
+        for (const auto& port : node.Description.Outputs)
+        {
+            if (!HasUsage(port.second.Usages, ResourceUsage::Present)) { continue; }
+            hasPresentation = true;
+            const auto& target = port.second.AliasInput;
+            const auto& connections = graph.GetDefinition().Connections;
+            const bool connected = std::any_of(connections.begin(), connections.end(), [&](const Connection& connection)
+            { return connection.Target == PinAddress{node.Id, target}; });
+            if (!connected) { graph.ConnectNodes(backBuffer, handle.GetInput(target)); }
+        }
+    }
+    if (!hasPresentation) { throw std::invalid_argument("ERROR: Given Render pipeline has no presentation pass. Add GDX12OutputToScreenPass."); }
+}
+
+void RenderModule::ConfigureRenderPipeline(FrameGraph& fg)
+{
+    fg.SetTransportQueuePolicy(TransportQueuePolicy::Auto);
+
+    auto culling = fg.AddPrimaryPass<GDX12GPUCullingPass>("Culling");
+    auto opaque = fg.AddPrimaryPass<GDX12OpaquePass>("Opaque");
+    auto transparency = fg.AddPrimaryPass<GDX12WBOITTransparencyPass>("Transparency");
+    auto composition = fg.AddPrimaryPass<GDX12WBOITCompositionPass>("Composition");
+
+    auto clear = fg.AddPrimaryPass<GDX12TextureClearPass>("Clear");
+    auto upscale = fg.AddSecondaryPass<GDX12XeSSUpscalePass>("XeSS");
+    auto output = fg.AddPrimaryPass<GDX12OutputToScreenPass>("Output");
+
+    fg.ConnectNodes(clear.GetOutput("Cleared"), output.GetInput("Target"));
+    fg.ConnectNodes(culling.GetOutput("OpaqueDrawStream"), opaque.GetInput("DrawStream"));
+    fg.ConnectNodes(culling.GetOutput("TransparentDrawStream"), transparency.GetInput("DrawStream"));
+    fg.ConnectNodes(opaque.GetOutput("Depth"), transparency.GetInput("Depth"));
+    fg.ConnectNodes(opaque.GetOutput("Color"), composition.GetInput("Opaque"));
+    fg.ConnectNodes(transparency.GetOutput("Accum"), composition.GetInput("Accum"));
+    fg.ConnectNodes(transparency.GetOutput("Revealage"), composition.GetInput("Revealage"));
+    fg.ConnectNodes(composition.GetOutput("Color"), upscale.GetInput("Source"));
+    fg.ConnectNodes(opaque.GetOutput("Depth"), upscale.GetInput("Depth"));
+    fg.ConnectNodes(opaque.GetOutput("Velocity"), upscale.GetInput("Velocity"));
+    fg.ConnectNodes(upscale.GetOutput("Color"), output.GetInput("Color"));
 }
 
 void RenderModule::SubscribeToSceneManager()
@@ -981,5 +833,5 @@ bool RenderModule::ShouldTick()
 
 bool RenderModule::ShouldRender()
 {
-    return true;
+    return _frameGraph && !_renderingSuspended && _RPcommonData.ActiveCameraCBufferIndex != UINT(-1);
 }

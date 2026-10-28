@@ -6,6 +6,7 @@
 class GDX12TextureResource : public GDX12Resource
 {
 public:
+    using GDX12Resource::SetCurrentState;
     GDX12TextureResource(ComPtr<ID3D12Resource> resource);
     GDX12TextureResource();
     ~GDX12TextureResource();

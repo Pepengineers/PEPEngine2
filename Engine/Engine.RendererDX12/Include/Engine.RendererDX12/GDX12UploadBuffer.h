@@ -204,15 +204,17 @@ void GDX12UploadBuffer<T>::Resize(UINT newElementCount)
     if (newElementCount <= _elementCount) return;
 
     UINT oldElementCount = _elementCount;
+    auto previousResource = _buffer.D3DResource;
+    auto* previousData = _mappedData;
     _elementCount = newElementCount;
-
-    if (_bufferType == EBufferType::Upload && _mappedData)
-    {
-        _buffer.D3DResource->Unmap(0, nullptr);
-        _mappedData = nullptr;
-    }
+    _mappedData = nullptr;
 
     CreateBuffer();
+    if (previousData)
+    {
+        memcpy(_mappedData, previousData, static_cast<size_t>(oldElementCount) * _elementByteSize);
+        previousResource->Unmap(0, nullptr);
+    }
 
     if (_srv) CreateSRV(_heap, _SRVheapIndex);
     if (_uav) CreateUAV(_heap, _UAVheapIndex);

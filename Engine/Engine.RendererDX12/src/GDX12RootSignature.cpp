@@ -66,7 +66,7 @@ GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSigna
             ranges.push_back(range);
 
             CD3DX12_ROOT_PARAMETER1 param;
-            param.InitAsDescriptorTable(1, &ranges.back());
+            param.InitAsDescriptorTable(1, &ranges.back(), desc.SingleSRVVisibility);
             rootParameters.push_back(param);
             currentParamIndex++;
             currentRegister++;

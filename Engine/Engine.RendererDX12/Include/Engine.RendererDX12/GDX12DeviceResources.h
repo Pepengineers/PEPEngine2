@@ -28,10 +28,6 @@ public:
 
     std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> IndirectCommandsCache;
 
-    std::unordered_map<std::string, ComPtr<ID3DBlob>> Shaders;
-    std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> PSOs;
-    std::unordered_map<std::string, std::unique_ptr<GDX12RootSignature>> RootSignatures;
-    std::unordered_map <std::string, ComPtr<ID3D12CommandSignature>> CommandSignatures;
     std::unordered_map<std::string, std::unique_ptr<GDX12Texture>> Textures;
 
     GDX12Device* Device;

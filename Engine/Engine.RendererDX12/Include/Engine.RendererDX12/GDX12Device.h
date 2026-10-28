@@ -33,6 +33,8 @@ public:
 	const ComPtr<ID3D12Device14>& GetDevice();
 	const ComPtr<ID3D12Device14>& GetCommandQueueCreationDevice();
 	GDX12CommandQueue* GetCommandQueue();
+	GDX12CommandQueue* GetCopyCommandQueue();
+	void Flush();
 	const DeviceSpecs& GetDeviceFeatures();
 	LUID GetAdapterLuid() const;
 	const bool IsInitialized();
@@ -46,6 +48,7 @@ private:
 	ComPtr<ID3D12Device14> _proxyDevice;
 
 	std::unique_ptr<GDX12CommandQueue> _commandQueue;
+	std::unique_ptr<GDX12CommandQueue> _copyCommandQueue;
 
 	bool _isInitialized;
 

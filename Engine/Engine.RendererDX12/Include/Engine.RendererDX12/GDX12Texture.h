@@ -3,7 +3,7 @@
 #include "Engine.RendererDX12\D3DHelpers.h"
 
 #include "Engine.Core/Types/TextureTypes.h"
-#include "Engine.RendererDX12/IRenderPassLink.h"
+#include <memory>
 
 class GDX12Descriptor;
 class GDX12DescriptorHeap;
@@ -36,12 +36,18 @@ namespace
 
 struct GDX12TextureDesc
 {
+	GDX12Device* Device = nullptr;
 	GDX12DescriptorHeap* SRV_UAV_Heap = nullptr;
 	GDX12DescriptorHeap* RTVHeap = nullptr;
 	GDX12DescriptorHeap* DSVHeap = nullptr;
 	UINT Width = 0;
 	UINT Height = 0;
+	UINT ArraySize = 1;
+	UINT MipLevels = 1;
+	UINT SampleCount = 1;
+	bool IsCube = false;
 	DXGI_FORMAT Format = DXGI_FORMAT_UNKNOWN;
+	DXGI_FORMAT ResourceFormat = DXGI_FORMAT_UNKNOWN;
 	ETextureSemantic Semantic = ETextureSemantic::Unknown;
 	bool CreateSRV = true;
 	D3D12_SHADER_RESOURCE_VIEW_DESC SRVDesc = {};
@@ -63,7 +69,7 @@ struct GDX12TextureDesc
 	ComPtr<ID3D12Resource> ExternalResource = nullptr;
 };
 
-class GDX12Texture : public IRenderPassLink
+class GDX12Texture
 {
 public:
 	GDX12Texture();
@@ -74,11 +80,17 @@ public:
 	//Recreates resources with new size and same descriptors
 	//This will wipe all data on said resources, unless ExternalResource is provided
 	void Resize(UINT width, UINT height);
+	void ReplaceExternalResource(ComPtr<ID3D12Resource> resource);
+	const GDX12TextureDesc& GetDescription() const;
+	GDX12Device* GetDevice() const;
 
 	GDX12Descriptor* GetSRV();
 	GDX12Descriptor* GetRTV();
+	GDX12Descriptor* GetRTV(UINT layer);
 	GDX12Descriptor* GetUAV();
 	GDX12Descriptor* GetDSV();
+	GDX12Descriptor* GetDSV(UINT layer);
+	GDX12Descriptor* GetReadOnlyDSV(UINT layer = 0);
 	bool HasDSV();
 	bool HasSRV();
 	bool HasUAV();
@@ -91,12 +103,12 @@ public:
 	D3D12_RECT GetScissorRect();
 	UINT GetWidth();
 	UINT GetHeight();
-	GDX12Texture* GetTexture() override;
-	bool IsInitialized() override;
+	bool IsInitialized();
 
 private:
 	void CreateResource();
 	void CreateViews();
+	void ValidateDescription();
 
 	std::unique_ptr<GDX12TextureResource> _resource;
 	D3D12_RESOURCE_FLAGS _resourceFlags;
@@ -106,6 +118,9 @@ private:
 	std::unique_ptr<GDX12Descriptor> _rtv;
 	std::unique_ptr<GDX12Descriptor> _uav;
 	std::unique_ptr<GDX12Descriptor> _dsv;
+	std::vector<std::unique_ptr<GDX12Descriptor>> _layerRTVs;
+	std::vector<std::unique_ptr<GDX12Descriptor>> _layerDSVs;
+	std::vector<std::unique_ptr<GDX12Descriptor>> _readOnlyDSVs;
 	D3D12_CLEAR_VALUE _clearValue;
 
 	D3D12_VIEWPORT _viewport;

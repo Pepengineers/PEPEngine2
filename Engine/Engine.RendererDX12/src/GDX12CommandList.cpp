@@ -9,19 +9,21 @@
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
 
 #include <pix/pix3.h>
+#include <limits>
 
-GDX12CommandList::GDX12CommandList(GDX12Device* device) :
-	FenceValue(0),
+GDX12CommandList::GDX12CommandList(GDX12Device* device, D3D12_COMMAND_LIST_TYPE type) :
+	FenceValue((std::numeric_limits<UINT64>::max)()),
+	_type(type),
 	_currentTopology(D3D_PRIMITIVE_TOPOLOGY_UNDEFINED),
 	_currentScissorRect({}),
 	_currentViewport({}),
 	_currentRootSignature(nullptr),
 	_currentGeometryBuffer(nullptr)
 {
-	device->GetDevice()->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&_commandAllocator));
+	ThrowIfFailed(device->GetDevice()->CreateCommandAllocator(type, IID_PPV_ARGS(&_commandAllocator)));
 
-	device->GetDevice()->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, _commandAllocator.Get(),
-			nullptr, IID_PPV_ARGS(&_commandList));
+	ThrowIfFailed(device->GetDevice()->CreateCommandList(0, type, _commandAllocator.Get(),
+			nullptr, IID_PPV_ARGS(&_commandList)));
 }
 
 GDX12CommandList::~GDX12CommandList()
@@ -40,10 +42,16 @@ const ComPtr<ID3D12CommandAllocator>& GDX12CommandList::GetCommandAllocator()
 	return _commandAllocator;
 }
 
+D3D12_COMMAND_LIST_TYPE GDX12CommandList::GetType() const
+{
+	return _type;
+}
+
 void GDX12CommandList::Reset()
 {
-	_commandAllocator->Reset();
-	_commandList->Reset(_commandAllocator.Get(), nullptr);
+	ThrowIfFailed(_commandAllocator->Reset());
+	ThrowIfFailed(_commandList->Reset(_commandAllocator.Get(), nullptr));
+	FenceValue = (std::numeric_limits<UINT64>::max)();
 
 	_currentRootSignature = nullptr;
 	_currentPSO = nullptr;
@@ -158,8 +166,15 @@ void GDX12CommandList::ClearRenderTargetView(GDX12Texture* texture)
 
 void GDX12CommandList::ClearDepthStencilView(GDX12Texture* texture)
 {
+	D3D12_CLEAR_FLAGS flags = D3D12_CLEAR_FLAG_DEPTH;
+	const auto format = texture->GetFormat();
+	if (format == DXGI_FORMAT_D24_UNORM_S8_UINT || format == DXGI_FORMAT_D32_FLOAT_S8X24_UINT ||
+		format == DXGI_FORMAT_R24G8_TYPELESS || format == DXGI_FORMAT_R32G8X24_TYPELESS)
+	{
+		flags |= D3D12_CLEAR_FLAG_STENCIL;
+	}
 	_commandList->ClearDepthStencilView(texture->GetDSV()->CPUHandle, 
-		D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, texture->GetClearValue().DepthStencil.Depth, texture->GetClearValue().DepthStencil.Stencil, 0, nullptr);
+		flags, texture->GetClearValue().DepthStencil.Depth, texture->GetClearValue().DepthStencil.Stencil, 0, nullptr);
 }
 
 void GDX12CommandList::ClearUnorderedAccessViewFloat(const D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle, const D3D12_CPU_DESCRIPTOR_HANDLE& cpuHandle, ID3D12Resource* resource, const float values[4])
@@ -279,7 +294,8 @@ void GDX12CommandList::ResourceBarrier(std::initializer_list<CD3DX12_RESOURCE_BA
 	{
 		//skip transition with equal before and after states
 		const D3D12_RESOURCE_BARRIER& baseBarrier = barrier;
-		if (baseBarrier.Transition.StateBefore != baseBarrier.Transition.StateAfter)
+		if (baseBarrier.Type != D3D12_RESOURCE_BARRIER_TYPE_TRANSITION ||
+			baseBarrier.Transition.StateBefore != baseBarrier.Transition.StateAfter)
 		{
 			filteredBarriers.push_back(barrier);
 		}

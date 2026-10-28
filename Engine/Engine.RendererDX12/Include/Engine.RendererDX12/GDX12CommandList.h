@@ -11,11 +11,12 @@ class GDX12GeometryBuffer;
 class GDX12CommandList
 {
 public:
-	GDX12CommandList(GDX12Device* device);
+	GDX12CommandList(GDX12Device* device, D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT);
 	~GDX12CommandList();
 
 	const ComPtr<ID3D12GraphicsCommandList10>& GetCommandList();
 	const ComPtr<ID3D12CommandAllocator>& GetCommandAllocator();
+	D3D12_COMMAND_LIST_TYPE GetType() const;
 	void Reset();
 
 	UINT64 FenceValue;
@@ -92,6 +93,7 @@ public:
 private:
 	ComPtr<ID3D12GraphicsCommandList10> _commandList;
 	ComPtr<ID3D12CommandAllocator> _commandAllocator;
+	D3D12_COMMAND_LIST_TYPE _type;
 
 	//Cached states
 	GDX12RootSignature* _currentRootSignature;
