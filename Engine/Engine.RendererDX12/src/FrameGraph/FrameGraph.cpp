@@ -492,133 +492,193 @@ struct CompiledFrameGraph::Runtime
         return {material.LocalCopies.at(device).get(), material.LocalCopyReady.at(device)};
     }
 
-    // Record and submit one frame using the compiled order and the current slot's allocations
-    // GPU execution can continue after this function returns
+    // Coalesce pending rebuilds before the frame takes references into the replacement slots.
+    void RebuildRequestedFrameSlotResources()
+    {
+        if (!ResourceRebuildRequested) { return; }
+        WaitForGPUCompletion();
+        ResolveResourceRequirements();
+        BuildFrameSlotResources();
+        for (auto& passEntry : Passes)
+        {
+            const auto& nodeDefinition = Definition.Nodes.at(passEntry.first);
+            PassInitContext initContext(GetDeviceResources(nodeDefinition.DeviceRole), Common, nodeDefinition, Plan, Sources);
+            passEntry.second->OnResourcesRecreated(initContext);
+        }
+        ResourceRebuildRequested = false;
+    }
+
+    // Keep idle slot allocations while discarding readiness from their previous frame.
+    void ResetFrameSlotReadiness(FrameSlotResources& frameResources)
+    {
+        frameResources.LastUse.clear();
+        for (auto& resourceEntry : frameResources.Resources)
+        {
+            resourceEntry.second.SharedReady = {};
+            resourceEntry.second.ProducerReady = {};
+            resourceEntry.second.LocalCopyReady.clear();
+        }
+    }
+
+    // Resolve the current external texture and retain its native allocation for this frame.
+    void RefreshImportedTexture(const NodeId& nodeId, FrameSlotResources& frameResources)
+    {
+        // Refresh rotating back buffers or replaced textures without recreating the source node
+        auto* importedTexture = Imports.at(nodeId)();
+        auto& resourceInstance = frameResources.Resources.at({nodeId,"Resource"});
+        resourceInstance.LocalResource->ImportedTexture = importedTexture;
+        frameResources.ExternalResources.push_back(importedTexture->GetResource()->D3DResource);
+        resourceInstance.ProducerResource = resourceInstance.LocalResource.get();
+    }
+
+    // Resolve inputs, wait for their data and publish alias outputs using the same physical allocation.
+    std::map<PinId, PassBinding> PreparePassBindings(const NodeDefinition& nodeDefinition,
+        GDX12CommandQueue* commandQueue, FrameSlotResources& frameResources)
+    {
+        const auto& passDescription = nodeDefinition.Description;
+        std::map<PinId, PassBinding> portBindings;
+        for (const auto& portEntry : passDescription.Inputs)
+        {
+            if (!Sources.count({nodeDefinition.Id,portEntry.first})) { continue; }
+            auto inputBinding = ResolveInputResource({nodeDefinition.Id,portEntry.first}, frameResources);
+            commandQueue->GPUWait(inputBinding.second);
+            commandQueue->GPUWait(frameResources.LastUse[inputBinding.first]);
+            portBindings[portEntry.first] = inputBinding.first->CreatePassBinding(portEntry.second.Usages);
+        }
+        for (const auto& portEntry : passDescription.Outputs)
+        {
+            auto& resourceInstance = frameResources.Resources.at({nodeDefinition.Id,portEntry.first});
+            if (!portEntry.second.AliasInput.empty())
+            {
+                resourceInstance.ProducerResource = portBindings.at(portEntry.second.AliasInput).Resource;
+                if (Plan.Resources.at({nodeDefinition.Id,portEntry.first}).Storage == MemoryType::Shared)
+                { resourceInstance.SharedAllocationAlias = &GetSharedResources(frameResources.Resources.at(Sources.at({nodeDefinition.Id,portEntry.second.AliasInput}))); }
+            }
+            portBindings[portEntry.first] = resourceInstance.ProducerResource->CreatePassBinding(portEntry.second.Usages);
+        }
+        return portBindings;
+    }
+
+    // Wait for external scene data, retain its allocation and prepare states outside graph ports.
+    void PreparePassExternalResources(GDX12RenderPass& renderPass, PassExecutionContext& executionContext,
+        FrameSlotResources& frameResources)
+    {
+        auto* commandList = executionContext.GetCommandList();
+        auto* commandQueue = executionContext.GetDevice()->GetCommandQueue();
+        for (const auto& externalUse : renderPass.GetExternalResources(executionContext))
+        {
+            if (!externalUse.Resource || !externalUse.Resource->D3DResource) { continue; }
+            commandQueue->GPUWait(externalUse.Ready);
+            frameResources.ExternalResources.push_back(externalUse.Resource->D3DResource);
+            D3D12_HEAP_PROPERTIES heapProperties = {};
+            D3D12_HEAP_FLAGS heapFlags = {};
+            ThrowIfFailed(externalUse.Resource->D3DResource->GetHeapProperties(&heapProperties, &heapFlags));
+            // Upload heaps remain in GENERIC_READ and cannot use ordinary state transitions.
+            if (heapProperties.Type == D3D12_HEAP_TYPE_UPLOAD) { externalUse.Resource->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ); }
+            else { commandList->ResourceBarrier({externalUse.Resource->GetTransitionBarrier(externalUse.State)}); }
+        }
+    }
+
+    // Prepare input and output states, leaving alias outputs in their input state until execution.
+    void PreparePassResourceStates(const PassDescription& passDescription, const std::map<PinId, PassBinding>& portBindings,
+        GDX12CommandList* commandList)
+    {
+        for (const auto* portList : {&passDescription.Inputs, &passDescription.Outputs})
+        {
+            for (const auto& portEntry : *portList)
+            {
+                if (!portBindings.count(portEntry.first) || (portList == &passDescription.Outputs && !portEntry.second.AliasInput.empty())) { continue; }
+                TransitionFrameGraphResource(commandList, *portBindings.at(portEntry.first).Resource, UsageState(portEntry.second.Usages));
+                if (HasUsage(portEntry.second.Usages, ResourceUsage::UnorderedAccess)) { FrameGraphUAVBarrier(commandList, *portBindings.at(portEntry.first).Resource); }
+            }
+        }
+    }
+
+    // Restore declared states, publish alias output states and release shared outputs to COMMON.
+    void RestorePassResourceStates(const NodeDefinition& nodeDefinition, const std::map<PinId, PassBinding>& portBindings,
+        GDX12CommandList* commandList)
+    {
+        const auto& passDescription = nodeDefinition.Description;
+        // Restore declared states after pass-local changes, then apply alias output states.
+        // This is where an Output pass can leave the same input back buffer in PRESENT.
+        for (bool isInputPort : {true, false})
+        {
+            for (const auto& portEntry : isInputPort ? passDescription.Inputs : passDescription.Outputs)
+            {
+                if (!portBindings.count(portEntry.first)) { continue; }
+                TransitionFrameGraphResource(commandList, *portBindings.at(portEntry.first).Resource, UsageState(portEntry.second.Usages));
+                if (HasUsage(portEntry.second.Usages, ResourceUsage::UnorderedAccess)) { FrameGraphUAVBarrier(commandList, *portBindings.at(portEntry.first).Resource); }
+            }
+        }
+        // Cross-adapter handoffs leave each device mapping coherent in COMMON.
+        for (const auto& portEntry : passDescription.Outputs)
+        {
+            if (!portBindings.count(portEntry.first)) { continue; }
+            if (Plan.Resources.at({nodeDefinition.Id,portEntry.first}).Storage == MemoryType::Shared)
+            { TransitionFrameGraphResource(commandList, *portBindings.at(portEntry.first).Resource, D3D12_RESOURCE_STATE_COMMON); }
+        }
+    }
+
+    // Publish the submission point for node dependencies, physical last use and output readiness.
+    void TrackPassCompletion(const NodeDefinition& nodeDefinition, const std::map<PinId, PassBinding>& portBindings,
+        const GDX12CompletionPoint& completionPoint, FrameSlotResources& frameResources,
+        std::map<NodeId, GDX12CompletionPoint>& nodeCompletions)
+    {
+        nodeCompletions[nodeDefinition.Id] = completionPoint;
+        for (const auto& portBinding : portBindings) { frameResources.LastUse[portBinding.second.Resource] = completionPoint; }
+        for (const auto& outputEntry : nodeDefinition.Description.Outputs)
+        { frameResources.Resources.at({nodeDefinition.Id,outputEntry.first}).ProducerReady = completionPoint; }
+    }
+
+    // Record one pass in the same order as its waits, resource preparation and completion bookkeeping.
+    void RecordAndSubmitPass(const NodeDefinition& nodeDefinition, FrameSlotResources& frameResources,
+        std::map<NodeId, GDX12CompletionPoint>& nodeCompletions)
+    {
+        auto* deviceResources = GetDeviceResources(nodeDefinition.DeviceRole);
+        deviceResources->CurrFrameConstantsIndex = GetCurrentFrameSlotResourcesIndex();
+        auto* commandQueue = deviceResources->Device->GetCommandQueue();
+        for (const auto& dependencyId : Plan.Dependencies.at(nodeDefinition.Id))
+        { commandQueue->GPUWait(nodeCompletions[dependencyId]); }
+        auto portBindings = PreparePassBindings(nodeDefinition, commandQueue, frameResources);
+        auto* commandList = commandQueue->GetCommandList();
+        auto* renderPass = Passes.at(nodeDefinition.Id).get();
+        auto* passTimer = Timers.at(nodeDefinition.Id).get();
+
+        commandList->BeginPixEvent(nodeDefinition.Id, Colors::CornflowerBlue);
+        passTimer->Start(commandList);
+        PassInitContext initContext(deviceResources, Common, nodeDefinition, Plan, Sources);
+        PassExecutionContext executionContext(initContext, commandList, Frame, GetCurrentFrameSlotResourcesIndex(), portBindings);
+
+        PreparePassExternalResources(*renderPass, executionContext, frameResources);
+        PreparePassResourceStates(nodeDefinition.Description, portBindings, commandList);
+        renderPass->Execute(executionContext);
+        RestorePassResourceStates(nodeDefinition, portBindings, commandList);
+        passTimer->Stop(commandList);
+        commandList->EndPixEvent();
+
+        const auto completionPoint = SubmitCommandList(commandQueue, commandList, frameResources);
+        passTimer->OnCommandListExecuted(completionPoint.Value);
+        TrackPassCompletion(nodeDefinition, portBindings, completionPoint, frameResources, nodeCompletions);
+    }
+
+    // Submit one frame; presentation and a final GPU wait remain the caller's responsibility.
     void ExecuteFrame()
     {
         WaitForCurrentFrameSlotResources();
-
-        // Requests are coalesced until a frame starts; rebuild before taking references into FrameSlots
-        if (ResourceRebuildRequested)
-        {
-            WaitForGPUCompletion();
-            ResolveResourceRequirements();
-            BuildFrameSlotResources();
-            for (auto& entry : Passes)
-            {
-                const auto& node = Definition.Nodes.at(entry.first);
-                PassInitContext init(GetDeviceResources(node.DeviceRole), Common, node, Plan, Sources);
-                entry.second->OnResourcesRecreated(init);
-            }
-            ResourceRebuildRequested = false;
-        }
-
+        RebuildRequestedFrameSlotResources();
         auto& frameResources = FrameSlots[GetCurrentFrameSlotResourcesIndex()];
-        // Discard readiness from its previous frame
-        frameResources.LastUse.clear();
-        for (auto& entry : frameResources.Resources)
-        {
-            entry.second.SharedReady = {};
-            entry.second.ProducerReady = {};
-            entry.second.LocalCopyReady.clear();
-        }
+        ResetFrameSlotReadiness(frameResources);
 
         std::map<NodeId, GDX12CompletionPoint> nodeCompletions;
-        for (const auto& id : Plan.Order)
+        for (const auto& nodeId : Plan.Order)
         {
-            const auto& node = Definition.Nodes.at(id);
-            if (Imports.count(id))
+            const auto& nodeDefinition = Definition.Nodes.at(nodeId);
+            if (Imports.count(nodeId))
             {
-                // Refresh rotating back buffers or replaced textures without recreating the source node
-                auto* texture = Imports.at(id)();
-                auto& material = frameResources.Resources.at({id,"Resource"});
-                material.LocalResource->ImportedTexture = texture;
-                frameResources.ExternalResources.push_back(texture->GetResource()->D3DResource);
-                material.ProducerResource = material.LocalResource.get();
+                RefreshImportedTexture(nodeId, frameResources);
                 continue;
             }
-            auto* resources = GetDeviceResources(node.DeviceRole);
-            resources->CurrFrameConstantsIndex = GetCurrentFrameSlotResourcesIndex();
-            auto* queue = resources->Device->GetCommandQueue();
-            for (const auto& dependency : Plan.Dependencies.at(id))
-            { queue->GPUWait(nodeCompletions[dependency]); }
-            const auto& description = node.Description;
-            // Bind logical ports to this slot's textures, buffers and descriptor views
-            std::map<PinId, PassBinding> bindings;
-            for (const auto& pin : description.Inputs)
-            {
-                if (!Sources.count({id,pin.first})) { continue; }
-                auto binding = ResolveInputResource({id,pin.first}, frameResources);
-                queue->GPUWait(binding.second);
-                queue->GPUWait(frameResources.LastUse[binding.first]);
-                bindings[pin.first] = binding.first->CreatePassBinding(pin.second.Usages);
-            }
-            for (const auto& pin : description.Outputs)
-            {
-                auto& material = frameResources.Resources.at({id,pin.first});
-                if (!pin.second.AliasInput.empty())
-                {
-                    material.ProducerResource = bindings.at(pin.second.AliasInput).Resource;
-                    if (Plan.Resources.at({id,pin.first}).Storage == MemoryType::Shared)
-                    { material.SharedAllocationAlias = &GetSharedResources(frameResources.Resources.at(Sources.at({id,pin.second.AliasInput}))); }
-                }
-                bindings[pin.first] = material.ProducerResource->CreatePassBinding(pin.second.Usages);
-            }
-            auto* commands = queue->GetCommandList();
-            commands->BeginPixEvent(id, Colors::CornflowerBlue);
-            Timers.at(id)->Start(commands);
-            PassInitContext init(resources, Common, node, Plan, Sources);
-            PassExecutionContext execution(init, commands, Frame, GetCurrentFrameSlotResourcesIndex(), bindings);
-            for (const auto& external : Passes.at(id)->GetExternalResources(execution))
-            {
-                if (!external.Resource || !external.Resource->D3DResource) { continue; }
-                queue->GPUWait(external.Ready);
-                frameResources.ExternalResources.push_back(external.Resource->D3DResource);
-                D3D12_HEAP_PROPERTIES heap = {};
-                D3D12_HEAP_FLAGS flags = {};
-                ThrowIfFailed(external.Resource->D3DResource->GetHeapProperties(&heap, &flags));
-                // Upload heaps remain in GENERIC_READ and cannot use ordinary state transitions.
-                if (heap.Type == D3D12_HEAP_TYPE_UPLOAD) { external.Resource->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ); }
-                else { commands->ResourceBarrier({external.Resource->GetTransitionBarrier(external.State)}); }
-            }
-            // Prepare boundary states. An alias uses its input state until the pass has executed.
-            for (const auto* ports : {&description.Inputs, &description.Outputs})
-            {
-                for (const auto& pin : *ports)
-                {
-                    if (!bindings.count(pin.first) || (ports == &description.Outputs && !pin.second.AliasInput.empty())) { continue; }
-                    TransitionFrameGraphResource(commands, *bindings.at(pin.first).Resource, UsageState(pin.second.Usages));
-                    if (HasUsage(pin.second.Usages, ResourceUsage::UnorderedAccess)) { FrameGraphUAVBarrier(commands, *bindings.at(pin.first).Resource); }
-                }
-            }
-            // The pass records its own rendering/SDK commands and any internal resource transitions.
-            Passes.at(id)->Execute(execution);
-            // Restore declared states after pass-local changes, then apply alias output states.
-            // This is where an Output pass can leave the same input back buffer in PRESENT.
-            for (bool input : {true, false})
-            {
-                for (const auto& pin : input ? description.Inputs : description.Outputs)
-                {
-                    if (!bindings.count(pin.first)) { continue; }
-                    TransitionFrameGraphResource(commands, *bindings.at(pin.first).Resource, UsageState(pin.second.Usages));
-                    if (HasUsage(pin.second.Usages, ResourceUsage::UnorderedAccess)) { FrameGraphUAVBarrier(commands, *bindings.at(pin.first).Resource); }
-                }
-            }
-            // Cross-adapter handoffs leave each device mapping coherent in COMMON.
-            for (const auto& pin : description.Outputs)
-            {
-                if (!bindings.count(pin.first)) { continue; }
-                if (Plan.Resources.at({id,pin.first}).Storage == MemoryType::Shared)
-                { TransitionFrameGraphResource(commands, *bindings.at(pin.first).Resource, D3D12_RESOURCE_STATE_COMMON); }
-            }
-            Timers.at(id)->Stop(commands);
-            commands->EndPixEvent();
-            auto completion = SubmitCommandList(queue,commands,frameResources);
-            Timers.at(id)->OnCommandListExecuted(completion.Value);
-            nodeCompletions[id] = completion;
-            for (const auto& binding : bindings) { frameResources.LastUse[binding.second.Resource] = completion; }
-            for (const auto& pin : description.Outputs)
-            { frameResources.Resources.at({id,pin.first}).ProducerReady = completion; }
+            RecordAndSubmitPass(nodeDefinition, frameResources, nodeCompletions);
         }
         ++Frame;
     }

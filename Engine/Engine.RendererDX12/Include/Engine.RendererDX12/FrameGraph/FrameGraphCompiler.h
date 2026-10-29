@@ -76,4 +76,6 @@ struct FrameGraphPlan
     std::string GetDebugReport(const FrameGraphDefinition& definition) const;
 };
 
-FrameGraphPlan CompileFrameGraph(const FrameGraphDefinition& definition, const FrameGraphCompileData& data);
+// Validate topology, resolve resource descriptions and choose minimum-copy memory placements.
+// Return a CPU plan; the runtime allocates GPU resources and initializes passes separately.
+FrameGraphPlan CompileFrameGraph(const FrameGraphDefinition& graphDefinition, const FrameGraphCompileData& compileData);
