@@ -86,6 +86,7 @@ void RenderModule::Uninitialize()
 void RenderModule::OnResize()
 {
     _primaryDevice->GetCommandQueue()->Flush();
+    if (_dualGPUMode) { _secondaryDevice->GetCommandQueue()->Flush(); }
 
     uint16_t width, height;
     _window->GetWindowSize(width, height);
