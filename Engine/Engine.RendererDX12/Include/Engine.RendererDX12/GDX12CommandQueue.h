@@ -42,6 +42,7 @@ public:
 
 	//Waits for execution of all active lists
 	void Flush();
+	HRESULT TryFlush() noexcept;
 
 private:
 	// We can probably make it work in a separate thread

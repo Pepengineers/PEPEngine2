@@ -31,13 +31,6 @@ public:
 		context.SetOutputBufferCapacity(TransparentDrawStream, capacity);
 	}
 
-	bool NeedsResourceRebuild(const PassInitContext& context) const override
-	{
-		const auto count = context.GetDeviceResources()->IndirectCommandsCache->GetElementCount();
-		return count > context.GetOutputResourceDescription(OpaqueDrawStream).Capacity
-			|| count > context.GetOutputResourceDescription(TransparentDrawStream).Capacity;
-	}
-
 	void Initialize(PassInitContext& context) override
 	{
 		auto* resources = context.GetDeviceResources();
@@ -104,10 +97,6 @@ public:
 		cmdList->SetComputeUAV(2, transparent.ArgumentUAV->GPUHandle);
 		cmdList->SetComputeUAV(3, transparent.CountUAV->GPUHandle);
 		const UINT drawCount = resources->IndirectCommandsCache->GetElementCount();
-		if (drawCount > opaque.Capacity || drawCount > transparent.Capacity)
-		{ throw std::runtime_error("ERROR: Scene indirect-command count exceeds the allocated culling buffer capacity. Make "
-			"NeedsResourceRebuild() request a buffer rebuild before the scene indirect-command count exceeds the allocated "
-			"capacity."); }
 		if (drawCount) { cmdList->Dispatch((drawCount + 63) / 64, 1, 1); }
 
 		cmdList->ResourceBarrier({ opaque.Arguments->GetUAVBarrier(), opaque.Count->GetUAVBarrier(),

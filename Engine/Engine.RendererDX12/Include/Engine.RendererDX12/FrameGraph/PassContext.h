@@ -75,12 +75,12 @@ struct PassBinding
 class PassInitContext
 {
 public:
-    PassInitContext(GDX12DeviceResources* resources, RenderPipelineCommonData* common,
+    PassInitContext(GDX12DeviceResources* resources, const RenderPipelineCommonData* common,
         const NodeDefinition& node, const FrameGraphPlan& plan, const std::map<PinAddress, PinAddress>& sources)
         : _resources(resources), _common(common), _node(node), _plan(plan), _sources(sources) {}
     GDX12Device* GetDevice() const { return _resources->Device; }
     GDX12DeviceResources* GetDeviceResources() const { return _resources; }
-    RenderPipelineCommonData* GetFrameData() const { return _common; }
+    const RenderPipelineCommonData* GetFrameData() const { return _common; }
     const ResourceDescription& GetInputResourceDescription(const PinId& id) const
     {
         _node.Description.GetInputDescription(id);
@@ -93,7 +93,7 @@ public:
     }
 protected:
     GDX12DeviceResources* _resources;
-    RenderPipelineCommonData* _common;
+    const RenderPipelineCommonData* _common;
     const NodeDefinition& _node;
     const FrameGraphPlan& _plan;
     const std::map<PinAddress, PinAddress>& _sources;
@@ -192,12 +192,12 @@ private:
 class PassResourceRequirementsContext
 {
 public:
-    PassResourceRequirementsContext(GDX12DeviceResources* resources, RenderPipelineCommonData* common,
+    PassResourceRequirementsContext(GDX12DeviceResources* resources, const RenderPipelineCommonData* common,
         NodeDefinition& node, FrameGraphCompileData& data)
         : _resources(resources), _common(common), _node(node), _compileData(data) {}
     GDX12Device* GetDevice() const { return _resources->Device; }
     GDX12DeviceResources* GetDeviceResources() const { return _resources; }
-    RenderPipelineCommonData* GetFrameData() const { return _common; }
+    const RenderPipelineCommonData* GetFrameData() const { return _common; }
     UInt2 GetDisplaySize() const { return _compileData.DisplaySize; }
     void RequireTextureSize(const PinId& id, UInt2 size)
     { _node.Description.GetPortDescription(id); _compileData.Ports.at({_node.Id, id}).RequiredTextureSize = size; }
@@ -211,7 +211,7 @@ public:
     }
 private:
     GDX12DeviceResources* _resources;
-    RenderPipelineCommonData* _common;
+    const RenderPipelineCommonData* _common;
     NodeDefinition& _node;
     FrameGraphCompileData& _compileData;
 };

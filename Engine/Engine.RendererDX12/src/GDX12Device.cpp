@@ -12,12 +12,7 @@ GDX12Device::GDX12Device() :
 {
 }
 
-GDX12Device::~GDX12Device()
-{
-    try { Reset(); }
-    catch (const DxException& error) { OutputDebugStringW(error.ToString().c_str()); }
-    catch (const std::exception& error) { OutputDebugStringA(error.what()); }
-}
+GDX12Device::~GDX12Device() = default;
 
 HRESULT GDX12Device::Initialize(ComPtr<IDXGIAdapter4> adapter)
 {
@@ -109,8 +104,14 @@ GDX12CommandQueue* GDX12Device::GetCopyCommandQueue()
 
 void GDX12Device::Flush()
 {
-    if (_commandQueue) { _commandQueue->Flush(); }
-    if (_copyCommandQueue) { _copyCommandQueue->Flush(); }
+    ThrowIfFailed(TryFlush());
+}
+
+HRESULT GDX12Device::TryFlush() noexcept
+{
+    const HRESULT directResult = _commandQueue ? _commandQueue->TryFlush() : S_OK;
+    const HRESULT copyResult = _copyCommandQueue ? _copyCommandQueue->TryFlush() : S_OK;
+    return FAILED(directResult) ? directResult : copyResult;
 }
 
 const DeviceSpecs& GDX12Device::GetDeviceFeatures()

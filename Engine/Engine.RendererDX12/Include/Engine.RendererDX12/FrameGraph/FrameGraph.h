@@ -123,7 +123,8 @@ public:
     ~CompiledFrameGraph();
     CompiledFrameGraph(const CompiledFrameGraph&) = delete;
     CompiledFrameGraph& operator=(const CompiledFrameGraph&) = delete;
-    void ExecuteFrame(const RenderPipelineCommonData& frame);
+    void ExecuteFrame();
+    void RequestResourceRebuild();
     void WaitForCurrentFrameSlot();
     void WaitForGPUCompletion();
     void ReleaseFrameResourcesForResize();

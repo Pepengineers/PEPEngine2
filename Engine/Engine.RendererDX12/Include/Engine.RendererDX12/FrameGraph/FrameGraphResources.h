@@ -32,8 +32,8 @@ struct FrameGraphSharedResources
 
 std::unique_ptr<FrameGraphPhysicalResource> CreateFrameGraphNative(GDX12DeviceResources* owner, const ResourceDescription& description);
 std::unique_ptr<FrameGraphPhysicalResource> WrapFrameGraphImport(GDX12DeviceResources* owner, GDX12Texture* texture, const ResourceDescription& description);
-FrameGraphSharedResources CreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceResources* other,
-    const ResourceDescription& description, bool bufferPayload);
+HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceResources* other,
+    const ResourceDescription& description, bool bufferPayload, FrameGraphSharedResources& result);
 void TransitionFrameGraphResource(GDX12CommandList* commands, FrameGraphPhysicalResource& resource, D3D12_RESOURCE_STATES state);
 void FrameGraphUAVBarrier(GDX12CommandList* commands, FrameGraphPhysicalResource& resource);
 struct FrameGraphCopyStatistics { uint64_t Bytes = 0; uint32_t Commands = 0; };

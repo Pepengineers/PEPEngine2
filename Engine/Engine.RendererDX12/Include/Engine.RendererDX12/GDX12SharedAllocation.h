@@ -18,14 +18,14 @@ public:
     GDX12SharedAllocation& operator=(const GDX12SharedAllocation&) = delete;
 
 
-    void Initialize(GDX12Device* source, GDX12Device* target, UINT width, UINT height, DXGI_FORMAT format)
+    HRESULT Initialize(GDX12Device* source, GDX12Device* target, UINT width, UINT height, DXGI_FORMAT format)
     {
         const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(format, width, height, 1, 1, 1, 0,
             D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER, D3D12_TEXTURE_LAYOUT_ROW_MAJOR);
-        Initialize(source, target, desc);
+        return Initialize(source, target, desc);
     }
 
-    void Initialize(GDX12Device* source, GDX12Device* target, const D3D12_RESOURCE_DESC& description)
+    HRESULT Initialize(GDX12Device* source, GDX12Device* target, const D3D12_RESOURCE_DESC& description)
     {
         Release();
         if (!source || !target || !source->IsInitialized() || !target->IsInitialized())
@@ -70,8 +70,7 @@ public:
         };
         if (!validInfo(sourceInfo) || !validInfo(targetInfo))
         {
-            throw std::runtime_error("ERROR: A device rejected the cross-adapter resource description. Use Local storage or a shared resource "
-                "description supported by both adapters.");
+            return DXGI_ERROR_UNSUPPORTED;
         }
         const UINT64 alignment = (std::max)(sourceInfo.Alignment, targetInfo.Alignment);
         const UINT64 size = (std::max)(sourceInfo.SizeInBytes, targetInfo.SizeInBytes);
@@ -92,9 +91,11 @@ public:
         heapDesc.Properties.CreationNodeMask = 1;
         heapDesc.Properties.VisibleNodeMask = 1;
         heapDesc.Flags = D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER;
-        ThrowIfFailed(source->GetDevice()->CreateHeap(&heapDesc, IID_PPV_ARGS(&sourceHeap)));
-        ThrowIfFailed(source->GetDevice()->CreatePlacedResource(sourceHeap.Get(), 0, &desc,
-            D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&sourceResource)));
+        HRESULT result = source->GetDevice()->CreateHeap(&heapDesc, IID_PPV_ARGS(&sourceHeap));
+        if (FAILED(result)) { return result; }
+        result = source->GetDevice()->CreatePlacedResource(sourceHeap.Get(), 0, &desc,
+            D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&sourceResource));
+        if (FAILED(result)) { return result; }
         if (source == target)
         {
             targetHeap = sourceHeap;
@@ -103,14 +104,15 @@ public:
         else
         {
             HANDLE handle = nullptr;
-            ThrowIfFailed(source->GetDevice()->CreateSharedHandle(sourceHeap.Get(), nullptr, GENERIC_ALL, nullptr, &handle));
-            if (!handle) { throw std::runtime_error("ERROR: Shared heap creation returned an empty handle. Verify shared-heap support on both devices and recreate "
-                "the shared allocation."); }
+            result = source->GetDevice()->CreateSharedHandle(sourceHeap.Get(), nullptr, GENERIC_ALL, nullptr, &handle);
+            if (FAILED(result)) { return result; }
+            if (!handle) { return E_HANDLE; }
             const HRESULT opened = target->GetDevice()->OpenSharedHandle(handle, IID_PPV_ARGS(&targetHeap));
             CloseHandle(handle);
-            ThrowIfFailed(opened);
-            ThrowIfFailed(target->GetDevice()->CreatePlacedResource(targetHeap.Get(), 0, &desc,
-                D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&targetResource)));
+            if (FAILED(opened)) { return opened; }
+            result = target->GetDevice()->CreatePlacedResource(targetHeap.Get(), 0, &desc,
+                D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&targetResource));
+            if (FAILED(result)) { return result; }
         }
         _sourceDevice = source;
         _targetDevice = target;
@@ -121,6 +123,7 @@ public:
         _sharedResourceSource.D3DResource = sourceResource;
         _sharedResourceTarget.D3DResource = targetResource;
         _isInitialized = true;
+        return S_OK;
     }
 
     void Release()
@@ -148,7 +151,7 @@ public:
         desc.Height = height;
         auto* source = _sourceDevice;
         auto* target = _targetDevice;
-        Initialize(source, target, desc);
+        ThrowIfFailed(Initialize(source, target, desc));
     }
 
     GDX12Resource* GetResource(GDX12Device* device)

@@ -26,10 +26,11 @@ RenderModule::RenderModule(Window* window, GameTimer* timer) :
 
 RenderModule::~RenderModule()
 {
-    if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
     _frameGraph.reset();
-    if (_primaryDevice) { _primaryDevice->Flush(); }
-    if (_secondaryDevice) { _secondaryDevice->Flush(); }
+    if (_primaryDevice && FAILED(_primaryDevice->TryFlush()))
+    { OutputDebugStringA("ERROR: Primary GPU synchronization failed during RenderModule destruction. Check the device removal reason.\n"); }
+    if (_secondaryDevice && FAILED(_secondaryDevice->TryFlush()))
+    { OutputDebugStringA("ERROR: Secondary GPU synchronization failed during RenderModule destruction. Check the device removal reason.\n"); }
 
     GDX12ShaderCompiler::Shutdown();
     GDX12DeviceFactory::Reset();
@@ -550,7 +551,7 @@ void RenderModule::OnUpdate()
 void RenderModule::OnRender()
 {
     if (!_frameGraph || _renderingSuspended) { return; }
-    _frameGraph->ExecuteFrame(_RPcommonData);
+    _frameGraph->ExecuteFrame();
     _backBuffer->Present();
 }
 
@@ -646,7 +647,9 @@ void RenderModule::ResizeSceneBuffers(GDX12DeviceResources& resources, uint32_t 
 {
     auto grow = [](auto& buffer, uint32_t count)
     {
-        if (buffer->GetElementCount() < count) { buffer->Resize(count); }
+        if (buffer->GetElementCount() >= count) { return false; }
+        buffer->Resize(count);
+        return true;
     };
     for (auto& frame : resources.FrameConstants)
     {
@@ -659,7 +662,11 @@ void RenderModule::ResizeSceneBuffers(GDX12DeviceResources& resources, uint32_t 
             grow(frame->InstanceCache, _instanceCount);
         }
     }
-    if (flags & RENDER_PASS_FLAG_USE_INSTANCES) { grow(resources.IndirectCommandsCache, _instanceCount); }
+    if (flags & RENDER_PASS_FLAG_USE_INSTANCES)
+    {
+        const bool commandsResized = grow(resources.IndirectCommandsCache, _instanceCount);
+        if (commandsResized && _frameGraph) { _frameGraph->RequestResourceRebuild(); }
+    }
 }
 
 void RenderModule::UploadSceneResources(GDX12DeviceResources& resources, uint32_t flags)

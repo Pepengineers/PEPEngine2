@@ -35,6 +35,7 @@ public:
 	GDX12CommandQueue* GetCommandQueue();
 	GDX12CommandQueue* GetCopyCommandQueue();
 	void Flush();
+	HRESULT TryFlush() noexcept;
 	const DeviceSpecs& GetDeviceFeatures();
 	LUID GetAdapterLuid() const;
 	const bool IsInitialized();

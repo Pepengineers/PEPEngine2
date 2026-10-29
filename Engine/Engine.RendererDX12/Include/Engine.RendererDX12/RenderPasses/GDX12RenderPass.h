@@ -34,7 +34,6 @@ public:
     virtual ~GDX12RenderPass() = default;
     virtual void Describe(PassDescription&) const = 0;
     virtual void ResolveResourceRequirements(PassResourceRequirementsContext&) {}
-    virtual bool NeedsResourceRebuild(const PassInitContext&) const { return false; }
     virtual void Initialize(PassInitContext&) {}
     virtual void Execute(PassExecutionContext&) = 0;
     virtual std::vector<ExternalResourceUse> GetExternalResources(PassExecutionContext& context);

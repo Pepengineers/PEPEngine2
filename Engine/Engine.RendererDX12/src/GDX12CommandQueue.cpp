@@ -6,6 +6,26 @@
 #include <limits>
 #include <stdexcept>
 
+namespace
+{
+    HRESULT WaitForFence(ID3D12Fence* fence, UINT64 value) noexcept
+    {
+        const UINT64 completed = fence->GetCompletedValue();
+        if (completed == (std::numeric_limits<UINT64>::max)()) { return DXGI_ERROR_DEVICE_REMOVED; }
+        if (completed >= value) { return S_OK; }
+        HANDLE event = CreateEventEx(nullptr, nullptr, 0, EVENT_ALL_ACCESS);
+        if (!event) { return HRESULT_FROM_WIN32(GetLastError()); }
+        const HRESULT result = fence->SetEventOnCompletion(value, event);
+        if (FAILED(result)) { CloseHandle(event); return result; }
+        const DWORD waitResult = WaitForSingleObjectEx(event, INFINITE, FALSE);
+        const DWORD waitError = waitResult == WAIT_FAILED ? GetLastError() : ERROR_GEN_FAILURE;
+        CloseHandle(event);
+        if (waitResult != WAIT_OBJECT_0) { return HRESULT_FROM_WIN32(waitError); }
+        if (fence->GetCompletedValue() == (std::numeric_limits<UINT64>::max)()) { return DXGI_ERROR_DEVICE_REMOVED; }
+        return S_OK;
+    }
+}
+
 GDX12CommandQueue::GDX12CommandQueue(GDX12Device* device, D3D12_COMMAND_LIST_TYPE type)
     : _device(device), _type(type), _lastSubmittedFenceValue(0)
 {
@@ -41,9 +61,8 @@ void GDX12CommandQueue::Reset()
 
 GDX12CommandQueue::~GDX12CommandQueue()
 {
-    try { Reset(); }
-    catch (const DxException& error) { OutputDebugStringW(error.ToString().c_str()); }
-    catch (const std::exception& error) { OutputDebugStringA(error.what()); }
+    if (FAILED(TryFlush()))
+    { OutputDebugStringA("ERROR: GPU synchronization failed during command queue destruction. Check the device removal reason.\n"); }
 }
 
 const ComPtr<ID3D12CommandQueue>& GDX12CommandQueue::GetCommandQueue()
@@ -215,27 +234,7 @@ void GDX12CommandQueue::CPUwait(const GDX12CompletionPoint& point)
         throw std::invalid_argument("ERROR: Given CPU completion point has invalid device, queue, fence, or signal-value fields. Use a completion "
             "point returned by a valid command-queue submission or signal.");
     }
-    UINT64 completed = point.Fence->GetCompletedValue();
-    if (completed == (std::numeric_limits<UINT64>::max)())
-    {
-        throw std::runtime_error("ERROR: Device removed while waiting for queue completion. Check GetDeviceRemovedReason() and recreate the "
-            "device and its FrameGraph.");
-    }
-    if (completed >= point.Value) { return; }
-
-    HANDLE event = CreateEventEx(nullptr, nullptr, 0, EVENT_ALL_ACCESS);
-    if (!event) { ThrowIfFailed(HRESULT_FROM_WIN32(GetLastError())); }
-    const HRESULT result = point.Fence->SetEventOnCompletion(point.Value, event);
-    if (FAILED(result)) { CloseHandle(event); ThrowIfFailed(result); }
-    const DWORD waitResult = WaitForSingleObjectEx(event, INFINITE, FALSE);
-    const DWORD waitError = waitResult == WAIT_FAILED ? GetLastError() : ERROR_GEN_FAILURE;
-    CloseHandle(event);
-    if (waitResult != WAIT_OBJECT_0) { ThrowIfFailed(HRESULT_FROM_WIN32(waitError)); }
-    if (point.Fence->GetCompletedValue() == (std::numeric_limits<UINT64>::max)())
-    {
-        throw std::runtime_error("ERROR: Device removed while waiting for queue completion. Check GetDeviceRemovedReason() and recreate the "
-            "device and its FrameGraph.");
-    }
+    ThrowIfFailed(WaitForFence(point.Fence.Get(), point.Value));
 }
 
 const ComPtr<ID3D12Fence>& GDX12CommandQueue::GetFence()
@@ -255,7 +254,19 @@ void GDX12CommandQueue::CPUWaitForFenceValue(uint64_t fenceValue)
 
 void GDX12CommandQueue::Flush()
 {
-    CPUwait(Signal());
+    ThrowIfFailed(TryFlush());
+}
+
+HRESULT GDX12CommandQueue::TryFlush() noexcept
+{
+    if (!_commandQueue || !_fence) { return S_OK; }
+    if (_lastSubmittedFenceValue >= (std::numeric_limits<UINT64>::max)() - 1)
+    { return HRESULT_FROM_WIN32(ERROR_ARITHMETIC_OVERFLOW); }
+    const UINT64 value = _lastSubmittedFenceValue + 1;
+    const HRESULT result = _commandQueue->Signal(_fence.Get(), value);
+    if (FAILED(result)) { return result; }
+    _lastSubmittedFenceValue = value;
+    return WaitForFence(_fence.Get(), value);
 }
 
 void GDX12CommandQueue::ClearCompletedLists()

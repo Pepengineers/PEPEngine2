@@ -344,12 +344,12 @@ FrameGraphPhysicalResource& FrameGraphSharedResources::GetDeviceMapping(GDX12Dev
         "created for this shared resource.");
 }
 
-FrameGraphSharedResources CreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceResources* other,
-    const ResourceDescription& description, bool bufferPayload)
+HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceResources* other,
+    const ResourceDescription& description, bool bufferPayload, FrameGraphSharedResources& result)
 {
     CheckOwner(producer);
     CheckOwner(other);
-    FrameGraphSharedResources result;
+    FrameGraphSharedResources created;
     if (bufferPayload && description.IsBuffer()) { throw std::invalid_argument("ERROR: GPU buffer transport was configured with a texture-footprint payload. Transport GPU buffers directly "
         "without enabling a texture-footprint payload."); }
     if (!description.IsBuffer() && !bufferPayload &&
@@ -363,14 +363,14 @@ FrameGraphSharedResources CreateFrameGraphShared(GDX12DeviceResources* producer,
         Footprints(producer->Device, description, footprints, payloadBytes);
         ValidateFootprints(other->Device, description, footprints, payloadBytes);
     }
-    result.Producer = std::make_unique<FrameGraphPhysicalResource>();
-    result.Producer->DeviceResources = producer;
+    created.Producer = std::make_unique<FrameGraphPhysicalResource>();
+    created.Producer->DeviceResources = producer;
     if (other->Device != producer->Device)
     {
-        result.Consumer = std::make_unique<FrameGraphPhysicalResource>();
-        result.Consumer->DeviceResources = other;
+        created.Consumer = std::make_unique<FrameGraphPhysicalResource>();
+        created.Consumer->DeviceResources = other;
     }
-    for (auto* mapping : {result.Producer.get(), result.Consumer.get()})
+    for (auto* mapping : {created.Producer.get(), created.Consumer.get()})
     {
         if (!mapping) { continue; }
         mapping->Description = description;
@@ -397,8 +397,9 @@ FrameGraphSharedResources CreateFrameGraphShared(GDX12DeviceResources* producer,
         }
         desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
         auto allocation = std::make_unique<GDX12SharedAllocation>();
-        allocation->Initialize(producer->Device, other->Device, desc);
-        for (auto* mapping : {result.Producer.get(), result.Consumer.get()})
+        const HRESULT initialized = allocation->Initialize(producer->Device, other->Device, desc);
+        if (FAILED(initialized)) { return initialized; }
+        for (auto* mapping : {created.Producer.get(), created.Consumer.get()})
         {
             if (!mapping) { continue; }
             auto* resource = allocation->GetResource(mapping->DeviceResources->Device);
@@ -415,9 +416,10 @@ FrameGraphSharedResources CreateFrameGraphShared(GDX12DeviceResources* producer,
                 mapping->Texture = CreateTexture(mapping->DeviceResources, description, resource->D3DResource);
             }
         }
-        result.Allocations.push_back(std::move(allocation));
+        created.Allocations.push_back(std::move(allocation));
     }
-    return result;
+    result = std::move(created);
+    return S_OK;
 }
 
 void TransitionFrameGraphResource(GDX12CommandList* commands, FrameGraphPhysicalResource& resource, D3D12_RESOURCE_STATES state)
