@@ -629,16 +629,15 @@ void RenderModule::CompileFrameGraph(FrameGraph& graph)
     if (dualGPUMode) { PrepareSceneResources(_secondaryResources, secondaryFlags); }
 
     graph.SetDeviceResources(&_primaryResources, dualGPUMode ? &_secondaryResources : nullptr, &_RPcommonData);
-    BindRenderTargets(graph);
-
-    const UInt2 previousRenderSize = {_RPcommonData.DownscaledWidth, _RPcommonData.DownscaledHeight};
-    try { _frameGraph = graph.Compile(); }
-    catch (...)
+    bool hasPresentPass = false;
+    for (const auto& entry : graph.GetDefinition().Nodes)
     {
-        _RPcommonData.DownscaledWidth = previousRenderSize.x;
-        _RPcommonData.DownscaledHeight = previousRenderSize.y;
-        throw;
+        for (const auto& port : entry.second.Description.Outputs)
+        { hasPresentPass |= HasUsage(port.second.Usages, ResourceUsage::Present); }
     }
+    if (!hasPresentPass) { throw std::invalid_argument("ERROR: Given Render pipeline has no presentation pass. Add GDX12OutputToScreenPass to the pipeline."); }
+
+    _frameGraph = graph.Compile();
     MarkSceneDataDirty();
     OutputDebugStringA(_frameGraph->GetDebugReport().c_str());
 }
@@ -698,37 +697,12 @@ void RenderModule::MarkSceneDataDirty()
     }
 }
 
-void RenderModule::BindRenderTargets(FrameGraph& graph)
-{
-    const auto backBuffer = graph.ImportTexture("back-buffer", [this]() { return _backBuffer->GetCurrentBuffer(); });
-    const auto depthTarget = graph.ImportTexture("display-depth", [this]() { return _depthStencil.get(); });
-    for (const auto& clear : graph.GetPassNodes<GDX12TextureClearPass>())
-    {
-        graph.ConnectNodes(backBuffer, clear.GetInput(GDX12TextureClearPass::Target));
-        graph.ConnectNodes(depthTarget, clear.GetInput(GDX12TextureClearPass::DepthTarget));
-    }
-    bool hasPresentation = false;
-    for (const auto& entry : graph.GetDefinition().Nodes)
-    {
-        const auto& node = entry.second;
-        auto handle = graph.GetNode(node.Id);
-        for (const auto& port : node.Description.Outputs)
-        {
-            if (!HasUsage(port.second.Usages, ResourceUsage::Present)) { continue; }
-            hasPresentation = true;
-            const auto& target = port.second.AliasInput;
-            const auto& connections = graph.GetDefinition().Connections;
-            const bool connected = std::any_of(connections.begin(), connections.end(), [&](const Connection& connection)
-            { return connection.Target == PinAddress{node.Id, target}; });
-            if (!connected) { graph.ConnectNodes(backBuffer, handle.GetInput(target)); }
-        }
-    }
-    if (!hasPresentation) { throw std::invalid_argument("ERROR: Given Render pipeline has no presentation pass. Add GDX12OutputToScreenPass."); }
-}
-
 void RenderModule::ConfigureRenderPipeline(FrameGraph& fg)
 {
     fg.SetTransportQueuePolicy(TransportQueuePolicy::Auto);
+
+    const auto backBuffer = fg.ImportTexture("back-buffer", [this]() { return _backBuffer->GetCurrentBuffer(); });
+    const auto depthStencil = fg.ImportTexture("depth-stencil", [this]() { return _depthStencil.get(); });
 
     auto culling = fg.AddPrimaryPass<GDX12GPUCullingPass>("Culling");
     auto opaque = fg.AddPrimaryPass<GDX12OpaquePass>("Opaque");
@@ -739,6 +713,8 @@ void RenderModule::ConfigureRenderPipeline(FrameGraph& fg)
     auto upscale = fg.AddSecondaryPass<GDX12XeSSUpscalePass>("XeSS");
     auto output = fg.AddPrimaryPass<GDX12OutputToScreenPass>("Output");
 
+    fg.ConnectNodes(backBuffer, clear.GetInput("Target"));
+    fg.ConnectNodes(depthStencil, clear.GetInput("DepthTarget"));
     fg.ConnectNodes(clear.GetOutput("Cleared"), output.GetInput("Target"));
     fg.ConnectNodes(culling.GetOutput("OpaqueDrawStream"), opaque.GetInput("DrawStream"));
     fg.ConnectNodes(culling.GetOutput("TransparentDrawStream"), transparency.GetInput("DrawStream"));

@@ -112,7 +112,6 @@ private:
     void BuildBackBuffer();
     void ConfigureRenderPipeline(FrameGraph& graph);
     void CompileFrameGraph(FrameGraph& graph);
-    void BindRenderTargets(FrameGraph& graph);
     void PrepareSceneResources(GDX12DeviceResources& resources, uint32_t flags);
     void ResizeSceneBuffers(GDX12DeviceResources& resources, uint32_t flags);
     void MarkSceneDataDirty();

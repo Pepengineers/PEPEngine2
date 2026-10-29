@@ -88,51 +88,37 @@ FrameGraph::FrameGraph(GDX12Device* primary, GDX12Device* secondary)
 
 void FrameGraph::ConnectNodes(const OutputPinRef& output, const InputPinRef& input)
 {
-    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled. Create and configure a new FrameGraph before calling "
-        "Compile()."); }
+    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
     auto outputDefinition = output._definition.lock();
     auto inputDefinition = input._definition.lock();
-    if (!outputDefinition || !inputDefinition) { throw std::logic_error("ERROR: Given FrameGraph handle refers to a destroyed graph. Keep the owning FrameGraph alive or obtain a new "
-        "handle from a live graph."); }
+    if (!outputDefinition || !inputDefinition) { throw std::logic_error("ERROR: Given FrameGraph handle refers to a destroyed graph."); }
     if (outputDefinition != _definition || inputDefinition != _definition)
-    { throw std::invalid_argument("ERROR: Given input and output ports belong to different FrameGraphs. Obtain both ports from the same "
-        "FrameGraph before calling ConnectNodes()."); }
+    { throw std::invalid_argument("ERROR: Given input and output ports belong to different FrameGraphs."); }
     for (const auto& edge : _definition->Connections)
-    { if (edge.Target == input._address) { throw std::invalid_argument("ERROR: " + input._address.Node + "." + input._address.Pin + ": input already has a connected source. Remove the duplicate ConnectNodes() call so this input has exactly "
-        "one source."); } }
+    { if (edge.Target == input._address) { throw std::invalid_argument("ERROR: " + input._address.Node + "." + input._address.Pin + ": input already has a connected source. Remove the duplicate ConnectNodes() call so this input has exactly one source."); } }
+
     _definition->Connections.push_back({output._address, input._address});
 }
 
 void FrameGraph::AddExecutionDependency(const NodeHandle& before, const NodeHandle& after)
 {
-    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled. Create and configure a new FrameGraph before calling "
-        "Compile()."); }
+    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
     auto beforeDefinition = before._definition.lock();
     auto afterDefinition = after._definition.lock();
-    if (!beforeDefinition || !afterDefinition) { throw std::logic_error("ERROR: Given FrameGraph handle refers to a destroyed graph. Keep the owning FrameGraph alive or obtain a new "
-        "handle from a live graph."); }
-    if (beforeDefinition != _definition || afterDefinition != _definition) { throw std::invalid_argument("ERROR: Given execution dependency contains nodes from another FrameGraph. Obtain both NodeHandle objects from "
-        "the FrameGraph receiving AddExecutionDependency()."); }
+    if (!beforeDefinition || !afterDefinition) { throw std::logic_error("ERROR: Given FrameGraph handle refers to a destroyed graph."); }
+    if (beforeDefinition != _definition || afterDefinition != _definition) { throw std::invalid_argument("ERROR: Given execution dependency contains nodes from another FrameGraph."); }
+
     _definition->OrderDependencies.emplace_back(before._id, after._id);
 }
 
 OutputPinRef FrameGraph::ImportTexture(NodeId id, std::function<GDX12Texture*()> provider)
 {
-    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled. Create and configure a new FrameGraph before calling "
-        "Compile()."); }
-    if (id.empty() || !provider || _definition->Nodes.count(id)) { throw std::invalid_argument("ERROR: Import ID '" + id + "' is empty, already registered, or has no provider. Use a non-empty, unique import ID and a valid texture "
-        "provider."); }
-    auto* texture = provider();
-    if (!texture || (texture->GetDevice() != _primary && texture->GetDevice() != _secondary))
-    { throw std::invalid_argument("ERROR: " + id + ": imported target must belong to a registered device. Return a texture owned by the registered primary or "
-        "secondary device."); }
-    auto description = DescribeFrameGraphTexture(texture);
+    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
+    if (id.empty() || !provider || _definition->Nodes.count(id)) { throw std::invalid_argument("ERROR: Import ID '" + id + "' is empty, already registered, or has no provider."); }
+
     NodeDefinition node;
     node.Id = id;
-    node.DeviceRole = texture->GetDevice() == _primary ? DEVICE_ROLE_PRIMARY : DEVICE_ROLE_SECONDARY;
-    auto& port = node.Description.AddOutputTexture("Resource", description.Type);
-    port.Formats = {description.Format};
-    port.Usages = description.Usages;
+    auto& port = node.Description.AddOutputTexture("Resource");
     port.RequestedMemory = MemoryType::Local;
     _definition->Nodes.emplace(id, std::move(node));
     _imports.emplace(id, std::move(provider));
@@ -141,31 +127,31 @@ OutputPinRef FrameGraph::ImportTexture(NodeId id, std::function<GDX12Texture*()>
 
 void FrameGraph::SetDeviceResources(GDX12DeviceResources* primary, GDX12DeviceResources* secondary, RenderPipelineCommonData* common)
 {
-    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled. Create and configure a new FrameGraph before calling "
-        "Compile()."); }
+    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
     if (!primary || primary->Device != _primary || !common ||
         (UsesDevice(DEVICE_ROLE_SECONDARY) && (!secondary || secondary->Device != _secondary)))
     { throw std::invalid_argument("ERROR: Given device resources or frame data do not match the registered FrameGraph devices. Call "
         "SetDeviceResources() with matching primary and secondary resources and non-null frame data."); }
+
     _primaryResources = primary; _secondaryResources = secondary; _common = common;
 }
 void FrameGraph::SetTransportQueuePolicy(TransportQueuePolicy policy)
 {
-    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled. Create and configure a new FrameGraph before calling "
-        "Compile()."); }
+    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
+
     _compileData.QueuePolicy = policy;
 }
 void FrameGraph::SetFrameSlotCount(uint32_t count)
 {
-    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled. Create and configure a new FrameGraph before calling "
-        "Compile()."); }
+    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
     if (!count) { throw std::invalid_argument("ERROR: Given frame slot count is zero. Pass a frame slot count greater than zero."); }
+
     _compileData.FrameSlotCount = count;
 }
 
 NodeHandle FrameGraph::GetNode(const NodeId& id) const
 {
-    if (!_definition->Nodes.count(id)) { throw std::invalid_argument("ERROR: NodeId '" + id + "' is not registered in this FrameGraph. Use an existing NodeId or add the pass before requesting its handle."); }
+    if (!_definition->Nodes.count(id)) { throw std::invalid_argument("ERROR: NodeId '" + id + "' is not registered in this FrameGraph."); }
     return NodeHandle(_definition, id);
 }
 
@@ -658,6 +644,21 @@ std::unique_ptr<CompiledFrameGraph> FrameGraph::Compile()
     runtime->Primary = _primaryResources; runtime->Secondary = UsesDevice(DEVICE_ROLE_SECONDARY) ? _secondaryResources : nullptr;
     runtime->Common = _common; runtime->Definition = *_definition; runtime->CompileData = _compileData;
     runtime->Imports = _imports;
+    for (const auto& imported : runtime->Imports)
+    {
+        auto* texture = imported.second();
+        if (!texture || (texture->GetDevice() != _primary && texture->GetDevice() != _secondary))
+        { throw std::invalid_argument("ERROR: " + imported.first + ": imported target must belong to a registered device. Return a texture owned by the registered primary or "
+            "secondary device."); }
+        const auto description = DescribeFrameGraphTexture(texture);
+        auto& node = runtime->Definition.Nodes.at(imported.first);
+        node.DeviceRole = texture->GetDevice() == _primary ? DEVICE_ROLE_PRIMARY : DEVICE_ROLE_SECONDARY;
+        auto& port = node.Description.Outputs.at("Resource");
+        port.Type = description.Type;
+        port.Formats = {description.Format};
+        port.Usages = description.Usages;
+        if (node.DeviceRole == DEVICE_ROLE_SECONDARY) { runtime->Secondary = _secondaryResources; }
+    }
     runtime->CompileData.DisplaySize = {_common->WindowWidth, _common->WindowHeight};
     if (!runtime->CompileData.FrameSlotCount)
     { runtime->CompileData.FrameSlotCount = static_cast<uint32_t>(_primaryResources->FrameConstants.size()); }

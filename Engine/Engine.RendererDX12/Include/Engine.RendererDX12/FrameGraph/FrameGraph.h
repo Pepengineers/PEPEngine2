@@ -68,6 +68,8 @@ public:
     }
     void ConnectNodes(const OutputPinRef& output, const InputPinRef& input);
     void AddExecutionDependency(const NodeHandle& before, const NodeHandle& after);
+    // Allows you to import external textures to FrameGraph via function
+    // Works as an output pin coming from nowhere
     OutputPinRef ImportTexture(NodeId id, std::function<GDX12Texture*()> provider);
     void SetDeviceResources(GDX12DeviceResources* primary, GDX12DeviceResources* secondary, RenderPipelineCommonData* common);
     void SetTransportQueuePolicy(TransportQueuePolicy policy);
