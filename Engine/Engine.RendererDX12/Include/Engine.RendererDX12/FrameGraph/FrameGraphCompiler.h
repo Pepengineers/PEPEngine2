@@ -27,7 +27,7 @@ struct NodeDefinition
 struct Connection { PinAddress Source; PinAddress Target; };
 struct FrameGraphDefinition
 {
-    bool Frozen = false;
+    bool IsCompiled = false;
     std::map<NodeId, NodeDefinition> Nodes;
     std::vector<Connection> Connections;
     std::vector<std::pair<NodeId, NodeId>> OrderDependencies;

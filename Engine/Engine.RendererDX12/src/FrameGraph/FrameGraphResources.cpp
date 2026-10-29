@@ -547,14 +547,12 @@ PortCapabilities QueryFrameGraphCapabilities(GDX12Device* device, const PortDesc
 ResourceDescription DescribeFrameGraphTexture(GDX12Texture* texture)
 {
     if (!texture || !texture->IsInitialized() || !texture->GetResource() || !texture->GetResource()->D3DResource)
-    { throw std::invalid_argument("ERROR: Given FrameGraph texture is missing or has no native allocation. Provide an initialized GDX12Texture "
-        "with a valid native resource."); }
+    { throw std::invalid_argument("ERROR: Given FrameGraph texture is missing or has no native allocation. Provide an initialized GDX12Texture."); }
     const auto& wrapper = texture->GetDescription();
     const auto actual = texture->GetResource()->D3DResource->GetDesc();
     if (actual.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D || actual.MipLevels != 1 || actual.SampleDesc.Count != 1)
     { throw std::invalid_argument("ERROR: Given imported texture allocation is not Texture2D, has multiple mips, or uses MSAA. Import a "
-        "two-dimensional allocation with one mip and one sample; arrays and cube faces must satisfy the declared "
-        "texture shape."); }
+        "two-dimensional allocation with one mip and one sample."); }
     ResourceDescription result;
     result.Type = wrapper.IsCube ? ResourceType::TextureCube : actual.DepthOrArraySize > 1 ? ResourceType::Texture2DArray : ResourceType::Texture2D;
     result.Format = wrapper.Format;

@@ -38,5 +38,6 @@ void TransitionFrameGraphResource(GDX12CommandList* commands, FrameGraphPhysical
 void FrameGraphUAVBarrier(GDX12CommandList* commands, FrameGraphPhysicalResource& resource);
 struct FrameGraphCopyStatistics { uint64_t Bytes = 0; uint32_t Commands = 0; };
 FrameGraphCopyStatistics CopyFrameGraphResource(GDX12CommandList* commands, FrameGraphPhysicalResource& source, FrameGraphPhysicalResource& target);
+// Check whether the device is capable of doing operations, described by the port
 PortCapabilities QueryFrameGraphCapabilities(GDX12Device* device, const PortDescription& schema);
 ResourceDescription DescribeFrameGraphTexture(GDX12Texture* texture);

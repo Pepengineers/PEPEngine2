@@ -21,7 +21,7 @@ public:
 		transparentDrawStream.AllowShared = true;
 	}
 
-	void PrepareResourceRequirements(PassResourceRequirementsContext& context) override
+	void ResolveResourceRequirements(PassResourceRequirementsContext& context) override
 	{
 		const auto& commands = context.GetDeviceResources()->IndirectCommandsCache;
 		if (!commands) { throw std::invalid_argument("ERROR: GPU culling has no scene indirect-command buffer. Initialize IndirectCommandsCache on the pass device "

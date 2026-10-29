@@ -46,7 +46,7 @@ void RenderModule::Initialize()
     _primaryDevice = std::make_unique<GDX12Device>();
     _secondaryDevice = std::make_unique<GDX12Device>();
     FrameGraph graph(_primaryDevice.get(), _secondaryDevice.get());
-    ConfigureRenderPipeline(graph);
+    ConfigureFrameGraph(graph);
     CompileFrameGraph(graph);
     SubscribeToSceneManager();
 }
@@ -625,10 +625,10 @@ void RenderModule::CompileFrameGraph(FrameGraph& graph)
 
     if (!_backBuffer) { BuildBackBuffer(); }
 
-    PrepareSceneResources(_primaryResources, primaryFlags);
-    if (dualGPUMode) { PrepareSceneResources(_secondaryResources, secondaryFlags); }
-
+    UploadSceneResources(_primaryResources, primaryFlags);
+    if (dualGPUMode) { UploadSceneResources(_secondaryResources, secondaryFlags); }
     graph.SetDeviceResources(&_primaryResources, dualGPUMode ? &_secondaryResources : nullptr, &_RPcommonData);
+
     bool hasPresentPass = false;
     for (const auto& entry : graph.GetDefinition().Nodes)
     {
@@ -662,7 +662,7 @@ void RenderModule::ResizeSceneBuffers(GDX12DeviceResources& resources, uint32_t 
     if (flags & RENDER_PASS_FLAG_USE_INSTANCES) { grow(resources.IndirectCommandsCache, _instanceCount); }
 }
 
-void RenderModule::PrepareSceneResources(GDX12DeviceResources& resources, uint32_t flags)
+void RenderModule::UploadSceneResources(GDX12DeviceResources& resources, uint32_t flags)
 {
     ResizeSceneBuffers(resources, flags);
     if (flags & RENDER_PASS_FLAG_USE_GEOMETRY)
@@ -697,7 +697,7 @@ void RenderModule::MarkSceneDataDirty()
     }
 }
 
-void RenderModule::ConfigureRenderPipeline(FrameGraph& fg)
+void RenderModule::ConfigureFrameGraph(FrameGraph& fg)
 {
     fg.SetTransportQueuePolicy(TransportQueuePolicy::Auto);
 

@@ -51,7 +51,7 @@ void OutputPinRef::SetStorageType(MemoryType value) const
 {
     auto definition = _definition.lock();
     if (!definition) { throw std::logic_error("ERROR: Given FrameGraph handle refers to a destroyed graph. Obtain a new handle from a live graph."); }
-    if (definition->Frozen) { throw std::logic_error("ERROR: Unable to edit this value on a compiled graph."); }
+    if (definition->IsCompiled) { throw std::logic_error("ERROR: Unable to edit this value on a compiled graph."); }
     definition->Nodes.at(_address.Node).Description.Outputs.at(_address.Pin).RequestedMemory = value;
 }
 
@@ -66,7 +66,7 @@ void InputPinRef::SetAccessType(MemoryType value) const
 {
     auto definition = _definition.lock();
     if (!definition) { throw std::logic_error("ERROR: Given FrameGraph handle refers to a destroyed graph. Obtain a new handle from a live graph."); }
-    if (definition->Frozen) { throw std::logic_error("ERROR: Unable to edit this value on a compiled graph"); }
+    if (definition->IsCompiled) { throw std::logic_error("ERROR: Unable to edit this value on a compiled graph"); }
     definition->Nodes.at(_address.Node).Description.Inputs.at(_address.Pin).RequestedMemory = value;
 }
 
@@ -88,7 +88,7 @@ FrameGraph::FrameGraph(GDX12Device* primary, GDX12Device* secondary)
 
 void FrameGraph::ConnectNodes(const OutputPinRef& output, const InputPinRef& input)
 {
-    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
+    if (_definition->IsCompiled) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
     auto outputDefinition = output._definition.lock();
     auto inputDefinition = input._definition.lock();
     if (!outputDefinition || !inputDefinition) { throw std::logic_error("ERROR: Given FrameGraph handle refers to a destroyed graph."); }
@@ -102,7 +102,7 @@ void FrameGraph::ConnectNodes(const OutputPinRef& output, const InputPinRef& inp
 
 void FrameGraph::AddExecutionDependency(const NodeHandle& before, const NodeHandle& after)
 {
-    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
+    if (_definition->IsCompiled) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
     auto beforeDefinition = before._definition.lock();
     auto afterDefinition = after._definition.lock();
     if (!beforeDefinition || !afterDefinition) { throw std::logic_error("ERROR: Given FrameGraph handle refers to a destroyed graph."); }
@@ -113,7 +113,7 @@ void FrameGraph::AddExecutionDependency(const NodeHandle& before, const NodeHand
 
 OutputPinRef FrameGraph::ImportTexture(NodeId id, std::function<GDX12Texture*()> provider)
 {
-    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
+    if (_definition->IsCompiled) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
     if (id.empty() || !provider || _definition->Nodes.count(id)) { throw std::invalid_argument("ERROR: Import ID '" + id + "' is empty, already registered, or has no provider."); }
 
     NodeDefinition node;
@@ -127,7 +127,7 @@ OutputPinRef FrameGraph::ImportTexture(NodeId id, std::function<GDX12Texture*()>
 
 void FrameGraph::SetDeviceResources(GDX12DeviceResources* primary, GDX12DeviceResources* secondary, RenderPipelineCommonData* common)
 {
-    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
+    if (_definition->IsCompiled) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
     if (!primary || primary->Device != _primary || !common ||
         (UsesDevice(DEVICE_ROLE_SECONDARY) && (!secondary || secondary->Device != _secondary)))
     { throw std::invalid_argument("ERROR: Given device resources or frame data do not match the registered FrameGraph devices. Call "
@@ -137,13 +137,13 @@ void FrameGraph::SetDeviceResources(GDX12DeviceResources* primary, GDX12DeviceRe
 }
 void FrameGraph::SetTransportQueuePolicy(TransportQueuePolicy policy)
 {
-    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
+    if (_definition->IsCompiled) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
 
     _compileData.QueuePolicy = policy;
 }
 void FrameGraph::SetFrameSlotCount(uint32_t count)
 {
-    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
+    if (_definition->IsCompiled) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
     if (!count) { throw std::invalid_argument("ERROR: Given frame slot count is zero. Pass a frame slot count greater than zero."); }
 
     _compileData.FrameSlotCount = count;
@@ -202,7 +202,6 @@ struct CompiledFrameGraph::Runtime
     std::map<NodeId, std::unique_ptr<GDX12RenderPass>> Passes;
     std::map<NodeId, std::unique_ptr<GDX12GPUTimer>> Timers;
     std::map<NodeId, std::function<GDX12Texture*()>> Imports;
-    std::map<NodeId, NodeId> ImportAliases;
     std::map<PinAddress, PinAddress> Sources;
     std::vector<Slot> Slots;
     uint64_t Frame = 0;
@@ -229,15 +228,15 @@ struct CompiledFrameGraph::Runtime
         slot.ExternalResources.clear();
     }
 
-    void PrepareResourceRequirements()
+    // Collects device capabilities, imported texture descriptions, and pass resource requirements.
+    // Propagates texture size requirements through the graph to determine the render resolution.
+    void ResolveResourceRequirements()
     {
         CompileData.Ports.clear();
         CompileData.RenderSize = CompileData.DisplaySize;
         for (const auto& node : Definition.Nodes)
         {
             auto* resources = GetDeviceResources(node.second.DeviceRole);
-            if (!resources) { throw std::invalid_argument("ERROR: " + node.first + ": device resources are unavailable. Initialize and supply GDX12DeviceResources for this node device before "
-                "Compile()."); }
             for (const auto* ports : {&node.second.Description.Inputs, &node.second.Description.Outputs})
             {
                 for (const auto& pin : *ports)
@@ -246,20 +245,14 @@ struct CompiledFrameGraph::Runtime
         }
         for (const auto& imported : Imports)
         {
-            if (ImportAliases.count(imported.first)) { continue; }
             auto* texture = imported.second();
-            auto* owner = GetDeviceResources(Definition.Nodes.at(imported.first).DeviceRole);
-            if (!texture || !owner || texture->GetDevice() != owner->Device)
-            { throw std::invalid_argument("ERROR: " + imported.first + ": texture provider returned no texture or changed its owning device. Keep the import on its original device "
-                "or compile a new FrameGraph for the new owner."); }
             CompileData.Ports[{imported.first,"Resource"}].Imported = DescribeFrameGraphTexture(texture);
         }
-        ValidateImportAliases();
         for (auto& entry : Passes)
         {
             auto& node = Definition.Nodes.at(entry.first);
             PassResourceRequirementsContext context(GetDeviceResources(node.DeviceRole), Common, node, CompileData);
-            entry.second->PrepareResourceRequirements(context);
+            entry.second->ResolveResourceRequirements(context);
         }
         // SDK input requirements flow backwards through SameAs to the render size.
         std::optional<UInt2> renderSize;
@@ -272,19 +265,16 @@ struct CompiledFrameGraph::Runtime
             if (Definition.Nodes.at(address.Node).Description.Inputs.count(address.Pin))
             {
                 auto source = Sources.find(address);
-                if (source == Sources.end()) { throw std::invalid_argument("ERROR: " + address.Node + "." + address.Pin + ": texture-size requirement refers to an unconnected input. Connect this input before assigning a texture-size "
-                    "requirement to it."); }
+                if (source == Sources.end()) { throw std::invalid_argument("ERROR: " + address.Node + "." + address.Pin + ": texture-size requirement refers to an unconnected input."); }
                 require(source->second, size, std::move(seen));
             }
             else if (extent.Type == Extent::Source::Render)
             {
-                if (renderSize && *renderSize != size) { throw std::invalid_argument("ERROR: SDK passes require conflicting render resolutions. Make all passes using Extent::Render() agree on one "
-                    "render resolution."); }
+                if (renderSize && *renderSize != size) { throw std::invalid_argument("ERROR: SDK passes require conflicting render resolutions. Make all passes using Extent::Render() agree on one render resolution."); }
                 renderSize = size;
             }
             else if (extent.Type == Extent::Source::Display && CompileData.DisplaySize != size)
-            { throw std::invalid_argument("ERROR: SDK input resolution conflicts with a fixed display-size texture. Use Extent::Render() for SDK inputs "
-                "that need a size different from the display resolution."); }
+            { throw std::invalid_argument("ERROR: SDK input resolution conflicts with a fixed display-size texture. Use Extent::Render() for SDK inputs that need a size different from the display resolution."); }
             else if (extent.Type == Extent::Source::Input) { require({address.Node, extent.Input}, size, std::move(seen)); }
         };
         for (const auto& port : CompileData.Ports)
@@ -298,24 +288,27 @@ struct CompiledFrameGraph::Runtime
         Common->DownscaledHeight = CompileData.RenderSize.y;
     }
 
-    void CanonicalizeImports()
+
+    void MergeDuplicateTextureImports()
     {
         std::map<ID3D12Resource*,NodeId> identities;
-        for (const auto& imported : Imports)
+        for (auto it = Imports.begin(); it != Imports.end();)
         {
+            const auto& imported = *it;
             auto* texture = imported.second();
             if (!texture || !texture->GetResource()) { throw std::invalid_argument("ERROR: " + imported.first + ": imported texture or resource is missing. Keep the imported texture alive and make its provider return an "
                 "initialized resource."); }
             auto resource = texture->GetResource()->D3DResource.Get();
             auto found = identities.emplace(resource,imported.first);
-            if (found.second) { continue; }
+            if (found.second) { ++it; continue; }
             if (Definition.Nodes.at(imported.first).Description.Outputs.at("Resource").RequestedMemory == MemoryType::Shared)
             { throw std::invalid_argument("ERROR: " + imported.first + ": imported allocation has fixed Local storage and cannot satisfy Shared storage. Keep imported resources in "
                 "MemoryType::Local and let FrameGraph create any required shared transport."); }
-            ImportAliases[imported.first] = found.first->second;
+
             Definition.Nodes.erase(imported.first);
             for (auto& connection : Definition.Connections)
             { if (connection.Source.Node == imported.first) { connection.Source.Node = found.first->second; } }
+
             auto& dependencies = Definition.OrderDependencies;
             dependencies.erase(std::remove_if(dependencies.begin(), dependencies.end(), [&](auto& dependency)
             {
@@ -324,18 +317,7 @@ struct CompiledFrameGraph::Runtime
                 if (dependency.second == imported.first) { dependency.second = found.first->second; }
                 return redirected && dependency.first == dependency.second;
             }), dependencies.end());
-        }
-    }
-
-    void ValidateImportAliases()
-    {
-        for (const auto& alias : ImportAliases)
-        {
-            auto* a = Imports.at(alias.first)();
-            auto* b = Imports.at(alias.second)();
-            if (!a || !b || a->GetResource()->D3DResource.Get() != b->GetResource()->D3DResource.Get()
-                || a->GetFormat() != b->GetFormat() || a->GetWidth() != b->GetWidth() || a->GetHeight() != b->GetHeight())
-            { throw std::invalid_argument("ERROR: " + alias.first + ": imported allocation or description no longer matches its canonical import " + alias.second + ". Make both import providers refer to the same native allocation after each resize or replacement."); }
+            it = Imports.erase(it);
         }
     }
 
@@ -510,7 +492,7 @@ struct CompiledFrameGraph::Runtime
         {
             try
             {
-                WaitForGPUCompletion(); PrepareResourceRequirements(); BuildResources();
+                WaitForGPUCompletion(); ResolveResourceRequirements(); BuildResources();
                 for (auto& entry : Passes)
                 {
                     const auto& node = Definition.Nodes.at(entry.first);
@@ -530,7 +512,6 @@ struct CompiledFrameGraph::Runtime
         }
         try
         {
-            ValidateImportAliases();
             std::map<NodeId, GDX12CompletionPoint> nodeCompletions;
             for (const auto& id : Plan.Order)
             {
@@ -636,20 +617,20 @@ struct CompiledFrameGraph::Runtime
 
 std::unique_ptr<CompiledFrameGraph> FrameGraph::Compile()
 {
-    if (_definition->Frozen) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled. Create and configure a new FrameGraph before calling "
-        "Compile()."); }
-    if (!_primaryResources || !_common) { throw std::invalid_argument("ERROR: Given FrameGraph has no device resources or frame data. Call SetDeviceResources() with initialized "
-        "device resources and non-null frame data before Compile()."); }
+    if (_definition->IsCompiled) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
+
     auto runtime = std::make_unique<CompiledFrameGraph::Runtime>();
-    runtime->Primary = _primaryResources; runtime->Secondary = UsesDevice(DEVICE_ROLE_SECONDARY) ? _secondaryResources : nullptr;
-    runtime->Common = _common; runtime->Definition = *_definition; runtime->CompileData = _compileData;
+    runtime->Primary = _primaryResources;
+    runtime->Secondary = UsesDevice(DEVICE_ROLE_SECONDARY) ? _secondaryResources : nullptr;
+    runtime->Common = _common; runtime->Definition = *_definition;
+    runtime->CompileData = _compileData;
     runtime->Imports = _imports;
     for (const auto& imported : runtime->Imports)
     {
         auto* texture = imported.second();
         if (!texture || (texture->GetDevice() != _primary && texture->GetDevice() != _secondary))
-        { throw std::invalid_argument("ERROR: " + imported.first + ": imported target must belong to a registered device. Return a texture owned by the registered primary or "
-            "secondary device."); }
+        { throw std::invalid_argument("ERROR: " + imported.first + ": imported target must belong to a registered device."); }
+
         const auto description = DescribeFrameGraphTexture(texture);
         auto& node = runtime->Definition.Nodes.at(imported.first);
         node.DeviceRole = texture->GetDevice() == _primary ? DEVICE_ROLE_PRIMARY : DEVICE_ROLE_SECONDARY;
@@ -659,31 +640,24 @@ std::unique_ptr<CompiledFrameGraph> FrameGraph::Compile()
         port.Usages = description.Usages;
         if (node.DeviceRole == DEVICE_ROLE_SECONDARY) { runtime->Secondary = _secondaryResources; }
     }
+
     runtime->CompileData.DisplaySize = {_common->WindowWidth, _common->WindowHeight};
-    if (!runtime->CompileData.FrameSlotCount)
-    { runtime->CompileData.FrameSlotCount = static_cast<uint32_t>(_primaryResources->FrameConstants.size()); }
-    if (!runtime->CompileData.FrameSlotCount || runtime->CompileData.FrameSlotCount > runtime->Primary->FrameConstants.size()
-        || (runtime->Secondary && runtime->CompileData.FrameSlotCount > runtime->Secondary->FrameConstants.size()))
-    { throw std::invalid_argument("ERROR: FrameGraph slots exceed the available device frame constants. Use SetFrameSlotCount() with a value no "
-        "greater than FrameConstants.size() on every participating device."); }
+    if (!runtime->CompileData.FrameSlotCount) { runtime->CompileData.FrameSlotCount = static_cast<uint32_t>(_primaryResources->FrameConstants.size()); }
+
     runtime->Passes = std::move(_passes);
-    try
+    runtime->MergeDuplicateTextureImports();
+    for (const auto& edge : runtime->Definition.Connections) { runtime->Sources[edge.Target] = edge.Source; }
+    runtime->ResolveResourceRequirements();
+    runtime->BuildResources();
+    for (auto& entry : runtime->Passes)
     {
-        runtime->CanonicalizeImports();
-        for (const auto& edge : runtime->Definition.Connections) { runtime->Sources[edge.Target] = edge.Source; }
-        runtime->PrepareResourceRequirements();
-        runtime->BuildResources();
-        for (auto& entry : runtime->Passes)
-        {
-            const auto& node = runtime->Definition.Nodes.at(entry.first);
-            PassInitContext context(runtime->GetDeviceResources(node.DeviceRole), _common, node, runtime->Plan, runtime->Sources);
-            entry.second->Initialize(context);
-            runtime->Timers[entry.first] = std::make_unique<GDX12GPUTimer>(runtime->GetDeviceResources(node.DeviceRole)->Device);
-        }
+        const auto& node = runtime->Definition.Nodes.at(entry.first);
+        PassInitContext context(runtime->GetDeviceResources(node.DeviceRole), _common, node, runtime->Plan, runtime->Sources);
+        entry.second->Initialize(context);
+        runtime->Timers[entry.first] = std::make_unique<GDX12GPUTimer>(runtime->GetDeviceResources(node.DeviceRole)->Device);
     }
-    catch (...) { runtime->WaitForGPUCompletion(); _passes = std::move(runtime->Passes); throw; }
     auto graph = std::unique_ptr<CompiledFrameGraph>(new CompiledFrameGraph(std::move(runtime)));
-    _definition->Frozen = true;
+    _definition->IsCompiled = true;
     return graph;
 }
 
@@ -769,7 +743,7 @@ void CompiledFrameGraph::ResizeResources(UInt2 display)
     {
         _runtime->WaitForGPUCompletion();
         _runtime->CompileData.DisplaySize = display;
-        _runtime->PrepareResourceRequirements();
+        _runtime->ResolveResourceRequirements();
         _runtime->BuildResources();
         for (auto& entry : _runtime->Passes)
         {

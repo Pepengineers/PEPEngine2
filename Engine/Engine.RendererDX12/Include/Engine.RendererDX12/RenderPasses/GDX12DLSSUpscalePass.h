@@ -43,7 +43,7 @@ public:
 		s.RequireSameTextureSize({"Source", "Depth", "Velocity"});
 	}
 
-	void PrepareResourceRequirements(PassResourceRequirementsContext& context) override
+	void ResolveResourceRequirements(PassResourceRequirementsContext& context) override
 	{
 		auto& sdk = GDX12StreamlineSDK::Get();
 		if (!sdk.IsEnabled()) { throw std::runtime_error("ERROR: DLSS requires initialized Streamline. Initialize GDX12StreamlineSDK and register the primary device "

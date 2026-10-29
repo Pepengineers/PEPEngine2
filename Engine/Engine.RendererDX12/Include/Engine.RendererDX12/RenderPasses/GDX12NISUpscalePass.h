@@ -43,7 +43,7 @@ public:
 		color.Usages = ResourceUsage::UnorderedAccess;
 	}
 
-	void PrepareResourceRequirements(PassResourceRequirementsContext& context) override
+	void ResolveResourceRequirements(PassResourceRequirementsContext& context) override
 	{
 		auto& sdk = GDX12StreamlineSDK::Get();
 		if (!sdk.IsEnabled()) { throw std::runtime_error("ERROR: NIS requires initialized Streamline. Initialize GDX12StreamlineSDK and register the primary device "

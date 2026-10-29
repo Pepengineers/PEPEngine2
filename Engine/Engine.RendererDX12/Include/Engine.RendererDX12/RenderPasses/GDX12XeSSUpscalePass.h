@@ -41,7 +41,7 @@ public:
 		s.RequireSameTextureSize({"Source", "Depth", "Velocity"});
 	}
 
-	void PrepareResourceRequirements(PassResourceRequirementsContext& context) override
+	void ResolveResourceRequirements(PassResourceRequirementsContext& context) override
 	{
 		ReleaseContext();
 		const auto displaySize = context.GetDisplaySize();
