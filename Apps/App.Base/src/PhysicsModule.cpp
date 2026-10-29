@@ -105,20 +105,22 @@ void PhysicsModule::TryCreateBody(World& world, Entity entity)
 
     if (rigidBody.Body.IsValid()) { return; }
     
-    PhysicsBoxBodyDesc desc;
+    PhysicsBodyDesc desc;
     desc.Position = transform.Location;
     // TODO make quats everywhere in engine
     desc.Rotation = DirectX::SimpleMath::Quaternion::CreateFromYawPitchRoll(
         DirectX::XMConvertToRadians(transform.Rotation.y),
         DirectX::XMConvertToRadians(transform.Rotation.x),
         DirectX::XMConvertToRadians(transform.Rotation.z));
-    desc.HalfExtent = DirectX::SimpleMath::Vector3(
+    BoxShapeDesc shape;
+    shape.HalfExtent = DirectX::SimpleMath::Vector3(
         collider.HalfExtent.x * transform.Scale.x,
         collider.HalfExtent.y * transform.Scale.y,
         collider.HalfExtent.z * transform.Scale.z);
+    desc.Shape = shape;
     desc.MotionType = rigidBody.MotionType;
     
-    rigidBody.Body = CreateBoxBody(desc);
+    rigidBody.Body = CreateBody(desc);
     
     // TODO remove later
     if (rigidBody.Body.IsValid())   
