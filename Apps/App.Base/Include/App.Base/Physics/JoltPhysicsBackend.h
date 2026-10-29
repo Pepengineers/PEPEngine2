@@ -32,6 +32,7 @@ public:
     
     // create bodies
     PhysicsBodyHandle CreateBoxBody(const PhysicsBoxBodyDesc& desc);
+    PhysicsBodyHandle CreateBody(const PhysicsBodyDesc& desc);
     
     // destroy bodies
     void DestroyBody(PhysicsBodyHandle handle);

@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <thread>
 #include <cmath>
+#include <type_traits>
 
 #include <Jolt/Jolt.h>
 #include <Jolt/RegisterTypes.h>
@@ -15,6 +16,9 @@
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/CylinderShape.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 
 #include "Common/Logger.h"
@@ -49,6 +53,51 @@ namespace
         return IsDebuggerPresent() != FALSE;
     }
 #endif
+    
+    JPH::Shape::ShapeResult CreateShape(const PhysicsShapeDesc& desc)
+    {
+        return std::visit([](const auto& shape) -> JPH::Shape::ShapeResult 
+        {
+            using T = std::decay_t<decltype(shape)>;
+            
+            const auto isPositive = [](float value) { return std::isfinite(value) && value > 0.0f; }; // TODO move somewhere to helpers
+            
+            const auto invalidShape = []()
+            {
+                JPH::Shape::ShapeResult result;
+                result.SetError("Invalid shape dimensions");
+                return result;
+            };
+            
+            if constexpr (std::is_same_v<T, BoxShapeDesc>)
+            {
+                const auto& halfExtent = shape.HalfExtent;
+                if (!isPositive(halfExtent.x) || !isPositive(halfExtent.y) || !isPositive(halfExtent.z)) { return invalidShape(); }
+                return JPH::BoxShapeSettings(JPH::Vec3(halfExtent.x, halfExtent.y, halfExtent.z)).Create();
+            }
+            
+            else if constexpr (std::is_same_v<T, SphereShapeDesc>)
+            {
+                if (!isPositive(shape.Radius)) { return invalidShape(); }
+                return JPH::SphereShapeSettings(shape.Radius).Create();
+            }
+            
+            else if constexpr (std::is_same_v<T, CylinderShapeDesc>)
+            {
+                if (!isPositive(shape.Radius) || !isPositive(shape.HalfHeight)) { return invalidShape(); }
+                return JPH::CylinderShapeSettings(shape.HalfHeight, shape.Radius).Create();
+            }
+            
+            else 
+            {
+                static_assert(std::is_same_v<T, CapsuleShapeDesc>, "Unsupported shape type");
+                if (!isPositive(shape.Radius) || !std::isfinite(shape.HalfCylinderHeight)) { return invalidShape(); }
+                return JPH::CapsuleShapeSettings(shape.HalfCylinderHeight, shape.Radius).Create();
+            }
+            
+        },
+        desc);
+    }
 }
 
 namespace ObjectLayers
@@ -270,6 +319,66 @@ PhysicsBodyHandle JoltPhysicsBackend::CreateBoxBody(const PhysicsBoxBodyDesc& de
     if (!body)
     {
         Logger::Error("CreateBoxBody(): failed to create");
+        return {};
+    }
+    
+    const JPH::BodyID& bodyID = body->GetID();
+    bodyInterface.AddBody(bodyID, isStatic ? JPH::EActivation::DontActivate : JPH::EActivation::Activate);
+    
+    return PhysicsBodyHandle{ bodyID.GetIndexAndSequenceNumber() };
+}
+
+PhysicsBodyHandle JoltPhysicsBackend::CreateBody(const PhysicsBodyDesc& desc)
+{
+    if (!_bInitialized || !_physicsSystem)
+    {
+        Logger::Error("CreateBody(): backend isnt initialized");
+        return {};
+    }
+    
+    JPH::EMotionType motionType;
+
+    switch (desc.MotionType)
+    {
+    case PhysicsMotionType::Static:
+        motionType = JPH::EMotionType::Static;
+        break;
+    case PhysicsMotionType::Dynamic:
+        motionType = JPH::EMotionType::Dynamic;
+        break;
+    case PhysicsMotionType::Kinematic:
+        motionType = JPH::EMotionType::Kinematic;
+        break;
+        
+    default:
+        Logger::Error("CreateBody(): invalid motion type");
+        return {};
+    }
+    
+    const bool isStatic = desc.MotionType == PhysicsMotionType::Static;
+    
+    const auto shapeResult = CreateShape(desc.Shape);
+    if (shapeResult.HasError())
+    {
+        Logger::Error("CreateBody(): {}", shapeResult.GetError().c_str());
+        return {};
+    }
+    JPH::ShapeRefC shape = shapeResult.Get();
+    
+    JPH::BodyCreationSettings settings(
+        shape, 
+        JPH::RVec3(desc.Position.x, desc.Position.y, desc.Position.z),
+        JPH::Quat(desc.Rotation.x, desc.Rotation.y, desc.Rotation.z, desc.Rotation.w),
+        motionType,
+        isStatic ? ObjectLayers::Static : ObjectLayers::Dynamic
+    );
+    
+    JPH::BodyInterface& bodyInterface = _physicsSystem->GetBodyInterface();
+    
+    JPH::Body* body = bodyInterface.CreateBody(settings);
+    if (!body)
+    {
+        Logger::Error("CreateBody(): failed to create");
         return {};
     }
     

@@ -46,6 +46,13 @@ PhysicsBodyHandle PhysicsModule::CreateBoxBody(const PhysicsBoxBodyDesc& desc)
     return _cpuPhysics->CreateBoxBody(desc);
 }
 
+PhysicsBodyHandle PhysicsModule::CreateBody(const PhysicsBodyDesc& desc)
+{
+    if (!_cpuPhysics) { return {}; }
+
+    return _cpuPhysics->CreateBody(desc);
+}
+
 void PhysicsModule::DestroyBody(PhysicsBodyHandle handle)
 {
     if (!_cpuPhysics || !handle.IsValid()) { return; }
