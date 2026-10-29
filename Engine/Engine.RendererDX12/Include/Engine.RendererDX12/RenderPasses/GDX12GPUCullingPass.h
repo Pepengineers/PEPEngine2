@@ -73,7 +73,7 @@ public:
 		const auto* common = context.GetFrameData();
 		const auto& opaque = context.GetOutputDrawStream(OpaqueDrawStream);
 		const auto& transparent = context.GetOutputDrawStream(TransparentDrawStream);
-		auto& currentFrameConstants = resources->FrameConstants[context.GetFrameSlotIndex()];
+		auto& currentFrameConstants = resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
 
 		cmdList->BeginPixEvent("GPU Mesh Culling", Colors::Blue);
 

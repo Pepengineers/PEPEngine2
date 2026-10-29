@@ -102,12 +102,12 @@ protected:
 class PassExecutionContext : public PassInitContext
 {
 public:
-    PassExecutionContext(const PassInitContext& init, GDX12CommandList* commands, uint64_t frameId, uint32_t slot,
+    PassExecutionContext(const PassInitContext& init, GDX12CommandList* commands, uint64_t frameId, uint32_t frameSlotIndex,
         const std::map<PinId, PassBinding>& bindings)
-        : PassInitContext(init), _commands(commands), _frameId(frameId), _slot(slot), _bindings(bindings) {}
+        : PassInitContext(init), _commands(commands), _frameId(frameId), _frameSlotIndex(frameSlotIndex), _bindings(bindings) {}
     GDX12CommandList* GetCommandList() const { return _commands; }
     uint64_t GetFrameId() const { return _frameId; }
-    uint32_t GetFrameSlotIndex() const { return _slot; }
+    uint32_t GetFrameSlotResourcesIndex() const { return _frameSlotIndex; }
     const TextureBinding& GetInputTexture(const PinId& id) const
     {
         ValidateTexturePort(id, _node.Description.GetInputDescription(id));
@@ -185,7 +185,7 @@ private:
     }
     GDX12CommandList* _commands;
     uint64_t _frameId;
-    uint32_t _slot;
+    uint32_t _frameSlotIndex;
     const std::map<PinId, PassBinding>& _bindings;
 };
 

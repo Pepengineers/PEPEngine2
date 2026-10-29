@@ -4,7 +4,7 @@ std::vector<ExternalResourceUse> GDX12RenderPass::GetExternalResources(PassExecu
 {
     std::vector<ExternalResourceUse> uses;
     auto* resources = context.GetDeviceResources();
-    auto& frame = *resources->FrameConstants.at(context.GetFrameSlotIndex());
+    auto& frame = *resources->FrameConstants.at(context.GetFrameSlotResourcesIndex());
     if (_flags & RENDER_PASS_FLAG_USE_INSTANCES)
     {
         uses.push_back({&frame.InstanceCache->GetResource(), D3D12_RESOURCE_STATE_GENERIC_READ, {}});

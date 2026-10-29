@@ -67,14 +67,17 @@ public:
         return AddPass<T>(std::move(id), DEVICE_ROLE_SECONDARY, std::forward<Args>(args)...);
     }
     void ConnectNodes(const OutputPinRef& output, const InputPinRef& input);
+    // Require `before` to execute ahead of `after` without adding a resource connection.
     void AddExecutionDependency(const NodeHandle& before, const NodeHandle& after);
     // Allows you to import external textures to FrameGraph via function
     // Works as an output pin coming from nowhere
     OutputPinRef ImportTexture(NodeId id, std::function<GDX12Texture*()> provider);
     void SetDeviceResources(GDX12DeviceResources* primary, GDX12DeviceResources* secondary, RenderPipelineCommonData* common);
     void SetTransportQueuePolicy(TransportQueuePolicy policy);
-    void SetFrameSlotCount(uint32_t count);
+    void SetFrameSlotResourcesCount(uint32_t count);
+    // Return a handle for an existing node identifier, including imported texture nodes.
     NodeHandle GetNode(const NodeId& id) const;
+    // Return handles of passes matching T
     template<class T> std::vector<NodeHandle> GetPassNodes() const
     {
         std::vector<NodeHandle> nodes;
@@ -87,7 +90,9 @@ public:
     }
     bool UsesDevice(EDeviceRole role) const;
     uint32_t GetDevicePassFlags(EDeviceRole role) const;
+    // Returns FrameGraph's CPU declarations
     const FrameGraphDefinition& GetDefinition() const { return *_definition; }
+    // Resolve requirements, allocate resources and initialize passes.
     std::unique_ptr<CompiledFrameGraph> Compile();
 private:
     template<class T, class... Args> NodeHandle AddPass(NodeId id, EDeviceRole role, Args&&... args)
@@ -117,23 +122,30 @@ private:
     FrameGraphCompileData _compileData;
 };
 
+// Owns executable passes, the resolved plan and per-slot allocations after successful graph compilation.
 class CompiledFrameGraph
 {
 public:
     ~CompiledFrameGraph();
     CompiledFrameGraph(const CompiledFrameGraph&) = delete;
     CompiledFrameGraph& operator=(const CompiledFrameGraph&) = delete;
+    // Wait for the selected slot, process pending rebuilds and submit the next frame's commands.
     void ExecuteFrame();
-    void RequestResourceRebuild();
-    void WaitForCurrentFrameSlot();
+    // Request resource recreation at the next ExecuteFrame().
+    void RequestFrameSlotResourcesRebuild();
+    void WaitForCurrentFrameSlotResources();
+    // Block the CPU until submitted DIRECT and COPY work on the graph's devices has completed.
     void WaitForGPUCompletion();
-    void ReleaseFrameResourcesForResize();
-    void ResizeResources(UInt2 display);
+    // Wait for GPU work and drop slot references before resizing imported swap-chain resources.
+    void ReleaseFrameSlotResourcesForResize();
+    void ResizeFrameSlotResources(UInt2 display);
     const FrameGraphPlan& GetExecutionPlan() const;
+    // Describe placement, requested policies, fallbacks, GPU timings and cumulative copy statistics.
     std::string GetDebugReport() const;
     uint32_t GetDevicePassFlags(EDeviceRole role) const;
-    uint32_t GetCurrentFrameSlotIndex() const;
+    uint32_t GetCurrentFrameSlotResourcesIndex() const;
     bool UsesDevice(EDeviceRole role) const;
+    // Access the owned pass by identifier and C++ type; throws for imports or a mismatched type.
     template<class T> T& GetPass(const NodeId& id)
     {
         auto* pass = dynamic_cast<T*>(&FindPass(id));

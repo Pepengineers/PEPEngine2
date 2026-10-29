@@ -66,13 +66,13 @@ void RenderModule::OnResize()
     if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
     if (_renderingSuspended) { return; }
 
-    if (_frameGraph) { _frameGraph->ReleaseFrameResourcesForResize(); }
+    if (_frameGraph) { _frameGraph->ReleaseFrameSlotResourcesForResize(); }
     _backBuffer->Resize(width, height);
     _depthStencil->Resize(width, height);
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
-    if (_frameGraph) { _frameGraph->ResizeResources({width, height}); }
+    if (_frameGraph) { _frameGraph->ResizeFrameSlotResources({width, height}); }
 }
 
 GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
@@ -532,16 +532,16 @@ const float RenderModule::GetAspectRatio()
 void RenderModule::OnUpdate()
 {
     if (!_frameGraph || _renderingSuspended) { return; }
-    _frameGraph->WaitForCurrentFrameSlot();
-    const auto slot = _frameGraph->GetCurrentFrameSlotIndex();
-    _primaryResources.CurrFrameConstantsIndex = slot;
+    _frameGraph->WaitForCurrentFrameSlotResources();
+    const auto frameSlotIndex = _frameGraph->GetCurrentFrameSlotResourcesIndex();
+    _primaryResources.CurrFrameConstantsIndex = frameSlotIndex;
     _primaryResources.UpdateMainCB(_RPcommonData.WindowWidth, _RPcommonData.WindowHeight, _timer);
     if (PipelineHasFlag(DEVICE_ROLE_PRIMARY, RENDER_PASS_FLAG_USE_MATERIALS))
     { _primaryResources.UpdateMaterialCB(_materials); }
 
     if (_frameGraph->UsesDevice(DEVICE_ROLE_SECONDARY))
     {
-        _secondaryResources.CurrFrameConstantsIndex = slot;
+        _secondaryResources.CurrFrameConstantsIndex = frameSlotIndex;
         _secondaryResources.UpdateMainCB(_RPcommonData.WindowWidth, _RPcommonData.WindowHeight, _timer);
         if (PipelineHasFlag(DEVICE_ROLE_SECONDARY, RENDER_PASS_FLAG_USE_MATERIALS))
         { _secondaryResources.UpdateMaterialCB(_materials); }
@@ -665,7 +665,7 @@ void RenderModule::ResizeSceneBuffers(GDX12DeviceResources& resources, uint32_t 
     if (flags & RENDER_PASS_FLAG_USE_INSTANCES)
     {
         const bool commandsResized = grow(resources.IndirectCommandsCache, _instanceCount);
-        if (commandsResized && _frameGraph) { _frameGraph->RequestResourceRebuild(); }
+        if (commandsResized && _frameGraph) { _frameGraph->RequestFrameSlotResourcesRebuild(); }
     }
 }
 

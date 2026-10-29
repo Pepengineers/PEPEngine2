@@ -130,7 +130,7 @@ public:
 		auto* OUT_Accumulation = context.GetOutputTexture(Accum).GetTexture();
 		auto* OUT_Revealage = context.GetOutputTexture(Revealage).GetTexture();
 		const auto& draws = context.GetInputDrawStream(Draws);
-		auto& currentFrameConstants = resources->FrameConstants[context.GetFrameSlotIndex()];
+		auto& currentFrameConstants = resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
 
 		cmdList->BeginPixEvent("Transparent Render Pass", Colors::Aqua);
 		cmdList->SetViewport(OUT_Accumulation->GetViewport());

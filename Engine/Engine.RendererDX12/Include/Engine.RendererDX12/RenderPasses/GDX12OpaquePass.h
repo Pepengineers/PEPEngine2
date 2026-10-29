@@ -107,7 +107,7 @@ public:
 		auto* OUT_VelocityBuffer = context.GetOutputTexture(Velocity).GetTexture();
 		auto* depthStencil = context.GetOutputTexture(Depth).GetTexture();
 		const auto& draws = context.GetInputDrawStream(Draws);
-		auto& currentFrameConstants = resources->FrameConstants[context.GetFrameSlotIndex()];
+		auto& currentFrameConstants = resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
 
 		cmdList->BeginPixEvent("Opaque Render Pass", Colors::ForestGreen);
 		cmdList->SetViewport(OUT_Accumulation->GetViewport());
