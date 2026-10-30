@@ -6,10 +6,10 @@
 class GDX12XeSSUpscalePass : public GDX12RenderPass
 {
 public:
-	static constexpr const char* Source = "Source";
-	static constexpr const char* Depth = "Depth";
-	static constexpr const char* Velocity = "Velocity";
-	static constexpr const char* Color = "Color";
+	static constexpr const char* InColorTexture = "InColorTexture";
+	static constexpr const char* InDepthBuffer = "InDepthBuffer";
+	static constexpr const char* InVelocityBuffer = "InVelocityBuffer";
+	static constexpr const char* OutColorTexture = "OutColorTexture";
 
 	explicit GDX12XeSSUpscalePass(xess_quality_settings_t quality = XESS_QUALITY_SETTING_ULTRA_QUALITY_PLUS)
 		: _quality(quality)
@@ -25,20 +25,20 @@ public:
 
 	void Describe(PassDescription& s) const override
 	{
-		auto& source = s.AddInputTexture(Source);
+		auto& source = s.AddInputTexture(InColorTexture);
 		source.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 		source.Usages = ResourceUsage::NonPixelShaderRead;
-		auto& depth = s.AddInputTexture(Depth);
+		auto& depth = s.AddInputTexture(InDepthBuffer);
 		depth.Formats = {DXGI_FORMAT_D32_FLOAT};
 		depth.Usages = ResourceUsage::NonPixelShaderRead;
-		auto& velocity = s.AddInputTexture(Velocity);
+		auto& velocity = s.AddInputTexture(InVelocityBuffer);
 		velocity.Formats = {DXGI_FORMAT_R16G16_FLOAT};
 		velocity.Usages = ResourceUsage::NonPixelShaderRead;
-		auto& color = s.AddOutputTexture(Color);
+		auto& color = s.AddOutputTexture(OutColorTexture);
 		color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 		color.Size = Extent::Display();
 		color.Usages = ResourceUsage::UnorderedAccess;
-		s.RequireSameTextureSize({"Source", "Depth", "Velocity"});
+		s.RequireSameTextureSize({InColorTexture, InDepthBuffer, InVelocityBuffer});
 	}
 
 	void ResolveResourceRequirements(PassResourceRequirementsContext& context) override
@@ -57,22 +57,22 @@ public:
 		const UInt2 renderSize = {recommended.x, recommended.y};
 		if (!renderSize.x || !renderSize.y) { throw std::runtime_error("ERROR: XeSS returned a zero or invalid input resolution. Use non-zero display dimensions and a supported XeSS "
 			"quality mode, then recreate the XeSS context."); }
-		context.RequireTextureSize(Source, renderSize);
-		context.RequireTextureSize(Depth, renderSize);
-		context.RequireTextureSize(Velocity, renderSize);
+		context.RequireTextureSize(InColorTexture, renderSize);
+		context.RequireTextureSize(InDepthBuffer, renderSize);
+		context.RequireTextureSize(InVelocityBuffer, renderSize);
 		_resetHistory = true;
 	}
 
 	void Execute(PassExecutionContext& context) override
 	{
-		const auto renderSize = context.GetInputResourceDescription(Source).GetSize();
+		const auto renderSize = context.GetInputResourceDescription(InColorTexture).GetSize();
 		auto* cmdList = context.GetCommandList();
 		const auto* frame = context.GetFrameData();
 		xess_d3d12_execute_params_t params = {};
-		params.pColorTexture = context.GetInputTexture(Source).GetTexture()->GetResource()->D3DResource.Get();
-		params.pDepthTexture = context.GetInputTexture(Depth).GetTexture()->GetResource()->D3DResource.Get();
-		params.pVelocityTexture = context.GetInputTexture(Velocity).GetTexture()->GetResource()->D3DResource.Get();
-		params.pOutputTexture = context.GetOutputTexture(Color).GetTexture()->GetResource()->D3DResource.Get();
+		params.pColorTexture = context.GetInputTexture(InColorTexture).GetTexture()->GetResource()->D3DResource.Get();
+		params.pDepthTexture = context.GetInputTexture(InDepthBuffer).GetTexture()->GetResource()->D3DResource.Get();
+		params.pVelocityTexture = context.GetInputTexture(InVelocityBuffer).GetTexture()->GetResource()->D3DResource.Get();
+		params.pOutputTexture = context.GetOutputTexture(OutColorTexture).GetTexture()->GetResource()->D3DResource.Get();
 		params.jitterOffsetX = -frame->ActiveCameraJitterOffsetX;
 		params.jitterOffsetY = -frame->ActiveCameraJitterOffsetY;
 		params.inputWidth = renderSize.x;

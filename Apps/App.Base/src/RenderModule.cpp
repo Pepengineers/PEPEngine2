@@ -720,19 +720,19 @@ void RenderModule::ConfigureFrameGraph(FrameGraph& fg)
     auto upscale = fg.AddSecondaryPass<GDX12XeSSUpscalePass>("XeSS");
     auto output = fg.AddPrimaryPass<GDX12OutputToScreenPass>("Output");
 
-    fg.ConnectNodes(backBuffer, clear.GetInput("Target"));
-    fg.ConnectNodes(depthStencil, clear.GetInput("DepthTarget"));
-    fg.ConnectNodes(clear.GetOutput("Cleared"), output.GetInput("Target"));
-    fg.ConnectNodes(culling.GetOutput("OpaqueDrawStream"), opaque.GetInput("DrawStream"));
-    fg.ConnectNodes(culling.GetOutput("TransparentDrawStream"), transparency.GetInput("DrawStream"));
-    fg.ConnectNodes(opaque.GetOutput("Depth"), transparency.GetInput("Depth"));
-    fg.ConnectNodes(opaque.GetOutput("Color"), composition.GetInput("Opaque"));
-    fg.ConnectNodes(transparency.GetOutput("Accum"), composition.GetInput("Accum"));
-    fg.ConnectNodes(transparency.GetOutput("Revealage"), composition.GetInput("Revealage"));
-    fg.ConnectNodes(composition.GetOutput("Color"), upscale.GetInput("Source"));
-    fg.ConnectNodes(opaque.GetOutput("Depth"), upscale.GetInput("Depth"));
-    fg.ConnectNodes(opaque.GetOutput("Velocity"), upscale.GetInput("Velocity"));
-    fg.ConnectNodes(upscale.GetOutput("Color"), output.GetInput("Color"));
+    fg.ConnectNodes(backBuffer, clear.GetInput("InTexture"));
+    fg.ConnectNodes(depthStencil, clear.GetInput("InDepthBuffer"));
+    fg.ConnectNodes(clear.GetOutput("OutClearedTexture"), output.GetInput("InBackBuffer"));
+    fg.ConnectNodes(culling.GetOutput("OutOpaqueDrawStream"), opaque.GetInput("InDrawStream"));
+    fg.ConnectNodes(culling.GetOutput("OutTransparentDrawStream"), transparency.GetInput("InDrawStream"));
+    fg.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), transparency.GetInput("InDepthBuffer"));
+    fg.ConnectNodes(opaque.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
+    fg.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
+    fg.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
+    fg.ConnectNodes(composition.GetOutput("OutColorTexture"), upscale.GetInput("InColorTexture"));
+    fg.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), upscale.GetInput("InDepthBuffer"));
+    fg.ConnectNodes(opaque.GetOutput("OutVelocityBuffer"), upscale.GetInput("InVelocityBuffer"));
+    fg.ConnectNodes(upscale.GetOutput("OutColorTexture"), output.GetInput("InColorTexture"));
 }
 
 void RenderModule::SubscribeToSceneManager()

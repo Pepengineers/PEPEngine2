@@ -4,8 +4,8 @@
 class GDX12GPUCullingPass : public GDX12RenderPass
 {
 public:
-	static constexpr const char* OpaqueDrawStream = "OpaqueDrawStream";
-	static constexpr const char* TransparentDrawStream = "TransparentDrawStream";
+	static constexpr const char* OutOpaqueDrawStream = "OutOpaqueDrawStream";
+	static constexpr const char* OutTransparentDrawStream = "OutTransparentDrawStream";
 
 	GDX12GPUCullingPass()
 	{ _flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_INSTANCES |
@@ -13,10 +13,10 @@ public:
 
 	void Describe(PassDescription& s) const override
 	{
-		auto& opaqueDrawStream = s.AddOutputDrawStream(OpaqueDrawStream);
+		auto& opaqueDrawStream = s.AddOutputDrawStream(OutOpaqueDrawStream);
 		opaqueDrawStream.Usages = ResourceUsage::UnorderedAccess;
 		opaqueDrawStream.AllowShared = true;
-		auto& transparentDrawStream = s.AddOutputDrawStream(TransparentDrawStream);
+		auto& transparentDrawStream = s.AddOutputDrawStream(OutTransparentDrawStream);
 		transparentDrawStream.Usages = ResourceUsage::UnorderedAccess;
 		transparentDrawStream.AllowShared = true;
 	}
@@ -27,8 +27,8 @@ public:
 		if (!commands) { throw std::invalid_argument("ERROR: GPU culling has no scene indirect-command buffer. Initialize IndirectCommandsCache on the pass device "
 			"before compiling the graph."); }
 		const auto capacity = (std::max)(1u, commands->GetElementCount());
-		context.SetOutputBufferCapacity(OpaqueDrawStream, capacity);
-		context.SetOutputBufferCapacity(TransparentDrawStream, capacity);
+		context.SetOutputBufferCapacity(OutOpaqueDrawStream, capacity);
+		context.SetOutputBufferCapacity(OutTransparentDrawStream, capacity);
 	}
 
 	void Initialize(PassInitContext& context) override
@@ -71,8 +71,8 @@ public:
 		auto* resources = context.GetDeviceResources();
 		auto* cmdList = context.GetCommandList();
 		const auto* common = context.GetFrameData();
-		const auto& opaque = context.GetOutputDrawStream(OpaqueDrawStream);
-		const auto& transparent = context.GetOutputDrawStream(TransparentDrawStream);
+		const auto& opaque = context.GetOutputDrawStream(OutOpaqueDrawStream);
+		const auto& transparent = context.GetOutputDrawStream(OutTransparentDrawStream);
 		auto& currentFrameConstants = resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
 
 		cmdList->BeginPixEvent("GPU Mesh Culling", Colors::Blue);

@@ -4,31 +4,31 @@
 class GDX12WBOITCompositionPass : public GDX12RenderPass
 {
 public:
-	static constexpr const char* Opaque = "Opaque";
-	static constexpr const char* Accum = "Accum";
-	static constexpr const char* Revealage = "Revealage";
-	static constexpr const char* Color = "Color";
+	static constexpr const char* InOpaqueTexture = "InOpaqueTexture";
+	static constexpr const char* InAccumulationTexture = "InAccumulationTexture";
+	static constexpr const char* InRevealageTexture = "InRevealageTexture";
+	static constexpr const char* OutColorTexture = "OutColorTexture";
 
 	void Describe(PassDescription& s) const override
 	{
-		auto& opaque = s.AddInputTexture(Opaque);
+		auto& opaque = s.AddInputTexture(InOpaqueTexture);
 		opaque.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 		opaque.Usages = ResourceUsage::PixelShaderRead;
 		opaque.AllowShared = true;
-		auto& accum = s.AddInputTexture(Accum);
+		auto& accum = s.AddInputTexture(InAccumulationTexture);
 		accum.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 		accum.Usages = ResourceUsage::PixelShaderRead;
 		accum.AllowShared = true;
-		auto& revealage = s.AddInputTexture(Revealage);
+		auto& revealage = s.AddInputTexture(InRevealageTexture);
 		revealage.Formats = {DXGI_FORMAT_R16_FLOAT};
 		revealage.Usages = ResourceUsage::PixelShaderRead;
 		revealage.AllowShared = true;
-		auto& color = s.AddOutputTexture(Color);
+		auto& color = s.AddOutputTexture(OutColorTexture);
 		color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
-		color.Size = Extent::SameAs(Opaque);
+		color.Size = Extent::SameAs(InOpaqueTexture);
 		color.Usages = ResourceUsage::RenderTarget;
 		color.AllowShared = true;
-		s.RequireSameTextureSize({Opaque, Accum, Revealage});
+		s.RequireSameTextureSize({InOpaqueTexture, InAccumulationTexture, InRevealageTexture});
 	}
 
 	void Initialize(PassInitContext& context) override
@@ -59,7 +59,7 @@ public:
 		PSODesc1.SampleMask = UINT_MAX;
 		PSODesc1.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 		PSODesc1.NumRenderTargets = 1;
-		PSODesc1.RTVFormats[0] = context.GetOutputResourceDescription(Color).Format;
+		PSODesc1.RTVFormats[0] = context.GetOutputResourceDescription(OutColorTexture).Format;
 
 		PSODesc1.SampleDesc.Count = 1;
 		PSODesc1.SampleDesc.Quality = 0;
@@ -74,10 +74,10 @@ public:
 	{
 		auto* resources = context.GetDeviceResources();
 		auto* cmdList = context.GetCommandList();
-		auto* OUT_Result = context.GetOutputTexture(Color).GetTexture();
-		GDX12Texture* opaqueAccum = context.GetInputTexture(Opaque).GetTexture();
-		GDX12Texture* transparencyAccum = context.GetInputTexture(Accum).GetTexture();
-		GDX12Texture* transparencyRevealage = context.GetInputTexture(Revealage).GetTexture();
+		auto* OUT_Result = context.GetOutputTexture(OutColorTexture).GetTexture();
+		GDX12Texture* opaqueAccum = context.GetInputTexture(InOpaqueTexture).GetTexture();
+		GDX12Texture* transparencyAccum = context.GetInputTexture(InAccumulationTexture).GetTexture();
+		GDX12Texture* transparencyRevealage = context.GetInputTexture(InRevealageTexture).GetTexture();
 
 		cmdList->BeginPixEvent("Composition Render Pass", Colors::Bisque);
 		cmdList->SetViewport(OUT_Result->GetViewport());

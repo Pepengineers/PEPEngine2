@@ -98,8 +98,7 @@ private:
     template<class T, class... Args> NodeHandle AddPass(NodeId id, EDeviceRole role, Args&&... args)
     {
         static_assert(std::is_base_of_v<GDX12RenderPass, T>, "FrameGraph passes must implement GDX12RenderPass");
-        if (_definition->IsCompiled) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled. Create and configure a new FrameGraph before calling "
-            "Compile()."); }
+        if (_definition->IsCompiled) { throw std::logic_error("ERROR: Given FrameGraph has already been compiled."); }
         if (id.empty() || _definition->Nodes.count(id)) { throw std::invalid_argument("ERROR: NodeId '" + id + "' is empty or already registered. Use a non-empty, unique NodeId."); }
         auto pass = std::make_unique<T>(std::forward<Args>(args)...);
         NodeDefinition node;

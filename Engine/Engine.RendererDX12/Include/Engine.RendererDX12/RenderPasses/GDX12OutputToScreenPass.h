@@ -4,31 +4,31 @@
 class GDX12OutputToScreenPass : public GDX12RenderPass
 {
 public:
-	static constexpr const char* Color = "Color";
-	static constexpr const char* Target = "Target";
-	static constexpr const char* Presented = "Presented";
+	static constexpr const char* InColorTexture = "InColorTexture";
+	static constexpr const char* InBackBuffer = "InBackBuffer";
+	static constexpr const char* OutPresentedBackBuffer = "OutPresentedBackBuffer";
 
 	void Describe(PassDescription& s) const override
 	{
-		auto& color = s.AddInputTexture(Color);
+		auto& color = s.AddInputTexture(InColorTexture);
 		color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 		color.Usages = ResourceUsage::CopySource;
 		color.AllowShared = true;
-		auto& target = s.AddInputTexture(Target);
+		auto& target = s.AddInputTexture(InBackBuffer);
 		target.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 		target.Access = DataAccess::WriteOnly;
 		target.Usages = ResourceUsage::CopyDest;
-		auto& presented = s.AddOutputTexture(Presented);
-		presented.AliasInput = Target;
+		auto& presented = s.AddOutputTexture(OutPresentedBackBuffer);
+		presented.AliasInput = InBackBuffer;
 		presented.Usages = ResourceUsage::Present;
-		s.RequireSameTextureSize({Color, Target});
+		s.RequireSameTextureSize({InColorTexture, InBackBuffer});
 	}
 
 	void Execute(PassExecutionContext& context) override
 	{
 		auto* cmdList = context.GetCommandList();
-		auto* source = context.GetInputTexture(Color).GetTexture();
-		auto* target = context.GetInputTexture(Target).GetTexture();
+		auto* source = context.GetInputTexture(InColorTexture).GetTexture();
+		auto* target = context.GetInputTexture(InBackBuffer).GetTexture();
 		cmdList->BeginPixEvent("Copy to Screen", Colors::Aqua);
 		cmdList->CopyResource(target->GetResource()->D3DResource.Get(), source->GetResource()->D3DResource.Get());
 		cmdList->EndPixEvent();

@@ -4,10 +4,10 @@
 class GDX12OpaquePass : public GDX12RenderPass
 {
 public:
-	static constexpr const char* Draws = "DrawStream";
-	static constexpr const char* Color = "Color";
-	static constexpr const char* Velocity = "Velocity";
-	static constexpr const char* Depth = "Depth";
+	static constexpr const char* InDrawStream = "InDrawStream";
+	static constexpr const char* OutColorTexture = "OutColorTexture";
+	static constexpr const char* OutVelocityBuffer = "OutVelocityBuffer";
+	static constexpr const char* OutDepthBuffer = "OutDepthBuffer";
 
 	GDX12OpaquePass()
 	{
@@ -17,20 +17,20 @@ public:
 
 	void Describe(PassDescription& s) const override
 	{
-		auto& draws = s.AddInputDrawStream(Draws);
+		auto& draws = s.AddInputDrawStream(InDrawStream);
 		draws.Usages = ResourceUsage::IndirectArguments;
 		draws.AllowShared = true;
-		auto& color = s.AddOutputTexture(Color);
+		auto& color = s.AddOutputTexture(OutColorTexture);
 		color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 		color.Size = Extent::Render();
 		color.Usages = ResourceUsage::RenderTarget;
 		color.AllowShared = true;
-		auto& velocity = s.AddOutputTexture(Velocity);
+		auto& velocity = s.AddOutputTexture(OutVelocityBuffer);
 		velocity.Formats = {DXGI_FORMAT_R16G16_FLOAT};
 		velocity.Size = Extent::Render();
 		velocity.Usages = ResourceUsage::RenderTarget;
 		velocity.AllowShared = true;
-		auto& depth = s.AddOutputTexture(Depth);
+		auto& depth = s.AddOutputTexture(OutDepthBuffer);
 		depth.Formats = {DXGI_FORMAT_D32_FLOAT};
 		depth.Size = Extent::Render();
 		depth.Usages = ResourceUsage::DepthWrite;
@@ -88,11 +88,11 @@ public:
 		PSODesc1.SampleMask = UINT_MAX;
 		PSODesc1.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 		PSODesc1.NumRenderTargets = 2;
-		PSODesc1.RTVFormats[0] = context.GetOutputResourceDescription(Color).Format;
-		PSODesc1.RTVFormats[1] = context.GetOutputResourceDescription(Velocity).Format;
+		PSODesc1.RTVFormats[0] = context.GetOutputResourceDescription(OutColorTexture).Format;
+		PSODesc1.RTVFormats[1] = context.GetOutputResourceDescription(OutVelocityBuffer).Format;
 		PSODesc1.SampleDesc.Count = 1;
 		PSODesc1.SampleDesc.Quality = 0;
-		PSODesc1.DSVFormat = context.GetOutputResourceDescription(Depth).Format;
+		PSODesc1.DSVFormat = context.GetOutputResourceDescription(OutDepthBuffer).Format;
 		PSODesc1.VS = { reinterpret_cast<BYTE*>(_opaqueVS->GetBufferPointer()), _opaqueVS->GetBufferSize() };
 		PSODesc1.PS = { reinterpret_cast<BYTE*>(_opaquePS->GetBufferPointer()), _opaquePS->GetBufferSize() };
 		ThrowIfFailed(resources->Device->GetDevice()->CreateGraphicsPipelineState(&PSODesc1, IID_PPV_ARGS(&_opaquePSO)));
@@ -103,10 +103,10 @@ public:
 		auto* resources = context.GetDeviceResources();
 		auto* cmdList = context.GetCommandList();
 		const auto* common = context.GetFrameData();
-		auto* OUT_Accumulation = context.GetOutputTexture(Color).GetTexture();
-		auto* OUT_VelocityBuffer = context.GetOutputTexture(Velocity).GetTexture();
-		auto* depthStencil = context.GetOutputTexture(Depth).GetTexture();
-		const auto& draws = context.GetInputDrawStream(Draws);
+		auto* OUT_Accumulation = context.GetOutputTexture(OutColorTexture).GetTexture();
+		auto* OUT_VelocityBuffer = context.GetOutputTexture(OutVelocityBuffer).GetTexture();
+		auto* depthStencil = context.GetOutputTexture(OutDepthBuffer).GetTexture();
+		const auto& draws = context.GetInputDrawStream(InDrawStream);
 		auto& currentFrameConstants = resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
 
 		cmdList->BeginPixEvent("Opaque Render Pass", Colors::ForestGreen);

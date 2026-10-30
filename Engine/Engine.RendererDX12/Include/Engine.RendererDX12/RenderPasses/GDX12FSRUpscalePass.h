@@ -8,10 +8,10 @@
 class GDX12FSRUpscalePass : public GDX12RenderPass
 {
 public:
-	static constexpr const char* Source = "Source";
-	static constexpr const char* Depth = "Depth";
-	static constexpr const char* Velocity = "Velocity";
-	static constexpr const char* Color = "Color";
+	static constexpr const char* InColorTexture = "InColorTexture";
+	static constexpr const char* InDepthBuffer = "InDepthBuffer";
+	static constexpr const char* InVelocityBuffer = "InVelocityBuffer";
+	static constexpr const char* OutColorTexture = "OutColorTexture";
 
 	explicit GDX12FSRUpscalePass(FfxApiUpscaleQualityMode quality = FFX_UPSCALE_QUALITY_MODE_QUALITY)
 		: _quality(quality)
@@ -28,20 +28,20 @@ public:
 	void Describe(PassDescription& s) const override
 	{
 		const auto read = ResourceUsage::PixelShaderRead | ResourceUsage::NonPixelShaderRead;
-		auto& source = s.AddInputTexture(Source);
+		auto& source = s.AddInputTexture(InColorTexture);
 		source.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 		source.Usages = read;
-		auto& depth = s.AddInputTexture(Depth);
+		auto& depth = s.AddInputTexture(InDepthBuffer);
 		depth.Formats = {DXGI_FORMAT_D32_FLOAT};
 		depth.Usages = read;
-		auto& velocity = s.AddInputTexture(Velocity);
+		auto& velocity = s.AddInputTexture(InVelocityBuffer);
 		velocity.Formats = {DXGI_FORMAT_R16G16_FLOAT};
 		velocity.Usages = read;
-		auto& color = s.AddOutputTexture(Color);
+		auto& color = s.AddOutputTexture(OutColorTexture);
 		color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 		color.Size = Extent::Display();
 		color.Usages = ResourceUsage::UnorderedAccess;
-		s.RequireSameTextureSize({"Source", "Depth", "Velocity"});
+		s.RequireSameTextureSize({InColorTexture, InDepthBuffer, InVelocityBuffer});
 	}
 
 	void ResolveResourceRequirements(PassResourceRequirementsContext& context) override
@@ -70,28 +70,28 @@ public:
 		Check(ffxQuery(&_context, &query.header), "query input resolution");
 		if (!renderSize.x || !renderSize.y) { throw std::runtime_error("ERROR: FSR returned a zero or invalid input resolution. Use non-zero display dimensions and a supported FSR "
 			"quality mode, then recreate the FSR context."); }
-		context.RequireTextureSize(Source, renderSize);
-		context.RequireTextureSize(Depth, renderSize);
-		context.RequireTextureSize(Velocity, renderSize);
+		context.RequireTextureSize(InColorTexture, renderSize);
+		context.RequireTextureSize(InDepthBuffer, renderSize);
+		context.RequireTextureSize(InVelocityBuffer, renderSize);
 		_resetHistory = true;
 	}
 
 	void Execute(PassExecutionContext& context) override
 	{
-		const auto renderSize = context.GetInputResourceDescription(Source).GetSize();
-		const auto displaySize = context.GetOutputResourceDescription(Color).GetSize();
+		const auto renderSize = context.GetInputResourceDescription(InColorTexture).GetSize();
+		const auto displaySize = context.GetOutputResourceDescription(OutColorTexture).GetSize();
 		auto* cmdList = context.GetCommandList();
 		const auto* frame = context.GetFrameData();
 		ffxDispatchDescUpscale dispatch = {};
 		dispatch.header.type = FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
 		dispatch.commandList = cmdList->GetCommandList().Get();
-		dispatch.color = ffxApiGetResourceDX12(context.GetInputTexture(Source).GetTexture()->GetResource()->D3DResource.Get(),
+		dispatch.color = ffxApiGetResourceDX12(context.GetInputTexture(InColorTexture).GetTexture()->GetResource()->D3DResource.Get(),
 			FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
-		dispatch.depth = ffxApiGetResourceDX12(context.GetInputTexture(Depth).GetTexture()->GetResource()->D3DResource.Get(),
+		dispatch.depth = ffxApiGetResourceDX12(context.GetInputTexture(InDepthBuffer).GetTexture()->GetResource()->D3DResource.Get(),
 			FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
-		dispatch.motionVectors = ffxApiGetResourceDX12(context.GetInputTexture(Velocity).GetTexture()->GetResource()->D3DResource.Get(),
+		dispatch.motionVectors = ffxApiGetResourceDX12(context.GetInputTexture(InVelocityBuffer).GetTexture()->GetResource()->D3DResource.Get(),
 			FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
-		dispatch.output = ffxApiGetResourceDX12(context.GetOutputTexture(Color).GetTexture()->GetResource()->D3DResource.Get(),
+		dispatch.output = ffxApiGetResourceDX12(context.GetOutputTexture(OutColorTexture).GetTexture()->GetResource()->D3DResource.Get(),
 			FFX_API_RESOURCE_STATE_UNORDERED_ACCESS);
 		dispatch.renderSize = {renderSize.x, renderSize.y};
 		dispatch.motionVectorScale = {static_cast<float>(renderSize.x), static_cast<float>(renderSize.y)};

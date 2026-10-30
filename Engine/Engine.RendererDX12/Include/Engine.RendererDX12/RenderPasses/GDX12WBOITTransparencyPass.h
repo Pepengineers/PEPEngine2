@@ -4,10 +4,10 @@
 class GDX12WBOITTransparencyPass : public GDX12RenderPass
 {
 public:
-	static constexpr const char* Draws = "DrawStream";
-	static constexpr const char* Depth = "Depth";
-	static constexpr const char* Accum = "Accum";
-	static constexpr const char* Revealage = "Revealage";
+	static constexpr const char* InDrawStream = "InDrawStream";
+	static constexpr const char* InDepthBuffer = "InDepthBuffer";
+	static constexpr const char* OutAccumulationTexture = "OutAccumulationTexture";
+	static constexpr const char* OutRevealageTexture = "OutRevealageTexture";
 
 	GDX12WBOITTransparencyPass()
 	{
@@ -17,21 +17,21 @@ public:
 
 	void Describe(PassDescription& s) const override
 	{
-		auto& draws = s.AddInputDrawStream(Draws);
+		auto& draws = s.AddInputDrawStream(InDrawStream);
 		draws.Usages = ResourceUsage::IndirectArguments;
 		draws.AllowShared = true;
-		auto& depth = s.AddInputTexture(Depth);
+		auto& depth = s.AddInputTexture(InDepthBuffer);
 		depth.Formats = {DXGI_FORMAT_D32_FLOAT};
 		depth.Size = Extent::Render();
 		depth.Usages = ResourceUsage::DepthRead;
-		auto& accum = s.AddOutputTexture(Accum);
+		auto& accum = s.AddOutputTexture(OutAccumulationTexture);
 		accum.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
-		accum.Size = Extent::SameAs(Depth);
+		accum.Size = Extent::SameAs(InDepthBuffer);
 		accum.Usages = ResourceUsage::RenderTarget;
 		accum.AllowShared = true;
-		auto& revealage = s.AddOutputTexture(Revealage);
+		auto& revealage = s.AddOutputTexture(OutRevealageTexture);
 		revealage.Formats = {DXGI_FORMAT_R16_FLOAT};
-		revealage.Size = Extent::SameAs(Depth);
+		revealage.Size = Extent::SameAs(InDepthBuffer);
 		revealage.Usages = ResourceUsage::RenderTarget;
 		revealage.AllowShared = true;
 	}
@@ -88,7 +88,7 @@ public:
 		PSODesc1.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 		PSODesc1.SampleDesc.Count = 1;
 		PSODesc1.SampleDesc.Quality = 0;
-		PSODesc1.DSVFormat = context.GetInputResourceDescription(Depth).Format;
+		PSODesc1.DSVFormat = context.GetInputResourceDescription(InDepthBuffer).Format;
 
 		// Accumulation
 		PSODesc1.BlendState.RenderTarget[0].BlendEnable = true;
@@ -115,8 +115,8 @@ public:
 		PSODesc1.DepthStencilState.StencilEnable = false;
 
 		PSODesc1.NumRenderTargets = 2;
-		PSODesc1.RTVFormats[0] = context.GetOutputResourceDescription(Accum).Format;
-		PSODesc1.RTVFormats[1] = context.GetOutputResourceDescription(Revealage).Format;
+		PSODesc1.RTVFormats[0] = context.GetOutputResourceDescription(OutAccumulationTexture).Format;
+		PSODesc1.RTVFormats[1] = context.GetOutputResourceDescription(OutRevealageTexture).Format;
 		PSODesc1.VS = { reinterpret_cast<BYTE*>(_transparencyVS->GetBufferPointer()), _transparencyVS->GetBufferSize() };
 		PSODesc1.PS = { reinterpret_cast<BYTE*>(_transparencyPS->GetBufferPointer()), _transparencyPS->GetBufferSize() };
 		ThrowIfFailed(resources->Device->GetDevice()->CreateGraphicsPipelineState(&PSODesc1, IID_PPV_ARGS(&_transparencyPSO)));
@@ -127,9 +127,9 @@ public:
 		auto* resources = context.GetDeviceResources();
 		auto* cmdList = context.GetCommandList();
 		const auto* common = context.GetFrameData();
-		auto* OUT_Accumulation = context.GetOutputTexture(Accum).GetTexture();
-		auto* OUT_Revealage = context.GetOutputTexture(Revealage).GetTexture();
-		const auto& draws = context.GetInputDrawStream(Draws);
+		auto* OUT_Accumulation = context.GetOutputTexture(OutAccumulationTexture).GetTexture();
+		auto* OUT_Revealage = context.GetOutputTexture(OutRevealageTexture).GetTexture();
+		const auto& draws = context.GetInputDrawStream(InDrawStream);
 		auto& currentFrameConstants = resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
 
 		cmdList->BeginPixEvent("Transparent Render Pass", Colors::Aqua);
@@ -148,8 +148,8 @@ public:
 		cmdList->SetGraphicsSRV(2, currentFrameConstants->InstanceCache->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(3, resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
 		const D3D12_CPU_DESCRIPTOR_HANDLE targets[] = {
-			context.GetOutputRTV(Accum)->CPUHandle, context.GetOutputRTV(Revealage)->CPUHandle};
-		const auto depth = context.GetInputTexture(Depth).GetDSV()->CPUHandle;
+			context.GetOutputRTV(OutAccumulationTexture)->CPUHandle, context.GetOutputRTV(OutRevealageTexture)->CPUHandle};
+		const auto depth = context.GetInputTexture(InDepthBuffer).GetDSV()->CPUHandle;
 		cmdList->GetCommandList()->OMSetRenderTargets(2, targets, FALSE, &depth);
 		cmdList->ClearRenderTargetView(OUT_Accumulation);
 		cmdList->ClearRenderTargetView(OUT_Revealage);

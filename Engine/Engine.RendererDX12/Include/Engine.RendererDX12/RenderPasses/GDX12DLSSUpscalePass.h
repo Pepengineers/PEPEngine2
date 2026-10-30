@@ -6,10 +6,10 @@
 class GDX12DLSSUpscalePass : public GDX12RenderPass
 {
 public:
-	static constexpr const char* Source = "Source";
-	static constexpr const char* Depth = "Depth";
-	static constexpr const char* Velocity = "Velocity";
-	static constexpr const char* Color = "Color";
+	static constexpr const char* InColorTexture = "InColorTexture";
+	static constexpr const char* InDepthBuffer = "InDepthBuffer";
+	static constexpr const char* InVelocityBuffer = "InVelocityBuffer";
+	static constexpr const char* OutColorTexture = "OutColorTexture";
 
 	explicit GDX12DLSSUpscalePass(sl::DLSSMode quality = sl::DLSSMode::eMaxQuality)
 		: _viewportHandle(_nextViewport.fetch_add(1)), _quality(quality)
@@ -27,20 +27,20 @@ public:
 	{
 		// Streamline is initialized against the primary device by RenderModule.
 		s.PrimaryOnly = true;
-		auto& source = s.AddInputTexture(Source);
+		auto& source = s.AddInputTexture(InColorTexture);
 		source.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 		source.Usages = ResourceUsage::NonPixelShaderRead;
-		auto& depth = s.AddInputTexture(Depth);
+		auto& depth = s.AddInputTexture(InDepthBuffer);
 		depth.Formats = {DXGI_FORMAT_D32_FLOAT};
 		depth.Usages = ResourceUsage::NonPixelShaderRead;
-		auto& velocity = s.AddInputTexture(Velocity);
+		auto& velocity = s.AddInputTexture(InVelocityBuffer);
 		velocity.Formats = {DXGI_FORMAT_R16G16_FLOAT};
 		velocity.Usages = ResourceUsage::NonPixelShaderRead;
-		auto& color = s.AddOutputTexture(Color);
+		auto& color = s.AddOutputTexture(OutColorTexture);
 		color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 		color.Size = Extent::Display();
 		color.Usages = ResourceUsage::UnorderedAccess;
-		s.RequireSameTextureSize({"Source", "Depth", "Velocity"});
+		s.RequireSameTextureSize({InColorTexture, InDepthBuffer, InVelocityBuffer});
 	}
 
 	void ResolveResourceRequirements(PassResourceRequirementsContext& context) override
@@ -63,26 +63,26 @@ public:
 		const UInt2 renderSize = {settings.optimalRenderWidth, settings.optimalRenderHeight};
 		if (!renderSize.x || !renderSize.y) { throw std::runtime_error("ERROR: DLSS returned a zero or invalid input resolution. Use non-zero display dimensions and a supported DLSS "
 			"quality mode, then recreate the DLSS context."); }
-		context.RequireTextureSize(Source, renderSize);
-		context.RequireTextureSize(Depth, renderSize);
-		context.RequireTextureSize(Velocity, renderSize);
+		context.RequireTextureSize(InColorTexture, renderSize);
+		context.RequireTextureSize(InDepthBuffer, renderSize);
+		context.RequireTextureSize(InVelocityBuffer, renderSize);
 		_resetHistory = true;
 	}
 
 	void Initialize(PassInitContext& context) override
-	{ CreateFeature(context.GetOutputResourceDescription(Color).GetSize()); }
+	{ CreateFeature(context.GetOutputResourceDescription(OutColorTexture).GetSize()); }
 
 	void OnResourcesRecreated(PassInitContext& context) override
 	{
 		ReleaseFeature();
-		CreateFeature(context.GetOutputResourceDescription(Color).GetSize());
+		CreateFeature(context.GetOutputResourceDescription(OutColorTexture).GetSize());
 		_resetHistory = true;
 	}
 
 	void Execute(PassExecutionContext& context) override
 	{
-		const auto renderSize = context.GetInputResourceDescription(Source).GetSize();
-		const auto displaySize = context.GetOutputResourceDescription(Color).GetSize();
+		const auto renderSize = context.GetInputResourceDescription(InColorTexture).GetSize();
+		const auto displaySize = context.GetOutputResourceDescription(OutColorTexture).GetSize();
 		auto* cmdList = context.GetCommandList();
 		auto& sdk = GDX12StreamlineSDK::Get();
 		sl::FrameToken* frame = nullptr;
@@ -91,10 +91,10 @@ public:
 		if (!frame) { throw std::runtime_error("ERROR: DLSS returned a null frame token. Verify Streamline initialization and primary-device registration "
 			"before requesting a frame token."); }
 		SetConstants(frame, *context.GetFrameData());
-		auto* source = context.GetInputTexture(Source).GetTexture();
-		auto* depth = context.GetInputTexture(Depth).GetTexture();
-		auto* velocity = context.GetInputTexture(Velocity).GetTexture();
-		auto* output = context.GetOutputTexture(Color).GetTexture();
+		auto* source = context.GetInputTexture(InColorTexture).GetTexture();
+		auto* depth = context.GetInputTexture(InDepthBuffer).GetTexture();
+		auto* velocity = context.GetInputTexture(InVelocityBuffer).GetTexture();
+		auto* output = context.GetOutputTexture(OutColorTexture).GetTexture();
 		sl::Resource sourceResource{sl::ResourceType::eTex2d, source->GetResource()->D3DResource.Get(),
 			nullptr, nullptr, static_cast<uint32_t>(source->GetResource()->GetCurrentState())};
 		sl::Resource depthResource{sl::ResourceType::eTex2d, depth->GetResource()->D3DResource.Get(),

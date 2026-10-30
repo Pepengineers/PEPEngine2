@@ -7,8 +7,8 @@
 class GDX12NISUpscalePass : public GDX12RenderPass
 {
 public:
-	static constexpr const char* Source = "Source";
-	static constexpr const char* Color = "Color";
+	static constexpr const char* InColorTexture = "InColorTexture";
+	static constexpr const char* OutColorTexture = "OutColorTexture";
 
 	explicit GDX12NISUpscalePass(float upscaleRatio = 1.5f, float sharpness = 0.1f)
 		: _viewportHandle(_nextViewport.fetch_add(1)), _upscaleRatio(upscaleRatio)
@@ -34,10 +34,10 @@ public:
 	{
 		// Streamline is initialized against the primary device by RenderModule.
 		s.PrimaryOnly = true;
-		auto& source = s.AddInputTexture(Source);
+		auto& source = s.AddInputTexture(InColorTexture);
 		source.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 		source.Usages = ResourceUsage::NonPixelShaderRead;
-		auto& color = s.AddOutputTexture(Color);
+		auto& color = s.AddOutputTexture(OutColorTexture);
 		color.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 		color.Size = Extent::Display();
 		color.Usages = ResourceUsage::UnorderedAccess;
@@ -57,7 +57,7 @@ public:
 		const UInt2 renderSize = {static_cast<uint32_t>(displaySize.x / _upscaleRatio), static_cast<uint32_t>(displaySize.y / _upscaleRatio)};
 		if (!renderSize.x || !renderSize.y) { throw std::runtime_error("ERROR: NIS input resolution is zero. Use non-zero display dimensions and an upscale ratio that produces a "
 			"non-zero input size."); }
-		context.RequireTextureSize(Source, renderSize);
+		context.RequireTextureSize(InColorTexture, renderSize);
 	}
 
 	void Initialize(PassInitContext&) override
@@ -71,8 +71,8 @@ public:
 
 	void Execute(PassExecutionContext& context) override
 	{
-		const auto renderSize = context.GetInputResourceDescription(Source).GetSize();
-		const auto displaySize = context.GetOutputResourceDescription(Color).GetSize();
+		const auto renderSize = context.GetInputResourceDescription(InColorTexture).GetSize();
+		const auto displaySize = context.GetOutputResourceDescription(OutColorTexture).GetSize();
 		auto* cmdList = context.GetCommandList();
 		auto& sdk = GDX12StreamlineSDK::Get();
 		if (_sharpness != _appliedSharpness) { SetOptions(_sharpness); }
@@ -81,8 +81,8 @@ public:
 		Check(sdk.GetNewFrameToken(frame, &frameIndex), "get frame token");
 		if (!frame) { throw std::runtime_error("ERROR: NIS returned a null frame token. Verify Streamline initialization and primary-device registration "
 			"before requesting a frame token."); }
-		auto* source = context.GetInputTexture(Source).GetTexture();
-		auto* output = context.GetOutputTexture(Color).GetTexture();
+		auto* source = context.GetInputTexture(InColorTexture).GetTexture();
+		auto* output = context.GetOutputTexture(OutColorTexture).GetTexture();
 		sl::Resource sourceResource{sl::ResourceType::eTex2d, source->GetResource()->D3DResource.Get(),
 			nullptr, nullptr, static_cast<uint32_t>(source->GetResource()->GetCurrentState())};
 		sl::Resource outputResource{sl::ResourceType::eTex2d, output->GetResource()->D3DResource.Get(),
