@@ -54,9 +54,9 @@ namespace
     }
 #endif
     
-    JPH::Shape::ShapeResult CreateShape(const PhysicsShapeDesc& desc)
+    JPH::Shape::ShapeResult CreateShape(const PhysicsShapeDesc& desc, const DirectX::SimpleMath::Vector3& scale)
     {
-        return std::visit([](const auto& shape) -> JPH::Shape::ShapeResult 
+        return std::visit([&scale](const auto& shape) -> JPH::Shape::ShapeResult 
         {
             using T = std::decay_t<decltype(shape)>;
             
@@ -71,28 +71,36 @@ namespace
             
             if constexpr (std::is_same_v<T, BoxShapeDesc>)
             {
-                const auto& halfExtent = shape.HalfExtent;
+                DirectX::SimpleMath::Vector3 halfExtent(
+                    shape.HalfExtent.x * scale.x,
+                    shape.HalfExtent.y * scale.y,
+                    shape.HalfExtent.z * scale.z);
                 if (!isPositive(halfExtent.x) || !isPositive(halfExtent.y) || !isPositive(halfExtent.z)) { return invalidShape(); }
                 return JPH::BoxShapeSettings(JPH::Vec3(halfExtent.x, halfExtent.y, halfExtent.z)).Create();
             }
             
             else if constexpr (std::is_same_v<T, SphereShapeDesc>)
             {
-                if (!isPositive(shape.Radius)) { return invalidShape(); }
-                return JPH::SphereShapeSettings(shape.Radius).Create();
+                const float radius = shape.Radius * scale.x;
+                if (!isPositive(radius)) { return invalidShape(); }
+                return JPH::SphereShapeSettings(radius).Create();
             }
             
             else if constexpr (std::is_same_v<T, CylinderShapeDesc>)
             {
-                if (!isPositive(shape.Radius) || !isPositive(shape.HalfHeight)) { return invalidShape(); }
-                return JPH::CylinderShapeSettings(shape.HalfHeight, shape.Radius).Create();
+                const float radius = shape.Radius * scale.x;
+                const float halfHeight = shape.HalfHeight * scale.y;
+                if (!isPositive(radius) || !isPositive(halfHeight)) { return invalidShape(); }
+                return JPH::CylinderShapeSettings(halfHeight, radius).Create();
             }
             
             else 
             {
                 static_assert(std::is_same_v<T, CapsuleShapeDesc>, "Unsupported shape type");
-                if (!isPositive(shape.Radius) || !std::isfinite(shape.HalfCylinderHeight)) { return invalidShape(); }
-                return JPH::CapsuleShapeSettings(shape.HalfCylinderHeight, shape.Radius).Create();
+                const float radius = shape.Radius * scale.x;
+                const float halfCylinderHeight = shape.HalfCylinderHeight * scale.y;
+                if (!isPositive(radius) || !std::isfinite(halfCylinderHeight)) { return invalidShape(); }
+                return JPH::CapsuleShapeSettings(halfCylinderHeight, radius).Create();
             }
             
         },
@@ -357,7 +365,7 @@ PhysicsBodyHandle JoltPhysicsBackend::CreateBody(const PhysicsBodyDesc& desc)
     
     const bool isStatic = desc.MotionType == PhysicsMotionType::Static;
     
-    const auto shapeResult = CreateShape(desc.Shape);
+    const auto shapeResult = CreateShape(desc.Shape, desc.Scale);
     if (shapeResult.HasError())
     {
         Logger::Error("CreateBody(): {}", shapeResult.GetError().c_str());
