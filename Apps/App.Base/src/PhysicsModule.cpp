@@ -1,5 +1,9 @@
 #include "App.Base/Modules/PhysicsModule.h"
 
+#include <algorithm>
+#include <cmath>
+#include <type_traits>
+
 #include "App.Base/ECS/World.h"
 #include "App.Base/Physics/JoltPhysicsBackend.h"
 
@@ -97,11 +101,11 @@ void PhysicsModule::TryCreateBody(World& world, Entity entity)
 {
     auto& ecs = world.GetECS();
     
-    if (!ecs.Has<RigidBodyComponent>(entity) || !ecs.Has<BoxColliderComponent>(entity) || !ecs.Has<TransformComponent>(entity)) { return; }
+    if (!ecs.Has<RigidBodyComponent>(entity) || !ecs.Has<ColliderComponent>(entity) || !ecs.Has<TransformComponent>(entity)) { return; }
     
     auto& rigidBody = ecs.Get<RigidBodyComponent>(entity);
     auto& transform = ecs.Get<TransformComponent>(entity);
-    auto& collider = ecs.Get<BoxColliderComponent>(entity);
+    auto& collider = ecs.Get<ColliderComponent>(entity);
 
     if (rigidBody.Body.IsValid()) { return; }
     
@@ -112,12 +116,8 @@ void PhysicsModule::TryCreateBody(World& world, Entity entity)
         DirectX::XMConvertToRadians(transform.Rotation.y),
         DirectX::XMConvertToRadians(transform.Rotation.x),
         DirectX::XMConvertToRadians(transform.Rotation.z));
-    BoxShapeDesc shape;
-    shape.HalfExtent = DirectX::SimpleMath::Vector3(
-        collider.HalfExtent.x * transform.Scale.x,
-        collider.HalfExtent.y * transform.Scale.y,
-        collider.HalfExtent.z * transform.Scale.z);
-    desc.Shape = shape;
+    desc.Shape = collider.Shape;
+    desc.Scale = transform.Scale;
     desc.MotionType = rigidBody.MotionType;
     
     rigidBody.Body = CreateBody(desc);
@@ -206,7 +206,7 @@ void PhysicsModule::SubscribeToWorld(World& world)
     auto& ecs = world.GetECS();
     
     auto& rigidBodyPool = ecs.GetPool<RigidBodyComponent>();
-    auto& colliderPool = ecs.GetPool<BoxColliderComponent>();
+    auto& colliderPool = ecs.GetPool<ColliderComponent>();
     
     WorldPhysicsSubscriptions subscriptions;
     
@@ -250,7 +250,7 @@ void PhysicsModule::UnsubscribeFromWorld(World& world)
     const auto& subscriptions = it->second;
 
     auto& rigidBodyPool = ecs.GetPool<RigidBodyComponent>();
-    auto& colliderPool = ecs.GetPool<BoxColliderComponent>();
+    auto& colliderPool = ecs.GetPool<ColliderComponent>();
     
     rigidBodyPool.OnComponentCreated.RemoveListener(subscriptions.RigidBodyCreated);
     rigidBodyPool.OnComponentDestroyed.RemoveListener(subscriptions.RigidBodyDestroyed);

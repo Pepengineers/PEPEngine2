@@ -14,7 +14,7 @@
 #include "App.Base/ECS/Components/TransformComponent.h"
 #include "App.Base/ECS/Components/VelocityComponent.h"
 #include "App.Base/ECS/Components/RigidBodyComponent.h"
-#include "App.Base/ECS/Components/BoxColliderComponent.h"
+#include "App.Base/ECS/Components/ColliderComponent.h"
 
 struct WorldDesc {
     std::filesystem::path WorldFilePath;
@@ -33,7 +33,7 @@ using WorldECS = ECSStorage<
     SplineFollowComponent,
     LookAtTargetComponent,
     RigidBodyComponent,
-    BoxColliderComponent
+    ColliderComponent
 >;
 
 class World {
