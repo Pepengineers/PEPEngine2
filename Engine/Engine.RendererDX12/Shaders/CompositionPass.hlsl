@@ -20,8 +20,10 @@ float4 PS(VSOutput input) : SV_TARGET
     float4 accumColor = AccumTexture.Sample(samPointClamp, uv);
     float revealage = saturate(RevealageTexture.Sample(samPointClamp, uv));
     
-    float3 finalColor = opaqueColor.rgb * (1.0 - revealage) + accumColor.rgb;
-    float finalAlpha = max(opaqueColor.a, revealage);
+    float coverage = 1.0 - revealage;
+    float3 transparentColor = accumColor.rgb / max(accumColor.a, 0.00001f);
+    float3 finalColor = opaqueColor.rgb * revealage + transparentColor * coverage;
+    float finalAlpha = coverage + opaqueColor.a * revealage;
     
     return float4(finalColor, finalAlpha);
 }

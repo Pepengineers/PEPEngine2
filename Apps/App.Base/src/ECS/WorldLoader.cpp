@@ -731,6 +731,7 @@ namespace
         cameraComponent.DirtyFlag = true;
         
         world.ActiveCamera = camera;
+        BenchmarkEngine::GetLocator().GetModule<RenderModule>()->SetActiveCamera(&cameraComponent);
     }
 
     /// Loads a set of obj files as one scene.
@@ -762,7 +763,8 @@ namespace
                 gpuTexturesByPath,
                 objBounds))
             {
-                continue;
+                OutputDebugStringA(("Failed to load scene part: " + objPath.string() + "\n").c_str());
+                return false;
             }
             
             if (!loadedAnyObject)

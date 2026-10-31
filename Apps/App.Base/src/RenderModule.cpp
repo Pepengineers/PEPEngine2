@@ -1,6 +1,7 @@
 ﻿#include "App.Base/Modules/RenderModule.h"
 
 #include "App.Base/Window.h"
+#include <cassert>
 #include "App.Base/App.h"
 
 #include "App.Base/Modules/SceneManagerModule.h"
@@ -620,44 +621,43 @@ void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticM
     if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
     {
         auto& MeshGPUData = _primaryResources.GeometryBuffer->_meshCache[component.MeshHandler.GetValue()];
-        for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
+        const UINT firstInstance = _primaryResources.FrameConstants[0]->InstanceCache->GetElementCount();
+        const UINT instanceCount = static_cast<UINT>(MeshGPUData->SubMeshes.size());
+        _primaryResources.IndirectCommandsCache->Resize(firstInstance + instanceCount);
+        for (auto& constants : _primaryResources.FrameConstants)
         {
-            component._CBufferIndices.push_back(_primaryResources.FrameConstants[0]->InstanceCache->GetElementCount());
-            _primaryResources.IndirectCommandsCache->Resize(_primaryResources.IndirectCommandsCache->GetElementCount() + 1);
-
-            for (auto& constants : _primaryResources.FrameConstants)
+            constants->InstanceCache->Resize(firstInstance + instanceCount);
+            for (auto& buffers : constants->CameraVisibilityCommands)
             {
-                auto& CBuffer = constants->InstanceCache;
-                CBuffer->Resize(CBuffer->GetElementCount() + 1);
-
-                for (auto& buffers : constants->CameraVisibilityCommands)
-                {
-                    buffers.VisibleOpaqueCommandsCache->Resize(buffers.VisibleOpaqueCommandsCache->GetElementCount() + 1);
-                    buffers.VisibleTransparentCommandsCache->Resize(buffers.VisibleTransparentCommandsCache->GetElementCount() + 1);
-                }
+                buffers.VisibleOpaqueCommandsCache->Resize(firstInstance + instanceCount);
+                buffers.VisibleTransparentCommandsCache->Resize(firstInstance + instanceCount);
             }
         }
+        for (UINT i = 0; i < instanceCount; ++i)
+        {
+            component._CBufferIndices.push_back(firstInstance + i);
+        }
+        assert(component._CBufferIndices.size() == instanceCount);
     }
 
     if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
     {
         auto& MeshGPUData = _secondaryResources.GeometryBuffer->_meshCache[component.MeshHandler.GetValue()];
-        for (int i = 0; i < MeshGPUData->SubMeshes.size(); i++)
+        const UINT firstInstance = _secondaryResources.FrameConstants[0]->InstanceCache->GetElementCount();
+        const UINT instanceCount = static_cast<UINT>(MeshGPUData->SubMeshes.size());
+        _secondaryResources.IndirectCommandsCache->Resize(firstInstance + instanceCount);
+        for (auto& constants : _secondaryResources.FrameConstants)
         {
-            component._CBufferIndices.push_back(_secondaryResources.FrameConstants[0]->InstanceCache->GetElementCount());
-            _secondaryResources.IndirectCommandsCache->Resize(_secondaryResources.IndirectCommandsCache->GetElementCount() + 1);
-
-            for (auto& constants : _secondaryResources.FrameConstants)
+            constants->InstanceCache->Resize(firstInstance + instanceCount);
+            for (auto& buffers : constants->CameraVisibilityCommands)
             {
-                auto& CBuffer = constants->InstanceCache;
-                CBuffer->Resize(CBuffer->GetElementCount() + 1);
-
-                for (auto& buffers : constants->CameraVisibilityCommands)
-                {
-                    buffers.VisibleOpaqueCommandsCache->Resize(buffers.VisibleOpaqueCommandsCache->GetElementCount() + 1);
-                    buffers.VisibleTransparentCommandsCache->Resize(buffers.VisibleTransparentCommandsCache->GetElementCount() + 1);
-                }
+                buffers.VisibleOpaqueCommandsCache->Resize(firstInstance + instanceCount);
+                buffers.VisibleTransparentCommandsCache->Resize(firstInstance + instanceCount);
             }
+        }
+        for (UINT i = 0; i < instanceCount; ++i)
+        {
+            component._CBufferIndices.push_back(firstInstance + i);
         }
     }
 }

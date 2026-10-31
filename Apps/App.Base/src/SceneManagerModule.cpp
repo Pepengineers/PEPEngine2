@@ -6,9 +6,10 @@
 #include "App.Base/Systems/LookAtTargetSystem.h"
 #include "App.Base/Systems/SplineFollowSystem.h"
 #include "Engine.Core/System.h"
+#include <stdexcept>
 
-SceneManagerModule::SceneManagerModule(GameTimer* timer) :
-    _timer(timer)
+SceneManagerModule::SceneManagerModule(GameTimer* timer, std::filesystem::path scenePath) :
+    _timer(timer), _scenePath(std::move(scenePath))
 {
     
 }
@@ -33,22 +34,22 @@ void SceneManagerModule::Initialize()
     "Scenes" /
     "Gallery";*/
 
-    const std::filesystem::path scenePath =
+    const std::filesystem::path scenePath = _scenePath.empty() ?
     std::filesystem::path(ASSETS_FOLDER) /
     "Scenes" /
     "Amazon Lumberyard Bistro" /
     "Interior" /
-    "interior.obj";
+    "interior.obj" : _scenePath;
 
     if (!LoadWorld(scenePath))
     {
-        // todo runtime error or log 
+        throw std::runtime_error("Failed to load scene: " + scenePath.string());
     }
 
     World* world = GetWorld(0);
     if (!world)
     {
-        // todo runtime error or log 
+        throw std::runtime_error("Loaded scene has no world: " + scenePath.string());
     }
 
     AddSystem<MovementSystem>(world, 0);

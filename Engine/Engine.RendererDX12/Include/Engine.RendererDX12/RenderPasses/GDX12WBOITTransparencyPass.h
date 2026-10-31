@@ -25,7 +25,9 @@ public:
 
 		// Textures
 		GDX12TextureDesc TextureDesc1;
-		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		// Overlapping glass must accumulate beyond one without clamping.
+		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		TextureDesc1.ClearValue = { 0.f, 0.f, 0.f, 0.f };
 		TextureDesc1.Width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
 		TextureDesc1.Height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
 
@@ -49,6 +51,7 @@ public:
 		OUT_Accumulation->Initialize(TextureDesc1);
 
 		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R16_FLOAT;
+		TextureDesc1.ClearValue = { 1.f, 1.f, 1.f, 1.f };
 		TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
 		TextureDesc1.RTVHeapIndex = _resources->RTVHeap->GetAvailableIndex();
 
@@ -95,6 +98,7 @@ public:
 		PSODesc1.pRootSignature = _transparencyRS->GetRootSignature().Get();
 		PSODesc1.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
 		PSODesc1.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+		PSODesc1.BlendState.IndependentBlendEnable = true;
 		PSODesc1.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
 		//reversed-Z
 		PSODesc1.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
@@ -116,8 +120,8 @@ public:
 		PSODesc1.BlendState.RenderTarget[0].RenderTargetWriteMask = D3D12_COLOR_WRITE_ENABLE_ALL;
 		// Revealage
 		PSODesc1.BlendState.RenderTarget[1].BlendEnable = true;
-		PSODesc1.BlendState.RenderTarget[1].SrcBlend = D3D12_BLEND_ONE;
-		PSODesc1.BlendState.RenderTarget[1].DestBlend = D3D12_BLEND_ONE;
+		PSODesc1.BlendState.RenderTarget[1].SrcBlend = D3D12_BLEND_ZERO;
+		PSODesc1.BlendState.RenderTarget[1].DestBlend = D3D12_BLEND_INV_SRC_COLOR;
 		PSODesc1.BlendState.RenderTarget[1].BlendOp = D3D12_BLEND_OP_ADD;
 		PSODesc1.BlendState.RenderTarget[1].SrcBlendAlpha = D3D12_BLEND_ONE;
 		PSODesc1.BlendState.RenderTarget[1].DestBlendAlpha = D3D12_BLEND_ONE;

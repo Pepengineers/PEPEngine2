@@ -373,7 +373,7 @@ newmtl Paris_Beertap
 newmtl Paris_LiquorBottle_02_Glass
 	Ns 5000.000
 	Ni 1.00
-	d 1.000
+	d 0.250
 	Tf 0.200 0.10 0.000 
 	illum 7
 	Ka 0 0 0
@@ -414,8 +414,8 @@ newmtl ToffeeJar_Label
 newmtl Paris_LiquorBottle_01_Glass_Wine
 	Ns 100.000
 	Ni 1.500
-	d 1.000
-	Tr 0.000
+	d 0.650
+	Tr 0.350
 	Tf 1.000 1.000 1.000 
 	illum 2
 	Ka 0.200 0.200 0.200
@@ -428,6 +428,7 @@ newmtl Paris_LiquorBottle_01_Glass_Wine
 newmtl Paris_LiquorBottle_01_Glass
 	Ns 100.000
 	Ni 1.500
+	d 0.200
 	Tf 0.200 0.200 0.200 
 	illum 7
 	Ka 0.200 0.200 0.200
@@ -438,6 +439,7 @@ newmtl Paris_LiquorBottle_01_Glass
 newmtl Paris_LiquorBottle_03_Glass
 	Ns 100.000
 	Ni 1.500
+	d 0.200
 	Tf 0.200 0.200 0.200 
 	illum 7
 	Ka 0.200 0.200 0.200
@@ -561,6 +563,7 @@ newmtl ToffeeJar_Metal
 newmtl Paris_LiquorBottle_01_Glass1
 	Ns 5000.000
 	Ni 1.200
+	d 0.250
 	Tf 0.030 0.05 0.04
 	illum 7
 	Ka 0 0 0

@@ -73,7 +73,8 @@ PSOutput PS(VS_OUTPUT_PS_INPUT pin)
     
     clip(alpha - 0.001f);
     
-    output.AccumColor = float4(color.rgb * alpha, alpha);
+    float weight = max(0.01f, alpha);
+    output.AccumColor = float4(color.rgb * alpha, alpha) * weight;
     output.Revealage = alpha;
     
     return output;

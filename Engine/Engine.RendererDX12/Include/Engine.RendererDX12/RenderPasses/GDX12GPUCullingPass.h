@@ -62,6 +62,9 @@ public:
 		cmdList->SetComputeUAV(0, currentCameraVisBuffers.OpaqueDrawCounter->GetUAV()->GPUHandle);
 		cmdList->SetComputeUAV(1, currentCameraVisBuffers.TransparentDrawCounter->GetUAV()->GPUHandle);
 		cmdList->Dispatch(1, 1, 1);
+		cmdList->ResourceBarrier({
+			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetUAVBarrier(),
+			currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetUAVBarrier() });
 
 		cmdList->SetComputeRootSignature(_cullingRS.get());
 		cmdList->SetPipelineState(_cullingPSO);
@@ -78,7 +81,9 @@ public:
 
 		cmdList->ResourceBarrier({
 			currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().GetUAVBarrier(),
-			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetUAVBarrier() });
+			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetUAVBarrier(),
+			currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetUAVBarrier(),
+			currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetUAVBarrier() });
 		cmdList->EndPixEvent();
 	}
 

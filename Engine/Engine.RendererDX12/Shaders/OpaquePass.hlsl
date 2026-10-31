@@ -73,6 +73,7 @@ PS_OUTPUT PS(VS_OUTPUT_PS_INPUT pin)
     
     Material material = MaterialCache[pin.MaterialIndex];
     float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
+    if (material.RenderLayer == 1) clip(color.a - 0.5f);
     
     float2 currentNDC = pin.PosCSNoJitter.xy / pin.PosCSNoJitter.w;
     float2 prevNDC = pin.PrevPosCSNoJitter.xy / pin.PrevPosCSNoJitter.w;

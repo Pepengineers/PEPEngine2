@@ -2,6 +2,7 @@
 
 #include <App.Base/App.h>
 #include <WindowsX.h>
+#include "Engine.Core/ConsoleModule.h"
 
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 
@@ -142,7 +143,13 @@ bool App::Initialize()
         return false;
     }
 
-    return BenchmarkEngine::Initialize();
+    if (!AddModules()) return false;
+
+    // Scene loading creates GPU resources, so module hash order cannot decide initialization.
+    Locator.GetModule<ConsoleModule>()->Initialize();
+    Locator.GetModule<RenderModule>()->Initialize();
+    Locator.GetModule<SceneManagerModule>()->Initialize();
+    return true;
 }
 
 LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)

@@ -30,7 +30,7 @@ public:
     Event<World&> OnWorldCreated;
     Event<World&> OnWorldDestroyed;
 
-    SceneManagerModule(GameTimer* timer);
+    SceneManagerModule(GameTimer* timer, std::filesystem::path scenePath = {});
     ~SceneManagerModule() override;
 
     void Initialize() override;
@@ -69,6 +69,7 @@ private:
     void Tick(float dt);
 
     GameTimer* _timer;
+    std::filesystem::path _scenePath;
     std::vector<std::unique_ptr<World>> _worldVector;
     std::vector<SystemEntry> _systemVector;
 };
