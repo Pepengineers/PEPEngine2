@@ -150,6 +150,8 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\Logger.cpp" />
+    <ClCompile Include="src\RuntimePaths.cpp" />
     <ClCompile Include="..\..\External\External.Libraries\inih\ini.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
@@ -175,6 +177,8 @@
     <ClCompile Include="src\ConsoleModule.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.Core\Logging\Logger.h" />
+    <ClInclude Include="Include\Common\RuntimePaths.h" />
     <ClInclude Include="Include\Engine.Core\Jobs\JobSystem.h" />
     <ClInclude Include="Include\Common\AssetDebugLog.h" />
     <ClInclude Include="Include\Engine.Core\AssetHandles.h" />

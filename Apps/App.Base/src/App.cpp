@@ -4,6 +4,7 @@
 #include <WindowsX.h>
 #include "Common/ConsoleVariables.h"
 #include "Engine.Core/ConsoleModule.h"
+#include "Engine.Core/Logging/Logger.h"
 
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 
@@ -19,7 +20,6 @@ namespace Private
     static AutoConsoleVariable<int> JobBatchSize(
         L"Jobs.BatchSize", 64, L"Default minimum elements per job batch; must be positive. Restart required.",
         EConsoleVariableFlags::ReadOnly, [](int value) { return value > 0; });
-
 
     static LRESULT CALLBACK MainWndProc(const HWND hwnd, const UINT msg, const WPARAM wParam, const LPARAM lParam)
     {
@@ -75,12 +75,14 @@ App::App(HINSTANCE hInstance)
 
 App::~App()
 {
+    Log::Info("Application", "Shutting down application resources");
     //ordering is important
     Locator.UnregisterModule<SceneManagerModule>();
     Locator.UnregisterModule<RenderModule>();
     // can't be put into RenderModule since it is required 
     // to call it after all module entities are destroyed
     GDX12StreamlineSDK::Get().Shutdown();
+    Log::Info("Application", "Application resources released");
 }
 
 HINSTANCE App::GetAppHandler() const
@@ -130,6 +132,7 @@ int App::Run()
 
 bool App::Initialize()
 {
+    Log::Info("Application", "Creating the application window");
     WNDCLASS WindowClass = {};
     WindowClass.style = CS_HREDRAW | CS_VREDRAW;
     WindowClass.lpfnWndProc = Private::MainWndProc;
@@ -144,23 +147,33 @@ bool App::Initialize()
 
     if (!RegisterClass(&WindowClass))
     {
+        Log::Error("Application", "Window class registration failed, Win32 error ", GetLastError());
         MessageBox(nullptr, L"RegisterClass Failed.", nullptr, 0);
         return false;
     }
 
     if (!InitMainWindow())
     {
+        Log::Error("Application", "Application window initialization failed");
         return false;
     }
 
-    if (!AddModules()) return false;
+    Log::Info("Application", "Registering application modules");
+    if (!AddModules())
+    {
+        Log::Error("Application", "Application module registration failed");
+        return false;
+    }
 
     // Scene loading creates GPU resources, so module hash order cannot decide initialization.
     Locator.GetModule<RenderModule>()->Initialize();
     Locator.GetModule<SceneManagerModule>()->Initialize();
+    Log::Info("Application", "Preparing initial indirect commands for ",
+        Locator.GetModule<SceneManagerModule>()->GetWorldCount(), " worlds");
     auto scenes = Locator.GetModule<SceneManagerModule>();
     for (size_t i = 0; i < scenes->GetWorldCount(); ++i)
         _indirect.Schedule(_jobs, *scenes->GetWorld(i), 0).Complete();
+    Log::Info("Application", "Application initialization complete");
     return true;
 }
 

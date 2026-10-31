@@ -10,11 +10,11 @@
 
 #if PEP_ENABLE_ASSET_DEBUG_LOGS
 
-#include <Windows.h>
+#include "Engine.Core/Logging/Logger.h"
 
 inline void PEPWriteAssetDebugLog(const std::wstring& message)
 {
-	OutputDebugStringW(message.c_str());
+	Log::Info("AssetDebug", message);
 }
 
 #define LOG(message) \

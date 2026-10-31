@@ -1,5 +1,6 @@
 ﻿#include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/ConsoleModule.h"
+#include "Engine.Core/Logging/Logger.h"
 
 BenchmarkEngine* BenchmarkEngine::Instance = nullptr;
 
@@ -18,6 +19,7 @@ BenchmarkEngine::BenchmarkEngine()
     auto console = std::make_shared<ConsoleModule>();
     console->Initialize();
     Locator.RegisterModule(std::move(console));
+    Log::Info("Engine", "Core configuration and console module ready");
     Instance = this;
 }
 

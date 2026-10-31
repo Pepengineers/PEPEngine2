@@ -1,4 +1,6 @@
 #include "Engine.Core/ConsoleModule.h"
+#include "Engine.Core/Logging/Logger.h"
+#include "Common/RuntimePaths.h"
 
 #include <algorithm>
 #include <atomic>
@@ -7,7 +9,6 @@
 #include <cstring>
 #include <cwctype>
 #include <iostream>
-#include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <system_error>
@@ -154,12 +155,7 @@ std::wstring_view IConsoleVariable::GetDescription() const
 
 std::filesystem::path ConsoleModule::GetDefaultConfigPath()
 {
-    std::wstring executable(32768, L'\0');
-    const DWORD length = GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size()));
-    if (length == 0 || length == executable.size())
-        throw std::system_error(GetLastError(), std::system_category(), "Cannot locate the application executable");
-    executable.resize(length);
-    return std::filesystem::path(executable).parent_path() / L"Config" / L"Engine.ini";
+    return Engine::Core::GetExecutableDirectory() / L"Config" / L"Engine.ini";
 }
 
 ConsoleConfigResult ConsoleModule::LoadIni(const std::filesystem::path& Path)
@@ -170,6 +166,7 @@ ConsoleConfigResult ConsoleModule::LoadIni(const std::filesystem::path& Path)
     const auto openError = _wfopen_s(&rawFile, Path.c_str(), L"rb");
     if (openError == ENOENT)
     {
+        Log::Info("Config", "INI not found; keeping C++ defaults: ", Path);
         return {};
     }
     if (openError != 0) return { 0, "Cannot open INI: " + std::generic_category().message(openError) };
@@ -221,21 +218,23 @@ void ConsoleModule::Initialize()
 {
     if (StartupComplete.load()) return;
     const auto path = GetDefaultConfigPath();
+    Log::Info("Config", "Loading INI: ", path);
     const auto result = LoadIni(path);
     if (!result.Error.empty())
     {
-        const auto message = path.u8string() + ":" + std::to_string(result.ErrorLine) + ": " + result.Error +
+        auto message = path.u8string() + ":" + std::to_string(result.ErrorLine) + ": " + result.Error +
             ". Application startup aborted.\n";
-        const auto logPath = path.parent_path().parent_path() / L"Logs" / L"Engine.log";
-        std::error_code error;
-        std::filesystem::create_directories(logPath.parent_path(), error);
-        std::ofstream log(logPath, std::ios::app);
-        if (log) { log << message; log.flush(); }
-        std::cerr << message;
-        OutputDebugStringA(message.c_str());
+        if (!Log::Error("Config", message) || !Log::Flush())
+        {
+            message += "Could not write startup log: " +
+                (path.parent_path().parent_path() / L"Logs" / L"Engine.log").u8string() + '\n';
+            std::cerr << message;
+            OutputDebugStringA(message.c_str());
+        }
         throw ConsoleConfigError(message);
     }
     StartupComplete.store(true);
+    Log::Info("Config", "Startup configuration applied; ReadOnly variables are locked");
 }
 
 bool ConsoleModule::RegisterConsoleVariable(IConsoleVariable* variable)

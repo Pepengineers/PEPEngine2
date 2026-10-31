@@ -1,6 +1,7 @@
 ﻿// SceneImporter.cpp
 
 #include <Engine.Core/IO/SceneImporter.h>
+#include "Engine.Core/Logging/Logger.h"
 #include <Engine.Core/IO/AssimpImportHelpers.h>
 
 #include <Engine.Core/AssetLocators.h>
@@ -113,6 +114,7 @@ namespace Engine::Core
 {
 	std::unique_ptr<SceneAsset> SceneImporter::ImportSceneAsset(const std::filesystem::path& sourcePath, MeshRegistry& meshRegistry)
 	{
+		Log::Info("Scene", "Importing scene hierarchy: ", sourcePath);
 		if (sourcePath.empty())
 		{
 			LogSceneImporterMessage(L"[SceneImporter] Failed to import scene: empty source path.\n");
@@ -129,6 +131,7 @@ namespace Engine::Core
 
 		if (assimpScene == nullptr || assimpScene->mRootNode == nullptr || (assimpScene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) != 0)
 		{
+			Log::Error("Scene", "Assimp scene import failed for ", sourcePath, ": ", importer.GetErrorString());
 			LogSceneImporterMessage(L"[SceneImporter] Failed to parse scene from path: " + sourcePath.generic_wstring() + L"\n");
 			return nullptr;
 		}
@@ -155,6 +158,7 @@ namespace Engine::Core
 		LogSceneImporterMessage(L"[SceneImporter] Imported scene with " + std::to_wstring(importedNodes.size()) +
 			L" nodes from path: " + sourcePath.generic_wstring() + L"\n");
 
+		Log::Info("Scene", "Imported ", importedNodes.size(), " scene nodes: ", sourcePath);
 		return std::make_unique<SceneAsset>(std::move(importedNodes), std::move(rootNodeIndices));
 	}
 }

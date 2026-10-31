@@ -3,6 +3,7 @@
 #include "App.Base/BistroLightPlacements.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "Engine.Core/BenchmarkEngine.h"
+#include "Engine.Core/Logging/Logger.h"
 #include <stdexcept>
 
 SceneManagerModule::SceneManagerModule(std::filesystem::path scenePath) :
@@ -40,17 +41,20 @@ void SceneManagerModule::Initialize()
 
     if (!LoadWorld(scenePath))
     {
+        Log::Error("Scene", "Failed to load world: ", scenePath);
         throw std::runtime_error("Failed to load scene: " + scenePath.string());
     }
 
     World* world = GetWorld(0);
     if (!world)
     {
+        Log::Error("Scene", "Loaded scene has no world: ", scenePath);
         throw std::runtime_error("Loaded scene has no world: " + scenePath.string());
     }
 
     if (scenePath.wstring().find(L"Amazon Lumberyard Bistro") != std::wstring::npos)
     {
+        Log::Info("Scene", "Creating Bistro light fixtures");
         BenchmarkEngine::GetLocator().GetModule<RenderModule>()->ReserveTransformCapacity(
             static_cast<UINT>(sizeof(BistroLightPlacements) / sizeof(BistroLightPlacements[0])) + 1);
         const auto create = [world](const char* name, Vector3 position, Vector3 direction,
@@ -76,6 +80,7 @@ void SceneManagerModule::Initialize()
             create(fixture.Name, fixture.Position, fixture.Direction,
                 fixture.Kind == BistroFixtureKind::Point ? LightType::Point : LightType::Spot, fixture.Range, fixture.Intensity);
     }
+    Log::Info("Scene", "Scene initialization complete: ", scenePath);
 }
 
 void SceneManagerModule::Uninitialize()
@@ -93,6 +98,7 @@ void SceneManagerModule::Uninitialize()
 
 bool SceneManagerModule::LoadWorld(const std::filesystem::path& path)
 {
+    Log::Info("Scene", "Loading world: ", path);
     WorldDesc desc;
     desc.WorldFilePath = path;
 

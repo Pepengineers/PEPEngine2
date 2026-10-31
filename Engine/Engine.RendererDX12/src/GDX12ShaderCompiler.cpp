@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
+#include "Engine.Core/Logging/Logger.h"
 
 #include "Engine.RendererDX12/GDX12Device.h"
 
@@ -91,6 +92,7 @@ std::string GDX12ShaderCompiler::GetShaderTargetForModel(GDX12Device* device, co
 
 ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filename, const D3D_SHADER_MACRO* defines, const std::string& entrypoint, const std::string& shaderType)
 {
+    Log::Info("Shader", "Compiling ", filename, " [", entrypoint, ", ", shaderType, ']');
     ComPtr<IDxcBlobEncoding> sourceBlob;
     ThrowIfFailed(_dxcUtils->LoadFile(filename.c_str(), nullptr, &sourceBlob));
 
@@ -146,6 +148,8 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
 
     if (errors != nullptr && errors->GetStringLength() > 0)
     {
+        Log::Warning("Shader", "Compiler diagnostics for ", filename, ": ",
+            std::string_view(errors->GetStringPointer(), errors->GetStringLength()));
         //print a bunch of info if shader doesnt want to compile
         OutputDebugStringA("Shader compilation warnings/errors:\n");
         OutputDebugStringA(errors->GetStringPointer());
@@ -162,6 +166,7 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
     HRESULT compileStatus;
     if (SUCCEEDED(results->GetStatus(&compileStatus)) && FAILED(compileStatus))
     {
+        Log::Error("Shader", "Compilation failed: ", filename, " [", entrypoint, ", ", shaderType, ']');
         if (errors != nullptr && errors->GetStringLength() > 0)
         {
             OutputDebugStringA("Shader compilation failed:\n");
@@ -192,11 +197,13 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
     D3DCreateBlob(dxcBlob->GetBufferSize(), &d3dBlob);
     memcpy(d3dBlob->GetBufferPointer(), dxcBlob->GetBufferPointer(), dxcBlob->GetBufferSize());
 
+    Log::Info("Shader", "Compiled ", filename, " [", entrypoint, ", ", shaderType, ']');
     return d3dBlob;
 }
 
 ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderFXC(const std::wstring& filename, const D3D_SHADER_MACRO* defines, const std::string& entrypoint, const std::string& shaderType)
 {
+    Log::Info("Shader", "Compiling ", filename, " [", entrypoint, ", ", shaderType, ']');
     UINT compileFlags = 0;
 #if defined(DEBUG) || defined(_DEBUG)  
     compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
@@ -212,6 +219,8 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderFXC(const std::wstring& filen
     std::wstring compilerLog;
     if (errors) 
     {
+        Log::Warning("Shader", "Compiler diagnostics for ", filename, ": ",
+            std::string_view(static_cast<const char*>(errors->GetBufferPointer()), errors->GetBufferSize()));
         const char* ptr = (const char*)errors->GetBufferPointer();
         size_t len = errors->GetBufferSize();
         int need = MultiByteToWideChar(CP_ACP, 0, ptr, (int)len, nullptr, 0);
@@ -221,6 +230,7 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderFXC(const std::wstring& filen
 
     if (FAILED(hr)) 
     {
+        Log::Error("Shader", "Compilation failed: ", filename, " [", entrypoint, ", ", shaderType, ']');
         std::wstringstream det;
 
         std::wstring strCopy = prettyPathToShader;
@@ -233,5 +243,6 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderFXC(const std::wstring& filen
         ThrowIfFailed(hr);
     }
 
+    Log::Info("Shader", "Compiled ", filename, " [", entrypoint, ", ", shaderType, ']');
     return byteCode;
 }

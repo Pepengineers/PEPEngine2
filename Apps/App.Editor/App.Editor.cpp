@@ -1,5 +1,6 @@
 #include <App.Base/App.h>
 #include "Engine.Core/ConsoleModule.h"
+#include "Engine.Core/Logging/Logger.h"
 #include <exception>
 
 class EditorApp : public App
@@ -57,11 +58,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, in
     }
     catch (DxException& e)
     {
+        Log::Error("Application", "DirectX failure: ", e.ToString());
+        Log::Flush();
         MessageBox(nullptr, e.ToString().c_str(), L"App Init Failed", MB_OK);
         return 0;
     }
     catch (const std::exception& error)
     {
+        Log::Error("Application", "Application failed: ", error.what());
+        Log::Flush();
         MessageBoxA(nullptr, error.what(), "App Init Failed", MB_OK | MB_ICONERROR);
         return 1;
     }

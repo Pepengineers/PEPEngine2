@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/GDX12Device.h"
+#include "Engine.Core/Logging/Logger.h"
 
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
@@ -67,6 +68,8 @@ void GDX12Device::CollectDeviceFeatures()
     _specs.DedicatedVideoMemory = adapterDesc.DedicatedVideoMemory;
     _specs.DedicatedSystemMemory = adapterDesc.DedicatedSystemMemory;
     _specs.SharedSystemMemory = adapterDesc.SharedSystemMemory;
+    Log::Info("Renderer", "GPU adapter: ", adapterDesc.Description, ", dedicated video memory ",
+        adapterDesc.DedicatedVideoMemory / (1024u * 1024u), " MiB");
 }
 
 void GDX12Device::Reset()

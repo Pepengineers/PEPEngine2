@@ -18,6 +18,8 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\Logger.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\RuntimePaths.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GameTimer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -71,6 +73,8 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.Core\Logging\Logger.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Include\Common\RuntimePaths.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Common\AssetDebugLog.h">
       <Filter>Header Files</Filter>
     </ClInclude>

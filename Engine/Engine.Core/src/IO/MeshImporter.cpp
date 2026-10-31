@@ -1,6 +1,7 @@
 ﻿// MeshImporter.cpp
 
 #include <Engine.Core/IO/MeshImporter.h>
+#include "Engine.Core/Logging/Logger.h"
 #include <Engine.Core/IO/AssimpImportHelpers.h>
 
 #include <assimp/Importer.hpp>
@@ -757,8 +758,10 @@ namespace Engine::Core
 {
 	std::unique_ptr<Mesh> MeshImporter::ImportSingleMeshAsset(const std::filesystem::path& sourcePath, const MeshImportOptions& options)
 	{
+		Log::Info("Mesh", "Importing mesh: ", sourcePath);
 		if (sourcePath.empty())
 		{
+			Log::Error("Mesh", "Mesh import has an empty source path");
 			return nullptr;
 		}
 
@@ -770,6 +773,7 @@ namespace Engine::Core
 		
 		if (assimpScene == nullptr || assimpScene->mRootNode == nullptr || (assimpScene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) != 0)
 		{
+			Log::Error("Mesh", "Assimp import failed for ", sourcePath, ": ", importer.GetErrorString());
 			return nullptr;
 		}
 
@@ -782,11 +786,14 @@ namespace Engine::Core
 
 		if (importedSubMeshes.empty())
 		{
+			Log::Error("Mesh", "Imported mesh has no geometry: ", sourcePath);
 			return nullptr;
 		}
 
 		const DirectX::BoundingBox meshBounds = CalculateMeshBounds(importedSubMeshes);
 		std::vector<MeshMaterial> importedMaterials = ImportMaterials(*assimpScene, sourcePath);
+		Log::Info("Mesh", "Imported ", importedSubMeshes.size(), " submeshes and ",
+			importedMaterials.size(), " materials: ", sourcePath);
 		std::unique_ptr<Mesh> mesh = std::make_unique<Mesh>(std::move(importedSubMeshes), meshBounds, std::move(importedMaterials));
 		return mesh;
 	}
