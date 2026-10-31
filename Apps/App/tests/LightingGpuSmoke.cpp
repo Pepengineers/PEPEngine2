@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12AmbientOcclusionPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/GDX12ShadowCascades.h"
@@ -147,6 +148,17 @@ int main()
         ThrowIfFailed(device.GetDevice().As(&info));
         // Existing empty scene caches create null/zero-element descriptors before scene loading.
         info->ClearStoredMessages();
+        auto* uploadQueue = device.GetCommandQueue();
+        auto* pendingUpload = uploadQueue->GetCommandList();
+        auto* otherUpload = uploadQueue->GetCommandList();
+        Require(pendingUpload != otherUpload, "A recording upload list must not be recycled");
+        uploadQueue->ExecuteCommandList(otherUpload);
+        uploadQueue->Flush();
+        otherUpload = uploadQueue->GetCommandList();
+        Require(pendingUpload != otherUpload, "A recording list must survive another list's completion");
+        uploadQueue->ExecuteCommandList(otherUpload);
+        uploadQueue->ExecuteCommandList(pendingUpload);
+        uploadQueue->Flush();
         RenderPipelineCommonData common;
         common.WindowWidth = common.DownscaledWidth = 64;
         common.WindowHeight = common.DownscaledHeight = 64;
@@ -168,11 +180,15 @@ int main()
         opaque.Setup(&resources, nullptr, &common);
         opaque.SetInputs({});
         opaque.Initialize();
+        GDX12AmbientOcclusionPass ao;
+        ao.Setup(&resources, nullptr, &common);
+        ao.SetInputs({ opaque.GetOutput(2), opaque.GetOutput(3) });
+        ao.Initialize();
         GDX12DeferredLightingPass deferred;
         deferred.Setup(&resources, nullptr, &common);
         deferred.SetInputs({ opaque.GetOutput(0), opaque.GetOutput(3), opaque.GetOutput(4), opaque.GetOutput(5),
             opaque.GetOutput(2), shadows.GetOutput(0), environment.GetOutput(0), environment.GetOutput(1),
-            environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0) });
+            environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0), ao.GetOutput(0) });
         deferred.Initialize();
         GDX12GPUCullingPass culling;
         culling.Setup(&resources, nullptr, &common);
@@ -314,6 +330,8 @@ int main()
         const float reverseRange = 0.1f / (10000.0f - 0.1f);
         projection._33 = reverseRange;
         projection._43 = reverseRange * 10000.0f;
+        common.CameraViewToClip = projection;
+        common.ClipToCameraView = projection.Invert();
         const Matrix viewProjection = view * projection;
         XMStoreFloat4x4(&camera.ViewProj, XMMatrixTranspose(viewProjection));
         camera.ViewProjNoJitter = camera.PrevViewProjNoJitter = camera.ViewProj;
@@ -350,6 +368,7 @@ int main()
             auto* list = queue->GetCommandList();
             culling.Execute(list);
             opaque.Execute(list);
+            ao.Execute(list);
             deferred.Execute(list);
             transparency.Execute(list);
             queue->ExecuteCommandList(list);

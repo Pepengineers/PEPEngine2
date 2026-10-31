@@ -2,6 +2,8 @@
 
 `BenchmarkEngine` применяет конфигурацию в своём конструкторе, до создания членов производного приложения (включая Jobs), окна и модулей. Все статические CVar к этому моменту зарегистрированы. Настройки, объявленные позднее, не участвуют в загрузке INI.
 
+Bistro применяет INI ещё раньше, до разбора аргументов запуска: `-Loading.TransientBudgetMiB=...` переопределяет значение из INI. Повторная инициализация конфигурации в конструкторе ядра не перечитывает файл.
+
 Приложение ищет `Config/Engine.ini` относительно своего exe, независимо от текущей рабочей папки. При первой сборке приложения MSBuild копирует туда [шаблон](../Config/Engine.ini); уже существующий файл не перезаписывается. Если файла нет, остаются значения из C++.
 
 ```ini
@@ -44,6 +46,8 @@ const bool parsed = console.FindConsoleVariable(L"Render.Exposure").SetFromStrin
 
 Размер пакета измеряется в элементах и не задаёт выравнивание кэш-линии. Для устранения false sharing нужно также учитывать адреса массивов, размеры/шаги элементов и фактические записи; enkiTS не гарантирует границы диапазонов на кэш-линиях. Автоматическое выравнивание или padding данных не выполняется.
 
+`Loading.TransientBudgetMiB` использует `Default` и принимает только положительные целые значения; неверный бюджет в INI отклоняется до начала загрузки сцены.
+
 Дубликат зарегистрированного имени и пустое имя отклоняются исключением и в Debug, и в Release. `TryFindConsoleVariable()` возвращает `false`/`nullptr` для отсутствующей переменной; `FindConsoleVariable()` выбрасывает исключение для обязательной настройки.
 
 ## Потоки и время жизни
@@ -85,7 +89,7 @@ Off, диапазон результатов и DX12 debug layer.
 
 ```powershell
 New-Item -ItemType Directory -Force Build/CVarTests/Manual | Out-Null
-cl /nologo /std:c++17 /EHsc /W4 /Z7 /IEngine/Engine.Core/Include /IExternal/External.Libraries/inih /DINI_STOP_ON_FIRST_ERROR=1 /DINI_ALLOW_MULTILINE=0 /DINI_CALL_HANDLER_ON_NEW_SECTION=1 /DINI_MAX_LINE=4096 Engine/Engine.Core/tests/ConsoleVariableTests.cpp Engine/Engine.Core/src/ConsoleModule.cpp Engine/Engine.Core/src/BenchmarkEngine.cpp Engine/Engine.Core/src/GameTimer.cpp External/External.Libraries/inih/ini.c /FoBuild/CVarTests/Manual/ /FeBuild/CVarTests/Manual/ConsoleVariableTests.exe /link kernel32.lib
+cl /nologo /std:c++17 /EHsc /W4 /Z7 /IEngine/Engine.Core/Include /IExternal/External.Libraries/inih /DINI_STOP_ON_FIRST_ERROR=1 /DINI_ALLOW_MULTILINE=0 /DINI_CALL_HANDLER_ON_NEW_SECTION=1 /DINI_MAX_LINE=4096 Engine/Engine.Core/tests/ConsoleVariableTests.cpp Engine/Engine.Core/src/ConsoleModule.cpp Engine/Engine.Core/src/Logger.cpp Engine/Engine.Core/src/RuntimePaths.cpp Engine/Engine.Core/src/BenchmarkEngine.cpp Engine/Engine.Core/src/GameTimer.cpp External/External.Libraries/inih/ini.c /FoBuild/CVarTests/Manual/ /FeBuild/CVarTests/Manual/ConsoleVariableTests.exe /link kernel32.lib
 Build/CVarTests/Manual/ConsoleVariableTests.exe
 ```
 
