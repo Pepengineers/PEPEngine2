@@ -112,6 +112,7 @@ int main(int argc, char** argv)
         Upload(device, material, materials.data(), 8);
         GDX12EnvironmentIBLPass environment;
         environment.Setup(&resources, nullptr, &common); environment.Initialize();
+        environment.Submit({0,{{1,{}}},{}}); environment.PrepareFrame();
         auto* queue = device.GetCommandQueue();
         auto* list = queue->GetCommandList();
         environment.Execute(list); queue->ExecuteCommandList(list); queue->Flush();

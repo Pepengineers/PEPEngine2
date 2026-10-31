@@ -16,6 +16,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12CascadedShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12SkyAerialPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
@@ -447,6 +448,11 @@ void RenderModule::SubmitReflectionProbes(uint64_t world, std::vector<GDX12Refle
     uint64_t staticRevision, uint64_t shadingRevision)
 {
     if (_reflectionProbes) _reflectionProbes->Submit(world, std::move(probes), staticRevision, shadingRevision);
+}
+
+void RenderModule::SubmitSky(GDX12SkyDesc sky)
+{
+    if (_environment) _environment->Submit(std::move(sky));
 }
 
 TransformCompGPUData& RenderModule::GetTransformGPUData(Entity entity)
@@ -909,7 +915,7 @@ void RenderModule::ConfigureRenderPipeline()
         return result;
     };
     auto* clearPass = add(std::make_unique<GDX12TextureClearPass>());
-    auto* environmentPass = add(std::make_unique<GDX12EnvironmentIBLPass>());
+    auto* environmentPass = _environment = add(std::make_unique<GDX12EnvironmentIBLPass>());
     auto* shadowPass = add(std::make_unique<GDX12CascadedShadowPass>());
     auto* localShadowPass = add(std::make_unique<GDX12LocalShadowPass>());
     _reflectionProbes = add(std::make_unique<GDX12ReflectionProbePass>());
@@ -923,6 +929,7 @@ void RenderModule::ConfigureRenderPipeline()
     auto* reflectionResolve = add(std::make_unique<GDX12SpecularResolvePass>(ssrPass));
     auto* transparencyPass = add(std::make_unique<GDX12WBOITTransparencyPass>());
     auto* compositionPass = add(std::make_unique<GDX12WBOITCompositionPass>());
+    auto* aerialPass = add(std::make_unique<GDX12SkyAerialPass>(environmentPass));
     auto* upscalePass = add(std::make_unique<GDX12XeSSUpscalePass>());
     auto* auxiliaryPass = add(std::make_unique<GDX12PostProcessAuxPass>());
     auto* motionBlurPass = add(std::make_unique<GDX12MotionBlurPass>());
@@ -942,7 +949,8 @@ void RenderModule::ConfigureRenderPipeline()
     reflectionResolve->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(3), opaquePass->GetOutput(4), aoPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), ssrPass->GetOutput(0) });
     transparencyPass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), localShadowPass->GetOutput(0) });
     compositionPass->SetInputs({ reflectionResolve->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
-    upscalePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1), compositionPass->GetOutput(0) });
+    aerialPass->SetInputs({ compositionPass->GetOutput(0), opaquePass->GetOutput(2) });
+    upscalePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1), aerialPass->GetOutput(0) });
     auxiliaryPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
     motionBlurPass->SetInputs({ upscalePass->GetOutput(0), auxiliaryPass->GetOutput(0), auxiliaryPass->GetOutput(1) });
     dofPass->SetInputs({ motionBlurPass->GetOutput(0), auxiliaryPass->GetOutput(0) });
@@ -950,7 +958,7 @@ void RenderModule::ConfigureRenderPipeline()
     outputPass->SetInputs({ toneMappingPass->GetOutput(0), _backBuffer.get() });
 
     GDX12RenderPass* renderResolutionPasses[] = { opaquePass, aoPass, lightingPass,
-        reflectionFallback, ssrPass, reflectionResolve, transparencyPass, compositionPass };
+        reflectionFallback, ssrPass, reflectionResolve, transparencyPass, compositionPass, aerialPass };
     for (auto* pass : renderResolutionPasses)
         pass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 

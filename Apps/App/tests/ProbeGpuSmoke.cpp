@@ -71,6 +71,7 @@ int main(int argc, char** argv)
         ComPtr<ID3D12InfoQueue> info; ThrowIfFailed(device.GetDevice().As(&info)); info->ClearStoredMessages();
         RenderPipelineCommonData common;
         GDX12EnvironmentIBLPass environment; environment.Setup(&resources, nullptr, &common); environment.Initialize();
+        environment.Submit({0,{{1,{}}},{}}); environment.PrepareFrame();
         GDX12LocalShadowPass local; local.Setup(&resources, nullptr, &common); local.Initialize();
         GDX12ReflectionProbePass probes; probes.Setup(&resources, nullptr, &common);
         probes.SetInputs({ environment.GetOutput(0), environment.GetOutput(1), environment.GetOutput(2), environment.GetOutput(3), local.GetOutput(0) }); probes.Initialize();
@@ -121,6 +122,7 @@ int main(int argc, char** argv)
                 if(i && shadowFixture) { instance.BoundingBoxCenter={6,0,5}; instance.BoundingBoxExtents={2,2,.025f}; frame->InstanceCache->CopyData(i,instance); }
             }
             frame->MainCB->CopyData(0,resources.Lighting);
+            environment.PrepareFrame();
             probes.Submit(worldId,{probe},staticRevision,shadeRevision); probes.PrepareFrame();
             auto* queue=device.GetCommandQueue(); auto* list=queue->GetCommandList();
             environment.Execute(list); local.Execute(list);
@@ -167,6 +169,23 @@ int main(int argc, char** argv)
         std::cout<<"Probe own-shadow receiver red "<<unshadowed[0]<<" / "<<shadowed[0]<<'\n';
         Require(unshadowed[0]>shadowed[0]+.2f,"An off-axis caster must shadow probe receivers independently of the active camera CSM");
         worldId=replacementWorldId; render(-5); Require(probes.GetPublished()[0].World==replacementWorldId,"Reused entity IDs in a new world must not retain old probe resources");
+        const auto originalSun=resources.Lighting.LightDirection;
+        GDX12SkyDesc atmosphere; atmosphere.World=worldId; atmosphere.Atmospheres.push_back({19,{}}); environment.Submit(atmosphere);
+        set(L"Render.Sky.Source","2"); set(L"Render.SkyAtmosphere.Quality","1"); probe.Mode=GDX12ReflectionProbeMode::BakedStatic;
+        for(UINT faceBudget:{1u,2u})
+        {
+            set(L"Render.Reflection.FacesPerFrame",std::to_string(faceBudget).c_str()); render(-5);
+            const auto identity=common.EnvironmentRevision,history=common.HistoryRevision;
+            const auto previousPublication=probes.GetPublished()[0].Revision;
+            for(UINT i=0;i<12;++i)
+            {
+                resources.Lighting.LightDirection={.2f+.01f*i,-1,.3f}; common.ActiveCameraView=Matrix::CreateTranslation(0,-100.0f*i,0); render(-5);
+                Require(common.EnvironmentRevision==identity&&common.HistoryRevision==history,"Continuous sky lighting must not change source identity");
+            }
+            Require(probes.GetPublished()[0].Revision>previousPublication,"Continuous atmosphere changes must not starve one/two-face probe publication");
+        }
+        environment.Submit({0,{{1,{}}},{}}); set(L"Render.Sky.Source","1"); set(L"Render.Reflection.FacesPerFrame","6"); probe.Mode=GDX12ReflectionProbeMode::Dynamic;
+        resources.Lighting.LightDirection=originalSun; common.ActiveCameraView=Matrix::Identity; render(-5);
         if(argc==2 && std::string(argv[1])=="--benchmark")
         {
             // Use the same lit two-plane fixture and own-sun-shadow policy as the strict smoke above.

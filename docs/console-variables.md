@@ -203,3 +203,66 @@ stochastic трассировку; общий normal/roughness G-buffer не и�
 
 `Apps/App/ProbeLightingGpuSmoke.vcxproj` проверяет box projection, overlap/global
 blend, Off, roughness mips, baked/sky tracing mask, PBR/SSR fallback и frame slots.
+
+## SkyBox и SkyAtmosphere
+
+`Render.Sky.Source`: 0 Off, 1 SkyBox (default), 2 SkyAtmosphere. Один выбранный
+enabled-компонент задаёт одновременно видимое небо и global IBL. Если выбранный
+тип отсутствует, рендер пишет диагностику и выдаёт чёрное небо/IBL; другой тип
+автоматически не включается. При нескольких компонентах выбранного типа используется
+наименьший entity ID с диагностикой. Off сохраняет BRDF LUT, обнуляя irradiance
+и specular environment. Existing Sun получает SkyBox; новые entities не создаются.
+
+| CVar | Default | Управление |
+|---|---:|---|
+| Render.SkyBox.Enabled | true | Разрешить выбранный SkyBox |
+| Render.SkyBox.Quality | 2 | 0 Off, 1 Low, 2 Mid, 3 High |
+| Render.SkyBox.Intensity | 1 | Множитель component intensity, 0..100 |
+| Render.SkyBox.Rotation | 0 | Добавочный поворот Y в градусах, -36000..36000 |
+| Render.SkyAtmosphere.Enabled | true | Разрешить выбранный SkyAtmosphere |
+| Render.SkyAtmosphere.Quality | 2 | 0 Off, 1 Low, 2 Mid, 3 High |
+| Render.SkyAtmosphere.RayleighScale | 1 | Множитель Rayleigh coefficients, 0..100 |
+| Render.SkyAtmosphere.MieScale | 1 | Множитель Mie scattering/extinction, 0..100 |
+| Render.SkyAtmosphere.OzoneScale | 1 | Множитель ozone absorption, 0..100 |
+| Render.SkyAtmosphere.MultipleScattering | 1 | Множитель multiscattering, 0..100 |
+| Render.SkyAtmosphere.SunIntensity | 1 | Множитель solar irradiance, 0..100; sun direction/color от active directional light |
+| Render.SkyAtmosphere.MieAnisotropy | 0.8 | Добавляет CVar−0.8 к component g, с clamp -0.95..0.95 |
+| Render.SkyAtmosphere.AerialPerspective | true | HDR aerial integration после OIT перед XeSS |
+| Render.SkyAtmosphere.AerialDistanceKm | 32 | Дальность volume: component range × CVar/32, CVar 0.001..1000 km |
+
+Quality выбирает irradiance 16/32/64 и specular prefilter 64/128/256, с полной
+mip chain. SkyBox сохраняет разрешение/mips исходной cubemap, небо читает интенсивность
+и поворот один раз. DDS LDR декодируется как sRGB; float HDR остаётся линейным.
+SkyBox.Texture задаёт абсолютный путь или путь относительно Assets. Revision повторно
+загружает GPU-копию из текущего AssetManager cache; изменение файла на диске само
+по себе cache не обновляет. Transform Sun не поворачивает SkyBox.
+
+SkyAtmosphere задаёт GroundOrigin в cm/Y-up, радиусы/scale heights в km,
+Rayleigh/Mie/ozone scales, Mie g, ground albedo, multiscattering, solar angular
+radius и aerial range. Глобальные CVars изменяют effective settings, не переписывая
+значения компонента. Atmosphere не создаётся в default scene.
+
+| Atmosphere LUT / steps | Low | Mid | High |
+|---|---|---|---|
+| Transmittance | 128×32 | 256×64 | 512×128 |
+| Multiscattering | 16² | 32² | 64² |
+| Sky-view | 96×54 | 192×108 | 384×216 |
+| Aerial scattering + RGB transmittance | 16³ | 32³ | 64³ |
+| Sky/IBL source cube face | 128² | 256² | 512² |
+| Ray integration steps | 16 | 32 | 64 |
+
+Алгоритм Hillaire 2020: transmittance → 64-direction multiscattering reduction →
+nonlinear sky-view LUT → cubemap/IBL и camera aerial volumes. Солнце берётся из
+того же directional light; его finite disk виден в небе, но исключён из IBL, чтобы
+не дублировать прямой свет. RGBA16F ограничивает яркость disk значением 65504.
+RGB extinction сохраняется в отдельном transmittance volume. SkyBox/Off aerial
+путь — точная HDR copy. Геометрия получает атмосферу по opaque depth; OIT всё ещё
+имеет однослойную глубину, поэтому отдельные слои стекла не получают независимую
+дистанцию рассеяния.
+
+Смена мира/типа/selected entity/texture revision сбрасывает temporal history один раз.
+Изменение солнца, интенсивности, поворота, scattering или высоты обновляет lighting,
+сохраняя историю SSSR и прогресс capture при бюджете 1/2 грани. Atmosphere берёт
+высоту активной камеры; глобальная IBL является локальным приближением для этой высоты.
+`SkyGpuSmoke.vcxproj` проверяет источники, LUT, aerial и SSR history;
+`ProbeGpuSmoke.vcxproj` — публикацию проб при непрерывном изменении атмосферы.

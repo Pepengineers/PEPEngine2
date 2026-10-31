@@ -7,6 +7,7 @@
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
 #include "Engine.RendererDX12/GDX12ReflectionProbes.h"
+#include "Engine.RendererDX12/GDX12Sky.h"
 
 class SceneManagerModule;
 class World;
@@ -15,6 +16,7 @@ class GDX12Device;
 class GDX12CommandList;
 class GDX12GPUTimer;
 class GDX12ReflectionProbePass;
+class GDX12EnvironmentIBLPass;
 
 struct TransformComponent;
 struct CameraComponent;
@@ -65,6 +67,7 @@ public:
     void SubmitCameraShadows(const GDX12ShadowConstants& shadows);
     void SubmitReflectionProbes(uint64_t world, std::vector<GDX12ReflectionProbeDesc> probes,
         uint64_t staticRevision, uint64_t shadingRevision);
+    void SubmitSky(GDX12SkyDesc sky);
     const GDX12MainConstants& GetLightingSettings() const { return _primaryResources.Lighting; }
     
     struct WorldRenderSubscriptions
@@ -173,6 +176,7 @@ private:
     // Sorted in execution order
     std::vector<std::unique_ptr<GDX12RenderPass>> _primaryRenderPassExecutionList;
     GDX12ReflectionProbePass* _reflectionProbes = nullptr;
+    GDX12EnvironmentIBLPass* _environment = nullptr;
     std::vector<std::unique_ptr<GDX12RenderPass>> _secondaryRenderPassExecutionList;
 
     // Flags that are accumulated from every active RenderPass on the device

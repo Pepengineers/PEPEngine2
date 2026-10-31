@@ -205,6 +205,7 @@
 
 ### GPU timings базовых проходов
 
+- Коммит `1e26802`, `test(render): benchmark base GPU techniques`.
 - Добавлен TechniqueGpuBenchmark: фиксированный HDR checker, reverse-Z depth
   step, движение 64 px/frame, 1920×1080. ProbeGpuSmoke имеет optional `--benchmark`,
   исходные assertions по умолчанию сохранены и выполняются до замеров.
@@ -235,9 +236,55 @@
   Release-сборки и оба probe regression smoke прошли. Логи `Build/benchmark-*`.
 - Замер не заменяет ещё требуемое визуальное сравнение native/XeSS и стекла Bistro.
 
+### SkyBox и SkyAtmosphere
+
+- Выбор одного источника `Render.Sky.Source=0/1/2`: Off/SkyBox/SkyAtmosphere.
+  Missing selected component выдаёт диагностику и neutral sky/IBL; дубликаты
+  разрешаются по минимальному entity ID с диагностикой. Другой тип не включается.
+- Текущее небо оформлено SkyBox на существующей Sun; новая сущность не создана.
+  Отдельного SkyAtmosphere consumer в Bistro нет. Обе update chains и граф подключены.
+- Hillaire LUT path: transmittance → 64-direction multiscattering → nonlinear
+  sky view → sky/IBL, отдельные RGB aerial scattering/transmittance volumes;
+  HDR integration после OIT перед XeSS. ABI 256 bytes с sizeof/offsetof asserts.
+  Источник MIT закреплён на `183ead5bdacc701b3b626347a680a2f3cd3d4fbd`, notice
+  и лицензия сохранены рядом с шейдером. Единицы cm/Y-up → km/Z-up согласованы.
+- Box сохраняет исходные 1024²/11 mips; sRGB декодируется один раз, float HDR
+  остаётся линейным. Intensity/rotation не наследуют Transform Sun. Видимый solar
+  disk ограничен RGBA16F и исключён из IBL; sun direction/radiance общие с PBR.
+- Source identity сбрасывает temporal history; отдельная lighting revision
+  обновляет IBL/baked shading без перезапуска partial probe capture и SSSR.
+  CVar enable/quality/params, компонентные настройки и Engine.ini/docs обновлены.
+- Evidence: SkyGpuSmoke написан до production; worker не запускал shared builds,
+  поэтому red-before-implementation не заявляется. Шесть изолированных DXC stages
+  прошли, затем host Release App и реальные GPU smokes. Первую сборку остановил
+  include DirectXTK, он исправлен. Старое требование BC1 output в LightingGpuSmoke
+  заменено проверкой linear-light radiance против независимого DDS decode/sRGB
+  oracle; dimensions/mips assertion сохранён. Обновлённый тест прошёл.
+- SkyGpuSmoke прошёл: sources/missing/duplicates/Off black IBL, axis rotation,
+  intensity once, LUT qualities, RGB volume bounds, six faces/zenith/vertical sun,
+  outside atmosphere, exact Box aerial bypass, реальная aerial geometry,
+  независимый 1 km Beer–Lambert matrix/depth oracle, 12 кадров warm SSSR при
+  движении солнца/высоты и reset при source switch. Найденная unrepresentable
+  thin-shell boundary закрыта adaptive ULP offset/validation и GPU-проверкой
+  planet radius 100000 km; thin 0.001 km shell отклоняется до dispatch.
+- ProbeGpuSmoke подтвердил publication при changing atmosphere и face budgets
+  1/2. LightingGpuSmoke, FidelityFXGpuSmoke, ProbeLightingGpuSmoke, десять кадров
+  BistroEffectsSmoke и verify_scene.py (4 OK) прошли. После boundary fix повторены
+  SkyGpuSmoke и Release App; DX12 debug errors отсутствуют. Логи `Build/sky-*`.
+- Sky timings: одинаковый fixture **65×49**, HDR/depth на 1 km, continuous sun,
+  steady transmittance/multiscattering, refresh sky/IBL/aerial + integration,
+  4 warmup/16 samples. Low/Mid/High median: **0.124928/0.532992/2.643968 ms**.
+  Process-local usage 64155648/70250496/97054720 bytes; это весь процесс с inputs
+  и live SSSR, не изолированная память sky. Полные rows добавлены в
+  [technique-gpu.json](2026-11-01-technique-gpu.json); не сравнивать с 1080p core
+  timings как с одинаковым разрешением. CPU allocation/PrepareFrame исключены.
+- Ограничения: aerial использует opaque depth и не разделяет слои стекла;
+  file hot reload не автоматический (SkyBox.Revision переотправляет текущий
+  AssetManager cache). Визуальное сравнение native/XeSS Bistro ещё не выполнено.
+
 ## Оставшаяся работа
 
-SkyBox/SkyAtmosphere, grass/wind, GPU particles, fluid surface/solver,
+Grass/wind, GPU particles, fluid surface/solver,
 skinning/asset import и cloud shaders. Наличие отдельных новых файлов во время
 работы не считается завершением этих пунктов без их callers и GPU-проверок.
 

@@ -136,6 +136,7 @@ public:
     Matrix ActiveCameraPreviousViewProjection = Identity4x4();
     uint64_t HistoryRevision = 0;
     uint64_t EnvironmentRevision = 0;
+    uint64_t EnvironmentLightingRevision = 0;
     GDX12ReflectionLightingPass* ReflectionLighting = nullptr;
     GameTimer* GameTimer = nullptr;
     UINT WindowWidth = 0;

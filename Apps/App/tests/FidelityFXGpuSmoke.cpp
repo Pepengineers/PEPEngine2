@@ -221,6 +221,7 @@ int main()
         GDX12EnvironmentIBLPass environment;
         environment.Setup(&resources, nullptr, &common);
         environment.Initialize();
+        environment.Submit({0,{{1,{}}},{}}); environment.PrepareFrame();
         auto* queue = device.GetCommandQueue();
         auto* commands = queue->GetCommandList();
         environment.Execute(commands);

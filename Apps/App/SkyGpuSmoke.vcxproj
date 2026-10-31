@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="AOGpuSmoke.vcxproj" />
+  <PropertyGroup><ProjectGuid>{9BC09EBE-991C-42D5-91D0-BE5B716D8120}</ProjectGuid></PropertyGroup>
+  <ItemGroup>
+    <ClCompile Remove="tests\AOGpuSmoke.cpp" />
+    <ClCompile Include="tests\SkyGpuSmoke.cpp" />
+  </ItemGroup>
+</Project>

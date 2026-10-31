@@ -378,5 +378,52 @@
       "processLocalCurrentUsageBytes": 73883648,
       "processLocalBudgetBytes": 5479858176
     }
+  ],
+  "sky": [
+    {
+      "quality": 1,
+      "width": 65,
+      "height": 49,
+      "warmupFrames": 4,
+      "sampleCount": 16,
+      "workload": "fixed 65x49 HDR/depth at 1km; changing sun each frame; steady transmittance/multiscattering; sky/IBL/camera-volume refresh plus aerial integration; D3D12 debug layer; per-frame flush",
+      "gpuMeanMs": 0.125312,
+      "gpuMedianMs": 0.124928,
+      "gpuMinMs": 0.113664,
+      "gpuMaxMs": 0.139264,
+      "memoryScope": "DXGI process-local usage includes fixture inputs, live SSSR and sky resources; not isolated sky allocation",
+      "processLocalCurrentUsageBytes": 64155648,
+      "processLocalBudgetBytes": 5479858176
+    },
+    {
+      "quality": 2,
+      "width": 65,
+      "height": 49,
+      "warmupFrames": 4,
+      "sampleCount": 16,
+      "workload": "fixed 65x49 HDR/depth at 1km; changing sun each frame; steady transmittance/multiscattering; sky/IBL/camera-volume refresh plus aerial integration; D3D12 debug layer; per-frame flush",
+      "gpuMeanMs": 0.538112,
+      "gpuMedianMs": 0.532992,
+      "gpuMinMs": 0.51712,
+      "gpuMaxMs": 0.57344,
+      "memoryScope": "DXGI process-local usage includes fixture inputs, live SSSR and sky resources; not isolated sky allocation",
+      "processLocalCurrentUsageBytes": 70250496,
+      "processLocalBudgetBytes": 5479858176
+    },
+    {
+      "quality": 3,
+      "width": 65,
+      "height": 49,
+      "warmupFrames": 4,
+      "sampleCount": 16,
+      "workload": "fixed 65x49 HDR/depth at 1km; changing sun each frame; steady transmittance/multiscattering; sky/IBL/camera-volume refresh plus aerial integration; D3D12 debug layer; per-frame flush",
+      "gpuMeanMs": 2.641152,
+      "gpuMedianMs": 2.643968,
+      "gpuMinMs": 2.614272,
+      "gpuMaxMs": 2.660352,
+      "memoryScope": "DXGI process-local usage includes fixture inputs, live SSSR and sky resources; not isolated sky allocation",
+      "processLocalCurrentUsageBytes": 97054720,
+      "processLocalBudgetBytes": 5479858176
+    }
   ]
 }
