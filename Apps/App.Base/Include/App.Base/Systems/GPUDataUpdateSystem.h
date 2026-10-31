@@ -85,6 +85,7 @@ private:
             GDX12InstanceData instance = {};
             instance.TransformIndex = transform.CBufferIndex;
             instance.MaterialIndex = renderer.Materials.at(submesh.MaterialIndex)->_CBufferIndex;
+            instance.Flags = renderer.ReflectionDynamic ? 1u : 0u;
             instance.BoundingBoxCenter = bounds.Center;
             instance.BoundingBoxExtents = bounds.Extents;
             frame->InstanceCache->CopyData(renderer._CBufferIndices.at(i), instance);

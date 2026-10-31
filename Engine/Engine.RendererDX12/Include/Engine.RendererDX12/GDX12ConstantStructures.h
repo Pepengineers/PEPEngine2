@@ -109,13 +109,15 @@ struct GDX12InstanceData
 {
     UINT TransformIndex;
     UINT MaterialIndex;
-    UINT _pad1;
+    UINT Flags;
     UINT _pad2;
     XMFLOAT3 BoundingBoxCenter;
     UINT _pad3;
     XMFLOAT3 BoundingBoxExtents;
     UINT _pad4;
 };
+
+static_assert(sizeof(GDX12InstanceData) == 48);
 
 struct GDX12IndirectDrawArgs
 {

@@ -20,6 +20,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\RenderSettings.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12ReflectionProbes.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionProbePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12AmbientOcclusionPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FidelityFXPasses.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12MotionBlurPass.h" />
@@ -73,6 +75,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\RenderSettings.cpp" />
+    <ClCompile Include="src\GDX12ReflectionProbePass.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusionPass.cpp" />
     <ClCompile Include="src\GDX12FidelityFXPasses.cpp" />
     <ClCompile Include="src\GDX12MotionBlurPass.cpp" />
@@ -176,7 +179,6 @@
     <Import Project="..\..\MSBuild\Props\PEPEngine.Module.Engine.RendererDX12.Public.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Dxc.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Pix.props" />
-    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Assimp.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />

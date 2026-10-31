@@ -113,6 +113,7 @@
 
 ### HDR-граф базовых эффектов
 
+- Коммит `e5dc247`, `feat(render): integrate HDR post effects`.
 - App исполняет deferred → SSSR/specular replacement → linear HDR OIT → XeSS →
   aligned depth/motion → motion blur → DoF → final Reinhard/sRGB → backbuffer.
 - Specular resolve заменяет старое environment specular, применяя общий DFG/AO
@@ -134,9 +135,37 @@
   opaque depth/motion и не описывает отдельный фокус/скорость стекла. Визуальный
   capture и сравнение производительности двух порядков с XeSS ещё не выполнены.
 
+### Захват cubemap-проб
+
+- Добавлены ReflectionProbeComponent, submission в обеих update chains и настоящий
+  capture producer. В сцене пробы не создаются; GPU-ресурсы выделяются лениво.
+- Dynamic снимает opaque/masked геометрию; BakedStatic копирует статический HDR
+  color и matching reverse-Z depth, затем дорисовывает только dynamic instances.
+  Существующие FlyingProps помечены dynamic, без новых entities.
+- Собственная directional shadow map охватывает capture volume независимо от
+  main-camera CSM. Source-only IBL исключает рекурсивное отражение проб/SSR.
+- GGX prefilter явно читает mip 0; публикация всех faces/mips и capture metadata
+  происходит вместе. При частичном обновлении сохраняется прежняя публикация.
+- World имеет монотонную runtime identity: повторное создание мира по тому же
+  адресу и повторный entity ID не переиспользуют его старый capture.
+- ProbeGpuSmoke Release прошёл: static color/depth reuse, dynamic front/behind,
+  roughness mips, partial publication/restart, metadata после перемещения,
+  scene/environment invalidation, world reuse, Off, frame slots и DX12 debug layer.
+  Own-shadow receiver red: 8.51562 без тени, 4.89453 с тенью.
+- Первый GPU-прогон выявил DSV/SRV alias при shadow draw; собственная depth map
+  больше не привязывается как SRV на этом проходе. Повторная проверка прошла.
+  Один повторный build остановился из-за временного LNK1104 общей Engine.UI.lib;
+  последующая последовательная сборка прошла.
+- Регрессии: LightingGpuSmoke, десять кадров BistroEffectsSmoke, Release App и
+  verify_scene.py (4 tests OK) прошли. Логи `Build/probe-capture-{build,gpu}.log`
+  и `Build/probe-{LightingGpuSmoke,BistroEffectsSmoke,App}-*.log`.
+- Capture producer готов; применение проб к material/specular/SSR — следующий
+  шаг. Budgeted faces снимаются в последовательных кадрах; широкая invalidation
+  может перерисовывать лишнюю статику. Производительность ещё не измерялась.
+
 ## Оставшаяся работа
 
-cubemap capture/cache/probes;
+Применение cubemap-проб в PBR/SSR;
 SkyBox/SkyAtmosphere, grass/wind, GPU particles, fluid surface/solver,
 skinning/asset import и cloud shaders. Наличие отдельных новых файлов во время
 работы не считается завершением этих пунктов без их callers и GPU-проверок.

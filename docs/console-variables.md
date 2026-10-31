@@ -144,3 +144,43 @@ Build/CVarTests/Manual/ConsoleVariableTests.exe
 ```
 
 Для проверки Release добавьте `/DNDEBUG /O2`. Тест намеренно вызывает ошибку запуска и проверяет её запись в лог. Он использует свой `Config/Engine.ini` рядом с тестовым exe и отказывается перезаписывать существующий файл.
+
+### Захват локальных reflection probes
+
+`ReflectionProbeComponent` задаёт включение, world-aligned influence extents,
+near/far clip, режим и явную `Invalidate()`. Позиция берётся из TransformComponent,
+extents масштабируются абсолютным scale. `NearPlane > 0`, `NearPlane < FarPlane <= 1000000`.
+По умолчанию компоненты не создаются; при отсутствии проб cubemap-ресурсы не выделяются.
+
+| CVar | По умолчанию | Допустимые значения |
+| --- | --- | --- |
+| `Render.Reflection.Enabled` | `true` | bool |
+| `Render.Reflection.Quality` | `2` | 0 Off, 1 Low, 2 Mid, 3 High |
+| `Render.Reflection.Implementation` | `0` | 0 Dynamic, 1 BakedStatic + Dynamic |
+| `Render.Reflection.Resolution` | `-1` | -1 пресет 64/128/256; иначе степень двойки 16..1024 |
+| `Render.Reflection.FacesPerFrame` | `-1` | -1 пресет 1/2/6; иначе 1..6 на пробу |
+
+Component Mode `Inherit` использует CVar; конкретные Dynamic/BakedStatic выбираются
+на отдельной пробе. Dynamic снимает всю opaque/masked геометрию. BakedStatic хранит
+HDR color и соответствующий reverse-Z depth, копирует оба и дорисовывает только
+объекты с `StaticMeshRenderComponent::ReflectionDynamic`; менять этот флаг следует
+через `SetReflectionDynamic`. Существующие летающие предметы уже помечены dynamic.
+
+Проба использует собственную directional shadow map, покрывающую capture volume;
+main-camera CSM для неё не используется. Глобальный IBL и local shadows сохраняются,
+обратной связи от SSR/локальных проб в capture нет. После шести faces выполняется
+GGX prefilter из явно выбранного mip 0 с 256 samples; все roughness mips публикуются
+вместе с capture position, influence и revision. До этого сохраняется предыдущее
+полностью готовое окружение. Ресурсы имеют постоянные SRV slots.
+
+Изменения проб/static geometry/materials/источника неба перезапускают поколение.
+Изменения света и dynamic caster shadows сбрасывают затронутый shading cache;
+budgeted faces снимаются в последовательных кадрах, поэтому быстрое движение
+может давать временное расхождение между направлениями. FacesPerFrame=6 снимает
+все направления в одном кадре. Ради корректности широкая scene invalidation пока
+может переснимать больше статики, чем нужно; spatial dependency tracking не добавлен.
+
+GPU fixture: `Apps/App/ProbeGpuSmoke.vcxproj` проверяет color/depth reuse,
+dynamic front/behind, публикацию metadata/mips, restart, собственные sun shadows,
+смену мира, Off и frame slots. Пробы предоставляет `GDX12ReflectionProbePass::GetPublished()`;
+их применение в итоговом material/specular resolve — отдельный потребитель.

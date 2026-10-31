@@ -705,6 +705,7 @@ namespace
             {
                 const auto& prop = partition.Props[index];
                 auto entity = createEntity(prop.Name, prop.SubMeshIndices);
+                entity.GetComponent<StaticMeshRenderComponent>().SetReflectionDynamic(true);
                 auto& flight = entity.AddComponent<FlyingPropComponent>();
                 flight.Phase = static_cast<float>(index) * 2.39996323f;
                 flight.Speed = 0.4f + static_cast<float>(index % 13) * 0.025f;
@@ -861,7 +862,7 @@ namespace
             textures.Schedule(jobs, end - begin, 1).Complete();
             for (size_t index = begin; index < end; ++index)
                 if (textures.Results[index - begin])
-                    assets.Textures().Cache(textureHandles[index], std::move(textures.Results[index - begin]));
+                    (void)assets.Textures().Cache(textureHandles[index], std::move(textures.Results[index - begin]));
             begin = end;
         }
         LastLoadingMeasurements.TextureSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - imported).count();
@@ -1029,7 +1030,7 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     auto en1 = ecs.CreateEntity();
     en1.AddComponent<NameComponent>("en1");
     en1.AddComponent<TransformComponent>(Vector3(0.0f, 0.f, 0.f));
-    en1.AddComponent<CircleMovementComponent>(1,1);
+    en1.AddComponent<CircleMovementComponent>(1.f, 1.f);
 
     std::vector<GDX12Material*> HeadMaterials = { HeadMaterial };
     en1.AddComponent<StaticMeshRenderComponent>(HeadMeshHandle, HeadMaterials);

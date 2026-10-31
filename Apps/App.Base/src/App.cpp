@@ -367,6 +367,7 @@ void App::Update(const GameTimer& gameTimer)
             work = _lookAt.Schedule(_jobs, world, dt, work);
             work = _lights.Schedule(_jobs, world, dt, work);
             work = _gpuData.Schedule(_jobs, world, dt, work);
+            work = _reflectionProbes.Schedule(_jobs, world, dt, work);
             work.Complete();
         }
         catch (...)

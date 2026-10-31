@@ -25,6 +25,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12SpecularResolvePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12PostProcessAuxPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ToneMappingPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionProbePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyFromSharedMemoryPass.h"
@@ -438,6 +439,12 @@ void RenderModule::SetActiveCamera(CameraComponent* camera)
     _RPcommonData.ActiveCameraFOV = camera->FOV;
     _RPcommonData.ActiveCameraNearPlane = camera->NearPlane;
     _RPcommonData.ActiveCameraFarPlane = camera->FarPlane;
+}
+
+void RenderModule::SubmitReflectionProbes(uint64_t world, std::vector<GDX12ReflectionProbeDesc> probes,
+    uint64_t staticRevision, uint64_t shadingRevision)
+{
+    if (_reflectionProbes) _reflectionProbes->Submit(world, std::move(probes), staticRevision, shadingRevision);
 }
 
 TransformCompGPUData& RenderModule::GetTransformGPUData(Entity entity)
@@ -903,6 +910,7 @@ void RenderModule::ConfigureRenderPipeline()
     auto* environmentPass = add(std::make_unique<GDX12EnvironmentIBLPass>());
     auto* shadowPass = add(std::make_unique<GDX12CascadedShadowPass>());
     auto* localShadowPass = add(std::make_unique<GDX12LocalShadowPass>());
+    _reflectionProbes = add(std::make_unique<GDX12ReflectionProbePass>());
     auto* cullingPass = add(std::make_unique<GDX12GPUCullingPass>());
     auto* opaquePass = add(std::make_unique<GDX12OpaquePass>());
     auto* aoPass = add(std::make_unique<GDX12AmbientOcclusionPass>());
@@ -920,6 +928,7 @@ void RenderModule::ConfigureRenderPipeline()
 
     SetupRenderPasses();
     clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
+    _reflectionProbes->SetInputs({ environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0) });
     cullingPass->SetInputs({});
     opaquePass->SetInputs({});
     aoPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3) });

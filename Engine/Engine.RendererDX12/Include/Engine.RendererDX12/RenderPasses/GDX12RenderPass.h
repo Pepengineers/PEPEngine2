@@ -134,6 +134,7 @@ public:
     Matrix ActiveCameraViewProjection = Identity4x4();
     Matrix ActiveCameraPreviousViewProjection = Identity4x4();
     uint64_t HistoryRevision = 0;
+    uint64_t EnvironmentRevision = 0;
     GameTimer* GameTimer = nullptr;
     UINT WindowWidth = 0;
     UINT WindowHeight = 0;

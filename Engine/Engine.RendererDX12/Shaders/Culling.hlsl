@@ -1,6 +1,7 @@
 #include "CBufferStructures.hlsl"
 
-ConstantBuffer<CameraCB> CBCamera : register(b0);
+cbuffer CaptureFilter : register(b0) { uint CaptureMask; };
+ConstantBuffer<CameraCB> CBCamera : register(b1);
 
 StructuredBuffer<InstanceData> InstanceCache : register(t0);
 StructuredBuffer<IndirectDrawArgs> InputCommands : register(t1);
@@ -50,6 +51,8 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
         return;
     
     uint instanceID = InputCommands[drawIndex].StartInstanceLocation;
+    bool dynamic = (InstanceCache[instanceID].Flags & 1u) != 0;
+    if ((CaptureMask == 1u && dynamic) || (CaptureMask == 2u && !dynamic)) return;
     
     if (IsBoxVisible(instanceID))
     {
