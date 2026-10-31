@@ -43,6 +43,7 @@
 
 ### Адаптеры FidelityFX и воспроизводимая зависимость
 
+- Коммит `bb5a28a`, `feat(render): add FidelityFX pass adapters`.
 - Реально загружен `v1.1.4`, commit `c6efa6bf7f2027b3ec94f28578bb5965eabb9e55`.
   Рабочий sparse checkout: `Build/FidelityFXSource`, не часть продуктового кода.
 - Собраны Release SSSR, DoF, Reflections Denoiser, DX12 backend и shader permutations.
@@ -63,9 +64,27 @@
   ещё не вызывает эти passes; их подключение и общий specular resolve — следующий шаг.
 - Логи: `Build/fidelityfx-integration-build.log`, `Build/fidelityfx-gpu.log`.
 
+### Motion blur
+
+- Реализованы TileMax → NeighborMax → двухнаправленный gather по Guertin,
+  McGuire, Nowrouzezahrai, HPG 2014; равное распределение samples без TileVariance.
+  Неоднозначность направления в Appendix разрешена по нормализованной конструкции §4.1.
+- Полувектор экспозиции ограничивается по длине; depth comparisons используют
+  обратную положительную глубину; небо получает rotation-only camera motion.
+- Off, нулевой shutter, cut, первый кадр включения и resize точно копируют HDR.
+- Авторитетные Release-сборка и `MotionBlurGpuSmoke` прошли с DX12 debug layer:
+  нечётные 65x49, HDR > 1, два тонких перпендикулярных moving features,
+  симметрия знака скорости, constant color, вращение/перенос камеры для неба,
+  все quality и frame slots, отсутствие DX12 errors.
+- Первый прогон обнаружил ошибку fixture: sky-проверка попадала на предусмотренный
+  cold-frame bypass после восстановления shutter. Тест теперь проверяет bypass
+  отдельно и blur на следующем кадре; production shader из-за этого не менялся.
+- Логи: `Build/motion-blur-build.log`, `Build/motion-blur-gpu.log`.
+  Pass ещё не подключён к графу App; проверка Bistro и стоимость остаются впереди.
+
 ## Оставшаяся работа
 
-SSSR/DOF integration в граф и публикация CVar в App; motion blur; cubemap capture/cache/probes;
+SSSR/DOF/motion blur integration в граф и публикация CVar в App; cubemap capture/cache/probes;
 SkyBox/SkyAtmosphere, grass/wind, GPU particles, fluid surface/solver,
 skinning/asset import и cloud shaders. Наличие отдельных новых файлов во время
 работы не считается завершением этих пунктов без их callers и GPU-проверок.

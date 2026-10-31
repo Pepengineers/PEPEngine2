@@ -22,6 +22,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderSettings.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12AmbientOcclusionPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FidelityFXPasses.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12MotionBlurPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceResources.h" />
@@ -71,6 +72,7 @@
     <ClCompile Include="src\RenderSettings.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusionPass.cpp" />
     <ClCompile Include="src\GDX12FidelityFXPasses.cpp" />
+    <ClCompile Include="src\GDX12MotionBlurPass.cpp" />
     <ClCompile Include="src\D3DHelpers.cpp" />
     <ClCompile Include="src\GDX12DeviceResources.cpp" />
     <ClCompile Include="src\GDX12GPUTimer.cpp" />
