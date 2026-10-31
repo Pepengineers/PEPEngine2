@@ -133,7 +133,7 @@ void GDX12CommandQueue::ClearCompletedLists()
     auto it = _workingCommandLists.begin();
     while (it != _workingCommandLists.end())
     {
-        if (_fence->GetCompletedValue() >= (*it)->FenceValue)
+        if ((*it)->FenceValue != 0 && _fence->GetCompletedValue() >= (*it)->FenceValue)
         {
             _availableCommandLists.push_back(std::move(*it));
             it = _workingCommandLists.erase(it);
