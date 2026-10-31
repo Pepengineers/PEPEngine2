@@ -11,6 +11,8 @@
 #include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureClearPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12CascadedShadowPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
@@ -822,6 +824,8 @@ void RenderModule::ConfigureRenderPipeline()
     // Setup render passes you would like to execute
     // Add in execution order
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureClearPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12EnvironmentIBLPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12CascadedShadowPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
@@ -833,17 +837,19 @@ void RenderModule::ConfigureRenderPipeline()
 
     // Link inputs & outputs for each pass that needs it
     GDX12RenderPass* clearPass = _primaryRenderPassExecutionList[0].get();
-    GDX12RenderPass* cullingPass = _primaryRenderPassExecutionList[1].get();
-    GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[2].get();
-    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[3].get();
-    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[4].get();
-    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[5].get();
-    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[6].get();
+    GDX12RenderPass* environmentPass = _primaryRenderPassExecutionList[1].get();
+    GDX12RenderPass* shadowPass = _primaryRenderPassExecutionList[2].get();
+    GDX12RenderPass* cullingPass = _primaryRenderPassExecutionList[3].get();
+    GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[4].get();
+    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[5].get();
+    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[6].get();
+    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[7].get();
+    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[8].get();
 
     clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
     cullingPass->SetInputs({});
-    opaquePass->SetInputs({});
-    transparencyPass->SetInputs({ opaquePass->GetOutput(2) });
+    opaquePass->SetInputs({ shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2) });
+    transparencyPass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2) });
     compositionPass->SetInputs({ opaquePass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
     upscalePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1), compositionPass->GetOutput(0) });
     outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get()});

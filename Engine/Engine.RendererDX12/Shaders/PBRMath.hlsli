@@ -26,6 +26,17 @@ float FresnelSchlickFactor(float vDotH)
     return f * f * f * f * f;
 }
 
+float GGXSampleCosTheta(float xiY, float roughness)
+{
+    float alpha = roughness * roughness;
+    return sqrt((1.0f - xiY) / (1.0f + (alpha * alpha - 1.0f) * xiY));
+}
+
+float SplitSumVisibility(float nDotV, float nDotL, float nDotH, float vDotH, float roughness)
+{
+    return 4.0f * nDotL * SmithGGXVisibility(nDotV, nDotL, roughness) * vDotH / max(nDotH, 1e-5f);
+}
+
 float LinearToSRGB(float value)
 {
     return value <= 0.0031308f ? value * 12.92f : 1.055f * pow(value, 1.0f / 2.4f) - 0.055f;

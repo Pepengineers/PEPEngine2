@@ -30,6 +30,26 @@ int main()
     assert(ToneMapToSRGB(1.0f) < ToneMapToSRGB(10.0f));
     assert(ToneMapToSRGB(10.0f) < 1.0f);
 
+    near(GGXSampleCosTheta(0.0f, 0.5f), 1.0f);
+    near(SplitSumVisibility(1, 1, 1, 1, 0.5f), 1.0f);
+    for (float roughness : { 0.045f, 0.3f, 1.0f })
+    {
+        double a = 0.0, b = 0.0;
+        for (int sample = 0; sample < 20000; ++sample)
+        {
+            const float nDotH = GGXSampleCosTheta((sample + 0.5f) / 20000.0f, roughness);
+            const float nDotL = 2.0f * nDotH * nDotH - 1.0f;
+            assert(std::isfinite(nDotH) && nDotH >= 0.0f && nDotH <= 1.0f);
+            if (nDotL <= 0.0f) continue;
+            const float visibility = SplitSumVisibility(1, nDotL, nDotH, nDotH, roughness);
+            const float fresnel = FresnelSchlickFactor(nDotH);
+            a += (1.0f - fresnel) * visibility / 20000.0f;
+            b += fresnel * visibility / 20000.0f;
+        }
+        assert(a >= 0.0 && b >= 0.0 && a + b <= 1.001);
+        if (roughness == 0.045f) assert(a + b > 0.99);
+    }
+
     for (float roughness : { 0.045f, 0.2f, 0.5f, 1.0f })
     {
         for (float angle : { 0.0f, 0.00001f, 0.5f, 1.0f })

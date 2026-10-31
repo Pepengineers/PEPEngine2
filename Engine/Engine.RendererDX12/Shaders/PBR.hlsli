@@ -2,6 +2,7 @@
 #define PBR_HLSLI
 
 #include "PBRMath.hlsli"
+#include "CSM.hlsli"
 
 float3 SafeNormalize(float3 value)
 {
@@ -64,10 +65,16 @@ float3 ShadePBR(Material material, float3 albedo, float3 position, float3 normal
     float3 diffuse = (1.0f - fresnel) * (1.0f - metallic) * albedo / PBR_PI;
     float3 specular = DistributionGGX(nDotH, roughness) * SmithGGXVisibility(nDotV, nDotL, roughness) * fresnel;
     float3 direct = (diffuse + specular) * CBMain.LightRadiance * nDotL;
+    if (nDotL > 0.0f) direct *= SunVisibility(position, n, nDotL);
     if (nDotV <= 0.0f) direct = 0.0f;
 
-    // shortcut: constant diffuse ambient; replace with filtered environment maps when IBL is added.
-    float3 ambient = CBMain.AmbientRadiance * albedo * (1.0f - metallic) * (1.0f - f0);
+    float3 irradiance = IrradianceEnvironment.SampleLevel(samLinearClamp, n, 0).rgb;
+    float3 reflection = reflect(-v, n);
+    float3 prefiltered = PrefilteredEnvironment.SampleLevel(samLinearClamp, reflection, roughness * 7.0f).rgb;
+    float2 brdf = EnvironmentBRDF.SampleLevel(samLinearClamp, float2(nDotV, roughness), 0).rg;
+    float3 fresnelIBL = f0 + (max(1.0f - roughness, f0) - f0) * FresnelSchlickFactor(nDotV);
+    float3 ambient = (1.0f - fresnelIBL) * (1.0f - metallic) * irradiance * albedo / PBR_PI +
+        prefiltered * (f0 * brdf.x + brdf.y);
     float3 emissive = material.EmissiveColor;
     if ((material.Flags & 8u) != 0u)
         emissive *= Texture2DCache[material.EmissiveIndex].Sample(samAnisotropicWrap, uv).rgb;

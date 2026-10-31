@@ -41,7 +41,22 @@ applies Reinhard and sRGB encoding before the existing LDR XeSS/output path.
 Default directional-light values are in `GDX12MainConstants`.
 Baked lighting is preserved without relighting.
 
-Ambient lighting is constant diffuse illumination; CSM and IBL are not implemented.
+The directional light uses four stabilized cascades in a 4096x4096 depth atlas
+(2048x2048 per cascade). Logarithmic/uniform splits cover up to 6000 scene units.
+Receiver frusta overlap, transitions blend over their last 10%, and the final
+cascade fades out. Matrices use the unjittered camera and a light-space texel grid.
+GPU culling builds four independent lists of opaque/masked shadow casters from
+the complete scene, including off-camera objects. Each cascade uses ExecuteIndirect;
+masked materials alpha-test in the depth pass. Transparent bottles receive shadows
+and IBL, but do not cast opaque shadows. Shadows use depth/slope/normal bias and
+3x3 comparison-sampler PCF, constrained to each atlas tile.
+
+IBL consists of diffuse irradiance, an eight-mip GGX-prefiltered radiance cubemap,
+and a split-sum BRDF LUT using the same Smith/Fresnel model as direct lighting.
+These resources are generated once on the GPU. The default source is a procedural
+HDR sky/ground in `EnvironmentIBL.hlsl`; no photographic HDR asset is bundled.
+This is global environment lighting, without local probes or environment occlusion.
+Reinhard remains the tone mapper after linear-HDR opaque/OIT composition.
 
 Controls: right mouse to look; W/A/S/D to fly; Q/E down/up; Shift to move faster;
 mouse wheel to change speed; Esc to exit.
@@ -53,6 +68,16 @@ python Apps/App/verify_scene.py
 ```
 
 These checks do not replace running the renderer on a DirectX 12 GPU.
+
+`tests/ShadowCascadeTests.cpp` checks the actual cascade matrices, receiver coverage,
+depth range, and whole-texel stabilization. Build with the renderer's public include
+directories, `/MD`, and `DirectXTK12.lib`.
+
+`tests/LightingGpuSmoke.cpp` runs without loading Bistro or opening a window. It
+creates the CSM/PBR pipeline states, renders one synthetic shadow caster through
+GPU culling and ExecuteIndirect, generates IBL on the GPU, and reads back the atlas,
+irradiance, radiance mips, and BRDF LUT under the DX12 debug layer. Build it with
+the App's include/link settings and the console subsystem.
 
 The BRDF tests compile the same scalar functions as the shaders. In a Visual Studio
 developer prompt:

@@ -12,8 +12,6 @@ struct MainCB
     float _pad0;
     float3 LightRadiance;
     float _pad1;
-    float3 AmbientRadiance;
-    float _pad2;
 };
 
 struct Transform
@@ -74,6 +72,12 @@ struct LightCB
     float4 CascadeDistances;
 };
 
+struct ShadowCB
+{
+    float4x4 ViewProj[4];
+    float4 SplitDepths;
+    float4 TexelWorldSize;
+};
 
 struct InstanceData
 {

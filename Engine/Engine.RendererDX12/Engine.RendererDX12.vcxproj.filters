@@ -191,6 +191,9 @@
     <None Include="Shaders\CBufferStructures.hlsl" />
     <None Include="Shaders\CompositionPass.hlsl" />
     <None Include="Shaders\Culling.hlsl" />
+    <None Include="Shaders\CSM.hlsli" />
+    <None Include="Shaders\EnvironmentIBL.hlsl" />
+    <None Include="Shaders\ShadowPass.hlsl" />
     <None Include="Shaders\FullScreenVS.hlsl" />
     <None Include="Shaders\OpaquePass.hlsl" />
     <None Include="Shaders\PBR.hlsli" />

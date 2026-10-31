@@ -3,6 +3,7 @@
 ConstantBuffer<IndirectConstants> CBIndirectConstants : register(b0);
 ConstantBuffer<MainCB> CBMain : register(b1);
 ConstantBuffer<CameraCB> CBCamera : register(b2);
+ConstantBuffer<ShadowCB> CBShadow : register(b3);
 
 SamplerState samPointWrap : register(s0);
 SamplerState samPointClamp : register(s1);
@@ -14,7 +15,12 @@ SamplerState samAnisotropicClamp : register(s5);
 StructuredBuffer<Material> MaterialCache : register(t0);
 StructuredBuffer<Transform> TransformCache : register(t1);
 StructuredBuffer<InstanceData> InstanceCache : register(t2);
-Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t3);
+Texture2D<float> ShadowAtlas : register(t3);
+TextureCube<float4> IrradianceEnvironment : register(t4);
+TextureCube<float4> PrefilteredEnvironment : register(t5);
+Texture2D<float4> EnvironmentBRDF : register(t6);
+Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t7);
+SamplerComparisonState samShadow : register(s6);
 
 #include "PBR.hlsli"
 

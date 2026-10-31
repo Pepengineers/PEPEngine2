@@ -6,6 +6,7 @@
 #include "Engine.Core/BenchmarkEngine.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.RendererDX12/GDX12ShadowCascades.h"
 
 class GPUDataUpdateSystem final : public System
 {
@@ -54,6 +55,16 @@ public:
 
 
                     Matrix view = Matrix::CreateLookAt(CameraLocation, CameraTarget, Vector3::Up);
+
+                    if (isActiveCamera)
+                    {
+                        const GDX12MainConstants lighting;
+                        const auto shadows = BuildShadowCascades(view.Invert(), FOV, renderModule->GetAspectRatio(),
+                            camera.NearPlane, camera.FarPlane, Vector3(lighting.LightDirection));
+                        renderModule->GetCurrentPrimaryFrameConstants()->ShadowCB->CopyData(0, shadows);
+                        if (renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS))
+                            renderModule->GetCurrentSecondaryFrameConstants()->ShadowCB->CopyData(0, shadows);
+                    }
 
                     //reserved-Z proj matrix
                     Matrix proj = Matrix::CreatePerspectiveFieldOfView(FOV, renderModule->GetAspectRatio(),

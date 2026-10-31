@@ -28,6 +28,7 @@ public:
 
     //Always updating
     std::unique_ptr<GDX12UploadBuffer<GDX12MainConstants>> MainCB;
+    std::unique_ptr<GDX12UploadBuffer<GDX12ShadowConstants>> ShadowCB;
 
     //Dirty flag notify updating
     std::unique_ptr<GDX12UploadBuffer<GDX12TransformConstants>> TransformCache;

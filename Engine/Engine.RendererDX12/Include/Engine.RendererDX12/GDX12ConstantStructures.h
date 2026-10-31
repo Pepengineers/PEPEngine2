@@ -11,8 +11,6 @@ struct GDX12MainConstants
     float _pad0 = 0.0f;
     XMFLOAT3 LightRadiance = { 4.0f, 3.8f, 3.5f };
     float _pad1 = 0.0f;
-    XMFLOAT3 AmbientRadiance = { 0.08f, 0.09f, 0.12f };
-    float _pad2 = 0.0f;
 };
 
 struct GDX12TransformConstants
@@ -21,6 +19,13 @@ struct GDX12TransformConstants
     XMFLOAT4X4 PrevWorldMatrix = Identity4x4();
 };
 
+struct GDX12ShadowConstants
+{
+    XMFLOAT4X4 ViewProj[4] = { Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4() };
+    XMFLOAT4 SplitDepths = {};
+    XMFLOAT4 TexelWorldSize = {};
+};
+static_assert(sizeof(GDX12ShadowConstants) == 288);
 
 struct GDX12MaterialConstants
 {
@@ -42,7 +47,7 @@ struct GDX12MaterialConstants
     float _pad2 = 0.0f;
 };
 
-static_assert(sizeof(GDX12MainConstants) == 64);
+static_assert(sizeof(GDX12MainConstants) == 48);
 static_assert(sizeof(GDX12MaterialConstants) == 80);
 
 struct GDX12CameraConstants
