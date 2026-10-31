@@ -73,10 +73,15 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
         if (material->DirtyFlag)
         {
             material->DirtyFlag = false;
-            material->_numFramesDirty = _numFrameConstants;
+            material->_numPrimaryFramesDirty = _numFrameConstants;
+            material->_numSecondaryFramesDirty = _numFrameConstants;
         }
 
-        if (material->_numFramesDirty > 0)
+        auto& numFramesDirty = Device->Role == DEVICE_ROLE_PRIMARY
+            ? material->_numPrimaryFramesDirty
+            : material->_numSecondaryFramesDirty;
+
+        if (numFramesDirty > 0)
         {
             GDX12MaterialConstants materialConstants;
             materialConstants.Roughness = material->Roughness;
@@ -98,7 +103,7 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
                 if (material->Displacement && material->Displacement->SecondaryDeviceTexture) { materialConstants.DisplacementIndex = material->Displacement->SecondaryDeviceTexture->GetSRV()->HeapIndex - Texture2D_StartIndex; }
                 currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
             }
-            material->_numFramesDirty--;
+            numFramesDirty--;
         }
     }
 }

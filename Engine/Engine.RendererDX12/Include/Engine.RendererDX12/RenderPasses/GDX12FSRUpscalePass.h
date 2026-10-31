@@ -76,7 +76,7 @@ public:
 		GDX12Texture* motionVectors = IN_MotionVectors->GetTexture();
 
 		cmdList->BeginPixEvent("FSR Upscale Pass", Colors::Blue);
-		ffxDispatchDescUpscale dispatchDesc;
+		ffxDispatchDescUpscale dispatchDesc = {};
 		dispatchDesc.header.type = FFX_API_DISPATCH_DESC_TYPE_UPSCALE;
 		dispatchDesc.commandList = cmdList->GetCommandList().Get();
 		dispatchDesc.depth = ffxApiGetResourceDX12(depthStencil->GetResource()->D3DResource.Get(), FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);

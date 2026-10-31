@@ -270,7 +270,9 @@ private:
 		constants.cameraAspectRatio = static_cast<float>(_commonData->WindowWidth) / _commonData->WindowHeight;
 
 		constants.jitterOffset = { -_commonData->ActiveCameraJitterOffsetX, -_commonData->ActiveCameraJitterOffsetY };
-		constants.mvecScale = { 1.f, 1.f };
+		// OpaquePass writes prevNDC - currentNDC. Convert to UV displacement;
+		// Streamline multiplies this scale by render width/height to obtain pixels.
+		constants.mvecScale = { 0.5f, -0.5f };
 
 		constants.depthInverted = Boolean::eTrue;
 		constants.cameraMotionIncluded = Boolean::eTrue;

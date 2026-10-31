@@ -66,14 +66,18 @@ public:
 
                     XMStoreFloat4x4(&objConstants.ViewProjNoJitter, XMMatrixTranspose(unjitteredViewProj));
                     objConstants.PrevViewProjNoJitter = camera.PrevViewProjNoJitter;
+
+                    if (isActiveCamera)
+                    {
+                        pipelineCommonData->CameraViewToClip = proj;
+                        pipelineCommonData->ClipToCameraView = proj.Invert();
+
+                        // Streamline uses row-major matrices.
+                        pipelineCommonData->ClipToPrevClip = unjitteredViewProj.Invert() * camera.PrevViewProjNoJitter.Transpose();
+                        pipelineCommonData->PrevClipToClip = pipelineCommonData->ClipToPrevClip.Invert();
+                    }
+
                     XMStoreFloat4x4(&camera.PrevViewProjNoJitter, XMMatrixTranspose(unjitteredViewProj));
-
-
-                    pipelineCommonData->CameraViewToClip = unjitteredViewProj;
-                    pipelineCommonData->ClipToCameraView = pipelineCommonData->CameraViewToClip.Invert();
-
-                    pipelineCommonData->ClipToPrevClip = unjitteredViewProj.Invert() * camera.PrevViewProjNoJitter;
-                    pipelineCommonData->PrevClipToClip = pipelineCommonData->ClipToPrevClip.Invert();
 
                     // Jitter current camera proj matrix if it is needed
                     if (isActiveCamera &&

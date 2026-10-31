@@ -282,7 +282,7 @@ void GDX12StreamlineSDK::LoadFunctions()
         || !_slIsFeatureSupported
         || !_slGetFeatureFunction || !_slEvaluateFeature || !_slFreeResources || !_slSetTagForFrame
         || !_slSetConstants || !_slGetNewFrameToken)
-    { LogWarning("Required Streamline exports are missing, Streamline is disabled."); }
+    { LogFailure("Required Streamline exports are missing, Streamline is disabled.", sl::Result::eErrorMissingOrInvalidAPI); }
 }
 
 sl::Result GDX12StreamlineSDK::LoadDLSSFunctions() const
