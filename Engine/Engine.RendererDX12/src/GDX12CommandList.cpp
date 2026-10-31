@@ -45,11 +45,15 @@ void GDX12CommandList::Reset()
 	FenceValue = 0;
 	_commandAllocator->Reset();
 	_commandList->Reset(_commandAllocator.Get(), nullptr);
+    InvalidateCachedState();
+}
 
+void GDX12CommandList::InvalidateCachedState()
+{
 	_currentRootSignature = nullptr;
 	_currentPSO = nullptr;
 	_currentTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
-	for (auto& cachedDescriptorHeap : _currentDescriptorHeaps) { cachedDescriptorHeap = nullptr; }
+    _currentDescriptorHeaps.clear();
 	_currentViewport = {};
 	_currentScissorRect = {};
 	_currentGeometryBuffer = nullptr;

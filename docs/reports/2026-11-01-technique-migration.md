@@ -19,6 +19,7 @@
 
 ### Три AO и интеграция
 
+- Коммит `e266912`, `feat(render): add switchable SSAO HBAO and XeGTAO`.
 - Реализованы отдельные SSAO, HBAO и Intel XeGTAO; единый выход visibility.
 - Исправлены prefilter dispatch и reduction conditions старого XeGTAO, обработка
   denoise/packed scale, RH/world-normal/reverse-Z mapping и нечётных размеров.
@@ -40,17 +41,31 @@
   Новые объекты для этого не создавались. Скриншот/длительное движение не проверялись.
 - Логи: `Build/ao-gpu.log`, `Build/lighting-ao-gpu.log`, `Build/app-ao-build.log`.
 
-## Подготовленная зависимость FidelityFX
+### Адаптеры FidelityFX и воспроизводимая зависимость
 
 - Реально загружен `v1.1.4`, commit `c6efa6bf7f2027b3ec94f28578bb5965eabb9e55`.
   Рабочий sparse checkout: `Build/FidelityFXSource`, не часть продуктового кода.
 - Собраны Release SSSR, DoF, Reflections Denoiser, DX12 backend и shader permutations.
   CMake build: `Build/FidelityFXBuild`, log `Build/fidelityfx-build.log`.
-- Это пока проверка сборки SDK, не доказательство интеграции SSR/DOF в App.
+- `MSBuild/BuildFidelityFX.ps1` проверяет точный commit SDK, восстанавливает
+  необходимые исходники/инструменты и проверяет выходные библиотеки. Обычная
+  сборка renderer вызывает bootstrap; демонстрационный Cauldron не используется.
+- Добавлены реальные SSSR/DoF passes, CVar, PrepareFrame для безопасного rebuild
+  контекстов и сброс cache native state после внешнего SDK dispatch.
+- Авторитетный `FidelityFXGpuSmoke` Release/x64 прошёл: нечерный SSR environment
+  fallback после инициализации history, reset/resize/quality/Off, sharp focus и
+  реальный blur DOF, точный HDR bypass, обычный AO после SDK, отсутствие DX12 errors.
+- У закреплённого SDK первый SSSR dispatch выдаёт чёрный radiance даже с history
+  weight=0; второй уже ненулевой. HasValidHistory явно сообщает готовность со
+  второго dispatch и сбрасывается при reset/Off/resize. Resolve должен сохранить
+  environment/probe fallback до готовности; угадывать confidence по alpha нельзя.
+- SSSR screen-space ray-hit fixture пока не проверен. Граф App на этой итерации
+  ещё не вызывает эти passes; их подключение и общий specular resolve — следующий шаг.
+- Логи: `Build/fidelityfx-integration-build.log`, `Build/fidelityfx-gpu.log`.
 
 ## Оставшаяся работа
 
-SSSR/DOF integration и runtime CVar; motion blur; cubemap capture/cache/probes;
+SSSR/DOF integration в граф и публикация CVar в App; motion blur; cubemap capture/cache/probes;
 SkyBox/SkyAtmosphere, grass/wind, GPU particles, fluid surface/solver,
 skinning/asset import и cloud shaders. Наличие отдельных новых файлов во время
 работы не считается завершением этих пунктов без их callers и GPU-проверок.
