@@ -21,6 +21,7 @@ int main()
     try
     {
         ConsoleModule console;
+        // These fixtures stay local to exercise scoped registration and destruction.
         AutoConsoleVariable<int> count(L"Test.Count", 3);
         AutoConsoleVariable<unsigned> frames(L"Test.Frames", 3, L"Startup setting",
             EConsoleVariableFlags::ReadOnly, [](unsigned value) { return value > 0 && value <= 8; });

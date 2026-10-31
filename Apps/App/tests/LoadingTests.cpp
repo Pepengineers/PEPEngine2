@@ -1,4 +1,6 @@
 #include "App.Base/LoadingSettings.h"
+#include "Engine.Core/ConsoleModule.h"
+#include <limits>
 #include <cassert>
 #include <fstream>
 #include <process.h>
@@ -23,6 +25,8 @@ int main()
         assert(config);
     }
     ConsoleModule{}.Initialize();
+    auto& budget = ConsoleModule{}.FindConsoleVariable(L"Loading.TransientBudgetMiB");
+    assert(budget.GetInt() == 128);
     assert(GetLoadingBudgetBytes() == 128ull * 1024 * 1024);
     const std::vector<std::uint64_t> sizes = { 40, 60, 101, 10 };
     assert(LoadingBatchEnd(sizes, 0, 100, 8) == 2);
@@ -39,10 +43,10 @@ int main()
         try { ApplyLoadingArgument(std::wstring(L"-Loading.TransientBudgetMiB=") + invalid); }
         catch (const std::runtime_error&) { rejected = true; }
         assert(rejected);
-        assert(LoadingTransientBudgetMiB.GetInt() == 2048);
+        assert(budget.GetInt() == 2048);
     }
-    assert(!LoadingTransientBudgetMiB.SetValue(0));
-    assert(!LoadingTransientBudgetMiB.SetFromString("-1"));
+    assert(!budget.SetFromString("0"));
+    assert(!budget.SetFromString("-1"));
     assert(GetLoadingBudgetBytes() == 2048ull * 1024 * 1024);
 
     const auto path = std::filesystem::temp_directory_path() / ("PEPEngineLoadingTest-" + std::to_string(_getpid()) + ".png");

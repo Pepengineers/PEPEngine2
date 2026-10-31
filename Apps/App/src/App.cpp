@@ -185,7 +185,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
             if (!report) throw std::runtime_error("Cannot open loading benchmark output");
             report << "{\n  \"initialize_seconds\": " << std::chrono::duration<double>(initialized - started).count()
                 << ",\n  \"ready_seconds\": " << std::chrono::duration<double>(ready - started).count()
-                << ",\n  \"budget_mib\": " << LoadingTransientBudgetMiB.GetInt()
+                << ",\n  \"budget_mib\": " << GetLoadingBudgetBytes() / (1024u * 1024u)
                 << ",\n  \"import_seconds\": " << LastLoadingMeasurements.ImportSeconds
                 << ",\n  \"texture_seconds\": " << LastLoadingMeasurements.TextureSeconds
                 << ",\n  \"publish_seconds\": " << LastLoadingMeasurements.PublishSeconds
