@@ -646,6 +646,7 @@ namespace
 		importedSubMesh.Vertices.reserve(assimpMesh.mNumVertices);
 		importedSubMesh.Indices.reserve(assimpMesh.mNumFaces * 3u);
 		importedSubMesh.MaterialIndex = assimpMesh.mMaterialIndex;
+		importedSubMesh.SourceNodeName = assimpMesh.mName.C_Str();
 
 		const aiMatrix3x3 normalTransform = BuildNormalTransform(nodeTransform);
 
@@ -727,6 +728,7 @@ namespace
 			}
 
 			Engine::Core::SubMesh importedSubMesh = ImportSubMesh(*assimpMesh, nodeTransform, startVertexLocation, startIndexLocation);
+			importedSubMesh.SourceNodeName = assimpNode.mName.C_Str();
 			if (importedSubMesh.GetVertexCount() == 0 || importedSubMesh.GetIndexCount() == 0)
 			{
 				continue;

@@ -2,7 +2,9 @@
 
 #include <cassert>
 #include <cstdint>
+#include <filesystem>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -11,10 +13,29 @@
 
 #include "Common/Module.h"
 
+enum class EConsoleVariableFlags : uint8_t
+{
+    Default = 0,
+    ReadOnly = 1
+};
+
+struct ConsoleConfigResult
+{
+    int ErrorLine = 0;
+    std::string Error;
+};
+
+class ConsoleConfigError final : public std::runtime_error
+{
+public:
+    using std::runtime_error::runtime_error;
+};
+
 class IConsoleVariable
 {
 public:
-    IConsoleVariable(std::wstring_view Name, std::wstring_view Description = {});
+    IConsoleVariable(std::wstring_view Name, std::wstring_view Description = {},
+        EConsoleVariableFlags Flags = EConsoleVariableFlags::Default);
 
     virtual ~IConsoleVariable();
 
@@ -26,23 +47,30 @@ public:
     std::wstring_view GetName() const;
 
     std::wstring_view GetDescription() const;
+    EConsoleVariableFlags GetFlags() const { return Flags; }
+    virtual bool SetFromString(std::string_view Value) = 0;
 
     virtual bool GetBool() const = 0;
     virtual int GetInt() const = 0;
     virtual float GetFloat() const = 0;
     virtual uint32_t GetUInt() const = 0;
 
+protected:
+    bool CanSetValue() const;
+
 private:
     std::wstring Name;
     std::wstring Description;
+    EConsoleVariableFlags Flags;
 };
 
 class ConsoleModule final : public Module
 {
 public:
-    void Initialize() override
-    {
-    };
+    void Initialize() override;
+
+    static std::filesystem::path GetDefaultConfigPath();
+    ConsoleConfigResult LoadIni(const std::filesystem::path& Path);
 
     void Uninitialize() override
     {
@@ -51,5 +79,6 @@ public:
     bool RegisterConsoleVariable(IConsoleVariable* variable);
     bool UnregisterConsoleVariable(const IConsoleVariable* variable);
     bool TryFindConsoleVariable(std::wstring_view Name, IConsoleVariable*& OutVariable) const;
+    IConsoleVariable& FindConsoleVariable(std::wstring_view Name) const;
     std::vector<IConsoleVariable*> GetConsoleVariables() const;
 };

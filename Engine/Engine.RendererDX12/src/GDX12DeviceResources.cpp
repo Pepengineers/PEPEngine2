@@ -5,12 +5,12 @@
 
 #include "Common/GameTimer.h"
 
-static UINT _numFrameConstants = 3;
-
-static AutoConsoleVariableRef NumFrameConstantVariable(
+static AutoConsoleVariable<UINT> NumFrameConstantVariable(
     L"Render.NumFrames",
-    _numFrameConstants,
-    L"How many deferred frames was rendered");
+    3,
+    L"Number of buffered frames. Positive integer; set before GPU initialization.",
+    EConsoleVariableFlags::ReadOnly,
+    [](UINT value) { return value > 0 && value <= static_cast<UINT>((std::numeric_limits<int>::max)()); });
 
 void GDX12DeviceResources::Initialize(GDX12Device* device)
 {
@@ -74,8 +74,8 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
         if (material->DirtyFlag)
         {
             material->DirtyFlag = false;
-            material->_numPrimaryFramesDirty = _numFrameConstants;
-            material->_numSecondaryFramesDirty = _numFrameConstants;
+            material->_numPrimaryFramesDirty = NumFrameConstantVariable.GetValue();
+            material->_numSecondaryFramesDirty = NumFrameConstantVariable.GetValue();
         }
 
         auto& numFramesDirty = Device->Role == DEVICE_ROLE_PRIMARY

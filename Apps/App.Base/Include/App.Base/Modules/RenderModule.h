@@ -51,6 +51,8 @@ public:
 
     //Uploads Mesh geometry to GPU
     void SubmitMesh(const Mesh* mesh, MeshHandle handle);
+    void ReserveInstanceCapacity(UINT additionalInstances);
+    void ReserveTransformCapacity(UINT additionalTransforms);
 
     void SetActiveCamera(CameraComponent* camera);
     void SubmitLights(std::vector<GDX12LocalLightConstants> lights, const GDX12MainConstants& settings);
@@ -121,6 +123,7 @@ private:
     void ConfigureRenderPipeline();
     void SetupRenderPasses();
     void InitializeRenderPasses();
+    void EnsureInstanceCapacity(UINT capacity);
     
     void SubscribeToSceneManager();
     void UnsubscribeFromSceneManager();
@@ -161,4 +164,6 @@ private:
     // Defines which resources should be uploaded onto respective GPU
     uint32_t _primaryPipelineFlags;
     uint32_t _secondaryPipelineFlags;
+    UINT _instanceCount = 0;
+    UINT _transformCount = 0;
 };

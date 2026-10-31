@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(PEPRepoRoot)External\External.Libraries\inih;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>INI_STOP_ON_FIRST_ERROR=1;INI_ALLOW_MULTILINE=0;INI_CALL_HANDLER_ON_NEW_SECTION=1;INI_MAX_LINE=4096;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+</Project>

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <type_traits>
 #include <utility>
+#include <stdexcept>
 #include "Engine.Core/ECS/Component.h"
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
@@ -360,13 +361,20 @@ public:
     template<typename T, typename Func>
     void ForEach(Func&& func)
     {
+        ForEachRange<T>(0, GetPool<T>().Size(), std::forward<Func>(func));
+    }
+
+    template<typename T, typename Func>
+    void ForEachRange(size_t begin, size_t end, Func&& func)
+    {
         static_assert(IsOneOf<T, Components...>::value, "T is not registered in ECSStorage");
 
         ComponentPool<T>& pool = GetPool<T>();
         const std::vector<Entity>& entities = pool.GetEntities();
         std::vector<T>& data = pool.GetDense();
 
-        for (size_t i = 0; i < data.size(); ++i)
+        if (begin > end || end > data.size()) throw std::out_of_range("Invalid ECS query range");
+        for (size_t i = begin; i < end; ++i)
         {
             func(entities[i], data[i]);
         }
@@ -374,6 +382,12 @@ public:
 
     template<typename First, typename Second, typename... Rest, typename Func>
     void ForEach(Func&& func)
+    {
+        ForEachRange<First, Second, Rest...>(0, GetPool<First>().Size(), std::forward<Func>(func));
+    }
+
+    template<typename First, typename Second, typename... Rest, typename Func>
+    void ForEachRange(size_t begin, size_t end, Func&& func)
     {
         static_assert(IsOneOf<First, Components...>::value, "First is not registered in ECSStorage");
         static_assert(IsOneOf<Second, Components...>::value, "Second is not registered in ECSStorage");
@@ -383,7 +397,8 @@ public:
         const std::vector<Entity>& entities = firstPool.GetEntities();
         std::vector<First>& firstData = firstPool.GetDense();
 
-        for (size_t i = 0; i < firstData.size(); ++i)
+        if (begin > end || end > firstData.size()) throw std::out_of_range("Invalid ECS query range");
+        for (size_t i = begin; i < end; ++i)
         {
             Entity entity = entities[i];
 

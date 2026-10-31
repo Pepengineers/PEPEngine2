@@ -5,6 +5,7 @@
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/Types/TextureTypes.h"
 #include "App.Base/Modules/RenderModule.h"
+#include "App.Base/BistroProps.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -675,23 +676,39 @@ namespace
         
         renderModule.SubmitMesh(sceneMesh, sceneMeshHandle);
         
+        const auto materialSlots = BuildObjMaterialSlots(renderModule, assetManager, *sceneMesh,
+            sceneName, fallbackMaterial, defaultMaterialTextures, gpuTexturesByPath);
+        renderModule.ReserveInstanceCapacity(static_cast<UINT>(sceneMesh->GetSubMeshCount()));
         WorldECS& ecs = world.GetECS();
-        auto sceneEntity = ecs.CreateEntity();
-        sceneEntity.AddComponent<NameComponent>(sceneName);
-        sceneEntity.AddComponent<TransformComponent>(
-            Vector3(0.0f, 0.0f, 0.0f),
-            Vector3(0.0f, 0.0f, 0.0f),
-            Vector3(1.0f, 1.0f, 1.0f));
-        sceneEntity.AddComponent<StaticMeshRenderComponent>(
-            sceneMeshHandle,
-            BuildObjMaterialSlots(
-                renderModule,
-                assetManager,
-                *sceneMesh,
-                sceneName,
-                fallbackMaterial,
-                defaultMaterialTextures,
-                gpuTexturesByPath));
+        const auto createEntity = [&](const std::string& name, const std::vector<std::uint32_t>& indices)
+        {
+            auto entity = ecs.CreateEntity();
+            entity.AddComponent<NameComponent>(name);
+            entity.AddComponent<TransformComponent>();
+            entity.AddComponent<StaticMeshRenderComponent>(sceneMeshHandle, materialSlots, indices);
+            return entity;
+        };
+        const bool interior = ToLowerAscii(objPath.stem().string()) == "interior" &&
+            ToLowerAscii(objPath.parent_path().parent_path().filename().string()) == "amazon lumberyard bistro";
+        if (interior)
+        {
+            const auto partition = PartitionBistroProps(*sceneMesh);
+            renderModule.ReserveTransformCapacity(static_cast<UINT>(partition.Props.size()) + 2);
+            if (!partition.StaticSubMeshes.empty()) createEntity(sceneName, partition.StaticSubMeshes);
+            for (size_t index = 0; index < partition.Props.size(); ++index)
+            {
+                const auto& prop = partition.Props[index];
+                auto entity = createEntity(prop.Name, prop.SubMeshIndices);
+                auto& flight = entity.AddComponent<FlyingPropComponent>();
+                flight.Phase = static_cast<float>(index) * 2.39996323f;
+                flight.Speed = 0.4f + static_cast<float>(index % 13) * 0.025f;
+            }
+        }
+        else
+        {
+            renderModule.ReserveTransformCapacity(2);
+            createEntity(sceneName, {});
+        }
         
         outBounds = sceneMesh->GetBounds();
         return true;

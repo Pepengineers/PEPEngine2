@@ -74,11 +74,16 @@ class SplineFollowSystem final : public System
 {
 public:
     void Tick(World& world, float dt) override
+    { TickRange(world, dt, 0, GetWorkCount(world)); }
+
+protected:
+    size_t GetWorkCount(World& world) const override { return world.GetECS().GetPool<SplineFollowComponent>().Size(); }
+    void TickRange(World& world, float dt, size_t begin, size_t end) override
     {
         WorldECS& ecs = world.GetECS();
         
-        ecs.ForEach<TransformComponent, SplineFollowComponent>(
-            [&](Entity entity, TransformComponent& transform, SplineFollowComponent& follow)
+        ecs.ForEachRange<SplineFollowComponent, TransformComponent>(begin, end,
+            [&](Entity entity, SplineFollowComponent& follow, TransformComponent& transform)
             {
                 if (!follow.bPlaying) return;
                 

@@ -1,6 +1,8 @@
 // App.Benchmark.cpp
 
 #include <Engine.Core/BenchmarkEngine.h>
+#include "Engine.Core/ConsoleModule.h"
+#include <exception>
 #include <App.Base/App.h>
 
 #include <Engine.Core/Registries/MeshRegistry.h>
@@ -48,10 +50,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, in
 
         return TheApp.Run();
     }
+    catch (const ConsoleConfigError&)
+    {
+        return 1;
+    }
     catch (DxException& e)
     {
         MessageBox(nullptr, e.ToString().c_str(), L"App Init Failed", MB_OK);
         return 0;
+    }
+    catch (const std::exception& error)
+    {
+        MessageBoxA(nullptr, error.what(), "App Init Failed", MB_OK | MB_ICONERROR);
+        return 1;
     }
 }
 

@@ -1,17 +1,12 @@
 #include "App.Base/Modules/SceneManagerModule.h"
 
-#include "App.Base/Systems/CircleMovementSystem.h"
-#include "App.Base/Systems/MovementSystem.h"
-#include "App.Base/Systems/GPUDataUpdateSystem.h"
-#include "App.Base/Systems/LightUpdateSystem.h"
 #include "App.Base/BistroLightPlacements.h"
-#include "App.Base/Systems/LookAtTargetSystem.h"
-#include "App.Base/Systems/SplineFollowSystem.h"
-#include "Engine.Core/System.h"
+#include "App.Base/Modules/RenderModule.h"
+#include "Engine.Core/BenchmarkEngine.h"
 #include <stdexcept>
 
-SceneManagerModule::SceneManagerModule(GameTimer* timer, std::filesystem::path scenePath) :
-    _timer(timer), _scenePath(std::move(scenePath))
+SceneManagerModule::SceneManagerModule(std::filesystem::path scenePath) :
+    _scenePath(std::move(scenePath))
 {
     
 }
@@ -54,12 +49,10 @@ void SceneManagerModule::Initialize()
         throw std::runtime_error("Loaded scene has no world: " + scenePath.string());
     }
 
-    AddSystem<MovementSystem>(world, 0);
-    AddSystem<CircleMovementSystem>(world, 1);
-    AddSystem<SplineFollowSystem>(world, 2);
-    AddSystem<LookAtTargetSystem>(world, 3);
     if (scenePath.wstring().find(L"Amazon Lumberyard Bistro") != std::wstring::npos)
     {
+        BenchmarkEngine::GetLocator().GetModule<RenderModule>()->ReserveTransformCapacity(
+            static_cast<UINT>(sizeof(BistroLightPlacements) / sizeof(BistroLightPlacements[0])) + 1);
         const auto create = [world](const char* name, Vector3 position, Vector3 direction,
             LightType type, float range, float intensity)
         {
@@ -83,14 +76,10 @@ void SceneManagerModule::Initialize()
             create(fixture.Name, fixture.Position, fixture.Direction,
                 fixture.Kind == BistroFixtureKind::Point ? LightType::Point : LightType::Spot, fixture.Range, fixture.Intensity);
     }
-    AddSystem<LightUpdateSystem>(world, 100);
-    AddSystem<GPUDataUpdateSystem>(world, 101);
 }
 
 void SceneManagerModule::Uninitialize()
 {
-    _systemVector.clear();
-
     for (auto& world : _worldVector)
     {
         if (world)
@@ -127,13 +116,6 @@ bool SceneManagerModule::UnloadWorld(size_t index)
     if (index >= _worldVector.size()) { return false; }
     
     World* worldToRemove = _worldVector[index].get();
-    _systemVector.erase(std::remove_if(_systemVector.begin(), _systemVector.end(),
-            [worldToRemove](const SystemEntry& entry)
-            {
-                return entry.world == worldToRemove;
-            }),
-        _systemVector.end());
-
     OnWorldDestroyed.Broadcast(*worldToRemove);
 
     _worldVector.erase(_worldVector.begin() + index);
@@ -167,7 +149,6 @@ size_t SceneManagerModule::GetWorldCount() const
 
 void SceneManagerModule::OnUpdate()
 {
-    Tick(_timer->DeltaTime());
 }
 
 void SceneManagerModule::OnRender()
@@ -176,23 +157,10 @@ void SceneManagerModule::OnRender()
 
 bool SceneManagerModule::ShouldTick()
 {
-    return true;
+    return false;
 }
 
 bool SceneManagerModule::ShouldRender()
 {
     return false;
-}
-
-void SceneManagerModule::Tick(float dt)
-{
-    for (auto& entry : _systemVector)
-    {
-        if (!entry.world || entry.world->IsPaused())
-        {
-            continue;
-        }
-
-        entry.system->Tick(*entry.world, dt);
-    }
 }

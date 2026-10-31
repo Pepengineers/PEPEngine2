@@ -13,6 +13,13 @@
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "App.Base/Window.h"
+#include "App.Base/Systems/MovementSystem.h"
+#include "App.Base/Systems/CircleMovementSystem.h"
+#include "App.Base/Systems/SplineFollowSystem.h"
+#include "App.Base/Systems/LookAtTargetSystem.h"
+#include "App.Base/Systems/LightUpdateSystem.h"
+#include "App.Base/Systems/GPUDataUpdateSystem.h"
+#include "App.Base/Systems/IndirectCommandBuildSystem.h"
 
 #undef min
 #undef max
@@ -37,6 +44,7 @@ public:
     LRESULT MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
     static App* GetInstance();
+    JobSystem& GetJobs() { return _jobs; }
 protected:
     HINSTANCE AppHandler = nullptr;
 
@@ -79,6 +87,15 @@ protected:
     bool InitMainWindow();
     bool AddModules() override;
     void Update(const GameTimer& gameTimer) override;
+
+    JobSystem _jobs;
+    MovementSystem _movement;
+    CircleMovementSystem _circle;
+    SplineFollowSystem _spline;
+    LookAtTargetSystem _lookAt;
+    LightUpdateSystem _lights;
+    GPUDataUpdateSystem _gpuData;
+    IndirectCommandBuildSystem _indirect;
 
 private:
     std::unique_ptr<Window> _window;

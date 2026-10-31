@@ -1,0 +1,84 @@
+# CVar и стартовая конфигурация
+
+`BenchmarkEngine` применяет конфигурацию в своём конструкторе, до создания членов производного приложения (включая Jobs), окна и модулей. Все статические CVar к этому моменту зарегистрированы. Настройки, объявленные позднее, не участвуют в загрузке INI.
+
+Приложение ищет `Config/Engine.ini` относительно своего exe, независимо от текущей рабочей папки. При первой сборке приложения MSBuild копирует туда [шаблон](../Config/Engine.ini); уже существующий файл не перезаписывается. Если файла нет, остаются значения из C++.
+
+```ini
+[ConsoleVariables]
+Render.NumFrames = 3
+```
+
+Любая ошибка синтаксиса, неизвестная секция/CVar, недопустимое значение или ошибка чтения прекращает загрузку. Путь, номер строки и причина дописываются в `Logs/Engine.log` рядом с exe, после чего выбрасывается `ConsoleConfigError`. Все три приложения завершаются с ненулевым кодом без создания окна или диалога. Если лог невозможно записать, запуск всё равно прерывается, а сообщение также выводится в stderr/отладчик.
+
+INI разбирает [inih r62](https://github.com/benhoyt/inih/tree/r62), подключённый как submodule. После клонирования проекта выполните `git submodule update --init --recursive`. Поддерживаются UTF-8 с BOM или без него, секция `[ConsoleVariables]`, комментарии `;` и `#` в начале строки и `;` после значения. Многострочные значения отключены; максимальная длина строки — 4093 байта без перевода строки. Повторная запись имени переопределяет предыдущую, регистр имени CVar не учитывается.
+
+## Флаги и запись
+
+| Флаг | Во время стартовой настройки | После её завершения |
+| --- | --- | --- |
+| `Default` | Чтение и запись | Чтение и запись |
+| `ReadOnly` | Чтение и запись | Только чтение |
+
+`ReadOnly` не означает константу из C++: INI может переопределить начальное значение. Фаза записи закрывается после успешной загрузки конфигурации, до создания ресурсов приложения. Повторный `Initialize()` не открывает её снова; повторная загрузка INI после запуска запрещена.
+
+```cpp
+static AutoConsoleVariable<float> Exposure(
+    L"Render.Exposure", 1.0f, L"Positive exposure multiplier",
+    EConsoleVariableFlags::Default,
+    [](float value) { return value > 0; });
+
+const bool changed = Exposure.SetValue(1.25f);
+const bool parsed = console.FindConsoleVariable(L"Render.Exposure").SetFromString("1.5");
+```
+
+`SetValue()` и `SetFromString()` возвращают `false` при отказе и сохраняют старое значение. Поддерживаются арифметические типы и enum (числовое значение underlying type); строки пока не поддерживаются. Целые числа — десятичные, bool — `true`, `false`, `1`, `0`. Переполнение, лишние символы, NaN и бесконечность отклоняются. Допустимые значения enum ограничивает переданный валидатор.
+
+`Render.NumFrames` имеет флаг `ReadOnly` и принимает положительные значения, представимые как `int`, поскольку часть потребителей использует `GetInt()`. После создания GPU-ресурсов менять число кадров нельзя.
+
+Дубликат зарегистрированного имени и пустое имя отклоняются исключением и в Debug, и в Release. `TryFindConsoleVariable()` возвращает `false`/`nullptr` для отсутствующей переменной; `FindConsoleVariable()` выбрасывает исключение для обязательной настройки.
+
+## Потоки и время жизни
+
+Чтение и запись значения через CVar сериализованы; `GetValue()` возвращает копию. Регистрацию, уничтожение и загрузку INI выполняйте без параллельных читателей: найденные указатели не продлевают жизнь объекта. Для `AutoConsoleVariableRef` внешнее значение должно жить дольше CVar; прямой доступ к нему обходит флаги, проверку и блокировку. Для новых настроек предпочтителен владеющий `AutoConsoleVariable`.
+
+## Проверка
+
+### Ambient occlusion
+
+AO работает после G-buffer и применяется к непрямому освещению; direct lighting,
+emissive и baked color сохраняются. Прозрачный forward-путь использует нейтральный AO.
+
+| CVar | Значение по умолчанию | Допустимые значения |
+| --- | --- | --- |
+| `Render.AO.Enabled` | `true` | bool |
+| `Render.AO.Quality` | `2` | 0 Off, 1 Low, 2 Mid, 3 High |
+| `Render.AO.Implementation` | `2` | 0 SSAO, 1 HBAO, 2 XeGTAO |
+| `Render.AO.Radius` | `100` | (0, 100000], мировые единицы; в Bistro сантиметры |
+| `Render.AO.Intensity` | `1` | [0, 8], 0 даёт нейтральную видимость |
+| `Render.AO.Bias` | `0.02` | [0, 1], SSAO depth bias / HBAO horizon bias |
+| `Render.AO.Samples` | `-1` | -1 из пресета, иначе 4..64 |
+| `Render.AO.DenoisePasses` | `-1` | -1 из пресета, иначе 0..4 |
+
+Все имеют флаг Default и читаются на кадре. Low/Mid/High задают бюджеты 8/16/32;
+алгоритмы распределяют их между направлениями/шагами по-разному. Denoise по умолчанию
+1/1/2 прохода (для классических AO один проход состоит из двух осей). Ручные значения
+не перезаписываются сменой качества. Off выводит ровно 1, исключая оставшийся AO
+прошлого кадра. Точность XeGTAO включает исходную аппроксимацию: наклонная относительно
+луча незатенённая плоскость может слегка затемняться у углов экрана.
+
+GPU-проверка: `Apps/App/AOGpuSmoke.vcxproj` (Release/x64). Проверяет все алгоритмы,
+нечётный размер 65x49, три кадровых слота, плоскость, ступень глубины, denoise 0/1/4,
+Off, диапазон результатов и DX12 debug layer.
+
+### Общие CVar
+
+Из Developer PowerShell Visual Studio, в корне репозитория:
+
+```powershell
+New-Item -ItemType Directory -Force Build/CVarTests/Manual | Out-Null
+cl /nologo /std:c++17 /EHsc /W4 /Z7 /IEngine/Engine.Core/Include /IExternal/External.Libraries/inih /DINI_STOP_ON_FIRST_ERROR=1 /DINI_ALLOW_MULTILINE=0 /DINI_CALL_HANDLER_ON_NEW_SECTION=1 /DINI_MAX_LINE=4096 Engine/Engine.Core/tests/ConsoleVariableTests.cpp Engine/Engine.Core/src/ConsoleModule.cpp Engine/Engine.Core/src/BenchmarkEngine.cpp Engine/Engine.Core/src/GameTimer.cpp External/External.Libraries/inih/ini.c /FoBuild/CVarTests/Manual/ /FeBuild/CVarTests/Manual/ConsoleVariableTests.exe /link kernel32.lib
+Build/CVarTests/Manual/ConsoleVariableTests.exe
+```
+
+Для проверки Release добавьте `/DNDEBUG /O2`. Тест намеренно вызывает ошибку запуска и проверяет её запись в лог. Он использует свой `Config/Engine.ini` рядом с тестовым exe и отказывается перезаписывать существующий файл.

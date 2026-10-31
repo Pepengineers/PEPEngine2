@@ -9,11 +9,16 @@ class CircleMovementSystem : public System
 {
 public:
     void Tick(World& world, float dt) override
+    { TickRange(world, dt, 0, GetWorkCount(world)); }
+
+protected:
+    size_t GetWorkCount(World& world) const override { return world.GetECS().GetPool<CircleMovementComponent>().Size(); }
+    void TickRange(World& world, float dt, size_t begin, size_t end) override
     {
         WorldECS& ecs = world.GetECS();
 
-        ecs.ForEach<TransformComponent, CircleMovementComponent>(
-            [dt](Entity entity, TransformComponent& transform, CircleMovementComponent& circleComponent)
+        ecs.ForEachRange<CircleMovementComponent, TransformComponent>(begin, end,
+            [dt](Entity entity, CircleMovementComponent& circleComponent, TransformComponent& transform)
             {
                 if (!circleComponent.bInitialized)
                 {

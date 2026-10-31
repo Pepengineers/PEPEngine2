@@ -15,12 +15,15 @@ BenchmarkEngine* BenchmarkEngine::GetInstance()
 
 BenchmarkEngine::BenchmarkEngine()
 {
+    auto console = std::make_shared<ConsoleModule>();
+    console->Initialize();
+    Locator.RegisterModule(std::move(console));
     Instance = this;
 }
 
 bool BenchmarkEngine::Initialize()
 {
-    AddModules();
+    if (!AddModules()) return false;
     for (auto& pair : Locator.registeredModules)
     {
         pair.second->Initialize();
@@ -47,6 +50,5 @@ void BenchmarkEngine::Render(const GameTimer& gameTimer)
 
 bool BenchmarkEngine::AddModules()
 {
-    Locator.RegisterModule(std::make_shared<ConsoleModule>());
     return true;
 }

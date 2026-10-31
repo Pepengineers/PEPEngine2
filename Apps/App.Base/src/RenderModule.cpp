@@ -2,6 +2,8 @@
 
 #include "App.Base/Window.h"
 #include <cassert>
+#include <stdexcept>
+#include <climits>
 #include "App.Base/App.h"
 
 #include "App.Base/Modules/SceneManagerModule.h"
@@ -552,30 +554,22 @@ bool RenderModule::SecondaryPipelineHasFlag(uint32_t flag)
     return _secondaryPipelineFlags & flag;
 }
 
-void RenderModule::OnTransformComponentCreated(World& world, Entity entity, TransformComponent& component)
+void RenderModule::ReserveTransformCapacity(UINT additionalTransforms)
 {
-    TransformCompGPUData gpuData;
-    _transformGPUData[entity] = gpuData;
-
+    if (additionalTransforms > UINT_MAX - _transformCount) throw std::overflow_error("Too many transforms");
+    const UINT capacity = _transformCount + additionalTransforms;
     if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
-    {
-        _transformGPUData[entity].CBufferIndex = _primaryResources.FrameConstants[0]->TransformCache->GetElementCount();
-        for (auto& constants : _primaryResources.FrameConstants)
-        {
-            auto& CBuffer = constants->TransformCache;
-            CBuffer->Resize(CBuffer->GetElementCount() + 1);
-        }
-    }
-
+        for (auto& frame : _primaryResources.FrameConstants) frame->TransformCache->Resize(capacity);
     if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
-    {
-        _transformGPUData[entity].CBufferIndex = _secondaryResources.FrameConstants[0]->TransformCache->GetElementCount();
-        for (auto& constants : _secondaryResources.FrameConstants)
-        {
-            auto& CBuffer = constants->TransformCache;
-            CBuffer->Resize(CBuffer->GetElementCount() + 1);
-        }
-    }
+        for (auto& frame : _secondaryResources.FrameConstants) frame->TransformCache->Resize(capacity);
+}
+
+void RenderModule::OnTransformComponentCreated(World&, Entity entity, TransformComponent&)
+{
+    ReserveTransformCapacity(1);
+    TransformCompGPUData data;
+    data.CBufferIndex = _transformCount++;
+    _transformGPUData[entity] = data;
 }
 
 void RenderModule::OnTransformComponentDestroyed(World& world, Entity entity, TransformComponent& component)
@@ -647,50 +641,45 @@ void RenderModule::OnCameraComponentUpdated(World& world, Entity entity, CameraC
 {
 }
 
-void RenderModule::OnRenderComponentCreated(World& world, Entity entity, StaticMeshRenderComponent& component)
+void RenderModule::ReserveInstanceCapacity(UINT additionalInstances)
 {
-    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
-    {
-        auto& MeshGPUData = _primaryResources.GeometryBuffer->_meshCache[component.MeshHandler.GetValue()];
-        const UINT firstInstance = _primaryResources.FrameConstants[0]->InstanceCache->GetElementCount();
-        const UINT instanceCount = static_cast<UINT>(MeshGPUData->SubMeshes.size());
-        _primaryResources.IndirectCommandsCache->Resize(firstInstance + instanceCount);
-        for (auto& constants : _primaryResources.FrameConstants)
-        {
-            constants->InstanceCache->Resize(firstInstance + instanceCount);
-            for (auto& buffers : constants->CameraVisibilityCommands)
-            {
-                buffers.VisibleOpaqueCommandsCache->Resize(firstInstance + instanceCount);
-                buffers.VisibleTransparentCommandsCache->Resize(firstInstance + instanceCount);
-            }
-        }
-        for (UINT i = 0; i < instanceCount; ++i)
-        {
-            component._CBufferIndices.push_back(firstInstance + i);
-        }
-        assert(component._CBufferIndices.size() == instanceCount);
-    }
+    if (additionalInstances > UINT_MAX - _instanceCount) throw std::overflow_error("Too many render instances");
+    EnsureInstanceCapacity(_instanceCount + additionalInstances);
+}
 
-    if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
+void RenderModule::EnsureInstanceCapacity(UINT capacity)
+{
+    const auto grow = [capacity](GDX12DeviceResources& resources)
     {
-        auto& MeshGPUData = _secondaryResources.GeometryBuffer->_meshCache[component.MeshHandler.GetValue()];
-        const UINT firstInstance = _secondaryResources.FrameConstants[0]->InstanceCache->GetElementCount();
-        const UINT instanceCount = static_cast<UINT>(MeshGPUData->SubMeshes.size());
-        _secondaryResources.IndirectCommandsCache->Resize(firstInstance + instanceCount);
-        for (auto& constants : _secondaryResources.FrameConstants)
+        resources.IndirectCommandsCache->Resize(capacity);
+        for (auto& frame : resources.FrameConstants)
         {
-            constants->InstanceCache->Resize(firstInstance + instanceCount);
-            for (auto& buffers : constants->CameraVisibilityCommands)
+            frame->InstanceCache->Resize(capacity);
+            for (auto& camera : frame->CameraVisibilityCommands)
             {
-                buffers.VisibleOpaqueCommandsCache->Resize(firstInstance + instanceCount);
-                buffers.VisibleTransparentCommandsCache->Resize(firstInstance + instanceCount);
+                camera.VisibleOpaqueCommandsCache->Resize(capacity);
+                camera.VisibleTransparentCommandsCache->Resize(capacity);
             }
         }
-        for (UINT i = 0; i < instanceCount; ++i)
-        {
-            component._CBufferIndices.push_back(firstInstance + i);
-        }
-    }
+    };
+    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES)) grow(_primaryResources);
+    if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES)) grow(_secondaryResources);
+}
+
+void RenderModule::OnRenderComponentCreated(World&, Entity, StaticMeshRenderComponent& component)
+{
+    if (!PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES) &&
+        !SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES)) return;
+    const GPUMesh* mesh = PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES)
+        ? GetPrimaryGPUMesh(component.MeshHandler) : GetSecondaryGPUMesh(component.MeshHandler);
+    const size_t count = component.GetSubMeshCount(mesh->SubMeshes.size());
+    if (count > UINT_MAX - _instanceCount) throw std::overflow_error("Too many render instances");
+    for (size_t i = 0; i < count; ++i)
+        if (component.GetSubMeshIndex(i) >= mesh->SubMeshes.size()) throw std::out_of_range("Invalid render submesh index");
+    EnsureInstanceCapacity(_instanceCount + static_cast<UINT>(count));
+    component._CBufferIndices.reserve(count);
+    for (UINT i = 0; i < count; ++i) component._CBufferIndices.push_back(_instanceCount + i);
+    _instanceCount += static_cast<UINT>(count);
 }
 
 void RenderModule::OnRenderComponentDestroyed(World& world, Entity entity, StaticMeshRenderComponent& component)

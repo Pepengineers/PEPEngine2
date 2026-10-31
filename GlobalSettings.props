@@ -24,4 +24,9 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup />
+  <Target Name="CopyEngineConfiguration" AfterTargets="Build" Condition="'$(ConfigurationType)' == 'Application'">
+    <MakeDir Directories="$(TargetDir)Config" />
+    <Copy SourceFiles="$(PEPRepoRoot)Config\Engine.ini" DestinationFiles="$(TargetDir)Config\Engine.ini"
+          Condition="!Exists('$(TargetDir)Config\Engine.ini')" />
+  </Target>
 </Project>

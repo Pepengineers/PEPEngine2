@@ -1,81 +1,124 @@
-﻿#pragma once
+#pragma once
 #include "Engine.Core/ConsoleModule.h"
 
+#include <charconv>
+#include <cmath>
+#include <limits>
+#include <stdexcept>
+
+namespace ConsoleVariableDetail
+{
+    template <class T>
+    bool ParseValue(std::string_view text, T& value)
+    {
+        if (text.empty()) return false;
+        if constexpr (std::is_enum_v<T>)
+        {
+            std::underlying_type_t<T> parsed{};
+            if (!ParseValue(text, parsed)) return false;
+            value = static_cast<T>(parsed);
+            return true;
+        }
+        else if constexpr (std::is_same_v<T, bool>)
+        {
+            if (text == "true" || text == "1") value = true;
+            else if (text == "false" || text == "0") value = false;
+            else return false;
+            return true;
+        }
+        else
+        {
+            using Parsed = std::conditional_t<std::is_integral_v<T>,
+                std::conditional_t<std::is_signed_v<T>, long long, unsigned long long>, T>;
+            Parsed parsed{};
+            const auto result = std::from_chars(text.data(), text.data() + text.size(), parsed);
+            if (result.ec != std::errc{} || result.ptr != text.data() + text.size()) return false;
+            if constexpr (std::is_integral_v<T>)
+            {
+                if (parsed < (std::numeric_limits<T>::lowest)() || parsed > (std::numeric_limits<T>::max)())
+                    return false;
+            }
+            else if (!std::isfinite(parsed)) return false;
+            value = static_cast<T>(parsed);
+            return true;
+        }
+    }
+}
 
 template <class TValue>
 class ConsoleVariableBase : public IConsoleVariable
 {
     static_assert(std::is_arithmetic_v<TValue> || std::is_enum_v<TValue>,
-                  "Console variable supports only arithmetic and enum value types.");
-    static_assert(sizeof(TValue) != 0, "Not supported");
-    
+        "Console variable supports only arithmetic and enum value types.");
+
 public:
-    ConsoleVariableBase(const std::wstring_view& Name, const std::wstring_view& Description)
-        : IConsoleVariable(Name, Description)
+    using Validator = bool (*)(TValue);
+
+    ConsoleVariableBase(std::wstring_view Name, std::wstring_view Description,
+        EConsoleVariableFlags Flags, Validator Validate)
+        : IConsoleVariable(Name, Description, Flags), Validate(Validate) {}
+
+    TValue GetValue() const
     {
+        std::scoped_lock lock(ValueMutex);
+        return GetTypedValue();
     }
 
-    bool GetBool() const override
+    bool SetValue(TValue value)
     {
-        const TValue value = GetTypedValue();
-        return static_cast<bool>(value);
+        std::scoped_lock lock(ValueMutex);
+        if (!CanSetValue() || !IsValidValue(value)) return false;
+        SetTypedValue(value);
+        return true;
     }
 
-    int GetInt() const override
+    bool SetFromString(std::string_view text) override
     {
-        const TValue value = GetTypedValue();
-        return static_cast<int>(value);
+        TValue value{};
+        return ConsoleVariableDetail::ParseValue(text, value) && SetValue(value);
     }
 
-    float GetFloat() const override
-    {
-        const TValue value = GetTypedValue();
-        return static_cast<float>(value);
-    }
-
-    uint32_t GetUInt() const override
-    {
-        const TValue value = GetTypedValue();
-        return static_cast<uint32_t>(value);
-    }
+    bool GetBool() const override { return static_cast<bool>(GetValue()); }
+    int GetInt() const override { return static_cast<int>(GetValue()); }
+    float GetFloat() const override { return static_cast<float>(GetValue()); }
+    uint32_t GetUInt() const override { return static_cast<uint32_t>(GetValue()); }
 
 protected:
+    bool IsValidValue(TValue value) const
+    {
+        if constexpr (std::is_floating_point_v<TValue>)
+            if (!std::isfinite(value)) return false;
+        return !Validate || Validate(value);
+    }
+
     virtual TValue GetTypedValue() const = 0;
+    virtual void SetTypedValue(TValue Value) = 0;
+
+private:
+    Validator Validate;
+    mutable std::mutex ValueMutex;
 };
 
-
-template <typename TValue>
+template <class TValue>
 class AutoConsoleVariable final : public ConsoleVariableBase<TValue>
 {
     using Super = ConsoleVariableBase<TValue>;
 
 public:
-    AutoConsoleVariable(const std::wstring_view Name, const TValue DefaultValue,
-                        const std::wstring_view Description = {})
-        : Super(Name, Description), Value(DefaultValue)
+    AutoConsoleVariable(std::wstring_view Name, TValue DefaultValue, std::wstring_view Description = {},
+        EConsoleVariableFlags Flags = EConsoleVariableFlags::Default, typename Super::Validator Validate = nullptr)
+        : Super(Name, Description, Flags, Validate), Value(DefaultValue)
     {
-    }
-
-    const TValue& GetValue() const
-    {
-        return Value;
-    }
-
-    void SetValue(const TValue InValue)
-    {
-        Value = InValue;
+        if (!this->IsValidValue(Value)) throw std::invalid_argument("Invalid default CVar value");
     }
 
 protected:
-    TValue GetTypedValue() const override
-    {
-        return Value;
-    }
+    TValue GetTypedValue() const override { return Value; }
+    void SetTypedValue(TValue value) override { Value = value; }
 
 private:
     TValue Value;
 };
-
 
 template <class TValue>
 class AutoConsoleVariableRef final : public ConsoleVariableBase<TValue>
@@ -83,28 +126,17 @@ class AutoConsoleVariableRef final : public ConsoleVariableBase<TValue>
     using Super = ConsoleVariableBase<TValue>;
 
 public:
-    AutoConsoleVariableRef(const std::wstring_view Name, TValue& ValueRef, const std::wstring_view Description = {})
-        : Super(Name, Description), RefValue(ValueRef)
+    AutoConsoleVariableRef(std::wstring_view Name, TValue& ValueRef, std::wstring_view Description = {},
+        EConsoleVariableFlags Flags = EConsoleVariableFlags::Default, typename Super::Validator Validate = nullptr)
+        : Super(Name, Description, Flags, Validate), RefValue(ValueRef)
     {
-    }
-
-    const TValue& GetValue() const
-    {
-        return RefValue;
-    }
-
-    void SetValue(const TValue Value) const
-    {
-        RefValue = Value;
+        if (!this->IsValidValue(RefValue)) throw std::invalid_argument("Invalid default CVar value");
     }
 
 protected:
-    TValue GetTypedValue() const override
-    {
-        return RefValue;
-    }
+    TValue GetTypedValue() const override { return RefValue; }
+    void SetTypedValue(TValue value) override { RefValue = value; }
 
 private:
     TValue& RefValue;
 };
-

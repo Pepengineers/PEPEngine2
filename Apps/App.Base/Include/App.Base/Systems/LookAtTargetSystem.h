@@ -26,10 +26,15 @@ class LookAtTargetSystem final : public System
 {
 public:
     void Tick(World& world, float dt) override
+    { TickRange(world, dt, 0, GetWorkCount(world)); }
+
+protected:
+    size_t GetWorkCount(World& world) const override { return world.GetECS().GetPool<LookAtTargetComponent>().Size(); }
+    void TickRange(World& world, float dt, size_t begin, size_t end) override
     {
         WorldECS& ecs = world.GetECS();
 
-        ecs.ForEach<LookAtTargetComponent, TransformComponent>(
+        ecs.ForEachRange<LookAtTargetComponent, TransformComponent>(begin, end,
             [&](Entity entity, LookAtTargetComponent& lookAt,  TransformComponent& transform)
             {
                 if (!lookAt.bEnabled || lookAt.TargetEntity == InvalidEntity) { return; }

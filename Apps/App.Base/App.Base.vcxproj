@@ -26,6 +26,8 @@
     <ClInclude Include="Include\App.Base\ECS\Components\LightComponent.h" />
     <ClInclude Include="Include\App.Base\Systems\LightUpdateSystem.h" />
     <ClInclude Include="Include\App.Base\BistroLightPlacements.h" />
+    <ClInclude Include="Include\App.Base\BistroProps.h" />
+    <ClInclude Include="Include\App.Base\ECS\Components\FlyingPropComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\NameComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\SplineCurveComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\SplineFollowComponent.h" />
@@ -39,6 +41,8 @@
     <ClInclude Include="Include\App.Base\Modules\SceneManagerModule.h" />
     <ClInclude Include="Include\App.Base\SceneTraversal.h" />
     <ClInclude Include="Include\App.Base\Systems\CircleMovementSystem.h" />
+    <ClInclude Include="Include\App.Base\Systems\FlyingPropSystem.h" />
+    <ClInclude Include="Include\App.Base\Systems\IndirectCommandBuildSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\GPUDataUpdateSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\LookAtTargetSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\MovementSystem.h" />

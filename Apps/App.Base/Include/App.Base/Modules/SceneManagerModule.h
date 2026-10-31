@@ -20,17 +20,10 @@ class System;
 class SceneManagerModule final : public Module
 {
 public:
-    struct SystemEntry
-    {
-        uint8_t priority = 0;
-        World* world = nullptr;
-        std::unique_ptr<System> system;
-    };
-    
     Event<World&> OnWorldCreated;
     Event<World&> OnWorldDestroyed;
 
-    SceneManagerModule(GameTimer* timer, std::filesystem::path scenePath = {});
+    explicit SceneManagerModule(std::filesystem::path scenePath = {});
     ~SceneManagerModule() override;
 
     void Initialize() override;
@@ -43,21 +36,6 @@ public:
     
     size_t GetWorldCount() const;
 
-    template<typename T, typename... Args>
-    void AddSystem(World* world, uint8_t priority, Args&&... args) {
-        SystemEntry entry;
-        entry.priority = priority;
-        entry.world = world;
-        entry.system = std::make_unique<T>(std::forward<Args>(args)...);
-
-        _systemVector.push_back(std::move(entry));
-
-        std::stable_sort(_systemVector.begin(), _systemVector.end(),
-            [](const SystemEntry& a, const SystemEntry& b) {
-                return a.priority < b.priority;
-            });
-    }
-
 protected:
     void OnUpdate() override;
     void OnRender() override;
@@ -66,10 +44,7 @@ protected:
     bool ShouldRender() override;
 
 private:
-    void Tick(float dt);
 
-    GameTimer* _timer;
     std::filesystem::path _scenePath;
     std::vector<std::unique_ptr<World>> _worldVector;
-    std::vector<SystemEntry> _systemVector;
 };

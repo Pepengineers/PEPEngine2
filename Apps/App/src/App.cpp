@@ -1,4 +1,6 @@
 #include <App.Base/App.h>
+#include "Engine.Core/ConsoleModule.h"
+#include "App.Base/Systems/FlyingPropSystem.h"
 #include <cmath>
 #include <cstdlib>
 #include <stdexcept>
@@ -9,6 +11,15 @@ namespace
     {
     public:
         explicit BistroApp(const HINSTANCE instance) : App(instance) {}
+
+        bool Initialize() override
+        {
+            if (!App::Initialize()) return false;
+            auto& ecs = Locator.GetModule<SceneManagerModule>()->GetWorld()->GetECS();
+            // Moving benchmark casters require fresh maps even when the fixtures are stationary.
+            ecs.ForEach<LightComponent>([](Entity, LightComponent& light) { light.ShadowUpdate = ShadowUpdateMode::EveryFrame; });
+            return true;
+        }
 
     protected:
         bool AddModules() override
@@ -23,8 +34,34 @@ namespace
             }
 
             Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer));
-            Locator.RegisterModule(std::make_shared<SceneManagerModule>(&Timer, scenePath));
+            Locator.RegisterModule(std::make_shared<SceneManagerModule>(scenePath));
             return BenchmarkEngine::AddModules();
+        }
+
+        void Update(const GameTimer& timer) override
+        {
+            OnKeyboardInput(timer);
+            Locator.GetModule<RenderModule>()->Update();
+            auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+            if (world.IsPaused()) return;
+            const float dt = timer.DeltaTime();
+            JobHandle work;
+            try
+            {
+                work = _movement.Schedule(_jobs, world, dt);
+                work = _circle.Schedule(_jobs, world, dt, 64, work);
+                work = _spline.Schedule(_jobs, world, dt, 64, work);
+                work = _flyingProps.Schedule(_jobs, world, dt, 32, work);
+                work = _lookAt.Schedule(_jobs, world, dt, 64, work);
+                work = _lights.Schedule(_jobs, world, dt, 64, work);
+                work = _gpuData.Schedule(_jobs, world, dt, 64, work);
+                work.Complete();
+            }
+            catch (...)
+            {
+                try { work.Complete(); } catch (...) {}
+                throw;
+            }
         }
 
         void OnMouseDown(WPARAM, int x, int y) override
@@ -79,6 +116,7 @@ namespace
         }
 
     private:
+        FlyingPropSystem _flyingProps;
         POINT _lastMousePos = {};
         float _cameraSpeed = 100.0f;
     };
@@ -94,6 +132,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
         BistroApp app(instance);
         if (!app.Initialize()) return EXIT_FAILURE;
         return app.Run();
+    }
+    catch (const ConsoleConfigError&)
+    {
+        return EXIT_FAILURE;
     }
     catch (const DxException& error)
     {

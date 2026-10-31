@@ -21,6 +21,12 @@
     <ClCompile Include="src\GameTimer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\Jobs\JobSystem.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\External\External.Libraries\enkiTS\TaskScheduler.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\AssetManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -57,6 +63,9 @@
     <ClCompile Include="src\ConsoleModule.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\External\External.Libraries\inih\ini.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\BenchmarkEngine.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -90,6 +99,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.Core\System.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\Jobs\JobSystem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.Core\Registries\MeshRegistry.h">

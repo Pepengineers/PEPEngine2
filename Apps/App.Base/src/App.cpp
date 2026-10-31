@@ -149,6 +149,9 @@ bool App::Initialize()
     Locator.GetModule<ConsoleModule>()->Initialize();
     Locator.GetModule<RenderModule>()->Initialize();
     Locator.GetModule<SceneManagerModule>()->Initialize();
+    auto scenes = Locator.GetModule<SceneManagerModule>();
+    for (size_t i = 0; i < scenes->GetWorldCount(); ++i)
+        _indirect.Schedule(_jobs, *scenes->GetWorld(i), 0).Complete();
     return true;
 }
 
@@ -319,15 +322,35 @@ bool App::InitMainWindow()
 bool App::AddModules()
 {
     Locator.RegisterModule(std::make_shared<RenderModule>(_window.get(), &Timer));
-    Locator.RegisterModule(std::make_shared<SceneManagerModule>(&Timer));
+    Locator.RegisterModule(std::make_shared<SceneManagerModule>());
     return BenchmarkEngine::AddModules();
 }
 
 void App::Update(const GameTimer& gameTimer)
 {
     OnKeyboardInput(gameTimer);
-    //explicitly specifying update order since it is not the same
-    // as the initialization order (that is used by the locator)
     Locator.GetModule<RenderModule>()->Update();
-    Locator.GetModule<SceneManagerModule>()->Update();
+    auto scenes = Locator.GetModule<SceneManagerModule>();
+    for (size_t i = 0; i < scenes->GetWorldCount(); ++i)
+    {
+        auto& world = *scenes->GetWorld(i);
+        if (world.IsPaused()) continue;
+        JobHandle work;
+        try
+        {
+            const float dt = gameTimer.DeltaTime();
+            work = _movement.Schedule(_jobs, world, dt);
+            work = _circle.Schedule(_jobs, world, dt, 64, work);
+            work = _spline.Schedule(_jobs, world, dt, 64, work);
+            work = _lookAt.Schedule(_jobs, world, dt, 64, work);
+            work = _lights.Schedule(_jobs, world, dt, 64, work);
+            work = _gpuData.Schedule(_jobs, world, dt, 64, work);
+            work.Complete();
+        }
+        catch (...)
+        {
+            try { work.Complete(); } catch (...) {}
+            throw;
+        }
+    }
 }
