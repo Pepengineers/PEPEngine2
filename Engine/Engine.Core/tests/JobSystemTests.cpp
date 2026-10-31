@@ -3,6 +3,7 @@
 #include <chrono>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <thread>
 #include <type_traits>
@@ -135,6 +136,23 @@ static void CheckAutomaticDependencies()
     Require(automatic, "Dependent jobs must start without the caller invoking Complete");
 }
 
+static void CheckDefaultBatchSize(unsigned threads)
+{
+    JobSystem jobs(threads, 17);
+    Require(jobs.GetDefaultBatchSize() == 17, "The pool must retain its configured batch default");
+    std::vector<unsigned> input(2051), output(input.size());
+    TestParallelJob first([&](size_t i) { ++input[i]; });
+    TestParallelJob second([&](size_t i) {
+        Require(input.back() == 1, "Default batches must preserve dependency ordering");
+        output[i] = input[i] * 2;
+    });
+    const auto ready = first.Schedule(jobs, input.size());
+    second.Schedule(jobs, output.size(), ready).Complete();
+    for (auto value : output) Require(value == 2, "Default batches lost or repeated elements");
+    first.Schedule(jobs, input.size(), 7).Complete();
+    for (auto value : input) Require(value == 2, "Explicit batch overrides must retain exact coverage");
+}
+
 int main()
 {
     try
@@ -142,6 +160,15 @@ int main()
         CheckThreads(1);
         CheckThreads(4);
         CheckAutomaticDependencies();
+        CheckDefaultBatchSize(1);
+        CheckDefaultBatchSize(4);
+        for (const auto invalid : { size_t(0), (std::numeric_limits<size_t>::max)() })
+        {
+            bool rejected = false;
+            try { JobSystem invalidPool(1, invalid); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            Require(rejected, "Invalid pool batch defaults must be rejected");
+        }
         std::cout << "Job ranges, dependency chains/fan-in, synchronous work, errors and reuse passed (1/4 threads).\n";
         return 0;
     }

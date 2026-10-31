@@ -16,6 +16,10 @@ namespace Private
     static AutoConsoleVariable<int> JobThreadCount(
         L"Jobs.ThreadCount", 0, L"Total job threads including the caller; <= 0 uses hardware concurrency. Restart required.",
         EConsoleVariableFlags::ReadOnly);
+    static AutoConsoleVariable<int> JobBatchSize(
+        L"Jobs.BatchSize", 64, L"Default minimum elements per job batch; must be positive. Restart required.",
+        EConsoleVariableFlags::ReadOnly, [](int value) { return value > 0; });
+
 
     static LRESULT CALLBACK MainWndProc(const HWND hwnd, const UINT msg, const WPARAM wParam, const LPARAM lParam)
     {
@@ -63,7 +67,8 @@ App* App::GetInstance()
 }
 
 App::App(HINSTANCE hInstance)
-    : AppHandler(hInstance), _jobs(static_cast<unsigned>((std::max)(0, Private::JobThreadCount.GetInt())))
+    : AppHandler(hInstance), _jobs(static_cast<unsigned>((std::max)(0, Private::JobThreadCount.GetInt())),
+        static_cast<size_t>(Private::JobBatchSize.GetInt()))
 {
     Instance = this;
 }
@@ -344,11 +349,11 @@ void App::Update(const GameTimer& gameTimer)
         {
             const float dt = gameTimer.DeltaTime();
             work = _movement.Schedule(_jobs, world, dt);
-            work = _circle.Schedule(_jobs, world, dt, 64, work);
-            work = _spline.Schedule(_jobs, world, dt, 64, work);
-            work = _lookAt.Schedule(_jobs, world, dt, 64, work);
-            work = _lights.Schedule(_jobs, world, dt, 64, work);
-            work = _gpuData.Schedule(_jobs, world, dt, 64, work);
+            work = _circle.Schedule(_jobs, world, dt, work);
+            work = _spline.Schedule(_jobs, world, dt, work);
+            work = _lookAt.Schedule(_jobs, world, dt, work);
+            work = _lights.Schedule(_jobs, world, dt, work);
+            work = _gpuData.Schedule(_jobs, world, dt, work);
             work.Complete();
         }
         catch (...)

@@ -49,11 +49,13 @@ static void Check(unsigned threads)
         entity.AddComponent<Position>(Position{ static_cast<double>(i) });
         if (i % 2 == 0) entity.AddComponent<Velocity>(Velocity{ 4.0 });
     }
-    JobSystem jobs(threads);
+    JobSystem jobs(threads, 37);
     Movement movement;
     Verify verify;
     auto first = movement.Schedule(jobs, world, 0.25f, 63);
     verify.Schedule(jobs, world, 0, 1, first).Complete();
+    const auto defaultWork = movement.Schedule(jobs, world, 0);
+    verify.Schedule(jobs, world, 0, defaultWork).Complete();
     bool rejected = false;
     try { world.Data.ForEachRange<Position>(0, 4098, [](Entity, Position&) {}); }
     catch (const std::out_of_range&) { rejected = true; }

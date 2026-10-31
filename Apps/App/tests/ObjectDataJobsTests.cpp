@@ -38,10 +38,14 @@ public:
             : (std::max)(1u, std::thread::hardware_concurrency());
         Require(GetJobs().GetThreadCount() == expected, "Jobs.ThreadCount must configure the application pool before scene loading");
         Require(!setting.SetFromString("2"), "Jobs.ThreadCount must stay frozen after startup");
+        auto& batch = GetLocator().GetModule<ConsoleModule>()->FindConsoleVariable(L"Jobs.BatchSize");
+        Require(GetJobs().GetDefaultBatchSize() == static_cast<size_t>(batch.GetInt()),
+            "Jobs.BatchSize must configure the application pool before scene loading");
+        Require(!batch.SetFromString("32"), "Jobs.BatchSize must stay frozen after startup");
     }
     void Measure(unsigned threads)
     {
-        JobSystem jobs(threads);
+        JobSystem jobs(threads, GetJobs().GetDefaultBatchSize());
         FlyingPropSystem motion;
         auto* render = Locator.GetModule<RenderModule>().get();
         auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
@@ -51,10 +55,10 @@ public:
         {
             render->Update();
             const auto start = std::chrono::steady_clock::now();
-            const auto moved = motion.Schedule(jobs, world, 1.0f / 60.0f, 32);
+            const auto moved = motion.Schedule(jobs, world, 1.0f / 60.0f);
             moved.Complete();
             const auto middle = std::chrono::steady_clock::now();
-            _gpuData.Schedule(jobs, world, 0, 64, moved).Complete();
+            _gpuData.Schedule(jobs, world, 0, moved).Complete();
             const auto end = std::chrono::steady_clock::now();
             if (i >= 0)
             {
@@ -63,13 +67,13 @@ public:
             }
         }
         Require(world.GetECS().GetPool<FlyingPropComponent>().Size() == 346, "Benchmark needs the actual Bistro Interior props");
-        std::cout << "threads=" << threads << " props=346 samples=" << iterations
+        std::cout << "threads=" << threads << " batch_size=" << jobs.GetDefaultBatchSize() << " props=346 samples=" << iterations
             << " motion_us=" << motionSeconds * 1e6 / iterations
             << " object_data_us=" << objectSeconds * 1e6 / iterations << '\n';
     }
     void Check(unsigned threads)
     {
-        JobSystem jobs(threads);
+        JobSystem jobs(threads, GetJobs().GetDefaultBatchSize());
         auto* render = Locator.GetModule<RenderModule>().get();
         auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
         auto& ecs = world.GetECS();
@@ -143,10 +147,11 @@ int main(int argc, char** argv)
 {
     try
     {
-        if (argc == 2 && std::string_view(argv[1]) == "--check-job-threads")
+        if (argc == 2 && (std::string_view(argv[1]) == "--check-job-threads" || std::string_view(argv[1]) == "--check-job-settings"))
         {
             ObjectDataApp app({});
-            std::cout << "Configured job pool: " << app.GetJobs().GetThreadCount() << " threads.\n";
+            std::cout << "Configured job pool: " << app.GetJobs().GetThreadCount()
+                << " threads, default batch=" << app.GetJobs().GetDefaultBatchSize() << ".\n";
             return 0;
         }
         if (argc == 2)

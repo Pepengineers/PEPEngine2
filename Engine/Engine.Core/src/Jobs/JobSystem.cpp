@@ -86,6 +86,7 @@ struct JobSystem::Impl
     enki::TaskScheduler Scheduler;
     std::thread::id OwnerThread = std::this_thread::get_id();
     std::vector<std::shared_ptr<JobDetail::State>> Active;
+    size_t DefaultBatchSize;
 };
 
 void JobDetail::State::RegisterDependencies()
@@ -207,14 +208,22 @@ void ParallelJob::EnsureIdle() const
     if (!_active.IsCompleted()) throw std::logic_error("Complete the active job before changing or rescheduling it");
 }
 
+JobHandle ParallelJob::Schedule(JobSystem& jobs, size_t count, const JobHandle& dependency) &
+{
+    return Schedule(jobs, count, jobs.GetDefaultBatchSize(), dependency);
+}
+
 JobHandle ParallelJob::Schedule(JobSystem& jobs, size_t count, size_t batchSize, const JobHandle& dependency) &
 {
     EnsureIdle();
     return jobs.Schedule(*this, count, batchSize, dependency);
 }
 
-JobSystem::JobSystem(unsigned threadCount) : _impl(std::make_unique<Impl>())
+JobSystem::JobSystem(unsigned threadCount, size_t defaultBatchSize) : _impl(std::make_unique<Impl>())
 {
+    if (defaultBatchSize == 0 || defaultBatchSize > (std::numeric_limits<uint32_t>::max)())
+        throw std::invalid_argument("Default batch size must be nonzero and fit enkiTS's uint32_t ranges");
+    _impl->DefaultBatchSize = defaultBatchSize;
     _impl->Scheduler.Initialize(threadCount ? threadCount : (std::max)(1u, std::thread::hardware_concurrency()));
 }
 
@@ -229,6 +238,7 @@ JobSystem::~JobSystem()
 }
 
 unsigned JobSystem::GetThreadCount() const { return _impl->Scheduler.GetNumTaskThreads(); }
+size_t JobSystem::GetDefaultBatchSize() const { return _impl->DefaultBatchSize; }
 
 JobHandle JobSystem::Schedule(ParallelJob& job, size_t count, size_t batchSize, const JobHandle& dependency)
 {

@@ -10,7 +10,12 @@ public:
 
     virtual void Tick(World& world, float dt) = 0;
 
-    JobHandle Schedule(JobSystem& jobs, World& world, float dt, size_t batchSize = 64,
+    JobHandle Schedule(JobSystem& jobs, World& world, float dt, const JobHandle& dependency = {}) &
+    {
+        return Schedule(jobs, world, dt, jobs.GetDefaultBatchSize(), dependency);
+    }
+
+    JobHandle Schedule(JobSystem& jobs, World& world, float dt, size_t batchSize,
         const JobHandle& dependency = {}) &
     {
         EnsureIdle();

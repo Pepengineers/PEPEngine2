@@ -135,8 +135,9 @@ struct Move final : ParallelJob {
 JobSystem jobs; // Hardware thread count, including the caller; JobSystem(1) is serial.
 std::vector<float> positions(4096);
 Move move(positions);
-auto moved = move.Schedule(jobs, positions.size(), 64);
+auto moved = move.Schedule(jobs, positions.size()); // Pool default, initially 64 elements.
 moved.Complete();
+move.Schedule(jobs, positions.size(), 32).Complete(); // Override for this invocation.
 ```
 
 The application's shared pool reads `Jobs.ThreadCount` from `[ConsoleVariables]`
@@ -145,6 +146,24 @@ concurrency; positive values specify the total thread count, including the calle
 (`4` means three workers and the caller). The default is `0`. This setting applies
 to ECS/object jobs and scene-loading jobs using the same application pool. It is
 read-only after startup; restart the application to change the pool size.
+
+`Jobs.BatchSize` sets the application's default minimum batch size in elements
+(default `64`, positive integers only). Set it in the same INI and restart to tune
+it without rebuilding. `Schedule(jobs, count, dependency)` and
+`system.Schedule(jobs, world, dt, dependency)` use the pool default; inserting an
+explicit batch-size argument before the dependency overrides it for that call.
+Standalone pools can choose a default with `JobSystem(threadCount, batchSize)`.
+The ECS/Bistro update chain and initial indirect-template build use the configured
+default. Scene import and texture decode retain explicit batches of one item.
+The CPU measurement test also uses this configured default and prints it.
+
+enkiTS uses the batch size as a minimum range, except for the final remainder; it
+can group more indices into a range. This is scheduling granularity, not byte
+alignment. Cache-line length alone cannot determine the best batch size: false
+sharing also depends on the base alignment, element strides, actual writes and
+the scheduler's range boundaries. The scheduler does not promise cache-aligned
+partitions. Choose a batch size for each workload and measure; padding or aligning
+data is a separate change when profiling shows cache-line contention.
 
 Pass a preceding `JobHandle` as the last Schedule argument to start a system only
 after every batch of its predecessor finishes. `JobHandle::CombineDependencies`
@@ -201,8 +220,9 @@ directory and optionally the actual Interior OBJ to verify its 2381 sections are
 partitioned exactly once. `ObjectDataJobsTests` loads a small real DX12 scene and
 checks selected indirect slots, motion and bounds across all frame slots with
 one and four threads, and that movement leaves source templates unchanged.
-Its `--check-job-threads` argument verifies the configured application pool and
-startup-only setting without opening a window or initializing the renderer.
+Its `--check-job-settings` argument verifies the configured thread count, batch
+default and startup-only settings without opening a window or initializing the
+renderer (`--check-job-threads` remains an alias).
 Pass the actual Bistro scene directory as its single argument for a CPU-only
 measurement of the real motion and object-data systems (256 samples after warmup,
 one/four/hardware threads). Loading still creates the real GPU resources; no draw

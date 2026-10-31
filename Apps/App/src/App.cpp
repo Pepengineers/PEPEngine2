@@ -49,12 +49,12 @@ namespace
             try
             {
                 work = _movement.Schedule(_jobs, world, dt);
-                work = _circle.Schedule(_jobs, world, dt, 64, work);
-                work = _spline.Schedule(_jobs, world, dt, 64, work);
-                work = _flyingProps.Schedule(_jobs, world, dt, 32, work);
-                work = _lookAt.Schedule(_jobs, world, dt, 64, work);
-                work = _lights.Schedule(_jobs, world, dt, 64, work);
-                work = _gpuData.Schedule(_jobs, world, dt, 64, work);
+                work = _circle.Schedule(_jobs, world, dt, work);
+                work = _spline.Schedule(_jobs, world, dt, work);
+                work = _flyingProps.Schedule(_jobs, world, dt, work);
+                work = _lookAt.Schedule(_jobs, world, dt, work);
+                work = _lights.Schedule(_jobs, world, dt, work);
+                work = _gpuData.Schedule(_jobs, world, dt, work);
                 work.Complete();
             }
             catch (...)
