@@ -13,6 +13,7 @@ struct GDX12ReflectionProbeDesc
     uint64_t Revision = 0;
 };
 class GDX12Texture;
+bool ReflectionProbeLightingEnabled();
 struct GDX12PublishedReflectionProbe
 {
     uint64_t World = 0;

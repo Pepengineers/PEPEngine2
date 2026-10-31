@@ -18,6 +18,9 @@ StructuredBuffer<LocalLight> LocalLights : register(t12);
 RWTexture2D<float4> SceneColor : register(u0);
 SamplerState samLinearClamp : register(s3);
 SamplerComparisonState samShadow : register(s6);
+#define PROBE_GLOBALS_REGISTER b3
+#define PROBE_DATA_REGISTER t13
+#define PROBE_CUBES_REGISTER t14
 #define PBR_LIGHTING_ONLY
 #include "PBRSurface.hlsli"
 #include "PBRLighting.hlsli"

@@ -22,6 +22,8 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderSettings.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ReflectionProbes.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionProbePass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionLightingPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionFallbackPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12AmbientOcclusionPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FidelityFXPasses.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12MotionBlurPass.h" />
@@ -76,6 +78,7 @@
   <ItemGroup>
     <ClCompile Include="src\RenderSettings.cpp" />
     <ClCompile Include="src\GDX12ReflectionProbePass.cpp" />
+    <ClCompile Include="src\GDX12ReflectionLightingPass.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusionPass.cpp" />
     <ClCompile Include="src\GDX12FidelityFXPasses.cpp" />
     <ClCompile Include="src\GDX12MotionBlurPass.cpp" />

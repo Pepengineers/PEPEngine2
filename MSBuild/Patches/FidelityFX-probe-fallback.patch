@@ -1,0 +1,78 @@
+--- a/sdk/include/FidelityFX/gpu/sssr/ffx_sssr_callbacks_hlsl.h
++++ b/sdk/include/FidelityFX/gpu/sssr/ffx_sssr_callbacks_hlsl.h
+@@ -378,6 +378,15 @@
+     FfxFloat32 mip = clamp(preceptualRoughness * FfxFloat32(maxMipLevel), 0.0, FfxFloat32(maxMipLevel));
+     return r_input_environment_map.SampleLevel(s_EnvironmentMapSampler, direction, mip).xyz * IBLFactor();
+ }
++FfxFloat32x3 FFX_SSSR_SampleEnvironmentMapForPixel(FfxFloat32x3 direction, FfxFloat32 roughness, FfxUInt32x2 pixel)
++{
++#if defined(SSSR_BIND_SRV_INPUT_MATERIAL_PARAMETERS)
++    FfxFloat32x3 fallback = r_input_material_parameters.Load(FfxInt32x3(FfxInt32x2(pixel), 0)).rgb;
++    if (all(fallback >= 0.0f))
++        return fallback * IBLFactor();
++#endif
++    return FFX_SSSR_SampleEnvironmentMap(direction, roughness);
++}
+ #endif // #if defined(SSSR_BIND_SRV_INPUT_ENVIRONMENT_MAP)
+ 
+ #if defined (SSSR_BIND_UAV_RAY_COUNTER)
+--- a/sdk/include/FidelityFX/gpu/sssr/ffx_sssr_callbacks_glsl.h
++++ b/sdk/include/FidelityFX/gpu/sssr/ffx_sssr_callbacks_glsl.h
+@@ -420,6 +420,15 @@
+     FfxFloat32 lod = clamp(preceptualRoughness * FfxFloat32(maxMipLevel), 0.0, FfxFloat32(maxMipLevel));
+     return textureLod(samplerCube(r_input_environment_map, s_EnvironmentMapSampler), direction, lod).xyz * IBLFactor();
+ }
++FfxFloat32x3 FFX_SSSR_SampleEnvironmentMapForPixel(FfxFloat32x3 direction, FfxFloat32 roughness, FfxUInt32x2 pixel)
++{
++#if defined(SSSR_BIND_SRV_INPUT_MATERIAL_PARAMETERS)
++    FfxFloat32x3 fallback = texelFetch(r_input_material_parameters, FfxInt32x2(pixel), 0).rgb;
++    if (all(greaterThanEqual(fallback, FfxFloat32x3(0.0f))))
++        return fallback * IBLFactor();
++#endif
++    return FFX_SSSR_SampleEnvironmentMap(direction, roughness);
++}
+ #endif // #if defined(SSSR_BIND_SRV_INPUT_ENVIRONMENT_MAP)
+ 
+ #if defined (SSSR_BIND_UAV_RAY_COUNTER)
+--- a/sdk/include/FidelityFX/gpu/sssr/ffx_sssr_classify_tiles.h
++++ b/sdk/include/FidelityFX/gpu/sssr/ffx_sssr_classify_tiles.h
+@@ -104,7 +104,7 @@
+         FfxFloat32x3 view_space_reflected_direction = reflect(view_space_ray_direction, view_space_surface_normal);
+         FfxFloat32x3 world_space_reflected_direction = FFX_MATRIX_MULTIPLY(InvView(), FfxFloat32x4(view_space_reflected_direction, 0)).xyz;
+ 
+-        intersection_output.xyz = FFX_SSSR_SampleEnvironmentMap(world_space_reflected_direction, sqrt(roughness));
++        intersection_output.xyz = FFX_SSSR_SampleEnvironmentMapForPixel(world_space_reflected_direction, sqrt(roughness), dispatch_thread_id);
+     }
+ 
+     FFX_SSSR_StoreRadiance(dispatch_thread_id, intersection_output);
+--- a/sdk/include/FidelityFX/gpu/sssr/ffx_sssr_intersect.h
++++ b/sdk/include/FidelityFX/gpu/sssr/ffx_sssr_intersect.h
+@@ -318,7 +318,7 @@
+ 
+     // Sample environment map.
+     FfxFloat32x3 world_space_reflected_direction = FFX_MATRIX_MULTIPLY(InvView(), FfxFloat32x4(view_space_reflected_direction, 0)).xyz;
+-    FfxFloat32x3 environment_lookup = FFX_SSSR_SampleEnvironmentMap(world_space_reflected_direction, 0.0f);
++    FfxFloat32x3 environment_lookup = FFX_SSSR_SampleEnvironmentMapForPixel(world_space_reflected_direction, 0.0f, coords);
+     reflection_radiance = ffxLerp(environment_lookup, reflection_radiance, confidence);
+ 
+     FfxFloat32x4 new_sample = FfxFloat32x4(reflection_radiance, world_ray_length);
+--- a/sdk/src/backends/dx12/shaders/sssr/ffx_sssr_intersect_pass.hlsl
++++ b/sdk/src/backends/dx12/shaders/sssr/ffx_sssr_intersect_pass.hlsl
+@@ -28,6 +28,7 @@
+ #define SSSR_BIND_SRV_DEPTH_HIERARCHY          3
+ #define SSSR_BIND_SRV_EXTRACTED_ROUGHNESS      4
+ #define SSSR_BIND_SRV_BLUE_NOISE_TEXTURE       5
++#define SSSR_BIND_SRV_INPUT_MATERIAL_PARAMETERS 6
+ 
+ #define SSSR_BIND_UAV_RADIANCE    0
+ #define SSSR_BIND_UAV_RAY_LIST    1
+--- a/sdk/src/backends/vk/shaders/sssr/ffx_sssr_intersect_pass.glsl
++++ b/sdk/src/backends/vk/shaders/sssr/ffx_sssr_intersect_pass.glsl
+@@ -34,6 +34,7 @@
+ #define SSSR_BIND_SRV_DEPTH_HIERARCHY          3
+ #define SSSR_BIND_SRV_EXTRACTED_ROUGHNESS      4
+ #define SSSR_BIND_SRV_BLUE_NOISE_TEXTURE       5
++#define SSSR_BIND_SRV_INPUT_MATERIAL_PARAMETERS 6
+ 
+ #define SSSR_BIND_UAV_RADIANCE    2000
+ #define SSSR_BIND_UAV_RAY_LIST    2001

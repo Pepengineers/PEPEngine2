@@ -147,11 +147,12 @@ int main()
         resources.FrameConstants[0]->CameraCB->Resize(1);
         resources.FrameConstants[0]->CameraCB->CopyData(0, camera);
 
-        GDX12Texture color, depth, motion, normal;
+        GDX12Texture color, depth, motion, normal, material;
         MakeInput(resources, color, width, height, DXGI_FORMAT_R16G16B16A16_FLOAT);
         MakeInput(resources, depth, width, height, DXGI_FORMAT_R32_FLOAT);
         MakeInput(resources, motion, width, height, DXGI_FORMAT_R16G16_FLOAT);
         MakeInput(resources, normal, width, height, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        MakeInput(resources, material, width, height, DXGI_FORMAT_R16G16B16A16_FLOAT);
         std::vector<uint16_t> colorData(width * height * 4), normals(width * height * 4), velocities(width * height * 2);
         std::vector<float> depthData(width * height, projection._43 / 100 - projection._33);
         for (UINT y = 0; y < height; ++y)
@@ -168,6 +169,10 @@ int main()
         Upload(device, depth, depthData.data(), 4);
         Upload(device, motion, velocities.data(), 4);
         Upload(device, normal, normals.data(), 8);
+        auto materials = normals;
+        for (size_t i = 0; i < materials.size(); i += 4)
+            materials[i] = materials[i + 1] = materials[i + 2] = PackedVector::XMConvertFloatToHalf(-1);
+        Upload(device, material, materials.data(), 8);
         {
             GDX12Texture preparedMotion;
             MakeInput(resources, preparedMotion, width, height, DXGI_FORMAT_R16G16_FLOAT, true);
@@ -226,7 +231,7 @@ int main()
         std::cout << "Environment energy " << environmentEnergy << '\n';
         GDX12SssrPass ssr;
         ssr.Setup(&resources, nullptr, &common);
-        ssr.SetInputs({ &color, &depth, &motion, &normal, &normal, environment.GetOutput(1), environment.GetOutput(2) });
+        ssr.SetInputs({ &color, &depth, &motion, &normal, &material, environment.GetOutput(1), environment.GetOutput(2) });
         ssr.Initialize();
         Require(!ssr.HasValidHistory(), "A new SSSR context must not expose valid history");
         GDX12DepthOfFieldPass dof;
@@ -322,11 +327,13 @@ int main()
                 normals[offset + 1] = 0;
                 normals[offset + 2] = PackedVector::XMConvertFloatToHalf(wall ? 0.0f : std::sqrt(0.75f));
                 normals[offset + 3] = PackedVector::XMConvertFloatToHalf(0.08f);
+                materials[offset + 3] = normals[offset + 3];
                 colorData[offset] = PackedVector::XMConvertFloatToHalf(wall ? 16.0f : 0.1f);
                 colorData[offset + 1] = colorData[offset + 2] = 0;
             }
         Upload(device, depth, depthData.data(), 4);
         Upload(device, normal, normals.data(), 8);
+        Upload(device, material, materials.data(), 8);
         Upload(device, color, colorData.data(), 8);
         ++common.HistoryRevision;
         for (int i = 0; i < 4; ++i) render();

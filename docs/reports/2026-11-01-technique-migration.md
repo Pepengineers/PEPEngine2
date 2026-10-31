@@ -137,6 +137,7 @@
 
 ### Захват cubemap-проб
 
+- Коммит `d4abaaf`, `feat(render): add cached reflection capture`.
 - Добавлены ReflectionProbeComponent, submission в обеих update chains и настоящий
   capture producer. В сцене пробы не создаются; GPU-ресурсы выделяются лениво.
 - Dynamic снимает opaque/masked геометрию; BakedStatic копирует статический HDR
@@ -163,9 +164,34 @@
   шаг. Budgeted faces снимаются в последовательных кадрах; широкая invalidation
   может перерисовывать лишнюю статику. Производительность ещё не измерялась.
 
+### Пробы в PBR и SSSR
+
+- Deferred, прозрачный forward и specular replacement используют общий probe
+  sampler: box projection только внутри influence AABB, плавное смешивание
+  перекрытий и global fallback. Capture остаётся global-only; diffuse IBL глобальный.
+- Общие metadata/globals загружаются раз на frame slot после capture; capacity
+  резервируется до записи команд. SRV опубликованных кубов не переписываются.
+- Материальный вход SSSR теперь имеет RGB fallback и roughness в A; negative RGB
+  оставляет штатный global path. Baked и sky маскируются roughness=1.
+- Маленький воспроизводимый SDK patch подставляет fallback до hit blending и
+  denoising, без чтения confidence из alpha. Это prefiltered approximation.
+  Bootstrap применяет его идемпотентно; AMD MIT notice сохранён. Также сохранён
+  уже имевшийся CMake compatibility patch; исходные чужие warning-cleanup правки
+  вне затронутых файлов этой итерации не включаются.
+- Release ProbeLightingGpuSmoke прошёл: axis/zero-direction components, box
+  parallax (другой face против raw direction), outside/global, overlap, mips,
+  Off, baked/sky mask, PBR/resolve DFG once, SSR miss-localfallback и frame slots.
+- Первое raw-radiance ожидание на градиенте маленькой пробы не учитывало denoiser.
+  Miss fixture изолирован на однородном ROI, без ослабления допусков; отдельные
+  границы/overlap/parallax проверки сохранены. RGB SSSR на тёплых кадрах:
+  `(8, 0.0000023, 0.0000045)`, затем `(7.59375, 0.0000017, 0.0000033)`.
+- FidelityFXGpuSmoke сохранил ray-hit deltas 367.869/322.359; PostProcessGpuSmoke,
+  ProbeGpuSmoke, LightingGpuSmoke, десять кадров BistroEffectsSmoke, Release App
+  и verify_scene.py (4 tests OK) прошли. Логи `Build/probe-lighting-*-{build,gpu}.log`.
+- GLSL callback обновлён согласованно, Vulkan не собирался: двигатель проверен с DX12.
+
 ## Оставшаяся работа
 
-Применение cubemap-проб в PBR/SSR;
 SkyBox/SkyAtmosphere, grass/wind, GPU particles, fluid surface/solver,
 skinning/asset import и cloud shaders. Наличие отдельных новых файлов во время
 работы не считается завершением этих пунктов без их callers и GPU-проверок.

@@ -12,6 +12,7 @@
 #include "Engine.RendererDX12/IRenderPassLink.h"
 
 class GameTimer;
+class GDX12ReflectionLightingPass;
 
 enum ERenderPassFlags : uint32_t
 {
@@ -135,6 +136,7 @@ public:
     Matrix ActiveCameraPreviousViewProjection = Identity4x4();
     uint64_t HistoryRevision = 0;
     uint64_t EnvironmentRevision = 0;
+    GDX12ReflectionLightingPass* ReflectionLighting = nullptr;
     GameTimer* GameTimer = nullptr;
     UINT WindowWidth = 0;
     UINT WindowHeight = 0;

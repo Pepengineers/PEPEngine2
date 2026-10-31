@@ -3,6 +3,7 @@
 #include "PBRMath.hlsli"
 #include "CSM.hlsli"
 #include "LocalShadows.hlsli"
+#include "ProbeIBL.hlsli"
 float3 EvaluateBRDF(PBRSurface s, float3 v, float3 l)
 {
     float nDotV = saturate(dot(s.Normal, v)), nDotL = saturate(dot(s.Normal, l));
@@ -21,7 +22,7 @@ float3 ShadeSunAndIBL(PBRSurface s, float3 position, float3 v, float ambientVisi
     if (any(direct > 0)) direct *= SunVisibility(position, s.Normal, saturate(dot(s.Normal, l)));
     float nDotV = saturate(dot(s.Normal, v));
     float3 irradiance = IrradianceEnvironment.SampleLevel(samLinearClamp, s.Normal, 0).rgb;
-    float3 prefiltered = PrefilteredEnvironment.SampleLevel(samLinearClamp, reflect(-v, s.Normal), s.Roughness * 7).rgb;
+    float3 prefiltered = SpecularEnvironmentRadiance(position, reflect(-v, s.Normal), s.Roughness);
     float2 brdf = EnvironmentBRDF.SampleLevel(samLinearClamp, float2(nDotV, s.Roughness), 0).rg;
     float3 fresnel = s.F0 + (max(1 - s.Roughness, s.F0) - s.F0) * FresnelSchlickFactor(nDotV);
     return direct + ambientVisibility * (1 - fresnel) * (1 - s.Metallic) * irradiance * s.Albedo / PBR_PI + prefiltered * SpecularIBLWeight(s.F0, brdf, nDotV, s.Roughness, ambientVisibility) + s.Emissive;

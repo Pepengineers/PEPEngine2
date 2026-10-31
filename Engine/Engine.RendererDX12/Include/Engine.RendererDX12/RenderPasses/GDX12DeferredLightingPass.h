@@ -1,5 +1,6 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionLightingPass.h"
 
 class GDX12DeferredLightingPass final : public GDX12RenderPass
 {
@@ -28,8 +29,10 @@ public:
         texture.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
         _color->Initialize(texture);
         GDX12RootSignatureDesc root;
-        root.NumSingleCBVSlots = 3;
-        root.NumSingleSRVSlots = 13;
+        const bool probes = _commonData->ReflectionLighting != nullptr;
+        root.NumSingleCBVSlots = probes ? 4 : 3;
+        root.NumSingleSRVSlots = probes ? 14 : 13;
+        if (probes) root.SRVRanges.emplace_back(TextureCube_RangeLength);
         root.NumSingleUAVSlots = 1;
         root.StaticSamplers = GetStaticSamplers();
         CD3DX12_STATIC_SAMPLER_DESC sampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
@@ -38,8 +41,9 @@ public:
         sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
         root.StaticSamplers.push_back(sampler);
         _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
+        D3D_SHADER_MACRO macros[] = { { "PROBE_LIGHTING", "1" }, { nullptr, nullptr } };
         auto shader = GDX12ShaderCompiler::GetInstance().CompileShader(_resources->Device,
-            SHADERS_FOLDER "DeferredLighting.hlsl", nullptr, "CS", "cs");
+            SHADERS_FOLDER "DeferredLighting.hlsl", probes ? macros : nullptr, "CS", "cs");
         D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
         desc.pRootSignature = _root->GetRootSignature().Get();
         desc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
@@ -62,6 +66,7 @@ public:
             commands->SetComputeSRV(i, texture->GetSRV()->GPUHandle);
         }
         commands->SetComputeSRV(12, frame->LocalLightCache->GetSRV()->GPUHandle);
+        if (_commonData->ReflectionLighting) _commonData->ReflectionLighting->BindCompute(commands, 3, 13, 14);
         commands->SetComputeUAV(0, _color->GetUAV()->GPUHandle);
         commands->ResourceBarrier({ _color->GetResource()->GetUnorderedAccessBarrier() });
         commands->Dispatch((_color->GetWidth() + 15) / 16, (_color->GetHeight() + 15) / 16, 1);

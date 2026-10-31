@@ -1,7 +1,8 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 
-// Inputs: HDR color, reverse-Z depth, NDC motion, world normal, material parameters (roughness in A), cubemap, BRDF LUT.
+// Inputs: HDR color, reverse-Z depth, NDC motion, world normal, material parameters,
+// cubemap, BRDF LUT. Material RGB is probe fallback radiance or negative for global; A is roughness.
 // Output is reflection radiance; the material BRDF must be applied once by the lighting resolve.
 class GDX12SssrPass final : public GDX12RenderPass
 {

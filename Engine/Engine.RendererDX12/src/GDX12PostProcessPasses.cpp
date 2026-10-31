@@ -1,6 +1,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12SpecularResolvePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12PostProcessAuxPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ToneMappingPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionLightingPass.h"
 #include <array>
 #include <stdexcept>
 
@@ -72,10 +73,17 @@ void GDX12SpecularResolvePass::Initialize()
             throw std::invalid_argument("Specular resolve surface grids must match");
     CreateTexture(*_resources, _data->Color, color->GetWidth(), color->GetHeight(), DXGI_FORMAT_R16G16B16A16_FLOAT);
     GDX12RootSignatureDesc root;
-    root.NumSingleCBVSlots = 1; root.NumSingleSRVSlots = 8; root.NumSingleUAVSlots = 1;
+    const bool probes = _commonData->ReflectionLighting != nullptr;
+    root.NumSingleCBVSlots = probes ? 2 : 1; root.NumSingleSRVSlots = probes ? 9 : 8; root.NumSingleUAVSlots = 1;
+    if (probes) root.SRVRanges.emplace_back(TextureCube_RangeLength);
     root.StaticSamplers = GetStaticSamplers();
     _data->Root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
-    Compile(_resources->Device, *_data->Root, SHADERS_FOLDER "SpecularResolve.hlsl", _data->Pipeline);
+    D3D_SHADER_MACRO macros[] = { { "PROBE_LIGHTING", "1" }, { nullptr, nullptr } };
+    auto shader = GDX12ShaderCompiler::GetInstance().CompileShader(_resources->Device,
+        SHADERS_FOLDER "SpecularResolve.hlsl", probes ? macros : nullptr, "CS", "cs");
+    D3D12_COMPUTE_PIPELINE_STATE_DESC pipeline = {};
+    pipeline.pRootSignature = _data->Root->GetRootSignature().Get(); pipeline.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
+    ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(&pipeline, IID_PPV_ARGS(&_data->Pipeline)));
 }
 void GDX12SpecularResolvePass::Execute(GDX12CommandList* commands)
 {
@@ -95,6 +103,7 @@ void GDX12SpecularResolvePass::Execute(GDX12CommandList* commands)
             commands->ResourceBarrier({ texture->GetResource()->GetSRVBarrier() });
             commands->SetComputeSRV(i, texture->GetSRV()->GPUHandle);
         }
+        if (_commonData->ReflectionLighting) _commonData->ReflectionLighting->BindCompute(commands, 1, 8, 9);
         commands->ResourceBarrier({ d.Color.GetResource()->GetUnorderedAccessBarrier() });
         commands->SetComputeUAV(0, d.Color.GetUAV()->GPUHandle);
         commands->Dispatch((d.Color.GetWidth() + 7) / 8, (d.Color.GetHeight() + 7) / 8, 1);

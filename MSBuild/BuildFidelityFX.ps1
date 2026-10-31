@@ -20,6 +20,15 @@ if (-not (Test-Path -LiteralPath (Join-Path $sourcePath 'sdk\tools\binary_store\
     & git -C $sourcePath sparse-checkout set sdk/include sdk/src sdk/libs sdk/tools/binary_store
     if ($LASTEXITCODE -ne 0) { throw 'Cannot restore FidelityFX source and shader compiler' }
 }
+# Apply local adaptations to the pinned SDK before configuring it.
+foreach ($relativePatch in @('FidelityFX-cmake.patch', 'Patches\FidelityFX-probe-fallback.patch')) {
+    $patchPath = Join-Path $PSScriptRoot $relativePatch
+    & git -C $sourcePath apply --reverse --check --quiet $patchPath
+    if ($LASTEXITCODE -ne 0) {
+        & git -C $sourcePath apply $patchPath
+        if ($LASTEXITCODE -ne 0) { throw "Cannot apply FidelityFX adaptation: $relativePatch" }
+    }
+}
 if (-not $CMake) {
     $command = Get-Command cmake -ErrorAction SilentlyContinue
     if ($command) { $CMake = $command.Source }

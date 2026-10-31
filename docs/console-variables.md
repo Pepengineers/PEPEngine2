@@ -182,5 +182,24 @@ budgeted faces снимаются в последовательных кадра
 
 GPU fixture: `Apps/App/ProbeGpuSmoke.vcxproj` проверяет color/depth reuse,
 dynamic front/behind, публикацию metadata/mips, restart, собственные sun shadows,
-смену мира, Off и frame slots. Пробы предоставляет `GDX12ReflectionProbePass::GetPublished()`;
-их применение в итоговом material/specular resolve — отдельный потребитель.
+смену мира, Off и frame slots. Пробы предоставляет `GDX12ReflectionProbePass::GetPublished()`.
+
+Deferred и прозрачный forward PBR используют один specular environment sampler.
+Box projection применяется только внутри world-aligned influence box; вес линейно
+падает от 1 в центре до 0 на ближайшей границе. Перекрывающиеся веса нормализуются;
+недостающий суммарный вес заполняется глобальным environment. Diffuse IBL остаётся
+глобальным, а capture использует только глобальное окружение без рекурсивных проб.
+При выключенном SSR локальные specular отражения продолжают работать.
+
+Перед SSSR готовится отдельный material buffer: RGB — prefiltered probe/global
+fallback, A — perceptual roughness. Отрицательный RGB сохраняет исходную global
+environment выборку SDK. Baked surfaces и sky получают A=1, исключая ненужную
+stochastic трассировку; общий normal/roughness G-buffer не изменяется. Небольшой
+[SDK patch](../MSBuild/Patches/FidelityFX-probe-fallback.md) подставляет этот fallback
+до смешивания ray hits и denoising; alpha SSSR не трактуется как confidence.
+Это prefiltered probe approximation, а не отдельная stochastic выборка куба для
+каждого miss-направления. Final specular resolve заменяет тот же environment,
+который использовался в PBR, применяя DFG/AO один раз.
+
+`Apps/App/ProbeLightingGpuSmoke.vcxproj` проверяет box projection, overlap/global
+blend, Off, roughness mips, baked/sky tracing mask, PBR/SSR fallback и frame slots.

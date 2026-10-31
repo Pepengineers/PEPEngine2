@@ -26,6 +26,8 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12PostProcessAuxPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ToneMappingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ReflectionProbePass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionLightingPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionFallbackPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyFromSharedMemoryPass.h"
@@ -911,10 +913,12 @@ void RenderModule::ConfigureRenderPipeline()
     auto* shadowPass = add(std::make_unique<GDX12CascadedShadowPass>());
     auto* localShadowPass = add(std::make_unique<GDX12LocalShadowPass>());
     _reflectionProbes = add(std::make_unique<GDX12ReflectionProbePass>());
+    add(std::make_unique<GDX12ReflectionLightingPass>(_reflectionProbes));
     auto* cullingPass = add(std::make_unique<GDX12GPUCullingPass>());
     auto* opaquePass = add(std::make_unique<GDX12OpaquePass>());
     auto* aoPass = add(std::make_unique<GDX12AmbientOcclusionPass>());
     auto* lightingPass = add(std::make_unique<GDX12DeferredLightingPass>());
+    auto* reflectionFallback = add(std::make_unique<GDX12ReflectionFallbackPass>());
     auto* ssrPass = add(std::make_unique<GDX12SssrPass>());
     auto* reflectionResolve = add(std::make_unique<GDX12SpecularResolvePass>(ssrPass));
     auto* transparencyPass = add(std::make_unique<GDX12WBOITTransparencyPass>());
@@ -933,7 +937,8 @@ void RenderModule::ConfigureRenderPipeline()
     opaquePass->SetInputs({});
     aoPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3) });
     lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0), aoPass->GetOutput(0) });
-    ssrPass->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(1), opaquePass->GetOutput(3), opaquePass->GetOutput(3), environmentPass->GetOutput(1), environmentPass->GetOutput(2) });
+    reflectionFallback->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3), environmentPass->GetOutput(1), opaquePass->GetOutput(4) });
+    ssrPass->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(1), opaquePass->GetOutput(3), reflectionFallback->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2) });
     reflectionResolve->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(3), opaquePass->GetOutput(4), aoPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), ssrPass->GetOutput(0) });
     transparencyPass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), localShadowPass->GetOutput(0) });
     compositionPass->SetInputs({ reflectionResolve->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
@@ -945,7 +950,7 @@ void RenderModule::ConfigureRenderPipeline()
     outputPass->SetInputs({ toneMappingPass->GetOutput(0), _backBuffer.get() });
 
     GDX12RenderPass* renderResolutionPasses[] = { opaquePass, aoPass, lightingPass,
-        ssrPass, reflectionResolve, transparencyPass, compositionPass };
+        reflectionFallback, ssrPass, reflectionResolve, transparencyPass, compositionPass };
     for (auto* pass : renderResolutionPasses)
         pass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 

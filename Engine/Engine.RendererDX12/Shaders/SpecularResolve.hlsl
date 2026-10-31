@@ -11,6 +11,10 @@ Texture2D<float4> EnvironmentBRDF : register(t6);
 Texture2D<float4> ReflectedRadiance : register(t7);
 RWTexture2D<float4> Result : register(u0);
 SamplerState samLinearClamp : register(s3);
+#define PROBE_GLOBALS_REGISTER b1
+#define PROBE_DATA_REGISTER t8
+#define PROBE_CUBES_REGISTER t9
+#include "ProbeIBL.hlsli"
 
 [numthreads(8, 8, 1)]
 void CS(uint2 pixel : SV_DispatchThreadID)
@@ -29,6 +33,6 @@ void CS(uint2 pixel : SV_DispatchThreadID)
     float nDotV = saturate(dot(normal, view));
     float2 brdf = EnvironmentBRDF.SampleLevel(samLinearClamp, float2(nDotV, normalRoughness.a), 0).rg;
     float3 weight = SpecularIBLWeight(material.rgb, brdf, nDotV, normalRoughness.a, AmbientVisibility[pixel]);
-    float3 oldRadiance = PrefilteredEnvironment.SampleLevel(samLinearClamp, reflect(-view, normal), normalRoughness.a * 7).rgb;
+    float3 oldRadiance = SpecularEnvironmentRadiance(world.xyz / world.w, reflect(-view, normal), normalRoughness.a);
     Result[pixel] = float4(max(0, color.rgb + (ReflectedRadiance[pixel].rgb - oldRadiance) * weight), color.a);
 }

@@ -17,6 +17,7 @@ public:
     // Metadata and texture describe the same completed generation; the list is refreshed each frame.
     const std::vector<GDX12PublishedReflectionProbe>& GetPublished() const;
     UINT GetLastFrameStaticFaces() const;
+    UINT GetSubmittedCount() const;
 private:
     struct Data;
     std::unique_ptr<Data> _data;

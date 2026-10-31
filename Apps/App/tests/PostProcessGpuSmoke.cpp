@@ -147,8 +147,8 @@ int main()
             { result[i] = half(value.x); result[i+1] = half(value.y); result[i+2] = half(value.z); result[i+3] = half(value.w); }
             return result;
         };
-        GDX12Texture color, depth, motion, normal, f0, ao, radiance, brdf, accumulation, revealage;
-        for (auto* texture : { &color, &normal, &f0, &radiance, &accumulation })
+        GDX12Texture color, depth, motion, normal, material, f0, ao, radiance, brdf, accumulation, revealage;
+        for (auto* texture : { &color, &normal, &material, &f0, &radiance, &accumulation })
             MakeInput(resources, *texture, width, height, DXGI_FORMAT_R16G16B16A16_FLOAT);
         for (auto* texture : { &depth, &ao, &revealage })
             MakeInput(resources, *texture, width, height, DXGI_FORMAT_R32_FLOAT);
@@ -156,12 +156,14 @@ int main()
         MakeInput(resources, brdf, 1, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
         auto colorPixels = constantColor({4,2,1,1});
         auto normalPixels = constantColor({0,0,1,0});
+        auto materialPixels = constantColor({-1,-1,-1,0});
         auto f0Pixels = constantColor({0.5f,0.5f,0.5f,0});
         auto reflectionPixels = constantColor({8,6,4,1});
         auto zeroPixels = constantColor({0,0,0,0});
         std::vector<float> depthPixels(width * height, projection._43 / 100 - projection._33), ones(width * height, 1);
         std::vector<uint16_t> motionPixels(width * height * 2);
         Upload(device, color, colorPixels.data(), 8); Upload(device, normal, normalPixels.data(), 8);
+        Upload(device, material, materialPixels.data(), 8);
         Upload(device, f0, f0Pixels.data(), 8); Upload(device, radiance, reflectionPixels.data(), 8);
         Upload(device, accumulation, zeroPixels.data(), 8); Upload(device, revealage, ones.data(), 4);
         Upload(device, depth, depthPixels.data(), 4); Upload(device, ao, ones.data(), 4); Upload(device, motion, motionPixels.data(), 4);
@@ -183,7 +185,7 @@ int main()
         for (UINT face = 0; face < 6; ++face) Upload(device, environment, envPixel, 8, face);
         GDX12SssrPass ssr;
         ssr.Setup(&resources, nullptr, &common);
-        ssr.SetInputs({ &color,&depth,&motion,&normal,&normal,&environment,&brdf }); ssr.Initialize();
+        ssr.SetInputs({ &color,&depth,&motion,&normal,&material,&environment,&brdf }); ssr.Initialize();
         GDX12SpecularResolvePass resolve(&ssr);
         resolve.Setup(&resources, nullptr, &common);
         resolve.SetInputs({ &color,&depth,&normal,&f0,&ao,&environment,&brdf,&radiance }); resolve.Initialize();

@@ -231,6 +231,8 @@ void GDX12ReflectionProbePass::Initialize() { if(_inputs.size()!=5) throw std::i
 void GDX12ReflectionProbePass::Submit(uint64_t world,std::vector<GDX12ReflectionProbeDesc> probes,uint64_t staticRevision,uint64_t shadingRevision)
 { _data->SubmittedWorld=world; _data->Submitted=std::move(probes); _data->StaticRevision=staticRevision; _data->ShadeRevision=shadingRevision; }
 const std::vector<GDX12PublishedReflectionProbe>& GDX12ReflectionProbePass::GetPublished() const { return _data->Published; }
+bool ReflectionProbeLightingEnabled() { return enabled.GetValue() && quality.GetValue() != 0; }
+UINT GDX12ReflectionProbePass::GetSubmittedCount() const { return static_cast<UINT>(_data->Submitted.size()); }
 UINT GDX12ReflectionProbePass::GetLastFrameStaticFaces() const { return _data->StaticFaces; }
 void GDX12ReflectionProbePass::PrepareFrame()
 {
