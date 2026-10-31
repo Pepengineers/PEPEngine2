@@ -19,6 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderSettings.h" />
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceResources.h" />
@@ -65,6 +66,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\RenderSettings.cpp" />
     <ClCompile Include="src\D3DHelpers.cpp" />
     <ClCompile Include="src\GDX12DeviceResources.cpp" />
     <ClCompile Include="src\GDX12GPUTimer.cpp" />
