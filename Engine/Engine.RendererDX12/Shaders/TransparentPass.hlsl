@@ -19,7 +19,9 @@ Texture2D<float> ShadowAtlas : register(t3);
 TextureCube<float4> IrradianceEnvironment : register(t4);
 TextureCube<float4> PrefilteredEnvironment : register(t5);
 Texture2D<float4> EnvironmentBRDF : register(t6);
-Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t7);
+StructuredBuffer<LocalLight> LocalLights : register(t7);
+Texture2DArray<float> LocalShadowMaps : register(t8);
+Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t9);
 SamplerComparisonState samShadow : register(s6);
 
 #include "PBR.hlsli"

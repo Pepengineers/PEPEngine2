@@ -3,7 +3,6 @@
 ConstantBuffer<IndirectConstants> CBIndirectConstants : register(b0);
 ConstantBuffer<MainCB> CBMain : register(b1);
 ConstantBuffer<CameraCB> CBCamera : register(b2);
-ConstantBuffer<ShadowCB> CBShadow : register(b3);
 
 SamplerState samPointWrap : register(s0);
 SamplerState samPointClamp : register(s1);
@@ -15,14 +14,9 @@ SamplerState samAnisotropicClamp : register(s5);
 StructuredBuffer<Material> MaterialCache : register(t0);
 StructuredBuffer<Transform> TransformCache : register(t1);
 StructuredBuffer<InstanceData> InstanceCache : register(t2);
-Texture2D<float> ShadowAtlas : register(t3);
-TextureCube<float4> IrradianceEnvironment : register(t4);
-TextureCube<float4> PrefilteredEnvironment : register(t5);
-Texture2D<float4> EnvironmentBRDF : register(t6);
-Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t7);
-SamplerComparisonState samShadow : register(s6);
+Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t3);
 
-#include "PBR.hlsli"
+#include "PBRSurface.hlsli"
 
 struct VS_INPUT
 {
@@ -70,8 +64,11 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
 
 struct PS_OUTPUT
 {
-    float4 Color : SV_TARGET0;
+    float4 AlbedoMetallic : SV_TARGET0;
     float2 Velocity : SV_TARGET1;
+    float4 NormalRoughness : SV_TARGET2;
+    float4 F0Baked : SV_TARGET3;
+    float4 Emissive : SV_TARGET4;
 };
 
 PS_OUTPUT PS(VS_OUTPUT_PS_INPUT pin)
@@ -86,7 +83,11 @@ PS_OUTPUT PS(VS_OUTPUT_PS_INPUT pin)
     float2 prevNDC = pin.PrevPosCSNoJitter.xy / pin.PrevPosCSNoJitter.w;
     float2 velocity = prevNDC - currentNDC;
 
-    output.Color = float4(ShadePBR(material, color.rgb, pin.PosW, pin.Normal, pin.TexC), 1.0f);
+    PBRSurface surface = SamplePBRSurface(material, color.rgb, pin.PosW, pin.Normal, pin.TexC);
+    output.AlbedoMetallic = float4(surface.Albedo, surface.Metallic);
+    output.NormalRoughness = float4(surface.Normal, surface.Roughness);
+    output.F0Baked = float4(surface.F0, surface.Baked);
+    output.Emissive = float4(surface.Emissive, 0.0f);
     output.Velocity = velocity;
     
     return output;

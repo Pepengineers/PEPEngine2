@@ -15,6 +15,8 @@ struct WorldLighting
 inline WorldLighting CollectWorldLights(World& world)
 {
     WorldLighting result;
+    result.Main.LightRadiance = {};
+    result.Main.SunShadowFlags = 0;
     world.GetECS().ForEach<TransformComponent, LightComponent>(
         [&result](Entity entity, TransformComponent& transform, LightComponent& light)
         {
@@ -43,7 +45,7 @@ inline WorldLighting CollectWorldLights(World& world)
             data.InnerCos = std::cos(XMConvertToRadians(std::clamp(light.InnerAngle, 0.0f, outerAngle)));
             data.ShadowFlags = (light.CastShadows ? 1u : 0u) | (light.ShadowUpdate == ShadowUpdateMode::EveryFrame ? 2u : 0u);
             data.ShadowRevision = light.ShadowRevision;
-            BuildLocalLightShadowMatrices(data);
+            if (light.CastShadows) BuildLocalLightShadowMatrices(data);
             result.Local.push_back(data);
         });
     std::sort(result.Local.begin(), result.Local.end(), [](const auto& a, const auto& b) { return a.EntityId < b.EntityId; });

@@ -21,6 +21,8 @@ int main()
         spot.AddComponent<LightComponent>().Type = LightType::Spot;
 
         auto frame = CollectWorldLights(world);
+        Require(frame.Main.LightRadiance.x == 0 && frame.Main.SunShadowFlags == 0,
+            "A world without an enabled directional light must not retain a default sun");
         Require(frame.Local.size() == 2, "ECS point and spot lights must be collected");
         Require(frame.Local[0].ShadowFirstSlice == 0 && frame.Local[1].ShadowFirstSlice == 6,
             "Point lights need six shadow faces and spot lights one");

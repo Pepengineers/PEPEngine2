@@ -90,6 +90,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITTransparencyPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredLightingPass.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OpaquePass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -198,6 +199,10 @@
     <None Include="Shaders\ShadowFrustum.hlsli" />
     <None Include="Shaders\FullScreenVS.hlsl" />
     <None Include="Shaders\OpaquePass.hlsl" />
+    <None Include="Shaders\DeferredLighting.hlsl" />
+    <None Include="Shaders\LocalShadows.hlsli" />
+    <None Include="Shaders\PBRSurface.hlsli" />
+    <None Include="Shaders\PBRLighting.hlsli" />
     <None Include="Shaders\PBR.hlsli" />
     <None Include="Shaders\PBRMath.hlsli" />
     <None Include="Shaders\TransparentPass.hlsl" />

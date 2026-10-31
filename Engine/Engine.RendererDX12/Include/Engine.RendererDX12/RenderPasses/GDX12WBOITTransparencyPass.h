@@ -8,7 +8,7 @@ public:
 	{ 
 		_flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_GEOMETRY | RENDER_PASS_FLAG_USE_MATERIALS | 
 		RENDER_PASS_FLAG_USE_INSTANCES; 
-		_numInputs = 5;
+		_numInputs = 6;
 		_numOutputs = 2;
 		OUT_Accumulation = std::make_unique<GDX12Texture>();
 		OUT_Revealage = std::make_unique<GDX12Texture>();
@@ -65,7 +65,7 @@ public:
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
 		RSDesc1.NumSingleCBVSlots = 3;
-		RSDesc1.NumSingleSRVSlots = 7;
+		RSDesc1.NumSingleSRVSlots = 9;
 		RSDesc1.StaticSamplers = GetStaticSamplers();
 		CD3DX12_STATIC_SAMPLER_DESC shadowSampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
 		shadowSampler.AddressU = shadowSampler.AddressV = shadowSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
@@ -112,7 +112,7 @@ public:
 		PSODesc1.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 		PSODesc1.SampleDesc.Count = 1;
 		PSODesc1.SampleDesc.Quality = 0;
-		PSODesc1.DSVFormat = IN_DepthStencil->GetTexture()->GetFormat();
+		PSODesc1.DSVFormat = DXGI_FORMAT_D32_FLOAT;
 
 		// Accumulation
 		PSODesc1.BlendState.RenderTarget[0].BlendEnable = true;
@@ -171,12 +171,15 @@ public:
 		cmdList->SetGraphicsSRV(2, currentFrameConstants->InstanceCache->GetSRV()->GPUHandle);
 		for (UINT input = 1; input < 5; ++input)
 			cmdList->SetGraphicsSRV(2 + input, _inputs[input]->GetTexture()->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(7, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
+		cmdList->SetGraphicsSRV(7, currentFrameConstants->LocalLightCache->GetSRV()->GPUHandle);
+		cmdList->SetGraphicsSRV(8, _inputs[5]->GetTexture()->GetSRV()->GPUHandle);
+		cmdList->SetGraphicsSRV(9, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
 
 		cmdList->ResourceBarrier({ currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetIndirectArgsBarrier(),
 		currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetIndirectArgsBarrier(),
 		OUT_Accumulation->GetResource()->GetRenderTargetBarrier(),
-		OUT_Revealage->GetResource()->GetRenderTargetBarrier() });
+		OUT_Revealage->GetResource()->GetRenderTargetBarrier(),
+		depthStencil->GetResource()->GetDepthWriteBarrier() });
 		cmdList->SetRenderTargets({ OUT_Accumulation.get(), OUT_Revealage.get() },
 			depthStencil);
 		cmdList->ClearRenderTargetView(OUT_Accumulation.get());

@@ -1,6 +1,7 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
+#include <optional>
 #include <stdexcept>
 
 class GDX12LocalShadowPass final : public GDX12RenderPass
@@ -93,7 +94,13 @@ public:
         for (UINT lightIndex = 0; lightIndex < _resources->LocalLights.size(); ++lightIndex)
         {
             const auto& light = _resources->LocalLights[lightIndex];
-            if (!ShouldRenderLocalShadow(light, _cached[lightIndex].get())) continue;
+            if (light.ShadowFirstSlice == UINT_MAX)
+            {
+                _cached[lightIndex].reset();
+                continue;
+            }
+            const auto& cached = _cached[lightIndex];
+            if (!ShouldRenderLocalShadow(light, cached ? &*cached : nullptr)) continue;
             for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
             {
                 commands->SetComputeRootSignature(_computeRoot.get());
@@ -133,7 +140,7 @@ public:
                     visibility.Commands->GetResource().D3DResource.Get(), 0, visibility.Counter->GetResource().D3DResource.Get(), 0);
                 ++_renderedViews;
             }
-            _cached[lightIndex] = std::make_unique<GDX12LocalLightConstants>(light);
+            _cached[lightIndex] = light;
         }
         commands->ResourceBarrier({ _maps->GetResource()->GetSRVBarrier() });
         commands->EndPixEvent();
@@ -205,7 +212,7 @@ private:
         std::unique_ptr<GDX12UploadBuffer<UINT>> Counter;
     };
     std::vector<Visibility> _visibility;
-    std::vector<std::unique_ptr<GDX12LocalLightConstants>> _cached;
+    std::vector<std::optional<GDX12LocalLightConstants>> _cached;
     std::vector<std::unique_ptr<GDX12Descriptor>> _dsvs;
     std::unique_ptr<GDX12Texture> _maps;
     std::unique_ptr<GDX12RootSignature> _graphicsRoot, _computeRoot;

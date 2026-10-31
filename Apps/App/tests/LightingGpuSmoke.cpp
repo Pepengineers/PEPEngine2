@@ -2,6 +2,8 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/GDX12ShadowCascades.h"
 #include "App.Base/Modules/RenderModule.h"
@@ -74,6 +76,53 @@ static void CheckReadback(GDX12Device& device, GDX12Texture& texture, UINT subre
     Require(!depth || foundCaster, "Shadow ExecuteIndirect did not render the test caster");
 }
 
+static std::vector<float> ReadHDR(GDX12Device& device, GDX12Texture& texture)
+{
+    const auto desc = texture.GetResource()->D3DResource->GetDesc();
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
+    UINT64 bytes = 0;
+    device.GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nullptr, nullptr, &bytes);
+    const auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
+    const auto bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(bytes);
+    ComPtr<ID3D12Resource> readback;
+    ThrowIfFailed(device.GetDevice()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &bufferDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback)));
+    auto* queue = device.GetCommandQueue();
+    auto* commands = queue->GetCommandList();
+    commands->ResourceBarrier({ texture.GetResource()->GetCopySourceBarrier() });
+    D3D12_TEXTURE_COPY_LOCATION source = {};
+    source.pResource = texture.GetResource()->D3DResource.Get();
+    source.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    D3D12_TEXTURE_COPY_LOCATION destination = {};
+    destination.pResource = readback.Get();
+    destination.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    destination.PlacedFootprint = footprint;
+    commands->GetCommandList()->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+    commands->ResourceBarrier({ texture.GetResource()->GetSRVBarrier() });
+    queue->ExecuteCommandList(commands);
+    queue->Flush();
+    void* mapped = nullptr;
+    D3D12_RANGE readRange = { 0, static_cast<SIZE_T>(bytes) };
+    ThrowIfFailed(readback->Map(0, &readRange, &mapped));
+    std::vector<float> result;
+    result.reserve(texture.GetWidth() * texture.GetHeight() * 3);
+    for (UINT y = 0; y < texture.GetHeight(); ++y)
+        for (UINT x = 0; x < texture.GetWidth(); ++x)
+        {
+            const auto* pixel = reinterpret_cast<const uint16_t*>(static_cast<const unsigned char*>(mapped) +
+                footprint.Offset + y * footprint.Footprint.RowPitch + x * 8);
+            for (UINT channel = 0; channel < 3; ++channel)
+            {
+                const float value = PackedVector::XMConvertHalfToFloat(pixel[channel]);
+                Require(std::isfinite(value) && value >= 0.0f, "Deferred HDR contains invalid values");
+                result.push_back(value);
+            }
+        }
+    const D3D12_RANGE noWrite = { 0, 0 };
+    readback->Unmap(0, &noWrite);
+    return result;
+}
+
 int main()
 {
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
@@ -117,11 +166,19 @@ int main()
         localShadows.Initialize();
         GDX12OpaquePass opaque;
         opaque.Setup(&resources, nullptr, &common);
-        opaque.SetInputs({ shadows.GetOutput(0), environment.GetOutput(0), environment.GetOutput(1), environment.GetOutput(2) });
+        opaque.SetInputs({});
         opaque.Initialize();
+        GDX12DeferredLightingPass deferred;
+        deferred.Setup(&resources, nullptr, &common);
+        deferred.SetInputs({ opaque.GetOutput(0), opaque.GetOutput(3), opaque.GetOutput(4), opaque.GetOutput(5),
+            opaque.GetOutput(2), shadows.GetOutput(0), environment.GetOutput(0), environment.GetOutput(1),
+            environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0) });
+        deferred.Initialize();
+        GDX12GPUCullingPass culling;
+        culling.Setup(&resources, nullptr, &common);
         GDX12WBOITTransparencyPass transparency;
         transparency.Setup(&resources, nullptr, &common);
-        transparency.SetInputs({ opaque.GetOutput(2), shadows.GetOutput(0), environment.GetOutput(0), environment.GetOutput(1), environment.GetOutput(2) });
+        transparency.SetInputs({ opaque.GetOutput(2), shadows.GetOutput(0), environment.GetOutput(0), environment.GetOutput(1), environment.GetOutput(2), localShadows.GetOutput(0) });
         transparency.Initialize();
         auto* queue = device.GetCommandQueue();
         auto* commands = queue->GetCommandList();
@@ -138,6 +195,11 @@ int main()
         triangle.Vertices[0].Position = Vector3(-100, 0, -100);
         triangle.Vertices[1].Position = Vector3(100, 0, -100);
         triangle.Vertices[2].Position = Vector3(0, 0, 100);
+        for (auto& vertex : triangle.Vertices)
+        {
+            vertex.Normal = Vector3::UnitY;
+            vertex.Tangent = Vector3::UnitX;
+        }
         triangle.Indices = { 0, 2, 1 };
         BoundingBox bounds(XMFLOAT3(0, 0, 0), XMFLOAT3(100, 0.1f, 100));
         Mesh mesh({ std::move(triangle) }, bounds);
@@ -146,7 +208,9 @@ int main()
         frame->TransformCache->Resize(1);
         frame->TransformCache->CopyData(0, GDX12TransformConstants{});
         frame->MaterialCache->Resize(1);
-        frame->MaterialCache->CopyData(0, GDX12MaterialConstants{});
+        GDX12MaterialConstants material;
+        material.Metallic = 0.0f;
+        frame->MaterialCache->CopyData(0, material);
         frame->InstanceCache->Resize(1);
         GDX12InstanceData instance = {};
         instance.BoundingBoxCenter = bounds.Center;
@@ -161,14 +225,27 @@ int main()
         frame->ShadowCB->CopyData(0, BuildShadowCascades(view.Invert(), XMConvertToRadians(60.0f), 1.0f,
             0.1f, 10000.0f, Vector3(0.35f, -1.0f, 0.25f)));
         const UINT textureSlot = resources.SRV_UAV_Heap->GetAvailableIndex(Texture2D_StartIndex, Texture2D_RangeLength);
-        D3D12_SHADER_RESOURCE_VIEW_DESC testTexture = {};
-        testTexture.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        testTexture.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        testTexture.Texture2D.MipLevels = 1;
-        testTexture.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        device.GetDevice()->CreateShaderResourceView(environment.GetOutput(2)->GetTexture()->GetResource()->D3DResource.Get(),
-            &testTexture, resources.SRV_UAV_Heap->GetCPUHandle(textureSlot));
+        GDX12Texture white;
+        GDX12TextureDesc whiteDesc;
+        whiteDesc.Width = whiteDesc.Height = 1;
+        whiteDesc.Format = whiteDesc.SRVDesc.Format = whiteDesc.RTVDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        whiteDesc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        whiteDesc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        whiteDesc.SRVDesc.Texture2D.MipLevels = 1;
+        whiteDesc.SRV_UAV_Heap = resources.SRV_UAV_Heap.get();
+        whiteDesc.SRVHeapIndex = textureSlot;
+        whiteDesc.CreateRTV = true;
+        whiteDesc.RTVDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+        whiteDesc.RTVHeap = resources.RTVHeap.get();
+        whiteDesc.RTVHeapIndex = resources.RTVHeap->GetAvailableIndex();
+        whiteDesc.ClearValue = { 1, 1, 1, 1 };
+        white.Initialize(whiteDesc);
+        material.DiffuseIndex = textureSlot - Texture2D_StartIndex;
+        frame->MaterialCache->CopyData(0, material);
         commands = queue->GetCommandList();
+        commands->ResourceBarrier({ white.GetResource()->GetRenderTargetBarrier() });
+        commands->ClearRenderTargetView(&white);
+        commands->ResourceBarrier({ white.GetResource()->GetSRVBarrier() });
         shadows.Execute(commands);
         queue->ExecuteCommandList(commands);
         queue->Flush();
@@ -211,6 +288,140 @@ int main()
         Require(localShadows.GetLastFrameRenderedViews() == 6, "EveryFrame point must update all six faces");
         updateLocal();
         Require(localShadows.GetLastFrameRenderedViews() == 6, "EveryFrame point updates must continue on later frames");
+
+        point.Type = 2;
+        point.ShadowFlags = 1;
+        BuildLocalLightShadowMatrices(point);
+        spot.ShadowFirstSlice = UINT_MAX;
+        updateLocal();
+        Require(localShadows.GetLastFrameRenderedViews() == 1, "First cached spot must own the single shadow slice");
+        point.ShadowFirstSlice = UINT_MAX;
+        spot.ShadowFirstSlice = 0;
+        updateLocal();
+        Require(localShadows.GetLastFrameRenderedViews() == 1, "Second spot must replace the slice owner");
+        point.ShadowFirstSlice = 0;
+        spot.ShadowFirstSlice = UINT_MAX;
+        updateLocal();
+        Require(localShadows.GetLastFrameRenderedViews() == 1, "Re-enabled cached spot must reclaim and rebake its overwritten slice");
+        point.Type = 1;
+        point.ShadowFlags = 3;
+        BuildLocalLightShadowMatrices(point);
+        spot.ShadowFirstSlice = 6;
+        updateLocal();
+
+        GDX12CameraConstants camera = {};
+        Matrix projection = Matrix::CreatePerspectiveFieldOfView(XMConvertToRadians(60.0f), 1.0f, 0.1f, 10000.0f);
+        const float reverseRange = 0.1f / (10000.0f - 0.1f);
+        projection._33 = reverseRange;
+        projection._43 = reverseRange * 10000.0f;
+        const Matrix viewProjection = view * projection;
+        XMStoreFloat4x4(&camera.ViewProj, XMMatrixTranspose(viewProjection));
+        camera.ViewProjNoJitter = camera.PrevViewProjNoJitter = camera.ViewProj;
+        XMStoreFloat4x4(&camera.View, XMMatrixTranspose(view));
+        XMStoreFloat4x4(&camera.InvViewProj, XMMatrixTranspose(viewProjection.Invert()));
+        camera.CameraLocation = { 0, 300, -400 };
+        camera.NearPlane = 0.1f;
+        camera.FarPlane = 10000.0f;
+        frame->CameraCB->Resize(1);
+        frame->CameraCB->CopyData(0, camera);
+        common.ActiveCameraCBufferIndex = 0;
+        frame->CameraVisibilityCommands.emplace_back();
+        auto& visibility = frame->CameraVisibilityCommands[0];
+        visibility.VisibleOpaqueCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(&device, 1, EBufferType::Default, false);
+        visibility.VisibleTransparentCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(&device, 1, EBufferType::Default, false);
+        visibility.OpaqueDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(&device, 1, EBufferType::Default, false);
+        visibility.TransparentDrawCounter = std::make_unique<GDX12UploadBuffer<UINT>>(&device, 1, EBufferType::Default, false);
+        visibility.VisibleOpaqueCommandsCache->CreateUAV(resources.SRV_UAV_Heap.get(), resources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        visibility.VisibleTransparentCommandsCache->CreateUAV(resources.SRV_UAV_Heap.get(), resources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        visibility.OpaqueDrawCounter->CreateUAV(resources.SRV_UAV_Heap.get(), resources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        visibility.TransparentDrawCounter->CreateUAV(resources.SRV_UAV_Heap.get(), resources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        GDX12MainConstants lighting;
+        lighting.RenderTargetSize = { 64, 64 };
+        lighting.LightRadiance = {};
+        lighting.SunShadowFlags = 0;
+        lighting.LocalLightCount = 2;
+        frame->MainCB->CopyData(0, lighting);
+        const auto renderLighting = [&](XMFLOAT3 pointRadiance, XMFLOAT3 spotRadiance)
+        {
+            point.Radiance = pointRadiance;
+            spot.Radiance = spotRadiance;
+            const GDX12LocalLightConstants lights[] = { point, spot };
+            frame->LocalLightCache->CopyData(0, lights, 2);
+            auto* list = queue->GetCommandList();
+            culling.Execute(list);
+            opaque.Execute(list);
+            deferred.Execute(list);
+            transparency.Execute(list);
+            queue->ExecuteCommandList(list);
+            queue->Flush();
+            return ReadHDR(device, *deferred.GetOutput(0)->GetTexture());
+        };
+        const auto ambient = renderLighting({}, {});
+        const auto pointLit = renderLighting({ 1, 1, 1 }, {});
+        const auto spotLit = renderLighting({}, { 1, 1, 1 });
+        float pointIncrease = 0.0f;
+        float spotIncrease = 0.0f;
+        for (size_t channel = 0; channel < ambient.size(); ++channel)
+        {
+            pointIncrease = (std::max)(pointIncrease, pointLit[channel] - ambient[channel]);
+            spotIncrease = (std::max)(spotIncrease, spotLit[channel] - ambient[channel]);
+        }
+        Require(pointIncrease > 0.01f, "Deferred point light did not illuminate the G-buffer geometry");
+        Require(spotIncrease > 0.01f, "Deferred spot light did not illuminate the G-buffer geometry");
+        Require(ambient[0] + ambient[1] + ambient[2] > 0.01f, "Deferred background did not sample the scene cubemap");
+        // Force an occluder in every view to verify shadow sampling independently of map generation.
+        GDX12Descriptor occludedViews;
+        D3D12_DEPTH_STENCIL_VIEW_DESC occludedDSV = {};
+        occludedDSV.Format = DXGI_FORMAT_D32_FLOAT;
+        occludedDSV.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+        occludedDSV.Texture2DArray.ArraySize = 7;
+        auto* localMaps = localShadows.GetOutput(0)->GetTexture();
+        occludedViews.InitAsDSV(localMaps->GetResource()->D3DResource.Get(), &occludedDSV,
+            resources.DSVHeap.get(), resources.DSVHeap->GetAvailableIndex());
+        const auto occludeLocalMaps = [&]()
+        {
+            auto* list = queue->GetCommandList();
+            list->ResourceBarrier({ localMaps->GetResource()->GetDepthWriteBarrier() });
+            list->GetCommandList()->ClearDepthStencilView(occludedViews.CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 0, 0, 0, nullptr);
+            list->ResourceBarrier({ localMaps->GetResource()->GetSRVBarrier() });
+            queue->ExecuteCommandList(list);
+            queue->Flush();
+        };
+        occludeLocalMaps();
+        const auto occluded = renderLighting({ 1, 1, 1 }, { 1, 1, 1 });
+        float originalEnergy = 0, occludedEnergy = 0;
+        for (size_t channel = 0; channel < ambient.size(); ++channel)
+        {
+            originalEnergy += pointLit[channel] + spotLit[channel] - 2 * ambient[channel];
+            occludedEnergy += occluded[channel] - ambient[channel];
+        }
+        std::cout << "Shadow occlusion energy: " << occludedEnergy << " / " << originalEnergy << '\n';
+        Require(occludedEnergy < originalEnergy * 0.05f,
+            "Point/spot shadow maps did not suppress direct illumination");
+        ++spot.ShadowRevision;
+        updateLocal();
+        material.RenderLayer = 2;
+        material.Opacity = 0.5f;
+        frame->MaterialCache->CopyData(0, material);
+        renderLighting({}, {});
+        const auto glassAmbient = ReadHDR(device, *transparency.GetOutput(0)->GetTexture());
+        renderLighting({ 1, 1, 1 }, { 1, 1, 1 });
+        const auto glassLit = ReadHDR(device, *transparency.GetOutput(0)->GetTexture());
+        float glassIncrease = 0.0f;
+        for (size_t channel = 0; channel < glassAmbient.size(); ++channel)
+            glassIncrease = (std::max)(glassIncrease, glassLit[channel] - glassAmbient[channel]);
+        Require(glassIncrease > 0.001f, "Forward OIT glass did not receive local lighting");
+        occludeLocalMaps();
+        renderLighting({ 1, 1, 1 }, { 1, 1, 1 });
+        const auto glassOccluded = ReadHDR(device, *transparency.GetOutput(0)->GetTexture());
+        originalEnergy = occludedEnergy = 0;
+        for (size_t channel = 0; channel < glassAmbient.size(); ++channel)
+        {
+            originalEnergy += glassLit[channel] - glassAmbient[channel];
+            occludedEnergy += glassOccluded[channel] - glassAmbient[channel];
+        }
+        Require(occludedEnergy < originalEnergy * 0.05f, "Forward OIT glass did not receive local shadows");
+
         for (UINT64 i = 0; i < info->GetNumStoredMessagesAllowedByRetrievalFilter(); ++i)
         {
             SIZE_T size = 0;
@@ -221,7 +432,7 @@ int main()
             if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR)
                 throw std::runtime_error(message->pDescription);
         }
-        std::cout << "DX12 lighting smoke: CSM/PBR PSOs, IBL dispatch/readback, and debug validation passed.\n";
+        std::cout << "DX12 lighting smoke: cubemap/IBL, cached point/spot shadows, deferred light readback, and debug validation passed.\n";
         GDX12ShaderCompiler::Shutdown();
         return 0;
     }

@@ -1,5 +1,6 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include <array>
 
 class GDX12OpaquePass : public GDX12RenderPass
 {
@@ -8,8 +9,8 @@ public:
 	{ 
 		_flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_GEOMETRY | RENDER_PASS_FLAG_USE_MATERIALS
 		| RENDER_PASS_FLAG_USE_INSTANCES; 
-		_numInputs = 4;
-		_numOutputs = 3;
+		_numInputs = 0;
+		_numOutputs = 6;
 		OUT_Accumulation = std::make_unique<GDX12Texture>();
 		OUT_VelocityBuffer = std::make_unique<GDX12Texture>();
 		OUT_DepthStencil = std::make_unique<GDX12Texture>();
@@ -17,15 +18,21 @@ public:
 		_outputs.push_back(OUT_Accumulation.get());
 		_outputs.push_back(OUT_VelocityBuffer.get());
 		_outputs.push_back(OUT_DepthStencil.get());
+		for (auto& texture : _surfaceBuffers)
+		{
+			texture = std::make_unique<GDX12Texture>();
+			_outputs.push_back(texture.get());
+		}
 	}
 
-	// Output 0 - AccumulationTexture
+	// Output 0 - Albedo/metallic
 	// Output 1 - MotionVectors
 	// Output 2 - DepthStencil
+	// Outputs 3, 4, 5 - Normal/roughness, F0/baked, emissive
 	void Initialize() override
 	{
 		GDX12TextureDesc TextureDesc1;
-		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		TextureDesc1.Width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
 		TextureDesc1.Height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
 
@@ -53,22 +60,35 @@ public:
 		TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
 
 		OUT_VelocityBuffer->Initialize(TextureDesc1);
+		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+		for (auto& texture : _surfaceBuffers)
+		{
+			TextureDesc1.RTVHeapIndex = _resources->RTVHeap->GetAvailableIndex();
+			TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+			texture->Initialize(TextureDesc1);
+		}
 
-		GDX12TextureDesc desc;
-		desc.CreateSRV = false;
+		auto& desc = _depthDesc;
+		desc.CreateSRV = true;
+		desc.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
+		desc.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+		desc.SRVDesc.Format = DXGI_FORMAT_R32_FLOAT;
+		desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+		desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+		desc.SRVDesc.Texture2D.MipLevels = 1;
 		desc.DSVHeap = _resources->DSVHeap.get();
 
 		desc.CreateDSV = true;
 		desc.DSVHeapIndex = _resources->DSVHeap->GetAvailableIndex();
 		desc.Format = desc.DSVDesc.Format = DXGI_FORMAT_D32_FLOAT;
-		desc.Width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;;
-		desc.Height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;;
+		desc.Width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
+		desc.Height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
 		desc.ClearValue = { 0.f, 0.f, 0.f, 0.f };
 
 		desc.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
 		desc.DSVDesc.Texture2D.MipSlice = 0;
 
-		OUT_DepthStencil->Initialize(desc);
+		CreateDepth(desc.Width, desc.Height);
 
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
@@ -77,14 +97,9 @@ public:
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
-		RSDesc1.NumSingleCBVSlots = 3;
-		RSDesc1.NumSingleSRVSlots = 7;
+		RSDesc1.NumSingleCBVSlots = 2;
+		RSDesc1.NumSingleSRVSlots = 3;
 		RSDesc1.StaticSamplers = GetStaticSamplers();
-		CD3DX12_STATIC_SAMPLER_DESC shadowSampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
-		shadowSampler.AddressU = shadowSampler.AddressV = shadowSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
-		shadowSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
-		shadowSampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
-		RSDesc1.StaticSamplers.push_back(shadowSampler);
 		RSDesc1.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
 		RSDesc1.Constants.push_back(1);
 		_opaqueRS = std::make_unique<GDX12RootSignature>(_resources->Device, RSDesc1);
@@ -106,9 +121,9 @@ public:
 		CSDesc1.pArgumentDescs = args.data();
 		CSDesc1.NodeMask = 0;
 
-		_resources->Device->GetDevice()->CreateCommandSignature(&CSDesc1,
+		ThrowIfFailed(_resources->Device->GetDevice()->CreateCommandSignature(&CSDesc1,
 			_opaqueRS->GetRootSignature().Get(),
-			IID_PPV_ARGS(&_opaqueCS));
+			IID_PPV_ARGS(&_opaqueCS)));
 
 		// Pipeline State Objects
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC PSODesc1 = {};
@@ -123,9 +138,11 @@ public:
 		PSODesc1.RasterizerState.FrontCounterClockwise = TRUE;
 		PSODesc1.SampleMask = UINT_MAX;
 		PSODesc1.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-		PSODesc1.NumRenderTargets = 2;
+		PSODesc1.NumRenderTargets = 5;
 		PSODesc1.RTVFormats[0] = OUT_Accumulation->GetFormat();
 		PSODesc1.RTVFormats[1] = OUT_VelocityBuffer->GetFormat();
+		for (UINT i = 0; i < _surfaceBuffers.size(); ++i)
+			PSODesc1.RTVFormats[i + 2] = _surfaceBuffers[i]->GetFormat();
 		PSODesc1.SampleDesc.Count = 1;
 		PSODesc1.SampleDesc.Quality = 0;
 		PSODesc1.DSVFormat = OUT_DepthStencil->GetTexture()->GetFormat();
@@ -142,13 +159,12 @@ public:
 		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[_commonData->ActiveCameraCBufferIndex];
 		GDX12Texture* depthStencil = OUT_DepthStencil->GetTexture();
 
-		cmdList->BeginPixEvent("Opaque Render Pass", Colors::ForestGreen);
+		cmdList->BeginPixEvent("Opaque G-buffer", Colors::ForestGreen);
 		cmdList->SetViewport(OUT_Accumulation->GetViewport());
 		cmdList->SetScissorRect(OUT_Accumulation->GetScissorRect());
 		cmdList->SetGraphicsRootSignature(_opaqueRS.get());
 		cmdList->SetPipelineState(_opaquePSO.Get());
 		cmdList->SetGraphicsRootConstantBufferView(1, currentFrameConstants->MainCB->GetElementAddress(0));
-		cmdList->SetGraphicsRootConstantBufferView(3, currentFrameConstants->ShadowCB->GetElementAddress(0));
 		cmdList->SetGraphicsRootConstantBufferView(2, currentFrameConstants->CameraCB->
 			GetElementAddress(_commonData->ActiveCameraCBufferIndex));
 		cmdList->SetGeometryBuffer(_resources->GeometryBuffer.get());
@@ -157,19 +173,22 @@ public:
 		cmdList->SetGraphicsSRV(0, currentFrameConstants->MaterialCache->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(1, currentFrameConstants->TransformCache->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(2, currentFrameConstants->InstanceCache->GetSRV()->GPUHandle);
-		for (UINT input = 0; input < 4; ++input)
-			cmdList->SetGraphicsSRV(3 + input, _inputs[input]->GetTexture()->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(7, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
+		cmdList->SetGraphicsSRV(3, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
 		cmdList->ResourceBarrier({ 
 			currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().GetIndirectArgsBarrier(),
 			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetIndirectArgsBarrier(),
 			OUT_Accumulation->GetResource()->GetRenderTargetBarrier(),
 			OUT_VelocityBuffer->GetResource()->GetRenderTargetBarrier(),
+			_surfaceBuffers[0]->GetResource()->GetRenderTargetBarrier(),
+			_surfaceBuffers[1]->GetResource()->GetRenderTargetBarrier(),
+			_surfaceBuffers[2]->GetResource()->GetRenderTargetBarrier(),
 			depthStencil->GetResource()->GetDepthWriteBarrier() });
-		cmdList->SetRenderTargets({ OUT_Accumulation.get(), OUT_VelocityBuffer.get() }, depthStencil);
-		cmdList->ClearDepthStencilView(depthStencil);
+		cmdList->SetRenderTargets({ OUT_Accumulation.get(), OUT_VelocityBuffer.get(),
+			_surfaceBuffers[0].get(), _surfaceBuffers[1].get(), _surfaceBuffers[2].get() }, depthStencil);
+		cmdList->GetCommandList()->ClearDepthStencilView(depthStencil->GetDSV()->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0, 0, nullptr);
 		cmdList->ClearRenderTargetView(OUT_Accumulation.get());
 		cmdList->ClearRenderTargetView(OUT_VelocityBuffer.get());
+		for (auto& texture : _surfaceBuffers) cmdList->ClearRenderTargetView(texture.get());
 		cmdList->ExecuteIndirect(_opaqueCS.Get(), _resources->IndirectCommandsCache->GetElementCount(),
 			currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().D3DResource.Get(), 0,
 			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().D3DResource.Get(), 0);
@@ -182,7 +201,8 @@ public:
 		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
 		OUT_Accumulation->Resize(newWidth, newHeight);
 		OUT_VelocityBuffer->Resize(newWidth, newHeight);
-		OUT_DepthStencil->Resize(newWidth, newHeight);
+		for (auto& texture : _surfaceBuffers) texture->Resize(newWidth, newHeight);
+		CreateDepth(newWidth, newHeight);
 	}
 
 	void ClearDenendencies() override
@@ -192,6 +212,8 @@ public:
 		OUT_Accumulation.reset();
 		OUT_VelocityBuffer.reset();
 		OUT_DepthStencil.reset();
+		_depthDesc.ExternalResource.Reset();
+		for (auto& texture : _surfaceBuffers) texture.reset();
 		_opaqueVS.Reset();
 		_opaquePS.Reset();
 		_opaqueRS.reset();
@@ -200,6 +222,22 @@ public:
 	}
 
 private:
+	void CreateDepth(UINT width, UINT height)
+	{
+		_depthDesc.Width = width;
+		_depthDesc.Height = height;
+		_depthDesc.ExternalResource.Reset();
+		const auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+		const auto resource = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, width, height,
+			1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
+		D3D12_CLEAR_VALUE clear = {};
+		clear.Format = DXGI_FORMAT_D32_FLOAT;
+		clear.DepthStencil.Depth = 0.0f;
+		ThrowIfFailed(_resources->Device->GetDevice()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE,
+			&resource, D3D12_RESOURCE_STATE_COMMON, &clear, IID_PPV_ARGS(&_depthDesc.ExternalResource)));
+		OUT_DepthStencil->Initialize(_depthDesc);
+	}
+
 	ComPtr<ID3DBlob> _opaqueVS;
 	ComPtr<ID3DBlob> _opaquePS;
 	std::unique_ptr<GDX12RootSignature> _opaqueRS;
@@ -209,4 +247,6 @@ private:
 	std::unique_ptr<GDX12Texture> OUT_Accumulation;
 	std::unique_ptr<GDX12Texture> OUT_VelocityBuffer;
 	std::unique_ptr<GDX12Texture> OUT_DepthStencil;
+	std::array<std::unique_ptr<GDX12Texture>, 3> _surfaceBuffers;
+	GDX12TextureDesc _depthDesc;
 };

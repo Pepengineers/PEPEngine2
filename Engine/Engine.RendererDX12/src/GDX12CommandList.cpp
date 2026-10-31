@@ -159,7 +159,7 @@ void GDX12CommandList::ClearRenderTargetView(GDX12Texture* texture)
 void GDX12CommandList::ClearDepthStencilView(GDX12Texture* texture)
 {
 	_commandList->ClearDepthStencilView(texture->GetDSV()->CPUHandle, 
-		D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL, texture->GetClearValue().DepthStencil.Depth, texture->GetClearValue().DepthStencil.Stencil, 0, nullptr);
+		(texture->GetClearValue().Format == DXGI_FORMAT_D24_UNORM_S8_UINT || texture->GetClearValue().Format == DXGI_FORMAT_D32_FLOAT_S8X24_UINT ? D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL : D3D12_CLEAR_FLAG_DEPTH), texture->GetClearValue().DepthStencil.Depth, texture->GetClearValue().DepthStencil.Stencil, 0, nullptr);
 }
 
 void GDX12CommandList::ClearUnorderedAccessViewFloat(const D3D12_GPU_DESCRIPTOR_HANDLE& gpuHandle, const D3D12_CPU_DESCRIPTOR_HANDLE& cpuHandle, ID3D12Resource* resource, const float values[4])

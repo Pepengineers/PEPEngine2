@@ -36,6 +36,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FSRUpscalePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12NISUpscalePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OpaquePass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredLightingPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OutputToScreenPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SyncPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureClearPass.h" />
@@ -95,6 +96,10 @@
     <None Include="Shaders\ShadowFrustum.hlsli" />
     <None Include="Shaders\FullScreenVS.hlsl" />
     <None Include="Shaders\OpaquePass.hlsl" />
+    <None Include="Shaders\DeferredLighting.hlsl" />
+    <None Include="Shaders\PBRSurface.hlsli" />
+    <None Include="Shaders\PBRLighting.hlsli" />
+    <None Include="Shaders\LocalShadows.hlsli" />
     <None Include="Shaders\PBR.hlsli" />
     <None Include="Shaders\PBRMath.hlsli" />
     <None Include="Shaders\TransparentPass.hlsl" />

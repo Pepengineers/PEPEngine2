@@ -27,7 +27,14 @@ approximation. The shared OIT passes use floating-point weighted accumulation,
 multiplicative revealage, and normalized composition for overlapping bottles.
 OIT approximates blended transparency; it does not simulate glass refraction.
 
-Both geometry passes use Cook-Torrance PBR with GGX distribution, correlated
+Opaque geometry writes a G-buffer (albedo/metallic, world normal/roughness,
+F0/baked flag, emissive, motion and sampled reverse-Z depth). A 16x16 tiled compute
+pass reconstructs world position, rejects local-light spheres against each tile's
+frustum and depth range, and evaluates lighting into HDR. Tile-list overflow falls
+back to the complete light list. The source cubemap supplies the visible background.
+Transparent bottles retain forward OIT and receive the same local-light PBR and PCF shadows.
+
+Both lighting paths use Cook-Torrance PBR with GGX distribution, correlated
 Smith visibility, and Schlick Fresnel. Materials use metallic/roughness factors,
 RGB specular maps, normal maps, red-channel roughness maps, and emissive maps/colors.
 OBJ shininess supplies roughness when there is no roughness factor; Bistro's
