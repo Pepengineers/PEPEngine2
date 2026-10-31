@@ -34,8 +34,8 @@ RenderModule::RenderModule(Window* window, GameTimer* timer) :
 
 RenderModule::~RenderModule()
 {
-    _primaryDevice->GetCommandQueue()->Flush();
-    if (_dualGPUMode) { _secondaryDevice->GetCommandQueue()->Flush(); }
+    if (_primaryDevice && _primaryDevice->GetCommandQueue()) { _primaryDevice->GetCommandQueue()->Flush(); }
+    if (_secondaryDevice && _secondaryDevice->GetCommandQueue()) { _secondaryDevice->GetCommandQueue()->Flush(); }
 
     for (auto& renderpass : _primaryRenderPassExecutionList) { renderpass->ClearDenendencies(); }
     for (auto& renderpass : _secondaryRenderPassExecutionList) { renderpass->ClearDenendencies(); }

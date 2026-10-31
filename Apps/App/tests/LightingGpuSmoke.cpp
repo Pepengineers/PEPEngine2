@@ -3,6 +3,8 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/GDX12ShadowCascades.h"
+#include "App.Base/Modules/RenderModule.h"
+#include "Engine.Core/BenchmarkEngine.h"
 #include <d3d12sdklayers.h>
 #include <cmath>
 #include <iostream>
@@ -73,8 +75,17 @@ static void CheckReadback(GDX12Device& device, GDX12Texture& texture, UINT subre
 
 int main()
 {
+    SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
     try
     {
+        BenchmarkEngine engine;
+        auto& locator = BenchmarkEngine::GetLocator();
+        locator.RegisterModule(std::make_shared<RenderModule>(nullptr, nullptr));
+        const std::weak_ptr<RenderModule> original = locator.GetModule<RenderModule>();
+        locator.RegisterModule(std::make_shared<RenderModule>(nullptr, nullptr));
+        Require(original.expired(), "Replacing an uninitialized renderer must release it safely");
+        locator.UnregisterModule<RenderModule>();
+
         ComPtr<ID3D12Debug> debug;
         ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
         debug->EnableDebugLayer();

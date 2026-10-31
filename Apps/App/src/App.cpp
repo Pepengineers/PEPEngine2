@@ -24,7 +24,7 @@ namespace
 
             Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer));
             Locator.RegisterModule(std::make_shared<SceneManagerModule>(&Timer, scenePath));
-            return App::AddModules();
+            return BenchmarkEngine::AddModules();
         }
 
         void OnMouseDown(WPARAM, int x, int y) override

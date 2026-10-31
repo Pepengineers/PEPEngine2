@@ -74,7 +74,8 @@ depth range, and whole-texel stabilization. Build with the renderer's public inc
 directories, `/MD`, and `DirectXTK12.lib`.
 
 `tests/LightingGpuSmoke.cpp` runs without loading Bistro or opening a window. It
-creates the CSM/PBR pipeline states, renders one synthetic shadow caster through
+first checks replacement/removal of an uninitialized renderer, then creates the
+CSM/PBR pipeline states, renders one synthetic shadow caster through
 GPU culling and ExecuteIndirect, generates IBL on the GPU, and reads back the atlas,
 irradiance, radiance mips, and BRDF LUT under the DX12 debug layer. Build it with
 the App's include/link settings and the console subsystem.
