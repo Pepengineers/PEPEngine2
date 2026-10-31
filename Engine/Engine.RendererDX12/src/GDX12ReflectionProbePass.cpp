@@ -242,7 +242,7 @@ void GDX12ReflectionProbePass::PrepareFrame()
     if(d.World!=d.SubmittedWorld) { flush(); d.Entries.clear(); d.World=d.SubmittedWorld; }
     for(auto it=d.Entries.begin();it!=d.Entries.end();)
         if(std::none_of(d.Submitted.begin(),d.Submitted.end(),[&](const auto& probe) {return probe.Entity==it->first;})) { flush(); it=d.Entries.erase(it); } else ++it;
-    d.Active=enabled.GetValue() && quality.GetValue()!=0;
+    d.Active=ReflectionProbeLightingEnabled();
     if(!d.Active || d.Submitted.empty()) return;
     if(!d.Initialized) d.Initialize(*_resources,_commonData);
     constexpr UINT sizes[]={0,64,128,256},budgets[]={0,1,2,6};
@@ -296,7 +296,7 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
         // DX cubemap faces are left-handed; mirror RH projection X and reverse capture winding.
         projection._11=-projection._11;
         projection._33=desc.NearPlane/(desc.FarPlane-desc.NearPlane); projection._43=projection._33*desc.FarPlane;
-        for(UINT face=0;face<6;++face)
+        for(UINT face=entry.NextFace;face<(std::min)(entry.NextFace+d.FaceBudget,6u);++face)
         {
             const Matrix view=Matrix::CreateLookAt(desc.Position,desc.Position+directions[face],ups[face]);
             GDX12CameraConstants camera={}; camera.View=view.Transpose(); camera.ViewProj=camera.ViewProjNoJitter=camera.PrevViewProjNoJitter=(view*projection).Transpose();

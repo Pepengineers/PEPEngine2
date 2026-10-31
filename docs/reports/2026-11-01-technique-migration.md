@@ -166,6 +166,7 @@
 
 ### Пробы в PBR и SSSR
 
+- Коммит `f67edfa`, `feat(render): apply probes to PBR and SSR`.
 - Deferred, прозрачный forward и specular replacement используют общий probe
   sampler: box projection только внутри influence AABB, плавное смешивание
   перекрытий и global fallback. Capture остаётся global-only; diffuse IBL глобальный.
@@ -189,6 +190,17 @@
   ProbeGpuSmoke, LightingGpuSmoke, десять кадров BistroEffectsSmoke, Release App
   и verify_scene.py (4 tests OK) прошли. Логи `Build/probe-lighting-*-{build,gpu}.log`.
 - GLSL callback обновлён согласованно, Vulkan не собирался: двигатель проверен с DX12.
+
+### Упрощение reflection passes
+
+- Четыре read-only проверки ce-simplify-code завершены. Два совпавших finding
+  объединены: единый enabled/quality predicate; camera constants загружаются
+  только для снимаемых в текущем кадре граней. Удалён один пересказ кода в комментарии.
+- Поведение публикации, shadow camera и тестовые assertions сохранены.
+  ProbeGpuSmoke (включая optional benchmark) и ProbeLightingGpuSmoke прошли
+  после изменений с DX12 debug layer. Логи `Build/benchmark-*-{build,gpu}.log`.
+- Первую сборку остановил Windows macro `min`; вызов std::min защищён скобками,
+  повторные Release-сборки прошли. Отдельный выигрыш упрощения не измерялся.
 
 ## Оставшаяся работа
 

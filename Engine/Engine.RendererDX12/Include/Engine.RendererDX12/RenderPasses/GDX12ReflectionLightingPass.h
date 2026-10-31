@@ -3,7 +3,6 @@
 #include "Engine.RendererDX12/GDX12ReflectionProbes.h"
 class GDX12ReflectionProbePass;
 
-// Uploads completed capture publications once per frame for all PBR consumers.
 class GDX12ReflectionLightingPass final : public GDX12RenderPass
 {
 public:
