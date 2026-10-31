@@ -193,6 +193,7 @@
 
 ### Упрощение reflection passes
 
+- Коммит `298159e`, `refactor(render): trim probe camera uploads`.
 - Четыре read-only проверки ce-simplify-code завершены. Два совпавших finding
   объединены: единый enabled/quality predicate; camera constants загружаются
   только для снимаемых в текущем кадре граней. Удалён один пересказ кода в комментарии.
@@ -201,6 +202,38 @@
   после изменений с DX12 debug layer. Логи `Build/benchmark-*-{build,gpu}.log`.
 - Первую сборку остановил Windows macro `min`; вызов std::min защищён скобками,
   повторные Release-сборки прошли. Отдельный выигрыш упрощения не измерялся.
+
+### GPU timings базовых проходов
+
+- Добавлен TechniqueGpuBenchmark: фиксированный HDR checker, reverse-Z depth
+  step, движение 64 px/frame, 1920×1080. ProbeGpuSmoke имеет optional `--benchmark`,
+  исходные assertions по умолчанию сохранены и выполняются до замеров.
+- RTX 3060 Laptop, Release, DX12 debug layer, timestamp только вокруг Execute,
+  4 warmup + 16 samples на случай, flush каждого кадра. PrepareFrame/allocations
+  исключены. Это синтетические проходы, не frame time Bistro и не FPS-прогноз.
+
+| Проход | Low median, ms | Mid median, ms | High median, ms |
+|---|---:|---:|---:|
+| SSAO | 1.339392 | 2.201600 | 4.244480 |
+| HBAO | 0.995328 | 1.571328 | 2.995200 |
+| XeGTAO | 0.529920 | 0.592896 | 1.030144 |
+| SSSR + denoiser | 2.556928 | 3.012096 | 4.058624 |
+| Motion blur | 0.721920 | 1.233920 | 2.138112 |
+| FidelityFX DoF | 0.311808 | 0.321024 | 0.454656 |
+| Probe Dynamic, 6 faces | 0.199680 | 0.314368 | 1.101312 |
+| Probe BakedStatic steady, 6 faces | 0.221696 | 0.342016 | 1.128448 |
+
+- Пробы: одинаковые две плоскости и own sun shadow; face sizes 64/128/256,
+  все шесть граней каждый кадр для одинаковой нагрузки. Статический cache reuse
+  проверен; на таком маленьком fixture baked чуть дороже из-за copy color/depth.
+- DXGI process-local usage в core run: 268910592–432373760 bytes, в probe run:
+  52539392–73883648 bytes; budget 5479858176 bytes. Это весь процесс с inputs,
+  IBL и накопленными live outputs, не изолированная память конкретного эффекта.
+- Полные mean/median/min/max, workload и usage каждого случая:
+  [technique-gpu.json](2026-11-01-technique-gpu.json). Все 24 случая завершены,
+  timestamp конечны, SSSR history прогрета, DX12 debug errors отсутствуют.
+  Release-сборки и оба probe regression smoke прошли. Логи `Build/benchmark-*`.
+- Замер не заменяет ещё требуемое визуальное сравнение native/XeSS и стекла Bistro.
 
 ## Оставшаяся работа
 

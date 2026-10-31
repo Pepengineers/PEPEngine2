@@ -1,6 +1,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12ReflectionProbePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
+#include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include "Engine.Core/ConsoleModule.h"
 #include "App.Base/ECS/World.h"
 #include <d3d12sdklayers.h>
@@ -8,6 +9,10 @@
 #include <iostream>
 #include <stdexcept>
 #include <new>
+#include <algorithm>
+#include <iomanip>
+#include <numeric>
+#include <string>
 
 namespace
 {
@@ -43,7 +48,7 @@ namespace
     }
 }
 
-int main()
+int main(int argc, char** argv)
 {
     std::cout << std::unitbuf;
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
@@ -60,7 +65,8 @@ int main()
         ConsoleModule console;
         const auto set = [&](const wchar_t* name, const char* value) { Require(console.FindConsoleVariable(name).SetFromString(value), "Invalid probe test CVar"); };
         ComPtr<ID3D12Debug> debug; ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))); debug->EnableDebugLayer();
-        GDX12Device device; ThrowIfFailed(device.Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
+        auto adapter=GDX12DeviceFactory::GetMostPerformantAdapter();
+        GDX12Device device; ThrowIfFailed(device.Initialize(adapter));
         GDX12DeviceResources resources; resources.Initialize(&device);
         ComPtr<ID3D12InfoQueue> info; ThrowIfFailed(device.GetDevice().As(&info)); info->ClearStoredMessages();
         RenderPipelineCommonData common;
@@ -101,6 +107,7 @@ int main()
         UINT frameIndex=0;
         uint64_t worldId=firstWorldId;
         bool shadowFixture=false;
+        GDX12GPUTimer* captureTimer=nullptr;
         const auto render = [&](float dynamicZ, uint64_t staticRevision=1, uint64_t shadeRevision=1)
         {
             resources.CurrFrameConstantsIndex=frameIndex++%resources.FrameConstants.size();
@@ -118,7 +125,12 @@ int main()
             auto* queue=device.GetCommandQueue(); auto* list=queue->GetCommandList();
             environment.Execute(list); local.Execute(list);
             for(auto& color:colors) { list->ResourceBarrier({color.GetResource()->GetRenderTargetBarrier()}); list->ClearRenderTargetView(&color); list->ResourceBarrier({color.GetResource()->GetSRVBarrier()}); }
-            probes.Execute(list); queue->ExecuteCommandList(list); queue->Flush();
+            if(captureTimer) captureTimer->Start(list);
+            probes.Execute(list);
+            if(captureTimer) captureTimer->Stop(list);
+            queue->ExecuteCommandList(list);
+            if(captureTimer) captureTimer->OnCommandListExecuted(list->FenceValue);
+            queue->Flush();
         };
         render(10);
         Require(probes.GetPublished().size()==1,"Completed six-face probe must publish");
@@ -155,6 +167,48 @@ int main()
         std::cout<<"Probe own-shadow receiver red "<<unshadowed[0]<<" / "<<shadowed[0]<<'\n';
         Require(unshadowed[0]>shadowed[0]+.2f,"An off-axis caster must shadow probe receivers independently of the active camera CSM");
         worldId=replacementWorldId; render(-5); Require(probes.GetPublished()[0].World==replacementWorldId,"Reused entity IDs in a new world must not retain old probe resources");
+        if(argc==2 && std::string(argv[1])=="--benchmark")
+        {
+            // Use the same lit two-plane fixture and own-sun-shadow policy as the strict smoke above.
+            constexpr UINT warmup=4, samples=16;
+            ComPtr<IDXGIAdapter3> memoryAdapter; ThrowIfFailed(adapter.As(&memoryAdapter));
+            DXGI_ADAPTER_DESC3 adapterDescription{}; ThrowIfFailed(adapter->GetDesc3(&adapterDescription));
+            std::wcout<<L"PROBE_GPU_ADAPTER "<<adapterDescription.Description<<L'\n';
+            GDX12GPUTimer timer(&device); captureTimer=&timer;
+            set(L"Render.Reflection.Enabled","true"); set(L"Render.Reflection.Resolution","-1"); set(L"Render.Reflection.FacesPerFrame","6");
+            for(int implementation=0;implementation<2;++implementation)
+                for(int quality=1;quality<=3;++quality)
+                {
+                    set(L"Render.Reflection.Implementation",std::to_string(implementation).c_str());
+                    set(L"Render.Reflection.Quality",std::to_string(quality).c_str());
+                    probe.Mode=GDX12ReflectionProbeMode::Inherit;
+                    std::vector<double> times;
+                    for(UINT frame=0;frame<warmup+samples;++frame)
+                    {
+                        render(-5);
+                        const double ms=timer.GetTimeMS();
+                        Require(std::isfinite(ms) && ms>=0,"Probe benchmark timestamp did not resolve");
+                        Require(probes.GetPublished().size()==1,"Benchmark probe did not publish all six faces");
+                        if(implementation==1 && frame>=warmup) Require(probes.GetLastFrameStaticFaces()==0,"Steady baked benchmark must reuse the static cache");
+                        if(frame>=warmup) times.push_back(ms);
+                    }
+                    // Readback/finite-radiance validation is deliberately outside capture timestamps.
+                    for(UINT face=0;face<6;++face) ReadCenter(device,*probes.GetPublished()[0].Texture,face);
+                    DXGI_QUERY_VIDEO_MEMORY_INFO memory{};
+                    ThrowIfFailed(memoryAdapter->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_LOCAL,&memory));
+                    const double mean=std::accumulate(times.begin(),times.end(),0.0)/times.size();
+                    std::sort(times.begin(),times.end());
+                    const double median=(times[times.size()/2-1]+times[times.size()/2])*.5;
+                    std::cout<<std::setprecision(9)<<"PROBE_GPU_BENCHMARK {\"implementation\":"<<implementation<<",\"quality\":"<<quality
+                        <<",\"faceResolution\":"<<(32u<<quality)<<",\"facesPerFrame\":6,\"warmupFrames\":"<<warmup<<",\"sampleCount\":"<<samples
+                        <<",\"ownSunShadow\":true,\"fixture\":\"two planes, fixed geometry/light; baked static cache steady\""
+                        <<",\"timing\":\"GPU timestamps around probes.Execute only; D3D12 debug layer enabled; flush each frame\""
+                        <<",\"gpuMeanMs\":"<<mean<<",\"gpuMedianMs\":"<<median<<",\"gpuMinMs\":"<<times.front()<<",\"gpuMaxMs\":"<<times.back()
+                        <<",\"memoryScope\":\"process local usage, includes fixture inputs and live outputs, not isolated capture allocation\""
+                        <<",\"processLocalCurrentUsageBytes\":"<<memory.CurrentUsage<<",\"processLocalBudgetBytes\":"<<memory.Budget<<"}\n";
+                }
+            captureTimer=nullptr;
+        }
         set(L"Render.Reflection.Quality","0"); render(-5); Require(probes.GetPublished().empty(),"Reflection Off must expose no active probes");
         for(UINT64 i=0;i<info->GetNumStoredMessagesAllowedByRetrievalFilter();++i)
         { SIZE_T bytes; info->GetMessage(i,nullptr,&bytes); std::vector<unsigned char> storage(bytes); auto* message=reinterpret_cast<D3D12_MESSAGE*>(storage.data()); ThrowIfFailed(info->GetMessage(i,message,&bytes)); if(message->Severity<=D3D12_MESSAGE_SEVERITY_ERROR) throw std::runtime_error(message->pDescription); }
