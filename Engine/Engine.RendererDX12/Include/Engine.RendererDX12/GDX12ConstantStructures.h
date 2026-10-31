@@ -7,6 +7,12 @@ struct GDX12MainConstants
     XMFLOAT2 RenderTargetSize = { 0.0f, 0.0f };
     float TotalTime = 0.0f;
     float DeltaTime = 0.0f;
+    XMFLOAT3 LightDirection = { 0.35f, -1.0f, 0.25f };
+    float _pad0 = 0.0f;
+    XMFLOAT3 LightRadiance = { 4.0f, 3.8f, 3.5f };
+    float _pad1 = 0.0f;
+    XMFLOAT3 AmbientRadiance = { 0.08f, 0.09f, 0.12f };
+    float _pad2 = 0.0f;
 };
 
 struct GDX12TransformConstants
@@ -14,6 +20,7 @@ struct GDX12TransformConstants
     XMFLOAT4X4 WorldMatrix = Identity4x4();
     XMFLOAT4X4 PrevWorldMatrix = Identity4x4();
 };
+
 
 struct GDX12MaterialConstants
 {
@@ -24,12 +31,19 @@ struct GDX12MaterialConstants
     UINT NormalIndex = 0;
     UINT DisplacementIndex = 0;
     UINT RenderLayer = 0; // 0 - opaque, 1 - masked, 2 - transparent
-    float _pad0 = 0.0f;
+    UINT SpecularIndex = 0;
+    UINT RoughnessIndex = 0;
+    UINT EmissiveIndex = 0;
+    UINT Flags = 0;
+    UINT _pad0 = 0;
+    XMFLOAT3 SpecularColor = { 0.04f, 0.04f, 0.04f };
     float _pad1 = 0.0f;
+    XMFLOAT3 EmissiveColor = { 0.0f, 0.0f, 0.0f };
     float _pad2 = 0.0f;
-    float _pad3 = 0.0f;
-    float _pad4 = 0.0f;
 };
+
+static_assert(sizeof(GDX12MainConstants) == 64);
+static_assert(sizeof(GDX12MaterialConstants) == 80);
 
 struct GDX12CameraConstants
 {

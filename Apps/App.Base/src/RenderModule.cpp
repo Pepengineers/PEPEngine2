@@ -197,8 +197,7 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
     CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
     CD3DX12_HEAP_PROPERTIES uploadHeap(D3D12_HEAP_TYPE_UPLOAD);
 
-    // TODO: add IsDiffuseTexture/useSRGB flag to Texture
-    bool convertToSRGB = false;
+    bool convertToSRGB = texture->GetType() == Engine::Core::ETextureType::Color;
     if (convertToSRGB) { desc.Format = desc.SRVDesc.Format = FormatToSRGB(texture->GetFormat()); }
 
     if (texture->IsCubeMap())

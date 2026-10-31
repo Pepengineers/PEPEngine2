@@ -16,6 +16,8 @@ StructuredBuffer<Transform> TransformCache : register(t1);
 StructuredBuffer<InstanceData> InstanceCache : register(t2);
 Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t3);
 
+#include "PBR.hlsli"
+
 struct VS_INPUT
 {
     float3 Pos : POSITION;
@@ -45,8 +47,7 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
     float4 posW = mul(float4(vin.Pos, 1.0f), World);
     vout.PosW = posW.xyz;
 
-    // Assumes nonuniform scaling; otherwise, need to use inverse-transpose of world matrix.
-    vout.Normal = normalize(mul(vin.Normal, (float3x3) World));
+    vout.Normal = TransformNormal(vin.Normal, (float3x3) World);
     vout.Tangent = normalize(mul(vin.Tangent, (float3x3) World));
     vout.PosCS = mul(posW, CBCamera.ViewProj);
     vout.TexC = vin.TexC;
@@ -74,7 +75,8 @@ PSOutput PS(VS_OUTPUT_PS_INPUT pin)
     clip(alpha - 0.001f);
     
     float weight = max(0.01f, alpha);
-    output.AccumColor = float4(color.rgb * alpha, alpha) * weight;
+    float3 litColor = ShadePBR(material, color.rgb, pin.PosW, pin.Normal, pin.TexC);
+    output.AccumColor = float4(litColor * alpha, alpha) * weight;
     output.Revealage = alpha;
     
     return output;

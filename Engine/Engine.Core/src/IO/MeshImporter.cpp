@@ -524,7 +524,7 @@ namespace
 				importedMaterial.DiffuseColor = SimpleMath::Vector3(diffuseColor.r, diffuseColor.g, diffuseColor.b);
 			}
 			
-			aiColor3D specularColor(0.0f, 0.0f, 0.0f);
+			aiColor3D specularColor(0.04f, 0.04f, 0.04f);
 			if (assimpMaterial->Get(AI_MATKEY_COLOR_SPECULAR, specularColor) == AI_SUCCESS)
 			{
 				importedMaterial.SpecularColor = SimpleMath::Vector3(specularColor.r, specularColor.g, specularColor.b);
@@ -549,6 +549,11 @@ namespace
 			}
 
 			float opacity = importedMaterial.Opacity;
+			float metallic = importedMaterial.Metallic;
+			if (assimpMaterial->Get(AI_MATKEY_METALLIC_FACTOR, metallic) == AI_SUCCESS)
+			{
+				importedMaterial.Metallic = Clamp01(metallic);
+			}
 			if (assimpMaterial->Get(AI_MATKEY_OPACITY, opacity) == AI_SUCCESS)
 			{
 				importedMaterial.Opacity = Clamp01(opacity);
@@ -567,6 +572,16 @@ namespace
 			TryImportTexturePath(*assimpMaterial, aiTextureType_DIFFUSE, sourcePath, importedMaterial.DiffuseTexturePath);
 			TryImportTexturePath(*assimpMaterial, aiTextureType_SPECULAR, sourcePath, importedMaterial.SpecularTexturePath);
 			TryImportTexturePath(*assimpMaterial, aiTextureType_NORMALS, sourcePath, importedMaterial.NormalTexturePath);
+			if (importedMaterial.NormalTexturePath.empty())
+			{
+				std::filesystem::path bumpPath;
+				TryImportTexturePath(*assimpMaterial, aiTextureType_HEIGHT, sourcePath, bumpPath);
+				// Bistro's OBJ bump slots contain RGB normal maps, not scalar height maps.
+				if (ToLowerAscii(bumpPath.stem().string()).find("_ddn") != std::string::npos)
+				{
+					importedMaterial.NormalTexturePath = std::move(bumpPath);
+				}
+			}
 			TryImportTexturePath(*assimpMaterial, aiTextureType_DIFFUSE_ROUGHNESS, sourcePath, importedMaterial.RoughnessTexturePath);
 			TryImportTexturePath(*assimpMaterial, aiTextureType_EMISSIVE, sourcePath, importedMaterial.EmissiveTexturePath);
 			TryImportTexturePath(*assimpMaterial, aiTextureType_OPACITY, sourcePath, importedMaterial.OpacityTexturePath);

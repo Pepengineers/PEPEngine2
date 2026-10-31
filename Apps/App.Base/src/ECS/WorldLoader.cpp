@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <system_error>
@@ -174,11 +175,12 @@ namespace
         return gpuTexture;
     }
 
-    /// Converts a normalized color component to an 8-bit texture channel value.
+    /// Encodes a linear material color for an sRGB texture.
     std::uint8_t ColorComponentToByte(const float value)
     {
         const float clampedValue = (std::max)(0.0f, (std::min)(value, 1.0f));
-        return static_cast<std::uint8_t>(clampedValue * 255.0f + 0.5f);
+        const float encoded = clampedValue <= 0.0031308f ? 12.92f * clampedValue : 1.055f * std::pow(clampedValue, 1.0f / 2.4f) - 0.055f;
+        return static_cast<std::uint8_t>(encoded * 255.0f + 0.5f);
     }
 
     /// Creates or retrieves a generated diffuse texture from the imported material diffuse color.
@@ -521,8 +523,8 @@ namespace
             return nullptr;
         }
 
-        material->Metallic = 0.0f;
-        material->Roughness = (std::max)(0.04f, (std::min)(sourceMaterial.Roughness, 1.0f));
+        material->Metallic = (std::max)(0.0f, (std::min)(sourceMaterial.Metallic, 1.0f));
+        material->Roughness = (std::max)(0.045f, (std::min)(sourceMaterial.Roughness, 1.0f));
         material->Opacity = (std::max)(0.0f, (std::min)(sourceMaterial.Opacity, 1.0f));
         material->SpecularColor = Vector3(sourceMaterial.SpecularColor.x, sourceMaterial.SpecularColor.y, sourceMaterial.SpecularColor.z);
         Vector3 emissiveColor(sourceMaterial.EmissiveColor.x, sourceMaterial.EmissiveColor.y, sourceMaterial.EmissiveColor.z);
@@ -605,7 +607,7 @@ namespace
                 textures.HasNormalMap = true;
             }
 
-            GPUTexture* specularTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].SpecularTexturePath, Engine::Core::ETextureType::Data, sceneName, gpuTexturesByPath);
+            GPUTexture* specularTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].SpecularTexturePath, Engine::Core::ETextureType::Color, sceneName, gpuTexturesByPath);
             if (specularTexture != nullptr)
             {
                 textures.Specular = specularTexture;

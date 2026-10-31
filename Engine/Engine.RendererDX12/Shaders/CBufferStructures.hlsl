@@ -8,6 +8,12 @@ struct MainCB
     float2 RenderTargetSize;
     float TotalTime;
     float DeltaTime;
+    float3 LightDirection;
+    float _pad0;
+    float3 LightRadiance;
+    float _pad1;
+    float3 AmbientRadiance;
+    float _pad2;
 };
 
 struct Transform
@@ -25,11 +31,15 @@ struct Material
     uint NormalIndex;
     uint DisplacementIndex;
     uint RenderLayer; // 0 - opaque, 1 - masked, 2 - transparent
-    float _pad0;
+    uint SpecularIndex;
+    uint RoughnessIndex;
+    uint EmissiveIndex;
+    uint Flags; // normal=1, specular=2, roughness=4, emissive=8, baked=16
+    uint _pad0;
+    float3 SpecularColor;
     float _pad1;
+    float3 EmissiveColor;
     float _pad2;
-    float _pad3;
-    float _pad4;
 };
 
 struct CameraCB
@@ -63,6 +73,7 @@ struct LightCB
     float4x4 ShadowTransform[6];
     float4 CascadeDistances;
 };
+
 
 struct InstanceData
 {

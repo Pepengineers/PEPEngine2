@@ -54,9 +54,10 @@ namespace Engine::Core
 		std::filesystem::path EmissiveTexturePath;
 		std::filesystem::path OpacityTexturePath;
 		DirectX::SimpleMath::Vector3 DiffuseColor = {1.0f, 1.0f, 1.0f};
-		DirectX::SimpleMath::Vector3 SpecularColor = {0.0f, 0.0f, 0.0f};
+		DirectX::SimpleMath::Vector3 SpecularColor = {0.04f, 0.04f, 0.04f};
 		DirectX::SimpleMath::Vector3 EmissiveColor = {0.0f, 0.0f, 0.0f};
 		float Roughness = 1.0f;
+		float Metallic = 0.0f;
 		float Opacity = 1.0f;
 		EMaterialType Type = EMaterialType::Opaque;
 		bool UseBakedLighting = false;
