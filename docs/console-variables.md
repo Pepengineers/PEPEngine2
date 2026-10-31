@@ -85,6 +85,54 @@ GPU-проверка: `Apps/App/AOGpuSmoke.vcxproj` (Release/x64). Провер�
 нечётный размер 65x49, три кадровых слота, плоскость, ступень глубины, denoise 0/1/4,
 Off, диапазон результатов и DX12 debug layer.
 
+### SSR, motion blur и DoF
+
+Граф сохраняет linear HDR до финального Reinhard + sRGB: deferred → SSSR и
+specular resolve → OIT composition → XeSS → depth/motion alignment → motion blur
+→ DoF → tone mapping. SSR заменяет прежнее environment specular с одним применением
+DFG и specular AO; direct/diffuse/emissive/baked сохраняются. До готовности SSR history
+и в Off остаётся исходный environment fallback. Смена камеры и resize сбрасывают
+temporal history. Alpha результата SSSR не используется как confidence.
+
+| CVar | По умолчанию | Допустимые значения |
+| --- | --- | --- |
+| `Render.SSR.Enabled` | `true` | bool |
+| `Render.SSR.Quality` | `2` | 0 Off, 1 Low, 2 Mid, 3 High |
+| `Render.SSR.Thickness` | `0.1` | (0, 1000000], view-space distance в мировых единицах |
+| `Render.SSR.RoughnessThreshold` | `0.8` | [0, 1], perceptual roughness |
+| `Render.SSR.MaxTraversalSteps` | `-1` | -1 пресет 32/64/96; иначе 8..1024 |
+| `Render.SSR.TemporalStability` | `0.9` | [0, 1), вес истории |
+| `Render.SSR.SamplesPerQuad` | `-1` | -1 пресет 1/2/4; иначе 1, 2 или 4 |
+| `Render.MotionBlur.Enabled` | `false` | bool |
+| `Render.MotionBlur.Quality` | `2` | 0 Off, 1 Low, 2 Mid, 3 High |
+| `Render.MotionBlur.ShutterAngle` | `180` | [0, 360], 0 сохраняет изображение |
+| `Render.MotionBlur.MaxRadius` | `32` | [1, 256], output pixels |
+| `Render.MotionBlur.Samples` | `-1` | -1 пресет 8/16/32; иначе 4..64 |
+| `Render.DOF.Enabled` | `false` | bool |
+| `Render.DOF.Quality` | `2` | 0 Off, 1 Low, 2 Mid, 3 High |
+| `Render.DOF.FocusDistance` | `1000` | (0, 1000000], сантиметры; должен превышать focal length |
+| `Render.DOF.Aperture` | `2.8` | [0.5, 64], lens f-number |
+| `Render.DOF.MaxCoC` | `-1` | -1 пресет 8/16/32; иначе [1, 256], максимальный radius в output pixels |
+
+Все имеют флаг Default; ручные overrides не стираются сменой quality. У SSSR и
+DoF по одной реализации, поэтому отдельного фиктивного Implementation CVar нет.
+Motion blur/DoF Off точно копируют HDR. Motion blur также пропускает кадр после
+cut/resize/включения, чтобы не размазывать несогласованное движение.
+
+Порядок после XeSS выбран для стабильного HDR-входа по
+[рекомендации Intel](https://github.com/intel/xess/blob/main/doc/xess_sr_developer_guide_english.md).
+[AMD рекомендует DoF до upscale](https://gpuopen.com/manuals/fidelityfx_sdk/techniques/depth-of-field/),
+когда depth есть только на render resolution; выбранный здесь путь дороже и
+готовит output-grid depth/motion отдельно. Depth и motion берутся одной ближайшей
+выборкой с учётом отрицательного экранного сдвига RH projection jitter, без
+bilinear смешивания глубин и противоположных скоростей. Это сохраняет границы,
+но не восстанавливает дополнительную геометрию между исходными samples.
+OIT использует opaque depth/motion: фокус/движение прозрачного слоя отдельно
+от фона пока не описываются этой однослойной парой буферов.
+
+GPU-проверка графических контрактов: `Apps/App/PostProcessGpuSmoke.vcxproj`;
+алгоритмов — `FidelityFXGpuSmoke.vcxproj` и `MotionBlurGpuSmoke.vcxproj`.
+
 ### Общие CVar
 
 Из Developer PowerShell Visual Studio, в корне репозитория:

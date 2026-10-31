@@ -48,4 +48,10 @@ float ToneMapToSRGB(float value)
     return LinearToSRGB(value / (1.0f + value));
 }
 
+float3 SpecularIBLWeight(float3 f0, float2 brdf, float nDotV, float roughness, float ambientVisibility)
+{
+    float visibility = saturate(pow(nDotV + ambientVisibility, exp2(-16 * roughness - 1)) - 1 + ambientVisibility);
+    return visibility * (f0 * brdf.x + brdf.y);
+}
+
 #endif

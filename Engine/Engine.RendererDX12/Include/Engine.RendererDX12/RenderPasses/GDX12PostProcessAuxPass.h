@@ -1,0 +1,17 @@
+#pragma once
+#include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+
+// Inputs: jittered render-resolution depth and NDC motion. Outputs: matching unjittered output-grid depth and motion.
+class GDX12PostProcessAuxPass final : public GDX12RenderPass
+{
+public:
+    GDX12PostProcessAuxPass();
+    ~GDX12PostProcessAuxPass() override;
+    void Initialize() override;
+    void Execute(GDX12CommandList* commands) override;
+    void Resize() override;
+    void ClearDenendencies() override;
+private:
+    struct Data;
+    std::unique_ptr<Data> _data;
+};

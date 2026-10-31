@@ -98,6 +98,7 @@
 
 ### Temporal SSR и попадание лучей
 
+- Коммит `ed261a6`, `fix(render): align SSR history with jitter`.
 - SSSR получает собственный RG16F motion с jitter delta; общий unjittered motion
   сохраняется для XeSS и motion blur. Denoiser использует предыдущую jittered VP.
 - Знак проверен проекцией точки: у RH row-vector projection экранный сдвиг равен
@@ -110,9 +111,32 @@
 - Старые focus/blur/Off/history/resize/state-restoration проверки также прошли.
   Логи: `Build/hdr-FidelityFXGpuSmoke-{build,gpu}.log`.
 
+### HDR-граф базовых эффектов
+
+- App исполняет deferred → SSSR/specular replacement → linear HDR OIT → XeSS →
+  aligned depth/motion → motion blur → DoF → final Reinhard/sRGB → backbuffer.
+- Specular resolve заменяет старое environment specular, применяя общий DFG/AO
+  helper один раз; direct/diffuse/emissive/baked и cold/Off fallback сохраняются.
+- Все PrepareFrame вызываются до получения command lists; camera/resize меняют
+  HistoryRevision. CPU matrices заполнены с явным разделением jittered и unjittered.
+- XeSS принимает RGBA16F HDR, сбрасывает историю и инвалидирует native state cache.
+  CVar SSR/DOF/motion blur опубликованы в Config/Engine.ini и console documentation.
+- `PostProcessGpuSmoke` Release прошёл: HDR OIT > 1, BRDF once, точный Off/cold,
+  baked bypass, нечётные размеры, discontinuity-safe point depth/motion alignment,
+  независимый RH jitter oracle, настоящий XeSS HDR/history/reset/resize и tone mapping.
+- `BistroEffectsSmoke` прошёл: десять настоящих кадров существующей Bistro,
+  переключение эффектов и Low/High, перенос/вращение камеры, cut, DX12 debug layer.
+  Новые объекты не создаются, существующая камера меняется только в тестовом процессе.
+- `LightingGpuSmoke` прошёл; Release App собран; `verify_scene.py`: 4 tests OK.
+  Логи: `Build/hdr-{PostProcessGpuSmoke,BistroEffectsSmoke,LightingGpuSmoke}-{build,gpu}.log`,
+  `Build/hdr-App-build.log`.
+- Ограничения: point aux не восстанавливает субпиксельную геометрию; OIT использует
+  opaque depth/motion и не описывает отдельный фокус/скорость стекла. Визуальный
+  capture и сравнение производительности двух порядков с XeSS ещё не выполнены.
+
 ## Оставшаяся работа
 
-SSSR/DOF/motion blur integration в граф и публикация CVar в App; cubemap capture/cache/probes;
+cubemap capture/cache/probes;
 SkyBox/SkyAtmosphere, grass/wind, GPU particles, fluid surface/solver,
 skinning/asset import и cloud shaders. Наличие отдельных новых файлов во время
 работы не считается завершением этих пунктов без их callers и GPU-проверок.

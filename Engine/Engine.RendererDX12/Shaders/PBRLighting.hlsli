@@ -24,8 +24,7 @@ float3 ShadeSunAndIBL(PBRSurface s, float3 position, float3 v, float ambientVisi
     float3 prefiltered = PrefilteredEnvironment.SampleLevel(samLinearClamp, reflect(-v, s.Normal), s.Roughness * 7).rgb;
     float2 brdf = EnvironmentBRDF.SampleLevel(samLinearClamp, float2(nDotV, s.Roughness), 0).rg;
     float3 fresnel = s.F0 + (max(1 - s.Roughness, s.F0) - s.F0) * FresnelSchlickFactor(nDotV);
-    float specularVisibility = saturate(pow(nDotV + ambientVisibility, exp2(-16 * s.Roughness - 1)) - 1 + ambientVisibility);
-    return direct + ambientVisibility * (1 - fresnel) * (1 - s.Metallic) * irradiance * s.Albedo / PBR_PI + specularVisibility * prefiltered * (s.F0 * brdf.x + brdf.y) + s.Emissive;
+    return direct + ambientVisibility * (1 - fresnel) * (1 - s.Metallic) * irradiance * s.Albedo / PBR_PI + prefiltered * SpecularIBLWeight(s.F0, brdf, nDotV, s.Roughness, ambientVisibility) + s.Emissive;
 }
 float3 ShadeLocalLight(PBRSurface s, float3 position, float3 v, LocalLight light)
 {

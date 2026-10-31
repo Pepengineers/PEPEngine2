@@ -149,6 +149,8 @@ private:
 
             if (isActiveCamera)
             {
+                pipelineCommonData->ActiveCameraView = view;
+                pipelineCommonData->ActiveCameraPreviousViewProjection = camera.PrevViewProjNoJitter.Transpose();
                 pipelineCommonData->CameraViewToClip = proj;
                 pipelineCommonData->ClipToCameraView = proj.Invert();
 
@@ -177,6 +179,7 @@ private:
             }
 
             camera.ViewProj = view * proj;
+            if (isActiveCamera) pipelineCommonData->ActiveCameraViewProjection = camera.ViewProj;
 
             XMStoreFloat4x4(&objConstants.ViewProj, XMMatrixTranspose(view * proj));
             XMStoreFloat4x4(&objConstants.View, XMMatrixTranspose(view));
