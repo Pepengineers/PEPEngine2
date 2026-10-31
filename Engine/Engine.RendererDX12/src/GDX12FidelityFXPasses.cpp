@@ -368,12 +368,12 @@ void GDX12DepthOfFieldPass::Execute(GDX12CommandList* commands)
         const Matrix projection = _commonData->CameraViewToClip;
         if (!(projection._11 > 0) || !std::isfinite(projection._11) || std::abs(projection._43) < 1e-8f)
             throw std::invalid_argument("DOF requires a finite perspective camera projection");
-        constexpr float sensorWidth = 3.6f; // 36 mm in the renderer's centimetre units.
-        const float focalLength = sensorWidth * projection._11 * 0.5f;
+        constexpr float sensorWidthCentimeters = 3.6f;
+        const float focalLength = sensorWidthCentimeters * projection._11 * 0.5f;
         if (d.Settings.Focus <= focalLength)
             throw std::invalid_argument("DOF focus distance must exceed the camera focal length");
         const float apertureRadius = focalLength / (2 * d.Settings.Aperture);
-        const float conversion = 0.5f * d.Output.GetWidth() / sensorWidth;
+        const float conversion = 0.5f * d.Output.GetWidth() / sensorWidthCentimeters;
         FfxDofDispatchDescription dispatch = {};
         dispatch.commandList = ffxGetCommandListDX12(commands->GetCommandList().Get());
         dispatch.color = Resource(commands, *_inputs[0]->GetTexture());

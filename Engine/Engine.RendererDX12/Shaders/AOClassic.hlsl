@@ -21,7 +21,6 @@ void PrepareCS(uint2 pixel : SV_DispatchThreadID)
     PreparedDepth[pixel] = max(depth, 1e-8f);
 }
 
-// Hemisphere sample/reflection and depth reconstruction from the original SSAO donor.
 [numthreads(8, 8, 1)]
 void SSAOCS(uint2 pixel : SV_DispatchThreadID)
 {
@@ -64,7 +63,6 @@ float3 MinDifference(float3 center, float3 next, float3 previous)
 }
 float TangentToSine(float tangent) { return tangent * rsqrt(1 + tangent * tangent); }
 
-// Horizon search, tangent integration and radial falloff from the original HBAO donor.
 [numthreads(8, 8, 1)]
 void HBAOCS(uint2 pixel : SV_DispatchThreadID)
 {

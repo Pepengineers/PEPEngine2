@@ -66,6 +66,7 @@
 
 ### Motion blur
 
+- Коммит `368664d`, `feat(render): add feature-aware motion blur`.
 - Реализованы TileMax → NeighborMax → двухнаправленный gather по Guertin,
   McGuire, Nowrouzezahrai, HPG 2014; равное распределение samples без TileVariance.
   Неоднозначность направления в Appendix разрешена по нормализованной конструкции §4.1.
@@ -81,6 +82,18 @@
   отдельно и blur на следующем кадре; production shader из-за этого не менялся.
 - Логи: `Build/motion-blur-build.log`, `Build/motion-blur-gpu.log`.
   Pass ещё не подключён к графу App; проверка Bistro и стоимость остаются впереди.
+
+### Упрощение готовых проходов
+
+- Выполнены отдельные read-only reviews reuse, quality, efficiency, tests и comments.
+- Motion blur использует существующий CopyResource helper и один флаг WasEnabled
+  вместо дублирующего History. Одинаковый Halton jitter вычисляется один раз
+  на группу из четырёх taps, с сохранением формулы и порядка выборок.
+- Единицы sensor width выражены именем переменной; удалены три комментария,
+  повторявших код или историю переноса. Алгоритмические/API/vendor constraints сохранены.
+- Proof tests оставлены без изменений. Повторные fills нейтрального AO/SSR в Off
+  пока сохранены: дополнительный persistent-state cache отложен до измерения стоимости.
+- Проверка: Release builds и GPU smoke трёх проходов; логи `Build/simplify-*-{build,gpu}.log`.
 
 ## Оставшаяся работа
 

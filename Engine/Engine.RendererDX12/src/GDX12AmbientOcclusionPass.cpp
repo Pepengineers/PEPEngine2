@@ -213,7 +213,6 @@ void GDX12AmbientOcclusionPass::Execute(GDX12CommandList* commands)
         XeGTAO::GTAOUpdateConstants(constants, d.WorkingWidth, d.WorkingHeight,
             xeSettings, &projection._11, true, 0);
         constants.DepthUnpackConsts = { -projection._43, -projection._33 };
-        // Padded textures retain the original camera's pixel-to-view mapping.
         constants.NDCToViewMul = { 2.0f / projection._11 * d.WorkingWidth / d.Width,
             -2.0f / projection._22 * d.WorkingHeight / d.Height };
         constants.NDCToViewAdd = { (-1.0f + projection._31) / projection._11,

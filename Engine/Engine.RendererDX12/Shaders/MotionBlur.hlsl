@@ -134,6 +134,7 @@ void GatherCS(uint3 dispatch : SV_DispatchThreadID)
     float centerDepth = ReciprocalDepth(pixel);
     float total = Samples / (40.0 * max(localSpeed, 0.5));
     float4 sum = center * total;
+    float jitter = 0;
     for (uint i = 0; i < Samples; ++i)
     {
         uint directionIndex = i & 1;
@@ -141,7 +142,8 @@ void GatherCS(uint3 dispatch : SV_DispatchThreadID)
         uint tap = i / 2;
         uint pairs = count / 2;
         float2 direction = directionIndex == 0 ? centerDirection : dominant;
-        float jitter = (Halton(pixel.x + pixel.y * Size.x + tap / 2 + 1, 2) - 0.5) * min(1.0, 0.95 * 27.0 / Samples);
+        if ((i & 3) == 0)
+            jitter = (Halton(pixel.x + pixel.y * Size.x + tap / 2 + 1, 2) - 0.5) * min(1.0, 0.95 * 27.0 / Samples);
         // Mirrored jitter pairs keep the centered exposure invariant to velocity sign.
         float t = tap < 2 * pairs ? ((tap / 2 + 0.5 + jitter) / max(pairs, 1)) * ((tap & 1) ? -1 : 1) : 0;
         float offset = t * radius;

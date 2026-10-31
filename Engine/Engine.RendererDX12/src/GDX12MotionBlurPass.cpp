@@ -26,7 +26,7 @@ struct GDX12MotionBlurPass::Data
     std::unique_ptr<GDX12UploadBuffer<BlurParameters>> Parameters;
     UINT Width = 0, Height = 0, TileSize = 0, TilesX = 0, TilesY = 0;
     uint64_t Revision = 0;
-    bool History = false, WasEnabled = false;
+    bool WasEnabled = false;
 
     void CreateTexture(GDX12DeviceResources& resources, GDX12Texture& texture,
         UINT width, UINT height, DXGI_FORMAT format)
@@ -122,8 +122,7 @@ void GDX12MotionBlurPass::Execute(GDX12CommandList* commands)
 {
     auto& d = *_data;
     const auto settings = RenderSettings::GetMotionBlur();
-    const bool cut = !d.History || d.Revision != _commonData->HistoryRevision || !d.WasEnabled;
-    d.History = true;
+    const bool cut = d.Revision != _commonData->HistoryRevision || !d.WasEnabled;
     d.Revision = _commonData->HistoryRevision;
     d.WasEnabled = settings.Enabled;
     auto* color = _inputs[0]->GetTexture();
@@ -131,7 +130,7 @@ void GDX12MotionBlurPass::Execute(GDX12CommandList* commands)
     if (!settings.Enabled || cut)
     {
         commands->ResourceBarrier({ color->GetResource()->GetCopySourceBarrier(), d.Color.GetResource()->GetCopyDestBarrier() });
-        commands->GetCommandList()->CopyResource(d.Color.GetResource()->D3DResource.Get(), color->GetResource()->D3DResource.Get());
+        commands->CopyResource(d.Color.GetResource()->D3DResource.Get(), color->GetResource()->D3DResource.Get());
         commands->ResourceBarrier({ color->GetResource()->GetSRVBarrier(), d.Color.GetResource()->GetSRVBarrier() });
         commands->EndPixEvent();
         return;
@@ -181,7 +180,7 @@ void GDX12MotionBlurPass::Resize()
     d.Width = _inputs[0]->GetTexture()->GetWidth(); d.Height = _inputs[0]->GetTexture()->GetHeight();
     d.CreateTexture(*_resources, d.Color, d.Width, d.Height, DXGI_FORMAT_R16G16B16A16_FLOAT);
     d.CreateTiles(*_resources, static_cast<UINT>(std::ceil(RenderSettings::GetMotionBlur().MaxRadius)));
-    d.History = false;
+    d.WasEnabled = false;
 }
 void GDX12MotionBlurPass::ClearDenendencies()
 {
