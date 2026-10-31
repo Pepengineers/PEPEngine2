@@ -85,6 +85,7 @@
 
 ### Упрощение готовых проходов
 
+- Коммит `faad732`, `refactor(render): simplify effect pass state`.
 - Выполнены отдельные read-only reviews reuse, quality, efficiency, tests и comments.
 - Motion blur использует существующий CopyResource helper и один флаг WasEnabled
   вместо дублирующего History. Одинаковый Halton jitter вычисляется один раз
@@ -94,6 +95,20 @@
 - Proof tests оставлены без изменений. Повторные fills нейтрального AO/SSR в Off
   пока сохранены: дополнительный persistent-state cache отложен до измерения стоимости.
 - Проверка: Release builds и GPU smoke трёх проходов; логи `Build/simplify-*-{build,gpu}.log`.
+
+### Temporal SSR и попадание лучей
+
+- SSSR получает собственный RG16F motion с jitter delta; общий unjittered motion
+  сохраняется для XeSS и motion blur. Denoiser использует предыдущую jittered VP.
+- Знак проверен проекцией точки: у RH row-vector projection экранный сдвиг равен
+  минус добавке jitter в projection, поэтому current-to-previous NDC поправка
+  равна `(2*(current.x-previous.x)/width, -2*(current.y-previous.y)/height)`.
+- Release `FidelityFXGpuSmoke` прошёл с проверкой production motion kernel,
+  сохранения исходного motion и настоящего попадания screen-space rays.
+  Изменение красной вертикальной стенки на зелёную при неизменном environment
+  изменило radiance в отражающей области: red delta 367.869, green delta 322.359.
+- Старые focus/blur/Off/history/resize/state-restoration проверки также прошли.
+  Логи: `Build/hdr-FidelityFXGpuSmoke-{build,gpu}.log`.
 
 ## Оставшаяся работа
 

@@ -83,14 +83,15 @@ namespace
         if (result != FFX_OK)
             throw std::runtime_error(std::string(operation) + " failed: FidelityFX error " + std::to_string(result));
     }
-    void CreateOutput(GDX12DeviceResources& resources, GDX12Texture& output, GDX12Texture& input)
+    void CreateOutput(GDX12DeviceResources& resources, GDX12Texture& output, GDX12Texture& input,
+        DXGI_FORMAT format = DXGI_FORMAT_R16G16B16A16_FLOAT)
     {
         if (input.GetFormat() != DXGI_FORMAT_R16G16B16A16_FLOAT)
             throw std::invalid_argument("FidelityFX color input must be linear HDR RGBA16F");
         auto* heap = resources.SRV_UAV_Heap.get();
         GDX12TextureDesc desc;
         desc.Width = input.GetWidth(); desc.Height = input.GetHeight();
-        desc.Format = desc.SRVDesc.Format = desc.UAVDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        desc.Format = desc.SRVDesc.Format = desc.UAVDesc.Format = format;
         desc.Semantic = ETextureSemantic::Color;
         desc.CreateUAV = true;
         desc.SRV_UAV_Heap = heap;
@@ -150,11 +151,16 @@ namespace
 
 struct GDX12SssrPass::Data
 {
-    GDX12Texture Output;
+    GDX12Texture Output, TemporalMotion;
     Backend BackendData;
     std::unique_ptr<FfxSssrContext> Context;
     std::unique_ptr<GDX12RootSignature> ClearRoot;
     ComPtr<ID3D12PipelineState> ClearPipeline;
+    std::unique_ptr<GDX12RootSignature> MotionRoot;
+    ComPtr<ID3D12PipelineState> MotionPipeline;
+    std::unique_ptr<GDX12UploadBuffer<XMFLOAT4>> MotionParameters;
+    XMFLOAT2 PreviousJitter = {};
+    Matrix PreviousJitteredViewProjection = Identity4x4();
     SsrSettings Settings = {};
     uint64_t Revision = UINT64_MAX;
     uint32_t DispatchCount = 0;
@@ -185,6 +191,9 @@ void GDX12SssrPass::Initialize()
     ValidateFfxInputs(_inputs, 7);
     auto& d = *_data;
     CreateOutput(*_resources, d.Output, *_inputs[0]->GetTexture());
+    CreateOutput(*_resources, d.TemporalMotion, *_inputs[0]->GetTexture(), DXGI_FORMAT_R16G16_FLOAT);
+    d.MotionParameters = std::make_unique<GDX12UploadBuffer<XMFLOAT4>>(_resources->Device,
+        static_cast<UINT>(_resources->FrameConstants.size()));
     GDX12RootSignatureDesc root;
     root.NumSingleUAVSlots = 1;
     d.ClearRoot = std::make_unique<GDX12RootSignature>(_resources->Device, root);
@@ -194,6 +203,15 @@ void GDX12SssrPass::Initialize()
     pipeline.pRootSignature = d.ClearRoot->GetRootSignature().Get();
     pipeline.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
     ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(&pipeline, IID_PPV_ARGS(&d.ClearPipeline)));
+    GDX12RootSignatureDesc motionRoot;
+    motionRoot.NumSingleCBVSlots = motionRoot.NumSingleSRVSlots = motionRoot.NumSingleUAVSlots = 1;
+    d.MotionRoot = std::make_unique<GDX12RootSignature>(_resources->Device, motionRoot);
+    D3D_SHADER_MACRO macros[] = { { "SSSR_PREPARE_MOTION", "1" }, { nullptr, nullptr } };
+    shader = GDX12ShaderCompiler::GetInstance().CompileShader(_resources->Device,
+        SHADERS_FOLDER "FidelityFXUtility.hlsl", macros, "PrepareMotionCS", "cs");
+    pipeline.pRootSignature = d.MotionRoot->GetRootSignature().Get();
+    pipeline.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
+    ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(&pipeline, IID_PPV_ARGS(&d.MotionPipeline)));
 }
 void GDX12SssrPass::PrepareFrame()
 {
@@ -241,11 +259,27 @@ void GDX12SssrPass::Execute(GDX12CommandList* commands)
     }
     else
     {
+        const XMFLOAT2 currentJitter = { _commonData->ActiveCameraJitterOffsetX, _commonData->ActiveCameraJitterOffsetY };
+        const XMFLOAT2 previousJitter = d.DispatchCount ? d.PreviousJitter : currentJitter;
+        const UINT frame = _resources->CurrFrameConstantsIndex;
+        const XMFLOAT4 motionParameters = {
+            (currentJitter.x - previousJitter.x) * 2.0f / d.Output.GetWidth(),
+            (currentJitter.y - previousJitter.y) * -2.0f / d.Output.GetHeight(), 0, 0 };
+        d.MotionParameters->CopyData(frame, motionParameters);
+        commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
+        commands->SetComputeRootSignature(d.MotionRoot.get());
+        commands->SetPipelineState(d.MotionPipeline);
+        commands->SetComputeRootConstantBufferView(0, d.MotionParameters->GetElementAddress(frame));
+        commands->ResourceBarrier({ _inputs[2]->GetTexture()->GetResource()->GetSRVBarrier(),
+            d.TemporalMotion.GetResource()->GetUnorderedAccessBarrier() });
+        commands->SetComputeSRV(0, _inputs[2]->GetTexture()->GetSRV()->GPUHandle);
+        commands->SetComputeUAV(0, d.TemporalMotion.GetUAV()->GPUHandle);
+        commands->Dispatch((d.Output.GetWidth() + 7) / 8, (d.Output.GetHeight() + 7) / 8, 1);
         FfxSssrDispatchDescription dispatch = {};
         dispatch.commandList = ffxGetCommandListDX12(commands->GetCommandList().Get());
         dispatch.color = Resource(commands, *_inputs[0]->GetTexture());
         dispatch.depth = Resource(commands, *_inputs[1]->GetTexture());
-        dispatch.motionVectors = Resource(commands, *_inputs[2]->GetTexture());
+        dispatch.motionVectors = Resource(commands, d.TemporalMotion);
         dispatch.normal = Resource(commands, *_inputs[3]->GetTexture());
         dispatch.materialParameters = Resource(commands, *_inputs[4]->GetTexture());
         dispatch.environmentMap = Resource(commands, *_inputs[5]->GetTexture());
@@ -257,7 +291,7 @@ void GDX12SssrPass::Execute(GDX12CommandList* commands)
         MatrixForFfx(dispatch.view, _commonData->ActiveCameraView);
         MatrixForFfx(dispatch.invView, _commonData->ActiveCameraView.Invert());
         MatrixForFfx(dispatch.invViewProjection, _commonData->ActiveCameraViewProjection.Invert());
-        MatrixForFfx(dispatch.prevViewProjection, _commonData->ActiveCameraPreviousViewProjection);
+        MatrixForFfx(dispatch.prevViewProjection, d.DispatchCount ? d.PreviousJitteredViewProjection : _commonData->ActiveCameraViewProjection);
         dispatch.renderSize = { d.Output.GetWidth(), d.Output.GetHeight() };
         dispatch.motionVectorScale = { 0.5f, -0.5f };
         dispatch.iblFactor = 1;
@@ -277,6 +311,8 @@ void GDX12SssrPass::Execute(GDX12CommandList* commands)
         const auto result = ffxSssrContextDispatch(d.Context.get(), &dispatch);
         commands->InvalidateCachedState();
         Check(result, "Dispatch SSSR");
+        d.PreviousJitter = currentJitter;
+        d.PreviousJitteredViewProjection = _commonData->ActiveCameraViewProjection;
         d.DispatchCount = (std::min)(d.DispatchCount + 1, 2u);
     }
     commands->EndPixEvent();
@@ -287,6 +323,7 @@ void GDX12SssrPass::Resize()
     _resources->Device->GetCommandQueue()->Flush();
     d.Destroy();
     CreateOutput(*_resources, d.Output, *_inputs[0]->GetTexture());
+    CreateOutput(*_resources, d.TemporalMotion, *_inputs[0]->GetTexture(), DXGI_FORMAT_R16G16_FLOAT);
     d.Prepared = false;
 }
 void GDX12SssrPass::ClearDenendencies()

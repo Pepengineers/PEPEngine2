@@ -15,7 +15,7 @@ namespace
     {
         if (!condition) throw std::runtime_error(message);
     }
-    void MakeInput(GDX12DeviceResources& resources, GDX12Texture& texture, UINT width, UINT height, DXGI_FORMAT format)
+    void MakeInput(GDX12DeviceResources& resources, GDX12Texture& texture, UINT width, UINT height, DXGI_FORMAT format, bool writable = false)
     {
         GDX12TextureDesc description;
         description.Width = width; description.Height = height;
@@ -25,6 +25,13 @@ namespace
         description.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
         description.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         description.SRVDesc.Texture2D.MipLevels = 1;
+        if (writable)
+        {
+            description.CreateUAV = true;
+            description.UAVDesc.Format = format;
+            description.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+            description.UAVHeapIndex = resources.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+        }
         texture.Initialize(description);
     }
     void Upload(GDX12Device& device, GDX12Texture& texture, const void* pixels, UINT pixelBytes)
@@ -55,7 +62,7 @@ namespace
         queue->ExecuteCommandList(commands);
         queue->Flush();
     }
-    std::vector<float> ReadColor(GDX12Device& device, GDX12Texture& texture)
+    std::vector<float> ReadColor(GDX12Device& device, GDX12Texture& texture, UINT channels = 4)
     {
         const auto description = texture.GetResource()->D3DResource->GetDesc();
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
@@ -78,15 +85,15 @@ namespace
         void* mapping;
         const D3D12_RANGE range = { 0, static_cast<SIZE_T>(bytes) };
         ThrowIfFailed(readback->Map(0, &range, &mapping));
-        std::vector<float> values(texture.GetWidth() * texture.GetHeight() * 4);
+        std::vector<float> values(texture.GetWidth() * texture.GetHeight() * channels);
         for (UINT y = 0; y < texture.GetHeight(); ++y)
         {
             const auto* row = reinterpret_cast<const uint16_t*>(static_cast<const char*>(mapping) + footprint.Offset + y * footprint.Footprint.RowPitch);
-            for (UINT x = 0; x < texture.GetWidth() * 4; ++x)
+            for (UINT x = 0; x < texture.GetWidth() * channels; ++x)
             {
                 const float value = PackedVector::XMConvertHalfToFloat(row[x]);
-                Require(std::isfinite(value) && value >= 0 && value < 100000, "FidelityFX output must contain finite HDR values");
-                values[y * texture.GetWidth() * 4 + x] = value;
+                Require(std::isfinite(value) && (channels == 2 || value >= 0) && value < 100000, "FidelityFX output must contain finite values");
+                values[y * texture.GetWidth() * channels + x] = value;
             }
         }
         const D3D12_RANGE noWrite = {};
@@ -161,6 +168,50 @@ int main()
         Upload(device, depth, depthData.data(), 4);
         Upload(device, motion, velocities.data(), 4);
         Upload(device, normal, normals.data(), 8);
+        {
+            GDX12Texture preparedMotion;
+            MakeInput(resources, preparedMotion, width, height, DXGI_FORMAT_R16G16_FLOAT, true);
+            GDX12RootSignatureDesc rootDescription;
+            rootDescription.NumSingleCBVSlots = rootDescription.NumSingleSRVSlots = rootDescription.NumSingleUAVSlots = 1;
+            GDX12RootSignature root(&device, rootDescription);
+            D3D_SHADER_MACRO macros[] = { { "SSSR_PREPARE_MOTION", "1" }, { nullptr, nullptr } };
+            auto shader = GDX12ShaderCompiler::GetInstance().CompileShader(&device,
+                SHADERS_FOLDER "FidelityFXUtility.hlsl", macros, "PrepareMotionCS", "cs");
+            D3D12_COMPUTE_PIPELINE_STATE_DESC description = {};
+            description.pRootSignature = root.GetRootSignature().Get();
+            description.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
+            ComPtr<ID3D12PipelineState> pipeline;
+            ThrowIfFailed(device.GetDevice()->CreateComputePipelineState(&description, IID_PPV_ARGS(&pipeline)));
+            GDX12UploadBuffer<XMFLOAT4> parameters(&device, 1);
+            const auto projected = [&](float jitterX, float jitterY)
+            {
+                Matrix jittered = projection;
+                jittered._31 += jitterX * 2.0f / width;
+                jittered._32 -= jitterY * 2.0f / height;
+                const Vector4 clip = Vector4::Transform(Vector4(0, 0, -100, 1), jittered);
+                return Vector2(clip.x / clip.w, clip.y / clip.w);
+            };
+            const Vector2 delta = projected(-2, -4) - projected(2, 4);
+            Require(std::abs(delta.x - 0.125f) < 1e-6f && std::abs(delta.y + 0.25f) < 1e-6f,
+                "Jitter motion must follow projected points in the RH camera, not the projection coefficient sign");
+            parameters.CopyData(0, { delta.x, delta.y, 0, 0 });
+            auto* queue = device.GetCommandQueue();
+            auto* list = queue->GetCommandList();
+            list->SetDescriptorHeaps({ resources.SRV_UAV_Heap.get() });
+            list->SetComputeRootSignature(&root);
+            list->SetPipelineState(pipeline);
+            list->SetComputeRootConstantBufferView(0, parameters.GetElementAddress(0));
+            list->ResourceBarrier({ motion.GetResource()->GetSRVBarrier(), preparedMotion.GetResource()->GetUnorderedAccessBarrier() });
+            list->SetComputeSRV(0, motion.GetSRV()->GPUHandle);
+            list->SetComputeUAV(0, preparedMotion.GetUAV()->GPUHandle);
+            list->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
+            queue->ExecuteCommandList(list);
+            queue->Flush();
+            const auto converted = ReadColor(device, preparedMotion, 2);
+            for (size_t i = 0; i < converted.size(); i += 2)
+                Require(converted[i] == 0.125f && converted[i + 1] == -0.25f, "Temporal SSSR motion must add signed jitter delta");
+            for (float value : ReadColor(device, motion, 2)) Require(value == 0, "Preparing SSSR history must preserve the shared unjittered motion");
+        }
         const auto reference = ReadColor(device, color);
         GDX12EnvironmentIBLPass environment;
         environment.Setup(&resources, nullptr, &common);
@@ -256,6 +307,50 @@ int main()
         Require(!ssr.HasValidHistory(), "Resized SSSR must warm up its first dispatch");
         render();
         Require(ssr.HasValidHistory(), "Resized SSSR history must recover on the second dispatch");
+        set(L"Render.DOF.Enabled", "false");
+        set(L"Render.SSR.Quality", "3");
+        set(L"Render.SSR.Thickness", "1");
+        for (UINT y = 0; y < height; ++y)
+            for (UINT x = 0; x < width; ++x)
+            {
+                const size_t i = y * width + x, offset = i * 4;
+                const bool wall = x >= 43;
+                const float ndcX = (x + 0.5f) * 2.0f / width - 1;
+                const float distance = wall ? 20.0f * projection._11 / ndcX : 100.0f;
+                depthData[i] = projection._43 / distance - projection._33;
+                normals[offset] = PackedVector::XMConvertFloatToHalf(wall ? -1.0f : 0.5f);
+                normals[offset + 1] = 0;
+                normals[offset + 2] = PackedVector::XMConvertFloatToHalf(wall ? 0.0f : std::sqrt(0.75f));
+                normals[offset + 3] = PackedVector::XMConvertFloatToHalf(0.08f);
+                colorData[offset] = PackedVector::XMConvertFloatToHalf(wall ? 16.0f : 0.1f);
+                colorData[offset + 1] = colorData[offset + 2] = 0;
+            }
+        Upload(device, depth, depthData.data(), 4);
+        Upload(device, normal, normals.data(), 8);
+        Upload(device, color, colorData.data(), 8);
+        ++common.HistoryRevision;
+        for (int i = 0; i < 4; ++i) render();
+        const auto redWall = ReadColor(device, *ssr.GetOutput(0)->GetTexture());
+        for (UINT y = 0; y < height; ++y)
+            for (UINT x = 43; x < width; ++x)
+            {
+                const size_t offset = (y * width + x) * 4;
+                colorData[offset] = 0;
+                colorData[offset + 1] = PackedVector::XMConvertFloatToHalf(16);
+            }
+        Upload(device, color, colorData.data(), 8);
+        for (int i = 0; i < 4; ++i) render();
+        const auto greenWall = ReadColor(device, *ssr.GetOutput(0)->GetTexture());
+        float redHit = 0, greenHit = 0;
+        for (UINT y = 12; y < height - 12; ++y)
+            for (UINT x = 12; x < 36; ++x)
+            {
+                const size_t offset = (y * width + x) * 4;
+                redHit += redWall[offset] - greenWall[offset];
+                greenHit += greenWall[offset + 1] - redWall[offset + 1];
+            }
+        std::cout << "SSSR ray-hit color deltas red=" << redHit << " green=" << greenHit << '\n';
+        Require(redHit > 0.5f && greenHit > 0.5f, "Screen-space rays must reflect changes in hit scene color while the environment stays fixed");
         Require(!console.FindConsoleVariable(L"Render.SSR.SamplesPerQuad").SetFromString("3"), "Invalid ray count must be rejected");
         Require(!console.FindConsoleVariable(L"Render.DOF.Aperture").SetFromString("0"), "Invalid aperture must be rejected");
         for (UINT64 i = 0; i < info->GetNumStoredMessagesAllowedByRetrievalFilter(); ++i)
@@ -273,7 +368,7 @@ int main()
         environment.ClearDenendencies();
         GDX12ShaderCompiler::Shutdown();
         if (liveInfo) liveInfo->UnregisterMessageCallback(callback);
-        std::cout << "FidelityFX GPU: SSSR fallback/history, DOF focus/blur/Off, quality and cached-state restoration passed.\n";
+        std::cout << "FidelityFX GPU: SSSR ray hits/jitter/fallback/history, DOF focus/blur/Off, quality and cached-state restoration passed.\n";
         return 0;
     }
     catch (const DxException& error) { std::wcerr << error.ToString() << '\n'; }
