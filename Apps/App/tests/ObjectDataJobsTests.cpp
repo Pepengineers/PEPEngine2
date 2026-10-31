@@ -30,7 +30,15 @@ static std::vector<T> ReadUpload(GDX12UploadBuffer<T>* buffer)
 class ObjectDataApp final : public App
 {
 public:
-    explicit ObjectDataApp(std::filesystem::path scene) : App(GetModuleHandleW(nullptr)), _scene(std::move(scene)) {}
+    explicit ObjectDataApp(std::filesystem::path scene) : App(GetModuleHandleW(nullptr)), _scene(std::move(scene))
+    {
+        auto& setting = GetLocator().GetModule<ConsoleModule>()->FindConsoleVariable(L"Jobs.ThreadCount");
+        const int configured = setting.GetInt();
+        const unsigned expected = configured > 0 ? static_cast<unsigned>(configured)
+            : (std::max)(1u, std::thread::hardware_concurrency());
+        Require(GetJobs().GetThreadCount() == expected, "Jobs.ThreadCount must configure the application pool before scene loading");
+        Require(!setting.SetFromString("2"), "Jobs.ThreadCount must stay frozen after startup");
+    }
     void Measure(unsigned threads)
     {
         JobSystem jobs(threads);
@@ -135,6 +143,12 @@ int main(int argc, char** argv)
 {
     try
     {
+        if (argc == 2 && std::string_view(argv[1]) == "--check-job-threads")
+        {
+            ObjectDataApp app({});
+            std::cout << "Configured job pool: " << app.GetJobs().GetThreadCount() << " threads.\n";
+            return 0;
+        }
         if (argc == 2)
         {
             ObjectDataApp app(std::filesystem::absolute(argv[1]));

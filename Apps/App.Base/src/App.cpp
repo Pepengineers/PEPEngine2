@@ -2,6 +2,7 @@
 
 #include <App.Base/App.h>
 #include <WindowsX.h>
+#include "Common/ConsoleVariables.h"
 #include "Engine.Core/ConsoleModule.h"
 
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
@@ -12,6 +13,10 @@ using namespace DirectX;
 
 namespace Private
 {
+    static AutoConsoleVariable<int> JobThreadCount(
+        L"Jobs.ThreadCount", 0, L"Total job threads including the caller; <= 0 uses hardware concurrency. Restart required.",
+        EConsoleVariableFlags::ReadOnly);
+
     static LRESULT CALLBACK MainWndProc(const HWND hwnd, const UINT msg, const WPARAM wParam, const LPARAM lParam)
     {
         return App::GetInstance()->MsgProc(hwnd, msg, wParam, lParam);
@@ -58,7 +63,7 @@ App* App::GetInstance()
 }
 
 App::App(HINSTANCE hInstance)
-    : AppHandler(hInstance)
+    : AppHandler(hInstance), _jobs(static_cast<unsigned>((std::max)(0, Private::JobThreadCount.GetInt())))
 {
     Instance = this;
 }
@@ -146,7 +151,6 @@ bool App::Initialize()
     if (!AddModules()) return false;
 
     // Scene loading creates GPU resources, so module hash order cannot decide initialization.
-    Locator.GetModule<ConsoleModule>()->Initialize();
     Locator.GetModule<RenderModule>()->Initialize();
     Locator.GetModule<SceneManagerModule>()->Initialize();
     auto scenes = Locator.GetModule<SceneManagerModule>();

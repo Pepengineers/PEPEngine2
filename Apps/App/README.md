@@ -139,6 +139,13 @@ auto moved = move.Schedule(jobs, positions.size(), 64);
 moved.Complete();
 ```
 
+The application's shared pool reads `Jobs.ThreadCount` from `[ConsoleVariables]`
+in `Config/Engine.ini` beside the executable. Values `<= 0` select hardware
+concurrency; positive values specify the total thread count, including the caller
+(`4` means three workers and the caller). The default is `0`. This setting applies
+to ECS/object jobs and scene-loading jobs using the same application pool. It is
+read-only after startup; restart the application to change the pool size.
+
 Pass a preceding `JobHandle` as the last Schedule argument to start a system only
 after every batch of its predecessor finishes. `JobHandle::CombineDependencies`
 joins handles; `Job::Run(handle)` waits before its synchronous Execute. Complete
@@ -194,6 +201,8 @@ directory and optionally the actual Interior OBJ to verify its 2381 sections are
 partitioned exactly once. `ObjectDataJobsTests` loads a small real DX12 scene and
 checks selected indirect slots, motion and bounds across all frame slots with
 one and four threads, and that movement leaves source templates unchanged.
+Its `--check-job-threads` argument verifies the configured application pool and
+startup-only setting without opening a window or initializing the renderer.
 Pass the actual Bistro scene directory as its single argument for a CPU-only
 measurement of the real motion and object-data systems (256 samples after warmup,
 one/four/hardware threads). Loading still creates the real GPU resources; no draw
