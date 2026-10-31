@@ -53,8 +53,9 @@ and IBL, but do not cast opaque shadows. Shadows use depth/slope/normal bias and
 
 IBL consists of diffuse irradiance, an eight-mip GGX-prefiltered radiance cubemap,
 and a split-sum BRDF LUT using the same Smith/Fresnel model as direct lighting.
-These resources are generated once on the GPU. The default source is a procedural
-HDR sky/ground in `EnvironmentIBL.hlsl`; no photographic HDR asset is bundled.
+These resources are generated once on the GPU from `Assets/Textures/Environment/grasscube1024.dds`,
+copied from the Multi-GPU-Render-DX12 project's `Data/Common/Textures` folder.
+The source is an sRGB BC1 cubemap with six 1024x1024 faces and eleven mip levels.
 This is global environment lighting, without local probes or environment occlusion.
 Reinhard remains the tone mapper after linear-HDR opaque/OIT composition.
 

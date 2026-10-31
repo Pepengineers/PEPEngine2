@@ -1,6 +1,8 @@
 #include "PBRMath.hlsli"
 
 cbuffer FilterParameters : register(b0) { uint OutputSize; float Roughness; };
+TextureCube<float4> SourceEnvironment : register(t0);
+SamplerState EnvironmentSampler : register(s0);
 RWTexture2DArray<float4> OutputCube : register(u0);
 RWTexture2D<float4> OutputLUT : register(u1);
 
@@ -20,14 +22,6 @@ float3 CubeDirection(uint3 id)
     else if (id.z == 4) direction = float3(uv.x, -uv.y, 1);
     else direction = float3(-uv.x, -uv.y, -1);
     return normalize(direction);
-}
-
-float3 EnvironmentRadiance(float3 direction)
-{
-    // Procedural HDR sky/ground source: no external HDR asset is required.
-    float3 sky = lerp(float3(0.65f, 0.75f, 0.9f), float3(0.12f, 0.3f, 0.65f), sqrt(saturate(direction.y)));
-    float3 ground = float3(0.12f, 0.10f, 0.08f);
-    return lerp(ground, sky, smoothstep(-0.05f, 0.1f, direction.y)) * 1.5f;
 }
 
 float3 ToWorld(float3 local, float3 normal)
@@ -51,12 +45,15 @@ void IrradianceCS(uint3 id : SV_DispatchThreadID)
     if (any(id.xy >= OutputSize)) return;
     float3 n = CubeDirection(id);
     float3 irradiance = 0.0f;
+    uint width, height, levels;
+    SourceEnvironment.GetDimensions(0, width, height, levels);
     for (uint i = 0; i < 128; ++i)
     {
         float2 xi = Hammersley(i, 128);
         float phi = 2.0f * PBR_PI * xi.x;
         float3 local = float3(cos(phi) * sqrt(xi.y), sin(phi) * sqrt(xi.y), sqrt(1.0f - xi.y));
-        irradiance += EnvironmentRadiance(ToWorld(local, n));
+        float mip = max(0.0f, 0.5f * log2(6.0f * width * height / (512.0f * local.z)));
+        irradiance += SourceEnvironment.SampleLevel(EnvironmentSampler, ToWorld(local, n), mip).rgb;
     }
     OutputCube[id] = float4(irradiance * (PBR_PI / 128.0f), 1);
 }
@@ -68,17 +65,22 @@ void PrefilterCS(uint3 id : SV_DispatchThreadID)
     float3 n = CubeDirection(id);
     if (Roughness == 0.0f)
     {
-        OutputCube[id] = float4(EnvironmentRadiance(n), 1);
+        OutputCube[id] = float4(SourceEnvironment.SampleLevel(EnvironmentSampler, n, 0).rgb, 1);
         return;
     }
     float3 color = 0.0f;
     float totalWeight = 0.0f;
+    uint width, height, levels;
+    SourceEnvironment.GetDimensions(0, width, height, levels);
+    float texelSolidAngle = 4.0f * PBR_PI / (6.0f * width * height);
     for (uint i = 0; i < 128; ++i)
     {
         float3 h = SampleGGX(Hammersley(i, 128), n, Roughness);
         float3 l = reflect(-n, h);
         float nDotL = saturate(dot(n, l));
-        color += EnvironmentRadiance(l) * nDotL;
+        float pdf = max(DistributionGGX(saturate(dot(n, h)), Roughness) * 0.25f, 1e-5f);
+        float mip = max(0.0f, 0.5f * log2(1.0f / (128.0f * pdf * texelSolidAngle)));
+        color += SourceEnvironment.SampleLevel(EnvironmentSampler, l, mip).rgb * nDotL;
         totalWeight += nDotL;
     }
     OutputCube[id] = float4(color / max(totalWeight, 1e-5f), 1);

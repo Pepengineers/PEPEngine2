@@ -103,6 +103,11 @@ int main()
         GDX12EnvironmentIBLPass environment;
         environment.Setup(&resources, nullptr, &common);
         environment.Initialize();
+        const auto sourceCube = environment.GetOutput(3)->GetTexture()->GetResource()->D3DResource->GetDesc();
+        Require(sourceCube.Width == 1024 && sourceCube.Height == 1024 && sourceCube.DepthOrArraySize == 6 &&
+            sourceCube.MipLevels == 11, "Scene cubemap dimensions/subresources were not preserved");
+        Require(environment.GetOutput(3)->GetTexture()->GetFormat() == DXGI_FORMAT_BC1_UNORM_SRGB,
+            "Scene cubemap must be sampled in linear light through an sRGB view");
         GDX12CascadedShadowPass shadows;
         shadows.Setup(&resources, nullptr, &common);
         shadows.Initialize();
