@@ -27,6 +27,9 @@
     <ClInclude Include="Include\App.Base\BistroProps.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\App.Base\LoadingSettings.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\App.Base\ECS\Components\FlyingPropComponent.h">
       <Filter>Header Files\ECS\Components</Filter>
     </ClInclude>

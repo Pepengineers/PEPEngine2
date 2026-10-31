@@ -6,6 +6,11 @@
 #include "Engine.Core/Types/TextureTypes.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/BistroProps.h"
+#include "App.Base/App.h"
+#include "App.Base/LoadingSettings.h"
+#include "Engine.Core/IO/MeshImporter.h"
+#include "Engine.Core/IO/TextureLoader.h"
+#include "Engine.Core/Logging/Logger.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -16,6 +21,8 @@
 #include <system_error>
 #include <unordered_map>
 #include <vector>
+#include <unordered_set>
+#include <chrono>
 
 namespace
 {
@@ -167,7 +174,7 @@ namespace
     {
         Engine::Core::Texture texture = CreateSingleColorTexture(red, green, blue, alpha, textureType);
 
-        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, &texture);
+        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, &texture, textureType);
         if (gpuTexture == nullptr)
         {
             gpuTexture = renderModule.GetTextureByName(textureName);
@@ -378,8 +385,7 @@ namespace
         }
 
         const std::string textureName = sceneName + "_Texture_" + std::to_string(gpuTexturesByPath.size());
-        const Engine::Core::Texture typedTexture = texture->WithType(textureType);
-        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, &typedTexture);
+        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, texture, textureType);
         if (gpuTexture == nullptr)
         {
             gpuTexture = renderModule.GetTextureByName(textureName);
@@ -434,7 +440,7 @@ namespace
         }
 
         const std::string textureName = sceneName + "_Texture_" + std::to_string(gpuTexturesByPath.size());
-        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, mergedTexture.get());
+        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, mergedTexture.get(), Engine::Core::ETextureType::Color);
         if (gpuTexture == nullptr)
         {
             gpuTexture = renderModule.GetTextureByName(textureName);
@@ -464,7 +470,7 @@ namespace
         const std::string textureName = sceneName + "_FallbackTexture";
         const std::string materialName = sceneName + "_FallbackMaterial";
 
-        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, fallbackTexture);
+        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, fallbackTexture, fallbackTexture->GetType());
         if (gpuTexture == nullptr)
         {
             gpuTexture = renderModule.GetTextureByName(textureName);
@@ -753,6 +759,116 @@ namespace
         BenchmarkEngine::GetLocator().GetModule<RenderModule>()->SetActiveCamera(&cameraComponent);
     }
 
+    struct MeshImportJob final : ParallelJob
+    {
+        std::vector<std::filesystem::path> Paths;
+        std::vector<std::unique_ptr<Engine::Core::Mesh>> Results;
+        size_t Begin = 0;
+        void Execute(size_t index) override
+        {
+            Results[index] = Engine::Core::MeshImporter::ImportSingleMeshAsset(Paths[Begin + index]);
+        }
+    };
+
+    struct TextureDecodeJob final : ParallelJob
+    {
+        std::vector<std::filesystem::path> Paths;
+        std::vector<std::unique_ptr<Engine::Core::Texture>> Results;
+        size_t Begin = 0;
+        void Execute(size_t index) override
+        {
+            Results[index] = Engine::Core::TextureLoader::LoadTextureAsset(Paths[Begin + index]);
+        }
+    };
+
+    bool PrepareSceneAssets(Engine::Core::AssetManager& assets,
+        const std::vector<std::filesystem::path>& objPaths, JobSystem& jobs, std::uint64_t budget)
+    {
+        Log::Info("Loading", "Preparing ", objPaths.size(), " scene files, budget ", budget,
+            " bytes, ", jobs.GetThreadCount(), " job threads");
+        const auto started = std::chrono::steady_clock::now();
+        MeshImportJob imports;
+        std::vector<Engine::Core::MeshHandle> meshHandles;
+        std::vector<std::uint64_t> estimates;
+        for (const auto& path : objPaths)
+        {
+            const auto handle = assets.Meshes().Register({ path });
+            if (!handle.IsValid()) return false;
+            if (assets.Meshes().GetMesh(handle)) continue;
+            imports.Paths.push_back(assets.Meshes().GetSourcePath(handle));
+            meshHandles.push_back(handle);
+            std::error_code error;
+            const auto bytes = std::filesystem::file_size(path, error);
+            const auto maximum = (std::numeric_limits<std::uint64_t>::max)();
+            // shortcut: Assimp's opaque workspace is estimated from source size, refine using measured peaks.
+            estimates.push_back(error || bytes > maximum / 12 ? maximum : bytes * 12);
+        }
+        for (size_t begin = 0; begin < imports.Paths.size();)
+        {
+            const auto end = LoadingBatchEnd(estimates, begin, budget, jobs.GetThreadCount());
+            Log::Info("Loading", "Import batch ", begin, "..", end, " of ", imports.Paths.size(), " meshes");
+            if (estimates[begin] > budget)
+                Log::Warning("Loading", "Import exceeds the estimated budget; importing alone: ", imports.Paths[begin]);
+            imports.Begin = begin;
+            imports.Results.resize(end - begin);
+            LastLoadingMeasurements.MaxImportTasks = (std::max)(LastLoadingMeasurements.MaxImportTasks, end - begin);
+            imports.Schedule(jobs, end - begin, 1).Complete();
+            for (size_t index = begin; index < end; ++index)
+            {
+                if (!imports.Results[index - begin]) return false;
+                if (!assets.Meshes().Cache(meshHandles[index], std::move(imports.Results[index - begin]))) return false;
+            }
+            begin = end;
+        }
+        const auto imported = std::chrono::steady_clock::now();
+        LastLoadingMeasurements.ImportSeconds = std::chrono::duration<double>(imported - started).count();
+        Log::Info("Loading", "CPU mesh import completed in ", LastLoadingMeasurements.ImportSeconds, " s");
+
+        TextureDecodeJob textures;
+        std::vector<Engine::Core::TextureHandle> textureHandles;
+        std::unordered_set<std::uint32_t> seen;
+        estimates.clear();
+        for (const auto& path : objPaths)
+        {
+            const auto* mesh = assets.Meshes().FindMesh(path);
+            if (!mesh) return false;
+            for (const auto& material : mesh->GetMaterials())
+            {
+                for (const auto& texturePath : { material.DiffuseTexturePath, material.NormalTexturePath,
+                    material.SpecularTexturePath, material.RoughnessTexturePath, material.EmissiveTexturePath, material.OpacityTexturePath })
+                {
+                    if (texturePath.empty()) continue;
+                    const auto handle = assets.Textures().Register(texturePath);
+                    if (!handle.IsValid() || !seen.insert(handle.GetValue()).second || assets.Textures().GetTexture(handle)) continue;
+                    const auto source = assets.Textures().GetSourcePath(handle);
+                    textures.Paths.push_back(source);
+                    textureHandles.push_back(handle);
+                    estimates.push_back(Engine::Core::TextureLoader::EstimateTransientBytes(source));
+                }
+            }
+        }
+        LastLoadingMeasurements.TextureCount = textures.Paths.size();
+        Log::Info("Loading", "Decoding ", textures.Paths.size(), " unique textures");
+        for (size_t begin = 0; begin < textures.Paths.size();)
+        {
+            const auto end = LoadingBatchEnd(estimates, begin, budget, jobs.GetThreadCount());
+            Log::Info("Loading", "Texture batch ", begin, "..", end, " of ", textures.Paths.size());
+            if (estimates[begin] > budget)
+                Log::Warning("Loading", "Texture decode exceeds the estimated budget; decoding alone: ", textures.Paths[begin]);
+            textures.Begin = begin;
+            textures.Results.resize(end - begin);
+            LastLoadingMeasurements.MaxTextureTasks = (std::max)(LastLoadingMeasurements.MaxTextureTasks, end - begin);
+            textures.Schedule(jobs, end - begin, 1).Complete();
+            for (size_t index = begin; index < end; ++index)
+                if (textures.Results[index - begin])
+                    assets.Textures().Cache(textureHandles[index], std::move(textures.Results[index - begin]));
+            begin = end;
+        }
+        LastLoadingMeasurements.TextureSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - imported).count();
+        Log::Info("Loading", "CPU texture decoding completed in ", LastLoadingMeasurements.TextureSeconds, " s");
+        return true;
+    }
+
     /// Loads a set of obj files as one scene.
     bool LoadObjSceneFiles(
         World& world,
@@ -763,8 +879,21 @@ namespace
     {
         if (objPaths.empty())
         {
+            Log::Error("Loading", "Scene contains no OBJ files: ", sceneRoot);
             return false;
         }
+
+        LastLoadingMeasurements = {};
+        const auto budget = GetLoadingBudgetBytes();
+        if (!PrepareSceneAssets(assetManager, objPaths, App::GetInstance()->GetJobs(), budget)) return false;
+        const auto publishStarted = std::chrono::steady_clock::now();
+        Log::Info("Loading", "Creating scene entities, materials and GPU resources");
+        renderModule.BeginTextureUploadBatch(budget);
+        struct UploadCompletion
+        {
+            RenderModule& Renderer;
+            ~UploadCompletion() { Renderer.EndTextureUploadBatch(); }
+        } completion{ renderModule };
         
         bool loadedAnyObject = false;
         DirectX::BoundingBox sceneBounds = {};
@@ -772,6 +901,7 @@ namespace
         
         for (const std::filesystem::path& objPath : objPaths)
         {
+            Log::Info("Loading", "Publishing scene part: ", objPath);
             DirectX::BoundingBox objBounds = {};
             if (!LoadObjSceneEntity(
                 world,
@@ -782,7 +912,7 @@ namespace
                 gpuTexturesByPath,
                 objBounds))
             {
-                OutputDebugStringA(("Failed to load scene part: " + objPath.string() + "\n").c_str());
+                Log::Error("Loading", "Failed to load scene part: ", objPath);
                 return false;
             }
             
@@ -803,6 +933,10 @@ namespace
         }
         
         CreateCameraForBounds(world, sceneBounds);
+        Log::Info("Loading", "Waiting for GPU uploads to complete");
+        renderModule.WaitForUploads();
+        LastLoadingMeasurements.PublishSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - publishStarted).count();
+        Log::Info("Loading", "Scene GPU resources ready in ", LastLoadingMeasurements.PublishSeconds, " s");
         return true;
     }
 }
@@ -851,12 +985,12 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
     auto HeadTexture = assetManager.LoadTexture("african_head_diffuse.dds");
 
     //this should be automated via events
-    renderModule->CreateTexture("HeadTexture", HeadTexture);
+    renderModule->CreateTexture("HeadTexture", HeadTexture, HeadTexture->GetType());
 
     auto SvTexture = assetManager.LoadTexture("friazino_diff.png");
 
     //this should be automated via events
-    renderModule->CreateTexture("SvTexture", SvTexture);
+    renderModule->CreateTexture("SvTexture", SvTexture, SvTexture->GetType());
 
     //Materials: 
     auto HeadMaterial = renderModule->CreateMaterial("HeadMaterial");

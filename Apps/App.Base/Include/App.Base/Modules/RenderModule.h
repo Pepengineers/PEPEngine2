@@ -11,6 +11,7 @@ class SceneManagerModule;
 class World;
 class GDX12SwapChain;
 class GDX12Device;
+class GDX12CommandList;
 class GDX12GPUTimer;
 
 struct TransformComponent;
@@ -47,7 +48,10 @@ public:
 
     GPUTexture* GetTextureByName(const std::string& name);
     //returns a pointer to a fully initialized structure that you can specify in materials
-    GPUTexture* CreateTexture(const std::string& name, const Texture* texture);
+    GPUTexture* CreateTexture(const std::string& name, const Texture* texture, ETextureType type);
+    void WaitForUploads();
+    void BeginTextureUploadBatch(std::uint64_t budgetBytes);
+    void EndTextureUploadBatch();
 
     //Uploads Mesh geometry to GPU
     void SubmitMesh(const Mesh* mesh, MeshHandle handle);
@@ -129,7 +133,13 @@ private:
     void UnsubscribeFromSceneManager();
     void UnsubscribeFromAllWorlds();
 
-    GDX12Texture* CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture);
+    GDX12Texture* CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture, ETextureType type);
+
+    std::uint64_t _textureUploadBudget = 0;
+    std::uint64_t _textureUploadBytes = 0;
+    GDX12CommandList* _primaryTextureCommands = nullptr;
+    GDX12CommandList* _secondaryTextureCommands = nullptr;
+    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> _textureUploadResources;
 
     GameTimer* _timer;
     Window* _window;

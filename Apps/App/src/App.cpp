@@ -1,9 +1,17 @@
 #include <App.Base/App.h>
 #include "Engine.Core/ConsoleModule.h"
-#include "App.Base/Systems/FlyingPropSystem.h"
+#include "Engine.Core/Logging/Logger.h"
 #include <cmath>
 #include <cstdlib>
 #include <stdexcept>
+#include <chrono>
+#include <fstream>
+#include <psapi.h>
+#include <shellapi.h>
+#pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "psapi.lib")
+#include "App.Base/Systems/FlyingPropSystem.h"
+#include "App.Base/LoadingSettings.h"
 
 namespace
 {
@@ -11,6 +19,21 @@ namespace
     {
     public:
         explicit BistroApp(const HINSTANCE instance) : App(instance) {}
+
+        void BenchmarkFrame()
+        {
+            MSG message;
+            while (PeekMessage(&message, nullptr, 0, 0, PM_REMOVE))
+            {
+                TranslateMessage(&message);
+                DispatchMessage(&message);
+            }
+            Timer.Reset();
+            Timer.Tick();
+            Update(Timer);
+            Render(Timer);
+            Locator.GetModule<RenderModule>()->WaitForUploads();
+        }
 
         bool Initialize() override
         {
@@ -129,8 +152,52 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
 #endif
     try
     {
+        ConsoleModule{}.Initialize();
+        std::filesystem::path benchmarkOutput;
+        std::wstring budgetArgument;
+        int argumentCount = 0;
+        auto arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+        if (!arguments) throw std::runtime_error("Cannot read startup arguments");
+        for (int index = 1; index < argumentCount; ++index)
+        {
+            const std::wstring_view argument(arguments[index]);
+            constexpr std::wstring_view budgetPrefix = L"-Loading.TransientBudgetMiB=";
+            if (argument.substr(0, budgetPrefix.size()) == budgetPrefix) budgetArgument = argument;
+            constexpr std::wstring_view prefix = L"-Loading.BenchmarkOutput=";
+            if (argument.substr(0, prefix.size()) == prefix)
+                benchmarkOutput = std::wstring(argument.substr(prefix.size()));
+        }
+        LocalFree(arguments);
+        const auto started = std::chrono::steady_clock::now();
         BistroApp app(instance);
+        if (!budgetArgument.empty()) ApplyLoadingArgument(budgetArgument);
         if (!app.Initialize()) return EXIT_FAILURE;
+        const auto initialized = std::chrono::steady_clock::now();
+        if (!benchmarkOutput.empty())
+        {
+            app.BenchmarkFrame();
+            const auto ready = std::chrono::steady_clock::now();
+            PROCESS_MEMORY_COUNTERS_EX memory = {};
+            memory.cb = sizeof(memory);
+            if (!GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory)))
+                throw std::runtime_error("Cannot read process memory counters");
+            std::ofstream report(benchmarkOutput);
+            if (!report) throw std::runtime_error("Cannot open loading benchmark output");
+            report << "{\n  \"initialize_seconds\": " << std::chrono::duration<double>(initialized - started).count()
+                << ",\n  \"ready_seconds\": " << std::chrono::duration<double>(ready - started).count()
+                << ",\n  \"budget_mib\": " << LoadingTransientBudgetMiB.GetInt()
+                << ",\n  \"import_seconds\": " << LastLoadingMeasurements.ImportSeconds
+                << ",\n  \"texture_seconds\": " << LastLoadingMeasurements.TextureSeconds
+                << ",\n  \"publish_seconds\": " << LastLoadingMeasurements.PublishSeconds
+                << ",\n  \"prepared_textures\": " << LastLoadingMeasurements.TextureCount
+                << ",\n  \"max_import_tasks\": " << LastLoadingMeasurements.MaxImportTasks
+                << ",\n  \"max_texture_tasks\": " << LastLoadingMeasurements.MaxTextureTasks
+                << ",\n  \"peak_working_set_bytes\": " << memory.PeakWorkingSetSize
+                << ",\n  \"peak_commit_bytes\": " << memory.PeakPagefileUsage << "\n}\n";
+            report.close();
+            if (!report) throw std::runtime_error("Cannot write loading benchmark output");
+            return EXIT_SUCCESS;
+        }
         return app.Run();
     }
     catch (const ConsoleConfigError&)
@@ -139,10 +206,14 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
     }
     catch (const DxException& error)
     {
+        Log::Error("Application", "DirectX failure: ", error.ToString());
+        Log::Flush();
         MessageBoxW(nullptr, error.ToString().c_str(), L"Bistro App", MB_OK | MB_ICONERROR);
     }
     catch (const std::exception& error)
     {
+        Log::Error("Application", "Application failed: ", error.what());
+        Log::Flush();
         MessageBoxA(nullptr, error.what(), "Bistro App", MB_OK | MB_ICONERROR);
     }
     return EXIT_FAILURE;

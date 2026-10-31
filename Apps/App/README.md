@@ -10,6 +10,39 @@ msbuild Apps/App/App.vcxproj /p:Configuration=Release /p:Platform=x64 /m
 Executable: `Build/bin/x64/Release/App/App.exe`. The existing asset-folder setting
 resolves assets independently of the working directory.
 
+Scene loading prepares independent textures through the App's shared JobSystem,
+then publishes assets/materials/entities on the owner thread and batches texture
+uploads. Rendering starts after the complete scene is ready. OBJ import remains
+Assimp-based; no persistent baked-resource cache is used.
+
+`Loading.TransientBudgetMiB` defaults to 1024. Set it in the executable's
+`Config/Engine.ini`, under `[ConsoleVariables]`, or override it for one launch:
+
+```powershell
+Build/bin/x64/Release/App/App.exe -Loading.TransientBudgetMiB=1024
+```
+
+The value must be a positive integer and is captured once per scene load. It limits
+estimated temporary loading work and pending GPU uploads, rather than total RAM,
+resident CPU assets or VRAM. An oversized resource runs alone. With the default
+budget, Bistro's two large OBJ files import sequentially; texture preparation is
+parallel. Larger budgets can allow both independent imports to run together.
+
+For a reproducible loading measurement, the App can initialize the complete scene,
+render one frame, wait for GPU completion, write JSON counters and exit:
+
+```powershell
+Build/bin/x64/Release/App/App.exe -Loading.TransientBudgetMiB=1024 -Loading.BenchmarkOutput=Build/loading.json
+msbuild Apps/App/LoadingTests.vcxproj /p:Configuration=Release /p:Platform=x64 /m
+Build/bin/x64/Release/LoadingTests/LoadingTests.exe
+```
+
+The report includes initialization/ready times, CPU preparation stages and OS
+process peaks (working set and committed private memory). Output paths are relative
+to the launch directory. The tests check CVar validation, bounded/oversized batches,
+and identical pixels/mips from serial and parallel WIC decoding. Measurements and
+limitations are recorded in `docs/reports/2026-11-01-bistro-loading.md`.
+
 The App loads Exterior and Interior into one world, including their submeshes and
 materials, and shares texture uploads by path. Loading fails if either part is
 missing or cannot be imported. No benchmark objects or camera splines are added.
