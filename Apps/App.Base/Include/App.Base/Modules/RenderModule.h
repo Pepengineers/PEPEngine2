@@ -53,6 +53,9 @@ public:
     void SubmitMesh(const Mesh* mesh, MeshHandle handle);
 
     void SetActiveCamera(CameraComponent* camera);
+    void SubmitLights(std::vector<GDX12LocalLightConstants> lights, const GDX12MainConstants& settings);
+    void SubmitCameraShadows(const GDX12ShadowConstants& shadows);
+    const GDX12MainConstants& GetLightingSettings() const { return _primaryResources.Lighting; }
     
     struct WorldRenderSubscriptions
     {

@@ -32,7 +32,7 @@ void GDX12DeviceResources::Initialize(GDX12Device* device)
         D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
 
     DSVHeap = std::make_unique<GDX12DescriptorHeap>(device,
-        D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 1000,
+        D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 4096,
         D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
     GeometryBuffer = std::make_unique<GDX12GeometryBuffer>(device);
@@ -44,6 +44,7 @@ void GDX12DeviceResources::Initialize(GDX12Device* device)
         FrameConstants[i]->MaterialCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
         FrameConstants[i]->TransformCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
         FrameConstants[i]->InstanceCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        FrameConstants[i]->LocalLightCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
     }
 
     IndirectCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(device, 0, EBufferType::Upload, false);
@@ -54,7 +55,7 @@ void GDX12DeviceResources::UpdateMainCB(UINT width, UINT height, GameTimer* time
 {
     auto& frameRes = FrameConstants[CurrFrameConstantsIndex];
 
-    GDX12MainConstants mainConstants;
+    GDX12MainConstants mainConstants = Lighting;
 
     mainConstants.RenderTargetSize = { static_cast<float>(width), static_cast<float>(height) };
     mainConstants.TotalTime = timer->TotalTime();

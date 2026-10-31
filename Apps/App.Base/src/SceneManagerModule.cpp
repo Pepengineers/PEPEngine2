@@ -3,6 +3,8 @@
 #include "App.Base/Systems/CircleMovementSystem.h"
 #include "App.Base/Systems/MovementSystem.h"
 #include "App.Base/Systems/GPUDataUpdateSystem.h"
+#include "App.Base/Systems/LightUpdateSystem.h"
+#include "App.Base/BistroLightPlacements.h"
 #include "App.Base/Systems/LookAtTargetSystem.h"
 #include "App.Base/Systems/SplineFollowSystem.h"
 #include "Engine.Core/System.h"
@@ -56,6 +58,32 @@ void SceneManagerModule::Initialize()
     AddSystem<CircleMovementSystem>(world, 1);
     AddSystem<SplineFollowSystem>(world, 2);
     AddSystem<LookAtTargetSystem>(world, 3);
+    if (scenePath.wstring().find(L"Amazon Lumberyard Bistro") != std::wstring::npos)
+    {
+        const auto create = [world](const char* name, Vector3 position, Vector3 direction,
+            LightType type, float range, float intensity)
+        {
+            direction.Normalize();
+            const Vector3 rotation(XMConvertToDegrees(std::asin(-direction.y)), XMConvertToDegrees(std::atan2(direction.x, direction.z)), 0);
+            auto entity = world->GetECS().CreateEntity();
+            entity.AddComponent<NameComponent>(name);
+            entity.AddComponent<TransformComponent>(position, rotation);
+            auto& light = entity.AddComponent<LightComponent>();
+            light.Type = type;
+            light.Range = range;
+            light.Intensity = intensity;
+            if (type == LightType::Directional)
+            {
+                light.Color = Vector3(1.0f, 0.95f, 0.875f);
+                light.ShadowUpdate = ShadowUpdateMode::EveryFrame;
+            }
+        };
+        create("Sun", Vector3::Zero, Vector3(0.35f, -1.0f, 0.25f), LightType::Directional, 0, 4.0f);
+        for (const auto& fixture : BistroLightPlacements)
+            create(fixture.Name, fixture.Position, fixture.Direction,
+                fixture.Kind == BistroFixtureKind::Point ? LightType::Point : LightType::Spot, fixture.Range, fixture.Intensity);
+    }
+    AddSystem<LightUpdateSystem>(world, 100);
     AddSystem<GPUDataUpdateSystem>(world, 101);
 }
 

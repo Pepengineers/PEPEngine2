@@ -1,6 +1,7 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include <array>
+#include <cstring>
 
 class GDX12CascadedShadowPass final : public GDX12RenderPass
 {
@@ -99,6 +100,14 @@ public:
 
     void Execute(GDX12CommandList* commands) override
     {
+        const auto& lighting = _resources->Lighting;
+        if ((lighting.SunShadowFlags & 1u) == 0u)
+        {
+            commands->ResourceBarrier({ _atlas->GetResource()->GetSRVBarrier() });
+            return;
+        }
+        if ((lighting.SunShadowFlags & 2u) == 0u && _rendered && _cachedRevision == lighting.SunShadowRevision &&
+            std::memcmp(&_cachedSettings, &_resources->ShadowSettings, sizeof(_cachedSettings)) == 0) return;
         const UINT count = _resources->IndirectCommandsCache->GetElementCount();
         auto& visibility = _visibility[_resources->CurrFrameConstantsIndex];
         auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
@@ -156,6 +165,9 @@ public:
         }
         commands->ResourceBarrier({ _atlas->GetResource()->GetSRVBarrier() });
         commands->EndPixEvent();
+        _rendered = true;
+        _cachedSettings = _resources->ShadowSettings;
+        _cachedRevision = lighting.SunShadowRevision;
     }
 
     void ClearDenendencies() override
@@ -189,4 +201,7 @@ private:
     std::unique_ptr<GDX12RootSignature> _graphicsRoot, _computeRoot;
     ComPtr<ID3D12PipelineState> _shadowPSO, _cullingPSO, _clearPSO;
     ComPtr<ID3D12CommandSignature> _signature;
+    GDX12ShadowConstants _cachedSettings;
+    UINT _cachedRevision = 0;
+    bool _rendered = false;
 };

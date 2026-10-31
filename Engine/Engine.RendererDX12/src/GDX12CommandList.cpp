@@ -279,7 +279,8 @@ void GDX12CommandList::ResourceBarrier(std::initializer_list<CD3DX12_RESOURCE_BA
 	{
 		//skip transition with equal before and after states
 		const D3D12_RESOURCE_BARRIER& baseBarrier = barrier;
-		if (baseBarrier.Transition.StateBefore != baseBarrier.Transition.StateAfter)
+		if (baseBarrier.Type != D3D12_RESOURCE_BARRIER_TYPE_TRANSITION ||
+			baseBarrier.Transition.StateBefore != baseBarrier.Transition.StateAfter)
 		{
 			filteredBarriers.push_back(barrier);
 		}

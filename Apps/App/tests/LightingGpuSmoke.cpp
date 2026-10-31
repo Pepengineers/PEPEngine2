@@ -1,5 +1,6 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12CascadedShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/GDX12ShadowCascades.h"
@@ -111,6 +112,9 @@ int main()
         GDX12CascadedShadowPass shadows;
         shadows.Setup(&resources, nullptr, &common);
         shadows.Initialize();
+        GDX12LocalShadowPass localShadows;
+        localShadows.Setup(&resources, nullptr, &common);
+        localShadows.Initialize();
         GDX12OpaquePass opaque;
         opaque.Setup(&resources, nullptr, &common);
         opaque.SetInputs({ shadows.GetOutput(0), environment.GetOutput(0), environment.GetOutput(1), environment.GetOutput(2) });
@@ -169,6 +173,44 @@ int main()
         queue->ExecuteCommandList(commands);
         queue->Flush();
         CheckReadback(device, *shadows.GetOutput(0)->GetTexture(), 0, false, true);
+
+        GDX12LocalLightConstants point;
+        point.Position = { 0, 20, 0 };
+        point.EntityId = 1;
+        point.ShadowFirstSlice = 0;
+        point.ShadowFlags = 1;
+        BuildLocalLightShadowMatrices(point);
+        GDX12LocalLightConstants spot = point;
+        spot.Type = 2;
+        spot.EntityId = 2;
+        spot.ShadowFirstSlice = 6;
+        spot.Position.y = 30;
+        BuildLocalLightShadowMatrices(spot);
+        const auto updateLocal = [&]()
+        {
+            resources.LocalLights = { point, spot };
+            frame->LocalLightCache->Resize(2);
+            frame->LocalLightCache->CopyData(0, resources.LocalLights.data(), 2);
+            auto* list = queue->GetCommandList();
+            localShadows.Execute(list);
+            queue->ExecuteCommandList(list);
+            queue->Flush();
+        };
+        updateLocal();
+        Require(localShadows.GetLastFrameRenderedViews() == 7, "Cached point+spot shadows must bake seven views initially");
+        CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true);
+        CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 6, false, true);
+        updateLocal();
+        Require(localShadows.GetLastFrameRenderedViews() == 0, "Cached shadows must skip rendering on unchanged frames");
+        spot.Position.x += 2;
+        BuildLocalLightShadowMatrices(spot);
+        updateLocal();
+        Require(localShadows.GetLastFrameRenderedViews() == 1, "Moving a spot must only update its own cached map");
+        point.ShadowFlags |= 2;
+        updateLocal();
+        Require(localShadows.GetLastFrameRenderedViews() == 6, "EveryFrame point must update all six faces");
+        updateLocal();
+        Require(localShadows.GetLastFrameRenderedViews() == 6, "EveryFrame point updates must continue on later frames");
         for (UINT64 i = 0; i < info->GetNumStoredMessagesAllowedByRetrievalFilter(); ++i)
         {
             SIZE_T size = 0;

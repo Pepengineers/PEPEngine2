@@ -59,6 +59,25 @@ The source is an sRGB BC1 cubemap with six 1024x1024 faces and eleven mip levels
 This is global environment lighting, without local probes or environment occlusion.
 Reinhard remains the tone mapper after linear-HDR opaque/OIT composition.
 
+Bistro contains 135 ECS fixture lights (124 point and 11 spot), placed from actual
+bulb/glass/lens geometry, including street lamps, string bulbs, chandeliers, wall
+lamps and fan globes. `BistroLightPlacements.h` retains the original fixture names.
+`TransformComponent` supplies position/rotation; `LightComponent` supplies type,
+linear color, intensity, range, spot half-angles, enable/shadow flags and update mode.
+Directional light is also an ECS entity. Systems update lights before GPU data upload.
+
+Each light selects `ShadowUpdateMode::Cached` or `EveryFrame`. Cached maps bake on
+first use and rebake when the light moves or its shadow projection changes; changes
+to intensity/color reuse depth. A system calls `light.InvalidateShadow()` after
+changing static casters or when an explicit refresh is desired. EveryFrame lights
+render on every frame. Point lights have six maps and spots one, currently 256x256
+per view with PCF. Transparent meshes receive shadows but do not cast opaque shadows.
+CSM caching also refreshes when the camera-fitted cascade matrices change.
+
+`LocalLightingTests.cpp` checks ECS parameter updates and cache invalidation; the
+GPU smoke verifies initial point/spot baking, cached reuse, moving a spot, and
+every-frame point updates with actual shadow depth readback.
+
 Controls: right mouse to look; W/A/S/D to fly; Q/E down/up; Shift to move faster;
 mouse wheel to change speed; Esc to exit.
 

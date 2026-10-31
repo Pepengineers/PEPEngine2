@@ -35,6 +35,9 @@ public:
     std::unordered_map<std::string, std::unique_ptr<GDX12Texture>> Textures;
 
     GDX12Device* Device;
+    GDX12MainConstants Lighting;
+    GDX12ShadowConstants ShadowSettings;
+    std::vector<GDX12LocalLightConstants> LocalLights;
     void Initialize(GDX12Device* device);
     void UpdateMainCB(UINT width, UINT height, GameTimer* timer);
     void UpdateMaterialCB(std::unordered_map<std::string, std::unique_ptr<GDX12Material>>& materials);

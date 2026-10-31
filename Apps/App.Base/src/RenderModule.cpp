@@ -347,6 +347,34 @@ void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
     { _secondaryResources.GeometryBuffer->AddMesh(mesh, handle); }
 }
 
+void RenderModule::SubmitLights(std::vector<GDX12LocalLightConstants> lights, const GDX12MainConstants& settings)
+{
+    uint16_t width, height;
+    _window->GetWindowSize(width, height);
+    const auto upload = [&](GDX12DeviceResources& resources)
+    {
+        resources.LocalLights = lights;
+        resources.Lighting = settings;
+        auto& cache = resources.FrameConstants[resources.CurrFrameConstantsIndex]->LocalLightCache;
+        cache->Resize((std::max)(static_cast<UINT>(lights.size()), 1u));
+        if (!lights.empty()) cache->CopyData(0, lights.data(), static_cast<UINT>(lights.size()));
+        resources.UpdateMainCB(width, height, _timer);
+    };
+    upload(_primaryResources);
+    if (_dualGPUMode) upload(_secondaryResources);
+}
+
+void RenderModule::SubmitCameraShadows(const GDX12ShadowConstants& shadows)
+{
+    _primaryResources.ShadowSettings = shadows;
+    GetCurrentPrimaryFrameConstants()->ShadowCB->CopyData(0, shadows);
+    if (_dualGPUMode)
+    {
+        _secondaryResources.ShadowSettings = shadows;
+        GetCurrentSecondaryFrameConstants()->ShadowCB->CopyData(0, shadows);
+    }
+}
+
 void RenderModule::SetActiveCamera(CameraComponent* camera)
 {
     _RPcommonData.ActiveCameraCBufferIndex = camera->_CBufferIndex;

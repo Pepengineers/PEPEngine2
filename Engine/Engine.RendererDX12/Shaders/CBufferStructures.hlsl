@@ -12,6 +12,10 @@ struct MainCB
     float _pad0;
     float3 LightRadiance;
     float _pad1;
+    uint LocalLightCount;
+    uint SunShadowFlags;
+    uint SunShadowRevision;
+    uint _pad2;
 };
 
 struct Transform
@@ -45,6 +49,7 @@ struct CameraCB
     float4x4 ViewProj;
     float4x4 ViewProjNoJitter;
     float4x4 View;
+    float4x4 InvViewProj;
     float4x4 PrevViewProjNoJitter;
     float3 CameraLocation;
     float NearPlane;
@@ -77,6 +82,23 @@ struct ShadowCB
     float4x4 ViewProj[4];
     float4 SplitDepths;
     float4 TexelWorldSize;
+};
+
+struct LocalLight
+{
+    float3 Position;
+    float Range;
+    float3 Direction;
+    float InnerCos;
+    float3 Radiance;
+    float OuterCos;
+    uint Type;
+    uint ShadowFirstSlice;
+    uint EntityId;
+    uint ShadowRevision;
+    uint ShadowFlags;
+    uint3 _padding;
+    float4x4 ShadowViewProj[6];
 };
 
 struct InstanceData

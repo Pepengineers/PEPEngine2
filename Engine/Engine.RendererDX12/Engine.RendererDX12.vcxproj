@@ -26,6 +26,8 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Material.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12SharedTexture.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ShadowCascades.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12LocalLights.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12LocalShadowPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12CascadedShadowPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12EnvironmentIBLPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12StreamlineSDK.h" />
@@ -89,6 +91,8 @@
     <None Include="Shaders\CSM.hlsli" />
     <None Include="Shaders\EnvironmentIBL.hlsl" />
     <None Include="Shaders\ShadowPass.hlsl" />
+    <None Include="Shaders\LocalShadowPass.hlsl" />
+    <None Include="Shaders\ShadowFrustum.hlsli" />
     <None Include="Shaders\FullScreenVS.hlsl" />
     <None Include="Shaders\OpaquePass.hlsl" />
     <None Include="Shaders\PBR.hlsli" />

@@ -58,12 +58,10 @@ public:
 
                     if (isActiveCamera)
                     {
-                        const GDX12MainConstants lighting;
+                        const auto& lighting = renderModule->GetLightingSettings();
                         const auto shadows = BuildShadowCascades(view.Invert(), FOV, renderModule->GetAspectRatio(),
                             camera.NearPlane, camera.FarPlane, Vector3(lighting.LightDirection));
-                        renderModule->GetCurrentPrimaryFrameConstants()->ShadowCB->CopyData(0, shadows);
-                        if (renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS))
-                            renderModule->GetCurrentSecondaryFrameConstants()->ShadowCB->CopyData(0, shadows);
+                        renderModule->SubmitCameraShadows(shadows);
                     }
 
                     //reserved-Z proj matrix
@@ -112,6 +110,7 @@ public:
 
                     XMStoreFloat4x4(&objConstants.ViewProj, XMMatrixTranspose(view * proj));
                     XMStoreFloat4x4(&objConstants.View, XMMatrixTranspose(view));
+                    XMStoreFloat4x4(&objConstants.InvViewProj, XMMatrixTranspose((view * proj).Invert()));
                     objConstants.CameraLocation = transform.Location;
                     objConstants.NearPlane = camera.NearPlane;
                     objConstants.FarPlane = camera.FarPlane;

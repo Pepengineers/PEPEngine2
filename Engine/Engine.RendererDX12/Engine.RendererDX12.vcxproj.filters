@@ -194,6 +194,8 @@
     <None Include="Shaders\CSM.hlsli" />
     <None Include="Shaders\EnvironmentIBL.hlsl" />
     <None Include="Shaders\ShadowPass.hlsl" />
+    <None Include="Shaders\LocalShadowPass.hlsl" />
+    <None Include="Shaders\ShadowFrustum.hlsli" />
     <None Include="Shaders\FullScreenVS.hlsl" />
     <None Include="Shaders\OpaquePass.hlsl" />
     <None Include="Shaders\PBR.hlsli" />

@@ -23,6 +23,7 @@ float SampleCascade(uint cascade, float3 position, float3 normal, float nDotL)
 
 float SunVisibility(float3 position, float3 normal, float nDotL)
 {
+    if ((CBMain.SunShadowFlags & 1u) == 0u) return 1.0f;
     float depth = -mul(float4(position, 1), CBCamera.View).z;
     if (depth <= 0.0f || depth >= CBShadow.SplitDepths.w) return 1.0f;
     uint cascade = depth > CBShadow.SplitDepths.x ? 1u : 0u;
