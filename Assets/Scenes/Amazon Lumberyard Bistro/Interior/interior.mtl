@@ -120,8 +120,8 @@ newmtl MASTER_Interior_01_Plaster2
 newmtl MASTER_Interior_01_Frozen_Glass
 	Ns 100.000
 	Ni 1.500
-	d 1.000
-	Tr 0.000
+	d 0.450
+	Tr 0.550
 	Tf 1.000 1.000 1.000 
 	illum 2
 	Ka 0.200 0.200 0.200
@@ -150,6 +150,7 @@ newmtl MASTER_Interior_01_Floor_Tile_Hexagonal_BLENDSHADER
 newmtl MASTER_Interior_01_Glass
 	Ns 100.000
 	Ni 1.500
+	d 0.200
 	Tr 0.800
 	Tf 0.200 0.200 0.200 
 	illum 2
@@ -525,8 +526,8 @@ newmtl Paris_Paintings
 newmtl Paris_Paintings_Glass
 	Ns 10.000
 	Ni 1.500
-	d 1.000
-	Tr 0.000
+	d 0.150
+	Tr 0.850
 	Tf 1.000 1.000 1.000 
 	illum 2
 	Ka 0.200 0.200 0.200
@@ -586,6 +587,7 @@ newmtl ToffeeJar_Toffee
 newmtl CookieJar_Glass1
 	Ns 500.000
 	Ni 1.000
+	d 0.200
 	Tf 0.100 0.100 0.100 
 	illum 7
 	Ka 0 0 0
@@ -888,6 +890,7 @@ newmtl Paris_Cashregister_Buttons
 newmtl Paris_Cashregister_Glass
 	Ns 100.000
 	Ni 1.500
+	d 0.100
 	Tr 0.900
 	Tf 0.100 0.100 0.100 
 	illum 2

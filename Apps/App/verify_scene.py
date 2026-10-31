@@ -74,6 +74,19 @@ class BistroChecks(unittest.TestCase):
         for actual, bg, color in zip(composite(background, repeated), background, repeated[0][0]):
             self.assertAlmostEqual(actual, bg * (1.0 - coverage) + color * coverage)
 
+    def test_all_glass_materials_have_partial_opacity(self):
+        for part in ("Interior", "Exterior"):
+            materials = read_materials(SCENE / part / (part.lower() + ".mtl"))
+            glass = {name: values for name, values in materials.items() if "glass" in name.lower()}
+            self.assertGreaterEqual(len(glass), 10)
+            for name, values in glass.items():
+                with self.subTest(part=part, material=name):
+                    self.assertIn("d", values, "OIT glass needs explicit partial opacity")
+                    opacity = float(values["d"][0])
+                    self.assertTrue(0.0 < opacity < 0.999, name)
+                    if "Tr" in values:
+                        self.assertAlmostEqual(opacity, 1.0 - float(values["Tr"][0]), msg=name)
+
 
 if __name__ == "__main__":
     unittest.main()
