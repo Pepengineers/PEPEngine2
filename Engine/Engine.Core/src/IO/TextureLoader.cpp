@@ -1,12 +1,14 @@
 ﻿// TextureLoader.cpp
 
 #include <Engine.Core/IO/TextureLoader.h>
+#include "Engine.Core/Logging/Logger.h"
 
 #include <Common/AssetDebugLog.h>
 
 #include <cwctype>
 #include <fstream>
 #include <string>
+#include <limits>
 
 #include <directxtex/DirectXTex.h>
 #include <wrl/client.h>
@@ -15,11 +17,21 @@
 
 namespace
 {
+    struct TextureMtaLifetime
+    {
+        CO_MTA_USAGE_COOKIE Cookie = nullptr;
+        HRESULT Result = CoIncrementMTAUsage(&Cookie);
+        ~TextureMtaLifetime() { if (SUCCEEDED(Result)) CoDecrementMTAUsage(Cookie); }
+    };
+
 	class ScopedComInitialization
 	{
 	public:
 		ScopedComInitialization()
 		{
+			// DirectXTex caches its WIC factory across calls, including between worker-thread lifetimes.
+			static TextureMtaLifetime lifetime;
+			if (FAILED(lifetime.Result)) { _result = lifetime.Result; return; }
 			// CoInitializeEx must be called before any COM objects (e.g. WIC) can be created.
 			// COINIT_MULTITHREADED - this thread uses the free-threaded COM apartment model.
 			_result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -180,7 +192,7 @@ namespace
 		return true;
 	}
 
-	std::unique_ptr<Engine::Core::Texture> CreateTextureFromScratchImage(const DirectX::TexMetadata& metadata, const DirectX::ScratchImage& scratchImage);
+	std::unique_ptr<Engine::Core::Texture> CreateTextureFromScratchImage(const DirectX::TexMetadata& metadata, const DirectX::ScratchImage& scratchImage, Engine::Core::ETextureType type);
 
 	/// Builds a generated mip chain from a single-mip CPU texture.
 	std::unique_ptr<Engine::Core::Texture> GenerateMipMapsForTexture(const Engine::Core::Texture& texture, const std::filesystem::path& sourcePath)
@@ -219,13 +231,13 @@ namespace
 			return nullptr;
 		}
 
-		std::unique_ptr<Engine::Core::Texture> generatedTexture = CreateTextureFromScratchImage(mipChain.GetMetadata(), mipChain);
+		std::unique_ptr<Engine::Core::Texture> generatedTexture = CreateTextureFromScratchImage(mipChain.GetMetadata(), mipChain, texture.GetType());
 		if (generatedTexture == nullptr)
 		{
 			return nullptr;
 		}
 
-		return std::make_unique<Engine::Core::Texture>(generatedTexture->WithType(texture.GetType()));
+		return generatedTexture;
 	}
 
 	/// Loads a texture from a WIC-compatible format (PNG, JPG, BMP, etc.) into a CPU Texture.
@@ -423,7 +435,7 @@ namespace
 	/// 3D textures are not supported and return nullptr.
 	/// Returns nullptr if the subresource set is incomplete
 	/// or if any subresource has missing pixel data.
-	std::unique_ptr<Engine::Core::Texture> CreateTextureFromScratchImage(const DirectX::TexMetadata& metadata, const DirectX::ScratchImage& scratchImage)
+	std::unique_ptr<Engine::Core::Texture> CreateTextureFromScratchImage(const DirectX::TexMetadata& metadata, const DirectX::ScratchImage& scratchImage, Engine::Core::ETextureType type)
 	{
 		if (metadata.dimension == DirectX::TEX_DIMENSION_TEXTURE3D)
 		{
@@ -440,7 +452,7 @@ namespace
 
 		Engine::Core::TextureDesc textureDesc = {};
 		textureDesc.Dimension = ConvertTextureDimension(metadata);
-		textureDesc.Type = Engine::Core::ETextureType::Unknown;
+		textureDesc.Type = type;
 		textureDesc.Format = metadata.format;
 		textureDesc.Width = static_cast<std::uint32_t>(metadata.width);
 		textureDesc.Height = static_cast<std::uint32_t>(metadata.height);
@@ -498,17 +510,44 @@ namespace
 
 namespace Engine::Core
 {
+	std::uint64_t TextureLoader::EstimateTransientBytes(const std::filesystem::path& sourcePath)
+	{
+		// DirectXTex caches its WIC factory across calls, so keep this apartment alive.
+		thread_local ScopedComInitialization com;
+		DirectX::TexMetadata metadata = {};
+		HRESULT result = E_FAIL;
+		const auto extension = ToLowerExtension(sourcePath);
+		if (com.IsUsable())
+		{
+			if (extension == L".dds") result = DirectX::GetMetadataFromDDSFile(sourcePath.c_str(), DirectX::DDS_FLAGS_NONE, metadata);
+			else if (extension == L".tga") result = DirectX::GetMetadataFromTGAFile(sourcePath.c_str(), DirectX::TGA_FLAGS_NONE, metadata);
+			else if (extension == L".hdr") result = DirectX::GetMetadataFromHDRFile(sourcePath.c_str(), metadata);
+			else result = DirectX::GetMetadataFromWICFile(sourcePath.c_str(), DirectX::WIC_FLAGS_NONE, metadata);
+		}
+		const auto maximum = (std::numeric_limits<std::uint64_t>::max)();
+		if (FAILED(result)) return maximum; // Unknown size runs alone; the loader reports the actual failure.
+		// shortcut: decoder/importer allocations are opaque, measure process peaks before treating estimates as hard limits.
+		std::uint64_t estimate = 32;
+		for (const auto factor : { metadata.width, metadata.height, metadata.depth, metadata.arraySize })
+		{
+			if (!factor || estimate > maximum / factor) return maximum;
+			estimate *= factor;
+		}
+		return estimate;
+	}
+
 	std::unique_ptr<Texture> TextureLoader::LoadTextureAsset(const std::filesystem::path& sourcePath)
 	{
+		Log::Info("Texture", "Decoding texture: ", sourcePath);
 		if (sourcePath.empty())
 		{
-			LogTextureLoaderMessage(L"[TextureLoader] Failed to load texture: empty source path.\n");
+			Log::Error("Texture", "Texture source path is empty");
 			return nullptr;
 		}
 
 		if (!std::filesystem::exists(sourcePath))
 		{
-			LogTextureLoaderMessage(L"[TextureLoader] Failed to load texture: file does not exist: " + sourcePath.generic_wstring() + L"\n");
+			Log::Warning("Texture", "Texture file not found: ", sourcePath);
 			return nullptr;
 		}
 
@@ -516,21 +555,21 @@ namespace Engine::Core
 
 		if (IsGitLfsPointerFile(filePrefix))
 		{
-			LogTextureLoaderMessage(L"[TextureLoader] Failed to load texture: file is a Git LFS pointer, not real texture data: " + sourcePath.generic_wstring() + L"\n");
+			Log::Error("Texture", "File is a Git LFS pointer, not texture data: ", sourcePath);
 			return nullptr;
 		}
 
 		const std::wstring extension = ToLowerExtension(sourcePath);
 		if (extension == L".dds" && !HasDdsMagic(filePrefix))
 		{
-			LogTextureLoaderMessage(L"[TextureLoader] Failed to load texture: invalid DDS header in file: " + sourcePath.generic_wstring() + L"\n");
+			Log::Error("Texture", "Invalid DDS header: ", sourcePath);
 			return nullptr;
 		}
 
 		ScopedComInitialization comInitialization;
 		if (!comInitialization.IsUsable())
 		{
-			LogTextureLoaderMessage(L"[TextureLoader] Failed to initialize COM for path: " + sourcePath.generic_wstring() + L"\n");
+			Log::Error("Texture", "COM initialization failed for ", sourcePath);
 			return nullptr;
 		}
 
@@ -544,7 +583,7 @@ namespace Engine::Core
 			const HRESULT loadResult = LoadScratchImageFromFile(sourcePath, metadata, scratchImage);
 			if (FAILED(loadResult))
 			{
-				LogTextureLoaderMessage(L"[TextureLoader] Failed to read texture file: " + sourcePath.generic_wstring() + L"\n");
+				Log::Error("Texture", "Failed to read ", sourcePath, ", HRESULT ", loadResult);
 				return nullptr;
 			}
 
@@ -558,7 +597,7 @@ namespace Engine::Core
 				textureMetadata = mipChain.GetMetadata();
 			}
 
-			loadedTexture = CreateTextureFromScratchImage(textureMetadata, *textureImage);
+			loadedTexture = CreateTextureFromScratchImage(textureMetadata, *textureImage, ETextureType::Unknown);
 		}
 		else
 		{
@@ -567,12 +606,12 @@ namespace Engine::Core
 
 		if (loadedTexture == nullptr)
 		{
-			LogTextureLoaderMessage(L"[TextureLoader] Failed to convert texture data for path: " + sourcePath.generic_wstring() + L"\n");
+			Log::Error("Texture", "Failed to convert texture data: ", sourcePath);
 			return nullptr;
 		}
 
-		LogTextureLoaderMessage(L"[TextureLoader] Loaded texture with " + std::to_wstring(loadedTexture->GetSubresourceCount()) +
-			L" subresources and " + std::to_wstring(loadedTexture->GetMipLevels()) + L" mip levels from path: " + sourcePath.generic_wstring() + L"\n");
+		Log::Info("Texture", "Decoded ", loadedTexture->GetSubresourceCount(), " subresources, ",
+			loadedTexture->GetMipLevels(), " mip levels: ", sourcePath);
 
 		if (loadedTexture->GetMipLevels() > 1)
 		{

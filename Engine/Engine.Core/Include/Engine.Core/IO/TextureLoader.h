@@ -11,6 +11,8 @@ namespace Engine::Core
 	class TextureLoader
 	{
 	public:
+		/// Conservative scheduling estimate for decoded pixels, mip workspace and an upload; not a process memory cap.
+		[[nodiscard]] static std::uint64_t EstimateTransientBytes(const std::filesystem::path& sourcePath);
 		/// Loads a texture asset from the given file path into a CPU-side Texture object.
 		///
 		/// Supports two loading paths depending on the file format:

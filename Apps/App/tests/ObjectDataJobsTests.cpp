@@ -1,5 +1,6 @@
 #include "App.Base/App.h"
 #include "App.Base/Systems/FlyingPropSystem.h"
+#include "Engine.Core/IO/TextureLoader.h"
 #include <cmath>
 #include <chrono>
 #include <cstring>
@@ -166,6 +167,16 @@ int main(int argc, char** argv)
         }
         const auto scene = std::filesystem::absolute("Build/tests/object-data/Amazon Lumberyard Bistro");
         std::filesystem::create_directories(scene / "Interior");
+        const auto bitmapPath = scene / "metadata.bmp";
+        char bitmap[58] = {};
+        bitmap[0] = 'B'; bitmap[1] = 'M'; bitmap[2] = 58; bitmap[10] = 54; bitmap[14] = 40;
+        bitmap[18] = bitmap[22] = bitmap[26] = 1; bitmap[28] = 24; bitmap[34] = 4;
+        std::ofstream image(bitmapPath, std::ios::binary);
+        image.write(bitmap, sizeof(bitmap));
+        image.close();
+        const auto estimate = Engine::Core::TextureLoader::EstimateTransientBytes(bitmapPath);
+        Require(estimate == 32 && Engine::Core::TextureLoader::EstimateTransientBytes(bitmapPath) == estimate,
+            "Repeated WIC metadata reads must keep their COM factory usable");
         std::ofstream materials(scene / "Interior/interior.mtl");
         for (const char* name : { "wall", "glass", "label", "cap" }) materials << "newmtl " << name << "\nKd 0.8 0.7 0.6\n";
         materials.close();
