@@ -1,0 +1,7 @@
+# GPU fluid solver и полноценная вода
+
+Статус: ПОДГОТОВЛЕНО, НЕ ЗАПУСКАТЬ до отдельного указания пользователя.
+
+Общий контракт: ../COMMON.md.
+
+Отдельный настраиваемый fluid render component плюс GPU solver, proper water surface (не цветные billboard particles). Донор MGPU-FluidSimulation из D:/Project/Multi-GPU-Render-DX12 — изолированный проект, его framework не копировать. Исправить реальные neighbour hash collisions, neighbor read/write races, hardcoded dt, coincident pairs, density division и collision transforms. Первичные алгоритмы Müller SPH 2003 и Truong/Yuksel Narrow-Range Filter 2018: https://matthias-research.github.io/pages/publications/sca03.pdf , https://www.cemyuksel.com/research/papers/narrowrangefilter.pdf . Reference NRF code all-rights-reserved не копировать; реализовать paper. GPU sort/hash neighbour search и безопасное adaptive/bounded stepping. Rendering: sphere depth/thickness, настоящий narrow-range smoothing с edge/pair/dynamic thresholds, normals, Fresnel/IOR, depth-checked refraction, Beer-Lambert absorption, environment/probe reflection, coherent water depth/motion для постэффектов. Учесть ordering glass перед/за водой. Solver и renderer выключаются независимо. CVars quality/enable/reset/solver timestep/substeps/particle физические параметры и surface/optics/filter controls, runtime+INI. CPU tiny all-pairs и NRF oracle плюс GPU конечность/стабильность/collision и optical/readback/transparent integration/timings. Не добавлять жидкость в сцену.
