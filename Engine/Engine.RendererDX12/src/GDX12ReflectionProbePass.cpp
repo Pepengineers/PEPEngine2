@@ -92,10 +92,12 @@ void GDX12ReflectionProbePass::Initialize()
 {
     GDX12RootSignatureDesc capture;
     capture.Constants.push_back(1);
-    capture.NumSingleCBVSlots = 3;
-    capture.NumSingleSRVSlots = 10;
+    capture.NumSingleCBVSlots = 4;
+    capture.NumSingleSRVSlots = 11;
     capture.SRVRanges.emplace_back(Texture2D_RangeLength);
     capture.StaticSamplers = GetStaticSamplers();
+    capture.StaticSamplers.emplace_back(7, D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+        D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
     CD3DX12_STATIC_SAMPLER_DESC sampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
     sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
     sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
@@ -387,7 +389,9 @@ void GDX12ReflectionProbePass::BindCapture(GDX12CommandList* commands, UINT face
     commands->SetGraphicsSRV(7, constants->LocalLightCache->GetSRV()->GPUHandle);
     commands->SetGraphicsSRV(8, localShadows->GetSRV()->GPUHandle);
     commands->SetGraphicsSRV(9, _inputs[3]->GetTexture()->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(10, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
+    commands->SetGraphicsRootConstantBufferView(4, _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->SkyCB->GetElementAddress(0));
+    commands->SetGraphicsSRV(10, _resources->SkyTransmittanceSRV.GPUHandle);
+    commands->SetGraphicsSRV(11, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
     commands->SetGeometryBuffer(_resources->GeometryBuffer.get());
     commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 }
@@ -407,7 +411,9 @@ void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, Geometry
     commands->SetGraphicsSRV(0, constants->MaterialCache->GetSRV()->GPUHandle);
     commands->SetGraphicsSRV(1, constants->TransformCache->GetSRV()->GPUHandle);
     commands->SetGraphicsSRV(2, constants->InstanceCache->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(10, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
+    commands->SetGraphicsRootConstantBufferView(4, _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->SkyCB->GetElementAddress(0));
+    commands->SetGraphicsSRV(10, _resources->SkyTransmittanceSRV.GPUHandle);
+    commands->SetGraphicsSRV(11, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
     commands->SetGeometryBuffer(_resources->GeometryBuffer.get());
     commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     commands->SetPipelineState(_shadowPSO);

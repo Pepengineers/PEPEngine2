@@ -43,3 +43,14 @@ const WorldECS& World::GetECS() const
 {
     return _ecs;
 }
+void World::SetSkySource(SkySource source, Entity entity)
+{
+    if (source != SkySource::Off && source != SkySource::SkyBox && source != SkySource::SkyAtmosphere)
+        throw std::invalid_argument("Unknown sky source");
+    if ((source == SkySource::SkyBox && !_ecs.Has<SkyBoxComponent>(entity)) ||
+        (source == SkySource::SkyAtmosphere && !_ecs.Has<SkyAtmosphereComponent>(entity)))
+        throw std::invalid_argument("Selected sky entity has no matching component");
+    _skySource = source;
+    _skyEntity = source == SkySource::Off ? InvalidEntity : entity;
+    ++_skyRevision;
+}

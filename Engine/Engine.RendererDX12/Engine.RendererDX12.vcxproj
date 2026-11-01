@@ -19,6 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12Sky.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ReflectionProbes.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionProbePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DepthOfField.h" />
@@ -75,6 +76,8 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\GDX12Sky.cpp" />
+    <ClCompile Include="src\GDX12EnvironmentIBLPass.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusion.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusionPass.cpp" />
     <ClCompile Include="..\..\External\External.Libraries\cacao\src\ffx_cacao.cpp">
@@ -124,6 +127,9 @@
     <None Include="Shaders\MotionBlur.hlsl" />
     <None Include="Shaders\Culling.hlsl" />
     <None Include="Shaders\CSM.hlsli" />
+    <None Include="Shaders\SkyParameters.hlsli" />
+    <None Include="Shaders\SkyRendering.hlsli" />
+    <None Include="Shaders\SkyAtmosphere.hlsl" />
     <None Include="Shaders\EnvironmentIBL.hlsl" />
     <None Include="Shaders\ShadowPass.hlsl" />
     <None Include="Shaders\LocalShadowPass.hlsl" />

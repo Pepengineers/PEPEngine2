@@ -59,6 +59,7 @@ public:
     void ReserveTransformCapacity(UINT additionalTransforms);
 
     void SetActiveCamera(CameraComponent* camera);
+    void SubmitSky(World& world);
     void SubmitLights(std::vector<GDX12LocalLightConstants> lights, const GDX12MainConstants& settings);
     void SubmitCameraShadows(const GDX12ShadowConstants& shadows);
     const GDX12MainConstants& GetLightingSettings() const { return _primaryResources.Lighting; }
@@ -179,6 +180,8 @@ private:
     // Defines which resources should be uploaded onto respective GPU
     uint32_t _primaryPipelineFlags;
     uint32_t _secondaryPipelineFlags;
+    World* _skyWorld = nullptr;
+    uint64_t _skyHash = 0;
     uint64_t _reflectionStaticHash = 0;
     uint64_t _reflectionDynamicHash = 0;
     UINT _instanceCount = 0;

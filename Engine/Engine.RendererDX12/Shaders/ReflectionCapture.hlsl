@@ -48,7 +48,10 @@ Texture2D<float4> EnvironmentBRDF : register(t6);
 StructuredBuffer<LocalLight> LocalLights : register(t7);
 Texture2DArray<float> LocalShadowMaps : register(t8);
 TextureCube<float4> SkyEnvironment : register(t9);
-Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t10);
+#define SKY_CB_REGISTER b4
+#define SKY_TRANSMITTANCE_REGISTER t10
+#include "SkyRendering.hlsli"
+Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t11);
 SamplerState samLinearClamp : register(s3);
 SamplerState samAnisotropicWrap : register(s4);
 SamplerComparisonState samShadow : register(s6);

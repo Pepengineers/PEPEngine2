@@ -162,14 +162,12 @@ int main()
         RenderPipelineCommonData common;
         common.WindowWidth = common.DownscaledWidth = 64;
         common.WindowHeight = common.DownscaledHeight = 64;
+        resources.Sky.Source = SkySource::SkyBox;
+        resources.Sky.Quality = 3;
+        resources.Sky.Box.IBL.CubeResolution = 1024;
         GDX12EnvironmentIBLPass environment;
         environment.Setup(&resources, nullptr, &common);
         environment.Initialize();
-        const auto sourceCube = environment.GetOutput(3)->GetTexture()->GetResource()->D3DResource->GetDesc();
-        Require(sourceCube.Width == 1024 && sourceCube.Height == 1024 && sourceCube.DepthOrArraySize == 6 &&
-            sourceCube.MipLevels == 11, "Scene cubemap dimensions/subresources were not preserved");
-        Require(environment.GetOutput(3)->GetTexture()->GetFormat() == DXGI_FORMAT_BC1_UNORM_SRGB,
-            "Scene cubemap must be sampled in linear light through an sRGB view");
         GDX12CascadedShadowPass shadows;
         shadows.Setup(&resources, nullptr, &common);
         shadows.Initialize();
@@ -199,6 +197,11 @@ int main()
         auto* queue = device.GetCommandQueue();
         auto* commands = queue->GetCommandList();
         environment.Execute(commands);
+        const auto sourceCube = environment.GetOutput(3)->GetTexture()->GetResource()->D3DResource->GetDesc();
+        Require(sourceCube.Width == 1024 && sourceCube.Height == 1024 && sourceCube.DepthOrArraySize == 6 &&
+            sourceCube.MipLevels == 11, "Authored source cubemap budget/mips were not preserved");
+        Require(environment.GetOutput(3)->GetTexture()->GetFormat() == DXGI_FORMAT_R16G16B16A16_FLOAT,
+            "Generated sky cubemap must contain linear HDR radiance");
         queue->ExecuteCommandList(commands);
         queue->Flush();
         CheckReadback(device, *environment.GetOutput(0)->GetTexture(), 0, false);

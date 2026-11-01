@@ -28,10 +28,12 @@ public:
         texture.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
         _color->Initialize(texture);
         GDX12RootSignatureDesc root;
-        root.NumSingleCBVSlots = 3;
-        root.NumSingleSRVSlots = 15;
+        root.NumSingleCBVSlots = 4;
+        root.NumSingleSRVSlots = 17;
         root.NumSingleUAVSlots = 1;
         root.StaticSamplers = GetStaticSamplers();
+        root.StaticSamplers.emplace_back(7, D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+            D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
         CD3DX12_STATIC_SAMPLER_DESC sampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
         sampler.AddressU = sampler.AddressV = sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
         sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
@@ -61,6 +63,9 @@ public:
             commands->ResourceBarrier({ texture->GetResource()->GetSRVBarrier() });
             commands->SetComputeSRV(i < 11 ? i : 14, texture->GetSRV()->GPUHandle);
         }
+        commands->SetComputeRootConstantBufferView(3, frame->SkyCB->GetElementAddress(0));
+        commands->SetComputeSRV(15, _resources->SkyTransmittanceSRV.GPUHandle);
+        commands->SetComputeSRV(16, _resources->SkyViewSRV.GPUHandle);
         commands->SetComputeSRV(11, frame->LocalLightCache->GetSRV()->GPUHandle);
         commands->SetComputeSRV(12, _resources->ReflectionRadianceSRV.GPUHandle);
         commands->SetComputeSRV(13, frame->ReflectionProbes->GetSRV()->GPUHandle);

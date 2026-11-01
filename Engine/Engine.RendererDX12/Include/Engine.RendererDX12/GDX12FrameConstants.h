@@ -6,6 +6,7 @@
 #include "Engine.RendererDX12/GDX12AppendBuffer.h"
 #include "Engine.RendererDX12/GDX12ConstantStructures.h"
 #include "Engine.RendererDX12/GDX12ReflectionProbes.h"
+#include "Engine.RendererDX12/GDX12Sky.h"
 
 class GDX12Device;
 
@@ -26,6 +27,8 @@ public:
     ~GDX12FrameConstants();
 
     bool IsInUseByGPU(UINT64 currentFence);
+
+    std::unique_ptr<GDX12UploadBuffer<GDX12SkyConstants>> SkyCB;
 
     //Always updating
     std::unique_ptr<GDX12UploadBuffer<GDX12MainConstants>> MainCB;

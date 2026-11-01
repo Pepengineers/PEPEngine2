@@ -36,6 +36,11 @@ public:
 
     GDX12Device* Device;
     GDX12MainConstants Lighting;
+    GDX12SkyState Sky;
+    GDX12Descriptor SkyTransmittanceSRV;
+    GDX12Descriptor SkyViewSRV;
+    GDX12Descriptor SkyAerialRadianceSRV;
+    GDX12Descriptor SkyAerialTransmittanceSRV;
     std::vector<GDX12ReflectionProbe> ReflectionProbes;
     GDX12Descriptor ReflectionRadianceSRV;
     uint64_t ReflectionWorldRevision = 0;

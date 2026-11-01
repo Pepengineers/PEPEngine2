@@ -405,6 +405,50 @@ void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
     { _secondaryResources.GeometryBuffer->AddMesh(mesh, handle); }
 }
 
+void RenderModule::SubmitSky(World& world)
+{
+    _skyWorld = &world;
+    GDX12SkyState sky;
+    sky.Source = world.GetSkySource();
+    auto& ecs = world.GetECS();
+    uint64_t revision = world.GetSkyRevision();
+    if (sky.Source == SkySource::SkyBox)
+    {
+        if (!ecs.Has<SkyBoxComponent>(world.GetSkyEntity()))
+            throw std::runtime_error("Selected SkyBox component was removed; choose Off or another component");
+        const auto& component = ecs.Get<SkyBoxComponent>(world.GetSkyEntity());
+        sky.Box = component.GetSettings();
+        ValidateSkySettings(sky.Box);
+        sky.Quality = GetSkyBoxQuality();
+        revision ^= component.GetRevision() * 1099511628211ull;
+        if (!sky.Box.Enabled || !sky.Quality) sky.Source = SkySource::Off;
+    }
+    else if (sky.Source == SkySource::SkyAtmosphere)
+    {
+        if (!ecs.Has<SkyAtmosphereComponent>(world.GetSkyEntity()))
+            throw std::runtime_error("Selected SkyAtmosphere component was removed; choose Off or another component");
+        const auto& component = ecs.Get<SkyAtmosphereComponent>(world.GetSkyEntity());
+        sky.Atmosphere = component.GetSettings();
+        ValidateSkySettings(sky.Atmosphere);
+        sky.Quality = GetSkyAtmosphereQuality();
+        revision ^= component.GetRevision() * 1099511628211ull;
+        if (!sky.Atmosphere.Enabled || !sky.Quality) sky.Source = SkySource::Off;
+    }
+    uint64_t hash = revision;
+    hash = (hash ^ reinterpret_cast<uintptr_t>(&world)) * 1099511628211ull;
+    hash = (hash ^ world.GetSkyEntity()) * 1099511628211ull;
+    hash = (hash ^ static_cast<UINT>(sky.Source)) * 1099511628211ull;
+    hash = (hash ^ sky.Quality) * 1099511628211ull;
+    if (_skyHash != hash)
+    {
+        _skyHash = hash;
+        ++_primaryResources.Sky.Revision;
+        _RPcommonData.RequestHistoryReset = true;
+    }
+    sky.Revision = _primaryResources.Sky.Revision;
+    _primaryResources.Sky = std::move(sky);
+}
+
 void RenderModule::SubmitLights(std::vector<GDX12LocalLightConstants> lights, const GDX12MainConstants& settings)
 {
     uint16_t width, height;
@@ -413,6 +457,16 @@ void RenderModule::SubmitLights(std::vector<GDX12LocalLightConstants> lights, co
     {
         resources.LocalLights = lights;
         resources.Lighting = settings;
+        const auto& sky = _primaryResources.Sky;
+        if (sky.Source == SkySource::SkyAtmosphere)
+        {
+            Vector3 direction = sky.Atmosphere.DirectionToSun;
+            direction.Normalize();
+            resources.Lighting.LightDirection = -direction;
+            resources.Lighting.LightRadiance = sky.Atmosphere.SunIlluminanceLux * sky.Atmosphere.LuminanceScale;
+            resources.Lighting.SunShadowFlags = sky.Atmosphere.SunCastsShadows ? 3u : 0u;
+            resources.Lighting.SunShadowRevision = static_cast<UINT>(sky.Revision);
+        }
         auto& cache = resources.FrameConstants[resources.CurrFrameConstantsIndex]->LocalLightCache;
         cache->Resize((std::max)(static_cast<UINT>(lights.size()), 1u));
         if (!lights.empty()) cache->CopyData(0, lights.data(), static_cast<UINT>(lights.size()));
@@ -563,6 +617,15 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     });
     ++_primaryResources.ReflectionStaticRevision;
     ++_primaryResources.ReflectionWorldRevision;
+    if (_skyWorld == &world)
+    {
+        _skyWorld = nullptr;
+        _skyHash = 0;
+        _primaryResources.Sky.Source = SkySource::Off;
+        _primaryResources.Sky.Quality = 0;
+        ++_primaryResources.Sky.Revision;
+        _RPcommonData.RequestHistoryReset = true;
+    }
     _worldSubscriptions.erase(it);
 }
 
@@ -1060,7 +1123,7 @@ void RenderModule::ConfigureRenderPipeline()
     transparencyPass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), localShadowPass->GetOutput(0) });
     ssrPass->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(3),
         opaquePass->GetOutput(4), opaquePass->GetOutput(1), environmentPass->GetOutput(1), environmentPass->GetOutput(2) });
-    compositionPass->SetInputs({ ssrPass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
+    compositionPass->SetInputs({ ssrPass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1), opaquePass->GetOutput(2) });
     dofPass->SetInputs({ compositionPass->GetOutput(0), opaquePass->GetOutput(2) });
     motionBlurPass->SetInputs({ dofPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
     upscalePass->SetInputs({ opaquePass->GetOutput(2), motionBlurPass->GetOutput(1), motionBlurPass->GetOutput(0) });

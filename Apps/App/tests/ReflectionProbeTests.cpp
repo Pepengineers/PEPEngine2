@@ -212,6 +212,8 @@ int main(int argc, char** argv)
         RenderPipelineCommonData common;
         common.WindowWidth = common.DownscaledWidth = 65;
         common.WindowHeight = common.DownscaledHeight = 37;
+        resources.Sky.Source = SkySource::SkyBox;
+        resources.Sky.Quality = 3;
         GDX12EnvironmentIBLPass environment;
         environment.Setup(&resources, nullptr, &common);
         environment.Initialize();

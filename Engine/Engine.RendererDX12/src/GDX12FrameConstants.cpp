@@ -8,6 +8,8 @@ GDX12FrameConstants::GDX12FrameConstants(GDX12Device* device)
 {
     ReflectionProbes = std::make_unique<GDX12UploadBuffer<GDX12ReflectionProbeData>>(device, MaxReflectionProbes, EBufferType::Upload, false);
     for (UINT i = 0; i < MaxReflectionProbes; ++i) ReflectionProbes->CopyData(i, GDX12ReflectionProbeData{});
+    SkyCB = std::make_unique<GDX12UploadBuffer<GDX12SkyConstants>>(device, 2);
+    SkyCB->CopyData(0, GDX12SkyConstants{});
     MainCB = std::make_unique<GDX12UploadBuffer<GDX12MainConstants>>(device, 1, EBufferType::Upload, true);
     ShadowCB = std::make_unique<GDX12UploadBuffer<GDX12ShadowConstants>>(device, 1, EBufferType::Upload, true);
     LocalLightCache = std::make_unique<GDX12UploadBuffer<GDX12LocalLightConstants>>(device, 1, EBufferType::Upload, false);
