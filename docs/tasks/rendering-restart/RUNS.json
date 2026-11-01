@@ -1,0 +1,63 @@
+{
+  "createdDate": "2026-11-01",
+  "model": "gpt-6.1-sol",
+  "reasoning": "high",
+  "firstGroup": [
+    {
+      "feature": "AO",
+      "threadId": "01a194ca-3997-7552-a164-e94bccef7a64",
+      "hostId": "local",
+      "model": "gpt-6.1-sol",
+      "reasoning": "high",
+      "base": "271551e",
+      "checkout": "D:/Project/PEPEngine2/Build/Features/AO"
+    },
+    {
+      "feature": "SSR",
+      "threadId": "01a194ca-47f0-7360-8929-6ed90c71c492",
+      "hostId": "local",
+      "model": "gpt-6.1-sol",
+      "reasoning": "high",
+      "base": "271551e",
+      "checkout": "D:/Project/PEPEngine2/Build/Features/SSR"
+    },
+    {
+      "feature": "REFLECTION",
+      "threadId": "01a194ca-594b-7662-87ec-2f868e815f8b",
+      "hostId": "local",
+      "model": "gpt-6.1-sol",
+      "reasoning": "high",
+      "base": "271551e",
+      "checkout": "D:/Project/PEPEngine2/Build/Features/REFLECTION"
+    },
+    {
+      "feature": "DOF",
+      "threadId": "01a194ca-6b5e-7062-8415-5a13b6c289ad",
+      "hostId": "local",
+      "model": "gpt-6.1-sol",
+      "reasoning": "high",
+      "base": "271551e",
+      "checkout": "D:/Project/PEPEngine2/Build/Features/DOF"
+    },
+    {
+      "feature": "MOTION_BLUR",
+      "threadId": "01a194ca-8344-7852-9dc2-2d05770f2de2",
+      "hostId": "local",
+      "model": "gpt-6.1-sol",
+      "reasoning": "high",
+      "base": "271551e",
+      "checkout": "D:/Project/PEPEngine2/Build/Features/MOTION_BLUR"
+    }
+  ],
+  "secondGroup": {
+    "status": "prepared_not_started",
+    "tasks": [
+      "SKY",
+      "GRASS_WIND",
+      "PARTICLES",
+      "FLUID",
+      "SKINNING",
+      "CLOUDS"
+    ]
+  }
+}
