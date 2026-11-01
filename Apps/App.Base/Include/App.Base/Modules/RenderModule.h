@@ -124,6 +124,7 @@ protected:
 private:
     void BuildBackBuffer();
     void CollectReflectionScene();
+    void CollectParticleEmitters();
     void ShareFences();
     void ConfigureRenderPipeline();
     void SetupRenderPasses();

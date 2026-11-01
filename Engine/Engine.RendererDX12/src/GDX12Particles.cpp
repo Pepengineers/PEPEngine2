@@ -1,0 +1,74 @@
+#include "Engine.RendererDX12/GDX12Particles.h"
+#include "Common/ConsoleVariables.h"
+#include <algorithm>
+#include <cmath>
+#include <stdexcept>
+
+namespace
+{
+    static AutoConsoleVariable<bool> Enabled(L"Render.Particles.Enabled", true,
+        L"Enable GPU particle components", EConsoleVariableFlags::Default);
+    static AutoConsoleVariable<int> Quality(L"Render.Particles.Quality", 2,
+        L"GPU particles: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default,
+        [](int value) { return value >= 0 && value <= 3; });
+
+    bool InRange(float value, float low, float high)
+    {
+        return std::isfinite(value) && value >= low && value <= high;
+    }
+
+    bool ValidVector(const Vector3& value, float limit)
+    {
+        return InRange(value.x, -limit, limit) && InRange(value.y, -limit, limit) && InRange(value.z, -limit, limit);
+    }
+
+    bool ValidColor(const Vector4& value)
+    {
+        return InRange(value.x, 0, 100) && InRange(value.y, 0, 100) &&
+            InRange(value.z, 0, 100) && InRange(value.w, 0, 1);
+    }
+}
+
+GDX12ParticleSettings GetParticleSettings()
+{
+    const int quality = Quality.GetValue();
+    return { Enabled.GetValue() && quality != 0, quality };
+}
+
+bool IsValidParticleEmitterSettings(const GDX12ParticleEmitterSettings& s)
+{
+    return s.MaxParticles <= 1048576 && s.Substeps <= 16 && s.EdgeSamples <= 4 &&
+        (s.MinPixelSize == -1 || InRange(s.MinPixelSize, 0, 64)) &&
+        InRange(s.EmissionRate, 0, 10000000) && InRange(s.LifetimeMin, 0.001f, 3600) &&
+        InRange(s.LifetimeMax, s.LifetimeMin, 3600) && InRange(s.SpeedMin, 0, 1000000) &&
+        InRange(s.SpeedMax, s.SpeedMin, 1000000) && ValidVector(s.Direction, 1) &&
+        s.Direction.LengthSquared() > 0.000001f && InRange(s.ConeAngleDegrees, 0, 180) &&
+        static_cast<UINT>(s.Shape) <= static_cast<UINT>(ParticleShape::Sphere) &&
+        ValidVector(s.ShapeExtents, 1000000) && s.ShapeExtents.x >= 0 && s.ShapeExtents.y >= 0 && s.ShapeExtents.z >= 0 &&
+        ValidVector(s.Acceleration, 1000000) && ValidVector(s.Wind, 1000000) && InRange(s.Drag, 0, 1000) &&
+        InRange(s.SizeStart, 0, 1000000) && InRange(s.SizeEnd, 0, 1000000) &&
+        InRange(s.SizeVariation, 0, 1) && InRange(s.RenderScale, 0.001f, 100) &&
+        ValidColor(s.ColorStart) && ValidColor(s.ColorEnd) && InRange(s.AngularVelocity, -10000, 10000) &&
+        InRange(s.SoftDistance, 0, 1000000) && InRange(s.MaxDistance, 1, 100000000) &&
+        InRange(s.MaxDeltaTime, 0.001f, 1) && InRange(s.TimeScale, 0, 100) &&
+        static_cast<UINT>(s.Blend) <= static_cast<UINT>(ParticleBlend::SortedAlpha) &&
+        s.AtlasColumns >= 1 && s.AtlasColumns <= 256 && s.AtlasRows >= 1 && s.AtlasRows <= 256 &&
+        InRange(s.FramesPerSecond, 0, 1000);
+}
+
+GDX12ParticleEmitterSettings ResolveParticleEmitterSettings(const GDX12ParticleEmitterSettings& author, int quality)
+{
+    if (quality < 0 || quality > 3 || !IsValidParticleEmitterSettings(author))
+        throw std::invalid_argument("Invalid particle quality or author settings");
+    auto settings = author;
+    const int index = (std::clamp)(quality, 1, 3) - 1;
+    constexpr UINT capacities[] = { 16384, 65536, 131072 };
+    constexpr UINT substeps[] = { 1, 2, 4 };
+    constexpr UINT samples[] = { 1, 2, 4 };
+    constexpr float minPixels[] = { 1.5f, 0.75f, 0.0f };
+    if (!settings.MaxParticles) settings.MaxParticles = capacities[index];
+    if (!settings.Substeps) settings.Substeps = substeps[index];
+    if (!settings.EdgeSamples) settings.EdgeSamples = samples[index];
+    if (settings.MinPixelSize == -1) settings.MinPixelSize = minPixels[index];
+    return settings;
+}

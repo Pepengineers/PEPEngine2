@@ -1,0 +1,201 @@
+# GPU particle components
+
+Implementation status: **UNVERIFIED / НЕПРОВЕРЕНО**. No builds, shader compilation,
+tests, GPU fixtures, benchmarks or separate review/cleanup/verification passes were
+run for this implementation, per the implementation-only instruction. The checks
+in the task package remain the central reviewer's acceptance criteria.
+
+## Ownership and API
+
+`ParticleEmitterComponent` is a WorldECS component. A component needs an existing
+entity's `TransformComponent`; no emitter, entity, material or asset is added to
+Bistro. Each emitter has its own GPU pool, counters, random stream, author settings,
+reset revision and pending burst requests. Component copies get a new identity;
+ECS moves preserve identity, so dense-pool compaction does not reset simulation.
+Copying a component copies author settings and burst requests, not live GPU state.
+
+```cpp
+auto& emitter = world.GetECS().Emplace<ParticleEmitterComponent>(existingEntity);
+auto settings = emitter.GetSettings();
+settings.MaxParticles = 32768;
+settings.Blend = ParticleBlend::SortedAlpha;
+settings.ColorStart = Vector4(4, 1, 0.2f, 0.8f);
+settings.Texture = renderModule.GetTextureByName("existing_particle_atlas");
+emitter.SetSettings(settings);
+emitter.Emit(1000);
+```
+
+This is an API example, not code executed against Bistro. Two components can use
+different settings and materials; sorted-alpha particles from all components share
+one GPU key/payload stream and one indirect draw. Update the component during scene
+update, before rendering's immutable per-frame snapshot; concurrent mutation during
+collection is unsupported, as for the existing ECS components.
+
+- `GetSettings()` returns a const reference; edit a copy and call `SetSettings()`.
+  Invalid finite/range/enum combinations throw `std::invalid_argument`, retaining
+  the old settings. Author settings are never overwritten by presets.
+- `Emit(count)` queues a burst, 0..1,048,576 particles per call. Repeated calls add
+  requests with checked 64-bit overflow. Requests remain pending while paused.
+  On an active frame, available pool slots bound the accepted burst plus continuous
+  emission; overflow is dropped without backlog or a CPU count readback.
+- `SetPaused(bool)` freezes age, position and emission while particles remain
+  visible and retain camera motion. World pause also freezes emission. On resume,
+  no missed wall time is simulated. `TimeScale=0` stops continuous simulation while
+  still allowing an explicitly requested burst.
+- `Reset()` clears live state, emission fraction and random sequence on the next
+  GPU frame, including queued bursts. Calling `Emit()` after `Reset()` spawns into
+  the reset pool. Reset works while paused. Render history is invalidated.
+- `SetEnabled(false)` removes this component from rendering; its pool is retired
+  at the next enabled particle frame. Re-enable starts a new pool. Global Off
+  freezes all retained pools and suppresses rendering; re-enable resumes them.
+- Moving an emitter changes only future spawn positions/directions. Existing
+  particles simulate in world space. Shape is transformed by the entity's full
+  scale/rotation/translation; velocity direction uses rotation/scale then normalizes
+  so the authored speed remains cm/s. Size is authored in world cm.
+
+The API is runtime C++; no scene-file particle serialization/editor UI is added.
+`RenderModule::CollectParticleEmitters` snapshots components from all loaded worlds,
+using world pause/time scale. Nonfinite/negative frame time and nonfinite/singular
+world transforms are rejected before dispatch. Negative world time is unsupported.
+`GDX12DeviceResources::ParticleEmitters` is also the renderer's direct snapshot seam;
+direct callers must provide unique nonzero stable IDs and the same valid data.
+
+## Global controls and quality
+
+Only `Render.Particles.Enabled` (bool, default true) and `Render.Particles.Quality`
+(int, default 2, range 0..3) are registered in `GDX12Particles.cpp`. Both use runtime
+`Default`, work through C++ `ConsoleModule` and startup `Config/Engine.ini`.
+Quality 0 is Off. No implementation/source/material/simulation CVar exists.
+
+| Inherited field | Low | Mid | High |
+|---|---:|---:|---:|
+| MaxParticles = 0 | 16,384 | 65,536 | 131,072 |
+| Substeps = 0 | 1 | 2 | 4 |
+| EdgeSamples = 0 | 1 | 2 | 4 |
+| MinPixelSize = -1 | 1.5 px | 0.75 px | 0 px |
+
+Explicit values survive quality changes. Returning an individual field to its
+sentinel restores inheritance. Changing resolved capacity resets only that pool;
+changing samples/substeps/culling threshold does not reset it. EdgeSamples changes
+atlas supersampling; an analytic disc uses derivative-based edge coverage.
+One scene is limited to 4,194,304 pool slots in total, checked before allocation.
+
+## Author settings
+
+All numeric fields must be finite. Distances are cm, time is seconds, speeds cm/s,
+acceleration cm/s², rotation speed rad/s. Color is linear HDR, straight alpha.
+
+| Field | Default | Accepted values / meaning |
+|---|---|---|
+| MaxParticles | 0 | 0 inherit, otherwise 1..1,048,576; changing resolved value resets pool |
+| Substeps | 0 | 0 inherit, otherwise 1..16 simulation steps per frame |
+| EdgeSamples | 0 | 0 inherit, otherwise 1..4 atlas samples per pixel |
+| MinPixelSize | -1 | -1 inherit, otherwise 0..64 projected pixels for size culling |
+| EmissionRate | 100 | 0..10,000,000 particles/s; GPU fractional carry |
+| LifetimeMin / LifetimeMax | 1 / 2 | 0.001..3600 s, max >= min |
+| SpeedMin / SpeedMax | 20 / 100 | 0..1,000,000 cm/s, max >= min |
+| Direction | (0,1,0) | each -1..1, squared length > 0.000001; normalized in shader |
+| ConeAngleDegrees | 30 | 0..180 degrees half angle; uniform solid-angle distribution |
+| Shape | Point | Point, Box or Sphere; sphere samples volume uniformly |
+| ShapeExtents | (10,10,10) | each 0..1,000,000 cm; box half-extents or ellipsoid radii |
+| Acceleration | (0,-98.1,0) | each ±1,000,000 cm/s², world space |
+| Wind | (0,0,0) | each ±1,000,000 cm/s, drag target velocity, world space |
+| Drag | 0 | 0..1000 s⁻¹; exponential velocity damping with acceleration |
+| SizeStart / SizeEnd | 10 / 0 | 0..1,000,000 cm, full billboard width over life |
+| SizeVariation | 0.25 | 0..1, uniform size multiplier 1±variation per spawn |
+| RenderScale | 1 | 0.001..100, billboard size multiplier; does not change simulation or internal resolution |
+| ColorStart / ColorEnd | (1,1,1,1) / (1,1,1,0) | RGB 0..100, alpha 0..1, interpolated over life |
+| AngularVelocity | 0 | ±10,000 rad/s, random initial billboard rotation |
+| SoftDistance | 10 | 0..1,000,000 cm; 0 hard intersections |
+| MaxDistance | 100,000 | 1..100,000,000 cm positive view distance; capped by camera far |
+| MaxDeltaTime | 0.1 | 0.001..1 s, clips scaled frame delta; dropped time is not accumulated |
+| TimeScale | 1 | 0..100, multiplied with world scale before MaxDeltaTime clamp |
+| Seed | 1 | full uint32 range; Reset restarts sequence with the current seed |
+| Blend | WeightedAlpha | WeightedAlpha, Additive or SortedAlpha |
+| Texture | nullptr | renderer-owned primary-GPU color 2D texture; nullptr = white analytic disc |
+| AtlasColumns / AtlasRows | 1 / 1 | each 1..256, no more than texture width/height |
+| FramesPerSecond | 0 | 0 = atlas once over life; otherwise 0..1000 fps, looping |
+
+The texture is obtained through existing `RenderModule::CreateTexture` or
+`GetTextureByName`, uses its existing sRGB color SRV and material descriptor range,
+and must outlive the component/snapshot. No new asset registry or material owner is
+introduced. Atlas cells should have padded edges/mips to prevent mip bleeding.
+Materials are unlit emissive/tinted sprites, with analytic discs or color/alpha
+flipbooks; mesh PBR materials are not reinterpreted as particle materials.
+
+## GPU cycle and resource lifetime
+
+Each pool uses 64 bytes per particle, two uint alive lists, one uint dead list,
+eight uint counters and three dispatch argument triplets. One dispatch initializes
+the dead permutation. Simulation consumes the previous alive list and compacts
+survivors into the next list; deaths append indices into the dead list. A one-thread
+GPU stage reserves `min(requested, deadCount)` spawn indices, subtracting only a
+bounded value. Spawn appends to the same alive output. GPU publish writes the alive
+count and cull dispatch. CPU only swaps the two list references, never reads counts.
+The invariant is `aliveCount + deadCount = capacity` after publish, with unique pool
+indices; no decrement/consume on a zero dead count is used.
+
+UAV dependencies separate initialization, simulation/death, spawn reservation,
+spawn, publish, cull, argument generation and each sort stage. Argument buffers
+transition between UAV and INDIRECT_ARGUMENT. Pool constants are uploaded into the
+current fenced frame slot. GPU-only buffers are shared sequentially on the existing
+direct queue; no readbacks participate in continuation. Pool replacement/removal
+and descriptor reuse flush previous submissions before recording particle work.
+Resize recreates only the coverage/motion target after the existing resize flush;
+live particle pools survive. Reset/re-enable/resize invalidate the upscaler history.
+
+The shared visible record stream uses 96 bytes per slot; two unsorted index regions
+hold weighted/additive references. Sorted emitters use the same draw-record stream,
+two uint key buffers and two uint payload buffers. GPU-generated sorted count and
+dispatch distribution feed the **actual pinned FidelityFX Parallel Sort kernels**
+through eight 4-bit count/reduce/scan/scan-add/scatter passes. There is no CPU sort
+count or CPU sorting. Positive view distance keys are inverted for far-to-near
+order. Zero visible count still produces bounded empty work and zero draw instances.
+SM6 wave operations with minimum wave width >=16 are required for sorted alpha;
+unsupported devices fail explicitly instead of silently giving unsorted alpha.
+Source/license pointers are in `External/Particles/README.md`.
+
+No pool/draw arena, motion texture, sort scratch, particle shader or PSO is created
+for a scene without enabled particle components. Sort scratch/kernels are lazy and
+only requested for SortedAlpha. Disabling the last component retires all particle
+resources; global Off retains existing state without allocating new resources.
+
+## Rendering seams and limits
+
+Order: existing depth prepass → early AO if selected → CSM/local shadows/probes →
+opaque G-buffer/late AO → deferred → AMD SSSR + single specular resolve → mesh
+WBOIT → particle simulation/cull/sort + weighted accumulation → WBOIT HDR resolve →
+global sorted-alpha particle draw → additive particle draw → DoF → feature-aware
+motion blur → HDR XeSS → the existing single tone map.
+
+- `GDX12ParticlesPass` runs after mesh WBOIT and appends to its two HDR targets.
+  `GDX12WBOITCompositionPass::SetParticles` calls `Composite` on the resolved HDR
+  target. Additive premultiplied radiance uses ONE+ONE directly on HDR, preserving
+  target alpha; it never enters normalized WBOIT accumulation with zero alpha.
+- Sampled scene depth has PIXEL_SHADER_RESOURCE state and **no DSV is bound** for
+  particle draws. Reverse-Z depth rejection and positive linear-depth soft fading
+  use the same jittered depth grid. Billboards use the current jittered ViewProj.
+- Particles are transparent, do not write opaque depth/normals and do not alter
+  either prepass path. They are not opaque/masked mesh geometry or shadow/probe
+  casters. Existing CSM/local shadow, probe capture, AO timing and SSSR fallback
+  paths remain unchanged. No second specular resolve or tone map is introduced.
+- A lazy RGBA32F motion/coverage target stores alpha-weighted motion and depth
+  for all modes without half-float counter overflow. Motion is unjittered
+  `prevNDC-currentNDC`, including particle displacement, size, rotation and previous
+  camera-facing axes. Camera resets zero motion. `ParticleMotion` is a borrowed
+  per-frame device-resource pointer, null when there is no particle output.
+- Motion blur mixes this motion by coverage after its sky-motion preparation;
+  dominant coverage uses particle depth in feature-aware gathering. Its complete
+  motion output continues to XeSS. XeSS still receives opaque depth. DoF also uses
+  the existing opaque depth, as for mesh WBOIT transparency.
+
+Sorted alpha is globally ordered **among SortedAlpha emitters**, not interleaved
+with weighted mesh/particle transparency. Weighted particles share approximate
+WBOIT ordering with transparent meshes. Additive energy is drawn after alpha modes.
+Motion/depth of overlapping transparent layers is a coverage-weighted approximation,
+not an exact per-layer history/depth solution. Transparent DoF/refraction, lighting
+and shadow casting, depth collisions, mesh particles, GPU child/subemitters,
+multi-GPU and SSAA are outside this implementation. Very large HDR overlap can
+overflow existing RGBA16F WBOIT/HDR targets; practical overlap budgets require GPU
+measurement. No visual quality, GPU timing, debug-layer cleanliness, build success
+or long-run stability is claimed.

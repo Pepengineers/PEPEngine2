@@ -24,6 +24,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12SSSRPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyFromSharedMemoryPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyToSharedMemoryPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OutputToScreenPass.h"
@@ -823,6 +824,7 @@ void RenderModule::OnUpdate()
 void RenderModule::OnRender()
 {
     CollectReflectionScene();
+    CollectParticleEmitters();
     auto primarycmdQueue = _primaryDevice->GetCommandQueue();
     auto primarycmdList = primarycmdQueue->GetCommandList();
     _primaryGPUTimer->Start(primarycmdList);
@@ -874,6 +876,33 @@ void RenderModule::OnRender()
     }
 
     _backBuffer->Present();
+}
+
+void RenderModule::CollectParticleEmitters()
+{
+    _primaryResources.ParticleEmitters.clear();
+    auto* scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
+    for (size_t i = 0; i < scenes->GetWorldCount(); ++i)
+    {
+        auto* world = scenes->GetWorld(i);
+        auto& ecs = world->GetECS();
+        ecs.ForEach<ParticleEmitterComponent>([&](Entity entity, ParticleEmitterComponent& component)
+        {
+            if (!component.IsEnabled() || !ecs.Has<TransformComponent>(entity)) return;
+            const auto& transform = ecs.Get<TransformComponent>(entity);
+            GDX12ParticleEmitter emitter;
+            static_cast<GDX12ParticleEmitterSettings&>(emitter) = component.GetSettings();
+            emitter.Id = component.GetId();
+            emitter.ResetRevision = component.GetResetRevision();
+            emitter.BurstTotal = component.GetBurstTotal();
+            emitter.Paused = component.IsPaused() || world->IsPaused();
+            emitter.DeltaTime = _timer->DeltaTime() * world->GetTimeScale();
+            emitter.World = Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
+                XMConvertToRadians(transform.Rotation.y), XMConvertToRadians(transform.Rotation.x),
+                XMConvertToRadians(transform.Rotation.z)) * Matrix::CreateTranslation(transform.Location);
+            _primaryResources.ParticleEmitters.push_back(emitter);
+        });
+    }
 }
 
 void RenderModule::CollectReflectionScene()
@@ -1019,6 +1048,7 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DeferredLightingPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12SSSRPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12ParticlesPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DepthOfFieldPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12MotionBlurPass>());
@@ -1040,11 +1070,12 @@ void RenderModule::ConfigureRenderPipeline()
     GDX12RenderPass* lightingPass = _primaryRenderPassExecutionList[9].get();
     GDX12RenderPass* ssrPass = _primaryRenderPassExecutionList[10].get();
     GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[11].get();
-    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[12].get();
-    GDX12RenderPass* dofPass = _primaryRenderPassExecutionList[13].get();
-    GDX12RenderPass* motionBlurPass = _primaryRenderPassExecutionList[14].get();
-    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[15].get();
-    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[16].get();
+    auto* particlesPass = static_cast<GDX12ParticlesPass*>(_primaryRenderPassExecutionList[12].get());
+    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[13].get();
+    GDX12RenderPass* dofPass = _primaryRenderPassExecutionList[14].get();
+    GDX12RenderPass* motionBlurPass = _primaryRenderPassExecutionList[15].get();
+    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[16].get();
+    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[17].get();
     _depthPrepass = depthPrepass;
     _opaquePass = opaquePass;
     _ambientOcclusionPass = aoPass;
@@ -1061,6 +1092,8 @@ void RenderModule::ConfigureRenderPipeline()
     ssrPass->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(3),
         opaquePass->GetOutput(4), opaquePass->GetOutput(1), environmentPass->GetOutput(1), environmentPass->GetOutput(2) });
     compositionPass->SetInputs({ ssrPass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
+    particlesPass->SetInputs({ opaquePass->GetOutput(2), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
+    static_cast<GDX12WBOITCompositionPass*>(compositionPass)->SetParticles(particlesPass);
     dofPass->SetInputs({ compositionPass->GetOutput(0), opaquePass->GetOutput(2) });
     motionBlurPass->SetInputs({ dofPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
     upscalePass->SetInputs({ opaquePass->GetOutput(2), motionBlurPass->GetOutput(1), motionBlurPass->GetOutput(0) });

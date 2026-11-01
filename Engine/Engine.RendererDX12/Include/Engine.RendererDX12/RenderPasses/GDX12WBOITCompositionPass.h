@@ -1,9 +1,11 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
 
 class GDX12WBOITCompositionPass : public GDX12RenderPass
 {
 public:
+    void SetParticles(GDX12ParticlesPass* particles) { _particles = particles; }
 	GDX12WBOITCompositionPass() : IN_OpaqueScene(nullptr), IN_TransparencyAccum(nullptr),
 		IN_Revealage(nullptr), OUT_Result(nullptr)
 	{ 
@@ -108,6 +110,7 @@ public:
 		cmdList->GetCommandList()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		cmdList->GetCommandList()->DrawInstanced(3, 1, 0, 0);
 		cmdList->EndPixEvent();
+        if (_particles) _particles->Composite(cmdList, OUT_Result.get());
 	}
 
 	void Resize() override
@@ -131,6 +134,7 @@ public:
 	}
 
 private:
+    GDX12ParticlesPass* _particles = nullptr;
 	ComPtr<ID3DBlob> _compositionVS;
 	ComPtr<ID3DBlob> _compositionPS;
 	std::unique_ptr<GDX12RootSignature> _compositionRS;

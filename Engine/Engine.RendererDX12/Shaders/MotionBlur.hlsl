@@ -14,6 +14,8 @@ cbuffer Parameters : register(b0)
     float2 OutputSize;
     float CenterWeight;
     float VelocityThreshold;
+    uint HasFeatureMotion;
+    uint3 Padding;
 };
 ConstantBuffer<CameraCB> Camera : register(b1);
 Texture2D<float4> Color : register(t0);
@@ -22,6 +24,7 @@ Texture2D<float2> Motion : register(t2);
 Texture2D<float2> Velocity : register(t3);
 Texture2D<float2> TileMax : register(t4);
 Texture2D<float2> NeighborMax : register(t5);
+Texture2D<float4> FeatureMotion : register(t6); // weighted NDC motion, normalized view depth, coverage
 RWTexture2D<float4> Result : register(u0);
 RWTexture2D<float2> CompleteMotion : register(u1);
 RWTexture2D<float2> PreparedVelocity : register(u2);
@@ -45,6 +48,11 @@ void Prepare(uint2 p : SV_DispatchThreadID)
         float4 previous = mul(ray, Camera.PrevViewProjNoJitter);
         motion = current.w > 0.00001f && previous.w > 0.00001f ?
             previous.xy / previous.w - current.xy / current.w : 0;
+    }
+    if (HasFeatureMotion != 0)
+    {
+        float4 feature = FeatureMotion[p];
+        if (feature.w > 0.00001f) motion = lerp(motion, feature.xy / feature.w, saturate(feature.w));
     }
     if (ResetMotion != 0 || !all(isfinite(motion))) motion = 0;
     CompleteMotion[p] = motion;
@@ -117,6 +125,12 @@ float Halton(uint index, uint base)
 
 float LinearDepth(int2 p)
 {
+    if (HasFeatureMotion != 0)
+    {
+        float4 feature = FeatureMotion[p];
+        if (feature.w >= 0.5f)
+            return clamp(feature.z / feature.w * Camera.FarPlane, Camera.NearPlane, Camera.FarPlane);
+    }
     // RH finite reverse-Z: positive view distance in scene centimeters.
     float depth = Depth[p];
     return Camera.NearPlane * Camera.FarPlane /

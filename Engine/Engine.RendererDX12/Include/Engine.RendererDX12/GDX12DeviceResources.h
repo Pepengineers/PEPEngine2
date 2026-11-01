@@ -6,6 +6,7 @@
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12Material.h"
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
+#include "Engine.RendererDX12/GDX12Particles.h"
 
 class GDX12Device;
 class GameTimer;
@@ -36,6 +37,8 @@ public:
 
     GDX12Device* Device;
     GDX12MainConstants Lighting;
+    std::vector<GDX12ParticleEmitter> ParticleEmitters;
+    GDX12Texture* ParticleMotion = nullptr; // Borrowed for this frame only, owned by the particles pass.
     std::vector<GDX12ReflectionProbe> ReflectionProbes;
     GDX12Descriptor ReflectionRadianceSRV;
     uint64_t ReflectionWorldRevision = 0;

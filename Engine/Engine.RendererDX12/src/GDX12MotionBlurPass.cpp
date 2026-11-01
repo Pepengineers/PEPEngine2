@@ -54,9 +54,9 @@ void GDX12MotionBlurPass::Initialize()
     _tileMax->GetResource()->D3DResource->SetName(L"MotionBlur.TileMax");
     _neighborMax->GetResource()->D3DResource->SetName(L"MotionBlur.NeighborMax");
     GDX12RootSignatureDesc root;
-    root.Constants = { 12 };
+    root.Constants = { 16 };
     root.NumSingleCBVSlots = 1;
-    root.NumSingleSRVSlots = 6;
+    root.NumSingleSRVSlots = 7;
     root.NumSingleUAVSlots = 5;
     _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
     const auto compile = [&](const char* entry, ComPtr<ID3D12PipelineState>& pipeline)
@@ -106,20 +106,26 @@ void GDX12MotionBlurPass::Execute(GDX12CommandList* commands)
         float Shutter, Radius;
         UINT Blur, Reset;
         float OutputWidth, OutputHeight, CenterWeight, VelocityThreshold;
+        UINT FeatureMotion, Padding[3];
     };
-    static_assert(sizeof(Parameters) == 12 * sizeof(UINT));
+    static_assert(sizeof(Parameters) == 16 * sizeof(UINT));
+    auto* featureMotion = _resources->ParticleMotion;
+    if (featureMotion && (featureMotion->GetWidth() != width || featureMotion->GetHeight() != height))
+        throw std::invalid_argument("Particle motion must match the motion blur input grid");
     const Parameters parameters = { width, height, tileSize, settings.Samples,
         settings.ShutterFraction, settings.MaxRadius, blur, _commonData->ResetHistory,
         static_cast<float>(_commonData->WindowWidth), static_cast<float>(_commonData->WindowHeight),
-        settings.CenterWeight, settings.VelocityThreshold };
+        settings.CenterWeight, settings.VelocityThreshold, featureMotion != nullptr, {} };
     commands->BeginPixEvent("Feature-aware motion blur", Colors::Coral);
     commands->SetComputeRootSignature(_root.get());
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-    commands->GetCommandList()->SetComputeRoot32BitConstants(0, 12, &parameters, 0);
+    commands->GetCommandList()->SetComputeRoot32BitConstants(0, 16, &parameters, 0);
     auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
     GDX12Texture* inputs[] = { _inputs[0]->GetTexture(), _inputs[1]->GetTexture(), _inputs[2]->GetTexture() };
     for (UINT i = 0; i < 3; ++i) commands->ResourceBarrier({ inputs[i]->GetResource()->GetNonPixelShaderResourceBarrier() });
+    if (featureMotion) commands->ResourceBarrier({ featureMotion->GetResource()->GetNonPixelShaderResourceBarrier() });
+    commands->SetComputeSRV(6, (featureMotion ? featureMotion : inputs[0])->GetSRV()->GPUHandle);
     commands->ResourceBarrier({ _motion->GetResource()->GetUnorderedAccessBarrier(),
         _velocity->GetResource()->GetUnorderedAccessBarrier() });
     commands->SetComputeSRV(1, inputs[1]->GetSRV()->GPUHandle);

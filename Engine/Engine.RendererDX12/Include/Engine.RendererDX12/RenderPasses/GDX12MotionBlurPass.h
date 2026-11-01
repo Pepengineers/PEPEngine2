@@ -2,7 +2,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 
 // Inputs: linear HDR, reverse-Z depth, unjittered prevNDC-currentNDC motion.
-// Outputs: linear HDR at the input grid, complete NDC motion (including sky).
+// Outputs: linear HDR at the input grid, complete NDC motion (including sky/particle coverage).
 class GDX12MotionBlurPass final : public GDX12RenderPass
 {
 public:
