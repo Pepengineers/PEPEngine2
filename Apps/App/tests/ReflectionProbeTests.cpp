@@ -21,10 +21,97 @@
 #include <fstream>
 #include <numeric>
 #include <stdexcept>
+#include <type_traits>
 
 static void Require(bool condition, const char* message)
 {
     if (!condition) throw std::runtime_error(message);
+}
+
+static void TestPassDependencies()
+{
+#if defined(DEBUG) || defined(_DEBUG)
+    static_assert(!std::is_copy_constructible_v<GDX12CommandList::ScopedEvent>);
+    static_assert(!std::is_move_constructible_v<GDX12CommandList::ScopedEvent>);
+    static_assert(std::is_nothrow_destructible_v<GDX12CommandList::ScopedEvent>);
+#else
+    int markerArguments = 0;
+    GDX12_SCOPED_EVENT((++markerArguments, nullptr), (++markerArguments, "unused"), (++markerArguments, Colors::White));
+    Require(markerArguments == 0, "Release evaluated debug marker arguments");
+#endif
+    struct Link final : IRenderPassLink
+    {
+        bool Ready = false;
+        bool IsInitialized() override { return Ready; }
+    };
+    struct Pass final : GDX12RenderPass
+    {
+        Link Output;
+        UINT Initializations = 0;
+        explicit Pass(UINT inputs) { _numInputs = inputs; }
+        void Initialize() override { ++Initializations; Output.Ready = true; }
+    };
+    const auto rejects = [](auto action, const char* message)
+    {
+        bool rejected = false;
+        try { action(); }
+        catch (const std::exception&) { rejected = true; }
+        Require(rejected, message);
+    };
+    Pass producer(0), consumer(1);
+    Require(!consumer.ValidateInputs(), "Missing required inputs passed validation");
+    rejects([&] { consumer.SetInputs({}); }, "Missing input accepted by SetInputs");
+    rejects([&] { consumer.SetInputs({ nullptr }); }, "Null input accepted by SetInputs");
+    rejects([&] { GDX12RenderPass::InitializeAll({ &consumer }); }, "Unbound pass initialized");
+    rejects([&] { GDX12RenderPass::InitializeAll({ nullptr }); }, "Null pass accepted");
+    consumer.SetInputs({ &producer.Output });
+    Require(!consumer.ValidateInputs(), "Uninitialized producer passed validation");
+    GDX12RenderPass::InitializeAll({ &consumer, &producer });
+    Require(producer.Initializations == 1 && consumer.Initializations == 1 && consumer.ValidateInputs(),
+        "Out-of-order dependencies did not initialize exactly once");
+    Pass optional(1);
+    optional.SetInputs({ &producer.Output, &consumer.Output });
+    GDX12RenderPass::InitializeAll({ &optional });
+    Require(optional.Initializations == 1, "Optional extra inputs were rejected");
+    Pass cycleA(1), cycleB(1);
+    cycleA.SetInputs({ &cycleB.Output });
+    cycleB.SetInputs({ &cycleA.Output });
+    rejects([&] { GDX12RenderPass::InitializeAll({ &cycleA, &cycleB }); }, "Dependency cycle accepted");
+    Require(cycleA.Initializations == 0 && cycleB.Initializations == 0, "Unresolved pass was initialized");
+    std::cout << "Render pass input validation, dependency ordering and cycle rejection passed.\n";
+}
+
+static void TestScopedEvents(GDX12CommandQueue& queue)
+{
+    auto* commands = queue.GetCommandList();
+    const auto record = [&](bool fail)
+    {
+        GDX12_SCOPED_EVENT(commands, "Scope test: 100% literal name");
+        if (!fail) return;
+        GDX12_SCOPED_EVENT(commands, "Nested exception scope", Colors::Red);
+        throw std::runtime_error("Scope unwinding test");
+    };
+    record(false);
+    try { record(true); }
+    catch (const std::runtime_error&) {}
+    queue.ExecuteCommandList(commands);
+    queue.Flush();
+}
+
+static std::array<UINT, 3> NextTextureDescriptors(GDX12DeviceResources& resources)
+{
+    GDX12Texture color, depth;
+    GDX12RenderHelpers::InitializeRenderTarget(color, resources, 1, 1, DXGI_FORMAT_R16G16B16A16_FLOAT);
+    GDX12TextureDesc desc;
+    desc.Width = desc.Height = 1;
+    desc.CreateSRV = false;
+    desc.CreateDSV = true;
+    desc.Format = desc.DSVDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    desc.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    desc.DSVHeap = resources.DSVHeap.get();
+    desc.DSVHeapIndex = desc.DSVHeap->GetAvailableIndex();
+    depth.Initialize(desc);
+    return { color.GetSRV()->HeapIndex, color.GetRTV()->HeapIndex, depth.GetDSV()->HeapIndex };
 }
 
 static void Set(const wchar_t* name, const char* value)
@@ -182,6 +269,7 @@ int main(int argc, char** argv)
     try
     {
         std::cout.setf(std::ios::unitbuf);
+        TestPassDependencies();
         TestIni();
         TestEngine engine;
         Require(GetLoadingBudgetBytes() > 0, "Invalid inherited loading configuration");
@@ -209,6 +297,7 @@ int main(int argc, char** argv)
         if (!benchmark) ThrowIfFailed(device.GetDevice().As(&info));
         if (info) info->ClearStoredMessages();
         auto* queue = device.GetCommandQueue();
+        TestScopedEvents(*queue);
         RenderPipelineCommonData common;
         common.WindowWidth = common.DownscaledWidth = 65;
         common.WindowHeight = common.DownscaledHeight = 37;
@@ -624,10 +713,19 @@ int main(int argc, char** argv)
         ao.SetInputs({ opaque.GetOutput(2), opaque.GetOutput(3) });
         ao.Initialize();
         Set(L"Render.AO.Enabled", "0");
-        deferred.SetInputs({ opaque.GetOutput(0), opaque.GetOutput(3), opaque.GetOutput(4), opaque.GetOutput(5),
+        const std::vector<IRenderPassLink*> lightingInputs = { opaque.GetOutput(0), opaque.GetOutput(3), opaque.GetOutput(4), opaque.GetOutput(5),
             opaque.GetOutput(2), mainShadows.GetOutput(0), environment.GetOutput(0), environment.GetOutput(1),
-            environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0), ao.GetOutput(0) });
+            environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0), ao.GetOutput(0) };
+        deferred.SetInputs(lightingInputs);
         deferred.Initialize();
+        GDX12RenderGraph lightingGraph(&device);
+        lightingGraph.ImportShared(GDX12RenderGraph::SharedResource::Scene, "Scene");
+        lightingGraph.ImportShared(GDX12RenderGraph::SharedResource::Environment, "Atmosphere");
+        lightingGraph.ImportShared(GDX12RenderGraph::SharedResource::ReflectionProbes, "Probes");
+        for (auto* input : lightingInputs) lightingGraph.ImportLink("Lighting input", input);
+        lightingGraph.ImportLink("HDR readback", deferred.GetOutput(0));
+        lightingGraph.AddPass(deferred);
+        lightingGraph.Compile(false);
         GDX12WBOITTransparencyPass transparency;
         transparency.Setup(&resources, nullptr, &common);
         transparency.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
@@ -653,6 +751,11 @@ int main(int argc, char** argv)
         output.Setup(&resources, nullptr, &common);
         output.SetInputs({ xess.GetOutput(0), &display });
         output.Initialize();
+        GDX12RenderGraph outputGraph(&device);
+        outputGraph.ImportLink("HDR input", xess.GetOutput(0));
+        outputGraph.ImportLink("Display", &display);
+        outputGraph.AddPass(output);
+        outputGraph.Compile(false);
         for (auto& frame : resources.FrameConstants)
         {
             frame->CameraCB->Resize(1);
@@ -698,11 +801,11 @@ int main(int argc, char** argv)
             mainCulling.Execute(list);
             opaque.Execute(list);
             ao.Execute(list);
-            deferred.Execute(list);
+            lightingGraph.Execute(list);
             transparency.Execute(list);
             composition.Execute(list);
             xess.Execute(list);
-            output.Execute(list);
+            outputGraph.Execute(list);
             queue->ExecuteCommandList(list);
             queue->Flush();
             Require(!common.ResetHistory, "XeSS did not consume the requested temporal reset");
@@ -713,6 +816,7 @@ int main(int argc, char** argv)
         const auto referenceDepth = ReadTexture(device, *opaque.GetOutput(2)->GetTexture(), 0);
         const auto referenceNormals = ReadTexture(device, *opaque.GetOutput(3)->GetTexture(), 0, true);
         const auto referenceAlbedo = ReadTexture(device, *opaque.GetOutput(0)->GetTexture(), 0);
+        const auto descriptorsBefore = NextTextureDescriptors(resources);
         GDX12OpaquePass prepass(GDX12OpaquePass::Stage::DepthPrepass);
         prepass.Setup(&resources, nullptr, &common);
         prepass.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
@@ -722,6 +826,10 @@ int main(int argc, char** argv)
         gbuffer.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
         gbuffer.SetInputs({ prepass.GetOutput(2) });
         gbuffer.Initialize();
+        const auto descriptorsAfter = NextTextureDescriptors(resources);
+        Require(descriptorsAfter[0] == descriptorsBefore[0] + 7 &&
+            descriptorsAfter[1] == descriptorsBefore[1] + 6 && descriptorsAfter[2] == descriptorsBefore[2] + 1,
+            "Depth/G-buffer allocated descriptors for skipped textures");
         for (bool early : { true, false })
         {
             common.AOAfterDepthPrepass = early;

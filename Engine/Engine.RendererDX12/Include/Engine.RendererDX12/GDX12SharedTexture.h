@@ -134,9 +134,11 @@ private:
         desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
         desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
 
+        ComPtr<ID3D12Resource> resource;
         ThrowIfFailed(_transferFromDeivce->GetDevice()->CreatePlacedResource(
             _sharedHeap.Get(), 0, &desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
-            IID_PPV_ARGS(&_sharedTexturePrimary.D3DResource)));
+            IID_PPV_ARGS(&resource)));
+        _sharedTexturePrimary.D3DResource = resource;
     }
 
     void ShareResources()
@@ -169,8 +171,10 @@ private:
         desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
         desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
 
+        ComPtr<ID3D12Resource> resource;
         ThrowIfFailed(_transferToDevice->GetDevice()->CreatePlacedResource(
             sharedHeapOnSecondary.Get(), 0, &desc, D3D12_RESOURCE_STATE_COMMON,
-            nullptr, IID_PPV_ARGS(&_sharedTextureSecondary.D3DResource)));
+            nullptr, IID_PPV_ARGS(&resource)));
+        _sharedTextureSecondary.D3DResource = resource;
     }
 };

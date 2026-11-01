@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12FluidPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <algorithm>
 #include <cmath>
 #include <set>
@@ -44,17 +45,6 @@ namespace
         buffer->CreateUAV(heap, heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
         return buffer;
     }
-    ComPtr<ID3D12PipelineState> Compute(GDX12DeviceResources* resources, GDX12RootSignature* root,
-        const wchar_t* file, const char* entry)
-    {
-        auto shader = GDX12ShaderCompiler::GetInstance().CompileShader(resources->Device, file, nullptr, entry, "cs");
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = root->GetRootSignature().Get();
-        desc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
-        ComPtr<ID3D12PipelineState> result;
-        ThrowIfFailed(resources->Device->GetDevice()->CreateComputePipelineState(&desc, IID_PPV_ARGS(&result)));
-        return result;
-    }
 }
 
 GDX12FluidSurfacePass::GDX12FluidSurfacePass()
@@ -89,12 +79,12 @@ void GDX12FluidSurfacePass::CreatePipelines()
     solver.NumSingleSRVSlots = 4;
     solver.NumSingleUAVSlots = 4;
     _solverRoot = std::make_unique<GDX12RootSignature>(_resources->Device, solver);
-    _save = Compute(_resources, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "SavePrevious");
-    _hash = Compute(_resources, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "Hash");
-    _sort = Compute(_resources, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "Sort");
-    _offsets = Compute(_resources, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "BuildOffsets");
-    _densities = Compute(_resources, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "Densities");
-    _integrate = Compute(_resources, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "Integrate");
+    _save = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "SavePrevious");
+    _hash = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "Hash");
+    _sort = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "Sort");
+    _offsets = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "BuildOffsets");
+    _densities = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "Densities");
+    _integrate = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "Integrate");
     GDX12RootSignatureDesc surface;
     surface.VolatileSRVData = true;
     surface.Constants = { 4 };
@@ -103,10 +93,10 @@ void GDX12FluidSurfacePass::CreatePipelines()
     surface.NumSingleUAVSlots = 6;
     surface.StaticSamplers = GetStaticSamplers();
     _surfaceRoot = std::make_unique<GDX12RootSignature>(_resources->Device, surface);
-    _initialize = Compute(_resources, _surfaceRoot.get(), SHADERS_FOLDER "FluidSurface.hlsl", "InitializeSurface");
-    _filter = Compute(_resources, _surfaceRoot.get(), SHADERS_FOLDER "FluidSurface.hlsl", "NarrowRange");
-    _merge = Compute(_resources, _surfaceRoot.get(), SHADERS_FOLDER "FluidSurface.hlsl", "MergeSurface");
-    _resolve = Compute(_resources, _surfaceRoot.get(), SHADERS_FOLDER "FluidSurface.hlsl", "ResolveWater");
+    _initialize = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), SHADERS_FOLDER "FluidSurface.hlsl", "InitializeSurface");
+    _filter = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), SHADERS_FOLDER "FluidSurface.hlsl", "NarrowRange");
+    _merge = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), SHADERS_FOLDER "FluidSurface.hlsl", "MergeSurface");
+    _resolve = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), SHADERS_FOLDER "FluidSurface.hlsl", "ResolveWater");
     auto& compiler = GDX12ShaderCompiler::GetInstance();
     auto vs = compiler.CompileShader(_resources->Device, SHADERS_FOLDER "FluidSurface.hlsl", nullptr, "SphereVS", "vs");
     auto ps = compiler.CompileShader(_resources->Device, SHADERS_FOLDER "FluidSurface.hlsl", nullptr, "SpherePS", "ps");
@@ -447,7 +437,7 @@ void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
     }
     CreatePipelines();
     if (rendering) CreateTargets();
-    commands->BeginPixEvent("Fluid SPH and NRF surface", Colors::Aqua);
+    GDX12_SCOPED_EVENT(commands, "Fluid SPH and NRF surface", Colors::Aqua);
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     bool initialized = false;
     UINT owner = 0;
@@ -515,7 +505,6 @@ void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
         _depthLink.Target = _depth.get();
         _motionLink.Target = _motion.get();
     }
-    commands->EndPixEvent();
 }
 
 GDX12Texture* GDX12FluidSurfacePass::Resolve(GDX12CommandList* commands, GDX12Texture* background,
@@ -525,7 +514,7 @@ GDX12Texture* GDX12FluidSurfacePass::Resolve(GDX12CommandList* commands, GDX12Te
     if (background->GetFormat() != DXGI_FORMAT_R16G16B16A16_FLOAT ||
         background->GetWidth() != _color->GetWidth() || background->GetHeight() != _color->GetHeight())
         throw std::invalid_argument("Water resolve requires matching linear RGBA16F HDR");
-    commands->BeginPixEvent("Water HDR optics", Colors::Aqua);
+    GDX12_SCOPED_EVENT(commands, "Water HDR optics", Colors::Aqua);
     commands->ResourceBarrier({ background->GetResource()->GetCopySourceBarrier(), _color->GetResource()->GetCopyDestBarrier() });
     commands->CopyResource(_color->GetResource()->D3DResource.Get(), background->GetResource()->D3DResource.Get());
     commands->ResourceBarrier({ background->GetResource()->GetNonPixelShaderResourceBarrier(),
@@ -553,7 +542,6 @@ GDX12Texture* GDX12FluidSurfacePass::Resolve(GDX12CommandList* commands, GDX12Te
         commands->ResourceBarrier({ _color->GetResource()->GetUAVBarrier() });
     }
     commands->ResourceBarrier({ _color->GetResource()->GetSRVBarrier() });
-    commands->EndPixEvent();
     return _color.get();
 }
 

@@ -13,10 +13,9 @@
 
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
-#include "Engine.RendererDX12/GDX12FrameGeneration.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12FrameGenerationPass.h"
 #include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include "Engine.RendererDX12/GDX12ShadowCascades.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12TextureClearPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12CascadedShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
@@ -38,6 +37,10 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12MotionBlurPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12FluidPass.h"
 #include <cmath>
+#include "Common/ConsoleVariables.h"
+
+static AutoConsoleVariable<bool> GraphReuseTextures(L"Render.Graph.ReuseTextures", true,
+    L"Reuse compatible transient graph textures. Disable to compare output and memory.", EConsoleVariableFlags::Default);
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
     _dualGPUMode(false), _window(window), _timer(timer),
@@ -51,12 +54,13 @@ RenderModule::~RenderModule()
     if (_primaryDevice && _primaryDevice->GetCommandQueue()) { _primaryDevice->GetCommandQueue()->Flush(); }
     if (_secondaryDevice && _secondaryDevice->GetCommandQueue()) { _secondaryDevice->GetCommandQueue()->Flush(); }
 
-    for (auto& renderpass : _primaryRenderPassExecutionList) { renderpass->ClearDenendencies(); }
-    for (auto& renderpass : _secondaryRenderPassExecutionList) { renderpass->ClearDenendencies(); }
+    _primaryGraph.reset();
+    for (auto& renderpass : _primaryRenderPasses) { renderpass->ClearDenendencies(); }
+    for (auto& renderpass : _secondaryRenderPasses) { renderpass->ClearDenendencies(); }
 
     _primaryResources.Grass.reset();
-    _primaryRenderPassExecutionList.clear();
-    _secondaryRenderPassExecutionList.clear();
+    _primaryRenderPasses.clear();
+    _secondaryRenderPasses.clear();
     _backBuffer.reset();
     GDX12ShaderCompiler::Shutdown();
     GDX12DeviceFactory::Reset();
@@ -117,14 +121,14 @@ void RenderModule::OnResize()
     _window->GetWindowSize(width, height);
 
     _backBuffer->Resize(width, height);
-    _depthStencil->Resize(width, height);
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
     if (_RPcommonData.Upscaler) { _RPcommonData.Upscaler->QueryRenderTargetResolution(); }
 
-    for (auto& renderPass : _primaryRenderPassExecutionList) { renderPass->Resize(); }
-    for (auto& renderPass : _secondaryRenderPassExecutionList) { renderPass->Resize(); }
+    for (auto& renderPass : _primaryRenderPasses) { renderPass->Resize(); }
+    for (auto& renderPass : _secondaryRenderPasses) { renderPass->Resize(); }
+    if (_primaryGraph) RebuildRenderGraph();
 }
 
 GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
@@ -240,9 +244,7 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
     uint32_t numMipLevels = texture->GetMipLevels();
     uint32_t numArraySlices = texture->GetArraySize();
 
-    ComPtr<ID3D12Resource> textureResource = nullptr;
-    CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
-    CD3DX12_HEAP_PROPERTIES uploadHeap(D3D12_HEAP_TYPE_UPLOAD);
+    GDX12ResourceHandle textureResource;
 
     bool convertToSRGB = type == Engine::Core::ETextureType::Color;
     if (convertToSRGB) { desc.Format = desc.SRVDesc.Format = FormatToSRGB(texture->GetFormat()); }
@@ -263,13 +265,8 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
             D3D12_TEXTURE_LAYOUT_UNKNOWN,
             D3D12_RESOURCE_DIMENSION_TEXTURE2D);
 
-        ThrowIfFailed(resources->Device->GetDevice()->CreateCommittedResource(
-            &defaultHeap,
-            D3D12_HEAP_FLAG_NONE,
-            &texDesc,
-            D3D12_RESOURCE_STATE_COMMON,
-            nullptr,
-            IID_PPV_ARGS(&textureResource)));
+        textureResource = resources->Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, texDesc,
+            D3D12_RESOURCE_STATE_COMMON, nullptr);
     }
     else
     {
@@ -285,13 +282,8 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
             desc.Format, desc.Width, desc.Height,
             numArraySlices, numMipLevels);
 
-        ThrowIfFailed(resources->Device->GetDevice()->CreateCommittedResource(
-            &defaultHeap,
-            D3D12_HEAP_FLAG_NONE,
-            &texDesc,
-            D3D12_RESOURCE_STATE_COMMON,
-            nullptr,
-            IID_PPV_ARGS(&textureResource)));
+        textureResource = resources->Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, texDesc,
+            D3D12_RESOURCE_STATE_COMMON, nullptr);
     }
 
     auto& subresources = texture->GetSubresources();
@@ -315,14 +307,8 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
     if (_textureUploadBudget && totalSize > _textureUploadBudget)
         OutputDebugStringA("Loading: one texture upload exceeds Loading.TransientBudgetMiB; uploading alone\n");
 
-    ComPtr<ID3D12Resource> uploadBuffer;
-    ThrowIfFailed(resources->Device->GetDevice()->CreateCommittedResource(
-        &uploadHeap,
-        D3D12_HEAP_FLAG_NONE,
-        &uploadDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&uploadBuffer)));
+    auto uploadBuffer = resources->Device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, uploadDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr);
 
     void* mappedData = nullptr;
     ThrowIfFailed(uploadBuffer->Map(0, nullptr, &mappedData));
@@ -882,7 +868,7 @@ void RenderModule::OnUpdate()
     {
         OnResize();
         _primaryPipelineFlags = 0;
-        for (const auto& pass : _primaryRenderPassExecutionList) _primaryPipelineFlags |= pass->GetFlags();
+        for (const auto& pass : _primaryRenderPasses) _primaryPipelineFlags |= pass->GetFlags();
     }
 
     auto consoleModule = BenchmarkEngine::GetLocator().GetModule<ConsoleModule>();
@@ -928,6 +914,8 @@ void RenderModule::OnRender()
     if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
         _secondaryResources.UpdateMaterialCB(_materials);
     CollectParticleEmitters();
+    if (_graphEarlyAO != (GetAmbientOcclusionExecutionPoint() == 0) ||
+        _graphReuseTextures != GraphReuseTextures.GetValue()) RebuildRenderGraph();
     auto primarycmdQueue = _primaryDevice->GetCommandQueue();
     auto primarycmdList = primarycmdQueue->GetCommandList();
     _primaryGPUTimer->Start(primarycmdList);
@@ -936,25 +924,7 @@ void RenderModule::OnRender()
     CollectReflectionScene();
 
     auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
-    const bool earlyAO = GetAmbientOcclusionExecutionPoint() == 0;
-    _RPcommonData.AOAfterDepthPrepass = earlyAO;
-    _ambientOcclusionPass->SetInputs({ _depthPrepass->GetOutput(2),
-        (earlyAO ? _depthPrepass : _opaquePass)->GetOutput(3) });
-    for (auto& renderPass : _primaryRenderPassExecutionList) 
-    { 
-        if (earlyAO && renderPass.get() == _ambientOcclusionPass) continue;
-        if (renderPass->GetFlagValue(RENDER_PASS_FLAG_SYNC_DEVICES) && _dualGPUMode)
-        {
-            primarycmdQueue->ExecuteCommandList(primarycmdList);
-                primarycmdQueue->WaitForOtherFence(primarycmdList->FenceValue);
-                primarycmdList = primarycmdQueue->GetCommandList();
-            }
-        else { renderPass->Execute(primarycmdList); }
-        if (earlyAO && renderPass.get() == _depthPrepass) _ambientOcclusionPass->Execute(primarycmdList);
-    }
-
-    _backBuffer->GetFrameGeneration().Prepare(primarycmdList,
-        _frameGenerationDepth->GetTexture(), _frameGenerationMotion->GetTexture(), _RPcommonData);
+    _primaryGraph->Execute(primarycmdList);
     _primaryGPUTimer->Stop(primarycmdList);
     primarycmdQueue->ExecuteCommandList(primarycmdList);
     primaryCurrentFrameConsts->FenceValue = primarycmdList->FenceValue;
@@ -967,7 +937,7 @@ void RenderModule::OnRender()
         _secondaryGPUTimer->Start(secondarycmdList);
 
         auto secondaryCurrentFrameConsts = GetCurrentSecondaryFrameConstants();
-        for (auto& renderPass : _secondaryRenderPassExecutionList)
+        for (auto& renderPass : _secondaryRenderPasses)
         {
             if (renderPass->GetFlagValue(RENDER_PASS_FLAG_SYNC_DEVICES))
             {
@@ -1218,23 +1188,6 @@ void RenderModule::BuildBackBuffer()
     _backBuffer = std::make_unique<GDX12SwapChain>(_primaryDevice.get(), _window->GetWindowHandle(),
         DXGI_FORMAT_R8G8B8A8_UNORM, 2, width, height, _primaryResources.RTVHeap.get());
 
-    GDX12TextureDesc desc;
-    desc.CreateSRV = false;
-    desc.DSVHeap = _primaryResources.DSVHeap.get();
-
-    desc.CreateDSV = true;
-    desc.DSVHeapIndex = _primaryResources.DSVHeap->GetAvailableIndex();
-    desc.Format = desc.DSVDesc.Format = DXGI_FORMAT_D32_FLOAT;
-    desc.Width = width;
-    desc.Height = height;
-    desc.ClearValue = { 0.f, 0.f, 0.f, 0.f };
-
-    desc.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-    desc.DSVDesc.Texture2D.MipSlice = 0;
-
-    _depthStencil = std::make_unique<GDX12Texture>();
-    _depthStencil->Initialize(desc);
-
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
 }
@@ -1262,76 +1215,39 @@ void RenderModule::ShareFences()
 
 void RenderModule::ConfigureRenderPipeline()
 {
-    // Setup render passes you would like to execute
-    // Add in execution order
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureClearPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12EnvironmentIBLPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>(GDX12OpaquePass::Stage::DepthPrepass));
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12CascadedShadowPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12LocalShadowPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12ReflectionProbePass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>(GDX12OpaquePass::Stage::GBuffer));
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12AmbientOcclusionPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DeferredLightingPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12SSSRPass>());
-    auto fluidSurface = std::make_unique<GDX12FluidSurfacePass>();
-    auto* fluidSurfacePass = fluidSurface.get();
-    _primaryRenderPassExecutionList.push_back(std::move(fluidSurface));
-    auto behind = std::make_unique<GDX12WBOITTransparencyPass>(GDX12WBOITTransparencyPass::WaterPartition::Behind);
-    auto* behindTransparency = behind.get();
-    _primaryRenderPassExecutionList.push_back(std::move(behind));
-    auto behindComposite = std::make_unique<GDX12WBOITCompositionPass>();
-    _primaryRenderPassExecutionList.push_back(std::move(behindComposite));
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12FluidResolvePass>(fluidSurfacePass));
-    auto front = std::make_unique<GDX12WBOITTransparencyPass>(
-        GDX12WBOITTransparencyPass::WaterPartition::Front, behindTransparency);
-    auto* frontTransparency = front.get();
-    _primaryRenderPassExecutionList.push_back(std::move(front));
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12ParticlesPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>(nullptr, frontTransparency));
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DepthOfFieldPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12MotionBlurPass>());
-    auto reconstruction = std::make_unique<GDX12ReconstructionPass>();
-    _reconstructionPass = reconstruction.get();
-    _primaryRenderPassExecutionList.push_back(std::move(reconstruction));
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
-
-    SetupRenderPasses();
-
-    // Link inputs & outputs for each pass that needs it
-    GDX12RenderPass* clearPass = _primaryRenderPassExecutionList[0].get();
-    GDX12RenderPass* environmentPass = _primaryRenderPassExecutionList[1].get();
-    GDX12RenderPass* cullingPass = _primaryRenderPassExecutionList[2].get();
-    GDX12RenderPass* depthPrepass = _primaryRenderPassExecutionList[3].get();
-    GDX12RenderPass* shadowPass = _primaryRenderPassExecutionList[4].get();
-    GDX12RenderPass* localShadowPass = _primaryRenderPassExecutionList[5].get();
-    GDX12RenderPass* reflectionPass = _primaryRenderPassExecutionList[6].get();
-    GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[7].get();
-    GDX12RenderPass* aoPass = _primaryRenderPassExecutionList[8].get();
-    GDX12RenderPass* lightingPass = _primaryRenderPassExecutionList[9].get();
-    GDX12RenderPass* ssrPass = _primaryRenderPassExecutionList[10].get();
-    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[12].get();
-    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[13].get();
-    GDX12RenderPass* waterResolvePass = _primaryRenderPassExecutionList[14].get();
-    GDX12RenderPass* frontPass = _primaryRenderPassExecutionList[15].get();
-    auto* particlesPass = static_cast<GDX12ParticlesPass*>(_primaryRenderPassExecutionList[16].get());
-    GDX12RenderPass* frontCompositionPass = _primaryRenderPassExecutionList[17].get();
-    GDX12RenderPass* dofPass = _primaryRenderPassExecutionList[18].get();
-    GDX12RenderPass* motionBlurPass = _primaryRenderPassExecutionList[19].get();
-    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[20].get();
-    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[21].get();
+    auto* environmentPass = CreateRenderPass<GDX12EnvironmentIBLPass>();
+    auto* cullingPass = CreateRenderPass<GDX12GPUCullingPass>();
+    auto* depthPrepass = CreateRenderPass<GDX12OpaquePass>(GDX12OpaquePass::Stage::DepthPrepass);
+    auto* shadowPass = CreateRenderPass<GDX12CascadedShadowPass>();
+    auto* localShadowPass = CreateRenderPass<GDX12LocalShadowPass>();
+    auto* reflectionPass = CreateRenderPass<GDX12ReflectionProbePass>();
+    auto* opaquePass = CreateRenderPass<GDX12OpaquePass>(GDX12OpaquePass::Stage::GBuffer);
+    auto* aoPass = CreateRenderPass<GDX12AmbientOcclusionPass>();
+    auto* lightingPass = CreateRenderPass<GDX12DeferredLightingPass>();
+    auto* ssrPass = CreateRenderPass<GDX12SSSRPass>();
+    auto* fluidSurfacePass = CreateRenderPass<GDX12FluidSurfacePass>();
+    auto* transparencyPass = CreateRenderPass<GDX12WBOITTransparencyPass>(GDX12WBOITTransparencyPass::WaterPartition::Behind);
+    auto* compositionPass = CreateRenderPass<GDX12WBOITCompositionPass>();
+    auto* waterResolvePass = CreateRenderPass<GDX12FluidResolvePass>(fluidSurfacePass);
+    auto* frontPass = CreateRenderPass<GDX12WBOITTransparencyPass>(GDX12WBOITTransparencyPass::WaterPartition::Front);
+    auto* particlesPass = CreateRenderPass<GDX12ParticlesPass>();
+    auto* frontCompositionPass = CreateRenderPass<GDX12WBOITCompositionPass>(nullptr, frontPass);
+    auto* dofPass = CreateRenderPass<GDX12DepthOfFieldPass>();
+    auto* motionBlurPass = CreateRenderPass<GDX12MotionBlurPass>();
+    auto* upscalePass = CreateRenderPass<GDX12ReconstructionPass>();
+    auto* outputPass = CreateRenderPass<GDX12OutputToScreenPass>();
+    auto* frameGenerationPass = CreateRenderPass<GDX12FrameGenerationPass>(_backBuffer.get());
+    _reconstructionPass = upscalePass;
     _depthPrepass = depthPrepass;
     _opaquePass = opaquePass;
     _ambientOcclusionPass = aoPass;
+    SetupRenderPasses();
 
-    // Output overwrites the entire backbuffer; FG proxy buffers need no clear.
-    clearPass->SetInputs({ _depthStencil.get() });
     reflectionPass->SetInputs({ environmentPass->GetOutput(0), environmentPass->GetOutput(1),
         environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0) });
     cullingPass->SetInputs({});
     depthPrepass->SetInputs({});
-    opaquePass->SetInputs({ depthPrepass->GetOutput(2) });
+    opaquePass->SetInputs(std::vector<IRenderPassLink*>{ depthPrepass->GetOutput(2) });
     aoPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3) });
     lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0), aoPass->GetOutput(0) });
     fluidSurfacePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
@@ -1347,11 +1263,10 @@ void RenderModule::ConfigureRenderPipeline()
     dofPass->SetInputs({ frontCompositionPass->GetOutput(0), fluidSurfacePass->GetOutput(0) });
     motionBlurPass->SetInputs({ dofPass->GetOutput(0), fluidSurfacePass->GetOutput(0), fluidSurfacePass->GetOutput(1) });
     upscalePass->SetInputs({ fluidSurfacePass->GetOutput(0), motionBlurPass->GetOutput(1), motionBlurPass->GetOutput(0) });
-    _frameGenerationDepth = fluidSurfacePass->GetOutput(0);
-    _frameGenerationMotion = motionBlurPass->GetOutput(1);
     particlesPass->SetInputs({ fluidSurfacePass->GetOutput(0), frontPass->GetOutput(0), frontPass->GetOutput(1) });
     static_cast<GDX12WBOITCompositionPass*>(frontCompositionPass)->SetParticles(particlesPass);
     outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get()});
+    frameGenerationPass->SetInputs({ fluidSurfacePass->GetOutput(0), motionBlurPass->GetOutput(1), _backBuffer.get() });
 
     depthPrepass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
     opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
@@ -1363,17 +1278,18 @@ void RenderModule::ConfigureRenderPipeline()
     frontCompositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 
     InitializeRenderPasses();
+    RebuildRenderGraph();
 }
 
 void RenderModule::SetupRenderPasses()
 {
-    for (auto& pass : _primaryRenderPassExecutionList)
+    for (auto& pass : _primaryRenderPasses)
     {
         pass->Setup(&_primaryResources, &_secondaryResources, &_RPcommonData);
         _primaryPipelineFlags |= pass->GetFlags();
     }
 
-    for (auto& pass : _secondaryRenderPassExecutionList)
+    for (auto& pass : _secondaryRenderPasses)
     {
         pass->Setup(&_secondaryResources, &_primaryResources, &_RPcommonData);
         _secondaryPipelineFlags |= pass->GetFlags();
@@ -1383,31 +1299,11 @@ void RenderModule::SetupRenderPasses()
 void RenderModule::InitializeRenderPasses()
 {
     std::vector<GDX12RenderPass*> allRenderPasses;
-    for (auto& pass : _primaryRenderPassExecutionList)
+    for (auto& pass : _primaryRenderPasses)
         allRenderPasses.push_back(pass.get());
-    for (auto& pass : _secondaryRenderPassExecutionList)
+    for (auto& pass : _secondaryRenderPasses)
         allRenderPasses.push_back(pass.get());
-    const int MAX_ITERATIONS = 100;
-    int iteration = 0;
-    while (!allRenderPasses.empty())
-    {
-        if (iteration > MAX_ITERATIONS)
-        {
-            OutputDebugStringA("ERROR: RenderPass linking failed after 100 attempts. This can be caused by wrong render pass inputs\n");
-            break;
-        }
-        for (auto it = allRenderPasses.begin(); it != allRenderPasses.end();)
-        {
-            GDX12RenderPass* renderPass = *it;
-            if (renderPass->ValidateInputs())
-            {
-                renderPass->Initialize();
-                it = allRenderPasses.erase(it);
-            }
-            else { ++it; }
-        }
-        iteration++;
-    }
+    GDX12RenderPass::InitializeAll(std::move(allRenderPasses));
 }
 
 void RenderModule::SubscribeToSceneManager()
@@ -1516,4 +1412,44 @@ const GDX12FrameGenerationStatus& RenderModule::GetFrameGenerationStatus() const
 {
     if (!_backBuffer) throw std::logic_error("Render pipeline has not been initialized");
     return _backBuffer->GetFrameGeneration().GetStatus();
+}
+
+D3D12MA::Statistics RenderModule::GetMemoryStatistics() const
+{
+    D3D12MA::TotalStatistics statistics = {};
+    if (_primaryDevice && _primaryDevice->GetMemoryAllocator())
+        _primaryDevice->GetMemoryAllocator()->CalculateStatistics(&statistics);
+    return statistics.Total.Stats;
+}
+
+void RenderModule::RebuildRenderGraph()
+{
+    _primaryDevice->GetCommandQueue()->Flush();
+    _graphEarlyAO = GetAmbientOcclusionExecutionPoint() == 0;
+    _graphReuseTextures = GraphReuseTextures.GetValue();
+    _RPcommonData.AOAfterDepthPrepass = _graphEarlyAO;
+    _ambientOcclusionPass->SetInputs({ _depthPrepass->GetOutput(2),
+        (_graphEarlyAO ? _depthPrepass : _opaquePass)->GetOutput(3) });
+    auto graph = std::make_unique<GDX12RenderGraph>(_primaryDevice.get());
+    graph->ImportShared(GDX12RenderGraph::SharedResource::Scene, "Scene and frame buffers");
+    graph->ImportLink("Swapchain", _backBuffer.get());
+    for (const auto& pass : _primaryRenderPasses)
+    {
+        if (_graphEarlyAO && pass.get() == _ambientOcclusionPass) continue;
+        graph->AddPass(*pass);
+        if (_graphEarlyAO && pass.get() == _depthPrepass) graph->AddPass(*_ambientOcclusionPass);
+    }
+    graph->Compile(_graphReuseTextures);
+    _primaryGraph = std::move(graph);
+    _RPcommonData.RequestHistoryReset = true;
+}
+
+const GDX12RenderGraph::Statistics& RenderModule::GetRenderGraphStatistics() const
+{
+    return _primaryGraph->GetStatistics();
+}
+
+void RenderModule::WriteRenderGraph(std::ostream& output) const
+{
+    _primaryGraph->WriteDot(output);
 }

@@ -36,17 +36,11 @@ void GDX12GeometryBuffer::ResizeVertexBuffer(UINT newSize, UINT updateStart, UIN
 {
     if (newSize > UINT_MAX / VERTEX_SIZE) throw std::overflow_error("Vertex buffer exceeds 32-bit addressing");
     auto desc = CD3DX12_RESOURCE_DESC::Buffer(newSize * VERTEX_SIZE, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-    CD3DX12_HEAP_PROPERTIES heapPropsDefault(D3D12_HEAP_TYPE_DEFAULT);
-    CD3DX12_HEAP_PROPERTIES heapPropsUpload(D3D12_HEAP_TYPE_UPLOAD);
-    ComPtr<ID3D12Resource> newBuffer;
-    ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(
-        &heapPropsDefault, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COPY_DEST,
-        nullptr, IID_PPV_ARGS(&newBuffer)));
+    auto newBuffer = _device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr);
     auto uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(newSize * VERTEX_SIZE);
-    ComPtr<ID3D12Resource> uploadBuffer;
-    ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(
-        &heapPropsUpload, D3D12_HEAP_FLAG_NONE, &uploadDesc, D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr, IID_PPV_ARGS(&uploadBuffer)));
+    auto uploadBuffer = _device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, uploadDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr);
     void* mapped = nullptr;
     ThrowIfFailed(uploadBuffer->Map(0, nullptr, &mapped));
     memcpy(mapped, _vertexDataCPU.data(), newSize * VERTEX_SIZE);
@@ -145,27 +139,13 @@ void GDX12GeometryBuffer::EndSkinning(GDX12CommandList* commands)
 void GDX12GeometryBuffer::ResizeIndexBuffer(UINT newSize)
 {
     auto desc = CD3DX12_RESOURCE_DESC::Buffer(newSize * INDEX_SIZE);
-    CD3DX12_HEAP_PROPERTIES heapPropsDefault(D3D12_HEAP_TYPE_DEFAULT);
-    CD3DX12_HEAP_PROPERTIES heapPropsUpload(D3D12_HEAP_TYPE_UPLOAD);
 
-    ComPtr<ID3D12Resource> newBuffer;
-    ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(
-        &heapPropsDefault,
-        D3D12_HEAP_FLAG_NONE,
-        &desc,
-        D3D12_RESOURCE_STATE_COMMON,
-        nullptr,
-        IID_PPV_ARGS(&newBuffer)));
+    auto newBuffer = _device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr);
 
     auto uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(newSize * INDEX_SIZE);
-    ComPtr<ID3D12Resource> uploadBuffer;
-    ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(
-        &heapPropsUpload,
-        D3D12_HEAP_FLAG_NONE,
-        &uploadDesc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&uploadBuffer)));
+    auto uploadBuffer = _device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, uploadDesc,
+        D3D12_RESOURCE_STATE_GENERIC_READ, nullptr);
 
     void* mapped = nullptr;
     ThrowIfFailed(uploadBuffer->Map(0, nullptr, &mapped));

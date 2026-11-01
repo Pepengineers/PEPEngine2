@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12SSSRPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12SSRSettings.h"
 #include <FidelityFX/host/ffx_sssr.h>
 #include <FidelityFX/host/backends/dx12/ffx_dx12.h>
@@ -51,19 +52,8 @@ void GDX12SSSRPass::Initialize()
         { &_fallback, DXGI_FORMAT_R16G16B16A16_FLOAT }, { &_radiance, DXGI_FORMAT_R16G16B16A16_FLOAT }, { &_roughness, DXGI_FORMAT_R16_FLOAT },
         { &_motion, DXGI_FORMAT_R16G16_FLOAT } })
     {
-        GDX12TextureDesc desc;
-        desc.Width = _inputs[0]->GetTexture()->GetWidth();
-        desc.Height = _inputs[0]->GetTexture()->GetHeight();
-        desc.Format = desc.SRVDesc.Format = desc.UAVDesc.Format = format;
-        desc.CreateUAV = true;
-        desc.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
-        desc.SRVHeapIndex = desc.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-        desc.UAVHeapIndex = desc.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-        desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        desc.SRVDesc.Texture2D.MipLevels = 1;
-        desc.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-        texture->Initialize(desc);
+        GDX12RenderHelpers::InitializeComputeTexture(*texture, *_resources,
+            _inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight(), format);
     }
     GDX12RootSignatureDesc root;
     root.NumSingleCBVSlots = 2;
@@ -73,12 +63,8 @@ void GDX12SSSRPass::Initialize()
     _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
     for (auto [pipeline, entry] : { std::pair{ std::addressof(_prepare), "Prepare" }, { std::addressof(_resolve), "Resolve" } })
     {
-        auto shader = GDX12ShaderCompiler::GetInstance().CompileShader(_resources->Device,
-            SHADERS_FOLDER "SSSR.hlsl", nullptr, entry, "cs");
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = _root->GetRootSignature().Get();
-        desc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
-        ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(&desc, IID_PPV_ARGS(pipeline->GetAddressOf())));
+        *pipeline = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(),
+            SHADERS_FOLDER "SSSR.hlsl", entry);
     }
     _constants = std::make_unique<GDX12UploadBuffer<Constants>>(_resources->Device,
         static_cast<UINT>(_resources->FrameConstants.size()));
@@ -140,7 +126,7 @@ void GDX12SSSRPass::Execute(GDX12CommandList* commands)
     _sources = sources;
     _historyRevision = _commonData->HistoryRevision;
     _wasEnabled = true;
-    commands->BeginPixEvent("AMD SSSR + Reflections Denoiser + specular resolve", Colors::Cyan);
+    GDX12_SCOPED_EVENT(commands, "AMD SSSR + Reflections Denoiser + specular resolve", Colors::Cyan);
     const UINT slot = _resources->CurrFrameConstantsIndex;
     const XMFLOAT2 jitter = { _commonData->ActiveCameraJitterOffsetX, _commonData->ActiveCameraJitterOffsetY };
     Constants constants;
@@ -219,7 +205,6 @@ void GDX12SSSRPass::Execute(GDX12CommandList* commands)
     commands->SetComputeUAV(2, _color.GetUAV()->GPUHandle);
     commands->Dispatch((_color.GetWidth() + 7) / 8, (_color.GetHeight() + 7) / 8, 1);
     commands->ResourceBarrier({ _color.GetResource()->GetSRVBarrier() });
-    commands->EndPixEvent();
     _previousViewProjection = viewProjection;
     _previousJitter = jitter;
 }

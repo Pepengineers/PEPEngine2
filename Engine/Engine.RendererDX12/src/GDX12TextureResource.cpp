@@ -1,6 +1,6 @@
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 
-GDX12TextureResource::GDX12TextureResource(ComPtr<ID3D12Resource> resource) :
+GDX12TextureResource::GDX12TextureResource(GDX12ResourceHandle resource) :
 	_currentSync(D3D12_BARRIER_SYNC_NONE),
 	_currentAccess(D3D12_BARRIER_ACCESS_COMMON),
 	_currentLayout(D3D12_BARRIER_LAYOUT_COMMON)

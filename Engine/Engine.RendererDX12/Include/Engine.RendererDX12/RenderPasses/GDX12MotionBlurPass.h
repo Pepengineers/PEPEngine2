@@ -6,6 +6,17 @@
 class GDX12MotionBlurPass final : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Motion blur");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs);
+        graph.Read(SharedResource::Particles);
+        graph.Write(_outputs[0], "Motion-blurred HDR");
+        // Frame generation can retain motion beyond this command list.
+        graph.Write(_outputs[1], "Complete motion", Lifetime::Persistent);
+    }
+
     GDX12MotionBlurPass();
     void Initialize() override;
     void Execute(GDX12CommandList* commands) override;

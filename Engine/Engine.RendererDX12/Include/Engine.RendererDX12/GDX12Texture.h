@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Engine.RendererDX12/GDX12ResourceHandle.h"
+
 #include "Engine.RendererDX12\D3DHelpers.h"
 
 #include "Engine.Core/Types/TextureTypes.h"
@@ -60,7 +62,7 @@ struct GDX12TextureDesc
 	//If this is specified, it will be used as texture resource
 	//It will not be wiped during resize, only views are recreated
 	//Thus, resource management is now under user's control
-	ComPtr<ID3D12Resource> ExternalResource = nullptr;
+	GDX12ResourceHandle ExternalResource;
 };
 
 class GDX12Texture : public IRenderPassLink
@@ -95,10 +97,16 @@ public:
 	bool IsInitialized() override;
 
 private:
+	friend class GDX12RenderGraph;
+    bool CanShareGraphResource() const;
+    bool CanShareGraphResource(const GDX12Texture& other) const;
+    std::shared_ptr<GDX12TextureResource> CreateGraphResource() const;
+    void BindGraphResource(std::shared_ptr<GDX12TextureResource> resource);
+
 	void CreateResource();
 	void CreateViews();
 
-	std::unique_ptr<GDX12TextureResource> _resource;
+	std::shared_ptr<GDX12TextureResource> _resource;
 	D3D12_RESOURCE_FLAGS _resourceFlags;
 	GDX12Device* _device;
 	GDX12TextureDesc _desc;

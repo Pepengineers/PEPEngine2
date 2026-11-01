@@ -90,18 +90,16 @@ void GDX12UploadBuffer<T>::CreateBuffer()
     if (_bufferType == EBufferType::Default)
     {
         resourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-        CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
-        ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(
-            &heapProps, D3D12_HEAP_FLAG_NONE, &resourceDesc,
-            D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&_buffer.D3DResource)));
+        _buffer.D3DResource = _device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, resourceDesc,
+            D3D12_RESOURCE_STATE_COMMON, nullptr);
     }
     else
     {
-        CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_UPLOAD);
-        ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(
-            &heapProps, D3D12_HEAP_FLAG_NONE, &resourceDesc,
-            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&_buffer.D3DResource)));
+        _buffer.D3DResource = _device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, resourceDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr);
         ThrowIfFailed(_buffer.D3DResource->Map(0, nullptr, reinterpret_cast<void**>(&_mappedData)));
+        // Reused heap regions need the same initial contents as fresh committed upload buffers.
+        std::memset(_mappedData, 0, _totalBufferSize);
     }
 }
 

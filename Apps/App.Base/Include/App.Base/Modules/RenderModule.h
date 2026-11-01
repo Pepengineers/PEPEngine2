@@ -8,6 +8,7 @@
 #include "Engine.Core/ECS/Event.h"
 #include "Engine.RendererDX12/GDX12Skinning.h"
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
+#include "Engine.RendererDX12/GDX12RenderGraph.h"
 #include <map>
 
 class SceneManagerModule;
@@ -59,6 +60,9 @@ public:
     //returns a pointer to a fully initialized structure that you can specify in materials
     GPUTexture* CreateTexture(const std::string& name, const Texture* texture, ETextureType type);
     void WaitForUploads();
+    D3D12MA::Statistics GetMemoryStatistics() const;
+    const GDX12RenderGraph::Statistics& GetRenderGraphStatistics() const;
+    void WriteRenderGraph(std::ostream& output) const;
     void BeginTextureUploadBatch(std::uint64_t budgetBytes);
     void EndTextureUploadBatch();
 
@@ -180,9 +184,17 @@ private:
     void CollectGrassScene(GDX12CommandList* commands);
     void CollectParticleEmitters();
     void ShareFences();
+    template<class T, class... Args> T* CreateRenderPass(Args&&... args)
+    {
+        auto pass = std::make_unique<T>(std::forward<Args>(args)...);
+        auto* result = pass.get();
+        _primaryRenderPasses.push_back(std::move(pass));
+        return result;
+    }
     void ConfigureRenderPipeline();
     void SetupRenderPasses();
     void InitializeRenderPasses();
+    void RebuildRenderGraph();
     void EnsureInstanceCapacity(UINT capacity);
     
     void SubscribeToSceneManager();
@@ -195,7 +207,7 @@ private:
     std::uint64_t _textureUploadBytes = 0;
     GDX12CommandList* _primaryTextureCommands = nullptr;
     GDX12CommandList* _secondaryTextureCommands = nullptr;
-    std::vector<Microsoft::WRL::ComPtr<ID3D12Resource>> _textureUploadResources;
+    std::vector<GDX12ResourceHandle> _textureUploadResources;
 
     GameTimer* _timer;
     Window* _window;
@@ -220,18 +232,19 @@ private:
 
     // These two resources are made on _primaryDevice only
     std::unique_ptr<GDX12SwapChain> _backBuffer;
-    std::unique_ptr<GDX12Texture> _depthStencil;
     
     GDX12RenderPass* _depthPrepass = nullptr;
     GDX12RenderPass* _opaquePass = nullptr;
     GDX12RenderPass* _ambientOcclusionPass = nullptr;
-    IRenderPassLink* _frameGenerationDepth = nullptr;
-    IRenderPassLink* _frameGenerationMotion = nullptr;
     GDX12ReconstructionPass* _reconstructionPass = nullptr;
 
-    // Sorted in execution order
-    std::vector<std::unique_ptr<GDX12RenderPass>> _primaryRenderPassExecutionList;
-    std::vector<std::unique_ptr<GDX12RenderPass>> _secondaryRenderPassExecutionList;
+    std::unique_ptr<GDX12RenderGraph> _primaryGraph;
+    bool _graphEarlyAO = false;
+    bool _graphReuseTextures = true;
+
+    // Owns pass implementations; execution is scheduled by the graph.
+    std::vector<std::unique_ptr<GDX12RenderPass>> _primaryRenderPasses;
+    std::vector<std::unique_ptr<GDX12RenderPass>> _secondaryRenderPasses;
 
     // Flags that are accumulated from every active RenderPass on the device
     // Defines which resources should be uploaded onto respective GPU

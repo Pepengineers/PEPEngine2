@@ -1,5 +1,6 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <stdexcept>
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
@@ -7,6 +8,17 @@
 class GDX12WBOITCompositionPass : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName(_front ? "Front composition" : "Behind-water composition");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs);
+        graph.Read(SharedResource::Environment);
+        if (_particles) graph.Read(SharedResource::Particles);
+        graph.Write(_outputs[0], "Composited HDR", Lifetime::Transient, GDX12RenderGraph::UnmanagedState, OUT_Result.get());
+        if (_front) graph.Fallback(_outputs[0], _inputs[0]);
+    }
+
     void SetParticles(GDX12ParticlesPass* particles) { _particles = particles; }
 	GDX12WBOITCompositionPass(GDX12WBOITCompositionPass* reuse = nullptr,
         GDX12WBOITTransparencyPass* front = nullptr) : IN_OpaqueScene(nullptr), IN_TransparencyAccum(nullptr),
@@ -30,33 +42,11 @@ public:
 		IN_TransparencyAccum = _inputs[1];
 		IN_Revealage = _inputs[2];
 
-		if (!_reuse)
+        if (!_reuse)
         {
-    		// Textures
-    		GDX12TextureDesc TextureDesc1;
-    		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    		TextureDesc1.Width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
-    		TextureDesc1.Height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
-
-    		TextureDesc1.CreateSRV = true;
-    		TextureDesc1.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
-    		TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-    		TextureDesc1.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    		TextureDesc1.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    		TextureDesc1.SRVDesc.Texture2D.MipLevels = 1;
-    		TextureDesc1.SRVDesc.Texture2D.MostDetailedMip = 0;
-    		TextureDesc1.SRVDesc.Texture2D.PlaneSlice = 0;
-    		TextureDesc1.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
-
-    		TextureDesc1.CreateRTV = true;
-    		TextureDesc1.RTVHeap = _resources->RTVHeap.get();
-    		TextureDesc1.RTVHeapIndex = _resources->RTVHeap->GetAvailableIndex();
-    		TextureDesc1.RTVDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-    		TextureDesc1.RTVDesc.Texture2D.PlaneSlice = 0;
-    		TextureDesc1.RTVDesc.Texture2D.MipSlice = 0;
-
-    		OUT_Result->Initialize(TextureDesc1);
-
+            const UINT width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
+            const UINT height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
+            GDX12RenderHelpers::InitializeRenderTarget(*OUT_Result, *_resources, width, height, DXGI_FORMAT_R16G16B16A16_FLOAT);
         }
 
 		// Shaders
@@ -107,41 +97,42 @@ public:
 		GDX12Texture* transparencyAccum = IN_TransparencyAccum->GetTexture();
 		GDX12Texture* transparencyRevealage = IN_Revealage->GetTexture();
 
-		cmdList->BeginPixEvent("Composition Render Pass", Colors::Bisque);
-		cmdList->SetViewport(OUT_Result->GetViewport());
-		cmdList->SetScissorRect(OUT_Result->GetScissorRect());
-		cmdList->SetGraphicsRootSignature(_compositionRS.get());
-		cmdList->SetPipelineState(_compositionPSO.Get());
-		cmdList->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-		cmdList->ResourceBarrier({ opaqueAccum->GetResource()->GetSRVBarrier(),
-		transparencyAccum->GetResource()->GetSRVBarrier(),
-		transparencyRevealage->GetResource()->GetSRVBarrier(),
-		OUT_Result->GetResource()->GetRenderTargetBarrier() });
-		cmdList->SetRenderTargets({ OUT_Result.get() }, nullptr);
-		cmdList->ClearRenderTargetView(OUT_Result.get());
-        auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-        const bool hasCamera = _commonData->ActiveCameraCBufferIndex < frame->CameraCB->GetElementCount();
-        if (_resources->Sky.Source == SkySource::SkyAtmosphere && (!hasCamera || _inputs.size() < 4))
-            throw std::invalid_argument("Aerial perspective composition requires active camera and opaque depth");
-        cmdList->SetGraphicsRootConstantBufferView(0, hasCamera ?
-            frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex) : frame->SkyCB->GetElementAddress(0));
-        cmdList->SetGraphicsRootConstantBufferView(1, frame->SkyCB->GetElementAddress(0));
-        if (_inputs.size() > 3)
         {
-            auto* depth = _inputs[3]->GetTexture();
-            cmdList->ResourceBarrier({ depth->GetResource()->GetSRVBarrier() });
-            cmdList->SetGraphicsSRV(3, depth->GetSRV()->GPUHandle);
+            GDX12_SCOPED_EVENT(cmdList, "Composition Render Pass", Colors::Bisque);
+            cmdList->SetViewport(OUT_Result->GetViewport());
+            cmdList->SetScissorRect(OUT_Result->GetScissorRect());
+            cmdList->SetGraphicsRootSignature(_compositionRS.get());
+            cmdList->SetPipelineState(_compositionPSO.Get());
+            cmdList->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
+            cmdList->ResourceBarrier({ opaqueAccum->GetResource()->GetSRVBarrier(),
+            transparencyAccum->GetResource()->GetSRVBarrier(),
+            transparencyRevealage->GetResource()->GetSRVBarrier(),
+            OUT_Result->GetResource()->GetRenderTargetBarrier() });
+            cmdList->SetRenderTargets({ OUT_Result.get() }, nullptr);
+            cmdList->ClearRenderTargetView(OUT_Result.get());
+            auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+            const bool hasCamera = _commonData->ActiveCameraCBufferIndex < frame->CameraCB->GetElementCount();
+            if (_resources->Sky.Source == SkySource::SkyAtmosphere && (!hasCamera || _inputs.size() < 4))
+                throw std::invalid_argument("Aerial perspective composition requires active camera and opaque depth");
+            cmdList->SetGraphicsRootConstantBufferView(0, hasCamera ?
+                frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex) : frame->SkyCB->GetElementAddress(0));
+            cmdList->SetGraphicsRootConstantBufferView(1, frame->SkyCB->GetElementAddress(0));
+            if (_inputs.size() > 3)
+            {
+                auto* depth = _inputs[3]->GetTexture();
+                cmdList->ResourceBarrier({ depth->GetResource()->GetSRVBarrier() });
+                cmdList->SetGraphicsSRV(3, depth->GetSRV()->GPUHandle);
+            }
+            else cmdList->SetGraphicsSRV(3, _resources->SkyTransmittanceSRV.GPUHandle);
+            cmdList->SetGraphicsSRV(4, _resources->SkyTransmittanceSRV.GPUHandle);
+            cmdList->SetGraphicsSRV(5, _resources->SkyAerialRadianceSRV.GPUHandle);
+            cmdList->SetGraphicsSRV(6, _resources->SkyAerialTransmittanceSRV.GPUHandle);
+            cmdList->SetGraphicsSRV(0, opaqueAccum->GetSRV()->GPUHandle);
+            cmdList->SetGraphicsSRV(1, transparencyAccum->GetSRV()->GPUHandle);
+            cmdList->SetGraphicsSRV(2, transparencyRevealage->GetSRV()->GPUHandle);
+            cmdList->GetCommandList()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            cmdList->GetCommandList()->DrawInstanced(3, 1, 0, 0);
         }
-        else cmdList->SetGraphicsSRV(3, _resources->SkyTransmittanceSRV.GPUHandle);
-        cmdList->SetGraphicsSRV(4, _resources->SkyTransmittanceSRV.GPUHandle);
-        cmdList->SetGraphicsSRV(5, _resources->SkyAerialRadianceSRV.GPUHandle);
-        cmdList->SetGraphicsSRV(6, _resources->SkyAerialTransmittanceSRV.GPUHandle);
-        cmdList->SetGraphicsSRV(0, opaqueAccum->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(1, transparencyAccum->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(2, transparencyRevealage->GetSRV()->GPUHandle);
-		cmdList->GetCommandList()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		cmdList->GetCommandList()->DrawInstanced(3, 1, 0, 0);
-		cmdList->EndPixEvent();
         if (_particles) _particles->Composite(cmdList, OUT_Result.get());
 	}
 

@@ -4,6 +4,13 @@
 class GDX12OutputToScreenPass final : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Tone map");
+        graph.Read(_inputs[0], D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+        graph.Write(_inputs[1], "Swapchain", Lifetime::Dynamic, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    }
+
     GDX12OutputToScreenPass() { _numInputs = 2; }
 
     // Linear HDR input, display UNORM back buffer. Encode once, after upscaling.
@@ -38,8 +45,9 @@ public:
     {
         auto* input = _inputs[0]->GetTexture();
         auto* output = _inputs[1]->GetTexture();
-        commands->BeginPixEvent("HDR tone map to display", Colors::Aqua);
-        commands->ResourceBarrier({ input->GetResource()->GetSRVBarrier(), output->GetResource()->GetRenderTargetBarrier() });
+        GDX12_SCOPED_EVENT(commands, "HDR tone map to display", Colors::Aqua);
+        // Full-screen overwrite still requires explicit initialization of placed render targets.
+        commands->GetCommandList()->DiscardResource(output->GetResource()->D3DResource.Get(), nullptr);
         commands->SetGraphicsRootSignature(_root.get());
         commands->SetPipelineState(_pipeline);
         commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
@@ -50,7 +58,6 @@ public:
         commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         commands->DrawInstanced(3, 1, 0, 0);
         commands->ResourceBarrier({ output->GetResource()->GetPresentBarrier() });
-        commands->EndPixEvent();
     }
 
     void ClearDenendencies() override

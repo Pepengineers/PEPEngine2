@@ -1,5 +1,6 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "xess/xess.h"
 #include "xess/xess_d3d12.h"
 #include <stdexcept>
@@ -31,19 +32,8 @@ public:
         auto* color = _inputs[2]->GetTexture();
         if (color->GetFormat() != DXGI_FORMAT_R16G16B16A16_FLOAT)
             throw std::invalid_argument("XeSS requires linear RGBA16F HDR input");
-        GDX12TextureDesc desc;
-        desc.Width = _commonData->WindowWidth;
-        desc.Height = _commonData->WindowHeight;
-        desc.Format = desc.SRVDesc.Format = desc.UAVDesc.Format = color->GetFormat();
-        desc.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
-        desc.SRVHeapIndex = desc.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-        desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        desc.SRVDesc.Texture2D.MipLevels = 1;
-        desc.CreateUAV = true;
-        desc.UAVHeapIndex = desc.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-        desc.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-        _output.Initialize(desc);
+        GDX12RenderHelpers::InitializeComputeTexture(_output, *_resources,
+            _commonData->WindowWidth, _commonData->WindowHeight, color->GetFormat());
     }
 
     void Execute(GDX12CommandList* commands) override
@@ -55,7 +45,7 @@ public:
             depth->GetWidth() != color->GetWidth() || depth->GetHeight() != color->GetHeight() ||
             motion->GetWidth() != color->GetWidth() || motion->GetHeight() != color->GetHeight())
             throw std::invalid_argument("XeSS color, depth and motion must share the render grid");
-        commands->BeginPixEvent("XeSS HDR Upscale", Colors::Blue);
+        GDX12_SCOPED_EVENT(commands, "XeSS HDR Upscale", Colors::Blue);
         commands->ResourceBarrier({ depth->GetResource()->GetNonPixelShaderResourceBarrier(),
             motion->GetResource()->GetNonPixelShaderResourceBarrier(), color->GetResource()->GetNonPixelShaderResourceBarrier(),
             _output.GetResource()->GetUnorderedAccessBarrier() });
@@ -79,7 +69,6 @@ public:
         _commonData->ResetUpscalerHistory = false;
         _commonData->ResetHistory = false;
         _historyRevision = _commonData->HistoryRevision;
-        commands->EndPixEvent();
     }
 
     void QueryRenderTargetResolution() override

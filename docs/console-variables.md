@@ -1,5 +1,7 @@
 # CVar и стартовая конфигурация
 
+`Render.Graph.ReuseTextures` (`bool`, по умолчанию `true`) включает переиспользование совместимых временных текстур render graph. Изменение во время работы дожидается GPU и пересобирает граф; `false` оставляет отдельные ресурсы для сравнения изображения и памяти. Подробности: [render graph](rendering/render-graph.md).
+
 Параметры AMD SSSR/Reflections Denoiser: [defaults, ranges, presets и runtime-поведение](sssr.md#runtime-controls).
 Runtime-параметры `Render.MotionBlur.*`, их единицы, ranges и независимость ручных
 overrides от Off/Low/Mid/High описаны в [motion-blur.md](motion-blur.md#runtime-cvars).

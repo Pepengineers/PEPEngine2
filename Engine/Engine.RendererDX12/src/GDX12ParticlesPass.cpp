@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12Particles.h"
 #include <algorithm>
 #include <cmath>
@@ -182,11 +183,7 @@ struct GDX12ParticlesPass::State
     void CompileCompute(GDX12DeviceResources* resources, const char* file, const char* entry, GDX12RootSignature* root)
     {
         const std::wstring path = std::wstring(SHADERS_FOLDER) + StringToWString(file);
-        auto shader = GDX12ShaderCompiler::GetInstance().CompileShader(resources->Device, path, nullptr, entry, "cs");
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = root->GetRootSignature().Get();
-        desc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
-        ThrowIfFailed(resources->Device->GetDevice()->CreateComputePipelineState(&desc, IID_PPV_ARGS(&Compute[entry])));
+        Compute[entry] = GDX12RenderHelpers::CreateComputePipeline(resources->Device, root, path.c_str(), entry);
     }
 
     void InitializeSort(GDX12DeviceResources* resources)
@@ -411,7 +408,7 @@ void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
         state.MotionTexture = std::make_unique<GDX12Texture>();
         state.MotionTexture->Initialize(desc);
     }
-    commands->BeginPixEvent("GPU particles", Colors::Orange);
+    GDX12_SCOPED_EVENT(commands, "GPU particles", Colors::Orange);
     commands->SetComputeRootSignature(state.Root.get());
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
@@ -568,7 +565,6 @@ void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
     for (UINT mode = 0; mode < 3; ++mode) state.Draw(commands, _resources, _commonData, mode);
     commands->ResourceBarrier({ state.MotionTexture->GetResource()->GetSRVBarrier() });
     _resources->ParticleMotion = state.MotionTexture.get();
-    commands->EndPixEvent();
 }
 
 void GDX12ParticlesPass::Composite(GDX12CommandList* commands, GDX12Texture* hdr)
@@ -576,7 +572,7 @@ void GDX12ParticlesPass::Composite(GDX12CommandList* commands, GDX12Texture* hdr
     if (!_state || !_state->Active) return;
     auto& state = *_state;
     auto* depth = _inputs[0]->GetTexture();
-    commands->BeginPixEvent("Sorted and additive HDR particles", Colors::Orange);
+    GDX12_SCOPED_EVENT(commands, "Sorted and additive HDR particles", Colors::Orange);
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     commands->ResourceBarrier({ hdr->GetResource()->GetRenderTargetBarrier(), depth->GetResource()->GetSRVBarrier() });
     commands->SetViewport(hdr->GetViewport());
@@ -591,7 +587,6 @@ void GDX12ParticlesPass::Composite(GDX12CommandList* commands, GDX12Texture* hdr
     }
     commands->SetPipelineState(state.Additive);
     state.Draw(commands, _resources, _commonData, 1);
-    commands->EndPixEvent();
 }
 
 void GDX12ParticlesPass::Resize()

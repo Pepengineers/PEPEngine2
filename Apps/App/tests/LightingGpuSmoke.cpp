@@ -184,10 +184,19 @@ int main()
         ao.Initialize();
         GDX12DeferredLightingPass deferred;
         deferred.Setup(&resources, nullptr, &common);
-        deferred.SetInputs({ opaque.GetOutput(0), opaque.GetOutput(3), opaque.GetOutput(4), opaque.GetOutput(5),
+        const std::vector<IRenderPassLink*> lightingInputs = { opaque.GetOutput(0), opaque.GetOutput(3), opaque.GetOutput(4), opaque.GetOutput(5),
             opaque.GetOutput(2), shadows.GetOutput(0), environment.GetOutput(0), environment.GetOutput(1),
-            environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0), ao.GetOutput(0) });
+            environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0), ao.GetOutput(0) };
+        deferred.SetInputs(lightingInputs);
         deferred.Initialize();
+        GDX12RenderGraph lightingGraph(&device);
+        lightingGraph.ImportShared(GDX12RenderGraph::SharedResource::Scene, "Scene");
+        lightingGraph.ImportShared(GDX12RenderGraph::SharedResource::Environment, "Atmosphere");
+        lightingGraph.ImportShared(GDX12RenderGraph::SharedResource::ReflectionProbes, "Probes");
+        for (auto* input : lightingInputs) lightingGraph.ImportLink("Lighting input", input);
+        lightingGraph.ImportLink("HDR readback", deferred.GetOutput(0));
+        lightingGraph.AddPass(deferred);
+        lightingGraph.Compile(false);
         GDX12GPUCullingPass culling;
         culling.Setup(&resources, nullptr, &common);
         GDX12WBOITTransparencyPass transparency;
@@ -407,7 +416,7 @@ int main()
                 list->ClearUnorderedAccessViewFloat(aoTexture->GetUAV()->GPUHandle, clearAO.CPUHandle,
                     aoTexture->GetResource()->D3DResource.Get(), values);
             }
-            deferred.Execute(list);
+            lightingGraph.Execute(list);
             transparency.Execute(list);
             queue->ExecuteCommandList(list);
             queue->Flush();

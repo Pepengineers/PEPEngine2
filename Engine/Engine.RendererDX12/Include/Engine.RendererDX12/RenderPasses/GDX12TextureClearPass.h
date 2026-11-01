@@ -10,9 +10,9 @@ public:
 
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
 	{
-		_inputs = inputs;
 		_numOutputs = 0;
 		_numInputs = static_cast<UINT>(inputs.size());
+		GDX12RenderPass::SetInputs(std::move(inputs));
 	}
 
 	// Input N - TextureToClear
@@ -25,7 +25,7 @@ public:
 	// Clears all textures if they have either DSVs or RTVs
 	void Execute(GDX12CommandList* cmdList) override
 	{
-		cmdList->BeginPixEvent("Texture clear pass", Colors::ForestGreen);
+		GDX12_SCOPED_EVENT(cmdList, "Texture clear pass", Colors::ForestGreen);
 		for (UINT i = 0; i < _numInputs; i++)
 		{
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
@@ -45,7 +45,6 @@ public:
 				continue;
 			}
 		}
-		cmdList->EndPixEvent();
 	}
 
 	void ClearDenendencies() override

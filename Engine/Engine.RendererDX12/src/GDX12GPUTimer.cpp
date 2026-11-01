@@ -41,13 +41,10 @@ void GDX12GPUTimer::Initialize(GDX12Device* device)
 
     ThrowIfFailed(device->GetDevice()->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&_queryHeap)));
 
-    CD3DX12_HEAP_PROPERTIES readbackHeapProperties(D3D12_HEAP_TYPE_READBACK);
     CD3DX12_RESOURCE_DESC readbackBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(UINT64) * BufferedFrameCount * QueryCount);
 
-    ThrowIfFailed(device->GetDevice()->CreateCommittedResource(
-        &readbackHeapProperties, D3D12_HEAP_FLAG_NONE,
-        &readbackBufferDesc, D3D12_RESOURCE_STATE_COPY_DEST,
-        nullptr, IID_PPV_ARGS(&_readbackBuffer)));
+    _readbackBuffer = device->CreateResource(D3D12_HEAP_TYPE_READBACK, readbackBufferDesc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr);
 
     ThrowIfFailed(_readbackBuffer->Map(0, nullptr, reinterpret_cast<void**>(&_mappedReadbackData)));
 }

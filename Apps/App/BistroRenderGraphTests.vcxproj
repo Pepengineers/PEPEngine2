@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="App.vcxproj" />
+  <PropertyGroup>
+    <ProjectGuid>{EC773A8E-DCE2-45B7-93E2-CBC374E3B1F9}</ProjectGuid>
+  </PropertyGroup>
+  <ItemGroup>
+    <ClCompile Remove="src\App.cpp" />
+    <ClCompile Include="tests\BistroRenderGraphTests.cpp" />
+  </ItemGroup>
+  <ItemDefinitionGroup>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+</Project>

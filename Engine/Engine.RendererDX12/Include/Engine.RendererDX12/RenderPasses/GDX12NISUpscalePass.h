@@ -1,5 +1,6 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 #include <stdexcept>
@@ -10,13 +11,12 @@ class GDX12NISUpscalePass : public GDX12RenderPass
 public:
 	explicit GDX12NISUpscalePass(float ratio = 1.5f) : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _viewportHandle(1337),
 		_sharpness(0.1f), _ratio(ratio)
-	{ _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_STREAMLINE; }
+	{ _numInputs = 2; _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_STREAMLINE; }
 
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
 	{
-		_inputs = inputs;
-		_numInputs = 2;
-		MatchOutputCount(inputs.size() > 2 ? static_cast<UINT>(inputs.size() - 2) : 0);
+		GDX12RenderPass::SetInputs(std::move(inputs));
+		MatchOutputCount(_inputs.size() > 2 ? static_cast<UINT>(_inputs.size() - 2) : 0);
 	}
 
 	IRenderPassLink* GetOutput(UINT index) override
@@ -36,31 +36,14 @@ public:
 		IN_DepthBuffer = _inputs[0];
 		IN_MotionVectors = _inputs[1];
 
-		GDX12TextureDesc TextureDesc1;
-		TextureDesc1.Width = _commonData->WindowWidth;
-		TextureDesc1.Height = _commonData->WindowHeight;
+        IN_Textures.resize(_numOutputs);
+        for (UINT i = 0; i < _numOutputs; ++i)
+        {
+            IN_Textures[i] = _inputs[i + 2];
+            GDX12RenderHelpers::InitializeComputeTexture(*OUT_UpscaledTextures[i], *_resources,
+                _commonData->WindowWidth, _commonData->WindowHeight, IN_Textures[i]->GetTexture()->GetFormat());
+        }
 
-		TextureDesc1.CreateSRV = true;
-        TextureDesc1.CreateUAV = true;
-        TextureDesc1.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-		TextureDesc1.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
-		TextureDesc1.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-		TextureDesc1.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-		TextureDesc1.SRVDesc.Texture2D.MipLevels = 1;
-		TextureDesc1.SRVDesc.Texture2D.MostDetailedMip = 0;
-		TextureDesc1.SRVDesc.Texture2D.PlaneSlice = 0;
-		TextureDesc1.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
-
-		IN_Textures.resize(_numOutputs);
-		for (UINT i = 0; i < _numOutputs; i++)
-		{
-			IN_Textures[i] = _inputs[i + 2];
-			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
-			TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = TextureDesc1.UAVDesc.Format = inputTexture->GetFormat();
-            TextureDesc1.UAVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-			TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-			OUT_UpscaledTextures[i]->Initialize(TextureDesc1);
-		}
 	}
 
 	void Setup(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData) override
@@ -76,7 +59,7 @@ public:
 	{
 		using namespace sl;
 
-		cmdList->BeginPixEvent("NIS Upscale Pass", Colors::Blue);
+		GDX12_SCOPED_EVENT(cmdList, "NIS Upscale Pass", Colors::Blue);
 
 		FrameToken* currentFrame = _commonData->StreamlineFrame;
         Result result = currentFrame ? Result::eOk : GDX12StreamlineSDK::Get().GetNewFrameToken(currentFrame);
@@ -135,7 +118,6 @@ public:
             cmdList->ResourceBarrier({ upscaledTexture->GetResource()->GetUAVBarrier() });
 		}
 
-		cmdList->EndPixEvent();
 	}
 
 	void Resize() override

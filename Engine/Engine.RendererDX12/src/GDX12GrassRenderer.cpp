@@ -360,7 +360,7 @@ void GDX12GrassRenderer::UpdateWind(GDX12CommandList* commands, WindState& state
         state.Divergence = Buffer<XMFLOAT4>(p.Resolution * p.Resolution, true, true);
         state.Resolution = p.Resolution;
     }
-    commands->BeginPixEvent("Wind advection and projection", Colors::DarkCyan);
+    GDX12_SCOPED_EVENT(commands, "Wind advection and projection", Colors::DarkCyan);
     if (reset || !state.Initialized)
     {
         for (auto& buffer : state.Velocity) WindDispatch(commands, 0, p, nullptr, nullptr, buffer.get());
@@ -387,7 +387,6 @@ void GDX12GrassRenderer::UpdateWind(GDX12CommandList* commands, WindState& state
         }
         WindDispatch(commands, 4, p, state.Advected.get(), state.Pressure[read].get(), state.Velocity[0].get());
     }
-    commands->EndPixEvent();
 }
 
 bool GDX12GrassRenderer::GetBounds(BoundingBox& bounds) const
@@ -418,7 +417,7 @@ void GDX12GrassRenderer::Draw(GDX12CommandList* commands, Stage stage, const Mat
 {
     if (_drawOrder.empty()) return;
     if (stage == Stage::Capture && (!lighting || !camera)) throw std::invalid_argument("Grass capture requires lighting and camera");
-    commands->BeginPixEvent(stage == Stage::Shadow ? "Grass shadow expansion and draw" : "Grass expansion and draw", Colors::ForestGreen);
+    GDX12_SCOPED_EVENT(commands, stage == Stage::Shadow ? "Grass shadow expansion and draw" : "Grass expansion and draw", Colors::ForestGreen);
     auto& frame = CurrentFrame();
     auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     for (const auto id : _drawOrder)
@@ -515,5 +514,4 @@ void GDX12GrassRenderer::Draw(GDX12CommandList* commands, Stage stage, const Mat
     }
     // IA was set directly; the following mesh pass must bind its own geometry again.
     commands->InvalidateCachedState();
-    commands->EndPixEvent();
 }

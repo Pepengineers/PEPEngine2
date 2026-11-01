@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="Source Files">
@@ -15,6 +15,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderHelpers.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Reconstruction.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameGeneration.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReconstructionPass.h"><Filter>Header Files</Filter></ClInclude>
@@ -92,6 +93,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12RenderPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FrameGenerationPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GPUCullingPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -143,6 +147,8 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\GDX12RenderPass.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\GDX12RenderHelpers.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12Reconstruction.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12FrameGeneration.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12ReconstructionPass.cpp"><Filter>Source Files</Filter></ClCompile>
@@ -243,5 +249,13 @@
     <ClCompile Include="src\GDX12Skinning.cpp" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Skinning.h" />
     <None Include="Shaders\Skinning.hlsl" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12ResourceHandle.h"><Filter>Header Files</Filter></ClInclude>
+    <ClCompile Include="..\..\External\External.Libraries\D3D12MemoryAllocator\src\D3D12MemAlloc.cpp"><Filter>Source Files</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGraph.h"><Filter>Header Files</Filter></ClInclude>
+    <ClCompile Include="src\GDX12RenderGraph.cpp"><Filter>Source Files</Filter></ClCompile>
   </ItemGroup>
 </Project>

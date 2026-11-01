@@ -83,13 +83,12 @@ void GDX12CloudComponent::CreateResources()
     pipeline.pRootSignature = _root->GetRootSignature().Get();
     pipeline.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
     ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(&pipeline, IID_PPV_ARGS(&_pipeline)));
-    const auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
     // shortcut: one source mip can alias extreme noise scales; add filtered mips if GPU inspection requires it.
     const auto resource = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT,
         256, 256, 6, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     GDX12TextureDesc desc;
-    ThrowIfFailed(_resources->Device->GetDevice()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE,
-        &resource, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&desc.ExternalResource)));
+    desc.ExternalResource = _resources->Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, resource,
+        D3D12_RESOURCE_STATE_COMMON, nullptr);
     desc.Width = desc.Height = 256;
     desc.Format = desc.SRVDesc.Format = desc.UAVDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     desc.Semantic = ETextureSemantic::Color;
@@ -134,7 +133,7 @@ void GDX12CloudComponent::Execute(GDX12CommandList* commands)
         _parameters.Scale, _parameters.Coverage, _parameters.Softness, 0,
         _parameters.HorizonColor, static_cast<float>(_phaseX), _parameters.ZenithColor,
         static_cast<float>(_phaseY), _parameters.CloudColor, 0 };
-    commands->BeginPixEvent("Procedural 2D clouds", Colors::CornflowerBlue);
+    GDX12_SCOPED_EVENT(commands, "Procedural 2D clouds", Colors::CornflowerBlue);
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     commands->SetComputeRootSignature(_root.get());
     commands->SetPipelineState(_pipeline);
@@ -143,7 +142,6 @@ void GDX12CloudComponent::Execute(GDX12CommandList* commands)
     commands->ResourceBarrier({ _texture->GetResource()->GetUnorderedAccessBarrier() });
     commands->Dispatch(32, 32, 6);
     commands->ResourceBarrier({ _texture->GetResource()->GetSRVBarrier() });
-    commands->EndPixEvent();
     _renderedRevision = _lightingRevision;
 }
 

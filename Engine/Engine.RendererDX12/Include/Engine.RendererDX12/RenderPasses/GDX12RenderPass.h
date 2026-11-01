@@ -10,6 +10,7 @@
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/IRenderPassLink.h"
+#include "Engine.RendererDX12/GDX12RenderGraph.h"
 
 class GameTimer;
 namespace sl { struct FrameToken; }
@@ -45,6 +46,7 @@ public:
     };
     virtual void Resize() {};
     virtual void Execute(GDX12CommandList* cmdList) {};
+    virtual void RecordRenderGraph(GDX12RenderGraphBuilder& builder);
     // Used by upscalers to determine downscaled render target size
     // And share it with all other passes
     virtual void QueryRenderTargetResolution() {};
@@ -66,14 +68,12 @@ public:
     bool GetFlagValue(uint32_t flag) { return _flags & flag; }
 
     void SetInputs(std::initializer_list<IRenderPassLink*> inputs) { SetInputs(std::vector<IRenderPassLink*>(inputs)); }
-    virtual void SetInputs(std::vector<IRenderPassLink*> inputs)
-    {
-        if (inputs.size() < _numInputs) { OutputDebugStringA("ERROR: Not enough inputs provided into render pass\n"); }
-        _inputs = inputs;
-    }
+    virtual void SetInputs(std::vector<IRenderPassLink*> inputs);
+    static void InitializeAll(std::vector<GDX12RenderPass*> passes);
     // returns true if all inputs are initialized
     bool ValidateInputs()
     {
+        if (_inputs.size() < _numInputs) return false;
         for (auto* input : _inputs)
         {
             if (!input)
@@ -98,6 +98,8 @@ public:
     UINT GetNumOutputs() { return _numOutputs; }
 
 protected:
+    using SharedResource = GDX12RenderGraph::SharedResource;
+    using Lifetime = GDX12RenderGraph::Lifetime;
     // This will define which resources will be loaded onto respective GPU
     // For example: if no RenderPasses has USE_TEXTURES, then GPU texture upload
     // will be skipped entirely for this GPU

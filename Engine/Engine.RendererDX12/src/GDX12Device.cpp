@@ -40,11 +40,16 @@ HRESULT GDX12Device::Initialize(ComPtr<IDXGIAdapter4> adapter)
             break; 
         }
     }
-    if (FAILED(hr)) { OutputDebugStringA("ERROR: FAILED TO CREATE DX12DEVICE\n"); }
+    if (FAILED(hr)) { OutputDebugStringA("ERROR: FAILED TO CREATE DX12DEVICE\n"); return hr; }
 
     _proxyDevice = GDX12StreamlineSDK::Get().CreateProxyDevice(_device, Role == DEVICE_ROLE_PRIMARY);
     _device = GDX12StreamlineSDK::Get().GetNativeDevice(_proxyDevice ? _proxyDevice : _device);
     CollectDeviceFeatures();
+
+    D3D12MA::ALLOCATOR_DESC allocatorDesc = {};
+    allocatorDesc.pDevice = _device.Get();
+    allocatorDesc.pAdapter = _adapter.Get();
+    ThrowIfFailed(D3D12MA::CreateAllocator(&allocatorDesc, &_allocator));
 
     _commandQueue = std::make_unique<GDX12CommandQueue>(this);
 
@@ -75,6 +80,7 @@ void GDX12Device::CollectDeviceFeatures()
 void GDX12Device::Reset()
 {
     _commandQueue.reset();
+    _allocator.Reset();
     _proxyDevice.Reset();
     _device.Reset();
     _adapter.Reset();
@@ -115,4 +121,15 @@ LUID GDX12Device::GetAdapterLuid() const
 const bool GDX12Device::IsInitialized()
 {
     return _isInitialized;
+}
+
+GDX12ResourceHandle GDX12Device::CreateResource(D3D12_HEAP_TYPE heapType, const D3D12_RESOURCE_DESC& desc,
+    D3D12_RESOURCE_STATES initialState, const D3D12_CLEAR_VALUE* clearValue)
+{
+    D3D12MA::ALLOCATION_DESC allocationDesc = {};
+    allocationDesc.HeapType = heapType;
+    ComPtr<D3D12MA::Allocation> allocation;
+    ThrowIfFailed(_allocator->CreateResource(&allocationDesc, &desc, initialState, clearValue,
+        &allocation, IID_NULL, nullptr));
+    return GDX12ResourceHandle(_allocator, std::move(allocation));
 }

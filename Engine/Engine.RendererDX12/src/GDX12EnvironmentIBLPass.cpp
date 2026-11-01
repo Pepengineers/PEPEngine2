@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.Core/AssetManager.h"
 #include <cstring>
 #include <cmath>
@@ -47,22 +48,15 @@ void GDX12EnvironmentIBLPass::Initialize()
     sky.NumSingleUAVSlots = 4;
     sky.StaticSamplers = filter.StaticSamplers;
     _skyRoot = std::make_unique<GDX12RootSignature>(_resources->Device, sky);
-    const auto compile = [&](const wchar_t* file, const char* entry, const D3D_SHADER_MACRO* defines,
-        GDX12RootSignature* root, ComPtr<ID3D12PipelineState>& pipeline)
-    {
-        auto shader = GDX12ShaderCompiler::GetInstance().CompileShader(_resources->Device, file, defines, entry, "cs");
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = root->GetRootSignature().Get();
-        desc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
-        ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline)));
-    };
     const D3D_SHADER_MACRO defines[] = { { "GLOBAL_SKY_FILTER", "1" }, { nullptr, nullptr } };
     const char* filters[] = { "IrradianceCS", "PrefilterCS", "IntegrateBRDFCS" };
     for (UINT i = 0; i < 3; ++i)
-        compile(SHADERS_FOLDER "EnvironmentIBL.hlsl", filters[i], defines, _filterRoot.get(), _filters[i]);
+        _filters[i] = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _filterRoot.get(),
+            SHADERS_FOLDER "EnvironmentIBL.hlsl", filters[i], defines);
     const char* entries[] = { "TransmittanceCS", "MultipleScatteringCS", "SkyViewCS", "AerialCS", "SourceCubeCS" };
     for (UINT i = 0; i < 5; ++i)
-        compile(SHADERS_FOLDER "SkyAtmosphere.hlsl", entries[i], nullptr, _skyRoot.get(), _skyPipelines[i]);
+        _skyPipelines[i] = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _skyRoot.get(),
+            SHADERS_FOLDER "SkyAtmosphere.hlsl", entries[i]);
 }
 
 void GDX12EnvironmentIBLPass::Invalidate() { _invalidated = true; }
@@ -78,15 +72,14 @@ void GDX12EnvironmentIBLPass::SetCloudSource(GDX12CloudComponent* source)
 void GDX12EnvironmentIBLPass::CreateTexture(GDX12Texture& texture, UINT width, UINT height, UINT depth, UINT mips, bool cube)
 {
     // Every replacement and descriptor rewrite is preceded by a queue drain in Ensure*.
-    const auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
     const auto resource = depth > 1 && !cube ?
         CD3DX12_RESOURCE_DESC::Tex3D(DXGI_FORMAT_R16G16B16A16_FLOAT, width, height, static_cast<UINT16>(depth), 1,
             D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) :
         CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT, width, height, cube ? 6 : 1,
             static_cast<UINT16>(mips), 1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     GDX12TextureDesc desc;
-    ThrowIfFailed(_resources->Device->GetDevice()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE,
-        &resource, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&desc.ExternalResource)));
+    desc.ExternalResource = _resources->Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, resource,
+        D3D12_RESOURCE_STATE_COMMON, nullptr);
     desc.Width = width;
     desc.Height = height;
     desc.Format = desc.SRVDesc.Format = desc.UAVDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
@@ -330,7 +323,7 @@ void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
         _boxAsset.clear();
     }
     if (!changed && state.Source != SkySource::SkyAtmosphere) return;
-    commands->BeginPixEvent("Sky source and atmosphere LUTs", Colors::CornflowerBlue);
+    GDX12_SCOPED_EVENT(commands, "Sky source and atmosphere LUTs", Colors::CornflowerBlue);
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     BindSky(commands, state.Source == SkySource::SkyAtmosphere ? 1 : 0);
     if (state.Source == SkySource::SkyAtmosphere)
@@ -384,7 +377,6 @@ void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
             commands->ResourceBarrier({ _luts[3]->GetResource()->GetSRVBarrier(), _luts[4]->GetResource()->GetSRVBarrier() });
         }
     }
-    commands->EndPixEvent();
     _revision = state.Revision;
     _quality = state.Quality;
     _source = state.Source;
@@ -429,9 +421,8 @@ void GDX12EnvironmentIBLPass::ClearDenendencies()
         desc.SRVDesc.TextureCube.MipLevels = source->GetMipLevels();
         const auto textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(desc.Format, desc.Width, desc.Height,
             6, static_cast<UINT16>(source->GetMipLevels()));
-        const auto defaultHeap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-        ThrowIfFailed(_resources->Device->GetDevice()->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,
-            &textureDesc, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&desc.ExternalResource)));
+        desc.ExternalResource = _resources->Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, textureDesc,
+            D3D12_RESOURCE_STATE_COMMON, nullptr);
         _boxTexture->Initialize(desc);
 
         const UINT count = static_cast<UINT>(source->GetSubresourceCount());
@@ -447,11 +438,9 @@ void GDX12EnvironmentIBLPass::ClearDenendencies()
             if (data.RowPitch < rowBytes[i] || data.Data.size() < data.RowPitch * (rows[i] - 1) + rowBytes[i])
                 throw std::runtime_error("Environment cubemap has incomplete subresource data: " + path.string());
         }
-        const auto uploadHeap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_UPLOAD);
         const auto uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBytes);
-        ComPtr<ID3D12Resource> upload;
-        ThrowIfFailed(_resources->Device->GetDevice()->CreateCommittedResource(&uploadHeap, D3D12_HEAP_FLAG_NONE,
-            &uploadDesc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&upload)));
+        auto upload = _resources->Device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, uploadDesc,
+            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr);
         void* mapped = nullptr;
         const D3D12_RANGE noRead = { 0, 0 };
         ThrowIfFailed(upload->Map(0, &noRead, &mapped));

@@ -8,6 +8,14 @@ struct FFX_CACAO_D3D12Context;
 class GDX12AmbientOcclusionPass final : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Ambient occlusion");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs);
+        graph.Write(_outputs[0], "Ambient occlusion", Lifetime::Dynamic);
+    }
+
     GDX12AmbientOcclusionPass();
     ~GDX12AmbientOcclusionPass() override;
     void Initialize() override;

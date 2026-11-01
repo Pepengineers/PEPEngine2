@@ -203,6 +203,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
             for (int frame = 1; frame < benchmarkFrames; ++frame) app.BenchmarkFrame();
             BenchmarkEngine::GetLocator().GetModule<RenderModule>()->WaitForUploads();
             const auto sampled = std::chrono::steady_clock::now();
+            auto renderer = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+            const auto gpuMemory = renderer->GetMemoryStatistics();
+            const auto graph = renderer->GetRenderGraphStatistics();
+            std::ofstream graphOutput(benchmarkOutput.wstring() + L".dot");
+            renderer->WriteRenderGraph(graphOutput);
             PROCESS_MEMORY_COUNTERS_EX memory = {};
             memory.cb = sizeof(memory);
             if (!GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory)))
@@ -220,6 +225,16 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
                 << ",\n  \"max_texture_tasks\": " << LastLoadingMeasurements.MaxTextureTasks
                 << ",\n  \"sampled_frames\": " << benchmarkFrames - 1
                 << ",\n  \"frame_ms\": " << (benchmarkFrames > 1 ? std::chrono::duration<double, std::milli>(sampled - ready).count() / (benchmarkFrames - 1) : 0)
+                << ",\n  \"graph_passes\": " << graph.Passes
+                << ",\n  \"graph_culled_passes\": " << graph.CulledPasses
+                << ",\n  \"graph_logical_textures\": " << graph.TransientTextures
+                << ",\n  \"graph_physical_textures\": " << graph.PhysicalTextures
+                << ",\n  \"graph_logical_bytes\": " << graph.LogicalBytes
+                << ",\n  \"graph_physical_bytes\": " << graph.PhysicalBytes
+                << ",\n  \"gpu_allocation_count\": " << gpuMemory.AllocationCount
+                << ",\n  \"gpu_block_count\": " << gpuMemory.BlockCount
+                << ",\n  \"gpu_allocation_bytes\": " << gpuMemory.AllocationBytes
+                << ",\n  \"gpu_block_bytes\": " << gpuMemory.BlockBytes
                 << ",\n  \"working_set_bytes\": " << memory.WorkingSetSize
                 << ",\n  \"private_bytes\": " << memory.PrivateUsage
                 << ",\n  \"peak_working_set_bytes\": " << memory.PeakWorkingSetSize

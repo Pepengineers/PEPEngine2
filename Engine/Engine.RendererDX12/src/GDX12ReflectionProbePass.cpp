@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12ReflectionProbePass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -153,30 +154,16 @@ void GDX12ReflectionProbePass::Initialize()
     graphics("VS", "PS", false, false, _capturePSO);
     graphics("SkyVS", "SkyPS", false, true, _skyPSO);
     graphics("ShadowVS", "ShadowPS", true, false, _shadowPSO);
-    const auto compute = [&](const wchar_t* path, const char* entry, D3D_SHADER_MACRO* defines,
-        GDX12RootSignature* root, ComPtr<ID3D12PipelineState>& pipeline)
-    {
-        auto shader = compiler.CompileShader(_resources->Device, path, defines, entry, "cs");
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = root->GetRootSignature().Get();
-        desc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
-        ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline)));
-    };
     D3D_SHADER_MACRO culling[] = { { "PROBE_CULLING", "1" }, { nullptr, nullptr } };
-    compute(SHADERS_FOLDER "ReflectionCapture.hlsl", "CullCS", culling, _cullRoot.get(), _cullPSO);
-    compute(SHADERS_FOLDER "ReflectionCapture.hlsl", "ClearCS", culling, _cullRoot.get(), _clearPSO);
+    _cullPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _cullRoot.get(),
+        SHADERS_FOLDER "ReflectionCapture.hlsl", "CullCS", culling);
+    _clearPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _cullRoot.get(),
+        SHADERS_FOLDER "ReflectionCapture.hlsl", "ClearCS", culling);
     D3D_SHADER_MACRO filtering[] = { { "LOCAL_PROBE_FILTER", "1" }, { nullptr, nullptr } };
-    compute(SHADERS_FOLDER "EnvironmentIBL.hlsl", "PrefilterCS", filtering, _filterRoot.get(), _filterPSO);
-    D3D12_INDIRECT_ARGUMENT_DESC arguments[2] = {};
-    arguments[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
-    arguments[0].Constant.Num32BitValuesToSet = 1;
-    arguments[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
-    D3D12_COMMAND_SIGNATURE_DESC signature = {};
-    signature.ByteStride = sizeof(GDX12IndirectDrawArgs);
-    signature.NumArgumentDescs = 2;
-    signature.pArgumentDescs = arguments;
-    ThrowIfFailed(_resources->Device->GetDevice()->CreateCommandSignature(&signature,
-        _captureRoot->GetRootSignature().Get(), IID_PPV_ARGS(&_signature)));
+    _filterPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _filterRoot.get(),
+        SHADERS_FOLDER "EnvironmentIBL.hlsl", "PrefilterCS", filtering);
+    _signature = GDX12RenderHelpers::CreateIndexedDrawSignature(_resources->Device, _captureRoot.get());
+
     _frames.resize(_resources->FrameConstants.size());
     for (auto& frame : _frames)
     {
@@ -190,7 +177,6 @@ void GDX12ReflectionProbePass::Initialize()
 void GDX12ReflectionProbePass::CreateTexture(GDX12Texture& texture, UINT size, UINT slices, UINT mips,
     D3D12_RESOURCE_FLAGS flags, bool depth)
 {
-    const auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
     const DXGI_FORMAT format = depth ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_R16G16B16A16_FLOAT;
     const auto resource = CD3DX12_RESOURCE_DESC::Tex2D(format, size, size,
         static_cast<UINT16>(slices), static_cast<UINT16>(mips), 1, 0, flags);
@@ -198,8 +184,8 @@ void GDX12ReflectionProbePass::CreateTexture(GDX12Texture& texture, UINT size, U
     clear.Format = depth ? DXGI_FORMAT_D32_FLOAT : format;
     GDX12TextureDesc desc;
     const bool clearable = (flags & (D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)) != 0;
-    ThrowIfFailed(_resources->Device->GetDevice()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE,
-        &resource, D3D12_RESOURCE_STATE_COMMON, clearable ? &clear : nullptr, IID_PPV_ARGS(&desc.ExternalResource)));
+    desc.ExternalResource = _resources->Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, resource,
+        D3D12_RESOURCE_STATE_COMMON, clearable ? &clear : nullptr);
     desc.Width = desc.Height = size;
     desc.Format = depth ? DXGI_FORMAT_R32_FLOAT : format;
     desc.CreateSRV = &texture == &_sunShadow;
@@ -297,6 +283,7 @@ void GDX12ReflectionProbePass::CreateCaptureTextures(UINT resolution)
         CreateTexture(_sunShadow, 1024, 1, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, true);
         _sunShadow.GetResource()->D3DResource->SetName(L"Reflection sun shadow");
         CreateFaceViews(_sunShadow, _sunDSV, true);
+        _sunShadowNeedsClear = true;
     }
     _filterUAVs.clear();
     _rawMipSRVs.clear();
@@ -398,6 +385,12 @@ void GDX12ReflectionProbePass::BindCapture(GDX12CommandList* commands, UINT face
 
 void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, Geometry geometry)
 {
+    if (_sunShadowNeedsClear)
+    {
+        commands->ResourceBarrier({ _sunShadow.GetResource()->GetDepthWriteBarrier() });
+        commands->GetCommandList()->ClearDepthStencilView(_sunDSV[0]->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
+        _sunShadowNeedsClear = false;
+    }
     if ((_resources->Lighting.SunShadowFlags & 1u) == 0)
     {
         commands->ResourceBarrier({ _sunShadow.GetResource()->GetSRVBarrier() });
@@ -636,7 +629,7 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
     for (UINT face = 0; face < 6; ++face) frame.Cameras->CopyData(face, FaceCamera(state.Source, face, _resolution));
     frame.Shadow->CopyData(0, ProbeSunShadow(*_resources));
-    commands->BeginPixEvent("Local reflection capture and GGX", Colors::MediumPurple);
+    GDX12_SCOPED_EVENT(commands, "Local reflection capture and GGX", Colors::MediumPurple);
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     const UINT endFace = (std::min)(6u, _face + state.Source.FacesPerFrame);
     if (state.Source.Implementation == 1 && state.BakedFaces != 63)
@@ -671,7 +664,6 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
         _activeProbe = (_activeProbe + 1) % static_cast<UINT>(_probes.size());
         _face = 0;
     }
-    commands->EndPixEvent();
     WriteProbeData(true);
 }
 

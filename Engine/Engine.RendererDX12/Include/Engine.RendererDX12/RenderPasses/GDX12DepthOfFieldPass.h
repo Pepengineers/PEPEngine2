@@ -4,6 +4,14 @@
 class GDX12DepthOfFieldPass final : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Depth of field");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs);
+        graph.Write(_outputs[0], "DoF HDR");
+    }
+
     GDX12DepthOfFieldPass();
     ~GDX12DepthOfFieldPass() override;
     // Input 0: linear RGBA16F HDR. Input 1: matching reverse-Z depth. Output 0: RGBA16F HDR.

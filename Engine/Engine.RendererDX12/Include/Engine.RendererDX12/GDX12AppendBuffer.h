@@ -28,9 +28,9 @@ private:
     void CreateBuffers();
 
     GDX12Device* _device;
-    ComPtr<ID3D12Resource> _buffer;
-    ComPtr<ID3D12Resource> _counterBuffer;
-    ComPtr<ID3D12Resource> _readbackBuffer;
+    GDX12ResourceHandle _buffer;
+    GDX12ResourceHandle _counterBuffer;
+    GDX12ResourceHandle _readbackBuffer;
 
     UINT _maxElementCount;
     UINT _elementSize;
@@ -58,17 +58,14 @@ void GDX12AppendBuffer<T>::CreateBuffers()
     D3D12_RESOURCE_DESC bufferDesc = CD3DX12_RESOURCE_DESC::Buffer(_totalBufferSize);
     bufferDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
-    CD3DX12_HEAP_PROPERTIES defaultHeap(D3D12_HEAP_TYPE_DEFAULT);
-    ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(
-        &defaultHeap, D3D12_HEAP_FLAG_NONE, &bufferDesc,
-        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&_buffer)));
+    _buffer = _device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, bufferDesc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr);
 
     auto counterDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(UINT),
         D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 
-    ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(
-        &defaultHeap, D3D12_HEAP_FLAG_NONE, &counterDesc,
-        D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&_counterBuffer)));
+    _counterBuffer = _device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, counterDesc,
+        D3D12_RESOURCE_STATE_COMMON, nullptr);
 }
 
 template<typename T>

@@ -5,6 +5,17 @@
 class GDX12ParticlesPass final : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Particles");
+        graph.Read(SharedResource::Scene);
+        graph.Read(_inputs[0]);
+        graph.ReadWrite(_inputs[1]);
+        graph.ReadWrite(_inputs[2]);
+        graph.Write(SharedResource::Particles, "Particles and feature motion");
+        graph.HasSideEffects();
+    }
+
     GDX12ParticlesPass();
     ~GDX12ParticlesPass() override;
     void Initialize() override;

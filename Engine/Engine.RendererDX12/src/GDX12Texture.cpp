@@ -1,4 +1,6 @@
 #include "Engine.RendererDX12/GDX12Texture.h"
+#include <stdexcept>
+#include <algorithm>
 
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
@@ -16,7 +18,7 @@ void GDX12Texture::Resize(UINT width, UINT height)
 {
     _desc.Width = width;
     _desc.Height = height;
-    if (_desc.ExternalResource == nullptr) { CreateResource(); }
+    if (!_desc.ExternalResource) { CreateResource(); }
     CreateViews();
 
     _viewport.TopLeftX = 0;
@@ -132,20 +134,11 @@ void GDX12Texture::CreateResource()
         1,  // sample count
         0,  // sample quality
         _resourceFlags);
-    
-    CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
 
-    ComPtr<ID3D12Resource> d3dResource;
-    ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(
-        &heapProps,
-        D3D12_HEAP_FLAG_NONE,
-        &resourceDesc,
-        D3D12_RESOURCE_STATE_COMMON,
-        (_desc.CreateRTV || _desc.CreateDSV) ? &_clearValue : nullptr,
-        IID_PPV_ARGS(&d3dResource)));
+    auto d3dResource = _device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, resourceDesc,
+        D3D12_RESOURCE_STATE_COMMON, (_desc.CreateRTV || _desc.CreateDSV) ? &_clearValue : nullptr);
 
-    if (!_resource) { _resource = std::make_unique<GDX12TextureResource>(d3dResource); }
-    else { _resource->D3DResource = d3dResource; }
+    _resource = std::make_shared<GDX12TextureResource>(std::move(d3dResource));
     _resource->ResetState();
 }
 
@@ -228,7 +221,7 @@ void GDX12Texture::Initialize(GDX12TextureDesc desc)
 
     _clearValue.Format = _desc.Format;
 
-    if (_desc.ExternalResource != nullptr) { _resource = std::make_unique<GDX12TextureResource>(_desc.ExternalResource); }
+    if (_desc.ExternalResource) { _resource = std::make_shared<GDX12TextureResource>(_desc.ExternalResource); }
     else { CreateResource(); }
 
     CreateViews();
@@ -243,4 +236,37 @@ void GDX12Texture::Initialize(GDX12TextureDesc desc)
     _scissorRect = { 0, 0, static_cast<int>(_desc.Width), static_cast<int>(_desc.Height) };
 
     _isInitialized = true;
+}
+
+
+bool GDX12Texture::CanShareGraphResource() const
+{
+    return _isInitialized && !_desc.ExternalResource && !_desc.CreateDSV;
+}
+
+bool GDX12Texture::CanShareGraphResource(const GDX12Texture& other) const
+{
+    if (!CanShareGraphResource() || !other.CanShareGraphResource() || _device != other._device) return false;
+    const auto a = _resource->D3DResource->GetDesc();
+    const auto b = other._resource->D3DResource->GetDesc();
+    return a.Dimension == b.Dimension && a.Alignment == b.Alignment && a.Width == b.Width &&
+        a.Height == b.Height && a.DepthOrArraySize == b.DepthOrArraySize && a.MipLevels == b.MipLevels &&
+        a.Format == b.Format && a.SampleDesc.Count == b.SampleDesc.Count && a.SampleDesc.Quality == b.SampleDesc.Quality &&
+        a.Layout == b.Layout && a.Flags == b.Flags && (!_desc.CreateRTV ||
+            (_clearValue.Format == other._clearValue.Format &&
+                std::equal(std::begin(_clearValue.Color), std::end(_clearValue.Color), std::begin(other._clearValue.Color))));
+}
+
+std::shared_ptr<GDX12TextureResource> GDX12Texture::CreateGraphResource() const
+{
+    if (!CanShareGraphResource()) throw std::logic_error("Cannot pool an imported or depth texture");
+    return std::make_shared<GDX12TextureResource>(_device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,
+        _resource->D3DResource->GetDesc(), D3D12_RESOURCE_STATE_COMMON, _desc.CreateRTV ? &_clearValue : nullptr));
+}
+
+void GDX12Texture::BindGraphResource(std::shared_ptr<GDX12TextureResource> resource)
+{
+    if (!CanShareGraphResource() || !resource) throw std::invalid_argument("Invalid graph texture binding");
+    _resource = std::move(resource);
+    CreateViews();
 }

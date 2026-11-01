@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12MotionBlurPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12MotionBlurSettings.h"
 #include <algorithm>
 #include <cmath>
@@ -27,26 +28,12 @@ void GDX12MotionBlurPass::Initialize()
         color->GetHeight() != _inputs[2]->GetTexture()->GetHeight())
         throw std::invalid_argument("Motion blur requires matching HDR/depth/motion grids");
 
-    GDX12TextureDesc texture;
-    texture.Width = color->GetWidth();
-    texture.Height = color->GetHeight();
-    texture.CreateUAV = true;
-    texture.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
-    texture.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    texture.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    texture.SRVDesc.Texture2D.MipLevels = 1;
-    texture.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     for (auto* target : { _color.get(), _motion.get(), _velocity.get(), _tileMax.get(), _neighborMax.get() })
     {
-        texture.Format = texture.SRVDesc.Format = texture.UAVDesc.Format =
-            target == _color.get() ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R16G16_FLOAT;
-        texture.SRVHeapIndex = texture.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-        texture.UAVHeapIndex = texture.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-        if (target == _tileMax.get() || target == _neighborMax.get())
-        {
-            texture.Width = texture.Height = 1;
-        }
-        target->Initialize(texture);
+        const bool tile = target == _tileMax.get() || target == _neighborMax.get();
+        GDX12RenderHelpers::InitializeComputeTexture(*target, *_resources,
+            tile ? 1 : color->GetWidth(), tile ? 1 : color->GetHeight(),
+            target == _color.get() ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R16G16_FLOAT);
     }
     _color->GetResource()->D3DResource->SetName(L"MotionBlur.Color");
     _motion->GetResource()->D3DResource->SetName(L"MotionBlur.CompleteMotion");
@@ -59,19 +46,10 @@ void GDX12MotionBlurPass::Initialize()
     root.NumSingleSRVSlots = 7;
     root.NumSingleUAVSlots = 5;
     _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
-    const auto compile = [&](const char* entry, ComPtr<ID3D12PipelineState>& pipeline)
-    {
-        auto shader = GDX12ShaderCompiler::GetInstance().CompileShader(_resources->Device,
-            SHADERS_FOLDER "MotionBlur.hlsl", nullptr, entry, "cs");
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = _root->GetRootSignature().Get();
-        desc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
-        ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(&desc, IID_PPV_ARGS(&pipeline)));
-    };
-    compile("Prepare", _prepare);
-    compile("Tiles", _tiles);
-    compile("Neighbors", _neighbors);
-    compile("Gather", _gather);
+    _prepare = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(), SHADERS_FOLDER "MotionBlur.hlsl", "Prepare");
+    _tiles = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(), SHADERS_FOLDER "MotionBlur.hlsl", "Tiles");
+    _neighbors = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(), SHADERS_FOLDER "MotionBlur.hlsl", "Neighbors");
+    _gather = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(), SHADERS_FOLDER "MotionBlur.hlsl", "Gather");
 }
 
 void GDX12MotionBlurPass::ResizeTiles(UINT tileSize)
@@ -116,7 +94,7 @@ void GDX12MotionBlurPass::Execute(GDX12CommandList* commands)
         settings.ShutterFraction, settings.MaxRadius, blur, _commonData->ResetHistory,
         static_cast<float>(_commonData->WindowWidth), static_cast<float>(_commonData->WindowHeight),
         settings.CenterWeight, settings.VelocityThreshold, featureMotion != nullptr, {} };
-    commands->BeginPixEvent("Feature-aware motion blur", Colors::Coral);
+    GDX12_SCOPED_EVENT(commands, "Feature-aware motion blur", Colors::Coral);
     commands->SetComputeRootSignature(_root.get());
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     commands->GetCommandList()->SetComputeRoot32BitConstants(0, 16, &parameters, 0);
@@ -164,7 +142,6 @@ void GDX12MotionBlurPass::Execute(GDX12CommandList* commands)
         commands->CopyResource(_color->GetResource()->D3DResource.Get(), inputs[0]->GetResource()->D3DResource.Get());
     }
     commands->ResourceBarrier({ _color->GetResource()->GetSRVBarrier() });
-    commands->EndPixEvent();
 }
 
 void GDX12MotionBlurPass::Resize()

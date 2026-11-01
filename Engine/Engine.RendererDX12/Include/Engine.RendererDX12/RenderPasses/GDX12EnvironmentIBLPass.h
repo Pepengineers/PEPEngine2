@@ -10,6 +10,17 @@
 class GDX12EnvironmentIBLPass final : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Environment");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs);
+        for (UINT i = 0; i < _outputs.size(); ++i)
+            graph.Write(_outputs[i], "Environment " + std::to_string(i), Lifetime::Dynamic);
+        graph.Write(SharedResource::Environment, "Atmosphere cache");
+        graph.HasSideEffects();
+    }
+
     GDX12EnvironmentIBLPass();
     void Initialize() override;
     void Execute(GDX12CommandList* commands) override;

@@ -7,6 +7,14 @@ struct FfxSssrContext;
 class GDX12SSSRPass final : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Screen-space reflections");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs);
+        graph.Write(_outputs[0], "SSR HDR");
+    }
+
     GDX12SSSRPass();
     ~GDX12SSSRPass() override;
     void Initialize() override;

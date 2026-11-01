@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12AmbientOcclusionPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "../../../External/External.Libraries/XeGTAO/XeGTAO.h"
 #define FFX_CACAO_ENABLE_D3D12
 #include "../../../External/External.Libraries/cacao/inc/ffx_cacao_impl.h"
@@ -42,12 +43,8 @@ void GDX12AmbientOcclusionPass::Initialize()
     const char* entries[] = { "PrepareNormalsCS", "SSAOCS", "HBAOCS", "BlurCS", "ResolveCS", "XePrefilterCS", "XeMainCS", "XeDenoiseCS", "NeutralCS" };
     for (UINT i = 0; i < PipelineCount; ++i)
     {
-        auto shader = GDX12ShaderCompiler::GetInstance().CompileShader(_resources->Device,
-            SHADERS_FOLDER "AmbientOcclusion.hlsl", nullptr, entries[i], "cs");
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = _root->GetRootSignature().Get();
-        desc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
-        ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(&desc, IID_PPV_ARGS(&_pipelines[i])));
+        _pipelines[i] = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(),
+            SHADERS_FOLDER "AmbientOcclusion.hlsl", entries[i]);
     }
     static_assert(sizeof(ShaderConstants) == 64);
 }
@@ -70,9 +67,8 @@ void GDX12AmbientOcclusionPass::CreateTexture(GDX12Texture& texture, DXGI_FORMAT
     desc.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     const auto allocation = CD3DX12_RESOURCE_DESC::Tex2D(format, width, height, 1,
         static_cast<UINT16>(mips), 1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-    const auto defaultHeap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-    ThrowIfFailed(_resources->Device->GetDevice()->CreateCommittedResource(&defaultHeap, D3D12_HEAP_FLAG_NONE,
-        &allocation, D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&desc.ExternalResource)));
+    desc.ExternalResource = _resources->Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, allocation,
+        D3D12_RESOURCE_STATE_COMMON, nullptr);
     texture.Initialize(desc);
 }
 
@@ -129,7 +125,7 @@ void GDX12AmbientOcclusionPass::Execute(GDX12CommandList* commands)
         _commonData->ResetUpscalerHistory = true;
     _previous = settings;
     _hasPrevious = true;
-    commands->BeginPixEvent("Ambient occlusion", Colors::DarkSlateBlue);
+    GDX12_SCOPED_EVENT(commands, "Ambient occlusion", Colors::DarkSlateBlue);
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     commands->ResourceBarrier({ _output.GetResource()->GetUnorderedAccessBarrier() });
     // shortcut: sub-icon viewports use neutral AO; extend vendor mip setup if these are needed.
@@ -139,7 +135,6 @@ void GDX12AmbientOcclusionPass::Execute(GDX12CommandList* commands)
         commands->SetComputeUAV(0, _output.GetUAV()->GPUHandle);
         Dispatch(commands, Neutral, _output.GetWidth(), _output.GetHeight());
         commands->ResourceBarrier({ _output.GetResource()->GetSRVBarrier() });
-        commands->EndPixEvent();
         return;
     }
 
@@ -235,7 +230,6 @@ void GDX12AmbientOcclusionPass::Execute(GDX12CommandList* commands)
     commands->SetComputeUAV(0, _output.GetUAV()->GPUHandle);
     Dispatch(commands, Resolve, _output.GetWidth(), _output.GetHeight());
     commands->ResourceBarrier({ _output.GetResource()->GetSRVBarrier() });
-    commands->EndPixEvent();
 }
 
 void GDX12AmbientOcclusionPass::DrawCACAO(GDX12CommandList* commands, const GDX12AOSettings& s, const Matrix& projection)

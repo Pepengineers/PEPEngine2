@@ -5,6 +5,15 @@
 class GDX12ReconstructionPass final : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Reconstruction");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs);
+        graph.Write(_outputs[0], "Reconstructed or native HDR", Lifetime::Dynamic);
+        graph.Fallback(_outputs[0], _inputs[2]);
+    }
+
     GDX12ReconstructionPass();
     ~GDX12ReconstructionPass() override;
     void Setup(GDX12DeviceResources*, GDX12DeviceResources*, RenderPipelineCommonData*) override;

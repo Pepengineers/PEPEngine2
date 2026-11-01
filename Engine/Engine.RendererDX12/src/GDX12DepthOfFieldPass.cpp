@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12DepthOfFieldPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12DepthOfField.h"
 #include <FidelityFX/host/ffx_dof.h>
 #include <FidelityFX/host/backends/dx12/ffx_dx12.h>
@@ -48,19 +49,8 @@ void GDX12DepthOfFieldPass::Initialize()
         color->GetWidth() != depth->GetWidth() || color->GetHeight() != depth->GetHeight())
         throw std::invalid_argument("DoF requires matching HDR color and depth grids");
 
-    GDX12TextureDesc desc;
-    desc.Width = color->GetWidth();
-    desc.Height = color->GetHeight();
-    desc.Format = desc.SRVDesc.Format = desc.UAVDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    desc.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
-    desc.SRVHeapIndex = desc.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-    desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    desc.SRVDesc.Texture2D.MipLevels = 1;
-    desc.CreateUAV = true;
-    desc.UAVHeapIndex = desc.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-    desc.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-    _output.Initialize(desc);
+    GDX12RenderHelpers::InitializeComputeTexture(_output, *_resources,
+        color->GetWidth(), color->GetHeight(), DXGI_FORMAT_R16G16B16A16_FLOAT);
 }
 
 void GDX12DepthOfFieldPass::DestroyContext()
@@ -80,12 +70,11 @@ void GDX12DepthOfFieldPass::Execute(GDX12CommandList* commands)
     const bool enabled = settings.Enabled && color->GetWidth() >= 16 && color->GetHeight() >= 16;
     if (_wasEnabled != enabled) _commonData->ResetUpscalerHistory = true;
     _wasEnabled = enabled;
-    commands->BeginPixEvent("FidelityFX Depth of Field", Colors::Purple);
+    GDX12_SCOPED_EVENT(commands, "FidelityFX Depth of Field", Colors::Purple);
     if (!enabled)
     {
         commands->ResourceBarrier({ color->GetResource()->GetCopySourceBarrier(), _output.GetResource()->GetCopyDestBarrier() });
         commands->CopyResource(_output.GetResource()->D3DResource.Get(), color->GetResource()->D3DResource.Get());
-        commands->EndPixEvent();
         return;
     }
 
@@ -139,7 +128,6 @@ void GDX12DepthOfFieldPass::Execute(GDX12CommandList* commands)
     commands->InvalidateCachedState();
     CheckFidelityFX(result);
     commands->ResourceBarrier({ _output.GetResource()->GetUAVBarrier() });
-    commands->EndPixEvent();
 }
 
 void GDX12DepthOfFieldPass::Resize()

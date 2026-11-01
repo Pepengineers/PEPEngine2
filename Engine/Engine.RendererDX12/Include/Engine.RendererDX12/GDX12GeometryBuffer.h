@@ -74,8 +74,8 @@ private:
 	std::vector<Vertex> _vertexDataCPU;
 	std::vector<uint32_t> _indexDataCPU;
 
-	ComPtr<ID3D12Resource> _vertexBuffer;
-	ComPtr<ID3D12Resource> _indexBuffer;
+	GDX12ResourceHandle _vertexBuffer;
+	GDX12ResourceHandle _indexBuffer;
 	D3D12_VERTEX_BUFFER_VIEW _vertexBufferView;
 	D3D12_INDEX_BUFFER_VIEW _indexBufferView;
 

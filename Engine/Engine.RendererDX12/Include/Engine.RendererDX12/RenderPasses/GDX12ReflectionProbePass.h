@@ -6,6 +6,16 @@
 class GDX12ReflectionProbePass final : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Reflection probes");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs);
+        graph.Read(SharedResource::Environment);
+        graph.Write(SharedResource::ReflectionProbes, "Reflection probe cache");
+        graph.HasSideEffects();
+    }
+
     GDX12ReflectionProbePass();
     void Initialize() override;
     void Execute(GDX12CommandList* commands) override;
@@ -60,6 +70,7 @@ private:
     ComPtr<ID3D12CommandSignature> _signature;
     std::unique_ptr<GDX12LocalShadowPass> _staticLocalShadows;
     GDX12Texture _published, _raw, _filtered, _depth, _sunShadow;
+    bool _sunShadowNeedsClear = true;
     std::vector<std::unique_ptr<GDX12Descriptor>> _rawRTVs, _depthDSVs, _sunDSV, _filterUAVs, _rawMipSRVs;
     Statistics _statistics;
     GDX12ReflectionSettings _settings;

@@ -1,20 +1,24 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 
 class GDX12GPUCullingPass : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Culling");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs);
+        graph.Write(SharedResource::Visibility, "Visible indirect draws");
+    }
+
 	GDX12GPUCullingPass()
 	{ _flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_INSTANCES; }
 
 	void Setup(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData) override
 	{
 		GDX12RenderPass::Setup(initOnResources, otherResources, commonData);
-
-		// Shaders
-		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
-		_cullingCS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "Culling.hlsl", nullptr, "CS", "cs");
-		_bufferClearCS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "BufferClear.hlsl", nullptr, "CS", "cs");
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
@@ -27,20 +31,8 @@ public:
 		RSDesc2.NumSingleUAVSlots = 2;
 		_bufferClearRS = std::make_unique<GDX12RootSignature>(_resources->Device, RSDesc2);
 
-		// Pipeline State Objects
-		D3D12_COMPUTE_PIPELINE_STATE_DESC PSODesc1 = {};
-		PSODesc1.pRootSignature = _cullingRS->GetRootSignature().Get();
-		PSODesc1.CS = { reinterpret_cast<BYTE*>(_cullingCS->GetBufferPointer()), _cullingCS->GetBufferSize() };
-
-		ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(
-			&PSODesc1, IID_PPV_ARGS(&_cullingPSO)));
-
-		D3D12_COMPUTE_PIPELINE_STATE_DESC PSODesc2 = {};
-		PSODesc2.pRootSignature = _bufferClearRS->GetRootSignature().Get();
-		PSODesc2.CS = { reinterpret_cast<BYTE*>(_bufferClearCS->GetBufferPointer()), _bufferClearCS->GetBufferSize() };
-
-		ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(
-			&PSODesc2, IID_PPV_ARGS(&_bufferClearPSO)));
+        _cullingPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _cullingRS.get(), SHADERS_FOLDER "Culling.hlsl", "CS");
+        _bufferClearPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _bufferClearRS.get(), SHADERS_FOLDER "BufferClear.hlsl", "CS");
 	}
 
 	// automatically uses IN_OUT_CameraVisibilityBuffers from cameraCBIndex
@@ -49,7 +41,7 @@ public:
 		auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
 		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[_commonData->ActiveCameraCBufferIndex];
 
-		cmdList->BeginPixEvent("GPU Mesh Culling", Colors::Blue);
+		GDX12_SCOPED_EVENT(cmdList, "GPU Mesh Culling", Colors::Blue);
 		cmdList->ResourceBarrier({
 			currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().GetUnorderedAccessBarrier(),
 			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetUnorderedAccessBarrier(),
@@ -84,7 +76,6 @@ public:
 			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetUAVBarrier(),
 			currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetUAVBarrier(),
 			currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetUAVBarrier() });
-		cmdList->EndPixEvent();
 	}
 
 	void ClearDenendencies() override
@@ -93,17 +84,14 @@ public:
 
 		_cullingRS.reset();
 		_cullingPSO.Reset();
-		_bufferClearCS.Reset();
 		_bufferClearRS.reset();
 		_bufferClearPSO.Reset();
 	}
 
 private:
-	ComPtr<ID3DBlob> _cullingCS;
 	std::unique_ptr<GDX12RootSignature> _cullingRS;
 	ComPtr<ID3D12PipelineState> _cullingPSO;
 
-	ComPtr<ID3DBlob> _bufferClearCS;
 	std::unique_ptr<GDX12RootSignature> _bufferClearRS;
 	ComPtr<ID3D12PipelineState> _bufferClearPSO;
 };

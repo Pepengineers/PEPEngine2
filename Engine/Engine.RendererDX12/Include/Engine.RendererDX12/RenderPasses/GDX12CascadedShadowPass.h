@@ -1,11 +1,21 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <array>
 #include <cstring>
 
 class GDX12CascadedShadowPass final : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Sun shadows");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs);
+        graph.Write(_outputs[0], "Sun shadows cache", Lifetime::Dynamic);
+        graph.HasSideEffects();
+    }
+
     GDX12CascadedShadowPass()
     {
         _flags = RENDER_PASS_FLAG_USE_GEOMETRY | RENDER_PASS_FLAG_USE_MATERIALS | RENDER_PASS_FLAG_USE_INSTANCES;
@@ -30,15 +40,15 @@ public:
         texture.DSVHeapIndex = texture.DSVHeap->GetAvailableIndex();
         texture.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
         texture.ClearValue = { 1, 0, 0, 0 };
-        const auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
         const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, 4096, 4096,
             1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
         D3D12_CLEAR_VALUE clear = {};
         clear.Format = DXGI_FORMAT_D32_FLOAT;
         clear.DepthStencil.Depth = 1.0f;
-        ThrowIfFailed(_resources->Device->GetDevice()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE,
-            &desc, D3D12_RESOURCE_STATE_COMMON, &clear, IID_PPV_ARGS(&texture.ExternalResource)));
+        texture.ExternalResource = _resources->Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc,
+            D3D12_RESOURCE_STATE_COMMON, &clear);
         _atlas->Initialize(texture);
+        _atlasNeedsClear = true;
 
         GDX12RootSignatureDesc graphics;
         graphics.Constants.push_back(2);
@@ -79,27 +89,22 @@ public:
         ComPtr<ID3D12PipelineState>* targets[] = { &_cullingPSO, &_clearPSO };
         for (UINT i = 0; i < 2; ++i)
         {
-            auto cs = compiler.CompileShader(_resources->Device, SHADERS_FOLDER "ShadowPass.hlsl", defines, entries[i], "cs");
-            D3D12_COMPUTE_PIPELINE_STATE_DESC computePSO = {};
-            computePSO.pRootSignature = _computeRoot->GetRootSignature().Get();
-            computePSO.CS = { cs->GetBufferPointer(), cs->GetBufferSize() };
-            ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(&computePSO, IID_PPV_ARGS(targets[i]->GetAddressOf())));
+            *targets[i] = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _computeRoot.get(),
+                SHADERS_FOLDER "ShadowPass.hlsl", entries[i], defines);
         }
-        D3D12_INDIRECT_ARGUMENT_DESC arguments[2] = {};
-        arguments[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
-        arguments[0].Constant.Num32BitValuesToSet = 1;
-        arguments[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
-        D3D12_COMMAND_SIGNATURE_DESC signature = {};
-        signature.ByteStride = sizeof(GDX12IndirectDrawArgs);
-        signature.NumArgumentDescs = 2;
-        signature.pArgumentDescs = arguments;
-        ThrowIfFailed(_resources->Device->GetDevice()->CreateCommandSignature(&signature,
-            _graphicsRoot->GetRootSignature().Get(), IID_PPV_ARGS(&_signature)));
+        _signature = GDX12RenderHelpers::CreateIndexedDrawSignature(_resources->Device, _graphicsRoot.get());
+
         _visibility.resize(_resources->FrameConstants.size());
     }
 
     void Execute(GDX12CommandList* commands) override
     {
+        if (_atlasNeedsClear)
+        {
+            commands->ResourceBarrier({ _atlas->GetResource()->GetDepthWriteBarrier() });
+            commands->GetCommandList()->ClearDepthStencilView(_atlas->GetDSV()->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
+            _atlasNeedsClear = false;
+        }
         const auto& lighting = _resources->Lighting;
         if ((lighting.SunShadowFlags & 1u) == 0u)
         {
@@ -120,7 +125,7 @@ public:
         }
         for (auto& buffer : visibility.Commands)
             if (count > buffer->GetElementCount()) buffer = CreateBuffer<GDX12IndirectDrawArgs>(count);
-        commands->BeginPixEvent("Cascaded shadow maps", Colors::DarkSlateBlue);
+        GDX12_SCOPED_EVENT(commands, "Cascaded shadow maps", Colors::DarkSlateBlue);
         commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
         commands->SetComputeRootSignature(_computeRoot.get());
         commands->ResourceBarrier({ visibility.Counters->GetResource().GetUnorderedAccessBarrier() });
@@ -180,7 +185,6 @@ public:
         }
         _cachedGrassRevision = grassRevision;
         commands->ResourceBarrier({ _atlas->GetResource()->GetSRVBarrier() });
-        commands->EndPixEvent();
         _rendered = true;
         _cachedSettings = _resources->ShadowSettings;
         _cachedRevision = lighting.SunShadowRevision;
@@ -200,6 +204,7 @@ public:
     }
 
 private:
+    bool _atlasNeedsClear = true;
     template<typename T>
     std::unique_ptr<GDX12UploadBuffer<T>> CreateBuffer(UINT count)
     {

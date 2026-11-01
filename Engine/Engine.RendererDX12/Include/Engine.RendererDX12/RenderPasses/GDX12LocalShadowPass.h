@@ -1,5 +1,6 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
 #include <optional>
 #include <stdexcept>
@@ -7,6 +8,15 @@
 class GDX12LocalShadowPass final : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Local shadows");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs);
+        graph.Write(_outputs[0], "Local shadows cache", Lifetime::Dynamic);
+        graph.HasSideEffects();
+    }
+
     GDX12LocalShadowPass(bool staticOnly = false) : _staticOnly(staticOnly)
     {
         _flags = RENDER_PASS_FLAG_USE_GEOMETRY | RENDER_PASS_FLAG_USE_MATERIALS | RENDER_PASS_FLAG_USE_INSTANCES;
@@ -54,22 +64,11 @@ public:
         ComPtr<ID3D12PipelineState>* targets[] = { &_cullPSO, &_clearPSO };
         for (UINT i = 0; i < 2; ++i)
         {
-            auto cs = compiler.CompileShader(_resources->Device, SHADERS_FOLDER "LocalShadowPass.hlsl", defines, entries[i], "cs");
-            D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-            desc.pRootSignature = _computeRoot->GetRootSignature().Get();
-            desc.CS = { cs->GetBufferPointer(), cs->GetBufferSize() };
-            ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(&desc, IID_PPV_ARGS(targets[i]->GetAddressOf())));
+            *targets[i] = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _computeRoot.get(),
+                SHADERS_FOLDER "LocalShadowPass.hlsl", entries[i], defines);
         }
-        D3D12_INDIRECT_ARGUMENT_DESC arguments[2] = {};
-        arguments[0].Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
-        arguments[0].Constant.Num32BitValuesToSet = 1;
-        arguments[1].Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
-        D3D12_COMMAND_SIGNATURE_DESC signature = {};
-        signature.ByteStride = sizeof(GDX12IndirectDrawArgs);
-        signature.NumArgumentDescs = 2;
-        signature.pArgumentDescs = arguments;
-        ThrowIfFailed(_resources->Device->GetDevice()->CreateCommandSignature(&signature,
-            _graphicsRoot->GetRootSignature().Get(), IID_PPV_ARGS(&_signature)));
+        _signature = GDX12RenderHelpers::CreateIndexedDrawSignature(_resources->Device, _graphicsRoot.get());
+
         _visibility.resize(_resources->FrameConstants.size());
         if (!_staticOnly)
         {
@@ -102,6 +101,13 @@ public:
         for (const auto& light : _resources->LocalLights)
             if (light.ShadowFirstSlice != UINT_MAX) slices = (std::max)(slices, light.ShadowFirstSlice + LocalShadowFaceCount(light));
         if ((std::max)(slices, 1u) != _sliceCount) CreateMaps((std::max)(slices, 1u));
+        if (_mapsNeedClear)
+        {
+            commands->ResourceBarrier({ _maps->GetResource()->GetDepthWriteBarrier() });
+            for (const auto& dsv : _dsvs)
+                commands->GetCommandList()->ClearDepthStencilView(dsv->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
+            _mapsNeedClear = false;
+        }
         _renderedViews = 0;
         _cached.resize(_resources->LocalLights.size());
         auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
@@ -110,7 +116,7 @@ public:
         if (!visibility.Counter) visibility.Counter = CreateBuffer<UINT>(1);
         if (!visibility.Commands || visibility.Commands->GetElementCount() < count)
             visibility.Commands = CreateBuffer<GDX12IndirectDrawArgs>((std::max)(count, 1u));
-        commands->BeginPixEvent("Point and spot shadow maps", Colors::DarkGoldenrod);
+        GDX12_SCOPED_EVENT(commands, "Point and spot shadow maps", Colors::DarkGoldenrod);
         commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
         for (UINT lightIndex = 0; lightIndex < _resources->LocalLights.size(); ++lightIndex)
         {
@@ -179,7 +185,6 @@ public:
             _cached[lightIndex] = light;
         }
         commands->ResourceBarrier({ _maps->GetResource()->GetSRVBarrier() });
-        commands->EndPixEvent();
     }
 
     void ClearDenendencies() override
@@ -212,15 +217,14 @@ private:
         if (_sliceCount) _resources->Device->GetCommandQueue()->Flush();
         _cached.clear();
         _dsvs.clear();
-        const auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
         const auto resource = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, LocalShadowResolution,
             LocalShadowResolution, static_cast<UINT16>(slices), 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
         D3D12_CLEAR_VALUE clear = {};
         clear.Format = DXGI_FORMAT_D32_FLOAT;
         clear.DepthStencil.Depth = 1;
         GDX12TextureDesc desc;
-        ThrowIfFailed(_resources->Device->GetDevice()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE,
-            &resource, D3D12_RESOURCE_STATE_COMMON, &clear, IID_PPV_ARGS(&desc.ExternalResource)));
+        desc.ExternalResource = _resources->Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, resource,
+            D3D12_RESOURCE_STATE_COMMON, &clear);
         desc.Format = desc.SRVDesc.Format = DXGI_FORMAT_R32_FLOAT;
         desc.Width = desc.Height = LocalShadowResolution;
         desc.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
@@ -242,6 +246,8 @@ private:
             _dsvs.push_back(std::move(descriptor));
         }
         _sliceCount = slices;
+        _mapsNeedClear = true;
+        _maps->GetResource()->D3DResource->SetName(L"Local shadow maps");
     }
     struct Visibility
     {
@@ -260,5 +266,6 @@ private:
     uint64_t _dynamicRevision = 0;
     bool _staticOnly = false;
     UINT _sliceCount = 0;
+    bool _mapsNeedClear = true;
     UINT _renderedViews = 0;
 };

@@ -6,6 +6,19 @@
 class GDX12FluidSurfacePass final : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Fluid surface");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs);
+        graph.Write(_outputs[0], "Fluid or opaque depth", Lifetime::Dynamic);
+        graph.Write(_outputs[1], "Fluid or opaque motion", Lifetime::Dynamic);
+        graph.Fallback(_outputs[0], _inputs[0]);
+        graph.Fallback(_outputs[1], _inputs[1]);
+        graph.Write(SharedResource::FluidSurface, "Fluid simulation and surface");
+        graph.HasSideEffects();
+    }
+
     GDX12FluidSurfacePass();
     ~GDX12FluidSurfacePass() override;
     void Initialize() override;
@@ -44,6 +57,16 @@ private:
 class GDX12FluidResolvePass final : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Fluid resolve");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs);
+        graph.Read(SharedResource::FluidSurface);
+        graph.Write(_outputs[0], "Water HDR", Lifetime::Dynamic);
+        graph.Fallback(_outputs[0], _inputs[0]);
+    }
+
     explicit GDX12FluidResolvePass(GDX12FluidSurfacePass* surface);
     void Initialize() override;
     void Execute(GDX12CommandList* commands) override;

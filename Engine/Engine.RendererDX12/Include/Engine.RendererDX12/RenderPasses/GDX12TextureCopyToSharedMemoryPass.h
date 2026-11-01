@@ -10,8 +10,8 @@ public:
 
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
 	{
-		_inputs = inputs;
 		_numInputs = static_cast<UINT>(inputs.size());
+		GDX12RenderPass::SetInputs(std::move(inputs));
 		MatchOutputCount(_numInputs);
 	}
 
@@ -39,7 +39,7 @@ public:
 	// Can be later used to read them on another device with CopyFromSharedMemoryPass
 	void Execute(GDX12CommandList* cmdList) override
 	{
-		cmdList->BeginPixEvent("Texture Transfer To Shared Memory pass", Colors::ForestGreen);
+		GDX12_SCOPED_EVENT(cmdList, "Texture Transfer To Shared Memory pass", Colors::ForestGreen);
 		for (UINT i = 0; i < _numInputs; i++)
 		{
 			GDX12Texture* inTexture = IN_Textures[i]->GetTexture();
@@ -51,7 +51,6 @@ public:
 				inTexture->GetResource()->D3DResource.Get());
 			cmdList->ResourceBarrier({ outSharedTexture->GetPrimaryResource()->GetCommonBarrier() });
 		}
-		cmdList->EndPixEvent();
 	}
 
 	void Resize() override

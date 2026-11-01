@@ -1,9 +1,20 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 
 class GDX12DeferredLightingPass final : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Deferred lighting");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+        graph.Read(SharedResource::Environment);
+        graph.Read(SharedResource::ReflectionProbes);
+        graph.Write(_outputs[0], "Deferred HDR", Lifetime::Transient, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+    }
+
     GDX12DeferredLightingPass()
     {
         _flags = RENDER_PASS_FLAG_USE_CAMERAS;
@@ -14,19 +25,8 @@ public:
     }
     void Initialize() override
     {
-        GDX12TextureDesc texture;
-        texture.Width = _inputs[0]->GetTexture()->GetWidth();
-        texture.Height = _inputs[0]->GetTexture()->GetHeight();
-        texture.Format = texture.SRVDesc.Format = texture.UAVDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-        texture.CreateUAV = true;
-        texture.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
-        texture.SRVHeapIndex = texture.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-        texture.UAVHeapIndex = texture.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-        texture.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        texture.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        texture.SRVDesc.Texture2D.MipLevels = 1;
-        texture.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-        _color->Initialize(texture);
+        GDX12RenderHelpers::InitializeComputeTexture(*_color, *_resources,
+            _inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight(), DXGI_FORMAT_R16G16B16A16_FLOAT);
         GDX12RootSignatureDesc root;
         root.NumSingleCBVSlots = 4;
         root.NumSingleSRVSlots = 17;
@@ -40,16 +40,12 @@ public:
         sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
         root.StaticSamplers.push_back(sampler);
         _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
-        auto shader = GDX12ShaderCompiler::GetInstance().CompileShader(_resources->Device,
-            SHADERS_FOLDER "DeferredLighting.hlsl", nullptr, "CS", "cs");
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = _root->GetRootSignature().Get();
-        desc.CS = { shader->GetBufferPointer(), shader->GetBufferSize() };
-        ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(&desc, IID_PPV_ARGS(&_pipeline)));
+        _pipeline = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(),
+            SHADERS_FOLDER "DeferredLighting.hlsl", "CS");
     }
     void Execute(GDX12CommandList* commands) override
     {
-        commands->BeginPixEvent("Tiled deferred lighting", Colors::Gold);
+        GDX12_SCOPED_EVENT(commands, "Tiled deferred lighting", Colors::Gold);
         auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
         commands->SetComputeRootSignature(_root.get());
         commands->SetPipelineState(_pipeline.Get());
@@ -60,7 +56,6 @@ public:
         for (UINT i = 0; i < _numInputs; ++i)
         {
             auto* texture = _inputs[i]->GetTexture();
-            commands->ResourceBarrier({ texture->GetResource()->GetSRVBarrier() });
             commands->SetComputeSRV(i < 11 ? i : 14, texture->GetSRV()->GPUHandle);
         }
         commands->SetComputeRootConstantBufferView(3, frame->SkyCB->GetElementAddress(0));
@@ -70,10 +65,7 @@ public:
         commands->SetComputeSRV(12, _resources->ReflectionRadianceSRV.GPUHandle);
         commands->SetComputeSRV(13, frame->ReflectionProbes->GetSRV()->GPUHandle);
         commands->SetComputeUAV(0, _color->GetUAV()->GPUHandle);
-        commands->ResourceBarrier({ _color->GetResource()->GetUnorderedAccessBarrier() });
         commands->Dispatch((_color->GetWidth() + 15) / 16, (_color->GetHeight() + 15) / 16, 1);
-        commands->ResourceBarrier({ _color->GetResource()->GetSRVBarrier() });
-        commands->EndPixEvent();
     }
     void Resize() override { _color->Resize(_inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight()); }
     void ClearDenendencies() override

@@ -1,9 +1,23 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 
 class GDX12WBOITTransparencyPass : public GDX12RenderPass
 {
 public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName(_partition == WaterPartition::Front ? "Front transparency" :
+            _partition == WaterPartition::Behind ? "Behind-water transparency" : "Transparency");
+        graph.Read(SharedResource::Scene);
+        graph.ReadInputs(_inputs);
+        graph.Read(SharedResource::Visibility);
+        graph.Read(SharedResource::Environment);
+        graph.Read(SharedResource::ReflectionProbes);
+        graph.Write(_outputs[0], "Transparency accumulation");
+        graph.Write(_outputs[1], "Transparency revealage");
+    }
+
 	enum class WaterPartition { All, Behind, Front };
 
 	GDX12WBOITTransparencyPass(WaterPartition partition = WaterPartition::All,
@@ -27,42 +41,14 @@ public:
 		IN_DepthStencil = _inputs[0];
         UpdateReadOnlyDepth();
 
-		if (!_reuse)
+        if (!_reuse)
         {
-    		// Textures
-    		GDX12TextureDesc TextureDesc1;
-    		// Overlapping glass must accumulate beyond one without clamping.
-    		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    		TextureDesc1.ClearValue = { 0.f, 0.f, 0.f, 0.f };
-    		TextureDesc1.Width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
-    		TextureDesc1.Height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
-
-    		TextureDesc1.CreateSRV = true;
-    		TextureDesc1.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
-    		TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-    		TextureDesc1.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    		TextureDesc1.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-    		TextureDesc1.SRVDesc.Texture2D.MipLevels = 1;
-    		TextureDesc1.SRVDesc.Texture2D.MostDetailedMip = 0;
-    		TextureDesc1.SRVDesc.Texture2D.PlaneSlice = 0;
-    		TextureDesc1.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
-
-    		TextureDesc1.CreateRTV = true;
-    		TextureDesc1.RTVHeap = _resources->RTVHeap.get();
-    		TextureDesc1.RTVHeapIndex = _resources->RTVHeap->GetAvailableIndex();
-    		TextureDesc1.RTVDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-    		TextureDesc1.RTVDesc.Texture2D.PlaneSlice = 0;
-    		TextureDesc1.RTVDesc.Texture2D.MipSlice = 0;
-
-    		OUT_Accumulation->Initialize(TextureDesc1);
-
-    		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R16_FLOAT;
-    		TextureDesc1.ClearValue = { 1.f, 1.f, 1.f, 1.f };
-    		TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-    		TextureDesc1.RTVHeapIndex = _resources->RTVHeap->GetAvailableIndex();
-
-    		OUT_Revealage->Initialize(TextureDesc1);
-
+            const UINT width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
+            const UINT height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
+            GDX12RenderHelpers::InitializeRenderTarget(*OUT_Accumulation, *_resources, width, height,
+                DXGI_FORMAT_R16G16B16A16_FLOAT, { 0, 0, 0, 0 });
+            GDX12RenderHelpers::InitializeRenderTarget(*OUT_Revealage, *_resources, width, height,
+                DXGI_FORMAT_R16_FLOAT, { 1, 1, 1, 1 });
         }
 
 		// Shaders
@@ -87,26 +73,7 @@ public:
 		RSDesc1.Constants.push_back(1);
 		_transparencyRS = std::make_unique<GDX12RootSignature>(_resources->Device, RSDesc1);
 
-		//Command Signatures
-		std::vector<D3D12_INDIRECT_ARGUMENT_DESC> args;
-		D3D12_INDIRECT_ARGUMENT_DESC argConst = {};
-		argConst.Type = D3D12_INDIRECT_ARGUMENT_TYPE_CONSTANT;
-		argConst.Constant.DestOffsetIn32BitValues = 0;
-		argConst.Constant.Num32BitValuesToSet = 1;
-		args.push_back(argConst);
-		D3D12_INDIRECT_ARGUMENT_DESC argDraw = {};
-		argDraw.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
-		args.push_back(argDraw);
-
-		D3D12_COMMAND_SIGNATURE_DESC CSDesc1 = {};
-		CSDesc1.ByteStride = sizeof(GDX12IndirectDrawArgs);
-		CSDesc1.NumArgumentDescs = args.size();
-		CSDesc1.pArgumentDescs = args.data();
-		CSDesc1.NodeMask = 0;
-
-		ThrowIfFailed(_resources->Device->GetDevice()->CreateCommandSignature(&CSDesc1,
-			_transparencyRS->GetRootSignature().Get(),
-			IID_PPV_ARGS(&_transparencyCS)));
+        _transparencyCS = GDX12RenderHelpers::CreateIndexedDrawSignature(_resources->Device, _transparencyRS.get());
 
 		// Pipeline State Objects
 		D3D12_GRAPHICS_PIPELINE_STATE_DESC PSODesc1 = {};
@@ -171,7 +138,7 @@ public:
 		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[_commonData->ActiveCameraCBufferIndex];
 		GDX12Texture* depthStencil = IN_DepthStencil->GetTexture();
 
-		cmdList->BeginPixEvent("Transparent Render Pass", Colors::Aqua);
+		GDX12_SCOPED_EVENT(cmdList, "Transparent Render Pass", Colors::Aqua);
 		cmdList->SetViewport(OUT_Accumulation->GetViewport());
 		cmdList->SetScissorRect(OUT_Accumulation->GetScissorRect());
 		cmdList->SetGraphicsRootSignature(_transparencyRS.get());
@@ -218,7 +185,6 @@ public:
 			currentCameraVisBuffers.TransparentDrawCounter->GetResource().D3DResource.Get(), 0);
 		cmdList->ResourceBarrier({ OUT_Accumulation->GetResource()->GetSRVBarrier(),
 		OUT_Revealage->GetResource()->GetSRVBarrier() });
-		cmdList->EndPixEvent();
 	}
 
 	void Resize() override

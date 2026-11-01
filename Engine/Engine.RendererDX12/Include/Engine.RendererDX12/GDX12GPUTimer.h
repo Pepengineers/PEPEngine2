@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Engine.RendererDX12/GDX12ResourceHandle.h"
+
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 class GDX12Device;
@@ -33,7 +35,7 @@ private:
 
     GDX12CommandQueue* _commandQueue;
     ComPtr<ID3D12QueryHeap> _queryHeap;
-    ComPtr<ID3D12Resource> _readbackBuffer;
+    GDX12ResourceHandle _readbackBuffer;
     UINT64* _mappedReadbackData;
     UINT64 _timestampFrequency;
     double _timeMS;

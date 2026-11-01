@@ -8,7 +8,9 @@
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
 
+#if defined(DEBUG) || defined(_DEBUG)
 #include <pix/pix3.h>
+#endif
 
 GDX12CommandList::GDX12CommandList(GDX12Device* device) :
 	FenceValue(0),
@@ -307,20 +309,23 @@ void GDX12CommandList::EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTUR
 	_commandList->Barrier(static_cast<UINT>(barrierGroups.size()), barrierGroups.data());
 }
 
-void GDX12CommandList::BeginPixEvent(const std::string& name, XMVECTOR color)
+#if defined(DEBUG) || defined(_DEBUG)
+GDX12CommandList::ScopedEvent::ScopedEvent(GDX12CommandList* commands, const char* name, XMVECTOR color)
+    : _commands(commands->_commandList.Get())
 {
 	UINT64 pixColor = (static_cast<UINT64>(XMVectorGetW(color) * 255.0f) << 24) |
 		(static_cast<UINT64>(XMVectorGetZ(color) * 255.0f) << 16) |
 		(static_cast<UINT64>(XMVectorGetY(color) * 255.0f) << 8) |
 		(static_cast<UINT64>(XMVectorGetX(color) * 255.0f));
 
-	PIXBeginEvent(_commandList.Get(), pixColor, name.c_str());
+	PIXBeginEvent(_commands, pixColor, "%s", name);
 }
 
-void GDX12CommandList::EndPixEvent()
+GDX12CommandList::ScopedEvent::~ScopedEvent() noexcept
 {
-	PIXEndEvent(_commandList.Get());
+	PIXEndEvent(_commands);
 }
+#endif
 
 void GDX12CommandList::CopyResource(ID3D12Resource* destResource, ID3D12Resource* sourceResource)
 {

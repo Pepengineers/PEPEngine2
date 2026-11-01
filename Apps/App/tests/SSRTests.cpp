@@ -109,9 +109,8 @@ public:
         if (cube)
         {
             auto resource = CD3DX12_RESOURCE_DESC::Tex2D(format, width, height, 6, 1);
-            auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
-            ThrowIfFailed(Device.GetDevice()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &resource,
-                D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&desc.ExternalResource)));
+            desc.ExternalResource = Device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, resource,
+                D3D12_RESOURCE_STATE_COMMON);
         }
         texture.Initialize(desc);
     }

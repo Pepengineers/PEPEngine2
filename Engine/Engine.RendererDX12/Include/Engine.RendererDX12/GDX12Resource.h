@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Engine.RendererDX12/GDX12ResourceHandle.h"
+
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 class GDX12Resource
@@ -32,7 +34,7 @@ public:
 
     virtual void ResetState();
 
-	ComPtr<ID3D12Resource> D3DResource;
+	GDX12ResourceHandle D3DResource;
 
 private:
 	D3D12_RESOURCE_STATES _currentState;

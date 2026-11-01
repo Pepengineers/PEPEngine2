@@ -11,8 +11,8 @@ public:
 
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
 	{
-		_inputs = inputs;
 		_numInputs = static_cast<UINT>(inputs.size());
+		GDX12RenderPass::SetInputs(std::move(inputs));
 		MatchOutputCount(_numInputs);
 	}
 
@@ -70,7 +70,7 @@ public:
 	// Resulting texture can be used as SRV or DSV on the device the texture was transferred to
 	void Execute(GDX12CommandList* cmdList) override
 	{
-		cmdList->BeginPixEvent("Texture Transfer From Shared Memory pass", Colors::ForestGreen);
+		GDX12_SCOPED_EVENT(cmdList, "Texture Transfer From Shared Memory pass", Colors::ForestGreen);
 		for (UINT i = 0; i < _numInputs; i++)
 		{
 			GDX12SharedTexture* inSharedTexture = IN_SharedTextures[i]->GetSharedTexture();
@@ -82,7 +82,6 @@ public:
 				inSharedTexture->GetSecondaryResource()->D3DResource.Get());
 			cmdList->ResourceBarrier({ inSharedTexture->GetSecondaryResource()->GetCommonBarrier() });
 		}
-		cmdList->EndPixEvent();
 	}
 
 	void Resize() override

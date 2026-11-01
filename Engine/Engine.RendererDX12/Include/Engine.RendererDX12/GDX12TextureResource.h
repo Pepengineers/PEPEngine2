@@ -6,7 +6,7 @@
 class GDX12TextureResource : public GDX12Resource
 {
 public:
-    GDX12TextureResource(ComPtr<ID3D12Resource> resource);
+    GDX12TextureResource(GDX12ResourceHandle resource);
     GDX12TextureResource();
     ~GDX12TextureResource();
 

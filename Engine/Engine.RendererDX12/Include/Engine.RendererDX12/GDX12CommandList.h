@@ -83,9 +83,19 @@ public:
 	void EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTURE_BARRIER> textureBarriers);
 
 
+#if defined(DEBUG) || defined(_DEBUG)
+    class ScopedEvent
+    {
+    public:
+        ScopedEvent(GDX12CommandList* commands, const char* name, XMVECTOR color = Colors::White);
+        ~ScopedEvent() noexcept;
+        ScopedEvent(const ScopedEvent&) = delete;
+        ScopedEvent& operator=(const ScopedEvent&) = delete;
+    private:
+        ID3D12GraphicsCommandList* _commands;
+    };
+#endif
 	//Misc
-	void BeginPixEvent(const std::string& name, XMVECTOR color);
-	void EndPixEvent();
 	void CopyResource(ID3D12Resource* destResource, ID3D12Resource* sourceResource);
 	void BuildRaytracingAccelerationStructure(const D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC* pDesc);
 
@@ -104,3 +114,12 @@ private:
 	D3D12_RECT _currentScissorRect;
 	GDX12GeometryBuffer* _currentGeometryBuffer;
 };
+
+#if defined(DEBUG) || defined(_DEBUG)
+#define GDX12_EVENT_JOIN_IMPL(a, b) a##b
+#define GDX12_EVENT_JOIN(a, b) GDX12_EVENT_JOIN_IMPL(a, b)
+#define GDX12_SCOPED_EVENT(...) const GDX12CommandList::ScopedEvent GDX12_EVENT_JOIN(gdx12Event, __LINE__)(__VA_ARGS__)
+#else
+// Do not evaluate marker names, colors or command-list expressions in Release.
+#define GDX12_SCOPED_EVENT(...) ((void)0)
+#endif
