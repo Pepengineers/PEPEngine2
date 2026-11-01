@@ -78,7 +78,7 @@ void GDX12CommandQueue::ExecuteCommandList(GDX12CommandList* commandList)
 void GDX12CommandQueue::ExecuteCommandLists(std::vector<GDX12CommandList*>& commandLists)
 {
     std::vector<ID3D12CommandList*> ppLists;
-    UINT commandListCount = commandLists.size();
+    const UINT commandListCount = static_cast<UINT>(commandLists.size());
     ppLists.reserve(commandListCount);
 
     for (UINT i = 0; i < commandListCount; ++i)

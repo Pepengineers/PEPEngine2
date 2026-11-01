@@ -29,7 +29,7 @@ public:
 	{
 		_inputs = inputs;
 		_numInputs = 2;
-		MatchOutputCount(inputs.size() > 2 ? inputs.size() - 2 : 0);
+		MatchOutputCount(static_cast<UINT>(inputs.size() > 2 ? inputs.size() - 2 : 0));
 	}
 
 	IRenderPassLink* GetOutput(UINT index) override
@@ -127,7 +127,7 @@ public:
 		ResourceTag depthTag{ &depthResource, kBufferTypeDepth, ResourceLifecycle::eValidUntilEvaluate, &fullExtent };
 		ResourceTag mvecTag{ &mvecResource, kBufferTypeMotionVectors, ResourceLifecycle::eValidUntilEvaluate, &fullExtent };
 
-		for (int i = 0; i < _numOutputs; i++)
+		for (UINT i = 0; i < _numOutputs; i++)
 		{
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
 			GDX12Texture* upscaledTexture = OUT_UpscaledTextures[i].get();

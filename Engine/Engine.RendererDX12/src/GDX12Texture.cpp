@@ -223,7 +223,7 @@ void GDX12Texture::Initialize(GDX12TextureDesc desc)
     else if (_desc.CreateDSV)
     {
         _clearValue.DepthStencil.Depth = _desc.ClearValue.x;
-        _clearValue.DepthStencil.Stencil = _desc.ClearValue.y;
+        _clearValue.DepthStencil.Stencil = static_cast<UINT8>(_desc.ClearValue.y);
     }
 
     _clearValue.Format = _desc.Format;

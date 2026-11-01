@@ -136,7 +136,7 @@ private:
 
         ThrowIfFailed(_transferFromDeivce->GetDevice()->CreatePlacedResource(
             _sharedHeap.Get(), 0, &desc, D3D12_RESOURCE_STATE_COMMON, nullptr,
-            IID_PPV_ARGS(&_sharedTexturePrimary.D3DResource)), "Failed to create placed resource on primary device");
+            IID_PPV_ARGS(&_sharedTexturePrimary.D3DResource)));
     }
 
     void ShareResources()

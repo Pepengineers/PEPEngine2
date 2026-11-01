@@ -11,7 +11,7 @@ public:
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
 	{
 		_inputs = inputs;
-		_numInputs = inputs.size();
+		_numInputs = static_cast<UINT>(inputs.size());
 		MatchOutputCount(_numInputs);
 	}
 
@@ -26,7 +26,7 @@ public:
 	void Initialize() override
 	{
 		IN_Textures.resize(_numInputs);
-		for (int i = 0; i < _numInputs; i++)
+		for (UINT i = 0; i < _numInputs; i++)
 		{
 			IN_Textures[i] = _inputs[i];
 			OUT_SharedTextures[i]->Initialize(_resources->Device, _otherResources->Device,
@@ -40,7 +40,7 @@ public:
 	void Execute(GDX12CommandList* cmdList) override
 	{
 		cmdList->BeginPixEvent("Texture Transfer To Shared Memory pass", Colors::ForestGreen);
-		for (int i = 0; i < _numInputs; i++)
+		for (UINT i = 0; i < _numInputs; i++)
 		{
 			GDX12Texture* inTexture = IN_Textures[i]->GetTexture();
 			GDX12SharedTexture* outSharedTexture = OUT_SharedTextures[i]->GetSharedTexture();

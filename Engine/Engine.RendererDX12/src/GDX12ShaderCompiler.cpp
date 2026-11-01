@@ -156,9 +156,9 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
 
         if (errors->GetStringLength() > 0) {
             OutputDebugStringA("\n=== Shader Compilation Details ===\n");
-            OutputDebugStringA(("Shader: " + std::string(filename.begin(), filename.end()) + "\n").c_str());
+            OutputDebugStringW((L"Shader: " + filename + L"\n").c_str());
             OutputDebugStringA(("Entry point: " + entrypoint + "\n").c_str());
-            OutputDebugStringA(("Target: " + std::string(shaderType.begin(), shaderType.end()) + "\n").c_str());
+            OutputDebugStringA(("Target: " + shaderType + "\n").c_str());
         }
     }
 

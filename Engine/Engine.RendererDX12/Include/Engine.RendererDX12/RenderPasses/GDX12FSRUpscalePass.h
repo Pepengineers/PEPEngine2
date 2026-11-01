@@ -17,7 +17,7 @@ public:
 	{
 		_inputs = inputs;
 		_numInputs = 2;
-		MatchOutputCount(inputs.size() > 2 ? inputs.size() - 2 : 0);
+		MatchOutputCount(static_cast<UINT>(inputs.size() > 2 ? inputs.size() - 2 : 0));
 	}
 
 	IRenderPassLink* GetOutput(UINT index) override
@@ -109,7 +109,7 @@ public:
 		dispatchDesc.transparencyAndComposition = ffxApiGetResourceDX12(nullptr, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		//dispatchDesc.flags = FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW;
 		dispatchDesc.flags = 0;
-		for (int i = 0; i < _numOutputs; i++)
+		for (UINT i = 0; i < _numOutputs; i++)
 		{
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
 			GDX12Texture* upscaledTexture = OUT_UpscaledTextures[i].get();
@@ -192,24 +192,21 @@ private:
 		upscaleDesc.flags = FFX_UPSCALE_ENABLE_DEBUG_CHECKING | FFX_UPSCALE_ENABLE_DEPTH_INVERTED | FFX_UPSCALE_ENABLE_AUTO_EXPOSURE;
 		upscaleDesc.fpMessage = [](uint32_t type, const wchar_t* message)
 			{
-				std::wstring wideMessage(message);
-				std::string narrowMessage(wideMessage.begin(), wideMessage.end());
-
-				std::string prefix;
+				std::wstring prefix;
 				switch (type) {
 				case FFX_API_MESSAGE_TYPE_ERROR:
-					prefix = "[FFX ERROR] ";
+					prefix = L"[FFX ERROR] ";
 					break;
 				case FFX_API_MESSAGE_TYPE_WARNING:
-					prefix = "[FFX WARNING] ";
+					prefix = L"[FFX WARNING] ";
 					break;
 				default:
-					prefix = "[FFX DEBUG] ";
+					prefix = L"[FFX DEBUG] ";
 					break;
 				}
 
-				std::string fullMessage = prefix + narrowMessage + "\n";
-				OutputDebugStringA(fullMessage.c_str());
+				std::wstring fullMessage = prefix + message + L"\n";
+				OutputDebugStringW(fullMessage.c_str());
 			};
 
 		ffxReturnCode_t errorCode = ffxCreateContext(&_FFXContext, &upscaleDesc.header, nullptr);

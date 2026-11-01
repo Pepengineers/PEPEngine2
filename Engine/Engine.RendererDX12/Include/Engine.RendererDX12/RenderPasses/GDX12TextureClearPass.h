@@ -12,21 +12,21 @@ public:
 	{
 		_inputs = inputs;
 		_numOutputs = 0;
-		_numInputs = inputs.size();
+		_numInputs = static_cast<UINT>(inputs.size());
 	}
 
 	// Input N - TextureToClear
 	void Initialize() override
 	{
 		IN_Textures.resize(_numInputs);
-		for (int i = 0; i < _numInputs; i++) { IN_Textures[i] = _inputs[i]; }
+		for (UINT i = 0; i < _numInputs; i++) { IN_Textures[i] = _inputs[i]; }
 	}
 
 	// Clears all textures if they have either DSVs or RTVs
 	void Execute(GDX12CommandList* cmdList) override
 	{
 		cmdList->BeginPixEvent("Texture clear pass", Colors::ForestGreen);
-		for (int i = 0; i < _numInputs; i++)
+		for (UINT i = 0; i < _numInputs; i++)
 		{
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
 
