@@ -69,3 +69,11 @@ Build/CVarTests/Manual/ConsoleVariableTests.exe
 ```
 
 Для проверки Release добавьте `/DNDEBUG /O2`. Тест намеренно вызывает ошибку запуска и проверяет её запись в лог. Он использует свой `Config/Engine.ini` рядом с тестовым exe и отказывается перезаписывать существующий файл.
+
+## Depth of field
+
+`Render.DOF.*` uses runtime-writable Default variables for enable, Off/Low/Mid/High,
+focus distance in cm, f-number, vertical sensor size, CoC limit, SDK ring budget and
+ring merging. Manual overrides survive quality changes; zero restores preset
+inheritance. Defaults, units, ranges, HDR/XeSS contracts and checks are documented
+in [depth-of-field.md](rendering/depth-of-field.md).

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="App.vcxproj" />
+  <PropertyGroup><ProjectGuid>{AADBE799-A0FD-4D96-A83B-6CAFC4F78011}</ProjectGuid></PropertyGroup>
+  <ItemGroup><ClCompile Remove="src\App.cpp" /><ClCompile Include="tests\BistroDofSmoke.cpp" /></ItemGroup>
+  <ItemDefinitionGroup><Link><SubSystem>Console</SubSystem></Link></ItemDefinitionGroup>
+</Project>
