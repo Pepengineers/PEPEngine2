@@ -105,7 +105,7 @@ struct GDX12EnvironmentIBLPass::Data
     uint64_t Identity=0,Lighting=0,MediumHash=0,RenderedLighting=0,RenderedMedium=0,Diagnostic=0;
     std::filesystem::path LoadedPath;
     uint64_t LoadedRevision=UINT64_MAX;
-    UINT EffectiveSource=0,Level=2,PrefilterSize=128,PrefilterMips=8,SkySize=1,SkyMips=1;
+    UINT EffectiveSource=0,PrefilterSize=128,PrefilterMips=8,SkySize=1,SkyMips=1;
     bool BrdfReady=false,Aerial=false;
     void LoadBox(GDX12DeviceResources&,const std::filesystem::path&);
     void BindSky(GDX12CommandList* commands,GDX12DeviceResources& resources)
@@ -324,7 +324,7 @@ void GDX12EnvironmentIBLPass::PrepareFrame()
         flush(); CreateTexture(*_resources,d.Outputs[0],filterSize/4,filterSize/4,1,1,true); CreateTexture(*_resources,d.Outputs[1],filterSize,filterSize,1,mips,true);
         CreateMipViews(*_resources,d.Outputs[1],mips,d.PrefilterViews); d.PrefilterSize=filterSize; d.PrefilterMips=mips; d.RenderedLighting=0;
     }
-    d.Level=level; d.Constants=constants;
+    d.Constants=constants;
     auto mediumConstants=constants; mediumConstants.InverseViewProjection={}; mediumConstants.CameraKm={}; mediumConstants.CameraWorld={}; mediumConstants.SunDirectionRadius={}; mediumConstants.SunRadiance={};
     d.MediumHash=Mix(1469598103934665603ull,&mediumConstants,sizeof(mediumConstants));
     auto lightingConstants=constants; lightingConstants.InverseViewProjection={}; lightingConstants.CameraWorld={};

@@ -1,5 +1,3 @@
-// Independent Stable Fluids implementation: Jos Stam, GDC 2003.
-// https://www.dgp.toronto.edu/~stam/reality/Research/pub.html
 cbuffer Parameters : register(b0)
 {
     uint Grid; uint Reserved0; uint Reserved1; uint Reserved2;
@@ -27,7 +25,6 @@ void Inject(uint3 id : SV_DispatchThreadID)
     float2 v=Bilinear(float2(p)-Dt*Velocity(p)/CellSize)*exp(-Decay*Dt);
     float envelope=sin(3.14159265*uv.x)*sin(3.14159265*uv.y);
     v+=Direction*Force*Dt*envelope;
-    // Face velocities on the right/top boundary have zero normal flux.
     if(p.x==int(Grid)-1) v.x=0; if(p.y==int(Grid)-1) v.y=0;
     Output[Address(p)]=v;
 }

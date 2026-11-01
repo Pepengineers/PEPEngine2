@@ -87,7 +87,6 @@ Scattering Integrate(float3 p,float3 d,float3 sun,float distance,uint steps,bool
     float miePhase=3*(1-g*g)*(1+cosTheta*cosTheta)/(8*PI*(2+g*g)*pow(max(.001,1+g*g-2*g*cosTheta),1.5));
     for(uint i=0;i<steps;++i)
     {
-        // Squared intervals retain near-camera precision without a long fixed-step ray march.
         float a=float(i)/steps,b=float(i+1)/steps;
         float dt=end*(b*b-a*a);
         float3 samplePos=p+d*end*lerp(a*a,b*b,.3);
@@ -163,9 +162,9 @@ float2 SkyUV(float3 p,float3 d,float3 sun)
     float height=length(p); float3 up=p/height;
     float zenith=clamp(dot(d,up),-1,1),beta=acos(sqrt(max(0,height*height-GroundRadius.w*GroundRadius.w))/height),horizon=PI-beta;
     float3 projectedView=d-up*zenith,projectedSun=sun-up*dot(sun,up);
-    // Zenith and a vertical sun have no azimuth; choose the continuous limit instead of normalizing zero.
-    float denom=length(projectedView)*length(projectedSun);
-    float lightView=denom>1e-6?clamp(dot(projectedView,projectedSun)/denom,-1,1):1;
+    float projectedAzimuthMagnitudeProduct=length(projectedView)*length(projectedSun);
+    const float alignedAzimuthCosine=1;
+    float lightView=projectedAzimuthMagnitudeProduct>1e-6?clamp(dot(projectedView,projectedSun)/projectedAzimuthMagnitudeProduct,-1,1):alignedAzimuthCosine;
     float y;
     if(Sphere(p,d,GroundRadius.w)<0) y=(1-sqrt(saturate(1-acos(zenith)/horizon)))*.5;
     else y=(1+sqrt(saturate((acos(zenith)-horizon)/beta)))*.5;

@@ -15,8 +15,7 @@ GDX12CommandList::GDX12CommandList(GDX12Device* device) :
 	_currentTopology(D3D_PRIMITIVE_TOPOLOGY_UNDEFINED),
 	_currentScissorRect({}),
 	_currentViewport({}),
-	_currentRootSignature(nullptr),
-	_currentGeometryBuffer(nullptr)
+	_currentRootSignature(nullptr)
 {
 	device->GetDevice()->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&_commandAllocator));
 
@@ -56,7 +55,6 @@ void GDX12CommandList::InvalidateCachedState()
     _currentDescriptorHeaps.clear();
 	_currentViewport = {};
 	_currentScissorRect = {};
-	_currentGeometryBuffer = nullptr;
 }
 
 void GDX12CommandList::SetPipelineState(ComPtr<ID3D12PipelineState> pso)
@@ -135,7 +133,6 @@ void GDX12CommandList::SetGeometryBuffer(GDX12GeometryBuffer* buffer)
 {
 	// Native buffers can grow while the arena object keeps its address.
 
-	_currentGeometryBuffer = buffer;
 	_commandList->IASetVertexBuffers(0, 1, &buffer->_vertexBufferView);
 	_commandList->IASetIndexBuffer(&buffer->_indexBufferView);
 }

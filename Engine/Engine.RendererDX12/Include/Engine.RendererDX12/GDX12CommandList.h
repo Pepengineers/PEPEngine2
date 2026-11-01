@@ -101,5 +101,4 @@ private:
 	std::vector<ID3D12DescriptorHeap*> _currentDescriptorHeaps;
 	D3D12_VIEWPORT _currentViewport;
 	D3D12_RECT _currentScissorRect;
-	GDX12GeometryBuffer* _currentGeometryBuffer;
 };

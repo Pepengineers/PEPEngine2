@@ -285,6 +285,7 @@
 
 ### Grass и wind
 
+- Коммит `24a021d`, `feat(render): add compact grass and wind`.
 - Добавлены GrassRenderComponent/WindComponent и submission в обеих update chains.
   Новых entities нет; пустая submission сохраняет neutral counts и не выделяет
   generated vertex/previous-position buffers. Материал — существующий opaque/masked PBR.
@@ -332,6 +333,20 @@
 - Ограничения: grass patch плоский в локальном XZ, wind — 2D world-XZ domain;
   maximum distance от основной камеры ограничивает также shadow/capture geometry.
   Симуляция ветра художественная, Jacobi projection приближённый; FPS не обещается.
+
+### Упрощение sky/grass после интеграции
+
+- Удалены write-only geometry-binding bookkeeping и sky level, повторная проверка
+  enabled ветра. World transpose/inverse для травы вычисляются один раз на компонент,
+  а не на каждый chunk. Используется существующий CopyResource wrapper.
+- Именование azimuth fallback уточнено без изменения выражений; удалены пересказы
+  кода в комментариях. Packed shader parameter mapping и правило исключения solar
+  disk из IBL сохранены как контракт интерфейса/учёта энергии.
+- Proof tests не менялись. SkyGpuSmoke, GrassGpuSmoke, десять кадров
+  BistroEffectsSmoke и Release App прошли после упрощений с DX12 debug layer.
+  Логи `Build/sky-grass-simplify-*`. Отдельного lint/typecheck runner нет;
+  полная Release-сборка App проверяет затронутые C++ проекты.
+  Выигрыш отдельных CPU-упрощений не измерялся.
 
 ## Оставшаяся работа
 

@@ -1,4 +1,3 @@
-// Compact two-sided triangle-list grass in the shared PBR vertex arena.
 cbuffer Parameters : register(b0)
 {
     float4x4 World;

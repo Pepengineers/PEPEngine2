@@ -174,6 +174,7 @@ void GDX12GrassWindPass::PrepareFrame()
         if(desc.Instances.size()!=size_t(nx)*nz) throw std::invalid_argument("Grass instance count must match bounded chunks");
         const float determinant=desc.World.Determinant();
         if(!std::isfinite(determinant)||std::abs(determinant)<1e-12f) throw std::invalid_argument("Grass requires a finite invertible world transform");
+        const Matrix world=desc.World.Transpose(),inverseWorld=desc.World.Invert().Transpose();
         const UINT tufts=static_cast<UINT>(std::ceil(s.TuftsPerChunk*d.Grass.DensityScale));
         const bool enabled=d.Grass.Enabled&&tufts&&s.Height*d.Grass.HeightScale>0;
         Data::Field* field=nullptr;
@@ -187,7 +188,7 @@ void GDX12GrassWindPass::PrepareFrame()
             {
                 r.GeometryBuffer->ReleaseGenerated(chunk.Range); chunk.Range=r.GeometryBuffer->AllocateGenerated(capacity); chunk.Reset=true;
             }
-            GrassCB cb={}; cb.World=desc.World.Transpose(); cb.InverseWorld=desc.World.Invert().Transpose();
+            GrassCB cb={}; cb.World=world; cb.InverseWorld=inverseWorld;
             const float left=-s.Extents.x+x*s.ChunkSize,right=(std::min)(left+s.ChunkSize,s.Extents.x);
             const float bottom=-s.Extents.y+z*s.ChunkSize,top=(std::min)(bottom+s.ChunkSize,s.Extents.y);
             cb.Patch={(left+right)*.5f,(bottom+top)*.5f,(right-left)*.5f,(top-bottom)*.5f};
@@ -207,7 +208,6 @@ void GDX12GrassWindPass::PrepareFrame()
             cb.ResetMotion=movement.Length()>s.MaxDistance||chunk.Reset||shapeChanged||chunk.ResetRevision!=s.ResetRevision||chunk.HistoryRevision!=_commonData->HistoryRevision||chunk.WindEntity!=windEntity||(field&&field->Reset);
             if(cb.ResetMotion) { cb.PreviousShape=cb.Shape; cb.PreviousWindDomain=cb.WindDomain; cb.PreviousWorld=cb.World; cb.PreviousInverseWorld=cb.InverseWorld; }
             chunk.Constants=cb; chunk.WindEntity=windEntity; chunk.ResetRevision=s.ResetRevision; chunk.HistoryRevision=_commonData->HistoryRevision;
-            // Do not hash previous-frame bookkeeping: a paused steady field must keep cached shadows warm.
             Hash(signature,instance); Hash(signature,enabled);
             if(enabled)
             {
@@ -252,20 +252,17 @@ void GDX12GrassWindPass::Execute(GDX12CommandList* commands)
         {
             for(auto* target:{f.Current.get(),f.Injected.get(),f.Previous.get(),f.Divergence.get(),f.Pressure[0].get(),f.Pressure[1].get()}) dispatch(f,d.Clear.Get(),*d.Neutral,*d.Neutral,*target);
         }
-        if(d.Wind.Enabled)
+        commands->ResourceBarrier({f.Current->GetResource().GetCopySourceBarrier(),f.Previous->GetResource().GetCopyDestBarrier()});
+        commands->CopyResource(f.Previous->GetResource().D3DResource.Get(),f.Current->GetResource().D3DResource.Get());
+        if(f.Constants.Dt>0)
         {
-            commands->ResourceBarrier({f.Current->GetResource().GetCopySourceBarrier(),f.Previous->GetResource().GetCopyDestBarrier()});
-            commands->GetCommandList()->CopyResource(f.Previous->GetResource().D3DResource.Get(),f.Current->GetResource().D3DResource.Get());
-            if(f.Constants.Dt>0)
-            {
-                dispatch(f,d.Inject.Get(),*f.Current,*d.Neutral,*f.Injected);
-                dispatch(f,d.Divergence.Get(),*f.Injected,*d.Neutral,*f.Divergence);
-                dispatch(f,d.Clear.Get(),*d.Neutral,*d.Neutral,*f.Pressure[0]);
-                UINT input=0;
-                for(UINT iteration=0;iteration<f.Iterations;++iteration)
-                { dispatch(f,d.Jacobi.Get(),*f.Divergence,*f.Pressure[input],*f.Pressure[1-input]); input=1-input; }
-                dispatch(f,d.Project.Get(),*f.Injected,*f.Pressure[input],*f.Current);
-            }
+            dispatch(f,d.Inject.Get(),*f.Current,*d.Neutral,*f.Injected);
+            dispatch(f,d.Divergence.Get(),*f.Injected,*d.Neutral,*f.Divergence);
+            dispatch(f,d.Clear.Get(),*d.Neutral,*d.Neutral,*f.Pressure[0]);
+            UINT input=0;
+            for(UINT iteration=0;iteration<f.Iterations;++iteration)
+            { dispatch(f,d.Jacobi.Get(),*f.Divergence,*f.Pressure[input],*f.Pressure[1-input]); input=1-input; }
+            dispatch(f,d.Project.Get(),*f.Injected,*f.Pressure[input],*f.Current);
         }
         commands->ResourceBarrier({f.Current->GetResource().GetSRVBarrier(),f.Previous->GetResource().GetSRVBarrier()});
     }
