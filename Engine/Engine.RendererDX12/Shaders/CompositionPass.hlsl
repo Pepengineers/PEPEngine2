@@ -24,6 +24,7 @@ float4 PS(VSOutput input) : SV_TARGET
     float2 uv = input.TexCoord;
     
     float4 opaqueColor = OpaqueTexture.Sample(samPointClamp, uv);
+#ifndef SKIP_OPAQUE_AERIAL
     float depth = OpaqueDepth.SampleLevel(samPointClamp, uv, 0);
     if (depth > 0 && CBSky.Mode.x == 2)
     {
@@ -31,6 +32,7 @@ float4 PS(VSOutput input) : SV_TARGET
         opaqueColor.rgb = ApplySkyAerialPerspective(opaqueColor.rgb, uv,
             length(world.xyz / world.w - CBCamera.CameraLocation));
     }
+#endif
     float4 accumColor = AccumTexture.Sample(samPointClamp, uv);
     float revealage = saturate(RevealageTexture.Sample(samPointClamp, uv));
     

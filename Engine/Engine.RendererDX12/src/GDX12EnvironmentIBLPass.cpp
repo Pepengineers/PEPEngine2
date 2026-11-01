@@ -28,6 +28,12 @@ void GDX12EnvironmentIBLPass::Initialize()
     nullCube.TextureCube.MipLevels = 1;
     _nullCube.InitAsSRV(nullptr, &nullCube, _resources->SRV_UAV_Heap.get(),
         _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
+    auto null2D = nullCube;
+    null2D.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    null2D.Texture2D = {};
+    null2D.Texture2D.MipLevels = 1;
+    _null2D.InitAsSRV(nullptr, &null2D, _resources->SRV_UAV_Heap.get(),
+        _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
     GDX12RootSignatureDesc filter;
     filter.Constants = { 4 };
     filter.NumSingleSRVSlots = 1;
@@ -192,9 +198,9 @@ void GDX12EnvironmentIBLPass::BindSky(GDX12CommandList* commands, UINT constantI
     auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     commands->SetComputeRootSignature(_skyRoot.get());
     commands->SetComputeRootConstantBufferView(0, frame->SkyCB->GetElementAddress(constantIndex));
-    commands->SetComputeSRV(0, _resources->SkyTransmittanceSRV.GPUHandle);
-    commands->SetComputeSRV(1, _resources->SkyTransmittanceSRV.GPUHandle);
-    commands->SetComputeSRV(2, _resources->SkyViewSRV.GPUHandle);
+    commands->SetComputeSRV(0, _null2D.GPUHandle);
+    commands->SetComputeSRV(1, _null2D.GPUHandle);
+    commands->SetComputeSRV(2, _null2D.GPUHandle);
     commands->SetComputeSRV(3, _nullCube.GPUHandle);
     if (_commonData->ActiveCameraCBufferIndex != UINT_MAX)
         commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));

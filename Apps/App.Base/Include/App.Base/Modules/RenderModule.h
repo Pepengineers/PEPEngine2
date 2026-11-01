@@ -1,4 +1,4 @@
-п»ї#pragma once
+#pragma once
 
 #include "Common/GameTimer.h"
 #include "Common/Module.h"

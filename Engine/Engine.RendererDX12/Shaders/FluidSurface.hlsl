@@ -63,9 +63,9 @@ SphereVertex SphereVS(uint vertex : SV_VertexID, uint instance : SV_InstanceID)
     float halfSize = Radius * max(viewDepth, Camera.NearPlane) / max(viewDepth - Radius, Camera.NearPlane);
     float3 right = float3(Camera.View._11, Camera.View._21, Camera.View._31);
     float3 up = float3(Camera.View._12, Camera.View._22, Camera.View._32);
-    float3 point = center + (right * Corners[vertex].x + up * Corners[vertex].y) * halfSize;
+    float3 surfacePoint = center + (right * Corners[vertex].x + up * Corners[vertex].y) * halfSize;
     SphereVertex output;
-    output.Position = mul(float4(point, 1), Camera.ViewProj);
+    output.Position = mul(float4(surfacePoint, 1), Camera.ViewProj);
     if (viewDepth - Radius <= Camera.NearPlane) output.Position = float4(Corners[vertex], 0.5f, 1);
     if (viewDepth + Radius <= Camera.NearPlane) output.Position = float4(2, 2, 0, 1);
     output.ParticleId = instance;

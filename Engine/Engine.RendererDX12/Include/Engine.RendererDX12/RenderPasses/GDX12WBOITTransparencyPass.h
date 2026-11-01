@@ -164,7 +164,8 @@ public:
 	void Execute(GDX12CommandList* cmdList) override
 	{
         _rendered = _partition != WaterPartition::Front ||
-            (_inputs.size() > 6 && _inputs[6]->GetTexture() != _inputs[0]->GetTexture());
+            (_inputs.size() > 6 && _inputs[6]->GetTexture() != _inputs[0]->GetTexture()) ||
+            !_resources->ParticleEmitters.empty();
         if (!_rendered) return;
 		auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
 		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[_commonData->ActiveCameraCBufferIndex];
@@ -207,7 +208,7 @@ public:
 		CD3DX12_RESOURCE_BARRIER::Transition(depthStencil->GetResource()->D3DResource.Get(),
             depthStencil->GetResource()->GetCurrentState(),
             D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) });
-        depthStencil->GetResource()->SetCurrentState(D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+        depthStencil->GetResource()->GDX12Resource::SetCurrentState(D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 		const D3D12_CPU_DESCRIPTOR_HANDLE renderTargets[] = { OUT_Accumulation->GetRTV()->CPUHandle, OUT_Revealage->GetRTV()->CPUHandle };
         cmdList->GetCommandList()->OMSetRenderTargets(2, renderTargets, FALSE, &_readOnlyDepth->CPUHandle);
 		cmdList->ClearRenderTargetView(OUT_Accumulation.get());

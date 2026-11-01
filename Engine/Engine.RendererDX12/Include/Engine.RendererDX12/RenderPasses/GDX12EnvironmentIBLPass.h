@@ -33,7 +33,7 @@ private:
     std::array<ComPtr<ID3D12PipelineState>, 5> _skyPipelines;
     std::unique_ptr<GDX12RootSignature> _filterRoot, _skyRoot;
     std::filesystem::path _boxAsset;
-    GDX12Descriptor _nullCube;
+    GDX12Descriptor _nullCube, _null2D;
     std::vector<std::unique_ptr<GDX12Descriptor>> _sourceUAVs;
     UINT _prefilterMips = 0;
     uint64_t _revision = UINT64_MAX;

@@ -234,7 +234,6 @@
     <Import Project="..\..\MSBuild\Props\PEPEngine.Module.Engine.RendererDX12.Public.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Dxc.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Pix.props" />
-    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Assimp.props" />
   </ImportGroup>
   <Import Project="..\..\MSBuild\Props\PEPEngine.External.FidelityFX.props" Condition="'$(PEPFidelityFXImported)'!='true'" />
   <PropertyGroup Label="UserMacros" />

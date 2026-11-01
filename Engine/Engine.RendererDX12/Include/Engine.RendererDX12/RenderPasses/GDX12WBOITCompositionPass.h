@@ -62,7 +62,8 @@ public:
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
 		_compositionVS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "FullScreenVS.hlsl", nullptr, "VS", "vs");
-		_compositionPS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "CompositionPass.hlsl", nullptr, "PS", "ps");
+		const D3D_SHADER_MACRO frontDefines[] = { { "SKIP_OPAQUE_AERIAL", "1" }, { nullptr, nullptr } };
+		_compositionPS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "CompositionPass.hlsl", _front ? frontDefines : nullptr, "PS", "ps");
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;

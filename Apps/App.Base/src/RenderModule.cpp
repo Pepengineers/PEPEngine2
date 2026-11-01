@@ -1051,7 +1051,7 @@ void RenderModule::CollectGrassScene(GDX12CommandList* commands)
 void RenderModule::CollectParticleEmitters()
 {
     _primaryResources.ParticleEmitters.clear();
-    auto* scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
+    auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
     for (size_t i = 0; i < scenes->GetWorldCount(); ++i)
     {
         auto* world = scenes->GetWorld(i);
@@ -1271,7 +1271,6 @@ void RenderModule::ConfigureRenderPipeline()
     auto* behindTransparency = behind.get();
     _primaryRenderPassExecutionList.push_back(std::move(behind));
     auto behindComposite = std::make_unique<GDX12WBOITCompositionPass>();
-    auto* behindComposition = behindComposite.get();
     _primaryRenderPassExecutionList.push_back(std::move(behindComposite));
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12FluidResolvePass>(fluidSurfacePass));
     auto front = std::make_unique<GDX12WBOITTransparencyPass>(
@@ -1279,7 +1278,7 @@ void RenderModule::ConfigureRenderPipeline()
     auto* frontTransparency = front.get();
     _primaryRenderPassExecutionList.push_back(std::move(front));
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12ParticlesPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>(behindComposition, frontTransparency));
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>(nullptr, frontTransparency));
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DepthOfFieldPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12MotionBlurPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12XeSSUpscalePass>());

@@ -47,16 +47,16 @@ void CS(uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
     }
     float3 position = mul(float4(source.Position, 1), current).xyz;
     float3 previousPosition = mul(float4(source.Position, 1), previous).xyz;
-    float3x3 linear = (float3x3)current;
-    float3x3 cofactor = float3x3(cross(linear[1], linear[2]),
-        cross(linear[2], linear[0]), cross(linear[0], linear[1]));
-    float determinant = dot(linear[0], cofactor[0]);
+    float3x3 deformation = (float3x3)current;
+    float3x3 cofactor = float3x3(cross(deformation[1], deformation[2]),
+        cross(deformation[2], deformation[0]), cross(deformation[0], deformation[1]));
+    float determinant = dot(deformation[0], cofactor[0]);
     float3 bindNormal = SafeNormal(source.Normal, float3(0, 1, 0));
     // Dividing by determinant preserves normal orientation under reflected scales.
     float3 normal = abs(determinant) > 1e-12
         ? SafeNormal(mul(bindNormal, cofactor) / determinant, bindNormal)
-        : SafeNormal(mul(bindNormal, linear), bindNormal);
-    float3 tangent = mul(source.Tangent, linear);
+        : SafeNormal(mul(bindNormal, deformation), bindNormal);
+    float3 tangent = mul(source.Tangent, deformation);
     float3 tangentAxis = abs(normal.y) < 0.9 ? float3(0, 1, 0) : float3(1, 0, 0);
     float3 fallbackTangent = normalize(cross(tangentAxis, normal));
     tangent = SafeNormal(tangent - normal * dot(normal, tangent), fallbackTangent);

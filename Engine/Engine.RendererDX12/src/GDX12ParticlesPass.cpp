@@ -111,6 +111,7 @@ struct GDX12ParticlesPass::State
     void Initialize(GDX12DeviceResources* resources)
     {
         GDX12RootSignatureDesc root;
+        root.VolatileSRVData = true;
         root.Constants = { 4 };
         root.NumSingleCBVSlots = 2;
         root.NumSingleSRVSlots = 4;
@@ -173,8 +174,8 @@ struct GDX12ParticlesPass::State
                 reveal.SrcBlendAlpha = D3D12_BLEND_ZERO;
                 reveal.DestBlendAlpha = D3D12_BLEND_ONE;
             }
-            auto* target = mode == 0 ? &Weighted : mode == 1 ? &Additive : mode == 2 ? &Alpha : &Motion;
-            ThrowIfFailed(resources->Device->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(target->ReleaseAndGetAddressOf())));
+            auto& target = mode == 0 ? Weighted : mode == 1 ? Additive : mode == 2 ? Alpha : Motion;
+            ThrowIfFailed(resources->Device->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(target.ReleaseAndGetAddressOf())));
         }
     }
 
@@ -197,6 +198,7 @@ struct GDX12ParticlesPass::State
             resources->Device->GetDeviceFeatures().Features.HighestShaderModel() < D3D_SHADER_MODEL_6_0)
             throw std::runtime_error("FidelityFX particle sorting requires SM6 wave operations");
         GDX12RootSignatureDesc root;
+        root.VolatileSRVData = true;
         root.Constants = { 2 };
         root.NumSingleCBVSlots = 1;
         root.NumSingleUAVSlots = 6;
@@ -549,7 +551,7 @@ void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
     commands->ResourceBarrier({ state.DrawArgs->GetResource().GetIndirectArgsBarrier() });
     if (state.Sorted) state.Sort(commands);
     commands->ResourceBarrier({ state.Draws->GetResource().GetSRVBarrier(), state.Indices->GetResource().GetSRVBarrier(),
-        state.Payloads[0]->GetResource().GetSRVBarrier(), depth->GetResource()->GetPixelShaderResourceBarrier(),
+        state.Payloads[0]->GetResource().GetSRVBarrier(), depth->GetResource()->GetSRVBarrier(),
         _inputs[1]->GetTexture()->GetResource()->GetRenderTargetBarrier(),
         _inputs[2]->GetTexture()->GetResource()->GetRenderTargetBarrier() });
     commands->SetViewport(depth->GetViewport());
@@ -575,7 +577,8 @@ void GDX12ParticlesPass::Composite(GDX12CommandList* commands, GDX12Texture* hdr
     auto& state = *_state;
     auto* depth = _inputs[0]->GetTexture();
     commands->BeginPixEvent("Sorted and additive HDR particles", Colors::Orange);
-    commands->ResourceBarrier({ hdr->GetResource()->GetRenderTargetBarrier(), depth->GetResource()->GetPixelShaderResourceBarrier() });
+    commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
+    commands->ResourceBarrier({ hdr->GetResource()->GetRenderTargetBarrier(), depth->GetResource()->GetSRVBarrier() });
     commands->SetViewport(hdr->GetViewport());
     commands->SetScissorRect(hdr->GetScissorRect());
     commands->SetRenderTargets({ hdr }, nullptr);

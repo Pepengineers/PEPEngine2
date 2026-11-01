@@ -62,7 +62,8 @@ GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSigna
         for (UINT i = 0; i < desc.NumSingleSRVSlots; i++)
         {
             CD3DX12_DESCRIPTOR_RANGE1 range;
-            range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, currentRegister);
+            range.Init(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, currentRegister, 0,
+                desc.VolatileSRVData ? D3D12_DESCRIPTOR_RANGE_FLAG_DATA_VOLATILE : D3D12_DESCRIPTOR_RANGE_FLAG_NONE);
             ranges.push_back(range);
 
             CD3DX12_ROOT_PARAMETER1 param;

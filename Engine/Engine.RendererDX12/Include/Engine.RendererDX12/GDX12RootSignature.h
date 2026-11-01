@@ -14,6 +14,7 @@ struct GDX12RootSignatureRange
 
 struct GDX12RootSignatureDesc
 {
+    bool VolatileSRVData = false;
 	UINT NumSingleCBVSlots = 0;
 	UINT NumSingleSRVSlots = 0;
 	UINT NumSingleUAVSlots = 0;

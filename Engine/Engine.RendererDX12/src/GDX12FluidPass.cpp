@@ -83,6 +83,7 @@ void GDX12FluidSurfacePass::CreatePipelines()
 {
     if (_solverRoot) return;
     GDX12RootSignatureDesc solver;
+    solver.VolatileSRVData = true;
     solver.Constants = { 8 };
     solver.NumSingleCBVSlots = 1;
     solver.NumSingleSRVSlots = 4;
@@ -95,6 +96,7 @@ void GDX12FluidSurfacePass::CreatePipelines()
     _densities = Compute(_resources, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "Densities");
     _integrate = Compute(_resources, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "Integrate");
     GDX12RootSignatureDesc surface;
+    surface.VolatileSRVData = true;
     surface.Constants = { 4 };
     surface.NumSingleCBVSlots = 2;
     surface.NumSingleSRVSlots = 14;

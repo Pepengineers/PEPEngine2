@@ -62,20 +62,28 @@ std::unique_ptr<GDX12UploadBuffer<T>> GDX12GrassRenderer::Buffer(UINT count, boo
 void GDX12GrassRenderer::Initialize()
 {
     GDX12RootSignatureDesc compute;
+    compute.VolatileSRVData = true;
     compute.NumSingleCBVSlots = 1;
     compute.NumSingleSRVSlots = 3;
     compute.NumSingleUAVSlots = 3;
     _computeRoot = std::make_unique<GDX12RootSignature>(_resources->Device, compute);
     GDX12RootSignatureDesc wind;
+    wind.VolatileSRVData = true;
     wind.NumSingleCBVSlots = 1;
     wind.NumSingleSRVSlots = 2;
     wind.NumSingleUAVSlots = 1;
     _windRoot = std::make_unique<GDX12RootSignature>(_resources->Device, wind);
     GDX12RootSignatureDesc graphics;
+    graphics.VolatileSRVData = true;
     graphics.NumSingleCBVSlots = 4;
     graphics.NumSingleSRVSlots = 8;
     graphics.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
     graphics.StaticSamplers = GetStaticSamplers();
+    CD3DX12_STATIC_SAMPLER_DESC shadowSampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
+    shadowSampler.AddressU = shadowSampler.AddressV = shadowSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
+    shadowSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
+    shadowSampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
+    graphics.StaticSamplers.push_back(shadowSampler);
     _graphicsRoot = std::make_unique<GDX12RootSignature>(_resources->Device, graphics);
     auto& compiler = GDX12ShaderCompiler::GetInstance();
     const auto createCompute = [&](const wchar_t* file, const char* entry, GDX12RootSignature* root,
@@ -478,7 +486,7 @@ void GDX12GrassRenderer::Draw(GDX12CommandList* commands, Stage stage, const Mat
         commands->ResourceBarrier({ _arguments->GetResource().GetUAVBarrier() });
         commands->SetPipelineState(_expandPSO);
         commands->Dispatch((p.Count + 63) / 64, 1, 1);
-        commands->ResourceBarrier({ _vertices->GetResource().GetNonPixelShaderResourceBarrier(),
+        commands->ResourceBarrier({ _vertices->GetResource().GetSRVBarrier(),
             _indices->GetResource().GetGenericReadBarrier(), _arguments->GetResource().GetIndirectArgsBarrier() });
         commands->SetGraphicsRootSignature(_graphicsRoot.get());
         commands->SetPipelineState(_graphicsPSO.at(static_cast<size_t>(stage)));

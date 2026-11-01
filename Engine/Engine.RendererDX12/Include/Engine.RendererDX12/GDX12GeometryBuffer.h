@@ -8,6 +8,7 @@
 #include <map>
 
 using namespace Engine::Core;
+class GDX12CommandList;
 
 struct GPUSubMesh
 {

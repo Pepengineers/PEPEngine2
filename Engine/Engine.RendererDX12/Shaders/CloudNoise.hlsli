@@ -21,14 +21,14 @@ float CloudSimplex(float2 position, float2 phase)
     const float unskew = 0.211324865405f;
     float2 lattice = position + (position.x + position.y) * skew + phase;
     int2 cell = int2(floor(lattice));
-    float2 point = lattice - float2(cell);
-    point -= (point.x + point.y) * unskew;
-    int2 middle = point.x > point.y ? int2(1, 0) : int2(0, 1);
+    float2 offsetFromCell = lattice - float2(cell);
+    offsetFromCell -= (offsetFromCell.x + offsetFromCell.y) * unskew;
+    int2 middle = offsetFromCell.x > offsetFromCell.y ? int2(1, 0) : int2(0, 1);
     float sum = 0;
     for (uint vertex = 0; vertex < 3; ++vertex)
     {
         int2 offset = vertex == 0 ? int2(0,0) : (vertex == 1 ? middle : int2(1,1));
-        float2 delta = point - float2(offset) + (offset.x + offset.y) * unskew;
+        float2 delta = offsetFromCell - float2(offset) + (offset.x + offset.y) * unskew;
         float weight = max(0.5f - dot(delta, delta), 0.0f);
         sum += weight * weight * weight * weight * dot(CloudGradient(cell + offset), delta);
     }
