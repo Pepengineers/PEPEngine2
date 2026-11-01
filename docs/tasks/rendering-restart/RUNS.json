@@ -50,7 +50,7 @@
     }
   ],
   "secondGroup": {
-    "status": "prepared_not_started",
+    "status": "awaiting_review_completion_before_authorized_launch",
     "tasks": [
       "SKY",
       "GRASS_WIND",
@@ -58,6 +58,16 @@
       "FLUID",
       "SKINNING",
       "CLOUDS"
-    ]
+    ],
+    "globalCVarPolicy": "Enabled and Quality only; all other settings belong to render component instances"
+  },
+  "reviewCoordinator": {
+    "threadId": "01a19712-024c-7381-96de-f328a7767952",
+    "hostId": "local",
+    "model": "gpt-6.1-sol",
+    "reasoning": "high",
+    "status": "launched",
+    "scope": "Verify and fix first group personally, then create second-group chats from verified integration baseline",
+    "plannedCheckout": "D:/Project/PEPEngine2/Build/Features/REVIEW"
   }
 }
