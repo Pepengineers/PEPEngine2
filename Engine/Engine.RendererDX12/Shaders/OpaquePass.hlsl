@@ -81,7 +81,7 @@ PS_OUTPUT PS(VS_OUTPUT_PS_INPUT pin)
     
     float2 currentNDC = pin.PosCSNoJitter.xy / pin.PosCSNoJitter.w;
     float2 prevNDC = pin.PrevPosCSNoJitter.xy / pin.PrevPosCSNoJitter.w;
-    float2 velocity = prevNDC - currentNDC;
+    float2 velocity = pin.PrevPosCSNoJitter.w > 0.00001f ? prevNDC - currentNDC : 0;
 
     PBRSurface surface = SamplePBRSurface(material, color.rgb, pin.PosW, pin.Normal, pin.TexC);
     output.AlbedoMetallic = float4(surface.Albedo, surface.Metallic);

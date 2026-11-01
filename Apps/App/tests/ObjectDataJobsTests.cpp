@@ -8,6 +8,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <thread>
+#include <d3d12sdklayers.h>
 
 static void Require(bool condition, const char* message)
 {
@@ -132,6 +133,97 @@ public:
             render->Update();
             _gpuData.Schedule(jobs, world, 0, 1).Complete();
         }
+        for (int frame = 0; frame < 3; ++frame)
+        {
+            render->Update();
+            _gpuData.Schedule(jobs, world, 0, 1).Complete();
+            const auto transforms = ReadUpload(render->GetCurrentPrimaryFrameConstants()->TransformCache.get());
+            const auto& object = transforms.at(render->GetTransformGPUData(bottle).CBufferIndex);
+            Require(Matrix(object.WorldMatrix) == Matrix(object.PrevWorldMatrix),
+                "Stopped object retained motion in a buffered frame slot");
+        }
+        auto& camera = ecs.Get<CameraComponent>(world.ActiveCamera);
+        camera.ResetHistory = true;
+        render->Update();
+        _gpuData.Schedule(jobs, world, 0, 1).Complete();
+        Require(render->GetRenderPipelineCommonData()->ResetHistory, "Camera cut did not reach the render pipeline");
+        const auto cameras = ReadUpload(render->GetCurrentPrimaryFrameConstants()->CameraCB.get());
+        Require(Matrix(cameras[camera._CBufferIndex].ViewProjNoJitter) == Matrix(cameras[camera._CBufferIndex].PrevViewProjNoJitter),
+            "Camera cut retained its old projection history");
+        render->Update();
+        _gpuData.Schedule(jobs, world, 0, 1).Complete();
+        Require(!render->GetRenderPipelineCommonData()->ResetHistory, "Camera cut reset did not expire");
+        camera.FOV += 1;
+        render->Update();
+        _gpuData.Schedule(jobs, world, 0, 1).Complete();
+        Require(render->GetRenderPipelineCommonData()->ResetHistory, "Projection change did not reset temporal history");
+        camera.FOV -= 1;
+    }
+    void RenderBistroFrames()
+    {
+        auto* render = Locator.GetModule<RenderModule>().get();
+        auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+        auto& ecs = world.GetECS();
+        Require(ecs.GetPool<FlyingPropComponent>().Size() > 0, "Bistro has no existing moving props");
+        ComPtr<ID3D12Device> device;
+        ThrowIfFailed(render->GetCurrentPrimaryFrameConstants()->CameraCB->GetResource().D3DResource->GetDevice(IID_PPV_ARGS(&device)));
+        ComPtr<ID3D12InfoQueue> info;
+        ThrowIfFailed(device.As(&info));
+        info->ClearStoredMessages();
+        FlyingPropSystem flyingProps;
+        Timer.Reset();
+        auto& cameraTransform = ecs.Get<TransformComponent>(world.ActiveCamera);
+        auto& camera = ecs.Get<CameraComponent>(world.ActiveCamera);
+        const auto setting = [&](const wchar_t* name, const char* value)
+        {
+            Require(Locator.GetModule<ConsoleModule>()->FindConsoleVariable(name).SetFromString(value), "Bistro runtime setting failed");
+        };
+        for (unsigned frame = 0; frame < 36; ++frame)
+        {
+            Timer.Tick();
+            if (frame < 12)
+            {
+                cameraTransform.Location.x += 0.25f;
+                cameraTransform.Rotation.y += 0.05f;
+                cameraTransform.DirtyFlag = true;
+            }
+            if (frame == 8) setting(L"Render.MotionBlur.Enabled", "false");
+            if (frame == 10) setting(L"Render.MotionBlur.Enabled", "true");
+            if (frame == 14) setting(L"Render.MotionBlur.Quality", "1");
+            if (frame == 16) GetWindow()->SetWindowSize(1001, 613);
+            if (frame == 18) setting(L"Render.MotionBlur.Quality", "3");
+            if (frame == 20) camera.ResetHistory = true;
+            if (frame == 22) setting(L"Render.MotionBlur.Quality", "2");
+            if (frame == 24) setting(L"Render.MotionBlur.MaxRadius", "16");
+            if (frame == 26) setting(L"Render.MotionBlur.MaxRadius", "40");
+            if (frame == 28) setting(L"Render.MotionBlur.ShutterFraction", "0");
+            if (frame == 30) setting(L"Render.MotionBlur.ShutterFraction", "0.5");
+            render->Update();
+            const float dt = frame < 24 ? 1.0f / 60 : 0;
+            auto work = _movement.Schedule(_jobs, world, dt);
+            work = _circle.Schedule(_jobs, world, dt, work);
+            work = _spline.Schedule(_jobs, world, dt, work);
+            work = flyingProps.Schedule(_jobs, world, dt, work);
+            work = _lookAt.Schedule(_jobs, world, dt, work);
+            work = _lights.Schedule(_jobs, world, dt, work);
+            work = _gpuData.Schedule(_jobs, world, dt, work);
+            work.Complete();
+            Render(Timer);
+            render->WaitForUploads();
+        }
+        ThrowIfFailed(device->GetDeviceRemovedReason());
+        for (UINT64 index = 0; index < info->GetNumStoredMessages(); ++index)
+        {
+            SIZE_T bytes = 0;
+            info->GetMessage(index, nullptr, &bytes);
+            std::vector<unsigned char> storage(bytes);
+            auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+            ThrowIfFailed(info->GetMessage(index, message, &bytes));
+            if (message->Severity <= D3D12_MESSAGE_SEVERITY_WARNING) throw std::runtime_error(message->pDescription);
+        }
+        std::cout << "Actual Bistro rendered 36 frames through motion blur/HDR XeSS/tone mapping; props="
+            << ecs.GetPool<FlyingPropComponent>().Size()
+            << ", camera translation/rotation, Off/Low/Mid/High, cut and odd resize passed; debug layer clean.\n";
     }
 protected:
     bool AddModules() override
@@ -148,6 +240,17 @@ int main(int argc, char** argv)
 {
     try
     {
+        if (argc == 3 && std::string_view(argv[1]) == "--render-bistro")
+        {
+            ComPtr<ID3D12Debug> debug;
+            ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
+            debug->EnableDebugLayer();
+            ObjectDataApp app(std::filesystem::absolute(argv[2]));
+            Require(app.Initialize(), "Bistro render smoke initialization failed");
+            ShowWindow(app.GetWindow()->GetWindowHandle(), SW_HIDE);
+            app.RenderBistroFrames();
+            return 0;
+        }
         if (argc == 2 && (std::string_view(argv[1]) == "--check-job-threads" || std::string_view(argv[1]) == "--check-job-settings"))
         {
             ObjectDataApp app({});

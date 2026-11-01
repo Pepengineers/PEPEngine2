@@ -28,6 +28,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12NISUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12SyncPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12XeSSUpscalePass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12MotionBlurPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
@@ -97,6 +98,7 @@ void RenderModule::Uninitialize()
 
 void RenderModule::OnResize()
 {
+    _RPcommonData.RequestHistoryReset = true;
     _primaryDevice->GetCommandQueue()->Flush();
     if (_dualGPUMode) { _secondaryDevice->GetCommandQueue()->Flush(); }
 
@@ -426,6 +428,7 @@ void RenderModule::SubmitCameraShadows(const GDX12ShadowConstants& shadows)
 
 void RenderModule::SetActiveCamera(CameraComponent* camera)
 {
+    _RPcommonData.RequestHistoryReset = true;
     _RPcommonData.ActiveCameraCBufferIndex = camera->_CBufferIndex;
     _RPcommonData.ActiveCameraFOV = camera->FOV;
     _RPcommonData.ActiveCameraNearPlane = camera->NearPlane;
@@ -742,6 +745,7 @@ const float RenderModule::GetAspectRatio()
 
 void RenderModule::OnUpdate()
 {
+    if (_timer->DeltaTime() > 0.25f) _RPcommonData.RequestHistoryReset = true;
     uint16_t width, height;
     _window->GetWindowSize(width, height);
 
@@ -894,6 +898,7 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DeferredLightingPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12MotionBlurPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12XeSSUpscalePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
 
@@ -909,8 +914,9 @@ void RenderModule::ConfigureRenderPipeline()
     GDX12RenderPass* lightingPass = _primaryRenderPassExecutionList[6].get();
     GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[7].get();
     GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[8].get();
-    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[9].get();
-    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[10].get();
+    GDX12RenderPass* motionBlurPass = _primaryRenderPassExecutionList[9].get();
+    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[10].get();
+    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[11].get();
 
     clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
     cullingPass->SetInputs({});
@@ -918,7 +924,8 @@ void RenderModule::ConfigureRenderPipeline()
     lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0) });
     transparencyPass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), localShadowPass->GetOutput(0) });
     compositionPass->SetInputs({ lightingPass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
-    upscalePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1), compositionPass->GetOutput(0) });
+    motionBlurPass->SetInputs({ compositionPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
+    upscalePass->SetInputs({ opaquePass->GetOutput(2), motionBlurPass->GetOutput(1), motionBlurPass->GetOutput(0) });
     outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get()});
 
     opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);

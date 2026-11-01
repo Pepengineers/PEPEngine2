@@ -17,6 +17,7 @@ public:
 	const ComPtr<ID3D12GraphicsCommandList10>& GetCommandList();
 	const ComPtr<ID3D12CommandAllocator>& GetCommandAllocator();
 	void Reset();
+    void InvalidateStateCache();
 
 	UINT64 FenceValue;
 

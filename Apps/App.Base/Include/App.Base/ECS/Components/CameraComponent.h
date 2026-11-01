@@ -13,6 +13,8 @@ struct CameraComponent : ComponentTag
     Matrix PrevViewProjNoJitter;
 
     bool DirtyFlag;
+    // Set on a teleport/cut. The active camera consumes this on its next update.
+    bool ResetHistory = true;
 
     CameraComponent()
         : DirtyFlag(true), _numFramesDirty(0), _CBufferIndex(0), 

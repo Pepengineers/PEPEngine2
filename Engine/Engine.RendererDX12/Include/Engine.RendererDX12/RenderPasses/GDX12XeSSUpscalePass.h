@@ -1,6 +1,7 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Common/GameTimer.h"
+#include <stdexcept>
 
 #include "xess/xess.h"
 #include "xess/xess_d3d12.h"
@@ -11,6 +12,11 @@ public:
 	GDX12XeSSUpscalePass() : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _XeSSContext(nullptr),
 		_XeSSQualityMode(XESS_QUALITY_SETTING_ULTRA_QUALITY_PLUS)
 	{ _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_JITTER; }
+
+	~GDX12XeSSUpscalePass() override
+	{
+		if (_XeSSContext) xessDestroyContext(_XeSSContext);
+	}
 
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
 	{
@@ -41,6 +47,8 @@ public:
 		TextureDesc1.Height = _commonData->WindowHeight;
 
 		TextureDesc1.CreateSRV = true;
+		TextureDesc1.CreateUAV = true;
+		TextureDesc1.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
 		TextureDesc1.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
 		TextureDesc1.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 		TextureDesc1.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -54,7 +62,8 @@ public:
 		{
 			IN_Textures[i] = _inputs[i + 2];
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
-			TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = inputTexture->GetFormat();
+			TextureDesc1.Format = TextureDesc1.UAVDesc.Format = TextureDesc1.SRVDesc.Format = inputTexture->GetFormat();
+			TextureDesc1.UAVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
 			TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
 			OUT_UpscaledTextures[i]->Initialize(TextureDesc1);
 		}
@@ -82,12 +91,12 @@ public:
 		xess_d3d12_execute_params_t execParams = {};
 		execParams.pDepthTexture = depthStencil->GetResource()->D3DResource.Get();
 		execParams.pVelocityTexture = motionVectors->GetResource()->D3DResource.Get();
-		// I have no idea why, but the minus sign fixes bluriness
-		execParams.jitterOffsetX = -_commonData->ActiveCameraJitterOffsetX;
-		execParams.jitterOffsetY = -_commonData->ActiveCameraJitterOffsetY;
+		// RH raster displacement is passed in input pixels; motion excludes jitter.
+		execParams.jitterOffsetX = _commonData->ActiveCameraJitterOffsetX;
+		execParams.jitterOffsetY = _commonData->ActiveCameraJitterOffsetY;
 		execParams.inputWidth = _commonData->DownscaledWidth;
 		execParams.inputHeight = _commonData->DownscaledHeight;
-		execParams.resetHistory = false;
+		execParams.resetHistory = _commonData->ResetHistory || _resetHistory;
 
 		execParams.exposureScale = 1;
 		execParams.inputColorBase = { 0,0 };
@@ -108,9 +117,12 @@ public:
 			if (execResult != XESS_RESULT_SUCCESS)
 			{
 				std::string msg = "ERROR: XeSS execute failed: " + XeSSResultToString(execResult) + "\n";
-				OutputDebugStringA(msg.c_str());
+				throw std::runtime_error(msg);
 			}
 		}
+		_resetHistory = false;
+		// XeSS records native commands, bypassing the engine's cached bindings.
+		cmdList->InvalidateStateCache();
 		cmdList->EndPixEvent();
 	}
 
@@ -118,6 +130,8 @@ public:
 	{
 		for (auto& texture : OUT_UpscaledTextures) { texture->Resize(_commonData->WindowWidth, _commonData->WindowHeight); }
 		xessDestroyContext(_XeSSContext);
+		_XeSSContext = nullptr;
+		_resetHistory = true;
 		BuildXeSSContext();
 	}
 
@@ -132,7 +146,7 @@ public:
 		if (queryResolutionResult != XESS_RESULT_SUCCESS)
 		{
 			std::string msg = "ERROR: XeSS query resolution failed: " + XeSSResultToString(queryResolutionResult) + "\n";
-			OutputDebugStringA(msg.c_str());
+			throw std::runtime_error(msg);
 		}
 		_commonData->DownscaledWidth = downscaledResolution.x;
 		_commonData->DownscaledHeight = downscaledResolution.y;
@@ -141,7 +155,8 @@ public:
 	void ClearDenendencies() override
 	{
 		GDX12RenderPass::ClearDenendencies();
-		xessDestroyContext(_XeSSContext);
+		if (_XeSSContext) xessDestroyContext(_XeSSContext);
+		_XeSSContext = nullptr;
 		IN_DepthBuffer = nullptr;
 		IN_MotionVectors = nullptr;
 		IN_Textures.clear();
@@ -155,6 +170,7 @@ private:
 	std::vector<std::unique_ptr<GDX12Texture>> OUT_UpscaledTextures;
 	xess_context_handle_t _XeSSContext;
 	xess_quality_settings_t _XeSSQualityMode;
+	bool _resetHistory = true;
 
 	void MatchOutputCount(UINT outputCount)
 	{
@@ -176,21 +192,21 @@ private:
 		if (createContextResult != XESS_RESULT_SUCCESS)
 		{
 			std::string msg = "ERROR: XeSS context not created: " + XeSSResultToString(createContextResult) + "\n";
-			OutputDebugStringA(msg.c_str());
+			throw std::runtime_error(msg);
 		}
 
 		xess_d3d12_init_params_t initParams = {};
 		initParams.outputResolution.x = _commonData->WindowWidth;
 		initParams.outputResolution.y = _commonData->WindowHeight;
 		initParams.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH | 
-			XESS_INIT_FLAG_LDR_INPUT_COLOR | XESS_INIT_FLAG_USE_NDC_VELOCITY;
+			XESS_INIT_FLAG_USE_NDC_VELOCITY;
 		initParams.qualitySetting = _XeSSQualityMode;
 
 		xess_result_t initResult = xessD3D12Init(_XeSSContext, &initParams);
 		if (initResult != XESS_RESULT_SUCCESS) 
 		{
 			std::string msg = "ERROR: XeSS context not initialized: " + XeSSResultToString(initResult) + "\n";
-			OutputDebugStringA(msg.c_str());
+			throw std::runtime_error(msg);
 		}
 	}
 

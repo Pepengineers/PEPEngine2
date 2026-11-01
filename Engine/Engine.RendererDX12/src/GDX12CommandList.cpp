@@ -45,7 +45,11 @@ void GDX12CommandList::Reset()
 	FenceValue = 0;
 	_commandAllocator->Reset();
 	_commandList->Reset(_commandAllocator.Get(), nullptr);
+    InvalidateStateCache();
+}
 
+void GDX12CommandList::InvalidateStateCache()
+{
 	_currentRootSignature = nullptr;
 	_currentPSO = nullptr;
 	_currentTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
