@@ -1,6 +1,8 @@
 # CVar и стартовая конфигурация
 
 Параметры AMD SSSR/Reflections Denoiser: [defaults, ranges, presets и runtime-поведение](sssr.md#runtime-controls).
+Runtime-параметры `Render.MotionBlur.*`, их единицы, ranges и независимость ручных
+overrides от Off/Low/Mid/High описаны в [motion-blur.md](motion-blur.md#runtime-cvars).
 
 `BenchmarkEngine` применяет конфигурацию в своём конструкторе, до создания членов производного приложения (включая Jobs), окна и модулей. Все статические CVar к этому моменту зарегистрированы. Настройки, объявленные позднее, не участвуют в загрузке INI.
 

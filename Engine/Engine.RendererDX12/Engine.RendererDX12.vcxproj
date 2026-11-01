@@ -28,6 +28,8 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12AmbientOcclusionPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12SSRSettings.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SSSRPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12MotionBlurSettings.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12MotionBlurPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GeometryBuffer.h" />
@@ -90,6 +92,8 @@
     <ClCompile Include="src\GDX12ReflectionProbePass.cpp" />
     <ClCompile Include="src\GDX12SSRSettings.cpp" />
     <ClCompile Include="src\GDX12SSSRPass.cpp" />
+    <ClCompile Include="src\GDX12MotionBlurSettings.cpp" />
+    <ClCompile Include="src\GDX12MotionBlurPass.cpp" />
     <ClCompile Include="src\GDX12DeviceResources.cpp" />
     <ClCompile Include="src\GDX12GPUTimer.cpp" />
     <ClCompile Include="src\GDX12GeometryBuffer.cpp" />
@@ -120,6 +124,8 @@
     <None Include="Shaders\CBufferStructures.hlsl" />
     <None Include="Shaders\CompositionPass.hlsl" />
     <None Include="Shaders\ToneMapping.hlsl" />
+    <None Include="Shaders\MotionBlur.hlsl" />
+    <None Include="Shaders\ToneMap.hlsl" />
     <None Include="Shaders\Culling.hlsl" />
     <None Include="Shaders\CSM.hlsli" />
     <None Include="Shaders\EnvironmentIBL.hlsl" />

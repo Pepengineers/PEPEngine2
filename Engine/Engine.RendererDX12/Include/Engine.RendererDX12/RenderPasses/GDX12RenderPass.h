@@ -124,6 +124,8 @@ public:
     float ActiveCameraFarPlane = 0;
     float ActiveCameraJitterOffsetX = 0;
     float ActiveCameraJitterOffsetY = 0;
+    bool ResetHistory = true;
+    bool RequestHistoryReset = true;
     Matrix CameraViewToClip = Identity4x4();
     Matrix ClipToCameraView = Identity4x4();
     Matrix ClipToPrevClip = Identity4x4();

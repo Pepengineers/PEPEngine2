@@ -356,7 +356,11 @@ void App::Update(const GameTimer& gameTimer)
     for (size_t i = 0; i < scenes->GetWorldCount(); ++i)
     {
         auto& world = *scenes->GetWorld(i);
-        if (world.IsPaused()) continue;
+        if (world.IsPaused())
+        {
+            _gpuData.Schedule(_jobs, world, 0).Complete();
+            continue;
+        }
         JobHandle work;
         try
         {

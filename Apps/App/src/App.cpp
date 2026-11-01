@@ -66,7 +66,11 @@ namespace
             OnKeyboardInput(timer);
             Locator.GetModule<RenderModule>()->Update();
             auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
-            if (world.IsPaused()) return;
+            if (world.IsPaused())
+            {
+                _gpuData.Schedule(_jobs, world, 0).Complete();
+                return;
+            }
             const float dt = timer.DeltaTime();
             JobHandle work;
             try

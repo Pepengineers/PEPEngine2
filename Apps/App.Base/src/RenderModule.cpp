@@ -32,6 +32,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12SyncPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12XeSSUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DepthOfFieldPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12MotionBlurPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
@@ -101,6 +102,7 @@ void RenderModule::Uninitialize()
 
 void RenderModule::OnResize()
 {
+    _RPcommonData.RequestHistoryReset = true;
     _primaryDevice->GetCommandQueue()->Flush();
     if (_dualGPUMode) { _secondaryDevice->GetCommandQueue()->Flush(); }
 
@@ -778,6 +780,7 @@ const float RenderModule::GetAspectRatio()
 
 void RenderModule::OnUpdate()
 {
+    if (_timer->DeltaTime() > 0.25f) _RPcommonData.RequestHistoryReset = true;
     uint16_t width, height;
     _window->GetWindowSize(width, height);
 
@@ -1012,6 +1015,7 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DepthOfFieldPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12MotionBlurPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12XeSSUpscalePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
 

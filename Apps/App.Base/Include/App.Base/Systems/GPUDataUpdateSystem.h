@@ -30,7 +30,8 @@ protected:
             UpdateCamera(ecs, entity, transform);
             auto& gpu = _render->GetTransformGPUData(entity);
             const bool changed = transform.DirtyFlag;
-            if (changed) gpu.NumFramesDirty = _numFrames;
+            // One final cycle replaces the last moving slot with zero object motion.
+            if (changed) gpu.NumFramesDirty = static_cast<UINT>(_numFrames) + 1;
             if (gpu.NumFramesDirty > 0)
             {
                 gpu.World = Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
@@ -159,18 +160,23 @@ private:
             Matrix unjitteredViewProj = view * proj;
 
             XMStoreFloat4x4(&objConstants.ViewProjNoJitter, XMMatrixTranspose(unjitteredViewProj));
-            objConstants.PrevViewProjNoJitter = camera.PrevViewProjNoJitter;
+            const bool reset = camera.ResetHistory || (isActiveCamera &&
+                (pipelineCommonData->RequestHistoryReset || proj != pipelineCommonData->CameraViewToClip));
+            objConstants.PrevViewProjNoJitter = reset ? objConstants.ViewProjNoJitter : camera.PrevViewProjNoJitter;
+            camera.ResetHistory = false;
 
             if (isActiveCamera)
             {
                 if (camera.ResetHistory || pipelineCommonData->CameraViewToClip != proj)
                     ++pipelineCommonData->HistoryRevision;
                 camera.ResetHistory = false;
+                pipelineCommonData->ResetHistory = reset;
+                pipelineCommonData->RequestHistoryReset = false;
                 pipelineCommonData->CameraViewToClip = proj;
                 pipelineCommonData->ClipToCameraView = proj.Invert();
 
                 // Streamline uses row-major matrices.
-                pipelineCommonData->ClipToPrevClip = unjitteredViewProj.Invert() * camera.PrevViewProjNoJitter.Transpose();
+                pipelineCommonData->ClipToPrevClip = unjitteredViewProj.Invert() * Matrix(objConstants.PrevViewProjNoJitter).Transpose();
                 pipelineCommonData->PrevClipToClip = pipelineCommonData->ClipToPrevClip.Invert();
             }
 
@@ -187,8 +193,9 @@ private:
                 float jitterY = HaltonSequence(_jitterFrameIndex, 3) - 0.5f;
                 float inputWidth = static_cast<float>(pipelineCommonData->DownscaledWidth);
                 float inputHeight = static_cast<float>(pipelineCommonData->DownscaledHeight);
-                proj._31 += jitterX * 2.0f / inputWidth;
-                proj._32 -= jitterY * 2.0f / inputHeight;
+                // RH projection has w=-viewZ: these signs give a +jitter pixel displacement.
+                proj._31 -= jitterX * 2.0f / inputWidth;
+                proj._32 += jitterY * 2.0f / inputHeight;
                 pipelineCommonData->ActiveCameraJitterOffsetX = jitterX;
                 pipelineCommonData->ActiveCameraJitterOffsetY = jitterY;
             }
