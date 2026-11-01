@@ -81,6 +81,15 @@ defaults and ranges are listed in [ambient-occlusion.md](ambient-occlusion.md).
 ## Локальные отражения
 
 `Render.Reflection.Enabled` и `Render.Reflection.Quality` — глобальные runtime Default CVar. Остальные параметры принадлежат `ReflectionProbeComponent` и изменяются из C++; единицы, диапазоны, пресеты и наследование описаны в [reflection-probes.md](reflection-probes.md). Регистрация находится в `GDX12ReflectionProbes.cpp`. `ReflectionProbeTests.exe --cpu` содержит проверки глобальных CVar и сохранения авторских параметров при смене качества. После переноса параметров в компонент проверки не запускались по новому указанию.
+
+## GPU particles
+
+`Render.Particles.Enabled=true` и `Render.Particles.Quality=2` — единственные
+глобальные controls техники, оба runtime `Default`. Quality принимает 0 Off,
+1 Low, 2 Mid, 3 High. Параметры отдельных эмиттеров задаются через
+`ParticleEmitterComponent::SetSettings`, без CVar-дублей. API, единицы, значения,
+наследование и ограничения описаны в [gpu-particles.md](rendering/gpu-particles.md).
+Регистрация — `GDX12Particles.cpp`; проверки реализации пока не запускались.
 ## Depth of field
 
 `Render.DOF.*` uses runtime-writable Default variables for enable, Off/Low/Mid/High,

@@ -18,6 +18,12 @@
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12Particles.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ParticlesPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceFactory.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -208,6 +214,12 @@
     <None Include="Shaders\TransparentPass.hlsl" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\GDX12Particles.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\GDX12ParticlesPass.cpp"><Filter>Source Files</Filter></ClCompile>
+    <None Include="Shaders\Particles.hlsli"><Filter>Resource Files</Filter></None>
+    <None Include="Shaders\ParticleSimulation.hlsl"><Filter>Resource Files</Filter></None>
+    <None Include="Shaders\ParticleRaster.hlsl"><Filter>Resource Files</Filter></None>
+    <None Include="Shaders\ParticleSort.hlsl"><Filter>Resource Files</Filter></None>
     <ClCompile Include="src\GDX12DepthOfField.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12DepthOfFieldPass.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DepthOfField.h"><Filter>Header Files</Filter></ClInclude>

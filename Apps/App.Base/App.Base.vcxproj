@@ -29,6 +29,7 @@
     <ClInclude Include="Include\App.Base\ECS\Components\ReflectionProbeComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\GrassRenderComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\WindFieldComponent.h" />
+    <ClInclude Include="Include\App.Base\ECS\Components\ParticleEmitterComponent.h" />
     <ClInclude Include="Include\App.Base\Systems\LightUpdateSystem.h" />
     <ClInclude Include="Include\App.Base\BistroLightPlacements.h" />
     <ClInclude Include="Include\App.Base\BistroProps.h" />

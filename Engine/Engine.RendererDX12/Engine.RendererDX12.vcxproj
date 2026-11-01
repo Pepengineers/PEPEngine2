@@ -22,6 +22,8 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Sky.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GrassWind.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GrassRenderer.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12Particles.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ParticlesPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ReflectionProbes.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionProbePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DepthOfField.h" />
@@ -82,6 +84,8 @@
     <ClCompile Include="src\GDX12EnvironmentIBLPass.cpp" />
     <ClCompile Include="src\GDX12GrassWind.cpp" />
     <ClCompile Include="src\GDX12GrassRenderer.cpp" />
+    <ClCompile Include="src\GDX12Particles.cpp" />
+    <ClCompile Include="src\GDX12ParticlesPass.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusion.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusionPass.cpp" />
     <ClCompile Include="..\..\External\External.Libraries\cacao\src\ffx_cacao.cpp">
@@ -124,6 +128,10 @@
     <None Include="Shaders\GrassExpand.hlsl" />
     <None Include="Shaders\GrassRender.hlsl" />
     <None Include="Shaders\WindField.hlsl" />
+    <None Include="Shaders\Particles.hlsli" />
+    <None Include="Shaders\ParticleSimulation.hlsl" />
+    <None Include="Shaders\ParticleRaster.hlsl" />
+    <None Include="Shaders\ParticleSort.hlsl" />
     <None Include="Shaders\AmbientOcclusion.hlsl" />
     <None Include="Shaders\ToneMap.hlsl" />
     <None Include="Shaders\ReflectionCapture.hlsl" />

@@ -130,6 +130,7 @@ private:
     void BuildBackBuffer();
     void CollectReflectionScene();
     void CollectGrassScene(GDX12CommandList* commands);
+    void CollectParticleEmitters();
     void ShareFences();
     void ConfigureRenderPipeline();
     void SetupRenderPasses();
