@@ -19,7 +19,17 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12ReflectionProbes.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionProbePass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12DepthOfField.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DepthOfFieldPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12AmbientOcclusion.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12AmbientOcclusionPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12SSRSettings.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SSSRPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12MotionBlurSettings.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12MotionBlurPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GeometryBuffer.h" />
@@ -65,7 +75,25 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\GDX12AmbientOcclusion.cpp" />
+    <ClCompile Include="src\GDX12AmbientOcclusionPass.cpp" />
+    <ClCompile Include="..\..\External\External.Libraries\cacao\src\ffx_cacao.cpp">
+      <AdditionalIncludeDirectories>$(PEPRepoRoot)External\External.Libraries\cacao\inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\..\External\External.Libraries\cacao\src\ffx_cacao_impl.cpp">
+      <PreprocessorDefinitions>FFX_CACAO_ENABLE_D3D12;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir)CacaoShaders;$(PEPRepoRoot)External\External.Libraries\cacao\inc;$(PEPExternalDirectX-HeadersInclude)\directx-headers\directx;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ConformanceMode>false</ConformanceMode>
+    </ClCompile>
+    <ClCompile Include="src\GDX12DepthOfField.cpp" />
+    <ClCompile Include="src\GDX12DepthOfFieldPass.cpp" />
     <ClCompile Include="src\D3DHelpers.cpp" />
+    <ClCompile Include="src\GDX12ReflectionProbes.cpp" />
+    <ClCompile Include="src\GDX12ReflectionProbePass.cpp" />
+    <ClCompile Include="src\GDX12SSRSettings.cpp" />
+    <ClCompile Include="src\GDX12SSSRPass.cpp" />
+    <ClCompile Include="src\GDX12MotionBlurSettings.cpp" />
+    <ClCompile Include="src\GDX12MotionBlurPass.cpp" />
     <ClCompile Include="src\GDX12DeviceResources.cpp" />
     <ClCompile Include="src\GDX12GPUTimer.cpp" />
     <ClCompile Include="src\GDX12GeometryBuffer.cpp" />
@@ -85,9 +113,15 @@
     <ClCompile Include="src\GDX12Texture.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Shaders\AmbientOcclusion.hlsl" />
+    <None Include="Shaders\ToneMap.hlsl" />
+    <None Include="Shaders\ReflectionCapture.hlsl" />
+    <None Include="Shaders\ReflectionProbes.hlsli" />
     <None Include="Shaders\BufferClear.hlsl" />
+    <None Include="Shaders\SSSR.hlsl" />
     <None Include="Shaders\CBufferStructures.hlsl" />
     <None Include="Shaders\CompositionPass.hlsl" />
+    <None Include="Shaders\MotionBlur.hlsl" />
     <None Include="Shaders\Culling.hlsl" />
     <None Include="Shaders\CSM.hlsli" />
     <None Include="Shaders\EnvironmentIBL.hlsl" />
@@ -166,6 +200,7 @@
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Pix.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Assimp.props" />
   </ImportGroup>
+  <Import Project="..\..\MSBuild\Props\PEPEngine.External.FidelityFX.props" Condition="'$(PEPFidelityFXImported)'!='true'" />
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -234,7 +269,18 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
+  <Target Name="BuildCacaoShaders" BeforeTargets="ClCompile"
+          Inputs="$(PEPRepoRoot)MSBuild\BuildCacaoShaders.ps1;$(PEPRepoRoot)External\External.Libraries\cacao\src\ffx_cacao.hlsl;$(PEPRepoRoot)External\External.Libraries\cacao\src\ffx_cacao_bindings.hlsl;$(PEPRepoRoot)External\External.Libraries\cacao\src\ffx_cacao_defines.h;$(PEPRepoRoot)External\External.Libraries\cacao\src\build_shaders_dxil.bat"
+          Outputs="$(IntDir)CacaoShaders\complete.stamp">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(PEPRepoRoot)MSBuild\BuildCacaoShaders.ps1&quot; -Dxc &quot;$(WindowsSDK_ExecutablePath_x64)&quot; -Source &quot;$(PEPRepoRoot)External\External.Libraries\cacao\src&quot; -Output &quot;$(IntDir)CacaoShaders&quot;" />
+    <Touch Files="$(IntDir)CacaoShaders\complete.stamp" AlwaysCreate="true" />
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="BuildFidelityFXSSSR" BeforeTargets="PrepareForBuild"
+          Inputs="$(PEPRepoRoot)tools\Build-FidelityFX.ps1;$(PEPRepoRoot)External\FidelityFX\cold-history.patch;$(PEPRepoRoot)External\FidelityFX\probe-fallback.patch"
+          Outputs="$(PEPFidelityFXRoot)bin\ffx_sdk\ffx_backend_dx12_x64$(PEPFidelityFXPostfix).lib;$(PEPFidelityFXRoot)bin\ffx_sdk\ffx_sssr_x64$(PEPFidelityFXPostfix).lib;$(PEPFidelityFXRoot)bin\ffx_sdk\ffx_dof_x64$(PEPFidelityFXPostfix).lib">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(PEPRepoRoot)tools\Build-FidelityFX.ps1&quot; -Configuration $(Configuration)" />
+  </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="App.vcxproj" />
+  <PropertyGroup>
+    <ProjectGuid>{D3F688A1-6E39-4405-A723-AD542585D3CE}</ProjectGuid>
+  </PropertyGroup>
+  <ItemGroup>
+    <ClCompile Remove="src\App.cpp" />
+    <ClCompile Include="tests\AOTests.cpp" />
+  </ItemGroup>
+  <ItemDefinitionGroup>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <Target Name="CopyEngineConfiguration" AfterTargets="Build">
+    <MakeDir Directories="$(TargetDir)Config" />
+    <WriteLinesToFile File="$(TargetDir)Config\Engine.ini" Lines="[ConsoleVariables];Render.NumFrames = 3;Render.AO.RadiusCm = 150" Overwrite="true" />
+  </Target>
+</Project>

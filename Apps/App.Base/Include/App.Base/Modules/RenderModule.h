@@ -123,6 +123,7 @@ protected:
 
 private:
     void BuildBackBuffer();
+    void CollectReflectionScene();
     void ShareFences();
     void ConfigureRenderPipeline();
     void SetupRenderPasses();
@@ -166,6 +167,10 @@ private:
     std::unique_ptr<GDX12SwapChain> _backBuffer;
     std::unique_ptr<GDX12Texture> _depthStencil;
     
+    GDX12RenderPass* _depthPrepass = nullptr;
+    GDX12RenderPass* _opaquePass = nullptr;
+    GDX12RenderPass* _ambientOcclusionPass = nullptr;
+
     // Sorted in execution order
     std::vector<std::unique_ptr<GDX12RenderPass>> _primaryRenderPassExecutionList;
     std::vector<std::unique_ptr<GDX12RenderPass>> _secondaryRenderPassExecutionList;
@@ -174,6 +179,8 @@ private:
     // Defines which resources should be uploaded onto respective GPU
     uint32_t _primaryPipelineFlags;
     uint32_t _secondaryPipelineFlags;
+    uint64_t _reflectionStaticHash = 0;
+    uint64_t _reflectionDynamicHash = 0;
     UINT _instanceCount = 0;
     UINT _transformCount = 0;
 };

@@ -7,7 +7,7 @@
 class GDX12LocalShadowPass final : public GDX12RenderPass
 {
 public:
-    GDX12LocalShadowPass()
+    GDX12LocalShadowPass(bool staticOnly = false) : _staticOnly(staticOnly)
     {
         _flags = RENDER_PASS_FLAG_USE_GEOMETRY | RENDER_PASS_FLAG_USE_MATERIALS | RENDER_PASS_FLAG_USE_INSTANCES;
         _numOutputs = 1;
@@ -49,7 +49,7 @@ public:
         pipeline.DSVFormat = DXGI_FORMAT_D32_FLOAT;
         pipeline.SampleDesc.Count = 1;
         ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&pipeline, IID_PPV_ARGS(&_depthPSO)));
-        D3D_SHADER_MACRO defines[] = { { "SHADOW_CULLING", "1" }, { nullptr, nullptr } };
+        D3D_SHADER_MACRO defines[] = { { "SHADOW_CULLING", "1" }, { "STATIC_ONLY", _staticOnly ? "1" : "0" }, { nullptr, nullptr } };
         const char* entries[] = { "CS", "ClearCS" };
         ComPtr<ID3D12PipelineState>* targets[] = { &_cullPSO, &_clearPSO };
         for (UINT i = 0; i < 2; ++i)
@@ -73,10 +73,19 @@ public:
         _visibility.resize(_resources->FrameConstants.size());
     }
 
+    void InvalidateCache() { _cached.clear(); }
+
     UINT GetLastFrameRenderedViews() const { return _renderedViews; }
 
     void Execute(GDX12CommandList* commands) override
     {
+        if (_staticRevision != _resources->ReflectionStaticRevision ||
+            (!_staticOnly && _dynamicRevision != _resources->ReflectionDynamicRevision))
+        {
+            _cached.clear();
+            _staticRevision = _resources->ReflectionStaticRevision;
+            _dynamicRevision = _resources->ReflectionDynamicRevision;
+        }
         UINT slices = 0;
         for (const auto& light : _resources->LocalLights)
             if (light.ShadowFirstSlice != UINT_MAX) slices = (std::max)(slices, light.ShadowFirstSlice + LocalShadowFaceCount(light));
@@ -218,6 +227,9 @@ private:
     std::unique_ptr<GDX12RootSignature> _graphicsRoot, _computeRoot;
     ComPtr<ID3D12PipelineState> _depthPSO, _cullPSO, _clearPSO;
     ComPtr<ID3D12CommandSignature> _signature;
+    uint64_t _staticRevision = 0;
+    uint64_t _dynamicRevision = 0;
+    bool _staticOnly = false;
     UINT _sliceCount = 0;
     UINT _renderedViews = 0;
 };

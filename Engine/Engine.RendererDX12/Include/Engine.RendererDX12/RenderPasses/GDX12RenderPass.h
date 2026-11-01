@@ -124,14 +124,21 @@ public:
     float ActiveCameraFarPlane = 0;
     float ActiveCameraJitterOffsetX = 0;
     float ActiveCameraJitterOffsetY = 0;
+    bool ResetHistory = true;
+    bool RequestHistoryReset = true;
+    bool AOAfterDepthPrepass = false;
     Matrix CameraViewToClip = Identity4x4();
     Matrix ClipToCameraView = Identity4x4();
     Matrix ClipToPrevClip = Identity4x4();
     Matrix PrevClipToClip = Identity4x4();
+    Matrix CameraView = Identity4x4();
+    Matrix CameraProjection = Identity4x4(); // Jittered projection matching depth.
+    uint64_t HistoryRevision = 0;
     GameTimer* GameTimer = nullptr;
     UINT WindowWidth = 0;
     UINT WindowHeight = 0;
     UINT DownscaledWidth = 0;
     UINT DownscaledHeight = 0;
     GDX12RenderPass* Upscaler = nullptr;
+    bool ResetUpscalerHistory = true;
 };

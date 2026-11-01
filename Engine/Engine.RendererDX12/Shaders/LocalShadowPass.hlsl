@@ -20,7 +20,11 @@ void CS(uint3 id : SV_DispatchThreadID)
     InputCommands.GetDimensions(count, stride);
     if (id.x >= count) return;
     IndirectDrawArgs command = InputCommands[id.x];
+    if (command.InstanceCount == 0) return;
     InstanceData instance = Instances[command.InstanceID];
+#if STATIC_ONLY
+    if (instance.ReflectionDynamic != 0) return;
+#endif
     if (Materials[instance.MaterialIndex].RenderLayer == 2) return;
     if (!ShadowBoxVisible(instance.BoundingBoxCenter, instance.BoundingBoxExtents, Lights[LightIndex].ShadowViewProj[FaceIndex])) return;
     uint index;

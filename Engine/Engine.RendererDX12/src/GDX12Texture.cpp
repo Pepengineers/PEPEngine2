@@ -136,13 +136,13 @@ void GDX12Texture::CreateResource()
     CD3DX12_HEAP_PROPERTIES heapProps(D3D12_HEAP_TYPE_DEFAULT);
 
     ComPtr<ID3D12Resource> d3dResource;
-    _device->GetDevice()->CreateCommittedResource(
+    ThrowIfFailed(_device->GetDevice()->CreateCommittedResource(
         &heapProps,
         D3D12_HEAP_FLAG_NONE,
         &resourceDesc,
         D3D12_RESOURCE_STATE_COMMON,
         (_desc.CreateRTV || _desc.CreateDSV) ? &_clearValue : nullptr,
-        IID_PPV_ARGS(&d3dResource));
+        IID_PPV_ARGS(&d3dResource)));
 
     if (!_resource) { _resource = std::make_unique<GDX12TextureResource>(d3dResource); }
     else { _resource->D3DResource = d3dResource; }

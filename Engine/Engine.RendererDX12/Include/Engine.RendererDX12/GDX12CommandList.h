@@ -17,6 +17,7 @@ public:
 	const ComPtr<ID3D12GraphicsCommandList10>& GetCommandList();
 	const ComPtr<ID3D12CommandAllocator>& GetCommandAllocator();
 	void Reset();
+    void InvalidateCachedState();
 
 	UINT64 FenceValue;
 
@@ -94,7 +95,8 @@ private:
 	ComPtr<ID3D12CommandAllocator> _commandAllocator;
 
 	//Cached states
-	GDX12RootSignature* _currentRootSignature;
+	GDX12RootSignature* _currentGraphicsRootSignature = nullptr;
+	GDX12RootSignature* _currentComputeRootSignature = nullptr;
 	ComPtr<ID3D12PipelineState> _currentPSO;
 	D3D_PRIMITIVE_TOPOLOGY _currentTopology;
 	std::vector<ID3D12DescriptorHeap*> _currentDescriptorHeaps;

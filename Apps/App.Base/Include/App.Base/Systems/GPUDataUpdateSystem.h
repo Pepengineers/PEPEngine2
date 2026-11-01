@@ -30,7 +30,8 @@ protected:
             UpdateCamera(ecs, entity, transform);
             auto& gpu = _render->GetTransformGPUData(entity);
             const bool changed = transform.DirtyFlag;
-            if (changed) gpu.NumFramesDirty = _numFrames;
+            // One final cycle replaces the last moving slot with zero object motion.
+            if (changed) gpu.NumFramesDirty = static_cast<UINT>(_numFrames) + 1;
             if (gpu.NumFramesDirty > 0)
             {
                 gpu.World = Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
@@ -49,6 +50,11 @@ protected:
             if (ecs.Has<StaticMeshRenderComponent>(entity))
             {
                 auto& renderer = ecs.Get<StaticMeshRenderComponent>(entity);
+                const bool dynamic = renderer.ReflectionDynamic || ecs.Has<VelocityComponent>(entity) ||
+                    ecs.Has<CircleMovementComponent>(entity) || ecs.Has<SplineFollowComponent>(entity) ||
+                    ecs.Has<FlyingPropComponent>(entity) || ecs.Has<LookAtTargetComponent>(entity);
+                renderer.DirtyFlag |= renderer._reflectionDynamic != dynamic;
+                renderer._reflectionDynamic = dynamic;
                 if (changed || renderer.DirtyFlag)
                 {
                     renderer._numFramesDirty = _numFrames;
@@ -83,6 +89,7 @@ private:
             if (i == 0) renderer.Bounds = bounds;
             else BoundingBox::CreateMerged(renderer.Bounds, renderer.Bounds, bounds);
             GDX12InstanceData instance = {};
+            instance.ReflectionDynamic = renderer._reflectionDynamic ? 1u : 0u;
             instance.TransformIndex = transform.CBufferIndex;
             instance.MaterialIndex = renderer.Materials.at(submesh.MaterialIndex)->_CBufferIndex;
             instance.BoundingBoxCenter = bounds.Center;
@@ -100,7 +107,10 @@ private:
         // Active camera requires constant update due to jittering
         auto pipelineCommonData = renderModule->GetRenderPipelineCommonData();
         bool isActiveCamera = pipelineCommonData->ActiveCameraCBufferIndex == camera._CBufferIndex;
-        if (isActiveCamera) { camera.DirtyFlag = true; }
+        if (isActiveCamera)
+        {
+            camera.DirtyFlag = true;
+        }
 
         if (camera.DirtyFlag || transform.DirtyFlag)
         {
@@ -145,15 +155,24 @@ private:
             Matrix unjitteredViewProj = view * proj;
 
             XMStoreFloat4x4(&objConstants.ViewProjNoJitter, XMMatrixTranspose(unjitteredViewProj));
-            objConstants.PrevViewProjNoJitter = camera.PrevViewProjNoJitter;
+            const bool reset = camera.ResetHistory || (isActiveCamera &&
+                (pipelineCommonData->RequestHistoryReset || proj != pipelineCommonData->CameraViewToClip));
+            objConstants.PrevViewProjNoJitter = reset ? objConstants.ViewProjNoJitter : camera.PrevViewProjNoJitter;
+            camera.ResetHistory = false;
 
             if (isActiveCamera)
             {
+                if (reset) ++pipelineCommonData->HistoryRevision;
+                pipelineCommonData->ActiveCameraFOV = camera.FOV;
+                pipelineCommonData->ActiveCameraNearPlane = camera.NearPlane;
+                pipelineCommonData->ActiveCameraFarPlane = camera.FarPlane;
+                pipelineCommonData->ResetHistory = reset;
+                pipelineCommonData->RequestHistoryReset = false;
                 pipelineCommonData->CameraViewToClip = proj;
                 pipelineCommonData->ClipToCameraView = proj.Invert();
 
                 // Streamline uses row-major matrices.
-                pipelineCommonData->ClipToPrevClip = unjitteredViewProj.Invert() * camera.PrevViewProjNoJitter.Transpose();
+                pipelineCommonData->ClipToPrevClip = unjitteredViewProj.Invert() * Matrix(objConstants.PrevViewProjNoJitter).Transpose();
                 pipelineCommonData->PrevClipToClip = pipelineCommonData->ClipToPrevClip.Invert();
             }
 
@@ -170,13 +189,19 @@ private:
                 float jitterY = HaltonSequence(_jitterFrameIndex, 3) - 0.5f;
                 float inputWidth = static_cast<float>(pipelineCommonData->DownscaledWidth);
                 float inputHeight = static_cast<float>(pipelineCommonData->DownscaledHeight);
-                proj._31 += jitterX * 2.0f / inputWidth;
-                proj._32 -= jitterY * 2.0f / inputHeight;
+                // RH projection has w=-viewZ: these signs give a +jitter pixel displacement.
+                proj._31 -= jitterX * 2.0f / inputWidth;
+                proj._32 += jitterY * 2.0f / inputHeight;
                 pipelineCommonData->ActiveCameraJitterOffsetX = jitterX;
                 pipelineCommonData->ActiveCameraJitterOffsetY = jitterY;
             }
 
             camera.ViewProj = view * proj;
+            if (isActiveCamera)
+            {
+                pipelineCommonData->CameraView = view;
+                pipelineCommonData->CameraProjection = proj;
+            }
 
             XMStoreFloat4x4(&objConstants.ViewProj, XMMatrixTranspose(view * proj));
             XMStoreFloat4x4(&objConstants.View, XMMatrixTranspose(view));

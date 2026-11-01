@@ -58,6 +58,7 @@ private:
 	{
 
 	}
+    uint64_t _revision = 0;
 	UINT _numPrimaryFramesDirty;
 	UINT _numSecondaryFramesDirty;
 };

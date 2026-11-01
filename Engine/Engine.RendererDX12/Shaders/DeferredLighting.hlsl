@@ -1,4 +1,5 @@
 #include "CBufferStructures.hlsl"
+#define LOCAL_REFLECTION_PROBES 1
 ConstantBuffer<MainCB> CBMain : register(b0);
 ConstantBuffer<CameraCB> CBCamera : register(b1);
 ConstantBuffer<ShadowCB> CBShadow : register(b2);
@@ -14,11 +15,14 @@ Texture2D<float4> EnvironmentBRDF : register(t8);
 TextureCube<float4> SourceEnvironment : register(t9);
 Texture2DArray<float> LocalShadowMaps : register(t10);
 StructuredBuffer<LocalLight> LocalLights : register(t11);
+Texture2D<float> AmbientOcclusion : register(t14);
 RWTexture2D<float4> SceneColor : register(u0);
 SamplerState samLinearClamp : register(s3);
 SamplerComparisonState samShadow : register(s6);
 #define PBR_LIGHTING_ONLY
 #include "PBRSurface.hlsli"
+#define REFLECTION_PROBE_BINDINGS_DEFERRED 1
+#include "ReflectionProbes.hlsli"
 #include "PBRLighting.hlsli"
 
 groupshared uint MinDepth, MaxDepth, LightCount;
@@ -83,7 +87,7 @@ void CS(uint3 dispatch : SV_DispatchThreadID, uint3 group : SV_GroupID, uint lan
     s.F0 = f0.rgb; s.Baked = f0.a > 0.5f;
     s.Emissive = GEmissive[pixel].rgb;
     float3 v = SafeNormalize(CBCamera.CameraLocation - position);
-    float3 result = ShadeSunAndIBL(s, position, v);
+    float3 result = ShadeSunAndIBL(s, position, v, AmbientOcclusion[pixel]);
     // Overflow preserves correctness for unusually dense groups of lights.
     uint count = LightCount > 512 ? CBMain.LocalLightCount : LightCount;
     for (uint j = 0; j < count; ++j)

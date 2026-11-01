@@ -7,7 +7,7 @@ public:
     GDX12DeferredLightingPass()
     {
         _flags = RENDER_PASS_FLAG_USE_CAMERAS;
-        _numInputs = 11;
+        _numInputs = 12;
         _numOutputs = 1;
         _color = std::make_unique<GDX12Texture>();
         _outputs.push_back(_color.get());
@@ -29,7 +29,7 @@ public:
         _color->Initialize(texture);
         GDX12RootSignatureDesc root;
         root.NumSingleCBVSlots = 3;
-        root.NumSingleSRVSlots = 12;
+        root.NumSingleSRVSlots = 15;
         root.NumSingleUAVSlots = 1;
         root.StaticSamplers = GetStaticSamplers();
         CD3DX12_STATIC_SAMPLER_DESC sampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
@@ -59,9 +59,11 @@ public:
         {
             auto* texture = _inputs[i]->GetTexture();
             commands->ResourceBarrier({ texture->GetResource()->GetSRVBarrier() });
-            commands->SetComputeSRV(i, texture->GetSRV()->GPUHandle);
+            commands->SetComputeSRV(i < 11 ? i : 14, texture->GetSRV()->GPUHandle);
         }
         commands->SetComputeSRV(11, frame->LocalLightCache->GetSRV()->GPUHandle);
+        commands->SetComputeSRV(12, _resources->ReflectionRadianceSRV.GPUHandle);
+        commands->SetComputeSRV(13, frame->ReflectionProbes->GetSRV()->GPUHandle);
         commands->SetComputeUAV(0, _color->GetUAV()->GPUHandle);
         commands->ResourceBarrier({ _color->GetResource()->GetUnorderedAccessBarrier() });
         commands->Dispatch((_color->GetWidth() + 15) / 16, (_color->GetHeight() + 15) / 16, 1);

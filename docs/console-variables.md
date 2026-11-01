@@ -1,5 +1,9 @@
 # CVar и стартовая конфигурация
 
+Параметры AMD SSSR/Reflections Denoiser: [defaults, ranges, presets и runtime-поведение](sssr.md#runtime-controls).
+Runtime-параметры `Render.MotionBlur.*`, их единицы, ranges и независимость ручных
+overrides от Off/Low/Mid/High описаны в [motion-blur.md](motion-blur.md#runtime-cvars).
+
 `BenchmarkEngine` применяет конфигурацию в своём конструкторе, до создания членов производного приложения (включая Jobs), окна и модулей. Все статические CVar к этому моменту зарегистрированы. Настройки, объявленные позднее, не участвуют в загрузке INI.
 
 Bistro применяет INI ещё раньше, до разбора аргументов запуска: `-Loading.TransientBudgetMiB=...` переопределяет значение из INI. Повторная инициализация конфигурации в конструкторе ядра не перечитывает файл.
@@ -69,3 +73,18 @@ Build/CVarTests/Manual/ConsoleVariableTests.exe
 ```
 
 Для проверки Release добавьте `/DNDEBUG /O2`. Тест намеренно вызывает ошибку запуска и проверяет её запись в лог. Он использует свой `Config/Engine.ini` рядом с тестовым exe и отказывается перезаписывать существующий файл.
+
+## Ambient occlusion
+
+`Render.AO.*` settings are runtime writable. Algorithms, preset inheritance, units,
+defaults and ranges are listed in [ambient-occlusion.md](ambient-occlusion.md).
+## Локальные отражения
+
+`Render.Reflection.Enabled` и `Render.Reflection.Quality` — глобальные runtime Default CVar. Остальные параметры принадлежат `ReflectionProbeComponent` и изменяются из C++; единицы, диапазоны, пресеты и наследование описаны в [reflection-probes.md](reflection-probes.md). Регистрация находится в `GDX12ReflectionProbes.cpp`. `ReflectionProbeTests.exe --cpu` содержит проверки глобальных CVar и сохранения авторских параметров при смене качества. После переноса параметров в компонент проверки не запускались по новому указанию.
+## Depth of field
+
+`Render.DOF.*` uses runtime-writable Default variables for enable, Off/Low/Mid/High,
+focus distance in cm, f-number, vertical sensor size, CoC limit, SDK ring budget and
+ring merging. Manual overrides survive quality changes; zero restores preset
+inheritance. Defaults, units, ranges, HDR/XeSS contracts and checks are documented
+in [depth-of-field.md](rendering/depth-of-field.md).
