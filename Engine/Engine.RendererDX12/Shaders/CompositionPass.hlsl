@@ -1,6 +1,5 @@
 #include "CBufferStructures.hlsl"
 #include "FullScreenVS.hlsl"
-#include "PBRMath.hlsli"
 
 SamplerState samPointWrap : register(s0);
 SamplerState samPointClamp : register(s1);

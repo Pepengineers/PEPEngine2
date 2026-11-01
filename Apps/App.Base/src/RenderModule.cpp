@@ -16,6 +16,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12CascadedShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionProbePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
@@ -392,7 +393,10 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
 void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
 {
     if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_GEOMETRY) 
-    { _primaryResources.GeometryBuffer->AddMesh(mesh, handle); }
+    {
+        _primaryResources.GeometryBuffer->AddMesh(mesh, handle);
+        ++_primaryResources.ReflectionStaticRevision;
+    }
     if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_GEOMETRY)
     { _secondaryResources.GeometryBuffer->AddMesh(mesh, handle); }
 }
@@ -427,6 +431,7 @@ void RenderModule::SubmitCameraShadows(const GDX12ShadowConstants& shadows)
 
 void RenderModule::SetActiveCamera(CameraComponent* camera)
 {
+    _RPcommonData.ResetHistory = true;
     _RPcommonData.ActiveCameraCBufferIndex = camera->_CBufferIndex;
     _RPcommonData.ActiveCameraFOV = camera->FOV;
     _RPcommonData.ActiveCameraNearPlane = camera->NearPlane;
@@ -517,6 +522,7 @@ void RenderModule::SubscribeToWorld(World& world)
             });
 
     _worldSubscriptions[&world] = subscriptions;
+    ++_primaryResources.ReflectionWorldRevision;
 }
 
 void RenderModule::UnsubscribeFromWorld(World& world)
@@ -542,6 +548,16 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     cameraPool.OnComponentDestroyed.RemoveListener(subscriptions.CameraDestroyed);
     cameraPool.OnComponentUpdated.RemoveListener(subscriptions.CameraUpdated);
 
+    auto& renderPool = ecs.GetPool<StaticMeshRenderComponent>();
+    renderPool.OnComponentCreated.RemoveListener(subscriptions.RenderCompCreated);
+    renderPool.OnComponentDestroyed.RemoveListener(subscriptions.RenderCompDestroyed);
+    renderPool.OnComponentUpdated.RemoveListener(subscriptions.RenderCompUpdated);
+    ecs.ForEach<StaticMeshRenderComponent>([&](Entity entity, StaticMeshRenderComponent& component)
+    {
+        OnRenderComponentDestroyed(world, entity, component);
+    });
+    ++_primaryResources.ReflectionStaticRevision;
+    ++_primaryResources.ReflectionWorldRevision;
     _worldSubscriptions.erase(it);
 }
 
@@ -604,10 +620,14 @@ void RenderModule::ReserveTransformCapacity(UINT additionalTransforms)
 {
     if (additionalTransforms > UINT_MAX - _transformCount) throw std::overflow_error("Too many transforms");
     const UINT capacity = _transformCount + additionalTransforms;
-    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
-        for (auto& frame : _primaryResources.FrameConstants) frame->TransformCache->Resize(capacity);
-    if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
-        for (auto& frame : _secondaryResources.FrameConstants) frame->TransformCache->Resize(capacity);
+    const auto grow = [capacity](GDX12DeviceResources& resources)
+    {
+        if (resources.FrameConstants.front()->TransformCache->GetElementCount() >= capacity) return;
+        resources.Device->GetCommandQueue()->Flush();
+        for (auto& frame : resources.FrameConstants) frame->TransformCache->Resize(capacity);
+    };
+    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES)) grow(_primaryResources);
+    if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES)) grow(_secondaryResources);
 }
 
 void RenderModule::OnTransformComponentCreated(World&, Entity entity, TransformComponent&)
@@ -697,6 +717,8 @@ void RenderModule::EnsureInstanceCapacity(UINT capacity)
 {
     const auto grow = [capacity](GDX12DeviceResources& resources)
     {
+        if (resources.IndirectCommandsCache->GetElementCount() >= capacity) return;
+        resources.Device->GetCommandQueue()->Flush();
         resources.IndirectCommandsCache->Resize(capacity);
         for (auto& frame : resources.FrameConstants)
         {
@@ -728,8 +750,17 @@ void RenderModule::OnRenderComponentCreated(World&, Entity, StaticMeshRenderComp
     _instanceCount += static_cast<UINT>(count);
 }
 
-void RenderModule::OnRenderComponentDestroyed(World& world, Entity entity, StaticMeshRenderComponent& component)
+void RenderModule::OnRenderComponentDestroyed(World&, Entity, StaticMeshRenderComponent& component)
 {
+    // Removed entities must stop participating in every indirect pass, including probes.
+    if (_primaryDevice) _primaryDevice->GetCommandQueue()->Flush();
+    if (_secondaryDevice) _secondaryDevice->GetCommandQueue()->Flush();
+    const GDX12IndirectDrawArgs empty = {};
+    for (const auto index : component._CBufferIndices)
+    {
+        if (_primaryResources.IndirectCommandsCache) _primaryResources.IndirectCommandsCache->CopyData(index, empty);
+        if (_secondaryResources.IndirectCommandsCache) _secondaryResources.IndirectCommandsCache->CopyData(index, empty);
+    }
 }
 
 void RenderModule::OnRenderComponentUpdated(World& world, Entity entity, StaticMeshRenderComponent& component)
@@ -785,6 +816,7 @@ void RenderModule::OnUpdate()
 
 void RenderModule::OnRender()
 {
+    CollectReflectionScene();
     auto primarycmdQueue = _primaryDevice->GetCommandQueue();
     auto primarycmdList = primarycmdQueue->GetCommandList();
     _primaryGPUTimer->Start(primarycmdList);
@@ -830,6 +862,83 @@ void RenderModule::OnRender()
     }
 
     _backBuffer->Present();
+}
+
+void RenderModule::CollectReflectionScene()
+{
+    uint64_t staticHash = 14695981039346656037ull;
+    uint64_t dynamicHash = staticHash;
+    const auto hash = [](uint64_t& result, const auto& value)
+    {
+        const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
+        for (size_t i = 0; i < sizeof(value); ++i) result = (result ^ bytes[i]) * 1099511628211ull;
+    };
+    auto& resources = _primaryResources;
+    hash(staticHash, resources.ReflectionEnvironmentRevision);
+    hash(staticHash, resources.Lighting.LightDirection);
+    hash(staticHash, resources.Lighting.LightRadiance);
+    hash(staticHash, resources.Lighting.SunShadowFlags);
+    hash(staticHash, resources.Lighting.SunShadowRevision);
+    for (const auto& light : resources.LocalLights) hash(staticHash, light);
+    resources.ReflectionProbes.clear();
+    bool hasBounds = false;
+    auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
+    for (size_t worldIndex = 0; worldIndex < scenes->GetWorldCount(); ++worldIndex)
+    {
+        auto* world = scenes->GetWorld(worldIndex);
+        auto& ecs = world->GetECS();
+        hash(staticHash, world);
+        ecs.ForEach<StaticMeshRenderComponent>([&](Entity entity, StaticMeshRenderComponent& renderer)
+        {
+            if (!ecs.Has<TransformComponent>(entity)) return;
+            auto& signature = renderer._reflectionDynamic ? dynamicHash : staticHash;
+            const auto& transform = ecs.Get<TransformComponent>(entity);
+            hash(signature, entity);
+            hash(signature, renderer.MeshHandler);
+            hash(signature, transform.Location);
+            hash(signature, transform.Rotation);
+            hash(signature, transform.Scale);
+            for (const auto index : renderer.SubMeshIndices) hash(signature, index);
+            for (const auto* material : renderer.Materials)
+            {
+                hash(signature, material);
+                hash(signature, material->_revision);
+            }
+            if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, renderer.Bounds);
+            else resources.ReflectionSceneBounds = renderer.Bounds;
+            hasBounds = true;
+        });
+        ecs.ForEach<ReflectionProbeComponent>([&](Entity entity, ReflectionProbeComponent& component)
+        {
+            if (!component.Enabled || !ecs.Has<TransformComponent>(entity)) return;
+            const auto& transform = ecs.Get<TransformComponent>(entity);
+            GDX12ReflectionProbe probe;
+            probe.Id = ((_primaryResources.ReflectionWorldRevision * 65599 + worldIndex) << 32) | entity;
+            probe.Position = transform.Location + component.CaptureOffset;
+            probe.BoxMin = transform.Location - component.Extents;
+            probe.BoxMax = transform.Location + component.Extents;
+            probe.BlendDistance = component.BlendDistance;
+            probe.Intensity = component.Intensity;
+            probe.NearPlane = component.NearPlane;
+            probe.FarPlane = component.FarPlane;
+            probe.UpdateInterval = component.UpdateInterval;
+            probe.Revision = component.Revision;
+            if (!IsValidReflectionProbe(probe)) throw std::invalid_argument("Invalid ReflectionProbeComponent");
+            resources.ReflectionProbes.push_back(probe);
+        });
+    }
+    std::sort(resources.ReflectionProbes.begin(), resources.ReflectionProbes.end(),
+        [](const auto& a, const auto& b) { return a.Id < b.Id; });
+    if (_reflectionStaticHash != staticHash)
+    {
+        ++resources.ReflectionStaticRevision;
+        _reflectionStaticHash = staticHash;
+    }
+    if (_reflectionDynamicHash != dynamicHash)
+    {
+        ++resources.ReflectionDynamicRevision;
+        _reflectionDynamicHash = dynamicHash;
+    }
 }
 
 void RenderModule::BuildBackBuffer()
@@ -890,6 +999,7 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12EnvironmentIBLPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12CascadedShadowPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12LocalShadowPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12ReflectionProbePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12AmbientOcclusionPass>());
@@ -906,159 +1016,7 @@ void RenderModule::ConfigureRenderPipeline()
     GDX12RenderPass* environmentPass = _primaryRenderPassExecutionList[1].get();
     GDX12RenderPass* shadowPass = _primaryRenderPassExecutionList[2].get();
     GDX12RenderPass* localShadowPass = _primaryRenderPassExecutionList[3].get();
-    GDX12RenderPass* cullingPass = _primaryRenderPassExecutionList[4].get();
-    GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[5].get();
-    GDX12RenderPass* aoPass = _primaryRenderPassExecutionList[6].get();
-    GDX12RenderPass* lightingPass = _primaryRenderPassExecutionList[7].get();
-    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[8].get();
-    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[9].get();
-    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[10].get();
-    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[11].get();
-
-    clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
-    cullingPass->SetInputs({});
-    opaquePass->SetInputs({});
-    aoPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3) });
-    lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0), aoPass->GetOutput(0) });
-    transparencyPass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), localShadowPass->GetOutput(0) });
-    compositionPass->SetInputs({ lightingPass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
-    upscalePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1), compositionPass->GetOutput(0) });
-    outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get()});
-
-    opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    aoPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    lightingPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    transparencyPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    compositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-
-    InitializeRenderPasses();
-}
-
-void RenderModule::SetupRenderPasses()
-{
-    for (auto& pass : _primaryRenderPassExecutionList)
-    {
-        pass->Setup(&_primaryResources, &_secondaryResources, &_RPcommonData);
-        _primaryPipelineFlags |= pass->GetFlags();
-    }
-
-    for (auto& pass : _secondaryRenderPassExecutionList)
-    {
-        pass->Setup(&_secondaryResources, &_primaryResources, &_RPcommonData);
-        _secondaryPipelineFlags |= pass->GetFlags();
-    }
-}
-
-void RenderModule::InitializeRenderPasses()
-{
-    std::vector<GDX12RenderPass*> allRenderPasses;
-    for (auto& pass : _primaryRenderPassExecutionList)
-        allRenderPasses.push_back(pass.get());
-    for (auto& pass : _secondaryRenderPassExecutionList)
-        allRenderPasses.push_back(pass.get());
-    const int MAX_ITERATIONS = 100;
-    int iteration = 0;
-    while (!allRenderPasses.empty())
-    {
-        if (iteration > MAX_ITERATIONS)
-        {
-            OutputDebugStringA("ERROR: RenderPass linking failed after 100 attempts. This can be caused by wrong render pass inputs\n");
-            break;
-        }
-        for (auto it = allRenderPasses.begin(); it != allRenderPasses.end();)
-        {
-            GDX12RenderPass* renderPass = *it;
-            if (renderPass->ValidateInputs())
-            {
-                renderPass->Initialize();
-                it = allRenderPasses.erase(it);
-            }
-            else { ++it; }
-        }
-        iteration++;
-    }
-}
-
-void RenderModule::SubscribeToSceneManager()
-{
-    auto sceneManager = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
-
-    if (sceneManager)
-    {
-        _worldCreatedListener =
-            sceneManager->OnWorldCreated.AddListener(
-                [this](World& world)
-                {
-                    SubscribeToWorld(world);
-                });
-
-        _worldDestroyedListener =
-            sceneManager->OnWorldDestroyed.AddListener(
-                [this](World& world)
-                {
-                    UnsubscribeFromWorld(world);
-                });
-
-        // just in case
-        for (size_t i = 0; i < sceneManager->GetWorldCount(); ++i)
-        {
-            World* world = sceneManager->GetWorld(i);
-
-            if (world)
-            {
-                SubscribeToWorld(*world);
-            }
-        }
-    }
-}
-
-void RenderModule::UnsubscribeFromSceneManager()
-{
-    auto sceneManager = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
-
-    if (sceneManager)
-    {
-        if (_worldCreatedListener != 0)
-        {
-            sceneManager->OnWorldCreated.RemoveListener(_worldCreatedListener);
-            _worldCreatedListener = 0;
-        }
-
-        if (_worldDestroyedListener != 0)
-        {
-            sceneManager->OnWorldDestroyed.RemoveListener(_worldDestroyedListener);
-            _worldDestroyedListener = 0;
-        }
-    }
-
-    UnsubscribeFromAllWorlds();
-}
-
-void RenderModule::UnsubscribeFromAllWorlds()
-{
-    std::vector<World*> worlds;
-    worlds.reserve(_worldSubscriptions.size());
-
-    for (const auto& pair : _worldSubscriptions)
-    {
-        worlds.push_back(pair.first);
-    }
-
-    for (World* world : worlds)
-    {
-        if (world)
-        {
-            UnsubscribeFromWorld(*world);
-        }
-    }
-}
-
-bool RenderModule::ShouldTick()
-{
-    return true;
-}
-
-bool RenderModule::ShouldRender()
-{
-    return true;
-}
+    GDX12RenderPass* reflectionPass = _primaryRenderPassExecutionList[4].get();
+    GDX12RenderPass* cullingPass = _primaryRenderPassExecutionList[5].get();
+    GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[6].get();
+    GDX12RenderPass* aoPass = _primaryRenderPassExecutionList[7].get();

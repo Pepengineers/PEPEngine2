@@ -53,6 +53,12 @@ public:
         }
     }
 
+    void Invalidate()
+    {
+        _ready = false;
+        ++_resources->ReflectionEnvironmentRevision;
+    }
+
     void Execute(GDX12CommandList* commands) override
     {
         if (_ready) return;

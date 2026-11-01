@@ -17,6 +17,8 @@ struct StaticMeshRenderComponent : ComponentTag
     DirectX::BoundingBox Bounds;
 
     bool DirtyFlag;
+    bool ReflectionDynamic = false;
+    bool _reflectionDynamic = false;
 
     //we are creating an instance buffer for each submesh
     std::vector<std::uint32_t> _CBufferIndices;

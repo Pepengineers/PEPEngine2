@@ -123,6 +123,7 @@ protected:
 
 private:
     void BuildBackBuffer();
+    void CollectReflectionScene();
     void ShareFences();
     void ConfigureRenderPipeline();
     void SetupRenderPasses();
@@ -174,6 +175,8 @@ private:
     // Defines which resources should be uploaded onto respective GPU
     uint32_t _primaryPipelineFlags;
     uint32_t _secondaryPipelineFlags;
+    uint64_t _reflectionStaticHash = 0;
+    uint64_t _reflectionDynamicHash = 0;
     UINT _instanceCount = 0;
     UINT _transformCount = 0;
 };

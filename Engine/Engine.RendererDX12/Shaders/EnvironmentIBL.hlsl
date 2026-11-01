@@ -1,6 +1,10 @@
 #include "PBRMath.hlsli"
 
-cbuffer FilterParameters : register(b0) { uint OutputSize; float Roughness; };
+cbuffer FilterParameters : register(b0) { uint OutputSize; float Roughness;
+#ifdef LOCAL_PROBE_FILTER
+uint PrefilterSamples;
+#endif
+};
 TextureCube<float4> SourceEnvironment : register(t0);
 SamplerState EnvironmentSampler : register(s0);
 RWTexture2DArray<float4> OutputCube : register(u0);
@@ -73,13 +77,18 @@ void PrefilterCS(uint3 id : SV_DispatchThreadID)
     uint width, height, levels;
     SourceEnvironment.GetDimensions(0, width, height, levels);
     float texelSolidAngle = 4.0f * PBR_PI / (6.0f * width * height);
-    for (uint i = 0; i < 128; ++i)
+#ifdef LOCAL_PROBE_FILTER
+    uint sampleCount = PrefilterSamples;
+#else
+    uint sampleCount = 128;
+#endif
+    for (uint i = 0; i < sampleCount; ++i)
     {
-        float3 h = SampleGGX(Hammersley(i, 128), n, Roughness);
+        float3 h = SampleGGX(Hammersley(i, sampleCount), n, Roughness);
         float3 l = reflect(-n, h);
         float nDotL = saturate(dot(n, l));
         float pdf = max(DistributionGGX(saturate(dot(n, h)), Roughness) * 0.25f, 1e-5f);
-        float mip = max(0.0f, 0.5f * log2(1.0f / (128.0f * pdf * texelSolidAngle)));
+        float mip = max(0.0f, 0.5f * log2(1.0f / (float(sampleCount) * pdf * texelSolidAngle)));
         color += SourceEnvironment.SampleLevel(EnvironmentSampler, l, mip).rgb * nDotL;
         totalWeight += nDotL;
     }

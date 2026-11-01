@@ -21,9 +21,11 @@ TextureCube<float4> PrefilteredEnvironment : register(t5);
 Texture2D<float4> EnvironmentBRDF : register(t6);
 StructuredBuffer<LocalLight> LocalLights : register(t7);
 Texture2DArray<float> LocalShadowMaps : register(t8);
-Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t9);
+Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t11);
 SamplerComparisonState samShadow : register(s6);
 
+#define LOCAL_REFLECTION_PROBES 1
+#include "ReflectionProbes.hlsli"
 #include "PBR.hlsli"
 
 struct VS_INPUT

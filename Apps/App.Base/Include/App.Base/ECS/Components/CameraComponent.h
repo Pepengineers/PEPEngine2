@@ -13,6 +13,7 @@ struct CameraComponent : ComponentTag
     Matrix PrevViewProjNoJitter;
 
     bool DirtyFlag;
+    bool ResetHistory = true;
 
     CameraComponent()
         : DirtyFlag(true), _numFramesDirty(0), _CBufferIndex(0), 

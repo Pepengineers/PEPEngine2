@@ -35,6 +35,15 @@ void GDX12DeviceResources::Initialize(GDX12Device* device)
         D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 4096,
         D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
+    D3D12_SHADER_RESOURCE_VIEW_DESC reflectionView = {};
+    reflectionView.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    reflectionView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
+    reflectionView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    reflectionView.TextureCubeArray.NumCubes = 1;
+    reflectionView.TextureCubeArray.MipLevels = 1;
+    ReflectionRadianceSRV.InitAsSRV(nullptr, &reflectionView, SRV_UAV_Heap.get(),
+        SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
+
     GeometryBuffer = std::make_unique<GDX12GeometryBuffer>(device);
 
     for (int i = 0; i < NumFrameConstantVariable.GetValue(); i++)
@@ -44,6 +53,7 @@ void GDX12DeviceResources::Initialize(GDX12Device* device)
         FrameConstants[i]->MaterialCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
         FrameConstants[i]->TransformCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
         FrameConstants[i]->InstanceCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        FrameConstants[i]->ReflectionProbes->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
         FrameConstants[i]->LocalLightCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
     }
 
@@ -74,6 +84,7 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
         if (material->DirtyFlag)
         {
             material->DirtyFlag = false;
+            ++material->_revision;
             material->_numPrimaryFramesDirty = NumFrameConstantVariable.GetValue();
             material->_numSecondaryFramesDirty = NumFrameConstantVariable.GetValue();
         }

@@ -134,5 +134,4 @@ public:
     UINT DownscaledWidth = 0;
     UINT DownscaledHeight = 0;
     GDX12RenderPass* Upscaler = nullptr;
-    bool ResetUpscalerHistory = true;
-};
+    bool ResetHistory = true;

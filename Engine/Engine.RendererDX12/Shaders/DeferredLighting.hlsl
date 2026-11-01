@@ -1,4 +1,5 @@
 #include "CBufferStructures.hlsl"
+#define LOCAL_REFLECTION_PROBES 1
 ConstantBuffer<MainCB> CBMain : register(b0);
 ConstantBuffer<CameraCB> CBCamera : register(b1);
 ConstantBuffer<ShadowCB> CBShadow : register(b2);
@@ -20,6 +21,8 @@ SamplerState samLinearClamp : register(s3);
 SamplerComparisonState samShadow : register(s6);
 #define PBR_LIGHTING_ONLY
 #include "PBRSurface.hlsli"
+#define REFLECTION_PROBE_BINDINGS_DEFERRED 1
+#include "ReflectionProbes.hlsli"
 #include "PBRLighting.hlsli"
 
 groupshared uint MinDepth, MaxDepth, LightCount;

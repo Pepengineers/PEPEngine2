@@ -6,6 +6,8 @@
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/GDX12Resource.h"
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
+#include <cstring>
+#include <utility>
 
 enum class EBufferType
 {
@@ -203,16 +205,12 @@ void GDX12UploadBuffer<T>::Resize(UINT newElementCount)
 {
     if (newElementCount <= _elementCount) return;
 
-    UINT oldElementCount = _elementCount;
-    _elementCount = newElementCount;
-
-    if (_bufferType == EBufferType::Upload && _mappedData)
-    {
-        _buffer.D3DResource->Unmap(0, nullptr);
-        _mappedData = nullptr;
-    }
-
-    CreateBuffer();
+    GDX12UploadBuffer replacement(_device, newElementCount, _bufferType, _useConstantBufferSizeAlignment);
+    if (_mappedData) std::memcpy(replacement._mappedData, _mappedData, _totalBufferSize);
+    std::swap(_buffer, replacement._buffer);
+    std::swap(_mappedData, replacement._mappedData);
+    std::swap(_elementCount, replacement._elementCount);
+    std::swap(_totalBufferSize, replacement._totalBufferSize);
 
     if (_srv) CreateSRV(_heap, _SRVheapIndex);
     if (_uav) CreateUAV(_heap, _UAVheapIndex);
