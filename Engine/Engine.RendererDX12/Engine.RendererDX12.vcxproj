@@ -21,6 +21,8 @@
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ReflectionProbes.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionProbePass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12DepthOfField.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DepthOfFieldPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AmbientOcclusion.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12AmbientOcclusionPass.h" />
@@ -81,6 +83,8 @@
       <AdditionalIncludeDirectories>$(IntDir)CacaoShaders;$(PEPRepoRoot)External\External.Libraries\cacao\inc;$(PEPExternalDirectX-HeadersInclude)\directx-headers\directx;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <ConformanceMode>false</ConformanceMode>
     </ClCompile>
+    <ClCompile Include="src\GDX12DepthOfField.cpp" />
+    <ClCompile Include="src\GDX12DepthOfFieldPass.cpp" />
     <ClCompile Include="src\D3DHelpers.cpp" />
     <ClCompile Include="src\GDX12ReflectionProbes.cpp" />
     <ClCompile Include="src\GDX12ReflectionProbePass.cpp" />
@@ -115,6 +119,7 @@
     <None Include="Shaders\ToneMap.hlsl" />
     <None Include="Shaders\CBufferStructures.hlsl" />
     <None Include="Shaders\CompositionPass.hlsl" />
+    <None Include="Shaders\ToneMapping.hlsl" />
     <None Include="Shaders\Culling.hlsl" />
     <None Include="Shaders\CSM.hlsli" />
     <None Include="Shaders\EnvironmentIBL.hlsl" />
@@ -193,6 +198,7 @@
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Pix.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Assimp.props" />
   </ImportGroup>
+  <Import Project="..\..\MSBuild\Props\PEPEngine.External.FidelityFX.props" Condition="'$(PEPFidelityFXImported)'!='true'" />
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">

@@ -4,6 +4,7 @@
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.FidelityFX.props" />
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.NvidiaSDK.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.NvidiaSDK.props')" />
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.XeSS.props" Condition="Exists('$(MSBuildThisFileDirectory)PEPEngine.External.XeSS.props')" />
+  <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.FidelityFX.props" Condition="'$(PEPFidelityFXImported)'!='true'" />
   <ItemDefinitionGroup>
     <ClCompile>
       <AdditionalIncludeDirectories>$(PEPRepoRoot)Engine\Engine.RendererDX12\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>

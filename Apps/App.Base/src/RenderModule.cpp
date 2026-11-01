@@ -31,6 +31,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12NISUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12SyncPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12XeSSUpscalePass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12DepthOfFieldPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
@@ -1010,6 +1011,7 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12SSSRPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DepthOfFieldPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12XeSSUpscalePass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
 
