@@ -1,6 +1,7 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.Core/AssetManager.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12CloudComponent.h"
 #include <array>
 #include <cstring>
 #include <stdexcept>
@@ -21,6 +22,7 @@ public:
     void Initialize() override
     {
         LoadEnvironment();
+        _sourceLink.Texture = _textures[3].get();
         CreateTexture(*_textures[0], 32, 1, true);
         CreateTexture(*_textures[1], 128, 8, true);
         CreateTexture(*_textures[2], 128, 1, false);
@@ -53,6 +55,21 @@ public:
         }
     }
 
+    // Explicit scene/sky selection. Source must outlive this pass and use the same device.
+    // Advance the component with the world's simulation dt before Execute; zero when paused.
+    void SetCloudSource(GDX12CloudComponent* source)
+    {
+        if (_cloudSource == source) return;
+        _cloudSource = source;
+        _cloudSourceRevision = 0;
+        Invalidate();
+    }
+
+    IRenderPassLink* GetOutput(UINT index) override
+    {
+        return index == 3 ? &_sourceLink : GDX12RenderPass::GetOutput(index);
+    }
+
     void Invalidate()
     {
         _ready = false;
@@ -61,17 +78,46 @@ public:
 
     void Execute(GDX12CommandList* commands) override
     {
+        auto* source = _textures[3].get();
+        const bool cloudActive = _cloudSource && _cloudSource->IsActive();
+        if (cloudActive)
+        {
+            _cloudSource->Setup(_resources, _otherResources, _commonData);
+            _cloudSource->Execute(commands);
+            source = _cloudSource->GetOutput(0)->GetTexture();
+            if (_cloudSourceRevision != _cloudSource->GetSourceRevision())
+            {
+                _cloudSourceRevision = _cloudSource->GetSourceRevision();
+                Invalidate();
+            }
+            if (_cloudLightingRevision != _cloudSource->GetLightingRevision())
+            {
+                _cloudLightingRevision = _cloudSource->GetLightingRevision();
+                _ready = false; // Continuous lighting does not invalidate temporal history.
+            }
+        }
+        if (_cloudActive != cloudActive)
+        {
+            _cloudActive = cloudActive;
+            Invalidate();
+        }
+        _sourceLink.Texture = source;
         if (_ready) return;
         commands->BeginPixEvent("Prepare environment IBL", Colors::CornflowerBlue);
         commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
         commands->SetComputeRootSignature(_root.get());
-        commands->SetComputeSRV(0, _textures[3]->GetSRV()->GPUHandle);
-        for (UINT i = 0; i < 3; ++i)
+        commands->SetComputeSRV(0, source->GetSRV()->GPUHandle);
+        for (UINT i = 0; i < 2; ++i)
             commands->ResourceBarrier({ _textures[i]->GetResource()->GetUnorderedAccessBarrier() });
         Dispatch(commands, 0, 32, 0.0f, _textures[0]->GetUAV()->GPUHandle, 0, 6);
         for (UINT mip = 0; mip < 8; ++mip)
             Dispatch(commands, 1, 128u >> mip, mip / 7.0f, _prefilterUAVs[mip].GPUHandle, 0, 6);
-        Dispatch(commands, 2, 128, 0.0f, _textures[2]->GetUAV()->GPUHandle, 1, 1);
+        if (!_brdfReady)
+        {
+            commands->ResourceBarrier({ _textures[2]->GetResource()->GetUnorderedAccessBarrier() });
+            Dispatch(commands, 2, 128, 0.0f, _textures[2]->GetUAV()->GPUHandle, 1, 1);
+            _brdfReady = true;
+        }
         for (UINT i = 0; i < 3; ++i)
             commands->ResourceBarrier({ _textures[i]->GetResource()->GetSRVBarrier() });
         commands->EndPixEvent();
@@ -84,6 +130,10 @@ public:
         for (auto& texture : _textures) texture.reset();
         for (auto& pipeline : _pipelines) pipeline.Reset();
         _root.reset();
+        _sourceLink.Texture = nullptr;
+        _cloudSource = nullptr;
+        _brdfReady = false;
+        _ready = false;
     }
 
 private:
@@ -195,5 +245,16 @@ private:
     std::array<GDX12Descriptor, 8> _prefilterUAVs;
     std::array<ComPtr<ID3D12PipelineState>, 3> _pipelines;
     std::unique_ptr<GDX12RootSignature> _root;
+    struct SourceLink final : IRenderPassLink
+    {
+        GDX12Texture* Texture = nullptr;
+        GDX12Texture* GetTexture() override { return Texture; }
+        bool IsInitialized() override { return Texture && Texture->IsInitialized(); }
+    } _sourceLink;
+    GDX12CloudComponent* _cloudSource = nullptr;
+    uint64_t _cloudSourceRevision = 0;
+    uint64_t _cloudLightingRevision = 0;
+    bool _cloudActive = false;
+    bool _brdfReady = false;
     bool _ready = false;
 };

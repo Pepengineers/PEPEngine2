@@ -88,3 +88,10 @@ focus distance in cm, f-number, vertical sensor size, CoC limit, SDK ring budget
 ring merging. Manual overrides survive quality changes; zero restores preset
 inheritance. Defaults, units, ranges, HDR/XeSS contracts and checks are documented
 in [depth-of-field.md](rendering/depth-of-field.md).
+
+## Procedural 2D clouds
+
+`Render.Clouds.Enabled` (bool, default true) and `Render.Clouds.Quality`
+(0 Off / 1 Low / 2 Mid default / 3 High) are runtime Default controls.
+Noise, colors and animation belong to each `GDX12CloudComponent`; see
+[component API and integration](rendering/clouds.md). No clouds are attached to Bistro.

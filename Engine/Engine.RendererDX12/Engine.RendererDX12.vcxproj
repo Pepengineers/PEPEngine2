@@ -19,6 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12CloudComponent.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ReflectionProbes.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionProbePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DepthOfField.h" />
@@ -75,6 +76,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\GDX12CloudComponent.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusion.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusionPass.cpp" />
     <ClCompile Include="..\..\External\External.Libraries\cacao\src\ffx_cacao.cpp">
@@ -124,6 +126,8 @@
     <None Include="Shaders\MotionBlur.hlsl" />
     <None Include="Shaders\Culling.hlsl" />
     <None Include="Shaders\CSM.hlsli" />
+    <None Include="Shaders\CloudNoise.hlsli" />
+    <None Include="Shaders\Clouds.hlsl" />
     <None Include="Shaders\EnvironmentIBL.hlsl" />
     <None Include="Shaders\ShadowPass.hlsl" />
     <None Include="Shaders\LocalShadowPass.hlsl" />
