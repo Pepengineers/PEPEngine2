@@ -1,5 +1,5 @@
 #include "App.Base/App.h"
-#include "App.Base/Systems/FlyingPropSystem.h"
+#include "../src/Systems/FlyingPropSystem.h"
 #include "Engine.Core/ConsoleModule.h"
 #include <d3d12sdklayers.h>
 #include <iostream>

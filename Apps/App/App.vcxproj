@@ -92,6 +92,7 @@ if exist "$(PEPRepoRoot)External\Runtime\nvngx*.dll" xcopy /Y "$(PEPRepoRoot)Ext
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
+    <ClInclude Include="src\Systems\FlyingPropSystem.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\App.Base\App.Base.vcxproj">

@@ -1,5 +1,5 @@
 #include "App.Base/App.h"
-#include "App.Base/Systems/FlyingPropSystem.h"
+#include "../src/Systems/FlyingPropSystem.h"
 #include "Engine.Core/IO/TextureLoader.h"
 #include <cmath>
 #include <chrono>

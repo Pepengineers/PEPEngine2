@@ -10,6 +10,7 @@ protected:
     size_t GetWorkCount(World& world) const override { return world.GetECS().GetPool<FlyingPropComponent>().Size(); }
     void TickRange(World& world, float dt, size_t begin, size_t end) override
     {
+        return;
         world.GetECS().ForEachRange<FlyingPropComponent, TransformComponent>(begin, end,
             [dt](Entity, FlyingPropComponent& flight, TransformComponent& transform)
             {

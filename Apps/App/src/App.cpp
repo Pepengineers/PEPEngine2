@@ -10,7 +10,7 @@
 #include <shellapi.h>
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "psapi.lib")
-#include "App.Base/Systems/FlyingPropSystem.h"
+#include "Systems/FlyingPropSystem.h"
 #include "App.Base/LoadingSettings.h"
 
 namespace
