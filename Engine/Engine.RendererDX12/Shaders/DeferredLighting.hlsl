@@ -15,7 +15,7 @@ Texture2D<float4> EnvironmentBRDF : register(t8);
 TextureCube<float4> SourceEnvironment : register(t9);
 Texture2DArray<float> LocalShadowMaps : register(t10);
 StructuredBuffer<LocalLight> LocalLights : register(t11);
-Texture2D<float> AmbientOcclusion : register(t12);
+Texture2D<float> AmbientOcclusion : register(t14);
 RWTexture2D<float4> SceneColor : register(u0);
 SamplerState samLinearClamp : register(s3);
 SamplerComparisonState samShadow : register(s6);

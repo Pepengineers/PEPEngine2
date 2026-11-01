@@ -39,24 +39,16 @@ static void TestSettings()
         Require(!console->FindConsoleVariable(name).SetFromString(value), "Invalid reflection CVar accepted");
     };
     reject(L"Render.Reflection.Quality", "4");
-    reject(L"Render.Reflection.Implementation", "2");
-    reject(L"Render.Reflection.Resolution", "127");
-    reject(L"Render.Reflection.Resolution", "1024");
-    reject(L"Render.Reflection.FacesPerFrame", "7");
-    reject(L"Render.Reflection.PrefilterSamples", "7");
-    reject(L"Render.Reflection.PrefilterSamples", "nan");
-    reject(L"Render.Reflection.UpdateInterval", "3601");
-    Set(L"Render.Reflection.Resolution", "32");
-    Set(L"Render.Reflection.FacesPerFrame", "3");
-    Set(L"Render.Reflection.PrefilterSamples", "24");
+    GDX12ReflectionProbe author;
+    author.Resolution = 32;
+    author.FacesPerFrame = 3;
+    author.PrefilterSamples = 24;
     Set(L"Render.Reflection.Quality", "1");
     Set(L"Render.Reflection.Quality", "3");
-    auto settings = GetReflectionSettings();
+    auto settings = ResolveReflectionCaptureSettings(author, GetReflectionSettings().Quality);
     Require(settings.Resolution == 32 && settings.FacesPerFrame == 3 && settings.PrefilterSamples == 24,
         "Quality changed explicit overrides");
-    Set(L"Render.Reflection.Resolution", "0");
-    Set(L"Render.Reflection.FacesPerFrame", "0");
-    Set(L"Render.Reflection.PrefilterSamples", "0");
+    author.Resolution = author.FacesPerFrame = author.PrefilterSamples = 0;
     const UINT resolutions[] = { 64, 128, 256 };
     const UINT faces[] = { 1, 2, 6 };
     const UINT samples[] = { 32, 64, 128 };
@@ -64,7 +56,7 @@ static void TestSettings()
     {
         const auto text = std::to_string(quality);
         Set(L"Render.Reflection.Quality", text.c_str());
-        settings = GetReflectionSettings();
+        settings = ResolveReflectionCaptureSettings(author, GetReflectionSettings().Quality);
         Require(settings.Resolution == resolutions[quality - 1] && settings.FacesPerFrame == faces[quality - 1] &&
             settings.PrefilterSamples == samples[quality - 1], "Incorrect reflection quality preset");
     }
@@ -307,9 +299,12 @@ int main(int argc, char** argv)
         GDX12ReflectionProbe probe;
         probe.Id = 1;
         resources.ReflectionProbes = { probe };
-        Set(L"Render.Reflection.Resolution", "32");
-        Set(L"Render.Reflection.FacesPerFrame", "1");
-        Set(L"Render.Reflection.Implementation", "1");
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.Resolution = 32;
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.FacesPerFrame = 1;
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.Implementation = 1;
         GDX12GPUTimer timer(&device);
         UINT testFrame = 0;
         const auto render = [&](bool waitForGPU = true)
@@ -379,7 +374,9 @@ int main(int argc, char** argv)
         Require(rough.y < green.y * 0.9f, "GGX roughness mips did not spread the reflected emitter");
         std::cout << "Depth/overlay/atomic publication: red=" << red.x << ", green=" << green.y << ", rough=" << rough.y << "\n";
 
-        Set(L"Render.Reflection.FacesPerFrame", "6");
+        for (auto& configuredProbe : resources.ReflectionProbes)
+
+            configuredProbe.FacesPerFrame = 6;
         locations[1] = Vector3(0, 0, 200);
         material[0].EmissiveColor = { 0, 0, 6 };
         ++resources.ReflectionStaticRevision;
@@ -409,7 +406,8 @@ int main(int argc, char** argv)
         ++resources.ReflectionStaticRevision;
         render();
         Require(Center(face(4), 32).z > 5.5f, "Dynamic-to-static classification failed");
-        Set(L"Render.Reflection.Implementation", "0");
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.Implementation = 0;
         render();
         Require(reflections.GetStatistics().BakedFaces == 0 && Center(face(4), 32).z > 5.5f,
             "Full dynamic mode failed to capture static geometry");
@@ -418,7 +416,8 @@ int main(int argc, char** argv)
         render();
         Require(Center(face(4), 32).y > 3.5f, "Full dynamic mode reused stale static radiance");
         locations[0].z = 100;
-        Set(L"Render.Reflection.Implementation", "1");
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.Implementation = 1;
         ++resources.ReflectionStaticRevision;
         render();
         Require(reflections.GetStatistics().BakedFaces == 6, "Returning to baked mode failed to rebuild its cache");
@@ -428,7 +427,8 @@ int main(int argc, char** argv)
             ReadUpload(*resources.FrameConstants[resources.CurrFrameConstantsIndex]->ReflectionProbes)[0].Intensity == 0,
             "Disabled probes are not neutral");
         Set(L"Render.Reflection.Enabled", "true");
-        Set(L"Render.Reflection.FacesPerFrame", "1");
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.FacesPerFrame = 1;
         render();
         common.ActiveCameraCBufferIndex = 123; // A camera cut cannot reset this camera-independent capture.
         for (UINT i = 0; i < 5; ++i) render();
@@ -504,7 +504,8 @@ int main(int argc, char** argv)
         second.Id += 100;
         second.Intensity = 2;
         resources.ReflectionProbes.push_back(second);
-        Set(L"Render.Reflection.FacesPerFrame", "6");
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.FacesPerFrame = 6;
         render();
         render();
         const auto overlap = sample(Vector3::Zero, Vector3::UnitZ, 0);
@@ -516,7 +517,8 @@ int main(int argc, char** argv)
             "Off must be an exact global IBL fallback");
         Set(L"Render.Reflection.Quality", "2");
         resources.ReflectionProbes.resize(1);
-        Set(L"Render.Reflection.Implementation", "0");
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.Implementation = 0;
         resources.Lighting.SunShadowFlags = 1;
         resources.Lighting.LightDirection = { -1, 0, 1 };
         resources.Lighting.LightRadiance = { 20, 20, 20 };
@@ -535,15 +537,19 @@ int main(int argc, char** argv)
         resources.Lighting.SunShadowFlags = 0;
         resources.Lighting.LightRadiance = {};
         material[0].EmissiveColor = { 4, 0, 0 };
-        Set(L"Render.Reflection.Implementation", "1");
-        Set(L"Render.Reflection.Resolution", "0");
-        Set(L"Render.Reflection.FacesPerFrame", "0");
-        Set(L"Render.Reflection.PrefilterSamples", "0");
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.Implementation = 1;
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.Resolution = 0;
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.FacesPerFrame = 0;
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.PrefilterSamples = 0;
         for (int quality = 1; quality <= 3; ++quality)
         {
             const auto qualityText = std::to_string(quality);
             Set(L"Render.Reflection.Quality", qualityText.c_str());
-            const auto settings = GetReflectionSettings();
+            const auto settings = ResolveReflectionCaptureSettings(resources.ReflectionProbes.front(), GetReflectionSettings().Quality);
             UINT publications = 0;
             for (UINT i = 0; i < 6 / settings.FacesPerFrame; ++i)
             {
@@ -708,16 +714,21 @@ int main(int argc, char** argv)
         ReadTexture(device, display, 0);
         std::cout << "Opaque/transparent PBR, FP16 HDR composition, XeSS reset/odd resize and final tone map passed.\n";
         Set(L"Render.Reflection.Enabled", "true");
-        Set(L"Render.Reflection.Implementation", "0");
-        Set(L"Render.Reflection.FacesPerFrame", "1");
-        Set(L"Render.Reflection.Resolution", "64");
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.Implementation = 0;
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.FacesPerFrame = 1;
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.Resolution = 64;
         for (UINT i = 0; i < 6; ++i) render(false);
-        Set(L"Render.Reflection.Resolution", "128");
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.Resolution = 128;
         for (UINT i = 0; i < 6; ++i) render(false);
         queue->Flush();
         Require(reflections.GetStatistics().PublishedProbes == 1 && Center(face(4), 128).x > 5.5f,
             "Queued frame slots or resolution replacement corrupted publication");
-        Set(L"Render.Reflection.Implementation", "1");
+        for (auto& configuredProbe : resources.ReflectionProbes)
+            configuredProbe.Implementation = 1;
         render(false);
         std::cout << "Queued frame-slot publication, resize and mode switch passed.\n";
 

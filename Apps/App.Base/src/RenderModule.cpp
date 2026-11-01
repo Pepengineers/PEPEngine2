@@ -1,4 +1,4 @@
-﻿#include "App.Base/Modules/RenderModule.h"
+п»ї#include "App.Base/Modules/RenderModule.h"
 
 #include "App.Base/Window.h"
 #include <cassert>
@@ -921,7 +921,7 @@ void RenderModule::CollectReflectionScene()
             probe.Intensity = component.Intensity;
             probe.NearPlane = component.NearPlane;
             probe.FarPlane = component.FarPlane;
-            probe.UpdateInterval = component.UpdateInterval;
+            static_cast<GDX12ReflectionCaptureSettings&>(probe) = component;
             probe.Revision = component.Revision;
             if (!IsValidReflectionProbe(probe)) throw std::invalid_argument("Invalid ReflectionProbeComponent");
             resources.ReflectionProbes.push_back(probe);
@@ -1020,3 +1020,158 @@ void RenderModule::ConfigureRenderPipeline()
     GDX12RenderPass* cullingPass = _primaryRenderPassExecutionList[5].get();
     GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[6].get();
     GDX12RenderPass* aoPass = _primaryRenderPassExecutionList[7].get();
+    GDX12RenderPass* lightingPass = _primaryRenderPassExecutionList[8].get();
+    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[9].get();
+    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[10].get();
+    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[11].get();
+    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[12].get();
+
+    clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
+    reflectionPass->SetInputs({ environmentPass->GetOutput(0), environmentPass->GetOutput(1),
+        environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0) });
+    cullingPass->SetInputs({});
+    opaquePass->SetInputs({});
+    aoPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3) });
+    lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0), aoPass->GetOutput(0) });
+    transparencyPass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), localShadowPass->GetOutput(0) });
+    compositionPass->SetInputs({ lightingPass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
+    upscalePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1), compositionPass->GetOutput(0) });
+    outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get()});
+
+    opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    aoPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    lightingPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    transparencyPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    compositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+
+    InitializeRenderPasses();
+}
+
+void RenderModule::SetupRenderPasses()
+{
+    for (auto& pass : _primaryRenderPassExecutionList)
+    {
+        pass->Setup(&_primaryResources, &_secondaryResources, &_RPcommonData);
+        _primaryPipelineFlags |= pass->GetFlags();
+    }
+
+    for (auto& pass : _secondaryRenderPassExecutionList)
+    {
+        pass->Setup(&_secondaryResources, &_primaryResources, &_RPcommonData);
+        _secondaryPipelineFlags |= pass->GetFlags();
+    }
+}
+
+void RenderModule::InitializeRenderPasses()
+{
+    std::vector<GDX12RenderPass*> allRenderPasses;
+    for (auto& pass : _primaryRenderPassExecutionList)
+        allRenderPasses.push_back(pass.get());
+    for (auto& pass : _secondaryRenderPassExecutionList)
+        allRenderPasses.push_back(pass.get());
+    const int MAX_ITERATIONS = 100;
+    int iteration = 0;
+    while (!allRenderPasses.empty())
+    {
+        if (iteration > MAX_ITERATIONS)
+        {
+            OutputDebugStringA("ERROR: RenderPass linking failed after 100 attempts. This can be caused by wrong render pass inputs\n");
+            break;
+        }
+        for (auto it = allRenderPasses.begin(); it != allRenderPasses.end();)
+        {
+            GDX12RenderPass* renderPass = *it;
+            if (renderPass->ValidateInputs())
+            {
+                renderPass->Initialize();
+                it = allRenderPasses.erase(it);
+            }
+            else { ++it; }
+        }
+        iteration++;
+    }
+}
+
+void RenderModule::SubscribeToSceneManager()
+{
+    auto sceneManager = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
+
+    if (sceneManager)
+    {
+        _worldCreatedListener =
+            sceneManager->OnWorldCreated.AddListener(
+                [this](World& world)
+                {
+                    SubscribeToWorld(world);
+                });
+
+        _worldDestroyedListener =
+            sceneManager->OnWorldDestroyed.AddListener(
+                [this](World& world)
+                {
+                    UnsubscribeFromWorld(world);
+                });
+
+        // just in case
+        for (size_t i = 0; i < sceneManager->GetWorldCount(); ++i)
+        {
+            World* world = sceneManager->GetWorld(i);
+
+            if (world)
+            {
+                SubscribeToWorld(*world);
+            }
+        }
+    }
+}
+
+void RenderModule::UnsubscribeFromSceneManager()
+{
+    auto sceneManager = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
+
+    if (sceneManager)
+    {
+        if (_worldCreatedListener != 0)
+        {
+            sceneManager->OnWorldCreated.RemoveListener(_worldCreatedListener);
+            _worldCreatedListener = 0;
+        }
+
+        if (_worldDestroyedListener != 0)
+        {
+            sceneManager->OnWorldDestroyed.RemoveListener(_worldDestroyedListener);
+            _worldDestroyedListener = 0;
+        }
+    }
+
+    UnsubscribeFromAllWorlds();
+}
+
+void RenderModule::UnsubscribeFromAllWorlds()
+{
+    std::vector<World*> worlds;
+    worlds.reserve(_worldSubscriptions.size());
+
+    for (const auto& pair : _worldSubscriptions)
+    {
+        worlds.push_back(pair.first);
+    }
+
+    for (World* world : worlds)
+    {
+        if (world)
+        {
+            UnsubscribeFromWorld(*world);
+        }
+    }
+}
+
+bool RenderModule::ShouldTick()
+{
+    return true;
+}
+
+bool RenderModule::ShouldRender()
+{
+    return true;
+}

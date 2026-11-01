@@ -88,4 +88,151 @@ public:
 		xess_d3d12_execute_params_t execParams = {};
 		execParams.pDepthTexture = depthStencil->GetResource()->D3DResource.Get();
 		execParams.pVelocityTexture = motionVectors->GetResource()->D3DResource.Get();
+		// RH projection produces the opposite pixel displacement to the stored jitter.
+		execParams.jitterOffsetX = -_commonData->ActiveCameraJitterOffsetX;
+		execParams.jitterOffsetY = -_commonData->ActiveCameraJitterOffsetY;
+		execParams.inputWidth = _commonData->DownscaledWidth;
+		execParams.inputHeight = _commonData->DownscaledHeight;
+		execParams.resetHistory = _resetHistory || _commonData->ResetHistory;
+
+		execParams.exposureScale = 1;
+		execParams.inputColorBase = { 0,0 };
+		execParams.inputDepthBase = { 0,0 };
+
+		for (UINT i = 0; i < _numOutputs; i++)
+		{
+			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
+			GDX12Texture* upscaledTexture = OUT_UpscaledTextures[i].get();
+
+			execParams.pColorTexture = inputTexture->GetResource()->D3DResource.Get();
+			execParams.pOutputTexture = upscaledTexture->GetResource()->D3DResource.Get();
+
+			cmdList->ResourceBarrier({ inputTexture->GetResource()->GetNonPixelShaderResourceBarrier(),
+			upscaledTexture->GetResource()->GetUnorderedAccessBarrier() });
+
+			xess_result_t execResult = xessD3D12Execute(_XeSSContext, cmdList->GetCommandList().Get(), &execParams);
+			if (execResult < XESS_RESULT_SUCCESS)
+			{
+				std::string msg = "ERROR: XeSS execute failed: " + XeSSResultToString(execResult) + "\n";
+				throw std::runtime_error(msg);
+			}
+		}
+        // XeSS records through the native list and may replace every cached binding.
+        cmdList->InvalidateCachedState();
+        _resetHistory = false;
+        _commonData->ResetHistory = false;
+		cmdList->EndPixEvent();
+	}
+
+	void Resize() override
+	{
+		for (auto& texture : OUT_UpscaledTextures) { texture->Resize(_commonData->WindowWidth, _commonData->WindowHeight); }
+		xessDestroyContext(_XeSSContext);
+		_XeSSContext = nullptr;
+		BuildXeSSContext();
+		_commonData->ResetHistory = true;
+	}
+
+	void QueryRenderTargetResolution() override
+	{
+		xess_2d_t targetResolution = { _commonData->WindowWidth, _commonData->WindowHeight } ;
+		xess_2d_t downscaledResolution;
+		xess_2d_t minResolution;
+		xess_2d_t maxResolution;
+		xess_result_t queryResolutionResult = xessGetOptimalInputResolution(_XeSSContext,
+			&targetResolution, _XeSSQualityMode, &downscaledResolution, &minResolution, &maxResolution);
+		if (queryResolutionResult < XESS_RESULT_SUCCESS)
+		{
+			std::string msg = "ERROR: XeSS query resolution failed: " + XeSSResultToString(queryResolutionResult) + "\n";
+			OutputDebugStringA(msg.c_str());
+			throw std::runtime_error(msg);
+		}
+		_commonData->DownscaledWidth = downscaledResolution.x;
+		_commonData->DownscaledHeight = downscaledResolution.y;
+	}
+
+	void ClearDenendencies() override
+	{
+		GDX12RenderPass::ClearDenendencies();
+		xessDestroyContext(_XeSSContext);
+		_XeSSContext = nullptr;
+		IN_DepthBuffer = nullptr;
+		IN_MotionVectors = nullptr;
+		IN_Textures.clear();
+		OUT_UpscaledTextures.clear();
+	}
+
+private:
+	IRenderPassLink* IN_DepthBuffer;
+	IRenderPassLink* IN_MotionVectors;
+	std::vector<IRenderPassLink*> IN_Textures;
+	std::vector<std::unique_ptr<GDX12Texture>> OUT_UpscaledTextures;
+    bool _resetHistory = true;
+	xess_context_handle_t _XeSSContext;
+	xess_quality_settings_t _XeSSQualityMode;
+
+	void MatchOutputCount(UINT outputCount)
+	{
+		if (OUT_UpscaledTextures.size() < outputCount) { OUT_UpscaledTextures.resize(outputCount); }
+		if (_outputs.size() < outputCount) { _outputs.resize(outputCount, nullptr); }
+
+		for (UINT i = 0; i < outputCount; i++)
+		{
+			if (!OUT_UpscaledTextures[i]) { OUT_UpscaledTextures[i] = std::make_unique<GDX12Texture>(); }
+			_outputs[i] = OUT_UpscaledTextures[i].get();
+		}
+
+		_numOutputs = outputCount;
+	}
+
+	void BuildXeSSContext()
+	{
+        _resetHistory = true;
+		xess_result_t createContextResult = xessD3D12CreateContext(_resources->Device->GetDevice().Get(), &_XeSSContext);
+		if (createContextResult < XESS_RESULT_SUCCESS)
+		{
+			std::string msg = "ERROR: XeSS context not created: " + XeSSResultToString(createContextResult) + "\n";
+			OutputDebugStringA(msg.c_str());
+			throw std::runtime_error(msg);
+		}
+
+		xess_d3d12_init_params_t initParams = {};
+		initParams.outputResolution.x = _commonData->WindowWidth;
+		initParams.outputResolution.y = _commonData->WindowHeight;
 		initParams.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH | 
+			XESS_INIT_FLAG_USE_NDC_VELOCITY;
+		initParams.qualitySetting = _XeSSQualityMode;
+
+		xess_result_t initResult = xessD3D12Init(_XeSSContext, &initParams);
+		if (initResult < XESS_RESULT_SUCCESS)
+		{
+			std::string msg = "ERROR: XeSS context not initialized: " + XeSSResultToString(initResult) + "\n";
+			OutputDebugStringA(msg.c_str());
+			throw std::runtime_error(msg);
+		}
+	}
+
+	std::string XeSSResultToString(const xess_result_t result)
+	{
+		switch (result)
+		{
+		case XESS_RESULT_SUCCESS: return "XESS_RESULT_SUCCESS";
+		case XESS_RESULT_WARNING_NONEXISTING_FOLDER: return "XESS_RESULT_WARNING_NONEXISTING_FOLDER";
+		case XESS_RESULT_WARNING_OLD_DRIVER: return "XESS_RESULT_WARNING_OLD_DRIVER";
+		case XESS_RESULT_ERROR_UNSUPPORTED_DEVICE: return "XESS_RESULT_ERROR_UNSUPPORTED_DEVICE";
+		case XESS_RESULT_ERROR_UNSUPPORTED_DRIVER: return "XESS_RESULT_ERROR_UNSUPPORTED_DRIVER";
+		case XESS_RESULT_ERROR_UNINITIALIZED: return "XESS_RESULT_ERROR_UNINITIALIZED";
+		case XESS_RESULT_ERROR_INVALID_ARGUMENT: return "XESS_RESULT_ERROR_INVALID_ARGUMENT";
+		case XESS_RESULT_ERROR_DEVICE_OUT_OF_MEMORY: return "XESS_RESULT_ERROR_DEVICE_OUT_OF_MEMORY";
+		case XESS_RESULT_ERROR_DEVICE: return "XESS_RESULT_ERROR_DEVICE";
+		case XESS_RESULT_ERROR_NOT_IMPLEMENTED: return "XESS_RESULT_ERROR_NOT_IMPLEMENTED";
+		case XESS_RESULT_ERROR_INVALID_CONTEXT: return "XESS_RESULT_ERROR_INVALID_CONTEXT";
+		case XESS_RESULT_ERROR_OPERATION_IN_PROGRESS: return "XESS_RESULT_ERROR_OPERATION_IN_PROGRESS";
+		case XESS_RESULT_ERROR_UNSUPPORTED: return "XESS_RESULT_ERROR_UNSUPPORTED";
+		case XESS_RESULT_ERROR_CANT_LOAD_LIBRARY: return "XESS_RESULT_ERROR_CANT_LOAD_LIBRARY";
+		case XESS_RESULT_ERROR_WRONG_CALL_ORDER: return "XESS_RESULT_ERROR_WRONG_CALL_ORDER";
+		case XESS_RESULT_ERROR_UNKNOWN: return "XESS_RESULT_ERROR_UNKNOWN";
+		default: return "XESS_RESULT_UNKNOWN_ENUM";
+		}
+	}
+};

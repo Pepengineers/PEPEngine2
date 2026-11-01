@@ -101,6 +101,167 @@
     <ClCompile Include="src\GDX12Texture.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Shaders\AmbientOcclusion.hlsl" />
+    <None Include="Shaders\ToneMapping.hlsl" />
     <None Include="Shaders\ToneMap.hlsl" />
     <None Include="Shaders\ReflectionCapture.hlsl" />
     <None Include="Shaders\ReflectionProbes.hlsli" />
+    <None Include="Shaders\BufferClear.hlsl" />
+    <None Include="Shaders\CBufferStructures.hlsl" />
+    <None Include="Shaders\CompositionPass.hlsl" />
+    <None Include="Shaders\Culling.hlsl" />
+    <None Include="Shaders\CSM.hlsli" />
+    <None Include="Shaders\EnvironmentIBL.hlsl" />
+    <None Include="Shaders\ShadowPass.hlsl" />
+    <None Include="Shaders\LocalShadowPass.hlsl" />
+    <None Include="Shaders\ShadowFrustum.hlsli" />
+    <None Include="Shaders\FullScreenVS.hlsl" />
+    <None Include="Shaders\OpaquePass.hlsl" />
+    <None Include="Shaders\DeferredLighting.hlsl" />
+    <None Include="Shaders\PBRSurface.hlsli" />
+    <None Include="Shaders\PBRLighting.hlsli" />
+    <None Include="Shaders\LocalShadows.hlsli" />
+    <None Include="Shaders\PBR.hlsli" />
+    <None Include="Shaders\PBRMath.hlsli" />
+    <None Include="Shaders\TransparentPass.hlsl" />
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{33a65dab-170e-49a8-9dd4-49f754ecdeb2}</ProjectGuid>
+    <RootNamespace>EngineRendererDX12</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\..\GlobalSettings.props" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\..\GlobalSettings.props" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\..\GlobalSettings.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.Module.Engine.RendererDX12.Public.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Dxc.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Pix.props" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\..\GlobalSettings.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.Module.Engine.RendererDX12.Public.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Dxc.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Pix.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.External.Assimp.props" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <Link>
+      <SubSystem>
+      </SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+    </ClCompile>
+    <Link>
+      <SubSystem>
+      </SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>
+      </SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_LIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <Link>
+      <SubSystem>
+      </SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <Target Name="BuildCacaoShaders" BeforeTargets="ClCompile"
+          Inputs="$(PEPRepoRoot)MSBuild\BuildCacaoShaders.ps1;$(PEPRepoRoot)External\External.Libraries\cacao\src\ffx_cacao.hlsl;$(PEPRepoRoot)External\External.Libraries\cacao\src\ffx_cacao_bindings.hlsl;$(PEPRepoRoot)External\External.Libraries\cacao\src\ffx_cacao_defines.h;$(PEPRepoRoot)External\External.Libraries\cacao\src\build_shaders_dxil.bat"
+          Outputs="$(IntDir)CacaoShaders\complete.stamp">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(PEPRepoRoot)MSBuild\BuildCacaoShaders.ps1&quot; -Dxc &quot;$(WindowsSDK_ExecutablePath_x64)&quot; -Source &quot;$(PEPRepoRoot)External\External.Libraries\cacao\src&quot; -Output &quot;$(IntDir)CacaoShaders&quot;" />
+    <Touch Files="$(IntDir)CacaoShaders\complete.stamp" AlwaysCreate="true" />
+  </Target>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
