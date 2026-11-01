@@ -106,3 +106,18 @@ Actual-image ordering checks: motion blur at render grid saved cost above; analy
 - No prolonged stability/thermal/memory-soak or target-FPS claim, multi-GPU/SSAA validation, or full vendor-XeSS GBV completion. Complete ordinary-debug XeSS/HDR paths and focused technique GBV did pass. Existing dependency PDB/conversion warnings remain.
 
 Second-group implementation is authorized only after final first-group completion. Its global controls remain Enabled/Quality only; all other settings are component-owned. New authors must preserve both prepass paths and this HDR/specular contract and leave their own results explicitly unverified.
+
+## Second-group launch
+
+First-group integration code commit: `353a585a529d46002a506e1d7e98d66cca55d397`. Six separate full local clones were created from that exact commit after the checks passed. Each inherited only the original warning/research WIP, separately recorded in Build/BASELINE-WIP.txt. Model gpt-6.1-sol / thinking high. The full technique packet, common integration contract, both prepass paths, component-only settings rule and implementation-only/no-verification instruction were sent to every chat. No further confirmation was needed. `wait_threads` confirmed all six active/inProgress after real creation.
+
+| Feature | Thread ID | Local clone / branch |
+|---|---|---|
+| SKY | `01a19738-1edc-7ec3-8ccc-6606e9d2a492` | `D:/Project/PEPEngine2/Build/Features/SKY` / `codex/feature-sky` |
+| GRASS_WIND | `01a19738-6e1d-77e2-a8ef-8540117a9bd5` | `D:/Project/PEPEngine2/Build/Features/GRASS_WIND` / `codex/feature-grass-wind` |
+| PARTICLES | `01a19738-99c4-76d1-9829-a740725bdcb5` | `D:/Project/PEPEngine2/Build/Features/PARTICLES` / `codex/feature-particles` |
+| FLUID | `01a19738-bb08-7fe2-b4d8-aa306dade5ff` | `D:/Project/PEPEngine2/Build/Features/FLUID` / `codex/feature-fluid` |
+| SKINNING | `01a19738-d751-7fe3-85a7-fff273932cf3` | `D:/Project/PEPEngine2/Build/Features/SKINNING` / `codex/feature-skinning` |
+| CLOUDS | `01a19739-011e-7770-97d7-c50bb7b527b5` | `D:/Project/PEPEngine2/Build/Features/CLOUDS` / `codex/feature-clouds` |
+
+Their future code is not part of the accepted first-group baseline and must be centrally reviewed separately.

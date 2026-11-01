@@ -50,7 +50,7 @@
     }
   ],
   "secondGroup": {
-    "status": "ready_for_authorized_launch",
+    "status": "launched",
     "tasks": [
       "SKY",
       "GRASS_WIND",
@@ -59,19 +59,85 @@
       "SKINNING",
       "CLOUDS"
     ],
-    "globalCVarPolicy": "Enabled and Quality only; all other settings belong to render component instances"
+    "globalCVarPolicy": "Enabled and Quality only; every other setting belongs to render component instances",
+    "base": "353a585a529d46002a506e1d7e98d66cca55d397",
+    "runs": [
+      {
+        "feature": "SKY",
+        "checkout": "D:/Project/PEPEngine2/Build/Features/SKY",
+        "branch": "codex/feature-sky",
+        "base": "353a585a529d46002a506e1d7e98d66cca55d397",
+        "hostId": "local",
+        "model": "gpt-6.1-sol",
+        "reasoning": "high",
+        "threadId": "01a19738-1edc-7ec3-8ccc-6606e9d2a492"
+      },
+      {
+        "feature": "GRASS_WIND",
+        "checkout": "D:/Project/PEPEngine2/Build/Features/GRASS_WIND",
+        "branch": "codex/feature-grass-wind",
+        "base": "353a585a529d46002a506e1d7e98d66cca55d397",
+        "hostId": "local",
+        "model": "gpt-6.1-sol",
+        "reasoning": "high",
+        "threadId": "01a19738-6e1d-77e2-a8ef-8540117a9bd5"
+      },
+      {
+        "feature": "PARTICLES",
+        "checkout": "D:/Project/PEPEngine2/Build/Features/PARTICLES",
+        "branch": "codex/feature-particles",
+        "base": "353a585a529d46002a506e1d7e98d66cca55d397",
+        "hostId": "local",
+        "model": "gpt-6.1-sol",
+        "reasoning": "high",
+        "threadId": "01a19738-99c4-76d1-9829-a740725bdcb5"
+      },
+      {
+        "feature": "FLUID",
+        "checkout": "D:/Project/PEPEngine2/Build/Features/FLUID",
+        "branch": "codex/feature-fluid",
+        "base": "353a585a529d46002a506e1d7e98d66cca55d397",
+        "hostId": "local",
+        "model": "gpt-6.1-sol",
+        "reasoning": "high",
+        "threadId": "01a19738-bb08-7fe2-b4d8-aa306dade5ff"
+      },
+      {
+        "feature": "SKINNING",
+        "checkout": "D:/Project/PEPEngine2/Build/Features/SKINNING",
+        "branch": "codex/feature-skinning",
+        "base": "353a585a529d46002a506e1d7e98d66cca55d397",
+        "hostId": "local",
+        "model": "gpt-6.1-sol",
+        "reasoning": "high",
+        "threadId": "01a19738-d751-7fe3-85a7-fff273932cf3"
+      },
+      {
+        "feature": "CLOUDS",
+        "checkout": "D:/Project/PEPEngine2/Build/Features/CLOUDS",
+        "branch": "codex/feature-clouds",
+        "base": "353a585a529d46002a506e1d7e98d66cca55d397",
+        "hostId": "local",
+        "model": "gpt-6.1-sol",
+        "reasoning": "high",
+        "threadId": "01a19739-011e-7770-97d7-c50bb7b527b5"
+      }
+    ],
+    "launchConfirmation": "wait_threads timeoutMs=0: all six active with latestTurn inProgress",
+    "authorsVerificationPolicy": "implementation only; no builds/tests/benchmarks/standalone review; final result explicitly unverified"
   },
   "reviewCoordinator": {
     "threadId": "01a19712-024c-7381-96de-f328a7767952",
     "hostId": "local",
     "model": "gpt-6.1-sol",
     "reasoning": "high",
-    "status": "verified_first_group",
+    "status": "complete",
     "scope": "Verify and fix first group personally, then create second-group chats from verified integration baseline",
     "plannedCheckout": "D:/Project/PEPEngine2/Build/Features/REVIEW",
     "checkout": "D:/Project/PEPEngine2/Build/Features/REVIEW",
     "branch": "codex/review-render-techniques",
     "report": "docs/rendering-review.md",
-    "checks": "Release App + focused CPU/GPU/debug/GBV, real Bistro frames/readback/visual, prepass early/late, two independent probes, root WIP/414 Bistro SHA256 preservation"
+    "checks": "Release App + focused CPU/GPU/debug/GBV, real Bistro frames/readback/visual, prepass early/late, two independent probes, root WIP/414 Bistro SHA256 preservation",
+    "integrationCommit": "353a585a529d46002a506e1d7e98d66cca55d397"
   }
 }
