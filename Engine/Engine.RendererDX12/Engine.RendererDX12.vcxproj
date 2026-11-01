@@ -20,6 +20,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12AmbientOcclusion.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12AmbientOcclusionPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GeometryBuffer.h" />
@@ -65,6 +67,16 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\GDX12AmbientOcclusion.cpp" />
+    <ClCompile Include="src\GDX12AmbientOcclusionPass.cpp" />
+    <ClCompile Include="..\..\External\External.Libraries\cacao\src\ffx_cacao.cpp">
+      <AdditionalIncludeDirectories>$(PEPRepoRoot)External\External.Libraries\cacao\inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ClCompile Include="..\..\External\External.Libraries\cacao\src\ffx_cacao_impl.cpp">
+      <PreprocessorDefinitions>FFX_CACAO_ENABLE_D3D12;NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(IntDir)CacaoShaders;$(PEPRepoRoot)External\External.Libraries\cacao\inc;$(PEPExternalDirectX-HeadersInclude)\directx-headers\directx;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <ConformanceMode>false</ConformanceMode>
+    </ClCompile>
     <ClCompile Include="src\D3DHelpers.cpp" />
     <ClCompile Include="src\GDX12DeviceResources.cpp" />
     <ClCompile Include="src\GDX12GPUTimer.cpp" />
@@ -85,6 +97,8 @@
     <ClCompile Include="src\GDX12Texture.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Shaders\AmbientOcclusion.hlsl" />
+    <None Include="Shaders\ToneMapping.hlsl" />
     <None Include="Shaders\BufferClear.hlsl" />
     <None Include="Shaders\CBufferStructures.hlsl" />
     <None Include="Shaders\CompositionPass.hlsl" />
@@ -234,6 +248,12 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
+  <Target Name="BuildCacaoShaders" BeforeTargets="ClCompile"
+          Inputs="$(PEPRepoRoot)MSBuild\BuildCacaoShaders.ps1;$(PEPRepoRoot)External\External.Libraries\cacao\src\ffx_cacao.hlsl;$(PEPRepoRoot)External\External.Libraries\cacao\src\ffx_cacao_bindings.hlsl;$(PEPRepoRoot)External\External.Libraries\cacao\src\ffx_cacao_defines.h;$(PEPRepoRoot)External\External.Libraries\cacao\src\build_shaders_dxil.bat"
+          Outputs="$(IntDir)CacaoShaders\complete.stamp">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(PEPRepoRoot)MSBuild\BuildCacaoShaders.ps1&quot; -Dxc &quot;$(WindowsSDK_ExecutablePath_x64)&quot; -Source &quot;$(PEPRepoRoot)External\External.Libraries\cacao\src&quot; -Output &quot;$(IntDir)CacaoShaders&quot;" />
+    <Touch Files="$(IntDir)CacaoShaders\complete.stamp" AlwaysCreate="true" />
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
