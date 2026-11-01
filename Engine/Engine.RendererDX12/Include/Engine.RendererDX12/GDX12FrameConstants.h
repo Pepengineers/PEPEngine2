@@ -5,6 +5,7 @@
 #include "Engine.RendererDX12/GDX12UploadBuffer.h"
 #include "Engine.RendererDX12/GDX12AppendBuffer.h"
 #include "Engine.RendererDX12/GDX12ConstantStructures.h"
+#include "Engine.RendererDX12/GDX12ReflectionProbes.h"
 
 class GDX12Device;
 
@@ -38,6 +39,8 @@ public:
     std::unique_ptr<GDX12UploadBuffer<GDX12LightConstants>> LightCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12CameraConstants>> CameraCB;
     std::vector<GDX12VisibilityBuffers> CameraVisibilityCommands;
+
+    std::unique_ptr<GDX12UploadBuffer<GDX12ReflectionProbeData>> ReflectionProbes;
 
     UINT64 FenceValue;
     

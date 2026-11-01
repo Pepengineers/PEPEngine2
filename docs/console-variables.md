@@ -69,3 +69,7 @@ Build/CVarTests/Manual/ConsoleVariableTests.exe
 ```
 
 Для проверки Release добавьте `/DNDEBUG /O2`. Тест намеренно вызывает ошибку запуска и проверяет её запись в лог. Он использует свой `Config/Engine.ini` рядом с тестовым exe и отказывается перезаписывать существующий файл.
+
+## Локальные отражения
+
+`Render.Reflection.*` — runtime Default CVar; единицы, диапазоны, пресеты и наследование overrides описаны в [reflection-probes.md](reflection-probes.md). Регистрация находится в `GDX12ReflectionProbes.cpp`. `ReflectionProbeTests.exe --cpu` проверяет реальные CVar, отклонение неверных значений и сохранение overrides при смене качества.

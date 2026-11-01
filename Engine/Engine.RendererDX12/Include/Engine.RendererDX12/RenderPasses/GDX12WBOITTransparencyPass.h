@@ -65,7 +65,7 @@ public:
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
 		RSDesc1.NumSingleCBVSlots = 3;
-		RSDesc1.NumSingleSRVSlots = 9;
+		RSDesc1.NumSingleSRVSlots = 11;
 		RSDesc1.StaticSamplers = GetStaticSamplers();
 		CD3DX12_STATIC_SAMPLER_DESC shadowSampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
 		shadowSampler.AddressU = shadowSampler.AddressV = shadowSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
@@ -173,7 +173,9 @@ public:
 			cmdList->SetGraphicsSRV(2 + input, _inputs[input]->GetTexture()->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(7, currentFrameConstants->LocalLightCache->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(8, _inputs[5]->GetTexture()->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(9, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
+		cmdList->SetGraphicsSRV(9, _resources->ReflectionRadianceSRV.GPUHandle);
+		cmdList->SetGraphicsSRV(10, currentFrameConstants->ReflectionProbes->GetSRV()->GPUHandle);
+		cmdList->SetGraphicsSRV(11, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
 
 		cmdList->ResourceBarrier({ currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetIndirectArgsBarrier(),
 		currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetIndirectArgsBarrier(),

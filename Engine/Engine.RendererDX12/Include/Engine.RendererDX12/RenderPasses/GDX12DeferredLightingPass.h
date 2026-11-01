@@ -29,7 +29,7 @@ public:
         _color->Initialize(texture);
         GDX12RootSignatureDesc root;
         root.NumSingleCBVSlots = 3;
-        root.NumSingleSRVSlots = 12;
+        root.NumSingleSRVSlots = 14;
         root.NumSingleUAVSlots = 1;
         root.StaticSamplers = GetStaticSamplers();
         CD3DX12_STATIC_SAMPLER_DESC sampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
@@ -62,6 +62,8 @@ public:
             commands->SetComputeSRV(i, texture->GetSRV()->GPUHandle);
         }
         commands->SetComputeSRV(11, frame->LocalLightCache->GetSRV()->GPUHandle);
+        commands->SetComputeSRV(12, _resources->ReflectionRadianceSRV.GPUHandle);
+        commands->SetComputeSRV(13, frame->ReflectionProbes->GetSRV()->GPUHandle);
         commands->SetComputeUAV(0, _color->GetUAV()->GPUHandle);
         commands->ResourceBarrier({ _color->GetResource()->GetUnorderedAccessBarrier() });
         commands->Dispatch((_color->GetWidth() + 15) / 16, (_color->GetHeight() + 15) / 16, 1);

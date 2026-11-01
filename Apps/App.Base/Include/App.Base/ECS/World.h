@@ -8,6 +8,7 @@
 #include "App.Base/ECS/Components/CircleMovementComponent.h"
 #include "App.Base/ECS/Components/LookAtTargetComponent.h"
 #include "App.Base/ECS/Components/LightComponent.h"
+#include "App.Base/ECS/Components/ReflectionProbeComponent.h"
 #include "App.Base/ECS/Components/FlyingPropComponent.h"
 #include "App.Base/ECS/Components/NameComponent.h"
 #include "App.Base/ECS/Components/SplineCurveComponent.h"
@@ -33,7 +34,8 @@ using WorldECS = ECSStorage<
     SplineFollowComponent,
     LookAtTargetComponent,
     LightComponent,
-    FlyingPropComponent
+    FlyingPropComponent,
+    ReflectionProbeComponent
 >;
 
 class World {

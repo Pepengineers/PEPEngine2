@@ -96,6 +96,28 @@ public:
             _gpuData.Schedule(jobs, world, 0, 1).Complete();
         }
         Require(renderer._numFramesDirty == 0, "Initial frame slots did not finish updating");
+        Require(renderer._reflectionDynamic, "Flying props must be classified dynamic for reflection capture");
+        const auto initialInstances = ReadUpload(render->GetCurrentPrimaryFrameConstants()->InstanceCache.get());
+        Require(initialInstances[0].ReflectionDynamic == 0, "The fixture wall must remain static for reflection baking");
+        auto* editedMaterial = renderer.Materials.front();
+        const float previousRoughness = editedMaterial->Roughness;
+        editedMaterial->Roughness = 0.23f;
+        editedMaterial->DirtyFlag = true;
+        render->Update();
+        const auto uploadedMaterials = ReadUpload(render->GetCurrentPrimaryFrameConstants()->MaterialCache.get());
+        Require(std::abs(uploadedMaterials[editedMaterial->_CBufferIndex].Roughness - 0.23f) < 1e-6f,
+            "An actual material edit must reach the GPU cache used by reflection capture");
+        editedMaterial->Roughness = previousRoughness;
+        editedMaterial->DirtyFlag = true;
+        const auto transformsBeforeGrowth = ReadUpload(render->GetCurrentPrimaryFrameConstants()->TransformCache.get());
+        auto probeEntity = ecs.CreateEntity();
+        probeEntity.AddComponent<TransformComponent>();
+        probeEntity.AddComponent<ReflectionProbeComponent>();
+        const auto transformsAfterGrowth = ReadUpload(render->GetCurrentPrimaryFrameConstants()->TransformCache.get());
+        Require(transformsAfterGrowth.size() > transformsBeforeGrowth.size() &&
+            std::memcmp(transformsBeforeGrowth.data(), transformsAfterGrowth.data(),
+                transformsBeforeGrowth.size() * sizeof(transformsBeforeGrowth[0])) == 0,
+            "Adding a runtime reflection probe erased existing uploaded transforms");
         auto& flight = ecs.Get<FlyingPropComponent>(bottle);
         flight.Time = flight.Phase = 0;
         flight.Speed = 1;
@@ -117,6 +139,7 @@ public:
                 const auto& actual = instances.at(renderer._CBufferIndices.at(i));
                 const auto& part = mesh->SubMeshes.at(renderer.GetSubMeshIndex(i));
                 const auto& command = source.at(renderer._CBufferIndices.at(i));
+                Require(actual.ReflectionDynamic == 1, "Every moving submesh must reach the dynamic reflection overlay");
                 Require(command.StartIndexLocation == part.StartIndexLocation && command.BaseVertexLocation == part.StartVertexLocation &&
                     actual.MaterialIndex == renderer.Materials.at(part.MaterialIndex)->_CBufferIndex &&
                     actual.TransformIndex == render->GetTransformGPUData(bottle).CBufferIndex,

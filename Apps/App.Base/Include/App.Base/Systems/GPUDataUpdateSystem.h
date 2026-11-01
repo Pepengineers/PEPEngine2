@@ -49,6 +49,11 @@ protected:
             if (ecs.Has<StaticMeshRenderComponent>(entity))
             {
                 auto& renderer = ecs.Get<StaticMeshRenderComponent>(entity);
+                const bool dynamic = renderer.ReflectionDynamic || ecs.Has<VelocityComponent>(entity) ||
+                    ecs.Has<CircleMovementComponent>(entity) || ecs.Has<SplineFollowComponent>(entity) ||
+                    ecs.Has<FlyingPropComponent>(entity) || ecs.Has<LookAtTargetComponent>(entity);
+                renderer.DirtyFlag |= renderer._reflectionDynamic != dynamic;
+                renderer._reflectionDynamic = dynamic;
                 if (changed || renderer.DirtyFlag)
                 {
                     renderer._numFramesDirty = _numFrames;
@@ -83,6 +88,7 @@ private:
             if (i == 0) renderer.Bounds = bounds;
             else BoundingBox::CreateMerged(renderer.Bounds, renderer.Bounds, bounds);
             GDX12InstanceData instance = {};
+            instance.ReflectionDynamic = renderer._reflectionDynamic ? 1u : 0u;
             instance.TransformIndex = transform.CBufferIndex;
             instance.MaterialIndex = renderer.Materials.at(submesh.MaterialIndex)->_CBufferIndex;
             instance.BoundingBoxCenter = bounds.Center;
@@ -100,7 +106,15 @@ private:
         // Active camera requires constant update due to jittering
         auto pipelineCommonData = renderModule->GetRenderPipelineCommonData();
         bool isActiveCamera = pipelineCommonData->ActiveCameraCBufferIndex == camera._CBufferIndex;
-        if (isActiveCamera) { camera.DirtyFlag = true; }
+        if (isActiveCamera)
+        {
+            camera.DirtyFlag = true;
+            if (camera.ResetHistory)
+            {
+                pipelineCommonData->ResetHistory = true;
+                camera.ResetHistory = false;
+            }
+        }
 
         if (camera.DirtyFlag || transform.DirtyFlag)
         {

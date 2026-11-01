@@ -1,6 +1,7 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Common/GameTimer.h"
+#include <stdexcept>
 
 #include "xess/xess.h"
 #include "xess/xess_d3d12.h"
@@ -82,12 +83,12 @@ public:
 		xess_d3d12_execute_params_t execParams = {};
 		execParams.pDepthTexture = depthStencil->GetResource()->D3DResource.Get();
 		execParams.pVelocityTexture = motionVectors->GetResource()->D3DResource.Get();
-		// I have no idea why, but the minus sign fixes bluriness
+		// RH projection produces the opposite pixel displacement to the stored jitter.
 		execParams.jitterOffsetX = -_commonData->ActiveCameraJitterOffsetX;
 		execParams.jitterOffsetY = -_commonData->ActiveCameraJitterOffsetY;
 		execParams.inputWidth = _commonData->DownscaledWidth;
 		execParams.inputHeight = _commonData->DownscaledHeight;
-		execParams.resetHistory = false;
+		execParams.resetHistory = _resetHistory || _commonData->ResetHistory;
 
 		execParams.exposureScale = 1;
 		execParams.inputColorBase = { 0,0 };
@@ -108,9 +109,13 @@ public:
 			if (execResult != XESS_RESULT_SUCCESS)
 			{
 				std::string msg = "ERROR: XeSS execute failed: " + XeSSResultToString(execResult) + "\n";
-				OutputDebugStringA(msg.c_str());
+				throw std::runtime_error(msg);
 			}
 		}
+        // XeSS records through the native list and may replace every cached binding.
+        cmdList->InvalidateCachedState();
+        _resetHistory = false;
+        _commonData->ResetHistory = false;
 		cmdList->EndPixEvent();
 	}
 
@@ -153,6 +158,7 @@ private:
 	IRenderPassLink* IN_MotionVectors;
 	std::vector<IRenderPassLink*> IN_Textures;
 	std::vector<std::unique_ptr<GDX12Texture>> OUT_UpscaledTextures;
+    bool _resetHistory = true;
 	xess_context_handle_t _XeSSContext;
 	xess_quality_settings_t _XeSSQualityMode;
 
@@ -172,6 +178,7 @@ private:
 
 	void BuildXeSSContext()
 	{
+        _resetHistory = true;
 		xess_result_t createContextResult = xessD3D12CreateContext(_resources->Device->GetDevice().Get(), &_XeSSContext);
 		if (createContextResult != XESS_RESULT_SUCCESS)
 		{
@@ -183,7 +190,7 @@ private:
 		initParams.outputResolution.x = _commonData->WindowWidth;
 		initParams.outputResolution.y = _commonData->WindowHeight;
 		initParams.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH | 
-			XESS_INIT_FLAG_LDR_INPUT_COLOR | XESS_INIT_FLAG_USE_NDC_VELOCITY;
+			XESS_INIT_FLAG_USE_NDC_VELOCITY;
 		initParams.qualitySetting = _XeSSQualityMode;
 
 		xess_result_t initResult = xessD3D12Init(_XeSSContext, &initParams);
