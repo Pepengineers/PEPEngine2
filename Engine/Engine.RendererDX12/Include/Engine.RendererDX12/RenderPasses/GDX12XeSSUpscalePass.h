@@ -1,6 +1,7 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Common/GameTimer.h"
+#include <stdexcept>
 
 #include "xess/xess.h"
 #include "xess/xess_d3d12.h"
@@ -11,6 +12,11 @@ public:
 	GDX12XeSSUpscalePass() : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _XeSSContext(nullptr),
 		_XeSSQualityMode(XESS_QUALITY_SETTING_ULTRA_QUALITY_PLUS)
 	{ _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_JITTER; }
+
+	~GDX12XeSSUpscalePass() override
+	{
+		if (_XeSSContext) xessDestroyContext(_XeSSContext);
+	}
 
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
 	{
@@ -82,35 +88,38 @@ public:
 		xess_d3d12_execute_params_t execParams = {};
 		execParams.pDepthTexture = depthStencil->GetResource()->D3DResource.Get();
 		execParams.pVelocityTexture = motionVectors->GetResource()->D3DResource.Get();
-		// I have no idea why, but the minus sign fixes bluriness
+		// The RH projection offsets shift raster samples by the negative pixel jitter.
 		execParams.jitterOffsetX = -_commonData->ActiveCameraJitterOffsetX;
 		execParams.jitterOffsetY = -_commonData->ActiveCameraJitterOffsetY;
 		execParams.inputWidth = _commonData->DownscaledWidth;
 		execParams.inputHeight = _commonData->DownscaledHeight;
-		execParams.resetHistory = false;
+		execParams.resetHistory = _commonData->ResetUpscalerHistory;
 
 		execParams.exposureScale = 1;
 		execParams.inputColorBase = { 0,0 };
 		execParams.inputDepthBase = { 0,0 };
 
-		for (int i = 0; i < _numOutputs; i++)
+		for (UINT i = 0; i < _numOutputs; i++)
 		{
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
 			GDX12Texture* upscaledTexture = OUT_UpscaledTextures[i].get();
 
 			execParams.pColorTexture = inputTexture->GetResource()->D3DResource.Get();
 			execParams.pOutputTexture = upscaledTexture->GetResource()->D3DResource.Get();
-			
+
 			cmdList->ResourceBarrier({ inputTexture->GetResource()->GetNonPixelShaderResourceBarrier(),
 			upscaledTexture->GetResource()->GetUnorderedAccessBarrier() });
 
 			xess_result_t execResult = xessD3D12Execute(_XeSSContext, cmdList->GetCommandList().Get(), &execParams);
-			if (execResult != XESS_RESULT_SUCCESS)
+			if (execResult < XESS_RESULT_SUCCESS)
 			{
 				std::string msg = "ERROR: XeSS execute failed: " + XeSSResultToString(execResult) + "\n";
 				OutputDebugStringA(msg.c_str());
+				throw std::runtime_error(msg);
 			}
 		}
+		cmdList->InvalidateCachedState();
+		_commonData->ResetUpscalerHistory = false;
 		cmdList->EndPixEvent();
 	}
 
@@ -118,7 +127,9 @@ public:
 	{
 		for (auto& texture : OUT_UpscaledTextures) { texture->Resize(_commonData->WindowWidth, _commonData->WindowHeight); }
 		xessDestroyContext(_XeSSContext);
+		_XeSSContext = nullptr;
 		BuildXeSSContext();
+		_commonData->ResetUpscalerHistory = true;
 	}
 
 	void QueryRenderTargetResolution() override
@@ -127,12 +138,13 @@ public:
 		xess_2d_t downscaledResolution;
 		xess_2d_t minResolution;
 		xess_2d_t maxResolution;
-		xess_result_t queryResolutionResult = xessGetOptimalInputResolution(_XeSSContext, 
+		xess_result_t queryResolutionResult = xessGetOptimalInputResolution(_XeSSContext,
 			&targetResolution, _XeSSQualityMode, &downscaledResolution, &minResolution, &maxResolution);
-		if (queryResolutionResult != XESS_RESULT_SUCCESS)
+		if (queryResolutionResult < XESS_RESULT_SUCCESS)
 		{
 			std::string msg = "ERROR: XeSS query resolution failed: " + XeSSResultToString(queryResolutionResult) + "\n";
 			OutputDebugStringA(msg.c_str());
+			throw std::runtime_error(msg);
 		}
 		_commonData->DownscaledWidth = downscaledResolution.x;
 		_commonData->DownscaledHeight = downscaledResolution.y;
@@ -142,6 +154,7 @@ public:
 	{
 		GDX12RenderPass::ClearDenendencies();
 		xessDestroyContext(_XeSSContext);
+		_XeSSContext = nullptr;
 		IN_DepthBuffer = nullptr;
 		IN_MotionVectors = nullptr;
 		IN_Textures.clear();
@@ -173,24 +186,26 @@ private:
 	void BuildXeSSContext()
 	{
 		xess_result_t createContextResult = xessD3D12CreateContext(_resources->Device->GetDevice().Get(), &_XeSSContext);
-		if (createContextResult != XESS_RESULT_SUCCESS)
+		if (createContextResult < XESS_RESULT_SUCCESS)
 		{
 			std::string msg = "ERROR: XeSS context not created: " + XeSSResultToString(createContextResult) + "\n";
 			OutputDebugStringA(msg.c_str());
+			throw std::runtime_error(msg);
 		}
 
 		xess_d3d12_init_params_t initParams = {};
 		initParams.outputResolution.x = _commonData->WindowWidth;
 		initParams.outputResolution.y = _commonData->WindowHeight;
-		initParams.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH | 
-			XESS_INIT_FLAG_LDR_INPUT_COLOR | XESS_INIT_FLAG_USE_NDC_VELOCITY;
+		initParams.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH |
+			XESS_INIT_FLAG_USE_NDC_VELOCITY;
 		initParams.qualitySetting = _XeSSQualityMode;
 
 		xess_result_t initResult = xessD3D12Init(_XeSSContext, &initParams);
-		if (initResult != XESS_RESULT_SUCCESS) 
+		if (initResult < XESS_RESULT_SUCCESS)
 		{
 			std::string msg = "ERROR: XeSS context not initialized: " + XeSSResultToString(initResult) + "\n";
 			OutputDebugStringA(msg.c_str());
+			throw std::runtime_error(msg);
 		}
 	}
 
