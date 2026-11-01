@@ -33,9 +33,7 @@
     <ClInclude Include="Include\App.Base\ECS\Components\ParticleEmitterComponent.h" />
     <ClInclude Include="Include\App.Base\Systems\LightUpdateSystem.h" />
     <ClInclude Include="Include\App.Base\BistroLightPlacements.h" />
-    <ClInclude Include="Include\App.Base\BistroProps.h" />
     <ClInclude Include="Include\App.Base\LoadingSettings.h" />
-    <ClInclude Include="Include\App.Base\ECS\Components\FlyingPropComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\NameComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\SplineCurveComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\SplineFollowComponent.h" />

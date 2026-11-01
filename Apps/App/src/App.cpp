@@ -11,6 +11,7 @@
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "psapi.lib")
 #include "Systems/FlyingPropSystem.h"
+#include "BistroScene.h"
 #include "App.Base/LoadingSettings.h"
 
 namespace
@@ -61,7 +62,9 @@ namespace
             }
 
             Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer));
-            Locator.RegisterModule(std::make_shared<SceneManagerModule>(scenePath));
+            auto scenes = std::make_shared<SceneManagerModule>(scenePath);
+            ConfigureBistroProps(*scenes);
+            Locator.RegisterModule(scenes);
             return BenchmarkEngine::AddModules();
         }
 

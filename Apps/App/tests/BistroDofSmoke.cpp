@@ -1,4 +1,5 @@
 #include "App.Base/App.h"
+#include "../src/BistroScene.h"
 #include <iostream>
 #include <cmath>
 #include <fstream>
@@ -141,7 +142,9 @@ protected:
     bool AddModules() override
     {
         Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer));
-        Locator.RegisterModule(std::make_shared<SceneManagerModule>(std::filesystem::path(ASSETS_FOLDER) / "Scenes/Amazon Lumberyard Bistro"));
+        auto scenes = std::make_shared<SceneManagerModule>(std::filesystem::path(ASSETS_FOLDER) / "Scenes/Amazon Lumberyard Bistro");
+        ConfigureBistroProps(*scenes);
+        Locator.RegisterModule(scenes);
         return BenchmarkEngine::AddModules();
     }
 };

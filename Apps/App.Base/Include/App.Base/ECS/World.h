@@ -2,6 +2,7 @@
 #include <string>
 #include <filesystem>
 #include <cstdint>
+#include <functional>
 
 #include "Engine.Core/ECS/ECSStorage.h"
 #include "App.Base/ECS/Components/CameraComponent.h"
@@ -15,7 +16,6 @@
 #include "App.Base/ECS/Components/WindFieldComponent.h"
 #include "App.Base/ECS/Components/ParticleEmitterComponent.h"
 #include "App.Base/ECS/Components/FluidRenderComponent.h"
-#include "App.Base/ECS/Components/FlyingPropComponent.h"
 #include "App.Base/ECS/Components/NameComponent.h"
 #include "App.Base/ECS/Components/SplineCurveComponent.h"
 #include "App.Base/ECS/Components/SplineFollowComponent.h"
@@ -42,7 +42,6 @@ using WorldECS = ECSStorage<
     SplineFollowComponent,
     LookAtTargetComponent,
     LightComponent,
-    FlyingPropComponent,
     ReflectionProbeComponent,
     SkyBoxComponent,
     SkyAtmosphereComponent,
@@ -84,6 +83,8 @@ public:
     uint64_t GetSkyRevision() const { return _skyRevision; }
 
     Entity ActiveCamera;
+    // Return true after creating the mesh entities; false keeps the loader's default entity.
+    std::function<bool(const std::string&, const StaticMeshRenderComponent&)> SceneMeshFactory;
 
 private:
     

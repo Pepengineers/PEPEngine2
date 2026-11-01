@@ -6,7 +6,7 @@
 
 struct Position { double X = 0; };
 struct Velocity { double X = 0; };
-class World { public: ECSStorage<Position, Velocity> Data; };
+class World { public: ECSStorage<Position> Data; };
 #include "Engine.Core/System.h"
 
 static void Require(bool condition, const char* message)
@@ -46,6 +46,7 @@ public:
 static void Check(unsigned threads)
 {
     World world;
+    world.Data.RegisterComponent<Velocity>();
     for (size_t i = 0; i < 4097; ++i)
     {
         auto entity = world.Data.CreateEntity();
@@ -67,6 +68,7 @@ static void Check(unsigned threads)
     verify.Schedule(jobs, world, 0, unsplit).Complete();
     Require(movement.RangeCalls == 1, "One batch must produce exactly one TickRange call");
     World empty;
+    empty.Data.RegisterComponent<Velocity>();
     movement.Schedule(jobs, empty, 0).Complete();
     Require(movement.RangeCalls == 1, "An empty system must not invoke TickRange");
     bool rejected = false;
@@ -76,12 +78,52 @@ static void Check(unsigned threads)
     world.Data.ForEachRange<Position>(4097, 4097, [](Entity, Position&) { throw std::runtime_error("Empty range executed"); });
 }
 
+static void CheckComponentRegistration()
+{
+    World world;
+    auto& ecs = world.Data;
+    bool rejected = false;
+    try { ecs.GetPool<Velocity>(); }
+    catch (const std::out_of_range&) { rejected = true; }
+    Require(rejected, "Custom components must be registered before use");
+    ecs.RegisterComponent<Position>();
+    ecs.RegisterComponent<Velocity>();
+    auto& pool = ecs.GetPool<Velocity>();
+    unsigned destroyed = 0;
+    pool.OnComponentDestroyed.AddListener([&](Entity, Velocity&) { ++destroyed; });
+    auto entity = ecs.CreateEntity();
+    entity.AddComponent<Position>();
+    entity.AddComponent<Velocity>(Velocity{ 4 });
+    ecs.RegisterComponent<Velocity>();
+    const auto& readOnly = ecs;
+    Require(&pool == &readOnly.GetPool<Velocity>() && readOnly.Get<Velocity>(entity).X == 4,
+        "Registration must preserve the existing custom pool and support const access");
+    unsigned visits = 0;
+    ecs.ForEach<Velocity, Position>([&](Entity, Velocity&, Position&) { ++visits; });
+    Require(visits == 1, "A custom pool must work as the first query component");
+    ecs.DestroyEntity(entity);
+    Require(pool.Size() == 0 && destroyed == 1, "DestroyEntity must remove custom components");
+    auto reused = ecs.CreateEntity();
+    Require(reused.GetId() == entity.GetId() && !reused.HasComponent<Velocity>(),
+        "Reused entity IDs must not inherit custom components");
+    reused.AddComponent<Velocity>();
+    reused.RemoveComponent<Velocity>();
+    Require(pool.Size() == 0 && destroyed == 2, "Explicit custom removal must notify listeners");
+    reused.AddComponent<Velocity>();
+    ecs.Clear();
+    Require(pool.Size() == 0 && destroyed == 3, "Clear must clean custom pools and retain their events");
+    auto fresh = ecs.CreateEntity();
+    fresh.AddComponent<Velocity>();
+    Require(pool.Size() == 1, "Registered custom pools must remain usable after Clear");
+}
+
 int main()
 {
     try
     {
         Check(1);
         Check(4);
+        CheckComponentRegistration();
         std::cout << "Sparse ECS range coverage and ordered system jobs passed (1/4 threads).\n";
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Engine.Core/Types/MeshTypes.h"
+#include "App.Base/ECS/World.h"
+#include "Components/FlyingPropComponent.h"
 #include <algorithm>
 #include <cctype>
 #include <unordered_map>
@@ -37,4 +39,28 @@ inline BistroPropPartition PartitionBistroProps(const Engine::Core::Mesh& mesh)
         result.Props[inserted.first->second].SubMeshIndices.push_back(static_cast<std::uint32_t>(index));
     }
     return result;
+}
+
+inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
+    const StaticMeshRenderComponent& source, const BistroPropPartition& partition)
+{
+    auto& ecs = world.GetECS();
+    const auto create = [&](const std::string& name, const std::vector<std::uint32_t>& indices)
+    {
+        auto entity = ecs.CreateEntity();
+        entity.AddComponent<NameComponent>(name);
+        entity.AddComponent<TransformComponent>();
+        entity.AddComponent<StaticMeshRenderComponent>(source.MeshHandler, source.Materials, indices);
+        return entity;
+    };
+    if (!partition.StaticSubMeshes.empty()) create(sceneName, partition.StaticSubMeshes);
+    for (size_t index = 0; index < partition.Props.size(); ++index)
+    {
+        const auto& prop = partition.Props[index];
+        auto entity = create(prop.Name, prop.SubMeshIndices);
+        entity.GetComponent<StaticMeshRenderComponent>().ReflectionDynamic = true;
+        auto& flight = entity.AddComponent<FlyingPropComponent>();
+        flight.Phase = static_cast<float>(index) * 2.39996323f;
+        flight.Speed = 0.4f + static_cast<float>(index % 13) * 0.025f;
+    }
 }

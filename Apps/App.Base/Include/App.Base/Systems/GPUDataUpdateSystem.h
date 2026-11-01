@@ -52,7 +52,7 @@ protected:
                 auto& renderer = ecs.Get<StaticMeshRenderComponent>(entity);
                 const bool dynamic = renderer.ReflectionDynamic || ecs.Has<VelocityComponent>(entity) ||
                     ecs.Has<CircleMovementComponent>(entity) || ecs.Has<SplineFollowComponent>(entity) ||
-                    ecs.Has<FlyingPropComponent>(entity) || ecs.Has<LookAtTargetComponent>(entity);
+                    ecs.Has<LookAtTargetComponent>(entity);
                 renderer.DirtyFlag |= renderer._reflectionDynamic != dynamic;
                 renderer._reflectionDynamic = dynamic;
                 if (changed || renderer.DirtyFlag)

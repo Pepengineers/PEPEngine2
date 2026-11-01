@@ -1,6 +1,7 @@
 #pragma once
 #include "Engine.Core/System.h"
 #include "App.Base/ECS/World.h"
+#include "../Components/FlyingPropComponent.h"
 
 class FlyingPropSystem final : public System
 {

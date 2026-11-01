@@ -1,5 +1,5 @@
-#include "App.Base/BistroProps.h"
-#include "App.Base/ECS/Components/FlyingPropComponent.h"
+#include "../src/BistroProps.h"
+#include "../src/Components/FlyingPropComponent.h"
 #include "App.Base/ECS/Components/StaticMeshRenderComponent.h"
 #include "Engine.Core/IO/MeshImporter.h"
 #include <cmath>
@@ -39,6 +39,24 @@ static void CheckPartition()
     StaticMeshRenderComponent selected({}, {}, { 1, 2, 4 });
     Require(whole.GetSubMeshCount(7) == 7 && whole.GetSubMeshIndex(4) == 4, "Existing renderers must retain all submeshes");
     Require(selected.GetSubMeshCount(7) == 3 && selected.GetSubMeshIndex(2) == 4, "Selected renderers must retain original mesh indices");
+
+    World world(WorldDesc{});
+    auto& ecs = world.GetECS();
+    ecs.RegisterComponent<FlyingPropComponent>();
+    CreateBistroPropEntities(world, "Interior_interior", whole, partition);
+    Require(ecs.GetPool<FlyingPropComponent>().Size() == 3, "The App must attach flight to each original prop");
+    std::vector<unsigned> rendered(mesh.GetSubMeshCount());
+    ecs.ForEach<StaticMeshRenderComponent>([&](Entity entity, StaticMeshRenderComponent& renderer)
+    {
+        Require(renderer.ReflectionDynamic == ecs.Has<FlyingPropComponent>(entity),
+            "Only props must opt into the generic dynamic reflection flag");
+        for (auto index : renderer.SubMeshIndices) ++rendered.at(index);
+    });
+    for (auto count : rendered) Require(count == 1, "App setup must not duplicate or drop source geometry");
+    ecs.ForEach<FlyingPropComponent>([](Entity, FlyingPropComponent& flight)
+    {
+        Require(flight.Time == 0 && flight.Speed >= 0.4f, "App setup must preserve initial flight parameters");
+    });
 }
 
 static void CheckFlight()

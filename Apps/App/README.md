@@ -75,6 +75,14 @@ materials still use the original shared mesh. Exterior and the remaining Interio
 geometry stay in their original positions.
 Instance and indirect buffers grow once per scene part, rather than once per submesh.
 
+The App owns `FlyingPropComponent`, prop partitioning and scene setup under `src`.
+`ConfigureBistroProps` registers its component when a world is created and installs
+the world's `SceneMeshFactory` before import. Without this optional factory the
+shared loader creates one entity per mesh. The renderer uses the existing
+`StaticMeshRenderComponent::ReflectionDynamic` flag for these props.
+Register additional ECS component types on the owner thread before scheduling jobs.
+Their pools participate in normal queries, entity destruction and world clearing.
+
 The bottle glass/wine materials have explicit opacity in both scene MTL files;
 caps and labels retain their source materials. Glass opacity is an artistic
 approximation. The shared OIT passes use floating-point weighted accumulation,

@@ -1,5 +1,6 @@
 #include "App.Base/App.h"
 #include "../src/Systems/FlyingPropSystem.h"
+#include "../src/BistroScene.h"
 #include "Engine.Core/ConsoleModule.h"
 #include <d3d12sdklayers.h>
 #include <iostream>
@@ -17,8 +18,10 @@ public:
     bool AddModules() override
     {
         Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer));
-        Locator.RegisterModule(std::make_shared<SceneManagerModule>(
-            std::filesystem::path(ASSETS_FOLDER) / "Scenes" / "Amazon Lumberyard Bistro"));
+        auto scenes = std::make_shared<SceneManagerModule>(
+            std::filesystem::path(ASSETS_FOLDER) / "Scenes" / "Amazon Lumberyard Bistro");
+        ConfigureBistroProps(*scenes);
+        Locator.RegisterModule(scenes);
         return BenchmarkEngine::AddModules();
     }
 

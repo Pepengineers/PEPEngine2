@@ -1,5 +1,6 @@
 #include "App.Base/App.h"
 #include "../src/Systems/FlyingPropSystem.h"
+#include "../src/BistroScene.h"
 #include "Engine.Core/IO/TextureLoader.h"
 #include <cmath>
 #include <chrono>
@@ -261,7 +262,9 @@ protected:
     bool AddModules() override
     {
         Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer));
-        Locator.RegisterModule(std::make_shared<SceneManagerModule>(_scene));
+        auto scenes = std::make_shared<SceneManagerModule>(_scene);
+        ConfigureBistroProps(*scenes);
+        Locator.RegisterModule(scenes);
         return BenchmarkEngine::AddModules();
     }
 private:

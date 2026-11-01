@@ -6,6 +6,9 @@
 #include <type_traits>
 #include <utility>
 #include <stdexcept>
+#include <memory>
+#include <typeindex>
+#include <unordered_map>
 #include "Engine.Core/ECS/Component.h"
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
@@ -23,15 +26,23 @@ struct IsOneOf<T, First, Rest...>
 {
 };
 
+class ComponentPoolBase
+{
+public:
+    virtual ~ComponentPoolBase() = default;
+    virtual void Clear() = 0;
+    virtual void Remove(Entity entity) = 0;
+};
+
 template<typename T>
-class ComponentPool
+class ComponentPool : public ComponentPoolBase
 {
 public:
     Event<Entity, T&> OnComponentCreated;
     Event<Entity, T&> OnComponentDestroyed;
     Event<Entity, T&> OnComponentUpdated;
     
-    void Clear()
+    void Clear() override
     {
         for (size_t i = 0; i < _denseComponents.size(); ++i)
         {
@@ -109,7 +120,7 @@ public:
         return createdComponent;
     }
 
-    void Remove(Entity entity)
+    void Remove(Entity entity) override
     {
         if (!Has(entity)) { return; }
 
@@ -258,6 +269,7 @@ public:
         _aliveList.push_back(false);
         _freeList.clear();
         ClearPools<0>();
+        for (auto& entry : _additionalPools) entry.second->Clear();
     }
 
     Entity AllocateEntitySlot()
@@ -290,6 +302,7 @@ public:
         if (!IsAlive(entity)) { return; }
 
         RemoveAllComponents<0>(entity);
+        for (auto& entry : _additionalPools) entry.second->Remove(entity);
         _aliveList[entity] = false;
         _freeList.push_back(entity);
     }
@@ -312,50 +325,60 @@ public:
     template<typename T, typename... Args>
     T& Add(Entity entity, Args&&... args)
     {
-        static_assert(IsOneOf<T, Components...>::value, "T is not registered in ECSStorage");
         return GetPool<T>().Emplace(entity, std::forward<Args>(args)...);
     }
 
     template<typename T>
     void Remove(Entity entity)
     {
-        static_assert(IsOneOf<T, Components...>::value, "T is not registered in ECSStorage");
         GetPool<T>().Remove(entity);
     }
 
     template<typename T>
     bool Has(Entity entity) const
     {
-        static_assert(IsOneOf<T, Components...>::value, "T is not registered in ECSStorage");
         return GetPool<T>().Has(entity);
     }
 
     template<typename T>
     T& Get(Entity entity)
     {
-        static_assert(IsOneOf<T, Components...>::value, "T is not registered in ECSStorage");
         return GetPool<T>().Get(entity);
     }
 
     template<typename T>
     const T& Get(Entity entity) const
     {
-        static_assert(IsOneOf<T, Components...>::value, "T is not registered in ECSStorage");
         return GetPool<T>().Get(entity);
+    }
+
+    template<typename T>
+    void RegisterComponent()
+    {
+        if constexpr (!IsOneOf<T, Components...>::value)
+        {
+            const std::type_index type(typeid(ComponentPool<T>));
+            if (_additionalPools.find(type) == _additionalPools.end())
+                _additionalPools.emplace(type, std::make_unique<ComponentPool<T>>());
+        }
     }
 
     template<typename T>
     ComponentPool<T>& GetPool()
     {
-        static_assert(IsOneOf<T, Components...>::value, "T is not registered in ECSStorage");
-        return std::get<ComponentPool<T>>(_pools);
+        if constexpr (IsOneOf<T, Components...>::value)
+            return std::get<ComponentPool<T>>(_pools);
+        else
+            return static_cast<ComponentPool<T>&>(*_additionalPools.at(std::type_index(typeid(ComponentPool<T>))));
     }
 
     template<typename T>
     const ComponentPool<T>& GetPool() const
     {
-        static_assert(IsOneOf<T, Components...>::value, "T is not registered in ECSStorage");
-        return std::get<ComponentPool<T>>(_pools);
+        if constexpr (IsOneOf<T, Components...>::value)
+            return std::get<ComponentPool<T>>(_pools);
+        else
+            return static_cast<const ComponentPool<T>&>(*_additionalPools.at(std::type_index(typeid(ComponentPool<T>))));
     }
     
     template<typename T, typename Func>
@@ -367,8 +390,6 @@ public:
     template<typename T, typename Func>
     void ForEachRange(size_t begin, size_t end, Func&& func)
     {
-        static_assert(IsOneOf<T, Components...>::value, "T is not registered in ECSStorage");
-
         ComponentPool<T>& pool = GetPool<T>();
         const std::vector<Entity>& entities = pool.GetEntities();
         std::vector<T>& data = pool.GetDense();
@@ -389,10 +410,6 @@ public:
     template<typename First, typename Second, typename... Rest, typename Func>
     void ForEachRange(size_t begin, size_t end, Func&& func)
     {
-        static_assert(IsOneOf<First, Components...>::value, "First is not registered in ECSStorage");
-        static_assert(IsOneOf<Second, Components...>::value, "Second is not registered in ECSStorage");
-        static_assert((IsOneOf<Rest, Components...>::value && ...), "Rest are not registered in ECSStorage");
-
         ComponentPool<First>& firstPool = GetPool<First>();
         const std::vector<Entity>& entities = firstPool.GetEntities();
         std::vector<First>& firstData = firstPool.GetDense();
@@ -416,7 +433,6 @@ public:
     template<typename T>
     void MarkComponentUpdated(Entity entity)
     {
-        static_assert(IsOneOf<T, Components...>::value, "T is not registered in ECSStorage");
         GetPool<T>().MarkComponentUpdated(entity);
     }
 
@@ -447,6 +463,7 @@ private:
 
 private:
     std::tuple<ComponentPool<Components>...> _pools;
+    std::unordered_map<std::type_index, std::unique_ptr<ComponentPoolBase>> _additionalPools;
     std::vector<uint8_t> _aliveList;
     std::vector<Entity> _freeList;
 };
