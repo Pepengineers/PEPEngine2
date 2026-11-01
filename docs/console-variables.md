@@ -88,3 +88,12 @@ focus distance in cm, f-number, vertical sensor size, CoC limit, SDK ring budget
 ring merging. Manual overrides survive quality changes; zero restores preset
 inheritance. Defaults, units, ranges, HDR/XeSS contracts and checks are documented
 in [depth-of-field.md](rendering/depth-of-field.md).
+
+## Skeletal rendering
+
+Only `Render.Skinning.Enabled` (default true) and `Render.Skinning.Quality` (default 2,
+0 Off / 1 Low / 2 Mid / 3 High) are global runtime Default CVar. Quality selects
+15/30/60 Hz pose evaluation and compute-deformation updates; a component's explicit
+update rate survives preset changes. Component API, units, asset ownership and
+pass integration are described in [skinning.md](rendering/skinning.md).
+Implementation has not been built or tested in the author chat.
