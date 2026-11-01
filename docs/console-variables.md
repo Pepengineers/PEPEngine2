@@ -88,3 +88,7 @@ focus distance in cm, f-number, vertical sensor size, CoC limit, SDK ring budget
 ring merging. Manual overrides survive quality changes; zero restores preset
 inheritance. Defaults, units, ranges, HDR/XeSS contracts and checks are documented
 in [depth-of-field.md](rendering/depth-of-field.md).
+
+## Fluid / water
+
+Render.Fluid.Enabled (true) and Render.Fluid.Quality (2; 0 Off, 1 Low, 2 Mid, 3 High) are the only global controls, both runtime Default. Solver, source, reset and optics belong to FluidRenderComponent. See [fluid.md](rendering/fluid.md) for its API, ranges, presets and integration contract. Implementation is unverified; no builds or checks were run by the author.

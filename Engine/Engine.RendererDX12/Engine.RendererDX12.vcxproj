@@ -19,6 +19,8 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12Fluid.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FluidPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ReflectionProbes.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionProbePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DepthOfField.h" />
@@ -88,6 +90,8 @@
     <ClCompile Include="src\GDX12DepthOfField.cpp" />
     <ClCompile Include="src\GDX12DepthOfFieldPass.cpp" />
     <ClCompile Include="src\D3DHelpers.cpp" />
+    <ClCompile Include="src\GDX12Fluid.cpp" />
+    <ClCompile Include="src\GDX12FluidPass.cpp" />
     <ClCompile Include="src\GDX12ReflectionProbes.cpp" />
     <ClCompile Include="src\GDX12ReflectionProbePass.cpp" />
     <ClCompile Include="src\GDX12SSRSettings.cpp" />
@@ -113,6 +117,9 @@
     <ClCompile Include="src\GDX12Texture.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Shaders\FluidParameters.hlsli" />
+    <None Include="Shaders\FluidSolver.hlsl" />
+    <None Include="Shaders\FluidSurface.hlsl" />
     <None Include="Shaders\AmbientOcclusion.hlsl" />
     <None Include="Shaders\ToneMap.hlsl" />
     <None Include="Shaders\ReflectionCapture.hlsl" />
