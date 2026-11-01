@@ -251,6 +251,7 @@ void GDX12ReflectionProbePass::PrepareFrame()
     uint64_t lightHash=LightingHash(*_resources);
     HashValue(lightHash,_commonData->EnvironmentRevision);
     HashValue(lightHash,_commonData->EnvironmentLightingRevision);
+    HashValue(lightHash,_resources->MaterialRevision);
     uint64_t shadingRevision=d.ShadeRevision; HashValue(shadingRevision,_resources->DeformationRevision);
     const bool dynamicShadows=(_resources->Lighting.SunShadowFlags&1u)!=0 || std::any_of(_resources->LocalLights.begin(),_resources->LocalLights.end(),[](const auto& light) {return (light.ShadowFlags&1u)!=0;});
     for(const auto& desc:d.Submitted)

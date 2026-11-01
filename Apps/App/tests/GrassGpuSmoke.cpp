@@ -5,6 +5,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12ReflectionProbePass.h"
 #include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include "Engine.Core/ConsoleModule.h"
+#include "App.Base/Modules/RenderModule.h"
 #include <numeric>
 #include <iomanip>
 
@@ -100,6 +101,7 @@ namespace
         const CD3DX12_TEXTURE_COPY_LOCATION src(texture.GetResource()->D3DResource.Get(),subresource),dst(readback.Get(),footprint); commands->GetCommandList()->CopyTextureRegion(&dst,0,0,0,&src,nullptr);
         commands->ResourceBarrier({texture.GetResource()->GetSRVBarrier()}); queue->ExecuteCommandList(commands); queue->Flush();
         void* mapped=nullptr; const D3D12_RANGE read={0,static_cast<SIZE_T>(bytes)}; ThrowIfFailed(readback->Map(0,&read,&mapped)); std::vector<float> result;
+        result.reserve(static_cast<size_t>(footprint.Footprint.Width)*footprint.Footprint.Height*channels);
         for(UINT y=0;y<footprint.Footprint.Height;++y) for(UINT x=0;x<footprint.Footprint.Width*channels;++x)
         {
             const auto* row=static_cast<const BYTE*>(mapped)+footprint.Offset+y*footprint.Footprint.RowPitch;
@@ -121,6 +123,11 @@ int main(int argc,char** argv)
         Require(!console.FindConsoleVariable(L"Render.Wind.GridResolution").SetFromString("8"),"Unsafe wind grid must be rejected");
         Require(!console.FindConsoleVariable(L"Render.Grass.DensityScale").SetFromString("nan"),"Density must reject NaN");
         Require(!console.FindConsoleVariable(L"Render.Wind.PressureIterations").SetFromString("0"),"Pressure solver needs a positive iteration count");
+        std::unordered_map<std::string,std::unique_ptr<GDX12Material>> authoredMaterials;
+        {
+            RenderModule materialFactory(nullptr,nullptr);
+            authoredMaterials.emplace("grass",std::make_unique<GDX12Material>(*materialFactory.CreateMaterial("grass")));
+        }
         bool rejectedTinyDomain=false; try { GDX12WindSettings tiny; tiny.HalfExtent=1e-37f; ValidateWind(tiny); } catch(const std::invalid_argument&) { rejectedTinyDomain=true; }
         Require(rejectedTinyDomain,"Wind domains whose cell scale underflows must be rejected before GPU work");
         ComPtr<ID3D12Debug> debug; ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))); debug->EnableDebugLayer();
@@ -241,6 +248,12 @@ int main(int argc,char** argv)
         texture.SRV_UAV_Heap=resources.SRV_UAV_Heap.get(); texture.SRVHeapIndex=resources.SRV_UAV_Heap->GetAvailableIndex(Texture2D_StartIndex,Texture2D_RangeLength);
         texture.SRVDesc.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D; texture.SRVDesc.Texture2D.MipLevels=1; texture.SRVDesc.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         texture.CreateRTV=true; texture.RTVHeap=resources.RTVHeap.get(); texture.RTVHeapIndex=texture.RTVHeap->GetAvailableIndex(); texture.RTVDesc.ViewDimension=D3D12_RTV_DIMENSION_TEXTURE2D; texture.ClearValue={1,.4f,.2f,1}; white.Initialize(texture);
+        GDX12Texture alphaZero;
+        auto alphaTexture=texture; alphaTexture.SRVHeapIndex=resources.SRV_UAV_Heap->GetAvailableIndex(Texture2D_StartIndex,Texture2D_RangeLength);
+        alphaTexture.RTVHeapIndex=texture.RTVHeap->GetAvailableIndex(); alphaTexture.ClearValue={1,1,1,0}; alphaZero.Initialize(alphaTexture);
+        auto* alphaCommands=queue->GetCommandList(); alphaCommands->ResourceBarrier({alphaZero.GetResource()->GetRenderTargetBarrier()});
+        alphaCommands->ClearRenderTargetView(&alphaZero); alphaCommands->ResourceBarrier({alphaZero.GetResource()->GetSRVBarrier()}); queue->ExecuteCommandList(alphaCommands); queue->Flush();
+        GPUTexture whiteAsset,alphaAsset; whiteAsset.PrimaryDeviceTexture=&white; alphaAsset.PrimaryDeviceTexture=&alphaZero;
         GDX12OpaquePass opaque; opaque.Setup(&resources,nullptr,&common); opaque.Initialize();
         GDX12GPUCullingPass culling; culling.Setup(&resources,nullptr,&common);
         GDX12CascadedShadowPass shadows; shadows.Setup(&resources,nullptr,&common); shadows.Initialize();
@@ -252,6 +265,7 @@ int main(int argc,char** argv)
         resources.Lighting.SunShadowFlags=1; resources.Lighting.RenderTargetSize={65,49};
         GDX12LocalLightConstants point; point.Position={0,100,-100}; point.Range=1000; point.EntityId=17; point.ShadowFirstSlice=0; point.ShadowFlags=1; BuildLocalLightShadowMatrices(point); resources.LocalLights={point};
         GDX12MaterialConstants material; material.DiffuseIndex=white.GetSRV()->HeapIndex-Texture2D_StartIndex; material.Metallic=.3f; material.Roughness=.4f;
+        auto maskedMaterial=material; maskedMaterial.RenderLayer=1; maskedMaterial.DiffuseIndex=alphaZero.GetSRV()->HeapIndex-Texture2D_StartIndex;
         const auto visibilityBuffer=[&](auto& pointer,UINT size)
         {
             using T=typename std::remove_reference_t<decltype(pointer)>::element_type;
@@ -259,6 +273,7 @@ int main(int argc,char** argv)
         };
         for(auto& frame:resources.FrameConstants)
         {
+            frame->MaterialCache->Resize(2); frame->MaterialCache->CopyData(1,maskedMaterial);
             frame->CameraCB->CopyData(0,camera); frame->TransformCache->CopyData(0,GDX12TransformConstants{}); frame->MaterialCache->CopyData(0,material); frame->MainCB->CopyData(0,resources.Lighting);
             frame->ShadowCB->CopyData(0,BuildShadowCascades(view.Invert(),XMConvertToRadians(60.0f),65.0f/49,.1f,10000,Vector3(.35f,-1,.25f)));
             frame->LocalLightCache->Resize(1); frame->LocalLightCache->CopyData(0,point); frame->CameraVisibilityCommands.emplace_back(); auto& v=frame->CameraVisibilityCommands[0];
@@ -269,6 +284,12 @@ int main(int argc,char** argv)
             if(submit) grass.Submit(submission); grass.PrepareFrame();
             auto* commands=queue->GetCommandList(); commands->ResourceBarrier({white.GetResource()->GetRenderTargetBarrier()}); commands->ClearRenderTargetView(&white); commands->ResourceBarrier({white.GetResource()->GetSRVBarrier()});
             grass.Execute(commands); shadows.Execute(commands); local.Execute(commands); culling.Execute(commands); opaque.Execute(commands); queue->ExecuteCommandList(commands); queue->Flush();
+        };
+        const auto shadowImage=[&]
+        {
+            std::vector<float> pixels;
+            for(UINT face=0;face<6;++face) { auto image=ReadTexture(device,*local.GetOutput(0)->GetTexture(),1,false,face); pixels.insert(pixels.end(),image.begin(),image.end()); }
+            return pixels;
         };
         submission.Grass[0].Settings.TuftsPerChunk=128; submission.DeltaTime=0;
         raster();
@@ -282,11 +303,40 @@ int main(int argc,char** argv)
         CheckReadback(device,*shadows.GetOutput(0)->GetTexture(),0,false,true);
         Require(local.GetLastFrameRenderedViews()==6,"Generated geometry must populate all point-shadow views initially");
         raster(false); Require(local.GetLastFrameRenderedViews()==0,"Paused grass must preserve cached local shadows");
+        const auto opaqueShadow=shadowImage();
+        Require(std::any_of(opaqueShadow.begin(),opaqueShadow.end(),[](float value){return value<1;}),"Material cache test requires a real grass shadow");
+        submission.Grass[0].MaterialIndex=1; raster();
+        const auto clippedShadow=shadowImage();
+        for(float value:clippedShadow) Require(value==1,"Changing a cached grass material to alpha-zero must remove its shadow");
+        submission.Grass[0].MaterialIndex=0; raster();
+        const auto restoredShadow=shadowImage();
+        Require(std::any_of(restoredShadow.begin(),restoredShadow.end(),[](float value){return value<1;}),"Returning to the opaque grass material must restore its shadow");
+        auto& authored=*authoredMaterials.at("grass"); authored._CBufferIndex=1; authored.Diffuse=&whiteAsset;
+        authored.Type=MaterialType::Opaque; authored.Roughness=.4f; authored.Metallic=.3f; authored.DirtyFlag=true;
+        resources.UpdateMaterialCB(authoredMaterials); submission.Grass[0].MaterialIndex=1; raster();
+        const auto authoredOpaqueShadow=shadowImage();
+        Require(std::any_of(authoredOpaqueShadow.begin(),authoredOpaqueShadow.end(),[](float value){return value<1;}),"Authored material test requires a real opaque shadow");
+        authored.Type=MaterialType::Masked; authored.Diffuse=&alphaAsset; authored.DirtyFlag=true;
+        resources.UpdateMaterialCB(authoredMaterials); raster();
+        for(float value:shadowImage()) Require(value==1,"Editing alpha coverage in the same material slot must invalidate cached shadows");
+        for(float value:ReadTexture(device,*shadows.GetOutput(0)->GetTexture(),1,false))
+            Require(value==1,"Editing material alpha coverage must also remove cached cascade shadows");
+        for(UINT frame=1;frame<resources.FrameConstants.size();++frame)
+        {
+            resources.CurrFrameConstantsIndex=(resources.CurrFrameConstantsIndex+1)%static_cast<UINT>(resources.FrameConstants.size());
+            resources.UpdateMaterialCB(authoredMaterials); raster();
+            Require(local.GetLastFrameRenderedViews()==0,"Copying unchanged material data to another frame slot must preserve the shadow cache");
+        }
+        submission.Grass[0].MaterialIndex=0; raster();
         submission.DeltaTime=.1f; raster(); Require(local.GetLastFrameRenderedViews()==6,"Wind deformation must invalidate cached local shadows");
         const auto movingVelocity=ReadTexture(device,*opaque.GetOutput(1)->GetTexture(),2);
         Require(std::any_of(movingVelocity.begin(),movingVelocity.end(),[](float v){return std::abs(v)>.0001f;}),"Previous wind must produce rasterized vertex motion");
         raster(false); const auto frozenVelocity=ReadTexture(device,*opaque.GetOutput(1)->GetTexture(),2);
         for(float v:frozenVelocity) Require(std::abs(v)<.0001f,"A paused field must produce zero rasterized wind motion");
+        const auto bentShadow=shadowImage();
+        set(L"Render.Wind.GridResolution","35"); raster(false);
+        Require(shadowImage()!=bentShadow,"Resetting a paused wind grid must refresh cached grass shadows");
+        set(L"Render.Wind.GridResolution","-1"); raster(false);
         for(auto& frame:resources.FrameConstants) { auto masked=material; masked.RenderLayer=1; frame->MaterialCache->CopyData(0,masked); }
         texture.ClearValue={1,.4f,.2f,0}; white.Initialize(texture); raster(false);
         const auto maskedDepth=ReadTexture(device,*opaque.GetOutput(2)->GetTexture(),1,false);

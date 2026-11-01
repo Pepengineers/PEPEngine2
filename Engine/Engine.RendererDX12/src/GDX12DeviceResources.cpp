@@ -89,6 +89,7 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
 
         if (numFramesDirty > 0)
         {
+            if (numFramesDirty == NumFrameConstantVariable.GetValue()) ++MaterialRevision;
             GDX12MaterialConstants materialConstants;
             materialConstants.Roughness = material->Roughness;
             materialConstants.Metallic = material->Metallic;

@@ -336,6 +336,7 @@
 
 ### Упрощение sky/grass после интеграции
 
+- Коммит `8a2f81f`, `refactor(render): trim sky and grass state`.
 - Удалены write-only geometry-binding bookkeeping и sky level, повторная проверка
   enabled ветра. World transpose/inverse для травы вычисляются один раз на компонент,
   а не на каждый chunk. Используется существующий CopyResource wrapper.
@@ -347,6 +348,29 @@
   Логи `Build/sky-grass-simplify-*`. Отдельного lint/typecheck runner нет;
   полная Release-сборка App проверяет затронутые C++ проекты.
   Выигрыш отдельных CPU-упрощений не измерялся.
+
+### Invalidation материалов и wind grid
+
+- Дополнительные проверки по реальным depth pixels сначала воспроизвели три
+  ошибки: смена material slot на alpha-zero оставляла старую тень; reset wind
+  grid на паузе менял геометрию без обновления тени; alpha edit в том же material
+  slot также не обновлял cached shadow. Каждый случай проверен до своей правки.
+- Grass caster signature теперь учитывает material binding и фактическую wind
+  grid. Общая MaterialRevision меняется на первом GPU upload каждого dirty edit
+  для устройства; propagation в остальные frame slots её повторно не меняет.
+  CSM/local caches и shading запечённых проб учитывают эту ревизию.
+- GrassGpuSmoke подтверждает удаление старой тени для alpha-zero материала,
+  восстановление opaque shadow, материал edit без смены slot, очистку CSM,
+  сохранение cache при frame-slot propagation и обновление paused-grid shadow.
+  Использован существующий material factory без его Initialize/scene creation;
+  новых production test hooks нет. Полный grass/wind GPU smoke прошёл.
+- ProbeGpuSmoke подтвердил смену cached static radiance red→green→red через
+  существующий UpdateMaterialCB без scene revision и отсутствие повторного bake
+  при frame-slot propagation. Первое emissive ожидание для baked material было
+  неверным: существующий baked path возвращает baked albedo. Oracle заменён
+  фактической сменой diffuse texture; production baked semantics не менялись.
+- LightingGpuSmoke, десять кадров BistroEffectsSmoke и Release App прошли.
+  DX12 debug errors отсутствуют. Логи `Build/grass-cache-*` и `Build/caster-cache-*`.
 
 ## Оставшаяся работа
 

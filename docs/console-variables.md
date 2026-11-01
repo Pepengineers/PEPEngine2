@@ -328,3 +328,8 @@ The maximum distance is measured from the active camera and limits every pass.
 Presets control cost; they are not frame-rate promises. Component removal releases
 and coalesces reusable generated ranges. Later static uploads preserve existing
 GPU-written geometry and upload only the new mesh range.
+
+Changing the grass material binding or resetting the wind grid refreshes cached
+shadows. Edits inside an existing material use its `DirtyFlag`: the first GPU
+upload invalidates cached CSM/local shadows and baked probe shading; copies of
+the same edit into the other frame slots preserve those caches.

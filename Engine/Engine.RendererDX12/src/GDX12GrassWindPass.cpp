@@ -211,8 +211,9 @@ void GDX12GrassWindPass::PrepareFrame()
             Hash(signature,instance); Hash(signature,enabled);
             if(enabled)
             {
+                Hash(signature,desc.MaterialIndex);
                 Hash(signature,cb.World); Hash(signature,cb.Patch); Hash(signature,cb.Shape); Hash(signature,cb.Lod); Hash(signature,cb.Eye); Hash(signature,tufts); Hash(signature,cb.BladeCount); Hash(signature,cb.SegmentCount); Hash(signature,s.Seed); Hash(signature,windEntity);
-                if(field) Hash(signature,field->Signature);
+                if(field) { Hash(signature,field->Signature); Hash(signature,field->Grid); }
             }
             GDX12IndirectDrawArgs command={}; command.InstanceID=command.StartInstanceLocation=instance; command.InstanceCount=1;
             command.IndexCountPerInstance=enabled?chunk.Range.Capacity:0; command.StartIndexLocation=chunk.Range.IndexBase; command.BaseVertexLocation=static_cast<INT>(chunk.Range.VertexBase);

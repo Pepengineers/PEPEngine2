@@ -106,7 +106,7 @@ public:
             commands->ResourceBarrier({ _atlas->GetResource()->GetSRVBarrier() });
             return;
         }
-        if ((lighting.SunShadowFlags & 2u) == 0u && _rendered && _cachedRevision == lighting.SunShadowRevision && _cachedDeformation == _resources->DeformationRevision &&
+        if ((lighting.SunShadowFlags & 2u) == 0u && _rendered && _cachedRevision == lighting.SunShadowRevision && _cachedDeformation == _resources->DeformationRevision && _cachedMaterial == _resources->MaterialRevision &&
             std::memcmp(&_cachedSettings, &_resources->ShadowSettings, sizeof(_cachedSettings)) == 0) return;
         const UINT count = _resources->IndirectCommandsCache->GetElementCount();
         auto& visibility = _visibility[_resources->CurrFrameConstantsIndex];
@@ -170,6 +170,7 @@ public:
         _cachedSettings = _resources->ShadowSettings;
         _cachedRevision = lighting.SunShadowRevision;
         _cachedDeformation = _resources->DeformationRevision;
+        _cachedMaterial = _resources->MaterialRevision;
     }
 
     void ClearDenendencies() override
@@ -206,5 +207,6 @@ private:
     GDX12ShadowConstants _cachedSettings;
     UINT _cachedRevision = 0;
     uint64_t _cachedDeformation = 0;
+    uint64_t _cachedMaterial = 0;
     bool _rendered = false;
 };

@@ -82,7 +82,8 @@ public:
             if (light.ShadowFirstSlice != UINT_MAX) slices = (std::max)(slices, light.ShadowFirstSlice + LocalShadowFaceCount(light));
         if ((std::max)(slices, 1u) != _sliceCount) CreateMaps((std::max)(slices, 1u));
         _renderedViews = 0;
-        if (_cachedDeformation != _resources->DeformationRevision) { _cached.clear(); _cachedDeformation = _resources->DeformationRevision; }
+        if (_cachedDeformation != _resources->DeformationRevision || _cachedMaterial != _resources->MaterialRevision)
+        { _cached.clear(); _cachedDeformation = _resources->DeformationRevision; _cachedMaterial = _resources->MaterialRevision; }
         _cached.resize(_resources->LocalLights.size());
         auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
         auto& visibility = _visibility[_resources->CurrFrameConstantsIndex];
@@ -223,4 +224,5 @@ private:
     UINT _sliceCount = 0;
     UINT _renderedViews = 0;
     uint64_t _cachedDeformation = 0;
+    uint64_t _cachedMaterial = 0;
 };

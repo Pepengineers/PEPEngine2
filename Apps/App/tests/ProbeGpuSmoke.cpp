@@ -4,6 +4,7 @@
 #include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include "Engine.Core/ConsoleModule.h"
 #include "App.Base/ECS/World.h"
+#include "App.Base/Modules/RenderModule.h"
 #include <d3d12sdklayers.h>
 #include <cmath>
 #include <iostream>
@@ -63,6 +64,11 @@ int main(int argc, char** argv)
         replacementWorld->~World();
         Require(firstWorldId != replacementWorldId, "World reconstruction at the same address must create a new runtime identity");
         ConsoleModule console;
+        std::unordered_map<std::string,std::unique_ptr<GDX12Material>> authoredMaterials;
+        {
+            RenderModule materialFactory(nullptr,nullptr);
+            authoredMaterials.emplace("static",std::make_unique<GDX12Material>(*materialFactory.CreateMaterial("static")));
+        }
         const auto set = [&](const wchar_t* name, const char* value) { Require(console.FindConsoleVariable(name).SetFromString(value), "Invalid probe test CVar"); };
         ComPtr<ID3D12Debug> debug; ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))); debug->EnableDebugLayer();
         auto adapter=GDX12DeviceFactory::GetMostPerformantAdapter();
@@ -139,6 +145,21 @@ int main(int argc, char** argv)
         auto pixel=ReadCenter(device,*probes.GetPublished()[0].Texture,4);
         Require(pixel[0]>3.9f && pixel[1]<.01f,"Cached static depth must occlude the dynamic plane behind it");
         const auto baked=probes.GetLastFrameStaticFaces(); Require(baked==6,"First bake must rasterize six static faces");
+        GPUTexture staticAsset,editedStaticAsset; staticAsset.PrimaryDeviceTexture=&colors[0]; editedStaticAsset.PrimaryDeviceTexture=&colors[1];
+        auto& authored=*authoredMaterials.at("static"); authored.Diffuse=&editedStaticAsset; authored.UseBakedLighting=true; authored.DirtyFlag=true;
+        const auto uploadAuthored=[&]
+        {
+            resources.CurrFrameConstantsIndex=frameIndex%static_cast<UINT>(resources.FrameConstants.size());
+            resources.UpdateMaterialCB(authoredMaterials);
+        };
+        uploadAuthored(); render(10);
+        pixel=ReadCenter(device,*probes.GetPublished()[0].Texture,4);
+        Require(pixel[1]>2.9f&&pixel[0]<.01f,"Editing a material must refresh baked probe radiance without a scene revision");
+        authored.Diffuse=&staticAsset; authored.DirtyFlag=true;
+        for(UINT frame=0;frame<resources.FrameConstants.size();++frame) { uploadAuthored(); render(10); }
+        pixel=ReadCenter(device,*probes.GetPublished()[0].Texture,4);
+        Require(pixel[0]>3.9f&&pixel[1]<.01f,"Restored authored material must replace the old cached probe radiance");
+        Require(probes.GetLastFrameStaticFaces()==0,"Material propagation across frame slots must not repeatedly rebake probes");
         render(-5);
         Require(probes.GetLastFrameStaticFaces()==0,"Unchanged static scene must reuse cached static faces");
         pixel=ReadCenter(device,*probes.GetPublished()[0].Texture,4);

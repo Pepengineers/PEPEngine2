@@ -37,6 +37,7 @@ public:
     GDX12Device* Device;
     std::unique_ptr<GDX12UploadBuffer<UINT>> GeneratedIndexCounts;
     uint64_t DeformationRevision = 0;
+    uint64_t MaterialRevision = 0;
     GDX12MainConstants Lighting;
     GDX12ShadowConstants ShadowSettings;
     std::vector<GDX12LocalLightConstants> LocalLights;
