@@ -24,6 +24,8 @@ void CS(uint3 id : SV_DispatchThreadID)
     InstanceData instance = Instances[command.InstanceID];
 #if STATIC_ONLY
     if (instance.ReflectionDynamic != 0) return;
+#else
+    if (instance.ReflectionDynamic == 0) return;
 #endif
     if (Materials[instance.MaterialIndex].RenderLayer == 2) return;
     if (!ShadowBoxVisible(instance.BoundingBoxCenter, instance.BoundingBoxExtents, Lights[LightIndex].ShadowViewProj[FaceIndex])) return;

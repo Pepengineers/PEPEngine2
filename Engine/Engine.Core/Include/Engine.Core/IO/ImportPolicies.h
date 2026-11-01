@@ -3,6 +3,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 
 namespace Engine::Core
 {
@@ -20,6 +21,9 @@ namespace Engine::Core
 		bool bGenerateNormals = true;
 		bool bGenerateTangents = true;
 		bool bFlipUVs = true;
+        bool bCache = false; // Native Mesh cache for OBJ; source/MTL changes invalidate it.
+		// Return false to cancel; may run on the import worker and must not throw.
+		std::function<bool()> Continue;
 	};
 
 	/// Options for importing a scene asset while preserving logical structure.

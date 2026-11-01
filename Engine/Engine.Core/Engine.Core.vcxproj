@@ -164,7 +164,17 @@
     <ClCompile Include="src\AssetManager.cpp" />
     <ClCompile Include="src\BenchmarkEngine.cpp" />
     <ClCompile Include="src\GameTimer.cpp" />
-    <ClCompile Include="src\IO\MeshImporter.cpp" />
+    <ClCompile Include="src\IO\MeshImporter.cpp">
+      <!-- Millions of imported vertices need optimization even during application debugging. -->
+      <Optimization Condition="'$(Configuration)'=='Debug'">MaxSpeed</Optimization>
+      <BasicRuntimeChecks Condition="'$(Configuration)'=='Debug'">Default</BasicRuntimeChecks>
+      <DebugInformationFormat Condition="'$(Configuration)'=='Debug'">ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <ClCompile Include="src\IO\MeshCache.cpp">
+      <Optimization Condition="'$(Configuration)'=='Debug'">MaxSpeed</Optimization>
+      <BasicRuntimeChecks Condition="'$(Configuration)'=='Debug'">Default</BasicRuntimeChecks>
+      <DebugInformationFormat Condition="'$(Configuration)'=='Debug'">ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
     <ClCompile Include="src\IO\SceneImporter.cpp" />
     <ClCompile Include="src\IO\TextureLoader.cpp" />
     <ClCompile Include="src\Registries\AssetRegistryBase.cpp" />
@@ -193,6 +203,8 @@
     <ClInclude Include="Include\Engine.Core\IO\SceneImporter.h" />
     <ClInclude Include="Include\Engine.Core\IO\TextureLoader.h" />
     <ClInclude Include="Include\Engine.Core\IO\ImportPolicies.h" />
+    <ClInclude Include="Include\Engine.Core\IO\AssetCache.h" />
+    <ClInclude Include="Include\Engine.Core\IO\MeshCache.h" />
     <ClInclude Include="Include\Engine.Core\Registries\AssetRegistryBase.h" />
     <ClInclude Include="Include\Engine.Core\Registries\MeshRegistry.h" />
     <ClInclude Include="Include\Engine.Core\Registries\SceneRegistry.h" />

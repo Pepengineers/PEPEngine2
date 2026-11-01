@@ -11,6 +11,7 @@ public:
     bool Initialize();
 
     void SetWindowSize(uint16_t width, uint16_t height);
+    void UpdateClientSize(uint16_t width, uint16_t height);
     void GetWindowSize(uint16_t& width, uint16_t& height) const;
 
     HWND GetWindowHandle() const;

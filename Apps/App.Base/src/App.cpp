@@ -42,7 +42,8 @@ void App::CalculateFrameStats() const
     // Compute averages over one second period.
     if ((Timer.TotalTime() - TimeElapsed) >= 1.0f)
     {
-        float Fps = static_cast<float>(FrameCount);
+        const float elapsed = Timer.TotalTime() - TimeElapsed;
+        float Fps = static_cast<float>(FrameCount) / elapsed;
         float MsPerFrame = 1000.0f / Fps;
 
         std::wstring FpsString = std::to_wstring(Fps);
@@ -56,14 +57,14 @@ void App::CalculateFrameStats() const
 
         // Reset for next average.
         FrameCount = 0;
-        TimeElapsed += 1.0f;
+        TimeElapsed = Timer.TotalTime();
     }
 }
 
 
 App* App::GetInstance()
 {
-    return static_cast<App*>(Instance);
+    return dynamic_cast<App*>(Instance);
 }
 
 App::App(HINSTANCE hInstance)
@@ -130,6 +131,53 @@ int App::Run()
     return static_cast<int>(Msg.wParam);
 }
 
+void App::ReportLoading(const std::wstring& stage)
+{
+    if (!_initializing) return;
+    _loadingStage = stage;
+    const auto title = L"Renderer - " + stage;
+    SetWindowTextW(_window->GetWindowHandle(), title.c_str());
+    InvalidateRect(_window->GetWindowHandle(), nullptr, FALSE);
+    if (!ContinueLoading()) throw std::runtime_error("Scene loading cancelled");
+}
+
+bool App::ContinueLoading()
+{
+    if (GetCurrentThreadId() == _windowThread && _initializing)
+    {
+        MSG message{};
+        while (PeekMessage(&message, nullptr, 0, 0, PM_REMOVE))
+        {
+            if (message.message == WM_QUIT) _loadingCancelled = true;
+            else
+            {
+                TranslateMessage(&message);
+                DispatchMessage(&message);
+            }
+        }
+    }
+    return !_loadingCancelled;
+}
+
+void App::WaitForLoading(const JobHandle& work)
+{
+    auto painted = GetTickCount64();
+    // Leave the window thread available while the shared workers import/decode.
+    if (_jobs.GetThreadCount() > 1)
+        while (!work.IsCompleted())
+        {
+            ContinueLoading();
+            if (GetTickCount64() - painted >= 1000)
+            {
+                InvalidateRect(_window->GetWindowHandle(), nullptr, FALSE);
+                painted = GetTickCount64();
+            }
+            MsgWaitForMultipleObjectsEx(0, nullptr, 16, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+        }
+    work.Complete();
+    if (!ContinueLoading()) throw std::runtime_error("Scene loading cancelled");
+}
+
 bool App::Initialize()
 {
     Log::Info("Application", "Creating the application window");
@@ -165,20 +213,65 @@ bool App::Initialize()
         return false;
     }
 
-    // Scene loading creates GPU resources, so module hash order cannot decide initialization.
-    Locator.GetModule<RenderModule>()->Initialize();
-    Locator.GetModule<SceneManagerModule>()->Initialize();
+    try
+    {
+        ReportLoading(L"Preparing renderer");
+        // Scene loading creates GPU resources, so module hash order cannot decide initialization.
+        Locator.GetModule<RenderModule>()->Initialize();
+        ReportLoading(L"Importing scene");
+        Locator.GetModule<SceneManagerModule>()->Initialize();
+    }
+    catch (...)
+    {
+        if (!_loadingCancelled) throw;
+        Log::Info("Loading", "Scene loading cancelled by the user");
+        return false;
+    }
     Log::Info("Application", "Preparing initial indirect commands for ",
         Locator.GetModule<SceneManagerModule>()->GetWorldCount(), " worlds");
     auto scenes = Locator.GetModule<SceneManagerModule>();
     for (size_t i = 0; i < scenes->GetWorldCount(); ++i)
         _indirect.Schedule(_jobs, *scenes->GetWorld(i), 0).Complete();
     Log::Info("Application", "Application initialization complete");
+    _initializing = false;
+    bAppPaused = bMinimized;
+    SetWindowTextW(_window->GetWindowHandle(), _window->GetWindowTitle().c_str());
+    if (!bMinimized) OnResize();
     return true;
 }
 
 LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    if (_initializing)
+    {
+        if (msg == WM_CLOSE || (msg == WM_KEYUP && wParam == VK_ESCAPE))
+        {
+            _loadingCancelled = true;
+            _loadingStage = L"Cancelling loading...";
+            SetWindowTextW(hwnd, _loadingStage.c_str());
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return 0;
+        }
+        if (msg == WM_PAINT)
+        {
+            PAINTSTRUCT paint{};
+            const auto dc = BeginPaint(hwnd, &paint);
+            RECT rect{};
+            GetClientRect(hwnd, &rect);
+            FillRect(dc, &rect, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
+            SetBkMode(dc, TRANSPARENT);
+            SetTextColor(dc, RGB(230, 230, 230));
+            const auto text = _loadingStage + L"\n" +
+                std::to_wstring((GetTickCount64() - _loadingStarted) / 1000) + L" s - Esc to cancel";
+            rect.top += 40;
+            DrawTextW(dc, text.c_str(), -1, &rect, DT_CENTER | DT_TOP | DT_NOPREFIX);
+            EndPaint(hwnd, &paint);
+            return 0;
+        }
+        if (msg == WM_SIZE) { bMinimized = wParam == SIZE_MINIMIZED; return 0; }
+        if (msg == WM_ACTIVATE || msg == WM_ENTERSIZEMOVE || msg == WM_EXITSIZEMOVE ||
+            (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST)) return 0;
+    }
     switch (msg)
     {
     // WM_ACTIVATE is sent when the window is activated or deactivated.
@@ -208,7 +301,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
             auto newWindowWidth = LOWORD(lParam);
             auto newWindowHeight = HIWORD(lParam);
-            _window->SetWindowSize(newWindowWidth, newWindowHeight);
+            _window->UpdateClientSize(newWindowWidth, newWindowHeight);
 
             if (wParam == SIZE_MINIMIZED)
             {
@@ -324,6 +417,10 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
 void App::OnResize()
 {
+    if (_initializing) return;
+    uint16_t width, height;
+    _window->GetWindowSize(width, height);
+    _window->UpdateClientSize(width, height);
     //WinApi unintentionally calls OnResize() once during window creation.
     //It happens during AppBase::Initialize(), 
     //so none of the systems are currently initialized.

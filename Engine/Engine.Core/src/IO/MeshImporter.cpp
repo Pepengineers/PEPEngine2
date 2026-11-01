@@ -1,4 +1,4 @@
-﻿// MeshImporter.cpp
+// MeshImporter.cpp
 
 #include <Engine.Core/IO/MeshImporter.h>
 #include <stdexcept>
@@ -6,6 +6,10 @@
 #include <Engine.Core/IO/AssimpImportHelpers.h>
 
 #include <assimp/Importer.hpp>
+#include <assimp/ProgressHandler.hpp>
+#include <assimp/version.h>
+#include "Engine.Core/IO/AssetCache.h"
+#include "Engine.Core/IO/MeshCache.h"
 #include <assimp/GltfMaterial.h>
 #include <assimp/ObjMaterial.h>
 #include <assimp/material.h>
@@ -24,6 +28,14 @@ namespace SimpleMath = DirectX::SimpleMath;
 
 namespace 
 {
+    class ImportProgress final : public Assimp::ProgressHandler
+    {
+    public:
+        explicit ImportProgress(const std::function<bool()>& callback) : _callback(callback) {}
+        bool Update(float) override { return _callback(); }
+    private:
+        std::function<bool()> _callback;
+    };
 	struct ObjMtlTransparencyInfo
 	{
 		bool HasOpacity = false;
@@ -385,43 +397,8 @@ namespace
 			return transparencyInfos;
 		}
 
-		std::ifstream file(sourcePath);
-		if (!file.is_open())
-		{
-			return transparencyInfos;
-		}
-
-		std::string line;
-		while (std::getline(file, line))
-		{
-			const std::size_t commentPosition = line.find('#');
-			if (commentPosition != std::string::npos)
-			{
-				line.erase(commentPosition);
-			}
-
-			line = TrimWhitespace(line);
-			if (line.empty())
-			{
-				continue;
-			}
-
-			std::istringstream stream(line);
-			std::string keyword;
-			stream >> keyword;
-			if (ToLowerAscii(keyword) != "mtllib")
-			{
-				continue;
-			}
-
-			const std::string mtlName = TrimWhitespace(line.substr(std::string("mtllib").size()));
-			if (mtlName.empty())
-			{
-				continue;
-			}
-
-			ParseObjMtlTransparencyFile((sourcePath.parent_path() / std::filesystem::path(mtlName)).lexically_normal(), transparencyInfos);
-		}
+        for (const auto& material : Engine::Core::ObjMaterialLibraries(sourcePath))
+            ParseObjMtlTransparencyFile(material, transparencyInfos);
 
 		return transparencyInfos;
 	}
@@ -793,18 +770,30 @@ namespace Engine::Core
 {
 	std::unique_ptr<Mesh> MeshImporter::ImportSingleMeshAsset(const std::filesystem::path& sourcePath, const MeshImportOptions& options)
 	{
-		Log::Info("Mesh", "Importing mesh: ", sourcePath);
+		Log::Info("Mesh", "Loading mesh: ", sourcePath);
 		if (sourcePath.empty())
 		{
 			Log::Error("Mesh", "Mesh import has an empty source path");
 			return nullptr;
 		}
 
-		Assimp::Importer importer;
-		const std::string sourcePathUtf8 = sourcePath.u8string();
-
+		if (options.Continue && !options.Continue()) return nullptr;
 		const std::uint32_t assimpFlags = BuildAssimpPostProcessFlags(options);
-		const aiScene* assimpScene = importer.ReadFile(sourcePathUtf8.c_str(), assimpFlags);
+        const auto cache = options.bCache && sourcePath.extension() == L".obj"
+            ? AssetCachePath(sourcePath, "mesh-" + std::to_string(MeshCacheVersion) + "-" +
+                std::to_string(aiGetVersionMajor()) + "-" + std::to_string(aiGetVersionMinor()) + "-" +
+                std::to_string(aiGetVersionPatch()) + "-" + std::to_string(assimpFlags) + ".pepmesh", true) : std::filesystem::path{};
+        if (auto cached = LoadMeshCache(cache, options.Continue))
+        {
+            Log::Info("Mesh", "Engine mesh cache hit (no Assimp import): ", sourcePath);
+            return cached;
+        }
+        if (options.Continue && !options.Continue()) return nullptr;
+        Log::Info("Mesh", "Assimp source import: ", sourcePath);
+        Assimp::Importer importer;
+        if (options.Continue) importer.SetProgressHandler(new ImportProgress(options.Continue));
+        const aiScene* assimpScene = importer.ReadFile(sourcePath.u8string().c_str(), assimpFlags);
+		if (options.Continue && !options.Continue()) return nullptr;
 		
 		if (assimpScene == nullptr || assimpScene->mRootNode == nullptr || (assimpScene->mFlags & AI_SCENE_FLAGS_INCOMPLETE) != 0)
 		{
@@ -830,6 +819,10 @@ namespace Engine::Core
 		Log::Info("Mesh", "Imported ", importedSubMeshes.size(), " submeshes and ",
 			importedMaterials.size(), " materials: ", sourcePath);
 		std::unique_ptr<Mesh> mesh = std::make_unique<Mesh>(std::move(importedSubMeshes), meshBounds, std::move(importedMaterials));
+        if (options.Continue && !options.Continue()) return nullptr;
+        if (!cache.empty() && SaveMeshCache(cache, *mesh, options.Continue))
+            Log::Info("Mesh", "Saved engine mesh cache: ", cache);
+        if (options.Continue && !options.Continue()) return nullptr;
 		return mesh;
 	}
 

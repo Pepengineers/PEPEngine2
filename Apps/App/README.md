@@ -13,7 +13,22 @@ resolves assets independently of the working directory.
 Scene loading prepares independent textures through the App's shared JobSystem,
 then publishes assets/materials/entities on the owner thread and batches texture
 uploads. Rendering starts after the complete scene is ready. OBJ import remains
-Assimp-based; no persistent baked-resource cache is used.
+Assimp-based on a cache miss. Converted engine `Mesh` objects (`*.pepmesh`) and BC7
+textures are cached under `Build/AssetCache`. A warm geometry load reads engine vertices,
+indices, bounds, materials and skin data directly, without creating an Assimp importer
+or converting its scene. Source/MTL size and modification time plus importer options,
+Assimp version and native format version invalidate the mesh cache. Writes are atomic;
+the reader checks record counts, indices and SHA-256 integrity and rebuilds invalid files.
+The old `.assbin-*` caches are no longer used. Native caches are shared by Debug/Release.
+Deleting this directory is safe, but the next launch must prepare it again.
+BC7 keeps texture dimensions and mip levels; diffuse/opacity inputs that need CPU
+alpha merging stay uncompressed. Uploaded CPU texture pixels are released after
+the GPU fence completes. The loading window pumps messages, shows its current
+stage, and supports Esc/close cancellation while worker tasks finish.
+
+Local shadows cache static geometry separately and compose moving casters over it.
+All original lights and shadow resolutions remain enabled. Debug optimizes the
+mesh importer and native-cache translation units (with PDBs); other Debug code remains unoptimized.
 
 `Loading.TransientBudgetMiB` defaults to 1024. Set it in the executable's
 `Config/Engine.ini`, under `[ConsoleVariables]`, or override it for one launch:
@@ -29,16 +44,18 @@ budget, Bistro's two large OBJ files import sequentially; texture preparation is
 parallel. Larger budgets can allow both independent imports to run together.
 
 For a reproducible loading measurement, the App can initialize the complete scene,
-render one frame, wait for GPU completion, write JSON counters and exit:
+render frames, wait for GPU completion, write JSON counters and exit:
 
 ```powershell
-Build/bin/x64/Release/App/App.exe -Loading.TransientBudgetMiB=1024 -Loading.BenchmarkOutput=Build/loading.json
+Build/bin/x64/Release/App/App.exe -Loading.TransientBudgetMiB=1024 -Loading.BenchmarkOutput=Build/loading.json -Loading.BenchmarkFrames=121
 msbuild Apps/App/LoadingTests.vcxproj /p:Configuration=Release /p:Platform=x64 /m
 Build/bin/x64/Release/LoadingTests/LoadingTests.exe
 ```
 
-The report includes initialization/ready times, CPU preparation stages and OS
-process peaks (working set and committed private memory). Output paths are relative
+The report includes initialization/ready times, CPU preparation stages, current and
+peak process memory, and average time of frames after the first. The sampled frames
+use the normal CPU/GPU pipeline; the measurement waits for the last GPU frame to finish.
+`Loading.BenchmarkFrames` accepts 1 (default) through 10000. Output paths are relative
 to the launch directory. The tests check CVar validation, bounded/oversized batches,
 and identical pixels/mips from serial and parallel WIC decoding. Measurements and
 limitations are recorded in `docs/reports/2026-11-01-bistro-loading.md`.

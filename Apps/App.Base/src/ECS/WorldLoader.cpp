@@ -583,6 +583,8 @@ namespace
         const size_t materialCount = (std::min)(materialSlots.size(), materials.size());
         for (size_t materialIndex = 0; materialIndex < materialCount; ++materialIndex)
         {
+            if (auto* app = App::GetInstance())
+                app->ReportLoading(L"Uploading materials " + std::to_wstring(materialIndex + 1) + L"/" + std::to_wstring(materialCount));
             const std::filesystem::path diffuseTexturePath = materials[materialIndex].DiffuseTexturePath;
             
             MaterialTextureSet textures = {};
@@ -766,18 +768,25 @@ namespace
         size_t Begin = 0;
         void Execute(size_t index) override
         {
-            Results[index] = Engine::Core::MeshImporter::ImportSingleMeshAsset(Paths[Begin + index]);
+            Engine::Core::MeshImportOptions options;
+            // PBRSurface reconstructs the tangent frame from derivatives, including mirrored UVs.
+            options.bGenerateTangents = false;
+            options.bCache = true;
+            options.Continue = [] { auto* app = App::GetInstance(); return !app || app->ContinueLoading(); };
+            Results[index] = Engine::Core::MeshImporter::ImportSingleMeshAsset(Paths[Begin + index], options);
         }
     };
 
     struct TextureDecodeJob final : ParallelJob
     {
         std::vector<std::filesystem::path> Paths;
+        std::unordered_set<std::wstring> RawPaths;
         std::vector<std::unique_ptr<Engine::Core::Texture>> Results;
         size_t Begin = 0;
         void Execute(size_t index) override
         {
-            Results[index] = Engine::Core::TextureLoader::LoadTextureAsset(Paths[Begin + index]);
+            const auto& path = Paths[Begin + index];
+            Results[index] = Engine::Core::TextureLoader::LoadTextureAsset(path, !RawPaths.count(path.wstring()));
         }
     };
 
@@ -805,6 +814,7 @@ namespace
         }
         for (size_t begin = 0; begin < imports.Paths.size();)
         {
+            if (auto* app = App::GetInstance()) app->ReportLoading(L"Importing " + imports.Paths[begin].filename().wstring());
             const auto end = LoadingBatchEnd(estimates, begin, budget, jobs.GetThreadCount());
             Log::Info("Loading", "Import batch ", begin, "..", end, " of ", imports.Paths.size(), " meshes");
             if (estimates[begin] > budget)
@@ -812,7 +822,8 @@ namespace
             imports.Begin = begin;
             imports.Results.resize(end - begin);
             LastLoadingMeasurements.MaxImportTasks = (std::max)(LastLoadingMeasurements.MaxImportTasks, end - begin);
-            imports.Schedule(jobs, end - begin, 1).Complete();
+            const auto work = imports.Schedule(jobs, end - begin, 1);
+            if (auto* app = App::GetInstance()) app->WaitForLoading(work); else work.Complete();
             for (size_t index = begin; index < end; ++index)
             {
                 if (!imports.Results[index - begin]) return false;
@@ -834,6 +845,14 @@ namespace
             if (!mesh) return false;
             for (const auto& material : mesh->GetMaterials())
             {
+                if (!material.OpacityTexturePath.empty())
+                {
+                    for (const auto& raw : { material.DiffuseTexturePath, material.OpacityTexturePath })
+                    {
+                        const auto handle = assets.Textures().Register(raw);
+                        if (handle.IsValid()) textures.RawPaths.insert(assets.Textures().GetSourcePath(handle).wstring());
+                    }
+                }
                 for (const auto& texturePath : { material.DiffuseTexturePath, material.NormalTexturePath,
                     material.SpecularTexturePath, material.RoughnessTexturePath, material.EmissiveTexturePath, material.OpacityTexturePath })
                 {
@@ -851,6 +870,7 @@ namespace
         Log::Info("Loading", "Decoding ", textures.Paths.size(), " unique textures");
         for (size_t begin = 0; begin < textures.Paths.size();)
         {
+            if (auto* app = App::GetInstance()) app->ReportLoading(L"Preparing textures " + std::to_wstring(begin) + L"/" + std::to_wstring(textures.Paths.size()));
             const auto end = LoadingBatchEnd(estimates, begin, budget, jobs.GetThreadCount());
             Log::Info("Loading", "Texture batch ", begin, "..", end, " of ", textures.Paths.size());
             if (estimates[begin] > budget)
@@ -858,10 +878,11 @@ namespace
             textures.Begin = begin;
             textures.Results.resize(end - begin);
             LastLoadingMeasurements.MaxTextureTasks = (std::max)(LastLoadingMeasurements.MaxTextureTasks, end - begin);
-            textures.Schedule(jobs, end - begin, 1).Complete();
+            const auto work = textures.Schedule(jobs, end - begin, 1);
+            if (auto* app = App::GetInstance()) app->WaitForLoading(work); else work.Complete();
             for (size_t index = begin; index < end; ++index)
                 if (textures.Results[index - begin])
-                    assets.Textures().Cache(textureHandles[index], std::move(textures.Results[index - begin]));
+                    if (!assets.Textures().Cache(textureHandles[index], std::move(textures.Results[index - begin]))) return false;
             begin = end;
         }
         LastLoadingMeasurements.TextureSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - imported).count();
@@ -935,6 +956,25 @@ namespace
         CreateCameraForBounds(world, sceneBounds);
         Log::Info("Loading", "Waiting for GPU uploads to complete");
         renderModule.WaitForUploads();
+        std::unordered_set<std::uint32_t> releasedTextures;
+        std::uint64_t releasedBytes = 0;
+        for (const auto& path : objPaths)
+        {
+            const auto* mesh = assetManager.Meshes().FindMesh(path);
+            for (const auto& material : mesh->GetMaterials())
+                for (const auto& texturePath : { material.DiffuseTexturePath, material.NormalTexturePath,
+                    material.SpecularTexturePath, material.RoughnessTexturePath, material.EmissiveTexturePath, material.OpacityTexturePath })
+                {
+                    if (texturePath.empty()) continue;
+                    const auto handle = assetManager.Textures().FindHandle(texturePath);
+                    if (!handle.IsValid() || !releasedTextures.insert(handle.GetValue()).second) continue;
+                    if (const auto* texture = assetManager.Textures().GetTexture(handle))
+                        for (const auto& subresource : texture->GetSubresources()) releasedBytes += subresource.Data.size();
+                    // GPU uploads and alpha-mask packing are finished; keep only the reloadable handle.
+                    assetManager.Textures().Unload(handle);
+                }
+        }
+        Log::Info("Loading", "Released uploaded CPU texture pixels: ", releasedBytes / (1024u * 1024u), " MiB");
         LastLoadingMeasurements.PublishSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - publishStarted).count();
         Log::Info("Loading", "Scene GPU resources ready in ", LastLoadingMeasurements.PublishSeconds, " s");
         return true;

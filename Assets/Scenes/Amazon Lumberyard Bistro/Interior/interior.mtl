@@ -354,7 +354,6 @@ newmtl Paris_CeilingFan
 	map_Ka ..\PropTextures\Bistro\Paris_CeilingFan_01\Paris_CeilingFan_01A_diff.png
 	map_Kd ..\PropTextures\Bistro\Paris_CeilingFan_01\Paris_CeilingFan_01A_diff.png
 	map_Ks ..\PropTextures\Bistro\Paris_CeilingFan_01\Paris_CeilingFan_01A_spec.png
-	map_Ke ..\PropTextures\Bistro\Paris_CeilingFan_01\Paris_CeilingFan_01A_emi.png
 
 newmtl Paris_Beertap
 	Ns 100.000

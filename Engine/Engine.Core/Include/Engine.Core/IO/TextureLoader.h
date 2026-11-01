@@ -31,7 +31,8 @@ namespace Engine::Core
 		///   - Rejects .dds files that do not begin with the DDS magic bytes.
 		///
 		/// Returns nullptr on any validation or loading failure.
-		[[nodiscard]] static std::unique_ptr<Texture> LoadTextureAsset(const std::filesystem::path& sourcePath);
+        // compressedCache prepares BC7 plus a disposable DDS cache; leave false for CPU pixel editing/alpha merging.
+		[[nodiscard]] static std::unique_ptr<Texture> LoadTextureAsset(const std::filesystem::path& sourcePath, bool compressedCache = false);
 
 		/// Creates a minimal 2x2 fallback texture used when a real texture fails to load.
 		///

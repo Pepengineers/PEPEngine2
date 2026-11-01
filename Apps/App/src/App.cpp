@@ -28,20 +28,11 @@ namespace
                 TranslateMessage(&message);
                 DispatchMessage(&message);
             }
-            Timer.Reset();
+            if (!_benchmarkStarted) { Timer.Reset(); _benchmarkStarted = true; }
+            Timer.Start();
             Timer.Tick();
             Update(Timer);
             Render(Timer);
-            Locator.GetModule<RenderModule>()->WaitForUploads();
-        }
-
-        bool Initialize() override
-        {
-            if (!App::Initialize()) return false;
-            auto& ecs = Locator.GetModule<SceneManagerModule>()->GetWorld()->GetECS();
-            // Moving benchmark casters require fresh maps even when the fixtures are stationary.
-            ecs.ForEach<LightComponent>([](Entity, LightComponent& light) { light.ShadowUpdate = ShadowUpdateMode::EveryFrame; });
-            return true;
         }
 
     protected:
@@ -143,6 +134,7 @@ namespace
         }
 
     private:
+        bool _benchmarkStarted = false;
         FlyingPropSystem _flyingProps;
         POINT _lastMousePos = {};
         float _cameraSpeed = 100.0f;
@@ -158,6 +150,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
     {
         ConsoleModule{}.Initialize();
         std::filesystem::path benchmarkOutput;
+        int benchmarkFrames = 1;
         std::wstring budgetArgument;
         int argumentCount = 0;
         auto arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
@@ -170,6 +163,15 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
             constexpr std::wstring_view prefix = L"-Loading.BenchmarkOutput=";
             if (argument.substr(0, prefix.size()) == prefix)
                 benchmarkOutput = std::wstring(argument.substr(prefix.size()));
+            constexpr std::wstring_view framesPrefix = L"-Loading.BenchmarkFrames=";
+            if (argument.substr(0, framesPrefix.size()) == framesPrefix)
+            {
+                const std::wstring value(argument.substr(framesPrefix.size()));
+                size_t consumed = 0;
+                benchmarkFrames = std::stoi(value, &consumed);
+                if (consumed != value.size() || benchmarkFrames < 1 || benchmarkFrames > 10000)
+                    throw std::runtime_error("Loading.BenchmarkFrames must be between 1 and 10000");
+            }
         }
         LocalFree(arguments);
         const auto started = std::chrono::steady_clock::now();
@@ -180,7 +182,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
         if (!benchmarkOutput.empty())
         {
             app.BenchmarkFrame();
+            BenchmarkEngine::GetLocator().GetModule<RenderModule>()->WaitForUploads();
             const auto ready = std::chrono::steady_clock::now();
+            for (int frame = 1; frame < benchmarkFrames; ++frame) app.BenchmarkFrame();
+            BenchmarkEngine::GetLocator().GetModule<RenderModule>()->WaitForUploads();
+            const auto sampled = std::chrono::steady_clock::now();
             PROCESS_MEMORY_COUNTERS_EX memory = {};
             memory.cb = sizeof(memory);
             if (!GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory)))
@@ -196,6 +202,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
                 << ",\n  \"prepared_textures\": " << LastLoadingMeasurements.TextureCount
                 << ",\n  \"max_import_tasks\": " << LastLoadingMeasurements.MaxImportTasks
                 << ",\n  \"max_texture_tasks\": " << LastLoadingMeasurements.MaxTextureTasks
+                << ",\n  \"sampled_frames\": " << benchmarkFrames - 1
+                << ",\n  \"frame_ms\": " << (benchmarkFrames > 1 ? std::chrono::duration<double, std::milli>(sampled - ready).count() / (benchmarkFrames - 1) : 0)
+                << ",\n  \"working_set_bytes\": " << memory.WorkingSetSize
+                << ",\n  \"private_bytes\": " << memory.PrivateUsage
                 << ",\n  \"peak_working_set_bytes\": " << memory.PeakWorkingSetSize
                 << ",\n  \"peak_commit_bytes\": " << memory.PeakPagefileUsage << "\n}\n";
             report.close();

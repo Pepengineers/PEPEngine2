@@ -44,6 +44,9 @@
     <ClCompile Include="src\IO\MeshImporter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\IO\MeshCache.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\IO\SceneImporter.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -121,6 +124,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.Core\IO\ImportPolicies.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\IO\AssetCache.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.Core\IO\MeshCache.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.Core\IO\MeshImporter.h">

@@ -39,8 +39,7 @@ bool Window::Initialize()
 
 void Window::SetWindowSize(uint16_t width, uint16_t height)
 {
-    WindowWidth = width;
-    WindowHeight = height == 0 ? 1 : height;
+    UpdateClientSize(width, height);
 
     if (!MainWndHandle)
     {
@@ -53,6 +52,12 @@ void Window::SetWindowSize(uint16_t width, uint16_t height)
     int Height = WindowRect.bottom - WindowRect.top;
 
     SetWindowPos(MainWndHandle, nullptr, 0, 0, Width, Height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+void Window::UpdateClientSize(uint16_t width, uint16_t height)
+{
+    WindowWidth = width;
+    WindowHeight = height == 0 ? 1 : height;
 }
 
 void Window::GetWindowSize(uint16_t& width, uint16_t& height) const

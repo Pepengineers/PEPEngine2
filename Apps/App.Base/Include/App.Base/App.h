@@ -20,6 +20,7 @@
 #include "App.Base/Systems/LightUpdateSystem.h"
 #include "App.Base/Systems/GPUDataUpdateSystem.h"
 #include "App.Base/Systems/IndirectCommandBuildSystem.h"
+#include <atomic>
 
 #undef min
 #undef max
@@ -45,6 +46,9 @@ public:
 
     static App* GetInstance();
     JobSystem& GetJobs() { return _jobs; }
+    void ReportLoading(const std::wstring& stage);
+    bool ContinueLoading();
+    void WaitForLoading(const JobHandle& work);
 protected:
     HINSTANCE AppHandler = nullptr;
 
@@ -99,4 +103,9 @@ protected:
 
 private:
     std::unique_ptr<Window> _window;
+    bool _initializing = true;
+    std::atomic<bool> _loadingCancelled{false};
+    DWORD _windowThread = GetCurrentThreadId();
+    std::wstring _loadingStage = L"Preparing renderer";
+    ULONGLONG _loadingStarted = GetTickCount64();
 };

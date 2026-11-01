@@ -71,14 +71,26 @@ public:
         ThrowIfFailed(_resources->Device->GetDevice()->CreateCommandSignature(&signature,
             _graphicsRoot->GetRootSignature().Get(), IID_PPV_ARGS(&_signature)));
         _visibility.resize(_resources->FrameConstants.size());
+        if (!_staticOnly)
+        {
+            _staticShadows = std::make_unique<GDX12LocalShadowPass>(true);
+            _staticShadows->Setup(_resources, _otherResources, _commonData);
+            _staticShadows->Initialize();
+        }
     }
 
-    void InvalidateCache() { _cached.clear(); }
+    void InvalidateCache()
+    {
+        _cached.clear();
+        if (_staticShadows) _staticShadows->InvalidateCache();
+    }
 
     UINT GetLastFrameRenderedViews() const { return _renderedViews; }
+    UINT GetLastFrameStaticRenderedViews() const { return _staticShadows ? _staticShadows->_renderedViews : _renderedViews; }
 
     void Execute(GDX12CommandList* commands) override
     {
+        if (_staticShadows) _staticShadows->Execute(commands);
         if (_staticRevision != _resources->ReflectionStaticRevision ||
             (!_staticOnly && _dynamicRevision != _resources->ReflectionDynamicRevision))
         {
@@ -109,9 +121,21 @@ public:
                 continue;
             }
             const auto& cached = _cached[lightIndex];
-            if (!ShouldRenderLocalShadow(light, cached ? &*cached : nullptr)) continue;
+            auto cacheKey = light;
+            if (_staticOnly) cacheKey.ShadowFlags &= ~2u;
+            if (!ShouldRenderLocalShadow(cacheKey, cached ? &*cached : nullptr)) continue;
             for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
             {
+                if (_staticShadows)
+                {
+                    auto* source = _staticShadows->_maps->GetResource();
+                    auto* target = _maps->GetResource();
+                    commands->ResourceBarrier({ source->GetCopySourceBarrier(), target->GetCopyDestBarrier() });
+                    const UINT slice = light.ShadowFirstSlice + face;
+                    const CD3DX12_TEXTURE_COPY_LOCATION src(source->D3DResource.Get(), slice);
+                    const CD3DX12_TEXTURE_COPY_LOCATION dst(target->D3DResource.Get(), slice);
+                    commands->GetCommandList()->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+                }
                 commands->SetComputeRootSignature(_computeRoot.get());
                 commands->ResourceBarrier({ visibility.Counter->GetResource().GetUnorderedAccessBarrier(),
                     visibility.Commands->GetResource().GetUnorderedAccessBarrier() });
@@ -144,7 +168,7 @@ public:
                 commands->SetScissorRect({ 0, 0, LocalShadowResolution, LocalShadowResolution });
                 const auto dsv = _dsvs[light.ShadowFirstSlice + face]->CPUHandle;
                 commands->GetCommandList()->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
-                commands->GetCommandList()->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
+                if (_staticOnly) commands->GetCommandList()->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
                 if (count) commands->ExecuteIndirect(_signature.Get(), count,
                     visibility.Commands->GetResource().D3DResource.Get(), 0, visibility.Counter->GetResource().D3DResource.Get(), 0);
                 if (!_staticOnly && _resources->Grass)
@@ -165,6 +189,7 @@ public:
         _cached.clear();
         _dsvs.clear();
         _maps.reset();
+        _staticShadows.reset();
         _graphicsRoot.reset();
         _computeRoot.reset();
         _signature.Reset();
@@ -227,6 +252,7 @@ private:
     std::vector<std::optional<GDX12LocalLightConstants>> _cached;
     std::vector<std::unique_ptr<GDX12Descriptor>> _dsvs;
     std::unique_ptr<GDX12Texture> _maps;
+    std::unique_ptr<GDX12LocalShadowPass> _staticShadows;
     std::unique_ptr<GDX12RootSignature> _graphicsRoot, _computeRoot;
     ComPtr<ID3D12PipelineState> _depthPSO, _cullPSO, _clearPSO;
     ComPtr<ID3D12CommandSignature> _signature;

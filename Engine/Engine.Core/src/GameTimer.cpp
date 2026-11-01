@@ -59,6 +59,9 @@ void GameTimer::Reset()
 
     _baseTime = CurrTime;
     _prevTime = CurrTime;
+    _currTime = CurrTime;
+    _pausedTime = 0;
+    _timeDelta = 0;
     _stopTime = 0;
     _bStopped = false;
 }

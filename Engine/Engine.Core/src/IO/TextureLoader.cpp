@@ -10,7 +10,11 @@
 #include <string>
 #include <limits>
 
+#include <d3d11.h>
 #include <directxtex/DirectXTex.h>
+#include <mutex>
+#include "Engine.Core/IO/AssetCache.h"
+#pragma comment(lib, "d3d11.lib")
 #include <wrl/client.h>
 #include <windows.h>
 #include <wincodec.h>
@@ -536,8 +540,15 @@ namespace Engine::Core
 		return estimate;
 	}
 
-	std::unique_ptr<Texture> TextureLoader::LoadTextureAsset(const std::filesystem::path& sourcePath)
+	std::unique_ptr<Texture> TextureLoader::LoadTextureAsset(const std::filesystem::path& sourcePath, bool compressedCache)
 	{
+        const auto cache = compressedCache ? AssetCachePath(sourcePath, "bc7-v1.dds") : std::filesystem::path{};
+        if (!cache.empty() && std::filesystem::is_regular_file(cache))
+        {
+            DirectX::ScratchImage cached;
+            if (SUCCEEDED(DirectX::LoadFromDDSFile(cache.c_str(), DirectX::DDS_FLAGS_NONE, nullptr, cached)))
+                return CreateTextureFromScratchImage(cached.GetMetadata(), cached, ETextureType::Unknown);
+        }
 		Log::Info("Texture", "Decoding texture: ", sourcePath);
 		if (sourcePath.empty())
 		{
@@ -619,6 +630,46 @@ namespace Engine::Core
 				std::to_wstring(loadedTexture->GetMipLevels()) + L" mip levels.\n");
 		}
 
+        if (compressedCache && loadedTexture->GetDimension() == ETextureDimension::Texture2D &&
+            loadedTexture->GetFormat() == DXGI_FORMAT_R8G8B8A8_UNORM &&
+            loadedTexture->GetWidth() >= 4 && loadedTexture->GetHeight() >= 4)
+        {
+            DirectX::TexMetadata metadata = {};
+            metadata.width = loadedTexture->GetWidth();
+            metadata.height = loadedTexture->GetHeight();
+            metadata.depth = 1;
+            metadata.arraySize = loadedTexture->GetArraySize();
+            metadata.mipLevels = loadedTexture->GetMipLevels();
+            metadata.dimension = DirectX::TEX_DIMENSION_TEXTURE2D;
+            metadata.format = loadedTexture->GetFormat();
+            std::vector<DirectX::Image> images;
+            for (const auto& subresource : loadedTexture->GetSubresources())
+                images.push_back({ subresource.Width, subresource.Height, metadata.format, subresource.RowPitch,
+                    subresource.SlicePitch, reinterpret_cast<uint8_t*>(const_cast<std::byte*>(subresource.Data.data())) });
+            DirectX::ScratchImage compressed;
+            HRESULT result;
+            {
+                // DirectXTex uses the D3D11 immediate context, which must be serialized across loading jobs.
+                static std::mutex mutex;
+                std::lock_guard lock(mutex);
+                static Microsoft::WRL::ComPtr<ID3D11Device> device;
+                if (!device) D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0,
+                    D3D11_SDK_VERSION, &device, nullptr, nullptr);
+                result = device ? DirectX::Compress(device.Get(), images.data(), images.size(), metadata,
+                    DXGI_FORMAT_BC7_UNORM, DirectX::TEX_COMPRESS_BC7_QUICK, 1.0f, compressed) : E_FAIL;
+            }
+            if (SUCCEEDED(result))
+            {
+                loadedTexture = CreateTextureFromScratchImage(compressed.GetMetadata(), compressed, ETextureType::Unknown);
+                if (!cache.empty())
+                {
+                    const auto temporary = CacheTemporaryPath(cache);
+                    if (SUCCEEDED(DirectX::SaveToDDSFile(compressed.GetImages(), compressed.GetImageCount(),
+                        compressed.GetMetadata(), DirectX::DDS_FLAGS_NONE, temporary.c_str()))) PublishAssetCache(temporary, cache);
+                }
+            }
+            else Log::Warning("Texture", "BC7 preparation failed; retaining original pixels: ", sourcePath, ", HRESULT ", result);
+        }
 		return loadedTexture;
 	}
 

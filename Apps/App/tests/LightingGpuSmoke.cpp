@@ -19,7 +19,7 @@ static void Require(bool condition, const char* message)
     if (!condition) throw std::runtime_error(message);
 }
 
-static void CheckReadback(GDX12Device& device, GDX12Texture& texture, UINT subresource, bool lut, bool depth = false)
+static void CheckReadback(GDX12Device& device, GDX12Texture& texture, UINT subresource, bool lut, bool depth = false, bool expectCaster = true)
 {
     const auto desc = texture.GetResource()->D3DResource->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
@@ -74,7 +74,7 @@ static void CheckReadback(GDX12Device& device, GDX12Texture& texture, UINT subre
         }
     D3D12_RANGE noWrite = { 0, 0 };
     readback->Unmap(0, &noWrite);
-    Require(!depth || foundCaster, "Shadow ExecuteIndirect did not render the test caster");
+    Require(!depth || foundCaster == expectCaster, "Shadow depth contains the wrong caster coverage");
 }
 
 static std::vector<float> ReadHDR(GDX12Device& device, GDX12Texture& texture)
@@ -294,6 +294,7 @@ int main()
         };
         updateLocal();
         Require(localShadows.GetLastFrameRenderedViews() == 7, "Cached point+spot shadows must bake seven views initially");
+        Require(localShadows.GetLastFrameStaticRenderedViews() == 7, "Static casters must bake initially");
         CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true);
         CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 6, false, true);
         updateLocal();
@@ -305,8 +306,29 @@ int main()
         point.ShadowFlags |= 2;
         updateLocal();
         Require(localShadows.GetLastFrameRenderedViews() == 6, "EveryFrame point must update all six faces");
+        Require(localShadows.GetLastFrameStaticRenderedViews() == 0, "EveryFrame dynamic shadows must reuse unchanged static casters");
+        CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true);
         updateLocal();
         Require(localShadows.GetLastFrameRenderedViews() == 6, "EveryFrame point updates must continue on later frames");
+        ++resources.ReflectionStaticRevision;
+        updateLocal();
+        Require(localShadows.GetLastFrameStaticRenderedViews() == 7, "Changed static casters must invalidate the static depth cache");
+        instance.ReflectionDynamic = 1;
+        frame->InstanceCache->CopyData(0, instance);
+        ++resources.ReflectionStaticRevision;
+        ++resources.ReflectionDynamicRevision;
+        updateLocal();
+        CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true);
+        draw.InstanceCount = 0;
+        resources.IndirectCommandsCache->CopyData(0, draw);
+        ++resources.ReflectionDynamicRevision;
+        updateLocal();
+        CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true, false);
+        draw.InstanceCount = 1;
+        resources.IndirectCommandsCache->CopyData(0, draw);
+        instance.ReflectionDynamic = 0;
+        frame->InstanceCache->CopyData(0, instance);
+        ++resources.ReflectionStaticRevision;
 
         point.Type = 2;
         point.ShadowFlags = 1;

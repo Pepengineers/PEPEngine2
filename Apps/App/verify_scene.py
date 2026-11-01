@@ -37,6 +37,15 @@ def composite(opaque, layers):
 
 
 class BistroChecks(unittest.TestCase):
+    def test_material_texture_paths_exist(self):
+        for part in ("Exterior", "Interior"):
+            path = SCENE / part / (part.lower() + ".mtl")
+            for name, material in read_materials(path).items():
+                for slot, values in material.items():
+                    if slot.startswith("map_") or slot in ("bump", "norm"):
+                        texture = path.parent / " ".join(values).replace("\\", "/")
+                        self.assertTrue(texture.is_file(), f"{part}/{name} {slot}: {texture}")
+
     def test_all_scene_parts_present(self):
         self.assertEqual({p.relative_to(SCENE).as_posix() for p in SCENE.rglob("*.obj")},
                          {"Exterior/exterior.obj", "Interior/interior.obj"})
