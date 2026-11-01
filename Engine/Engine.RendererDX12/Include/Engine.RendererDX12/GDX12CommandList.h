@@ -17,6 +17,8 @@ public:
 	const ComPtr<ID3D12GraphicsCommandList10>& GetCommandList();
 	const ComPtr<ID3D12CommandAllocator>& GetCommandAllocator();
 	void Reset();
+	// Call after an external SDK records commands outside this state cache.
+	void InvalidateCachedState();
 
 	UINT64 FenceValue;
 

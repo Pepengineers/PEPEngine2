@@ -207,4 +207,11 @@
     <None Include="Shaders\PBRMath.hlsli" />
     <None Include="Shaders\TransparentPass.hlsl" />
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\GDX12DepthOfField.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\GDX12DepthOfFieldPass.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12DepthOfField.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DepthOfFieldPass.h"><Filter>Header Files</Filter></ClInclude>
+    <None Include="Shaders\ToneMapping.hlsl"><Filter>Resource Files</Filter></None>
+  </ItemGroup>
 </Project>

@@ -149,6 +149,13 @@ private:
 
             if (isActiveCamera)
             {
+                if (pipelineCommonData->ActiveCameraFOV != camera.FOV ||
+                    pipelineCommonData->ActiveCameraNearPlane != camera.NearPlane ||
+                    pipelineCommonData->ActiveCameraFarPlane != camera.FarPlane)
+                    pipelineCommonData->ResetUpscalerHistory = true;
+                pipelineCommonData->ActiveCameraFOV = camera.FOV;
+                pipelineCommonData->ActiveCameraNearPlane = camera.NearPlane;
+                pipelineCommonData->ActiveCameraFarPlane = camera.FarPlane;
                 pipelineCommonData->CameraViewToClip = proj;
                 pipelineCommonData->ClipToCameraView = proj.Invert();
 

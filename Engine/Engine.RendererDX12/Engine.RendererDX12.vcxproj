@@ -19,6 +19,8 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12DepthOfField.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DepthOfFieldPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceResources.h" />
@@ -65,6 +67,8 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\GDX12DepthOfField.cpp" />
+    <ClCompile Include="src\GDX12DepthOfFieldPass.cpp" />
     <ClCompile Include="src\D3DHelpers.cpp" />
     <ClCompile Include="src\GDX12DeviceResources.cpp" />
     <ClCompile Include="src\GDX12GPUTimer.cpp" />
@@ -88,6 +92,7 @@
     <None Include="Shaders\BufferClear.hlsl" />
     <None Include="Shaders\CBufferStructures.hlsl" />
     <None Include="Shaders\CompositionPass.hlsl" />
+    <None Include="Shaders\ToneMapping.hlsl" />
     <None Include="Shaders\Culling.hlsl" />
     <None Include="Shaders\CSM.hlsli" />
     <None Include="Shaders\EnvironmentIBL.hlsl" />
@@ -166,6 +171,7 @@
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Pix.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.Assimp.props" />
   </ImportGroup>
+  <Import Project="..\..\MSBuild\Props\PEPEngine.External.FidelityFX.props" Condition="'$(PEPFidelityFXImported)'!='true'" />
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
