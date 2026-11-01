@@ -1,5 +1,7 @@
 # AO validation — 2026-11-01
 
+> Central REVIEW acceptance and remaining limits: [rendering-review.md](rendering-review.md). Historical branch/handoff statements below are retained as history.
+
 > Handoff status: **UNVERIFIED**. The user stopped all validation on 2026-11-01.
 > The runs below are historical and precede the last native CACAO load-counter
 > UAV-barrier change. They are not acceptance of the final revision. The main

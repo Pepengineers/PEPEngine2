@@ -26,13 +26,20 @@ static void Set(std::wstring_view name, const std::string& value)
 static void CheckSettings()
 {
     ConsoleModule console;
+    Set(L"Render.AO.ExecutionPoint", "0");
+    Require(GetAmbientOcclusionExecutionPoint() == 0, "Early AO execution point was not selected");
+    Require(!console.FindConsoleVariable(L"Render.AO.ExecutionPoint").SetFromString("2"), "Invalid AO execution point accepted");
+    Set(L"Render.AO.ExecutionPoint", "1");
+    Require(GetAmbientOcclusionExecutionPoint() == 1, "Late AO execution point was not selected");
     const auto path = std::filesystem::path(SOLUTION_DIR) / "Build/AO-test.ini";
     {
         std::ofstream ini(path);
-        ini << "[ConsoleVariables]\nRender.AO.Implementation=3\nRender.AO.RadiusCm=75\nRender.AO.Quality=1\nRender.AO.SSAO.Samples=27\n";
+        ini << "[ConsoleVariables]\nRender.AO.ExecutionPoint=0\nRender.AO.Implementation=3\nRender.AO.RadiusCm=75\nRender.AO.Quality=1\nRender.AO.SSAO.Samples=27\n";
     }
     const auto result = console.LoadIni(path);
     Require(result.Error.empty(), "AO INI settings rejected");
+    Require(GetAmbientOcclusionExecutionPoint() == 0, "INI did not select early AO");
+    Set(L"Render.AO.ExecutionPoint", "1");
     auto settings = GetAmbientOcclusionSettings();
     Require(settings.Implementation == 3 && settings.RadiusCm == 75 && settings.Samples == 27, "INI did not reach AO snapshot");
     Set(L"Render.AO.HBAO.Directions", "7");
@@ -298,7 +305,7 @@ static void CheckHDR(GDX12DeviceResources& resources)
     std::cout << "HDR composition/XeSS/tone mapping/reset/odd resize passed\n";
 }
 
-int main(int argc, char**)
+int main(int argc, char** argv)
 {
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
     try
@@ -314,7 +321,9 @@ int main(int argc, char**)
             }
             ~GpuLock() { ReleaseMutex(Mutex); CloseHandle(Mutex); }
         } gpuLock;
+        std::cout.setf(std::ios::unitbuf);
         CheckSettings();
+        if (argc > 1 && std::string(argv[1]) == "--cpu") return 0;
         BenchmarkEngine engine;
         Set(L"Render.AO.RadiusCm", "150");
         ComPtr<ID3D12Debug> debug;
@@ -534,8 +543,12 @@ int main(int argc, char**)
             std::cout << "Resize/quality/range passed " << size.first << 'x' << size.second << '\n';
         }
         CheckDebug(info.Get());
-        CheckHDR(resources);
-        CheckDebug(info.Get());
+        if (argc == 1)
+        {
+            CheckHDR(resources);
+            CheckDebug(info.Get());
+        }
+        else std::cout << "Focused AO GPU-based validation excludes separately checked vendor XeSS.\n";
         std::cout << "AO GPU tests passed\n";
         return 0;
     }

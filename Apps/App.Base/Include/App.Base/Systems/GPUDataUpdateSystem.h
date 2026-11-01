@@ -110,11 +110,6 @@ private:
         if (isActiveCamera)
         {
             camera.DirtyFlag = true;
-            if (camera.ResetHistory)
-            {
-                pipelineCommonData->ResetHistory = true;
-                camera.ResetHistory = false;
-            }
         }
 
         if (camera.DirtyFlag || transform.DirtyFlag)
@@ -167,9 +162,10 @@ private:
 
             if (isActiveCamera)
             {
-                if (camera.ResetHistory || pipelineCommonData->CameraViewToClip != proj)
-                    ++pipelineCommonData->HistoryRevision;
-                camera.ResetHistory = false;
+                if (reset) ++pipelineCommonData->HistoryRevision;
+                pipelineCommonData->ActiveCameraFOV = camera.FOV;
+                pipelineCommonData->ActiveCameraNearPlane = camera.NearPlane;
+                pipelineCommonData->ActiveCameraFarPlane = camera.FarPlane;
                 pipelineCommonData->ResetHistory = reset;
                 pipelineCommonData->RequestHistoryReset = false;
                 pipelineCommonData->CameraViewToClip = proj;

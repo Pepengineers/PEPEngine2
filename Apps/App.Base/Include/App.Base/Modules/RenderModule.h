@@ -167,6 +167,10 @@ private:
     std::unique_ptr<GDX12SwapChain> _backBuffer;
     std::unique_ptr<GDX12Texture> _depthStencil;
     
+    GDX12RenderPass* _depthPrepass = nullptr;
+    GDX12RenderPass* _opaquePass = nullptr;
+    GDX12RenderPass* _ambientOcclusionPass = nullptr;
+
     // Sorted in execution order
     std::vector<std::unique_ptr<GDX12RenderPass>> _primaryRenderPassExecutionList;
     std::vector<std::unique_ptr<GDX12RenderPass>> _secondaryRenderPassExecutionList;

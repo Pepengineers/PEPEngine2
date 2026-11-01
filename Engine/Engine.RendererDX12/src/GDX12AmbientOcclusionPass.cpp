@@ -150,8 +150,8 @@ void GDX12AmbientOcclusionPass::Execute(GDX12CommandList* commands)
         static_cast<UINT>(settings.Implementation), static_cast<float>(settings.GTAOSlices), static_cast<float>(settings.GTAOSteps), {} };
     _constants->CopyData(frame, constants);
     Matrix projection = _commonData->CameraViewToClip;
-    projection._31 += _commonData->ActiveCameraJitterOffsetX * 2.0f / _output.GetWidth();
-    projection._32 -= _commonData->ActiveCameraJitterOffsetY * 2.0f / _output.GetHeight();
+    projection._31 -= _commonData->ActiveCameraJitterOffsetX * 2.0f / _output.GetWidth();
+    projection._32 += _commonData->ActiveCameraJitterOffsetY * 2.0f / _output.GetHeight();
     XeGTAO::GTAOSettings gtao;
     gtao.Radius = settings.RadiusCm;
     gtao.DenoisePasses = settings.DenoisePasses;

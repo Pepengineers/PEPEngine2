@@ -126,6 +126,7 @@ public:
     float ActiveCameraJitterOffsetY = 0;
     bool ResetHistory = true;
     bool RequestHistoryReset = true;
+    bool AOAfterDepthPrepass = false;
     Matrix CameraViewToClip = Identity4x4();
     Matrix ClipToCameraView = Identity4x4();
     Matrix ClipToPrevClip = Identity4x4();
@@ -139,5 +140,5 @@ public:
     UINT DownscaledWidth = 0;
     UINT DownscaledHeight = 0;
     GDX12RenderPass* Upscaler = nullptr;
-    bool ResetHistory = true;
+    bool ResetUpscalerHistory = true;
 };

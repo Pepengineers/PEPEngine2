@@ -66,8 +66,10 @@ namespace
         Require(!GetMotionBlurSettings().Enabled, "Off still enabled");
         Set(L"Render.MotionBlur.Quality", "2");
         const auto ini = std::filesystem::path(L"Build/MotionBlur/settings.ini");
+        std::filesystem::create_directories(ini.parent_path());
         {
             std::ofstream file(ini);
+            Require(bool(file), "Cannot write motion blur INI fixture");
             file << "[ConsoleVariables]\nRender.MotionBlur.MaxRadius=24\nRender.MotionBlur.ShutterFraction=0.25\n";
         }
         Require(console.LoadIni(ini).Error.empty(), "Motion blur INI load failed");

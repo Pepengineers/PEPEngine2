@@ -1,0 +1,51 @@
+--- a/include/FidelityFX/gpu/sssr/ffx_sssr_callbacks_hlsl.h
++++ b/include/FidelityFX/gpu/sssr/ffx_sssr_callbacks_hlsl.h
+@@ -259,7 +259,7 @@
+         Texture2D<FfxFloat32x4>     r_input_material_parameters     : FFX_SSSR_DECLARE_SRV(SSSR_BIND_SRV_INPUT_MATERIAL_PARAMETERS);
+     #endif
+     #if defined SSSR_BIND_SRV_INPUT_ENVIRONMENT_MAP
+-        TextureCube                 r_input_environment_map         : FFX_SSSR_DECLARE_SRV(SSSR_BIND_SRV_INPUT_ENVIRONMENT_MAP);
++        Texture2D<FfxFloat32x4>      r_input_environment_map         : FFX_SSSR_DECLARE_SRV(SSSR_BIND_SRV_INPUT_ENVIRONMENT_MAP);
+     #endif
+     #if defined SSSR_BIND_SRV_RADIANCE
+         Texture2D<FfxFloat32x4>     r_radiance                      : FFX_SSSR_DECLARE_SRV(SSSR_BIND_SRV_RADIANCE);
+@@ -370,13 +370,10 @@
+ #endif // #if defined(SSSR_BIND_SRV_BLUE_NOISE_TEXTURE)
+ 
+ #if defined(SSSR_BIND_SRV_INPUT_ENVIRONMENT_MAP)
+-FfxFloat32x3 FFX_SSSR_SampleEnvironmentMap(FfxFloat32x3 direction, FfxFloat32 preceptualRoughness)
+-{
+-    FfxFloat32 Width; FfxFloat32 Height;
+-    r_input_environment_map.GetDimensions(Width, Height);
+-    FfxInt32 maxMipLevel = FfxInt32(log2(FfxFloat32(Width > 0 ? Width : 1)));
+-    FfxFloat32 mip = clamp(preceptualRoughness * FfxFloat32(maxMipLevel), 0.0, FfxFloat32(maxMipLevel));
+-    return r_input_environment_map.SampleLevel(s_EnvironmentMapSampler, direction, mip).xyz * IBLFactor();
++FfxFloat32x3 FFX_SSSR_SampleEnvironmentMap(FfxUInt32x2 pixel)
++{
++    // PEPEngine supplies the same prefiltered local/global incident radiance as PBR.
++    return r_input_environment_map.Load(FfxInt32x3(pixel, 0)).xyz * IBLFactor();
+ }
+ #endif // #if defined(SSSR_BIND_SRV_INPUT_ENVIRONMENT_MAP)
+ 
+--- a/include/FidelityFX/gpu/sssr/ffx_sssr_intersect.h
++++ b/include/FidelityFX/gpu/sssr/ffx_sssr_intersect.h
+@@ -318,7 +318,7 @@
+ 
+     // Sample environment map.
+     FfxFloat32x3 world_space_reflected_direction = FFX_MATRIX_MULTIPLY(InvView(), FfxFloat32x4(view_space_reflected_direction, 0)).xyz;
+-    FfxFloat32x3 environment_lookup = FFX_SSSR_SampleEnvironmentMap(world_space_reflected_direction, 0.0f);
++    FfxFloat32x3 environment_lookup = FFX_SSSR_SampleEnvironmentMap(coords);
+     reflection_radiance = ffxLerp(environment_lookup, reflection_radiance, confidence);
+ 
+     FfxFloat32x4 new_sample = FfxFloat32x4(reflection_radiance, world_ray_length);
+--- a/include/FidelityFX/gpu/sssr/ffx_sssr_classify_tiles.h
++++ b/include/FidelityFX/gpu/sssr/ffx_sssr_classify_tiles.h
+@@ -104,7 +104,7 @@
+         FfxFloat32x3 view_space_reflected_direction = reflect(view_space_ray_direction, view_space_surface_normal);
+         FfxFloat32x3 world_space_reflected_direction = FFX_MATRIX_MULTIPLY(InvView(), FfxFloat32x4(view_space_reflected_direction, 0)).xyz;
+ 
+-        intersection_output.xyz = FFX_SSSR_SampleEnvironmentMap(world_space_reflected_direction, sqrt(roughness));
++        intersection_output.xyz = FFX_SSSR_SampleEnvironmentMap(dispatch_thread_id);
+     }
+ 
+     FFX_SSSR_StoreRadiance(dispatch_thread_id, intersection_output);

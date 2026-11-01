@@ -1,5 +1,6 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12SSSRPass.h"
 #include "Engine.RendererDX12/GDX12SSRSettings.h"
+#include <FidelityFX/host/ffx_sssr.h>
 #include <FidelityFX/host/backends/dx12/ffx_dx12.h>
 #include <algorithm>
 #include <stdexcept>
@@ -47,7 +48,7 @@ GDX12SSSRPass::~GDX12SSSRPass()
 void GDX12SSSRPass::Initialize()
 {
     for (auto [texture, format] : { std::pair{ &_color, DXGI_FORMAT_R16G16B16A16_FLOAT },
-        { &_radiance, DXGI_FORMAT_R16G16B16A16_FLOAT }, { &_roughness, DXGI_FORMAT_R16_FLOAT },
+        { &_fallback, DXGI_FORMAT_R16G16B16A16_FLOAT }, { &_radiance, DXGI_FORMAT_R16G16B16A16_FLOAT }, { &_roughness, DXGI_FORMAT_R16_FLOAT },
         { &_motion, DXGI_FORMAT_R16G16_FLOAT } })
     {
         GDX12TextureDesc desc;
@@ -66,8 +67,8 @@ void GDX12SSSRPass::Initialize()
     }
     GDX12RootSignatureDesc root;
     root.NumSingleCBVSlots = 2;
-    root.NumSingleSRVSlots = 8;
-    root.NumSingleUAVSlots = 3;
+    root.NumSingleSRVSlots = 11;
+    root.NumSingleUAVSlots = 4;
     root.StaticSamplers = GetStaticSamplers();
     _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
     for (auto [pipeline, entry] : { std::pair{ std::addressof(_prepare), "Prepare" }, { std::addressof(_resolve), "Resolve" } })
@@ -127,13 +128,15 @@ void GDX12SSSRPass::Execute(GDX12CommandList* commands)
     const Matrix view = _commonData->CameraView;
     const Matrix projection = _commonData->CameraProjection;
     const Matrix viewProjection = view * projection;
-    if (!_context || !_wasEnabled || _historyRevision != _commonData->HistoryRevision || sources != _sources)
+    if (!_context || !_wasEnabled || _historyRevision != _commonData->HistoryRevision || sources != _sources ||
+        _environmentRevision != _resources->ReflectionEnvironmentRevision)
     {
         // SDK 1.1.4 has no reset dispatch flag. Recreate only at actual history discontinuities.
         CreateContext();
         _previousViewProjection = viewProjection;
         _previousJitter = { _commonData->ActiveCameraJitterOffsetX, _commonData->ActiveCameraJitterOffsetY };
     }
+    _environmentRevision = _resources->ReflectionEnvironmentRevision;
     _sources = sources;
     _historyRevision = _commonData->HistoryRevision;
     _wasEnabled = true;
@@ -141,8 +144,8 @@ void GDX12SSSRPass::Execute(GDX12CommandList* commands)
     const UINT slot = _resources->CurrFrameConstantsIndex;
     const XMFLOAT2 jitter = { _commonData->ActiveCameraJitterOffsetX, _commonData->ActiveCameraJitterOffsetY };
     Constants constants;
-    constants.JitterDeltaUV = { (jitter.x - _previousJitter.x) / _color.GetWidth(),
-        (jitter.y - _previousJitter.y) / _color.GetHeight() };
+    constants.JitterDeltaUV = { (_previousJitter.x - jitter.x) / _color.GetWidth(),
+        (_previousJitter.y - jitter.y) / _color.GetHeight() };
     constants.RoughnessCutoff = settings.RoughnessCutoff;
     _constants->CopyData(slot, constants);
     auto bind = [&]
@@ -152,6 +155,8 @@ void GDX12SSSRPass::Execute(GDX12CommandList* commands)
         commands->SetComputeRootConstantBufferView(0,
             _resources->FrameConstants[slot]->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
         commands->SetComputeRootConstantBufferView(1, _constants->GetElementAddress(slot));
+        commands->SetComputeSRV(9, _resources->ReflectionRadianceSRV.GPUHandle);
+        commands->SetComputeSRV(10, _resources->FrameConstants[slot]->ReflectionProbes->GetSRV()->GPUHandle);
         for (UINT i = 0; i < _numInputs; ++i)
         {
             auto* texture = _inputs[i]->GetTexture();
@@ -161,12 +166,13 @@ void GDX12SSSRPass::Execute(GDX12CommandList* commands)
     };
     bind();
     commands->SetPipelineState(_prepare);
-    commands->ResourceBarrier({ _roughness.GetResource()->GetUnorderedAccessBarrier(), _motion.GetResource()->GetUnorderedAccessBarrier() });
+    commands->ResourceBarrier({ _roughness.GetResource()->GetUnorderedAccessBarrier(), _motion.GetResource()->GetUnorderedAccessBarrier(), _fallback.GetResource()->GetUnorderedAccessBarrier() });
     commands->SetComputeUAV(0, _roughness.GetUAV()->GPUHandle);
     commands->SetComputeUAV(1, _motion.GetUAV()->GPUHandle);
+    commands->SetComputeUAV(3, _fallback.GetUAV()->GPUHandle);
     commands->Dispatch((_color.GetWidth() + 7) / 8, (_color.GetHeight() + 7) / 8, 1);
     commands->ResourceBarrier({ _roughness.GetResource()->GetNonPixelShaderResourceBarrier(),
-        _motion.GetResource()->GetNonPixelShaderResourceBarrier(), _radiance.GetResource()->GetNonPixelShaderResourceBarrier() });
+        _motion.GetResource()->GetNonPixelShaderResourceBarrier(), _fallback.GetResource()->GetNonPixelShaderResourceBarrier(), _radiance.GetResource()->GetNonPixelShaderResourceBarrier() });
 
     FfxSssrDispatchDescription desc = {};
     desc.commandList = ffxGetCommandListDX12(commands->GetCommandList().Get());
@@ -175,7 +181,7 @@ void GDX12SSSRPass::Execute(GDX12CommandList* commands)
     desc.normal = SDKResource(_inputs[2]->GetTexture());
     desc.materialParameters = SDKResource(&_roughness);
     desc.motionVectors = SDKResource(&_motion);
-    desc.environmentMap = SDKResource(_inputs[5]->GetTexture());
+    desc.environmentMap = SDKResource(&_fallback);
     desc.brdfTexture = SDKResource(_inputs[6]->GetTexture());
     desc.output = SDKResource(&_radiance);
     CopyMatrix(desc.invViewProjection, viewProjection.Invert());
@@ -199,6 +205,8 @@ void GDX12SSSRPass::Execute(GDX12CommandList* commands)
     desc.mostDetailedMip = (std::min)(static_cast<UINT>(settings.MostDetailedMip), maxMip);
     desc.samplesPerQuad = settings.SamplesPerQuad;
     desc.temporalVarianceGuidedTracingEnabled = settings.VarianceGuided;
+    if (_resources->FrameConstants.size() > FFX_MAX_QUEUED_FRAMES)
+        _resources->Device->GetCommandQueue()->Flush();
     const auto result = ffxSssrContextDispatch(_context.get(), &desc);
     // The backend restores all imported resource states, but changes native binding state.
     commands->InvalidateCachedState();
@@ -207,6 +215,7 @@ void GDX12SSSRPass::Execute(GDX12CommandList* commands)
     commands->SetPipelineState(_resolve);
     commands->ResourceBarrier({ _color.GetResource()->GetUnorderedAccessBarrier() });
     commands->SetComputeSRV(7, _radiance.GetSRV()->GPUHandle);
+    commands->SetComputeSRV(8, _fallback.GetSRV()->GPUHandle);
     commands->SetComputeUAV(2, _color.GetUAV()->GPUHandle);
     commands->Dispatch((_color.GetWidth() + 7) / 8, (_color.GetHeight() + 7) / 8, 1);
     commands->ResourceBarrier({ _color.GetResource()->GetSRVBarrier() });
@@ -218,7 +227,7 @@ void GDX12SSSRPass::Execute(GDX12CommandList* commands)
 void GDX12SSSRPass::Resize()
 {
     DestroyContext();
-    for (auto* texture : { &_color, &_radiance, &_roughness, &_motion })
+    for (auto* texture : { &_color, &_radiance, &_roughness, &_motion, &_fallback })
         texture->Resize(_inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight());
     _wasEnabled = false;
 }

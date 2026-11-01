@@ -1,5 +1,7 @@
 # FidelityFX depth of field
 
+> Central REVIEW acceptance and remaining limits: [rendering-review.md](../rendering-review.md). Historical branch/handoff statements below are retained as history.
+
 Status: implementation handoff, **final verification deferred** by the user's
 latest instruction. Existing fixtures and development diagnostics are retained;
 the owning chat must build, review and validate the final combined scope. The
@@ -7,7 +9,7 @@ commands below describe the available checks, not a verification receipt.
 
 The single-GPU pipeline uses AMD FidelityFX DoF 1.1 from SDK 1.1.4, pinned to
 `c6efa6bf7f2027b3ec94f28578bb5965eabb9e55`. No Cauldron or old depth-band/PatchMatch
-implementation is included. `External/PrepareFidelityFX.ps1` downloads the upstream
+implementation is included. `tools/Build-FidelityFX.ps1` downloads the upstream
 MIT-licensed archive, checks SHA-256, extracts only the SDK and license into this
 checkout's ignored `Build/dependencies`, and builds only DoF and the DX12 backend.
 The renderer's MSBuild target runs this preparation before compilation. CMake and

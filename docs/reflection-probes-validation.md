@@ -1,5 +1,7 @@
 # Reflection validation — 2026-11-01
 
+> Central REVIEW acceptance and remaining limits: [rendering-review.md](rendering-review.md). Historical branch/handoff statements below are retained as history.
+
 Implementation: `5c6c802` on `codex/feature-reflection`, in `D:/Project/PEPEngine2/Build/Features/REFLECTION`. The main checkout and other feature copies were not modified. Baseline warning WIP remains unstaged and was excluded from the implementation commit.
 
 ## Completed checks

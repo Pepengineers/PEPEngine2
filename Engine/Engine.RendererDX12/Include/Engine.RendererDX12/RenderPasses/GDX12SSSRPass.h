@@ -1,6 +1,6 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
-#include <FidelityFX/host/ffx_sssr.h>
+struct FfxSssrContext;
 
 // Inputs: lit HDR, reverse-Z depth, world normal/roughness, F0/baked,
 // unjittered prevNDC-currentNDC motion, prefiltered global environment, DFG LUT.
@@ -21,7 +21,7 @@ private:
         float RoughnessCutoff;
         float Padding = 0;
     };
-    GDX12Texture _color, _radiance, _roughness, _motion;
+    GDX12Texture _color, _radiance, _roughness, _motion, _fallback;
     std::unique_ptr<GDX12RootSignature> _root;
     ComPtr<ID3D12PipelineState> _prepare, _resolve;
     std::unique_ptr<GDX12UploadBuffer<Constants>> _constants;
@@ -30,6 +30,7 @@ private:
     Matrix _previousViewProjection = Identity4x4();
     XMFLOAT2 _previousJitter = {};
     uint64_t _historyRevision = UINT64_MAX;
+    uint64_t _environmentRevision = UINT64_MAX;
     std::array<ID3D12Resource*, 7> _sources = {};
     bool _wasEnabled = false;
     void CreateContext();

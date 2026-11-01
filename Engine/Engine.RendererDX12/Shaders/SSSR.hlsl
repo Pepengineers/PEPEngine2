@@ -18,7 +18,12 @@ Texture2D<float4> Radiance : register(t7);
 RWTexture2D<float> RoughnessOut : register(u0);
 RWTexture2D<float2> MotionOut : register(u1);
 RWTexture2D<float4> ColorOut : register(u2);
+Texture2D<float4> Fallback : register(t8);
+RWTexture2D<float4> FallbackOut : register(u3);
 SamplerState LinearClamp : register(s3);
+#define samLinearClamp LinearClamp
+#include "ReflectionProbes.hlsli"
+#undef samLinearClamp
 
 [numthreads(8, 8, 1)]
 void Prepare(uint3 id : SV_DispatchThreadID)
@@ -26,7 +31,20 @@ void Prepare(uint3 id : SV_DispatchThreadID)
     uint width, height;
     RoughnessOut.GetDimensions(width, height);
     if (any(id.xy >= uint2(width, height))) return;
-    float roughness = NormalRoughness[id.xy].w;
+    float4 normal = NormalRoughness[id.xy];
+    float roughness = normal.w;
+    float2 ndc = (float2(id.xy) + 0.5f) / float2(width, height) * float2(2, -2) + float2(-1, 1);
+    float4 world = mul(float4(ndc, Depth[id.xy], 1), CBCamera.InvViewProj);
+    float3 position = world.xyz / world.w;
+    float3 view = normalize(CBCamera.CameraLocation - position);
+    float3 direction = reflect(-view, normalize(normal.xyz));
+    float3 fallback = 0;
+    if (Depth[id.xy] > 0 && F0Baked[id.xy].a < 0.5f)
+    {
+        fallback = Environment.SampleLevel(LinearClamp, direction, roughness * 7).rgb;
+        fallback = SampleReflectionRadiance(position, direction, roughness, fallback);
+    }
+    FallbackOut[id.xy] = float4(fallback, 1);
     // Supply alpha roughness explicitly: SDK 1.1.4 forwards this flag to the denoiser too.
     RoughnessOut[id.xy] = Depth[id.xy] > 0 && F0Baked[id.xy].a < 0.5f ? roughness * roughness : 1;
     // SDK samples history at uv + motion; raster jitter is excluded from the shared motion buffer.
@@ -50,7 +68,7 @@ void Resolve(uint3 id : SV_DispatchThreadID)
         float3 v = normalize(CBCamera.CameraLocation - world.xyz / world.w);
         float3 n = normalize(normal.xyz);
         float2 brdf = DFG.SampleLevel(LinearClamp, float2(saturate(dot(n, v)), normal.w), 0).rg;
-        float3 fallback = Environment.SampleLevel(LinearClamp, reflect(-v, n), normal.w * 7).rgb;
+        float3 fallback = Fallback[id.xy].rgb;
         // The SDK already blends hits with environment fallback. Denoiser alpha is an internal payload.
         scene.rgb = max(0, scene.rgb + (Radiance[id.xy].rgb - fallback) * (f0.rgb * brdf.x + brdf.y));
     }

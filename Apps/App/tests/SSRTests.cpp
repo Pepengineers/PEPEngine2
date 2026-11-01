@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <fstream>
 #include <stdexcept>
 
 static void Require(bool condition, const char* message)
@@ -22,6 +23,15 @@ static void Set(const wchar_t* name, const char* value)
 static void SettingsTests()
 {
     ConsoleModule console;
+    const std::filesystem::path ini = "Build/Review/ssr-settings.ini";
+    std::filesystem::create_directories(ini.parent_path());
+    {
+        std::ofstream file(ini);
+        Require(bool(file), "Cannot write SSR INI fixture");
+        file << "[ConsoleVariables]\nRender.SSR.Quality=3\nRender.SSR.SamplesPerQuad=1\n";
+    }
+    Require(console.LoadIni(ini).Error.empty() && GetSSRSettings().SamplesPerQuad == 1,
+        "SSR INI override did not reach the frame snapshot");
     for (auto [name, bad] : { std::pair{ L"Render.SSR.Quality", "4" },
         { L"Render.SSR.SamplesPerQuad", "3" }, { L"Render.SSR.MaxIntersections", "0" },
         { L"Render.SSR.MinOccupancy", "33" }, { L"Render.SSR.Thickness", "0" },
@@ -52,14 +62,16 @@ public:
     GDX12Device& Device;
     GDX12DeviceResources Resources;
     RenderPipelineCommonData Common;
-    GDX12Texture Color, Depth, Normal, F0, Motion, Environment, DFG;
+    GDX12Texture Color, Depth, Normal, F0, Motion, Environment, DFG, LocalEnvironment;
     GDX12SSSRPass SSR;
     UINT Width = 257, Height = 129;
     UINT Frame = 0;
+    std::vector<UINT64> Fences;
 
     explicit Fixture(GDX12Device& device) : Device(device)
     {
         Resources.Initialize(&device);
+        Fences.resize(Resources.FrameConstants.size());
         Common.ActiveCameraCBufferIndex = 0;
         for (auto& frame : Resources.FrameConstants) frame->CameraCB->Resize(1);
         Create(Color, DXGI_FORMAT_R16G16B16A16_FLOAT, Width, Height);
@@ -69,6 +81,9 @@ public:
         Create(Motion, DXGI_FORMAT_R16G16_FLOAT, Width, Height);
         Create(Environment, DXGI_FORMAT_R16G16B16A16_FLOAT, 1, 1, true);
         Create(DFG, DXGI_FORMAT_R16G16B16A16_FLOAT, 1, 1);
+        Create(LocalEnvironment, DXGI_FORMAT_R16G16B16A16_FLOAT, 1, 1, true);
+        const uint16_t localColor[] = { Half(1.5f), Half(2), Half(0.3f), Half(1) };
+        for (UINT face = 0; face < 6; ++face) Upload(LocalEnvironment, localColor, 8, face);
         const uint16_t blue[] = { Half(0.05f), Half(0.1f), Half(0.2f), Half(1) };
         for (UINT face = 0; face < 6; ++face) Upload(Environment, blue, 8, face);
         const uint16_t dfg[] = { Half(1), 0, 0, 0 };
@@ -137,8 +152,8 @@ public:
         Matrix projection = Matrix::CreatePerspectiveFieldOfView(XM_PIDIV2, float(Width) / Height, 10, 2000);
         projection._33 = 10.0f / 1990;
         projection._43 = 20000.0f / 1990;
-        projection._31 += Common.ActiveCameraJitterOffsetX * 2 / Width;
-        projection._32 -= Common.ActiveCameraJitterOffsetY * 2 / Height;
+        projection._31 -= Common.ActiveCameraJitterOffsetX * 2 / Width;
+        projection._32 += Common.ActiveCameraJitterOffsetY * 2 / Height;
         Common.CameraProjection = projection;
         const Matrix viewProjection = Common.CameraView * projection;
         GDX12CameraConstants camera;
@@ -152,8 +167,8 @@ public:
         for (UINT y = 0; y < Height; ++y)
             for (UINT x = 0; x < Width; ++x)
             {
-                const float rayX = ((x + 0.5f + Common.ActiveCameraJitterOffsetX) / Width * 2 - 1) * Width / Height;
-                const float rayY = 1 - (y + 0.5f + Common.ActiveCameraJitterOffsetY) / Height * 2;
+                const float rayX = ((x + 0.5f - Common.ActiveCameraJitterOffsetX) / Width * 2 - 1) * Width / Height;
+                const float rayY = 1 - (y + 0.5f - Common.ActiveCameraJitterOffsetY) / Height * 2;
                 const float floorT = rayY < 0 ? -100 / rayY : 1e9f;
                 const bool floor = floorT < 500 || !wall;
                 const float distance = floor ? floorT : 500;
@@ -178,17 +193,20 @@ public:
         Upload(Motion, motion.data(), Width * 4);
     }
 
-    double Draw(GDX12GPUTimer* timer = nullptr)
+    double Draw(GDX12GPUTimer* timer = nullptr, bool wait = true)
     {
         Resources.CurrFrameConstantsIndex = Frame++ % static_cast<UINT>(Resources.FrameConstants.size());
         auto* queue = Device.GetCommandQueue();
+        const auto slot = Resources.CurrFrameConstantsIndex;
+        if (Fences[slot]) queue->CPUWaitForFenceValue(Fences[slot]);
         auto* commands = queue->GetCommandList();
         if (timer) timer->Start(commands);
         SSR.Execute(commands);
         if (timer) timer->Stop(commands);
         queue->ExecuteCommandList(commands);
+        Fences[slot] = commands->FenceValue;
         if (timer) timer->OnCommandListExecuted(commands->FenceValue);
-        queue->Flush();
+        if (wait) queue->Flush();
         return timer ? timer->GetTimeMS() : 0;
     }
 
@@ -308,6 +326,7 @@ int main(int argc, char** argv)
     {
         SettingsTests();
         if (argc > 1 && std::string(argv[1]) == "--cpu-only") return 0;
+        if (argc > 1 && std::string(argv[1]) == "--five-frames") Set(L"Render.NumFrames", "5");
         HANDLE mutex = CreateMutexW(nullptr, FALSE, L"Local\\PEPEngine2FeatureGpuValidation");
         Require(mutex != nullptr, "GPU validation mutex creation failed");
         std::cout << "Waiting for feature GPU validation mutex..." << std::endl;
@@ -356,6 +375,48 @@ int main(int argc, char** argv)
                         const size_t i = (size_t(y) * fixture.Width + x) * 4 + c;
                         Require(std::abs(fallback[i] - source[i]) < 0.015f, "Miss failed to preserve global IBL fallback");
                     }
+            auto* localCommands = device.GetCommandQueue()->GetCommandList();
+            localCommands->ResourceBarrier({ fixture.LocalEnvironment.GetResource()->GetSRVBarrier() });
+            device.GetCommandQueue()->ExecuteCommandList(localCommands);
+            device.GetCommandQueue()->Flush();
+            D3D12_SHADER_RESOURCE_VIEW_DESC localView = {};
+            localView.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+            localView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
+            localView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+            localView.TextureCubeArray.NumCubes = localView.TextureCubeArray.MipLevels = 1;
+            fixture.Resources.ReflectionRadianceSRV.InitAsSRV(fixture.LocalEnvironment.GetResource()->D3DResource.Get(),
+                &localView, fixture.Resources.SRV_UAV_Heap.get(), fixture.Resources.ReflectionRadianceSRV.HeapIndex);
+            for (auto& frame : fixture.Resources.FrameConstants)
+            {
+                GDX12ReflectionProbeData probe;
+                probe.Intensity = 1;
+                probe.BoxMin = { -5000, -5000, -5000 };
+                probe.BoxMax = { 5000, 5000, 5000 };
+                probe.BlendDistance = 1;
+                frame->ReflectionProbes->CopyData(0, probe);
+            }
+            ++fixture.Common.HistoryRevision;
+            fixture.Draw();
+            const auto localFallback = fixture.Result();
+            const size_t localCenter = (size_t(fixture.Height * 4 / 5) * fixture.Width + fixture.Width / 2) * 4;
+            std::cout << "Local miss center source=" << source[localCenter] << "," << source[localCenter+1] << "," << source[localCenter+2]
+                << " output=" << localFallback[localCenter] << "," << localFallback[localCenter+1] << "," << localFallback[localCenter+2] << std::endl;
+            float relativeMissError = 0;
+            constexpr float localRadiance[] = { 1.5f, 2.0f, 0.3f };
+            for (UINT y = fixture.Height * 3 / 4; y < fixture.Height * 7 / 8; ++y)
+                for (UINT x = fixture.Width / 4; x < fixture.Width * 3 / 4; ++x)
+                    for (UINT c = 0; c < 3; ++c)
+                    {
+                        const size_t i = (size_t(y) * fixture.Width + x) * 4 + c;
+                        relativeMissError = (std::max)(relativeMissError,
+                            std::abs(localFallback[i] - source[i]) / (std::max)(1.0f, localRadiance[c]));
+                    }
+            // FP16 denoiser filtering is approximate; a wrong global fallback differs by 0.1..1.9 radiance.
+            std::cout << "Local miss normalized max error=" << relativeMissError << std::endl;
+            Require(relativeMissError < 0.02f, "SSSR miss and subtraction did not use the same local probe fallback");
+            for (auto& frame : fixture.Resources.FrameConstants)
+                frame->ReflectionProbes->CopyData(0, GDX12ReflectionProbeData{});
+            std::cout << "Local/global SSSR miss fallback preserves one specular contribution.\n";
             fixture.Resize(319, 181); fixture.Draw();
             CheckHits(fixture.Result(), fixture.Width, fixture.Height);
             for (int i = 0; i < 8; ++i)
@@ -369,7 +430,7 @@ int main(int argc, char** argv)
             CheckHits(fixture.Result(), fixture.Width, fixture.Height);
             fixture.Fill(0, true, 10, 30); fixture.Draw();
             CheckHits(fixture.Result(), fixture.Width, fixture.Height);
-            fixture.Resize(640, 360);
+            fixture.Resize(1280, 720);
             fixture.Fill(0.25f);
             GDX12GPUTimer timer(&device);
             auto adapter = GDX12DeviceFactory::GetMostPerformantAdapter();
@@ -382,11 +443,18 @@ int main(int argc, char** argv)
                 std::sort(times.begin(), times.end());
                 DXGI_QUERY_VIDEO_MEMORY_INFO memory = {};
                 ThrowIfFailed(adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memory));
-                std::cout << "640x360 preset=" << quality << " GPU median_ms=" << times[times.size() / 2]
+                std::cout << "1280x720 preset=" << quality << " GPU median_ms=" << times[times.size() / 2]
                     << " p95_ms=" << times[times.size() * 95 / 100]
                     << " process_local_resident_MiB=" << memory.CurrentUsage / 1048576.0 << '\n';
                 fixture.Result();
             }
+            for (int frame = 0; frame < 15; ++frame) fixture.Draw(nullptr, false);
+            device.GetCommandQueue()->Flush();
+            fixture.Result();
+            ++fixture.Resources.ReflectionEnvironmentRevision;
+            fixture.Draw();
+            fixture.Result();
+            std::cout << "Queued frame slots and environment revision reset passed.\n";
             fixture.SSR.ClearDenendencies();
         }
         device.GetCommandQueue()->Flush();

@@ -6,6 +6,8 @@
 namespace
 {
     constexpr auto Runtime = EConsoleVariableFlags::Default;
+    static AutoConsoleVariable<int> ExecutionPoint(L"Render.AO.ExecutionPoint", 1, L"0 after depth prepass, 1 before lighting", Runtime,
+        [](int v) { return v == 0 || v == 1; });
     static AutoConsoleVariable<int> Enabled(L"Render.AO.Enabled", 1, L"AO enabled: 0/1", Runtime,
         [](int v) { return v == 0 || v == 1; });
     static AutoConsoleVariable<int> Quality(L"Render.AO.Quality", 2, L"0 Off, 1 Low, 2 Mid, 3 High", Runtime,
@@ -91,3 +93,5 @@ GDX12AOSettings GetAmbientOcclusionSettings()
     s.CACAOAdaptiveLimit = CACAOAdaptive.GetValue();
     return s;
 }
+
+int GetAmbientOcclusionExecutionPoint() { return ExecutionPoint.GetValue(); }

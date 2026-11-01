@@ -92,3 +92,37 @@ PS_OUTPUT PS(VS_OUTPUT_PS_INPUT pin)
     
     return output;
 }
+
+float4 PrepassPS(VS_OUTPUT_PS_INPUT pin) : SV_TARGET0
+{
+    Material material = MaterialCache[pin.MaterialIndex];
+    float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
+    if (material.RenderLayer == 1) clip(color.a - 0.5f);
+    PBRSurface surface = SamplePBRSurface(material, color.rgb, pin.PosW, pin.Normal, pin.TexC);
+    return float4(surface.Normal, surface.Roughness);
+}
+
+struct DepthVertex
+{
+    float4 PosCS : SV_POSITION;
+    float2 TexC : TEXCOORD;
+    nointerpolation uint MaterialIndex : TEXCOORD1;
+};
+
+DepthVertex DepthVS(VS_INPUT vin)
+{
+    InstanceData instance = InstanceCache[CBIndirectConstants.InstanceID];
+    Transform transform = TransformCache[instance.TransformIndex];
+    DepthVertex output;
+    output.PosCS = mul(mul(float4(vin.Pos, 1), transform.World), CBCamera.ViewProj);
+    output.TexC = vin.TexC;
+    output.MaterialIndex = instance.MaterialIndex;
+    return output;
+}
+
+void DepthPS(DepthVertex pin)
+{
+    Material material = MaterialCache[pin.MaterialIndex];
+    if (material.RenderLayer == 1)
+        clip(Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC).a - 0.5f);
+}

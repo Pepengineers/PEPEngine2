@@ -10,7 +10,7 @@ SSSR consumes reverse-Z RH depth, signed world normals, squared roughness prepar
 unjittered motion (`previousNDC-currentNDC`), a GGX-prefiltered 128px/eight-mip
 environment and the existing DFG LUT. Baked/unlit surfaces and background do not
 spawn rays. Only the SDK's private motion input converts NDC to UV and adds
-`(currentJitter-previousJitter)/renderSize`. Previous view-projection is the
+`(previousJitter-currentJitter)/renderSize`. Previous view-projection is the
 actual previous jittered matrix, including camera motion. Matrices are copied
 from the engine's row-vector row-major representation to the equivalent SDK
 column-vector column-major representation, without an extra transpose.
@@ -27,12 +27,18 @@ Transparent bottles retain forward PBR/global IBL and WBOIT; they do not write t
 opaque G-buffer and are neither SSR receivers nor ray-hit geometry. No Bistro
 objects, materials or scene fixtures are added for SSR.
 
-The concrete local-probe integration seam is `SSSR.hlsl::Resolve`'s old-radiance
-term, paired with the same indirect-specular term in `PBRLighting.hlsli`.
-A future probe branch must supply the **same** fallback to lighting and resolve,
-and choose how offscreen ray misses sample local probes. The SDK accepts one
-global cubemap; replacing only deferred IBL with probes would leave the wrong
-subtraction/fallback. There is intentionally no unused probe interface here.
+The integrated fallback is prepared per receiver with the same
+`SampleReflectionRadiance` function as opaque/transparent PBR. `SSSR.hlsl::Prepare`
+writes local/global prefiltered incident HDR into an RGBA16F image. The small
+`probe-fallback.patch` changes the SDK environment callback to load that image at
+the ray origin in both classification and intersection. Thus confidence-weighted
+misses and the final subtraction use the same radiance, before one BRDF factor.
+The SDK ray marcher and Reflections Denoiser remain the real AMD implementation.
+This SDK build's `environmentMap` input is deliberately a receiver-grid 2D fallback
+image; callers must go through `GDX12SSSRPass`, not supply an unpatched SDK cube.
+The fallback uses the split-sum prefiltered reflection direction, matching PBR;
+it does not trace parallax for every stochastic offscreen ray. The local/global
+constant-environment GPU oracle measures 0.78% maximum normalized denoiser error.
 
 SDK 1.1.4 exposes no history-reset dispatch flag. Context recreation resets SSSR
 and denoiser together after waiting for prior GPU work, on cut, resize, re-enable
@@ -40,7 +46,7 @@ and input-resource identity changes. `CameraComponent::InvalidateHistory()` mark
 a teleport/cut. Camera switch and projection change also increment the shared
 `RenderPipelineCommonData::HistoryRevision`; XeSS consumes that revision and
 resets on first dispatch/resize. Continuous camera/object movement retains history.
-Quality switches keep compatible history; roughness changes are rejected using
+Environment revisions also reset history even when no probes exist. Queued frames beyond the SDK ring capacity flush preceding work before dispatch. Quality switches keep compatible history; roughness changes are rejected using
 the denoiser's roughness/depth/normal tests. Command-list binding caches are
 invalidated after each external SDK dispatch; the AMD backend restores imported
 resource states before returning. Shared inputs retain combined pixel/compute SRV

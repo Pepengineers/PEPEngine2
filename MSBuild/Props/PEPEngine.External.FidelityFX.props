@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
+    <PEPFidelityFXImported>true</PEPFidelityFXImported>
     <PEPFidelityFXRoot>$(PEPRepoRoot)Build\Dependencies\FidelityFX-SDK-c6efa6bf7f2027b3ec94f28578bb5965eabb9e55\sdk\</PEPFidelityFXRoot>
     <PEPFidelityFXPostfix Condition="'$(Configuration)'=='Debug'">d</PEPFidelityFXPostfix>
   </PropertyGroup>
@@ -10,7 +11,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>$(PEPFidelityFXRoot)bin\ffx_sdk;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>ffx_sssr_x64$(PEPFidelityFXPostfix).lib;ffx_denoiser_x64$(PEPFidelityFXPostfix).lib;ffx_backend_dx12_x64$(PEPFidelityFXPostfix).lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>dxgi.lib;ffx_dof_x64$(PEPFidelityFXPostfix).lib;ffx_sssr_x64$(PEPFidelityFXPostfix).lib;ffx_denoiser_x64$(PEPFidelityFXPostfix).lib;ffx_backend_dx12_x64$(PEPFidelityFXPostfix).lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
 </Project>

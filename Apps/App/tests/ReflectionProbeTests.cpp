@@ -4,6 +4,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12CascadedShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12AmbientOcclusionPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
@@ -17,6 +18,7 @@
 #include <cmath>
 #include <cstring>
 #include <iostream>
+#include <fstream>
 #include <numeric>
 #include <stdexcept>
 
@@ -29,6 +31,21 @@ static void Set(const wchar_t* name, const char* value)
 {
     Require(BenchmarkEngine::GetLocator().GetModule<ConsoleModule>()->FindConsoleVariable(name).SetFromString(value),
         "Valid reflection CVar assignment rejected");
+}
+
+static void TestIni()
+{
+    ConsoleModule console;
+    const std::filesystem::path ini = "Build/Review/reflection-settings.ini";
+    std::filesystem::create_directories(ini.parent_path());
+    {
+        std::ofstream file(ini);
+        Require(bool(file), "Cannot write reflection INI fixture");
+        file << "[ConsoleVariables]\nRender.Reflection.Enabled=false\nRender.Reflection.Quality=1\n";
+    }
+    Require(console.LoadIni(ini).Error.empty() && !GetReflectionSettings().Enabled && GetReflectionSettings().Quality == 1,
+        "Global reflection INI controls did not reach the renderer");
+    Require(console.FindConsoleVariable(L"Render.Reflection.Enabled").SetFromString("true"), "Cannot restore fixture Enabled state");
 }
 
 static void TestSettings()
@@ -92,7 +109,7 @@ private:
     HANDLE _mutex;
 };
 
-static std::vector<float> ReadTexture(GDX12Device& device, GDX12Texture& texture, UINT subresource)
+static std::vector<float> ReadTexture(GDX12Device& device, GDX12Texture& texture, UINT subresource, bool signedValues = false)
 {
     const auto desc = texture.GetResource()->D3DResource->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
@@ -116,16 +133,17 @@ static std::vector<float> ReadTexture(GDX12Device& device, GDX12Texture& texture
     D3D12_RANGE range = { 0, static_cast<SIZE_T>(bytes) };
     ThrowIfFailed(readback->Map(0, &range, &mapped));
     const bool hdr = desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
+    const bool depth = desc.Format == DXGI_FORMAT_R32_TYPELESS || desc.Format == DXGI_FORMAT_D32_FLOAT;
     std::vector<float> result;
     for (UINT y = 0; y < footprint.Footprint.Height; ++y)
         for (UINT x = 0; x < footprint.Footprint.Width; ++x)
         {
             const auto* pixel = reinterpret_cast<const uint16_t*>(static_cast<const unsigned char*>(mapped) +
                 footprint.Offset + y * footprint.Footprint.RowPitch + x * (hdr ? 8 : 4));
-            for (UINT c = 0; c < 3; ++c)
+            for (UINT c = 0; c < (depth ? 1u : 3u); ++c)
             {
-                const float value = hdr ? PackedVector::XMConvertHalfToFloat(pixel[c]) : reinterpret_cast<const unsigned char*>(pixel)[c] / 255.0f;
-                Require(std::isfinite(value) && value >= 0, "Nonfinite/negative reflected HDR");
+                const float value = depth ? *reinterpret_cast<const float*>(pixel) : hdr ? PackedVector::XMConvertHalfToFloat(pixel[c]) : reinterpret_cast<const unsigned char*>(pixel)[c] / 255.0f;
+                Require(std::isfinite(value) && (signedValues || value >= 0), "Nonfinite/negative reflected HDR");
                 result.push_back(value);
             }
         }
@@ -163,6 +181,8 @@ int main(int argc, char** argv)
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
     try
     {
+        std::cout.setf(std::ios::unitbuf);
+        TestIni();
         TestEngine engine;
         Require(GetLoadingBudgetBytes() > 0, "Invalid inherited loading configuration");
         TestSettings();
@@ -174,9 +194,12 @@ int main(int argc, char** argv)
         {
             ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
             debug->EnableDebugLayer();
-            ComPtr<ID3D12Debug1> validation;
-            ThrowIfFailed(debug.As(&validation));
-            validation->SetEnableGPUBasedValidation(TRUE);
+            if (!(argc > 1 && std::strcmp(argv[1], "--debug") == 0))
+            {
+                ComPtr<ID3D12Debug1> validation;
+                ThrowIfFailed(debug.As(&validation));
+                validation->SetEnableGPUBasedValidation(TRUE);
+            }
         }
         GDX12Device device;
         ThrowIfFailed(device.Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
@@ -574,6 +597,13 @@ int main(int argc, char** argv)
                 for (UINT mip = 0; mip < mips; ++mip) face(f, mip);
         }
 
+        if (argc > 1 && std::strcmp(argv[1], "--capture-gpu-validation") == 0)
+        {
+            std::cout << "Focused probe capture/cache/shadow/GGX GPU-based validation passed; PBR/XeSS checked separately.\n";
+            GDX12ShaderCompiler::Shutdown();
+            return 0;
+        }
+
         GDX12XeSSUpscalePass xess;
         xess.Setup(&resources, nullptr, &common);
         GDX12CascadedShadowPass mainShadows;
@@ -587,9 +617,14 @@ int main(int argc, char** argv)
         opaque.Initialize();
         GDX12DeferredLightingPass deferred;
         deferred.Setup(&resources, nullptr, &common);
+        GDX12AmbientOcclusionPass ao;
+        ao.Setup(&resources, nullptr, &common);
+        ao.SetInputs({ opaque.GetOutput(2), opaque.GetOutput(3) });
+        ao.Initialize();
+        Set(L"Render.AO.Enabled", "0");
         deferred.SetInputs({ opaque.GetOutput(0), opaque.GetOutput(3), opaque.GetOutput(4), opaque.GetOutput(5),
             opaque.GetOutput(2), mainShadows.GetOutput(0), environment.GetOutput(0), environment.GetOutput(1),
-            environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0) });
+            environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0), ao.GetOutput(0) });
         deferred.Initialize();
         GDX12WBOITTransparencyPass transparency;
         transparency.Setup(&resources, nullptr, &common);
@@ -660,6 +695,7 @@ int main(int argc, char** argv)
             mainShadows.Execute(list);
             mainCulling.Execute(list);
             opaque.Execute(list);
+            ao.Execute(list);
             deferred.Execute(list);
             transparency.Execute(list);
             composition.Execute(list);
@@ -671,6 +707,42 @@ int main(int argc, char** argv)
         };
         surface(false);
         const auto opaqueOff = ReadTexture(device, *deferred.GetOutput(0)->GetTexture(), 0);
+        // Compare the shared-depth path against the independently rendered full G-buffer.
+        const auto referenceDepth = ReadTexture(device, *opaque.GetOutput(2)->GetTexture(), 0);
+        const auto referenceNormals = ReadTexture(device, *opaque.GetOutput(3)->GetTexture(), 0, true);
+        const auto referenceAlbedo = ReadTexture(device, *opaque.GetOutput(0)->GetTexture(), 0);
+        GDX12OpaquePass prepass(GDX12OpaquePass::Stage::DepthPrepass);
+        prepass.Setup(&resources, nullptr, &common);
+        prepass.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+        prepass.Initialize();
+        GDX12OpaquePass gbuffer(GDX12OpaquePass::Stage::GBuffer);
+        gbuffer.Setup(&resources, nullptr, &common);
+        gbuffer.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+        gbuffer.SetInputs({ prepass.GetOutput(2) });
+        gbuffer.Initialize();
+        for (bool early : { true, false })
+        {
+            common.AOAfterDepthPrepass = early;
+            auto* list = queue->GetCommandList();
+            auto* normals = prepass.GetOutput(3)->GetTexture();
+            list->ResourceBarrier({ normals->GetResource()->GetRenderTargetBarrier() });
+            list->ClearRenderTargetView(normals);
+            prepass.Execute(list);
+            gbuffer.Execute(list);
+            queue->ExecuteCommandList(list);
+            queue->Flush();
+            Require(ReadTexture(device, *prepass.GetOutput(2)->GetTexture(), 0) == referenceDepth,
+                "Depth prepass differs from full opaque depth");
+            const auto prepassNormals = ReadTexture(device, *normals, 0, true);
+            if (early) Require(prepassNormals == referenceNormals, "Early AO normals differ from the G-buffer");
+            else Require(std::all_of(prepassNormals.begin(), prepassNormals.end(), [](float v) { return v == 0; }),
+                "Late AO wrote normals during the depth-only prepass");
+            Require(ReadTexture(device, *gbuffer.GetOutput(3)->GetTexture(), 0, true) == referenceNormals &&
+                ReadTexture(device, *gbuffer.GetOutput(0)->GetTexture(), 0) == referenceAlbedo,
+                "Equal-depth G-buffer differs from the independently rendered opaque pass");
+        }
+        std::cout << "Depth-only and depth+normal prepasses match full opaque; late mode leaves normals untouched; Equal G-buffer matches.\n";
+
         surface(true);
         const auto opaqueOn = ReadTexture(device, *deferred.GetOutput(0)->GetTexture(), 0);
         const auto increase = [](const auto& before, const auto& after)
@@ -706,6 +778,7 @@ int main(int argc, char** argv)
         xess.Resize();
         xess.QueryRenderTargetResolution();
         opaque.Resize();
+        ao.Resize();
         deferred.Resize();
         transparency.Resize();
         composition.Resize();
@@ -731,6 +804,27 @@ int main(int argc, char** argv)
             configuredProbe.Implementation = 1;
         render(false);
         std::cout << "Queued frame-slot publication, resize and mode switch passed.\n";
+
+        auto firstProbe = resources.ReflectionProbes[0];
+        firstProbe.Resolution = 32;
+        firstProbe.FacesPerFrame = 1;
+        firstProbe.PrefilterSamples = 8;
+        firstProbe.Implementation = 0;
+        auto secondProbe = firstProbe;
+        ++secondProbe.Id;
+        secondProbe.Resolution = 64;
+        secondProbe.FacesPerFrame = 2;
+        secondProbe.PrefilterSamples = 16;
+        secondProbe.Implementation = 1;
+        resources.ReflectionProbes = { firstProbe, secondProbe };
+        for (UINT frame = 0; frame < 12; ++frame) render();
+        const auto mixedData = ReadUpload(*resources.FrameConstants[resources.CurrFrameConstantsIndex]->ReflectionProbes);
+        Require(mixedData[0].Intensity > 0 && mixedData[1].Intensity > 0 &&
+            mixedData[0].MinMip == 1 && mixedData[1].MinMip == 0,
+            "Different per-probe resolutions did not publish into their own mip ranges");
+        Require(Center(face(4, 1), 32).x > 5.5f && Center(face(10, 0), 64).x > 5.5f,
+            "Mixed dynamic/baked probes lost their independently sized captured radiance");
+        std::cout << "Two real probes with independent resolution/mode/budget/samples published correct radiance.\n";
 
         // Frame-local metadata must remain neutral after disable in every buffered frame slot.
         Set(L"Render.Reflection.Enabled", "false");

@@ -203,6 +203,13 @@ public:
         };
         for (unsigned frame = 0; frame < 36; ++frame)
         {
+            MSG message;
+            while (PeekMessage(&message, nullptr, 0, 0, PM_REMOVE))
+            {
+                TranslateMessage(&message);
+                DispatchMessage(&message);
+            }
+            std::cout << "Bistro transition frame=" << frame << std::endl;
             Timer.Tick();
             if (frame < 12)
             {
@@ -210,6 +217,8 @@ public:
                 cameraTransform.Rotation.y += 0.05f;
                 cameraTransform.DirtyFlag = true;
             }
+            setting(L"Render.AO.ExecutionPoint", frame % 2 ? "0" : "1");
+            setting(L"Render.AO.Implementation", std::to_string((frame / 4) % 4).c_str());
             if (frame == 8) setting(L"Render.MotionBlur.Enabled", "false");
             if (frame == 10) setting(L"Render.MotionBlur.Enabled", "true");
             if (frame == 14) setting(L"Render.MotionBlur.Quality", "1");

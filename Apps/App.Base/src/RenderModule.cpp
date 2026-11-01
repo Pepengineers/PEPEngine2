@@ -1,4 +1,4 @@
-п»ї#include "App.Base/Modules/RenderModule.h"
+#include "App.Base/Modules/RenderModule.h"
 
 #include "App.Base/Window.h"
 #include <cassert>
@@ -435,9 +435,8 @@ void RenderModule::SubmitCameraShadows(const GDX12ShadowConstants& shadows)
 
 void RenderModule::SetActiveCamera(CameraComponent* camera)
 {
-    _RPcommonData.ResetHistory = true;
     if (_RPcommonData.ActiveCameraCBufferIndex != camera->_CBufferIndex)
-        ++_RPcommonData.HistoryRevision;
+        _RPcommonData.RequestHistoryReset = true;
     _RPcommonData.ActiveCameraCBufferIndex = camera->_CBufferIndex;
     _RPcommonData.ActiveCameraFOV = camera->FOV;
     _RPcommonData.ActiveCameraNearPlane = camera->NearPlane;
@@ -829,8 +828,13 @@ void RenderModule::OnRender()
     _primaryGPUTimer->Start(primarycmdList);
 
     auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
+    const bool earlyAO = GetAmbientOcclusionExecutionPoint() == 0;
+    _RPcommonData.AOAfterDepthPrepass = earlyAO;
+    _ambientOcclusionPass->SetInputs({ _depthPrepass->GetOutput(2),
+        (earlyAO ? _depthPrepass : _opaquePass)->GetOutput(3) });
     for (auto& renderPass : _primaryRenderPassExecutionList) 
     { 
+        if (earlyAO && renderPass.get() == _ambientOcclusionPass) continue;
         if (renderPass->GetFlagValue(RENDER_PASS_FLAG_SYNC_DEVICES) && _dualGPUMode)
         {
             primarycmdQueue->ExecuteCommandList(primarycmdList);
@@ -838,6 +842,7 @@ void RenderModule::OnRender()
                 primarycmdList = primarycmdQueue->GetCommandList();
             }
         else { renderPass->Execute(primarycmdList); }
+        if (earlyAO && renderPass.get() == _depthPrepass) _ambientOcclusionPass->Execute(primarycmdList);
     }
 
     _primaryGPUTimer->Stop(primarycmdList);
@@ -1004,11 +1009,12 @@ void RenderModule::ConfigureRenderPipeline()
     // Add in execution order
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureClearPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12EnvironmentIBLPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>(GDX12OpaquePass::Stage::DepthPrepass));
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12CascadedShadowPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12LocalShadowPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12ReflectionProbePass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>(GDX12OpaquePass::Stage::GBuffer));
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12AmbientOcclusionPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DeferredLightingPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12SSSRPass>());
@@ -1024,32 +1030,43 @@ void RenderModule::ConfigureRenderPipeline()
     // Link inputs & outputs for each pass that needs it
     GDX12RenderPass* clearPass = _primaryRenderPassExecutionList[0].get();
     GDX12RenderPass* environmentPass = _primaryRenderPassExecutionList[1].get();
-    GDX12RenderPass* shadowPass = _primaryRenderPassExecutionList[2].get();
-    GDX12RenderPass* localShadowPass = _primaryRenderPassExecutionList[3].get();
-    GDX12RenderPass* reflectionPass = _primaryRenderPassExecutionList[4].get();
-    GDX12RenderPass* cullingPass = _primaryRenderPassExecutionList[5].get();
-    GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[6].get();
-    GDX12RenderPass* aoPass = _primaryRenderPassExecutionList[7].get();
-    GDX12RenderPass* lightingPass = _primaryRenderPassExecutionList[8].get();
-    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[9].get();
-    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[10].get();
-    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[11].get();
-    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[12].get();
+    GDX12RenderPass* cullingPass = _primaryRenderPassExecutionList[2].get();
+    GDX12RenderPass* depthPrepass = _primaryRenderPassExecutionList[3].get();
+    GDX12RenderPass* shadowPass = _primaryRenderPassExecutionList[4].get();
+    GDX12RenderPass* localShadowPass = _primaryRenderPassExecutionList[5].get();
+    GDX12RenderPass* reflectionPass = _primaryRenderPassExecutionList[6].get();
+    GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[7].get();
+    GDX12RenderPass* aoPass = _primaryRenderPassExecutionList[8].get();
+    GDX12RenderPass* lightingPass = _primaryRenderPassExecutionList[9].get();
+    GDX12RenderPass* ssrPass = _primaryRenderPassExecutionList[10].get();
+    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[11].get();
+    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[12].get();
+    GDX12RenderPass* dofPass = _primaryRenderPassExecutionList[13].get();
+    GDX12RenderPass* motionBlurPass = _primaryRenderPassExecutionList[14].get();
+    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[15].get();
+    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[16].get();
+    _depthPrepass = depthPrepass;
+    _opaquePass = opaquePass;
+    _ambientOcclusionPass = aoPass;
 
     clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
     reflectionPass->SetInputs({ environmentPass->GetOutput(0), environmentPass->GetOutput(1),
         environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0) });
     cullingPass->SetInputs({});
-    opaquePass->SetInputs({});
+    depthPrepass->SetInputs({});
+    opaquePass->SetInputs({ depthPrepass->GetOutput(2) });
     aoPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3) });
     lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0), aoPass->GetOutput(0) });
     transparencyPass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), localShadowPass->GetOutput(0) });
     ssrPass->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(3),
         opaquePass->GetOutput(4), opaquePass->GetOutput(1), environmentPass->GetOutput(1), environmentPass->GetOutput(2) });
     compositionPass->SetInputs({ ssrPass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
-    upscalePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1), compositionPass->GetOutput(0) });
+    dofPass->SetInputs({ compositionPass->GetOutput(0), opaquePass->GetOutput(2) });
+    motionBlurPass->SetInputs({ dofPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
+    upscalePass->SetInputs({ opaquePass->GetOutput(2), motionBlurPass->GetOutput(1), motionBlurPass->GetOutput(0) });
     outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get()});
 
+    depthPrepass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
     opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
     aoPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
     lightingPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);

@@ -64,18 +64,21 @@ public:
         params.pDepthTexture = depth->GetResource()->D3DResource.Get();
         params.pVelocityTexture = motion->GetResource()->D3DResource.Get();
         params.pOutputTexture = _output.GetResource()->D3DResource.Get();
-        // RH projection adds _31/_32 jitter with the opposite screen-space sign.
-        params.jitterOffsetX = -_commonData->ActiveCameraJitterOffsetX;
-        params.jitterOffsetY = -_commonData->ActiveCameraJitterOffsetY;
+        // GPUDataUpdateSystem applies a positive raster displacement in input pixels.
+        params.jitterOffsetX = _commonData->ActiveCameraJitterOffsetX;
+        params.jitterOffsetY = _commonData->ActiveCameraJitterOffsetY;
         params.inputWidth = color->GetWidth();
         params.inputHeight = color->GetHeight();
-        params.resetHistory = _commonData->ResetUpscalerHistory;
+        params.resetHistory = _commonData->ResetUpscalerHistory || _commonData->ResetHistory ||
+            _historyRevision != _commonData->HistoryRevision;
         params.exposureScale = 1.0f;
         const auto result = xessD3D12Execute(_context, commands->GetCommandList().Get(), &params);
         commands->InvalidateCachedState();
         Check(result);
         commands->ResourceBarrier({ _output.GetResource()->GetUAVBarrier() });
         _commonData->ResetUpscalerHistory = false;
+        _commonData->ResetHistory = false;
+        _historyRevision = _commonData->HistoryRevision;
         commands->EndPixEvent();
     }
 
@@ -135,4 +138,5 @@ private:
 
     GDX12Texture _output;
     xess_context_handle_t _context = nullptr;
+    uint64_t _historyRevision = UINT64_MAX;
 };

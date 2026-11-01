@@ -523,7 +523,11 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
     if (!settings.Enabled || _resources->ReflectionProbes.empty())
     {
         WriteProbeData(false);
-        if (_enabled) _commonData->ResetHistory = true;
+        if (_enabled)
+        {
+            _commonData->ResetHistory = true;
+            ++_commonData->HistoryRevision;
+        }
         _enabled = false;
         _face = 0;
         return;
@@ -541,7 +545,10 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
     if (!topologyChanged)
         for (size_t i = 0; i < submitted.size(); ++i) topologyChanged |= _probes[i].Source.Id != submitted[i].Id;
     if (!_enabled || topologyChanged || _settings.Quality != settings.Quality)
+    {
         _commonData->ResetHistory = true;
+        ++_commonData->HistoryRevision;
+    }
     if (topologyChanged)
     {
         _resources->Device->GetCommandQueue()->Flush();
@@ -574,6 +581,7 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
         if (!SameCapture(_probes[i].Source, submitted[i]))
         {
             _commonData->ResetHistory = true;
+            ++_commonData->HistoryRevision;
             _probes[i].BakedFaces = 0;
             _probes[i].LastUpdate = 0;
             if (i == _activeProbe) _face = 0;

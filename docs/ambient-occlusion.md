@@ -97,3 +97,7 @@ invalidate command-list binding caches before engine drawing resumes. These
 small shared changes should be merged only once with other rendering features.
 
 Build/test commands and measured results are recorded in `ao-validation.md`.
+
+## Execution point
+
+`Render.AO.ExecutionPoint` (runtime/INI, default 1) selects 0 immediately after the depth+normal prepass, or 1 immediately before deferred lighting. Early mode writes normal-mapped world normals in the prepass. Late mode runs a depth-only VS/PS with masked alpha-test, without normal/material G-buffer evaluation or color targets; normals are produced by the later G-buffer. Early mode does not read last frame's G-buffer. CSM and local shadows execute after the prepass (and early AO when selected). The G-buffer reuses prepass depth with Equal testing and no depth writes.

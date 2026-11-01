@@ -1,5 +1,7 @@
 # Feature-aware motion blur
 
+> Central REVIEW acceptance and remaining limits: [rendering-review.md](rendering-review.md). Historical branch/handoff statements below are retained as history.
+
 Status: implementation handoff. The user stopped verification on 2026-11-01.
 The final integrated state is **unverified**; the main chat owns subsequent
 builds, tests, GPU measurements and review. Existing verification code is retained.
