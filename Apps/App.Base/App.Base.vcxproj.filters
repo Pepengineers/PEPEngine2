@@ -24,6 +24,7 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\App.Base\ECS\Components\FluidRenderComponent.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\App.Base\BistroProps.h">
       <Filter>Header Files</Filter>
     </ClInclude>

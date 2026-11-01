@@ -8,6 +8,7 @@
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
 #include "Engine.RendererDX12/GDX12GrassRenderer.h"
 #include "Engine.RendererDX12/GDX12Particles.h"
+#include "Engine.RendererDX12/GDX12Fluid.h"
 
 class GDX12Device;
 class GameTimer;
@@ -47,6 +48,7 @@ public:
     std::vector<GDX12ParticleEmitter> ParticleEmitters;
     GDX12Texture* ParticleMotion = nullptr; // Borrowed for this frame only, owned by the particles pass.
     std::vector<GDX12ReflectionProbe> ReflectionProbes;
+    std::vector<GDX12FluidInstance> Fluids;
     GDX12Descriptor ReflectionRadianceSRV;
     uint64_t ReflectionWorldRevision = 0;
     uint64_t ReflectionStaticRevision = 0;

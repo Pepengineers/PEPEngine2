@@ -21,7 +21,9 @@ TextureCube<float4> PrefilteredEnvironment : register(t5);
 Texture2D<float4> EnvironmentBRDF : register(t6);
 StructuredBuffer<LocalLight> LocalLights : register(t7);
 Texture2DArray<float> LocalShadowMaps : register(t8);
-Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t14);
+Texture2D<float> WaterDepth : register(t14);
+Texture2D<float> OpaqueDepth : register(t15);
+Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t16);
 SamplerComparisonState samShadow : register(s6);
 
 #define SKY_CB_REGISTER b4
@@ -79,9 +81,17 @@ struct PSOutput
     float Revealage : SV_TARGET1;
 };
 
-PSOutput PS(VS_OUTPUT_PS_INPUT pin)
+PSOutput ShadeTransparency(VS_OUTPUT_PS_INPUT pin, uint partition)
 {
     PSOutput output;
+    if (partition != 0)
+    {
+        uint2 pixel = (uint2)pin.PosCS.xy;
+        float water = WaterDepth[pixel];
+        bool hasWater = water > OpaqueDepth[pixel];
+        bool front = hasWater && pin.PosCS.z > water;
+        if ((partition == 1 && front) || (partition == 2 && !front)) discard;
+    }
     
     Material material = MaterialCache[pin.MaterialIndex];
     float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
@@ -98,3 +108,7 @@ PSOutput PS(VS_OUTPUT_PS_INPUT pin)
     
     return output;
 }
+
+PSOutput PS(VS_OUTPUT_PS_INPUT pin) { return ShadeTransparency(pin, 0); }
+PSOutput PSBehindWater(VS_OUTPUT_PS_INPUT pin) { return ShadeTransparency(pin, 1); }
+PSOutput PSFrontWater(VS_OUTPUT_PS_INPUT pin) { return ShadeTransparency(pin, 2); }

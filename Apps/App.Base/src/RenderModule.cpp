@@ -35,6 +35,8 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12XeSSUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DepthOfFieldPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12MotionBlurPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12FluidPass.h"
+#include <cmath>
 #include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
@@ -1075,6 +1077,7 @@ void RenderModule::CollectReflectionScene()
     hash(staticHash, resources.Lighting.SunShadowRevision);
     for (const auto& light : resources.LocalLights) hash(staticHash, light);
     resources.ReflectionProbes.clear();
+    resources.Fluids.clear();
     bool hasBounds = false;
     auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
     for (size_t worldIndex = 0; worldIndex < scenes->GetWorldCount(); ++worldIndex)
@@ -1101,6 +1104,20 @@ void RenderModule::CollectReflectionScene()
             if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, renderer.Bounds);
             else resources.ReflectionSceneBounds = renderer.Bounds;
             hasBounds = true;
+        });
+        ecs.ForEach<FluidRenderComponent>([&](Entity entity, FluidRenderComponent& component)
+        {
+            if (!ecs.Has<TransformComponent>(entity)) return;
+            const auto& transform = ecs.Get<TransformComponent>(entity);
+            GDX12FluidInstance instance;
+            instance.Id = ((resources.ReflectionWorldRevision * 65599 + worldIndex) << 32) | entity;
+            instance.Component = component;
+            instance.ContainerToWorld = Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
+                XMConvertToRadians(transform.Rotation.y), XMConvertToRadians(transform.Rotation.x),
+                XMConvertToRadians(transform.Rotation.z)) * Matrix::CreateTranslation(transform.Location);
+            instance.DeltaSeconds = world->IsPaused() ? 0 : _timer->DeltaTime() * world->GetTimeScale();
+            ValidateFluidInstance(instance);
+            resources.Fluids.push_back(std::move(instance));
         });
         ecs.ForEach<ReflectionProbeComponent>([&](Entity entity, ReflectionProbeComponent& component)
         {
@@ -1206,9 +1223,22 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12AmbientOcclusionPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DeferredLightingPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12SSSRPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
+    auto fluidSurface = std::make_unique<GDX12FluidSurfacePass>();
+    auto* fluidSurfacePass = fluidSurface.get();
+    _primaryRenderPassExecutionList.push_back(std::move(fluidSurface));
+    auto behind = std::make_unique<GDX12WBOITTransparencyPass>(GDX12WBOITTransparencyPass::WaterPartition::Behind);
+    auto* behindTransparency = behind.get();
+    _primaryRenderPassExecutionList.push_back(std::move(behind));
+    auto behindComposite = std::make_unique<GDX12WBOITCompositionPass>();
+    auto* behindComposition = behindComposite.get();
+    _primaryRenderPassExecutionList.push_back(std::move(behindComposite));
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12FluidResolvePass>(fluidSurfacePass));
+    auto front = std::make_unique<GDX12WBOITTransparencyPass>(
+        GDX12WBOITTransparencyPass::WaterPartition::Front, behindTransparency);
+    auto* frontTransparency = front.get();
+    _primaryRenderPassExecutionList.push_back(std::move(front));
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12ParticlesPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>(behindComposition, frontTransparency));
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DepthOfFieldPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12MotionBlurPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12XeSSUpscalePass>());
@@ -1228,13 +1258,16 @@ void RenderModule::ConfigureRenderPipeline()
     GDX12RenderPass* aoPass = _primaryRenderPassExecutionList[8].get();
     GDX12RenderPass* lightingPass = _primaryRenderPassExecutionList[9].get();
     GDX12RenderPass* ssrPass = _primaryRenderPassExecutionList[10].get();
-    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[11].get();
-    auto* particlesPass = static_cast<GDX12ParticlesPass*>(_primaryRenderPassExecutionList[12].get());
+    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[12].get();
     GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[13].get();
-    GDX12RenderPass* dofPass = _primaryRenderPassExecutionList[14].get();
-    GDX12RenderPass* motionBlurPass = _primaryRenderPassExecutionList[15].get();
-    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[16].get();
-    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[17].get();
+    GDX12RenderPass* waterResolvePass = _primaryRenderPassExecutionList[14].get();
+    GDX12RenderPass* frontPass = _primaryRenderPassExecutionList[15].get();
+    auto* particlesPass = static_cast<GDX12ParticlesPass*>(_primaryRenderPassExecutionList[16].get());
+    GDX12RenderPass* frontCompositionPass = _primaryRenderPassExecutionList[17].get();
+    GDX12RenderPass* dofPass = _primaryRenderPassExecutionList[18].get();
+    GDX12RenderPass* motionBlurPass = _primaryRenderPassExecutionList[19].get();
+    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[20].get();
+    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[21].get();
     _depthPrepass = depthPrepass;
     _opaquePass = opaquePass;
     _ambientOcclusionPass = aoPass;
@@ -1247,15 +1280,21 @@ void RenderModule::ConfigureRenderPipeline()
     opaquePass->SetInputs({ depthPrepass->GetOutput(2) });
     aoPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3) });
     lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0), aoPass->GetOutput(0) });
-    transparencyPass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), localShadowPass->GetOutput(0) });
+    fluidSurfacePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
+    for (auto* pass : { transparencyPass, frontPass })
+        pass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0),
+            environmentPass->GetOutput(1), environmentPass->GetOutput(2), localShadowPass->GetOutput(0),
+            fluidSurfacePass->GetOutput(0) });
     ssrPass->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(3),
         opaquePass->GetOutput(4), opaquePass->GetOutput(1), environmentPass->GetOutput(1), environmentPass->GetOutput(2) });
     compositionPass->SetInputs({ ssrPass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1), opaquePass->GetOutput(2) });
-    particlesPass->SetInputs({ opaquePass->GetOutput(2), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
-    static_cast<GDX12WBOITCompositionPass*>(compositionPass)->SetParticles(particlesPass);
-    dofPass->SetInputs({ compositionPass->GetOutput(0), opaquePass->GetOutput(2) });
-    motionBlurPass->SetInputs({ dofPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
-    upscalePass->SetInputs({ opaquePass->GetOutput(2), motionBlurPass->GetOutput(1), motionBlurPass->GetOutput(0) });
+    waterResolvePass->SetInputs({ compositionPass->GetOutput(0), environmentPass->GetOutput(1) });
+    frontCompositionPass->SetInputs({ waterResolvePass->GetOutput(0), frontPass->GetOutput(0), frontPass->GetOutput(1), fluidSurfacePass->GetOutput(0) });
+    dofPass->SetInputs({ frontCompositionPass->GetOutput(0), fluidSurfacePass->GetOutput(0) });
+    motionBlurPass->SetInputs({ dofPass->GetOutput(0), fluidSurfacePass->GetOutput(0), fluidSurfacePass->GetOutput(1) });
+    upscalePass->SetInputs({ fluidSurfacePass->GetOutput(0), motionBlurPass->GetOutput(1), motionBlurPass->GetOutput(0) });
+    particlesPass->SetInputs({ fluidSurfacePass->GetOutput(0), frontPass->GetOutput(0), frontPass->GetOutput(1) });
+    static_cast<GDX12WBOITCompositionPass*>(frontCompositionPass)->SetParticles(particlesPass);
     outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get()});
 
     depthPrepass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
@@ -1264,6 +1303,8 @@ void RenderModule::ConfigureRenderPipeline()
     lightingPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
     transparencyPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
     compositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    frontPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    frontCompositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 
     InitializeRenderPasses();
 }

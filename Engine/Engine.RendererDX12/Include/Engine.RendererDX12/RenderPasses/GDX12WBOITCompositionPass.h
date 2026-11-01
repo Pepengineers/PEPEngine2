@@ -2,19 +2,22 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include <stdexcept>
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 
 class GDX12WBOITCompositionPass : public GDX12RenderPass
 {
 public:
     void SetParticles(GDX12ParticlesPass* particles) { _particles = particles; }
-	GDX12WBOITCompositionPass() : IN_OpaqueScene(nullptr), IN_TransparencyAccum(nullptr),
-		IN_Revealage(nullptr), OUT_Result(nullptr)
+	GDX12WBOITCompositionPass(GDX12WBOITCompositionPass* reuse = nullptr,
+        GDX12WBOITTransparencyPass* front = nullptr) : IN_OpaqueScene(nullptr), IN_TransparencyAccum(nullptr),
+		IN_Revealage(nullptr), _reuse(reuse), _front(front)
 	{ 
 		_flags = RENDER_PASS_FLAG_NONE; 
 		_numInputs = 3;
 		_numOutputs = 1;
-		OUT_Result = std::make_unique<GDX12Texture>();
-		_outputs.push_back(OUT_Result.get());
+		OUT_Result = reuse ? reuse->OUT_Result : std::make_shared<GDX12Texture>();
+        _link.Target = OUT_Result.get();
+		_outputs.push_back(&_link);
 	}
 
 	// Input 0 - OpaqueScene
@@ -27,30 +30,34 @@ public:
 		IN_TransparencyAccum = _inputs[1];
 		IN_Revealage = _inputs[2];
 
-		// Textures
-		GDX12TextureDesc TextureDesc1;
-		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-		TextureDesc1.Width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
-		TextureDesc1.Height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
+		if (!_reuse)
+        {
+    		// Textures
+    		GDX12TextureDesc TextureDesc1;
+    		TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    		TextureDesc1.Width = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
+    		TextureDesc1.Height = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
 
-		TextureDesc1.CreateSRV = true;
-		TextureDesc1.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
-		TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-		TextureDesc1.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-		TextureDesc1.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-		TextureDesc1.SRVDesc.Texture2D.MipLevels = 1;
-		TextureDesc1.SRVDesc.Texture2D.MostDetailedMip = 0;
-		TextureDesc1.SRVDesc.Texture2D.PlaneSlice = 0;
-		TextureDesc1.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+    		TextureDesc1.CreateSRV = true;
+    		TextureDesc1.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
+    		TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+    		TextureDesc1.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    		TextureDesc1.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    		TextureDesc1.SRVDesc.Texture2D.MipLevels = 1;
+    		TextureDesc1.SRVDesc.Texture2D.MostDetailedMip = 0;
+    		TextureDesc1.SRVDesc.Texture2D.PlaneSlice = 0;
+    		TextureDesc1.SRVDesc.Texture2D.ResourceMinLODClamp = 0.0f;
 
-		TextureDesc1.CreateRTV = true;
-		TextureDesc1.RTVHeap = _resources->RTVHeap.get();
-		TextureDesc1.RTVHeapIndex = _resources->RTVHeap->GetAvailableIndex();
-		TextureDesc1.RTVDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-		TextureDesc1.RTVDesc.Texture2D.PlaneSlice = 0;
-		TextureDesc1.RTVDesc.Texture2D.MipSlice = 0;
+    		TextureDesc1.CreateRTV = true;
+    		TextureDesc1.RTVHeap = _resources->RTVHeap.get();
+    		TextureDesc1.RTVHeapIndex = _resources->RTVHeap->GetAvailableIndex();
+    		TextureDesc1.RTVDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+    		TextureDesc1.RTVDesc.Texture2D.PlaneSlice = 0;
+    		TextureDesc1.RTVDesc.Texture2D.MipSlice = 0;
 
-		OUT_Result->Initialize(TextureDesc1);
+    		OUT_Result->Initialize(TextureDesc1);
+
+        }
 
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
@@ -92,6 +99,9 @@ public:
 
 	void Execute(GDX12CommandList* cmdList) override
 	{
+        _link.Target = IN_OpaqueScene->GetTexture();
+        if (_front && !_front->Rendered()) return;
+        _link.Target = OUT_Result.get();
 		GDX12Texture* opaqueAccum = IN_OpaqueScene->GetTexture();
 		GDX12Texture* transparencyAccum = IN_TransparencyAccum->GetTexture();
 		GDX12Texture* transparencyRevealage = IN_Revealage->GetTexture();
@@ -136,6 +146,7 @@ public:
 
 	void Resize() override
 	{
+        if (_reuse) return;
 		UINT newWidth = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledWidth : _commonData->WindowWidth;
 		UINT newHeight = GetFlagValue(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION) ? _commonData->DownscaledHeight : _commonData->WindowHeight;
 		OUT_Result->Resize(newWidth, newHeight);
@@ -152,10 +163,19 @@ public:
 		_compositionPS.Reset();
 		_compositionRS.reset();
 		_compositionPSO.Reset();
+        _link.Target = nullptr;
 	}
 
 private:
     GDX12ParticlesPass* _particles = nullptr;
+    struct Link final : IRenderPassLink
+    {
+        GDX12Texture* Target = nullptr;
+        GDX12Texture* GetTexture() override { return Target; }
+        bool IsInitialized() override { return Target && Target->IsInitialized(); }
+    } _link;
+    GDX12WBOITCompositionPass* _reuse;
+    GDX12WBOITTransparencyPass* _front;
 	ComPtr<ID3DBlob> _compositionVS;
 	ComPtr<ID3DBlob> _compositionPS;
 	std::unique_ptr<GDX12RootSignature> _compositionRS;
@@ -164,5 +184,5 @@ private:
 	IRenderPassLink* IN_OpaqueScene;
 	IRenderPassLink* IN_TransparencyAccum;
 	IRenderPassLink* IN_Revealage;
-	std::unique_ptr<GDX12Texture> OUT_Result;
+	std::shared_ptr<GDX12Texture> OUT_Result;
 };

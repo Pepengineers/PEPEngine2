@@ -116,3 +116,6 @@ Implementation delivery is **unverified**; the author ran no builds/tests/GPU ch
 или `WindFieldComponent`. [API, units, ranges, budgets и seams](grass-wind.md).
 Реализация автора **НЕПРОВЕРЕНА**: сборки, тесты и GPU-проверки не запускались
 по прямому указанию пользователя.
+## Fluid / water
+
+Render.Fluid.Enabled (true) and Render.Fluid.Quality (2; 0 Off, 1 Low, 2 Mid, 3 High) are the only global controls, both runtime Default. Solver, source, reset and optics belong to FluidRenderComponent. See [fluid.md](rendering/fluid.md) for its API, ranges, presets and integration contract. Implementation is unverified; no builds or checks were run by the author.
