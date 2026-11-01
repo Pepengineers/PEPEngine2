@@ -281,11 +281,13 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         if (LOWORD(wParam) == WA_INACTIVE)
         {
             bAppPaused = true;
+            if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(true);
             Timer.Stop();
         }
         else
         {
             bAppPaused = false;
+            if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(false);
             Timer.Start();
         }
         return 0;
@@ -306,6 +308,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             if (wParam == SIZE_MINIMIZED)
             {
                 bAppPaused = true;
+                if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(true);
                 bMinimized = true;
                 bMaximized = false;
             }
@@ -315,6 +318,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 bMinimized = false;
                 bMaximized = true;
                 OnResize();
+                if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(false);
             }
             else if (wParam == SIZE_RESTORED)
             {
@@ -324,6 +328,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                     bAppPaused = false;
                     bMinimized = false;
                     OnResize();
+                    if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(false);
                 }
 
                 // Restoring from maximized state?
@@ -354,6 +359,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     // WM_EXITSIZEMOVE is sent when the user grabs the resize bars.
     case WM_ENTERSIZEMOVE:
         bAppPaused = true;
+        if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(true);
         bResizing = true;
         Timer.Stop();
         return 0;
@@ -365,6 +371,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         bResizing = false;
         Timer.Start();
         OnResize();
+        if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(false);
         return 0;
 
     // WM_DESTROY is sent when the window is being destroyed.
@@ -447,6 +454,7 @@ bool App::AddModules()
 
 void App::Update(const GameTimer& gameTimer)
 {
+    Locator.GetModule<RenderModule>()->BeginFrame();
     OnKeyboardInput(gameTimer);
     Locator.GetModule<RenderModule>()->Update();
     auto scenes = Locator.GetModule<SceneManagerModule>();

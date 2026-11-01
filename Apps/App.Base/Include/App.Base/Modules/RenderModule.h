@@ -7,6 +7,7 @@
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
 #include "Engine.RendererDX12/GDX12Skinning.h"
+#include "Engine.RendererDX12/GDX12Reconstruction.h"
 #include <map>
 
 class SceneManagerModule;
@@ -15,6 +16,8 @@ class GDX12SwapChain;
 class GDX12Device;
 class GDX12CommandList;
 class GDX12GPUTimer;
+class GDX12ReconstructionPass;
+struct GDX12FrameGenerationStatus;
 
 struct TransformComponent;
 struct CameraComponent;
@@ -42,6 +45,10 @@ public:
     void Uninitialize() override;
 
     void OnResize();
+    void BeginFrame();
+    void SetFrameGenerationSuspended(bool);
+    const GDX12ReconstructionStatus& GetReconstructionStatus() const;
+    const GDX12FrameGenerationStatus& GetFrameGenerationStatus() const;
 
     GDX12Material* GetMaterialByName(const std::string& name);
 
@@ -218,6 +225,9 @@ private:
     GDX12RenderPass* _depthPrepass = nullptr;
     GDX12RenderPass* _opaquePass = nullptr;
     GDX12RenderPass* _ambientOcclusionPass = nullptr;
+    IRenderPassLink* _frameGenerationDepth = nullptr;
+    IRenderPassLink* _frameGenerationMotion = nullptr;
+    GDX12ReconstructionPass* _reconstructionPass = nullptr;
 
     // Sorted in execution order
     std::vector<std::unique_ptr<GDX12RenderPass>> _primaryRenderPassExecutionList;

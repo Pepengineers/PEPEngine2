@@ -6,6 +6,8 @@
 class GDX12Device;
 class GDX12Texture;
 class GDX12DescriptorHeap;
+class GDX12FrameGeneration;
+class RenderPipelineCommonData;
 
 class GDX12SwapChain : public IRenderPassLink
 {
@@ -17,6 +19,9 @@ public:
 
     void Resize(UINT width, UINT height);
     void Present();
+    void BeginFrame(RenderPipelineCommonData&);
+    void SetFrameGenerationSuspended(bool);
+    GDX12FrameGeneration& GetFrameGeneration();
 
     DXGI_FORMAT GetFormat();
     UINT GetBufferCount();
@@ -36,6 +41,7 @@ public:
 
 private:
     void CreateBuffers();
+    void CreatePresentation(bool applySettings);
     IDXGISwapChain4* GetPresentationSwapChain() const;
 
     GDX12Device* _device;
@@ -51,6 +57,7 @@ private:
     UINT _height;
 
     std::vector<std::unique_ptr<GDX12Texture>> _buffers;
+    std::unique_ptr<GDX12FrameGeneration> _frameGeneration;
 
     D3D12_VIEWPORT _screenViewport;
     D3D12_RECT _screenScissorRect;

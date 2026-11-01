@@ -25,7 +25,11 @@ bool GDX12StreamlineSDK::Initialize()
 
     _runtimeDirectory = GetRuntimeDirectory();
     LoadInterposer();
+    if (!_interposerModule) return false;
     LoadFunctions();
+    if (!_slInit || !_slShutdown || !_slUpgradeInterface || !_slGetNativeInterface || !_slSetD3DDevice ||
+        !_slIsFeatureSupported || !_slGetFeatureFunction || !_slSetFeatureLoaded || !_slEvaluateFeature ||
+        !_slFreeResources || !_slSetTagForFrame || !_slSetConstants || !_slGetNewFrameToken) return false;
 
     const wchar_t* pluginPaths[] = { _runtimeDirectory.c_str() };
 
@@ -41,7 +45,7 @@ bool GDX12StreamlineSDK::Initialize()
         | sl::PreferenceFlags::eUseDXGIFactoryProxy
         | sl::PreferenceFlags::eUseFrameBasedResourceTagging;
 
-    sl::Feature FeaturestoLoad[] = { sl::kFeatureDLSS, sl::kFeatureNIS };
+    sl::Feature FeaturestoLoad[] = { sl::kFeatureDLSS, sl::kFeatureNIS, sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeaturePCL };
     preferences.featuresToLoad = FeaturestoLoad;
     preferences.numFeaturesToLoad = _countof(FeaturestoLoad);
     preferences.engine = sl::EngineType::eCustom;
@@ -80,6 +84,7 @@ void GDX12StreamlineSDK::Shutdown()
     _slSetD3DDevice = nullptr;
     _slIsFeatureSupported = nullptr;
     _slGetFeatureFunction = nullptr;
+    _slSetFeatureLoaded = nullptr;
     _slEvaluateFeature = nullptr;
     _slFreeResources = nullptr;
     _slSetTagForFrame = nullptr;
@@ -89,11 +94,7 @@ void GDX12StreamlineSDK::Shutdown()
     _slDLSSSetOptions = nullptr;
     _slNISSetOptions = nullptr;
 
-    if (_interposerModule)
-    {
-        FreeLibrary(_interposerModule);
-        _interposerModule = nullptr;
-    }
+    // Proxy COM objects can outlive slShutdown; keep their implementation loaded until process exit.
 }
 
 bool GDX12StreamlineSDK::IsEnabled() const
@@ -114,6 +115,11 @@ ComPtr<IDXGIFactory7> GDX12StreamlineSDK::CreateProxyFactory(const ComPtr<IDXGIF
     { return nativeFactory; }
 
     return UpgradeInterface(nativeFactory, "slUpgradeInterface(IDXGIFactory7)");
+}
+
+ComPtr<IDXGISwapChain4> GDX12StreamlineSDK::CreateProxySwapChain(const ComPtr<IDXGISwapChain4>& swapChain) const
+{
+    return UpgradeInterface(swapChain, "slUpgradeInterface(IDXGISwapChain4)");
 }
 
 ComPtr<ID3D12Device14> GDX12StreamlineSDK::CreateProxyDevice(const ComPtr<ID3D12Device14>& nativeDevice, bool setAsMainDevice) const
@@ -137,6 +143,8 @@ ComPtr<ID3D12Device14> GDX12StreamlineSDK::CreateProxyDevice(const ComPtr<ID3D12
         }
 
         const_cast<GDX12StreamlineSDK*>(this)->_mainDeviceWasSet = true;
+        // Loading state changes require a device and must precede swapchain creation.
+        SetFeatureLoaded(sl::kFeatureDLSS_G, false);
     }
 
     if (inputAlreadyProxy)
@@ -174,32 +182,44 @@ ComPtr<ID3D12Resource> GDX12StreamlineSDK::GetNativeResource(const ComPtr<ID3D12
 
 sl::Result GDX12StreamlineSDK::IsFeatureSupported(sl::Feature feature, const sl::AdapterInfo& adapterInfo) const
 {
-    return _slIsFeatureSupported(feature, adapterInfo);
+    return _initialized && _slIsFeatureSupported ? _slIsFeatureSupported(feature, adapterInfo) : sl::Result::eErrorInvalidState;
+}
+
+sl::Result GDX12StreamlineSDK::GetFeatureFunction(sl::Feature feature, const char* name, void*& function) const
+{
+    function = nullptr;
+    return _initialized && _slGetFeatureFunction ? _slGetFeatureFunction(feature, name, function) : sl::Result::eErrorInvalidState;
+}
+
+sl::Result GDX12StreamlineSDK::SetFeatureLoaded(sl::Feature feature, bool loaded) const
+{
+    return _initialized && _slSetFeatureLoaded ? _slSetFeatureLoaded(feature, loaded) : sl::Result::eErrorInvalidState;
 }
 
 sl::Result GDX12StreamlineSDK::GetNewFrameToken(sl::FrameToken*& token, const uint32_t* frameIndex) const
 {
-    return _slGetNewFrameToken(token, frameIndex);
+    token = nullptr;
+    return _initialized && _slGetNewFrameToken ? _slGetNewFrameToken(token, frameIndex) : sl::Result::eErrorInvalidState;
 }
 
 sl::Result GDX12StreamlineSDK::SetTagForFrame(const sl::FrameToken& frame, const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer) const
 {
-    return _slSetTagForFrame(frame, viewport, tags, numTags, cmdBuffer);
+    return _initialized && _slSetTagForFrame ? _slSetTagForFrame(frame, viewport, tags, numTags, cmdBuffer) : sl::Result::eErrorInvalidState;
 }
 
 sl::Result GDX12StreamlineSDK::EvaluateFeature(sl::Feature feature, const sl::FrameToken& frame, const sl::BaseStructure** inputs, uint32_t numInputs, sl::CommandBuffer* cmdBuffer) const
 {
-    return _slEvaluateFeature(feature, frame, inputs, numInputs, cmdBuffer);
+    return _initialized && _slEvaluateFeature ? _slEvaluateFeature(feature, frame, inputs, numInputs, cmdBuffer) : sl::Result::eErrorInvalidState;
 }
 
 sl::Result GDX12StreamlineSDK::FreeResources(sl::Feature feature, const sl::ViewportHandle& viewport) const
 {
-    return _slFreeResources(feature, viewport);
+    return _initialized && _slFreeResources ? _slFreeResources(feature, viewport) : sl::Result::eErrorInvalidState;
 }
 
 sl::Result GDX12StreamlineSDK::SetConstants(const sl::Constants& values, const sl::FrameToken& frame, const sl::ViewportHandle& viewport) const
 {
-    return _slSetConstants(values, frame, viewport);
+    return _initialized && _slSetConstants ? _slSetConstants(values, frame, viewport) : sl::Result::eErrorInvalidState;
 }
 
 sl::Result GDX12StreamlineSDK::DLSSGetOptimalSettings(const sl::DLSSOptions& options, sl::DLSSOptimalSettings& settings) const
@@ -255,11 +275,12 @@ std::wstring GDX12StreamlineSDK::GetRuntimeDirectory() const
 
 void GDX12StreamlineSDK::LoadInterposer()
 {
+    if (_interposerModule) return;
     const std::filesystem::path interposerPath = std::filesystem::path(_runtimeDirectory) / L"sl.interposer.dll";
-    if (!std::filesystem::exists(interposerPath)) { LogWarning("sl.interposer.dll was not found"); }
+    if (!std::filesystem::exists(interposerPath)) { LogWarning("sl.interposer.dll was not found"); return; }
     if (!sl::security::verifyEmbeddedSignature(interposerPath.c_str())) 
-    { LogWarning("sl.interposer.dll signature check failed"); }
-    _interposerModule = LoadLibraryW(interposerPath.c_str());
+    { LogWarning("sl.interposer.dll signature check failed"); return; }
+    _interposerModule = LoadLibraryExW(interposerPath.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (!_interposerModule) { LogWarning("sl.interposer.dll LoadLibraryW failed"); }
 }
 
@@ -272,6 +293,7 @@ void GDX12StreamlineSDK::LoadFunctions()
     _slSetD3DDevice = reinterpret_cast<PFun_slSetD3DDevice*>(GetProcAddress(_interposerModule, "slSetD3DDevice"));
     _slIsFeatureSupported = reinterpret_cast<PFun_slIsFeatureSupported*>(GetProcAddress(_interposerModule, "slIsFeatureSupported"));
     _slGetFeatureFunction = reinterpret_cast<PFun_slGetFeatureFunction*>(GetProcAddress(_interposerModule, "slGetFeatureFunction"));
+    _slSetFeatureLoaded = reinterpret_cast<PFun_slSetFeatureLoaded*>(GetProcAddress(_interposerModule, "slSetFeatureLoaded"));
     _slEvaluateFeature = reinterpret_cast<PFun_slEvaluateFeature*>(GetProcAddress(_interposerModule, "slEvaluateFeature"));
     _slFreeResources = reinterpret_cast<PFun_slFreeResources*>(GetProcAddress(_interposerModule, "slFreeResources"));
     _slSetTagForFrame = reinterpret_cast<PFun_slSetTagForFrame*>(GetProcAddress(_interposerModule, "slSetTagForFrame"));

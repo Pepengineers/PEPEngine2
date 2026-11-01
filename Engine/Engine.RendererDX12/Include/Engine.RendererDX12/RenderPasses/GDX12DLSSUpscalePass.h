@@ -1,6 +1,7 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Common/GameTimer.h"
+#include <stdexcept>
 
 // HOLY SHIT
 // we need this crazy include since SL's free() function conflits with CRT library's free() function
@@ -21,8 +22,8 @@
 class GDX12DLSSUpscalePass : public GDX12RenderPass
 {
 public:
-	GDX12DLSSUpscalePass() : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _viewportHandle(1337),
-		_DLSSQualityMode(sl::DLSSMode::eMaxQuality)
+	explicit GDX12DLSSUpscalePass(sl::DLSSMode quality = sl::DLSSMode::eMaxQuality) : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _viewportHandle(0),
+		_DLSSQualityMode(quality)
 	{ _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_JITTER | RENDER_PASS_FLAG_USE_STREAMLINE; }
 
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
@@ -54,6 +55,8 @@ public:
 		TextureDesc1.Height = _commonData->WindowHeight;
 
 		TextureDesc1.CreateSRV = true;
+        TextureDesc1.CreateUAV = true;
+        TextureDesc1.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
 		TextureDesc1.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
 		TextureDesc1.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 		TextureDesc1.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -67,7 +70,8 @@ public:
 		{
 			IN_Textures[i] = _inputs[i + 2];
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
-			TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = inputTexture->GetFormat();
+			TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = TextureDesc1.UAVDesc.Format = inputTexture->GetFormat();
+            TextureDesc1.UAVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
 			TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
 			OUT_UpscaledTextures[i]->Initialize(TextureDesc1);
 		}
@@ -89,20 +93,20 @@ public:
 
 		cmdList->BeginPixEvent("DLSS Upscale Pass", Colors::Blue);
 
-		FrameToken* currentFrame = nullptr;
-		Result result = GDX12StreamlineSDK::Get().GetNewFrameToken(currentFrame);
+		FrameToken* currentFrame = _commonData->StreamlineFrame;
+        Result result = currentFrame ? Result::eOk : GDX12StreamlineSDK::Get().GetNewFrameToken(currentFrame);
 		if (result != Result::eOk || currentFrame == nullptr)
 		{
 			std::string errorMsg = "DLSS: Failed to get a frame token: " + SLResultToString(result) + "\n";
-			OutputDebugStringA(errorMsg.c_str());
-			cmdList->EndPixEvent();
-			return;
+			throw std::runtime_error(errorMsg);
 		}
 
-		SetConstants(currentFrame);
+		if (!_commonData->StreamlineFrame) SetConstants(currentFrame);
 
 		GDX12Texture* depthStencil = IN_DepthBuffer->GetTexture();
 		GDX12Texture* motionVectors = IN_MotionVectors->GetTexture();
+        cmdList->ResourceBarrier({ depthStencil->GetResource()->GetNonPixelShaderResourceBarrier(),
+            motionVectors->GetResource()->GetNonPixelShaderResourceBarrier() });
 
 		Resource depthResource = Resource{ ResourceType::eTex2d,
 		depthStencil->GetResource()->D3DResource.Get(),
@@ -131,6 +135,8 @@ public:
 		{
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
 			GDX12Texture* upscaledTexture = OUT_UpscaledTextures[i].get();
+            cmdList->ResourceBarrier({ inputTexture->GetResource()->GetNonPixelShaderResourceBarrier(),
+                upscaledTexture->GetResource()->GetUnorderedAccessBarrier() });
 
 			Resource inputResource = Resource{ ResourceType::eTex2d,
 				inputTexture->GetResource()->D3DResource.Get(),
@@ -148,19 +154,24 @@ public:
 			if (result != Result::eOk)
 			{
 				std::string errorMsg = "DLSS: Failed to set tags: " + SLResultToString(result) + "\n";
-				OutputDebugStringA(errorMsg.c_str());
+				throw std::runtime_error(errorMsg);
 			}
 
 			const BaseStructure* inputs[] = { &_viewportHandle };
 			result = GDX12StreamlineSDK::Get().EvaluateFeature(kFeatureDLSS, *currentFrame, inputs, _countof(inputs), cmdList->GetCommandList().Get());
+            cmdList->InvalidateCachedState();
 			if (result != Result::eOk)
 			{
 				std::string errorMsg = "DLSS EVALUATE ERROR: " + SLResultToString(result) + "\n";
-				OutputDebugStringA(errorMsg.c_str());
+				throw std::runtime_error(errorMsg);
 			}
 
-		}
-		cmdList->EndPixEvent();
+            cmdList->ResourceBarrier({ upscaledTexture->GetResource()->GetUAVBarrier() });
+        }
+        _commonData->ResetUpscalerHistory = false;
+        _commonData->ResetHistory = false;
+        _historyRevision = _commonData->HistoryRevision;
+        cmdList->EndPixEvent();
 	}
 
 	void Resize() override
@@ -185,18 +196,12 @@ public:
 		if (result != Result::eOk)
 		{
 			std::string errorMsg = "DLSS: Failed to get optimal settings: " + SLResultToString(result) + "\n";
-			OutputDebugStringA(errorMsg.c_str());
-			_commonData->DownscaledWidth = _commonData->WindowWidth;
-			_commonData->DownscaledHeight = _commonData->WindowHeight;
-			return;
+			throw std::runtime_error(errorMsg);
 		}
 
 		if (optimalSettings.optimalRenderWidth == 0 || optimalSettings.optimalRenderHeight == 0)
 		{
-			OutputDebugStringA("DLSS: Optimal settings returned a zero-sized render resolution, falling back to full-resolution rendering.\n");
-			_commonData->DownscaledWidth = _commonData->WindowWidth;
-			_commonData->DownscaledHeight = _commonData->WindowHeight;
-			return;
+			throw std::runtime_error("DLSS returned a zero render resolution");
 		}
 
 		_commonData->DownscaledWidth = optimalSettings.optimalRenderWidth;
@@ -220,6 +225,7 @@ private:
 	std::vector<std::unique_ptr<GDX12Texture>> OUT_UpscaledTextures;
 	sl::ViewportHandle _viewportHandle;
 	sl::DLSSMode _DLSSQualityMode;
+    uint64_t _historyRevision = UINT64_MAX;
 
 	void MatchOutputCount(UINT outputCount)
 	{
@@ -235,7 +241,7 @@ private:
 		_numOutputs = outputCount;
 	}
 
-	bool CheckDLSSSupport()
+	void CheckDLSSSupport()
 	{
 		using namespace sl;
 
@@ -245,11 +251,10 @@ private:
 		adapterInfo.deviceLUIDSizeInBytes = sizeof(adapterLuid);
 
 		Result result = GDX12StreamlineSDK::Get().IsFeatureSupported(kFeatureDLSS, adapterInfo);
-		if (result == Result::eOk) { return true; }
+		if (result == Result::eOk) { return; }
 
 		std::string errorMsg = "ERROR: DLSS Feature is not supported on the current adapter: " + SLResultToString(result) + "\n";
-		OutputDebugStringA(errorMsg.c_str());
-		return false;
+		throw std::runtime_error(errorMsg);
 	}
 
 	void SetConstants(sl::FrameToken* currentFrameToken)
@@ -269,7 +274,7 @@ private:
 		constants.cameraFOV = XMConvertToRadians(_commonData->ActiveCameraFOV);
 		constants.cameraAspectRatio = static_cast<float>(_commonData->WindowWidth) / _commonData->WindowHeight;
 
-		constants.jitterOffset = { -_commonData->ActiveCameraJitterOffsetX, -_commonData->ActiveCameraJitterOffsetY };
+		constants.jitterOffset = { _commonData->ActiveCameraJitterOffsetX, _commonData->ActiveCameraJitterOffsetY };
 		// OpaquePass writes prevNDC - currentNDC. Convert to UV displacement;
 		// Streamline multiplies this scale by render width/height to obtain pixels.
 		constants.mvecScale = { 0.5f, -0.5f };
@@ -277,16 +282,26 @@ private:
 		constants.depthInverted = Boolean::eTrue;
 		constants.cameraMotionIncluded = Boolean::eTrue;
 		constants.motionVectors3D = Boolean::eFalse;
-		constants.reset = Boolean::eFalse;
+		constants.reset = (_commonData->ResetUpscalerHistory || _commonData->ResetHistory ||
+            _historyRevision != _commonData->HistoryRevision) ? Boolean::eTrue : Boolean::eFalse;
 		constants.orthographicProjection = Boolean::eFalse;
 		constants.motionVectorsDilated = Boolean::eFalse;
 		constants.motionVectorsJittered = Boolean::eFalse;
+        const auto camera = _commonData->CameraView.Invert();
+        const auto position = camera.Translation();
+        const auto up = camera.Up();
+        const auto right = camera.Right();
+        const auto forward = camera.Forward();
+        constants.cameraPos = { position.x, position.y, position.z };
+        constants.cameraUp = { up.x, up.y, up.z };
+        constants.cameraRight = { right.x, right.y, right.z };
+        constants.cameraFwd = { forward.x, forward.y, forward.z };
 
 		Result result = GDX12StreamlineSDK::Get().SetConstants(constants, *currentFrameToken, _viewportHandle);
 		if (result != Result::eOk)
 		{
 			std::string errorMsg = "DLSS: Failed to set constants: " + SLResultToString(result) + "\n";
-			OutputDebugStringA(errorMsg.c_str());
+			throw std::runtime_error(errorMsg);
 		}
 	}
 
@@ -300,14 +315,13 @@ private:
 		dlssOptions.outputWidth = _commonData->WindowWidth;
 		dlssOptions.outputHeight = _commonData->WindowHeight;
 		dlssOptions.sharpness = 0.25f;
-		dlssOptions.colorBuffersHDR = Boolean::eFalse;
+		dlssOptions.colorBuffersHDR = Boolean::eTrue;
 
 		Result result = GDX12StreamlineSDK::Get().DLSSSetOptions(_viewportHandle, dlssOptions);
 		if (result != Result::eOk)
 		{
 			std::string errorMsg = "ERROR: Failed to set DLSS options: " + SLResultToString(result) + "\n";
-			OutputDebugStringA(errorMsg.c_str());
-			return;
+			throw std::runtime_error(errorMsg);
 		}
 
 	}

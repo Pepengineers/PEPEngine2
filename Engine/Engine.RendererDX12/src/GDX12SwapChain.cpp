@@ -5,6 +5,9 @@
 #include <Engine.RendererDX12/GDX12Texture.h>
 #include <Engine.RendererDX12/GDX12DescriptorHeap.h>
 #include <Engine.RendererDX12/GDX12StreamlineSDK.h>
+#include <Engine.RendererDX12/GDX12FrameGeneration.h>
+#include <Engine.RendererDX12/RenderPasses/GDX12RenderPass.h>
+#include <Engine.Core/Logging/Logger.h>
 
 GDX12SwapChain::GDX12SwapChain(GDX12Device* device, HWND hwnd,
     DXGI_FORMAT format, UINT bufferCount, UINT width, UINT height, GDX12DescriptorHeap* rtvHeap)
@@ -12,8 +15,12 @@ GDX12SwapChain::GDX12SwapChain(GDX12Device* device, HWND hwnd,
     _format(format), _bufferCount(bufferCount), _currentBufferIndex(0),
     _width(width), _height(height), _rtvHeap(rtvHeap), bVSyncEnabled(false)
 {
-    Reset();
+    _frameGeneration = std::make_unique<GDX12FrameGeneration>(_device);
+    CreatePresentation(false);
+}
 
+void GDX12SwapChain::CreatePresentation(bool applySettings)
+{
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
     swapChainDesc.Width = _width;
     swapChainDesc.Height = _height;
@@ -28,7 +35,7 @@ GDX12SwapChain::GDX12SwapChain(GDX12Device* device, HWND hwnd,
     swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
     swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
-    _proxySwapChain = GDX12DeviceFactory::CreateSwapChain(_device, swapChainDesc, _hwnd);
+    _proxySwapChain = _frameGeneration->CreateSwapChain(_hwnd, swapChainDesc, applySettings);
     _swapChain = GDX12StreamlineSDK::Get().GetNativeSwapChain(_proxySwapChain);
     CreateBuffers();
     _currentBufferIndex = GetPresentationSwapChain()->GetCurrentBackBufferIndex();
@@ -45,7 +52,8 @@ GDX12SwapChain::GDX12SwapChain(GDX12Device* device, HWND hwnd,
 
 GDX12SwapChain::~GDX12SwapChain()
 {
-    Reset();
+    try { Reset(); }
+    catch (const std::exception& e) { Log::Error("FrameGeneration", "Swapchain shutdown: ", e.what()); }
 }
 
 void GDX12SwapChain::CreateBuffers()
@@ -56,7 +64,7 @@ void GDX12SwapChain::CreateBuffers()
     for (UINT i = 0; i < _bufferCount; i++)
     {
         ComPtr<ID3D12Resource> backBuffer;
-        GetPresentationSwapChain()->GetBuffer(i, IID_PPV_ARGS(&backBuffer));
+        ThrowIfFailed(GetPresentationSwapChain()->GetBuffer(i, IID_PPV_ARGS(&backBuffer)));
         backBuffer = GDX12StreamlineSDK::Get().GetNativeResource(backBuffer);
 
         GDX12TextureDesc textureDesc;
@@ -83,40 +91,44 @@ void GDX12SwapChain::CreateBuffers()
 
 void GDX12SwapChain::Resize(UINT width, UINT height)
 {
-    if (_width == width && _height == height) { return; }
+    if (!width || !height || (_width == width && _height == height)) return;
+
+    Reset();
 
     _width = width;
     _height = height;
 
-    _buffers.clear();
-
-    DXGI_SWAP_CHAIN_DESC desc;
-    GetPresentationSwapChain()->GetDesc(&desc);
-
-    GetPresentationSwapChain()->ResizeBuffers(
-        _bufferCount, _width, _height,
-        desc.BufferDesc.Format, desc.Flags);
-
-    CreateBuffers();
-    _currentBufferIndex = GetPresentationSwapChain()->GetCurrentBackBufferIndex();
-
-    _screenViewport.TopLeftX = 0;
-    _screenViewport.TopLeftY = 0;
-    _screenViewport.Width = static_cast<FLOAT>(_width);
-    _screenViewport.Height = static_cast<FLOAT>(_height);
-    _screenViewport.MinDepth = 0.0f;
-    _screenViewport.MaxDepth = 1.0f;
-
-    _screenScissorRect = { 0, 0, static_cast<int>(_width), static_cast<int>(_height) };
+    CreatePresentation(true);
 }
 
 void GDX12SwapChain::Present()
 {
     UINT syncInterval = bVSyncEnabled ? 1 : 0;
     UINT presentFlags = bVSyncEnabled ? 0 : DXGI_PRESENT_ALLOW_TEARING;
-    GetPresentationSwapChain()->Present(syncInterval, presentFlags);
+    _frameGeneration->BeforePresent();
+    ThrowIfFailed(GetPresentationSwapChain()->Present(syncInterval, presentFlags));
     _currentBufferIndex = GetPresentationSwapChain()->GetCurrentBackBufferIndex();
+    _frameGeneration->AfterPresent();
 }
+
+void GDX12SwapChain::BeginFrame(RenderPipelineCommonData& common)
+{
+    if (_frameGeneration->NeedsRecreate())
+    {
+        Reset(); CreatePresentation(true);
+        common.RequestHistoryReset = common.ResetUpscalerHistory = true;
+    }
+    _frameGeneration->BeginFrame(common);
+}
+
+void GDX12SwapChain::SetFrameGenerationSuspended(bool suspended)
+{
+    if (_frameGeneration->GetStatus().Suspended == suspended) return;
+    _device->GetCommandQueue()->Flush();
+    _frameGeneration->SetSuspended(suspended);
+}
+
+GDX12FrameGeneration& GDX12SwapChain::GetFrameGeneration() { return *_frameGeneration; }
 
 D3D12_VIEWPORT GDX12SwapChain::GetViewport()
 {
@@ -176,9 +188,11 @@ const ComPtr<IDXGISwapChain4>& GDX12SwapChain::GetSwapChain()
 
 void GDX12SwapChain::Reset()
 {
+    _device->GetCommandQueue()->Flush();
+    if (_frameGeneration) _frameGeneration->WaitForIdle();
     _buffers.clear();
-    _proxySwapChain.Reset();
-    _swapChain.Reset();
+    if (_frameGeneration) _frameGeneration->DestroySwapChain(_proxySwapChain, _swapChain);
+    else { _proxySwapChain.Reset(); _swapChain.Reset(); }
     _currentBufferIndex = 0;
 }
 

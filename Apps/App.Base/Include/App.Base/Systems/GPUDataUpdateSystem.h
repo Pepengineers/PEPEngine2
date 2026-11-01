@@ -178,6 +178,11 @@ private:
 
             XMStoreFloat4x4(&camera.PrevViewProjNoJitter, XMMatrixTranspose(unjitteredViewProj));
 
+            if (isActiveCamera)
+            {
+                pipelineCommonData->ActiveCameraJitterOffsetX = 0;
+                pipelineCommonData->ActiveCameraJitterOffsetY = 0;
+            }
             // Jitter current camera proj matrix if it is needed
             if (isActiveCamera &&
                 (renderModule->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_JITTER) ||

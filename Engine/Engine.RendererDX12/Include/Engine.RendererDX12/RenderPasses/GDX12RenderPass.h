@@ -12,6 +12,7 @@
 #include "Engine.RendererDX12/IRenderPassLink.h"
 
 class GameTimer;
+namespace sl { struct FrameToken; }
 
 enum ERenderPassFlags : uint32_t
 {
@@ -140,5 +141,6 @@ public:
     UINT DownscaledWidth = 0;
     UINT DownscaledHeight = 0;
     GDX12RenderPass* Upscaler = nullptr;
+    sl::FrameToken* StreamlineFrame = nullptr;
     bool ResetUpscalerHistory = true;
 };

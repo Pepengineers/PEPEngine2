@@ -19,6 +19,9 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameGeneration.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12Reconstruction.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReconstructionPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Sky.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GrassWind.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GrassRenderer.h" />
@@ -84,7 +87,10 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\GDX12Reconstruction.cpp" />
+    <ClCompile Include="src\GDX12ReconstructionPass.cpp" />
     <ClCompile Include="src\GDX12Sky.cpp" />
+    <ClCompile Include="src\GDX12FrameGeneration.cpp" />
     <ClCompile Include="src\GDX12EnvironmentIBLPass.cpp" />
     <ClCompile Include="src\GDX12GrassWind.cpp" />
     <ClCompile Include="src\GDX12GrassRenderer.cpp" />

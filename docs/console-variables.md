@@ -135,3 +135,35 @@ Noise, colors and animation belong to each `GDX12CloudComponent`; see
 [component API and integration](rendering/clouds.md). No clouds are attached to Bistro.
 
 Текущий статус обеих групп: код интегрирован в корневую ветку; центральные проверки и ограничения второй группы — в [отчёте интеграции](rendering/second-group-integration.md). Фразы о непроверенной авторской реализации выше относятся к исходной передаче агентами.
+
+## Апскейлеры и генерация кадров
+
+Все настройки ниже — runtime `Default`, доступны из стартового INI и через `SetValue`/`SetFromString` существующего ConsoleModule. INI после запуска не перечитывается.
+
+| CVar | Default | Значения |
+| --- | --- | --- |
+| `Render.Upscaler.Provider` | `1` | `0` Native, `1` XeSS, `2` FSR, `3` DLSS, `4` NIS |
+| `Render.Upscaler.Quality` | `0` | `0` SDK default, `1` NativeAA, `2` Quality, `3` Balanced, `4` Performance, `5` UltraPerformance, `6` UltraQuality, `7` UltraQualityPlus |
+| `Render.FrameGeneration.Provider` | `0` | `0` Off, `1` AMD, `2` NVIDIA, `3` Intel |
+| `Render.Reconstruction.Restart` | `0` | Беззнаковая 64-битная ревизия; изменение значения принудительно пересоздаёт текущие SR/FG contexts на следующей границе кадра |
+
+XeSS default — Ultra Quality Plus; FSR/DLSS/NIS default — Quality. XeSS принимает все перечисленные качества; FSR — Default/NativeAA/Quality/Balanced/Performance/UltraPerformance; DLSS — также UltraQuality при доступности в SDK; NIS — Default/Quality/Balanced/Performance. Запрос отсутствующего качества или недоступного SDK даёт native fallback с причиной, а не скрытую смену производителя. FG независимо ограничивается совместимостью GPU/driver/SDK; при отказе остаётся Off. Поддерживается один промежуточный кадр (2x).
+
+```ini
+[ConsoleVariables]
+Render.Upscaler.Provider = 1
+Render.Upscaler.Quality = 0
+Render.FrameGeneration.Provider = 0
+```
+
+```cpp
+auto console = BenchmarkEngine::GetLocator().GetModule<ConsoleModule>();
+console->FindConsoleVariable(L"Render.Upscaler.Provider").SetFromString("2");
+console->FindConsoleVariable(L"Render.FrameGeneration.Provider").SetFromString("3");
+console->FindConsoleVariable(L"Render.Reconstruction.Restart").SetFromString("1");
+// Следующий принудительный restart: новая ревизия, например 2.
+```
+
+Requested/effective режимы, причина fallback и поколения контекстов доступны через `RenderModule::GetReconstructionStatus()` и `GetFrameGenerationStatus()` на потоке рендера. Смена настроек допускает ожидание GPU и пересоздание presentation; сцена/ассеты сохраняются. Pause/minimize/resize приостанавливают FG. Счётчик `GeneratedFrames` относится к текущему поколению FG: AMD учитывает успешные generation dispatches, Intel/NVIDIA — дополнительные presented frames из SDK status.
+
+Вывод остаётся SDR с существующим Reinhard/sRGB: `scene-linear HDR → SR → Reinhard/sRGB → FG presentation → Present`. Native и NIS не включают temporal jitter; temporal SR включает его. [Текущий граф](rendering/current-render-graph.md), [пакеты SDK](../External/ReconstructionSDKs.md).

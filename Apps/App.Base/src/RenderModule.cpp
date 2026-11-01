@@ -12,6 +12,8 @@
 #include "Engine.Core/Logging/Logger.h"
 
 #include "Engine.RendererDX12/GDX12SwapChain.h"
+#include "Engine.RendererDX12/GDX12StreamlineSDK.h"
+#include "Engine.RendererDX12/GDX12FrameGeneration.h"
 #include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include "Engine.RendererDX12/GDX12ShadowCascades.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureClearPass.h"
@@ -30,15 +32,12 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyFromSharedMemoryPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyToSharedMemoryPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OutputToScreenPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12FSRUpscalePass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12NISUpscalePass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12ReconstructionPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12SyncPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12XeSSUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DepthOfFieldPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12MotionBlurPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12FluidPass.h"
 #include <cmath>
-#include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
     _dualGPUMode(false), _window(window), _timer(timer),
@@ -56,17 +55,19 @@ RenderModule::~RenderModule()
     for (auto& renderpass : _secondaryRenderPassExecutionList) { renderpass->ClearDenendencies(); }
 
     _primaryResources.Grass.reset();
+    _primaryRenderPassExecutionList.clear();
+    _secondaryRenderPassExecutionList.clear();
+    _backBuffer.reset();
     GDX12ShaderCompiler::Shutdown();
     GDX12DeviceFactory::Reset();
+    GDX12StreamlineSDK::Get().Shutdown();
 }
 
 void RenderModule::Initialize()
 {
     Log::Info("Renderer", "Initializing rendering devices and frame resources");
-    // This value will be later provided by external pipeline config
-    bool useStreamlineSDK = false;
-    // Streamline is initialized on the primary device only
-    if (useStreamlineSDK) { GDX12StreamlineSDK::Get().Initialize(); }
+    if (!GDX12StreamlineSDK::Get().Initialize())
+        Log::Warning("Renderer", "Streamline unavailable; NVIDIA features will report unsupported and fall back");
 
 #if defined(DEBUG) || defined(_DEBUG)
     // Enable the D3D12 debug layer.
@@ -877,6 +878,12 @@ void RenderModule::OnUpdate()
     if (_timer->DeltaTime() > 0.25f) _RPcommonData.RequestHistoryReset = true;
     uint16_t width, height;
     _window->GetWindowSize(width, height);
+    if (width && height && _reconstructionPass && _reconstructionPass->ApplySettings())
+    {
+        OnResize();
+        _primaryPipelineFlags = 0;
+        for (const auto& pass : _primaryRenderPassExecutionList) _primaryPipelineFlags |= pass->GetFlags();
+    }
 
     auto consoleModule = BenchmarkEngine::GetLocator().GetModule<ConsoleModule>();
     const auto numFrames = consoleModule->FindConsoleVariable(L"Render.NumFrames").GetUInt();
@@ -914,6 +921,7 @@ void RenderModule::OnUpdate()
 
 void RenderModule::OnRender()
 {
+    _backBuffer->GetFrameGeneration().BeginRendering(_RPcommonData);
     PrepareSkeletalMeshes();
     if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
         _primaryResources.UpdateMaterialCB(_materials);
@@ -945,6 +953,8 @@ void RenderModule::OnRender()
         if (earlyAO && renderPass.get() == _depthPrepass) _ambientOcclusionPass->Execute(primarycmdList);
     }
 
+    _backBuffer->GetFrameGeneration().Prepare(primarycmdList,
+        _frameGenerationDepth->GetTexture(), _frameGenerationMotion->GetTexture(), _RPcommonData);
     _primaryGPUTimer->Stop(primarycmdList);
     primarycmdQueue->ExecuteCommandList(primarycmdList);
     primaryCurrentFrameConsts->FenceValue = primarycmdList->FenceValue;
@@ -973,6 +983,7 @@ void RenderModule::OnRender()
         _secondaryGPUTimer->OnCommandListExecuted(secondarycmdList->FenceValue);
     }
 
+    _backBuffer->GetFrameGeneration().EndRendering();
     _backBuffer->Present();
 }
 
@@ -1281,7 +1292,9 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>(nullptr, frontTransparency));
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DepthOfFieldPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12MotionBlurPass>());
-    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12XeSSUpscalePass>());
+    auto reconstruction = std::make_unique<GDX12ReconstructionPass>();
+    _reconstructionPass = reconstruction.get();
+    _primaryRenderPassExecutionList.push_back(std::move(reconstruction));
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
 
     SetupRenderPasses();
@@ -1312,7 +1325,8 @@ void RenderModule::ConfigureRenderPipeline()
     _opaquePass = opaquePass;
     _ambientOcclusionPass = aoPass;
 
-    clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
+    // Output overwrites the entire backbuffer; FG proxy buffers need no clear.
+    clearPass->SetInputs({ _depthStencil.get() });
     reflectionPass->SetInputs({ environmentPass->GetOutput(0), environmentPass->GetOutput(1),
         environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0) });
     cullingPass->SetInputs({});
@@ -1333,6 +1347,8 @@ void RenderModule::ConfigureRenderPipeline()
     dofPass->SetInputs({ frontCompositionPass->GetOutput(0), fluidSurfacePass->GetOutput(0) });
     motionBlurPass->SetInputs({ dofPass->GetOutput(0), fluidSurfacePass->GetOutput(0), fluidSurfacePass->GetOutput(1) });
     upscalePass->SetInputs({ fluidSurfacePass->GetOutput(0), motionBlurPass->GetOutput(1), motionBlurPass->GetOutput(0) });
+    _frameGenerationDepth = fluidSurfacePass->GetOutput(0);
+    _frameGenerationMotion = motionBlurPass->GetOutput(1);
     particlesPass->SetInputs({ fluidSurfacePass->GetOutput(0), frontPass->GetOutput(0), frontPass->GetOutput(1) });
     static_cast<GDX12WBOITCompositionPass*>(frontCompositionPass)->SetParticles(particlesPass);
     outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get()});
@@ -1476,4 +1492,28 @@ bool RenderModule::ShouldTick()
 bool RenderModule::ShouldRender()
 {
     return true;
+}
+
+const GDX12ReconstructionStatus& RenderModule::GetReconstructionStatus() const
+{
+    if (!_reconstructionPass) throw std::logic_error("Render pipeline has not been initialized");
+    return _reconstructionPass->GetStatus();
+}
+
+void RenderModule::BeginFrame()
+{
+    if (_backBuffer) _backBuffer->BeginFrame(_RPcommonData);
+}
+
+void RenderModule::SetFrameGenerationSuspended(bool suspended)
+{
+    if (!_backBuffer || _backBuffer->GetFrameGeneration().GetStatus().Suspended == suspended) return;
+    _backBuffer->SetFrameGenerationSuspended(suspended);
+    _RPcommonData.RequestHistoryReset = true;
+}
+
+const GDX12FrameGenerationStatus& RenderModule::GetFrameGenerationStatus() const
+{
+    if (!_backBuffer) throw std::logic_error("Render pipeline has not been initialized");
+    return _backBuffer->GetFrameGeneration().GetStatus();
 }

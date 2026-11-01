@@ -2,6 +2,7 @@
 #include "../src/Systems/FlyingPropSystem.h"
 #include "../src/BistroScene.h"
 #include "Engine.Core/IO/TextureLoader.h"
+#include "Engine.RendererDX12/GDX12FrameGeneration.h"
 #include <cmath>
 #include <chrono>
 #include <cstring>
@@ -202,6 +203,8 @@ public:
         {
             Require(Locator.GetModule<ConsoleModule>()->FindConsoleVariable(name).SetFromString(value), "Bistro runtime setting failed");
         };
+        const int upscalers[] = {0, 1, 2, 3, 4, 1};
+        bool startedFG[4] = {};
         for (unsigned frame = 0; frame < 36; ++frame)
         {
             MSG message;
@@ -231,6 +234,16 @@ public:
             if (frame == 26) setting(L"Render.MotionBlur.MaxRadius", "40");
             if (frame == 28) setting(L"Render.MotionBlur.ShutterFraction", "0");
             if (frame == 30) setting(L"Render.MotionBlur.ShutterFraction", "0.5");
+            const int upscaler = upscalers[frame / 6];
+            const int frameGeneration = frame < 12 ? 0 : frame < 24 ? 1 : 3;
+            setting(L"Render.Upscaler.Provider", std::to_string(upscaler).c_str());
+            setting(L"Render.Upscaler.Quality", "0");
+            setting(L"Render.FrameGeneration.Provider", std::to_string(frameGeneration).c_str());
+            if (frame == 9 || frame == 27)
+                setting(L"Render.Reconstruction.Restart", std::to_string(frame).c_str());
+            // This fixture renders explicitly instead of using App::Update.
+            render->SetFrameGenerationSuspended(false);
+            render->BeginFrame();
             render->Update();
             const float dt = frame < 24 ? 1.0f / 60 : 0;
             auto work = _movement.Schedule(_jobs, world, dt);
@@ -243,7 +256,20 @@ public:
             work.Complete();
             Render(Timer);
             render->WaitForUploads();
+            const auto& sr = render->GetReconstructionStatus();
+            const auto& fg = render->GetFrameGenerationStatus();
+            Require(static_cast<int>(sr.Requested.Provider) == upscaler &&
+                (sr.Effective == sr.Requested.Provider || !sr.FallbackReason.empty()), "Bistro SR mode/fallback mismatch");
+            Require(static_cast<int>(fg.Requested) == frameGeneration, "Bistro FG request lost");
+            if (frameGeneration && fg.Effective == fg.Requested) startedFG[frameGeneration] = true;
+            if (frameGeneration && startedFG[frameGeneration])
+            {
+                Require(fg.Effective == fg.Requested, "Bistro FG failed after starting");
+                if (frame % 6 == 5) Require(fg.GeneratedFrames > 0, "Bistro FG did not generate frames");
+            }
+            else Require(!frameGeneration || !fg.FallbackReason.empty(), "Bistro FG fallback omitted its reason");
         }
+        render->SetFrameGenerationSuspended(true);
         ThrowIfFailed(device->GetDeviceRemovedReason());
         for (UINT64 index = 0; index < info->GetNumStoredMessages(); ++index)
         {
@@ -254,7 +280,7 @@ public:
             ThrowIfFailed(info->GetMessage(index, message, &bytes));
             if (message->Severity <= D3D12_MESSAGE_SEVERITY_WARNING) throw std::runtime_error(message->pDescription);
         }
-        std::cout << "Actual Bistro rendered 36 frames through motion blur/HDR XeSS/tone mapping; props="
+        std::cout << "Actual Bistro rendered 36 frames through all SR providers, independent AMD/Intel FG and Reinhard; props="
             << ecs.GetPool<FlyingPropComponent>().Size()
             << ", camera translation/rotation, Off/Low/Mid/High, cut and odd resize passed; debug layer clean.\n";
     }
@@ -282,7 +308,7 @@ int main(int argc, char** argv)
             debug->EnableDebugLayer();
             ObjectDataApp app(std::filesystem::absolute(argv[2]));
             Require(app.Initialize(), "Bistro render smoke initialization failed");
-            ShowWindow(app.GetWindow()->GetWindowHandle(), SW_HIDE);
+            ShowWindow(app.GetWindow()->GetWindowHandle(), SW_SHOWNOACTIVATE);
             app.RenderBistroFrames();
             return 0;
         }

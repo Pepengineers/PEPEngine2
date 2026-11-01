@@ -2,12 +2,14 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
+#include <stdexcept>
+#include <algorithm>
 
 class GDX12NISUpscalePass : public GDX12RenderPass
 {
 public:
-	GDX12NISUpscalePass() : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _viewportHandle(1337),
-		_sharpness(0.1f)
+	explicit GDX12NISUpscalePass(float ratio = 1.5f) : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _viewportHandle(1337),
+		_sharpness(0.1f), _ratio(ratio)
 	{ _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_STREAMLINE; }
 
 	virtual void SetInputs(std::vector<IRenderPassLink*> inputs) override
@@ -39,6 +41,8 @@ public:
 		TextureDesc1.Height = _commonData->WindowHeight;
 
 		TextureDesc1.CreateSRV = true;
+        TextureDesc1.CreateUAV = true;
+        TextureDesc1.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
 		TextureDesc1.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
 		TextureDesc1.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 		TextureDesc1.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -52,7 +56,8 @@ public:
 		{
 			IN_Textures[i] = _inputs[i + 2];
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
-			TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = inputTexture->GetFormat();
+			TextureDesc1.Format = TextureDesc1.RTVDesc.Format = TextureDesc1.SRVDesc.Format = TextureDesc1.UAVDesc.Format = inputTexture->GetFormat();
+            TextureDesc1.UAVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
 			TextureDesc1.SRVHeapIndex = _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
 			OUT_UpscaledTextures[i]->Initialize(TextureDesc1);
 		}
@@ -73,14 +78,12 @@ public:
 
 		cmdList->BeginPixEvent("NIS Upscale Pass", Colors::Blue);
 
-		FrameToken* currentFrame = nullptr;
-		Result result = GDX12StreamlineSDK::Get().GetNewFrameToken(currentFrame);
+		FrameToken* currentFrame = _commonData->StreamlineFrame;
+        Result result = currentFrame ? Result::eOk : GDX12StreamlineSDK::Get().GetNewFrameToken(currentFrame);
 		if (result != Result::eOk || currentFrame == nullptr)
 		{
 			std::string errorMsg = "NIS: Failed to get a frame token: " + SLResultToString(result) + "\n";
-			OutputDebugStringA(errorMsg.c_str());
-			cmdList->EndPixEvent();
-			return;
+			throw std::runtime_error(errorMsg);
 		}
 
 		Extent inputExtent{};
@@ -99,6 +102,8 @@ public:
 		{
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
 			GDX12Texture* upscaledTexture = OUT_UpscaledTextures[i].get();
+            cmdList->ResourceBarrier({ inputTexture->GetResource()->GetNonPixelShaderResourceBarrier(),
+                upscaledTexture->GetResource()->GetUnorderedAccessBarrier() });
 
 			Resource inputResource = Resource{ ResourceType::eTex2d,
 				inputTexture->GetResource()->D3DResource.Get(),
@@ -116,16 +121,18 @@ public:
 			if (result != Result::eOk)
 			{
 				std::string errorMsg = "NIS: Failed to set tags: " + SLResultToString(result) + "\n";
-				OutputDebugStringA(errorMsg.c_str());
+				throw std::runtime_error(errorMsg);
 			}
 
 			const BaseStructure* inputs[] = { &_viewportHandle };
 			result = GDX12StreamlineSDK::Get().EvaluateFeature(kFeatureNIS, *currentFrame, inputs, _countof(inputs), cmdList->GetCommandList().Get());
+            cmdList->InvalidateCachedState();
 			if (result != Result::eOk)
 			{
 				std::string errorMsg = "NIS EVALUATE ERROR: " + SLResultToString(result) + "\n";
-				OutputDebugStringA(errorMsg.c_str());
+				throw std::runtime_error(errorMsg);
 			}
+            cmdList->ResourceBarrier({ upscaledTexture->GetResource()->GetUAVBarrier() });
 		}
 
 		cmdList->EndPixEvent();
@@ -140,7 +147,7 @@ public:
 
 	void QueryRenderTargetResolution() override
 	{
-		constexpr float UpscaleRatio = 1.5f;
+		const float UpscaleRatio = _ratio;
 		_commonData->DownscaledWidth = static_cast<UINT>(static_cast<float>(_commonData->WindowWidth) / UpscaleRatio);
 		_commonData->DownscaledHeight = static_cast<UINT>(static_cast<float>(_commonData->WindowHeight) / UpscaleRatio);
 	}
@@ -167,6 +174,7 @@ private:
 	std::vector<std::unique_ptr<GDX12Texture>> OUT_UpscaledTextures;
 	sl::ViewportHandle _viewportHandle;
 	float _sharpness;
+    float _ratio;
 
 	void MatchOutputCount(UINT outputCount)
 	{
@@ -182,7 +190,7 @@ private:
 		_numOutputs = outputCount;
 	}
 
-	bool CheckNISSupport()
+	void CheckNISSupport()
 	{
 		using namespace sl;
 
@@ -192,11 +200,10 @@ private:
 		adapterInfo.deviceLUIDSizeInBytes = sizeof(adapterLuid);
 
 		Result result = GDX12StreamlineSDK::Get().IsFeatureSupported(kFeatureNIS, adapterInfo);
-		if (result == Result::eOk) { return true; }
+		if (result == Result::eOk) { return; }
 
 		std::string errorMsg = "ERROR: NIS Feature is not supported on the current adapter: " + SLResultToString(result) + "\n";
-		OutputDebugStringA(errorMsg.c_str());
-		return false;
+		throw std::runtime_error(errorMsg);
 	}
 
 	void CreateNISFeature()
@@ -205,14 +212,14 @@ private:
 
 		NISOptions nisOptions = {};
 		nisOptions.mode = NISMode::eScaler;
-		nisOptions.hdrMode = NISHDR::eNone;
+		nisOptions.hdrMode = NISHDR::eLinear;
 		nisOptions.sharpness = _sharpness;
 
 		Result result = GDX12StreamlineSDK::Get().NISSetOptions(_viewportHandle, nisOptions);
 		if (result != Result::eOk)
 		{
 			std::string errorMsg = "ERROR: Failed to set NIS options: " + SLResultToString(result) + "\n";
-			OutputDebugStringA(errorMsg.c_str());
+			throw std::runtime_error(errorMsg);
 		}
 	}
 

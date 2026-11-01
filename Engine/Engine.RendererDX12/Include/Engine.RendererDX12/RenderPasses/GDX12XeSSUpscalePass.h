@@ -7,7 +7,7 @@
 class GDX12XeSSUpscalePass : public GDX12RenderPass
 {
 public:
-    GDX12XeSSUpscalePass()
+    explicit GDX12XeSSUpscalePass(xess_quality_settings_t quality = XESS_QUALITY_SETTING_ULTRA_QUALITY_PLUS) : _quality(quality)
     {
         _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_JITTER;
         _numInputs = 3;
@@ -86,7 +86,7 @@ public:
     {
         const xess_2d_t output = { _commonData->WindowWidth, _commonData->WindowHeight };
         xess_2d_t input = {}, minimum = {}, maximum = {};
-        Check(xessGetOptimalInputResolution(_context, &output, XESS_QUALITY_SETTING_ULTRA_QUALITY_PLUS,
+        Check(xessGetOptimalInputResolution(_context, &output, _quality,
             &input, &minimum, &maximum));
         _commonData->DownscaledWidth = input.x;
         _commonData->DownscaledHeight = input.y;
@@ -126,7 +126,7 @@ private:
         xess_d3d12_init_params_t params = {};
         params.outputResolution = { _commonData->WindowWidth, _commonData->WindowHeight };
         params.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH | XESS_INIT_FLAG_USE_NDC_VELOCITY;
-        params.qualitySetting = XESS_QUALITY_SETTING_ULTRA_QUALITY_PLUS;
+        params.qualitySetting = _quality;
         const auto result = xessD3D12Init(_context, &params);
         if (result < XESS_RESULT_SUCCESS)
         {
@@ -136,6 +136,7 @@ private:
         _commonData->ResetUpscalerHistory = true;
     }
 
+    xess_quality_settings_t _quality;
     GDX12Texture _output;
     xess_context_handle_t _context = nullptr;
     uint64_t _historyRevision = UINT64_MAX;

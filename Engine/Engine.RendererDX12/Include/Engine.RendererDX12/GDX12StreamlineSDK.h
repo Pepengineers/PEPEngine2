@@ -32,6 +32,7 @@ public:
     static std::string ResultToString(sl::Result result);
 
     ComPtr<IDXGIFactory7> CreateProxyFactory(const ComPtr<IDXGIFactory7>& nativeFactory) const;
+    ComPtr<IDXGISwapChain4> CreateProxySwapChain(const ComPtr<IDXGISwapChain4>& swapChain) const;
     ComPtr<ID3D12Device14> CreateProxyDevice(const ComPtr<ID3D12Device14>& nativeDevice, bool setAsMainDevice) const;
     ComPtr<IDXGIFactory7> GetNativeFactory(const ComPtr<IDXGIFactory7>& factory) const;
     ComPtr<ID3D12Device14> GetNativeDevice(const ComPtr<ID3D12Device14>& device) const;
@@ -39,6 +40,8 @@ public:
     ComPtr<IDXGISwapChain4> GetNativeSwapChain(const ComPtr<IDXGISwapChain4>& swapChain) const;
     ComPtr<ID3D12Resource> GetNativeResource(const ComPtr<ID3D12Resource>& resource) const;
     sl::Result IsFeatureSupported(sl::Feature feature, const sl::AdapterInfo& adapterInfo) const;
+    sl::Result GetFeatureFunction(sl::Feature feature, const char* name, void*& function) const;
+    sl::Result SetFeatureLoaded(sl::Feature feature, bool loaded) const;
     sl::Result GetNewFrameToken(sl::FrameToken*& token, const uint32_t* frameIndex = nullptr) const;
     sl::Result SetTagForFrame(const sl::FrameToken& frame, const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer) const;
     sl::Result EvaluateFeature(sl::Feature feature, const sl::FrameToken& frame, const sl::BaseStructure** inputs, uint32_t numInputs, sl::CommandBuffer* cmdBuffer) const;
@@ -123,6 +126,7 @@ private:
     PFun_slSetD3DDevice* _slSetD3DDevice = nullptr;
     PFun_slIsFeatureSupported* _slIsFeatureSupported = nullptr;
     PFun_slGetFeatureFunction* _slGetFeatureFunction = nullptr;
+    PFun_slSetFeatureLoaded* _slSetFeatureLoaded = nullptr;
     PFun_slEvaluateFeature* _slEvaluateFeature = nullptr;
     PFun_slFreeResources* _slFreeResources = nullptr;
     PFun_slSetTagForFrame* _slSetTagForFrame = nullptr;
