@@ -20,6 +20,19 @@ namespace
     public:
         explicit BistroApp(const HINSTANCE instance) : App(instance) {}
 
+        bool Initialize() override
+        {
+            if (!App::Initialize()) return false;
+            auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+            auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
+            // Start at eye height just outside the main entrance, facing the interior.
+            camera.Location = Vector3(-300.0f, 200.0f, 20.0f);
+            camera.Rotation = Vector3(0.0f, 117.0f, 0.0f);
+            camera.DirtyFlag = true;
+            world.GetECS().Get<CameraComponent>(world.ActiveCamera).InvalidateHistory();
+            return true;
+        }
+
         void BenchmarkFrame()
         {
             MSG message;
