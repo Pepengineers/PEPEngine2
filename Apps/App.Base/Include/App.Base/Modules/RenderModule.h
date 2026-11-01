@@ -1,4 +1,4 @@
-﻿#pragma once
+п»ї#pragma once
 
 #include "Common/GameTimer.h"
 #include "Common/Module.h"
@@ -76,6 +76,10 @@ public:
         ListenerHandle RenderCompCreated = 0;
         ListenerHandle RenderCompDestroyed = 0;
         ListenerHandle RenderCompUpdated = 0;
+        ListenerHandle GrassCreated = 0;
+        ListenerHandle GrassUpdated = 0;
+        ListenerHandle WindCreated = 0;
+        ListenerHandle WindUpdated = 0;
     };
 
     TransformCompGPUData& GetTransformGPUData(Entity entity);
@@ -124,6 +128,7 @@ protected:
 private:
     void BuildBackBuffer();
     void CollectReflectionScene();
+    void CollectGrassScene(GDX12CommandList* commands);
     void ShareFences();
     void ConfigureRenderPipeline();
     void SetupRenderPasses();
@@ -179,6 +184,7 @@ private:
     // Defines which resources should be uploaded onto respective GPU
     uint32_t _primaryPipelineFlags;
     uint32_t _secondaryPipelineFlags;
+    uint64_t _grassWindOwner = 0;
     uint64_t _reflectionStaticHash = 0;
     uint64_t _reflectionDynamicHash = 0;
     UINT _instanceCount = 0;

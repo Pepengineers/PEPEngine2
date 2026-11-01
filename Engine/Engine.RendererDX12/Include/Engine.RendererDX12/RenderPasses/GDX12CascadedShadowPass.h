@@ -106,7 +106,8 @@ public:
             commands->ResourceBarrier({ _atlas->GetResource()->GetSRVBarrier() });
             return;
         }
-        if ((lighting.SunShadowFlags & 2u) == 0u && _rendered && _cachedRevision == lighting.SunShadowRevision &&
+        const uint64_t grassRevision = _resources->Grass ? _resources->Grass->Revision() : 0;
+        if ((lighting.SunShadowFlags & 2u) == 0u && _rendered && _cachedGrassRevision == grassRevision && _cachedRevision == lighting.SunShadowRevision &&
             std::memcmp(&_cachedSettings, &_resources->ShadowSettings, sizeof(_cachedSettings)) == 0) return;
         const UINT count = _resources->IndirectCommandsCache->GetElementCount();
         auto& visibility = _visibility[_resources->CurrFrameConstantsIndex];
@@ -163,6 +164,21 @@ public:
                 visibility.Commands[cascade]->GetResource().D3DResource.Get(), 0,
                 visibility.Counters->GetResource().D3DResource.Get(), cascade * sizeof(UINT));
         }
+        if (_resources->Grass && _resources->Grass->HasCasters())
+        {
+            for (UINT cascade = 0; cascade < 4; ++cascade)
+            {
+                const UINT x = (cascade & 1u) * 2048;
+                const UINT y = (cascade >> 1u) * 2048;
+                commands->SetViewport({ static_cast<float>(x), static_cast<float>(y), 2048, 2048, 0, 1 });
+                commands->SetScissorRect({ static_cast<LONG>(x), static_cast<LONG>(y), static_cast<LONG>(x + 2048), static_cast<LONG>(y + 2048) });
+                commands->SetRenderTargets({}, _atlas.get());
+                _resources->Grass->Draw(commands, GDX12GrassRenderer::Stage::Shadow,
+                    Matrix(_resources->ShadowSettings.ViewProj[cascade]).Transpose(),
+                    _commonData->CameraView.Invert().Translation(), 0);
+            }
+        }
+        _cachedGrassRevision = grassRevision;
         commands->ResourceBarrier({ _atlas->GetResource()->GetSRVBarrier() });
         commands->EndPixEvent();
         _rendered = true;
@@ -202,6 +218,7 @@ private:
     ComPtr<ID3D12PipelineState> _shadowPSO, _cullingPSO, _clearPSO;
     ComPtr<ID3D12CommandSignature> _signature;
     GDX12ShadowConstants _cachedSettings;
+    uint64_t _cachedGrassRevision = 0;
     UINT _cachedRevision = 0;
     bool _rendered = false;
 };

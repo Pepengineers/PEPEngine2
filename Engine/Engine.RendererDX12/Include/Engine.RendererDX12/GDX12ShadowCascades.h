@@ -5,7 +5,7 @@
 #include <cmath>
 
 inline GDX12ShadowConstants BuildShadowCascades(const Matrix& inverseView, float fov, float aspect,
-    float nearPlane, float farPlane, Vector3 lightDirection)
+    float nearPlane, float farPlane, Vector3 lightDirection, const BoundingBox* casterBounds = nullptr)
 {
     GDX12ShadowConstants result;
     float splits[4], texelSizes[4];
@@ -44,9 +44,24 @@ inline GDX12ShadowConstants BuildShadowCascades(const Matrix& inverseView, float
         centerLS.y = std::floor(centerLS.y / texelSize) * texelSize;
         // Include off-camera casters above/below the receiver frustum.
         const float depthRadius = radius + 4000.0f;
+        float shadowNear = -centerLS.z - depthRadius;
+        float shadowFarPlane = -centerLS.z + depthRadius;
+        if (casterBounds)
+        {
+            BoundingBox lightBounds;
+            casterBounds->Transform(lightBounds, lightView);
+            const Vector3 low = Vector3(lightBounds.Center) - Vector3(lightBounds.Extents);
+            const Vector3 high = Vector3(lightBounds.Center) + Vector3(lightBounds.Extents);
+            if (high.x >= centerLS.x - radius && low.x <= centerLS.x + radius &&
+                high.y >= centerLS.y - radius && low.y <= centerLS.y + radius)
+            {
+                shadowNear = (std::min)(shadowNear, -high.z - 1);
+                shadowFarPlane = (std::max)(shadowFarPlane, -low.z + 1);
+            }
+        }
         const Matrix projection = Matrix::CreateOrthographicOffCenter(
             centerLS.x - radius, centerLS.x + radius, centerLS.y - radius, centerLS.y + radius,
-            -centerLS.z - depthRadius, -centerLS.z + depthRadius);
+            shadowNear, shadowFarPlane);
         XMStoreFloat4x4(&result.ViewProj[cascade], XMMatrixTranspose(lightView * projection));
         // Overlap receiver intervals for a smooth transition between cascades.
         previous = split - (split - previous) * 0.1f;

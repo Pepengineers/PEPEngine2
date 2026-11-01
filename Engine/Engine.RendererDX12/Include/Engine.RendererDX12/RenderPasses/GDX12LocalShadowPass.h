@@ -147,6 +147,9 @@ public:
                 commands->GetCommandList()->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
                 if (count) commands->ExecuteIndirect(_signature.Get(), count,
                     visibility.Commands->GetResource().D3DResource.Get(), 0, visibility.Counter->GetResource().D3DResource.Get(), 0);
+                if (!_staticOnly && _resources->Grass)
+                    _resources->Grass->Draw(commands, GDX12GrassRenderer::Stage::Shadow,
+                        Matrix(light.ShadowViewProj[face]).Transpose(), _commonData->CameraView.Invert().Translation(), 0);
                 ++_renderedViews;
             }
             _cached[lightIndex] = light;

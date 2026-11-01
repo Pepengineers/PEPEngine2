@@ -88,3 +88,13 @@ focus distance in cm, f-number, vertical sensor size, CoC limit, SDK ring budget
 ring merging. Manual overrides survive quality changes; zero restores preset
 inheritance. Defaults, units, ranges, HDR/XeSS contracts and checks are documented
 in [depth-of-field.md](rendering/depth-of-field.md).
+
+## Grass и wind
+
+`Render.Grass.Enabled`, `Render.Grass.Quality`, `Render.Wind.Enabled` и
+`Render.Wind.Quality` — единственные глобальные controls этих техник, runtime
+`Default`. Enabled по умолчанию `true`; Quality `2`, допустимо `0..3`
+(Off/Low/Mid/High). Все остальные настройки принадлежат `GrassRenderComponent`
+или `WindFieldComponent`. [API, units, ranges, budgets и seams](grass-wind.md).
+Реализация автора **НЕПРОВЕРЕНА**: сборки, тесты и GPU-проверки не запускались
+по прямому указанию пользователя.

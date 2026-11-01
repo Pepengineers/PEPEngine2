@@ -9,6 +9,8 @@
 #include "App.Base/ECS/Components/LookAtTargetComponent.h"
 #include "App.Base/ECS/Components/LightComponent.h"
 #include "App.Base/ECS/Components/ReflectionProbeComponent.h"
+#include "App.Base/ECS/Components/GrassRenderComponent.h"
+#include "App.Base/ECS/Components/WindFieldComponent.h"
 #include "App.Base/ECS/Components/FlyingPropComponent.h"
 #include "App.Base/ECS/Components/NameComponent.h"
 #include "App.Base/ECS/Components/SplineCurveComponent.h"
@@ -35,7 +37,9 @@ using WorldECS = ECSStorage<
     LookAtTargetComponent,
     LightComponent,
     FlyingPropComponent,
-    ReflectionProbeComponent
+    ReflectionProbeComponent,
+    GrassRenderComponent,
+    WindFieldComponent
 >;
 
 class World {
