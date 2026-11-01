@@ -19,6 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12GpuRadixSort.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GrassWind.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GrassWindPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderSettings.h" />
@@ -80,6 +81,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\GDX12GpuRadixSort.cpp" />
     <ClCompile Include="src\GDX12GrassWind.cpp" />
     <ClCompile Include="src\GDX12GrassWindPass.cpp" />
     <ClCompile Include="src\RenderSettings.cpp" />
@@ -110,6 +112,7 @@
     <ClCompile Include="src\GDX12Texture.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Shaders\GpuRadixSort.hlsl" />
     <None Include="Shaders\BufferClear.hlsl" />
     <None Include="Shaders\CBufferStructures.hlsl" />
     <None Include="Shaders\CompositionPass.hlsl" />

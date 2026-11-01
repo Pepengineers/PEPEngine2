@@ -375,6 +375,7 @@
 
 ### Native/XeSS и качество апскейлера
 
+- Коммит `2978cdb`, `feat(render): add native and XeSS controls`.
 - Добавлены Render.Upscaler.Enabled и Quality: 0 native, 1 XeSS Performance,
   2 Balanced, 3 Ultra Quality Plus. Default High сохраняет прежний режим.
   Input dimensions запрашиваются у SDK; native использует полный размер окна.
@@ -390,6 +391,25 @@
   Логи `Build/native-*-{build,run}.log`; DX12 debug errors отсутствуют.
 - Сравнение итоговых изображений и положения MB/DoF относительно XeSS остаётся
   отдельной проверкой; эта итерация подтверждает управление режимами и ресурсами.
+
+### GPU-count radix sort
+
+- Новый GDX12GpuRadixSort использует MIT GPU kernels FidelityFX SDK v1.1.4
+  (тот же pin, что SSR/DoF). Count читается GPU; setup вычисляет constants и
+  indirect dispatch arguments. CPU не получает count для запуска сортировки.
+  Восемь 4-bit iterations выполняют Count/Reduce/Scan/ScanAdd/Scatter; uint32 keys
+  и payload остаются в выходном buffer A. Между стадиями заданы UAV dependencies.
+- Constant records имеют явный stride 256 bytes; count ограничивается реальной
+  capacity, пустой список задаёт нулевые dispatches. Helper создаётся потребителем,
+  поэтому пустая пользовательская сцена не выделяет его buffers.
+- Fixture написан первым; host подтвердил missing-header compile/API red
+  (`Build/gpu-sort-red-build.log`). Шесть стадий прошли DXC cs_6_0 -WX. Затем
+  Release GpuSortGpuSmoke и GPU debug layer прошли: random/duplicate keys,
+  0/1/511/512/513/409600/409601, full→zero, count index 2 и UINT_MAX clamp,
+  key/payload association, полный payload multiset и suffix canaries.
+  Логи `Build/gpu-sort-{build,run}.log`. Timings сортировки отдельно не измерялись.
+- Это проверенная общая зависимость будущих particles/fluid, а не завершение
+  их компонентов. Алгоритм и лицензия: https://gpuopen.com/fidelityfx-parallel-sort/.
 
 ## Оставшаяся работа
 
