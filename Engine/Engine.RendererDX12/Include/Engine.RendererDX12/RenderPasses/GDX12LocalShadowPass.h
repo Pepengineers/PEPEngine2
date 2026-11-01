@@ -90,8 +90,8 @@ public:
     void Execute(GDX12CommandList* commands) override
     {
         if (_staticShadows) _staticShadows->Execute(commands);
-        if (_staticRevision != _resources->ReflectionStaticRevision ||
-            (!_staticOnly && _dynamicRevision != _resources->ReflectionDynamicRevision))
+        if (!_resources->LocalShadowCasters && (_staticRevision != _resources->ReflectionStaticRevision ||
+            (!_staticOnly && _dynamicRevision != _resources->ReflectionDynamicRevision)))
         {
             _cached.clear();
             _staticRevision = _resources->ReflectionStaticRevision;
@@ -129,7 +129,9 @@ public:
             const auto& cached = _cached[lightIndex];
             auto cacheKey = light;
             if (_staticOnly) cacheKey.ShadowFlags &= ~2u;
-            if (!ShouldRenderLocalShadow(cacheKey, cached ? &*cached : nullptr)) continue;
+            const uint64_t casters = _resources->LocalShadowCasters ?
+                LocalShadowCasterSignature(light, *_resources->LocalShadowCasters, _staticOnly) : 0;
+            if (!ShouldRenderLocalShadow(cacheKey, cached ? &cached->Light : nullptr) && cached->Casters == casters) continue;
             for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
             {
                 if (_staticShadows)
@@ -182,7 +184,7 @@ public:
                         Matrix(light.ShadowViewProj[face]).Transpose(), _commonData->CameraView.Invert().Translation(), 0);
                 ++_renderedViews;
             }
-            _cached[lightIndex] = light;
+            _cached[lightIndex] = CachedShadow{ light, casters };
         }
         commands->ResourceBarrier({ _maps->GetResource()->GetSRVBarrier() });
     }
@@ -255,7 +257,12 @@ private:
         std::unique_ptr<GDX12UploadBuffer<UINT>> Counter;
     };
     std::vector<Visibility> _visibility;
-    std::vector<std::optional<GDX12LocalLightConstants>> _cached;
+    struct CachedShadow
+    {
+        GDX12LocalLightConstants Light;
+        uint64_t Casters;
+    };
+    std::vector<std::optional<CachedShadow>> _cached;
     std::vector<std::unique_ptr<GDX12Descriptor>> _dsvs;
     std::unique_ptr<GDX12Texture> _maps;
     std::unique_ptr<GDX12LocalShadowPass> _staticShadows;

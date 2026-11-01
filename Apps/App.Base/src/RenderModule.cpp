@@ -1066,6 +1066,8 @@ void RenderModule::CollectReflectionScene()
         for (size_t i = 0; i < sizeof(value); ++i) result = (result ^ bytes[i]) * 1099511628211ull;
     };
     auto& resources = _primaryResources;
+    if (!resources.LocalShadowCasters) resources.LocalShadowCasters.emplace();
+    resources.LocalShadowCasters->clear();
     if (resources.Grass) hash(dynamicHash, resources.Grass->Revision());
     hash(staticHash, resources.ReflectionEnvironmentRevision);
     hash(staticHash, resources.Lighting.LightDirection);
@@ -1085,10 +1087,12 @@ void RenderModule::CollectReflectionScene()
         ecs.ForEach<StaticMeshRenderComponent>([&](Entity entity, StaticMeshRenderComponent& renderer)
         {
             if (!ecs.Has<TransformComponent>(entity)) return;
-            auto& signature = renderer._reflectionDynamic ? dynamicHash : staticHash;
+            uint64_t signature = 14695981039346656037ull;
+            hash(signature, world);
             const auto& transform = ecs.Get<TransformComponent>(entity);
             hash(signature, entity);
             hash(signature, renderer.MeshHandler);
+            hash(signature, GetPrimaryGPUMesh(renderer.MeshHandler)->ContentRevision);
             hash(signature, transform.Location);
             hash(signature, transform.Rotation);
             hash(signature, transform.Scale);
@@ -1098,6 +1102,8 @@ void RenderModule::CollectReflectionScene()
                 hash(signature, material);
                 hash(signature, material->_revision);
             }
+            hash(renderer._reflectionDynamic ? dynamicHash : staticHash, signature);
+            resources.LocalShadowCasters->push_back({ renderer.Bounds, signature, renderer._reflectionDynamic });
             if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, renderer.Bounds);
             else resources.ReflectionSceneBounds = renderer.Bounds;
             hasBounds = true;
@@ -1120,22 +1126,26 @@ void RenderModule::CollectReflectionScene()
         {
             const auto found = _skeletalStates.find({world, entity});
             if (found == _skeletalStates.end()) return;
-            hash(dynamicHash, world);
-            hash(dynamicHash, entity);
-            hash(dynamicHash, found->second.SceneRevision);
-            for (const auto& matrix : found->second.Pose) hash(dynamicHash, matrix);
+            uint64_t signature = 14695981039346656037ull;
+            hash(signature, world);
+            hash(signature, entity);
+            hash(signature, found->second.SceneRevision);
+            for (const auto& matrix : found->second.Pose) hash(signature, matrix);
             if (ecs.Has<TransformComponent>(entity))
             {
                 const auto& transform = ecs.Get<TransformComponent>(entity);
-                hash(dynamicHash, transform.Location);
-                hash(dynamicHash, transform.Rotation);
-                hash(dynamicHash, transform.Scale);
+                hash(signature, transform.Location);
+                hash(signature, transform.Rotation);
+                hash(signature, transform.Scale);
             }
             for (const auto& part : found->second.Parts)
             {
-                hash(dynamicHash, part.MeshRevision);
-                hash(dynamicHash, part.Material);
-                if (part.ActiveMaterial) hash(dynamicHash, part.ActiveMaterial->_revision);
+                auto partSignature = signature;
+                hash(partSignature, part.MeshRevision);
+                hash(partSignature, part.Material);
+                if (part.ActiveMaterial) hash(partSignature, part.ActiveMaterial->_revision);
+                hash(dynamicHash, partSignature);
+                resources.LocalShadowCasters->push_back({ part.Bounds, partSignature, true });
                 if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, part.Bounds);
                 else resources.ReflectionSceneBounds = part.Bounds;
                 hasBounds = true;
@@ -1163,6 +1173,7 @@ void RenderModule::CollectReflectionScene()
     BoundingBox grassBounds;
     if (resources.Grass && resources.Grass->GetBounds(grassBounds))
     {
+        resources.LocalShadowCasters->push_back({ grassBounds, resources.Grass->Revision(), true });
         if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, grassBounds);
         else resources.ReflectionSceneBounds = grassBounds;
     }

@@ -9,6 +9,8 @@
 #include "Engine.RendererDX12/GDX12GrassRenderer.h"
 #include "Engine.RendererDX12/GDX12Particles.h"
 #include "Engine.RendererDX12/GDX12Fluid.h"
+#include "Engine.RendererDX12/GDX12LocalLights.h"
+#include <optional>
 
 class GDX12Device;
 class GameTimer;
@@ -57,6 +59,8 @@ public:
     BoundingBox ReflectionSceneBounds = { XMFLOAT3(0, 0, 0), XMFLOAT3(10000, 10000, 10000) };
     GDX12ShadowConstants ShadowSettings;
     std::vector<GDX12LocalLightConstants> LocalLights;
+    // Complete current caster snapshot; standalone clients without one retain revision-based invalidation.
+    std::optional<std::vector<GDX12LocalShadowCaster>> LocalShadowCasters;
     void Initialize(GDX12Device* device);
     void UpdateMainCB(UINT width, UINT height, GameTimer* timer);
     void UpdateMaterialCB(std::unordered_map<std::string, std::unique_ptr<GDX12Material>>& materials);

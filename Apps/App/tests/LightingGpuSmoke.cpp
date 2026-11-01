@@ -333,6 +333,69 @@ int main()
         ++resources.ReflectionDynamicRevision;
         updateLocal();
         CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true, false);
+
+        // Spatial invalidation must retain unrelated lights and remove shadows at the old position.
+        point.ShadowFlags = 1;
+        spot.Position.x = 3000;
+        BuildLocalLightShadowMatrices(spot);
+        Require(LocalShadowIntersects(point, bounds), "Point range must intersect the nearby caster");
+        Require(!LocalShadowIntersects(spot, bounds), "Distant spot must reject the caster bounds");
+        const BoundingBox outsideCone({ 3100, 20, 0 }, { 1, 1, 1 });
+        Require(BoundingSphere(spot.Position, spot.Range).Intersects(outsideCone) &&
+            !LocalShadowIntersects(spot, outsideCone), "Spot culling must test its frustum, not just range");
+        const BoundingBox behindSpot({ 3000, 40, 0 }, { 1, 1, 1 });
+        Require(!LocalShadowIntersects(spot, behindSpot), "Spot culling must reject casters behind the light");
+        const BoundingBox touchesPoint({ point.Range + 1, 20, 0 }, { 1, 1, 1 });
+        Require(LocalShadowIntersects(point, touchesPoint), "Point bounds touching the range must be retained");
+        draw.InstanceCount = 1;
+        resources.IndirectCommandsCache->CopyData(0, draw);
+        resources.LocalShadowCasters.emplace(1, GDX12LocalShadowCaster{ bounds, 1, true });
+        updateLocal();
+        Require(localShadows.GetLastFrameRenderedViews() == 7, "Switching to spatial snapshots must initialize both lights");
+        updateLocal();
+        Require(localShadows.GetLastFrameRenderedViews() == 0, "Unchanged caster snapshots must reuse both lights");
+        const auto moveCaster = [&](float x)
+        {
+            GDX12TransformConstants transform;
+            XMStoreFloat4x4(&transform.WorldMatrix, Matrix::CreateTranslation(x, 0, 0).Transpose());
+            frame->TransformCache->CopyData(0, transform);
+            instance.BoundingBoxCenter.x = x;
+            frame->InstanceCache->CopyData(0, instance);
+            resources.LocalShadowCasters->front().Bounds.Center.x = x;
+            ++resources.ReflectionDynamicRevision;
+            updateLocal();
+        };
+        moveCaster(5);
+        Require(localShadows.GetLastFrameRenderedViews() == 6 && localShadows.GetLastFrameStaticRenderedViews() == 0,
+            "Moving near the point must preserve the distant spot and static depth caches");
+        moveCaster(3000);
+        Require(localShadows.GetLastFrameRenderedViews() == 7, "Teleport must invalidate both old and new lights");
+        CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true, false);
+        CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 6, false, true);
+        moveCaster(6000);
+        Require(localShadows.GetLastFrameRenderedViews() == 1, "Leaving the spot must only remove its old shadow");
+        CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 6, false, true, false);
+        moveCaster(0);
+        Require(localShadows.GetLastFrameRenderedViews() == 6, "Entering the point must only update the point");
+        ++resources.LocalShadowCasters->front().Signature;
+        updateLocal();
+        Require(localShadows.GetLastFrameRenderedViews() == 6, "Changed caster content must invalidate its light without movement");
+        resources.LocalShadowCasters->front().Dynamic = false;
+        instance.ReflectionDynamic = 0;
+        frame->InstanceCache->CopyData(0, instance);
+        updateLocal();
+        Require(localShadows.GetLastFrameStaticRenderedViews() == 6 && localShadows.GetLastFrameRenderedViews() == 6,
+            "Reclassifying a caster must update both depth caches of its light");
+        resources.LocalShadowCasters->clear();
+        draw.InstanceCount = 0;
+        resources.IndirectCommandsCache->CopyData(0, draw);
+        updateLocal();
+        Require(localShadows.GetLastFrameStaticRenderedViews() == 6 && localShadows.GetLastFrameRenderedViews() == 6,
+            "Deleting a caster must invalidate its former light even with an empty snapshot");
+        CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true, false);
+        resources.LocalShadowCasters.reset();
+        spot.Position.x = 2;
+        BuildLocalLightShadowMatrices(spot);
         draw.InstanceCount = 1;
         resources.IndirectCommandsCache->CopyData(0, draw);
         instance.ReflectionDynamic = 0;
