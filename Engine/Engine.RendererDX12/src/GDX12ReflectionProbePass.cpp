@@ -426,6 +426,9 @@ void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, Geometry
     const UINT count = _resources->IndirectCommandsCache->GetElementCount();
     if (count) commands->ExecuteIndirect(_signature.Get(), count, frame.Commands->GetResource().D3DResource.Get(), 0,
         frame.Counter->GetResource().D3DResource.Get(), 0);
+    if (geometry != StaticGeometry && _resources->Grass)
+        _resources->Grass->Draw(commands, GDX12GrassRenderer::Stage::Shadow,
+            Matrix(ProbeSunShadow(*_resources).ViewProj[0]).Transpose(), _commonData->CameraView.Invert().Translation(), 0);
     commands->ResourceBarrier({ _sunShadow.GetResource()->GetSRVBarrier() });
 }
 
@@ -467,6 +470,19 @@ void GDX12ReflectionProbePass::RenderFace(GDX12CommandList* commands, UINT probe
     const UINT count = _resources->IndirectCommandsCache->GetElementCount();
     if (count) commands->ExecuteIndirect(_signature.Get(), count, frame.Commands->GetResource().D3DResource.Get(), 0,
         frame.Counter->GetResource().D3DResource.Get(), 0);
+    if (geometry != StaticGeometry && _resources->Grass)
+    {
+        GDX12GrassRenderer::CaptureLighting lighting;
+        lighting.SunShadow = &_sunShadow;
+        lighting.Irradiance = _inputs[0]->GetTexture();
+        lighting.Prefiltered = _inputs[1]->GetTexture();
+        lighting.BRDF = _inputs[2]->GetTexture();
+        lighting.LocalShadows = _inputs[4]->GetTexture();
+        lighting.ShadowConstants = frame.Shadow->GetElementAddress(0);
+        const auto camera = FaceCamera(state.Source, face, _resolution);
+        _resources->Grass->Draw(commands, GDX12GrassRenderer::Stage::Capture, Matrix(camera.ViewProj).Transpose(),
+            state.Source.Position, frame.Cameras->GetElementAddress(face), &lighting);
+    }
 }
 
 void GDX12ReflectionProbePass::FilterAndPublish(GDX12CommandList* commands, UINT probe)

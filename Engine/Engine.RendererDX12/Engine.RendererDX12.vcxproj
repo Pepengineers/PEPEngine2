@@ -20,6 +20,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Sky.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12GrassWind.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12GrassRenderer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ReflectionProbes.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionProbePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DepthOfField.h" />
@@ -78,6 +80,8 @@
   <ItemGroup>
     <ClCompile Include="src\GDX12Sky.cpp" />
     <ClCompile Include="src\GDX12EnvironmentIBLPass.cpp" />
+    <ClCompile Include="src\GDX12GrassWind.cpp" />
+    <ClCompile Include="src\GDX12GrassRenderer.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusion.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusionPass.cpp" />
     <ClCompile Include="..\..\External\External.Libraries\cacao\src\ffx_cacao.cpp">
@@ -116,6 +120,10 @@
     <ClCompile Include="src\GDX12Texture.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="Shaders\GrassCommon.hlsli" />
+    <None Include="Shaders\GrassExpand.hlsl" />
+    <None Include="Shaders\GrassRender.hlsl" />
+    <None Include="Shaders\WindField.hlsl" />
     <None Include="Shaders\AmbientOcclusion.hlsl" />
     <None Include="Shaders\ToneMap.hlsl" />
     <None Include="Shaders\ReflectionCapture.hlsl" />

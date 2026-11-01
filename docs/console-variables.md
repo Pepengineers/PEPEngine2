@@ -98,3 +98,12 @@ runtime `Default`; startup `Engine.ini` and ConsoleModule writes are supported.
 Source selection belongs to World; every asset/optical/LUT parameter belongs to a
 component. [API, defaults, units, ranges and integration](sky.md).
 Implementation delivery is **unverified**; the author ran no builds/tests/GPU checks.
+## Grass и wind
+
+`Render.Grass.Enabled`, `Render.Grass.Quality`, `Render.Wind.Enabled` и
+`Render.Wind.Quality` — единственные глобальные controls этих техник, runtime
+`Default`. Enabled по умолчанию `true`; Quality `2`, допустимо `0..3`
+(Off/Low/Mid/High). Все остальные настройки принадлежат `GrassRenderComponent`
+или `WindFieldComponent`. [API, units, ranges, budgets и seams](grass-wind.md).
+Реализация автора **НЕПРОВЕРЕНА**: сборки, тесты и GPU-проверки не запускались
+по прямому указанию пользователя.

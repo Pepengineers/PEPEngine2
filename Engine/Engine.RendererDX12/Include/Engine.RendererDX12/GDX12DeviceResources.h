@@ -6,6 +6,7 @@
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12Material.h"
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
+#include "Engine.RendererDX12/GDX12GrassRenderer.h"
 
 class GDX12Device;
 class GameTimer;
@@ -34,6 +35,7 @@ public:
     std::unordered_map <std::string, ComPtr<ID3D12CommandSignature>> CommandSignatures;
     std::unordered_map<std::string, std::unique_ptr<GDX12Texture>> Textures;
 
+    std::unique_ptr<GDX12GrassRenderer> Grass;
     GDX12Device* Device;
     GDX12MainConstants Lighting;
     GDX12SkyState Sky;

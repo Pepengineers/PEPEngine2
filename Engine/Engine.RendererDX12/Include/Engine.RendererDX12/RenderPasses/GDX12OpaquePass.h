@@ -237,6 +237,15 @@ public:
 		cmdList->ExecuteIndirect(_opaqueCS.Get(), _resources->IndirectCommandsCache->GetElementCount(),
 			currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().D3DResource.Get(), 0,
 			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().D3DResource.Get(), 0);
+        if (_resources->Grass)
+        {
+            const auto stage = _stage == Stage::DepthPrepass ?
+                (writeNormals ? GDX12GrassRenderer::Stage::PrepassNormals : GDX12GrassRenderer::Stage::Depth) :
+                (_stage == Stage::GBuffer ? GDX12GrassRenderer::Stage::GBuffer : GDX12GrassRenderer::Stage::Full);
+            _resources->Grass->Draw(cmdList, stage, _commonData->CameraView * _commonData->CameraProjection,
+                _commonData->CameraView.Invert().Translation(),
+                currentFrameConstants->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
+        }
 		cmdList->EndPixEvent();
 	}
 
