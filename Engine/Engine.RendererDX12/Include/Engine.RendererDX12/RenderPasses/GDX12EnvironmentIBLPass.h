@@ -1,5 +1,7 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.Core/AssetManager.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12CloudComponent.h"
 #include <array>
 #include <filesystem>
 #include <climits>
@@ -13,6 +15,7 @@ public:
     void Execute(GDX12CommandList* commands) override;
     void Invalidate();
     void ClearDenendencies() override;
+    void SetCloudSource(GDX12CloudComponent* source);
 private:
     void LoadEnvironment(const std::filesystem::path& asset);
     void CreateTexture(GDX12Texture& texture, UINT width, UINT height, UINT depth, UINT mips, bool cube);
@@ -38,4 +41,7 @@ private:
     SkySource _source = SkySource::Off;
     bool _invalidated = true;
     bool _brdfReady = false;
+    GDX12CloudComponent* _cloudSource = nullptr;
+    uint64_t _cloudSourceRevision = 0, _cloudLightingRevision = 0;
+    bool _cloudActive = false;
 };

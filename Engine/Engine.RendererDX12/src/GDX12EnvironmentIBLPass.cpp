@@ -61,6 +61,14 @@ void GDX12EnvironmentIBLPass::Initialize()
 
 void GDX12EnvironmentIBLPass::Invalidate() { _invalidated = true; }
 
+void GDX12EnvironmentIBLPass::SetCloudSource(GDX12CloudComponent* source)
+{
+    if (_cloudSource == source) return;
+    _cloudSource = source;
+    _cloudSourceRevision = _cloudLightingRevision = 0;
+    Invalidate();
+}
+
 void GDX12EnvironmentIBLPass::CreateTexture(GDX12Texture& texture, UINT width, UINT height, UINT depth, UINT mips, bool cube)
 {
     // Every replacement and descriptor rewrite is preceded by a queue drain in Ensure*.
@@ -229,8 +237,27 @@ void GDX12EnvironmentIBLPass::Filter(GDX12CommandList* commands, UINT samples, f
 
 void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
 {
-    const auto& state = _resources->Sky;
-    const bool changed = _invalidated || _revision != state.Revision || _quality != state.Quality || _source != state.Source;
+    auto state = _resources->Sky;
+    const bool cloudActive = _cloudSource && _cloudSource->IsActive();
+    bool cloudChanged = cloudActive != _cloudActive;
+    bool lightingChanged = false;
+    if (cloudActive)
+    {
+        _cloudSource->Setup(_resources, _otherResources, _commonData);
+        _cloudSource->Execute(commands);
+        cloudChanged |= _cloudSourceRevision != _cloudSource->GetSourceRevision();
+        lightingChanged = _cloudLightingRevision != _cloudSource->GetLightingRevision();
+        _cloudSourceRevision = _cloudSource->GetSourceRevision();
+        _cloudLightingRevision = _cloudSource->GetLightingRevision();
+        state.Source = SkySource::SkyBox;
+        state.Quality = _cloudSource->GetQuality();
+        state.Box.RadianceMultiplier = 1;
+        state.Box.RotationRadians = 0;
+    }
+    _cloudActive = cloudActive;
+    const bool discontinuity = _invalidated || cloudChanged || _revision != state.Revision ||
+        _quality != state.Quality || _source != state.Source;
+    const bool changed = discontinuity || lightingChanged;
     auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     GDX12SkyConstants constants;
     constants.Mode.x = static_cast<UINT>(state.Source);
@@ -241,7 +268,7 @@ void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
         ValidateSkySettings(state.Box);
         ibl = ResolveSkyIBLSettings(state.Box.IBL, state.Quality);
         constants.Box = { state.Box.RadianceMultiplier, std::sin(state.Box.RotationRadians), std::cos(state.Box.RotationRadians), 0 };
-        if (_boxAsset != state.Box.Cubemap || !_boxTexture->IsInitialized())
+        if (!cloudActive && (_boxAsset != state.Box.Cubemap || !_boxTexture->IsInitialized()))
         {
             _resources->Device->GetCommandQueue()->Flush();
             LoadEnvironment(state.Box.Cubemap);
@@ -314,7 +341,7 @@ void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
         commands->SetComputeSRV(2, _luts[2]->GetSRV()->GPUHandle);
     }
     else if (state.Source == SkySource::SkyBox)
-        commands->SetComputeSRV(3, _boxTexture->GetSRV()->GPUHandle);
+        commands->SetComputeSRV(3, (cloudActive ? _cloudSource->GetOutput(0)->GetTexture() : _boxTexture.get())->GetSRV()->GPUHandle);
     if (changed)
     {
         commands->ResourceBarrier({ _textures[3]->GetResource()->GetUnorderedAccessBarrier() });
@@ -327,11 +354,13 @@ void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
         }
         commands->ResourceBarrier({ _textures[3]->GetResource()->GetSRVBarrier() });
         Filter(commands, state.Source == SkySource::Off ? 16 : ibl.FilterSamples, state.Source == SkySource::Off ? 0 : ibl.Intensity);
-        ++_resources->ReflectionEnvironmentRevision;
-        // Components/quality/source are discontinuities. Continuous camera motion keeps its history.
-        _commonData->ResetHistory = true;
-        _commonData->ResetUpscalerHistory = true;
-        _commonData->RequestHistoryReset = true;
+        if (discontinuity)
+        {
+            ++_resources->ReflectionEnvironmentRevision;
+            _commonData->ResetHistory = true;
+            _commonData->ResetUpscalerHistory = true;
+            _commonData->RequestHistoryReset = true;
+        }
     }
     if (state.Source == SkySource::SkyAtmosphere)
     {
@@ -364,6 +393,7 @@ void GDX12EnvironmentIBLPass::ClearDenendencies()
     for (auto& uav : _prefilterUAVs) uav.reset();
     for (auto& pipeline : _filters) pipeline.Reset();
     for (auto& pipeline : _skyPipelines) pipeline.Reset();
+    _cloudSource = nullptr;
     _sourceUAVs.clear();
     _boxTexture.reset();
     _filterRoot.reset();

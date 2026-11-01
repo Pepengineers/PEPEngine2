@@ -127,3 +127,9 @@ Only `Render.Skinning.Enabled` (default true) and `Render.Skinning.Quality` (def
 update rate survives preset changes. Component API, units, asset ownership and
 pass integration are described in [skinning.md](rendering/skinning.md).
 Implementation has not been built or tested in the author chat.
+## Procedural 2D clouds
+
+`Render.Clouds.Enabled` (bool, default true) and `Render.Clouds.Quality`
+(0 Off / 1 Low / 2 Mid default / 3 High) are runtime Default controls.
+Noise, colors and animation belong to each `GDX12CloudComponent`; see
+[component API and integration](rendering/clouds.md). No clouds are attached to Bistro.

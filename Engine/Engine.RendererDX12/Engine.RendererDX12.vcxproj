@@ -27,6 +27,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Fluid.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FluidPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Skinning.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12CloudComponent.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ReflectionProbes.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionProbePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DepthOfField.h" />
@@ -90,6 +91,7 @@
     <ClCompile Include="src\GDX12Particles.cpp" />
     <ClCompile Include="src\GDX12ParticlesPass.cpp" />
     <ClCompile Include="src\GDX12Skinning.cpp" />
+    <ClCompile Include="src\GDX12CloudComponent.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusion.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusionPass.cpp" />
     <ClCompile Include="..\..\External\External.Libraries\cacao\src\ffx_cacao.cpp">
@@ -155,6 +157,8 @@
     <None Include="Shaders\SkyParameters.hlsli" />
     <None Include="Shaders\SkyRendering.hlsli" />
     <None Include="Shaders\SkyAtmosphere.hlsl" />
+    <None Include="Shaders\CloudNoise.hlsli" />
+    <None Include="Shaders\Clouds.hlsl" />
     <None Include="Shaders\EnvironmentIBL.hlsl" />
     <None Include="Shaders\ShadowPass.hlsl" />
     <None Include="Shaders\LocalShadowPass.hlsl" />
