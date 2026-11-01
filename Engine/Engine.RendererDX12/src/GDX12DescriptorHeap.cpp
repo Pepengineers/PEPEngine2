@@ -1,5 +1,7 @@
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
 #include "Engine.RendererDX12/GDX12Device.h"
+#include <stdexcept>
+#include <algorithm>
 
 GDX12DescriptorHeap::GDX12DescriptorHeap(GDX12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT numDescriptors, D3D12_DESCRIPTOR_HEAP_FLAGS flags)
     : _device(device), 
@@ -48,18 +50,17 @@ UINT GDX12DescriptorHeap::GetNumDescriptors()
 
 UINT GDX12DescriptorHeap::GetAvailableIndex(UINT startIndex, UINT maxRange)
 {
-    UINT k = 0;
-    while (true)
+    if (startIndex >= _numDescriptors) throw std::out_of_range("Descriptor allocation starts outside heap");
+    const UINT remaining = _numDescriptors - startIndex;
+    const UINT count = maxRange == 0 ? remaining : (std::min)(maxRange, remaining);
+    for (UINT offset = 0; offset < count; ++offset)
     {
-        if (startIndex + k > _numDescriptors) { OutputDebugStringA("ERROR: GetAvailableIndex is out of heap capacity\n"); }
-        if (_occupanceRegistry[startIndex + k] == false)
-        {
-            _occupanceRegistry[startIndex + k] = true;
-            return startIndex + k;
-        }
-        if ((maxRange != 0) && k > maxRange) { OutputDebugStringA("ERROR: GetAvailableIndex is out of specified range\n"); }
-        k++;
+        const UINT index = startIndex + offset;
+        if (_occupanceRegistry[index]) continue;
+        _occupanceRegistry[index] = true;
+        return index;
     }
+    throw std::runtime_error("Descriptor allocation range exhausted");
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE GDX12DescriptorHeap::GetCPUHandle(UINT index) const
