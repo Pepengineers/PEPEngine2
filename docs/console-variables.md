@@ -69,3 +69,8 @@ Build/CVarTests/Manual/ConsoleVariableTests.exe
 ```
 
 Для проверки Release добавьте `/DNDEBUG /O2`. Тест намеренно вызывает ошибку запуска и проверяет её запись в лог. Он использует свой `Config/Engine.ini` рядом с тестовым exe и отказывается перезаписывать существующий файл.
+
+## Ambient occlusion
+
+`Render.AO.*` settings are runtime writable. Algorithms, preset inheritance, units,
+defaults and ranges are listed in [ambient-occlusion.md](ambient-occlusion.md).

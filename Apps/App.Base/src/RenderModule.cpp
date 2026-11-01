@@ -19,6 +19,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12AmbientOcclusionPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyFromSharedMemoryPass.h"
@@ -891,6 +892,7 @@ void RenderModule::ConfigureRenderPipeline()
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12LocalShadowPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12AmbientOcclusionPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DeferredLightingPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
     _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
@@ -906,22 +908,25 @@ void RenderModule::ConfigureRenderPipeline()
     GDX12RenderPass* localShadowPass = _primaryRenderPassExecutionList[3].get();
     GDX12RenderPass* cullingPass = _primaryRenderPassExecutionList[4].get();
     GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[5].get();
-    GDX12RenderPass* lightingPass = _primaryRenderPassExecutionList[6].get();
-    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[7].get();
-    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[8].get();
-    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[9].get();
-    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[10].get();
+    GDX12RenderPass* aoPass = _primaryRenderPassExecutionList[6].get();
+    GDX12RenderPass* lightingPass = _primaryRenderPassExecutionList[7].get();
+    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[8].get();
+    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[9].get();
+    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[10].get();
+    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[11].get();
 
     clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
     cullingPass->SetInputs({});
     opaquePass->SetInputs({});
-    lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0) });
+    aoPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3) });
+    lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0), aoPass->GetOutput(0) });
     transparencyPass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), localShadowPass->GetOutput(0) });
     compositionPass->SetInputs({ lightingPass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
     upscalePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1), compositionPass->GetOutput(0) });
     outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get()});
 
     opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    aoPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
     lightingPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
     transparencyPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
     compositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);

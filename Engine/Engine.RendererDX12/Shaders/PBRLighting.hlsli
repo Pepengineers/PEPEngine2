@@ -13,7 +13,7 @@ float3 EvaluateBRDF(PBRSurface s, float3 v, float3 l)
     float3 specular = DistributionGGX(saturate(dot(s.Normal, h)), s.Roughness) * SmithGGXVisibility(nDotV, nDotL, s.Roughness) * fresnel;
     return (diffuse + specular) * nDotL;
 }
-float3 ShadeSunAndIBL(PBRSurface s, float3 position, float3 v)
+float3 ShadeSunAndIBL(PBRSurface s, float3 position, float3 v, float ambientVisibility = 1)
 {
     if (s.Baked != 0) return s.Albedo;
     float3 l = SafeNormalize(-CBMain.LightDirection);
@@ -24,7 +24,9 @@ float3 ShadeSunAndIBL(PBRSurface s, float3 position, float3 v)
     float3 prefiltered = PrefilteredEnvironment.SampleLevel(samLinearClamp, reflect(-v, s.Normal), s.Roughness * 7).rgb;
     float2 brdf = EnvironmentBRDF.SampleLevel(samLinearClamp, float2(nDotV, s.Roughness), 0).rg;
     float3 fresnel = s.F0 + (max(1 - s.Roughness, s.F0) - s.F0) * FresnelSchlickFactor(nDotV);
-    return direct + (1 - fresnel) * (1 - s.Metallic) * irradiance * s.Albedo / PBR_PI + prefiltered * (s.F0 * brdf.x + brdf.y) + s.Emissive;
+    float3 diffuseIBL = (1 - fresnel) * (1 - s.Metallic) * irradiance * s.Albedo / PBR_PI;
+    float3 specularIBL = prefiltered * (s.F0 * brdf.x + brdf.y);
+    return direct + diffuseIBL * ambientVisibility + specularIBL + s.Emissive;
 }
 float3 ShadeLocalLight(PBRSurface s, float3 position, float3 v, LocalLight light)
 {

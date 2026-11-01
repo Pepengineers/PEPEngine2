@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12AmbientOcclusionPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/GDX12ShadowCascades.h"
@@ -179,11 +180,15 @@ int main()
         opaque.Setup(&resources, nullptr, &common);
         opaque.SetInputs({});
         opaque.Initialize();
+        GDX12AmbientOcclusionPass ao;
+        ao.Setup(&resources, nullptr, &common);
+        ao.SetInputs({ opaque.GetOutput(2), opaque.GetOutput(3) });
+        ao.Initialize();
         GDX12DeferredLightingPass deferred;
         deferred.Setup(&resources, nullptr, &common);
         deferred.SetInputs({ opaque.GetOutput(0), opaque.GetOutput(3), opaque.GetOutput(4), opaque.GetOutput(5),
             opaque.GetOutput(2), shadows.GetOutput(0), environment.GetOutput(0), environment.GetOutput(1),
-            environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0) });
+            environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0), ao.GetOutput(0) });
         deferred.Initialize();
         GDX12GPUCullingPass culling;
         culling.Setup(&resources, nullptr, &common);
@@ -336,6 +341,7 @@ int main()
         frame->CameraCB->Resize(1);
         frame->CameraCB->CopyData(0, camera);
         common.ActiveCameraCBufferIndex = 0;
+        common.CameraViewToClip = projection;
         frame->CameraVisibilityCommands.emplace_back();
         auto& visibility = frame->CameraVisibilityCommands[0];
         visibility.VisibleOpaqueCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(&device, 1, EBufferType::Default, false);
@@ -352,7 +358,14 @@ int main()
         lighting.SunShadowFlags = 0;
         lighting.LocalLightCount = 2;
         frame->MainCB->CopyData(0, lighting);
-        const auto renderLighting = [&](XMFLOAT3 pointRadiance, XMFLOAT3 spotRadiance)
+        auto* aoTexture = ao.GetOutput(0)->GetTexture();
+        GDX12DescriptorHeap clearHeap(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+        GDX12Descriptor clearAO;
+        D3D12_UNORDERED_ACCESS_VIEW_DESC clearView = {};
+        clearView.Format = DXGI_FORMAT_R32_FLOAT;
+        clearView.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        clearAO.InitAsUAV(aoTexture->GetResource()->D3DResource.Get(), nullptr, &clearView, &clearHeap, 0);
+        const auto renderLighting = [&](XMFLOAT3 pointRadiance, XMFLOAT3 spotRadiance, float aoOverride = -1)
         {
             point.Radiance = pointRadiance;
             spot.Radiance = spotRadiance;
@@ -361,6 +374,14 @@ int main()
             auto* list = queue->GetCommandList();
             culling.Execute(list);
             opaque.Execute(list);
+            ao.Execute(list);
+            if (aoOverride >= 0)
+            {
+                list->ResourceBarrier({ aoTexture->GetResource()->GetUnorderedAccessBarrier() });
+                const float values[] = { aoOverride, aoOverride, aoOverride, aoOverride };
+                list->ClearUnorderedAccessViewFloat(aoTexture->GetUAV()->GPUHandle, clearAO.CPUHandle,
+                    aoTexture->GetResource()->D3DResource.Get(), values);
+            }
             deferred.Execute(list);
             transparency.Execute(list);
             queue->ExecuteCommandList(list);
@@ -380,6 +401,33 @@ int main()
         Require(pointIncrease > 0.01f, "Deferred point light did not illuminate the G-buffer geometry");
         Require(spotIncrease > 0.01f, "Deferred spot light did not illuminate the G-buffer geometry");
         Require(ambient[0] + ambient[1] + ambient[2] > 0.01f, "Deferred background did not sample the scene cubemap");
+        const auto darkAmbient = renderLighting({}, {}, 0);
+        const auto darkPoint = renderLighting({ 1, 1, 1 }, {}, 0);
+        float ambientReduction = 0;
+        for (size_t channel = 0; channel < ambient.size(); ++channel)
+        {
+            ambientReduction += ambient[channel] - darkAmbient[channel];
+            Require(std::abs((pointLit[channel] - ambient[channel]) - (darkPoint[channel] - darkAmbient[channel])) < 0.01f,
+                "AO changed direct local-light energy");
+        }
+        Require(ambientReduction > 0.01f, "AO did not reduce diffuse IBL");
+        material.Metallic = 1;
+        frame->MaterialCache->CopyData(0, material);
+        const auto specularNeutral = renderLighting({}, {}, 1);
+        Require(specularNeutral == renderLighting({}, {}, 0), "Scalar AO attenuated specular IBL");
+        material.EmissiveColor = { 3, 2, 1 };
+        frame->MaterialCache->CopyData(0, material);
+        const auto emissiveNeutral = renderLighting({}, {}, 1);
+        Require(emissiveNeutral == renderLighting({}, {}, 0), "AO attenuated emissive energy");
+        material.Metallic = 0;
+        material.EmissiveColor = {};
+        material.Flags = 16;
+        frame->MaterialCache->CopyData(0, material);
+        const auto bakedNeutral = renderLighting({}, {}, 1);
+        Require(bakedNeutral == renderLighting({}, {}, 0), "AO multiplied baked color");
+        material.Flags = 0;
+        frame->MaterialCache->CopyData(0, material);
+        std::cout << "AO diffuse/direct/specular/emissive/baked energy invariants passed\n";
         // Force an occluder in every view to verify shadow sampling independently of map generation.
         GDX12Descriptor occludedViews;
         D3D12_DEPTH_STENCIL_VIEW_DESC occludedDSV = {};
