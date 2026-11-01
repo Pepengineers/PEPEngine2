@@ -40,6 +40,10 @@ public:
     ParallelJob(const ParallelJob&) = delete;
     ParallelJob& operator=(const ParallelJob&) = delete;
     virtual void Execute(size_t index) = 0;
+    virtual void ExecuteRange(size_t begin, size_t end)
+    {
+        for (size_t i = begin; i < end; ++i) Execute(i);
+    }
 
     // The job and its data must remain alive and unchanged until Complete.
     JobHandle Schedule(JobSystem& jobs, size_t count, const JobHandle& dependency = {}) &;

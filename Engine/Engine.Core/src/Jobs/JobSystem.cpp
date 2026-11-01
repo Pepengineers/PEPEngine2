@@ -22,7 +22,7 @@ namespace JobDetail
             {
                 try
                 {
-                    for (uint32_t i = range.start; i < range.end; ++i) StateRef.Work->Execute(i);
+                    StateRef.Work->ExecuteRange(range.start, range.end);
                 }
                 catch (...) { StateRef.SetError(std::current_exception()); }
             }

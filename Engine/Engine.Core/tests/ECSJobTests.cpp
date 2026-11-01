@@ -1,5 +1,6 @@
 #include "Engine.Core/ECS/ECSStorage.h"
 #include "Engine.Core/Jobs/JobSystem.h"
+#include <atomic>
 #include <iostream>
 #include <stdexcept>
 
@@ -16,11 +17,13 @@ static void Require(bool condition, const char* message)
 class Movement final : public System
 {
 public:
+    std::atomic<size_t> RangeCalls{ 0 };
     void Tick(World& world, float dt) override { TickRange(world, dt, 0, GetWorkCount(world)); }
 protected:
     size_t GetWorkCount(World& world) const override { return world.Data.GetPool<Position>().Size(); }
     void TickRange(World& world, float dt, size_t begin, size_t end) override
     {
+        ++RangeCalls;
         world.Data.ForEachRange<Position, Velocity>(begin, end,
             [dt](Entity, Position& position, Velocity& velocity) { position.X += velocity.X * dt; });
     }
@@ -54,8 +57,18 @@ static void Check(unsigned threads)
     Verify verify;
     auto first = movement.Schedule(jobs, world, 0.25f, 63);
     verify.Schedule(jobs, world, 0, 1, first).Complete();
+    Require(movement.RangeCalls > 0 && movement.RangeCalls < 4097, "System must receive whole batches in TickRange");
+    movement.RangeCalls = 0;
     const auto defaultWork = movement.Schedule(jobs, world, 0);
     verify.Schedule(jobs, world, 0, defaultWork).Complete();
+    Require(movement.RangeCalls > 0 && movement.RangeCalls < 4097, "Default batches must reach TickRange intact");
+    movement.RangeCalls = 0;
+    const auto unsplit = movement.Schedule(jobs, world, 0, 4097);
+    verify.Schedule(jobs, world, 0, unsplit).Complete();
+    Require(movement.RangeCalls == 1, "One batch must produce exactly one TickRange call");
+    World empty;
+    movement.Schedule(jobs, empty, 0).Complete();
+    Require(movement.RangeCalls == 1, "An empty system must not invoke TickRange");
     bool rejected = false;
     try { world.Data.ForEachRange<Position>(0, 4098, [](Entity, Position&) {}); }
     catch (const std::out_of_range&) { rejected = true; }

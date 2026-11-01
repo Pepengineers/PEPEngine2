@@ -63,6 +63,7 @@ limitations are recorded in `docs/reports/2026-11-01-bistro-loading.md`.
 The App loads Exterior and Interior into one world, including their submeshes and
 materials, and shares texture uploads by path. Loading fails if either part is
 missing or cannot be imported. No benchmark objects or camera splines are added.
+The camera starts at eye height just outside the main entrance, facing the Interior.
 
 The existing renderer uses shared vertex/index buffers and bindless material
 textures. GPU frustum culling builds separate opaque/masked and transparent
@@ -233,6 +234,11 @@ their specified order. `App::Update` supplies the default chain for the other ap
 Custom systems can be inserted at the required point in either application's code.
 `System::Tick` remains available as a sequential baseline; SceneManager no longer
 owns system execution or implicit ordering.
+
+The scheduler passes each complete batch to `ParallelJob::ExecuteRange(begin, end)`.
+Its default implementation calls `Execute(index)` for each item, preserving per-index
+jobs. `System` overrides this entry point to call `TickRange(world, dt, begin, end)`
+once per batch; the ECS query then iterates the objects inside that range.
 
 Keep job objects, component storage and referenced data alive until Complete.
 Do not mutate a scheduled job, schedule it again while active, or add/remove

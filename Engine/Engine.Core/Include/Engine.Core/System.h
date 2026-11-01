@@ -31,7 +31,8 @@ protected:
     virtual void TickRange(World& world, float dt, size_t, size_t) { Tick(world, dt); }
 
 private:
-    void Execute(size_t index) final { TickRange(*_world, _dt, index, index + 1); }
+    void Execute(size_t index) final { ExecuteRange(index, index + 1); }
+    void ExecuteRange(size_t begin, size_t end) final { TickRange(*_world, _dt, begin, end); }
     World* _world = nullptr;
     float _dt = 0;
 };
