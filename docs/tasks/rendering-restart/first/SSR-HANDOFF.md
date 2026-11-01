@@ -1,4 +1,6 @@
-# SSR implementation handoff — verification stopped
+# SSR implementation handoff — historical snapshot
+
+This handoff records the author state before central verification. The verified SSR is now integrated in the top-level project, `D:/Project/PEPEngine2`, branch `codex/bistro-rendering`; see [the current review](../../../rendering-review.md). The old author checkout was removed after preserving its commits in `codex/feature-ssr`. The restrictions and unchecked status below describe that historical handoff only.
 
 Status: **implemented, unverified; not merge-ready**. The user's later instruction
 stopped all builds, tests, GPU fixtures, benchmarks, visual inspection and separate

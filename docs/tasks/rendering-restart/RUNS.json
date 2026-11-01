@@ -10,7 +10,10 @@
       "model": "gpt-6.1-sol",
       "reasoning": "high",
       "base": "271551e",
-      "checkout": "D:/Project/PEPEngine2/Build/Features/AO"
+      "checkout": "D:/Project/PEPEngine2",
+      "branch": "codex/feature-ao",
+      "head": "ffa60e3c1d5127a8add4a1641de6baecdb1774de",
+      "status": "integrated_verified_in_active_branch"
     },
     {
       "feature": "SSR",
@@ -19,7 +22,10 @@
       "model": "gpt-6.1-sol",
       "reasoning": "high",
       "base": "271551e",
-      "checkout": "D:/Project/PEPEngine2/Build/Features/SSR"
+      "checkout": "D:/Project/PEPEngine2",
+      "branch": "codex/feature-ssr",
+      "head": "87744817a3a18c2b55430318e59c2f3a631fcac2",
+      "status": "integrated_verified_in_active_branch"
     },
     {
       "feature": "REFLECTION",
@@ -28,7 +34,10 @@
       "model": "gpt-6.1-sol",
       "reasoning": "high",
       "base": "271551e",
-      "checkout": "D:/Project/PEPEngine2/Build/Features/REFLECTION"
+      "checkout": "D:/Project/PEPEngine2",
+      "branch": "codex/feature-reflection",
+      "head": "16d16b25c8e7155d06013524213c9100911bd1c6",
+      "status": "integrated_verified_in_active_branch"
     },
     {
       "feature": "DOF",
@@ -37,7 +46,10 @@
       "model": "gpt-6.1-sol",
       "reasoning": "high",
       "base": "271551e",
-      "checkout": "D:/Project/PEPEngine2/Build/Features/DOF"
+      "checkout": "D:/Project/PEPEngine2",
+      "branch": "codex/feature-dof",
+      "head": "97ed6e37b6740beb30b871c9ecbfab808ab9da5a",
+      "status": "integrated_verified_in_active_branch"
     },
     {
       "feature": "MOTION_BLUR",
@@ -46,11 +58,14 @@
       "model": "gpt-6.1-sol",
       "reasoning": "high",
       "base": "271551e",
-      "checkout": "D:/Project/PEPEngine2/Build/Features/MOTION_BLUR"
+      "checkout": "D:/Project/PEPEngine2",
+      "branch": "codex/feature-motion-blur",
+      "head": "2742dfe592da18bdf9adc3714a351463bba0a1c4",
+      "status": "integrated_verified_in_active_branch"
     }
   ],
   "secondGroup": {
-    "status": "launched",
+    "status": "stopped_preserved_in_top_level_git_branches",
     "tasks": [
       "SKY",
       "GRASS_WIND",
@@ -64,66 +79,78 @@
     "runs": [
       {
         "feature": "SKY",
-        "checkout": "D:/Project/PEPEngine2/Build/Features/SKY",
+        "checkout": "D:/Project/PEPEngine2",
         "branch": "codex/feature-sky",
         "base": "353a585a529d46002a506e1d7e98d66cca55d397",
         "hostId": "local",
         "model": "gpt-6.1-sol",
         "reasoning": "high",
-        "threadId": "01a19738-1edc-7ec3-8ccc-6606e9d2a492"
+        "threadId": "01a19738-1edc-7ec3-8ccc-6606e9d2a492",
+        "head": "5a95aa49763719e3a2829e42f4292534f91f5219",
+        "status": "stopped_unverified_preserved_in_git_branch"
       },
       {
         "feature": "GRASS_WIND",
-        "checkout": "D:/Project/PEPEngine2/Build/Features/GRASS_WIND",
+        "checkout": "D:/Project/PEPEngine2",
         "branch": "codex/feature-grass-wind",
         "base": "353a585a529d46002a506e1d7e98d66cca55d397",
         "hostId": "local",
         "model": "gpt-6.1-sol",
         "reasoning": "high",
-        "threadId": "01a19738-6e1d-77e2-a8ef-8540117a9bd5"
+        "threadId": "01a19738-6e1d-77e2-a8ef-8540117a9bd5",
+        "head": "c146dcd5ef8b7930fc2f20f08cdf86c0eb5e65f0",
+        "status": "stopped_unverified_preserved_in_git_branch"
       },
       {
         "feature": "PARTICLES",
-        "checkout": "D:/Project/PEPEngine2/Build/Features/PARTICLES",
+        "checkout": "D:/Project/PEPEngine2",
         "branch": "codex/feature-particles",
         "base": "353a585a529d46002a506e1d7e98d66cca55d397",
         "hostId": "local",
         "model": "gpt-6.1-sol",
         "reasoning": "high",
-        "threadId": "01a19738-99c4-76d1-9829-a740725bdcb5"
+        "threadId": "01a19738-99c4-76d1-9829-a740725bdcb5",
+        "head": "47f5f231674dc4259ea4400d92da96a4628eced6",
+        "status": "stopped_unverified_preserved_in_git_branch"
       },
       {
         "feature": "FLUID",
-        "checkout": "D:/Project/PEPEngine2/Build/Features/FLUID",
+        "checkout": "D:/Project/PEPEngine2",
         "branch": "codex/feature-fluid",
         "base": "353a585a529d46002a506e1d7e98d66cca55d397",
         "hostId": "local",
         "model": "gpt-6.1-sol",
         "reasoning": "high",
-        "threadId": "01a19738-bb08-7fe2-b4d8-aa306dade5ff"
+        "threadId": "01a19738-bb08-7fe2-b4d8-aa306dade5ff",
+        "head": "38294c141a60e1e1a1fbe9dc54a7709d3ac53f46",
+        "status": "stopped_unverified_preserved_in_git_branch"
       },
       {
         "feature": "SKINNING",
-        "checkout": "D:/Project/PEPEngine2/Build/Features/SKINNING",
+        "checkout": "D:/Project/PEPEngine2",
         "branch": "codex/feature-skinning",
         "base": "353a585a529d46002a506e1d7e98d66cca55d397",
         "hostId": "local",
         "model": "gpt-6.1-sol",
         "reasoning": "high",
-        "threadId": "01a19738-d751-7fe3-85a7-fff273932cf3"
+        "threadId": "01a19738-d751-7fe3-85a7-fff273932cf3",
+        "head": "fba7b3daf7dea30e67628124dc0520cd441393d9",
+        "status": "stopped_unverified_preserved_in_git_branch"
       },
       {
         "feature": "CLOUDS",
-        "checkout": "D:/Project/PEPEngine2/Build/Features/CLOUDS",
+        "checkout": "D:/Project/PEPEngine2",
         "branch": "codex/feature-clouds",
         "base": "353a585a529d46002a506e1d7e98d66cca55d397",
         "hostId": "local",
         "model": "gpt-6.1-sol",
         "reasoning": "high",
-        "threadId": "01a19739-011e-7770-97d7-c50bb7b527b5"
+        "threadId": "01a19739-011e-7770-97d7-c50bb7b527b5",
+        "head": "74666b6a5bf79d2117a9c92dae35d49739a2079b",
+        "status": "stopped_unverified_preserved_in_git_branch"
       }
     ],
-    "launchConfirmation": "wait_threads timeoutMs=0: all six active with latestTurn inProgress",
+    "launchConfirmation": "All six author chats acknowledged STOP and are idle. Their commits and LFS assets were imported into the top-level Git before clone removal.",
     "authorsVerificationPolicy": "implementation only; no builds/tests/benchmarks/standalone review; final result explicitly unverified"
   },
   "reviewCoordinator": {
@@ -131,13 +158,104 @@
     "hostId": "local",
     "model": "gpt-6.1-sol",
     "reasoning": "high",
-    "status": "complete",
-    "scope": "Verify and fix first group personally, then create second-group chats from verified integration baseline",
-    "plannedCheckout": "D:/Project/PEPEngine2/Build/Features/REVIEW",
-    "checkout": "D:/Project/PEPEngine2/Build/Features/REVIEW",
-    "branch": "codex/review-render-techniques",
+    "status": "migrated_to_top_level",
+    "scope": "Verified first group, integrated into root; second-group chats stopped and commits preserved in root branches",
+    "checkout": "D:/Project/PEPEngine2",
+    "branch": "codex/bistro-rendering",
     "report": "docs/rendering-review.md",
     "checks": "Release App + focused CPU/GPU/debug/GBV, real Bistro frames/readback/visual, prepass early/late, two independent probes, root WIP/414 Bistro SHA256 preservation",
-    "integrationCommit": "353a585a529d46002a506e1d7e98d66cca55d397"
+    "integrationCommit": "353a585a529d46002a506e1d7e98d66cca55d397",
+    "repositoryIntegrationCommit": "a7f57819cf03332a09c5187518cfc37a11374128"
+  },
+  "workspace": {
+    "checkout": "D:/Project/PEPEngine2",
+    "repository": "D:/Project/PEPEngine2/.git",
+    "activeBranch": "codex/bistro-rendering",
+    "policy": "one top-level project; local Git feature branches; no nested clones or worktrees unless explicitly requested",
+    "integrationMerge": "a7f57819cf03332a09c5187518cfc37a11374128"
+  },
+  "migration": {
+    "agentWarningCleanup": "ffb529e",
+    "allocatorResearch": "b021641",
+    "preservedBranches": [
+      {
+        "feature": "AO",
+        "branch": "codex/feature-ao",
+        "head": "ffa60e3c1d5127a8add4a1641de6baecdb1774de"
+      },
+      {
+        "feature": "CLOUDS",
+        "branch": "codex/feature-clouds",
+        "head": "74666b6a5bf79d2117a9c92dae35d49739a2079b"
+      },
+      {
+        "feature": "DOF",
+        "branch": "codex/feature-dof",
+        "head": "97ed6e37b6740beb30b871c9ecbfab808ab9da5a"
+      },
+      {
+        "feature": "FLUID",
+        "branch": "codex/feature-fluid",
+        "head": "38294c141a60e1e1a1fbe9dc54a7709d3ac53f46"
+      },
+      {
+        "feature": "GRASS_WIND",
+        "branch": "codex/feature-grass-wind",
+        "head": "c146dcd5ef8b7930fc2f20f08cdf86c0eb5e65f0"
+      },
+      {
+        "feature": "MOTION_BLUR",
+        "branch": "codex/feature-motion-blur",
+        "head": "2742dfe592da18bdf9adc3714a351463bba0a1c4"
+      },
+      {
+        "feature": "PARTICLES",
+        "branch": "codex/feature-particles",
+        "head": "47f5f231674dc4259ea4400d92da96a4628eced6"
+      },
+      {
+        "feature": "REFLECTION",
+        "branch": "codex/feature-reflection",
+        "head": "16d16b25c8e7155d06013524213c9100911bd1c6"
+      },
+      {
+        "feature": "REVIEW",
+        "branch": "codex/review-render-techniques",
+        "head": "6209740a1010ff04987aea13d2c41f34b78ed628"
+      },
+      {
+        "feature": "SKINNING",
+        "branch": "codex/feature-skinning",
+        "head": "fba7b3daf7dea30e67628124dc0520cd441393d9"
+      },
+      {
+        "feature": "SKY",
+        "branch": "codex/feature-sky",
+        "head": "5a95aa49763719e3a2829e42f4292534f91f5219"
+      },
+      {
+        "feature": "SSR",
+        "branch": "codex/feature-ssr",
+        "head": "87744817a3a18c2b55430318e59c2f3a631fcac2"
+      }
+    ],
+    "evidence": "Build/RenderingReview",
+    "cleanup": "nested project copies removed after Git/LFS/WIP preservation checks",
+    "rootValidation": {
+      "configuration": "Release/x64",
+      "appBuild": "passed",
+      "focusedBuilds": [
+        "AOTests",
+        "SSRTests",
+        "ReflectionProbeTests",
+        "DepthOfFieldTests",
+        "MotionBlurTests"
+      ],
+      "cpuRuns": "all five passed",
+      "ordinaryGpuRuns": "all five passed",
+      "logs": "Build/RepositoryMigration/root-*",
+      "fullProjectCopiesRemoved": 14,
+      "remainingSolution": "D:/Project/PEPEngine2/PEPEngine2.sln"
+    }
   }
 }

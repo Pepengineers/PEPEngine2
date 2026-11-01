@@ -1,8 +1,8 @@
 # Central rendering integration review — 2026-11-01
 
-Workspace: `D:/Project/PEPEngine2/Build/Features/REVIEW`, branch `codex/review-render-techniques`. This is a separate local clone. The main checkout, its branch/index, donor project and five author clones were not modified. No push/PR/merge into the main checkout was performed.
+Current workspace: `D:/Project/PEPEngine2`, branch `codex/bistro-rendering`. The reviewed code and full Git history are integrated into the top-level project by merge `a7f5781`; the original reviewed code commit remains `353a585`. Nested feature/review clones were removed after preserving every branch, commit and new LFS asset. No push/PR was performed.
 
-Status: **first-group integration review complete**. Focused CPU/GPU checks, focused GPU-based validation, mixed-probe/prepass oracles and the final real Bistro transition rerun passed. The second group is authorized for separate implementation-only chats from this reviewed code.
+The original technique checks below ran before migration; their small logs/images were retained under `Build/RenderingReview`. The migration also builds/runs the top-level project directly, with separate logs under `Build/RepositoryMigration`. Original temporary checkout paths in historical logs are provenance, not live working directories. The second-group chats are stopped, and their unverified code is preserved in ordinary branches of this same top-level Git.
 
 ## Inputs and ownership
 
@@ -18,7 +18,8 @@ Root requirements base: `4d7b19ca5948c66601294ad1878208e9bd02ced4`. The actual f
 
 The old cancelled implementation was not restored. Author validation claims were treated as historical, not as acceptance of the integrated code.
 
-Baseline warning changes remain unstaged. Their patch is `Build/Review/baseline-wip.patch`; a fresh root `git diff --binary -- Engine MSBuild` matched it byte-for-byte. The allocator research remains untracked and was copied intact. One existing stencil conversion already belongs to an imported feature commit; it was preserved. Physical SHA256 comparison of all **414 Bistro files** against the root passed; hashes are in `Build/Review/bistro-sha256.json`. Existing LFS payloads in Assets/External Runtime are copied byte-for-byte and marked assume-unchanged only in this local clone to avoid the sandbox's shell-based LFS filtering problem. This index flag is not evidence for scene preservation; the independent physical hashes are.
+The user clarified that the remaining WIP was entirely agent-created. Warning/MSBuild changes are committed as `ffb529e`; allocator research as `b021641`. Before deleting the copies, residual changes were checked against the committed baseline/canonical files: no unique uncommitted feature edits remained. All imported branch HEADs and new LFS asset objects were verified in the top-level Git. Physical SHA256 comparison of all **414 Bistro files** against the original root passed; the hash inventory is retained in `Build/RenderingReview/bistro-sha256.json`. No assume-unchanged workaround was added to the top-level project.
+
 
 ## Final pipeline and fixes
 
@@ -35,7 +36,7 @@ Baseline warning changes remain unstaged. Their patch is `Build/Review/baseline-
 
 ## Reproduction and completed checks
 
-Run from REVIEW. Builder: `C:/Program Files/Microsoft Visual Studio/18/Professional/MSBuild/Current/Bin/MSBuild.exe` (18.8.2); Release/x64, MSVC 14.51.36231. The existing host workaround was kept local:
+Run from `D:/Project/PEPEngine2`. Builder: `C:/Program Files/Microsoft Visual Studio/18/Professional/MSBuild/Current/Bin/MSBuild.exe` (18.8.2); Release/x64, MSVC 14.51.36231. The existing host workaround was kept local:
 
 ```powershell
 $env:_CL_ = '/Z7 /GL-'
@@ -69,11 +70,11 @@ Every GPU run was serialized with `Local\PEPEngine2FeatureGpuValidation`. AO/SSR
 ```powershell
 $gate = [System.Threading.Mutex]::new($false, 'Local\PEPEngine2FeatureGpuValidation')
 $null = $gate.WaitOne()
-try { & Build/bin/x64/Release/ObjectDataJobsTests/ObjectDataJobsTests.exe --render-bistro 'D:/Project/PEPEngine2/Build/Features/REVIEW/Assets/Scenes/Amazon Lumberyard Bistro' }
+try { & Build/bin/x64/Release/ObjectDataJobsTests/ObjectDataJobsTests.exe --render-bistro 'D:/Project/PEPEngine2/Assets/Scenes/Amazon Lumberyard Bistro' }
 finally { $gate.ReleaseMutex(); $gate.Dispose() }
 ```
 
-Logs and generated image artifacts are in `Build/Review/`. Key logs: `gpu-AO.log`, `gpu-MotionBlur.log`, `final-gpu-SSRTests.log`, `final-gpu-ReflectionProbeTests.log`, `final-gpu-DepthOfFieldTests.log`, `focused-gbv-AOTests.log`, `focused-gbv-ReflectionProbeTests.log`, `connected-LightingGpuTests.log`, `connected-ObjectDataJobsTests.log`, `bistro-visual.log`, `final-bistro-transitions.log`. Current build logs include `final-build-App.log`, `ini-build-SSRTests.log`, `ini-build-ReflectionProbeTests.log` and `build-ObjectDataJobsTests-final.log`.
+Original logs and generated image artifacts are retained in `Build/RenderingReview/`. Key logs: `gpu-AO.log`, `gpu-MotionBlur.log`, `final-gpu-SSRTests.log`, `final-gpu-ReflectionProbeTests.log`, `final-gpu-DepthOfFieldTests.log`, `focused-gbv-AOTests.log`, `focused-gbv-ReflectionProbeTests.log`, `connected-LightingGpuTests.log`, `connected-ObjectDataJobsTests.log`, `bistro-visual.log`, `final-bistro-transitions.log`. Current build logs include `final-build-App.log`, `ini-build-SSRTests.log`, `ini-build-ReflectionProbeTests.log` and `build-ObjectDataJobsTests-final.log`.
 
 Two attempted full GBV runs were stopped **only in owned REVIEW processes** while spending minutes instrumenting vendor XeSS (Reflection PID 24420, AO PID 39800). Their incomplete runs are not counted as passes. Focused GBV and complete ordinary-debug paths above passed. No foreign process was terminated. The initial Bistro transition run completed successfully on its own; no Bistro process was killed.
 
@@ -95,7 +96,7 @@ GPU: NVIDIA GeForce RTX 3060 Laptop. These are isolated-fixture GPU timestamps o
 
 Repeated uninstrumented-vs-instrumented runs can move these laptop timings with clocks/load; keep the workload and measurement boundary when comparing changes. Quality changes real rays/rings/slices/samples/faces or resolution; explicit author overrides are intentionally retained.
 
-Actual-image ordering checks: motion blur at render grid saved cost above; analytic XeSS static/moving 16-frame HDR MAE was 0.00073/0.00157. DoF native/output-grid variants differ materially (mean HDR difference 0.493 in the aggressive synthetic fixture) and output-grid DoF costs more; depth/color grids stay aligned before XeSS rather than resampling scene depth without a validated silhouette contract. Bottle readbacks demonstrate real DoF changes through the integrated chain. The four actual Bistro images are `Build/Review/Visual/bistro-q0.png` through `bistro-q3.png`; the contact sheet `bistro-quality.png` was inspected (top-left Off, top-right Low, bottom-left Mid, bottom-right High). Synthetic probe/AO fixtures are not claimed as Bistro visual acceptance.
+Actual-image ordering checks: motion blur at render grid saved cost above; analytic XeSS static/moving 16-frame HDR MAE was 0.00073/0.00157. DoF native/output-grid variants differ materially (mean HDR difference 0.493 in the aggressive synthetic fixture) and output-grid DoF costs more; depth/color grids stay aligned before XeSS rather than resampling scene depth without a validated silhouette contract. Bottle readbacks demonstrate real DoF changes through the integrated chain. The four actual Bistro images are `Build/RenderingReview/Visual/bistro-q0.png` through `bistro-q3.png`; the contact sheet `bistro-quality.png` was inspected (top-left Off, top-right Low, bottom-left Mid, bottom-right High). Synthetic probe/AO fixtures are not claimed as Bistro visual acceptance.
 
 ## Material limitations
 
@@ -121,3 +122,9 @@ First-group integration code commit: `353a585a529d46002a506e1d7e98d66cca55d397`.
 | CLOUDS | `01a19739-011e-7770-97d7-c50bb7b527b5` | `D:/Project/PEPEngine2/Build/Features/CLOUDS` / `codex/feature-clouds` |
 
 Their future code is not part of the accepted first-group baseline and must be centrally reviewed separately.
+
+## Repository normalization
+
+By the user's later instruction all code/history now belongs to the top-level Git. `a7f5781` merges the reviewed first group; feature branches preserve the author commits, including all six unverified second-group implementations. All six chats acknowledged STOP/idle before their checkouts were removed. RUNS.json and the task README give their current branch names/HEADs. Two older build snapshots (lighting-validation and iteration-commits/1) contained no unique files outside the root or existing Git history and were also removed. No feature source or new LFS asset was discarded. The original second-group launch table above records historical paths only; current work must use the root project.
+
+Top-level relocation verification: Release/x64 App and all five focused projects built with `_CL_=/Z7 /GL-`. AO, SSR, ReflectionProbe, DepthOfField and MotionBlur CPU and ordinary GPU runs all passed from `Build/bin/x64/Release`. ReflectionProbe specifically confirmed depth-only/depth+normal identity, no late-prepass normal writes and Equal G-buffer reuse. Logs: `Build/RepositoryMigration/root-*-build.log`, `root-*-cpu.log`, `root-*-gpu.log`. Only the root `PEPEngine2.sln` remains; all 12 feature clones and both old project snapshots were removed. The snapshot junctions to root Assets/External were removed without traversing their targets.

@@ -1,5 +1,7 @@
 # D3D12 Memory Allocator: Unreal, AMD и PEPEngine2
 
+> Historical investigation retained from the agents. Source inventories/line pointers describe the pre-integration tree; this is not an allocator implementation or current performance result.
+
 Дата проверки: 2026-11-01. Статус: исследование, внедрение не выполнялось.
 
 ## Рекомендация

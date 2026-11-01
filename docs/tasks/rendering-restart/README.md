@@ -1,17 +1,41 @@
-# Перезапуск реализации техник
+# Графические техники: один проект и обычные Git-коммиты
 
-Запрос 2026-11-01: отменить старую реализацию; одна техника — один отдельный чат **gpt-6.1-sol / high**. Авторы добавляют код с code style + ponytail без самостоятельной верификации; отдельный проверяющий проверяет первую группу и чинит сам. Постэффекты управляются runtime CVar + INI; у второй группы глобально только Enabled/Quality, остальные параметры внутри рендер-компонентов. Общий контракт: [COMMON.md](COMMON.md).
+Рабочая копия: `D:/Project/PEPEngine2`, текущая ветка `codex/bistro-rendering`. Полные вложенные копии проекта отменены по указанию пользователя. Новые clones/worktrees не создавать без отдельного запроса. Общий контракт: [COMMON.md](COMMON.md); точные HEAD/статусы: [RUNS.json](RUNS.json).
 
-Первая группа, запуск сейчас: [AO: SSAO/HBAO/XeGTAO/CACAO](first/AO.md), [SSSR](first/SSR.md), [cubemap reflections](first/REFLECTION.md), [DoF](first/DOF.md), [Motion Blur](first/MOTION_BLUR.md).
+Проверенная первая группа объединена в текущую ветку коммитом `a7f5781` с полной историей feature-коммитов и исправлениями `353a585`. Агентские warning/MSBuild правки — `ffb529e`, исследование аллокатора — `b021641`. Обычная рабочая копия должна оставаться чистой после законченной работы.
 
-Вторая группа, **запущена после проверки первой, Sol/high**: [Sky](second/SKY.md), [Grass/Wind](second/GRASS_WIND.md), [GPU particles](second/PARTICLES.md), [Fluid/Water](second/FLUID.md), [Skinning](second/SKINNING.md), [2D clouds](second/CLOUDS.md).
+| Техника в текущей ветке | Интеграционные коммиты |
+|---|---|
+| [AO: SSAO/HBAO/XeGTAO/CACAO](first/AO.md) | `d12ca7a`, `711fe4e`, `353a585` |
+| [FidelityFX SSSR + denoiser](first/SSR.md) | `329f537`, `353a585` |
+| [Reflection probes](first/REFLECTION.md) | `6ea913b`, `271e44f`, `353a585` |
+| [FidelityFX DoF](first/DOF.md) | `beb75f4`, `42ddc6d`, `353a585` |
+| [Motion Blur HPG2014](first/MOTION_BLUR.md) | `d639b4d`, `353a585` |
+| Depth Prepass / ранний или поздний AO | `353a585` |
 
-Первая группа работает в отдельных local clones под ignored `Build/Features`, а не одновременно в одном checkout. Изменения не объединяются автоматически с основной веткой. По завершении каждой задачи её чат отдаёт код, commits и непроверенные ограничения для последующего объединения.
+`Render.AO.ExecutionPoint=0`: prepass depth+normals → AO → тени. `=1` (default): depth-only prepass с alpha-test → тени → G-buffer → AO перед lighting. Во втором режиме normals и прочие G-buffer данные в препассе не считаются. [Отчёт проверки](../../rendering-review.md); сохранённые logs/images — `Build/RenderingReview`.
 
-Прежние исходники отменены отдельным обратным коммитом без переписывания чужой истории; полная копия затронутых файлов и исходных patches перед откатом находится в ignored `Build/TechniqueRestart/rollback-snapshot`. Исследовательские решения перенесены в новые задания. Посторонние правки загрузчика/Jobs/CVar/предупреждений сохраняются.
+## Вторая группа: сохранена в ветках, чаты остановлены
 
-Откат: commit `409356f`; Release App после отката собран успешно. Проверка чужого исходного WIP побайтно прошла.
+Это непроверенные реализации, не часть принятой первой группы. Все шесть авторов подтвердили остановку. Работа, Git commits и LFS assets перенесены в тот же верхнеуровневый Git; отдельных проектов для них больше нет.
 
-Центральная интеграция первой группы завершена в отдельной REVIEW-копии на `codex/review-render-techniques`: [отчёт](../../rendering-review.md). Добавлен Depth Prepass; `Render.AO.ExecutionPoint=0/1` выбирает ранний AO с normals в препассе или поздний AO с depth-only препассом. Основные тени идут после препасса. Корневой checkout не объединён с REVIEW. Запуск второй группы от проверенной базы разрешён и отражается в RUNS.json.
+| Техника | Ветка в основном Git | HEAD |
+|---|---|---|
+| [SKY](second/SKY.md) | `codex/feature-sky` | `5a95aa4` |
+| [GRASS_WIND](second/GRASS_WIND.md) | `codex/feature-grass-wind` | `c146dcd` |
+| [PARTICLES](second/PARTICLES.md) | `codex/feature-particles` | `47f5f23` |
+| [FLUID](second/FLUID.md) | `codex/feature-fluid` | `38294c1` |
+| [SKINNING](second/SKINNING.md) | `codex/feature-skinning` | `fba7b3d` |
+| [CLOUDS](second/CLOUDS.md) | `codex/feature-clouds` | `74666b6` |
 
-Вторая группа фактически запущена в шести отдельных local clones от `353a585`; все шесть чатов подтвердили active/inProgress через wait_threads. IDs, paths и branch names — в RUNS.json и отчёте REVIEW. Авторы добавляют только код; глобально Enabled/Quality, остальные поля на экземпляре компонента.
+Глобально у компонентов только Enabled/Quality; все остальные параметры принадлежат экземплярам компонентов. Следующая стадия — отдельная центральная проверка этих веток и их согласованная интеграция. Не запускать автоматически старые чаты с удалёнными путями.
+
+Историю видно обычными командами из корня:
+
+```powershell
+git log --oneline --graph --all
+git show codex/feature-sky --stat
+git branch --list 'codex/feature-*'
+```
+
+Прежняя отменённая реализация остаётся в Git-истории; её код не восстановлен. Старые временные snapshots не являются рабочими проектами.
