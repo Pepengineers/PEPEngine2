@@ -5,6 +5,7 @@
 
 #include "Engine.Core/Types/MeshTypes.h"
 #include "Engine.Core/AssetHandles.h"
+#include <map>
 
 using namespace Engine::Core;
 
@@ -26,6 +27,12 @@ struct GPUMesh
 {
 	std::vector<GPUSubMesh> SubMeshes;
 	const Mesh* CPUMesh;
+	MeshHandle SourceHandle;
+	std::uint64_t ContentRevision = 0;
+	UINT VertexStart = 0;
+	UINT VertexCapacity = 0;
+	UINT IndexStart = 0;
+	UINT IndexCapacity = 0;
 
 	GPUMesh(const Mesh* mesh) : CPUMesh(mesh)
 	{
@@ -44,14 +51,18 @@ public:
 	GDX12GeometryBuffer(GDX12Device* device);
 	~GDX12GeometryBuffer();
 	void Clear();
-	void AddMesh(const Mesh* mesh, MeshHandle handle);
+	void AddMesh(const Mesh* mesh, MeshHandle handle, std::uint64_t contentRevision = 0);
+	UINT AllocateSkinnedVertices(UINT count);
+	void ReleaseSkinnedVertices(UINT offset, UINT count);
+	ID3D12Resource* BeginSkinning(GDX12CommandList* commands);
+	void EndSkinning(GDX12CommandList* commands);
 	const GPUMesh* GetGPUMeshByHandle(MeshHandle handle);
 
 private:
 	friend class RenderModule;
 	friend class GDX12CommandList;
 
-	void ResizeVertexBuffer(UINT newSize);
+	void ResizeVertexBuffer(UINT newSize, UINT updateStart = 0, UINT updateCount = 0);
 	void ResizeIndexBuffer(UINT newSize);
 
 	GDX12Device* _device;
@@ -67,6 +78,9 @@ private:
 	D3D12_VERTEX_BUFFER_VIEW _vertexBufferView;
 	D3D12_INDEX_BUFFER_VIEW _indexBufferView;
 
+	D3D12_RESOURCE_STATES _vertexState = D3D12_RESOURCE_STATE_COMMON;
+	std::map<UINT, UINT> _freeSkinRanges;
+	std::map<UINT, UINT> _freeIndexRanges;
 	UINT _totalVertices;
 	UINT _totalIndices;
 

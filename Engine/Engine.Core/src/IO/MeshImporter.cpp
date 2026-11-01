@@ -1,6 +1,7 @@
 ﻿// MeshImporter.cpp
 
 #include <Engine.Core/IO/MeshImporter.h>
+#include <stdexcept>
 #include "Engine.Core/Logging/Logger.h"
 #include <Engine.Core/IO/AssimpImportHelpers.h>
 
@@ -695,6 +696,40 @@ namespace
 			}
 		}
 
+		if (assimpMesh.HasBones())
+		{
+			std::vector<std::vector<Engine::Core::SkinInfluence>> influences(assimpMesh.mNumVertices);
+			for (unsigned int boneIndex = 0; boneIndex < assimpMesh.mNumBones; ++boneIndex)
+			{
+				if (!assimpMesh.mBones[boneIndex]) throw std::runtime_error("Null skin bone");
+				const aiBone& bone = *assimpMesh.mBones[boneIndex];
+				Engine::Core::SkinBone importedBone;
+				importedBone.NodeName = bone.mName.C_Str();
+				importedBone.InverseBind = Engine::Core::ImportAssimpMatrix(bone.mOffsetMatrix);
+				importedSubMesh.Bones.push_back(std::move(importedBone));
+				for (unsigned int i = 0; i < bone.mNumWeights; ++i)
+				{
+					const auto& weight = bone.mWeights[i];
+					if (weight.mVertexId >= influences.size() || !std::isfinite(weight.mWeight) || weight.mWeight < 0)
+						throw std::runtime_error("Invalid imported skin weight");
+					if (weight.mWeight > 0) influences[weight.mVertexId].push_back({boneIndex, weight.mWeight});
+				}
+			}
+			for (auto& vertex : influences)
+			{
+				double sum = 0;
+				for (const auto& influence : vertex) sum += influence.Weight;
+				if (vertex.size() > UINT32_MAX || importedSubMesh.Influences.size() > UINT32_MAX - vertex.size())
+					throw std::overflow_error("Skin influence buffer exceeds 32-bit addressing");
+				importedSubMesh.SkinVertices.push_back({static_cast<std::uint32_t>(importedSubMesh.Influences.size()),
+					static_cast<std::uint32_t>(vertex.size())});
+				for (auto influence : vertex)
+				{
+					influence.Weight = static_cast<float>(influence.Weight / sum);
+					importedSubMesh.Influences.push_back(influence);
+				}
+			}
+		}
 		importedSubMesh.Bounds = CalculateVertexBounds(importedSubMesh.Vertices);
 		return importedSubMesh;
 	}

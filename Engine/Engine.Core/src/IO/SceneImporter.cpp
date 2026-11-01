@@ -12,6 +12,10 @@
 #include <assimp/Importer.hpp>
 #include <assimp/postprocess.h>
 #include <assimp/scene.h>
+#include <unordered_map>
+#include <unordered_set>
+#include <cmath>
+#include <stdexcept>
 
 namespace
 {
@@ -28,6 +32,7 @@ namespace
 		Engine::Core::SceneNode importedNode = {};
 		importedNode.Name = assimpNode.mName.C_Str();
 		importedNode.ParentIndex = parentIndex;
+		importedNode.LocalBindMatrix = Engine::Core::ImportAssimpMatrix(assimpNode.mTransformation);
 
 		aiVector3D scaling;
 		aiQuaternion rotation;
@@ -158,7 +163,71 @@ namespace Engine::Core
 		LogSceneImporterMessage(L"[SceneImporter] Imported scene with " + std::to_wstring(importedNodes.size()) +
 			L" nodes from path: " + sourcePath.generic_wstring() + L"\n");
 
+		std::unordered_map<std::string, std::uint32_t> nodeIndices;
+		std::unordered_set<std::string> ambiguousNames;
+		for (std::uint32_t i = 0; i < importedNodes.size(); ++i)
+			if (!nodeIndices.emplace(importedNodes[i].Name, i).second) ambiguousNames.insert(importedNodes[i].Name);
+		const auto findNode = [&](const std::string& name)
+		{
+			const auto it = nodeIndices.find(name);
+			if (it == nodeIndices.end() || ambiguousNames.count(name) != 0)
+				throw std::runtime_error("Skin/animation node name is missing or ambiguous: " + name);
+			return it->second;
+		};
+		for (const auto& node : importedNodes)
+			for (const auto handle : node.Meshes)
+				for (const auto& part : meshRegistry.GetMesh(handle)->GetSubMeshes())
+					for (const auto& bone : part.Bones) (void)findNode(bone.NodeName);
+		std::vector<AnimationClip> clips;
+		for (unsigned int i = 0; i < assimpScene->mNumAnimations; ++i)
+		{
+			const auto& animation = *assimpScene->mAnimations[i];
+			if (animation.mNumMeshChannels || animation.mNumMorphMeshChannels)
+				throw std::runtime_error("Mesh/morph animation is not skeletal animation");
+			const double ticksPerSecond = animation.mTicksPerSecond > 0 ? animation.mTicksPerSecond : 25.0;
+			AnimationClip clip;
+			clip.Name = animation.mName.C_Str();
+			clip.DurationSeconds = animation.mDuration / ticksPerSecond;
+			if (!std::isfinite(clip.DurationSeconds) || clip.DurationSeconds < 0 || !std::isfinite(ticksPerSecond))
+				throw std::runtime_error("Invalid animation duration");
+			std::unordered_set<std::uint32_t> trackedNodes;
+			for (unsigned int channelIndex = 0; channelIndex < animation.mNumChannels; ++channelIndex)
+			{
+				const auto& channel = *animation.mChannels[channelIndex];
+				NodeAnimation track;
+				track.NodeIndex = findNode(channel.mNodeName.C_Str());
+				if (!trackedNodes.insert(track.NodeIndex).second) throw std::runtime_error("Duplicate animation track");
+				const auto importVectors = [&](const aiVectorKey* keys, unsigned int count, auto& destination)
+				{
+					for (unsigned int key = 0; key < count; ++key)
+					{
+						const auto& v = keys[key].mValue;
+						const double time = keys[key].mTime / ticksPerSecond;
+						if (!std::isfinite(time) || !std::isfinite(v.x) || !std::isfinite(v.y) || !std::isfinite(v.z) ||
+							(!destination.empty() && time <= destination.back().TimeSeconds))
+							throw std::runtime_error("Invalid animation vector key");
+						destination.push_back({time, {v.x, v.y, v.z}});
+					}
+				};
+				importVectors(channel.mPositionKeys, channel.mNumPositionKeys, track.Translation);
+				importVectors(channel.mScalingKeys, channel.mNumScalingKeys, track.Scale);
+				for (unsigned int key = 0; key < channel.mNumRotationKeys; ++key)
+				{
+					const auto& q = channel.mRotationKeys[key].mValue;
+					const double time = channel.mRotationKeys[key].mTime / ticksPerSecond;
+					DirectX::SimpleMath::Quaternion rotation(q.x, q.y, q.z, q.w);
+					if (!std::isfinite(time) || !std::isfinite(rotation.LengthSquared()) ||
+						rotation.LengthSquared() < 1e-12f ||
+						(!track.Rotation.empty() && time <= track.Rotation.back().TimeSeconds))
+						throw std::runtime_error("Invalid animation quaternion key");
+					rotation.Normalize();
+					track.Rotation.push_back({time, rotation});
+				}
+				clip.Tracks.push_back(std::move(track));
+			}
+			clips.push_back(std::move(clip));
+		}
 		Log::Info("Scene", "Imported ", importedNodes.size(), " scene nodes: ", sourcePath);
-		return std::make_unique<SceneAsset>(std::move(importedNodes), std::move(rootNodeIndices));
+		return std::make_unique<SceneAsset>(std::move(importedNodes), std::move(rootNodeIndices), std::move(clips));
 	}
 }

@@ -214,4 +214,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DepthOfFieldPass.h"><Filter>Header Files</Filter></ClInclude>
     <None Include="Shaders\ToneMap.hlsl"><Filter>Resource Files</Filter></None>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\GDX12Skinning.cpp" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12Skinning.h" />
+    <None Include="Shaders\Skinning.hlsl" />
+  </ItemGroup>
 </Project>
