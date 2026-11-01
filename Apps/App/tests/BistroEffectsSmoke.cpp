@@ -20,6 +20,9 @@ int main()
         if (!app.Initialize()) throw std::runtime_error("Bistro initialization failed");
         const auto render = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
         auto& world = *BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()->GetWorld();
+        const auto entityCount=world.GetECS().GetEntityCount();
+        if(world.GetECS().GetPool<GrassRenderComponent>().Size()!=0||world.GetECS().GetPool<WindComponent>().Size()!=0)
+            throw std::runtime_error("Bistro must not acquire grass/wind components");
         auto& transform = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
         auto& camera = world.GetECS().Get<CameraComponent>(world.ActiveCamera);
         ComPtr<ID3D12Device> device;
@@ -62,6 +65,8 @@ int main()
             }
             if (frame == 9) render->SetActiveCamera(&camera);
             app.BenchmarkFrame();
+            if(world.GetECS().GetEntityCount()!=entityCount||world.GetECS().GetPool<GrassRenderComponent>().Size()!=0||world.GetECS().GetPool<WindComponent>().Size()!=0)
+                throw std::runtime_error("Rendering must not create grass/wind entities");
             std::cout << "Bistro HDR frame " << frame << " passed\n";
         }
         for (UINT64 i = 0; i < info->GetNumStoredMessagesAllowedByRetrievalFilter(); ++i)

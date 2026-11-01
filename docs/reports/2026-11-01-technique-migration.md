@@ -238,6 +238,7 @@
 
 ### SkyBox и SkyAtmosphere
 
+- Коммит `fb1560e`, `feat(render): add sky components and atmosphere`.
 - Выбор одного источника `Render.Sky.Source=0/1/2`: Off/SkyBox/SkyAtmosphere.
   Missing selected component выдаёт диагностику и neutral sky/IBL; дубликаты
   разрешаются по минимальному entity ID с диагностикой. Другой тип не включается.
@@ -282,9 +283,59 @@
   file hot reload не автоматический (SkyBox.Revision переотправляет текущий
   AssetManager cache). Визуальное сравнение native/XeSS Bistro ещё не выполнено.
 
+### Grass и wind
+
+- Добавлены GrassRenderComponent/WindComponent и submission в обеих update chains.
+  Новых entities нет; пустая submission сохраняет neutral counts и не выделяет
+  generated vertex/previous-position buffers. Материал — существующий opaque/masked PBR.
+- GPU расширяет только фактические triangles пучков с тремя distance LOD, atomically
+  формирует index count и использует существующие main/CSM/local/probe indirect paths.
+  Генерация не отсекается main frustum: off-camera geometry остаётся caster/capture.
+- Общая generated arena сохраняет GPU-данные при новых static uploads, повторно
+  использует split/coalesced ranges с локальными identity indices. Удалены дубли
+  CPU vertex/index caches. Previous positions выделяются только для деформации.
+  Vertex ABI 44 bytes сохранён, tangent offset исправлен 36→offsetof(Tangent)=32.
+- Wind solver написан по Stable Fluids: один semi-Lagrangian advection/force,
+  divergence, ping-pong Jacobi, projection. Старый Shadertoy-код не копируется.
+  Previous field/world/shape сохраняют корреспонденцию пучков независимо от порядка
+  append. Свежий dt потребляется один раз; отсутствие Submit на паузе даёт dt=0.
+- Enabled/Quality/parameters и documented overrides добавлены в CVar/Engine.ini.
+  Grass Off убирает draw/count, wind может продолжаться; Wind Off выдаёт neutral
+  field, трава остаётся. Off после первого перехода не инвалидирует тени каждый кадр.
+  Глобальные множители не переписывают компонентные значения.
+- Deformation revision инвалидирует cached shadows и shading проб, не сбрасывая
+  capture cursor. UploadBuffer growth сохраняет mapped upload bytes и синхронизирует
+  tracking state с новым ресурсом: growing visibility buffers не наследуют старый
+  INDIRECT/UAV state. Native geometry binding обновляется после роста арен.
+- Evidence: fixture написан до production, shared red build не запускался worker;
+  одиночные DXC stages прошли с -WX. Host Release App сначала выявил недостающий
+  descriptor-heap include и narrow/wide shader-path mismatch; они исправлены.
+  Первый GPU run выявил rounding в повторном расчёте reset pose (макс. 0.000005722 cm).
+  Reset теперь копирует current position напрямую; exact equality assertion сохранён
+  и прошёл. Проверки free-index reuse и previous-world lookup усилены до GPU draws
+  и multiset previous-pose oracle, без зависимости от append ordering.
+- GrassGpuSmoke прошёл: odd wind grid/canaries и снижение divergence, neutral Off,
+  compact counts 0/1/17/1024, near/mid/far/max distance, quality/grid/reset switches,
+  прежние author fields, paused/no-submit motion, owner/slot reuse, generated data
+  после static AddMesh, nonzero BaseVertex indexed motion, split/coalesced draws,
+  PBR roughness/masked clipping, cached local shadows, emissive probe contribution,
+  six-frame publication при wind updates, behind-camera caster/probe retention.
+- Release App, LightingGpuSmoke, ProbeGpuSmoke, ProbeLightingGpuSmoke,
+  PostProcessGpuSmoke, десять кадров BistroEffectsSmoke и verify_scene.py (4 OK)
+  прошли; DX12 debug errors отсутствуют. Логи `Build/grass-*`.
+- Fixed workload: один near chunk, 1024 tufts, solver + compact generation только,
+  без raster/shadow/capture timings; wind grids 64²/128²/256² и 12/24/40 iterations,
+  output vertices 24576/98304/294912. 4 warmup/16 samples, debug layer, per-frame flush.
+  Low/Mid/High median **0.104960/0.327680/0.933888 ms**, process-local usage
+  **133738496/134131712/136491008 bytes**. Это весь fixture с retained arenas,
+  не isolated component memory. Полные rows добавлены в technique-gpu.json.
+- Ограничения: grass patch плоский в локальном XZ, wind — 2D world-XZ domain;
+  maximum distance от основной камеры ограничивает также shadow/capture geometry.
+  Симуляция ветра художественная, Jacobi projection приближённый; FPS не обещается.
+
 ## Оставшаяся работа
 
-Grass/wind, GPU particles, fluid surface/solver,
+GPU particles, fluid surface/solver,
 skinning/asset import и cloud shaders. Наличие отдельных новых файлов во время
 работы не считается завершением этих пунктов без их callers и GPU-проверок.
 

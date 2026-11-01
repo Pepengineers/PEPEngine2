@@ -26,7 +26,7 @@ public:
         _graphicsRoot = std::make_unique<GDX12RootSignature>(_resources->Device, graphics);
         GDX12RootSignatureDesc compute;
         compute.Constants.push_back(2);
-        compute.NumSingleSRVSlots = 4;
+        compute.NumSingleSRVSlots = 5;
         compute.NumSingleUAVSlots = 2;
         _computeRoot = std::make_unique<GDX12RootSignature>(_resources->Device, compute);
         auto& compiler = GDX12ShaderCompiler::GetInstance();
@@ -82,6 +82,7 @@ public:
             if (light.ShadowFirstSlice != UINT_MAX) slices = (std::max)(slices, light.ShadowFirstSlice + LocalShadowFaceCount(light));
         if ((std::max)(slices, 1u) != _sliceCount) CreateMaps((std::max)(slices, 1u));
         _renderedViews = 0;
+        if (_cachedDeformation != _resources->DeformationRevision) { _cached.clear(); _cachedDeformation = _resources->DeformationRevision; }
         _cached.resize(_resources->LocalLights.size());
         auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
         auto& visibility = _visibility[_resources->CurrFrameConstantsIndex];
@@ -117,6 +118,7 @@ public:
                 commands->SetComputeSRV(1, _resources->IndirectCommandsCache->GetSRV()->GPUHandle);
                 commands->SetComputeSRV(2, frame->MaterialCache->GetSRV()->GPUHandle);
                 commands->SetComputeSRV(3, frame->LocalLightCache->GetSRV()->GPUHandle);
+                commands->SetComputeSRV(4, _resources->GeneratedIndexCounts->GetSRV()->GPUHandle);
                 commands->SetComputeUAV(0, visibility.Commands->GetUAV()->GPUHandle);
                 if (count) commands->Dispatch((count + 63) / 64, 1, 1);
                 commands->ResourceBarrier({ visibility.Commands->GetResource().GetIndirectArgsBarrier(),
@@ -220,4 +222,5 @@ private:
     ComPtr<ID3D12CommandSignature> _signature;
     UINT _sliceCount = 0;
     UINT _renderedViews = 0;
+    uint64_t _cachedDeformation = 0;
 };

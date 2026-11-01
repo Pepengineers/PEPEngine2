@@ -251,6 +251,7 @@ void GDX12ReflectionProbePass::PrepareFrame()
     uint64_t lightHash=LightingHash(*_resources);
     HashValue(lightHash,_commonData->EnvironmentRevision);
     HashValue(lightHash,_commonData->EnvironmentLightingRevision);
+    uint64_t shadingRevision=d.ShadeRevision; HashValue(shadingRevision,_resources->DeformationRevision);
     const bool dynamicShadows=(_resources->Lighting.SunShadowFlags&1u)!=0 || std::any_of(_resources->LocalLights.begin(),_resources->LocalLights.end(),[](const auto& light) {return (light.ShadowFlags&1u)!=0;});
     for(const auto& desc:d.Submitted)
     {
@@ -274,8 +275,8 @@ void GDX12ReflectionProbePass::PrepareFrame()
         if(entry.Published && entry.Fallback) { flush(); entry.Fallback.reset(); }
         if(!SameDescription(entry.Description,desc)||entry.StaticRevision!=d.StaticRevision || entry.EnvironmentRevision!=_commonData->EnvironmentRevision)
         { entry.StaticValid.fill(false); entry.NextFace=0; }
-        if(entry.LightHash!=lightHash || (dynamicShadows&&entry.ShadeRevision!=d.ShadeRevision)) entry.StaticValid.fill(false);
-        entry.Description=desc; entry.StaticRevision=d.StaticRevision; entry.ShadeRevision=d.ShadeRevision; entry.LightHash=lightHash; entry.EnvironmentRevision=_commonData->EnvironmentRevision;
+        if(entry.LightHash!=lightHash || (dynamicShadows&&entry.ShadeRevision!=shadingRevision)) entry.StaticValid.fill(false);
+        entry.Description=desc; entry.StaticRevision=d.StaticRevision; entry.ShadeRevision=shadingRevision; entry.LightHash=lightHash; entry.EnvironmentRevision=_commonData->EnvironmentRevision;
         auto& frame=entry.Frames[_resources->CurrFrameConstantsIndex];
         if(frame.Capacity<(std::max)(_resources->IndirectCommandsCache->GetElementCount(),1u)) { flush(); d.EnsureVisibility(*_resources,frame); }
     }

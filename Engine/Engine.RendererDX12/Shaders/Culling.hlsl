@@ -6,6 +6,7 @@ ConstantBuffer<CameraCB> CBCamera : register(b1);
 StructuredBuffer<InstanceData> InstanceCache : register(t0);
 StructuredBuffer<IndirectDrawArgs> InputCommands : register(t1);
 StructuredBuffer<Material> MaterialCache : register(t2);
+StructuredBuffer<uint> GeneratedIndexCounts : register(t3);
 RWStructuredBuffer<IndirectDrawArgs> OpaqueVisibleCommands : register(u0);
 RWStructuredBuffer<uint> OpaqueCounterBuffer : register(u1);
 RWStructuredBuffer<IndirectDrawArgs> TransparentVisibleCommands : register(u2);
@@ -50,7 +51,11 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
     if (drawIndex >= numDraws)
         return;
     
-    uint instanceID = InputCommands[drawIndex].StartInstanceLocation;
+    IndirectDrawArgs command = InputCommands[drawIndex];
+    if (command.IndexCountPerInstance == 0) return;
+    uint instanceID = command.StartInstanceLocation;
+    if ((InstanceCache[instanceID].Flags & 4u) != 0) command.IndexCountPerInstance = GeneratedIndexCounts[instanceID];
+    if (command.IndexCountPerInstance == 0) return;
     bool dynamic = (InstanceCache[instanceID].Flags & 1u) != 0;
     if ((CaptureMask == 1u && dynamic) || (CaptureMask == 2u && !dynamic)) return;
     
@@ -63,7 +68,7 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
         {
             uint writeIndex;
             InterlockedAdd(OpaqueCounterBuffer[0], 1, writeIndex);
-            OpaqueVisibleCommands[writeIndex] = InputCommands[drawIndex];
+            OpaqueVisibleCommands[writeIndex] = command;
             return;
         }
         //transparent
@@ -71,7 +76,7 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
         {
             uint writeIndex;
             InterlockedAdd(TransparentCounterBuffer[0], 1, writeIndex);
-            TransparentVisibleCommands[writeIndex] = InputCommands[drawIndex];
+            TransparentVisibleCommands[writeIndex] = command;
             return;
         }
     }

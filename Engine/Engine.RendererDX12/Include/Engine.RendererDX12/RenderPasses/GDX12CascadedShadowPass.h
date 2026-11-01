@@ -49,7 +49,7 @@ public:
         _graphicsRoot = std::make_unique<GDX12RootSignature>(_resources->Device, graphics);
         GDX12RootSignatureDesc compute;
         compute.NumSingleCBVSlots = 1;
-        compute.NumSingleSRVSlots = 3;
+        compute.NumSingleSRVSlots = 4;
         compute.NumSingleUAVSlots = 5;
         _computeRoot = std::make_unique<GDX12RootSignature>(_resources->Device, compute);
 
@@ -106,7 +106,7 @@ public:
             commands->ResourceBarrier({ _atlas->GetResource()->GetSRVBarrier() });
             return;
         }
-        if ((lighting.SunShadowFlags & 2u) == 0u && _rendered && _cachedRevision == lighting.SunShadowRevision &&
+        if ((lighting.SunShadowFlags & 2u) == 0u && _rendered && _cachedRevision == lighting.SunShadowRevision && _cachedDeformation == _resources->DeformationRevision &&
             std::memcmp(&_cachedSettings, &_resources->ShadowSettings, sizeof(_cachedSettings)) == 0) return;
         const UINT count = _resources->IndirectCommandsCache->GetElementCount();
         auto& visibility = _visibility[_resources->CurrFrameConstantsIndex];
@@ -134,6 +134,7 @@ public:
         commands->SetComputeSRV(0, frame->InstanceCache->GetSRV()->GPUHandle);
         commands->SetComputeSRV(1, _resources->IndirectCommandsCache->GetSRV()->GPUHandle);
         commands->SetComputeSRV(2, frame->MaterialCache->GetSRV()->GPUHandle);
+        commands->SetComputeSRV(3, _resources->GeneratedIndexCounts->GetSRV()->GPUHandle);
         for (UINT cascade = 0; cascade < 4; ++cascade)
             commands->SetComputeUAV(cascade, visibility.Commands[cascade]->GetUAV()->GPUHandle);
         if (count) commands->Dispatch((count + 63) / 64, 1, 1);
@@ -168,6 +169,7 @@ public:
         _rendered = true;
         _cachedSettings = _resources->ShadowSettings;
         _cachedRevision = lighting.SunShadowRevision;
+        _cachedDeformation = _resources->DeformationRevision;
     }
 
     void ClearDenendencies() override
@@ -203,5 +205,6 @@ private:
     ComPtr<ID3D12CommandSignature> _signature;
     GDX12ShadowConstants _cachedSettings;
     UINT _cachedRevision = 0;
+    uint64_t _cachedDeformation = 0;
     bool _rendered = false;
 };

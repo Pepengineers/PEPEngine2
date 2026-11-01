@@ -133,7 +133,7 @@ void GDX12CommandList::SetScissorRect(const D3D12_RECT& scissorRect)
 
 void GDX12CommandList::SetGeometryBuffer(GDX12GeometryBuffer* buffer)
 {
-	if (_currentGeometryBuffer == buffer) { return; }
+	// Native buffers can grow while the arena object keeps its address.
 
 	_currentGeometryBuffer = buffer;
 	_commandList->IASetVertexBuffers(0, 1, &buffer->_vertexBufferView);
@@ -151,7 +151,7 @@ void GDX12CommandList::SetRenderTargets(std::initializer_list<GDX12Texture*> rtv
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = {};
 	if (dsvTexture && dsvTexture->GetDSV()) { dsvHandle = dsvTexture->GetDSV()->CPUHandle; }
 
-	_commandList->OMSetRenderTargets(rtvHandles.size(), rtvHandles.data(), FALSE, 
+	_commandList->OMSetRenderTargets(static_cast<UINT>(rtvHandles.size()), rtvHandles.data(), FALSE,
 		(dsvHandle.ptr != 0) ? &dsvHandle : nullptr );
 }
 
@@ -290,7 +290,7 @@ void GDX12CommandList::ResourceBarrier(std::initializer_list<CD3DX12_RESOURCE_BA
 			filteredBarriers.push_back(barrier);
 		}
 	}
-	if (!filteredBarriers.empty()) { _commandList->ResourceBarrier(filteredBarriers.size(), filteredBarriers.data()); }
+	if (!filteredBarriers.empty()) { _commandList->ResourceBarrier(static_cast<UINT>(filteredBarriers.size()), filteredBarriers.data()); }
 }
 
 void GDX12CommandList::EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTURE_BARRIER> textureBarriers)

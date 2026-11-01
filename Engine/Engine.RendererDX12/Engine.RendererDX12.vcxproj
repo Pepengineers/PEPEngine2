@@ -19,6 +19,8 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12GrassWind.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GrassWindPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderSettings.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Sky.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SkyAerialPass.h" />
@@ -78,6 +80,8 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="src\GDX12GrassWind.cpp" />
+    <ClCompile Include="src\GDX12GrassWindPass.cpp" />
     <ClCompile Include="src\RenderSettings.cpp" />
     <ClCompile Include="src\GDX12SkyPasses.cpp" />
     <ClCompile Include="src\GDX12ReflectionProbePass.cpp" />
@@ -116,6 +120,8 @@
     <None Include="Shaders\LocalShadowPass.hlsl" />
     <None Include="Shaders\ShadowFrustum.hlsli" />
     <None Include="Shaders\FullScreenVS.hlsl" />
+    <None Include="Shaders\Grass.hlsl" />
+    <None Include="Shaders\WindFluid.hlsl" />
     <None Include="Shaders\OpaquePass.hlsl" />
     <None Include="Shaders\DeferredLighting.hlsl" />
     <None Include="Shaders\PBRSurface.hlsli" />

@@ -101,6 +101,7 @@ void GDX12UploadBuffer<T>::CreateBuffer()
             D3D12_RESOURCE_STATE_GENERIC_READ, nullptr, IID_PPV_ARGS(&_buffer.D3DResource)));
         ThrowIfFailed(_buffer.D3DResource->Map(0, nullptr, reinterpret_cast<void**>(&_mappedData)));
     }
+    _buffer.SetCurrentState(_bufferType == EBufferType::Default ? D3D12_RESOURCE_STATE_COMMON : D3D12_RESOURCE_STATE_GENERIC_READ);
 }
 
 template<typename T>
@@ -203,7 +204,8 @@ void GDX12UploadBuffer<T>::Resize(UINT newElementCount)
 {
     if (newElementCount <= _elementCount) return;
 
-    UINT oldElementCount = _elementCount;
+    std::vector<BYTE> previous;
+    if (_mappedData) previous.assign(_mappedData, _mappedData + _totalBufferSize);
     _elementCount = newElementCount;
 
     if (_bufferType == EBufferType::Upload && _mappedData)
@@ -213,6 +215,8 @@ void GDX12UploadBuffer<T>::Resize(UINT newElementCount)
     }
 
     CreateBuffer();
+
+    if (!previous.empty()) memcpy(_mappedData, previous.data(), previous.size());
 
     if (_srv) CreateSRV(_heap, _SRVheapIndex);
     if (_uav) CreateUAV(_heap, _UAVheapIndex);

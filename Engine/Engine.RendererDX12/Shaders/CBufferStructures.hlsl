@@ -106,9 +106,9 @@ struct InstanceData
     uint TransformIndex;
     uint MaterialIndex;
     uint Flags;
-    uint _pad2;
+    uint PreviousPositionBase;
     float3 BoundingBoxCenter;
-    uint _pad3;
+    uint VertexBase;
     float3 BoundingBoxExtents;
     uint _pad4;
 };

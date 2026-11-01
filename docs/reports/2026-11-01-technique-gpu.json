@@ -425,5 +425,49 @@
       "processLocalCurrentUsageBytes": 97054720,
       "processLocalBudgetBytes": 5479858176
     }
+  ],
+  "grassWind": [
+    {
+      "quality": 1,
+      "tufts": 1024,
+      "warmupFrames": 4,
+      "samples": 16,
+      "workload": "production wind solver plus compact generation, fixed one-chunk patch, per-frame fence flush, debug layer",
+      "gpuMeanMs": 0.106432,
+      "gpuMedianMs": 0.10496,
+      "gpuMinMs": 0.103424,
+      "gpuMaxMs": 0.113664,
+      "memoryScope": "DXGI whole-process local usage, includes all fixture render/arena resources, not isolated grass allocation",
+      "processLocalCurrentUsageBytes": 133738496,
+      "processLocalBudgetBytes": 5479858176
+    },
+    {
+      "quality": 2,
+      "tufts": 1024,
+      "warmupFrames": 4,
+      "samples": 16,
+      "workload": "production wind solver plus compact generation, fixed one-chunk patch, per-frame fence flush, debug layer",
+      "gpuMeanMs": 0.327168,
+      "gpuMedianMs": 0.32768,
+      "gpuMinMs": 0.32256,
+      "gpuMaxMs": 0.331776,
+      "memoryScope": "DXGI whole-process local usage, includes all fixture render/arena resources, not isolated grass allocation",
+      "processLocalCurrentUsageBytes": 134131712,
+      "processLocalBudgetBytes": 5479858176
+    },
+    {
+      "quality": 3,
+      "tufts": 1024,
+      "warmupFrames": 4,
+      "samples": 16,
+      "workload": "production wind solver plus compact generation, fixed one-chunk patch, per-frame fence flush, debug layer",
+      "gpuMeanMs": 0.934976,
+      "gpuMedianMs": 0.933888,
+      "gpuMinMs": 0.929792,
+      "gpuMaxMs": 0.946176,
+      "memoryScope": "DXGI whole-process local usage, includes all fixture render/arena resources, not isolated grass allocation",
+      "processLocalCurrentUsageBytes": 136491008,
+      "processLocalBudgetBytes": 5479858176
+    }
   ]
 }

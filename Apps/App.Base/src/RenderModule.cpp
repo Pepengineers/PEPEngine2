@@ -17,6 +17,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12CascadedShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12SkyAerialPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12GrassWindPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
@@ -448,6 +449,40 @@ void RenderModule::SubmitReflectionProbes(uint64_t world, std::vector<GDX12Refle
     uint64_t staticRevision, uint64_t shadingRevision)
 {
     if (_reflectionProbes) _reflectionProbes->Submit(world, std::move(probes), staticRevision, shadingRevision);
+}
+
+void RenderModule::SubmitGrassWind(GDX12GrassWindDesc submission)
+{
+    if(!_grassWind) return;
+    const auto release=[&](std::vector<UINT>& slots,size_t keep)
+    {
+        if(slots.size()<=keep) return;
+        _primaryDevice->GetCommandQueue()->Flush();
+        while(slots.size()>keep)
+        { _primaryResources.IndirectCommandsCache->CopyData(slots.back(),GDX12IndirectDrawArgs{}); _freeGrassInstances.push_back(slots.back()); slots.pop_back(); }
+    };
+    for(auto it=_grassInstances.begin();it!=_grassInstances.end();)
+        if(_grassWorld!=submission.World||std::none_of(submission.Grass.begin(),submission.Grass.end(),[&](const auto& desc){return desc.Entity==it->first;}))
+        { release(it->second,0); it=_grassInstances.erase(it); } else ++it;
+    _grassWorld=submission.World;
+    for(auto& desc:submission.Grass)
+    {
+        ValidateGrass(desc.Settings); const UINT count=GrassChunkCount(desc.Settings); auto& slots=_grassInstances[desc.Entity];
+        release(slots,count);
+        if(slots.size()<count)
+        {
+            _primaryDevice->GetCommandQueue()->Flush();
+            const UINT additional=count-static_cast<UINT>(slots.size());
+            ReserveInstanceCapacity(additional);
+            while(slots.size()<count)
+            {
+                if(_freeGrassInstances.empty()) slots.push_back(_instanceCount++);
+                else { slots.push_back(_freeGrassInstances.back()); _freeGrassInstances.pop_back(); }
+            }
+        }
+        desc.Instances=slots;
+    }
+    _grassWind->Submit(std::move(submission));
 }
 
 void RenderModule::SubmitSky(GDX12SkyDesc sky)
@@ -916,6 +951,7 @@ void RenderModule::ConfigureRenderPipeline()
     };
     auto* clearPass = add(std::make_unique<GDX12TextureClearPass>());
     auto* environmentPass = _environment = add(std::make_unique<GDX12EnvironmentIBLPass>());
+    _grassWind = add(std::make_unique<GDX12GrassWindPass>());
     auto* shadowPass = add(std::make_unique<GDX12CascadedShadowPass>());
     auto* localShadowPass = add(std::make_unique<GDX12LocalShadowPass>());
     _reflectionProbes = add(std::make_unique<GDX12ReflectionProbePass>());

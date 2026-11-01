@@ -20,6 +20,7 @@
 #include "App.Base/Systems/LightUpdateSystem.h"
 #include "App.Base/Systems/ReflectionProbeUpdateSystem.h"
 #include "App.Base/Systems/SkyUpdateSystem.h"
+#include "App.Base/Systems/GrassWindUpdateSystem.h"
 #include "App.Base/Systems/GPUDataUpdateSystem.h"
 #include "App.Base/Systems/IndirectCommandBuildSystem.h"
 
@@ -99,6 +100,7 @@ protected:
     GPUDataUpdateSystem _gpuData;
     ReflectionProbeUpdateSystem _reflectionProbes;
     SkyUpdateSystem _sky;
+    GrassWindUpdateSystem _grassWind;
     IndirectCommandBuildSystem _indirect;
 
 private:

@@ -266,3 +266,65 @@ RGB extinction сохраняется в отдельном transmittance volume
 высоту активной камеры; глобальная IBL является локальным приближением для этой высоты.
 `SkyGpuSmoke.vcxproj` проверяет источники, LUT, aerial и SSR history;
 `ProbeGpuSmoke.vcxproj` — публикацию проб при непрерывном изменении атмосферы.
+
+## Grass and wind components
+
+These settings do not add entities. Shipped Bistro has no `GrassRenderComponent`
+or `WindComponent`. Grass needs an existing opaque or masked PBR material and a
+transform. Its local XZ patch splits into bounded chunks, each with an instance,
+transformed bounds and a GPU-generated indirect index count. Main PBR, CSM, local
+shadows and probes share the generated vertices. Two-sided blades carry reversed
+triangles and normals. There is one expansion algorithm and no implementation selector.
+
+| CVar | Default | Meaning and accepted values |
+|---|---:|---|
+| `Render.Grass.Enabled` | true | Render existing grass components |
+| `Render.Grass.Quality` | 2 | 0 Off; Low: 1 blade/2 segments; Mid: 2/4; High: 4/6 per near tuft |
+| `Render.Grass.DensityScale` | 1 | Multiply component tuft count, 0..4 |
+| `Render.Grass.HeightScale` | 1 | Multiply height, 0..4; zero emits no geometry |
+| `Render.Grass.BendScale` | 1 | Multiply wind response, 0..4 |
+| `Render.Grass.LodScale` | 1 | Multiply all three LOD distances, (0,4] |
+| `Render.Wind.Enabled` | true | Run component solvers; false supplies neutral wind |
+| `Render.Wind.Quality` | 2 | 0 Off; Low: 64 squared/12 Jacobi steps; Mid: 128 squared/24; High: 256 squared/40 |
+| `Render.Wind.ForceScale` | 1 | Multiply component acceleration, 0..4 |
+| `Render.Wind.DirectionOffset` | 0 | Add -360..360 degrees to component direction |
+| `Render.Wind.GridResolution` | -1 | -1 component/preset, otherwise 9..512 cells per axis, including odd sizes |
+| `Render.Wind.PressureIterations` | -1 | -1 component/preset, otherwise 1..128 steps |
+
+Global scales leave authoring values unchanged. Component units follow the scene
+(Bistro uses centimetres). Grass `Extents` are local XZ half sizes; `ChunkSize` is
+the maximum side. `TuftsPerChunk` is 0..1024 before density scaling. Positive
+`Height`, `Width` and world distances `LodNear < LodFar < MaxDistance` are at most
+100000. `Bend` is 0..4. Patches require 1..4096 chunks and must fit DX12 view limits.
+`Seed` preserves stable tuft identity through append compaction. `WindEntity=0`
+chooses the lowest enabled wind entity; a nonzero value explicitly selects one.
+A missing field bends nothing. Paths/textures stay on the existing material.
+
+Wind domains are centered on the transform in world XZ. `HalfExtent` is
+0.001..1000000, `Force` is 0..100000 world units/second squared,
+`DirectionDegrees` is -360..360, and exponential `Dissipation` is 0..100 per second.
+Transform yaw rotates force; the larger absolute X/Z scale scales the domain.
+Component `GridResolution=0` and `PressureIterations=0` inherit quality. Explicit
+global values override component values; component values override presets.
+The independently written solver uses semi-Lagrangian advection/force, divergence,
+ping-pong Jacobi and projection. No Shadertoy-derived donor source is copied.
+References: [Stam, Real-Time Fluid Dynamics for Games](https://www.dgp.toronto.edu/~stam/reality/Research/pub.html)
+and [GPU Gems, Waving Grass](https://developer.nvidia.com/gpugems/gpugems/part-i-natural-effects/chapter-7-rendering-countless-blades-waving-grass).
+
+Grass Off emits zero indirect commands while wind may continue. Wind Off bypasses
+simulation and supplies neutral wind while grass remains visible. Pausing, or a
+render without a fresh simulation submission, advances neither the field nor blade
+time; previous positions catch up to the current pose. Increment component
+`ResetRevision` after an authored teleport; jumps beyond the grass maximum draw
+distance also reset automatically. Grid/domain changes, reallocation, re-enabling,
+patch changes and camera-history changes reset motion. A dedicated previous field
+and previous world transform evaluate the same stable blade/segment in its prior
+pose independently of GPU append ordering.
+
+Beyond the near distance, blade count halves and segment count becomes two.
+Beyond the far distance, one two-sided quad remains. Expansion does not apply the
+main-camera frustum, so chunks behind it still cast shadows or appear in probes.
+The maximum distance is measured from the active camera and limits every pass.
+Presets control cost; they are not frame-rate promises. Component removal releases
+and coalesces reusable generated ranges. Later static uploads preserve existing
+GPU-written geometry and upload only the new mesh range.

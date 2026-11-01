@@ -11,6 +11,8 @@
 #include "App.Base/ECS/Components/LightComponent.h"
 #include "App.Base/ECS/Components/ReflectionProbeComponent.h"
 #include "App.Base/ECS/Components/SkyBoxComponent.h"
+#include "App.Base/ECS/Components/GrassRenderComponent.h"
+#include "App.Base/ECS/Components/WindComponent.h"
 #include "App.Base/ECS/Components/SkyAtmosphereComponent.h"
 #include "App.Base/ECS/Components/FlyingPropComponent.h"
 #include "App.Base/ECS/Components/NameComponent.h"
@@ -39,6 +41,8 @@ using WorldECS = ECSStorage<
     LightComponent,
     ReflectionProbeComponent,
     SkyBoxComponent,
+    GrassRenderComponent,
+    WindComponent,
     SkyAtmosphereComponent,
     FlyingPropComponent
 >;

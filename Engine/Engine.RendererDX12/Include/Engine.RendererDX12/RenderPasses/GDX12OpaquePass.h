@@ -98,7 +98,7 @@ public:
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
 		RSDesc1.NumSingleCBVSlots = 2;
-		RSDesc1.NumSingleSRVSlots = 3;
+		RSDesc1.NumSingleSRVSlots = 4;
 		RSDesc1.StaticSamplers = GetStaticSamplers();
 		RSDesc1.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
 		RSDesc1.Constants.push_back(1);
@@ -117,7 +117,7 @@ public:
 
 		D3D12_COMMAND_SIGNATURE_DESC CSDesc1 = {};
 		CSDesc1.ByteStride = sizeof(GDX12IndirectDrawArgs);
-		CSDesc1.NumArgumentDescs = args.size();
+		CSDesc1.NumArgumentDescs = static_cast<UINT>(args.size());
 		CSDesc1.pArgumentDescs = args.data();
 		CSDesc1.NodeMask = 0;
 
@@ -173,7 +173,8 @@ public:
 		cmdList->SetGraphicsSRV(0, currentFrameConstants->MaterialCache->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(1, currentFrameConstants->TransformCache->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(2, currentFrameConstants->InstanceCache->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(3, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
+		cmdList->SetGraphicsSRV(4, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
+		cmdList->SetGraphicsSRV(3, _resources->GeometryBuffer->PreviousSRV()->GPUHandle);
 		cmdList->ResourceBarrier({ 
 			currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().GetIndirectArgsBarrier(),
 			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetIndirectArgsBarrier(),

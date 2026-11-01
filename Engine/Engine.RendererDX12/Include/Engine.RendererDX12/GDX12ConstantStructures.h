@@ -110,9 +110,9 @@ struct GDX12InstanceData
     UINT TransformIndex;
     UINT MaterialIndex;
     UINT Flags;
-    UINT _pad2;
+    UINT PreviousPositionBase;
     XMFLOAT3 BoundingBoxCenter;
-    UINT _pad3;
+    UINT VertexBase;
     XMFLOAT3 BoundingBoxExtents;
     UINT _pad4;
 };

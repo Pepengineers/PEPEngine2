@@ -20,7 +20,7 @@ public:
 		GDX12RootSignatureDesc RSDesc1;
 		RSDesc1.Constants.push_back(1);
 		RSDesc1.NumSingleCBVSlots = 1;
-		RSDesc1.NumSingleSRVSlots = 3;
+		RSDesc1.NumSingleSRVSlots = 4;
 		RSDesc1.NumSingleUAVSlots = 4;
 		_cullingRS = std::make_unique<GDX12RootSignature>(_resources->Device, RSDesc1);
 
@@ -83,6 +83,7 @@ public:
 		cmdList->SetComputeSRV(0, currentFrameConstants->InstanceCache->GetSRV()->GPUHandle);
 		cmdList->SetComputeSRV(1, _resources->IndirectCommandsCache->GetSRV()->GPUHandle);
 		cmdList->SetComputeSRV(2, currentFrameConstants->MaterialCache->GetSRV()->GPUHandle);
+		cmdList->SetComputeSRV(3, _resources->GeneratedIndexCounts->GetSRV()->GPUHandle);
 		cmdList->SetComputeUAV(0, currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetUAV()->GPUHandle);
 		cmdList->SetComputeUAV(1, currentCameraVisBuffers.OpaqueDrawCounter->GetUAV()->GPUHandle);
 		cmdList->SetComputeUAV(2, currentCameraVisBuffers.VisibleTransparentCommandsCache->GetUAV()->GPUHandle);

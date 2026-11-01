@@ -1,6 +1,7 @@
 #include "CBufferStructures.hlsl"
 
 #ifdef SHADOW_CULLING
+StructuredBuffer<uint> GeneratedIndexCounts : register(t4);
 #include "ShadowFrustum.hlsli"
 cbuffer ViewConstants : register(b0) { uint LightIndex; uint FaceIndex; };
 StructuredBuffer<InstanceData> Instances : register(t0);
@@ -20,7 +21,10 @@ void CS(uint3 id : SV_DispatchThreadID)
     InputCommands.GetDimensions(count, stride);
     if (id.x >= count) return;
     IndirectDrawArgs command = InputCommands[id.x];
+    if (command.IndexCountPerInstance == 0) return;
     InstanceData instance = Instances[command.InstanceID];
+    if ((instance.Flags & 4u) != 0) command.IndexCountPerInstance = GeneratedIndexCounts[command.InstanceID];
+    if (command.IndexCountPerInstance == 0) return;
     if (Materials[instance.MaterialIndex].RenderLayer == 2) return;
     if (!ShadowBoxVisible(instance.BoundingBoxCenter, instance.BoundingBoxExtents, Lights[LightIndex].ShadowViewProj[FaceIndex])) return;
     uint index;

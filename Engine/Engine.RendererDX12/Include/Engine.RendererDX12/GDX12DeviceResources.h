@@ -16,13 +16,13 @@ public:
     GDX12DeviceResources() : CurrFrameConstantsIndex(0), Device(nullptr) {}
 
     std::unordered_map<std::string, std::vector<D3D12_INPUT_ELEMENT_DESC>> InputLayouts;
-    std::unique_ptr<GDX12GeometryBuffer> GeometryBuffer;
 
     // All heaps created in one high-capacity instance
     std::unique_ptr<GDX12DescriptorHeap> RTVHeap;
     std::unique_ptr<GDX12DescriptorHeap> SRV_UAV_Heap;
     std::unique_ptr<GDX12DescriptorHeap> DSVHeap;
 
+    std::unique_ptr<GDX12GeometryBuffer> GeometryBuffer;
     std::vector<std::unique_ptr<GDX12FrameConstants>> FrameConstants;
     UINT CurrFrameConstantsIndex;
 
@@ -35,6 +35,8 @@ public:
     std::unordered_map<std::string, std::unique_ptr<GDX12Texture>> Textures;
 
     GDX12Device* Device;
+    std::unique_ptr<GDX12UploadBuffer<UINT>> GeneratedIndexCounts;
+    uint64_t DeformationRevision = 0;
     GDX12MainConstants Lighting;
     GDX12ShadowConstants ShadowSettings;
     std::vector<GDX12LocalLightConstants> LocalLights;

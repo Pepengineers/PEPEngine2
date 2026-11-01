@@ -22,6 +22,9 @@
     <ClInclude Include="Include\App.Base\App.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\ReflectionProbeComponent.h" />
     <ClInclude Include="Include\App.Base\Systems\ReflectionProbeUpdateSystem.h" />
+    <ClInclude Include="Include\App.Base\Systems\GrassWindUpdateSystem.h" />
+    <ClInclude Include="Include\App.Base\ECS\Components\GrassRenderComponent.h" />
+    <ClInclude Include="Include\App.Base\ECS\Components\WindComponent.h" />
     <ClInclude Include="Include\App.Base\Systems\SkyUpdateSystem.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\SkyBoxComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\SkyAtmosphereComponent.h" />
