@@ -133,3 +133,5 @@ Implementation has not been built or tested in the author chat.
 (0 Off / 1 Low / 2 Mid default / 3 High) are runtime Default controls.
 Noise, colors and animation belong to each `GDX12CloudComponent`; see
 [component API and integration](rendering/clouds.md). No clouds are attached to Bistro.
+
+Текущий статус обеих групп: код интегрирован в корневую ветку; центральные проверки и ограничения второй группы — в [отчёте интеграции](rendering/second-group-integration.md). Фразы о непроверенной авторской реализации выше относятся к исходной передаче агентами.

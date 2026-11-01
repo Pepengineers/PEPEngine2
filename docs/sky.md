@@ -1,5 +1,8 @@
 # Component sky and atmosphere
 
+Актуальная интеграция: код объединён в корневую ветку и прошёл CPU/GPU/GBV smoke checks. [Результаты и непроверенные области](rendering/second-group-integration.md). Авторский статус ниже — исторический, до центральной интеграции.
+
+
 Implementation-only delivery, **UNVERIFIED**. No build, shader compilation, tests,
 GPU fixture, benchmark or separate verification/review pass was run by this author.
 The [official MIT reference](https://github.com/sebh/UnrealEngineSkyAtmosphere/tree/183ead5bdacc701b3b626347a680a2f3cd3d4fbd)

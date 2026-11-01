@@ -1,5 +1,8 @@
 # GPU particle components
 
+Актуальная интеграция: код объединён в корневую ветку и прошёл CPU/GPU/GBV smoke checks. [Результаты и непроверенные области](second-group-integration.md). Авторский статус ниже — исторический, до центральной интеграции.
+
+
 Implementation status: **UNVERIFIED / НЕПРОВЕРЕНО**. No builds, shader compilation,
 tests, GPU fixtures, benchmarks or separate review/cleanup/verification passes were
 run for this implementation, per the implementation-only instruction. The checks

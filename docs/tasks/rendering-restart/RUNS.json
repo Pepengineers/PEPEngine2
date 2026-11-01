@@ -13,7 +13,9 @@
       "checkout": "D:/Project/PEPEngine2",
       "branch": "codex/feature-ao",
       "head": "ffa60e3c1d5127a8add4a1641de6baecdb1774de",
-      "status": "integrated_verified_in_active_branch"
+      "status": "integrated_verified_original_author_history_reachable",
+      "branchState": "deleted_after_ancestor_check",
+      "includedIn": "codex/bistro-rendering"
     },
     {
       "feature": "SSR",
@@ -25,7 +27,9 @@
       "checkout": "D:/Project/PEPEngine2",
       "branch": "codex/feature-ssr",
       "head": "87744817a3a18c2b55430318e59c2f3a631fcac2",
-      "status": "integrated_verified_in_active_branch"
+      "status": "integrated_verified_original_author_history_reachable",
+      "branchState": "deleted_after_ancestor_check",
+      "includedIn": "codex/bistro-rendering"
     },
     {
       "feature": "REFLECTION",
@@ -37,7 +41,9 @@
       "checkout": "D:/Project/PEPEngine2",
       "branch": "codex/feature-reflection",
       "head": "16d16b25c8e7155d06013524213c9100911bd1c6",
-      "status": "integrated_verified_in_active_branch"
+      "status": "integrated_verified_original_author_history_reachable",
+      "branchState": "deleted_after_ancestor_check",
+      "includedIn": "codex/bistro-rendering"
     },
     {
       "feature": "DOF",
@@ -49,7 +55,9 @@
       "checkout": "D:/Project/PEPEngine2",
       "branch": "codex/feature-dof",
       "head": "97ed6e37b6740beb30b871c9ecbfab808ab9da5a",
-      "status": "integrated_verified_in_active_branch"
+      "status": "integrated_verified_original_author_history_reachable",
+      "branchState": "deleted_after_ancestor_check",
+      "includedIn": "codex/bistro-rendering"
     },
     {
       "feature": "MOTION_BLUR",
@@ -61,11 +69,13 @@
       "checkout": "D:/Project/PEPEngine2",
       "branch": "codex/feature-motion-blur",
       "head": "2742dfe592da18bdf9adc3714a351463bba0a1c4",
-      "status": "integrated_verified_in_active_branch"
+      "status": "integrated_verified_original_author_history_reachable",
+      "branchState": "deleted_after_ancestor_check",
+      "includedIn": "codex/bistro-rendering"
     }
   ],
   "secondGroup": {
-    "status": "stopped_preserved_in_top_level_git_branches",
+    "status": "integrated_in_active_branch",
     "tasks": [
       "SKY",
       "GRASS_WIND",
@@ -87,7 +97,10 @@
         "reasoning": "high",
         "threadId": "01a19738-1edc-7ec3-8ccc-6606e9d2a492",
         "head": "5a95aa49763719e3a2829e42f4292534f91f5219",
-        "status": "stopped_unverified_preserved_in_git_branch"
+        "status": "integrated_cpu_gpu_gbv_smoke_checked",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering",
+        "mergeCommit": "6ff383a"
       },
       {
         "feature": "GRASS_WIND",
@@ -99,7 +112,10 @@
         "reasoning": "high",
         "threadId": "01a19738-6e1d-77e2-a8ef-8540117a9bd5",
         "head": "c146dcd5ef8b7930fc2f20f08cdf86c0eb5e65f0",
-        "status": "stopped_unverified_preserved_in_git_branch"
+        "status": "integrated_cpu_gpu_gbv_smoke_checked",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering",
+        "mergeCommit": "d4be556"
       },
       {
         "feature": "PARTICLES",
@@ -111,7 +127,10 @@
         "reasoning": "high",
         "threadId": "01a19738-99c4-76d1-9829-a740725bdcb5",
         "head": "47f5f231674dc4259ea4400d92da96a4628eced6",
-        "status": "stopped_unverified_preserved_in_git_branch"
+        "status": "integrated_cpu_gpu_gbv_smoke_checked",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering",
+        "mergeCommit": "1e9bfa8"
       },
       {
         "feature": "FLUID",
@@ -123,7 +142,10 @@
         "reasoning": "high",
         "threadId": "01a19738-bb08-7fe2-b4d8-aa306dade5ff",
         "head": "38294c141a60e1e1a1fbe9dc54a7709d3ac53f46",
-        "status": "stopped_unverified_preserved_in_git_branch"
+        "status": "integrated_cpu_gpu_gbv_smoke_checked",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering",
+        "mergeCommit": "e1f5aef"
       },
       {
         "feature": "SKINNING",
@@ -135,7 +157,10 @@
         "reasoning": "high",
         "threadId": "01a19738-d751-7fe3-85a7-fff273932cf3",
         "head": "fba7b3daf7dea30e67628124dc0520cd441393d9",
-        "status": "stopped_unverified_preserved_in_git_branch"
+        "status": "integrated_cpu_gpu_gbv_smoke_checked",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering",
+        "mergeCommit": "de5ce69"
       },
       {
         "feature": "CLOUDS",
@@ -147,25 +172,37 @@
         "reasoning": "high",
         "threadId": "01a19739-011e-7770-97d7-c50bb7b527b5",
         "head": "74666b6a5bf79d2117a9c92dae35d49739a2079b",
-        "status": "stopped_unverified_preserved_in_git_branch"
+        "status": "integrated_cpu_gpu_gbv_smoke_checked",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering",
+        "mergeCommit": "d556c0f"
       }
     ],
-    "launchConfirmation": "All six author chats acknowledged STOP and are idle. Their commits and LFS assets were imported into the top-level Git before clone removal.",
-    "authorsVerificationPolicy": "implementation only; no builds/tests/benchmarks/standalone review; final result explicitly unverified"
+    "launchConfirmation": "All six authors remain stopped; their completed commits are merged into the active root branch. Source branch names/HEADs below are historical provenance.",
+    "authorsVerificationPolicy": "implementation only; no builds/tests/benchmarks/standalone review; final result explicitly unverified",
+    "validation": {
+      "build": "Release/x64 App and seven focused projects passed",
+      "cpuGpu": "five first-group regression suites and SecondGroupTests passed",
+      "gpuBasedValidation": "SecondGroupTests --gpu-validation passed",
+      "limits": "integration smoke/readbacks; full visual/physical acceptance and long-run stability remain unverified",
+      "logs": "Build/SecondGroupIntegration",
+      "bistro": "36 frames, 346 existing props, early/late AO, cut, odd resize; clean debug layer"
+    }
   },
   "reviewCoordinator": {
     "threadId": "01a19712-024c-7381-96de-f328a7767952",
     "hostId": "local",
     "model": "gpt-6.1-sol",
     "reasoning": "high",
-    "status": "migrated_to_top_level",
-    "scope": "Verified first group, integrated into root; second-group chats stopped and commits preserved in root branches",
+    "status": "both_groups_integrated",
+    "scope": "Integrate all feature branches in the root checkout, fix conflicts, verify CPU/GPU/GBV and remove merged branch names",
     "checkout": "D:/Project/PEPEngine2",
     "branch": "codex/bistro-rendering",
     "report": "docs/rendering-review.md",
     "checks": "Release App + focused CPU/GPU/debug/GBV, real Bistro frames/readback/visual, prepass early/late, two independent probes, root WIP/414 Bistro SHA256 preservation",
     "integrationCommit": "353a585a529d46002a506e1d7e98d66cca55d397",
-    "repositoryIntegrationCommit": "a7f57819cf03332a09c5187518cfc37a11374128"
+    "repositoryIntegrationCommit": "a7f57819cf03332a09c5187518cfc37a11374128",
+    "secondGroupReport": "docs/rendering/second-group-integration.md"
   },
   "workspace": {
     "checkout": "D:/Project/PEPEngine2",
@@ -181,62 +218,86 @@
       {
         "feature": "AO",
         "branch": "codex/feature-ao",
-        "head": "ffa60e3c1d5127a8add4a1641de6baecdb1774de"
+        "head": "ffa60e3c1d5127a8add4a1641de6baecdb1774de",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering"
       },
       {
         "feature": "CLOUDS",
         "branch": "codex/feature-clouds",
-        "head": "74666b6a5bf79d2117a9c92dae35d49739a2079b"
+        "head": "74666b6a5bf79d2117a9c92dae35d49739a2079b",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering"
       },
       {
         "feature": "DOF",
         "branch": "codex/feature-dof",
-        "head": "97ed6e37b6740beb30b871c9ecbfab808ab9da5a"
+        "head": "97ed6e37b6740beb30b871c9ecbfab808ab9da5a",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering"
       },
       {
         "feature": "FLUID",
         "branch": "codex/feature-fluid",
-        "head": "38294c141a60e1e1a1fbe9dc54a7709d3ac53f46"
+        "head": "38294c141a60e1e1a1fbe9dc54a7709d3ac53f46",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering"
       },
       {
         "feature": "GRASS_WIND",
         "branch": "codex/feature-grass-wind",
-        "head": "c146dcd5ef8b7930fc2f20f08cdf86c0eb5e65f0"
+        "head": "c146dcd5ef8b7930fc2f20f08cdf86c0eb5e65f0",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering"
       },
       {
         "feature": "MOTION_BLUR",
         "branch": "codex/feature-motion-blur",
-        "head": "2742dfe592da18bdf9adc3714a351463bba0a1c4"
+        "head": "2742dfe592da18bdf9adc3714a351463bba0a1c4",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering"
       },
       {
         "feature": "PARTICLES",
         "branch": "codex/feature-particles",
-        "head": "47f5f231674dc4259ea4400d92da96a4628eced6"
+        "head": "47f5f231674dc4259ea4400d92da96a4628eced6",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering"
       },
       {
         "feature": "REFLECTION",
         "branch": "codex/feature-reflection",
-        "head": "16d16b25c8e7155d06013524213c9100911bd1c6"
+        "head": "16d16b25c8e7155d06013524213c9100911bd1c6",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering"
       },
       {
         "feature": "REVIEW",
         "branch": "codex/review-render-techniques",
-        "head": "6209740a1010ff04987aea13d2c41f34b78ed628"
+        "head": "6209740a1010ff04987aea13d2c41f34b78ed628",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering"
       },
       {
         "feature": "SKINNING",
         "branch": "codex/feature-skinning",
-        "head": "fba7b3daf7dea30e67628124dc0520cd441393d9"
+        "head": "fba7b3daf7dea30e67628124dc0520cd441393d9",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering"
       },
       {
         "feature": "SKY",
         "branch": "codex/feature-sky",
-        "head": "5a95aa49763719e3a2829e42f4292534f91f5219"
+        "head": "5a95aa49763719e3a2829e42f4292534f91f5219",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering"
       },
       {
         "feature": "SSR",
         "branch": "codex/feature-ssr",
-        "head": "87744817a3a18c2b55430318e59c2f3a631fcac2"
+        "head": "87744817a3a18c2b55430318e59c2f3a631fcac2",
+        "branchState": "deleted_after_ancestor_check",
+        "includedIn": "codex/bistro-rendering"
       }
     ],
     "evidence": "Build/RenderingReview",
@@ -256,6 +317,75 @@
       "logs": "Build/RepositoryMigration/root-*",
       "fullProjectCopiesRemoved": 14,
       "remainingSolution": "D:/Project/PEPEngine2/PEPEngine2.sln"
-    }
+    },
+    "authorAncestryMerge": "66ecc94",
+    "componentIntegrationFixes": "35b05cb",
+    "deletedMergedBranches": [
+      {
+        "branch": "MoreRenderFeatures",
+        "head": "6ed2f0cd7dedc1c9d8eea0d78ae5e77971358786",
+        "reachableFrom": "codex/bistro-rendering"
+      },
+      {
+        "branch": "codex/feature-ao",
+        "head": "ffa60e3c1d5127a8add4a1641de6baecdb1774de",
+        "reachableFrom": "codex/bistro-rendering"
+      },
+      {
+        "branch": "codex/feature-ssr",
+        "head": "87744817a3a18c2b55430318e59c2f3a631fcac2",
+        "reachableFrom": "codex/bistro-rendering"
+      },
+      {
+        "branch": "codex/feature-reflection",
+        "head": "16d16b25c8e7155d06013524213c9100911bd1c6",
+        "reachableFrom": "codex/bistro-rendering"
+      },
+      {
+        "branch": "codex/feature-dof",
+        "head": "97ed6e37b6740beb30b871c9ecbfab808ab9da5a",
+        "reachableFrom": "codex/bistro-rendering"
+      },
+      {
+        "branch": "codex/feature-motion-blur",
+        "head": "2742dfe592da18bdf9adc3714a351463bba0a1c4",
+        "reachableFrom": "codex/bistro-rendering"
+      },
+      {
+        "branch": "codex/feature-sky",
+        "head": "5a95aa49763719e3a2829e42f4292534f91f5219",
+        "reachableFrom": "codex/bistro-rendering"
+      },
+      {
+        "branch": "codex/feature-grass-wind",
+        "head": "c146dcd5ef8b7930fc2f20f08cdf86c0eb5e65f0",
+        "reachableFrom": "codex/bistro-rendering"
+      },
+      {
+        "branch": "codex/feature-particles",
+        "head": "47f5f231674dc4259ea4400d92da96a4628eced6",
+        "reachableFrom": "codex/bistro-rendering"
+      },
+      {
+        "branch": "codex/feature-fluid",
+        "head": "38294c141a60e1e1a1fbe9dc54a7709d3ac53f46",
+        "reachableFrom": "codex/bistro-rendering"
+      },
+      {
+        "branch": "codex/feature-skinning",
+        "head": "fba7b3daf7dea30e67628124dc0520cd441393d9",
+        "reachableFrom": "codex/bistro-rendering"
+      },
+      {
+        "branch": "codex/feature-clouds",
+        "head": "74666b6a5bf79d2117a9c92dae35d49739a2079b",
+        "reachableFrom": "codex/bistro-rendering"
+      },
+      {
+        "branch": "codex/review-render-techniques",
+        "head": "6209740a1010ff04987aea13d2c41f34b78ed628",
+        "reachableFrom": "codex/bistro-rendering"
+      }
+    ]
   }
 }

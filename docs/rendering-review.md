@@ -1,5 +1,8 @@
 # Central rendering integration review — 2026-11-01
 
+Subsequent integration: all six second-group features are now merged into the same current branch, with fixes in `35b05cb` and original first-group author ancestry retained by `66ecc94`. Their active CPU/GPU/GBV checks, merge commits and remaining acceptance limits are recorded in [second-group-integration.md](rendering/second-group-integration.md). The launch and repository-migration statuses below describe the earlier first-group review and migration stage.
+
+
 Current workspace: `D:/Project/PEPEngine2`, branch `codex/bistro-rendering`. The reviewed code and full Git history are integrated into the top-level project by merge `a7f5781`; the original reviewed code commit remains `353a585`. Nested feature/review clones were removed after preserving every branch, commit and new LFS asset. No push/PR was performed.
 
 The original technique checks below ran before migration; their small logs/images were retained under `Build/RenderingReview`. The migration also builds/runs the top-level project directly, with separate logs under `Build/RepositoryMigration`. Original temporary checkout paths in historical logs are provenance, not live working directories. The second-group chats are stopped, and their unverified code is preserved in ordinary branches of this same top-level Git.

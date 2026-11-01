@@ -15,27 +15,12 @@
 
 `Render.AO.ExecutionPoint=0`: prepass depth+normals → AO → тени. `=1` (default): depth-only prepass с alpha-test → тени → G-buffer → AO перед lighting. Во втором режиме normals и прочие G-buffer данные в препассе не считаются. [Отчёт проверки](../../rendering-review.md); сохранённые logs/images — `Build/RenderingReview`.
 
-## Вторая группа: сохранена в ветках, чаты остановлены
+## Вторая группа: объединена в текущую ветку
 
-Это непроверенные реализации, не часть принятой первой группы. Все шесть авторов подтвердили остановку. Работа, Git commits и LFS assets перенесены в тот же верхнеуровневый Git; отдельных проектов для них больше нет.
+SKY, GRASS_WIND, PARTICLES, FLUID, SKINNING и CLOUDS объединены отдельными merge-коммитами с сохранением исходной истории. Все шесть компонентов прошли активные CPU/GPU integration checks и GPU-based validation. [Коммиты, исправления, команды и границы проверки](../../rendering/second-group-integration.md).
 
-| Техника | Ветка в основном Git | HEAD |
-|---|---|---|
-| [SKY](second/SKY.md) | `codex/feature-sky` | `5a95aa4` |
-| [GRASS_WIND](second/GRASS_WIND.md) | `codex/feature-grass-wind` | `c146dcd` |
-| [PARTICLES](second/PARTICLES.md) | `codex/feature-particles` | `47f5f23` |
-| [FLUID](second/FLUID.md) | `codex/feature-fluid` | `38294c1` |
-| [SKINNING](second/SKINNING.md) | `codex/feature-skinning` | `fba7b3d` |
-| [CLOUDS](second/CLOUDS.md) | `codex/feature-clouds` | `74666b6` |
+Глобально у компонентов только Enabled/Quality; остальные параметры принадлежат экземплярам. Новые компоненты не добавлены в Bistro. Полная визуальная/физическая приёмка второй группы и длительные stress tests ещё не выполнены.
 
-Глобально у компонентов только Enabled/Quality; все остальные параметры принадлежат экземплярам компонентов. Следующая стадия — отдельная центральная проверка этих веток и их согласованная интеграция. Не запускать автоматически старые чаты с удалёнными путями.
+Объединённые `codex/feature-*` и `codex/review-render-techniques` удалены после проверки достижимости их HEAD из текущей ветки. Их исходные имена/коммиты сохранены в RUNS.json; все коммиты доступны через обычный `git log --graph` и `git show <commit>`. Исходные авторские ветки первой группы закрыты отдельным ancestry merge: их изменения раньше перенесены и исправлены центральной интеграцией, повторно старый код не применяется.
 
-Историю видно обычными командами из корня:
-
-```powershell
-git log --oneline --graph --all
-git show codex/feature-sky --stat
-git branch --list 'codex/feature-*'
-```
-
-Прежняя отменённая реализация остаётся в Git-истории; её код не восстановлен. Старые временные snapshots не являются рабочими проектами.
+Новые clones/worktrees и автоматический перезапуск старых чатов не допускаются без прямого запроса. Вся дальнейшая работа выполняется последовательно в корневом проекте и оформляется коммитами.

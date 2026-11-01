@@ -1,5 +1,8 @@
 # Skeletal mesh rendering
 
+Актуальная интеграция: код объединён в корневую ветку и прошёл CPU/GPU/GBV smoke checks. [Результаты и непроверенные области](second-group-integration.md). Авторский статус ниже — исторический, до центральной интеграции.
+
+
 UNVERIFIED implementation, 2026-11-01. Author instructions prohibit builds,
 tests, GPU fixtures, benchmarks, and separate verification/review passes.
 This document describes the added code and the future central validation

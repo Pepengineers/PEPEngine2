@@ -1,5 +1,8 @@
 # Procedural 2D clouds — UNVERIFIED
 
+Актуальная интеграция: код объединён в корневую ветку и прошёл CPU/GPU/GBV smoke checks. [Результаты и непроверенные области](second-group-integration.md). Авторский статус ниже — исторический, до центральной интеграции.
+
+
 Implementation only, 2026-11-01. No builds, tests, GPU fixtures, benchmarks or
 separate review/verification passes were run, per the author's task contract.
 

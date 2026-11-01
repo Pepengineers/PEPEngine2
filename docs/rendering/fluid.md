@@ -1,5 +1,8 @@
 # GPU fluid components and water surface
 
+Актуальная интеграция: код объединён в корневую ветку и прошёл CPU/GPU/GBV smoke checks. [Результаты и непроверенные области](second-group-integration.md). Авторский статус ниже — исторический, до центральной интеграции.
+
+
 Status: **UNVERIFIED implementation** (2026-11-01). No build, shader compilation,
 test, GPU fixture, benchmark or separate review was run by the author, as directed.
 CPU all-pairs/NRF oracles and GPU/readback acceptance belong to the central checker;
