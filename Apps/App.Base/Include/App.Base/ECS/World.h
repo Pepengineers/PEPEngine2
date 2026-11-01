@@ -9,6 +9,8 @@
 #include "App.Base/ECS/Components/LookAtTargetComponent.h"
 #include "App.Base/ECS/Components/LightComponent.h"
 #include "App.Base/ECS/Components/ReflectionProbeComponent.h"
+#include "App.Base/ECS/Components/SkyBoxComponent.h"
+#include "App.Base/ECS/Components/SkyAtmosphereComponent.h"
 #include "App.Base/ECS/Components/FlyingPropComponent.h"
 #include "App.Base/ECS/Components/NameComponent.h"
 #include "App.Base/ECS/Components/SplineCurveComponent.h"
@@ -35,7 +37,9 @@ using WorldECS = ECSStorage<
     LookAtTargetComponent,
     LightComponent,
     FlyingPropComponent,
-    ReflectionProbeComponent
+    ReflectionProbeComponent,
+    SkyBoxComponent,
+    SkyAtmosphereComponent
 >;
 
 class World {
@@ -64,10 +68,18 @@ public:
 
     const std::filesystem::path& GetPath() const;
 
+    void SetSkySource(SkySource source, Entity entity = InvalidEntity);
+    SkySource GetSkySource() const { return _skySource; }
+    Entity GetSkyEntity() const { return _skyEntity; }
+    uint64_t GetSkyRevision() const { return _skyRevision; }
+
     Entity ActiveCamera;
 
 private:
     
+    SkySource _skySource = SkySource::Off;
+    Entity _skyEntity = InvalidEntity;
+    uint64_t _skyRevision = 0;
     WorldDesc _desc;
 
     WorldECS _ecs;

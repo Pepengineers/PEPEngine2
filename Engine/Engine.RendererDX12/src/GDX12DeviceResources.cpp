@@ -44,6 +44,18 @@ void GDX12DeviceResources::Initialize(GDX12Device* device)
     ReflectionRadianceSRV.InitAsSRV(nullptr, &reflectionView, SRV_UAV_Heap.get(),
         SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
 
+    D3D12_SHADER_RESOURCE_VIEW_DESC skyView = {};
+    skyView.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    skyView.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    skyView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    skyView.Texture2D.MipLevels = 1;
+    SkyTransmittanceSRV.InitAsSRV(nullptr, &skyView, SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
+    SkyViewSRV.InitAsSRV(nullptr, &skyView, SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
+    skyView.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+    skyView.Texture3D.MipLevels = 1;
+    SkyAerialRadianceSRV.InitAsSRV(nullptr, &skyView, SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
+    SkyAerialTransmittanceSRV.InitAsSRV(nullptr, &skyView, SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
+
     GeometryBuffer = std::make_unique<GDX12GeometryBuffer>(device);
 
     for (int i = 0; i < NumFrameConstantVariable.GetValue(); i++)

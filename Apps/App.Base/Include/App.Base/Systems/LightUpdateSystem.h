@@ -68,6 +68,7 @@ public:
         auto render = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
         if (world.GetECS().Get<CameraComponent>(world.ActiveCamera)._CBufferIndex !=
             render->GetRenderPipelineCommonData()->ActiveCameraCBufferIndex) return;
+        render->SubmitSky(world);
         auto lighting = CollectWorldLights(world);
         render->SubmitLights(std::move(lighting.Local), lighting.Main);
     }

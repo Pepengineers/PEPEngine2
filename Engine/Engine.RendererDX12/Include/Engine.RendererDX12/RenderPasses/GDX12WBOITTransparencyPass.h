@@ -64,9 +64,11 @@ public:
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
-		RSDesc1.NumSingleCBVSlots = 3;
-		RSDesc1.NumSingleSRVSlots = 11;
+		RSDesc1.NumSingleCBVSlots = 4;
+		RSDesc1.NumSingleSRVSlots = 14;
 		RSDesc1.StaticSamplers = GetStaticSamplers();
+        RSDesc1.StaticSamplers.emplace_back(7, D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+            D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
 		CD3DX12_STATIC_SAMPLER_DESC shadowSampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
 		shadowSampler.AddressU = shadowSampler.AddressV = shadowSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
 		shadowSampler.ComparisonFunc = D3D12_COMPARISON_FUNC_LESS_EQUAL;
@@ -175,7 +177,11 @@ public:
 		cmdList->SetGraphicsSRV(8, _inputs[5]->GetTexture()->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(9, _resources->ReflectionRadianceSRV.GPUHandle);
 		cmdList->SetGraphicsSRV(10, currentFrameConstants->ReflectionProbes->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(11, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
+        cmdList->SetGraphicsRootConstantBufferView(4, currentFrameConstants->SkyCB->GetElementAddress(0));
+        cmdList->SetGraphicsSRV(11, _resources->SkyTransmittanceSRV.GPUHandle);
+        cmdList->SetGraphicsSRV(12, _resources->SkyAerialRadianceSRV.GPUHandle);
+        cmdList->SetGraphicsSRV(13, _resources->SkyAerialTransmittanceSRV.GPUHandle);
+        cmdList->SetGraphicsSRV(14, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
 
 		cmdList->ResourceBarrier({ currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetIndirectArgsBarrier(),
 		currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetIndirectArgsBarrier(),

@@ -20,6 +20,9 @@ float3 ShadeSunAndIBL(PBRSurface s, float3 position, float3 v, float ambientVisi
     if (s.Baked != 0) return s.Albedo;
     float3 l = SafeNormalize(-CBMain.LightDirection);
     float3 direct = EvaluateBRDF(s, v, l) * CBMain.LightRadiance;
+#ifdef SKY_RENDERING_HLSLI
+    direct *= SkySunTransmittance(position, l);
+#endif
     if (any(direct > 0)) direct *= SunVisibility(position, s.Normal, saturate(dot(s.Normal, l)));
     float nDotV = saturate(dot(s.Normal, v));
     float3 irradiance = IrradianceEnvironment.SampleLevel(samLinearClamp, s.Normal, 0).rgb;

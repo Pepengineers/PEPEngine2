@@ -21,9 +21,14 @@ TextureCube<float4> PrefilteredEnvironment : register(t5);
 Texture2D<float4> EnvironmentBRDF : register(t6);
 StructuredBuffer<LocalLight> LocalLights : register(t7);
 Texture2DArray<float> LocalShadowMaps : register(t8);
-Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t11);
+Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t14);
 SamplerComparisonState samShadow : register(s6);
 
+#define SKY_CB_REGISTER b4
+#define SKY_TRANSMITTANCE_REGISTER t11
+#define SKY_AERIAL_RADIANCE_REGISTER t12
+#define SKY_AERIAL_TRANSMITTANCE_REGISTER t13
+#include "SkyRendering.hlsli"
 #define LOCAL_REFLECTION_PROBES 1
 #include "ReflectionProbes.hlsli"
 #include "PBR.hlsli"
@@ -86,6 +91,8 @@ PSOutput PS(VS_OUTPUT_PS_INPUT pin)
     
     float weight = max(0.01f, alpha);
     float3 litColor = ShadePBR(material, color.rgb, pin.PosW, pin.Normal, pin.TexC);
+    litColor = ApplySkyAerialPerspective(litColor, pin.PosCS.xy / CBSky.Box.zw,
+        length(pin.PosW - CBCamera.CameraLocation));
     output.AccumColor = float4(litColor * alpha, alpha) * weight;
     output.Revealage = alpha;
     

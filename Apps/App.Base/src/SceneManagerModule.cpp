@@ -71,6 +71,8 @@ void SceneManagerModule::Initialize()
             light.Intensity = intensity;
             if (type == LightType::Directional)
             {
+                entity.AddComponent<SkyBoxComponent>();
+                world->SetSkySource(SkySource::SkyBox, entity.GetId());
                 light.Color = Vector3(1.0f, 0.95f, 0.875f);
                 light.ShadowUpdate = ShadowUpdateMode::EveryFrame;
             }

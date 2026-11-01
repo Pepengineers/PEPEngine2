@@ -1,8 +1,11 @@
 #include "PBRMath.hlsli"
 
 cbuffer FilterParameters : register(b0) { uint OutputSize; float Roughness;
-#ifdef LOCAL_PROBE_FILTER
+#if defined(LOCAL_PROBE_FILTER) || defined(GLOBAL_SKY_FILTER)
 uint PrefilterSamples;
+#endif
+#ifdef GLOBAL_SKY_FILTER
+float IBLIntensity;
 #endif
 };
 TextureCube<float4> SourceEnvironment : register(t0);
@@ -51,15 +54,23 @@ void IrradianceCS(uint3 id : SV_DispatchThreadID)
     float3 irradiance = 0.0f;
     uint width, height, levels;
     SourceEnvironment.GetDimensions(0, width, height, levels);
-    for (uint i = 0; i < 128; ++i)
+#ifdef GLOBAL_SKY_FILTER
+    uint irradianceSamples = PrefilterSamples;
+#else
+    uint irradianceSamples = 128;
+#endif
+    for (uint i = 0; i < irradianceSamples; ++i)
     {
-        float2 xi = Hammersley(i, 128);
+        float2 xi = Hammersley(i, irradianceSamples);
         float phi = 2.0f * PBR_PI * xi.x;
         float3 local = float3(cos(phi) * sqrt(xi.y), sin(phi) * sqrt(xi.y), sqrt(1.0f - xi.y));
-        float mip = max(0.0f, 0.5f * log2(6.0f * width * height / (512.0f * local.z)));
+        float mip = max(0.0f, 0.5f * log2(6.0f * width * height / (4.0f * irradianceSamples * local.z)));
         irradiance += SourceEnvironment.SampleLevel(EnvironmentSampler, ToWorld(local, n), mip).rgb;
     }
-    OutputCube[id] = float4(irradiance * (PBR_PI / 128.0f), 1);
+#ifdef GLOBAL_SKY_FILTER
+    irradiance *= IBLIntensity;
+#endif
+    OutputCube[id] = float4(irradiance * (PBR_PI / irradianceSamples), 1);
 }
 
 [numthreads(8, 8, 1)]
@@ -69,7 +80,11 @@ void PrefilterCS(uint3 id : SV_DispatchThreadID)
     float3 n = CubeDirection(id);
     if (Roughness == 0.0f)
     {
-        OutputCube[id] = float4(SourceEnvironment.SampleLevel(EnvironmentSampler, n, 0).rgb, 1);
+        float3 radiance = SourceEnvironment.SampleLevel(EnvironmentSampler, n, 0).rgb;
+#ifdef GLOBAL_SKY_FILTER
+        radiance *= IBLIntensity;
+#endif
+        OutputCube[id] = float4(radiance, 1);
         return;
     }
     float3 color = 0.0f;
@@ -77,7 +92,7 @@ void PrefilterCS(uint3 id : SV_DispatchThreadID)
     uint width, height, levels;
     SourceEnvironment.GetDimensions(0, width, height, levels);
     float texelSolidAngle = 4.0f * PBR_PI / (6.0f * width * height);
-#ifdef LOCAL_PROBE_FILTER
+#if defined(LOCAL_PROBE_FILTER) || defined(GLOBAL_SKY_FILTER)
     uint sampleCount = PrefilterSamples;
 #else
     uint sampleCount = 128;
@@ -92,6 +107,9 @@ void PrefilterCS(uint3 id : SV_DispatchThreadID)
         color += SourceEnvironment.SampleLevel(EnvironmentSampler, l, mip).rgb * nDotL;
         totalWeight += nDotL;
     }
+#ifdef GLOBAL_SKY_FILTER
+    color *= IBLIntensity;
+#endif
     OutputCube[id] = float4(color / max(totalWeight, 1e-5f), 1);
 }
 

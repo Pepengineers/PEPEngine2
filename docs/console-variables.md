@@ -88,3 +88,13 @@ focus distance in cm, f-number, vertical sensor size, CoC limit, SDK ring budget
 ring merging. Manual overrides survive quality changes; zero restores preset
 inheritance. Defaults, units, ranges, HDR/XeSS contracts and checks are documented
 in [depth-of-field.md](rendering/depth-of-field.md).
+
+## SkyBox / SkyAtmosphere
+
+`Render.SkyBox.Enabled/Quality` (defaults true/3) and
+`Render.SkyAtmosphere.Enabled/Quality` (true/2) are the only global controls for
+these component techniques. Quality is 0 Off, 1 Low, 2 Mid, 3 High. All four use
+runtime `Default`; startup `Engine.ini` and ConsoleModule writes are supported.
+Source selection belongs to World; every asset/optical/LUT parameter belongs to a
+component. [API, defaults, units, ranges and integration](sky.md).
+Implementation delivery is **unverified**; the author ran no builds/tests/GPU checks.

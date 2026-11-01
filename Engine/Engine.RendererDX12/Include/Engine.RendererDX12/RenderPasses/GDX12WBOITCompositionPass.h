@@ -1,5 +1,6 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include <stdexcept>
 
 class GDX12WBOITCompositionPass : public GDX12RenderPass
 {
@@ -56,8 +57,11 @@ public:
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
-		RSDesc1.NumSingleSRVSlots = 3;
+		RSDesc1.NumSingleCBVSlots = 2;
+        RSDesc1.NumSingleSRVSlots = 7;
 		RSDesc1.StaticSamplers = GetStaticSamplers();
+        RSDesc1.StaticSamplers.emplace_back(7, D3D12_FILTER_MIN_MAG_MIP_LINEAR,
+            D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
 		_compositionRS = std::make_unique<GDX12RootSignature>(_resources->Device, RSDesc1);
 
 		// Pipeline State Objects
@@ -102,7 +106,24 @@ public:
 		OUT_Result->GetResource()->GetRenderTargetBarrier() });
 		cmdList->SetRenderTargets({ OUT_Result.get() }, nullptr);
 		cmdList->ClearRenderTargetView(OUT_Result.get());
-		cmdList->SetGraphicsSRV(0, opaqueAccum->GetSRV()->GPUHandle);
+        auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+        const bool hasCamera = _commonData->ActiveCameraCBufferIndex < frame->CameraCB->GetElementCount();
+        if (_resources->Sky.Source == SkySource::SkyAtmosphere && (!hasCamera || _inputs.size() < 4))
+            throw std::invalid_argument("Aerial perspective composition requires active camera and opaque depth");
+        cmdList->SetGraphicsRootConstantBufferView(0, hasCamera ?
+            frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex) : frame->SkyCB->GetElementAddress(0));
+        cmdList->SetGraphicsRootConstantBufferView(1, frame->SkyCB->GetElementAddress(0));
+        if (_inputs.size() > 3)
+        {
+            auto* depth = _inputs[3]->GetTexture();
+            cmdList->ResourceBarrier({ depth->GetResource()->GetSRVBarrier() });
+            cmdList->SetGraphicsSRV(3, depth->GetSRV()->GPUHandle);
+        }
+        else cmdList->SetGraphicsSRV(3, _resources->SkyTransmittanceSRV.GPUHandle);
+        cmdList->SetGraphicsSRV(4, _resources->SkyTransmittanceSRV.GPUHandle);
+        cmdList->SetGraphicsSRV(5, _resources->SkyAerialRadianceSRV.GPUHandle);
+        cmdList->SetGraphicsSRV(6, _resources->SkyAerialTransmittanceSRV.GPUHandle);
+        cmdList->SetGraphicsSRV(0, opaqueAccum->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(1, transparencyAccum->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(2, transparencyRevealage->GetSRV()->GPUHandle);
 		cmdList->GetCommandList()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
