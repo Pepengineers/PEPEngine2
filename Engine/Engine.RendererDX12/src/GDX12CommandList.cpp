@@ -15,7 +15,6 @@ GDX12CommandList::GDX12CommandList(GDX12Device* device) :
 	_currentTopology(D3D_PRIMITIVE_TOPOLOGY_UNDEFINED),
 	_currentScissorRect({}),
 	_currentViewport({}),
-	_currentRootSignature(nullptr),
 	_currentGeometryBuffer(nullptr)
 {
 	device->GetDevice()->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&_commandAllocator));
@@ -46,12 +45,13 @@ void GDX12CommandList::Reset()
 	_commandAllocator->Reset();
 	_commandList->Reset(_commandAllocator.Get(), nullptr);
 
-    InvalidateCachedState();
+	InvalidateCachedState();
 }
 
 void GDX12CommandList::InvalidateCachedState()
 {
-	_currentRootSignature = nullptr;
+	_currentGraphicsRootSignature = nullptr;
+	_currentComputeRootSignature = nullptr;
 	_currentPSO = nullptr;
 	_currentTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
     _currentDescriptorHeaps.clear();
@@ -74,15 +74,15 @@ void GDX12CommandList::SetPipelineState1(ComPtr<ID3D12StateObject> stateObject)
 
 void GDX12CommandList::SetGraphicsRootSignature(GDX12RootSignature* rootSignature)
 {
-	if (_currentRootSignature == rootSignature) { return; }
-	_currentRootSignature = rootSignature;
+	if (_currentGraphicsRootSignature == rootSignature) { return; }
+	_currentGraphicsRootSignature = rootSignature;
 	_commandList->SetGraphicsRootSignature(rootSignature->GetRootSignature().Get());
 }
 
 void GDX12CommandList::SetComputeRootSignature(GDX12RootSignature* rootSignature)
 {
-	if (_currentRootSignature == rootSignature) { return; }
-	_currentRootSignature = rootSignature;
+	if (_currentComputeRootSignature == rootSignature) { return; }
+	_currentComputeRootSignature = rootSignature;
 	_commandList->SetComputeRootSignature(rootSignature->GetRootSignature().Get());
 }
 
@@ -102,10 +102,10 @@ void GDX12CommandList::SetDescriptorHeaps(std::initializer_list<GDX12DescriptorH
 
 	if (_currentDescriptorHeaps == rawHeaps) { return; }
 
-	if (!rawHeaps.empty()) 
-	{ 
+	if (!rawHeaps.empty())
+	{
 		_currentDescriptorHeaps = rawHeaps;
-		_commandList->SetDescriptorHeaps(static_cast<UINT>(rawHeaps.size()), rawHeaps.data()); 
+		_commandList->SetDescriptorHeaps(static_cast<UINT>(rawHeaps.size()), rawHeaps.data());
 	}
 }
 
@@ -152,19 +152,19 @@ void GDX12CommandList::SetRenderTargets(std::initializer_list<GDX12Texture*> rtv
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = {};
 	if (dsvTexture && dsvTexture->GetDSV()) { dsvHandle = dsvTexture->GetDSV()->CPUHandle; }
 
-	_commandList->OMSetRenderTargets(rtvHandles.size(), rtvHandles.data(), FALSE, 
+	_commandList->OMSetRenderTargets(rtvHandles.size(), rtvHandles.data(), FALSE,
 		(dsvHandle.ptr != 0) ? &dsvHandle : nullptr );
 }
 
 void GDX12CommandList::ClearRenderTargetView(GDX12Texture* texture)
 {
-	_commandList->ClearRenderTargetView(texture->GetRTV()->CPUHandle, 
+	_commandList->ClearRenderTargetView(texture->GetRTV()->CPUHandle,
 		texture->GetClearValue().Color, 0, nullptr);
 }
 
 void GDX12CommandList::ClearDepthStencilView(GDX12Texture* texture)
 {
-	_commandList->ClearDepthStencilView(texture->GetDSV()->CPUHandle, 
+	_commandList->ClearDepthStencilView(texture->GetDSV()->CPUHandle,
 		(texture->GetClearValue().Format == DXGI_FORMAT_D24_UNORM_S8_UINT || texture->GetClearValue().Format == DXGI_FORMAT_D32_FLOAT_S8X24_UINT ? D3D12_CLEAR_FLAG_DEPTH | D3D12_CLEAR_FLAG_STENCIL : D3D12_CLEAR_FLAG_DEPTH), texture->GetClearValue().DepthStencil.Depth, texture->GetClearValue().DepthStencil.Stencil, 0, nullptr);
 }
 
@@ -180,69 +180,69 @@ void GDX12CommandList::ClearUnorderedAccessViewUINT(const D3D12_GPU_DESCRIPTOR_H
 
 void GDX12CommandList::SetGraphicsRootConstantBufferView(UINT CregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation)
 {
-	if (!_currentRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
-	_commandList->SetGraphicsRootConstantBufferView(_currentRootSignature->GetBRootParamIndex(CregisterIndex), bufferLocation);
+	if (!_currentGraphicsRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
+	_commandList->SetGraphicsRootConstantBufferView(_currentGraphicsRootSignature->GetBRootParamIndex(CregisterIndex), bufferLocation);
 }
 
 void GDX12CommandList::SetGraphicsRootShaderResourceView(UINT TregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation)
 {
-	if (!_currentRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
-	_commandList->SetGraphicsRootShaderResourceView(_currentRootSignature->GetTRootParamIndex(TregisterIndex), bufferLocation);
+	if (!_currentGraphicsRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
+	_commandList->SetGraphicsRootShaderResourceView(_currentGraphicsRootSignature->GetTRootParamIndex(TregisterIndex), bufferLocation);
 }
 
 void GDX12CommandList::SetGraphicsRootUnorderedAccessView(UINT UregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation)
 {
-	if (!_currentRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
-	_commandList->SetGraphicsRootUnorderedAccessView(_currentRootSignature->GetURootParamIndex(UregisterIndex), bufferLocation);
+	if (!_currentGraphicsRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
+	_commandList->SetGraphicsRootUnorderedAccessView(_currentGraphicsRootSignature->GetURootParamIndex(UregisterIndex), bufferLocation);
 }
 
 void GDX12CommandList::SetGraphicsRootDescriptorTable(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE baseDescriptor)
 {
-	if (!_currentRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
+	if (!_currentGraphicsRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
 	_commandList->SetGraphicsRootDescriptorTable(registerIndex, baseDescriptor);
 }
 
 void GDX12CommandList::SetTextureAsSRV(UINT registerIndex, GDX12Texture* texture)
 {
-	if (!_currentRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
+	if (!_currentGraphicsRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
 
-	_commandList->SetGraphicsRootDescriptorTable(_currentRootSignature->GetTRootParamIndex(registerIndex), 
+	_commandList->SetGraphicsRootDescriptorTable(_currentGraphicsRootSignature->GetTRootParamIndex(registerIndex),
 		texture->GetSRV()->GPUHandle);
 }
 
 void GDX12CommandList::SetGraphicsSRV(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle)
 {
-	_commandList->SetGraphicsRootDescriptorTable(_currentRootSignature->GetTRootParamIndex(registerIndex), 
+	_commandList->SetGraphicsRootDescriptorTable(_currentGraphicsRootSignature->GetTRootParamIndex(registerIndex),
 		GPUHandle);
 }
 
 void GDX12CommandList::SetComputeRootConstantBufferView(UINT CregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation)
 {
-	if (!_currentRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
-	_commandList->SetComputeRootConstantBufferView(_currentRootSignature->GetBRootParamIndex(CregisterIndex), bufferLocation);
+	if (!_currentComputeRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
+	_commandList->SetComputeRootConstantBufferView(_currentComputeRootSignature->GetBRootParamIndex(CregisterIndex), bufferLocation);
 }
 
 void GDX12CommandList::SetComputeRootShaderResourceView(UINT TregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation)
 {
-	if (!_currentRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
-	_commandList->SetComputeRootShaderResourceView(_currentRootSignature->GetTRootParamIndex(TregisterIndex), bufferLocation);
+	if (!_currentComputeRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
+	_commandList->SetComputeRootShaderResourceView(_currentComputeRootSignature->GetTRootParamIndex(TregisterIndex), bufferLocation);
 }
 
 void GDX12CommandList::SetComputeRootUnorderedAccessView(UINT UregisterIndex, D3D12_GPU_VIRTUAL_ADDRESS bufferLocation)
 {
-	if (!_currentRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
-	_commandList->SetComputeRootUnorderedAccessView(_currentRootSignature->GetURootParamIndex(UregisterIndex), bufferLocation);
+	if (!_currentComputeRootSignature) { OutputDebugStringA("ERROR: Command List tries to set a root parameter but GDX12RootSignature is not set.\n"); }
+	_commandList->SetComputeRootUnorderedAccessView(_currentComputeRootSignature->GetURootParamIndex(UregisterIndex), bufferLocation);
 }
 
 void GDX12CommandList::SetComputeSRV(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle)
 {
-	_commandList->SetComputeRootDescriptorTable(_currentRootSignature->GetTRootParamIndex(registerIndex),
+	_commandList->SetComputeRootDescriptorTable(_currentComputeRootSignature->GetTRootParamIndex(registerIndex),
 		GPUHandle);
 }
 
 void GDX12CommandList::SetComputeUAV(UINT registerIndex, D3D12_GPU_DESCRIPTOR_HANDLE GPUHandle)
 {
-	_commandList->SetComputeRootDescriptorTable(_currentRootSignature->GetURootParamIndex(registerIndex),
+	_commandList->SetComputeRootDescriptorTable(_currentComputeRootSignature->GetURootParamIndex(registerIndex),
 		GPUHandle);
 }
 

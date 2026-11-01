@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="SSRTests.vcxproj" />
+  <PropertyGroup><ProjectGuid>{A672D623-5744-4F6A-B678-180C807DC15C}</ProjectGuid></PropertyGroup>
+  <ItemGroup>
+    <ClCompile Remove="tests\SSRTests.cpp" />
+    <ClCompile Include="tests\SSRBistroTests.cpp" />
+  </ItemGroup>
+</Project>

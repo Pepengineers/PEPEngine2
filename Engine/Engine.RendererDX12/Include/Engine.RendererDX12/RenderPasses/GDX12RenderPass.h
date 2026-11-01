@@ -128,6 +128,9 @@ public:
     Matrix ClipToCameraView = Identity4x4();
     Matrix ClipToPrevClip = Identity4x4();
     Matrix PrevClipToClip = Identity4x4();
+    Matrix CameraView = Identity4x4();
+    Matrix CameraProjection = Identity4x4(); // Jittered projection matching depth.
+    uint64_t HistoryRevision = 0;
     GameTimer* GameTimer = nullptr;
     UINT WindowWidth = 0;
     UINT WindowHeight = 0;

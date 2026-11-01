@@ -15,6 +15,9 @@ struct CameraComponent : ComponentTag
     bool DirtyFlag;
     bool ResetHistory = true;
 
+    // Call after a teleport/cut; continuous camera movement retains temporal history.
+    void InvalidateHistory() { ResetHistory = DirtyFlag = true; }
+
     CameraComponent()
         : DirtyFlag(true), _numFramesDirty(0), _CBufferIndex(0), 
         FOV(60.0f), NearPlane(0.1f), FarPlane(10000.f), ViewProj(Identity4x4()), PrevViewProjNoJitter(Identity4x4())

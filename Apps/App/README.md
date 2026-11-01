@@ -79,8 +79,10 @@ Normal mapping derives its tangent frame from UV/position derivatives so mirrore
 UVs do not need an extra tangent-sign vertex attribute.
 
 Color textures use sRGB views; normal and roughness maps stay linear. Opaque color
-and OIT accumulation use floating-point HDR targets, then the composition pass
-applies Reinhard and sRGB encoding before the existing LDR XeSS/output path.
+and OIT accumulation use floating-point HDR targets. Composition and XeSS retain
+linear HDR; the final output pass applies Reinhard and sRGB encoding once.
+AMD SSSR and Reflections Denoiser replace opaque indirect specular before OIT;
+[controls, conventions and verification](../../docs/sssr.md) describe the integration.
 Default directional-light values are in `GDX12MainConstants`.
 Baked lighting is preserved without relighting.
 
