@@ -5,10 +5,25 @@
 
 namespace
 {
+    UINT CubeMipCount(UINT resolution)
+    {
+        UINT count = 1;
+        for (; resolution > 1; resolution >>= 1) ++count;
+        return count;
+    }
+
+    UINT64 AllocationBytes(GDX12Device* device, GDX12Texture* texture)
+    {
+        if (!texture || !texture->IsInitialized()) return 0;
+        const auto desc = texture->GetResource()->D3DResource->GetDesc();
+        return device->GetDevice()->GetResourceAllocationInfo(0, 1, &desc).SizeInBytes;
+    }
+
     bool SameCapture(const GDX12ReflectionProbe& a, const GDX12ReflectionProbe& b)
     {
         return a.Id == b.Id && a.Position == b.Position && a.BoxMin == b.BoxMin && a.BoxMax == b.BoxMax &&
-            a.NearPlane == b.NearPlane && a.FarPlane == b.FarPlane && a.Revision == b.Revision;
+            a.NearPlane == b.NearPlane && a.FarPlane == b.FarPlane && a.Revision == b.Revision &&
+            a.Implementation == b.Implementation && a.Resolution == b.Resolution;
     }
 
     GDX12CameraConstants FaceCamera(const GDX12ReflectionProbe& probe, UINT face, UINT size)
@@ -185,7 +200,7 @@ void GDX12ReflectionProbePass::CreateTexture(GDX12Texture& texture, UINT size, U
         &resource, D3D12_RESOURCE_STATE_COMMON, clearable ? &clear : nullptr, IID_PPV_ARGS(&desc.ExternalResource)));
     desc.Width = desc.Height = size;
     desc.Format = depth ? DXGI_FORMAT_R32_FLOAT : format;
-    desc.CreateSRV = &texture == &_raw || &texture == &_sunShadow;
+    desc.CreateSRV = &texture == &_sunShadow;
     if (desc.CreateSRV)
     {
         desc.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
@@ -197,9 +212,10 @@ void GDX12ReflectionProbePass::CreateTexture(GDX12Texture& texture, UINT size, U
         if (depth) desc.SRVDesc.Texture2D.MipLevels = mips;
         else desc.SRVDesc.TextureCube.MipLevels = mips;
     }
+    const UINT64 previousBytes = AllocationBytes(_resources->Device, &texture);
     texture.Initialize(desc);
     D3D12_RESOURCE_ALLOCATION_INFO allocation = _resources->Device->GetDevice()->GetResourceAllocationInfo(0, 1, &resource);
-    _statistics.TextureBytes += allocation.SizeInBytes;
+    _statistics.TextureBytes = _statistics.TextureBytes - previousBytes + allocation.SizeInBytes;
 }
 
 void GDX12ReflectionProbePass::CreateFaceViews(GDX12Texture& texture,
@@ -207,60 +223,93 @@ void GDX12ReflectionProbePass::CreateFaceViews(GDX12Texture& texture,
 {
     views.clear();
     const auto resource = texture.GetResource()->D3DResource;
-    for (UINT face = 0; face < resource->GetDesc().DepthOrArraySize; ++face)
-    {
-        auto descriptor = std::make_unique<GDX12Descriptor>();
-        if (depth)
+    const auto desc = resource->GetDesc();
+    for (UINT face = 0; face < desc.DepthOrArraySize; ++face)
+        for (UINT mip = 0; mip < desc.MipLevels; ++mip)
         {
-            D3D12_DEPTH_STENCIL_VIEW_DESC view = {};
-            view.Format = DXGI_FORMAT_D32_FLOAT;
-            view.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
-            view.Texture2DArray.FirstArraySlice = face;
-            view.Texture2DArray.ArraySize = 1;
-            descriptor->InitAsDSV(resource.Get(), &view, _resources->DSVHeap.get(), _resources->DSVHeap->GetAvailableIndex());
+            auto descriptor = std::make_unique<GDX12Descriptor>();
+            if (depth)
+            {
+                D3D12_DEPTH_STENCIL_VIEW_DESC view = {};
+                view.Format = DXGI_FORMAT_D32_FLOAT;
+                view.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+                view.Texture2DArray.FirstArraySlice = face;
+                view.Texture2DArray.ArraySize = 1;
+                view.Texture2DArray.MipSlice = mip;
+                descriptor->InitAsDSV(resource.Get(), &view, _resources->DSVHeap.get(), _resources->DSVHeap->GetAvailableIndex());
+            }
+            else
+            {
+                D3D12_RENDER_TARGET_VIEW_DESC view = {};
+                view.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+                view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+                view.Texture2DArray.FirstArraySlice = face;
+                view.Texture2DArray.ArraySize = 1;
+                view.Texture2DArray.MipSlice = mip;
+                descriptor->InitAsRTV(resource.Get(), &view, _resources->RTVHeap.get(), _resources->RTVHeap->GetAvailableIndex());
+            }
+            views.push_back(std::move(descriptor));
         }
-        else
-        {
-            D3D12_RENDER_TARGET_VIEW_DESC view = {};
-            view.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-            view.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
-            view.Texture2DArray.FirstArraySlice = face;
-            view.Texture2DArray.ArraySize = 1;
-            descriptor->InitAsRTV(resource.Get(), &view, _resources->RTVHeap.get(), _resources->RTVHeap->GetAvailableIndex());
-        }
-        views.push_back(std::move(descriptor));
-    }
 }
 
-void GDX12ReflectionProbePass::CreateTextures(UINT count, UINT resolution)
+void GDX12ReflectionProbePass::CreatePublishedTexture(GDX12CommandList* commands, UINT count, UINT resolution)
 {
     _resources->Device->GetCommandQueue()->Flush();
-    _resolution = resolution;
-    _mips = 1;
-    for (UINT size = resolution; size > 1; size >>= 1) ++_mips;
-    _statistics.TextureBytes = 0;
-    CreateTexture(_published, resolution, count * 6, _mips, D3D12_RESOURCE_FLAG_NONE, false);
-    CreateTexture(_raw, resolution, 6, 1, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET, false);
-    CreateTexture(_filtered, resolution, 6, _mips, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, false);
-    CreateTexture(_bakedColor, resolution, count * 6, 1, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET, false);
-    CreateTexture(_bakedDepth, resolution, count * 6, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, true);
-    CreateTexture(_depth, resolution, 6, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, true);
-    CreateTexture(_sunShadow, 1024, 1, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, true);
+    _publishedResolution = resolution;
+    _publishedMips = CubeMipCount(resolution);
+    CreateTexture(_published, resolution, count * 6, _publishedMips, D3D12_RESOURCE_FLAG_NONE, false);
     _published.GetResource()->D3DResource->SetName(L"Reflection published radiance");
+    commands->ResourceBarrier({ _published.GetResource()->GetSRVBarrier() });
+    D3D12_SHADER_RESOURCE_VIEW_DESC view = {};
+    view.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
+    view.TextureCubeArray.NumCubes = count;
+    view.TextureCubeArray.MipLevels = _publishedMips;
+    _resources->ReflectionRadianceSRV.InitAsSRV(_published.GetResource()->D3DResource.Get(), &view,
+        _resources->SRV_UAV_Heap.get(), _resources->ReflectionRadianceSRV.HeapIndex);
+    for (auto& probe : _probes)
+    {
+        probe.Ready = false;
+        probe.LastUpdate = 0;
+    }
+    _activeProbe = _face = 0;
+}
+
+void GDX12ReflectionProbePass::CreateCaptureTextures(UINT resolution)
+{
+    if (_captureTextureResolution == resolution) return;
+    _resources->Device->GetCommandQueue()->Flush();
+    _captureTextureResolution = resolution;
+    const UINT captureMips = CubeMipCount(resolution);
+    CreateTexture(_raw, resolution, 6, captureMips, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET, false);
+    CreateTexture(_filtered, resolution, 6, captureMips, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, false);
+    CreateTexture(_depth, resolution, 6, captureMips, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, true);
     _raw.GetResource()->D3DResource->SetName(L"Reflection working capture");
     _filtered.GetResource()->D3DResource->SetName(L"Reflection working GGX");
-    _bakedColor.GetResource()->D3DResource->SetName(L"Reflection baked static color");
-    _bakedDepth.GetResource()->D3DResource->SetName(L"Reflection baked static depth");
     _depth.GetResource()->D3DResource->SetName(L"Reflection restored depth");
-    _sunShadow.GetResource()->D3DResource->SetName(L"Reflection sun shadow");
     CreateFaceViews(_raw, _rawRTVs, false);
-    CreateFaceViews(_bakedColor, _bakedRTVs, false);
-    CreateFaceViews(_bakedDepth, _bakedDSVs, true);
     CreateFaceViews(_depth, _depthDSVs, true);
-    CreateFaceViews(_sunShadow, _sunDSV, true);
-    _filterUAVs.clear();
-    for (UINT mip = 0; mip < _mips; ++mip)
+    if (!_sunShadow.IsInitialized())
     {
+        CreateTexture(_sunShadow, 1024, 1, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, true);
+        _sunShadow.GetResource()->D3DResource->SetName(L"Reflection sun shadow");
+        CreateFaceViews(_sunShadow, _sunDSV, true);
+    }
+    _filterUAVs.clear();
+    _rawMipSRVs.clear();
+    for (UINT mip = 0; mip < captureMips; ++mip)
+    {
+        auto sourceView = std::make_unique<GDX12Descriptor>();
+        D3D12_SHADER_RESOURCE_VIEW_DESC sourceDesc = {};
+        sourceDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        sourceDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        sourceDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+        sourceDesc.TextureCube.MostDetailedMip = mip;
+        sourceDesc.TextureCube.MipLevels = 1;
+        sourceView->InitAsSRV(_raw.GetResource()->D3DResource.Get(), &sourceDesc,
+            _resources->SRV_UAV_Heap.get(), _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
+        _rawMipSRVs.push_back(std::move(sourceView));
         auto descriptor = std::make_unique<GDX12Descriptor>();
         D3D12_UNORDERED_ACCESS_VIEW_DESC view = {};
         view.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
@@ -271,16 +320,25 @@ void GDX12ReflectionProbePass::CreateTextures(UINT count, UINT resolution)
             _resources->SRV_UAV_Heap.get(), _resources->SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
         _filterUAVs.push_back(std::move(descriptor));
     }
-    D3D12_SHADER_RESOURCE_VIEW_DESC view = {};
-    view.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-    view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBEARRAY;
-    view.TextureCubeArray.NumCubes = count;
-    view.TextureCubeArray.MipLevels = _mips;
-    _resources->ReflectionRadianceSRV.InitAsSRV(_published.GetResource()->D3DResource.Get(), &view,
-        _resources->SRV_UAV_Heap.get(), _resources->ReflectionRadianceSRV.HeapIndex);
-    _probes.assign(count, ProbeState{});
-    _activeProbe = _face = 0;
+}
+
+void GDX12ReflectionProbePass::CreateBakedTextures(ProbeState& probe)
+{
+    const UINT resolution = probe.Source.Resolution;
+    if (probe.BakedColor && probe.BakedColor->GetWidth() == resolution) return;
+    _resources->Device->GetCommandQueue()->Flush();
+    if (!probe.BakedColor)
+    {
+        probe.BakedColor = std::make_unique<GDX12Texture>();
+        probe.BakedDepth = std::make_unique<GDX12Texture>();
+    }
+    CreateTexture(*probe.BakedColor, resolution, 6, 1, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET, false);
+    CreateTexture(*probe.BakedDepth, resolution, 6, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, true);
+    probe.BakedColor->GetResource()->D3DResource->SetName(L"Reflection probe baked color");
+    probe.BakedDepth->GetResource()->D3DResource->SetName(L"Reflection probe baked depth");
+    CreateFaceViews(*probe.BakedColor, probe.BakedRTVs, false);
+    CreateFaceViews(*probe.BakedDepth, probe.BakedDSVs, true);
+    probe.BakedFaces = 0;
 }
 
 void GDX12ReflectionProbePass::Cull(GDX12CommandList* commands, UINT camera, Geometry geometry, bool shadow)
@@ -367,19 +425,20 @@ void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, Geometry
 
 void GDX12ReflectionProbePass::RenderFace(GDX12CommandList* commands, UINT probe, UINT face, Geometry geometry, bool bake)
 {
-    const UINT slice = probe * 6 + face;
-    auto& color = bake ? _bakedColor : _raw;
-    auto& depth = bake ? _bakedDepth : _depth;
-    const auto rtv = (bake ? _bakedRTVs[slice] : _rawRTVs[face])->CPUHandle;
-    const auto dsv = (bake ? _bakedDSVs[slice] : _depthDSVs[face])->CPUHandle;
+    auto& state = _probes[probe];
+    const UINT captureSlice = face * _publishedMips + (_publishedMips - _mips);
+    auto& color = bake ? *state.BakedColor : _raw;
+    auto& depth = bake ? *state.BakedDepth : _depth;
+    const auto rtv = (bake ? state.BakedRTVs[face] : _rawRTVs[captureSlice])->CPUHandle;
+    const auto dsv = (bake ? state.BakedDSVs[face] : _depthDSVs[captureSlice])->CPUHandle;
     if (!bake && geometry == DynamicGeometry)
     {
-        commands->ResourceBarrier({ _bakedColor.GetResource()->GetCopySourceBarrier(),
-            _bakedDepth.GetResource()->GetCopySourceBarrier(), color.GetResource()->GetCopyDestBarrier(), depth.GetResource()->GetCopyDestBarrier() });
-        const CD3DX12_TEXTURE_COPY_LOCATION colorSource(_bakedColor.GetResource()->D3DResource.Get(), slice);
-        const CD3DX12_TEXTURE_COPY_LOCATION depthSource(_bakedDepth.GetResource()->D3DResource.Get(), slice);
-        const CD3DX12_TEXTURE_COPY_LOCATION colorDestination(color.GetResource()->D3DResource.Get(), face);
-        const CD3DX12_TEXTURE_COPY_LOCATION depthDestination(depth.GetResource()->D3DResource.Get(), face);
+        commands->ResourceBarrier({ state.BakedColor->GetResource()->GetCopySourceBarrier(),
+            state.BakedDepth->GetResource()->GetCopySourceBarrier(), color.GetResource()->GetCopyDestBarrier(), depth.GetResource()->GetCopyDestBarrier() });
+        const CD3DX12_TEXTURE_COPY_LOCATION colorSource(state.BakedColor->GetResource()->D3DResource.Get(), face);
+        const CD3DX12_TEXTURE_COPY_LOCATION depthSource(state.BakedDepth->GetResource()->D3DResource.Get(), face);
+        const CD3DX12_TEXTURE_COPY_LOCATION colorDestination(color.GetResource()->D3DResource.Get(), captureSlice);
+        const CD3DX12_TEXTURE_COPY_LOCATION depthDestination(depth.GetResource()->D3DResource.Get(), captureSlice);
         commands->GetCommandList()->CopyTextureRegion(&colorDestination, 0, 0, 0, &colorSource, nullptr);
         commands->GetCommandList()->CopyTextureRegion(&depthDestination, 0, 0, 0, &depthSource, nullptr);
     }
@@ -410,21 +469,21 @@ void GDX12ReflectionProbePass::FilterAndPublish(GDX12CommandList* commands, UINT
     commands->SetComputeRootSignature(_filterRoot.get());
     commands->SetPipelineState(_filterPSO);
     // shortcut: capture input has one mip, add input mips if small HDR emitters alias at the chosen sample budget.
-    commands->SetComputeSRV(0, _raw.GetSRV()->GPUHandle);
+    commands->SetComputeSRV(0, _rawMipSRVs[_publishedMips - _mips]->GPUHandle);
     for (UINT mip = 0; mip < _mips; ++mip)
     {
         struct { UINT Size; float Roughness; UINT Samples; } parameters = {
-            _resolution >> mip, static_cast<float>(mip) / (_mips - 1), _settings.PrefilterSamples };
+            _resolution >> mip, static_cast<float>(mip) / (_mips - 1), _probes[probe].Source.PrefilterSamples };
         commands->GetCommandList()->SetComputeRoot32BitConstants(0, 3, &parameters, 0);
-        commands->SetComputeUAV(0, _filterUAVs[mip]->GPUHandle);
+        commands->SetComputeUAV(0, _filterUAVs[_publishedMips - _mips + mip]->GPUHandle);
         commands->Dispatch((parameters.Size + 7) / 8, (parameters.Size + 7) / 8, 6);
     }
     commands->ResourceBarrier({ _filtered.GetResource()->GetCopySourceBarrier(), _published.GetResource()->GetCopyDestBarrier() });
     for (UINT face = 0; face < 6; ++face)
         for (UINT mip = 0; mip < _mips; ++mip)
         {
-            const CD3DX12_TEXTURE_COPY_LOCATION source(_filtered.GetResource()->D3DResource.Get(), face * _mips + mip);
-            const CD3DX12_TEXTURE_COPY_LOCATION destination(_published.GetResource()->D3DResource.Get(), (probe * 6 + face) * _mips + mip);
+            const CD3DX12_TEXTURE_COPY_LOCATION source(_filtered.GetResource()->D3DResource.Get(), face * _publishedMips + (_publishedMips - _mips) + mip);
+            const CD3DX12_TEXTURE_COPY_LOCATION destination(_published.GetResource()->D3DResource.Get(), (probe * 6 + face) * _publishedMips + (_publishedMips - _mips) + mip);
             commands->GetCommandList()->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
         }
     commands->ResourceBarrier({ _published.GetResource()->GetSRVBarrier() });
@@ -449,7 +508,8 @@ void GDX12ReflectionProbePass::WriteProbeData(bool enabled)
             data.BoxMax = probe.BoxMax;
             data.BlendDistance = _probes[i].Source.BlendDistance;
             data.Intensity = _probes[i].Source.Intensity;
-            data.MaxMip = static_cast<float>(_mips - 1);
+            data.MaxMip = static_cast<float>(_publishedMips - 1);
+            data.MinMip = static_cast<float>(_publishedMips - CubeMipCount(probe.Resolution));
         }
         frame->ReflectionProbes->CopyData(i, data);
     }
@@ -468,21 +528,34 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
         _face = 0;
         return;
     }
-    const auto& submitted = _resources->ReflectionProbes;
+    auto submitted = _resources->ReflectionProbes;
     if (submitted.size() > MaxReflectionProbes) throw std::runtime_error("Too many reflection probes (maximum 32)");
-    for (const auto& probe : submitted)
+    UINT maximumResolution = 0;
+    for (auto& probe : submitted)
+    {
         if (!IsValidReflectionProbe(probe)) throw std::invalid_argument("Invalid reflection probe bounds or capture parameters");
+        static_cast<GDX12ReflectionCaptureSettings&>(probe) = ResolveReflectionCaptureSettings(probe, settings.Quality);
+        maximumResolution = (std::max)(maximumResolution, probe.Resolution);
+    }
     bool topologyChanged = _probes.size() != submitted.size();
     if (!topologyChanged)
         for (size_t i = 0; i < submitted.size(); ++i) topologyChanged |= _probes[i].Source.Id != submitted[i].Id;
-    if (!_enabled || topologyChanged || _resolution != settings.Resolution ||
-        _settings.Implementation != settings.Implementation || _settings.Quality != settings.Quality)
+    if (!_enabled || topologyChanged || _settings.Quality != settings.Quality)
         _commonData->ResetHistory = true;
-    if (topologyChanged || _resolution != settings.Resolution)
-        CreateTextures(static_cast<UINT>(submitted.size()), settings.Resolution);
+    if (topologyChanged)
+    {
+        _resources->Device->GetCommandQueue()->Flush();
+        for (auto& probe : _probes)
+            _statistics.TextureBytes -= AllocationBytes(_resources->Device, probe.BakedColor.get()) +
+                AllocationBytes(_resources->Device, probe.BakedDepth.get());
+        _probes.clear();
+        _probes.resize(submitted.size());
+        _activeProbe = _face = 0;
+    }
+    if (topologyChanged || _publishedResolution != maximumResolution)
+        CreatePublishedTexture(commands, static_cast<UINT>(submitted.size()), maximumResolution);
     const bool invalidate = _staticRevision != _resources->ReflectionStaticRevision ||
-        _environmentRevision != _resources->ReflectionEnvironmentRevision ||
-        _settings.Implementation != settings.Implementation;
+        _environmentRevision != _resources->ReflectionEnvironmentRevision;
     if (invalidate)
     {
         _face = 0;
@@ -500,6 +573,7 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
     {
         if (!SameCapture(_probes[i].Source, submitted[i]))
         {
+            _commonData->ResetHistory = true;
             _probes[i].BakedFaces = 0;
             _probes[i].LastUpdate = 0;
             if (i == _activeProbe) _face = 0;
@@ -514,7 +588,7 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
         while (visited < _probes.size())
         {
             const auto& probe = _probes[_activeProbe];
-            const UINT interval = settings.UpdateInterval ? settings.UpdateInterval : probe.Source.UpdateInterval;
+            const UINT interval = probe.Source.UpdateInterval;
             if (!probe.Ready || probe.LastUpdate == 0 || _frameNumber - probe.LastUpdate >= interval) break;
             _activeProbe = (_activeProbe + 1) % static_cast<UINT>(_probes.size());
             ++visited;
@@ -526,14 +600,18 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
         }
     }
     auto& state = _probes[_activeProbe];
+    CreateCaptureTextures(maximumResolution);
+    _resolution = state.Source.Resolution;
+    _mips = CubeMipCount(_resolution);
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
     for (UINT face = 0; face < 6; ++face) frame.Cameras->CopyData(face, FaceCamera(state.Source, face, _resolution));
     frame.Shadow->CopyData(0, ProbeSunShadow(*_resources));
     commands->BeginPixEvent("Local reflection capture and GGX", Colors::MediumPurple);
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-    const UINT endFace = (std::min)(6u, _face + settings.FacesPerFrame);
-    if (settings.Implementation == 1 && state.BakedFaces != 63)
+    const UINT endFace = (std::min)(6u, _face + state.Source.FacesPerFrame);
+    if (state.Source.Implementation == 1 && state.BakedFaces != 63)
     {
+        CreateBakedTextures(state);
         if (!_staticLocalShadows)
         {
             // shortcut: baked receivers retain static-only shadows, use dynamic capture for moving shadow reception.
@@ -554,7 +632,7 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
     RenderShadow(commands, AllGeometry);
     for (; _face < endFace; ++_face)
     {
-        RenderFace(commands, _activeProbe, _face, settings.Implementation == 1 ? DynamicGeometry : AllGeometry, false);
+        RenderFace(commands, _activeProbe, _face, state.Source.Implementation == 1 ? DynamicGeometry : AllGeometry, false);
         ++_statistics.CapturedFaces;
     }
     if (_face == 6)

@@ -5,6 +5,7 @@ struct ReflectionProbeData
     float3 Position; float Intensity;
     float3 BoxMin; float BlendDistance;
     float3 BoxMax; float MaxMip;
+    float MinMip;
 };
 
 #ifdef REFLECTION_PROBE_BINDINGS_DEFERRED
@@ -42,7 +43,7 @@ float3 SampleReflectionRadiance(float3 position, float3 direction, float roughne
         float3 lookup = BoxProjectedDirection(position, direction, probe);
         if (dot(lookup, lookup) < 1e-12f) lookup = direction;
         localRadiance += LocalReflectionRadiance.SampleLevel(samLinearClamp,
-            float4(lookup, i), roughness * probe.MaxMip).rgb * probe.Intensity * weight;
+            float4(lookup, i), lerp(probe.MinMip, probe.MaxMip, saturate(roughness))).rgb * probe.Intensity * weight;
         totalWeight += weight;
     }
     return lerp(globalRadiance, localRadiance / max(totalWeight, 1e-6f), saturate(totalWeight));

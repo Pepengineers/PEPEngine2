@@ -72,4 +72,4 @@ Build/CVarTests/Manual/ConsoleVariableTests.exe
 
 ## Локальные отражения
 
-`Render.Reflection.*` — runtime Default CVar; единицы, диапазоны, пресеты и наследование overrides описаны в [reflection-probes.md](reflection-probes.md). Регистрация находится в `GDX12ReflectionProbes.cpp`. `ReflectionProbeTests.exe --cpu` проверяет реальные CVar, отклонение неверных значений и сохранение overrides при смене качества.
+`Render.Reflection.Enabled` и `Render.Reflection.Quality` — глобальные runtime Default CVar. Остальные параметры принадлежат `ReflectionProbeComponent` и изменяются из C++; единицы, диапазоны, пресеты и наследование описаны в [reflection-probes.md](reflection-probes.md). Регистрация находится в `GDX12ReflectionProbes.cpp`. `ReflectionProbeTests.exe --cpu` содержит проверки глобальных CVar и сохранения авторских параметров при смене качества. После переноса параметров в компонент проверки не запускались по новому указанию.

@@ -30,6 +30,8 @@ private:
         UINT BakedFaces = 0;
         uint64_t LastUpdate = 0;
         bool Ready = false;
+        std::unique_ptr<GDX12Texture> BakedColor, BakedDepth;
+        std::vector<std::unique_ptr<GDX12Descriptor>> BakedRTVs, BakedDSVs;
     };
     struct FrameData
     {
@@ -39,7 +41,9 @@ private:
         std::unique_ptr<GDX12UploadBuffer<UINT>> Counter;
     };
 
-    void CreateTextures(UINT count, UINT resolution);
+    void CreatePublishedTexture(GDX12CommandList* commands, UINT count, UINT resolution);
+    void CreateCaptureTextures(UINT resolution);
+    void CreateBakedTextures(ProbeState& probe);
     void CreateTexture(GDX12Texture& texture, UINT size, UINT slices, UINT mips, D3D12_RESOURCE_FLAGS flags, bool depth);
     void CreateFaceViews(GDX12Texture& texture, std::vector<std::unique_ptr<GDX12Descriptor>>& views, bool depth);
     void Cull(GDX12CommandList* commands, UINT camera, Geometry geometry, bool shadow);
@@ -55,8 +59,8 @@ private:
     ComPtr<ID3D12PipelineState> _capturePSO, _skyPSO, _shadowPSO, _cullPSO, _clearPSO, _filterPSO;
     ComPtr<ID3D12CommandSignature> _signature;
     std::unique_ptr<GDX12LocalShadowPass> _staticLocalShadows;
-    GDX12Texture _published, _raw, _filtered, _bakedColor, _bakedDepth, _depth, _sunShadow;
-    std::vector<std::unique_ptr<GDX12Descriptor>> _rawRTVs, _bakedRTVs, _bakedDSVs, _depthDSVs, _sunDSV, _filterUAVs;
+    GDX12Texture _published, _raw, _filtered, _depth, _sunShadow;
+    std::vector<std::unique_ptr<GDX12Descriptor>> _rawRTVs, _depthDSVs, _sunDSV, _filterUAVs, _rawMipSRVs;
     Statistics _statistics;
     GDX12ReflectionSettings _settings;
     uint64_t _staticRevision = 0;
@@ -66,5 +70,8 @@ private:
     UINT _face = 0;
     UINT _resolution = 0;
     UINT _mips = 0;
+    UINT _captureTextureResolution = 0;
+    UINT _publishedResolution = 0;
+    UINT _publishedMips = 0;
     bool _enabled = false;
 };

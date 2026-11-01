@@ -26,14 +26,18 @@ RTX 3060 Laptop GPU, one probe, three small quads, static steady-state overlay, 
 
 Texture allocation excludes descriptor heaps, frame buffers and the separate static local-shadow maps. Low/Mid amortize one complete GGX publication across six/three frames respectively.
 
-## Final reruns waiting for the shared GPU slot
+## Current handoff: implementation only, not verified
 
-After the completed full run, the connected-code review fixed runtime upload-buffer growth and tightened fixture geometry to one-sided triangles. The final fixture also queues multiple frame slots without a Flush after every frame, then switches resolution/mode while work is pending. These final GPU/ECS reruns have been built and queued, but have not yet executed: the shared mutex is held by the Motion Blur visual-validation shell (PID 21016). Its holding command waits for its own `Build/MotionBlur/bistro-validation-hold` marker; that chat is waiting on approval. No other chat's process or marker was changed.
+The latest user instruction stops verification in this chat. Own queued Reflection/ECS validation processes were stopped; no build, test, GPU fixture, benchmark, visual validation or separate review/cleanup pass is being run for the subsequent changes. The main chat owns verification.
 
-The final acceptance record must be updated after those queued checks and the frame-slot profiles complete. Earlier completed GPU results must not be presented as execution of the newly tightened assertions.
+The follow-up moves Implementation, Resolution, FacesPerFrame, PrefilterSamples and UpdateInterval into each ReflectionProbeComponent. Only Enabled and Quality remain global CVar/INI settings, as explicitly clarified by the user in this chat. The capture pass resolves author/preset values per probe, allocates matching baked color/depth per probe, uses matching mip subresources of shared scratch capture resources for the scheduled probe and publishes lower-resolution captures into a matching mip range of the shared cube array. Shader metadata includes MinMip as well as MaxMip. Existing fixture call sites were adapted without adding new checks.
+
+These ownership/resource changes are unverified. The completed GPU results above apply to the earlier global-parameter implementation, not to this follow-up. Runtime buffer-growth assertions and the tightened single-sided/queued-frame fixture were also queued but not completed before the stop instruction.
+
+The old request to coordinate GPU mutex release is no longer needed. No other chat's process or marker was modified.
 
 ## Integration and limits
 
-See [reflection-probes.md](reflection-probes.md) for the seven CVars, defaults/ranges, authoring, exact SSSR radiance fallback seam and separate common HDR integration. The implementation uses one shared working capture and GGX scratch cube plus a published cube array; complete copy publication avoids a per-probe double-buffer framework.
+See [reflection-probes.md](reflection-probes.md) for the two global CVars, per-component fields, defaults/ranges, authoring, exact SSSR radiance fallback seam and separate common HDR integration. The implementation uses one shared working capture and GGX scratch cube plus a published cube array; complete copy publication avoids a per-probe double-buffer framework.
 
 The baked mode deliberately retains static-only shadows on baked receivers; full dynamic mode is required for moving caster shadows on them. Transparent surfaces consume probes but are excluded from capture; glass-in-glass and multi-layer refraction are not represented. Main-camera navigation, long-run stability and visual probe placement in Bistro remain unverified; no probes were added there for demonstration. Multi-GPU is not implemented or tested.

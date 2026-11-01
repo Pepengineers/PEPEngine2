@@ -1,4 +1,4 @@
-﻿#include "App.Base/Modules/RenderModule.h"
+п»ї#include "App.Base/Modules/RenderModule.h"
 
 #include "App.Base/Window.h"
 #include <cassert>
@@ -920,7 +920,7 @@ void RenderModule::CollectReflectionScene()
             probe.Intensity = component.Intensity;
             probe.NearPlane = component.NearPlane;
             probe.FarPlane = component.FarPlane;
-            probe.UpdateInterval = component.UpdateInterval;
+            static_cast<GDX12ReflectionCaptureSettings&>(probe) = component;
             probe.Revision = component.Revision;
             if (!IsValidReflectionProbe(probe)) throw std::invalid_argument("Invalid ReflectionProbeComponent");
             resources.ReflectionProbes.push_back(probe);
