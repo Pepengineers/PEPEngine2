@@ -264,37 +264,78 @@ int main()
                     "Aux motion must come from the same source sample as its depth");
             }
         }
+        set(L"Render.Upscaler.Enabled", "false");
         RenderPipelineCommonData upscaleCommon;
         upscaleCommon.WindowWidth = 256; upscaleCommon.WindowHeight = 144;
         GDX12XeSSUpscalePass upscale;
         upscale.Setup(&resources, nullptr, &upscaleCommon);
+        Require(upscaleCommon.DownscaledWidth == 256 && upscaleCommon.DownscaledHeight == 144,
+            "Native startup must render at the output size");
+        Require(!upscale.GetFlagValue(RENDER_PASS_FLAG_USE_JITTER), "Native startup must not request jitter");
         GDX12Texture upscaleInput, upscaleDepth, upscaleMotion;
-        const UINT inputWidth = upscaleCommon.DownscaledWidth, inputHeight = upscaleCommon.DownscaledHeight;
-        MakeInput(resources, upscaleInput, inputWidth, inputHeight, DXGI_FORMAT_R16G16B16A16_FLOAT);
-        MakeInput(resources, upscaleDepth, inputWidth, inputHeight, DXGI_FORMAT_R32_FLOAT);
-        MakeInput(resources, upscaleMotion, inputWidth, inputHeight, DXGI_FORMAT_R16G16_FLOAT);
-        std::vector<uint16_t> hdrPixels(inputWidth * inputHeight * 4), stationary(inputWidth * inputHeight * 2);
-        std::vector<float> planarDepth(inputWidth * inputHeight, 0.1f);
-        for (size_t i=0;i<hdrPixels.size();i+=4)
-        { hdrPixels[i]=half(4); hdrPixels[i+1]=half(2); hdrPixels[i+2]=half(1); hdrPixels[i+3]=half(1); }
-        Upload(device, upscaleInput, hdrPixels.data(), 8);
-        Upload(device, upscaleDepth, planarDepth.data(), 4); Upload(device, upscaleMotion, stationary.data(), 4);
+        MakeInput(resources, upscaleInput, 256, 144, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        MakeInput(resources, upscaleDepth, 256, 144, DXGI_FORMAT_R32_FLOAT);
+        MakeInput(resources, upscaleMotion, 256, 144, DXGI_FORMAT_R16G16_FLOAT);
         upscale.SetInputs({ &upscaleDepth,&upscaleMotion,&upscaleInput }); upscale.Initialize();
+        auto* const stableOutput = upscale.GetOutput(0);
+        const UINT stableDescriptor = stableOutput->GetTexture()->GetSRV()->HeapIndex;
         GDX12ToneMappingPass upscaleTone;
         upscaleTone.Setup(&resources, nullptr, &upscaleCommon);
-        upscaleTone.SetInputs({ upscale.GetOutput(0) }); upscaleTone.Initialize();
-        for (UINT frame=0;frame<3;++frame)
+        upscaleTone.SetInputs({ stableOutput }); upscaleTone.Initialize();
+        const auto runUpscale = [&]
         {
-            if (frame==2) { ++upscaleCommon.HistoryRevision; upscale.Resize(); }
+            const UINT inputWidth = upscaleCommon.DownscaledWidth, inputHeight = upscaleCommon.DownscaledHeight;
+            upscaleInput.Resize(inputWidth,inputHeight); upscaleDepth.Resize(inputWidth,inputHeight); upscaleMotion.Resize(inputWidth,inputHeight);
+            std::vector<uint16_t> hdrPixels(inputWidth * inputHeight * 4), stationary(inputWidth * inputHeight * 2);
+            std::vector<float> planarDepth(inputWidth * inputHeight, 0.1f);
+            for (UINT y=0; y<inputHeight; ++y) for (UINT x=0; x<inputWidth; ++x)
+            {
+                const size_t i=(size_t(y)*inputWidth+x)*4;
+                hdrPixels[i]=half(4+x*0.002f); hdrPixels[i+1]=half(2+y*0.002f); hdrPixels[i+2]=half(1); hdrPixels[i+3]=half(1);
+            }
+            Upload(device, upscaleInput, hdrPixels.data(), 8);
+            Upload(device, upscaleDepth, planarDepth.data(), 4); Upload(device, upscaleMotion, stationary.data(), 4);
             auto* commands=queue->GetCommandList();
             upscale.Execute(commands); upscaleTone.Execute(commands);
             queue->ExecuteCommandList(commands); queue->Flush();
-            const auto hdr=ReadColor(device,*upscale.GetOutput(0)->GetTexture());
+            Require(upscale.GetOutput(0)==stableOutput && stableOutput->GetTexture()->GetSRV()->HeapIndex==stableDescriptor,
+                "Upscaler mode and resize must retain downstream links and descriptors");
+            const auto hdr=ReadColor(device,*stableOutput->GetTexture());
+            if (!upscale.GetFlagValue(RENDER_PASS_FLAG_USE_JITTER))
+                Require(hdr==ReadColor(device,upscaleInput), "Native rendering must copy every HDR pixel exactly");
             const size_t centerPixel=((upscaleCommon.WindowHeight/2)*upscaleCommon.WindowWidth+upscaleCommon.WindowWidth/2)*4;
-            Require(hdr[centerPixel]>2, "Real XeSS must preserve HDR above one on first/history/reset frames");
+            Require(hdr[centerPixel]>2, "Native/XeSS must preserve HDR above one on first/history/reset frames");
             const auto encoded=ReadColor(device,*upscaleTone.GetOutput(0)->GetTexture());
-            Require(encoded[centerPixel]>0.8f && encoded[centerPixel]<=1, "Engine tone mapping must restore state after raw XeSS dispatch");
+            Require(encoded[centerPixel]>0.8f && encoded[centerPixel]<=1, "Engine tone mapping must restore state after native/XeSS dispatch");
+        };
+        runUpscale();
+        set(L"Render.Upscaler.Enabled", "true");
+        UINT qualityWidths[4] = {};
+        for (const char* level : { "3", "1", "2", "0", "3" })
+        {
+            set(L"Render.Upscaler.Quality",level);
+            Require(upscale.ApplySettings(), "A changed active mode or quality must require a rebuild");
+            ++upscaleCommon.HistoryRevision; upscale.Resize(); upscale.QueryRenderTargetResolution();
+            const bool native = level[0]=='0';
+            Require(upscale.GetFlagValue(RENDER_PASS_FLAG_USE_JITTER)!=native, "Jitter flags must follow the applied mode");
+            Require(native ? upscaleCommon.DownscaledWidth==upscaleCommon.WindowWidth : upscaleCommon.DownscaledWidth<upscaleCommon.WindowWidth,
+                "Native uses the output grid; XeSS uses SDK input dimensions");
+            qualityWidths[level[0]-'0'] = upscaleCommon.DownscaledWidth;
+            Require(!upscale.ApplySettings(), "Unchanged settings must retain the temporal context");
+            runUpscale(); runUpscale();
         }
+        Require(qualityWidths[1]<qualityWidths[2] && qualityWidths[2]<qualityWidths[3],
+            "XeSS quality must select distinct SDK render sizes in increasing quality order");
+        ++upscaleCommon.HistoryRevision; runUpscale();
+        set(L"Render.Upscaler.Enabled", "false"); Require(upscale.ApplySettings(), "Disable must switch to native");
+        upscaleCommon.WindowWidth=320; upscaleCommon.WindowHeight=180;
+        ++upscaleCommon.HistoryRevision; upscale.Resize(); upscale.QueryRenderTargetResolution(); upscaleTone.Resize();
+        runUpscale();
+        set(L"Render.Upscaler.Quality", "1");
+        Require(!upscale.ApplySettings(), "Quality changes while disabled must retain the native path");
+        set(L"Render.Upscaler.Enabled", "true"); Require(upscale.ApplySettings(), "Re-enable must apply the selected quality");
+        ++upscaleCommon.HistoryRevision; upscale.Resize(); upscale.QueryRenderTargetResolution();
+        runUpscale();
         upscaleTone.ClearDenendencies(); upscale.ClearDenendencies();
         for (UINT64 i=0;i<info->GetNumStoredMessagesAllowedByRetrievalFilter();++i)
         {

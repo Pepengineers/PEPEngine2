@@ -120,10 +120,17 @@ void RenderModule::OnResize()
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
-    if (_RPcommonData.Upscaler) { _RPcommonData.Upscaler->QueryRenderTargetResolution(); }
+    if (_upscaler) _upscaler->ApplySettings();
+    auto* upscaler = _RPcommonData.Upscaler;
+    if (upscaler)
+    {
+        upscaler->Resize();
+        upscaler->QueryRenderTargetResolution();
+    }
 
-    for (auto& renderPass : _primaryRenderPassExecutionList) { renderPass->Resize(); }
-    for (auto& renderPass : _secondaryRenderPassExecutionList) { renderPass->Resize(); }
+    for (auto& renderPass : _primaryRenderPassExecutionList) { if (renderPass.get() != upscaler) renderPass->Resize(); }
+    for (auto& renderPass : _secondaryRenderPassExecutionList) { if (renderPass.get() != upscaler) renderPass->Resize(); }
+    RefreshPipelineFlags();
 }
 
 GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
@@ -800,6 +807,7 @@ const float RenderModule::GetAspectRatio()
 
 void RenderModule::OnUpdate()
 {
+    if (_upscaler && _upscaler->ApplySettings()) OnResize();
     uint16_t width, height;
     _window->GetWindowSize(width, height);
 
@@ -966,7 +974,7 @@ void RenderModule::ConfigureRenderPipeline()
     auto* transparencyPass = add(std::make_unique<GDX12WBOITTransparencyPass>());
     auto* compositionPass = add(std::make_unique<GDX12WBOITCompositionPass>());
     auto* aerialPass = add(std::make_unique<GDX12SkyAerialPass>(environmentPass));
-    auto* upscalePass = add(std::make_unique<GDX12XeSSUpscalePass>());
+    auto* upscalePass = _upscaler = add(std::make_unique<GDX12XeSSUpscalePass>());
     auto* auxiliaryPass = add(std::make_unique<GDX12PostProcessAuxPass>());
     auto* motionBlurPass = add(std::make_unique<GDX12MotionBlurPass>());
     auto* dofPass = add(std::make_unique<GDX12DepthOfFieldPass>());
@@ -1006,14 +1014,20 @@ void RenderModule::SetupRenderPasses()
     for (auto& pass : _primaryRenderPassExecutionList)
     {
         pass->Setup(&_primaryResources, &_secondaryResources, &_RPcommonData);
-        _primaryPipelineFlags |= pass->GetFlags();
     }
 
     for (auto& pass : _secondaryRenderPassExecutionList)
     {
         pass->Setup(&_secondaryResources, &_primaryResources, &_RPcommonData);
-        _secondaryPipelineFlags |= pass->GetFlags();
     }
+    RefreshPipelineFlags();
+}
+
+void RenderModule::RefreshPipelineFlags()
+{
+    _primaryPipelineFlags = _secondaryPipelineFlags = 0;
+    for (auto& pass : _primaryRenderPassExecutionList) _primaryPipelineFlags |= pass->GetFlags();
+    for (auto& pass : _secondaryRenderPassExecutionList) _secondaryPipelineFlags |= pass->GetFlags();
 }
 
 void RenderModule::InitializeRenderPasses()

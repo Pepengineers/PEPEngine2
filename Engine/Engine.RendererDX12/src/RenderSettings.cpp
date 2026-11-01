@@ -15,6 +15,10 @@ namespace
     bool BlurRadius(float value) { return value >= 1 && value <= 256; }
     constexpr auto Runtime = EConsoleVariableFlags::Default;
 
+    static AutoConsoleVariable<bool> upscalerEnabled(L"Render.Upscaler.Enabled", true, L"Enable XeSS; false renders at native resolution");
+    static AutoConsoleVariable<Quality> upscalerQuality(L"Render.Upscaler.Quality", Quality::High,
+        L"0 native, 1 XeSS Performance, 2 Balanced, 3 Ultra Quality Plus", Runtime, ValidQuality);
+
     static AutoConsoleVariable<bool> aoEnabled(L"Render.AO.Enabled", true, L"Enable ambient occlusion");
     static AutoConsoleVariable<Quality> aoQuality(L"Render.AO.Quality", Quality::Mid,
         L"0 Off, 1 Low, 2 Mid, 3 High", Runtime, ValidQuality);
@@ -43,6 +47,11 @@ namespace
 
 namespace RenderSettings
 {
+    Upscaler GetUpscaler()
+    {
+        const auto quality = upscalerQuality.GetValue();
+        return { upscalerEnabled.GetValue() && quality != Quality::Off, quality };
+    }
     AO GetAO()
     {
         const auto quality = aoQuality.GetValue();

@@ -11,6 +11,18 @@ int main()
         return console.FindConsoleVariable(name).SetFromString(value);
     };
     using namespace RenderSettings;
+    assert(GetUpscaler().Enabled && GetUpscaler().Level == Quality::High);
+    assert(set(L"Render.Upscaler.Enabled", "false"));
+    assert(!GetUpscaler().Enabled);
+    assert(set(L"Render.Upscaler.Enabled", "true"));
+    for (int quality = 0; quality <= 3; ++quality)
+    {
+        assert(set(L"Render.Upscaler.Quality", std::to_string(quality).c_str()));
+        assert(GetUpscaler().Enabled == (quality != 0));
+        assert(static_cast<int>(GetUpscaler().Level) == quality);
+    }
+    assert(!set(L"Render.Upscaler.Quality", "4"));
+    assert(!set(L"Render.Upscaler.Quality", "-1"));
     assert(set(L"Render.AO.Quality", "1"));
     const auto low = GetAO();
     assert(low.Enabled && low.Samples > 0);

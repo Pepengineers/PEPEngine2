@@ -6,6 +6,13 @@ namespace RenderSettings
     enum class Quality : int { Off, Low, Mid, High };
     enum class AOImplementation : int { SSAO, HBAO, XeGTAO };
 
+    struct Upscaler
+    {
+        bool Enabled;
+        Quality Level;
+    };
+    Upscaler GetUpscaler();
+
     struct AO
     {
         bool Enabled;

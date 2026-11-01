@@ -351,6 +351,7 @@
 
 ### Invalidation материалов и wind grid
 
+- Коммит `1e0409f`, `fix(render): invalidate edited caster caches`.
 - Дополнительные проверки по реальным depth pixels сначала воспроизвели три
   ошибки: смена material slot на alpha-zero оставляла старую тень; reset wind
   grid на паузе менял геометрию без обновления тени; alpha edit в том же material
@@ -371,6 +372,24 @@
   фактической сменой diffuse texture; production baked semantics не менялись.
 - LightingGpuSmoke, десять кадров BistroEffectsSmoke и Release App прошли.
   DX12 debug errors отсутствуют. Логи `Build/grass-cache-*` и `Build/caster-cache-*`.
+
+### Native/XeSS и качество апскейлера
+
+- Добавлены Render.Upscaler.Enabled и Quality: 0 native, 1 XeSS Performance,
+  2 Balanced, 3 Ultra Quality Plus. Default High сохраняет прежний режим.
+  Input dimensions запрашиваются у SDK; native использует полный размер окна.
+- Native не создаёт XeSS context, копирует HDR без изменения пикселей и отключает
+  jitter. Переключения применяются до camera GPU upload; context пересоздаётся до
+  запроса новых размеров, затем обновляются остальные passes и pipeline flags.
+  Выходные ссылки/descriptor slots сохраняются при mode/quality/resize.
+- Тесты написаны до production; host подтвердил compile/API red отсутствующего
+  ApplySettings (`Build/native-controls-red-build.log`), runtime red не заявляется.
+  TechniqueTests, PostProcessGpuSmoke, BistroEffectsSmoke и Release App прошли.
+  Проверены HDR equality, все presets, native startup/resize/re-enable, jitter,
+  один history reset на effective transition и отсутствие новых scene entities.
+  Логи `Build/native-*-{build,run}.log`; DX12 debug errors отсутствуют.
+- Сравнение итоговых изображений и положения MB/DoF относительно XeSS остаётся
+  отдельной проверкой; эта итерация подтверждает управление режимами и ресурсами.
 
 ## Оставшаяся работа
 

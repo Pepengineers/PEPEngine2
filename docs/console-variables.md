@@ -333,3 +333,19 @@ Changing the grass material binding or resetting the wind grid refreshes cached
 shadows. Edits inside an existing material use its `DirtyFlag`: the first GPU
 upload invalidates cached CSM/local shadows and baked probe shading; copies of
 the same edit into the other frame slots preserve those caches.
+
+## Native rendering and XeSS
+
+| CVar | Default | Meaning |
+|---|---:|---|
+| `Render.Upscaler.Enabled` | true | False renders the full window size without jitter or a XeSS context |
+| `Render.Upscaler.Quality` | 3 | 0 native/Off; 1 Low: XeSS Performance; 2 Mid: Balanced; 3 High: Ultra Quality Plus |
+
+High preserves the previous fixed XeSS mode. Input dimensions come from
+`xessGetOptimalInputResolution`, rather than fixed scale factors. These settings
+apply before camera constants are uploaded. An effective mode/quality change
+flushes and resizes the graph, updates jitter flags, and resets temporal history
+once. Changing quality while disabled records the choice for re-enabling and
+keeps the current native image/history. Output links and descriptor indices stay
+stable across transitions. Native uses an exact linear HDR copy; motion blur,
+DoF and tone mapping keep their existing position after that output.

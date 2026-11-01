@@ -1,6 +1,7 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Common/GameTimer.h"
+#include "Engine.RendererDX12/RenderSettings.h"
 #include <stdexcept>
 
 #include "xess/xess.h"
@@ -11,7 +12,7 @@ class GDX12XeSSUpscalePass : public GDX12RenderPass
 public:
 	GDX12XeSSUpscalePass() : IN_DepthBuffer(nullptr), IN_MotionVectors(nullptr), _XeSSContext(nullptr),
 		_XeSSQualityMode(XESS_QUALITY_SETTING_ULTRA_QUALITY_PLUS)
-	{ _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_JITTER; }
+	{ _flags = RENDER_PASS_FLAG_UPSCALER; }
 
     ~GDX12XeSSUpscalePass() override
     {
@@ -26,7 +27,7 @@ public:
 	{
 		_inputs = inputs;
 		_numInputs = 2;
-		MatchOutputCount(inputs.size() > 2 ? inputs.size() - 2 : 0);
+		MatchOutputCount(static_cast<UINT>(inputs.size() > 2 ? inputs.size() - 2 : 0));
 	}
 
 	IRenderPassLink* GetOutput(UINT index) override
@@ -80,12 +81,42 @@ public:
 	{
 		GDX12RenderPass::Setup(initOnResources, otherResources, commonData);
 
-		BuildXeSSContext();
+		ApplySettings();
+		if (_settings.Enabled) BuildXeSSContext();
 		QueryRenderTargetResolution();
 	}
 
+    bool ApplySettings()
+    {
+        const auto next = RenderSettings::GetUpscaler();
+        const bool changed = next.Enabled != _settings.Enabled || (next.Enabled && next.Level != _settings.Level);
+        _settings = next;
+        switch (next.Level)
+        {
+        case RenderSettings::Quality::Low: _XeSSQualityMode = XESS_QUALITY_SETTING_PERFORMANCE; break;
+        case RenderSettings::Quality::Mid: _XeSSQualityMode = XESS_QUALITY_SETTING_BALANCED; break;
+        default: _XeSSQualityMode = XESS_QUALITY_SETTING_ULTRA_QUALITY_PLUS; break;
+        }
+        SetFlag(RENDER_PASS_FLAG_USE_JITTER, next.Enabled);
+        return changed;
+    }
+
 	void Execute(GDX12CommandList* cmdList) override
 	{
+		if (!_settings.Enabled)
+		{
+			cmdList->BeginPixEvent("Native HDR copy", Colors::Blue);
+			for (UINT i = 0; i < _numOutputs; ++i)
+			{
+				auto* input = IN_Textures[i]->GetTexture()->GetResource();
+				auto* output = OUT_UpscaledTextures[i]->GetResource();
+				cmdList->ResourceBarrier({ input->GetCopySourceBarrier(), output->GetCopyDestBarrier() });
+				cmdList->CopyResource(output->D3DResource.Get(), input->D3DResource.Get());
+				cmdList->ResourceBarrier({ input->GetSRVBarrier(), output->GetSRVBarrier() });
+			}
+			cmdList->EndPixEvent();
+			return;
+		}
 		GDX12Texture* depthStencil = IN_DepthBuffer->GetTexture();
 		GDX12Texture* motionVectors = IN_MotionVectors->GetTexture();
 
@@ -108,7 +139,7 @@ public:
 		execParams.inputColorBase = { 0,0 };
 		execParams.inputDepthBase = { 0,0 };
 
-		for (int i = 0; i < _numOutputs; i++)
+		for (UINT i = 0; i < _numOutputs; i++)
 		{
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();
 			GDX12Texture* upscaledTexture = OUT_UpscaledTextures[i].get();
@@ -132,14 +163,20 @@ public:
 	void Resize() override
 	{
 		for (auto& texture : OUT_UpscaledTextures) { texture->Resize(_commonData->WindowWidth, _commonData->WindowHeight); }
-        xessDestroyContext(_XeSSContext);
+        if (_XeSSContext) xessDestroyContext(_XeSSContext);
         _XeSSContext = nullptr;
-        BuildXeSSContext();
+        if (_settings.Enabled) BuildXeSSContext();
         _historyRevision = UINT64_MAX;
 	}
 
 	void QueryRenderTargetResolution() override
 	{
+		if (!_settings.Enabled)
+		{
+			_commonData->DownscaledWidth = _commonData->WindowWidth;
+			_commonData->DownscaledHeight = _commonData->WindowHeight;
+			return;
+		}
 		xess_2d_t targetResolution = { _commonData->WindowWidth, _commonData->WindowHeight } ;
 		xess_2d_t downscaledResolution;
 		xess_2d_t minResolution;
@@ -176,6 +213,7 @@ private:
 	std::vector<std::unique_ptr<GDX12Texture>> OUT_UpscaledTextures;
 	xess_context_handle_t _XeSSContext;
 	xess_quality_settings_t _XeSSQualityMode;
+    RenderSettings::Upscaler _settings = { false, RenderSettings::Quality::High };
     uint64_t _historyRevision = UINT64_MAX;
 
 	void MatchOutputCount(UINT outputCount)

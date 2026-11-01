@@ -19,6 +19,7 @@ class GDX12GPUTimer;
 class GDX12ReflectionProbePass;
 class GDX12EnvironmentIBLPass;
 class GDX12GrassWindPass;
+class GDX12XeSSUpscalePass;
 
 struct TransformComponent;
 struct CameraComponent;
@@ -136,6 +137,7 @@ private:
     void ShareFences();
     void ConfigureRenderPipeline();
     void SetupRenderPasses();
+    void RefreshPipelineFlags();
     void InitializeRenderPasses();
     void EnsureInstanceCapacity(UINT capacity);
     
@@ -181,6 +183,7 @@ private:
     GDX12ReflectionProbePass* _reflectionProbes = nullptr;
     GDX12EnvironmentIBLPass* _environment = nullptr;
     GDX12GrassWindPass* _grassWind = nullptr;
+    GDX12XeSSUpscalePass* _upscaler = nullptr;
     uint64_t _grassWorld = 0;
     std::unordered_map<uint64_t,std::vector<UINT>> _grassInstances;
     std::vector<UINT> _freeGrassInstances;

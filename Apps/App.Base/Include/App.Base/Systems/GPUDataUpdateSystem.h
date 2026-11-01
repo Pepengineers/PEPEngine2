@@ -154,6 +154,8 @@ private:
                 pipelineCommonData->ActiveCameraPreviousViewProjection = camera.PrevViewProjNoJitter.Transpose();
                 pipelineCommonData->CameraViewToClip = proj;
                 pipelineCommonData->ClipToCameraView = proj.Invert();
+                pipelineCommonData->ActiveCameraJitterOffsetX = 0;
+                pipelineCommonData->ActiveCameraJitterOffsetY = 0;
 
                 // Streamline uses row-major matrices.
                 pipelineCommonData->ClipToPrevClip = unjitteredViewProj.Invert() * camera.PrevViewProjNoJitter.Transpose();
