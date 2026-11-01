@@ -40,6 +40,7 @@
     <ClInclude Include="Include\App.Base\ECS\Components\SplineCurveComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\SplineFollowComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\StaticMeshRenderComponent.h" />
+    <ClInclude Include="Include\App.Base\ECS\Components\SkeletalMeshRenderComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\TransformComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\VelocityComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\World.h" />
@@ -61,6 +62,7 @@
     <ClCompile Include="src\App.cpp" />
     <ClCompile Include="src\LoadingSettings.cpp" />
     <ClCompile Include="src\RenderModule.cpp" />
+    <ClCompile Include="src\RenderModuleSkinning.cpp" />
     <ClCompile Include="src\SceneManagerModule.cpp" />
     <ClCompile Include="src\SceneTraversal.cpp" />
     <ClCompile Include="src\Window.cpp" />

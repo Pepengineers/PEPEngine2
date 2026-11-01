@@ -941,6 +941,20 @@ namespace
     }
 }
 
+std::vector<GDX12Material*> WorldLoader::BuildMaterialSlots(RenderModule& render,
+    const Engine::Core::Mesh& mesh, const std::string& resourceName)
+{
+    auto& assets = Engine::Core::AssetManager::GetInstance();
+    const auto defaults = CreateSceneDefaultMaterialTextures(render, resourceName);
+    if (!defaults.IsValid()) throw std::runtime_error("Cannot create skeletal material defaults");
+    auto* fallback = CreateSceneFallbackMaterial(render, assets, resourceName, defaults);
+    if (!fallback) throw std::runtime_error("Cannot create skeletal fallback material");
+    std::unordered_map<std::wstring, GPUTexture*> textureCache;
+    auto materials = BuildObjMaterialSlots(render, assets, mesh, resourceName, fallback, defaults, textureCache);
+    render.WaitForUploads();
+    return materials;
+}
+
 bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
 {
     /* todo if file not found return 0;

@@ -20,6 +20,7 @@
 #include "App.Base/ECS/Components/SplineCurveComponent.h"
 #include "App.Base/ECS/Components/SplineFollowComponent.h"
 #include "App.Base/ECS/Components/StaticMeshRenderComponent.h"
+#include "App.Base/ECS/Components/SkeletalMeshRenderComponent.h"
 #include "App.Base/ECS/Components/TransformComponent.h"
 #include "App.Base/ECS/Components/VelocityComponent.h"
 
@@ -34,6 +35,7 @@ using WorldECS = ECSStorage<
     VelocityComponent,
     NameComponent,
     StaticMeshRenderComponent,
+    SkeletalMeshRenderComponent,
     CameraComponent,
     CircleMovementComponent,
     SplineCurveComponent,

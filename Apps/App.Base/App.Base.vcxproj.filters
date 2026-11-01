@@ -136,4 +136,8 @@
       <Filter>Source Files\ECS</Filter>
     </ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="src\RenderModuleSkinning.cpp" />
+    <ClInclude Include="Include\App.Base\ECS\Components\SkeletalMeshRenderComponent.h" />
+  </ItemGroup>
 </Project>

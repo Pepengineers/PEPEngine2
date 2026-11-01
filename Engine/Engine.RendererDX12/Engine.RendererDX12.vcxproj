@@ -26,6 +26,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ParticlesPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Fluid.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FluidPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12Skinning.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ReflectionProbes.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionProbePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DepthOfField.h" />
@@ -88,6 +89,7 @@
     <ClCompile Include="src\GDX12GrassRenderer.cpp" />
     <ClCompile Include="src\GDX12Particles.cpp" />
     <ClCompile Include="src\GDX12ParticlesPass.cpp" />
+    <ClCompile Include="src\GDX12Skinning.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusion.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusionPass.cpp" />
     <ClCompile Include="..\..\External\External.Libraries\cacao\src\ffx_cacao.cpp">
@@ -159,6 +161,7 @@
     <None Include="Shaders\ShadowFrustum.hlsli" />
     <None Include="Shaders\FullScreenVS.hlsl" />
     <None Include="Shaders\OpaquePass.hlsl" />
+    <None Include="Shaders\Skinning.hlsl" />
     <None Include="Shaders\DeferredLighting.hlsl" />
     <None Include="Shaders\PBRSurface.hlsli" />
     <None Include="Shaders\PBRLighting.hlsli" />

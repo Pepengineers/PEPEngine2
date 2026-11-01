@@ -24,6 +24,7 @@ struct VS_INPUT
     float2 TexC : TEXCOORD;
     float3 Normal : NORMAL;
     float3 Tangent : TANGENT;
+    float3 PreviousPosition : PREVPOSITION;
 };
 
 struct VS_OUTPUT_PS_INPUT
@@ -53,7 +54,7 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
     vout.PosCS = mul(posW, CBCamera.ViewProj);
     
     vout.PosCSNoJitter = mul(posW, CBCamera.ViewProjNoJitter);
-    float4 prevPosW = mul(float4(vin.Pos, 1.0f), transform.PrevWorld);
+    float4 prevPosW = mul(float4(vin.PreviousPosition, 1.0f), transform.PrevWorld);
     vout.PrevPosCSNoJitter = mul(prevPosW, CBCamera.PrevViewProjNoJitter);
     
     vout.TexC = vin.TexC;

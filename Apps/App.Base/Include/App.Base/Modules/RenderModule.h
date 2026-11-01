@@ -6,6 +6,8 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
+#include "Engine.RendererDX12/GDX12Skinning.h"
+#include <map>
 
 class SceneManagerModule;
 class World;
@@ -81,6 +83,8 @@ public:
         ListenerHandle GrassUpdated = 0;
         ListenerHandle WindCreated = 0;
         ListenerHandle WindUpdated = 0;
+        ListenerHandle SkeletalDestroyed = 0;
+        ListenerHandle SkeletalUpdated = 0;
     };
 
     TransformCompGPUData& GetTransformGPUData(Entity entity);
@@ -127,6 +131,43 @@ protected:
     bool ShouldRender() override;
 
 private:
+    struct SkeletalPart
+    {
+        MeshHandle Mesh;
+        std::uint64_t MeshRevision = 0;
+        UINT Node = 0;
+        UINT SubMesh = 0;
+        UINT Instance = 0;
+        UINT Material = 0;
+        UINT SourceMaterial = 0;
+        GDX12Material* ImportedMaterial = nullptr;
+        GDX12Material* ActiveMaterial = nullptr;
+        std::vector<UINT> BoneNodes;
+        std::vector<Matrix> InverseBinds;
+        DirectX::BoundingBox SourceBounds;
+        DirectX::BoundingBox Bounds;
+        std::unique_ptr<GDX12SkinMesh> GPU;
+        std::vector<GDX12SkinPalette> Palette;
+    };
+    struct SkeletalState
+    {
+        SceneHandle Scene;
+        std::uint64_t SceneRevision = 0;
+        std::uint64_t ComponentRevision = 0;
+        std::vector<SkeletalPart> Parts;
+        std::vector<Matrix> Pose;
+        double SinceUpdate = 0;
+        bool NeedsSettle = false;
+        bool Dispatch = false;
+        bool Seen = false;
+    };
+    void PrepareSkeletalMeshes();
+    void DispatchSkeletalMeshes(GDX12CommandList* commands);
+    void ReleaseSkeletalState(World& world, Entity entity);
+    std::map<std::pair<World*, Entity>, SkeletalState> _skeletalStates;
+    std::vector<UINT> _freeSkeletalInstances;
+    std::unique_ptr<GDX12Skinning> _skinning;
+
     void BuildBackBuffer();
     void CollectReflectionScene();
     void CollectGrassScene(GDX12CommandList* commands);

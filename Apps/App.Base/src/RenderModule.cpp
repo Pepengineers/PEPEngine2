@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <climits>
 #include "App.Base/App.h"
+#include "Engine.Core/AssetManager.h"
 
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Common/ConsoleVariables.h"
@@ -403,11 +404,11 @@ void RenderModule::SubmitMesh(const Mesh* mesh, MeshHandle handle)
 {
     if (_primaryPipelineFlags & RENDER_PASS_FLAG_USE_GEOMETRY) 
     {
-        _primaryResources.GeometryBuffer->AddMesh(mesh, handle);
+        _primaryResources.GeometryBuffer->AddMesh(mesh, handle, AssetManager::GetInstance().Meshes().GetContentRevision(handle));
         ++_primaryResources.ReflectionStaticRevision;
     }
     if (_secondaryPipelineFlags & RENDER_PASS_FLAG_USE_GEOMETRY)
-    { _secondaryResources.GeometryBuffer->AddMesh(mesh, handle); }
+    { _secondaryResources.GeometryBuffer->AddMesh(mesh, handle, AssetManager::GetInstance().Meshes().GetContentRevision(handle)); }
 }
 
 void RenderModule::SubmitSky(World& world)
@@ -595,6 +596,11 @@ void RenderModule::SubscribeToWorld(World& world)
     subscriptions.WindCreated = windPool.OnComponentCreated.AddListener(windOwner);
     subscriptions.WindUpdated = windPool.OnComponentUpdated.AddListener(windOwner);
     ecs.ForEach<WindFieldComponent>(windOwner);
+    auto& skeletalPool = ecs.GetPool<SkeletalMeshRenderComponent>();
+    subscriptions.SkeletalDestroyed = skeletalPool.OnComponentDestroyed.AddListener(
+        [this, &world](Entity entity, SkeletalMeshRenderComponent&) { ReleaseSkeletalState(world, entity); });
+    subscriptions.SkeletalUpdated = skeletalPool.OnComponentUpdated.AddListener(
+        [this, &world](Entity entity, SkeletalMeshRenderComponent&) { ReleaseSkeletalState(world, entity); });
     _worldSubscriptions[&world] = subscriptions;
     ++_primaryResources.ReflectionWorldRevision;
 }
@@ -622,6 +628,13 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     cameraPool.OnComponentDestroyed.RemoveListener(subscriptions.CameraDestroyed);
     cameraPool.OnComponentUpdated.RemoveListener(subscriptions.CameraUpdated);
 
+    auto& skeletalPool = ecs.GetPool<SkeletalMeshRenderComponent>();
+    skeletalPool.OnComponentDestroyed.RemoveListener(subscriptions.SkeletalDestroyed);
+    skeletalPool.OnComponentUpdated.RemoveListener(subscriptions.SkeletalUpdated);
+    ecs.ForEach<SkeletalMeshRenderComponent>([&](Entity entity, SkeletalMeshRenderComponent&)
+    {
+        ReleaseSkeletalState(world, entity);
+    });
     auto& renderPool = ecs.GetPool<StaticMeshRenderComponent>();
     renderPool.OnComponentCreated.RemoveListener(subscriptions.RenderCompCreated);
     renderPool.OnComponentDestroyed.RemoveListener(subscriptions.RenderCompDestroyed);
@@ -880,8 +893,7 @@ void RenderModule::OnUpdate()
     }
 
     _primaryResources.UpdateMainCB(width, height, _timer);
-    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
-    { _primaryResources.UpdateMaterialCB(_materials); }
+    // Materials are uploaded once in OnRender, after lazy component resource creation.
 
     // same for SecondaryDevice
     if (_dualGPUMode)
@@ -897,17 +909,21 @@ void RenderModule::OnUpdate()
         }
 
         _secondaryResources.UpdateMainCB(width, height, _timer);
-        if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
-        { _secondaryResources.UpdateMaterialCB(_materials); }
     }
 }
 
 void RenderModule::OnRender()
 {
+    PrepareSkeletalMeshes();
+    if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
+        _primaryResources.UpdateMaterialCB(_materials);
+    if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
+        _secondaryResources.UpdateMaterialCB(_materials);
     CollectParticleEmitters();
     auto primarycmdQueue = _primaryDevice->GetCommandQueue();
     auto primarycmdList = primarycmdQueue->GetCommandList();
     _primaryGPUTimer->Start(primarycmdList);
+    DispatchSkeletalMeshes(primarycmdList);
     CollectGrassScene(primarycmdList);
     CollectReflectionScene();
 
@@ -1118,6 +1134,31 @@ void RenderModule::CollectReflectionScene()
             instance.DeltaSeconds = world->IsPaused() ? 0 : _timer->DeltaTime() * world->GetTimeScale();
             ValidateFluidInstance(instance);
             resources.Fluids.push_back(std::move(instance));
+        });
+        ecs.ForEach<SkeletalMeshRenderComponent>([&](Entity entity, SkeletalMeshRenderComponent&)
+        {
+            const auto found = _skeletalStates.find({world, entity});
+            if (found == _skeletalStates.end()) return;
+            hash(dynamicHash, world);
+            hash(dynamicHash, entity);
+            hash(dynamicHash, found->second.SceneRevision);
+            for (const auto& matrix : found->second.Pose) hash(dynamicHash, matrix);
+            if (ecs.Has<TransformComponent>(entity))
+            {
+                const auto& transform = ecs.Get<TransformComponent>(entity);
+                hash(dynamicHash, transform.Location);
+                hash(dynamicHash, transform.Rotation);
+                hash(dynamicHash, transform.Scale);
+            }
+            for (const auto& part : found->second.Parts)
+            {
+                hash(dynamicHash, part.MeshRevision);
+                hash(dynamicHash, part.Material);
+                if (part.ActiveMaterial) hash(dynamicHash, part.ActiveMaterial->_revision);
+                if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, part.Bounds);
+                else resources.ReflectionSceneBounds = part.Bounds;
+                hasBounds = true;
+            }
         });
         ecs.ForEach<ReflectionProbeComponent>([&](Entity entity, ReflectionProbeComponent& component)
         {

@@ -3,6 +3,8 @@
 #pragma once
 
 #include <string>
+#include <vector>
+#include <cstdint>
 
 #include <Engine.Core/AssetHandles.h>
 
@@ -15,6 +17,7 @@ namespace Engine::Core
 	struct SceneNode
 	{
 		std::string Name;
+		DirectX::SimpleMath::Matrix LocalBindMatrix;
 		std::int32_t ParentIndex = -1;
 		std::vector<std::uint32_t> ChildrenIndices;
 		std::vector<MeshHandle> Meshes;
@@ -32,12 +35,34 @@ namespace Engine::Core
 		[[nodiscard]] bool HasMeshes() const;
 	};
 
+	template<typename T> struct AnimationKey
+	{
+		double TimeSeconds = 0;
+		T Value;
+	};
+
+	struct NodeAnimation
+	{
+		std::uint32_t NodeIndex = 0;
+		std::vector<AnimationKey<DirectX::SimpleMath::Vector3>> Translation;
+		std::vector<AnimationKey<DirectX::SimpleMath::Quaternion>> Rotation;
+		std::vector<AnimationKey<DirectX::SimpleMath::Vector3>> Scale;
+	};
+
+	struct AnimationClip
+	{
+		std::string Name;
+		double DurationSeconds = 0;
+		std::vector<NodeAnimation> Tracks;
+	};
+
 	/// CPU-side scene representation.
 	class SceneAsset
 	{
 	public:
 		SceneAsset() = default;
-		SceneAsset(std::vector<SceneNode> nodes, std::vector<std::uint32_t> rootNodeIndices);
+		SceneAsset(std::vector<SceneNode> nodes, std::vector<std::uint32_t> rootNodeIndices,
+			std::vector<AnimationClip> clips = {});
 
 		/// Returns true if the scene has no nodes.
 		[[nodiscard]] bool IsEmpty() const;
@@ -57,7 +82,14 @@ namespace Engine::Core
 		/// Returns the node at the given index.
 		[[nodiscard]] const SceneNode& GetNode(const size_t nodeIndex) const;
 
+		[[nodiscard]] const std::vector<AnimationClip>& GetClips() const { return _clips; }
+		// clipIndex=-1 selects exact bind matrices; localPose replaces the entire local pose.
+		[[nodiscard]] std::vector<DirectX::SimpleMath::Matrix> EvaluatePose(
+			int clipIndex, double timeSeconds, bool loop,
+			const std::vector<DirectX::SimpleMath::Matrix>& localPose = {}) const;
+
 	private:
+		std::vector<AnimationClip> _clips;
 		/// Flat array of all nodes in the scene.
 		/// Parent-child relationships are encoded via index references within the nodes themselves.
 		std::vector<SceneNode> _nodes;

@@ -3,6 +3,7 @@
 #include <Engine.Core/Registries/AssetRegistryBase.h>
 
 #include <cassert>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -30,6 +31,12 @@ namespace Engine::Core
 	class TypedAssetRegistry : public AssetRegistryBase
 	{
 	public:
+		[[nodiscard]] std::uint64_t GetContentRevision(THandle handle) const
+		{
+			const auto* record = TryGetRecord(handle, L"get content revision");
+			return record ? record->ContentRevision : 0;
+		}
+
 		/// Registers the given asset path and returns a typed handle for it.
 		/// If the path is already registered, returns the existing handle
 		/// without allocating a new slot or duplicating metadata.
@@ -86,6 +93,7 @@ namespace Engine::Core
 			}
 
 			record->AssetData = std::move(data);
+			record->ContentRevision = ++_contentRevision;
 			++_loadedCount;
 
 			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Cached " + assetName + L" data for handle " +
@@ -166,6 +174,7 @@ namespace Engine::Core
 
 			--_loadedCount;
 			record->AssetData.reset();
+			record->ContentRevision = ++_contentRevision;
 
 			WriteRegistryLog(L"[" + std::wstring(GetRegistryName()) + L"] Unloaded " + assetName + L" data for handle " +
 				std::to_wstring(handle.GetValue()) + L".\n");
@@ -200,6 +209,7 @@ namespace Engine::Core
 			{
 				--_loadedCount;
 				record->AssetData.reset();
+				record->ContentRevision = ++_contentRevision;
 			}
 
 			record->Metadata = TMetadata{};
@@ -233,6 +243,7 @@ namespace Engine::Core
 			///   - std::filesystem::path for textures;
 			///   - MeshAssetLocator for meshes.
 			TMetadata Metadata{};
+			std::uint64_t ContentRevision = 0;
 
 			/// The loaded asset data, or nullptr if the asset has not been loaded yet
 			/// (registered but not cached) or has been unloaded.
@@ -414,5 +425,6 @@ namespace Engine::Core
 
 		/// Number of records that currently have loaded asset data.
 		size_t _loadedCount = 0;
+		std::uint64_t _contentRevision = 0;
 	};
 }

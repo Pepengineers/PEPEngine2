@@ -17,6 +17,25 @@ namespace Engine::Core
 		DirectX::SimpleMath::Vector3 Normal = {0.0f, 0.0f, 0.0f};
 		DirectX::SimpleMath::Vector2 TexCoord = {0.0f, 0.0f};
 		DirectX::SimpleMath::Vector3 Tangent = {1.0f, 0.0f, 0.0f};
+		DirectX::SimpleMath::Vector3 PreviousPosition = {0.0f, 0.0f, 0.0f};
+	};
+
+	struct SkinInfluence
+	{
+		std::uint32_t BoneIndex = 0;
+		float Weight = 0;
+	};
+
+	struct SkinVertexRange
+	{
+		std::uint32_t Offset = 0;
+		std::uint32_t Count = 0;
+	};
+
+	struct SkinBone
+	{
+		std::string NodeName;
+		DirectX::SimpleMath::Matrix InverseBind;
 	};
 
 	struct SubMesh
@@ -26,6 +45,9 @@ namespace Engine::Core
 		std::uint32_t MaterialIndex = 0;
 		DirectX::BoundingBox Bounds = {{0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}};
 		std::string SourceNodeName;
+		std::vector<SkinBone> Bones;
+		std::vector<SkinVertexRange> SkinVertices;
+		std::vector<SkinInfluence> Influences;
 
 		/// Returns the number of vertices in this submesh.
 		[[nodiscard]] size_t GetVertexCount() const;

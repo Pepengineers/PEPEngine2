@@ -119,3 +119,11 @@ Implementation delivery is **unverified**; the author ran no builds/tests/GPU ch
 ## Fluid / water
 
 Render.Fluid.Enabled (true) and Render.Fluid.Quality (2; 0 Off, 1 Low, 2 Mid, 3 High) are the only global controls, both runtime Default. Solver, source, reset and optics belong to FluidRenderComponent. See [fluid.md](rendering/fluid.md) for its API, ranges, presets and integration contract. Implementation is unverified; no builds or checks were run by the author.
+## Skeletal rendering
+
+Only `Render.Skinning.Enabled` (default true) and `Render.Skinning.Quality` (default 2,
+0 Off / 1 Low / 2 Mid / 3 High) are global runtime Default CVar. Quality selects
+15/30/60 Hz pose evaluation and compute-deformation updates; a component's explicit
+update rate survives preset changes. Component API, units, asset ownership and
+pass integration are described in [skinning.md](rendering/skinning.md).
+Implementation has not been built or tested in the author chat.
