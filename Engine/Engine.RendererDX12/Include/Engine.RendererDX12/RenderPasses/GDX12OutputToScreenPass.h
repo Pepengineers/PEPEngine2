@@ -5,44 +5,74 @@
 class GDX12OutputToScreenPass : public GDX12RenderPass
 {
 public:
-	GDX12OutputToScreenPass() : IN_Texture(nullptr), IN_BackBuffer(nullptr)
-	{  
-		_flags = RENDER_PASS_FLAG_NONE; 
-		_numInputs = 2;
-		_numOutputs = 0;
-	}
+    GDX12OutputToScreenPass() : IN_Texture(nullptr), IN_BackBuffer(nullptr)
+    {
+        _flags = RENDER_PASS_FLAG_NONE;
+        _numInputs = 2;
+        _numOutputs = 0;
+    }
 
-	// Input 0 - InputTexture
-	// Input 1 - BackBuffer
-	void Initialize() override
-	{
-		IN_Texture = _inputs[0];
-		IN_BackBuffer = _inputs[1];
-	}
+    // Input 0 - InputTexture
+    // Input 1 - BackBuffer
+    void Initialize() override
+    {
+        IN_Texture = _inputs[0];
+        IN_BackBuffer = _inputs[1];
+        GDX12RootSignatureDesc root;
+        root.NumSingleSRVSlots = 1;
+        _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
+        auto& compiler = GDX12ShaderCompiler::GetInstance();
+        auto vs = compiler.CompileShader(_resources->Device, SHADERS_FOLDER "FullScreenVS.hlsl", nullptr, "VS", "vs");
+        auto ps = compiler.CompileShader(_resources->Device, SHADERS_FOLDER "ToneMapping.hlsl", nullptr, "PS", "ps");
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
+        desc.pRootSignature = _root->GetRootSignature().Get();
+        desc.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
+        desc.PS = { ps->GetBufferPointer(), ps->GetBufferSize() };
+        desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+        desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+        desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+        desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        desc.DepthStencilState.DepthEnable = false;
+        desc.DepthStencilState.StencilEnable = false;
+        desc.SampleMask = UINT_MAX;
+        desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        desc.NumRenderTargets = 1;
+        desc.RTVFormats[0] = IN_BackBuffer->GetTexture()->GetFormat();
+        desc.SampleDesc.Count = 1;
+        ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_pipeline)));
+    }
 
-	void Execute(GDX12CommandList* cmdList) override
-	{
-		GDX12Texture* inputTexture = IN_Texture->GetTexture();
-		GDX12Texture* backBuffer = IN_BackBuffer->GetTexture();
+    void Execute(GDX12CommandList* cmdList) override
+    {
+        GDX12Texture* inputTexture = IN_Texture->GetTexture();
+        GDX12Texture* backBuffer = IN_BackBuffer->GetTexture();
 
-		cmdList->BeginPixEvent("Copy To Screen Pass", Colors::Aqua);
-		cmdList->ResourceBarrier({ inputTexture->GetResource()->GetCopySourceBarrier() });
-		cmdList->ResourceBarrier({ backBuffer->GetResource()->GetCopyDestBarrier() });
-		cmdList->CopyResource(backBuffer->GetResource()->D3DResource.Get(),
-			inputTexture->GetResource()->D3DResource.Get());
-		cmdList->ResourceBarrier({ backBuffer->GetResource()->GetPresentBarrier() });
-		cmdList->EndPixEvent();
-	}
+        cmdList->BeginPixEvent("Tone map to screen", Colors::Aqua);
+        cmdList->ResourceBarrier({ inputTexture->GetResource()->GetSRVBarrier(), backBuffer->GetResource()->GetRenderTargetBarrier() });
+        cmdList->SetViewport(backBuffer->GetViewport());
+        cmdList->SetScissorRect(backBuffer->GetScissorRect());
+        cmdList->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
+        cmdList->SetGraphicsRootSignature(_root.get());
+        cmdList->SetPipelineState(_pipeline);
+        cmdList->SetGraphicsSRV(0, inputTexture->GetSRV()->GPUHandle);
+        cmdList->SetRenderTargets({ backBuffer }, nullptr);
+        cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        cmdList->DrawInstanced(3, 1, 0, 0);
+        cmdList->ResourceBarrier({ backBuffer->GetResource()->GetPresentBarrier() });
+        cmdList->EndPixEvent();
+    }
 
-	void ClearDenendencies() override
-	{
-		GDX12RenderPass::ClearDenendencies();
+    void ClearDenendencies() override
+    {
+        GDX12RenderPass::ClearDenendencies();
 
-		IN_Texture = nullptr;
-		IN_BackBuffer = nullptr;
-	}
+        IN_Texture = nullptr;
+        IN_BackBuffer = nullptr;
+    }
 
 private:
-	IRenderPassLink* IN_Texture;
-	IRenderPassLink* IN_BackBuffer;
+    std::unique_ptr<GDX12RootSignature> _root;
+    ComPtr<ID3D12PipelineState> _pipeline;
+    IRenderPassLink* IN_Texture;
+    IRenderPassLink* IN_BackBuffer;
 };
