@@ -74,10 +74,8 @@ void SceneManagerModule::Initialize()
                 light.Color = Vector3(1.0f, 0.95f, 0.875f);
                 light.ShadowUpdate = ShadowUpdateMode::EveryFrame;
             }
-            return entity;
         };
-        auto sun = create("Sun", Vector3::Zero, Vector3(0.35f, -1.0f, 0.25f), LightType::Directional, 0, 4.0f);
-        sun.AddComponent<SkyBoxComponent>();
+        create("Sun", Vector3::Zero, Vector3(0.35f, -1.0f, 0.25f), LightType::Directional, 0, 4.0f);
         for (const auto& fixture : BistroLightPlacements)
             create(fixture.Name, fixture.Position, fixture.Direction,
                 fixture.Kind == BistroFixtureKind::Point ? LightType::Point : LightType::Spot, fixture.Range, fixture.Intensity);

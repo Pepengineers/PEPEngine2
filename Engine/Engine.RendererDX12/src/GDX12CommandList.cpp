@@ -15,7 +15,8 @@ GDX12CommandList::GDX12CommandList(GDX12Device* device) :
 	_currentTopology(D3D_PRIMITIVE_TOPOLOGY_UNDEFINED),
 	_currentScissorRect({}),
 	_currentViewport({}),
-	_currentRootSignature(nullptr)
+	_currentRootSignature(nullptr),
+	_currentGeometryBuffer(nullptr)
 {
 	device->GetDevice()->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&_commandAllocator));
 
@@ -44,17 +45,14 @@ void GDX12CommandList::Reset()
 	FenceValue = 0;
 	_commandAllocator->Reset();
 	_commandList->Reset(_commandAllocator.Get(), nullptr);
-    InvalidateCachedState();
-}
 
-void GDX12CommandList::InvalidateCachedState()
-{
 	_currentRootSignature = nullptr;
 	_currentPSO = nullptr;
 	_currentTopology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
-    _currentDescriptorHeaps.clear();
+	for (auto& cachedDescriptorHeap : _currentDescriptorHeaps) { cachedDescriptorHeap = nullptr; }
 	_currentViewport = {};
 	_currentScissorRect = {};
+	_currentGeometryBuffer = nullptr;
 }
 
 void GDX12CommandList::SetPipelineState(ComPtr<ID3D12PipelineState> pso)
@@ -131,8 +129,9 @@ void GDX12CommandList::SetScissorRect(const D3D12_RECT& scissorRect)
 
 void GDX12CommandList::SetGeometryBuffer(GDX12GeometryBuffer* buffer)
 {
-	// Native buffers can grow while the arena object keeps its address.
+	if (_currentGeometryBuffer == buffer) { return; }
 
+	_currentGeometryBuffer = buffer;
 	_commandList->IASetVertexBuffers(0, 1, &buffer->_vertexBufferView);
 	_commandList->IASetIndexBuffer(&buffer->_indexBufferView);
 }
@@ -148,7 +147,7 @@ void GDX12CommandList::SetRenderTargets(std::initializer_list<GDX12Texture*> rtv
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = {};
 	if (dsvTexture && dsvTexture->GetDSV()) { dsvHandle = dsvTexture->GetDSV()->CPUHandle; }
 
-	_commandList->OMSetRenderTargets(static_cast<UINT>(rtvHandles.size()), rtvHandles.data(), FALSE,
+	_commandList->OMSetRenderTargets(rtvHandles.size(), rtvHandles.data(), FALSE, 
 		(dsvHandle.ptr != 0) ? &dsvHandle : nullptr );
 }
 
@@ -287,7 +286,7 @@ void GDX12CommandList::ResourceBarrier(std::initializer_list<CD3DX12_RESOURCE_BA
 			filteredBarriers.push_back(barrier);
 		}
 	}
-	if (!filteredBarriers.empty()) { _commandList->ResourceBarrier(static_cast<UINT>(filteredBarriers.size()), filteredBarriers.data()); }
+	if (!filteredBarriers.empty()) { _commandList->ResourceBarrier(filteredBarriers.size(), filteredBarriers.data()); }
 }
 
 void GDX12CommandList::EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTURE_BARRIER> textureBarriers)

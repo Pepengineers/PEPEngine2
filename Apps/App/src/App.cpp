@@ -78,9 +78,6 @@ namespace
                 work = _lookAt.Schedule(_jobs, world, dt, work);
                 work = _lights.Schedule(_jobs, world, dt, work);
                 work = _gpuData.Schedule(_jobs, world, dt, work);
-                work = _grassWind.Schedule(_jobs, world, dt, work);
-                work = _sky.Schedule(_jobs, world, dt, work);
-                work = _reflectionProbes.Schedule(_jobs, world, dt, work);
                 work.Complete();
             }
             catch (...)

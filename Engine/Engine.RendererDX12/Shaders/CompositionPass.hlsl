@@ -1,5 +1,6 @@
 #include "CBufferStructures.hlsl"
 #include "FullScreenVS.hlsl"
+#include "PBRMath.hlsli"
 
 SamplerState samPointWrap : register(s0);
 SamplerState samPointClamp : register(s1);
@@ -25,5 +26,7 @@ float4 PS(VSOutput input) : SV_TARGET
     float3 finalColor = opaqueColor.rgb * revealage + transparentColor * coverage;
     float finalAlpha = coverage + opaqueColor.a * revealage;
     
-    return float4(finalColor, finalAlpha);
+    // Compose in linear HDR, then encode once for the existing LDR upscaler/output.
+    float3 displayColor = float3(ToneMapToSRGB(finalColor.r), ToneMapToSRGB(finalColor.g), ToneMapToSRGB(finalColor.b));
+    return float4(displayColor, finalAlpha);
 }

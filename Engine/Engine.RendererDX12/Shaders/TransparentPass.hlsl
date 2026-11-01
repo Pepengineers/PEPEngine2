@@ -21,15 +21,8 @@ TextureCube<float4> PrefilteredEnvironment : register(t5);
 Texture2D<float4> EnvironmentBRDF : register(t6);
 StructuredBuffer<LocalLight> LocalLights : register(t7);
 Texture2DArray<float> LocalShadowMaps : register(t8);
-#if defined(PROBE_LIGHTING)
-Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t10);
-#else
 Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t9);
-#endif
 SamplerComparisonState samShadow : register(s6);
-#define PROBE_GLOBALS_REGISTER b4
-#define PROBE_DATA_REGISTER t9
-#define PROBE_CUBES_REGISTER t99010
 
 #include "PBR.hlsli"
 

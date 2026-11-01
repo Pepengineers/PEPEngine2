@@ -18,9 +18,8 @@ public:
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
-		RSDesc1.Constants.push_back(1);
 		RSDesc1.NumSingleCBVSlots = 1;
-		RSDesc1.NumSingleSRVSlots = 4;
+		RSDesc1.NumSingleSRVSlots = 3;
 		RSDesc1.NumSingleUAVSlots = 4;
 		_cullingRS = std::make_unique<GDX12RootSignature>(_resources->Device, RSDesc1);
 
@@ -49,14 +48,6 @@ public:
 	{
 		auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
 		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[_commonData->ActiveCameraCBufferIndex];
-		ExecuteView(cmdList, currentFrameConstants->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex), currentCameraVisBuffers);
-	}
-
-    // captureMask: 0 all geometry, 1 static, 2 dynamic reflection geometry.
-    void ExecuteView(GDX12CommandList* cmdList, D3D12_GPU_VIRTUAL_ADDRESS camera,
-        GDX12VisibilityBuffers& currentCameraVisBuffers, UINT captureMask = 0)
-    {
-        auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
 
 		cmdList->BeginPixEvent("GPU Mesh Culling", Colors::Blue);
 		cmdList->ResourceBarrier({
@@ -78,18 +69,15 @@ public:
 		cmdList->SetComputeRootSignature(_cullingRS.get());
 		cmdList->SetPipelineState(_cullingPSO);
 		cmdList->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-		cmdList->GetCommandList()->SetComputeRoot32BitConstant(0, captureMask, 0);
-		cmdList->SetComputeRootConstantBufferView(1, camera);
+		cmdList->SetComputeRootConstantBufferView(0, currentFrameConstants->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
 		cmdList->SetComputeSRV(0, currentFrameConstants->InstanceCache->GetSRV()->GPUHandle);
 		cmdList->SetComputeSRV(1, _resources->IndirectCommandsCache->GetSRV()->GPUHandle);
 		cmdList->SetComputeSRV(2, currentFrameConstants->MaterialCache->GetSRV()->GPUHandle);
-		cmdList->SetComputeSRV(3, _resources->GeneratedIndexCounts->GetSRV()->GPUHandle);
 		cmdList->SetComputeUAV(0, currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetUAV()->GPUHandle);
 		cmdList->SetComputeUAV(1, currentCameraVisBuffers.OpaqueDrawCounter->GetUAV()->GPUHandle);
 		cmdList->SetComputeUAV(2, currentCameraVisBuffers.VisibleTransparentCommandsCache->GetUAV()->GPUHandle);
 		cmdList->SetComputeUAV(3, currentCameraVisBuffers.TransparentDrawCounter->GetUAV()->GPUHandle);
-		if (_resources->IndirectCommandsCache->GetElementCount())
-            cmdList->Dispatch((_resources->IndirectCommandsCache->GetElementCount() + 63) / 64, 1, 1);
+		cmdList->Dispatch((_resources->IndirectCommandsCache->GetElementCount() + 63) / 64, 1, 1);
 
 		cmdList->ResourceBarrier({
 			currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().GetUAVBarrier(),

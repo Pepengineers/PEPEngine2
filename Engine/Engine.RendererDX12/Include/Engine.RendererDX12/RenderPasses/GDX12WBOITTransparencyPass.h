@@ -1,6 +1,5 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionLightingPass.h"
 
 class GDX12WBOITTransparencyPass : public GDX12RenderPass
 {
@@ -60,15 +59,13 @@ public:
 
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
-        const bool probes = _commonData->ReflectionLighting != nullptr;
-        D3D_SHADER_MACRO macros[] = { { "PROBE_LIGHTING", "1" }, { nullptr, nullptr } };
-		_transparencyVS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", probes ? macros : nullptr, "VS", "vs");
-		_transparencyPS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", probes ? macros : nullptr, "PS", "ps");
+		_transparencyVS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", nullptr, "VS", "vs");
+		_transparencyPS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", nullptr, "PS", "ps");
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
-		RSDesc1.NumSingleCBVSlots = probes ? 4 : 3;
-		RSDesc1.NumSingleSRVSlots = probes ? 10 : 9;
+		RSDesc1.NumSingleCBVSlots = 3;
+		RSDesc1.NumSingleSRVSlots = 9;
 		RSDesc1.StaticSamplers = GetStaticSamplers();
 		CD3DX12_STATIC_SAMPLER_DESC shadowSampler(6, D3D12_FILTER_COMPARISON_MIN_MAG_LINEAR_MIP_POINT);
 		shadowSampler.AddressU = shadowSampler.AddressV = shadowSampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_BORDER;
@@ -76,7 +73,6 @@ public:
 		shadowSampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
 		RSDesc1.StaticSamplers.push_back(shadowSampler);
 		RSDesc1.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
-        if (probes) RSDesc1.SRVRanges.emplace_back(TextureCube_RangeLength);
 		RSDesc1.Constants.push_back(1);
 		_transparencyRS = std::make_unique<GDX12RootSignature>(_resources->Device, RSDesc1);
 
@@ -93,7 +89,7 @@ public:
 
 		D3D12_COMMAND_SIGNATURE_DESC CSDesc1 = {};
 		CSDesc1.ByteStride = sizeof(GDX12IndirectDrawArgs);
-		CSDesc1.NumArgumentDescs = static_cast<UINT>(args.size());
+		CSDesc1.NumArgumentDescs = args.size();
 		CSDesc1.pArgumentDescs = args.data();
 		CSDesc1.NodeMask = 0;
 
@@ -177,9 +173,7 @@ public:
 			cmdList->SetGraphicsSRV(2 + input, _inputs[input]->GetTexture()->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(7, currentFrameConstants->LocalLightCache->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(8, _inputs[5]->GetTexture()->GetSRV()->GPUHandle);
-        const bool probes = _commonData->ReflectionLighting != nullptr;
-		cmdList->SetGraphicsSRV(probes ? 10 : 9, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
-        if (probes) _commonData->ReflectionLighting->BindGraphics(cmdList, 4, 9, 11);
+		cmdList->SetGraphicsSRV(9, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
 
 		cmdList->ResourceBarrier({ currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetIndirectArgsBarrier(),
 		currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetIndirectArgsBarrier(),

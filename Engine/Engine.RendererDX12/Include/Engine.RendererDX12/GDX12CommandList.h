@@ -17,7 +17,6 @@ public:
 	const ComPtr<ID3D12GraphicsCommandList10>& GetCommandList();
 	const ComPtr<ID3D12CommandAllocator>& GetCommandAllocator();
 	void Reset();
-    void InvalidateCachedState();
 
 	UINT64 FenceValue;
 
@@ -101,4 +100,5 @@ private:
 	std::vector<ID3D12DescriptorHeap*> _currentDescriptorHeaps;
 	D3D12_VIEWPORT _currentViewport;
 	D3D12_RECT _currentScissorRect;
+	GDX12GeometryBuffer* _currentGeometryBuffer;
 };

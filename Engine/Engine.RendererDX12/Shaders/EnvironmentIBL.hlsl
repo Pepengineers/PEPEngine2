@@ -73,21 +73,13 @@ void PrefilterCS(uint3 id : SV_DispatchThreadID)
     uint width, height, levels;
     SourceEnvironment.GetDimensions(0, width, height, levels);
     float texelSolidAngle = 4.0f * PBR_PI / (6.0f * width * height);
-#ifdef PROBE_BASE_MIP_ONLY
-    const uint sampleCount = 256;
-#else
-    const uint sampleCount = 128;
-#endif
-    for (uint i = 0; i < sampleCount; ++i)
+    for (uint i = 0; i < 128; ++i)
     {
-        float3 h = SampleGGX(Hammersley(i, sampleCount), n, Roughness);
+        float3 h = SampleGGX(Hammersley(i, 128), n, Roughness);
         float3 l = reflect(-n, h);
         float nDotL = saturate(dot(n, l));
         float pdf = max(DistributionGGX(saturate(dot(n, h)), Roughness) * 0.25f, 1e-5f);
-        float mip = max(0.0f, 0.5f * log2(1.0f / (sampleCount * pdf * texelSolidAngle)));
-#ifdef PROBE_BASE_MIP_ONLY
-        mip = 0;
-#endif
+        float mip = max(0.0f, 0.5f * log2(1.0f / (128.0f * pdf * texelSolidAngle)));
         color += SourceEnvironment.SampleLevel(EnvironmentSampler, l, mip).rgb * nDotL;
         totalWeight += nDotL;
     }

@@ -1,12 +1,10 @@
 #include "CBufferStructures.hlsl"
 
-cbuffer CaptureFilter : register(b0) { uint CaptureMask; };
-ConstantBuffer<CameraCB> CBCamera : register(b1);
+ConstantBuffer<CameraCB> CBCamera : register(b0);
 
 StructuredBuffer<InstanceData> InstanceCache : register(t0);
 StructuredBuffer<IndirectDrawArgs> InputCommands : register(t1);
 StructuredBuffer<Material> MaterialCache : register(t2);
-StructuredBuffer<uint> GeneratedIndexCounts : register(t3);
 RWStructuredBuffer<IndirectDrawArgs> OpaqueVisibleCommands : register(u0);
 RWStructuredBuffer<uint> OpaqueCounterBuffer : register(u1);
 RWStructuredBuffer<IndirectDrawArgs> TransparentVisibleCommands : register(u2);
@@ -51,13 +49,7 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
     if (drawIndex >= numDraws)
         return;
     
-    IndirectDrawArgs command = InputCommands[drawIndex];
-    if (command.IndexCountPerInstance == 0) return;
-    uint instanceID = command.StartInstanceLocation;
-    if ((InstanceCache[instanceID].Flags & 4u) != 0) command.IndexCountPerInstance = GeneratedIndexCounts[instanceID];
-    if (command.IndexCountPerInstance == 0) return;
-    bool dynamic = (InstanceCache[instanceID].Flags & 1u) != 0;
-    if ((CaptureMask == 1u && dynamic) || (CaptureMask == 2u && !dynamic)) return;
+    uint instanceID = InputCommands[drawIndex].StartInstanceLocation;
     
     if (IsBoxVisible(instanceID))
     {
@@ -68,7 +60,7 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
         {
             uint writeIndex;
             InterlockedAdd(OpaqueCounterBuffer[0], 1, writeIndex);
-            OpaqueVisibleCommands[writeIndex] = command;
+            OpaqueVisibleCommands[writeIndex] = InputCommands[drawIndex];
             return;
         }
         //transparent
@@ -76,7 +68,7 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
         {
             uint writeIndex;
             InterlockedAdd(TransparentCounterBuffer[0], 1, writeIndex);
-            TransparentVisibleCommands[writeIndex] = command;
+            TransparentVisibleCommands[writeIndex] = InputCommands[drawIndex];
             return;
         }
     }

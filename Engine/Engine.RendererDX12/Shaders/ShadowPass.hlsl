@@ -1,7 +1,6 @@
 #include "CBufferStructures.hlsl"
 
 #ifdef SHADOW_CULLING
-StructuredBuffer<uint> GeneratedIndexCounts : register(t3);
 ConstantBuffer<ShadowCB> CBShadow : register(b0);
 StructuredBuffer<IndirectDrawArgs> InputCommands : register(t1);
 RWStructuredBuffer<IndirectDrawArgs> Commands0 : register(u0);
@@ -40,10 +39,7 @@ void CS(uint3 id : SV_DispatchThreadID)
     InputCommands.GetDimensions(count, stride);
     if (id.x >= count) return;
     IndirectDrawArgs command = InputCommands[id.x];
-    if (command.IndexCountPerInstance == 0) return;
     InstanceData instance = InstanceCache[command.InstanceID];
-    if ((instance.Flags & 4u) != 0) command.IndexCountPerInstance = GeneratedIndexCounts[command.InstanceID];
-    if (command.IndexCountPerInstance == 0) return;
     if (MaterialCache[instance.MaterialIndex].RenderLayer == 2) return;
     for (uint cascade = 0; cascade < 4; ++cascade)
     {

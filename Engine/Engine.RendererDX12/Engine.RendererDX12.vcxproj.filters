@@ -132,11 +132,6 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12GpuRadixSort.h"><Filter>Header Files</Filter></ClInclude>
-    <ClCompile Include="src\GDX12GpuRadixSort.cpp"><Filter>Source Files</Filter></ClCompile>
-    <None Include="Shaders\GpuRadixSort.hlsl"><Filter>Resource Files</Filter></None>
-  </ItemGroup>
-  <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

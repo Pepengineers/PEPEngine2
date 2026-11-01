@@ -14,8 +14,7 @@ SamplerState samAnisotropicClamp : register(s5);
 StructuredBuffer<Material> MaterialCache : register(t0);
 StructuredBuffer<Transform> TransformCache : register(t1);
 StructuredBuffer<InstanceData> InstanceCache : register(t2);
-StructuredBuffer<float3> PreviousPositions : register(t3);
-Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t4);
+Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t3);
 
 #include "PBRSurface.hlsli"
 
@@ -39,7 +38,7 @@ struct VS_OUTPUT_PS_INPUT
     uint MaterialIndex : TEXCOORD1;
 };
 
-VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint vertexID : SV_VertexID)
+VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
 {
     VS_OUTPUT_PS_INPUT vout = (VS_OUTPUT_PS_INPUT) 0.0f;
 	
@@ -54,9 +53,7 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint vertexID : SV_VertexID)
     vout.PosCS = mul(posW, CBCamera.ViewProj);
     
     vout.PosCSNoJitter = mul(posW, CBCamera.ViewProjNoJitter);
-    float3 previous = vin.Pos;
-    if ((instance.Flags & 2u) != 0) previous = PreviousPositions[instance.PreviousPositionBase + vertexID];
-    float4 prevPosW = (instance.Flags & 8u) != 0 ? mul(float4(previous, 1.0f), transform.World) : mul(float4(previous, 1.0f), transform.PrevWorld);
+    float4 prevPosW = mul(float4(vin.Pos, 1.0f), transform.PrevWorld);
     vout.PrevPosCSNoJitter = mul(prevPosW, CBCamera.PrevViewProjNoJitter);
     
     vout.TexC = vin.TexC;

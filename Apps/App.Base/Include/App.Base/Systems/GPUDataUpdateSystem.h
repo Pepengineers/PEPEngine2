@@ -85,7 +85,6 @@ private:
             GDX12InstanceData instance = {};
             instance.TransformIndex = transform.CBufferIndex;
             instance.MaterialIndex = renderer.Materials.at(submesh.MaterialIndex)->_CBufferIndex;
-            instance.Flags = renderer.ReflectionDynamic ? 1u : 0u;
             instance.BoundingBoxCenter = bounds.Center;
             instance.BoundingBoxExtents = bounds.Extents;
             frame->InstanceCache->CopyData(renderer._CBufferIndices.at(i), instance);
@@ -150,12 +149,8 @@ private:
 
             if (isActiveCamera)
             {
-                pipelineCommonData->ActiveCameraView = view;
-                pipelineCommonData->ActiveCameraPreviousViewProjection = camera.PrevViewProjNoJitter.Transpose();
                 pipelineCommonData->CameraViewToClip = proj;
                 pipelineCommonData->ClipToCameraView = proj.Invert();
-                pipelineCommonData->ActiveCameraJitterOffsetX = 0;
-                pipelineCommonData->ActiveCameraJitterOffsetY = 0;
 
                 // Streamline uses row-major matrices.
                 pipelineCommonData->ClipToPrevClip = unjitteredViewProj.Invert() * camera.PrevViewProjNoJitter.Transpose();
@@ -182,7 +177,6 @@ private:
             }
 
             camera.ViewProj = view * proj;
-            if (isActiveCamera) pipelineCommonData->ActiveCameraViewProjection = camera.ViewProj;
 
             XMStoreFloat4x4(&objConstants.ViewProj, XMMatrixTranspose(view * proj));
             XMStoreFloat4x4(&objConstants.View, XMMatrixTranspose(view));

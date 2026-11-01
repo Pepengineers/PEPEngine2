@@ -14,14 +14,13 @@ static AutoConsoleVariable<UINT> NumFrameConstantVariable(
 
 void GDX12DeviceResources::Initialize(GDX12Device* device)
 {
-    static_assert(sizeof(Vertex) == 44 && offsetof(Vertex, Tangent) == 32);
     Device = device;
     InputLayouts["Default"] =
     {
         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
         { "NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
         { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
-        { "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, static_cast<UINT>(offsetof(Vertex, Tangent)), D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
+        { "TANGENT", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 36, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 }
     };
 
     RTVHeap = std::make_unique<GDX12DescriptorHeap>(device,
@@ -37,12 +36,8 @@ void GDX12DeviceResources::Initialize(GDX12Device* device)
         D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
 
     GeometryBuffer = std::make_unique<GDX12GeometryBuffer>(device);
-    GeometryBuffer->InitializeViews(SRV_UAV_Heap.get());
-    GeneratedIndexCounts = std::make_unique<GDX12UploadBuffer<UINT>>(device,1,EBufferType::Upload,false);
-    GeneratedIndexCounts->CopyData(0,0u);
-    GeneratedIndexCounts->CreateSRV(SRV_UAV_Heap.get(),SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
 
-    for (UINT i = 0; i < NumFrameConstantVariable.GetValue(); i++)
+    for (int i = 0; i < NumFrameConstantVariable.GetValue(); i++)
     {
         FrameConstants.push_back(std::make_unique<GDX12FrameConstants>(device));
 
@@ -89,7 +84,6 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
 
         if (numFramesDirty > 0)
         {
-            if (numFramesDirty == NumFrameConstantVariable.GetValue()) ++MaterialRevision;
             GDX12MaterialConstants materialConstants;
             materialConstants.Roughness = material->Roughness;
             materialConstants.Metallic = material->Metallic;

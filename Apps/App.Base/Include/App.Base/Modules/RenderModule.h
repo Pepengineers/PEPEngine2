@@ -6,9 +6,6 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
-#include "Engine.RendererDX12/GDX12ReflectionProbes.h"
-#include "Engine.RendererDX12/GDX12Sky.h"
-#include "Engine.RendererDX12/GDX12GrassWind.h"
 
 class SceneManagerModule;
 class World;
@@ -16,10 +13,6 @@ class GDX12SwapChain;
 class GDX12Device;
 class GDX12CommandList;
 class GDX12GPUTimer;
-class GDX12ReflectionProbePass;
-class GDX12EnvironmentIBLPass;
-class GDX12GrassWindPass;
-class GDX12XeSSUpscalePass;
 
 struct TransformComponent;
 struct CameraComponent;
@@ -68,10 +61,6 @@ public:
     void SetActiveCamera(CameraComponent* camera);
     void SubmitLights(std::vector<GDX12LocalLightConstants> lights, const GDX12MainConstants& settings);
     void SubmitCameraShadows(const GDX12ShadowConstants& shadows);
-    void SubmitReflectionProbes(uint64_t world, std::vector<GDX12ReflectionProbeDesc> probes,
-        uint64_t staticRevision, uint64_t shadingRevision);
-    void SubmitSky(GDX12SkyDesc sky);
-    void SubmitGrassWind(GDX12GrassWindDesc submission);
     const GDX12MainConstants& GetLightingSettings() const { return _primaryResources.Lighting; }
     
     struct WorldRenderSubscriptions
@@ -137,7 +126,6 @@ private:
     void ShareFences();
     void ConfigureRenderPipeline();
     void SetupRenderPasses();
-    void RefreshPipelineFlags();
     void InitializeRenderPasses();
     void EnsureInstanceCapacity(UINT capacity);
     
@@ -180,13 +168,6 @@ private:
     
     // Sorted in execution order
     std::vector<std::unique_ptr<GDX12RenderPass>> _primaryRenderPassExecutionList;
-    GDX12ReflectionProbePass* _reflectionProbes = nullptr;
-    GDX12EnvironmentIBLPass* _environment = nullptr;
-    GDX12GrassWindPass* _grassWind = nullptr;
-    GDX12XeSSUpscalePass* _upscaler = nullptr;
-    uint64_t _grassWorld = 0;
-    std::unordered_map<uint64_t,std::vector<UINT>> _grassInstances;
-    std::vector<UINT> _freeGrassInstances;
     std::vector<std::unique_ptr<GDX12RenderPass>> _secondaryRenderPassExecutionList;
 
     // Flags that are accumulated from every active RenderPass on the device

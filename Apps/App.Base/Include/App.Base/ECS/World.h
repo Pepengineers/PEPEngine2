@@ -2,18 +2,12 @@
 #include <string>
 #include <filesystem>
 #include <cstdint>
-#include <atomic>
 
 #include "Engine.Core/ECS/ECSStorage.h"
 #include "App.Base/ECS/Components/CameraComponent.h"
 #include "App.Base/ECS/Components/CircleMovementComponent.h"
 #include "App.Base/ECS/Components/LookAtTargetComponent.h"
 #include "App.Base/ECS/Components/LightComponent.h"
-#include "App.Base/ECS/Components/ReflectionProbeComponent.h"
-#include "App.Base/ECS/Components/SkyBoxComponent.h"
-#include "App.Base/ECS/Components/GrassRenderComponent.h"
-#include "App.Base/ECS/Components/WindComponent.h"
-#include "App.Base/ECS/Components/SkyAtmosphereComponent.h"
 #include "App.Base/ECS/Components/FlyingPropComponent.h"
 #include "App.Base/ECS/Components/NameComponent.h"
 #include "App.Base/ECS/Components/SplineCurveComponent.h"
@@ -39,11 +33,6 @@ using WorldECS = ECSStorage<
     SplineFollowComponent,
     LookAtTargetComponent,
     LightComponent,
-    ReflectionProbeComponent,
-    SkyBoxComponent,
-    GrassRenderComponent,
-    WindComponent,
-    SkyAtmosphereComponent,
     FlyingPropComponent
 >;
 
@@ -53,13 +42,6 @@ public:
         : _desc(desc)
     {
     }
-
-    World(const World&) = delete;
-    World& operator=(const World&) = delete;
-    World(World&&) = delete;
-    World& operator=(World&&) = delete;
-
-    uint64_t GetRuntimeId() const noexcept { return _runtimeId; }
 
     bool Load();
 
@@ -83,9 +65,7 @@ public:
     Entity ActiveCamera;
 
 private:
-    inline static std::atomic<uint64_t> _nextRuntimeId{1};
-    const uint64_t _runtimeId = _nextRuntimeId.fetch_add(1, std::memory_order_relaxed);
-
+    
     WorldDesc _desc;
 
     WorldECS _ecs;

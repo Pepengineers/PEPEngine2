@@ -3,14 +3,11 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12AmbientOcclusionPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/GDX12ShadowCascades.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "Engine.Core/BenchmarkEngine.h"
-#include "Engine.Core/AssetManager.h"
-#include <directxtex/DirectXTex.h>
 #include <d3d12sdklayers.h>
 #include <cmath>
 #include <iostream>
@@ -167,12 +164,11 @@ int main()
         GDX12EnvironmentIBLPass environment;
         environment.Setup(&resources, nullptr, &common);
         environment.Initialize();
-        environment.Submit({0,{{1,{}}},{}}); environment.PrepareFrame();
         const auto sourceCube = environment.GetOutput(3)->GetTexture()->GetResource()->D3DResource->GetDesc();
         Require(sourceCube.Width == 1024 && sourceCube.Height == 1024 && sourceCube.DepthOrArraySize == 6 &&
             sourceCube.MipLevels == 11, "Scene cubemap dimensions/subresources were not preserved");
-        Require(environment.GetOutput(3)->GetTexture()->GetFormat() == DXGI_FORMAT_R16G16B16A16_FLOAT,
-            "Processed scene cubemap must store linear HDR radiance");
+        Require(environment.GetOutput(3)->GetTexture()->GetFormat() == DXGI_FORMAT_BC1_UNORM_SRGB,
+            "Scene cubemap must be sampled in linear light through an sRGB view");
         GDX12CascadedShadowPass shadows;
         shadows.Setup(&resources, nullptr, &common);
         shadows.Initialize();
@@ -183,15 +179,11 @@ int main()
         opaque.Setup(&resources, nullptr, &common);
         opaque.SetInputs({});
         opaque.Initialize();
-        GDX12AmbientOcclusionPass ao;
-        ao.Setup(&resources, nullptr, &common);
-        ao.SetInputs({ opaque.GetOutput(2), opaque.GetOutput(3) });
-        ao.Initialize();
         GDX12DeferredLightingPass deferred;
         deferred.Setup(&resources, nullptr, &common);
         deferred.SetInputs({ opaque.GetOutput(0), opaque.GetOutput(3), opaque.GetOutput(4), opaque.GetOutput(5),
             opaque.GetOutput(2), shadows.GetOutput(0), environment.GetOutput(0), environment.GetOutput(1),
-            environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0), ao.GetOutput(0) });
+            environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0) });
         deferred.Initialize();
         GDX12GPUCullingPass culling;
         culling.Setup(&resources, nullptr, &common);
@@ -204,22 +196,6 @@ int main()
         environment.Execute(commands);
         queue->ExecuteCommandList(commands);
         queue->Flush();
-        const auto* sourceAsset=Engine::Core::AssetManager::GetInstance().LoadTexture(std::filesystem::path(ASSETS_FOLDER)/"Textures/Environment/grasscube1024.dds");
-        Require(sourceAsset!=nullptr,"Scene cubemap CPU source must be available");
-        const auto& sourceMip=sourceAsset->GetSubresources()[0];
-        DirectX::Image compressed={}; compressed.width=sourceMip.Width; compressed.height=sourceMip.Height; compressed.format=sourceAsset->GetFormat();
-        compressed.rowPitch=sourceMip.RowPitch; compressed.slicePitch=sourceMip.Data.size(); compressed.pixels=const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(sourceMip.Data.data()));
-        DirectX::ScratchImage decoded; ThrowIfFailed(DirectX::Decompress(compressed,DXGI_FORMAT_R8G8B8A8_UNORM,decoded));
-        const auto* encoded=decoded.GetImage(0,0,0); const auto processed=ReadHDR(device,*environment.GetOutput(3)->GetTexture());
-        UINT midtoneSamples=0;
-        for(UINT y=11;y<sourceMip.Height-11;y+=97) for(UINT x=13;x<sourceMip.Width-13;x+=89) for(UINT channel=0;channel<3;++channel)
-        {
-            const float srgb=encoded->pixels[y*encoded->rowPitch+x*4+channel]/255.0f;
-            const float linear=srgb<=.04045f?srgb/12.92f:std::pow((srgb+.055f)/1.055f,2.4f);
-            Require(std::abs(processed[(static_cast<size_t>(y)*sourceMip.Width+x)*3+channel]-linear)<.012f,"SkyBox LDR source must be decoded to linear light exactly once");
-            if(srgb>.1f&&srgb<.9f) ++midtoneSamples;
-        }
-        Require(midtoneSamples>20,"Linear-light oracle needs nontrivial source midtones");
         CheckReadback(device, *environment.GetOutput(0)->GetTexture(), 0, false);
         CheckReadback(device, *environment.GetOutput(1)->GetTexture(), 0, false);
         CheckReadback(device, *environment.GetOutput(1)->GetTexture(), 7, false);
@@ -349,8 +325,6 @@ int main()
         const float reverseRange = 0.1f / (10000.0f - 0.1f);
         projection._33 = reverseRange;
         projection._43 = reverseRange * 10000.0f;
-        common.CameraViewToClip = projection;
-        common.ClipToCameraView = projection.Invert();
         const Matrix viewProjection = view * projection;
         XMStoreFloat4x4(&camera.ViewProj, XMMatrixTranspose(viewProjection));
         camera.ViewProjNoJitter = camera.PrevViewProjNoJitter = camera.ViewProj;
@@ -387,7 +361,6 @@ int main()
             auto* list = queue->GetCommandList();
             culling.Execute(list);
             opaque.Execute(list);
-            ao.Execute(list);
             deferred.Execute(list);
             transparency.Execute(list);
             queue->ExecuteCommandList(list);

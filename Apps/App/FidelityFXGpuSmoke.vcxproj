@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
-  <Import Project="AOGpuSmoke.vcxproj" />
-  <PropertyGroup><ProjectGuid>{FC639526-3504-4D7B-9AE9-281FF41D0DB7}</ProjectGuid></PropertyGroup>
-  <ItemGroup>
-    <ClCompile Remove="tests\AOGpuSmoke.cpp" />
-    <ClCompile Include="tests\FidelityFXGpuSmoke.cpp" />
-  </ItemGroup>
-</Project>

@@ -12,7 +12,6 @@
 #include "Engine.RendererDX12/IRenderPassLink.h"
 
 class GameTimer;
-class GDX12ReflectionLightingPass;
 
 enum ERenderPassFlags : uint32_t
 {
@@ -96,8 +95,6 @@ public:
     }
     UINT GetNumInputs() { return _numInputs; }
     UINT GetNumOutputs() { return _numOutputs; }
-    // Called before recording any frame commands, so effects may safely replace GPU contexts.
-    virtual void PrepareFrame() {};
 
 protected:
     // This will define which resources will be loaded onto respective GPU
@@ -131,13 +128,6 @@ public:
     Matrix ClipToCameraView = Identity4x4();
     Matrix ClipToPrevClip = Identity4x4();
     Matrix PrevClipToClip = Identity4x4();
-    Matrix ActiveCameraView = Identity4x4();
-    Matrix ActiveCameraViewProjection = Identity4x4();
-    Matrix ActiveCameraPreviousViewProjection = Identity4x4();
-    uint64_t HistoryRevision = 0;
-    uint64_t EnvironmentRevision = 0;
-    uint64_t EnvironmentLightingRevision = 0;
-    GDX12ReflectionLightingPass* ReflectionLighting = nullptr;
     GameTimer* GameTimer = nullptr;
     UINT WindowWidth = 0;
     UINT WindowHeight = 0;

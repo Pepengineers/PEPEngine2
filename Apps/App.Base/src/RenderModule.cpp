@@ -16,20 +16,9 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12CascadedShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12SkyAerialPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12GrassWindPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12AmbientOcclusionPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12FidelityFXPasses.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12MotionBlurPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12SpecularResolvePass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12PostProcessAuxPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12ToneMappingPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionProbePass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionLightingPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionFallbackPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyFromSharedMemoryPass.h"
@@ -108,7 +97,6 @@ void RenderModule::Uninitialize()
 
 void RenderModule::OnResize()
 {
-    ++_RPcommonData.HistoryRevision;
     _primaryDevice->GetCommandQueue()->Flush();
     if (_dualGPUMode) { _secondaryDevice->GetCommandQueue()->Flush(); }
 
@@ -120,17 +108,10 @@ void RenderModule::OnResize()
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
-    if (_upscaler) _upscaler->ApplySettings();
-    auto* upscaler = _RPcommonData.Upscaler;
-    if (upscaler)
-    {
-        upscaler->Resize();
-        upscaler->QueryRenderTargetResolution();
-    }
+    if (_RPcommonData.Upscaler) { _RPcommonData.Upscaler->QueryRenderTargetResolution(); }
 
-    for (auto& renderPass : _primaryRenderPassExecutionList) { if (renderPass.get() != upscaler) renderPass->Resize(); }
-    for (auto& renderPass : _secondaryRenderPassExecutionList) { if (renderPass.get() != upscaler) renderPass->Resize(); }
-    RefreshPipelineFlags();
+    for (auto& renderPass : _primaryRenderPassExecutionList) { renderPass->Resize(); }
+    for (auto& renderPass : _secondaryRenderPassExecutionList) { renderPass->Resize(); }
 }
 
 GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
@@ -445,56 +426,10 @@ void RenderModule::SubmitCameraShadows(const GDX12ShadowConstants& shadows)
 
 void RenderModule::SetActiveCamera(CameraComponent* camera)
 {
-    ++_RPcommonData.HistoryRevision;
     _RPcommonData.ActiveCameraCBufferIndex = camera->_CBufferIndex;
     _RPcommonData.ActiveCameraFOV = camera->FOV;
     _RPcommonData.ActiveCameraNearPlane = camera->NearPlane;
     _RPcommonData.ActiveCameraFarPlane = camera->FarPlane;
-}
-
-void RenderModule::SubmitReflectionProbes(uint64_t world, std::vector<GDX12ReflectionProbeDesc> probes,
-    uint64_t staticRevision, uint64_t shadingRevision)
-{
-    if (_reflectionProbes) _reflectionProbes->Submit(world, std::move(probes), staticRevision, shadingRevision);
-}
-
-void RenderModule::SubmitGrassWind(GDX12GrassWindDesc submission)
-{
-    if(!_grassWind) return;
-    const auto release=[&](std::vector<UINT>& slots,size_t keep)
-    {
-        if(slots.size()<=keep) return;
-        _primaryDevice->GetCommandQueue()->Flush();
-        while(slots.size()>keep)
-        { _primaryResources.IndirectCommandsCache->CopyData(slots.back(),GDX12IndirectDrawArgs{}); _freeGrassInstances.push_back(slots.back()); slots.pop_back(); }
-    };
-    for(auto it=_grassInstances.begin();it!=_grassInstances.end();)
-        if(_grassWorld!=submission.World||std::none_of(submission.Grass.begin(),submission.Grass.end(),[&](const auto& desc){return desc.Entity==it->first;}))
-        { release(it->second,0); it=_grassInstances.erase(it); } else ++it;
-    _grassWorld=submission.World;
-    for(auto& desc:submission.Grass)
-    {
-        ValidateGrass(desc.Settings); const UINT count=GrassChunkCount(desc.Settings); auto& slots=_grassInstances[desc.Entity];
-        release(slots,count);
-        if(slots.size()<count)
-        {
-            _primaryDevice->GetCommandQueue()->Flush();
-            const UINT additional=count-static_cast<UINT>(slots.size());
-            ReserveInstanceCapacity(additional);
-            while(slots.size()<count)
-            {
-                if(_freeGrassInstances.empty()) slots.push_back(_instanceCount++);
-                else { slots.push_back(_freeGrassInstances.back()); _freeGrassInstances.pop_back(); }
-            }
-        }
-        desc.Instances=slots;
-    }
-    _grassWind->Submit(std::move(submission));
-}
-
-void RenderModule::SubmitSky(GDX12SkyDesc sky)
-{
-    if (_environment) _environment->Submit(std::move(sky));
 }
 
 TransformCompGPUData& RenderModule::GetTransformGPUData(Entity entity)
@@ -807,7 +742,6 @@ const float RenderModule::GetAspectRatio()
 
 void RenderModule::OnUpdate()
 {
-    if (_upscaler && _upscaler->ApplySettings()) OnResize();
     uint16_t width, height;
     _window->GetWindowSize(width, height);
 
@@ -850,8 +784,6 @@ void RenderModule::OnUpdate()
 
 void RenderModule::OnRender()
 {
-    for (auto& pass : _primaryRenderPassExecutionList) pass->PrepareFrame();
-    for (auto& pass : _secondaryRenderPassExecutionList) pass->PrepareFrame();
     auto primarycmdQueue = _primaryDevice->GetCommandQueue();
     auto primarycmdList = primarycmdQueue->GetCommandList();
     _primaryGPUTimer->Start(primarycmdList);
@@ -951,60 +883,48 @@ void RenderModule::ShareFences()
 
 void RenderModule::ConfigureRenderPipeline()
 {
-    const auto add = [this](auto pass)
-    {
-        auto* result = pass.get();
-        _primaryRenderPassExecutionList.push_back(std::move(pass));
-        return result;
-    };
-    auto* clearPass = add(std::make_unique<GDX12TextureClearPass>());
-    auto* environmentPass = _environment = add(std::make_unique<GDX12EnvironmentIBLPass>());
-    _grassWind = add(std::make_unique<GDX12GrassWindPass>());
-    auto* shadowPass = add(std::make_unique<GDX12CascadedShadowPass>());
-    auto* localShadowPass = add(std::make_unique<GDX12LocalShadowPass>());
-    _reflectionProbes = add(std::make_unique<GDX12ReflectionProbePass>());
-    add(std::make_unique<GDX12ReflectionLightingPass>(_reflectionProbes));
-    auto* cullingPass = add(std::make_unique<GDX12GPUCullingPass>());
-    auto* opaquePass = add(std::make_unique<GDX12OpaquePass>());
-    auto* aoPass = add(std::make_unique<GDX12AmbientOcclusionPass>());
-    auto* lightingPass = add(std::make_unique<GDX12DeferredLightingPass>());
-    auto* reflectionFallback = add(std::make_unique<GDX12ReflectionFallbackPass>());
-    auto* ssrPass = add(std::make_unique<GDX12SssrPass>());
-    auto* reflectionResolve = add(std::make_unique<GDX12SpecularResolvePass>(ssrPass));
-    auto* transparencyPass = add(std::make_unique<GDX12WBOITTransparencyPass>());
-    auto* compositionPass = add(std::make_unique<GDX12WBOITCompositionPass>());
-    auto* aerialPass = add(std::make_unique<GDX12SkyAerialPass>(environmentPass));
-    auto* upscalePass = _upscaler = add(std::make_unique<GDX12XeSSUpscalePass>());
-    auto* auxiliaryPass = add(std::make_unique<GDX12PostProcessAuxPass>());
-    auto* motionBlurPass = add(std::make_unique<GDX12MotionBlurPass>());
-    auto* dofPass = add(std::make_unique<GDX12DepthOfFieldPass>());
-    auto* toneMappingPass = add(std::make_unique<GDX12ToneMappingPass>());
-    auto* outputPass = add(std::make_unique<GDX12OutputToScreenPass>());
+    // Setup render passes you would like to execute
+    // Add in execution order
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12TextureClearPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12EnvironmentIBLPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12CascadedShadowPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12LocalShadowPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12GPUCullingPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OpaquePass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12DeferredLightingPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITTransparencyPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12WBOITCompositionPass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12XeSSUpscalePass>());
+    _primaryRenderPassExecutionList.push_back(std::make_unique<GDX12OutputToScreenPass>());
 
     SetupRenderPasses();
+
+    // Link inputs & outputs for each pass that needs it
+    GDX12RenderPass* clearPass = _primaryRenderPassExecutionList[0].get();
+    GDX12RenderPass* environmentPass = _primaryRenderPassExecutionList[1].get();
+    GDX12RenderPass* shadowPass = _primaryRenderPassExecutionList[2].get();
+    GDX12RenderPass* localShadowPass = _primaryRenderPassExecutionList[3].get();
+    GDX12RenderPass* cullingPass = _primaryRenderPassExecutionList[4].get();
+    GDX12RenderPass* opaquePass = _primaryRenderPassExecutionList[5].get();
+    GDX12RenderPass* lightingPass = _primaryRenderPassExecutionList[6].get();
+    GDX12RenderPass* transparencyPass = _primaryRenderPassExecutionList[7].get();
+    GDX12RenderPass* compositionPass = _primaryRenderPassExecutionList[8].get();
+    GDX12RenderPass* upscalePass = _primaryRenderPassExecutionList[9].get();
+    GDX12RenderPass* outputPass = _primaryRenderPassExecutionList[10].get();
+
     clearPass->SetInputs({ _backBuffer.get(), _depthStencil.get() });
-    _reflectionProbes->SetInputs({ environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0) });
     cullingPass->SetInputs({});
     opaquePass->SetInputs({});
-    aoPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3) });
-    lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0), aoPass->GetOutput(0) });
-    reflectionFallback->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3), environmentPass->GetOutput(1), opaquePass->GetOutput(4) });
-    ssrPass->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(1), opaquePass->GetOutput(3), reflectionFallback->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2) });
-    reflectionResolve->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(3), opaquePass->GetOutput(4), aoPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), ssrPass->GetOutput(0) });
+    lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0) });
     transparencyPass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), localShadowPass->GetOutput(0) });
-    compositionPass->SetInputs({ reflectionResolve->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
-    aerialPass->SetInputs({ compositionPass->GetOutput(0), opaquePass->GetOutput(2) });
-    upscalePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1), aerialPass->GetOutput(0) });
-    auxiliaryPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
-    motionBlurPass->SetInputs({ upscalePass->GetOutput(0), auxiliaryPass->GetOutput(0), auxiliaryPass->GetOutput(1) });
-    dofPass->SetInputs({ motionBlurPass->GetOutput(0), auxiliaryPass->GetOutput(0) });
-    toneMappingPass->SetInputs({ dofPass->GetOutput(0) });
-    outputPass->SetInputs({ toneMappingPass->GetOutput(0), _backBuffer.get() });
+    compositionPass->SetInputs({ lightingPass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1) });
+    upscalePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1), compositionPass->GetOutput(0) });
+    outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get()});
 
-    GDX12RenderPass* renderResolutionPasses[] = { opaquePass, aoPass, lightingPass,
-        reflectionFallback, ssrPass, reflectionResolve, transparencyPass, compositionPass, aerialPass };
-    for (auto* pass : renderResolutionPasses)
-        pass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    lightingPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    transparencyPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    compositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 
     InitializeRenderPasses();
 }
@@ -1014,20 +934,14 @@ void RenderModule::SetupRenderPasses()
     for (auto& pass : _primaryRenderPassExecutionList)
     {
         pass->Setup(&_primaryResources, &_secondaryResources, &_RPcommonData);
+        _primaryPipelineFlags |= pass->GetFlags();
     }
 
     for (auto& pass : _secondaryRenderPassExecutionList)
     {
         pass->Setup(&_secondaryResources, &_primaryResources, &_RPcommonData);
+        _secondaryPipelineFlags |= pass->GetFlags();
     }
-    RefreshPipelineFlags();
-}
-
-void RenderModule::RefreshPipelineFlags()
-{
-    _primaryPipelineFlags = _secondaryPipelineFlags = 0;
-    for (auto& pass : _primaryRenderPassExecutionList) _primaryPipelineFlags |= pass->GetFlags();
-    for (auto& pass : _secondaryRenderPassExecutionList) _secondaryPipelineFlags |= pass->GetFlags();
 }
 
 void RenderModule::InitializeRenderPasses()
