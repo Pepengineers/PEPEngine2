@@ -79,3 +79,10 @@ defaults and ranges are listed in [ambient-occlusion.md](ambient-occlusion.md).
 ## Локальные отражения
 
 `Render.Reflection.Enabled` и `Render.Reflection.Quality` — глобальные runtime Default CVar. Остальные параметры принадлежат `ReflectionProbeComponent` и изменяются из C++; единицы, диапазоны, пресеты и наследование описаны в [reflection-probes.md](reflection-probes.md). Регистрация находится в `GDX12ReflectionProbes.cpp`. `ReflectionProbeTests.exe --cpu` содержит проверки глобальных CVar и сохранения авторских параметров при смене качества. После переноса параметров в компонент проверки не запускались по новому указанию.
+## Depth of field
+
+`Render.DOF.*` uses runtime-writable Default variables for enable, Off/Low/Mid/High,
+focus distance in cm, f-number, vertical sensor size, CoC limit, SDK ring budget and
+ring merging. Manual overrides survive quality changes; zero restores preset
+inheritance. Defaults, units, ranges, HDR/XeSS contracts and checks are documented
+in [depth-of-field.md](rendering/depth-of-field.md).

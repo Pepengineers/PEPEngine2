@@ -102,7 +102,9 @@ These resources are generated once on the GPU from `Assets/Textures/Environment/
 copied from the Multi-GPU-Render-DX12 project's `Data/Common/Textures` folder.
 The source is an sRGB BC1 cubemap with six 1024x1024 faces and eleven mip levels.
 This is global environment lighting, without local probes or environment occlusion.
-Reinhard remains the tone mapper after linear-HDR opaque/OIT composition.
+Reinhard + sRGB now runs once after HDR DoF and XeSS. Opaque/OIT composition,
+FidelityFX DoF and XeSS retain linear RGBA16F HDR. See
+[the DoF contract](../../docs/rendering/depth-of-field.md) for settings and checks.
 
 Bistro contains 135 ECS fixture lights (124 point and 11 spot), placed from actual
 bulb/glass/lens geometry, including street lamps, string bulbs, chandeliers, wall
