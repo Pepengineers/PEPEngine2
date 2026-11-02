@@ -17,9 +17,6 @@ World:
     - Name: GPUDataUpdateSystem
       Priority: 101
 
-    - Name: RenderSubmitSystem
-      Priority: 102
-
   Resources:
     Meshes:
       - Id: BistroInteriorMesh

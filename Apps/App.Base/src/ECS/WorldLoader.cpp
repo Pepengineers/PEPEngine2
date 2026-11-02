@@ -808,6 +808,8 @@ namespace
         cameraComponent.DirtyFlag = true;
         
         world.ActiveCamera = camera;
+        auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+        renderModule->SetActiveCamera(&cameraComponent);
     }
 
     /// Loads a set of obj files as one scene.
@@ -969,7 +971,23 @@ static bool LoadYamlWorld(World& world, const std::filesystem::path& path)
             return false;
         }
 
+        auto& ecs = world.GetECS();
+        if (!ecs.Has<CameraComponent>(activeCamera) || !ecs.Has<TransformComponent>(activeCamera))
+        {
+            Logger::Error(
+                "World ActiveCamera '{}' requires Camera and Transform components: {}",
+                activeCameraId,
+                context.WorldFilePath.string());
+            return false;
+        }
+
         world.ActiveCamera = activeCamera;
+        renderModule->SetActiveCamera(&ecs.Get<CameraComponent>(activeCamera));
+    }
+    else
+    {
+        Logger::Error("World yaml requires ActiveCamera: {}", context.WorldFilePath.string());
+        return false;
     }
 
     return true;
@@ -1082,7 +1100,7 @@ static bool LoadTextures(WorldLoadContext& context, ryml::NodeRef texturesNode)
             return false;
         }
 
-        GDX12Texture* gpuTexture = context.Render->CreateTexture(id, cpuTexture);
+        GPUTexture* gpuTexture = context.Render->CreateTexture(id, cpuTexture);
         if (!gpuTexture)
         {
             gpuTexture = context.Render->GetTextureByName(id);
@@ -1689,9 +1707,6 @@ static bool LoadEntityComponentsWithRefs(
         }
     }
 
-    world.ActiveCamera = camera;
-    renderModule->SetActiveCamera(&camera.GetComponent<CameraComponent>());
-    
     return true;
 }
 
