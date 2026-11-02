@@ -21,6 +21,7 @@
 #include "App.Base/Systems/GPUDataUpdateSystem.h"
 #include "App.Base/Systems/IndirectCommandBuildSystem.h"
 #include <atomic>
+#include "App.Base/ECS/AppConfig.h"
 
 #undef min
 #undef max
@@ -59,6 +60,9 @@ protected:
     bool bResizing = false;
     bool bFullscreenState = false;
 
+    virtual std::string GetAppConfigPath() const { return {}; }
+    AppConfig _AppConfig;
+
 
     App(HINSTANCE hInstance);
     App(const App& rhs) = delete;
@@ -88,7 +92,8 @@ protected:
     virtual void OnKeyboardInput(const GameTimer& gameTimer)
     {
     }
-
+    bool InitWindowClass();
+    bool LoadStartScene();
     bool InitMainWindow();
     bool AddModules() override;
     void Update(const GameTimer& gameTimer) override;

@@ -12,6 +12,10 @@
 #include "Engine.Core/Registries/TextureRegistry.h"
 #include "Engine.Core/IO/AssetCache.h"
 #include "Engine.Core/IO/MeshCache.h"
+#include "App.Base/ECS/AppConfigLoader.h"
+#include "App.Base/Modules/SceneManagerModule.h"
+#include "App.Base/Modules/RenderModule.h"
+#include "Engine.Core/BenchmarkEngine.h"
 #include <directxtex/DirectXTex.h>
 
 struct DecodeJob final : ParallelJob
@@ -100,6 +104,56 @@ static void CheckMeshCache(const std::filesystem::path& path)
     assert(SaveMeshCache(path, Mesh({part}, part.Bounds, {material})));
     assert(!LoadMeshCache(path));
     std::filesystem::remove(path);
+}
+
+static void CheckConfiguredScene()
+{
+    const auto directory = std::filesystem::temp_directory_path() /
+        ("PEPEngineSceneTest-" + std::to_string(_getpid()));
+    std::filesystem::create_directories(directory);
+    const auto worldPath = directory / "test.world";
+    const auto scenePath = directory / "scene.yaml";
+    {
+        std::ofstream world(worldPath);
+        world << "World:\n  Name: Configured\n  ActiveCamera: camera\n"
+            "  Systems:\n    - {Name: MovementSystem, Priority: 20}\n"
+            "    - {Name: CircleMovementSystem, Priority: 10}\n"
+            "  Entities:\n    - Id: camera\n      Components:\n"
+            "        Transform: {Location: [0, 0, 0]}\n        Camera: {FOV: 75}\n"
+            "        Velocity: [2, 0, 0]\n        CircleMovement: {Radius: 1, Speed: 1}\n";
+        std::ofstream scene(scenePath);
+        scene << "Scene:\n  Name: Test\n  Worlds:\n    - Name: Test\n      Path: " << worldPath.generic_string() << '\n';
+    }
+    BenchmarkEngine engine;
+    auto& locator = BenchmarkEngine::GetLocator();
+    GameTimer timer;
+    locator.RegisterModule(std::make_shared<RenderModule>(nullptr, &timer));
+    auto scenes = std::make_shared<SceneManagerModule>();
+    locator.RegisterModule(scenes);
+    scenes->Initialize();
+    assert(scenes->GetWorldCount() == 0);
+    AppConfig config;
+    assert(scenes->LoadScene(scenePath.string(), config));
+    assert(scenes->GetWorldCount() == 1);
+    auto* world = scenes->GetWorld();
+    assert(world->GetECS().Get<CameraComponent>(world->ActiveCamera).FOV == 75);
+    JobSystem jobs(4);
+    scenes->UpdateSystems(jobs, *world, 1);
+    auto position = world->GetECS().Get<TransformComponent>(world->ActiveCamera).Location;
+    assert(std::abs(position.x - (std::cos(1.0f) + 2)) < 0.001f);
+    assert(std::abs(position.z - std::sin(1.0f)) < 0.001f);
+    config.SystemsBanlist = { "CircleMovementSystem" };
+    assert(scenes->LoadScene(scenePath.string(), config));
+    world = scenes->GetWorld();
+    scenes->UpdateSystems(jobs, *world, 1);
+    assert(world->GetECS().Get<TransformComponent>(world->ActiveCamera).Location == Vector3(2, 0, 0));
+    assert(scenes->UnloadWorld(0));
+    World empty(WorldDesc{});
+    scenes->UpdateSystems(jobs, empty, 1);
+    locator.UnregisterModule<SceneManagerModule>();
+    locator.UnregisterModule<RenderModule>();
+    std::filesystem::remove_all(directory);
+    std::cout << "Configured scene: YAML, system priority, banlist and unload passed\n";
 }
 
 int main()
@@ -260,5 +314,6 @@ int main()
     std::filesystem::remove(ddsPath);
     assert(!TextureLoader::LoadTextureAsset(ddsPath, true));
     std::filesystem::remove(cachePath);
+    CheckConfiguredScene();
     std::cout << "Loading tests: native Mesh roundtrip/integrity/cancellation, timer, texture lifetime, import parity, cache invalidation/recovery, BC7 pixels, CVar and PNG mips passed.\n";
 }

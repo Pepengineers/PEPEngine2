@@ -5,6 +5,41 @@
 
 namespace Engine::Core
 {
+	namespace
+	{
+		bool IsAssetsRootRelative(const std::filesystem::path& path)
+		{
+			const auto iterator = path.begin();
+			if (iterator == path.end())
+			{
+				return false;
+			}
+
+			std::wstring firstComponent = iterator->wstring();
+			std::transform(firstComponent.begin(), firstComponent.end(), firstComponent.begin(), ::towlower);
+			return firstComponent == L"assets";
+		}
+
+		std::filesystem::path ResolveFromAssetsRoot(const std::filesystem::path& path)
+		{
+			std::filesystem::path resolvedPath = ASSETS_FOLDER;
+
+			bool isFirstComponent = true;
+			for (const auto& component : path)
+			{
+				if (isFirstComponent)
+				{
+					isFirstComponent = false;
+					continue;
+				}
+
+				resolvedPath /= component;
+			}
+
+			return resolvedPath.lexically_normal();
+		}
+	}
+
 	const wchar_t* MeshRegistry::GetRegistryName() const
 	{
 		return L"MeshRegistry";
@@ -15,6 +50,11 @@ namespace Engine::Core
 		if (path.is_absolute())
 		{
 			return path.lexically_normal();
+		}
+
+		if (IsAssetsRootRelative(path))
+		{
+			return ResolveFromAssetsRoot(path);
 		}
 
 		std::filesystem::path resolvedPath = MODELS_FOLDER;

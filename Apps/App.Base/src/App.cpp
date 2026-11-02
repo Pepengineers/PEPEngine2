@@ -5,6 +5,11 @@
 #include "Common/ConsoleVariables.h"
 #include "Engine.Core/ConsoleModule.h"
 #include "Engine.Core/Logging/Logger.h"
+#include "App.Base/ECS/AppConfigLoader.h"
+#include "Common/Logger.h"
+
+#include <filesystem>
+#include <string>
 
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 
@@ -194,20 +199,27 @@ void App::WaitForLoading(const JobHandle& work)
 
 bool App::Initialize()
 {
-    Log::Info("Application", "Creating the application window");
-    WNDCLASS WindowClass = {};
-    WindowClass.style = CS_HREDRAW | CS_VREDRAW;
-    WindowClass.lpfnWndProc = Private::MainWndProc;
-    WindowClass.cbClsExtra = 0;
-    WindowClass.cbWndExtra = 0;
-    WindowClass.hInstance = AppHandler;
-    WindowClass.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
-    WindowClass.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    WindowClass.hbrBackground = static_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
-    WindowClass.lpszMenuName = nullptr;
-    WindowClass.lpszClassName = L"MainWnd";
+    Logger::Init();
+    const auto configPath = GetAppConfigPath();
+    if (!configPath.empty())
+    {
+        try
+        {
+            _AppConfig = AppConfigLoader::LoadAppConfig(configPath);
+        }
+        catch (const std::exception& exception)
+        {
+            Logger::Error("LoadAppConfig failed: {}", exception.what());
+            return false;
+        }
+        if (_AppConfig.StartScene.empty())
+        {
+            Logger::Error("App config StartScene is empty.");
+            return false;
+        }
+    }
 
-    if (!RegisterClass(&WindowClass))
+    if (!InitWindowClass())
     {
         Log::Error("Application", "Window class registration failed, Win32 error ", GetLastError());
         MessageBox(nullptr, L"RegisterClass Failed.", nullptr, 0);
@@ -234,6 +246,7 @@ bool App::Initialize()
         Locator.GetModule<RenderModule>()->Initialize();
         ReportLoading(L"Importing scene");
         Locator.GetModule<SceneManagerModule>()->Initialize();
+        if (!configPath.empty() && !LoadStartScene()) return false;
     }
     catch (...)
     {
@@ -430,6 +443,42 @@ void App::OnResize()
     RenderSystem->OnResize();
 }
 
+bool App::InitWindowClass()
+{
+    WNDCLASS WindowClass = {};
+    WindowClass.style = CS_HREDRAW | CS_VREDRAW;
+    WindowClass.lpfnWndProc = Private::MainWndProc;
+    WindowClass.cbClsExtra = 0;
+    WindowClass.cbWndExtra = 0;
+    WindowClass.hInstance = AppHandler;
+    WindowClass.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
+    WindowClass.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    WindowClass.hbrBackground = static_cast<HBRUSH>(GetStockObject(NULL_BRUSH));
+    WindowClass.lpszMenuName = nullptr;
+    WindowClass.lpszClassName = L"MainWnd";
+
+    if (!RegisterClass(&WindowClass))
+    {
+        Logger::Error("RegisterClass failed.");
+        return false;
+    }
+
+    return true;
+}
+
+bool App::LoadStartScene()
+{
+    auto sceneManager = Locator.GetModule<SceneManagerModule>();
+
+    if (!sceneManager)
+    {
+        Logger::Error("SceneManagerModule not found.");
+        return false;
+    }
+
+    return sceneManager->LoadScene(_AppConfig.StartScene, _AppConfig);
+}
+
 bool App::InitMainWindow()
 {
     _window = std::make_unique<Window>(1280, 800, AppHandler);
@@ -461,6 +510,11 @@ void App::Update(const GameTimer& gameTimer)
         try
         {
             const float dt = gameTimer.DeltaTime();
+            if (!_AppConfig.StartScene.empty())
+            {
+                scenes->UpdateSystems(_jobs, world, dt);
+                continue;
+            }
             work = _movement.Schedule(_jobs, world, dt);
             work = _circle.Schedule(_jobs, world, dt, work);
             work = _spline.Schedule(_jobs, world, dt, work);

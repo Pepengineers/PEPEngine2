@@ -1,4 +1,5 @@
 #include "Engine.Core/Logging/Logger.h"
+#include "Common/Logger.h"
 
 #include <atomic>
 #include <chrono>
@@ -143,6 +144,15 @@ int main()
         Logger badFormat(directory / "bad-format.log");
         badFormat.Write(LogLevel::Info, "Failure", BadFormat{});
         Require(!badFormat.Flush(), "Formatting failure must not be reported as a successful write");
+        Logger::Init();
+        Logger::Info("Configured logger value={}", 42);
+        Logger::Error("Configured logger failure={}", "test");
+        Logger::Shutdown();
+        const auto formatted = Read(Logger::Get().GetPath());
+        Require(formatted.find("Configured logger value=42") != std::string::npos &&
+            formatted.find("[ERROR] [Engine]") != std::string::npos &&
+            formatted.find("Configured logger failure=test") != std::string::npos,
+            "Both logging interfaces must use the existing async sink");
         std::cout << "Logger tests passed\n";
         return 0;
     }

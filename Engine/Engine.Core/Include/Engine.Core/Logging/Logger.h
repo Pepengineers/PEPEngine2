@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <spdlog/fmt/fmt.h>
 #include <functional>
 #include <memory>
 #include <ostream>
@@ -19,6 +20,39 @@ public:
     ~Logger();
     Logger(const Logger&) = delete;
     Logger& operator=(const Logger&) = delete;
+
+    static void Init() { Get(); }
+    static void Shutdown() { Get().Flush(); }
+
+    template <class... Args>
+    static void Trace(fmt::format_string<Args...> format, Args&&... args)
+    {
+        Get().Write(LogLevel::Info, "Engine", fmt::format(format, std::forward<Args>(args)...));
+    }
+
+    template <class... Args>
+    static void Info(fmt::format_string<Args...> format, Args&&... args)
+    {
+        Get().Write(LogLevel::Info, "Engine", fmt::format(format, std::forward<Args>(args)...));
+    }
+
+    template <class... Args>
+    static void Warn(fmt::format_string<Args...> format, Args&&... args)
+    {
+        Get().Write(LogLevel::Warning, "Engine", fmt::format(format, std::forward<Args>(args)...));
+    }
+
+    template <class... Args>
+    static void Error(fmt::format_string<Args...> format, Args&&... args)
+    {
+        Get().Write(LogLevel::Error, "Engine", fmt::format(format, std::forward<Args>(args)...));
+    }
+
+    template <class... Args>
+    static void Critical(fmt::format_string<Args...> format, Args&&... args)
+    {
+        Get().Write(LogLevel::Error, "Engine", fmt::format(format, std::forward<Args>(args)...));
+    }
 
     static Logger& Get();
     const std::filesystem::path& GetPath() const;
