@@ -530,6 +530,22 @@ void GDX12ReflectionProbePass::WriteProbeData(bool enabled)
     }
 }
 
+void GDX12ReflectionProbePass::Prepare()
+{
+    if (!GetReflectionSettings().Enabled || std::none_of(_resources->ReflectionProbes.begin(),
+        _resources->ReflectionProbes.end(), [](const auto& probe) { return probe.Implementation == 1; })) return;
+    if (!_staticLocalShadows)
+    {
+        // shortcut: baked receivers retain static-only shadows, use dynamic capture for moving shadow reception.
+        _staticLocalShadows = std::make_unique<GDX12LocalShadowPass>(true);
+        _staticLocalShadows->Setup(_resources, nullptr, _commonData);
+        _staticLocalShadows->Initialize();
+    }
+    if (_staticRevision != _resources->ReflectionStaticRevision ||
+        _environmentRevision != _resources->ReflectionEnvironmentRevision) _staticLocalShadows->InvalidateCache();
+    _staticLocalShadows->Prepare();
+}
+
 void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
 {
     ++_frameNumber;
@@ -586,7 +602,6 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
             probe.BakedFaces = 0;
             probe.LastUpdate = 0;
         }
-        if (_staticLocalShadows) _staticLocalShadows->InvalidateCache();
     }
     _staticRevision = _resources->ReflectionStaticRevision;
     _environmentRevision = _resources->ReflectionEnvironmentRevision;
@@ -635,13 +650,6 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
     if (state.Source.Implementation == 1 && state.BakedFaces != 63)
     {
         CreateBakedTextures(state);
-        if (!_staticLocalShadows)
-        {
-            // shortcut: baked receivers retain static-only shadows, use dynamic capture for moving shadow reception.
-            _staticLocalShadows = std::make_unique<GDX12LocalShadowPass>(true);
-            _staticLocalShadows->Setup(_resources, nullptr, _commonData);
-            _staticLocalShadows->Initialize();
-        }
         _staticLocalShadows->Execute(commands);
         RenderShadow(commands, StaticGeometry);
         for (UINT face = _face; face < endFace; ++face)

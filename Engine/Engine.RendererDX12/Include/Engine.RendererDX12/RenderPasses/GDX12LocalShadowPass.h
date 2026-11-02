@@ -80,6 +80,7 @@ public:
 
     void InvalidateCache()
     {
+        _prepared = false;
         _cached.clear();
         if (_staticShadows) _staticShadows->InvalidateCache();
     }
@@ -87,11 +88,11 @@ public:
     UINT GetLastFrameRenderedViews() const { return _renderedViews; }
     UINT GetLastFrameStaticRenderedViews() const { return _staticShadows ? _staticShadows->_renderedViews : _renderedViews; }
 
-    void Execute(GDX12CommandList* commands) override
+    void Prepare()
     {
         if (_resources->LocalShadowCasters && _resources->LocalShadowVisibility.size() != _resources->LocalLights.size())
             throw std::logic_error("Prepare shadow visibility before rendering local shadows");
-        if (_staticShadows) _staticShadows->Execute(commands);
+        if (_staticShadows) _staticShadows->Prepare();
         if (!_resources->LocalShadowCasters && (_staticRevision != _resources->ReflectionStaticRevision ||
             (!_staticOnly && _dynamicRevision != _resources->ReflectionDynamicRevision)))
         {
@@ -103,31 +104,19 @@ public:
         for (const auto& light : _resources->LocalLights)
             if (light.ShadowFirstSlice != UINT_MAX) slices = (std::max)(slices, light.ShadowFirstSlice + LocalShadowFaceCount(light));
         if ((std::max)(slices, 1u) != _sliceCount) CreateMaps((std::max)(slices, 1u));
-        if (_mapsNeedClear)
-        {
-            commands->ResourceBarrier({ _maps->GetResource()->GetDepthWriteBarrier() });
-            for (const auto& dsv : _dsvs)
-                commands->GetCommandList()->ClearDepthStencilView(dsv->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
-            _mapsNeedClear = false;
-        }
-        _renderedViews = 0;
-        _cached.resize(_resources->LocalLights.size());
-        auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-        auto& visibility = _visibility[_resources->CurrFrameConstantsIndex];
         const UINT count = _resources->IndirectCommandsCache->GetElementCount();
+        _commandCount = count;
+        auto& visibility = _visibility[_resources->CurrFrameConstantsIndex];
         if (!visibility.Counter) visibility.Counter = CreateBuffer<UINT>(1);
         if (!visibility.Commands || visibility.Commands->GetElementCount() < count)
             visibility.Commands = CreateBuffer<GDX12IndirectDrawArgs>((std::max)(count, 1u));
-        GDX12_SCOPED_EVENT(commands, "Point and spot shadow maps", Colors::DarkGoldenrod);
-        commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
+        _cached.resize(_resources->LocalLights.size());
+        _preparedCache.resize(_resources->LocalLights.size());
+        _dirtyFaces.assign(_resources->LocalLights.size(), 0);
         for (UINT lightIndex = 0; lightIndex < _resources->LocalLights.size(); ++lightIndex)
         {
             const auto& light = _resources->LocalLights[lightIndex];
-            if (light.ShadowFirstSlice == UINT_MAX)
-            {
-                _cached[lightIndex].reset();
-                continue;
-            }
+            if (light.ShadowFirstSlice == UINT_MAX) { _preparedCache[lightIndex].reset(); continue; }
             const auto& cached = _cached[lightIndex];
             auto cacheKey = light;
             if (_staticOnly) cacheKey.ShadowFlags &= ~2u;
@@ -138,9 +127,35 @@ public:
                 casters = _staticOnly ? visible.StaticCasters : visible.AllCasters;
             }
             const bool force = ShouldRenderLocalShadow(cacheKey, cached ? &cached->Light : nullptr);
-            UINT dirtyFaces = 0;
             for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
-                if (force || cached->Casters[face] != casters[face]) dirtyFaces |= 1u << face;
+                if (force || cached->Casters[face] != casters[face]) _dirtyFaces[lightIndex] |= 1u << face;
+            _preparedCache[lightIndex] = CachedShadow{ light, casters };
+        }
+        _prepared = true;
+    }
+
+    void Execute(GDX12CommandList* commands) override
+    {
+        if (!_prepared) throw std::logic_error("Prepare local shadow views before recording shadows");
+        if (_staticShadows) _staticShadows->Execute(commands);
+        if (_mapsNeedClear)
+        {
+            commands->ResourceBarrier({ _maps->GetResource()->GetDepthWriteBarrier() });
+            for (const auto& dsv : _dsvs)
+                commands->GetCommandList()->ClearDepthStencilView(dsv->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
+            _mapsNeedClear = false;
+        }
+        _renderedViews = 0;
+        auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+        auto& visibility = _visibility[_resources->CurrFrameConstantsIndex];
+        const UINT count = _commandCount;
+        GDX12_SCOPED_EVENT(commands, "Point and spot shadow maps", Colors::DarkGoldenrod);
+        commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
+        for (UINT lightIndex = 0; lightIndex < _preparedCache.size(); ++lightIndex)
+        {
+            if (!_preparedCache[lightIndex]) continue;
+            const auto& light = _preparedCache[lightIndex]->Light;
+            const UINT dirtyFaces = _dirtyFaces[lightIndex];
             for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
             {
                 if ((dirtyFaces & (1u << face)) == 0) continue;
@@ -160,53 +175,54 @@ public:
                     visibility.Commands->GetResource().GetUnorderedAccessBarrier() });
                 commands->SetComputeUAV(1, visibility.Counter->GetUAV()->GPUHandle);
                 {
-                GDX12_SCOPED_EVENT(commands, "Local shadow clear");
-                commands->SetPipelineState(_clearPSO);
-                commands->Dispatch(1, 1, 1);
-                commands->ResourceBarrier({ visibility.Counter->GetResource().GetUAVBarrier() });
+                    GDX12_SCOPED_EVENT(commands, "Local shadow clear");
+                    commands->SetPipelineState(_clearPSO);
+                    commands->Dispatch(1, 1, 1);
+                    commands->ResourceBarrier({ visibility.Counter->GetResource().GetUAVBarrier() });
                 }
                 {
-                GDX12_SCOPED_EVENT(commands, "Local shadow cull");
-                commands->SetPipelineState(_cullPSO);
-                const UINT parameters[] = { lightIndex, face };
-                commands->GetCommandList()->SetComputeRoot32BitConstants(0, 2, parameters, 0);
-                commands->SetComputeSRV(0, frame->ShadowInstances->GetSRV()->GPUHandle);
-                commands->SetComputeSRV(1, frame->ShadowTemplates->GetSRV()->GPUHandle);
-                commands->SetComputeSRV(2, frame->ShadowMaterials->GetSRV()->GPUHandle);
-                commands->SetComputeSRV(3, frame->ShadowLights->GetSRV()->GPUHandle);
-                commands->SetComputeUAV(0, visibility.Commands->GetUAV()->GPUHandle);
-                if (count) commands->Dispatch((count + 63) / 64, 1, 1);
+                    GDX12_SCOPED_EVENT(commands, "Local shadow cull");
+                    commands->SetPipelineState(_cullPSO);
+                    const UINT parameters[] = { lightIndex, face };
+                    commands->GetCommandList()->SetComputeRoot32BitConstants(0, 2, parameters, 0);
+                    commands->SetComputeSRV(0, frame->ShadowInstances->GetSRV()->GPUHandle);
+                    commands->SetComputeSRV(1, frame->ShadowTemplates->GetSRV()->GPUHandle);
+                    commands->SetComputeSRV(2, frame->ShadowMaterials->GetSRV()->GPUHandle);
+                    commands->SetComputeSRV(3, frame->ShadowLights->GetSRV()->GPUHandle);
+                    commands->SetComputeUAV(0, visibility.Commands->GetUAV()->GPUHandle);
+                    if (count) commands->Dispatch((count + 63) / 64, 1, 1);
                 }
                 {
-                GDX12_SCOPED_EVENT(commands, "Local shadow draw");
-                commands->ResourceBarrier({ visibility.Commands->GetResource().GetIndirectArgsBarrier(),
-                    visibility.Counter->GetResource().GetIndirectArgsBarrier(), _maps->GetResource()->GetDepthWriteBarrier() });
-                commands->SetGraphicsRootSignature(_graphicsRoot.get());
-                commands->SetPipelineState(_depthPSO);
-                commands->SetGraphicsSRV(0, frame->ShadowMaterials->GetSRV()->GPUHandle);
-                commands->SetGraphicsSRV(1, frame->ShadowTransforms->GetSRV()->GPUHandle);
-                commands->SetGraphicsSRV(2, frame->ShadowInstances->GetSRV()->GPUHandle);
-                commands->SetGraphicsSRV(3, frame->ShadowLights->GetSRV()->GPUHandle);
-                commands->SetGraphicsSRV(4, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
-                commands->GetCommandList()->SetGraphicsRoot32BitConstant(0, lightIndex * 6 + face, 1);
-                commands->SetGeometryBuffer(_resources->GeometryBuffer.get());
-                commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-                commands->SetViewport({ 0, 0, static_cast<float>(LocalShadowResolution), static_cast<float>(LocalShadowResolution), 0, 1 });
-                commands->SetScissorRect({ 0, 0, LocalShadowResolution, LocalShadowResolution });
-                const auto dsv = _dsvs[light.ShadowFirstSlice + face]->CPUHandle;
-                commands->GetCommandList()->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
-                if (_staticOnly) commands->GetCommandList()->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
-                if (count) commands->ExecuteIndirect(_signature.Get(), count,
-                    visibility.Commands->GetResource().D3DResource.Get(), 0, visibility.Counter->GetResource().D3DResource.Get(), 0);
-                if (!_staticOnly && _resources->Grass)
-                    _resources->Grass->Draw(commands, GDX12GrassRenderer::Stage::Shadow,
-                        Matrix(light.ShadowViewProj[face]).Transpose(), _commonData->CameraView.Invert().Translation(), 0);
+                    GDX12_SCOPED_EVENT(commands, "Local shadow draw");
+                    commands->ResourceBarrier({ visibility.Commands->GetResource().GetIndirectArgsBarrier(),
+                        visibility.Counter->GetResource().GetIndirectArgsBarrier(), _maps->GetResource()->GetDepthWriteBarrier() });
+                    commands->SetGraphicsRootSignature(_graphicsRoot.get());
+                    commands->SetPipelineState(_depthPSO);
+                    commands->SetGraphicsSRV(0, frame->ShadowMaterials->GetSRV()->GPUHandle);
+                    commands->SetGraphicsSRV(1, frame->ShadowTransforms->GetSRV()->GPUHandle);
+                    commands->SetGraphicsSRV(2, frame->ShadowInstances->GetSRV()->GPUHandle);
+                    commands->SetGraphicsSRV(3, frame->ShadowLights->GetSRV()->GPUHandle);
+                    commands->SetGraphicsSRV(4, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
+                    commands->GetCommandList()->SetGraphicsRoot32BitConstant(0, lightIndex * 6 + face, 1);
+                    commands->SetGeometryBuffer(_resources->GeometryBuffer.get());
+                    commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                    commands->SetViewport({ 0, 0, static_cast<float>(LocalShadowResolution), static_cast<float>(LocalShadowResolution), 0, 1 });
+                    commands->SetScissorRect({ 0, 0, LocalShadowResolution, LocalShadowResolution });
+                    const auto dsv = _dsvs[light.ShadowFirstSlice + face]->CPUHandle;
+                    commands->GetCommandList()->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
+                    if (_staticOnly) commands->GetCommandList()->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
+                    if (count) commands->ExecuteIndirect(_signature.Get(), count,
+                        visibility.Commands->GetResource().D3DResource.Get(), 0, visibility.Counter->GetResource().D3DResource.Get(), 0);
+                    if (!_staticOnly && _resources->Grass)
+                        _resources->Grass->Draw(commands, GDX12GrassRenderer::Stage::Shadow,
+                            Matrix(light.ShadowViewProj[face]).Transpose(), _commonData->CameraView.Invert().Translation(), 0);
                 }
                 ++_renderedViews;
             }
-            _cached[lightIndex] = CachedShadow{ light, casters };
         }
         commands->ResourceBarrier({ _maps->GetResource()->GetSRVBarrier() });
+        _cached.swap(_preparedCache);
+        _prepared = false;
     }
 
     void ClearDenendencies() override
@@ -214,6 +230,9 @@ public:
         GDX12RenderPass::ClearDenendencies();
         _visibility.clear();
         _cached.clear();
+        _preparedCache.clear();
+        _dirtyFaces.clear();
+        _prepared = false;
         _dsvs.clear();
         _maps.reset();
         _staticShadows.reset();
@@ -238,6 +257,9 @@ private:
         if (slices > D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION) throw std::runtime_error("Local shadow maps exceed the DX12 texture-array layer limit");
         if (_sliceCount) _resources->Device->GetCommandQueue()->Flush();
         _cached.clear();
+        _preparedCache.clear();
+        _dirtyFaces.clear();
+        _prepared = false;
         _dsvs.clear();
         const auto resource = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, LocalShadowResolution,
             LocalShadowResolution, static_cast<UINT16>(slices), 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
@@ -282,7 +304,9 @@ private:
         GDX12LocalLightConstants Light;
         std::array<uint64_t, 6> Casters;
     };
-    std::vector<std::optional<CachedShadow>> _cached;
+    std::vector<std::optional<CachedShadow>> _cached, _preparedCache;
+    std::vector<UINT> _dirtyFaces;
+    bool _prepared = false;
     std::vector<std::unique_ptr<GDX12Descriptor>> _dsvs;
     std::unique_ptr<GDX12Texture> _maps;
     std::unique_ptr<GDX12LocalShadowPass> _staticShadows;
@@ -295,4 +319,5 @@ private:
     UINT _sliceCount = 0;
     bool _mapsNeedClear = true;
     UINT _renderedViews = 0;
+    UINT _commandCount = 0;
 };

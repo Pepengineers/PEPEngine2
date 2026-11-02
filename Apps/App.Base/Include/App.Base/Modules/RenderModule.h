@@ -19,6 +19,9 @@ class GDX12Device;
 class GDX12CommandList;
 class GDX12GPUTimer;
 class GDX12ReconstructionPass;
+class GDX12DeferredLightingPass;
+class GDX12LocalShadowPass;
+class GDX12ReflectionProbePass;
 struct GDX12FrameGenerationStatus;
 
 struct TransformComponent;
@@ -237,6 +240,9 @@ private:
     
     GDX12RenderPass* _depthPrepass = nullptr;
     GDX12RenderPass* _opaquePass = nullptr;
+    GDX12DeferredLightingPass* _deferredLightingPass = nullptr;
+    GDX12LocalShadowPass* _localShadowPass = nullptr;
+    GDX12ReflectionProbePass* _reflectionPass = nullptr;
     GDX12RenderPass* _ambientOcclusionPass = nullptr;
     GDX12ReconstructionPass* _reconstructionPass = nullptr;
 

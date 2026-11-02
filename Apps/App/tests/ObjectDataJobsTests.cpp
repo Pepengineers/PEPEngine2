@@ -106,10 +106,20 @@ public:
         const float previousRoughness = editedMaterial->Roughness;
         editedMaterial->Roughness = 0.23f;
         editedMaterial->DirtyFlag = true;
-        render->Update();
-        const auto uploadedMaterials = ReadUpload(render->GetCurrentPrimaryFrameConstants()->MaterialCache.get());
-        Require(std::abs(uploadedMaterials[editedMaterial->_CBufferIndex].Roughness - 0.23f) < 1e-6f,
-            "An actual material edit must reach the GPU cache used by reflection capture");
+        Timer.Reset();
+        for (int slot = 0; slot < 3; ++slot)
+        {
+            Timer.Tick();
+            render->BeginFrame();
+            render->Update();
+            _lights.Schedule(jobs, world, 0).Complete();
+            _gpuData.Schedule(jobs, world, 0, 1).Complete();
+            render->Render();
+            render->WaitForUploads();
+            const auto uploadedMaterials = ReadUpload(render->GetCurrentPrimaryFrameConstants()->MaterialCache.get());
+            Require(std::abs(uploadedMaterials[editedMaterial->_CBufferIndex].Roughness - 0.23f) < 1e-6f,
+                "An actual material edit must reach every prepared frame slot");
+        }
         editedMaterial->Roughness = previousRoughness;
         editedMaterial->DirtyFlag = true;
         const auto transformsBeforeGrowth = ReadUpload(render->GetCurrentPrimaryFrameConstants()->TransformCache.get());

@@ -73,6 +73,8 @@ public:
         }
         auto render = Locator.GetModule<RenderModule>();
         auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+        Timer.Tick();
+        render->BeginFrame();
         render->Update();
         auto work = _lights.Schedule(_jobs, world, 0);
         _gpuData.Schedule(_jobs, world, 0, work).Complete();
@@ -81,6 +83,8 @@ public:
 
     void Check()
     {
+        Timer.Reset();
+        Timer.Stop();
         auto render = Locator.GetModule<RenderModule>();
         Set(L"Render.Upscaler.Provider", "0");
         Set(L"Render.SSR.Enabled", "false");

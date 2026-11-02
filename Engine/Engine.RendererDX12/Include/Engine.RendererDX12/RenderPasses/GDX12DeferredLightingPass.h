@@ -2,6 +2,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12LightGrid.h"
+#include <stdexcept>
 
 class GDX12DeferredLightingPass final : public GDX12RenderPass
 {
@@ -57,10 +58,8 @@ public:
             grid.Constants = std::make_unique<GDX12UploadBuffer<GDX12LightGridConstants>>(_resources->Device, 1);
         }
     }
-    void Execute(GDX12CommandList* commands) override
+    void Prepare()
     {
-        GDX12_SCOPED_EVENT(commands, "Clustered deferred lighting", Colors::Gold);
-        auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
         _gridSystem.Build(_grid, _commonData->CameraProjection, _commonData->CameraView,
             _commonData->ActiveCameraNearPlane, _commonData->ActiveCameraFarPlane,
             _color->GetWidth(), _color->GetHeight(), _resources->LocalLights, _commonData->Jobs);
@@ -70,6 +69,15 @@ public:
         grid.Masks->Resize(words);
         grid.Upload->CopyData(0, _grid.Masks.data(), words);
         grid.Constants->CopyData(0, _grid.Constants);
+        _prepared = true;
+    }
+    void Execute(GDX12CommandList* commands) override
+    {
+        if (!_prepared) throw std::logic_error("Prepare the CPU light grid before recording lighting");
+        GDX12_SCOPED_EVENT(commands, "Clustered deferred lighting", Colors::Gold);
+        auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+        auto& grid = _grids[_resources->CurrFrameConstantsIndex];
+        const UINT words = static_cast<UINT>(_grid.Masks.size());
         commands->ResourceBarrier({ grid.Masks->GetResource().GetCopyDestBarrier() });
         commands->GetCommandList()->CopyBufferRegion(grid.Masks->GetResource().D3DResource.Get(), 0,
             grid.Upload->GetResource().D3DResource.Get(), 0, UINT64(words) * sizeof(UINT));
@@ -96,13 +104,15 @@ public:
         commands->SetComputeUAV(0, _color->GetUAV()->GPUHandle);
         commands->Dispatch((_color->GetWidth() + 15) / 16, (_color->GetHeight() + 15) / 16, 1);
     }
-    void Resize() override { _color->Resize(_inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight()); }
+    void Resize() override { _prepared = false; _color->Resize(_inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight()); }
     void ClearDenendencies() override
     {
         GDX12RenderPass::ClearDenendencies();
+        _prepared = false;
         _color.reset(); _root.reset(); _pipeline.Reset(); _grids.clear();
     }
 private:
+    bool _prepared = false;
     struct FrameGrid
     {
         std::unique_ptr<GDX12UploadBuffer<UINT>> Upload, Masks;

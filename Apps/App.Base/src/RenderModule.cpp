@@ -926,15 +926,30 @@ void RenderModule::OnRender()
     _primaryGPUTimer->Start(primarycmdList);
     DispatchSkeletalMeshes(primarycmdList);
     CollectGrassScene(primarycmdList);
-    CollectReflectionScene();
     {
-        GDX12_SCOPED_CPU_EVENT("Shadow visibility");
-        _shadowVisibility.Schedule(App::GetInstance()->GetJobs(), _primaryResources.LocalLights,
-            *_primaryResources.LocalShadowCasters, _primaryResources.LocalShadowVisibility).Complete();
+        GDX12_SCOPED_CPU_EVENT("Scene preparation");
+        CollectReflectionScene();
+        auto visibility = _shadowVisibility.Schedule(App::GetInstance()->GetJobs(), _primaryResources.LocalLights,
+            *_primaryResources.LocalShadowCasters, _primaryResources.LocalShadowVisibility);
+        try
+        {
+            _deferredLightingPass->Prepare();
+            {
+                GDX12_SCOPED_CPU_EVENT("Shadow visibility wait");
+                visibility.Complete();
+            }
+        }
+        catch (...)
+        {
+            try { visibility.Complete(); } catch (...) {}
+            throw;
+        }
+        _localShadowPass->Prepare();
+        _reflectionPass->Prepare();
+        _primaryResources.PrepareLocalShadowData();
     }
 
     auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
-    _primaryResources.PrepareLocalShadowData();
     _primaryResources.UploadLocalShadowData(primarycmdList);
     _primaryGraph->Execute(primarycmdList);
     _primaryGPUTimer->Stop(primarycmdList);
@@ -1244,10 +1259,13 @@ void RenderModule::ConfigureRenderPipeline()
     auto* depthPrepass = CreateRenderPass<GDX12OpaquePass>(GDX12OpaquePass::Stage::DepthPrepass);
     auto* shadowPass = CreateRenderPass<GDX12CascadedShadowPass>();
     auto* localShadowPass = CreateRenderPass<GDX12LocalShadowPass>();
+    _localShadowPass = localShadowPass;
     auto* reflectionPass = CreateRenderPass<GDX12ReflectionProbePass>();
+    _reflectionPass = reflectionPass;
     auto* opaquePass = CreateRenderPass<GDX12OpaquePass>(GDX12OpaquePass::Stage::GBuffer);
     auto* aoPass = CreateRenderPass<GDX12AmbientOcclusionPass>();
     auto* lightingPass = CreateRenderPass<GDX12DeferredLightingPass>();
+    _deferredLightingPass = lightingPass;
     auto* ssrPass = CreateRenderPass<GDX12SSSRPass>();
     auto* fluidSurfacePass = CreateRenderPass<GDX12FluidSurfacePass>();
     auto* transparencyPass = CreateRenderPass<GDX12WBOITTransparencyPass>(GDX12WBOITTransparencyPass::WaterPartition::Behind);

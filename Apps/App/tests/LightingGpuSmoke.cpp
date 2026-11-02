@@ -411,7 +411,10 @@ int main(int argc, char** argv)
             auto* list = queue->GetCommandList();
             resources.PrepareLocalShadowData();
             resources.UploadLocalShadowData(list);
+            localShadows.Prepare();
+            auto visibilitySnapshot = std::move(resources.LocalShadowVisibility);
             localShadows.Execute(list);
+            resources.LocalShadowVisibility = std::move(visibilitySnapshot);
             queue->ExecuteCommandList(list);
             queue->Flush();
         };
@@ -635,7 +638,10 @@ int main(int argc, char** argv)
                 list->ClearUnorderedAccessViewFloat(aoTexture->GetUAV()->GPUHandle, clearAO.CPUHandle,
                     aoTexture->GetResource()->D3DResource.Get(), values);
             }
+            deferred.Prepare();
+            auto lightSnapshot = std::move(resources.LocalLights);
             lightingGraph.Execute(list);
+            resources.LocalLights = std::move(lightSnapshot);
             transparency.Execute(list);
             queue->ExecuteCommandList(list);
             queue->Flush();

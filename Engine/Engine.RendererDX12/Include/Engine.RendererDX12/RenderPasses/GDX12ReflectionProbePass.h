@@ -18,6 +18,7 @@ public:
 
     GDX12ReflectionProbePass();
     void Initialize() override;
+    void Prepare();
     void Execute(GDX12CommandList* commands) override;
     void ClearDenendencies() override;
 

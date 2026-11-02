@@ -30,7 +30,7 @@ static void Require(bool condition, const char* message)
 
 static void TestPassDependencies()
 {
-#if defined(DEBUG) || defined(_DEBUG)
+#if defined(DEBUG) || defined(_DEBUG) || defined(PROFILE_BUILD)
     static_assert(!std::is_copy_constructible_v<GDX12CommandList::ScopedEvent>);
     static_assert(!std::is_move_constructible_v<GDX12CommandList::ScopedEvent>);
     static_assert(std::is_nothrow_destructible_v<GDX12CommandList::ScopedEvent>);
@@ -431,8 +431,10 @@ int main(int argc, char** argv)
             auto* list = queue->GetCommandList();
             resources.PrepareLocalShadowData();
             resources.UploadLocalShadowData(list);
+            localShadows.Prepare();
             localShadows.Execute(list);
             timer.Start(list);
+            reflections.Prepare();
             reflections.Execute(list);
             timer.Stop(list);
             queue->ExecuteCommandList(list);
@@ -807,6 +809,7 @@ int main(int argc, char** argv)
             mainCulling.Execute(list);
             opaque.Execute(list);
             ao.Execute(list);
+            deferred.Prepare();
             lightingGraph.Execute(list);
             transparency.Execute(list);
             composition.Execute(list);

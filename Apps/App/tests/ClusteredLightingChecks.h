@@ -200,6 +200,7 @@ static void CheckClusteredLighting(GDX12DeviceResources& resources, RenderPipeli
         };
         const auto render = [&](ID3D12PipelineState* variant, UINT repeats = 1)
         {
+            clustered.Prepare();
             auto* list = queue->GetCommandList();
             graph.Execute(list);
             if (variant) list->SetPipelineState(variant);
