@@ -1384,35 +1384,72 @@ static bool ParseRigidBody(WorldECS::EntityHandle& entity, ryml::NodeRef node)
     return true;
 }
 
-static bool ParseBoxCollider(
+static bool ParseCollider(
     WorldECS::EntityHandle& entity,
     ryml::NodeRef node)
 {
-    BoxShapeDesc shape;
-
-    if (node.has_child("HalfExtent"))
+    if (!node.is_map() || !node.has_child("Type"))
     {
-        shape.HalfExtent = ReadVector3(node["HalfExtent"]);
-    }
-
-    const auto& extent = shape.HalfExtent;
-
-    if (!std::isfinite(extent.x) ||
-        !std::isfinite(extent.y) ||
-        !std::isfinite(extent.z) ||
-        extent.x <= 0.0f ||
-        extent.y <= 0.0f ||
-        extent.z <= 0.0f)
-    {
-        Logger::Error("BoxCollider requires finite positive half extents");
+        Logger::Error("Collider requires Type");
         return false;
     }
 
+    std::string type;
+    node["Type"] >> type;
+
+    const auto isPositive = [](float value) { return std::isfinite(value) && value > 0.0f; };
+
     ColliderComponent component;
-    component.Shape = shape;
+    bool valid = false;
+
+    if (type == "Box")
+    {
+        BoxShapeDesc shape;
+        if (node.has_child("HalfExtent")) { shape.HalfExtent = ReadVector3(node["HalfExtent"]); }
+
+        const auto& extent = shape.HalfExtent;
+        valid = isPositive(extent.x) && isPositive(extent.y) && isPositive(extent.z);
+        component.Shape = shape;
+    }
+    else if (type == "Sphere")
+    {
+        SphereShapeDesc shape;
+        if (node.has_child("Radius")) { node["Radius"] >> shape.Radius; }
+
+        valid = isPositive(shape.Radius);
+        component.Shape = shape;
+    }
+    else if (type == "Cylinder")
+    {
+        CylinderShapeDesc shape;
+        if (node.has_child("Radius")) { node["Radius"] >> shape.Radius; }
+        if (node.has_child("HalfHeight")) { node["HalfHeight"] >> shape.HalfHeight; }
+
+        valid = isPositive(shape.Radius) && isPositive(shape.HalfHeight);
+        component.Shape = shape;
+    }
+    else if (type == "Capsule")
+    {
+        CapsuleShapeDesc shape;
+        if (node.has_child("Radius")) { node["Radius"] >> shape.Radius; }
+        if (node.has_child("HalfCylinderHeight")) { node["HalfCylinderHeight"] >> shape.HalfCylinderHeight; }
+
+        valid = isPositive(shape.Radius) && std::isfinite(shape.HalfCylinderHeight) && shape.HalfCylinderHeight >= 0.0f;
+        component.Shape = shape;
+    }
+    else
+    {
+        Logger::Error("Unknown collider type: {}", type);
+        return false;
+    }
+
+    if (!valid)
+    {
+        Logger::Error("Invalid {} collider dimensions", type);
+        return false;
+    }
+
     entity.AddComponent<ColliderComponent>(component);
-    return true;
-}
     return true;
 }
 
@@ -1531,11 +1568,11 @@ static bool LoadEntityComponentsWithoutRefs(
         }
         
         const bool hasRigidBody = components.has_child("RigidBody");
-        const bool hasBoxCollider = components.has_child("BoxCollider");
-        if ((hasRigidBody || hasBoxCollider) &&
-            !entity.HasComponent<TransformComponent>())
+        const bool hasCollider = components.has_child("Collider");
+
+        if ((hasRigidBody || hasCollider) && !entity.HasComponent<TransformComponent>())
         {
-            Logger::Error("Physics entity '{}' need Transform to create Physics body", id);
+            Logger::Error("Physics entity '{}' requires Transform", id);
             return false;
         }
 
@@ -1543,10 +1580,9 @@ static bool LoadEntityComponentsWithoutRefs(
         {
             if (!ParseRigidBody(entity, components["RigidBody"])) { return false; }
         }
-
-        if (hasBoxCollider)
+        if (hasCollider)
         {
-            if (!ParseBoxCollider(entity, components["BoxCollider"])) { return false; }
+            if (!ParseCollider(entity, components["Collider"])) { return false; }
         }
 
         if (components.has_child("Camera"))

@@ -284,58 +284,6 @@ void JoltPhysicsBackend::Step(float dt)
     
 }
 
-PhysicsBodyHandle JoltPhysicsBackend::CreateBoxBody(const PhysicsBoxBodyDesc& desc)
-{
-    if (!_bInitialized || !_physicsSystem)
-    {
-        Logger::Error("CreateBoxBody(): backend isnt initialized");
-        return {};
-    }
-    
-    JPH::EMotionType motionType;
-
-    switch (desc.MotionType)
-    {
-    case PhysicsMotionType::Static:
-        motionType = JPH::EMotionType::Static;
-        break;
-    case PhysicsMotionType::Dynamic:
-        motionType = JPH::EMotionType::Dynamic;
-        break;
-    case PhysicsMotionType::Kinematic:
-        motionType = JPH::EMotionType::Kinematic;
-        break;
-        
-    default:
-        Logger::Error("CreateBoxBody(): invalid motion type");
-        return {};
-    }
-    
-    const bool isStatic = desc.MotionType == PhysicsMotionType::Static;
-    
-    JPH::BodyCreationSettings settings(
-        new JPH::BoxShape(JPH::Vec3(desc.HalfExtent.x, desc.HalfExtent.y, desc.HalfExtent.z)),
-        JPH::RVec3(desc.Position.x, desc.Position.y, desc.Position.z),
-        JPH::Quat(desc.Rotation.x, desc.Rotation.y, desc.Rotation.z, desc.Rotation.w),
-        motionType,
-        isStatic ? ObjectLayers::Static : ObjectLayers::Dynamic
-    );
-    
-    JPH::BodyInterface& bodyInterface = _physicsSystem->GetBodyInterface();
-    
-    JPH::Body* body = bodyInterface.CreateBody(settings);
-    if (!body)
-    {
-        Logger::Error("CreateBoxBody(): failed to create");
-        return {};
-    }
-    
-    const JPH::BodyID& bodyID = body->GetID();
-    bodyInterface.AddBody(bodyID, isStatic ? JPH::EActivation::DontActivate : JPH::EActivation::Activate);
-    
-    return PhysicsBodyHandle{ bodyID.GetIndexAndSequenceNumber() };
-}
-
 PhysicsBodyHandle JoltPhysicsBackend::CreateBody(const PhysicsBodyDesc& desc)
 {
     if (!_bInitialized || !_physicsSystem)

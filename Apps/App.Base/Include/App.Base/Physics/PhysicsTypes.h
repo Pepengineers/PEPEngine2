@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <directxtk/SimpleMath.h>
 #include <variant>
-#include "Engine.Core/ECS/Component.h"
 
 struct PhysicsBodyHandle
 {
@@ -52,14 +51,5 @@ struct PhysicsBodyDesc
     DirectX::SimpleMath::Vector3 Position{ 0.0f, 0.0f, 0.0f };
     DirectX::SimpleMath::Quaternion Rotation{ 0.0f, 0.0f, 0.0f, 1.0f };
     DirectX::SimpleMath::Vector3 Scale{ 1.0f, 1.0f, 1.0f }; // only for body creation
-    PhysicsMotionType MotionType = PhysicsMotionType::Static;
-};
-
-// deprecated
-struct PhysicsBoxBodyDesc
-{
-    DirectX::SimpleMath::Vector3 HalfExtent{ 0.5f, 0.5f, 0.5f };
-    DirectX::SimpleMath::Vector3 Position{ 0.0f, 0.0f, 0.0f };
-    DirectX::SimpleMath::Quaternion Rotation{ 0.0f, 0.0f, 0.0f, 1.0f };
     PhysicsMotionType MotionType = PhysicsMotionType::Static;
 };

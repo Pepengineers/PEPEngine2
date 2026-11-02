@@ -30,11 +30,7 @@ public:
 
     void Step(float dt);
     
-    // create bodies
-    PhysicsBodyHandle CreateBoxBody(const PhysicsBoxBodyDesc& desc);
     PhysicsBodyHandle CreateBody(const PhysicsBodyDesc& desc);
-    
-    // destroy bodies
     void DestroyBody(PhysicsBodyHandle handle);
     
     bool TryGetBodyTransform(PhysicsBodyHandle handle, DirectX::SimpleMath::Vector3& outPosition, DirectX::SimpleMath::Quaternion& outRotation) const;

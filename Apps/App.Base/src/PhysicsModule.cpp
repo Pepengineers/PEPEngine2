@@ -44,12 +44,6 @@ void PhysicsModule::Step(float dt)
     _cpuPhysics->Step(dt);
 }
 
-PhysicsBodyHandle PhysicsModule::CreateBoxBody(const PhysicsBoxBodyDesc& desc)
-{
-    if (!_cpuPhysics) { return {}; }
-    return _cpuPhysics->CreateBoxBody(desc);
-}
-
 PhysicsBodyHandle PhysicsModule::CreateBody(const PhysicsBodyDesc& desc)
 {
     if (!_cpuPhysics) { return {}; }
@@ -96,7 +90,6 @@ bool PhysicsModule::ShouldRender()
     return false;
 }
 
-// TODO make generalized, not only for box bodies
 void PhysicsModule::TryCreateBody(World& world, Entity entity)
 {
     auto& ecs = world.GetECS();
@@ -122,12 +115,7 @@ void PhysicsModule::TryCreateBody(World& world, Entity entity)
     
     rigidBody.Body = CreateBody(desc);
     
-    // TODO remove later
-    if (rigidBody.Body.IsValid())   
-    {
-        Logger::Info("Created physics body: entity={}, handle={}", entity, rigidBody.Body.Value);
-    }
-    else
+    if (!rigidBody.Body.IsValid())
     {
         Logger::Error("Failed to create physics body for entity={}", entity);
     }
@@ -228,7 +216,6 @@ void PhysicsModule::SubscribeToWorld(World& world)
     
     _worldSubscriptions.emplace(&world, subscriptions);
     
-    // TODO tmp
     ecs.ForEach<RigidBodyComponent>([this, &world](Entity entity, RigidBodyComponent&)
     {
        TryCreateBody(world, entity); 
