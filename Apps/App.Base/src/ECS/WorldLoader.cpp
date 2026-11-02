@@ -1388,14 +1388,14 @@ static bool ParseBoxCollider(
     WorldECS::EntityHandle& entity,
     ryml::NodeRef node)
 {
-    BoxColliderComponent component;
+    BoxShapeDesc shape;
 
     if (node.has_child("HalfExtent"))
     {
-        component.HalfExtent = ReadVector3(node["HalfExtent"]);
+        shape.HalfExtent = ReadVector3(node["HalfExtent"]);
     }
 
-    const auto& extent = component.HalfExtent;
+    const auto& extent = shape.HalfExtent;
 
     if (!std::isfinite(extent.x) ||
         !std::isfinite(extent.y) ||
@@ -1408,7 +1408,11 @@ static bool ParseBoxCollider(
         return false;
     }
 
-    entity.AddComponent<BoxColliderComponent>(component);
+    ColliderComponent component;
+    component.Shape = shape;
+    entity.AddComponent<ColliderComponent>(component);
+    return true;
+}
     return true;
 }
 
