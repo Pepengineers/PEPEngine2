@@ -209,12 +209,6 @@ bool SceneManagerModule::AddSystemByName(
         return true;
     }
 
-    if (systemConfig.Name == "RenderSubmitSystem")
-    {
-        AddSystem<RenderSubmitSystem>(world, priority);
-        return true;
-    }
-
     Logger::Error("Unknown system name: {}", systemConfig.Name);
     return false;
 }

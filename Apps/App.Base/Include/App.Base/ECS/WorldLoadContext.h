@@ -10,7 +10,7 @@
 
 class World;
 class RenderModule;
-class GDX12Texture;
+struct GPUTexture;
 class GDX12Material;
 
 namespace Engine::Core
@@ -34,9 +34,9 @@ struct WorldLoadContext
     std::unordered_map<std::string, const Engine::Core::Mesh*> CpuMeshesById;
     std::unordered_map<std::string, std::vector<GDX12Material*>> MeshMaterialsById;
 
-    std::unordered_map<std::string, GDX12Texture*> TexturesById;
+    std::unordered_map<std::string, GPUTexture*> TexturesById;
     std::unordered_map<std::string, GDX12Material*> MaterialsById;
-    std::unordered_map<std::wstring, GDX12Texture*> ImportedTexturesByPath;
+    std::unordered_map<std::wstring, GPUTexture*> ImportedTexturesByPath;
 
     Entity ResolveEntity(const std::string& id) const
     {
@@ -70,7 +70,7 @@ struct WorldLoadContext
         return &it->second;
     }
 
-    GDX12Texture* ResolveTexture(const std::string& id) const
+    GPUTexture* ResolveTexture(const std::string& id) const
     {
         const auto it = TexturesById.find(id);
         if (it == TexturesById.end()) { return nullptr; }
