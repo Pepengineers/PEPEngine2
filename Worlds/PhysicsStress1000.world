@@ -1,7 +1,7 @@
-# Physics stress test: 1000 dynamic primitives, 16 static obstacles and 6 kinematic cubes.
-# Cascade: steep ramp -> corner-up bumpers -> opposite ramp -> repeat -> catch floor.
+# Physics stress test: 1000 dynamic primitives, 32 static bodies and 7 kinematic bodies.
+# The upper floor feeds two chutes with a 7-unit outlet above the enclosed rotary mill.
 # 10 x 10 x 10 grid: 25 rows of 10 bodies for each of the four shapes.
-# 1022 scene bodies / 1024 body capacity.
+# 1039 scene bodies / 2048 body capacity.
 # Six floor lanes traverse a two-point closed spline: 3 seconds each way.
 World:
   Name: PhysicsStress1000World
@@ -11,6 +11,8 @@ World:
       Priority: 0
     - Name: FixedSplineFollowSystem
       Priority: 10
+    - Name: FixedMovementSystem
+      Priority: 20
     - Name: KinematicBodyUpdateSystem
       Priority: 100
     - Name: GPUDataUpdateSystem
@@ -295,6 +297,10 @@ World:
       - Id: StressCylinderMesh
         Source: Assets/Models/PhysicsSandbox/UnitCylinder.obj
         SubmitToRenderer: true
+      - Id: StressGuardMesh
+        Source: Assets/Models/PhysicsStress/GuardPanel.obj
+        SubmitToRenderer: true
+        ImportMaterials: true
 
   Entities:
     - Id: CatchFloor
@@ -312,6 +318,168 @@ World:
           HalfExtent: [0.5, 0.5, 0.5]
         StaticMeshRender:
           Mesh: StressObstacleMesh
+
+    - Id: ChuteWestWall
+      Components:
+        Name:
+          Value: ChuteWestWall
+        Transform:
+          Location: [53, -38, 0]
+          Rotation: [0, 0, 0]
+          Scale: [2, 32, 88]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressGuardMesh
+
+    - Id: ChuteEastWall
+      Components:
+        Name:
+          Value: ChuteEastWall
+        Transform:
+          Location: [163, -38, 0]
+          Rotation: [0, 0, 0]
+          Scale: [2, 32, 88]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressGuardMesh
+
+    - Id: ChuteWestRamp
+      Components:
+        Name:
+          Value: ChuteWestRamp
+        Transform:
+          Location: [78.4453, -66.83205, 0]
+          Rotation: [0, 0, -33.690068]
+          Scale: [61.294372, 2, 88]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressObstacleMesh
+
+    - Id: ChuteEastRamp
+      Components:
+        Name:
+          Value: ChuteEastRamp
+        Transform:
+          Location: [137.5547, -66.83205, 0]
+          Rotation: [0, 0, 33.690068]
+          Scale: [61.294372, 2, 88]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressObstacleMesh
+
+    - Id: MillFloor
+      Components:
+        Name:
+          Value: MillFloor
+        Transform:
+          Location: [108, -97, 0]
+          Rotation: [0, 0, 0]
+          Scale: [94, 3, 90]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressObstacleMesh
+
+    - Id: MillWestWall
+      Components:
+        Name:
+          Value: MillWestWall
+        Transform:
+          Location: [62, -87.5, 0]
+          Rotation: [0, 0, 0]
+          Scale: [2, 16, 90]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressGuardMesh
+
+    - Id: MillEastWall
+      Components:
+        Name:
+          Value: MillEastWall
+        Transform:
+          Location: [154, -87.5, 0]
+          Rotation: [0, 0, 0]
+          Scale: [2, 16, 90]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressGuardMesh
+
+    - Id: MillFrontWall
+      Components:
+        Name:
+          Value: MillFrontWall
+        Transform:
+          Location: [108, -27.75, -44]
+          Rotation: [0, 0, 0]
+          Scale: [112, 135.5, 2]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressGuardMesh
+
+    - Id: MillBackWall
+      Components:
+        Name:
+          Value: MillBackWall
+        Transform:
+          Location: [108, -27.75, 44]
+          Rotation: [0, 0, 0]
+          Scale: [112, 135.5, 2]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressGuardMesh
+
+    - Id: MillSweeper
+      Components:
+        Name:
+          Value: MillSweeper
+        Transform:
+          Location: [108, -94.3, 0]
+          Rotation: [0, 0, 0]
+          Scale: [82, 2, 2.4]
+        RigidBody:
+          MotionType: Kinematic
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        Velocity:
+          AngularVelocity: [0, 22.5, 0]
+        StaticMeshRender:
+          Mesh: StressCubeMesh
 
     - Id: RampUpper
       Components:
@@ -555,6 +723,119 @@ World:
 
     # Lane centers split CatchFloor's 80-unit width into six equal strips.
     # Zero tangents ease to rest at each end before reversing direction.
+    # Raised dividers feed resting bodies into the six sweeper lanes.
+    - Id: LaneDivider01
+      Components:
+        Name:
+          Value: LaneDivider01
+        Transform:
+          Location: [108, -42.5, -26.6666666666667]
+          Rotation: [45, 0, 0]
+          Scale: [92, 5.09, 5.09]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressObstacleMesh
+
+    - Id: LaneDivider02
+      Components:
+        Name:
+          Value: LaneDivider02
+        Transform:
+          Location: [108, -42.5, -13.3333333333333]
+          Rotation: [45, 0, 0]
+          Scale: [92, 5.09, 5.09]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressObstacleMesh
+
+    - Id: LaneDivider03
+      Components:
+        Name:
+          Value: LaneDivider03
+        Transform:
+          Location: [108, -42.5, 0]
+          Rotation: [45, 0, 0]
+          Scale: [92, 5.09, 5.09]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressObstacleMesh
+
+    - Id: LaneDivider04
+      Components:
+        Name:
+          Value: LaneDivider04
+        Transform:
+          Location: [108, -42.5, 13.3333333333333]
+          Rotation: [45, 0, 0]
+          Scale: [92, 5.09, 5.09]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressObstacleMesh
+
+    - Id: LaneDivider05
+      Components:
+        Name:
+          Value: LaneDivider05
+        Transform:
+          Location: [108, -42.5, 26.6666666666667]
+          Rotation: [45, 0, 0]
+          Scale: [92, 5.09, 5.09]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressObstacleMesh
+
+    - Id: LaneEdgeFront
+      Components:
+        Name:
+          Value: LaneEdgeFront
+        Transform:
+          Location: [108, -40.6669129, -40.425]
+          Rotation: [30, 0, 0]
+          Scale: [92, 0.8, 8.7179891]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressObstacleMesh
+
+    - Id: LaneEdgeBack
+      Components:
+        Name:
+          Value: LaneEdgeBack
+        Transform:
+          Location: [108, -40.6669129, 40.425]
+          Rotation: [-30, 0, 0]
+          Scale: [92, 0.8, 8.7179891]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: StressObstacleMesh
+
     - Id: FloorKinematicPath01
       Components:
         SplineCurve:
@@ -18270,11 +18551,11 @@ World:
         Name:
           Value: MainCamera
         Transform:
-          Location: [169, 88, -159]
-          Rotation: [16.362238, -20.989201, 0]
+          Location: [167, -26, -232]
+          Rotation: [-6, -14.268, 0]
           Scale: [1, 1, 1]
         Camera:
-          FOV: 68.0
+          FOV: 64.0
           NearPlane: 0.1
           FarPlane: 600.0
 

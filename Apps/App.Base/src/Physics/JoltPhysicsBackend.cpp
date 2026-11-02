@@ -233,7 +233,7 @@ void JoltPhysicsBackend::Initialize()
     _objectLayerPairFilter = std::make_unique<ObjectLayerPairFilterImpl>();
     _objectVsBroadPhaseLayerFilter = std::make_unique<ObjectVsBroadPhaseLayerFilterImpl>();
 
-    constexpr uint32_t MaxBodies = 1024;
+    constexpr uint32_t MaxBodies = 2048;
     constexpr uint32_t NumBodyMutexes = 0;
     constexpr uint32_t MaxBodyPairs = 16384;
     constexpr uint32_t MaxContactConstraints = 16384;
