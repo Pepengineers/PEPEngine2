@@ -8,6 +8,8 @@
 #include <filesystem>
 #include <string>
 
+#include "Engine.RendererDX12/GDX12StreamlineSDK.h"
+
 using Microsoft::WRL::ComPtr;
 using namespace std;
 using namespace DirectX;
@@ -65,7 +67,15 @@ App::App(HINSTANCE hInstance)
     Instance = this;
 }
 
-App::~App() = default;
+App::~App()
+{
+    //ordering is important
+    Locator.UnregisterModule<SceneManagerModule>();
+    Locator.UnregisterModule<RenderModule>();
+    // can't be put into RenderModule since it is required 
+    // to call it after all module entities are destroyed
+    GDX12StreamlineSDK::Get().Shutdown();
+}
 
 HINSTANCE App::GetAppHandler() const
 {

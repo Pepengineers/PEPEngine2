@@ -36,7 +36,7 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShader(GDX12Device* device, const s
 {
     std::string target = GetShaderTargetForModel(device, shaderType);
 
-    if (device->GetDeviceFeatures().MaxShaderModel == D3D_SHADER_MODEL_5_1)
+    if (device->GetDeviceFeatures().Features.HighestShaderModel() == D3D_SHADER_MODEL_5_1)
     {
         return CompileShaderFXC(filename, defines, entrypoint, target);
     }
@@ -57,7 +57,7 @@ void GDX12ShaderCompiler::Shutdown()
 
 std::string GDX12ShaderCompiler::GetShaderTargetForModel(GDX12Device* device, const std::string& shaderType)
 {
-    D3D_SHADER_MODEL targetModel = device->GetDeviceFeatures().MaxShaderModel;
+    D3D_SHADER_MODEL targetModel = device->GetDeviceFeatures().Features.HighestShaderModel();
 
     UINT modelMajor = (targetModel >> 4) & 0xF;
     UINT modelMinor = targetModel & 0xF;
@@ -66,7 +66,9 @@ std::string GDX12ShaderCompiler::GetShaderTargetForModel(GDX12Device* device, co
 
     switch (modelMajor) {
     case 6:
-        if (modelMinor >= 8 && targetModel >= D3D_SHADER_MODEL_6_8) { targetVersion = "6_8"; }
+        if (modelMinor >= 10 && targetModel >= D3D_SHADER_MODEL_6_10) { targetVersion = "6_10"; }
+        else if (modelMinor >= 9 && targetModel >= D3D_SHADER_MODEL_6_9) { targetVersion = "6_9"; }
+        else if (modelMinor >= 8 && targetModel >= D3D_SHADER_MODEL_6_8) { targetVersion = "6_8"; }
         else if (modelMinor >= 7 && targetModel >= D3D_SHADER_MODEL_6_7) { targetVersion = "6_7"; }
         else if (modelMinor >= 6 && targetModel >= D3D_SHADER_MODEL_6_6) { targetVersion = "6_6"; }
         else if (modelMinor >= 5 && targetModel >= D3D_SHADER_MODEL_6_5) { targetVersion = "6_5"; }

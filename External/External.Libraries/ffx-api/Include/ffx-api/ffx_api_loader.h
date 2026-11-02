@@ -1,6 +1,6 @@
 // This file is part of the FidelityFX SDK.
 //
-// Copyright (C) 2024 Advanced Micro Devices, Inc.
+// Copyright (C) 2026 Advanced Micro Devices, Inc.
 // 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files(the "Software"), to deal
@@ -23,7 +23,6 @@
 #pragma once
 
 #include "ffx_api.h"
-#include <windows.h>
 
 typedef struct ffxFunctions {
     PfnFfxCreateContext CreateContext;
@@ -33,11 +32,31 @@ typedef struct ffxFunctions {
     PfnFfxDispatch Dispatch;
 } ffxFunctions;
 
-static inline void ffxLoadFunctions(ffxFunctions* pOutFunctions, HMODULE module)
+// _GAMING_XBOX defined by GDK tools build
+// _WINDOWS defined by MSBuild x64 windows configurations
+// PLATFORM_WINDOWS defined for Unreal Engine build processes
+#if defined(_WINDOWS) || defined(PLATFORM_WINDOWS)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif //WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif // defined(_WINDOWS) || defined(PLATFORM_WINDOWS)
+#if defined(_GAMING_XBOX) || defined(_WINDOWS) || defined(PLATFORM_WINDOWS)
+#include <libloaderapi.h>
+#else
+#pragma error "Unsupported ffx API platform"
+#endif // #if defined(_GAMING_XBOX) || defined(_WINDOWS) || defined(PLATFORM_WINDOWS)
+
+static inline void ffxLoadFunctions(ffxFunctions* pOutFunctions, void* module)
 {
-    pOutFunctions->CreateContext  = (PfnFfxCreateContext )GetProcAddress(module, "ffxCreateContext");
-    pOutFunctions->DestroyContext = (PfnFfxDestroyContext)GetProcAddress(module, "ffxDestroyContext");
-    pOutFunctions->Configure      = (PfnFfxConfigure     )GetProcAddress(module, "ffxConfigure");
-    pOutFunctions->Query          = (PfnFfxQuery         )GetProcAddress(module, "ffxQuery");
-    pOutFunctions->Dispatch       = (PfnFfxDispatch      )GetProcAddress(module, "ffxDispatch");
+    // _GAMING_XBOX defined by GDK tools build
+    // _WINDOWS defined by MSBuild x64 windows configurations
+    // PLATFORM_WINDOWS defined for Unreal Engine build processes
+#if defined(_GAMING_XBOX) || defined(_WINDOWS) || defined(PLATFORM_WINDOWS)
+    pOutFunctions->CreateContext  = (PfnFfxCreateContext)GetProcAddress((HMODULE)module, "ffxCreateContext");
+    pOutFunctions->DestroyContext = (PfnFfxDestroyContext)GetProcAddress((HMODULE)module, "ffxDestroyContext");
+    pOutFunctions->Configure      = (PfnFfxConfigure)GetProcAddress((HMODULE)module, "ffxConfigure");
+    pOutFunctions->Query          = (PfnFfxQuery)GetProcAddress((HMODULE)module, "ffxQuery");
+    pOutFunctions->Dispatch       = (PfnFfxDispatch)GetProcAddress((HMODULE)module, "ffxDispatch");
+#endif // #if defined(_GAMING_XBOX) || defined(_WINDOWS) || defined(PLATFORM_WINDOWS)
 }

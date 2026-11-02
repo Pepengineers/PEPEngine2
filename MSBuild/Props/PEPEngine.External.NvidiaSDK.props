@@ -5,5 +5,8 @@
     <ClCompile>
       <AdditionalIncludeDirectories>$(PEPExternalNvidiaSDKInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
+    <Link>
+      <AdditionalLibraryDirectories>$(PEPRepoRoot)External\External.Libraries\nvidia-sdk\lib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+    </Link>
   </ItemDefinitionGroup>
 </Project>

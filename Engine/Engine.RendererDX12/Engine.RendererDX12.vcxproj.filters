@@ -54,6 +54,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameConstants.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12GPUTimer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ConstantStructures.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -66,13 +69,64 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GeometryBuffer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderCommandRecorder.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceResources.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12RenderPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GPUCullingPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITCompositionPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITTransparencyPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OpaquePass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\IRenderPassLink.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureCopyToSharedMemoryPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12SharedTexture.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12StreamlineSDK.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureCopyFromSharedMemoryPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FSRUpscalePass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12NISUpscalePass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OutputToScreenPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SyncPass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DLSSUpscalePass.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureClearPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
@@ -110,6 +164,9 @@
     <ClCompile Include="src\GDX12SwapChain.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\GDX12StreamlineSDK.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\GDX12FrameConstants.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -119,11 +176,23 @@
     <ClCompile Include="src\GDX12GeometryBuffer.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\GDX12RenderCommandRecorder.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\GDX12Resource.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\GDX12DeviceResources.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\GDX12GPUTimer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Shaders\BufferClear.hlsl" />
+    <None Include="Shaders\CBufferStructures.hlsl" />
+    <None Include="Shaders\CompositionPass.hlsl" />
+    <None Include="Shaders\Culling.hlsl" />
+    <None Include="Shaders\FullScreenVS.hlsl" />
+    <None Include="Shaders\OpaquePass.hlsl" />
+    <None Include="Shaders\TransparentPass.hlsl" />
   </ItemGroup>
 </Project>

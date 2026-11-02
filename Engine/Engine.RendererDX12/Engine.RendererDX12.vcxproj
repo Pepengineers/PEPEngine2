@@ -21,9 +21,24 @@
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GeometryBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Material.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderCommandRecorder.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12SharedTexture.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12StreamlineSDK.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\IRenderPassLink.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DLSSUpscalePass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FSRUpscalePass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12NISUpscalePass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OpaquePass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OutputToScreenPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SyncPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureClearPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureCopyFromSharedMemoryPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureCopyToSharedMemoryPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITTransparencyPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GPUCullingPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12RenderPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12SwapChain.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12CommandList.h" />
@@ -34,18 +49,23 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Device.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceFactory.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameConstants.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12GPUTimer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12TextureResource.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RootSignature.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ShaderCompiler.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Texture.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12UploadBuffer.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITCompositionPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\D3DHelpers.cpp" />
+    <ClCompile Include="src\GDX12DeviceResources.cpp" />
+    <ClCompile Include="src\GDX12GPUTimer.cpp" />
     <ClCompile Include="src\GDX12GeometryBuffer.cpp" />
-    <ClCompile Include="src\GDX12RenderCommandRecorder.cpp" />
     <ClCompile Include="src\GDX12Resource.cpp" />
     <ClCompile Include="src\GDX12SwapChain.cpp" />
+    <ClCompile Include="src\GDX12StreamlineSDK.cpp" />
     <ClCompile Include="src\GDX12CommandList.cpp" />
     <ClCompile Include="src\GDX12CommandQueue.cpp" />
     <ClCompile Include="src\GDX12Descriptor.cpp" />

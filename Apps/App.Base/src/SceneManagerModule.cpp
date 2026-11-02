@@ -4,7 +4,6 @@
 
 #include "App.Base/Systems/CircleMovementSystem.h"
 #include "App.Base/Systems/MovementSystem.h"
-#include "App.Base/Systems/RenderSubmitSystem.h"
 #include "App.Base/Systems/GPUDataUpdateSystem.h"
 #include "App.Base/Systems/LookAtTargetSystem.h"
 #include "App.Base/Systems/SplineFollowSystem.h"

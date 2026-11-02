@@ -2,23 +2,16 @@
 
 #include "Common/GameTimer.h"
 #include "Common/Module.h"
-#include "Engine.RendererDX12/D3DHelpers.h"
-#include "Engine.RendererDX12/GDX12Device.h"
-#include "Engine.RendererDX12/GDX12DescriptorHeap.h"
-#include "Engine.RendererDX12/GDX12FrameConstants.h"
-#include "Engine.RendererDX12/GDX12RootSignature.h"
-#include "Engine.RendererDX12/GDX12SwapChain.h"
-#include "Engine.RendererDX12/GDX12Texture.h"
-#include "Engine.RendererDX12/GDX12Material.h"
-#include "Engine.RendererDX12/GDX12GeometryBuffer.h"
-#include "Engine.RendererDX12/GDX12RenderCommandRecorder.h"
 
-#include "Engine.Core/Types/TextureTypes.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
 
 class SceneManagerModule;
 class World;
+class GDX12SwapChain;
+class GDX12Device;
+class GDX12GPUTimer;
 
 struct TransformComponent;
 struct CameraComponent;
@@ -30,9 +23,10 @@ using namespace Engine::Core;
 
 struct TransformCompGPUData
 {
-    UINT CBufferIndex;
-    UINT NumFramesDirty;
-    Matrix World;
+    UINT CBufferIndex = -1;
+    UINT NumFramesDirty = -1;
+    Matrix World = Identity4x4();
+    Matrix PrevWorld = Identity4x4();
 };
 
 class RenderModule final : public Module
@@ -44,19 +38,21 @@ public:
     void Initialize() override;
     void Uninitialize() override;
 
-    void OnResize() const;
+    void OnResize();
 
     GDX12Material* GetMaterialByName(const std::string& name);
 
     //returns a pointer to a fully initialized structure that you can specify in components
     GDX12Material* CreateMaterial(const std::string& name);
 
-    GDX12Texture* GetTextureByName(const std::string& name);
+    GPUTexture* GetTextureByName(const std::string& name);
     //returns a pointer to a fully initialized structure that you can specify in materials
-    GDX12Texture* CreateTexture(const std::string& name, const Texture* texture);
+    GPUTexture* CreateTexture(const std::string& name, const Texture* texture);
 
     //Uploads Mesh geometry to GPU
     void SubmitMesh(const Mesh* mesh, MeshHandle handle);
+
+    void SetActiveCamera(CameraComponent* camera);
     
     struct WorldRenderSubscriptions
     {
@@ -96,10 +92,18 @@ public:
     void OnRenderComponentUpdated(World& world, Entity entity, StaticMeshRenderComponent& component);
 
     const float GetAspectRatio();
-    GDX12RenderCommandRecorder* GetCommandRecorder();
-    GDX12FrameConstants* GetCurrentFrameConstants();
-    const GPUMesh* GetGPUMesh(MeshHandle handle);
-    GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetIndirectCommandsCache();
+    GDX12FrameConstants* GetCurrentPrimaryFrameConstants();
+    GDX12FrameConstants* GetCurrentSecondaryFrameConstants();
+    const GPUMesh* GetPrimaryGPUMesh(MeshHandle handle);
+    const GPUMesh* GetSecondaryGPUMesh(MeshHandle handle);
+    GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetPrimaryIndirectCommandsCache();
+    GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetSecondaryIndirectCommandsCache();
+
+    uint32_t GetPrimaryPipelineFlags();
+    uint32_t GetSecondaryPipelineFlags();
+    RenderPipelineCommonData* GetRenderPipelineCommonData();
+    bool PrimaryPipelineHasFlag(uint32_t flag);
+    bool SecondaryPipelineHasFlag(uint32_t flag);
 
 protected:
     void OnUpdate() override;
@@ -109,18 +113,17 @@ protected:
     bool ShouldRender() override;
 
 private:
-    void BuildDescHeapsAndBackBuffer();
-    void BuildRootSignatures();
-    void BuildShaders();
-    void BuildPSOs();
-    void BuildFrameConstants();
-
-    void UpdateMainCB();
-    void UpdateMaterialCB();
+    void BuildBackBuffer();
+    void ShareFences();
+    void ConfigureRenderPipeline();
+    void SetupRenderPasses();
+    void InitializeRenderPasses();
     
     void SubscribeToSceneManager();
     void UnsubscribeFromSceneManager();
     void UnsubscribeFromAllWorlds();
+
+    GDX12Texture* CreateDX12Texture(const std::string& name, GDX12DeviceResources* resources, const Texture* texture);
 
     GameTimer* _timer;
     Window* _window;
@@ -130,42 +133,29 @@ private:
     
     std::unordered_map<Entity, TransformCompGPUData> _transformGPUData;
     std::unordered_map<World*, WorldRenderSubscriptions> _worldSubscriptions;
-
-    GDX12RenderCommandRecorder _commandRecorder;
+    RenderPipelineCommonData _RPcommonData;
 
     std::unique_ptr<GDX12Device> _primaryDevice;
     std::unique_ptr<GDX12Device> _secondaryDevice;
     bool _dualGPUMode;
+    std::unique_ptr<GDX12GPUTimer> _primaryGPUTimer;
+    std::unique_ptr<GDX12GPUTimer> _secondaryGPUTimer;
 
-    std::unordered_map<std::string, std::vector<D3D12_INPUT_ELEMENT_DESC>> _inputLayouts;
+    GDX12DeviceResources _primaryResources;
+    GDX12DeviceResources _secondaryResources;
+    std::unordered_map<std::string, std::unique_ptr<GPUTexture>> _textures;
     std::unordered_map<std::string, std::unique_ptr<GDX12Material>> _materials;
-
-    // All of class members below should probably be put into DeviceResources class, and made for each device
-    // Since all of these resources are currently existing on _primaryDevice only
-    std::unique_ptr<GDX12GeometryBuffer> _geometryBuffer;
-
-    // All heaps created in one high-capacity instance
-    std::unique_ptr<GDX12DescriptorHeap> _rtvHeap;
-    std::unique_ptr<GDX12DescriptorHeap> _srvuavHeap;
-    std::unique_ptr<GDX12DescriptorHeap> _dsvHeap;
-
-    std::vector<std::unique_ptr<GDX12FrameConstants>> _frameConstants;
-    UINT _currFrameConstantsIndex;
-
-    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> _IndirectCommandsCache;
-
-    std::unordered_map<std::string, ComPtr<ID3DBlob>> _shaders;
-    std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> _PSOs;
-    std::unordered_map<std::string, std::unique_ptr<GDX12RootSignature>> _rootSignatures;
-    std::unordered_map <std::string, ComPtr<ID3D12CommandSignature>> _commandSignatures;
-
-    std::unordered_map<std::string, std::unique_ptr<GDX12Texture>> _textures;
 
     // These two resources are made on _primaryDevice only
     std::unique_ptr<GDX12SwapChain> _backBuffer;
     std::unique_ptr<GDX12Texture> _depthStencil;
+    
+    // Sorted in execution order
+    std::vector<std::unique_ptr<GDX12RenderPass>> _primaryRenderPassExecutionList;
+    std::vector<std::unique_ptr<GDX12RenderPass>> _secondaryRenderPassExecutionList;
 
-    std::unique_ptr<GDX12Texture> _opaqueAccumTexture;
-    std::unique_ptr<GDX12Texture> _transparencyAccumTexture;
-    std::unique_ptr<GDX12Texture> _transparencyRevealageTexture;
+    // Flags that are accumulated from every active RenderPass on the device
+    // Defines which resources should be uploaded onto respective GPU
+    uint32_t _primaryPipelineFlags;
+    uint32_t _secondaryPipelineFlags;
 };

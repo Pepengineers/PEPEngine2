@@ -7,6 +7,7 @@ class GDX12TextureResource : public GDX12Resource
 {
 public:
     GDX12TextureResource(ComPtr<ID3D12Resource> resource);
+    GDX12TextureResource();
     ~GDX12TextureResource();
 
     // Enhanced texture barrier transition getters
@@ -28,7 +29,7 @@ public:
         D3D12_BARRIER_ACCESS accessAfter, D3D12_BARRIER_LAYOUT layoutAfter);
 
     void SetCurrentState(D3D12_BARRIER_SYNC sync, D3D12_BARRIER_ACCESS access, D3D12_BARRIER_LAYOUT layout);
-
+    void ResetState() override;
     D3D12_BARRIER_SYNC GetCurrentSync();
     D3D12_BARRIER_ACCESS GetCurrentAccess();
     D3D12_BARRIER_LAYOUT GetCurrentLayout();

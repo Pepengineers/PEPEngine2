@@ -1,11 +1,10 @@
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 
 #include "Engine.RendererDX12/GDX12CommandList.h"
+#include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 
 GDX12CommandQueue::GDX12CommandQueue(GDX12Device* device)
-    : FenceValue(0), 
-    _device(device), 
-    _lastDispatchedFenceValue(0)
+    : FenceValue(0),  _device(device),  _lastDispatchedFenceValue(0)
 {
     D3D12_COMMAND_QUEUE_DESC desc = {};
     desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
@@ -13,16 +12,20 @@ GDX12CommandQueue::GDX12CommandQueue(GDX12Device* device)
     desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
     desc.NodeMask = 0;
 
-    ThrowIfFailed(device->GetDevice()->CreateCommandQueue(&desc, IID_PPV_ARGS(&_commandQueue)));
-    ThrowIfFailed(device->GetDevice()->CreateFence(FenceValue, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&_fence)));
+    ThrowIfFailed(device->GetCommandQueueCreationDevice()->CreateCommandQueue(&desc, IID_PPV_ARGS(&_proxyCommandQueue)));
+    _commandQueue = GDX12StreamlineSDK::Get().GetNativeCommandQueue(_proxyCommandQueue);
+    ThrowIfFailed(device->GetDevice()->CreateFence(FenceValue, 
+        D3D12_FENCE_FLAG_SHARED | D3D12_FENCE_FLAG_SHARED_CROSS_ADAPTER, IID_PPV_ARGS(&_fence)));
 }
 
 void GDX12CommandQueue::Reset()
 {
+    _proxyCommandQueue.Reset();
     _commandQueue.Reset();
     _fence.Reset();
     _workingCommandLists.clear();
     _availableCommandLists.clear();
+    _otherFence.Reset();
 }
 
 GDX12CommandQueue::~GDX12CommandQueue()
@@ -33,6 +36,11 @@ GDX12CommandQueue::~GDX12CommandQueue()
 const ComPtr<ID3D12CommandQueue>& GDX12CommandQueue::GetCommandQueue()
 {
     return _commandQueue;
+}
+
+const ComPtr<ID3D12CommandQueue>& GDX12CommandQueue::GetPresentCommandQueue()
+{
+    return _proxyCommandQueue ? _proxyCommandQueue : _commandQueue;
 }
 
 GDX12CommandList* GDX12CommandQueue::GetCommandList()
@@ -67,23 +75,24 @@ void GDX12CommandQueue::ExecuteCommandList(GDX12CommandList* commandList)
     _lastDispatchedFenceValue = FenceValue;
 }
 
-void GDX12CommandQueue::ExecuteCommandLists(GDX12CommandList** commandLists, UINT count)
+void GDX12CommandQueue::ExecuteCommandLists(std::vector<GDX12CommandList*>& commandLists)
 {
     std::vector<ID3D12CommandList*> ppLists;
-    ppLists.reserve(count);
+    UINT commandListCount = commandLists.size();
+    ppLists.reserve(commandListCount);
 
-    for (UINT i = 0; i < count; ++i)
+    for (UINT i = 0; i < commandListCount; ++i)
     {
         commandLists[i]->GetCommandList()->Close();
         ppLists.push_back(commandLists[i]->GetCommandList().Get());
     }
 
-    _commandQueue->ExecuteCommandLists(count, ppLists.data());
+    _commandQueue->ExecuteCommandLists(commandListCount, ppLists.data());
 
     FenceValue++;
     _commandQueue->Signal(_fence.Get(), FenceValue);
 
-    for (UINT i = 0; i < count; ++i) { commandLists[i]->FenceValue = FenceValue; }
+    for (UINT i = 0; i < commandListCount; ++i) { commandLists[i]->FenceValue = FenceValue; }
     _lastDispatchedFenceValue = FenceValue;
 }
 
@@ -92,7 +101,12 @@ const ComPtr<ID3D12Fence>& GDX12CommandQueue::GetFence()
     return _fence;
 }
 
-void GDX12CommandQueue::WaitForFenceValue(uint64_t fenceValue)
+ComPtr<ID3D12Fence>& GDX12CommandQueue::GetOtherFence()
+{
+    return _otherFence;
+}
+
+void GDX12CommandQueue::CPUWaitForFenceValue(uint64_t fenceValue)
 {
     if (_fence->GetCompletedValue() >= fenceValue) { return; }
 
@@ -102,11 +116,16 @@ void GDX12CommandQueue::WaitForFenceValue(uint64_t fenceValue)
     CloseHandle(event);
 }
 
+void GDX12CommandQueue::WaitForOtherFence(uint64_t otherFenceValue)
+{
+    _commandQueue->Wait(_otherFence.Get(), otherFenceValue);
+}
+
 void GDX12CommandQueue::Flush()
 {
     FenceValue++;
     _commandQueue->Signal(_fence.Get(), FenceValue);
-    if (_lastDispatchedFenceValue > 0) { WaitForFenceValue(_lastDispatchedFenceValue); }
+    if (_lastDispatchedFenceValue > 0) { CPUWaitForFenceValue(_lastDispatchedFenceValue); }
 }
 
 void GDX12CommandQueue::ClearCompletedLists()

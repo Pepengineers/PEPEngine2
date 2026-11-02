@@ -23,9 +23,14 @@ public:
     CD3DX12_RESOURCE_BARRIER GetPresentBarrier();
     CD3DX12_RESOURCE_BARRIER GetIndirectArgsBarrier();
     CD3DX12_RESOURCE_BARRIER GetUAVBarrier();
+    CD3DX12_RESOURCE_BARRIER GetSRVBarrier();
 
     void SetCurrentState(D3D12_RESOURCE_STATES newState);
     D3D12_RESOURCE_STATES GetCurrentState();
+
+    void Reset();
+
+    virtual void ResetState();
 
 	ComPtr<ID3D12Resource> D3DResource;
 

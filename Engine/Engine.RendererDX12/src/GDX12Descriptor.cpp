@@ -14,7 +14,7 @@ GDX12Descriptor::GDX12Descriptor() :
 
 GDX12Descriptor::~GDX12Descriptor()
 {
-    if (HeapIndex != -1) _heap->_occupanceRegistry[HeapIndex] = false;
+    if (HeapIndex != -1) { _heap->_occupanceRegistry[HeapIndex] = false; }
 }
 
 void GDX12Descriptor::InitAsSRV(ID3D12Resource* resource, D3D12_SHADER_RESOURCE_VIEW_DESC* srvDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex)

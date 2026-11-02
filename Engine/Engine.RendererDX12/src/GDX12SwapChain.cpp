@@ -4,17 +4,13 @@
 #include <Engine.RendererDX12/GDX12Device.h>
 #include <Engine.RendererDX12/GDX12Texture.h>
 #include <Engine.RendererDX12/GDX12DescriptorHeap.h>
+#include <Engine.RendererDX12/GDX12StreamlineSDK.h>
 
 GDX12SwapChain::GDX12SwapChain(GDX12Device* device, HWND hwnd,
     DXGI_FORMAT format, UINT bufferCount, UINT width, UINT height, GDX12DescriptorHeap* rtvHeap)
-    : _device(device)
-    , _hwnd(hwnd)
-    , _format(format)
-    , _bufferCount(bufferCount)
-    , _currentBufferIndex(0)
-    , _width(width)
-    , _height(height)
-    , _rtvHeap(rtvHeap)
+    : _device(device), _hwnd(hwnd),
+    _format(format), _bufferCount(bufferCount), _currentBufferIndex(0),
+    _width(width), _height(height), _rtvHeap(rtvHeap), bVSyncEnabled(false)
 {
     Reset();
 
@@ -32,9 +28,10 @@ GDX12SwapChain::GDX12SwapChain(GDX12Device* device, HWND hwnd,
     swapChainDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
     swapChainDesc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH | DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
-    _swapChain = GDX12DeviceFactory::CreateSwapChain(_device, swapChainDesc, _hwnd);
-
+    _proxySwapChain = GDX12DeviceFactory::CreateSwapChain(_device, swapChainDesc, _hwnd);
+    _swapChain = GDX12StreamlineSDK::Get().GetNativeSwapChain(_proxySwapChain);
     CreateBuffers();
+    _currentBufferIndex = GetPresentationSwapChain()->GetCurrentBackBufferIndex();
 
     _screenViewport.TopLeftX = 0;
     _screenViewport.TopLeftY = 0;
@@ -59,7 +56,8 @@ void GDX12SwapChain::CreateBuffers()
     for (UINT i = 0; i < _bufferCount; i++)
     {
         ComPtr<ID3D12Resource> backBuffer;
-       _swapChain->GetBuffer(i, IID_PPV_ARGS(&backBuffer));
+        GetPresentationSwapChain()->GetBuffer(i, IID_PPV_ARGS(&backBuffer));
+        backBuffer = GDX12StreamlineSDK::Get().GetNativeResource(backBuffer);
 
         GDX12TextureDesc textureDesc;
         textureDesc.RTVHeap = _rtvHeap;
@@ -78,7 +76,8 @@ void GDX12SwapChain::CreateBuffers()
 
         textureDesc.ExternalResource = backBuffer;
 
-        _buffers.push_back(std::make_unique<GDX12Texture>(textureDesc));
+        _buffers.push_back(std::make_unique<GDX12Texture>());
+        _buffers[i]->Initialize(textureDesc);
     }
 }
 
@@ -92,14 +91,14 @@ void GDX12SwapChain::Resize(UINT width, UINT height)
     _buffers.clear();
 
     DXGI_SWAP_CHAIN_DESC desc;
-    _swapChain->GetDesc(&desc);
+    GetPresentationSwapChain()->GetDesc(&desc);
 
-    _swapChain->ResizeBuffers(
+    GetPresentationSwapChain()->ResizeBuffers(
         _bufferCount, _width, _height,
         desc.BufferDesc.Format, desc.Flags);
 
     CreateBuffers();
-    _currentBufferIndex = _swapChain->GetCurrentBackBufferIndex();
+    _currentBufferIndex = GetPresentationSwapChain()->GetCurrentBackBufferIndex();
 
     _screenViewport.TopLeftX = 0;
     _screenViewport.TopLeftY = 0;
@@ -113,8 +112,10 @@ void GDX12SwapChain::Resize(UINT width, UINT height)
 
 void GDX12SwapChain::Present()
 {
-    _swapChain->Present(0u, DXGI_PRESENT_ALLOW_TEARING);
-    _currentBufferIndex = (_currentBufferIndex + 1) % _bufferCount;
+    UINT syncInterval = bVSyncEnabled ? 1 : 0;
+    UINT presentFlags = bVSyncEnabled ? 0 : DXGI_PRESENT_ALLOW_TEARING;
+    GetPresentationSwapChain()->Present(syncInterval, presentFlags);
+    _currentBufferIndex = GetPresentationSwapChain()->GetCurrentBackBufferIndex();
 }
 
 D3D12_VIEWPORT GDX12SwapChain::GetViewport()
@@ -125,6 +126,16 @@ D3D12_VIEWPORT GDX12SwapChain::GetViewport()
 D3D12_RECT GDX12SwapChain::GetScissorRect()
 {
     return _screenScissorRect;
+}
+
+GDX12Texture* GDX12SwapChain::GetTexture()
+{
+    return GetCurrentBuffer();
+}
+
+bool GDX12SwapChain::IsInitialized()
+{
+    return true;
 }
 
 DXGI_FORMAT GDX12SwapChain::GetFormat()
@@ -166,6 +177,12 @@ const ComPtr<IDXGISwapChain4>& GDX12SwapChain::GetSwapChain()
 void GDX12SwapChain::Reset()
 {
     _buffers.clear();
+    _proxySwapChain.Reset();
     _swapChain.Reset();
     _currentBufferIndex = 0;
+}
+
+IDXGISwapChain4* GDX12SwapChain::GetPresentationSwapChain() const
+{
+    return (_proxySwapChain ? _proxySwapChain : _swapChain).Get();
 }

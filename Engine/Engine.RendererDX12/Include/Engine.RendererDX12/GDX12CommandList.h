@@ -85,7 +85,7 @@ public:
 	//Misc
 	void BeginPixEvent(const std::string& name, XMVECTOR color);
 	void EndPixEvent();
-
+	void CopyResource(ID3D12Resource* destResource, ID3D12Resource* sourceResource);
 	void BuildRaytracingAccelerationStructure(const D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC* pDesc);
 
 

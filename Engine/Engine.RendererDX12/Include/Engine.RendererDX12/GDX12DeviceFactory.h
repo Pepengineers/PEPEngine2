@@ -45,5 +45,6 @@ private:
 	GDX12DeviceFactory() = delete;
 
 	static ComPtr<IDXGIFactory7> _dxgiFactory;
+	static ComPtr<IDXGIFactory7> _dxgiFactoryProxy;
 	static bool _isInitialized;
 };

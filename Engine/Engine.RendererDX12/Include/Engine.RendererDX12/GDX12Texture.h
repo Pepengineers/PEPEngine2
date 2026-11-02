@@ -2,6 +2,9 @@
 
 #include "Engine.RendererDX12\D3DHelpers.h"
 
+#include "Engine.Core/Types/TextureTypes.h"
+#include "Engine.RendererDX12/IRenderPassLink.h"
+
 class GDX12Descriptor;
 class GDX12DescriptorHeap;
 class GDX12Device;
@@ -14,6 +17,22 @@ enum class ETextureSemantic
 	Color,
 	Data,
 };
+
+namespace
+{
+	ETextureSemantic ConvertTextureSemantic(const Engine::Core::ETextureType textureType)
+	{
+		switch (textureType)
+		{
+		case Engine::Core::ETextureType::Color:
+			return ETextureSemantic::Color;
+		case Engine::Core::ETextureType::Data:
+			return ETextureSemantic::Data;
+		default:
+			return ETextureSemantic::Unknown;
+		}
+	}
+}
 
 struct GDX12TextureDesc
 {
@@ -44,11 +63,13 @@ struct GDX12TextureDesc
 	ComPtr<ID3D12Resource> ExternalResource = nullptr;
 };
 
-class GDX12Texture
+class GDX12Texture : public IRenderPassLink
 {
 public:
-	GDX12Texture(GDX12TextureDesc desc);
+	GDX12Texture();
 	~GDX12Texture();
+
+	void Initialize(GDX12TextureDesc desc);
 
 	//Recreates resources with new size and same descriptors
 	//This will wipe all data on said resources, unless ExternalResource is provided
@@ -58,11 +79,20 @@ public:
 	GDX12Descriptor* GetRTV();
 	GDX12Descriptor* GetUAV();
 	GDX12Descriptor* GetDSV();
+	bool HasDSV();
+	bool HasSRV();
+	bool HasUAV();
+	bool HasRTV();
 	D3D12_CLEAR_VALUE& GetClearValue();
 	GDX12TextureResource* GetResource();
 	DXGI_FORMAT GetFormat();
 	ETextureSemantic GetSemantic() const;
-
+	D3D12_VIEWPORT GetViewport();
+	D3D12_RECT GetScissorRect();
+	UINT GetWidth();
+	UINT GetHeight();
+	GDX12Texture* GetTexture() override;
+	bool IsInitialized() override;
 
 private:
 	void CreateResource();
@@ -77,4 +107,9 @@ private:
 	std::unique_ptr<GDX12Descriptor> _uav;
 	std::unique_ptr<GDX12Descriptor> _dsv;
 	D3D12_CLEAR_VALUE _clearValue;
+
+	D3D12_VIEWPORT _viewport;
+	D3D12_RECT _scissorRect;
+
+	bool _isInitialized;
 };

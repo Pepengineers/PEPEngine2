@@ -9,6 +9,11 @@ GDX12TextureResource::GDX12TextureResource(ComPtr<ID3D12Resource> resource) :
 	_desc = D3DResource->GetDesc();
 }
 
+GDX12TextureResource::GDX12TextureResource() : _currentAccess(D3D12_BARRIER_ACCESS_COMMON),
+    _currentLayout(D3D12_BARRIER_LAYOUT_COMMON), _currentSync(D3D12_BARRIER_SYNC_ALL), _desc({})
+{
+}
+
 GDX12TextureResource::~GDX12TextureResource()
 {
 }
@@ -28,6 +33,15 @@ void GDX12TextureResource::SetCurrentState(D3D12_BARRIER_SYNC sync, D3D12_BARRIE
     _currentSync = sync;
     _currentAccess = access;
     _currentLayout = layout;
+}
+
+void GDX12TextureResource::ResetState()
+{
+    GDX12Resource::ResetState();
+
+    _currentSync = D3D12_BARRIER_SYNC_NONE;
+    _currentAccess = D3D12_BARRIER_ACCESS_COMMON;
+    _currentLayout = D3D12_BARRIER_LAYOUT_COMMON;
 }
 
 D3D12_BARRIER_SYNC GDX12TextureResource::GetCurrentSync()
