@@ -19,6 +19,61 @@ static void Require(bool condition, const char* message)
     if (!condition) throw std::runtime_error(message);
 }
 
+static void ShadowUploadSlots(GDX12Device& device)
+{
+    GDX12DeviceResources resources;
+    resources.Initialize(&device);
+    ComPtr<ID3D12InfoQueue> info;
+    if (SUCCEEDED(device.GetDevice().As(&info))) info->ClearStoredMessages();
+    auto& templates = *resources.IndirectCommandsCache;
+    GDX12IndirectDrawArgs draw = {};
+    draw.IndexCountPerInstance = 3; draw.InstanceCount = 1;
+    for (UINT capacity : { 1u, 9u })
+    {
+        templates.Resize(capacity);
+        templates.CopyData(capacity - 1, draw);
+        const auto revision = templates.GetRevision();
+        templates.CopyData(capacity - 1, draw);
+        Require(templates.GetRevision() == revision, "Unchanged templates must not invalidate GPU copies");
+        for (UINT slot = 0; slot < resources.FrameConstants.size(); ++slot)
+        {
+            resources.CurrFrameConstantsIndex = slot;
+            auto& frame = *resources.FrameConstants[slot];
+            resources.PrepareLocalShadowData();
+            Require(frame.ShadowTemplatesDirty, "Template edits/growth must reach every frame slot");
+            auto* queue = device.GetCommandQueue();
+            auto* list = queue->GetCommandList();
+            resources.UploadLocalShadowData(list);
+            const auto bytes = UINT64(capacity) * sizeof(draw);
+            auto readback = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(bytes),
+                D3D12_RESOURCE_STATE_COPY_DEST, nullptr);
+            auto& gpu = frame.ShadowTemplates->GetResource();
+            D3D12_HEAP_PROPERTIES heap = {};
+            ThrowIfFailed(gpu.D3DResource->GetHeapProperties(&heap, nullptr));
+            Require(heap.Type == D3D12_HEAP_TYPE_DEFAULT, "Shadow templates must reside in DEFAULT memory");
+            list->ResourceBarrier({ gpu.GetCopySourceBarrier() });
+            list->GetCommandList()->CopyBufferRegion(readback.Get(), 0, gpu.D3DResource.Get(), 0, bytes);
+            queue->ExecuteCommandList(list); queue->Flush();
+            void* mapped = nullptr;
+            ThrowIfFailed(readback->Map(0, nullptr, &mapped));
+            Require(std::memcmp(static_cast<GDX12IndirectDrawArgs*>(mapped) + capacity - 1, &draw, sizeof(draw)) == 0,
+                "Frame-local template staging lost an edit");
+            readback->Unmap(0, nullptr);
+            resources.PrepareLocalShadowData();
+            Require(!frame.ShadowTemplatesDirty, "Unchanged slots must reuse their DEFAULT templates");
+        }
+        draw = {}; // Deletion is an empty command and must invalidate every slot too.
+        templates.CopyData(capacity - 1, draw);
+        for (UINT slot = 0; slot < resources.FrameConstants.size(); ++slot)
+        {
+            resources.CurrFrameConstantsIndex = slot;
+            resources.PrepareLocalShadowData();
+            Require(resources.FrameConstants[slot]->ShadowTemplatesDirty, "Deletion must invalidate every slot");
+        }
+        draw.IndexCountPerInstance = 6; draw.InstanceCount = 1;
+    }
+}
+
 static void CheckReadback(GDX12Device& device, GDX12Texture& texture, UINT subresource, bool lut, bool depth = false, bool expectCaster = true)
 {
     const auto desc = texture.GetResource()->D3DResource->GetDesc();
@@ -198,6 +253,7 @@ int main(int argc, char** argv)
         if (!benchmark) ThrowIfFailed(device.GetDevice().As(&info));
         // Existing empty scene caches create null/zero-element descriptors before scene loading.
         if (info) info->ClearStoredMessages();
+        ShadowUploadSlots(device);
         auto* uploadQueue = device.GetCommandQueue();
         auto* pendingUpload = uploadQueue->GetCommandList();
         auto* otherUpload = uploadQueue->GetCommandList();
@@ -353,6 +409,8 @@ int main(int argc, char** argv)
                     resources.LocalShadowVisibility).Complete();
             else resources.LocalShadowVisibility.clear();
             auto* list = queue->GetCommandList();
+            resources.PrepareLocalShadowData();
+            resources.UploadLocalShadowData(list);
             localShadows.Execute(list);
             queue->ExecuteCommandList(list);
             queue->Flush();

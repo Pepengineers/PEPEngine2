@@ -934,6 +934,8 @@ void RenderModule::OnRender()
     }
 
     auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
+    _primaryResources.PrepareLocalShadowData();
+    _primaryResources.UploadLocalShadowData(primarycmdList);
     _primaryGraph->Execute(primarycmdList);
     _primaryGPUTimer->Stop(primarycmdList);
     primarycmdQueue->ExecuteCommandList(primarycmdList);

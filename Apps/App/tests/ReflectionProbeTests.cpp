@@ -429,6 +429,8 @@ int main(int argc, char** argv)
             if (frame->FenceValue) queue->CPUWaitForFenceValue(frame->FenceValue);
             upload();
             auto* list = queue->GetCommandList();
+            resources.PrepareLocalShadowData();
+            resources.UploadLocalShadowData(list);
             localShadows.Execute(list);
             timer.Start(list);
             reflections.Execute(list);

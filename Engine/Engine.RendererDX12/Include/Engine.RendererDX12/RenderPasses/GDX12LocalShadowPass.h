@@ -170,10 +170,10 @@ public:
                 commands->SetPipelineState(_cullPSO);
                 const UINT parameters[] = { lightIndex, face };
                 commands->GetCommandList()->SetComputeRoot32BitConstants(0, 2, parameters, 0);
-                commands->SetComputeSRV(0, frame->InstanceCache->GetSRV()->GPUHandle);
-                commands->SetComputeSRV(1, _resources->IndirectCommandsCache->GetSRV()->GPUHandle);
-                commands->SetComputeSRV(2, frame->MaterialCache->GetSRV()->GPUHandle);
-                commands->SetComputeSRV(3, frame->LocalLightCache->GetSRV()->GPUHandle);
+                commands->SetComputeSRV(0, frame->ShadowInstances->GetSRV()->GPUHandle);
+                commands->SetComputeSRV(1, frame->ShadowTemplates->GetSRV()->GPUHandle);
+                commands->SetComputeSRV(2, frame->ShadowMaterials->GetSRV()->GPUHandle);
+                commands->SetComputeSRV(3, frame->ShadowLights->GetSRV()->GPUHandle);
                 commands->SetComputeUAV(0, visibility.Commands->GetUAV()->GPUHandle);
                 if (count) commands->Dispatch((count + 63) / 64, 1, 1);
                 }
@@ -183,10 +183,10 @@ public:
                     visibility.Counter->GetResource().GetIndirectArgsBarrier(), _maps->GetResource()->GetDepthWriteBarrier() });
                 commands->SetGraphicsRootSignature(_graphicsRoot.get());
                 commands->SetPipelineState(_depthPSO);
-                commands->SetGraphicsSRV(0, frame->MaterialCache->GetSRV()->GPUHandle);
-                commands->SetGraphicsSRV(1, frame->TransformCache->GetSRV()->GPUHandle);
-                commands->SetGraphicsSRV(2, frame->InstanceCache->GetSRV()->GPUHandle);
-                commands->SetGraphicsSRV(3, frame->LocalLightCache->GetSRV()->GPUHandle);
+                commands->SetGraphicsSRV(0, frame->ShadowMaterials->GetSRV()->GPUHandle);
+                commands->SetGraphicsSRV(1, frame->ShadowTransforms->GetSRV()->GPUHandle);
+                commands->SetGraphicsSRV(2, frame->ShadowInstances->GetSRV()->GPUHandle);
+                commands->SetGraphicsSRV(3, frame->ShadowLights->GetSRV()->GPUHandle);
                 commands->SetGraphicsSRV(4, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
                 commands->GetCommandList()->SetGraphicsRoot32BitConstant(0, lightIndex * 6 + face, 1);
                 commands->SetGeometryBuffer(_resources->GeometryBuffer.get());

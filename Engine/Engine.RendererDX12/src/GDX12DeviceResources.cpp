@@ -5,6 +5,7 @@
 
 #include "Common/GameTimer.h"
 #include <cstddef>
+#include <type_traits>
 
 static AutoConsoleVariable<UINT> NumFrameConstantVariable(
     L"Render.NumFrames",
@@ -72,7 +73,50 @@ void GDX12DeviceResources::Initialize(GDX12Device* device)
     }
 
     IndirectCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(device, 0, EBufferType::Upload, false);
+    IndirectCommandsCache->TrackChanges();
     IndirectCommandsCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+}
+
+void GDX12DeviceResources::PrepareLocalShadowData()
+{
+    auto& frame = *FrameConstants[CurrFrameConstantsIndex];
+    if (!frame.ShadowTemplatesUpload)
+        frame.ShadowTemplatesUpload = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(Device, 0, EBufferType::Upload, false);
+    const auto revision = IndirectCommandsCache->GetRevision();
+    if (frame.ShadowTemplateRevision == revision) return;
+    const auto count = IndirectCommandsCache->GetElementCount();
+    frame.ShadowTemplatesUpload->Resize(count);
+    if (count) frame.ShadowTemplatesUpload->CopyData(0, IndirectCommandsCache->GetCPUData(), count);
+    frame.ShadowTemplateRevision = revision;
+    frame.ShadowTemplatesDirty = true;
+}
+
+void GDX12DeviceResources::UploadLocalShadowData(GDX12CommandList* commands)
+{
+    GDX12_SCOPED_EVENT(commands, "Local shadow scene upload");
+    auto& frame = *FrameConstants[CurrFrameConstantsIndex];
+    const auto upload = [this, commands](auto& source, auto& target, bool dirty = true)
+    {
+        using Buffer = typename std::decay_t<decltype(source)>::element_type;
+        const UINT count = source->GetElementCount();
+        if (!target)
+        {
+            target = std::make_unique<Buffer>(Device, (std::max)(count, 1u), EBufferType::Default, false);
+            target->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        }
+        target->Resize(count);
+        if (!dirty || !count) return;
+        commands->ResourceBarrier({ target->GetResource().GetCopyDestBarrier() });
+        commands->GetCommandList()->CopyBufferRegion(target->GetResource().D3DResource.Get(), 0,
+            source->GetResource().D3DResource.Get(), 0, UINT64(count) * source->GetElementSize());
+        commands->ResourceBarrier({ target->GetResource().GetSRVBarrier() });
+    };
+    upload(frame.ShadowTemplatesUpload, frame.ShadowTemplates, frame.ShadowTemplatesDirty);
+    frame.ShadowTemplatesDirty = false;
+    upload(frame.InstanceCache, frame.ShadowInstances);
+    upload(frame.MaterialCache, frame.ShadowMaterials);
+    upload(frame.LocalLightCache, frame.ShadowLights);
+    upload(frame.TransformCache, frame.ShadowTransforms);
 }
 
 void GDX12DeviceResources::UpdateMainCB(UINT width, UINT height, GameTimer* timer)

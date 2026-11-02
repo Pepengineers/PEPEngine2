@@ -39,6 +39,13 @@ public:
     std::unique_ptr<GDX12UploadBuffer<GDX12TransformConstants>> TransformCache;
     std::unique_ptr<GDX12UploadBuffer<GDX12MaterialConstants>> MaterialCache;
     std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> InstanceCache;
+    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> ShadowTemplatesUpload, ShadowTemplates;
+    std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> ShadowInstances;
+    std::unique_ptr<GDX12UploadBuffer<GDX12MaterialConstants>> ShadowMaterials;
+    std::unique_ptr<GDX12UploadBuffer<GDX12LocalLightConstants>> ShadowLights;
+    std::unique_ptr<GDX12UploadBuffer<GDX12TransformConstants>> ShadowTransforms;
+    uint64_t ShadowTemplateRevision = 0;
+    bool ShadowTemplatesDirty = false;
     std::unique_ptr<GDX12UploadBuffer<GDX12LightConstants>> LightCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12CameraConstants>> CameraCB;
     std::vector<GDX12VisibilityBuffers> CameraVisibilityCommands;

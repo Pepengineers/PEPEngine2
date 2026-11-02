@@ -65,4 +65,6 @@ public:
     void Initialize(GDX12Device* device);
     void UpdateMainCB(UINT width, UINT height, GameTimer* timer);
     void UpdateMaterialCB(std::unordered_map<std::string, std::unique_ptr<GDX12Material>>& materials);
+    void PrepareLocalShadowData();
+    void UploadLocalShadowData(GDX12CommandList* commands);
 };

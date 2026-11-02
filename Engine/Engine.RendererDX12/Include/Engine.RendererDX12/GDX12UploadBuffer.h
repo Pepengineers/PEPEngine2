@@ -8,6 +8,7 @@
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
 #include <cstring>
 #include <utility>
+#include <atomic>
 
 enum class EBufferType
 {
@@ -26,6 +27,11 @@ public:
 
     void CopyData(UINT elementIndex, const T& data);
     void CopyData(UINT elementIndex, const T* data, UINT count);
+
+    // CPU mirror avoids reading write-combined upload memory when checking static templates.
+    void TrackChanges() { _cpuData.resize(_elementCount); _trackChanges = true; }
+    uint64_t GetRevision() const { return _revision.load(std::memory_order_relaxed); }
+    const T* GetCPUData() const { return _cpuData.data(); }
 
     void Resize(UINT newElementCount);
     UINT GetElementCount();
@@ -57,6 +63,9 @@ private:
     GDX12DescriptorHeap* _heap;
     UINT _SRVheapIndex;
     UINT _UAVheapIndex;
+    bool _trackChanges = false;
+    std::vector<T> _cpuData;
+    std::atomic<uint64_t> _revision{1};
 };
 
 template<typename T>
@@ -179,11 +188,7 @@ void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T& data)
 {
     if (!_buffer.D3DResource) return;
     if (elementIndex >= _elementCount) return;
-
-    if (_bufferType == EBufferType::Upload && _mappedData)
-    {
-        memcpy(&_mappedData[elementIndex * _elementByteSize], &data, sizeof(T));
-    }
+    CopyData(elementIndex, &data, 1);
 }
 
 template<typename T>
@@ -194,6 +199,12 @@ void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T* data, UINT count
 
     if (_bufferType == EBufferType::Upload && _mappedData)
     {
+        if (_trackChanges)
+        {
+            if (std::memcmp(&_cpuData[elementIndex], data, sizeof(T) * count) == 0) return;
+            std::memcpy(&_cpuData[elementIndex], data, sizeof(T) * count);
+            _revision.fetch_add(1, std::memory_order_relaxed);
+        }
         memcpy(&_mappedData[elementIndex * _elementByteSize], data, sizeof(T) * count);
     }
 }
@@ -209,6 +220,11 @@ void GDX12UploadBuffer<T>::Resize(UINT newElementCount)
     std::swap(_mappedData, replacement._mappedData);
     std::swap(_elementCount, replacement._elementCount);
     std::swap(_totalBufferSize, replacement._totalBufferSize);
+    if (_trackChanges)
+    {
+        _cpuData.resize(newElementCount);
+        _revision.fetch_add(1, std::memory_order_relaxed);
+    }
 
     if (_srv) CreateSRV(_heap, _SRVheapIndex);
     if (_uav) CreateUAV(_heap, _UAVheapIndex);
