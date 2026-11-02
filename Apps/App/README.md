@@ -10,6 +10,18 @@ msbuild Apps/App/App.vcxproj /p:Configuration=Release /p:Platform=x64 /m
 Executable: `Build/bin/x64/Release/App/App.exe`. The existing asset-folder setting
 resolves assets independently of the working directory.
 
+Eight particle effects share the App-owned runtime CVar `App.Particles.CountScale`
+(default 1; <=0 also uses 1). Use
+`App.exe -App.Particles.CountScale=4` for four times the particles in every
+emitter, or set the CVar in App.exe's own `Config/Engine.ini`. GPU bursts refill
+dead slots to maintain the requested live simulation count from the first frame.
+Changing the count resets the pools and waits for GPU work; exclude that frame
+from timing. Fractional scales are accepted (0.5 gives 125000); the upper limit
+is 4194304/250000. The JSON includes `particle_count_scale` and `particle_budget`.
+Fireflies use a 120-vertex volumetric instanced mesh with animated wings; the
+other effects use larger billboard sprites.
+See [effects and benchmark commands](../../docs/rendering/scene-techniques.md).
+
 Scene loading prepares independent textures through the App's shared JobSystem,
 then publishes assets/materials/entities on the owner thread and batches texture
 uploads. Rendering starts after the complete scene is ready. OBJ import remains

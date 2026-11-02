@@ -11,8 +11,8 @@ in the task package remain the central reviewer's acceptance criteria.
 ## Ownership and API
 
 `ParticleEmitterComponent` is a WorldECS component. A component needs an existing
-entity's `TransformComponent`; no emitter, entity, material or asset is added to
-Bistro. Each emitter has its own GPU pool, counters, random stream, author settings,
+entity's `TransformComponent`. Bistro installs eight App-owned effects with a shared
+`App.Particles.CountScale` multiplier; see [scene techniques](scene-techniques.md). Each emitter has its own GPU pool, counters, random stream, author settings,
 reset revision and pending burst requests. Component copies get a new identity;
 ECS moves preserve identity, so dense-pool compaction does not reset simulation.
 Copying a component copies author settings and burst requests, not live GPU state.
@@ -115,9 +115,14 @@ acceleration cm/s², rotation speed rad/s. Color is linear HDR, straight alpha.
 | TimeScale | 1 | 0..100, multiplied with world scale before MaxDeltaTime clamp |
 | Seed | 1 | full uint32 range; Reset restarts sequence with the current seed |
 | Blend | WeightedAlpha | WeightedAlpha, Additive or SortedAlpha |
+| Geometry | Billboard | Billboard or built-in volumetric Firefly; Firefly accepts WeightedAlpha/Additive |
 | Texture | nullptr | renderer-owned primary-GPU color 2D texture; nullptr = white analytic disc |
 | AtlasColumns / AtlasRows | 1 / 1 | each 1..256, no more than texture width/height |
 | FramesPerSecond | 0 | 0 = atlas once over life; otherwise 0..1000 fps, looping |
+| DepthCollision | false | Enable screen-space collision against the current scene depth |
+| CollisionRadius | 1.5 | 0.01..1,000,000 cm; sphere radius independent of billboard size |
+| CollisionRestitution | 0.45 | 0..1; normal velocity retained after bounce |
+| CollisionThickness | 10 | 0..1,000,000 cm; maximum tolerated initial penetration |
 
 The texture is obtained through existing `RenderModule::CreateTexture` or
 `GetTextureByName`, uses its existing sRGB color SRV and material descriptor range,
@@ -165,6 +170,30 @@ resources; global Off retains existing state without allocating new resources.
 
 ## Rendering seams and limits
 
+Billboards already use quad instancing, with no geometry shader: `ParticleRaster.VS`
+uses `SV_VertexID` for six triangle-list corners and `SV_InstanceID` for each
+visible particle. GPU-generated `D3D12_DRAW_ARGUMENTS` are submitted with
+`ExecuteIndirect`; all four billboard PSOs bind only VS and PS. For lifetime atlas
+playback (`FramesPerSecond=0`, also used by Bistro), frame selection is
+`min(Columns*Rows-1, floor(Age/Lifetime * Columns*Rows))` in the compute cull pass.
+The pixel shader samples that frame's cell from the packed texture.
+
+`ParticleGeometry::Firefly` selects a shared immutable vertex buffer: five closed
+octahedra form a head, body, emissive abdomen and two volumetric wings, with
+120 vertices / 40 triangles (below the 600-vertex limit). `MeshVS` uses normal
+vertex input and `SV_InstanceID`; there is no GS or mesh-shader stage. Wings flap
+by particle age and the whole model rotates in world space. Previous age/rotation
+also animate the previous vertices for motion output. Material colors and a fixed
+key light show the facets; this is stylized emissive shading, not scene PBR lighting.
+
+Mesh weighted/additive lists use separate GPU counts and indirect arguments;
+ordinary sprites still draw six vertices, so adding meshes does not inflate their
+vertex work. Mesh resources and three PSOs (weighted/additive/motion) are lazy.
+The shared 96-byte draw record remains unchanged in size. Additional index regions
+cost eight bytes per scene slot only when mesh particles are present. Geometry
+fits the existing culling sphere. SortedAlpha mesh settings are rejected explicitly;
+weighted and additive meshes work alongside all three billboard blend modes.
+
 Order: existing depth prepass → early AO if selected → CSM/local shadows/probes →
 opaque G-buffer/late AO → deferred → AMD SSSR + single specular resolve → mesh
 WBOIT → particle simulation/cull/sort + weighted accumulation → WBOIT HDR resolve →
@@ -197,8 +226,14 @@ with weighted mesh/particle transparency. Weighted particles share approximate
 WBOIT ordering with transparent meshes. Additive energy is drawn after alpha modes.
 Motion/depth of overlapping transparent layers is a coverage-weighted approximation,
 not an exact per-layer history/depth solution. Transparent DoF/refraction, lighting
-and shadow casting, depth collisions, mesh particles, GPU child/subemitters,
+and shadow casting, arbitrary imported particle meshes, GPU child/subemitters,
 multi-GPU and SSAA are outside this implementation. Very large HDR overlap can
 overflow existing RGBA16F WBOIT/HDR targets; practical overlap budgets require GPU
 measurement. No visual quality, GPU timing, debug-layer cleanliness, build success
 or long-run stability is claimed.
+
+Depth collision reconstructs a local surface from current jittered reverse-Z depth
+and its closest depth neighbours. It runs per simulation substep, corrects sphere
+penetration and reflects incoming velocity. It sees only the frontmost on-screen
+depth, including merged water depth; hidden/off-screen geometry and glass without
+depth writes do not collide. Silhouette and fast grazing hits can be missed.

@@ -2,14 +2,15 @@
 #include "Particles.hlsli"
 
 StructuredBuffer<uint> AliveIn : register(t1);
+Texture2D<float> SceneDepth : register(t3);
 RWStructuredBuffer<Particle> Pool : register(u0);
 RWStructuredBuffer<uint> AliveOut : register(u1);
 RWStructuredBuffer<uint> Dead : register(u2);
 RWStructuredBuffer<uint> Counters : register(u3);
 RWStructuredBuffer<uint> Args : register(u4);
 RWStructuredBuffer<ParticleDraw> Draws : register(u5);
-RWStructuredBuffer<uint> Counts : register(u6); // all, weighted, additive, sorted
-RWStructuredBuffer<uint> Indices : register(u7); // weighted/additive, each TotalCapacity entries
+RWStructuredBuffer<uint> Counts : register(u6); // all, billboard weighted/additive/sorted, mesh weighted/additive
+RWStructuredBuffer<uint> Indices : register(u7); // billboard weighted/additive, mesh weighted/additive
 RWStructuredBuffer<uint> Keys : register(u8);
 RWStructuredBuffer<uint> Payloads : register(u9);
 RWStructuredBuffer<uint> DrawArgs : register(u10);
@@ -42,6 +43,51 @@ void DispatchArgs(uint offset, uint count)
     Args[offset] = (count + 255) / 256;
     Args[offset + 1] = 1;
     Args[offset + 2] = 1;
+}
+
+float3 DepthPosition(int2 pixel, float depth)
+{
+    float2 ndc = (float2(pixel) + 0.5f) / RenderSize * float2(2, -2) + float2(-1, 1);
+    float4 world = mul(float4(ndc, depth, 1), Camera.InvViewProj);
+    return world.xyz / world.w;
+}
+
+// shortcut: only frontmost on-screen depth collides; use scene colliders when hidden/off-screen hits are required.
+void CollideDepth(float3 previous, inout float3 position, inout float3 velocity)
+{
+    float4 clip = mul(float4(position, 1), Camera.ViewProj);
+    if (clip.w <= 0 || clip.z <= 0 || clip.z >= clip.w) return;
+    float2 uv = clip.xy / clip.w * float2(0.5f, -0.5f) + 0.5f;
+    int2 pixel = int2(floor(uv * RenderSize));
+    if (any(pixel < 1) || any(pixel >= int2(RenderSize) - 1)) return;
+    float depth = SceneDepth.Load(int3(pixel, 0));
+    if (depth <= 0) return;
+    float3 surface = DepthPosition(pixel, depth);
+    float left = SceneDepth.Load(int3(pixel + int2(-1, 0), 0));
+    float right = SceneDepth.Load(int3(pixel + int2(1, 0), 0));
+    float top = SceneDepth.Load(int3(pixel + int2(0, -1), 0));
+    float bottom = SceneDepth.Load(int3(pixel + int2(0, 1), 0));
+    // Choose the closest depth neighbour on each axis to avoid normals across silhouettes.
+    int2 dx = abs(left - depth) < abs(right - depth) ? int2(-1, 0) : int2(1, 0);
+    int2 dy = abs(top - depth) < abs(bottom - depth) ? int2(0, -1) : int2(0, 1);
+    float depthX = dx.x < 0 ? left : right;
+    float depthY = dy.y < 0 ? top : bottom;
+    if (depthX <= 0 || depthY <= 0) return;
+    float3 normal = cross(DepthPosition(pixel + dx, depthX) - surface,
+        DepthPosition(pixel + dy, depthY) - surface);
+    float lengthSquared = dot(normal, normal);
+    if (lengthSquared < 1e-12f) return;
+    normal *= rsqrt(lengthSquared);
+    if (dot(normal, Camera.CameraLocation - surface) < 0) normal = -normal;
+    float distance = dot(position - surface, normal);
+    float previousDistance = dot(previous - surface, normal);
+    float incoming = dot(velocity, normal);
+    if (incoming < 0 && distance < CollisionRadius && previousDistance >= -CollisionThickness &&
+        (previousDistance >= CollisionRadius || distance >= -CollisionThickness))
+    {
+        position += normal * (CollisionRadius - distance + 0.01f);
+        velocity -= (1 + CollisionRestitution) * incoming * normal;
+    }
 }
 
 [numthreads(256, 1, 1)]
@@ -87,10 +133,13 @@ void Simulate(uint id : SV_DispatchThreadID)
     float damping = exp(-Drag * step);
     for (uint i = 0; i < Substeps; ++i)
     {
+        float3 previousPosition = particle.Position;
         float3 oldVelocity = particle.Velocity;
         particle.Velocity = Wind + (oldVelocity - Wind) * damping +
             Acceleration * (Drag > 0.00001f ? (1 - damping) / Drag : step);
         particle.Position += (oldVelocity + particle.Velocity) * (0.5f * step);
+        if (DepthCollision != 0 && step > 0)
+            CollideDepth(previousPosition, particle.Position, particle.Velocity);
     }
     particle.Rotation += AngularVelocity * DeltaTime;
     if (!all(isfinite(particle.Position)) || !all(isfinite(particle.Velocity)))
@@ -195,6 +244,9 @@ void Cull(uint id : SV_DispatchThreadID)
     draw.PreviousSize = lerp(Sizes.x, Sizes.y, saturate(particle.PreviousAge / particle.Lifetime)) * particle.SizeRandom * RenderScale;
     draw.Rotation = particle.Rotation;
     draw.PreviousRotation = particle.PreviousRotation;
+    draw.Age = particle.Age;
+    draw.PreviousAge = particle.PreviousAge;
+    draw.Geometry = Geometry;
     draw.Color = color;
     draw.SoftDistance = SoftDistance;
     draw.TextureIndex = TextureIndex;
@@ -206,19 +258,19 @@ void Cull(uint id : SV_DispatchThreadID)
     draw.ViewDepth = -view.z;
     Draws[drawIndex] = draw;
     uint modeIndex;
-    InterlockedAdd(Counts[BlendMode + 1], 1, modeIndex);
+    InterlockedAdd(Counts[Geometry != 0 ? BlendMode + 4 : BlendMode + 1], 1, modeIndex);
     if (BlendMode == 2)
     {
         Keys[modeIndex] = ~asuint(max(0.0f, -view.z)); // Positive distance, far to near.
         Payloads[modeIndex] = drawIndex;
     }
-    else Indices[BlendMode * TotalCapacity + modeIndex] = drawIndex;
+    else Indices[(BlendMode + (Geometry != 0 ? 2 : 0)) * TotalCapacity + modeIndex] = drawIndex;
 }
 
 [numthreads(1, 1, 1)]
 void ClearDraws()
 {
-    for (uint i = 0; i < 4; ++i) Counts[i] = 0;
+    for (uint i = 0; i < 6; ++i) Counts[i] = 0;
 }
 
 [numthreads(1, 1, 1)]
@@ -230,6 +282,12 @@ void BuildDrawArgs()
         DrawArgs[mode * 4 + 1] = Counts[mode + 1];
         DrawArgs[mode * 4 + 2] = 0;
         DrawArgs[mode * 4 + 3] = 0;
+    }
+    for (uint mode = 0; mode < 2; ++mode)
+    {
+        DrawArgs[18 + mode * 4] = 120;
+        DrawArgs[19 + mode * 4] = Counts[4 + mode];
+        DrawArgs[20 + mode * 4] = DrawArgs[21 + mode * 4] = 0;
     }
     uint blocks = (max(Counts[3], 1u) + 511) / 512;
     uint groups = min(blocks, 800u);

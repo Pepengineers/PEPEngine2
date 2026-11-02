@@ -383,6 +383,9 @@ GDX12Texture* RenderModule::CreateDX12Texture(const std::string& name, GDX12Devi
 
     resources->Textures[name] = std::make_unique<GDX12Texture>();
     resources->Textures[name]->Initialize(desc);
+    // The upload already transitioned every mip to SRV before the wrapper was created.
+    resources->Textures[name]->GetResource()->GDX12Resource::SetCurrentState(
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 
     return resources->Textures[name].get();
 }

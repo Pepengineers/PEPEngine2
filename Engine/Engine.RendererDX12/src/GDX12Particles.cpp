@@ -52,8 +52,40 @@ bool IsValidParticleEmitterSettings(const GDX12ParticleEmitterSettings& s)
         InRange(s.SoftDistance, 0, 1000000) && InRange(s.MaxDistance, 1, 100000000) &&
         InRange(s.MaxDeltaTime, 0.001f, 1) && InRange(s.TimeScale, 0, 100) &&
         static_cast<UINT>(s.Blend) <= static_cast<UINT>(ParticleBlend::SortedAlpha) &&
+        static_cast<UINT>(s.Geometry) <= static_cast<UINT>(ParticleGeometry::Firefly) &&
+        !(s.Geometry != ParticleGeometry::Billboard && s.Blend == ParticleBlend::SortedAlpha) &&
         s.AtlasColumns >= 1 && s.AtlasColumns <= 256 && s.AtlasRows >= 1 && s.AtlasRows <= 256 &&
-        InRange(s.FramesPerSecond, 0, 1000);
+        InRange(s.FramesPerSecond, 0, 1000) && InRange(s.CollisionRadius, 0.01f, 1000000) &&
+        InRange(s.CollisionRestitution, 0, 1) && InRange(s.CollisionThickness, 0, 1000000);
+}
+
+const std::array<GDX12ParticleMeshVertex, FireflyParticleVertexCount>& GetFireflyParticleMesh()
+{
+    static const auto vertices = []
+    {
+        std::array<GDX12ParticleMeshVertex, FireflyParticleVertexCount> result;
+        UINT next = 0;
+        const auto octahedron = [&](Vector3 center, Vector3 radii, Vector4 color, float wing)
+        {
+            const Vector3 axes[] = {{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}};
+            const UINT faces[][3] = {{2,4,0}, {2,0,5}, {2,5,1}, {2,1,4}, {3,0,4}, {3,5,0}, {3,1,5}, {3,4,1}};
+            for (const auto& face : faces)
+            {
+                const Vector3 a = center + axes[face[0]] * radii;
+                const Vector3 b = center + axes[face[1]] * radii;
+                const Vector3 c = center + axes[face[2]] * radii;
+                Vector3 normal = (b - a).Cross(c - a); normal.Normalize();
+                for (const auto& position : {a, b, c}) result[next++] = {position, normal, color, wing};
+            }
+        };
+        octahedron({0,0,0}, {0.075f,0.085f,0.20f}, {0.035f,0.06f,0.025f,0}, 0);
+        octahedron({0,0,-0.22f}, {0.10f,0.10f,0.16f}, {1.4f,4,0.2f,1}, 0);
+        octahedron({0,0,0.25f}, {0.07f,0.07f,0.08f}, {0.025f,0.04f,0.02f,0}, 0);
+        octahedron({-0.23f,0.025f,-0.015f}, {0.24f,0.025f,0.19f}, {0.2f,0.3f,0.35f,0}, -1);
+        octahedron({0.23f,0.025f,-0.015f}, {0.24f,0.025f,0.19f}, {0.2f,0.3f,0.35f,0}, 1);
+        return result;
+    }();
+    return vertices;
 }
 
 GDX12ParticleEmitterSettings ResolveParticleEmitterSettings(const GDX12ParticleEmitterSettings& author, int quality)

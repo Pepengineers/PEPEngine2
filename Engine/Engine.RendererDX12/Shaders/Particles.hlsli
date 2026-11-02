@@ -30,7 +30,9 @@ struct ParticleDraw
     float ViewDepth;
     float PreviousSize;
     float PreviousRotation;
-    float3 Padding;
+    float Age;
+    float PreviousAge;
+    uint Geometry;
 };
 
 cbuffer Parameters : register(b0)
@@ -75,4 +77,10 @@ cbuffer Emitter : register(b2)
     uint Seed;
     uint Paused;
     float2 RenderSize;
+    uint DepthCollision;
+    float CollisionRadius;
+    float CollisionRestitution;
+    float CollisionThickness;
+    uint Geometry;
+    float3 EmitterPadding;
 };

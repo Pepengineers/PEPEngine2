@@ -23,7 +23,7 @@ namespace
         XMFLOAT4 Color;
         float SoftDistance; UINT TextureIndex, Frame, Columns;
         UINT Rows, EdgeSamples; float ViewDepth, PreviousSize;
-        float PreviousRotation; XMFLOAT3 Padding;
+        float PreviousRotation, Age, PreviousAge; UINT Geometry;
     };
     struct EmitterConstants
     {
@@ -39,10 +39,13 @@ namespace
         float MinPixelSize, FramesPerSecond; UINT TextureIndex, Blend;
         UINT Columns, Rows, Substeps, EdgeSamples;
         UINT Seed, Paused; XMFLOAT2 RenderSize;
+        UINT DepthCollision; float CollisionRadius, CollisionRestitution, CollisionThickness;
+        UINT Geometry; XMFLOAT3 Padding;
     };
     static_assert(sizeof(Particle) == 64);
     static_assert(sizeof(ParticleDraw) == 96);
-    static_assert(sizeof(EmitterConstants) == 256);
+    static_assert(sizeof(EmitterConstants) == 288);
+    static_assert(sizeof(GDX12ParticleMeshVertex) == 44);
 
     template<class T>
     using Buffer = GDX12UploadBuffer<T>;
@@ -96,6 +99,7 @@ struct GDX12ParticlesPass::State
 {
     UINT Capacity = 0;
     bool Sorted = false;
+    bool Mesh = false;
     bool Active = false;
     bool WasEnabled = false;
     bool ResetMotion = true;
@@ -103,6 +107,8 @@ struct GDX12ParticlesPass::State
     std::unique_ptr<GDX12RootSignature> Root, SortRoot;
     std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> Compute;
     ComPtr<ID3D12PipelineState> Weighted, Additive, Alpha, Motion;
+    ComPtr<ID3D12PipelineState> MeshWeighted, MeshAdditive, MeshMotion;
+    std::unique_ptr<Buffer<GDX12ParticleMeshVertex>> FireflyVertices;
     ComPtr<ID3D12CommandSignature> DispatchSignature, DrawSignature;
     std::unique_ptr<Buffer<ParticleDraw>> Draws;
     std::unique_ptr<Buffer<UINT>> Counts, Indices, DrawArgs, SortParameters;
@@ -136,18 +142,30 @@ struct GDX12ParticlesPass::State
         signature.ByteStride = sizeof(D3D12_DRAW_ARGUMENTS);
         ThrowIfFailed(resources->Device->GetDevice()->CreateCommandSignature(&signature, nullptr, IID_PPV_ARGS(&DrawSignature)));
 
+        InitializeRaster(resources, false);
+    }
+
+    void InitializeRaster(GDX12DeviceResources* resources, bool mesh)
+    {
+        const D3D12_INPUT_ELEMENT_DESC layout[] = {
+            {"POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 12, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 24, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0},
+            {"TEXCOORD", 0, DXGI_FORMAT_R32_FLOAT, 0, 40, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0}};
         auto& compiler = GDX12ShaderCompiler::GetInstance();
-        auto vs = compiler.CompileShader(resources->Device, SHADERS_FOLDER "ParticleRaster.hlsl", nullptr, "VS", "vs");
+        auto vs = compiler.CompileShader(resources->Device, SHADERS_FOLDER "ParticleRaster.hlsl", nullptr, mesh ? "MeshVS" : "VS", "vs");
         for (UINT mode = 0; mode < 4; ++mode)
         {
+            if (mesh && mode == 2) continue;
             auto ps = compiler.CompileShader(resources->Device, SHADERS_FOLDER "ParticleRaster.hlsl", nullptr,
                 mode == 0 ? "WeightedPS" : mode == 3 ? "MotionPS" : "ColorPS", "ps");
             D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
             desc.pRootSignature = Root->GetRootSignature().Get();
             desc.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
             desc.PS = { ps->GetBufferPointer(), ps->GetBufferSize() };
+            if (mesh) desc.InputLayout = {layout, static_cast<UINT>(std::size(layout))};
             desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
-            desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+            desc.RasterizerState.CullMode = mesh ? D3D12_CULL_MODE_BACK : D3D12_CULL_MODE_NONE;
             desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
             desc.DepthStencilState.DepthEnable = false;
             desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
@@ -175,8 +193,14 @@ struct GDX12ParticlesPass::State
                 reveal.SrcBlendAlpha = D3D12_BLEND_ZERO;
                 reveal.DestBlendAlpha = D3D12_BLEND_ONE;
             }
-            auto& target = mode == 0 ? Weighted : mode == 1 ? Additive : mode == 2 ? Alpha : Motion;
+            auto& target = mesh ? (mode == 0 ? MeshWeighted : mode == 1 ? MeshAdditive : MeshMotion) :
+                (mode == 0 ? Weighted : mode == 1 ? Additive : mode == 2 ? Alpha : Motion);
             ThrowIfFailed(resources->Device->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(target.ReleaseAndGetAddressOf())));
+        }
+        if (mesh)
+        {
+            FireflyVertices = std::make_unique<Buffer<GDX12ParticleMeshVertex>>(resources->Device, FireflyParticleVertexCount, EBufferType::Upload, false);
+            FireflyVertices->CopyData(0, GetFireflyParticleMesh().data(), FireflyParticleVertexCount);
         }
     }
 
@@ -204,14 +228,16 @@ struct GDX12ParticlesPass::State
             CompileCompute(resources, "ParticleSort.hlsl", entry, SortRoot.get());
     }
 
-    void AllocateDraws(GDX12DeviceResources* resources, UINT capacity, bool sorted)
+    void AllocateDraws(GDX12DeviceResources* resources, UINT capacity, bool sorted, bool mesh)
     {
         Capacity = capacity;
         Sorted = sorted;
+        Mesh = mesh;
+        if (mesh && !FireflyVertices) InitializeRaster(resources, true);
         Draws = CreateBuffer<ParticleDraw>(resources, capacity);
-        Counts = CreateBuffer<UINT>(resources, 4);
-        Indices = CreateBuffer<UINT>(resources, capacity * 2);
-        DrawArgs = CreateBuffer<UINT>(resources, 18);
+        Counts = CreateBuffer<UINT>(resources, 6);
+        Indices = CreateBuffer<UINT>(resources, capacity * (mesh ? 4 : 2));
+        DrawArgs = CreateBuffer<UINT>(resources, 26);
         SortParameters = CreateBuffer<UINT>(resources, 64); // GPU-written CBV, 256-byte allocation.
         for (UINT i = 0; i < 2; ++i)
         {
@@ -281,14 +307,22 @@ struct GDX12ParticlesPass::State
         commands->SetDescriptorHeaps({ resources->SRV_UAV_Heap.get() });
         auto& frame = resources->FrameConstants[resources->CurrFrameConstantsIndex];
         commands->SetGraphicsRootConstantBufferView(1, frame->CameraCB->GetElementAddress(common->ActiveCameraCBufferIndex));
-        const UINT parameters[] = { mode * Capacity, mode, Capacity, ResetMotion };
+        const UINT region = mode < 3 ? mode : mode - 1;
+        const UINT blend = mode < 3 ? mode : mode - 3;
+        const UINT parameters[] = { region * Capacity, blend, Capacity, ResetMotion };
         commands->GetCommandList()->SetGraphicsRoot32BitConstants(0, 4, parameters, 0);
         commands->SetGraphicsSRV(0, Draws->GetSRV()->GPUHandle);
         commands->SetGraphicsSRV(1, Indices->GetSRV()->GPUHandle);
         commands->SetGraphicsSRV(2, Payloads[0]->GetSRV()->GPUHandle);
         commands->SetGraphicsSRV(4, resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
         commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        commands->ExecuteIndirect(DrawSignature.Get(), 1, DrawArgs->GetResource().D3DResource.Get(), mode * 16, nullptr);
+        if (mode >= 3)
+        {
+            const D3D12_VERTEX_BUFFER_VIEW view = {FireflyVertices->GetElementAddress(0),
+                FireflyParticleVertexCount * sizeof(GDX12ParticleMeshVertex), sizeof(GDX12ParticleMeshVertex)};
+            commands->GetCommandList()->IASetVertexBuffers(0, 1, &view);
+        }
+        commands->ExecuteIndirect(DrawSignature.Get(), 1, DrawArgs->GetResource().D3DResource.Get(), mode < 3 ? mode * 16 : 72 + (mode - 3) * 16, nullptr);
     }
 };
 
@@ -335,6 +369,7 @@ void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
     std::unordered_set<uint64_t> ids;
     UINT total = 0;
     bool sorted = false;
+    bool mesh = false;
     for (auto& emitter : emitters)
     {
         if (!emitter.Id || !ids.insert(emitter.Id).second || !IsValidParticleEmitterSettings(emitter) ||
@@ -352,6 +387,7 @@ void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
         if (emitter.MaxParticles > 4194304 - total) throw std::length_error("Particle scene capacity exceeds 4194304");
         total += emitter.MaxParticles;
         sorted |= emitter.Blend == ParticleBlend::SortedAlpha;
+        mesh |= emitter.Geometry != ParticleGeometry::Billboard;
     }
     if (!_state)
     {
@@ -363,7 +399,7 @@ void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
     state.ResetMotion = _commonData->ResetHistory || !state.WasEnabled;
     if (!state.WasEnabled) _commonData->ResetUpscalerHistory = true;
     state.WasEnabled = true;
-    bool changed = total != state.Capacity || sorted != state.Sorted;
+    bool changed = total != state.Capacity || sorted != state.Sorted || mesh != state.Mesh;
     for (const auto& pool : state.Pools) changed |= ids.count(pool.first) == 0;
     for (const auto& emitter : emitters)
     {
@@ -383,7 +419,7 @@ void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
             if (!pool || pool->Capacity != emitter.MaxParticles)
                 pool = std::make_unique<Pool>(_resources, emitter.MaxParticles);
         }
-        if (total != state.Capacity || sorted != state.Sorted) state.AllocateDraws(_resources, total, sorted);
+        if (total != state.Capacity || sorted != state.Sorted || mesh != state.Mesh) state.AllocateDraws(_resources, total, sorted, mesh);
         _commonData->ResetUpscalerHistory = true;
     }
     auto* depth = _inputs[0]->GetTexture();
@@ -412,6 +448,8 @@ void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
     commands->SetComputeRootSignature(state.Root.get());
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+    commands->ResourceBarrier({ depth->GetResource()->GetSRVBarrier() });
+    commands->SetComputeSRV(3, depth->GetSRV()->GPUHandle);
     commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
     UAV(commands, *state.Draws);
     UAV(commands, *state.Counts);
@@ -484,6 +522,11 @@ void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
         constants.Seed = emitter.Seed;
         constants.Paused = emitter.Paused;
         constants.RenderSize = XMFLOAT2(static_cast<float>(width), static_cast<float>(height));
+        constants.DepthCollision = emitter.DepthCollision;
+        constants.CollisionRadius = emitter.CollisionRadius;
+        constants.CollisionRestitution = emitter.CollisionRestitution;
+        constants.CollisionThickness = emitter.CollisionThickness;
+        constants.Geometry = static_cast<UINT>(emitter.Geometry);
         pool.Constants[_resources->CurrFrameConstantsIndex]->CopyData(0, constants);
         commands->SetComputeRootConstantBufferView(2, pool.Constants[_resources->CurrFrameConstantsIndex]->GetElementAddress(0));
         const UINT parameters[] = { pool.Capacity, burst, state.Capacity, state.ResetMotion || reset };
@@ -558,11 +601,21 @@ void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
     commands->SetGraphicsSRV(3, depth->GetSRV()->GPUHandle);
     commands->SetPipelineState(state.Weighted);
     state.Draw(commands, _resources, _commonData, 0);
+    if (state.Mesh)
+    {
+        commands->SetPipelineState(state.MeshWeighted);
+        state.Draw(commands, _resources, _commonData, 3);
+    }
     commands->ResourceBarrier({ state.MotionTexture->GetResource()->GetRenderTargetBarrier() });
     commands->SetRenderTargets({ state.MotionTexture.get() }, nullptr);
     commands->ClearRenderTargetView(state.MotionTexture.get());
     commands->SetPipelineState(state.Motion);
     for (UINT mode = 0; mode < 3; ++mode) state.Draw(commands, _resources, _commonData, mode);
+    if (state.Mesh)
+    {
+        commands->SetPipelineState(state.MeshMotion);
+        for (UINT mode = 3; mode < 5; ++mode) state.Draw(commands, _resources, _commonData, mode);
+    }
     commands->ResourceBarrier({ state.MotionTexture->GetResource()->GetSRVBarrier() });
     _resources->ParticleMotion = state.MotionTexture.get();
 }
@@ -587,6 +640,11 @@ void GDX12ParticlesPass::Composite(GDX12CommandList* commands, GDX12Texture* hdr
     }
     commands->SetPipelineState(state.Additive);
     state.Draw(commands, _resources, _commonData, 1);
+    if (state.Mesh)
+    {
+        commands->SetPipelineState(state.MeshAdditive);
+        state.Draw(commands, _resources, _commonData, 4);
+    }
 }
 
 void GDX12ParticlesPass::Resize()

@@ -73,6 +73,7 @@ namespace
             OnKeyboardInput(timer);
             Locator.GetModule<RenderModule>()->Update();
             auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+            BistroParticles::Update(world);
             if (world.IsPaused())
             {
                 _gpuData.Schedule(_jobs, world, 0).Complete();
@@ -175,6 +176,15 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
         for (int index = 1; index < argumentCount; ++index)
         {
             const std::wstring_view argument(arguments[index]);
+            constexpr std::wstring_view particlesPrefix = L"-App.Particles.CountScale=";
+            if (argument.substr(0, particlesPrefix.size()) == particlesPrefix &&
+                !BistroParticles::CountScale.SetFromString(WStringToString(std::wstring(argument.substr(particlesPrefix.size())))))
+            {
+                Log::Error("Application", "App.Particles.CountScale must be finite and at most 4194304/250000");
+                Log::Flush();
+                LocalFree(arguments);
+                return EXIT_FAILURE;
+            }
             constexpr std::wstring_view budgetPrefix = L"-Loading.TransientBudgetMiB=";
             if (argument.substr(0, budgetPrefix.size()) == budgetPrefix) budgetArgument = argument;
             constexpr std::wstring_view prefix = L"-Loading.BenchmarkOutput=";
@@ -225,6 +235,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
                 << ",\n  \"max_import_tasks\": " << LastLoadingMeasurements.MaxImportTasks
                 << ",\n  \"max_texture_tasks\": " << LastLoadingMeasurements.MaxTextureTasks
                 << ",\n  \"sampled_frames\": " << benchmarkFrames - 1
+                << ",\n  \"particle_count_scale\": " << BistroParticles::CountScale.GetValue()
+                << ",\n  \"particle_budget\": " << BistroParticles::GetBudget()
                 << ",\n  \"frame_ms\": " << (benchmarkFrames > 1 ? std::chrono::duration<double, std::milli>(sampled - ready).count() / (benchmarkFrames - 1) : 0)
                 << ",\n  \"graph_passes\": " << graph.Passes
                 << ",\n  \"graph_culled_passes\": " << graph.CulledPasses

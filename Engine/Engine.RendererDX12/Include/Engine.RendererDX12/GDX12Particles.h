@@ -1,9 +1,22 @@
 #pragma once
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include "Engine.RendererDX12/GDX12Material.h"
+#include <array>
 
 enum class ParticleBlend : UINT { WeightedAlpha, Additive, SortedAlpha };
 enum class ParticleShape : UINT { Point, Box, Sphere };
+enum class ParticleGeometry : UINT { Billboard, Firefly };
+
+struct GDX12ParticleMeshVertex
+{
+    Vector3 Position;
+    Vector3 Normal;
+    Vector4 Color; // RGB material tint, W emissive fraction.
+    float Wing;
+};
+inline constexpr UINT FireflyParticleVertexCount = 120;
+static_assert(FireflyParticleVertexCount <= 600);
+const std::array<GDX12ParticleMeshVertex, FireflyParticleVertexCount>& GetFireflyParticleMesh();
 
 struct GDX12ParticleEmitterSettings
 {
@@ -36,10 +49,15 @@ struct GDX12ParticleEmitterSettings
     float TimeScale = 1.0f;
     UINT Seed = 1;
     ParticleBlend Blend = ParticleBlend::WeightedAlpha;
+    ParticleGeometry Geometry = ParticleGeometry::Billboard;
     GPUTexture* Texture = nullptr; // RenderModule-owned color texture; nullptr uses an analytic disc.
     UINT AtlasColumns = 1;
     UINT AtlasRows = 1;
     float FramesPerSecond = 0.0f; // Zero plays the entire atlas once over the lifetime.
+    bool DepthCollision = false;
+    float CollisionRadius = 1.5f; // World cm, independent of billboard size.
+    float CollisionRestitution = 0.45f;
+    float CollisionThickness = 10.0f; // Maximum initial penetration in cm.
 };
 
 struct GDX12ParticleSettings

@@ -1,4 +1,4 @@
-#include "../src/BistroProps.h"
+#include "../src/BistroScene.h"
 #include "../src/Components/FlyingPropComponent.h"
 #include "App.Base/ECS/Components/StaticMeshRenderComponent.h"
 #include "Engine.Core/IO/MeshImporter.h"
@@ -11,6 +11,61 @@
 static void Require(bool condition, const char* message)
 {
     if (!condition) throw std::runtime_error(message);
+}
+
+static void CheckParticleBudgets()
+{
+    const double original = BistroParticles::CountScale.GetValue();
+    Require(BistroParticles::CountScale.SetValue(1), "Default particle scale must be writable");
+    World world(WorldDesc{});
+    BistroParticles::Create(world, nullptr);
+    auto& ecs = world.GetECS();
+    Require(ecs.GetPool<BistroParticles::EffectComponent>().Size() == 8, "Bistro must have eight distinct effects");
+    std::vector<UINT> baseline;
+    ecs.ForEach<ParticleEmitterComponent>([&](Entity, const ParticleEmitterComponent& emitter)
+    { baseline.push_back(emitter.GetSettings().MaxParticles); });
+    Require(baseline.front() == 62500, "Entrance fountain must own one quarter of the budget");
+    const std::pair<double, UINT> cases[] = {{4,1000000}, {4194304.0/250000,4194304},
+        {1.25,312500}, {0.6,150000}, {0.5,125000}, {0.000028,7}, {0.000004,1},
+        {0.000000001,0}, {0,250000}, {-2,250000}, {1,250000}};
+    for (const auto& [scale, budget] : cases)
+    {
+        Require(BistroParticles::CountScale.SetValue(scale), "Valid particle scale rejected");
+        BistroParticles::Update(world);
+        UINT sum = 0; size_t index = 0;
+        ecs.ForEach<ParticleEmitterComponent>([&](Entity, const ParticleEmitterComponent& emitter)
+        {
+            const auto& settings = emitter.GetSettings();
+            Require(IsValidParticleEmitterSettings(settings), "Scaled emitter exceeds renderer limits");
+            if (emitter.IsEnabled())
+            {
+                sum += settings.MaxParticles;
+                Require(emitter.GetBurstTotal() >= settings.MaxParticles, "Live budget must be filled without a warmup");
+            }
+            if (budget == 1000000) Require(settings.MaxParticles == baseline[index] * 4, "Million budget must scale every effect by four");
+            ++index;
+        });
+        Require(sum == static_cast<UINT>(budget), "Emitter capacities must sum to the exact App budget, including rounding and Off");
+    }
+    Require(!BistroParticles::CountScale.SetFromString("17") && !BistroParticles::CountScale.SetFromString("nan") &&
+        !BistroParticles::CountScale.SetFromString("inf"), "Invalid particle scale accepted");
+    ecs.ForEach<NameComponent, ParticleEmitterComponent>([](Entity, const NameComponent& name, const ParticleEmitterComponent& emitter)
+    {
+        const auto& settings = emitter.GetSettings();
+        if (name.value == "BistroPlanterFireflies")
+            Require(settings.Geometry == ParticleGeometry::Firefly && settings.SizeStart >= 10 &&
+                settings.Blend == ParticleBlend::WeightedAlpha, "Fireflies must use visible, volumetric mesh particles");
+        if (name.value == "BistroEntranceFountain") Require(settings.SizeStart >= 7.5f, "Fountain particles must be larger");
+    });
+    world.SetPaused(true);
+    std::vector<uint64_t> bursts;
+    ecs.ForEach<ParticleEmitterComponent>([&](Entity, const ParticleEmitterComponent& emitter) { bursts.push_back(emitter.GetBurstTotal()); });
+    BistroParticles::Update(world);
+    size_t index = 0;
+    ecs.ForEach<ParticleEmitterComponent>([&](Entity, const ParticleEmitterComponent& emitter)
+    { Require(emitter.GetBurstTotal() == bursts[index++], "Paused world must not queue replenishment"); });
+    Require(BistroParticles::CountScale.SetValue(original), "Cannot restore particle scale");
+    std::cout << "Bistro particle scales: default, 4x, fractions, <=0 fallback, maximum, rounding, pause and visible mesh settings passed.\n";
 }
 
 static void CheckPartition()
@@ -123,6 +178,7 @@ int main(int argc, char** argv)
     try
     {
         Require(argc == 2 || argc == 3, "Pass a test-artifact directory and optionally Bistro Interior OBJ");
+        CheckParticleBudgets();
         CheckPartition();
         CheckFlight();
         CheckImporter(argv[1]);

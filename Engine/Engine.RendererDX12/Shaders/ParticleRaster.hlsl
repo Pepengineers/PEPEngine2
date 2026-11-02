@@ -14,6 +14,9 @@ struct VertexOutput
     float4 Current : TEXCOORD1;
     float4 Previous : TEXCOORD2;
     nointerpolation uint DrawIndex : TEXCOORD3;
+    float4 Material : TEXCOORD4;
+    float3 Normal : TEXCOORD5;
+    float ViewDepth : TEXCOORD6;
 };
 
 VertexOutput VS(uint vertex : SV_VertexID, uint instance : SV_InstanceID)
@@ -33,12 +36,47 @@ VertexOutput VS(uint vertex : SV_VertexID, uint instance : SV_InstanceID)
     float3 previousUp = normalize(float3(Camera.PrevViewProjNoJitter[0][1], Camera.PrevViewProjNoJitter[1][1], Camera.PrevViewProjNoJitter[2][1]));
     float3 world = draw.Position + (right * rotated.x + up * rotated.y) * draw.Size;
     float3 previousWorld = draw.Previous + (previousRight * previousRotated.x + previousUp * previousRotated.y) * draw.PreviousSize;
-    VertexOutput result;
+    VertexOutput result = (VertexOutput)0;
     result.Position = mul(float4(world, 1), Camera.ViewProj);
     result.Current = mul(float4(world, 1), Camera.ViewProjNoJitter);
     result.Previous = mul(float4(previousWorld, 1), Camera.PrevViewProjNoJitter);
     result.UV = corner * float2(1, -1) + 0.5f;
     result.DrawIndex = index;
+    result.ViewDepth = draw.ViewDepth;
+    return result;
+}
+
+struct MeshVertex
+{
+    float3 Position : POSITION;
+    float3 Normal : NORMAL;
+    float4 Color : COLOR;
+    float Wing : TEXCOORD0;
+};
+
+float3 MeshDirection(float3 local, float wing, float age, float yaw)
+{
+    float angle = sin(age * 38) * 0.65f * wing;
+    float2 flap = float2(local.x * cos(angle) - local.y * sin(angle),
+        local.x * sin(angle) + local.y * cos(angle));
+    return float3(flap.x * cos(yaw) + local.z * sin(yaw), flap.y,
+        local.z * cos(yaw) - flap.x * sin(yaw));
+}
+
+VertexOutput MeshVS(MeshVertex vertex, uint instance : SV_InstanceID)
+{
+    uint index = Indices[Capacity + instance];
+    ParticleDraw draw = Draws[index];
+    float3 world = draw.Position + MeshDirection(vertex.Position, vertex.Wing, draw.Age, draw.Rotation) * draw.Size;
+    float3 previous = draw.Previous + MeshDirection(vertex.Position, vertex.Wing, draw.PreviousAge, draw.PreviousRotation) * draw.PreviousSize;
+    VertexOutput result = (VertexOutput)0;
+    result.Position = mul(float4(world, 1), Camera.ViewProj);
+    result.Current = mul(float4(world, 1), Camera.ViewProjNoJitter);
+    result.Previous = mul(float4(previous, 1), Camera.PrevViewProjNoJitter);
+    result.DrawIndex = index;
+    result.Material = vertex.Color;
+    result.Normal = MeshDirection(vertex.Normal, vertex.Wing, draw.Age, draw.Rotation);
+    result.ViewDepth = -mul(float4(world, 1), Camera.View).z;
     return result;
 }
 
@@ -52,14 +90,20 @@ float4 Shade(VertexOutput input)
     {
         float distance = Camera.NearPlane * Camera.FarPlane /
             (Camera.NearPlane + scene * (Camera.FarPlane - Camera.NearPlane));
-        fade = saturate((distance - draw.ViewDepth) / draw.SoftDistance);
+        fade = saturate((distance - input.ViewDepth) / draw.SoftDistance);
     }
     float2 texel = float2(1.0f / draw.Columns, 1.0f / draw.Rows);
     float2 uv = (input.UV + float2(draw.Frame % draw.Columns, draw.Frame / draw.Columns)) * texel;
     float2 dx = ddx(uv);
     float2 dy = ddy(uv);
     float4 material = 0;
-    if (draw.TextureIndex != 0xffffffffu)
+    if (draw.Geometry != 0)
+    {
+        // A fixed key light shows the low-poly facets; the abdomen keeps its emissive radiance.
+        float light = 0.25f + 0.75f * saturate(dot(normalize(input.Normal), normalize(float3(0.4f, 0.8f, -0.3f))));
+        material = float4(input.Material.rgb * lerp(light, 1, input.Material.a), 1);
+    }
+    else if (draw.TextureIndex != 0xffffffffu)
     {
         const float2 offsets[4] = { float2(-0.25f, -0.25f), float2(0.25f, 0.25f),
             float2(-0.25f, 0.25f), float2(0.25f, -0.25f) };
@@ -94,7 +138,7 @@ struct WeightedOutput
 WeightedOutput WeightedPS(VertexOutput input)
 {
     float4 color = Shade(input);
-    float distance = Draws[input.DrawIndex].ViewDepth;
+    float distance = input.ViewDepth;
     float weight = clamp(0.03f / (0.00001f + pow(distance / 200.0f, 4)), 0.01f, 1.0f);
     WeightedOutput result;
     result.Accumulation = float4(color.rgb * color.a, color.a) * weight;
@@ -115,5 +159,5 @@ float4 MotionPS(VertexOutput input) : SV_Target0
         input.Previous.xy / input.Previous.w - input.Current.xy / input.Current.w;
     if (!all(isfinite(motion))) motion = 0;
     // Depth is normalized to the camera far plane to keep half-float accumulation finite.
-    return float4(motion, Draws[input.DrawIndex].ViewDepth / Camera.FarPlane, 1) * alpha;
+    return float4(motion, input.ViewDepth / Camera.FarPlane, 1) * alpha;
 }

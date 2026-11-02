@@ -21,7 +21,7 @@ static void Set(const wchar_t* name, const char* value)
 }
 class TestEngine final : public App { public: TestEngine() : App(GetModuleHandleW(nullptr)) {} };
 
-static std::vector<float> Read(GDX12Device& device, GDX12Texture& texture)
+static std::vector<float> Read(GDX12Device& device, GDX12Texture& texture, UINT channel = 0)
 {
     const auto desc = texture.GetResource()->D3DResource->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
@@ -44,16 +44,17 @@ static std::vector<float> Read(GDX12Device& device, GDX12Texture& texture)
     const D3D12_RANGE range = { 0, static_cast<SIZE_T>(bytes) };
     ThrowIfFailed(readback->Map(0, &range, &mapped));
     const bool hdr = desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
+    const bool rgba32 = desc.Format == DXGI_FORMAT_R32G32B32A32_FLOAT;
     const UINT channels = hdr ? 3 : 1;
     std::vector<float> result;
     for (UINT y = 0; y < footprint.Footprint.Height; ++y)
         for (UINT x = 0; x < footprint.Footprint.Width; ++x)
         {
             const auto* pixel = static_cast<const unsigned char*>(mapped) + footprint.Offset +
-                y * footprint.Footprint.RowPitch + x * (hdr ? 8 : 4);
+                y * footprint.Footprint.RowPitch + x * (hdr ? 8 : rgba32 ? 16 : 4);
             for (UINT c = 0; c < channels; ++c)
             {
-                const float value = hdr ? PackedVector::XMConvertHalfToFloat(reinterpret_cast<const uint16_t*>(pixel)[c]) : *reinterpret_cast<const float*>(pixel);
+                const float value = hdr ? PackedVector::XMConvertHalfToFloat(reinterpret_cast<const uint16_t*>(pixel)[c]) : reinterpret_cast<const float*>(pixel)[channel];
                 Require(std::isfinite(value), "Nonfinite GPU output");
                 result.push_back(value);
             }
@@ -80,6 +81,33 @@ static void TestCPU()
     Require(rejected, "Nonfinite atmosphere accepted");
     GDX12ParticleEmitterSettings particle; particle.LifetimeMin = -1;
     Require(!IsValidParticleEmitterSettings(particle), "Invalid lifetime accepted");
+    particle = {}; particle.CollisionRestitution = 1.01f;
+    Require(!IsValidParticleEmitterSettings(particle), "Energy-gaining particle bounce accepted");
+    particle = {}; particle.CollisionRadius = 0;
+    Require(!IsValidParticleEmitterSettings(particle), "Zero collision radius accepted");
+    particle = {}; particle.CollisionThickness = NAN;
+    Require(!IsValidParticleEmitterSettings(particle), "Nonfinite collision thickness accepted");
+    particle = {}; particle.Geometry = static_cast<ParticleGeometry>(2);
+    Require(!IsValidParticleEmitterSettings(particle), "Unknown particle geometry accepted");
+    particle.Geometry = ParticleGeometry::Firefly; particle.Blend = ParticleBlend::SortedAlpha;
+    Require(!IsValidParticleEmitterSettings(particle), "Unsupported globally sorted mesh particles accepted");
+    const auto& firefly = GetFireflyParticleMesh();
+    Require(firefly.size() == 120 && firefly.size() <= 600, "Firefly mesh exceeds the vertex budget");
+    UINT wings = 0;
+    for (size_t vertex = 0; vertex < firefly.size(); vertex += 3)
+    {
+        const Vector3 normal = (firefly[vertex+1].Position - firefly[vertex].Position).Cross(
+            firefly[vertex+2].Position - firefly[vertex].Position);
+        Require(normal.LengthSquared() > 1e-10f && normal.Dot(firefly[vertex].Normal) > 0,
+            "Firefly triangles must have nonzero area and outward face normals");
+    }
+    for (const auto& vertex : firefly)
+    {
+        Require(vertex.Position.Length() <= 0.707107f && std::abs(vertex.Normal.Length() - 1) < 1e-5f,
+            "Firefly mesh must fit the shared particle culling sphere and have unit normals");
+        if (vertex.Wing != 0) ++wings;
+    }
+    Require(wings == 48, "Firefly must have two volumetric animated wings");
     auto& assets = Engine::Core::AssetManager::GetInstance();
     const auto* fox = assets.LoadScene(std::filesystem::absolute("Assets/Models/KhronosFox/glTF/Fox.gltf"));
     Require(fox && fox->GetClips().size() == 3 && fox->GetNodeCount() >= 24, "Actual Fox hierarchy/clips failed to import");
@@ -275,10 +303,90 @@ int main(int argc, char** argv)
             else Require(before != after, "Additive/sorted particles drew no HDR pixels");
             Require(resources.ParticleMotion, "Particles did not publish motion");
         }
+        ComPtr<ID3D12QueryHeap> meshQuery;
+        D3D12_QUERY_HEAP_DESC queryDesc = {}; queryDesc.Type = D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS; queryDesc.Count = 1;
+        ThrowIfFailed(device.GetDevice()->CreateQueryHeap(&queryDesc, IID_PPV_ARGS(&meshQuery)));
+        const auto queryHeap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
+        const auto queryBuffer = CD3DX12_RESOURCE_DESC::Buffer(sizeof(D3D12_QUERY_DATA_PIPELINE_STATISTICS));
+        ComPtr<ID3D12Resource> meshStats;
+        ThrowIfFailed(device.GetDevice()->CreateCommittedResource(&queryHeap, D3D12_HEAP_FLAG_NONE, &queryBuffer,
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&meshStats)));
+        emitter.MaxParticles = 16; emitter.BurstTotal = 1; emitter.Geometry = ParticleGeometry::Firefly;
+        emitter.ColorStart = emitter.ColorEnd = Vector4(1, 1, 1, 1);
+        for (auto blend : {ParticleBlend::WeightedAlpha, ParticleBlend::Additive})
+        {
+            emitter.Blend = blend; emitter.ResetRevision += 10; resources.ParticleEmitters = {emitter};
+            list = queue->GetCommandList();
+            list->GetCommandList()->BeginQuery(meshQuery.Get(), D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0);
+            particles.Execute(list); particles.Composite(list, hdr.get());
+            list->GetCommandList()->EndQuery(meshQuery.Get(), D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0);
+            list->GetCommandList()->ResolveQueryData(meshQuery.Get(), D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0, 1, meshStats.Get(), 0);
+            queue->ExecuteCommandList(list); queue->Flush();
+            void* mapped = nullptr; ThrowIfFailed(meshStats->Map(0, nullptr, &mapped));
+            const auto stats = *static_cast<D3D12_QUERY_DATA_PIPELINE_STATISTICS*>(mapped);
+            meshStats->Unmap(0, nullptr);
+            Require(stats.GSInvocations == 0 && stats.IAPrimitives == 80 && stats.VSInvocations >= 120,
+                "Mesh particles must draw the 40-triangle model twice (color/motion), with no GS");
+            const auto coverage = Read(device, *resources.ParticleMotion, 3);
+            Require(*std::max_element(coverage.begin(), coverage.end()) > 0, "Firefly mesh produced no motion/coverage pixels");
+        }
+        std::cout << "GPU firefly mesh: 120 vertices, 40 triangles, weighted/additive color and motion, zero GS invocations passed.\n";
+        // Constant reverse-Z depth is a plane 150 cm from the camera, independent of the shader oracle.
+        list = queue->GetCommandList();
+        list->ResourceBarrier({depth->GetResource()->GetDepthWriteBarrier()});
+        list->GetCommandList()->ClearDepthStencilView(depth->GetDSV()->CPUHandle, D3D12_CLEAR_FLAG_DEPTH,
+            (10000.0f / 150 - 1) / 9999, 0, 0, nullptr);
+        queue->ExecuteCommandList(list); queue->Flush();
+        particles.SetInputs({depth, accum.get(), reveal.get()});
+        Vector3 forward(0, -10, 150); forward.Normalize();
+        emitter = {}; emitter.Id = 1; emitter.MaxParticles = 16; emitter.BurstTotal = 1;
+        emitter.World = Matrix::CreateTranslation(eye + forward * 100);
+        emitter.Direction = forward; emitter.ConeAngleDegrees = 0;
+        emitter.SpeedMin = emitter.SpeedMax = 100; emitter.Acceleration = Vector3::Zero;
+        emitter.SizeStart = emitter.SizeEnd = 10; emitter.EmissionRate = 0;
+        emitter.LifetimeMin = emitter.LifetimeMax = 10; emitter.DeltaTime = 0.1f; emitter.Substeps = 4;
+        emitter.CollisionRadius = 2; emitter.CollisionRestitution = 1; emitter.SoftDistance = 0;
+        emitter.Blend = ParticleBlend::Additive;
+        for (int mode = 0; mode < 3; ++mode)
+        {
+            emitter.DepthCollision = mode != 0;
+            emitter.CollisionRestitution = mode == 2 ? 0.0f : 1.0f;
+            emitter.ResetRevision = 100 + mode;
+            resources.ParticleEmitters = {emitter};
+            for (UINT frame = 0; frame < 9; ++frame) execute(particles);
+            const auto coverage = Read(device, *resources.ParticleMotion, 3);
+            const float alpha = std::accumulate(coverage.begin(), coverage.end(), 0.0f);
+            if (mode == 0) Require(alpha == 0, "Noncolliding particles should pass behind the test plane");
+            else
+            {
+                Require(alpha > 0, "Depth-colliding particles disappeared behind the test plane");
+                const auto depths = Read(device, *resources.ParticleMotion, 2);
+                const float distance = std::accumulate(depths.begin(), depths.end(), 0.0f) / alpha * 10000;
+                Require(mode == 1 ? distance > 100 && distance < 130 : std::abs(distance - 147.99f) < 0.2f,
+                    "Particle depth collision differs from independent bounce/stop oracle");
+            }
+        }
+        emitter = {}; emitter.Id = 1; emitter.World = Matrix::CreateTranslation(eye + forward * 100);
+        emitter.EmissionRate = 0; emitter.SpeedMin = emitter.SpeedMax = 0; emitter.Acceleration = Vector3::Zero;
+        emitter.LifetimeMin = emitter.LifetimeMax = 0.15f; emitter.DeltaTime = 0.1f;
+        emitter.SizeStart = emitter.SizeEnd = 10; emitter.SizeVariation = 0; emitter.SoftDistance = 0;
+        emitter.ColorStart = emitter.ColorEnd = Vector4(0, 0, 0, 1); emitter.Blend = ParticleBlend::Additive;
+        for (UINT count : {250000u, 1000000u})
+        {
+            emitter.MaxParticles = count; emitter.BurstTotal = 0; emitter.ResetRevision = count;
+            for (UINT frame = 0; frame < 3; ++frame)
+            {
+                emitter.BurstTotal += count; resources.ParticleEmitters = {emitter}; execute(particles);
+                const auto coverage = Read(device, *resources.ParticleMotion, 3);
+                Require(*std::max_element(coverage.begin(), coverage.end()) == static_cast<float>(count),
+                    "GPU refill must maintain the exact 250k/1M live count through particle deaths");
+            }
+        }
+        std::cout << "GPU particle refill: exact 250000/1000000 live particles from first frame and after expiry passed.\n";
         resources.ParticleEmitters.clear(); execute(particles); Require(!resources.ParticleMotion, "Removed emitter retained motion");
         Set(L"Render.Fluid.Enabled", "false"); execute(water);
         Require(water.GetOutput(0)->GetTexture() == depth, "Disabled fluid retained merged depth");
-        std::cout << "GPU particle spawn/indirect/three blend modes/reset/removal passed.\n";
+        std::cout << "GPU particle spawn/indirect/three blend modes/reset/removal and depth collision off/bounce/stop passed.\n";
         ThrowIfFailed(device.GetDevice()->GetDeviceRemovedReason());
         for (UINT64 i = 0; i < info->GetNumStoredMessages(); ++i)
         {
