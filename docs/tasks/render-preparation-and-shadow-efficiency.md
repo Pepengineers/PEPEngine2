@@ -131,4 +131,6 @@ GPU culling, barriers и ExecuteIndirect остаются GPU nodes с корр�
 5. Проверь diff, создай локальные коммиты только своих правок. Передай hashes, команды проверок,
    пути к захватам и таблицу до/после. Push выполняй только по запросу пользователя.
 
-Этот документ — задание; оптимизации, A/B DEFAULT и FG runtime regression ещё не выполнены.
+Выполнено и проверено 2026-11-03: DEFAULT A/B, CPU median/p95 и граница подготовки,
+BeginFrame lifecycle и FG runtime regression. Числа, команды, захваты и аппаратные ограничения —
+в [отчёте приёмки](../research/2026-11-02-render-preparation-shadow-efficiency-results.md).

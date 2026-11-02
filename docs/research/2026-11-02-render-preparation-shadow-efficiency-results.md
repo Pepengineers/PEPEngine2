@@ -15,13 +15,16 @@ local-shadow cull scopes — с **8,327 до 1,972 мс**. Финальный в
 
 CPU light grid и решения о dirty local-shadow views вынесены из Execute. Построение light grid
 перекрывается с shadow visibility; зависимая подготовка начинается после Complete. Скорость
-финального CPU-пути **не подтверждена измерениями**: четыре попытки записи PIX завершились timeout.
-Эта часть сохранена как исправление требуемой границы подготовки; отдельный CPU speedup не заявляется.
-Следовательно, численная CPU-часть performance-приёмки остаётся открытой.
+финального CPU-пути проверена 2026-11-03: девять независимых PIX captures, без потерь ETW.
+Относительно DEFAULT до CPU-рефакторинга median/p95 записи графа уменьшились с
+**4,100 / 6,997 до 3,188 / 4,280 мс**, подготовки вместе с записью — с
+**5,171 / 8,261 до 4,125 / 5,472 мс**. Это сокращение CPU critical path;
+дополнительный прирост FPS от CPU-этапа не подтверждён.
 
-11 целевых исполняемых проверок прошли. Standalone FrameGenerationTests завершился ошибкой
-debug layer на baseline и candidate; это существующая проблема FG, описанная ниже.
-Полностью зелёная FG-приёмка не заявляется.
+Приёмка закрыта на доступной RTX 3060 Laptop. FrameGenerationTests теперь проходит с
+debug layer после каждого кадра; исправлены состояния входа и выхода общего tone-map pass.
+Также прошли AO/DoF/motion-blur/SSR и повторные reflection/Bistro проверки. Ограничения
+коротких GPU traces, неподдерживаемого DLSS-G и отсутствующей второй GPU сохранены ниже.
 
 ## Сопоставимая база
 
@@ -31,6 +34,7 @@ debug layer на baseline и candidate; это существующая проб
 - Lifecycle: `81fdb36` — настоящий Bistro Update вызывает BeginFrame; отдельная red/green регрессия.
 - CPU preparation: `73d8066`; полные SHA также записаны в локальном
   `Build/Captures/2026-11-02-render-preparation/manifest.json`.
+- Tone-map state correctness и per-frame FG debug regression: `7e10358`.
 
 Свежие EXE и PDB собраны MSVC **14.51.36231**, v145, `Release|x64`, `/O2 /GL /MD /Zi`,
 `PEPEnableProfiling=true` (`PROFILE_BUILD`, без `_DEBUG`). Runtime INI для App во всех сравнениях:
@@ -52,6 +56,7 @@ upscaler XeSS, эффекты и видимые casters не отключали�
 | DEFAULT, runs 1/2 | `A8050919AFC757C33D5516DDD77419837ACAC456AB0FC4A9A40E3248ECD02EE1` | `1880779EEB6244656EDF29753DA822678CE42A210B86409B4AF313478DB207DE` |
 | DEFAULT, run 3 | `6E6C9D62D1FD43F8867446FA429156C2B46A90532923E07F194A466F4321BB95` | `837D654A30223D87B8A29E6CF4EA30F00D6EAA26CE1365C80920A9CA9CD15F15` |
 | final prepared | `449BC8D9498B8CAA0673E297686DC8BDCB5F82A4B9D66182ED2987530FB6C8AD` | `7D2BB1C88187618F9A6CEA4A98A8E2960CCB373642C985290979971B57B035FC` |
+| final acceptance, 2026-11-03 PIX | `7121D886841F960CF80607EFEF09AEDD2E3FF26C8F7F707DA184AE9CFC8A02D2` | `7CF8C60ABF5159D87C045224F691A9B766FC6602179478F689268E02B3127680` |
 
 DEFAULT run 3 пересобран после эквивалентного упрощения scalar CopyData через bulk overload;
 исходные resource/index guards сохранены. Runs 1/2 относятся к предшествующему эквивалентному
@@ -158,30 +163,73 @@ Execute использует подготовленные light/cache/dirty-face
 Глобальный scene hashing оставлен: замена его revision-моделью без полной invalidation не оправдана.
 ECS System::Prepare не использован для зависимой работы.
 
-Baseline и DEFAULT PIX attach captures успешно записаны с нулём lost ETW events/buffers.
-Время — wall duration scopes, включая scheduling/driver calls. Диапазон анализа 500–6500 мс;
-p95 — nearest rank. Это не inclusive CPU sampling и не сумма процентов стеков.
+Новые PIX attach captures 2026-11-03: по три свежих процесса каждого варианта, 30 s прогрева,
+6 s capture, одинаковый benchmark loop с продолжающейся simulation. Порядок:
+baseline, DEFAULT, prepared, prepared, baseline, DEFAULT, DEFAULT, prepared, baseline.
+Во всех девяти manifest **lostEtwEvents=0, lostEtwBuffers=0**; длительность trace 7,008–7,325 s.
+Анализируется внутреннее окно **1000–6000 ms**, только полностью завершённые scopes нужного PID.
+p95 — nearest rank по объединённым кадрам трёх повторов. Нулевые padding rows PIX API
+исключены проверкой eventId/processId; сырые ответы сохранены. Первые captures 2026-11-02
+сохранены как исторические артефакты, в новые числа не смешаны.
 
-| CPU scope / cadence, мс median / p95 | baseline | DEFAULT | final CPU prepare |
-| --- | ---: | ---: | --- |
-| CPU full-frame interval между Game update starts | 25,507 / 29,883 (224) | 23,713 / 24,222 (252) | нет данных |
-| Game update | 0,339 / 0,504 | 0,381 / 0,692 | нет данных |
-| Frame-slot wait/upload scope | 0,006 / 0,012 | 0,007 / 0,012 | нет данных |
-| Scene snapshot | 0,501 / 0,625 | 0,612 / 0,768 | нет данных |
-| Shadow visibility | 0,214 / 0,272 | 0,227 / 0,323 | заменён подготовкой и отдельным wait scope; нет замера |
-| CPU light grid | 0,112 / 0,153 | 0,117 / 0,167 | до graph Execute; нет замера |
-| Graph recording | 2,897 / 3,490 | 3,130 / 4,666 | нет данных |
-| Submit | 0,214 / 0,723 | 0,246 / 0,374 | нет данных |
+| CPU scope / cadence, мс median / p95 | UPLOAD baseline | DEFAULT до CPU prepare | final CPU prepare |
+| --- | ---: | ---: | ---: |
+| CPU full-frame interval между Game update starts | 30,837 / 33,683 (495) | 28,683 / 29,687 (548) | 29,149 / 29,900 (513) |
+| Game update | 0,397 / 0,660 | 0,440 / 0,776 | 0,412 / 0,706 |
+| Frame-slot wait/upload scope | 0,008 / 0,013 | 0,008 / 0,013 | 0,006 / 0,012 |
+| Scene snapshot | 0,646 / 0,785 | 0,729 / 0,968 | 0,629 / 0,781 |
+| Shadow visibility, Schedule + Complete | 0,238 / 0,334 | 0,281 / 0,424 | перекрывается с grid; отдельный wait ниже |
+| Shadow visibility wait после grid | — | — | 0,084 / 0,148 |
+| CPU light grid | 0,132 / 0,174 | 0,146 / 0,216 | 0,098 / 0,146 |
+| Scene preparation, включая snapshot/grid/wait/dirty views | отдельного scope нет | отдельного scope нет | 0,894 / 1,127 |
+| Graph recording | 3,580 / 4,673 | 4,100 / 6,997 | 3,188 / 4,280 |
+| Snapshot start → graph recording end | 4,466 / 5,687 | 5,171 / 8,261 | 4,125 / 5,472 |
+| Submit | 0,266 / 0,441 | 0,295 / 0,487 | 0,253 / 0,385 |
 
-Wait/upload — весь OnUpdate scope, не чистое ожидание fence. CPU cadence включает update,
-render, Present и ожидания; её нельзя считать чистым CPU execution time. PIX GPU clocks
-не фиксировались/не измерялись, поэтому эта таблица не изолирует эффект CPU-рефакторинга.
+Число graph/preparation-span samples: 497 / 551 / 516. Строка Snapshot start → graph end включает
+подготовку, промежуточный upload и запись графа, поэтому измеряет больше, чем перенос grid
+между методами. От DEFAULT до final median этого span уменьшилась на **20,24%**, p95 — на
+**33,77%**; graph recording — на **22,24% / 38,84%**. Медианы отдельных повторов:
 
-Final PIX попытки: warm attach 6 s / timeout 90 s; fresh attach 3 s / timeout 60 s;
-launch 30 s / timeout 90 s; fresh CPU-only attach 3 s / timeout 60 s. Файлы не получены,
-эти попытки исключены из численных выводов. Не заявляется уменьшение CPU median/p95 или
-суммарного CPU work. Из recording phase устранено само построение grid, а независимые jobs
-теперь перекрываются; количественная проверка новой critical path остаётся следующей проверкой.
+| Вариант | Graph recording, три median, мс | Preparation + recording, три median, мс |
+| --- | --- | --- |
+| baseline | 3,566 / 3,352 / 3,848 | 4,433 / 4,221 / 4,771 |
+| DEFAULT | 3,968 / 4,334 / 4,083 | 4,912 / 5,463 / 5,150 |
+| prepared | 3,230 / 3,277 / 3,093 | 4,159 / 4,231 / 4,028 |
+
+В baseline и DEFAULT grid вложен в graph recording во всех 497/551 полностью проверенных
+graph scopes; в final — **0 из 516**, все grid/snapshot scopes находятся внутри Scene preparation
+до соответствующего graph scope. Это подтверждает границу фаз профилем, а не только исходниками.
+Shadow wait и прежний Schedule+Complete имеют разные границы: их разность сама по себе не
+является точным временем сэкономленной работы. Все длительности inclusive wall time,
+включают scheduling/driver calls и могут перекрываться; сумма строк не равна CPU work.
+
+Wait/upload — весь OnUpdate, не чистое ожидание fence. CPU cadence включает GPU/Present waits:
+между DEFAULT и prepared она **не улучшилась** (28,683 → 29,149 ms median). Не заявляется
+снижение полного CPU work или дополнительный FPS от этапа 4. CPU/GPU clocks не фиксировались;
+схема питания Turbo, ноутбук под длительной нагрузкой. Частичная NVIDIA telemetry для последних
+повторов сохранена отдельно; её нельзя распространить на первые повторы. Основной вывод —
+воспроизводимое сокращение измеренной CPU preparation/recording critical path при прежней сцене.
+
+### PIX timeout diagnosis
+
+Четыре прежние попытки через MCP (60–90 s timeout) не оставили файлов и подробного журнала;
+восстановить точную причину тех зависаний нельзя. Новый контроль использует прямой
+`pixtool 2610.28`, verbose logs, свежий PID, гарантированно исполняющий кадры benchmark loop,
+отдельный timeout процесса и проверку файла/manifest. Для 6 s записи полное время CLI:
+**11,54–51,27 s**; все девять завершились exit 0. В длинном prepared-1 журнал показывает
+Starting New Timing Capture на 2,1 s, Stopping на 49,9 s, saved на 51,2 s, но сам trace —
+7,010 s: задержка находится в live setup/start-stop пути PIX, вне измеряемого окна,
+а не в анализаторе и не является 48-секундным кадром приложения.
+
+Повтор исходного MCP `pix_capture_timing` на свежем прогретом final PID также успешен:
+3 s capture за **9,53 s**, 60 252 160 bytes. Отдельный обычный `App.Run`, без benchmark,
+после 30 s прогрева записал 3 s trace за **8,0 s**, exit 0; файл открыт официальным
+анализатором, ETW losses=0. Таким образом, результат не зависит только от benchmark entry point.
+Ошибка не воспроизводится устойчиво ни как
+дефект CPU preparation, ни как постоянная неисправность MCP. Изменять renderer или чужой
+PIX plugin по неподтверждённой причине не требуется. Рабочий CLI workflow и все журналы
+сохранены; увеличение timeout само по себе не использовалось как доказательство исправления.
 
 BeginFrame исправлен отдельно. Регрессия переключает Intel FG → Off через настоящий
 BistroApp::BenchmarkFrame/Update: до исправления падала с `Bistro Update must begin the frame...`,
@@ -215,11 +263,27 @@ test condition включает PROFILE_BUILD и больше не подаёт 
 GPU runtime tests запускались последовательно; один конкурентный Bistro запуск вышел с 2173,
 повторный отдельный запуск прошёл. Debug layer не включался в timing runs.
 
-Standalone **FrameGenerationTests не прошёл**: `DiscardResource` получает COMMON/PRESENT
-вместо RENDER_TARGET. С теми же исходными baseline renderer headers и baseline libraries
-тест воспроизвёл ту же ошибку. AMD успел сгенерировать 33 кадра, Intel — 32; NVIDIA DLSS-G
-недоступен на RTX 3060. Это не доказательство исправности FG SDK integration и не новая
-регрессия данного shadow/CPU-патча; исправление provider/state interoperability сюда не включено.
+Standalone **FrameGenerationTests исправлен и прошёл 2026-11-03**. Первоначальная ошибка
+`DiscardResource` COMMON/PRESENT вместо RENDER_TARGET воспроизводилась также с baseline
+headers/libraries. Проверка debug layer после каждого кадра дополнительно обнаружила
+отсутствующий SRV transition входа уже на первом FG-Off/native кадре, до включения SDK providers.
+Причина — общий GDX12OutputToScreenPass полагался на barriers графа, тогда как FG и несколько
+effect tests вызывают его Execute напрямую. SetRenderTargets только привязывает RTV.
+
+Общий проход теперь переводит input в ALL_SHADER_RESOURCE и output в RENDER_TARGET перед
+bind/discard. На graph path helper отфильтровывает одинаковые before/after states, дополнительных
+GPU transitions не появляется. Discard сохранён: это требование инициализации placed RT;
+RT state требуется самим [D3D12 DiscardResource API](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12graphicscommandlist-discardresource).
+Регрессия оставляет direct Execute и проверяет info queue после каждого Flush и teardown.
+Red: первый FG-Off кадр падает с SRV state error; green: весь provider/restart/pause/resize/SR
+цикл проходит без warning/error. AMD генерирует 33 кадра, Intel — 32; NVIDIA DLSS-G корректно
+сообщает unsupported на RTX 3060, его генерация этим оборудованием не проверяется.
+
+После fix заново собраны и последовательно прошли AOTests, DepthOfFieldTests, MotionBlurTests,
+SSRTests, ReflectionProbeTests `--debug`, BistroRenderGraphTests и BistroStartupTests. Эти проверки
+покрывают direct consumers, graph states, HDR readback, runtime switches и настоящий app lifecycle.
+Вместе с предыдущими проверками задачи — 16 целевых исполняемых тестов; 8 повторены после fix.
+Независимый targeted review двух изменённых файлов и barrier helpers замечаний не обнаружил.
 
 Свежий `prepared.rdc` открыт RenderDoc: 43826 draw-событий, 46370 action-tree событий,
 17 именованных проходов, debug log пуст. Проверены compute/graphics bindings local shadows
@@ -236,6 +300,28 @@ pixel-exact Bistro A/B, физическая secondary GPU и длительны
 `prepared-1.ngfx-gputrace`, два успешных warm PIX capture и `prepared.rdc`.
 Build roots: `Build/RenderPreparation/{baseline,default,prepared}`.
 Изолированные output/include/library props: `Build/render-preparation-*.props`.
+
+Доведение приёмки 2026-11-03:
+`D:\Project\PEPEngine2\Build\Captures\2026-11-03-acceptance`.
+Там `capture-cpu.ps1`, `analyze-cpu.py`, `capture-runs.json`, `cpu-summary.json`, per-event JSON,
+девять `{baseline,default,prepared}-{1,2,3}.wpix`, verbose PIX logs, MCP контроль и
+`manifest.json` с SHA-256 артефактов и EXE/PDB. `probe.wpix` записан у конца benchmark process
+и не включён в A/B. FG red/green logs — `Build/fg-{checkpoint-red,fix-green}.log`;
+дополнительные build/runtime logs — `Build/acceptance-*-{build,run}.log` и
+`Build/acceptance-test-results.json`.
+
+Повтор CPU captures/анализа (последовательно, без других GPU runtimes):
+
+```powershell
+& Build/Captures/2026-11-03-acceptance/capture-cpu.ps1
+& C:/Users/Asus/.codex/vendor_imports/gpu-debug/pix-mcp/.venv/Scripts/python.exe Build/Captures/2026-11-03-acceptance/analyze-cpu.py
+```
+
+Внутри capture script после 30 s прогрева выполняется фактическая CLI команда:
+
+```powershell
+& 'C:\Program Files\Microsoft PIX\2610.28\pixtool.exe' --output=verbose --log=verbose --log-file=<log> attach <PID> take-new-timing-capture <capture.wpix> --duration=6000
+```
 
 Пример фактически использованных build/check команд (PowerShell; MSBuild 18 Professional):
 
