@@ -4,6 +4,7 @@
     <PEPExternalRoot Condition="'$(PEPExternalRoot)'==''">$(PEPRepoRoot)External\External.Libraries\</PEPExternalRoot>
     <PEPExternalAssimpInclude Condition="'$(PEPExternalAssimpInclude)'==''">$(PEPExternalRoot)assimp\Include</PEPExternalAssimpInclude>
     <PEPExternalImGuiInclude Condition="'$(PEPExternalImGuiInclude)'==''">$(PEPExternalRoot)imgui\Include</PEPExternalImGuiInclude>
+    <PEPExternalSpdlogInclude Condition="'$(PEPExternalSpdlogInclude)'==''">$(PEPExternalRoot)spdlog\include</PEPExternalSpdlogInclude>
     <PEPExternalDxcInclude Condition="'$(PEPExternalDxcInclude)'==''">$(PEPExternalRoot)dxc\Include</PEPExternalDxcInclude>
     <PEPExternalPixInclude Condition="'$(PEPExternalPixInclude)'==''">$(PEPExternalRoot)pix\Include</PEPExternalPixInclude>
     <PEPExternalDirectXTKInclude Condition="'$(PEPExternalDirectXTKInclude)'==''">$(PEPExternalRoot)directxtk\Include</PEPExternalDirectXTKInclude>

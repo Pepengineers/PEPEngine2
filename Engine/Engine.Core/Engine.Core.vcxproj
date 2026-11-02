@@ -147,6 +147,7 @@
     <ClCompile Include="src\AssetManager.cpp" />
     <ClCompile Include="src\BenchmarkEngine.cpp" />
     <ClCompile Include="src\GameTimer.cpp" />
+    <ClCompile Include="src\Logger.cpp" />
     <ClCompile Include="src\IO\MeshImporter.cpp" />
     <ClCompile Include="src\IO\SceneImporter.cpp" />
     <ClCompile Include="src\IO\TextureLoader.cpp" />
@@ -161,6 +162,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Common\AssetDebugLog.h" />
+    <ClInclude Include="Include\Common\Logger.h" />
     <ClInclude Include="Include\Engine.Core\AssetHandles.h" />
     <ClInclude Include="Include\Engine.Core\AssetLocators.h" />
     <ClInclude Include="Include\Engine.Core\AssetManager.h" />

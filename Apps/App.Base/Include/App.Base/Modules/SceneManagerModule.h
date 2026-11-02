@@ -13,6 +13,7 @@
 
 #include "Engine.Core/ECS/Event.h"
 #include "App.Base/ECS/World.h"
+#include "App.Base/ECS/AppConfig.h"
 
 class World;
 class System;
@@ -36,6 +37,8 @@ public:
     void Initialize() override;
     void Uninitialize() override;
 
+    bool LoadScene(const std::string& scenePath, const AppConfig& appConfig);
+
     bool LoadWorld(const std::filesystem::path& path);
     bool UnloadWorld(size_t index);
     bool SaveWorld(World* world, const std::filesystem::path& path);
@@ -55,7 +58,8 @@ public:
         std::stable_sort(_systemVector.begin(), _systemVector.end(),
             [](const SystemEntry& a, const SystemEntry& b) {
                 return a.priority < b.priority;
-            });
+            }
+        );
     }
 
 protected:
@@ -68,6 +72,25 @@ protected:
 private:
     void Tick(float dt);
 
+    bool LoadConfiguredWorld(
+        const SceneWorldConfig& sceneWorldConfig,
+        const AppConfig& appConfig
+    );
+
+    bool AddSystemsFromConfig(
+        World* world,
+        const WorldConfig& worldConfig,
+        const AppConfig& appConfig
+    );
+
+    bool AddSystemByName(
+        World* world,
+        const SystemConfig& systemConfig
+    );
+
+    static uint8_t ToSystemPriority(int priority);
+
+private:
     GameTimer* _timer;
     std::vector<std::unique_ptr<World>> _worldVector;
     std::vector<SystemEntry> _systemVector;

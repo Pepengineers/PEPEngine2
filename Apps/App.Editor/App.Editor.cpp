@@ -20,6 +20,11 @@ protected:
     void OnMouseMove(WPARAM btnState, int x, int y) override;
     void OnMouseWheelMove(WPARAM rotation) override;
     void OnKeyboardInput(const GameTimer& gameTimer) override;
+    
+    std::string GetAppConfigPath() const override
+    {
+        return "Configs/App.Editor/App.yaml";
+    }
 
 private:
     POINT _lastMousePos = {};
