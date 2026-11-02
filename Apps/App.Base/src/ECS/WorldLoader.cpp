@@ -1351,6 +1351,41 @@ static bool ParseTransform(WorldECS::EntityHandle& entity, ryml::NodeRef node)
     return true;
 }
 
+static bool ParseVelocity(WorldECS::EntityHandle& entity, ryml::NodeRef node)
+{
+    if (node.is_seq())
+    {
+        entity.AddComponent<VelocityComponent>(ReadVector3(node));
+        return true;
+    }
+
+    if (!node.is_map() || (!node.has_child("Linear") && !node.has_child("AngularVelocity")))
+    {
+        Logger::Error("Velocity requires Linear or AngularVelocity");
+        return false;
+    }
+
+    const auto readVector = [](ryml::NodeRef field, Vector3& out)
+    {
+        const auto readNumber = [](ryml::NodeRef value, float& outValue)
+        {
+            return value.has_val() && ryml::read(value, &outValue) && std::isfinite(outValue);
+        };
+        return field.is_seq() && field.num_children() == 3 && readNumber(field[0], out.x) && readNumber(field[1], out.y) && readNumber(field[2], out.z);
+    };
+
+    VelocityComponent velocity;
+    if ((node.has_child("Linear") && !readVector(node["Linear"], velocity.Velocity)) ||
+        (node.has_child("AngularVelocity") && !readVector(node["AngularVelocity"], velocity.AngularVelocity)))
+    {
+        Logger::Error("Velocity vectors require three finite numbers");
+        return false;
+    }
+
+    entity.AddComponent<VelocityComponent>(velocity);
+    return true;
+}
+
 static bool ParseRigidBody(WorldECS::EntityHandle& entity, ryml::NodeRef node)
 {   
     RigidBodyComponent component;
@@ -1611,8 +1646,7 @@ static bool LoadEntityComponentsWithoutRefs(
 
         if (components.has_child("Velocity"))
         {
-            Vector3 velocity = ReadVector3(components["Velocity"]);
-            entity.AddComponent<VelocityComponent>(velocity);
+            if (!ParseVelocity(entity, components["Velocity"])) { return false; }
         }
 
         if (components.has_child("CircleMovement"))

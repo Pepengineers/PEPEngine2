@@ -202,6 +202,12 @@ bool SceneManagerModule::AddSystemByName(
         return true;
     }
 
+    if (systemConfig.Name == "FixedMovementSystem")
+    {
+        AddSystem<MovementSystem>(world, priority, SystemUpdatePhase::FixedPrePhysics);
+        return true;
+    }
+
     if (systemConfig.Name == "CircleMovementSystem")
     {
         AddSystem<CircleMovementSystem>(world, priority);
