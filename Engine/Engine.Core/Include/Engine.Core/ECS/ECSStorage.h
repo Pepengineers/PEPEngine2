@@ -22,7 +22,7 @@ struct IsOneOf : std::false_type
 
 template<typename T, typename First, typename... Rest>
 struct IsOneOf<T, First, Rest...>
-    : std::conditional<std::is_same<T, First>::value, std::true_type, IsOneOf<T, Rest...>>::type
+    : std::conditional_t<std::is_same_v<T, First>, std::true_type, IsOneOf<T, Rest...>>
 {
 };
 
@@ -54,7 +54,7 @@ public:
         _denseComponents.clear();
     }
 
-    bool Has(Entity entity) const
+    bool Has(const Entity entity) const
     {
         if (entity >= _sparse.size()) { return false; }
 
@@ -151,12 +151,12 @@ public:
         OnComponentUpdated.Broadcast(entity, component);
     }
 
-    T& Get(Entity entity)
+    T& Get(const Entity entity)
     {
         return _denseComponents[_sparse[entity]];
     }
 
-    const T& Get(Entity entity) const
+    const T& Get(const Entity entity) const
     {
         return _denseComponents[_sparse[entity]];
     }
@@ -218,7 +218,7 @@ public:
         }
 
         template<typename T>
-        void RemoveComponent()
+        void RemoveComponent() const
         {
             _storage->Remove<T>(_entity);
         }
@@ -242,7 +242,7 @@ public:
         }
         
         template<typename T>
-        void MarkComponentUpdated()
+        void MarkComponentUpdated() const
         {
             _storage->template MarkComponentUpdated<T>(_entity);
         }
@@ -250,7 +250,7 @@ public:
     private:
         friend class ECSStorage<Components...>;
 
-        EntityHandle(ECSStorage* storage, Entity entity)
+        EntityHandle(ECSStorage* storage, const Entity entity)
             : _storage(storage), _entity(entity)
         {}
 
@@ -307,7 +307,7 @@ public:
         _freeList.push_back(entity);
     }
 
-    bool IsAlive(Entity entity) const
+    bool IsAlive(const Entity entity) const
     {
         return entity != InvalidEntity && entity < _aliveList.size() && _aliveList[entity];
     }
@@ -388,7 +388,7 @@ public:
     }
 
     template<typename T, typename Func>
-    void ForEachRange(size_t begin, size_t end, Func&& func)
+    void ForEachRange(const size_t begin, size_t end, Func&& func)
     {
         ComponentPool<T>& pool = GetPool<T>();
         const std::vector<Entity>& entities = pool.GetEntities();
@@ -408,7 +408,7 @@ public:
     }
 
     template<typename First, typename Second, typename... Rest, typename Func>
-    void ForEachRange(size_t begin, size_t end, Func&& func)
+    void ForEachRange(const size_t begin, size_t end, Func&& func)
     {
         ComponentPool<First>& firstPool = GetPool<First>();
         const std::vector<Entity>& entities = firstPool.GetEntities();
@@ -438,24 +438,24 @@ public:
 
 private:
     template<size_t I>
-    typename std::enable_if<I == sizeof...(Components), void>::type ClearPools()
+    std::enable_if_t<I == sizeof...(Components), void> ClearPools()
     {
     }
 
     template<size_t I>
-    typename std::enable_if < I < sizeof...(Components), void>::type ClearPools()
+    std::enable_if_t < I < sizeof...(Components), void> ClearPools()
     {
         std::get<I>(_pools).Clear();
         ClearPools<I + 1>();
     }
 
     template<size_t I>
-    typename std::enable_if<I == sizeof...(Components), void>::type RemoveAllComponents(Entity)
+    std::enable_if_t<I == sizeof...(Components), void> RemoveAllComponents(Entity)
     {
     }
 
     template<size_t I>
-    typename std::enable_if < I < sizeof...(Components), void>::type RemoveAllComponents(Entity entity)
+    std::enable_if_t < I < sizeof...(Components), void> RemoveAllComponents(Entity entity)
     {
         std::get<I>(_pools).Remove(entity);
         RemoveAllComponents<I + 1>(entity);

@@ -6,12 +6,12 @@ bool World::Load()
     return WorldLoader::LoadFromFile(*this, _desc.WorldFilePath);
 }
 
-bool World::Save(std::filesystem::path path)
+bool World::Save(const std::filesystem::path& path)
 {
     return WorldLoader::SaveToFile(*this, path);
 }
 
-void World::Tick(float dt) // not implemented
+void World::Tick(const float dt) // not implemented
 {
     if (_bPaused) { return; }
 
@@ -20,15 +20,15 @@ void World::Tick(float dt) // not implemented
     // scripting here
 }
 
-void World::SetTimeScale(float scale) { _timeScale = scale; }
+void World::SetTimeScale(const float scale) { _timeScale = scale; }
 
 float World::GetTimeScale() const { return _timeScale; }
 
-void World::SetPaused(bool paused) { _bPaused = paused; }
+void World::SetPaused(const bool paused) { _bPaused = paused; }
 
 bool World::IsPaused() const { return _bPaused; }
 
-void World::SetName(std::string name) {
+void World::SetName(const std::string& name) {
     _desc.Name = name;
 }
 
@@ -43,7 +43,7 @@ const WorldECS& World::GetECS() const
 {
     return _ecs;
 }
-void World::SetSkySource(SkySource source, Entity entity)
+void World::SetSkySource(const SkySource source, const Entity entity)
 {
     if (source != SkySource::Off && source != SkySource::SkyBox && source != SkySource::SkyAtmosphere)
         throw std::invalid_argument("Unknown sky source");

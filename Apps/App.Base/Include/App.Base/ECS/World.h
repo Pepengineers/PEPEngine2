@@ -60,7 +60,7 @@ public:
 
     bool Load();
 
-    bool Save(std::filesystem::path path);
+    bool Save(const std::filesystem::path& path);
     
     void Tick(float dt);
 
@@ -73,7 +73,7 @@ public:
     WorldECS& GetECS();
     const WorldECS& GetECS() const;
 
-    void SetName(std::string name);
+    void SetName(const std::string& name);
 
     const std::filesystem::path& GetPath() const;
 
