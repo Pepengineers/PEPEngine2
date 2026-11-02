@@ -75,6 +75,15 @@ int main()
         app.MsgProc(window, WM_ACTIVATE, WA_INACTIVE, 0);
         check(!render->GetFrameGenerationStatus().Suspended, "Alt+Tab must keep rendering active by default");
         app.BenchmarkFrame();
+        auto& frameGeneration = ConsoleModule{}.FindConsoleVariable(L"Render.FrameGeneration.Provider");
+        check(frameGeneration.SetFromString("3"), "FG selection must be writable on the real Bistro path");
+        app.BenchmarkFrame();
+        check(render->GetFrameGenerationStatus().Requested == GDX12FrameGenerationProvider::Intel,
+            "Bistro Update must begin the frame and apply a runtime FG selection");
+        check(frameGeneration.SetFromString("0"), "FG Off must remain writable");
+        app.BenchmarkFrame();
+        check(render->GetFrameGenerationStatus().Requested == GDX12FrameGenerationProvider::Off,
+            "Bistro Update must apply FG Off on the next frame");
         for (unsigned frame = 0; frame < 90; ++frame) app.BenchmarkFrame();
         auto& scale = ConsoleModule{}.FindConsoleVariable(L"App.Particles.CountScale");
         for (const char* value : {"4", "0", "-2", "0.5", "1"})
