@@ -46,6 +46,7 @@ public:
         auto* input = _inputs[0]->GetTexture();
         auto* output = _inputs[1]->GetTexture();
         GDX12_SCOPED_EVENT(commands, "HDR tone map to display", Colors::Aqua);
+        commands->ResourceBarrier({ input->GetResource()->GetSRVBarrier(), output->GetResource()->GetRenderTargetBarrier() });
         // Full-screen overwrite still requires explicit initialization of placed render targets.
         commands->GetCommandList()->DiscardResource(output->GetResource()->D3DResource.Get(), nullptr);
         commands->SetGraphicsRootSignature(_root.get());

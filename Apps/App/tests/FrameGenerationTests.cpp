@@ -10,6 +10,18 @@
 #include <stdexcept>
 
 static void Require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
+static void CheckDebugMessages(ID3D12InfoQueue* info)
+{
+    for (UINT64 i = 0; i < info->GetNumStoredMessages(); ++i)
+    {
+        SIZE_T bytes = 0; info->GetMessage(i, nullptr, &bytes);
+        std::vector<uint8_t> data(bytes); auto* message = reinterpret_cast<D3D12_MESSAGE*>(data.data());
+        info->GetMessage(i, message, &bytes);
+        if (message->Severity <= D3D12_MESSAGE_SEVERITY_WARNING)
+        { std::cerr << message->pDescription << '\n'; throw std::runtime_error("D3D12 validation warning/error"); }
+    }
+    info->ClearStoredMessages();
+}
 static void Set(const wchar_t* name, int value)
 {
     Require(ConsoleModule{}.FindConsoleVariable(name).SetFromString(std::to_string(value)), "CVar write failed");
@@ -99,6 +111,7 @@ static void GPU(HWND window)
             sr.Execute(commands); output.Execute(commands);
             fg.Prepare(commands, &depth, &motion, common);
             queue->ExecuteCommandList(commands); fg.EndRendering(); swap.Present(); queue->Flush();
+            CheckDebugMessages(info.Get());
             common.ResetHistory = false;
         };
         int revision = 0;
@@ -148,14 +161,7 @@ static void GPU(HWND window)
         }
         output.ClearDenendencies(); sr.ClearDenendencies(); swap.Reset();
     }
-    for (UINT64 i = 0; i < info->GetNumStoredMessages(); ++i)
-    {
-        SIZE_T bytes = 0; info->GetMessage(i, nullptr, &bytes);
-        std::vector<uint8_t> data(bytes); auto* message = reinterpret_cast<D3D12_MESSAGE*>(data.data());
-        info->GetMessage(i, message, &bytes);
-        if (message->Severity <= D3D12_MESSAGE_SEVERITY_WARNING)
-        { std::cerr << message->pDescription << '\n'; throw std::runtime_error("D3D12 validation warning/error"); }
-    }
+    CheckDebugMessages(info.Get());
     GDX12ShaderCompiler::Shutdown(); GDX12DeviceFactory::Reset(); GDX12StreamlineSDK::Get().Shutdown();
 }
 
