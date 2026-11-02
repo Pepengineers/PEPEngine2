@@ -106,6 +106,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredLightingPass.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12LightGrid.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OpaquePass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -149,6 +150,7 @@
   <ItemGroup>
     <ClCompile Include="src\GDX12RenderPass.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12RenderHelpers.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\GDX12LightGrid.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12Reconstruction.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12FrameGeneration.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12ReconstructionPass.cpp"><Filter>Source Files</Filter></ClCompile>

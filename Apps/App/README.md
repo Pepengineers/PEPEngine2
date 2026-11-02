@@ -102,10 +102,13 @@ multiplicative revealage, and normalized composition for overlapping bottles.
 OIT approximates blended transparency; it does not simulate glass refraction.
 
 Opaque geometry writes a G-buffer (albedo/metallic, world normal/roughness,
-F0/baked flag, emissive, motion and sampled reverse-Z depth). A 16x16 tiled compute
-pass reconstructs world position, rejects local-light spheres against each tile's
-frustum and depth range, and evaluates lighting into HDR. Tile-list overflow falls
-back to the complete light list. The source cubemap supplies the visible background.
+F0/baked flag, emissive, motion and sampled reverse-Z depth). A CPU job fills a
+regular frustum grid, independently of G-buffer depth, with global light masks.
+Its Z slabs are built in parallel on the shared JobSystem. The deferred compute
+pass selects each pixel's cell and scalarizes the wave's union of sources using
+SM6 intrinsics; other devices use a per-lane mask loop. Grid size/depth are startup
+ReadOnly CVars in Engine.ini. See [clustered lighting](../../docs/rendering/clustered-lighting.md) for
+the algorithm, GPU reference checks and limits. The source cubemap supplies the visible background.
 Transparent bottles retain forward OIT and receive the same local-light PBR and PCF shadows.
 
 Both lighting paths use Cook-Torrance PBR with GGX distribution, correlated

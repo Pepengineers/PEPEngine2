@@ -795,6 +795,10 @@ int main(int argc, char** argv)
             camera.CameraLocation = { 0, 0, -100 };
             camera.NearPlane = 1;
             camera.FarPlane = 10000;
+            common.CameraProjection = projection;
+            common.CameraView = view;
+            common.ActiveCameraNearPlane = camera.NearPlane;
+            common.ActiveCameraFarPlane = camera.FarPlane;
             frame->CameraCB->CopyData(0, camera);
             auto* list = queue->GetCommandList();
             mainShadows.Execute(list);

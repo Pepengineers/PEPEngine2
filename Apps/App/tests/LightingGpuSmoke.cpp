@@ -124,6 +124,8 @@ static std::vector<float> ReadHDR(GDX12Device& device, GDX12Texture& texture)
     return result;
 }
 
+#include "ClusteredLightingChecks.h"
+
 static void CheckShadowVisibilityJobs()
 {
     GDX12LocalLightConstants point;
@@ -167,13 +169,16 @@ static void CheckShadowVisibilityJobs()
     Require(parallel.empty(), "Removing all lights must discard old visibility results");
 }
 
-int main()
+int main(int argc, char** argv)
 {
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
     try
     {
         CheckShadowVisibilityJobs();
+        CheckLightGridSettings();
         BenchmarkEngine engine;
+        Require(!ConsoleModule{}.FindConsoleVariable(L"Render.Lighting.Cluster.TileSize").SetFromString("32"),
+            "Light grid configuration changed after startup");
         auto& locator = BenchmarkEngine::GetLocator();
         locator.RegisterModule(std::make_shared<RenderModule>(nullptr, nullptr));
         const std::weak_ptr<RenderModule> original = locator.GetModule<RenderModule>();
@@ -181,17 +186,18 @@ int main()
         Require(original.expired(), "Replacing an uninitialized renderer must release it safely");
         locator.UnregisterModule<RenderModule>();
 
+        const bool benchmark = argc > 1 && std::strcmp(argv[1], "--benchmark") == 0;
         ComPtr<ID3D12Debug> debug;
         ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
-        debug->EnableDebugLayer();
+        if (!benchmark) debug->EnableDebugLayer();
         GDX12Device device;
         ThrowIfFailed(device.Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
         GDX12DeviceResources resources;
         resources.Initialize(&device);
         ComPtr<ID3D12InfoQueue> info;
-        ThrowIfFailed(device.GetDevice().As(&info));
+        if (!benchmark) ThrowIfFailed(device.GetDevice().As(&info));
         // Existing empty scene caches create null/zero-element descriptors before scene loading.
-        info->ClearStoredMessages();
+        if (info) info->ClearStoredMessages();
         auto* uploadQueue = device.GetCommandQueue();
         auto* pendingUpload = uploadQueue->GetCommandList();
         auto* otherUpload = uploadQueue->GetCommandList();
@@ -525,6 +531,11 @@ int main()
         frame->CameraCB->CopyData(0, camera);
         common.ActiveCameraCBufferIndex = 0;
         common.CameraViewToClip = projection;
+        common.CameraProjection = projection;
+        common.CameraView = view;
+        common.ActiveCameraNearPlane = camera.NearPlane;
+        common.ActiveCameraFarPlane = camera.FarPlane;
+        common.Jobs = &shadowJobs;
         frame->CameraVisibilityCommands.emplace_back();
         auto& visibility = frame->CameraVisibilityCommands[0];
         visibility.VisibleOpaqueCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(&device, 1, EBufferType::Default, false);
@@ -553,6 +564,7 @@ int main()
             point.Radiance = pointRadiance;
             spot.Radiance = spotRadiance;
             const GDX12LocalLightConstants lights[] = { point, spot };
+            resources.LocalLights = { point, spot };
             frame->LocalLightCache->CopyData(0, lights, 2);
             auto* list = queue->GetCommandList();
             culling.Execute(list);
@@ -664,7 +676,8 @@ int main()
         }
         Require(occludedEnergy < originalEnergy * 0.05f, "Forward OIT glass did not receive local shadows");
 
-        for (UINT64 i = 0; i < info->GetNumStoredMessagesAllowedByRetrievalFilter(); ++i)
+        CheckClusteredLighting(resources, common, lightingInputs, benchmark);
+        for (UINT64 i = 0; info && i < info->GetNumStoredMessagesAllowedByRetrievalFilter(); ++i)
         {
             SIZE_T size = 0;
             info->GetMessage(i, nullptr, &size);
@@ -674,7 +687,7 @@ int main()
             if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR)
                 throw std::runtime_error(message->pDescription);
         }
-        std::cout << "DX12 lighting smoke: cubemap/IBL, cached point/spot shadows, deferred light readback, and debug validation passed.\n";
+        std::cout << "DX12 lighting smoke: cubemap/IBL, cached point/spot shadows, deferred light readback passed; debug layer=" << !benchmark << '\n';
         GDX12ShaderCompiler::Shutdown();
         return 0;
     }

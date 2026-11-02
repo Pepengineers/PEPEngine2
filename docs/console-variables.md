@@ -88,6 +88,16 @@ Build/CVarTests/Manual/ConsoleVariableTests.exe
 
 Для проверки Release добавьте `/DNDEBUG /O2`. Тест намеренно вызывает ошибку запуска и проверяет её запись в лог. Он использует свой `Config/Engine.ini` рядом с тестовым exe и отказывается перезаписывать существующий файл.
 
+## Frustum light grid
+
+`Render.Lighting.Cluster.TileSize` (64 pixels, 8..1024),
+`Render.Lighting.Cluster.DepthSlices` (32, 1..128) and
+`Render.Lighting.Cluster.FarDepthCm` (100000 cm, finite 1..1e9) are statically
+registered `ReadOnly` variables: set them in the executable INI and restart.
+The last slice covers farther visible geometry. CPU filling uses the shared
+`Jobs.ThreadCount` pool, with `Jobs.BatchSize` as its maximum batch size.
+See [CPU frustum grid and benchmarks](rendering/clustered-lighting.md).
+
 ## Ambient occlusion
 
 `Render.AO.*` settings are runtime writable. Algorithms, preset inheritance, units,

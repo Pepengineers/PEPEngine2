@@ -21,7 +21,7 @@ flowchart TD
         Local --> Probes["6 · Reflection probes"]
         Probes --> GB["7 · Opaque/masked G-buffer"]
         GB --> Late["8 · AO при ExecutionPoint=1 — default; иначе пропуск"]
-        Late --> Lit["9 · Deferred lighting → linear HDR"]
+        Late --> Lit["9 · Clustered deferred lighting → linear HDR"]
         Lit --> SSR["10 · SSSR + denoiser + specular resolve"]
     end
     subgraph Transparency["Вода, прозрачность и частицы"]

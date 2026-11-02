@@ -13,6 +13,7 @@
 #include "Engine.RendererDX12/GDX12RenderGraph.h"
 
 class GameTimer;
+class JobSystem;
 namespace sl { struct FrameToken; }
 
 enum ERenderPassFlags : uint32_t
@@ -121,6 +122,7 @@ protected:
 class RenderPipelineCommonData
 {
 public:
+    JobSystem* Jobs = nullptr; // Borrowed application pool; standalone clients can build serially.
     UINT ActiveCameraCBufferIndex = -1;
     float ActiveCameraFOV = 0;
     float ActiveCameraNearPlane = 0;

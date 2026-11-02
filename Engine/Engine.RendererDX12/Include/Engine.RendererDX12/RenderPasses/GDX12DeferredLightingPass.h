@@ -1,13 +1,14 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
+#include "Engine.RendererDX12/GDX12LightGrid.h"
 
 class GDX12DeferredLightingPass final : public GDX12RenderPass
 {
 public:
     void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
     {
-        graph.SetName("Deferred lighting");
+        graph.SetName("Clustered deferred lighting");
         graph.Read(SharedResource::Scene);
         graph.ReadInputs(_inputs, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
         graph.Read(SharedResource::Environment);
@@ -28,8 +29,8 @@ public:
         GDX12RenderHelpers::InitializeComputeTexture(*_color, *_resources,
             _inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight(), DXGI_FORMAT_R16G16B16A16_FLOAT);
         GDX12RootSignatureDesc root;
-        root.NumSingleCBVSlots = 4;
-        root.NumSingleSRVSlots = 17;
+        root.NumSingleCBVSlots = 5;
+        root.NumSingleSRVSlots = 18;
         root.NumSingleUAVSlots = 1;
         root.StaticSamplers = GetStaticSamplers();
         root.StaticSamplers.emplace_back(7, D3D12_FILTER_MIN_MAG_MIP_LINEAR,
@@ -40,13 +41,39 @@ public:
         sampler.BorderColor = D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
         root.StaticSamplers.push_back(sampler);
         _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
+        D3D12_FEATURE_DATA_D3D12_OPTIONS1 options = {};
+        const bool waveOps = SUCCEEDED(_resources->Device->GetDevice()->CheckFeatureSupport(
+            D3D12_FEATURE_D3D12_OPTIONS1, &options, sizeof(options))) && options.WaveOps &&
+            _resources->Device->GetDeviceFeatures().Features.HighestShaderModel() >= D3D_SHADER_MODEL_6_0;
+        const D3D_SHADER_MACRO defines[] = { { "DEFERRED_WAVE_OPS", waveOps ? "1" : "0" }, { nullptr, nullptr } };
         _pipeline = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(),
-            SHADERS_FOLDER "DeferredLighting.hlsl", "CS");
+            SHADERS_FOLDER "DeferredLighting.hlsl", "CS", defines);
+        _grids.resize(_resources->FrameConstants.size());
+        for (auto& grid : _grids)
+        {
+            grid.Upload = std::make_unique<GDX12UploadBuffer<UINT>>(_resources->Device, 1, EBufferType::Upload, false);
+            grid.Masks = std::make_unique<GDX12UploadBuffer<UINT>>(_resources->Device, 1, EBufferType::Default, false);
+            grid.Masks->CreateSRV(_resources->SRV_UAV_Heap.get(), _resources->SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+            grid.Constants = std::make_unique<GDX12UploadBuffer<GDX12LightGridConstants>>(_resources->Device, 1);
+        }
     }
     void Execute(GDX12CommandList* commands) override
     {
-        GDX12_SCOPED_EVENT(commands, "Tiled deferred lighting", Colors::Gold);
+        GDX12_SCOPED_EVENT(commands, "Clustered deferred lighting", Colors::Gold);
         auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+        _gridSystem.Build(_grid, _commonData->CameraProjection, _commonData->CameraView,
+            _commonData->ActiveCameraNearPlane, _commonData->ActiveCameraFarPlane,
+            _color->GetWidth(), _color->GetHeight(), _resources->LocalLights, _commonData->Jobs);
+        auto& grid = _grids[_resources->CurrFrameConstantsIndex];
+        const UINT words = static_cast<UINT>(_grid.Masks.size());
+        grid.Upload->Resize(words);
+        grid.Masks->Resize(words);
+        grid.Upload->CopyData(0, _grid.Masks.data(), words);
+        grid.Constants->CopyData(0, _grid.Constants);
+        commands->ResourceBarrier({ grid.Masks->GetResource().GetCopyDestBarrier() });
+        commands->GetCommandList()->CopyBufferRegion(grid.Masks->GetResource().D3DResource.Get(), 0,
+            grid.Upload->GetResource().D3DResource.Get(), 0, UINT64(words) * sizeof(UINT));
+        commands->ResourceBarrier({ grid.Masks->GetResource().GetSRVBarrier() });
         commands->SetComputeRootSignature(_root.get());
         commands->SetPipelineState(_pipeline.Get());
         commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
@@ -59,11 +86,13 @@ public:
             commands->SetComputeSRV(i < 11 ? i : 14, texture->GetSRV()->GPUHandle);
         }
         commands->SetComputeRootConstantBufferView(3, frame->SkyCB->GetElementAddress(0));
+        commands->SetComputeRootConstantBufferView(4, grid.Constants->GetElementAddress(0));
         commands->SetComputeSRV(15, _resources->SkyTransmittanceSRV.GPUHandle);
         commands->SetComputeSRV(16, _resources->SkyViewSRV.GPUHandle);
         commands->SetComputeSRV(11, frame->LocalLightCache->GetSRV()->GPUHandle);
         commands->SetComputeSRV(12, _resources->ReflectionRadianceSRV.GPUHandle);
         commands->SetComputeSRV(13, frame->ReflectionProbes->GetSRV()->GPUHandle);
+        commands->SetComputeSRV(17, grid.Masks->GetSRV()->GPUHandle);
         commands->SetComputeUAV(0, _color->GetUAV()->GPUHandle);
         commands->Dispatch((_color->GetWidth() + 15) / 16, (_color->GetHeight() + 15) / 16, 1);
     }
@@ -71,9 +100,17 @@ public:
     void ClearDenendencies() override
     {
         GDX12RenderPass::ClearDenendencies();
-        _color.reset(); _root.reset(); _pipeline.Reset();
+        _color.reset(); _root.reset(); _pipeline.Reset(); _grids.clear();
     }
 private:
+    struct FrameGrid
+    {
+        std::unique_ptr<GDX12UploadBuffer<UINT>> Upload, Masks;
+        std::unique_ptr<GDX12UploadBuffer<GDX12LightGridConstants>> Constants;
+    };
+    GDX12LightGrid _grid;
+    GDX12LightGridBuildSystem _gridSystem;
+    std::vector<FrameGrid> _grids;
     std::unique_ptr<GDX12Texture> _color;
     std::unique_ptr<GDX12RootSignature> _root;
     ComPtr<ID3D12PipelineState> _pipeline;

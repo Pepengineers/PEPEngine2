@@ -29,8 +29,16 @@ Texture2D<float4> VisibleSkyView : register(t16);
 #include "ReflectionProbes.hlsli"
 #include "PBRLighting.hlsli"
 
-groupshared uint MinDepth, MaxDepth, LightCount;
-groupshared uint LightIndices[512];
+#ifndef DEFERRED_WAVE_OPS
+#define DEFERRED_WAVE_OPS 0
+#endif
+
+cbuffer LightGrid : register(b4)
+{
+    uint4 GridSize;
+    float4 GridDepth;
+};
+StructuredBuffer<uint> LightMasks : register(t17);
 
 float3 WorldPosition(uint2 pixel, uint2 size, float depth)
 {
@@ -38,45 +46,15 @@ float3 WorldPosition(uint2 pixel, uint2 size, float depth)
     float4 world = mul(float4(ndc, depth, 1), CBCamera.InvViewProj);
     return world.xyz / world.w;
 }
-bool IntersectsPlane(float4 plane, LocalLight light)
-{
-    return dot(float4(light.Position, 1), plane) >= -light.Range * length(plane.xyz);
-}
 
 [numthreads(16, 16, 1)]
-void CS(uint3 dispatch : SV_DispatchThreadID, uint3 group : SV_GroupID, uint lane : SV_GroupIndex)
+void CS(uint3 dispatch : SV_DispatchThreadID)
 {
     uint width, height;
     SceneColor.GetDimensions(width, height);
     uint2 size = uint2(width, height), pixel = dispatch.xy;
-    bool valid = all(pixel < size);
-    float depth = valid ? GDepth[pixel] : 0;
-    float3 position = depth > 0 ? WorldPosition(pixel, size, depth) : 0;
-    if (lane == 0) { MinDepth = 0x7f7fffffu; MaxDepth = 0; LightCount = 0; }
-    GroupMemoryBarrierWithGroupSync();
-    if (depth > 0)
-    {
-        uint z = asuint(max(0.0f, -mul(float4(position, 1), CBCamera.View).z));
-        InterlockedMin(MinDepth, z);
-        InterlockedMax(MaxDepth, z);
-    }
-    GroupMemoryBarrierWithGroupSync();
-    float2 lo = float2(group.xy * 16) / size * 2 - 1;
-    float2 hi = float2(min(group.xy * 16 + 16, size)) / size * 2 - 1;
-    float4x4 m = transpose(CBCamera.ViewProj);
-    for (uint i = lane; i < CBMain.LocalLightCount && MaxDepth != 0; i += 256)
-    {
-        LocalLight light = LocalLights[i];
-        float z = -mul(float4(light.Position, 1), CBCamera.View).z;
-        if (z + light.Range < asfloat(MinDepth) || z - light.Range > asfloat(MaxDepth)) continue;
-        if (!IntersectsPlane(m[0] - lo.x * m[3], light) || !IntersectsPlane(hi.x * m[3] - m[0], light) ||
-            !IntersectsPlane(m[1] + hi.y * m[3], light) || !IntersectsPlane(-lo.y * m[3] - m[1], light)) continue;
-        uint slot;
-        InterlockedAdd(LightCount, 1, slot);
-        if (slot < 512) LightIndices[slot] = i;
-    }
-    GroupMemoryBarrierWithGroupSync();
-    if (!valid) return;
+    if (any(pixel >= size)) return;
+    float depth = GDepth[pixel];
     if (depth <= 0)
     {
         // A finite far depth also supports cameras with an infinite reverse-Z far plane.
@@ -89,6 +67,7 @@ void CS(uint3 dispatch : SV_DispatchThreadID, uint3 group : SV_GroupID, uint lan
         SceneColor[pixel] = float4(sky, 1);
         return;
     }
+    float3 position = WorldPosition(pixel, size, depth);
     float4 albedo = GAlbedo[pixel], normal = GNormal[pixel], f0 = GF0[pixel];
     PBRSurface s;
     s.Albedo = albedo.rgb; s.Metallic = albedo.a;
@@ -97,9 +76,42 @@ void CS(uint3 dispatch : SV_DispatchThreadID, uint3 group : SV_GroupID, uint lan
     s.Emissive = GEmissive[pixel].rgb;
     float3 v = SafeNormalize(CBCamera.CameraLocation - position);
     float3 result = ShadeSunAndIBL(s, position, v, AmbientOcclusion[pixel]);
-    // Overflow preserves correctness for unusually dense groups of lights.
-    uint count = LightCount > 512 ? CBMain.LocalLightCount : LightCount;
-    for (uint j = 0; j < count; ++j)
-        result += ShadeLocalLight(s, position, v, LocalLights[LightCount > 512 ? j : LightIndices[j]]);
+    if (s.Baked != 0)
+    {
+        SceneColor[pixel] = float4(result, 1);
+        return;
+    }
+#ifdef DEFERRED_REFERENCE
+    for (uint j = 0; j < CBMain.LocalLightCount; ++j)
+        result += ShadeLocalLight(s, position, v, LocalLights[j]);
+#else
+    float viewDepth = max(-mul(float4(position, 1), CBCamera.View).z, GridDepth.w);
+    uint slice = (uint)clamp(log2(viewDepth) * GridDepth.x + GridDepth.y, 0.0f, (float)(GridSize.z - 1));
+    uint2 cell = min(pixel / (uint)GridDepth.z, GridSize.xy - 1);
+    uint address = ((slice * GridSize.y + cell.y) * GridSize.x + cell.x) * GridSize.w;
+    for (uint word = 0; word < GridSize.w; ++word)
+    {
+        uint mask = LightMasks[address + word];
+#if DEFERRED_WAVE_OPS
+        // Merge by source, so a light shared by several cells is visited once per wave.
+        uint merged = WaveActiveBitOr(mask);
+        while (merged != 0)
+        {
+            uint bit = firstbitlow(merged);
+            merged &= merged - 1;
+            uint index = WaveReadLaneFirst(word * 32 + bit);
+            if ((mask & (1u << bit)) != 0)
+                result += ShadeLocalLight(s, position, v, LocalLights[index]);
+        }
+#else
+        while (mask != 0)
+        {
+            uint bit = firstbitlow(mask);
+            mask &= mask - 1;
+            result += ShadeLocalLight(s, position, v, LocalLights[word * 32 + bit]);
+        }
+#endif
+    }
+#endif
     SceneColor[pixel] = float4(result, 1);
 }

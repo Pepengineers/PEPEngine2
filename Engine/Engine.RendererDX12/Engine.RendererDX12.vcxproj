@@ -50,6 +50,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12SharedTexture.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ShadowCascades.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12LocalLights.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12LightGrid.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12LocalShadowPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12CascadedShadowPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12EnvironmentIBLPass.h" />
@@ -94,6 +95,7 @@
     <ClCompile Include="src\GDX12RenderPass.cpp" />
     <ClCompile Include="src\GDX12RenderGraph.cpp" />
     <ClCompile Include="src\GDX12RenderHelpers.cpp" />
+    <ClCompile Include="src\GDX12LightGrid.cpp" />
     <ClCompile Include="src\GDX12Reconstruction.cpp" />
     <ClCompile Include="src\GDX12ReconstructionPass.cpp" />
     <ClCompile Include="src\GDX12Sky.cpp" />

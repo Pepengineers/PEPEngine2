@@ -910,6 +910,7 @@ void RenderModule::OnUpdate()
 
 void RenderModule::OnRender()
 {
+    _RPcommonData.Jobs = &App::GetInstance()->GetJobs();
     _backBuffer->GetFrameGeneration().BeginRendering(_RPcommonData);
     PrepareSkeletalMeshes();
     if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
