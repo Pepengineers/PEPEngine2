@@ -129,6 +129,7 @@ namespace
 
         void OnKeyboardInput(const GameTimer& timer) override
         {
+            if (bInactive) return;
             auto* world = Locator.GetModule<SceneManagerModule>()->GetWorld();
             auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
             const auto rotation = Matrix::CreateFromYawPitchRoll(

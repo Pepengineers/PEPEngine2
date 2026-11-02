@@ -53,6 +53,7 @@ protected:
     HINSTANCE AppHandler = nullptr;
 
     bool bAppPaused = false;
+    bool bInactive = false;
     bool bMinimized = false;
     bool bMaximized = false;
     bool bResizing = false;
@@ -102,6 +103,8 @@ protected:
     IndirectCommandBuildSystem _indirect;
 
 private:
+    void UpdatePauseState();
+
     std::unique_ptr<Window> _window;
     bool _initializing = true;
     std::atomic<bool> _loadingCancelled{false};

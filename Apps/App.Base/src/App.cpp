@@ -14,6 +14,8 @@ using namespace DirectX;
 
 namespace Private
 {
+    static AutoConsoleVariable<bool> RenderInBackground(
+        L"App.RenderInBackground", true, L"Continue rendering without window focus. Minimize and resize still pause.");
     static AutoConsoleVariable<int> JobThreadCount(
         L"Jobs.ThreadCount", 0, L"Total job threads including the caller; <= 0 uses hardware concurrency. Restart required.",
         EConsoleVariableFlags::ReadOnly);
@@ -101,6 +103,7 @@ int App::Run()
     MSG Msg = {nullptr};
 
     Timer.Reset();
+    if (bAppPaused) Timer.Stop();
 
     while (Msg.message != WM_QUIT)
     {
@@ -113,6 +116,7 @@ int App::Run()
         // Otherwise, do animation/game stuff.
         else
         {
+            UpdatePauseState();
             Timer.Tick();
 
             if (!bAppPaused)
@@ -129,6 +133,16 @@ int App::Run()
     }
 
     return static_cast<int>(Msg.wParam);
+}
+
+void App::UpdatePauseState()
+{
+    const bool paused = bMinimized || bResizing || (bInactive && !Private::RenderInBackground.GetBool());
+    if (bAppPaused == paused) return;
+    bAppPaused = paused;
+    if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(paused);
+    if (paused) Timer.Stop();
+    else Timer.Start();
 }
 
 void App::ReportLoading(const std::wstring& stage)
@@ -234,7 +248,7 @@ bool App::Initialize()
         _indirect.Schedule(_jobs, *scenes->GetWorld(i), 0).Complete();
     Log::Info("Application", "Application initialization complete");
     _initializing = false;
-    bAppPaused = bMinimized;
+    UpdatePauseState();
     SetWindowTextW(_window->GetWindowHandle(), _window->GetWindowTitle().c_str());
     if (!bMinimized) OnResize();
     return true;
@@ -242,6 +256,7 @@ bool App::Initialize()
 
 LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    if (msg == WM_ACTIVATE) bInactive = LOWORD(wParam) == WA_INACTIVE;
     if (_initializing)
     {
         if (msg == WM_CLOSE || (msg == WM_KEYUP && wParam == VK_ESCAPE))
@@ -274,22 +289,8 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     }
     switch (msg)
     {
-    // WM_ACTIVATE is sent when the window is activated or deactivated.
-    // We pause the game when the window is deactivated and unpause it
-    // when it becomes active.
     case WM_ACTIVATE:
-        if (LOWORD(wParam) == WA_INACTIVE)
-        {
-            bAppPaused = true;
-            if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(true);
-            Timer.Stop();
-        }
-        else
-        {
-            bAppPaused = false;
-            if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(false);
-            Timer.Start();
-        }
+        UpdatePauseState();
         return 0;
 
     // WM_SIZE is sent when the user resizes the window.
@@ -307,34 +308,27 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 
             if (wParam == SIZE_MINIMIZED)
             {
-                bAppPaused = true;
-                if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(true);
                 bMinimized = true;
                 bMaximized = false;
             }
             else if (wParam == SIZE_MAXIMIZED)
             {
-                bAppPaused = false;
                 bMinimized = false;
                 bMaximized = true;
                 OnResize();
-                if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(false);
             }
             else if (wParam == SIZE_RESTORED)
             {
                 // Restoring from minimized state?
                 if (bMinimized)
                 {
-                    bAppPaused = false;
                     bMinimized = false;
                     OnResize();
-                    if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(false);
                 }
 
                 // Restoring from maximized state?
                 else if (bMaximized)
                 {
-                    bAppPaused = false;
                     bMaximized = false;
                     OnResize();
                 }
@@ -354,24 +348,21 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                     OnResize();
                 }
             }
+            UpdatePauseState();
             return 0;
         }
     // WM_EXITSIZEMOVE is sent when the user grabs the resize bars.
     case WM_ENTERSIZEMOVE:
-        bAppPaused = true;
-        if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(true);
         bResizing = true;
-        Timer.Stop();
+        UpdatePauseState();
         return 0;
 
     // WM_EXITSIZEMOVE is sent when the user releases the resize bars.
     // Here we reset everything based on the new window dimensions.
     case WM_EXITSIZEMOVE:
-        bAppPaused = false;
         bResizing = false;
-        Timer.Start();
         OnResize();
-        if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(false);
+        UpdatePauseState();
         return 0;
 
     // WM_DESTROY is sent when the window is being destroyed.
@@ -455,7 +446,7 @@ bool App::AddModules()
 void App::Update(const GameTimer& gameTimer)
 {
     Locator.GetModule<RenderModule>()->BeginFrame();
-    OnKeyboardInput(gameTimer);
+    if (!bInactive) OnKeyboardInput(gameTimer);
     Locator.GetModule<RenderModule>()->Update();
     auto scenes = Locator.GetModule<SceneManagerModule>();
     for (size_t i = 0; i < scenes->GetWorldCount(); ++i)
