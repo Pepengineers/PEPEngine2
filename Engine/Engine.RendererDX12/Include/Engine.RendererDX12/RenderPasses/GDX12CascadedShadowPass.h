@@ -137,9 +137,9 @@ public:
         commands->ResourceBarrier({ visibility.Counters->GetResource().GetUAVBarrier() });
         commands->SetPipelineState(_cullingPSO);
         commands->SetComputeRootConstantBufferView(0, frame->ShadowCB->GetElementAddress(0));
-        commands->SetComputeSRV(0, frame->InstanceCache->GetSRV()->GPUHandle);
-        commands->SetComputeSRV(1, _resources->IndirectCommandsCache->GetSRV()->GPUHandle);
-        commands->SetComputeSRV(2, frame->MaterialCache->GetSRV()->GPUHandle);
+        commands->SetComputeSRV(0, frame->ShadowInstances->GetSRV()->GPUHandle);
+        commands->SetComputeSRV(1, frame->ShadowTemplates->GetSRV()->GPUHandle);
+        commands->SetComputeSRV(2, frame->ShadowMaterials->GetSRV()->GPUHandle);
         for (UINT cascade = 0; cascade < 4; ++cascade)
             commands->SetComputeUAV(cascade, visibility.Commands[cascade]->GetUAV()->GPUHandle);
         if (count) commands->Dispatch((count + 63) / 64, 1, 1);
@@ -149,9 +149,9 @@ public:
         commands->SetGraphicsRootSignature(_graphicsRoot.get());
         commands->SetPipelineState(_shadowPSO);
         commands->SetGraphicsRootConstantBufferView(1, frame->ShadowCB->GetElementAddress(0));
-        commands->SetGraphicsSRV(0, frame->MaterialCache->GetSRV()->GPUHandle);
-        commands->SetGraphicsSRV(1, frame->TransformCache->GetSRV()->GPUHandle);
-        commands->SetGraphicsSRV(2, frame->InstanceCache->GetSRV()->GPUHandle);
+        commands->SetGraphicsSRV(0, frame->ShadowMaterials->GetSRV()->GPUHandle);
+        commands->SetGraphicsSRV(1, frame->ShadowTransforms->GetSRV()->GPUHandle);
+        commands->SetGraphicsSRV(2, frame->ShadowInstances->GetSRV()->GPUHandle);
         commands->SetGraphicsSRV(3, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
         commands->SetGeometryBuffer(_resources->GeometryBuffer.get());
         commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);

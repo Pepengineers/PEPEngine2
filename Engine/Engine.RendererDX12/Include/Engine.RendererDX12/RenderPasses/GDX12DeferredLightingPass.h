@@ -102,7 +102,7 @@ public:
         commands->SetComputeSRV(13, frame->ReflectionProbes->GetSRV()->GPUHandle);
         commands->SetComputeSRV(17, grid.Masks->GetSRV()->GPUHandle);
         commands->SetComputeUAV(0, _color->GetUAV()->GPUHandle);
-        commands->Dispatch((_color->GetWidth() + 15) / 16, (_color->GetHeight() + 15) / 16, 1);
+        commands->Dispatch((_color->GetWidth() + 7) / 8, (_color->GetHeight() + 7) / 8, 1);
     }
     void Resize() override { _prepared = false; _color->Resize(_inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight()); }
     void ClearDenendencies() override

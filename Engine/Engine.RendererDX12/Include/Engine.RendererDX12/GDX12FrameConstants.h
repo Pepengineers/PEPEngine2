@@ -39,6 +39,7 @@ public:
     std::unique_ptr<GDX12UploadBuffer<GDX12TransformConstants>> TransformCache;
     std::unique_ptr<GDX12UploadBuffer<GDX12MaterialConstants>> MaterialCache;
     std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> InstanceCache;
+    // DEFAULT snapshot shared by shadows and main-camera geometry, uploaded before the render graph.
     std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> ShadowTemplatesUpload, ShadowTemplates;
     std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> ShadowInstances;
     std::unique_ptr<GDX12UploadBuffer<GDX12MaterialConstants>> ShadowMaterials;

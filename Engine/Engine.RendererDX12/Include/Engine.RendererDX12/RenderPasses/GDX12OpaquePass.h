@@ -170,9 +170,9 @@ public:
 		cmdList->SetGeometryBuffer(_resources->GeometryBuffer.get());
 		cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		cmdList->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-		cmdList->SetGraphicsSRV(0, currentFrameConstants->MaterialCache->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(1, currentFrameConstants->TransformCache->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(2, currentFrameConstants->InstanceCache->GetSRV()->GPUHandle);
+		cmdList->SetGraphicsSRV(0, currentFrameConstants->ShadowMaterials->GetSRV()->GPUHandle);
+		cmdList->SetGraphicsSRV(1, currentFrameConstants->ShadowTransforms->GetSRV()->GPUHandle);
+		cmdList->SetGraphicsSRV(2, currentFrameConstants->ShadowInstances->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(3, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
         cmdList->ResourceBarrier({
             currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().GetIndirectArgsBarrier(),

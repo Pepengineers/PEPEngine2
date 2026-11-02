@@ -62,9 +62,9 @@ public:
 		cmdList->SetPipelineState(_cullingPSO);
 		cmdList->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
 		cmdList->SetComputeRootConstantBufferView(0, currentFrameConstants->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
-		cmdList->SetComputeSRV(0, currentFrameConstants->InstanceCache->GetSRV()->GPUHandle);
-		cmdList->SetComputeSRV(1, _resources->IndirectCommandsCache->GetSRV()->GPUHandle);
-		cmdList->SetComputeSRV(2, currentFrameConstants->MaterialCache->GetSRV()->GPUHandle);
+		cmdList->SetComputeSRV(0, currentFrameConstants->ShadowInstances->GetSRV()->GPUHandle);
+		cmdList->SetComputeSRV(1, currentFrameConstants->ShadowTemplates->GetSRV()->GPUHandle);
+		cmdList->SetComputeSRV(2, currentFrameConstants->ShadowMaterials->GetSRV()->GPUHandle);
 		cmdList->SetComputeUAV(0, currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetUAV()->GPUHandle);
 		cmdList->SetComputeUAV(1, currentCameraVisBuffers.OpaqueDrawCounter->GetUAV()->GPUHandle);
 		cmdList->SetComputeUAV(2, currentCameraVisBuffers.VisibleTransparentCommandsCache->GetUAV()->GPUHandle);

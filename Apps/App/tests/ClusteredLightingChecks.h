@@ -213,7 +213,8 @@ static void CheckClusteredLighting(GDX12DeviceResources& resources, RenderPipeli
                 else
                 {
                     if (variant == baseline.Get()) bindPrevious(list);
-                    list->Dispatch((width + 15) / 16, (height + 15) / 16, 1);
+                    const UINT groupSize = variant == baseline.Get() ? 16 : 8;
+                    list->Dispatch((width + groupSize - 1) / groupSize, (height + groupSize - 1) / groupSize, 1);
                 }
             }
             const double cpuMS = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - cpuStart).count() / repeats;

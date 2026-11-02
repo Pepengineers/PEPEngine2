@@ -380,10 +380,14 @@ int main(int argc, char** argv)
         commands->ResourceBarrier({ white.GetResource()->GetRenderTargetBarrier() });
         commands->ClearRenderTargetView(&white);
         commands->ResourceBarrier({ white.GetResource()->GetSRVBarrier() });
+        resources.PrepareLocalShadowData();
+        resources.UploadLocalShadowData(commands);
+        resources.IndirectCommandsCache->CopyData(0, GDX12IndirectDrawArgs{});
         shadows.Execute(commands);
         queue->ExecuteCommandList(commands);
         queue->Flush();
         CheckReadback(device, *shadows.GetOutput(0)->GetTexture(), 0, false, true);
+        resources.IndirectCommandsCache->CopyData(0, draw);
 
         GDX12LocalLightConstants point;
         point.Position = { 0, 20, 0 };
@@ -628,6 +632,8 @@ int main(int argc, char** argv)
             resources.LocalLights = { point, spot };
             frame->LocalLightCache->CopyData(0, lights, 2);
             auto* list = queue->GetCommandList();
+            resources.PrepareLocalShadowData();
+            resources.UploadLocalShadowData(list);
             culling.Execute(list);
             opaque.Execute(list);
             ao.Execute(list);

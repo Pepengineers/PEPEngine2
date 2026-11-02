@@ -150,12 +150,12 @@ public:
 		cmdList->SetGeometryBuffer(_resources->GeometryBuffer.get());
 		cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 		cmdList->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-		cmdList->SetGraphicsSRV(0, currentFrameConstants->MaterialCache->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(1, currentFrameConstants->TransformCache->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(2, currentFrameConstants->InstanceCache->GetSRV()->GPUHandle);
+		cmdList->SetGraphicsSRV(0, currentFrameConstants->ShadowMaterials->GetSRV()->GPUHandle);
+		cmdList->SetGraphicsSRV(1, currentFrameConstants->ShadowTransforms->GetSRV()->GPUHandle);
+		cmdList->SetGraphicsSRV(2, currentFrameConstants->ShadowInstances->GetSRV()->GPUHandle);
 		for (UINT input = 1; input < 5; ++input)
 			cmdList->SetGraphicsSRV(2 + input, _inputs[input]->GetTexture()->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(7, currentFrameConstants->LocalLightCache->GetSRV()->GPUHandle);
+		cmdList->SetGraphicsSRV(7, currentFrameConstants->ShadowLights->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(8, _inputs[5]->GetTexture()->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(9, _resources->ReflectionRadianceSRV.GPUHandle);
 		cmdList->SetGraphicsSRV(10, currentFrameConstants->ReflectionProbes->GetSRV()->GPUHandle);

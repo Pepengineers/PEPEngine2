@@ -47,7 +47,7 @@ float3 WorldPosition(uint2 pixel, uint2 size, float depth)
     return world.xyz / world.w;
 }
 
-[numthreads(16, 16, 1)]
+[numthreads(8, 8, 1)]
 void CS(uint3 dispatch : SV_DispatchThreadID)
 {
     uint width, height;
