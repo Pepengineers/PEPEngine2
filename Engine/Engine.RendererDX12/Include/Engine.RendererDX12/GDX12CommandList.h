@@ -2,6 +2,13 @@
 
 #include "Engine.RendererDX12\D3DHelpers.h"
 
+#if defined(DEBUG) || defined(_DEBUG) || defined(PROFILE_BUILD)
+#include <pix/pix3.h>
+#define GDX12_SCOPED_CPU_EVENT(name) PIXScopedEvent(0, name)
+#else
+#define GDX12_SCOPED_CPU_EVENT(name) ((void)0)
+#endif
+
 class GDX12Device;
 class GDX12RootSignature;
 class GDX12DescriptorHeap;
@@ -83,7 +90,7 @@ public:
 	void EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTURE_BARRIER> textureBarriers);
 
 
-#if defined(DEBUG) || defined(_DEBUG)
+#if defined(DEBUG) || defined(_DEBUG) || defined(PROFILE_BUILD)
     class ScopedEvent
     {
     public:
@@ -115,7 +122,7 @@ private:
 	GDX12GeometryBuffer* _currentGeometryBuffer;
 };
 
-#if defined(DEBUG) || defined(_DEBUG)
+#if defined(DEBUG) || defined(_DEBUG) || defined(PROFILE_BUILD)
 #define GDX12_EVENT_JOIN_IMPL(a, b) a##b
 #define GDX12_EVENT_JOIN(a, b) GDX12_EVENT_JOIN_IMPL(a, b)
 #define GDX12_SCOPED_EVENT(...) const GDX12CommandList::ScopedEvent GDX12_EVENT_JOIN(gdx12Event, __LINE__)(__VA_ARGS__)

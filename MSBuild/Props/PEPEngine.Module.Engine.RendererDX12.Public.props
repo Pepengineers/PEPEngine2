@@ -7,7 +7,7 @@
   <Import Project="$(MSBuildThisFileDirectory)PEPEngine.External.D3D12MA.props" />
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(PEPRepoRoot)Engine\Engine.RendererDX12\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(PEPRepoRoot)Engine\Engine.RendererDX12\Include;$(PEPExternalPixInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
 </Project>

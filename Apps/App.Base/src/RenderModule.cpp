@@ -864,6 +864,7 @@ const float RenderModule::GetAspectRatio()
 
 void RenderModule::OnUpdate()
 {
+    GDX12_SCOPED_CPU_EVENT("Frame slot wait and upload");
     if (_timer->DeltaTime() > 0.25f) _RPcommonData.RequestHistoryReset = true;
     uint16_t width, height;
     _window->GetWindowSize(width, height);
@@ -926,8 +927,11 @@ void RenderModule::OnRender()
     DispatchSkeletalMeshes(primarycmdList);
     CollectGrassScene(primarycmdList);
     CollectReflectionScene();
-    _shadowVisibility.Schedule(App::GetInstance()->GetJobs(), _primaryResources.LocalLights,
-        *_primaryResources.LocalShadowCasters, _primaryResources.LocalShadowVisibility).Complete();
+    {
+        GDX12_SCOPED_CPU_EVENT("Shadow visibility");
+        _shadowVisibility.Schedule(App::GetInstance()->GetJobs(), _primaryResources.LocalLights,
+            *_primaryResources.LocalShadowCasters, _primaryResources.LocalShadowVisibility).Complete();
+    }
 
     auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
     _primaryGraph->Execute(primarycmdList);
@@ -1064,6 +1068,7 @@ void RenderModule::CollectParticleEmitters()
 
 void RenderModule::CollectReflectionScene()
 {
+    GDX12_SCOPED_CPU_EVENT("Scene snapshot");
     uint64_t staticHash = 14695981039346656037ull;
     uint64_t dynamicHash = staticHash;
     const auto hash = [](uint64_t& result, const auto& value)

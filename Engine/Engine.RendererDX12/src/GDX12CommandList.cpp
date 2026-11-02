@@ -8,7 +8,7 @@
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
 
-#if defined(DEBUG) || defined(_DEBUG)
+#if defined(DEBUG) || defined(_DEBUG) || defined(PROFILE_BUILD)
 #include <pix/pix3.h>
 #endif
 
@@ -309,7 +309,7 @@ void GDX12CommandList::EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTUR
 	_commandList->Barrier(static_cast<UINT>(barrierGroups.size()), barrierGroups.data());
 }
 
-#if defined(DEBUG) || defined(_DEBUG)
+#if defined(DEBUG) || defined(_DEBUG) || defined(PROFILE_BUILD)
 GDX12CommandList::ScopedEvent::ScopedEvent(GDX12CommandList* commands, const char* name, XMVECTOR color)
     : _commands(commands->_commandList.Get())
 {

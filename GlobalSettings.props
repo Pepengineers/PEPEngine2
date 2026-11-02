@@ -8,6 +8,9 @@
     <OutDir>$(PEPRepoRoot)Build\bin\$(PlatformName)\$(Configuration)\$(ProjectName)\</OutDir>
     <IntDir>$(PEPRepoRoot)Build\obj\$(PlatformName)\$(Configuration)\$(ProjectName)\</IntDir>
   </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(PEPEnableProfiling)'=='true'">
+    <ClCompile><PreprocessorDefinitions>PROFILE_BUILD;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup>
     <ClCompile>
       <PreprocessorDefinitions>

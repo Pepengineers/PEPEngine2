@@ -66,6 +66,7 @@ GDX12CommandList* GDX12CommandQueue::GetCommandList()
 
 void GDX12CommandQueue::ExecuteCommandList(GDX12CommandList* commandList)
 {
+    GDX12_SCOPED_CPU_EVENT("Submit");
     commandList->GetCommandList()->Close();
     ID3D12CommandList* ppLists[] = { commandList->GetCommandList().Get() };
     _commandQueue->ExecuteCommandLists(1, ppLists);

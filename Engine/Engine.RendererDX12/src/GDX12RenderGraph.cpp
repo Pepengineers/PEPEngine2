@@ -335,6 +335,7 @@ void GDX12RenderGraph::Compile(bool reuseTextures)
 
 void GDX12RenderGraph::Execute(GDX12CommandList* commands)
 {
+    GDX12_SCOPED_CPU_EVENT("Graph recording");
     if (!_compiled) throw std::logic_error("Render graph must be compiled before execution");
     for (const auto& resource : _resources)
         if (resource.Slot != UINT_MAX && resource.Texture->GetResource() != _slots[resource.Slot].ResourceObject.get())

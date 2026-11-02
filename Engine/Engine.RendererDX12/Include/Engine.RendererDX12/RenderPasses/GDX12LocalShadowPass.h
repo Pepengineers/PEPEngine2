@@ -146,6 +146,7 @@ public:
                 if ((dirtyFaces & (1u << face)) == 0) continue;
                 if (_staticShadows)
                 {
+                    GDX12_SCOPED_EVENT(commands, "Local shadow copy");
                     auto* source = _staticShadows->_maps->GetResource();
                     auto* target = _maps->GetResource();
                     commands->ResourceBarrier({ source->GetCopySourceBarrier(), target->GetCopyDestBarrier() });
@@ -158,9 +159,14 @@ public:
                 commands->ResourceBarrier({ visibility.Counter->GetResource().GetUnorderedAccessBarrier(),
                     visibility.Commands->GetResource().GetUnorderedAccessBarrier() });
                 commands->SetComputeUAV(1, visibility.Counter->GetUAV()->GPUHandle);
+                {
+                GDX12_SCOPED_EVENT(commands, "Local shadow clear");
                 commands->SetPipelineState(_clearPSO);
                 commands->Dispatch(1, 1, 1);
                 commands->ResourceBarrier({ visibility.Counter->GetResource().GetUAVBarrier() });
+                }
+                {
+                GDX12_SCOPED_EVENT(commands, "Local shadow cull");
                 commands->SetPipelineState(_cullPSO);
                 const UINT parameters[] = { lightIndex, face };
                 commands->GetCommandList()->SetComputeRoot32BitConstants(0, 2, parameters, 0);
@@ -170,6 +176,9 @@ public:
                 commands->SetComputeSRV(3, frame->LocalLightCache->GetSRV()->GPUHandle);
                 commands->SetComputeUAV(0, visibility.Commands->GetUAV()->GPUHandle);
                 if (count) commands->Dispatch((count + 63) / 64, 1, 1);
+                }
+                {
+                GDX12_SCOPED_EVENT(commands, "Local shadow draw");
                 commands->ResourceBarrier({ visibility.Commands->GetResource().GetIndirectArgsBarrier(),
                     visibility.Counter->GetResource().GetIndirectArgsBarrier(), _maps->GetResource()->GetDepthWriteBarrier() });
                 commands->SetGraphicsRootSignature(_graphicsRoot.get());
@@ -192,6 +201,7 @@ public:
                 if (!_staticOnly && _resources->Grass)
                     _resources->Grass->Draw(commands, GDX12GrassRenderer::Stage::Shadow,
                         Matrix(light.ShadowViewProj[face]).Transpose(), _commonData->CameraView.Invert().Translation(), 0);
+                }
                 ++_renderedViews;
             }
             _cached[lightIndex] = CachedShadow{ light, casters };

@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/GDX12LightGrid.h"
+#include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Common/ConsoleVariables.h"
 #include <algorithm>
 #include <cmath>
@@ -35,6 +36,7 @@ void GDX12LightGridBuildSystem::Build(GDX12LightGrid& grid, const Matrix& projec
     JobSystem* jobs, GDX12LightGridSettings settings)
 {
     EnsureIdle();
+    GDX12_SCOPED_CPU_EVENT("CPU light grid");
     if (!width || !height || width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION || height > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
         !std::isfinite(nearPlane) || nearPlane <= 0 ||
         !(farPlane == 0 || farPlane > nearPlane) || XMMatrixIsNaN(projection) || XMMatrixIsInfinite(projection) ||

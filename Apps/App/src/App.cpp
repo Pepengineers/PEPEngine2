@@ -70,6 +70,7 @@ namespace
 
         void Update(const GameTimer& timer) override
         {
+            GDX12_SCOPED_CPU_EVENT("Game update");
             OnKeyboardInput(timer);
             Locator.GetModule<RenderModule>()->Update();
             auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
