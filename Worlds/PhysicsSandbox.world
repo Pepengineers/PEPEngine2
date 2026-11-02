@@ -1,5 +1,4 @@
 # Physics sandbox. Set App.StartScene to Scenes/PhysicsSandbox.yaml.
-# Centered at x=50 to avoid the legacy backend test at x=0.
 # Visible motion requires the physics-to-ECS transform synchronization.
 World:
   Name: PhysicsSandboxWorld
@@ -18,6 +17,18 @@ World:
         Source: Assets/Models/PhysicsSandbox/UnitCube.obj
         SubmitToRenderer: true
         ImportMaterials: true
+      - Id: SandboxSphereMesh
+        Source: Assets/Models/PhysicsSandbox/UnitSphere.obj
+        SubmitToRenderer: true
+        ImportMaterials: true
+      - Id: SandboxCapsuleMesh
+        Source: Assets/Models/PhysicsSandbox/UnitCapsule.obj
+        SubmitToRenderer: true
+        ImportMaterials: true
+      - Id: SandboxCylinderMesh
+        Source: Assets/Models/PhysicsSandbox/UnitCylinder.obj
+        SubmitToRenderer: true
+        ImportMaterials: true
       - Id: SandboxFloorMesh
         Source: Assets/Models/PhysicsSandbox/FloorCube.obj
         SubmitToRenderer: true
@@ -34,40 +45,44 @@ World:
           Scale: [24, 1, 20]
         RigidBody:
           MotionType: Static
-        BoxCollider:
+        Collider:
+          Type: Box
           HalfExtent: [0.5, 0.5, 0.5]
         StaticMeshRender:
           Mesh: SandboxFloorMesh
 
-    - Id: CubeResting
+    - Id: CapsuleResting
       Components:
         Name:
-          Value: CubeResting
+          Value: CapsuleResting
         Transform:
           Location: [45, 1, -3]
           Rotation: [0.0, 0.0, 0.0]
           Scale: [2, 2, 2]
         RigidBody:
           MotionType: Dynamic
-        BoxCollider:
-          HalfExtent: [0.5, 0.5, 0.5]
+        Collider:
+          Type: Capsule
+          Radius: 0.25
+          HalfCylinderHeight: 0.25
         StaticMeshRender:
-          Mesh: SandboxCubeMesh
+          Mesh: SandboxCapsuleMesh
 
-    - Id: CubeDrop
+    - Id: SphereDrop
       Components:
         Name:
-          Value: CubeDrop
+          Value: SphereDrop
         Transform:
           Location: [49, 7, -3]
           Rotation: [0.0, 0.0, 0.0]
           Scale: [2, 2, 2]
         RigidBody:
           MotionType: Dynamic
-        BoxCollider:
-          HalfExtent: [0.5, 0.5, 0.5]
+        Collider:
+          Type: Sphere
+          Radius: 0.5
         StaticMeshRender:
-          Mesh: SandboxCubeMesh
+          Mesh: SandboxSphereMesh
 
     - Id: CubeTilted
       Components:
@@ -79,55 +94,61 @@ World:
           Scale: [2, 2, 2]
         RigidBody:
           MotionType: Dynamic
-        BoxCollider:
+        Collider:
+          Type: Box
           HalfExtent: [0.5, 0.5, 0.5]
         StaticMeshRender:
           Mesh: SandboxCubeMesh
 
-    - Id: CubeLarge
+    - Id: CapsuleLarge
       Components:
         Name:
-          Value: CubeLarge
+          Value: CapsuleLarge
         Transform:
           Location: [55, 9, 3]
           Rotation: [0.0, 15, 0.0]
           Scale: [3, 3, 3]
         RigidBody:
           MotionType: Dynamic
-        BoxCollider:
-          HalfExtent: [0.5, 0.5, 0.5]
+        Collider:
+          Type: Capsule
+          Radius: 0.25
+          HalfCylinderHeight: 0.25
         StaticMeshRender:
-          Mesh: SandboxCubeMesh
+          Mesh: SandboxCapsuleMesh
 
-    - Id: CubeStackLower
+    - Id: CylinderStackLower
       Components:
         Name:
-          Value: CubeStackLower
+          Value: CylinderStackLower
         Transform:
           Location: [47, 1, 3]
           Rotation: [0.0, 0.0, 0.0]
           Scale: [2, 2, 2]
         RigidBody:
           MotionType: Dynamic
-        BoxCollider:
-          HalfExtent: [0.5, 0.5, 0.5]
+        Collider:
+          Type: Cylinder
+          Radius: 0.5
+          HalfHeight: 0.5
         StaticMeshRender:
-          Mesh: SandboxCubeMesh
+          Mesh: SandboxCylinderMesh
 
-    - Id: CubeStackUpper
+    - Id: SphereStackUpper
       Components:
         Name:
-          Value: CubeStackUpper
+          Value: SphereStackUpper
         Transform:
           Location: [47, 3.15, 3]
           Rotation: [0.0, 8, 0.0]
           Scale: [2, 2, 2]
         RigidBody:
           MotionType: Dynamic
-        BoxCollider:
-          HalfExtent: [0.5, 0.5, 0.5]
+        Collider:
+          Type: Sphere
+          Radius: 0.5
         StaticMeshRender:
-          Mesh: SandboxCubeMesh
+          Mesh: SandboxSphereMesh
 
     - Id: MainCamera
       Components:
