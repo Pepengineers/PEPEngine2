@@ -3,6 +3,7 @@
 #include <cstring>
 #include <cmath>
 #include <vector>
+#include <array>
 
 inline constexpr UINT LocalShadowResolution = 256;
 
@@ -13,12 +14,22 @@ struct GDX12LocalShadowCaster
     bool Dynamic = false;
 };
 
-inline bool LocalShadowIntersects(const GDX12LocalLightConstants& light, const BoundingBox& bounds)
+struct GDX12LocalShadowVisibility
 {
-    if (!BoundingSphere(light.Position, light.Range).Intersects(bounds)) return false;
-    if (light.Type == 1) return true;
+    // One signature per face; each render pass compares against the last contents of its own maps.
+    std::array<uint64_t, 6> StaticCasters = {};
+    std::array<uint64_t, 6> AllCasters = {};
+};
+
+inline UINT LocalShadowFaceCount(const GDX12LocalLightConstants& light)
+{
+    return light.Type == 1 ? 6u : 1u;
+}
+
+inline bool LocalShadowFaceIntersects(const XMFLOAT4X4& viewProjection, const BoundingBox& bounds)
+{
     // Uploaded matrices are transposed: their rows are the clip-space plane coefficients.
-    const XMMATRIX m = XMLoadFloat4x4(&light.ShadowViewProj[0]);
+    const XMMATRIX m = XMLoadFloat4x4(&viewProjection);
     const XMVECTOR planes[] = { m.r[3] + m.r[0], m.r[3] - m.r[0], m.r[3] + m.r[1],
         m.r[3] - m.r[1], m.r[2], m.r[3] - m.r[2] };
     const auto center = XMLoadFloat3(&bounds.Center);
@@ -29,30 +40,40 @@ inline bool LocalShadowIntersects(const GDX12LocalLightConstants& light, const B
     return true;
 }
 
-inline uint64_t LocalShadowCasterSignature(const GDX12LocalLightConstants& light,
-    const std::vector<GDX12LocalShadowCaster>& casters, bool staticOnly)
+inline bool LocalShadowIntersects(const GDX12LocalLightConstants& light, const BoundingBox& bounds)
 {
-    uint64_t signature = 14695981039346656037ull;
-    const auto hash = [&](const auto& value)
+    return BoundingSphere(light.Position, light.Range).Intersects(bounds) &&
+        (light.Type == 1 || LocalShadowFaceIntersects(light.ShadowViewProj[0], bounds));
+}
+
+inline GDX12LocalShadowVisibility BuildLocalShadowVisibility(const GDX12LocalLightConstants& light,
+    const std::vector<GDX12LocalShadowCaster>& casters)
+{
+    GDX12LocalShadowVisibility result;
+    result.StaticCasters.fill(14695981039346656037ull);
+    result.AllCasters = result.StaticCasters;
+    if (light.ShadowFirstSlice == UINT_MAX) return result;
+    const auto hash = [](uint64_t& signature, const auto& value)
     {
         const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
         for (size_t i = 0; i < sizeof(value); ++i) signature = (signature ^ bytes[i]) * 1099511628211ull;
     };
     for (const auto& caster : casters)
     {
-        if ((staticOnly && caster.Dynamic) || !LocalShadowIntersects(light, caster.Bounds)) continue;
-        hash(caster.Signature);
-        hash(caster.Bounds.Center);
-        hash(caster.Bounds.Extents);
-        hash(caster.Dynamic);
+        if (!BoundingSphere(light.Position, light.Range).Intersects(caster.Bounds)) continue;
+        uint64_t signature = caster.Signature;
+        hash(signature, caster.Bounds.Center);
+        hash(signature, caster.Bounds.Extents);
+        hash(signature, caster.Dynamic);
+        for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
+        {
+            if (!LocalShadowFaceIntersects(light.ShadowViewProj[face], caster.Bounds)) continue;
+            hash(result.AllCasters[face], signature);
+            if (!caster.Dynamic) hash(result.StaticCasters[face], signature);
+        }
     }
     // Comparing the old and new caster sets also catches exits, removals and static/dynamic reclassification.
-    return signature;
-}
-
-inline UINT LocalShadowFaceCount(const GDX12LocalLightConstants& light)
-{
-    return light.Type == 1 ? 6u : 1u;
+    return result;
 }
 
 inline void BuildLocalLightShadowMatrices(GDX12LocalLightConstants& light)

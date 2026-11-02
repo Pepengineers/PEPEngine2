@@ -124,11 +124,55 @@ static std::vector<float> ReadHDR(GDX12Device& device, GDX12Texture& texture)
     return result;
 }
 
+static void CheckShadowVisibilityJobs()
+{
+    GDX12LocalLightConstants point;
+    point.ShadowFirstSlice = 0;
+    BuildLocalLightShadowMatrices(point);
+    std::vector<GDX12LocalShadowCaster> casters = { { BoundingBox({ 0, -10, 0 }, { 1, 1, 1 }), 1, true } };
+    const auto empty = BuildLocalShadowVisibility(point, {});
+    const auto faceMask = [&](const GDX12LocalShadowVisibility& visible)
+    {
+        UINT mask = 0;
+        for (UINT face = 0; face < 6; ++face)
+            if (visible.AllCasters[face] != empty.AllCasters[face]) mask |= 1u << face;
+        return mask;
+    };
+    auto visible = BuildLocalShadowVisibility(point, casters);
+    Require(faceMask(visible) == (1u << 3) && visible.StaticCasters == empty.StaticCasters,
+        "A dynamic caster below the point must affect only -Y and leave static signatures unchanged");
+    casters[0].Bounds.Center = { 10, 0, 10 };
+    Require(faceMask(BuildLocalShadowVisibility(point, casters)) == ((1u << 0) | (1u << 4)),
+        "A caster crossing a cube seam must participate in both faces");
+    casters[0].Bounds.Center = { 0, 0, 0 };
+    Require(faceMask(BuildLocalShadowVisibility(point, casters)) == 63,
+        "Bounds surrounding a point light must participate in all faces");
+    std::vector<GDX12LocalLightConstants> lights(65, point);
+    for (size_t i = 0; i < lights.size(); ++i)
+    {
+        lights[i].Position = { static_cast<float>(i) * 10, 20, 0 };
+        lights[i].Type = i % 2 ? 2 : 1;
+        BuildLocalLightShadowMatrices(lights[i]);
+    }
+    std::vector<GDX12LocalShadowVisibility> serial, parallel;
+    ShadowVisibilitySystem system;
+    JobSystem one(1), four(4);
+    system.Schedule(one, lights, casters, serial).Complete();
+    system.Schedule(four, lights, casters, parallel).Complete();
+    for (size_t i = 0; i < lights.size(); ++i)
+        Require(serial[i].AllCasters == parallel[i].AllCasters && serial[i].StaticCasters == parallel[i].StaticCasters,
+            "Parallel light batches must match serial visibility exactly");
+    lights.clear();
+    system.Schedule(four, lights, casters, parallel).Complete();
+    Require(parallel.empty(), "Removing all lights must discard old visibility results");
+}
+
 int main()
 {
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
     try
     {
+        CheckShadowVisibilityJobs();
         BenchmarkEngine engine;
         auto& locator = BenchmarkEngine::GetLocator();
         locator.RegisterModule(std::make_shared<RenderModule>(nullptr, nullptr));
@@ -291,11 +335,17 @@ int main()
         spot.ShadowFirstSlice = 6;
         spot.Position.y = 30;
         BuildLocalLightShadowMatrices(spot);
+        ShadowVisibilitySystem shadowVisibility;
+        JobSystem shadowJobs(4);
         const auto updateLocal = [&]()
         {
             resources.LocalLights = { point, spot };
             frame->LocalLightCache->Resize(2);
             frame->LocalLightCache->CopyData(0, resources.LocalLights.data(), 2);
+            if (resources.LocalShadowCasters)
+                shadowVisibility.Schedule(shadowJobs, resources.LocalLights, *resources.LocalShadowCasters,
+                    resources.LocalShadowVisibility).Complete();
+            else resources.LocalShadowVisibility.clear();
             auto* list = queue->GetCommandList();
             localShadows.Execute(list);
             queue->ExecuteCommandList(list);
@@ -366,33 +416,69 @@ int main()
             updateLocal();
         };
         moveCaster(5);
-        Require(localShadows.GetLastFrameRenderedViews() == 6 && localShadows.GetLastFrameStaticRenderedViews() == 0,
+        Require(localShadows.GetLastFrameRenderedViews() == 5 && localShadows.GetLastFrameStaticRenderedViews() == 0,
             "Moving near the point must preserve the distant spot and static depth caches");
         moveCaster(3000);
-        Require(localShadows.GetLastFrameRenderedViews() == 7, "Teleport must invalidate both old and new lights");
+        Require(localShadows.GetLastFrameRenderedViews() == 6, "Teleport must invalidate affected faces of both old and new lights");
         CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true, false);
         CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 6, false, true);
         moveCaster(6000);
         Require(localShadows.GetLastFrameRenderedViews() == 1, "Leaving the spot must only remove its old shadow");
         CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 6, false, true, false);
         moveCaster(0);
-        Require(localShadows.GetLastFrameRenderedViews() == 6, "Entering the point must only update the point");
+        Require(localShadows.GetLastFrameRenderedViews() == 5, "Entering the point must only update its intersected faces");
         ++resources.LocalShadowCasters->front().Signature;
         updateLocal();
-        Require(localShadows.GetLastFrameRenderedViews() == 6, "Changed caster content must invalidate its light without movement");
+        Require(localShadows.GetLastFrameRenderedViews() == 5, "Changed caster content must invalidate its faces without movement");
         resources.LocalShadowCasters->front().Dynamic = false;
         instance.ReflectionDynamic = 0;
         frame->InstanceCache->CopyData(0, instance);
         updateLocal();
-        Require(localShadows.GetLastFrameStaticRenderedViews() == 6 && localShadows.GetLastFrameRenderedViews() == 6,
+        Require(localShadows.GetLastFrameStaticRenderedViews() == 5 && localShadows.GetLastFrameRenderedViews() == 5,
             "Reclassifying a caster must update both depth caches of its light");
         resources.LocalShadowCasters->clear();
         draw.InstanceCount = 0;
         resources.IndirectCommandsCache->CopyData(0, draw);
         updateLocal();
-        Require(localShadows.GetLastFrameStaticRenderedViews() == 6 && localShadows.GetLastFrameRenderedViews() == 6,
+        Require(localShadows.GetLastFrameStaticRenderedViews() == 5 && localShadows.GetLastFrameRenderedViews() == 5,
             "Deleting a caster must invalidate its former light even with an empty snapshot");
         CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true, false);
+        draw.InstanceCount = 1;
+        resources.IndirectCommandsCache->CopyData(0, draw);
+        instance.ReflectionDynamic = 1;
+        resources.LocalShadowCasters->push_back({ bounds, 1, true });
+        const auto placeCaster = [&](const Matrix& world)
+        {
+            GDX12TransformConstants transform;
+            XMStoreFloat4x4(&transform.WorldMatrix, world.Transpose());
+            frame->TransformCache->CopyData(0, transform);
+            BoundingBox placed;
+            bounds.Transform(placed, world);
+            instance.BoundingBoxCenter = placed.Center;
+            instance.BoundingBoxExtents = placed.Extents;
+            frame->InstanceCache->CopyData(0, instance);
+            resources.LocalShadowCasters->front().Bounds = placed;
+            ++resources.LocalShadowCasters->front().Signature;
+            updateLocal();
+        };
+        placeCaster(Matrix::CreateTranslation(0, -250, 0));
+        Require(localShadows.GetLastFrameRenderedViews() == 1, "A caster contained in -Y must update only that face");
+        CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true);
+        placeCaster(Matrix::CreateTranslation(5, -250, 0));
+        Require(localShadows.GetLastFrameRenderedViews() == 1, "Movement within one face must retain the other five maps");
+        placeCaster(Matrix::CreateRotationZ(XM_PIDIV2) * Matrix::CreateTranslation(250, 20, 0));
+        Require(localShadows.GetLastFrameRenderedViews() == 2, "Moving between cube faces must update the old and new faces");
+        CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true, false);
+        CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 0, false, true);
+        resources.LocalShadowCasters->clear();
+        draw.InstanceCount = 0;
+        resources.IndirectCommandsCache->CopyData(0, draw);
+        updateLocal();
+        Require(localShadows.GetLastFrameRenderedViews() == 1, "Deleting the last caster must clear only its former face");
+        CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 0, false, true, false);
+        frame->TransformCache->CopyData(0, GDX12TransformConstants{});
+        instance.BoundingBoxCenter = bounds.Center;
+        instance.BoundingBoxExtents = bounds.Extents;
         resources.LocalShadowCasters.reset();
         spot.Position.x = 2;
         BuildLocalLightShadowMatrices(spot);

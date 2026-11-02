@@ -922,6 +922,8 @@ void RenderModule::OnRender()
     DispatchSkeletalMeshes(primarycmdList);
     CollectGrassScene(primarycmdList);
     CollectReflectionScene();
+    _shadowVisibility.Schedule(App::GetInstance()->GetJobs(), _primaryResources.LocalLights,
+        *_primaryResources.LocalShadowCasters, _primaryResources.LocalShadowVisibility).Complete();
 
     auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
     _primaryGraph->Execute(primarycmdList);

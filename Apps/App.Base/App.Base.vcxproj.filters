@@ -55,6 +55,9 @@
     <ClInclude Include="Include\App.Base\Systems\GPUDataUpdateSystem.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\App.Base\Systems\ShadowVisibilitySystem.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\App.Base\Modules\EventManagerModule.h">
       <Filter>Header Files</Filter>
     </ClInclude>

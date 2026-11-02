@@ -9,6 +9,7 @@
 #include "Engine.RendererDX12/GDX12Skinning.h"
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
 #include "Engine.RendererDX12/GDX12RenderGraph.h"
+#include "App.Base/Systems/ShadowVisibilitySystem.h"
 #include <map>
 
 class SceneManagerModule;
@@ -181,6 +182,7 @@ private:
 
     void BuildBackBuffer();
     void CollectReflectionScene();
+    ShadowVisibilitySystem _shadowVisibility;
     void CollectGrassScene(GDX12CommandList* commands);
     void CollectParticleEmitters();
     void ShareFences();

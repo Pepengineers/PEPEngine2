@@ -89,6 +89,8 @@ public:
 
     void Execute(GDX12CommandList* commands) override
     {
+        if (_resources->LocalShadowCasters && _resources->LocalShadowVisibility.size() != _resources->LocalLights.size())
+            throw std::logic_error("Prepare shadow visibility before rendering local shadows");
         if (_staticShadows) _staticShadows->Execute(commands);
         if (!_resources->LocalShadowCasters && (_staticRevision != _resources->ReflectionStaticRevision ||
             (!_staticOnly && _dynamicRevision != _resources->ReflectionDynamicRevision)))
@@ -129,11 +131,19 @@ public:
             const auto& cached = _cached[lightIndex];
             auto cacheKey = light;
             if (_staticOnly) cacheKey.ShadowFlags &= ~2u;
-            const uint64_t casters = _resources->LocalShadowCasters ?
-                LocalShadowCasterSignature(light, *_resources->LocalShadowCasters, _staticOnly) : 0;
-            if (!ShouldRenderLocalShadow(cacheKey, cached ? &cached->Light : nullptr) && cached->Casters == casters) continue;
+            std::array<uint64_t, 6> casters = {};
+            if (_resources->LocalShadowCasters)
+            {
+                const auto& visible = _resources->LocalShadowVisibility[lightIndex];
+                casters = _staticOnly ? visible.StaticCasters : visible.AllCasters;
+            }
+            const bool force = ShouldRenderLocalShadow(cacheKey, cached ? &cached->Light : nullptr);
+            UINT dirtyFaces = 0;
+            for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
+                if (force || cached->Casters[face] != casters[face]) dirtyFaces |= 1u << face;
             for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
             {
+                if ((dirtyFaces & (1u << face)) == 0) continue;
                 if (_staticShadows)
                 {
                     auto* source = _staticShadows->_maps->GetResource();
@@ -260,7 +270,7 @@ private:
     struct CachedShadow
     {
         GDX12LocalLightConstants Light;
-        uint64_t Casters;
+        std::array<uint64_t, 6> Casters;
     };
     std::vector<std::optional<CachedShadow>> _cached;
     std::vector<std::unique_ptr<GDX12Descriptor>> _dsvs;

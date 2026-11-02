@@ -61,6 +61,7 @@ public:
     std::vector<GDX12LocalLightConstants> LocalLights;
     // Complete current caster snapshot; standalone clients without one retain revision-based invalidation.
     std::optional<std::vector<GDX12LocalShadowCaster>> LocalShadowCasters;
+    std::vector<GDX12LocalShadowVisibility> LocalShadowVisibility;
     void Initialize(GDX12Device* device);
     void UpdateMainCB(UINT width, UINT height, GameTimer* timer);
     void UpdateMaterialCB(std::unordered_map<std::string, std::unique_ptr<GDX12Material>>& materials);
