@@ -128,9 +128,11 @@ limitation. The supplied Fox glTF uses an external Texture.png.
   Material uploads occur once in OnRender after component preparation, so lazy
   material creation cannot decrement frame-dirty counts twice in the same slot.
 - GPU: GDX12Skinning lazily creates a compute PSO only with mesh consumers.
-  Per-attachment source/range/influence uploads are immutable; palettes have
-  one mapped upload per frame slot. OnUpdate waits that slot's fence before
-  uploads are written. Vertex outputs use non-overlapping slices of the
+  Per-attachment immutable source/range/influence buffers use DEFAULT, with
+  a completed staging upload before CreateMesh returns. Palettes have one
+  DEFAULT snapshot and mapped staging buffer per frame slot. OnUpdate waits
+  that slot's fence before staging is written; Dispatch copies the palette
+  before compute. Vertex outputs use non-overlapping slices of the
   existing GDX12GeometryBuffer, with explicit UAV -> IA transitions.
 - Compute runs on the single direct queue before culling and raster passes.
   Current/previous outputs are written in one dispatch. Queue ordering protects
