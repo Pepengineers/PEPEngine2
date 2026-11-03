@@ -151,7 +151,7 @@ GDX12Material* RenderModule::CreateMaterial(const std::string& name)
 
 GPUTexture* RenderModule::GetTextureByName(const std::string& name)
 {
-    if (GDX12Texture* texture = FindTextureByName(name))
+    if (GPUTexture* texture = FindTextureByName(name))
     {
         return texture;
     }
@@ -502,6 +502,11 @@ void RenderModule::SubscribeToWorld(World& world)
     {
         OnRenderComponentCreated(world, entity, component);
     });
+
+    if (ecs.Has<CameraComponent>(world.ActiveCamera))
+    {
+        SetActiveCamera(&ecs.Get<CameraComponent>(world.ActiveCamera));
+    }
 }
 
 void RenderModule::UnsubscribeFromWorld(World& world)
@@ -1045,7 +1050,7 @@ void RenderModule::UnsubscribeFromAllWorlds()
     }
 }
 
-GDX12Texture* RenderModule::FindTextureByName(const std::string& name) const noexcept
+GPUTexture* RenderModule::FindTextureByName(const std::string& name) const noexcept
 {
     const auto it = _textures.find(name);
     return (it != _textures.end()) ? it->second.get() : nullptr;

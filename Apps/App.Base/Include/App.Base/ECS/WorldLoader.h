@@ -1,6 +1,9 @@
 #pragma once
+#include <chrono>
 #include <filesystem>
 #include <functional>
+#include <memory>
+#include <string>
 
 struct PreparedScene;
 struct AppConfig;

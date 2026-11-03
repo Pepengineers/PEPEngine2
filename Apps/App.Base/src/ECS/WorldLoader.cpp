@@ -1,3 +1,388 @@
+// TODO move helpers to separate utility libs
+#include "App.Base/ECS/WorldLoader.h"
+
+#include <ryml.hpp>
+#include <ryml_std.hpp>
+
+#include "App.Base/ECS/World.h"
+#include "App.Base/ECS/WorldLoadContext.h"
+#include "App.Base/Modules/RenderModule.h"
+#include "Common/Logger.h"
+#include "Engine.Core/AssetManager.h"
+#include "Engine.Core/BenchmarkEngine.h"
+#include "Engine.Core/Types/TextureTypes.h"
+
+#include <algorithm>
+#include <cstddef>
+#include <stdexcept>
+#include <string>
+#include <system_error>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+#include <Windows.h>
+
+#include "App.Base/ECS/AppConfig.h"
+#include "App.Base/ECS/AppConfigLoader.h"
+#include "App.Base/ECS/PreparedScene.h"
+#include "App.Base/Modules/SceneManagerModule.h"
+#include "Engine.Core/IO/MeshImporter.h"
+#include "Engine.Core/IO/TextureLoader.h"
+
+namespace
+{
+    std::filesystem::path ResolveResourcePath(const std::filesystem::path& worldDirectory, const std::filesystem::path& sourcePath)
+    {
+        if (sourcePath.empty() || sourcePath.is_absolute())
+        {
+            return sourcePath.lexically_normal();
+        }
+
+        std::error_code errorCode;
+        if (std::filesystem::exists(sourcePath, errorCode))
+        {
+            return std::filesystem::absolute(sourcePath, errorCode).lexically_normal();
+        }
+
+        const std::filesystem::path worldRelativePath = (worldDirectory / sourcePath).lexically_normal();
+
+        errorCode.clear();
+        if (std::filesystem::exists(worldRelativePath, errorCode))
+        {
+            return std::filesystem::absolute(worldRelativePath, errorCode).lexically_normal();
+        }
+
+        return sourcePath.lexically_normal();
+    }
+
+    std::filesystem::path ResolveWorldResourcePath(
+        const WorldLoadContext& context,
+        const std::filesystem::path& sourcePath)
+    {
+        return ResolveResourcePath(context.WorldDirectory, sourcePath);
+    }
+
+    /// Converts an ASCII string to lowercase.
+    std::string ToLowerAscii(std::string value)
+    {
+        std::transform(value.begin(), value.end(), value.begin(), [](const unsigned char character) { return static_cast<char>(std::tolower(character)); });
+        return value;
+    }
+
+    /// Returns true if the path points to an obj file.
+    bool IsObjPath(const std::filesystem::path& path)
+    {
+        return ToLowerAscii(path.extension().string()) == ".obj";
+    }
+
+    /// Replaces characters that are unsafe for renderer resource names with underscores.
+    /// Returns "scene" for an empty input string.
+    std::string SanitizeResourceName(std::string value)
+    {
+        for (char& character : value)
+        {
+            const unsigned char unsignedCharacter = static_cast<unsigned char>(character);
+            if (!std::isalnum(unsignedCharacter))
+            {
+                character = '_';
+            }
+        }
+
+        if (value.empty())
+        {
+            return "scene";
+        }
+
+        return value;
+    }
+
+    /// Builds a stable renderer resource name for one obj file inside a scene directory.
+    /// The name is based on the path relative to sceneRoot to avoid collisions between files with the same filename.
+    std::string BuildScenePartName(const std::filesystem::path& sceneRoot, const std::filesystem::path& objPath)
+    {
+        std::filesystem::path relativePath = objPath.lexically_relative(sceneRoot);
+        if (relativePath.empty() || relativePath.native().find(L"..") == 0)
+        {
+            relativePath = objPath.filename();
+        }
+
+        relativePath.replace_extension();
+        return SanitizeResourceName(relativePath.generic_string());
+    }
+
+    /// Recursively collects all obj files under the given scene directory.
+    std::vector<std::filesystem::path> CollectSceneObjPaths(const std::filesystem::path& sceneDirectory)
+    {
+        std::vector<std::filesystem::path> objPaths;
+
+        std::error_code errorCode;
+        std::filesystem::recursive_directory_iterator iterator(
+            sceneDirectory,
+            std::filesystem::directory_options::skip_permission_denied, /* so that it does not crash on folders it does not have access to */
+            errorCode);
+
+        const std::filesystem::recursive_directory_iterator endIterator;
+        while (!errorCode && iterator != endIterator)
+        {
+            const std::filesystem::directory_entry& entry = *iterator;
+            if (entry.is_regular_file(errorCode) && IsObjPath(entry.path()))
+            {
+                objPaths.push_back(entry.path());
+            }
+
+            iterator.increment(errorCode);
+        }
+
+        std::sort(objPaths.begin(), objPaths.end(), [](const std::filesystem::path& left, const std::filesystem::path& right) { return left.generic_wstring() < right.generic_wstring(); });
+        return objPaths;
+    }
+
+    /// Returns the number of material slots required by the mesh submeshes.
+    /// At least one slot is returned so meshes without material indices still have a fallback material.
+    size_t GetMaterialSlotCount(const Engine::Core::Mesh& mesh)
+    {
+        size_t materialSlotCount = 1;
+
+        for (const Engine::Core::SubMesh& subMesh : mesh.GetSubMeshes())
+        {
+            const size_t requiredSlotCount = static_cast<size_t>(subMesh.MaterialIndex) + 1;
+            if (requiredSlotCount > materialSlotCount)
+            {
+                materialSlotCount = requiredSlotCount;
+            }
+        }
+
+        return materialSlotCount;
+    }
+
+    /// Builds a material slot array filled with the given fallback material.
+    std::vector<GDX12Material*> BuildFallbackMaterialSlots(const Engine::Core::Mesh& mesh, GDX12Material* fallbackMaterial)
+    {
+        return std::vector<GDX12Material*>(GetMaterialSlotCount(mesh), fallbackMaterial);
+    }
+
+    /// Creates a CPU-side 1x1 RGBA texture with the given color.
+    Engine::Core::Texture CreateSingleColorTexture(
+        const std::uint8_t red,
+        const std::uint8_t green,
+        const std::uint8_t blue,
+        const std::uint8_t alpha,
+        const Engine::Core::ETextureType textureType)
+    {
+        Engine::Core::TextureDesc textureDesc = {};
+        textureDesc.Dimension = Engine::Core::ETextureDimension::Texture2D;
+        textureDesc.Type = textureType;
+        textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        textureDesc.Width = 1;
+        textureDesc.Height = 1;
+        textureDesc.Depth = 1;
+        textureDesc.ArraySize = 1;
+        textureDesc.MipLevels = 1;
+
+        Engine::Core::SubTexture subTexture = {};
+        subTexture.Width = 1;
+        subTexture.Height = 1;
+        subTexture.Depth = 1;
+        subTexture.RowPitch = 4;
+        subTexture.SlicePitch = 4;
+        subTexture.Data =
+        {
+            static_cast<std::byte>(red),
+            static_cast<std::byte>(green),
+            static_cast<std::byte>(blue),
+            static_cast<std::byte>(alpha)
+        };
+
+        std::vector<Engine::Core::SubTexture> subresources;
+        subresources.push_back(std::move(subTexture));
+        return Engine::Core::Texture(textureDesc, std::move(subresources));
+    }
+
+    /// Creates or retrieves a GPU texture backed by a generated solid-color CPU texture.
+    GPUTexture* CreateSolidGpuTexture(
+        RenderModule& renderModule,
+        const std::string& textureName,
+        const std::uint8_t red,
+        const std::uint8_t green,
+        const std::uint8_t blue,
+        const std::uint8_t alpha,
+        const Engine::Core::ETextureType textureType)
+    {
+        if (GPUTexture* existing = renderModule.FindTextureByName(textureName))
+        {
+            return existing;
+        }
+
+        Engine::Core::Texture texture = CreateSingleColorTexture(red, green, blue, alpha, textureType);
+
+        return renderModule.CreateTexture(textureName, &texture);
+    }
+
+    /// Converts a normalized color component to an 8-bit texture channel value.
+    std::uint8_t ColorComponentToByte(const float value)
+    {
+        const float clampedValue = (std::max)(0.0f, (std::min)(value, 1.0f));
+        return static_cast<std::uint8_t>(clampedValue * 255.0f + 0.5f);
+    }
+
+    /// Creates or retrieves a generated diffuse texture from the imported material diffuse color.
+    GPUTexture* CreateDiffuseColorTexture(
+        RenderModule& renderModule,
+        const std::string& sceneName,
+        const Engine::Core::MeshMaterial& material)
+    {
+        const std::uint8_t red = ColorComponentToByte(material.DiffuseColor.x);
+        const std::uint8_t green = ColorComponentToByte(material.DiffuseColor.y);
+        const std::uint8_t blue = ColorComponentToByte(material.DiffuseColor.z);
+
+        const std::string textureName = sceneName + "_DiffuseColor_" + std::to_string(red) + "_" + std::to_string(green) + "_" + std::to_string(blue);
+
+        return CreateSolidGpuTexture(renderModule, textureName, red, green, blue, 255, Engine::Core::ETextureType::Color);
+    }
+
+    struct SceneDefaultMaterialTextures
+    {
+        GPUTexture* FlatNormal = nullptr;
+        GPUTexture* White = nullptr;
+        GPUTexture* Black = nullptr;
+
+        [[nodiscard]] bool IsValid() const
+        {
+            return FlatNormal != nullptr && White != nullptr && Black != nullptr;
+        }
+    };
+
+    /// Creates shared default GPU textures used by imported scene materials.
+    /// These textures provide neutral values for missing normal, specular, roughness, and emissive maps.
+    SceneDefaultMaterialTextures CreateSceneDefaultMaterialTextures(RenderModule& renderModule, const std::string& sceneName)
+    {
+        SceneDefaultMaterialTextures textures = {};
+        textures.FlatNormal = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultFlatNormal", 128, 128, 255, 255, Engine::Core::ETextureType::Data);
+        textures.White = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultWhite", 255, 255, 255, 255, Engine::Core::ETextureType::Data);
+        textures.Black = CreateSolidGpuTexture(renderModule, sceneName + "_DefaultBlack", 0, 0, 0, 255, Engine::Core::ETextureType::Data);
+        return textures;
+    }
+
+    struct MaterialTextureSet
+    {
+        GPUTexture* Diffuse = nullptr;
+        GPUTexture* Normal = nullptr;
+        GPUTexture* Specular = nullptr;
+        GPUTexture* Roughness = nullptr;
+        GPUTexture* Emissive = nullptr;
+        bool HasNormalMap = false;
+        bool HasSpecularMap = false;
+        bool HasRoughnessMap = false;
+        bool HasEmissiveMap = false;
+    };
+
+    /// Builds a GPU texture cache key from source path and texture semantic type.
+    std::wstring BuildTextureCacheKey(const std::filesystem::path& texturePath, const Engine::Core::ETextureType textureType)
+    {
+        std::wstring textureKey = texturePath.lexically_normal().generic_wstring();
+        textureKey += L"#type:";
+        textureKey += std::to_wstring(static_cast<std::uint32_t>(textureType));
+        return textureKey;
+    }
+
+    /// Builds a GPU texture cache key for a diffuse texture with an opacity mask packed into its alpha channel.
+    std::wstring BuildMergedOpacityTextureCacheKey(
+        const std::filesystem::path& diffuseTexturePath,
+        const std::filesystem::path& opacityTexturePath)
+    {
+        std::wstring textureKey = BuildTextureCacheKey(diffuseTexturePath, Engine::Core::ETextureType::Color);
+        textureKey += L"#opacity:";
+        textureKey += opacityTexturePath.lexically_normal().generic_wstring();
+        return textureKey;
+    }
+
+    /// Returns true if both textures can be merged as CPU-side RGBA8 images.
+    bool CanMergeOpacityIntoDiffuse(const Engine::Core::Texture& diffuseTexture, const Engine::Core::Texture& opacityTexture)
+    {
+        return diffuseTexture.GetDimension() == Engine::Core::ETextureDimension::Texture2D &&
+            opacityTexture.GetDimension() == Engine::Core::ETextureDimension::Texture2D &&
+            diffuseTexture.GetFormat() == DXGI_FORMAT_R8G8B8A8_UNORM &&
+            opacityTexture.GetFormat() == DXGI_FORMAT_R8G8B8A8_UNORM &&
+            diffuseTexture.GetDepth() == 1 &&
+            opacityTexture.GetDepth() == 1 &&
+            diffuseTexture.GetArraySize() >= 1 &&
+            opacityTexture.GetArraySize() >= 1 &&
+            diffuseTexture.GetMipLevels() >= 1 &&
+            opacityTexture.GetMipLevels() >= 1;
+    }
+
+    /// Creates a copy of diffuseTexture with opacityTexture packed into the alpha channel.
+    /// The opacity texture is sampled from its red channel and multiplied with the existing diffuse alpha.
+    std::unique_ptr<Engine::Core::Texture> TryCreateDiffuseTextureWithOpacityAlpha(
+        const Engine::Core::Texture& diffuseTexture,
+        const Engine::Core::Texture& opacityTexture)
+    {
+        if (!CanMergeOpacityIntoDiffuse(diffuseTexture, opacityTexture))
+        {
+            return nullptr;
+        }
+
+        Engine::Core::TextureDesc textureDesc = {};
+        textureDesc.Dimension = Engine::Core::ETextureDimension::Texture2D;
+        textureDesc.Type = Engine::Core::ETextureType::Color;
+        textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        textureDesc.Width = diffuseTexture.GetWidth();
+        textureDesc.Height = diffuseTexture.GetHeight();
+        textureDesc.Depth = 1;
+        textureDesc.ArraySize = diffuseTexture.GetArraySize();
+        textureDesc.MipLevels = diffuseTexture.GetMipLevels();
+
+        std::vector<Engine::Core::SubTexture> subresources;
+        subresources.reserve(diffuseTexture.GetSubresourceCount());
+
+        for (std::uint32_t arraySlice = 0; arraySlice < diffuseTexture.GetArraySize(); ++arraySlice)
+        {
+            const std::uint32_t opacityArraySlice = (std::min)(arraySlice, opacityTexture.GetArraySize() - 1);
+            for (std::uint32_t mipLevel = 0; mipLevel < diffuseTexture.GetMipLevels(); ++mipLevel)
+            {
+                const Engine::Core::SubTexture& diffuseSubresource = diffuseTexture.GetSubresource(mipLevel, arraySlice);
+                const std::uint32_t opacityMipLevel = (std::min)(mipLevel, opacityTexture.GetMipLevels() - 1);
+                const Engine::Core::SubTexture& opacitySubresource = opacityTexture.GetSubresource(opacityMipLevel, opacityArraySlice);
+
+                if (diffuseSubresource.Width == 0 ||
+                    diffuseSubresource.Height == 0 ||
+                    opacitySubresource.Width == 0 ||
+                    opacitySubresource.Height == 0 ||
+                    diffuseSubresource.RowPitch < static_cast<size_t>(diffuseSubresource.Width) * 4u ||
+                    opacitySubresource.RowPitch < static_cast<size_t>(opacitySubresource.Width) * 4u)
+                {
+                    return nullptr;
+                }
+
+                Engine::Core::SubTexture mergedSubresource = diffuseSubresource;
+                for (std::uint32_t y = 0; y < diffuseSubresource.Height; ++y)
+                {
+                    const std::uint32_t opacityY = (std::min)(
+                        static_cast<std::uint32_t>((static_cast<std::uint64_t>(y) * opacitySubresource.Height) / diffuseSubresource.Height),
+                        opacitySubresource.Height - 1);
+
+                    for (std::uint32_t x = 0; x < diffuseSubresource.Width; ++x)
+                    {
+                        const std::uint32_t opacityX = (std::min)(
+                            static_cast<std::uint32_t>((static_cast<std::uint64_t>(x) * opacitySubresource.Width) / diffuseSubresource.Width),
+                            opacitySubresource.Width - 1);
+
+                        const size_t diffusePixelOffset = static_cast<size_t>(y) * diffuseSubresource.RowPitch + static_cast<size_t>(x) * 4u;
+                        const size_t opacityPixelOffset = static_cast<size_t>(opacityY) * opacitySubresource.RowPitch + static_cast<size_t>(opacityX) * 4u;
+                        if (diffusePixelOffset + 3 >= mergedSubresource.Data.size() ||
+                            opacityPixelOffset >= opacitySubresource.Data.size())
+                        {
+                            return nullptr;
+                        }
+
+                        const std::uint8_t diffuseAlpha = std::to_integer<std::uint8_t>(mergedSubresource.Data[diffusePixelOffset + 3]);
+                        const std::uint8_t opacityAlpha = std::to_integer<std::uint8_t>(opacitySubresource.Data[opacityPixelOffset]);
+                        const std::uint8_t mergedAlpha = static_cast<std::uint8_t>(
+                            (static_cast<std::uint32_t>(diffuseAlpha) * opacityAlpha + 127u) / 255u);
+                        mergedSubresource.Data[diffusePixelOffset + 3] = static_cast<std::byte>(mergedAlpha);
+                    }
+                }
 
                 subresources.push_back(std::move(mergedSubresource));
             }
@@ -8,13 +393,13 @@
 
     /// Loads a texture through AssetManager, creates the corresponding GPU texture and caches it by normalized path and semantic type.
     /// Returns an already created GPU texture when the same source texture is requested again.
-    GDX12Texture* LoadSceneGpuTexture(
+    GPUTexture* LoadSceneGpuTexture(
         RenderModule& renderModule,
         Engine::Core::AssetManager& assetManager,
         const std::filesystem::path& texturePath,
         const Engine::Core::ETextureType textureType,
         const std::string& sceneName,
-        std::unordered_map<std::wstring, GDX12Texture*>& gpuTexturesByPath)
+        std::unordered_map<std::wstring, GPUTexture*>& gpuTexturesByPath)
     {
         if (texturePath.empty())
         {
@@ -36,7 +421,7 @@
 
         const std::string textureName = sceneName + "_Texture_" + std::to_string(gpuTexturesByPath.size());
         const Engine::Core::Texture typedTexture = texture->WithType(textureType);
-        GDX12Texture* gpuTexture = renderModule.CreateTexture(textureName, &typedTexture);
+        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, &typedTexture);
         if (gpuTexture == nullptr)
         {
             gpuTexture = renderModule.GetTextureByName(textureName);
@@ -52,13 +437,13 @@
 
     /// Loads a diffuse texture and packs an optional opacity mask into its alpha channel before GPU upload.
     /// Falls back to the original diffuse texture if the opacity texture is missing or cannot be merged.
-    GDX12Texture* LoadSceneDiffuseGpuTexture(
+    GPUTexture* LoadSceneDiffuseGpuTexture(
         RenderModule& renderModule,
         Engine::Core::AssetManager& assetManager,
         const std::filesystem::path& diffuseTexturePath,
         const std::filesystem::path& opacityTexturePath,
         const std::string& sceneName,
-        std::unordered_map<std::wstring, GDX12Texture*>& gpuTexturesByPath)
+        std::unordered_map<std::wstring, GPUTexture*>& gpuTexturesByPath)
     {
         if (diffuseTexturePath.empty())
         {
@@ -91,7 +476,7 @@
         }
 
         const std::string textureName = sceneName + "_Texture_" + std::to_string(gpuTexturesByPath.size());
-        GDX12Texture* gpuTexture = renderModule.CreateTexture(textureName, mergedTexture.get());
+        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, mergedTexture.get());
         if (gpuTexture == nullptr)
         {
             gpuTexture = renderModule.GetTextureByName(textureName);
@@ -121,7 +506,7 @@
         const std::string textureName = sceneName + "_FallbackTexture";
         const std::string materialName = sceneName + "_FallbackMaterial";
 
-        GDX12Texture* gpuTexture = renderModule.CreateTexture(textureName, fallbackTexture);
+        GPUTexture* gpuTexture = renderModule.CreateTexture(textureName, fallbackTexture);
         if (gpuTexture == nullptr)
         {
             gpuTexture = renderModule.GetTextureByName(textureName);
@@ -226,7 +611,7 @@
         const std::string& sceneName,
         GDX12Material* fallbackMaterial,
         const SceneDefaultMaterialTextures& defaultTextures,
-        std::unordered_map<std::wstring, GDX12Texture*>& gpuTexturesByPath)
+        std::unordered_map<std::wstring, GPUTexture*>& gpuTexturesByPath)
     {
         std::vector<GDX12Material*> materialSlots = BuildFallbackMaterialSlots(mesh, fallbackMaterial);
         const std::vector<Engine::Core::MeshMaterial>& materials = mesh.GetMaterials();
@@ -258,28 +643,28 @@
             textures.Roughness = defaultTextures.White;
             textures.Emissive = defaultTextures.Black;
 
-            GDX12Texture* normalTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].NormalTexturePath, Engine::Core::ETextureType::Data, sceneName, gpuTexturesByPath);
+            GPUTexture* normalTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].NormalTexturePath, Engine::Core::ETextureType::Data, sceneName, gpuTexturesByPath);
             if (normalTexture != nullptr)
             {
                 textures.Normal = normalTexture;
                 textures.HasNormalMap = true;
             }
 
-            GDX12Texture* specularTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].SpecularTexturePath, Engine::Core::ETextureType::Data, sceneName, gpuTexturesByPath);
+            GPUTexture* specularTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].SpecularTexturePath, Engine::Core::ETextureType::Data, sceneName, gpuTexturesByPath);
             if (specularTexture != nullptr)
             {
                 textures.Specular = specularTexture;
                 textures.HasSpecularMap = true;
             }
 
-            GDX12Texture* roughnessTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].RoughnessTexturePath, Engine::Core::ETextureType::Data, sceneName, gpuTexturesByPath);
+            GPUTexture* roughnessTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].RoughnessTexturePath, Engine::Core::ETextureType::Data, sceneName, gpuTexturesByPath);
             if (roughnessTexture != nullptr)
             {
                 textures.Roughness = roughnessTexture;
                 textures.HasRoughnessMap = true;
             }
             
-            GDX12Texture* emissiveTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].EmissiveTexturePath, Engine::Core::ETextureType::Color, sceneName, gpuTexturesByPath);
+            GPUTexture* emissiveTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].EmissiveTexturePath, Engine::Core::ETextureType::Color, sceneName, gpuTexturesByPath);
             if (emissiveTexture != nullptr)
             {
                 textures.Emissive = emissiveTexture;
@@ -309,7 +694,7 @@
         Engine::Core::AssetManager& assetManager,
         const std::filesystem::path& objPath,
         const std::string& sceneName,
-        std::unordered_map<std::wstring, GDX12Texture*>& gpuTexturesByPath,
+        std::unordered_map<std::wstring, GPUTexture*>& gpuTexturesByPath,
         DirectX::BoundingBox& outBounds)
     {
         Engine::Core::MeshHandle sceneMeshHandle = {};
@@ -417,6 +802,8 @@
         cameraComponent.DirtyFlag = true;
         
         world.ActiveCamera = camera;
+        auto renderModule = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+        renderModule->SetActiveCamera(&cameraComponent);
     }
 
     /// Loads a set of obj files as one scene.
@@ -435,7 +822,7 @@
         
         bool loadedAnyObject = false;
         DirectX::BoundingBox sceneBounds = {};
-        std::unordered_map<std::wstring, GDX12Texture*> gpuTexturesByPath;
+        std::unordered_map<std::wstring, GPUTexture*> gpuTexturesByPath;
         
         for (const std::filesystem::path& objPath : objPaths)
         {
@@ -542,8 +929,23 @@ static bool LoadYamlWorld(World& world, const std::filesystem::path& path)
             world.ActiveCamera = context.ResolveEntity(activeCameraId);
             if (world.ActiveCamera == InvalidEntity)
             {
+                Logger::Error("Unknown active camera: {}", activeCameraId);
                 return false;
             }
+
+            auto& ecs = world.GetECS();
+            if (!ecs.Has<CameraComponent>(world.ActiveCamera) || !ecs.Has<TransformComponent>(world.ActiveCamera))
+            {
+                Logger::Error("World ActiveCamera '{}' requires Camera and Transform components: {}", activeCameraId, path.string());
+                return false;
+            }
+
+            renderModule->SetActiveCamera(&ecs.Get<CameraComponent>(world.ActiveCamera));
+        }
+        else
+        {
+            Logger::Error("World yaml requires ActiveCamera: {}", path.string());
+            return false;
         }
         
         return true;
@@ -883,6 +1285,18 @@ bool WorldLoader::Committer::Tick(std::chrono::milliseconds budget)
                         fail("Unknown active camera: " + activeCameraId);
                         break;
                     }
+
+                    auto& ecs = _impl->CurrentWorld->GetECS();
+                    if (!ecs.Has<CameraComponent>(_impl->CurrentWorld->ActiveCamera) || !ecs.Has<TransformComponent>(_impl->CurrentWorld->ActiveCamera))
+                    {
+                        fail("World ActiveCamera '" + activeCameraId + "' requires Camera and Transform components");
+                        break;
+                    }
+                }
+                else
+                {
+                    fail("World yaml requires ActiveCamera: " + preparedWorld.Document.SourcePath.string());
+                    break;
                 }
                 
                 _impl->WorldConfigs.push_back(preparedWorld.Document.Config);
@@ -1235,7 +1649,7 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
         }
 
         DirectX::BoundingBox sceneBounds = {};
-        std::unordered_map<std::wstring, GDX12Texture*> gpuTexturesByPath;
+        std::unordered_map<std::wstring, GPUTexture*> gpuTexturesByPath;
 
         if (!LoadObjSceneEntity(
             world,
@@ -1288,7 +1702,7 @@ static bool LoadTexture(WorldLoadContext& context, const WorldTextureResource& r
         return false;
     }
 
-    GDX12Texture* gpuTexture = context.Render->CreateTexture(resource.Id, cpuTexture);
+    GPUTexture* gpuTexture = context.Render->CreateTexture(resource.Id, cpuTexture);
     if (!gpuTexture)
     {
         gpuTexture = context.Render->GetTextureByName(resource.Id);
@@ -1949,4 +2363,4 @@ bool WorldLoader::SaveToFile(World& world, const std::filesystem::path& path)
     return true;
 }
 
-#pragma endregion 
+#pragma endregion

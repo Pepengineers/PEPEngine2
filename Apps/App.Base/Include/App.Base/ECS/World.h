@@ -58,7 +58,7 @@ public:
 
     const std::filesystem::path& GetPath() const;
 
-    Entity ActiveCamera;
+    Entity ActiveCamera = InvalidEntity;
 
 private:
     
