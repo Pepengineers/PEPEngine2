@@ -1,0 +1,11 @@
+{
+  "Models/soldier.m3d": "8ee570b4a3c6786eb766ccdefa2c102ffb37c584bbcd50ef2b3ae9010eaeb88a",
+  "Textures/head_diff.dds": "2cbee39e881681df5bd391f91ac5bbe2a5e3e73682fddd408368a009dd93f22b",
+  "Textures/head_norm.dds": "8c24e95dda461dbc8f4f87302728ce7f3afd4689739b3268d69c9e0c4e9a2b4b",
+  "Textures/jacket_diff.dds": "a41e0a485e78410acc9c77aef3bb2450a9576e79c86685dc5395200c146389c8",
+  "Textures/jacket_norm.dds": "01076ae8d598bec45dc047145f7bddf37c89da1d23570afd370a965d613331f4",
+  "Textures/pants_diff.dds": "ab2f50dd73577efa0ca14b043466752069e742e6a64d3c7cab468d3f9491c3c8",
+  "Textures/pants_norm.dds": "cd7a33635ccd3a4b4297fa3196532bc7b3cd36f4f518db2fff7b4f902241cda3",
+  "Textures/upBody_diff.dds": "6176a4b1eafc2993199a8ae65805897e3a5d4fa9bf8ad6268dc0779379f7381c",
+  "Textures/upBody_norm.dds": "7bb56e38dd5f701e4d10f5f400652d126f29362b0d005b55326f8306608093cc"
+}

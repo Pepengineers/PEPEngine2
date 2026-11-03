@@ -164,18 +164,21 @@ public:
         cmdList->SetGraphicsSRV(12, _resources->SkyAerialRadianceSRV.GPUHandle);
         cmdList->SetGraphicsSRV(13, _resources->SkyAerialTransmittanceSRV.GPUHandle);
         cmdList->SetGraphicsSRV(16, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
-		cmdList->SetGraphicsSRV(14, (_inputs.size() > 6 ? _inputs[6] : _inputs[0])->GetTexture()->GetSRV()->GPUHandle);
+        auto* waterDepth = (_inputs.size() > 6 ? _inputs[6] : _inputs[0])->GetTexture();
+        constexpr auto depthReadState = D3D12_RESOURCE_STATE_DEPTH_READ |
+            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+        // Fluid resolve can leave opaque depth compute-only; graphics binding also validates its pixel state.
+        cmdList->ResourceBarrier({ waterDepth->GetResource()->GetSRVBarrier(),
+            CD3DX12_RESOURCE_BARRIER::Transition(depthStencil->GetResource()->D3DResource.Get(),
+                depthStencil->GetResource()->GetCurrentState(), depthReadState) });
+        depthStencil->GetResource()->GDX12Resource::SetCurrentState(depthReadState);
+		cmdList->SetGraphicsSRV(14, waterDepth->GetSRV()->GPUHandle);
         cmdList->SetGraphicsSRV(15, depthStencil->GetSRV()->GPUHandle);
-        if (_inputs.size() > 6) cmdList->ResourceBarrier({ _inputs[6]->GetTexture()->GetResource()->GetPixelShaderResourceBarrier() });
 
 		cmdList->ResourceBarrier({ currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetIndirectArgsBarrier(),
 		currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetIndirectArgsBarrier(),
 		OUT_Accumulation->GetResource()->GetRenderTargetBarrier(),
-		OUT_Revealage->GetResource()->GetRenderTargetBarrier(),
-		CD3DX12_RESOURCE_BARRIER::Transition(depthStencil->GetResource()->D3DResource.Get(),
-            depthStencil->GetResource()->GetCurrentState(),
-            D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE) });
-        depthStencil->GetResource()->GDX12Resource::SetCurrentState(D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+		OUT_Revealage->GetResource()->GetRenderTargetBarrier() });
 		const D3D12_CPU_DESCRIPTOR_HANDLE renderTargets[] = { OUT_Accumulation->GetRTV()->CPUHandle, OUT_Revealage->GetRTV()->CPUHandle };
         cmdList->GetCommandList()->OMSetRenderTargets(2, renderTargets, FALSE, &_readOnlyDepth->CPUHandle);
 		cmdList->ClearRenderTargetView(OUT_Accumulation.get());

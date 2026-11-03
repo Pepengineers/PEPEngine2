@@ -92,6 +92,10 @@
     <ClInclude Include="src\Components\FlyingPropComponent.h" />
     <ClInclude Include="src\BistroProps.h" />
     <ClInclude Include="src\BistroScene.h" />
+    <ClInclude Include="src\BistroReflections.h" />
+    <ClInclude Include="src\BistroGrass.h" />
+    <ClInclude Include="src\BistroWater.h" />
+    <ClInclude Include="src\BistroCharacters.h" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\App.Base\App.Base.vcxproj">

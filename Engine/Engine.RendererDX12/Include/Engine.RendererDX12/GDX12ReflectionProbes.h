@@ -6,7 +6,7 @@ constexpr UINT MaxReflectionProbes = 32;
 
 struct GDX12ReflectionCaptureSettings
 {
-    int Implementation = 1;
+    int Implementation = 1; // 0 dynamic, 1 static cache + dynamic, 2 frozen static capture.
     UINT Resolution = 0;
     UINT FacesPerFrame = 0;
     UINT PrefilterSamples = 0;

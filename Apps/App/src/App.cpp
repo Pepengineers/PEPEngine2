@@ -13,6 +13,10 @@
 #pragma comment(lib, "psapi.lib")
 #include "Systems/FlyingPropSystem.h"
 #include "BistroScene.h"
+#include "BistroReflections.h"
+#include "BistroGrass.h"
+#include "BistroWater.h"
+#include "BistroCharacters.h"
 #include "App.Base/LoadingSettings.h"
 
 namespace
@@ -26,6 +30,7 @@ namespace
         {
             if (!App::Initialize()) return false;
             auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+            UpdateSceneAdditions(world, 0);
             auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
             // Start at eye height just outside the main entrance, facing the interior.
             camera.Location = Vector3(-300.0f, 200.0f, 20.0f);
@@ -76,6 +81,7 @@ namespace
             OnKeyboardInput(timer);
             Locator.GetModule<RenderModule>()->Update();
             auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+            UpdateSceneAdditions(world, timer.DeltaTime());
             BistroParticles::Update(world);
             if (world.IsPaused())
             {
@@ -155,6 +161,18 @@ namespace
         }
 
     private:
+        void UpdateSceneAdditions(World& world, float deltaSeconds)
+        {
+            _reflections.Update(world, deltaSeconds);
+            _grass.Update(world, deltaSeconds);
+            _water.Update(world, deltaSeconds);
+            _characters.Update(world, deltaSeconds);
+        }
+
+        BistroReflections::Scene _reflections;
+        BistroGrass::Scene _grass;
+        BistroWater::Scene _water;
+        BistroCharacters::Scene _characters;
         bool _benchmarkStarted = false;
         FlyingPropSystem _flyingProps;
         POINT _lastMousePos = {};

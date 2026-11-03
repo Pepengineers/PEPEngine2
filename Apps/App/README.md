@@ -1,5 +1,33 @@
 # Bistro App
 
+The scene includes four frozen local reflection cubemaps, one entrance grass
+patch with wind, one small water basin, four walking human NPCs from the MGPU
+sample and one walking Khronos fox inside. Application-only runtime CVars control
+the populations; zero removes the corresponding objects:
+
+| CVar | Default | Range |
+|---|---:|---:|
+| `App.ReflectionProbes.Count` | 4 | 0..32 |
+| `App.Grass.Count` | 1 | 0..16 |
+| `App.Water.Count` | 1 | 0..8 |
+| `App.NPC.Count` | 4 | 0..16 |
+| `App.Fox.Count` | 1 | 0..8 |
+
+Use the console/settings controls or the App executable's own
+`[ConsoleVariables]` INI section. Clear the default settings search to find these
+application CVars. These names are
+registered by Bistro App, so keep them out of other executables' shared INI files.
+Reflection maps bake during initial warmup and remain static until explicitly
+invalidated or their capture settings/topology change. They exclude moving props
+and characters and do not repeatedly capture the scene. This is an in-memory
+bake, without an offline disk cache. Character routes are simple bounded loops;
+they respect world pause/time scale and use the existing GPU skinning pipeline.
+Human asset provenance is in `Assets/Models/MGPUSoldier/SOURCE.md`.
+
+Separate development tasks are in `docs/tasks/bistro-additions/README.md`.
+Build `BistroAdditionsTests.vcxproj` for the integrated count, animation and GPU
+visibility checks; images are written under `Build/BistroAdditions`.
+
 Set **App** as the startup project in `PEPEngine2.sln`, select **Release | x64**, and run.
 Build from a Visual Studio developer prompt:
 

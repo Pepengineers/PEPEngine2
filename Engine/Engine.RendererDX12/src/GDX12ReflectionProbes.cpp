@@ -41,7 +41,7 @@ bool IsValidReflectionProbe(const GDX12ReflectionProbe& probe)
         probe.Position.z < probe.BoxMin.z || probe.Position.z > probe.BoxMax.z) return false;
     const bool validResolution = probe.Resolution == 0 || (probe.Resolution >= 16 && probe.Resolution <= 512 &&
         (probe.Resolution & (probe.Resolution - 1)) == 0);
-    return (probe.Implementation == 0 || probe.Implementation == 1) && validResolution &&
+    return probe.Implementation >= 0 && probe.Implementation <= 2 && validResolution &&
         probe.FacesPerFrame <= 6 && (probe.PrefilterSamples == 0 ||
             (probe.PrefilterSamples >= 8 && probe.PrefilterSamples <= 1024)) &&
         std::isfinite(probe.BlendDistance) && probe.BlendDistance > 0 &&

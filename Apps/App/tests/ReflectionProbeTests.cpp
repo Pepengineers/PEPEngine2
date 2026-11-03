@@ -170,6 +170,11 @@ static void TestSettings()
     Set(L"Render.Reflection.Quality", "2");
     GDX12ReflectionProbe probe;
     Require(IsValidReflectionProbe(probe), "Default author probe invalid");
+    probe.Implementation = 2;
+    Require(IsValidReflectionProbe(probe), "Frozen static capture mode rejected");
+    probe.Implementation = 3;
+    Require(!IsValidReflectionProbe(probe), "Unknown capture mode accepted");
+    probe.Implementation = 1;
     probe.BlendDistance = NAN;
     Require(!IsValidReflectionProbe(probe), "NaN author probe accepted");
     probe.BlendDistance = 10;
@@ -548,6 +553,53 @@ int main(int argc, char** argv)
         render();
         Require(Center(face(4), 32).y > 3.5f, "Full dynamic mode reused stale static radiance");
         locations[0].z = 100;
+        resources.ReflectionProbes[0].Implementation = 2;
+        render();
+        Require(reflections.GetStatistics().CapturedFaces == 6 &&
+            reflections.GetStatistics().PublishedProbes == 1 && Center(face(4), 32).z > 5.5f,
+            "Frozen capture did not publish static scene radiance");
+        const auto frozenRadiance = face(4);
+        locations[1].z = 50;
+        material[0].EmissiveColor = { 6, 0, 0 };
+        ++resources.ReflectionStaticRevision;
+        ++resources.ReflectionDynamicRevision;
+        ++resources.ReflectionEnvironmentRevision;
+        for (UINT frame = 0; frame < 9; ++frame)
+        {
+            render();
+            Require(reflections.GetStatistics().CapturedFaces == 0 &&
+                reflections.GetStatistics().BakedFaces == 0 && reflections.GetStatistics().PublishedProbes == 0,
+                "Frozen cubemap kept capturing or filtering after publication");
+        }
+        Require(face(4) == frozenRadiance, "Scene/environment edits changed a frozen cubemap");
+        ++resources.ReflectionProbes[0].Revision;
+        render();
+        Require(reflections.GetStatistics().PublishedProbes == 1 && Center(face(4), 32).x > 5.5f,
+            "Explicit frozen rebake failed or captured the foreground dynamic object");
+        resources.ReflectionProbes[0].PrefilterSamples = 8;
+        render();
+        Require(reflections.GetStatistics().PublishedProbes == 1, "Frozen filter settings change did not rebake");
+        resources.ReflectionProbes[0].Resolution = 64;
+        render();
+        Require(reflections.GetStatistics().PublishedProbes == 1 && Center(face(4), 64).x > 5.5f,
+            "Frozen resolution change did not republish its cubemap");
+        render();
+        Require(reflections.GetStatistics().CapturedFaces == 0 && reflections.GetStatistics().PublishedProbes == 0,
+            "Frozen resized cubemap resumed recurring captures");
+        const auto frozenProbe = resources.ReflectionProbes[0];
+        resources.ReflectionProbes.clear();
+        render();
+        Require(ReadProbeBuffer(device, *resources.FrameConstants[resources.CurrFrameConstantsIndex]->ReflectionProbes)[0].Intensity == 0,
+            "Removed frozen probe retained published metadata");
+        resources.ReflectionProbes = { frozenProbe };
+        render();
+        Require(reflections.GetStatistics().CapturedFaces == 6 && reflections.GetStatistics().PublishedProbes == 1,
+            "Recreated frozen probe reused the removed generation");
+        std::cout << "Frozen static cubemap: initial publication, zero steady-state capture/filter, explicit rebake and settings changes passed.\n";
+        resources.ReflectionProbes[0].Resolution = 32;
+        resources.ReflectionProbes[0].PrefilterSamples = 0;
+        locations[1].z = 200;
+        material[0].EmissiveColor = { 0, 0, 6 };
         for (auto& configuredProbe : resources.ReflectionProbes)
             configuredProbe.Implementation = 1;
         ++resources.ReflectionStaticRevision;

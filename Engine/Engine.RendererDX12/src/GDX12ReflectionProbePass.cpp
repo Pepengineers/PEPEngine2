@@ -24,7 +24,8 @@ namespace
     {
         return a.Id == b.Id && a.Position == b.Position && a.BoxMin == b.BoxMin && a.BoxMax == b.BoxMax &&
             a.NearPlane == b.NearPlane && a.FarPlane == b.FarPlane && a.Revision == b.Revision &&
-            a.Implementation == b.Implementation && a.Resolution == b.Resolution;
+            a.Implementation == b.Implementation && a.Resolution == b.Resolution &&
+            a.PrefilterSamples == b.PrefilterSamples;
     }
 
     GDX12CameraConstants FaceCamera(const GDX12ReflectionProbe& probe, UINT face, UINT size)
@@ -445,12 +446,12 @@ void GDX12ReflectionProbePass::RenderFace(GDX12CommandList* commands, UINT probe
         commands->GetCommandList()->CopyTextureRegion(&depthDestination, 0, 0, 0, &depthSource, nullptr);
     }
     Cull(commands, face, geometry, false);
-    BindCapture(commands, face, bake ? _staticLocalShadows->GetOutput(0)->GetTexture() : _inputs[4]->GetTexture());
+    BindCapture(commands, face, geometry == StaticGeometry ? _staticLocalShadows->GetOutput(0)->GetTexture() : _inputs[4]->GetTexture());
     commands->ResourceBarrier({ color.GetResource()->GetRenderTargetBarrier(), depth.GetResource()->GetDepthWriteBarrier() });
     commands->GetCommandList()->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
     commands->SetViewport({ 0, 0, static_cast<float>(_resolution), static_cast<float>(_resolution), 0, 1 });
     commands->SetScissorRect({ 0, 0, static_cast<LONG>(_resolution), static_cast<LONG>(_resolution) });
-    if (bake || geometry == AllGeometry)
+    if (geometry != DynamicGeometry)
     {
         const float clear[] = { 0, 0, 0, 0 };
         commands->GetCommandList()->ClearRenderTargetView(rtv, clear, 0, nullptr);
@@ -533,8 +534,23 @@ void GDX12ReflectionProbePass::WriteProbeData(GDX12CommandList* commands, bool e
 
 void GDX12ReflectionProbePass::Prepare()
 {
-    if (!GetReflectionSettings().Enabled || std::none_of(_resources->ReflectionProbes.begin(),
-        _resources->ReflectionProbes.end(), [](const auto& probe) { return probe.Implementation == 1; })) return;
+    const auto settings = GetReflectionSettings();
+    if (!settings.Enabled) return;
+    bool needsStaticShadows = false;
+    UINT maximumResolution = 0;
+    for (size_t i = 0; i < _resources->ReflectionProbes.size(); ++i)
+    {
+        auto probe = _resources->ReflectionProbes[i];
+        static_cast<GDX12ReflectionCaptureSettings&>(probe) = ResolveReflectionCaptureSettings(probe, settings.Quality);
+        maximumResolution = (std::max)(maximumResolution, probe.Resolution);
+        needsStaticShadows |= probe.Implementation == 1 || (probe.Implementation == 2 &&
+            (_probes.size() != _resources->ReflectionProbes.size() || !_probes[i].Ready ||
+                !_probes[i].LastUpdate || !SameCapture(_probes[i].Source, probe)));
+    }
+    needsStaticShadows |= maximumResolution != _publishedResolution && std::any_of(
+        _resources->ReflectionProbes.begin(), _resources->ReflectionProbes.end(),
+        [](const auto& probe) { return probe.Implementation == 2; });
+    if (!needsStaticShadows) return;
     if (!_staticLocalShadows)
     {
         // shortcut: baked receivers retain static-only shadows, use dynamic capture for moving shadow reception.
@@ -555,6 +571,12 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
     if (!settings.Enabled || _resources->ReflectionProbes.empty())
     {
         WriteProbeData(commands, false);
+        if (_resources->ReflectionProbes.empty())
+            for (auto& probe : _probes)
+            {
+                probe.Ready = false;
+                probe.LastUpdate = 0;
+            }
         if (_enabled)
         {
             _commonData->ResetHistory = true;
@@ -600,6 +622,7 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
         _face = 0;
         for (auto& probe : _probes)
         {
+            if (probe.Source.Implementation == 2 && probe.Ready && probe.LastUpdate) continue;
             probe.BakedFaces = 0;
             probe.LastUpdate = 0;
         }
@@ -628,7 +651,8 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
         {
             const auto& probe = _probes[_activeProbe];
             const UINT interval = probe.Source.UpdateInterval;
-            if (!probe.Ready || probe.LastUpdate == 0 || _frameNumber - probe.LastUpdate >= interval) break;
+            if (!probe.Ready || probe.LastUpdate == 0 ||
+                (probe.Source.Implementation != 2 && _frameNumber - probe.LastUpdate >= interval)) break;
             _activeProbe = (_activeProbe + 1) % static_cast<UINT>(_probes.size());
             ++visited;
         }
@@ -661,10 +685,13 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
             ++_statistics.BakedFaces;
         }
     }
-    RenderShadow(commands, AllGeometry);
+    const bool frozen = state.Source.Implementation == 2;
+    if (frozen) _staticLocalShadows->Execute(commands);
+    RenderShadow(commands, frozen ? StaticGeometry : AllGeometry);
     for (; _face < endFace; ++_face)
     {
-        RenderFace(commands, _activeProbe, _face, state.Source.Implementation == 1 ? DynamicGeometry : AllGeometry, false);
+        RenderFace(commands, _activeProbe, _face, frozen ? StaticGeometry :
+            state.Source.Implementation == 1 ? DynamicGeometry : AllGeometry, false);
         ++_statistics.CapturedFaces;
     }
     if (_face == 6)

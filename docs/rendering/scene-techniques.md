@@ -1,16 +1,16 @@
 # Компонентные техники сцены
 
-Проверено по `WorldECS`, сбору данных в `RenderModule` и настройке Bistro, 2026-11-02.
+Перечень по `WorldECS`, сбору данных в `RenderModule` и настройке Bistro, 2026-11-04.
 Это список реализованных техник, которые устанавливаются на объекты сцены.
 
 | Техника | Компонент / точка подключения | Bistro |
 |---|---|---|
 | GPU-частицы | `ParticleEmitterComponent` + `TransformComponent` | Восемь эффектов, общий бюджет 250000 |
-| Трава | `GrassRenderComponent` | Не установлена |
-| Поле ветра | `WindFieldComponent`, ссылка из травы | Не установлено |
-| SPH-жидкость и поверхность воды | `FluidRenderComponent` | Не установлена |
-| Скелетная анимация / GPU skinning | `SkeletalMeshRenderComponent` | Не установлена |
-| Локальные отражения из cubemap | `ReflectionProbeComponent` | Не установлены |
+| Трава | `GrassRenderComponent` | Один участок у входа, `App.Grass.Count` |
+| Поле ветра | `WindFieldComponent`, ссылка из травы | Аналитический ветер для каждого участка травы |
+| SPH-жидкость и поверхность воды | `FluidRenderComponent` | Один небольшой бассейн, `App.Water.Count` |
+| Скелетная анимация / GPU skinning | `SkeletalMeshRenderComponent` | Четыре человека снаружи и одна лиса внутри, `App.NPC.Count` / `App.Fox.Count` |
+| Локальные отражения из cubemap | `ReflectionProbeComponent` | Четыре frozen static кубмапы, `App.ReflectionProbes.Count` |
 | Текстурное небо / IBL | `SkyBoxComponent`, выбор через `World::SetSkySource` | Есть на Sun |
 | Физическая атмосфера / IBL | `SkyAtmosphereComponent` | Не выбрана |
 | Процедурные 2D-облака | Renderer-компонент `GDX12CloudComponent`, `GDX12EnvironmentIBLPass::SetCloudSource` (отдельного ECS-компонента нет) | Не подключены |

@@ -1,6 +1,6 @@
 # Local reflection probes
 
-`ReflectionProbeComponent` plus `TransformComponent` enables a probe; neither the component nor the renderer creates scene content. Bistro is unchanged. The renderer supports 32 enabled probes on the primary GPU. Exceeding this limit or supplying invalid author parameters throws before capture.
+`ReflectionProbeComponent` plus `TransformComponent` enables a probe; neither the component nor the renderer creates scene content. The Bistro App installs four frozen static probes through `BistroReflections::Scene`; `App.ReflectionProbes.Count` controls their count (0..32). The renderer supports 32 enabled probes on the primary GPU. Exceeding this limit or supplying invalid author parameters throws before capture.
 
 ## Authoring
 
@@ -20,7 +20,7 @@ Every `ReflectionProbeComponent` owns the capture settings below through `GDX12R
 
 | Component field | Default | Accepted values / units |
 | --- | --- | --- |
-| `Implementation` | 1 | 0 full dynamic, 1 baked static color + matching depth + dynamic overlay |
+| `Implementation` | 1 | 0 full dynamic, 1 baked static color + matching depth + dynamic overlay, 2 frozen static capture |
 | `Resolution` | 0 | 0 inherit quality; power-of-two face width 16..512 pixels |
 | `FacesPerFrame` | 0 | 0 inherit quality; 1..6 capture faces when this probe is scheduled |
 | `PrefilterSamples` | 0 | 0 inherit quality; 8..1024 GGX samples per texel |
@@ -39,6 +39,16 @@ The retired global names `Render.Reflection.Implementation`, `.Resolution`, `.Fa
 Off writes neutral metadata in each reused frame slot and performs no capture. A frame snapshots the two global CVars and every submitted probe's author settings. Resource replacement waits for preceding GPU work before replacing descriptors.
 
 ## Capture, caching and publication
+
+Frozen mode (`Implementation=2`) captures static opaque/masked geometry and the
+environment once, filters all six faces and publishes the complete cubemap. It
+then performs no capture, shadow rendering or filtering for that probe. Moving
+props, skinned characters, grass, particles and water are excluded. Scene,
+material, light and environment revisions leave a completed frozen snapshot
+unchanged; call `Invalidate()` to rebake it. Capture-setting changes and probe
+topology/resource replacement also rebuild the result. `UpdateInterval` does not
+schedule recurring captures in this mode. This is an initial GPU bake during
+scene warmup, not a persistent disk cache.
 
 Captures use RH cameras, D3D cubemap face orientation, reverse-Z depth (clear zero), RGBA16F linear HDR, the existing PBR material sampling, directional/local lighting and global IBL. Transparent geometry is excluded from capture; masked alpha uses the same 0.5 threshold as the opaque pass. Draws are GPU-frustum-culled and use ExecuteIndirect.
 
