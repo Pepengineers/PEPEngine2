@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <string>
 
+#include "App.Base/ECS/SceneLoadTask.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 
 using Microsoft::WRL::ComPtr;
@@ -69,11 +70,11 @@ App::App(HINSTANCE hInstance)
 
 App::~App()
 {
-    //ordering is important
+    // Stop the loader before destroying the modules it uses.
+    _sceneLoadTask.reset();
     Locator.UnregisterModule<SceneManagerModule>();
     Locator.UnregisterModule<RenderModule>();
-    // can't be put into RenderModule since it is required 
-    // to call it after all module entities are destroyed
+    // Streamline must outlive all module resources.
     GDX12StreamlineSDK::Get().Shutdown();
 }
 
@@ -101,6 +102,22 @@ int App::Run()
             TranslateMessage(&Msg);
             DispatchMessage(&Msg);
         }
+        else if (!TickSceneLoad())
+        {
+            const float progress = _sceneLoadTask->GetProgress();
+            const std::string status = _sceneLoadTask->GetStatus();
+
+            auto renderModule = Locator.GetModule<RenderModule>();
+            renderModule->RenderLoadingScreen(_sceneLoadTask->GetProgress());
+
+            const std::wstring wideStatus(status.begin(), status.end());
+
+            const std::wstring title = _window->GetWindowTitle()
+                                    + L" - " + wideStatus
+                                    + L" (" + std::to_wstring(static_cast<int>(_sceneLoadTask->GetProgress() * 100.0f)) + L"%)";
+
+            SetWindowText(_window->GetWindowHandle(), title.c_str());
+        }
         // Otherwise, do animation/game stuff.
         else
         {
@@ -125,7 +142,7 @@ int App::Run()
 bool App::Initialize()
 {
     Logger::Init();
-    
+
     try {
         _AppConfig = AppConfigLoader::LoadAppConfig(GetAppConfigPath());
     }
@@ -159,12 +176,11 @@ bool App::Initialize()
         return false;
     }
 
-    Logger::Info("App::Initialize before LoadStartScene");
+    Logger::Info("Starting asynchronous start-scene loading");
+    SetWindowText(_window->GetWindowHandle(), (_window->GetWindowTitle() + L" - Loading...").c_str());
 
-    if (!LoadStartScene())
-    {
-        return false;
-    }
+    _sceneLoadTask = std::make_unique<SceneLoadTask>(_AppConfig.StartScene, _AppConfig, *Locator.GetModule<SceneManagerModule>(), *Locator.GetModule<RenderModule>());
+    _sceneLoadTask->Start();
 
     return true;
 }
@@ -286,20 +302,40 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_LBUTTONDOWN:
     case WM_MBUTTONDOWN:
     case WM_RBUTTONDOWN:
+        if (_sceneLoadTask)
+        {
+            return 0;
+        }
+
         OnMouseDown(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
         return 0;
 
     case WM_LBUTTONUP:
     case WM_MBUTTONUP:
     case WM_RBUTTONUP:
+        if (_sceneLoadTask)
+        {
+            return 0;
+        }
+
         OnMouseUp(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
         return 0;
 
     case WM_MOUSEMOVE:
+        if (_sceneLoadTask)
+        {
+            return 0;
+        }
+
         OnMouseMove(wParam, GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
         return 0;
 
     case WM_MOUSEWHEEL:
+        if (_sceneLoadTask)
+        {
+            return 0;
+        }
+
         OnMouseWheelMove(wParam);
         return 0;
 
@@ -317,7 +353,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 void App::OnResize()
 {
     //WinApi unintentionally calls OnResize() once during window creation.
-    //It happens during AppBase::Initialize(), 
+    //It happens during AppBase::Initialize(),
     //so none of the systems are currently initialized.
     //This effectively ignores the first OnResize() call.
 
@@ -383,4 +419,38 @@ void App::Update(const GameTimer& gameTimer)
     // as the initialization order (that is used by the locator)
     Locator.GetModule<RenderModule>()->Update();
     Locator.GetModule<SceneManagerModule>()->Update();
+}
+
+bool App::TickSceneLoad()
+{
+    if (!_sceneLoadTask)
+    {
+        return true;
+    }
+
+    _sceneLoadTask->TickMainThread(std::chrono::milliseconds(4));
+
+    if (_sceneLoadTask->HasFailed())
+    {
+        Logger::Error("Scene load failed: {}", _sceneLoadTask->GetError());
+
+        PostQuitMessage(EXIT_FAILURE);
+        return false;
+    }
+
+    if (!_sceneLoadTask->IsComplete())
+    {
+        return false;
+    }
+
+    SetWindowText(_window->GetWindowHandle(), _window->GetWindowTitle().c_str());
+
+    Timer.Reset();
+    if (bAppPaused)
+    {
+        Timer.Stop();
+    }
+
+    _sceneLoadTask.reset();
+    return true;
 }
