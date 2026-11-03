@@ -1,6 +1,7 @@
 #include "App.Base/Modules/RenderModule.h"
 
 #include "App.Base/Window.h"
+#include "Engine.UI/UI_test.h"
 #include <cassert>
 #include <stdexcept>
 #include <climits>
@@ -53,6 +54,7 @@ RenderModule::~RenderModule()
 {
     if (_primaryDevice && _primaryDevice->GetCommandQueue()) { _primaryDevice->GetCommandQueue()->Flush(); }
     if (_secondaryDevice && _secondaryDevice->GetCommandQueue()) { _secondaryDevice->GetCommandQueue()->Flush(); }
+    if (_uiInitialized) Engine::UI::ShutdownUI();
 
     _primaryGraph.reset();
     for (auto& renderpass : _primaryRenderPasses) { renderpass->ClearDenendencies(); }
@@ -101,6 +103,10 @@ void RenderModule::Initialize()
     if (_dualGPUMode) { ShareFences(); }
     Log::Info("Renderer", "Configuring render passes and pipeline states");
     ConfigureRenderPipeline();
+
+    Engine::UI::Initialize(_window->GetWindowHandle(), _primaryDevice.get(),
+        static_cast<int>(_primaryResources.FrameConstants.size()), _backBuffer->GetFormat());
+    _uiInitialized = true;
 
     SubscribeToSceneManager();
     Log::Info("Renderer", "Rendering initialization complete");
@@ -952,6 +958,7 @@ void RenderModule::OnRender()
     auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
     _primaryResources.UploadLocalShadowData(primarycmdList);
     _primaryGraph->Execute(primarycmdList);
+    if (_uiInitialized) Engine::UI::Render(primarycmdList, _backBuffer->GetCurrentBuffer());
     _primaryGPUTimer->Stop(primarycmdList);
     primarycmdQueue->ExecuteCommandList(primarycmdList);
     primaryCurrentFrameConsts->FenceValue = primarycmdList->FenceValue;
@@ -1443,6 +1450,7 @@ const GDX12ReconstructionStatus& RenderModule::GetReconstructionStatus() const
 
 void RenderModule::BeginFrame()
 {
+    if (_uiInitialized) Engine::UI::BeginFrame();
     if (_backBuffer) _backBuffer->BeginFrame(_RPcommonData);
 }
 

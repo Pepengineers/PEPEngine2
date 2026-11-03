@@ -227,6 +227,7 @@ private:
     std::unique_ptr<GDX12Device> _primaryDevice;
     std::unique_ptr<GDX12Device> _secondaryDevice;
     bool _dualGPUMode;
+    bool _uiInitialized = false;
     std::unique_ptr<GDX12GPUTimer> _primaryGPUTimer;
     std::unique_ptr<GDX12GPUTimer> _secondaryGPUTimer;
 

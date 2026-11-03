@@ -19,6 +19,15 @@ enum class EConsoleVariableFlags : uint8_t
     ReadOnly = 1
 };
 
+enum class EConsoleVariableType : uint8_t
+{
+    Boolean,
+    Integer,
+    UnsignedInteger,
+    FloatingPoint,
+    Enumeration
+};
+
 struct ConsoleConfigResult
 {
     int ErrorLine = 0;
@@ -48,7 +57,10 @@ public:
 
     std::wstring_view GetDescription() const;
     EConsoleVariableFlags GetFlags() const { return Flags; }
+    virtual EConsoleVariableType GetType() const = 0;
+    virtual int GetEnumCount() const = 0;
     virtual bool SetFromString(std::string_view Value) = 0;
+    virtual std::string GetString() const = 0;
 
     virtual bool GetBool() const = 0;
     virtual int GetInt() const = 0;
@@ -80,5 +92,6 @@ public:
     bool UnregisterConsoleVariable(const IConsoleVariable* variable);
     bool TryFindConsoleVariable(std::wstring_view Name, IConsoleVariable*& OutVariable) const;
     IConsoleVariable& FindConsoleVariable(std::wstring_view Name) const;
-    std::vector<IConsoleVariable*> GetConsoleVariables() const;
+    // Sorted snapshot; the owners must outlive iteration. Prefix matching ignores case.
+    std::vector<IConsoleVariable*> GetConsoleVariables(std::wstring_view Prefix = {}) const;
 };

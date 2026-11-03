@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
   <Import Project="App.vcxproj" />
+  <Import Project="..\..\MSBuild\Props\PEPEngine.External.ImGui.props" />
   <PropertyGroup>
     <ProjectGuid>{FC853B7E-A847-45B0-B51C-462A0345231F}</ProjectGuid>
   </PropertyGroup>

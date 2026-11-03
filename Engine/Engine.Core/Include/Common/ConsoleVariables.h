@@ -8,6 +8,19 @@
 
 namespace ConsoleVariableDetail
 {
+    template <class T, class = void>
+    struct EnumSize { static constexpr int Count = 0; };
+
+    template <class T>
+    struct EnumSize<T, std::void_t<decltype(T::Count)>>
+    {
+        static_assert(std::is_enum_v<T>, "Count is reserved for enum console variables");
+        static_assert(static_cast<std::underlying_type_t<T>>(T::Count) > 0 &&
+            static_cast<std::underlying_type_t<T>>(T::Count) <= (std::numeric_limits<int>::max)(),
+            "Console enum must be contiguous from zero and end with Count fitting in int");
+        static constexpr int Count = static_cast<int>(T::Count);
+    };
+
     template <class T>
     bool ParseValue(std::string_view text, T& value)
     {
@@ -58,6 +71,17 @@ public:
         EConsoleVariableFlags Flags, Validator Validate)
         : IConsoleVariable(Name, Description, Flags), Validate(Validate) {}
 
+    EConsoleVariableType GetType() const override
+    {
+        if constexpr (std::is_same_v<TValue, bool>) return EConsoleVariableType::Boolean;
+        else if constexpr (std::is_enum_v<TValue>) return EConsoleVariableType::Enumeration;
+        else if constexpr (std::is_floating_point_v<TValue>) return EConsoleVariableType::FloatingPoint;
+        else if constexpr (std::is_unsigned_v<TValue>) return EConsoleVariableType::UnsignedInteger;
+        else return EConsoleVariableType::Integer;
+    }
+
+    int GetEnumCount() const override { return ConsoleVariableDetail::EnumSize<TValue>::Count; }
+
     TValue GetValue() const
     {
         std::scoped_lock lock(ValueMutex);
@@ -79,6 +103,23 @@ public:
     }
 
     bool GetBool() const override { return static_cast<bool>(GetValue()); }
+    std::string GetString() const override
+    {
+        const auto value = GetValue();
+        if constexpr (std::is_same_v<TValue, bool>) return value ? "true" : "false";
+        else
+        {
+            char buffer[128];
+            const auto result = [&]
+            {
+                if constexpr (std::is_enum_v<TValue>)
+                    return std::to_chars(buffer, buffer + sizeof(buffer), static_cast<std::underlying_type_t<TValue>>(value));
+                else return std::to_chars(buffer, buffer + sizeof(buffer), value);
+            }();
+            if (result.ec != std::errc{}) throw std::runtime_error("Cannot format console variable");
+            return {buffer, result.ptr};
+        }
+    }
     int GetInt() const override { return static_cast<int>(GetValue()); }
     float GetFloat() const override { return static_cast<float>(GetValue()); }
     uint32_t GetUInt() const override { return static_cast<uint32_t>(GetValue()); }
@@ -86,6 +127,14 @@ public:
 protected:
     bool IsValidValue(TValue value) const
     {
+        if constexpr (std::is_enum_v<TValue> && ConsoleVariableDetail::EnumSize<TValue>::Count > 0)
+        {
+            using Underlying = std::underlying_type_t<TValue>;
+            const auto index = static_cast<Underlying>(value);
+            if constexpr (std::is_signed_v<Underlying>)
+                if (index < 0) return false;
+            if (index >= static_cast<Underlying>(TValue::Count)) return false;
+        }
         if constexpr (std::is_floating_point_v<TValue>)
             if (!std::isfinite(value)) return false;
         return !Validate || Validate(value);

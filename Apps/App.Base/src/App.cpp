@@ -2,6 +2,7 @@
 
 #include <App.Base/App.h>
 #include <WindowsX.h>
+#include "Engine.UI/UI_test.h"
 #include "Common/ConsoleVariables.h"
 #include "Engine.Core/ConsoleModule.h"
 #include "Engine.Core/Logging/Logger.h"
@@ -300,6 +301,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         if (msg == WM_ACTIVATE || msg == WM_ENTERSIZEMOVE || msg == WM_EXITSIZEMOVE ||
             (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST)) return 0;
     }
+    if (!_initializing && Engine::UI::HandleMessage(hwnd, msg, wParam, lParam)) return 1;
     switch (msg)
     {
     case WM_ACTIVATE:
@@ -495,7 +497,7 @@ bool App::AddModules()
 void App::Update(const GameTimer& gameTimer)
 {
     Locator.GetModule<RenderModule>()->BeginFrame();
-    if (!bInactive) OnKeyboardInput(gameTimer);
+    if (!bInactive && !Engine::UI::WantsKeyboardInput()) OnKeyboardInput(gameTimer);
     Locator.GetModule<RenderModule>()->Update();
     auto scenes = Locator.GetModule<SceneManagerModule>();
     for (size_t i = 0; i < scenes->GetWorldCount(); ++i)

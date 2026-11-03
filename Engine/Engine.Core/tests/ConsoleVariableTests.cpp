@@ -1,6 +1,7 @@
 #include "Common/ConsoleVariables.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include <chrono>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -13,7 +14,9 @@ namespace
     {
         if (!condition) throw std::runtime_error(message);
     }
-    enum class Quality : unsigned { Low, High };
+    enum class Quality : unsigned { Low, High, Count };
+    enum class SignedQuality { Low, High, Count };
+    enum class LegacyMode { Automatic = -3, Manual = 11 };
 }
 
 int main()
@@ -48,6 +51,47 @@ int main()
             "Boolean validation failed");
         Require(quality.SetFromString("1") && quality.GetValue() == Quality::High, "Enum parsing failed");
         Require(reference.SetValue(5) && backing == 5, "Reference update failed");
+        Require(count.GetType() == EConsoleVariableType::Integer &&
+            frames.GetType() == EConsoleVariableType::UnsignedInteger &&
+            enabled.GetType() == EConsoleVariableType::Boolean &&
+            scale.GetType() == EConsoleVariableType::FloatingPoint &&
+            quality.GetType() == EConsoleVariableType::Enumeration &&
+            reference.GetType() == EConsoleVariableType::Integer,
+            "Registry must expose the declared types, including enum and reference variables");
+        Require(quality.GetEnumCount() == 2 && count.GetEnumCount() == 0 &&
+            !quality.SetFromString("2") && !quality.SetFromString("-1") && !quality.SetValue(Quality::Count),
+            "Enum Count must expose the UI range and reject the sentinel and invalid values");
+        const auto snapshot = console.GetConsoleVariables();
+        Require(std::is_sorted(snapshot.begin(), snapshot.end(), [](const auto* left, const auto* right)
+            { return left->GetName() < right->GetName(); }), "Registry snapshots must have deterministic order");
+        Require(console.GetConsoleVariables(L"tEsT.").size() == snapshot.size() &&
+            console.GetConsoleVariables(L"Test.Count").size() == 1 &&
+            console.GetConsoleVariables(L"Missing.").empty(), "Registry prefix filtering failed");
+        {
+            AutoConsoleVariable<SignedQuality> dynamic(L"Test.Dynamic.Option", SignedQuality::Low, L"0 Low, 1 High");
+            const auto discovered = console.GetConsoleVariables(L"TEST.DYNAMIC.");
+            Require(discovered.size() == 1 && discovered.front() == &dynamic &&
+                dynamic.GetEnumCount() == 2 && dynamic.SetFromString("1") &&
+                !dynamic.SetFromString("-1") && !dynamic.SetFromString("2") && dynamic.GetString() == "1",
+                "Runtime discovery must expose enum types, counts and range validation");
+            SignedQuality enumBacking = SignedQuality::Low;
+            AutoConsoleVariableRef<SignedQuality> enumRef(L"Test.Dynamic.Ref", enumBacking);
+            Require(enumRef.GetEnumCount() == 2 && enumRef.SetFromString("1") &&
+                !enumRef.SetValue(SignedQuality::Count) && enumBacking == SignedQuality::High,
+                "Referenced enums must preserve type and enforce Count");
+            AutoConsoleVariable<LegacyMode> legacy(L"Test.Dynamic.Legacy", LegacyMode::Automatic);
+            Require(legacy.GetEnumCount() == 0 && legacy.SetFromString("11") && legacy.GetValue() == LegacyMode::Manual,
+                "Enums without Count must retain their existing numeric behavior");
+        }
+        Require(console.GetConsoleVariables(L"Test.Dynamic.").empty(), "Enumeration retained a destroyed CVar");
+        Require(count.GetString() == "-7" && frames.GetString() == "3" && scale.GetString() == "1.25" &&
+            enabled.GetString() == "true" && quality.GetString() == "1" && reference.GetString() == "5",
+            "Console display must preserve values, enums and references");
+        AutoConsoleVariable<uint64_t> wide(L"Test.Wide", UINT64_MAX);
+        AutoConsoleVariable<double> precise(L"Test.Precise", 1.2345678901234567);
+        Require(wide.GetString() == "18446744073709551615" && wide.SetFromString(wide.GetString()) &&
+            precise.SetFromString(precise.GetString()) && precise.GetValue() == 1.2345678901234567,
+            "Console display must round-trip without narrowing integers or floating point values");
         bool duplicateRejected = false;
         try { AutoConsoleVariable<int> duplicate(L"TEST.COUNT", 99); }
         catch (const std::invalid_argument&) { duplicateRejected = true; }

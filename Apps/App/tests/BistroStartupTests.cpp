@@ -4,6 +4,9 @@
 #include "../src/App.cpp"
 #undef WinMain
 #include "Engine.RendererDX12/GDX12FrameGeneration.h"
+#include "Engine.UI/UI_test.h"
+#include <imgui/imgui.h>
+#include <imgui/imgui_internal.h>
 #include <iostream>
 #include <thread>
 #include <d3d12sdklayers.h>
@@ -75,6 +78,50 @@ int main()
         app.MsgProc(window, WM_ACTIVATE, WA_INACTIVE, 0);
         check(!render->GetFrameGenerationStatus().Suspended, "Alt+Tab must keep rendering active by default");
         app.BenchmarkFrame();
+        app.BenchmarkFrame();
+        check(ImGui::GetCurrentContext() && ImGui::GetDrawData() && ImGui::GetDrawData()->TotalVtxCount > 0,
+            "Image quality window must generate visible ImGui geometry");
+        {
+            enum class ProbeMode { First, Second, Third, Count };
+            AutoConsoleVariable<ProbeMode> discovered(L"Render.AutoDiscoveryTest.NewSetting", ProbeMode::Second,
+                L"Runtime registration probe: 0 First, 1 Second, 2 Third");
+            AutoConsoleVariable<float> size(L"Render.AutoDiscoveryTest.Size", 1.25f);
+            AutoConsoleVariable<int> count(L"Render.AutoDiscoveryTest.Count", 4);
+            AutoConsoleVariable<bool> enabled(L"Render.AutoDiscoveryTest.Enabled", true);
+            const auto logPath = ConsoleModule::GetDefaultConfigPath().parent_path().parent_path() / "Logs/GraphicsSettingsUITest.log";
+            const auto previousBytes = std::filesystem::exists(logPath) ? std::filesystem::file_size(logPath) : 0;
+            auto logFilename = logPath.string();
+            ImGuiContextHook hook;
+            hook.Type = ImGuiContextHookType_NewFramePost;
+            hook.UserData = &logFilename;
+            hook.Callback = [](ImGuiContext*, ImGuiContextHook* current)
+            { ImGui::LogToFile(4, static_cast<const std::string*>(current->UserData)->c_str()); };
+            const auto hookId = ImGui::AddContextHook(ImGui::GetCurrentContext(), &hook);
+            app.BenchmarkFrame();
+            ImGui::RemoveContextHook(ImGui::GetCurrentContext(), hookId);
+            ImGui::LogFinish();
+            std::ifstream log(logPath);
+            log.seekg(static_cast<std::streamoff>(previousBytes));
+            const std::string text((std::istreambuf_iterator<char>(log)), std::istreambuf_iterator<char>());
+            const auto group = text.find("Render.AutoDiscoveryTest");
+            check(group != std::string::npos && text.find("Render.AutoDiscoveryTest", group + 1) == std::string::npos &&
+                text.find("NewSetting") != std::string::npos && text.find("Size") != std::string::npos &&
+                text.find("Count") != std::string::npos && text.find("Enabled") != std::string::npos &&
+                discovered.GetType() == EConsoleVariableType::Enumeration && discovered.GetEnumCount() == 3,
+                "New typed CVars must appear in one shared name-prefix group without UI changes");
+        }
+        ImGui::GetIO().WantCaptureKeyboard = true;
+        check(Engine::UI::WantsKeyboardInput() && Engine::UI::HandleMessage(window, WM_CHAR, 'W', 0),
+            "Editing settings must capture keyboard input before camera handling");
+        ImGui::GetIO().WantCaptureMouse = true;
+        check(Engine::UI::HandleMessage(window, WM_MOUSEWHEEL, 0, 0), "Settings must capture the mouse wheel");
+        app.MsgProc(window, WM_KEYUP, VK_F1, 0);
+        app.BenchmarkFrame();
+        check(ImGui::GetDrawData()->TotalVtxCount == 0 && !Engine::UI::WantsKeyboardInput(),
+            "F1 must hide settings and release camera input");
+        app.MsgProc(window, WM_KEYUP, VK_F1, 0);
+        app.BenchmarkFrame();
+        check(ImGui::GetDrawData()->TotalVtxCount > 0, "F1 must reopen settings");
         auto& frameGeneration = ConsoleModule{}.FindConsoleVariable(L"Render.FrameGeneration.Provider");
         check(frameGeneration.SetFromString("3"), "FG selection must be writable on the real Bistro path");
         app.BenchmarkFrame();
@@ -144,6 +191,7 @@ int main()
         if (passed) std::cout << "Bistro effects: eight emitters, mesh fireflies, 1x/4x/fraction/<=0 scales and 90 frames with no debug-layer errors passed.\n";
         if (passed) std::cout << "Background rendering: defaults, runtime CVar, focus, minimize and resize passed.\n";
         if (passed) std::cout << "Bistro startup: both scene parts, 346 props and stable entrance camera passed.\n";
+        if (passed) std::cout << "Image quality UI: automatic enum discovery, draw data, F1 and keyboard/mouse capture passed.\n";
         return passed ? 0 : 1;
     }
     catch (const DxException& error) { std::wcerr << error.ToString() << '\n'; return 1; }

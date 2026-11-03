@@ -10,6 +10,18 @@ msbuild Apps/App/App.vcxproj /p:Configuration=Release /p:Platform=x64 /m
 Executable: `Build/bin/x64/Release/App/App.exe`. The existing asset-folder setting
 resolves assets independently of the working directory.
 
+The **Settings** ImGui window opens with the application; **F1** hides or
+reopens it. Search by CVar name, expand an effect group, and hover a control for
+its description and valid range. Checkboxes, numeric fields and enum lists apply
+immediately. Rejected values leave the previous setting intact and show an error.
+Startup-only settings are locked and marked **restart**. Changes last for this
+session; edit `Config/Engine.ini` beside
+the executable to keep them. Camera controls yield to ImGui while it captures input.
+All registered CVars are discovered every frame. Controls follow their declared
+types; groups use everything before the last dot in the name. Enum classes ending
+in `Count` get a numeric
+dropdown automatically. New settings need no UI edits; use descriptions for help.
+
 Eight particle effects share the App-owned runtime CVar `App.Particles.CountScale`
 (default 1; <=0 also uses 1). Use
 `App.exe -App.Particles.CountScale=4` for four times the particles in every

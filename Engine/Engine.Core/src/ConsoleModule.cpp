@@ -81,17 +81,23 @@ namespace
             return true;
         }
 
-        std::vector<IConsoleVariable*> GetConsoleVariables() const
+        std::vector<IConsoleVariable*> GetConsoleVariables(std::wstring_view prefix) const
         {
             std::scoped_lock lock(Mutex);
 
             std::vector<IConsoleVariable*> result;
             result.reserve(Variables.size());
+            const auto lookupPrefix = MakeLookupKey(prefix);
 
             for (const auto& [key, variable] : Variables)
             {
-                result.push_back(variable);
+                if (key.compare(0, lookupPrefix.size(), lookupPrefix) == 0) result.push_back(variable);
             }
+
+            std::sort(result.begin(), result.end(), [](const auto* left, const auto* right)
+            {
+                return left->GetName() < right->GetName();
+            });
 
             return result;
         }
@@ -260,7 +266,7 @@ IConsoleVariable& ConsoleModule::FindConsoleVariable(std::wstring_view Name) con
     return *variable;
 }
 
-std::vector<IConsoleVariable*> ConsoleModule::GetConsoleVariables() const
+std::vector<IConsoleVariable*> ConsoleModule::GetConsoleVariables(std::wstring_view Prefix) const
 {
-    return ConsoleVariableStorage::Get().GetConsoleVariables();
+    return ConsoleVariableStorage::Get().GetConsoleVariables(Prefix);
 }

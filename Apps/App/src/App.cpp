@@ -1,4 +1,5 @@
 #include <App.Base/App.h>
+#include "Engine.UI/UI_test.h"
 #include "Engine.Core/ConsoleModule.h"
 #include "Engine.Core/Logging/Logger.h"
 #include <cmath>
@@ -132,7 +133,7 @@ namespace
 
         void OnKeyboardInput(const GameTimer& timer) override
         {
-            if (bInactive) return;
+            if (bInactive || Engine::UI::WantsKeyboardInput()) return;
             auto* world = Locator.GetModule<SceneManagerModule>()->GetWorld();
             auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
             const auto rotation = Matrix::CreateFromYawPitchRoll(

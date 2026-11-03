@@ -1,5 +1,54 @@
 # CVar и стартовая конфигурация
 
+## Перебор и метаданные
+
+`ConsoleModule{}.GetConsoleVariables()` возвращает отсортированный по имени снимок
+всех зарегистрированных CVar. Необязательный префикс фильтруется без учёта регистра:
+
+```cpp
+for (auto* variable : ConsoleModule{}.GetConsoleVariables(L"Render."))
+{
+    const auto name = variable->GetName();
+    const auto description = variable->GetDescription();
+    const auto type = variable->GetType();
+    const auto flags = variable->GetFlags();
+    const auto value = variable->GetString();
+    const auto enumCount = variable->GetEnumCount();
+    // SetFromString(...) applies the same validation as configuration loading.
+}
+```
+
+`GetType()` различает bool, знаковые/беззнаковые целые, floating point и enum.
+`GetString()` возвращает значение без потери точности, пригодное для `SetFromString()`.
+Снимок содержит невладеющие указатели: владельцы CVar должны жить до конца обхода;
+их уничтожение нужно синхронизировать с обходом. Новая регистрация видна следующему
+вызову, удалённые CVar в новые снимки не попадают. Чтение и запись значений защищены
+существующим mutex каждой переменной.
+
+Как в [CVar API Unreal](https://dev.epicgames.com/documentation/en-us/unreal-engine/console-variables-cplusplus-in-unreal-engine),
+имя, default, описание и флаги задаются при регистрации. Существующие int/float/bool
+CVar сохраняют свои типы. Для новых перечислений поддерживается `enum class`:
+
+```cpp
+enum class ExampleMode { Off, Low, High, Count };
+static AutoConsoleVariable<ExampleMode> Mode(L"Render.Example.Mode", ExampleMode::Low,
+    L"Example mode: 0 Off, 1 Low, 2 High");
+```
+
+`Count` завершает непрерывное перечисление с нуля. `GetEnumCount()` возвращает
+число значений; `Count`, отрицательные и выходящие за диапазон значения
+автоматически отклоняются. Дополнительный валидатор по-прежнему может сузить диапазон.
+Это работает и для `AutoConsoleVariableRef`. Enum без `Count` сохраняет прежнее
+числовое поведение, а `GetEnumCount()` возвращает 0.
+
+ImGui выбирает флажок для bool, числовое поле для int/float, меню `0..Count-1`
+для enum с `Count`. Значения enum поясняются описанием при наведении. Группы
+получаются из всего имени до последней точки: `Render.UI.Count` и `Render.UI.Size`
+попадают в `Render.UI`, `Render.AO.SSAO.Samples` — в `Render.AO.SSAO`.
+Отдельного списка переменных или вариантов в UI нет; реестр перечитывается каждый кадр.
+**F1** скрывает/открывает окно. По умолчанию виден весь реестр; поиск фильтрует
+его по имени. Изменения сохраняются только на время запуска.
+
 `App.Particles.CountScale` — runtime-CVar **Bistro App**, default **1**.
 Домножает авторские количества частиц восьми эффектов: **1** = 250000,
 **4** = 1000000, **1.25** = 312500, **0.6** = 150000, **0.5** = 125000.
@@ -82,7 +131,7 @@ const bool parsed = console.FindConsoleVariable(L"Render.Exposure").SetFromStrin
 
 ```powershell
 New-Item -ItemType Directory -Force Build/CVarTests/Manual | Out-Null
-cl /nologo /std:c++17 /EHsc /W4 /Z7 /IEngine/Engine.Core/Include /IExternal/External.Libraries/inih /DINI_STOP_ON_FIRST_ERROR=1 /DINI_ALLOW_MULTILINE=0 /DINI_CALL_HANDLER_ON_NEW_SECTION=1 /DINI_MAX_LINE=4096 Engine/Engine.Core/tests/ConsoleVariableTests.cpp Engine/Engine.Core/src/ConsoleModule.cpp Engine/Engine.Core/src/Logger.cpp Engine/Engine.Core/src/RuntimePaths.cpp Engine/Engine.Core/src/BenchmarkEngine.cpp Engine/Engine.Core/src/GameTimer.cpp External/External.Libraries/inih/ini.c /FoBuild/CVarTests/Manual/ /FeBuild/CVarTests/Manual/ConsoleVariableTests.exe /link kernel32.lib
+cl /nologo /utf-8 /std:c++17 /EHsc /W4 /Z7 /DFMT_HEADER_ONLY /IEngine/Engine.Core/Include /IExternal/External.Libraries/inih /IExternal/External.Libraries/spdlog/include /DINI_STOP_ON_FIRST_ERROR=1 /DINI_ALLOW_MULTILINE=0 /DINI_CALL_HANDLER_ON_NEW_SECTION=1 /DINI_MAX_LINE=4096 Engine/Engine.Core/tests/ConsoleVariableTests.cpp Engine/Engine.Core/src/ConsoleModule.cpp Engine/Engine.Core/src/Logger.cpp Engine/Engine.Core/src/RuntimePaths.cpp Engine/Engine.Core/src/BenchmarkEngine.cpp Engine/Engine.Core/src/GameTimer.cpp External/External.Libraries/inih/ini.c /FoBuild/CVarTests/Manual/ /FeBuild/CVarTests/Manual/ConsoleVariableTests.exe /link kernel32.lib
 Build/CVarTests/Manual/ConsoleVariableTests.exe
 ```
 
