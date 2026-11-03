@@ -31,6 +31,7 @@ struct GDX12FluidSurfacePass::State
     uint64_t SettingsRevision = 0;
     UINT Count = 0, Capacity = 0, Current = 0;
     bool SeedPending = true;
+    UINT SeedFrameSlot = UINT_MAX;
     bool WasRendered = false;
 };
 
@@ -255,12 +256,16 @@ void GDX12FluidSurfacePass::PrepareStates()
 
 void GDX12FluidSurfacePass::Simulate(GDX12CommandList* commands, State& state, const GDX12FluidSettings& settings, float elapsed)
 {
+    // Reusing the upload slot requires its completed fence, including the initial seed copy.
+    if (!state.SeedPending && state.SeedFrameSlot == _resources->CurrFrameConstantsIndex)
+        state.SeedUpload.reset();
     if (state.SeedPending)
     {
         auto& target = state.Particles[state.Current]->GetResource();
         commands->ResourceBarrier({ target.GetCopyDestBarrier() });
         commands->CopyResource(target.D3DResource.Get(), state.SeedUpload->GetResource().D3DResource.Get());
         state.SeedPending = false;
+        state.SeedFrameSlot = _resources->CurrFrameConstantsIndex;
     }
     commands->SetComputeRootSignature(_solverRoot.get());
     commands->SetComputeRootConstantBufferView(1, state.Constants->GetElementAddress(_resources->CurrFrameConstantsIndex));

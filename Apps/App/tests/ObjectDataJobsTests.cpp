@@ -31,6 +31,52 @@ static std::vector<T> ReadUpload(GDX12UploadBuffer<T>* buffer)
     return result;
 }
 
+template<typename T>
+static std::vector<T> ReadDefault(GDX12UploadBuffer<T>* buffer)
+{
+    auto& resource = buffer->GetResource();
+    D3D12_HEAP_PROPERTIES properties = {};
+    ThrowIfFailed(resource.D3DResource->GetHeapProperties(&properties, nullptr));
+    Require(properties.Type == D3D12_HEAP_TYPE_DEFAULT, "Scene consumers must read DEFAULT memory");
+    ComPtr<ID3D12Device> device;
+    ThrowIfFailed(resource.D3DResource->GetDevice(IID_PPV_ARGS(&device)));
+    const UINT64 bytes = UINT64(buffer->GetElementCount()) * sizeof(T);
+    const auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
+    const auto desc = CD3DX12_RESOURCE_DESC::Buffer(bytes);
+    ComPtr<ID3D12Resource> readback;
+    ThrowIfFailed(device->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc,
+        D3D12_RESOURCE_STATE_COPY_DEST, nullptr, IID_PPV_ARGS(&readback)));
+    ComPtr<ID3D12CommandQueue> queue;
+    D3D12_COMMAND_QUEUE_DESC queueDesc = {};
+    ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&queue)));
+    ComPtr<ID3D12CommandAllocator> allocator;
+    ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
+    ComPtr<ID3D12GraphicsCommandList> commands;
+    ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commands)));
+    auto barrier = resource.GetCopySourceBarrier();
+    commands->ResourceBarrier(1, &barrier);
+    commands->CopyBufferRegion(readback.Get(), 0, resource.D3DResource.Get(), 0, bytes);
+    barrier = resource.GetSRVBarrier(); commands->ResourceBarrier(1, &barrier);
+    ThrowIfFailed(commands->Close());
+    ID3D12CommandList* lists[] = {commands.Get()};
+    queue->ExecuteCommandLists(1, lists);
+    ComPtr<ID3D12Fence> fence;
+    ThrowIfFailed(device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)));
+    ThrowIfFailed(queue->Signal(fence.Get(), 1));
+    const HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    Require(event != nullptr, "Readback fence event failed");
+    const HRESULT completion = fence->SetEventOnCompletion(1, event);
+    if (SUCCEEDED(completion)) WaitForSingleObject(event, INFINITE);
+    CloseHandle(event); ThrowIfFailed(completion);
+    std::vector<T> result(buffer->GetElementCount());
+    void* mapped = nullptr;
+    const D3D12_RANGE range = {0, static_cast<SIZE_T>(bytes)}, noWrite = {};
+    ThrowIfFailed(readback->Map(0, &range, &mapped));
+    std::memcpy(result.data(), mapped, range.End);
+    readback->Unmap(0, &noWrite);
+    return result;
+}
+
 class ObjectDataApp final : public App
 {
 public:
@@ -119,6 +165,9 @@ public:
             const auto uploadedMaterials = ReadUpload(render->GetCurrentPrimaryFrameConstants()->MaterialCache.get());
             Require(std::abs(uploadedMaterials[editedMaterial->_CBufferIndex].Roughness - 0.23f) < 1e-6f,
                 "An actual material edit must reach every prepared frame slot");
+            const auto gpuMaterials = ReadDefault(render->GetCurrentPrimaryFrameConstants()->ShadowMaterials.get());
+            Require(std::abs(gpuMaterials[editedMaterial->_CBufferIndex].Roughness - 0.23f) < 1e-6f,
+                "An actual material edit must reach the DEFAULT snapshot in every frame slot");
         }
         editedMaterial->Roughness = previousRoughness;
         editedMaterial->DirtyFlag = true;

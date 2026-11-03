@@ -200,6 +200,7 @@ public:
         if (Fences[slot]) queue->CPUWaitForFenceValue(Fences[slot]);
         auto* commands = queue->GetCommandList();
         if (timer) timer->Start(commands);
+        Resources.FrameConstants[slot]->UploadReflectionProbeData(commands);
         SSR.Execute(commands);
         if (timer) timer->Stop(commands);
         queue->ExecuteCommandList(commands);
@@ -392,7 +393,7 @@ int main(int argc, char** argv)
                 probe.BoxMin = { -5000, -5000, -5000 };
                 probe.BoxMax = { 5000, 5000, 5000 };
                 probe.BlendDistance = 1;
-                frame->ReflectionProbes->CopyData(0, probe);
+                frame->ReflectionProbesUpload->CopyData(0, probe);
             }
             ++fixture.Common.HistoryRevision;
             fixture.Draw();
@@ -414,7 +415,7 @@ int main(int argc, char** argv)
             std::cout << "Local miss normalized max error=" << relativeMissError << std::endl;
             Require(relativeMissError < 0.02f, "SSSR miss and subtraction did not use the same local probe fallback");
             for (auto& frame : fixture.Resources.FrameConstants)
-                frame->ReflectionProbes->CopyData(0, GDX12ReflectionProbeData{});
+                frame->ReflectionProbesUpload->CopyData(0, GDX12ReflectionProbeData{});
             std::cout << "Local/global SSSR miss fallback preserves one specular contribution.\n";
             fixture.Resize(319, 181); fixture.Draw();
             CheckHits(fixture.Result(), fixture.Width, fixture.Height);

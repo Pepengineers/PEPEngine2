@@ -624,7 +624,7 @@ int main(int argc, char** argv)
         clearView.Format = DXGI_FORMAT_R32_FLOAT;
         clearView.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
         clearAO.InitAsUAV(aoTexture->GetResource()->D3DResource.Get(), nullptr, &clearView, &clearHeap, 0);
-        const auto renderLighting = [&](XMFLOAT3 pointRadiance, XMFLOAT3 spotRadiance, float aoOverride = -1)
+        const auto renderLighting = [&](XMFLOAT3 pointRadiance, XMFLOAT3 spotRadiance, float aoOverride = -1, bool poisonUpload = false)
         {
             point.Radiance = pointRadiance;
             spot.Radiance = spotRadiance;
@@ -634,6 +634,15 @@ int main(int argc, char** argv)
             auto* list = queue->GetCommandList();
             resources.PrepareLocalShadowData();
             resources.UploadLocalShadowData(list);
+            if (poisonUpload)
+            {
+                queue->ExecuteCommandList(list);
+                queue->Flush();
+                const GDX12LocalLightConstants unlit[2] = {};
+                frame->LocalLightCache->CopyData(0, unlit, 2);
+                list = queue->GetCommandList();
+            }
+            frame->UploadReflectionProbeData(list);
             culling.Execute(list);
             opaque.Execute(list);
             ao.Execute(list);
@@ -651,10 +660,13 @@ int main(int argc, char** argv)
             transparency.Execute(list);
             queue->ExecuteCommandList(list);
             queue->Flush();
+            frame->LocalLightCache->CopyData(0, lights, 2);
             return ReadHDR(device, *deferred.GetOutput(0)->GetTexture());
         };
         const auto ambient = renderLighting({}, {});
         const auto pointLit = renderLighting({ 1, 1, 1 }, {});
+        Require(pointLit == renderLighting({ 1, 1, 1 }, {}, -1, true),
+            "Deferred lighting must read the published DEFAULT lights snapshot");
         const auto spotLit = renderLighting({}, { 1, 1, 1 });
         float pointIncrease = 0.0f;
         float spotIncrease = 0.0f;

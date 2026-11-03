@@ -26,6 +26,7 @@ public:
     };
     explicit GDX12GrassRenderer(GDX12DeviceResources* resources);
     ~GDX12GrassRenderer();
+    // Wait the current frame-slot fence before reusing staging or replacing its roots.
     void BeginFrame(GDX12CommandList* commands, const RenderPipelineCommonData& common,
         std::vector<GDX12GrassInstance> grass, std::vector<GDX12WindInstance> wind, GDX12GrassWindControls controls);
     void Draw(GDX12CommandList* commands, Stage stage, const Matrix& viewProjection,
@@ -71,7 +72,8 @@ private:
     {
         GDX12GrassInstance Source;
         Matrix PreviousWorld = Matrix::Identity;
-        std::vector<std::unique_ptr<GDX12UploadBuffer<XMFLOAT3>>> Roots;
+        std::vector<std::unique_ptr<GDX12UploadBuffer<XMFLOAT3>>> Roots, RootsUpload;
+        std::vector<uint64_t> RootSignatures;
         bool ResetHistory = true;
         uint64_t SettingsHash = 0;
     };

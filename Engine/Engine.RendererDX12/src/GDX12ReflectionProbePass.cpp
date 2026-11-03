@@ -353,9 +353,9 @@ void GDX12ReflectionProbePass::Cull(GDX12CommandList* commands, UINT camera, Geo
     commands->GetCommandList()->SetComputeRoot32BitConstants(0, 2, parameters, 0);
     commands->SetComputeRootConstantBufferView(1, frame.Cameras->GetElementAddress(camera));
     commands->SetComputeRootConstantBufferView(2, frame.Shadow->GetElementAddress(0));
-    commands->SetComputeSRV(0, constants->InstanceCache->GetSRV()->GPUHandle);
-    commands->SetComputeSRV(1, _resources->IndirectCommandsCache->GetSRV()->GPUHandle);
-    commands->SetComputeSRV(2, constants->MaterialCache->GetSRV()->GPUHandle);
+    commands->SetComputeSRV(0, constants->ShadowInstances->GetSRV()->GPUHandle);
+    commands->SetComputeSRV(1, constants->ShadowTemplates->GetSRV()->GPUHandle);
+    commands->SetComputeSRV(2, constants->ShadowMaterials->GetSRV()->GPUHandle);
     if (count) commands->Dispatch((count + 63) / 64, 1, 1);
     commands->ResourceBarrier({ frame.Commands->GetResource().GetIndirectArgsBarrier(), frame.Counter->GetResource().GetIndirectArgsBarrier() });
 }
@@ -368,12 +368,12 @@ void GDX12ReflectionProbePass::BindCapture(GDX12CommandList* commands, UINT face
     commands->SetGraphicsRootConstantBufferView(1, constants->MainCB->GetElementAddress(0));
     commands->SetGraphicsRootConstantBufferView(2, frame.Cameras->GetElementAddress(face));
     commands->SetGraphicsRootConstantBufferView(3, frame.Shadow->GetElementAddress(0));
-    commands->SetGraphicsSRV(0, constants->MaterialCache->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(1, constants->TransformCache->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(2, constants->InstanceCache->GetSRV()->GPUHandle);
+    commands->SetGraphicsSRV(0, constants->ShadowMaterials->GetSRV()->GPUHandle);
+    commands->SetGraphicsSRV(1, constants->ShadowTransforms->GetSRV()->GPUHandle);
+    commands->SetGraphicsSRV(2, constants->ShadowInstances->GetSRV()->GPUHandle);
     commands->SetGraphicsSRV(3, _sunShadow.GetSRV()->GPUHandle);
     for (UINT i = 0; i < 3; ++i) commands->SetGraphicsSRV(4 + i, _inputs[i]->GetTexture()->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(7, constants->LocalLightCache->GetSRV()->GPUHandle);
+    commands->SetGraphicsSRV(7, constants->ShadowLights->GetSRV()->GPUHandle);
     commands->SetGraphicsSRV(8, localShadows->GetSRV()->GPUHandle);
     commands->SetGraphicsSRV(9, _inputs[3]->GetTexture()->GetSRV()->GPUHandle);
     commands->SetGraphicsRootConstantBufferView(4, _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->SkyCB->GetElementAddress(0));
@@ -401,9 +401,9 @@ void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, Geometry
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
     commands->SetGraphicsRootSignature(_captureRoot.get());
     commands->SetGraphicsRootConstantBufferView(3, frame.Shadow->GetElementAddress(0));
-    commands->SetGraphicsSRV(0, constants->MaterialCache->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(1, constants->TransformCache->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(2, constants->InstanceCache->GetSRV()->GPUHandle);
+    commands->SetGraphicsSRV(0, constants->ShadowMaterials->GetSRV()->GPUHandle);
+    commands->SetGraphicsSRV(1, constants->ShadowTransforms->GetSRV()->GPUHandle);
+    commands->SetGraphicsSRV(2, constants->ShadowInstances->GetSRV()->GPUHandle);
     commands->SetGraphicsRootConstantBufferView(4, _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->SkyCB->GetElementAddress(0));
     commands->SetGraphicsSRV(10, _resources->SkyTransmittanceSRV.GPUHandle);
     commands->SetGraphicsSRV(11, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
@@ -509,7 +509,7 @@ void GDX12ReflectionProbePass::FilterAndPublish(GDX12CommandList* commands, UINT
     ++_statistics.PublishedProbes;
 }
 
-void GDX12ReflectionProbePass::WriteProbeData(bool enabled)
+void GDX12ReflectionProbePass::WriteProbeData(GDX12CommandList* commands, bool enabled)
 {
     auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     for (UINT i = 0; i < MaxReflectionProbes; ++i)
@@ -526,8 +526,9 @@ void GDX12ReflectionProbePass::WriteProbeData(bool enabled)
             data.MaxMip = static_cast<float>(_publishedMips - 1);
             data.MinMip = static_cast<float>(_publishedMips - CubeMipCount(probe.Resolution));
         }
-        frame->ReflectionProbes->CopyData(i, data);
+        frame->ReflectionProbesUpload->CopyData(i, data);
     }
+    frame->UploadReflectionProbeData(commands);
 }
 
 void GDX12ReflectionProbePass::Prepare()
@@ -553,7 +554,7 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
     const auto settings = GetReflectionSettings();
     if (!settings.Enabled || _resources->ReflectionProbes.empty())
     {
-        WriteProbeData(false);
+        WriteProbeData(commands, false);
         if (_enabled)
         {
             _commonData->ResetHistory = true;
@@ -633,7 +634,7 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
         }
         if (visited == _probes.size())
         {
-            WriteProbeData(true);
+            WriteProbeData(commands, true);
             return;
         }
     }
@@ -672,7 +673,7 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
         _activeProbe = (_activeProbe + 1) % static_cast<UINT>(_probes.size());
         _face = 0;
     }
-    WriteProbeData(true);
+    WriteProbeData(commands, true);
 }
 
 void GDX12ReflectionProbePass::ClearDenendencies()

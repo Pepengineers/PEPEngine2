@@ -9,6 +9,7 @@
 #include <cstring>
 #include <utility>
 #include <atomic>
+#include <stdexcept>
 
 enum class EBufferType
 {
@@ -93,6 +94,8 @@ inline GDX12UploadBuffer<T>::GDX12UploadBuffer(GDX12Device* device, UINT element
 template<typename T>
 void GDX12UploadBuffer<T>::CreateBuffer()
 {
+    if (_elementCount > UINT_MAX / _elementByteSize)
+        throw std::length_error("Buffer byte size exceeds UINT_MAX");
     _totalBufferSize = _elementByteSize * _elementCount;
     D3D12_RESOURCE_DESC resourceDesc = CD3DX12_RESOURCE_DESC::Buffer(_totalBufferSize);
 
@@ -195,7 +198,7 @@ template<typename T>
 void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T* data, UINT count)
 {
     if (!_buffer.D3DResource) return;
-    if (elementIndex + count > _elementCount) return;
+    if (elementIndex > _elementCount || count > _elementCount - elementIndex) return;
 
     if (_bufferType == EBufferType::Upload && _mappedData)
     {

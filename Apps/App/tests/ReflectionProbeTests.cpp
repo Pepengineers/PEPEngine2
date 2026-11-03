@@ -27,6 +27,7 @@ static void Require(bool condition, const char* message)
 {
     if (!condition) throw std::runtime_error(message);
 }
+#include "PlacementTiming.h"
 
 static void TestPassDependencies()
 {
@@ -239,15 +240,27 @@ static std::vector<float> ReadTexture(GDX12Device& device, GDX12Texture& texture
     return result;
 }
 
-template<typename T> static std::vector<T> ReadUpload(GDX12UploadBuffer<T>& buffer)
+template<typename T> static std::vector<T> ReadProbeBuffer(GDX12Device& device, GDX12UploadBuffer<T>& buffer)
 {
+    D3D12_HEAP_PROPERTIES properties = {};
+    ThrowIfFailed(buffer.GetResource().D3DResource->GetHeapProperties(&properties, nullptr));
+    Require(properties.Type == D3D12_HEAP_TYPE_DEFAULT, "Probe metadata consumers must use DEFAULT memory");
+    const UINT64 bytes = UINT64(buffer.GetElementCount()) * sizeof(T);
+    auto readback = device.CreateResource(D3D12_HEAP_TYPE_READBACK,
+        CD3DX12_RESOURCE_DESC::Buffer(bytes), D3D12_RESOURCE_STATE_COPY_DEST);
+    auto* queue = device.GetCommandQueue();
+    auto* commands = queue->GetCommandList();
+    commands->ResourceBarrier({buffer.GetResource().GetCopySourceBarrier()});
+    commands->GetCommandList()->CopyBufferRegion(readback.Get(), 0, buffer.GetResource().D3DResource.Get(), 0, bytes);
+    commands->ResourceBarrier({buffer.GetResource().GetSRVBarrier()});
+    queue->ExecuteCommandList(commands); queue->Flush();
     void* mapped = nullptr;
-    const D3D12_RANGE range = { 0, buffer.GetElementCount() * sizeof(T) };
-    ThrowIfFailed(buffer.GetResource().D3DResource->Map(0, &range, &mapped));
+    const D3D12_RANGE range = {0, static_cast<SIZE_T>(bytes)};
+    ThrowIfFailed(readback->Map(0, &range, &mapped));
     std::vector<T> result(buffer.GetElementCount());
     std::memcpy(result.data(), mapped, range.End);
     const D3D12_RANGE noWrite = {};
-    buffer.GetResource().D3DResource->Unmap(0, &noWrite);
+    readback->Unmap(0, &noWrite);
     return result;
 }
 
@@ -289,6 +302,7 @@ int main(int argc, char** argv)
                 validation->SetEnableGPUBasedValidation(TRUE);
             }
         }
+        LoadPlacementCapturer();
         GDX12Device device;
         ThrowIfFailed(device.Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
         GDX12DeviceResources resources;
@@ -464,7 +478,7 @@ int main(int argc, char** argv)
             locations[1].x += 0.01f;
             ++resources.ReflectionDynamicRevision;
             render();
-            const auto metadata = ReadUpload(*resources.FrameConstants[resources.CurrFrameConstantsIndex]->ReflectionProbes);
+            const auto metadata = ReadProbeBuffer(device, *resources.FrameConstants[resources.CurrFrameConstantsIndex]->ReflectionProbes);
             Require(reflections.GetStatistics().PublishedProbes == 0 && metadata[0].Intensity == 0,
                 "Partial cubemap became visible or dynamic motion reset publication cursor");
         }
@@ -542,7 +556,7 @@ int main(int argc, char** argv)
         Set(L"Render.Reflection.Enabled", "false");
         render();
         Require(reflections.GetStatistics().CapturedFaces == 0 &&
-            ReadUpload(*resources.FrameConstants[resources.CurrFrameConstantsIndex]->ReflectionProbes)[0].Intensity == 0,
+            ReadProbeBuffer(device, *resources.FrameConstants[resources.CurrFrameConstantsIndex]->ReflectionProbes)[0].Intensity == 0,
             "Disabled probes are not neutral");
         Set(L"Render.Reflection.Enabled", "true");
         for (auto& configuredProbe : resources.ReflectionProbes)
@@ -553,7 +567,7 @@ int main(int argc, char** argv)
         Require(reflections.GetStatistics().PublishedProbes == 1, "Camera cut reset the probe generation");
         ++resources.ReflectionProbes[0].Id;
         render();
-        Require(ReadUpload(*resources.FrameConstants[resources.CurrFrameConstantsIndex]->ReflectionProbes)[0].Intensity == 0,
+        Require(ReadProbeBuffer(device, *resources.FrameConstants[resources.CurrFrameConstantsIndex]->ReflectionProbes)[0].Intensity == 0,
             "World/probe replacement exposed the old scene's cubemap");
         for (UINT i = 0; i < 5; ++i) render();
         Require(reflections.GetStatistics().PublishedProbes == 1, "World replacement never published its new generation");
@@ -687,6 +701,21 @@ int main(int argc, char** argv)
             std::cout << "Quality " << quality << ": " << settings.Resolution << "px, " << settings.FacesPerFrame
                 << " faces/frame, " << settings.PrefilterSamples << " samples, textures=" << reflections.GetStatistics().TextureBytes
                 << " bytes, capture+GGX GPU mean=" << totalMS / iterations << " ms\n";
+            if (benchmark)
+            {
+                const auto label = "reflection-quality-" + std::to_string(quality);
+                MeasurePlacement(device, label.c_str(), static_cast<UINT>(resources.FrameConstants.size()),
+                    [&](GDX12CommandList* commands, UINT slot, UINT iteration)
+                {
+                    resources.CurrFrameConstantsIndex = slot;
+                    resources.ReflectionProbes[0].Intensity = 1.0f + (iteration % 2) * 0.125f;
+                    upload();
+                    resources.PrepareLocalShadowData();
+                    resources.UploadLocalShadowData(commands);
+                    localShadows.Prepare(); localShadows.Execute(commands);
+                    reflections.Prepare(); reflections.Execute(commands);
+                });
+            }
             const UINT mips = reflections.GetOutput(0)->GetTexture()->GetResource()->D3DResource->GetDesc().MipLevels;
             for (UINT f = 0; f < 6; ++f)
                 for (UINT mip = 0; mip < mips; ++mip) face(f, mip);
@@ -937,7 +966,7 @@ int main(int argc, char** argv)
         secondProbe.Implementation = 1;
         resources.ReflectionProbes = { firstProbe, secondProbe };
         for (UINT frame = 0; frame < 12; ++frame) render();
-        const auto mixedData = ReadUpload(*resources.FrameConstants[resources.CurrFrameConstantsIndex]->ReflectionProbes);
+        const auto mixedData = ReadProbeBuffer(device, *resources.FrameConstants[resources.CurrFrameConstantsIndex]->ReflectionProbes);
         Require(mixedData[0].Intensity > 0 && mixedData[1].Intensity > 0 &&
             mixedData[0].MinMip == 1 && mixedData[1].MinMip == 0,
             "Different per-probe resolutions did not publish into their own mip ranges");
@@ -950,7 +979,7 @@ int main(int argc, char** argv)
         for (size_t i = 0; i < resources.FrameConstants.size(); ++i) render(false);
         queue->Flush();
         for (const auto& frame : resources.FrameConstants)
-            for (const auto& entry : ReadUpload(*frame->ReflectionProbes))
+            for (const auto& entry : ReadProbeBuffer(device, *frame->ReflectionProbes))
                 Require(entry.Intensity == 0, "Disabled probe metadata leaked into another frame slot");
         if (info)
         {

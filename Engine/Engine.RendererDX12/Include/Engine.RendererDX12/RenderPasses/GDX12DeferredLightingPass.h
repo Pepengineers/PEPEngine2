@@ -97,7 +97,7 @@ public:
         commands->SetComputeRootConstantBufferView(4, grid.Constants->GetElementAddress(0));
         commands->SetComputeSRV(15, _resources->SkyTransmittanceSRV.GPUHandle);
         commands->SetComputeSRV(16, _resources->SkyViewSRV.GPUHandle);
-        commands->SetComputeSRV(11, frame->LocalLightCache->GetSRV()->GPUHandle);
+        commands->SetComputeSRV(11, frame->ShadowLights->GetSRV()->GPUHandle);
         commands->SetComputeSRV(12, _resources->ReflectionRadianceSRV.GPUHandle);
         commands->SetComputeSRV(13, frame->ReflectionProbes->GetSRV()->GPUHandle);
         commands->SetComputeSRV(17, grid.Masks->GetSRV()->GPUHandle);

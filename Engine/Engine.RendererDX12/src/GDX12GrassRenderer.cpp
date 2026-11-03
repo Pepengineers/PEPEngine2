@@ -12,7 +12,7 @@ namespace
         const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
         for (size_t i = 0; i < sizeof(value); ++i) hash = (hash ^ bytes[i]) * 1099511628211ull;
     }
-    uint64_t SettingsHash(const GDX12GrassInstance& s)
+    uint64_t SettingsHash(const GDX12GrassInstance& s, uint64_t& rootsHash)
     {
         uint64_t hash = 14695981039346656037ull;
         Hash(hash, s.Implementation); Hash(hash, s.ExtentsCm); Hash(hash, s.DensityPerSquareMetre);
@@ -21,8 +21,10 @@ namespace
         Hash(hash, s.LodDistanceCm); Hash(hash, s.FarCardDistanceCm); Hash(hash, s.MaxDistanceCm);
         Hash(hash, s.WindId); Hash(hash, s.MaterialIndex); Hash(hash, s.MaterialRevision); Hash(hash, s.ResetRevision);
         Hash(hash, s.CastShadows); Hash(hash, s.CaptureReflections);
-        Hash(hash, s.RootsCm.size());
-        for (const auto& root : s.RootsCm) Hash(hash, root);
+        rootsHash = 14695981039346656037ull;
+        Hash(rootsHash, s.RootsCm.size());
+        for (const auto& root : s.RootsCm) Hash(rootsHash, root);
+        Hash(hash, rootsHash);
         return hash;
     }
     uint64_t SettingsHash(const GDX12WindInstance& s)
@@ -198,7 +200,8 @@ void GDX12GrassRenderer::BeginFrame(GDX12CommandList* commands, const RenderPipe
             if (!count) continue;
             if (!activeGrass.insert(source.Id).second) throw std::invalid_argument("Duplicate grass owner");
             auto& state = _grass[source.Id];
-            const auto signature = SettingsHash(source);
+            uint64_t rootsHash;
+            const auto signature = SettingsHash(source, rootsHash);
             state.ResetHistory = common.ResetHistory || controlChange || state.SettingsHash != signature;
             state.PreviousWorld = state.ResetHistory ? source.World : state.Source.World;
             state.SettingsHash = signature;
@@ -208,16 +211,33 @@ void GDX12GrassRenderer::BeginFrame(GDX12CommandList* commands, const RenderPipe
             const UINT ribbons = state.Source.Implementation == GDX12GrassImplementation::CrossedRibbons ? 2u : 1u;
             vertexCapacity = (std::max)(vertexCapacity, count * (state.Source.Segments + 1) * 2 * ribbons);
             indexCapacity = (std::max)(indexCapacity, count * state.Source.Segments * 6 * ribbons);
-            if (state.Roots.empty()) state.Roots.resize(_frames.size());
-            auto& roots = state.Roots[_resources->CurrFrameConstantsIndex];
+            if (state.Roots.empty())
+            {
+                state.Roots.resize(_frames.size());
+                state.RootsUpload.resize(_frames.size());
+                state.RootSignatures.resize(_frames.size());
+            }
+            const auto slot = _resources->CurrFrameConstantsIndex;
+            auto& roots = state.Roots[slot];
+            auto& upload = state.RootsUpload[slot];
             const UINT rootCount = (std::max)(1u, static_cast<UINT>(state.Source.RootsCm.size()));
+            bool dirty = state.RootSignatures[slot] != rootsHash;
             if (!roots || roots->GetElementCount() < rootCount)
             {
-                roots = std::make_unique<GDX12UploadBuffer<XMFLOAT3>>(_resources->Device, rootCount, EBufferType::Upload, false);
-                roots->CreateSRV(_resources->SRV_UAV_Heap.get(), _resources->SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+                roots = Buffer<XMFLOAT3>(rootCount, true, false);
+                upload = std::make_unique<GDX12UploadBuffer<XMFLOAT3>>(_resources->Device, rootCount, EBufferType::Upload, false);
+                dirty = true;
             }
-            if (state.Source.RootsCm.empty()) roots->CopyData(0, XMFLOAT3(0, 0, 0));
-            else roots->CopyData(0, state.Source.RootsCm.data(), static_cast<UINT>(state.Source.RootsCm.size()));
+            if (dirty)
+            {
+                if (state.Source.RootsCm.empty()) upload->CopyData(0, XMFLOAT3(0, 0, 0));
+                else upload->CopyData(0, state.Source.RootsCm.data(), static_cast<UINT>(state.Source.RootsCm.size()));
+                commands->ResourceBarrier({roots->GetResource().GetCopyDestBarrier()});
+                commands->GetCommandList()->CopyBufferRegion(roots->GetResource().D3DResource.Get(), 0,
+                    upload->GetResource().D3DResource.Get(), 0, UINT64(rootCount) * sizeof(XMFLOAT3));
+                commands->ResourceBarrier({roots->GetResource().GetNonPixelShaderResourceBarrier()});
+                state.RootSignatures[slot] = rootsHash;
+            }
         }
     }
     bool changed = controlChange;
@@ -494,7 +514,7 @@ void GDX12GrassRenderer::Draw(GDX12CommandList* commands, Stage stage, const Mat
         if (camera) commands->SetGraphicsRootConstantBufferView(1, camera);
         commands->SetGraphicsRootConstantBufferView(2, constants->MainCB->GetElementAddress(0));
         commands->SetGraphicsSRV(0, _vertices->GetSRV()->GPUHandle);
-        commands->SetGraphicsSRV(1, constants->MaterialCache->GetSRV()->GPUHandle);
+        commands->SetGraphicsSRV(1, constants->ShadowMaterials->GetSRV()->GPUHandle);
         commands->SetGraphicsSRV(8, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
         if (stage == Stage::Capture)
         {
@@ -503,7 +523,7 @@ void GDX12GrassRenderer::Draw(GDX12CommandList* commands, Stage stage, const Mat
             commands->SetGraphicsSRV(3, lighting->Irradiance->GetSRV()->GPUHandle);
             commands->SetGraphicsSRV(4, lighting->Prefiltered->GetSRV()->GPUHandle);
             commands->SetGraphicsSRV(5, lighting->BRDF->GetSRV()->GPUHandle);
-            commands->SetGraphicsSRV(6, constants->LocalLightCache->GetSRV()->GPUHandle);
+            commands->SetGraphicsSRV(6, constants->ShadowLights->GetSRV()->GPUHandle);
             commands->SetGraphicsSRV(7, lighting->LocalShadows->GetSRV()->GPUHandle);
         }
         const D3D12_INDEX_BUFFER_VIEW indexView = { _indices->GetElementAddress(0),

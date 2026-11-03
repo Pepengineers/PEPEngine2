@@ -199,8 +199,18 @@ struct GDX12ParticlesPass::State
         }
         if (mesh)
         {
-            FireflyVertices = std::make_unique<Buffer<GDX12ParticleMeshVertex>>(resources->Device, FireflyParticleVertexCount, EBufferType::Upload, false);
-            FireflyVertices->CopyData(0, GetFireflyParticleMesh().data(), FireflyParticleVertexCount);
+            FireflyVertices = std::make_unique<Buffer<GDX12ParticleMeshVertex>>(resources->Device, FireflyParticleVertexCount, EBufferType::Default, false);
+            Buffer<GDX12ParticleMeshVertex> upload(resources->Device, FireflyParticleVertexCount, EBufferType::Upload, false);
+            upload.CopyData(0, GetFireflyParticleMesh().data(), FireflyParticleVertexCount);
+            auto* queue = resources->Device->GetCommandQueue();
+            auto* commands = queue->GetCommandList();
+            commands->ResourceBarrier({FireflyVertices->GetResource().GetCopyDestBarrier()});
+            commands->GetCommandList()->CopyBufferRegion(FireflyVertices->GetResource().D3DResource.Get(), 0,
+                upload.GetResource().D3DResource.Get(), 0, UINT64(FireflyParticleVertexCount) * sizeof(GDX12ParticleMeshVertex));
+            commands->ResourceBarrier({FireflyVertices->GetResource().GetGenericReadBarrier()});
+            queue->ExecuteCommandList(commands);
+            // Lazy mesh initialization completes its upload before any color or motion draw.
+            queue->Flush();
         }
     }
 

@@ -9,6 +9,7 @@
 #include "Engine.RendererDX12/GDX12Sky.h"
 
 class GDX12Device;
+class GDX12CommandList;
 
 // Used for collecting & using GPU culling results
 // This structured is used by any object that uses culling(cameras, shadowmaps)
@@ -27,6 +28,7 @@ public:
     ~GDX12FrameConstants();
 
     bool IsInUseByGPU(UINT64 currentFence);
+    void UploadReflectionProbeData(GDX12CommandList* commands);
 
     std::unique_ptr<GDX12UploadBuffer<GDX12SkyConstants>> SkyCB;
 
@@ -39,7 +41,7 @@ public:
     std::unique_ptr<GDX12UploadBuffer<GDX12TransformConstants>> TransformCache;
     std::unique_ptr<GDX12UploadBuffer<GDX12MaterialConstants>> MaterialCache;
     std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> InstanceCache;
-    // DEFAULT snapshot shared by shadows and main-camera geometry, uploaded before the render graph.
+    // DEFAULT scene snapshot shared by all geometry and lighting consumers before the render graph.
     std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> ShadowTemplatesUpload, ShadowTemplates;
     std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> ShadowInstances;
     std::unique_ptr<GDX12UploadBuffer<GDX12MaterialConstants>> ShadowMaterials;
@@ -51,7 +53,8 @@ public:
     std::unique_ptr<GDX12UploadBuffer<GDX12CameraConstants>> CameraCB;
     std::vector<GDX12VisibilityBuffers> CameraVisibilityCommands;
 
-    std::unique_ptr<GDX12UploadBuffer<GDX12ReflectionProbeData>> ReflectionProbes;
+    std::unique_ptr<GDX12UploadBuffer<GDX12ReflectionProbeData>> ReflectionProbesUpload, ReflectionProbes;
+    uint64_t ReflectionProbeRevision = 0;
 
     UINT64 FenceValue;
     

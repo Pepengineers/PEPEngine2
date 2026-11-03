@@ -964,6 +964,9 @@ void RenderModule::OnRender()
         _secondaryGPUTimer->Start(secondarycmdList);
 
         auto secondaryCurrentFrameConsts = GetCurrentSecondaryFrameConstants();
+        _secondaryResources.PrepareLocalShadowData();
+        _secondaryResources.UploadLocalShadowData(secondarycmdList);
+        secondaryCurrentFrameConsts->UploadReflectionProbeData(secondarycmdList);
         for (auto& renderPass : _secondaryRenderPasses)
         {
             if (renderPass->GetFlagValue(RENDER_PASS_FLAG_SYNC_DEVICES))

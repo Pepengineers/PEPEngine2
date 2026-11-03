@@ -15,6 +15,9 @@ static void Require(bool value, const char* message)
 {
     if (!value) throw std::runtime_error(message);
 }
+#include "PlacementTiming.h"
+#include "SkinPlacementChecks.h"
+#include "GrassPlacementChecks.h"
 static void Set(const wchar_t* name, const char* value)
 {
     Require(BenchmarkEngine::GetLocator().GetModule<ConsoleModule>()->FindConsoleVariable(name).SetFromString(value), "CVar write failed");
@@ -63,6 +66,8 @@ static std::vector<float> Read(GDX12Device& device, GDX12Texture& texture, UINT 
     readback->Unmap(0, &noWrite);
     return result;
 }
+
+#include "ParticlePlacementChecks.h"
 
 static void TestCPU()
 {
@@ -167,20 +172,31 @@ int main(int argc, char** argv)
     try
     {
         std::cout.setf(std::ios::unitbuf);
+        const std::string_view mode = argc > 1 ? argv[1] : "";
+        const bool benchmark = mode == "--benchmark" || mode == "--benchmark-skin" ||
+            mode == "--benchmark-grass" || mode == "--benchmark-particles";
+        if (!mode.empty() && !benchmark && mode != "--cpu" && mode != "--gpu-validation")
+            throw std::invalid_argument("Unknown SecondGroupTests mode");
         TestEngine engine;
         TestCPU();
         if (argc > 1 && std::string_view(argv[1]) == "--cpu") return 0;
         HANDLE gate = CreateMutexW(nullptr, FALSE, L"Local\\PEPEngine2FeatureGpuValidation");
         Require(gate && WaitForSingleObject(gate, INFINITE) == WAIT_OBJECT_0, "GPU mutex failed");
-        ComPtr<ID3D12Debug> debug; ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))); debug->EnableDebugLayer();
+        ComPtr<ID3D12Debug> debug;
+        if (!benchmark) { ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))); debug->EnableDebugLayer(); }
         if (argc > 1 && std::string_view(argv[1]) == "--gpu-validation")
         {
             ComPtr<ID3D12Debug1> validation; ThrowIfFailed(debug.As(&validation));
             validation->SetEnableGPUBasedValidation(TRUE);
         }
+        LoadPlacementCapturer();
         GDX12Device device; ThrowIfFailed(device.Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
+        if (benchmark)
+            std::cout << "CAPABILITIES UMA=" << device.GetDeviceFeatures().Features.UMA()
+                << " GPUUploadHeapSupported=" << device.GetDeviceFeatures().Features.GPUUploadHeapSupported() << '\n';
         GDX12DeviceResources resources; resources.Initialize(&device);
-        ComPtr<ID3D12InfoQueue> info; ThrowIfFailed(device.GetDevice().As(&info));
+        ComPtr<ID3D12InfoQueue> info;
+        if (!benchmark) ThrowIfFailed(device.GetDevice().As(&info));
         diagnosticInfo = info;
         auto* queue = device.GetCommandQueue();
         RenderPipelineCommonData common;
@@ -203,7 +219,19 @@ int main(int argc, char** argv)
             frame->CameraCB->CopyData(0, camera);
             frame->MaterialCache->Resize(1); frame->MaterialCache->CopyData(0, GDX12MaterialConstants());
         }
+        for (UINT slot = 0; slot < resources.FrameConstants.size(); ++slot)
+        {
+            resources.CurrFrameConstantsIndex = slot;
+            auto* commands = queue->GetCommandList();
+            resources.PrepareLocalShadowData();
+            resources.UploadLocalShadowData(commands);
+            resources.FrameConstants[slot]->UploadReflectionProbeData(commands);
+            queue->ExecuteCommandList(commands);
+        }
+        queue->Flush(); resources.CurrFrameConstantsIndex = 0;
         TestSkinning(device, resources);
+        if (!benchmark) TestSkinPlacement(device, resources);
+        if (benchmark && (mode == "--benchmark" || mode == "--benchmark-skin")) BenchmarkSkinPlacement(device, resources);
         GDX12EnvironmentIBLPass environment; environment.Setup(&resources, nullptr, &common); environment.Initialize();
         const auto execute = [&](GDX12RenderPass& pass) { auto* list = queue->GetCommandList(); pass.Execute(list); queue->ExecuteCommandList(list); queue->Flush(); };
         resources.Sky.Source = SkySource::Off; execute(environment);
@@ -264,6 +292,8 @@ int main(int argc, char** argv)
         const auto blades = Read(device, *depth);
         Require(*std::max_element(blades.begin(), blades.end()) > 0 && resources.Grass->HasCasters(), "Grass indirect draw produced no depth/casters");
         std::cout << "GPU projected-grid wind and compact grass indirect depth passed.\n";
+        if (!benchmark) TestGrassPlacement(device, resources, common, depth, vp, eye);
+        if (benchmark && (mode == "--benchmark" || mode == "--benchmark-grass")) BenchmarkGrassPlacement(device, resources, common, depth, vp, eye);
 
         GDX12FluidSurfacePass water; water.Setup(&resources, nullptr, &common); water.SetInputs({depth, motion}); water.Initialize();
         execute(water); Require(water.GetOutput(0)->GetTexture() == depth, "Empty fluid must preserve depth identity");
@@ -387,8 +417,13 @@ int main(int argc, char** argv)
         Set(L"Render.Fluid.Enabled", "false"); execute(water);
         Require(water.GetOutput(0)->GetTexture() == depth, "Disabled fluid retained merged depth");
         std::cout << "GPU particle spawn/indirect/three blend modes/reset/removal and depth collision off/bounce/stop passed.\n";
+        if (benchmark && (mode == "--benchmark" || mode == "--benchmark-particles"))
+        {
+            Set(L"Render.Particles.Enabled", "true");
+            BenchmarkParticlePlacement(device, resources, common, depth, hdr.get(), accum.get(), reveal.get());
+        }
         ThrowIfFailed(device.GetDevice()->GetDeviceRemovedReason());
-        for (UINT64 i = 0; i < info->GetNumStoredMessages(); ++i)
+        for (UINT64 i = 0; info && i < info->GetNumStoredMessages(); ++i)
         {
             SIZE_T size = 0; info->GetMessage(i, nullptr, &size); std::vector<unsigned char> storage(size);
             auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data()); ThrowIfFailed(info->GetMessage(i, message, &size));
@@ -396,7 +431,8 @@ int main(int argc, char** argv)
         }
         queue->Flush(); resources.Grass.reset(); GDX12ShaderCompiler::Shutdown();
         ReleaseMutex(gate); CloseHandle(gate);
-        std::cout << "Six-component GPU integration passed with no debug-layer errors.\n";
+        std::cout << (benchmark ? "Component placement benchmarks passed without the debug layer.\n" :
+            "Six-component GPU integration passed with no debug-layer errors.\n");
         return 0;
     }
     catch (const DxException& e) { std::wcerr << e.ToString() << '\n'; }

@@ -202,6 +202,9 @@ static void CheckClusteredLighting(GDX12DeviceResources& resources, RenderPipeli
         {
             clustered.Prepare();
             auto* list = queue->GetCommandList();
+            resources.PrepareLocalShadowData();
+            resources.UploadLocalShadowData(list);
+            frame->UploadReflectionProbeData(list);
             graph.Execute(list);
             if (variant) list->SetPipelineState(variant);
             timer.Start(list);

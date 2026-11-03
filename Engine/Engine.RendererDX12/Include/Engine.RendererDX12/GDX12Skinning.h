@@ -9,13 +9,14 @@ struct GDX12SkinPalette
     DirectX::SimpleMath::Matrix Previous;
 };
 
-// One attachment owns its source buffers and one palette upload per queued frame slot.
+// One attachment owns immutable DEFAULT inputs and a palette snapshot/upload per queued frame slot.
 struct GDX12SkinMesh
 {
     std::unique_ptr<GDX12UploadBuffer<Vertex>> Vertices;
     std::unique_ptr<GDX12UploadBuffer<SkinVertexRange>> Ranges;
     std::unique_ptr<GDX12UploadBuffer<SkinInfluence>> Influences;
     std::vector<std::unique_ptr<GDX12UploadBuffer<GDX12SkinPalette>>> Palettes;
+    std::vector<std::unique_ptr<GDX12UploadBuffer<GDX12SkinPalette>>> PaletteUploads;
     UINT OutputVertex = 0;
     UINT VertexCount = 0;
 };

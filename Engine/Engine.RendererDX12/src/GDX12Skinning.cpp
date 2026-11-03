@@ -1,5 +1,6 @@
 #include "Engine.RendererDX12/GDX12Skinning.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
+#include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include <cstddef>
 #include <cmath>
@@ -75,28 +76,55 @@ std::unique_ptr<GDX12SkinMesh> GDX12Skinning::CreateMesh(const SubMesh& source, 
     }
     auto result = std::make_unique<GDX12SkinMesh>();
     result->VertexCount = static_cast<UINT>(source.Vertices.size());
-    result->Vertices = std::make_unique<GDX12UploadBuffer<Vertex>>(_device, result->VertexCount, EBufferType::Upload, false);
-    result->Vertices->CopyData(0, source.Vertices.data(), result->VertexCount);
-    result->Ranges = std::make_unique<GDX12UploadBuffer<SkinVertexRange>>(_device, result->VertexCount, EBufferType::Upload, false);
-    result->Ranges->CopyData(0, ranges.data(), result->VertexCount);
+    result->Vertices = std::make_unique<GDX12UploadBuffer<Vertex>>(_device, result->VertexCount, EBufferType::Default, false);
+    result->Ranges = std::make_unique<GDX12UploadBuffer<SkinVertexRange>>(_device, result->VertexCount, EBufferType::Default, false);
     result->Influences = std::make_unique<GDX12UploadBuffer<SkinInfluence>>(_device,
-        (std::max)(1u, static_cast<UINT>(source.Influences.size())), EBufferType::Upload, false);
+        (std::max)(1u, static_cast<UINT>(source.Influences.size())), EBufferType::Default, false);
+    GDX12UploadBuffer<Vertex> verticesUpload(_device, result->VertexCount, EBufferType::Upload, false);
+    GDX12UploadBuffer<SkinVertexRange> rangesUpload(_device, result->VertexCount, EBufferType::Upload, false);
+    GDX12UploadBuffer<SkinInfluence> influencesUpload(_device, result->Influences->GetElementCount(), EBufferType::Upload, false);
+    verticesUpload.CopyData(0, source.Vertices.data(), result->VertexCount);
+    rangesUpload.CopyData(0, ranges.data(), result->VertexCount);
     if (!source.Influences.empty())
-        result->Influences->CopyData(0, source.Influences.data(), static_cast<UINT>(source.Influences.size()));
+        influencesUpload.CopyData(0, source.Influences.data(), static_cast<UINT>(source.Influences.size()));
     for (UINT i = 0; i < frameCount; ++i)
+    {
         result->Palettes.push_back(std::make_unique<GDX12UploadBuffer<GDX12SkinPalette>>(
+            _device, static_cast<UINT>(source.Bones.size()) + 1, EBufferType::Default, false));
+        result->PaletteUploads.push_back(std::make_unique<GDX12UploadBuffer<GDX12SkinPalette>>(
             _device, static_cast<UINT>(source.Bones.size()) + 1, EBufferType::Upload, false));
+    }
+    auto* queue = _device->GetCommandQueue();
+    auto* commands = queue->GetCommandList();
+    const auto upload = [commands](auto& target, auto& staging)
+    {
+        commands->ResourceBarrier({target->GetResource().GetCopyDestBarrier()});
+        commands->GetCommandList()->CopyBufferRegion(target->GetResource().D3DResource.Get(), 0,
+            staging.GetResource().D3DResource.Get(), 0, UINT64(staging.GetElementCount()) * staging.GetElementSize());
+        commands->ResourceBarrier({target->GetResource().GetNonPixelShaderResourceBarrier()});
+    };
+    upload(result->Vertices, verticesUpload);
+    upload(result->Ranges, rangesUpload);
+    upload(result->Influences, influencesUpload);
+    queue->ExecuteCommandList(commands);
+    // Mesh creation precedes frame recording; keep static staging alive through its upload fence.
+    queue->Flush();
     return result;
 }
 
 void GDX12Skinning::Dispatch(GDX12CommandList* commands, GDX12GeometryBuffer& geometry,
     GDX12SkinMesh& mesh, UINT frameSlot, const std::vector<GDX12SkinPalette>& palette)
 {
-    auto& upload = mesh.Palettes.at(frameSlot);
+    auto& upload = mesh.PaletteUploads.at(frameSlot);
+    auto& snapshot = mesh.Palettes.at(frameSlot);
     if (palette.size() != upload->GetElementCount())
         throw std::invalid_argument("Skin palette size changed");
     upload->CopyData(0, palette.data(), static_cast<UINT>(palette.size()));
     auto* list = commands->GetCommandList().Get();
+    commands->ResourceBarrier({snapshot->GetResource().GetCopyDestBarrier()});
+    list->CopyBufferRegion(snapshot->GetResource().D3DResource.Get(), 0,
+        upload->GetResource().D3DResource.Get(), 0, UINT64(palette.size()) * sizeof(GDX12SkinPalette));
+    commands->ResourceBarrier({snapshot->GetResource().GetNonPixelShaderResourceBarrier()});
     auto* output = geometry.BeginSkinning(commands);
     list->SetComputeRootSignature(_rootSignature.Get());
     list->SetPipelineState(_pipeline.Get());
@@ -105,7 +133,7 @@ void GDX12Skinning::Dispatch(GDX12CommandList* commands, GDX12GeometryBuffer& ge
     list->SetComputeRootShaderResourceView(1, mesh.Vertices->GetElementAddress(0));
     list->SetComputeRootShaderResourceView(2, mesh.Ranges->GetElementAddress(0));
     list->SetComputeRootShaderResourceView(3, mesh.Influences->GetElementAddress(0));
-    list->SetComputeRootShaderResourceView(4, upload->GetElementAddress(0));
+    list->SetComputeRootShaderResourceView(4, snapshot->GetElementAddress(0));
     list->SetComputeRootUnorderedAccessView(5, output->GetGPUVirtualAddress());
     const UINT groups = (mesh.VertexCount + 63) / 64;
     list->Dispatch((std::min)(groups, 65535u), (groups + 65534) / 65535, 1);

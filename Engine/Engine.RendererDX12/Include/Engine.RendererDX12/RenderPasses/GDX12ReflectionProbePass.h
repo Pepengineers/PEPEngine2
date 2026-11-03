@@ -62,7 +62,7 @@ private:
     void RenderShadow(GDX12CommandList* commands, Geometry geometry);
     void RenderFace(GDX12CommandList* commands, UINT probe, UINT face, Geometry geometry, bool bake);
     void FilterAndPublish(GDX12CommandList* commands, UINT probe);
-    void WriteProbeData(bool enabled);
+    void WriteProbeData(GDX12CommandList* commands, bool enabled);
 
     std::vector<ProbeState> _probes;
     std::vector<FrameData> _frames;
