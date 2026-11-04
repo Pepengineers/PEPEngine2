@@ -4,9 +4,47 @@
 #include "Engine.RendererDX12/GDX12Device.h"
 
 #include <filesystem>
+#include <map>
 
 #include <dxc/dxcapi.h>
 #include <dxc/d3d12shader.h>
+
+namespace
+{
+    class ShaderIncludes final : public ID3DInclude
+    {
+    public:
+        explicit ShaderIncludes(const std::filesystem::path& source) : _sourceDirectory(source.parent_path()) {}
+
+        HRESULT __stdcall Open(D3D_INCLUDE_TYPE, LPCSTR name, LPCVOID parent, LPCVOID* data, UINT* size) override
+        {
+            try
+            {
+                const auto owner = _files.find(parent);
+                const auto directory = owner == _files.end() ? _sourceDirectory : owner->second.Path.parent_path();
+                auto path = directory / name;
+                if (!std::filesystem::is_regular_file(path)) path = std::filesystem::path(SHADERS_FOLDER) / name;
+                std::ifstream input(path, std::ios::binary);
+                if (!input) return E_FAIL;
+                File file{ path, std::vector<char>(std::istreambuf_iterator<char>(input), {}) };
+                if (input.bad() || file.Bytes.size() > UINT_MAX) return E_FAIL;
+                const auto byteCount = static_cast<UINT>(file.Bytes.size());
+                file.Bytes.push_back('\0');
+                const auto contents = file.Bytes.data();
+                const auto inserted = _files.emplace(contents, std::move(file));
+                *data = inserted.first->second.Bytes.data();
+                *size = byteCount;
+                return S_OK;
+            }
+            catch (...) { return E_FAIL; }
+        }
+        HRESULT __stdcall Close(LPCVOID data) override { _files.erase(data); return S_OK; }
+    private:
+        struct File { std::filesystem::path Path; std::vector<char> Bytes; };
+        std::filesystem::path _sourceDirectory;
+        std::map<LPCVOID, File> _files;
+    };
+}
 
 GDX12ShaderCompiler* GDX12ShaderCompiler::_instance = nullptr;
 
@@ -106,6 +144,10 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
     arguments.push_back(L"-T");
     std::wstring targetW(shaderType.begin(), shaderType.end());
     arguments.push_back(targetW.c_str());
+
+    const auto sourceDirectory = std::filesystem::path(filename).parent_path().wstring();
+    arguments.push_back(L"-I");
+    arguments.push_back(sourceDirectory.c_str());
 
     arguments.push_back(L"-I");
     arguments.push_back(SHADERS_FOLDER);
@@ -214,7 +256,8 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderFXC(const std::wstring& filen
     std::wstring prettyPathToShader = std::filesystem::weakly_canonical(filename).wstring();
     ComPtr<ID3DBlob> byteCode = nullptr;
     ComPtr<ID3DBlob> errors;
-    hr = D3DCompileFromFile(prettyPathToShader.c_str(), defines, D3D_COMPILE_STANDARD_FILE_INCLUDE, entrypoint.c_str(), shaderType.c_str(), compileFlags, 0, &byteCode, &errors);
+    ShaderIncludes includes(prettyPathToShader);
+    hr = D3DCompileFromFile(prettyPathToShader.c_str(), defines, &includes, entrypoint.c_str(), shaderType.c_str(), compileFlags, 0, &byteCode, &errors);
 
     std::wstring compilerLog;
     if (errors) 
