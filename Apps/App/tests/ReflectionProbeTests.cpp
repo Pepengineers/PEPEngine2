@@ -317,7 +317,6 @@ int main(int argc, char** argv)
         ComPtr<ID3D12InfoQueue> info;
         if (!benchmark) ThrowIfFailed(device.GetDevice().As(&info));
         if (info) info->ClearStoredMessages();
-        TestReflectionPreview(device);
         auto* queue = device.GetCommandQueue();
         TestScopedEvents(*queue);
         RenderPipelineCommonData common;
@@ -806,12 +805,9 @@ int main(int argc, char** argv)
             environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0), ao.GetOutput(0) };
         deferred.SetInputs(lightingInputs);
         deferred.Initialize();
-        GDX12Texture previewColor;
-        GDX12RenderHelpers::InitializeRenderTarget(previewColor, resources, common.DownscaledWidth,
-            common.DownscaledHeight, DXGI_FORMAT_R16G16B16A16_FLOAT);
         GDX12ReflectionPreviewPass preview;
         preview.Setup(&resources, nullptr, &common);
-        preview.SetInputs({ &previewColor, opaque.GetOutput(2) });
+        preview.SetInputs({deferred.GetOutput(0), opaque.GetOutput(2), opaque.GetOutput(1), opaque.GetOutput(3), opaque.GetOutput(4)});
         preview.Initialize();
         GDX12RenderGraph lightingGraph(&device);
         lightingGraph.ImportShared(GDX12RenderGraph::SharedResource::Scene, "Scene");
@@ -872,7 +868,7 @@ int main(int argc, char** argv)
         material[0].Metallic = 1;
         material[0].Roughness = 0.1f;
         material[0].EmissiveColor = {};
-        const auto surface = [&](bool enabled, bool showPreview = false)
+        const auto surface = [&](bool enabled, D3D12_GPU_DESCRIPTOR_HANDLE testRadiance = {}, bool published = true)
         {
             Set(L"Render.Reflection.Enabled", enabled ? "true" : "false");
             render();
@@ -896,32 +892,42 @@ int main(int argc, char** argv)
             common.ActiveCameraFarPlane = camera.FarPlane;
             frame->CameraCB->CopyData(0, camera);
             auto* list = queue->GetCommandList();
+            const auto originalRadiance = resources.ReflectionRadianceSRV.GPUHandle;
+            if (testRadiance.ptr)
+            {
+                resources.ReflectionRadianceSRV.GPUHandle = testRadiance;
+                GDX12ReflectionProbeData data;
+                data.Intensity = published ? 1.0f : 0.0f;
+                data.MinMip = data.MaxMip = 1;
+                for (UINT i = 0; i < 2; ++i) frame->ReflectionProbesUpload->CopyData(i, data);
+                frame->UploadReflectionProbeData(list);
+            }
+            resources.ReflectionPreviewDraws.clear();
+            for (UINT i = 0; i < 3; ++i)
+                if (material[i].ReflectionProbePreview)
+                {
+                    GDX12IndirectDrawArgs draw = {};
+                    draw.InstanceID = draw.StartInstanceLocation = i;
+                    draw.InstanceCount = 1;
+                    draw.IndexCountPerInstance = part.IndexCount;
+                    draw.StartIndexLocation = part.StartIndexLocation;
+                    draw.BaseVertexLocation = part.StartVertexLocation;
+                    resources.ReflectionPreviewDraws.push_back(draw);
+                }
             mainShadows.Execute(list);
             mainCulling.Execute(list);
             opaque.Execute(list);
             ao.Execute(list);
             deferred.Prepare();
             lightingGraph.Execute(list);
-            resources.ReflectionProbes[0].PreviewSphere = showPreview;
-            if (showPreview)
-            {
-                GDX12ReflectionProbeData sphere;
-                sphere.Position = {0,0,0};
-                sphere.BoxMin = {-20,-20,-20};
-                sphere.BoxMax = {20,20,20};
-                sphere.Intensity = 1;
-                frame->ReflectionProbesUpload->CopyData(0, sphere);
-                frame->UploadReflectionProbeData(list);
-                list->ResourceBarrier({ previewColor.GetResource()->GetRenderTargetBarrier() });
-                list->ClearRenderTargetView(&previewColor);
-                preview.Execute(list);
-            }
+            preview.Execute(list);
             transparency.Execute(list);
             composition.Execute(list);
             xess.Execute(list);
             outputGraph.Execute(list);
             queue->ExecuteCommandList(list);
             queue->Flush();
+            resources.ReflectionRadianceSRV.GPUHandle = originalRadiance;
             Require(!common.ResetHistory, "XeSS did not consume the requested temporal reset");
         };
         surface(false);
@@ -987,15 +993,29 @@ int main(int argc, char** argv)
         const std::array savedLocations = {locations[0], locations[1], locations[2]};
         const auto savedScale = scales[0];
         const auto savedMaterial = material[0];
-        locations[1].x = locations[2].x = 20000;
+        const auto savedPreviewMaterial = material[2];
+        const auto savedPreviewScale = scales[2];
+        locations[1].x = 20000;
+        locations[2] = Vector3::Zero;
+        scales[2] = Vector3(16);
+        material[2].RenderLayer = 0;
         scales[0] = Vector3(120);
         material[0].EmissiveColor = {6,6,6};
+        TestReflectionPreview(device, resources, deferred.GetOutput(0)->GetTexture()->GetWidth(),
+            deferred.GetOutput(0)->GetTexture()->GetHeight(), [&](UINT slot, D3D12_GPU_DESCRIPTOR_HANDLE map, bool ready)
+        {
+            material[2].ReflectionProbePreview = slot;
+            surface(true, map, ready);
+            return ReadTexture(device, *deferred.GetOutput(0)->GetTexture(), 0);
+        });
         const size_t centerPixel = (size_t(common.DownscaledHeight / 2) * common.DownscaledWidth + common.DownscaledWidth / 2) * 3;
         const auto glass = [&](float z, bool sphere)
         {
             locations[0] = Vector3(0,0,z);
+            material[2].ReflectionProbePreview = sphere ? 1u : 0u;
+            locations[2].x = sphere ? 0.0f : 20000.0f;
             ++resources.ReflectionStaticRevision;
-            surface(true, sphere);
+            surface(true);
             return ReadTexture(device, *transparency.GetOutput(0)->GetTexture(), 0);
         };
         const auto unoccludedGlass = glass(100, false);
@@ -1015,7 +1035,8 @@ int main(int argc, char** argv)
         for (UINT i = 0; i < 3; ++i) locations[i] = savedLocations[i];
         scales[0] = savedScale;
         material[0] = savedMaterial;
-        resources.ReflectionProbes[0].PreviewSphere = false;
+        material[2] = savedPreviewMaterial;
+        scales[2] = savedPreviewScale;
         ++resources.ReflectionStaticRevision;
         std::cout << "Probe sphere depth: actual WBOIT glass behind is hidden, front/outside glass remains visible.\n";
         material[0].RenderLayer = 0;

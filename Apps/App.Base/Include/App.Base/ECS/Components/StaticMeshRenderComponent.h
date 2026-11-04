@@ -17,6 +17,7 @@ struct StaticMeshRenderComponent : ComponentTag
     DirectX::BoundingBox Bounds;
 
     bool DirtyFlag;
+    bool Visible = true;
     bool ReflectionDynamic = false;
     bool _reflectionDynamic = false;
 

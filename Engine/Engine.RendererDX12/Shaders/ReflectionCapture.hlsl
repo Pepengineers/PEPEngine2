@@ -24,7 +24,8 @@ void CullCS(uint3 id : SV_DispatchThreadID)
     if (command.InstanceCount == 0) return;
     InstanceData instance = Instances[command.InstanceID];
     // shortcut: transparent surfaces are excluded, add transparency capture when glass must appear inside probes.
-    if (Materials[instance.MaterialIndex].RenderLayer == 2) return;
+    Material material = Materials[instance.MaterialIndex];
+    if (material.RenderLayer == 2 || material.ReflectionProbePreview != 0) return;
     if (Geometry == 1 && instance.ReflectionDynamic != 0) return;
     if (Geometry == 2 && instance.ReflectionDynamic == 0) return;
     float4x4 matrix = Shadow != 0 ? CBShadow.ViewProj[0] : CBCamera.ViewProj;

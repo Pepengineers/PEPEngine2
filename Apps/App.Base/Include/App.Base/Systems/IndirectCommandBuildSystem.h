@@ -36,7 +36,7 @@ private:
             GDX12IndirectDrawArgs draw = {};
             draw.InstanceID = draw.StartInstanceLocation = renderer._CBufferIndices.at(i);
             draw.IndexCountPerInstance = part.IndexCount;
-            draw.InstanceCount = 1;
+            draw.InstanceCount = renderer.Visible ? 1 : 0;
             draw.StartIndexLocation = part.StartIndexLocation;
             draw.BaseVertexLocation = part.StartVertexLocation;
             buffer->CopyData(draw.InstanceID, draw);

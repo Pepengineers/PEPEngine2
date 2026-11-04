@@ -40,7 +40,8 @@ void CS(uint3 id : SV_DispatchThreadID)
     if (id.x >= count) return;
     IndirectDrawArgs command = InputCommands[id.x];
     InstanceData instance = InstanceCache[command.InstanceID];
-    if (MaterialCache[instance.MaterialIndex].RenderLayer == 2) return;
+    Material material = MaterialCache[instance.MaterialIndex];
+    if (material.RenderLayer == 2 || material.ReflectionProbePreview != 0) return;
     for (uint cascade = 0; cascade < 4; ++cascade)
     {
         if (!Visible(instance, CBShadow.ViewProj[cascade])) continue;

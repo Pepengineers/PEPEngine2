@@ -5,7 +5,6 @@
 struct ReflectionProbeComponent : ComponentTag, GDX12ReflectionCaptureSettings
 {
     bool Enabled = true;
-    bool PreviewSphere = false;
     Vector3 Extents = Vector3(500.0f);
     Vector3 CaptureOffset = Vector3::Zero;
     float BlendDistance = 100.0f;

@@ -50,6 +50,7 @@ public:
     std::vector<GDX12ParticleEmitter> ParticleEmitters;
     GDX12Texture* ParticleMotion = nullptr; // Borrowed for this frame only, owned by the particles pass.
     std::vector<GDX12ReflectionProbe> ReflectionProbes;
+    std::vector<GDX12IndirectDrawArgs> ReflectionPreviewDraws;
     std::vector<GDX12FluidInstance> Fluids;
     GDX12Descriptor ReflectionRadianceSRV;
     uint64_t ReflectionWorldRevision = 0;

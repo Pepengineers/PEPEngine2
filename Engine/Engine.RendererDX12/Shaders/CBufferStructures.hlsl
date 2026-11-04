@@ -37,7 +37,7 @@ struct Material
     uint RoughnessIndex;
     uint EmissiveIndex;
     uint Flags; // normal=1, specular=2, roughness=4, emissive=8, baked=16
-    uint _pad0;
+    uint ReflectionProbePreview; // 0: ordinary material; otherwise one-based published cubemap slot.
     float3 SpecularColor;
     float _pad1;
     float3 EmissiveColor;

@@ -1,8 +1,7 @@
 #include "CBufferStructures.hlsl"
-
-cbuffer PreviewConstants : register(b0) { uint PreviewMask; };
-ConstantBuffer<CameraCB> CBCamera : register(b1);
-TextureCubeArray<float4> ProbeRadiance : register(t0);
+ConstantBuffer<CameraCB> CBCamera : register(b2);
+StructuredBuffer<Material> Materials : register(t0);
+TextureCubeArray<float4> ProbeRadiance : register(t3);
 struct ProbeData
 {
     float3 Position; float Intensity;
@@ -10,50 +9,41 @@ struct ProbeData
     float3 BoxMax; float MaxMip;
     float MinMip;
 };
-StructuredBuffer<ProbeData> Probes : register(t1);
+StructuredBuffer<ProbeData> Probes : register(t4);
 SamplerState LinearClamp : register(s3);
 
-struct PSInput { float4 Position : SV_POSITION; float2 TexCoord : TEXCOORD; };
-struct PSOutput { float4 Color : SV_TARGET; float Depth : SV_DEPTH; };
-
+struct PSInput
+{
+    float4 Position : SV_POSITION;
+    float4 Previous : TEXCOORD2;
+    float3 WorldPosition : POSITION;
+    float4 Current : POSITION2;
+    float2 TexCoord : TEXCOORD;
+    float3 Normal : NORMAL;
+    float3 Tangent : TANGENT;
+    uint MaterialIndex : TEXCOORD1;
+};
+struct PSOutput
+{
+    float4 Color : SV_TARGET0;
+    float2 Motion : SV_TARGET1;
+    float4 Normal : SV_TARGET2;
+    float4 F0Baked : SV_TARGET3;
+};
 PSOutput PS(PSInput input)
 {
-    float2 ndc = input.TexCoord * float2(2, -2) + float2(-1, 1);
-    float4 nearWorld = mul(float4(ndc, 1, 1), CBCamera.InvViewProj);
-    float3 ray = normalize(nearWorld.xyz / nearWorld.w - CBCamera.CameraLocation);
-    float closest = 3.402823466e+38f;
-    uint selected = 32;
-    uint remaining = PreviewMask;
-    while (remaining)
-    {
-        uint index = firstbitlow(remaining);
-        remaining &= remaining - 1;
-        ProbeData probe = Probes[index];
-        if (probe.Intensity <= 0) continue; // No complete published capture yet.
-        float3 extent = (probe.BoxMax - probe.BoxMin) * 0.5f;
-        float radius = 0.8f * min(extent.x, min(extent.y, extent.z));
-        float3 offset = CBCamera.CameraLocation - probe.Position;
-        float b = dot(offset, ray);
-        float discriminant = b * b - dot(offset, offset) + radius * radius;
-        if (discriminant < 0) continue;
-        float root = sqrt(discriminant);
-        float distance = -b - root;
-        if (distance <= 0) distance = -b + root;
-        if (distance <= 0 || distance >= closest) continue;
-        float4 clip = mul(float4(CBCamera.CameraLocation + ray * distance, 1), CBCamera.ViewProj);
-        if (clip.w <= 0 || clip.z < 0 || clip.z > clip.w) continue;
-        closest = distance;
-        selected = index;
-    }
-    if (selected == 32) discard;
-    ProbeData probe = Probes[selected];
-    float3 normal = normalize(CBCamera.CameraLocation + ray * closest - probe.Position);
-    float3 reflection = reflect(ray, normal);
-    // The exact published slice and its first populated mip show this probe's capture.
+    uint index = Materials[input.MaterialIndex].ReflectionProbePreview - 1;
+    uint count, stride;
+    Probes.GetDimensions(count, stride);
+    float3 n = normalize(input.Normal);
+    float3 view = normalize(CBCamera.CameraLocation - input.WorldPosition);
+    float3 radiance = 0;
+    if (index < count && Probes[index].Intensity > 0)
+        radiance = ProbeRadiance.SampleLevel(LinearClamp, float4(reflect(-view, n), index), Probes[index].MinMip).rgb;
     PSOutput output;
-    output.Color = float4(ProbeRadiance.SampleLevel(LinearClamp, float4(reflection, selected), probe.MinMip).rgb, 1);
-    float4 clip = mul(float4(CBCamera.CameraLocation + ray * closest, 1), CBCamera.ViewProj);
-    output.Depth = clip.z / clip.w;
-    // shortcut: preview spheres reuse scene motion; write sphere motion if temporal artifacts require it.
+    output.Color = float4(radiance, 1);
+    output.Motion = input.Previous.w > 0.00001f ? input.Previous.xy / input.Previous.w - input.Current.xy / input.Current.w : 0;
+    output.Normal = float4(n, 1);
+    output.F0Baked = float4(0, 0, 0, 1); // Preserve the unlit result through the subsequent SSR resolve.
     return output;
 }

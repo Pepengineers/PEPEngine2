@@ -27,7 +27,8 @@ void CS(uint3 id : SV_DispatchThreadID)
 #else
     if (instance.ReflectionDynamic == 0) return;
 #endif
-    if (Materials[instance.MaterialIndex].RenderLayer == 2) return;
+    Material material = Materials[instance.MaterialIndex];
+    if (material.RenderLayer == 2 || material.ReflectionProbePreview != 0) return;
     if (!ShadowBoxVisible(instance.BoundingBoxCenter, instance.BoundingBoxExtents, Lights[LightIndex].ShadowViewProj[FaceIndex])) return;
     uint index;
     InterlockedAdd(Counter[0], 1, index);

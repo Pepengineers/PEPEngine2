@@ -14,14 +14,16 @@ tabletop by 5 cm. `App.ReflectionProbes.ShowBounds` draws clipped colored boxes
 and labels; `App.ReflectionProbes.ShowSpheres` draws mirror spheres of radius
 0.8 times the box half-size. Spheres default to on; boxes/labels default to off.
 The switches are independent.
-The HDR preview pass runs after SSSR and samples the exact published cube-array
-slice at its first populated mip. It respects opaque depth and skips unpublished
-probes. The preview flag is outside capture settings, so toggling it does not
-invalidate the bake. Preview spheres never enter captures or shadow rendering.
-Spheres write the existing reverse-Z depth buffer before fluid surface and
-transparency rendering, so glass/particles behind them are occluded and glass in
-front is retained. The render graph declares both HDR and depth as read/write.
-Sphere motion vectors still come from the underlying scene.
+The preview is a forward unlit mesh pass immediately after deferred lighting,
+before SSR and transparency. Each probe entity owns a regular static sphere mesh
+and a material selecting its published cubemap slice and first populated mip.
+All spheres share one DirectXTK sphere mesh with the engine's CCW winding. The
+pass reuses the opaque mesh vertex shader and writes HDR, reverse-Z depth, motion,
+normals and the existing baked-material marker to preserve unlit color through SSR.
+There is no analytic sphere intersection or fullscreen triangle. An unpublished
+map produces an opaque black placeholder. Preview materials are excluded from
+ordinary opaque culling, captures and all shadow culling, and from the CPU capture
+revision. Visibility toggles preserve the existing mesh instances.
 
 Grass now exposes bounds, density/budget, blade geometry, shadow and wind solver
 settings through application CVars. See [grass controls](../rendering/bistro-grass-controls.md).
@@ -41,7 +43,7 @@ Follow-up Release/x64 builds use `/Z7 /GL-` and
 stale LTCG objects with this local compiler installation. RendererDX12 and
 App.Base were rebuilt together for the CPU probe/emitter layout changes.
 `ReflectionProbeTests` passed with GPU-based validation, including independent
-exact-slice/mip, silhouette, opaque occlusion, off and unpublished sphere checks.
+exact-slice/mip, unlit radiance and unpublished-material checks.
 The existing static publication, rebake, runtime mode changes and HDR/XeSS checks
 also passed. Logs for this follow-up are under `Build/BistroControls`.
 `SecondGroupTests --gpu-validation` passed the skinning, wind/grass, fluid and
@@ -51,7 +53,7 @@ independent 0.5/1 cm integrator oracles, rotated-domain reflection and pause.
 populations, imported soldier surfaces, animation/pause, new grass/particle
 controls and clipped box overlay. Sphere previews changed 22147 HDR pixels by
 more than 1%; switching them off restored scene RGB within 0.000838 relative
-FP16 drift. Final pixel contributions were grass 57090, water 15788, human 48446
+FP16 drift in the original controls run. Its pixel contributions were grass 57090, water 15788, human 48446
 and fox 31266, with no debug-layer errors. The terrace spheres and both sides of
 the animated human were visually inspected from the HDR readbacks under
 `Build/BistroAdditions`.
@@ -60,24 +62,19 @@ budget compatibility, focus/minimize/resize, enum discovery, F1 and input captur
 The final App/Additions builds and scene run include the NPC heading correction;
 its imported-skin-palette regression failed before that correction and passed after it.
 
-The depth correction replaces the color-only compute preview with a raster pass
-that writes HDR and `SV_Depth` into the existing main depth buffer. Only the SSR
-HDR texture additionally gets an RTV; there is no separate depth-composition
-buffer. The regression first failed because sphere surface depth was still the
-background value. It now checks the independent reverse-Z sphere depth and
-unchanged color/depth outside the silhouette, for disabled/unpublished spheres
-and behind opaque geometry. The actual WBOIT regression retains front glass and
-290 of 306 background-glass pixels outside the sphere while rejecting glass at
-its center. `ReflectionProbeTests --debug` and the full Bistro additions run
-passed without debug-layer errors. The latter also checks boxes default off and
-runtime toggling, and exercised both SSR warmup and native rendering. The updated
-terrace readback is `Build/BistroAdditions/probe-spheres-depth.png`; logs are
-`Build/BistroControls/preview-depth-debug-run.log` and
-`Build/BistroControls/additions-preview-depth-run.log`.
-The full `ReflectionProbeTests` run with GPU-based validation also passed,
-including real WBOIT occlusion, HDR/XeSS, odd resize and queued publication;
-see `Build/BistroControls/preview-depth-gbv-final-run.log`. Release/x64 builds
-of RendererDX12, App.Base, App, ReflectionProbeTests and BistroAdditionsTests passed.
+The forward mesh implementation passed `ReflectionProbeTests --debug` and full
+GPU-based validation, including exact cubemap slice/mip, unlit radiance, opaque
+unpublished material, actual WBOIT front/behind/outside occlusion, HDR/XeSS, odd
+resize and queued publication. The full Bistro run passed counts 0/2/4/8, actual
+mesh-component ownership, visibility toggling, original effects and animation,
+with no debug-layer errors. Mesh previews changed 22187 HDR pixels; off restored
+RGB within 0.001706 relative FP16 drift. The verified image is
+`Build/BistroAdditions/probe-spheres-forward.png`. Release/x64 RendererDX12,
+App.Base, App, ReflectionProbeTests and BistroAdditionsTests builds passed.
+Logs: `Build/BistroControls/forward-preview-debug-run.log`,
+`forward-preview-gbv-run.log` and `forward-preview-bistro-run.log`.
+The rebuilt `BistroStartupTests` also passed its 90-frame scene/effects/UI checks
+and focus/minimize/resize regression (`Build/BistroControls/forward-startup-run.log`).
 
 ## Original integration
 

@@ -44,7 +44,7 @@ struct GDX12MaterialConstants
     UINT RoughnessIndex = 0;
     UINT EmissiveIndex = 0;
     UINT Flags = 0;
-    UINT _pad0 = 0;
+    UINT ReflectionProbePreview = 0;
     XMFLOAT3 SpecularColor = { 0.04f, 0.04f, 0.04f };
     float _pad1 = 0.0f;
     XMFLOAT3 EmissiveColor = { 0.0f, 0.0f, 0.0f };

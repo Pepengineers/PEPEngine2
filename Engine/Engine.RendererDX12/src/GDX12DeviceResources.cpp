@@ -158,6 +158,7 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
             materialConstants.Metallic = material->Metallic;
             materialConstants.Opacity = material->Opacity;
             materialConstants.RenderLayer = UINT(material->Type);
+            materialConstants.ReflectionProbePreview = material->ReflectionProbePreview;
             materialConstants.SpecularColor = material->SpecularColor;
             materialConstants.EmissiveColor = material->EmissiveColor;
             materialConstants.Flags = (material->HasNormalMap ? 1u : 0u) |

@@ -4,6 +4,10 @@
 #include "Common/ConsoleVariables.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "Engine.UI/UI_test.h"
+#include "Engine.Core/AssetManager.h"
+#include "App.Base/Systems/IndirectCommandBuildSystem.h"
+#include <directxtk/GeometricPrimitive.h>
+#include <algorithm>
 #include <array>
 #include <vector>
 
@@ -39,6 +43,9 @@ namespace BistroReflections
         {
             auto& ecs = world.GetECS();
             const size_t requested = static_cast<size_t>(Count.GetValue());
+            const bool visible = ShowSpheres.GetValue();
+            if (_entities.size() == requested && _visible == visible) return;
+            if (requested && !_mesh.IsValid()) CreateMesh();
             while (_entities.size() > requested)
             {
                 ecs.DestroyEntity(_entities.back());
@@ -64,8 +71,32 @@ namespace BistroReflections
                 probe.FarPlane = 15000;
                 _entities.push_back(entity.GetId());
             }
-            for (const auto entity : _entities)
-                ecs.Get<ReflectionProbeComponent>(entity).PreviewSphere = ShowSpheres.GetValue();
+            auto order = _entities;
+            std::sort(order.begin(), order.end()); // Same entity order as the published cubemap array.
+            auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+            for (size_t index = 0; index < _entities.size(); ++index)
+            {
+                const auto entity = _entities[index];
+                const auto name = "BistroProbePreview" + std::to_string(index);
+                auto* material = render.GetMaterialByName(name);
+                if (!material) material = render.CreateMaterial(name);
+                const UINT slot = static_cast<UINT>(std::lower_bound(order.begin(), order.end(), entity) - order.begin()) + 1;
+                if (material->ReflectionProbePreview != slot)
+                {
+                    material->ReflectionProbePreview = slot;
+                    material->DirtyFlag = true;
+                }
+                if (!ecs.Has<StaticMeshRenderComponent>(entity))
+                {
+                    auto& transform = ecs.Get<TransformComponent>(entity);
+                    transform.Scale = Vector3(0.8f * ecs.Get<ReflectionProbeComponent>(entity).Extents.x);
+                    transform.DirtyFlag = true;
+                    ecs.GetEntityHandle(entity).AddComponent<StaticMeshRenderComponent>(_mesh, std::vector<GDX12Material*>{material});
+                }
+                ecs.Get<StaticMeshRenderComponent>(entity).Visible = visible;
+            }
+            _visible = visible;
+            IndirectCommandBuildSystem{}.Tick(world, 0);
         }
 
         void DrawBounds(World& world, RenderModule& render) const
@@ -87,6 +118,40 @@ namespace BistroReflections
         }
 
     private:
+        void CreateMesh()
+        {
+            auto& meshes = Engine::Core::AssetManager::GetInstance().Meshes();
+            _mesh = meshes.Register(Engine::Core::MeshAssetLocator{
+                std::filesystem::path(ASSETS_FOLDER) / "Models/ProbePreviewSphere.generated"});
+            auto* mesh = meshes.GetMesh(_mesh);
+            if (!mesh)
+            {
+                DirectX::GeometricPrimitive::VertexCollection vertices;
+                DirectX::GeometricPrimitive::IndexCollection indices;
+                DirectX::GeometricPrimitive::CreateSphere(vertices, indices, 2, 24);
+                Engine::Core::SubMesh part;
+                for (const auto& source : vertices)
+                {
+                    Engine::Core::Vertex vertex;
+                    vertex.Position = vertex.PreviousPosition = source.position;
+                    vertex.Normal = source.normal;
+                    vertex.TexCoord = source.textureCoordinate;
+                    part.Vertices.push_back(vertex);
+                }
+                part.Indices.assign(indices.begin(), indices.end());
+                // DirectXTK's default winding is clockwise; this renderer uses CCW fronts.
+                for (size_t i = 0; i < part.Indices.size(); i += 3) std::swap(part.Indices[i+1], part.Indices[i+2]);
+                const BoundingBox bounds({0,0,0}, {1,1,1});
+                part.Bounds = bounds;
+                mesh = meshes.Cache(_mesh, std::make_unique<Engine::Core::Mesh>(
+                    std::vector<Engine::Core::SubMesh>{std::move(part)}, bounds,
+                    std::vector<Engine::Core::MeshMaterial>{Engine::Core::MeshMaterial{}}));
+            }
+            BenchmarkEngine::GetLocator().GetModule<RenderModule>()->SubmitMesh(mesh, _mesh);
+        }
+
         std::vector<Entity> _entities;
+        Engine::Core::MeshHandle _mesh;
+        bool _visible = true;
     };
 }

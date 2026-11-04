@@ -28,7 +28,7 @@ public:
     void Initialize() override
     {
         GDX12RenderHelpers::InitializeComputeTexture(*_color, *_resources,
-            _inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight(), DXGI_FORMAT_R16G16B16A16_FLOAT);
+            _inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight(), DXGI_FORMAT_R16G16B16A16_FLOAT, true);
         GDX12RootSignatureDesc root;
         root.NumSingleCBVSlots = 5;
         root.NumSingleSRVSlots = 18;
@@ -74,6 +74,10 @@ public:
     void Execute(GDX12CommandList* commands) override
     {
         if (!_prepared) throw std::logic_error("Prepare the CPU light grid before recording lighting");
+        // The hybrid UAV/RT target must be initialized before its first UAV use, including after graph aliasing.
+        commands->ResourceBarrier({_color->GetResource()->GetRenderTargetBarrier()});
+        commands->GetCommandList()->DiscardResource(_color->GetResource()->D3DResource.Get(), nullptr);
+        commands->ResourceBarrier({_color->GetResource()->GetUnorderedAccessBarrier()});
         GDX12_SCOPED_EVENT(commands, "Clustered deferred lighting", Colors::Gold);
         auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
         auto& grid = _grids[_resources->CurrFrameConstantsIndex];

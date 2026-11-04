@@ -1115,6 +1115,7 @@ void RenderModule::CollectReflectionScene()
     hash(staticHash, resources.Lighting.SunShadowRevision);
     for (const auto& light : resources.LocalLights) hash(staticHash, light);
     resources.ReflectionProbes.clear();
+    resources.ReflectionPreviewDraws.clear();
     resources.Fluids.clear();
     bool hasBounds = false;
     auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
@@ -1126,6 +1127,22 @@ void RenderModule::CollectReflectionScene()
         ecs.ForEach<StaticMeshRenderComponent>([&](Entity entity, StaticMeshRenderComponent& renderer)
         {
             if (!ecs.Has<TransformComponent>(entity)) return;
+            if (!renderer.Visible) return;
+            const auto* mesh = GetPrimaryGPUMesh(renderer.MeshHandler);
+            for (size_t part = 0; part < renderer.GetSubMeshCount(mesh->SubMeshes.size()); ++part)
+            {
+                const auto& submesh = mesh->SubMeshes.at(renderer.GetSubMeshIndex(part));
+                if (!renderer.Materials.at(submesh.MaterialIndex)->ReflectionProbePreview) continue;
+                GDX12IndirectDrawArgs draw = {};
+                draw.InstanceID = draw.StartInstanceLocation = renderer._CBufferIndices.at(part);
+                draw.InstanceCount = 1;
+                draw.IndexCountPerInstance = submesh.IndexCount;
+                draw.StartIndexLocation = submesh.StartIndexLocation;
+                draw.BaseVertexLocation = submesh.StartVertexLocation;
+                resources.ReflectionPreviewDraws.push_back(draw);
+            }
+            if (std::all_of(renderer.Materials.begin(), renderer.Materials.end(),
+                [](const GDX12Material* material) { return material->ReflectionProbePreview != 0; })) return;
             uint64_t signature = 14695981039346656037ull;
             hash(signature, world);
             const auto& transform = ecs.Get<TransformComponent>(entity);
@@ -1205,7 +1222,6 @@ void RenderModule::CollectReflectionScene()
             probe.FarPlane = component.FarPlane;
             static_cast<GDX12ReflectionCaptureSettings&>(probe) = component;
             probe.Revision = component.Revision;
-            probe.PreviewSphere = component.PreviewSphere;
             if (!IsValidReflectionProbe(probe)) throw std::invalid_argument("Invalid ReflectionProbeComponent");
             resources.ReflectionProbes.push_back(probe);
         });
@@ -1278,8 +1294,8 @@ void RenderModule::ConfigureRenderPipeline()
     auto* aoPass = CreateRenderPass<GDX12AmbientOcclusionPass>();
     auto* lightingPass = CreateRenderPass<GDX12DeferredLightingPass>();
     _deferredLightingPass = lightingPass;
-    auto* ssrPass = CreateRenderPass<GDX12SSSRPass>();
     auto* reflectionPreviewPass = CreateRenderPass<GDX12ReflectionPreviewPass>();
+    auto* ssrPass = CreateRenderPass<GDX12SSSRPass>();
     auto* fluidSurfacePass = CreateRenderPass<GDX12FluidSurfacePass>();
     auto* transparencyPass = CreateRenderPass<GDX12WBOITTransparencyPass>(GDX12WBOITTransparencyPass::WaterPartition::Behind);
     auto* compositionPass = CreateRenderPass<GDX12WBOITCompositionPass>();
@@ -1305,6 +1321,8 @@ void RenderModule::ConfigureRenderPipeline()
     opaquePass->SetInputs(std::vector<IRenderPassLink*>{ depthPrepass->GetOutput(2) });
     aoPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3) });
     lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0), aoPass->GetOutput(0) });
+    reflectionPreviewPass->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2),
+        opaquePass->GetOutput(1), opaquePass->GetOutput(3), opaquePass->GetOutput(4) });
     fluidSurfacePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
     for (auto* pass : { transparencyPass, frontPass })
         pass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0),
@@ -1312,7 +1330,6 @@ void RenderModule::ConfigureRenderPipeline()
             fluidSurfacePass->GetOutput(0) });
     ssrPass->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(3),
         opaquePass->GetOutput(4), opaquePass->GetOutput(1), environmentPass->GetOutput(1), environmentPass->GetOutput(2) });
-    reflectionPreviewPass->SetInputs({ ssrPass->GetOutput(0), opaquePass->GetOutput(2) });
     compositionPass->SetInputs({ ssrPass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1), opaquePass->GetOutput(2) });
     waterResolvePass->SetInputs({ compositionPass->GetOutput(0), environmentPass->GetOutput(1) });
     frontCompositionPass->SetInputs({ waterResolvePass->GetOutput(0), frontPass->GetOutput(0), frontPass->GetOutput(1), fluidSurfacePass->GetOutput(0) });

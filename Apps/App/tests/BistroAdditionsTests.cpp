@@ -230,7 +230,6 @@ int main()
         debug->EnableDebugLayer();
         ComPtr<ID3D12Debug5> names;
         if (SUCCEEDED(debug.As(&names))) names->SetEnableAutoName(TRUE);
-        CheckBistroReflectionCounts();
         CheckBistroCharacterCounts();
         CheckBistroParticleControls();
         BistroApp app(GetModuleHandleW(nullptr));
@@ -239,6 +238,7 @@ int main()
         ShowWindow(app.GetWindow()->GetWindowHandle(), SW_HIDE);
         auto render = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
         auto& world = *BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()->GetWorld();
+        CheckBistroReflectionCounts(world, [&] { app.BenchmarkFrame(); });
         CheckBistroWaterCounts(world, [&] { app.BenchmarkFrame(); });
         CheckProbeOverlay(app, world);
         CheckCounts(world, 4, 1, 1, 5);

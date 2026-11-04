@@ -18,11 +18,13 @@ shows their baked cubemaps on mirrored spheres; `App.ReflectionProbes.ShowBounds
 independently shows the colored influence boxes and labels. Preview spheres are
 excluded from captures and shadow casting. Spheres default to on; boxes and labels
 default to off. Each sphere samples only its probe's published cubemap, starting
-at the first populated mip; enabling previews does not trigger a bake. The HDR preview pass runs after
-SSSR and writes sphere depth before water, transparent geometry and particles.
-Their existing depth tests hide fragments behind spheres while retaining glass
-in front and outside the sphere silhouette. Probes without a published map are
-skipped. These debug spheres still reuse the underlying scene's motion vectors.
+at the first populated mip; enabling previews does not trigger a bake. These are
+ordinary sphere meshes with an unlit cubemap material, drawn forward immediately
+after deferred lighting and before SSR/transparency. The pass uses the standard
+mesh vertex shader and writes regular depth, normals and motion vectors. The
+baked-material marker preserves unlit color through SSR. There is no analytic
+sphere intersection or fullscreen preview draw. An unpublished map appears black.
+All spheres share one mesh; visibility toggles keep their existing instances.
 
 Grass bounds and appearance are controlled by `App.Grass.ExtentsXCm`,
 `ExtentsZCm`, `DensityPerSquareMetre`, `MaxBlades`, `HeightCm`, `WidthCm` and the

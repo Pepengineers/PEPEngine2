@@ -43,6 +43,7 @@ public:
 	bool HasEmissiveMap;
 	bool UseBakedLighting;
 	MaterialType Type;
+    UINT ReflectionProbePreview = 0; // 0: ordinary material; otherwise one-based published cubemap slot.
 	bool DirtyFlag;
 	UINT _CBufferIndex;
 
