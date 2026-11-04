@@ -53,13 +53,19 @@ the bar area. Counts choose random free route positions and directions, with
 choose a continuation. They wait for occupied space and turn back after a second
 of blockage. Routes respect world pause/time scale and use the existing GPU skinning pipeline.
 The authored nodes, links and sampled Bezier curves are in `src/BistroRoutes.h`.
+Movement uses the App's shared JobSystem with one character per job: first propose
+positions, then test swept separation and apply changes from an immutable snapshot.
+Each walker owns its random generator, so thread scheduling cannot change routes.
+Skeletal pose evaluation, bone palettes and bounds also run per character on that
+pool; entity/resource creation and GPU command recording stay on the owner thread.
 Human asset provenance is in `Assets/Models/MGPUSoldier/SOURCE.md`.
 
 Separate development tasks are in `docs/tasks/bistro-additions/README.md`.
 Build `BistroAdditionsTests.vcxproj` for the integrated count, animation and GPU
 visibility checks; images are written under `Build/BistroAdditions`.
 Run `BistroAdditionsTests.exe --routes-only` for the CPU population/spacing and
-table-limit checks without loading the rendered Bistro scene.
+table-limit checks without loading the rendered Bistro scene. This also checks
+identical trajectories with one/four threads and records actual worker thread IDs.
 
 Set **App** as the startup project in `PEPEngine2.sln`, select **Release | x64**, and run.
 Build from a Visual Studio developer prompt:

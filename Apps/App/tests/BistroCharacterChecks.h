@@ -2,7 +2,63 @@
 
 #include "../src/BistroCharacters.h"
 #include <map>
+#include <mutex>
+#include <set>
+#include <thread>
+#include <tuple>
+#include <iostream>
+#include <atomic>
+#include <chrono>
 #include <stdexcept>
+
+inline void CheckBistroParallelMovement()
+{
+    class ObservedScene : public BistroCharacters::Scene
+    {
+    public:
+        using Scene::Scene;
+        std::set<std::thread::id> Workers;
+    protected:
+        void Execute(size_t index) override
+        {
+            { std::lock_guard<std::mutex> guard(_lock); Workers.insert(std::this_thread::get_id()); }
+            // Give workers time to pick up the first tiny batch instead of racing the caller.
+            if (_warmup.fetch_add(1, std::memory_order_relaxed) < 24)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            Scene::Execute(index);
+        }
+    private:
+        std::mutex _lock;
+        std::atomic<unsigned> _warmup{0};
+    };
+    const auto snapshot = [](World& world)
+    {
+        std::map<std::string, std::tuple<Vector3, Vector3, double>> result;
+        world.GetECS().ForEach<NameComponent, TransformComponent, SkeletalMeshRenderComponent>(
+            [&](Entity, const NameComponent& name, const TransformComponent& transform, const SkeletalMeshRenderComponent& mesh)
+            { result.emplace(name.value, std::make_tuple(transform.Location, transform.Rotation, mesh.GetPlaybackSpeed())); });
+        return result;
+    };
+    JobSystem serialJobs(1), parallelJobs(4);
+    World serialWorld(WorldDesc{}), parallelWorld(WorldDesc{});
+    BistroCharacters::Scene serial(0x5eed);
+    ObservedScene parallel(0x5eed);
+    BistroCharacters::NPCCount.SetFromString("16");
+    BistroCharacters::FoxCount.SetFromString("8");
+    for (int frame = 0; frame < 600; ++frame)
+    {
+        if (frame == 200) { BistroCharacters::NPCCount.SetFromString("0"); BistroCharacters::FoxCount.SetFromString("0"); }
+        if (frame == 201) { BistroCharacters::NPCCount.SetFromString("16"); BistroCharacters::FoxCount.SetFromString("8"); }
+        serial.Update(serialWorld, 0.1f, serialJobs);
+        parallel.Update(parallelWorld, 0.1f, parallelJobs);
+        if (snapshot(serialWorld) != snapshot(parallelWorld))
+            throw std::runtime_error("Crowd movement depends on worker scheduling/order");
+    }
+    if (parallel.Workers.size() < 2) throw std::runtime_error("Crowd jobs never used multiple threads");
+    std::cout << "Bistro crowd worker threads: " << parallel.Workers.size() << "; 1/4-thread trajectories identical." << std::endl;
+    BistroCharacters::NPCCount.SetFromString("4");
+    BistroCharacters::FoxCount.SetFromString("1");
+}
 
 inline void CheckBistroCharacterCounts()
 {
@@ -11,6 +67,7 @@ inline void CheckBistroCharacterCounts()
         if (!condition) throw std::runtime_error(message);
     };
     World world(WorldDesc{});
+    JobSystem jobs(4);
     BistroCharacters::Scene scene;
     auto& ecs = world.GetECS();
     require(BistroCharacters::NPCCount.GetValue() == 4 && BistroCharacters::FoxCount.GetValue() == 1,
@@ -18,7 +75,7 @@ inline void CheckBistroCharacterCounts()
     require(!BistroCharacters::NPCCount.SetFromString("-1") && !BistroCharacters::NPCCount.SetFromString("17") &&
         !BistroCharacters::NPCCount.SetFromString("1.5") && !BistroCharacters::FoxCount.SetFromString("9"),
         "Invalid Bistro character count accepted");
-    scene.Update(world, 0);
+    scene.Update(world, 0, jobs);
     require(ecs.GetPool<SkeletalMeshRenderComponent>().Size() == 5, "Default Bistro character count mismatch");
     Engine::Core::SceneHandle sharedNPC;
     Matrix bodyInverseBind;
@@ -80,14 +137,14 @@ inline void CheckBistroCharacterCounts()
     });
     require(firstNPC != InvalidEntity && firstFox != InvalidEntity, "Both character populations are required");
     require(BistroCharacters::NPCCount.SetFromString("1"), "Single walker count rejected");
-    scene.Update(world, 0);
+    scene.Update(world, 0, jobs);
     const auto npcStart = ecs.Get<TransformComponent>(firstNPC).Location;
     const auto foxStart = ecs.Get<TransformComponent>(firstFox).Location;
-    scene.Update(world, 0.5f);
+    scene.Update(world, 0.5f, jobs);
     require(ecs.Get<TransformComponent>(firstNPC).Location != npcStart &&
         ecs.Get<TransformComponent>(firstFox).Location != foxStart, "Both character populations must walk");
     const auto facingStart = ecs.Get<TransformComponent>(firstNPC).Location;
-    scene.Update(world, 0.01f);
+    scene.Update(world, 0.01f, jobs);
     const auto& npcTransform = ecs.Get<TransformComponent>(firstNPC);
     const auto& npcMesh = ecs.Get<SkeletalMeshRenderComponent>(firstNPC);
     const auto* npcSource = assets.Scenes().GetScene(npcMesh.GetScene());
@@ -105,17 +162,17 @@ inline void CheckBistroCharacterCounts()
     const auto pausedNPC = ecs.Get<TransformComponent>(firstNPC).Location;
     const auto pausedFox = ecs.Get<TransformComponent>(firstFox).Location;
     world.SetPaused(true);
-    scene.Update(world, 1);
+    scene.Update(world, 1, jobs);
     require(ecs.Get<TransformComponent>(firstNPC).Location == pausedNPC &&
         ecs.Get<TransformComponent>(firstFox).Location == pausedFox, "World pause must stop character movement");
     world.SetPaused(false);
     world.SetTimeScale(0);
-    scene.Update(world, 1);
+    scene.Update(world, 1, jobs);
     require(ecs.Get<TransformComponent>(firstNPC).Location == pausedNPC, "Zero time scale must stop movement");
     world.SetTimeScale(1);
     require(BistroCharacters::NPCCount.SetFromString("2") && BistroCharacters::FoxCount.SetFromString("3"),
         "Character count change rejected");
-    scene.Update(world, 0);
+    scene.Update(world, 0, jobs);
     require(ecs.GetPool<SkeletalMeshRenderComponent>().Size() == 5, "Changed character count mismatch");
     size_t humans = 0, foxes = 0;
     ecs.ForEach<NameComponent>([&](Entity, const NameComponent& name)
@@ -126,12 +183,12 @@ inline void CheckBistroCharacterCounts()
     require(humans == 2 && foxes == 3, "Character populations must reconcile independently");
     require(BistroCharacters::NPCCount.SetFromString("16") && BistroCharacters::FoxCount.SetFromString("8"),
         "Maximum character populations rejected");
-    scene.Update(world, 0);
+    scene.Update(world, 0, jobs);
     require(ecs.GetPool<SkeletalMeshRenderComponent>().Size() == 24, "Maximum character count mismatch");
     std::map<Entity, std::pair<Vector3, float>> progress;
     for (int frame = 0; frame < 600; ++frame)
     {
-        scene.Update(world, 0.1f);
+        scene.Update(world, 0.1f, jobs);
         std::vector<std::pair<Vector3, bool>> positions;
         ecs.ForEach<SkeletalMeshRenderComponent, NameComponent>([&](Entity entity,
             const SkeletalMeshRenderComponent&, const NameComponent& name)
@@ -167,8 +224,9 @@ inline void CheckBistroCharacterCounts()
     });
     require(BistroCharacters::NPCCount.SetFromString("0") && BistroCharacters::FoxCount.SetFromString("0"),
         "Character disable rejected");
-    scene.Update(world, 0);
+    scene.Update(world, 0, jobs);
     require(ecs.GetEntityCount() == 0, "Disabled characters must release all their entities");
     require(BistroCharacters::NPCCount.SetFromString("4") && BistroCharacters::FoxCount.SetFromString("1"),
         "Character defaults restore rejected");
+    CheckBistroParallelMovement();
 }

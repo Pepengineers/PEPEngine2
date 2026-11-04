@@ -56,7 +56,28 @@ void RenderModule::PrepareSkeletalMeshes()
     auto& assets = AssetManager::GetInstance();
     auto& meshes = assets.Meshes();
     auto& scenes = assets.Scenes();
-    auto* frame = GetCurrentPrimaryFrameConstants();
+    struct PoseJob final : ParallelJob
+    {
+        struct Task
+        {
+            World* WorldPtr;
+            Entity Id;
+            SkeletalMeshRenderComponent* Component;
+            SkeletalState* State;
+            const SceneAsset* Scene;
+        };
+        explicit PoseJob(RenderModule& owner, bool animate, double rate) : Owner(owner), Animate(animate), Rate(rate) {}
+        void Execute(size_t index) override
+        {
+            auto& task = Tasks[index];
+            Owner.UpdateSkeletalPose(*task.WorldPtr, task.Id, *task.Component, *task.State, *task.Scene, Animate, Rate);
+        }
+        RenderModule& Owner;
+        bool Animate;
+        double Rate;
+        std::vector<Task> Tasks;
+    } poses(*this, animate, presetRates[quality]);
+    poses.Tasks.reserve(_skeletalStates.size());
     for (auto& entry : _skeletalStates) entry.second.Seen = false;
     auto worlds = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
     for (size_t worldIndex = 0; worldIndex < worlds->GetWorldCount(); ++worldIndex)
@@ -187,77 +208,7 @@ void RenderModule::PrepareSkeletalMeshes()
             auto& state = _skeletalStates.at(key);
             state.Seen = true;
             if (state.Parts.empty()) return;
-            const bool edited = state.ComponentRevision != component._revision;
-            const double dt = world->IsPaused() ? 0 : static_cast<double>(_timer->DeltaTime()) * world->GetTimeScale();
-            if (!std::isfinite(dt)) throw std::invalid_argument("Invalid skeletal world delta time");
-            if (animate && !component._frozen)
-            {
-                const double next = component._time + dt * component._speed;
-                if (!std::isfinite(next)) throw std::overflow_error("Animation time overflow");
-                component._time = next;
-                state.SinceUpdate += std::abs(dt);
-            }
-            const double rate = component._rate == 0 ? presetRates[quality] : component._rate;
-            const bool due = animate && !component._frozen && state.SinceUpdate >= 1.0 / rate;
-            auto previousPose = state.Pose;
-            const bool evaluate = state.Pose.empty() || (animate && (edited || due));
-            if (evaluate)
-            {
-                state.Pose = scene->EvaluatePose(component._clip, component._time, component._loop, component._localPose);
-                state.SinceUpdate = due ? std::fmod(state.SinceUpdate, 1.0 / rate) : 0;
-            }
-            const bool changed = previousPose != state.Pose;
-            const bool reset = previousPose.empty() || edited || !animate || component._frozen ||
-                world->IsPaused() || _RPcommonData.ResetHistory;
-            if (reset) previousPose = state.Pose;
-            state.Dispatch = changed || state.NeedsSettle;
-            // Only the frame displaying a new pose carries deformation velocity.
-            state.NeedsSettle = changed && !reset;
-            if (animate || state.ComponentRevision == 0) state.ComponentRevision = component._revision;
-            const auto& transform = ecs.Get<TransformComponent>(entity);
-            const Matrix entityWorld = EntityWorld(transform);
-            const auto transformIt = _transformGPUData.find(entity);
-            if (transformIt == _transformGPUData.end()) throw std::logic_error("Missing skeletal transform registration");
-            for (auto& part : state.Parts)
-            {
-                for (size_t bone = 0; bone < part.BoneNodes.size(); ++bone)
-                {
-                    part.Palette[bone].Current = part.InverseBinds[bone] * state.Pose.at(part.BoneNodes[bone]);
-                    part.Palette[bone].Previous = part.InverseBinds[bone] * previousPose.at(part.BoneNodes[bone]);
-                }
-                part.Palette.back() = {state.Pose.at(part.Node), previousPose.at(part.Node)};
-                bool hasBounds = false;
-                BoundingBox localBounds;
-                // Positive normalized LBS lies inside the union of each transformed source box.
-                for (const auto& palette : part.Palette)
-                {
-                    BoundingBox bounds;
-                    part.SourceBounds.Transform(bounds, palette.Current);
-                    if (hasBounds) BoundingBox::CreateMerged(localBounds, localBounds, bounds);
-                    else localBounds = bounds;
-                    hasBounds = true;
-                }
-                localBounds.Extents.x += std::abs(localBounds.Extents.x) * 0.00001f + 0.01f;
-                localBounds.Extents.y += std::abs(localBounds.Extents.y) * 0.00001f + 0.01f;
-                localBounds.Extents.z += std::abs(localBounds.Extents.z) * 0.00001f + 0.01f;
-                localBounds.Transform(part.Bounds, entityWorld);
-                const auto& center = part.Bounds.Center;
-                const auto& extents = part.Bounds.Extents;
-                if (!std::isfinite(center.x) || !std::isfinite(center.y) || !std::isfinite(center.z) ||
-                    !std::isfinite(extents.x) || !std::isfinite(extents.y) || !std::isfinite(extents.z))
-                    throw std::overflow_error("Non-finite skeletal bounds");
-                auto* material = component._materials.empty() ? part.ImportedMaterial :
-                    component._materials.at(part.SourceMaterial);
-                part.ActiveMaterial = material;
-                part.Material = material->_CBufferIndex;
-                GDX12InstanceData instance = {};
-                instance.TransformIndex = transformIt->second.CBufferIndex;
-                instance.MaterialIndex = part.Material;
-                instance.ReflectionDynamic = 1;
-                instance.BoundingBoxCenter = part.Bounds.Center;
-                instance.BoundingBoxExtents = part.Bounds.Extents;
-                frame->InstanceCache->CopyData(part.Instance, instance);
-            }
+            poses.Tasks.push_back({world, entity, &component, &state, scene});
         });
     }
     for (auto it = _skeletalStates.begin(); it != _skeletalStates.end();)
@@ -266,6 +217,85 @@ void RenderModule::PrepareSkeletalMeshes()
         const auto key = it->first;
         ++it;
         ReleaseSkeletalState(*key.first, key.second);
+    }
+    // Resource creation/release stays on the owner thread; poses and disjoint instance slots run in jobs.
+    poses.Schedule(*_RPcommonData.Jobs, poses.Tasks.size(), 1).Complete();
+}
+
+void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshRenderComponent& component,
+    SkeletalState& state, const SceneAsset& scene, bool animate, double presetRate)
+{
+    auto* frame = GetCurrentPrimaryFrameConstants();
+    const bool edited = state.ComponentRevision != component._revision;
+    const double dt = world.IsPaused() ? 0 : static_cast<double>(_timer->DeltaTime()) * world.GetTimeScale();
+    if (!std::isfinite(dt)) throw std::invalid_argument("Invalid skeletal world delta time");
+    if (animate && !component._frozen)
+    {
+        const double next = component._time + dt * component._speed;
+        if (!std::isfinite(next)) throw std::overflow_error("Animation time overflow");
+        component._time = next;
+        state.SinceUpdate += std::abs(dt);
+    }
+    const double rate = component._rate == 0 ? presetRate : component._rate;
+    const bool due = animate && !component._frozen && state.SinceUpdate >= 1.0 / rate;
+    auto previousPose = state.Pose;
+    const bool evaluate = state.Pose.empty() || (animate && (edited || due));
+    if (evaluate)
+    {
+        state.Pose = scene.EvaluatePose(component._clip, component._time, component._loop, component._localPose);
+        state.SinceUpdate = due ? std::fmod(state.SinceUpdate, 1.0 / rate) : 0;
+    }
+    const bool changed = previousPose != state.Pose;
+    const bool reset = previousPose.empty() || edited || !animate || component._frozen ||
+        world.IsPaused() || _RPcommonData.ResetHistory;
+    if (reset) previousPose = state.Pose;
+    state.Dispatch = changed || state.NeedsSettle;
+    // Only the frame displaying a new pose carries deformation velocity.
+    state.NeedsSettle = changed && !reset;
+    if (animate || state.ComponentRevision == 0) state.ComponentRevision = component._revision;
+    const auto& transform = world.GetECS().Get<TransformComponent>(entity);
+    const Matrix entityWorld = EntityWorld(transform);
+    const auto transformIt = _transformGPUData.find(entity);
+    if (transformIt == _transformGPUData.end()) throw std::logic_error("Missing skeletal transform registration");
+    for (auto& part : state.Parts)
+    {
+        for (size_t bone = 0; bone < part.BoneNodes.size(); ++bone)
+        {
+            part.Palette[bone].Current = part.InverseBinds[bone] * state.Pose.at(part.BoneNodes[bone]);
+            part.Palette[bone].Previous = part.InverseBinds[bone] * previousPose.at(part.BoneNodes[bone]);
+        }
+        part.Palette.back() = {state.Pose.at(part.Node), previousPose.at(part.Node)};
+        bool hasBounds = false;
+        BoundingBox localBounds;
+        // Positive normalized LBS lies inside the union of each transformed source box.
+        for (const auto& palette : part.Palette)
+        {
+            BoundingBox bounds;
+            part.SourceBounds.Transform(bounds, palette.Current);
+            if (hasBounds) BoundingBox::CreateMerged(localBounds, localBounds, bounds);
+            else localBounds = bounds;
+            hasBounds = true;
+        }
+        localBounds.Extents.x += std::abs(localBounds.Extents.x) * 0.00001f + 0.01f;
+        localBounds.Extents.y += std::abs(localBounds.Extents.y) * 0.00001f + 0.01f;
+        localBounds.Extents.z += std::abs(localBounds.Extents.z) * 0.00001f + 0.01f;
+        localBounds.Transform(part.Bounds, entityWorld);
+        const auto& center = part.Bounds.Center;
+        const auto& extents = part.Bounds.Extents;
+        if (!std::isfinite(center.x) || !std::isfinite(center.y) || !std::isfinite(center.z) ||
+            !std::isfinite(extents.x) || !std::isfinite(extents.y) || !std::isfinite(extents.z))
+            throw std::overflow_error("Non-finite skeletal bounds");
+        auto* material = component._materials.empty() ? part.ImportedMaterial :
+            component._materials.at(part.SourceMaterial);
+        part.ActiveMaterial = material;
+        part.Material = material->_CBufferIndex;
+        GDX12InstanceData instance = {};
+        instance.TransformIndex = transformIt->second.CBufferIndex;
+        instance.MaterialIndex = part.Material;
+        instance.ReflectionDynamic = 1;
+        instance.BoundingBoxCenter = part.Bounds.Center;
+        instance.BoundingBoxExtents = part.Bounds.Extents;
+        frame->InstanceCache->CopyData(part.Instance, instance);
     }
 }
 

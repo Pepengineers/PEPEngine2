@@ -175,7 +175,7 @@ namespace
             _reflections.Update(world, deltaSeconds);
             _grass.Update(world, deltaSeconds);
             _water.Update(world, deltaSeconds);
-            _characters.Update(world, deltaSeconds);
+            _characters.Update(world, deltaSeconds, _jobs);
         }
 
         BistroReflections::Scene _reflections;

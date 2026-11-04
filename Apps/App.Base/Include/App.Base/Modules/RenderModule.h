@@ -27,6 +27,8 @@ struct GDX12FrameGenerationStatus;
 struct TransformComponent;
 struct CameraComponent;
 struct StaticMeshRenderComponent;
+class SkeletalMeshRenderComponent;
+namespace Engine::Core { class SceneAsset; }
 
 class Window;
 
@@ -177,6 +179,8 @@ private:
         bool Seen = false;
     };
     void PrepareSkeletalMeshes();
+    void UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshRenderComponent& component,
+        SkeletalState& state, const SceneAsset& scene, bool animate, double presetRate);
     void DispatchSkeletalMeshes(GDX12CommandList* commands);
     void ReleaseSkeletalState(World& world, Entity entity);
     std::map<std::pair<World*, Entity>, SkeletalState> _skeletalStates;
