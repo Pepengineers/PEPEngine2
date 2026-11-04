@@ -17,7 +17,7 @@ namespace BistroBounds
 
     struct Box
     {
-        Box(const std::string& name, const BoundingBox& bounds, unsigned color)
+        Box(const std::string& name, const BoundingBox& bounds, unsigned color, float yawDegrees = 0)
             : Name(name), Color(color),
               CenterX(Prefix() + L"CenterX", bounds.Center.x, L"Detached box centre X, world cm"),
               CenterY(Prefix() + L"CenterY", bounds.Center.y, L"Detached box centre Y, world cm"),
@@ -25,12 +25,27 @@ namespace BistroBounds
               HalfExtentX(Prefix() + L"HalfExtentX", (std::max)(0.01f, bounds.Extents.x), L"Detached box half-size X, cm", EConsoleVariableFlags::Default, Positive),
               HalfExtentY(Prefix() + L"HalfExtentY", (std::max)(0.01f, bounds.Extents.y), L"Detached box half-size Y, cm", EConsoleVariableFlags::Default, Positive),
               HalfExtentZ(Prefix() + L"HalfExtentZ", (std::max)(0.01f, bounds.Extents.z), L"Detached box half-size Z, cm", EConsoleVariableFlags::Default, Positive),
-              Visible(Prefix() + L"Visible", true, L"Show this detached layout box") {}
+              Visible(Prefix() + L"Visible", true, L"Show this detached layout box"), _yawDegrees(yawDegrees) {}
 
         BoundingBox GetBounds() const
         {
             return {{CenterX.GetValue(), CenterY.GetValue(), CenterZ.GetValue()},
                 {HalfExtentX.GetValue(), HalfExtentY.GetValue(), HalfExtentZ.GetValue()}};
+        }
+
+        void Draw(const XMFLOAT4X4& viewProjection) const
+        {
+            const auto bounds = GetBounds();
+            if (_yawDegrees == 0)
+            {
+                Engine::UI::DrawWorldBox(bounds, viewProjection, Name.c_str(), Color);
+                return;
+            }
+            const auto world = Matrix::CreateRotationY(XMConvertToRadians(_yawDegrees)) *
+                Matrix::CreateTranslation(Vector3(bounds.Center));
+            XMFLOAT4X4 localViewProjection;
+            XMStoreFloat4x4(&localViewProjection, world * XMLoadFloat4x4(&viewProjection));
+            Engine::UI::DrawWorldBox({Vector3::Zero, bounds.Extents}, localViewProjection, Name.c_str(), Color);
         }
 
         const std::string Name;
@@ -39,6 +54,7 @@ namespace BistroBounds
         AutoConsoleVariable<bool> Visible;
 
     private:
+        float _yawDegrees;
         std::wstring Prefix() const { return L"App.Bounds." + std::wstring(Name.begin(), Name.end()) + L"."; }
         static bool Positive(float value) { return value >= 0.01f && value <= 1000000; }
     };
@@ -57,8 +73,20 @@ namespace BistroBounds
                 _boxes.push_back(std::make_unique<Box>(ecs.Get<NameComponent>(entity).value, bounds, color));
             };
             ecs.ForEach<ParticleEmitterComponent, TransformComponent, NameComponent>(
-                [&](Entity entity, const ParticleEmitterComponent& emitter, const TransformComponent&, const NameComponent&)
+                [&](Entity entity, const ParticleEmitterComponent& emitter, const TransformComponent&, const NameComponent& name)
                 {
+                    if (name.value == "BistroInteriorDust")
+                    {
+                        _boxes.push_back(std::make_unique<Box>(name.value,
+                            BoundingBox({559,221,-348}, {694,181,779}), 0xff40e8ff));
+                        return;
+                    }
+                    if (name.value == "BistroTableSteam")
+                    {
+                        _boxes.push_back(std::make_unique<Box>(name.value,
+                            BoundingBox({922,227,-293}, {305,175,85.5f}), 0xff40e8ff, -28.5f));
+                        return;
+                    }
                     const auto& settings = emitter.GetSettings();
                     const auto extents = settings.VolumeEnabled ? settings.VolumeHalfExtents :
                         settings.Shape == ParticleShape::Point ? Vector3::Zero : settings.ShapeExtents;
@@ -83,7 +111,7 @@ namespace BistroBounds
             XMStoreFloat4x4(&viewProjection, common->CameraView * common->CameraProjection);
             for (const auto& box : _boxes)
                 if (box->Visible.GetValue())
-                    Engine::UI::DrawWorldBox(box->GetBounds(), viewProjection, box->Name.c_str(), box->Color);
+                    box->Draw(viewProjection);
         }
 
     private:

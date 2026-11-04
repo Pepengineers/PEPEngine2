@@ -24,6 +24,18 @@ boxes are pose snapshots, not walking-route or animation-cycle envelopes. Boxes
 are drawn through geometry as an overlay, using the existing near-plane clipping.
 F1 hides the settings window; `App.Bounds.Show` controls the boxes separately.
 
+Dust and Steam use independent layout presets instead of their spawn snapshots:
+
+- Dust: one approximate box covering the Bistro interior, centre (559,221,-348),
+  half extents (694,181,779) cm. Some corners extend outside the walls by design.
+- Steam: one simple box along the behind-bar space, centre (922,227,-293),
+  half extents (305,175,85.5) cm, rotated -28.5 degrees around Y. It approximates
+  the 6.1 m passage without following the curved counter end.
+
+These presets do not change either emitter. Steam's X/Z half extents follow its
+rotated axes; centre coordinates remain world-space. Particle confinement will
+be connected only after the layout is approved.
+
 The regression checks run in `BistroAdditionsTests`: control availability, source
 object isolation, extent validation, paused drawing, visibility, and persistence
 across scene updates. `BistroStartupTests` disables the boxes to isolate its

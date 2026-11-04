@@ -29,6 +29,23 @@ inline void CheckBistroBounds(BistroApp& app, World& world)
         "Water bounds must use the fluid container");
     require(console.FindConsoleVariable(L"App.Bounds.BistroGrass0.HalfExtentY").GetFloat() > 15,
         "Grass bounds must include blade height and wind displacement");
+    require(console.FindConsoleVariable(L"App.Bounds.BistroInteriorDust.CenterX").GetFloat() == 559 &&
+        console.FindConsoleVariable(L"App.Bounds.BistroInteriorDust.HalfExtentZ").GetFloat() == 779 &&
+        console.FindConsoleVariable(L"App.Bounds.BistroTableSteam.CenterX").GetFloat() == 922 &&
+        console.FindConsoleVariable(L"App.Bounds.BistroTableSteam.HalfExtentX").GetFloat() == 305,
+        "Dust and Steam must use independent room/bar layout boxes");
+    world.GetECS().ForEach<ParticleEmitterComponent, TransformComponent, NameComponent>(
+        [&](Entity, const ParticleEmitterComponent& emitter, const TransformComponent& transform, const NameComponent& name)
+        {
+            if (name.value == "BistroInteriorDust")
+                require(transform.Location == Vector3(160,180,-160) &&
+                    emitter.GetSettings().ShapeExtents == Vector3(250,100,180) && !emitter.GetSettings().VolumeEnabled,
+                    "Dust layout must not change its emitter before approval");
+            if (name.value == "BistroTableSteam")
+                require(transform.Location == Vector3(550,130,-350) &&
+                    emitter.GetSettings().ShapeExtents == Vector3(35,1,20) && !emitter.GetSettings().VolumeEnabled,
+                    "Steam layout must not change its emitter before approval");
+        });
     size_t edited = 0;
     world.GetECS().ForEach<TransformComponent, NameComponent>(
         [&](Entity, const TransformComponent& transform, const NameComponent& name)
