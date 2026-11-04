@@ -79,6 +79,8 @@ void GDX12Device::CollectDeviceFeatures()
 
 void GDX12Device::Reset()
 {
+    _computeQueue.reset();
+    _computeQueueAttempted = false;
     _commandQueue.reset();
     _allocator.Reset();
     _proxyDevice.Reset();
@@ -100,6 +102,21 @@ const ComPtr<ID3D12Device14>& GDX12Device::GetCommandQueueCreationDevice()
 GDX12CommandQueue* GDX12Device::GetCommandQueue()
 {
     return _commandQueue.get();
+}
+
+GDX12CommandQueue* GDX12Device::TryGetComputeQueue()
+{
+    if (!_computeQueueAttempted)
+    {
+        _computeQueueAttempted = true;
+        try { _computeQueue = std::make_unique<GDX12CommandQueue>(this, D3D12_COMMAND_LIST_TYPE_COMPUTE); }
+        catch (const DxException&)
+        {
+            ThrowIfFailed(_device->GetDeviceRemovedReason());
+            Log::Warning("Renderer", "COMPUTE queue creation failed; using DIRECT particle simulation");
+        }
+    }
+    return _computeQueue.get();
 }
 
 const DeviceSpecs& GDX12Device::GetDeviceFeatures()

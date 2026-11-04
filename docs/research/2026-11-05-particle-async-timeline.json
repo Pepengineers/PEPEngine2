@@ -1,0 +1,117 @@
+{
+  "reader": "Nsight Graphics 2026.4 native GTAPI; WRPV 11",
+  "direct": {
+    "path": "D:\\Project\\PEPEngine2\\Build\\async-timelines\\direct\\2026-11-05-01-41-23-090\\BistroRenderGraphTests_2026_11_05_01_41_57.ngfx-gputrace",
+    "frames": 17,
+    "queues": [
+      {
+        "action_count": 2125,
+        "api": "d3d12",
+        "barrier_count": 5508,
+        "command_buffer_count": 17,
+        "id": 0,
+        "marker_hierarchy_count": 0,
+        "name": "DIRECT queue",
+        "pipeline_count": 1479,
+        "qmd_count": 0,
+        "queue_index": 0,
+        "semaphore_event_count": 33,
+        "submit_count": 34,
+        "sync_event_count": 0,
+        "type": "graphics"
+      }
+    ],
+    "actions_per_frame": 125,
+    "warnings": [
+      {
+        "text": "The following metrics have missing data and have been removed: \"CS_0x9ee459d0785be7ca\", \"CS_0x6c2db1cc2575ed34\", \"CS_0xc4223797e04b7879\" [see Output Messages window for more]",
+        "warning_index": 0
+      }
+    ]
+  },
+  "async": {
+    "path": "D:\\Project\\PEPEngine2\\Build\\async-timelines\\async-numeric\\2026-11-05-01-44-51-202\\BistroRenderGraphTests_2026_11_05_01_45_23.ngfx-gputrace",
+    "frames": 18,
+    "queues": [
+      {
+        "action_count": 1530,
+        "api": "d3d12",
+        "barrier_count": 3671,
+        "command_buffer_count": 54,
+        "id": 0,
+        "marker_hierarchy_count": 0,
+        "name": "DIRECT queue",
+        "pipeline_count": 846,
+        "qmd_count": 0,
+        "queue_index": 0,
+        "semaphore_event_count": 89,
+        "submit_count": 72,
+        "sync_event_count": 89,
+        "type": "graphics"
+      },
+      {
+        "action_count": 720,
+        "api": "d3d12",
+        "barrier_count": 3744,
+        "command_buffer_count": 18,
+        "id": 1,
+        "marker_hierarchy_count": 0,
+        "name": "COMPUTE queue",
+        "pipeline_count": 720,
+        "qmd_count": 0,
+        "queue_index": 1,
+        "semaphore_event_count": 36,
+        "submit_count": 18,
+        "sync_event_count": 36,
+        "type": "compute"
+      }
+    ],
+    "direct_actions_per_frame": 85,
+    "compute_actions_per_frame": 40,
+    "warnings": [
+      {
+        "text": "The following metrics have missing data and have been removed: \"CS_0x9ee459d0785be7ca\", \"CS_0x6c2db1cc2575ed34\", \"PrepareNormalsCS_0x6b9110efa8c51338\" [see Output Messages window for more]",
+        "warning_index": 0
+      }
+    ]
+  },
+  "overlap": {
+    "kind": "command-buffer GPU timestamp interval intersection, not proof of simultaneous SM issue",
+    "compute_intervals": 18,
+    "fully_contained_in_direct_intervals": 18,
+    "total_compute_ns": 6175360,
+    "total_intersection_ns": 6175360,
+    "first_frame_direct": [
+      {
+        "index": 0,
+        "duration_ns": 1477408,
+        "end_ns": 1477408,
+        "start_ns": 0
+      },
+      {
+        "index": 1,
+        "duration_ns": 2446432,
+        "end_ns": 3934176,
+        "start_ns": 1487744
+      },
+      {
+        "index": 2,
+        "duration_ns": 4710464,
+        "end_ns": 8658432,
+        "start_ns": 3947968
+      }
+    ],
+    "first_frame_compute": {
+      "duration_ns": 340000,
+      "end_ns": 1906272,
+      "start_ns": 1566272
+    }
+  },
+  "limits": [
+    "Validation disabled; clocks unaltered; 200 ms instrumented captures.",
+    "Release has no pass markers; queue identity and 125 -> 85 DIRECT + 40 COMPUTE actions/frame establish scope.",
+    "The Rust analyzer rejects WRPV 11. Native GTAPI successfully opened both captures.",
+    "CLI exporter writes BASE_UNLOCKED; wrapper falsely reports BASE missing despite ngfx rc=0 and successful exports.",
+    "Missing per-shader metric data prevents shader-counter attribution. Captures are not the uninstrumented frame-sample benchmark."
+  ]
+}

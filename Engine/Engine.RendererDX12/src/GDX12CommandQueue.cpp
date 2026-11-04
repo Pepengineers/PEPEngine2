@@ -2,20 +2,27 @@
 
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
+#include <stdexcept>
 
-GDX12CommandQueue::GDX12CommandQueue(GDX12Device* device)
-    : FenceValue(0),  _device(device)
+GDX12CommandQueue::GDX12CommandQueue(GDX12Device* device, D3D12_COMMAND_LIST_TYPE type)
+    : FenceValue(0), _type(type), _device(device)
 {
     D3D12_COMMAND_QUEUE_DESC desc = {};
-    desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+    desc.Type = type;
     desc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
     desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
     desc.NodeMask = 0;
 
-    ThrowIfFailed(device->GetCommandQueueCreationDevice()->CreateCommandQueue(&desc, IID_PPV_ARGS(&_proxyCommandQueue)));
-    _commandQueue = GDX12StreamlineSDK::Get().GetNativeCommandQueue(_proxyCommandQueue);
+    if (type == D3D12_COMMAND_LIST_TYPE_DIRECT)
+    {
+        ThrowIfFailed(device->GetCommandQueueCreationDevice()->CreateCommandQueue(&desc, IID_PPV_ARGS(&_proxyCommandQueue)));
+        _commandQueue = GDX12StreamlineSDK::Get().GetNativeCommandQueue(_proxyCommandQueue);
+    }
+    else ThrowIfFailed(device->GetDevice()->CreateCommandQueue(&desc, IID_PPV_ARGS(&_commandQueue)));
+    _commandQueue->SetName(type == D3D12_COMMAND_LIST_TYPE_COMPUTE ? L"COMPUTE queue" : L"DIRECT queue");
     ThrowIfFailed(device->GetDevice()->CreateFence(FenceValue, 
-        D3D12_FENCE_FLAG_SHARED | D3D12_FENCE_FLAG_SHARED_CROSS_ADAPTER, IID_PPV_ARGS(&_fence)));
+        type == D3D12_COMMAND_LIST_TYPE_DIRECT ? D3D12_FENCE_FLAG_SHARED | D3D12_FENCE_FLAG_SHARED_CROSS_ADAPTER :
+        D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&_fence)));
 }
 
 void GDX12CommandQueue::Reset()
@@ -58,7 +65,7 @@ GDX12CommandList* GDX12CommandQueue::GetCommandList()
         return rawPtr;
     }
 
-    auto commandList = std::make_unique<GDX12CommandList>(_device);
+    auto commandList = std::make_unique<GDX12CommandList>(_device, _type);
     rawPtr = commandList.get();
     _workingCommandLists.push_back(std::move(commandList));
     return rawPtr;
@@ -67,11 +74,12 @@ GDX12CommandList* GDX12CommandQueue::GetCommandList()
 void GDX12CommandQueue::ExecuteCommandList(GDX12CommandList* commandList)
 {
     GDX12_SCOPED_CPU_EVENT("Submit");
-    commandList->GetCommandList()->Close();
+    if (commandList->GetType() != _type) throw std::invalid_argument("Command list/queue type mismatch");
+    ThrowIfFailed(commandList->GetCommandList()->Close());
     ID3D12CommandList* ppLists[] = { commandList->GetCommandList().Get() };
     _commandQueue->ExecuteCommandLists(1, ppLists);
     FenceValue++;
-    _commandQueue->Signal(_fence.Get(), FenceValue);
+    ThrowIfFailed(_commandQueue->Signal(_fence.Get(), FenceValue));
     commandList->FenceValue = FenceValue;
 }
 
@@ -83,16 +91,20 @@ void GDX12CommandQueue::ExecuteCommandLists(std::vector<GDX12CommandList*>& comm
 
     for (UINT i = 0; i < commandListCount; ++i)
     {
-        commandLists[i]->GetCommandList()->Close();
+        if (commandLists[i]->GetType() != _type) throw std::invalid_argument("Command list/queue type mismatch");
+        ThrowIfFailed(commandLists[i]->GetCommandList()->Close());
         ppLists.push_back(commandLists[i]->GetCommandList().Get());
     }
 
     _commandQueue->ExecuteCommandLists(commandListCount, ppLists.data());
 
     FenceValue++;
-    _commandQueue->Signal(_fence.Get(), FenceValue);
+    ThrowIfFailed(_commandQueue->Signal(_fence.Get(), FenceValue));
 
-    for (UINT i = 0; i < commandListCount; ++i) { commandLists[i]->FenceValue = FenceValue; }
+    for (auto* list : commandLists)
+    {
+        list->FenceValue = FenceValue;
+    }
 }
 
 const ComPtr<ID3D12Fence>& GDX12CommandQueue::GetFence()
@@ -118,6 +130,11 @@ void GDX12CommandQueue::CPUWaitForFenceValue(const uint64_t fenceValue)
 void GDX12CommandQueue::WaitForOtherFence(const uint64_t otherFenceValue)
 {
     _commandQueue->Wait(_otherFence.Get(), otherFenceValue);
+}
+
+void GDX12CommandQueue::WaitForQueue(GDX12CommandQueue& producer, const uint64_t fenceValue)
+{
+    ThrowIfFailed(_commandQueue->Wait(producer.GetFence().Get(), fenceValue));
 }
 
 void GDX12CommandQueue::Flush()

@@ -14,10 +14,10 @@ GDX12GPUTimer::GDX12GPUTimer()
 {
 }
 
-GDX12GPUTimer::GDX12GPUTimer(GDX12Device* device)
+GDX12GPUTimer::GDX12GPUTimer(GDX12Device* device, GDX12CommandQueue* queue)
     : GDX12GPUTimer()
 {
-    Initialize(device);
+    Initialize(device, queue);
 }
 
 GDX12GPUTimer::~GDX12GPUTimer()
@@ -25,13 +25,13 @@ GDX12GPUTimer::~GDX12GPUTimer()
     Reset();
 }
 
-void GDX12GPUTimer::Initialize(GDX12Device* device)
+void GDX12GPUTimer::Initialize(GDX12Device* device, GDX12CommandQueue* queue)
 {
     Reset();
 
     if (!device) { return; }
 
-    _commandQueue = device->GetCommandQueue();
+    _commandQueue = queue ? queue : device->GetCommandQueue();
     ThrowIfFailed(_commandQueue->GetCommandQueue()->GetTimestampFrequency(&_timestampFrequency));
 
     D3D12_QUERY_HEAP_DESC queryHeapDesc = {};

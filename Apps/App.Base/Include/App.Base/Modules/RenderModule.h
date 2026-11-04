@@ -69,6 +69,7 @@ public:
     void WaitForUploads();
     D3D12MA::Statistics GetMemoryStatistics() const;
     const GDX12RenderGraph::Statistics& GetRenderGraphStatistics() const;
+    double GetGPUFrameTimeMS() const;
     void WriteRenderGraph(std::ostream& output) const;
     void BeginTextureUploadBatch(std::uint64_t budgetBytes);
     void EndTextureUploadBatch();

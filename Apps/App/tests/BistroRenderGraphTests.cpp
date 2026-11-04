@@ -4,10 +4,25 @@
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <chrono>
+#include <fstream>
 
 static void Set(const wchar_t* name, const char* value)
 {
     if (!ConsoleModule{}.FindConsoleVariable(name).SetFromString(value)) throw std::runtime_error("Cannot change fixture setting: " + WStringToString(name));
+}
+
+static void CheckMessages(ID3D12InfoQueue& info)
+{
+    for (UINT64 i = 0; i < info.GetNumStoredMessages(); ++i)
+    {
+        SIZE_T size = 0;
+        ThrowIfFailed(info.GetMessage(i, nullptr, &size));
+        std::vector<BYTE> bytes(size);
+        auto* message = reinterpret_cast<D3D12_MESSAGE*>(bytes.data());
+        ThrowIfFailed(info.GetMessage(i, message, &size));
+        if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR) throw std::runtime_error(message->pDescription);
+    }
 }
 
 static std::vector<BYTE> CaptureHDR(GDX12Texture& texture)
@@ -107,18 +122,24 @@ public:
             std::vector<BYTE> reference;
             for (bool reuse : { false, true, false })
             {
-                Set(L"Render.Graph.ReuseTextures", reuse ? "true" : "false");
-                for (int frame = 0; frame < 4; ++frame) Frame();
-                render->WaitForUploads();
-                output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
-                const auto pixels = CaptureHDR(*output);
-                if (reference.empty()) reference = pixels;
-                else if (pixels != reference) throw std::runtime_error("Bistro pooled output differs from dedicated HDR output");
-                const auto stats = render->GetRenderGraphStatistics();
-                if (reuse && stats.PhysicalTextures >= stats.TransientTextures) throw std::runtime_error("Bistro graph did not reuse textures");
-                if (!reuse && stats.PhysicalTextures != stats.TransientTextures) throw std::runtime_error("Dedicated graph mode still shares textures");
-                std::cout << "Bistro earlyAO=" << early << " reuse=" << reuse << " textures="
-                    << stats.PhysicalTextures << '/' << stats.TransientTextures << " HDR readback identical" << std::endl;
+                for (bool async : { false, true, false })
+                {
+                    Set(L"Render.Particles.AsyncCompute", async ? "true" : "false");
+                    Set(L"Render.Graph.ReuseTextures", reuse ? "true" : "false");
+                    for (int frame = 0; frame < 4; ++frame) Frame();
+                    render->WaitForUploads();
+                    CheckMessages(*info.Get());
+                    output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+                    const auto pixels = CaptureHDR(*output);
+                    if (reference.empty()) reference = pixels;
+                    else if (pixels != reference) throw std::runtime_error("Bistro pooled output differs from dedicated HDR output");
+                    const auto stats = render->GetRenderGraphStatistics();
+                    if (reuse && stats.PhysicalTextures >= stats.TransientTextures) throw std::runtime_error("Bistro graph did not reuse textures");
+                    if (!reuse && stats.PhysicalTextures != stats.TransientTextures) throw std::runtime_error("Dedicated graph mode still shares textures");
+                    if (stats.AsyncPasses != (async ? 1u : 0u)) throw std::runtime_error("Bistro particle queue selection failed");
+                    std::cout << "Bistro earlyAO=" << early << " reuse=" << reuse << " async=" << async << " textures="
+                        << stats.PhysicalTextures << '/' << stats.TransientTextures << " HDR readback identical" << std::endl;
+                }
             }
         }
         Set(L"Render.Graph.ReuseTextures", "true");
@@ -127,22 +148,60 @@ public:
         Set(L"Render.DOF.Enabled", "true");
         Set(L"Render.MotionBlur.Enabled", "true");
         Set(L"Render.Reflection.Enabled", "true");
+        Set(L"Render.Particles.AsyncCompute", "true");
         SetWindowPos(GetWindow()->GetWindowHandle(), nullptr, 0, 0, 973, 657, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         for (int frame = 0; frame < 4; ++frame) Frame();
         render->WaitForUploads();
         Set(L"Render.Upscaler.Provider", "1");
         for (int frame = 0; frame < 4; ++frame) Frame();
         render->WaitForUploads();
-        for (UINT64 i = 0; i < info->GetNumStoredMessages(); ++i)
-        {
-            SIZE_T size = 0;
-            ThrowIfFailed(info->GetMessage(i, nullptr, &size));
-            std::vector<BYTE> bytes(size);
-            auto* message = reinterpret_cast<D3D12_MESSAGE*>(bytes.data());
-            ThrowIfFailed(info->GetMessage(i, message, &size));
-            if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR) throw std::runtime_error(message->pDescription);
-        }
+        Set(L"Render.Particles.AsyncCompute", "false");
+        CheckMessages(*info.Get());
         std::cout << "Bistro graph: pooled/dedicated HDR identity, both AO placements, odd resize and native/XeSS switch passed." << std::endl;
+    }
+    void Time()
+    {
+        Timer.Reset(); Timer.Stop();
+        auto render = Locator.GetModule<RenderModule>();
+        auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+        Set(L"Render.FrameGeneration.Provider", "0");
+        Set(L"Render.Upscaler.Provider", "0");
+        Set(L"Render.Particles.Enabled", "true");
+        Set(L"Render.Particles.DrawEnabled", "true");
+        Set(L"Render.Particles.SimulationEnabled", "true");
+        Set(L"App.Particles.Count", "250000");
+        BistroParticles::Update(world);
+        std::ofstream samples("Build/async-bistro-timing.csv");
+        if (!samples) throw std::runtime_error("Cannot create timing report");
+        samples << "series,async,sample,gpu_ms,compute_ms,cpu_submit_ms\n";
+        int series = 0;
+        for (bool async : {false, true, false})
+        {
+            Set(L"Render.Particles.AsyncCompute", async ? "true" : "false");
+            world.GetECS().ForEach<ParticleEmitterComponent>([](Entity, ParticleEmitterComponent& emitter)
+            {
+                emitter.Reset();
+                emitter.Emit(emitter.GetSettings().MaxParticles);
+            });
+            for (int frame = 0; frame < 24; ++frame) Frame();
+            render->WaitForUploads();
+            std::cout << "Timing series=" << series << " async=" << async << " 250000 particles, frozen dt=0" << std::endl;
+            for (int frame = 0; frame < 120; ++frame)
+            {
+                const auto started = std::chrono::steady_clock::now();
+                Frame();
+                const double cpu = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+                render->WaitForUploads();
+                const auto& stats = render->GetRenderGraphStatistics();
+                samples << series << ',' << async << ',' << frame << ',' << render->GetGPUFrameTimeMS() << ','
+                    << (async ? stats.ComputeTimeMS : -1) << ',' << cpu << '\n';
+            }
+            std::ofstream graph("Build/async-bistro-series-" + std::to_string(series) + ".dot");
+            render->WriteRenderGraph(graph);
+            ++series;
+        }
+        Set(L"Render.Particles.AsyncCompute", "false");
+        if (!samples) throw std::runtime_error("Cannot write timing report");
     }
 protected:
     bool AddModules() override
@@ -151,21 +210,34 @@ protected:
         auto scenes = std::make_shared<SceneManagerModule>(std::filesystem::path(ASSETS_FOLDER) / "Scenes/Amazon Lumberyard Bistro");
         ConfigureBistroProps(*scenes);
         Locator.RegisterModule(scenes);
+        Locator.RegisterModule(std::make_shared<PhysicsModule>(_jobs));
         return BenchmarkEngine::AddModules();
     }
 };
 
-int main()
+int main(int argc, char** argv)
 {
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
     try
     {
+        const bool timing = argc > 1 && std::string_view(argv[1]) == "--timing";
+        std::cout.setf(std::ios::unitbuf);
         ComPtr<ID3D12Debug> debug;
-        ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
-        debug->EnableDebugLayer();
+        if (!timing)
+        {
+            ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
+            debug->EnableDebugLayer();
+        }
+        if (argc > 1 && std::string_view(argv[1]) == "--gpu-validation")
+        {
+            ComPtr<ID3D12Debug1> validation;
+            ThrowIfFailed(debug.As(&validation));
+            validation->SetEnableGPUBasedValidation(TRUE);
+        }
         BistroRenderGraphTests app;
         if (!app.Initialize()) throw std::runtime_error("Bistro initialization failed");
-        app.Check();
+        if (timing) app.Time();
+        else app.Check();
         return 0;
     }
     catch (const DxException& error) { std::wcerr << error.ToString() << '\n'; }

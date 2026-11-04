@@ -29,7 +29,7 @@ public:
 graph.AddPass(myPass);
 graph.Compile();
 // Every frame:
-graph.Execute(commands);
+commands = graph.Execute(commands);
 ```
 
 The pass owns its pipelines and logical texture/view objects. The graph owns the scheduling and physical transient pool. `Initialize` creates texture descriptions/views as before; first allocation is still eager. Passes must outlive the graph, and changing their links requires rebuilding it. Adding the same pass instance twice or a pass without a graph contract is rejected. Failed recording rolls back its resource registrations.
@@ -68,7 +68,21 @@ Build the following projects with MSBuild (`/p:Configuration=Release /p:Platform
 * `Apps/App/RenderGraphTests.vcxproj`: class recording, linked-input validation, failed-recording rollback, dependency hazards, cycles, dead passes, bad accesses, pooled/dedicated pixel identity, queued frames, shared states, descriptor stability, recompilation, resize, fallback/export lifetimes and allocation cleanup, with the D3D12 debug layer.
 * `Apps/App/BistroRenderGraphTests.vcxproj`: complete Bistro HDR readbacks match byte-for-byte with pooling off/on/off, in both AO placements. Temporal effects are disabled for this deterministic comparison, then re-enabled for odd resize and Native/XeSS switching under the debug layer.
 
-This implementation schedules one direct queue. Cross-queue/adapter scheduling, pooling of internal SDK resources and buffers, lazy resource creation before pass initialization, and heap aliasing between incompatible texture descriptions are not implemented. Existing secondary-device code is unchanged apart from the owning-vector name. New passes must declare hidden reads/writes and conditional forwarding before opting their outputs into pooling.
+The particle simulation pass can opt into COMPUTE; other production passes remain on DIRECT. Cross-adapter async scheduling, pooling of internal SDK resources and buffers, lazy resource creation before pass initialization, and heap aliasing between incompatible texture descriptions are not implemented. New passes must declare hidden reads/writes and conditional forwarding before opting their outputs into pooling.
+
+## Particle async scheduling
+
+`builder.AsyncCompute()` marks eligibility. `Execute(commands, computeQueue)` returns the final DIRECT list, which the caller must submit; omitting the queue preserves sequential DIRECT execution. Each list/allocator belongs to its queue and is recycled by that queue's fence. The presentation/Streamline queue remains DIRECT.
+
+The initial executor supports explicitly declared read-only texture inputs and persistent buffers returned by `GetBufferAccesses()` each frame. This lets particle pools be replaced during pre-graph preparation without caching obsolete physical addresses. Buffer handoffs release to COMMON on their producer and signal/wait the owning fences. Logical dependencies and physical buffer RAW/WAR/WAW force a join. Texture ownership is conservative: any subsequent DIRECT access to the same physical texture joins first, including another reader. Independent graphics work continues on DIRECT. A side-effect-only branch still joins before execution returns; the caller's final DIRECT submission fence transitively retires both queues' frame inputs. Failed recording drains submitted compute work before resource owners unwind.
+
+Opaque depth transitions to `NON_PIXEL_SHADER_RESOURCE` on DIRECT before the fork. COMPUTE uses that state without a graphics-only transition. Depth-independent shadows/probes can overlap simulation; early AO or the next depth reader/writer forces the join. The proposed concurrent GBuffer/COMPUTE depth reading is deferred: a native D3D12 stress repro also reported cross-queue texture hazards on the validation runtime used for this iteration. No read-only DSV or global resource-helper changes are required by the exclusive path. Async resources and their fallback sets have conservative whole-graph texture lifetimes; no aliasing benefit is assumed from linear pass indices across queues.
+
+DOT diagnostics include actual queue selection, physical buffer access identities and fork/compute fence values plus the join boundary. Statistics expose async pass count and COMPUTE duration using its own frequency/query/readback slots; `RenderModule::GetGPUFrameTimeMS()` measures the full DIRECT frame interval including waits. These are durations on their respective queues, not a calibrated cross-queue timeline.
+
+`SecondGroupTests --async` and `--async-gpu-validation` run the particle oracles through this path. Both ordinary and async runs include direct/async/direct queued frames and branches without a draw consumer. `BistroRenderGraphTests` compares HDR across queue/pooling toggles and AO placements; `--gpu-validation` enables GBV. Its separate `--timing` mode disables validation, freezes dt/camera, seeds 250000 particles and records 24 warm-up plus 120 measured frames per direct/async/direct series in `Build/async-bistro-timing.csv`, with DOT files beside it. A per-frame CPU drain makes timer readback unambiguous; this timing mode does not replace the queued-frame correctness tests or establish general FPS gains.
+
+[2026-11-05 validation and A/B report](../research/2026-11-05-particle-async-compute.md) records the final exclusive-depth path, captured queue overlap, raw samples and the SSSR stride error limiting full Bistro GBV.
 
 ## Class API migration checks, 2026-11-02
 

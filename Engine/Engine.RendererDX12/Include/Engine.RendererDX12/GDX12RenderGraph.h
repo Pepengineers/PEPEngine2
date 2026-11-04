@@ -6,6 +6,9 @@
 #include <unordered_map>
 
 class GDX12CommandList;
+class GDX12CommandQueue;
+class GDX12GPUTimer;
+class GDX12Resource;
 class GDX12Device;
 class GDX12Texture;
 class GDX12TextureResource;
@@ -29,13 +32,23 @@ public:
         // Omit for nodes that perform multiple internal transitions (SDKs, simulation, captures).
         D3D12_RESOURCE_STATES State = static_cast<D3D12_RESOURCE_STATES>(UINT_MAX);
     };
+    struct BufferAccess
+    {
+        GDX12Resource* Resource;
+        Mode Usage;
+    };
     struct Statistics
     {
         UINT Passes = 0, CulledPasses = 0, TransientTextures = 0, PhysicalTextures = 0;
         UINT64 LogicalBytes = 0, PhysicalBytes = 0;
+        UINT AsyncPasses = 0;
+        mutable double ComputeTimeMS = -1;
+        UINT64 ForkFence = 0, ComputeFence = 0;
+        std::string JoinBefore;
     };
 
-    explicit GDX12RenderGraph(GDX12Device* device = nullptr) : _device(device) {}
+    explicit GDX12RenderGraph(GDX12Device* device = nullptr);
+    ~GDX12RenderGraph();
     Resource Import(std::string name, GDX12Texture* texture = nullptr);
     Resource Create(std::string name, GDX12Texture* texture = nullptr, bool transient = false);
     // A conditional output may forward an input instead of writing its own target.
@@ -47,9 +60,10 @@ public:
     void DependsOn(Pass pass, Pass prerequisite);
     void Export(Resource resource);
     void Compile(bool reuseTextures = true);
-    void Execute(GDX12CommandList* commands);
+    // Returns the final DIRECT list; the caller submits it and retires the frame with its fence.
+    GDX12CommandList* Execute(GDX12CommandList* commands, GDX12CommandQueue* computeQueue = nullptr);
     void WriteDot(std::ostream& output) const;
-    const Statistics& GetStatistics() const { return _statistics; }
+    const Statistics& GetStatistics() const;
     const std::vector<Pass>& GetExecutionOrder() const { return _order; }
 
 private:
@@ -69,6 +83,9 @@ private:
         std::vector<Access> Accesses;
         GDX12RenderPass* Instance = nullptr;
         bool SideEffect = false;
+        bool AsyncCompute = false;
+        bool LastAsync = false;
+        std::vector<std::pair<uintptr_t, Mode>> LastBuffers;
         std::vector<Pass> ExplicitDependencies, Dependencies;
     };
     struct Slot
@@ -89,6 +106,7 @@ private:
     std::unordered_map<SharedResource, Resource> _shared;
     Statistics _statistics;
     bool _compiled = false;
+    std::unique_ptr<GDX12GPUTimer> _computeTimer;
 };
 
 class GDX12RenderGraphBuilder
@@ -99,6 +117,7 @@ public:
     using SharedResource = Graph::SharedResource;
     void SetName(std::string name);
     void HasSideEffects();
+    void AsyncCompute();
     void Use(Graph::Resource resource, Graph::Mode mode, D3D12_RESOURCE_STATES state = Graph::UnmanagedState);
     void Read(IRenderPassLink* link, D3D12_RESOURCE_STATES state = Graph::UnmanagedState);
     void ReadInputs(const std::vector<IRenderPassLink*>& inputs, D3D12_RESOURCE_STATES state = Graph::UnmanagedState);

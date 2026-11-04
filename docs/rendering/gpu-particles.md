@@ -2,6 +2,8 @@
 
 Актуальная интеграция: код объединён в корневую ветку и прошёл CPU/GPU/GBV smoke checks. [Результаты и непроверенные области](second-group-integration.md). Авторский статус ниже — исторический, до центральной интеграции.
 
+Optional particle async реализован 2026-11-05, default-off: [проверки, консервативный depth join, timings и ограничения полного Bistro GBV](../research/2026-11-05-particle-async-compute.md).
+
 
 Implementation status: **UNVERIFIED / НЕПРОВЕРЕНО**. No builds, shader compilation,
 tests, GPU fixtures, benchmarks or separate review/cleanup/verification passes were
@@ -18,8 +20,22 @@ initialization/reset before the render graph. `GDX12ParticleSimulationPass` then
 advances all emitters immediately after the full opaque depth prepass, before
 early AO and shadows. Its depth input excludes water and transparent geometry.
 The late particle pass only reads published pools for culling, sorting, color and
-motion. The graph declares a separate simulation dependency. Both passes still
-execute on the existing direct queue; Async Compute is a separate iteration.
+motion. The graph declares a separate simulation dependency and each frame's
+physical persistent pool accesses. `Render.Particles.AsyncCompute` defaults to
+false. With it enabled on a single GPU, simulation uses a COMPUTE queue; queue
+creation failure and dual-GPU mode keep the DIRECT path. Initialization/reset,
+cull/sort/draw and composite remain on DIRECT.
+
+The graph releases initialized pools through COMMON and transitions opaque depth
+to NON_PIXEL_SHADER_RESOURCE before the fork. COMPUTE waits on DIRECT; DIRECT joins
+before the first dependent pass or any later access to that depth texture, including
+readers. Depth-independent shadows/probes can overlap simulation; early AO joins
+immediately. Concurrent texture readers are deferred after native D3D12 validation
+also reported cross-queue hazards in the stress fixture. A simulation-only branch also
+joins before frame retirement. The final DIRECT fence covers frame constants,
+uploads and descriptors; compute list/allocator and timestamp slots use their
+own queue fence. The next frame's DIRECT prefix follows the preceding graphics
+readers, protecting pool reuse without adding a frame of simulation latency.
 
 The separation was checked on 2026-11-04 with Release/x64 builds,
 `SecondGroupTests` (debug layer and `--gpu-validation`) and

@@ -174,9 +174,10 @@ int main(int argc, char** argv)
     {
         std::cout.setf(std::ios::unitbuf);
         const std::string_view mode = argc > 1 ? argv[1] : "";
+        const bool asyncMode = mode == "--async" || mode == "--async-gpu-validation";
         const bool benchmark = mode == "--benchmark" || mode == "--benchmark-skin" ||
             mode == "--benchmark-grass" || mode == "--benchmark-particles";
-        if (!mode.empty() && !benchmark && mode != "--cpu" && mode != "--gpu-validation")
+        if (!mode.empty() && !benchmark && !asyncMode && mode != "--cpu" && mode != "--gpu-validation")
             throw std::invalid_argument("Unknown SecondGroupTests mode");
         TestEngine engine;
         TestCPU();
@@ -185,7 +186,7 @@ int main(int argc, char** argv)
         Require(gate && WaitForSingleObject(gate, INFINITE) == WAIT_OBJECT_0, "GPU mutex failed");
         ComPtr<ID3D12Debug> debug;
         if (!benchmark) { ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))); debug->EnableDebugLayer(); }
-        if (argc > 1 && std::string_view(argv[1]) == "--gpu-validation")
+        if (mode == "--gpu-validation" || mode == "--async-gpu-validation")
         {
             ComPtr<ID3D12Debug1> validation; ThrowIfFailed(debug.As(&validation));
             validation->SetEnableGPUBasedValidation(TRUE);
@@ -296,6 +297,8 @@ int main(int argc, char** argv)
         if (!benchmark) TestGrassPlacement(device, resources, common, depth, vp, eye);
         if (benchmark && (mode == "--benchmark" || mode == "--benchmark-grass")) BenchmarkGrassPlacement(device, resources, common, depth, vp, eye);
 
+        Set(L"Render.Fluid.Enabled", "true");
+        Set(L"Render.Fluid.Quality", "2");
         GDX12FluidSurfacePass water; water.Setup(&resources, nullptr, &common); water.SetInputs({depth, motion}); water.Initialize();
         execute(water); Require(water.GetOutput(0)->GetTexture() == depth, "Empty fluid must preserve depth identity");
         GDX12FluidInstance fluid; fluid.Id = 1; fluid.DeltaSeconds = 1.0f / 60;
@@ -317,6 +320,29 @@ int main(int argc, char** argv)
         GDX12ParticlesPass particles; particles.Setup(&resources, nullptr, &common);
         particles.SetInputs({water.GetOutput(0), accum.get(), reveal.get()}); particles.Initialize();
         resources.ParticleSimulation = std::make_unique<GDX12ParticleSimulation>();
+        Set(L"Render.Particles.Enabled", "true");
+        Set(L"Render.Particles.Quality", "2");
+        Set(L"Render.Particles.DrawEnabled", "true");
+        Set(L"Render.Particles.SimulationEnabled", "true");
+        GDX12ParticleSimulationPass simulationPass;
+        simulationPass.Setup(&resources, nullptr, &common);
+        simulationPass.SetInputs({depth});
+        const auto makeParticleGraph = [&](bool draw)
+        {
+            auto graph = std::make_unique<GDX12RenderGraph>(&device);
+            graph->ImportShared(GDX12RenderGraph::SharedResource::Scene, "Fixture scene");
+            graph->ImportLink("Opaque depth", depth);
+            if (water.GetOutput(0) != depth) graph->ImportLink("Water depth", water.GetOutput(0));
+            graph->ImportLink("Accumulation", accum.get());
+            graph->ImportLink("Revealage", reveal.get());
+            graph->AddPass(simulationPass);
+            if (draw) graph->AddPass(particles);
+            graph->Compile(false);
+            return graph;
+        };
+        auto particleGraph = makeParticleGraph(true);
+        auto simulationOnlyGraph = makeParticleGraph(false);
+        bool particleAsync = asyncMode, flushParticles = true, simulationOnly = false;
         const auto prepareParticles = [&]
         {
             resources.ParticleSimulation->BeginFrame(&resources, common);
@@ -327,10 +353,15 @@ int main(int argc, char** argv)
             prepareParticles();
             auto* commands = queue->GetCommandList();
             resources.ParticleSimulation->InitializePools(commands, &resources);
-            resources.ParticleSimulation->Execute(commands, &resources, common, depth);
-            pass.Execute(commands);
+            Require(&pass == &particles, "Unexpected particle fixture pass");
+            auto* computeQueue = particleAsync ? device.TryGetComputeQueue() : nullptr;
+            Require(!particleAsync || computeQueue, "Async fixture requires a COMPUTE queue");
+            auto& graph = simulationOnly ? simulationOnlyGraph : particleGraph;
+            commands = graph->Execute(commands, computeQueue);
             queue->ExecuteCommandList(commands);
-            queue->Flush();
+            resources.FrameConstants[resources.CurrFrameConstantsIndex]->FenceValue = commands->FenceValue;
+            Require(graph->GetStatistics().AsyncPasses == (particleAsync ? 1u : 0u), "Particle queue selection failed");
+            if (flushParticles) queue->Flush();
         };
         GDX12ParticleEmitter emitter; emitter.Id = 1; emitter.MaxParticles = 64; emitter.BurstTotal = 16;
         emitter.EmissionRate = 0; emitter.World = Matrix::CreateTranslation(0, 30, -40);
@@ -388,6 +419,7 @@ int main(int argc, char** argv)
             (10000.0f / 150 - 1) / 9999, 0, 0, nullptr);
         queue->ExecuteCommandList(list); queue->Flush();
         particles.SetInputs({depth, accum.get(), reveal.get()});
+        particleGraph = makeParticleGraph(true);
         Vector3 forward(0, -10, 150); forward.Normalize();
         emitter = {}; emitter.Id = 1; emitter.MaxParticles = 16; emitter.BurstTotal = 1;
         emitter.World = Matrix::CreateTranslation(eye + forward * 100);
@@ -417,6 +449,37 @@ int main(int argc, char** argv)
             }
         }
         CheckParticleSimulationControls(device, resources, particles, executeParticles, eye, forward);
+        std::vector<float> queuedReference;
+        for (bool async : {false, true, false})
+        {
+            particleAsync = async;
+            emitter = {}; emitter.Id = 1901; emitter.MaxParticles = 16; emitter.BurstTotal = 1;
+            emitter.ResetRevision = async ? 2 : (queuedReference.empty() ? 1 : 3);
+            emitter.EmissionRate = 0; emitter.SpeedMin = emitter.SpeedMax = 10;
+            emitter.Direction = forward; emitter.ConeAngleDegrees = 0; emitter.Acceleration = Vector3::Zero;
+            emitter.World = Matrix::CreateTranslation(eye + forward * 100);
+            emitter.LifetimeMin = emitter.LifetimeMax = 10; emitter.SizeStart = emitter.SizeEnd = 10;
+            emitter.SoftDistance = 0; emitter.ColorStart = emitter.ColorEnd = Vector4(0,0,0,1);
+            emitter.Blend = ParticleBlend::Additive;
+            flushParticles = false;
+            for (UINT frame = 0; frame < 10; ++frame)
+            {
+                resources.CurrFrameConstantsIndex = frame % resources.FrameConstants.size();
+                const auto fence = resources.FrameConstants[resources.CurrFrameConstantsIndex]->FenceValue;
+                queue->CPUWaitForFenceValue(fence);
+                simulationOnly = frame >= 3 && frame <= 6;
+                Set(L"Render.Particles.DrawEnabled", simulationOnly ? "false" : "true");
+                emitter.DeltaTime = frame ? 0.1f : 0;
+                resources.ParticleEmitters = {emitter};
+                executeParticles(particles);
+            }
+            queue->Flush();
+            const auto pixels = Read(device, *resources.ParticleMotion, 2);
+            if (queuedReference.empty()) queuedReference = pixels;
+            else Require(pixels == queuedReference, "Queued particle async/direct result differs");
+        }
+        std::cout << "Particle direct/async/direct: queued frame slots, simulation-only joins and toggles passed.\n";
+        particleAsync = asyncMode; flushParticles = true; simulationOnly = false; resources.CurrFrameConstantsIndex = 0;
         emitter = {}; emitter.Id = 1; emitter.World = Matrix::CreateTranslation(eye + forward * 100);
         emitter.EmissionRate = 0; emitter.SpeedMin = emitter.SpeedMax = 0; emitter.Acceleration = Vector3::Zero;
         emitter.LifetimeMin = emitter.LifetimeMax = 0.15f; emitter.DeltaTime = 0.1f;

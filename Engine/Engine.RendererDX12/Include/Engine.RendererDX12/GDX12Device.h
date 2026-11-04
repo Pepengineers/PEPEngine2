@@ -40,6 +40,8 @@ public:
 	const ComPtr<ID3D12Device14>& GetDevice();
 	const ComPtr<ID3D12Device14>& GetCommandQueueCreationDevice();
 	GDX12CommandQueue* GetCommandQueue();
+    // Lazily created on opt-in. Queue creation failure keeps the DIRECT path available.
+    GDX12CommandQueue* TryGetComputeQueue();
 	const DeviceSpecs& GetDeviceFeatures();
 	LUID GetAdapterLuid() const;
 	const bool IsInitialized();
@@ -54,6 +56,8 @@ private:
 	ComPtr<D3D12MA::Allocator> _allocator;
 
 	std::unique_ptr<GDX12CommandQueue> _commandQueue;
+    std::unique_ptr<GDX12CommandQueue> _computeQueue;
+    bool _computeQueueAttempted = false;
 
 	bool _isInitialized;
 

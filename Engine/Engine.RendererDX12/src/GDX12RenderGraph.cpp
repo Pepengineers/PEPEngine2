@@ -3,12 +3,22 @@
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
+#include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include <algorithm>
 #include <ostream>
 #include <iomanip>
 #include <queue>
 #include <stdexcept>
+
+GDX12RenderGraph::GDX12RenderGraph(GDX12Device* device) : _device(device) {}
+GDX12RenderGraph::~GDX12RenderGraph() = default;
+
+const GDX12RenderGraph::Statistics& GDX12RenderGraph::GetStatistics() const
+{
+    _statistics.ComputeTimeMS = _computeTimer ? _computeTimer->GetTimeMS() : -1;
+    return _statistics;
+}
 
 void GDX12RenderGraph::CheckResource(const Resource id) const
 {
@@ -104,6 +114,7 @@ void GDX12RenderGraph::ImportShared(SharedResource resource, std::string name)
 
 void GDX12RenderGraphBuilder::SetName(std::string name) { _node.Name = std::move(name); }
 void GDX12RenderGraphBuilder::HasSideEffects() { _node.SideEffect = true; }
+void GDX12RenderGraphBuilder::AsyncCompute() { _node.AsyncCompute = true; }
 
 void GDX12RenderGraphBuilder::Use(const Graph::Resource resource, const Graph::Mode mode, const D3D12_RESOURCE_STATES state)
 {
@@ -293,6 +304,18 @@ void GDX12RenderGraph::Compile(bool reuseTextures)
             ExpandRead(r, outputs);
             for (auto id : outputs) _resources[id].Last = static_cast<UINT>(_order.size());
         }
+    for (auto p : _order)
+        if (_nodes[p].AsyncCompute)
+            for (const auto& access : _nodes[p].Accesses)
+            {
+                std::vector<Resource> used;
+                ExpandRead(access.Id, used);
+                for (auto id : used)
+                {
+                    _resources[id].First = 0;
+                    _resources[id].Last = static_cast<UINT>(_order.size());
+                }
+            }
     std::vector<Resource> textures;
     for (Resource r = 0; r < _resources.size(); ++r)
         if (_resources[r].Transient && _resources[r].First != UINT_MAX) textures.push_back(r);
@@ -333,44 +356,139 @@ void GDX12RenderGraph::Compile(bool reuseTextures)
     _compiled = true;
 }
 
-void GDX12RenderGraph::Execute(GDX12CommandList* commands)
+GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12CommandQueue* computeQueue)
 {
     GDX12_SCOPED_CPU_EVENT("Graph recording");
     if (!_compiled) throw std::logic_error("Render graph must be compiled before execution");
     for (const auto& resource : _resources)
         if (resource.Slot != UINT_MAX && resource.Texture->GetResource() != _slots[resource.Slot].ResourceObject.get())
             throw std::logic_error("Render graph texture changed; recompile after resize: " + resource.Name);
-    for (UINT i = 0; i < _order.size(); ++i)
+    if (computeQueue && (!_device || computeQueue->GetType() != D3D12_COMMAND_LIST_TYPE_COMPUTE))
+        throw std::invalid_argument("Render graph requires a COMPUTE queue on its device");
+    auto* directQueue = _device ? _device->GetCommandQueue() : nullptr;
+    Pass pending = UINT_MAX;
+    UINT64 computeFence = 0;
+    std::vector<BufferAccess> pendingBuffers;
+    std::vector<GDX12Resource*> ownedTextures;
+    _statistics.AsyncPasses = 0;
+    _statistics.ForkFence = _statistics.ComputeFence = 0;
+    _statistics.JoinBefore.clear();
+    _statistics.ComputeTimeMS = _computeTimer ? _computeTimer->GetTimeMS() : -1;
+    const auto textureFor = [&](const Access& access) -> GDX12Texture*
     {
-        const auto& node = _nodes[_order[i]];
-        GDX12_SCOPED_EVENT(commands, node.Name.c_str());
-        for (const auto& resource : _resources)
-            if (resource.Slot != UINT_MAX && resource.First == i)
-            {
-                auto* physical = resource.Texture->GetResource();
-                if (physical->D3DResource->GetDesc().Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)
-                    commands->ResourceBarrier({ physical->GetUAVBarrier() });
-            }
-        for (auto access : node.Accesses)
+        const auto& entry = _resources[access.Id];
+        return entry.Link && (access.Usage == Mode::Read || !entry.Texture) ? entry.Link->GetTexture() : entry.Texture;
+    };
+    const auto join = [&](const std::string& before)
+    {
+        if (pending == UINT_MAX) return;
+        directQueue->ExecuteCommandList(commands);
+        directQueue->WaitForQueue(*computeQueue, computeFence);
+        commands = directQueue->GetCommandList();
+        _statistics.JoinBefore = before;
+        pending = UINT_MAX;
+        pendingBuffers.clear();
+        ownedTextures.clear();
+    };
+    try
+    {
+        for (UINT i = 0; i < _order.size(); ++i)
         {
-            const auto& entry = _resources[access.Id];
-            auto* texture = entry.Link && (access.Usage == Mode::Read || !entry.Texture) ? entry.Link->GetTexture() : entry.Texture;
-            if (!texture || access.State == static_cast<D3D12_RESOURCE_STATES>(UINT_MAX)) continue;
-            auto* resource = texture->GetResource();
-            commands->ResourceBarrier({ CD3DX12_RESOURCE_BARRIER::Transition(resource->D3DResource.Get(), resource->GetCurrentState(), access.State) });
-            resource->GDX12Resource::SetCurrentState(access.State);
+            const auto p = _order[i];
+            auto& node = _nodes[p];
+            const auto buffers = node.Instance->GetBufferAccesses();
+            node.LastAsync = computeQueue && node.AsyncCompute;
+            node.LastBuffers.clear();
+            for (const auto& access : buffers)
+                node.LastBuffers.emplace_back(reinterpret_cast<uintptr_t>(access.Resource->D3DResource.Get()), access.Usage);
+            bool needsJoin = node.AsyncCompute || std::find(node.Dependencies.begin(), node.Dependencies.end(), pending) != node.Dependencies.end();
+            for (const auto& access : buffers)
+                for (const auto& active : pendingBuffers)
+                    needsJoin |= access.Resource->D3DResource.Get() == active.Resource->D3DResource.Get() &&
+                        (access.Usage != Mode::Read || active.Usage != Mode::Read);
+            for (const auto& access : node.Accesses)
+                if (auto* texture = textureFor(access))
+                    for (auto* shared : ownedTextures)
+                        // Legacy texture ownership stays exclusive through the COMPUTE fence.
+                        needsJoin |= texture->GetResource()->D3DResource.Get() == shared->D3DResource.Get();
+            if (needsJoin) join(node.Name);
+            for (const auto& resource : _resources)
+                if (resource.Slot != UINT_MAX && resource.First == i)
+                {
+                    auto* physical = resource.Texture->GetResource();
+                    if (physical->D3DResource->GetDesc().Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)
+                        commands->ResourceBarrier({ physical->GetUAVBarrier() });
+                }
+            for (auto access : node.Accesses)
+            {
+                auto* texture = textureFor(access);
+                if (!texture || access.State == UnmanagedState) continue;
+                auto* resource = texture->GetResource();
+                commands->ResourceBarrier({ CD3DX12_RESOURCE_BARRIER::Transition(resource->D3DResource.Get(), resource->GetCurrentState(), access.State) });
+                resource->GDX12Resource::SetCurrentState(access.State);
+            }
+            const auto record = [&](GDX12CommandList* list)
+            {
+                GDX12_SCOPED_EVENT(list, node.Name.c_str());
+                node.Instance->Execute(list);
+            };
+            if (!computeQueue || !node.AsyncCompute) { record(commands); continue; }
+            for (const auto& access : node.Accesses)
+                if (auto* texture = textureFor(access))
+                {
+                    if (access.Usage != Mode::Read || access.State == UnmanagedState)
+                        throw std::logic_error("Async textures require an explicit read state: " + node.Name);
+                    ownedTextures.push_back(texture->GetResource());
+                }
+            for (const auto& access : buffers)
+                commands->ResourceBarrier({ access.Resource->GetCommonBarrier() });
+            if (!_computeTimer) _computeTimer = std::make_unique<GDX12GPUTimer>(_device, computeQueue);
+            directQueue->ExecuteCommandList(commands);
+            computeQueue->WaitForQueue(*directQueue, commands->FenceValue);
+            _statistics.ForkFence = commands->FenceValue;
+            commands = directQueue->GetCommandList();
+            auto* compute = computeQueue->GetCommandList();
+            _computeTimer->Start(compute);
+            record(compute);
+            for (const auto& access : buffers)
+                compute->ResourceBarrier({ access.Resource->GetCommonBarrier() });
+            _computeTimer->Stop(compute);
+            computeQueue->ExecuteCommandList(compute);
+            computeFence = compute->FenceValue;
+            _statistics.ComputeFence = computeFence;
+            _computeTimer->OnCommandListExecuted(computeFence);
+            pending = p;
+            pendingBuffers = buffers;
+            ++_statistics.AsyncPasses;
         }
-        node.Instance->Execute(commands);
+        join("frame retirement");
     }
+    catch (...)
+    {
+        if (computeQueue) computeQueue->Flush();
+        if (directQueue)
+        {
+            directQueue->Flush();
+        }
+        throw;
+    }
+    return commands;
 }
 
 void GDX12RenderGraph::WriteDot(std::ostream& output) const
 {
     if (!_compiled) throw std::logic_error("Render graph must be compiled before export");
     output << "digraph RenderGraph {\n";
+    if (_statistics.AsyncPasses)
+        output << "  label=" << std::quoted("DIRECT fork fence=" + std::to_string(_statistics.ForkFence) +
+            "; COMPUTE fence=" + std::to_string(_statistics.ComputeFence) + "; join before " + _statistics.JoinBefore) << ";\n";
     for (auto p : _order)
     {
-        output << "  p" << p << " [label=" << std::quoted(_nodes[p].Name) << "];\n";
+        output << "  p" << p << " [label=" << std::quoted(_nodes[p].Name +
+            (_nodes[p].LastAsync ? " [COMPUTE]" : (_nodes[p].AsyncCompute ? " [DIRECT; COMPUTE eligible]" : " [DIRECT]"))) << "];\n";
+        for (const auto& buffer : _nodes[p].LastBuffers)
+            output << "  p" << p << " -> b" << buffer.first << " [label=" << std::quoted(
+                buffer.second == Mode::Read ? "read" : (buffer.second == Mode::Write ? "write" : "read/write")) << "];\n";
         for (auto predecessor : _nodes[p].Dependencies) output << "  p" << predecessor << " -> p" << p << ";\n";
     }
     output << "}\n";

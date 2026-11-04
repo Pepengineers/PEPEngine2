@@ -12,17 +12,18 @@
 #include <pix/pix3.h>
 #endif
 
-GDX12CommandList::GDX12CommandList(GDX12Device* device) :
+GDX12CommandList::GDX12CommandList(GDX12Device* device, D3D12_COMMAND_LIST_TYPE type) :
 	FenceValue(0),
+    _type(type),
 	_currentTopology(D3D_PRIMITIVE_TOPOLOGY_UNDEFINED),
 	_currentScissorRect({}),
 	_currentViewport({}),
 	_currentGeometryBuffer(nullptr)
 {
-	device->GetDevice()->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&_commandAllocator));
+	ThrowIfFailed(device->GetDevice()->CreateCommandAllocator(type, IID_PPV_ARGS(&_commandAllocator)));
 
-	device->GetDevice()->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, _commandAllocator.Get(),
-			nullptr, IID_PPV_ARGS(&_commandList));
+	ThrowIfFailed(device->GetDevice()->CreateCommandList(0, type, _commandAllocator.Get(),
+			nullptr, IID_PPV_ARGS(&_commandList)));
 }
 
 GDX12CommandList::~GDX12CommandList()
@@ -44,8 +45,8 @@ const ComPtr<ID3D12CommandAllocator>& GDX12CommandList::GetCommandAllocator()
 void GDX12CommandList::Reset()
 {
 	FenceValue = 0;
-	_commandAllocator->Reset();
-	_commandList->Reset(_commandAllocator.Get(), nullptr);
+	ThrowIfFailed(_commandAllocator->Reset());
+	ThrowIfFailed(_commandList->Reset(_commandAllocator.Get(), nullptr));
     InvalidateCachedState();
 }
 
