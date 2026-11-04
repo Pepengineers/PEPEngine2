@@ -29,12 +29,12 @@ Dust and Steam use independent layout presets instead of their spawn snapshots:
 - Dust: one approximate box covering the Bistro interior, centre (559,221,-348),
   half extents (694,181,779) cm. Some corners extend outside the walls by design.
 - Steam: one simple box along the behind-bar space, centre (922,227,-293),
-  half extents (305,175,85.5) cm, rotated -28.5 degrees around Y. It approximates
-  the 6.1 m passage without following the curved counter end.
+  half extents (305,175,85.5) cm, aligned to the world axes like Dust. Its long
+  faces are parallel to Dust's faces; it does not follow the curved counter end.
 
-These presets do not change either emitter. Steam's X/Z half extents follow its
-rotated axes; centre coordinates remain world-space. Particle confinement will
-be connected only after the layout is approved.
+These presets do not change either emitter. All centre coordinates and box axes
+are world-space. Particle confinement will be connected only after the layout is
+approved.
 
 The regression checks run in `BistroAdditionsTests`: control availability, source
 object isolation, extent validation, paused drawing, visibility, and persistence
