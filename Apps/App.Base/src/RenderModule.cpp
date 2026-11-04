@@ -40,7 +40,6 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12SyncPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DepthOfFieldPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12MotionBlurPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12FluidPass.h"
 #include <cmath>
 #include "Common/ConsoleVariables.h"
 
@@ -67,14 +66,25 @@ RenderModule::~RenderModule()
     _primaryResources.Grass.reset();
     _primaryRenderPasses.clear();
     _secondaryRenderPasses.clear();
+    _renderExtensions.clear();
     _backBuffer.reset();
     GDX12ShaderCompiler::Shutdown();
     GDX12DeviceFactory::Reset();
     GDX12StreamlineSDK::Get().Shutdown();
 }
 
+GDX12RenderExtension* RenderModule::RegisterRenderExtension(std::unique_ptr<GDX12RenderExtension> extension)
+{
+    if (_extensionsInitialized) throw std::logic_error("Render extensions must be registered before Initialize");
+    if (!extension) throw std::invalid_argument("Cannot register a null render extension");
+    auto* result = extension.get();
+    _renderExtensions.push_back(std::move(extension));
+    return result;
+}
+
 void RenderModule::Initialize()
 {
+    _extensionsInitialized = true;
     Log::Info("Renderer", "Initializing rendering devices and frame resources");
     if (!GDX12StreamlineSDK::Get().Initialize())
         Log::Warning("Renderer", "Streamline unavailable; NVIDIA features will report unsupported and fall back");
@@ -114,6 +124,7 @@ void RenderModule::Initialize()
     BuildBackBuffer();
     if (_dualGPUMode) { ShareFences(); }
     Log::Info("Renderer", "Configuring render passes and pipeline states");
+    for (auto& extension : _renderExtensions) extension->Initialize(_primaryResources, _RPcommonData);
     ConfigureRenderPipeline();
 
     Engine::UI::Initialize(_window->GetWindowHandle(), _primaryDevice.get(),
@@ -146,6 +157,7 @@ void RenderModule::OnResize()
 
     for (auto& renderPass : _primaryRenderPasses) { renderPass->Resize(); }
     for (auto& renderPass : _secondaryRenderPasses) { renderPass->Resize(); }
+    for (auto& extension : _renderExtensions) extension->Resize(_RPcommonData);
     if (_primaryGraph) RebuildRenderGraph();
 }
 
@@ -949,6 +961,8 @@ void RenderModule::OnRender()
     _primaryResources.ParticleSimulation->InitializePools(primarycmdList, &_primaryResources);
     DispatchSkeletalMeshes(primarycmdList);
     CollectGrassScene(primarycmdList);
+    for (auto& extension : _renderExtensions)
+        extension->PrepareFrame(primarycmdList, _primaryResources, _RPcommonData);
     {
         GDX12_SCOPED_CPU_EVENT("Scene preparation");
         CollectReflectionScene();
@@ -1298,78 +1312,114 @@ void RenderModule::ShareFences()
 
 void RenderModule::ConfigureRenderPipeline()
 {
-    auto* environmentPass = CreateRenderPass<GDX12EnvironmentIBLPass>();
-    auto* cullingPass = CreateRenderPass<GDX12GPUCullingPass>();
-    auto* depthPrepass = CreateRenderPass<GDX12OpaquePass>(GDX12OpaquePass::Stage::DepthPrepass);
-    auto* particleSimulationPass = CreateRenderPass<GDX12ParticleSimulationPass>();
+    if (!_primaryRenderPasses.empty()) throw std::logic_error("Render pipeline is already configured");
+    GDX12RenderExtensionBuildContext context(_primaryRenderPasses, &_primaryResources, &_secondaryResources, &_RPcommonData);
+    auto* environmentPass = context.AddPass<GDX12EnvironmentIBLPass>();
+    auto* cullingPass = context.AddPass<GDX12GPUCullingPass>();
+    auto* depthPrepass = context.AddPass<GDX12OpaquePass>(GDX12OpaquePass::Stage::DepthPrepass);
+    auto* particleSimulationPass = context.AddPass<GDX12ParticleSimulationPass>();
     _particleSimulationPass = particleSimulationPass;
-    auto* shadowPass = CreateRenderPass<GDX12CascadedShadowPass>();
-    auto* localShadowPass = CreateRenderPass<GDX12LocalShadowPass>();
+    cullingPass->SetInputs({});
+    depthPrepass->SetInputs({});
+    particleSimulationPass->SetInputs({ depthPrepass->GetOutput(2) });
+    context.SceneDepth = depthPrepass->GetOutput(2);
+    context.FinishStage();
+    for (auto& extension : _renderExtensions) extension->AfterDepthPrepass(context);
+    context.FinishStage();
+
+    auto* shadowPass = context.AddPass<GDX12CascadedShadowPass>();
+    auto* localShadowPass = context.AddPass<GDX12LocalShadowPass>();
     _localShadowPass = localShadowPass;
-    auto* reflectionPass = CreateRenderPass<GDX12ReflectionProbePass>();
+    auto* reflectionPass = context.AddPass<GDX12ReflectionProbePass>();
     _reflectionPass = reflectionPass;
-    auto* opaquePass = CreateRenderPass<GDX12OpaquePass>(GDX12OpaquePass::Stage::GBuffer);
-    auto* aoPass = CreateRenderPass<GDX12AmbientOcclusionPass>();
-    auto* lightingPass = CreateRenderPass<GDX12DeferredLightingPass>();
+    context.SunShadow = shadowPass->GetOutput(0);
+    context.LocalShadows = localShadowPass->GetOutput(0);
+    for (UINT i = 0; i < context.Environment.size(); ++i) context.Environment[i] = environmentPass->GetOutput(i);
+    reflectionPass->SetInputs({ context.Environment[0], context.Environment[1], context.Environment[2],
+        context.Environment[3], context.LocalShadows });
+    context.FinishStage();
+    for (auto& extension : _renderExtensions) extension->AfterShadows(context);
+    context.FinishStage();
+
+    auto* opaquePass = context.AddPass<GDX12OpaquePass>(GDX12OpaquePass::Stage::GBuffer);
+    opaquePass->SetInputs({ context.SceneDepth });
+    context.SetOpaqueInputs(opaquePass->GetOutput(2), opaquePass->GetOutput(1));
+    context.FinishStage();
+    for (auto& extension : _renderExtensions) extension->AfterOpaque(context);
+    context.FinishStage();
+
+    auto* aoPass = context.AddPass<GDX12AmbientOcclusionPass>();
+    auto* lightingPass = context.AddPass<GDX12DeferredLightingPass>();
     _deferredLightingPass = lightingPass;
-    auto* reflectionPreviewPass = CreateRenderPass<GDX12ReflectionPreviewPass>();
-    auto* ssrPass = CreateRenderPass<GDX12SSSRPass>();
-    auto* fluidSurfacePass = CreateRenderPass<GDX12FluidSurfacePass>();
-    auto* transparencyPass = CreateRenderPass<GDX12WBOITTransparencyPass>(GDX12WBOITTransparencyPass::WaterPartition::Behind);
-    auto* compositionPass = CreateRenderPass<GDX12WBOITCompositionPass>();
-    auto* waterResolvePass = CreateRenderPass<GDX12FluidResolvePass>(fluidSurfacePass);
-    auto* frontPass = CreateRenderPass<GDX12WBOITTransparencyPass>(GDX12WBOITTransparencyPass::WaterPartition::Front);
-    auto* particlesPass = CreateRenderPass<GDX12ParticlesPass>();
+    auto* reflectionPreviewPass = context.AddPass<GDX12ReflectionPreviewPass>();
+    auto* ssrPass = context.AddPass<GDX12SSSRPass>();
+    aoPass->SetInputs({ context.OpaqueDepth(), opaquePass->GetOutput(3) });
+    lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4),
+        opaquePass->GetOutput(5), context.OpaqueDepth(), context.SunShadow, context.Environment[0], context.Environment[1],
+        context.Environment[2], context.Environment[3], context.LocalShadows, aoPass->GetOutput(0) });
+    reflectionPreviewPass->SetInputs({ lightingPass->GetOutput(0), context.OpaqueDepth(), context.OpaqueMotion(),
+        opaquePass->GetOutput(3), opaquePass->GetOutput(4) });
+    ssrPass->SetInputs({ lightingPass->GetOutput(0), context.OpaqueDepth(), opaquePass->GetOutput(3),
+        opaquePass->GetOutput(4), context.OpaqueMotion(), context.Environment[1], context.Environment[2] });
+    context.SceneColor = ssrPass->GetOutput(0);
+    context.FinishStage();
+    for (auto& extension : _renderExtensions) extension->AfterLighting(context);
+    context.FinishStage();
+
+    GDX12TransparencyTail tail;
+    const bool handled = GDX12BuildExtensionTransparency(_renderExtensions, context, tail);
+    if (!handled)
+    {
+        auto* transparencyPass = context.AddPass<GDX12WBOITTransparencyPass>();
+        transparencyPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+        transparencyPass->SetInputs({ context.SceneDepth, context.SunShadow, context.Environment[0],
+            context.Environment[1], context.Environment[2], context.LocalShadows });
+        tail.Background = context.SceneColor;
+        tail.Accumulation = transparencyPass->GetOutput(0);
+        tail.Revealage = transparencyPass->GetOutput(1);
+    }
+    if (!tail.Background || !tail.Accumulation || !tail.Revealage || !context.SceneDepth || !context.SceneMotion)
+        throw std::logic_error("Render extension returned an incomplete transparency tail");
+    context.FinishStage();
+
+    auto* particlesPass = context.AddPass<GDX12ParticlesPass>();
     _particlesPass = particlesPass;
-    auto* frontCompositionPass = CreateRenderPass<GDX12WBOITCompositionPass>(nullptr, frontPass);
-    auto* dofPass = CreateRenderPass<GDX12DepthOfFieldPass>();
-    auto* motionBlurPass = CreateRenderPass<GDX12MotionBlurPass>();
-    auto* upscalePass = CreateRenderPass<GDX12ReconstructionPass>();
-    auto* outputPass = CreateRenderPass<GDX12OutputToScreenPass>();
-    auto* frameGenerationPass = CreateRenderPass<GDX12FrameGenerationPass>(_backBuffer.get());
+    particlesPass->SetInputs({ context.SceneDepth, tail.Accumulation, tail.Revealage });
+    auto* compositionPass = context.AddPass<GDX12WBOITCompositionPass>(nullptr, tail.Producer);
+    compositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    compositionPass->SetApplyOpaqueAerialPerspective(tail.ApplyOpaqueAerialPerspective);
+    compositionPass->SetInputs({ tail.Background, tail.Accumulation, tail.Revealage, context.SceneDepth });
+    compositionPass->SetParticles(particlesPass);
+    context.SceneColor = compositionPass->GetOutput(0);
+    context.FinishStage();
+    for (auto& extension : _renderExtensions) extension->AfterTransparency(context);
+    context.FinishStage();
+
+    auto* dofPass = context.AddPass<GDX12DepthOfFieldPass>();
+    auto* motionBlurPass = context.AddPass<GDX12MotionBlurPass>();
+    dofPass->SetInputs({ context.SceneColor, context.SceneDepth });
+    motionBlurPass->SetInputs({ dofPass->GetOutput(0), context.SceneDepth, context.SceneMotion });
+    context.SceneColor = motionBlurPass->GetOutput(0);
+    context.SceneMotion = motionBlurPass->GetOutput(1);
+    context.FinishStage();
+    for (auto& extension : _renderExtensions) extension->AfterPostProcess(context);
+    context.FinishStage();
+
+    auto* upscalePass = context.AddPass<GDX12ReconstructionPass>();
+    auto* outputPass = context.AddPass<GDX12OutputToScreenPass>();
+    auto* frameGenerationPass = context.AddPass<GDX12FrameGenerationPass>(_backBuffer.get());
+    upscalePass->SetInputs({ context.SceneDepth, context.SceneMotion, context.SceneColor });
+    outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get() });
+    frameGenerationPass->SetInputs({ context.SceneDepth, context.SceneMotion, _backBuffer.get() });
+    context.FinishStage();
+    _renderStages = std::move(context.Stages);
     _reconstructionPass = upscalePass;
     _depthPrepass = depthPrepass;
     _opaquePass = opaquePass;
     _ambientOcclusionPass = aoPass;
+    for (auto* pass : std::array<GDX12RenderPass*, 4>{ depthPrepass, opaquePass, aoPass, lightingPass })
+        pass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
     SetupRenderPasses();
-
-    reflectionPass->SetInputs({ environmentPass->GetOutput(0), environmentPass->GetOutput(1),
-        environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0) });
-    cullingPass->SetInputs({});
-    depthPrepass->SetInputs({});
-    particleSimulationPass->SetInputs({depthPrepass->GetOutput(2)});
-    opaquePass->SetInputs(std::vector<IRenderPassLink*>{ depthPrepass->GetOutput(2) });
-    aoPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3) });
-    lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0), aoPass->GetOutput(0) });
-    reflectionPreviewPass->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2),
-        opaquePass->GetOutput(1), opaquePass->GetOutput(3), opaquePass->GetOutput(4) });
-    fluidSurfacePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
-    for (auto* pass : { transparencyPass, frontPass })
-        pass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0),
-            environmentPass->GetOutput(1), environmentPass->GetOutput(2), localShadowPass->GetOutput(0),
-            fluidSurfacePass->GetOutput(0) });
-    ssrPass->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(3),
-        opaquePass->GetOutput(4), opaquePass->GetOutput(1), environmentPass->GetOutput(1), environmentPass->GetOutput(2) });
-    compositionPass->SetInputs({ ssrPass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1), opaquePass->GetOutput(2) });
-    waterResolvePass->SetInputs({ compositionPass->GetOutput(0), environmentPass->GetOutput(1) });
-    frontCompositionPass->SetInputs({ waterResolvePass->GetOutput(0), frontPass->GetOutput(0), frontPass->GetOutput(1), fluidSurfacePass->GetOutput(0) });
-    dofPass->SetInputs({ frontCompositionPass->GetOutput(0), fluidSurfacePass->GetOutput(0) });
-    motionBlurPass->SetInputs({ dofPass->GetOutput(0), fluidSurfacePass->GetOutput(0), fluidSurfacePass->GetOutput(1) });
-    upscalePass->SetInputs({ fluidSurfacePass->GetOutput(0), motionBlurPass->GetOutput(1), motionBlurPass->GetOutput(0) });
-    particlesPass->SetInputs({ fluidSurfacePass->GetOutput(0), frontPass->GetOutput(0), frontPass->GetOutput(1) });
-    static_cast<GDX12WBOITCompositionPass*>(frontCompositionPass)->SetParticles(particlesPass);
-    outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get()});
-    frameGenerationPass->SetInputs({ fluidSurfacePass->GetOutput(0), motionBlurPass->GetOutput(1), _backBuffer.get() });
-
-    depthPrepass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    aoPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    lightingPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    transparencyPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    compositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    frontPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    frontCompositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-
     InitializeRenderPasses();
     RebuildRenderGraph();
 }
@@ -1527,12 +1577,24 @@ void RenderModule::RebuildRenderGraph()
     auto graph = std::make_unique<GDX12RenderGraph>(_primaryDevice.get());
     graph->ImportShared(GDX12RenderGraph::SharedResource::Scene, "Scene and frame buffers");
     graph->ImportLink("Swapchain", _backBuffer.get());
+    std::unordered_map<GDX12RenderPass*, GDX12RenderGraph::Pass> ids;
     for (const auto& pass : _primaryRenderPasses)
     {
         if (_graphEarlyAO && pass.get() == _ambientOcclusionPass) continue;
-        graph->AddPass(*pass);
-        if (_graphEarlyAO && pass.get() == _particleSimulationPass) graph->AddPass(*_ambientOcclusionPass);
+        ids.emplace(pass.get(), graph->AddPass(*pass));
+        if (_graphEarlyAO && pass.get() == _particleSimulationPass)
+            ids.emplace(_ambientOcclusionPass, graph->AddPass(*_ambientOcclusionPass));
     }
+    auto stages = _renderStages;
+    if (_graphEarlyAO)
+    {
+        for (auto& stage : stages)
+            stage.erase(std::remove(stage.begin(), stage.end(), _ambientOcclusionPass), stage.end());
+        stages.front().push_back(_ambientOcclusionPass);
+    }
+    GDX12RenderExtensionBuildContext ordering(_primaryRenderPasses, &_primaryResources, &_secondaryResources, &_RPcommonData);
+    ordering.Stages = std::move(stages);
+    ordering.ApplyStageDependencies(*graph, ids);
     graph->Compile(_graphReuseTextures);
     _primaryGraph = std::move(graph);
     _RPcommonData.RequestHistoryReset = true;

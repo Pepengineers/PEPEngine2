@@ -9,6 +9,7 @@
 #include "Engine.RendererDX12/GDX12Skinning.h"
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
 #include "Engine.RendererDX12/GDX12RenderGraph.h"
+#include "Engine.RendererDX12/GDX12RenderExtension.h"
 #include "App.Base/Systems/ShadowVisibilitySystem.h"
 #include <map>
 
@@ -48,6 +49,8 @@ class RenderModule final : public Module
 public:
     RenderModule(Window* window, GameTimer* timer);
     ~RenderModule() override;
+
+    GDX12RenderExtension* RegisterRenderExtension(std::unique_ptr<GDX12RenderExtension> extension);
 
     void Initialize() override;
     void Uninitialize() override;
@@ -261,6 +264,9 @@ private:
     // Owns pass implementations; execution is scheduled by the graph.
     std::vector<std::unique_ptr<GDX12RenderPass>> _primaryRenderPasses;
     std::vector<std::unique_ptr<GDX12RenderPass>> _secondaryRenderPasses;
+    std::vector<std::unique_ptr<GDX12RenderExtension>> _renderExtensions;
+    std::vector<GDX12RenderExtensionBuildContext::Stage> _renderStages;
+    bool _extensionsInitialized = false;
 
     // Flags that are accumulated from every active RenderPass on the device
     // Defines which resources should be uploaded onto respective GPU
