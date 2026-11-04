@@ -1,0 +1,414 @@
+#include "App.Base/Physics/JoltPhysicsBackend.h"
+
+#include <cstdarg>
+#include <cstdio>
+#include <stdexcept>
+#include "App.Base/Physics/JoltJobSystem.h"
+#include <cmath>
+#include <type_traits>
+
+#include <Jolt/Jolt.h>
+#include <Jolt/RegisterTypes.h>
+#include <Jolt/Core/Factory.h>
+#include <Jolt/Core/IssueReporting.h>
+#include <Jolt/Core/TempAllocator.h>
+#include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Collision/Shape/BoxShape.h>
+#include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
+#include <Jolt/Physics/Collision/Shape/CylinderShape.h>
+#include <Jolt/Physics/Body/BodyLock.h>
+
+#include "Common/Logger.h"
+
+#include <Windows.h>
+
+namespace
+{
+    void JoltTraceImpl(const char* format, ...)
+    {
+        va_list args;
+        va_start(args, format);
+
+        char buffer[1024];
+        vsnprintf(buffer, sizeof(buffer), format, args);
+
+        va_end(args);
+
+        Logger::Warn("Jolt: {}", buffer);
+    }
+
+#ifdef JPH_ENABLE_ASSERTS
+    bool JoltAssertFailedImpl(const char* expression, const char* message, const char* file, JPH::uint line)
+    {
+        Logger::Error(
+            "Jolt assert failed: {}:{}: ({}) {}",
+            file,
+            line,
+            expression ? expression : "",
+            message ? message : "");
+
+        return IsDebuggerPresent() != FALSE;
+    }
+#endif
+
+    JPH::Shape::ShapeResult CreateShape(const PhysicsShapeDesc& desc, const DirectX::SimpleMath::Vector3& scale)
+    {
+        return std::visit([&scale](const auto& shape) -> JPH::Shape::ShapeResult
+        {
+            using T = std::decay_t<decltype(shape)>;
+
+            const auto isPositive = [](float value) { return std::isfinite(value) && value > 0.0f; };
+
+            const auto invalidShape = []()
+            {
+                JPH::Shape::ShapeResult result;
+                result.SetError("Invalid shape dimensions");
+                return result;
+            };
+
+            if constexpr (std::is_same_v<T, BoxShapeDesc>)
+            {
+                DirectX::SimpleMath::Vector3 halfExtent(
+                    shape.HalfExtent.x * scale.x,
+                    shape.HalfExtent.y * scale.y,
+                    shape.HalfExtent.z * scale.z);
+                if (!isPositive(halfExtent.x) || !isPositive(halfExtent.y) || !isPositive(halfExtent.z)) { return invalidShape(); }
+                return JPH::BoxShapeSettings(JPH::Vec3(halfExtent.x, halfExtent.y, halfExtent.z)).Create();
+            }
+
+            else if constexpr (std::is_same_v<T, SphereShapeDesc>)
+            {
+                const float radius = shape.Radius * scale.x;
+                if (!isPositive(radius)) { return invalidShape(); }
+                return JPH::SphereShapeSettings(radius).Create();
+            }
+
+            else if constexpr (std::is_same_v<T, CylinderShapeDesc>)
+            {
+                const float radius = shape.Radius * scale.x;
+                const float halfHeight = shape.HalfHeight * scale.y;
+                if (!isPositive(radius) || !isPositive(halfHeight)) { return invalidShape(); }
+                return JPH::CylinderShapeSettings(halfHeight, radius).Create();
+            }
+
+            else
+            {
+                static_assert(std::is_same_v<T, CapsuleShapeDesc>, "Unsupported shape type");
+                const float radius = shape.Radius * scale.x;
+                const float halfCylinderHeight = shape.HalfCylinderHeight * scale.y;
+                if (!isPositive(radius) || (!std::isfinite(halfCylinderHeight) || halfCylinderHeight < 0)) { return invalidShape(); }
+                return JPH::CapsuleShapeSettings(halfCylinderHeight, radius).Create();
+            }
+
+        },
+        desc);
+    }
+}
+
+namespace ObjectLayers
+{
+    static constexpr JPH::ObjectLayer Static = 0;
+    static constexpr JPH::ObjectLayer Dynamic = 1;
+    static constexpr JPH::ObjectLayer Count = 2;
+}
+
+namespace BroadPhaseLayers
+{
+    static constexpr JPH::BroadPhaseLayer Static(0);
+    static constexpr JPH::BroadPhaseLayer Dynamic(1);
+    static constexpr uint32_t Count = 2;
+}
+
+class ObjectLayerPairFilterImpl final : public JPH::ObjectLayerPairFilter
+{
+public:
+    bool ShouldCollide(JPH::ObjectLayer a, JPH::ObjectLayer b) const override
+    {
+        switch (a)
+        {
+        case ObjectLayers::Static:
+            return b == ObjectLayers::Dynamic;
+
+        case ObjectLayers::Dynamic:
+            return true;
+
+        default:
+            JPH_ASSERT(false);
+            return false;
+        }
+    }
+};
+
+class BroadPhaseLayerInterfaceImpl final : public JPH::BroadPhaseLayerInterface
+{
+    public:
+    BroadPhaseLayerInterfaceImpl()
+    {
+        _mapping[ObjectLayers::Static] = BroadPhaseLayers::Static;
+        _mapping[ObjectLayers::Dynamic] = BroadPhaseLayers::Dynamic;
+    }
+
+    JPH::uint GetNumBroadPhaseLayers() const override
+    {
+        return BroadPhaseLayers::Count;
+    }
+
+    JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer layer) const override
+    {
+        JPH_ASSERT(layer < ObjectLayers::Count);
+        return _mapping[layer];
+    }
+
+#if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
+    const char* GetBroadPhaseLayerName(JPH::BroadPhaseLayer layer) const override
+    {
+        switch ((JPH::BroadPhaseLayer::Type)layer)
+        {
+        case (JPH::BroadPhaseLayer::Type)BroadPhaseLayers::Static:
+            return "Static";
+
+        case (JPH::BroadPhaseLayer::Type)BroadPhaseLayers::Dynamic:
+            return "Dynamic";
+
+        default:
+            JPH_ASSERT(false);
+            return "Invalid";
+        }
+    }
+#endif
+
+private:
+    JPH::BroadPhaseLayer _mapping[ObjectLayers::Count];
+};
+
+class ObjectVsBroadPhaseLayerFilterImpl final : public JPH::ObjectVsBroadPhaseLayerFilter
+{
+public:
+    bool ShouldCollide(JPH::ObjectLayer objectLayer, JPH::BroadPhaseLayer broadPhaseLayer) const override
+    {
+        switch (objectLayer)
+        {
+            case ObjectLayers::Static:
+                return broadPhaseLayer == BroadPhaseLayers::Dynamic;
+            case ObjectLayers::Dynamic:
+                return true;
+            default:
+                JPH_ASSERT(false);
+                return false;
+        }
+    }
+};
+
+struct JoltRuntime
+{
+    JoltRuntime()
+    {
+        JPH::RegisterDefaultAllocator();
+        if (JPH::Factory::sInstance) throw std::logic_error("Jolt factory is already owned by another runtime");
+        JPH::Trace = JoltTraceImpl;
+#ifdef JPH_ENABLE_ASSERTS
+        JPH::AssertFailed = JoltAssertFailedImpl;
+#endif
+        JPH::Factory::sInstance = new JPH::Factory();
+        JPH::RegisterTypes();
+    }
+    ~JoltRuntime()
+    {
+        JPH::UnregisterTypes();
+        delete JPH::Factory::sInstance;
+        JPH::Factory::sInstance = nullptr;
+    }
+};
+
+void JoltPhysicsBackend::Initialize(JobSystem& jobs)
+{
+    if (_bInitialized) return;
+    static std::weak_ptr<JoltRuntime> runtime;
+    _runtime = runtime.lock();
+    if (!_runtime) runtime = _runtime = std::make_shared<JoltRuntime>();
+
+    _tempAllocator = std::make_unique<JPH::TempAllocatorImpl>(10*1024*1024);
+
+    _jobSystem = std::make_unique<JoltJobSystem>(jobs);
+
+    _broadPhaseLayerInterface = std::make_unique<BroadPhaseLayerInterfaceImpl>();
+    _objectLayerPairFilter = std::make_unique<ObjectLayerPairFilterImpl>();
+    _objectVsBroadPhaseLayerFilter = std::make_unique<ObjectVsBroadPhaseLayerFilterImpl>();
+
+    constexpr uint32_t MaxBodies = 2048;
+    constexpr uint32_t NumBodyMutexes = 0;
+    constexpr uint32_t MaxBodyPairs = 16384;
+    constexpr uint32_t MaxContactConstraints = 16384;
+
+    _physicsSystem = std::make_unique<JPH::PhysicsSystem>();
+
+    _physicsSystem->Init(MaxBodies, NumBodyMutexes, MaxBodyPairs, MaxContactConstraints, *_broadPhaseLayerInterface, *_objectVsBroadPhaseLayerFilter, *_objectLayerPairFilter);
+    _bInitialized = true;
+    Logger::Info("Jolt physics backend initialized");
+}
+
+void JoltPhysicsBackend::Uninitialize()
+{
+    _physicsSystem.reset();
+    _objectLayerPairFilter.reset();
+    _objectVsBroadPhaseLayerFilter.reset();
+    _broadPhaseLayerInterface.reset();
+
+    _jobSystem.reset();
+    _tempAllocator.reset();
+
+    _runtime.reset();
+
+    _bInitialized = false;
+}
+
+JoltPhysicsBackend::JoltPhysicsBackend() = default;
+
+JoltPhysicsBackend::~JoltPhysicsBackend()
+{
+    Uninitialize();
+}
+
+void JoltPhysicsBackend::Step(float dt)
+{
+    if (!_bInitialized || !_physicsSystem)
+    {
+        return;
+    }
+
+    if (!std::isfinite(dt) || dt <= 0) return;
+    constexpr int CollisionSteps = 1;
+    const auto error = _physicsSystem->Update(dt, CollisionSteps, _tempAllocator.get(), _jobSystem.get());
+    if (error != JPH::EPhysicsUpdateError::None) throw std::runtime_error("Jolt physics capacity exceeded during update");
+
+}
+
+PhysicsBodyHandle JoltPhysicsBackend::CreateBody(const PhysicsBodyDesc& desc)
+{
+    if (!_bInitialized || !_physicsSystem)
+    {
+        Logger::Error("CreateBody(): backend isnt initialized");
+        return {};
+    }
+
+    JPH::EMotionType motionType;
+
+    switch (desc.MotionType)
+    {
+    case PhysicsMotionType::Static:
+        motionType = JPH::EMotionType::Static;
+        break;
+    case PhysicsMotionType::Dynamic:
+        motionType = JPH::EMotionType::Dynamic;
+        break;
+    case PhysicsMotionType::Kinematic:
+        motionType = JPH::EMotionType::Kinematic;
+        break;
+
+    default:
+        Logger::Error("CreateBody(): invalid motion type");
+        return {};
+    }
+
+    const bool isStatic = desc.MotionType == PhysicsMotionType::Static;
+
+    const auto shapeResult = CreateShape(desc.Shape, desc.Scale);
+    if (shapeResult.HasError())
+    {
+        Logger::Error("CreateBody(): {}", shapeResult.GetError().c_str());
+        return {};
+    }
+    JPH::ShapeRefC shape = shapeResult.Get();
+
+    JPH::BodyCreationSettings settings(
+        shape,
+        JPH::RVec3(desc.Position.x, desc.Position.y, desc.Position.z),
+        JPH::Quat(desc.Rotation.x, desc.Rotation.y, desc.Rotation.z, desc.Rotation.w),
+        motionType,
+        isStatic ? ObjectLayers::Static : ObjectLayers::Dynamic
+    );
+
+    JPH::BodyInterface& bodyInterface = _physicsSystem->GetBodyInterface();
+
+    JPH::Body* body = bodyInterface.CreateBody(settings);
+    if (!body)
+    {
+        Logger::Error("CreateBody(): failed to create");
+        return {};
+    }
+
+    const JPH::BodyID& bodyID = body->GetID();
+    bodyInterface.AddBody(bodyID, isStatic ? JPH::EActivation::DontActivate : JPH::EActivation::Activate);
+
+    return PhysicsBodyHandle{ bodyID.GetIndexAndSequenceNumber() };
+}
+
+void JoltPhysicsBackend::DestroyBody(PhysicsBodyHandle handle)
+{
+    if (!_bInitialized || !_physicsSystem || !handle.IsValid())
+    {
+        Logger::Error("DestroyBody(): backend isn't initialized or invalid handle");
+        return;
+    }
+
+    const JPH::BodyID bodID(handle.Value);
+
+    JPH::BodyInterface& bodyInterface = _physicsSystem->GetBodyInterface();
+
+    bodyInterface.RemoveBody(bodID);
+    bodyInterface.DestroyBody(bodID);
+}
+
+bool JoltPhysicsBackend::TryGetBodyTransform(PhysicsBodyHandle handle, DirectX::SimpleMath::Vector3& outPosition,
+    DirectX::SimpleMath::Quaternion& outRotation) const
+{
+    if (!_bInitialized || !_physicsSystem || !handle.IsValid()) { return false; }
+
+    const JPH::BodyID bodID(handle.Value);
+    JPH::BodyLockRead lock(_physicsSystem->GetBodyLockInterface(), bodID);
+
+    if (!lock.Succeeded()) { return false; }
+
+    const JPH::Body& body = lock.GetBody();
+    const JPH::RVec3 position = body.GetPosition();
+    const JPH::Quat rotation = body.GetRotation();
+
+    outPosition = DirectX::SimpleMath::Vector3(
+        static_cast<float>(position.GetX()),
+        static_cast<float>(position.GetY()),
+        static_cast<float>(position.GetZ()));
+
+    outRotation = DirectX::SimpleMath::Quaternion(
+       rotation.GetX(),
+       rotation.GetY(),
+       rotation.GetZ(),
+       rotation.GetW());
+
+    return true;
+}
+
+void JoltPhysicsBackend::MoveKinematicBody(PhysicsBodyHandle handle, const DirectX::SimpleMath::Vector3& targetPosition,
+    const DirectX::SimpleMath::Quaternion& targetRotation, float dt)
+{
+    if (!_bInitialized || !_physicsSystem || !handle.IsValid() || !std::isfinite(dt) || dt <= 0) { return; }
+
+    const JPH::BodyID bodID(handle.Value);
+    auto& bodyInterface = _physicsSystem->GetBodyInterface();
+
+    if (bodyInterface.GetMotionType(bodID) != JPH::EMotionType::Kinematic) { return; }
+
+    bodyInterface.MoveKinematic(
+        bodID,
+        JPH::RVec3(
+            targetPosition.x,
+            targetPosition.y,
+            targetPosition.z),
+        JPH::Quat(
+            targetRotation.x,
+            targetRotation.y,
+            targetRotation.z,
+            targetRotation.w),
+        dt);
+}

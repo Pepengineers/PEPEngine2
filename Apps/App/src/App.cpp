@@ -105,7 +105,9 @@ namespace
                 work = _flyingProps.Schedule(_jobs, world, dt, work);
                 work = _lookAt.Schedule(_jobs, world, dt, work);
                 work = _lights.Schedule(_jobs, world, dt, work);
-                work = _gpuData.Schedule(_jobs, world, dt, work);
+                work.Complete();
+                UpdatePhysics(world, dt);
+                work = _gpuData.Schedule(_jobs, world, dt);
                 work.Complete();
                 _reflections.DrawBounds(world, *Locator.GetModule<RenderModule>());
                 _bounds->DrawBounds(*Locator.GetModule<RenderModule>());

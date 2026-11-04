@@ -1,0 +1,8 @@
+App:
+  Name: App.Editor
+  Type: Editor
+  StartScene: Scenes/PhysicsSandbox.yaml
+
+  SystemsBanlist:
+    - SplineFollowSystem
+    - LookAtTargetSystem

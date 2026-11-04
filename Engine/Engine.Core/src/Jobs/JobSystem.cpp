@@ -240,6 +240,17 @@ JobSystem::~JobSystem()
 unsigned JobSystem::GetThreadCount() const { return _impl->Scheduler.GetNumTaskThreads(); }
 size_t JobSystem::GetDefaultBatchSize() const { return _impl->DefaultBatchSize; }
 
+void JobSystem::QueueTask(enki::ITaskSet& task)
+{
+    _impl->Scheduler.AddTaskSetToPipe(&task);
+}
+
+void JobSystem::WaitForTask(const enki::ICompletable* task)
+{
+    _impl->CheckThread();
+    _impl->Scheduler.WaitforTask(task);
+}
+
 JobHandle JobSystem::Schedule(ParallelJob& job, size_t count, size_t batchSize, const JobHandle& dependency)
 {
     _impl->CheckThread();

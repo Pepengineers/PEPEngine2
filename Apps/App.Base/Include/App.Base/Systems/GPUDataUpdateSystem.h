@@ -9,6 +9,7 @@
 class GPUDataUpdateSystem final : public System
 {
 public:
+    SystemUpdatePhase GetUpdatePhase() const override { return SystemUpdatePhase::RenderPrep; }
     void Tick(World& world, float dt) override
     {
         Prepare(world, dt);
@@ -52,7 +53,8 @@ protected:
                 auto& renderer = ecs.Get<StaticMeshRenderComponent>(entity);
                 const bool dynamic = renderer.ReflectionDynamic || ecs.Has<VelocityComponent>(entity) ||
                     ecs.Has<CircleMovementComponent>(entity) || ecs.Has<SplineFollowComponent>(entity) ||
-                    ecs.Has<LookAtTargetComponent>(entity);
+                    ecs.Has<LookAtTargetComponent>(entity) ||
+                    (ecs.Has<RigidBodyComponent>(entity) && ecs.Get<RigidBodyComponent>(entity).MotionType != PhysicsMotionType::Static);
                 renderer.DirtyFlag |= renderer._reflectionDynamic != dynamic;
                 renderer._reflectionDynamic = dynamic;
                 if (changed || renderer.DirtyFlag)

@@ -4,3 +4,6 @@
 [submodule "External/External.Libraries/inih"]
 	path = External/External.Libraries/inih
 	url = https://github.com/benhoyt/inih.git
+[submodule "External/External.Libraries/jolt/JoltPhysics"]
+	path = External/External.Libraries/jolt/JoltPhysics
+	url = https://github.com/jrouwe/JoltPhysics.git

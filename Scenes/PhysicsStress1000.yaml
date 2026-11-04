@@ -1,0 +1,6 @@
+Scene:
+  Name: PhysicsStress1000
+
+  Worlds:
+    - Name: PhysicsStress1000World
+      Path: Worlds/PhysicsStress1000.world

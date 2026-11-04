@@ -5,10 +5,10 @@
 
 using DirectX::SimpleMath::Vector3;
 
-//This should probably be remade into a PhysicsComponent
 struct VelocityComponent : ComponentTag
 {
     Vector3 Velocity;
+    Vector3 AngularVelocity{}; // degrees per second
 
     VelocityComponent()
         : Velocity(Vector3(0.f, 0.f, 0.f))

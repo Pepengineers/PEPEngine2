@@ -12,6 +12,7 @@
 
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Modules/SceneManagerModule.h"
+#include "App.Base/Modules/PhysicsModule.h"
 #include "App.Base/Window.h"
 #include "App.Base/Systems/MovementSystem.h"
 #include "App.Base/Systems/CircleMovementSystem.h"
@@ -70,7 +71,7 @@ protected:
     virtual ~App() override;
 
     virtual void OnResize();
-    
+
     // Convenience overrides for handling mouse input.
     virtual void OnMouseDown(WPARAM btnState, int x, int y)
     {
@@ -97,6 +98,8 @@ protected:
     bool InitMainWindow();
     bool AddModules() override;
     void Update(const GameTimer& gameTimer) override;
+
+    void UpdatePhysics(World& world, float dt);
 
     JobSystem _jobs;
     MovementSystem _movement;

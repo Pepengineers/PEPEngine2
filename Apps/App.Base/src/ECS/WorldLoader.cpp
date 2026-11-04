@@ -33,6 +33,8 @@
 #include <vector>
 #include <unordered_set>
 #include <chrono>
+#include <cmath>
+#include <Windows.h>
 
 namespace
 {
@@ -636,7 +638,7 @@ namespace
             if (auto* app = App::GetInstance())
                 app->ReportLoading(L"Uploading materials " + std::to_wstring(materialIndex + 1) + L"/" + std::to_wstring(materialCount));
             const std::filesystem::path diffuseTexturePath = materials[materialIndex].DiffuseTexturePath;
-            
+
             MaterialTextureSet textures = {};
             if (!diffuseTexturePath.empty())
             {
@@ -653,7 +655,7 @@ namespace
             {
                 textures.Diffuse = CreateDiffuseColorTexture(renderModule, sceneName, materials[materialIndex]);
             }
-            
+
             textures.Normal = defaultTextures.FlatNormal;
             textures.Specular = defaultTextures.White;
             textures.Roughness = defaultTextures.White;
@@ -679,27 +681,27 @@ namespace
                 textures.Roughness = roughnessTexture;
                 textures.HasRoughnessMap = true;
             }
-            
+
             GPUTexture* emissiveTexture = LoadSceneGpuTexture(renderModule, assetManager, materials[materialIndex].EmissiveTexturePath, Engine::Core::ETextureType::Color, sceneName, gpuTexturesByPath);
             if (emissiveTexture != nullptr)
             {
                 textures.Emissive = emissiveTexture;
                 textures.HasEmissiveMap = true;
             }
-            
+
             if (textures.Diffuse == nullptr)
             {
                 continue;
             }
-            
+
             GDX12Material* material = CreateSceneMaterial(renderModule, sceneName + "_Material_" + std::to_string(materialIndex), materials[materialIndex], textures);
-            
+
             if (material != nullptr)
             {
                 materialSlots[materialIndex] = material;
             }
         }
-        
+
         return materialSlots;
     }
 
@@ -729,7 +731,7 @@ namespace
                 sceneMeshHandle.IsValid() ? "true" : "false");
             return false;
         }
-        
+
         const SceneDefaultMaterialTextures defaultMaterialTextures = CreateSceneDefaultMaterialTextures(renderModule, sceneName);
         if (!defaultMaterialTextures.IsValid())
         {
@@ -745,7 +747,7 @@ namespace
                 defaultMaterialTextures.Black != nullptr ? "true" : "false");
             return false;
         }
-        
+
         GDX12Material* fallbackMaterial = CreateSceneFallbackMaterial(renderModule, assetManager, sceneName, defaultMaterialTextures);
         if (fallbackMaterial == nullptr)
         {
@@ -757,9 +759,9 @@ namespace
                 objPath.string());
             return false;
         }
-        
+
         renderModule.SubmitMesh(sceneMesh, sceneMeshHandle);
-        
+
         const auto materialSlots = BuildObjMaterialSlots(renderModule, assetManager, *sceneMesh,
             sceneName, fallbackMaterial, defaultMaterialTextures, gpuTexturesByPath);
         renderModule.ReserveInstanceCapacity(static_cast<UINT>(sceneMesh->GetSubMeshCount()));
@@ -773,7 +775,7 @@ namespace
             entity.AddComponent<TransformComponent>();
             entity.AddComponent<StaticMeshRenderComponent>(sceneMeshHandle, materialSlots);
         }
-        
+
         outBounds = sceneMesh->GetBounds();
         return true;
     }
@@ -787,32 +789,32 @@ namespace
             sceneBounds.Center.y,
             sceneBounds.Center.z
         };
-        
+
         const Vector3 sceneExtents =
         {
             sceneBounds.Extents.x,
             sceneBounds.Extents.y,
             sceneBounds.Extents.z
         };
-        
+
         float maxHorizontalExtent = sceneExtents.x;
         maxHorizontalExtent = (std::max)(sceneExtents.z, maxHorizontalExtent);
         maxHorizontalExtent = (std::max)(maxHorizontalExtent, 10.0f);
-        
+
         const float cameraDistance = maxHorizontalExtent * 1.75f;
         const Vector3 cameraLocation = sceneCenter + Vector3(0.0f, sceneExtents.y * 0.35f, -cameraDistance);
-        
+
         WorldECS& ecs = world.GetECS();
         auto camera = ecs.CreateEntity();
         camera.AddComponent<NameComponent>("MainCamera");
         camera.AddComponent<TransformComponent>(cameraLocation, Vector3(0.0f, 0.0f, 0.0f));
-        
+
         auto& cameraComponent = camera.AddComponent<CameraComponent>();
         cameraComponent.FOV = 60.0f;
         cameraComponent.NearPlane = 0.1f;
         cameraComponent.FarPlane = 10000.0f;
         cameraComponent.DirtyFlag = true;
-        
+
         world.ActiveCamera = camera;
         BenchmarkEngine::GetLocator().GetModule<RenderModule>()->SetActiveCamera(&cameraComponent);
     }
@@ -971,11 +973,11 @@ namespace
             RenderModule& Renderer;
             ~UploadCompletion() { Renderer.EndTextureUploadBatch(); }
         } completion{ renderModule };
-        
+
         bool loadedAnyObject = false;
         DirectX::BoundingBox sceneBounds = {};
         std::unordered_map<std::wstring, GPUTexture*> gpuTexturesByPath;
-        
+
         for (const std::filesystem::path& objPath : objPaths)
         {
             Log::Info("Loading", "Publishing scene part: ", objPath);
@@ -992,7 +994,7 @@ namespace
                 Log::Error("Loading", "Failed to load scene part: ", objPath);
                 return false;
             }
-            
+
             if (!loadedAnyObject)
             {
                 sceneBounds = objBounds;
@@ -1003,7 +1005,7 @@ namespace
                 DirectX::BoundingBox::CreateMerged(sceneBounds, sceneBounds, objBounds);
             }
         }
-        
+
         if (!loadedAnyObject)
         {
             Logger::Error(
@@ -1012,7 +1014,7 @@ namespace
                 sceneRoot.string());
             return false;
         }
-        
+
         CreateCameraForBounds(world, sceneBounds);
         Log::Info("Loading", "Waiting for GPU uploads to complete");
         renderModule.WaitForUploads();
@@ -1552,6 +1554,143 @@ static bool ParseTransform(WorldECS::EntityHandle& entity, ryml::NodeRef node)
     return true;
 }
 
+static bool ParseVelocity(WorldECS::EntityHandle& entity, ryml::NodeRef node)
+{
+    if (node.is_seq())
+    {
+        entity.AddComponent<VelocityComponent>(ReadVector3(node));
+        return true;
+    }
+
+    if (!node.is_map() || (!node.has_child("Linear") && !node.has_child("AngularVelocity")))
+    {
+        Logger::Error("Velocity requires Linear or AngularVelocity");
+        return false;
+    }
+
+    const auto readVector = [](ryml::NodeRef field, Vector3& out)
+    {
+        const auto readNumber = [](ryml::NodeRef value, float& outValue)
+        {
+            return value.has_val() && ryml::read(value, &outValue) && std::isfinite(outValue);
+        };
+        return field.is_seq() && field.num_children() == 3 && readNumber(field[0], out.x) && readNumber(field[1], out.y) && readNumber(field[2], out.z);
+    };
+
+    VelocityComponent velocity;
+    if ((node.has_child("Linear") && !readVector(node["Linear"], velocity.Velocity)) ||
+        (node.has_child("AngularVelocity") && !readVector(node["AngularVelocity"], velocity.AngularVelocity)))
+    {
+        Logger::Error("Velocity vectors require three finite numbers");
+        return false;
+    }
+
+    entity.AddComponent<VelocityComponent>(velocity);
+    return true;
+}
+
+static bool ParseRigidBody(WorldECS::EntityHandle& entity, ryml::NodeRef node)
+{
+    RigidBodyComponent component;
+
+    std::string motionType = "Static";
+
+    if (node.has_child("MotionType"))
+    {
+        node["MotionType"] >> motionType;
+    }
+
+    if (motionType == "Static")
+    {
+        component.MotionType = PhysicsMotionType::Static;
+    }
+    else if (motionType == "Dynamic")
+    {
+        component.MotionType = PhysicsMotionType::Dynamic;
+    }
+    else if (motionType == "Kinematic")
+    {
+        component.MotionType = PhysicsMotionType::Kinematic;
+    }
+    else
+    {
+        Logger::Error("Unknown physics motion type: {}", motionType);
+        return false;
+    }
+
+    entity.AddComponent<RigidBodyComponent>(component);
+    return true;
+}
+
+static bool ParseCollider(
+    WorldECS::EntityHandle& entity,
+    ryml::NodeRef node)
+{
+    if (!node.is_map() || !node.has_child("Type"))
+    {
+        Logger::Error("Collider requires Type");
+        return false;
+    }
+
+    std::string type;
+    node["Type"] >> type;
+
+    const auto isPositive = [](float value) { return std::isfinite(value) && value > 0.0f; };
+
+    ColliderComponent component;
+    bool valid = false;
+
+    if (type == "Box")
+    {
+        BoxShapeDesc shape;
+        if (node.has_child("HalfExtent")) { shape.HalfExtent = ReadVector3(node["HalfExtent"]); }
+
+        const auto& extent = shape.HalfExtent;
+        valid = isPositive(extent.x) && isPositive(extent.y) && isPositive(extent.z);
+        component.Shape = shape;
+    }
+    else if (type == "Sphere")
+    {
+        SphereShapeDesc shape;
+        if (node.has_child("Radius")) { node["Radius"] >> shape.Radius; }
+
+        valid = isPositive(shape.Radius);
+        component.Shape = shape;
+    }
+    else if (type == "Cylinder")
+    {
+        CylinderShapeDesc shape;
+        if (node.has_child("Radius")) { node["Radius"] >> shape.Radius; }
+        if (node.has_child("HalfHeight")) { node["HalfHeight"] >> shape.HalfHeight; }
+
+        valid = isPositive(shape.Radius) && isPositive(shape.HalfHeight);
+        component.Shape = shape;
+    }
+    else if (type == "Capsule")
+    {
+        CapsuleShapeDesc shape;
+        if (node.has_child("Radius")) { node["Radius"] >> shape.Radius; }
+        if (node.has_child("HalfCylinderHeight")) { node["HalfCylinderHeight"] >> shape.HalfCylinderHeight; }
+
+        valid = isPositive(shape.Radius) && std::isfinite(shape.HalfCylinderHeight) && shape.HalfCylinderHeight >= 0.0f;
+        component.Shape = shape;
+    }
+    else
+    {
+        Logger::Error("Unknown collider type: {}", type);
+        return false;
+    }
+
+    if (!valid)
+    {
+        Logger::Error("Invalid {} collider dimensions", type);
+        return false;
+    }
+
+    entity.AddComponent<ColliderComponent>(component);
+    return true;
+}
+
 static bool ParseStaticMeshRender(
     WorldLoadContext& context,
     WorldECS::EntityHandle& entity,
@@ -1666,6 +1805,24 @@ static bool LoadEntityComponentsWithoutRefs(
             }
         }
 
+        const bool hasRigidBody = components.has_child("RigidBody");
+        const bool hasCollider = components.has_child("Collider");
+
+        if ((hasRigidBody || hasCollider) && !entity.HasComponent<TransformComponent>())
+        {
+            Logger::Error("Physics entity '{}' requires Transform", id);
+            return false;
+        }
+
+        if (hasRigidBody)
+        {
+            if (!ParseRigidBody(entity, components["RigidBody"])) { return false; }
+        }
+        if (hasCollider)
+        {
+            if (!ParseCollider(entity, components["Collider"])) { return false; }
+        }
+
         if (components.has_child("Camera"))
         {
             auto& camera = entity.AddComponent<CameraComponent>();
@@ -1692,8 +1849,7 @@ static bool LoadEntityComponentsWithoutRefs(
 
         if (components.has_child("Velocity"))
         {
-            Vector3 velocity = ReadVector3(components["Velocity"]);
-            entity.AddComponent<VelocityComponent>(velocity);
+            if (!ParseVelocity(entity, components["Velocity"])) { return false; }
         }
 
         if (components.has_child("CircleMovement"))
@@ -1882,12 +2038,47 @@ static bool LoadEntityComponentsWithRefs(
                 node["Time"] >> time;
             }
 
+            SplineUpdateMode updateMode = SplineUpdateMode::Frame;
+            if (node.has_child("UpdateMode"))
+            {
+                std::string mode;
+                node["UpdateMode"] >> mode;
+
+                if (mode == "Fixed")
+                {
+                    updateMode = SplineUpdateMode::Fixed;
+                }
+                else if (mode != "Frame")
+                {
+                    Logger::Error("Unknown spline update mode: {}", mode);
+                    return false;
+                }
+            }
+
+            if (!std::isfinite(duration) || duration <= 0.0f || !std::isfinite(time) || time < 0.0f)
+            {
+                Logger::Error("Invalid spline timing for entity '{}'", id);
+                return false;
+            }
+
+            if (entity.HasComponent<RigidBodyComponent>())
+            {
+                const auto& rigidBody = entity.GetComponent<RigidBodyComponent>();
+
+                if (rigidBody.MotionType != PhysicsMotionType::Kinematic || updateMode != SplineUpdateMode::Fixed)
+                {
+                    Logger::Error("Spline movement of entity '{}' requires kinematic motion type and fixed update mode", id);
+                    return false;
+                }
+            }
+
             entity.AddComponent<SplineFollowComponent>(
                 curveEntity,
                 duration,
                 loop,
                 playing,
-                time
+                time,
+                updateMode
             );
         }
     }

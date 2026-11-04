@@ -73,6 +73,11 @@ inline Vector3 EvaluateSpline(const SplineCurveComponent& spline, float t)
 class SplineFollowSystem final : public System
 {
 public:
+    explicit SplineFollowSystem(SplineUpdateMode updateMode = SplineUpdateMode::Frame)
+        : _updateMode(updateMode)
+    {
+    }
+
     void Tick(World& world, float dt) override
     { TickRange(world, dt, 0, GetWorkCount(world)); }
 
@@ -81,13 +86,25 @@ protected:
     void TickRange(World& world, float dt, size_t begin, size_t end) override
     {
         WorldECS& ecs = world.GetECS();
-        
+
         ecs.ForEachRange<SplineFollowComponent, TransformComponent>(begin, end,
             [&](Entity entity, SplineFollowComponent& follow, TransformComponent& transform)
             {
-                if (!follow.bPlaying) return;
-                
-                auto& curve = ecs.GetEntityHandle(follow.CurveEntity).GetComponent<SplineCurveComponent>();
+                if (follow.UpdateMode != _updateMode || !follow.bPlaying) { return; }
+
+                if (!std::isfinite(follow.Duration) || follow.Duration <= 0.0f || !std::isfinite(follow.Time) || follow.Time < 0.0f) { return; }
+
+                if (ecs.Has<RigidBodyComponent>(entity))
+                {
+                    const auto& rigidBody = ecs.Get<RigidBodyComponent>(entity);
+                    if (rigidBody.MotionType != PhysicsMotionType::Kinematic || _updateMode != SplineUpdateMode::Fixed || !rigidBody.Body.IsValid()) { return; }
+                }
+
+                if (!ecs.Has<SplineCurveComponent>(follow.CurveEntity)) { return; }
+
+                const auto& curve = ecs.Get<SplineCurveComponent>(follow.CurveEntity);
+
+                if (curve.Points.empty()) { return; }
 
                 follow.Time += dt;
 
@@ -109,4 +126,12 @@ protected:
                 transform.DirtyFlag = true;
             });
     }
+
+    SystemUpdatePhase GetUpdatePhase() const override
+    {
+        return _updateMode == SplineUpdateMode::Fixed ? SystemUpdatePhase::FixedPrePhysics : SystemUpdatePhase::FrameUpdate;
+    }
+
+private:
+    SplineUpdateMode _updateMode;
 };

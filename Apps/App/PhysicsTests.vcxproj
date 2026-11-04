@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="App.vcxproj" />
+  <PropertyGroup><ProjectGuid>{A99FE610-4AE5-4D58-AF07-A07B9F521E49}</ProjectGuid></PropertyGroup>
+  <ItemGroup>
+    <ClCompile Remove="src\App.cpp" />
+    <ClCompile Include="tests\PhysicsTests.cpp" />
+  </ItemGroup>
+  <ItemDefinitionGroup><Link><SubSystem>Console</SubSystem></Link></ItemDefinitionGroup>
+</Project>

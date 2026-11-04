@@ -23,6 +23,8 @@
 #include "App.Base/ECS/Components/SkeletalMeshRenderComponent.h"
 #include "App.Base/ECS/Components/TransformComponent.h"
 #include "App.Base/ECS/Components/VelocityComponent.h"
+#include "App.Base/ECS/Components/RigidBodyComponent.h"
+#include "App.Base/ECS/Components/ColliderComponent.h"
 
 struct WorldDesc {
     std::filesystem::path WorldFilePath;
@@ -48,7 +50,9 @@ using WorldECS = ECSStorage<
     GrassRenderComponent,
     WindFieldComponent,
     ParticleEmitterComponent,
-    FluidRenderComponent
+    FluidRenderComponent,
+    RigidBodyComponent,
+    ColliderComponent
 >;
 
 class World {
@@ -61,7 +65,7 @@ public:
     bool Load();
 
     bool Save(const std::filesystem::path& path);
-    
+
     void Tick(float dt);
 
     void SetTimeScale(float scale);
@@ -87,7 +91,9 @@ public:
     std::function<bool(const std::string&, const StaticMeshRenderComponent&)> SceneMeshFactory;
 
 private:
-    
+    friend class App;
+    double _physicsAccumulator = 0;
+
     SkySource _skySource = SkySource::Off;
     Entity _skyEntity = InvalidEntity;
     uint64_t _skyRevision = 0;

@@ -1,0 +1,164 @@
+# Physics sandbox. Set App.StartScene to Scenes/PhysicsSandbox.yaml.
+# Visible motion requires the physics-to-ECS transform synchronization.
+World:
+  Name: PhysicsSandboxWorld
+
+  Systems:
+    - Name: DynamicBodyUpdateSystem
+      Priority: 0
+    - Name: GPUDataUpdateSystem
+      Priority: 101
+
+  Resources:
+    Meshes:
+      - Id: SandboxCubeMesh
+        Source: Assets/Models/PhysicsSandbox/UnitCube.obj
+        SubmitToRenderer: true
+        ImportMaterials: true
+      - Id: SandboxSphereMesh
+        Source: Assets/Models/PhysicsSandbox/UnitSphere.obj
+        SubmitToRenderer: true
+        ImportMaterials: true
+      - Id: SandboxCapsuleMesh
+        Source: Assets/Models/PhysicsSandbox/UnitCapsule.obj
+        SubmitToRenderer: true
+        ImportMaterials: true
+      - Id: SandboxCylinderMesh
+        Source: Assets/Models/PhysicsSandbox/UnitCylinder.obj
+        SubmitToRenderer: true
+        ImportMaterials: true
+      - Id: SandboxFloorMesh
+        Source: Assets/Models/PhysicsSandbox/FloorCube.obj
+        SubmitToRenderer: true
+        ImportMaterials: true
+
+  Entities:
+    - Id: Floor
+      Components:
+        Name:
+          Value: Floor
+        Transform:
+          Location: [50, -0.5, 0.0]
+          Rotation: [0.0, 0.0, 0.0]
+          Scale: [24, 1, 20]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: SandboxFloorMesh
+
+    - Id: CapsuleResting
+      Components:
+        Name:
+          Value: CapsuleResting
+        Transform:
+          Location: [45, 1, -3]
+          Rotation: [0.0, 0.0, 0.0]
+          Scale: [2, 2, 2]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: Capsule
+          Radius: 0.25
+          HalfCylinderHeight: 0.25
+        StaticMeshRender:
+          Mesh: SandboxCapsuleMesh
+
+    - Id: SphereDrop
+      Components:
+        Name:
+          Value: SphereDrop
+        Transform:
+          Location: [49, 7, -3]
+          Rotation: [0.0, 0.0, 0.0]
+          Scale: [2, 2, 2]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: Sphere
+          Radius: 0.5
+        StaticMeshRender:
+          Mesh: SandboxSphereMesh
+
+    - Id: CubeTilted
+      Components:
+        Name:
+          Value: CubeTilted
+        Transform:
+          Location: [53, 5, -2]
+          Rotation: [12, 25, 8]
+          Scale: [2, 2, 2]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: Box
+          HalfExtent: [0.5, 0.5, 0.5]
+        StaticMeshRender:
+          Mesh: SandboxCubeMesh
+
+    - Id: CapsuleLarge
+      Components:
+        Name:
+          Value: CapsuleLarge
+        Transform:
+          Location: [55, 9, 3]
+          Rotation: [0.0, 15, 0.0]
+          Scale: [3, 3, 3]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: Capsule
+          Radius: 0.25
+          HalfCylinderHeight: 0.25
+        StaticMeshRender:
+          Mesh: SandboxCapsuleMesh
+
+    - Id: CylinderStackLower
+      Components:
+        Name:
+          Value: CylinderStackLower
+        Transform:
+          Location: [47, 1, 3]
+          Rotation: [0.0, 0.0, 0.0]
+          Scale: [2, 2, 2]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: Cylinder
+          Radius: 0.5
+          HalfHeight: 0.5
+        StaticMeshRender:
+          Mesh: SandboxCylinderMesh
+
+    - Id: SphereStackUpper
+      Components:
+        Name:
+          Value: SphereStackUpper
+        Transform:
+          Location: [47, 3.15, 3]
+          Rotation: [0.0, 8, 0.0]
+          Scale: [2, 2, 2]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: Sphere
+          Radius: 0.5
+        StaticMeshRender:
+          Mesh: SandboxSphereMesh
+
+    - Id: MainCamera
+      Components:
+        Name:
+          Value: MainCamera
+        Transform:
+          Location: [68, 16, -26]
+          Rotation: [22.347372, -34.695154, 0.0]
+          Scale: [1, 1, 1]
+        Camera:
+          FOV: 60.0
+          NearPlane: 0.1
+          FarPlane: 300.0
+
+  ActiveCamera: MainCamera

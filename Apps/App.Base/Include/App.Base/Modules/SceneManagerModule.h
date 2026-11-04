@@ -17,7 +17,7 @@
 #include "App.Base/ECS/AppConfig.h"
 
 class World;
-class System;
+class PhysicsModule;
 
 class SceneManagerModule final : public Module
 {
@@ -44,9 +44,10 @@ public:
     bool UnloadWorld(size_t index);
     bool SaveWorld(World* world, const std::filesystem::path& path);
     World* GetWorld(size_t index = 0);
-    
+
     size_t GetWorldCount() const;
-    void UpdateSystems(JobSystem& jobs, World& world, float dt);
+    void UpdateSystems(JobSystem& jobs, World& world, float dt,
+        SystemUpdatePhase phase = SystemUpdatePhase::FrameUpdate);
 
     template<typename T, typename... Args>
     void AddSystem(World* world, uint8_t priority, Args&&... args) {
@@ -72,6 +73,7 @@ protected:
     bool ShouldRender() override;
 
 private:
+    bool LoadWorldContents(World& world);
 
     std::filesystem::path _scenePath;
     bool LoadConfiguredWorld(

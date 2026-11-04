@@ -11,6 +11,9 @@
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/Logging/Logger.h"
 #include <stdexcept>
+#include "App.Base/Modules/PhysicsModule.h"
+#include "App.Base/Systems/DynamicBodyUpdateSystem.h"
+#include "App.Base/Systems/KinematicBodyUpdateSystem.h"
 
 SceneManagerModule::SceneManagerModule(std::filesystem::path scenePath) :
     _scenePath(std::move(scenePath))
@@ -19,7 +22,7 @@ SceneManagerModule::SceneManagerModule(std::filesystem::path scenePath) :
 
 SceneManagerModule::~SceneManagerModule()
 {
-    
+
 }
 
 void SceneManagerModule::Initialize()
@@ -151,12 +154,9 @@ bool SceneManagerModule::LoadConfiguredWorld(
     auto world = std::make_unique<World>(desc);
     World* worldPtr = world.get();
 
-    OnWorldCreated.Broadcast(*worldPtr);
-
-    if (!world->Load())
+    if (!LoadWorldContents(*worldPtr))
     {
         Logger::Error("World::Load failed: {}", desc.WorldFilePath.string());
-        OnWorldDestroyed.Broadcast(*worldPtr);
         return false;
     }
 
@@ -230,6 +230,12 @@ bool SceneManagerModule::AddSystemByName(
         return true;
     }
 
+    if (systemConfig.Name == "FixedMovementSystem")
+    {
+        AddSystem<MovementSystem>(world, priority, SystemUpdatePhase::FixedPrePhysics);
+        return true;
+    }
+
     if (systemConfig.Name == "CircleMovementSystem")
     {
         AddSystem<CircleMovementSystem>(world, priority);
@@ -242,9 +248,31 @@ bool SceneManagerModule::AddSystemByName(
         return true;
     }
 
+    if (systemConfig.Name == "FixedSplineFollowSystem")
+    {
+        AddSystem<SplineFollowSystem>(world, priority, SplineUpdateMode::Fixed);
+        return true;
+    }
+
     if (systemConfig.Name == "LookAtTargetSystem")
     {
         AddSystem<LookAtTargetSystem>(world, priority);
+        return true;
+    }
+
+    if (systemConfig.Name == "DynamicBodyUpdateSystem")
+    {
+        auto physics = BenchmarkEngine::GetLocator().GetModule<PhysicsModule>();
+        if (!physics) return false;
+        AddSystem<DynamicBodyUpdateSystem>(world, priority, *physics);
+        return true;
+    }
+
+    if (systemConfig.Name == "KinematicBodyUpdateSystem")
+    {
+        auto physics = BenchmarkEngine::GetLocator().GetModule<PhysicsModule>();
+        if (!physics) return false;
+        AddSystem<KinematicBodyUpdateSystem>(world, priority, *physics);
         return true;
     }
 
@@ -281,23 +309,34 @@ bool SceneManagerModule::LoadWorld(const std::filesystem::path& path)
 
     auto world = std::make_unique<World>(desc);
 
-    World& worldRef = *world;
-    OnWorldCreated.Broadcast(worldRef);
-
-    if (!world->Load())
-    {
-        OnWorldDestroyed.Broadcast(worldRef);
-        return false;
-    }
+    if (!LoadWorldContents(*world)) return false;
 
     _worldVector.push_back(std::move(world));
     return true;
 }
 
+bool SceneManagerModule::LoadWorldContents(World& world)
+{
+    // Reserve ownership before notifying modules that keep references to the world.
+    _worldVector.reserve(_worldVector.size() + 1);
+    try
+    {
+        OnWorldCreated.Broadcast(world);
+        if (world.Load()) return true;
+    }
+    catch (...)
+    {
+        OnWorldDestroyed.Broadcast(world);
+        throw;
+    }
+    OnWorldDestroyed.Broadcast(world);
+    return false;
+}
+
 bool SceneManagerModule::UnloadWorld(size_t index)
 {
     if (index >= _worldVector.size()) { return false; }
-    
+
     World* worldToRemove = _worldVector[index].get();
     _systemVector.erase(std::remove_if(_systemVector.begin(), _systemVector.end(),
             [worldToRemove](const SystemEntry& entry)
@@ -339,13 +378,13 @@ size_t SceneManagerModule::GetWorldCount() const
     return _worldVector.size();
 }
 
-void SceneManagerModule::UpdateSystems(JobSystem& jobs, World& world, float dt)
+void SceneManagerModule::UpdateSystems(JobSystem& jobs, World& world, float dt, SystemUpdatePhase phase)
 {
     JobHandle work;
     try
     {
         for (auto& entry : _systemVector)
-            if (entry.world == &world)
+            if (entry.world == &world && entry.system->GetUpdatePhase() == phase)
                 work = entry.system->Schedule(jobs, world, dt, work);
         work.Complete();
     }

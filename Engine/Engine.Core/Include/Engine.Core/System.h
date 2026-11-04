@@ -1,12 +1,27 @@
 #pragma once
 #include "Engine.Core/Jobs/JobSystem.h"
 
+#include <cstdint>
+
 class World;
+
+enum class SystemUpdatePhase : uint8_t
+{
+    FrameUpdate,
+    FixedPrePhysics,
+    FixedPostPhysics,
+    RenderPrep
+};
 
 class System : public ParallelJob
 {
 public:
     virtual ~System() = default;
+
+    virtual SystemUpdatePhase GetUpdatePhase() const
+    {
+        return SystemUpdatePhase::FrameUpdate;
+    }
 
     virtual void Tick(World& world, float dt) = 0;
 

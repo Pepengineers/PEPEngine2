@@ -6,6 +6,7 @@
 #include <utility>
 
 namespace JobDetail { struct State; }
+namespace enki { class ITaskSet; class ICompletable; }
 class JobSystem;
 
 class JobHandle
@@ -69,6 +70,11 @@ public:
     JobSystem& operator=(const JobSystem&) = delete;
     unsigned GetThreadCount() const;
     size_t GetDefaultBatchSize() const;
+
+    // External schedulers may submit from the owner or this pool's workers.
+    // Tasks must remain alive until their enki completion callback has returned.
+    void QueueTask(enki::ITaskSet& task);
+    void WaitForTask(const enki::ICompletable* task = nullptr);
 
 private:
     friend class ParallelJob;

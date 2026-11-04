@@ -1,0 +1,16 @@
+# Constant materials; the engine creates fallback textures from Kd.
+newmtl SandboxCube
+Ka 0.0 0.0 0.0
+Kd 0.92 0.40 0.10
+Ks 0.04 0.04 0.04
+Ns 24.0
+d 1.0
+illum 2
+
+newmtl SandboxFloor
+Ka 0.0 0.0 0.0
+Kd 0.16 0.24 0.32
+Ks 0.04 0.04 0.04
+Ns 8.0
+d 1.0
+illum 2

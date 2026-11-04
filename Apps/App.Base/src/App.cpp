@@ -1,3 +1,5 @@
+#include "App.Base/Systems/DynamicBodyUpdateSystem.h"
+#include "App.Base/Systems/KinematicBodyUpdateSystem.h"
 // AppBase.cpp
 
 #include <App.Base/App.h>
@@ -87,8 +89,9 @@ App::~App()
     Log::Info("Application", "Shutting down application resources");
     //ordering is important
     Locator.UnregisterModule<SceneManagerModule>();
+    Locator.UnregisterModule<PhysicsModule>();
     Locator.UnregisterModule<RenderModule>();
-    // can't be put into RenderModule since it is required 
+    // can't be put into RenderModule since it is required
     // to call it after all module entities are destroyed
     GDX12StreamlineSDK::Get().Shutdown();
     Log::Info("Application", "Application resources released");
@@ -240,12 +243,16 @@ bool App::Initialize()
         return false;
     }
 
+    if (!Locator.GetModule<PhysicsModule>())
+        Locator.RegisterModule(std::make_shared<PhysicsModule>(_jobs));
+
     try
     {
         ReportLoading(L"Preparing renderer");
         // Scene loading creates GPU resources, so module hash order cannot decide initialization.
         Locator.GetModule<RenderModule>()->Initialize();
         ReportLoading(L"Importing scene");
+        Locator.GetModule<PhysicsModule>()->Initialize();
         Locator.GetModule<SceneManagerModule>()->Initialize();
         if (!configPath.empty() && !LoadStartScene()) return false;
     }
@@ -435,7 +442,7 @@ void App::OnResize()
     _window->GetWindowSize(width, height);
     _window->UpdateClientSize(width, height);
     //WinApi unintentionally calls OnResize() once during window creation.
-    //It happens during AppBase::Initialize(), 
+    //It happens during AppBase::Initialize(),
     //so none of the systems are currently initialized.
     //This effectively ignores the first OnResize() call.
 
@@ -515,6 +522,8 @@ void App::Update(const GameTimer& gameTimer)
             if (!_AppConfig.StartScene.empty())
             {
                 scenes->UpdateSystems(_jobs, world, dt);
+                UpdatePhysics(world, dt);
+                scenes->UpdateSystems(_jobs, world, dt, SystemUpdatePhase::RenderPrep);
                 continue;
             }
             work = _movement.Schedule(_jobs, world, dt);
@@ -522,7 +531,9 @@ void App::Update(const GameTimer& gameTimer)
             work = _spline.Schedule(_jobs, world, dt, work);
             work = _lookAt.Schedule(_jobs, world, dt, work);
             work = _lights.Schedule(_jobs, world, dt, work);
-            work = _gpuData.Schedule(_jobs, world, dt, work);
+            work.Complete();
+            UpdatePhysics(world, dt);
+            work = _gpuData.Schedule(_jobs, world, dt);
             work.Complete();
         }
         catch (...)
@@ -530,5 +541,41 @@ void App::Update(const GameTimer& gameTimer)
             try { work.Complete(); } catch (...) {}
             throw;
         }
+    }
+}
+
+void App::UpdatePhysics(World& world, float dt)
+{
+    if (world.IsPaused()) return;
+    auto physics = Locator.GetModule<PhysicsModule>();
+    if (!physics) return;
+    auto scenes = Locator.GetModule<SceneManagerModule>();
+    constexpr float step = 1.0f / 60.0f;
+    const double elapsed = static_cast<double>(dt) * world.GetTimeScale();
+    if (!std::isfinite(elapsed) || elapsed <= 0) return;
+    world._physicsAccumulator += elapsed;
+    // Retain backlog, but bound catch-up work so an overloaded frame can still render.
+    for (unsigned ticks = 0; ticks < 8 && world._physicsAccumulator >= step; ++ticks)
+    {
+        if (!_AppConfig.StartScene.empty())
+            scenes->UpdateSystems(_jobs, world, step, SystemUpdatePhase::FixedPrePhysics);
+        else
+        {
+            MovementSystem movement(SystemUpdatePhase::FixedPrePhysics);
+            SplineFollowSystem spline(SplineUpdateMode::Fixed);
+            KinematicBodyUpdateSystem kinematic(*physics);
+            movement.Schedule(_jobs, world, step).Complete();
+            spline.Schedule(_jobs, world, step).Complete();
+            kinematic.Schedule(_jobs, world, step).Complete();
+        }
+        physics->Step(world, step);
+        if (!_AppConfig.StartScene.empty())
+            scenes->UpdateSystems(_jobs, world, step, SystemUpdatePhase::FixedPostPhysics);
+        else
+        {
+            DynamicBodyUpdateSystem dynamic(*physics);
+            dynamic.Schedule(_jobs, world, step).Complete();
+        }
+        world._physicsAccumulator -= step;
     }
 }

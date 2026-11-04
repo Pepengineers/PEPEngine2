@@ -1,0 +1,8 @@
+App:
+  Name: App.Editor
+  Type: Editor
+  StartScene: Scenes/PhysicsStress1000.yaml
+
+  SystemsBanlist:
+    - SplineFollowSystem
+    - LookAtTargetSystem
