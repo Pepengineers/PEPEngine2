@@ -104,26 +104,50 @@ int main(int argc, char** argv)
             AutoConsoleVariable<int> count(L"Render.AutoDiscoveryTest.Count", 4);
             AutoConsoleVariable<bool> enabled(L"Render.AutoDiscoveryTest.Enabled", true);
             const auto logPath = ConsoleModule::GetDefaultConfigPath().parent_path().parent_path() / "Logs/GraphicsSettingsUITest.log";
-            const auto previousBytes = std::filesystem::exists(logPath) ? std::filesystem::file_size(logPath) : 0;
             auto logFilename = logPath.string();
             ImGuiContextHook hook;
             hook.Type = ImGuiContextHookType_NewFramePost;
             hook.UserData = &logFilename;
             hook.Callback = [](ImGuiContext*, ImGuiContextHook* current)
-            { ImGui::LogToFile(4, static_cast<const std::string*>(current->UserData)->c_str()); };
-            const auto hookId = ImGui::AddContextHook(ImGui::GetCurrentContext(), &hook);
-            app.BenchmarkFrame();
-            ImGui::RemoveContextHook(ImGui::GetCurrentContext(), hookId);
-            ImGui::LogFinish();
-            std::ifstream log(logPath);
-            log.seekg(static_cast<std::streamoff>(previousBytes));
-            const std::string text((std::istreambuf_iterator<char>(log)), std::istreambuf_iterator<char>());
-            const auto group = text.find("Render.AutoDiscoveryTest");
-            check(group != std::string::npos && text.find("Render.AutoDiscoveryTest", group + 1) == std::string::npos &&
+            { ImGui::LogToFile(0, static_cast<const std::string*>(current->UserData)->c_str()); };
+            const auto captureSettings = [&]
+            {
+                const auto previousBytes = std::filesystem::exists(logPath) ? std::filesystem::file_size(logPath) : 0;
+                const auto hookId = ImGui::AddContextHook(ImGui::GetCurrentContext(), &hook);
+                app.BenchmarkFrame();
+                ImGui::RemoveContextHook(ImGui::GetCurrentContext(), hookId);
+                ImGui::LogFinish();
+                std::ifstream log(logPath);
+                log.seekg(static_cast<std::streamoff>(previousBytes));
+                return std::string((std::istreambuf_iterator<char>(log)), std::istreambuf_iterator<char>());
+            };
+            const auto text = captureSettings();
+            const auto group = text.find("AutoDiscoveryTest");
+            check(group != std::string::npos && text.find("AutoDiscoveryTest", group + 1) == std::string::npos &&
                 text.find("NewSetting") != std::string::npos && text.find("Size") != std::string::npos &&
                 text.find("Count") != std::string::npos && text.find("Enabled") != std::string::npos &&
                 discovered.GetType() == EConsoleVariableType::Enumeration && discovered.GetEnumCount() == 3,
                 "New typed CVars must appear in one shared name-prefix group without UI changes");
+            auto* settings = ImGui::FindWindowByName("Settings (F1)");
+            const auto treeId = ImHashStr("SettingsTree", 0, settings->ID);
+            const auto appId = ImHashStr("App", 0, treeId);
+            const auto boundsId = ImHashStr("Bounds", 0, appId);
+            settings->StateStorage.SetInt(appId, 0);
+            const auto closedApp = captureSettings();
+            check(closedApp.find("BistroTableSteam") == std::string::npos && closedApp.find("NewSetting") != std::string::npos,
+                "Closing App must hide all its descendants without hiding the Render tree");
+            settings->StateStorage.SetInt(appId, 1);
+            settings->StateStorage.SetInt(boundsId, 0);
+            check(captureSettings().find("BistroTableSteam") == std::string::npos,
+                "Closing Bounds must hide every individual bound");
+            settings->StateStorage.SetInt(appId, 0);
+            app.BenchmarkFrame();
+            settings->StateStorage.SetInt(appId, 1);
+            check(captureSettings().find("BistroTableSteam") == std::string::npos,
+                "Reopening App must preserve the collapsed Bounds folder");
+            settings->StateStorage.SetInt(boundsId, 1);
+            check(captureSettings().find("BistroTableSteam") != std::string::npos,
+                "Reopening Bounds must restore its children");
         }
         ImGui::GetIO().WantCaptureKeyboard = true;
         check(Engine::UI::WantsKeyboardInput() && Engine::UI::HandleMessage(window, WM_CHAR, 'W', 0),

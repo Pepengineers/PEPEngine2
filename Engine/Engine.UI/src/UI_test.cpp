@@ -60,23 +60,31 @@ namespace Engine::UI
                 ImGui::TextWrapped("Session only. Startup settings are locked. F1 hides/shows this window.");
                 static ImGuiTextFilter filter;
                 filter.Draw("Search", -90);
-                std::map<std::string, std::vector<IConsoleVariable*>> groups;
+                struct Group
+                {
+                    std::map<std::string, Group> Children;
+                    std::vector<IConsoleVariable*> Variables;
+                };
+                Group root;
                 for (auto* variable : ConsoleModule{}.GetConsoleVariables())
                 {
                     const auto name = Utf8(variable->GetName());
-                    const auto dot = name.rfind('.');
-                    groups[dot == std::string::npos ? "General" : name.substr(0, dot)].push_back(variable);
+                    if (!filter.PassFilter(name.c_str())) continue;
+                    auto* group = &root;
+                    size_t start = 0;
+                    for (auto dot = name.find('.'); dot != std::string::npos; dot = name.find('.', start))
+                    {
+                        group = &group->Children[name.substr(start, dot - start)];
+                        start = dot + 1;
+                    }
+                    if (!start) group = &root.Children["General"];
+                    group->Variables.push_back(variable);
                 }
-                for (const auto& [group, variables] : groups)
+                const auto drawGroup = [&](auto&& self, const Group& group) -> void
                 {
-                    bool matches = false;
-                    for (auto* variable : variables)
-                        matches |= filter.PassFilter(Utf8(variable->GetName()).c_str());
-                    if (!matches || !ImGui::CollapsingHeader(group.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) continue;
-                    for (auto* variable : variables)
+                    for (auto* variable : group.Variables)
                     {
                         const auto name = Utf8(variable->GetName());
-                        if (!filter.PassFilter(name.c_str())) continue;
                         const auto dot = name.rfind('.');
                         const auto label = dot == std::string::npos ? name : name.substr(dot + 1);
                         auto value = variable->GetString();
@@ -129,7 +137,20 @@ namespace Engine::UI
                         if (readOnly) { ImGui::SameLine(); ImGui::TextDisabled("(restart)"); }
                         ImGui::PopID();
                     }
-                }
+                    for (const auto& [name, child] : group.Children)
+                    {
+                        if (filter.IsActive()) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
+                        if (ImGui::TreeNodeEx(name.c_str(), ImGuiTreeNodeFlags_DefaultOpen |
+                            ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth))
+                        {
+                            self(self, child);
+                            ImGui::TreePop();
+                        }
+                    }
+                };
+                ImGui::PushID(filter.IsActive() ? "FilteredSettings" : "SettingsTree");
+                drawGroup(drawGroup, root);
+                ImGui::PopID();
             }
             ImGui::End();
         }

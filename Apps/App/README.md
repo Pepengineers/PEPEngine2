@@ -68,7 +68,9 @@ Startup-only settings are locked and marked **restart**. Changes last for this
 session; edit `Config/Engine.ini` beside
 the executable to keep them. Camera controls yield to ImGui while it captures input.
 All registered CVars are discovered every frame. Controls follow their declared
-types; groups use everything before the last dot in the name. Enum classes ending
+types; dotted names form nested folders, for example `App > Bounds > BistroTableSteam`.
+Collapsing a folder hides its entire subtree and preserves the child folders' states.
+Search opens matching branches; clearing it restores the normal tree state. Enum classes ending
 in `Count` get a numeric
 dropdown automatically. New settings need no UI edits; use descriptions for help.
 
