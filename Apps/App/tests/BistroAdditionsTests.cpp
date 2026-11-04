@@ -240,7 +240,7 @@ int main(int argc, char** argv)
             CheckBistroCharacterCounts();
             Require(BistroReflections::Tables.size() == 21 && BistroReflections::Count.SetFromString("21") &&
                 !BistroReflections::Count.SetFromString("22"), "Table count limit must match all 21 anchors");
-            std::cout << "Bistro routes: maximum populations, separated spawn/movement, floor routes and table count passed." << std::endl;
+            std::cout << "Bistro routes: startup populations, grouped ranks, crowded routes and table count passed." << std::endl;
             return 0;
         }
         ComPtr<ID3D12Debug> debug;
@@ -262,15 +262,24 @@ int main(int argc, char** argv)
         CheckBistroReflectionCounts(world, [&] { app.BenchmarkFrame(); });
         CheckBistroWaterCounts(world, [&] { app.BenchmarkFrame(); });
         CheckProbeOverlay(app, world);
-        CheckCounts(world, 4, 1, 1, 5);
-        const wchar_t* counts[] = {L"App.ReflectionProbes.Count", L"App.Grass.Count", L"App.Water.Count", L"App.NPC.Count", L"App.Fox.Count"};
+        CheckCounts(world, 4, 1, 1, 15);
+        const wchar_t* counts[] = {L"App.ReflectionProbes.Count", L"App.Grass.Count", L"App.Water.Count"};
         for (const auto* name : counts)
             Require(!ConsoleModule{}.FindConsoleVariable(name).SetFromString("-1"), "Negative feature count accepted");
+        for (const auto* name : {L"App.NPC.Count", L"App.Fox.Count"})
+        {
+            auto& count = ConsoleModule{}.FindConsoleVariable(name);
+            const auto initial = count.GetString();
+            Require(!count.SetFromString("0") && count.SetConfigFromString("0") &&
+                count.GetString() == initial && count.GetConfigString() == "0",
+                "Character count edits must save for next startup without changing the active count");
+            Require(count.SetConfigFromString(initial), "Cannot restore startup character count fixture");
+        }
         for (int frame = 0; frame < 48; ++frame) app.BenchmarkFrame();
         const auto initial = Characters(world);
         for (int frame = 0; frame < 16; ++frame) app.BenchmarkFrame();
         const auto animated = Characters(world);
-        Require(initial.size() == 5 && animated.size() == 5, "Expected four humans and one fox");
+        Require(initial.size() == 15 && animated.size() == 15, "Expected ten humans and five foxes");
         size_t walking = 0;
         for (const auto& [entity, before] : initial)
         {
@@ -295,13 +304,13 @@ int main(int argc, char** argv)
         CheckProbeSpheres(app, world, *render);
         for (const auto* name : counts) Set(name, "0");
         app.BenchmarkFrame();
-        CheckCounts(world, 0, 0, 0, 0);
+        CheckCounts(world, 0, 0, 0, 15);
         for (const auto* name : counts) Set(name, "2");
         app.BenchmarkFrame();
-        CheckCounts(world, 2, 2, 2, 4);
-        Set(counts[0], "4"); Set(counts[1], "1"); Set(counts[2], "1"); Set(counts[3], "4"); Set(counts[4], "1");
+        CheckCounts(world, 2, 2, 2, 15);
+        Set(counts[0], "4"); Set(counts[1], "1"); Set(counts[2], "1");
         app.BenchmarkFrame();
-        CheckCounts(world, 4, 1, 1, 5);
+        CheckCounts(world, 4, 1, 1, 15);
         Set(L"Render.Upscaler.Provider", "0");
         Set(L"Render.Particles.Enabled", "false");
         Set(L"Render.SSR.Enabled", "false");
@@ -349,9 +358,6 @@ int main(int argc, char** argv)
         }
         for (const bool fox : {false, true})
         {
-            const auto* setting = fox ? L"App.Fox.Count" : L"App.NPC.Count";
-            Set(setting, "1");
-            app.BenchmarkFrame();
             Vector3 target;
             Entity targetEntity = InvalidEntity;
             Vector3 spawn;

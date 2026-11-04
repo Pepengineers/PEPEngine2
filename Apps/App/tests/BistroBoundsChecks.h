@@ -7,8 +7,8 @@ inline void CheckBistroBounds(BistroApp& app, World& world)
         if (!value) throw std::runtime_error(message);
     };
     ConsoleModule console;
-    // Eight emitters, one grass patch, one water volume, four soldiers and one fox.
-    require(console.GetConsoleVariables(L"App.Bounds.").size() == 15 * 7 + 1,
+    // Eight emitters, one grass patch, one water volume, ten soldiers and five foxes.
+    require(console.GetConsoleVariables(L"App.Bounds.").size() == 25 * 7 + 1,
         "Every Bistro effect must have its own layout bounds controls");
     auto& center = console.FindConsoleVariable(L"App.Bounds.BistroEntranceFountain.CenterX");
     auto& extent = console.FindConsoleVariable(L"App.Bounds.BistroEntranceFountain.HalfExtentX");
@@ -71,7 +71,7 @@ inline void CheckBistroBounds(BistroApp& app, World& world)
             require(setting->SetFromString(original), "Cannot restore detached box centre");
             ++edited;
         });
-    require(edited == 13 && console.FindConsoleVariable(L"App.Bounds.BistroNPC0.HalfExtentY").GetFloat() > 25 &&
+    require(edited == 23 && console.FindConsoleVariable(L"App.Bounds.BistroNPC0.HalfExtentY").GetFloat() > 25 &&
         console.FindConsoleVariable(L"App.Bounds.BistroFox0.HalfExtentY").GetFloat() > 1,
         "Character bounds must cover the scaled animated mesh, with independent controls for every effect");
     const auto foxBefore = console.FindConsoleVariable(L"App.Bounds.BistroFox0.CenterX").GetString();

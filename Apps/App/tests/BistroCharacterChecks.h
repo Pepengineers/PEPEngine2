@@ -43,12 +43,11 @@ inline void CheckBistroParallelMovement()
     World serialWorld(WorldDesc{}), parallelWorld(WorldDesc{});
     BistroCharacters::Scene serial(0x5eed);
     ObservedScene parallel(0x5eed);
-    BistroCharacters::NPCCount.SetFromString("16");
-    BistroCharacters::FoxCount.SetFromString("8");
+    BistroCharacters::NPCCount.SetFromString(std::to_string(BistroRoutes::People().Spawns.size() * 2 + 1));
+    BistroCharacters::FoxCount.SetFromString(std::to_string(BistroRoutes::Foxes().Spawns.size() + 5));
     for (int frame = 0; frame < 600; ++frame)
     {
         if (frame == 200) { BistroCharacters::NPCCount.SetFromString("0"); BistroCharacters::FoxCount.SetFromString("0"); }
-        if (frame == 201) { BistroCharacters::NPCCount.SetFromString("16"); BistroCharacters::FoxCount.SetFromString("8"); }
         serial.Update(serialWorld, 0.1f, serialJobs);
         parallel.Update(parallelWorld, 0.1f, parallelJobs);
         if (snapshot(serialWorld) != snapshot(parallelWorld))
@@ -56,8 +55,8 @@ inline void CheckBistroParallelMovement()
     }
     if (parallel.Workers.size() < 2) throw std::runtime_error("Crowd jobs never used multiple threads");
     std::cout << "Bistro crowd worker threads: " << parallel.Workers.size() << "; 1/4-thread trajectories identical." << std::endl;
-    BistroCharacters::NPCCount.SetFromString("4");
-    BistroCharacters::FoxCount.SetFromString("1");
+    BistroCharacters::NPCCount.SetFromString("10");
+    BistroCharacters::FoxCount.SetFromString("5");
 }
 
 inline void CheckBistroCharacterCounts()
@@ -70,13 +69,12 @@ inline void CheckBistroCharacterCounts()
     JobSystem jobs(4);
     BistroCharacters::Scene scene;
     auto& ecs = world.GetECS();
-    require(BistroCharacters::NPCCount.GetValue() == 4 && BistroCharacters::FoxCount.GetValue() == 1,
-        "Bistro must default to four humans and one fox");
-    require(!BistroCharacters::NPCCount.SetFromString("-1") && !BistroCharacters::NPCCount.SetFromString("17") &&
-        !BistroCharacters::NPCCount.SetFromString("1.5") && !BistroCharacters::FoxCount.SetFromString("9"),
+    require(BistroCharacters::NPCCount.GetValue() == 10 && BistroCharacters::FoxCount.GetValue() == 5,
+        "Bistro must default to ten humans and five foxes");
+    require(!BistroCharacters::NPCCount.SetFromString("-1") && !BistroCharacters::NPCCount.SetFromString("1.5") && !BistroCharacters::FoxCount.SetFromString("-1"),
         "Invalid Bistro character count accepted");
     scene.Update(world, 0, jobs);
-    require(ecs.GetPool<SkeletalMeshRenderComponent>().Size() == 5, "Default Bistro character count mismatch");
+    require(ecs.GetPool<SkeletalMeshRenderComponent>().Size() == 15, "Default Bistro character count mismatch");
     Engine::Core::SceneHandle sharedNPC;
     Matrix bodyInverseBind;
     bool bodyFound = false;
@@ -138,6 +136,7 @@ inline void CheckBistroCharacterCounts()
     require(firstNPC != InvalidEntity && firstFox != InvalidEntity, "Both character populations are required");
     require(BistroCharacters::NPCCount.SetFromString("1"), "Single walker count rejected");
     scene.Update(world, 0, jobs);
+    require(ecs.GetPool<SkeletalMeshRenderComponent>().Size() == 15, "Startup counts changed in an existing world");
     const auto npcStart = ecs.Get<TransformComponent>(firstNPC).Location;
     const auto foxStart = ecs.Get<TransformComponent>(firstFox).Location;
     scene.Update(world, 0.5f, jobs);
@@ -170,63 +169,76 @@ inline void CheckBistroCharacterCounts()
     scene.Update(world, 1, jobs);
     require(ecs.Get<TransformComponent>(firstNPC).Location == pausedNPC, "Zero time scale must stop movement");
     world.SetTimeScale(1);
-    require(BistroCharacters::NPCCount.SetFromString("2") && BistroCharacters::FoxCount.SetFromString("3"),
-        "Character count change rejected");
-    scene.Update(world, 0, jobs);
-    require(ecs.GetPool<SkeletalMeshRenderComponent>().Size() == 5, "Changed character count mismatch");
-    size_t humans = 0, foxes = 0;
-    ecs.ForEach<NameComponent>([&](Entity, const NameComponent& name)
-    {
-        humans += name.value.find("BistroNPC") == 0;
-        foxes += name.value.find("BistroFox") == 0;
-    });
-    require(humans == 2 && foxes == 3, "Character populations must reconcile independently");
-    require(BistroCharacters::NPCCount.SetFromString("16") && BistroCharacters::FoxCount.SetFromString("8"),
-        "Maximum character populations rejected");
-    scene.Update(world, 0, jobs);
-    require(ecs.GetPool<SkeletalMeshRenderComponent>().Size() == 24, "Maximum character count mismatch");
-    std::map<Entity, std::pair<Vector3, float>> progress;
-    for (int frame = 0; frame < 600; ++frame)
-    {
-        scene.Update(world, 0.1f, jobs);
-        std::vector<std::pair<Vector3, bool>> positions;
-        ecs.ForEach<SkeletalMeshRenderComponent, NameComponent>([&](Entity entity,
-            const SkeletalMeshRenderComponent&, const NameComponent& name)
-        {
-            const bool fox = name.value.find("BistroFox") == 0;
-            const auto& network = fox ? BistroRoutes::Foxes() : BistroRoutes::People();
-            const auto position = ecs.Get<TransformComponent>(entity).Location;
-            auto [entry, added] = progress.try_emplace(entity, position, 0.0f);
-            entry->second.second += Vector3::Distance(entry->second.first, position);
-            entry->second.first = position;
-            bool onRoute = false;
-            for (const auto& edge : network.Edges)
-                for (size_t i = 1; i < edge.Points.size(); ++i)
-                {
-                    const auto travel = edge.Points[i] - edge.Points[i - 1];
-                    const auto delta = position - edge.Points[i - 1];
-                    const float t = std::clamp(delta.Dot(travel) / travel.LengthSquared(), 0.0f, 1.0f);
-                    onRoute |= (delta - t * travel).LengthSquared() < 0.01f;
-                }
-            require(onRoute, "Walker left its spline network");
-            for (const auto& [other, otherFox] : positions)
-                require(fox != otherFox || BistroRoutes::HorizontalDistanceSquared(position, other) >=
-                    network.Separation * network.Separation - 0.1f, "Walkers overlapped while spawning or moving");
-            positions.emplace_back(position, fox);
-        });
-        // Exercise adding new walkers while the existing population is away from its spawn slots.
-        if (frame == 300) { BistroCharacters::NPCCount.SetFromString("4"); BistroCharacters::FoxCount.SetFromString("1"); }
-        if (frame == 301) { BistroCharacters::NPCCount.SetFromString("16"); BistroCharacters::FoxCount.SetFromString("8"); }
-    }
-    ecs.ForEach<SkeletalMeshRenderComponent>([&](Entity entity, const SkeletalMeshRenderComponent&)
-    {
-        require(progress.at(entity).second > 100, "Crowd traffic left a walker permanently stuck");
-    });
     require(BistroCharacters::NPCCount.SetFromString("0") && BistroCharacters::FoxCount.SetFromString("0"),
         "Character disable rejected");
     scene.Update(world, 0, jobs);
-    require(ecs.GetEntityCount() == 0, "Disabled characters must release all their entities");
-    require(BistroCharacters::NPCCount.SetFromString("4") && BistroCharacters::FoxCount.SetFromString("1"),
-        "Character defaults restore rejected");
+    require(ecs.GetPool<SkeletalMeshRenderComponent>().Size() == 15, "Startup count edit removed existing characters");
+    World emptyWorld(WorldDesc{});
+    BistroCharacters::Scene empty;
+    empty.Update(emptyWorld, 0, jobs);
+    require(emptyWorld.GetECS().GetEntityCount() == 0, "Zero startup counts must create no characters");
+    require(BistroCharacters::NPCCount.SetFromString(std::to_string(BistroRoutes::People().Spawns.size() * 2 + 1)) &&
+        BistroCharacters::FoxCount.SetFromString(std::to_string(BistroRoutes::Foxes().Spawns.size() + 5)),
+        "Counts beyond the spawn list rejected");
+    World crowdedWorld(WorldDesc{});
+    BistroCharacters::Scene crowded(0x5eed);
+    crowded.Update(crowdedWorld, 0, jobs);
+    auto& crowd = crowdedWorld.GetECS();
+    require(crowd.GetPool<SkeletalMeshRenderComponent>().Size() ==
+        BistroRoutes::People().Spawns.size() * 2 + BistroRoutes::Foxes().Spawns.size() + 6,
+        "Crowded startup must create the complete requested population");
+    std::array<Entity, 3> rank = {InvalidEntity, InvalidEntity, InvalidEntity};
+    std::vector<Vector3> foxSpawns;
+    bool repeatedFoxSpawn = false;
+    crowd.ForEach<NameComponent, TransformComponent>([&](Entity entity, const NameComponent& name, const TransformComponent& transform)
+    {
+        for (size_t member = 0; member < rank.size(); ++member)
+            if (name.value == "BistroNPC" + std::to_string(member)) rank[member] = entity;
+        if (name.value.find("BistroFox") != 0) return;
+        for (const auto position : foxSpawns) repeatedFoxSpawn |= position == transform.Location;
+        foxSpawns.push_back(transform.Location);
+    });
+    require(repeatedFoxSpawn, "Excess single-file foxes must reuse spawn positions");
+    require(rank[0] != InvalidEntity && rank[1] != InvalidEntity && rank[2] != InvalidEntity, "Three-wide human rank missing");
+    require(crowd.Get<SkeletalMeshRenderComponent>(rank[0]).GetTimeSeconds() !=
+        crowd.Get<SkeletalMeshRenderComponent>(rank[1]).GetTimeSeconds(), "Rank members must retain individual animation phases");
+    const auto onRoute = [](const BistroRoutes::Network& network, Vector3 position)
+    {
+        for (const auto& edge : network.Edges)
+            for (size_t i = 1; i < edge.Points.size(); ++i)
+            {
+                const auto travel = edge.Points[i] - edge.Points[i - 1];
+                const auto delta = position - edge.Points[i - 1];
+                const float t = std::clamp(delta.Dot(travel) / travel.LengthSquared(), 0.0f, 1.0f);
+                if ((delta - t * travel).LengthSquared() < 0.01f) return true;
+            }
+        return false;
+    };
+    std::map<Entity, std::pair<Vector3, float>> progress;
+    for (int frame = 0; frame < 600; ++frame)
+    {
+        crowded.Update(crowdedWorld, 0.1f, jobs);
+        const auto& left = crowd.Get<TransformComponent>(rank[0]);
+        const auto& middle = crowd.Get<TransformComponent>(rank[1]);
+        const auto& right = crowd.Get<TransformComponent>(rank[2]);
+        require(left.Rotation == middle.Rotation && middle.Rotation == right.Rotation &&
+            Vector3::Distance((left.Location + right.Location) * 0.5f, middle.Location) < 0.01f &&
+            std::abs(Vector3::Distance(left.Location, middle.Location) - 110) < 0.01f,
+            "A human rank must turn together and preserve its lateral spacing");
+        require(onRoute(BistroRoutes::People(), middle.Location), "Rank center left the human route");
+        crowd.ForEach<SkeletalMeshRenderComponent, NameComponent>([&](Entity entity,
+            const SkeletalMeshRenderComponent& mesh, const NameComponent& name)
+        {
+            const auto position = crowd.Get<TransformComponent>(entity).Location;
+            auto [entry, added] = progress.try_emplace(entity, position, 0.0f);
+            entry->second.second += Vector3::Distance(entry->second.first, position);
+            entry->second.first = position;
+            require(mesh.GetPlaybackSpeed() == 1, "Crowded walkers must not stop each other's animation");
+            if (name.value.find("BistroFox") == 0)
+                require(onRoute(BistroRoutes::Foxes(), position), "Single-file fox left its route");
+        });
+    }
+    for (const auto& [entity, distance] : progress)
+        require(distance.second > 100, "Crowded benchmark left a walker stuck");
     CheckBistroParallelMovement();
 }

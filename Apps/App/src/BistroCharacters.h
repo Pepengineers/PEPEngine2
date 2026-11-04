@@ -11,24 +11,20 @@
 
 namespace BistroCharacters
 {
-    inline AutoConsoleVariable<int> NPCCount(L"App.NPC.Count", 4,
-        L"People on random separated street/plaza spline positions, 0 disables, maximum 16",
-        EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 16; });
-    inline AutoConsoleVariable<int> FoxCount(L"App.Fox.Count", 1,
-        L"Foxes on random separated interior spline positions, 0 disables, maximum 8",
-        EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 8; });
+    inline AutoConsoleVariable<int> NPCCount(L"App.NPC.Count", 10,
+        L"Initial people count; crowded spawns form wider ranks, 0 disables, applies on startup",
+        EConsoleVariableFlags::ReadOnly, [](int value) { return value >= 0; });
+    inline AutoConsoleVariable<int> FoxCount(L"App.Fox.Count", 5,
+        L"Initial single-file fox count; spawn positions repeat when crowded, 0 disables, applies on startup",
+        EConsoleVariableFlags::ReadOnly, [](int value) { return value >= 0; });
 
     class Scene : private ParallelJob
     {
-        struct Character { Entity Id; BistroRoutes::Cursor Route; std::mt19937 Random; };
-        struct Step
+        struct Group
         {
-            Character* Actor;
-            TransformComponent* Transform;
-            SkeletalMeshRenderComponent* Mesh;
-            const BistroRoutes::Network* Network;
-            Vector3 Start, Position;
-            BistroRoutes::Cursor Next;
+            BistroRoutes::Cursor Route;
+            std::mt19937 Random;
+            size_t First, Count;
             bool Fox;
         };
 
@@ -37,103 +33,52 @@ namespace BistroCharacters
 
         void Update(World& world, float deltaSeconds, JobSystem& jobs)
         {
+            const bool spawning = !_initialized;
             auto& ecs = world.GetECS();
-            Reconcile(ecs, _npcs, static_cast<size_t>(NPCCount.GetValue()), false);
-            Reconcile(ecs, _foxes, static_cast<size_t>(FoxCount.GetValue()), true);
-            if (_npcs.empty() && _foxes.empty()) return;
-            float remaining = world.IsPaused() ? 0 : deltaSeconds * world.GetTimeScale();
-            while (remaining > 0)
+            if (spawning)
             {
-                const float step = (std::min)(remaining, 0.1f);
-                _stepSeconds = step;
-                _steps.clear();
-                Snapshot(ecs, _npcs, BistroRoutes::People(), false);
-                Snapshot(ecs, _foxes, BistroRoutes::Foxes(), true);
-                _apply = false;
-                Schedule(jobs, _steps.size(), 1).Complete();
-                _apply = true;
-                Schedule(jobs, _steps.size(), 1).Complete();
-                remaining -= step;
+                Spawn(ecs, static_cast<size_t>(NPCCount.GetValue()), false);
+                Spawn(ecs, static_cast<size_t>(FoxCount.GetValue()), true);
+                _initialized = true;
             }
-        }
-
-    private:
-        static void Face(TransformComponent& transform, Vector3 movement, bool fox)
-        {
-            if (movement.x * movement.x + movement.z * movement.z < 0.000001f) return;
-            transform.Rotation = Vector3(0, XMConvertToDegrees(std::atan2(movement.x, movement.z)) + (fox ? 0 : 180), 0);
-        }
-
-        void Snapshot(WorldECS& ecs, std::vector<Character>& characters, const BistroRoutes::Network& network, bool fox)
-        {
-            for (auto& actor : characters)
-            {
-                auto& transform = ecs.Get<TransformComponent>(actor.Id);
-                _steps.push_back({&actor, &transform, &ecs.Get<SkeletalMeshRenderComponent>(actor.Id),
-                    &network, transform.Location, {}, actor.Route, fox});
-            }
-        }
-
-        static float ClosestDistanceSquared(Vector3 delta, Vector3 travel)
-        {
-            delta.y = travel.y = 0;
-            const float t = travel.LengthSquared() > 0 ? std::clamp(-delta.Dot(travel) / travel.LengthSquared(), 0.0f, 1.0f) : 0;
-            return (delta + travel * t).LengthSquared();
+            _stepSeconds = world.IsPaused() ? 0 : deltaSeconds * world.GetTimeScale();
+            if (_groups.empty() || (!spawning && _stepSeconds <= 0)) return;
+            _transforms.clear();
+            for (const auto entity : _entities) _transforms.push_back(&ecs.Get<TransformComponent>(entity));
+            Schedule(jobs, _groups.size(), 1).Complete();
         }
 
     protected:
         void Execute(size_t index) override
         {
-            auto& step = _steps[index];
-            auto& actor = *step.Actor;
-            if (!_apply)
+            auto& group = _groups[index];
+            const auto& network = group.Fox ? BistroRoutes::Foxes() : BistroRoutes::People();
+            network.Advance(group.Route, (group.Fox ? 60 : 95) * _stepSeconds, group.Random);
+            const auto center = network.Position(group.Route);
+            auto sample = group.Route;
+            const float length = network.Edges[sample.Edge].Length();
+            sample.Distance = sample.Distance < length ? (std::min)(length, sample.Distance + 1) :
+                (std::max)(0.0f, sample.Distance - 1);
+            auto forward = network.Position(sample) - center;
+            if ((sample.Distance < group.Route.Distance) == group.Route.Forward) forward = -forward;
+            forward.y = 0;
+            forward.Normalize();
+            const Vector3 right(forward.z, 0, -forward.x);
+            const float yaw = XMConvertToDegrees(std::atan2(forward.x, forward.z)) + (group.Fox ? 0 : 180);
+            for (size_t member = 0; member < group.Count; ++member)
             {
-                step.Network->Advance(step.Next, (step.Fox ? 60 : 95) * _stepSeconds, actor.Random);
-                step.Position = step.Network->Position(step.Next);
-                return;
+                auto& transform = *_transforms[group.First + member];
+                const float offset = (static_cast<float>(member) - static_cast<float>(group.Count - 1) * 0.5f) * network.Separation;
+                transform.Location = center + right * offset;
+                transform.Rotation = Vector3(0, yaw, 0);
+                transform.DirtyFlag = true;
             }
-            const auto travel = step.Position - step.Start;
-            const float separationSquared = step.Network->Separation * step.Network->Separation;
-            bool free = true;
-            for (size_t other = 0; other < _steps.size(); ++other)
-            {
-                const auto& peer = _steps[other];
-                if (other == index || peer.Fox != step.Fox) continue;
-                const auto delta = step.Start - peer.Start;
-                // Check both moving and stationary peers: a rejected proposal must also remain safe.
-                free &= ClosestDistanceSquared(delta, travel) >= separationSquared &&
-                    ClosestDistanceSquared(delta, travel - (peer.Position - peer.Start)) >= separationSquared;
-            }
-            if (free)
-            {
-                Face(*step.Transform, travel, step.Fox);
-                step.Transform->Location = step.Position;
-                step.Transform->DirtyFlag = true;
-                actor.Route = step.Next;
-                actor.Route.Waiting = 0;
-            }
-            else
-            {
-                actor.Route.Waiting += _stepSeconds;
-                if (actor.Route.Waiting >= 1)
-                {
-                    actor.Route.Forward = !actor.Route.Forward;
-                    actor.Route.Waiting = 0;
-                }
-            }
-            const double playback = free ? 1 : 0;
-            if (step.Mesh->GetPlaybackSpeed() != playback) step.Mesh->SetPlaybackSpeed(playback);
         }
 
     private:
-        void Reconcile(WorldECS& ecs, std::vector<Character>& entities, size_t requested, bool fox)
+        void Spawn(WorldECS& ecs, size_t requested, bool fox)
         {
-            while (entities.size() > requested)
-            {
-                ecs.DestroyEntity(entities.back().Id);
-                entities.pop_back();
-            }
-            if (entities.size() == requested) return;
+            if (!requested) return;
             auto& assets = Engine::Core::AssetManager::GetInstance();
             const auto path = std::filesystem::path(ASSETS_FOLDER) /
                 (fox ? "Models/KhronosFox/glTF/Fox.gltf" : "Models/MGPUSoldier/Soldier.gltf");
@@ -145,43 +90,37 @@ namespace BistroCharacters
                 if (source->GetClips()[index].Name == (fox ? "Walk" : "Take1")) clip = static_cast<int>(index);
             if (!handle.IsValid() || clip < 0) throw std::runtime_error("Bistro character walking clip is missing");
             const auto& network = fox ? BistroRoutes::Foxes() : BistroRoutes::People();
-            while (entities.size() < requested)
+            if (network.Spawns.empty()) throw std::runtime_error("Bistro character route has no spawn positions");
+            std::vector<size_t> slots(network.Spawns.size());
+            std::iota(slots.begin(), slots.end(), size_t{0});
+            std::shuffle(slots.begin(), slots.end(), _random);
+            const size_t groups = fox ? requested : (std::min)(requested, slots.size());
+            size_t character = 0;
+            for (size_t index = 0; index < groups; ++index)
             {
-                const size_t index = entities.size();
-                std::vector<size_t> slots(network.Spawns.size());
-                std::iota(slots.begin(), slots.end(), size_t{0});
-                std::shuffle(slots.begin(), slots.end(), _random);
-                auto chosen = slots.end();
-                for (auto slot = slots.begin(); slot != slots.end(); ++slot)
-                {
-                    bool free = true;
-                    for (const auto& other : entities)
-                        free &= BistroRoutes::HorizontalDistanceSquared(network.Position(network.Spawns[*slot]),
-                            ecs.Get<TransformComponent>(other.Id).Location) >= network.Separation * network.Separation;
-                    if (free) { chosen = slot; break; }
-                }
-                if (chosen == slots.end()) throw std::runtime_error("No separated Bistro character spawn slot");
-                auto route = network.Spawns[*chosen];
+                auto route = network.Spawns[slots[index % slots.size()]];
                 route.Forward = std::uniform_int_distribution<int>(0, 1)(_random) != 0;
-                const auto position = network.Position(route);
-                auto entity = ecs.CreateEntity();
-                entity.AddComponent<NameComponent>((fox ? "BistroFox" : "BistroNPC") + std::to_string(index));
-                auto& transform = entity.AddComponent<TransformComponent>(position, Vector3::Zero, Vector3(fox ? 0.55f : 2.4f));
-                auto facing = route;
-                network.Advance(facing, 1, _random);
-                Face(transform, network.Position(facing) - position, fox);
-                auto& skeletal = entity.AddComponent<SkeletalMeshRenderComponent>(handle);
-                skeletal.SetClip(clip);
-                skeletal.SetLooping(true);
-                skeletal.SetTimeSeconds(std::uniform_real_distribution<double>(0, source->GetClips()[clip].DurationSeconds)(_random));
-                entities.push_back({entity.GetId(), route, std::mt19937{_random()}});
+                const size_t members = requested / groups + (index < requested % groups);
+                _groups.push_back({route, std::mt19937{_random()}, _entities.size(), members, fox});
+                for (size_t member = 0; member < members; ++member, ++character)
+                {
+                    auto entity = ecs.CreateEntity();
+                    entity.AddComponent<NameComponent>((fox ? "BistroFox" : "BistroNPC") + std::to_string(character));
+                    entity.AddComponent<TransformComponent>(network.Position(route), Vector3::Zero, Vector3(fox ? 0.55f : 2.4f));
+                    auto& skeletal = entity.AddComponent<SkeletalMeshRenderComponent>(handle);
+                    skeletal.SetClip(clip);
+                    skeletal.SetLooping(true);
+                    skeletal.SetTimeSeconds(std::uniform_real_distribution<double>(0, source->GetClips()[clip].DurationSeconds)(_random));
+                    _entities.push_back(entity.GetId());
+                }
             }
         }
 
-        std::mt19937 _random{std::random_device{}()};
-        std::vector<Character> _npcs, _foxes;
-        std::vector<Step> _steps;
+        std::mt19937 _random;
+        std::vector<Group> _groups;
+        std::vector<Entity> _entities;
+        std::vector<TransformComponent*> _transforms;
         float _stepSeconds = 0;
-        bool _apply = false;
+        bool _initialized = false;
     };
 }

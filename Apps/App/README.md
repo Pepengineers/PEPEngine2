@@ -1,17 +1,17 @@
 # Bistro App
 
 The scene includes four frozen local reflection cubemaps, one entrance grass
-patch with wind, one small water basin, four walking human NPCs from the MGPU
-sample and one walking Khronos fox inside. Application-only runtime CVars control
-the populations; zero removes the corresponding objects:
+patch with wind, one small water basin, ten walking human NPCs from the MGPU
+sample and five walking Khronos foxes inside. Application-only CVars control
+the populations. Character counts apply at startup; zero creates no characters:
 
 | CVar | Default | Range |
 |---|---:|---:|
 | `App.ReflectionProbes.Count` | 4 | 0..21 (number of tables) |
 | `App.Grass.Count` | 1 | 0..16 |
 | `App.Water.Count` | 1 | 0..8 |
-| `App.NPC.Count` | 4 | 0..16 |
-| `App.Fox.Count` | 1 | 0..8 |
+| `App.NPC.Count` | 10 | nonnegative integer (startup) |
+| `App.Fox.Count` | 5 | nonnegative integer (startup) |
 
 Each of the 21 tables has a reflection spawn anchor: 11 on the terrace and 10
 inside. `App.ReflectionProbes.Count=4` picks four random distinct tables. Growing
@@ -48,22 +48,32 @@ invalidated or their capture settings/topology change. They exclude moving props
 and characters and do not repeatedly capture the scene. This is an in-memory
 bake, without an offline disk cache. Humans follow a connected spline network
 along the street and around the plaza/fountain; foxes follow interior aisles and
-the bar area. Counts choose random free route positions and directions, with
-110 cm spacing for humans and 80 cm for foxes. At junctions walkers randomly
-choose a continuation. They wait for occupied space and turn back after a second
-of blockage. Routes respect world pause/time scale and use the existing GPU skinning pipeline.
+the bar area. Counts use shuffled route spawn positions without an artificial upper bound.
+Once human spawn positions fill, ranks grow sideways (two abreast, then three,
+and so on), spaced 110 cm apart. Each rank shares its route, direction and
+junction choices; each member keeps an independent animation phase. Foxes remain
+single file on their route centers and reuse spawn positions when necessary.
+This is a benchmark: walkers can intersect, never wait for each other, and wide
+human ranks may cross scenery. There is no wall or passage-width avoidance.
+The complete requested population is created during initial world setup; changing
+`App.NPC.Count` or `App.Fox.Count` takes effect on the next startup. Existing saved
+CVar values override the defaults. Counts remain limited by the integer type and
+available CPU/GPU resources, rather than a fixed crowd or spawn-slot maximum.
+Routes respect world pause/time scale and use the existing GPU skinning pipeline.
 The authored nodes, links and sampled Bezier curves are in `src/BistroRoutes.h`.
-Movement uses the App's shared JobSystem with one character per job: first propose
-positions, then test swept separation and apply changes from an immutable snapshot.
-Each walker owns its random generator, so thread scheduling cannot change routes.
-Skeletal pose evaluation, bone palettes and bounds also run per character on that
-pool; entity/resource creation and GPU command recording stay on the owner thread.
+Movement uses the App's shared JobSystem with one job per human rank or fox;
+there is no pairwise crowd scan. Each group owns its random generator, so thread
+scheduling cannot change routes. Skeletal pose evaluation, bone palettes and
+bounds also run per character on that pool; entity/resource creation and GPU
+command recording stay on the owner thread. Skinning and drawing are unchanged:
+GPU skinning inputs/outputs remain per character part and indirect commands use
+one instance each; full animated instancing is a separate follow-up.
 Human asset provenance is in `Assets/Models/MGPUSoldier/SOURCE.md`.
 
 Separate development tasks are in `docs/tasks/bistro-additions/README.md`.
 Build `BistroAdditionsTests.vcxproj` for the integrated count, animation and GPU
 visibility checks; images are written under `Build/BistroAdditions`.
-Run `BistroAdditionsTests.exe --routes-only` for the CPU population/spacing and
+Run `BistroAdditionsTests.exe --routes-only` for the CPU startup-population/rank and
 table-limit checks without loading the rendered Bistro scene. This also checks
 identical trajectories with one/four threads and records actual worker thread IDs.
 
