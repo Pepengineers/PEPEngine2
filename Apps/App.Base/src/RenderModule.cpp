@@ -939,9 +939,14 @@ void RenderModule::OnRender()
     CollectParticleEmitters();
     if (_graphEarlyAO != (GetAmbientOcclusionExecutionPoint() == 0) ||
         _graphReuseTextures != GraphReuseTextures.GetValue()) RebuildRenderGraph();
+    if (!_primaryResources.ParticleSimulation)
+        _primaryResources.ParticleSimulation = std::make_unique<GDX12ParticleSimulation>();
+    _primaryResources.ParticleSimulation->BeginFrame(&_primaryResources, _RPcommonData);
+    _particlesPass->BeginFrame();
     auto primarycmdQueue = _primaryDevice->GetCommandQueue();
     auto primarycmdList = primarycmdQueue->GetCommandList();
     _primaryGPUTimer->Start(primarycmdList);
+    _primaryResources.ParticleSimulation->InitializePools(primarycmdList, &_primaryResources);
     DispatchSkeletalMeshes(primarycmdList);
     CollectGrassScene(primarycmdList);
     {
@@ -1296,6 +1301,8 @@ void RenderModule::ConfigureRenderPipeline()
     auto* environmentPass = CreateRenderPass<GDX12EnvironmentIBLPass>();
     auto* cullingPass = CreateRenderPass<GDX12GPUCullingPass>();
     auto* depthPrepass = CreateRenderPass<GDX12OpaquePass>(GDX12OpaquePass::Stage::DepthPrepass);
+    auto* particleSimulationPass = CreateRenderPass<GDX12ParticleSimulationPass>();
+    _particleSimulationPass = particleSimulationPass;
     auto* shadowPass = CreateRenderPass<GDX12CascadedShadowPass>();
     auto* localShadowPass = CreateRenderPass<GDX12LocalShadowPass>();
     _localShadowPass = localShadowPass;
@@ -1313,6 +1320,7 @@ void RenderModule::ConfigureRenderPipeline()
     auto* waterResolvePass = CreateRenderPass<GDX12FluidResolvePass>(fluidSurfacePass);
     auto* frontPass = CreateRenderPass<GDX12WBOITTransparencyPass>(GDX12WBOITTransparencyPass::WaterPartition::Front);
     auto* particlesPass = CreateRenderPass<GDX12ParticlesPass>();
+    _particlesPass = particlesPass;
     auto* frontCompositionPass = CreateRenderPass<GDX12WBOITCompositionPass>(nullptr, frontPass);
     auto* dofPass = CreateRenderPass<GDX12DepthOfFieldPass>();
     auto* motionBlurPass = CreateRenderPass<GDX12MotionBlurPass>();
@@ -1329,6 +1337,7 @@ void RenderModule::ConfigureRenderPipeline()
         environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0) });
     cullingPass->SetInputs({});
     depthPrepass->SetInputs({});
+    particleSimulationPass->SetInputs({depthPrepass->GetOutput(2)});
     opaquePass->SetInputs(std::vector<IRenderPassLink*>{ depthPrepass->GetOutput(2) });
     aoPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3) });
     lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0), aoPass->GetOutput(0) });
@@ -1522,7 +1531,7 @@ void RenderModule::RebuildRenderGraph()
     {
         if (_graphEarlyAO && pass.get() == _ambientOcclusionPass) continue;
         graph->AddPass(*pass);
-        if (_graphEarlyAO && pass.get() == _depthPrepass) graph->AddPass(*_ambientOcclusionPass);
+        if (_graphEarlyAO && pass.get() == _particleSimulationPass) graph->AddPass(*_ambientOcclusionPass);
     }
     graph->Compile(_graphReuseTextures);
     _primaryGraph = std::move(graph);

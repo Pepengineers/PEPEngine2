@@ -8,6 +8,8 @@ static void BenchmarkParticlePlacement(GDX12Device& device, GDX12DeviceResources
     const UINT previousSlot = resources.CurrFrameConstantsIndex;
     auto previousEmitters = std::move(resources.ParticleEmitters);
     auto* previousMotion = resources.ParticleMotion;
+    auto previousSimulation = std::move(resources.ParticleSimulation);
+    resources.ParticleSimulation = std::make_unique<GDX12ParticleSimulation>();
     GDX12ParticlesPass particles;
     particles.Setup(&resources, nullptr, &common);
     particles.SetInputs({depth, accum, reveal});
@@ -40,15 +42,21 @@ static void BenchmarkParticlePlacement(GDX12Device& device, GDX12DeviceResources
         emitter.Blend = blend;
         ++emitter.ResetRevision;
         resources.ParticleEmitters = {emitter};
+        resources.ParticleSimulation->BeginFrame(&resources, common);
+        particles.BeginFrame();
         const auto record = [&](GDX12CommandList* commands, UINT slot, UINT)
         {
             resources.CurrFrameConstantsIndex = slot;
+            resources.ParticleSimulation->BeginFrame(&resources, common);
+            particles.BeginFrame();
             commands->ResourceBarrier({depth->GetResource()->GetDepthWriteBarrier(),
                 hdr->GetResource()->GetRenderTargetBarrier(), accum->GetResource()->GetRenderTargetBarrier(),
                 reveal->GetResource()->GetRenderTargetBarrier()});
             commands->GetCommandList()->ClearDepthStencilView(depth->GetDSV()->CPUHandle,
                 D3D12_CLEAR_FLAG_DEPTH, 0, 0, 0, nullptr);
             for (auto* texture : {hdr, accum, reveal}) commands->ClearRenderTargetView(texture);
+            resources.ParticleSimulation->InitializePools(commands, &resources);
+            resources.ParticleSimulation->Execute(commands, &resources, common, depth);
             particles.Execute(commands);
             particles.Composite(commands, hdr);
         };
@@ -76,6 +84,7 @@ static void BenchmarkParticlePlacement(GDX12Device& device, GDX12DeviceResources
     }
     queue->Flush();
     particles.ClearDenendencies();
+    resources.ParticleSimulation = std::move(previousSimulation);
     resources.ParticleMotion = previousMotion;
     resources.ParticleEmitters = std::move(previousEmitters);
     resources.CurrFrameConstantsIndex = previousSlot;

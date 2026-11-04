@@ -10,6 +10,24 @@ in the task package remain the central reviewer's acceptance criteria.
 
 ## Ownership and API
 
+`GDX12ParticleSimulation`, owned by device resources, owns live GPU pools and
+simulation pipelines independently of `GDX12ParticlesPass`. At frame preparation,
+`BeginFrame` validates/snapshots emitters and allocates resources; the draw pass's
+`BeginFrame` prepares only rendering resources. `InitializePools` records pool
+initialization/reset before the render graph. `GDX12ParticleSimulationPass` then
+advances all emitters immediately after the full opaque depth prepass, before
+early AO and shadows. Its depth input excludes water and transparent geometry.
+The late particle pass only reads published pools for culling, sorting, color and
+motion. The graph declares a separate simulation dependency. Both passes still
+execute on the existing direct queue; Async Compute is a separate iteration.
+
+The separation was checked on 2026-11-04 with Release/x64 builds,
+`SecondGroupTests` (debug layer and `--gpu-validation`) and
+`BistroRenderGraphTests` (both AO placements, pooled/dedicated resources, resize,
+native/XeSS switching). Particle readbacks cover hidden simulation progression
+and expiry, simulation freeze, master disable, pending bursts and reset while
+both stages are disabled. Performance and long-run stability were not measured.
+
 `ParticleEmitterComponent` is a WorldECS component. A component needs an existing
 entity's `TransformComponent`. Bistro installs eight App-owned effects with a shared
 `App.Particles.CountScale` multiplier; see [scene techniques](scene-techniques.md). Each emitter has its own GPU pool, counters, random stream, author settings,
@@ -65,10 +83,21 @@ direct callers must provide unique nonzero stable IDs and the same valid data.
 
 ## Global controls and quality
 
-Only `Render.Particles.Enabled` (bool, default true) and `Render.Particles.Quality`
-(int, default 2, range 0..3) are registered in `GDX12Particles.cpp`. Both use runtime
-`Default`, work through C++ `ConsoleModule` and startup `Config/Engine.ini`.
-Quality 0 is Off. No implementation/source/material/simulation CVar exists.
+Three independent bool controls (all default true) are registered in
+`GDX12Particles.cpp` and startup `Config/Engine.ini`:
+
+- `Render.Particles.Enabled`: master switch; false suppresses both stages and
+  retains existing pools without advancing time.
+- `Render.Particles.DrawEnabled`: false skips culling, sorting, color and motion
+  output while simulation and spawning continue. Restoring drawing preserves the
+  live pool and invalidates render history.
+- `Render.Particles.SimulationEnabled`: false freezes motion, age and spawning
+  while existing particles remain drawable. Pending `Emit` requests wait for
+  resume, without elapsed-time catch-up. `Reset` still clears the pool immediately
+  during frame initialization, including when drawing is also off.
+
+`Render.Particles.Quality` retains budgets 0 Off, 1 Low, 2 Mid (default), 3 High.
+Quality Off acts like the master switch. Per-emitter/world pause still applies.
 
 | Inherited field | Low | Mid | High |
 |---|---:|---:|---:|
@@ -194,9 +223,10 @@ cost eight bytes per scene slot only when mesh particles are present. Geometry
 fits the existing culling sphere. SortedAlpha mesh settings are rejected explicitly;
 weighted and additive meshes work alongside all three billboard blend modes.
 
-Order: existing depth prepass → early AO if selected → CSM/local shadows/probes →
+Order: particle pool initialization/reset → existing depth prepass → particle
+simulation → early AO if selected → CSM/local shadows/probes →
 opaque G-buffer/late AO → deferred → AMD SSSR + single specular resolve → mesh
-WBOIT → particle simulation/cull/sort + weighted accumulation → WBOIT HDR resolve →
+WBOIT → particle cull/sort + weighted accumulation → WBOIT HDR resolve →
 global sorted-alpha particle draw → additive particle draw → DoF → feature-aware
 motion blur → HDR XeSS → the existing single tone map.
 
@@ -232,8 +262,8 @@ overflow existing RGBA16F WBOIT/HDR targets; practical overlap budgets require G
 measurement. No visual quality, GPU timing, debug-layer cleanliness, build success
 or long-run stability is claimed.
 
-Depth collision reconstructs a local surface from current jittered reverse-Z depth
-and its closest depth neighbours. It runs per simulation substep, corrects sphere
+Depth collision reconstructs a local surface from current jittered reverse-Z
+opaque prepass depth and its closest depth neighbours. It runs per simulation substep, corrects sphere
 penetration and reflects incoming velocity. It sees only the frontmost on-screen
-depth, including merged water depth; hidden/off-screen geometry and glass without
-depth writes do not collide. Silhouette and fast grazing hits can be missed.
+depth, excluding water and other transparent surfaces; hidden/off-screen geometry
+and glass without depth writes do not collide. Silhouette and fast grazing hits can be missed.

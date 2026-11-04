@@ -9,6 +9,10 @@ namespace
 {
     static AutoConsoleVariable<bool> Enabled(L"Render.Particles.Enabled", true,
         L"Enable GPU particle components", EConsoleVariableFlags::Default);
+    static AutoConsoleVariable<bool> DrawEnabled(L"Render.Particles.DrawEnabled", true,
+        L"Draw particles without changing simulation", EConsoleVariableFlags::Default);
+    static AutoConsoleVariable<bool> SimulationEnabled(L"Render.Particles.SimulationEnabled", true,
+        L"Advance particles and spawn; false freezes simulation", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Particles.Quality", GDX12Quality::Mid,
         L"GPU particles: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default);
 
@@ -32,7 +36,7 @@ namespace
 GDX12ParticleSettings GetParticleSettings()
 {
     const int quality = Quality.GetInt();
-    return { Enabled.GetValue() && quality != 0, quality };
+    return { Enabled.GetValue() && quality != 0, quality, DrawEnabled.GetValue(), SimulationEnabled.GetValue() };
 }
 
 bool IsValidParticleEmitterSettings(const GDX12ParticleEmitterSettings& s)

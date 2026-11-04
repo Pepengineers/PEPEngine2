@@ -316,6 +316,22 @@ int main(int argc, char** argv)
 
         GDX12ParticlesPass particles; particles.Setup(&resources, nullptr, &common);
         particles.SetInputs({water.GetOutput(0), accum.get(), reveal.get()}); particles.Initialize();
+        resources.ParticleSimulation = std::make_unique<GDX12ParticleSimulation>();
+        const auto prepareParticles = [&]
+        {
+            resources.ParticleSimulation->BeginFrame(&resources, common);
+            particles.BeginFrame();
+        };
+        const auto executeParticles = [&](GDX12ParticlesPass& pass)
+        {
+            prepareParticles();
+            auto* commands = queue->GetCommandList();
+            resources.ParticleSimulation->InitializePools(commands, &resources);
+            resources.ParticleSimulation->Execute(commands, &resources, common, depth);
+            pass.Execute(commands);
+            queue->ExecuteCommandList(commands);
+            queue->Flush();
+        };
         GDX12ParticleEmitter emitter; emitter.Id = 1; emitter.MaxParticles = 64; emitter.BurstTotal = 16;
         emitter.EmissionRate = 0; emitter.World = Matrix::CreateTranslation(0, 30, -40);
         emitter.SpeedMin = emitter.SpeedMax = 0; emitter.SizeStart = emitter.SizeEnd = 40; emitter.Acceleration = Vector3::Zero;
@@ -323,7 +339,7 @@ int main(int argc, char** argv)
         {
             emitter.Blend = blend; ++emitter.ResetRevision; resources.ParticleEmitters = {emitter};
             const auto before = Read(device, *hdr);
-            execute(particles); list = queue->GetCommandList(); particles.Composite(list, hdr.get());
+            executeParticles(particles); list = queue->GetCommandList(); particles.Composite(list, hdr.get());
             queue->ExecuteCommandList(list); queue->Flush();
             const auto after = Read(device, *hdr);
             if (blend == ParticleBlend::WeightedAlpha)
@@ -347,7 +363,10 @@ int main(int argc, char** argv)
         for (auto blend : {ParticleBlend::WeightedAlpha, ParticleBlend::Additive})
         {
             emitter.Blend = blend; emitter.ResetRevision += 10; resources.ParticleEmitters = {emitter};
+            prepareParticles();
             list = queue->GetCommandList();
+            resources.ParticleSimulation->InitializePools(list, &resources);
+            resources.ParticleSimulation->Execute(list, &resources, common, depth);
             list->GetCommandList()->BeginQuery(meshQuery.Get(), D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0);
             particles.Execute(list); particles.Composite(list, hdr.get());
             list->GetCommandList()->EndQuery(meshQuery.Get(), D3D12_QUERY_TYPE_PIPELINE_STATISTICS, 0);
@@ -384,7 +403,7 @@ int main(int argc, char** argv)
             emitter.CollisionRestitution = mode == 2 ? 0.0f : 1.0f;
             emitter.ResetRevision = 100 + mode;
             resources.ParticleEmitters = {emitter};
-            for (UINT frame = 0; frame < 9; ++frame) execute(particles);
+            for (UINT frame = 0; frame < 9; ++frame) executeParticles(particles);
             const auto coverage = Read(device, *resources.ParticleMotion, 3);
             const float alpha = std::accumulate(coverage.begin(), coverage.end(), 0.0f);
             if (mode == 0) Require(alpha == 0, "Noncolliding particles should pass behind the test plane");
@@ -397,7 +416,7 @@ int main(int argc, char** argv)
                     "Particle depth collision differs from independent bounce/stop oracle");
             }
         }
-        CheckParticleSimulationControls(device, resources, particles, execute, eye, forward);
+        CheckParticleSimulationControls(device, resources, particles, executeParticles, eye, forward);
         emitter = {}; emitter.Id = 1; emitter.World = Matrix::CreateTranslation(eye + forward * 100);
         emitter.EmissionRate = 0; emitter.SpeedMin = emitter.SpeedMax = 0; emitter.Acceleration = Vector3::Zero;
         emitter.LifetimeMin = emitter.LifetimeMax = 0.15f; emitter.DeltaTime = 0.1f;
@@ -408,14 +427,14 @@ int main(int argc, char** argv)
             emitter.MaxParticles = count; emitter.BurstTotal = 0; emitter.ResetRevision = count;
             for (UINT frame = 0; frame < 3; ++frame)
             {
-                emitter.BurstTotal += count; resources.ParticleEmitters = {emitter}; execute(particles);
+                emitter.BurstTotal += count; resources.ParticleEmitters = {emitter}; executeParticles(particles);
                 const auto coverage = Read(device, *resources.ParticleMotion, 3);
                 Require(*std::max_element(coverage.begin(), coverage.end()) == static_cast<float>(count),
                     "GPU refill must maintain the exact 250k/1M live count through particle deaths");
             }
         }
         std::cout << "GPU particle refill: exact 250000/1000000 live particles from first frame and after expiry passed.\n";
-        resources.ParticleEmitters.clear(); execute(particles); Require(!resources.ParticleMotion, "Removed emitter retained motion");
+        resources.ParticleEmitters.clear(); executeParticles(particles); Require(!resources.ParticleMotion, "Removed emitter retained motion");
         Set(L"Render.Fluid.Enabled", "false"); execute(water);
         Require(water.GetOutput(0)->GetTexture() == depth, "Disabled fluid retained merged depth");
         std::cout << "GPU particle spawn/indirect/three blend modes/reset/removal and depth collision off/bounce/stop passed.\n";

@@ -238,8 +238,11 @@
   <ItemGroup>
     <ClCompile Include="src\GDX12Particles.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12ParticlesPass.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\GDX12ParticleSimulation.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClInclude Include="src\GDX12ParticleResources.h"><Filter>Header Files</Filter></ClInclude>
     <None Include="Shaders\Particles.hlsli"><Filter>Resource Files</Filter></None>
     <None Include="Shaders\ParticleSimulation.hlsl"><Filter>Resource Files</Filter></None>
+    <None Include="Shaders\ParticleRender.hlsl"><Filter>Resource Files</Filter></None>
     <None Include="Shaders\ParticleRaster.hlsl"><Filter>Resource Files</Filter></None>
     <None Include="Shaders\ParticleSort.hlsl"><Filter>Resource Files</Filter></None>
     <ClCompile Include="src\GDX12DepthOfField.cpp"><Filter>Source Files</Filter></ClCompile>

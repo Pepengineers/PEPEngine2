@@ -28,6 +28,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GrassWind.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GrassRenderer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Particles.h" />
+    <ClInclude Include="src\GDX12ParticleResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ParticlesPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Fluid.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FluidPass.h" />
@@ -107,6 +108,7 @@
     <ClCompile Include="src\GDX12GrassRenderer.cpp" />
     <ClCompile Include="src\GDX12Particles.cpp" />
     <ClCompile Include="src\GDX12ParticlesPass.cpp" />
+    <ClCompile Include="src\GDX12ParticleSimulation.cpp" />
     <ClCompile Include="src\GDX12Skinning.cpp" />
     <ClCompile Include="src\GDX12CloudComponent.cpp" />
     <ClCompile Include="src\GDX12AmbientOcclusion.cpp" />
@@ -159,6 +161,7 @@
     <None Include="Shaders\WindField.hlsl" />
     <None Include="Shaders\Particles.hlsli" />
     <None Include="Shaders\ParticleSimulation.hlsl" />
+    <None Include="Shaders\ParticleRender.hlsl" />
     <None Include="Shaders\ParticleRaster.hlsl" />
     <None Include="Shaders\ParticleSort.hlsl" />
     <None Include="Shaders\FluidParameters.hlsli" />

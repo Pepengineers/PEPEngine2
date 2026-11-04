@@ -69,6 +69,8 @@ struct GDX12ParticleSettings
 {
     bool Enabled;
     int Quality;
+    bool DrawEnabled;
+    bool SimulationEnabled;
 };
 
 GDX12ParticleSettings GetParticleSettings();
@@ -83,4 +85,25 @@ struct GDX12ParticleEmitter : GDX12ParticleEmitterSettings
     Matrix World = Matrix::Identity;
     float DeltaTime = 0.0f;
     bool Paused = false;
+};
+
+class GDX12DeviceResources;
+class GDX12CommandList;
+class GDX12Texture;
+class RenderPipelineCommonData;
+
+class GDX12ParticleSimulation
+{
+public:
+    GDX12ParticleSimulation();
+    ~GDX12ParticleSimulation();
+    void BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common);
+    void InitializePools(GDX12CommandList* commands, GDX12DeviceResources* resources);
+    void Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,
+        RenderPipelineCommonData& common, GDX12Texture* opaqueDepth);
+
+private:
+    friend class GDX12ParticlesPass;
+    struct State;
+    std::unique_ptr<State> _state;
 };

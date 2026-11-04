@@ -22,6 +22,7 @@ class GDX12ReconstructionPass;
 class GDX12DeferredLightingPass;
 class GDX12LocalShadowPass;
 class GDX12ReflectionProbePass;
+class GDX12ParticlesPass;
 struct GDX12FrameGenerationStatus;
 
 struct TransformComponent;
@@ -244,6 +245,8 @@ private:
     std::unique_ptr<GDX12SwapChain> _backBuffer;
     
     GDX12RenderPass* _depthPrepass = nullptr;
+    GDX12RenderPass* _particleSimulationPass = nullptr;
+    GDX12ParticlesPass* _particlesPass = nullptr;
     GDX12RenderPass* _opaquePass = nullptr;
     GDX12DeferredLightingPass* _deferredLightingPass = nullptr;
     GDX12LocalShadowPass* _localShadowPass = nullptr;
