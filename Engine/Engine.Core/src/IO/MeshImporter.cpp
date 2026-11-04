@@ -622,7 +622,8 @@ namespace
 		const aiMesh& assimpMesh,
 		const aiMatrix4x4& nodeTransform,
 		const std::uint32_t startVertexLocation,
-		const std::uint32_t startIndexLocation)
+		const std::uint32_t startIndexLocation,
+		const std::function<bool()>& shouldContinue = {})
 	{
 		Engine::Core::SubMesh importedSubMesh = {};
 		importedSubMesh.Vertices.reserve(assimpMesh.mNumVertices);
@@ -634,6 +635,7 @@ namespace
 
 		for (unsigned int vertexIndex = 0; vertexIndex < assimpMesh.mNumVertices; ++vertexIndex)
 		{
+			if ((vertexIndex & 0xFFFu) == 0u && shouldContinue && !shouldContinue()) return {};
 			const aiVector3D transformedPosition = TransformPosition(nodeTransform, assimpMesh.mVertices[vertexIndex]);
 
 			Engine::Core::Vertex importedVertex = {};
@@ -662,6 +664,7 @@ namespace
 
 		for (unsigned int faceIndex = 0; faceIndex < assimpMesh.mNumFaces; ++faceIndex)
 		{
+			if ((faceIndex & 0xFFFu) == 0u && shouldContinue && !shouldContinue()) return {};
 			const aiFace& assimpFace = assimpMesh.mFaces[faceIndex];
 
 			assert(assimpFace.mNumIndices == 3);
@@ -681,6 +684,7 @@ namespace
 			std::vector<std::vector<Engine::Core::SkinInfluence>> influences(assimpMesh.mNumVertices);
 			for (unsigned int boneIndex = 0; boneIndex < assimpMesh.mNumBones; ++boneIndex)
 			{
+				if (shouldContinue && !shouldContinue()) return {};
 				if (!assimpMesh.mBones[boneIndex]) throw std::runtime_error("Null skin bone");
 				const aiBone& bone = *assimpMesh.mBones[boneIndex];
 				Engine::Core::SkinBone importedBone;
@@ -719,18 +723,21 @@ namespace
 	/// so that each mesh is baked into a common world space.
 	/// startVertexLocation and startIndexLocation are updated after each imported submesh
 	/// to maintain correct offsets for a merged GPU vertex/index buffer.
-	void ImportNodeMeshes(
+	bool ImportNodeMeshes(
 		const aiScene& assimpScene,
 		const aiNode& assimpNode,
 		const aiMatrix4x4& parentTransform,
 		std::vector<Engine::Core::SubMesh>& importedSubMeshes,
 		std::uint32_t& startVertexLocation,
-		std::uint32_t& startIndexLocation)
+		std::uint32_t& startIndexLocation,
+		const std::function<bool()>& shouldContinue)
 	{
+		if (shouldContinue && !shouldContinue()) return false;
 		const aiMatrix4x4 nodeTransform = parentTransform * assimpNode.mTransformation;
 
 		for (unsigned int nodeMeshIndex = 0; nodeMeshIndex < assimpNode.mNumMeshes; ++nodeMeshIndex)
 		{
+			if (shouldContinue && !shouldContinue()) return false;
 			const unsigned int sceneMeshIndex = assimpNode.mMeshes[nodeMeshIndex];
 			if (sceneMeshIndex >= assimpScene.mNumMeshes)
 			{
@@ -743,7 +750,8 @@ namespace
 				continue;
 			}
 
-			Engine::Core::SubMesh importedSubMesh = ImportSubMesh(*assimpMesh, nodeTransform, startVertexLocation, startIndexLocation);
+			Engine::Core::SubMesh importedSubMesh = ImportSubMesh(*assimpMesh, nodeTransform, startVertexLocation, startIndexLocation, shouldContinue);
+			if (shouldContinue && !shouldContinue()) return false;
 			importedSubMesh.SourceNodeName = assimpNode.mName.C_Str();
 			if (importedSubMesh.GetVertexCount() == 0 || importedSubMesh.GetIndexCount() == 0)
 			{
@@ -764,8 +772,10 @@ namespace
 				continue;
 			}
 
-			ImportNodeMeshes(assimpScene, *childNode, nodeTransform, importedSubMeshes, startVertexLocation, startIndexLocation);
+			if (!ImportNodeMeshes(assimpScene, *childNode, nodeTransform, importedSubMeshes, startVertexLocation, startIndexLocation, shouldContinue))
+				return false;
 		}
+		return true;
 	}
 }
 
@@ -824,7 +834,8 @@ namespace Engine::Core
 		std::uint32_t startIndexLocation = 0;
 
 		const aiMatrix4x4 identityTransform;
-		ImportNodeMeshes(*assimpScene, *assimpScene->mRootNode, identityTransform, importedSubMeshes, startVertexLocation, startIndexLocation);
+		if (!ImportNodeMeshes(*assimpScene, *assimpScene->mRootNode, identityTransform, importedSubMeshes, startVertexLocation, startIndexLocation, options.Continue))
+			return nullptr;
 
 		if (importedSubMeshes.empty())
 		{

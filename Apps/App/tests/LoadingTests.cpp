@@ -149,6 +149,7 @@ static void CheckConfiguredScene()
     assert(world->GetECS().Get<TransformComponent>(world->ActiveCamera).Location == Vector3(2, 0, 0));
     assert(scenes->UnloadWorld(0));
     World empty(WorldDesc{});
+    assert(empty.ActiveCamera == InvalidEntity);
     scenes->UpdateSystems(jobs, empty, 1);
     locator.UnregisterModule<SceneManagerModule>();
     locator.UnregisterModule<RenderModule>();
@@ -240,6 +241,17 @@ int main()
         mesh << "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
     }
     const auto reference = Engine::Core::MeshImporter::ImportSingleMeshAsset(meshPath);
+    Engine::Core::MeshImportOptions cancellable;
+    size_t checkpoints = 0;
+    cancellable.Continue = [&] { ++checkpoints; return true; };
+    assert(Engine::Core::MeshImporter::ImportSingleMeshAsset(meshPath, cancellable));
+    for (size_t cancelAt = 1; cancelAt <= checkpoints; ++cancelAt)
+    {
+        size_t visited = 0;
+        cancellable.Continue = [&] { return ++visited < cancelAt; };
+        assert(!Engine::Core::MeshImporter::ImportSingleMeshAsset(meshPath, cancellable));
+        assert(visited >= cancelAt);
+    }
     Engine::Core::MeshImportOptions options;
     options.bGenerateTangents = false;
     const auto derivativeNormals = Engine::Core::MeshImporter::ImportSingleMeshAsset(meshPath, options);

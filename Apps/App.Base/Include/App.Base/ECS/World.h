@@ -82,7 +82,7 @@ public:
     Entity GetSkyEntity() const { return _skyEntity; }
     uint64_t GetSkyRevision() const { return _skyRevision; }
 
-    Entity ActiveCamera;
+    Entity ActiveCamera = InvalidEntity;
     // Return true after creating the mesh entities; false keeps the loader's default entity.
     std::function<bool(const std::string&, const StaticMeshRenderComponent&)> SceneMeshFactory;
 
