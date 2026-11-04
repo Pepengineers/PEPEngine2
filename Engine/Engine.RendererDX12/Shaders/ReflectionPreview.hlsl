@@ -2,8 +2,7 @@
 
 cbuffer PreviewConstants : register(b0) { uint PreviewMask; };
 ConstantBuffer<CameraCB> CBCamera : register(b1);
-Texture2D<float> Depth : register(t0);
-TextureCubeArray<float4> ProbeRadiance : register(t1);
+TextureCubeArray<float4> ProbeRadiance : register(t0);
 struct ProbeData
 {
     float3 Position; float Intensity;
@@ -11,26 +10,18 @@ struct ProbeData
     float3 BoxMax; float MaxMip;
     float MinMip;
 };
-StructuredBuffer<ProbeData> Probes : register(t2);
-RWTexture2D<float4> Color : register(u0);
+StructuredBuffer<ProbeData> Probes : register(t1);
 SamplerState LinearClamp : register(s3);
 
-[numthreads(8, 8, 1)]
-void CS(uint3 id : SV_DispatchThreadID)
+struct PSInput { float4 Position : SV_POSITION; float2 TexCoord : TEXCOORD; };
+struct PSOutput { float4 Color : SV_TARGET; float Depth : SV_DEPTH; };
+
+PSOutput PS(PSInput input)
 {
-    uint width, height;
-    Color.GetDimensions(width, height);
-    if (any(id.xy >= uint2(width, height))) return;
-    float2 ndc = (float2(id.xy) + 0.5f) / float2(width, height) * float2(2, -2) + float2(-1, 1);
+    float2 ndc = input.TexCoord * float2(2, -2) + float2(-1, 1);
     float4 nearWorld = mul(float4(ndc, 1, 1), CBCamera.InvViewProj);
     float3 ray = normalize(nearWorld.xyz / nearWorld.w - CBCamera.CameraLocation);
     float closest = 3.402823466e+38f;
-    float depth = Depth[id.xy];
-    if (depth > 0)
-    {
-        float4 world = mul(float4(ndc, depth, 1), CBCamera.InvViewProj);
-        closest = dot(world.xyz / world.w - CBCamera.CameraLocation, ray);
-    }
     uint selected = 32;
     uint remaining = PreviewMask;
     while (remaining)
@@ -54,11 +45,15 @@ void CS(uint3 id : SV_DispatchThreadID)
         closest = distance;
         selected = index;
     }
-    if (selected == 32) return;
+    if (selected == 32) discard;
     ProbeData probe = Probes[selected];
     float3 normal = normalize(CBCamera.CameraLocation + ray * closest - probe.Position);
     float3 reflection = reflect(ray, normal);
     // The exact published slice and its first populated mip show this probe's capture.
-    Color[id.xy] = float4(ProbeRadiance.SampleLevel(LinearClamp, float4(reflection, selected), probe.MinMip).rgb, 1);
-    // shortcut: debug spheres do not write depth/motion, use geometry if previews must participate in post effects.
+    PSOutput output;
+    output.Color = float4(ProbeRadiance.SampleLevel(LinearClamp, float4(reflection, selected), probe.MinMip).rgb, 1);
+    float4 clip = mul(float4(CBCamera.CameraLocation + ray * closest, 1), CBCamera.ViewProj);
+    output.Depth = clip.z / clip.w;
+    // shortcut: preview spheres reuse scene motion; write sphere motion if temporal artifacts require it.
+    return output;
 }

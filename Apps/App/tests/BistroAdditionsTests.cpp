@@ -135,6 +135,7 @@ static void Aim(World& world, Vector3 eye, Vector3 target)
 
 static void CheckProbeOverlay(BistroApp& app, World& world)
 {
+    const bool savedBounds = BistroReflections::ShowBounds.GetValue();
     const auto saved = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
     const auto window = app.GetWindow()->GetWindowHandle();
     app.MsgProc(window, WM_KEYUP, VK_F1, 0);
@@ -159,6 +160,7 @@ static void CheckProbeOverlay(BistroApp& app, World& world)
                     "Probe bounds crossing the camera/near plane must remain clipped and finite");
     }
     Set(L"App.ReflectionProbes.Count", "4");
+    Set(L"App.ReflectionProbes.ShowBounds", savedBounds ? "true" : "false");
     auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
     camera.Location = saved.Location; camera.Rotation = saved.Rotation; camera.DirtyFlag = true;
     app.MsgProc(window, WM_KEYUP, VK_F1, 0);

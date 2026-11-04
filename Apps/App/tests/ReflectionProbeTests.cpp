@@ -806,6 +806,13 @@ int main(int argc, char** argv)
             environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0), ao.GetOutput(0) };
         deferred.SetInputs(lightingInputs);
         deferred.Initialize();
+        GDX12Texture previewColor;
+        GDX12RenderHelpers::InitializeRenderTarget(previewColor, resources, common.DownscaledWidth,
+            common.DownscaledHeight, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        GDX12ReflectionPreviewPass preview;
+        preview.Setup(&resources, nullptr, &common);
+        preview.SetInputs({ &previewColor, opaque.GetOutput(2) });
+        preview.Initialize();
         GDX12RenderGraph lightingGraph(&device);
         lightingGraph.ImportShared(GDX12RenderGraph::SharedResource::Scene, "Scene");
         lightingGraph.ImportShared(GDX12RenderGraph::SharedResource::Environment, "Atmosphere");
@@ -865,7 +872,7 @@ int main(int argc, char** argv)
         material[0].Metallic = 1;
         material[0].Roughness = 0.1f;
         material[0].EmissiveColor = {};
-        const auto surface = [&](bool enabled)
+        const auto surface = [&](bool enabled, bool showPreview = false)
         {
             Set(L"Render.Reflection.Enabled", enabled ? "true" : "false");
             render();
@@ -895,6 +902,20 @@ int main(int argc, char** argv)
             ao.Execute(list);
             deferred.Prepare();
             lightingGraph.Execute(list);
+            resources.ReflectionProbes[0].PreviewSphere = showPreview;
+            if (showPreview)
+            {
+                GDX12ReflectionProbeData sphere;
+                sphere.Position = {0,0,0};
+                sphere.BoxMin = {-20,-20,-20};
+                sphere.BoxMax = {20,20,20};
+                sphere.Intensity = 1;
+                frame->ReflectionProbesUpload->CopyData(0, sphere);
+                frame->UploadReflectionProbeData(list);
+                list->ResourceBarrier({ previewColor.GetResource()->GetRenderTargetBarrier() });
+                list->ClearRenderTargetView(&previewColor);
+                preview.Execute(list);
+            }
             transparency.Execute(list);
             composition.Execute(list);
             xess.Execute(list);
@@ -963,6 +984,40 @@ int main(int argc, char** argv)
         surface(true);
         const auto glassOn = ReadTexture(device, *transparency.GetOutput(0)->GetTexture(), 0);
         Require(increase(glassOff, glassOn) > 0.001f, "Transparent PBR did not consume local probe radiance");
+        const std::array savedLocations = {locations[0], locations[1], locations[2]};
+        const auto savedScale = scales[0];
+        const auto savedMaterial = material[0];
+        locations[1].x = locations[2].x = 20000;
+        scales[0] = Vector3(120);
+        material[0].EmissiveColor = {6,6,6};
+        const size_t centerPixel = (size_t(common.DownscaledHeight / 2) * common.DownscaledWidth + common.DownscaledWidth / 2) * 3;
+        const auto glass = [&](float z, bool sphere)
+        {
+            locations[0] = Vector3(0,0,z);
+            ++resources.ReflectionStaticRevision;
+            surface(true, sphere);
+            return ReadTexture(device, *transparency.GetOutput(0)->GetTexture(), 0);
+        };
+        const auto unoccludedGlass = glass(100, false);
+        Require(unoccludedGlass[centerPixel] > 0.01f, "Glass regression fixture must be visible with spheres off");
+        const auto behindSphere = glass(100, true);
+        Require(behindSphere[centerPixel] == 0, "WBOIT glass behind an opaque probe sphere must fail depth testing");
+        size_t visibleGlass = 0, retainedGlass = 0;
+        for (size_t i = 0; i < unoccludedGlass.size(); i += 3)
+            if (unoccludedGlass[i] > 0.01f)
+            {
+                ++visibleGlass;
+                retainedGlass += behindSphere[i] > 0.01f;
+            }
+        std::cout << "WBOIT glass pixels: baseline=" << visibleGlass << ", outside sphere=" << retainedGlass << '\n';
+        Require(retainedGlass > 0, "Sphere occlusion must retain glass outside its silhouette");
+        Require(glass(-50, true)[centerPixel] > 0.01f, "WBOIT glass in front of a probe sphere must remain visible");
+        for (UINT i = 0; i < 3; ++i) locations[i] = savedLocations[i];
+        scales[0] = savedScale;
+        material[0] = savedMaterial;
+        resources.ReflectionProbes[0].PreviewSphere = false;
+        ++resources.ReflectionStaticRevision;
+        std::cout << "Probe sphere depth: actual WBOIT glass behind is hidden, front/outside glass remains visible.\n";
         material[0].RenderLayer = 0;
         material[0].EmissiveColor = { 6, 6, 6 };
         common.ResetHistory = true;

@@ -34,13 +34,21 @@ void GDX12RenderHelpers::InitializeRenderTarget(GDX12Texture& texture, GDX12Devi
 }
 
 void GDX12RenderHelpers::InitializeComputeTexture(GDX12Texture& texture, GDX12DeviceResources& resources,
-    UINT width, UINT height, DXGI_FORMAT format)
+    UINT width, UINT height, DXGI_FORMAT format, bool renderTarget)
 {
     auto desc = Texture2D(resources, width, height, format);
     desc.CreateUAV = true;
     desc.UAVHeapIndex = desc.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
     desc.UAVDesc.Format = format;
     desc.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    if (renderTarget)
+    {
+        desc.CreateRTV = true;
+        desc.RTVHeap = resources.RTVHeap.get();
+        desc.RTVHeapIndex = desc.RTVHeap->GetAvailableIndex();
+        desc.RTVDesc.Format = format;
+        desc.RTVDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+    }
     texture.Initialize(desc);
 }
 

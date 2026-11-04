@@ -12,6 +12,8 @@ static void TestReflectionPreview(GDX12Device& device)
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 512, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
     resources.RTVHeap = std::make_unique<GDX12DescriptorHeap>(&device,
         D3D12_DESCRIPTOR_HEAP_TYPE_RTV, 32, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
+    resources.DSVHeap = std::make_unique<GDX12DescriptorHeap>(&device,
+        D3D12_DESCRIPTOR_HEAP_TYPE_DSV, 2, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
     resources.FrameConstants.push_back(std::make_unique<GDX12FrameConstants>(&device));
     auto& frame = *resources.FrameConstants[0];
     frame.ReflectionProbes->CreateSRV(resources.SRV_UAV_Heap.get(), 11);
@@ -28,18 +30,31 @@ static void TestReflectionPreview(GDX12Device& device)
     frame.CameraCB->CopyData(0, camera);
 
     GDX12Texture color, depth, cubes;
-    GDX12RenderHelpers::InitializeComputeTexture(color, resources, 65, 37, DXGI_FORMAT_R16G16B16A16_FLOAT);
-    GDX12RenderHelpers::InitializeComputeTexture(depth, resources, 65, 37, DXGI_FORMAT_R32_FLOAT);
-    GDX12DescriptorHeap cpuUAVs(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 2,
+    GDX12RenderHelpers::InitializeComputeTexture(color, resources, 65, 37, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
+    GDX12TextureDesc depthDesc;
+    depthDesc.Width = 65; depthDesc.Height = 37;
+    depthDesc.Format = depthDesc.DSVDesc.Format = DXGI_FORMAT_D32_FLOAT;
+    depthDesc.SRVDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    depthDesc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+    depthDesc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+    depthDesc.SRVDesc.Texture2D.MipLevels = 1;
+    depthDesc.SRV_UAV_Heap = resources.SRV_UAV_Heap.get();
+    depthDesc.SRVHeapIndex = resources.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+    depthDesc.CreateDSV = true;
+    depthDesc.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+    depthDesc.DSVHeap = resources.DSVHeap.get();
+    depthDesc.DSVHeapIndex = 0;
+    depthDesc.ExternalResource = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT,
+        CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, 65, 37, 1, 1, 1, 0,
+            D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL), D3D12_RESOURCE_STATE_COMMON);
+    depth.Initialize(depthDesc);
+    GDX12DescriptorHeap cpuUAVs(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1,
         D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
     D3D12_UNORDERED_ACCESS_VIEW_DESC clearView = {};
     clearView.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
     clearView.Format = color.GetFormat();
     device.GetDevice()->CreateUnorderedAccessView(color.GetResource()->D3DResource.Get(), nullptr,
         &clearView, cpuUAVs.GetCPUHandle(0));
-    clearView.Format = depth.GetFormat();
-    device.GetDevice()->CreateUnorderedAccessView(depth.GetResource()->D3DResource.Get(), nullptr,
-        &clearView, cpuUAVs.GetCPUHandle(1));
     GDX12TextureDesc cubeDesc;
     cubeDesc.Width = cubeDesc.Height = 2;
     cubeDesc.Format = cubeDesc.SRVDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
@@ -95,27 +110,32 @@ static void TestReflectionPreview(GDX12Device& device)
         for (UINT i = 0; i < 2; ++i) resources.ReflectionProbes[i].PreviewSphere = selected == i;
         auto* list = queue->GetCommandList();
         list->SetDescriptorHeaps({ resources.SRV_UAV_Heap.get() });
-        list->ResourceBarrier({ color.GetResource()->GetUnorderedAccessBarrier(), depth.GetResource()->GetUnorderedAccessBarrier() });
-        const float depthClear[4] = {sceneDepth,0,0,0};
-        for (auto [texture, clear] : {std::pair{&color, background}, std::pair{&depth, depthClear}})
-            list->ClearUnorderedAccessViewFloat(texture->GetUAV()->GPUHandle, cpuUAVs.GetCPUHandle(texture == &color ? 0 : 1),
-                texture->GetResource()->D3DResource.Get(), clear);
-        list->ResourceBarrier({ CD3DX12_RESOURCE_BARRIER::UAV(color.GetResource()->D3DResource.Get()),
-            CD3DX12_RESOURCE_BARRIER::UAV(depth.GetResource()->D3DResource.Get()) });
+        list->ResourceBarrier({ color.GetResource()->GetUnorderedAccessBarrier(), depth.GetResource()->GetDepthWriteBarrier() });
+        list->ClearUnorderedAccessViewFloat(color.GetUAV()->GPUHandle, cpuUAVs.GetCPUHandle(0),
+            color.GetResource()->D3DResource.Get(), background);
+        list->GetCommandList()->ClearDepthStencilView(depth.GetDSV()->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, sceneDepth, 0, 0, nullptr);
+        list->ResourceBarrier({ CD3DX12_RESOURCE_BARRIER::UAV(color.GetResource()->D3DResource.Get()) });
         frame.UploadReflectionProbeData(list);
         preview.Execute(list);
         queue->ExecuteCommandList(list);
         queue->Flush();
         return ReadTexture(device, color, 0);
     };
-    const auto identity = [&](const std::vector<float>& pixels)
+    const auto identity = [&](const std::vector<float>& pixels, float sceneDepth = 0)
     {
         for (size_t i = 0; i < pixels.size(); ++i)
             Require(std::abs(pixels[i] - background[i % 3]) < 0.001f, "Probe preview changed a hidden/disabled pixel");
+        for (const float value : ReadTexture(device, depth, 0))
+            Require(std::abs(value - sceneDepth) < 1e-6f, "Hidden/disabled preview changed scene depth");
     };
     for (UINT index = 0; index < 2; ++index)
     {
         const auto pixels = render(index, 0);
+        const auto sphereDepth = ReadTexture(device, depth, 0);
+        const float expectedDepth = (10000.0f / 84 - 1) / 9999;
+        Require(std::abs(sphereDepth[18 * 65 + 32] - expectedDepth) < 1e-5f,
+            "Probe sphere must write its surface depth so glass behind it fails the depth test");
+        Require(sphereDepth[0] == 0, "Probe sphere wrote depth outside its silhouette");
         const size_t center = (18 * 65 + 32) * 3;
         for (UINT c = 0; c < 3; ++c)
         {
@@ -125,7 +145,7 @@ static void TestReflectionPreview(GDX12Device& device)
         }
     }
     identity(render(32, 0));
-    identity(render(0, 0.1f)); // Opaque depth is in front of the complete sphere.
+    identity(render(0, 0.1f), 0.1f); // Opaque depth is in front of the complete sphere.
     published.Intensity = 0;
     frame.ReflectionProbesUpload->CopyData(0, published);
     identity(render(0, 0));

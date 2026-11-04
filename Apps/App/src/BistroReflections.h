@@ -12,7 +12,7 @@ namespace BistroReflections
     inline AutoConsoleVariable<int> Count(L"App.ReflectionProbes.Count", 4,
         L"Frozen static Bistro cubemaps, 0 disables, maximum 32",
         EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= static_cast<int>(MaxReflectionProbes); });
-    inline AutoConsoleVariable<bool> ShowBounds(L"App.ReflectionProbes.ShowBounds", true,
+    inline AutoConsoleVariable<bool> ShowBounds(L"App.ReflectionProbes.ShowBounds", false,
         L"Show colored table-sized reflection boxes and capture labels above Bistro terrace tables");
     inline AutoConsoleVariable<bool> ShowSpheres(L"App.ReflectionProbes.ShowSpheres", true,
         L"Show mirror spheres sampling each Bistro probe's own baked cubemap");

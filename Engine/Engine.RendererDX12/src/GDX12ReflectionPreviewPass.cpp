@@ -12,12 +12,31 @@ void GDX12ReflectionPreviewPass::Initialize()
     GDX12RootSignatureDesc root;
     root.Constants = { 1 };
     root.NumSingleCBVSlots = 1;
-    root.NumSingleSRVSlots = 3;
-    root.NumSingleUAVSlots = 1;
+    root.NumSingleSRVSlots = 2;
     root.StaticSamplers = GetStaticSamplers();
     _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
-    _pipeline = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(),
-        SHADERS_FOLDER "ReflectionPreview.hlsl", "CS");
+    auto* color = _inputs[0]->GetTexture();
+    if (!color->HasRTV() || !_inputs[1]->GetTexture()->HasDSV())
+        throw std::invalid_argument("Reflection preview requires writable HDR and depth render targets");
+    auto& compiler = GDX12ShaderCompiler::GetInstance();
+    auto vs = compiler.CompileShader(_resources->Device, SHADERS_FOLDER "FullScreenVS.hlsl", nullptr, "VS", "vs");
+    auto ps = compiler.CompileShader(_resources->Device, SHADERS_FOLDER "ReflectionPreview.hlsl", nullptr, "PS", "ps");
+    D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
+    desc.pRootSignature = _root->GetRootSignature().Get();
+    desc.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
+    desc.PS = { ps->GetBufferPointer(), ps->GetBufferSize() };
+    desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+    desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+    desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+    desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+    desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+    desc.SampleMask = UINT_MAX;
+    desc.SampleDesc.Count = 1;
+    desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+    desc.NumRenderTargets = 1;
+    desc.RTVFormats[0] = color->GetFormat();
+    desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+    ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_pipeline)));
 }
 
 void GDX12ReflectionPreviewPass::Execute(GDX12CommandList* commands)
@@ -31,19 +50,20 @@ void GDX12ReflectionPreviewPass::Execute(GDX12CommandList* commands)
     auto* color = _inputs[0]->GetTexture();
     auto* depth = _inputs[1]->GetTexture();
     auto& frame = *_resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-    commands->ResourceBarrier({ color->GetResource()->GetUnorderedAccessBarrier(),
-        depth->GetResource()->GetSRVBarrier(), frame.ReflectionProbes->GetResource().GetSRVBarrier() });
-    commands->SetComputeRootSignature(_root.get());
+    commands->ResourceBarrier({ color->GetResource()->GetRenderTargetBarrier(),
+        depth->GetResource()->GetDepthWriteBarrier(), frame.ReflectionProbes->GetResource().GetSRVBarrier() });
+    commands->SetGraphicsRootSignature(_root.get());
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-    commands->GetCommandList()->SetComputeRoot32BitConstants(0, 1, &mask, 0);
-    commands->SetComputeRootConstantBufferView(1,
+    commands->GetCommandList()->SetGraphicsRoot32BitConstants(0, 1, &mask, 0);
+    commands->SetGraphicsRootConstantBufferView(1,
         frame.CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
-    commands->SetComputeSRV(0, depth->GetSRV()->GPUHandle);
-    commands->SetComputeSRV(1, _resources->ReflectionRadianceSRV.GPUHandle);
-    commands->SetComputeSRV(2, frame.ReflectionProbes->GetSRV()->GPUHandle);
-    commands->SetComputeUAV(0, color->GetUAV()->GPUHandle);
+    commands->SetGraphicsSRV(0, _resources->ReflectionRadianceSRV.GPUHandle);
+    commands->SetGraphicsSRV(1, frame.ReflectionProbes->GetSRV()->GPUHandle);
     commands->SetPipelineState(_pipeline);
-    commands->Dispatch((color->GetWidth() + 7) / 8, (color->GetHeight() + 7) / 8, 1);
-    commands->ResourceBarrier({ CD3DX12_RESOURCE_BARRIER::UAV(color->GetResource()->D3DResource.Get()),
-        color->GetResource()->GetSRVBarrier() });
+    commands->SetViewport(color->GetViewport());
+    commands->SetScissorRect(color->GetScissorRect());
+    commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    commands->SetRenderTargets({ color }, depth);
+    commands->DrawInstanced(3, 1, 0, 0);
+    commands->ResourceBarrier({ color->GetResource()->GetSRVBarrier(), depth->GetResource()->GetSRVBarrier() });
 }

@@ -16,12 +16,13 @@ the populations; zero removes the corresponding objects:
 Reflection probes follow the terrace tables. `App.ReflectionProbes.ShowSpheres`
 shows their baked cubemaps on mirrored spheres; `App.ReflectionProbes.ShowBounds`
 independently shows the colored influence boxes and labels. Preview spheres are
-excluded from captures and shadow casting. Both switches default to true. Each
-sphere samples only its probe's published cubemap, starting at the first populated
-mip; enabling previews does not trigger a bake. The HDR preview pass runs after
-SSSR, respects opaque depth and skips probes without a published map.
-These debug spheres do not write depth or motion, so depth-based post effects
-still use the underlying scene.
+excluded from captures and shadow casting. Spheres default to on; boxes and labels
+default to off. Each sphere samples only its probe's published cubemap, starting
+at the first populated mip; enabling previews does not trigger a bake. The HDR preview pass runs after
+SSSR and writes sphere depth before water, transparent geometry and particles.
+Their existing depth tests hide fragments behind spheres while retaining glass
+in front and outside the sphere silhouette. Probes without a published map are
+skipped. These debug spheres still reuse the underlying scene's motion vectors.
 
 Grass bounds and appearance are controlled by `App.Grass.ExtentsXCm`,
 `ExtentsZCm`, `DensityPerSquareMetre`, `MaxBlades`, `HeightCm`, `WidthCm` and the

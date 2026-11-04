@@ -12,6 +12,7 @@ inline void CheckBistroReflectionCounts()
     World world(WorldDesc{});
     BistroReflections::Scene scene;
     require(BistroReflections::Count.GetValue() == 4, "Bistro must default to four reflection probes");
+    require(!BistroReflections::ShowBounds.GetValue(), "Probe gizmo boxes must be disabled by default");
     scene.Update(world, 0);
     auto& ecs = world.GetECS();
     require(ecs.GetPool<ReflectionProbeComponent>().Size() == 4, "Bistro reflection default count mismatch");

@@ -1,7 +1,7 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 
-// Inputs: writable linear HDR and opaque reverse-Z depth. Does not enter probe captures.
+// Inputs: writable linear HDR and reverse-Z depth. Does not enter probe captures.
 class GDX12ReflectionPreviewPass final : public GDX12RenderPass
 {
 public:
@@ -12,7 +12,7 @@ public:
         graph.Read(SharedResource::Scene);
         graph.Read(SharedResource::ReflectionProbes);
         graph.ReadWrite(_inputs[0]);
-        graph.Read(_inputs[1]);
+        graph.ReadWrite(_inputs[1]);
     }
     void Initialize() override;
     void Execute(GDX12CommandList* commands) override;

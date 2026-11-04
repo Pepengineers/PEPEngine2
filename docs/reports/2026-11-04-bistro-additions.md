@@ -12,12 +12,16 @@ The first four probes use actual terrace-table anchors and cubic influence
 bounds with half-size 60.55..62.48 cm. Their bottom blend region intersects the
 tabletop by 5 cm. `App.ReflectionProbes.ShowBounds` draws clipped colored boxes
 and labels; `App.ReflectionProbes.ShowSpheres` draws mirror spheres of radius
-0.8 times the box half-size. Both default to true and are independently switchable.
+0.8 times the box half-size. Spheres default to on; boxes/labels default to off.
+The switches are independent.
 The HDR preview pass runs after SSSR and samples the exact published cube-array
 slice at its first populated mip. It respects opaque depth and skips unpublished
 probes. The preview flag is outside capture settings, so toggling it does not
 invalidate the bake. Preview spheres never enter captures or shadow rendering.
-They do not write depth/motion; post effects still use the original scene depth.
+Spheres write the existing reverse-Z depth buffer before fluid surface and
+transparency rendering, so glass/particles behind them are occluded and glass in
+front is retained. The render graph declares both HDR and depth as read/write.
+Sphere motion vectors still come from the underlying scene.
 
 Grass now exposes bounds, density/budget, blade geometry, shadow and wind solver
 settings through application CVars. See [grass controls](../rendering/bistro-grass-controls.md).
@@ -55,6 +59,25 @@ the animated human were visually inspected from the HDR readbacks under
 budget compatibility, focus/minimize/resize, enum discovery, F1 and input capture.
 The final App/Additions builds and scene run include the NPC heading correction;
 its imported-skin-palette regression failed before that correction and passed after it.
+
+The depth correction replaces the color-only compute preview with a raster pass
+that writes HDR and `SV_Depth` into the existing main depth buffer. Only the SSR
+HDR texture additionally gets an RTV; there is no separate depth-composition
+buffer. The regression first failed because sphere surface depth was still the
+background value. It now checks the independent reverse-Z sphere depth and
+unchanged color/depth outside the silhouette, for disabled/unpublished spheres
+and behind opaque geometry. The actual WBOIT regression retains front glass and
+290 of 306 background-glass pixels outside the sphere while rejecting glass at
+its center. `ReflectionProbeTests --debug` and the full Bistro additions run
+passed without debug-layer errors. The latter also checks boxes default off and
+runtime toggling, and exercised both SSR warmup and native rendering. The updated
+terrace readback is `Build/BistroAdditions/probe-spheres-depth.png`; logs are
+`Build/BistroControls/preview-depth-debug-run.log` and
+`Build/BistroControls/additions-preview-depth-run.log`.
+The full `ReflectionProbeTests` run with GPU-based validation also passed,
+including real WBOIT occlusion, HDR/XeSS, odd resize and queued publication;
+see `Build/BistroControls/preview-depth-gbv-final-run.log`. Release/x64 builds
+of RendererDX12, App.Base, App, ReflectionProbeTests and BistroAdditionsTests passed.
 
 ## Original integration
 
