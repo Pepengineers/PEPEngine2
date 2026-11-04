@@ -5,6 +5,9 @@
 #include <cassert>
 #include <stdexcept>
 #include <climits>
+#include <shellapi.h>
+#include <string_view>
+#pragma comment(lib, "shell32.lib")
 #include "App.Base/App.h"
 #include "Engine.Core/AssetManager.h"
 
@@ -76,12 +79,20 @@ void RenderModule::Initialize()
     if (!GDX12StreamlineSDK::Get().Initialize())
         Log::Warning("Renderer", "Streamline unavailable; NVIDIA features will report unsupported and fall back");
 
-#if defined(DEBUG) || defined(_DEBUG)
-    // Enable the D3D12 debug layer.
-    ComPtr<ID3D12Debug> debugController;
-    ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)));
-    debugController->EnableDebugLayer();
-#endif
+    int argumentCount = 0;
+    auto arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+    if (!arguments) throw std::runtime_error("Cannot read renderer startup arguments");
+    bool debugLayerRequested = false;
+    for (int index = 1; index < argumentCount; ++index)
+        if (std::wstring_view(arguments[index]) == L"-d3ddebug") debugLayerRequested = true;
+    LocalFree(arguments);
+    if (debugLayerRequested)
+    {
+        ComPtr<ID3D12Debug> debugController;
+        ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController)));
+        debugController->EnableDebugLayer();
+        Log::Info("Renderer", "D3D12 debug layer enabled by -d3ddebug");
+    }
 
     _primaryDevice = std::make_unique<GDX12Device>();
     _primaryDevice->Role = DEVICE_ROLE_PRIMARY;

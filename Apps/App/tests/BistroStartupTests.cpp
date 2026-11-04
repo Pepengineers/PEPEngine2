@@ -8,16 +8,21 @@
 #include <imgui/imgui.h>
 #include <imgui/imgui_internal.h>
 #include <iostream>
+#include <cstring>
 #include <thread>
 #include <d3d12sdklayers.h>
 
-int main()
+int main(int argc, char** argv)
 {
     try
     {
-        ComPtr<ID3D12Debug> debug;
-        ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
-        debug->EnableDebugLayer();
+        const bool checkDebugLayer = argc > 1 && std::strcmp(argv[1], "--check-debug-layer") == 0;
+        if (!checkDebugLayer)
+        {
+            ComPtr<ID3D12Debug> debug;
+            ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
+            debug->EnableDebugLayer();
+        }
         BistroReflections::ShowBounds.SetFromString("false");
         BistroApp app(GetModuleHandleW(nullptr));
         if (!app.Initialize()) throw std::runtime_error("Bistro startup failed");
@@ -58,10 +63,18 @@ int main()
             {
                 ComPtr<ID3D12Device> device;
                 ThrowIfFailed(settings.Texture->PrimaryDeviceTexture->GetResource()->D3DResource->GetDevice(IID_PPV_ARGS(&device)));
-                ThrowIfFailed(device.As(&info));
+                const HRESULT debugResult = device.As(&info);
+                if (!checkDebugLayer || debugResult != E_NOINTERFACE) ThrowIfFailed(debugResult);
             }
         });
         check(particleBudget == 250000, "Default Bistro budget must be 250000 particles");
+        if (checkDebugLayer)
+        {
+            const bool expected = argc > 2 && std::strcmp(argv[2], "-d3ddebug") == 0;
+            check(static_cast<bool>(info) == expected, "D3D12 debug layer must require an explicit -d3ddebug argument");
+            if (passed) std::cout << "D3D12 debug layer opt-in passed: enabled=" << expected << '\n';
+            return passed ? 0 : 1;
+        }
         check(!ecs.Has<SplineFollowComponent>(world.ActiveCamera) && !ecs.Has<LookAtTargetComponent>(world.ActiveCamera),
             "The free camera must not inherit benchmark spline/look-at controls");
         SplineFollowSystem spline;
