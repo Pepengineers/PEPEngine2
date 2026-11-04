@@ -6,7 +6,7 @@
 
 - Первая техника на compute queue — симуляция частиц. Остальные переносим отдельными шагами после неё.
 - Async-режимы техник по умолчанию выключены. Требуется сделать их корректно работоспособными; выбор режима под конкретное железо пользователя и автоматическая политика остаются на потом. Сами техники этим решением не выключаются.
-- Предпосылка — отдельная текущая задача разделения particle simulation/rendering на одной DIRECT queue. CPU snapshot, создание ресурсов и подготовка начинаются до графа; GPU initialize/reset и симуляция выполняются в simulation pass сразу после полного opaque depth prepass; cull/sort/draw остаются поздно.
+- Предпосылка — отдельная текущая задача разделения particle simulation/rendering на одной DIRECT queue. CPU snapshot и создание ресурсов выполняются до графа; отдельный публичный `InitializePools` записывает GPU initialization/reset в начале `RenderModule::OnRender`, до render graph. После полного opaque depth prepass `GDX12ParticleSimulationPass` выполняет только шаг симуляции; cull/sort/draw остаются поздно.
 - Столкновения частиц используют текущий opaque/masked depth, включая траву. Вода и прозрачность не входят в этот контракт; предыдущая глубина не нужна.
 - `Render.Particles.Enabled` управляет всей системой; `DrawEnabled` — отрисовкой; `SimulationEnabled` — симуляцией. Остановка симуляции замораживает движение, возраст и спавн, сохраняет `Emit`, не догоняет время; `Reset` работает и при остановке. Будущий async-переключатель не меняет эту семантику.
 
@@ -17,6 +17,8 @@
 ## Что уже есть и чего не хватает
 
 Проверено по рабочему дереву 2026-11-04: исходная tracked-версия `052ef8736445f504119fb7e92876ea5b25b629a8`, поверх неё незавершённое разделение частиц из соседней задачи. Это срез для планирования, а не принятый direct baseline; перед началом реализации нужно перепроверить окончательный код, имена, bindings и результаты той задачи. В этой задаче разрешён только этот документ: production-код, конфигурация и тестовые артефакты не меняются.
+
+При последующей read-only сверке подтверждён отдельный pre-graph `InitializePools`. По переданному отчёту соседней задачи текущие CPU/GPU `SecondGroupTests` и GPU-based validation прошли; здесь они повторно не запускались. Это проверки direct-разделения, Async Compute ещё не реализован.
 
 | Область | Текущее ограничение | Изменение в первой async-итерации |
 | --- | --- | --- |
@@ -43,6 +45,7 @@ Epic показывает, что подходящий overlap зависит о
 
 ```mermaid
 flowchart LR
+    I[DIRECT: InitializePools до графа] --> D
     D[DIRECT: opaque depth prepass] --> R[DIRECT: depth release/read transition + signal]
     R --> C[COMPUTE: wait → particle simulation → release + signal]
     R --> G[DIRECT: AO / shadows / probes / G-buffer / lighting / transparency]
@@ -54,8 +57,8 @@ flowchart LR
 
 Диаграмма показывает допустимое окно по зависимостям, а не измеренный overlap. Ранний AO и другие compute-нагрузки на DIRECT могут конкурировать с частицами за те же аппаратные ресурсы.
 
-1. DIRECT submission заканчивается после prepass и необходимых переходов; очередь сигналит fence. COMPUTE ждёт этот fence на GPU.
-2. Симуляция выполняет те же initialization/reset/simulate/spawn/publish операции, что и direct baseline, с тем же порядком UAV-зависимостей. Draw-подготовка не переносится за компанию.
+1. DIRECT submission включает pre-graph `InitializePools`, полный depth prepass и необходимые переходы, затем очередь сигналит fence. Записанные initialization/reset writes particle pools также должны быть опубликованы перед передачей COMPUTE: writable ресурсы переводятся на DIRECT в допустимое read/COMMON состояние. COMPUTE ждёт этот fence на GPU.
+2. COMPUTE выполняет только шаг симуляции: prepare/simulate/spawn/publish, с тем же порядком UAV-зависимостей, что и direct baseline. Initialization/reset остаётся отдельным pre-graph этапом на DIRECT, включая Reset при остановленной симуляции. Draw-подготовка не переносится за компанию.
 3. COMPUTE публикует готовые particle buffers, переводит их в подходящее для передачи read/COMMON состояние и сигналит свой fence. Конкретный переход определяется реальным SRV/UAV binding потребителя; переход всех ресурсов в COMMON на каждом dispatch не нужен.
 4. DIRECT продолжает независимую работу. GPU wait ставится перед первым чтением результата, то есть перед particle cull, а не сразу после запуска compute.
 5. При `DrawEnabled=false` основной graphics-потребитель отсутствует, но ветку всё равно закрываем GPU join до завершения кадра и повторного использования входов/пулов. Fork/join используют GPU waits; существующие CPU waits при повторном использовании frame slots сохраняются.
@@ -69,7 +72,7 @@ flowchart LR
 | --- | --- | --- |
 | Opaque depth | DIRECT prepass → simulation SRV | Release/read transition до fork; все readers сохраняют общее состояние; следующая запись, resize и physical reuse только после compute |
 | Camera/frame CB и emitter constants текущего slot | CPU snapshot/upload → simulation CBV | Не переписывать slot до его final post-join DIRECT fence; root constants копируются в list, адресуемые upload buffers требуют retirement |
-| Particles, alive ping-pong, dead list, counters, simulation indirect args | Persistent pools → compute read/write | RAW/WAR/WAW внутри kernels; publish до первого graphics-reader; следующий writer ждёт всех прошлых readers, включая cull и копирование данных для draw |
+| Particles, alive ping-pong, dead list, counters, simulation indirect args | DIRECT pre-graph initialization/reset → compute simulation read/write | Импортировать результат `InitializePools` и его состояния в граф; RAW/WAR/WAW внутри kernels; publish до первого graphics-reader; следующий writer ждёт всех прошлых readers, включая cull и копирование данных для draw |
 | SRV/UAV descriptors, pool resources и query/readback storage | Обе очереди / соответствующая очередь таймера | Не освобождать, не перепривязывать и не переиспользовать до всех использующих submissions; пустой draw не снимает это условие |
 
 GPU wait упорядочивает очереди; transition/UAV barrier описывает доступ и видимость ресурса. Одно не заменяет другое. DIRECT↔COMPUTE не требует обязательного промежуточного COMMON; переходы выбираются по фактическому состоянию и допустимым командам очереди. [Microsoft: Resource states](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ne-d3d12-d3d12_resource_states).
