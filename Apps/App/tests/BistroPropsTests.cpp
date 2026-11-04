@@ -99,38 +99,16 @@ static void CheckPartition()
     World world(WorldDesc{});
     auto& ecs = world.GetECS();
     ecs.RegisterComponent<FlyingPropComponent>();
-    CreateBistroPropEntities(world, "Interior_interior", whole, partition);
-    Require(ecs.GetPool<FlyingPropComponent>().Size() == 3, "The App must attach flight to each original prop");
+    CreateBistroPropEntities(world, "Interior_interior", whole, mesh, partition);
+    Require(ecs.GetPool<RigidBodyComponent>().Size() == 4, "Each source object needs one body including static environment");
+    Require(ecs.GetPool<FlyingPropComponent>().Size() == 0, "Physics props must not have FlyingProp movement");
     std::vector<unsigned> rendered(mesh.GetSubMeshCount());
-    ecs.ForEach<StaticMeshRenderComponent>([&](Entity entity, StaticMeshRenderComponent& renderer)
+    ecs.ForEach<StaticMeshRenderComponent, RigidBodyComponent>([&](Entity, StaticMeshRenderComponent& renderer, RigidBodyComponent& body)
     {
-        Require(renderer.ReflectionDynamic == ecs.Has<FlyingPropComponent>(entity),
-            "Only props must opt into the generic dynamic reflection flag");
+        Require(renderer.ReflectionDynamic == (body.MotionType == PhysicsMotionType::Dynamic), "Props must be reflection dynamic");
         for (auto index : renderer.SubMeshIndices) ++rendered.at(index);
     });
     for (auto count : rendered) Require(count == 1, "App setup must not duplicate or drop source geometry");
-    ecs.ForEach<FlyingPropComponent>([](Entity, FlyingPropComponent& flight)
-    {
-        Require(flight.Time == 0 && flight.Speed >= 0.4f, "App setup must preserve initial flight parameters");
-    });
-    FlyingPropSystem motion;
-    for (unsigned threads : { 1u, 4u })
-    {
-        JobSystem jobs(threads);
-        ecs.ForEach<FlyingPropComponent, TransformComponent>([](Entity, FlyingPropComponent& flight, TransformComponent& transform)
-        {
-            flight.Time = 0;
-            transform.Location = flight.Origin;
-            transform.DirtyFlag = false;
-        });
-        motion.Schedule(jobs, world, 1.0f, 1).Complete();
-        ecs.ForEach<FlyingPropComponent, TransformComponent>([](Entity, FlyingPropComponent& flight, TransformComponent& transform)
-        {
-            Require(flight.Time == 1.0f && (transform.Location - flight.Origin).LengthSquared() > 0.01f,
-                "Scheduled flight must advance time and move every prop");
-            Require(transform.DirtyFlag, "Scheduled flight must mark moved transforms for GPU upload");
-        });
-    }
 }
 
 static void CheckFlight()

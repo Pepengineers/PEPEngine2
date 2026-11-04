@@ -6,6 +6,7 @@
 #include "App.Base/Physics/JoltJobSystem.h"
 #include <cmath>
 #include <type_traits>
+#include <algorithm>
 
 #include <Jolt/Jolt.h>
 #include <Jolt/RegisterTypes.h>
@@ -19,6 +20,12 @@
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
 #include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
+#include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
+#include <Jolt/Physics/Collision/Shape/StaticCompoundShape.h>
+#include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/CollideShape.h>
 
 #include "Common/Logger.h"
 
@@ -75,7 +82,8 @@ namespace
                     shape.HalfExtent.y * scale.y,
                     shape.HalfExtent.z * scale.z);
                 if (!isPositive(halfExtent.x) || !isPositive(halfExtent.y) || !isPositive(halfExtent.z)) { return invalidShape(); }
-                return JPH::BoxShapeSettings(JPH::Vec3(halfExtent.x, halfExtent.y, halfExtent.z)).Create();
+                return JPH::BoxShapeSettings(JPH::Vec3(halfExtent.x, halfExtent.y, halfExtent.z),
+                    (std::min)({0.05f, halfExtent.x * 0.1f, halfExtent.y * 0.1f, halfExtent.z * 0.1f})).Create();
             }
 
             else if constexpr (std::is_same_v<T, SphereShapeDesc>)
@@ -93,13 +101,54 @@ namespace
                 return JPH::CylinderShapeSettings(halfHeight, radius).Create();
             }
 
-            else
+            else if constexpr (std::is_same_v<T, CapsuleShapeDesc>)
             {
                 static_assert(std::is_same_v<T, CapsuleShapeDesc>, "Unsupported shape type");
                 const float radius = shape.Radius * scale.x;
                 const float halfCylinderHeight = shape.HalfCylinderHeight * scale.y;
                 if (!isPositive(radius) || (!std::isfinite(halfCylinderHeight) || halfCylinderHeight < 0)) { return invalidShape(); }
                 return JPH::CapsuleShapeSettings(halfCylinderHeight, radius).Create();
+            }
+            else if constexpr (std::is_same_v<T, TriangleMeshShapeDesc>)
+            {
+                if (!shape.Geometry || shape.Geometry->Triangles.empty()) return invalidShape();
+                JPH::VertexList vertices;
+                vertices.reserve(shape.Geometry->Vertices.size());
+                for (const auto& p : shape.Geometry->Vertices)
+                    vertices.emplace_back(p.x * scale.x, p.y * scale.y, p.z * scale.z);
+                JPH::IndexedTriangleList triangles;
+                triangles.reserve(shape.Geometry->Triangles.size());
+                for (const auto& t : shape.Geometry->Triangles)
+                {
+                    if (t[0] >= vertices.size() || t[1] >= vertices.size() || t[2] >= vertices.size()) return invalidShape();
+                    triangles.emplace_back(t[0], t[1], t[2]);
+                }
+                return JPH::MeshShapeSettings(std::move(vertices), std::move(triangles)).Create();
+            }
+            else
+            {
+                if (!shape.Geometry || shape.Geometry->Hulls.empty()) return invalidShape();
+                JPH::StaticCompoundShapeSettings compound;
+                for (const auto& hull : shape.Geometry->Hulls)
+                {
+                    if (hull.size() < 3) return invalidShape();
+                    auto minimum = hull.front(), maximum = hull.front();
+                    for (const auto& p : hull)
+                    {
+                        minimum = DirectX::SimpleMath::Vector3((std::min)(minimum.x,p.x), (std::min)(minimum.y,p.y), (std::min)(minimum.z,p.z));
+                        maximum = DirectX::SimpleMath::Vector3((std::max)(maximum.x,p.x), (std::max)(maximum.y,p.y), (std::max)(maximum.z,p.z));
+                    }
+                    const auto center = (minimum + maximum) * 0.5f;
+                    JPH::Array<JPH::Vec3> points;
+                    for (const auto& p : hull) points.emplace_back((p.x-center.x) * scale.x, (p.y-center.y) * scale.y, (p.z-center.z) * scale.z);
+                    // Cook near the origin: baked world coordinates lose precision on thin furniture parts.
+                    JPH::ConvexHullShapeSettings settings(points, 0.001f);
+                    settings.mHullTolerance = 0.0001f;
+                    const auto result = settings.Create();
+                    if (result.HasError()) return result;
+                    compound.AddShape(JPH::Vec3(center.x*scale.x,center.y*scale.y,center.z*scale.z), JPH::Quat::sIdentity(), result.Get());
+                }
+                return compound.Create();
             }
 
         },
@@ -222,14 +271,20 @@ struct JoltRuntime
     }
 };
 
-void JoltPhysicsBackend::Initialize(JobSystem& jobs)
+void JoltPhysicsBackend::Initialize(JobSystem& jobs, const PhysicsWorldSettings& settings)
 {
     if (_bInitialized) return;
+    if (!std::isfinite(settings.WorldUnitsPerMeter) || settings.WorldUnitsPerMeter <= 0 ||
+        settings.MaxBodies == 0 || settings.MaxBodies > 65536 || settings.MaxBodyPairs == 0 ||
+        settings.MaxContactConstraints == 0 || settings.MaxContactConstraints > UINT32_MAX / 512)
+        throw std::invalid_argument("Invalid physics world settings");
+    _settings = settings;
     static std::weak_ptr<JoltRuntime> runtime;
     _runtime = runtime.lock();
     if (!_runtime) runtime = _runtime = std::make_shared<JoltRuntime>();
 
-    _tempAllocator = std::make_unique<JPH::TempAllocatorImpl>(10*1024*1024);
+    _tempAllocator = std::make_unique<JPH::TempAllocatorImpl>(
+        (std::max)(10u * 1024 * 1024, settings.MaxContactConstraints * 512));
 
     _jobSystem = std::make_unique<JoltJobSystem>(jobs);
 
@@ -237,14 +292,9 @@ void JoltPhysicsBackend::Initialize(JobSystem& jobs)
     _objectLayerPairFilter = std::make_unique<ObjectLayerPairFilterImpl>();
     _objectVsBroadPhaseLayerFilter = std::make_unique<ObjectVsBroadPhaseLayerFilterImpl>();
 
-    constexpr uint32_t MaxBodies = 2048;
-    constexpr uint32_t NumBodyMutexes = 0;
-    constexpr uint32_t MaxBodyPairs = 16384;
-    constexpr uint32_t MaxContactConstraints = 16384;
-
     _physicsSystem = std::make_unique<JPH::PhysicsSystem>();
-
-    _physicsSystem->Init(MaxBodies, NumBodyMutexes, MaxBodyPairs, MaxContactConstraints, *_broadPhaseLayerInterface, *_objectVsBroadPhaseLayerFilter, *_objectLayerPairFilter);
+    _physicsSystem->Init(settings.MaxBodies, 0, settings.MaxBodyPairs, settings.MaxContactConstraints,
+        *_broadPhaseLayerInterface, *_objectVsBroadPhaseLayerFilter, *_objectLayerPairFilter);
     _bInitialized = true;
     Logger::Info("Jolt physics backend initialized");
 }
@@ -313,8 +363,10 @@ PhysicsBodyHandle JoltPhysicsBackend::CreateBody(const PhysicsBodyDesc& desc)
     }
 
     const bool isStatic = desc.MotionType == PhysicsMotionType::Static;
+    if (!isStatic && std::holds_alternative<TriangleMeshShapeDesc>(desc.Shape))
+        throw std::invalid_argument("Triangle mesh bodies must be static");
 
-    const auto shapeResult = CreateShape(desc.Shape, desc.Scale);
+    const auto shapeResult = CreateShape(desc.Shape, desc.Scale / _settings.WorldUnitsPerMeter);
     if (shapeResult.HasError())
     {
         Logger::Error("CreateBody(): {}", shapeResult.GetError().c_str());
@@ -324,11 +376,13 @@ PhysicsBodyHandle JoltPhysicsBackend::CreateBody(const PhysicsBodyDesc& desc)
 
     JPH::BodyCreationSettings settings(
         shape,
-        JPH::RVec3(desc.Position.x, desc.Position.y, desc.Position.z),
+        JPH::RVec3(desc.Position.x, desc.Position.y, desc.Position.z) / _settings.WorldUnitsPerMeter,
         JPH::Quat(desc.Rotation.x, desc.Rotation.y, desc.Rotation.z, desc.Rotation.w),
         motionType,
         isStatic ? ObjectLayers::Static : ObjectLayers::Dynamic
     );
+
+    if (desc.ContinuousCollision && !isStatic) settings.mMotionQuality = JPH::EMotionQuality::LinearCast;
 
     JPH::BodyInterface& bodyInterface = _physicsSystem->GetBodyInterface();
 
@@ -376,9 +430,9 @@ bool JoltPhysicsBackend::TryGetBodyTransform(PhysicsBodyHandle handle, DirectX::
     const JPH::Quat rotation = body.GetRotation();
 
     outPosition = DirectX::SimpleMath::Vector3(
-        static_cast<float>(position.GetX()),
-        static_cast<float>(position.GetY()),
-        static_cast<float>(position.GetZ()));
+        static_cast<float>(position.GetX()) * _settings.WorldUnitsPerMeter,
+        static_cast<float>(position.GetY()) * _settings.WorldUnitsPerMeter,
+        static_cast<float>(position.GetZ()) * _settings.WorldUnitsPerMeter);
 
     outRotation = DirectX::SimpleMath::Quaternion(
        rotation.GetX(),
@@ -402,13 +456,29 @@ void JoltPhysicsBackend::MoveKinematicBody(PhysicsBodyHandle handle, const Direc
     bodyInterface.MoveKinematic(
         bodID,
         JPH::RVec3(
-            targetPosition.x,
-            targetPosition.y,
-            targetPosition.z),
+            targetPosition.x / _settings.WorldUnitsPerMeter,
+            targetPosition.y / _settings.WorldUnitsPerMeter,
+            targetPosition.z / _settings.WorldUnitsPerMeter),
         JPH::Quat(
             targetRotation.x,
             targetRotation.y,
             targetRotation.z,
             targetRotation.w),
         dt);
+}
+
+bool JoltPhysicsBackend::OverlapsBox(const DirectX::SimpleMath::Vector3& center,
+    const DirectX::SimpleMath::Vector3& halfExtent) const
+{
+    if (!_physicsSystem) throw std::logic_error("Physics backend is not initialized");
+    const auto shape = CreateShape(BoxShapeDesc{halfExtent}, DirectX::SimpleMath::Vector3(1 / _settings.WorldUnitsPerMeter));
+    if (shape.HasError()) throw std::invalid_argument("Invalid placement box");
+    JPH::AnyHitCollisionCollector<JPH::CollideShapeCollector> collector;
+    JPH::CollideShapeSettings settings;
+    settings.mBackFaceMode = JPH::EBackFaceMode::CollideWithBackFaces;
+    const JPH::RVec3 position(center.x / _settings.WorldUnitsPerMeter,
+        center.y / _settings.WorldUnitsPerMeter, center.z / _settings.WorldUnitsPerMeter);
+    _physicsSystem->GetNarrowPhaseQuery().CollideShape(shape.Get(), JPH::Vec3::sReplicate(1),
+        JPH::RMat44::sTranslation(position), settings, position, collector);
+    return collector.HadHit();
 }

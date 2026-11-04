@@ -6,4 +6,6 @@
 struct ColliderComponent : ComponentTag
 {
     PhysicsShapeDesc Shape;
+    ColliderComponent() = default;
+    explicit ColliderComponent(PhysicsShapeDesc shape) : Shape(std::move(shape)) {}
 };

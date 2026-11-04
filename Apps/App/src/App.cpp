@@ -11,7 +11,6 @@
 #include <shellapi.h>
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "psapi.lib")
-#include "Systems/FlyingPropSystem.h"
 #include "BistroScene.h"
 #include "BistroReflections.h"
 #include "BistroGrass.h"
@@ -102,7 +101,6 @@ namespace
                 work = _movement.Schedule(_jobs, world, dt);
                 work = _circle.Schedule(_jobs, world, dt, work);
                 work = _spline.Schedule(_jobs, world, dt, work);
-                work = _flyingProps.Schedule(_jobs, world, dt, work);
                 work = _lookAt.Schedule(_jobs, world, dt, work);
                 work = _lights.Schedule(_jobs, world, dt, work);
                 work.Complete();
@@ -186,7 +184,6 @@ namespace
         BistroCharacters::Scene _characters;
         std::unique_ptr<BistroBounds::Scene> _bounds;
         bool _benchmarkStarted = false;
-        FlyingPropSystem _flyingProps;
         POINT _lastMousePos = {};
         float _cameraSpeed = 100.0f;
     };
@@ -209,6 +206,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
         for (int index = 1; index < argumentCount; ++index)
         {
             const std::wstring_view argument(arguments[index]);
+            constexpr std::wstring_view physicsPrefix = L"-App.Physics.CountScale=";
+            if (argument.substr(0, physicsPrefix.size()) == physicsPrefix &&
+                !BistroPhysics::CountScale.SetFromString(WStringToString(std::wstring(argument.substr(physicsPrefix.size())))))
+                throw std::invalid_argument("App.Physics.CountScale must be finite and within 0..16");
             constexpr std::wstring_view particlesPrefix = L"-App.Particles.CountScale=";
             if (argument.substr(0, particlesPrefix.size()) == particlesPrefix &&
                 !BistroParticles::CountScale.SetFromString(WStringToString(std::wstring(argument.substr(particlesPrefix.size())))))

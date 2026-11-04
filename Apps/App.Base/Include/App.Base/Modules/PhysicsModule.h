@@ -27,6 +27,8 @@ public:
     void Uninitialize() override;
 
     void Step(World& world, float dt);
+    void ConfigureWorld(World& world, const PhysicsWorldSettings& settings);
+    bool OverlapsBox(World& world, const DirectX::SimpleMath::Vector3& center, const DirectX::SimpleMath::Vector3& halfExtent) const;
 
     PhysicsBodyHandle CreateBody(World& world, const PhysicsBodyDesc& desc);
     void DestroyBody(World& world, PhysicsBodyHandle handle);

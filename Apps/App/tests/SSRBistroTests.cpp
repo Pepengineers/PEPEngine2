@@ -1,5 +1,4 @@
 #include "App.Base/App.h"
-#include "../src/Systems/FlyingPropSystem.h"
 #include "../src/BistroScene.h"
 #include "Engine.Core/ConsoleModule.h"
 #include <d3d12sdklayers.h>
@@ -37,8 +36,8 @@ public:
         auto render = Locator.GetModule<RenderModule>();
         render->Update();
         auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
-        auto work = _flyingProps.Schedule(_jobs, world, 1.0f / 60);
-        work = _lights.Schedule(_jobs, world, 1.0f / 60, work);
+        UpdatePhysics(world, 1.0f / 60);
+        auto work = _lights.Schedule(_jobs, world, 1.0f / 60);
         work = _gpuData.Schedule(_jobs, world, 1.0f / 60, work);
         work.Complete();
         Render(Timer);
@@ -71,8 +70,6 @@ public:
     }
 
     RenderModule& Renderer() { return *Locator.GetModule<RenderModule>(); }
-private:
-    FlyingPropSystem _flyingProps;
 };
 
 int main(int argc, char**)

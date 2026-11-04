@@ -12,6 +12,7 @@
 #include "BistroWaterChecks.h"
 #include "BistroParticleControlsChecks.h"
 #include "BistroBoundsChecks.h"
+#include "App.Base/Systems/DynamicBodyUpdateSystem.h"
 
 static void Require(bool value, const char* message)
 {
@@ -98,7 +99,7 @@ static void CheckCounts(World& world, size_t probes, size_t grass, size_t water,
     Require(ecs.GetPool<GrassRenderComponent>().Size() == grass, "Wrong Bistro grass count");
     Require(ecs.GetPool<FluidRenderComponent>().Size() == water, "Wrong Bistro water count");
     Require(ecs.GetPool<SkeletalMeshRenderComponent>().Size() == characters, "Wrong Bistro character count");
-    Require(ecs.GetPool<FlyingPropComponent>().Size() == 346, "Scene additions changed original Bistro props");
+    Require(ecs.GetPool<RigidBodyComponent>().Size() == 381, "Scene additions changed original Bistro physics bodies");
     Require(ecs.GetPool<ParticleEmitterComponent>().Size() == 8, "Scene additions changed original Bistro particles");
 }
 
@@ -256,6 +257,63 @@ int main(int argc, char** argv)
         ShowWindow(app.GetWindow()->GetWindowHandle(), SW_HIDE);
         auto render = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
         auto& world = *BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()->GetWorld();
+        if (argc > 1 && std::strcmp(argv[1], "--physics-smoke") == 0)
+        {
+            Set(L"App.ReflectionProbes.ShowSpheres", "false");
+            Set(L"Render.MotionBlur.Enabled", "false");
+            Set(L"Render.DOF.Enabled", "false");
+            for (int frame = 0; frame < 6; ++frame) app.BenchmarkFrame();
+            auto& ecs = world.GetECS();
+            Require(ecs.GetPool<RigidBodyComponent>().Size() == 381, "Bistro physics body count changed");
+            Entity chair = InvalidEntity;
+            Vector3 center;
+            ecs.ForEach<NameComponent, StaticMeshRenderComponent>([&](Entity entity, const NameComponent& name, const StaticMeshRenderComponent& renderer)
+            {
+                const auto* mesh = render->GetPrimaryGPUMesh(renderer.MeshHandler)->CPUMesh;
+                if (chair != InvalidEntity || mesh->GetSubMeshCount() != 2381 || name.value.find("Chair") == std::string::npos) return;
+                chair = entity;
+                center = Vector3(BistroPhysics::Bounds(*mesh, renderer.SubMeshIndices).Center);
+            });
+            Require(chair != InvalidEntity, "No original Interior chair");
+            const auto shape = ecs.Get<ColliderComponent>(chair).Shape;
+            ecs.Remove<ColliderComponent>(chair);
+            auto& transform = ecs.Get<TransformComponent>(chair);
+            transform.Rotation = {0, 0, 20};
+            transform.Location = center - Vector3::Transform(center, Quaternion::CreateFromYawPitchRoll(0,0,XMConvertToRadians(20.f))) + Vector3(0,150,0);
+            transform.DirtyFlag = true;
+            ecs.Add<ColliderComponent>(chair, shape);
+            Aim(world, center + Vector3(-250,180,-250), center + Vector3(0,50,0));
+            world.SetPaused(true);
+            for (int frame = 0; frame < 6; ++frame) app.BenchmarkFrame();
+            render->WaitForUploads();
+            auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+            SaveImage(ReadHDR(*output), output->GetWidth(), output->GetHeight(), "physics-start");
+            world.SetPaused(false);
+            auto physics = BenchmarkEngine::GetLocator().GetModule<PhysicsModule>();
+            DynamicBodyUpdateSystem sync(*physics);
+            for (int step = 0; step < 300; ++step) { physics->Step(world,1.f/60); sync.Tick(world,1.f/60); }
+            for (int frame = 0; frame < 6; ++frame) app.BenchmarkFrame();
+            render->WaitForUploads();
+            output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+            SaveImage(ReadHDR(*output), output->GetWidth(), output->GetHeight(), "physics-settled");
+            const auto q = Quaternion::CreateFromYawPitchRoll(XMConvertToRadians(transform.Rotation.y),XMConvertToRadians(transform.Rotation.x),XMConvertToRadians(transform.Rotation.z));
+            Require((Vector3::Transform(center,q)+transform.Location).y < center.y+100, "Chair did not fall onto real environment");
+            ComPtr<ID3D12Device> device;
+            ThrowIfFailed(output->GetResource()->D3DResource->GetDevice(IID_PPV_ARGS(&device)));
+            ThrowIfFailed(device->GetDeviceRemovedReason());
+            ComPtr<ID3D12InfoQueue> info;
+            ThrowIfFailed(device.As(&info));
+            for (UINT64 index = 0; index < info->GetNumStoredMessages(); ++index)
+            {
+                SIZE_T bytes = 0; info->GetMessage(index, nullptr, &bytes);
+                std::vector<BYTE> storage(bytes);
+                auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+                ThrowIfFailed(info->GetMessage(index, message, &bytes));
+                Require(message->Severity > D3D12_MESSAGE_SEVERITY_ERROR, message->pDescription);
+            }
+            std::cout << "Bistro physics visual smoke: lifted/tilted original chair, 300 ticks, source geometry and GPU frames passed.\n";
+            return 0;
+        }
         CheckBistroBounds(app, world);
         std::cout << "Bistro bounds: linked Dust/Steam volumes, detached boxes, visibility and paused drawing passed." << std::endl;
         if (argc > 1 && std::strcmp(argv[1], "--bounds-only") == 0) return 0;

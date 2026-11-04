@@ -25,7 +25,8 @@ public:
     JoltPhysicsBackend();
     ~JoltPhysicsBackend();
 
-    void Initialize(JobSystem& jobs);
+    void Initialize(JobSystem& jobs, const PhysicsWorldSettings& settings = {});
+    bool OverlapsBox(const DirectX::SimpleMath::Vector3& center, const DirectX::SimpleMath::Vector3& halfExtent) const;
     void Uninitialize();
 
     void Step(float dt);
@@ -38,6 +39,7 @@ public:
 
 private:
     bool _bInitialized = false;
+    PhysicsWorldSettings _settings;
 
     std::unique_ptr<JPH::PhysicsSystem> _physicsSystem;
 

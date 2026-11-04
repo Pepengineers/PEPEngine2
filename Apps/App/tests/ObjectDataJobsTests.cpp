@@ -96,7 +96,6 @@ public:
     void Measure(unsigned threads)
     {
         JobSystem jobs(threads, GetJobs().GetDefaultBatchSize());
-        FlyingPropSystem motion;
         auto* render = Locator.GetModule<RenderModule>().get();
         auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
         double motionSeconds = 0, objectSeconds = 0;
@@ -105,10 +104,9 @@ public:
         {
             render->Update();
             const auto start = std::chrono::steady_clock::now();
-            const auto moved = motion.Schedule(jobs, world, 1.0f / 60.0f);
-            moved.Complete();
+            UpdatePhysics(world, 1.0f / 60.0f);
             const auto middle = std::chrono::steady_clock::now();
-            _gpuData.Schedule(jobs, world, 0, moved).Complete();
+            _gpuData.Schedule(jobs, world, 0).Complete();
             const auto end = std::chrono::steady_clock::now();
             if (i >= 0)
             {
@@ -116,9 +114,10 @@ public:
                 objectSeconds += std::chrono::duration<double>(end - middle).count();
             }
         }
-        Require(world.GetECS().GetPool<FlyingPropComponent>().Size() == 346, "Benchmark needs the actual Bistro Interior props");
-        std::cout << "threads=" << threads << " batch_size=" << jobs.GetDefaultBatchSize() << " props=346 samples=" << iterations
-            << " motion_us=" << motionSeconds * 1e6 / iterations
+        Require(world.GetECS().GetPool<RigidBodyComponent>().Size() == 381, "Benchmark needs the actual Bistro physical props");
+        std::cout << "object_threads=" << threads << " physics_threads=" << GetJobs().GetThreadCount()
+            << " batch_size=" << jobs.GetDefaultBatchSize() << " props=379 samples=" << iterations
+            << " physics_us=" << motionSeconds * 1e6 / iterations
             << " object_data_us=" << objectSeconds * 1e6 / iterations << '\n';
     }
     void Check(unsigned threads)
@@ -127,8 +126,12 @@ public:
         auto* render = Locator.GetModule<RenderModule>().get();
         auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
         auto& ecs = world.GetECS();
-        Require(ecs.GetPool<FlyingPropComponent>().Size() == 1, "Fixture bottle was not split into one entity");
-        const Entity bottle = ecs.GetPool<FlyingPropComponent>().GetEntities().front();
+        Entity bottle = InvalidEntity;
+        ecs.ForEach<RigidBodyComponent>([&](Entity entity, const RigidBodyComponent& body)
+        { if (body.MotionType == PhysicsMotionType::Dynamic) bottle = entity; });
+        Require(bottle != InvalidEntity, "Fixture bottle was not split into one entity");
+        ecs.RegisterComponent<FlyingPropComponent>();
+        if (!ecs.Has<FlyingPropComponent>(bottle)) ecs.Add<FlyingPropComponent>(bottle);
         auto& renderer = ecs.Get<StaticMeshRenderComponent>(bottle);
         Require(renderer.SubMeshIndices.size() == 3, "Bottle material sections were separated");
         _indirect.Schedule(jobs, world, 0, 1).Complete();
@@ -248,13 +251,12 @@ public:
         auto* render = Locator.GetModule<RenderModule>().get();
         auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
         auto& ecs = world.GetECS();
-        Require(ecs.GetPool<FlyingPropComponent>().Size() > 0, "Bistro has no existing moving props");
+        Require(ecs.GetPool<RigidBodyComponent>().Size() == 381, "Bistro has no physical props");
         ComPtr<ID3D12Device> device;
         ThrowIfFailed(render->GetCurrentPrimaryFrameConstants()->CameraCB->GetResource().D3DResource->GetDevice(IID_PPV_ARGS(&device)));
         ComPtr<ID3D12InfoQueue> info;
         ThrowIfFailed(device.As(&info));
         info->ClearStoredMessages();
-        FlyingPropSystem flyingProps;
         Timer.Reset();
         auto& cameraTransform = ecs.Get<TransformComponent>(world.ActiveCamera);
         auto& camera = ecs.Get<CameraComponent>(world.ActiveCamera);
@@ -308,11 +310,11 @@ public:
             auto work = _movement.Schedule(_jobs, world, dt);
             work = _circle.Schedule(_jobs, world, dt, work);
             work = _spline.Schedule(_jobs, world, dt, work);
-            work = flyingProps.Schedule(_jobs, world, dt, work);
             work = _lookAt.Schedule(_jobs, world, dt, work);
             work = _lights.Schedule(_jobs, world, dt, work);
-            work = _gpuData.Schedule(_jobs, world, dt, work);
             work.Complete();
+            UpdatePhysics(world, dt);
+            _gpuData.Schedule(_jobs, world, dt).Complete();
             Render(Timer);
             render->WaitForUploads();
             const auto& sr = render->GetReconstructionStatus();
@@ -340,7 +342,7 @@ public:
             if (message->Severity <= D3D12_MESSAGE_SEVERITY_WARNING) throw std::runtime_error(message->pDescription);
         }
         std::cout << "Actual Bistro rendered 36 frames through all SR providers, independent AMD/Intel FG and Reinhard; props="
-            << ecs.GetPool<FlyingPropComponent>().Size()
+            << ecs.GetPool<RigidBodyComponent>().Size() - 2
             << ", camera translation/rotation, Off/Low/Mid/High, cut and odd resize passed; debug layer clean.\n";
     }
 protected:
@@ -404,8 +406,8 @@ int main(int argc, char** argv)
         for (const char* name : { "wall", "glass", "label", "cap" }) materials << "newmtl " << name << "\nKd 0.8 0.7 0.6\n";
         materials.close();
         std::ofstream obj(scene / "Interior/interior.obj");
-        obj << "mtllib interior.mtl\nv 0 0 0\nv 2 0 0\nv 0 2 0\ng Wall\nusemtl wall\nf 1 2 3\ng Paris_LiquorBottle_1\n";
-        for (const char* name : { "glass", "label", "cap" }) obj << "usemtl " << name << "\nf 1 2 3\n";
+        obj << "mtllib interior.mtl\nv 0 0 0\nv 2 0 0\nv 0 2 0\nv 0 0 2\ng Wall\nusemtl wall\nf 1 2 3\ng Paris_LiquorBottle_1\n";
+        for (const char* name : { "glass", "label", "cap" }) obj << "usemtl " << name << "\nf " << (std::string_view(name) == "glass" ? "1 2 3" : std::string_view(name) == "label" ? "1 4 2" : "1 3 4") << "\n";
         obj.close();
         ObjectDataApp app(scene);
         Require(app.Initialize(), "GPU object-data fixture initialization failed");

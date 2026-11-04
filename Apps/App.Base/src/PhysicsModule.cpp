@@ -30,6 +30,23 @@ JoltPhysicsBackend* PhysicsModule::GetPhysics(World& world) const
     return it == _worldSubscriptions.end() ? nullptr : it->second.Physics.get();
 }
 
+void PhysicsModule::ConfigureWorld(World& world, const PhysicsWorldSettings& settings)
+{
+    if (world.GetECS().GetPool<RigidBodyComponent>().Size() != 0)
+        throw std::logic_error("Configure physics before creating bodies");
+    auto* physics = GetPhysics(world);
+    if (!physics) throw std::logic_error("World has no physics backend");
+    physics->Uninitialize();
+    physics->Initialize(_jobs, settings);
+}
+
+bool PhysicsModule::OverlapsBox(World& world, const Vector3& center, const Vector3& halfExtent) const
+{
+    auto* physics = GetPhysics(world);
+    if (!physics) throw std::logic_error("World has no physics backend");
+    return physics->OverlapsBox(center, halfExtent);
+}
+
 void PhysicsModule::Step(World& world, float dt)
 {
     if (auto* physics = GetPhysics(world); physics && !world.IsPaused()) physics->Step(dt);
@@ -98,12 +115,13 @@ void PhysicsModule::TryCreateBody(World& world, Entity entity)
     desc.Shape = collider.Shape;
     desc.Scale = transform.Scale;
     desc.MotionType = rigidBody.MotionType;
+    desc.ContinuousCollision = rigidBody.ContinuousCollision;
 
     rigidBody.Body = CreateBody(world, desc);
 
     if (!rigidBody.Body.IsValid())
     {
-        Logger::Error("Failed to create physics body for entity={}", entity);
+        throw std::runtime_error("Failed to create physics body for entity=" + std::to_string(entity));
     }
 }
 

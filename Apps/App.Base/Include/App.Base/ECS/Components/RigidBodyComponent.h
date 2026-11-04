@@ -7,4 +7,5 @@ struct RigidBodyComponent : ComponentTag
 {
     PhysicsBodyHandle Body;
     PhysicsMotionType MotionType = PhysicsMotionType::Static;
+    bool ContinuousCollision = false;
 };

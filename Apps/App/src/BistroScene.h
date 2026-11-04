@@ -202,16 +202,21 @@ inline void ConfigureBistroProps(SceneManagerModule& scenes)
 {
     scenes.OnWorldCreated.AddListener([](World& world)
     {
-        world.GetECS().RegisterComponent<FlyingPropComponent>();
-        world.SceneMeshFactory = [&world](const std::string& name, const StaticMeshRenderComponent& source)
+        world.SceneMeshFactory = [&world, configured = false](const std::string& name, const StaticMeshRenderComponent& source) mutable
         {
-            if (name != "Interior_interior") return false;
+            if (name != "Interior_interior" && name != "Exterior_exterior") return false;
+            auto& physics = *BenchmarkEngine::GetLocator().GetModule<PhysicsModule>();
+            if (!configured) { physics.ConfigureWorld(world, BistroPhysics::Settings()); configured = true; }
             auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
             const auto* mesh = render.GetPrimaryGPUMesh(source.MeshHandler);
             const auto partition = PartitionBistroProps(*mesh->CPUMesh);
-            render.ReserveTransformCapacity(static_cast<UINT>(partition.Props.size()) + 9);
-            CreateBistroPropEntities(world, name, source, partition);
-            CreateBistroParticles(world);
+            const auto count = BistroPhysics::GetCount(partition.Props.size(), BistroPhysics::CountScale.GetValue());
+            render.ReserveTransformCapacity(static_cast<UINT>(count) + 9);
+            size_t instances = partition.StaticSubMeshes.size();
+            for (size_t i = 0; i < count; ++i) instances += partition.Props[i % partition.Props.size()].SubMeshIndices.size();
+            render.ReserveInstanceCapacity(static_cast<UINT>(instances));
+            CreateBistroPropEntities(world, name, source, *mesh->CPUMesh, partition, &physics);
+            if (name == "Interior_interior") CreateBistroParticles(world);
             return true;
         };
     });

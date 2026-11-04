@@ -1,0 +1,135 @@
+# Исходные физические предметы Bistro
+
+Реализован второй этап [плана](../tasks/bistro-cpu-physics-navigation.md):
+исходные бутылки, стулья и столы в существующей Bistro получают Jolt rigid bodies.
+Волны, осколки и навигация в этот этап не входят.
+
+Изменённые файлы:
+
+- `Apps/App/src/App.cpp`, `BistroProps.h`, `BistroScene.h` — gameplay и спавн.
+- `Apps/App.Base/Include/App.Base/Physics/PhysicsTypes.h`,
+  `JoltPhysicsBackend.h`, `Apps/App.Base/src/Physics/JoltPhysicsBackend.cpp` —
+  shapes, единицы, ёмкости и placement query.
+- `Apps/App.Base/Include/App.Base/Modules/PhysicsModule.h`,
+  `Apps/App.Base/src/PhysicsModule.cpp` — настройка мира и ошибки создания.
+- `Apps/App.Base/Include/App.Base/ECS/Components/ColliderComponent.h`,
+  `RigidBodyComponent.h` — создание collider с готовой shape и CCD.
+- `Apps/App/BistroPhysicsTests.vcxproj`,
+  `Apps/App/tests/BistroPhysicsTests.cpp` — новая CPU-проверка.
+- `Apps/App/tests/BistroPropsTests.cpp`, `BistroAdditionsTests.cpp`,
+  `BistroStartupTests.cpp`, `ObjectDataJobsTests.cpp`, `SSRBistroTests.cpp` —
+  обновлённые callers/fixtures и визуальный smoke.
+- Этот отчёт.
+
+## Геометрия и единицы
+
+- Interior содержит 346 предметов (954 material sections) и 1427 статических
+  sections. Exterior содержит 33 предмета (66 sections) и 22330 статических
+  sections. Части стульев `_Mesh_01/_Mesh_02` объединяются по имени исходного
+  объекта. При базовом количестве каждая исходная section рендерится один раз.
+- Оба статических тела построены из настоящих треугольников соответствующих
+  OBJ, включая полы, стены, стойки и прочие неподвижные препятствия. Выбранные
+  динамические sections исключены из статических коллайдеров.
+- Вершины Bistro имеют запечённые координаты в сантиметрах. Backend мира
+  получает `WorldUnitsPerMeter=100`, переводит геометрию и позы в метры Jolt и
+  возвращает позы в сантиметрах. Остальные миры сохраняют значение по умолчанию 1.
+- Бутылка получает convex hull; мебель — compound hulls по связным частям
+  геометрии с объединением совпадающих позиций через material/UV seams
+  (квантование 0.01 см). Это сохраняет ножки, сиденья и столешницы раздельно.
+  Каждый hull готовится около собственного центра: cooking непосредственно
+  в запечённых координатах давал ошибку точности на тонкой части Exterior.
+- Jolt вычисляет центр масс compound. `GetPosition()` возвращает смещённое
+  начало исходной геометрии после вращения вокруг центра масс; обычный
+  `DynamicBodyUpdateSystem` передаёт именно эту позу рендеру. Перенос вершин,
+  дополнительная render-only анимация и изменение общего GPU transform path
+  не требуются. Отдельный тест проверяет это на запечённом удалённом от нуля меше.
+- FlyingProp удалён из обновления Bistro и не назначается её предметам.
+  Старый helper остаётся в изолированных тестах обновления GPU-данных.
+- Динамические предметы используют continuous collision detection. Это нужно
+  дополнительным копиям при падении с высоты на тонкие поверхности.
+
+## Количество при загрузке
+
+`App.Physics.CountScale` — конечное число в диапазоне **0..16**, по умолчанию 1.
+Настройка применяется при создании сцены; изменение в консоли/ImGui требует
+перезагрузки сцены. Пример запуска: `App.exe -App.Physics.CountScale=4`.
+
+| Значение | Результат |
+|---|---|
+| 0..1 | Все 379 исходных предметов физические; копий нет |
+| >1 | Исходные предметы плюс дополнительные копии |
+| 16 | 6064 динамических тела и два статических mesh-тела |
+| Отрицательное, NaN/Inf, >16 | Отказ до спавна и выделения памяти под количество |
+
+Число округляется вверх **отдельно для каждого OBJ**:
+`ceil(baseInPart * max(1, scale))`. Например, 1.25 даёт 42 Exterior + 433 Interior
+= 475 предметов. Значения меньше 1 сохраняют исходную сцену целиком.
+
+Копии используют исходные mesh/material sections. Они размещаются в сетке над
+верхней границей соответствующего исходного меша, затем падают на окружение.
+Шаг сетки превышает максимальные размеры предметов; перед созданием каждого
+тела Jolt проверяет свободный AABB с дополнительным зазором. Совпадающих
+начальных поз копий нет. Это не спавн дополнительной мебели на занятых местах
+внутри комнаты. Исходные предметы сохраняют авторские позы.
+
+Бюджет части проверяется до резервирования render capacity; перед созданием
+entities также проверяется сумма с уже опубликованными телами. Для Bistro задаются
+8192 тела, 131072 пары и 131072 contact constraints. Общий backend сохраняет
+прежние значения по умолчанию; размер временного allocator учитывает выбранный
+contact budget. Ошибка создания тела становится исключением, превышение
+ёмкостей шага также не замалчивается. Резерв под будущие осколки этим этапом
+не гарантируется — их количество ещё не определено.
+
+## Проверка
+
+Новый `Apps/App/BistroPhysicsTests.vcxproj` запускается как
+`BistroPhysicsTests.exe <scale> <threads>` и проверяет настоящие оба OBJ:
+однократное покрытие исходной геометрии, группировку частей, наличие всех
+Jolt handles, диапазоны/переполнение бюджета, позы и 300 физических шагов.
+Дополнительный маленький тест проверяет запечённый pivot, масштаб гравитации,
+контакт с triangle mesh и placement queries.
+
+Проверены:
+
+- BistroPhysicsTests Debug: scale 1, 4 потока, 379 динамических тел, 300 шагов.
+- BistroPhysicsTests Release: scale 1 на 4 потоках, scale 0 на одном потоке,
+  scale 16 на 4 потоках (6064 тела); по 300 шагов, без ошибок ёмкостей.
+- Общие PhysicsTests Debug/Release: scheduler fan-out/fan-in, 1000 тел на
+  1/4 потоках, lifecycle миров и fixed pre/post pipeline.
+- BistroPropsTests: покрытие настоящего Interior, material grouping,
+  физическое владение исходными entities и существующие particle budgets.
+- Bistro App собран в Debug/Release, App.Editor в Release. Обновлённые
+  BistroStartupTests и SSRBistroTests собраны в Release; их полные сценарии
+  не запускались.
+- ObjectDataJobsTests Release прошёл на 1/4 потоках: material/transform upload,
+  bounds и выбранные indirect slots. Синтетическая бутылка теперь имеет
+  конечный объём для физического bootstrap.
+- `BistroAdditionsTests.exe --physics-smoke` прошёл: исходный стул поднят
+  на 150 см и наклонён вокруг своего центра, затем выполнены 300 шагов и
+  GPU frames до/после. Проверены отсутствие D3D12 errors и device removal;
+  сохранённые кадры визуально просмотрены. Стул падает среди реальной мебели,
+  окружение и исходные предметы сохраняют корректные позы.
+
+Кадры smoke: `Build/BistroAdditions/physics-start.ppm` и `physics-settled.ppm`,
+копии для просмотра — одноимённые PNG. Preview-сферы отключены, освещение
+прогрето перед захватом. Это проверка Interior, а не визуальный осмотр всех
+379 предметов и не GPU-прогон максимального scale.
+
+Изолированные артефакты: `Build/bistro-physics-validation/`, логи
+`Build/bistro-physics-*-build.console` и `Build/bistro-physics-*-run.log`.
+Проверочная property sheet: `Build/bistro-physics-validation.props`.
+MSBuild получает
+`/p:ForceImportBeforeCppTargets=D:\Project\PEPEngine2\Build\bistro-physics-validation.props`.
+В ней отдельные `IntDir/OutDir`, `/Z7` и отключён incremental LTCG. Сборки
+выполнялись вне sandbox после C1902 менеджера PDB; известные LNK4099 о PDB
+сторонних библиотек сохраняются.
+
+## Границы доказательств
+
+Convex-части являются приближением связной геометрии, а не точным concave
+коллайдером каждой детали. Подготовка геометрии выполняется при загрузке,
+готовые Jolt shapes не кешируются между загрузками. Проверки выполнены в
+общем checkout с посторонними незакоммиченными renderer/config изменениями.
+Это не проверка чистого HEAD и не доказательство длительной устойчивости
+плотной кучи предметов. CPU utilization, CPU/GPU timings и выигрыш FPS
+не измерялись; увеличение числа видимых тел также увеличивает работу рендера.

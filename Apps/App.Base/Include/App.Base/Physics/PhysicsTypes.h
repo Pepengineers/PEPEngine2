@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <directxtk/SimpleMath.h>
 #include <variant>
+#include <memory>
+#include <vector>
+#include <array>
 
 struct PhysicsBodyHandle
 {
@@ -43,7 +46,28 @@ struct CylinderShapeDesc
     float HalfHeight = 0.5f;
 };
 
-using PhysicsShapeDesc = std::variant<BoxShapeDesc, SphereShapeDesc, CapsuleShapeDesc, CylinderShapeDesc>;
+struct PhysicsTriangleMesh
+{
+    std::vector<DirectX::SimpleMath::Vector3> Vertices;
+    std::vector<std::array<uint32_t, 3>> Triangles;
+};
+
+struct TriangleMeshShapeDesc { std::shared_ptr<const PhysicsTriangleMesh> Geometry; };
+struct PhysicsConvexCompound
+{
+    std::vector<std::vector<DirectX::SimpleMath::Vector3>> Hulls;
+};
+struct ConvexCompoundShapeDesc { std::shared_ptr<const PhysicsConvexCompound> Geometry; };
+
+struct PhysicsWorldSettings
+{
+    uint32_t MaxBodies = 2048;
+    uint32_t MaxBodyPairs = 16384;
+    uint32_t MaxContactConstraints = 16384;
+    float WorldUnitsPerMeter = 1;
+};
+
+using PhysicsShapeDesc = std::variant<BoxShapeDesc, SphereShapeDesc, CapsuleShapeDesc, CylinderShapeDesc, TriangleMeshShapeDesc, ConvexCompoundShapeDesc>;
 
 struct PhysicsBodyDesc
 {
@@ -52,4 +76,5 @@ struct PhysicsBodyDesc
     DirectX::SimpleMath::Quaternion Rotation{ 0.0f, 0.0f, 0.0f, 1.0f };
     DirectX::SimpleMath::Vector3 Scale{ 1.0f, 1.0f, 1.0f }; // only for body creation
     PhysicsMotionType MotionType = PhysicsMotionType::Static;
+    bool ContinuousCollision = false;
 };
