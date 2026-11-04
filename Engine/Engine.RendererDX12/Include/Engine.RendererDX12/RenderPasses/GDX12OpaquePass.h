@@ -8,6 +8,15 @@
 class GDX12OpaquePass : public GDX12RenderPass
 {
 public:
+    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
+    {
+        if (!_resources) return {};
+        const auto stage = _stage == Stage::DepthPrepass ?
+            (_commonData->AOAfterDepthPrepass ? GDX12GeometryStage::DepthNormals : GDX12GeometryStage::Depth) :
+            (_stage == Stage::GBuffer ? GDX12GeometryStage::GBuffer : GDX12GeometryStage::Forward);
+        return _resources->GetGeometryBufferAccesses(stage);
+    }
+
     void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
     {
         graph.SetName(_stage == Stage::DepthPrepass ? "Depth prepass" : "GBuffer");
@@ -164,19 +173,40 @@ public:
 		GDX12_SCOPED_EVENT(cmdList, _stage == Stage::DepthPrepass ? "Depth prepass" : "Opaque G-buffer", Colors::ForestGreen);
 		cmdList->SetViewport(depthStencil->GetViewport());
 		cmdList->SetScissorRect(depthStencil->GetScissorRect());
-		cmdList->SetGraphicsRootSignature(_opaqueRS.get());
         const bool writeNormals = _stage != Stage::DepthPrepass || _commonData->AOAfterDepthPrepass;
-        cmdList->SetPipelineState(writeNormals ? _opaquePSO.Get() : _depthOnlyPSO.Get());
-		cmdList->SetGraphicsRootConstantBufferView(1, currentFrameConstants->MainCB->GetElementAddress(0));
-		cmdList->SetGraphicsRootConstantBufferView(2, currentFrameConstants->CameraCB->
-			GetElementAddress(_commonData->ActiveCameraCBufferIndex));
-		cmdList->SetGeometryBuffer(_resources->GeometryBuffer.get());
-		cmdList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		cmdList->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-		cmdList->SetGraphicsSRV(0, currentFrameConstants->ShadowMaterials->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(1, currentFrameConstants->ShadowTransforms->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(2, currentFrameConstants->ShadowInstances->GetSRV()->GPUHandle);
-		cmdList->SetGraphicsSRV(3, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
+        const auto stage = _stage == Stage::DepthPrepass ?
+            (writeNormals ? GDX12GeometryStage::DepthNormals : GDX12GeometryStage::Depth) :
+            (_stage == Stage::GBuffer ? GDX12GeometryStage::GBuffer : GDX12GeometryStage::Forward);
+        GDX12GeometryContext view{ stage, _commonData->CameraView * _commonData->CameraProjection,
+            _commonData->CameraView.Invert().Translation(),
+            currentFrameConstants->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex) };
+        view.Key = 1;
+        view.FrameSlot = _resources->CurrFrameConstantsIndex;
+        view.ColorTargetCount = _stage == Stage::DepthPrepass ? (writeNormals ? 1u : 0u) : 5u;
+        view.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+        if (_stage == Stage::DepthPrepass)
+        { if (writeNormals) view.ColorFormats[0] = _surfaceBuffers[0]->GetFormat(); }
+        else
+        {
+            view.ColorFormats[0] = OUT_Accumulation->GetFormat();
+            view.ColorFormats[1] = OUT_VelocityBuffer->GetFormat();
+            for (UINT i = 0; i < _surfaceBuffers.size(); ++i) view.ColorFormats[i + 2] = _surfaceBuffers[i]->GetFormat();
+        }
+        GDX12GraphicsBindings binding;
+        binding.Root = _opaqueRS.get();
+        binding.Pipeline = writeNormals ? _opaquePSO : _depthOnlyPSO;
+        binding.IndirectSignature = _opaqueCS.Get();
+        binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
+        binding.Stage = stage;
+        binding.ColorTargetCount = view.ColorTargetCount;
+        binding.ColorFormats = view.ColorFormats;
+        binding.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+        binding.Heap = _resources->SRV_UAV_Heap.get();
+        binding.CBVs = { { 1, currentFrameConstants->MainCB->GetElementAddress(0) }, { 2, view.CameraConstants } };
+        binding.SRVs = { { 0, currentFrameConstants->ShadowMaterials->GetSRV()->GPUHandle },
+            { 1, currentFrameConstants->ShadowTransforms->GetSRV()->GPUHandle },
+            { 2, currentFrameConstants->ShadowInstances->GetSRV()->GPUHandle },
+            { 3, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex) } };
         const UINT meshCount = _resources->IndirectCommandsCache->GetElementCount();
         if (meshCount)
             cmdList->ResourceBarrier({
@@ -218,18 +248,15 @@ public:
             cmdList->ClearRenderTargetView(OUT_VelocityBuffer.get());
             for (auto& texture : _surfaceBuffers) cmdList->ClearRenderTargetView(texture.get());
         }
-        if (meshCount)
-            cmdList->ExecuteIndirect(_opaqueCS.Get(), meshCount,
-                currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().D3DResource.Get(), 0,
-                currentCameraVisBuffers.OpaqueDrawCounter->GetResource().D3DResource.Get(), 0);
-        {
-            const auto stage = _stage == Stage::DepthPrepass ?
-                (writeNormals ? GDX12GeometryStage::DepthNormals : GDX12GeometryStage::Depth) :
-                (_stage == Stage::GBuffer ? GDX12GeometryStage::GBuffer : GDX12GeometryStage::Forward);
-            _resources->DrawGeometry(cmdList, { stage, _commonData->CameraView * _commonData->CameraProjection,
-                _commonData->CameraView.Invert().Translation(),
-                currentFrameConstants->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex) });
-        }
+        GDX12RenderBatch mesh;
+        mesh.Binding = &binding;
+        mesh.Geometry = _resources->GeometryBuffer.get();
+        mesh.InstanceCount = meshCount;
+        mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _opaqueCS.Get(),
+            meshCount ? currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().D3DResource.Get() : nullptr, 0,
+            meshCount ? currentCameraVisBuffers.OpaqueDrawCounter->GetResource().D3DResource.Get() : nullptr, 0,
+            meshCount, sizeof(GDX12IndirectDrawArgs) };
+        _resources->EmitGeometry(cmdList, view, mesh);
 	}
 
 	void Resize() override

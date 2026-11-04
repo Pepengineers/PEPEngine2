@@ -865,6 +865,7 @@ void RenderModule::OnRenderComponentDestroyed(World&, Entity, StaticMeshRenderCo
     const GDX12IndirectDrawArgs empty = {};
     for (const auto index : component._CBufferIndices)
     {
+        _primaryResources.RemoveMeshPrimitive(index);
         if (_primaryResources.IndirectCommandsCache) _primaryResources.IndirectCommandsCache->CopyData(index, empty);
         if (_secondaryResources.IndirectCommandsCache) _secondaryResources.IndirectCommandsCache->CopyData(index, empty);
     }
@@ -926,6 +927,7 @@ void RenderModule::OnRender()
 {
     _RPcommonData.Jobs = &App::GetInstance()->GetJobs();
     _backBuffer->GetFrameGeneration().BeginRendering(_RPcommonData);
+    _primaryResources.BeginMeshPrimitiveUpdate();
     PrepareSkeletalMeshes();
     if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
         _primaryResources.UpdateMaterialCB(_materials);
@@ -1044,42 +1046,42 @@ void RenderModule::CollectReflectionScene()
         ecs.ForEach<StaticMeshRenderComponent>([&](Entity entity, StaticMeshRenderComponent& renderer)
         {
             if (!ecs.Has<TransformComponent>(entity)) return;
-            if (!renderer.Visible) return;
             const auto* mesh = GetPrimaryGPUMesh(renderer.MeshHandler);
             for (size_t part = 0; part < renderer.GetSubMeshCount(mesh->SubMeshes.size()); ++part)
             {
-                const auto& submesh = mesh->SubMeshes.at(renderer.GetSubMeshIndex(part));
-                if (!renderer.Materials.at(submesh.MaterialIndex)->ReflectionProbePreview) continue;
+                const auto submeshIndex = renderer.GetSubMeshIndex(part);
+                const auto& submesh = mesh->SubMeshes.at(submeshIndex);
+                const auto* material = renderer.Materials.at(submesh.MaterialIndex);
+                const UINT instanceIndex = renderer._CBufferIndices.at(part);
+                const auto& instance = resources.FrameConstants[resources.CurrFrameConstantsIndex]->InstanceCache->GetCPUData()[instanceIndex];
+                GDX12RenderPrimitive primitive;
+                primitive.Bounds = { instance.BoundingBoxCenter, instance.BoundingBoxExtents };
+                primitive.TransformIndex = instance.TransformIndex;
+                primitive.FirstInstance = instanceIndex;
+                primitive.MaterialIndex = instance.MaterialIndex;
+                primitive.Visible = renderer.Visible;
+                primitive.Dynamic = renderer._reflectionDynamic;
+                primitive.CastsShadows = material->Type != MaterialType::Transparent && !material->ReflectionProbePreview;
+                primitive.CapturedInReflections = !material->ReflectionProbePreview;
+                primitive.GeometryRevision = 14695981039346656037ull;
+                hash(primitive.GeometryRevision, renderer.MeshHandler);
+                hash(primitive.GeometryRevision, mesh->ContentRevision);
+                hash(primitive.GeometryRevision, submeshIndex);
+                primitive.MaterialRevision = 14695981039346656037ull;
+                hash(primitive.MaterialRevision, material);
+                hash(primitive.MaterialRevision, material->_revision);
+                primitive.TransformRevision = 14695981039346656037ull;
+                hash(primitive.TransformRevision, resources.FrameConstants[resources.CurrFrameConstantsIndex]->TransformCache->GetCPUData()[instance.TransformIndex].WorldMatrix);
+                resources.PublishMeshPrimitive(instanceIndex, primitive);
+                if (!renderer.Visible || !material->ReflectionProbePreview) continue;
                 GDX12IndirectDrawArgs draw = {};
-                draw.InstanceID = draw.StartInstanceLocation = renderer._CBufferIndices.at(part);
+                draw.InstanceID = draw.StartInstanceLocation = instanceIndex;
                 draw.InstanceCount = 1;
                 draw.IndexCountPerInstance = submesh.IndexCount;
                 draw.StartIndexLocation = submesh.StartIndexLocation;
                 draw.BaseVertexLocation = submesh.StartVertexLocation;
                 resources.ReflectionPreviewDraws.push_back(draw);
             }
-            if (std::all_of(renderer.Materials.begin(), renderer.Materials.end(),
-                [](const GDX12Material* material) { return material->ReflectionProbePreview != 0; })) return;
-            uint64_t signature = 14695981039346656037ull;
-            hash(signature, world);
-            const auto& transform = ecs.Get<TransformComponent>(entity);
-            hash(signature, entity);
-            hash(signature, renderer.MeshHandler);
-            hash(signature, GetPrimaryGPUMesh(renderer.MeshHandler)->ContentRevision);
-            hash(signature, transform.Location);
-            hash(signature, transform.Rotation);
-            hash(signature, transform.Scale);
-            for (const auto index : renderer.SubMeshIndices) hash(signature, index);
-            for (const auto* material : renderer.Materials)
-            {
-                hash(signature, material);
-                hash(signature, material->_revision);
-            }
-            hash(renderer._reflectionDynamic ? dynamicHash : staticHash, signature);
-            resources.LocalShadowCasters->push_back({ renderer.Bounds, signature, renderer._reflectionDynamic });
-            if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, renderer.Bounds);
-            else resources.ReflectionSceneBounds = renderer.Bounds;
-            hasBounds = true;
         });
         ecs.ForEach<FluidRenderComponent>([&](Entity entity, FluidRenderComponent& component)
         {
@@ -1094,35 +1096,6 @@ void RenderModule::CollectReflectionScene()
             instance.DeltaSeconds = world->IsPaused() ? 0 : _timer->DeltaTime() * world->GetTimeScale();
             ValidateFluidInstance(instance);
             resources.Fluids.push_back(std::move(instance));
-        });
-        ecs.ForEach<SkeletalMeshRenderComponent>([&](Entity entity, SkeletalMeshRenderComponent&)
-        {
-            const auto found = _skeletalStates.find({world, entity});
-            if (found == _skeletalStates.end()) return;
-            uint64_t signature = 14695981039346656037ull;
-            hash(signature, world);
-            hash(signature, entity);
-            hash(signature, found->second.SceneRevision);
-            for (const auto& matrix : found->second.Pose) hash(signature, matrix);
-            if (ecs.Has<TransformComponent>(entity))
-            {
-                const auto& transform = ecs.Get<TransformComponent>(entity);
-                hash(signature, transform.Location);
-                hash(signature, transform.Rotation);
-                hash(signature, transform.Scale);
-            }
-            for (const auto& part : found->second.Parts)
-            {
-                auto partSignature = signature;
-                hash(partSignature, part.MeshRevision);
-                hash(partSignature, part.Material);
-                if (part.ActiveMaterial) hash(partSignature, part.ActiveMaterial->_revision);
-                hash(dynamicHash, partSignature);
-                resources.LocalShadowCasters->push_back({ part.Bounds, partSignature, true });
-                if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, part.Bounds);
-                else resources.ReflectionSceneBounds = part.Bounds;
-                hasBounds = true;
-            }
         });
         ecs.ForEach<ReflectionProbeComponent>([&](Entity entity, ReflectionProbeComponent& component)
         {
@@ -1143,6 +1116,24 @@ void RenderModule::CollectReflectionScene()
             resources.ReflectionProbes.push_back(probe);
         });
     }
+    resources.EndMeshPrimitiveUpdate();
+    resources.Primitives.ForEach([&](GDX12RenderPrimitiveHandle handle, const GDX12RenderPrimitive& primitive)
+    {
+        if (!primitive.Visible || (!primitive.CastsShadows && !primitive.CapturedInReflections)) return;
+        auto signature = primitive.Revision();
+        hash(signature, handle.Index);
+        hash(signature, handle.Generation);
+        hash(resources.GeometryRevision, signature);
+        // Shadow contributors can change probe lighting even when capture geometry is excluded.
+        hash(primitive.Dynamic ? dynamicHash : staticHash, signature);
+        if (primitive.CastsShadows) resources.LocalShadowCasters->push_back({ primitive.Bounds, signature, primitive.Dynamic });
+        if (primitive.CapturedInReflections || primitive.CastsShadows)
+        {
+            if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, primitive.Bounds);
+            else resources.ReflectionSceneBounds = primitive.Bounds;
+            hasBounds = true;
+        }
+    });
     resources.LocalShadowCasters->insert(resources.LocalShadowCasters->end(), contributions.Casters.begin(), contributions.Casters.end());
     if (contributions.HasBounds)
     {

@@ -8,6 +8,9 @@
 class GDX12CascadedShadowPass final : public GDX12RenderPass
 {
 public:
+    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
+    { return _resources ? _resources->GetGeometryBufferAccesses(GDX12GeometryStage::Shadow) : std::vector<GDX12RenderGraph::BufferAccess>{}; }
+
     void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
     {
         graph.SetName("Sun shadows");
@@ -148,15 +151,19 @@ public:
 
         commands->ResourceBarrier({ _atlas->GetResource()->GetDepthWriteBarrier(),
             visibility.Counters->GetResource().GetIndirectArgsBarrier() });
-        commands->SetGraphicsRootSignature(_graphicsRoot.get());
-        commands->SetPipelineState(_shadowPSO);
-        commands->SetGraphicsRootConstantBufferView(1, frame->ShadowCB->GetElementAddress(0));
-        commands->SetGraphicsSRV(0, frame->ShadowMaterials->GetSRV()->GPUHandle);
-        commands->SetGraphicsSRV(1, frame->ShadowTransforms->GetSRV()->GPUHandle);
-        commands->SetGraphicsSRV(2, frame->ShadowInstances->GetSRV()->GPUHandle);
-        commands->SetGraphicsSRV(3, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
-        commands->SetGeometryBuffer(_resources->GeometryBuffer.get());
-        commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        GDX12GraphicsBindings binding;
+        binding.Stage = GDX12GeometryStage::Shadow;
+        binding.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+        binding.IndirectSignature = _signature.Get();
+        binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
+        binding.Heap = _resources->SRV_UAV_Heap.get();
+        binding.Root = _graphicsRoot.get();
+        binding.Pipeline = _shadowPSO;
+        binding.CBVs.push_back({ 1, frame->ShadowCB->GetElementAddress(0) });
+        binding.SRVs.push_back({ 0, frame->ShadowMaterials->GetSRV()->GPUHandle });
+        binding.SRVs.push_back({ 1, frame->ShadowTransforms->GetSRV()->GPUHandle });
+        binding.SRVs.push_back({ 2, frame->ShadowInstances->GetSRV()->GPUHandle });
+        binding.SRVs.push_back({ 3, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex) });
         commands->SetRenderTargets({}, _atlas.get());
         commands->GetCommandList()->ClearDepthStencilView(_atlas->GetDSV()->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
         for (UINT cascade = 0; cascade < 4; ++cascade)
@@ -165,25 +172,23 @@ public:
             const UINT y = (cascade >> 1u) * 2048;
             commands->SetViewport({ static_cast<float>(x), static_cast<float>(y), 2048.0f, 2048.0f, 0.0f, 1.0f });
             commands->SetScissorRect({ static_cast<LONG>(x), static_cast<LONG>(y), static_cast<LONG>(x + 2048), static_cast<LONG>(y + 2048) });
-            commands->GetCommandList()->SetGraphicsRoot32BitConstant(0, cascade, 1);
+            binding.Constants = { { 0, cascade, 1 } };
             commands->ResourceBarrier({ visibility.Commands[cascade]->GetResource().GetIndirectArgsBarrier() });
-            if (count) commands->ExecuteIndirect(_signature.Get(), count,
-                visibility.Commands[cascade]->GetResource().D3DResource.Get(), 0,
-                visibility.Counters->GetResource().D3DResource.Get(), cascade * sizeof(UINT));
-        }
-        if (_resources->HasExtensionCasters)
-        {
-            for (UINT cascade = 0; cascade < 4; ++cascade)
-            {
-                const UINT x = (cascade & 1u) * 2048;
-                const UINT y = (cascade >> 1u) * 2048;
-                commands->SetViewport({ static_cast<float>(x), static_cast<float>(y), 2048, 2048, 0, 1 });
-                commands->SetScissorRect({ static_cast<LONG>(x), static_cast<LONG>(y), static_cast<LONG>(x + 2048), static_cast<LONG>(y + 2048) });
-                commands->SetRenderTargets({}, _atlas.get());
-                _resources->DrawGeometry(commands, { GDX12GeometryStage::Shadow,
-                    Matrix(_resources->ShadowSettings.ViewProj[cascade]).Transpose(),
-                    _commonData->CameraView.Invert().Translation(), 0 });
-            }
+            GDX12GeometryContext view{ GDX12GeometryStage::Shadow,
+                Matrix(_resources->ShadowSettings.ViewProj[cascade]).Transpose(),
+                _commonData->CameraView.Invert().Translation() };
+            view.Key = (2ull << 60) | cascade;
+            view.FrameSlot = _resources->CurrFrameConstantsIndex;
+            view.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+            GDX12RenderBatch mesh;
+            mesh.Binding = &binding;
+            mesh.Geometry = _resources->GeometryBuffer.get();
+            mesh.InstanceCount = count;
+            mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _signature.Get(),
+                count ? visibility.Commands[cascade]->GetResource().D3DResource.Get() : nullptr, 0,
+                count ? visibility.Counters->GetResource().D3DResource.Get() : nullptr, cascade * sizeof(UINT),
+                count, sizeof(GDX12IndirectDrawArgs) };
+            _resources->EmitGeometry(commands, view, mesh);
         }
         _cachedGeometryRevision = geometryRevision;
         commands->ResourceBarrier({ _atlas->GetResource()->GetSRVBarrier() });

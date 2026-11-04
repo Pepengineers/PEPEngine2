@@ -38,6 +38,7 @@ void RenderModule::ReleaseSkeletalState(World& world, Entity entity)
     const GDX12IndirectDrawArgs empty = {};
     for (const auto& part : it->second.Parts)
     {
+        _primaryResources.RemoveMeshPrimitive(part.Instance);
         _primaryResources.IndirectCommandsCache->CopyData(part.Instance, empty);
         _primaryResources.GeometryBuffer->ReleaseSkinnedVertices(part.GPU->OutputVertex, part.GPU->VertexCount);
         _freeSkeletalInstances.push_back(part.Instance);
@@ -220,6 +221,42 @@ void RenderModule::PrepareSkeletalMeshes()
     }
     // Resource creation/release stays on the owner thread; poses and disjoint instance slots run in jobs.
     poses.Schedule(*_RPcommonData.Jobs, poses.Tasks.size(), 1).Complete();
+    const auto hash = [](uint64_t& result, const auto& value)
+    {
+        const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
+        for (size_t i = 0; i < sizeof(value); ++i) result = (result ^ bytes[i]) * 1099511628211ull;
+    };
+    const auto* frame = GetCurrentPrimaryFrameConstants();
+    for (const auto& [owner, state] : _skeletalStates)
+    {
+        uint64_t deformation = 14695981039346656037ull;
+        for (const auto& matrix : state.Pose) hash(deformation, matrix);
+        for (const auto& part : state.Parts)
+        {
+            const auto& instance = frame->InstanceCache->GetCPUData()[part.Instance];
+            GDX12RenderPrimitive primitive;
+            primitive.Bounds = part.Bounds;
+            primitive.TransformIndex = instance.TransformIndex;
+            primitive.FirstInstance = part.Instance;
+            primitive.MaterialIndex = part.Material;
+            primitive.Dynamic = true;
+            primitive.CastsShadows = part.ActiveMaterial->Type != MaterialType::Transparent && !part.ActiveMaterial->ReflectionProbePreview;
+            primitive.CapturedInReflections = !part.ActiveMaterial->ReflectionProbePreview;
+            primitive.GeometryRevision = 14695981039346656037ull;
+            hash(primitive.GeometryRevision, state.SceneRevision);
+            hash(primitive.GeometryRevision, part.Mesh);
+            hash(primitive.GeometryRevision, part.MeshRevision);
+            hash(primitive.GeometryRevision, part.SubMesh);
+            primitive.MaterialRevision = 14695981039346656037ull;
+            hash(primitive.MaterialRevision, part.ActiveMaterial);
+            hash(primitive.MaterialRevision, part.ActiveMaterial->_revision);
+            primitive.TransformRevision = 14695981039346656037ull;
+            hash(primitive.TransformRevision, frame->TransformCache->GetCPUData()[instance.TransformIndex].WorldMatrix);
+            primitive.DeformationRevision = deformation;
+            _primaryResources.PublishMeshPrimitive(part.Instance, primitive);
+        }
+    }
+
 }
 
 void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshRenderComponent& component,

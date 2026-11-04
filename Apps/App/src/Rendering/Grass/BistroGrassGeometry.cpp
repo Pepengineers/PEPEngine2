@@ -128,7 +128,7 @@ void BistroGrassGeometry::DeclareGeometryResources(GDX12RenderGraphBuilder& grap
 
 void BistroGrassGeometry::DrawGeometry(GDX12CommandList* commands, const GDX12GeometryContext& context)
 {
-    if (!_gpu || context.StaticOnly) return;
+    if (!_gpu || context.Filter == GDX12GeometryFilter::Static) return;
     GDX12GrassRenderer::Stage stage;
     switch (context.Stage)
     {

@@ -10,6 +10,9 @@
 class GDX12LocalShadowPass final : public GDX12RenderPass
 {
 public:
+    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
+    { return _resources ? _resources->GetGeometryBufferAccesses(GDX12GeometryStage::Shadow) : std::vector<GDX12RenderGraph::BufferAccess>{}; }
+
     void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
     {
         graph.SetName("Local shadows");
@@ -211,25 +214,40 @@ public:
                     GDX12_SCOPED_EVENT(commands, "Local shadow draw");
                     commands->ResourceBarrier({ visibility.Commands->GetResource().GetIndirectArgsBarrier(),
                         visibility.Counter->GetResource().GetIndirectArgsBarrier() });
-                    commands->SetGraphicsRootSignature(_graphicsRoot.get());
-                    commands->SetPipelineState(_depthPSO);
-                    commands->SetGraphicsSRV(0, frame->ShadowMaterials->GetSRV()->GPUHandle);
-                    commands->SetGraphicsSRV(1, frame->ShadowTransforms->GetSRV()->GPUHandle);
-                    commands->SetGraphicsSRV(2, frame->ShadowInstances->GetSRV()->GPUHandle);
-                    commands->SetGraphicsSRV(3, frame->ShadowLights->GetSRV()->GPUHandle);
-                    commands->SetGraphicsSRV(4, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
-                    commands->GetCommandList()->SetGraphicsRoot32BitConstant(0, lightIndex * 6 + face, 1);
-                    commands->SetGeometryBuffer(_resources->GeometryBuffer.get());
-                    commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+                    GDX12GraphicsBindings binding;
+                    binding.Stage = GDX12GeometryStage::Shadow;
+                    binding.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+                    binding.IndirectSignature = _signature.Get();
+                    binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
+                    binding.Heap = _resources->SRV_UAV_Heap.get();
+                    binding.Root = _graphicsRoot.get();
+                    binding.Pipeline = _depthPSO;
+                    binding.SRVs.push_back({ 0, frame->ShadowMaterials->GetSRV()->GPUHandle });
+                    binding.SRVs.push_back({ 1, frame->ShadowTransforms->GetSRV()->GPUHandle });
+                    binding.SRVs.push_back({ 2, frame->ShadowInstances->GetSRV()->GPUHandle });
+                    binding.SRVs.push_back({ 3, frame->ShadowLights->GetSRV()->GPUHandle });
+                    binding.SRVs.push_back({ 4, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex) });
+                    binding.Constants = { { 0, lightIndex * 6 + face, 1 } };
                     commands->SetViewport({ 0, 0, static_cast<float>(LocalShadowResolution), static_cast<float>(LocalShadowResolution), 0, 1 });
                     commands->SetScissorRect({ 0, 0, LocalShadowResolution, LocalShadowResolution });
                     const auto dsv = _dsvs[light.ShadowFirstSlice + face]->CPUHandle;
                     commands->GetCommandList()->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
                     if (_staticOnly) commands->GetCommandList()->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
-                    if (count) commands->ExecuteIndirect(_signature.Get(), count,
-                        visibility.Commands->GetResource().D3DResource.Get(), 0, visibility.Counter->GetResource().D3DResource.Get(), 0);
-                    _resources->DrawGeometry(commands, { GDX12GeometryStage::Shadow,
-                        Matrix(light.ShadowViewProj[face]).Transpose(), Vector3(light.Position), 0, nullptr, _staticOnly });
+                    GDX12GeometryContext view{ GDX12GeometryStage::Shadow,
+                        Matrix(light.ShadowViewProj[face]).Transpose(), Vector3(light.Position) };
+                    view.Filter = _staticOnly ? GDX12GeometryFilter::Static : GDX12GeometryFilter::Dynamic;
+                    view.Key = (3ull << 60) | (static_cast<uint64_t>(_staticOnly) << 59) | (lightIndex * 6ull + face);
+                    view.FrameSlot = _resources->CurrFrameConstantsIndex;
+                    view.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+                    GDX12RenderBatch mesh;
+                    mesh.Binding = &binding;
+                    mesh.Geometry = _resources->GeometryBuffer.get();
+                    mesh.InstanceCount = count;
+                    mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _signature.Get(),
+                        count ? visibility.Commands->GetResource().D3DResource.Get() : nullptr, 0,
+                        count ? visibility.Counter->GetResource().D3DResource.Get() : nullptr, 0,
+                        count, sizeof(GDX12IndirectDrawArgs) };
+                    _resources->EmitGeometry(commands, view, mesh);
                 }
                 ++_renderedViews;
             }

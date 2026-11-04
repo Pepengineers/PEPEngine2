@@ -8,6 +8,15 @@
 class GDX12ReflectionProbePass final : public GDX12RenderPass
 {
 public:
+    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
+    {
+        if (!_resources) return {};
+        auto accesses = _resources->GetGeometryBufferAccesses(GDX12GeometryStage::ReflectionCapture);
+        const auto shadows = _resources->GetGeometryBufferAccesses(GDX12GeometryStage::Shadow);
+        accesses.insert(accesses.end(), shadows.begin(), shadows.end());
+        return accesses;
+    }
+
     void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
     {
         graph.SetName("Reflection probes");
@@ -61,7 +70,7 @@ private:
     void CreateTexture(GDX12Texture& texture, UINT size, UINT slices, UINT mips, D3D12_RESOURCE_FLAGS flags, bool depth);
     void CreateFaceViews(GDX12Texture& texture, std::vector<std::unique_ptr<GDX12Descriptor>>& views, bool depth);
     void Cull(GDX12CommandList* commands, UINT camera, Geometry geometry, bool shadow);
-    void BindCapture(GDX12CommandList* commands, UINT face, GDX12Texture* localShadows);
+    GDX12GraphicsBindings CaptureBindings(UINT face, GDX12Texture* localShadows);
     void RenderShadow(GDX12CommandList* commands, Geometry geometry, Vector3 eye);
     void RenderFace(GDX12CommandList* commands, UINT probe, UINT face, Geometry geometry, bool bake);
     void FilterAndPublish(GDX12CommandList* commands, UINT probe);

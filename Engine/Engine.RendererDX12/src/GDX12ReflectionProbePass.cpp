@@ -361,27 +361,35 @@ void GDX12ReflectionProbePass::Cull(GDX12CommandList* commands, const UINT camer
     commands->ResourceBarrier({ frame.Commands->GetResource().GetIndirectArgsBarrier(), frame.Counter->GetResource().GetIndirectArgsBarrier() });
 }
 
-void GDX12ReflectionProbePass::BindCapture(GDX12CommandList* commands, const UINT face, GDX12Texture* localShadows)
+GDX12GraphicsBindings GDX12ReflectionProbePass::CaptureBindings(const UINT face, GDX12Texture* localShadows)
 {
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
     auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-    commands->SetGraphicsRootSignature(_captureRoot.get());
-    commands->SetGraphicsRootConstantBufferView(1, constants->MainCB->GetElementAddress(0));
-    commands->SetGraphicsRootConstantBufferView(2, frame.Cameras->GetElementAddress(face));
-    commands->SetGraphicsRootConstantBufferView(3, frame.Shadow->GetElementAddress(0));
-    commands->SetGraphicsSRV(0, constants->ShadowMaterials->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(1, constants->ShadowTransforms->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(2, constants->ShadowInstances->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(3, _sunShadow.GetSRV()->GPUHandle);
-    for (UINT i = 0; i < 3; ++i) commands->SetGraphicsSRV(4 + i, _inputs[i]->GetTexture()->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(7, constants->ShadowLights->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(8, localShadows->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(9, _inputs[3]->GetTexture()->GetSRV()->GPUHandle);
-    commands->SetGraphicsRootConstantBufferView(4, _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->SkyCB->GetElementAddress(0));
-    commands->SetGraphicsSRV(10, _resources->SkyTransmittanceSRV.GPUHandle);
-    commands->SetGraphicsSRV(11, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
-    commands->SetGeometryBuffer(_resources->GeometryBuffer.get());
-    commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    GDX12GraphicsBindings binding;
+    binding.Root = _captureRoot.get();
+    binding.Pipeline = _capturePSO;
+    binding.IndirectSignature = _signature.Get();
+    binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
+    binding.Stage = GDX12GeometryStage::ReflectionCapture;
+    binding.ColorTargetCount = 1;
+    binding.ColorFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    binding.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+    binding.Heap = _resources->SRV_UAV_Heap.get();
+    binding.CBVs.push_back({ 1, constants->MainCB->GetElementAddress(0) });
+    binding.CBVs.push_back({ 2, frame.Cameras->GetElementAddress(face) });
+    binding.CBVs.push_back({ 3, frame.Shadow->GetElementAddress(0) });
+    binding.SRVs.push_back({ 0, constants->ShadowMaterials->GetSRV()->GPUHandle });
+    binding.SRVs.push_back({ 1, constants->ShadowTransforms->GetSRV()->GPUHandle });
+    binding.SRVs.push_back({ 2, constants->ShadowInstances->GetSRV()->GPUHandle });
+    binding.SRVs.push_back({ 3, _sunShadow.GetSRV()->GPUHandle });
+    for (UINT i = 0; i < 3; ++i) binding.SRVs.push_back({ 4 + i, _inputs[i]->GetTexture()->GetSRV()->GPUHandle });
+    binding.SRVs.push_back({ 7, constants->ShadowLights->GetSRV()->GPUHandle });
+    binding.SRVs.push_back({ 8, localShadows->GetSRV()->GPUHandle });
+    binding.SRVs.push_back({ 9, _inputs[3]->GetTexture()->GetSRV()->GPUHandle });
+    binding.CBVs.push_back({ 4, _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->SkyCB->GetElementAddress(0) });
+    binding.SRVs.push_back({ 10, _resources->SkyTransmittanceSRV.GPUHandle });
+    binding.SRVs.push_back({ 11, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex) });
+    return binding;
 }
 
 void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, const Geometry geometry, const Vector3 eye)
@@ -400,17 +408,21 @@ void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, const Ge
     Cull(commands, 0, geometry, true);
     auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
-    commands->SetGraphicsRootSignature(_captureRoot.get());
-    commands->SetGraphicsRootConstantBufferView(3, frame.Shadow->GetElementAddress(0));
-    commands->SetGraphicsSRV(0, constants->ShadowMaterials->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(1, constants->ShadowTransforms->GetSRV()->GPUHandle);
-    commands->SetGraphicsSRV(2, constants->ShadowInstances->GetSRV()->GPUHandle);
-    commands->SetGraphicsRootConstantBufferView(4, _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->SkyCB->GetElementAddress(0));
-    commands->SetGraphicsSRV(10, _resources->SkyTransmittanceSRV.GPUHandle);
-    commands->SetGraphicsSRV(11, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
-    commands->SetGeometryBuffer(_resources->GeometryBuffer.get());
-    commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    commands->SetPipelineState(_shadowPSO);
+    GDX12GraphicsBindings binding;
+    binding.Root = _captureRoot.get();
+    binding.IndirectSignature = _signature.Get();
+    binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
+    binding.Stage = GDX12GeometryStage::Shadow;
+    binding.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+    binding.Heap = _resources->SRV_UAV_Heap.get();
+    binding.CBVs.push_back({ 3, frame.Shadow->GetElementAddress(0) });
+    binding.SRVs.push_back({ 0, constants->ShadowMaterials->GetSRV()->GPUHandle });
+    binding.SRVs.push_back({ 1, constants->ShadowTransforms->GetSRV()->GPUHandle });
+    binding.SRVs.push_back({ 2, constants->ShadowInstances->GetSRV()->GPUHandle });
+    binding.CBVs.push_back({ 4, _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->SkyCB->GetElementAddress(0) });
+    binding.SRVs.push_back({ 10, _resources->SkyTransmittanceSRV.GPUHandle });
+    binding.SRVs.push_back({ 11, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex) });
+    binding.Pipeline = _shadowPSO;
     commands->ResourceBarrier({ _sunShadow.GetResource()->GetDepthWriteBarrier() });
     const auto dsv = _sunDSV[0]->CPUHandle;
     commands->GetCommandList()->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
@@ -418,10 +430,21 @@ void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, const Ge
     commands->SetViewport({ 0, 0, 1024, 1024, 0, 1 });
     commands->SetScissorRect({ 0, 0, 1024, 1024 });
     const UINT count = _resources->IndirectCommandsCache->GetElementCount();
-    if (count) commands->ExecuteIndirect(_signature.Get(), count, frame.Commands->GetResource().D3DResource.Get(), 0,
-        frame.Counter->GetResource().D3DResource.Get(), 0);
-    _resources->DrawGeometry(commands, { GDX12GeometryStage::Shadow,
-        Matrix(ProbeSunShadow(*_resources).ViewProj[0]).Transpose(), eye, 0, nullptr, geometry == StaticGeometry });
+    GDX12GeometryContext view{ GDX12GeometryStage::Shadow,
+        Matrix(ProbeSunShadow(*_resources).ViewProj[0]).Transpose(), eye };
+    view.Filter = geometry == StaticGeometry ? GDX12GeometryFilter::Static :
+        (geometry == DynamicGeometry ? GDX12GeometryFilter::Dynamic : GDX12GeometryFilter::All);
+    view.Key = (4ull << 60) | (_activeProbe * 3ull + geometry);
+    view.FrameSlot = _resources->CurrFrameConstantsIndex;
+    view.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+    GDX12RenderBatch mesh;
+    mesh.Binding = &binding;
+    mesh.Geometry = _resources->GeometryBuffer.get();
+    mesh.InstanceCount = count;
+    mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _signature.Get(),
+        count ? frame.Commands->GetResource().D3DResource.Get() : nullptr, 0,
+        count ? frame.Counter->GetResource().D3DResource.Get() : nullptr, 0, count, sizeof(GDX12IndirectDrawArgs) };
+    _resources->EmitGeometry(commands, view, mesh);
     commands->ResourceBarrier({ _sunShadow.GetResource()->GetSRVBarrier() });
 }
 
@@ -445,7 +468,9 @@ void GDX12ReflectionProbePass::RenderFace(GDX12CommandList* commands, const UINT
         commands->GetCommandList()->CopyTextureRegion(&depthDestination, 0, 0, 0, &depthSource, nullptr);
     }
     Cull(commands, face, geometry, false);
-    BindCapture(commands, face, geometry == StaticGeometry ? _staticLocalShadows->GetOutput(0)->GetTexture() : _inputs[4]->GetTexture());
+    auto binding = CaptureBindings(face, geometry == StaticGeometry ? _staticLocalShadows->GetOutput(0)->GetTexture() : _inputs[4]->GetTexture());
+    binding.Bind(commands);
+    commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     commands->ResourceBarrier({ color.GetResource()->GetRenderTargetBarrier(), depth.GetResource()->GetDepthWriteBarrier() });
     commands->GetCommandList()->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
     commands->SetViewport({ 0, 0, static_cast<float>(_resolution), static_cast<float>(_resolution), 0, 1 });
@@ -458,23 +483,33 @@ void GDX12ReflectionProbePass::RenderFace(GDX12CommandList* commands, const UINT
         commands->SetPipelineState(_skyPSO);
         commands->DrawInstanced(3, 1, 0, 0);
     }
-    commands->SetPipelineState(_capturePSO);
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
     const UINT count = _resources->IndirectCommandsCache->GetElementCount();
-    if (count) commands->ExecuteIndirect(_signature.Get(), count, frame.Commands->GetResource().D3DResource.Get(), 0,
-        frame.Counter->GetResource().D3DResource.Get(), 0);
-    {
-        GDX12CaptureLighting lighting;
-        lighting.SunShadow = &_sunShadow;
-        lighting.Irradiance = _inputs[0]->GetTexture();
-        lighting.Prefiltered = _inputs[1]->GetTexture();
-        lighting.BRDF = _inputs[2]->GetTexture();
-        lighting.LocalShadows = _inputs[4]->GetTexture();
-        lighting.ShadowConstants = frame.Shadow->GetElementAddress(0);
-        const auto camera = FaceCamera(state.Source, face, _resolution);
-        _resources->DrawGeometry(commands, { GDX12GeometryStage::ReflectionCapture, Matrix(camera.ViewProj).Transpose(),
-            state.Source.Position, frame.Cameras->GetElementAddress(face), &lighting, geometry == StaticGeometry });
-    }
+    GDX12CaptureLighting lighting;
+    lighting.SunShadow = &_sunShadow;
+    lighting.Irradiance = _inputs[0]->GetTexture();
+    lighting.Prefiltered = _inputs[1]->GetTexture();
+    lighting.BRDF = _inputs[2]->GetTexture();
+    lighting.LocalShadows = geometry == StaticGeometry ? _staticLocalShadows->GetOutput(0)->GetTexture() : _inputs[4]->GetTexture();
+    lighting.ShadowConstants = frame.Shadow->GetElementAddress(0);
+    const auto camera = FaceCamera(state.Source, face, _resolution);
+    GDX12GeometryContext view{ GDX12GeometryStage::ReflectionCapture, Matrix(camera.ViewProj).Transpose(),
+        state.Source.Position, frame.Cameras->GetElementAddress(face), &lighting };
+    view.Filter = geometry == StaticGeometry ? GDX12GeometryFilter::Static :
+        (geometry == DynamicGeometry ? GDX12GeometryFilter::Dynamic : GDX12GeometryFilter::All);
+    view.Key = (5ull << 60) | (static_cast<uint64_t>(probe) << 8) | (geometry * 6u + face);
+    view.FrameSlot = _resources->CurrFrameConstantsIndex;
+    view.ColorTargetCount = 1;
+    view.ColorFormats[0] = color.GetFormat();
+    view.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+    GDX12RenderBatch mesh;
+    mesh.Binding = &binding;
+    mesh.Geometry = _resources->GeometryBuffer.get();
+    mesh.InstanceCount = count;
+    mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _signature.Get(),
+        count ? frame.Commands->GetResource().D3DResource.Get() : nullptr, 0,
+        count ? frame.Counter->GetResource().D3DResource.Get() : nullptr, 0, count, sizeof(GDX12IndirectDrawArgs) };
+    _resources->EmitGeometry(commands, view, mesh);
 }
 
 void GDX12ReflectionProbePass::FilterAndPublish(GDX12CommandList* commands, const UINT probe)

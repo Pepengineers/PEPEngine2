@@ -42,6 +42,7 @@ public:
 	void SetViewport(const D3D12_VIEWPORT& viewport);
 	void SetScissorRect(const D3D12_RECT& scissorRect);
 	void SetGeometryBuffer(GDX12GeometryBuffer* buffer);
+    void InvalidateGeometryBuffer() { _currentGeometryBuffer = nullptr; }
 
     // View management
 	void SetRenderTargets(std::initializer_list<GDX12Texture*> rtvTextures,
