@@ -27,14 +27,15 @@ F1 hides the settings window; `App.Bounds.Show` controls the boxes separately.
 Dust and Steam use independent layout presets instead of their spawn snapshots:
 
 - Dust: one approximate box covering the Bistro interior, centre (559,221,-348),
-  half extents (694,181,779) cm. Some corners extend outside the walls by design.
+  half extents (694,181,779) cm, rotated -28.5 degrees around Y to match Steam.
+  Some corners extend outside the walls by design.
 - Steam: one simple box along the behind-bar space, centre (922,227,-293),
-  half extents (305,175,85.5) cm, aligned to the world axes like Dust. Its long
-  faces are parallel to Dust's faces; it does not follow the curved counter end.
+  half extents (305,175,85.5) cm, restored to its original -28.5-degree Y rotation
+  along the bar. Dust shares the same rotation, so their faces are parallel.
 
-These presets do not change either emitter. All centre coordinates and box axes
-are world-space. Particle confinement will be connected only after the layout is
-approved.
+These presets do not change either emitter. Centres are world-space; half extents
+follow the rotated box axes. Particle confinement will be connected only after
+the layout is approved.
 
 The regression checks run in `BistroAdditionsTests`: control availability, source
 object isolation, extent validation, paused drawing, visibility, and persistence
