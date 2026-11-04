@@ -1,11 +1,11 @@
 #pragma once
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include <cstdint>
-#include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12GeometryViewPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <array>
 
-class GDX12OpaquePass : public GDX12RenderPass
+class GDX12OpaquePass : public GDX12GeometryViewPass
 {
 public:
     std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
@@ -21,7 +21,6 @@ public:
     {
         graph.SetName(_stage == Stage::DepthPrepass ? "Depth prepass" : "GBuffer");
         graph.Read(SharedResource::Scene);
-        if (_resources) _resources->DeclareGeometryResources(graph);
         graph.Read(SharedResource::Visibility);
         graph.ReadInputs(_inputs);
         if (_stage != Stage::GBuffer)
@@ -164,34 +163,76 @@ public:
 
 	// VisibilityBuffers will automatically be selected from CameraCBIndex
 	// It requires GPUCullingPass to be executed beforehand
-	void Execute(GDX12CommandList* cmdList) override
-	{
-		auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[_commonData->ActiveCameraCBufferIndex];
-		GDX12Texture* depthStencil = _outputs[2]->GetTexture();
-
-		GDX12_SCOPED_EVENT(cmdList, _stage == Stage::DepthPrepass ? "Depth prepass" : "Opaque G-buffer", Colors::ForestGreen);
-		cmdList->SetViewport(depthStencil->GetViewport());
-		cmdList->SetScissorRect(depthStencil->GetScissorRect());
+    void Prepare()
+    {
+        auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
         const bool writeNormals = _stage != Stage::DepthPrepass || _commonData->AOAfterDepthPrepass;
         const auto stage = _stage == Stage::DepthPrepass ?
             (writeNormals ? GDX12GeometryStage::DepthNormals : GDX12GeometryStage::Depth) :
             (_stage == Stage::GBuffer ? GDX12GeometryStage::GBuffer : GDX12GeometryStage::Forward);
-        GDX12GeometryContext view{ stage, _commonData->CameraView * _commonData->CameraProjection,
+        _view = GDX12GeometryContext{ stage, _commonData->CameraView * _commonData->CameraProjection,
             _commonData->CameraView.Invert().Translation(),
             currentFrameConstants->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex) };
-        view.Key = 1;
-        view.FrameSlot = _resources->CurrFrameConstantsIndex;
-        view.ColorTargetCount = _stage == Stage::DepthPrepass ? (writeNormals ? 1u : 0u) : 5u;
-        view.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+        _view.Key = 1;
+        _view.FrameSlot = _resources->CurrFrameConstantsIndex;
+        _view.ColorTargetCount = _stage == Stage::DepthPrepass ? (writeNormals ? 1u : 0u) : 5u;
+        _view.DepthFormat = DXGI_FORMAT_D32_FLOAT;
         if (_stage == Stage::DepthPrepass)
-        { if (writeNormals) view.ColorFormats[0] = _surfaceBuffers[0]->GetFormat(); }
+        { if (writeNormals) _view.ColorFormats[0] = _surfaceBuffers[0]->GetFormat(); }
         else
         {
-            view.ColorFormats[0] = OUT_Accumulation->GetFormat();
-            view.ColorFormats[1] = OUT_VelocityBuffer->GetFormat();
-            for (UINT i = 0; i < _surfaceBuffers.size(); ++i) view.ColorFormats[i + 2] = _surfaceBuffers[i]->GetFormat();
+            _view.ColorFormats[0] = OUT_Accumulation->GetFormat();
+            _view.ColorFormats[1] = OUT_VelocityBuffer->GetFormat();
+            for (UINT i = 0; i < _surfaceBuffers.size(); ++i) _view.ColorFormats[i + 2] = _surfaceBuffers[i]->GetFormat();
         }
+        _prepared = true;
+    }
+    UINT GetGeometryViewCapacity() const override { return 1; }
+    const GDX12GeometryContext* GetGeometryView(UINT slot) const override
+    { return _prepared && slot == 0 ? &_view : nullptr; }
+    void BeginGeometry(GDX12CommandList*) override { if (!_prepared) Prepare(); }
+    void EndGeometry(GDX12CommandList*) override { _prepared = false; }
+    void BindGeometryViewTargets(GDX12CommandList* cmdList, UINT) override
+    {
+        auto* depth = _outputs[2]->GetTexture();
+        cmdList->SetViewport(depth->GetViewport());
+        cmdList->SetScissorRect(depth->GetScissorRect());
+        cmdList->ResourceBarrier({ _stage == Stage::GBuffer ? depth->GetResource()->GetDepthReadBarrier() : depth->GetResource()->GetDepthWriteBarrier() });
+        if (_stage == Stage::DepthPrepass)
+        {
+            if (_view.ColorTargetCount)
+            {
+                cmdList->ResourceBarrier({ _surfaceBuffers[0]->GetResource()->GetRenderTargetBarrier() });
+                cmdList->SetRenderTargets({ _surfaceBuffers[0].get() }, depth);
+            }
+            else cmdList->SetRenderTargets({}, depth);
+        }
+        else
+        {
+            cmdList->ResourceBarrier({ OUT_Accumulation->GetResource()->GetRenderTargetBarrier(),
+                OUT_VelocityBuffer->GetResource()->GetRenderTargetBarrier(), _surfaceBuffers[0]->GetResource()->GetRenderTargetBarrier(),
+                _surfaceBuffers[1]->GetResource()->GetRenderTargetBarrier(), _surfaceBuffers[2]->GetResource()->GetRenderTargetBarrier() });
+            if (_stage == Stage::GBuffer)
+            {
+                UpdateReadOnlyDepth();
+                const D3D12_CPU_DESCRIPTOR_HANDLE targets[] = { OUT_Accumulation->GetRTV()->CPUHandle, OUT_VelocityBuffer->GetRTV()->CPUHandle,
+                    _surfaceBuffers[0]->GetRTV()->CPUHandle, _surfaceBuffers[1]->GetRTV()->CPUHandle, _surfaceBuffers[2]->GetRTV()->CPUHandle };
+                cmdList->GetCommandList()->OMSetRenderTargets(5, targets, FALSE, &_readOnlyDepth->CPUHandle);
+            }
+            else cmdList->SetRenderTargets({ OUT_Accumulation.get(), OUT_VelocityBuffer.get(), _surfaceBuffers[0].get(),
+                _surfaceBuffers[1].get(), _surfaceBuffers[2].get() }, depth);
+        }
+    }
+    void ExecuteGeometryView(GDX12CommandList* cmdList, UINT slot) override
+    {
+        if (!GetGeometryView(slot)) return;
+        auto view = _view;
+        view.IncludeApplicationGeometry = !_splitGeometry;
+        const auto stage = view.Stage;
+        const bool writeNormals = _stage != Stage::DepthPrepass || _commonData->AOAfterDepthPrepass;
+        auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+        auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[_commonData->ActiveCameraCBufferIndex];
+        auto* depthStencil = _outputs[2]->GetTexture();
         GDX12GraphicsBindings binding;
         binding.Root = _opaqueRS.get();
         binding.Pipeline = writeNormals ? _opaquePSO : _depthOnlyPSO;
@@ -212,38 +253,13 @@ public:
             cmdList->ResourceBarrier({
                 currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().GetIndirectArgsBarrier(),
                 currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetIndirectArgsBarrier() });
-        cmdList->ResourceBarrier({ _stage == Stage::GBuffer ? depthStencil->GetResource()->GetDepthReadBarrier() :
-            depthStencil->GetResource()->GetDepthWriteBarrier() });
+        BindGeometryViewTargets(cmdList, slot);
         if (_stage != Stage::GBuffer)
-            cmdList->GetCommandList()->ClearDepthStencilView(depthStencil->GetDSV()->CPUHandle,
-                D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0, 0, nullptr);
+            cmdList->GetCommandList()->ClearDepthStencilView(depthStencil->GetDSV()->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 0, 0, 0, nullptr);
         if (_stage == Stage::DepthPrepass)
-        {
-            if (writeNormals)
-            {
-                cmdList->ResourceBarrier({ _surfaceBuffers[0]->GetResource()->GetRenderTargetBarrier() });
-                cmdList->SetRenderTargets({ _surfaceBuffers[0].get() }, depthStencil);
-                cmdList->ClearRenderTargetView(_surfaceBuffers[0].get());
-            }
-            else cmdList->SetRenderTargets({}, depthStencil);
-        }
+        { if (writeNormals) cmdList->ClearRenderTargetView(_surfaceBuffers[0].get()); }
         else
         {
-            cmdList->ResourceBarrier({ OUT_Accumulation->GetResource()->GetRenderTargetBarrier(),
-                OUT_VelocityBuffer->GetResource()->GetRenderTargetBarrier(),
-                _surfaceBuffers[0]->GetResource()->GetRenderTargetBarrier(),
-                _surfaceBuffers[1]->GetResource()->GetRenderTargetBarrier(),
-                _surfaceBuffers[2]->GetResource()->GetRenderTargetBarrier() });
-            if (_stage == Stage::GBuffer)
-            {
-                UpdateReadOnlyDepth();
-                const D3D12_CPU_DESCRIPTOR_HANDLE targets[] = { OUT_Accumulation->GetRTV()->CPUHandle,
-                    OUT_VelocityBuffer->GetRTV()->CPUHandle, _surfaceBuffers[0]->GetRTV()->CPUHandle,
-                    _surfaceBuffers[1]->GetRTV()->CPUHandle, _surfaceBuffers[2]->GetRTV()->CPUHandle };
-                cmdList->GetCommandList()->OMSetRenderTargets(5, targets, FALSE, &_readOnlyDepth->CPUHandle);
-            }
-            else cmdList->SetRenderTargets({ OUT_Accumulation.get(), OUT_VelocityBuffer.get(),
-                _surfaceBuffers[0].get(), _surfaceBuffers[1].get(), _surfaceBuffers[2].get() }, depthStencil);
             cmdList->ClearRenderTargetView(OUT_Accumulation.get());
             cmdList->ClearRenderTargetView(OUT_VelocityBuffer.get());
             for (auto& texture : _surfaceBuffers) cmdList->ClearRenderTargetView(texture.get());
@@ -293,6 +309,8 @@ public:
 	}
 
 private:
+    bool _prepared = false;
+    GDX12GeometryContext _view;
     Stage _stage;
     void UpdateReadOnlyDepth()
     {

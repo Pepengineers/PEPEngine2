@@ -65,6 +65,9 @@ void CommonRenderPasses::PrepareFrame(RenderPipelineContext& context, GDX12Comma
         try { visibility.Complete(); } catch (...) {}
         throw;
     }
+    Depth.Prepare();
+    Opaque.Prepare();
+    SunShadow.Prepare();
     LocalShadow.Prepare();
     Reflections.Prepare();
     context.Primary.PrepareLocalShadowData();

@@ -107,49 +107,31 @@ void BistroGrassGeometry::CollectScene(float deltaSeconds)
     _controls = controls;
 }
 
-void BistroGrassGeometry::PrepareFrame(GDX12CommandList* commands, GDX12DeviceResources& resources,
-    const RenderPipelineCommonData& common)
+void BistroGrassGeometry::PrepareFrame(GDX12DeviceResources& resources, const RenderPipelineCommonData& common)
 {
     if (!_grass.empty() && !_gpu) _gpu = std::make_unique<GDX12GrassRenderer>(&resources);
-    if (_gpu) _gpu->BeginFrame(commands, common, _grass, _wind, _controls);
+    if (!_gpu) return;
+    _gpu->BeginFrame(common, _grass, _wind, _controls);
+    _gpu->PublishPrimitives(resources.Primitives, this);
 }
 
-void BistroGrassGeometry::AppendSceneContributions(GDX12SceneContributions& scene) const
-{
-    BoundingBox bounds;
-    if (_gpu && _gpu->GetBounds(bounds)) scene.Append(bounds, _gpu->Revision(), true, _gpu->HasCasters());
-}
+void BistroGrassGeometry::PrepareGPU(GDX12CommandList* commands)
+{ if (_gpu) _gpu->PrepareGPU(commands); }
 
-void BistroGrassGeometry::DeclareGeometryResources(GDX12RenderGraphBuilder& graph) const
-{
-    // shortcut: direct-queue scratch is one mutable set; declare physical buffers before cross-queue geometry.
-    graph.ReadWriteExternal(this, "Application geometry scratch");
-}
+void BistroGrassGeometry::PrepareView(const GDX12GeometryContext& view, UINT patch)
+{ if (_gpu) _gpu->PrepareView(view, patch); }
 
-void BistroGrassGeometry::DrawGeometry(GDX12CommandList* commands, const GDX12GeometryContext& context)
-{
-    if (!_gpu || context.Filter == GDX12GeometryFilter::Static) return;
-    GDX12GrassRenderer::Stage stage;
-    switch (context.Stage)
-    {
-    case GDX12GeometryStage::Depth: stage = GDX12GrassRenderer::Stage::Depth; break;
-    case GDX12GeometryStage::DepthNormals: stage = GDX12GrassRenderer::Stage::PrepassNormals; break;
-    case GDX12GeometryStage::GBuffer: stage = GDX12GrassRenderer::Stage::GBuffer; break;
-    case GDX12GeometryStage::Forward: stage = GDX12GrassRenderer::Stage::Full; break;
-    case GDX12GeometryStage::Shadow: stage = GDX12GrassRenderer::Stage::Shadow; break;
-    case GDX12GeometryStage::ReflectionCapture: stage = GDX12GrassRenderer::Stage::Capture; break;
-    default: return;
-    }
-    GDX12GrassRenderer::CaptureLighting lighting;
-    if (context.CaptureLighting)
-    {
-        lighting.SunShadow = context.CaptureLighting->SunShadow;
-        lighting.Irradiance = context.CaptureLighting->Irradiance;
-        lighting.Prefiltered = context.CaptureLighting->Prefiltered;
-        lighting.BRDF = context.CaptureLighting->BRDF;
-        lighting.LocalShadows = context.CaptureLighting->LocalShadows;
-        lighting.ShadowConstants = context.CaptureLighting->ShadowConstants;
-    }
-    _gpu->Draw(commands, stage, context.ViewProjection, context.Eye, context.CameraConstants,
-        context.CaptureLighting ? &lighting : nullptr);
-}
+void BistroGrassGeometry::Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch)
+{ if (_gpu) _gpu->Expand(commands, view, patch); }
+
+void BistroGrassGeometry::GatherBatches(const GDX12GeometryContext& view, std::vector<GDX12RenderBatch>& batches) const
+{ if (_gpu) _gpu->GatherBatches(view, batches); }
+
+std::vector<GDX12RenderGraph::BufferAccess> BistroGrassGeometry::GetGeometryBufferAccesses(GDX12GeometryStage) const
+{ return _gpu ? _gpu->DrawAccesses() : std::vector<GDX12RenderGraph::BufferAccess>{}; }
+
+std::vector<GDX12RenderGraph::BufferAccess> BistroGrassGeometry::PreparationAccesses() const
+{ return _gpu ? _gpu->PreparationAccesses() : std::vector<GDX12RenderGraph::BufferAccess>{}; }
+
+std::vector<GDX12RenderGraph::BufferAccess> BistroGrassGeometry::ExpansionAccesses(const GDX12GeometryContext& view, UINT patch) const
+{ return _gpu ? _gpu->ExpansionAccesses(view, patch) : std::vector<GDX12RenderGraph::BufferAccess>{}; }

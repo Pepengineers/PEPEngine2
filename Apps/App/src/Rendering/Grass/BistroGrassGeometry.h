@@ -13,10 +13,16 @@ public:
     BistroGrassGeometry(std::shared_ptr<SceneManagerModule> scenes, RenderModule& renderer);
     ~BistroGrassGeometry() override;
     void CollectScene(float deltaSeconds);
-    void PrepareFrame(GDX12CommandList*, GDX12DeviceResources&, const RenderPipelineCommonData&);
-    void AppendSceneContributions(GDX12SceneContributions&) const override;
-    void DeclareGeometryResources(GDX12RenderGraphBuilder&) const override;
-    void DrawGeometry(GDX12CommandList*, const GDX12GeometryContext&) override;
+    void PrepareFrame(GDX12DeviceResources&, const RenderPipelineCommonData&);
+    void PrepareGPU(GDX12CommandList* commands);
+    void PrepareView(const GDX12GeometryContext&, UINT patch);
+    void Expand(GDX12CommandList*, const GDX12GeometryContext&, UINT patch);
+    void GatherBatches(const GDX12GeometryContext&, std::vector<GDX12RenderBatch>&) const override;
+    std::vector<GDX12RenderGraph::BufferAccess> GetGeometryBufferAccesses(GDX12GeometryStage) const override;
+    std::vector<GDX12RenderGraph::BufferAccess> PreparationAccesses() const;
+    std::vector<GDX12RenderGraph::BufferAccess> ExpansionAccesses(const GDX12GeometryContext&, UINT patch) const;
+    UINT PatchCount() const { return _gpu ? _gpu->PatchCount() : 0; }
+    uint64_t GeometryAllocationBytes() const { return _gpu ? _gpu->GeometryAllocationBytes() : 0; }
 
 private:
     void Subscribe(World& world);

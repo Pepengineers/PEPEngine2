@@ -1022,11 +1022,7 @@ void RenderModule::CollectReflectionScene()
     auto& resources = _primaryResources;
     if (!resources.LocalShadowCasters) resources.LocalShadowCasters.emplace();
     resources.LocalShadowCasters->clear();
-    GDX12SceneContributions contributions;
-    _pipeline->AppendSceneContributions(contributions);
-    hash(dynamicHash, contributions.Revision);
-    resources.GeometryRevision = contributions.Revision;
-    resources.HasExtensionCasters = !contributions.Casters.empty();
+    resources.GeometryRevision = 14695981039346656037ull;
     hash(staticHash, resources.ReflectionEnvironmentRevision);
     hash(staticHash, resources.Lighting.LightDirection);
     hash(staticHash, resources.Lighting.LightRadiance);
@@ -1134,16 +1130,10 @@ void RenderModule::CollectReflectionScene()
             hasBounds = true;
         }
     });
-    resources.LocalShadowCasters->insert(resources.LocalShadowCasters->end(), contributions.Casters.begin(), contributions.Casters.end());
-    if (contributions.HasBounds)
+    if (!resources.LocalShadowCasters->empty())
     {
-        if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, contributions.Bounds);
-        else resources.ReflectionSceneBounds = contributions.Bounds;
-    }
-    if (resources.HasExtensionCasters)
-    {
-        auto casterBounds = contributions.Casters.front().Bounds;
-        for (const auto& caster : contributions.Casters) BoundingBox::CreateMerged(casterBounds, casterBounds, caster.Bounds);
+        auto casterBounds = resources.LocalShadowCasters->front().Bounds;
+        for (const auto& caster : *resources.LocalShadowCasters) BoundingBox::CreateMerged(casterBounds, casterBounds, caster.Bounds);
         SubmitCameraShadows(BuildShadowCascades(_RPcommonData.CameraView.Invert(),
             XMConvertToRadians(_RPcommonData.ActiveCameraFOV), GetAspectRatio(),
             _RPcommonData.ActiveCameraNearPlane, _RPcommonData.ActiveCameraFarPlane,

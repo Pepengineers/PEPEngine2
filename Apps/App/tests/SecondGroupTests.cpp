@@ -18,6 +18,7 @@ static void Require(bool value, const char* message)
 #include "PlacementTiming.h"
 #include "SkinPlacementChecks.h"
 #include "GrassPlacementChecks.h"
+#include "PreparedGrassViewChecks.h"
 static void Set(const wchar_t* name, const char* value)
 {
     Require(BenchmarkEngine::GetLocator().GetModule<ConsoleModule>()->FindConsoleVariable(name).SetFromString(value), "CVar write failed");
@@ -286,15 +287,19 @@ int main(int argc, char** argv)
         grass.WidthCm = 12; grass.WindId = 1;
         GDX12WindInstance wind; wind.Id = 1; wind.DeltaSeconds = 1.0f / 60;
         auto controls = GetGrassWindControls();
-        list = queue->GetCommandList(); grassRenderer->BeginFrame(list, common, {grass}, {wind}, controls);
+        list = queue->GetCommandList(); grassRenderer->BeginFrame(common, {grass}, {wind}, controls); grassRenderer->PrepareGPU(list);
         list->ResourceBarrier({depth->GetResource()->GetDepthWriteBarrier()});
         list->SetViewport(depth->GetViewport()); list->SetScissorRect(depth->GetScissorRect()); list->SetRenderTargets({}, depth);
-        grassRenderer->Draw(list, GDX12GrassRenderer::Stage::Depth, vp, eye, resources.FrameConstants[0]->CameraCB->GetElementAddress(0));
+        EmitPreparedGrass(*grassRenderer, resources, list, GDX12GrassRenderer::Stage::Depth, vp, eye, resources.FrameConstants[0]->CameraCB->GetElementAddress(0));
         queue->ExecuteCommandList(list); queue->Flush();
         const auto blades = Read(device, *depth);
         Require(*std::max_element(blades.begin(), blades.end()) > 0 && grassRenderer->HasCasters(), "Grass indirect draw produced no depth/casters");
         std::cout << "GPU projected-grid wind and compact grass indirect depth passed.\n";
-        if (!benchmark) TestGrassPlacement(device, resources, common, depth, vp, eye, *grassRenderer);
+        if (!benchmark)
+        {
+            TestGrassPlacement(device, resources, common, depth, vp, eye, *grassRenderer);
+            TestPreparedGrassViews(device, resources, common, *depth, vp, eye);
+        }
         if (benchmark && (mode == "--benchmark" || mode == "--benchmark-grass")) BenchmarkGrassPlacement(device, resources, common, depth, vp, eye);
 
         Set(L"Render.Fluid.Enabled", "true");

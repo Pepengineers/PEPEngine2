@@ -45,5 +45,4 @@ public:
     virtual void BuildGraph(GDX12RenderGraph&, const RenderPipelineGraphInputs&) = 0;
     virtual void Resize(RenderPipelineContext&) = 0;
     virtual const RenderPipelineBindings& GetBindings() const = 0;
-    virtual void AppendSceneContributions(GDX12SceneContributions&) const {}
 };

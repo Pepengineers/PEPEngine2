@@ -185,11 +185,6 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
     }
 }
 
-void GDX12DeviceResources::DrawGeometry(GDX12CommandList* commands, const GDX12GeometryContext& context)
-{
-    for (auto* extension : GeometrySources) extension->DrawGeometry(commands, context);
-}
-
 void GDX12DeviceResources::BeginMeshPrimitiveUpdate()
 {
     if (_meshPrimitiveEpoch == (std::numeric_limits<uint64_t>::max)())
@@ -234,8 +229,10 @@ void GDX12DeviceResources::GatherGeometryBatches(const GDX12GeometryContext& vie
     const GDX12RenderBatch& mesh, std::vector<GDX12RenderBatch>& batches) const
 {
     if (!mesh.Draw.Empty()) batches.push_back(mesh);
+    if (!view.IncludeApplicationGeometry) return;
     for (const auto* source : GeometrySources)
     {
+        if (view.Source && view.Source != source) continue;
         const auto first = batches.size();
         source->GatherBatches(view, batches);
         const auto declared = source->GetGeometryBufferAccesses(view.Stage);
@@ -257,8 +254,6 @@ void GDX12DeviceResources::EmitGeometry(GDX12CommandList* commands, const GDX12G
     std::vector<GDX12RenderBatch> batches;
     GatherGeometryBatches(view, mesh, batches);
     for (const auto& batch : batches) GDX12EmitRenderBatch(commands, view, batch);
-    // shortcut: grass still combines expansion/draw until its explicit preparation conversion.
-    DrawGeometry(commands, view);
 }
 
 std::vector<GDX12RenderGraph::BufferAccess> GDX12DeviceResources::GetGeometryBufferAccesses(GDX12GeometryStage stage) const
@@ -270,9 +265,4 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12DeviceResources::GetGeometryBuf
         accesses.insert(accesses.end(), sourceAccesses.begin(), sourceAccesses.end());
     }
     return accesses;
-}
-
-void GDX12DeviceResources::DeclareGeometryResources(GDX12RenderGraphBuilder& graph) const
-{
-    for (auto* extension : GeometrySources) extension->DeclareGeometryResources(graph);
 }

@@ -3,6 +3,8 @@
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Rendering/DefaultRenderPipeline.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GeometryViewPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12GeometryBatchPass.h"
+#include "PreparedShadowViewChecks.h"
 #include <iostream>
 #include <stdexcept>
 
@@ -161,38 +163,56 @@ static void TestAmbientOcclusionInputs()
 class GeometryContributor final : public IRenderGeometrySource
 {
 public:
-    std::vector<GDX12GeometryContext> Views;
-    UINT StaticViews = 0;
-    void DrawGeometry(GDX12CommandList*, const GDX12GeometryContext& view) override
+    mutable std::vector<GDX12GeometryContext> Views;
+    mutable UINT StaticViews = 0;
+    void GatherBatches(const GDX12GeometryContext& view, std::vector<GDX12RenderBatch>&) const override
     { if (view.Filter == GDX12GeometryFilter::Static) ++StaticViews; else Views.push_back(view); }
-    void DeclareGeometryResources(GDX12RenderGraphBuilder& graph) const override
-    { graph.ReadWriteExternal(this, "test geometry scratch"); }
 };
 
-class GeometryPass final : public GDX12RenderPass
+class TargetViewPass final : public GDX12GeometryViewPass
 {
 public:
-    explicit GeometryPass(const GDX12DeviceResources& resources) : Resources(resources) {}
     void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-    { graph.SetName("Geometry"); Resources.DeclareGeometryResources(graph); }
-private:
-    const GDX12DeviceResources& Resources;
+    { graph.SetName("Geometry targets"); graph.Write(&Output, "Geometry result", Lifetime::Dynamic); }
+    UINT GetGeometryViewCapacity() const override { return 2; }
+    const GDX12GeometryContext* GetGeometryView(UINT slot) const override { return &Views.at(slot); }
+    void BeginGeometry(GDX12CommandList*) override {}
+    void ExecuteGeometryView(GDX12CommandList*, UINT) override {}
+    void BindGeometryViewTargets(GDX12CommandList*, UINT) override {}
+    void EndGeometry(GDX12CommandList*) override {}
+    std::array<GDX12GeometryContext, 2> Views;
+    GDX12Texture Output;
 };
+
+static void TestAliasedGeometryOrdering()
+{
+    GDX12DeviceResources resources;
+    GeometryContributor source;
+    TargetViewPass target;
+    GDX12GeometryViewJobPass mesh(target, 0);
+    LinkedPass prepareA("Prepare A"), prepareB("Prepare B"), consumer("Output consumer");
+    GDX12GeometryBatchPass consumeA(resources, target, 0, source, 0, 1), consumeB(resources, target, 1, source, 0, 1);
+    GDX12GeometryFinalizePass finish(target);
+    consumer.SetInputs({ &target.Output });
+    consumer.Export = true;
+    GDX12RenderGraph graph;
+    std::vector<GDX12RenderGraph::Pass> expected;
+    for (auto* pass : std::vector<GDX12RenderPass*>{ &target, &mesh, &prepareA, &consumeA, &prepareB, &consumeB, &finish, &consumer })
+    {
+        const auto node = graph.AddPass(*pass);
+        if (!expected.empty() && pass != &consumer) graph.DependsOn(node, expected.back());
+        expected.push_back(node);
+    }
+    graph.Compile();
+    Require(graph.GetExecutionOrder() == expected,
+        "Aliased geometry reordered Prepare A / Consume A / Prepare B / Consume B or published targets before the tail");
+}
 
 static void TestGeometryAndGrassLifetime()
 {
     GDX12DeviceResources resources;
     GeometryContributor contributor;
     resources.GeometrySources.push_back(&contributor);
-    GeometryPass depth(resources), shadow(resources);
-    for (int rebuild = 0; rebuild < 2; ++rebuild)
-    {
-        GDX12RenderGraph graph;
-        const auto first = graph.AddPass(depth), second = graph.AddPass(shadow);
-        graph.Compile();
-        Require(graph.GetExecutionOrder() == std::vector<GDX12RenderGraph::Pass>{ first, second },
-            "Mutable extension scratch lost draw ordering or was culled");
-    }
     GDX12GeometryContext view;
     view.Eye = Vector3(100, 200, 300);
     view.CameraConstants = 77;
@@ -201,12 +221,14 @@ static void TestGeometryAndGrassLifetime()
         GDX12GeometryStage::ReflectionCapture })
     {
         view.Stage = stage;
-        resources.DrawGeometry(nullptr, view);
+        std::vector<GDX12RenderBatch> batches;
+        resources.GatherGeometryBatches(view, {}, batches);
     }
     Require(contributor.Views.size() == 6 && contributor.Views.back().Eye == view.Eye &&
         contributor.Views.back().CameraConstants == 77, "Geometry dispatch lost the current view");
     view.Filter = GDX12GeometryFilter::Static;
-    resources.DrawGeometry(nullptr, view);
+    std::vector<GDX12RenderBatch> batches;
+    resources.GatherGeometryBatches(view, {}, batches);
     Require(contributor.Views.size() == 6 && contributor.StaticViews == 1,
         "Static-only filter did not reach the application contributor");
 
@@ -426,6 +448,8 @@ int main()
     {
         TestPrimitiveRecords();
         TestPreparedViewPhases();
+        TestPreparedShadowViews();
+        TestAliasedGeometryOrdering();
         TestBatchContract();
         TestApplicationComposition();
         TestAmbientOcclusionInputs();

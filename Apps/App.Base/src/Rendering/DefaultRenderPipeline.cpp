@@ -23,6 +23,7 @@ bool DefaultRenderPipeline::PrepareFrame(RenderPipelineContext& context, GDX12Co
     const bool early = GetAmbientOcclusionExecutionPoint() == 0;
     const bool rebuild = early != _earlyAO;
     _earlyAO = early;
+    _passes->BindAmbientOcclusion(context.Common, _earlyAO);
     _passes->PrepareFrame(context, commands);
     return rebuild;
 }

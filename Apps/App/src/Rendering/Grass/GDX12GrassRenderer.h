@@ -3,6 +3,7 @@
 #include "Rendering/Grass/GDX12GrassWind.h"
 #include "Engine.RendererDX12/GDX12UploadBuffer.h"
 #include "Engine.RendererDX12/GDX12RootSignature.h"
+#include "Engine.RendererDX12/GDX12RenderGeometry.h"
 #include <array>
 #include <unordered_map>
 
@@ -16,26 +17,25 @@ class GDX12GrassRenderer
 {
 public:
     enum class Stage : std::uint8_t { Full, GBuffer, PrepassNormals, Depth, Shadow, Capture };
-    struct CaptureLighting
-    {
-        GDX12Texture* SunShadow = nullptr;
-        GDX12Texture* Irradiance = nullptr;
-        GDX12Texture* Prefiltered = nullptr;
-        GDX12Texture* BRDF = nullptr;
-        GDX12Texture* LocalShadows = nullptr;
-        D3D12_GPU_VIRTUAL_ADDRESS ShadowConstants = 0;
-    };
+    using CaptureLighting = GDX12CaptureLighting;
     explicit GDX12GrassRenderer(GDX12DeviceResources* resources);
     ~GDX12GrassRenderer();
     // Wait the current frame-slot fence before reusing staging or replacing its roots.
-    void BeginFrame(GDX12CommandList* commands, const RenderPipelineCommonData& common,
+    void BeginFrame(const RenderPipelineCommonData& common,
         std::vector<GDX12GrassInstance> grass, std::vector<GDX12WindInstance> wind, GDX12GrassWindControls controls);
-    void Draw(GDX12CommandList* commands, Stage stage, const Matrix& viewProjection,
-        Vector3 eye, D3D12_GPU_VIRTUAL_ADDRESS camera, const CaptureLighting* lighting = nullptr);
+    void PrepareGPU(GDX12CommandList* commands);
+    void PrepareView(const GDX12GeometryContext& view, UINT patch);
+    void Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch);
+    void GatherBatches(const GDX12GeometryContext& view, std::vector<GDX12RenderBatch>& batches) const;
+    std::vector<GDX12RenderGraph::BufferAccess> PreparationAccesses() const;
+    std::vector<GDX12RenderGraph::BufferAccess> ExpansionAccesses(const GDX12GeometryContext& view, UINT patch) const;
+    std::vector<GDX12RenderGraph::BufferAccess> DrawAccesses() const;
+    UINT PatchCount() const { return static_cast<UINT>(_drawOrder.size()); }
+    void PublishPrimitives(GDX12RenderPrimitiveRegistry&, const IRenderGeometrySource*);
+    void RemovePrimitives(GDX12RenderPrimitiveRegistry&);
+    uint64_t GeometryAllocationBytes() const;
     bool HasCasters() const;
-    bool GetBounds(BoundingBox& bounds) const;
     const GDX12GrassWindControls& Controls() const { return _controls; }
-    uint64_t Revision() const { return _revision; }
 
 private:
     struct Vertex
@@ -77,6 +77,7 @@ private:
         std::vector<uint64_t> RootSignatures;
         bool ResetHistory = true;
         uint64_t SettingsHash = 0;
+        GDX12RenderPrimitiveHandle Primitive;
     };
     using FieldBuffer = GDX12UploadBuffer<XMFLOAT4>;
     struct WindState
@@ -91,6 +92,23 @@ private:
         bool ResetHistory = true;
         uint64_t SettingsHash = 0;
     };
+    struct WindJob
+    {
+        UINT Stage, Resolution;
+        GDX12UploadBuffer<WindParameters>* Constants;
+        FieldBuffer *Input, *Pressure, *Output;
+    };
+    struct Output
+    {
+        GDX12GeometryContext View;
+        GDX12CaptureLighting Lighting;
+        UINT Patch = 0;
+        uint64_t Owner = 0;
+        GDX12UploadBuffer<Parameters>* Constants = nullptr;
+        FieldBuffer *CurrentWind = nullptr, *PreviousWind = nullptr;
+        GDX12GraphicsBindings Binding;
+        GDX12RenderBatch Batch;
+    };
     struct Frame
     {
         std::vector<std::unique_ptr<GDX12UploadBuffer<Parameters>>> DrawParameters;
@@ -100,16 +118,21 @@ private:
         std::vector<std::unique_ptr<GDX12UploadBuffer<Vertex>>> RetiredVertices;
         std::vector<std::unique_ptr<GDX12UploadBuffer<UINT>>> RetiredIndices;
         std::vector<GrassState> RetiredGrass;
+        std::vector<WindJob> WindJobs;
+        std::vector<std::pair<GDX12UploadBuffer<XMFLOAT3>*, GDX12UploadBuffer<XMFLOAT3>*>> RootUploads;
+        std::vector<std::unique_ptr<Output>> Outputs;
         UINT DrawCursor = 0;
         UINT WindCursor = 0;
     };
     template<typename T> std::unique_ptr<GDX12UploadBuffer<T>> Buffer(UINT count, bool srv, bool uav);
     void Initialize();
-    void UpdateWind(GDX12CommandList* commands, WindState& state, bool reset);
-    void WindDispatch(GDX12CommandList* commands, UINT stage, const WindParameters& parameters,
+    void UpdateWind(WindState& state, bool reset);
+    void WindDispatch(UINT stage, const WindParameters& parameters,
         FieldBuffer* input, FieldBuffer* pressure, FieldBuffer* output);
     void RetireWind(WindState& state);
     Frame& CurrentFrame();
+    Output* FindOutput(const GDX12GeometryContext&, UINT patch) const;
+    static Stage RenderStage(GDX12GeometryStage);
 
     GDX12DeviceResources* _resources;
     GDX12GrassWindControls _controls;
@@ -125,8 +148,10 @@ private:
     std::unique_ptr<GDX12UploadBuffer<Vertex>> _vertices;
     std::unique_ptr<GDX12UploadBuffer<UINT>> _indices, _arguments;
     std::unique_ptr<FieldBuffer> _neutralWind;
-    uint64_t _revision = 0;
     Vector3 _previousEye = Vector3::Zero;
     Vector3 _eye = Vector3::Zero;
     bool _initialized = false;
+    const Output* _arenaOutput = nullptr;
+    GDX12RenderPrimitiveRegistry* _primitiveRegistry = nullptr;
+    std::vector<GDX12RenderPrimitiveHandle> _removedPrimitives;
 };

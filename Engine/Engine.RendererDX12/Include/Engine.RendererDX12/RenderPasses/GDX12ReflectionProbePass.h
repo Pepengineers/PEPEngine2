@@ -1,11 +1,11 @@
 #pragma once
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include <cstdint>
-#include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12GeometryViewPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include <array>
 
-class GDX12ReflectionProbePass final : public GDX12RenderPass
+class GDX12ReflectionProbePass final : public GDX12GeometryViewPass
 {
 public:
     std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
@@ -21,7 +21,6 @@ public:
     {
         graph.SetName("Reflection probes");
         graph.Read(SharedResource::Scene);
-        if (_resources) _resources->DeclareGeometryResources(graph);
         graph.ReadInputs(_inputs);
         graph.Read(SharedResource::Environment);
         graph.Write(SharedResource::ReflectionProbes, "Reflection probe cache");
@@ -31,7 +30,12 @@ public:
     GDX12ReflectionProbePass();
     void Initialize() override;
     void Prepare();
-    void Execute(GDX12CommandList* commands) override;
+    UINT GetGeometryViewCapacity() const override { return static_cast<UINT>(_views.size()); }
+    const GDX12GeometryContext* GetGeometryView(UINT slot) const override;
+    void BeginGeometry(GDX12CommandList* commands) override;
+    void ExecuteGeometryView(GDX12CommandList* commands, UINT slot) override;
+    void BindGeometryViewTargets(GDX12CommandList* commands, UINT slot) override;
+    void EndGeometry(GDX12CommandList* commands) override;
     void ClearDenendencies() override;
 
     struct Statistics
@@ -63,16 +67,25 @@ private:
         std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> Commands;
         std::unique_ptr<GDX12UploadBuffer<UINT>> Counter;
     };
+    struct PreparedView
+    {
+        GDX12GeometryContext Context;
+        GDX12CaptureLighting Lighting;
+        Geometry Filter = AllGeometry;
+        UINT Face = 0;
+        bool Bake = false;
+        bool Selected = false;
+    };
 
-    void CreatePublishedTexture(GDX12CommandList* commands, UINT count, UINT resolution);
+    void CreatePublishedTexture(UINT count, UINT resolution);
     void CreateCaptureTextures(UINT resolution);
     void CreateBakedTextures(ProbeState& probe);
     void CreateTexture(GDX12Texture& texture, UINT size, UINT slices, UINT mips, D3D12_RESOURCE_FLAGS flags, bool depth);
     void CreateFaceViews(GDX12Texture& texture, std::vector<std::unique_ptr<GDX12Descriptor>>& views, bool depth);
     void Cull(GDX12CommandList* commands, UINT camera, Geometry geometry, bool shadow);
     GDX12GraphicsBindings CaptureBindings(UINT face, GDX12Texture* localShadows);
-    void RenderShadow(GDX12CommandList* commands, Geometry geometry, Vector3 eye);
-    void RenderFace(GDX12CommandList* commands, UINT probe, UINT face, Geometry geometry, bool bake);
+    void RenderShadow(GDX12CommandList* commands, UINT slot);
+    void RenderFace(GDX12CommandList* commands, UINT slot);
     void FilterAndPublish(GDX12CommandList* commands, UINT probe);
     void WriteProbeData(GDX12CommandList* commands, bool enabled);
 
@@ -98,4 +111,11 @@ private:
     UINT _publishedResolution = 0;
     UINT _publishedMips = 0;
     bool _enabled = false;
+    // Static shadow/bake faces precede the final shadow/capture faces.
+    std::array<PreparedView, 14> _views;
+    bool _planPrepared = false;
+    bool _capturePlanned = false;
+    bool _staticShadowsPlanned = false;
+    bool _publishedNeedsTransition = false;
+    UINT _endFace = 0;
 };

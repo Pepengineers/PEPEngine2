@@ -15,7 +15,6 @@ public:
         graph.SetName(_partition == WaterPartition::Front ? "Front transparency" :
             _partition == WaterPartition::Behind ? "Behind-water transparency" : "Transparency");
         graph.Read(SharedResource::Scene);
-        if (_resources) _resources->DeclareGeometryResources(graph);
         graph.ReadInputs(_inputs);
         graph.Read(SharedResource::Visibility);
         graph.Read(SharedResource::Environment);
