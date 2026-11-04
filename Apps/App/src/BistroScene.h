@@ -18,7 +18,7 @@ namespace BistroParticles
     inline AutoConsoleVariable<ParticleSimulation> Simulation(L"App.Particles.Simulation", ParticleSimulation::AnalyticDrag,
         L"0 analytic drag + trapezoidal position (authored default), 1 MGPU semi-implicit Euler");
     inline AutoConsoleVariable<bool> VolumeEnabled(L"App.Particles.Volume.Enabled", false,
-        L"Override all emitters with box spawn and a reflecting emitter-local simulation volume");
+        L"Override unbound emitters with box spawn and a reflecting emitter-local simulation volume; Dust/Steam use App.Bounds");
     inline AutoConsoleVariable<float> VolumeHalfExtentX(L"App.Particles.Volume.HalfExtentX", 100.0f,
         L"Particle box half-size X in emitter-local cm, 0.01..1000000",
         EConsoleVariableFlags::Default, [](float value) { return value >= 0.01f && value <= 1000000; });
@@ -43,6 +43,7 @@ namespace BistroParticles
         UINT BudgetEnd = 0;
         ParticleShape AuthoredShape = ParticleShape::Point;
         Vector3 AuthoredExtents;
+        bool LayoutVolume = false;
     };
 
     inline void Update(World& world)
@@ -57,16 +58,18 @@ namespace BistroParticles
                 const UINT count = static_cast<UINT>(total * effect.BudgetEnd / 16 - total * effect.BudgetBegin / 16);
                 const auto& current = emitter.GetSettings();
                 auto settings = current;
+                const bool useVolume = bounded || effect.LayoutVolume;
+                const auto volumeExtents = effect.LayoutVolume ? effect.AuthoredExtents : halfExtents;
                 settings.MaxParticles = (std::max)(1u, count);
                 settings.Simulation = simulation;
-                settings.VolumeEnabled = bounded;
-                settings.VolumeHalfExtents = halfExtents;
-                settings.Shape = bounded ? ParticleShape::Box : effect.AuthoredShape;
-                settings.ShapeExtents = bounded ? halfExtents : effect.AuthoredExtents;
+                settings.VolumeEnabled = useVolume;
+                settings.VolumeHalfExtents = volumeExtents;
+                settings.Shape = useVolume ? ParticleShape::Box : effect.AuthoredShape;
+                settings.ShapeExtents = useVolume ? volumeExtents : effect.AuthoredExtents;
                 const bool reset = current.MaxParticles != settings.MaxParticles || emitter.IsEnabled() != (count != 0) ||
-                    current.VolumeEnabled != bounded || current.Shape != settings.Shape || current.ShapeExtents != settings.ShapeExtents ||
-                    (bounded && current.VolumeHalfExtents != halfExtents);
-                if (reset || current.Simulation != simulation || current.VolumeHalfExtents != halfExtents)
+                    current.VolumeEnabled != useVolume || current.Shape != settings.Shape || current.ShapeExtents != settings.ShapeExtents ||
+                    (useVolume && current.VolumeHalfExtents != volumeExtents);
+                if (reset || current.Simulation != simulation || current.VolumeHalfExtents != volumeExtents)
                 {
                     emitter.SetSettings(settings);
                     if (reset) emitter.Reset();

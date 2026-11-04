@@ -240,7 +240,7 @@ int main(int argc, char** argv)
         auto render = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
         auto& world = *BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()->GetWorld();
         CheckBistroBounds(app, world);
-        std::cout << "Bistro detached bounds: 15 boxes, independent edits, visibility and paused drawing passed." << std::endl;
+        std::cout << "Bistro bounds: linked Dust/Steam volumes, detached boxes, visibility and paused drawing passed." << std::endl;
         if (argc > 1 && std::strcmp(argv[1], "--bounds-only") == 0) return 0;
         CheckBistroReflectionCounts(world, [&] { app.BenchmarkFrame(); });
         CheckBistroWaterCounts(world, [&] { app.BenchmarkFrame(); });

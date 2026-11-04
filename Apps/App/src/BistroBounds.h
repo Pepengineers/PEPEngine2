@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BistroScene.h"
 #include "App.Base/ECS/World.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "Engine.Core/AssetManager.h"
@@ -13,26 +14,27 @@
 namespace BistroBounds
 {
     inline AutoConsoleVariable<bool> Show(L"App.Bounds.Show", true,
-        L"Show detached effect layout boxes; edits never change real scene objects. Session only.");
+        L"Show layout boxes; Dust/Steam drive their particle volumes, other boxes remain detached. Session only.");
     inline constexpr float InteriorYawDegrees = -28.5f;
 
     struct Box
     {
         Box(const std::string& name, const BoundingBox& bounds, unsigned color, float yawDegrees = 0)
             : Name(name), Color(color),
-              CenterX(Prefix() + L"CenterX", bounds.Center.x, L"Detached box centre X, world cm"),
-              CenterY(Prefix() + L"CenterY", bounds.Center.y, L"Detached box centre Y, world cm"),
-              CenterZ(Prefix() + L"CenterZ", bounds.Center.z, L"Detached box centre Z, world cm"),
-              HalfExtentX(Prefix() + L"HalfExtentX", (std::max)(0.01f, bounds.Extents.x), L"Detached box half-size X, cm", EConsoleVariableFlags::Default, Positive),
-              HalfExtentY(Prefix() + L"HalfExtentY", (std::max)(0.01f, bounds.Extents.y), L"Detached box half-size Y, cm", EConsoleVariableFlags::Default, Positive),
-              HalfExtentZ(Prefix() + L"HalfExtentZ", (std::max)(0.01f, bounds.Extents.z), L"Detached box half-size Z, cm", EConsoleVariableFlags::Default, Positive),
-              Visible(Prefix() + L"Visible", true, L"Show this detached layout box"), _yawDegrees(yawDegrees) {}
+              CenterX(Prefix() + L"CenterX", bounds.Center.x, L"Layout box centre X, world cm"),
+              CenterY(Prefix() + L"CenterY", bounds.Center.y, L"Layout box centre Y, world cm"),
+              CenterZ(Prefix() + L"CenterZ", bounds.Center.z, L"Layout box centre Z, world cm"),
+              HalfExtentX(Prefix() + L"HalfExtentX", (std::max)(0.01f, bounds.Extents.x), L"Layout box half-size X, cm", EConsoleVariableFlags::Default, Positive),
+              HalfExtentY(Prefix() + L"HalfExtentY", (std::max)(0.01f, bounds.Extents.y), L"Layout box half-size Y, cm", EConsoleVariableFlags::Default, Positive),
+              HalfExtentZ(Prefix() + L"HalfExtentZ", (std::max)(0.01f, bounds.Extents.z), L"Layout box half-size Z, cm", EConsoleVariableFlags::Default, Positive),
+              Visible(Prefix() + L"Visible", true, L"Show this layout box; does not disable its particles"), _yawDegrees(yawDegrees) {}
 
         BoundingBox GetBounds() const
         {
             return {{CenterX.GetValue(), CenterY.GetValue(), CenterZ.GetValue()},
                 {HalfExtentX.GetValue(), HalfExtentY.GetValue(), HalfExtentZ.GetValue()}};
         }
+        float GetYawDegrees() const { return _yawDegrees; }
 
         void Draw(const XMFLOAT4X4& viewProjection) const
         {
@@ -63,7 +65,7 @@ namespace BistroBounds
     class Scene
     {
     public:
-        // Copy once: later object motion, count changes and box edits remain independent.
+        // Only Dust/Steam are linked; the other scene additions retain detached snapshots.
         explicit Scene(World& world)
         {
             auto& ecs = world.GetECS();
@@ -76,16 +78,13 @@ namespace BistroBounds
             ecs.ForEach<ParticleEmitterComponent, TransformComponent, NameComponent>(
                 [&](Entity entity, const ParticleEmitterComponent& emitter, const TransformComponent&, const NameComponent& name)
                 {
-                    if (name.value == "BistroInteriorDust")
+                    if (name.value == "BistroInteriorDust" || name.value == "BistroTableSteam")
                     {
-                        _boxes.push_back(std::make_unique<Box>(name.value,
-                            BoundingBox({559,221,-348}, {694,181,779}), 0xff40e8ff, InteriorYawDegrees));
-                        return;
-                    }
-                    if (name.value == "BistroTableSteam")
-                    {
-                        _boxes.push_back(std::make_unique<Box>(name.value,
-                            BoundingBox({922,227,-293}, {305,175,85.5f}), 0xff40e8ff, InteriorYawDegrees));
+                        const auto bounds = name.value == "BistroInteriorDust" ?
+                            BoundingBox({559,221,-348}, {694,181,779}) : BoundingBox({922,227,-293}, {305,175,85.5f});
+                        auto box = std::make_unique<Box>(name.value, bounds, 0xff40e8ff, InteriorYawDegrees);
+                        _particleVolumes.emplace_back(entity, box.get());
+                        _boxes.push_back(std::move(box));
                         return;
                     }
                     const auto& settings = emitter.GetSettings();
@@ -102,6 +101,33 @@ namespace BistroBounds
             ecs.ForEach<SkeletalMeshRenderComponent, TransformComponent, NameComponent>(
                 [&](Entity, const SkeletalMeshRenderComponent& mesh, const TransformComponent& transform, const NameComponent& name)
                 { _boxes.push_back(std::make_unique<Box>(name.value, CharacterBounds(mesh, transform), 0xffff70ff)); });
+        }
+
+        void UpdateEmitters(World& world) const
+        {
+            auto& ecs = world.GetECS();
+            for (const auto& [entity, box] : _particleVolumes)
+            {
+                auto& emitter = ecs.Get<ParticleEmitterComponent>(entity);
+                auto& effect = ecs.Get<BistroParticles::EffectComponent>(entity);
+                auto& transform = ecs.Get<TransformComponent>(entity);
+                const auto bounds = box->GetBounds();
+                const Vector3 rotation(0, box->GetYawDegrees(), 0);
+                if (transform.Location != Vector3(bounds.Center) || transform.Rotation != rotation || transform.Scale != Vector3::One)
+                {
+                    transform.Location = bounds.Center;
+                    transform.Rotation = rotation;
+                    transform.Scale = Vector3::One;
+                    transform.DirtyFlag = true;
+                    emitter.Reset();
+                }
+                const auto& settings = emitter.GetSettings();
+                // Reserve the billboard half-diagonal, so its corners stay inside the visible box too.
+                const float radius = (std::max)(settings.SizeStart, settings.SizeEnd) *
+                    (1 + settings.SizeVariation) * settings.RenderScale * 0.707107f;
+                effect.LayoutVolume = true;
+                effect.AuthoredExtents = Vector3::Max(Vector3(0.01f), Vector3(bounds.Extents) - Vector3(radius));
+            }
         }
 
         void DrawBounds(RenderModule& render) const
@@ -175,5 +201,6 @@ namespace BistroBounds
         }
 
         std::vector<std::unique_ptr<Box>> _boxes;
+        std::vector<std::pair<Entity, Box*>> _particleVolumes;
     };
 }

@@ -33,6 +33,8 @@ namespace
             auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
             UpdateSceneAdditions(world, 0);
             _bounds = std::make_unique<BistroBounds::Scene>(world);
+            _bounds->UpdateEmitters(world);
+            BistroParticles::Update(world);
             auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
             // Start at eye height just outside the main entrance, facing the interior.
             camera.Location = Vector3(-300.0f, 200.0f, 20.0f);
@@ -84,6 +86,7 @@ namespace
             Locator.GetModule<RenderModule>()->Update();
             auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
             UpdateSceneAdditions(world, timer.DeltaTime());
+            _bounds->UpdateEmitters(world);
             BistroParticles::Update(world);
             if (world.IsPaused())
             {
