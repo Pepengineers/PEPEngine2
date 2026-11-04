@@ -9,21 +9,20 @@
 #include <directxtk/GeometricPrimitive.h>
 #include <algorithm>
 #include <array>
+#include <numeric>
+#include <random>
 #include <vector>
 
 namespace BistroReflections
 {
-    inline AutoConsoleVariable<int> Count(L"App.ReflectionProbes.Count", 4,
-        L"Frozen static Bistro cubemaps, 0 disables, maximum 32",
-        EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= static_cast<int>(MaxReflectionProbes); });
     inline AutoConsoleVariable<bool> ShowBounds(L"App.ReflectionProbes.ShowBounds", false,
-        L"Show colored table-sized reflection boxes and capture labels above Bistro terrace tables");
+        L"Show colored table-sized reflection boxes and capture labels above Bistro tables");
     inline AutoConsoleVariable<bool> ShowSpheres(L"App.ReflectionProbes.ShowSpheres", true,
         L"Show mirror spheres sampling each Bistro probe's own baked cubemap");
 
     struct TableAnchor { Vector3 Centre; float HalfSize; };
-    // Exterior OBJ table bounds, ordered along the entrance terrace first.
-    inline const std::array<TableAnchor, 11> Tables = {{
+    // OBJ tabletop centres: 11 terrace tables, then all 10 interior tables.
+    inline const std::array<TableAnchor, 21> Tables = {{
         {{-337.744f,107.503f,-534.7695f},62.4795f},
         {{-132.7655f,107.503f,-482.213f},60.551f},
         {{2.9765f,107.503f,-739.244f},60.551f},
@@ -34,17 +33,45 @@ namespace BistroReflections
         {{429.8935f,107.503f,356.0345f},58.1845f},
         {{509.407f,107.503f,580.489f},58.398f},
         {{708.2035f,107.503f,466.5315f},58.1845f},
-        {{748.304f,107.503f,677.719f},58.398f}}};
+        {{748.304f,107.503f,677.719f},58.398f},
+        {{963.496f,124.338f,173.940f},82.728f},
+        {{32.347f,124.327f,-394.740f},82.728f},
+        {{173.030f,124.327f,-648.631f},82.727f},
+        {{222.673f,124.547f,83.986f},82.303f},
+        {{501.667f,124.547f,192.991f},82.303f},
+        {{779.009f,124.541f,302.068f},82.303f},
+        {{790.023f,124.327f,76.496f},62.810f},
+        {{490.576f,124.247f,-87.531f},62.810f},
+        {{343.798f,124.219f,-164.417f},62.810f},
+        {{638.546f,124.309f,-5.547f},62.810f}}};
+    static_assert(Tables.size() <= MaxReflectionProbes);
+    inline AutoConsoleVariable<int> Count(L"App.ReflectionProbes.Count", 4,
+        L"Frozen static captures at random unique tables; 0 disables, maximum " +
+        std::to_wstring(Tables.size()) + L" (the number of tables: 11 terrace + 10 interior)",
+        EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= static_cast<int>(Tables.size()); });
 
     class Scene
     {
     public:
+        Scene() { std::iota(_tableOrder.begin(), _tableOrder.end(), size_t{0}); }
+
         void Update(World& world, float)
         {
             auto& ecs = world.GetECS();
             const size_t requested = static_cast<size_t>(Count.GetValue());
             const bool visible = ShowSpheres.GetValue();
             if (_entities.size() == requested && _visible == visible) return;
+            auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+            if (_entities.size() != requested)
+            {
+                render.WaitForUploads();
+                if (requested > _entities.size())
+                {
+                    render.ReserveTransformCapacity(static_cast<UINT>(requested - _entities.size()));
+                    render.ReserveInstanceCapacity(static_cast<UINT>(requested - _entities.size()));
+                }
+                if (_entities.empty()) std::shuffle(_tableOrder.begin(), _tableOrder.end(), _random);
+            }
             if (requested && !_mesh.IsValid()) CreateMesh();
             while (_entities.size() > requested)
             {
@@ -54,10 +81,8 @@ namespace BistroReflections
             while (_entities.size() < requested)
             {
                 const size_t index = _entities.size();
-                const auto& table = Tables[index % Tables.size()];
-                // Include the tabletop in the blend region; additional layers retain the existing 32-probe limit.
-                const Vector3 position = table.Centre + Vector3(0,
-                    table.HalfSize - 5 + 2 * table.HalfSize * static_cast<float>(index / Tables.size()), 0);
+                const auto& table = Tables[_tableOrder[index]];
+                const Vector3 position = table.Centre + Vector3(0, table.HalfSize - 5, 0);
                 auto entity = ecs.CreateEntity();
                 entity.AddComponent<NameComponent>("BistroReflection" + std::to_string(index));
                 entity.AddComponent<TransformComponent>(position);
@@ -73,7 +98,6 @@ namespace BistroReflections
             }
             auto order = _entities;
             std::sort(order.begin(), order.end()); // Same entity order as the published cubemap array.
-            auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
             for (size_t index = 0; index < _entities.size(); ++index)
             {
                 const auto entity = _entities[index];
@@ -112,7 +136,7 @@ namespace BistroReflections
                 const auto entity = _entities[index];
                 const auto& position = ecs.Get<TransformComponent>(entity).Location;
                 const auto& probe = ecs.Get<ReflectionProbeComponent>(entity);
-                const auto label = "Baked probe " + std::to_string(index + 1);
+                const auto label = "Table capture " + std::to_string(_tableOrder[index] + 1);
                 Engine::UI::DrawWorldBox({position,probe.Extents}, viewProjection, label.c_str(), colors[index % 4]);
             }
         }
@@ -151,6 +175,8 @@ namespace BistroReflections
         }
 
         std::vector<Entity> _entities;
+        std::array<size_t, Tables.size()> _tableOrder;
+        std::mt19937 _random{std::random_device{}()};
         Engine::Core::MeshHandle _mesh;
         bool _visible = true;
     };

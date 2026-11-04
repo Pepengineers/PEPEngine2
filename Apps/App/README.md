@@ -7,13 +7,17 @@ the populations; zero removes the corresponding objects:
 
 | CVar | Default | Range |
 |---|---:|---:|
-| `App.ReflectionProbes.Count` | 4 | 0..32 |
+| `App.ReflectionProbes.Count` | 4 | 0..21 (number of tables) |
 | `App.Grass.Count` | 1 | 0..16 |
 | `App.Water.Count` | 1 | 0..8 |
 | `App.NPC.Count` | 4 | 0..16 |
 | `App.Fox.Count` | 1 | 0..8 |
 
-Reflection probes follow the terrace tables. `App.ReflectionProbes.ShowSpheres`
+Each of the 21 tables has a reflection spawn anchor: 11 on the terrace and 10
+inside. `App.ReflectionProbes.Count=4` picks four random distinct tables. Growing
+the count adds captures at unused tables; surviving captures stay in place.
+Setting zero and then increasing the count reshuffles the selection. Values above
+21 are rejected. `App.ReflectionProbes.ShowSpheres`
 shows their baked cubemaps on mirrored spheres; `App.ReflectionProbes.ShowBounds`
 independently shows the colored influence boxes and labels. Preview spheres are
 excluded from captures and shadow casting. Spheres default to on; boxes and labels
@@ -42,13 +46,20 @@ registered by Bistro App, so keep them out of other executables' shared INI file
 Reflection maps bake during initial warmup and remain static until explicitly
 invalidated or their capture settings/topology change. They exclude moving props
 and characters and do not repeatedly capture the scene. This is an in-memory
-bake, without an offline disk cache. Character routes are simple bounded loops;
-they respect world pause/time scale and use the existing GPU skinning pipeline.
+bake, without an offline disk cache. Humans follow a connected spline network
+along the street and around the plaza/fountain; foxes follow interior aisles and
+the bar area. Counts choose random free route positions and directions, with
+110 cm spacing for humans and 80 cm for foxes. At junctions walkers randomly
+choose a continuation. They wait for occupied space and turn back after a second
+of blockage. Routes respect world pause/time scale and use the existing GPU skinning pipeline.
+The authored nodes, links and sampled Bezier curves are in `src/BistroRoutes.h`.
 Human asset provenance is in `Assets/Models/MGPUSoldier/SOURCE.md`.
 
 Separate development tasks are in `docs/tasks/bistro-additions/README.md`.
 Build `BistroAdditionsTests.vcxproj` for the integrated count, animation and GPU
 visibility checks; images are written under `Build/BistroAdditions`.
+Run `BistroAdditionsTests.exe --routes-only` for the CPU population/spacing and
+table-limit checks without loading the rendered Bistro scene.
 
 Set **App** as the startup project in `PEPEngine2.sln`, select **Release | x64**, and run.
 Build from a Visual Studio developer prompt:

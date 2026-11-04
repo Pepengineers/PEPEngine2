@@ -142,7 +142,10 @@ static void CheckProbeOverlay(BistroApp& app, World& world)
     app.MsgProc(window, WM_KEYUP, VK_F1, 0);
     Set(L"App.ReflectionProbes.Count", "1");
     Set(L"App.ReflectionProbes.ShowBounds", "false");
-    const auto target = BistroReflections::Tables[0].Centre + Vector3(0, 60, 0);
+    app.BenchmarkFrame();
+    Vector3 target;
+    world.GetECS().ForEach<ReflectionProbeComponent, TransformComponent>(
+        [&](Entity, const ReflectionProbeComponent&, const TransformComponent& transform) { target = transform.Location; });
     Aim(world, target + Vector3(-250,100,-250), target);
     app.BenchmarkFrame();
     Require(ImGui::GetDrawData()->TotalVtxCount == 0, "Hidden settings/probe overlay must have no draw geometry");
@@ -178,7 +181,13 @@ static void CheckProbeSpheres(BistroApp& app, World& world, RenderModule& render
     Set(L"Render.DOF.Enabled", "false");
     Set(L"Render.MotionBlur.Enabled", "false");
     Set(L"Render.AO.Enabled", "0");
-    Aim(world, Vector3(-800,300,-1100), Vector3(-100,165,-700));
+    bool aimed = false;
+    world.GetECS().ForEach<ReflectionProbeComponent, TransformComponent>(
+        [&](Entity, const ReflectionProbeComponent& probe, const TransformComponent& transform)
+        {
+            if (!aimed) Aim(world, transform.Location + Vector3(0, probe.Extents.x * 2, probe.Extents.x * 0.3f), transform.Location);
+            aimed = true;
+        });
     std::vector<uint16_t> reference;
     const auto difference = [&](const std::vector<uint16_t>& pixels, size_t index)
     {
@@ -212,7 +221,7 @@ static void CheckProbeSpheres(BistroApp& app, World& world, RenderModule& render
             size_t changed = 0;
             for (size_t i = 0; i < pixels.size(); i += 4)
                 if (difference(pixels, i) > 0.01f) ++changed;
-            Require(changed > 1000, "Published probe cubemaps must produce visible sphere pixels above terrace tables");
+            Require(changed > 1000, "Published probe cubemaps must produce visible sphere pixels above tables");
             SaveImage(pixels, output->GetWidth(), output->GetHeight(), "probe-spheres");
             std::cout << "Probe sphere HDR pixels: " << changed << std::endl;
         }
@@ -226,6 +235,14 @@ int main(int argc, char** argv)
 {
     try
     {
+        if (argc > 1 && std::strcmp(argv[1], "--routes-only") == 0)
+        {
+            CheckBistroCharacterCounts();
+            Require(BistroReflections::Tables.size() == 21 && BistroReflections::Count.SetFromString("21") &&
+                !BistroReflections::Count.SetFromString("22"), "Table count limit must match all 21 anchors");
+            std::cout << "Bistro routes: maximum populations, separated spawn/movement, floor routes and table count passed." << std::endl;
+            return 0;
+        }
         ComPtr<ID3D12Debug> debug;
         ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
         debug->EnableDebugLayer();
@@ -254,12 +271,17 @@ int main(int argc, char** argv)
         for (int frame = 0; frame < 16; ++frame) app.BenchmarkFrame();
         const auto animated = Characters(world);
         Require(initial.size() == 5 && animated.size() == 5, "Expected four humans and one fox");
+        size_t walking = 0;
         for (const auto& [entity, before] : initial)
         {
             const auto& after = animated.at(entity);
-            Require(before.Position != after.Position, "Bistro character is not walking");
-            Require(before.Pose != after.Pose, "Bistro character skeletal pose is not animating");
+            if (before.Position != after.Position)
+            {
+                ++walking;
+                Require(before.Pose != after.Pose, "Walking character skeletal pose is not animating");
+            }
         }
+        Require(walking > 0, "Bistro crowd is not walking");
         world.SetPaused(true);
         app.BenchmarkFrame();
         const auto paused = Characters(world);
@@ -331,22 +353,29 @@ int main(int argc, char** argv)
             Set(setting, "1");
             app.BenchmarkFrame();
             Vector3 target;
+            Entity targetEntity = InvalidEntity;
+            Vector3 spawn;
             bool found = false;
             world.GetECS().ForEach<SkeletalMeshRenderComponent, NameComponent, TransformComponent>(
-                [&](Entity, const SkeletalMeshRenderComponent&, const NameComponent& name, const TransformComponent& transform)
+                [&](Entity entity, const SkeletalMeshRenderComponent&, const NameComponent& name, const TransformComponent& transform)
                 {
                     if (name.value == (fox ? "BistroFox0" : "BistroNPC0"))
                     {
                         target = transform.Location + Vector3(0, fox ? 25.0f : 90.0f, 0);
+                        targetEntity = entity;
+                        spawn = transform.Location;
                         found = true;
                     }
                 });
             Require(found, "Character validation target missing");
-            Aim(world, target + Vector3(fox ? -130.0f : -200.0f, 60, -180), target);
+            Aim(world, target + Vector3(0, fox ? 170.0f : 250.0f, 30), target);
             std::vector<uint16_t> off;
             for (const bool enabled : {false, true})
             {
-                Set(setting, enabled ? "1" : "0");
+                // Keep the same random spawn and camera for the visible/hidden comparison.
+                auto& transform = world.GetECS().Get<TransformComponent>(targetEntity);
+                transform.Location = enabled ? spawn : spawn + Vector3(0,100000,0);
+                transform.DirtyFlag = true;
                 for (int frame = 0; frame < 4; ++frame) app.BenchmarkFrame();
                 render->WaitForUploads();
                 auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();

@@ -96,6 +96,7 @@
     <ClInclude Include="src\BistroGrass.h" />
     <ClInclude Include="src\BistroWater.h" />
     <ClInclude Include="src\BistroCharacters.h" />
+    <ClInclude Include="src\BistroRoutes.h" />
     <ClInclude Include="src\BistroBounds.h" />
   </ItemGroup>
   <ItemGroup>

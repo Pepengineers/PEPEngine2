@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../src/BistroCharacters.h"
+#include <map>
 #include <stdexcept>
 
 inline void CheckBistroCharacterCounts()
@@ -36,7 +37,7 @@ inline void CheckBistroCharacterCounts()
         const auto& transform = ecs.Get<TransformComponent>(entity);
         require(transform.Scale.x > 0 && transform.Scale.y > 0 && transform.Scale.z > 0,
             "Character must use positive calibrated scale");
-        require(std::abs(transform.Location.y - (fox ? 39.722f : 27.762f)) < 0.001f,
+        require(transform.Location.y >= (fox ? 39.7f : 20) && transform.Location.y <= (fox ? 52 : 33),
             "Characters must stand on the authored Bistro floor/pavement");
         if (fox) firstFox = entity;
         else
@@ -78,11 +79,15 @@ inline void CheckBistroCharacterCounts()
         }
     });
     require(firstNPC != InvalidEntity && firstFox != InvalidEntity, "Both character populations are required");
+    require(BistroCharacters::NPCCount.SetFromString("1"), "Single walker count rejected");
+    scene.Update(world, 0);
     const auto npcStart = ecs.Get<TransformComponent>(firstNPC).Location;
     const auto foxStart = ecs.Get<TransformComponent>(firstFox).Location;
     scene.Update(world, 0.5f);
     require(ecs.Get<TransformComponent>(firstNPC).Location != npcStart &&
         ecs.Get<TransformComponent>(firstFox).Location != foxStart, "Both character populations must walk");
+    const auto facingStart = ecs.Get<TransformComponent>(firstNPC).Location;
+    scene.Update(world, 0.01f);
     const auto& npcTransform = ecs.Get<TransformComponent>(firstNPC);
     const auto& npcMesh = ecs.Get<SkeletalMeshRenderComponent>(firstNPC);
     const auto* npcSource = assets.Scenes().GetScene(npcMesh.GetScene());
@@ -94,7 +99,7 @@ inline void CheckBistroCharacterCounts()
     const Matrix facing = bodyInverseBind * animated[hips] *
         Matrix::CreateRotationY(XMConvertToRadians(npcTransform.Rotation.y));
     auto forward = Vector3::TransformNormal(Vector3::UnitZ, facing);
-    auto movement = npcTransform.Location - npcStart;
+    auto movement = npcTransform.Location - facingStart;
     forward.Normalize(); movement.Normalize();
     require(forward.Dot(movement) > 0.9f, "Animated soldier must walk forward along the street route");
     const auto pausedNPC = ecs.Get<TransformComponent>(firstNPC).Location;
@@ -119,15 +124,46 @@ inline void CheckBistroCharacterCounts()
         foxes += name.value.find("BistroFox") == 0;
     });
     require(humans == 2 && foxes == 3, "Character populations must reconcile independently");
-    scene.Update(world, 30);
-    ecs.ForEach<SkeletalMeshRenderComponent, NameComponent>([&](Entity entity,
-        const SkeletalMeshRenderComponent&, const NameComponent& name)
+    require(BistroCharacters::NPCCount.SetFromString("16") && BistroCharacters::FoxCount.SetFromString("8"),
+        "Maximum character populations rejected");
+    scene.Update(world, 0);
+    require(ecs.GetPool<SkeletalMeshRenderComponent>().Size() == 24, "Maximum character count mismatch");
+    std::map<Entity, std::pair<Vector3, float>> progress;
+    for (int frame = 0; frame < 600; ++frame)
     {
-        const bool fox = name.value.find("BistroFox") == 0;
-        const auto position = ecs.Get<TransformComponent>(entity).Location;
-        require(position.x >= (fox ? 79.99f : -1090.01f) && position.x <= (fox ? 480.01f : -969.99f) &&
-            position.z >= (fox ? -130.01f : -630.01f) && position.z <= (fox ? -29.99f : -269.99f),
-            "Walking must remain on the verified street/interior route");
+        scene.Update(world, 0.1f);
+        std::vector<std::pair<Vector3, bool>> positions;
+        ecs.ForEach<SkeletalMeshRenderComponent, NameComponent>([&](Entity entity,
+            const SkeletalMeshRenderComponent&, const NameComponent& name)
+        {
+            const bool fox = name.value.find("BistroFox") == 0;
+            const auto& network = fox ? BistroRoutes::Foxes() : BistroRoutes::People();
+            const auto position = ecs.Get<TransformComponent>(entity).Location;
+            auto [entry, added] = progress.try_emplace(entity, position, 0.0f);
+            entry->second.second += Vector3::Distance(entry->second.first, position);
+            entry->second.first = position;
+            bool onRoute = false;
+            for (const auto& edge : network.Edges)
+                for (size_t i = 1; i < edge.Points.size(); ++i)
+                {
+                    const auto travel = edge.Points[i] - edge.Points[i - 1];
+                    const auto delta = position - edge.Points[i - 1];
+                    const float t = std::clamp(delta.Dot(travel) / travel.LengthSquared(), 0.0f, 1.0f);
+                    onRoute |= (delta - t * travel).LengthSquared() < 0.01f;
+                }
+            require(onRoute, "Walker left its spline network");
+            for (const auto& [other, otherFox] : positions)
+                require(fox != otherFox || BistroRoutes::HorizontalDistanceSquared(position, other) >=
+                    network.Separation * network.Separation - 0.1f, "Walkers overlapped while spawning or moving");
+            positions.emplace_back(position, fox);
+        });
+        // Exercise adding new walkers while the existing population is away from its spawn slots.
+        if (frame == 300) { BistroCharacters::NPCCount.SetFromString("4"); BistroCharacters::FoxCount.SetFromString("1"); }
+        if (frame == 301) { BistroCharacters::NPCCount.SetFromString("16"); BistroCharacters::FoxCount.SetFromString("8"); }
+    }
+    ecs.ForEach<SkeletalMeshRenderComponent>([&](Entity entity, const SkeletalMeshRenderComponent&)
+    {
+        require(progress.at(entity).second > 100, "Crowd traffic left a walker permanently stuck");
     });
     require(BistroCharacters::NPCCount.SetFromString("0") && BistroCharacters::FoxCount.SetFromString("0"),
         "Character disable rejected");
