@@ -10,14 +10,14 @@ namespace
 {
     AutoConsoleVariable<UINT> TileSize(L"Render.Lighting.Cluster.TileSize", 64,
         L"Frustum light grid XY cell size in pixels; restart required.", EConsoleVariableFlags::ReadOnly,
-        [](UINT value) { return value >= 8 && value <= 1024; });
+        [](const UINT value) { return value >= 8 && value <= 1024; });
     AutoConsoleVariable<UINT> DepthSlices(L"Render.Lighting.Cluster.DepthSlices", 32,
         L"Frustum light grid logarithmic depth slices; restart required.", EConsoleVariableFlags::ReadOnly,
-        [](UINT value) { return value >= 1 && value <= 128; });
+        [](const UINT value) { return value >= 1 && value <= 128; });
     AutoConsoleVariable<float> FarDepth(L"Render.Lighting.Cluster.FarDepthCm", 100000.0f,
         L"Logarithmic grid depth in cm; the last slice also covers farther visible geometry. Restart required.",
         EConsoleVariableFlags::ReadOnly,
-        [](float value) { return std::isfinite(value) && value >= 1 && value <= 1e9f; });
+        [](const float value) { return std::isfinite(value) && value >= 1 && value <= 1e9f; });
 }
 
 GDX12LightGridSettings GetLightGridSettings()
@@ -25,14 +25,14 @@ GDX12LightGridSettings GetLightGridSettings()
     return { TileSize.GetValue(), DepthSlices.GetValue(), FarDepth.GetValue() };
 }
 
-UINT GDX12LightGrid::DepthSlice(float z) const
+UINT GDX12LightGrid::DepthSlice(const float z) const
 {
     return static_cast<UINT>((std::clamp)(std::log2((std::max)(z, Constants.Depth.w)) * Constants.Depth.x + Constants.Depth.y,
         0.0f, float(Constants.Size.z - 1)));
 }
 
 void GDX12LightGridBuildSystem::Build(GDX12LightGrid& grid, const Matrix& projection, const Matrix& view,
-    float nearPlane, float farPlane, UINT width, UINT height, const std::vector<GDX12LocalLightConstants>& lights,
+    float nearPlane, const float farPlane, const UINT width, const UINT height, const std::vector<GDX12LocalLightConstants>& lights,
     JobSystem* jobs, GDX12LightGridSettings settings)
 {
     EnsureIdle();
@@ -88,7 +88,7 @@ void GDX12LightGridBuildSystem::Build(GDX12LightGrid& grid, const Matrix& projec
     else for (UINT slice = 0; slice < settings.DepthSlices; ++slice) Execute(slice);
 }
 
-void GDX12LightGridBuildSystem::Execute(size_t slice)
+void GDX12LightGridBuildSystem::Execute(const size_t slice)
 {
     const auto size = _grid->Constants.Size;
     const float tileSize = _grid->Constants.Depth.z;
@@ -103,7 +103,7 @@ void GDX12LightGridBuildSystem::Execute(size_t slice)
         // Clip the sphere to this Z slab before projecting conservative XY bounds.
         const float dz = std::abs((std::clamp)(z, front, back) - z) / sphere.Radius;
         const float radial = sphere.Radius * std::sqrt((std::max)(0.0f, 1 - dz * dz)) + sphere.Margin;
-        const auto interval = [&](float center, float scale, float offset)
+        const auto interval = [&](const float center, const float scale, const float offset)
         {
             const float a = (center - radial) / front, b = (center - radial) / back;
             const float c = (center + radial) / front, d = (center + radial) / back;
@@ -112,7 +112,7 @@ void GDX12LightGridBuildSystem::Execute(size_t slice)
         const auto x = interval(sphere.Center.x, _projection._11, _projection._31);
         const auto y = interval(sphere.Center.y, _projection._22, _projection._32);
         if (x.y < -1 || x.x > 1 || y.y < -1 || y.x > 1) continue;
-        const auto cell = [&](float pixel, UINT count)
+        const auto cell = [&](const float pixel, const UINT count)
         {
             return static_cast<UINT>((std::clamp)(std::floor(pixel / tileSize), 0.0f, float(count - 1)));
         };

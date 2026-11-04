@@ -123,8 +123,8 @@ const bool GDX12Device::IsInitialized()
     return _isInitialized;
 }
 
-GDX12ResourceHandle GDX12Device::CreateResource(D3D12_HEAP_TYPE heapType, const D3D12_RESOURCE_DESC& desc,
-    D3D12_RESOURCE_STATES initialState, const D3D12_CLEAR_VALUE* clearValue)
+GDX12ResourceHandle GDX12Device::CreateResource(const D3D12_HEAP_TYPE heapType, const D3D12_RESOURCE_DESC& desc,
+    const D3D12_RESOURCE_STATES initialState, const D3D12_CLEAR_VALUE* clearValue)
 {
     D3D12MA::ALLOCATION_DESC allocationDesc = {};
     allocationDesc.HeapType = heapType;

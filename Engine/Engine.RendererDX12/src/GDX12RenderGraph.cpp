@@ -10,17 +10,17 @@
 #include <queue>
 #include <stdexcept>
 
-void GDX12RenderGraph::CheckResource(Resource id) const
+void GDX12RenderGraph::CheckResource(const Resource id) const
 {
     if (id >= _resources.size()) throw std::out_of_range("Render graph: invalid resource");
 }
 
-void GDX12RenderGraph::CheckPass(Pass id) const
+void GDX12RenderGraph::CheckPass(const Pass id) const
 {
     if (id >= _nodes.size()) throw std::out_of_range("Render graph: invalid pass");
 }
 
-GDX12RenderGraph::Resource GDX12RenderGraph::Create(std::string name, GDX12Texture* texture, bool transient)
+GDX12RenderGraph::Resource GDX12RenderGraph::Create(std::string name, GDX12Texture* texture, const bool transient)
 {
     if (transient && (!texture || !texture->IsInitialized() || !texture->CanShareGraphResource()))
         throw std::invalid_argument("Render graph: transient texture must be initialized and engine-owned: " + name);
@@ -43,14 +43,14 @@ GDX12RenderGraph::Resource GDX12RenderGraph::Import(std::string name, GDX12Textu
     return id;
 }
 
-void GDX12RenderGraph::ExpandRead(Resource id, std::vector<Resource>& result) const
+void GDX12RenderGraph::ExpandRead(const Resource id, std::vector<Resource>& result) const
 {
     if (std::find(result.begin(), result.end(), id) != result.end()) return;
     result.push_back(id);
     for (auto fallback : _resources[id].Fallbacks) ExpandRead(fallback, result);
 }
 
-void GDX12RenderGraph::AddFallback(Resource output, Resource input)
+void GDX12RenderGraph::AddFallback(const Resource output, const Resource input)
 {
     CheckResource(output); CheckResource(input);
     std::vector<Resource> reachable;
@@ -105,7 +105,7 @@ void GDX12RenderGraph::ImportShared(SharedResource resource, std::string name)
 void GDX12RenderGraphBuilder::SetName(std::string name) { _node.Name = std::move(name); }
 void GDX12RenderGraphBuilder::HasSideEffects() { _node.SideEffect = true; }
 
-void GDX12RenderGraphBuilder::Use(Graph::Resource resource, Graph::Mode mode, D3D12_RESOURCE_STATES state)
+void GDX12RenderGraphBuilder::Use(const Graph::Resource resource, const Graph::Mode mode, const D3D12_RESOURCE_STATES state)
 {
     _graph.CheckResource(resource);
     for (const auto& access : _node.Accesses)
@@ -125,17 +125,17 @@ GDX12RenderGraph::Resource GDX12RenderGraphBuilder::Find(IRenderPassLink* link) 
     return found->second;
 }
 
-void GDX12RenderGraphBuilder::Read(IRenderPassLink* link, D3D12_RESOURCE_STATES state)
+void GDX12RenderGraphBuilder::Read(IRenderPassLink* link, const D3D12_RESOURCE_STATES state)
 { Use(Find(link), Graph::Mode::Read, state); }
 
-void GDX12RenderGraphBuilder::ReadInputs(const std::vector<IRenderPassLink*>& inputs, D3D12_RESOURCE_STATES state)
+void GDX12RenderGraphBuilder::ReadInputs(const std::vector<IRenderPassLink*>& inputs, const D3D12_RESOURCE_STATES state)
 { for (auto* input : inputs) Read(input, state); }
 
-void GDX12RenderGraphBuilder::ReadWrite(IRenderPassLink* link, D3D12_RESOURCE_STATES state)
+void GDX12RenderGraphBuilder::ReadWrite(IRenderPassLink* link, const D3D12_RESOURCE_STATES state)
 { Use(Find(link), Graph::Mode::ReadWrite, state); }
 
-void GDX12RenderGraphBuilder::Write(IRenderPassLink* link, std::string name, Lifetime lifetime,
-    D3D12_RESOURCE_STATES state, GDX12Texture* storage)
+void GDX12RenderGraphBuilder::Write(IRenderPassLink* link, std::string name, const Lifetime lifetime,
+    const D3D12_RESOURCE_STATES state, GDX12Texture* storage)
 {
     if (!link) throw std::invalid_argument("Render graph: null output: " + _node.Name);
     auto found = _graph._links.find(link);
@@ -149,7 +149,7 @@ void GDX12RenderGraphBuilder::Write(IRenderPassLink* link, std::string name, Lif
     Use(found->second, Graph::Mode::Write, state);
 }
 
-void GDX12RenderGraphBuilder::Read(SharedResource resource)
+void GDX12RenderGraphBuilder::Read(const SharedResource resource)
 {
     const auto found = _graph._shared.find(resource);
     if (found == _graph._shared.end()) throw std::invalid_argument("Render graph: shared input has no producer: " + _node.Name);
@@ -168,14 +168,14 @@ void GDX12RenderGraphBuilder::Fallback(IRenderPassLink* output, IRenderPassLink*
 
 void GDX12RenderGraphBuilder::Export(IRenderPassLink* link) { _graph.Export(Find(link)); }
 
-void GDX12RenderGraph::DependsOn(Pass pass, Pass prerequisite)
+void GDX12RenderGraph::DependsOn(const Pass pass, const Pass prerequisite)
 {
     CheckPass(pass); CheckPass(prerequisite);
     _nodes[pass].ExplicitDependencies.push_back(prerequisite);
     _compiled = false;
 }
 
-void GDX12RenderGraph::Export(Resource resource)
+void GDX12RenderGraph::Export(const Resource resource)
 {
     CheckResource(resource);
     _resources[resource].Exported = true;
@@ -193,7 +193,7 @@ void GDX12RenderGraph::Compile(bool reuseTextures)
     {
         auto& node = _nodes[p];
         node.Dependencies = node.ExplicitDependencies;
-        const auto depend = [&](Pass producer)
+        const auto depend = [&](const Pass producer)
         {
             if (producer != UINT_MAX && producer != p) node.Dependencies.push_back(producer);
         };
@@ -245,7 +245,7 @@ void GDX12RenderGraph::Compile(bool reuseTextures)
         throw std::logic_error(message);
     }
     std::vector<bool> live(_nodes.size());
-    std::function<void(Pass)> retain = [&](Pass p)
+    std::function<void(Pass)> retain = [&](const Pass p)
     {
         if (p == UINT_MAX || live[p]) return;
         live[p] = true;
@@ -296,7 +296,7 @@ void GDX12RenderGraph::Compile(bool reuseTextures)
     std::vector<Resource> textures;
     for (Resource r = 0; r < _resources.size(); ++r)
         if (_resources[r].Transient && _resources[r].First != UINT_MAX) textures.push_back(r);
-    std::stable_sort(textures.begin(), textures.end(), [&](Resource a, Resource b) { return _resources[a].First < _resources[b].First; });
+    std::stable_sort(textures.begin(), textures.end(), [&](const Resource a, const Resource b) { return _resources[a].First < _resources[b].First; });
     if (!textures.empty())
     {
         if (!_device) throw std::logic_error("Render graph: pooling requires a device");

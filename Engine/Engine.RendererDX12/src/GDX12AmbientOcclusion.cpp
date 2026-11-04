@@ -7,55 +7,55 @@ namespace
 {
     constexpr auto Runtime = EConsoleVariableFlags::Default;
     static AutoConsoleVariable<int> ExecutionPoint(L"Render.AO.ExecutionPoint", 1, L"0 after depth prepass, 1 before lighting", Runtime,
-        [](int v) { return v == 0 || v == 1; });
+        [](const int v) { return v == 0 || v == 1; });
     static AutoConsoleVariable<int> Enabled(L"Render.AO.Enabled", 1, L"AO enabled: 0/1", Runtime,
-        [](int v) { return v == 0 || v == 1; });
+        [](const int v) { return v == 0 || v == 1; });
     static AutoConsoleVariable<int> Quality(L"Render.AO.Quality", 2, L"0 Off, 1 Low, 2 Mid, 3 High", Runtime,
-        [](int v) { return v >= 0 && v <= 3; });
+        [](const int v) { return v >= 0 && v <= 3; });
     static AutoConsoleVariable<int> Implementation(L"Render.AO.Implementation", 2, L"0 SSAO, 1 HBAO, 2 XeGTAO, 3 AMD CACAO", Runtime,
-        [](int v) { return v >= 0 && v <= 3; });
+        [](const int v) { return v >= 0 && v <= 3; });
     static AutoConsoleVariable<int> Samples(L"Render.AO.SSAO.Samples", -1, L"Hemisphere samples: -1 preset, 4..64", Runtime,
-        [](int v) { return v == -1 || (v >= 4 && v <= 64); });
+        [](const int v) { return v == -1 || (v >= 4 && v <= 64); });
     static AutoConsoleVariable<int> Directions(L"Render.AO.HBAO.Directions", -1, L"Azimuth directions: -1 preset, 2..16", Runtime,
-        [](int v) { return v == -1 || (v >= 2 && v <= 16); });
+        [](const int v) { return v == -1 || (v >= 2 && v <= 16); });
     static AutoConsoleVariable<int> Steps(L"Render.AO.HBAO.Steps", -1, L"Horizon steps per direction: -1 preset, 2..16", Runtime,
-        [](int v) { return v == -1 || (v >= 2 && v <= 16); });
+        [](const int v) { return v == -1 || (v >= 2 && v <= 16); });
     static AutoConsoleVariable<int> Denoise(L"Render.AO.DenoisePasses", -1, L"-1 preset, 0..8 edge-aware passes", Runtime,
-        [](int v) { return v >= -1 && v <= 8; });
+        [](const int v) { return v >= -1 && v <= 8; });
     static AutoConsoleVariable<int> GTAOSlices(L"Render.AO.XeGTAO.Slices", -1, L"-1 preset, 1..8 integration slices", Runtime,
-        [](int v) { return v == -1 || (v >= 1 && v <= 8); });
+        [](const int v) { return v == -1 || (v >= 1 && v <= 8); });
     static AutoConsoleVariable<int> GTAOSteps(L"Render.AO.XeGTAO.Steps", -1, L"-1 preset, 1..16 steps per half slice", Runtime,
-        [](int v) { return v == -1 || (v >= 1 && v <= 16); });
+        [](const int v) { return v == -1 || (v >= 1 && v <= 16); });
     static AutoConsoleVariable<int> CACAOQuality(L"Render.AO.CACAO.Quality", -1, L"-1 preset, native quality 0..4 (4 adaptive)", Runtime,
-        [](int v) { return v >= -1 && v <= 4; });
+        [](const int v) { return v >= -1 && v <= 4; });
     static AutoConsoleVariable<float> Radius(L"Render.AO.RadiusCm", 50.0f, L"World radius in cm: 0.1..10000", Runtime,
-        [](float v) { return std::isfinite(v) && v >= 0.1f && v <= 10000; });
+        [](const float v) { return std::isfinite(v) && v >= 0.1f && v <= 10000; });
     static AutoConsoleVariable<float> Intensity(L"Render.AO.Intensity", 1.0f, L"Occlusion multiplier: 0..5", Runtime,
-        [](float v) { return std::isfinite(v) && v >= 0 && v <= 5; });
+        [](const float v) { return std::isfinite(v) && v >= 0 && v <= 5; });
     static AutoConsoleVariable<float> Bias(L"Render.AO.SSAO.BiasCm", 0.5f, L"Hemisphere depth bias in cm: 0..100", Runtime,
-        [](float v) { return std::isfinite(v) && v >= 0 && v <= 100; });
+        [](const float v) { return std::isfinite(v) && v >= 0 && v <= 100; });
     static AutoConsoleVariable<float> HorizonBias(L"Render.AO.HorizonBias", 0.06f, L"HBAO/CACAO horizon sine threshold: 0..0.2", Runtime,
-        [](float v) { return std::isfinite(v) && v >= 0 && v <= 0.2f; });
+        [](const float v) { return std::isfinite(v) && v >= 0 && v <= 0.2f; });
     static AutoConsoleVariable<float> FadeStart(L"Render.AO.FadeStartCm", 5000.0f, L"Fade start distance in cm: 0..1000000", Runtime,
-        [](float v) { return std::isfinite(v) && v >= 0 && v <= 1000000; });
+        [](const float v) { return std::isfinite(v) && v >= 0 && v <= 1000000; });
     static AutoConsoleVariable<float> FadeEnd(L"Render.AO.FadeEndCm", 15000.0f, L"Fade end in cm: 1..1000001; resolved >= start+1", Runtime,
-        [](float v) { return std::isfinite(v) && v >= 1 && v <= 1000001; });
+        [](const float v) { return std::isfinite(v) && v >= 1 && v <= 1000001; });
     static AutoConsoleVariable<float> Sharpness(L"Render.AO.Sharpness", 0.98f, L"Depth edge preservation: 0..1", Runtime,
-        [](float v) { return std::isfinite(v) && v >= 0 && v <= 1; });
+        [](const float v) { return std::isfinite(v) && v >= 0 && v <= 1; });
     static AutoConsoleVariable<float> GTAOFalloff(L"Render.AO.XeGTAO.Falloff", 0.615f, L"Radius falloff fraction: 0.05..1", Runtime,
-        [](float v) { return std::isfinite(v) && v >= 0.05f && v <= 1; });
+        [](const float v) { return std::isfinite(v) && v >= 0.05f && v <= 1; });
     static AutoConsoleVariable<float> GTAOThin(L"Render.AO.XeGTAO.ThinOccluder", 0.0f, L"Thin occluder compensation: 0..0.7", Runtime,
-        [](float v) { return std::isfinite(v) && v >= 0 && v <= 0.7f; });
+        [](const float v) { return std::isfinite(v) && v >= 0 && v <= 0.7f; });
     static AutoConsoleVariable<float> CACAOPower(L"Render.AO.CACAO.Power", 1.5f, L"Native shadow exponent: 0.5..5", Runtime,
-        [](float v) { return std::isfinite(v) && v >= 0.5f && v <= 5; });
+        [](const float v) { return std::isfinite(v) && v >= 0.5f && v <= 5; });
     static AutoConsoleVariable<float> CACAOClamp(L"Render.AO.CACAO.Clamp", 0.98f, L"Native maximum occlusion: 0..1", Runtime,
-        [](float v) { return std::isfinite(v) && v >= 0 && v <= 1; });
+        [](const float v) { return std::isfinite(v) && v >= 0 && v <= 1; });
     static AutoConsoleVariable<float> CACAODetail(L"Render.AO.CACAO.Detail", 0.5f, L"Native detail shadow strength: 0..5", Runtime,
-        [](float v) { return std::isfinite(v) && v >= 0 && v <= 5; });
+        [](const float v) { return std::isfinite(v) && v >= 0 && v <= 5; });
     static AutoConsoleVariable<float> CACAOAdaptive(L"Render.AO.CACAO.AdaptiveLimit", 0.45f, L"Native adaptive sample budget: 0..1", Runtime,
-        [](float v) { return std::isfinite(v) && v >= 0 && v <= 1; });
+        [](const float v) { return std::isfinite(v) && v >= 0 && v <= 1; });
 
-    int Override(int value, int preset) { return value < 0 ? preset : value; }
+    int Override(const int value, const int preset) { return value < 0 ? preset : value; }
 }
 
 GDX12AOSettings GetAmbientOcclusionSettings()

@@ -8,17 +8,17 @@ namespace
 {
     static AutoConsoleVariable<bool> Enabled(L"Render.DOF.Enabled", true, L"Enable FidelityFX DoF");
     static AutoConsoleVariable<int> Quality(L"Render.DOF.Quality", 2, L"0 Off, 1 Low, 2 Mid, 3 High",
-        EConsoleVariableFlags::Default, [](int v) { return v >= 0 && v <= 3; });
+        EConsoleVariableFlags::Default, [](const int v) { return v >= 0 && v <= 3; });
     static AutoConsoleVariable<float> Focus(L"Render.DOF.FocusDistanceCm", 500.0f, L"Focus distance in cm [1, 1000000]",
-        EConsoleVariableFlags::Default, [](float v) { return v >= 1.0f && v <= 1000000.0f; });
+        EConsoleVariableFlags::Default, [](const float v) { return v >= 1.0f && v <= 1000000.0f; });
     static AutoConsoleVariable<float> Aperture(L"Render.DOF.FNumber", 2.8f, L"Lens f-number [0.7, 64]",
-        EConsoleVariableFlags::Default, [](float v) { return v >= 0.7f && v <= 64.0f; });
+        EConsoleVariableFlags::Default, [](const float v) { return v >= 0.7f && v <= 64.0f; });
     static AutoConsoleVariable<float> Sensor(L"Render.DOF.SensorHeightMm", 24.0f, L"Vertical sensor size in mm [1, 100]",
-        EConsoleVariableFlags::Default, [](float v) { return v >= 1.0f && v <= 100.0f; });
+        EConsoleVariableFlags::Default, [](const float v) { return v >= 1.0f && v <= 100.0f; });
     static AutoConsoleVariable<float> CocLimit(L"Render.DOF.CocLimit", 0.0f, L"Max full-res CoC radius / image height [0, 0.25]; 0 preset",
-        EConsoleVariableFlags::Default, [](float v) { return v >= 0.0f && v <= 0.25f; });
+        EConsoleVariableFlags::Default, [](const float v) { return v >= 0.0f && v <= 0.25f; });
     static AutoConsoleVariable<int> Rings(L"Render.DOF.Rings", 0, L"Maximum kernel rings [1, 12]; 0 preset",
-        EConsoleVariableFlags::Default, [](int v) { return v >= 0 && v <= 12; });
+        EConsoleVariableFlags::Default, [](const int v) { return v >= 0 && v <= 12; });
     static AutoConsoleVariable<bool> RingMerge(L"Render.DOF.RingMerge", true, L"Merge outer kernel rings using the bilateral mip chain");
 }
 
@@ -35,7 +35,7 @@ GDX12DepthOfFieldSettings GetDepthOfFieldSettings()
 }
 
 GDX12CircleOfConfusion CalculateDepthOfFieldCoc(const GDX12DepthOfFieldSettings& settings,
-    float verticalFovRadians, unsigned height, float projectionZZ, float projectionZW, float projectionWZ)
+    const float verticalFovRadians, const unsigned height, const float projectionZZ, const float projectionZW, const float projectionWZ)
 {
     if (!std::isfinite(verticalFovRadians) || verticalFovRadians < 0.0174532925f || verticalFovRadians > 3.12413936f ||
         !height || !std::isfinite(settings.FocusDistanceCm) || settings.FocusDistanceCm <= 0.0f ||

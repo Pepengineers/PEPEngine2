@@ -7,7 +7,7 @@ static AutoConsoleVariable<bool> Enabled(L"Render.Reflection.Enabled", true,
     L"Enable local reflection probes. Default true.", EConsoleVariableFlags::Default);
 static AutoConsoleVariable<int> Quality(L"Render.Reflection.Quality", 2,
     L"0 Off, 1 Low, 2 Mid (default), 3 High.", EConsoleVariableFlags::Default,
-    [](int value) { return value >= 0 && value <= 3; });
+    [](const int value) { return value >= 0 && value <= 3; });
 GDX12ReflectionSettings GetReflectionSettings()
 {
     GDX12ReflectionSettings result;
@@ -16,7 +16,7 @@ GDX12ReflectionSettings GetReflectionSettings()
     return result;
 }
 
-GDX12ReflectionCaptureSettings ResolveReflectionCaptureSettings(const GDX12ReflectionCaptureSettings& author, int quality)
+GDX12ReflectionCaptureSettings ResolveReflectionCaptureSettings(const GDX12ReflectionCaptureSettings& author, const int quality)
 {
     if (quality < 0 || quality > 3) throw std::invalid_argument("Invalid reflection quality");
     const UINT level = static_cast<UINT>((std::max)(1, quality) - 1);
@@ -29,7 +29,7 @@ GDX12ReflectionCaptureSettings ResolveReflectionCaptureSettings(const GDX12Refle
 
 bool IsValidReflectionProbe(const GDX12ReflectionProbe& probe)
 {
-    const auto finite = [](Vector3 value)
+    const auto finite = [](const Vector3 value)
     {
         return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
     };

@@ -147,17 +147,17 @@ GDX12RootSignature::~GDX12RootSignature()
     _rootSignature.Reset();
 }
 
-int GDX12RootSignature::GetTRootParamIndex(int registerIndex)
+int GDX12RootSignature::GetTRootParamIndex(const int registerIndex)
 {
     return registerIndex + _srv0ParamIndex;
 }
 
-int GDX12RootSignature::GetBRootParamIndex(int registerIndex)
+int GDX12RootSignature::GetBRootParamIndex(const int registerIndex)
 {
     return registerIndex + _cbv0ParamIndex;
 }
 
-int GDX12RootSignature::GetURootParamIndex(int registerIndex)
+int GDX12RootSignature::GetURootParamIndex(const int registerIndex)
 {
     return registerIndex + _uav0ParamIndex;
 }

@@ -113,7 +113,7 @@ std::unique_ptr<GDX12SkinMesh> GDX12Skinning::CreateMesh(const SubMesh& source, 
 }
 
 void GDX12Skinning::Dispatch(GDX12CommandList* commands, GDX12GeometryBuffer& geometry,
-    GDX12SkinMesh& mesh, UINT frameSlot, const std::vector<GDX12SkinPalette>& palette)
+    GDX12SkinMesh& mesh, const UINT frameSlot, const std::vector<GDX12SkinPalette>& palette)
 {
     auto& upload = mesh.PaletteUploads.at(frameSlot);
     auto& snapshot = mesh.Palettes.at(frameSlot);

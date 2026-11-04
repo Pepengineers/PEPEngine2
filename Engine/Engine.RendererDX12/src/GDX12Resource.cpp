@@ -131,7 +131,7 @@ CD3DX12_RESOURCE_BARRIER GDX12Resource::GetSRVBarrier()
 	return transition;
 }
 
-void GDX12Resource::SetCurrentState(D3D12_RESOURCE_STATES newState)
+void GDX12Resource::SetCurrentState(const D3D12_RESOURCE_STATES newState)
 {
 	_currentState = newState;
 }

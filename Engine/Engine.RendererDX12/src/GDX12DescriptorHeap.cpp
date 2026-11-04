@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <algorithm>
 
-GDX12DescriptorHeap::GDX12DescriptorHeap(GDX12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, UINT numDescriptors, D3D12_DESCRIPTOR_HEAP_FLAGS flags)
+GDX12DescriptorHeap::GDX12DescriptorHeap(GDX12Device* device, const D3D12_DESCRIPTOR_HEAP_TYPE type, const UINT numDescriptors, const D3D12_DESCRIPTOR_HEAP_FLAGS flags)
     : _device(device), 
     _type(type), 
     _numDescriptors(numDescriptors), 
@@ -48,7 +48,7 @@ UINT GDX12DescriptorHeap::GetNumDescriptors()
     return _numDescriptors;
 }
 
-UINT GDX12DescriptorHeap::GetAvailableIndex(UINT startIndex, UINT maxRange)
+UINT GDX12DescriptorHeap::GetAvailableIndex(const UINT startIndex, const UINT maxRange)
 {
     if (startIndex >= _numDescriptors) throw std::out_of_range("Descriptor allocation starts outside heap");
     const UINT remaining = _numDescriptors - startIndex;
@@ -63,12 +63,12 @@ UINT GDX12DescriptorHeap::GetAvailableIndex(UINT startIndex, UINT maxRange)
     throw std::runtime_error("Descriptor allocation range exhausted");
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE GDX12DescriptorHeap::GetCPUHandle(UINT index) const
+D3D12_CPU_DESCRIPTOR_HANDLE GDX12DescriptorHeap::GetCPUHandle(const UINT index) const
 {
     return CD3DX12_CPU_DESCRIPTOR_HANDLE(_heap->GetCPUDescriptorHandleForHeapStart(), index, _descriptorSize);
 }
 
-D3D12_GPU_DESCRIPTOR_HANDLE GDX12DescriptorHeap::GetGPUHandle(UINT index) const
+D3D12_GPU_DESCRIPTOR_HANDLE GDX12DescriptorHeap::GetGPUHandle(const UINT index) const
 {
     return CD3DX12_GPU_DESCRIPTOR_HANDLE(_heap->GetGPUDescriptorHandleForHeapStart(), index, _descriptorSize);
 }

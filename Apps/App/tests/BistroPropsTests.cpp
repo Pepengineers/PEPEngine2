@@ -1,5 +1,6 @@
 #include "../src/BistroScene.h"
 #include "../src/Components/FlyingPropComponent.h"
+#include "../src/Systems/FlyingPropSystem.h"
 #include "App.Base/ECS/Components/StaticMeshRenderComponent.h"
 #include "Engine.Core/IO/MeshImporter.h"
 #include <cmath>
@@ -112,6 +113,24 @@ static void CheckPartition()
     {
         Require(flight.Time == 0 && flight.Speed >= 0.4f, "App setup must preserve initial flight parameters");
     });
+    FlyingPropSystem motion;
+    for (unsigned threads : { 1u, 4u })
+    {
+        JobSystem jobs(threads);
+        ecs.ForEach<FlyingPropComponent, TransformComponent>([](Entity, FlyingPropComponent& flight, TransformComponent& transform)
+        {
+            flight.Time = 0;
+            transform.Location = flight.Origin;
+            transform.DirtyFlag = false;
+        });
+        motion.Schedule(jobs, world, 1.0f, 1).Complete();
+        ecs.ForEach<FlyingPropComponent, TransformComponent>([](Entity, FlyingPropComponent& flight, TransformComponent& transform)
+        {
+            Require(flight.Time == 1.0f && (transform.Location - flight.Origin).LengthSquared() > 0.01f,
+                "Scheduled flight must advance time and move every prop");
+            Require(transform.DirtyFlag, "Scheduled flight must mark moved transforms for GPU upload");
+        });
+    }
 }
 
 static void CheckFlight()

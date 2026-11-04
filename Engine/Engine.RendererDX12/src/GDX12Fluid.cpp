@@ -9,12 +9,12 @@ namespace
         L"Enable fluid components. Default true.", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<int> Quality(L"Render.Fluid.Quality", 2,
         L"0 Off, 1 Low, 2 Mid (default), 3 High.", EConsoleVariableFlags::Default,
-        [](int value) { return value >= 0 && value <= 3; });
-    bool Finite(Vector3 value)
+        [](const int value) { return value >= 0 && value <= 3; });
+    bool Finite(const Vector3 value)
     {
         return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
     }
-    bool Range(float value, float low, float high)
+    bool Range(const float value, const float low, const float high)
     {
         return std::isfinite(value) && value >= low && value <= high;
     }
@@ -26,7 +26,7 @@ GDX12FluidControls GetFluidControls()
     return { Enabled.GetValue() && quality != 0, quality };
 }
 
-GDX12FluidSettings ResolveFluidSettings(const GDX12FluidSettings& author, int quality)
+GDX12FluidSettings ResolveFluidSettings(const GDX12FluidSettings& author, const int quality)
 {
     if (quality < 0 || quality > 3) throw std::invalid_argument("Invalid fluid quality");
     auto result = author;

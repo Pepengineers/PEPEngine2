@@ -7,11 +7,11 @@ namespace
 {
     static AutoConsoleVariable<bool> GrassEnabled(L"Render.Grass.Enabled", true, L"Enable grass components", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<int> GrassQuality(L"Render.Grass.Quality", 2, L"Grass: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default,
-        [](int value) { return value >= 0 && value <= 3; });
+        [](const int value) { return value >= 0 && value <= 3; });
     static AutoConsoleVariable<bool> WindEnabled(L"Render.Wind.Enabled", true, L"Enable wind components", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<int> WindQuality(L"Render.Wind.Quality", 2, L"Wind: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default,
-        [](int value) { return value >= 0 && value <= 3; });
-    bool Range(float value, float low, float high) { return std::isfinite(value) && value >= low && value <= high; }
+        [](const int value) { return value >= 0 && value <= 3; });
+    bool Range(const float value, const float low, const float high) { return std::isfinite(value) && value >= low && value <= high; }
     bool Point(const XMFLOAT3& v) { return Range(v.x, -1e7f, 1e7f) && Range(v.y, -1e7f, 1e7f) && Range(v.z, -1e7f, 1e7f); }
 }
 
@@ -20,7 +20,7 @@ GDX12GrassWindControls GetGrassWindControls()
     return { GrassEnabled.GetValue(), GrassQuality.GetValue(), WindEnabled.GetValue(), WindQuality.GetValue() };
 }
 
-GDX12GrassSettings ResolveGrassSettings(const GDX12GrassSettings& author, int quality)
+GDX12GrassSettings ResolveGrassSettings(const GDX12GrassSettings& author, const int quality)
 {
     auto settings = author;
     const int q = (std::clamp)(quality, 1, 3) - 1;
@@ -30,7 +30,7 @@ GDX12GrassSettings ResolveGrassSettings(const GDX12GrassSettings& author, int qu
     if (!settings.Segments) settings.Segments = segments[q];
     return settings;
 }
-GDX12WindSettings ResolveWindSettings(const GDX12WindSettings& author, int quality)
+GDX12WindSettings ResolveWindSettings(const GDX12WindSettings& author, const int quality)
 {
     auto settings = author;
     const int q = (std::clamp)(quality, 1, 3) - 1;

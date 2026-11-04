@@ -7,13 +7,13 @@
 
 namespace
 {
-    void CheckFidelityFX(FfxErrorCode result)
+    void CheckFidelityFX(const FfxErrorCode result)
     {
         if (result != FFX_OK)
             throw std::runtime_error("FidelityFX DoF failed: " + std::to_string(result));
     }
 
-    FfxResource SDKResource(GDX12Texture& texture, const wchar_t* name, FfxResourceStates state)
+    FfxResource SDKResource(GDX12Texture& texture, const wchar_t* name, const FfxResourceStates state)
     {
         auto* resource = texture.GetResource()->D3DResource.Get();
         return ffxGetResourceDX12(resource, ffxGetResourceDescriptionDX12(resource), name, state);

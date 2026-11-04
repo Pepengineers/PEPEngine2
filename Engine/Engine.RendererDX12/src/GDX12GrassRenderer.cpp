@@ -52,7 +52,7 @@ GDX12GrassRenderer::~GDX12GrassRenderer() = default;
 GDX12GrassRenderer::Frame& GDX12GrassRenderer::CurrentFrame() { return _frames.at(_resources->CurrFrameConstantsIndex); }
 
 template<typename T>
-std::unique_ptr<GDX12UploadBuffer<T>> GDX12GrassRenderer::Buffer(UINT count, bool srv, bool uav)
+std::unique_ptr<GDX12UploadBuffer<T>> GDX12GrassRenderer::Buffer(UINT count, const bool srv, const bool uav)
 {
     auto buffer = std::make_unique<GDX12UploadBuffer<T>>(_resources->Device, count, EBufferType::Default, false);
     auto* heap = _resources->SRV_UAV_Heap.get();
@@ -323,7 +323,7 @@ void GDX12GrassRenderer::BeginFrame(GDX12CommandList* commands, const RenderPipe
     if (changed) ++_revision;
 }
 
-void GDX12GrassRenderer::WindDispatch(GDX12CommandList* commands, UINT stage, const WindParameters& parameters,
+void GDX12GrassRenderer::WindDispatch(GDX12CommandList* commands, const UINT stage, const WindParameters& parameters,
     FieldBuffer* input, FieldBuffer* pressure, FieldBuffer* output)
 {
     auto& frame = CurrentFrame();
@@ -351,7 +351,7 @@ void GDX12GrassRenderer::WindDispatch(GDX12CommandList* commands, UINT stage, co
     commands->ResourceBarrier({ output->GetResource().GetUAVBarrier() });
 }
 
-void GDX12GrassRenderer::UpdateWind(GDX12CommandList* commands, WindState& state, bool reset)
+void GDX12GrassRenderer::UpdateWind(GDX12CommandList* commands, WindState& state, const bool reset)
 {
     const auto& s = state.Source;
     WindParameters p = {};
@@ -433,7 +433,7 @@ bool GDX12GrassRenderer::HasCasters() const
 }
 
 void GDX12GrassRenderer::Draw(GDX12CommandList* commands, Stage stage, const Matrix& viewProjection,
-    Vector3 eye, D3D12_GPU_VIRTUAL_ADDRESS camera, const CaptureLighting* lighting)
+    const Vector3 eye, const D3D12_GPU_VIRTUAL_ADDRESS camera, const CaptureLighting* lighting)
 {
     if (_drawOrder.empty()) return;
     if (stage == Stage::Capture && (!lighting || !camera)) throw std::invalid_argument("Grass capture requires lighting and camera");

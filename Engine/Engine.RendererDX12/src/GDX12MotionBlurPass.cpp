@@ -52,7 +52,7 @@ void GDX12MotionBlurPass::Initialize()
     _gather = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(), SHADERS_FOLDER "MotionBlur.hlsl", "Gather");
 }
 
-void GDX12MotionBlurPass::ResizeTiles(UINT tileSize)
+void GDX12MotionBlurPass::ResizeTiles(const UINT tileSize)
 {
     const UINT width = (_color->GetWidth() + tileSize - 1) / tileSize;
     const UINT height = (_color->GetHeight() + tileSize - 1) / tileSize;

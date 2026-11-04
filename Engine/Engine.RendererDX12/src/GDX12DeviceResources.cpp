@@ -12,7 +12,7 @@ static AutoConsoleVariable<UINT> NumFrameConstantVariable(
     3,
     L"Number of buffered frames. Positive integer; set before GPU initialization.",
     EConsoleVariableFlags::ReadOnly,
-    [](UINT value) { return value > 0 && value <= static_cast<UINT>((std::numeric_limits<int>::max)()); });
+    [](const UINT value) { return value > 0 && value <= static_cast<UINT>((std::numeric_limits<int>::max)()); });
 
 void GDX12DeviceResources::Initialize(GDX12Device* device)
 {
@@ -95,7 +95,7 @@ void GDX12DeviceResources::UploadLocalShadowData(GDX12CommandList* commands)
 {
     GDX12_SCOPED_EVENT(commands, "Local shadow scene upload");
     auto& frame = *FrameConstants[CurrFrameConstantsIndex];
-    const auto upload = [this, commands](auto& source, auto& target, bool dirty = true)
+    const auto upload = [this, commands](auto& source, auto& target, const bool dirty = true)
     {
         using Buffer = typename std::decay_t<decltype(source)>::element_type;
         const UINT count = source->GetElementCount();
@@ -119,7 +119,7 @@ void GDX12DeviceResources::UploadLocalShadowData(GDX12CommandList* commands)
     upload(frame.TransformCache, frame.ShadowTransforms);
 }
 
-void GDX12DeviceResources::UpdateMainCB(UINT width, UINT height, GameTimer* timer)
+void GDX12DeviceResources::UpdateMainCB(const UINT width, const UINT height, GameTimer* timer)
 {
     auto& frameRes = FrameConstants[CurrFrameConstantsIndex];
 

@@ -7,30 +7,30 @@ static AutoConsoleVariable<bool> SkyBoxEnabled(L"Render.SkyBox.Enabled", true,
     L"Enable the selected SkyBox component", EConsoleVariableFlags::Default);
 static AutoConsoleVariable<UINT> SkyBoxQuality(L"Render.SkyBox.Quality", 3,
     L"SkyBox: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default,
-    [](UINT value) { return value <= 3; });
+    [](const UINT value) { return value <= 3; });
 static AutoConsoleVariable<bool> AtmosphereEnabled(L"Render.SkyAtmosphere.Enabled", true,
     L"Enable the selected SkyAtmosphere component", EConsoleVariableFlags::Default);
 static AutoConsoleVariable<UINT> AtmosphereQuality(L"Render.SkyAtmosphere.Quality", 2,
     L"Atmosphere: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default,
-    [](UINT value) { return value <= 3; });
+    [](const UINT value) { return value <= 3; });
 
 UINT GetSkyBoxQuality() { return SkyBoxEnabled.GetValue() ? SkyBoxQuality.GetValue() : 0; }
 UINT GetSkyAtmosphereQuality() { return AtmosphereEnabled.GetValue() ? AtmosphereQuality.GetValue() : 0; }
 
 namespace
 {
-    void Range(float value, float minimum, float maximum)
+    void Range(const float value, const float minimum, const float maximum)
     {
         if (!std::isfinite(value) || value < minimum || value > maximum)
             throw std::invalid_argument("Sky component parameter outside its documented finite range");
     }
-    void Range(const Vector3& value, float minimum, float maximum)
+    void Range(const Vector3& value, const float minimum, const float maximum)
     {
         Range(value.x, minimum, maximum);
         Range(value.y, minimum, maximum);
         Range(value.z, minimum, maximum);
     }
-    void Budget(UINT value, UINT minimum, UINT maximum)
+    void Budget(const UINT value, const UINT minimum, const UINT maximum)
     {
         if (value && (value < minimum || value > maximum))
             throw std::invalid_argument("Sky LUT/sample budget outside its documented range");
@@ -95,7 +95,7 @@ void ValidateSkySettings(const SkyAtmosphereSettings& s)
     Budget(s.AerialSamples, 4, 128);
 }
 
-SkyIBLSettings ResolveSkyIBLSettings(const SkyIBLSettings& source, UINT quality)
+SkyIBLSettings ResolveSkyIBLSettings(const SkyIBLSettings& source, const UINT quality)
 {
     if (quality < 1 || quality > 3) throw std::invalid_argument("Sky quality must be 1..3 when resolving budgets");
     auto result = source;
@@ -104,12 +104,12 @@ SkyIBLSettings ResolveSkyIBLSettings(const SkyIBLSettings& source, UINT quality)
     return result;
 }
 
-SkyAtmosphereSettings ResolveSkyAtmosphereSettings(const SkyAtmosphereSettings& source, UINT quality)
+SkyAtmosphereSettings ResolveSkyAtmosphereSettings(const SkyAtmosphereSettings& source, const UINT quality)
 {
     ValidateSkySettings(source);
     auto s = source;
     s.IBL = ResolveSkyIBLSettings(source.IBL, quality);
-    const auto inherit = [](UINT& value, UINT preset) { if (!value) value = preset; };
+    const auto inherit = [](UINT& value, const UINT preset) { if (!value) value = preset; };
     inherit(s.TransmittanceWidth, 128u << (quality - 1));
     inherit(s.TransmittanceHeight, 32u << (quality - 1));
     inherit(s.MultipleScatteringSize, quality == 1 ? 16 : 32);

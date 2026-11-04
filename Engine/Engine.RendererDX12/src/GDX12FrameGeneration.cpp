@@ -34,17 +34,17 @@ namespace
 {
     AutoConsoleVariable<int> Provider(L"Render.FrameGeneration.Provider", 0,
         L"0 Off, 1 AMD, 2 NVIDIA, 3 Intel; unavailable providers remain Off with a reason",
-        EConsoleVariableFlags::Default, [](int v) { return v >= 0 && v <= 3; });
+        EConsoleVariableFlags::Default, [](const int v) { return v >= 0 && v <= 3; });
 
-    void CheckAMD(ffxReturnCode_t result, const char* operation)
+    void CheckAMD(const ffxReturnCode_t result, const char* operation)
     {
         if (result != FFX_API_RETURN_OK) throw std::runtime_error(std::string(operation) + " failed (" + std::to_string(result) + ")");
     }
-    void CheckIntel(int result, const char* operation)
+    void CheckIntel(const int result, const char* operation)
     {
         if (result < 0) throw std::runtime_error(std::string(operation) + " failed (" + std::to_string(result) + ")");
     }
-    void CheckSL(sl::Result result, const char* operation)
+    void CheckSL(const sl::Result result, const char* operation)
     {
         if (result != sl::Result::eOk) throw std::runtime_error(std::string(operation) + ": " + GDX12StreamlineSDK::ResultToString(result));
     }
@@ -58,12 +58,12 @@ namespace
         if (!module) throw std::runtime_error("Optional FG runtime could not be loaded (" + std::to_string(GetLastError()) + ")");
         return module;
     }
-    template<typename T> void Import(HMODULE module, const char* name, T& function)
+    template<typename T> void Import(const HMODULE module, const char* name, T& function)
     {
         function = reinterpret_cast<T>(GetProcAddress(module, name));
         if (!function) throw std::runtime_error(std::string("Missing FG export: ") + name);
     }
-    template<typename T> void ImportSL(sl::Feature feature, const char* name, T*& function)
+    template<typename T> void ImportSL(const sl::Feature feature, const char* name, T*& function)
     {
         void* address = nullptr;
         CheckSL(GDX12StreamlineSDK::Get().GetFeatureFunction(feature, name, address), name);
@@ -133,7 +133,7 @@ struct GDX12FrameGeneration::Impl
         }
     }
 
-    sl::Result Supported(sl::Feature feature) const
+    sl::Result Supported(const sl::Feature feature) const
     {
         auto luid = Device->GetAdapterLuid();
         sl::AdapterInfo adapter{};
@@ -161,7 +161,7 @@ struct GDX12FrameGeneration::Impl
         }
     }
 
-    void NvidiaOptions(bool enabled, GDX12Texture* depth = nullptr, GDX12Texture* motion = nullptr)
+    void NvidiaOptions(const bool enabled, GDX12Texture* depth = nullptr, GDX12Texture* motion = nullptr)
     {
         if (!NvidiaLoaded || !DLSSGSetOptions) return;
         sl::DLSSGOptions options{};
@@ -224,7 +224,7 @@ struct GDX12FrameGeneration::Impl
         return result;
     }
 
-    ComPtr<IDXGISwapChain4> CreateAMD(HWND window)
+    ComPtr<IDXGISwapChain4> CreateAMD(const HWND window)
     {
         ffxCreateBackendDX12Desc backend{};
         backend.header.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_DX12;
@@ -257,7 +257,7 @@ struct GDX12FrameGeneration::Impl
         return output;
     }
 
-    ComPtr<IDXGISwapChain4> CreateIntel(HWND window)
+    ComPtr<IDXGISwapChain4> CreateIntel(const HWND window)
     {
         if (!XeFGModule) XeFGModule = LoadRuntime(L"libxess_fg.dll");
         if (!XeLLModule) XeLLModule = LoadRuntime(L"libxell.dll");
@@ -302,7 +302,7 @@ struct GDX12FrameGeneration::Impl
         CheckSL(ReflexSetOptions(reflex), "Enable Reflex");
     }
 
-    void Marker(sl::PCLMarker nvidia, xell_latency_marker_type_t intel)
+    void Marker(const sl::PCLMarker nvidia, const xell_latency_marker_type_t intel)
     {
         if (Status.Effective == GDX12FrameGenerationProvider::Intel && XeLL)
             CheckIntel(xellAddMarkerDataFn(XeLL, Frame, intel), "XeLL marker");
@@ -319,7 +319,7 @@ bool GDX12FrameGeneration::NeedsRecreate() const
     return !p.PendingFailure.empty() || GetFrameGenerationProvider() != p.Status.Requested || GetReconstructionSettings().Restart != p.Restart;
 }
 
-ComPtr<IDXGISwapChain4> GDX12FrameGeneration::CreateSwapChain(HWND window, DXGI_SWAP_CHAIN_DESC1& desc, bool applySettings)
+ComPtr<IDXGISwapChain4> GDX12FrameGeneration::CreateSwapChain(const HWND window, DXGI_SWAP_CHAIN_DESC1& desc, const bool applySettings)
 {
     auto& p = *_impl;
     p.Desc = desc; p.Status.Requested = applySettings ? GetFrameGenerationProvider() : GDX12FrameGenerationProvider::Off;
@@ -389,7 +389,7 @@ void GDX12FrameGeneration::DestroySwapChain(ComPtr<IDXGISwapChain4>& proxy, ComP
     p.Status.Effective = GDX12FrameGenerationProvider::Off;
 }
 
-void GDX12FrameGeneration::SetSuspended(bool suspended)
+void GDX12FrameGeneration::SetSuspended(const bool suspended)
 {
     auto& p = *_impl;
     if (p.Suspended == suspended) return;

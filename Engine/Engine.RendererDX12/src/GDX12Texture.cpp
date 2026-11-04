@@ -14,7 +14,7 @@ GDX12Texture::GDX12Texture() :
 {
 }
 
-void GDX12Texture::Resize(UINT width, UINT height)
+void GDX12Texture::Resize(const UINT width, const UINT height)
 {
     _desc.Width = width;
     _desc.Height = height;

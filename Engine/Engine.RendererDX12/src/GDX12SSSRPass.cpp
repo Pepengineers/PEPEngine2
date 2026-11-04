@@ -8,7 +8,7 @@
 
 namespace
 {
-    void CheckFFX(FfxErrorCode result)
+    void CheckFFX(const FfxErrorCode result)
     {
         if (result != FFX_OK)
             throw std::runtime_error("FidelityFX SSSR failed: " + std::to_string(result));

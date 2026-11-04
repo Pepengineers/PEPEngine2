@@ -9,7 +9,7 @@
 
 namespace
 {
-    void CheckCACAO(FFX_CACAO_Status status)
+    void CheckCACAO(const FFX_CACAO_Status status)
     {
         if (status != FFX_CACAO_STATUS_OK)
             throw std::runtime_error("FidelityFX CACAO failed: " + std::to_string(status));
@@ -49,7 +49,7 @@ void GDX12AmbientOcclusionPass::Initialize()
     static_assert(sizeof(ShaderConstants) == 64);
 }
 
-void GDX12AmbientOcclusionPass::CreateTexture(GDX12Texture& texture, DXGI_FORMAT format, UINT width, UINT height, UINT mips)
+void GDX12AmbientOcclusionPass::CreateTexture(GDX12Texture& texture, const DXGI_FORMAT format, const UINT width, const UINT height, const UINT mips)
 {
     auto* heap = _resources->SRV_UAV_Heap.get();
     GDX12TextureDesc desc;
@@ -110,7 +110,7 @@ void GDX12AmbientOcclusionPass::Bind(GDX12CommandList* commands)
     commands->SetComputeSRV(1, _inputs[1]->GetTexture()->GetSRV()->GPUHandle);
 }
 
-void GDX12AmbientOcclusionPass::Dispatch(GDX12CommandList* commands, Pipeline pipeline, UINT width, UINT height)
+void GDX12AmbientOcclusionPass::Dispatch(GDX12CommandList* commands, const Pipeline pipeline, const UINT width, const UINT height)
 {
     commands->SetPipelineState(_pipelines[pipeline]);
     commands->Dispatch((width + 7) / 8, (height + 7) / 8, 1);

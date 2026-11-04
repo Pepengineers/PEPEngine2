@@ -28,7 +28,7 @@ namespace
             a.PrefilterSamples == b.PrefilterSamples;
     }
 
-    GDX12CameraConstants FaceCamera(const GDX12ReflectionProbe& probe, UINT face, UINT size)
+    GDX12CameraConstants FaceCamera(const GDX12ReflectionProbe& probe, const UINT face, const UINT size)
     {
         const Vector3 directions[] = { Vector3::UnitX, -Vector3::UnitX, Vector3::UnitY,
             -Vector3::UnitY, Vector3::UnitZ, -Vector3::UnitZ };
@@ -175,8 +175,8 @@ void GDX12ReflectionProbePass::Initialize()
     }
 }
 
-void GDX12ReflectionProbePass::CreateTexture(GDX12Texture& texture, UINT size, UINT slices, UINT mips,
-    D3D12_RESOURCE_FLAGS flags, bool depth)
+void GDX12ReflectionProbePass::CreateTexture(GDX12Texture& texture, const UINT size, const UINT slices, const UINT mips,
+    const D3D12_RESOURCE_FLAGS flags, const bool depth)
 {
     const DXGI_FORMAT format = depth ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_R16G16B16A16_FLOAT;
     const auto resource = CD3DX12_RESOURCE_DESC::Tex2D(format, size, size,
@@ -331,7 +331,7 @@ void GDX12ReflectionProbePass::CreateBakedTextures(ProbeState& probe)
     probe.BakedFaces = 0;
 }
 
-void GDX12ReflectionProbePass::Cull(GDX12CommandList* commands, UINT camera, Geometry geometry, bool shadow)
+void GDX12ReflectionProbePass::Cull(GDX12CommandList* commands, const UINT camera, const Geometry geometry, const bool shadow)
 {
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
     auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
@@ -361,7 +361,7 @@ void GDX12ReflectionProbePass::Cull(GDX12CommandList* commands, UINT camera, Geo
     commands->ResourceBarrier({ frame.Commands->GetResource().GetIndirectArgsBarrier(), frame.Counter->GetResource().GetIndirectArgsBarrier() });
 }
 
-void GDX12ReflectionProbePass::BindCapture(GDX12CommandList* commands, UINT face, GDX12Texture* localShadows)
+void GDX12ReflectionProbePass::BindCapture(GDX12CommandList* commands, const UINT face, GDX12Texture* localShadows)
 {
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
     auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
@@ -384,7 +384,7 @@ void GDX12ReflectionProbePass::BindCapture(GDX12CommandList* commands, UINT face
     commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 }
 
-void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, Geometry geometry)
+void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, const Geometry geometry)
 {
     if (_sunShadowNeedsClear)
     {
@@ -426,7 +426,7 @@ void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, Geometry
     commands->ResourceBarrier({ _sunShadow.GetResource()->GetSRVBarrier() });
 }
 
-void GDX12ReflectionProbePass::RenderFace(GDX12CommandList* commands, UINT probe, UINT face, Geometry geometry, bool bake)
+void GDX12ReflectionProbePass::RenderFace(GDX12CommandList* commands, const UINT probe, const UINT face, const Geometry geometry, const bool bake)
 {
     auto& state = _probes[probe];
     const UINT captureSlice = face * _publishedMips + (_publishedMips - _mips);
@@ -479,7 +479,7 @@ void GDX12ReflectionProbePass::RenderFace(GDX12CommandList* commands, UINT probe
     }
 }
 
-void GDX12ReflectionProbePass::FilterAndPublish(GDX12CommandList* commands, UINT probe)
+void GDX12ReflectionProbePass::FilterAndPublish(GDX12CommandList* commands, const UINT probe)
 {
     commands->ResourceBarrier({ _raw.GetResource()->GetSRVBarrier(), _filtered.GetResource()->GetUnorderedAccessBarrier() });
     commands->SetComputeRootSignature(_filterRoot.get());
@@ -510,7 +510,7 @@ void GDX12ReflectionProbePass::FilterAndPublish(GDX12CommandList* commands, UINT
     ++_statistics.PublishedProbes;
 }
 
-void GDX12ReflectionProbePass::WriteProbeData(GDX12CommandList* commands, bool enabled)
+void GDX12ReflectionProbePass::WriteProbeData(GDX12CommandList* commands, const bool enabled)
 {
     auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     for (UINT i = 0; i < MaxReflectionProbes; ++i)

@@ -5,7 +5,7 @@
 
 namespace
 {
-    GDX12TextureDesc Texture2D(GDX12DeviceResources& resources, UINT width, UINT height, DXGI_FORMAT format)
+    GDX12TextureDesc Texture2D(GDX12DeviceResources& resources, const UINT width, const UINT height, const DXGI_FORMAT format)
     {
         GDX12TextureDesc desc;
         desc.Width = width;
@@ -21,7 +21,7 @@ namespace
 }
 
 void GDX12RenderHelpers::InitializeRenderTarget(GDX12Texture& texture, GDX12DeviceResources& resources,
-    UINT width, UINT height, DXGI_FORMAT format, XMFLOAT4 clear)
+    const UINT width, const UINT height, const DXGI_FORMAT format, const XMFLOAT4 clear)
 {
     auto desc = Texture2D(resources, width, height, format);
     desc.ClearValue = clear;
@@ -34,7 +34,7 @@ void GDX12RenderHelpers::InitializeRenderTarget(GDX12Texture& texture, GDX12Devi
 }
 
 void GDX12RenderHelpers::InitializeComputeTexture(GDX12Texture& texture, GDX12DeviceResources& resources,
-    UINT width, UINT height, DXGI_FORMAT format, bool renderTarget)
+    const UINT width, const UINT height, const DXGI_FORMAT format, const bool renderTarget)
 {
     auto desc = Texture2D(resources, width, height, format);
     desc.CreateUAV = true;

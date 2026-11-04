@@ -101,7 +101,7 @@ ComPtr<IDXGIAdapter4> GDX12DeviceFactory::GetMostPerformantAdapter()
     return GetDeviceDescriptors()[0].Adapter;
 }
 
-ComPtr<IDXGISwapChain4> GDX12DeviceFactory::CreateSwapChain(GDX12Device* device, DXGI_SWAP_CHAIN_DESC1& desc, HWND hwnd)
+ComPtr<IDXGISwapChain4> GDX12DeviceFactory::CreateSwapChain(GDX12Device* device, DXGI_SWAP_CHAIN_DESC1& desc, const HWND hwnd)
 {
     ComPtr<IDXGISwapChain4> swapChain4;
     const ComPtr<IDXGIFactory7>& factory = _dxgiFactoryProxy ? _dxgiFactoryProxy : _dxgiFactory;

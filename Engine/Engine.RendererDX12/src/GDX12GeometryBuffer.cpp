@@ -32,7 +32,7 @@ void GDX12GeometryBuffer::Clear()
     _totalVertices = 0;
 }
 
-void GDX12GeometryBuffer::ResizeVertexBuffer(UINT newSize, UINT updateStart, UINT updateCount)
+void GDX12GeometryBuffer::ResizeVertexBuffer(const UINT newSize, const UINT updateStart, const UINT updateCount)
 {
     if (newSize > UINT_MAX / VERTEX_SIZE) throw std::overflow_error("Vertex buffer exceeds 32-bit addressing");
     auto desc = CD3DX12_RESOURCE_DESC::Buffer(newSize * VERTEX_SIZE, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
@@ -73,7 +73,7 @@ void GDX12GeometryBuffer::ResizeVertexBuffer(UINT newSize, UINT updateStart, UIN
     _vertexBufferView.StrideInBytes = static_cast<UINT>(VERTEX_SIZE);
 }
 
-UINT GDX12GeometryBuffer::AllocateSkinnedVertices(UINT count)
+UINT GDX12GeometryBuffer::AllocateSkinnedVertices(const UINT count)
 {
     if (!count) throw std::invalid_argument("Empty skin slice");
     for (auto it = _freeSkinRanges.begin(); it != _freeSkinRanges.end(); ++it)
@@ -136,7 +136,7 @@ void GDX12GeometryBuffer::EndSkinning(GDX12CommandList* commands)
     _vertexState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
 }
 
-void GDX12GeometryBuffer::ResizeIndexBuffer(UINT newSize)
+void GDX12GeometryBuffer::ResizeIndexBuffer(const UINT newSize)
 {
     auto desc = CD3DX12_RESOURCE_DESC::Buffer(newSize * INDEX_SIZE);
 
@@ -168,7 +168,7 @@ void GDX12GeometryBuffer::ResizeIndexBuffer(UINT newSize)
     _indexBufferView.Format = DXGI_FORMAT_R32_UINT;
 }
 
-void GDX12GeometryBuffer::AddMesh(const Mesh* mesh, MeshHandle handle, std::uint64_t contentRevision)
+void GDX12GeometryBuffer::AddMesh(const Mesh* mesh, const MeshHandle handle, const std::uint64_t contentRevision)
 {
     if (!mesh || !handle.IsValid()) throw std::invalid_argument("Invalid geometry source");
     auto found = _meshCache.find(handle.GetValue());
@@ -256,7 +256,7 @@ void GDX12GeometryBuffer::AddMesh(const Mesh* mesh, MeshHandle handle, std::uint
     _meshCache[handle.GetValue()] = std::move(replacement);
 }
 
-const GPUMesh* GDX12GeometryBuffer::GetGPUMeshByHandle(MeshHandle handle)
+const GPUMesh* GDX12GeometryBuffer::GetGPUMeshByHandle(const MeshHandle handle)
 {
     const auto it = _meshCache.find(handle.GetValue());
     return it != _meshCache.end() && it->second->SourceHandle == handle ? it->second.get() : nullptr;

@@ -7,7 +7,7 @@ static AutoConsoleVariable<bool> Enabled(L"Render.Clouds.Enabled", true,
     L"Allow explicitly selected cloud sources. Default true.", EConsoleVariableFlags::Default);
 static AutoConsoleVariable<int> Quality(L"Render.Clouds.Quality", 2,
     L"0 Off, 1 Low (3 octaves), 2 Mid (5), 3 High (8).", EConsoleVariableFlags::Default,
-    [](int value) { return value >= 0 && value <= 3; });
+    [](const int value) { return value >= 0 && value <= 3; });
 
 GDX12CloudComponent::GDX12CloudComponent()
 {
@@ -26,7 +26,7 @@ void GDX12CloudComponent::Setup(GDX12DeviceResources* resources, GDX12DeviceReso
 
 void GDX12CloudComponent::SetParameters(const GDX12CloudParameters& parameters)
 {
-    const auto colorValid = [](Vector3 color)
+    const auto colorValid = [](const Vector3 color)
     {
         return std::isfinite(color.x) && std::isfinite(color.y) && std::isfinite(color.z) &&
             color.x >= 0 && color.y >= 0 && color.z >= 0 &&
@@ -53,7 +53,7 @@ bool GDX12CloudComponent::IsActive() const
     return _parameters.Enabled && Enabled.GetValue() && Quality.GetValue() != 0;
 }
 
-void GDX12CloudComponent::Advance(double simulationDeltaSeconds)
+void GDX12CloudComponent::Advance(const double simulationDeltaSeconds)
 {
     if (!std::isfinite(simulationDeltaSeconds) || simulationDeltaSeconds < 0 || simulationDeltaSeconds > 3600)
         throw std::invalid_argument("Cloud delta must be finite and within [0, 3600] seconds");

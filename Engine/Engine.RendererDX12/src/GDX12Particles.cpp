@@ -10,14 +10,14 @@ namespace
         L"Enable GPU particle components", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<int> Quality(L"Render.Particles.Quality", 2,
         L"GPU particles: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default,
-        [](int value) { return value >= 0 && value <= 3; });
+        [](const int value) { return value >= 0 && value <= 3; });
 
-    bool InRange(float value, float low, float high)
+    bool InRange(const float value, const float low, const float high)
     {
         return std::isfinite(value) && value >= low && value <= high;
     }
 
-    bool ValidVector(const Vector3& value, float limit)
+    bool ValidVector(const Vector3& value, const float limit)
     {
         return InRange(value.x, -limit, limit) && InRange(value.y, -limit, limit) && InRange(value.z, -limit, limit);
     }
@@ -68,7 +68,7 @@ const std::array<GDX12ParticleMeshVertex, FireflyParticleVertexCount>& GetFirefl
     {
         std::array<GDX12ParticleMeshVertex, FireflyParticleVertexCount> result;
         UINT next = 0;
-        const auto octahedron = [&](Vector3 center, Vector3 radii, Vector4 color, float wing)
+        const auto octahedron = [&](const Vector3 center, const Vector3 radii, const Vector4 color, const float wing)
         {
             const Vector3 axes[] = {{1,0,0}, {-1,0,0}, {0,1,0}, {0,-1,0}, {0,0,1}, {0,0,-1}};
             const UINT faces[][3] = {{2,4,0}, {2,0,5}, {2,5,1}, {2,1,4}, {3,0,4}, {3,5,0}, {3,1,5}, {3,4,1}};
@@ -91,7 +91,7 @@ const std::array<GDX12ParticleMeshVertex, FireflyParticleVertexCount>& GetFirefl
     return vertices;
 }
 
-GDX12ParticleEmitterSettings ResolveParticleEmitterSettings(const GDX12ParticleEmitterSettings& author, int quality)
+GDX12ParticleEmitterSettings ResolveParticleEmitterSettings(const GDX12ParticleEmitterSettings& author, const int quality)
 {
     if (quality < 0 || quality > 3 || !IsValidParticleEmitterSettings(author))
         throw std::invalid_argument("Invalid particle quality or author settings");

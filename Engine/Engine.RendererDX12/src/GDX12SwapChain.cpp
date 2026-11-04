@@ -9,8 +9,8 @@
 #include <Engine.RendererDX12/RenderPasses/GDX12RenderPass.h>
 #include <Engine.Core/Logging/Logger.h>
 
-GDX12SwapChain::GDX12SwapChain(GDX12Device* device, HWND hwnd,
-    DXGI_FORMAT format, UINT bufferCount, UINT width, UINT height, GDX12DescriptorHeap* rtvHeap)
+GDX12SwapChain::GDX12SwapChain(GDX12Device* device, const HWND hwnd,
+    const DXGI_FORMAT format, const UINT bufferCount, const UINT width, const UINT height, GDX12DescriptorHeap* rtvHeap)
     : _device(device), _hwnd(hwnd),
     _format(format), _bufferCount(bufferCount), _currentBufferIndex(0),
     _width(width), _height(height), _rtvHeap(rtvHeap), bVSyncEnabled(false)
@@ -19,7 +19,7 @@ GDX12SwapChain::GDX12SwapChain(GDX12Device* device, HWND hwnd,
     CreatePresentation(false);
 }
 
-void GDX12SwapChain::CreatePresentation(bool applySettings)
+void GDX12SwapChain::CreatePresentation(const bool applySettings)
 {
     DXGI_SWAP_CHAIN_DESC1 swapChainDesc = {};
     swapChainDesc.Width = _width;
@@ -89,7 +89,7 @@ void GDX12SwapChain::CreateBuffers()
     }
 }
 
-void GDX12SwapChain::Resize(UINT width, UINT height)
+void GDX12SwapChain::Resize(const UINT width, const UINT height)
 {
     if (!width || !height || (_width == width && _height == height)) return;
 
@@ -121,7 +121,7 @@ void GDX12SwapChain::BeginFrame(RenderPipelineCommonData& common)
     _frameGeneration->BeginFrame(common);
 }
 
-void GDX12SwapChain::SetFrameGenerationSuspended(bool suspended)
+void GDX12SwapChain::SetFrameGenerationSuspended(const bool suspended)
 {
     if (_frameGeneration->GetStatus().Suspended == suspended) return;
     _device->GetCommandQueue()->Flush();
@@ -170,7 +170,7 @@ GDX12Texture* GDX12SwapChain::GetCurrentBuffer()
     return _buffers[_currentBufferIndex].get();
 }
 
-GDX12Texture* GDX12SwapChain::GetBuffer(UINT index)
+GDX12Texture* GDX12SwapChain::GetBuffer(const UINT index)
 {
     if (index >= _buffers.size())
     {

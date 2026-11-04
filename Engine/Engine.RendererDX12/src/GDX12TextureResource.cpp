@@ -19,16 +19,16 @@ GDX12TextureResource::~GDX12TextureResource()
 }
 
 D3D12_TEXTURE_BARRIER GDX12TextureResource::GetBarrier(
-    D3D12_BARRIER_SYNC syncAfter,
-    D3D12_BARRIER_ACCESS accessAfter,
-    D3D12_BARRIER_LAYOUT layoutAfter)
+    const D3D12_BARRIER_SYNC syncAfter,
+    const D3D12_BARRIER_ACCESS accessAfter,
+    const D3D12_BARRIER_LAYOUT layoutAfter)
 {
     auto barrier = CreateBarrier(syncAfter, accessAfter, layoutAfter);
     SetCurrentState(syncAfter, accessAfter, layoutAfter);
     return barrier;
 }
 
-void GDX12TextureResource::SetCurrentState(D3D12_BARRIER_SYNC sync, D3D12_BARRIER_ACCESS access, D3D12_BARRIER_LAYOUT layout)
+void GDX12TextureResource::SetCurrentState(const D3D12_BARRIER_SYNC sync, const D3D12_BARRIER_ACCESS access, const D3D12_BARRIER_LAYOUT layout)
 {
     _currentSync = sync;
     _currentAccess = access;
@@ -59,7 +59,7 @@ D3D12_BARRIER_LAYOUT GDX12TextureResource::GetCurrentLayout()
 	return _currentLayout;
 }
 
-D3D12_TEXTURE_BARRIER GDX12TextureResource::CreateBarrier(D3D12_BARRIER_SYNC syncAfter, D3D12_BARRIER_ACCESS accessAfter, D3D12_BARRIER_LAYOUT layoutAfter)
+D3D12_TEXTURE_BARRIER GDX12TextureResource::CreateBarrier(const D3D12_BARRIER_SYNC syncAfter, const D3D12_BARRIER_ACCESS accessAfter, const D3D12_BARRIER_LAYOUT layoutAfter)
 {
     D3D12_TEXTURE_BARRIER barrier = {};
 

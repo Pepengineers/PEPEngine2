@@ -83,7 +83,7 @@ namespace
         std::unique_ptr<Buffer<UINT>> Dead, Counters, Args;
         std::vector<std::unique_ptr<Buffer<EmitterConstants>>> Constants;
 
-        Pool(GDX12DeviceResources* resources, UINT capacity) : Capacity(capacity)
+        Pool(GDX12DeviceResources* resources, const UINT capacity) : Capacity(capacity)
         {
             Particles = CreateBuffer<Particle>(resources, capacity);
             Alive[0] = CreateBuffer<UINT>(resources, capacity);
@@ -240,7 +240,7 @@ struct GDX12ParticlesPass::State
             CompileCompute(resources, "ParticleSort.hlsl", entry, SortRoot.get());
     }
 
-    void AllocateDraws(GDX12DeviceResources* resources, UINT capacity, bool sorted, bool mesh)
+    void AllocateDraws(GDX12DeviceResources* resources, const UINT capacity, const bool sorted, const bool mesh)
     {
         Capacity = capacity;
         Sorted = sorted;
@@ -313,7 +313,7 @@ struct GDX12ParticlesPass::State
         }
     }
 
-    void Draw(GDX12CommandList* commands, GDX12DeviceResources* resources, RenderPipelineCommonData* common, UINT mode)
+    void Draw(GDX12CommandList* commands, GDX12DeviceResources* resources, RenderPipelineCommonData* common, const UINT mode)
     {
         commands->SetGraphicsRootSignature(Root.get());
         commands->SetDescriptorHeaps({ resources->SRV_UAV_Heap.get() });

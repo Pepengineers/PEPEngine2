@@ -107,7 +107,7 @@ ComPtr<ID3D12Fence>& GDX12CommandQueue::GetOtherFence()
     return _otherFence;
 }
 
-void GDX12CommandQueue::CPUWaitForFenceValue(uint64_t fenceValue)
+void GDX12CommandQueue::CPUWaitForFenceValue(const uint64_t fenceValue)
 {
     if (_fence->GetCompletedValue() >= fenceValue) { return; }
 
@@ -117,7 +117,7 @@ void GDX12CommandQueue::CPUWaitForFenceValue(uint64_t fenceValue)
     CloseHandle(event);
 }
 
-void GDX12CommandQueue::WaitForOtherFence(uint64_t otherFenceValue)
+void GDX12CommandQueue::WaitForOtherFence(const uint64_t otherFenceValue)
 {
     _commandQueue->Wait(_otherFence.Get(), otherFenceValue);
 }

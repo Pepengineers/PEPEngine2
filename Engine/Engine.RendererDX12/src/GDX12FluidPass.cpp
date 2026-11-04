@@ -138,7 +138,7 @@ void GDX12FluidSurfacePass::CreateTargets()
     if (_depth) return;
     const UINT width = _inputs[0]->GetTexture()->GetWidth();
     const UINT height = _inputs[0]->GetTexture()->GetHeight();
-    const auto texture = [&](DXGI_FORMAT format, bool renderTarget = false)
+    const auto texture = [&](const DXGI_FORMAT format, const bool renderTarget = false)
     {
         auto result = std::make_unique<GDX12Texture>();
         GDX12TextureDesc desc;
@@ -254,7 +254,7 @@ void GDX12FluidSurfacePass::PrepareStates()
     }
 }
 
-void GDX12FluidSurfacePass::Simulate(GDX12CommandList* commands, State& state, const GDX12FluidSettings& settings, float elapsed)
+void GDX12FluidSurfacePass::Simulate(GDX12CommandList* commands, State& state, const GDX12FluidSettings& settings, const float elapsed)
 {
     // Reusing the upload slot requires its completed fence, including the initial seed copy.
     if (!state.SeedPending && state.SeedFrameSlot == _resources->CurrFrameConstantsIndex)
@@ -336,7 +336,7 @@ void GDX12FluidSurfacePass::Simulate(GDX12CommandList* commands, State& state, c
     }
 }
 
-void GDX12FluidSurfacePass::SurfaceBindings(GDX12CommandList* commands, State& state, UINT owner, UINT mode)
+void GDX12FluidSurfacePass::SurfaceBindings(GDX12CommandList* commands, State& state, const UINT owner, const UINT mode)
 {
     commands->SetComputeRootSignature(_surfaceRoot.get());
     UINT dispatch[] = { _depth->GetWidth(), _depth->GetHeight(), owner, mode };
@@ -354,7 +354,7 @@ void GDX12FluidSurfacePass::SurfaceBindings(GDX12CommandList* commands, State& s
     commands->SetComputeUAV(3, _owner->GetUAV()->GPUHandle);
 }
 
-void GDX12FluidSurfacePass::DrawSurface(GDX12CommandList* commands, State& state, UINT owner,
+void GDX12FluidSurfacePass::DrawSurface(GDX12CommandList* commands, State& state, const UINT owner,
     const GDX12FluidSettings& settings)
 {
     commands->ResourceBarrier({ state.Particles[state.Current]->GetResource().GetSRVBarrier(),

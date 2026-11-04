@@ -93,7 +93,7 @@ void GDX12GPUTimer::Stop(GDX12CommandList* commandList)
         _readbackBuffer.Get(), GetReadbackOffset(_activeFrameIndex));
 }
 
-void GDX12GPUTimer::OnCommandListExecuted(UINT64 fenceValue)
+void GDX12GPUTimer::OnCommandListExecuted(const UINT64 fenceValue)
 {
     _frameFenceValues[_activeFrameIndex] = fenceValue;
     _activeFrameIndex = (_activeFrameIndex + 1) % BufferedFrameCount;
@@ -137,17 +137,17 @@ void GDX12GPUTimer::UpdateResolvedFrames()
     if (latestResolvedFenceValue != 0) { _timeMS = latestResolvedTimeMS; }
 }
 
-UINT GDX12GPUTimer::GetStartQueryIndex(UINT frameIndex) const
+UINT GDX12GPUTimer::GetStartQueryIndex(const UINT frameIndex) const
 {
     return frameIndex * QueryCount;
 }
 
-UINT GDX12GPUTimer::GetEndQueryIndex(UINT frameIndex) const
+UINT GDX12GPUTimer::GetEndQueryIndex(const UINT frameIndex) const
 {
     return GetStartQueryIndex(frameIndex) + 1;
 }
 
-UINT64 GDX12GPUTimer::GetReadbackOffset(UINT frameIndex) const
+UINT64 GDX12GPUTimer::GetReadbackOffset(const UINT frameIndex) const
 {
     return static_cast<UINT64>(GetStartQueryIndex(frameIndex)) * sizeof(UINT64);
 }

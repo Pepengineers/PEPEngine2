@@ -2,7 +2,7 @@
 
 #include <Engine.RendererDX12/D3DHelpers.h>
 
-DxException::DxException (HRESULT hr, const std::wstring& functionName, const std::wstring& fileName, int lineNumber)
+DxException::DxException (const HRESULT hr, const std::wstring& functionName, const std::wstring& fileName, const int lineNumber)
 	: ErrorCode(hr)
 	, FunctionName(functionName)
 	, FileName(fileName)
@@ -72,7 +72,7 @@ std::vector<CD3DX12_STATIC_SAMPLER_DESC> GetStaticSamplers()
         anisotropicWrap, anisotropicClamp };
 }
 
-DXGI_FORMAT FormatToSRGB(DXGI_FORMAT format)
+DXGI_FORMAT FormatToSRGB(const DXGI_FORMAT format)
 {
     switch (format)
     {

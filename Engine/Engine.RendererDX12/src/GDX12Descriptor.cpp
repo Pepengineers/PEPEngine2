@@ -17,7 +17,7 @@ GDX12Descriptor::~GDX12Descriptor()
     if (HeapIndex != -1) { _heap->_occupanceRegistry[HeapIndex] = false; }
 }
 
-void GDX12Descriptor::InitAsSRV(ID3D12Resource* resource, D3D12_SHADER_RESOURCE_VIEW_DESC* srvDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex)
+void GDX12Descriptor::InitAsSRV(ID3D12Resource* resource, D3D12_SHADER_RESOURCE_VIEW_DESC* srvDesc, GDX12DescriptorHeap* inHeap, const UINT heapIndex)
 {
     _heap = inHeap;
     HeapIndex = heapIndex;
@@ -33,7 +33,7 @@ void GDX12Descriptor::InitAsSRV(ID3D12Resource* resource, D3D12_SHADER_RESOURCE_
     else { OutputDebugStringA("ERROR: Cannot create SRV in a non-CBV_SRV_UAV heap\n"); }
 }
 
-void GDX12Descriptor::InitAsCBV(D3D12_CONSTANT_BUFFER_VIEW_DESC* cbvDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex)
+void GDX12Descriptor::InitAsCBV(D3D12_CONSTANT_BUFFER_VIEW_DESC* cbvDesc, GDX12DescriptorHeap* inHeap, const UINT heapIndex)
 {
     _heap = inHeap;
     HeapIndex = heapIndex;
@@ -49,7 +49,7 @@ void GDX12Descriptor::InitAsCBV(D3D12_CONSTANT_BUFFER_VIEW_DESC* cbvDesc, GDX12D
     else { OutputDebugStringA("ERROR: Cannot create CBV in a non-CBV_SRV_UAV heap\n"); }
 }
 
-void GDX12Descriptor::InitAsUAV(ID3D12Resource* resource, ID3D12Resource* counterResource, D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex)
+void GDX12Descriptor::InitAsUAV(ID3D12Resource* resource, ID3D12Resource* counterResource, D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc, GDX12DescriptorHeap* inHeap, const UINT heapIndex)
 {
     _heap = inHeap;
     HeapIndex = heapIndex;
@@ -65,7 +65,7 @@ void GDX12Descriptor::InitAsUAV(ID3D12Resource* resource, ID3D12Resource* counte
     else { OutputDebugStringA("ERROR: Cannot create UAV in a non-CBV_SRV_UAV heap\n"); }
 }
 
-void GDX12Descriptor::InitAsDSV(ID3D12Resource* resource, D3D12_DEPTH_STENCIL_VIEW_DESC* dsvDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex)
+void GDX12Descriptor::InitAsDSV(ID3D12Resource* resource, D3D12_DEPTH_STENCIL_VIEW_DESC* dsvDesc, GDX12DescriptorHeap* inHeap, const UINT heapIndex)
 {
     _heap = inHeap;
     HeapIndex = heapIndex;
@@ -81,7 +81,7 @@ void GDX12Descriptor::InitAsDSV(ID3D12Resource* resource, D3D12_DEPTH_STENCIL_VI
     else { OutputDebugStringA("ERROR: Cannot create DSV in a non-DSV heap\n"); }
 }
 
-void GDX12Descriptor::InitAsRTV(ID3D12Resource* resource, D3D12_RENDER_TARGET_VIEW_DESC* rtvDesc, GDX12DescriptorHeap* inHeap, UINT heapIndex)
+void GDX12Descriptor::InitAsRTV(ID3D12Resource* resource, D3D12_RENDER_TARGET_VIEW_DESC* rtvDesc, GDX12DescriptorHeap* inHeap, const UINT heapIndex)
 {
     _heap = inHeap;
     HeapIndex = heapIndex;

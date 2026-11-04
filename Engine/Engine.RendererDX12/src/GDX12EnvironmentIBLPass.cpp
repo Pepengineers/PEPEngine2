@@ -69,7 +69,7 @@ void GDX12EnvironmentIBLPass::SetCloudSource(GDX12CloudComponent* source)
     Invalidate();
 }
 
-void GDX12EnvironmentIBLPass::CreateTexture(GDX12Texture& texture, UINT width, UINT height, UINT depth, UINT mips, bool cube)
+void GDX12EnvironmentIBLPass::CreateTexture(GDX12Texture& texture, const UINT width, const UINT height, const UINT depth, const UINT mips, const bool cube)
 {
     // Every replacement and descriptor rewrite is preceded by a queue drain in Ensure*.
     const auto resource = depth > 1 && !cube ?
@@ -186,7 +186,7 @@ void GDX12EnvironmentIBLPass::EnsureAtmosphere(const SkyAtmosphereSettings& s)
     PublishAtmosphereViews(true);
 }
 
-void GDX12EnvironmentIBLPass::BindSky(GDX12CommandList* commands, UINT constantIndex)
+void GDX12EnvironmentIBLPass::BindSky(GDX12CommandList* commands, const UINT constantIndex)
 {
     auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     commands->SetComputeRootSignature(_skyRoot.get());
@@ -199,7 +199,7 @@ void GDX12EnvironmentIBLPass::BindSky(GDX12CommandList* commands, UINT constantI
         commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
 }
 
-void GDX12EnvironmentIBLPass::DispatchLUT(GDX12CommandList* commands, UINT pipeline, UINT index)
+void GDX12EnvironmentIBLPass::DispatchLUT(GDX12CommandList* commands, const UINT pipeline, const UINT index)
 {
     commands->SetPipelineState(_skyPipelines[pipeline]);
     auto* texture = _luts[index].get();
@@ -209,12 +209,12 @@ void GDX12EnvironmentIBLPass::DispatchLUT(GDX12CommandList* commands, UINT pipel
     commands->ResourceBarrier({ texture->GetResource()->GetSRVBarrier() });
 }
 
-void GDX12EnvironmentIBLPass::Filter(GDX12CommandList* commands, UINT samples, float intensity)
+void GDX12EnvironmentIBLPass::Filter(GDX12CommandList* commands, const UINT samples, const float intensity)
 {
     commands->SetComputeRootSignature(_filterRoot.get());
     commands->SetComputeSRV(0, _textures[3]->GetSRV()->GPUHandle);
     for (UINT i = 0; i < 3; ++i) commands->ResourceBarrier({ _textures[i]->GetResource()->GetUnorderedAccessBarrier() });
-    const auto dispatch = [&](UINT pipeline, UINT size, float roughness, D3D12_GPU_DESCRIPTOR_HANDLE uav, UINT slot, UINT faces)
+    const auto dispatch = [&](const UINT pipeline, const UINT size, const float roughness, const D3D12_GPU_DESCRIPTOR_HANDLE uav, const UINT slot, const UINT faces)
     {
         struct { UINT Size; float Roughness; UINT Samples; float Intensity; } parameters = { size, roughness, samples, intensity };
         commands->SetPipelineState(_filters[pipeline]);
@@ -279,7 +279,7 @@ void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
         atmosphere = ResolveSkyAtmosphereSettings(state.Atmosphere, state.Quality);
         ibl = atmosphere.IBL;
         EnsureAtmosphere(atmosphere);
-        const auto pack = [](const Vector3& value, float w) { return XMFLOAT4(value.x, value.y, value.z, w); };
+        const auto pack = [](const Vector3& value, const float w) { return XMFLOAT4(value.x, value.y, value.z, w); };
         constants.RayleighHeight = pack(atmosphere.RayleighScatteringPerKm, atmosphere.RayleighScaleHeightKm);
         constants.MieScatteringHeight = pack(atmosphere.MieScatteringPerKm, atmosphere.MieScaleHeightKm);
         constants.MieAbsorptionG = pack(atmosphere.MieAbsorptionPerKm, atmosphere.MieAnisotropy);

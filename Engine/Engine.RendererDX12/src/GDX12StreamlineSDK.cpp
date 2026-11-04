@@ -102,7 +102,7 @@ bool GDX12StreamlineSDK::IsEnabled() const
     return _initialized;
 }
 
-std::string GDX12StreamlineSDK::ResultToString(sl::Result result)
+std::string GDX12StreamlineSDK::ResultToString(const sl::Result result)
 {
     const char* name = sl::getResultAsStr(result);
     return name ? name : "UNKNOWN_RESULT";
@@ -122,7 +122,7 @@ ComPtr<IDXGISwapChain4> GDX12StreamlineSDK::CreateProxySwapChain(const ComPtr<ID
     return UpgradeInterface(swapChain, "slUpgradeInterface(IDXGISwapChain4)");
 }
 
-ComPtr<ID3D12Device14> GDX12StreamlineSDK::CreateProxyDevice(const ComPtr<ID3D12Device14>& nativeDevice, bool setAsMainDevice) const
+ComPtr<ID3D12Device14> GDX12StreamlineSDK::CreateProxyDevice(const ComPtr<ID3D12Device14>& nativeDevice, const bool setAsMainDevice) const
 {
     if (!_initialized || !nativeDevice)
     {
@@ -180,18 +180,18 @@ ComPtr<ID3D12Resource> GDX12StreamlineSDK::GetNativeResource(const ComPtr<ID3D12
     return UnwrapInterface(resource);
 }
 
-sl::Result GDX12StreamlineSDK::IsFeatureSupported(sl::Feature feature, const sl::AdapterInfo& adapterInfo) const
+sl::Result GDX12StreamlineSDK::IsFeatureSupported(const sl::Feature feature, const sl::AdapterInfo& adapterInfo) const
 {
     return _initialized && _slIsFeatureSupported ? _slIsFeatureSupported(feature, adapterInfo) : sl::Result::eErrorInvalidState;
 }
 
-sl::Result GDX12StreamlineSDK::GetFeatureFunction(sl::Feature feature, const char* name, void*& function) const
+sl::Result GDX12StreamlineSDK::GetFeatureFunction(const sl::Feature feature, const char* name, void*& function) const
 {
     function = nullptr;
     return _initialized && _slGetFeatureFunction ? _slGetFeatureFunction(feature, name, function) : sl::Result::eErrorInvalidState;
 }
 
-sl::Result GDX12StreamlineSDK::SetFeatureLoaded(sl::Feature feature, bool loaded) const
+sl::Result GDX12StreamlineSDK::SetFeatureLoaded(const sl::Feature feature, const bool loaded) const
 {
     return _initialized && _slSetFeatureLoaded ? _slSetFeatureLoaded(feature, loaded) : sl::Result::eErrorInvalidState;
 }
@@ -202,17 +202,17 @@ sl::Result GDX12StreamlineSDK::GetNewFrameToken(sl::FrameToken*& token, const ui
     return _initialized && _slGetNewFrameToken ? _slGetNewFrameToken(token, frameIndex) : sl::Result::eErrorInvalidState;
 }
 
-sl::Result GDX12StreamlineSDK::SetTagForFrame(const sl::FrameToken& frame, const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer) const
+sl::Result GDX12StreamlineSDK::SetTagForFrame(const sl::FrameToken& frame, const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, const uint32_t numTags, sl::CommandBuffer* cmdBuffer) const
 {
     return _initialized && _slSetTagForFrame ? _slSetTagForFrame(frame, viewport, tags, numTags, cmdBuffer) : sl::Result::eErrorInvalidState;
 }
 
-sl::Result GDX12StreamlineSDK::EvaluateFeature(sl::Feature feature, const sl::FrameToken& frame, const sl::BaseStructure** inputs, uint32_t numInputs, sl::CommandBuffer* cmdBuffer) const
+sl::Result GDX12StreamlineSDK::EvaluateFeature(const sl::Feature feature, const sl::FrameToken& frame, const sl::BaseStructure** inputs, const uint32_t numInputs, sl::CommandBuffer* cmdBuffer) const
 {
     return _initialized && _slEvaluateFeature ? _slEvaluateFeature(feature, frame, inputs, numInputs, cmdBuffer) : sl::Result::eErrorInvalidState;
 }
 
-sl::Result GDX12StreamlineSDK::FreeResources(sl::Feature feature, const sl::ViewportHandle& viewport) const
+sl::Result GDX12StreamlineSDK::FreeResources(const sl::Feature feature, const sl::ViewportHandle& viewport) const
 {
     return _initialized && _slFreeResources ? _slFreeResources(feature, viewport) : sl::Result::eErrorInvalidState;
 }
@@ -255,7 +255,7 @@ sl::Result GDX12StreamlineSDK::NISSetOptions(const sl::ViewportHandle& viewport,
     return _slNISSetOptions(viewport, options);
 }
 
-void GDX12StreamlineSDK::StreamlineLog(sl::LogType type, const char* message)
+void GDX12StreamlineSDK::StreamlineLog(const sl::LogType type, const char* message)
 {
     const char* level = "INFO";
     if (type == sl::LogType::eWarn) { level = "WARNING"; }
@@ -333,7 +333,7 @@ void GDX12StreamlineSDK::LogWarning(const std::string& message) const
     OutputDebugStringA(formattedMessage.c_str());
 }
 
-void GDX12StreamlineSDK::LogFailure(const char* operation, sl::Result result) const
+void GDX12StreamlineSDK::LogFailure(const char* operation, const sl::Result result) const
 {
     std::string formattedMessage = std::string("Streamline ERROR: ") + operation + " failed: " + ResultToString(result) + '\n';
     OutputDebugStringA(formattedMessage.c_str());

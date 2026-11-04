@@ -43,7 +43,7 @@ GDX12FrameConstants::~GDX12FrameConstants()
     CameraCB.reset();
 }
 
-bool GDX12FrameConstants::IsInUseByGPU(UINT64 currentFence)
+bool GDX12FrameConstants::IsInUseByGPU(const UINT64 currentFence)
 {
     return currentFence < FenceValue;
 }
