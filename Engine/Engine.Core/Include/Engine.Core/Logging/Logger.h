@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <spdlog/fmt/fmt.h>
 #include <functional>
@@ -11,7 +12,7 @@
 #include <type_traits>
 #include <utility>
 
-enum class LogLevel { Info, Warning, Error };
+enum class LogLevel : std::uint8_t { Info, Warning, Error };
 
 class Logger final
 {

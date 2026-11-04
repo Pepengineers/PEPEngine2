@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 #include "Engine.RendererDX12/GDX12Device.h"
@@ -11,7 +12,7 @@
 #include <atomic>
 #include <stdexcept>
 
-enum class EBufferType
+enum class EBufferType : std::uint8_t
 {
     Upload,
     Default

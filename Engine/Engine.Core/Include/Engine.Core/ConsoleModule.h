@@ -13,13 +13,13 @@
 
 #include "Common/Module.h"
 
-enum class EConsoleVariableFlags : uint8_t
+enum class EConsoleVariableFlags : std::uint8_t
 {
     Default = 0,
     ReadOnly = 1
 };
 
-enum class EConsoleVariableType : uint8_t
+enum class EConsoleVariableType : std::uint8_t
 {
     Boolean,
     Integer,

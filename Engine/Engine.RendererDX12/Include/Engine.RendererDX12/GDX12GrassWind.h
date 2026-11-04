@@ -3,8 +3,8 @@
 #include <vector>
 #include <cstdint>
 
-enum class GDX12GrassImplementation : UINT { Ribbon, CrossedRibbons };
-enum class GDX12WindImplementation : UINT { Analytic, ProjectedGrid };
+enum class GDX12GrassImplementation : std::uint8_t { Ribbon, CrossedRibbons };
+enum class GDX12WindImplementation : std::uint8_t { Analytic, ProjectedGrid };
 
 struct GDX12GrassSettings
 {

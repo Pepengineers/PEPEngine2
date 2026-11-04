@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include "Engine.RendererDX12\D3DHelpers.h"
 
 #include "Engine.RendererDX12/GDX12ResourceHandle.h"
@@ -17,7 +18,7 @@ struct DeviceSpecs
 	CD3DX12FeatureSupport Features;
 };
 
-enum EDeviceRole
+enum EDeviceRole : std::uint8_t
 {
 	DEVICE_ROLE_PRIMARY,
 	DEVICE_ROLE_SECONDARY

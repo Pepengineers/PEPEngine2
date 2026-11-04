@@ -1,3 +1,4 @@
+#include <cstdint>
 #include "Common/ConsoleVariables.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include <chrono>
@@ -18,10 +19,10 @@ namespace
     {
         if (!condition) throw std::runtime_error(message);
     }
-    enum class Quality : unsigned { Low, High, Count };
-    enum class SignedQuality { Low, High, Count };
-    enum class LegacyMode { Automatic = -3, Manual = 11 };
-    enum class NativeQuality { Inherit = -1, Low, High, Count, First = Inherit };
+    enum class Quality : std::uint8_t { Low, High, Count };
+    enum class SignedQuality : std::int8_t { Low, High, Count };
+    enum class LegacyMode : std::int8_t { Automatic = -3, Manual = 11 };
+    enum class NativeQuality : std::int8_t { Inherit = -1, Low, High, Count, First = Inherit };
 }
 
 int main(int argc, char**)

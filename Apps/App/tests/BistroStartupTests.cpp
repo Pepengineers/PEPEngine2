@@ -1,3 +1,4 @@
+#include <cstdint>
 #include "App.Base/App.h"
 // Exercise the real bootstrap: the other scene tests register their own modules.
 #define WinMain BistroEntryPointForTest
@@ -120,7 +121,7 @@ int main(int argc, char** argv)
         check(ImGui::GetCurrentContext() && ImGui::GetDrawData() && ImGui::GetDrawData()->TotalVtxCount > 0,
             "Image quality window must generate visible ImGui geometry");
         {
-            enum class ProbeMode { First, Second, Third, Count };
+            enum class ProbeMode : std::uint8_t { First, Second, Third, Count };
             AutoConsoleVariable<ProbeMode> discovered(L"Render.AutoDiscoveryTest.NewSetting", ProbeMode::Second,
                 L"Runtime registration probe: 0 First, 1 Second, 2 Third");
             AutoConsoleVariable<float> size(L"Render.AutoDiscoveryTest.Size", 1.25f);

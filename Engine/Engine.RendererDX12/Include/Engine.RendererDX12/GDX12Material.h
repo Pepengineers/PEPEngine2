@@ -1,12 +1,13 @@
 #pragma once
 
+#include <cstdint>
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 #include "Engine.Core/Types/TextureTypes.h"
 
 class GDX12Texture;
 
-enum class MaterialType
+enum class MaterialType : std::uint8_t
 {
 	Opaque = 0,
 	Masked = 1,

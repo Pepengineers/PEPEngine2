@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include "App.Base/ECS/World.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "Engine.Core/BenchmarkEngine.h"
@@ -14,8 +15,8 @@ namespace BistroGrass
         L"Bistro entrance grass patches, 0 disables, maximum 16",
         EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 16; });
 
-    enum class Geometry { Ribbon, CrossedRibbons, Count };
-    enum class WindAlgorithm { Analytic, ProjectedGrid, Count };
+    enum class Geometry : std::uint8_t { Ribbon, CrossedRibbons, Count };
+    enum class WindAlgorithm : std::uint8_t { Analytic, ProjectedGrid, Count };
     inline AutoConsoleVariable<Geometry> Implementation(L"App.Grass.Implementation", Geometry::CrossedRibbons,
         L"0 Ribbon, 1 CrossedRibbons; runtime grass geometry");
     inline AutoConsoleVariable<float> ExtentsXCm(L"App.Grass.ExtentsXCm", 55,

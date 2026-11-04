@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 
@@ -18,7 +19,7 @@ public:
         graph.Write(_outputs[1], "Transparency revealage");
     }
 
-	enum class WaterPartition { All, Behind, Front };
+	enum class WaterPartition : std::uint8_t { All, Behind, Front };
 
 	GDX12WBOITTransparencyPass(WaterPartition partition = WaterPartition::All,
         GDX12WBOITTransparencyPass* reuse = nullptr) : IN_DepthStencil(nullptr), _partition(partition), _reuse(reuse)

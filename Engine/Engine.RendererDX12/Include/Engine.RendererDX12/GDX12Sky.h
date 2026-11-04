@@ -4,7 +4,7 @@
 #include <cstdint>
 
 // Source selection belongs to the world; components never compete by iteration order.
-enum class SkySource : UINT { Off, SkyBox, SkyAtmosphere };
+enum class SkySource : std::uint8_t { Off, SkyBox, SkyAtmosphere };
 
 struct SkyIBLSettings
 {

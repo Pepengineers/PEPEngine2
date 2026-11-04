@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <array>
@@ -24,7 +25,7 @@ public:
         }
     }
 
-    enum class Stage { Full, DepthPrepass, GBuffer };
+    enum class Stage : std::uint8_t { Full, DepthPrepass, GBuffer };
 
 	GDX12OpaquePass(Stage stage = Stage::Full) : _stage(stage)
 	{ 

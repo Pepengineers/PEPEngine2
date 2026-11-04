@@ -1,3 +1,4 @@
+#include <cstdint>
 #include "Engine.RendererDX12/GDX12AmbientOcclusion.h"
 #include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12Quality.h"
@@ -7,9 +8,9 @@
 namespace
 {
     constexpr auto Runtime = EConsoleVariableFlags::Default;
-    enum class AOExecutionPoint { AfterDepthPrepass, BeforeLighting, Count };
-    enum class AOImplementation { SSAO, HBAO, XeGTAO, CACAO, Count };
-    enum class CacaoQuality { Inherit = -1, Lowest, Low, Medium, High, Highest, Count, First = Inherit };
+    enum class AOExecutionPoint : std::uint8_t { AfterDepthPrepass, BeforeLighting, Count };
+    enum class AOImplementation : std::uint8_t { SSAO, HBAO, XeGTAO, CACAO, Count };
+    enum class CacaoQuality : std::int8_t { Inherit = -1, Lowest, Low, Medium, High, Highest, Count, First = Inherit };
     static AutoConsoleVariable<AOExecutionPoint> ExecutionPoint(L"Render.AO.ExecutionPoint", AOExecutionPoint::BeforeLighting,
         L"0 after depth prepass, 1 before lighting", Runtime);
     static AutoConsoleVariable<bool> Enabled(L"Render.AO.Enabled", true, L"Enable ambient occlusion", Runtime);

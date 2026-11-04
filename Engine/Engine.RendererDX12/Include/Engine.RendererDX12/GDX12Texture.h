@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include "Engine.RendererDX12/GDX12ResourceHandle.h"
 
 #include "Engine.RendererDX12\D3DHelpers.h"
@@ -13,7 +14,7 @@ class GDX12Device;
 class GDX12CommandList;
 class GDX12TextureResource;
 
-enum class ETextureSemantic
+enum class ETextureSemantic : std::uint8_t
 {
 	Unknown,
 	Color,

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include <array>
@@ -32,7 +33,7 @@ public:
     const Statistics& GetStatistics() const { return _statistics; }
 
 private:
-    enum Geometry : UINT { AllGeometry, StaticGeometry, DynamicGeometry };
+    enum Geometry : std::uint8_t { AllGeometry, StaticGeometry, DynamicGeometry };
 
     struct ProbeState
     {

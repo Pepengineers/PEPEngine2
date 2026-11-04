@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12AmbientOcclusion.h"
 
@@ -32,7 +33,7 @@ private:
         UINT Directions, Steps, DenoisePasses, Implementation;
         float Slices, SliceSteps, Padding[2];
     };
-    enum Pipeline { PrepareNormals, SSAO, HBAO, Blur, Resolve, XePrefilter, XeMain, XeDenoise, Neutral, PipelineCount };
+    enum Pipeline : std::uint8_t { PrepareNormals, SSAO, HBAO, Blur, Resolve, XePrefilter, XeMain, XeDenoise, Neutral, PipelineCount };
     void CreateTextures();
     void CreateTexture(GDX12Texture& texture, DXGI_FORMAT format, UINT width, UINT height, UINT mips = 1);
     void Bind(GDX12CommandList* commands);

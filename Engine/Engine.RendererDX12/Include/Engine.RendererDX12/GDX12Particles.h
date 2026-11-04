@@ -1,12 +1,13 @@
 #pragma once
+#include <cstdint>
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include "Engine.RendererDX12/GDX12Material.h"
 #include <array>
 
-enum class ParticleBlend : UINT { WeightedAlpha, Additive, SortedAlpha };
-enum class ParticleShape : UINT { Point, Box, Sphere };
-enum class ParticleGeometry : UINT { Billboard, Firefly };
-enum class ParticleSimulation : UINT { AnalyticDrag, SemiImplicitEuler, Count };
+enum class ParticleBlend : std::uint8_t { WeightedAlpha, Additive, SortedAlpha };
+enum class ParticleShape : std::uint8_t { Point, Box, Sphere };
+enum class ParticleGeometry : std::uint8_t { Billboard, Firefly };
+enum class ParticleSimulation : std::uint8_t { AnalyticDrag, SemiImplicitEuler, Count };
 
 struct GDX12ParticleMeshVertex
 {

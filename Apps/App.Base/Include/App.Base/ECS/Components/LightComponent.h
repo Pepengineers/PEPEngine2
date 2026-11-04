@@ -1,9 +1,10 @@
 #pragma once
+#include <cstdint>
 #include "Engine.Core/ECS/Component.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
 
-enum class LightType : uint32_t { Directional, Point, Spot };
-enum class ShadowUpdateMode : uint32_t { Cached, EveryFrame };
+enum class LightType : std::uint8_t { Directional, Point, Spot };
+enum class ShadowUpdateMode : std::uint8_t { Cached, EveryFrame };
 
 struct LightComponent : ComponentTag
 {

@@ -1,10 +1,11 @@
 #pragma once
 
+#include <cstdint>
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 class GDX12DescriptorHeap;
 
-enum GDX12DescriptorType { DESC_TYPE_NONE, DESC_TYPE_SRV, DESC_TYPE_CBV, DESC_TYPE_UAV, DESC_TYPE_DSV, DESC_TYPE_RTV };
+enum GDX12DescriptorType : std::uint8_t { DESC_TYPE_NONE, DESC_TYPE_SRV, DESC_TYPE_CBV, DESC_TYPE_UAV, DESC_TYPE_DSV, DESC_TYPE_RTV };
 
 class GDX12Descriptor
 {

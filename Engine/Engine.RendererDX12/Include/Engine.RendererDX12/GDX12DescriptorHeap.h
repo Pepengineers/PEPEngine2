@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include "Engine.RendererDX12/D3DHelpers.h"
 
 class GDX12Device;
@@ -45,7 +46,7 @@ private:
 };
 
 // Don't forget to update these values in CBufferStructures.hlsl
-enum GDX12SRVHeapIndexAllocation
+enum GDX12SRVHeapIndexAllocation : std::uint32_t
 {
     GBuffer_Color = 0,
     GBuffer_Normal = 1,

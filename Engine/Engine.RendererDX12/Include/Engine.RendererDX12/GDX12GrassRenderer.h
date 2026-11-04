@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include "Engine.RendererDX12/GDX12GrassWind.h"
 #include "Engine.RendererDX12/GDX12UploadBuffer.h"
 #include "Engine.RendererDX12/GDX12RootSignature.h"
@@ -14,7 +15,7 @@ class GDX12Texture;
 class GDX12GrassRenderer
 {
 public:
-    enum class Stage : UINT { Full, GBuffer, PrepassNormals, Depth, Shadow, Capture };
+    enum class Stage : std::uint8_t { Full, GBuffer, PrepassNormals, Depth, Shadow, Capture };
     struct CaptureLighting
     {
         GDX12Texture* SunShadow = nullptr;

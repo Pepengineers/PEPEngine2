@@ -1,8 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include "Engine.RendererDX12/D3DHelpers.h"
 
-enum class BistroFixtureKind { Point, Spot };
+enum class BistroFixtureKind : std::uint8_t { Point, Spot };
 
 struct BistroLightPlacement
 {

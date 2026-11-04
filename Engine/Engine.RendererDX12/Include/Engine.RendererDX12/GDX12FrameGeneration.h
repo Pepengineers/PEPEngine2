@@ -8,7 +8,7 @@ class GDX12CommandList;
 class GDX12Texture;
 class RenderPipelineCommonData;
 
-enum class GDX12FrameGenerationProvider { Off, AMD, NVIDIA, Intel, Count };
+enum class GDX12FrameGenerationProvider : std::uint8_t { Off, AMD, NVIDIA, Intel, Count };
 GDX12FrameGenerationProvider GetFrameGenerationProvider();
 
 struct GDX12FrameGenerationStatus

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.RendererDX12/GDX12DeviceResources.h"
@@ -16,7 +17,7 @@ class GameTimer;
 class JobSystem;
 namespace sl { struct FrameToken; }
 
-enum ERenderPassFlags : uint32_t
+enum ERenderPassFlags : std::uint16_t
 {
     RENDER_PASS_FLAG_NONE = 0,
     RENDER_PASS_FLAG_USE_GEOMETRY = 1 << 0,
