@@ -24,6 +24,7 @@ namespace Engine::UI
         std::unique_ptr<GDX12DescriptorHeap> Heap;
         std::vector<UINT> FreeDescriptors;
         bool Visible = true;
+        bool FrameBegun = false;
         std::string InvalidVariable;
 
         std::string Utf8(std::wstring_view text)
@@ -178,16 +179,76 @@ namespace Engine::UI
     void BeginFrame()
     {
         if (!ImGui::GetCurrentContext()) return;
+        if (FrameBegun) ImGui::EndFrame();
         ImGui_ImplDX12_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
+        FrameBegun = true;
         DrawSettings();
-        ImGui::Render();
+    }
+
+    void DrawWorldBox(const DirectX::BoundingBox& box, const DirectX::XMFLOAT4X4& viewProjection,
+        const char* label, unsigned int color)
+    {
+        if (!FrameBegun || !ImGui::GetCurrentContext()) return;
+        DirectX::XMFLOAT3 corners[8];
+        box.GetCorners(corners);
+        DirectX::XMFLOAT4 clip[8];
+        const auto matrix = DirectX::XMLoadFloat4x4(&viewProjection);
+        for (unsigned i = 0; i < 8; ++i)
+            DirectX::XMStoreFloat4(&clip[i], DirectX::XMVector4Transform(
+                DirectX::XMVectorSet(corners[i].x, corners[i].y, corners[i].z, 1), matrix));
+        const auto size = ImGui::GetIO().DisplaySize;
+        const auto screen = [size](const DirectX::XMFLOAT4& p)
+        { return ImVec2((p.x / p.w + 1) * size.x * 0.5f, (1 - p.y / p.w) * size.y * 0.5f); };
+        const auto distance = [](const DirectX::XMFLOAT4& p, unsigned plane)
+        {
+            switch (plane)
+            {
+            case 0: return p.w + p.x;
+            case 1: return p.w - p.x;
+            case 2: return p.w + p.y;
+            case 3: return p.w - p.y;
+            case 4: return p.z;
+            default: return p.w - p.z;
+            }
+        };
+        constexpr unsigned edges[12][2] = {{0,1},{1,2},{2,3},{3,0},{4,5},{5,6},{6,7},{7,4},{0,4},{1,5},{2,6},{3,7}};
+        auto* draw = ImGui::GetBackgroundDrawList();
+        for (const auto& edge : edges)
+        {
+            auto a = clip[edge[0]], b = clip[edge[1]];
+            bool visible = true;
+            for (unsigned plane = 0; plane < 6; ++plane)
+            {
+                const float da = distance(a, plane), db = distance(b, plane);
+                if (da < 0 && db < 0) { visible = false; break; }
+                if (da < 0 || db < 0)
+                {
+                    const float t = da / (da - db);
+                    const DirectX::XMFLOAT4 point(a.x + (b.x-a.x)*t, a.y + (b.y-a.y)*t,
+                        a.z + (b.z-a.z)*t, a.w + (b.w-a.w)*t);
+                    if (da < 0) a = point; else b = point;
+                }
+            }
+            if (visible && a.w > 0.00001f && b.w > 0.00001f)
+                draw->AddLine(screen(a), screen(b), color, 2);
+        }
+        const auto centre = DirectX::XMVector4Transform(
+            DirectX::XMVectorSet(box.Center.x, box.Center.y, box.Center.z, 1), matrix);
+        DirectX::XMFLOAT4 point;
+        DirectX::XMStoreFloat4(&point, centre);
+        bool visible = point.w > 0.00001f;
+        for (unsigned plane = 0; plane < 6; ++plane) visible &= distance(point, plane) >= 0;
+        if (visible) draw->AddText(screen(point), color, label);
     }
 
     void Render(GDX12CommandList* commands, GDX12Texture* target)
     {
-        if (!ImGui::GetCurrentContext() || !ImGui::GetDrawData()) return;
+        if (!ImGui::GetCurrentContext() || !FrameBegun) return;
+        ImGui::Render();
+        FrameBegun = false;
+        if (!ImGui::GetDrawData()) return;
         commands->ResourceBarrier({target->GetResource()->GetRenderTargetBarrier()});
         commands->SetRenderTargets({target}, nullptr);
         commands->SetDescriptorHeaps({Heap.get()});
@@ -202,6 +263,7 @@ namespace Engine::UI
         if (ImGui::GetIO().BackendRendererUserData) ImGui_ImplDX12_Shutdown();
         if (ImGui::GetIO().BackendPlatformUserData) ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
+        FrameBegun = false;
         Heap.reset();
         FreeDescriptors.clear();
     }

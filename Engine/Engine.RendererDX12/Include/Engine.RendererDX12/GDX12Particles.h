@@ -6,6 +6,7 @@
 enum class ParticleBlend : UINT { WeightedAlpha, Additive, SortedAlpha };
 enum class ParticleShape : UINT { Point, Box, Sphere };
 enum class ParticleGeometry : UINT { Billboard, Firefly };
+enum class ParticleSimulation : UINT { AnalyticDrag, SemiImplicitEuler, Count };
 
 struct GDX12ParticleMeshVertex
 {
@@ -33,6 +34,9 @@ struct GDX12ParticleEmitterSettings
     float ConeAngleDegrees = 30.0f;
     ParticleShape Shape = ParticleShape::Point;
     Vector3 ShapeExtents = Vector3(10.0f);
+    ParticleSimulation Simulation = ParticleSimulation::AnalyticDrag;
+    bool VolumeEnabled = false;
+    Vector3 VolumeHalfExtents = Vector3(100.0f); // Emitter-local cm; contains particle centres.
     Vector3 Acceleration = Vector3(0, -98.1f, 0);
     Vector3 Wind = Vector3::Zero;
     float Drag = 0.0f;

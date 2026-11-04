@@ -26,6 +26,11 @@ inline void CheckBistroReflectionCounts()
         capture.BlendDistance = probe.BlendDistance;
         capture.FarPlane = probe.FarPlane;
         require(probe.Implementation == 2 && IsValidReflectionProbe(capture), "Invalid Bistro frozen capture");
+        require(probe.Extents.x >= 58 && probe.Extents.x <= 63 &&
+            probe.Extents.x == probe.Extents.y && probe.Extents.y == probe.Extents.z,
+            "Reflection bounds must match an exterior table-sized cube");
+        require(std::abs(transform.Location.y - probe.Extents.y - 102.503f) < 0.01f,
+            "Reflection cube must stand over the tabletop with a 5 cm blend inset");
     });
     require(!BistroReflections::Count.SetFromString("-1") && !BistroReflections::Count.SetFromString("33") &&
         !BistroReflections::Count.SetFromString("1.5"), "Invalid Bistro reflection count accepted");

@@ -90,6 +90,28 @@ void CollideDepth(float3 previous, inout float3 position, inout float3 velocity)
     }
 }
 
+// shortcut: discard remaining travel after a hit; use swept multi-hit integration for tiny boxes or high speeds.
+void ConfineVolume(inout float3 position, inout float3 velocity)
+{
+    float3 local = mul(float4(position, 1), WorldToEmitter).xyz;
+    float3 localVelocity = mul(float4(velocity, 0), WorldToEmitter).xyz;
+    for (uint axis = 0; axis < 3; ++axis)
+    {
+        if (local[axis] < -VolumeHalfExtents[axis])
+        {
+            local[axis] = -VolumeHalfExtents[axis];
+            if (localVelocity[axis] < 0) localVelocity[axis] *= -CollisionRestitution;
+        }
+        if (local[axis] > VolumeHalfExtents[axis])
+        {
+            local[axis] = VolumeHalfExtents[axis];
+            if (localVelocity[axis] > 0) localVelocity[axis] *= -CollisionRestitution;
+        }
+    }
+    position = mul(float4(local, 1), EmitterWorld).xyz;
+    velocity = mul(float4(localVelocity, 0), EmitterWorld).xyz;
+}
+
 [numthreads(256, 1, 1)]
 void InitializePool(uint id : SV_DispatchThreadID)
 {
@@ -135,11 +157,21 @@ void Simulate(uint id : SV_DispatchThreadID)
     {
         float3 previousPosition = particle.Position;
         float3 oldVelocity = particle.Velocity;
-        particle.Velocity = Wind + (oldVelocity - Wind) * damping +
-            Acceleration * (Drag > 0.00001f ? (1 - damping) / Drag : step);
-        particle.Position += (oldVelocity + particle.Velocity) * (0.5f * step);
+        if (Simulation == 1)
+        {
+            particle.Velocity += (Acceleration + (Wind - oldVelocity) * Drag) * step;
+            particle.Position += particle.Velocity * step;
+        }
+        else
+        {
+            particle.Velocity = Wind + (oldVelocity - Wind) * damping +
+                Acceleration * (Drag > 0.00001f ? (1 - damping) / Drag : step);
+            particle.Position += (oldVelocity + particle.Velocity) * (0.5f * step);
+        }
         if (DepthCollision != 0 && step > 0)
             CollideDepth(previousPosition, particle.Position, particle.Velocity);
+        if (VolumeEnabled != 0 && step > 0)
+            ConfineVolume(particle.Position, particle.Velocity);
     }
     particle.Rotation += AngularVelocity * DeltaTime;
     if (!all(isfinite(particle.Position)) || !all(isfinite(particle.Velocity)))
@@ -189,7 +221,9 @@ void Spawn(uint id : SV_DispatchThreadID)
         float radius = pow(Random(state), 1.0f / 3.0f);
         offset = direction * radius;
     }
-    particle.Position = mul(float4(offset * Extents, 1), EmitterWorld).xyz;
+    float3 localPosition = offset * Extents;
+    if (VolumeEnabled != 0) localPosition = clamp(localPosition, -VolumeHalfExtents, VolumeHalfExtents);
+    particle.Position = mul(float4(localPosition, 1), EmitterWorld).xyz;
     particle.Previous = particle.Position;
     float3 axis = normalize(Direction);
     float3 tangent = normalize(cross(abs(axis.y) < 0.99f ? float3(0, 1, 0) : float3(1, 0, 0), axis));

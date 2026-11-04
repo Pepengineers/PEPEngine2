@@ -20,6 +20,8 @@ inline void CheckBistroCharacterCounts()
     scene.Update(world, 0);
     require(ecs.GetPool<SkeletalMeshRenderComponent>().Size() == 5, "Default Bistro character count mismatch");
     Engine::Core::SceneHandle sharedNPC;
+    Matrix bodyInverseBind;
+    bool bodyFound = false;
     Entity firstNPC = InvalidEntity, firstFox = InvalidEntity;
     auto& assets = Engine::Core::AssetManager::GetInstance();
     ecs.ForEach<SkeletalMeshRenderComponent, NameComponent>([&](Entity entity,
@@ -39,7 +41,39 @@ inline void CheckBistroCharacterCounts()
         if (fox) firstFox = entity;
         else
         {
-            if (firstNPC == InvalidEntity) { firstNPC = entity; sharedNPC = skeletal.GetScene(); }
+            if (firstNPC == InvalidEntity)
+            {
+                firstNPC = entity;
+                sharedNPC = skeletal.GetScene();
+                size_t parts = 0;
+                for (const auto& node : source->GetNodes())
+                    for (const auto handle : node.Meshes)
+                    {
+                        const auto* mesh = assets.Meshes().GetMesh(handle);
+                        require(mesh != nullptr, "Soldier imported mesh missing");
+                        for (const auto& part : mesh->GetSubMeshes())
+                        {
+                            for (const auto& bone : part.Bones)
+                                if (bone.NodeName == "SoldierBone1")
+                                { bodyInverseBind = bone.InverseBind; bodyFound = true; }
+                            size_t outward = 0, inward = 0;
+                            for (size_t index = 0; index < part.Indices.size(); index += 3)
+                            {
+                                const auto& a = part.Vertices.at(part.Indices.at(index));
+                                const auto& b = part.Vertices.at(part.Indices.at(index + 1));
+                                const auto& c = part.Vertices.at(part.Indices.at(index + 2));
+                                const auto face = (b.Position - a.Position).Cross(c.Position - a.Position);
+                                const float alignment = face.Dot(a.Normal + b.Normal + c.Normal);
+                                outward += alignment > 1e-8f;
+                                inward += alignment < -1e-8f;
+                            }
+                            require(outward > 0.9 * (outward + inward),
+                                "Soldier front faces must agree with surface normals, not expose interior faces");
+                            ++parts;
+                        }
+                    }
+                require(parts == 5, "Soldier surface check must cover all five material sections");
+            }
             require(skeletal.GetScene() == sharedNPC, "Human instances must share the imported scene asset");
         }
     });
@@ -49,6 +83,20 @@ inline void CheckBistroCharacterCounts()
     scene.Update(world, 0.5f);
     require(ecs.Get<TransformComponent>(firstNPC).Location != npcStart &&
         ecs.Get<TransformComponent>(firstFox).Location != foxStart, "Both character populations must walk");
+    const auto& npcTransform = ecs.Get<TransformComponent>(firstNPC);
+    const auto& npcMesh = ecs.Get<SkeletalMeshRenderComponent>(firstNPC);
+    const auto* npcSource = assets.Scenes().GetScene(npcMesh.GetScene());
+    const auto animated = npcSource->EvaluatePose(npcMesh.GetClip(), 0.5, true);
+    size_t hips = 0;
+    while (hips < npcSource->GetNodes().size() && npcSource->GetNode(hips).Name != "SoldierBone1") ++hips;
+    require(bodyFound && hips < animated.size(), "Soldier animated body root is missing");
+    // Node defaults are Take1 frame zero; use the actual skin inverse bind, as the GPU does.
+    const Matrix facing = bodyInverseBind * animated[hips] *
+        Matrix::CreateRotationY(XMConvertToRadians(npcTransform.Rotation.y));
+    auto forward = Vector3::TransformNormal(Vector3::UnitZ, facing);
+    auto movement = npcTransform.Location - npcStart;
+    forward.Normalize(); movement.Normalize();
+    require(forward.Dot(movement) > 0.9f, "Animated soldier must walk forward along the street route");
     const auto pausedNPC = ecs.Get<TransformComponent>(firstNPC).Location;
     const auto pausedFox = ecs.Get<TransformComponent>(firstFox).Location;
     world.SetPaused(true);

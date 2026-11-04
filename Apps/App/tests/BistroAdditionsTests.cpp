@@ -5,10 +5,12 @@
 #include <cstring>
 #include <iostream>
 #include <map>
+#include <imgui/imgui.h>
 #include "BistroReflectionChecks.h"
 #include "BistroCharacterChecks.h"
 #include "BistroGrassChecks.h"
 #include "BistroWaterChecks.h"
+#include "BistroParticleControlsChecks.h"
 
 static void Require(bool value, const char* message)
 {
@@ -131,6 +133,92 @@ static void Aim(World& world, Vector3 eye, Vector3 target)
     world.GetECS().Get<CameraComponent>(world.ActiveCamera).InvalidateHistory();
 }
 
+static void CheckProbeOverlay(BistroApp& app, World& world)
+{
+    const auto saved = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
+    const auto window = app.GetWindow()->GetWindowHandle();
+    app.MsgProc(window, WM_KEYUP, VK_F1, 0);
+    Set(L"App.ReflectionProbes.Count", "1");
+    Set(L"App.ReflectionProbes.ShowBounds", "false");
+    const auto target = BistroReflections::Tables[0].Centre + Vector3(0, 60, 0);
+    Aim(world, target + Vector3(-250,100,-250), target);
+    app.BenchmarkFrame();
+    Require(ImGui::GetDrawData()->TotalVtxCount == 0, "Hidden settings/probe overlay must have no draw geometry");
+    Set(L"App.ReflectionProbes.ShowBounds", "true");
+    app.BenchmarkFrame();
+    Require(ImGui::GetDrawData()->TotalVtxCount > 0, "Probe bounds and labels must produce visible overlay geometry");
+    for (const auto eye : {target, target + Vector3(0,0,2), target + Vector3(-250,100,-250)})
+    {
+        Aim(world, eye, eye + Vector3(0,0,200));
+        app.BenchmarkFrame();
+        const auto* data = ImGui::GetDrawData();
+        for (int list = 0; list < data->CmdListsCount; ++list)
+            for (const auto& vertex : data->CmdLists[list]->VtxBuffer)
+                Require(std::isfinite(vertex.pos.x) && std::isfinite(vertex.pos.y) &&
+                    std::abs(vertex.pos.x) < 100000 && std::abs(vertex.pos.y) < 100000,
+                    "Probe bounds crossing the camera/near plane must remain clipped and finite");
+    }
+    Set(L"App.ReflectionProbes.Count", "4");
+    auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
+    camera.Location = saved.Location; camera.Rotation = saved.Rotation; camera.DirtyFlag = true;
+    app.MsgProc(window, WM_KEYUP, VK_F1, 0);
+    app.BenchmarkFrame();
+}
+
+static void CheckProbeSpheres(BistroApp& app, World& world, RenderModule& render)
+{
+    Set(L"Render.Upscaler.Provider", "0");
+    Set(L"Render.Particles.Enabled", "false");
+    Set(L"Render.Grass.Enabled", "false");
+    Set(L"Render.Fluid.Enabled", "false");
+    Set(L"Render.SSR.Enabled", "false");
+    Set(L"Render.DOF.Enabled", "false");
+    Set(L"Render.MotionBlur.Enabled", "false");
+    Set(L"Render.AO.Enabled", "0");
+    Aim(world, Vector3(-800,300,-1100), Vector3(-100,165,-700));
+    std::vector<uint16_t> reference;
+    const auto difference = [&](const std::vector<uint16_t>& pixels, size_t index)
+    {
+        float maximum = 0;
+        for (size_t channel = 0; channel < 3; ++channel)
+        {
+            const float before = PackedVector::XMConvertHalfToFloat(reference[index + channel]);
+            const float after = PackedVector::XMConvertHalfToFloat(pixels[index + channel]);
+            maximum = (std::max)(maximum, std::abs(after - before) / (std::max)(1.0f, std::abs(before)));
+        }
+        return maximum;
+    };
+    for (const bool enabled : {false,true,false})
+    {
+        Set(L"App.ReflectionProbes.ShowSpheres", enabled ? "true" : "false");
+        for (int frame = 0; frame < 6; ++frame) app.BenchmarkFrame();
+        render.WaitForUploads();
+        auto* output = render.GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+        const auto pixels = ReadHDR(*output);
+        if (reference.empty()) reference = pixels;
+        else if (!enabled)
+        {
+            float drift = 0;
+            for (size_t i = 0; i < pixels.size(); i += 4) drift = (std::max)(drift, difference(pixels, i));
+            // Allow FP16 roundoff in the full scene; the isolated fixture checks exact off identity.
+            Require(drift <= 0.002f, "Disabling probe spheres left visible changes in the scene HDR");
+            std::cout << "Probe preview off RGB relative drift: " << drift << std::endl;
+        }
+        else
+        {
+            size_t changed = 0;
+            for (size_t i = 0; i < pixels.size(); i += 4)
+                if (difference(pixels, i) > 0.01f) ++changed;
+            Require(changed > 1000, "Published probe cubemaps must produce visible sphere pixels above terrace tables");
+            SaveImage(pixels, output->GetWidth(), output->GetHeight(), "probe-spheres");
+            std::cout << "Probe sphere HDR pixels: " << changed << std::endl;
+        }
+    }
+    Set(L"App.ReflectionProbes.ShowSpheres", "true");
+    Set(L"Render.Grass.Enabled", "true");
+    Set(L"Render.Fluid.Enabled", "true");
+}
+
 int main()
 {
     try
@@ -142,6 +230,7 @@ int main()
         if (SUCCEEDED(debug.As(&names))) names->SetEnableAutoName(TRUE);
         CheckBistroReflectionCounts();
         CheckBistroCharacterCounts();
+        CheckBistroParticleControls();
         BistroApp app(GetModuleHandleW(nullptr));
         Require(app.Initialize(), "Bistro additions initialization failed");
         CheckBistroGrassCounts();
@@ -149,6 +238,7 @@ int main()
         auto render = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
         auto& world = *BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()->GetWorld();
         CheckBistroWaterCounts(world, [&] { app.BenchmarkFrame(); });
+        CheckProbeOverlay(app, world);
         CheckCounts(world, 4, 1, 1, 5);
         const wchar_t* counts[] = {L"App.ReflectionProbes.Count", L"App.Grass.Count", L"App.Water.Count", L"App.NPC.Count", L"App.Fox.Count"};
         for (const auto* name : counts)
@@ -174,6 +264,7 @@ int main()
             const auto& after = stillPaused.at(entity);
             Require(before.Position == after.Position && before.Pose == after.Pose, "Paused Bistro character moved");
         }
+        CheckProbeSpheres(app, world, *render);
         for (const auto* name : counts) Set(name, "0");
         app.BenchmarkFrame();
         CheckCounts(world, 0, 0, 0, 0);
@@ -265,6 +356,24 @@ int main()
                     SaveImage(pixels, output->GetWidth(), output->GetHeight(), fox ? "fox" : "npc");
                 }
             }
+            if (!fox)
+                for (const bool front : {true,false})
+                {
+                    Vector3 forward;
+                    world.GetECS().ForEach<SkeletalMeshRenderComponent, NameComponent, TransformComponent>(
+                        [&](Entity, SkeletalMeshRenderComponent& mesh, const NameComponent& name, const TransformComponent& transform)
+                        {
+                            if (name.value != "BistroNPC0") return;
+                            mesh.SetTimeSeconds(front ? 0.3 : 0.8);
+                            const float yaw = XMConvertToRadians(transform.Rotation.y);
+                            forward = -Vector3(std::sin(yaw),0,std::cos(yaw));
+                        });
+                    Aim(world, target + forward * (front ? 250.0f : -250.0f) + Vector3(0,35,0), target);
+                    for (int frame = 0; frame < 4; ++frame) app.BenchmarkFrame();
+                    render->WaitForUploads();
+                    auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+                    SaveImage(ReadHDR(*output), output->GetWidth(), output->GetHeight(), front ? "npc-front" : "npc-back");
+                }
         }
         render->WaitForUploads();
         for (UINT64 index = 0; index < info->GetNumStoredMessages(); ++index)

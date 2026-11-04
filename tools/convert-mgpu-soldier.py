@@ -180,6 +180,9 @@ def convert(source, output):
                                         width, kind, 34962, name == "POSITION")
         subset_indices = [value - start for value in indices[face_start * 3:(face_start + face_count) * 3]]
         assert min(subset_indices) >= 0 and max(subset_indices) < count
+        # M3D fronts are clockwise; glTF and the engine's RH rasterizer require counter-clockwise fronts.
+        for triangle in range(0, len(subset_indices), 3):
+            subset_indices[triangle + 1], subset_indices[triangle + 2] = subset_indices[triangle + 2], subset_indices[triangle + 1]
         primitives.append({"attributes": attributes, "indices": accessor(subset_indices, 1, "H", 34963), "material": index})
     gltf["meshes"].append({"name": "MGPUSoldier", "primitives": primitives})
     for index, keys in enumerate(tracks):

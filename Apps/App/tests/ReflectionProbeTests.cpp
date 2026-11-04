@@ -245,6 +245,8 @@ static std::vector<float> ReadTexture(GDX12Device& device, GDX12Texture& texture
     return result;
 }
 
+#include "ReflectionPreviewChecks.h"
+
 template<typename T> static std::vector<T> ReadProbeBuffer(GDX12Device& device, GDX12UploadBuffer<T>& buffer)
 {
     D3D12_HEAP_PROPERTIES properties = {};
@@ -315,6 +317,7 @@ int main(int argc, char** argv)
         ComPtr<ID3D12InfoQueue> info;
         if (!benchmark) ThrowIfFailed(device.GetDevice().As(&info));
         if (info) info->ClearStoredMessages();
+        TestReflectionPreview(device);
         auto* queue = device.GetCommandQueue();
         TestScopedEvents(*queue);
         RenderPipelineCommonData common;

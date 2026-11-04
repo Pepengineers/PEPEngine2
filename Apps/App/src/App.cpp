@@ -86,6 +86,7 @@ namespace
             if (world.IsPaused())
             {
                 _gpuData.Schedule(_jobs, world, 0).Complete();
+                _reflections.DrawBounds(world, *Locator.GetModule<RenderModule>());
                 return;
             }
             const float dt = timer.DeltaTime();
@@ -100,6 +101,7 @@ namespace
                 work = _lights.Schedule(_jobs, world, dt, work);
                 work = _gpuData.Schedule(_jobs, world, dt, work);
                 work.Complete();
+                _reflections.DrawBounds(world, *Locator.GetModule<RenderModule>());
             }
             catch (...)
             {

@@ -260,4 +260,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGraph.h"><Filter>Header Files</Filter></ClInclude>
     <ClCompile Include="src\GDX12RenderGraph.cpp"><Filter>Source Files</Filter></ClCompile>
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionPreviewPass.h"><Filter>Header Files</Filter></ClInclude>
+    <ClCompile Include="src\GDX12ReflectionPreviewPass.cpp"><Filter>Source Files</Filter></ClCompile>
+    <None Include="Shaders\ReflectionPreview.hlsl"><Filter>Resource Files</Filter></None>
+  </ItemGroup>
 </Project>

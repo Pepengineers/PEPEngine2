@@ -1,5 +1,63 @@
 # Bistro scene additions — 2026-11-04
 
+Correction after visual feedback: the original visibility checks did not detect
+inverted soldier winding. The follow-up converter/import regression now checks
+surface orientation; the converter reverses M3D triangles for the engine's CCW
+rasterizer. The current scene also places probe visualizations above terrace
+tables and exposes grass/particle authoring controls. See the current App README.
+
+## Follow-up: previews and authoring controls
+
+The first four probes use actual terrace-table anchors and cubic influence
+bounds with half-size 60.55..62.48 cm. Their bottom blend region intersects the
+tabletop by 5 cm. `App.ReflectionProbes.ShowBounds` draws clipped colored boxes
+and labels; `App.ReflectionProbes.ShowSpheres` draws mirror spheres of radius
+0.8 times the box half-size. Both default to true and are independently switchable.
+The HDR preview pass runs after SSSR and samples the exact published cube-array
+slice at its first populated mip. It respects opaque depth and skips unpublished
+probes. The preview flag is outside capture settings, so toggling it does not
+invalidate the bake. Preview spheres never enter captures or shadow rendering.
+They do not write depth/motion; post effects still use the original scene depth.
+
+Grass now exposes bounds, density/budget, blade geometry, shadow and wind solver
+settings through application CVars. See [grass controls](../rendering/bistro-grass-controls.md).
+Particles expose an exact total budget, bounded emitter-local volume and analytic
+drag/semi-implicit Euler selection. See [particle controls](../rendering/bistro-particle-controls.md).
+
+The soldier fix changes triangle winding only; UVs, textures and animation data
+are unchanged. The dependency-free orientation regression checks every material
+section against authored normals (over 99.8% outward faces), and the App checks
+the actual imported sections as well. `Take1` also turns the body approximately
+171 degrees relative to bind pose; human route yaw adds 180 degrees so they walk
+forward. The heading regression uses the actual imported body-root pose and
+route displacement. Fox orientation is unchanged.
+
+Follow-up Release/x64 builds use `/Z7 /GL-` and
+`/p:WholeProgramOptimization=false`; the renderer was rebuilt to avoid mixing
+stale LTCG objects with this local compiler installation. RendererDX12 and
+App.Base were rebuilt together for the CPU probe/emitter layout changes.
+`ReflectionProbeTests` passed with GPU-based validation, including independent
+exact-slice/mip, silhouette, opaque occlusion, off and unpublished sphere checks.
+The existing static publication, rebake, runtime mode changes and HDR/XeSS checks
+also passed. Logs for this follow-up are under `Build/BistroControls`.
+`SecondGroupTests --gpu-validation` passed the skinning, wind/grass, fluid and
+particle regressions without debug-layer errors. New particle readbacks matched
+independent 0.5/1 cm integrator oracles, rotated-domain reflection and pause.
+`BistroAdditionsTests` passed the real-scene defaults/zero/changed/restored
+populations, imported soldier surfaces, animation/pause, new grass/particle
+controls and clipped box overlay. Sphere previews changed 22147 HDR pixels by
+more than 1%; switching them off restored scene RGB within 0.000838 relative
+FP16 drift. Final pixel contributions were grass 57090, water 15788, human 48446
+and fox 31266, with no debug-layer errors. The terrace spheres and both sides of
+the animated human were visually inspected from the HDR readbacks under
+`Build/BistroAdditions`.
+`BistroStartupTests` also passed: 90 frames, original props/effects, particle
+budget compatibility, focus/minimize/resize, enum discovery, F1 and input capture.
+The final App/Additions builds and scene run include the NPC heading correction;
+its imported-skin-palette regression failed before that correction and passed after it.
+
+## Original integration
+
 Four separate development tasks are retained under
 [`docs/tasks/bistro-additions`](../tasks/bistro-additions/README.md).
 The App integrates the existing renderer implementations; it retains both Bistro

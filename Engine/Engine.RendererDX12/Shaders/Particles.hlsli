@@ -82,5 +82,10 @@ cbuffer Emitter : register(b2)
     float CollisionRestitution;
     float CollisionThickness;
     uint Geometry;
-    float3 EmitterPadding;
+    uint Simulation;
+    uint VolumeEnabled;
+    uint EmitterPadding;
+    float3 VolumeHalfExtents;
+    float VolumePadding;
+    float4x4 WorldToEmitter;
 };

@@ -13,9 +13,28 @@ the populations; zero removes the corresponding objects:
 | `App.NPC.Count` | 4 | 0..16 |
 | `App.Fox.Count` | 1 | 0..8 |
 
+Reflection probes follow the terrace tables. `App.ReflectionProbes.ShowSpheres`
+shows their baked cubemaps on mirrored spheres; `App.ReflectionProbes.ShowBounds`
+independently shows the colored influence boxes and labels. Preview spheres are
+excluded from captures and shadow casting. Both switches default to true. Each
+sphere samples only its probe's published cubemap, starting at the first populated
+mip; enabling previews does not trigger a bake. The HDR preview pass runs after
+SSSR, respects opaque depth and skips probes without a published map.
+These debug spheres do not write depth or motion, so depth-based post effects
+still use the underlying scene.
+
+Grass bounds and appearance are controlled by `App.Grass.ExtentsXCm`,
+`ExtentsZCm`, `DensityPerSquareMetre`, `MaxBlades`, `HeightCm`, `WidthCm` and the
+other [grass/wind settings](../../docs/rendering/bistro-grass-controls.md).
+For particles, `App.Particles.Count=-1` preserves the existing `CountScale`, `0`
+disables the effects, and positive values select the exact total. The
+[particle settings](../../docs/rendering/bistro-particle-controls.md) also expose
+the simulation integrator and a bounded emitter-local box with configurable
+X/Y/Z half-extents.
+
 Use the console/settings controls or the App executable's own
-`[ConsoleVariables]` INI section. Clear the default settings search to find these
-application CVars. These names are
+`[ConsoleVariables]` INI section. Search by `App.Grass.`, `App.Particles.` or
+`App.ReflectionProbes.` to find these controls. These names are
 registered by Bistro App, so keep them out of other executables' shared INI files.
 Reflection maps bake during initial warmup and remain static until explicitly
 invalidated or their capture settings/topology change. They exclude moving props

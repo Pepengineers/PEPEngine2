@@ -67,8 +67,11 @@ namespace BistroCharacters
                 // This capsule stays on the OBJ's flat pavement, above the model's source-foot offset.
                 const Vector3 center(-1030, 23.162f + 4.6f, -450);
                 const double phase = (index % 4) / 4.0 + (index / 4) / 16.0;
-                PlaceOnRoute(ecs.Get<TransformComponent>(_npcs[index]), _time * 95 + perimeter * phase,
+                auto& transform = ecs.Get<TransformComponent>(_npcs[index]);
+                PlaceOnRoute(transform, _time * 95 + perimeter * phase,
                     halfStraight, radius, center, false);
+                // Take1 turns the body toward local -Z relative to its original skin bind pose.
+                transform.Rotation.y += 180;
             }
             for (size_t index = 0; index < _foxes.size(); ++index)
             {

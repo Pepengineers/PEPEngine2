@@ -16,6 +16,7 @@ struct GDX12ReflectionCaptureSettings
 struct GDX12ReflectionProbe : GDX12ReflectionCaptureSettings
 {
     uint64_t Id = 0;
+    bool PreviewSphere = false;
     Vector3 Position = Vector3::Zero;
     Vector3 BoxMin = Vector3(-500);
     Vector3 BoxMax = Vector3(500);

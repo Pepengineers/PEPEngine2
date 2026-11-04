@@ -49,6 +49,62 @@ inline void CheckBistroGrassCounts()
         require(grass.Material == sharedMaterial, "Bistro grass patches must share their material");
         require(ecs.Has<WindFieldComponent>(grass.WindEntity), "Bistro grass growth lost its wind owner");
     });
+    require(BistroGrass::Implementation.GetEnumCount() == 2 && BistroGrass::Algorithm.GetEnumCount() == 2,
+        "Grass and wind implementation controls must expose enum choices to the settings UI");
+    const Entity firstWind = ecs.Get<GrassRenderComponent>(first).WindEntity;
+    const UINT initialGrassRevision = ecs.Get<GrassRenderComponent>(first).ResetRevision;
+    const UINT initialWindRevision = ecs.Get<WindFieldComponent>(firstWind).ResetRevision;
+    scene.Update(world, 0);
+    require(ecs.Get<GrassRenderComponent>(first).ResetRevision == initialGrassRevision &&
+        ecs.Get<WindFieldComponent>(firstWind).ResetRevision == initialWindRevision,
+        "Unchanged grass controls must not reset GPU history or the wind simulation");
+    require(!BistroGrass::ExtentsXCm.SetFromString("0") && !BistroGrass::WidthCm.SetFromString("0") &&
+        !BistroGrass::Density.SetFromString("100001") && !BistroGrass::MaxBlades.SetFromString("262145") &&
+        !BistroGrass::Segments.SetFromString("9") && !BistroGrass::Algorithm.SetFromString("2") &&
+        !BistroGrass::WindSpeed.SetFromString("501") && !BistroGrass::GridResolution.SetFromString("7") &&
+        !BistroGrass::GustFrequencyHz.SetFromString("nan"), "Invalid grass/wind controls accepted");
+    require(BistroGrass::ExtentsXCm.SetFromString("120") && BistroGrass::ExtentsZCm.SetFromString("90") &&
+        BistroGrass::HeightCm.SetFromString("45") && BistroGrass::Density.SetFromString("100") &&
+        BistroGrass::MaxBlades.SetFromString("10000") && BistroGrass::Segments.SetFromString("5") &&
+        BistroGrass::Implementation.SetFromString("0") && BistroGrass::Algorithm.SetFromString("1") &&
+        BistroGrass::WindAngleDegrees.SetFromString("90") && BistroGrass::WindSpeed.SetFromString("80") &&
+        BistroGrass::GridResolution.SetFromString("32") && BistroGrass::PressureIterations.SetFromString("8"),
+        "Grass/wind controls must accept supported runtime values");
+    scene.Update(world, 0);
+    ecs.ForEach<GrassRenderComponent>([&](Entity, const GrassRenderComponent& grass)
+    {
+        const auto& wind = ecs.Get<WindFieldComponent>(grass.WindEntity);
+        const auto bounds = GrassLocalBounds(grass);
+        require(grass.ExtentsCm == Vector2(120, 90) && grass.HeightCm == 45 && grass.Segments == 5 &&
+            grass.Implementation == GDX12GrassImplementation::Ribbon && GrassBladeCount(grass) == 432,
+            "Runtime grass controls must update every existing patch, including area-driven blade count");
+        require(IsValidGrassSettings(grass) && IsValidWindSettings(wind) &&
+            wind.ExtentsCm.x >= bounds.Extents.x && wind.ExtentsCm.y >= bounds.Extents.z &&
+            wind.Implementation == GDX12WindImplementation::ProjectedGrid && wind.GridResolution == 32 &&
+            wind.PressureIterations == 8 && wind.SpeedCmPerSecond == 80 && std::abs(wind.Direction.y - 1) < 0.0001f,
+            "Runtime wind controls must update every field and cover changed grass bounds");
+    });
+    const UINT editedWindRevision = ecs.Get<WindFieldComponent>(firstWind).ResetRevision;
+    require(BistroGrass::HeightCm.SetFromString("60") && BistroGrass::MaxBlades.SetFromString("50"),
+        "Grass height/budget edits rejected");
+    scene.Update(world, 0);
+    require(GrassBladeCount(ecs.Get<GrassRenderComponent>(first)) == 50 &&
+        ecs.Get<WindFieldComponent>(firstWind).ResetRevision == editedWindRevision,
+        "Blade budget must cap density while height-only edits preserve the wind simulation");
+    require(BistroGrass::Density.SetFromString("0"), "Zero grass density rejected");
+    scene.Update(world, 0);
+    require(GrassBladeCount(ecs.Get<GrassRenderComponent>(first)) == 0,
+        "Zero density must remove drawn blades without removing the patch");
+    require(BistroGrass::ExtentsXCm.SetFromString("55") && BistroGrass::ExtentsZCm.SetFromString("40") &&
+        BistroGrass::HeightCm.SetFromString("30") && BistroGrass::Density.SetFromString("1400") &&
+        BistroGrass::MaxBlades.SetFromString("2048") && BistroGrass::Segments.SetFromString("3") &&
+        BistroGrass::Implementation.SetFromString("1") && BistroGrass::Algorithm.SetFromString("0") &&
+        BistroGrass::WindAngleDegrees.SetFromString("0") && BistroGrass::WindSpeed.SetFromString("45") &&
+        BistroGrass::GridResolution.SetFromString("0") && BistroGrass::PressureIterations.SetFromString("0"),
+        "Grass/wind defaults restore rejected");
+    scene.Update(world, 0);
+    require(GrassBladeCount(ecs.Get<GrassRenderComponent>(first)) == 1232,
+        "Restoring controls must preserve the authored default grass budget");
     require(BistroGrass::Count.SetFromString("1"), "Bistro grass reduction rejected");
     scene.Update(world, 0);
     require(ecs.GetPool<GrassRenderComponent>().Size() == 1 && ecs.GetPool<WindFieldComponent>().Size() == 1 &&

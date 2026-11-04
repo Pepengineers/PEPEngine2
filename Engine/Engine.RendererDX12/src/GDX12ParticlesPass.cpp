@@ -40,11 +40,13 @@ namespace
         UINT Columns, Rows, Substeps, EdgeSamples;
         UINT Seed, Paused; XMFLOAT2 RenderSize;
         UINT DepthCollision; float CollisionRadius, CollisionRestitution, CollisionThickness;
-        UINT Geometry; XMFLOAT3 Padding;
+        UINT Geometry, Simulation, VolumeEnabled, Padding;
+        XMFLOAT3 VolumeHalfExtents; float VolumePadding;
+        XMFLOAT4X4 WorldToEmitter;
     };
     static_assert(sizeof(Particle) == 64);
     static_assert(sizeof(ParticleDraw) == 96);
-    static_assert(sizeof(EmitterConstants) == 288);
+    static_assert(sizeof(EmitterConstants) == 368);
     static_assert(sizeof(GDX12ParticleMeshVertex) == 44);
 
     template<class T>
@@ -537,6 +539,11 @@ void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
         constants.CollisionRestitution = emitter.CollisionRestitution;
         constants.CollisionThickness = emitter.CollisionThickness;
         constants.Geometry = static_cast<UINT>(emitter.Geometry);
+        constants.Simulation = static_cast<UINT>(emitter.Simulation);
+        constants.VolumeEnabled = emitter.VolumeEnabled;
+        constants.VolumeHalfExtents = emitter.VolumeHalfExtents;
+        XMStoreFloat4x4(&constants.WorldToEmitter,
+            emitter.VolumeEnabled ? emitter.World.Invert().Transpose() : Matrix::Identity);
         pool.Constants[_resources->CurrFrameConstantsIndex]->CopyData(0, constants);
         commands->SetComputeRootConstantBufferView(2, pool.Constants[_resources->CurrFrameConstantsIndex]->GetElementAddress(0));
         const UINT parameters[] = { pool.Capacity, burst, state.Capacity, state.ResetMotion || reset };

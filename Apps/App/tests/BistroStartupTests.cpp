@@ -18,6 +18,7 @@ int main()
         ComPtr<ID3D12Debug> debug;
         ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
         debug->EnableDebugLayer();
+        BistroReflections::ShowBounds.SetFromString("false");
         BistroApp app(GetModuleHandleW(nullptr));
         if (!app.Initialize()) throw std::runtime_error("Bistro startup failed");
         ShowWindow(app.GetWindow()->GetWindowHandle(), SW_HIDE);

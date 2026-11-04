@@ -21,6 +21,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12CascadedShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ReflectionProbePass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionPreviewPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
@@ -1204,6 +1205,7 @@ void RenderModule::CollectReflectionScene()
             probe.FarPlane = component.FarPlane;
             static_cast<GDX12ReflectionCaptureSettings&>(probe) = component;
             probe.Revision = component.Revision;
+            probe.PreviewSphere = component.PreviewSphere;
             if (!IsValidReflectionProbe(probe)) throw std::invalid_argument("Invalid ReflectionProbeComponent");
             resources.ReflectionProbes.push_back(probe);
         });
@@ -1277,6 +1279,7 @@ void RenderModule::ConfigureRenderPipeline()
     auto* lightingPass = CreateRenderPass<GDX12DeferredLightingPass>();
     _deferredLightingPass = lightingPass;
     auto* ssrPass = CreateRenderPass<GDX12SSSRPass>();
+    auto* reflectionPreviewPass = CreateRenderPass<GDX12ReflectionPreviewPass>();
     auto* fluidSurfacePass = CreateRenderPass<GDX12FluidSurfacePass>();
     auto* transparencyPass = CreateRenderPass<GDX12WBOITTransparencyPass>(GDX12WBOITTransparencyPass::WaterPartition::Behind);
     auto* compositionPass = CreateRenderPass<GDX12WBOITCompositionPass>();
@@ -1309,6 +1312,7 @@ void RenderModule::ConfigureRenderPipeline()
             fluidSurfacePass->GetOutput(0) });
     ssrPass->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(3),
         opaquePass->GetOutput(4), opaquePass->GetOutput(1), environmentPass->GetOutput(1), environmentPass->GetOutput(2) });
+    reflectionPreviewPass->SetInputs({ ssrPass->GetOutput(0), opaquePass->GetOutput(2) });
     compositionPass->SetInputs({ ssrPass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1), opaquePass->GetOutput(2) });
     waterResolvePass->SetInputs({ compositionPass->GetOutput(0), environmentPass->GetOutput(1) });
     frontCompositionPass->SetInputs({ waterResolvePass->GetOutput(0), frontPass->GetOutput(0), frontPass->GetOutput(1), fluidSurfacePass->GetOutput(0) });

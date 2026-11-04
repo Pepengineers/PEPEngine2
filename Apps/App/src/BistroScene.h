@@ -9,12 +9,30 @@
 
 namespace BistroParticles
 {
+    inline AutoConsoleVariable<int> Count(L"App.Particles.Count", -1,
+        L"Total live Bistro particles: -1 uses CountScale, 0 disables, maximum 4194304",
+        EConsoleVariableFlags::Default, [](int value) { return value >= -1 && value <= 4194304; });
     inline AutoConsoleVariable<double> CountScale(L"App.Particles.CountScale", 1.0,
         L"Multiply authored Bistro particle counts; <=0 uses 1, maximum 4194304/250000",
         EConsoleVariableFlags::Default, [](double value) { return value <= 4194304.0 / 250000; });
+    inline AutoConsoleVariable<ParticleSimulation> Simulation(L"App.Particles.Simulation", ParticleSimulation::AnalyticDrag,
+        L"0 analytic drag + trapezoidal position (authored default), 1 MGPU semi-implicit Euler");
+    inline AutoConsoleVariable<bool> VolumeEnabled(L"App.Particles.Volume.Enabled", false,
+        L"Override all emitters with box spawn and a reflecting emitter-local simulation volume");
+    inline AutoConsoleVariable<float> VolumeHalfExtentX(L"App.Particles.Volume.HalfExtentX", 100.0f,
+        L"Particle box half-size X in emitter-local cm, 0.01..1000000",
+        EConsoleVariableFlags::Default, [](float value) { return value >= 0.01f && value <= 1000000; });
+    inline AutoConsoleVariable<float> VolumeHalfExtentY(L"App.Particles.Volume.HalfExtentY", 100.0f,
+        L"Particle box half-size Y in emitter-local cm, 0.01..1000000",
+        EConsoleVariableFlags::Default, [](float value) { return value >= 0.01f && value <= 1000000; });
+    inline AutoConsoleVariable<float> VolumeHalfExtentZ(L"App.Particles.Volume.HalfExtentZ", 100.0f,
+        L"Particle box half-size Z in emitter-local cm, 0.01..1000000",
+        EConsoleVariableFlags::Default, [](float value) { return value >= 0.01f && value <= 1000000; });
 
     inline UINT GetBudget()
     {
+        const int count = Count.GetValue();
+        if (count >= 0) return static_cast<UINT>(count);
         const double scale = CountScale.GetValue();
         return static_cast<UINT>(std::round(250000 * (scale > 0 ? scale : 1)));
     }
@@ -23,21 +41,35 @@ namespace BistroParticles
     {
         UINT BudgetBegin = 0;
         UINT BudgetEnd = 0;
+        ParticleShape AuthoredShape = ParticleShape::Point;
+        Vector3 AuthoredExtents;
     };
 
     inline void Update(World& world)
     {
         const auto total = static_cast<uint64_t>(GetBudget());
+        const auto simulation = Simulation.GetValue();
+        const bool bounded = VolumeEnabled.GetValue();
+        const Vector3 halfExtents(VolumeHalfExtentX.GetValue(), VolumeHalfExtentY.GetValue(), VolumeHalfExtentZ.GetValue());
         world.GetECS().ForEach<EffectComponent, ParticleEmitterComponent>(
             [&](Entity, const EffectComponent& effect, ParticleEmitterComponent& emitter)
             {
                 const UINT count = static_cast<UINT>(total * effect.BudgetEnd / 16 - total * effect.BudgetBegin / 16);
-                auto settings = emitter.GetSettings();
-                if (settings.MaxParticles != (std::max)(1u, count) || emitter.IsEnabled() != (count != 0))
+                const auto& current = emitter.GetSettings();
+                auto settings = current;
+                settings.MaxParticles = (std::max)(1u, count);
+                settings.Simulation = simulation;
+                settings.VolumeEnabled = bounded;
+                settings.VolumeHalfExtents = halfExtents;
+                settings.Shape = bounded ? ParticleShape::Box : effect.AuthoredShape;
+                settings.ShapeExtents = bounded ? halfExtents : effect.AuthoredExtents;
+                const bool reset = current.MaxParticles != settings.MaxParticles || emitter.IsEnabled() != (count != 0) ||
+                    current.VolumeEnabled != bounded || current.Shape != settings.Shape || current.ShapeExtents != settings.ShapeExtents ||
+                    (bounded && current.VolumeHalfExtents != halfExtents);
+                if (reset || current.Simulation != simulation || current.VolumeHalfExtents != halfExtents)
                 {
-                    settings.MaxParticles = (std::max)(1u, count);
                     emitter.SetSettings(settings);
-                    emitter.Reset();
+                    if (reset) emitter.Reset();
                     emitter.SetEnabled(count != 0);
                 }
                 // GPU spawn accepts only dead slots, keeping the requested live count without CPU readback.
@@ -63,6 +95,8 @@ namespace BistroParticles
             settings.Substeps = settings.DepthCollision ? 4 : 1;
             settings.EdgeSamples = 1;
             settings.MinPixelSize = 0;
+            effect.AuthoredShape = settings.Shape;
+            effect.AuthoredExtents = settings.ShapeExtents;
             entity.AddComponent<ParticleEmitterComponent>().SetSettings(settings);
         };
 

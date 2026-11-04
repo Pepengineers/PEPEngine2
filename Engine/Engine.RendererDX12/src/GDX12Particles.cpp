@@ -45,6 +45,9 @@ bool IsValidParticleEmitterSettings(const GDX12ParticleEmitterSettings& s)
         s.Direction.LengthSquared() > 0.000001f && InRange(s.ConeAngleDegrees, 0, 180) &&
         static_cast<UINT>(s.Shape) <= static_cast<UINT>(ParticleShape::Sphere) &&
         ValidVector(s.ShapeExtents, 1000000) && s.ShapeExtents.x >= 0 && s.ShapeExtents.y >= 0 && s.ShapeExtents.z >= 0 &&
+        static_cast<UINT>(s.Simulation) < static_cast<UINT>(ParticleSimulation::Count) &&
+        InRange(s.VolumeHalfExtents.x, 0.01f, 1000000) && InRange(s.VolumeHalfExtents.y, 0.01f, 1000000) &&
+        InRange(s.VolumeHalfExtents.z, 0.01f, 1000000) &&
         ValidVector(s.Acceleration, 1000000) && ValidVector(s.Wind, 1000000) && InRange(s.Drag, 0, 1000) &&
         InRange(s.SizeStart, 0, 1000000) && InRange(s.SizeEnd, 0, 1000000) &&
         InRange(s.SizeVariation, 0, 1) && InRange(s.RenderScale, 0.001f, 100) &&

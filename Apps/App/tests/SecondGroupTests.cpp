@@ -68,6 +68,7 @@ static std::vector<float> Read(GDX12Device& device, GDX12Texture& texture, UINT 
 }
 
 #include "ParticlePlacementChecks.h"
+#include "ParticleSimulationControlsChecks.h"
 
 static void TestCPU()
 {
@@ -396,6 +397,7 @@ int main(int argc, char** argv)
                     "Particle depth collision differs from independent bounce/stop oracle");
             }
         }
+        CheckParticleSimulationControls(device, resources, particles, execute, eye, forward);
         emitter = {}; emitter.Id = 1; emitter.World = Matrix::CreateTranslation(eye + forward * 100);
         emitter.EmissionRate = 0; emitter.SpeedMin = emitter.SpeedMax = 0; emitter.Acceleration = Vector3::Zero;
         emitter.LifetimeMin = emitter.LifetimeMax = 0.15f; emitter.DeltaTime = 0.1f;
