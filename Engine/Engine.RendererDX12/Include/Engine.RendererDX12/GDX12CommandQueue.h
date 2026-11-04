@@ -27,7 +27,7 @@ public:
 	void CPUWaitForFenceValue(uint64_t fenceValue);
 	void WaitForOtherFence(uint64_t otherFenceValue);
 
-	//Waits for execution of all active lists
+	// Waits for all work submitted to the native queue, including presentation SDKs.
 	void Flush();
 
 	// Do I even need this?
@@ -54,5 +54,4 @@ private:
 	std::vector<std::unique_ptr<GDX12CommandList>> _workingCommandLists;
 	std::vector<std::unique_ptr<GDX12CommandList>> _availableCommandLists;
 
-	uint64_t _lastDispatchedFenceValue;
 };

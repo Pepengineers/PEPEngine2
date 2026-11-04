@@ -9,6 +9,8 @@
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <future>
+#include <thread>
 
 static void Require(bool condition, const char* message)
 {
@@ -26,6 +28,38 @@ static D3D12MA::Statistics Statistics(GDX12Device& device)
     D3D12MA::TotalStatistics stats = {};
     device.GetMemoryAllocator()->CalculateStatistics(&stats);
     return stats.Total.Stats;
+}
+
+static void TestQueueFlush(GDX12Device& device)
+{
+    auto* queue = device.GetCommandQueue();
+    for (bool submit : {false, true})
+    {
+        if (submit) queue->ExecuteCommandList(queue->GetCommandList());
+        queue->Flush();
+        ComPtr<ID3D12Fence> gate;
+        ThrowIfFailed(device.GetDevice()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gate)));
+        // SDK work can enter the native queue after the engine's last submission.
+        ThrowIfFailed(queue->GetCommandQueue()->Wait(gate.Get(), 1));
+        std::promise<void> started, finished;
+        auto startedFuture = started.get_future();
+        auto finishedFuture = finished.get_future();
+        std::thread flush([&]
+        {
+            started.set_value();
+            try { queue->Flush(); finished.set_value(); }
+            catch (...) { finished.set_exception(std::current_exception()); }
+        });
+        startedFuture.wait();
+        const bool returnedEarly = finishedFuture.wait_for(std::chrono::milliseconds(100)) == std::future_status::ready;
+        const auto release = gate->Signal(1);
+        flush.join();
+        ThrowIfFailed(release);
+        finishedFuture.get();
+        queue->CPUWaitForFenceValue(queue->FenceValue);
+        Require(!returnedEarly, "Flush returned while native queue work was still blocked");
+    }
+    std::cout << "Queue Flush waits for native work before and after engine submissions passed.\n";
 }
 
 static void TestBuffers(GDX12Device& device)
@@ -128,6 +162,7 @@ int main()
         ComPtr<ID3D12InfoQueue> info;
         ThrowIfFailed(device.GetDevice().As(&info));
         info->ClearStoredMessages();
+        TestQueueFlush(device);
         TestBuffers(device);
         Require(Statistics(device).AllocationCount == 0, "Buffers leaked allocations");
         TestTextures(device);

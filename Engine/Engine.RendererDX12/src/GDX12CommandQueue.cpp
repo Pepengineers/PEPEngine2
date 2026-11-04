@@ -4,7 +4,7 @@
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 
 GDX12CommandQueue::GDX12CommandQueue(GDX12Device* device)
-    : FenceValue(0),  _device(device),  _lastDispatchedFenceValue(0)
+    : FenceValue(0),  _device(device)
 {
     D3D12_COMMAND_QUEUE_DESC desc = {};
     desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
@@ -73,7 +73,6 @@ void GDX12CommandQueue::ExecuteCommandList(GDX12CommandList* commandList)
     FenceValue++;
     _commandQueue->Signal(_fence.Get(), FenceValue);
     commandList->FenceValue = FenceValue;
-    _lastDispatchedFenceValue = FenceValue;
 }
 
 void GDX12CommandQueue::ExecuteCommandLists(std::vector<GDX12CommandList*>& commandLists)
@@ -94,7 +93,6 @@ void GDX12CommandQueue::ExecuteCommandLists(std::vector<GDX12CommandList*>& comm
     _commandQueue->Signal(_fence.Get(), FenceValue);
 
     for (UINT i = 0; i < commandListCount; ++i) { commandLists[i]->FenceValue = FenceValue; }
-    _lastDispatchedFenceValue = FenceValue;
 }
 
 const ComPtr<ID3D12Fence>& GDX12CommandQueue::GetFence()
@@ -125,8 +123,9 @@ void GDX12CommandQueue::WaitForOtherFence(const uint64_t otherFenceValue)
 void GDX12CommandQueue::Flush()
 {
     FenceValue++;
-    _commandQueue->Signal(_fence.Get(), FenceValue);
-    if (_lastDispatchedFenceValue > 0) { CPUWaitForFenceValue(_lastDispatchedFenceValue); }
+    ThrowIfFailed(_commandQueue->Signal(_fence.Get(), FenceValue));
+    // Include native queue work submitted by presentation SDKs after our command lists.
+    CPUWaitForFenceValue(FenceValue);
 }
 
 void GDX12CommandQueue::ClearCompletedLists()
