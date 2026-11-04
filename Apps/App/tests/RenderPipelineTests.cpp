@@ -2,12 +2,49 @@
 #include "Rendering/BistroRenderPipeline.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Rendering/DefaultRenderPipeline.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12GeometryViewPass.h"
 #include <iostream>
 #include <stdexcept>
 
 static void Require(bool value, const char* message)
 {
     if (!value) throw std::runtime_error(message);
+}
+
+class PreparedViewPass final : public GDX12GeometryViewPass
+{
+public:
+    UINT GetGeometryViewCapacity() const override { return 3; }
+    const GDX12GeometryContext* GetGeometryView(UINT slot) const override
+    { return slot == 1 ? nullptr : &Views.at(slot); }
+    void BeginGeometry(GDX12CommandList*) override { ++Begins; }
+    void ExecuteGeometryView(GDX12CommandList*, UINT slot) override { Consumed.push_back(slot); }
+    void BindGeometryViewTargets(GDX12CommandList*, UINT slot) override { Bound.push_back(slot); }
+    void EndGeometry(GDX12CommandList*) override { ++Ends; }
+    std::array<GDX12GeometryContext, 3> Views;
+    std::vector<UINT> Consumed, Bound;
+    UINT Begins = 0, Ends = 0;
+};
+
+static void TestPreparedViewPhases()
+{
+    PreparedViewPass pass;
+    pass.Execute(nullptr);
+    Require(pass.Begins == 1 && pass.Ends == 1 && pass.Consumed == std::vector<UINT>{ 0, 2 },
+        "Prepared geometry executed an inactive view or repeated frame setup/finalization");
+    pass.SetSplitGeometry(true);
+    pass.Execute(nullptr);
+    Require(pass.Begins == 2 && pass.Ends == 1 && pass.Consumed.size() == 2,
+        "Split geometry head consumed views or finalized before its application preparation jobs");
+    for (UINT slot = 0; slot < pass.GetGeometryViewCapacity(); ++slot)
+    {
+        if (!pass.GetGeometryView(slot)) continue;
+        pass.ExecuteGeometryView(nullptr, slot);
+        pass.BindGeometryViewTargets(nullptr, slot);
+    }
+    pass.EndGeometry(nullptr);
+    Require(pass.Begins == 2 && pass.Ends == 2 && pass.Consumed == std::vector<UINT>{ 0, 2, 0, 2 } &&
+        pass.Bound == std::vector<UINT>{ 0, 2 }, "Split view jobs lost their prepared selection or target rebinding");
 }
 
 class LinkedPass final : public GDX12RenderPass
@@ -388,6 +425,7 @@ int main()
     try
     {
         TestPrimitiveRecords();
+        TestPreparedViewPhases();
         TestBatchContract();
         TestApplicationComposition();
         TestAmbientOcclusionInputs();

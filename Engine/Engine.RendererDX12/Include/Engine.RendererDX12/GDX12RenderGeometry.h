@@ -39,6 +39,10 @@ struct GDX12GeometryContext
     GDX12Texture* SceneDepth = nullptr;
     GDX12Texture* PartitionDepth = nullptr;
     GDX12GeometryDepthPartition DepthPartition = GDX12GeometryDepthPartition::All;
+    bool IncludeApplicationGeometry = true;
+    const IRenderGeometrySource* Source = nullptr;
+    UINT BatchOffset = 0;
+    UINT BatchCount = UINT_MAX;
     // Targets, viewport and scissor remain owned by the containing pass.
 };
 
