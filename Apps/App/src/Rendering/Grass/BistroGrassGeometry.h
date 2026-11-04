@@ -1,5 +1,5 @@
 #pragma once
-#include "Engine.RendererDX12/GDX12RenderExtension.h"
+#include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include "Rendering/Grass/GDX12GrassRenderer.h"
 #include "Components/BistroGrassComponents.h"
 #include "App.Base/Modules/SceneManagerModule.h"
@@ -7,13 +7,13 @@
 
 class RenderModule;
 
-class BistroGrassRenderExtension final : public GDX12RenderExtension
+class BistroGrassGeometry final : public IRenderGeometrySource
 {
 public:
-    BistroGrassRenderExtension(std::shared_ptr<SceneManagerModule> scenes, RenderModule& renderer);
-    ~BistroGrassRenderExtension() override;
+    BistroGrassGeometry(std::shared_ptr<SceneManagerModule> scenes, RenderModule& renderer);
+    ~BistroGrassGeometry() override;
     void CollectScene(float deltaSeconds);
-    void PrepareFrame(GDX12CommandList*, GDX12DeviceResources&, const RenderPipelineCommonData&) override;
+    void PrepareFrame(GDX12CommandList*, GDX12DeviceResources&, const RenderPipelineCommonData&);
     void AppendSceneContributions(GDX12SceneContributions&) const override;
     void DeclareGeometryResources(GDX12RenderGraphBuilder&) const override;
     void DrawGeometry(GDX12CommandList*, const GDX12GeometryContext&) override;

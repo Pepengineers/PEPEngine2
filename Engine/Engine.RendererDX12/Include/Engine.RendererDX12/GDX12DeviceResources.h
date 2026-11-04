@@ -13,7 +13,7 @@
 
 class GDX12Device;
 class GameTimer;
-class GDX12RenderExtension;
+class IRenderGeometrySource;
 class GDX12RenderGraphBuilder;
 struct GDX12GeometryContext;
 
@@ -41,7 +41,7 @@ public:
     std::unordered_map <std::string, ComPtr<ID3D12CommandSignature>> CommandSignatures;
     std::unordered_map<std::string, std::unique_ptr<GDX12Texture>> Textures;
 
-    std::vector<GDX12RenderExtension*> RenderExtensions; // Borrowed from the pipeline owner.
+    std::vector<IRenderGeometrySource*> GeometrySources; // Borrowed from the pipeline owner.
     uint64_t GeometryRevision = 0;
     bool HasExtensionCasters = false;
     void DrawGeometry(GDX12CommandList* commands, const GDX12GeometryContext& context);

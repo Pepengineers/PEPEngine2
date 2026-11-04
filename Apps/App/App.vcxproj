@@ -90,6 +90,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
+    <ClCompile Include="src\Rendering\BistroRenderPipeline.cpp" />
+    <ClInclude Include="src\Rendering\BistroRenderPipeline.h" />
     <ClInclude Include="src\Rendering\Grass\GDX12GrassWind.h" />
     <ClInclude Include="src\Rendering\Grass\GDX12GrassRenderer.h" />
     <ClCompile Include="src\Rendering\Grass\GDX12GrassWind.cpp" />
@@ -100,8 +102,8 @@
     <None Include="Shaders\GrassExpand.hlsl" />
     <None Include="Shaders\GrassRender.hlsl" />
     <None Include="Shaders\WindField.hlsl" />
-    <ClCompile Include="src\Rendering\Grass\BistroGrassRenderExtension.cpp" />
-    <ClInclude Include="src\Rendering\Grass\BistroGrassRenderExtension.h" />
+    <ClCompile Include="src\Rendering\Grass\BistroGrassGeometry.cpp" />
+    <ClInclude Include="src\Rendering\Grass\BistroGrassGeometry.h" />
     <ClInclude Include="src\Components\BistroGrassComponents.h" />
     <ClInclude Include="src\Systems\FlyingPropSystem.h" />
     <ClInclude Include="src\Components\FlyingPropComponent.h" />

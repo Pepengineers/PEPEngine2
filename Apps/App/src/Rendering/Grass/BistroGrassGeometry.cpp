@@ -1,7 +1,7 @@
-#include "Rendering/Grass/BistroGrassRenderExtension.h"
+#include "Rendering/Grass/BistroGrassGeometry.h"
 #include "App.Base/Modules/RenderModule.h"
 
-BistroGrassRenderExtension::BistroGrassRenderExtension(std::shared_ptr<SceneManagerModule> scenes, RenderModule& renderer)
+BistroGrassGeometry::BistroGrassGeometry(std::shared_ptr<SceneManagerModule> scenes, RenderModule& renderer)
     : _scenes(std::move(scenes)), _renderer(renderer)
 {
     _created = _scenes->OnWorldCreated.AddListener([this](World& world) { Subscribe(world); });
@@ -9,14 +9,14 @@ BistroGrassRenderExtension::BistroGrassRenderExtension(std::shared_ptr<SceneMana
     for (size_t i = 0; i < _scenes->GetWorldCount(); ++i) Subscribe(*_scenes->GetWorld(i));
 }
 
-BistroGrassRenderExtension::~BistroGrassRenderExtension()
+BistroGrassGeometry::~BistroGrassGeometry()
 {
     _scenes->OnWorldCreated.RemoveListener(_created);
     _scenes->OnWorldDestroyed.RemoveListener(_destroyed);
     while (!_subscriptions.empty()) Unsubscribe(*_subscriptions.begin()->first);
 }
 
-void BistroGrassRenderExtension::Subscribe(World& world)
+void BistroGrassGeometry::Subscribe(World& world)
 {
     if (_subscriptions.count(&world)) return;
     RegisterBistroGrassComponents(world);
@@ -32,7 +32,7 @@ void BistroGrassRenderExtension::Subscribe(World& world)
     ecs.ForEach<WindFieldComponent>(ownWind);
 }
 
-void BistroGrassRenderExtension::Unsubscribe(World& world)
+void BistroGrassGeometry::Unsubscribe(World& world)
 {
     const auto found = _subscriptions.find(&world);
     if (found == _subscriptions.end()) return;
@@ -48,7 +48,7 @@ void BistroGrassRenderExtension::Unsubscribe(World& world)
     _wind.clear();
 }
 
-void BistroGrassRenderExtension::CollectScene(float deltaSeconds)
+void BistroGrassGeometry::CollectScene(float deltaSeconds)
 {
     _grass.clear();
     _wind.clear();
@@ -107,26 +107,26 @@ void BistroGrassRenderExtension::CollectScene(float deltaSeconds)
     _controls = controls;
 }
 
-void BistroGrassRenderExtension::PrepareFrame(GDX12CommandList* commands, GDX12DeviceResources& resources,
+void BistroGrassGeometry::PrepareFrame(GDX12CommandList* commands, GDX12DeviceResources& resources,
     const RenderPipelineCommonData& common)
 {
     if (!_grass.empty() && !_gpu) _gpu = std::make_unique<GDX12GrassRenderer>(&resources);
     if (_gpu) _gpu->BeginFrame(commands, common, _grass, _wind, _controls);
 }
 
-void BistroGrassRenderExtension::AppendSceneContributions(GDX12SceneContributions& scene) const
+void BistroGrassGeometry::AppendSceneContributions(GDX12SceneContributions& scene) const
 {
     BoundingBox bounds;
     if (_gpu && _gpu->GetBounds(bounds)) scene.Append(bounds, _gpu->Revision(), true, _gpu->HasCasters());
 }
 
-void BistroGrassRenderExtension::DeclareGeometryResources(GDX12RenderGraphBuilder& graph) const
+void BistroGrassGeometry::DeclareGeometryResources(GDX12RenderGraphBuilder& graph) const
 {
     // shortcut: direct-queue scratch is one mutable set; declare physical buffers before cross-queue geometry.
     graph.ReadWriteExternal(this, "Application geometry scratch");
 }
 
-void BistroGrassRenderExtension::DrawGeometry(GDX12CommandList* commands, const GDX12GeometryContext& context)
+void BistroGrassGeometry::DrawGeometry(GDX12CommandList* commands, const GDX12GeometryContext& context)
 {
     if (!_gpu || context.StaticOnly) return;
     GDX12GrassRenderer::Stage stage;

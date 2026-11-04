@@ -176,17 +176,20 @@ public:
 		cmdList->SetGraphicsSRV(14, waterDepth->GetSRV()->GPUHandle);
         cmdList->SetGraphicsSRV(15, depthStencil->GetSRV()->GPUHandle);
 
-		cmdList->ResourceBarrier({ currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetIndirectArgsBarrier(),
-		currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetIndirectArgsBarrier(),
-		OUT_Accumulation->GetResource()->GetRenderTargetBarrier(),
-		OUT_Revealage->GetResource()->GetRenderTargetBarrier() });
+        const UINT meshCount = _resources->IndirectCommandsCache->GetElementCount();
+        if (meshCount)
+            cmdList->ResourceBarrier({ currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetIndirectArgsBarrier(),
+                currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetIndirectArgsBarrier() });
+        cmdList->ResourceBarrier({ OUT_Accumulation->GetResource()->GetRenderTargetBarrier(),
+            OUT_Revealage->GetResource()->GetRenderTargetBarrier() });
 		const D3D12_CPU_DESCRIPTOR_HANDLE renderTargets[] = { OUT_Accumulation->GetRTV()->CPUHandle, OUT_Revealage->GetRTV()->CPUHandle };
         cmdList->GetCommandList()->OMSetRenderTargets(2, renderTargets, FALSE, &_readOnlyDepth->CPUHandle);
 		cmdList->ClearRenderTargetView(OUT_Accumulation.get());
 		cmdList->ClearRenderTargetView(OUT_Revealage.get());
-		cmdList->ExecuteIndirect(_transparencyCS.Get(), _resources->IndirectCommandsCache->GetElementCount(),
-			currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().D3DResource.Get(), 0,
-			currentCameraVisBuffers.TransparentDrawCounter->GetResource().D3DResource.Get(), 0);
+        if (meshCount)
+            cmdList->ExecuteIndirect(_transparencyCS.Get(), meshCount,
+                currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().D3DResource.Get(), 0,
+                currentCameraVisBuffers.TransparentDrawCounter->GetResource().D3DResource.Get(), 0);
 		cmdList->ResourceBarrier({ OUT_Accumulation->GetResource()->GetSRVBarrier(),
 		OUT_Revealage->GetResource()->GetSRVBarrier() });
 	}

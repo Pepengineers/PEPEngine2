@@ -1,5 +1,5 @@
 #pragma once
-#include "Engine.RendererDX12/GDX12RenderExtension.h"
+#include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include <cstdint>
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
@@ -177,11 +177,13 @@ public:
 		cmdList->SetGraphicsSRV(1, currentFrameConstants->ShadowTransforms->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(2, currentFrameConstants->ShadowInstances->GetSRV()->GPUHandle);
 		cmdList->SetGraphicsSRV(3, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
-        cmdList->ResourceBarrier({
-            currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().GetIndirectArgsBarrier(),
-            currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetIndirectArgsBarrier(),
-            _stage == Stage::GBuffer ? depthStencil->GetResource()->GetDepthReadBarrier() :
-                depthStencil->GetResource()->GetDepthWriteBarrier() });
+        const UINT meshCount = _resources->IndirectCommandsCache->GetElementCount();
+        if (meshCount)
+            cmdList->ResourceBarrier({
+                currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().GetIndirectArgsBarrier(),
+                currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetIndirectArgsBarrier() });
+        cmdList->ResourceBarrier({ _stage == Stage::GBuffer ? depthStencil->GetResource()->GetDepthReadBarrier() :
+            depthStencil->GetResource()->GetDepthWriteBarrier() });
         if (_stage != Stage::GBuffer)
             cmdList->GetCommandList()->ClearDepthStencilView(depthStencil->GetDSV()->CPUHandle,
                 D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0, 0, nullptr);
@@ -216,9 +218,10 @@ public:
             cmdList->ClearRenderTargetView(OUT_VelocityBuffer.get());
             for (auto& texture : _surfaceBuffers) cmdList->ClearRenderTargetView(texture.get());
         }
-		cmdList->ExecuteIndirect(_opaqueCS.Get(), _resources->IndirectCommandsCache->GetElementCount(),
-			currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().D3DResource.Get(), 0,
-			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().D3DResource.Get(), 0);
+        if (meshCount)
+            cmdList->ExecuteIndirect(_opaqueCS.Get(), meshCount,
+                currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().D3DResource.Get(), 0,
+                currentCameraVisBuffers.OpaqueDrawCounter->GetResource().D3DResource.Get(), 0);
         {
             const auto stage = _stage == Stage::DepthPrepass ?
                 (writeNormals ? GDX12GeometryStage::DepthNormals : GDX12GeometryStage::Depth) :

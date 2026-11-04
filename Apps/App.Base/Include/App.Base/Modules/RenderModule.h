@@ -9,7 +9,7 @@
 #include "Engine.RendererDX12/GDX12Skinning.h"
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
 #include "Engine.RendererDX12/GDX12RenderGraph.h"
-#include "Engine.RendererDX12/GDX12RenderExtension.h"
+#include "App.Base/Rendering/IRenderPipeline.h"
 #include "App.Base/Systems/ShadowVisibilitySystem.h"
 #include <map>
 
@@ -19,11 +19,6 @@ class GDX12SwapChain;
 class GDX12Device;
 class GDX12CommandList;
 class GDX12GPUTimer;
-class GDX12ReconstructionPass;
-class GDX12DeferredLightingPass;
-class GDX12LocalShadowPass;
-class GDX12ReflectionProbePass;
-class GDX12ParticlesPass;
 struct GDX12FrameGenerationStatus;
 
 struct TransformComponent;
@@ -48,9 +43,8 @@ class RenderModule final : public Module
 {
 public:
     RenderModule(Window* window, GameTimer* timer);
+    RenderModule(Window* window, GameTimer* timer, std::unique_ptr<IRenderPipeline> pipeline);
     ~RenderModule() override;
-
-    GDX12RenderExtension* RegisterRenderExtension(std::unique_ptr<GDX12RenderExtension> extension);
 
     void Initialize() override;
     void Uninitialize() override;
@@ -194,16 +188,9 @@ private:
     ShadowVisibilitySystem _shadowVisibility;
     void CollectParticleEmitters();
     void ShareFences();
-    template<class T, class... Args> T* CreateRenderPass(Args&&... args)
-    {
-        auto pass = std::make_unique<T>(std::forward<Args>(args)...);
-        auto* result = pass.get();
-        _primaryRenderPasses.push_back(std::move(pass));
-        return result;
-    }
-    void ConfigureRenderPipeline();
-    void SetupRenderPasses();
-    void InitializeRenderPasses();
+    friend struct RenderPipelineContext;
+    RenderPipelineContext PipelineContext();
+    void RefreshPipelineFlags();
     void RebuildRenderGraph();
     void EnsureInstanceCapacity(UINT capacity);
     
@@ -244,26 +231,10 @@ private:
     // These two resources are made on _primaryDevice only
     std::unique_ptr<GDX12SwapChain> _backBuffer;
     
-    GDX12RenderPass* _depthPrepass = nullptr;
-    GDX12RenderPass* _particleSimulationPass = nullptr;
-    GDX12ParticlesPass* _particlesPass = nullptr;
-    GDX12RenderPass* _opaquePass = nullptr;
-    GDX12DeferredLightingPass* _deferredLightingPass = nullptr;
-    GDX12LocalShadowPass* _localShadowPass = nullptr;
-    GDX12ReflectionProbePass* _reflectionPass = nullptr;
-    GDX12RenderPass* _ambientOcclusionPass = nullptr;
-    GDX12ReconstructionPass* _reconstructionPass = nullptr;
-
+    // The graph borrows pipeline passes and must be destroyed first.
+    std::unique_ptr<IRenderPipeline> _pipeline;
     std::unique_ptr<GDX12RenderGraph> _primaryGraph;
-    bool _graphEarlyAO = false;
     bool _graphReuseTextures = true;
-
-    // Owns pass implementations; execution is scheduled by the graph.
-    std::vector<std::unique_ptr<GDX12RenderPass>> _primaryRenderPasses;
-    std::vector<std::unique_ptr<GDX12RenderPass>> _secondaryRenderPasses;
-    std::vector<std::unique_ptr<GDX12RenderExtension>> _renderExtensions;
-    std::vector<GDX12RenderExtensionBuildContext::Stage> _renderStages;
-    bool _extensionsInitialized = false;
 
     // Flags that are accumulated from every active RenderPass on the device
     // Defines which resources should be uploaded onto respective GPU

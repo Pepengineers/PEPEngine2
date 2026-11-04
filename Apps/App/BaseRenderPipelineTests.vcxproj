@@ -1,12 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
   <Import Project="App.vcxproj" />
-  <PropertyGroup>
-    <ProjectGuid>{E20E6021-43BD-4600-AC20-38D3B82BD180}</ProjectGuid>
-  </PropertyGroup>
+  <PropertyGroup><ProjectGuid>{818F5B0F-275A-4B5A-A346-C7CD82DA1E90}</ProjectGuid></PropertyGroup>
   <ItemGroup>
-    <ClCompile Remove="src\App.cpp" />
-    <ClCompile Include="tests\RenderExtensionTests.cpp" />
+    <ClCompile Remove="src\App.cpp;src\Rendering\**\*.cpp" />
+    <ClCompile Include="tests\BaseRenderPipelineTests.cpp" />
   </ItemGroup>
   <ItemDefinitionGroup>
     <Link>

@@ -1,4 +1,4 @@
-#include "Engine.RendererDX12/GDX12RenderExtension.h"
+#include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include "Engine.RendererDX12/GDX12DeviceResources.h"
 
 #include "Common/ConsoleVariables.h"
@@ -186,10 +186,10 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
 
 void GDX12DeviceResources::DrawGeometry(GDX12CommandList* commands, const GDX12GeometryContext& context)
 {
-    for (auto* extension : RenderExtensions) extension->DrawGeometry(commands, context);
+    for (auto* extension : GeometrySources) extension->DrawGeometry(commands, context);
 }
 
 void GDX12DeviceResources::DeclareGeometryResources(GDX12RenderGraphBuilder& graph) const
 {
-    for (auto* extension : RenderExtensions) extension->DeclareGeometryResources(graph);
+    for (auto* extension : GeometrySources) extension->DeclareGeometryResources(graph);
 }

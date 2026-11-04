@@ -1,5 +1,5 @@
 #pragma once
-#include "Engine.RendererDX12/GDX12RenderExtension.h"
+#include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include <cstdint>
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
