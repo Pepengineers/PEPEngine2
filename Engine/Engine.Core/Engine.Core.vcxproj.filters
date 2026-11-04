@@ -147,6 +147,9 @@
     <ClInclude Include="Include\Common\ConsoleVariables.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Common\EnumMetadata.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Common\LockThreadQueue.h">
       <Filter>Header Files</Filter>
     </ClInclude>

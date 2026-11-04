@@ -216,6 +216,7 @@
     <ClInclude Include="Include\Engine.Core\Types\SceneTypes.h" />
     <ClInclude Include="Include\Engine.Core\Types\TextureTypes.h" />
     <ClInclude Include="Include\Common\ConsoleVariables.h" />
+    <ClInclude Include="Include\Common\EnumMetadata.h" />
     <ClInclude Include="Include\Common\LockThreadQueue.h" />
     <ClInclude Include="Include\Common\Module.h" />
     <ClInclude Include="Include\Common\Stopwatch.h" />

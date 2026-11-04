@@ -30,7 +30,7 @@ for (auto* variable : ConsoleModule{}.GetConsoleVariables(L"Render."))
 CVar сохраняют свои типы. Для новых перечислений поддерживается `enum class`:
 
 ```cpp
-enum class ExampleMode { Off, Low, High, Count };
+enum class ExampleMode : std::uint8_t { Off, Low, High, Count };
 static AutoConsoleVariable<ExampleMode> Mode(L"Render.Example.Mode", ExampleMode::Low,
     L"Example mode: 0 Off, 1 Low, 2 High");
 ```
@@ -44,8 +44,28 @@ static AutoConsoleVariable<ExampleMode> Mode(L"Render.Example.Mode", ExampleMode
 Это работает и для `AutoConsoleVariableRef`. Enum без `Count` сохраняет прежнее
 числовое поведение, а `GetEnumCount()` возвращает 0.
 
-ImGui выбирает флажок для bool, числовое поле для int/float, меню `First..Count-1` (по умолчанию `First=0`)
-для enum с `Count`. Значения enum поясняются описанием при наведении. Группы
+ImGui выбирает флажок для bool, числовое поле для int/float, выпадающий список названий
+для enum с `Count`. `GetEnumValueName(value)` возвращает название значения,
+а `GetString()`/INI по-прежнему используют число. Диапазон — `First..Count-1`
+(по умолчанию `First=0`); `Count` и псевдоним `First` не добавляют пункты списка.
+Имена обычных enum, включая локальные, автоматически извлекаются из сигнатур
+шаблонов MSVC при компиляции. Для читаемых подписей объявите метаданные рядом
+с enum, в том же namespace:
+
+```cpp
+enum class ExampleQuality : std::uint8_t { Off, Low, Mid, High, Count };
+PEP_ENUM_METADATA(ExampleQuality,
+    PEP_DISPLAY_NAME(Mid, "Medium")
+)
+```
+
+Варианты без `PEP_DISPLAY_NAME` показывают C++-идентификатор (`Off`, `Low`, `High`).
+`PEP_ENUM_METADATA` доступен через `Common/EnumMetadata.h` и `ConsoleVariables.h`.
+Отдельный список для каждого CVar не нужен. Такой подход к display-name metadata
+взят из [UENUM/UMETA Unreal](https://dev.epicgames.com/documentation/en-us/unreal-engine/metadata-specifiers-in-unreal-engine).
+Подписи не участвуют в парсинге и сохранении значений.
+
+Описания и допустимые диапазоны доступны при наведении. Группы
 получаются из всего имени до последней точки: `Render.UI.Count` и `Render.UI.Size`
 попадают в `Render.UI`, `Render.AO.SSAO.Samples` — в `Render.AO.SSAO`.
 Уровни качества эффектов, провайдеры SR/FG, реализация AO и точка его выполнения —

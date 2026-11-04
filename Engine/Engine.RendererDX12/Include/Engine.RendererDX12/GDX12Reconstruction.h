@@ -1,10 +1,18 @@
 #pragma once
 #include <cstdint>
 #include <string>
+#include "Common/EnumMetadata.h"
 
 enum class GDX12UpscalerProvider : std::uint8_t { Native, XeSS, FSR, DLSS, NIS, Count };
 // Default keeps each SDK's preferred preset; XeSS defaults to Ultra Quality Plus.
 enum class GDX12UpscalerQuality : std::uint8_t { Default, NativeAA, Quality, Balanced, Performance, UltraPerformance, UltraQuality, UltraQualityPlus, Count };
+PEP_ENUM_METADATA(GDX12UpscalerQuality,
+    PEP_DISPLAY_NAME(Default, "SDK default")
+    PEP_DISPLAY_NAME(NativeAA, "Native AA")
+    PEP_DISPLAY_NAME(UltraPerformance, "Ultra Performance")
+    PEP_DISPLAY_NAME(UltraQuality, "Ultra Quality")
+    PEP_DISPLAY_NAME(UltraQualityPlus, "Ultra Quality Plus")
+)
 
 struct GDX12ReconstructionSettings
 {

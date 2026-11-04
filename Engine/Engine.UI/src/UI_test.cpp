@@ -100,15 +100,20 @@ namespace Engine::UI
                         }
                         else if (variable->GetType() == EConsoleVariableType::Enumeration && variable->GetEnumCount() > 0)
                         {
-                            if (ImGui::BeginCombo(label.c_str(), value.c_str()))
+                            const auto currentValue = std::stoi(value);
+                            const std::string preview(variable->GetEnumValueName(currentValue));
+                            if (ImGui::BeginCombo(label.c_str(), preview.c_str()))
                             {
                                 for (int index = 0; index < variable->GetEnumCount(); ++index)
                                 {
-                                    const auto item = std::to_string(variable->GetEnumFirstValue() + index);
-                                    const bool selected = item == value;
+                                    const auto itemValue = variable->GetEnumFirstValue() + index;
+                                    const std::string item(variable->GetEnumValueName(itemValue));
+                                    const bool selected = itemValue == currentValue;
+                                    ImGui::PushID(itemValue);
                                     if (ImGui::Selectable(item.c_str(), selected))
-                                    { value = item; changed = true; }
+                                    { value = std::to_string(itemValue); changed = true; }
                                     if (selected) ImGui::SetItemDefaultFocus();
+                                    ImGui::PopID();
                                 }
                                 ImGui::EndCombo();
                             }

@@ -83,8 +83,10 @@ All registered CVars are discovered every frame. Controls follow their declared
 types; dotted names form nested folders, for example `App > Bounds > BistroTableSteam`.
 Collapsing a folder hides its entire subtree and preserves the child folders' states.
 Search opens matching branches; clearing it restores the normal tree state. Enum classes ending
-in `Count` get a numeric
-dropdown automatically. All effect-quality and provider/mode selectors use enums;
+in `Count` get a dropdown of their value names automatically.
+Optional `PEP_ENUM_METADATA` / `PEP_DISPLAY_NAME` declarations beside the enum
+provide readable labels; INI files retain numeric values. All effect-quality and
+provider/mode selectors use enums;
 counts, dimensions and sample budgets remain numeric. New settings need no UI
 edits; use descriptions for help.
 

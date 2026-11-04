@@ -60,6 +60,7 @@ public:
     virtual EConsoleVariableType GetType() const = 0;
     virtual int GetEnumCount() const = 0;
     virtual int GetEnumFirstValue() const = 0;
+    virtual std::string_view GetEnumValueName(int Value) const = 0;
     virtual bool SetFromString(std::string_view Value) = 0;
     virtual std::string GetString() const = 0;
     // Settings edits may save ReadOnly values for the next startup.

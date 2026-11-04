@@ -1,5 +1,6 @@
 #pragma once
 #include "Engine.Core/ConsoleModule.h"
+#include "Common/EnumMetadata.h"
 
 #include <charconv>
 #include <cmath>
@@ -93,6 +94,17 @@ public:
 
     int GetEnumCount() const override { return ConsoleVariableDetail::EnumSize<TValue>::Count; }
     int GetEnumFirstValue() const override { return ConsoleVariableDetail::EnumFirst<TValue>::Value; }
+    std::string_view GetEnumValueName(int value) const override
+    {
+        if constexpr (std::is_enum_v<TValue> && ConsoleVariableDetail::EnumSize<TValue>::Count > 0)
+        {
+            constexpr int first = ConsoleVariableDetail::EnumFirst<TValue>::Value;
+            constexpr int count = ConsoleVariableDetail::EnumSize<TValue>::Count;
+            static constexpr auto names = EnumMetadataDetail::Names<TValue, first>(std::make_index_sequence<count>{});
+            if (value >= first && value < first + count) return names[value - first];
+        }
+        return {};
+    }
 
     TValue GetValue() const
     {

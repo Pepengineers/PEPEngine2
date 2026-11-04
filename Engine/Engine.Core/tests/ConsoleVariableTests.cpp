@@ -23,6 +23,9 @@ namespace
     enum class SignedQuality : std::int8_t { Low, High, Count };
     enum class LegacyMode : std::int8_t { Automatic = -3, Manual = 11 };
     enum class NativeQuality : std::int8_t { Inherit = -1, Low, High, Count, First = Inherit };
+    PEP_ENUM_METADATA(Quality,
+        PEP_DISPLAY_NAME(High, "High quality")
+    )
 }
 
 int main(int argc, char**)
@@ -67,6 +70,15 @@ int main(int argc, char**)
         Require(quality.GetEnumCount() == 2 && count.GetEnumCount() == 0 &&
             !quality.SetFromString("2") && !quality.SetFromString("-1") && !quality.SetValue(Quality::Count),
             "Enum Count must expose the UI range and reject the sentinel and invalid values");
+        Require(quality.GetEnumValueName(0) == "Low" && quality.GetEnumValueName(1) == "High quality" &&
+            quality.GetEnumValueName(-1).empty() && quality.GetEnumValueName(2).empty() &&
+            count.GetEnumValueName(0).empty() && quality.GetString() == "1",
+            "Enum names and display-name metadata must remain separate from numeric serialization");
+        {
+            enum class LocalMode : std::uint8_t { First, Second, Count };
+            AutoConsoleVariable<LocalMode> local(L"Test.LocalMode", LocalMode::Second);
+            Require(local.GetEnumValueName(1) == "Second", "Function-local enums must expose their declared names");
+        }
         const auto snapshot = console.GetConsoleVariables();
         Require(std::is_sorted(snapshot.begin(), snapshot.end(), [](const auto* left, const auto* right)
             { return left->GetName() < right->GetName(); }), "Registry snapshots must have deterministic order");
@@ -83,7 +95,8 @@ int main(int argc, char**)
             SignedQuality enumBacking = SignedQuality::Low;
             AutoConsoleVariableRef<SignedQuality> enumRef(L"Test.Dynamic.Ref", enumBacking);
             Require(enumRef.GetEnumCount() == 2 && enumRef.SetFromString("1") &&
-                !enumRef.SetValue(SignedQuality::Count) && enumBacking == SignedQuality::High,
+                !enumRef.SetValue(SignedQuality::Count) && enumBacking == SignedQuality::High &&
+                enumRef.GetEnumValueName(1) == "High",
                 "Referenced enums must preserve type and enforce Count");
             AutoConsoleVariable<LegacyMode> legacy(L"Test.Dynamic.Legacy", LegacyMode::Automatic);
             Require(legacy.GetEnumCount() == 0 && legacy.SetFromString("11") && legacy.GetValue() == LegacyMode::Manual,
@@ -124,7 +137,9 @@ int main(int argc, char**)
             AutoConsoleVariable<NativeQuality> native(L"Test.NativeQuality", NativeQuality::Inherit);
             Require(native.GetEnumFirstValue() == -1 && native.GetEnumCount() == 3 &&
                 native.SetFromString("-1") && native.SetFromString("1") &&
-                !native.SetFromString("-2") && !native.SetFromString("2"),
+                !native.SetFromString("-2") && !native.SetFromString("2") &&
+                native.GetEnumValueName(-1) == "Inherit" && native.GetEnumValueName(0) == "Low" &&
+                native.GetEnumValueName(1) == "High" && native.GetEnumValueName(2).empty(),
                 "Native enum ranges must include the inherited preset without renumbering INI values");
         }
 

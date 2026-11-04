@@ -11,6 +11,17 @@ namespace
     enum class AOExecutionPoint : std::uint8_t { AfterDepthPrepass, BeforeLighting, Count };
     enum class AOImplementation : std::uint8_t { SSAO, HBAO, XeGTAO, CACAO, Count };
     enum class CacaoQuality : std::int8_t { Inherit = -1, Lowest, Low, Medium, High, Highest, Count, First = Inherit };
+    PEP_ENUM_METADATA(AOExecutionPoint,
+        PEP_DISPLAY_NAME(AfterDepthPrepass, "After depth prepass")
+        PEP_DISPLAY_NAME(BeforeLighting, "Before lighting")
+    )
+    PEP_ENUM_METADATA(AOImplementation,
+        PEP_DISPLAY_NAME(CACAO, "AMD CACAO")
+    )
+    PEP_ENUM_METADATA(CacaoQuality,
+        PEP_DISPLAY_NAME(Inherit, "Inherit AO quality")
+        PEP_DISPLAY_NAME(Highest, "Highest (adaptive)")
+    )
     static AutoConsoleVariable<AOExecutionPoint> ExecutionPoint(L"Render.AO.ExecutionPoint", AOExecutionPoint::BeforeLighting,
         L"0 after depth prepass, 1 before lighting", Runtime);
     static AutoConsoleVariable<bool> Enabled(L"Render.AO.Enabled", true, L"Enable ambient occlusion", Runtime);

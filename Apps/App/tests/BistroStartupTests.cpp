@@ -31,6 +31,16 @@ static void CheckEnumCVars()
         L"Render.AO.CACAO.Quality", L"App.Grass.Implementation", L"App.Grass.Wind.Algorithm", L"App.Particles.Simulation" })
         require(ConsoleModule{}.FindConsoleVariable(name).GetType() == EConsoleVariableType::Enumeration,
             "Every provider and mode selector must use an enum dropdown");
+    for (const auto* variable : ConsoleModule{}.GetConsoleVariables())
+        for (int i = 0; i < variable->GetEnumCount(); ++i)
+            require(!variable->GetEnumValueName(variable->GetEnumFirstValue() + i).empty(),
+                "Every enum dropdown entry must have a name");
+    require(ConsoleModule{}.FindConsoleVariable(L"Render.AO.Quality").GetEnumValueName(2) == "Medium" &&
+        ConsoleModule{}.FindConsoleVariable(L"Render.AO.ExecutionPoint").GetEnumValueName(1) == "Before lighting" &&
+        ConsoleModule{}.FindConsoleVariable(L"Render.Upscaler.Provider").GetEnumValueName(1) == "XeSS" &&
+        ConsoleModule{}.FindConsoleVariable(L"Render.Upscaler.Quality").GetEnumValueName(0) == "SDK default" &&
+        ConsoleModule{}.FindConsoleVariable(L"Render.AO.CACAO.Quality").GetEnumValueName(-1) == "Inherit AO quality",
+        "Dropdown labels must use enum identifiers or declared display names");
     std::cout << "Effect quality/provider/mode CVar metadata passed\n";
 }
 
@@ -150,6 +160,7 @@ int main(int argc, char** argv)
             check(group != std::string::npos && text.find("AutoDiscoveryTest", group + 1) == std::string::npos &&
                 text.find("NewSetting") != std::string::npos && text.find("Size") != std::string::npos &&
                 text.find("Count") != std::string::npos && text.find("Enabled") != std::string::npos &&
+                text.find("Second") != std::string::npos &&
                 discovered.GetType() == EConsoleVariableType::Enumeration && discovered.GetEnumCount() == 3,
                 "New typed CVars must appear in one shared name-prefix group without UI changes");
             auto* settings = ImGui::FindWindowByName("Settings (F1)");
