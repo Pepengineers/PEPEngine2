@@ -6,6 +6,10 @@
 #include <fstream>
 #include <iostream>
 #include <limits>
+#include <process.h>
+#include <io.h>
+#include <sys/stat.h>
+#include <thread>
 #include <stdexcept>
 
 namespace
@@ -17,9 +21,10 @@ namespace
     enum class Quality : unsigned { Low, High, Count };
     enum class SignedQuality { Low, High, Count };
     enum class LegacyMode { Automatic = -3, Manual = 11 };
+    enum class NativeQuality { Inherit = -1, Low, High, Count, First = Inherit };
 }
 
-int main()
+int main(int argc, char**)
 {
     try
     {
@@ -89,6 +94,16 @@ int main()
             "Console display must preserve values, enums and references");
         AutoConsoleVariable<uint64_t> wide(L"Test.Wide", UINT64_MAX);
         AutoConsoleVariable<double> precise(L"Test.Precise", 1.2345678901234567);
+        if (argc > 1)
+        {
+            console.Initialize();
+            Require(count.GetInt() == 43 && frames.GetUInt() == 5 && backing == 7 &&
+                scale.GetValue() == 1.75f && enabled.GetBool() && quality.GetValue() == Quality::Low &&
+                wide.GetValue() == 42 && precise.GetValue() == 0.125,
+                "Saved runtime and pending readonly values must load in a new process");
+            std::cout << "Saved CVar startup reload passed\n";
+            return 0;
+        }
         Require(wide.GetString() == "18446744073709551615" && wide.SetFromString(wide.GetString()) &&
             precise.SetFromString(precise.GetString()) && precise.GetValue() == 1.2345678901234567,
             "Console display must round-trip without narrowing integers or floating point values");
@@ -104,6 +119,13 @@ int main()
         try { console.FindConsoleVariable(L"Test.Missing"); }
         catch (const std::out_of_range&) { missingRejected = true; }
         Require(missingRejected, "Required lookup must fail explicitly");
+        {
+            AutoConsoleVariable<NativeQuality> native(L"Test.NativeQuality", NativeQuality::Inherit);
+            Require(native.GetEnumFirstValue() == -1 && native.GetEnumCount() == 3 &&
+                native.SetFromString("-1") && native.SetFromString("1") &&
+                !native.SetFromString("-2") && !native.SetFromString("2"),
+                "Native enum ranges must include the inherited preset without renumbering INI values");
+        }
 
         const auto directory = std::filesystem::temp_directory_path() /
             ("pep-cvar-tests-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -169,7 +191,9 @@ int main()
         const std::string logText((std::istreambuf_iterator<char>(log)), std::istreambuf_iterator<char>());
         Require(logText.find("Engine.ini:3:") != std::string::npos &&
             logText.find("Application startup aborted") != std::string::npos, "Startup failure must be logged to disk");
-        { std::ofstream file(startupIni); file << "[ConsoleVariables]\nTest.Count=28\nTest.Frames=4\nTest.Ref=6\n"; }
+        { std::ofstream file(startupIni, std::ios::binary); file <<
+            "\xEF\xBB\xBF; Keep this comment\r\n[ConsoleVariables]\r\n"
+            "test.count = 20 ; duplicate\r\nTest.Count=28\r\nTest.Frames=4\r\nTest.Ref=6\r\n"; }
         const auto originalDirectory = std::filesystem::current_path();
         std::filesystem::current_path(directory);
         StartupProbe app(constructed, frames);
@@ -182,10 +206,66 @@ int main()
         Require(!reference.SetValue(7) && backing == 6, "Reference setter must obey ReadOnly");
         Require(count.SetValue(42) && console.FindConsoleVariable(L"Test.Count").SetFromString("43") &&
             count.GetInt() == 43, "Default must remain mutable at runtime");
+        Require(frames.SetConfigFromString("5") && frames.GetUInt() == 4 && frames.GetConfigString() == "5" &&
+            reference.SetConfigFromString("7") && backing == 6 && reference.GetConfigString() == "7",
+            "Readonly config edits must save pending values without changing active resources");
+        Require(!frames.SetConfigFromString("0") && frames.GetConfigString() == "5",
+            "Pending readonly edits must obey the same validator");
+        Require(frames.SetConfigFromString("4") && frames.GetConfigString() == "4" && frames.SetConfigFromString("5"),
+            "A pending readonly change must be reversible");
+        Require(scale.SetConfigFromString("1.75") && scale.GetValue() == 1.75f && enabled.SetValue(true) &&
+            quality.SetValue(Quality::Low) && wide.SetValue(42) && precise.SetValue(0.125),
+            "All supported CVar types must save through UI and typed setters");
+        const auto readSaved = [&]
+        {
+            std::ifstream file(startupIni, std::ios::binary);
+            return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+        };
+        bool countSaved = true, scaleSaved = true;
+        std::thread countWriter([&] { for (int i = 0; i < 4; ++i) countSaved &= count.SetValue(50 + i); });
+        std::thread scaleWriter([&] { for (int i = 0; i < 4; ++i) scaleSaved &= scale.SetValue(2.0f + i); });
+        countWriter.join();
+        scaleWriter.join();
+        Require(countSaved && scaleSaved && readSaved().find("Test.Count=53") != std::string::npos &&
+            readSaved().find("Test.Scale = 5") != std::string::npos,
+            "Concurrent edits of different CVars must not lose persisted values");
+        Require(count.SetValue(43) && scale.SetValue(1.75f), "Cannot restore concurrent-test values");
+        const auto saved = readSaved();
+        Require(saved.find("\xEF\xBB\xBF; Keep this comment\r\n") == 0 &&
+            saved.find("test.count = 43 ; duplicate\r\nTest.Count=43\r\n") != std::string::npos &&
+            saved.find("Test.Frames=5\r\nTest.Ref=7\r\n") != std::string::npos &&
+            saved.find("Test.Scale = 1.75") != std::string::npos,
+            "Autosave must update duplicate keys, append missing keys and preserve comments/BOM/line endings");
+        Require(!count.SetFromString("invalid") && !quality.SetConfigFromString("2") && readSaved() == saved,
+            "Rejected edits must leave the INI untouched");
+        {
+            struct RestoreWrite
+            {
+                std::filesystem::path Path;
+                ~RestoreWrite()
+                {
+                    _wchmod(Path.c_str(), _S_IREAD | _S_IWRITE);
+                }
+            } restore{startupIni};
+            Require(_wchmod(startupIni.c_str(), _S_IREAD) == 0, "Cannot make test INI read-only");
+            Require(!count.SetValue(99) && count.GetInt() == 43 && !frames.SetConfigFromString("6") &&
+                frames.GetConfigString() == "5" && readSaved() == saved,
+                "Failed atomic replacement must retain the original INI and active/pending values");
+        }
+        const auto executable = startupIni.parent_path().parent_path() / "ConsoleVariableTests.exe";
+        Require(_wspawnl(_P_WAIT, executable.c_str(), executable.c_str(), L"--verify-saved", nullptr) == 0,
+            "Saved INI did not survive a fresh application startup");
         Require(!console.LoadIni(ini).Error.empty() && count.GetInt() == 43,
             "INI loading is a startup-only operation");
         AutoConsoleVariable<int> late(L"Test.Late", 1, {}, EConsoleVariableFlags::ReadOnly);
         Require(!late.SetValue(2), "Late registration must not reopen startup writes");
+        std::filesystem::remove(startupIni);
+        Require(count.SetValue(44) && readSaved() == "[ConsoleVariables]\nTest.Count = 44\n",
+            "First runtime edit must create a missing INI with the required section");
+        { std::ofstream file(startupIni, std::ios::binary); file << "; Example: [ConsoleVariables]\r\n"; }
+        Require(count.SetValue(45) && readSaved() ==
+            "; Example: [ConsoleVariables]\r\n[ConsoleVariables]\r\nTest.Count = 45\r\n",
+            "A section mentioned only in a comment must not suppress the real header or change newlines");
         std::cout << "Console variable tests passed\n";
         return 0;
     }

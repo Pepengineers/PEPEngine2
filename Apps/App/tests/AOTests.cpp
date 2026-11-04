@@ -59,6 +59,15 @@ static void CheckSettings()
     for (const auto name : { L"Render.AO.SSAO.Samples", L"Render.AO.HBAO.Directions", L"Render.AO.HBAO.Steps",
         L"Render.AO.DenoisePasses", L"Render.AO.XeGTAO.Slices", L"Render.AO.XeGTAO.Steps", L"Render.AO.CACAO.Quality" }) Set(name, "-1");
     Require(GetAmbientOcclusionSettings().Samples == 32, "Preset inheritance did not resume");
+    auto& quality = console.FindConsoleVariable(L"Render.AO.Quality");
+    Require(quality.GetType() == EConsoleVariableType::Enumeration && quality.GetEnumCount() == 4 &&
+        !quality.SetFromString("4"), "AO quality must expose a validated enum dropdown");
+    for (const auto name : { L"Render.AO.ExecutionPoint", L"Render.AO.Implementation", L"Render.AO.CACAO.Quality" })
+        Require(console.FindConsoleVariable(name).GetType() == EConsoleVariableType::Enumeration,
+            "AO mode selectors must expose enum dropdowns");
+    Require(console.FindConsoleVariable(L"Render.AO.CACAO.Quality").GetEnumFirstValue() == -1 &&
+        console.FindConsoleVariable(L"Render.AO.CACAO.Quality").GetEnumCount() == 6,
+        "CACAO dropdown must preserve the native -1 inherited preset");
     for (auto* variable : console.GetConsoleVariables())
     {
         if (variable->GetName().substr(0, 10) != L"Render.AO.") continue;

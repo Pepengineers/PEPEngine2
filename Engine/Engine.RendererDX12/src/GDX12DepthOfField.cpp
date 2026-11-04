@@ -1,5 +1,6 @@
 #include "Engine.RendererDX12/GDX12DepthOfField.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.RendererDX12/GDX12Quality.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -7,8 +8,8 @@
 namespace
 {
     static AutoConsoleVariable<bool> Enabled(L"Render.DOF.Enabled", true, L"Enable FidelityFX DoF");
-    static AutoConsoleVariable<int> Quality(L"Render.DOF.Quality", 2, L"0 Off, 1 Low, 2 Mid, 3 High",
-        EConsoleVariableFlags::Default, [](const int v) { return v >= 0 && v <= 3; });
+    static AutoConsoleVariable<GDX12Quality> Quality(L"Render.DOF.Quality", GDX12Quality::Mid, L"0 Off, 1 Low, 2 Mid, 3 High",
+        EConsoleVariableFlags::Default);
     static AutoConsoleVariable<float> Focus(L"Render.DOF.FocusDistanceCm", 500.0f, L"Focus distance in cm [1, 1000000]",
         EConsoleVariableFlags::Default, [](const float v) { return v >= 1.0f && v <= 1000000.0f; });
     static AutoConsoleVariable<float> Aperture(L"Render.DOF.FNumber", 2.8f, L"Lens f-number [0.7, 64]",
@@ -24,7 +25,7 @@ namespace
 
 GDX12DepthOfFieldSettings GetDepthOfFieldSettings()
 {
-    const int quality = Quality.GetValue();
+    const int quality = Quality.GetInt();
     const unsigned rings[] = { 0, 3, 5, 8 };
     const float limits[] = { 0.0f, 0.025f, 0.05f, 0.1f };
     const int overrideRings = Rings.GetValue();

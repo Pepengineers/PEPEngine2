@@ -56,8 +56,8 @@ namespace Engine::UI
             ImGui::SetNextWindowSize(ImVec2(540, 650), ImGuiCond_FirstUseEver);
             if (ImGui::Begin("Settings (F1)", &Visible))
             {
-                ImGui::TextWrapped("Changes apply live. Hover a setting for its CVar description and limits.");
-                ImGui::TextWrapped("Session only. Startup settings are locked. F1 hides/shows this window.");
+                ImGui::TextWrapped("Changes are saved to Config/Engine.ini automatically. Hover a setting for its description and limits.");
+                ImGui::TextWrapped("Readonly settings apply only after restarting the application. Other changes apply live. F1 hides/shows this window.");
                 static ImGuiTextFilter filter;
                 filter.Draw("Search", -90);
                 struct Group
@@ -87,11 +87,10 @@ namespace Engine::UI
                         const auto name = Utf8(variable->GetName());
                         const auto dot = name.rfind('.');
                         const auto label = dot == std::string::npos ? name : name.substr(dot + 1);
-                        auto value = variable->GetString();
+                        auto value = variable->GetConfigString();
                         bool changed = false;
                         const bool readOnly = variable->GetFlags() == EConsoleVariableFlags::ReadOnly;
                         ImGui::PushID(name.c_str());
-                        ImGui::BeginDisabled(readOnly);
                         ImGui::SetNextItemWidth(210);
                         if (variable->GetType() == EConsoleVariableType::Boolean)
                         {
@@ -105,7 +104,7 @@ namespace Engine::UI
                             {
                                 for (int index = 0; index < variable->GetEnumCount(); ++index)
                                 {
-                                    const auto item = std::to_string(index);
+                                    const auto item = std::to_string(variable->GetEnumFirstValue() + index);
                                     const bool selected = item == value;
                                     if (ImGui::Selectable(item.c_str(), selected))
                                     { value = item; changed = true; }
@@ -121,20 +120,23 @@ namespace Engine::UI
                         else if (variable->GetType() == EConsoleVariableType::Integer)
                             changed = InputNumber<int64_t>(label.c_str(), ImGuiDataType_S64, value);
                         else changed = ImGui::InputText(label.c_str(), &value, ImGuiInputTextFlags_EnterReturnsTrue);
-                        ImGui::EndDisabled();
                         if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                         {
                             ImGui::BeginTooltip();
                             ImGui::TextUnformatted(name.c_str());
                             ImGui::TextUnformatted(Utf8(variable->GetDescription()).c_str());
-                            if (readOnly) ImGui::TextUnformatted("Restart required: edit Config/Engine.ini.");
+                            if (readOnly)
+                            {
+                                ImGui::TextUnformatted("Readonly: changes are saved now and apply only after restarting the application.");
+                                ImGui::Text("Active value: %s", variable->GetString().c_str());
+                            }
                             ImGui::EndTooltip();
                         }
                         if (changed)
-                            InvalidVariable = variable->SetFromString(value) ? std::string{} : name;
+                            InvalidVariable = variable->SetConfigFromString(value) ? std::string{} : name;
                         if (InvalidVariable == name)
-                            ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1), "Invalid value; previous value retained. See tooltip for limits.");
-                        if (readOnly) { ImGui::SameLine(); ImGui::TextDisabled("(restart)"); }
+                            ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1), "Invalid value or INI save failed; previous value retained. See tooltip and log.");
+                        if (readOnly) { ImGui::SameLine(); ImGui::TextDisabled("(readonly)"); }
                         ImGui::PopID();
                     }
                     for (const auto& [name, child] : group.Children)

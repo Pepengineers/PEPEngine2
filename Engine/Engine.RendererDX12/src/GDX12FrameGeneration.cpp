@@ -32,9 +32,9 @@
 
 namespace
 {
-    AutoConsoleVariable<int> Provider(L"Render.FrameGeneration.Provider", 0,
+    AutoConsoleVariable<GDX12FrameGenerationProvider> Provider(L"Render.FrameGeneration.Provider", GDX12FrameGenerationProvider::Off,
         L"0 Off, 1 AMD, 2 NVIDIA, 3 Intel; unavailable providers remain Off with a reason",
-        EConsoleVariableFlags::Default, [](const int v) { return v >= 0 && v <= 3; });
+        EConsoleVariableFlags::Default);
 
     void CheckAMD(const ffxReturnCode_t result, const char* operation)
     {
@@ -74,7 +74,7 @@ namespace
 
 GDX12FrameGenerationProvider GetFrameGenerationProvider()
 {
-    return static_cast<GDX12FrameGenerationProvider>(Provider.GetValue());
+    return Provider.GetValue();
 }
 
 struct GDX12FrameGeneration::Impl

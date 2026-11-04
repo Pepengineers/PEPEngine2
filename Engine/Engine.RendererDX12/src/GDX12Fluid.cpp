@@ -1,5 +1,6 @@
 #include "Engine.RendererDX12/GDX12Fluid.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.RendererDX12/GDX12Quality.h"
 #include <cmath>
 #include <stdexcept>
 
@@ -7,9 +8,8 @@ namespace
 {
     static AutoConsoleVariable<bool> Enabled(L"Render.Fluid.Enabled", true,
         L"Enable fluid components. Default true.", EConsoleVariableFlags::Default);
-    static AutoConsoleVariable<int> Quality(L"Render.Fluid.Quality", 2,
-        L"0 Off, 1 Low, 2 Mid (default), 3 High.", EConsoleVariableFlags::Default,
-        [](const int value) { return value >= 0 && value <= 3; });
+    static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Fluid.Quality", GDX12Quality::Mid,
+        L"0 Off, 1 Low, 2 Mid (default), 3 High.", EConsoleVariableFlags::Default);
     bool Finite(const Vector3 value)
     {
         return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
@@ -22,7 +22,7 @@ namespace
 
 GDX12FluidControls GetFluidControls()
 {
-    const int quality = Quality.GetValue();
+    const int quality = Quality.GetInt();
     return { Enabled.GetValue() && quality != 0, quality };
 }
 

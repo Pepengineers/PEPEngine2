@@ -19,6 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12Quality.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderHelpers.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameGeneration.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Reconstruction.h" />

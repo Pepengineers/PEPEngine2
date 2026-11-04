@@ -1,13 +1,13 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12CloudComponent.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.RendererDX12/GDX12Quality.h"
 #include <cmath>
 #include <stdexcept>
 
 static AutoConsoleVariable<bool> Enabled(L"Render.Clouds.Enabled", true,
     L"Allow explicitly selected cloud sources. Default true.", EConsoleVariableFlags::Default);
-static AutoConsoleVariable<int> Quality(L"Render.Clouds.Quality", 2,
-    L"0 Off, 1 Low (3 octaves), 2 Mid (5), 3 High (8).", EConsoleVariableFlags::Default,
-    [](const int value) { return value >= 0 && value <= 3; });
+static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Clouds.Quality", GDX12Quality::Mid,
+    L"0 Off, 1 Low (3 octaves), 2 Mid (5), 3 High (8).", EConsoleVariableFlags::Default);
 
 GDX12CloudComponent::GDX12CloudComponent()
 {
@@ -46,11 +46,11 @@ void GDX12CloudComponent::SetParameters(const GDX12CloudParameters& parameters)
     ++_lightingRevision;
 }
 
-UINT GDX12CloudComponent::GetQuality() const { return static_cast<UINT>(Quality.GetValue()); }
+UINT GDX12CloudComponent::GetQuality() const { return static_cast<UINT>(Quality.GetInt()); }
 
 bool GDX12CloudComponent::IsActive() const
 {
-    return _parameters.Enabled && Enabled.GetValue() && Quality.GetValue() != 0;
+    return _parameters.Enabled && Enabled.GetValue() && Quality.GetInt() != 0;
 }
 
 void GDX12CloudComponent::Advance(const double simulationDeltaSeconds)
@@ -107,7 +107,7 @@ void GDX12CloudComponent::CreateResources()
 void GDX12CloudComponent::Execute(GDX12CommandList* commands)
 {
     if (!_resources || !_texture) throw std::logic_error("Cloud source requires Setup before Execute");
-    const int quality = Quality.GetValue();
+    const int quality = Quality.GetInt();
     const bool enabled = _parameters.Enabled && Enabled.GetValue() && quality != 0;
     if (_quality != quality || _enabled != enabled)
     {

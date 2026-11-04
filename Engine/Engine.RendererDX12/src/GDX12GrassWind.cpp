@@ -1,23 +1,22 @@
 #include "Engine.RendererDX12/GDX12GrassWind.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.RendererDX12/GDX12Quality.h"
 #include <algorithm>
 #include <cmath>
 
 namespace
 {
     static AutoConsoleVariable<bool> GrassEnabled(L"Render.Grass.Enabled", true, L"Enable grass components", EConsoleVariableFlags::Default);
-    static AutoConsoleVariable<int> GrassQuality(L"Render.Grass.Quality", 2, L"Grass: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default,
-        [](const int value) { return value >= 0 && value <= 3; });
+    static AutoConsoleVariable<GDX12Quality> GrassQuality(L"Render.Grass.Quality", GDX12Quality::Mid, L"Grass: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<bool> WindEnabled(L"Render.Wind.Enabled", true, L"Enable wind components", EConsoleVariableFlags::Default);
-    static AutoConsoleVariable<int> WindQuality(L"Render.Wind.Quality", 2, L"Wind: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default,
-        [](const int value) { return value >= 0 && value <= 3; });
+    static AutoConsoleVariable<GDX12Quality> WindQuality(L"Render.Wind.Quality", GDX12Quality::Mid, L"Wind: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default);
     bool Range(const float value, const float low, const float high) { return std::isfinite(value) && value >= low && value <= high; }
     bool Point(const XMFLOAT3& v) { return Range(v.x, -1e7f, 1e7f) && Range(v.y, -1e7f, 1e7f) && Range(v.z, -1e7f, 1e7f); }
 }
 
 GDX12GrassWindControls GetGrassWindControls()
 {
-    return { GrassEnabled.GetValue(), GrassQuality.GetValue(), WindEnabled.GetValue(), WindQuality.GetValue() };
+    return { GrassEnabled.GetValue(), GrassQuality.GetInt(), WindEnabled.GetValue(), WindQuality.GetInt() };
 }
 
 GDX12GrassSettings ResolveGrassSettings(const GDX12GrassSettings& author, const int quality)

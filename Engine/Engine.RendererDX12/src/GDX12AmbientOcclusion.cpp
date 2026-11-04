@@ -1,19 +1,22 @@
 #include "Engine.RendererDX12/GDX12AmbientOcclusion.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.RendererDX12/GDX12Quality.h"
 #include <algorithm>
 #include <cmath>
 
 namespace
 {
     constexpr auto Runtime = EConsoleVariableFlags::Default;
-    static AutoConsoleVariable<int> ExecutionPoint(L"Render.AO.ExecutionPoint", 1, L"0 after depth prepass, 1 before lighting", Runtime,
-        [](const int v) { return v == 0 || v == 1; });
-    static AutoConsoleVariable<int> Enabled(L"Render.AO.Enabled", 1, L"AO enabled: 0/1", Runtime,
-        [](const int v) { return v == 0 || v == 1; });
-    static AutoConsoleVariable<int> Quality(L"Render.AO.Quality", 2, L"0 Off, 1 Low, 2 Mid, 3 High", Runtime,
-        [](const int v) { return v >= 0 && v <= 3; });
-    static AutoConsoleVariable<int> Implementation(L"Render.AO.Implementation", 2, L"0 SSAO, 1 HBAO, 2 XeGTAO, 3 AMD CACAO", Runtime,
-        [](const int v) { return v >= 0 && v <= 3; });
+    enum class AOExecutionPoint { AfterDepthPrepass, BeforeLighting, Count };
+    enum class AOImplementation { SSAO, HBAO, XeGTAO, CACAO, Count };
+    enum class CacaoQuality { Inherit = -1, Lowest, Low, Medium, High, Highest, Count, First = Inherit };
+    static AutoConsoleVariable<AOExecutionPoint> ExecutionPoint(L"Render.AO.ExecutionPoint", AOExecutionPoint::BeforeLighting,
+        L"0 after depth prepass, 1 before lighting", Runtime);
+    static AutoConsoleVariable<bool> Enabled(L"Render.AO.Enabled", true, L"Enable ambient occlusion", Runtime);
+    static AutoConsoleVariable<GDX12Quality> Quality(L"Render.AO.Quality", GDX12Quality::Mid,
+        L"0 Off, 1 Low, 2 Mid, 3 High", Runtime);
+    static AutoConsoleVariable<AOImplementation> Implementation(L"Render.AO.Implementation", AOImplementation::XeGTAO,
+        L"0 SSAO, 1 HBAO, 2 XeGTAO, 3 AMD CACAO", Runtime);
     static AutoConsoleVariable<int> Samples(L"Render.AO.SSAO.Samples", -1, L"Hemisphere samples: -1 preset, 4..64", Runtime,
         [](const int v) { return v == -1 || (v >= 4 && v <= 64); });
     static AutoConsoleVariable<int> Directions(L"Render.AO.HBAO.Directions", -1, L"Azimuth directions: -1 preset, 2..16", Runtime,
@@ -26,8 +29,8 @@ namespace
         [](const int v) { return v == -1 || (v >= 1 && v <= 8); });
     static AutoConsoleVariable<int> GTAOSteps(L"Render.AO.XeGTAO.Steps", -1, L"-1 preset, 1..16 steps per half slice", Runtime,
         [](const int v) { return v == -1 || (v >= 1 && v <= 16); });
-    static AutoConsoleVariable<int> CACAOQuality(L"Render.AO.CACAO.Quality", -1, L"-1 preset, native quality 0..4 (4 adaptive)", Runtime,
-        [](const int v) { return v >= -1 && v <= 4; });
+    static AutoConsoleVariable<CacaoQuality> CACAOQuality(L"Render.AO.CACAO.Quality", CacaoQuality::Inherit,
+        L"-1 preset, native quality 0..4 (4 adaptive)", Runtime);
     static AutoConsoleVariable<float> Radius(L"Render.AO.RadiusCm", 50.0f, L"World radius in cm: 0.1..10000", Runtime,
         [](const float v) { return std::isfinite(v) && v >= 0.1f && v <= 10000; });
     static AutoConsoleVariable<float> Intensity(L"Render.AO.Intensity", 1.0f, L"Occlusion multiplier: 0..5", Runtime,
@@ -62,8 +65,8 @@ GDX12AOSettings GetAmbientOcclusionSettings()
 {
     GDX12AOSettings s = {};
     s.Enabled = Enabled.GetValue();
-    s.Quality = Quality.GetValue();
-    s.Implementation = Implementation.GetValue();
+    s.Quality = Quality.GetInt();
+    s.Implementation = Implementation.GetInt();
     const int level = std::max(1, s.Quality) - 1;
     constexpr int samples[] = { 8, 16, 32 };
     constexpr int directions[] = { 4, 6, 8 };
@@ -77,7 +80,7 @@ GDX12AOSettings GetAmbientOcclusionSettings()
     s.DenoisePasses = Override(Denoise.GetValue(), level + 1);
     s.GTAOSlices = Override(GTAOSlices.GetValue(), slices[level]);
     s.GTAOSteps = Override(GTAOSteps.GetValue(), gtaoSteps[level]);
-    s.CACAOQuality = Override(CACAOQuality.GetValue(), cacaoQuality[level]);
+    s.CACAOQuality = Override(CACAOQuality.GetInt(), cacaoQuality[level]);
     s.RadiusCm = Radius.GetValue();
     s.Intensity = Intensity.GetValue();
     s.BiasCm = Bias.GetValue();
@@ -94,4 +97,4 @@ GDX12AOSettings GetAmbientOcclusionSettings()
     return s;
 }
 
-int GetAmbientOcclusionExecutionPoint() { return ExecutionPoint.GetValue(); }
+int GetAmbientOcclusionExecutionPoint() { return ExecutionPoint.GetInt(); }

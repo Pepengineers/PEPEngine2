@@ -1,17 +1,17 @@
 #include "Engine.RendererDX12/GDX12ReflectionProbes.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.RendererDX12/GDX12Quality.h"
 #include <cmath>
 #include <stdexcept>
 
 static AutoConsoleVariable<bool> Enabled(L"Render.Reflection.Enabled", true,
     L"Enable local reflection probes. Default true.", EConsoleVariableFlags::Default);
-static AutoConsoleVariable<int> Quality(L"Render.Reflection.Quality", 2,
-    L"0 Off, 1 Low, 2 Mid (default), 3 High.", EConsoleVariableFlags::Default,
-    [](const int value) { return value >= 0 && value <= 3; });
+static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Reflection.Quality", GDX12Quality::Mid,
+    L"0 Off, 1 Low, 2 Mid (default), 3 High.", EConsoleVariableFlags::Default);
 GDX12ReflectionSettings GetReflectionSettings()
 {
     GDX12ReflectionSettings result;
-    result.Quality = Quality.GetValue();
+    result.Quality = Quality.GetInt();
     result.Enabled = Enabled.GetValue() && result.Quality != 0;
     return result;
 }

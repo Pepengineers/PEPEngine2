@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cwctype>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -21,6 +22,7 @@
 namespace
 {
     std::atomic<bool> StartupComplete{ false };
+    std::mutex ConfigMutex;
 
     class ConsoleVariableStorage final
     {
@@ -142,6 +144,98 @@ IConsoleVariable::IConsoleVariable(const std::wstring_view Name, const std::wstr
 bool IConsoleVariable::CanSetValue() const
 {
     return Flags != EConsoleVariableFlags::ReadOnly || !StartupComplete.load();
+}
+
+bool IConsoleVariable::SaveConfigValue(std::string_view value) const
+{
+    if (!StartupComplete.load()) return true;
+    std::scoped_lock lock(ConfigMutex);
+    const auto path = ConsoleModule::GetDefaultConfigPath();
+    const auto fail = [&](std::string_view reason)
+    {
+        Log::Error("Config", "Cannot save ", Name, " to ", path, ": ", reason);
+        return false;
+    };
+    std::error_code error;
+    std::string contents;
+    if (std::filesystem::exists(path, error))
+    {
+        std::ifstream input(path, std::ios::binary);
+        if (!input) return fail("cannot open INI");
+        contents.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+        if (input.bad()) return fail("cannot read INI");
+    }
+    if (error) return fail(error.message());
+
+    const auto name = std::filesystem::path(Name).u8string();
+    bool replaced = false;
+    bool hasSection = false;
+    const auto trim = [](std::string_view text)
+    {
+        const auto begin = text.find_first_not_of(" \t\r");
+        return begin == std::string_view::npos ? std::string_view{} :
+            text.substr(begin, text.find_last_not_of(" \t\r") - begin + 1);
+    };
+    for (size_t start = 0; start < contents.size();)
+    {
+        const auto end = contents.find('\n', start);
+        const auto length = (end == std::string::npos ? contents.size() : end) - start;
+        auto line = std::string_view(contents.data() + start, length);
+        if (start == 0 && line.substr(0, 3) == "\xEF\xBB\xBF") line.remove_prefix(3);
+        const auto trimmed = trim(line);
+        if (trimmed.substr(0, 18) == "[ConsoleVariables]") hasSection = true;
+        const auto equals = line.find('=');
+        if (equals != std::string_view::npos)
+        {
+            const auto key = trim(line.substr(0, equals));
+            if (!key.empty() && key.front() != ';' && key.front() != '#' &&
+                _wcsicmp(std::filesystem::u8path(key).c_str(), Name.c_str()) == 0)
+            {
+                // Update every duplicate: the loader uses the last occurrence.
+                const auto comment = line.find(';', equals + 1);
+                const auto valueEnd = comment == std::string_view::npos ? line.size() : comment;
+                const auto oldValue = line.substr(equals + 1, valueEnd - equals - 1);
+                const auto first = oldValue.find_first_not_of(" \t\r");
+                const auto last = oldValue.find_last_not_of(" \t\r");
+                const auto offset = first == std::string_view::npos ? 0 : first;
+                contents.replace(static_cast<size_t>(line.data() - contents.data()) + equals + 1 + offset,
+                    first == std::string_view::npos ? 0 : last - first + 1, value);
+                replaced = true;
+            }
+        }
+        const auto next = contents.find('\n', start);
+        if (next == std::string::npos) break;
+        start = next + 1;
+    }
+    if (!replaced)
+    {
+        const auto newline = contents.find("\r\n") == std::string::npos ? "\n" : "\r\n";
+        if (!contents.empty() && contents.back() != '\n') contents += newline;
+        if (!hasSection) contents += std::string("[ConsoleVariables]") + newline;
+        contents += name + " = " + std::string(value) + newline;
+    }
+
+    std::filesystem::create_directories(path.parent_path(), error);
+    if (error) return fail(error.message());
+    auto temporary = path;
+    temporary += L"." + std::to_wstring(GetCurrentProcessId()) + L".tmp";
+    {
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        output.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+        output.close();
+        if (!output)
+        {
+            std::filesystem::remove(temporary, error);
+            return fail("cannot write temporary INI");
+        }
+    }
+    if (!MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        const auto message = std::system_category().message(GetLastError());
+        std::filesystem::remove(temporary, error);
+        return fail(message);
+    }
+    return true;
 }
 
 IConsoleVariable::~IConsoleVariable()

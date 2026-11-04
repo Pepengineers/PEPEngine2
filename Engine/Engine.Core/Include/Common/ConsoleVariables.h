@@ -4,10 +4,20 @@
 #include <charconv>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 
 namespace ConsoleVariableDetail
 {
+    template <class T, class = void>
+    struct EnumFirst { static constexpr int Value = 0; };
+
+    template <class T>
+    struct EnumFirst<T, std::void_t<decltype(T::First)>>
+    {
+        static constexpr int Value = static_cast<int>(T::First);
+    };
+
     template <class T, class = void>
     struct EnumSize { static constexpr int Count = 0; };
 
@@ -17,8 +27,9 @@ namespace ConsoleVariableDetail
         static_assert(std::is_enum_v<T>, "Count is reserved for enum console variables");
         static_assert(static_cast<std::underlying_type_t<T>>(T::Count) > 0 &&
             static_cast<std::underlying_type_t<T>>(T::Count) <= (std::numeric_limits<int>::max)(),
-            "Console enum must be contiguous from zero and end with Count fitting in int");
-        static constexpr int Count = static_cast<int>(T::Count);
+            "Console enum must end with positive Count fitting in int");
+        static constexpr int Count = static_cast<int>(T::Count) - EnumFirst<T>::Value;
+        static_assert(Count > 0, "Console enum First must precede Count");
     };
 
     template <class T>
@@ -81,6 +92,7 @@ public:
     }
 
     int GetEnumCount() const override { return ConsoleVariableDetail::EnumSize<TValue>::Count; }
+    int GetEnumFirstValue() const override { return ConsoleVariableDetail::EnumFirst<TValue>::Value; }
 
     TValue GetValue() const
     {
@@ -90,10 +102,7 @@ public:
 
     bool SetValue(TValue value)
     {
-        std::scoped_lock lock(ValueMutex);
-        if (!CanSetValue() || !IsValidValue(value)) return false;
-        SetTypedValue(value);
-        return true;
+        return UpdateValue(value, false);
     }
 
     bool SetFromString(std::string_view text) override
@@ -103,9 +112,36 @@ public:
     }
 
     bool GetBool() const override { return static_cast<bool>(GetValue()); }
-    std::string GetString() const override
+    std::string GetString() const override { return FormatValue(GetValue()); }
+    bool SetConfigFromString(std::string_view text) override
     {
-        const auto value = GetValue();
+        TValue value{};
+        return ConsoleVariableDetail::ParseValue(text, value) && UpdateValue(value, true);
+    }
+    std::string GetConfigString() const override
+    {
+        std::scoped_lock lock(ValueMutex);
+        return FormatValue(PendingValue.value_or(GetTypedValue()));
+    }
+    int GetInt() const override { return static_cast<int>(GetValue()); }
+    float GetFloat() const override { return static_cast<float>(GetValue()); }
+    uint32_t GetUInt() const override { return static_cast<uint32_t>(GetValue()); }
+
+private:
+    bool UpdateValue(TValue value, bool configEdit)
+    {
+        std::scoped_lock lock(ValueMutex);
+        const bool readOnly = !CanSetValue();
+        if ((readOnly && !configEdit) || !IsValidValue(value)) return false;
+        if (value == PendingValue.value_or(GetTypedValue())) return true;
+        if (!SaveConfigValue(FormatValue(value))) return false;
+        if (readOnly) PendingValue = value;
+        else SetTypedValue(value);
+        return true;
+    }
+
+    static std::string FormatValue(TValue value)
+    {
         if constexpr (std::is_same_v<TValue, bool>) return value ? "true" : "false";
         else
         {
@@ -120,10 +156,6 @@ public:
             return {buffer, result.ptr};
         }
     }
-    int GetInt() const override { return static_cast<int>(GetValue()); }
-    float GetFloat() const override { return static_cast<float>(GetValue()); }
-    uint32_t GetUInt() const override { return static_cast<uint32_t>(GetValue()); }
-
 protected:
     bool IsValidValue(TValue value) const
     {
@@ -131,8 +163,7 @@ protected:
         {
             using Underlying = std::underlying_type_t<TValue>;
             const auto index = static_cast<Underlying>(value);
-            if constexpr (std::is_signed_v<Underlying>)
-                if (index < 0) return false;
+            if (index < static_cast<Underlying>(ConsoleVariableDetail::EnumFirst<TValue>::Value)) return false;
             if (index >= static_cast<Underlying>(TValue::Count)) return false;
         }
         if constexpr (std::is_floating_point_v<TValue>)
@@ -146,6 +177,7 @@ protected:
 private:
     Validator Validate;
     mutable std::mutex ValueMutex;
+    std::optional<TValue> PendingValue;
 };
 
 template <class TValue>

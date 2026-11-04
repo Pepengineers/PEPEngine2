@@ -1,14 +1,15 @@
 #include "Engine.RendererDX12/GDX12MotionBlurSettings.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.RendererDX12/GDX12Quality.h"
 #include <cmath>
 
 namespace
 {
     static AutoConsoleVariable<bool> Enabled(L"Render.MotionBlur.Enabled", true,
         L"Enable feature-aware motion blur.");
-    static AutoConsoleVariable<int> Quality(L"Render.MotionBlur.Quality", 2,
+    static AutoConsoleVariable<GDX12Quality> Quality(L"Render.MotionBlur.Quality", GDX12Quality::Mid,
         L"0=Off, 1=Low (19 samples), 2=Mid (27), 3=High (35).",
-        EConsoleVariableFlags::Default, [](const int value) { return value >= 0 && value <= 3; });
+        EConsoleVariableFlags::Default);
     static AutoConsoleVariable<float> Shutter(L"Render.MotionBlur.ShutterFraction", 0.5f,
         L"Exposure/frame duration, 0..1; 0.5 = 180 degrees, centered exposure.",
         EConsoleVariableFlags::Default,
@@ -33,7 +34,7 @@ namespace
 
 GDX12MotionBlurSettings GetMotionBlurSettings()
 {
-    const int quality = Quality.GetValue();
+    const int quality = Quality.GetInt();
     const int samples = Samples.GetValue();
     constexpr unsigned presetSamples[] = { 0, 19, 27, 35 };
     const float shutter = Shutter.GetValue();

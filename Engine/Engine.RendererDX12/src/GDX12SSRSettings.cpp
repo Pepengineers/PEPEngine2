@@ -1,14 +1,15 @@
 #include "Engine.RendererDX12/GDX12SSRSettings.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.RendererDX12/GDX12Quality.h"
 #include <algorithm>
 
 namespace
 {
     static AutoConsoleVariable<bool> Enabled(L"Render.SSR.Enabled", true,
         L"Enable AMD SSSR and Reflections Denoiser.", EConsoleVariableFlags::Default);
-    static AutoConsoleVariable<int> Quality(L"Render.SSR.Quality", 2,
+    static AutoConsoleVariable<GDX12Quality> Quality(L"Render.SSR.Quality", GDX12Quality::Mid,
         L"0 Off, 1 Low, 2 Mid, 3 High. Manual overrides survive preset changes.",
-        EConsoleVariableFlags::Default, [](const int v) { return v >= 0 && v <= 3; });
+        EConsoleVariableFlags::Default);
     static AutoConsoleVariable<int> MaxIntersections(L"Render.SSR.MaxIntersections", -1,
         L"Depth hierarchy lookups per ray: -1 preset, 1..1024.",
         EConsoleVariableFlags::Default, [](const int v) { return v == -1 || (v >= 1 && v <= 1024); });
@@ -39,7 +40,7 @@ namespace
 
 GDX12SSRSettings GetSSRSettings()
 {
-    const int quality = Quality.GetValue();
+    const int quality = Quality.GetInt();
     const int preset = (std::max)(quality, 1) - 1;
     const int intersections[] = { 64, 128, 256 };
     const int occupancy[] = { 8, 4, 0 };

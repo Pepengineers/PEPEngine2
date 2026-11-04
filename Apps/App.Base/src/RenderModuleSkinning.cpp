@@ -6,6 +6,7 @@
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.RendererDX12/GDX12Quality.h"
 #include <algorithm>
 #include <cmath>
 #include <climits>
@@ -16,9 +17,9 @@ namespace
     static AutoConsoleVariable<bool> SkinningEnabled(
         L"Render.Skinning.Enabled", true, L"Freeze skeletal deformation when disabled.",
         EConsoleVariableFlags::Default);
-    static AutoConsoleVariable<int> SkinningQuality(
-        L"Render.Skinning.Quality", 2, L"0 Off, 1 Low (15 Hz), 2 Mid (30 Hz), 3 High (60 Hz).",
-        EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 3; });
+    static AutoConsoleVariable<GDX12Quality> SkinningQuality(
+        L"Render.Skinning.Quality", GDX12Quality::Mid, L"0 Off, 1 Low (15 Hz), 2 Mid (30 Hz), 3 High (60 Hz).",
+        EConsoleVariableFlags::Default);
 
     Matrix EntityWorld(const TransformComponent& transform)
     {
@@ -49,7 +50,7 @@ void RenderModule::ReleaseSkeletalState(World& world, Entity entity)
 void RenderModule::PrepareSkeletalMeshes()
 {
     const bool enabled = SkinningEnabled.GetValue();
-    const int quality = SkinningQuality.GetValue();
+    const int quality = SkinningQuality.GetInt();
     const bool animate = enabled && quality != 0;
     const double presetRates[] = {0, 15, 30, 60};
     auto& assets = AssetManager::GetInstance();

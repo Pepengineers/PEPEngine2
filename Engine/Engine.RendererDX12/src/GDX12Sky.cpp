@@ -1,21 +1,20 @@
 #include "Engine.RendererDX12/GDX12Sky.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.RendererDX12/GDX12Quality.h"
 #include <cmath>
 #include <stdexcept>
 
 static AutoConsoleVariable<bool> SkyBoxEnabled(L"Render.SkyBox.Enabled", true,
     L"Enable the selected SkyBox component", EConsoleVariableFlags::Default);
-static AutoConsoleVariable<UINT> SkyBoxQuality(L"Render.SkyBox.Quality", 3,
-    L"SkyBox: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default,
-    [](const UINT value) { return value <= 3; });
+static AutoConsoleVariable<GDX12Quality> SkyBoxQuality(L"Render.SkyBox.Quality", GDX12Quality::High,
+    L"SkyBox: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default);
 static AutoConsoleVariable<bool> AtmosphereEnabled(L"Render.SkyAtmosphere.Enabled", true,
     L"Enable the selected SkyAtmosphere component", EConsoleVariableFlags::Default);
-static AutoConsoleVariable<UINT> AtmosphereQuality(L"Render.SkyAtmosphere.Quality", 2,
-    L"Atmosphere: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default,
-    [](const UINT value) { return value <= 3; });
+static AutoConsoleVariable<GDX12Quality> AtmosphereQuality(L"Render.SkyAtmosphere.Quality", GDX12Quality::Mid,
+    L"Atmosphere: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default);
 
-UINT GetSkyBoxQuality() { return SkyBoxEnabled.GetValue() ? SkyBoxQuality.GetValue() : 0; }
-UINT GetSkyAtmosphereQuality() { return AtmosphereEnabled.GetValue() ? AtmosphereQuality.GetValue() : 0; }
+UINT GetSkyBoxQuality() { return SkyBoxEnabled.GetValue() ? SkyBoxQuality.GetInt() : 0; }
+UINT GetSkyAtmosphereQuality() { return AtmosphereEnabled.GetValue() ? AtmosphereQuality.GetInt() : 0; }
 
 namespace
 {

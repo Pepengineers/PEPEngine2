@@ -59,8 +59,12 @@ public:
     EConsoleVariableFlags GetFlags() const { return Flags; }
     virtual EConsoleVariableType GetType() const = 0;
     virtual int GetEnumCount() const = 0;
+    virtual int GetEnumFirstValue() const = 0;
     virtual bool SetFromString(std::string_view Value) = 0;
     virtual std::string GetString() const = 0;
+    // Settings edits may save ReadOnly values for the next startup.
+    virtual bool SetConfigFromString(std::string_view Value) = 0;
+    virtual std::string GetConfigString() const = 0;
 
     virtual bool GetBool() const = 0;
     virtual int GetInt() const = 0;
@@ -69,6 +73,7 @@ public:
 
 protected:
     bool CanSetValue() const;
+    bool SaveConfigValue(std::string_view Value) const;
 
 private:
     std::wstring Name;

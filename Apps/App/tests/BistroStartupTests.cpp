@@ -12,10 +12,33 @@
 #include <thread>
 #include <d3d12sdklayers.h>
 
+static void CheckEnumCVars()
+{
+    const auto require = [](bool condition, const char* message)
+    { if (!condition) throw std::runtime_error(message); };
+    for (const auto name : { L"Render.AO.Quality", L"Render.SSR.Quality", L"Render.DOF.Quality",
+        L"Render.MotionBlur.Quality", L"Render.Reflection.Quality", L"Render.Grass.Quality",
+        L"Render.Wind.Quality", L"Render.Particles.Quality", L"Render.Fluid.Quality",
+        L"Render.Skinning.Quality", L"Render.Clouds.Quality", L"Render.SkyBox.Quality", L"Render.SkyAtmosphere.Quality" })
+    {
+        const auto& quality = ConsoleModule{}.FindConsoleVariable(name);
+        require(quality.GetType() == EConsoleVariableType::Enumeration && quality.GetEnumCount() == 4 &&
+            quality.GetEnumFirstValue() == 0, "Every effect quality must use an enum dropdown");
+    }
+    for (const auto name : { L"Render.Upscaler.Provider", L"Render.Upscaler.Quality",
+        L"Render.FrameGeneration.Provider", L"Render.AO.Implementation", L"Render.AO.ExecutionPoint",
+        L"Render.AO.CACAO.Quality", L"App.Grass.Implementation", L"App.Grass.Wind.Algorithm", L"App.Particles.Simulation" })
+        require(ConsoleModule{}.FindConsoleVariable(name).GetType() == EConsoleVariableType::Enumeration,
+            "Every provider and mode selector must use an enum dropdown");
+    std::cout << "Effect quality/provider/mode CVar metadata passed\n";
+}
+
 int main(int argc, char** argv)
 {
     try
     {
+        CheckEnumCVars();
+        if (argc > 1 && std::strcmp(argv[1], "--cvars-only") == 0) return 0;
         const bool checkDebugLayer = argc > 1 && std::strcmp(argv[1], "--check-debug-layer") == 0;
         if (!checkDebugLayer)
         {

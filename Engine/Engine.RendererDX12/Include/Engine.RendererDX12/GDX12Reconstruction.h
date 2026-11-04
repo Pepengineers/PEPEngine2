@@ -2,9 +2,9 @@
 #include <cstdint>
 #include <string>
 
-enum class GDX12UpscalerProvider { Native, XeSS, FSR, DLSS, NIS };
+enum class GDX12UpscalerProvider { Native, XeSS, FSR, DLSS, NIS, Count };
 // Default keeps each SDK's preferred preset; XeSS defaults to Ultra Quality Plus.
-enum class GDX12UpscalerQuality { Default, NativeAA, Quality, Balanced, Performance, UltraPerformance, UltraQuality, UltraQualityPlus };
+enum class GDX12UpscalerQuality { Default, NativeAA, Quality, Balanced, Performance, UltraPerformance, UltraQuality, UltraQualityPlus, Count };
 
 struct GDX12ReconstructionSettings
 {

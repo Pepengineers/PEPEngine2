@@ -1,5 +1,6 @@
 #include "Engine.RendererDX12/GDX12Particles.h"
 #include "Common/ConsoleVariables.h"
+#include "Engine.RendererDX12/GDX12Quality.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -8,9 +9,8 @@ namespace
 {
     static AutoConsoleVariable<bool> Enabled(L"Render.Particles.Enabled", true,
         L"Enable GPU particle components", EConsoleVariableFlags::Default);
-    static AutoConsoleVariable<int> Quality(L"Render.Particles.Quality", 2,
-        L"GPU particles: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default,
-        [](const int value) { return value >= 0 && value <= 3; });
+    static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Particles.Quality", GDX12Quality::Mid,
+        L"GPU particles: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default);
 
     bool InRange(const float value, const float low, const float high)
     {
@@ -31,7 +31,7 @@ namespace
 
 GDX12ParticleSettings GetParticleSettings()
 {
-    const int quality = Quality.GetValue();
+    const int quality = Quality.GetInt();
     return { Enabled.GetValue() && quality != 0, quality };
 }
 

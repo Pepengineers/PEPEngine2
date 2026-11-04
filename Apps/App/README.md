@@ -64,15 +64,18 @@ The **Settings** ImGui window opens with the application; **F1** hides or
 reopens it. Search by CVar name, expand an effect group, and hover a control for
 its description and valid range. Checkboxes, numeric fields and enum lists apply
 immediately. Rejected values leave the previous setting intact and show an error.
-Startup-only settings are locked and marked **restart**. Changes last for this
-session; edit `Config/Engine.ini` beside
-the executable to keep them. Camera controls yield to ImGui while it captures input.
+Changes are saved immediately to `Config/Engine.ini` beside the executable and
+loaded automatically at the next startup. Settings marked **readonly** save the
+new value immediately but apply it only after restarting the application.
+Camera controls yield to ImGui while it captures input.
 All registered CVars are discovered every frame. Controls follow their declared
 types; dotted names form nested folders, for example `App > Bounds > BistroTableSteam`.
 Collapsing a folder hides its entire subtree and preserves the child folders' states.
 Search opens matching branches; clearing it restores the normal tree state. Enum classes ending
 in `Count` get a numeric
-dropdown automatically. New settings need no UI edits; use descriptions for help.
+dropdown automatically. All effect-quality and provider/mode selectors use enums;
+counts, dimensions and sample budgets remain numeric. New settings need no UI
+edits; use descriptions for help.
 
 Eight particle effects share the App-owned runtime CVar `App.Particles.CountScale`
 (default 1; <=0 also uses 1). Use
