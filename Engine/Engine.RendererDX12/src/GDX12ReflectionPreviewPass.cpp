@@ -10,6 +10,7 @@ GDX12ReflectionPreviewPass::GDX12ReflectionPreviewPass()
 void GDX12ReflectionPreviewPass::Initialize()
 {
     GDX12RootSignatureDesc root;
+    root.InstancedGeometry = true;
     root.Constants = {1};
     root.NumSingleCBVSlots = 2;
     root.NumSingleSRVSlots = 5;
@@ -46,6 +47,9 @@ void GDX12ReflectionPreviewPass::Execute(GDX12CommandList* commands)
         commands->ResourceBarrier({i == 1 ? _inputs[i]->GetTexture()->GetResource()->GetDepthWriteBarrier() :
             _inputs[i]->GetTexture()->GetResource()->GetRenderTargetBarrier()});
     commands->SetGraphicsRootSignature(_root.get());
+    const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
+    commands->GetCommandList()->SetGraphicsRootShaderResourceView(_root->GetGeometryRootParamIndex(), geometryAddress);
+    commands->GetCommandList()->SetGraphicsRootShaderResourceView(_root->GetGeometryRootParamIndex() + 1, geometryAddress);
     commands->SetDescriptorHeaps({_resources->SRV_UAV_Heap.get()});
     commands->SetGraphicsRootConstantBufferView(1, frame.MainCB->GetElementAddress(0));
     commands->SetGraphicsRootConstantBufferView(2, frame.CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));

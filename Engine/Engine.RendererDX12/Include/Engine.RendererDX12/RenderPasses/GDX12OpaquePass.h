@@ -95,6 +95,7 @@ public:
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
+        RSDesc1.InstancedGeometry = true;
 		RSDesc1.NumSingleCBVSlots = 2;
 		RSDesc1.NumSingleSRVSlots = 3;
 		RSDesc1.StaticSamplers = GetStaticSamplers();
@@ -163,6 +164,11 @@ public:
 		cmdList->SetViewport(depthStencil->GetViewport());
 		cmdList->SetScissorRect(depthStencil->GetScissorRect());
 		cmdList->SetGraphicsRootSignature(_opaqueRS.get());
+        const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
+        cmdList->GetCommandList()->SetGraphicsRootShaderResourceView(_opaqueRS->GetGeometryRootParamIndex(), geometryAddress);
+        cmdList->GetCommandList()->SetGraphicsRootShaderResourceView(_opaqueRS->GetGeometryRootParamIndex() + 1,
+            currentCameraVisBuffers.OpaqueBatches ? currentCameraVisBuffers.OpaqueBatches->VisibleInstancesAddress() : geometryAddress);
+
         const bool writeNormals = _stage != Stage::DepthPrepass || _commonData->AOAfterDepthPrepass;
         cmdList->SetPipelineState(writeNormals ? _opaquePSO.Get() : _depthOnlyPSO.Get());
 		cmdList->SetGraphicsRootConstantBufferView(1, currentFrameConstants->MainCB->GetElementAddress(0));
@@ -206,7 +212,7 @@ public:
             for (auto& texture : _surfaceBuffers) cmdList->ClearRenderTargetView(texture.get());
         }
 		cmdList->ExecuteIndirect(_opaqueCS.Get(), _resources->IndirectCommandsCache->GetElementCount(),
-			currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().D3DResource.Get(), 0,
+			(currentCameraVisBuffers.OpaqueBatches ? currentCameraVisBuffers.OpaqueBatches->Commands() : *currentCameraVisBuffers.VisibleOpaqueCommandsCache).GetResource().D3DResource.Get(), 0,
 			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().D3DResource.Get(), 0);
         if (_resources->Grass)
         {

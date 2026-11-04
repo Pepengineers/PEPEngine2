@@ -1,4 +1,5 @@
 #include "CBufferStructures.hlsl"
+#include "InstancedGeometry.hlsli"
 
 ConstantBuffer<IndirectConstants> CBIndirectConstants : register(b0);
 ConstantBuffer<MainCB> CBMain : register(b1);
@@ -54,11 +55,19 @@ struct VS_OUTPUT_PS_INPUT
     float LinearDepth : TEXCOORD2;
 };
 
-VS_OUTPUT_PS_INPUT VS(VS_INPUT vin)
+VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
 {
     VS_OUTPUT_PS_INPUT vout = (VS_OUTPUT_PS_INPUT) 0.0f;
 	
-    InstanceData instance = InstanceCache[CBIndirectConstants.InstanceID];
+    InstanceData instance = InstanceCache[DrawInstance(CBIndirectConstants.InstanceID, instanceID, InstanceCache[CBIndirectConstants.InstanceID])];
+    if (instance.SkinOutputVertex != 0xffffffffu)
+    {
+        SkinVertex vertex = ReadSkinVertex(instance, vertexID);
+        vin.Pos = vertex.Position;
+        vin.Normal = vertex.Normal;
+        vin.TexC = vertex.UV;
+        vin.Tangent = vertex.Tangent;
+    }
     float4x4 World = TransformCache[instance.TransformIndex].World;
     
     float4 posW = mul(float4(vin.Pos, 1.0f), World);

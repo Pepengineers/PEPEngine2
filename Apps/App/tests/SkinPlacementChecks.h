@@ -58,9 +58,20 @@ static void TestSkinPlacement(GDX12Device& device, GDX12DeviceResources& resourc
     const UINT slots = static_cast<UINT>(resources.FrameConstants.size());
     GDX12Skinning skinning(&device);
     auto mesh = skinning.CreateMesh(source, slots);
-    CheckSkinSource(device, *mesh->Vertices, source.Vertices);
-    CheckSkinSource(device, *mesh->Ranges, source.SkinVertices);
-    CheckSkinSource(device, *mesh->Influences, source.Influences);
+    CheckSkinSource(device, *mesh->Source->Vertices, source.Vertices);
+    CheckSkinSource(device, *mesh->Source->Ranges, source.SkinVertices);
+    CheckSkinSource(device, *mesh->Source->Influences, source.Influences);
+    const MeshHandle sharedHandle(7, 2);
+    auto shared = skinning.CreateMesh(source, slots, sharedHandle, 1);
+    auto peer = skinning.CreateMesh(source, slots, sharedHandle, 1);
+    auto revised = skinning.CreateMesh(source, slots, sharedHandle, 2);
+    auto regenerated = skinning.CreateMesh(source, slots, MeshHandle(7, 3), 1);
+    Require(shared->Source == peer->Source && shared->Source != revised->Source &&
+        shared->Source != regenerated->Source && shared->Palettes[0] != peer->Palettes[0],
+        "Skin instances must share immutable inputs only within a mesh generation/revision, with private palettes");
+    std::weak_ptr<const GDX12SkinSource> released = shared->Source;
+    shared.reset(); peer.reset();
+    Require(released.expired(), "Skin source cache must not retain unused GPU inputs");
     for (auto& palette : mesh->Palettes)
     {
         D3D12_HEAP_PROPERTIES properties = {};
@@ -123,8 +134,8 @@ static void TestSkinPlacement(GDX12Device& device, GDX12DeviceResources& resourc
     mesh.reset();
     source.Bones.clear(); source.SkinVertices.clear(); source.Influences.clear();
     mesh = skinning.CreateMesh(source, slots);
-    CheckSkinSource(device, *mesh->Ranges, std::vector<SkinVertexRange>(2));
-    CheckSkinSource(device, *mesh->Influences, std::vector<SkinInfluence>(1));
+    CheckSkinSource(device, *mesh->Source->Ranges, std::vector<SkinVertexRange>(2));
+    CheckSkinSource(device, *mesh->Source->Influences, std::vector<SkinInfluence>(1));
     mesh->OutputVertex = resources.GeometryBuffer->AllocateSkinnedVertices(2);
     auto* commands = queue->GetCommandList();
     skinning.Dispatch(commands, *resources.GeometryBuffer, *mesh, slots - 1,

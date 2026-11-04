@@ -22,6 +22,8 @@ public:
 
     std::unordered_map<std::string, std::vector<D3D12_INPUT_ELEMENT_DESC>> InputLayouts;
     std::unique_ptr<GDX12GeometryBuffer> GeometryBuffer;
+    UINT SkeletalBatchCount = 0;
+    UINT SkeletalInstanceCount = 0;
 
     // All heaps created in one high-capacity instance
     std::unique_ptr<GDX12DescriptorHeap> RTVHeap;

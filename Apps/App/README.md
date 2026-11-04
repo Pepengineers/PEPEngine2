@@ -65,9 +65,37 @@ Movement uses the App's shared JobSystem with one job per human rank or fox;
 there is no pairwise crowd scan. Each group owns its random generator, so thread
 scheduling cannot change routes. Skeletal pose evaluation, bone palettes and
 bounds also run per character on that pool; entity/resource creation and GPU
-command recording stay on the owner thread. Skinning and drawing are unchanged:
-GPU skinning inputs/outputs remain per character part and indirect commands use
-one instance each; full animated instancing is a separate follow-up.
+command recording stay on the owner thread. Immutable GPU skinning inputs are
+shared by matching mesh generation/content revision. Each character keeps its own
+animation time, bone palette, deformed vertices and previous positions; its initial
+time offset remains independent when characters pause or change clips.
+
+`Render.Skinning.Instancing=true` groups visible compatible character
+parts into hardware-instanced indexed draws. Each view culls individual characters
+before grouping; `SV_InstanceID` selects that character's transform, material and
+skinning output. Opaque, transparent, directional/local shadows and reflection
+captures use this path. Set the flag to `false` for a live raster comparison;
+shared inputs and per-character compute skinning remain active in either mode.
+Batching defaults to `false` pending an isolated performance comparison. Initial
+runs did not establish a gain; the report identifies concurrent-load limits.
+This does not bake animation into a shared pose atlas or remove per-character CPU
+pose evaluation.
+
+Build `InstancingTests.vcxproj` for GPU batch compaction, actual multi-instance
+commands, image agreement with separate draws, independent human/fox animation
+phases and D3D12 debug-layer checks (`--batcher-only` skips the Bistro scene).
+Build `CrowdBenchmark.vcxproj`, then run from the repository root:
+
+```powershell
+./tools/Measure-Crowd.ps1 -Output ./Build/CrowdInstancing/run-100-50 -People 100 -Foxes 50 -Instancing On
+```
+
+The runner saves/restores the executable's INI, serializes GPU tests, and records
+three seeded runs with a fixed animation step, 120 warmup frames and 600 sampled
+frames. Use `-Instancing Off` for the same binary's unbatched control. Exact GPU
+timestamp totals, process CPU time, memory and crowd state checksums are in JSON;
+latest buffered timer observations are separately labelled. Measurements and their
+limits are in [the instancing report](../../docs/research/2026-11-05-crowd-instancing.md).
 Human asset provenance is in `Assets/Models/MGPUSoldier/SOURCE.md`.
 
 Separate development tasks are in `docs/tasks/bistro-additions/README.md`.

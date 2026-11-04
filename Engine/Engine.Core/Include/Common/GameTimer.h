@@ -23,5 +23,5 @@ public:
 	void Reset (); // Call before message loop.
 	void Start (); // Call when unpaused.
 	void Stop ();  // Call when paused.
-	void Tick ();  // Call every frame.
+	void Tick (double fixedDeltaSeconds = -1); // Optional fixed frame step; TotalTime stays wall-clock.
 };

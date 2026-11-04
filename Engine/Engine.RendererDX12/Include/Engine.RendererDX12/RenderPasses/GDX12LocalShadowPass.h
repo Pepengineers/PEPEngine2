@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine.RendererDX12/GDX12InstanceBatcher.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
@@ -30,6 +31,7 @@ public:
     {
         CreateMaps(1);
         GDX12RootSignatureDesc graphics;
+        graphics.InstancedGeometry = true;
         graphics.Constants.push_back(2);
         graphics.NumSingleSRVSlots = 4;
         graphics.StaticSamplers = GetStaticSamplers();
@@ -205,11 +207,23 @@ public:
                     commands->SetComputeUAV(0, visibility.Commands->GetUAV()->GPUHandle);
                     if (count) commands->Dispatch((count + 63) / 64, 1, 1);
                 }
+                if (_resources->SkeletalBatchCount)
+                {
+                    if (!visibility.Batches) visibility.Batches = std::make_unique<GDX12InstanceBatcher>(_resources->Device);
+                    visibility.Batches->Build(commands, *frame->ShadowInstances, *visibility.Commands, *visibility.Counter,
+                        _resources->SkeletalBatchCount, _resources->SkeletalInstanceCount);
+                }
+                else visibility.Batches.reset();
                 {
                     GDX12_SCOPED_EVENT(commands, "Local shadow draw");
                     commands->ResourceBarrier({ visibility.Commands->GetResource().GetIndirectArgsBarrier(),
                         visibility.Counter->GetResource().GetIndirectArgsBarrier() });
                     commands->SetGraphicsRootSignature(_graphicsRoot.get());
+                    const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
+                    commands->GetCommandList()->SetGraphicsRootShaderResourceView(_graphicsRoot->GetGeometryRootParamIndex(), geometryAddress);
+                    commands->GetCommandList()->SetGraphicsRootShaderResourceView(_graphicsRoot->GetGeometryRootParamIndex() + 1,
+                        visibility.Batches ? visibility.Batches->VisibleInstancesAddress() : geometryAddress);
+
                     commands->SetPipelineState(_depthPSO);
                     commands->SetGraphicsSRV(0, frame->ShadowMaterials->GetSRV()->GPUHandle);
                     commands->SetGraphicsSRV(1, frame->ShadowTransforms->GetSRV()->GPUHandle);
@@ -225,7 +239,7 @@ public:
                     commands->GetCommandList()->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
                     if (_staticOnly) commands->GetCommandList()->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
                     if (count) commands->ExecuteIndirect(_signature.Get(), count,
-                        visibility.Commands->GetResource().D3DResource.Get(), 0, visibility.Counter->GetResource().D3DResource.Get(), 0);
+                        (visibility.Batches ? visibility.Batches->Commands() : *visibility.Commands).GetResource().D3DResource.Get(), 0, visibility.Counter->GetResource().D3DResource.Get(), 0);
                     if (!_staticOnly && _resources->Grass)
                         _resources->Grass->Draw(commands, GDX12GrassRenderer::Stage::Shadow,
                             Matrix(light.ShadowViewProj[face]).Transpose(), _commonData->CameraView.Invert().Translation(), 0);
@@ -310,6 +324,7 @@ private:
     {
         std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> Commands;
         std::unique_ptr<GDX12UploadBuffer<UINT>> Counter;
+        std::unique_ptr<GDX12InstanceBatcher> Batches;
     };
     std::vector<Visibility> _visibility;
     struct CachedShadow

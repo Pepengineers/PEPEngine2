@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine.RendererDX12/GDX12InstanceBatcher.h"
 
 #include "Engine.RendererDX12/D3DHelpers.h"
 
@@ -19,6 +20,7 @@ struct GDX12VisibilityBuffers
     std::unique_ptr<GDX12UploadBuffer<UINT>> OpaqueDrawCounter;
     std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> VisibleTransparentCommandsCache;
     std::unique_ptr<GDX12UploadBuffer<UINT>> TransparentDrawCounter;
+    std::unique_ptr<GDX12InstanceBatcher> OpaqueBatches, TransparentBatches;
 };
 
 class GDX12FrameConstants

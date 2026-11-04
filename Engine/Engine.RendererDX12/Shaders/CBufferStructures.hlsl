@@ -106,11 +106,11 @@ struct InstanceData
     uint TransformIndex;
     uint MaterialIndex;
     uint ReflectionDynamic;
-    uint _pad2;
+    uint SkinOutputVertex;
     float3 BoundingBoxCenter;
-    uint _pad3;
+    uint SkinBatch;
     float3 BoundingBoxExtents;
-    uint _pad4;
+    uint SkinBatchStart;
 };
 
 struct IndirectDrawArgs

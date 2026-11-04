@@ -8,6 +8,12 @@ class GDX12Device;
 class GDX12CommandList;
 class GDX12CommandQueue;
 
+struct GDX12GPUTimingTotals
+{
+    UINT64 Count = 0;
+    double Milliseconds = 0;
+};
+
 class GDX12GPUTimer
 {
 public:
@@ -23,6 +29,7 @@ public:
     void OnCommandListExecuted(UINT64 fenceValue);
 
     double GetTimeMS();
+    GDX12GPUTimingTotals GetSampleTotals();
 
 private:
     void UpdateResolvedFrames();
@@ -39,6 +46,7 @@ private:
     UINT64* _mappedReadbackData;
     UINT64 _timestampFrequency;
     double _timeMS;
+    GDX12GPUTimingTotals _sampleTotals;
     UINT _activeFrameIndex;
     std::array<UINT64, BufferedFrameCount> _frameFenceValues;
 };

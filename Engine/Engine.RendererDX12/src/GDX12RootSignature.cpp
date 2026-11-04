@@ -121,6 +121,18 @@ GDX12RootSignature::GDX12RootSignature(GDX12Device* device, const GDX12RootSigna
         }
     }
 
+    if (desc.InstancedGeometry)
+    {
+        _geometryRootParamIndex = static_cast<int>(rootParameters.size());
+        for (UINT reg = 0; reg < 2; ++reg)
+        {
+            CD3DX12_ROOT_PARAMETER1 parameter;
+            parameter.InitAsShaderResourceView(reg, 1, D3D12_ROOT_DESCRIPTOR_FLAG_DATA_VOLATILE,
+                D3D12_SHADER_VISIBILITY_VERTEX);
+            rootParameters.push_back(parameter);
+        }
+    }
+
     CD3DX12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc;
     rootSignatureDesc.Init_1_1(
         static_cast<UINT>(rootParameters.size()),

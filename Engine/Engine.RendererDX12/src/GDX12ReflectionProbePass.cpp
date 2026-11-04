@@ -93,6 +93,7 @@ GDX12ReflectionProbePass::GDX12ReflectionProbePass()
 void GDX12ReflectionProbePass::Initialize()
 {
     GDX12RootSignatureDesc capture;
+    capture.InstancedGeometry = true;
     capture.Constants.push_back(1);
     capture.NumSingleCBVSlots = 4;
     capture.NumSingleSRVSlots = 11;
@@ -358,6 +359,13 @@ void GDX12ReflectionProbePass::Cull(GDX12CommandList* commands, const UINT camer
     commands->SetComputeSRV(1, constants->ShadowTemplates->GetSRV()->GPUHandle);
     commands->SetComputeSRV(2, constants->ShadowMaterials->GetSRV()->GPUHandle);
     if (count) commands->Dispatch((count + 63) / 64, 1, 1);
+    if (_resources->SkeletalBatchCount)
+    {
+        if (!frame.Batches) frame.Batches = std::make_unique<GDX12InstanceBatcher>(_resources->Device);
+        frame.Batches->Build(commands, *constants->ShadowInstances, *frame.Commands, *frame.Counter,
+            _resources->SkeletalBatchCount, _resources->SkeletalInstanceCount);
+    }
+    else frame.Batches.reset();
     commands->ResourceBarrier({ frame.Commands->GetResource().GetIndirectArgsBarrier(), frame.Counter->GetResource().GetIndirectArgsBarrier() });
 }
 
@@ -366,6 +374,11 @@ void GDX12ReflectionProbePass::BindCapture(GDX12CommandList* commands, const UIN
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
     auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     commands->SetGraphicsRootSignature(_captureRoot.get());
+    const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
+    commands->GetCommandList()->SetGraphicsRootShaderResourceView(_captureRoot->GetGeometryRootParamIndex(), geometryAddress);
+    commands->GetCommandList()->SetGraphicsRootShaderResourceView(_captureRoot->GetGeometryRootParamIndex() + 1,
+        frame.Batches ? frame.Batches->VisibleInstancesAddress() : geometryAddress);
+
     commands->SetGraphicsRootConstantBufferView(1, constants->MainCB->GetElementAddress(0));
     commands->SetGraphicsRootConstantBufferView(2, frame.Cameras->GetElementAddress(face));
     commands->SetGraphicsRootConstantBufferView(3, frame.Shadow->GetElementAddress(0));
@@ -401,6 +414,11 @@ void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, const Ge
     auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
     commands->SetGraphicsRootSignature(_captureRoot.get());
+    const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
+    commands->GetCommandList()->SetGraphicsRootShaderResourceView(_captureRoot->GetGeometryRootParamIndex(), geometryAddress);
+    commands->GetCommandList()->SetGraphicsRootShaderResourceView(_captureRoot->GetGeometryRootParamIndex() + 1,
+        frame.Batches ? frame.Batches->VisibleInstancesAddress() : geometryAddress);
+
     commands->SetGraphicsRootConstantBufferView(3, frame.Shadow->GetElementAddress(0));
     commands->SetGraphicsSRV(0, constants->ShadowMaterials->GetSRV()->GPUHandle);
     commands->SetGraphicsSRV(1, constants->ShadowTransforms->GetSRV()->GPUHandle);
@@ -418,7 +436,7 @@ void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, const Ge
     commands->SetViewport({ 0, 0, 1024, 1024, 0, 1 });
     commands->SetScissorRect({ 0, 0, 1024, 1024 });
     const UINT count = _resources->IndirectCommandsCache->GetElementCount();
-    if (count) commands->ExecuteIndirect(_signature.Get(), count, frame.Commands->GetResource().D3DResource.Get(), 0,
+    if (count) commands->ExecuteIndirect(_signature.Get(), count, (frame.Batches ? frame.Batches->Commands() : *frame.Commands).GetResource().D3DResource.Get(), 0,
         frame.Counter->GetResource().D3DResource.Get(), 0);
     if (geometry != StaticGeometry && _resources->Grass)
         _resources->Grass->Draw(commands, GDX12GrassRenderer::Stage::Shadow,
@@ -462,7 +480,7 @@ void GDX12ReflectionProbePass::RenderFace(GDX12CommandList* commands, const UINT
     commands->SetPipelineState(_capturePSO);
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
     const UINT count = _resources->IndirectCommandsCache->GetElementCount();
-    if (count) commands->ExecuteIndirect(_signature.Get(), count, frame.Commands->GetResource().D3DResource.Get(), 0,
+    if (count) commands->ExecuteIndirect(_signature.Get(), count, (frame.Batches ? frame.Batches->Commands() : *frame.Commands).GetResource().D3DResource.Get(), 0,
         frame.Counter->GetResource().D3DResource.Get(), 0);
     if (geometry != StaticGeometry && _resources->Grass)
     {

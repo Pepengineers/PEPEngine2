@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine.RendererDX12/GDX12InstanceBatcher.h"
 #include <cstdint>
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
@@ -51,6 +52,7 @@ private:
         std::unique_ptr<GDX12UploadBuffer<GDX12ShadowConstants>> Shadow;
         std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> Commands;
         std::unique_ptr<GDX12UploadBuffer<UINT>> Counter;
+        std::unique_ptr<GDX12InstanceBatcher> Batches;
     };
 
     void CreatePublishedTexture(GDX12CommandList* commands, UINT count, UINT resolution);

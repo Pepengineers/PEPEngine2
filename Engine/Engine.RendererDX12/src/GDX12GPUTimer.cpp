@@ -59,6 +59,7 @@ void GDX12GPUTimer::Reset()
     _mappedReadbackData = nullptr;
     _timestampFrequency = 0;
     _timeMS = -1.0;
+    _sampleTotals = {};
     _activeFrameIndex = 0;
     _frameFenceValues.fill(0);
 }
@@ -105,6 +106,12 @@ double GDX12GPUTimer::GetTimeMS()
     return _timeMS;
 }
 
+GDX12GPUTimingTotals GDX12GPUTimer::GetSampleTotals()
+{
+    UpdateResolvedFrames();
+    return _sampleTotals;
+}
+
 void GDX12GPUTimer::UpdateResolvedFrames()
 {
     if (!_commandQueue || !_mappedReadbackData || _timestampFrequency == 0) { return; }
@@ -125,6 +132,8 @@ void GDX12GPUTimer::UpdateResolvedFrames()
         const UINT64 elapsedTicks = endTimestamp > startTimestamp ? endTimestamp - startTimestamp : 0;
         const double resolvedTimeMS = static_cast<double>(elapsedTicks) * 1000.0 / static_cast<double>(_timestampFrequency);
 
+        ++_sampleTotals.Count;
+        _sampleTotals.Milliseconds += resolvedTimeMS;
         if (fenceValue >= latestResolvedFenceValue)
         {
             latestResolvedFenceValue = fenceValue;

@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine.RendererDX12/GDX12InstanceBatcher.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <array>
@@ -51,6 +52,7 @@ public:
         _atlasNeedsClear = true;
 
         GDX12RootSignatureDesc graphics;
+        graphics.InstancedGeometry = true;
         graphics.Constants.push_back(2);
         graphics.NumSingleCBVSlots = 1;
         graphics.NumSingleSRVSlots = 3;
@@ -144,6 +146,17 @@ public:
             commands->SetComputeUAV(cascade, visibility.Commands[cascade]->GetUAV()->GPUHandle);
         if (count) commands->Dispatch((count + 63) / 64, 1, 1);
 
+        for (UINT cascade = 0; cascade < 4; ++cascade)
+        {
+            auto& batches = visibility.Batches[cascade];
+            if (_resources->SkeletalBatchCount)
+            {
+                if (!batches) batches = std::make_unique<GDX12InstanceBatcher>(_resources->Device);
+                batches->Build(commands, *frame->ShadowInstances, *visibility.Commands[cascade], *visibility.Counters,
+                    _resources->SkeletalBatchCount, _resources->SkeletalInstanceCount, cascade);
+            }
+            else batches.reset();
+        }
         commands->ResourceBarrier({ _atlas->GetResource()->GetDepthWriteBarrier(),
             visibility.Counters->GetResource().GetIndirectArgsBarrier() });
         commands->SetGraphicsRootSignature(_graphicsRoot.get());
@@ -164,9 +177,14 @@ public:
             commands->SetViewport({ static_cast<float>(x), static_cast<float>(y), 2048.0f, 2048.0f, 0.0f, 1.0f });
             commands->SetScissorRect({ static_cast<LONG>(x), static_cast<LONG>(y), static_cast<LONG>(x + 2048), static_cast<LONG>(y + 2048) });
             commands->GetCommandList()->SetGraphicsRoot32BitConstant(0, cascade, 1);
+            const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
+            commands->GetCommandList()->SetGraphicsRootShaderResourceView(_graphicsRoot->GetGeometryRootParamIndex(), geometryAddress);
+            commands->GetCommandList()->SetGraphicsRootShaderResourceView(_graphicsRoot->GetGeometryRootParamIndex() + 1,
+                visibility.Batches[cascade] ? visibility.Batches[cascade]->VisibleInstancesAddress() : geometryAddress);
+
             commands->ResourceBarrier({ visibility.Commands[cascade]->GetResource().GetIndirectArgsBarrier() });
             if (count) commands->ExecuteIndirect(_signature.Get(), count,
-                visibility.Commands[cascade]->GetResource().D3DResource.Get(), 0,
+                (visibility.Batches[cascade] ? visibility.Batches[cascade]->Commands() : *visibility.Commands[cascade]).GetResource().D3DResource.Get(), 0,
                 visibility.Counters->GetResource().D3DResource.Get(), cascade * sizeof(UINT));
         }
         if (_resources->Grass && _resources->Grass->HasCasters())
@@ -216,6 +234,7 @@ private:
     {
         std::array<std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>>, 4> Commands;
         std::unique_ptr<GDX12UploadBuffer<UINT>> Counters;
+        std::array<std::unique_ptr<GDX12InstanceBatcher>, 4> Batches;
     };
     std::vector<Visibility> _visibility;
     std::unique_ptr<GDX12Texture> _atlas;

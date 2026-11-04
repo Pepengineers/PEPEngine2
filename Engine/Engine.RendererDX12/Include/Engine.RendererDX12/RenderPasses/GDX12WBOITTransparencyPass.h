@@ -60,6 +60,7 @@ public:
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
+        RSDesc1.InstancedGeometry = true;
 		RSDesc1.NumSingleCBVSlots = 4;
 		RSDesc1.NumSingleSRVSlots = 16;
 		RSDesc1.StaticSamplers = GetStaticSamplers();
@@ -143,6 +144,11 @@ public:
 		cmdList->SetViewport(OUT_Accumulation->GetViewport());
 		cmdList->SetScissorRect(OUT_Accumulation->GetScissorRect());
 		cmdList->SetGraphicsRootSignature(_transparencyRS.get());
+        const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
+        cmdList->GetCommandList()->SetGraphicsRootShaderResourceView(_transparencyRS->GetGeometryRootParamIndex(), geometryAddress);
+        cmdList->GetCommandList()->SetGraphicsRootShaderResourceView(_transparencyRS->GetGeometryRootParamIndex() + 1,
+            currentCameraVisBuffers.TransparentBatches ? currentCameraVisBuffers.TransparentBatches->VisibleInstancesAddress() : geometryAddress);
+
 		cmdList->SetPipelineState(_transparencyPSO);
 		cmdList->SetGraphicsRootConstantBufferView(1, currentFrameConstants->MainCB->GetElementAddress(0));
 		cmdList->SetGraphicsRootConstantBufferView(3, currentFrameConstants->ShadowCB->GetElementAddress(0));
@@ -185,7 +191,7 @@ public:
 		cmdList->ClearRenderTargetView(OUT_Accumulation.get());
 		cmdList->ClearRenderTargetView(OUT_Revealage.get());
 		cmdList->ExecuteIndirect(_transparencyCS.Get(), _resources->IndirectCommandsCache->GetElementCount(),
-			currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().D3DResource.Get(), 0,
+			(currentCameraVisBuffers.TransparentBatches ? currentCameraVisBuffers.TransparentBatches->Commands() : *currentCameraVisBuffers.VisibleTransparentCommandsCache).GetResource().D3DResource.Get(), 0,
 			currentCameraVisBuffers.TransparentDrawCounter->GetResource().D3DResource.Get(), 0);
 		cmdList->ResourceBarrier({ OUT_Accumulation->GetResource()->GetSRVBarrier(),
 		OUT_Revealage->GetResource()->GetSRVBarrier() });
