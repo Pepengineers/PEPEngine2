@@ -2,6 +2,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
+#include <algorithm>
 #include <optional>
 #include <stdexcept>
 
@@ -151,6 +152,29 @@ public:
         const UINT count = _commandCount;
         GDX12_SCOPED_EVENT(commands, "Point and spot shadow maps", Colors::DarkGoldenrod);
         commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
+        const bool hasDirtyFaces = std::any_of(_dirtyFaces.begin(), _dirtyFaces.end(), [](UINT faces) { return faces != 0; });
+        if (_staticShadows && hasDirtyFaces)
+        {
+            GDX12_SCOPED_EVENT(commands, "Local shadow copy");
+            auto* source = _staticShadows->_maps->GetResource();
+            auto* target = _maps->GetResource();
+            // Copy all dirty slices before drawing to transition the array only once.
+            commands->ResourceBarrier({ source->GetCopySourceBarrier(), target->GetCopyDestBarrier() });
+            for (UINT lightIndex = 0; lightIndex < _preparedCache.size(); ++lightIndex)
+            {
+                if (!_preparedCache[lightIndex]) continue;
+                const auto& light = _preparedCache[lightIndex]->Light;
+                for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
+                {
+                    if ((_dirtyFaces[lightIndex] & (1u << face)) == 0) continue;
+                    const UINT slice = light.ShadowFirstSlice + face;
+                    const CD3DX12_TEXTURE_COPY_LOCATION src(source->D3DResource.Get(), slice);
+                    const CD3DX12_TEXTURE_COPY_LOCATION dst(target->D3DResource.Get(), slice);
+                    commands->GetCommandList()->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+                }
+            }
+        }
+        if (hasDirtyFaces) commands->ResourceBarrier({ _maps->GetResource()->GetDepthWriteBarrier() });
         for (UINT lightIndex = 0; lightIndex < _preparedCache.size(); ++lightIndex)
         {
             if (!_preparedCache[lightIndex]) continue;
@@ -159,17 +183,6 @@ public:
             for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
             {
                 if ((dirtyFaces & (1u << face)) == 0) continue;
-                if (_staticShadows)
-                {
-                    GDX12_SCOPED_EVENT(commands, "Local shadow copy");
-                    auto* source = _staticShadows->_maps->GetResource();
-                    auto* target = _maps->GetResource();
-                    commands->ResourceBarrier({ source->GetCopySourceBarrier(), target->GetCopyDestBarrier() });
-                    const UINT slice = light.ShadowFirstSlice + face;
-                    const CD3DX12_TEXTURE_COPY_LOCATION src(source->D3DResource.Get(), slice);
-                    const CD3DX12_TEXTURE_COPY_LOCATION dst(target->D3DResource.Get(), slice);
-                    commands->GetCommandList()->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
-                }
                 commands->SetComputeRootSignature(_computeRoot.get());
                 commands->ResourceBarrier({ visibility.Counter->GetResource().GetUnorderedAccessBarrier(),
                     visibility.Commands->GetResource().GetUnorderedAccessBarrier() });
@@ -195,7 +208,7 @@ public:
                 {
                     GDX12_SCOPED_EVENT(commands, "Local shadow draw");
                     commands->ResourceBarrier({ visibility.Commands->GetResource().GetIndirectArgsBarrier(),
-                        visibility.Counter->GetResource().GetIndirectArgsBarrier(), _maps->GetResource()->GetDepthWriteBarrier() });
+                        visibility.Counter->GetResource().GetIndirectArgsBarrier() });
                     commands->SetGraphicsRootSignature(_graphicsRoot.get());
                     commands->SetPipelineState(_depthPSO);
                     commands->SetGraphicsSRV(0, frame->ShadowMaterials->GetSRV()->GPUHandle);
