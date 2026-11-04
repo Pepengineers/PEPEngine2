@@ -21,7 +21,7 @@ if (!(Test-Path "$sdk/CMakeLists.txt")) {
     & tar.exe -xf $archive -C $dependencies "FidelityFX-SDK-$pin/sdk" "FidelityFX-SDK-$pin/LICENSE.txt"
     if ($LASTEXITCODE) { throw 'FidelityFX extraction failed' }
 }
-foreach ($patchName in @('cold-history.patch', 'probe-fallback.patch')) {
+foreach ($patchName in @('cold-history.patch', 'probe-fallback.patch', 'sssr-spd-counter.patch')) {
     $patch = Join-Path $repo "External/FidelityFX/$patchName"
     $ErrorActionPreference = 'Continue'
     & git -C $sdk apply --reverse --check $patch 2>&1 | Out-Null

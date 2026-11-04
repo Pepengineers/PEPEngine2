@@ -23,3 +23,10 @@ The patch is checked and applied idempotently by the build script. All upstream
 notices remain; [LICENSE.txt](LICENSE.txt) is retained here for distribution.
 
 `probe-fallback.patch` adapts only the SSSR environment callback: the engine prepares the same per-pixel prefiltered local/global incident radiance used by PBR, and the SDK loads it at the ray origin for misses. The input named environmentMap is a 2D RGBA16F receiver-grid image in this build. The real AMD ray marcher, confidence weighting and denoiser are retained. See docs/sssr.md and the centralized review report. All patches are checked against the pinned source before application.
+
+`sssr-spd-counter.patch` sizes the single SPD atomic counter and its initialization
+to `sizeof(uint32_t)`, with the same structured-buffer stride. The upstream entry
+uses one byte for all three, conflicting with `RWStructuredBuffer<FfxUInt32>`.
+`SSRTests --gpu-validation` checks the real SDK dispatch and reports the stride
+mismatch without this patch; full `BistroRenderGraphTests --gpu-validation`
+also covers particle async scheduling, resize and Native/XeSS switching.

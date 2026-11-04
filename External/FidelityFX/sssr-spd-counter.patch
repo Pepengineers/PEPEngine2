@@ -1,0 +1,15 @@
+--- a/src/components/sssr/ffx_sssr.cpp
++++ b/src/components/sssr/ffx_sssr.cpp
+@@ -419,9 +419,9 @@
+          FFX_RESOURCE_TYPE_BUFFER,
+          FFX_RESOURCE_USAGE_UAV,
+          FFX_SURFACE_FORMAT_R32_UINT,
+-         1,
+-         1,
++         sizeof(uint32_t),
++         sizeof(uint32_t),
+          1,
+          FFX_RESOURCE_FLAGS_ALIASABLE,
+-         {FFX_RESOURCE_INIT_DATA_TYPE_VALUE, 1, 0}},
++         {FFX_RESOURCE_INIT_DATA_TYPE_VALUE, sizeof(uint32_t), 0}},
+     };

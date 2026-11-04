@@ -149,9 +149,12 @@ public:
         Set(L"Render.MotionBlur.Enabled", "true");
         Set(L"Render.Reflection.Enabled", "true");
         Set(L"Render.Particles.AsyncCompute", "true");
+        std::cout << "Bistro async: all effects and odd resize started." << std::endl;
         SetWindowPos(GetWindow()->GetWindowHandle(), nullptr, 0, 0, 973, 657, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         for (int frame = 0; frame < 4; ++frame) Frame();
         render->WaitForUploads();
+        CheckMessages(*info.Get());
+        std::cout << "Bistro async: odd resize passed; Native/XeSS switch started." << std::endl;
         Set(L"Render.Upscaler.Provider", "1");
         for (int frame = 0; frame < 4; ++frame) Frame();
         render->WaitForUploads();

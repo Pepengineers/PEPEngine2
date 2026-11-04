@@ -1,6 +1,6 @@
 # Particle Async Compute: первая реализация
 
-Дата: 2026-11-05. Реализация и проверки относятся к исходникам этого коммита поверх `e173c28`, direct-разделение принято на `9411599`.
+Дата: 2026-11-05. Первичная реализация и исходные измерения относятся к `4b5097e` поверх `e173c28`, direct-разделение принято на `9411599`. Повторная GBV-проверка после исправления SSSR описана отдельно ниже.
 
 `Render.Particles.AsyncCompute=false` остаётся значением по умолчанию. При ручном включении только simulation выполняется на COMPUTE; initialization/reset до графа и поздние cull/sort/draw/composite остаются на DIRECT. Неудачная инициализация COMPUTE и dual-GPU режим сохраняют DIRECT scheduling. Shader path, controls и текущая opaque prepass depth для collision сохранены.
 
@@ -30,16 +30,28 @@ Async texture inputs и их fallback sets исключены из линейн�
 | `SecondGroupTests`, `--async` | Exit 0, чистый debug layer |
 | `SecondGroupTests --gpu-validation`, `--async-gpu-validation` | Exit 0, без GBV/debug errors |
 | `BistroRenderGraphTests` | Exit 0, чистый debug layer; 18 HDR cases (две reference readbacks и 16 byte-identical сравнений), pooling off/on/off, DIRECT/async/DIRECT, обе AO placements, odd resize и Native/XeSS switch |
-| `BistroRenderGraphTests --gpu-validation` | Все 18 HDR cases прошли без ошибок; финальная стадия с включёнными SDK effects завершилась ошибкой SSSR, см. ниже |
+| `BistroRenderGraphTests --gpu-validation` | Исходный run остановился на SSSR stride error; повтор после SDK patch — exit 0, все 18 HDR cases и заключительные SDK effects/resize/Native→XeSS прошли, см. follow-up ниже |
 | `BistroRenderGraphTests --timing` | Exit 0; 360 measured samples после прогрева |
 
 Particle fixtures проверяют независимые position/age/lifetime и collision oracles, hidden simulation/expiry, pause/master disable, pending Emit/Reset, quality/capacity/removal, три blend modes, mesh fireflies, точный refill 250000/1000000 и queued DIRECT/async/DIRECT кадры с simulation-only участками. Recording-failure fixture проверяет завершение уже отправленного COMPUTE до явных cleanup flushes вызывающего кода.
 
-**Ограничение полного Bistro GBV:** `SSSR_SpdAtomicCounter`, DIRECT `SSSR-DEPTH_DOWNSAMPLE`: UAV `StructureByteStride=1`, shader ожидает 4. В локальном FidelityFX SDK `c6efa6bf7f2027b3ec94f28578bb5965eabb9e55` описание counter в `sdk/src/components/sssr/ffx_sssr.cpp` действительно задаёт stride 1, а `ffx_sssr_callbacks_hlsl.h` объявляет `RWStructuredBuffer<FfxUInt32>`. Эти SDK-файлы и SSSR production pass в этой задаче не менялись. Ошибка сохранена; тест не ослаблялся и не объявляется полностью прошедшим. Отдельный чистый baseline этого полного GBV SDK-run не получен.
+**Исходный сбой полного Bistro GBV в `4b5097e`:** `SSSR_SpdAtomicCounter`, DIRECT `SSSR-DEPTH_DOWNSAMPLE`: UAV `StructureByteStride=1`, shader ожидает 4. В локальном FidelityFX SDK `c6efa6bf7f2027b3ec94f28578bb5965eabb9e55` описание counter в `sdk/src/components/sssr/ffx_sssr.cpp` задавало stride 1, а `ffx_sssr_callbacks_hlsl.h` объявлял `RWStructuredBuffer<FfxUInt32>`. В первичной async-реализации SDK не менялся, и первоначальный run не является полностью прошедшим. Исправление и чистый повтор зафиксированы ниже.
 
 Логи: `Build/async-baseline-{cpu,gpu-configured,gbv-configured}.log`, `Build/async-final-root-build.log`, `Build/async-final-graph*.log`, `Build/async-final-second-*.log`, `Build/async-final-bistro-{debug,gbv}.log`, `Build/async-final-timing.log`. Ранние shared-read прогоны и native repro находятся под `Build/AsyncComputeVerify-9411599/Build/async-*.log`; они не являются приёмкой финального пути.
 
 Сборка использовала MSBuild 18.8.2, Release/x64, `BuildProjectReferences=false`, `_CL_='/Z7 /GL-'` и существующий `Build/ParticleSplit.targets`, отключающий linker PDB. Это обход локального C1902 toolset/PDB mismatch. Сохранились существующие conversion и third-party warnings. Отдельного lint runner для C++ здесь не запускалось; task-scoped `git diff --check` проверен.
+
+## Исправление SSSR counter и повторный GBV, 2026-11-05
+
+Pinned SDK задавал SPD counter как buffer размером 1 byte, stride 1 и initialization size 1. `FfxInternalResourceDescription::width/height` означают для buffers size/stride; DX12 backend переносит stride в UAV, тогда как HLSL читает `RWStructuredBuffer<FfxUInt32>`. [Патч](../../External/FidelityFX/sssr-spd-counter.patch) заменяет все три значения на `sizeof(uint32_t)`: один полностью инициализированный 4-byte element. Общий DX12 backend и shader path не менялись. Патч зарегистрирован в build script и MSBuild inputs, проверен на чистом pinned archive и обратной проверкой уже применённого SDK.
+
+В `SSRTests` добавлен `--gpu-validation`: до patch он воспроизвёл точный stride 1/4 error; после пересборки SDK прошёл с exit 0 и без debug/GBV warnings/errors. Проверены hits/HDR/fallback/roughness/history/Off/resize/jitter/motion/frame slots. Этот test проверяет настоящий SDK dispatch, но сам не проверяет particle scheduling.
+
+**Полный `BistroRenderGraphTests --gpu-validation` завершился с exit 0**, без D3D12/GBV errors: 18 HDR cases (две reference readbacks и 16 byte-identical сравнений), DIRECT/async/DIRECT, pooling off/on/off, обе AO placements, затем все effects, odd resize и Native→XeSS с включённым particle async. Тест не ослаблялся: добавлены отметки заключительных стадий и дополнительная проверка messages после resize до переключения XeSS. Проверка текущего консервативного async-пути на RTX 3060 Laptop закрыта; shared-depth read/read scheduling остаётся отложенным.
+
+Один повтор был прерван до окончания и не считается приёмкой. Финальная XeSS GBV-стадия заняла несколько минут; stack snapshot активного CPU worker показал `nvgpucomp64`/`nvwgf2umx` (NVIDIA shader compilation). Окно в этот момент может не отвечать, поэтому отсутствие UI response само по себе не означает зависание GPU fence.
+
+Логи follow-up: `Build/sssr-stride-red-build.log`, `Build/sssr-stride-red.log`, `Build/sssr-stride-fix-build.log`, `Build/sssr-stride-green-gbv.log`, `Build/sssr-stride-bistro-rebuild.log`, **`Build/sssr-stride-bistro-gbv-complete.log`**. `Build/sssr-stride-bistro-gbv.log` относится к прерванному повтору. Обычный SSR test раньше не включал GBV, поэтому buffer/shader stride mismatch оставался незамеченным. A/B samples и captures ниже сняты до этого SDK patch и в follow-up не переснимались.
 
 ## A/B timing
 

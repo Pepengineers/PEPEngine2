@@ -2,7 +2,7 @@
 
 Актуальная интеграция: код объединён в корневую ветку и прошёл CPU/GPU/GBV smoke checks. [Результаты и непроверенные области](second-group-integration.md). Авторский статус ниже — исторический, до центральной интеграции.
 
-Optional particle async реализован 2026-11-05, default-off: [проверки, консервативный depth join, timings и ограничения полного Bistro GBV](../research/2026-11-05-particle-async-compute.md).
+Optional particle async реализован 2026-11-05, default-off: [проверки, консервативный depth join, timings и чистый полный Bistro GBV после SSSR counter fix](../research/2026-11-05-particle-async-compute.md).
 
 
 Implementation status: **UNVERIFIED / НЕПРОВЕРЕНО**. No builds, shader compilation,

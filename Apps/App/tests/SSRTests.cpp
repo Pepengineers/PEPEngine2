@@ -335,6 +335,12 @@ int main(int argc, char** argv)
         ComPtr<ID3D12Debug> debug;
         ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
         debug->EnableDebugLayer();
+        if (argc > 1 && std::string(argv[1]) == "--gpu-validation")
+        {
+            ComPtr<ID3D12Debug1> validation;
+            ThrowIfFailed(debug.As(&validation));
+            validation->SetEnableGPUBasedValidation(TRUE);
+        }
         GDX12Device device;
         ThrowIfFailed(device.Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
         ComPtr<ID3D12InfoQueue> info;

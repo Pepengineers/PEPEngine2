@@ -82,7 +82,7 @@ DOT diagnostics include actual queue selection, physical buffer access identitie
 
 `SecondGroupTests --async` and `--async-gpu-validation` run the particle oracles through this path. Both ordinary and async runs include direct/async/direct queued frames and branches without a draw consumer. `BistroRenderGraphTests` compares HDR across queue/pooling toggles and AO placements; `--gpu-validation` enables GBV. Its separate `--timing` mode disables validation, freezes dt/camera, seeds 250000 particles and records 24 warm-up plus 120 measured frames per direct/async/direct series in `Build/async-bistro-timing.csv`, with DOT files beside it. A per-frame CPU drain makes timer readback unambiguous; this timing mode does not replace the queued-frame correctness tests or establish general FPS gains.
 
-[2026-11-05 validation and A/B report](../research/2026-11-05-particle-async-compute.md) records the final exclusive-depth path, captured queue overlap, raw samples and the SSSR stride error limiting full Bistro GBV.
+[2026-11-05 validation and A/B report](../research/2026-11-05-particle-async-compute.md) records the final exclusive-depth path, captured queue overlap, raw samples and the completed full Bistro GBV after fixing the SDK's SSSR counter layout.
 
 ## Class API migration checks, 2026-11-02
 

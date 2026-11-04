@@ -337,7 +337,7 @@
   </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="BuildFidelityFXSSSR" BeforeTargets="PrepareForBuild"
-          Inputs="$(PEPRepoRoot)tools\Build-FidelityFX.ps1;$(PEPRepoRoot)External\FidelityFX\cold-history.patch;$(PEPRepoRoot)External\FidelityFX\probe-fallback.patch"
+          Inputs="$(PEPRepoRoot)tools\Build-FidelityFX.ps1;$(PEPRepoRoot)External\FidelityFX\cold-history.patch;$(PEPRepoRoot)External\FidelityFX\probe-fallback.patch;$(PEPRepoRoot)External\FidelityFX\sssr-spd-counter.patch"
           Outputs="$(PEPFidelityFXRoot)bin\ffx_sdk\ffx_backend_dx12_x64$(PEPFidelityFXPostfix).lib;$(PEPFidelityFXRoot)bin\ffx_sdk\ffx_sssr_x64$(PEPFidelityFXPostfix).lib;$(PEPFidelityFXRoot)bin\ffx_sdk\ffx_dof_x64$(PEPFidelityFXPostfix).lib">
     <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(PEPRepoRoot)tools\Build-FidelityFX.ps1&quot; -Configuration $(Configuration)" />
   </Target>
