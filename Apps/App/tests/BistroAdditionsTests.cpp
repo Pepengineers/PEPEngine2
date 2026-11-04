@@ -11,6 +11,7 @@
 #include "BistroGrassChecks.h"
 #include "BistroWaterChecks.h"
 #include "BistroParticleControlsChecks.h"
+#include "BistroBoundsChecks.h"
 
 static void Require(bool value, const char* message)
 {
@@ -221,7 +222,7 @@ static void CheckProbeSpheres(BistroApp& app, World& world, RenderModule& render
     Set(L"Render.Fluid.Enabled", "true");
 }
 
-int main()
+int main(int argc, char** argv)
 {
     try
     {
@@ -238,6 +239,9 @@ int main()
         ShowWindow(app.GetWindow()->GetWindowHandle(), SW_HIDE);
         auto render = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
         auto& world = *BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()->GetWorld();
+        CheckBistroBounds(app, world);
+        std::cout << "Bistro detached bounds: 15 boxes, independent edits, visibility and paused drawing passed." << std::endl;
+        if (argc > 1 && std::strcmp(argv[1], "--bounds-only") == 0) return 0;
         CheckBistroReflectionCounts(world, [&] { app.BenchmarkFrame(); });
         CheckBistroWaterCounts(world, [&] { app.BenchmarkFrame(); });
         CheckProbeOverlay(app, world);

@@ -24,6 +24,7 @@ int main(int argc, char** argv)
             debug->EnableDebugLayer();
         }
         BistroReflections::ShowBounds.SetFromString("false");
+        BistroBounds::Show.SetFromString("false");
         BistroApp app(GetModuleHandleW(nullptr));
         if (!app.Initialize()) throw std::runtime_error("Bistro startup failed");
         ShowWindow(app.GetWindow()->GetWindowHandle(), SW_HIDE);

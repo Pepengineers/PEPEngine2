@@ -17,6 +17,7 @@
 #include "BistroGrass.h"
 #include "BistroWater.h"
 #include "BistroCharacters.h"
+#include "BistroBounds.h"
 #include "App.Base/LoadingSettings.h"
 
 namespace
@@ -31,6 +32,7 @@ namespace
             if (!App::Initialize()) return false;
             auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
             UpdateSceneAdditions(world, 0);
+            _bounds = std::make_unique<BistroBounds::Scene>(world);
             auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
             // Start at eye height just outside the main entrance, facing the interior.
             camera.Location = Vector3(-300.0f, 200.0f, 20.0f);
@@ -87,6 +89,7 @@ namespace
             {
                 _gpuData.Schedule(_jobs, world, 0).Complete();
                 _reflections.DrawBounds(world, *Locator.GetModule<RenderModule>());
+                _bounds->DrawBounds(*Locator.GetModule<RenderModule>());
                 return;
             }
             const float dt = timer.DeltaTime();
@@ -102,6 +105,7 @@ namespace
                 work = _gpuData.Schedule(_jobs, world, dt, work);
                 work.Complete();
                 _reflections.DrawBounds(world, *Locator.GetModule<RenderModule>());
+                _bounds->DrawBounds(*Locator.GetModule<RenderModule>());
             }
             catch (...)
             {
@@ -175,6 +179,7 @@ namespace
         BistroGrass::Scene _grass;
         BistroWater::Scene _water;
         BistroCharacters::Scene _characters;
+        std::unique_ptr<BistroBounds::Scene> _bounds;
         bool _benchmarkStarted = false;
         FlyingPropSystem _flyingProps;
         POINT _lastMousePos = {};
