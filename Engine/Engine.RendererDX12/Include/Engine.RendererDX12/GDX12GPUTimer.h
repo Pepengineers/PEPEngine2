@@ -12,10 +12,10 @@ class GDX12GPUTimer
 {
 public:
     GDX12GPUTimer();
-    explicit GDX12GPUTimer(GDX12Device* device);
+    explicit GDX12GPUTimer(GDX12Device* device, GDX12CommandQueue* queue = nullptr);
     ~GDX12GPUTimer();
 
-    void Initialize(GDX12Device* device);
+    void Initialize(GDX12Device* device, GDX12CommandQueue* queue = nullptr);
     void Reset();
 
     void Start(GDX12CommandList* commandList);

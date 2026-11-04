@@ -1,6 +1,7 @@
 #include "App.Base/App.h"
 #include "Engine.RendererDX12/GDX12RenderGraph.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
+#include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 #include <d3d12sdklayers.h>
 #include <iostream>
 #include <sstream>
@@ -9,6 +10,29 @@
 using Graph = GDX12RenderGraph;
 using Mode = Graph::Mode;
 static void Require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
+static void TestDepthReadStates()
+{
+    constexpr auto sharedRead = D3D12_RESOURCE_STATE_DEPTH_READ |
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+    GDX12Resource depth;
+    depth.SetCurrentState(D3D12_RESOURCE_STATE_DEPTH_WRITE);
+    const D3D12_RESOURCE_BARRIER release = depth.GetDepthReadBarrier();
+    Require(release.Transition.StateBefore == D3D12_RESOURCE_STATE_DEPTH_WRITE &&
+        release.Transition.StateAfter == sharedRead, "Depth release omitted a concurrent reader");
+    for (auto read : { &GDX12Resource::GetPixelShaderResourceBarrier, &GDX12Resource::GetNonPixelShaderResourceBarrier,
+        &GDX12Resource::GetSRVBarrier, &GDX12Resource::GetDepthReadBarrier })
+    {
+        const D3D12_RESOURCE_BARRIER barrier = (depth.*read)();
+        Require(barrier.Transition.StateBefore == sharedRead && barrier.Transition.StateAfter == sharedRead &&
+            depth.GetCurrentState() == sharedRead, "Depth reader narrowed the concurrent read state");
+    }
+    depth.GetDepthWriteBarrier();
+    Require(depth.GetCurrentState() == D3D12_RESOURCE_STATE_DEPTH_WRITE, "Next prepass did not restore writable depth");
+    GDX12Resource buffer;
+    buffer.GetSRVBarrier();
+    buffer.GetNonPixelShaderResourceBarrier();
+    Require(buffer.GetCurrentState() == D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, "Buffer acquired depth-read state");
+}
 template<class F> static void Reject(F action, const char* message)
 {
     bool rejected = false;
@@ -25,7 +49,9 @@ public:
         graph.SetName(Name);
         for (const auto& access : Accesses) graph.Use(access.Id, access.Usage, access.State);
         if (SideEffect) graph.HasSideEffects();
+        if (Async) graph.AsyncCompute();
     }
+    bool Async = false;
 private:
     std::string Name;
     std::vector<Graph::Access> Accesses;
@@ -221,23 +247,129 @@ static void TestPooling(GDX12Device& device)
     std::cout << "GPU pooled/dedicated identity, queued frames, shared states, descriptors, resize, exports and fallback lifetimes passed.\n";
 }
 
-int main()
+class BufferCopyPass final : public GDX12RenderPass
+{
+public:
+    BufferCopyPass(GDX12Resource& buffer, ID3D12Resource* transfer, bool write)
+        : Buffer(buffer), Transfer(transfer), Write(write) {}
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName(Write ? "Async buffer producer" : "Physical buffer reader");
+        graph.HasSideEffects();
+        if (Write) graph.AsyncCompute();
+    }
+    std::vector<Graph::BufferAccess> GetBufferAccesses() const override
+    { return {{ &Buffer, Write ? Mode::Write : Mode::Read }}; }
+    void Execute(GDX12CommandList* commands) override
+    {
+        commands->ResourceBarrier({ Write ? Buffer.GetCopyDestBarrier() : Buffer.GetCopySourceBarrier() });
+        if (Write) commands->GetCommandList()->CopyBufferRegion(Buffer.D3DResource.Get(), 0, Transfer, 0, sizeof(UINT));
+        else commands->GetCommandList()->CopyBufferRegion(Transfer, 0, Buffer.D3DResource.Get(), 0, sizeof(UINT));
+    }
+private:
+    GDX12Resource& Buffer;
+    ID3D12Resource* Transfer;
+    bool Write;
+};
+
+static void TestAsyncTexture(GDX12Device& device)
+{
+    GDX12DeviceResources resources;
+    resources.Initialize(&device);
+    GDX12Texture texture;
+    GDX12RenderHelpers::InitializeRenderTarget(texture, resources, 256, 256, DXGI_FORMAT_R8G8B8A8_UNORM);
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
+    UINT64 size;
+    const auto desc = texture.GetResource()->D3DResource->GetDesc();
+    device.GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nullptr, nullptr, &size);
+    auto readback = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(size), D3D12_RESOURCE_STATE_COPY_DEST);
+    auto graphicsReadback = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(size), D3D12_RESOURCE_STATE_COPY_DEST);
+    Graph graph(&device);
+    const auto input = graph.Create("Shared async texture", &texture, true), output = graph.Import("Readback");
+    ClearPass clear("Texture producer", input, texture, {1,0,0,1});
+    CopyPass copy("Async texture reader", input, output, texture, readback.Get(), footprint);
+    CopyPass graphicsCopy("Concurrent DIRECT texture reader", input, graph.Import("Graphics readback"), texture, graphicsReadback.Get(), footprint);
+    copy.Async = true;
+    graph.AddPass(clear); graph.AddPass(copy); graph.AddPass(graphicsCopy); graph.Compile();
+    auto* queue = device.GetCommandQueue();
+    for (UINT frame = 0; frame < 40; ++frame)
+    {
+        auto* commands = graph.Execute(queue->GetCommandList(), device.TryGetComputeQueue());
+        queue->ExecuteCommandList(commands);
+    }
+    queue->Flush();
+    BYTE* pixels;
+    ThrowIfFailed(readback->Map(0, nullptr, reinterpret_cast<void**>(&pixels)));
+    Require(pixels[0] == 255 && pixels[1] == 0 && pixels[2] == 0, "Async texture handoff lost producer contents");
+    readback->Unmap(0, nullptr);
+    Require(graph.GetStatistics().JoinBefore == "frame retirement", "Independent texture readers were serialized");
+    std::cout << "Async texture handoff and cross-frame retirement passed.\n";
+}
+
+static void TestAsyncQueues(GDX12Device& device)
+{
+    auto* direct = device.GetCommandQueue();
+    auto* compute = device.TryGetComputeQueue();
+    Require(compute, "COMPUTE queue unavailable for GPU fixture");
+    const auto desc = CD3DX12_RESOURCE_DESC::Buffer(256);
+    GDX12Resource buffer;
+    buffer.D3DResource = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
+    auto upload = device.CreateResource(D3D12_HEAP_TYPE_UPLOAD, desc, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto readback = device.CreateResource(D3D12_HEAP_TYPE_READBACK, desc, D3D12_RESOURCE_STATE_COPY_DEST);
+    UINT* mapped;
+    ThrowIfFailed(upload->Map(0, nullptr, reinterpret_cast<void**>(&mapped)));
+    *mapped = 0x1234abcd;
+    upload->Unmap(0, nullptr);
+    BufferCopyPass producer(buffer, upload.Get(), true), consumer(buffer, readback.Get(), false);
+    for (bool async : {false, true, false})
+        for (bool hasConsumer : {true, false})
+        {
+            Graph graph(&device);
+            graph.AddPass(producer);
+            if (hasConsumer) graph.AddPass(consumer);
+            graph.Compile();
+            UINT64 finalFence = 0;
+            for (UINT frame = 0; frame < 12; ++frame)
+            {
+                auto* commands = graph.Execute(direct->GetCommandList(), async ? compute : nullptr);
+                if (!hasConsumer) consumer.Execute(commands);
+                direct->ExecuteCommandList(commands);
+                finalFence = commands->FenceValue;
+            }
+            direct->CPUWaitForFenceValue(finalFence);
+            ThrowIfFailed(readback->Map(0, nullptr, reinterpret_cast<void**>(&mapped)));
+            Require(*mapped == 0x1234abcd, "Async buffer publication or final DIRECT retirement failed");
+            readback->Unmap(0, nullptr);
+            Require(graph.GetStatistics().AsyncPasses == (async ? 1u : 0u), "Async/direct scheduling differs from selection");
+        }
+    auto* wrongType = compute->GetCommandList();
+    Reject([&] { direct->ExecuteCommandList(wrongType); }, "Wrong command-list queue type accepted");
+    direct->Flush(); compute->Flush();
+    std::cout << "Async queues: physical RAW/WAR, DIRECT fallback, queued allocators, side-effect join and final fence passed.\n";
+}
+
+int main(int argc, char** argv)
 {
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
     try
     {
+        TestDepthReadStates();
         TestCompiler();
         TestPassRecording();
         TestApp app;
         ComPtr<ID3D12Debug> debug;
         ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
         debug->EnableDebugLayer();
+        if (argc > 1 && std::string_view(argv[1]) == "--streamline")
+            Require(GDX12StreamlineSDK::Get().Initialize(), "Streamline initialization unavailable for fixture");
         GDX12Device device;
         ThrowIfFailed(device.Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
         ComPtr<ID3D12InfoQueue> info;
         ThrowIfFailed(device.GetDevice().As(&info));
         info->ClearStoredMessages();
         TestPooling(device);
+        TestAsyncQueues(device);
+        TestAsyncTexture(device);
         for (UINT64 i = 0; i < info->GetNumStoredMessages(); ++i)
         {
             SIZE_T size = 0;

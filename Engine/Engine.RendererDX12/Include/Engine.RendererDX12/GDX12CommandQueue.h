@@ -8,7 +8,8 @@ class GDX12CommandList;
 class GDX12CommandQueue
 {
 public:
-	GDX12CommandQueue(GDX12Device* device);
+	GDX12CommandQueue(GDX12Device* device, D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT);
+	D3D12_COMMAND_LIST_TYPE GetType() const { return _type; }
 	~GDX12CommandQueue();
 
 	void Reset();
@@ -21,11 +22,12 @@ public:
 	// Returns a CommandList that you can work with.
 	// If all previously created lists are busy - a new one will be created.
 	GDX12CommandList* GetCommandList();
-	void ExecuteCommandList(GDX12CommandList* commandList);
+	void ExecuteCommandList(GDX12CommandList* commandList, bool deferRetirement = false);
 	void ExecuteCommandLists(std::vector<GDX12CommandList*>& commandLists);
 
 	void CPUWaitForFenceValue(uint64_t fenceValue);
 	void WaitForOtherFence(uint64_t otherFenceValue);
+    void WaitForQueue(GDX12CommandQueue& producer, uint64_t fenceValue);
 
 	// Waits for all work submitted to the native queue, including presentation SDKs.
 	void Flush();
@@ -34,6 +36,7 @@ public:
 	UINT64 FenceValue;
 
 private:
+    D3D12_COMMAND_LIST_TYPE _type;
 	// We can probably make it work in a separate thread
 	//Imported PEPEngine::Utils::LockThreadQueue in case it helps
 	void ClearCompletedLists();

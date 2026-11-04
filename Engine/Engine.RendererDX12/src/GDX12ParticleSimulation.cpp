@@ -23,6 +23,19 @@ GDX12ParticleSimulation::State::State(GDX12DeviceResources* resources)
 GDX12ParticleSimulation::GDX12ParticleSimulation() = default;
 GDX12ParticleSimulation::~GDX12ParticleSimulation() = default;
 
+std::vector<GDX12Resource*> GDX12ParticleSimulation::GetPoolResources() const
+{
+    std::vector<GDX12Resource*> result;
+    if (_state && _state->Active)
+        for (const auto& entry : _state->Pools)
+        {
+            const auto& pool = *entry.second;
+            result.insert(result.end(), { &pool.Particles->GetResource(), &pool.Alive[0]->GetResource(),
+                &pool.Alive[1]->GetResource(), &pool.Dead->GetResource(), &pool.Counters->GetResource(), &pool.Args->GetResource() });
+        }
+    return result;
+}
+
 void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common)
 {
     resources->ParticleMotion = nullptr;

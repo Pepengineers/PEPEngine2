@@ -18,7 +18,8 @@ class GDX12GeometryBuffer;
 class GDX12CommandList
 {
 public:
-	GDX12CommandList(GDX12Device* device);
+	GDX12CommandList(GDX12Device* device, D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT);
+	D3D12_COMMAND_LIST_TYPE GetType() const { return _type; }
 	~GDX12CommandList();
 
 	const ComPtr<ID3D12GraphicsCommandList10>& GetCommandList();
@@ -27,6 +28,9 @@ public:
     void InvalidateCachedState();
 
 	UINT64 FenceValue;
+    UINT64 RetirementFenceValue = 0;
+    std::vector<GDX12CommandList*> RetirementGroup;
+    void Retire(UINT64 fenceValue);
 
 	// State Management
 	void SetPipelineState(ComPtr<ID3D12PipelineState> pso);
@@ -108,6 +112,7 @@ public:
 
 
 private:
+    D3D12_COMMAND_LIST_TYPE _type;
 	ComPtr<ID3D12GraphicsCommandList10> _commandList;
 	ComPtr<ID3D12CommandAllocator> _commandAllocator;
 

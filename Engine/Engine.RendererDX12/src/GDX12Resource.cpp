@@ -15,17 +15,21 @@ CD3DX12_RESOURCE_BARRIER GDX12Resource::GetRenderTargetBarrier()
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetPixelShaderResourceBarrier()
 {
+	const auto nextState = _currentState & D3D12_RESOURCE_STATE_DEPTH_READ ?
+		_currentState | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE : D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-	_currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
+		_currentState, nextState);
+	_currentState = nextState;
 	return transition;
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetNonPixelShaderResourceBarrier()
 {
+	const auto nextState = _currentState & D3D12_RESOURCE_STATE_DEPTH_READ ?
+		_currentState | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-	_currentState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+		_currentState, nextState);
+	_currentState = nextState;
 	return transition;
 }
 
@@ -63,9 +67,11 @@ CD3DX12_RESOURCE_BARRIER GDX12Resource::GetDepthWriteBarrier()
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetDepthReadBarrier()
 {
+	constexpr auto nextState = D3D12_RESOURCE_STATE_DEPTH_READ |
+		D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_DEPTH_READ);
-	_currentState = D3D12_RESOURCE_STATE_DEPTH_READ;
+		_currentState, nextState);
+	_currentState = nextState;
 	return transition;
 }
 
@@ -125,9 +131,11 @@ CD3DX12_RESOURCE_BARRIER GDX12Resource::GetUAVBarrier()
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetSRVBarrier()
 {
+	const auto nextState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE |
+		(_currentState & D3D12_RESOURCE_STATE_DEPTH_READ ? _currentState : D3D12_RESOURCE_STATE_COMMON);
 	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-	_currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+		_currentState, nextState);
+	_currentState = nextState;
 	return transition;
 }
 

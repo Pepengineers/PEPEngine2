@@ -11,7 +11,9 @@ public:
     {
         graph.SetName("Screen-space reflections");
         graph.Read(SharedResource::Scene);
-        graph.ReadInputs(_inputs);
+        for (UINT i = 0; i < _inputs.size(); ++i)
+            graph.Read(_inputs[i], i == 1 ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE |
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE : GDX12RenderGraph::UnmanagedState);
         graph.Write(_outputs[0], "SSR HDR");
     }
 

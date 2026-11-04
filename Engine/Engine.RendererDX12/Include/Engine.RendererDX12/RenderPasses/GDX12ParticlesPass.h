@@ -12,8 +12,10 @@ public:
     void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
     {
         graph.SetName("Particle simulation");
+        graph.AsyncCompute();
         graph.Read(SharedResource::Scene);
-        graph.Read(_inputs[0]);
+        graph.Read(_inputs[0], D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE |
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
         graph.Write(SharedResource::ParticleSimulation, "Particle simulation pools");
         graph.HasSideEffects();
     }
@@ -21,6 +23,14 @@ public:
     {
         if (_resources->ParticleSimulation)
             _resources->ParticleSimulation->Execute(commands, _resources, *_commonData, _inputs[0]->GetTexture());
+    }
+    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
+    {
+        std::vector<GDX12RenderGraph::BufferAccess> result;
+        if (_resources->ParticleSimulation)
+            for (auto* resource : _resources->ParticleSimulation->GetPoolResources())
+                result.push_back({ resource, GDX12RenderGraph::Mode::ReadWrite });
+        return result;
     }
 };
 
@@ -44,6 +54,14 @@ public:
     ~GDX12ParticlesPass() override;
     void Initialize() override;
     void BeginFrame();
+    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
+    {
+        std::vector<GDX12RenderGraph::BufferAccess> result;
+        if (_resources->ParticleSimulation)
+            for (auto* resource : _resources->ParticleSimulation->GetPoolResources())
+                result.push_back({ resource, GDX12RenderGraph::Mode::Read });
+        return result;
+    }
     void Execute(GDX12CommandList* commands) override;
     void Composite(GDX12CommandList* commands, GDX12Texture* hdr);
     void Resize() override;

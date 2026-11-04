@@ -180,7 +180,8 @@ public:
         cmdList->ResourceBarrier({
             currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().GetIndirectArgsBarrier(),
             currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetIndirectArgsBarrier(),
-            depthStencil->GetResource()->GetDepthWriteBarrier() });
+            _stage == Stage::GBuffer ? depthStencil->GetResource()->GetDepthReadBarrier() :
+                depthStencil->GetResource()->GetDepthWriteBarrier() });
         if (_stage != Stage::GBuffer)
             cmdList->GetCommandList()->ClearDepthStencilView(depthStencil->GetDSV()->CPUHandle,
                 D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0, 0, nullptr);
@@ -201,7 +202,15 @@ public:
                 _surfaceBuffers[0]->GetResource()->GetRenderTargetBarrier(),
                 _surfaceBuffers[1]->GetResource()->GetRenderTargetBarrier(),
                 _surfaceBuffers[2]->GetResource()->GetRenderTargetBarrier() });
-            cmdList->SetRenderTargets({ OUT_Accumulation.get(), OUT_VelocityBuffer.get(),
+            if (_stage == Stage::GBuffer)
+            {
+                UpdateReadOnlyDepth();
+                const D3D12_CPU_DESCRIPTOR_HANDLE targets[] = { OUT_Accumulation->GetRTV()->CPUHandle,
+                    OUT_VelocityBuffer->GetRTV()->CPUHandle, _surfaceBuffers[0]->GetRTV()->CPUHandle,
+                    _surfaceBuffers[1]->GetRTV()->CPUHandle, _surfaceBuffers[2]->GetRTV()->CPUHandle };
+                cmdList->GetCommandList()->OMSetRenderTargets(5, targets, FALSE, &_readOnlyDepth->CPUHandle);
+            }
+            else cmdList->SetRenderTargets({ OUT_Accumulation.get(), OUT_VelocityBuffer.get(),
                 _surfaceBuffers[0].get(), _surfaceBuffers[1].get(), _surfaceBuffers[2].get() }, depthStencil);
             cmdList->ClearRenderTargetView(OUT_Accumulation.get());
             cmdList->ClearRenderTargetView(OUT_VelocityBuffer.get());
@@ -249,10 +258,28 @@ public:
 		_opaqueCS.Reset();
 		_opaquePSO.Reset();
         _depthOnlyPSO.Reset();
+        _readOnlyDepth.reset();
+        _readOnlyDepthResource.Reset();
 	}
 
 private:
     Stage _stage;
+    void UpdateReadOnlyDepth()
+    {
+        const auto& resource = _outputs[2]->GetTexture()->GetResource()->D3DResource;
+        if (_readOnlyDepth && _readOnlyDepthResource.Get() == resource.Get()) return;
+        D3D12_DEPTH_STENCIL_VIEW_DESC desc = {};
+        desc.Format = DXGI_FORMAT_D32_FLOAT;
+        desc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        desc.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH;
+        auto* heap = _resources->DSVHeap.get();
+        if (!_readOnlyDepth) _readOnlyDepth = std::make_unique<GDX12Descriptor>();
+        const UINT index = _readOnlyDepth->HeapIndex == UINT_MAX ? heap->GetAvailableIndex() : _readOnlyDepth->HeapIndex;
+        _readOnlyDepth->InitAsDSV(resource.Get(), &desc, heap, index);
+        _readOnlyDepthResource = resource;
+    }
+    std::unique_ptr<GDX12Descriptor> _readOnlyDepth;
+    GDX12ResourceHandle _readOnlyDepthResource;
 	void CreateDepth(UINT width, UINT height)
 	{
 		_depthDesc.Width = width;
@@ -265,6 +292,7 @@ private:
 		clear.DepthStencil.Depth = 0.0f;
 		_depthDesc.ExternalResource = _resources->Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, resource,
 			D3D12_RESOURCE_STATE_COMMON, &clear);
+        _depthDesc.ExternalResource->SetName(L"Opaque depth");
 		OUT_DepthStencil->Initialize(_depthDesc);
 	}
 

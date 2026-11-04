@@ -979,7 +979,8 @@ void RenderModule::OnRender()
 
     auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
     _primaryResources.UploadLocalShadowData(primarycmdList);
-    _primaryGraph->Execute(primarycmdList);
+    primarycmdList = _primaryGraph->Execute(primarycmdList,
+        !_dualGPUMode && GetParticleSettings().AsyncCompute ? _primaryDevice->TryGetComputeQueue() : nullptr);
     if (_uiInitialized) Engine::UI::Render(primarycmdList, _backBuffer->GetCurrentBuffer());
     _primaryGPUTimer->Stop(primarycmdList);
     primarycmdQueue->ExecuteCommandList(primarycmdList);
@@ -1534,6 +1535,11 @@ void RenderModule::RebuildRenderGraph()
 const GDX12RenderGraph::Statistics& RenderModule::GetRenderGraphStatistics() const
 {
     return _primaryGraph->GetStatistics();
+}
+
+double RenderModule::GetGPUFrameTimeMS() const
+{
+    return _primaryGPUTimer->GetTimeMS();
 }
 
 void RenderModule::WriteRenderGraph(std::ostream& output) const
