@@ -25,8 +25,6 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Reconstruction.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReconstructionPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Sky.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12GrassWind.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12GrassRenderer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Particles.h" />
     <ClInclude Include="src\GDX12ParticleResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ParticlesPass.h" />
@@ -105,8 +103,6 @@
     <ClCompile Include="src\GDX12Sky.cpp" />
     <ClCompile Include="src\GDX12FrameGeneration.cpp" />
     <ClCompile Include="src\GDX12EnvironmentIBLPass.cpp" />
-    <ClCompile Include="src\GDX12GrassWind.cpp" />
-    <ClCompile Include="src\GDX12GrassRenderer.cpp" />
     <ClCompile Include="src\GDX12Particles.cpp" />
     <ClCompile Include="src\GDX12ParticlesPass.cpp" />
     <ClCompile Include="src\GDX12ParticleSimulation.cpp" />
@@ -156,10 +152,6 @@
     <ClCompile Include="src\GDX12Texture.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="Shaders\GrassCommon.hlsli" />
-    <None Include="Shaders\GrassExpand.hlsl" />
-    <None Include="Shaders\GrassRender.hlsl" />
-    <None Include="Shaders\WindField.hlsl" />
     <None Include="Shaders\Particles.hlsli" />
     <None Include="Shaders\ParticleSimulation.hlsl" />
     <None Include="Shaders\ParticleRender.hlsl" />

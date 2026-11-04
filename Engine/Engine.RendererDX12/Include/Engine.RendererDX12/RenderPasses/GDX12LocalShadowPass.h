@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine.RendererDX12/GDX12RenderExtension.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
@@ -13,6 +14,7 @@ public:
     {
         graph.SetName("Local shadows");
         graph.Read(SharedResource::Scene);
+        if (_resources) _resources->DeclareGeometryResources(graph);
         graph.ReadInputs(_inputs);
         graph.Write(_outputs[0], "Local shadows cache", Lifetime::Dynamic);
         graph.HasSideEffects();
@@ -226,9 +228,8 @@ public:
                     if (_staticOnly) commands->GetCommandList()->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
                     if (count) commands->ExecuteIndirect(_signature.Get(), count,
                         visibility.Commands->GetResource().D3DResource.Get(), 0, visibility.Counter->GetResource().D3DResource.Get(), 0);
-                    if (!_staticOnly && _resources->Grass)
-                        _resources->Grass->Draw(commands, GDX12GrassRenderer::Stage::Shadow,
-                            Matrix(light.ShadowViewProj[face]).Transpose(), _commonData->CameraView.Invert().Translation(), 0);
+                    _resources->DrawGeometry(commands, { GDX12GeometryStage::Shadow,
+                        Matrix(light.ShadowViewProj[face]).Transpose(), Vector3(light.Position), 0, nullptr, _staticOnly });
                 }
                 ++_renderedViews;
             }

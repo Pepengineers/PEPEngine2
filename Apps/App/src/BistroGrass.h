@@ -1,4 +1,5 @@
 #pragma once
+#include "Components/BistroGrassComponents.h"
 
 #include <cstdint>
 #include "App.Base/ECS/World.h"
@@ -162,6 +163,7 @@ namespace BistroGrass
     public:
         void Update(World& world, float)
         {
+            RegisterBistroGrassComponents(world);
             auto& ecs = world.GetECS();
             const size_t requested = static_cast<size_t>(Count.GetValue());
             const auto controls = ReadControls();

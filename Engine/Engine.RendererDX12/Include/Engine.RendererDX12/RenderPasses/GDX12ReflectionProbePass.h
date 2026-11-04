@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine.RendererDX12/GDX12RenderExtension.h"
 #include <cstdint>
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
@@ -11,6 +12,7 @@ public:
     {
         graph.SetName("Reflection probes");
         graph.Read(SharedResource::Scene);
+        if (_resources) _resources->DeclareGeometryResources(graph);
         graph.ReadInputs(_inputs);
         graph.Read(SharedResource::Environment);
         graph.Write(SharedResource::ReflectionProbes, "Reflection probe cache");
@@ -60,7 +62,7 @@ private:
     void CreateFaceViews(GDX12Texture& texture, std::vector<std::unique_ptr<GDX12Descriptor>>& views, bool depth);
     void Cull(GDX12CommandList* commands, UINT camera, Geometry geometry, bool shadow);
     void BindCapture(GDX12CommandList* commands, UINT face, GDX12Texture* localShadows);
-    void RenderShadow(GDX12CommandList* commands, Geometry geometry);
+    void RenderShadow(GDX12CommandList* commands, Geometry geometry, Vector3 eye);
     void RenderFace(GDX12CommandList* commands, UINT probe, UINT face, Geometry geometry, bool bake);
     void FilterAndPublish(GDX12CommandList* commands, UINT probe);
     void WriteProbeData(GDX12CommandList* commands, bool enabled);

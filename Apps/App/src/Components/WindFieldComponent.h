@@ -1,6 +1,6 @@
 #pragma once
 #include "Engine.Core/ECS/Component.h"
-#include "Engine.RendererDX12/GDX12GrassWind.h"
+#include "Rendering/Grass/GDX12GrassWind.h"
 #include <stdexcept>
 
 struct WindFieldComponent : ComponentTag, GDX12WindSettings

@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine.RendererDX12/GDX12RenderExtension.h"
 #include <cstdint>
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
@@ -11,6 +12,7 @@ public:
     {
         graph.SetName(_stage == Stage::DepthPrepass ? "Depth prepass" : "GBuffer");
         graph.Read(SharedResource::Scene);
+        if (_resources) _resources->DeclareGeometryResources(graph);
         graph.Read(SharedResource::Visibility);
         graph.ReadInputs(_inputs);
         if (_stage != Stage::GBuffer)
@@ -208,14 +210,13 @@ public:
 		cmdList->ExecuteIndirect(_opaqueCS.Get(), _resources->IndirectCommandsCache->GetElementCount(),
 			currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().D3DResource.Get(), 0,
 			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().D3DResource.Get(), 0);
-        if (_resources->Grass)
         {
             const auto stage = _stage == Stage::DepthPrepass ?
-                (writeNormals ? GDX12GrassRenderer::Stage::PrepassNormals : GDX12GrassRenderer::Stage::Depth) :
-                (_stage == Stage::GBuffer ? GDX12GrassRenderer::Stage::GBuffer : GDX12GrassRenderer::Stage::Full);
-            _resources->Grass->Draw(cmdList, stage, _commonData->CameraView * _commonData->CameraProjection,
+                (writeNormals ? GDX12GeometryStage::DepthNormals : GDX12GeometryStage::Depth) :
+                (_stage == Stage::GBuffer ? GDX12GeometryStage::GBuffer : GDX12GeometryStage::Forward);
+            _resources->DrawGeometry(cmdList, { stage, _commonData->CameraView * _commonData->CameraProjection,
                 _commonData->CameraView.Invert().Translation(),
-                currentFrameConstants->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
+                currentFrameConstants->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex) });
         }
 	}
 

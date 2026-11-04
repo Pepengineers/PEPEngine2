@@ -1,3 +1,4 @@
+#include "Rendering/Grass/BistroGrassRenderExtension.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "Engine.RendererDX12/GDX12RenderExtension.h"
 #include <iostream>
@@ -97,12 +98,93 @@ static void TestTransparencyOwnership()
     Require(rejected, "Multiple transparency providers were accepted");
 }
 
+class GeometryContributor final : public GDX12RenderExtension
+{
+public:
+    std::vector<GDX12GeometryContext> Views;
+    UINT StaticViews = 0;
+    void DrawGeometry(GDX12CommandList*, const GDX12GeometryContext& view) override
+    { if (view.StaticOnly) ++StaticViews; else Views.push_back(view); }
+    void DeclareGeometryResources(GDX12RenderGraphBuilder& graph) const override
+    { graph.ReadWriteExternal(this, "test geometry scratch"); }
+};
+
+class GeometryPass final : public GDX12RenderPass
+{
+public:
+    explicit GeometryPass(const GDX12DeviceResources& resources) : Resources(resources) {}
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    { graph.SetName("Geometry"); Resources.DeclareGeometryResources(graph); }
+private:
+    const GDX12DeviceResources& Resources;
+};
+
+static void TestGeometryAndGrassLifetime()
+{
+    GDX12DeviceResources resources;
+    GeometryContributor contributor;
+    resources.RenderExtensions.push_back(&contributor);
+    GeometryPass depth(resources), shadow(resources);
+    for (int rebuild = 0; rebuild < 2; ++rebuild)
+    {
+        GDX12RenderGraph graph;
+        const auto first = graph.AddPass(depth), second = graph.AddPass(shadow);
+        graph.Compile();
+        Require(graph.GetExecutionOrder() == std::vector<GDX12RenderGraph::Pass>{ first, second },
+            "Mutable extension scratch lost draw ordering or was culled");
+    }
+    GDX12GeometryContext view;
+    view.Eye = Vector3(100, 200, 300);
+    view.CameraConstants = 77;
+    for (const auto stage : { GDX12GeometryStage::Depth, GDX12GeometryStage::DepthNormals,
+        GDX12GeometryStage::GBuffer, GDX12GeometryStage::Forward, GDX12GeometryStage::Shadow,
+        GDX12GeometryStage::ReflectionCapture })
+    {
+        view.Stage = stage;
+        resources.DrawGeometry(nullptr, view);
+    }
+    Require(contributor.Views.size() == 6 && contributor.Views.back().Eye == view.Eye &&
+        contributor.Views.back().CameraConstants == 77, "Geometry dispatch lost the current view");
+    view.StaticOnly = true;
+    resources.DrawGeometry(nullptr, view);
+    Require(contributor.Views.size() == 6 && contributor.StaticViews == 1,
+        "Static-only filter did not reach the application contributor");
+
+    auto scenes = std::make_shared<SceneManagerModule>();
+    RenderModule renderer(nullptr, nullptr);
+    World world(WorldDesc{});
+    {
+        BistroGrassRenderExtension extension(scenes, renderer);
+        scenes->OnWorldCreated.Broadcast(world);
+        auto& ecs = world.GetECS();
+        auto entity = ecs.CreateEntity();
+        const auto id = entity.GetId();
+        auto& first = entity.AddComponent<GrassRenderComponent>();
+        const auto firstOwner = first._renderOwner;
+        Require(firstOwner != 0, "Bistro did not assign a grass owner");
+        entity.AddComponent<GrassRenderComponent>();
+        Require(ecs.Get<GrassRenderComponent>(id)._renderOwner > firstOwner, "Replacement retained old GPU identity");
+        const auto replacedOwner = ecs.Get<GrassRenderComponent>(id)._renderOwner;
+        ecs.DestroyEntity(id);
+        auto reused = ecs.CreateEntity();
+        Require(reused.AddComponent<GrassRenderComponent>()._renderOwner > replacedOwner,
+            "Entity reuse inherited old grass GPU identity");
+        scenes->OnWorldDestroyed.Broadcast(world);
+        Require(ecs.CreateEntity().AddComponent<GrassRenderComponent>()._renderOwner == 0,
+            "World removal retained Bistro component listeners");
+        scenes->OnWorldCreated.Broadcast(world);
+    }
+    Require(world.GetECS().CreateEntity().AddComponent<WindFieldComponent>()._renderOwner == 0,
+        "Extension destruction retained world listeners");
+}
+
 int main()
 {
     try
     {
         TestStagesAndLinks();
         TestTransparencyOwnership();
+        TestGeometryAndGrassLifetime();
         RenderModule renderer(nullptr, nullptr);
         auto extension = std::make_unique<TestExtension>(4);
         auto* expected = extension.get();

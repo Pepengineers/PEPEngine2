@@ -375,3 +375,11 @@ void GDX12RenderGraph::WriteDot(std::ostream& output) const
     }
     output << "}\n";
 }
+
+void GDX12RenderGraphBuilder::ReadWriteExternal(const void* identity, std::string name)
+{
+    if (!identity) throw std::invalid_argument("Render graph: null external resource identity");
+    auto found = _graph._external.find(identity);
+    if (found == _graph._external.end()) found = _graph._external.emplace(identity, _graph.Import(std::move(name))).first;
+    Use(found->second, Graph::Mode::ReadWrite);
+}

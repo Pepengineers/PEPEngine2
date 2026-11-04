@@ -15,6 +15,7 @@
 #include "BistroScene.h"
 #include "BistroReflections.h"
 #include "BistroGrass.h"
+#include "Rendering/Grass/BistroGrassRenderExtension.h"
 #include "BistroWater.h"
 #include "BistroCharacters.h"
 #include "BistroBounds.h"
@@ -71,8 +72,12 @@ namespace
                 }
             }
 
-            Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer));
+            auto renderer = std::make_shared<RenderModule>(GetWindow(), &Timer);
+            Locator.RegisterModule(renderer);
             auto scenes = std::make_shared<SceneManagerModule>(scenePath);
+            auto grass = std::make_unique<BistroGrassRenderExtension>(scenes, *renderer);
+            _grassRendering = grass.get();
+            renderer->RegisterRenderExtension(std::move(grass));
             ConfigureBistroProps(*scenes);
             Locator.RegisterModule(scenes);
             return BenchmarkEngine::AddModules();
@@ -174,12 +179,14 @@ namespace
         {
             _reflections.Update(world, deltaSeconds);
             _grass.Update(world, deltaSeconds);
+            _grassRendering->CollectScene(deltaSeconds);
             _water.Update(world, deltaSeconds);
             _characters.Update(world, deltaSeconds, _jobs);
         }
 
         BistroReflections::Scene _reflections;
         BistroGrass::Scene _grass;
+        BistroGrassRenderExtension* _grassRendering = nullptr;
         BistroWater::Scene _water;
         BistroCharacters::Scene _characters;
         std::unique_ptr<BistroBounds::Scene> _bounds;

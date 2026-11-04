@@ -384,7 +384,7 @@ void GDX12ReflectionProbePass::BindCapture(GDX12CommandList* commands, const UIN
     commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
 }
 
-void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, const Geometry geometry)
+void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, const Geometry geometry, const Vector3 eye)
 {
     if (_sunShadowNeedsClear)
     {
@@ -420,9 +420,8 @@ void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, const Ge
     const UINT count = _resources->IndirectCommandsCache->GetElementCount();
     if (count) commands->ExecuteIndirect(_signature.Get(), count, frame.Commands->GetResource().D3DResource.Get(), 0,
         frame.Counter->GetResource().D3DResource.Get(), 0);
-    if (geometry != StaticGeometry && _resources->Grass)
-        _resources->Grass->Draw(commands, GDX12GrassRenderer::Stage::Shadow,
-            Matrix(ProbeSunShadow(*_resources).ViewProj[0]).Transpose(), _commonData->CameraView.Invert().Translation(), 0);
+    _resources->DrawGeometry(commands, { GDX12GeometryStage::Shadow,
+        Matrix(ProbeSunShadow(*_resources).ViewProj[0]).Transpose(), eye, 0, nullptr, geometry == StaticGeometry });
     commands->ResourceBarrier({ _sunShadow.GetResource()->GetSRVBarrier() });
 }
 
@@ -464,9 +463,8 @@ void GDX12ReflectionProbePass::RenderFace(GDX12CommandList* commands, const UINT
     const UINT count = _resources->IndirectCommandsCache->GetElementCount();
     if (count) commands->ExecuteIndirect(_signature.Get(), count, frame.Commands->GetResource().D3DResource.Get(), 0,
         frame.Counter->GetResource().D3DResource.Get(), 0);
-    if (geometry != StaticGeometry && _resources->Grass)
     {
-        GDX12GrassRenderer::CaptureLighting lighting;
+        GDX12CaptureLighting lighting;
         lighting.SunShadow = &_sunShadow;
         lighting.Irradiance = _inputs[0]->GetTexture();
         lighting.Prefiltered = _inputs[1]->GetTexture();
@@ -474,8 +472,8 @@ void GDX12ReflectionProbePass::RenderFace(GDX12CommandList* commands, const UINT
         lighting.LocalShadows = _inputs[4]->GetTexture();
         lighting.ShadowConstants = frame.Shadow->GetElementAddress(0);
         const auto camera = FaceCamera(state.Source, face, _resolution);
-        _resources->Grass->Draw(commands, GDX12GrassRenderer::Stage::Capture, Matrix(camera.ViewProj).Transpose(),
-            state.Source.Position, frame.Cameras->GetElementAddress(face), &lighting);
+        _resources->DrawGeometry(commands, { GDX12GeometryStage::ReflectionCapture, Matrix(camera.ViewProj).Transpose(),
+            state.Source.Position, frame.Cameras->GetElementAddress(face), &lighting, geometry == StaticGeometry });
     }
 }
 
@@ -676,7 +674,7 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
     {
         CreateBakedTextures(state);
         _staticLocalShadows->Execute(commands);
-        RenderShadow(commands, StaticGeometry);
+        RenderShadow(commands, StaticGeometry, state.Source.Position);
         for (UINT face = _face; face < endFace; ++face)
         {
             if (state.BakedFaces & (1u << face)) continue;
@@ -687,7 +685,7 @@ void GDX12ReflectionProbePass::Execute(GDX12CommandList* commands)
     }
     const bool frozen = state.Source.Implementation == 2;
     if (frozen) _staticLocalShadows->Execute(commands);
-    RenderShadow(commands, frozen ? StaticGeometry : AllGeometry);
+    RenderShadow(commands, frozen ? StaticGeometry : AllGeometry, state.Source.Position);
     for (; _face < endFace; ++_face)
     {
         RenderFace(commands, _activeProbe, _face, frozen ? StaticGeometry :

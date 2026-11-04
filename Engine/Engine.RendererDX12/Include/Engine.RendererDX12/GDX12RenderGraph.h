@@ -87,6 +87,7 @@ private:
     std::vector<Slot> _slots;
     std::unordered_map<IRenderPassLink*, Resource> _links;
     std::unordered_map<SharedResource, Resource> _shared;
+    std::unordered_map<const void*, Resource> _external;
     Statistics _statistics;
     bool _compiled = false;
 };
@@ -102,6 +103,7 @@ public:
     void Use(Graph::Resource resource, Graph::Mode mode, D3D12_RESOURCE_STATES state = Graph::UnmanagedState);
     void Read(IRenderPassLink* link, D3D12_RESOURCE_STATES state = Graph::UnmanagedState);
     void ReadInputs(const std::vector<IRenderPassLink*>& inputs, D3D12_RESOURCE_STATES state = Graph::UnmanagedState);
+    void ReadWriteExternal(const void* identity, std::string name);
     void ReadWrite(IRenderPassLink* link, D3D12_RESOURCE_STATES state = Graph::UnmanagedState);
     void Write(IRenderPassLink* link, std::string name, Lifetime lifetime = Lifetime::Transient,
         D3D12_RESOURCE_STATES state = Graph::UnmanagedState, GDX12Texture* storage = nullptr);

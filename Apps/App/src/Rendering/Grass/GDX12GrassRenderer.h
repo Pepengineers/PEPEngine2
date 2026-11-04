@@ -1,6 +1,6 @@
 #pragma once
 #include <cstdint>
-#include "Engine.RendererDX12/GDX12GrassWind.h"
+#include "Rendering/Grass/GDX12GrassWind.h"
 #include "Engine.RendererDX12/GDX12UploadBuffer.h"
 #include "Engine.RendererDX12/GDX12RootSignature.h"
 #include <array>
@@ -11,7 +11,7 @@ class GDX12DeviceResources;
 class RenderPipelineCommonData;
 class GDX12Texture;
 
-// Owned by the renderer, never a singleton. All calls use its direct queue.
+// Owned by Bistro. All calls use the renderer direct queue.
 class GDX12GrassRenderer
 {
 public:

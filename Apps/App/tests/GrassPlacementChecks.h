@@ -289,7 +289,7 @@ static void TestGrassStages(GDX12Device& device, GDX12DeviceResources& resources
 }
 
 static void TestGrassPlacement(GDX12Device& device, GDX12DeviceResources& resources,
-    const RenderPipelineCommonData& common, GDX12Texture* depth, const Matrix& vp, Vector3 eye)
+    const RenderPipelineCommonData& common, GDX12Texture* depth, const Matrix& vp, Vector3 eye, GDX12GrassRenderer& originalRenderer)
 {
     auto* queue = device.GetCommandQueue();
     const UINT previousSlot = resources.CurrFrameConstantsIndex;
@@ -420,7 +420,7 @@ static void TestGrassPlacement(GDX12Device& device, GDX12DeviceResources& resour
     commands->SetViewport(depth->GetViewport());
     commands->SetScissorRect(depth->GetScissorRect());
     commands->SetRenderTargets({}, depth);
-    resources.Grass->Draw(commands, GDX12GrassRenderer::Stage::Depth, vp, eye,
+    originalRenderer.Draw(commands, GDX12GrassRenderer::Stage::Depth, vp, eye,
         resources.FrameConstants[previousSlot]->CameraCB->GetElementAddress(0));
     queue->ExecuteCommandList(commands);
     queue->Flush();

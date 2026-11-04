@@ -63,7 +63,6 @@ RenderModule::~RenderModule()
     for (auto& renderpass : _primaryRenderPasses) { renderpass->ClearDenendencies(); }
     for (auto& renderpass : _secondaryRenderPasses) { renderpass->ClearDenendencies(); }
 
-    _primaryResources.Grass.reset();
     _primaryRenderPasses.clear();
     _secondaryRenderPasses.clear();
     _renderExtensions.clear();
@@ -79,6 +78,7 @@ GDX12RenderExtension* RenderModule::RegisterRenderExtension(std::unique_ptr<GDX1
     if (!extension) throw std::invalid_argument("Cannot register a null render extension");
     auto* result = extension.get();
     _renderExtensions.push_back(std::move(extension));
+    _primaryResources.RenderExtensions.push_back(result);
     return result;
 }
 
@@ -159,6 +159,12 @@ void RenderModule::OnResize()
     for (auto& renderPass : _secondaryRenderPasses) { renderPass->Resize(); }
     for (auto& extension : _renderExtensions) extension->Resize(_RPcommonData);
     if (_primaryGraph) RebuildRenderGraph();
+}
+
+bool RenderModule::OwnsMaterial(const GDX12Material* material) const
+{
+    return std::any_of(_materials.begin(), _materials.end(),
+        [material](const auto& entry) { return entry.second.get() == material; });
 }
 
 GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
@@ -606,16 +612,6 @@ void RenderModule::SubscribeToWorld(World& world)
                 OnRenderComponentUpdated(world, entity, component);
             });
 
-    auto& grassPool = ecs.GetPool<GrassRenderComponent>();
-    const auto grassOwner = [this](Entity, GrassRenderComponent& component) { component._renderOwner = ++_grassWindOwner; };
-    subscriptions.GrassCreated = grassPool.OnComponentCreated.AddListener(grassOwner);
-    subscriptions.GrassUpdated = grassPool.OnComponentUpdated.AddListener(grassOwner);
-    ecs.ForEach<GrassRenderComponent>(grassOwner);
-    auto& windPool = ecs.GetPool<WindFieldComponent>();
-    const auto windOwner = [this](Entity, WindFieldComponent& component) { component._renderOwner = ++_grassWindOwner; };
-    subscriptions.WindCreated = windPool.OnComponentCreated.AddListener(windOwner);
-    subscriptions.WindUpdated = windPool.OnComponentUpdated.AddListener(windOwner);
-    ecs.ForEach<WindFieldComponent>(windOwner);
     auto& skeletalPool = ecs.GetPool<SkeletalMeshRenderComponent>();
     subscriptions.SkeletalDestroyed = skeletalPool.OnComponentDestroyed.AddListener(
         [this, &world](Entity entity, SkeletalMeshRenderComponent&) { ReleaseSkeletalState(world, entity); });
@@ -663,10 +659,6 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     {
         OnRenderComponentDestroyed(world, entity, component);
     });
-    ecs.GetPool<GrassRenderComponent>().OnComponentCreated.RemoveListener(subscriptions.GrassCreated);
-    ecs.GetPool<GrassRenderComponent>().OnComponentUpdated.RemoveListener(subscriptions.GrassUpdated);
-    ecs.GetPool<WindFieldComponent>().OnComponentCreated.RemoveListener(subscriptions.WindCreated);
-    ecs.GetPool<WindFieldComponent>().OnComponentUpdated.RemoveListener(subscriptions.WindUpdated);
     ++_primaryResources.ReflectionStaticRevision;
     ++_primaryResources.ReflectionWorldRevision;
     if (_skyWorld == &world)
@@ -960,7 +952,6 @@ void RenderModule::OnRender()
     _primaryGPUTimer->Start(primarycmdList);
     _primaryResources.ParticleSimulation->InitializePools(primarycmdList, &_primaryResources);
     DispatchSkeletalMeshes(primarycmdList);
-    CollectGrassScene(primarycmdList);
     for (auto& extension : _renderExtensions)
         extension->PrepareFrame(primarycmdList, _primaryResources, _RPcommonData);
     {
@@ -1025,78 +1016,6 @@ void RenderModule::OnRender()
     _backBuffer->Present();
 }
 
-void RenderModule::CollectGrassScene(GDX12CommandList* commands)
-{
-    std::vector<GDX12GrassInstance> grass;
-    std::vector<GDX12WindInstance> wind;
-    const auto controls = GetGrassWindControls();
-    auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
-    if (controls.GrassEnabled && controls.GrassQuality > 0)
-    {
-        for (size_t worldIndex = 0; worldIndex < scenes->GetWorldCount(); ++worldIndex)
-        {
-            auto* world = scenes->GetWorld(worldIndex);
-            auto& ecs = world->GetECS();
-            ecs.ForEach<GrassRenderComponent>([&](Entity entity, GrassRenderComponent& component)
-            {
-                if (!component.Enabled || !component.Material || !ecs.Has<TransformComponent>(entity)) return;
-                if (!IsValidGrassSettings(component)) throw std::invalid_argument("Invalid GrassRenderComponent");
-                if (!GrassBladeCount(ResolveGrassSettings(component, controls.GrassQuality))) return;
-                const auto material = std::find_if(_materials.begin(), _materials.end(),
-                    [&](const auto& entry) { return entry.second.get() == component.Material; });
-                if (material == _materials.end() || component.Material->Type == MaterialType::Transparent)
-                    throw std::invalid_argument("Grass requires an owned opaque or masked material");
-                if (!component._renderOwner) component._renderOwner = ++_grassWindOwner;
-                const auto& transform = ecs.Get<TransformComponent>(entity);
-                GDX12GrassInstance instance;
-                static_cast<GDX12GrassSettings&>(instance) = component;
-                instance.Id = component._renderOwner;
-                instance.World = Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
-                    XMConvertToRadians(transform.Rotation.y), XMConvertToRadians(transform.Rotation.x),
-                    XMConvertToRadians(transform.Rotation.z)) * Matrix::CreateTranslation(transform.Location);
-                instance.MaterialIndex = component.Material->_CBufferIndex;
-                instance.ResetRevision = component.ResetRevision;
-                instance.MaterialRevision = component.Material->_revision;
-                if (component.WindEntity != InvalidEntity && ecs.Has<WindFieldComponent>(component.WindEntity) &&
-                    ecs.Has<TransformComponent>(component.WindEntity))
-                {
-                    auto& field = ecs.Get<WindFieldComponent>(component.WindEntity);
-                    if (field.Enabled && controls.WindEnabled && controls.WindQuality > 0)
-                    {
-                        if (!field._renderOwner) field._renderOwner = ++_grassWindOwner;
-                        instance.WindId = field._renderOwner;
-                        const auto found = std::find_if(wind.begin(), wind.end(), [&](const auto& item) { return item.Id == instance.WindId; });
-                        if (found == wind.end())
-                        {
-                            GDX12WindInstance snapshot;
-                            static_cast<GDX12WindSettings&>(snapshot) = field;
-                            snapshot.Id = field._renderOwner;
-                            const auto& location = ecs.Get<TransformComponent>(component.WindEntity).Location;
-                            snapshot.CenterCm = Vector2(location.x, location.z);
-                            snapshot.DeltaSeconds = field.Paused || world->IsPaused() ? 0 :
-                                _timer->DeltaTime() * world->GetTimeScale();
-                            wind.push_back(std::move(snapshot));
-                        }
-                    }
-                }
-                grass.push_back(std::move(instance));
-            });
-        }
-    }
-    if (!grass.empty() && !_primaryResources.Grass)
-        _primaryResources.Grass = std::make_unique<GDX12GrassRenderer>(&_primaryResources);
-    if (_primaryResources.Grass)
-    {
-        _primaryResources.Grass->BeginFrame(commands, _RPcommonData, std::move(grass), std::move(wind), controls);
-        BoundingBox bounds;
-        if (_primaryResources.Grass->HasCasters() && _primaryResources.Grass->GetBounds(bounds))
-            SubmitCameraShadows(BuildShadowCascades(_RPcommonData.CameraView.Invert(),
-                XMConvertToRadians(_RPcommonData.ActiveCameraFOV), GetAspectRatio(),
-                _RPcommonData.ActiveCameraNearPlane, _RPcommonData.ActiveCameraFarPlane,
-                Vector3(_primaryResources.Lighting.LightDirection), &bounds));
-    }
-}
-
 void RenderModule::CollectParticleEmitters()
 {
     _primaryResources.ParticleEmitters.clear();
@@ -1137,7 +1056,11 @@ void RenderModule::CollectReflectionScene()
     auto& resources = _primaryResources;
     if (!resources.LocalShadowCasters) resources.LocalShadowCasters.emplace();
     resources.LocalShadowCasters->clear();
-    if (resources.Grass) hash(dynamicHash, resources.Grass->Revision());
+    GDX12SceneContributions contributions;
+    for (const auto& extension : _renderExtensions) extension->AppendSceneContributions(contributions);
+    hash(dynamicHash, contributions.Revision);
+    resources.GeometryRevision = contributions.Revision;
+    resources.HasExtensionCasters = !contributions.Casters.empty();
     hash(staticHash, resources.ReflectionEnvironmentRevision);
     hash(staticHash, resources.Lighting.LightDirection);
     hash(staticHash, resources.Lighting.LightRadiance);
@@ -1256,12 +1179,20 @@ void RenderModule::CollectReflectionScene()
             resources.ReflectionProbes.push_back(probe);
         });
     }
-    BoundingBox grassBounds;
-    if (resources.Grass && resources.Grass->GetBounds(grassBounds))
+    resources.LocalShadowCasters->insert(resources.LocalShadowCasters->end(), contributions.Casters.begin(), contributions.Casters.end());
+    if (contributions.HasBounds)
     {
-        resources.LocalShadowCasters->push_back({ grassBounds, resources.Grass->Revision(), true });
-        if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, grassBounds);
-        else resources.ReflectionSceneBounds = grassBounds;
+        if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, contributions.Bounds);
+        else resources.ReflectionSceneBounds = contributions.Bounds;
+    }
+    if (resources.HasExtensionCasters)
+    {
+        auto casterBounds = contributions.Casters.front().Bounds;
+        for (const auto& caster : contributions.Casters) BoundingBox::CreateMerged(casterBounds, casterBounds, caster.Bounds);
+        SubmitCameraShadows(BuildShadowCascades(_RPcommonData.CameraView.Invert(),
+            XMConvertToRadians(_RPcommonData.ActiveCameraFOV), GetAspectRatio(),
+            _RPcommonData.ActiveCameraNearPlane, _RPcommonData.ActiveCameraFarPlane,
+            Vector3(resources.Lighting.LightDirection), &casterBounds));
     }
     std::sort(resources.ReflectionProbes.begin(), resources.ReflectionProbes.end(),
         [](const auto& a, const auto& b) { return a.Id < b.Id; });

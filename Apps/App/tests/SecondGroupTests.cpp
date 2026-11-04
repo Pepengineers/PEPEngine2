@@ -1,5 +1,5 @@
 #include "App.Base/App.h"
-#include "Engine.RendererDX12/GDX12GrassRenderer.h"
+#include "Rendering/Grass/GDX12GrassRenderer.h"
 #include "Engine.RendererDX12/GDX12Skinning.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12FluidPass.h"
@@ -280,20 +280,20 @@ int main(int argc, char** argv)
         for (auto* texture : {hdr.get(), accum.get(), reveal.get()})
         { list->ResourceBarrier({texture->GetResource()->GetRenderTargetBarrier()}); list->ClearRenderTargetView(texture); }
         queue->ExecuteCommandList(list); queue->Flush();
-        resources.Grass = std::make_unique<GDX12GrassRenderer>(&resources);
+        auto grassRenderer = std::make_unique<GDX12GrassRenderer>(&resources);
         GDX12GrassInstance grass; grass.Id = 1; grass.RootsCm = {{0, 0, 0}, {-12, 0, 0}, {12, 0, 0}};
         grass.WidthCm = 12; grass.WindId = 1;
         GDX12WindInstance wind; wind.Id = 1; wind.DeltaSeconds = 1.0f / 60;
         auto controls = GetGrassWindControls();
-        list = queue->GetCommandList(); resources.Grass->BeginFrame(list, common, {grass}, {wind}, controls);
+        list = queue->GetCommandList(); grassRenderer->BeginFrame(list, common, {grass}, {wind}, controls);
         list->ResourceBarrier({depth->GetResource()->GetDepthWriteBarrier()});
         list->SetViewport(depth->GetViewport()); list->SetScissorRect(depth->GetScissorRect()); list->SetRenderTargets({}, depth);
-        resources.Grass->Draw(list, GDX12GrassRenderer::Stage::Depth, vp, eye, resources.FrameConstants[0]->CameraCB->GetElementAddress(0));
+        grassRenderer->Draw(list, GDX12GrassRenderer::Stage::Depth, vp, eye, resources.FrameConstants[0]->CameraCB->GetElementAddress(0));
         queue->ExecuteCommandList(list); queue->Flush();
         const auto blades = Read(device, *depth);
-        Require(*std::max_element(blades.begin(), blades.end()) > 0 && resources.Grass->HasCasters(), "Grass indirect draw produced no depth/casters");
+        Require(*std::max_element(blades.begin(), blades.end()) > 0 && grassRenderer->HasCasters(), "Grass indirect draw produced no depth/casters");
         std::cout << "GPU projected-grid wind and compact grass indirect depth passed.\n";
-        if (!benchmark) TestGrassPlacement(device, resources, common, depth, vp, eye);
+        if (!benchmark) TestGrassPlacement(device, resources, common, depth, vp, eye, *grassRenderer);
         if (benchmark && (mode == "--benchmark" || mode == "--benchmark-grass")) BenchmarkGrassPlacement(device, resources, common, depth, vp, eye);
 
         GDX12FluidSurfacePass water; water.Setup(&resources, nullptr, &common); water.SetInputs({depth, motion}); water.Initialize();
@@ -450,7 +450,7 @@ int main(int argc, char** argv)
             auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data()); ThrowIfFailed(info->GetMessage(i, message, &size));
             if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR) throw std::runtime_error(message->pDescription);
         }
-        queue->Flush(); resources.Grass.reset(); GDX12ShaderCompiler::Shutdown();
+        queue->Flush(); grassRenderer.reset(); GDX12ShaderCompiler::Shutdown();
         ReleaseMutex(gate); CloseHandle(gate);
         std::cout << (benchmark ? "Component placement benchmarks passed without the debug layer.\n" :
             "Six-component GPU integration passed with no debug-layer errors.\n");

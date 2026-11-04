@@ -1,4 +1,4 @@
-#include "Engine.RendererDX12/GDX12GrassRenderer.h"
+#include "Rendering/Grass/GDX12GrassRenderer.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include <algorithm>
 #include <cmath>
@@ -97,13 +97,13 @@ void GDX12GrassRenderer::Initialize()
         desc.CS = { cs->GetBufferPointer(), cs->GetBufferSize() };
         ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(&desc, IID_PPV_ARGS(&target)));
     };
-    createCompute(SHADERS_FOLDER "GrassExpand.hlsl", "ExpandCS", _computeRoot.get(), nullptr, _expandPSO);
-    createCompute(SHADERS_FOLDER "GrassExpand.hlsl", "ClearCS", _computeRoot.get(), nullptr, _clearPSO);
+    createCompute(APP_SHADERS_FOLDER "GrassExpand.hlsl", "ExpandCS", _computeRoot.get(), nullptr, _expandPSO);
+    createCompute(APP_SHADERS_FOLDER "GrassExpand.hlsl", "ClearCS", _computeRoot.get(), nullptr, _clearPSO);
     for (UINT stage = 0; stage < _windPSO.size(); ++stage)
     {
         const auto number = std::to_string(stage);
         D3D_SHADER_MACRO defines[] = { { "WIND_STAGE", number.c_str() }, { nullptr, nullptr } };
-        createCompute(SHADERS_FOLDER "WindField.hlsl", "CS", _windRoot.get(), defines, _windPSO[stage]);
+        createCompute(APP_SHADERS_FOLDER "WindField.hlsl", "CS", _windRoot.get(), defines, _windPSO[stage]);
     }
     for (UINT i = 0; i < _graphicsPSO.size(); ++i)
     {
@@ -111,9 +111,9 @@ void GDX12GrassRenderer::Initialize()
         const bool depth = stage == Stage::Depth || stage == Stage::Shadow;
         const bool capture = stage == Stage::Capture;
         D3D_SHADER_MACRO captureDefines[] = { { "GRASS_CAPTURE", "1" }, { nullptr, nullptr } };
-        auto vs = compiler.CompileShader(_resources->Device, SHADERS_FOLDER "GrassRender.hlsl", capture ? captureDefines : nullptr,
+        auto vs = compiler.CompileShader(_resources->Device, APP_SHADERS_FOLDER "GrassRender.hlsl", capture ? captureDefines : nullptr,
             depth ? "DepthVS" : "VS", "vs");
-        auto ps = compiler.CompileShader(_resources->Device, SHADERS_FOLDER "GrassRender.hlsl", capture ? captureDefines : nullptr,
+        auto ps = compiler.CompileShader(_resources->Device, APP_SHADERS_FOLDER "GrassRender.hlsl", capture ? captureDefines : nullptr,
             depth ? "DepthPS" : (capture ? "CapturePS" : (stage == Stage::PrepassNormals ? "PrepassPS" : "PS")), "ps");
         D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
         desc.pRootSignature = _graphicsRoot->GetRootSignature().Get();

@@ -6,7 +6,6 @@
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12Material.h"
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
-#include "Engine.RendererDX12/GDX12GrassRenderer.h"
 #include "Engine.RendererDX12/GDX12Particles.h"
 #include "Engine.RendererDX12/GDX12Fluid.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
@@ -14,6 +13,9 @@
 
 class GDX12Device;
 class GameTimer;
+class GDX12RenderExtension;
+class GDX12RenderGraphBuilder;
+struct GDX12GeometryContext;
 
 class GDX12DeviceResources
 {
@@ -39,7 +41,11 @@ public:
     std::unordered_map <std::string, ComPtr<ID3D12CommandSignature>> CommandSignatures;
     std::unordered_map<std::string, std::unique_ptr<GDX12Texture>> Textures;
 
-    std::unique_ptr<GDX12GrassRenderer> Grass;
+    std::vector<GDX12RenderExtension*> RenderExtensions; // Borrowed from the pipeline owner.
+    uint64_t GeometryRevision = 0;
+    bool HasExtensionCasters = false;
+    void DrawGeometry(GDX12CommandList* commands, const GDX12GeometryContext& context);
+    void DeclareGeometryResources(GDX12RenderGraphBuilder& graph) const;
     GDX12Device* Device;
     GDX12MainConstants Lighting;
     GDX12SkyState Sky;

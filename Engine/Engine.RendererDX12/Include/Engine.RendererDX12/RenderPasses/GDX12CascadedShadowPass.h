@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine.RendererDX12/GDX12RenderExtension.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <array>
@@ -11,6 +12,7 @@ public:
     {
         graph.SetName("Sun shadows");
         graph.Read(SharedResource::Scene);
+        if (_resources) _resources->DeclareGeometryResources(graph);
         graph.ReadInputs(_inputs);
         graph.Write(_outputs[0], "Sun shadows cache", Lifetime::Dynamic);
         graph.HasSideEffects();
@@ -111,8 +113,8 @@ public:
             commands->ResourceBarrier({ _atlas->GetResource()->GetSRVBarrier() });
             return;
         }
-        const uint64_t grassRevision = _resources->Grass ? _resources->Grass->Revision() : 0;
-        if ((lighting.SunShadowFlags & 2u) == 0u && _rendered && _cachedGrassRevision == grassRevision && _cachedRevision == lighting.SunShadowRevision &&
+        const uint64_t geometryRevision = _resources->GeometryRevision;
+        if ((lighting.SunShadowFlags & 2u) == 0u && _rendered && _cachedGeometryRevision == geometryRevision && _cachedRevision == lighting.SunShadowRevision &&
             std::memcmp(&_cachedSettings, &_resources->ShadowSettings, sizeof(_cachedSettings)) == 0) return;
         const UINT count = _resources->IndirectCommandsCache->GetElementCount();
         auto& visibility = _visibility[_resources->CurrFrameConstantsIndex];
@@ -169,7 +171,7 @@ public:
                 visibility.Commands[cascade]->GetResource().D3DResource.Get(), 0,
                 visibility.Counters->GetResource().D3DResource.Get(), cascade * sizeof(UINT));
         }
-        if (_resources->Grass && _resources->Grass->HasCasters())
+        if (_resources->HasExtensionCasters)
         {
             for (UINT cascade = 0; cascade < 4; ++cascade)
             {
@@ -178,12 +180,12 @@ public:
                 commands->SetViewport({ static_cast<float>(x), static_cast<float>(y), 2048, 2048, 0, 1 });
                 commands->SetScissorRect({ static_cast<LONG>(x), static_cast<LONG>(y), static_cast<LONG>(x + 2048), static_cast<LONG>(y + 2048) });
                 commands->SetRenderTargets({}, _atlas.get());
-                _resources->Grass->Draw(commands, GDX12GrassRenderer::Stage::Shadow,
+                _resources->DrawGeometry(commands, { GDX12GeometryStage::Shadow,
                     Matrix(_resources->ShadowSettings.ViewProj[cascade]).Transpose(),
-                    _commonData->CameraView.Invert().Translation(), 0);
+                    _commonData->CameraView.Invert().Translation(), 0 });
             }
         }
-        _cachedGrassRevision = grassRevision;
+        _cachedGeometryRevision = geometryRevision;
         commands->ResourceBarrier({ _atlas->GetResource()->GetSRVBarrier() });
         _rendered = true;
         _cachedSettings = _resources->ShadowSettings;
@@ -223,7 +225,7 @@ private:
     ComPtr<ID3D12PipelineState> _shadowPSO, _cullingPSO, _clearPSO;
     ComPtr<ID3D12CommandSignature> _signature;
     GDX12ShadowConstants _cachedSettings;
-    uint64_t _cachedGrassRevision = 0;
+    uint64_t _cachedGeometryRevision = 0;
     UINT _cachedRevision = 0;
     bool _rendered = false;
 };

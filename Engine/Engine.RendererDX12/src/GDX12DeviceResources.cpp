@@ -1,3 +1,4 @@
+#include "Engine.RendererDX12/GDX12RenderExtension.h"
 #include "Engine.RendererDX12/GDX12DeviceResources.h"
 
 #include "Common/ConsoleVariables.h"
@@ -181,4 +182,14 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
             numFramesDirty--;
         }
     }
+}
+
+void GDX12DeviceResources::DrawGeometry(GDX12CommandList* commands, const GDX12GeometryContext& context)
+{
+    for (auto* extension : RenderExtensions) extension->DrawGeometry(commands, context);
+}
+
+void GDX12DeviceResources::DeclareGeometryResources(GDX12RenderGraphBuilder& graph) const
+{
+    for (auto* extension : RenderExtensions) extension->DeclareGeometryResources(graph);
 }

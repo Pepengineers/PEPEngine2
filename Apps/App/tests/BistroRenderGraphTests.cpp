@@ -1,3 +1,4 @@
+#include "Rendering/Grass/BistroGrassRenderExtension.h"
 #include "App.Base/App.h"
 #include "../src/BistroScene.h"
 #include <d3d12sdklayers.h>
@@ -147,8 +148,10 @@ public:
 protected:
     bool AddModules() override
     {
-        Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer));
+        auto renderer = std::make_shared<RenderModule>(GetWindow(), &Timer);
+        Locator.RegisterModule(renderer);
         auto scenes = std::make_shared<SceneManagerModule>(std::filesystem::path(ASSETS_FOLDER) / "Scenes/Amazon Lumberyard Bistro");
+        renderer->RegisterRenderExtension(std::make_unique<BistroGrassRenderExtension>(scenes, *renderer));
         ConfigureBistroProps(*scenes);
         Locator.RegisterModule(scenes);
         return BenchmarkEngine::AddModules();

@@ -24,6 +24,7 @@ struct GPUTexture
 class GDX12Material
 {
 public:
+    uint64_t GetRevision() const { return _revision; }
 	std::string Name;
 
 	GPUTexture* Diffuse;

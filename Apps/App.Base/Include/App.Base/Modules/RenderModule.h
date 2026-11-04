@@ -61,6 +61,7 @@ public:
     const GDX12ReconstructionStatus& GetReconstructionStatus() const;
     const GDX12FrameGenerationStatus& GetFrameGenerationStatus() const;
 
+    bool OwnsMaterial(const GDX12Material* material) const;
     GDX12Material* GetMaterialByName(const std::string& name);
 
     //returns a pointer to a fully initialized structure that you can specify in components
@@ -100,10 +101,6 @@ public:
         ListenerHandle RenderCompCreated = 0;
         ListenerHandle RenderCompDestroyed = 0;
         ListenerHandle RenderCompUpdated = 0;
-        ListenerHandle GrassCreated = 0;
-        ListenerHandle GrassUpdated = 0;
-        ListenerHandle WindCreated = 0;
-        ListenerHandle WindUpdated = 0;
         ListenerHandle SkeletalDestroyed = 0;
         ListenerHandle SkeletalUpdated = 0;
     };
@@ -194,7 +191,6 @@ private:
     void BuildBackBuffer();
     void CollectReflectionScene();
     ShadowVisibilitySystem _shadowVisibility;
-    void CollectGrassScene(GDX12CommandList* commands);
     void CollectParticleEmitters();
     void ShareFences();
     template<class T, class... Args> T* CreateRenderPass(Args&&... args)
@@ -274,7 +270,6 @@ private:
     uint32_t _secondaryPipelineFlags;
     World* _skyWorld = nullptr;
     uint64_t _skyHash = 0;
-    uint64_t _grassWindOwner = 0;
     uint64_t _reflectionStaticHash = 0;
     uint64_t _reflectionDynamicHash = 0;
     UINT _instanceCount = 0;
