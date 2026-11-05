@@ -4,6 +4,12 @@
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 
+extern "C"
+{
+    __declspec(dllexport) extern const UINT D3D12SDKVersion = 619;
+    __declspec(dllexport) extern const char* D3D12SDKPath = ".\\D3D12\\";
+}
+
 GDX12Device::GDX12Device() :
     _isInitialized(false),
     _rtvDescriptorSize(0),

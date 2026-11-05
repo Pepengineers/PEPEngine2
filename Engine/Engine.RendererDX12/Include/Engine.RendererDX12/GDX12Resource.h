@@ -26,6 +26,11 @@ public:
     CD3DX12_RESOURCE_BARRIER GetIndirectArgsBarrier();
     CD3DX12_RESOURCE_BARRIER GetUAVBarrier();
     CD3DX12_RESOURCE_BARRIER GetSRVBarrier();
+    CD3DX12_RESOURCE_BARRIER GetTransitionBarrier(D3D12_RESOURCE_STATES state);
+
+    // Keep the DIRECT-published read union immutable until the COMPUTE join.
+    void BeginConcurrentRead();
+    void EndConcurrentRead() { _concurrentRead = false; }
 
     void SetCurrentState(D3D12_RESOURCE_STATES newState);
     D3D12_RESOURCE_STATES GetCurrentState();
@@ -38,4 +43,5 @@ public:
 
 private:
 	D3D12_RESOURCE_STATES _currentState;
+    bool _concurrentRead = false;
 };

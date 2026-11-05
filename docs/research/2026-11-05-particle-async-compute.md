@@ -1,12 +1,12 @@
 # Particle Async Compute: первая реализация
 
-Дата: 2026-11-05. Первичная реализация и исходные измерения относятся к `4b5097e` поверх `e173c28`, direct-разделение принято на `9411599`. Повторная GBV-проверка после исправления SSSR описана отдельно ниже.
+Дата: 2026-11-05. Первичная реализация и исходные измерения относятся к `4b5097e` поверх `e173c28`, direct-разделение принято на `9411599`. Повторная GBV-проверка после исправления SSSR и последующий shared-depth путь описаны отдельно ниже. Исходные A/B samples и captures относятся к первоначальному conservative join.
 
 `Render.Particles.AsyncCompute=false` остаётся значением по умолчанию. При ручном включении только simulation выполняется на COMPUTE; initialization/reset до графа и поздние cull/sort/draw/composite остаются на DIRECT. Неудачная инициализация COMPUTE и dual-GPU режим сохраняют DIRECT scheduling. Shader path, controls и текущая opaque prepass depth для collision сохранены.
 
-## Уточнение исходного плана
+## Первичный консервативный путь (`4b5097e`)
 
-Из [плана](../tasks/async-compute-rollout.md) реализованы particle-only очередь, physical buffer accesses, GPU fork/join, retirement, fallback, diagnostics и A/B harness. Совместное чтение одной depth texture из GBuffer и COMPUTE **отложено**. Итоговая схема консервативно держит texture ownership на одной очереди до join:
+В `4b5097e` из [плана](../tasks/async-compute-rollout.md) реализованы particle-only очередь, physical buffer accesses, GPU fork/join, retirement, fallback, diagnostics и A/B harness. Совместное чтение одной depth texture из GBuffer и COMPUTE тогда было **отложено**. Первичная схема консервативно держала texture ownership на одной очереди до join:
 
 1. DIRECT выполняет `InitializePools`, полный opaque depth prepass и переход depth в `NON_PIXEL_SHADER_RESOURCE`; persistent particle buffers выпускаются через COMMON.
 2. COMPUTE ждёт fence DIRECT, выполняет prepare/simulate/spawn/publish, выпускает buffers через COMMON и сигналит собственный fence.
@@ -52,6 +52,43 @@ Pinned SDK задавал SPD counter как buffer размером 1 byte, str
 Один повтор был прерван до окончания и не считается приёмкой. Финальная XeSS GBV-стадия заняла несколько минут; stack snapshot активного CPU worker показал `nvgpucomp64`/`nvwgf2umx` (NVIDIA shader compilation). Окно в этот момент может не отвечать, поэтому отсутствие UI response само по себе не означает зависание GPU fence.
 
 Логи follow-up: `Build/sssr-stride-red-build.log`, `Build/sssr-stride-red.log`, `Build/sssr-stride-fix-build.log`, `Build/sssr-stride-green-gbv.log`, `Build/sssr-stride-bistro-rebuild.log`, **`Build/sssr-stride-bistro-gbv-complete.log`**. `Build/sssr-stride-bistro-gbv.log` относится к прерванному повтору. Обычный SSR test раньше не включал GBV, поэтому buffer/shader stride mismatch оставался незамеченным. A/B samples и captures ниже сняты до этого SDK patch и в follow-up не переснимались.
+
+## Совместное чтение depth: follow-up 2026-11-05
+
+Этот раздел заменяет ограничение exclusive-depth пути выше. DIRECT публикует после prepass `DEPTH_READ | PIXEL_SHADER_RESOURCE | NON_PIXEL_SHADER_RESOURCE`; COMPUTE не меняет depth state. На время ветки `BeginConcurrentRead` сохраняет опубликованное объединение во всех resource helpers и отклоняет запись, UAV barrier, release в COMMON и стороннюю смену состояния. После GPU join ограничение снимается. Совместное чтение разрешено для явных read-accesses того же physical state owner; writer, unmanaged access, несовместимый state или другой state owner требуют join. Буферные hazards, whole-graph texture lifetimes, exception drain и final DIRECT retirement сохранены.
+
+GBuffer использует read-only DSV и `DEPTH_READ`, включая grass EQUAL/no-write. View пересоздаётся после resize через существующий descriptor API. AO/CACAO и deferred lighting явно объявляют SRV reads и сохраняют общее состояние. В Bistro join сдвинут с GBuffer/early AO на **`Reflection probe meshes`**, первый объявленный depth writer после GBuffer, AO и lighting. Cull/sort/draw и остальные техники остаются DIRECT; новых GPU-копий, CPU waits и задержки на кадр нет. `Render.Particles.AsyncCompute=false` и DIRECT fallback не менялись.
+
+### Runtime и воспроизводимость
+
+Системный `D3D12Core.dll` **10.0.26100.9549** давал `Non-simultaneous-access Texture Resource ... read|write|transition_barrier` и на native fixture без graph, pooling, timer и recycling. Создание новых command lists внутри каждого кадра часто скрывало конфликт за CPU-задержкой. После предварительного создания всех списков ошибка воспроизводилась в 400 queued frames и с legacy read union, и с Enhanced Barriers. Поэтому ранние нулевые результаты медленного repro не доказывали корректность overlap.
+
+Тот же native prepared-list repro с **Agility SDK 1.619.6** завершился без ошибок и с правильными меняющимися данными в обоих readback buffers. Разница связана с версией runtime/debug layer; причину в GPU driver этот опыт не устанавливает. Новая реализация использует обычные legacy barriers и read-state union, без нового Enhanced Barriers API. Synchronized command queue validation сохраняет стандартное включённое состояние.
+
+[Подготовка Agility](../../External/AgilitySDK/README.md) закреплена в публичных renderer MSBuild props: SHA256-проверенный NuGet archive в `Build/Dependencies`, version export **619**, runtime/debug layer/state-object compiler/license в `D3D12` рядом с каждым EXE. Этот каталог нужен и для поставки приложения с DIRECT по умолчанию. Установка системного runtime не меняется. Для первого скачивания нужен интернет; проверены свежая распаковка и повторная подготовка через Windows PowerShell, deployment x64 и Win32.
+
+Новый runtime сообщает SM 6.9, а комплектный DXC **1.8.2505.32** создаёт для этого target preview shader. Red particle run остановился на `CreateComputePipelineState` с unsigned/preview shader. Engine target ограничен retail **SM 6.8**, как на прежнем системном runtime; compiler и shader algorithm не обновлялись.
+
+Диагностика: `Build/depth-share-probe-prepared-1050612.log` — старый runtime, 400 frames, ownership errors при правильных readbacks; `Build/depth-share-probe-agility619-{1048832,1050612,1048584}.log` — prepared-list color/depth variants, errors=0 и bad_readbacks=0. Первые эксперименты с Agility 1.620.1 не являются выбранной зависимостью: 1.619.6 устраняет исходную проблему без миграции feature-query API.
+
+### Проверки финального shared-depth пути
+
+Финальные проверки Release/x64 выполнены с Agility 1.619.6; логи используют префикс `Build/depth-share-619-`.
+
+| Проверка | Результат |
+| --- | --- |
+| RendererDX12, App.Base, App, RenderGraphTests, SecondGroupTests, BistroRenderGraphTests, SSRTests | Сборки успешны; тот же локальный `/Z7 /GL-` и `ParticleSplit.targets` workaround |
+| RenderGraphTests: native / Streamline, с GBV и без GBV | Exit 0; 400 меняющихся кадров, оба readback buffers, guard против сужения/записи/release, writer/unmanaged joins, fallback, retirement и clean debug layer |
+| SecondGroupTests: CPU, DIRECT, async, DIRECT GBV, async GBV | Все пять вариантов exit 0; queued toggles, hidden simulation, expiry/refill, collision, controls и frame slots сохранены |
+| SSRTests --gpu-validation | Exit 0, строгая проверка warnings/errors; SDK hits/HDR/fallback/history/resize/jitter/motion/frame slots прошли |
+| BistroRenderGraphTests | Exit 0; 18 HDR cases, восемь активных AO cases, odd resize и Native→XeSS |
+| **BistroRenderGraphTests --gpu-validation** | **Exit 0**; те же 18 HDR cases и восемь active AO cases, все эффекты, odd resize и Native→XeSS с async, без D3D12/GBV errors |
+
+В обеих Bistro-проверках HDR identity проверяется при pooling off/on/off и DIRECT/async/DIRECT в обеих AO placements. SSAO/HBAO/XeGTAO/CACAO дополнительно исполняются по четыре кадра в каждой позиции с активным async и проверкой join перед `Reflection probe meshes`. HDR byte-identity не заявляется для этих восьми дополнительных AO cases. Заключительный GBV запущен в 03:16:34 и завершён в 03:27:10 по Москве. Медленная XeSS-стадия вновь показала активный NVIDIA shader compiler в stack snapshot (`Build/depth-share-xess-stacks.log`); процесс завершился самостоятельно.
+
+Code review: targeted manual due to unrelated branch work. Проверены state-owner lifetime, совпадение деклараций и локальных barriers, read-only DSV при resize, fallback/default, runtime deployment и SM 6.8. Task-scoped `git diff --check` чистый. Параллельные physics/Bistro правки не входят в этот follow-up.
+
+Свежие A/B timings и GPU captures для расширенного окна не снимались; ускорение не установлено. Другие GPU/драйверы, Win32 GPU execution, реальный dual-GPU, принудительный отказ создания COMPUTE, все SR/FG providers и длительный soak остаются непроверенными.
 
 ## A/B timing
 

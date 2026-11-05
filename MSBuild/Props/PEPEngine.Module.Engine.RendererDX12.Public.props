@@ -10,4 +10,8 @@
       <AdditionalIncludeDirectories>$(PEPRepoRoot)Engine\Engine.RendererDX12\Include;$(PEPExternalPixInclude);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
+  <Target Name="PrepareAgilitySDK" BeforeTargets="PrepareForBuild"
+          Condition="'$(ConfigurationType)'=='Application'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(PEPRepoRoot)tools\Prepare-AgilitySDK.ps1&quot; -Destination &quot;$(TargetDir)D3D12&quot; -Architecture $(Platform)" />
+  </Target>
 </Project>

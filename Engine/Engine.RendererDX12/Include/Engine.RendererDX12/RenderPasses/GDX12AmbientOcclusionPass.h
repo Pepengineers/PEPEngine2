@@ -13,7 +13,7 @@ public:
     {
         graph.SetName("Ambient occlusion");
         graph.Read(SharedResource::Scene);
-        graph.ReadInputs(_inputs);
+        graph.ReadInputs(_inputs, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
         graph.Write(_outputs[0], "Ambient occlusion", Lifetime::Dynamic);
     }
 

@@ -1,4 +1,5 @@
 #include "Engine.RendererDX12/GDX12Resource.h"
+#include <stdexcept>
 
 GDX12Resource::GDX12Resource() : _currentState(D3D12_RESOURCE_STATE_COMMON)
 {
@@ -7,132 +8,112 @@ GDX12Resource::GDX12Resource() : _currentState(D3D12_RESOURCE_STATE_COMMON)
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetRenderTargetBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_RENDER_TARGET);
-	_currentState = D3D12_RESOURCE_STATE_RENDER_TARGET;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_RENDER_TARGET);
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetPixelShaderResourceBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-	_currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetNonPixelShaderResourceBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-	_currentState = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetUnorderedAccessBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-	_currentState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetCopyDestBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_COPY_DEST);
-	_currentState = D3D12_RESOURCE_STATE_COPY_DEST;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_COPY_DEST);
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetCopySourceBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_COPY_SOURCE);
-	_currentState = D3D12_RESOURCE_STATE_COPY_SOURCE;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_COPY_SOURCE);
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetDepthWriteBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-	_currentState = D3D12_RESOURCE_STATE_DEPTH_WRITE;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_DEPTH_WRITE);
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetDepthReadBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_DEPTH_READ);
-	_currentState = D3D12_RESOURCE_STATE_DEPTH_READ;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_DEPTH_READ);
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetResolveSourceBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
-	_currentState = D3D12_RESOURCE_STATE_RESOLVE_SOURCE;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_RESOLVE_SOURCE);
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetResolveDestBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_RESOLVE_DEST);
-	_currentState = D3D12_RESOURCE_STATE_RESOLVE_DEST;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_RESOLVE_DEST);
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetGenericReadBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_GENERIC_READ);
-	_currentState = D3D12_RESOURCE_STATE_GENERIC_READ;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_GENERIC_READ);
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetCommonBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_COMMON);
-	_currentState = D3D12_RESOURCE_STATE_COMMON;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_COMMON);
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetPresentBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_PRESENT);
-	_currentState = D3D12_RESOURCE_STATE_PRESENT;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_PRESENT);
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetIndirectArgsBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
-	_currentState = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetUAVBarrier()
 {
+	if (_concurrentRead) throw std::logic_error("UAV barrier during concurrent texture reads");
 	auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(D3DResource.Get());
 	return barrier;
 }
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetSRVBarrier()
 {
-	auto transition = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(),
-		_currentState, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-	_currentState = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-	return transition;
+	return GetTransitionBarrier(D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+}
+
+CD3DX12_RESOURCE_BARRIER GDX12Resource::GetTransitionBarrier(D3D12_RESOURCE_STATES state)
+{
+    if (_concurrentRead)
+    {
+        if (state == D3D12_RESOURCE_STATE_COMMON || (state & _currentState) != state)
+            throw std::logic_error("Concurrent texture reader attempted to change its published state");
+        state = _currentState;
+    }
+    auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(), _currentState, state);
+    _currentState = state;
+    return barrier;
+}
+
+void GDX12Resource::BeginConcurrentRead()
+{
+    constexpr auto readStates = D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE |
+        D3D12_RESOURCE_STATE_COPY_SOURCE;
+    if (_concurrentRead || _currentState == D3D12_RESOURCE_STATE_COMMON || (_currentState & ~readStates))
+        throw std::logic_error("Concurrent texture access requires a published read-only state");
+    _concurrentRead = true;
 }
 
 void GDX12Resource::SetCurrentState(const D3D12_RESOURCE_STATES newState)
 {
+	if (_concurrentRead && newState != _currentState)
+        throw std::logic_error("Concurrent texture state changed outside its queue join");
 	_currentState = newState;
 }
 
@@ -145,9 +126,11 @@ void GDX12Resource::Reset()
 {
 	D3DResource.Reset();
 	_currentState = D3D12_RESOURCE_STATE_COMMON;
+    _concurrentRead = false;
 }
 
 void GDX12Resource::ResetState()
 {
 	_currentState = D3D12_RESOURCE_STATE_COMMON;
+    _concurrentRead = false;
 }

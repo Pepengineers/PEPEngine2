@@ -42,6 +42,7 @@ public:
         : TestPass(name, {{ resource, Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET }}), Texture(texture), Color(color) {}
     void Execute(GDX12CommandList* commands) override
     { commands->GetCommandList()->ClearRenderTargetView(Texture.GetRTV()->CPUHandle, Color.data(), 0, nullptr); }
+    void SetRed(float red) { Color[0] = red; }
 private:
     GDX12Texture& Texture;
     std::array<float, 4> Color;
@@ -56,10 +57,12 @@ public:
           Texture(texture), Readback(readback), Footprint(footprint) {}
     void Execute(GDX12CommandList* commands) override
     {
+        commands->ResourceBarrier({ Texture.GetResource()->GetCopySourceBarrier() });
         CD3DX12_TEXTURE_COPY_LOCATION source(Texture.GetResource()->D3DResource.Get(), 0);
         CD3DX12_TEXTURE_COPY_LOCATION destination(Readback, Footprint);
         commands->GetCommandList()->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
     }
+    void SetOffset(UINT64 offset) { Footprint.Offset = offset; }
 private:
     GDX12Texture& Texture;
     ID3D12Resource* Readback;
@@ -68,6 +71,22 @@ private:
 
 static void TestCompiler()
 {
+    GDX12Resource states;
+    const auto readUnion = D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
+    states.SetCurrentState(readUnion);
+    states.BeginConcurrentRead();
+    states.GetDepthReadBarrier();
+    states.GetNonPixelShaderResourceBarrier();
+    states.GetSRVBarrier();
+    Require(states.GetCurrentState() == readUnion, "Concurrent reader narrowed the published union");
+    Reject([&] { states.GetDepthWriteBarrier(); }, "Concurrent texture writer accepted");
+    Reject([&] { states.GetCommonBarrier(); }, "Concurrent texture layout release accepted");
+    Reject([&] { states.SetCurrentState(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE); }, "Concurrent state override accepted");
+    Reject([&] { states.GetUAVBarrier(); }, "Concurrent UAV barrier accepted");
+    states.EndConcurrentRead();
+    states.GetDepthWriteBarrier();
+    Require(states.GetCurrentState() == D3D12_RESOURCE_STATE_DEPTH_WRITE, "Join did not release the published state");
+
     Graph graph;
     const auto input = graph.Import("input"), temporary = graph.Create("temporary"), dead = graph.Create("unused");
     const auto output = graph.Import("present");
@@ -255,12 +274,14 @@ static void TestAsyncTexture(GDX12Device& device)
     resources.Initialize(&device);
     GDX12Texture texture;
     GDX12RenderHelpers::InitializeRenderTarget(texture, resources, 256, 256, DXGI_FORMAT_R8G8B8A8_UNORM);
+    texture.GetResource()->D3DResource->SetName(L"Concurrent graph texture");
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
     UINT64 size;
     const auto desc = texture.GetResource()->D3DResource->GetDesc();
     device.GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nullptr, nullptr, &size);
-    auto readback = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(size), D3D12_RESOURCE_STATE_COPY_DEST);
-    auto graphicsReadback = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(size), D3D12_RESOURCE_STATE_COPY_DEST);
+    constexpr UINT frames = 400;
+    auto readback = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(size * frames), D3D12_RESOURCE_STATE_COPY_DEST);
+    auto graphicsReadback = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(size * frames), D3D12_RESOURCE_STATE_COPY_DEST);
     Graph graph(&device);
     const auto input = graph.Create("Shared async texture", &texture, true), output = graph.Import("Readback");
     ClearPass clear("Texture producer", input, texture, {1,0,0,1});
@@ -269,18 +290,41 @@ static void TestAsyncTexture(GDX12Device& device)
     copy.Async = true;
     graph.AddPass(clear); graph.AddPass(copy); graph.AddPass(graphicsCopy); graph.Compile();
     auto* queue = device.GetCommandQueue();
-    for (UINT frame = 0; frame < 400; ++frame)
+    for (UINT frame = 0; frame < frames; ++frame)
     {
+        clear.SetRed(float(frame % 251) / 255);
+        copy.SetOffset(frame * size);
+        graphicsCopy.SetOffset(frame * size);
         auto* commands = graph.Execute(queue->GetCommandList(), device.TryGetComputeQueue());
         queue->ExecuteCommandList(commands);
+        Require(texture.GetResource()->GetCurrentState() ==
+            (D3D12_RESOURCE_STATE_COPY_SOURCE | D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE), "Shared texture union was not published");
     }
     queue->Flush();
-    BYTE* pixels;
-    ThrowIfFailed(readback->Map(0, nullptr, reinterpret_cast<void**>(&pixels)));
-    Require(pixels[0] == 255 && pixels[1] == 0 && pixels[2] == 0, "Async texture handoff lost producer contents");
-    readback->Unmap(0, nullptr);
-    Require(graph.GetStatistics().JoinBefore == "Concurrent DIRECT texture reader", "Shared texture reader did not join its owner");
-    std::cout << "Async texture handoff and cross-frame retirement passed.\n";
+    for (auto* buffer : { readback.Get(), graphicsReadback.Get() })
+    {
+        BYTE* pixels;
+        ThrowIfFailed(buffer->Map(0, nullptr, reinterpret_cast<void**>(&pixels)));
+        for (UINT frame = 0; frame < frames; ++frame)
+            Require(pixels[frame * size] == frame % 251 && pixels[frame * size + 1] == 0,
+                "Concurrent texture reader observed stale producer contents");
+        buffer->Unmap(0, nullptr);
+    }
+    Require(graph.GetStatistics().JoinBefore == "frame retirement", "Shared texture reader joined its owner early");
+    for (bool unmanaged : { false, true })
+    {
+        Graph guarded(&device);
+        const auto shared = guarded.Import("Shared texture", &texture);
+        TestPass asyncRead("Async guarded reader", {{ shared, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE }}, true);
+        asyncRead.Async = true;
+        TestPass hazard("Texture hazard", {{ shared, unmanaged ? Mode::Read : Mode::Write,
+            unmanaged ? Graph::UnmanagedState : D3D12_RESOURCE_STATE_RENDER_TARGET }}, true);
+        guarded.AddPass(asyncRead); guarded.AddPass(hazard); guarded.Compile();
+        queue->ExecuteCommandList(guarded.Execute(queue->GetCommandList(), device.TryGetComputeQueue()));
+        queue->Flush();
+        Require(guarded.GetStatistics().JoinBefore == "Texture hazard", "Writer or unmanaged state escaped the queue join");
+    }
+    std::cout << "Concurrent texture readers: 400 changing frames, both readbacks, writer/unmanaged joins passed.\n";
 }
 
 static void TestAsyncQueues(GDX12Device& device)
@@ -348,8 +392,17 @@ int main(int argc, char** argv)
         ComPtr<ID3D12Debug> debug;
         ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
         debug->EnableDebugLayer();
-        if (argc > 1 && std::string_view(argv[1]) == "--streamline")
-            Require(GDX12StreamlineSDK::Get().Initialize(), "Streamline initialization unavailable for fixture");
+        bool streamline = false;
+        for (int i = 1; i < argc; ++i)
+            if (std::string_view(argv[i]) == "--gpu-validation")
+            {
+                ComPtr<ID3D12Debug1> gbv;
+                ThrowIfFailed(debug.As(&gbv));
+                gbv->SetEnableGPUBasedValidation(TRUE);
+            }
+            else if (std::string_view(argv[i]) == "--streamline")
+                streamline = true;
+        if (streamline) Require(GDX12StreamlineSDK::Get().Initialize(), "Streamline initialization unavailable for fixture");
         GDX12Device device;
         ThrowIfFailed(device.Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
         ComPtr<ID3D12InfoQueue> info;

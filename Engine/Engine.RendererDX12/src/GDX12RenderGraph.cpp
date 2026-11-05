@@ -388,6 +388,7 @@ GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12Com
         _statistics.JoinBefore = before;
         pending = UINT_MAX;
         pendingBuffers.clear();
+        for (auto* texture : ownedTextures) texture->EndConcurrentRead();
         ownedTextures.clear();
     };
     try
@@ -409,8 +410,10 @@ GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12Com
             for (const auto& access : node.Accesses)
                 if (auto* texture = textureFor(access))
                     for (auto* shared : ownedTextures)
-                        // Legacy texture ownership stays exclusive through the COMPUTE fence.
-                        needsJoin |= texture->GetResource()->D3DResource.Get() == shared->D3DResource.Get();
+                        needsJoin |= texture->GetResource()->D3DResource.Get() == shared->D3DResource.Get() &&
+                            (texture->GetResource() != shared || access.Usage != Mode::Read ||
+                                access.State == UnmanagedState || access.State == D3D12_RESOURCE_STATE_COMMON ||
+                                (access.State & shared->GetCurrentState()) != access.State);
             if (needsJoin) join(node.Name);
             for (const auto& resource : _resources)
                 if (resource.Slot != UINT_MAX && resource.First == i)
@@ -424,8 +427,14 @@ GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12Com
                 auto* texture = textureFor(access);
                 if (!texture || access.State == UnmanagedState) continue;
                 auto* resource = texture->GetResource();
-                commands->ResourceBarrier({ CD3DX12_RESOURCE_BARRIER::Transition(resource->D3DResource.Get(), resource->GetCurrentState(), access.State) });
-                resource->GDX12Resource::SetCurrentState(access.State);
+                if (node.LastAsync)
+                {
+                    // Publish a shared read layout on DIRECT; neither reader may narrow it before join.
+                    access.State |= D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
+                    if (resource->D3DResource->GetDesc().Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)
+                        access.State |= D3D12_RESOURCE_STATE_DEPTH_READ;
+                }
+                commands->ResourceBarrier({ resource->GetTransitionBarrier(access.State) });
             }
             const auto record = [&](GDX12CommandList* list)
             {
@@ -438,7 +447,12 @@ GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12Com
                 {
                     if (access.Usage != Mode::Read || access.State == UnmanagedState)
                         throw std::logic_error("Async textures require an explicit read state: " + node.Name);
-                    ownedTextures.push_back(texture->GetResource());
+                    auto* resource = texture->GetResource();
+                    if (std::find(ownedTextures.begin(), ownedTextures.end(), resource) == ownedTextures.end())
+                    {
+                        resource->BeginConcurrentRead();
+                        ownedTextures.push_back(resource);
+                    }
                 }
             for (const auto& access : buffers)
                 commands->ResourceBarrier({ access.Resource->GetCommonBarrier() });
@@ -470,6 +484,7 @@ GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12Com
         {
             directQueue->Flush();
         }
+        for (auto* texture : ownedTextures) texture->EndConcurrentRead();
         throw;
     }
     return commands;

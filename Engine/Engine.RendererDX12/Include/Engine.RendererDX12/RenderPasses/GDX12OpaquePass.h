@@ -12,7 +12,7 @@ public:
         graph.SetName(_stage == Stage::DepthPrepass ? "Depth prepass" : "GBuffer");
         graph.Read(SharedResource::Scene);
         graph.Read(SharedResource::Visibility);
-        graph.ReadInputs(_inputs);
+        graph.ReadInputs(_inputs, D3D12_RESOURCE_STATE_DEPTH_READ);
         if (_stage != Stage::GBuffer)
             graph.Write(_outputs[2], "Opaque depth", Lifetime::Persistent);
         graph.Write(_outputs[3], _stage == Stage::DepthPrepass ? "Prepass normals" : "GBuffer normals");
@@ -87,6 +87,7 @@ public:
             desc.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
             CreateDepth(width, height);
         }
+        else UpdateReadOnlyDepth();
 
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
@@ -178,7 +179,8 @@ public:
         cmdList->ResourceBarrier({
             currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().GetIndirectArgsBarrier(),
             currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetIndirectArgsBarrier(),
-            depthStencil->GetResource()->GetDepthWriteBarrier() });
+            _stage == Stage::GBuffer ? depthStencil->GetResource()->GetDepthReadBarrier() :
+                depthStencil->GetResource()->GetDepthWriteBarrier() });
         if (_stage != Stage::GBuffer)
             cmdList->GetCommandList()->ClearDepthStencilView(depthStencil->GetDSV()->CPUHandle,
                 D3D12_CLEAR_FLAG_DEPTH, 0.0f, 0, 0, nullptr);
@@ -199,8 +201,11 @@ public:
                 _surfaceBuffers[0]->GetResource()->GetRenderTargetBarrier(),
                 _surfaceBuffers[1]->GetResource()->GetRenderTargetBarrier(),
                 _surfaceBuffers[2]->GetResource()->GetRenderTargetBarrier() });
-            cmdList->SetRenderTargets({ OUT_Accumulation.get(), OUT_VelocityBuffer.get(),
-                _surfaceBuffers[0].get(), _surfaceBuffers[1].get(), _surfaceBuffers[2].get() }, depthStencil);
+            const D3D12_CPU_DESCRIPTOR_HANDLE targets[] = { OUT_Accumulation->GetRTV()->CPUHandle,
+                OUT_VelocityBuffer->GetRTV()->CPUHandle, _surfaceBuffers[0]->GetRTV()->CPUHandle,
+                _surfaceBuffers[1]->GetRTV()->CPUHandle, _surfaceBuffers[2]->GetRTV()->CPUHandle };
+            const auto dsv = _stage == Stage::GBuffer ? _readOnlyDepth->CPUHandle : depthStencil->GetDSV()->CPUHandle;
+            cmdList->GetCommandList()->OMSetRenderTargets(5, targets, FALSE, &dsv);
             cmdList->ClearRenderTargetView(OUT_Accumulation.get());
             cmdList->ClearRenderTargetView(OUT_VelocityBuffer.get());
             for (auto& texture : _surfaceBuffers) cmdList->ClearRenderTargetView(texture.get());
@@ -231,6 +236,7 @@ public:
         for (auto& texture : _surfaceBuffers)
             if (_stage != Stage::DepthPrepass || texture == _surfaceBuffers[0]) texture->Resize(newWidth, newHeight);
         if (_stage != Stage::GBuffer) CreateDepth(newWidth, newHeight);
+        else UpdateReadOnlyDepth();
 	}
 
 	void ClearDenendencies() override
@@ -248,10 +254,23 @@ public:
 		_opaqueCS.Reset();
 		_opaquePSO.Reset();
         _depthOnlyPSO.Reset();
+        _readOnlyDepth.reset();
 	}
 
 private:
     Stage _stage;
+    void UpdateReadOnlyDepth()
+    {
+        D3D12_DEPTH_STENCIL_VIEW_DESC desc = {};
+        desc.Format = DXGI_FORMAT_D32_FLOAT;
+        desc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        desc.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH;
+        auto* heap = _resources->DSVHeap.get();
+        if (!_readOnlyDepth) _readOnlyDepth = std::make_unique<GDX12Descriptor>();
+        const UINT index = _readOnlyDepth->HeapIndex == UINT_MAX ? heap->GetAvailableIndex() : _readOnlyDepth->HeapIndex;
+        _readOnlyDepth->InitAsDSV(_outputs[2]->GetTexture()->GetResource()->D3DResource.Get(), &desc, heap, index);
+    }
+    std::unique_ptr<GDX12Descriptor> _readOnlyDepth;
 	void CreateDepth(UINT width, UINT height)
 	{
 		_depthDesc.Width = width;

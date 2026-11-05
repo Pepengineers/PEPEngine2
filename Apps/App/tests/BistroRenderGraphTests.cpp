@@ -137,13 +137,29 @@ public:
                     if (reuse && stats.PhysicalTextures >= stats.TransientTextures) throw std::runtime_error("Bistro graph did not reuse textures");
                     if (!reuse && stats.PhysicalTextures != stats.TransientTextures) throw std::runtime_error("Dedicated graph mode still shares textures");
                     if (stats.AsyncPasses != (async ? 1u : 0u)) throw std::runtime_error("Bistro particle queue selection failed");
+                    if (async && stats.JoinBefore != "Reflection probe meshes")
+                        throw std::runtime_error("Bistro joined before its first depth writer");
                     std::cout << "Bistro earlyAO=" << early << " reuse=" << reuse << " async=" << async << " textures="
-                        << stats.PhysicalTextures << '/' << stats.TransientTextures << " HDR readback identical" << std::endl;
+                        << stats.PhysicalTextures << '/' << stats.TransientTextures << " join=" << stats.JoinBefore
+                        << " HDR readback identical" << std::endl;
                 }
             }
         }
         Set(L"Render.Graph.ReuseTextures", "true");
         Set(L"Render.AO.Enabled", "1");
+        Set(L"Render.Particles.AsyncCompute", "true");
+        for (int early : { 0, 1 })
+            for (int implementation = 0; implementation < 4; ++implementation)
+            {
+                Set(L"Render.AO.ExecutionPoint", early ? "0" : "1");
+                Set(L"Render.AO.Implementation", std::to_string(implementation).c_str());
+                for (int frame = 0; frame < 4; ++frame) Frame();
+                render->WaitForUploads();
+                CheckMessages(*info.Get());
+                if (render->GetRenderGraphStatistics().JoinBefore != "Reflection probe meshes")
+                    throw std::runtime_error("Active AO joined its shared depth reader early");
+                std::cout << "Bistro shared depth: active AO=" << implementation << " early=" << early << " passed." << std::endl;
+            }
         Set(L"Render.SSR.Enabled", "true");
         Set(L"Render.DOF.Enabled", "true");
         Set(L"Render.MotionBlur.Enabled", "true");
