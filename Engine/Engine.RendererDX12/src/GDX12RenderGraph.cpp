@@ -427,6 +427,8 @@ GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12Com
                 auto* texture = textureFor(access);
                 if (!texture || access.State == UnmanagedState) continue;
                 auto* resource = texture->GetResource();
+                // COMMON releases prior write ownership before concurrent queue reads.
+                if (computeQueue && node.AsyncCompute) commands->ResourceBarrier({ resource->GetCommonBarrier() });
                 commands->ResourceBarrier({ CD3DX12_RESOURCE_BARRIER::Transition(resource->D3DResource.Get(), resource->GetCurrentState(), access.State) });
                 resource->GDX12Resource::SetCurrentState(access.State);
             }
