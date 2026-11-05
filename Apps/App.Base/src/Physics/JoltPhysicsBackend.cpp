@@ -62,10 +62,10 @@ namespace
             
             const auto isPositive = [](float value) { return std::isfinite(value) && value > 0.0f; }; // TODO move somewhere to helpers
             
-            const auto invalidShape = []()
+            const auto invalidShape = [](const char* message = "Invalid shape dimensions")
             {
                 JPH::Shape::ShapeResult result;
-                result.SetError("Invalid shape dimensions");
+                result.SetError(message);
                 return result;
             };
             
