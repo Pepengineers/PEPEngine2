@@ -21,8 +21,8 @@ TextureCube<float4> PrefilteredEnvironment : register(t5);
 Texture2D<float4> EnvironmentBRDF : register(t6);
 StructuredBuffer<LocalLight> LocalLights : register(t7);
 Texture2DArray<float> LocalShadowMaps : register(t8);
-Texture2D<float> WaterDepth : register(t14);
-Texture2D<float> OpaqueDepth : register(t15);
+Texture2D<float> SeparatorDepth : register(t14);
+Texture2D<float> SceneDepth : register(t15);
 Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t16);
 SamplerComparisonState samShadow : register(s6);
 
@@ -87,10 +87,10 @@ PSOutput ShadeTransparency(VS_OUTPUT_PS_INPUT pin, uint partition)
     if (partition != 0)
     {
         uint2 pixel = (uint2)pin.PosCS.xy;
-        float water = WaterDepth[pixel];
-        bool hasWater = water > OpaqueDepth[pixel];
-        bool front = hasWater && pin.PosCS.z > water;
-        if ((partition == 1 && front) || (partition == 2 && !front)) discard;
+        float separator = SeparatorDepth[pixel];
+        bool hasSeparator = separator > SceneDepth[pixel];
+        bool near = hasSeparator && pin.PosCS.z > separator;
+        if ((partition == 1 && near) || (partition == 2 && !near)) discard;
     }
     
     Material material = MaterialCache[pin.MaterialIndex];
@@ -110,5 +110,5 @@ PSOutput ShadeTransparency(VS_OUTPUT_PS_INPUT pin, uint partition)
 }
 
 PSOutput PS(VS_OUTPUT_PS_INPUT pin) { return ShadeTransparency(pin, 0); }
-PSOutput PSBehindWater(VS_OUTPUT_PS_INPUT pin) { return ShadeTransparency(pin, 1); }
-PSOutput PSFrontWater(VS_OUTPUT_PS_INPUT pin) { return ShadeTransparency(pin, 2); }
+PSOutput PSFar(VS_OUTPUT_PS_INPUT pin) { return ShadeTransparency(pin, 1); }
+PSOutput PSNear(VS_OUTPUT_PS_INPUT pin) { return ShadeTransparency(pin, 2); }

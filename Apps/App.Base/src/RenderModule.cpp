@@ -1031,7 +1031,6 @@ void RenderModule::CollectReflectionScene()
     for (const auto& light : resources.LocalLights) hash(staticHash, light);
     resources.ReflectionProbes.clear();
     resources.ReflectionPreviewDraws.clear();
-    resources.Fluids.clear();
     bool hasBounds = false;
     auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
     for (size_t worldIndex = 0; worldIndex < scenes->GetWorldCount(); ++worldIndex)
@@ -1078,20 +1077,6 @@ void RenderModule::CollectReflectionScene()
                 draw.BaseVertexLocation = submesh.StartVertexLocation;
                 resources.ReflectionPreviewDraws.push_back(draw);
             }
-        });
-        ecs.ForEach<FluidRenderComponent>([&](Entity entity, FluidRenderComponent& component)
-        {
-            if (!ecs.Has<TransformComponent>(entity)) return;
-            const auto& transform = ecs.Get<TransformComponent>(entity);
-            GDX12FluidInstance instance;
-            instance.Id = ((resources.ReflectionWorldRevision * 65599 + worldIndex) << 32) | entity;
-            instance.Component = component;
-            instance.ContainerToWorld = Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
-                XMConvertToRadians(transform.Rotation.y), XMConvertToRadians(transform.Rotation.x),
-                XMConvertToRadians(transform.Rotation.z)) * Matrix::CreateTranslation(transform.Location);
-            instance.DeltaSeconds = world->IsPaused() ? 0 : _timer->DeltaTime() * world->GetTimeScale();
-            ValidateFluidInstance(instance);
-            resources.Fluids.push_back(std::move(instance));
         });
         ecs.ForEach<ReflectionProbeComponent>([&](Entity entity, ReflectionProbeComponent& component)
         {

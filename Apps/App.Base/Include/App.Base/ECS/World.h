@@ -13,7 +13,6 @@
 #include "App.Base/ECS/Components/SkyBoxComponent.h"
 #include "App.Base/ECS/Components/SkyAtmosphereComponent.h"
 #include "App.Base/ECS/Components/ParticleEmitterComponent.h"
-#include "App.Base/ECS/Components/FluidRenderComponent.h"
 #include "App.Base/ECS/Components/NameComponent.h"
 #include "App.Base/ECS/Components/SplineCurveComponent.h"
 #include "App.Base/ECS/Components/SplineFollowComponent.h"
@@ -43,8 +42,7 @@ using WorldECS = ECSStorage<
     ReflectionProbeComponent,
     SkyBoxComponent,
     SkyAtmosphereComponent,
-    ParticleEmitterComponent,
-    FluidRenderComponent
+    ParticleEmitterComponent
 >;
 
 class World {

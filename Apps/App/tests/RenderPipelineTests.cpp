@@ -1,4 +1,5 @@
 #include "Rendering/Grass/BistroGrassGeometry.h"
+#include "Rendering/Water/BistroWaterRendering.h"
 #include "Rendering/BistroRenderPipeline.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Rendering/DefaultRenderPipeline.h"
@@ -7,6 +8,7 @@
 #include "PreparedShadowViewChecks.h"
 #include <iostream>
 #include <stdexcept>
+#include <sstream>
 
 static void Require(bool value, const char* message)
 {
@@ -157,6 +159,91 @@ static void TestAmbientOcclusionInputs()
         const std::vector<GDX12RenderGraph::Pass> expected = early ?
             std::vector<GDX12RenderGraph::Pass>{ 0, 1, 3 } : std::vector<GDX12RenderGraph::Pass>{ 0, 1, 2, 3 };
         Require(order == expected, "AO consumed normals from the wrong producer");
+    }
+}
+
+static void TestWaterLifetime()
+{
+    auto scenes = std::make_shared<SceneManagerModule>();
+    World first(WorldDesc{}), second(WorldDesc{});
+    {
+        BistroWaterRendering water(scenes);
+        scenes->OnWorldCreated.Broadcast(first);
+        scenes->OnWorldCreated.Broadcast(second);
+        auto create = [](World& world)
+        {
+            auto entity = world.GetECS().CreateEntity();
+            entity.AddComponent<TransformComponent>(Vector3(10, 20, 30));
+            entity.AddComponent<FluidRenderComponent>().SetParticles({ { Vector3::Zero, Vector3::Zero } });
+            return entity.GetId();
+        };
+        auto entity = create(first);
+        create(second);
+        first.SetTimeScale(0.5f);
+        second.SetPaused(true);
+        auto snapshots = water.CollectScene(0.2f);
+        Require(snapshots.size() == 2 && snapshots[0].DeltaSeconds == 0.1f && snapshots[1].DeltaSeconds == 0,
+            "Water extraction lost world pause/time scale or a world");
+        Require(snapshots[0].ContainerToWorld.Translation() == Vector3(10, 20, 30), "Water extraction lost the container transform");
+        const auto owner = snapshots[0].Id;
+        const auto author = snapshots[0].Component;
+        const auto seed = snapshots[0].Component.GetParticles();
+        auto& ecs = first.GetECS();
+        ecs.DestroyEntity(entity);
+        entity = create(first);
+        static_cast<GDX12FluidComponent&>(ecs.Get<FluidRenderComponent>(entity)) = author;
+        snapshots = water.CollectScene(0);
+        Require(snapshots[0].Id > owner && snapshots[0].Component.GetParticles() == seed && seed->size() == 1,
+            "Entity reuse inherited old water GPU identity or mutated an immutable snapshot");
+        const auto reusedOwner = snapshots[0].Id;
+        ecs.Add<FluidRenderComponent>(entity);
+        Require(ecs.Get<FluidRenderComponent>(entity)._renderOwner > reusedOwner,
+            "Component replacement retained old water GPU identity");
+        scenes->OnWorldDestroyed.Broadcast(first);
+        Require(water.CollectScene(0).size() == 1, "Removed world retained water snapshots");
+        Require(ecs.CreateEntity().AddComponent<FluidRenderComponent>()._renderOwner == 0,
+            "Removed world retained water listeners");
+    }
+    Require(second.GetECS().CreateEntity().AddComponent<FluidRenderComponent>()._renderOwner == 0 &&
+        scenes->OnWorldCreated.IsEmpty() && scenes->OnWorldDestroyed.IsEmpty(),
+        "Water owner destruction retained world listeners");
+}
+
+static void TestWaterGraphLinks()
+{
+    GDX12FluidSurfacePass surface;
+    GDX12FluidResolvePass resolve(&surface);
+    LinkedPass depth("Opaque depth"), motion("Opaque motion"), environment("Environment"), hdr("Behind HDR"), sink("Water consumer");
+    surface.SetInputs({ depth.GetOutput(0), motion.GetOutput(0) });
+    resolve.SetInputs({ hdr.GetOutput(0), environment.GetOutput(0) });
+    sink.SetInputs({ resolve.GetOutput(0), surface.GetOutput(1) });
+    sink.Export = true;
+    Require(!surface.GetOutput(2)->GetTexture() && !surface.GetOutput(3)->GetTexture() && resolve.GetNumInputs() == 2,
+        "Empty water eagerly allocated internal targets or made them lifecycle inputs");
+    for (UINT rebuild = 0; rebuild < 2; ++rebuild)
+    {
+        GDX12RenderGraph graph;
+        graph.ImportShared(GDX12RenderGraph::SharedResource::Scene, "Scene");
+        graph.ImportShared(GDX12RenderGraph::SharedResource::ReflectionProbes, "Reflection cache");
+        for (auto* pass : std::vector<GDX12RenderPass*>{ &depth, &motion, &environment, &hdr, &surface, &resolve, &sink }) graph.AddPass(*pass);
+        graph.Compile();
+        Require(graph.GetStatistics().Passes == 7 && graph.GetStatistics().CulledPasses == 0,
+            "Water internal/fallback reads lost an opaque producer or rebuild duplicated passes");
+    }
+    for (auto* omitted : { surface.GetOutput(2), surface.GetOutput(3) })
+    {
+        GDX12RenderGraph missing;
+        missing.ImportShared(GDX12RenderGraph::SharedResource::Scene, "Scene");
+        missing.ImportShared(GDX12RenderGraph::SharedResource::ReflectionProbes, "Reflection cache");
+        missing.ImportLink("HDR", hdr.GetOutput(0));
+        missing.ImportLink("Environment", environment.GetOutput(0));
+        missing.ImportLink("Opaque depth", depth.GetOutput(0));
+        missing.ImportLink("Selected depth", surface.GetOutput(0));
+        for (auto* internal : { surface.GetOutput(2), surface.GetOutput(3) })
+            if (internal != omitted) missing.ImportLink("Other internal texture", internal);
+        bool rejected = false;
+        try { missing.AddPass(resolve); } catch (const std::invalid_argument&) { rejected = true; }
+        Require(rejected, "Water resolve accepted an undeclared geometry/owner producer");
     }
 }
 
@@ -454,6 +541,8 @@ int main()
         TestApplicationComposition();
         TestAmbientOcclusionInputs();
         TestGeometryAndGrassLifetime();
+        TestWaterLifetime();
+        TestWaterGraphLinks();
         std::cout << "Render primitive/batch, pipeline composition, AO rebinding, rebuild and grass lifetime checks passed.\n";
         return 0;
     }

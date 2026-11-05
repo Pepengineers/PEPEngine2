@@ -22,7 +22,8 @@
 // Owns reusable techniques and their lifecycle; each pipeline chooses links and graph order.
 struct CommonRenderPasses
 {
-    explicit CommonRenderPasses(GDX12SwapChain*);
+    explicit CommonRenderPasses(GDX12SwapChain*,
+        GDX12WBOITTransparencyPass::DepthPartition = GDX12WBOITTransparencyPass::DepthPartition::All);
     ~CommonRenderPasses();
     void Setup(RenderPipelineContext&);
     void Initialize();

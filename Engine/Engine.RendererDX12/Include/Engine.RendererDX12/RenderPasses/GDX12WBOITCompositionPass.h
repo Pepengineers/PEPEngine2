@@ -21,6 +21,7 @@ public:
 
     void SetParticles(GDX12ParticlesPass* particles) { _particles = particles; }
     void SetApplyOpaqueAerialPerspective(bool apply) { _applyOpaqueAerialPerspective = apply; }
+    void SetConditionalTransparency(GDX12WBOITTransparencyPass* transparency) { _front = transparency; }
 	GDX12WBOITCompositionPass(GDX12WBOITCompositionPass* reuse = nullptr,
         GDX12WBOITTransparencyPass* front = nullptr) : IN_OpaqueScene(nullptr), IN_TransparencyAccum(nullptr),
 		IN_Revealage(nullptr), _reuse(reuse), _front(front), _applyOpaqueAerialPerspective(front == nullptr)

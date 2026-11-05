@@ -90,6 +90,17 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
+    <ClInclude Include="src\Rendering\Water\GDX12Fluid.h" />
+    <ClCompile Include="src\Rendering\Water\GDX12Fluid.cpp" />
+    <ClInclude Include="src\Rendering\Water\GDX12FluidPass.h" />
+    <ClCompile Include="src\Rendering\Water\GDX12FluidPass.cpp" />
+    <ClInclude Include="src\Rendering\Water\BistroWaterRendering.h" />
+    <ClCompile Include="src\Rendering\Water\BistroWaterRendering.cpp" />
+    <ClInclude Include="src\Components\FluidRenderComponent.h" />
+    <ClInclude Include="src\Components\BistroWaterComponents.h" />
+    <None Include="Shaders\FluidParameters.hlsli" />
+    <None Include="Shaders\FluidSolver.hlsl" />
+    <None Include="Shaders\FluidSurface.hlsl" />
     <ClCompile Include="src\Rendering\BistroRenderPipeline.cpp" />
     <ClInclude Include="src\Rendering\BistroRenderPipeline.h" />
     <ClInclude Include="src\Rendering\Grass\GDX12GrassWind.h" />

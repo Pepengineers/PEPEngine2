@@ -3,6 +3,7 @@
 #include "App.Base/Modules/SceneManagerModule.h"
 
 class BistroGrassGeometry;
+class BistroWaterRendering;
 
 class BistroRenderPipeline final : public IRenderPipeline
 {
@@ -22,6 +23,7 @@ private:
     std::vector<GDX12GeometryViewPass*> GeometryPasses();
     std::shared_ptr<SceneManagerModule> _scenes;
     std::unique_ptr<BistroGrassGeometry> _grass;
+    std::unique_ptr<BistroWaterRendering> _water;
     std::unique_ptr<CommonRenderPasses> _passes;
     RenderPipelineCommonData* _common = nullptr;
     bool _earlyAO = false;

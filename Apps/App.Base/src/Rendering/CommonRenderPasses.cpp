@@ -1,6 +1,7 @@
 #include "App.Base/Rendering/CommonRenderPasses.h"
 
-CommonRenderPasses::CommonRenderPasses(GDX12SwapChain* backBuffer) : FrameGeneration(backBuffer)
+CommonRenderPasses::CommonRenderPasses(GDX12SwapChain* backBuffer, GDX12WBOITTransparencyPass::DepthPartition partition)
+    : Transparency(partition), FrameGeneration(backBuffer)
 {
     Bindings.PrimaryPasses = { &Environment, &Culling, &Depth, &ParticleSimulation, &SunShadow,
         &LocalShadow, &Reflections, &Opaque, &AO, &Lighting, &ReflectionPreview, &SSR,

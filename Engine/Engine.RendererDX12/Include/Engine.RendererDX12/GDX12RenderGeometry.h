@@ -11,7 +11,7 @@ class IRenderGeometrySource;
 enum class GDX12GeometryStage : std::uint8_t
 { Depth, DepthNormals, GBuffer, Forward, Shadow, ReflectionCapture, Transparency };
 enum class GDX12GeometryFilter : std::uint8_t { All, Static, Dynamic };
-enum class GDX12GeometryDepthPartition : std::uint8_t { All, Behind, Front };
+enum class GDX12GeometryDepthPartition : std::uint8_t { All, Far, Near };
 
 struct GDX12CaptureLighting
 {

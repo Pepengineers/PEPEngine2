@@ -2,7 +2,7 @@
 #include "Rendering/Grass/GDX12GrassRenderer.h"
 #include "Engine.RendererDX12/GDX12Skinning.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12FluidPass.h"
+#include "Rendering/Water/GDX12FluidPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include <d3d12sdklayers.h>
@@ -24,6 +24,18 @@ static void Set(const wchar_t* name, const char* value)
     Require(BenchmarkEngine::GetLocator().GetModule<ConsoleModule>()->FindConsoleVariable(name).SetFromString(value), "CVar write failed");
 }
 class TestEngine final : public App { public: TestEngine() : App(GetModuleHandleW(nullptr)) {} };
+
+class WaterGraphOutput final : public GDX12RenderPass
+{
+public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Water output check");
+        graph.ReadInputs(_inputs);
+        graph.Export(_inputs[0]);
+        graph.HasSideEffects();
+    }
+};
 
 static std::vector<float> Read(GDX12Device& device, GDX12Texture& texture, UINT channel = 0)
 {
@@ -70,6 +82,7 @@ static std::vector<float> Read(GDX12Device& device, GDX12Texture& texture, UINT 
 
 #include "ParticlePlacementChecks.h"
 #include "ParticleSimulationControlsChecks.h"
+#include "WaterCompositionChecks.h"
 
 static void TestCPU()
 {
@@ -305,22 +318,63 @@ int main(int argc, char** argv)
         Set(L"Render.Fluid.Enabled", "true");
         Set(L"Render.Fluid.Quality", "2");
         GDX12FluidSurfacePass water; water.Setup(&resources, nullptr, &common); water.SetInputs({depth, motion}); water.Initialize();
-        execute(water); Require(water.GetOutput(0)->GetTexture() == depth, "Empty fluid must preserve depth identity");
+        GDX12FluidResolvePass waterResolve(&water);
+        waterResolve.Setup(&resources, nullptr, &common);
+        waterResolve.SetInputs({ hdr.get(), environment.GetOutput(1) });
+        waterResolve.Initialize();
+        WaterGraphOutput waterOutput;
+        waterOutput.SetInputs({ waterResolve.GetOutput(0), water.GetOutput(0), water.GetOutput(1) });
+        GDX12RenderGraph waterGraph(&device);
+        waterGraph.ImportShared(GDX12RenderGraph::SharedResource::Scene, "Water fixture scene");
+        waterGraph.ImportShared(GDX12RenderGraph::SharedResource::ReflectionProbes, "Water fixture probes");
+        for (auto* input : std::vector<IRenderPassLink*>{ depth, motion, hdr.get(), environment.GetOutput(1) })
+            waterGraph.ImportLink("Water fixture input", input);
+        waterGraph.AddPass(water); waterGraph.AddPass(waterResolve); waterGraph.AddPass(waterOutput); waterGraph.Compile(false);
+        const auto executeWater = [&]
+        {
+            water.PrepareFrame();
+            waterResolve.PrepareFrame();
+            auto* commands = waterGraph.Execute(queue->GetCommandList());
+            queue->ExecuteCommandList(commands); queue->Flush();
+        };
+        const auto requireWaterFallback = [&]
+        {
+            Require(water.GetOutput(0)->GetTexture() == depth && water.GetOutput(1)->GetTexture() == motion &&
+                waterResolve.GetOutput(0)->GetTexture() == hdr.get(), "Inactive water must preserve depth, motion and HDR identity");
+        };
+        executeWater(); requireWaterFallback();
         GDX12FluidInstance fluid; fluid.Id = 1; fluid.DeltaSeconds = 1.0f / 60;
         GDX12FluidSettings settings; settings.ParticleRadiusCm = 8; settings.SmoothingRadiusCm = 20;
         settings.AccelerationCmPerSecond2 = Vector3::Zero; settings.FilterIterations = 1; settings.FilterRadiusPixels = 2;
         fluid.Component.SetSettings(settings);
         fluid.Component.SetParticles({{{-5,20,0},{}},{{5,20,0},{}},{{0,25,5},{}},{{0,15,-5},{}}});
-        resources.Fluids = {fluid};
-        for (UINT frame = 0; frame < 4; ++frame) execute(water);
+        water.SetInstances({fluid});
+        water.PrepareFrame();
+        const auto waterAccesses = water.GetBufferAccesses();
+        Require(std::count_if(waterAccesses.begin(), waterAccesses.end(), [](const auto& access)
+            { return access.Usage == GDX12RenderGraph::Mode::ReadWrite; }) == 5,
+            "Fluid first-frame physical particle/sort/density buffers were not declared before graph execution");
+        for (UINT frame = 0; frame < 4; ++frame) executeWater();
         Require(water.GetOutput(0)->GetTexture() != depth, "Active fluid did not publish its depth");
+        Require(water.GetOutput(1)->GetTexture() != motion && water.GetOutput(2)->GetTexture() && water.GetOutput(3)->GetTexture(),
+            "Active fluid did not publish motion or its internal geometry/owner links");
         const auto waterDepth = Read(device, *water.GetOutput(0)->GetTexture());
         Require(waterDepth != blades, "Water sphere/NRF/merge produced no depth change");
-        list = queue->GetCommandList(); auto* resolved = water.Resolve(list, hdr.get(), environment.GetOutput(1)->GetTexture());
-        queue->ExecuteCommandList(list); queue->Flush();
+        auto* resolved = waterResolve.GetOutput(0)->GetTexture();
         Require(resolved != hdr.get(), "Water resolve is inactive"); Read(device, *resolved);
-        resources.Fluids[0].Component.Reset(); execute(water);
-        std::cout << "GPU fluid hash/sort/SPH, NRF surface, resolve and reset passed.\n";
+        fluid.Component.Reset(); water.SetInstances({fluid}); executeWater();
+        for (const char* quality : { "1", "3", "0", "2" })
+        {
+            Set(L"Render.Fluid.Quality", quality); executeWater();
+            if (quality[0] == '0') requireWaterFallback();
+            else Require(waterResolve.GetOutput(0)->GetTexture() != hdr.get(), "Fluid quality switch lost water resolve");
+        }
+        settings.RenderEnabled = false; fluid.Component.SetSettings(settings); water.SetInstances({fluid}); executeWater();
+        requireWaterFallback();
+        Require(water.GetBufferAccesses().size() >= 6, "Render-disabled fluid lost its simulation state");
+        water.SetInstances({}); executeWater(); requireWaterFallback();
+        settings.RenderEnabled = true; fluid.Component.SetSettings(settings); water.SetInstances({fluid}); executeWater();
+        std::cout << "GPU fluid graph: first-frame buffers, SPH/NRF, resolve, quality, simulation-only, clear and reset passed.\n";
 
         GDX12ParticlesPass particles; particles.Setup(&resources, nullptr, &common);
         particles.SetInputs({water.GetOutput(0), accum.get(), reveal.get()}); particles.Initialize();
@@ -503,9 +557,9 @@ int main(int argc, char** argv)
         }
         std::cout << "GPU particle refill: exact 250000/1000000 live particles from first frame and after expiry passed.\n";
         resources.ParticleEmitters.clear(); executeParticles(particles); Require(!resources.ParticleMotion, "Removed emitter retained motion");
-        Set(L"Render.Fluid.Enabled", "false"); execute(water);
-        Require(water.GetOutput(0)->GetTexture() == depth, "Disabled fluid retained merged depth");
+        Set(L"Render.Fluid.Enabled", "false"); executeWater(); requireWaterFallback();
         std::cout << "GPU particle spawn/indirect/three blend modes/reset/removal and depth collision off/bounce/stop passed.\n";
+        if (!benchmark) CheckWaterComposition(device, resources, common, *depth, *motion, environment, makeColor, execute, eye, forward);
         if (benchmark && (mode == "--benchmark" || mode == "--benchmark-particles"))
         {
             Set(L"Render.Particles.Enabled", "true");

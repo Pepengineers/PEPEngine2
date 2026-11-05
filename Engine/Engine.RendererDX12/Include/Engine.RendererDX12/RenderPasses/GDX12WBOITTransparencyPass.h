@@ -12,8 +12,8 @@ public:
 
     void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
     {
-        graph.SetName(_partition == WaterPartition::Front ? "Front transparency" :
-            _partition == WaterPartition::Behind ? "Behind-water transparency" : "Transparency");
+        graph.SetName(_partition == DepthPartition::Near ? "Near transparency" :
+            _partition == DepthPartition::Far ? "Far transparency" : "Transparency");
         graph.Read(SharedResource::Scene);
         graph.ReadInputs(_inputs);
         graph.Read(SharedResource::Visibility);
@@ -23,14 +23,14 @@ public:
         graph.Write(_outputs[1], "Transparency revealage");
     }
 
-	enum class WaterPartition : std::uint8_t { All, Behind, Front };
+	using DepthPartition = GDX12GeometryDepthPartition;
 
-	GDX12WBOITTransparencyPass(WaterPartition partition = WaterPartition::All,
+	GDX12WBOITTransparencyPass(DepthPartition partition = DepthPartition::All,
         GDX12WBOITTransparencyPass* reuse = nullptr) : IN_DepthStencil(nullptr), _partition(partition), _reuse(reuse)
 	{ 
 		_flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_GEOMETRY | RENDER_PASS_FLAG_USE_MATERIALS | 
 		RENDER_PASS_FLAG_USE_INSTANCES; 
-		_numInputs = partition == WaterPartition::All ? 6 : 7;
+		_numInputs = partition == DepthPartition::All ? 6 : 7;
 		_numOutputs = 2;
 		OUT_Accumulation = reuse ? reuse->OUT_Accumulation : std::make_shared<GDX12Texture>();
 		OUT_Revealage = reuse ? reuse->OUT_Revealage : std::make_shared<GDX12Texture>();
@@ -38,7 +38,7 @@ public:
 		_outputs.push_back(OUT_Revealage.get());
 	}
 
-	// Input 0 - DepthStencil; input 6 - combined nearest water/opaque depth for water partitions
+	// Input 0 - DepthStencil; input 6 - optional nearest separator/scene depth for depth partitions
 	// Output 0 - TransparencyAccumulation
 	// Output 1 - RevealageTexture
 	void Initialize() override
@@ -59,8 +59,8 @@ public:
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
 		_transparencyVS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", nullptr, "VS", "vs");
-		_transparencyPS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", nullptr, _partition == WaterPartition::Behind ? "PSBehindWater" :
-            _partition == WaterPartition::Front ? "PSFrontWater" : "PS", "ps");
+		_transparencyPS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", nullptr, _partition == DepthPartition::Far ? "PSFar" :
+            _partition == DepthPartition::Near ? "PSNear" : "PS", "ps");
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
@@ -135,7 +135,7 @@ public:
 
 	void Execute(GDX12CommandList* cmdList) override
 	{
-        _rendered = _partition != WaterPartition::Front ||
+        _rendered = _partition != DepthPartition::Near ||
             (_inputs.size() > 6 && _inputs[6]->GetTexture() != _inputs[0]->GetTexture()) ||
             !_resources->ParticleEmitters.empty();
         if (!_rendered) return;
@@ -191,19 +191,18 @@ public:
         binding.SRVs.push_back({ 12, _resources->SkyAerialRadianceSRV.GPUHandle });
         binding.SRVs.push_back({ 13, _resources->SkyAerialTransmittanceSRV.GPUHandle });
         binding.SRVs.push_back({ 16, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex) });
-        auto* waterDepth = (_inputs.size() > 6 ? _inputs[6] : _inputs[0])->GetTexture();
+        auto* separatorDepth = (_inputs.size() > 6 ? _inputs[6] : _inputs[0])->GetTexture();
         view.SceneDepth = depthStencil;
-        view.PartitionDepth = waterDepth;
-        view.DepthPartition = _partition == WaterPartition::All ? GDX12GeometryDepthPartition::All :
-            (_partition == WaterPartition::Behind ? GDX12GeometryDepthPartition::Behind : GDX12GeometryDepthPartition::Front);
+        view.PartitionDepth = separatorDepth;
+        view.DepthPartition = _partition;
         constexpr auto depthReadState = D3D12_RESOURCE_STATE_DEPTH_READ |
             D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-        // Fluid resolve can leave opaque depth compute-only; graphics binding also validates its pixel state.
-        cmdList->ResourceBarrier({ waterDepth->GetResource()->GetSRVBarrier(),
+        // A preceding compute pass can leave scene depth compute-only; graphics binding needs its pixel state.
+        cmdList->ResourceBarrier({ separatorDepth->GetResource()->GetSRVBarrier(),
             CD3DX12_RESOURCE_BARRIER::Transition(depthStencil->GetResource()->D3DResource.Get(),
                 depthStencil->GetResource()->GetCurrentState(), depthReadState) });
         depthStencil->GetResource()->GDX12Resource::SetCurrentState(depthReadState);
-		binding.SRVs.push_back({ 14, waterDepth->GetSRV()->GPUHandle });
+		binding.SRVs.push_back({ 14, separatorDepth->GetSRV()->GPUHandle });
         binding.SRVs.push_back({ 15, depthStencil->GetSRV()->GPUHandle });
 
         const UINT meshCount = _resources->IndirectCommandsCache->GetElementCount();
@@ -276,7 +275,7 @@ private:
 	std::shared_ptr<GDX12Texture> OUT_Revealage;
 
 	IRenderPassLink* IN_DepthStencil;
-    WaterPartition _partition;
+    DepthPartition _partition;
     GDX12WBOITTransparencyPass* _reuse;
     bool _rendered = false;
 };

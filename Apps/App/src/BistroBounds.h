@@ -1,5 +1,6 @@
 #pragma once
 #include "Components/BistroGrassComponents.h"
+#include "Components/BistroWaterComponents.h"
 
 #include "BistroScene.h"
 #include "App.Base/ECS/World.h"
@@ -70,6 +71,7 @@ namespace BistroBounds
         explicit Scene(World& world)
         {
             RegisterBistroGrassComponents(world);
+            RegisterBistroWaterComponents(world);
             auto& ecs = world.GetECS();
             const auto add = [&](Entity entity, const BoundingBox& local, unsigned color)
             {

@@ -20,8 +20,6 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Reconstruction.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameGeneration.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReconstructionPass.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12Fluid.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FluidPass.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -155,8 +153,6 @@
     <ClCompile Include="src\GDX12Reconstruction.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12FrameGeneration.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\GDX12ReconstructionPass.cpp"><Filter>Source Files</Filter></ClCompile>
-    <ClCompile Include="src\GDX12Fluid.cpp"><Filter>Source Files</Filter></ClCompile>
-    <ClCompile Include="src\GDX12FluidPass.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\D3DHelpers.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -213,9 +209,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include="Shaders\FluidParameters.hlsli" />
-    <None Include="Shaders\FluidSolver.hlsl" />
-    <None Include="Shaders\FluidSurface.hlsl" />
     <None Include="Shaders\BufferClear.hlsl" />
     <None Include="Shaders\CBufferStructures.hlsl" />
     <None Include="Shaders\CompositionPass.hlsl" />

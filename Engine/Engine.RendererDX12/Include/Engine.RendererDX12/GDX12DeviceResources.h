@@ -7,7 +7,6 @@
 #include "Engine.RendererDX12/GDX12Material.h"
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
 #include "Engine.RendererDX12/GDX12Particles.h"
-#include "Engine.RendererDX12/GDX12Fluid.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
 #include "Engine.RendererDX12/GDX12RenderGeometry.h"
 #include <optional>
@@ -64,7 +63,6 @@ public:
     GDX12Texture* ParticleMotion = nullptr; // Borrowed for this frame only, owned by the particles pass.
     std::vector<GDX12ReflectionProbe> ReflectionProbes;
     std::vector<GDX12IndirectDrawArgs> ReflectionPreviewDraws;
-    std::vector<GDX12FluidInstance> Fluids;
     GDX12Descriptor ReflectionRadianceSRV;
     uint64_t ReflectionWorldRevision = 0;
     uint64_t ReflectionStaticRevision = 0;

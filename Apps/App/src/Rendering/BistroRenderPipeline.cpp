@@ -2,6 +2,7 @@
 #include <stdexcept>
 #include "Common/GameTimer.h"
 #include "Rendering/Grass/BistroGrassGeometry.h"
+#include "Rendering/Water/BistroWaterRendering.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GeometryBatchPass.h"
 
 namespace
@@ -49,7 +50,16 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& context)
     _earlyAO = GetAmbientOcclusionExecutionPoint() == 0;
     _grass = std::make_unique<BistroGrassGeometry>(_scenes, context.Runtime);
     context.Primary.GeometrySources.push_back(_grass.get());
-    _passes = std::make_unique<CommonRenderPasses>(context.BackBuffer);
+    _water = std::make_unique<BistroWaterRendering>(_scenes);
+    _passes = std::make_unique<CommonRenderPasses>(context.BackBuffer, GDX12WBOITTransparencyPass::DepthPartition::Near);
+    _passes->Composition.SetConditionalTransparency(&_passes->Transparency);
+    _passes->Composition.SetApplyOpaqueAerialPerspective(false);
+    auto& passes = _passes->Bindings.PrimaryPasses;
+    passes.insert(std::find(passes.begin(), passes.end(), &_passes->AO), &_water->Surface);
+    passes.insert(std::find(passes.begin(), passes.end(), &_passes->Transparency),
+        { &_water->Transparency, &_water->Composition, &_water->Resolve });
+    _water->Transparency.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    _water->Composition.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
     _passes->Setup(context);
     LinkInputs({ context.BackBuffer });
     _passes->Initialize();
@@ -69,6 +79,9 @@ bool BistroRenderPipeline::PrepareFrame(RenderPipelineContext& context, GDX12Com
     _earlyAO = early;
     _grass->CollectScene(context.Common.GameTimer ? context.Common.GameTimer->DeltaTime() : 0);
     _grass->PrepareFrame(context.Primary, context.Common);
+    _water->Surface.SetInstances(_water->CollectScene(context.Common.GameTimer ? context.Common.GameTimer->DeltaTime() : 0));
+    _water->Surface.PrepareFrame();
+    _water->Resolve.PrepareFrame();
     _passes->BindAmbientOcclusion(context.Common, _earlyAO);
     _passes->PrepareFrame(context, commands);
     const auto passes = GeometryPasses();
@@ -102,17 +115,24 @@ void BistroRenderPipeline::LinkInputs(const RenderPipelineGraphInputs& inputs)
         p.Opaque.GetOutput(3), p.Opaque.GetOutput(4) });
     p.SSR.SetInputs({ p.Lighting.GetOutput(0), p.Opaque.GetOutput(2), p.Opaque.GetOutput(3),
         p.Opaque.GetOutput(4), p.Opaque.GetOutput(1), p.Environment.GetOutput(1), p.Environment.GetOutput(2) });
-    p.Transparency.SetInputs({ p.Opaque.GetOutput(2), p.SunShadow.GetOutput(0), p.Environment.GetOutput(0),
-        p.Environment.GetOutput(1), p.Environment.GetOutput(2), p.LocalShadow.GetOutput(0) });
-    p.Particles.SetInputs({ p.Opaque.GetOutput(2), p.Transparency.GetOutput(0), p.Transparency.GetOutput(1) });
-    p.Composition.SetInputs({ p.SSR.GetOutput(0), p.Transparency.GetOutput(0), p.Transparency.GetOutput(1),
+    auto& water = *_water;
+    water.Surface.SetInputs({ p.Opaque.GetOutput(2), p.Opaque.GetOutput(1) });
+    water.Transparency.SetInputs({ p.Opaque.GetOutput(2), p.SunShadow.GetOutput(0), p.Environment.GetOutput(0),
+        p.Environment.GetOutput(1), p.Environment.GetOutput(2), p.LocalShadow.GetOutput(0), water.Surface.GetOutput(0) });
+    water.Composition.SetInputs({ p.SSR.GetOutput(0), water.Transparency.GetOutput(0), water.Transparency.GetOutput(1),
         p.Opaque.GetOutput(2) });
+    water.Resolve.SetInputs({ water.Composition.GetOutput(0), p.Environment.GetOutput(1) });
+    p.Transparency.SetInputs({ p.Opaque.GetOutput(2), p.SunShadow.GetOutput(0), p.Environment.GetOutput(0),
+        p.Environment.GetOutput(1), p.Environment.GetOutput(2), p.LocalShadow.GetOutput(0), water.Surface.GetOutput(0) });
+    p.Particles.SetInputs({ water.Surface.GetOutput(0), p.Transparency.GetOutput(0), p.Transparency.GetOutput(1) });
+    p.Composition.SetInputs({ water.Resolve.GetOutput(0), p.Transparency.GetOutput(0), p.Transparency.GetOutput(1),
+        water.Surface.GetOutput(0) });
     p.Composition.SetParticles(&p.Particles);
-    p.DepthOfField.SetInputs({ p.Composition.GetOutput(0), p.Opaque.GetOutput(2) });
-    p.MotionBlur.SetInputs({ p.DepthOfField.GetOutput(0), p.Opaque.GetOutput(2), p.Opaque.GetOutput(1) });
-    p.Reconstruction.SetInputs({ p.Opaque.GetOutput(2), p.MotionBlur.GetOutput(1), p.MotionBlur.GetOutput(0) });
+    p.DepthOfField.SetInputs({ p.Composition.GetOutput(0), water.Surface.GetOutput(0) });
+    p.MotionBlur.SetInputs({ p.DepthOfField.GetOutput(0), water.Surface.GetOutput(0), water.Surface.GetOutput(1) });
+    p.Reconstruction.SetInputs({ water.Surface.GetOutput(0), p.MotionBlur.GetOutput(1), p.MotionBlur.GetOutput(0) });
     p.Output.SetInputs({ p.Reconstruction.GetOutput(0), inputs.BackBuffer });
-    p.FrameGeneration.SetInputs({ p.Opaque.GetOutput(2), p.MotionBlur.GetOutput(1), inputs.BackBuffer });
+    p.FrameGeneration.SetInputs({ water.Surface.GetOutput(0), p.MotionBlur.GetOutput(1), inputs.BackBuffer });
 }
 
 void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipelineGraphInputs& inputs)
@@ -137,10 +157,16 @@ void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipel
     geometryTail = AddGeometry(graph, p.Reflections, geometryTail);
     AddGeometry(graph, p.Opaque, geometryTail);
     if (!_earlyAO) graph.AddPass(p.AO);
+    graph.AddPass(_water->Surface);
     graph.AddPass(p.Lighting);
     graph.AddPass(p.ReflectionPreview);
-    graph.AddPass(p.SSR);
-    graph.AddPass(p.Transparency);
+    const auto hdr = graph.AddPass(p.SSR);
+    const auto farTransparency = graph.AddPass(_water->Transparency);
+    graph.DependsOn(farTransparency, hdr);
+    graph.AddPass(_water->Composition);
+    const auto resolve = graph.AddPass(_water->Resolve);
+    const auto nearTransparency = graph.AddPass(p.Transparency);
+    graph.DependsOn(nearTransparency, resolve);
     graph.AddPass(p.Particles);
     graph.AddPass(p.Composition);
     graph.AddPass(p.DepthOfField);

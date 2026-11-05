@@ -28,7 +28,6 @@
     <ClInclude Include="Include\App.Base\ECS\Components\LightComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\SkyBoxComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\SkyAtmosphereComponent.h" />
-    <ClInclude Include="Include\App.Base\ECS\Components\FluidRenderComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\ReflectionProbeComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\ParticleEmitterComponent.h" />
     <ClInclude Include="Include\App.Base\Systems\LightUpdateSystem.h" />

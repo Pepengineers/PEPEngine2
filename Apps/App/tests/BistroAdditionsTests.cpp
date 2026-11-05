@@ -93,6 +93,7 @@ static void SaveImage(const std::vector<uint16_t>& pixels, UINT width, UINT heig
 
 static void CheckCounts(World& world, size_t probes, size_t grass, size_t water, size_t characters)
 {
+    RegisterBistroWaterComponents(world);
     auto& ecs = world.GetECS();
     Require(ecs.GetPool<ReflectionProbeComponent>().Size() == probes, "Wrong Bistro reflection count");
     Require(ecs.GetPool<GrassRenderComponent>().Size() == grass, "Wrong Bistro grass count");
@@ -426,6 +427,12 @@ int main(int argc, char** argv)
             ThrowIfFailed(info->GetMessage(index, message, &bytes));
             Require(message->Severity > D3D12_MESSAGE_SEVERITY_ERROR, message->pDescription);
         }
+        const auto graphDirectory = std::filesystem::path(SOLUTION_DIR) / "Build/Verification";
+        std::filesystem::create_directories(graphDirectory);
+        std::ofstream graph(graphDirectory / "bistro-with-content.dot");
+        render->WriteRenderGraph(graph);
+        Require(bool(graph), "Cannot write Bistro content graph");
+        std::cout << "Bistro content graph passes=" << render->GetRenderGraphStatistics().Passes << '\n';
         std::cout << "Bistro additions: default/zero/changed counts, walking skeletal animation, pause, grass/water GPU pixels, clean debug layer passed.\n";
         return 0;
     }

@@ -7,6 +7,7 @@
 template<class Frame>
 inline void CheckBistroWaterCounts(World& world, Frame&& frame)
 {
+    RegisterBistroWaterComponents(world);
     const auto require = [](bool value, const char* message)
     {
         if (!value) throw std::runtime_error(message);
