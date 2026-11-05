@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <map>
 #include <tuple>
+#include <limits>
 
 #include <Jolt/Jolt.h>
 #include <Jolt/RegisterTypes.h>
@@ -30,6 +31,7 @@
 #include <Jolt/Physics/Collision/CollideShape.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/AABBTree/TriangleCodec/TriangleCodecIndexed8BitPackSOA4Flags.h>
 
 #include "Common/Logger.h"
 
@@ -127,14 +129,36 @@ namespace
                 JPH::VertexList vertices;
                 vertices.reserve(shape.Geometry->Vertices.size());
                 for (const auto& p : shape.Geometry->Vertices)
-                    vertices.emplace_back(p.x * scale.x, p.y * scale.y, p.z * scale.z);
+                {
+                    const auto position = p * scale;
+                    if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z)) return invalidShape();
+                    vertices.emplace_back(position.x, position.y, position.z);
+                }
                 JPH::IndexedTriangleList triangles;
                 triangles.reserve(shape.Geometry->Triangles.size());
+                JPH::AABox bounds;
                 for (const auto& t : shape.Geometry->Triangles)
                 {
                     if (t[0] >= vertices.size() || t[1] >= vertices.size() || t[2] >= vertices.size()) return invalidShape();
                     triangles.emplace_back(t[0], t[1], t[2]);
+                    for (const auto index : t) bounds.Encapsulate(JPH::Vec3(vertices[index]));
                 }
+                // A nonzero source area can collapse after 21-bit compression and body-space transforms.
+                const float precision = (std::max)(bounds.GetSize().Length() / JPH::TriangleCodecIndexed8BitPackSOA4Flags::COMPONENT_MASK,
+                    JPH::Vec3::sMax(bounds.mMin.Abs(), bounds.mMax.Abs()).ReduceMax() * std::numeric_limits<float>::epsilon());
+                if (!std::isfinite(precision)) return invalidShape();
+                const float minimumHeight = 8 * precision;
+                const auto end = std::remove_if(triangles.begin(), triangles.end(), [&](const auto& triangle)
+                {
+                    const JPH::Vec3 a(vertices[triangle.mIdx[0]]), b(vertices[triangle.mIdx[1]]), c(vertices[triangle.mIdx[2]]);
+                    const auto ab = b-a, ac = c-a, bc = c-b;
+                    const float edgeSquared = (std::max)({ab.LengthSq(), ac.LengthSq(), bc.LengthSq()});
+                    const float areaSquared = ab.Cross(ac).LengthSq();
+                    // Keep a margin above Jolt's 1e-12 squared-normal cutoff, even after rotations.
+                    return !std::isfinite(areaSquared) || areaSquared <= (std::max)(16e-12f, edgeSquared * minimumHeight * minimumHeight);
+                });
+                if (end != triangles.end()) Logger::Warn("Removed {} numerically unstable collision triangles", triangles.end()-end);
+                triangles.erase(end, triangles.end());
                 return JPH::MeshShapeSettings(std::move(vertices), std::move(triangles)).Create();
             }
             else if constexpr (std::is_same_v<T, ConvexCompoundShapeDesc>)

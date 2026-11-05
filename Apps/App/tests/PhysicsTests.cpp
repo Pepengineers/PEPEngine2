@@ -25,6 +25,48 @@ static void Require(bool condition, const char* message)
     if (!condition) throw std::runtime_error(message);
 }
 
+static void CheckTriangleSanitization(JobSystem& jobs)
+{
+    for (float units : {1.f, 100.f})
+    {
+        JoltPhysicsBackend physics;
+        PhysicsWorldSettings settings;
+        settings.WorldUnitsPerMeter = units;
+        physics.Initialize(jobs, settings);
+        auto mesh = std::make_shared<PhysicsTriangleMesh>();
+        // Nonzero area passes Jolt's input check but has no safe margin for compression and rotation.
+        mesh->Vertices = {{0,0,0}, {units,0,0}, {0.5f*units,0,0.000003f*units}};
+        mesh->Triangles = {{0,1,2}};
+        PhysicsBodyDesc body;
+        body.Shape = TriangleMeshShapeDesc{mesh};
+        Require(!physics.CreateBody(body).IsValid(), "Mesh cooker accepted a nearly collinear triangle");
+        mesh = std::make_shared<PhysicsTriangleMesh>(*mesh);
+        mesh->Vertices.insert(mesh->Vertices.end(), {{2*units,0,0},{3*units,0,0},{2*units,0,units}});
+        mesh->Triangles.push_back({3,5,4});
+        body.Shape = TriangleMeshShapeDesc{mesh};
+        Require(physics.CreateBody(body).IsValid(), "Sliver cleanup removed valid supporting geometry");
+        PhysicsRayHit hit;
+        Require(physics.RayCastStatic({2.2f*units,units,0.2f*units},{0,-2*units,0},hit),
+            "Sliver cleanup lost the supporting triangle");
+        mesh = std::make_shared<PhysicsTriangleMesh>(*mesh);
+        mesh->Vertices[2].z = 0.0001f*units;
+        mesh->Vertices.insert(mesh->Vertices.end(), {{4*units,0,0},{5*units,0,0},{4*units,0,0.005f*units},
+            {100*units,0,0},{101*units,0,0},{100*units,0,units}});
+        mesh->Triangles.insert(mesh->Triangles.end(), {{6,8,7},{9,11,10}});
+        body.Shape = TriangleMeshShapeDesc{mesh};
+        Require(physics.CreateBody(body).IsValid(), "Large-bounds mesh sanitization failed");
+        Require(!physics.RayCastStatic({0.5f*units,units,0.00002f*units},{0,-2*units,0},hit),
+            "Mesh compression precision was ignored for a thin triangle");
+        Require(physics.RayCastStatic({4.2f*units,units,0.001f*units},{0,-2*units,0},hit),
+            "Mesh sanitization removed a resolvable thin triangle");
+        mesh = std::make_shared<PhysicsTriangleMesh>(*mesh);
+        mesh->Vertices[0].x = std::numeric_limits<float>::quiet_NaN();
+        body.Shape = TriangleMeshShapeDesc{mesh};
+        Require(!physics.CreateBody(body).IsValid(), "Mesh cooker accepted a nonfinite vertex");
+    }
+    std::cout << "Triangle sliver rejection, surviving support and centimeter/meter units passed\n";
+}
+
 static void CheckJobs(JobSystem& pool)
 {
     // The backend owns Jolt registration, including its allocator.
@@ -379,6 +421,7 @@ int main()
         for (unsigned threads : {1u, 4u})
         {
             JobSystem jobs(threads);
+            CheckTriangleSanitization(jobs);
             CheckJobs(jobs);
             auto positions = CheckBodies(jobs);
             if (baseline.empty()) baseline = positions;

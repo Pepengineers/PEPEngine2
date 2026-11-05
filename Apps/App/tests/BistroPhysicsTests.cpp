@@ -9,6 +9,19 @@
 #include <iostream>
 #include <limits>
 #include <tuple>
+#include <atomic>
+#include <Jolt/Jolt.h>
+#include <Jolt/Core/IssueReporting.h>
+
+#ifdef JPH_ENABLE_ASSERTS
+static std::atomic<unsigned> JoltAssertions{0};
+static bool RecordJoltAssert(const char* expression, const char*, const char* file, JPH::uint line)
+{
+    if (JoltAssertions.fetch_add(1) < 4)
+        std::cerr << "Jolt assertion: " << file << ':' << line << ": " << expression << '\n';
+    return false;
+}
+#endif
 
 static void Require(bool condition, const char* message)
 {
@@ -266,6 +279,9 @@ int main(int argc, char** argv)
         World world(WorldDesc{});
         scenes->OnWorldCreated.Broadcast(world);
         physics.ConfigureWorld(world, BistroPhysics::Settings());
+#ifdef JPH_ENABLE_ASSERTS
+        JPH::AssertFailed = RecordJoltAssert;
+#endif
         size_t base = 0, expected = 0;
         std::vector<std::tuple<Entity,Vector3,Vector3>> centers;
         BistroWaves::Controller waves;
@@ -420,6 +436,9 @@ int main(int argc, char** argv)
             }
         }
         Require(waves.GetTimeline().CompletedCycles() == cycles, "Real Bistro did not complete the requested full waves");
+#ifdef JPH_ENABLE_ASSERTS
+        Require(JoltAssertions.load() == 0, "Jolt asserted during real Bistro collision baking/simulation");
+#endif
         size_t moved=0;
         for (const auto& [entity,center,start] : centers)
         {
