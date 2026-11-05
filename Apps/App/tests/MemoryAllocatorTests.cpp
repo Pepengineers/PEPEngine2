@@ -121,6 +121,40 @@ static void TestBuffers(GDX12Device& device)
     buffer->Unmap(0, nullptr);
 }
 
+static void TestTrackedDefaults(GDX12Device& device)
+{
+    const GDX12TransformConstants identity;
+    for (bool aligned : { false, true })
+    {
+        GDX12UploadBuffer<GDX12TransformConstants> buffer(&device, 0, EBufferType::Upload, aligned);
+        buffer.TrackChanges();
+        for (UINT count : { 1u, 2u })
+        {
+            buffer.Resize(count);
+            buffer.CopyData(count - 1, identity);
+            BYTE* mapped = nullptr;
+            ThrowIfFailed(buffer.GetResource().D3DResource->Map(0, nullptr, reinterpret_cast<void**>(&mapped)));
+            bool matches = true;
+            for (UINT slot = 0; slot < count; ++slot)
+                matches &= std::memcmp(mapped + slot * buffer.GetElementSize(), &identity, sizeof(identity)) == 0;
+            buffer.GetResource().D3DResource->Unmap(0, nullptr);
+            Require(matches, "Tracked nonzero defaults were skipped on initial allocation or growth");
+        }
+        const auto revision = buffer.GetRevision();
+        buffer.CopyData(0, identity);
+        Require(buffer.GetRevision() == revision, "Unchanged tracked data lost its no-change signal");
+
+        GDX12UploadBuffer<GDX12TransformConstants> late(&device, 1, EBufferType::Upload, aligned);
+        auto translated = identity;
+        translated.WorldMatrix._41 = 17;
+        late.CopyData(0, translated);
+        late.TrackChanges();
+        Require(std::memcmp(late.GetCPUData(), &translated, sizeof(translated)) == 0,
+            "Enabling tracking lost already uploaded values");
+    }
+    std::cout << "Tracked upload mirrors: nonzero defaults, growth, alignment and late enable passed.\n";
+}
+
 static void TestTextures(GDX12Device& device)
 {
     GDX12DeviceResources resources;
@@ -164,6 +198,7 @@ int main()
         info->ClearStoredMessages();
         TestQueueFlush(device);
         TestBuffers(device);
+        TestTrackedDefaults(device);
         Require(Statistics(device).AllocationCount == 0, "Buffers leaked allocations");
         TestTextures(device);
         Require(Statistics(device).AllocationCount == 0, "Textures leaked allocations");

@@ -31,7 +31,15 @@ public:
     void CopyData(UINT elementIndex, const T* data, UINT count);
 
     // CPU mirror avoids reading write-combined upload memory when checking static templates.
-    void TrackChanges() { _cpuData.resize(_elementCount); _trackChanges = true; }
+    void TrackChanges()
+    {
+        _cpuData.resize(_elementCount);
+        // The upload allocation starts at zero; T{} can have nonzero defaults.
+        if (_mappedData)
+            for (UINT i = 0; i < _elementCount; ++i)
+                std::memcpy(&_cpuData[i], &_mappedData[i * _elementByteSize], sizeof(T));
+        _trackChanges = true;
+    }
     uint64_t GetRevision() const { return _revision.load(std::memory_order_relaxed); }
     const T* GetCPUData() const { return _cpuData.data(); }
 
@@ -226,7 +234,7 @@ void GDX12UploadBuffer<T>::Resize(UINT newElementCount)
     std::swap(_totalBufferSize, replacement._totalBufferSize);
     if (_trackChanges)
     {
-        _cpuData.resize(newElementCount);
+        TrackChanges();
         _revision.fetch_add(1, std::memory_order_relaxed);
     }
 
