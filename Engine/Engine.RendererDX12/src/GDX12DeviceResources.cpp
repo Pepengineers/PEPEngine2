@@ -1,3 +1,4 @@
+#include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include "Engine.RendererDX12/GDX12DeviceResources.h"
 
 #include "Common/ConsoleVariables.h"
@@ -6,6 +7,7 @@
 #include "Common/GameTimer.h"
 #include <cstddef>
 #include <type_traits>
+#include <algorithm>
 
 static AutoConsoleVariable<UINT> NumFrameConstantVariable(
     L"Render.NumFrames",
@@ -181,4 +183,86 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
             numFramesDirty--;
         }
     }
+}
+
+void GDX12DeviceResources::BeginMeshPrimitiveUpdate()
+{
+    if (_meshPrimitiveEpoch == (std::numeric_limits<uint64_t>::max)())
+        throw std::overflow_error("Mesh primitive snapshot epoch exhausted");
+    ++_meshPrimitiveEpoch;
+}
+
+GDX12RenderPrimitiveHandle GDX12DeviceResources::PublishMeshPrimitive(UINT instance, const GDX12RenderPrimitive& primitive)
+{
+    const auto found = _meshPrimitives.find(instance);
+    if (found == _meshPrimitives.end())
+    {
+        const auto handle = Primitives.Add(primitive);
+        try { _meshPrimitives.emplace(instance, MeshPrimitive{ handle, _meshPrimitiveEpoch }); }
+        catch (...) { Primitives.Remove(handle); throw; }
+        return handle;
+    }
+    Primitives.Update(found->second.Handle, primitive);
+    found->second.Epoch = _meshPrimitiveEpoch;
+    return found->second.Handle;
+}
+
+void GDX12DeviceResources::RemoveMeshPrimitive(UINT instance)
+{
+    const auto found = _meshPrimitives.find(instance);
+    if (found == _meshPrimitives.end()) return;
+    Primitives.Remove(found->second.Handle);
+    _meshPrimitives.erase(found);
+}
+
+void GDX12DeviceResources::EndMeshPrimitiveUpdate()
+{
+    for (auto it = _meshPrimitives.begin(); it != _meshPrimitives.end();)
+    {
+        if (it->second.Epoch == _meshPrimitiveEpoch) { ++it; continue; }
+        Primitives.Remove(it->second.Handle);
+        it = _meshPrimitives.erase(it);
+    }
+}
+
+void GDX12DeviceResources::GatherGeometryBatches(const GDX12GeometryContext& view,
+    const GDX12RenderBatch& mesh, std::vector<GDX12RenderBatch>& batches) const
+{
+    if (!mesh.Draw.Empty()) batches.push_back(mesh);
+    if (!view.IncludeApplicationGeometry) return;
+    for (const auto* source : GeometrySources)
+    {
+        if (view.Source && view.Source != source) continue;
+        const auto first = batches.size();
+        source->GatherBatches(view, batches);
+        const auto declared = source->GetGeometryBufferAccesses(view.Stage);
+        for (size_t i = first; i < batches.size(); ++i)
+        {
+            if (batches[i].Draw.Empty()) continue;
+            for (const auto& access : batches[i].BufferAccesses)
+                if (!access.Resource || access.Usage != GDX12RenderGraph::Mode::Read ||
+                    std::none_of(declared.begin(), declared.end(), [&](const auto& entry)
+                        { return entry.Resource == access.Resource && entry.Usage == access.Usage; }))
+                    throw std::invalid_argument("Render batch buffer read was not declared by its geometry source");
+        }
+    }
+}
+
+void GDX12DeviceResources::EmitGeometry(GDX12CommandList* commands, const GDX12GeometryContext& view,
+    const GDX12RenderBatch& mesh)
+{
+    std::vector<GDX12RenderBatch> batches;
+    GatherGeometryBatches(view, mesh, batches);
+    for (const auto& batch : batches) GDX12EmitRenderBatch(commands, view, batch);
+}
+
+std::vector<GDX12RenderGraph::BufferAccess> GDX12DeviceResources::GetGeometryBufferAccesses(GDX12GeometryStage stage) const
+{
+    std::vector<GDX12RenderGraph::BufferAccess> accesses;
+    for (const auto* source : GeometrySources)
+    {
+        const auto sourceAccesses = source->GetGeometryBufferAccesses(stage);
+        accesses.insert(accesses.end(), sourceAccesses.begin(), sourceAccesses.end());
+    }
+    return accesses;
 }

@@ -9,6 +9,7 @@
 #include "Engine.RendererDX12/GDX12Skinning.h"
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
 #include "Engine.RendererDX12/GDX12RenderGraph.h"
+#include "App.Base/Rendering/IRenderPipeline.h"
 #include "App.Base/Systems/ShadowVisibilitySystem.h"
 #include <map>
 
@@ -18,11 +19,6 @@ class GDX12SwapChain;
 class GDX12Device;
 class GDX12CommandList;
 class GDX12GPUTimer;
-class GDX12ReconstructionPass;
-class GDX12DeferredLightingPass;
-class GDX12LocalShadowPass;
-class GDX12ReflectionProbePass;
-class GDX12ParticlesPass;
 struct GDX12FrameGenerationStatus;
 
 struct TransformComponent;
@@ -47,6 +43,7 @@ class RenderModule final : public Module
 {
 public:
     RenderModule(Window* window, GameTimer* timer);
+    RenderModule(Window* window, GameTimer* timer, std::unique_ptr<IRenderPipeline> pipeline);
     ~RenderModule() override;
 
     void Initialize() override;
@@ -58,6 +55,7 @@ public:
     const GDX12ReconstructionStatus& GetReconstructionStatus() const;
     const GDX12FrameGenerationStatus& GetFrameGenerationStatus() const;
 
+    bool OwnsMaterial(const GDX12Material* material) const;
     GDX12Material* GetMaterialByName(const std::string& name);
 
     //returns a pointer to a fully initialized structure that you can specify in components
@@ -98,10 +96,6 @@ public:
         ListenerHandle RenderCompCreated = 0;
         ListenerHandle RenderCompDestroyed = 0;
         ListenerHandle RenderCompUpdated = 0;
-        ListenerHandle GrassCreated = 0;
-        ListenerHandle GrassUpdated = 0;
-        ListenerHandle WindCreated = 0;
-        ListenerHandle WindUpdated = 0;
         ListenerHandle SkeletalDestroyed = 0;
         ListenerHandle SkeletalUpdated = 0;
     };
@@ -192,19 +186,11 @@ private:
     void BuildBackBuffer();
     void CollectReflectionScene();
     ShadowVisibilitySystem _shadowVisibility;
-    void CollectGrassScene(GDX12CommandList* commands);
     void CollectParticleEmitters();
     void ShareFences();
-    template<class T, class... Args> T* CreateRenderPass(Args&&... args)
-    {
-        auto pass = std::make_unique<T>(std::forward<Args>(args)...);
-        auto* result = pass.get();
-        _primaryRenderPasses.push_back(std::move(pass));
-        return result;
-    }
-    void ConfigureRenderPipeline();
-    void SetupRenderPasses();
-    void InitializeRenderPasses();
+    friend struct RenderPipelineContext;
+    RenderPipelineContext PipelineContext();
+    void RefreshPipelineFlags();
     void RebuildRenderGraph();
     void EnsureInstanceCapacity(UINT capacity);
     
@@ -245,23 +231,10 @@ private:
     // These two resources are made on _primaryDevice only
     std::unique_ptr<GDX12SwapChain> _backBuffer;
     
-    GDX12RenderPass* _depthPrepass = nullptr;
-    GDX12RenderPass* _particleSimulationPass = nullptr;
-    GDX12ParticlesPass* _particlesPass = nullptr;
-    GDX12RenderPass* _opaquePass = nullptr;
-    GDX12DeferredLightingPass* _deferredLightingPass = nullptr;
-    GDX12LocalShadowPass* _localShadowPass = nullptr;
-    GDX12ReflectionProbePass* _reflectionPass = nullptr;
-    GDX12RenderPass* _ambientOcclusionPass = nullptr;
-    GDX12ReconstructionPass* _reconstructionPass = nullptr;
-
+    // The graph borrows pipeline passes and must be destroyed first.
+    std::unique_ptr<IRenderPipeline> _pipeline;
     std::unique_ptr<GDX12RenderGraph> _primaryGraph;
-    bool _graphEarlyAO = false;
     bool _graphReuseTextures = true;
-
-    // Owns pass implementations; execution is scheduled by the graph.
-    std::vector<std::unique_ptr<GDX12RenderPass>> _primaryRenderPasses;
-    std::vector<std::unique_ptr<GDX12RenderPass>> _secondaryRenderPasses;
 
     // Flags that are accumulated from every active RenderPass on the device
     // Defines which resources should be uploaded onto respective GPU
@@ -269,7 +242,6 @@ private:
     uint32_t _secondaryPipelineFlags;
     World* _skyWorld = nullptr;
     uint64_t _skyHash = 0;
-    uint64_t _grassWindOwner = 0;
     uint64_t _reflectionStaticHash = 0;
     uint64_t _reflectionDynamicHash = 0;
     UINT _instanceCount = 0;

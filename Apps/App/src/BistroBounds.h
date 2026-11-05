@@ -1,4 +1,6 @@
 #pragma once
+#include "Components/BistroGrassComponents.h"
+#include "Components/BistroWaterComponents.h"
 
 #include "BistroScene.h"
 #include "App.Base/ECS/World.h"
@@ -68,6 +70,8 @@ namespace BistroBounds
         // Only Dust/Steam are linked; the other scene additions retain detached snapshots.
         explicit Scene(World& world)
         {
+            RegisterBistroGrassComponents(world);
+            RegisterBistroWaterComponents(world);
             auto& ecs = world.GetECS();
             const auto add = [&](Entity entity, const BoundingBox& local, unsigned color)
             {

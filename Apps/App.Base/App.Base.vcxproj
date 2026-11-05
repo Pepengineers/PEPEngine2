@@ -29,10 +29,7 @@
     <ClInclude Include="Include\App.Base\ECS\Components\LightComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\SkyBoxComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\SkyAtmosphereComponent.h" />
-    <ClInclude Include="Include\App.Base\ECS\Components\FluidRenderComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\ReflectionProbeComponent.h" />
-    <ClInclude Include="Include\App.Base\ECS\Components\GrassRenderComponent.h" />
-    <ClInclude Include="Include\App.Base\ECS\Components\WindFieldComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\ParticleEmitterComponent.h" />
     <ClInclude Include="Include\App.Base\Systems\LightUpdateSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\ShadowVisibilitySystem.h" />
@@ -76,6 +73,11 @@
     <ClCompile Include="src\Physics\JoltPhysicsBackend.cpp" />
     <ClCompile Include="src\Physics\JoltJobSystem.cpp" />
     <ClCompile Include="src\RenderModule.cpp" />
+    <ClCompile Include="src\Rendering\CommonRenderPasses.cpp" />
+    <ClCompile Include="src\Rendering\DefaultRenderPipeline.cpp" />
+    <ClInclude Include="Include\App.Base\Rendering\IRenderPipeline.h" />
+    <ClInclude Include="Include\App.Base\Rendering\CommonRenderPasses.h" />
+    <ClInclude Include="Include\App.Base\Rendering\DefaultRenderPipeline.h" />
     <ClCompile Include="src\RenderModuleSkinning.cpp" />
     <ClCompile Include="src\SceneManagerModule.cpp" />
     <ClCompile Include="src\SceneTraversal.cpp" />

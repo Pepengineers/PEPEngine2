@@ -10,7 +10,7 @@ class GDX12WBOITCompositionPass : public GDX12RenderPass
 public:
     void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
     {
-        graph.SetName(_front ? "Front composition" : "Behind-water composition");
+        graph.SetName(_front ? "Conditional composition" : "Transparency composition");
         graph.Read(SharedResource::Scene);
         graph.ReadInputs(_inputs);
         graph.Read(SharedResource::Environment);
@@ -20,9 +20,11 @@ public:
     }
 
     void SetParticles(GDX12ParticlesPass* particles) { _particles = particles; }
+    void SetApplyOpaqueAerialPerspective(bool apply) { _applyOpaqueAerialPerspective = apply; }
+    void SetConditionalTransparency(GDX12WBOITTransparencyPass* transparency) { _front = transparency; }
 	GDX12WBOITCompositionPass(GDX12WBOITCompositionPass* reuse = nullptr,
         GDX12WBOITTransparencyPass* front = nullptr) : IN_OpaqueScene(nullptr), IN_TransparencyAccum(nullptr),
-		IN_Revealage(nullptr), _reuse(reuse), _front(front)
+		IN_Revealage(nullptr), _reuse(reuse), _front(front), _applyOpaqueAerialPerspective(front == nullptr)
 	{ 
 		_flags = RENDER_PASS_FLAG_NONE; 
 		_numInputs = 3;
@@ -53,7 +55,7 @@ public:
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
 		_compositionVS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "FullScreenVS.hlsl", nullptr, "VS", "vs");
 		const D3D_SHADER_MACRO frontDefines[] = { { "SKIP_OPAQUE_AERIAL", "1" }, { nullptr, nullptr } };
-		_compositionPS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "CompositionPass.hlsl", _front ? frontDefines : nullptr, "PS", "ps");
+		_compositionPS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "CompositionPass.hlsl", _applyOpaqueAerialPerspective ? nullptr : frontDefines, "PS", "ps");
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
@@ -159,6 +161,7 @@ public:
 	}
 
 private:
+    bool _applyOpaqueAerialPerspective = true;
     GDX12ParticlesPass* _particles = nullptr;
     struct Link final : IRenderPassLink
     {

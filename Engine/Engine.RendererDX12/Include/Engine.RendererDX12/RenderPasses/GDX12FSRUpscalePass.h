@@ -98,6 +98,10 @@ public:
 		dispatchDesc.transparencyAndComposition = ffxApiGetResourceDX12(nullptr, FFX_API_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		//dispatchDesc.flags = FFX_UPSCALE_FLAG_DRAW_DEBUG_VIEW;
 		dispatchDesc.flags = 0;
+
+        // FFX input descriptors declare shader-read state without read-only DSV bits.
+        if (depthStencil->GetResource()->GetCurrentState() & D3D12_RESOURCE_STATE_DEPTH_READ)
+            cmdList->ResourceBarrier({ depthStencil->GetResource()->GetCommonBarrier() });
 		for (UINT i = 0; i < _numOutputs; i++)
 		{
 			GDX12Texture* inputTexture = IN_Textures[i]->GetTexture();

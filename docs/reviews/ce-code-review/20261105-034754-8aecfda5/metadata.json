@@ -1,0 +1,94 @@
+{
+  "branch": "codex/bistro-render-extensions",
+  "completed_at": "2026-11-05T01:10:39.943599+00:00",
+  "cost": {
+    "host": "codex",
+    "scope": {
+      "changed_lines": 5521,
+      "deleted_band": "small",
+      "depth": "full",
+      "exec_nontest_lines": 2057,
+      "size_band": "large",
+      "unclassified_lines": {
+        ".filters": 13,
+        ".h": 1559,
+        ".hlsl": 16,
+        ".hlsli": 0,
+        ".vcxproj": 52
+      }
+    },
+    "stages": [
+      {
+        "elapsed_seconds": 0.799,
+        "ended_at": "2026-11-05T00:48:49.701454+00:00",
+        "facts": {
+          "changed_lines": 5521,
+          "deleted_band": "small",
+          "depth": "full",
+          "exec_nontest_lines": 2057,
+          "size_band": "large",
+          "unclassified_lines": {
+            ".filters": 13,
+            ".h": 1559,
+            ".hlsl": 16,
+            ".hlsli": 0,
+            ".vcxproj": 52
+          }
+        },
+        "stage": "scope",
+        "started_at": "2026-11-05T00:48:48.902209+00:00"
+      },
+      {
+        "elapsed_seconds": 53.389,
+        "ended_at": "2026-11-05T00:49:43.090362+00:00",
+        "reviewers": 8,
+        "stage": "select",
+        "started_at": "2026-11-05T00:48:49.701454+00:00"
+      },
+      {
+        "candidates": 0,
+        "elapsed_seconds": 776.881,
+        "ended_at": "2026-11-05T01:02:39.970948+00:00",
+        "facts": {
+          "refreshed_changed_lines": 6049,
+          "refreshed_exec_nontest_lines": 2060,
+          "refreshed_files": 78
+        },
+        "stage": "dispatch",
+        "started_at": "2026-11-05T00:49:43.090362+00:00"
+      },
+      {
+        "candidates": 0,
+        "elapsed_seconds": 73.346,
+        "ended_at": "2026-11-05T01:06:14.613432+00:00",
+        "stage": "merge",
+        "started_at": "2026-11-05T01:05:01.267540+00:00"
+      },
+      {
+        "candidates": 0,
+        "elapsed_seconds": 0.357,
+        "ended_at": "2026-11-05T01:06:34.045260+00:00",
+        "stage": "validate",
+        "started_at": "2026-11-05T01:06:33.687802+00:00"
+      },
+      {
+        "candidates": 0,
+        "elapsed_seconds": 121.092,
+        "ended_at": "2026-11-05T01:10:40.081371+00:00",
+        "stage": "report",
+        "started_at": "2026-11-05T01:08:38.989358+00:00"
+      }
+    ],
+    "status": "complete",
+    "totals": {
+      "artifact_bytes": 654003,
+      "candidates": 0,
+      "elapsed_seconds": 1025.864,
+      "reviewers": 8
+    },
+    "truncated_events": 0
+  },
+  "head_sha": "d2d2038b68deb3e7524681cc18dfe35cdfa46585",
+  "run_id": "20261105-034754-8aecfda5",
+  "verdict": "Ready to merge"
+}

@@ -14,6 +14,7 @@
 #include "BistroScene.h"
 #include "BistroReflections.h"
 #include "BistroGrass.h"
+#include "Rendering/BistroRenderPipeline.h"
 #include "BistroWater.h"
 #include "BistroCharacters.h"
 #include "BistroBounds.h"
@@ -70,8 +71,10 @@ namespace
                 }
             }
 
-            Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer));
             auto scenes = std::make_shared<SceneManagerModule>(scenePath);
+            auto renderer = std::make_shared<RenderModule>(GetWindow(), &Timer,
+                std::make_unique<BistroRenderPipeline>(scenes));
+            Locator.RegisterModule(renderer);
             ConfigureBistroProps(*scenes);
             Locator.RegisterModule(scenes);
             return BenchmarkEngine::AddModules();

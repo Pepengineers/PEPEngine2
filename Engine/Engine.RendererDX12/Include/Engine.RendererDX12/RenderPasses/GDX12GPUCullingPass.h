@@ -38,6 +38,7 @@ public:
 	// automatically uses IN_OUT_CameraVisibilityBuffers from cameraCBIndex
 	void Execute(GDX12CommandList* cmdList) override
 	{
+        if (!_resources->IndirectCommandsCache->GetElementCount()) return;
 		auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
 		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[_commonData->ActiveCameraCBufferIndex];
 

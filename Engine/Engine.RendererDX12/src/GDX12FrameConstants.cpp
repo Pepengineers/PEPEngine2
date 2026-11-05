@@ -18,6 +18,8 @@ GDX12FrameConstants::GDX12FrameConstants(GDX12Device* device)
     LocalLightCache = std::make_unique<GDX12UploadBuffer<GDX12LocalLightConstants>>(device, 1, EBufferType::Upload, false);
     TransformCache = std::make_unique<GDX12UploadBuffer<GDX12TransformConstants>>(device, 0, EBufferType::Upload, false);
     InstanceCache = std::make_unique<GDX12UploadBuffer<GDX12InstanceData>>(device, 0, EBufferType::Upload, false);
+    TransformCache->TrackChanges();
+    InstanceCache->TrackChanges();
     MaterialCache = std::make_unique<GDX12UploadBuffer<GDX12MaterialConstants>>(device, 0, EBufferType::Upload, false);
     LightCB = std::make_unique<GDX12UploadBuffer<GDX12LightConstants>>(device, 0, EBufferType::Upload, true);
     CameraCB = std::make_unique<GDX12UploadBuffer<GDX12CameraConstants>>(device, 0, EBufferType::Upload, true);

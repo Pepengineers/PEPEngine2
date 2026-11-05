@@ -17,41 +17,46 @@
 
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12FrameGenerationPass.h"
+#include "Engine.RendererDX12/GDX12FrameGeneration.h"
 #include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include "Engine.RendererDX12/GDX12ShadowCascades.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12CascadedShadowPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionProbePass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionPreviewPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12AmbientOcclusionPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12SSSRPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyFromSharedMemoryPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12TextureCopyToSharedMemoryPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12OutputToScreenPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12ReconstructionPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12SyncPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12DepthOfFieldPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12MotionBlurPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12FluidPass.h"
+#include "App.Base/Rendering/DefaultRenderPipeline.h"
 #include <cmath>
 #include "Common/ConsoleVariables.h"
 
 static AutoConsoleVariable<bool> GraphReuseTextures(L"Render.Graph.ReuseTextures", true,
     L"Reuse compatible transient graph textures. Disable to compare output and memory.", EConsoleVariableFlags::Default);
 
-RenderModule::RenderModule(Window* window, GameTimer* timer) :
-    _dualGPUMode(false), _window(window), _timer(timer),
+RenderModule::RenderModule(Window* window, GameTimer* timer)
+    : RenderModule(window, timer, std::make_unique<DefaultRenderPipeline>()) {}
+
+RenderModule::RenderModule(Window* window, GameTimer* timer, std::unique_ptr<IRenderPipeline> pipeline) :
+    _dualGPUMode(false), _window(window), _timer(timer), _pipeline(std::move(pipeline)),
     _primaryPipelineFlags(0), _secondaryPipelineFlags(0)
 {
+    if (!_pipeline) throw std::invalid_argument("Cannot use a null render pipeline");
     _RPcommonData.GameTimer = _timer;
+}
+
+RenderPipelineContext RenderModule::PipelineContext()
+{
+    return { *this, _primaryResources, _secondaryResources, _RPcommonData, _backBuffer.get() };
+}
+
+JobHandle RenderPipelineContext::PrepareScene()
+{
+    Runtime.CollectReflectionScene();
+    return Runtime._shadowVisibility.Schedule(*Common.Jobs, Primary.LocalLights,
+        *Primary.LocalShadowCasters, Primary.LocalShadowVisibility);
+}
+
+void RenderPipelineContext::Resize() { Runtime.OnResize(); }
+
+void RenderModule::RefreshPipelineFlags()
+{
+    _primaryPipelineFlags = _secondaryPipelineFlags = 0;
+    for (auto* pass : _pipeline->GetBindings().PrimaryPasses) _primaryPipelineFlags |= pass->GetFlags();
+    for (auto* pass : _pipeline->GetBindings().SecondaryPasses) _secondaryPipelineFlags |= pass->GetFlags();
 }
 
 RenderModule::~RenderModule()
@@ -61,12 +66,9 @@ RenderModule::~RenderModule()
     if (_uiInitialized) Engine::UI::ShutdownUI();
 
     _primaryGraph.reset();
-    for (auto& renderpass : _primaryRenderPasses) { renderpass->ClearDenendencies(); }
-    for (auto& renderpass : _secondaryRenderPasses) { renderpass->ClearDenendencies(); }
-
-    _primaryResources.Grass.reset();
-    _primaryRenderPasses.clear();
-    _secondaryRenderPasses.clear();
+    _primaryResources.GeometrySources.clear();
+    _secondaryResources.GeometrySources.clear();
+    _pipeline.reset();
     _backBuffer.reset();
     GDX12ShaderCompiler::Shutdown();
     GDX12DeviceFactory::Reset();
@@ -114,7 +116,11 @@ void RenderModule::Initialize()
     BuildBackBuffer();
     if (_dualGPUMode) { ShareFences(); }
     Log::Info("Renderer", "Configuring render passes and pipeline states");
-    ConfigureRenderPipeline();
+    auto context = PipelineContext();
+    _pipeline->Initialize(context);
+    if (!_pipeline->GetBindings().FrameGenerationInputs) _backBuffer->SetFrameGenerationSuspended(true);
+    RefreshPipelineFlags();
+    RebuildRenderGraph();
 
     Engine::UI::Initialize(_window->GetWindowHandle(), _primaryDevice.get(),
         static_cast<int>(_primaryResources.FrameConstants.size()), _backBuffer->GetFormat());
@@ -142,11 +148,18 @@ void RenderModule::OnResize()
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
-    if (_RPcommonData.Upscaler) { _RPcommonData.Upscaler->QueryRenderTargetResolution(); }
+    const bool rebuild = static_cast<bool>(_primaryGraph);
+    _primaryGraph.reset();
+    auto context = PipelineContext();
+    _pipeline->Resize(context);
+    RefreshPipelineFlags();
+    if (rebuild) RebuildRenderGraph();
+}
 
-    for (auto& renderPass : _primaryRenderPasses) { renderPass->Resize(); }
-    for (auto& renderPass : _secondaryRenderPasses) { renderPass->Resize(); }
-    if (_primaryGraph) RebuildRenderGraph();
+bool RenderModule::OwnsMaterial(const GDX12Material* material) const
+{
+    return std::any_of(_materials.begin(), _materials.end(),
+        [material](const auto& entry) { return entry.second.get() == material; });
 }
 
 GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
@@ -594,16 +607,6 @@ void RenderModule::SubscribeToWorld(World& world)
                 OnRenderComponentUpdated(world, entity, component);
             });
 
-    auto& grassPool = ecs.GetPool<GrassRenderComponent>();
-    const auto grassOwner = [this](Entity, GrassRenderComponent& component) { component._renderOwner = ++_grassWindOwner; };
-    subscriptions.GrassCreated = grassPool.OnComponentCreated.AddListener(grassOwner);
-    subscriptions.GrassUpdated = grassPool.OnComponentUpdated.AddListener(grassOwner);
-    ecs.ForEach<GrassRenderComponent>(grassOwner);
-    auto& windPool = ecs.GetPool<WindFieldComponent>();
-    const auto windOwner = [this](Entity, WindFieldComponent& component) { component._renderOwner = ++_grassWindOwner; };
-    subscriptions.WindCreated = windPool.OnComponentCreated.AddListener(windOwner);
-    subscriptions.WindUpdated = windPool.OnComponentUpdated.AddListener(windOwner);
-    ecs.ForEach<WindFieldComponent>(windOwner);
     auto& skeletalPool = ecs.GetPool<SkeletalMeshRenderComponent>();
     subscriptions.SkeletalDestroyed = skeletalPool.OnComponentDestroyed.AddListener(
         [this, &world](Entity entity, SkeletalMeshRenderComponent&) { ReleaseSkeletalState(world, entity); });
@@ -651,10 +654,6 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     {
         OnRenderComponentDestroyed(world, entity, component);
     });
-    ecs.GetPool<GrassRenderComponent>().OnComponentCreated.RemoveListener(subscriptions.GrassCreated);
-    ecs.GetPool<GrassRenderComponent>().OnComponentUpdated.RemoveListener(subscriptions.GrassUpdated);
-    ecs.GetPool<WindFieldComponent>().OnComponentCreated.RemoveListener(subscriptions.WindCreated);
-    ecs.GetPool<WindFieldComponent>().OnComponentUpdated.RemoveListener(subscriptions.WindUpdated);
     ++_primaryResources.ReflectionStaticRevision;
     ++_primaryResources.ReflectionWorldRevision;
     if (_skyWorld == &world)
@@ -866,6 +865,7 @@ void RenderModule::OnRenderComponentDestroyed(World&, Entity, StaticMeshRenderCo
     const GDX12IndirectDrawArgs empty = {};
     for (const auto index : component._CBufferIndices)
     {
+        _primaryResources.RemoveMeshPrimitive(index);
         if (_primaryResources.IndirectCommandsCache) _primaryResources.IndirectCommandsCache->CopyData(index, empty);
         if (_secondaryResources.IndirectCommandsCache) _secondaryResources.IndirectCommandsCache->CopyData(index, empty);
     }
@@ -886,13 +886,9 @@ void RenderModule::OnUpdate()
     if (_timer->DeltaTime() > 0.25f) _RPcommonData.RequestHistoryReset = true;
     uint16_t width, height;
     _window->GetWindowSize(width, height);
-    if (width && height && _reconstructionPass && _reconstructionPass->ApplySettings())
-    {
-        OnResize();
-        _primaryPipelineFlags = 0;
-        for (const auto& pass : _primaryRenderPasses) _primaryPipelineFlags |= pass->GetFlags();
-    }
-
+    auto context = PipelineContext();
+    if (width && height) _pipeline->UpdateFrameSettings(context);
+    RefreshPipelineFlags();
     auto consoleModule = BenchmarkEngine::GetLocator().GetModule<ConsoleModule>();
     const auto numFrames = consoleModule->FindConsoleVariable(L"Render.NumFrames").GetUInt();
 
@@ -931,51 +927,25 @@ void RenderModule::OnRender()
 {
     _RPcommonData.Jobs = &App::GetInstance()->GetJobs();
     _backBuffer->GetFrameGeneration().BeginRendering(_RPcommonData);
+    _primaryResources.BeginMeshPrimitiveUpdate();
     PrepareSkeletalMeshes();
     if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
         _primaryResources.UpdateMaterialCB(_materials);
     if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
         _secondaryResources.UpdateMaterialCB(_materials);
     CollectParticleEmitters();
-    if (_graphEarlyAO != (GetAmbientOcclusionExecutionPoint() == 0) ||
-        _graphReuseTextures != GraphReuseTextures.GetValue()) RebuildRenderGraph();
-    if (!_primaryResources.ParticleSimulation)
-        _primaryResources.ParticleSimulation = std::make_unique<GDX12ParticleSimulation>();
-    _primaryResources.ParticleSimulation->BeginFrame(&_primaryResources, _RPcommonData);
-    _particlesPass->BeginFrame();
     auto primarycmdQueue = _primaryDevice->GetCommandQueue();
     auto primarycmdList = primarycmdQueue->GetCommandList();
     _primaryGPUTimer->Start(primarycmdList);
-    _primaryResources.ParticleSimulation->InitializePools(primarycmdList, &_primaryResources);
     DispatchSkeletalMeshes(primarycmdList);
-    CollectGrassScene(primarycmdList);
-    {
-        GDX12_SCOPED_CPU_EVENT("Scene preparation");
-        CollectReflectionScene();
-        auto visibility = _shadowVisibility.Schedule(App::GetInstance()->GetJobs(), _primaryResources.LocalLights,
-            *_primaryResources.LocalShadowCasters, _primaryResources.LocalShadowVisibility);
-        try
-        {
-            _deferredLightingPass->Prepare();
-            {
-                GDX12_SCOPED_CPU_EVENT("Shadow visibility wait");
-                visibility.Complete();
-            }
-        }
-        catch (...)
-        {
-            try { visibility.Complete(); } catch (...) {}
-            throw;
-        }
-        _localShadowPass->Prepare();
-        _reflectionPass->Prepare();
-        _primaryResources.PrepareLocalShadowData();
-    }
+    auto context = PipelineContext();
+    const bool rebuild = _pipeline->PrepareFrame(context, primarycmdList);
+    RefreshPipelineFlags();
+    if (rebuild || _graphReuseTextures != GraphReuseTextures.GetValue()) RebuildRenderGraph();
 
     auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
-    _primaryResources.UploadLocalShadowData(primarycmdList);
     primarycmdList = _primaryGraph->Execute(primarycmdList,
-        !_dualGPUMode && GetParticleSettings().AsyncCompute ? _primaryDevice->TryGetComputeQueue() : nullptr);
+        !_dualGPUMode && _pipeline->GetBindings().UseAsyncCompute ? _primaryDevice->TryGetComputeQueue() : nullptr);
     if (_uiInitialized) Engine::UI::Render(primarycmdList, _backBuffer->GetCurrentBuffer());
     _primaryGPUTimer->Stop(primarycmdList);
     primarycmdQueue->ExecuteCommandList(primarycmdList);
@@ -992,7 +962,7 @@ void RenderModule::OnRender()
         _secondaryResources.PrepareLocalShadowData();
         _secondaryResources.UploadLocalShadowData(secondarycmdList);
         secondaryCurrentFrameConsts->UploadReflectionProbeData(secondarycmdList);
-        for (auto& renderPass : _secondaryRenderPasses)
+        for (auto* renderPass : _pipeline->GetBindings().SecondaryPasses)
         {
             if (renderPass->GetFlagValue(RENDER_PASS_FLAG_SYNC_DEVICES))
             {
@@ -1010,78 +980,6 @@ void RenderModule::OnRender()
 
     _backBuffer->GetFrameGeneration().EndRendering();
     _backBuffer->Present();
-}
-
-void RenderModule::CollectGrassScene(GDX12CommandList* commands)
-{
-    std::vector<GDX12GrassInstance> grass;
-    std::vector<GDX12WindInstance> wind;
-    const auto controls = GetGrassWindControls();
-    auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
-    if (controls.GrassEnabled && controls.GrassQuality > 0)
-    {
-        for (size_t worldIndex = 0; worldIndex < scenes->GetWorldCount(); ++worldIndex)
-        {
-            auto* world = scenes->GetWorld(worldIndex);
-            auto& ecs = world->GetECS();
-            ecs.ForEach<GrassRenderComponent>([&](Entity entity, GrassRenderComponent& component)
-            {
-                if (!component.Enabled || !component.Material || !ecs.Has<TransformComponent>(entity)) return;
-                if (!IsValidGrassSettings(component)) throw std::invalid_argument("Invalid GrassRenderComponent");
-                if (!GrassBladeCount(ResolveGrassSettings(component, controls.GrassQuality))) return;
-                const auto material = std::find_if(_materials.begin(), _materials.end(),
-                    [&](const auto& entry) { return entry.second.get() == component.Material; });
-                if (material == _materials.end() || component.Material->Type == MaterialType::Transparent)
-                    throw std::invalid_argument("Grass requires an owned opaque or masked material");
-                if (!component._renderOwner) component._renderOwner = ++_grassWindOwner;
-                const auto& transform = ecs.Get<TransformComponent>(entity);
-                GDX12GrassInstance instance;
-                static_cast<GDX12GrassSettings&>(instance) = component;
-                instance.Id = component._renderOwner;
-                instance.World = Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
-                    XMConvertToRadians(transform.Rotation.y), XMConvertToRadians(transform.Rotation.x),
-                    XMConvertToRadians(transform.Rotation.z)) * Matrix::CreateTranslation(transform.Location);
-                instance.MaterialIndex = component.Material->_CBufferIndex;
-                instance.ResetRevision = component.ResetRevision;
-                instance.MaterialRevision = component.Material->_revision;
-                if (component.WindEntity != InvalidEntity && ecs.Has<WindFieldComponent>(component.WindEntity) &&
-                    ecs.Has<TransformComponent>(component.WindEntity))
-                {
-                    auto& field = ecs.Get<WindFieldComponent>(component.WindEntity);
-                    if (field.Enabled && controls.WindEnabled && controls.WindQuality > 0)
-                    {
-                        if (!field._renderOwner) field._renderOwner = ++_grassWindOwner;
-                        instance.WindId = field._renderOwner;
-                        const auto found = std::find_if(wind.begin(), wind.end(), [&](const auto& item) { return item.Id == instance.WindId; });
-                        if (found == wind.end())
-                        {
-                            GDX12WindInstance snapshot;
-                            static_cast<GDX12WindSettings&>(snapshot) = field;
-                            snapshot.Id = field._renderOwner;
-                            const auto& location = ecs.Get<TransformComponent>(component.WindEntity).Location;
-                            snapshot.CenterCm = Vector2(location.x, location.z);
-                            snapshot.DeltaSeconds = field.Paused || world->IsPaused() ? 0 :
-                                _timer->DeltaTime() * world->GetTimeScale();
-                            wind.push_back(std::move(snapshot));
-                        }
-                    }
-                }
-                grass.push_back(std::move(instance));
-            });
-        }
-    }
-    if (!grass.empty() && !_primaryResources.Grass)
-        _primaryResources.Grass = std::make_unique<GDX12GrassRenderer>(&_primaryResources);
-    if (_primaryResources.Grass)
-    {
-        _primaryResources.Grass->BeginFrame(commands, _RPcommonData, std::move(grass), std::move(wind), controls);
-        BoundingBox bounds;
-        if (_primaryResources.Grass->HasCasters() && _primaryResources.Grass->GetBounds(bounds))
-            SubmitCameraShadows(BuildShadowCascades(_RPcommonData.CameraView.Invert(),
-                XMConvertToRadians(_RPcommonData.ActiveCameraFOV), GetAspectRatio(),
-                _RPcommonData.ActiveCameraNearPlane, _RPcommonData.ActiveCameraFarPlane,
-                Vector3(_primaryResources.Lighting.LightDirection), &bounds));
-    }
 }
 
 void RenderModule::CollectParticleEmitters()
@@ -1124,7 +1022,7 @@ void RenderModule::CollectReflectionScene()
     auto& resources = _primaryResources;
     if (!resources.LocalShadowCasters) resources.LocalShadowCasters.emplace();
     resources.LocalShadowCasters->clear();
-    if (resources.Grass) hash(dynamicHash, resources.Grass->Revision());
+    resources.GeometryRevision = 14695981039346656037ull;
     hash(staticHash, resources.ReflectionEnvironmentRevision);
     hash(staticHash, resources.Lighting.LightDirection);
     hash(staticHash, resources.Lighting.LightRadiance);
@@ -1133,7 +1031,6 @@ void RenderModule::CollectReflectionScene()
     for (const auto& light : resources.LocalLights) hash(staticHash, light);
     resources.ReflectionProbes.clear();
     resources.ReflectionPreviewDraws.clear();
-    resources.Fluids.clear();
     bool hasBounds = false;
     auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
     for (size_t worldIndex = 0; worldIndex < scenes->GetWorldCount(); ++worldIndex)
@@ -1144,84 +1041,41 @@ void RenderModule::CollectReflectionScene()
         ecs.ForEach<StaticMeshRenderComponent>([&](Entity entity, StaticMeshRenderComponent& renderer)
         {
             if (!ecs.Has<TransformComponent>(entity)) return;
-            if (!renderer.Visible) return;
             const auto* mesh = GetPrimaryGPUMesh(renderer.MeshHandler);
             for (size_t part = 0; part < renderer.GetSubMeshCount(mesh->SubMeshes.size()); ++part)
             {
-                const auto& submesh = mesh->SubMeshes.at(renderer.GetSubMeshIndex(part));
-                if (!renderer.Materials.at(submesh.MaterialIndex)->ReflectionProbePreview) continue;
+                const auto submeshIndex = renderer.GetSubMeshIndex(part);
+                const auto& submesh = mesh->SubMeshes.at(submeshIndex);
+                const auto* material = renderer.Materials.at(submesh.MaterialIndex);
+                const UINT instanceIndex = renderer._CBufferIndices.at(part);
+                const auto& instance = resources.FrameConstants[resources.CurrFrameConstantsIndex]->InstanceCache->GetCPUData()[instanceIndex];
+                GDX12RenderPrimitive primitive;
+                primitive.Bounds = { instance.BoundingBoxCenter, instance.BoundingBoxExtents };
+                primitive.TransformIndex = instance.TransformIndex;
+                primitive.FirstInstance = instanceIndex;
+                primitive.MaterialIndex = instance.MaterialIndex;
+                primitive.Visible = renderer.Visible;
+                primitive.Dynamic = renderer._reflectionDynamic;
+                primitive.CastsShadows = material->Type != MaterialType::Transparent && !material->ReflectionProbePreview;
+                primitive.CapturedInReflections = !material->ReflectionProbePreview;
+                primitive.GeometryRevision = 14695981039346656037ull;
+                hash(primitive.GeometryRevision, renderer.MeshHandler);
+                hash(primitive.GeometryRevision, mesh->ContentRevision);
+                hash(primitive.GeometryRevision, submeshIndex);
+                primitive.MaterialRevision = 14695981039346656037ull;
+                hash(primitive.MaterialRevision, material);
+                hash(primitive.MaterialRevision, material->_revision);
+                primitive.TransformRevision = 14695981039346656037ull;
+                hash(primitive.TransformRevision, resources.FrameConstants[resources.CurrFrameConstantsIndex]->TransformCache->GetCPUData()[instance.TransformIndex].WorldMatrix);
+                resources.PublishMeshPrimitive(instanceIndex, primitive);
+                if (!renderer.Visible || !material->ReflectionProbePreview) continue;
                 GDX12IndirectDrawArgs draw = {};
-                draw.InstanceID = draw.StartInstanceLocation = renderer._CBufferIndices.at(part);
+                draw.InstanceID = draw.StartInstanceLocation = instanceIndex;
                 draw.InstanceCount = 1;
                 draw.IndexCountPerInstance = submesh.IndexCount;
                 draw.StartIndexLocation = submesh.StartIndexLocation;
                 draw.BaseVertexLocation = submesh.StartVertexLocation;
                 resources.ReflectionPreviewDraws.push_back(draw);
-            }
-            if (std::all_of(renderer.Materials.begin(), renderer.Materials.end(),
-                [](const GDX12Material* material) { return material->ReflectionProbePreview != 0; })) return;
-            uint64_t signature = 14695981039346656037ull;
-            hash(signature, world);
-            const auto& transform = ecs.Get<TransformComponent>(entity);
-            hash(signature, entity);
-            hash(signature, renderer.MeshHandler);
-            hash(signature, GetPrimaryGPUMesh(renderer.MeshHandler)->ContentRevision);
-            hash(signature, transform.Location);
-            hash(signature, transform.Rotation);
-            hash(signature, transform.Scale);
-            for (const auto index : renderer.SubMeshIndices) hash(signature, index);
-            for (const auto* material : renderer.Materials)
-            {
-                hash(signature, material);
-                hash(signature, material->_revision);
-            }
-            hash(renderer._reflectionDynamic ? dynamicHash : staticHash, signature);
-            resources.LocalShadowCasters->push_back({ renderer.Bounds, signature, renderer._reflectionDynamic });
-            if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, renderer.Bounds);
-            else resources.ReflectionSceneBounds = renderer.Bounds;
-            hasBounds = true;
-        });
-        ecs.ForEach<FluidRenderComponent>([&](Entity entity, FluidRenderComponent& component)
-        {
-            if (!ecs.Has<TransformComponent>(entity)) return;
-            const auto& transform = ecs.Get<TransformComponent>(entity);
-            GDX12FluidInstance instance;
-            instance.Id = ((resources.ReflectionWorldRevision * 65599 + worldIndex) << 32) | entity;
-            instance.Component = component;
-            instance.ContainerToWorld = Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
-                XMConvertToRadians(transform.Rotation.y), XMConvertToRadians(transform.Rotation.x),
-                XMConvertToRadians(transform.Rotation.z)) * Matrix::CreateTranslation(transform.Location);
-            instance.DeltaSeconds = world->IsPaused() ? 0 : _timer->DeltaTime() * world->GetTimeScale();
-            ValidateFluidInstance(instance);
-            resources.Fluids.push_back(std::move(instance));
-        });
-        ecs.ForEach<SkeletalMeshRenderComponent>([&](Entity entity, SkeletalMeshRenderComponent&)
-        {
-            const auto found = _skeletalStates.find({world, entity});
-            if (found == _skeletalStates.end()) return;
-            uint64_t signature = 14695981039346656037ull;
-            hash(signature, world);
-            hash(signature, entity);
-            hash(signature, found->second.SceneRevision);
-            for (const auto& matrix : found->second.Pose) hash(signature, matrix);
-            if (ecs.Has<TransformComponent>(entity))
-            {
-                const auto& transform = ecs.Get<TransformComponent>(entity);
-                hash(signature, transform.Location);
-                hash(signature, transform.Rotation);
-                hash(signature, transform.Scale);
-            }
-            for (const auto& part : found->second.Parts)
-            {
-                auto partSignature = signature;
-                hash(partSignature, part.MeshRevision);
-                hash(partSignature, part.Material);
-                if (part.ActiveMaterial) hash(partSignature, part.ActiveMaterial->_revision);
-                hash(dynamicHash, partSignature);
-                resources.LocalShadowCasters->push_back({ part.Bounds, partSignature, true });
-                if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, part.Bounds);
-                else resources.ReflectionSceneBounds = part.Bounds;
-                hasBounds = true;
             }
         });
         ecs.ForEach<ReflectionProbeComponent>([&](Entity entity, ReflectionProbeComponent& component)
@@ -1243,12 +1097,32 @@ void RenderModule::CollectReflectionScene()
             resources.ReflectionProbes.push_back(probe);
         });
     }
-    BoundingBox grassBounds;
-    if (resources.Grass && resources.Grass->GetBounds(grassBounds))
+    resources.EndMeshPrimitiveUpdate();
+    resources.Primitives.ForEach([&](GDX12RenderPrimitiveHandle handle, const GDX12RenderPrimitive& primitive)
     {
-        resources.LocalShadowCasters->push_back({ grassBounds, resources.Grass->Revision(), true });
-        if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, grassBounds);
-        else resources.ReflectionSceneBounds = grassBounds;
+        if (!primitive.Visible || (!primitive.CastsShadows && !primitive.CapturedInReflections)) return;
+        auto signature = primitive.Revision();
+        hash(signature, handle.Index);
+        hash(signature, handle.Generation);
+        hash(resources.GeometryRevision, signature);
+        // Shadow contributors can change probe lighting even when capture geometry is excluded.
+        hash(primitive.Dynamic ? dynamicHash : staticHash, signature);
+        if (primitive.CastsShadows) resources.LocalShadowCasters->push_back({ primitive.Bounds, signature, primitive.Dynamic });
+        if (primitive.CapturedInReflections || primitive.CastsShadows)
+        {
+            if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, primitive.Bounds);
+            else resources.ReflectionSceneBounds = primitive.Bounds;
+            hasBounds = true;
+        }
+    });
+    if (!resources.LocalShadowCasters->empty())
+    {
+        auto casterBounds = resources.LocalShadowCasters->front().Bounds;
+        for (const auto& caster : *resources.LocalShadowCasters) BoundingBox::CreateMerged(casterBounds, casterBounds, caster.Bounds);
+        SubmitCameraShadows(BuildShadowCascades(_RPcommonData.CameraView.Invert(),
+            XMConvertToRadians(_RPcommonData.ActiveCameraFOV), GetAspectRatio(),
+            _RPcommonData.ActiveCameraNearPlane, _RPcommonData.ActiveCameraFarPlane,
+            Vector3(resources.Lighting.LightDirection), &casterBounds));
     }
     std::sort(resources.ReflectionProbes.begin(), resources.ReflectionProbes.end(),
         [](const auto& a, const auto& b) { return a.Id < b.Id; });
@@ -1295,109 +1169,6 @@ void RenderModule::ShareFences()
     ThrowIfFailed(_primaryDevice->GetDevice()->OpenSharedHandle(
         secondaryhandle,
         IID_PPV_ARGS(&_primaryDevice->GetCommandQueue()->GetOtherFence())));
-}
-
-void RenderModule::ConfigureRenderPipeline()
-{
-    auto* environmentPass = CreateRenderPass<GDX12EnvironmentIBLPass>();
-    auto* cullingPass = CreateRenderPass<GDX12GPUCullingPass>();
-    auto* depthPrepass = CreateRenderPass<GDX12OpaquePass>(GDX12OpaquePass::Stage::DepthPrepass);
-    auto* particleSimulationPass = CreateRenderPass<GDX12ParticleSimulationPass>();
-    _particleSimulationPass = particleSimulationPass;
-    auto* shadowPass = CreateRenderPass<GDX12CascadedShadowPass>();
-    auto* localShadowPass = CreateRenderPass<GDX12LocalShadowPass>();
-    _localShadowPass = localShadowPass;
-    auto* reflectionPass = CreateRenderPass<GDX12ReflectionProbePass>();
-    _reflectionPass = reflectionPass;
-    auto* opaquePass = CreateRenderPass<GDX12OpaquePass>(GDX12OpaquePass::Stage::GBuffer);
-    auto* aoPass = CreateRenderPass<GDX12AmbientOcclusionPass>();
-    auto* lightingPass = CreateRenderPass<GDX12DeferredLightingPass>();
-    _deferredLightingPass = lightingPass;
-    auto* reflectionPreviewPass = CreateRenderPass<GDX12ReflectionPreviewPass>();
-    auto* ssrPass = CreateRenderPass<GDX12SSSRPass>();
-    auto* fluidSurfacePass = CreateRenderPass<GDX12FluidSurfacePass>();
-    auto* transparencyPass = CreateRenderPass<GDX12WBOITTransparencyPass>(GDX12WBOITTransparencyPass::WaterPartition::Behind);
-    auto* compositionPass = CreateRenderPass<GDX12WBOITCompositionPass>();
-    auto* waterResolvePass = CreateRenderPass<GDX12FluidResolvePass>(fluidSurfacePass);
-    auto* frontPass = CreateRenderPass<GDX12WBOITTransparencyPass>(GDX12WBOITTransparencyPass::WaterPartition::Front);
-    auto* particlesPass = CreateRenderPass<GDX12ParticlesPass>();
-    _particlesPass = particlesPass;
-    auto* frontCompositionPass = CreateRenderPass<GDX12WBOITCompositionPass>(nullptr, frontPass);
-    auto* dofPass = CreateRenderPass<GDX12DepthOfFieldPass>();
-    auto* motionBlurPass = CreateRenderPass<GDX12MotionBlurPass>();
-    auto* upscalePass = CreateRenderPass<GDX12ReconstructionPass>();
-    auto* outputPass = CreateRenderPass<GDX12OutputToScreenPass>();
-    auto* frameGenerationPass = CreateRenderPass<GDX12FrameGenerationPass>(_backBuffer.get());
-    _reconstructionPass = upscalePass;
-    _depthPrepass = depthPrepass;
-    _opaquePass = opaquePass;
-    _ambientOcclusionPass = aoPass;
-    SetupRenderPasses();
-
-    reflectionPass->SetInputs({ environmentPass->GetOutput(0), environmentPass->GetOutput(1),
-        environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0) });
-    cullingPass->SetInputs({});
-    depthPrepass->SetInputs({});
-    particleSimulationPass->SetInputs({depthPrepass->GetOutput(2)});
-    opaquePass->SetInputs(std::vector<IRenderPassLink*>{ depthPrepass->GetOutput(2) });
-    aoPass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(3) });
-    lightingPass->SetInputs({ opaquePass->GetOutput(0), opaquePass->GetOutput(3), opaquePass->GetOutput(4), opaquePass->GetOutput(5), opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0), environmentPass->GetOutput(1), environmentPass->GetOutput(2), environmentPass->GetOutput(3), localShadowPass->GetOutput(0), aoPass->GetOutput(0) });
-    reflectionPreviewPass->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2),
-        opaquePass->GetOutput(1), opaquePass->GetOutput(3), opaquePass->GetOutput(4) });
-    fluidSurfacePass->SetInputs({ opaquePass->GetOutput(2), opaquePass->GetOutput(1) });
-    for (auto* pass : { transparencyPass, frontPass })
-        pass->SetInputs({ opaquePass->GetOutput(2), shadowPass->GetOutput(0), environmentPass->GetOutput(0),
-            environmentPass->GetOutput(1), environmentPass->GetOutput(2), localShadowPass->GetOutput(0),
-            fluidSurfacePass->GetOutput(0) });
-    ssrPass->SetInputs({ lightingPass->GetOutput(0), opaquePass->GetOutput(2), opaquePass->GetOutput(3),
-        opaquePass->GetOutput(4), opaquePass->GetOutput(1), environmentPass->GetOutput(1), environmentPass->GetOutput(2) });
-    compositionPass->SetInputs({ ssrPass->GetOutput(0), transparencyPass->GetOutput(0), transparencyPass->GetOutput(1), opaquePass->GetOutput(2) });
-    waterResolvePass->SetInputs({ compositionPass->GetOutput(0), environmentPass->GetOutput(1) });
-    frontCompositionPass->SetInputs({ waterResolvePass->GetOutput(0), frontPass->GetOutput(0), frontPass->GetOutput(1), fluidSurfacePass->GetOutput(0) });
-    dofPass->SetInputs({ frontCompositionPass->GetOutput(0), fluidSurfacePass->GetOutput(0) });
-    motionBlurPass->SetInputs({ dofPass->GetOutput(0), fluidSurfacePass->GetOutput(0), fluidSurfacePass->GetOutput(1) });
-    upscalePass->SetInputs({ fluidSurfacePass->GetOutput(0), motionBlurPass->GetOutput(1), motionBlurPass->GetOutput(0) });
-    particlesPass->SetInputs({ fluidSurfacePass->GetOutput(0), frontPass->GetOutput(0), frontPass->GetOutput(1) });
-    static_cast<GDX12WBOITCompositionPass*>(frontCompositionPass)->SetParticles(particlesPass);
-    outputPass->SetInputs({ upscalePass->GetOutput(0), _backBuffer.get()});
-    frameGenerationPass->SetInputs({ fluidSurfacePass->GetOutput(0), motionBlurPass->GetOutput(1), _backBuffer.get() });
-
-    depthPrepass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    opaquePass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    aoPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    lightingPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    transparencyPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    compositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    frontPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-    frontCompositionPass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-
-    InitializeRenderPasses();
-    RebuildRenderGraph();
-}
-
-void RenderModule::SetupRenderPasses()
-{
-    for (auto& pass : _primaryRenderPasses)
-    {
-        pass->Setup(&_primaryResources, &_secondaryResources, &_RPcommonData);
-        _primaryPipelineFlags |= pass->GetFlags();
-    }
-
-    for (auto& pass : _secondaryRenderPasses)
-    {
-        pass->Setup(&_secondaryResources, &_primaryResources, &_RPcommonData);
-        _secondaryPipelineFlags |= pass->GetFlags();
-    }
-}
-
-void RenderModule::InitializeRenderPasses()
-{
-    std::vector<GDX12RenderPass*> allRenderPasses;
-    for (auto& pass : _primaryRenderPasses)
-        allRenderPasses.push_back(pass.get());
-    for (auto& pass : _secondaryRenderPasses)
-        allRenderPasses.push_back(pass.get());
-    GDX12RenderPass::InitializeAll(std::move(allRenderPasses));
 }
 
 void RenderModule::SubscribeToSceneManager()
@@ -1486,8 +1257,9 @@ bool RenderModule::ShouldRender()
 
 const GDX12ReconstructionStatus& RenderModule::GetReconstructionStatus() const
 {
-    if (!_reconstructionPass) throw std::logic_error("Render pipeline has not been initialized");
-    return _reconstructionPass->GetStatus();
+    auto* reconstruction = _pipeline->GetBindings().Reconstruction;
+    if (!reconstruction) throw std::logic_error("Render pipeline has no reconstruction status");
+    return reconstruction->GetStatus();
 }
 
 void RenderModule::BeginFrame()
@@ -1498,6 +1270,7 @@ void RenderModule::BeginFrame()
 
 void RenderModule::SetFrameGenerationSuspended(bool suspended)
 {
+    if (!_pipeline->GetBindings().FrameGenerationInputs) return;
     if (!_backBuffer || _backBuffer->GetFrameGeneration().GetStatus().Suspended == suspended) return;
     _backBuffer->SetFrameGenerationSuspended(suspended);
     _RPcommonData.RequestHistoryReset = true;
@@ -1506,6 +1279,8 @@ void RenderModule::SetFrameGenerationSuspended(bool suspended)
 const GDX12FrameGenerationStatus& RenderModule::GetFrameGenerationStatus() const
 {
     if (!_backBuffer) throw std::logic_error("Render pipeline has not been initialized");
+    if (!_pipeline->GetBindings().FrameGenerationInputs)
+        throw std::logic_error("Render pipeline has no frame generation inputs");
     return _backBuffer->GetFrameGeneration().GetStatus();
 }
 
@@ -1520,20 +1295,11 @@ D3D12MA::Statistics RenderModule::GetMemoryStatistics() const
 void RenderModule::RebuildRenderGraph()
 {
     _primaryDevice->GetCommandQueue()->Flush();
-    _graphEarlyAO = GetAmbientOcclusionExecutionPoint() == 0;
     _graphReuseTextures = GraphReuseTextures.GetValue();
-    _RPcommonData.AOAfterDepthPrepass = _graphEarlyAO;
-    _ambientOcclusionPass->SetInputs({ _depthPrepass->GetOutput(2),
-        (_graphEarlyAO ? _depthPrepass : _opaquePass)->GetOutput(3) });
     auto graph = std::make_unique<GDX12RenderGraph>(_primaryDevice.get());
     graph->ImportShared(GDX12RenderGraph::SharedResource::Scene, "Scene and frame buffers");
     graph->ImportLink("Swapchain", _backBuffer.get());
-    for (const auto& pass : _primaryRenderPasses)
-    {
-        if (_graphEarlyAO && pass.get() == _ambientOcclusionPass) continue;
-        graph->AddPass(*pass);
-        if (_graphEarlyAO && pass.get() == _particleSimulationPass) graph->AddPass(*_ambientOcclusionPass);
-    }
+    _pipeline->BuildGraph(*graph, { _backBuffer.get() });
     graph->Compile(_graphReuseTextures);
     _primaryGraph = std::move(graph);
     _RPcommonData.RequestHistoryReset = true;

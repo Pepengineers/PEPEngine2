@@ -1,4 +1,4 @@
-#include "Engine.RendererDX12/RenderPasses/GDX12FluidPass.h"
+#include "Rendering/Water/GDX12FluidPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <algorithm>
 #include <cmath>
@@ -52,8 +52,8 @@ GDX12FluidSurfacePass::GDX12FluidSurfacePass()
 {
     _flags = RENDER_PASS_FLAG_USE_CAMERAS;
     _numInputs = 2;
-    _numOutputs = 2;
-    _outputs = { &_depthLink, &_motionLink };
+    _numOutputs = 4;
+    _outputs = { &_depthLink, &_motionLink, &_geometryLink, &_ownerLink };
 }
 GDX12FluidSurfacePass::~GDX12FluidSurfacePass() = default;
 
@@ -80,12 +80,12 @@ void GDX12FluidSurfacePass::CreatePipelines()
     solver.NumSingleSRVSlots = 4;
     solver.NumSingleUAVSlots = 4;
     _solverRoot = std::make_unique<GDX12RootSignature>(_resources->Device, solver);
-    _save = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "SavePrevious");
-    _hash = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "Hash");
-    _sort = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "Sort");
-    _offsets = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "BuildOffsets");
-    _densities = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "Densities");
-    _integrate = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), SHADERS_FOLDER "FluidSolver.hlsl", "Integrate");
+    _save = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "SavePrevious");
+    _hash = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Hash");
+    _sort = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Sort");
+    _offsets = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "BuildOffsets");
+    _densities = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Densities");
+    _integrate = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Integrate");
     GDX12RootSignatureDesc surface;
     surface.VolatileSRVData = true;
     surface.Constants = { 4 };
@@ -94,13 +94,13 @@ void GDX12FluidSurfacePass::CreatePipelines()
     surface.NumSingleUAVSlots = 6;
     surface.StaticSamplers = GetStaticSamplers();
     _surfaceRoot = std::make_unique<GDX12RootSignature>(_resources->Device, surface);
-    _initialize = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), SHADERS_FOLDER "FluidSurface.hlsl", "InitializeSurface");
-    _filter = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), SHADERS_FOLDER "FluidSurface.hlsl", "NarrowRange");
-    _merge = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), SHADERS_FOLDER "FluidSurface.hlsl", "MergeSurface");
-    _resolve = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), SHADERS_FOLDER "FluidSurface.hlsl", "ResolveWater");
+    _initialize = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), APP_SHADERS_FOLDER "FluidSurface.hlsl", "InitializeSurface");
+    _filter = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), APP_SHADERS_FOLDER "FluidSurface.hlsl", "NarrowRange");
+    _merge = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), APP_SHADERS_FOLDER "FluidSurface.hlsl", "MergeSurface");
+    _resolve = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), APP_SHADERS_FOLDER "FluidSurface.hlsl", "ResolveWater");
     auto& compiler = GDX12ShaderCompiler::GetInstance();
-    auto vs = compiler.CompileShader(_resources->Device, SHADERS_FOLDER "FluidSurface.hlsl", nullptr, "SphereVS", "vs");
-    auto ps = compiler.CompileShader(_resources->Device, SHADERS_FOLDER "FluidSurface.hlsl", nullptr, "SpherePS", "ps");
+    auto vs = compiler.CompileShader(_resources->Device, APP_SHADERS_FOLDER "FluidSurface.hlsl", nullptr, "SphereVS", "vs");
+    auto ps = compiler.CompileShader(_resources->Device, APP_SHADERS_FOLDER "FluidSurface.hlsl", nullptr, "SpherePS", "ps");
     D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
     desc.pRootSignature = _surfaceRoot->GetRootSignature().Get();
     desc.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
@@ -118,7 +118,7 @@ void GDX12FluidSurfacePass::CreatePipelines()
     desc.RTVFormats[1] = DXGI_FORMAT_R32_FLOAT;
     desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
     ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_sphere)));
-    ps = compiler.CompileShader(_resources->Device, SHADERS_FOLDER "FluidSurface.hlsl", nullptr, "ThicknessPS", "ps");
+    ps = compiler.CompileShader(_resources->Device, APP_SHADERS_FOLDER "FluidSurface.hlsl", nullptr, "ThicknessPS", "ps");
     desc.PS = { ps->GetBufferPointer(), ps->GetBufferSize() };
     desc.DepthStencilState.DepthEnable = false;
     desc.DSVFormat = DXGI_FORMAT_UNKNOWN;
@@ -172,6 +172,8 @@ void GDX12FluidSurfacePass::CreateTargets()
     _motion = texture(DXGI_FORMAT_R16G16_FLOAT);
     _geometry = texture(DXGI_FORMAT_R32G32B32A32_FLOAT);
     _owner = texture(DXGI_FORMAT_R32_UINT);
+    _geometryLink.Target = _geometry.get();
+    _ownerLink.Target = _owner.get();
     _color = texture(DXGI_FORMAT_R16G16B16A16_FLOAT);
     _scratchDepth = std::make_unique<GDX12Texture>();
     GDX12TextureDesc depth;
@@ -191,7 +193,7 @@ void GDX12FluidSurfacePass::PrepareStates()
 {
     std::set<uint64_t> alive;
     bool retire = false;
-    for (const auto& instance : _resources->Fluids)
+    for (const auto& instance : _instances)
     {
         ValidateFluidInstance(instance);
         const auto& source = instance.Component.GetParticles();
@@ -217,7 +219,7 @@ void GDX12FluidSurfacePass::PrepareStates()
     for (auto it = _states.begin(); it != _states.end();)
         if (!alive.count(it->first)) it = _states.erase(it);
         else ++it;
-    for (const auto& instance : _resources->Fluids)
+    for (const auto& instance : _instances)
     {
         const auto& source = instance.Component.GetParticles();
         const auto& author = instance.Component.GetSettings();
@@ -252,6 +254,35 @@ void GDX12FluidSurfacePass::PrepareStates()
             state->SeedUpload->CopyData(i, { position, velocity, position });
         }
     }
+}
+
+std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::GetResolveBufferAccesses() const
+{
+    std::vector<GDX12RenderGraph::BufferAccess> accesses;
+    for (const auto& [id, state] : _states)
+        accesses.push_back({ &state->Constants->GetResource(), GDX12RenderGraph::Mode::Read });
+    if (_resources && _resources->CurrFrameConstantsIndex < _resources->FrameConstants.size())
+    {
+        const auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+        if (frame->CameraCB) accesses.push_back({ &frame->CameraCB->GetResource(), GDX12RenderGraph::Mode::Read });
+        if (frame->ReflectionProbes) accesses.push_back({ &frame->ReflectionProbes->GetResource(), GDX12RenderGraph::Mode::Read });
+    }
+    return accesses;
+}
+
+std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::GetBufferAccesses() const
+{
+    auto accesses = GetResolveBufferAccesses();
+    for (const auto& [id, state] : _states)
+    {
+        for (const auto& particles : state->Particles)
+            accesses.push_back({ &particles->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
+        accesses.push_back({ &state->Density->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
+        accesses.push_back({ &state->Keys->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
+        accesses.push_back({ &state->Offsets->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
+        if (state->SeedUpload) accesses.push_back({ &state->SeedUpload->GetResource(), GDX12RenderGraph::Mode::Read });
+    }
+    return accesses;
 }
 
 void GDX12FluidSurfacePass::Simulate(GDX12CommandList* commands, State& state, const GDX12FluidSettings& settings, const float elapsed)
@@ -409,22 +440,23 @@ void GDX12FluidSurfacePass::DrawSurface(GDX12CommandList* commands, State& state
         _geometry->GetResource()->GetUAVBarrier(), _owner->GetResource()->GetUAVBarrier() });
 }
 
-void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
+void GDX12FluidSurfacePass::PrepareFrame()
 {
+    if (_prepared) return;
     const auto previousControls = _controls;
     _controls = GetFluidControls();
     PrepareStates();
     _depthLink.Target = _inputs[0]->GetTexture();
     _motionLink.Target = _inputs[1]->GetTexture();
     bool rendering = false;
-    bool simulating = false;
-    for (const auto& instance : _resources->Fluids)
+    _simulating = false;
+    for (const auto& instance : _instances)
     {
         const auto& seed = instance.Component.GetParticles();
         if (!seed || seed->empty()) continue;
         const auto& settings = instance.Component.GetSettings();
         rendering |= _controls.Enabled && settings.RenderEnabled;
-        simulating |= _controls.Enabled && settings.SimulationEnabled;
+        _simulating |= _controls.Enabled && settings.SimulationEnabled;
     }
     const bool changed = rendering != _rendering || previousControls.Enabled != _controls.Enabled ||
         previousControls.Quality != _controls.Quality;
@@ -435,18 +467,33 @@ void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
         _resources->Device->GetCommandQueue()->Flush();
         ReleaseTargets();
     }
-    if (!rendering && !simulating)
+    if (!rendering && !_simulating)
     {
         for (auto& [id, state] : _states) state->WasRendered = false;
+        _prepared = true;
         return;
     }
     CreatePipelines();
     if (rendering) CreateTargets();
+    _prepared = true;
+}
+
+void GDX12FluidSurfacePass::SetInstances(std::vector<GDX12FluidInstance> instances)
+{
+    _instances = std::move(instances);
+    _prepared = false;
+}
+
+void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
+{
+    if (!_prepared) PrepareFrame();
+    _prepared = false;
+    if (!_rendering && !_simulating) return;
     GDX12_SCOPED_EVENT(commands, "Fluid SPH and NRF surface", Colors::Aqua);
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     bool initialized = false;
     UINT owner = 0;
-    for (const auto& instance : _resources->Fluids)
+    for (const auto& instance : _instances)
     {
         ++owner;
         auto found = _states.find(instance.Id);
@@ -527,7 +574,7 @@ GDX12Texture* GDX12FluidSurfacePass::Resolve(GDX12CommandList* commands, GDX12Te
         _depth->GetResource()->GetSRVBarrier(), _inputs[0]->GetTexture()->GetResource()->GetNonPixelShaderResourceBarrier() });
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     UINT owner = 0;
-    for (const auto& instance : _resources->Fluids)
+    for (const auto& instance : _instances)
     {
         ++owner;
         auto found = _states.find(instance.Id);
@@ -574,6 +621,7 @@ void GDX12FluidSurfacePass::ReleaseTargets()
     _motion.reset();
     _geometry.reset();
     _owner.reset();
+    _geometryLink.Target = _ownerLink.Target = nullptr;
     _color.reset();
 }
 
@@ -581,6 +629,7 @@ void GDX12FluidSurfacePass::ClearDenendencies()
 {
     GDX12RenderPass::ClearDenendencies();
     _states.clear();
+    _instances.clear();
     ReleaseTargets();
     _solverRoot.reset();
     _surfaceRoot.reset();
@@ -597,7 +646,7 @@ void GDX12FluidSurfacePass::ClearDenendencies()
     _merge.Reset();
     _resolve.Reset();
     _depthLink.Target = _motionLink.Target = nullptr;
-    _rendering = false;
+    _rendering = _simulating = _prepared = false;
 }
 
 GDX12FluidResolvePass::GDX12FluidResolvePass(GDX12FluidSurfacePass* surface) : _surface(surface)
@@ -607,7 +656,8 @@ GDX12FluidResolvePass::GDX12FluidResolvePass(GDX12FluidSurfacePass* surface) : _
     _numOutputs = 1;
     _outputs = { &_color };
 }
-void GDX12FluidResolvePass::Initialize() { _color.Target = _inputs[0]->GetTexture(); }
+void GDX12FluidResolvePass::Initialize() { PrepareFrame(); }
+void GDX12FluidResolvePass::PrepareFrame() { _color.Target = _inputs[0]->GetTexture(); }
 void GDX12FluidResolvePass::Execute(GDX12CommandList* commands)
 {
     _color.Target = _surface->Resolve(commands, _inputs[0]->GetTexture(), _inputs[1]->GetTexture());

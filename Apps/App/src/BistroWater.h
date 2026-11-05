@@ -1,6 +1,7 @@
 #pragma once
 
 #include "App.Base/ECS/World.h"
+#include "Components/BistroWaterComponents.h"
 #include "App.Base/ECS/WorldLoader.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Systems/IndirectCommandBuildSystem.h"
@@ -21,6 +22,7 @@ namespace BistroWater
     public:
         void Update(World& world, float)
         {
+            RegisterBistroWaterComponents(world);
             auto& ecs = world.GetECS();
             const size_t requested = static_cast<size_t>(Count.GetValue());
             while (_basins.size() > requested)

@@ -1,3 +1,4 @@
+#include "Rendering/BistroRenderPipeline.h"
 #include "App.Base/App.h"
 #include "../src/BistroScene.h"
 #include <d3d12sdklayers.h>
@@ -6,6 +7,7 @@
 #include <stdexcept>
 #include <chrono>
 #include <fstream>
+#include <map>
 
 static void Set(const wchar_t* name, const char* value)
 {
@@ -101,11 +103,42 @@ public:
         Timer.Reset();
         Timer.Stop();
         auto render = Locator.GetModule<RenderModule>();
+        auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+        auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
+        camera.Location = Vector3(-300, 200, 20);
+        camera.Rotation = Vector3(0, 117, 0);
+        camera.DirtyFlag = true;
+        world.GetECS().Get<CameraComponent>(world.ActiveCamera).InvalidateHistory();
         Set(L"Render.Upscaler.Provider", "0");
         Set(L"Render.SSR.Enabled", "false");
         Set(L"Render.DOF.Enabled", "false");
         Set(L"Render.MotionBlur.Enabled", "false");
         Set(L"Render.Reflection.Enabled", "false");
+        Set(L"Render.Particles.Enabled", "true");
+        // Atomic particle compaction changes FP16 blend order even with a zero simulation delta.
+        Set(L"Render.Particles.DrawEnabled", "false");
+        // Atomic culling reorders transparency and the asset's coplanar ceramic/plate-details overlays.
+        std::map<GDX12Material*, std::pair<MaterialType, float>> materialStates;
+        bool plateOverlayFound = false;
+        world.GetECS().ForEach<StaticMeshRenderComponent>([&](Entity, StaticMeshRenderComponent& mesh)
+        {
+            const auto& imported = render->GetPrimaryGPUMesh(mesh.MeshHandler)->CPUMesh->GetMaterials();
+            for (size_t slot = 0; slot < mesh.Materials.size(); ++slot)
+            {
+                auto* material = mesh.Materials[slot];
+                const bool plateOverlay = material && material->Type == MaterialType::Masked &&
+                    slot < imported.size() && imported[slot].Name == "Plates_Details";
+                plateOverlayFound |= plateOverlay;
+                if (material && (material->Type == MaterialType::Transparent || plateOverlay))
+                {
+                    materialStates.try_emplace(material, material->Type, material->Opacity);
+                    material->Type = MaterialType::Transparent;
+                    material->Opacity = 0;
+                    material->DirtyFlag = true;
+                }
+            }
+        });
+        if (!plateOverlayFound) throw std::runtime_error("Fixture did not find the coplanar plate overlay");
         Set(L"Render.AO.Implementation", "0");
         Set(L"Render.AO.Enabled", "0");
         Frame();
@@ -120,9 +153,9 @@ public:
         {
             Set(L"Render.AO.ExecutionPoint", early ? "0" : "1");
             std::vector<BYTE> reference;
-            for (bool reuse : { false, true, false })
+            for (bool reuse : { false, false, true, false })
             {
-                for (bool async : { false, true, false })
+                for (bool async : { false, false, true, false })
                 {
                     Set(L"Render.Particles.AsyncCompute", async ? "true" : "false");
                     Set(L"Render.Graph.ReuseTextures", reuse ? "true" : "false");
@@ -132,18 +165,24 @@ public:
                     output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
                     const auto pixels = CaptureHDR(*output);
                     if (reference.empty()) reference = pixels;
-                    else if (pixels != reference) throw std::runtime_error("Bistro pooled output differs from dedicated HDR output");
+                    else if (pixels != reference) throw std::runtime_error("Bistro HDR differs from the first dedicated capture (reuse=" +
+                        std::to_string(reuse) + ", async=" + std::to_string(async) + ")");
                     const auto stats = render->GetRenderGraphStatistics();
                     if (reuse && stats.PhysicalTextures >= stats.TransientTextures) throw std::runtime_error("Bistro graph did not reuse textures");
                     if (!reuse && stats.PhysicalTextures != stats.TransientTextures) throw std::runtime_error("Dedicated graph mode still shares textures");
                     if (stats.AsyncPasses != (async ? 1u : 0u)) throw std::runtime_error("Bistro particle queue selection failed");
-                    if (async && stats.JoinBefore != "Reflection probe meshes")
-                        throw std::runtime_error("Bistro joined before its first depth writer");
-                    std::cout << "Bistro earlyAO=" << early << " reuse=" << reuse << " async=" << async << " textures="
+                    if (async && stats.JoinBefore != "Fluid surface")
+                        throw std::runtime_error("Bistro joined before its first declared depth hazard: " + stats.JoinBefore);
+                    std::cout << "Bistro earlyAO=" << early << " reuse=" << reuse << " async=" << async << " passes=" << stats.Passes << " textures="
                         << stats.PhysicalTextures << '/' << stats.TransientTextures << " join=" << stats.JoinBefore
                         << " HDR readback identical" << std::endl;
                 }
             }
+            const auto directory = std::filesystem::path(SOLUTION_DIR) / "Build/Verification";
+            std::filesystem::create_directories(directory);
+            std::ofstream graph(directory / (early ? "bistro-early-ao.dot" : "bistro-late-ao.dot"));
+            render->WriteRenderGraph(graph);
+            if (!graph) throw std::runtime_error("Cannot write Bistro render graph");
         }
         Set(L"Render.Graph.ReuseTextures", "true");
         Set(L"Render.AO.Enabled", "1");
@@ -156,8 +195,8 @@ public:
                 for (int frame = 0; frame < 4; ++frame) Frame();
                 render->WaitForUploads();
                 CheckMessages(*info.Get());
-                if (render->GetRenderGraphStatistics().JoinBefore != "Reflection probe meshes")
-                    throw std::runtime_error("Active AO joined its shared depth reader early");
+                if (render->GetRenderGraphStatistics().JoinBefore != "Fluid surface")
+                    throw std::runtime_error("Active AO joined its shared depth reader early: " + render->GetRenderGraphStatistics().JoinBefore);
                 std::cout << "Bistro shared depth: active AO=" << implementation << " early=" << early << " passed." << std::endl;
             }
         Set(L"Render.SSR.Enabled", "true");
@@ -166,6 +205,13 @@ public:
         Set(L"Render.Reflection.Enabled", "true");
         Set(L"Render.Particles.AsyncCompute", "true");
         std::cout << "Bistro async: all effects and odd resize started." << std::endl;
+        Set(L"Render.Particles.DrawEnabled", "true");
+        for (const auto& [material, state] : materialStates)
+        {
+            material->Type = state.first;
+            material->Opacity = state.second;
+            material->DirtyFlag = true;
+        }
         SetWindowPos(GetWindow()->GetWindowHandle(), nullptr, 0, 0, 973, 657, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         for (int frame = 0; frame < 4; ++frame) Frame();
         render->WaitForUploads();
@@ -225,8 +271,10 @@ public:
 protected:
     bool AddModules() override
     {
-        Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer));
         auto scenes = std::make_shared<SceneManagerModule>(std::filesystem::path(ASSETS_FOLDER) / "Scenes/Amazon Lumberyard Bistro");
+        auto renderer = std::make_shared<RenderModule>(GetWindow(), &Timer,
+            std::make_unique<BistroRenderPipeline>(scenes));
+        Locator.RegisterModule(renderer);
         ConfigureBistroProps(*scenes);
         Locator.RegisterModule(scenes);
         Locator.RegisterModule(std::make_shared<PhysicsModule>(_jobs));

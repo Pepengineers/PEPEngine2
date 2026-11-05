@@ -1,0 +1,249 @@
+{
+  "status": "complete",
+  "verdict": "Ready to merge",
+  "verdict_reason": "No primary or actionable findings survived eight local review lenses. All explicit requirements and implementation units are represented; the documented coverage and hardware limits remain. This verdict covers the isolated reviewed worktree, not integration into main.",
+  "scope": {
+    "base": "6dea962",
+    "branch": "codex/bistro-render-extensions",
+    "head_sha": "d2d2038b68deb3e7524681cc18dfe35cdfa46585",
+    "pr_url": null,
+    "files_changed": 78,
+    "mode": "standalone"
+  },
+  "intent": "Move render-graph composition from RenderModule into explicit application-owned Default and Bistro pipelines while preserving the shared runtime/executor and existing visual behavior. Keep Bistro water/grass/wind ownership in App and use a shared static/skinned/grass primitive/batch consumer path with per-view preparation and correct frame-slot lifetime.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "project-standards",
+    "testing",
+    "maintainability",
+    "performance",
+    "api-contract",
+    "reliability",
+    "adversarial"
+  ],
+  "findings": [],
+  "actionable_findings": [],
+  "triage_groups": [],
+  "pre_existing_findings": [],
+  "requirements_completeness": {
+    "plan": "docs/plans/2026-11-05-0014-refactor-bistro-render-extensions-plan.md",
+    "plan_source": "explicit",
+    "requirements": [
+      {
+        "id": "R1",
+        "status": "met",
+        "evidence": "Bistro owns water state/passes/shaders and grass/wind adapters; earlier grass relocation is baseline context."
+      },
+      {
+        "id": "R2",
+        "status": "met",
+        "evidence": "Default pipeline and base-only consumer exclude Bistro effects; ownership and project audits accompany caller link/GPU evidence."
+      },
+      {
+        "id": "R3",
+        "status": "met",
+        "evidence": "CommonRenderPasses retains shared particles, atmosphere, AO/SSR, lighting, skinning, shadows and post-processing."
+      },
+      {
+        "id": "R4",
+        "status": "met",
+        "evidence": "DefaultRenderPipeline and BistroRenderPipeline explicitly instantiate/link/add passes; obsolete extension hooks are removed."
+      },
+      {
+        "id": "R5",
+        "status": "met",
+        "evidence": "RenderModule retains device/frame/queue ownership and graph execution; pipelines declare links and dependencies."
+      },
+      {
+        "id": "R6",
+        "status": "met",
+        "evidence": "Pipeline AO rebinding precedes view preparation; composition tests cover both placements and an independent application pass."
+      },
+      {
+        "id": "R7",
+        "status": "met",
+        "evidence": "Prepared view jobs and shared batch consumers preserve grass depth/GBuffer, shadow/probe participation, revisions and static filtering."
+      },
+      {
+        "id": "R8",
+        "status": "met",
+        "evidence": "Explicit Far/water/Near composition preserves aliases and single particle/aerial composition; isolated active-water mesh oracle remains a testing limit."
+      },
+      {
+        "id": "R9",
+        "status": "met",
+        "evidence": "Bistro owns effect snapshots/delta and world listeners; graph construction does not simulate; physics remains outside render ownership."
+      },
+      {
+        "id": "R10",
+        "status": "met",
+        "evidence": "Lifecycle/query/config compatibility is retained; caller final Debug/Release SR/FG and resize checks passed; secondary-device hardware remains unverified."
+      },
+      {
+        "id": "R11",
+        "status": "met",
+        "evidence": "Static/skinned/grass sources use primitive/batch contracts and the shared emitter, with declared preparation accesses and ordered arena reuse."
+      }
+    ],
+    "implementation_units": [
+      {
+        "id": "U1",
+        "status": "met",
+        "evidence": "IRenderPipeline, explicit Default/Bistro composition, shared runtime and focused composition/lifecycle tests are present."
+      },
+      {
+        "id": "U2",
+        "status": "met",
+        "evidence": "Primitive registry, mesh/skinned/grass batch consumers and prepared shadow/probe view jobs replace the grass draw bridge."
+      },
+      {
+        "id": "U3",
+        "status": "met",
+        "evidence": "Bistro water ownership and explicit Far/Near transparency, aliases and composition checks are present."
+      },
+      {
+        "id": "U4",
+        "status": "met",
+        "evidence": "Callers, projects, component registration and shader ownership are updated; earlier config migration remains baseline context."
+      },
+      {
+        "id": "U5",
+        "status": "met",
+        "evidence": "Pipeline guide and final validation record document observed checks, provenance and limits; delivery commits remain caller-owned."
+      }
+    ],
+    "unrequested_behavior_rules": [],
+    "reverse_check": "No unrequested user/caller behavior rule identified against the plan and reviewed diff. Upload initialization, concurrent-read handoff and SDK depth-state fixes restore the planned visual/compatibility contract."
+  },
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [
+    "CPU frame cost of the documented 4,620-node Bistro topology remains unmeasured. Engine/Engine.RendererDX12/src/GDX12RenderGraph.cpp:402 queries node buffer accesses; Apps/App/src/Rendering/Grass/BistroGrassGeometry.cpp:131 delegates to DrawAccesses, whose Apps/App/src/Rendering/Grass/GDX12GrassRenderer.cpp:644-645 includes all prepared output constants. Per-frame allocations and linear output lookup also remain. No baseline/candidate timing establishes a consequential regression or an FPS gain."
+  ],
+  "testing_gaps": [
+    "Active-water transparent-mesh Far/Near membership lacks an isolated pixel oracle. Apps/App/tests/WaterCompositionChecks.h:110-131 covers absent/empty/disabled water; existing nonzero All-partition glass, real-water depth/HDR and particle tests cover separate cases. A deterministic transparent triangle in front of, behind and outside a visible water surface should assert expected and opposite partition coverage and final HDR. Preserved shader comparisons and existing pixel tests reduce the risk; no new rendering defect was established.",
+    "Apps/App/tests/BistroRenderGraphTests.cpp:104-117 disables particle drawing and zeroes transparent material opacity for exact pooled/dedicated HDR comparison; lines 159-164 restore them before resize/SR smoke. Thus nonzero transparent/particle blending is outside that equality oracle. Independent nonzero transparency and particle fixtures supply partial coverage, but do not directly compare nonzero pooling output."
+  ],
+  "coverage": {
+    "depth": "full",
+    "reviewer_selection": [
+      {
+        "reviewer": "correctness",
+        "reason": "always-on"
+      },
+      {
+        "reviewer": "project-standards",
+        "reason": "AGENTS.md instruction fallback applies to every changed file"
+      },
+      {
+        "reviewer": "testing",
+        "reason": "test fixtures and harnesses changed"
+      },
+      {
+        "reviewer": "maintainability",
+        "reason": "substantial ownership and interface refactor"
+      },
+      {
+        "reviewer": "performance",
+        "reason": "per-view batch preparation and resource allocation loops changed"
+      },
+      {
+        "reviewer": "api-contract",
+        "reason": "shared RenderModule/pipeline and geometry contracts have evidenced downstream consumers"
+      },
+      {
+        "reviewer": "reliability",
+        "reason": "frame-slot lifecycle, GPU resource preparation, rebuild/shutdown ordering changed"
+      },
+      {
+        "reviewer": "adversarial",
+        "reason": "large executable diff and concurrency/ordering semantics; no different-provider CLI installed"
+      }
+    ],
+    "failed_reviewers": [],
+    "timed_out_reviewers": [],
+    "suppressed_by_confidence": {},
+    "suppressed_count": 0,
+    "mode_aware_demotion_count": 0,
+    "settlement_suppressed_count": 0,
+    "first_evidence_backfilled": 0,
+    "quote_gate_demotions": 0,
+    "malformed_findings": 0,
+    "malformed_returns": 0,
+    "validator": {
+      "outcome": "empty-batch",
+      "reason": "Merge selected zero findings; no validator launch required.",
+      "selected": 0,
+      "confirmed": 0,
+      "rejected": 0,
+      "unresolved": 0,
+      "malformed": 0,
+      "failed": 0,
+      "shortcut_skipped": 0,
+      "protected_subject_reclassifications": 0,
+      "degraded_blockers": 0,
+      "evidence_basis": "Empty primary set; no validator launched and no cross-model shortcut used."
+    },
+    "project_standards": {
+      "criteria": [
+        {
+          "path": "AGENTS.md",
+          "governs": "all changed files",
+          "kind": "instruction fallback"
+        }
+      ],
+      "fallback_named": true,
+      "not_run_reason": null
+    },
+    "compound_packs": {
+      "roots": [],
+      "warnings": [],
+      "errors": []
+    },
+    "review_policy": {
+      "sources": [],
+      "removed": 0,
+      "regraded": 0,
+      "not_applied": []
+    },
+    "scope_facts": {
+      "changed_lines": 6073,
+      "exec_nontest_lines": 2060,
+      "size_band": "large",
+      "deleted_band": "small"
+    },
+    "notes": [
+      "Scope: standalone base:6dea962 against tracked working tree, including committed/staged/unstaged changes.",
+      "Project standards: AGENTS.md instruction-file fallback; no designated CODING_STANDARDS.md or CLAUDE.md found.",
+      "No applicable REVIEW.md at base. No declared packs or learnings corpus.",
+      "Initial sandbox TEMP path changed per command; normal TEMP stage artifacts copied into symlink-checked ignored worktree Build/Verification/ce-review-scratch for persistent read/write collection.",
+      "Parent supplied hardware/build/test evidence was not independently rerun by this report-only review. No build/GPU/test execution in review leaves.",
+      "Review baseline 6dea962 is immutable borrowed async/particle snapshot from main; physics excluded. No integration into main checkout reviewed.",
+      "RTX3060Laptop only; secondary-device executor disabled at baseline; no second GPU or FPS claims.",
+      "Earlier shader include/config key migration/grass relocation lie outside selected diff and may be inspected only for related ownership/compatibility completeness.",
+      "Scope refreshed during dispatch after parent explicitly staged application-render-pipelines.md and validation.md; both now included. Reviewed tree includes final transparent-opacity deterministic fixture; parent may append final validation report results only.",
+      "Caller reports latest current-helper Debug SecondGroup/Graph/Object/App/Editor and Release MemoryAllocator builds passed; current Debug SecondGroup GPU clean. Exact pool HDR comparison zeroes transparent material opacity and disables particle draw, restores both before resize/SR; byte identity covers opaque contribution/full graph only. Independent nonzero WBOIT/particle oracles cover transparency; isolated active-water transparent-mesh pixel oracle absent.",
+      "All eight selected local reviewers returned terminal schema artifacts and compact JSON; no reviewer failures. Reliability performed focused follow-up on late SDK handoffs and ObjectDataJobs fixture controls. Adversarial also reviewed refreshed delta before terminal return.",
+      "Performance compact return corrects artifact references: BistroGrassGeometry.cpp:135 should read131; GDX12GrassRenderer.cpp:650-651 should read644-645.",
+      "Final artifact run persisted under resolved docs root; initial unstable TEMP and ignored Build scratch were adaptations only. No detached peer job exists.",
+      "Final helper facts: {\"changed_lines\": 6073, \"exec_nontest_lines\": 2060, \"size_band\": \"large\", \"deleted_band\": \"small\"}",
+      "Cross-model pass: not run (no different-provider CLI installed); adversarial lens covered by in-process adversarial reviewer.",
+      "Synthesis: eight local reviewers produced zero primary or pre-existing candidates; no semantic duplicates, settlement conflicts, policy changes, or mode-aware finding demotions. No malformed returns or findings.",
+      "Confidence suppression: none; quote-gate demotions: 0; first_evidence_backfilled: 0.",
+      "Validator shortcut-skipped: 0; no cross-model-independent corroboration exists. Selected batch: 0 findings, because the primary set is empty; dispatch should record empty-batch without launching a validator.",
+      "Earlier reviewer-cut SR/FG failures, pending SDK verification, pending Release builds and pre-refresh adversarial scope exclusions are superseded by the final dispatch evidence: reviewed SDK handoffs, final Debug and Release 36-frame clean SR/FG runs, Release EXIT0, and final Release builds. Review leaves did not independently rerun those checks.",
+      "Exact pooled/dedicated HDR equality exercises opaque contribution with particle drawing disabled and transparent opacity zero, then restores both before resize/SR; independent nonzero transparency and particle oracles do not establish nonzero pooled/dedicated equality. No rendering defect was established.",
+      "Final caller evidence: SDK-fix Release ObjectDataJobs/App/App.Editor/SecondGroup/Base builds passed; clean-source Release 36-frame Bistro SR/FG smoke completed EXIT0 with clean D3D12 validation. Final Debug smoke also passed. Earlier failures/pending notes are superseded; review leaves did not rerun execution.",
+      "No source/test/config/index/ref edits, builds, GPU/tests, commits, pushes or external messages were performed by this report leaf. Stage 5c was not authorized.",
+      "Requirements completeness checks implementation coverage within the selected diff and preserved baseline context; it does not certify untested hardware, long-run stability or integration into main."
+    ]
+  },
+  "peer": {
+    "outcome": "in-process-fallback",
+    "coverage": "Cross-model pass: not run (no different-provider CLI installed); adversarial lens covered by in-process adversarial reviewer."
+  },
+  "artifact_path": "D:/Project/PEPEngine2/.worktrees/bistro-render-extensions/docs/reviews/ce-code-review/20261105-034754-8aecfda5",
+  "run_id": "20261105-034754-8aecfda5"
+}

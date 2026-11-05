@@ -1,12 +1,16 @@
 #pragma once
-#include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12GeometryViewPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <array>
 #include <cstring>
 
-class GDX12CascadedShadowPass final : public GDX12RenderPass
+class GDX12CascadedShadowPass final : public GDX12GeometryViewPass
 {
 public:
+    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
+    { return _resources ? _resources->GetGeometryBufferAccesses(GDX12GeometryStage::Shadow) : std::vector<GDX12RenderGraph::BufferAccess>{}; }
+
     void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
     {
         graph.SetName("Sun shadows");
@@ -97,23 +101,46 @@ public:
         _visibility.resize(_resources->FrameConstants.size());
     }
 
-    void Execute(GDX12CommandList* commands) override
+    void Prepare()
     {
-        if (_atlasNeedsClear)
+        if (_prepared) return;
+        const auto& lighting = _resources->Lighting;
+        _updating = (lighting.SunShadowFlags & 1u) != 0u &&
+            ((lighting.SunShadowFlags & 2u) != 0u || !_rendered ||
+                _cachedGeometryRevision != _resources->GeometryRevision || _cachedRevision != lighting.SunShadowRevision ||
+                std::memcmp(&_cachedSettings, &_resources->ShadowSettings, sizeof(_cachedSettings)) != 0);
+        if (_updating)
+        {
+            _preparedSettings = _resources->ShadowSettings;
+            _preparedGeometryRevision = _resources->GeometryRevision;
+            _preparedRevision = lighting.SunShadowRevision;
+            for (UINT cascade = 0; cascade < 4; ++cascade)
+            {
+                auto& view = _views[cascade];
+                view = { GDX12GeometryStage::Shadow, Matrix(_preparedSettings.ViewProj[cascade]).Transpose(),
+                    _commonData->CameraView.Invert().Translation() };
+                view.Key = (2ull << 60) | cascade;
+                view.FrameSlot = _resources->CurrFrameConstantsIndex;
+                view.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+            }
+        }
+        _prepared = true;
+    }
+
+    UINT GetGeometryViewCapacity() const override { return 4; }
+    const GDX12GeometryContext* GetGeometryView(UINT slot) const override
+    { return _prepared && _updating && slot < _views.size() ? &_views[slot] : nullptr; }
+
+    void BeginGeometry(GDX12CommandList* commands) override
+    {
+        if (!_prepared) Prepare();
+        if (_atlasNeedsClear && !_updating)
         {
             commands->ResourceBarrier({ _atlas->GetResource()->GetDepthWriteBarrier() });
             commands->GetCommandList()->ClearDepthStencilView(_atlas->GetDSV()->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
             _atlasNeedsClear = false;
         }
-        const auto& lighting = _resources->Lighting;
-        if ((lighting.SunShadowFlags & 1u) == 0u)
-        {
-            commands->ResourceBarrier({ _atlas->GetResource()->GetSRVBarrier() });
-            return;
-        }
-        const uint64_t grassRevision = _resources->Grass ? _resources->Grass->Revision() : 0;
-        if ((lighting.SunShadowFlags & 2u) == 0u && _rendered && _cachedGrassRevision == grassRevision && _cachedRevision == lighting.SunShadowRevision &&
-            std::memcmp(&_cachedSettings, &_resources->ShadowSettings, sizeof(_cachedSettings)) == 0) return;
+        if (!_updating) return;
         const UINT count = _resources->IndirectCommandsCache->GetElementCount();
         auto& visibility = _visibility[_resources->CurrFrameConstantsIndex];
         auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
@@ -146,53 +173,77 @@ public:
 
         commands->ResourceBarrier({ _atlas->GetResource()->GetDepthWriteBarrier(),
             visibility.Counters->GetResource().GetIndirectArgsBarrier() });
-        commands->SetGraphicsRootSignature(_graphicsRoot.get());
-        commands->SetPipelineState(_shadowPSO);
-        commands->SetGraphicsRootConstantBufferView(1, frame->ShadowCB->GetElementAddress(0));
-        commands->SetGraphicsSRV(0, frame->ShadowMaterials->GetSRV()->GPUHandle);
-        commands->SetGraphicsSRV(1, frame->ShadowTransforms->GetSRV()->GPUHandle);
-        commands->SetGraphicsSRV(2, frame->ShadowInstances->GetSRV()->GPUHandle);
-        commands->SetGraphicsSRV(3, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex));
-        commands->SetGeometryBuffer(_resources->GeometryBuffer.get());
-        commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         commands->SetRenderTargets({}, _atlas.get());
         commands->GetCommandList()->ClearDepthStencilView(_atlas->GetDSV()->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1.0f, 0, 0, nullptr);
-        for (UINT cascade = 0; cascade < 4; ++cascade)
-        {
-            const UINT x = (cascade & 1u) * 2048;
-            const UINT y = (cascade >> 1u) * 2048;
-            commands->SetViewport({ static_cast<float>(x), static_cast<float>(y), 2048.0f, 2048.0f, 0.0f, 1.0f });
-            commands->SetScissorRect({ static_cast<LONG>(x), static_cast<LONG>(y), static_cast<LONG>(x + 2048), static_cast<LONG>(y + 2048) });
-            commands->GetCommandList()->SetGraphicsRoot32BitConstant(0, cascade, 1);
-            commands->ResourceBarrier({ visibility.Commands[cascade]->GetResource().GetIndirectArgsBarrier() });
-            if (count) commands->ExecuteIndirect(_signature.Get(), count,
-                visibility.Commands[cascade]->GetResource().D3DResource.Get(), 0,
-                visibility.Counters->GetResource().D3DResource.Get(), cascade * sizeof(UINT));
-        }
-        if (_resources->Grass && _resources->Grass->HasCasters())
-        {
-            for (UINT cascade = 0; cascade < 4; ++cascade)
-            {
-                const UINT x = (cascade & 1u) * 2048;
-                const UINT y = (cascade >> 1u) * 2048;
-                commands->SetViewport({ static_cast<float>(x), static_cast<float>(y), 2048, 2048, 0, 1 });
-                commands->SetScissorRect({ static_cast<LONG>(x), static_cast<LONG>(y), static_cast<LONG>(x + 2048), static_cast<LONG>(y + 2048) });
-                commands->SetRenderTargets({}, _atlas.get());
-                _resources->Grass->Draw(commands, GDX12GrassRenderer::Stage::Shadow,
-                    Matrix(_resources->ShadowSettings.ViewProj[cascade]).Transpose(),
-                    _commonData->CameraView.Invert().Translation(), 0);
-            }
-        }
-        _cachedGrassRevision = grassRevision;
+        _atlasNeedsClear = false;
+    }
+
+    void BindGeometryViewTargets(GDX12CommandList* commands, UINT cascade) override
+    {
+        if (!GetGeometryView(cascade)) return;
+        commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
+        commands->ResourceBarrier({ _atlas->GetResource()->GetDepthWriteBarrier() });
+        commands->SetRenderTargets({}, _atlas.get());
+        const UINT x = (cascade & 1u) * 2048;
+        const UINT y = (cascade >> 1u) * 2048;
+        commands->SetViewport({ static_cast<float>(x), static_cast<float>(y), 2048.0f, 2048.0f, 0.0f, 1.0f });
+        commands->SetScissorRect({ static_cast<LONG>(x), static_cast<LONG>(y), static_cast<LONG>(x + 2048), static_cast<LONG>(y + 2048) });
+    }
+
+    void ExecuteGeometryView(GDX12CommandList* commands, UINT cascade) override
+    {
+        const auto* prepared = GetGeometryView(cascade);
+        if (!prepared) return;
+        BindGeometryViewTargets(commands, cascade);
+        auto& visibility = _visibility[_resources->CurrFrameConstantsIndex];
+        auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+        const UINT count = _resources->IndirectCommandsCache->GetElementCount();
+        GDX12GraphicsBindings binding;
+        binding.Stage = GDX12GeometryStage::Shadow;
+        binding.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+        binding.IndirectSignature = _signature.Get();
+        binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
+        binding.Heap = _resources->SRV_UAV_Heap.get();
+        binding.Root = _graphicsRoot.get();
+        binding.Pipeline = _shadowPSO;
+        binding.CBVs.push_back({ 1, frame->ShadowCB->GetElementAddress(0) });
+        binding.SRVs.push_back({ 0, frame->ShadowMaterials->GetSRV()->GPUHandle });
+        binding.SRVs.push_back({ 1, frame->ShadowTransforms->GetSRV()->GPUHandle });
+        binding.SRVs.push_back({ 2, frame->ShadowInstances->GetSRV()->GPUHandle });
+        binding.SRVs.push_back({ 3, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex) });
+        binding.Constants = { { 0, cascade, 1 } };
+        commands->ResourceBarrier({ visibility.Commands[cascade]->GetResource().GetIndirectArgsBarrier() });
+        auto view = *prepared;
+        view.IncludeApplicationGeometry = !_splitGeometry;
+        GDX12RenderBatch mesh;
+        mesh.Binding = &binding;
+        mesh.Geometry = _resources->GeometryBuffer.get();
+        mesh.InstanceCount = count;
+        mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _signature.Get(),
+            count ? visibility.Commands[cascade]->GetResource().D3DResource.Get() : nullptr, 0,
+            count ? visibility.Counters->GetResource().D3DResource.Get() : nullptr, cascade * sizeof(UINT),
+            count, sizeof(GDX12IndirectDrawArgs) };
+        _resources->EmitGeometry(commands, view, mesh);
+    }
+
+    void EndGeometry(GDX12CommandList* commands) override
+    {
         commands->ResourceBarrier({ _atlas->GetResource()->GetSRVBarrier() });
-        _rendered = true;
-        _cachedSettings = _resources->ShadowSettings;
-        _cachedRevision = lighting.SunShadowRevision;
+        if (_updating)
+        {
+            _cachedGeometryRevision = _preparedGeometryRevision;
+            _rendered = true;
+            _cachedSettings = _preparedSettings;
+            _cachedRevision = _preparedRevision;
+        }
+        _prepared = false;
+        _updating = false;
     }
 
     void ClearDenendencies() override
     {
         GDX12RenderPass::ClearDenendencies();
+        _prepared = _updating = _rendered = false;
         _visibility.clear();
         _atlas.reset();
         _graphicsRoot.reset();
@@ -204,6 +255,11 @@ public:
     }
 
 private:
+    std::array<GDX12GeometryContext, 4> _views;
+    bool _prepared = false, _updating = false;
+    GDX12ShadowConstants _preparedSettings;
+    uint64_t _preparedGeometryRevision = 0;
+    UINT _preparedRevision = 0;
     bool _atlasNeedsClear = true;
     template<typename T>
     std::unique_ptr<GDX12UploadBuffer<T>> CreateBuffer(UINT count)
@@ -223,7 +279,7 @@ private:
     ComPtr<ID3D12PipelineState> _shadowPSO, _cullingPSO, _clearPSO;
     ComPtr<ID3D12CommandSignature> _signature;
     GDX12ShadowConstants _cachedSettings;
-    uint64_t _cachedGrassRevision = 0;
+    uint64_t _cachedGeometryRevision = 0;
     UINT _cachedRevision = 0;
     bool _rendered = false;
 };

@@ -6,14 +6,16 @@
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12Material.h"
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
-#include "Engine.RendererDX12/GDX12GrassRenderer.h"
 #include "Engine.RendererDX12/GDX12Particles.h"
-#include "Engine.RendererDX12/GDX12Fluid.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
+#include "Engine.RendererDX12/GDX12RenderGeometry.h"
 #include <optional>
 
 class GDX12Device;
 class GameTimer;
+class IRenderGeometrySource;
+class GDX12RenderGraphBuilder;
+struct GDX12GeometryContext;
 
 class GDX12DeviceResources
 {
@@ -39,7 +41,16 @@ public:
     std::unordered_map <std::string, ComPtr<ID3D12CommandSignature>> CommandSignatures;
     std::unordered_map<std::string, std::unique_ptr<GDX12Texture>> Textures;
 
-    std::unique_ptr<GDX12GrassRenderer> Grass;
+    std::vector<IRenderGeometrySource*> GeometrySources; // Borrowed from the pipeline owner.
+    GDX12RenderPrimitiveRegistry Primitives;
+    void BeginMeshPrimitiveUpdate();
+    GDX12RenderPrimitiveHandle PublishMeshPrimitive(UINT instance, const GDX12RenderPrimitive& primitive);
+    void RemoveMeshPrimitive(UINT instance);
+    void EndMeshPrimitiveUpdate();
+    void GatherGeometryBatches(const GDX12GeometryContext&, const GDX12RenderBatch& mesh, std::vector<GDX12RenderBatch>&) const;
+    void EmitGeometry(GDX12CommandList*, const GDX12GeometryContext&, const GDX12RenderBatch& mesh);
+    std::vector<GDX12RenderGraph::BufferAccess> GetGeometryBufferAccesses(GDX12GeometryStage stage) const;
+    uint64_t GeometryRevision = 0;
     GDX12Device* Device;
     GDX12MainConstants Lighting;
     GDX12SkyState Sky;
@@ -52,7 +63,6 @@ public:
     GDX12Texture* ParticleMotion = nullptr; // Borrowed for this frame only, owned by the particles pass.
     std::vector<GDX12ReflectionProbe> ReflectionProbes;
     std::vector<GDX12IndirectDrawArgs> ReflectionPreviewDraws;
-    std::vector<GDX12FluidInstance> Fluids;
     GDX12Descriptor ReflectionRadianceSRV;
     uint64_t ReflectionWorldRevision = 0;
     uint64_t ReflectionStaticRevision = 0;
@@ -69,4 +79,8 @@ public:
     void UpdateMaterialCB(std::unordered_map<std::string, std::unique_ptr<GDX12Material>>& materials);
     void PrepareLocalShadowData();
     void UploadLocalShadowData(GDX12CommandList* commands);
+private:
+    struct MeshPrimitive { GDX12RenderPrimitiveHandle Handle; uint64_t Epoch; };
+    std::unordered_map<UINT, MeshPrimitive> _meshPrimitives;
+    uint64_t _meshPrimitiveEpoch = 0;
 };

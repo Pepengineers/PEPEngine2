@@ -1,6 +1,48 @@
 #pragma once
 #include "PlacementTiming.h"
 
+static GDX12GeometryContext GrassTestView(GDX12DeviceResources& resources, GDX12GrassRenderer::Stage stage,
+    const Matrix& vp, Vector3 eye, D3D12_GPU_VIRTUAL_ADDRESS camera, const GDX12GrassRenderer::CaptureLighting* lighting = nullptr)
+{
+    const GDX12GeometryStage stages[] = { GDX12GeometryStage::Forward, GDX12GeometryStage::GBuffer,
+        GDX12GeometryStage::DepthNormals, GDX12GeometryStage::Depth, GDX12GeometryStage::Shadow, GDX12GeometryStage::ReflectionCapture };
+    GDX12GeometryContext view{ stages[static_cast<UINT>(stage)], vp, eye, camera };
+    view.Key = 1;
+    view.FrameSlot = resources.CurrFrameConstantsIndex;
+    view.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+    if (stage == GDX12GrassRenderer::Stage::Full || stage == GDX12GrassRenderer::Stage::GBuffer)
+    {
+        view.ColorTargetCount = 5;
+        view.ColorFormats = { DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R16G16_FLOAT,
+            DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16B16A16_FLOAT };
+    }
+    else if (stage == GDX12GrassRenderer::Stage::Capture || stage == GDX12GrassRenderer::Stage::PrepassNormals)
+    {
+        view.ColorTargetCount = 1;
+        view.ColorFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+    }
+    view.CaptureLighting = lighting;
+    return view;
+}
+
+static void EmitPreparedGrass(GDX12GrassRenderer& renderer, GDX12DeviceResources& resources,
+    GDX12CommandList* commands, GDX12GrassRenderer::Stage stage, const Matrix& vp, Vector3 eye,
+    D3D12_GPU_VIRTUAL_ADDRESS camera, const GDX12GrassRenderer::CaptureLighting* lighting = nullptr)
+{
+    auto view = GrassTestView(resources, stage, vp, eye, camera, lighting);
+    for (UINT patch = 0; patch < renderer.PatchCount(); ++patch) renderer.PrepareView(view, patch);
+    for (UINT patch = 0; patch < renderer.PatchCount(); ++patch)
+    {
+        renderer.Expand(commands, view, patch);
+        view.BatchOffset = patch;
+        view.BatchCount = 1;
+        std::vector<GDX12RenderBatch> batches;
+        renderer.GatherBatches(view, batches);
+        for (const auto& batch : batches) GDX12EmitRenderBatch(commands, view, batch);
+    }
+}
+
+
 static void BenchmarkGrassPlacement(GDX12Device& device, GDX12DeviceResources& resources,
     const RenderPipelineCommonData& common, GDX12Texture* depth, const Matrix& vp, Vector3 eye)
 {
@@ -38,13 +80,14 @@ static void BenchmarkGrassPlacement(GDX12Device& device, GDX12DeviceResources& r
             {
                 resources.CurrFrameConstantsIndex = slot;
                 if (edited) grass.RootsCm[0].x += iteration % 2 ? 0.125f : -0.125f;
-                renderer.BeginFrame(commands, common, {grass}, {}, controls);
+                renderer.BeginFrame(common, {grass}, {}, controls);
+                renderer.PrepareGPU(commands);
                 commands->ResourceBarrier({depth->GetResource()->GetDepthWriteBarrier()});
                 commands->ClearDepthStencilView(depth);
                 commands->SetViewport(depth->GetViewport());
                 commands->SetScissorRect(depth->GetScissorRect());
                 commands->SetRenderTargets({}, depth);
-                renderer.Draw(commands, GDX12GrassRenderer::Stage::Depth, vp, eye,
+                EmitPreparedGrass(renderer, resources, commands, GDX12GrassRenderer::Stage::Depth, vp, eye,
                     resources.FrameConstants[slot]->CameraCB->GetElementAddress(0));
             });
     resources.CurrFrameConstantsIndex = previousSlot;
@@ -219,7 +262,8 @@ static void TestGrassStages(GDX12Device& device, GDX12DeviceResources& resources
         };
         publish();
         commands = queue->GetCommandList();
-        renderer.BeginFrame(commands, stageCommon, {grass}, {}, controls);
+        renderer.BeginFrame(stageCommon, {grass}, {}, controls);
+        renderer.PrepareGPU(commands);
         queue->ExecuteCommandList(commands);
         queue->Flush();
         GDX12GrassRenderer::CaptureLighting lighting;
@@ -242,7 +286,7 @@ static void TestGrassStages(GDX12Device& device, GDX12DeviceResources& resources
             if (stage == GDX12GrassRenderer::Stage::Capture) commands->SetRenderTargets({&surfaces[4]}, depth);
             else if (stage == GDX12GrassRenderer::Stage::PrepassNormals) commands->SetRenderTargets({&surfaces[2]}, depth);
             else commands->SetRenderTargets({&surfaces[0], &surfaces[1], &surfaces[2], &surfaces[3], &surfaces[4]}, depth);
-            renderer.Draw(commands, stage, vp, eye, frame.CameraCB->GetElementAddress(0), &lighting);
+            EmitPreparedGrass(renderer, resources, commands, stage, vp, eye, frame.CameraCB->GetElementAddress(0), &lighting);
             queue->ExecuteCommandList(commands);
             queue->Flush();
         };
@@ -254,7 +298,8 @@ static void TestGrassStages(GDX12Device& device, GDX12DeviceResources& resources
         Require(read(surfaces[2], 3).first > 0.49, "Grass prepass lost normal/roughness coverage");
         grass.World = Matrix::CreateTranslation(2, 0, 0);
         commands = queue->GetCommandList();
-        renderer.BeginFrame(commands, stageCommon, {grass}, {}, controls);
+        renderer.BeginFrame(stageCommon, {grass}, {}, controls);
+        renderer.PrepareGPU(commands);
         queue->ExecuteCommandList(commands);
         queue->Flush();
         draw(GDX12GrassRenderer::Stage::Full);
@@ -262,7 +307,8 @@ static void TestGrassStages(GDX12Device& device, GDX12DeviceResources& resources
         material.EmissiveColor.x = 0.75f;
         ++grass.MaterialRevision;
         commands = queue->GetCommandList();
-        renderer.BeginFrame(commands, stageCommon, {grass}, {}, controls);
+        renderer.BeginFrame(stageCommon, {grass}, {}, controls);
+        renderer.PrepareGPU(commands);
         queue->ExecuteCommandList(commands);
         queue->Flush();
         publish();
@@ -289,7 +335,7 @@ static void TestGrassStages(GDX12Device& device, GDX12DeviceResources& resources
 }
 
 static void TestGrassPlacement(GDX12Device& device, GDX12DeviceResources& resources,
-    const RenderPipelineCommonData& common, GDX12Texture* depth, const Matrix& vp, Vector3 eye)
+    const RenderPipelineCommonData& common, GDX12Texture* depth, const Matrix& vp, Vector3 eye, GDX12GrassRenderer& originalRenderer)
 {
     auto* queue = device.GetCommandQueue();
     const UINT previousSlot = resources.CurrFrameConstantsIndex;
@@ -346,14 +392,15 @@ static void TestGrassPlacement(GDX12Device& device, GDX12DeviceResources& resour
         {
             resources.CurrFrameConstantsIndex = slot;
             auto* commands = queue->GetCommandList();
-            renderer.BeginFrame(commands, common, owners, {}, controls);
+            renderer.BeginFrame(common, owners, {}, controls);
+            renderer.PrepareGPU(commands);
             commands->ResourceBarrier({depth->GetResource()->GetDepthWriteBarrier()});
             commands->GetCommandList()->ClearDepthStencilView(depth->GetDSV()->CPUHandle,
                 D3D12_CLEAR_FLAG_DEPTH, shadow ? 1.0f : 0.0f, 0, 0, nullptr);
             commands->SetViewport(depth->GetViewport());
             commands->SetScissorRect(depth->GetScissorRect());
             commands->SetRenderTargets({}, depth);
-            renderer.Draw(commands, stage, vp, eye,
+            EmitPreparedGrass(renderer, resources, commands, stage, vp, eye,
                 resources.FrameConstants[slot]->CameraCB->GetElementAddress(0));
             commands->ResourceBarrier({depth->GetResource()->GetCopySourceBarrier()});
             const CD3DX12_TEXTURE_COPY_LOCATION source(depth->GetResource()->D3DResource.Get(), 0);
@@ -420,7 +467,7 @@ static void TestGrassPlacement(GDX12Device& device, GDX12DeviceResources& resour
     commands->SetViewport(depth->GetViewport());
     commands->SetScissorRect(depth->GetScissorRect());
     commands->SetRenderTargets({}, depth);
-    resources.Grass->Draw(commands, GDX12GrassRenderer::Stage::Depth, vp, eye,
+    EmitPreparedGrass(originalRenderer, resources, commands, GDX12GrassRenderer::Stage::Depth, vp, eye,
         resources.FrameConstants[previousSlot]->CameraCB->GetElementAddress(0));
     queue->ExecuteCommandList(commands);
     queue->Flush();

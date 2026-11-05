@@ -1,3 +1,4 @@
+#include "Rendering/BistroRenderPipeline.h"
 #include "App.Base/App.h"
 #include "../src/BistroScene.h"
 #include <iostream>
@@ -141,8 +142,10 @@ public:
 protected:
     bool AddModules() override
     {
-        Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer));
         auto scenes = std::make_shared<SceneManagerModule>(std::filesystem::path(ASSETS_FOLDER) / "Scenes/Amazon Lumberyard Bistro");
+        auto renderer = std::make_shared<RenderModule>(GetWindow(), &Timer,
+            std::make_unique<BistroRenderPipeline>(scenes));
+        Locator.RegisterModule(renderer);
         ConfigureBistroProps(*scenes);
         Locator.RegisterModule(scenes);
         return BenchmarkEngine::AddModules();

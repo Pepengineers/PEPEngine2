@@ -1,0 +1,262 @@
+{
+  "status": "complete",
+  "verdict": "Ready to merge",
+  "verdict_reason": "Seven reviewers found no actionable defects or unresolved verification gates in the integrated working tree. All extracted requirements and implementation units have corresponding implementation or evidence. The readiness verdict is limited by the documented visual, performance, soak and hardware coverage below; it does not claim completion of the caller's subsequent local integration commit.",
+  "scope": {
+    "base": "d360368ed8cb862bf41f985883d3c490853b06ab",
+    "branch": "codex/bistro-rendering",
+    "head_sha": "d360368ed8cb862bf41f985883d3c490853b06ab",
+    "pr_url": null,
+    "files_changed": 95,
+    "mode": "standalone",
+    "reviewed_tree": "integration working tree against d360368; head_sha records the pre-integration dispatch HEAD"
+  },
+  "intent": "Integrate application-owned pipeline source a1458c8 into current d360368 working branch preserving newer Jolt physics/seeded waves, async particles and shared-depth concurrent execution. Adopt App-owned water/grass/composition with common batch geometry and runtime; local merge and verification only, no push.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "project-standards",
+    "testing",
+    "maintainability",
+    "performance",
+    "reliability",
+    "adversarial"
+  ],
+  "findings": [],
+  "actionable_findings": [],
+  "triage_groups": [],
+  "pre_existing_findings": [],
+  "requirements_completeness": {
+    "plan_path": "D:/Project/PEPEngine2/docs/plans/2026-11-05-0014-refactor-bistro-render-extensions-plan.md",
+    "plan_source": "inferred",
+    "requirements": [
+      {
+        "id": "R1",
+        "status": "met",
+        "requirement": "App owns specialized water, grass and wind.",
+        "evidence": "Apps/App/src/Components/, Apps/App/src/Rendering/{Grass,Water}/ and Apps/App/Shaders/ contain the relocated implementation and registrations."
+      },
+      {
+        "id": "R2",
+        "status": "met",
+        "requirement": "Common layers do not depend on Bistro effects.",
+        "evidence": "Engine/App.Base project and World changes remove concrete effect ownership; DefaultRenderPipeline and base-only tests provide the independent common consumer."
+      },
+      {
+        "id": "R3",
+        "status": "met",
+        "requirement": "Common rendering features remain common.",
+        "evidence": "CommonRenderPasses retains particles, atmosphere, AO, SSR, skinning, lighting, shadows and postprocessing; the current graph executor is retained."
+      },
+      {
+        "id": "R4",
+        "status": "met",
+        "requirement": "Bistro composes passes without an injection registry.",
+        "evidence": "BistroRenderPipeline::LinkInputs/BuildGraph compose common and app passes; IRenderPipeline and DefaultRenderPipeline provide the alternative builder."
+      },
+      {
+        "id": "R5",
+        "status": "met",
+        "requirement": "Common runtime owns devices, queues and synchronization.",
+        "evidence": "RenderModule initializes the pipeline and compiles/executes its graph after frame-slot synchronization; device and secondary execution ownership remain common."
+      },
+      {
+        "id": "R6",
+        "status": "met",
+        "requirement": "AO placement and app passes change in application composition.",
+        "evidence": "BistroRenderPipeline selects early/late AO and binds the matching inputs; RenderPipelineTests and the integration AO matrix exercise composition."
+      },
+      {
+        "id": "R7",
+        "status": "met",
+        "requirement": "Grass preserves geometry, shadow and probe participation.",
+        "evidence": "BistroGrassGeometry, prepared view jobs and common primitive metadata retain view-specific outputs, bounds, revisions and static filtering; grass/probe tests cover these contracts."
+      },
+      {
+        "id": "R8",
+        "status": "met",
+        "requirement": "Water, split transparency and once-only composition are preserved.",
+        "evidence": "Bistro explicitly links surface, Far composition, resolve, Near transparency, particles and downstream depth/motion. WaterCompositionChecks and SecondGroupTests cover aliases and composition; the active-water two-sided pixel oracle remains a documented coverage limit."
+      },
+      {
+        "id": "R9",
+        "status": "met",
+        "requirement": "Simulation remains independent of drawing.",
+        "evidence": "App physics update ordering is retained; Bistro preparation owns effect simulation delta, while BuildGraph only composes jobs. Parent physics/wave and pause checks passed."
+      },
+      {
+        "id": "R10",
+        "status": "met",
+        "requirement": "Compatibility and lifecycle are preserved.",
+        "evidence": "Common queries/bindings, runtime flags, config registrations, resize/history and frame-slot preparation remain wired; parent checks cover toggles, SR/FG, async transitions, resize and strict config migration."
+      },
+      {
+        "id": "R11",
+        "status": "met",
+        "requirement": "Static, skinned and grass use common batch consumers.",
+        "evidence": "GDX12RenderGeometry/Source, shared batch emission and geometry view jobs retain direct/indexed/indirect/instanced data and per-view preparation; external-source and prepared-view tests exercise the contract."
+      }
+    ],
+    "implementation_units": [
+      {
+        "id": "U1",
+        "status": "met",
+        "unit": "Extract composition from common runtime.",
+        "evidence": "IRenderPipeline, CommonRenderPasses, DefaultRenderPipeline, BistroRenderPipeline and RenderModule integration appear in the reviewed changes."
+      },
+      {
+        "id": "U2",
+        "status": "met",
+        "unit": "Common primitives/batches and App grass/wind.",
+        "evidence": "Shared geometry contracts/consumers, app grass adapters, prepared jobs, metadata and their tests appear in the reviewed changes."
+      },
+      {
+        "id": "U3",
+        "status": "met",
+        "unit": "App water and explicit transparency composition.",
+        "evidence": "App water resources/passes, neutral depth partitioning and explicit composition/alias tests appear in the reviewed changes."
+      },
+      {
+        "id": "U4",
+        "status": "met",
+        "unit": "Callers, build, config and shader paths.",
+        "evidence": "App/base callers, project entries, shader include lookup, scoped INI migration tool/tests and common defaults are updated."
+      },
+      {
+        "id": "U5",
+        "status": "met",
+        "unit": "Verification and documentation.",
+        "evidence": "Architecture documentation and source acceptance artifacts are included; the parent integration report records current combined-branch checks and limitations. The parent owns the subsequent task-local integration commit; this report-only review does not commit."
+      }
+    ],
+    "assessment": "Met means corresponding work appears in the reviewed diff or current integration evidence, not that every possible acceptance scenario was independently rerun. Declared verification limits are preserved below.",
+    "unrequested_behavior_rules": [],
+    "reverse_check": "Reviewed plan requirements, scope boundaries, technical decisions, implementation units and verification contract against the diff inventory, synthesized reviewer coverage and selected current owning sources. The six-key config migration and neutral depth partitioning are explicitly planned; the read-only depth, current scheduler/particles and newer physics behavior are preservation requirements. No additional caller-visible behavior rule was identified."
+  },
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [],
+  "testing_gaps": [
+    "Apps/App/tests/WaterCompositionChecks.h:109-120 exercises absent, empty-seed and disabled water with visible single particles, while SecondGroupTests verifies active fluid depth/resolve and BistroAdditionsTests verifies visible water. There is still no isolated pixel oracle with active water and transparent mesh geometry on both sides of the water surface; swapped Far/Near routing would not be directly diagnosed by those existing assertions. This is an acknowledged acceptance limit in docs/reports/2026-11-05-app-render-pipelines-validation.md:210-213. The integration report also acknowledges this limit.",
+    "Apps/App/tests/BistroRenderGraphTests.cpp:121-146 intentionally removes particle drawing, nonzero transparent contribution and the authored coplanar masked plate overlay from the exact pooled/dedicated HDR oracle, then restores them at lines 208-215 before resize/SR smoke. Thus the successful byte-equality matrix does not independently establish pooled/dedicated equality for nonzero transparent or particle contribution; separate composition/pixel tests and restored ordinary-rendering validation cover their behavior without that equality comparison. A deterministic single-contributor pooling case would close this specific coverage boundary.",
+    "No baseline/candidate CPU graph-recording or GPU frame-time comparison establishes the cost of the integrated prepared-view topology. BistroRenderPipeline.cpp:206-215 creates mesh, expansion and consumer jobs per view/patch; GDX12RenderGraph.cpp:400 queries accesses per job; GDX12GrassRenderer.cpp:644-645 supplies every prepared output constant to each grass consumer, while FindOutput at lines 434-439 searches outputs linearly. These are concrete profiling targets at the documented 4,620-node Bistro topology, but source inspection and passing functional tests do not establish a consequential regression or speedup.",
+    "The supplied acceptance evidence exercises the primary RTX 3060 Laptop GPU. No second-GPU allocation or frame-time measurement is available; the largest-patch shared arena and its maximum-capacity allocation test do not establish performance on other hardware. This reviewer performed source inspection only and did not rerun builds, GPU tests or timings."
+  ],
+  "peer": {
+    "outcome": "in-process-fallback",
+    "coverage": "Cross-model pass: not run (no different-provider Claude, Grok or Antigravity CLI route installed); the in-process adversarial reviewer covered the lens. No code left the machine."
+  },
+  "coverage": {
+    "depth": "full",
+    "reviewer_selection": [
+      {
+        "reviewer": "correctness",
+        "tier": "session",
+        "reason": "always-on"
+      },
+      {
+        "reviewer": "project-standards",
+        "tier": "mid",
+        "reason": "root AGENTS fallback governs all changed paths"
+      },
+      {
+        "reviewer": "testing",
+        "tier": "mid",
+        "reason": "changed proof fixtures and extensive new geometry/pipeline tests"
+      },
+      {
+        "reviewer": "maintainability",
+        "tier": "mid",
+        "reason": "large structural ownership and geometry refactor"
+      },
+      {
+        "reviewer": "performance",
+        "tier": "mid",
+        "reason": "per-view batching/GPU allocation with substantial scene topology"
+      },
+      {
+        "reviewer": "reliability",
+        "tier": "mid",
+        "reason": "GPU resource and world-listener lifecycles"
+      },
+      {
+        "reviewer": "adversarial",
+        "tier": "session",
+        "reason": "ordering/concurrency/composition and test harness fidelity"
+      }
+    ],
+    "reviewers_completed": 7,
+    "failed_reviewers": [],
+    "timed_out_reviewers": [],
+    "source_snapshot": "Current integrated working tree; historical isolated acceptance is context only. The parent staged its final integration report after the initial scope snapshot; source was unchanged during review.",
+    "standards": {
+      "fallback": "Root AGENTS.md governs all changed files; commit preservation and no-push instructions apply.",
+      "designated_coding_standards": false
+    },
+    "review_policy": {
+      "sources": [],
+      "removed": 0,
+      "regraded": 0,
+      "not_applied": []
+    },
+    "compound_packs": {
+      "roots": [],
+      "warnings": [],
+      "errors": []
+    },
+    "validator": {
+      "outcome": "empty-batch",
+      "reason": "No primary or selected findings survived the completed seven-reviewer merge.",
+      "selected": 0,
+      "confirmed": 0,
+      "rejected": 0,
+      "unresolved": 0,
+      "malformed": 0,
+      "failed": 0,
+      "shortcut_skipped": 0,
+      "protected_subject_reclassifications": 0,
+      "degraded_p0_p1": 0,
+      "batch_launched": false,
+      "bound_exceeded": false
+    },
+    "mechanics": {
+      "malformed_returns": 0,
+      "malformed_findings": 0,
+      "suppressed_by_confidence": {},
+      "first_evidence_backfilled": 0,
+      "missing_first_evidence_demotions": 0,
+      "mode_aware_demotions": 0,
+      "semantic_merges": 0,
+      "direct_dependency_reclassifications": 0,
+      "settlement_suppressed": 0,
+      "advisory_deduplications": 1
+    },
+    "settlements": "The inferred plan supplied no extracted session-settled decisions; no preference findings were suppressed.",
+    "apply": "Stage 5c skipped: mode:agent is report-only and apply_local is false. No source, index, branch, commit, build, GPU or process changes were made by this review.",
+    "parent_validation": "The current integration report records 18 Debug and 11 Release targeted builds; graph, pipeline, base-only, allocator, lighting, loading, startup, SSR, object-data and configuration checks. Final plate-controlled exact HDR matrices passed in Debug and Release with 32 captures per configuration, both AO placements, all eight AO combinations, direct/async and dedicated/pooled switching, resize and Native/XeSS. Corrected Debug probes, Release three-wave GPU and ordinary-content runs passed with explicit D3D12 validation. The 758-body Release scenario passed three waves/1827 ticks at one and four threads. These are parent-recorded checks, not reviewer reruns.",
+    "documented_limits": [
+      "No baseline/candidate frame-time or CPU graph-overhead comparison, long soak or second-GPU acceptance establishes performance or stability beyond the supplied runs.",
+      "Active-water two-sided transparent-mesh routing lacks an isolated pixel oracle. Exact pooled/dedicated HDR equality uses controlled transparent/particle/plate-overlay contributions; ordinary rendering is validated separately.",
+      "The retained physics baseline reproduces 16 escaped props and 16 static-chord candidates; complete modeled-floor containment is not established.",
+      "The authored coplanar plate overlay retains production ordering ambiguity; it is excluded only from the exact-HDR fixture and restored for ordinary rendering."
+    ],
+    "notes": [
+      "Full depth selected by helper hard_block_full:2209 executable non-test changed lines,6361totalchangedlines,large band; no whole-file deletions.",
+      "Root AGENTS.md supplies instruction-file fallback; only commit preservation/no-push instructions apply. No designated coding standards, CLAUDE or base REVIEW policy; no packs/solutions corpus.",
+      "Untracked .tmp/.worktrees and integration report at scope snapshot excluded. Parent staged the completed final report later; source snapshot itself unchanged during review.",
+      "No auth/security, externally published API, migration, frontend/Swift or agent-facing product surface warranted extra personas.",
+      "Final parent GPU checks completed after context staging: exactHDR Debug+Release matrices(32captures including references per config), Debugprobes, Release3wave and ordinarycontent all passed under explicitD3D12 validation. Physics758bodies3waves1827ticks at1/4threads passed with sameknown16escapes16chordbaseline. Reviewers did not build/run/GPU; no source mutation.",
+      "Review snapshots are integration working tree, not old isolated receipt. Historical source acceptance supplied context only.",
+      "Cross-model pass: not run (no different-provider Claude, Grok or Antigravity CLI route installed); the in-process adversarial reviewer covered the lens. No code left the machine.",
+      "Seven selected reviewers returned no primary or pre-existing findings; all reviewer artifacts were loaded. No failed or timed-out reviewers.",
+      "Mechanical validation: zero malformed returns/findings; zero confidence suppressions; zero missing-first-evidence demotions; first_evidence_backfilled=0.",
+      "No semantic merges, direct-dependency reclassifications, settlement suppressions, policy removals/regrades or mode-aware demotions were needed. The inferred plan has no extracted session-settled decisions.",
+      "One duplicate active-water pixel-oracle advisory was consolidated; four distinct reviewer-supplied testing gaps remain. Their relevant test setup and integration acceptance limits were inspected read-only.",
+      "Integration acceptance explicitly leaves FPS/graph-overhead budget, long-soak stability and second-GPU behavior unestablished. Existing modeled-floor containment remains imperfect: 16 escaped props and 16 static-chord candidates in the retained baseline scenario; no integration regression is alleged.",
+      "Validator selection: zero findings selected, zero quote-anchored independently corroborated shortcuts; empty batch requires no validator launch."
+    ]
+  },
+  "artifact_path": "D:/Project/PEPEngine2/docs/reviews/ce-code-review/20261105-integration-5c9e",
+  "run_id": "20261105-integration-5c9e"
+}

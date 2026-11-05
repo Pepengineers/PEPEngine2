@@ -23,7 +23,7 @@ public:
     using Pass = UINT;
     enum class Mode : std::uint8_t { Read, Write, ReadWrite };
     enum class Lifetime : std::uint8_t { Transient, Persistent, Dynamic };
-    enum class SharedResource : std::uint8_t { Scene, Visibility, Environment, ReflectionProbes, FluidSurface, ParticleSimulation, Particles };
+    enum class SharedResource : std::uint8_t { Scene, Visibility, Environment, ReflectionProbes, ParticleSimulation, Particles };
     static constexpr auto UnmanagedState = static_cast<D3D12_RESOURCE_STATES>(UINT_MAX);
     struct Access
     {

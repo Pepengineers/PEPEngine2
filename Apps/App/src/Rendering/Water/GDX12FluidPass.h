@@ -1,6 +1,6 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
-#include "Engine.RendererDX12/GDX12Fluid.h"
+#include "Rendering/Water/GDX12Fluid.h"
 #include <map>
 
 class GDX12FluidSurfacePass final : public GDX12RenderPass
@@ -15,7 +15,8 @@ public:
         graph.Write(_outputs[1], "Fluid or opaque motion", Lifetime::Dynamic);
         graph.Fallback(_outputs[0], _inputs[0]);
         graph.Fallback(_outputs[1], _inputs[1]);
-        graph.Write(SharedResource::FluidSurface, "Fluid simulation and surface");
+        graph.Write(_outputs[2], "Fluid geometry", Lifetime::Dynamic);
+        graph.Write(_outputs[3], "Fluid owners", Lifetime::Dynamic);
         graph.HasSideEffects();
     }
 
@@ -23,6 +24,11 @@ public:
     ~GDX12FluidSurfacePass() override;
     void Initialize() override;
     void Execute(GDX12CommandList* commands) override;
+    void SetInstances(std::vector<GDX12FluidInstance> instances);
+    void PrepareFrame();
+    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override;
+    std::vector<GDX12RenderGraph::BufferAccess> GetResolveBufferAccesses() const;
+    IRenderPassLink* GetOpaqueDepth() const { return _inputs[0]; }
     void Resize() override;
     void ClearDenendencies() override;
     GDX12Texture* Resolve(GDX12CommandList* commands, GDX12Texture* background, GDX12Texture* environment);
@@ -42,7 +48,8 @@ private:
     void Simulate(GDX12CommandList* commands, State& state, const GDX12FluidSettings& settings, float elapsed);
     void DrawSurface(GDX12CommandList* commands, State& state, UINT owner, const GDX12FluidSettings& settings);
     void SurfaceBindings(GDX12CommandList* commands, State& state, UINT owner, UINT mode = 0);
-    Link _depthLink, _motionLink;
+    Link _depthLink, _motionLink, _geometryLink, _ownerLink;
+    std::vector<GDX12FluidInstance> _instances;
     std::map<uint64_t, std::unique_ptr<State>> _states;
     std::unique_ptr<GDX12RootSignature> _solverRoot, _surfaceRoot;
     ComPtr<ID3D12PipelineState> _save, _hash, _sort, _offsets, _densities, _integrate;
@@ -52,6 +59,8 @@ private:
     std::unique_ptr<GDX12Texture> _depth, _motion, _geometry, _owner, _color;
     GDX12FluidControls _controls = { false, 0 };
     bool _rendering = false;
+    bool _simulating = false;
+    bool _prepared = false;
 };
 
 class GDX12FluidResolvePass final : public GDX12RenderPass
@@ -62,14 +71,21 @@ public:
         graph.SetName("Fluid resolve");
         graph.Read(SharedResource::Scene);
         graph.ReadInputs(_inputs);
-        graph.Read(SharedResource::FluidSurface);
+        graph.Read(_surface->GetOpaqueDepth());
+        graph.Read(_surface->GetOutput(0));
+        graph.Read(_surface->GetOutput(2));
+        graph.Read(_surface->GetOutput(3));
+        graph.Read(SharedResource::ReflectionProbes);
         graph.Write(_outputs[0], "Water HDR", Lifetime::Dynamic);
         graph.Fallback(_outputs[0], _inputs[0]);
     }
 
     explicit GDX12FluidResolvePass(GDX12FluidSurfacePass* surface);
     void Initialize() override;
+    void PrepareFrame();
     void Execute(GDX12CommandList* commands) override;
+    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
+    { return _surface->GetResolveBufferAccesses(); }
     void ClearDenendencies() override;
 private:
     struct Link final : IRenderPassLink

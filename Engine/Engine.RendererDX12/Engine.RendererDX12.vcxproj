@@ -25,13 +25,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Reconstruction.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReconstructionPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Sky.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12GrassWind.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12GrassRenderer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Particles.h" />
     <ClInclude Include="src\GDX12ParticleResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ParticlesPass.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12Fluid.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FluidPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Skinning.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12CloudComponent.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ReflectionProbes.h" />
@@ -76,6 +72,10 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ResourceHandle.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGraph.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGeometrySource.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGeometry.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GeometryViewPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GeometryBatchPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12SwapChain.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12CommandList.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12CommandQueue.h" />
@@ -104,8 +104,6 @@
     <ClCompile Include="src\GDX12Sky.cpp" />
     <ClCompile Include="src\GDX12FrameGeneration.cpp" />
     <ClCompile Include="src\GDX12EnvironmentIBLPass.cpp" />
-    <ClCompile Include="src\GDX12GrassWind.cpp" />
-    <ClCompile Include="src\GDX12GrassRenderer.cpp" />
     <ClCompile Include="src\GDX12Particles.cpp" />
     <ClCompile Include="src\GDX12ParticlesPass.cpp" />
     <ClCompile Include="src\GDX12ParticleSimulation.cpp" />
@@ -124,8 +122,6 @@
     <ClCompile Include="src\GDX12DepthOfField.cpp" />
     <ClCompile Include="src\GDX12DepthOfFieldPass.cpp" />
     <ClCompile Include="src\D3DHelpers.cpp" />
-    <ClCompile Include="src\GDX12Fluid.cpp" />
-    <ClCompile Include="src\GDX12FluidPass.cpp" />
     <ClCompile Include="src\GDX12ReflectionProbes.cpp" />
     <ClCompile Include="src\GDX12ReflectionProbePass.cpp" />
     <ClCompile Include="src\GDX12ReflectionPreviewPass.cpp" />
@@ -155,18 +151,11 @@
     <ClCompile Include="src\GDX12Texture.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="Shaders\GrassCommon.hlsli" />
-    <None Include="Shaders\GrassExpand.hlsl" />
-    <None Include="Shaders\GrassRender.hlsl" />
-    <None Include="Shaders\WindField.hlsl" />
     <None Include="Shaders\Particles.hlsli" />
     <None Include="Shaders\ParticleSimulation.hlsl" />
     <None Include="Shaders\ParticleRender.hlsl" />
     <None Include="Shaders\ParticleRaster.hlsl" />
     <None Include="Shaders\ParticleSort.hlsl" />
-    <None Include="Shaders\FluidParameters.hlsli" />
-    <None Include="Shaders\FluidSolver.hlsl" />
-    <None Include="Shaders\FluidSurface.hlsl" />
     <None Include="Shaders\AmbientOcclusion.hlsl" />
     <None Include="Shaders\ToneMap.hlsl" />
     <None Include="Shaders\ReflectionCapture.hlsl" />

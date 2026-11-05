@@ -295,6 +295,7 @@ int main(int argc, char** argv)
         Require(GetLoadingBudgetBytes() > 0, "Invalid inherited loading configuration");
         TestSettings();
         if (argc > 1 && std::strcmp(argv[1], "--cpu") == 0) return 0;
+        Set(L"Render.Reflection.Enabled", "true");
         const bool benchmark = argc > 1 && std::strcmp(argv[1], "--benchmark") == 0;
         GpuValidationLock validationLock;
         ComPtr<ID3D12Debug> debug;
@@ -455,6 +456,8 @@ int main(int argc, char** argv)
             localShadows.Prepare();
             localShadows.Execute(list);
             timer.Start(list);
+            reflections.Prepare();
+            // Composition and standalone execution must share one pending capture plan.
             reflections.Prepare();
             reflections.Execute(list);
             timer.Stop(list);
@@ -948,7 +951,7 @@ int main(int argc, char** argv)
         gbuffer.Initialize();
         const auto descriptorsAfter = NextTextureDescriptors(resources);
         Require(descriptorsAfter[0] == descriptorsBefore[0] + 7 &&
-            descriptorsAfter[1] == descriptorsBefore[1] + 6 && descriptorsAfter[2] == descriptorsBefore[2] + 1,
+            descriptorsAfter[1] == descriptorsBefore[1] + 6 && descriptorsAfter[2] == descriptorsBefore[2] + 2,
             "Depth/G-buffer allocated descriptors for skipped textures");
         for (bool early : { true, false })
         {
