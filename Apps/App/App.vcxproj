@@ -91,6 +91,7 @@
     <ClInclude Include="src\Systems\FlyingPropSystem.h" />
     <ClInclude Include="src\Components\FlyingPropComponent.h" />
     <ClInclude Include="src\BistroProps.h" />
+    <ClInclude Include="src\BistroWaves.h" />
     <ClInclude Include="src\BistroScene.h" />
     <ClInclude Include="src\BistroReflections.h" />
     <ClInclude Include="src\BistroGrass.h" />

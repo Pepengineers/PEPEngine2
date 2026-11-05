@@ -29,9 +29,12 @@ public:
     void Step(World& world, float dt);
     void ConfigureWorld(World& world, const PhysicsWorldSettings& settings);
     bool OverlapsBox(World& world, const DirectX::SimpleMath::Vector3& center, const DirectX::SimpleMath::Vector3& halfExtent) const;
+    bool RayCastStatic(World& world, const DirectX::SimpleMath::Vector3& origin, const DirectX::SimpleMath::Vector3& displacement, PhysicsRayHit& hit) const;
 
     PhysicsBodyHandle CreateBody(World& world, const PhysicsBodyDesc& desc);
     void DestroyBody(World& world, PhysicsBodyHandle handle);
+    bool AddBodyVelocityImpulse(World& world, PhysicsBodyHandle handle, const DirectX::SimpleMath::Vector3& deltaVelocity, float maxSpeed);
+    bool TryGetBodyVelocity(World& world, PhysicsBodyHandle handle, DirectX::SimpleMath::Vector3& velocity, bool& active) const;
 
     bool TryGetBodyTransform(World& world, PhysicsBodyHandle handle, DirectX::SimpleMath::Vector3& outPosition, DirectX::SimpleMath::Quaternion& outRotation) const;
     void MoveKinematicBody(World& world, PhysicsBodyHandle handle, const DirectX::SimpleMath::Vector3& targetPosition, const DirectX::SimpleMath::Quaternion& targetRotation, float dt);

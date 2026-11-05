@@ -257,6 +257,66 @@ int main(int argc, char** argv)
         ShowWindow(app.GetWindow()->GetWindowHandle(), SW_HIDE);
         auto render = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
         auto& world = *BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()->GetWorld();
+        if (argc > 1 && std::strcmp(argv[1], "--waves-smoke") == 0)
+        {
+            world.SetTimeScale(0);
+            Set(L"App.ReflectionProbes.ShowSpheres", "false");
+            Set(L"Render.MotionBlur.Enabled", "false");
+            Set(L"Render.DOF.Enabled", "false");
+            auto& ecs = world.GetECS();
+            const size_t bodies = ecs.GetPool<RigidBodyComponent>().Size();
+            Vector3 center;
+            bool found = false;
+            ecs.ForEach<NameComponent, StaticMeshRenderComponent>([&](Entity, const NameComponent& name, const StaticMeshRenderComponent& renderer)
+            {
+                const auto* mesh = render->GetPrimaryGPUMesh(renderer.MeshHandler)->CPUMesh;
+                if (found || mesh->GetSubMeshCount() != 2381 || name.value.find("Chair") == std::string::npos) return;
+                center = Vector3(BistroPhysics::Bounds(*mesh, renderer.SubMeshIndices).Center); found = true;
+            });
+            Require(found && world.BeforePhysicsStep, "Missing real Bistro wave scene");
+            Aim(world, center + Vector3(-250,180,-250), center + Vector3(0,50,0));
+            auto physics = BenchmarkEngine::GetLocator().GetModule<PhysicsModule>();
+            DynamicBodyUpdateSystem sync(*physics);
+            for (int frame=0; frame<6; ++frame) app.BenchmarkFrame();
+            world.SetTimeScale(1);
+            world.SetPaused(true);
+            unsigned ticks = 0;
+            const auto capture = [&](unsigned target, const char* name)
+            {
+                world.SetPaused(false);
+                while (ticks < target)
+                {
+                    world.BeforePhysicsStep(1.f/60); physics->Step(world,1.f/60); sync.Tick(world,1.f/60); ++ticks;
+                }
+                world.SetPaused(true);
+                for (int frame=0; frame<6; ++frame) app.BenchmarkFrame();
+                render->WaitForUploads();
+                auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+                SaveImage(ReadHDR(*output),output->GetWidth(),output->GetHeight(),name);
+            };
+            const auto seed = BistroWaves::Seed.GetValue();
+            const auto launchTick = static_cast<unsigned>(std::ceil(BistroWaves::Interval(seed,1)*60));
+            double end = 0;
+            for (uint64_t serial=1; serial<=4; ++serial) end += BistroWaves::Interval(seed,serial);
+            capture(0,"waves-start"); capture(launchTick-1,"waves-wait");
+            capture(launchTick+18,"waves-lift"); capture(launchTick+66,"waves-scatter");
+            capture(launchTick+180,"waves-fall"); capture(static_cast<unsigned>(std::ceil(end*60)),"waves-three-cycles");
+            Require(ecs.GetPool<RigidBodyComponent>().Size() == bodies, "Waves grew body count");
+            auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+            ComPtr<ID3D12Device> device;
+            ThrowIfFailed(output->GetResource()->D3DResource->GetDevice(IID_PPV_ARGS(&device)));
+            ThrowIfFailed(device->GetDeviceRemovedReason());
+            ComPtr<ID3D12InfoQueue> info; ThrowIfFailed(device.As(&info));
+            for (UINT64 index=0; index<info->GetNumStoredMessages(); ++index)
+            {
+                SIZE_T bytes=0; info->GetMessage(index,nullptr,&bytes); std::vector<BYTE> storage(bytes);
+                auto* message=reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+                ThrowIfFailed(info->GetMessage(index,message,&bytes));
+                Require(message->Severity > D3D12_MESSAGE_SEVERITY_ERROR,message->pDescription);
+            }
+            std::cout << "Real Bistro waves: lift/scatter/fall and three cycles, stable bodies, finite HDR and clean D3D12 debug layer passed.\n";
+            return 0;
+        }
         if (argc > 1 && std::strcmp(argv[1], "--physics-smoke") == 0)
         {
             Set(L"App.ReflectionProbes.ShowSpheres", "false");

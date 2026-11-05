@@ -65,6 +65,14 @@ struct PhysicsWorldSettings
     uint32_t MaxBodyPairs = 16384;
     uint32_t MaxContactConstraints = 16384;
     float WorldUnitsPerMeter = 1;
+    float PenetrationSlopMeters = 0.02f;
+    uint32_t CollisionSteps = 1;
+};
+
+struct PhysicsRayHit
+{
+    DirectX::SimpleMath::Vector3 Position;
+    DirectX::SimpleMath::Vector3 Normal;
 };
 
 using PhysicsShapeDesc = std::variant<BoxShapeDesc, SphereShapeDesc, CapsuleShapeDesc, CylinderShapeDesc, TriangleMeshShapeDesc, ConvexCompoundShapeDesc>;

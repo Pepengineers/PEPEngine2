@@ -568,6 +568,7 @@ void App::UpdatePhysics(World& world, float dt)
             spline.Schedule(_jobs, world, step).Complete();
             kinematic.Schedule(_jobs, world, step).Complete();
         }
+        if (world.BeforePhysicsStep) world.BeforePhysicsStep(step);
         physics->Step(world, step);
         if (!_AppConfig.StartScene.empty())
             scenes->UpdateSystems(_jobs, world, step, SystemUpdatePhase::FixedPostPhysics);

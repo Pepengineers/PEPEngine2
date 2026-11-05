@@ -26,6 +26,8 @@
 #include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
 #include <Jolt/Physics/Collision/CollideShape.h>
+#include <Jolt/Physics/Collision/RayCast.h>
+#include <Jolt/Physics/Collision/CastResult.h>
 
 #include "Common/Logger.h"
 
@@ -275,6 +277,8 @@ void JoltPhysicsBackend::Initialize(JobSystem& jobs, const PhysicsWorldSettings&
 {
     if (_bInitialized) return;
     if (!std::isfinite(settings.WorldUnitsPerMeter) || settings.WorldUnitsPerMeter <= 0 ||
+        !std::isfinite(settings.PenetrationSlopMeters) || settings.PenetrationSlopMeters <= 0 || settings.PenetrationSlopMeters > 1 ||
+        settings.CollisionSteps == 0 || settings.CollisionSteps > 8 ||
         settings.MaxBodies == 0 || settings.MaxBodies > 65536 || settings.MaxBodyPairs == 0 ||
         settings.MaxContactConstraints == 0 || settings.MaxContactConstraints > UINT32_MAX / 512)
         throw std::invalid_argument("Invalid physics world settings");
@@ -295,6 +299,9 @@ void JoltPhysicsBackend::Initialize(JobSystem& jobs, const PhysicsWorldSettings&
     _physicsSystem = std::make_unique<JPH::PhysicsSystem>();
     _physicsSystem->Init(settings.MaxBodies, 0, settings.MaxBodyPairs, settings.MaxContactConstraints,
         *_broadPhaseLayerInterface, *_objectVsBroadPhaseLayerFilter, *_objectLayerPairFilter);
+    auto physicsSettings = _physicsSystem->GetPhysicsSettings();
+    physicsSettings.mPenetrationSlop = settings.PenetrationSlopMeters;
+    _physicsSystem->SetPhysicsSettings(physicsSettings);
     _bInitialized = true;
     Logger::Info("Jolt physics backend initialized");
 }
@@ -329,8 +336,7 @@ void JoltPhysicsBackend::Step(float dt)
     }
 
     if (!std::isfinite(dt) || dt <= 0) return;
-    constexpr int CollisionSteps = 1;
-    const auto error = _physicsSystem->Update(dt, CollisionSteps, _tempAllocator.get(), _jobSystem.get());
+    const auto error = _physicsSystem->Update(dt, static_cast<int>(_settings.CollisionSteps), _tempAllocator.get(), _jobSystem.get());
     if (error != JPH::EPhysicsUpdateError::None) throw std::runtime_error("Jolt physics capacity exceeded during update");
 
 }
@@ -481,4 +487,63 @@ bool JoltPhysicsBackend::OverlapsBox(const DirectX::SimpleMath::Vector3& center,
     _physicsSystem->GetNarrowPhaseQuery().CollideShape(shape.Get(), JPH::Vec3::sReplicate(1),
         JPH::RMat44::sTranslation(position), settings, position, collector);
     return collector.HadHit();
+}
+
+bool JoltPhysicsBackend::AddBodyVelocityImpulse(PhysicsBodyHandle handle,
+    const DirectX::SimpleMath::Vector3& deltaVelocity, float maxSpeed)
+{
+    if (!std::isfinite(deltaVelocity.LengthSquared()) || !std::isfinite(maxSpeed) || maxSpeed <= 0 || maxSpeed > 1000000)
+        throw std::invalid_argument("Invalid body drive");
+    if (!_physicsSystem || !handle.IsValid()) return false;
+    const JPH::BodyID id(handle.Value);
+    {
+        JPH::BodyLockWrite lock(_physicsSystem->GetBodyLockInterface(), id);
+        if (!lock.Succeeded() || !lock.GetBody().IsDynamic()) return false;
+        auto& body = lock.GetBody();
+        auto* motion = body.GetMotionProperties();
+        if (motion->GetInverseMass() <= 0) return false;
+        const float speed = maxSpeed / _settings.WorldUnitsPerMeter;
+        motion->SetMaxLinearVelocity(speed);
+        body.SetLinearVelocityClamped(body.GetLinearVelocity());
+        const auto previous = body.GetLinearVelocity();
+        auto target = previous + JPH::Vec3(deltaVelocity.x, deltaVelocity.y, deltaVelocity.z) / _settings.WorldUnitsPerMeter;
+        if (target.LengthSq() > speed * speed) target = target.Normalized() * speed;
+        const auto impulse = (target - previous) / motion->GetInverseMass();
+        body.AddImpulse(impulse);
+    }
+    _physicsSystem->GetBodyInterface().ActivateBody(id);
+    return true;
+}
+
+bool JoltPhysicsBackend::RayCastStatic(const DirectX::SimpleMath::Vector3& origin,
+    const DirectX::SimpleMath::Vector3& displacement, PhysicsRayHit& hit) const
+{
+    if (!std::isfinite(origin.LengthSquared()) || !std::isfinite(displacement.LengthSquared()) || displacement.LengthSquared() <= 0)
+        throw std::invalid_argument("Invalid static ray query");
+    if (!_physicsSystem) throw std::logic_error("Physics backend is not initialized");
+    const JPH::RRayCast ray(JPH::RVec3(origin.x,origin.y,origin.z)/_settings.WorldUnitsPerMeter,
+        JPH::Vec3(displacement.x,displacement.y,displacement.z)/_settings.WorldUnitsPerMeter);
+    JPH::ClosestHitCollisionCollector<JPH::CastRayCollector> collector;
+    _physicsSystem->GetNarrowPhaseQuery().CastRay(ray,JPH::RayCastSettings{},collector,{},JPH::SpecifiedObjectLayerFilter(ObjectLayers::Static));
+    if (!collector.HadHit()) return false;
+    JPH::BodyLockRead lock(_physicsSystem->GetBodyLockInterface(),collector.mHit.mBodyID);
+    if (!lock.Succeeded()) return false;
+    const auto position=ray.GetPointOnRay(collector.mHit.mFraction);
+    const auto normal=lock.GetBody().GetWorldSpaceSurfaceNormal(collector.mHit.mSubShapeID2,position);
+    hit.Position=DirectX::SimpleMath::Vector3(position.GetX(),position.GetY(),position.GetZ())*_settings.WorldUnitsPerMeter;
+    hit.Normal=DirectX::SimpleMath::Vector3(normal.GetX(),normal.GetY(),normal.GetZ());
+    return true;
+}
+
+bool JoltPhysicsBackend::TryGetBodyVelocity(PhysicsBodyHandle handle,
+    DirectX::SimpleMath::Vector3& velocity, bool& active) const
+{
+    if (!_physicsSystem || !handle.IsValid()) return false;
+    JPH::BodyLockRead lock(_physicsSystem->GetBodyLockInterface(), JPH::BodyID(handle.Value));
+    if (!lock.Succeeded()) return false;
+    const auto& body = lock.GetBody();
+    const auto v = body.GetLinearVelocity();
+    velocity = DirectX::SimpleMath::Vector3(v.GetX(), v.GetY(), v.GetZ()) * _settings.WorldUnitsPerMeter;
+    active = body.IsActive();
+    return true;
 }

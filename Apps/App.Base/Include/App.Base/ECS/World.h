@@ -89,6 +89,8 @@ public:
     Entity ActiveCamera = InvalidEntity;
     // Return true after creating the mesh entities; false keeps the loader's default entity.
     std::function<bool(const std::string&, const StaticMeshRenderComponent&)> SceneMeshFactory;
+    // App gameplay runs once per fixed step, after kinematics and before the physics solve.
+    std::function<void(float)> BeforePhysicsStep;
 
 private:
     friend class App;

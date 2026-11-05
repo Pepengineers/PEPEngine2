@@ -27,6 +27,7 @@ public:
 
     void Initialize(JobSystem& jobs, const PhysicsWorldSettings& settings = {});
     bool OverlapsBox(const DirectX::SimpleMath::Vector3& center, const DirectX::SimpleMath::Vector3& halfExtent) const;
+    bool RayCastStatic(const DirectX::SimpleMath::Vector3& origin, const DirectX::SimpleMath::Vector3& displacement, PhysicsRayHit& hit) const;
     void Uninitialize();
 
     void Step(float dt);
@@ -36,6 +37,9 @@ public:
 
     bool TryGetBodyTransform(PhysicsBodyHandle handle, DirectX::SimpleMath::Vector3& outPosition, DirectX::SimpleMath::Quaternion& outRotation) const;
     void MoveKinematicBody(PhysicsBodyHandle handle, const DirectX::SimpleMath::Vector3& targetPosition, const DirectX::SimpleMath::Quaternion& targetRotation, float dt);
+    // World units/s; mass is applied internally. Wakes dynamics and sets a persistent speed cap.
+    bool AddBodyVelocityImpulse(PhysicsBodyHandle handle, const DirectX::SimpleMath::Vector3& deltaVelocity, float maxSpeed);
+    bool TryGetBodyVelocity(PhysicsBodyHandle handle, DirectX::SimpleMath::Vector3& velocity, bool& active) const;
 
 private:
     bool _bInitialized = false;

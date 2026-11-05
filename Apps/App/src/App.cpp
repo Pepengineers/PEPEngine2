@@ -206,6 +206,14 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
         for (int index = 1; index < argumentCount; ++index)
         {
             const std::wstring_view argument(arguments[index]);
+            constexpr std::wstring_view wavesPrefix = L"-App.Physics.Waves.";
+            if (argument.substr(0, wavesPrefix.size()) == wavesPrefix)
+            {
+                const auto equals = argument.find(L'=');
+                if (equals == std::wstring_view::npos || !ConsoleModule{}.FindConsoleVariable(argument.substr(1, equals - 1)).SetFromString(
+                    WStringToString(std::wstring(argument.substr(equals + 1)))))
+                    throw std::invalid_argument("Invalid App.Physics.Waves argument");
+            }
             constexpr std::wstring_view physicsPrefix = L"-App.Physics.CountScale=";
             if (argument.substr(0, physicsPrefix.size()) == physicsPrefix &&
                 !BistroPhysics::CountScale.SetFromString(WStringToString(std::wstring(argument.substr(physicsPrefix.size())))))

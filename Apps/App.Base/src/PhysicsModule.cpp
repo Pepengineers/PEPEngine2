@@ -47,6 +47,13 @@ bool PhysicsModule::OverlapsBox(World& world, const Vector3& center, const Vecto
     return physics->OverlapsBox(center, halfExtent);
 }
 
+bool PhysicsModule::RayCastStatic(World& world, const Vector3& origin, const Vector3& displacement, PhysicsRayHit& hit) const
+{
+    auto* physics = GetPhysics(world);
+    if (!physics) throw std::logic_error("World has no physics backend");
+    return physics->RayCastStatic(origin,displacement,hit);
+}
+
 void PhysicsModule::Step(World& world, float dt)
 {
     if (auto* physics = GetPhysics(world); physics && !world.IsPaused()) physics->Step(dt);
@@ -61,6 +68,18 @@ PhysicsBodyHandle PhysicsModule::CreateBody(World& world, const PhysicsBodyDesc&
 void PhysicsModule::DestroyBody(World& world, PhysicsBodyHandle handle)
 {
     if (auto* physics = GetPhysics(world); physics && handle.IsValid()) physics->DestroyBody(handle);
+}
+
+bool PhysicsModule::AddBodyVelocityImpulse(World& world, PhysicsBodyHandle handle, const Vector3& deltaVelocity, float maxSpeed)
+{
+    auto* physics = GetPhysics(world);
+    return physics && physics->AddBodyVelocityImpulse(handle, deltaVelocity, maxSpeed);
+}
+
+bool PhysicsModule::TryGetBodyVelocity(World& world, PhysicsBodyHandle handle, Vector3& velocity, bool& active) const
+{
+    auto* physics = GetPhysics(world);
+    return physics && physics->TryGetBodyVelocity(handle, velocity, active);
 }
 
 bool PhysicsModule::TryGetBodyTransform(World& world, PhysicsBodyHandle handle,

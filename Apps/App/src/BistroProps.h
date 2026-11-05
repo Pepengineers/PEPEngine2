@@ -4,6 +4,7 @@
 #include "App.Base/ECS/World.h"
 #include "App.Base/Modules/PhysicsModule.h"
 #include "Common/ConsoleVariables.h"
+#include "BistroWaves.h"
 #include <map>
 #include <numeric>
 #include <cmath>
@@ -67,7 +68,8 @@ namespace BistroPhysics
 
     inline PhysicsWorldSettings Settings()
     {
-        return {MaxBodies, 131072, 131072, 100};
+        // Use a 1 mm contact tolerance for centimeter-wide bottles.
+        return {MaxBodies, 131072, 131072, 100, 0.001f, 4};
     }
 
     inline DirectX::BoundingBox Bounds(const Engine::Core::Mesh& mesh, const std::vector<uint32_t>& indices)
@@ -139,7 +141,7 @@ namespace BistroPhysics
 
 inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
     const StaticMeshRenderComponent& source, const Engine::Core::Mesh& mesh,
-    const BistroPropPartition& partition, PhysicsModule* physics = nullptr)
+    const BistroPropPartition& partition, PhysicsModule* physics = nullptr, BistroWaves::Controller* waves = nullptr)
 {
     auto& ecs = world.GetECS();
     const size_t count = BistroPhysics::GetCount(partition.Props.size(), BistroPhysics::CountScale.GetValue());
@@ -157,6 +159,12 @@ inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
         body.ContinuousCollision = motion == PhysicsMotionType::Dynamic;
         try { entity.AddComponent<ColliderComponent>(shape); }
         catch (const std::exception& error) { throw std::runtime_error(name + ": " + error.what()); }
+        if (waves && motion == PhysicsMotionType::Dynamic)
+        {
+            waves->Register(entity.GetId());
+            // Configure the speed cap during the initial wait too; a zero impulse adds no energy.
+            if (physics) physics->AddBodyVelocityImpulse(world, body.Body, Vector3::Zero, BistroWaves::MaxSpeed);
+        }
     };
     if (!partition.StaticSubMeshes.empty())
         create(sceneName, partition.StaticSubMeshes, BistroPhysics::StaticShape(mesh, partition.StaticSubMeshes), PhysicsMotionType::Static);
@@ -175,10 +183,13 @@ inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
     for (const auto& b : bounds) largest = Vector3((std::max)(largest.x, b.Extents.x),
         (std::max)(largest.y, b.Extents.y), (std::max)(largest.z, b.Extents.z));
     const Vector3 step = largest * 2 + Vector3(10);
-    const auto& sceneBounds = mesh.GetBounds();
+    // Use the occupied prop area, not the full city AABB whose corners can be empty sky.
+    auto sceneBounds = bounds.front();
+    for (size_t i=1; i<bounds.size(); ++i) DirectX::BoundingBox::CreateMerged(sceneBounds,sceneBounds,bounds[i]);
     const Vector3 minimum = Vector3(sceneBounds.Center) - Vector3(sceneBounds.Extents) + largest + Vector3(5);
     const Vector3 maximum = Vector3(sceneBounds.Center) + Vector3(sceneBounds.Extents) - largest - Vector3(5);
-    Vector3 candidate(minimum.x, maximum.y + step.y, minimum.z);
+    // Start above floor-level furniture before trying higher layers.
+    Vector3 candidate(minimum.x, minimum.y + step.y, minimum.z);
     size_t attempts = 0;
     for (size_t i = partition.Props.size(); i < count; ++i)
     {
@@ -188,9 +199,19 @@ inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
         {
             if (++attempts > count * 100) throw std::runtime_error("Cannot place Bistro physics copies");
             const auto center = candidate;
-            candidate.x += step.x;
+            candidate.x += b.Extents.x * 2 + 10;
             if (candidate.x > maximum.x) { candidate.x = minimum.x; candidate.z += step.z; }
             if (candidate.z > maximum.z) { candidate.z = minimum.z; candidate.y += step.y; }
+            const float distance = center.y - (sceneBounds.Center.y-sceneBounds.Extents.y) + 100;
+            const auto support = [&](const Vector3& point)
+            {
+                PhysicsRayHit hit;
+                return physics->RayCastStatic(world,point,{0,-distance,0},hit) && hit.Normal.y>=0.5f;
+            };
+            bool supported = support(center);
+            for (float x : {-b.Extents.x,b.Extents.x}) for (float z : {-b.Extents.z,b.Extents.z})
+                supported = supported && support(center+Vector3(x,0,z));
+            if (!supported) continue;
             if (physics->OverlapsBox(world, center, Vector3(b.Extents) + Vector3(2))) continue;
             const auto& prop = partition.Props[index];
             create(prop.Name + "_PhysicsCopy_" + std::to_string(i), prop.SubMeshIndices, shapes[index],

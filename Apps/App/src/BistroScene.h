@@ -202,7 +202,10 @@ inline void ConfigureBistroProps(SceneManagerModule& scenes)
 {
     scenes.OnWorldCreated.AddListener([](World& world)
     {
-        world.SceneMeshFactory = [&world, configured = false](const std::string& name, const StaticMeshRenderComponent& source) mutable
+        auto waves = std::make_shared<BistroWaves::Controller>();
+        world.BeforePhysicsStep = [&world, waves](float dt)
+        { waves->Tick(world, *BenchmarkEngine::GetLocator().GetModule<PhysicsModule>(), dt); };
+        world.SceneMeshFactory = [&world, waves, configured = false](const std::string& name, const StaticMeshRenderComponent& source) mutable
         {
             if (name != "Interior_interior" && name != "Exterior_exterior") return false;
             auto& physics = *BenchmarkEngine::GetLocator().GetModule<PhysicsModule>();
@@ -215,7 +218,7 @@ inline void ConfigureBistroProps(SceneManagerModule& scenes)
             size_t instances = partition.StaticSubMeshes.size();
             for (size_t i = 0; i < count; ++i) instances += partition.Props[i % partition.Props.size()].SubMeshIndices.size();
             render.ReserveInstanceCapacity(static_cast<UINT>(instances));
-            CreateBistroPropEntities(world, name, source, *mesh->CPUMesh, partition, &physics);
+            CreateBistroPropEntities(world, name, source, *mesh->CPUMesh, partition, &physics, waves.get());
             if (name == "Interior_interior") CreateBistroParticles(world);
             return true;
         };
