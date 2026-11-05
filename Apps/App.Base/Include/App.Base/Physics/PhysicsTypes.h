@@ -60,10 +60,10 @@ struct PhysicsConvexCompound
 };
 struct ConvexCompoundShapeDesc { std::shared_ptr<const PhysicsConvexCompound> Geometry; };
 
-using PrimitiveShapeDesc = std::variant<BoxShapeDesc, SphereShapeDesc, CapsuleShapeDesc, CylinderShapeDesc>;
+using CompoundChildShapeDesc = std::variant<BoxShapeDesc, SphereShapeDesc, CapsuleShapeDesc, CylinderShapeDesc, ConvexCompoundShapeDesc>;
 struct PhysicsCompoundChild
 {
-    PrimitiveShapeDesc Shape;
+    CompoundChildShapeDesc Shape;
     DirectX::SimpleMath::Vector3 Position{ 0.0f, 0.0f, 0.0f };
     DirectX::SimpleMath::Quaternion Rotation{ 0.0f, 0.0f, 0.0f, 1.0f };
 };

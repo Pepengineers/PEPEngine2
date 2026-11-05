@@ -280,7 +280,7 @@ int main(int argc, char** argv)
             expected += BistroPhysics::GetCount(partition.Props.size(), scale);
             std::cout << part << ": " << partition.Props.size() << " originals; static sections=" << partition.StaticSubMeshes.size() << std::endl;
             const auto before = world.GetECS().GetPool<RigidBodyComponent>().Size();
-            CreateBistroPropEntities(world, part, StaticMeshRenderComponent({},{}), *mesh, partition, &physics, &waves);
+            CreateBistroPropEntities(world, part, StaticMeshRenderComponent({},{}), *mesh, partition, jobs, &physics, &waves);
             auto& ecs = world.GetECS();
             ecs.ForEach<NameComponent,StaticMeshRenderComponent,RigidBodyComponent>([&](Entity entity, const NameComponent& name, const StaticMeshRenderComponent& render, const RigidBodyComponent& body)
             {
@@ -301,6 +301,39 @@ int main(int argc, char** argv)
         Require(base == 379, "Bistro source object grouping changed");
         auto& ecs=world.GetECS();
         ecs.ForEach<RigidBodyComponent>([](Entity,const RigidBodyComponent& body){Require(body.Body.IsValid(),"Silently missing Jolt body");});
+        size_t convexParts = 0, primitiveParts = 0, staticTriangles = 0;
+        ecs.ForEach<ColliderComponent, RigidBodyComponent>([&](Entity, const ColliderComponent& collider, const RigidBodyComponent& body)
+        {
+            if (const auto* triangle = std::get_if<TriangleMeshShapeDesc>(&collider.Shape))
+            {
+                Require(body.MotionType == PhysicsMotionType::Static, "Dynamic body received a triangle mesh");
+                staticTriangles += triangle->Geometry->Triangles.size();
+            }
+            else if (const auto* convex = std::get_if<ConvexCompoundShapeDesc>(&collider.Shape))
+            {
+                Require(convex->Geometry->Hulls.size() <= 12, "Collider bake exceeded the furniture hull budget");
+                convexParts += convex->Geometry->Hulls.size();
+                for (const auto& hull : convex->Geometry->Hulls)
+                    Require(hull.size() <= 32, "Collider bake exceeded the hull vertex budget");
+            }
+            else if (const auto* compound = std::get_if<CompoundShapeDesc>(&collider.Shape))
+            {
+                Require(compound->Geometry->Children.size() <= 12, "Collider bake exceeded its compound part budget");
+                for (const auto& child : compound->Geometry->Children)
+                    if (const auto* convex = std::get_if<ConvexCompoundShapeDesc>(&child.Shape))
+                    {
+                        convexParts += convex->Geometry->Hulls.size();
+                        for (const auto& hull : convex->Geometry->Hulls)
+                            Require(hull.size() <= 32, "Mixed collider exceeded the hull vertex budget");
+                    }
+                    else ++primitiveParts;
+            }
+            else ++primitiveParts;
+        });
+        Require(staticTriangles < 3438175, "Bistro collision mesh was not simplified");
+        Require((convexParts + primitiveParts) * base < 2277 * expected, "Bistro collision bake increased the legacy part count");
+        std::cout << "Baked colliders: " << staticTriangles << " static triangles, " << convexParts
+            << " convex parts, " << primitiveParts << " primitive parts\n";
         DynamicBodyUpdateSystem sync(physics);
         Require(waves.ParticipantCount() == expected, "Only spawned props must opt into waves");
         float peakSpeed = 0;

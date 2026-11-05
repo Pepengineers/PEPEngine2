@@ -5,8 +5,9 @@
 #include "App.Base/Modules/PhysicsModule.h"
 #include "Common/ConsoleVariables.h"
 #include "BistroWaves.h"
-#include <map>
-#include <numeric>
+#include "App.Base/Physics/CollisionGeometry.h"
+#include "Engine.Core/Jobs/JobSystem.h"
+#include "App.Base/App.h"
 #include <cmath>
 #include <stdexcept>
 #include <algorithm>
@@ -83,70 +84,47 @@ namespace BistroPhysics
 
     inline TriangleMeshShapeDesc StaticShape(const Engine::Core::Mesh& mesh, const std::vector<uint32_t>& indices)
     {
-        auto geometry = std::make_shared<PhysicsTriangleMesh>();
-        for (auto index : indices)
-        {
-            const auto& part = mesh.GetSubMesh(index);
-            const auto offset = static_cast<uint32_t>(geometry->Vertices.size());
-            for (const auto& vertex : part.Vertices) geometry->Vertices.push_back(vertex.Position);
-            for (size_t i = 0; i + 2 < part.Indices.size(); i += 3)
-                geometry->Triangles.push_back({offset + part.Indices[i], offset + part.Indices[i+1], offset + part.Indices[i+2]});
-        }
-        return {geometry};
+        return BuildStaticCollision(mesh, indices, 1.0f);
     }
 
-    inline ConvexCompoundShapeDesc PropShape(const Engine::Core::Mesh& mesh, const BistroPropGroup& prop)
+    inline PhysicsShapeDesc PropShape(const Engine::Core::Mesh& mesh, const BistroPropGroup& prop)
     {
-        auto geometry = std::make_shared<PhysicsConvexCompound>();
-        std::vector<Vector3> points;
-        std::vector<size_t> parent;
-        std::map<std::array<int, 3>, size_t> welded;
-        const auto root = [&](size_t i)
-        {
-            while (parent[i] != i) { parent[i] = parent[parent[i]]; i = parent[i]; }
-            return i;
-        };
-        for (auto index : prop.SubMeshIndices)
-        {
-            const auto& part = mesh.GetSubMesh(index);
-            std::vector<size_t> remap;
-            for (const auto& vertex : part.Vertices)
-            {
-                const auto& p = vertex.Position;
-                const std::array<int, 3> key = {static_cast<int>(std::round(p.x*100)),
-                    static_cast<int>(std::round(p.y*100)), static_cast<int>(std::round(p.z*100))};
-                const auto [it, added] = welded.emplace(key, points.size());
-                if (added) { parent.push_back(points.size()); points.push_back(p); }
-                remap.push_back(it->second);
-            }
-            for (size_t i = 0; i + 2 < part.Indices.size(); i += 3)
-            {
-                const auto a = root(remap.at(part.Indices[i]));
-                parent[root(remap.at(part.Indices[i+1]))] = a;
-                parent[root(remap.at(part.Indices[i+2]))] = a;
-            }
-        }
-        // Bottles are closed hulls; furniture keeps separate legs, seats and tops instead of filling their gaps.
-        const bool bottle = prop.Name.find("Bottle") != std::string::npos || prop.Name.find("bottle") != std::string::npos;
-        std::map<size_t, size_t> hulls;
-        for (size_t i = 0; i < points.size(); ++i)
-        {
-            const auto [it, added] = hulls.emplace(bottle ? 0 : root(i), geometry->Hulls.size());
-            if (added) geometry->Hulls.emplace_back();
-            geometry->Hulls[it->second].push_back(points[i]);
-        }
-        return {geometry};
+        const Vector3 size = Vector3(Bounds(mesh, prop.SubMeshIndices).Extents) * 2;
+        // Thin props cannot use the same detail budget as full-size furniture at 1 cm resolution.
+        const auto hulls = static_cast<unsigned>(std::clamp(std::ceil((std::min)({size.x,size.y,size.z}) / 4.f), 4.f, 12.f));
+        return BuildDynamicCollision(mesh, prop.SubMeshIndices, 1.0f, hulls);
     }
 }
 
 inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
     const StaticMeshRenderComponent& source, const Engine::Core::Mesh& mesh,
-    const BistroPropPartition& partition, PhysicsModule* physics = nullptr, BistroWaves::Controller* waves = nullptr)
+    const BistroPropPartition& partition, JobSystem& jobs, PhysicsModule* physics = nullptr, BistroWaves::Controller* waves = nullptr)
 {
     auto& ecs = world.GetECS();
     const size_t count = BistroPhysics::GetCount(partition.Props.size(), BistroPhysics::CountScale.GetValue());
     if (ecs.GetPool<RigidBodyComponent>().Size() + count + 1 > BistroPhysics::MaxBodies)
         throw std::length_error("Combined Bistro physics body budget exceeded");
+    struct BakeColliders final : ParallelJob
+    {
+        BakeColliders(const Engine::Core::Mesh& mesh, const BistroPropPartition& partition)
+            : Mesh(mesh), Partition(partition), Props(partition.Props.size()) {}
+        void Execute(size_t index) override
+        {
+            if (index == 0)
+            {
+                if (!Partition.StaticSubMeshes.empty()) Static = BistroPhysics::StaticShape(Mesh, Partition.StaticSubMeshes);
+            }
+            else Props[index - 1] = BistroPhysics::PropShape(Mesh, Partition.Props[index - 1]);
+        }
+        const Engine::Core::Mesh& Mesh;
+        const BistroPropPartition& Partition;
+        TriangleMeshShapeDesc Static;
+        std::vector<PhysicsShapeDesc> Props;
+    } baked(mesh, partition);
+    const auto prepared = baked.Schedule(jobs, partition.Props.size() + 1, 1);
+    if (auto* app = dynamic_cast<App*>(BenchmarkEngine::GetInstance()); app && &app->GetJobs() == &jobs)
+        app->WaitForLoading(prepared);
+    else prepared.Complete();
     const auto create = [&](const std::string& name, const std::vector<uint32_t>& indices,
         const PhysicsShapeDesc& shape, PhysicsMotionType motion, Vector3 offset = Vector3::Zero)
     {
@@ -167,15 +145,14 @@ inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
         }
     };
     if (!partition.StaticSubMeshes.empty())
-        create(sceneName, partition.StaticSubMeshes, BistroPhysics::StaticShape(mesh, partition.StaticSubMeshes), PhysicsMotionType::Static);
-    std::vector<ConvexCompoundShapeDesc> shapes;
+        create(sceneName, partition.StaticSubMeshes, baked.Static, PhysicsMotionType::Static);
     std::vector<DirectX::BoundingBox> bounds;
-    for (const auto& prop : partition.Props)
+    for (size_t index = 0; index < partition.Props.size(); ++index)
     {
-        shapes.push_back(BistroPhysics::PropShape(mesh, prop));
+        const auto& prop = partition.Props[index];
         bounds.push_back(BistroPhysics::Bounds(mesh, prop.SubMeshIndices));
         // Imported vertices retain their baked positions. Jolt shifts the body origin as it rotates about shape COM.
-        create(prop.Name, prop.SubMeshIndices, shapes.back(), PhysicsMotionType::Dynamic);
+        create(prop.Name, prop.SubMeshIndices, baked.Props[index], PhysicsMotionType::Dynamic);
     }
     if (count == partition.Props.size()) return;
     if (!physics) throw std::logic_error("Spawn copies require physics placement queries");
@@ -214,7 +191,7 @@ inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
             if (!supported) continue;
             if (physics->OverlapsBox(world, center, Vector3(b.Extents) + Vector3(2))) continue;
             const auto& prop = partition.Props[index];
-            create(prop.Name + "_PhysicsCopy_" + std::to_string(i), prop.SubMeshIndices, shapes[index],
+            create(prop.Name + "_PhysicsCopy_" + std::to_string(i), prop.SubMeshIndices, baked.Props[index],
                 PhysicsMotionType::Dynamic, center - Vector3(b.Center));
             break;
         }

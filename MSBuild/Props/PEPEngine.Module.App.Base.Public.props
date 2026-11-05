@@ -7,4 +7,8 @@
       <AdditionalIncludeDirectories>$(PEPRepoRoot)Apps\App.Base\Include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
+  <Target Name="CopyCollisionBakingLicenses" AfterTargets="Build" Condition="'$(ConfigurationType)'=='Application'">
+    <Copy SourceFiles="$(PEPRepoRoot)External\External.Libraries\meshoptimizer\LICENSE.md" DestinationFiles="$(TargetDir)Licenses\meshoptimizer\LICENSE.md" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(PEPRepoRoot)External\External.Libraries\vhacd\LICENSE" DestinationFiles="$(TargetDir)Licenses\vhacd\LICENSE" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

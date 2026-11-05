@@ -12,6 +12,7 @@
 #include "Common/Logger.h"
 
 #include <filesystem>
+#include <chrono>
 #include <string>
 
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
@@ -554,7 +555,7 @@ void App::UpdatePhysics(World& world, float dt)
     const double elapsed = static_cast<double>(dt) * world.GetTimeScale();
     if (!std::isfinite(elapsed) || elapsed <= 0) return;
     world._physicsAccumulator += elapsed;
-    // Retain backlog, but bound catch-up work so an overloaded frame can still render.
+    const auto started = std::chrono::steady_clock::now();
     for (unsigned ticks = 0; ticks < 8 && world._physicsAccumulator >= step; ++ticks)
     {
         if (!_AppConfig.StartScene.empty())
@@ -578,5 +579,6 @@ void App::UpdatePhysics(World& world, float dt)
             dynamic.Schedule(_jobs, world, step).Complete();
         }
         world._physicsAccumulator -= step;
+        if (std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count() >= step) break;
     }
 }

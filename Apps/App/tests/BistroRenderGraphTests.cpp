@@ -275,7 +275,7 @@ protected:
         auto renderer = std::make_shared<RenderModule>(GetWindow(), &Timer,
             std::make_unique<BistroRenderPipeline>(scenes));
         Locator.RegisterModule(renderer);
-        ConfigureBistroProps(*scenes);
+        ConfigureBistroProps(*scenes, GetJobs());
         Locator.RegisterModule(scenes);
         Locator.RegisterModule(std::make_shared<PhysicsModule>(_jobs));
         return BenchmarkEngine::AddModules();

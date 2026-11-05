@@ -54,6 +54,7 @@
     <ClInclude Include="Include\App.Base\Physics\JoltPhysicsBackend.h" />
     <ClInclude Include="Include\App.Base\Physics\JoltJobSystem.h" />
     <ClInclude Include="Include\App.Base\Physics\PhysicsTypes.h" />
+    <ClInclude Include="Include\App.Base\Physics\CollisionGeometry.h" />
     <ClInclude Include="Include\App.Base\SceneTraversal.h" />
     <ClInclude Include="Include\App.Base\Systems\CircleMovementSystem.h" />
     <ClInclude Include="Include\App.Base\Systems\IndirectCommandBuildSystem.h" />
@@ -72,6 +73,22 @@
     <ClCompile Include="src\PhysicsModule.cpp" />
     <ClCompile Include="src\Physics\JoltPhysicsBackend.cpp" />
     <ClCompile Include="src\Physics\JoltJobSystem.cpp" />
+    <ClCompile Include="src\Physics\CollisionGeometry.cpp">
+      <Optimization>MaxSpeed</Optimization><InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks><SupportJustMyCode>false</SupportJustMyCode>
+    </ClCompile>
+    <ClCompile Include="..\..\External\External.Libraries\meshoptimizer\allocator.cpp">
+      <Optimization>MaxSpeed</Optimization><BasicRuntimeChecks>Default</BasicRuntimeChecks><SupportJustMyCode>false</SupportJustMyCode>
+    </ClCompile>
+    <ClCompile Include="..\..\External\External.Libraries\meshoptimizer\indexgenerator.cpp">
+      <Optimization>MaxSpeed</Optimization><BasicRuntimeChecks>Default</BasicRuntimeChecks><SupportJustMyCode>false</SupportJustMyCode>
+    </ClCompile>
+    <ClCompile Include="..\..\External\External.Libraries\meshoptimizer\simplifier.cpp">
+      <Optimization>MaxSpeed</Optimization><BasicRuntimeChecks>Default</BasicRuntimeChecks><SupportJustMyCode>false</SupportJustMyCode>
+    </ClCompile>
+    <ClCompile Include="..\..\External\External.Libraries\meshoptimizer\vfetchoptimizer.cpp">
+      <Optimization>MaxSpeed</Optimization><BasicRuntimeChecks>Default</BasicRuntimeChecks><SupportJustMyCode>false</SupportJustMyCode>
+    </ClCompile>
     <ClCompile Include="src\RenderModule.cpp" />
     <ClCompile Include="src\Rendering\CommonRenderPasses.cpp" />
     <ClCompile Include="src\Rendering\DefaultRenderPipeline.cpp" />

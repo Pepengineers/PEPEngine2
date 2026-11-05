@@ -174,13 +174,18 @@ static void CheckCompoundShapes(JobSystem& jobs)
         {SphereShapeDesc{10}, {1200, 100, -400}},
         {CapsuleShapeDesc{10, 10}, {1300, 100, -400}}
     };
+    auto hull = std::make_shared<PhysicsConvexCompound>();
+    hull->Hulls.emplace_back();
+    for (float x : {-10.f,10.f}) for (float y : {-10.f,10.f}) for (float z : {-10.f,10.f})
+        hull->Hulls.front().push_back({x,y,z});
+    geometry->Children.push_back({ConvexCompoundShapeDesc{hull}, {1400,100,-400}});
     PhysicsBodyDesc desc;
     desc.Shape = CompoundShapeDesc{geometry};
     const auto first = physics.CreateBody(desc);
     Require(first.IsValid(), "Primitive compound creation failed");
     PhysicsRayHit hit;
     for (const auto& sample : {Vector3(1000, 150, -400), Vector3(1100, 120, -400), Vector3(1108, 120, -400),
-        Vector3(1200, 110, -400), Vector3(1300, 120, -400)})
+        Vector3(1200, 110, -400), Vector3(1300, 120, -400), Vector3(1400, 110, -400)})
     {
         Require(physics.RayCastStatic({sample.x, 300, sample.z}, {0, -400, 0}, hit) &&
             std::abs(hit.Position.y - sample.y) < 0.05f, "Compound local transforms or centimeter units are wrong");
@@ -190,9 +195,18 @@ static void CheckCompoundShapes(JobSystem& jobs)
     Require(physics.CreateBody(desc).IsValid(), "Reusing a cooked compound failed");
     desc.Position = {6000, 0, 0};
     desc.Scale = {2, 1, 1};
+    Require(!physics.CreateBody(desc).IsValid(), "Compound silently approximated nonuniformly scaled round children");
+    auto boxOnly = std::make_shared<PhysicsCompound>();
+    boxOnly->Children.push_back(geometry->Children.front());
+    desc.Shape = CompoundShapeDesc{boxOnly};
     Require(physics.CreateBody(desc).IsValid(), "Nonuniformly scaled compound failed");
     Require(physics.RayCastStatic({8000, 300, -400}, {0, -400, 0}, hit) &&
         std::abs(hit.Position.y - 150) < 0.05f, "Cooked compound cache ignored scale or rotated child axes");
+    auto sheared = std::make_shared<PhysicsCompound>(*boxOnly);
+    sheared->Children.front().Rotation = Quaternion::CreateFromAxisAngle(Vector3::UnitZ, XM_PIDIV4);
+    auto unsupported = desc;
+    unsupported.Shape = CompoundShapeDesc{sheared};
+    Require(!physics.CreateBody(unsupported).IsValid(), "Compound silently approximated a sheared box");
     auto invalidGeometry = std::make_shared<PhysicsCompound>(*geometry);
     invalidGeometry->Children.front().Rotation = {0, 0, 0, 0};
     auto invalid = desc;
@@ -337,6 +351,20 @@ static void CheckFixedPipeline()
         app.UpdatePhysics(world, step);
         Require(entity.GetComponent<TransformComponent>().Location.x == 17,
             "Removing the last rigid body stopped independent fixed systems");
+        World overloaded(WorldDesc{});
+        scenes->OnWorldCreated.Broadcast(overloaded);
+        unsigned slowTicks = 0;
+        overloaded.BeforePhysicsStep = [&](float)
+        {
+            if (++slowTicks == 1) Sleep(25);
+        };
+        app.UpdatePhysics(overloaded, step * 8.01f);
+        Require(slowTicks == 1, "Catch-up repeated an expensive physics tick past the frame budget");
+        overloaded.BeforePhysicsStep = [&](float) { ++slowTicks; };
+        for (unsigned frame = 0; frame < 16 && slowTicks < 8; ++frame)
+            app.UpdatePhysics(overloaded, step * 0.0001f);
+        Require(slowTicks == 8, "Physics frame budget discarded the accumulated simulation time");
+        scenes->OnWorldDestroyed.Broadcast(overloaded);
         scenes->OnWorldDestroyed.Broadcast(world);
         scenes->Uninitialize();
     }

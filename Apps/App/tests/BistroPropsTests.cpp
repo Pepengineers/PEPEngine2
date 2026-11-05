@@ -78,6 +78,14 @@ static void CheckPartition()
     {
         parts[i].SourceNodeName = names[i];
         parts[i].MaterialIndex = static_cast<uint32_t>(i);
+        const Vector3 offset(static_cast<float>(i) * 100, 0, 0);
+        for (const auto point : {Vector3(0,0,0),Vector3(10,0,0),Vector3(0,10,0),Vector3(0,0,10)})
+        {
+            Engine::Core::Vertex vertex;
+            vertex.Position = point + offset;
+            parts[i].Vertices.push_back(vertex);
+        }
+        parts[i].Indices = {0,2,1,0,1,3,0,3,2,1,2,3};
     }
     Engine::Core::Mesh mesh(std::move(parts), {});
     const auto partition = PartitionBistroProps(mesh);
@@ -99,7 +107,8 @@ static void CheckPartition()
     World world(WorldDesc{});
     auto& ecs = world.GetECS();
     ecs.RegisterComponent<FlyingPropComponent>();
-    CreateBistroPropEntities(world, "Interior_interior", whole, mesh, partition);
+    JobSystem jobs(1);
+    CreateBistroPropEntities(world, "Interior_interior", whole, mesh, partition, jobs);
     Require(ecs.GetPool<RigidBodyComponent>().Size() == 4, "Each source object needs one body including static environment");
     Require(ecs.GetPool<FlyingPropComponent>().Size() == 0, "Physics props must not have FlyingProp movement");
     std::vector<unsigned> rendered(mesh.GetSubMeshCount());

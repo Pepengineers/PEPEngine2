@@ -187,7 +187,9 @@ namespace
                 const auto result = compound.Create();
                 if (result.HasError()) return result;
                 // Parent nonuniform scale must also transform rotated child axes.
-                return result.Get()->ScaleShape(JPH::Vec3(scale.x / uniform, scale.y / uniform, scale.z / uniform));
+                const JPH::Vec3 residual(scale.x / uniform, scale.y / uniform, scale.z / uniform);
+                if (!result.Get()->IsValidScale(residual)) return invalidShape();
+                return result.Get()->ScaleShape(residual);
             }
 
         },

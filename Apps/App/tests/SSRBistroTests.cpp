@@ -21,7 +21,7 @@ public:
             std::filesystem::path(ASSETS_FOLDER) / "Scenes" / "Amazon Lumberyard Bistro");
         Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer,
             std::make_unique<BistroRenderPipeline>(scenes)));
-        ConfigureBistroProps(*scenes);
+        ConfigureBistroProps(*scenes, GetJobs());
         Locator.RegisterModule(scenes);
         return BenchmarkEngine::AddModules();
     }
