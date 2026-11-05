@@ -1,4 +1,5 @@
 #include "App.Base/App.h"
+#include <fstream>
 #include <d3d12sdklayers.h>
 #include <iostream>
 #include <sstream>
@@ -97,6 +98,11 @@ public:
         std::ostringstream graph;
         renderer->WriteRenderGraph(graph);
         const auto text = graph.str();
+        const auto directory = std::filesystem::path(SOLUTION_DIR) / "Build/Verification";
+        std::filesystem::create_directories(directory);
+        std::ofstream saved(directory / (_custom ? "application-clear.dot" : "default-render-pipeline.dot"));
+        saved << text;
+        Require(bool(saved), "Cannot write the selected application render graph");
         if (_custom)
         {
             Require(passCount == 1 && text.find("Application clear") != std::string::npos,

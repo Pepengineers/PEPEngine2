@@ -5,6 +5,8 @@
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <fstream>
+#include <map>
 
 static void Set(const wchar_t* name, const char* value)
 {
@@ -87,11 +89,32 @@ public:
         Timer.Reset();
         Timer.Stop();
         auto render = Locator.GetModule<RenderModule>();
+        auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+        auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
+        camera.Location = Vector3(-300, 200, 20);
+        camera.Rotation = Vector3(0, 117, 0);
+        camera.DirtyFlag = true;
+        world.GetECS().Get<CameraComponent>(world.ActiveCamera).InvalidateHistory();
         Set(L"Render.Upscaler.Provider", "0");
         Set(L"Render.SSR.Enabled", "false");
         Set(L"Render.DOF.Enabled", "false");
         Set(L"Render.MotionBlur.Enabled", "false");
         Set(L"Render.Reflection.Enabled", "false");
+        Set(L"Render.Particles.Enabled", "true");
+        // Atomic particle compaction changes FP16 blend order even with a zero simulation delta.
+        Set(L"Render.Particles.DrawEnabled", "false");
+        // Atomic culling also varies transparent draw order and FP16 WBOIT rounding.
+        std::map<GDX12Material*, float> transparentOpacity;
+        world.GetECS().ForEach<StaticMeshRenderComponent>([&](Entity, StaticMeshRenderComponent& mesh)
+        {
+            for (auto* material : mesh.Materials)
+                if (material && material->Type == MaterialType::Transparent)
+                {
+                    transparentOpacity.try_emplace(material, material->Opacity);
+                    material->Opacity = 0;
+                    material->DirtyFlag = true;
+                }
+        });
         Set(L"Render.AO.Implementation", "0");
         Set(L"Render.AO.Enabled", "0");
         Frame();
@@ -106,7 +129,7 @@ public:
         {
             Set(L"Render.AO.ExecutionPoint", early ? "0" : "1");
             std::vector<BYTE> reference;
-            for (bool reuse : { false, true, false })
+            for (bool reuse : { false, false, true, false })
             {
                 Set(L"Render.Graph.ReuseTextures", reuse ? "true" : "false");
                 for (int frame = 0; frame < 4; ++frame) Frame();
@@ -114,13 +137,18 @@ public:
                 output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
                 const auto pixels = CaptureHDR(*output);
                 if (reference.empty()) reference = pixels;
-                else if (pixels != reference) throw std::runtime_error("Bistro pooled output differs from dedicated HDR output");
+                else if (pixels != reference) throw std::runtime_error("Bistro HDR differs from the first dedicated capture (reuse=" + std::to_string(reuse) + ")");
                 const auto stats = render->GetRenderGraphStatistics();
                 if (reuse && stats.PhysicalTextures >= stats.TransientTextures) throw std::runtime_error("Bistro graph did not reuse textures");
                 if (!reuse && stats.PhysicalTextures != stats.TransientTextures) throw std::runtime_error("Dedicated graph mode still shares textures");
-                std::cout << "Bistro earlyAO=" << early << " reuse=" << reuse << " textures="
+                std::cout << "Bistro earlyAO=" << early << " reuse=" << reuse << " passes=" << stats.Passes << " textures="
                     << stats.PhysicalTextures << '/' << stats.TransientTextures << " HDR readback identical" << std::endl;
             }
+            const auto directory = std::filesystem::path(SOLUTION_DIR) / "Build/Verification";
+            std::filesystem::create_directories(directory);
+            std::ofstream graph(directory / (early ? "bistro-early-ao.dot" : "bistro-late-ao.dot"));
+            render->WriteRenderGraph(graph);
+            if (!graph) throw std::runtime_error("Cannot write Bistro render graph");
         }
         Set(L"Render.Graph.ReuseTextures", "true");
         Set(L"Render.AO.Enabled", "1");
@@ -128,6 +156,12 @@ public:
         Set(L"Render.DOF.Enabled", "true");
         Set(L"Render.MotionBlur.Enabled", "true");
         Set(L"Render.Reflection.Enabled", "true");
+        Set(L"Render.Particles.DrawEnabled", "true");
+        for (const auto& [material, opacity] : transparentOpacity)
+        {
+            material->Opacity = opacity;
+            material->DirtyFlag = true;
+        }
         SetWindowPos(GetWindow()->GetWindowHandle(), nullptr, 0, 0, 973, 657, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         for (int frame = 0; frame < 4; ++frame) Frame();
         render->WaitForUploads();

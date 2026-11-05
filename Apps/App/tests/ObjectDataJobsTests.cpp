@@ -1,4 +1,5 @@
 #include "App.Base/App.h"
+#include "Rendering/BistroRenderPipeline.h"
 #include "../src/Systems/FlyingPropSystem.h"
 #include "../src/BistroScene.h"
 #include "Engine.Core/IO/TextureLoader.h"
@@ -256,6 +257,8 @@ public:
         info->ClearStoredMessages();
         FlyingPropSystem flyingProps;
         Timer.Reset();
+        // Debug/SDK stalls must not trigger a pause-history reset every frame; jobs use explicit dt below.
+        Timer.Stop();
         auto& cameraTransform = ecs.Get<TransformComponent>(world.ActiveCamera);
         auto& camera = ecs.Get<CameraComponent>(world.ActiveCamera);
         const auto setting = [&](const wchar_t* name, const char* value)
@@ -280,7 +283,7 @@ public:
                 cameraTransform.Rotation.y += 0.05f;
                 cameraTransform.DirtyFlag = true;
             }
-            setting(L"Render.AO.ExecutionPoint", frame % 2 ? "0" : "1");
+            setting(L"Render.AO.ExecutionPoint", (frame / 6) % 2 ? "0" : "1");
             setting(L"Render.AO.Implementation", std::to_string((frame / 4) % 4).c_str());
             if (frame == 8) setting(L"Render.MotionBlur.Enabled", "false");
             if (frame == 10) setting(L"Render.MotionBlur.Enabled", "true");
@@ -346,8 +349,9 @@ public:
 protected:
     bool AddModules() override
     {
-        Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer));
         auto scenes = std::make_shared<SceneManagerModule>(_scene);
+        Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer,
+            std::make_unique<BistroRenderPipeline>(scenes)));
         ConfigureBistroProps(*scenes);
         Locator.RegisterModule(scenes);
         return BenchmarkEngine::AddModules();

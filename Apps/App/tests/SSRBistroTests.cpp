@@ -1,4 +1,5 @@
 #include "App.Base/App.h"
+#include "Rendering/BistroRenderPipeline.h"
 #include "../src/Systems/FlyingPropSystem.h"
 #include "../src/BistroScene.h"
 #include "Engine.Core/ConsoleModule.h"
@@ -17,9 +18,10 @@ public:
     BistroSSRApp() : App(GetModuleHandleW(nullptr)) {}
     bool AddModules() override
     {
-        Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer));
         auto scenes = std::make_shared<SceneManagerModule>(
             std::filesystem::path(ASSETS_FOLDER) / "Scenes" / "Amazon Lumberyard Bistro");
+        Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer,
+            std::make_unique<BistroRenderPipeline>(scenes)));
         ConfigureBistroProps(*scenes);
         Locator.RegisterModule(scenes);
         return BenchmarkEngine::AddModules();
