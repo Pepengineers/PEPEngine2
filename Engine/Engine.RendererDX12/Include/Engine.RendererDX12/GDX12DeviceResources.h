@@ -80,7 +80,8 @@ public:
     void PrepareLocalShadowData();
     void UploadLocalShadowData(GDX12CommandList* commands);
 private:
-    struct MeshPrimitive { GDX12RenderPrimitiveHandle Handle; uint64_t Epoch; };
-    std::unordered_map<UINT, MeshPrimitive> _meshPrimitives;
+    struct MeshPrimitive { GDX12RenderPrimitiveHandle Handle; uint64_t Epoch = 0; };
+    // Instance indices already address the dense GPU instance buffers.
+    std::vector<MeshPrimitive> _meshPrimitives;
     uint64_t _meshPrimitiveEpoch = 0;
 };

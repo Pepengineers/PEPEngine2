@@ -194,35 +194,31 @@ void GDX12DeviceResources::BeginMeshPrimitiveUpdate()
 
 GDX12RenderPrimitiveHandle GDX12DeviceResources::PublishMeshPrimitive(UINT instance, const GDX12RenderPrimitive& primitive)
 {
-    const auto found = _meshPrimitives.find(instance);
-    if (found == _meshPrimitives.end())
-    {
-        const auto handle = Primitives.Add(primitive);
-        try { _meshPrimitives.emplace(instance, MeshPrimitive{ handle, _meshPrimitiveEpoch }); }
-        catch (...) { Primitives.Remove(handle); throw; }
-        return handle;
-    }
-    Primitives.Update(found->second.Handle, primitive);
-    found->second.Epoch = _meshPrimitiveEpoch;
-    return found->second.Handle;
+    if (instance == UINT_MAX) throw std::invalid_argument("Invalid GPU instance index");
+    if (_meshPrimitives.size() <= instance) _meshPrimitives.resize(size_t(instance) + 1);
+    auto& entry = _meshPrimitives[instance];
+    if (entry.Handle.Index == UINT_MAX) entry.Handle = Primitives.Add(primitive);
+    else Primitives.Update(entry.Handle, primitive);
+    entry.Epoch = _meshPrimitiveEpoch;
+    return entry.Handle;
 }
 
 void GDX12DeviceResources::RemoveMeshPrimitive(UINT instance)
 {
-    const auto found = _meshPrimitives.find(instance);
-    if (found == _meshPrimitives.end()) return;
-    Primitives.Remove(found->second.Handle);
-    _meshPrimitives.erase(found);
+    if (instance >= _meshPrimitives.size()) return;
+    auto& entry = _meshPrimitives[instance];
+    Primitives.Remove(entry.Handle);
+    entry = {};
 }
 
 void GDX12DeviceResources::EndMeshPrimitiveUpdate()
 {
-    for (auto it = _meshPrimitives.begin(); it != _meshPrimitives.end();)
-    {
-        if (it->second.Epoch == _meshPrimitiveEpoch) { ++it; continue; }
-        Primitives.Remove(it->second.Handle);
-        it = _meshPrimitives.erase(it);
-    }
+    for (auto& entry : _meshPrimitives)
+        if (entry.Handle.Index != UINT_MAX && entry.Epoch != _meshPrimitiveEpoch)
+        {
+            Primitives.Remove(entry.Handle);
+            entry = {};
+        }
 }
 
 void GDX12DeviceResources::GatherGeometryBatches(const GDX12GeometryContext& view,

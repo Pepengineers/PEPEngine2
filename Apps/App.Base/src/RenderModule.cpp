@@ -1020,6 +1020,9 @@ void RenderModule::CollectReflectionScene()
         for (size_t i = 0; i < sizeof(value); ++i) result = (result ^ bytes[i]) * 1099511628211ull;
     };
     auto& resources = _primaryResources;
+    const auto& frame = *resources.FrameConstants[resources.CurrFrameConstantsIndex];
+    const auto* instances = frame.InstanceCache->GetCPUData();
+    const auto* transforms = frame.TransformCache->GetCPUData();
     if (!resources.LocalShadowCasters) resources.LocalShadowCasters.emplace();
     resources.LocalShadowCasters->clear();
     resources.GeometryRevision = 14695981039346656037ull;
@@ -1048,8 +1051,8 @@ void RenderModule::CollectReflectionScene()
                 const auto& submesh = mesh->SubMeshes.at(submeshIndex);
                 const auto* material = renderer.Materials.at(submesh.MaterialIndex);
                 const UINT instanceIndex = renderer._CBufferIndices.at(part);
-                const auto& instance = resources.FrameConstants[resources.CurrFrameConstantsIndex]->InstanceCache->GetCPUData()[instanceIndex];
-                const auto& worldMatrix = resources.FrameConstants[resources.CurrFrameConstantsIndex]->TransformCache->GetCPUData()[instance.TransformIndex].WorldMatrix;
+                const auto& instance = instances[instanceIndex];
+                const auto& worldMatrix = transforms[instance.TransformIndex].WorldMatrix;
                 if (_meshSnapshots.size() <= instanceIndex) _meshSnapshots.resize(size_t(instanceIndex) + 1);
                 auto& cached = _meshSnapshots[instanceIndex];
                 const bool castsShadows = material->Type != MaterialType::Transparent && !material->ReflectionProbePreview;

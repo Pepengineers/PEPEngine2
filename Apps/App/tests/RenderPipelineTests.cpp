@@ -447,6 +447,19 @@ static void TestPrimitiveRecords()
     resources.BeginMeshPrimitiveUpdate();
     resources.EndMeshPrimitiveUpdate();
     Require(!resources.Primitives.Get(reused), "Missing extraction retained stale primitive bounds");
+    resources.RemoveMeshPrimitive(9000);
+    resources.BeginMeshPrimitiveUpdate();
+    const auto sparse = resources.PublishMeshPrimitive(4096, primitive);
+    const auto low = resources.PublishMeshPrimitive(3, primitive);
+    resources.EndMeshPrimitiveUpdate();
+    resources.BeginMeshPrimitiveUpdate();
+    Require(resources.PublishMeshPrimitive(4096, primitive) == sparse, "Sparse GPU instance changed primitive identity");
+    resources.EndMeshPrimitiveUpdate();
+    Require(resources.Primitives.Get(sparse) && !resources.Primitives.Get(low),
+        "Retiring a missing low instance removed a retained high instance");
+    rejected = false;
+    try { resources.PublishMeshPrimitive(UINT_MAX, primitive); } catch (const std::invalid_argument&) { rejected = true; }
+    Require(rejected, "Invalid GPU instance index was accepted");
 }
 
 static void TestBatchContract()

@@ -13,8 +13,8 @@ public:
         _casters = &casters;
         _visibility = &visibility;
         visibility.resize(lights.size());
-        // Small light batches keep the six-face tests distributed even in scenes with few lights.
-        return ParallelJob::Schedule(jobs, lights.size(), 8);
+        // Nearby lights can intersect far more casters than their neighbours.
+        return ParallelJob::Schedule(jobs, lights.size(), 1);
     }
 
 private:

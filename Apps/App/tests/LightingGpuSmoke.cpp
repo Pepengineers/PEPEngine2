@@ -13,6 +13,7 @@
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
+#include <random>
 
 static void Require(bool condition, const char* message)
 {
@@ -183,6 +184,16 @@ static std::vector<float> ReadHDR(GDX12Device& device, GDX12Texture& texture)
 
 static void CheckShadowVisibilityJobs()
 {
+    const auto referenceIntersects = [](const XMFLOAT4X4& matrix, const BoundingBox& bounds)
+    {
+        const XMMATRIX m = XMLoadFloat4x4(&matrix);
+        const XMVECTOR planes[] = { m.r[3] + m.r[0], m.r[3] - m.r[0], m.r[3] + m.r[1],
+            m.r[3] - m.r[1], m.r[2], m.r[3] - m.r[2] };
+        for (const auto plane : planes)
+            if (XMVectorGetX(XMVector3Dot(XMLoadFloat3(&bounds.Center), plane)) + XMVectorGetW(plane) +
+                XMVectorGetX(XMVector3Dot(XMLoadFloat3(&bounds.Extents), XMVectorAbs(plane))) < 0) return false;
+        return true;
+    };
     GDX12LocalLightConstants point;
     point.ShadowFirstSlice = 0;
     BuildLocalLightShadowMatrices(point);
@@ -211,6 +222,22 @@ static void CheckShadowVisibilityJobs()
         lights[i].Type = i % 2 ? 2 : 1;
         BuildLocalLightShadowMatrices(lights[i]);
     }
+    std::mt19937 random(42);
+    std::uniform_real_distribution<float> position(-1500, 1500), extent(0, 500);
+    for (const auto& light : lights)
+        for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
+        {
+            const GDX12LocalShadowFrustum frustum(light.ShadowViewProj[face]);
+            for (UINT i = 0; i < 512; ++i)
+            {
+                const BoundingBox bounds({ position(random), position(random), position(random) },
+                    { extent(random), extent(random), extent(random) });
+                Require(LocalShadowRangeIntersects(light, bounds) == BoundingSphere(light.Position, light.Range).Intersects(bounds),
+                    "Scalar shadow range disagrees with sphere/box intersection");
+                Require(frustum.Intersects(bounds) == referenceIntersects(light.ShadowViewProj[face], bounds),
+                    "Prepared point/spot frustum disagrees with the clip-plane reference");
+            }
+        }
     std::vector<GDX12LocalShadowVisibility> serial, parallel;
     ShadowVisibilitySystem system;
     JobSystem one(1), four(4);

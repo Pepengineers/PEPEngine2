@@ -28,7 +28,8 @@ namespace
         void Execute(GDX12CommandList* commands) override
         {
             _pass.BeginGeometry(commands);
-            for (UINT slot = 0; slot < _pass.GetGeometryViewCapacity(); ++slot)
+            const auto capacity = _pass.GetGeometryViewCapacity();
+            for (UINT slot = 0; slot < capacity; ++slot)
                 if (const auto* prepared = _pass.GetGeometryView(slot))
                 {
                     _pass.ExecuteGeometryView(commands, slot);
@@ -49,7 +50,8 @@ namespace
         std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
         {
             auto accesses = _pass.GetBufferAccesses();
-            for (UINT slot = 0; slot < _pass.GetGeometryViewCapacity(); ++slot)
+            const auto capacity = _pass.GetGeometryViewCapacity();
+            for (UINT slot = 0; slot < capacity; ++slot)
                 if (const auto* view = _pass.GetGeometryView(slot))
                     for (UINT patch = 0; patch < _grass.PatchCount(); ++patch)
                     {

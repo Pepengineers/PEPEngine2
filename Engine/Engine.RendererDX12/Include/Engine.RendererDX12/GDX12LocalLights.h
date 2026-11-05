@@ -26,23 +26,60 @@ inline UINT LocalShadowFaceCount(const GDX12LocalLightConstants& light)
     return light.Type == 1 ? 6u : 1u;
 }
 
+class GDX12LocalShadowFrustum
+{
+public:
+    explicit GDX12LocalShadowFrustum(const XMFLOAT4X4& viewProjection)
+    {
+        // Uploaded matrices are transposed: their rows are the clip-space plane coefficients.
+        const XMMATRIX m = XMLoadFloat4x4(&viewProjection);
+        const XMVECTOR planes[] = { m.r[3] + m.r[0], m.r[3] - m.r[0], m.r[3] + m.r[1],
+            m.r[3] - m.r[1], m.r[2], m.r[3] - m.r[2] };
+        for (size_t i = 0; i < _planes.size(); ++i)
+        {
+            XMStoreFloat4(&_planes[i].Equation, planes[i]);
+            XMStoreFloat3(&_planes[i].AbsoluteNormal, XMVectorAbs(planes[i]));
+        }
+    }
+    bool Intersects(const BoundingBox& bounds) const
+    {
+        const auto& c = bounds.Center;
+        const auto& e = bounds.Extents;
+        for (const auto& plane : _planes)
+        {
+            const auto& p = plane.Equation;
+            const auto& a = plane.AbsoluteNormal;
+            if (((c.x * p.x + c.y * p.y) + c.z * p.z) + p.w +
+                ((e.x * a.x + e.y * a.y) + e.z * a.z) < 0) return false;
+        }
+        return true;
+    }
+private:
+    struct Plane { XMFLOAT4 Equation; XMFLOAT3 AbsoluteNormal; };
+    std::array<Plane, 6> _planes;
+};
+
 inline bool LocalShadowFaceIntersects(const XMFLOAT4X4& viewProjection, const BoundingBox& bounds)
 {
-    // Uploaded matrices are transposed: their rows are the clip-space plane coefficients.
-    const XMMATRIX m = XMLoadFloat4x4(&viewProjection);
-    const XMVECTOR planes[] = { m.r[3] + m.r[0], m.r[3] - m.r[0], m.r[3] + m.r[1],
-        m.r[3] - m.r[1], m.r[2], m.r[3] - m.r[2] };
-    const auto center = XMLoadFloat3(&bounds.Center);
-    const auto extents = XMLoadFloat3(&bounds.Extents);
-    for (const auto plane : planes)
-        if (XMVectorGetX(XMVector3Dot(center, plane)) + XMVectorGetW(plane) +
-            XMVectorGetX(XMVector3Dot(extents, XMVectorAbs(plane))) < 0) return false;
-    return true;
+    return GDX12LocalShadowFrustum(viewProjection).Intersects(bounds);
+}
+
+inline bool LocalShadowRangeIntersects(const GDX12LocalLightConstants& light, const BoundingBox& bounds)
+{
+    const auto distance = [](float position, float center, float extent)
+    {
+        const float lo = center - extent, hi = center + extent;
+        return position < lo ? position - lo : position > hi ? position - hi : 0.0f;
+    };
+    const float x = distance(light.Position.x, bounds.Center.x, bounds.Extents.x);
+    const float y = distance(light.Position.y, bounds.Center.y, bounds.Extents.y);
+    const float z = distance(light.Position.z, bounds.Center.z, bounds.Extents.z);
+    return (x * x + y * y) + z * z <= light.Range * light.Range;
 }
 
 inline bool LocalShadowIntersects(const GDX12LocalLightConstants& light, const BoundingBox& bounds)
 {
-    return BoundingSphere(light.Position, light.Range).Intersects(bounds) &&
+    return LocalShadowRangeIntersects(light, bounds) &&
         (light.Type == 1 || LocalShadowFaceIntersects(light.ShadowViewProj[0], bounds));
 }
 
@@ -53,6 +90,10 @@ inline GDX12LocalShadowVisibility BuildLocalShadowVisibility(const GDX12LocalLig
     result.StaticCasters.fill(14695981039346656037ull);
     result.AllCasters = result.StaticCasters;
     if (light.ShadowFirstSlice == UINT_MAX) return result;
+    std::vector<GDX12LocalShadowFrustum> faces;
+    faces.reserve(LocalShadowFaceCount(light));
+    for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
+        faces.emplace_back(light.ShadowViewProj[face]);
     const auto hash = [](uint64_t& signature, const auto& value)
     {
         const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
@@ -60,14 +101,14 @@ inline GDX12LocalShadowVisibility BuildLocalShadowVisibility(const GDX12LocalLig
     };
     for (const auto& caster : casters)
     {
-        if (!BoundingSphere(light.Position, light.Range).Intersects(caster.Bounds)) continue;
+        if (!LocalShadowRangeIntersects(light, caster.Bounds)) continue;
         uint64_t signature = caster.Signature;
         hash(signature, caster.Bounds.Center);
         hash(signature, caster.Bounds.Extents);
         hash(signature, caster.Dynamic);
         for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
         {
-            if (!LocalShadowFaceIntersects(light.ShadowViewProj[face], caster.Bounds)) continue;
+            if (!faces[face].Intersects(caster.Bounds)) continue;
             hash(result.AllCasters[face], signature);
             if (!caster.Dynamic) hash(result.StaticCasters[face], signature);
         }
