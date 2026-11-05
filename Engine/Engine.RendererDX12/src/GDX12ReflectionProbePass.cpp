@@ -419,7 +419,6 @@ void GDX12ReflectionProbePass::BindGeometryViewTargets(GDX12CommandList* command
     auto& depth = prepared.Bake ? *state.BakedDepth : _depth;
     const auto rtv = (prepared.Bake ? state.BakedRTVs[prepared.Face] : _rawRTVs[captureSlice])->CPUHandle;
     const auto dsv = (prepared.Bake ? state.BakedDSVs[prepared.Face] : _depthDSVs[captureSlice])->CPUHandle;
-    // The preceding shadow view includes application chunks before sampling begins.
     commands->ResourceBarrier({ _sunShadow.GetResource()->GetSRVBarrier(),
         color.GetResource()->GetRenderTargetBarrier(), depth.GetResource()->GetDepthWriteBarrier() });
     commands->GetCommandList()->OMSetRenderTargets(1, &rtv, FALSE, &dsv);

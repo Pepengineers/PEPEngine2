@@ -129,7 +129,6 @@ public:
         if (!Get(handle)) return;
         auto& slot = _slots[handle.Index];
         slot.Alive = false;
-        // An exhausted generation is retired rather than resurrecting an old handle.
         if (slot.Generation == (std::numeric_limits<uint64_t>::max)()) return;
         ++slot.Generation;
         _free.push_back(handle.Index);

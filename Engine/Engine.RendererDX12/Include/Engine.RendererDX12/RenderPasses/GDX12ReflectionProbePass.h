@@ -111,7 +111,6 @@ private:
     UINT _publishedResolution = 0;
     UINT _publishedMips = 0;
     bool _enabled = false;
-    // Static shadow/bake faces precede the final shadow/capture faces.
     std::array<PreparedView, 14> _views;
     bool _planPrepared = false;
     bool _capturePlanned = false;

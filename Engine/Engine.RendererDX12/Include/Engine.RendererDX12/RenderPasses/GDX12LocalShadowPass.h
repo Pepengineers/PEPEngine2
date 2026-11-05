@@ -340,7 +340,6 @@ private:
             GDX12_SCOPED_EVENT(commands, "Local shadow copy");
             auto* source = _staticShadows->_maps->GetResource();
             auto* target = _maps->GetResource();
-            // Copy all dirty slices before drawing to transition the array only once.
             commands->ResourceBarrier({ source->GetCopySourceBarrier(), target->GetCopyDestBarrier() });
             for (UINT lightIndex = 0; lightIndex < _preparedCache.size(); ++lightIndex)
             {

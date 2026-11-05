@@ -1,5 +1,6 @@
 #include "Rendering/Grass/GDX12GrassRenderer.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -89,22 +90,13 @@ void GDX12GrassRenderer::Initialize()
     graphics.StaticSamplers.push_back(shadowSampler);
     _graphicsRoot = std::make_unique<GDX12RootSignature>(_resources->Device, graphics);
     auto& compiler = GDX12ShaderCompiler::GetInstance();
-    const auto createCompute = [&](const wchar_t* file, const char* entry, GDX12RootSignature* root,
-        const D3D_SHADER_MACRO* defines, ComPtr<ID3D12PipelineState>& target)
-    {
-        auto cs = compiler.CompileShader(_resources->Device, file, defines, entry, "cs");
-        D3D12_COMPUTE_PIPELINE_STATE_DESC desc = {};
-        desc.pRootSignature = root->GetRootSignature().Get();
-        desc.CS = { cs->GetBufferPointer(), cs->GetBufferSize() };
-        ThrowIfFailed(_resources->Device->GetDevice()->CreateComputePipelineState(&desc, IID_PPV_ARGS(&target)));
-    };
-    createCompute(APP_SHADERS_FOLDER "GrassExpand.hlsl", "ExpandCS", _computeRoot.get(), nullptr, _expandPSO);
-    createCompute(APP_SHADERS_FOLDER "GrassExpand.hlsl", "ClearCS", _computeRoot.get(), nullptr, _clearPSO);
+    _expandPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _computeRoot.get(), APP_SHADERS_FOLDER "GrassExpand.hlsl", "ExpandCS");
+    _clearPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _computeRoot.get(), APP_SHADERS_FOLDER "GrassExpand.hlsl", "ClearCS");
     for (UINT stage = 0; stage < _windPSO.size(); ++stage)
     {
         const auto number = std::to_string(stage);
         D3D_SHADER_MACRO defines[] = { { "WIND_STAGE", number.c_str() }, { nullptr, nullptr } };
-        createCompute(APP_SHADERS_FOLDER "WindField.hlsl", "CS", _windRoot.get(), defines, _windPSO[stage]);
+        _windPSO[stage] = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _windRoot.get(), APP_SHADERS_FOLDER "WindField.hlsl", "CS", defines);
     }
     for (UINT i = 0; i < _graphicsPSO.size(); ++i)
     {

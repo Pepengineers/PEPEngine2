@@ -477,6 +477,9 @@ void GDX12FrameGeneration::Prepare(GDX12CommandList* commands, GDX12Texture* dep
     {
         if (!depth || !motion || depth->GetWidth() != motion->GetWidth() || depth->GetHeight() != motion->GetHeight())
             throw std::invalid_argument("FG depth and motion must share the render grid");
+        // SDK descriptors below require exact compute-read state, without read-only DSV bits.
+        if (depth->GetResource()->GetCurrentState() & D3D12_RESOURCE_STATE_DEPTH_READ)
+            commands->ResourceBarrier({ depth->GetResource()->GetCommonBarrier() });
         commands->ResourceBarrier({ depth->GetResource()->GetNonPixelShaderResourceBarrier(), motion->GetResource()->GetNonPixelShaderResourceBarrier() });
         if (p.Status.Effective == GDX12FrameGenerationProvider::AMD)
         {
