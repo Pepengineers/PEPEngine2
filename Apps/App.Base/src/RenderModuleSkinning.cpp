@@ -129,11 +129,26 @@ void RenderModule::PrepareSkeletalMeshes()
                     _primaryDevice->GetCommandQueue()->Flush();
                     auto& created = _skeletalStates.at(key);
                     size_t partCount = 0;
+                    UINT skinVertices = 0;
                     for (const auto& node : scene->GetNodes())
-                        for (const auto handle : node.Meshes) partCount += meshes.GetMesh(handle)->GetSubMeshCount();
+                        for (const auto handle : node.Meshes)
+                        {
+                            const auto* mesh = meshes.GetMesh(handle);
+                            SubmitMesh(mesh, handle);
+                            partCount += mesh->GetSubMeshCount();
+                            for (const auto& source : mesh->GetSubMeshes())
+                            {
+                                if (source.Vertices.empty() || source.Indices.empty()) continue;
+                                if (source.Vertices.size() > UINT_MAX / sizeof(Vertex) - skinVertices)
+                                    throw std::overflow_error("Skeletal attachments exceed vertex buffer addressing");
+                                skinVertices += static_cast<UINT>(source.Vertices.size());
+                            }
+                        }
                     if (partCount > UINT_MAX - _instanceCount) throw std::overflow_error("Too many skeletal attachments");
                     if (partCount && !_skinning) _skinning = std::make_unique<GDX12Skinning>(_primaryDevice.get());
                     EnsureInstanceCapacity(_instanceCount + static_cast<UINT>(partCount));
+                    // Upload source meshes first so they cannot consume the reserved output range.
+                    _primaryResources.GeometryBuffer->ReserveSkinnedVertices(skinVertices);
                     created.Parts.reserve(partCount);
                     std::map<std::pair<UINT, UINT>, std::vector<GDX12Material*>> importedMaterials;
                     for (UINT nodeIndex = 0; nodeIndex < scene->GetNodeCount(); ++nodeIndex)
@@ -142,7 +157,6 @@ void RenderModule::PrepareSkeletalMeshes()
                         {
                             const auto* mesh = meshes.GetMesh(handle);
                             const auto revision = meshes.GetContentRevision(handle);
-                            SubmitMesh(mesh, handle);
                             const auto materialKey = std::make_pair(handle.GetValue(), handle.GetGeneration());
                             auto materialIt = importedMaterials.find(materialKey);
                             if (materialIt == importedMaterials.end())

@@ -3,7 +3,7 @@
 #include "Common/GameTimer.h"
 #include "Rendering/Grass/BistroGrassGeometry.h"
 #include "Rendering/Water/BistroWaterRendering.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12GeometryBatchPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12GeometryViewPass.h"
 
 namespace
 {
@@ -18,24 +18,50 @@ namespace
     private:
         BistroGrassGeometry& _grass;
     };
-    class GrassExpansionPass final : public GDX12RenderPass
+    class BistroGeometryPass final : public GDX12RenderPass
     {
     public:
-        GrassExpansionPass(BistroGrassGeometry& grass, GDX12GeometryViewPass& pass, UINT slot, UINT patch)
-            : _grass(grass), _pass(pass), _slot(slot), _patch(patch) {}
+        BistroGeometryPass(GDX12DeviceResources& resources, BistroGrassGeometry& grass, GDX12GeometryViewPass& pass)
+            : _resources(resources), _grass(grass), _pass(pass) { _pass.SetSplitGeometry(true); }
         void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-        { graph.SetName("Bistro grass expansion"); graph.HasSideEffects(); }
+        { _pass.RecordRenderGraph(graph); }
         void Execute(GDX12CommandList* commands) override
-        { if (const auto* view = _pass.GetGeometryView(_slot)) _grass.Expand(commands, *view, _patch); }
+        {
+            _pass.BeginGeometry(commands);
+            for (UINT slot = 0; slot < _pass.GetGeometryViewCapacity(); ++slot)
+                if (const auto* prepared = _pass.GetGeometryView(slot))
+                {
+                    _pass.ExecuteGeometryView(commands, slot);
+                    for (UINT patch = 0; patch < _grass.PatchCount(); ++patch)
+                    {
+                        auto view = *prepared;
+                        view.IncludeApplicationGeometry = true;
+                        view.Source = &_grass;
+                        view.BatchOffset = patch;
+                        view.BatchCount = 1;
+                        if (!_grass.Expand(commands, view, patch)) continue;
+                        _pass.BindGeometryViewTargets(commands, slot);
+                        _resources.EmitGeometry(commands, view, {});
+                    }
+                }
+            _pass.EndGeometry(commands);
+        }
         std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
         {
-            const auto* view = _pass.GetGeometryView(_slot);
-            return view ? _grass.ExpansionAccesses(*view, _patch) : std::vector<GDX12RenderGraph::BufferAccess>{};
+            auto accesses = _pass.GetBufferAccesses();
+            for (UINT slot = 0; slot < _pass.GetGeometryViewCapacity(); ++slot)
+                if (const auto* view = _pass.GetGeometryView(slot))
+                    for (UINT patch = 0; patch < _grass.PatchCount(); ++patch)
+                    {
+                        const auto expansion = _grass.ExpansionAccesses(*view, patch);
+                        accesses.insert(accesses.end(), expansion.begin(), expansion.end());
+                    }
+            return accesses;
         }
     private:
+        GDX12DeviceResources& _resources;
         BistroGrassGeometry& _grass;
         GDX12GeometryViewPass& _pass;
-        UINT _slot, _patch;
     };
 }
 
@@ -63,6 +89,9 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& context)
     _passes->Setup(context);
     LinkInputs({ context.BackBuffer });
     _passes->Initialize();
+    _geometryJobs.push_back(std::make_unique<GrassFramePreparationPass>(*_grass));
+    for (auto* pass : GeometryPasses())
+        _geometryJobs.push_back(std::make_unique<BistroGeometryPass>(*_resources, *_grass, *pass));
 }
 
 void BistroRenderPipeline::UpdateFrameSettings(RenderPipelineContext& context)
@@ -73,7 +102,6 @@ void BistroRenderPipeline::UpdateFrameSettings(RenderPipelineContext& context)
 
 bool BistroRenderPipeline::PrepareFrame(RenderPipelineContext& context, GDX12CommandList* commands)
 {
-    _retiredGeometryJobs.clear();
     const bool early = GetAmbientOcclusionExecutionPoint() == 0;
     bool rebuild = early != _earlyAO;
     _earlyAO = early;
@@ -85,11 +113,9 @@ bool BistroRenderPipeline::PrepareFrame(RenderPipelineContext& context, GDX12Com
     _passes->BindAmbientOcclusion(context.Common, _earlyAO);
     _passes->PrepareFrame(context, commands);
     const auto passes = GeometryPasses();
-    rebuild |= _graphPatchCount != _grass->PatchCount() || _graphViewCapacities.size() != passes.size();
     for (UINT i = 0; i < passes.size(); ++i)
     {
         const auto capacity = passes[i]->GetGeometryViewCapacity();
-        rebuild |= i >= _graphViewCapacities.size() || _graphViewCapacities[i] != capacity;
         for (UINT slot = 0; slot < capacity; ++slot)
             if (const auto* view = passes[i]->GetGeometryView(slot))
                 for (UINT patch = 0; patch < _grass->PatchCount(); ++patch) _grass->PrepareView(*view, patch);
@@ -141,21 +167,20 @@ void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipel
     auto& p = *_passes;
     graph.AddPass(p.Environment);
     graph.AddPass(p.Culling);
-    // BuildGraph runs before the old graph is destroyed; retain its referenced jobs.
-    _retiredGeometryJobs = std::move(_geometryJobs);
-    _graphPatchCount = _grass->PatchCount();
-    _graphViewCapacities.clear();
-    for (auto* pass : GeometryPasses()) _graphViewCapacities.push_back(pass->GetGeometryViewCapacity());
-    auto preparation = std::make_unique<GrassFramePreparationPass>(*_grass);
-    auto geometryTail = graph.AddPass(*preparation);
-    _geometryJobs.push_back(std::move(preparation));
-    geometryTail = AddGeometry(graph, p.Depth, geometryTail);
+    auto geometryTail = graph.AddPass(*_geometryJobs.at(0));
+    const auto addGeometry = [&](UINT index)
+    {
+        const auto node = graph.AddPass(*_geometryJobs.at(index));
+        graph.DependsOn(node, geometryTail);
+        geometryTail = node;
+    };
+    addGeometry(1);
     graph.AddPass(p.ParticleSimulation);
     if (_earlyAO) graph.AddPass(p.AO);
-    geometryTail = AddGeometry(graph, p.SunShadow, geometryTail);
-    geometryTail = AddGeometry(graph, p.LocalShadow, geometryTail);
-    geometryTail = AddGeometry(graph, p.Reflections, geometryTail);
-    AddGeometry(graph, p.Opaque, geometryTail);
+    addGeometry(2);
+    addGeometry(3);
+    addGeometry(4);
+    addGeometry(5);
     if (!_earlyAO) graph.AddPass(p.AO);
     graph.AddPass(_water->Surface);
     graph.AddPass(p.Lighting);
@@ -189,29 +214,3 @@ const RenderPipelineBindings& BistroRenderPipeline::GetBindings() const
 
 std::vector<GDX12GeometryViewPass*> BistroRenderPipeline::GeometryPasses()
 { return { &_passes->Depth, &_passes->SunShadow, &_passes->LocalShadow, &_passes->Reflections, &_passes->Opaque }; }
-
-GDX12RenderGraph::Pass BistroRenderPipeline::AddGeometry(GDX12RenderGraph& graph,
-    GDX12GeometryViewPass& pass, GDX12RenderGraph::Pass prerequisite)
-{
-    pass.SetSplitGeometry(true);
-    auto previous = graph.AddPass(pass);
-    graph.DependsOn(previous, prerequisite);
-    const auto append = [&](std::unique_ptr<GDX12RenderPass> job)
-    {
-        const auto node = graph.AddPass(*job);
-        graph.DependsOn(node, previous);
-        previous = node;
-        _geometryJobs.push_back(std::move(job));
-    };
-    for (UINT slot = 0; slot < pass.GetGeometryViewCapacity(); ++slot)
-    {
-        append(std::make_unique<GDX12GeometryViewJobPass>(pass, slot));
-        for (UINT patch = 0; patch < _graphPatchCount; ++patch)
-        {
-            append(std::make_unique<GrassExpansionPass>(*_grass, pass, slot, patch));
-            append(std::make_unique<GDX12GeometryBatchPass>(*_resources, pass, slot, *_grass, patch, 1));
-        }
-    }
-    append(std::make_unique<GDX12GeometryFinalizePass>(pass));
-    return previous;
-}

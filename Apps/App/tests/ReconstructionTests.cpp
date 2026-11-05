@@ -2,6 +2,7 @@
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 #include "Engine.Core/ConsoleModule.h"
 #include "Common/GameTimer.h"
+#include "App.Base/Modules/RenderModule.h"
 #include <d3d12sdklayers.h>
 #include <cmath>
 #include <cstring>
@@ -16,6 +17,27 @@ static void Require(bool condition, const char* message)
 static void Set(const wchar_t* name, int value)
 {
     Require(ConsoleModule{}.FindConsoleVariable(name).SetFromString(std::to_string(value)), "CVar write failed");
+}
+
+static void TestRenderSuspension()
+{
+    GameTimer timer;
+    RenderModule renderer(nullptr, &timer);
+    auto& common = *renderer.GetRenderPipelineCommonData();
+    common.RequestHistoryReset = false;
+    renderer.SetFrameGenerationSuspended(false);
+    Require(!common.RequestHistoryReset, "Unchanged render activity reset temporal history");
+    for (const bool suspended : { true, false, true, false })
+    {
+        renderer.SetFrameGenerationSuspended(suspended);
+        Require(common.RequestHistoryReset, "Pause/resume did not reset history without frame generation");
+        common.RequestHistoryReset = false;
+        renderer.SetFrameGenerationSuspended(suspended);
+        Require(!common.RequestHistoryReset, "Repeated suspension state reset history again");
+    }
+    common.RequestHistoryReset = true;
+    renderer.SetFrameGenerationSuspended(false);
+    Require(common.RequestHistoryReset, "Unchanged render activity erased an explicit history reset");
 }
 
 static void TestSettings()
@@ -174,6 +196,7 @@ int main(int argc, char** argv)
     try
     {
         TestSettings();
+        TestRenderSuspension();
         if (argc > 1 && std::string(argv[1]) == "--cpu") return 0;
         gate = CreateMutexW(nullptr, FALSE, L"Local\\PEPEngine2FeatureGpuValidation");
         Require(gate != nullptr, "Cannot create GPU validation mutex");

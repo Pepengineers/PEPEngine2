@@ -1,6 +1,7 @@
 #include "Rendering/BistroRenderPipeline.h"
 #include "App.Base/App.h"
 #include "../src/BistroScene.h"
+#include "../src/BistroGrass.h"
 #include <d3d12sdklayers.h>
 #include <cstring>
 #include <iostream>
@@ -104,6 +105,8 @@ public:
         Timer.Stop();
         auto render = Locator.GetModule<RenderModule>();
         auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+        BistroGrass::Scene grass;
+        grass.Update(world, 0);
         auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
         camera.Location = Vector3(-300, 200, 20);
         camera.Rotation = Vector3(0, 117, 0);
@@ -168,6 +171,7 @@ public:
                     else if (pixels != reference) throw std::runtime_error("Bistro HDR differs from the first dedicated capture (reuse=" +
                         std::to_string(reuse) + ", async=" + std::to_string(async) + ")");
                     const auto stats = render->GetRenderGraphStatistics();
+                    if (stats.Passes > 64) throw std::runtime_error("Bistro graph expanded geometry views into individual passes");
                     if (reuse && stats.PhysicalTextures >= stats.TransientTextures) throw std::runtime_error("Bistro graph did not reuse textures");
                     if (!reuse && stats.PhysicalTextures != stats.TransientTextures) throw std::runtime_error("Dedicated graph mode still shares textures");
                     if (stats.AsyncPasses != (async ? 1u : 0u)) throw std::runtime_error("Bistro particle queue selection failed");

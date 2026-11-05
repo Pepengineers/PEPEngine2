@@ -16,7 +16,7 @@ public:
     void PrepareFrame(GDX12DeviceResources&, const RenderPipelineCommonData&);
     void PrepareGPU(GDX12CommandList* commands);
     void PrepareView(const GDX12GeometryContext&, UINT patch);
-    void Expand(GDX12CommandList*, const GDX12GeometryContext&, UINT patch);
+    bool Expand(GDX12CommandList*, const GDX12GeometryContext&, UINT patch);
     void GatherBatches(const GDX12GeometryContext&, std::vector<GDX12RenderBatch>&) const override;
     std::vector<GDX12RenderGraph::BufferAccess> GetGeometryBufferAccesses(GDX12GeometryStage) const override;
     std::vector<GDX12RenderGraph::BufferAccess> PreparationAccesses() const;

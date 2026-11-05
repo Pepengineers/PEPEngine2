@@ -73,6 +73,13 @@ void GDX12GeometryBuffer::ResizeVertexBuffer(const UINT newSize, const UINT upda
     _vertexBufferView.StrideInBytes = static_cast<UINT>(VERTEX_SIZE);
 }
 
+void GDX12GeometryBuffer::ReserveSkinnedVertices(const UINT count)
+{
+    if (!count) return;
+    const UINT offset = AllocateSkinnedVertices(count);
+    ReleaseSkinnedVertices(offset, count);
+}
+
 UINT GDX12GeometryBuffer::AllocateSkinnedVertices(const UINT count)
 {
     if (!count) throw std::invalid_argument("Empty skin slice");

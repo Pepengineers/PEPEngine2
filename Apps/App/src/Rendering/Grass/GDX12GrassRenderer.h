@@ -6,6 +6,8 @@
 #include "Engine.RendererDX12/GDX12RenderGeometry.h"
 #include <array>
 #include <unordered_map>
+#include <map>
+#include <tuple>
 
 class GDX12CommandList;
 class GDX12DeviceResources;
@@ -25,7 +27,7 @@ public:
         std::vector<GDX12GrassInstance> grass, std::vector<GDX12WindInstance> wind, GDX12GrassWindControls controls);
     void PrepareGPU(GDX12CommandList* commands);
     void PrepareView(const GDX12GeometryContext& view, UINT patch);
-    void Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch);
+    bool Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch);
     void GatherBatches(const GDX12GeometryContext& view, std::vector<GDX12RenderBatch>& batches) const;
     std::vector<GDX12RenderGraph::BufferAccess> PreparationAccesses() const;
     std::vector<GDX12RenderGraph::BufferAccess> ExpansionAccesses(const GDX12GeometryContext& view, UINT patch) const;
@@ -78,6 +80,7 @@ private:
         bool ResetHistory = true;
         uint64_t SettingsHash = 0;
         GDX12RenderPrimitiveHandle Primitive;
+        BoundingBox Bounds;
     };
     using FieldBuffer = GDX12UploadBuffer<XMFLOAT4>;
     struct WindState
@@ -105,6 +108,7 @@ private:
         UINT Patch = 0;
         uint64_t Owner = 0;
         GDX12UploadBuffer<Parameters>* Constants = nullptr;
+        UINT ConstantIndex = 0;
         FieldBuffer *CurrentWind = nullptr, *PreviousWind = nullptr;
         GDX12GraphicsBindings Binding;
         GDX12RenderBatch Batch;
@@ -121,6 +125,7 @@ private:
         std::vector<WindJob> WindJobs;
         std::vector<std::pair<GDX12UploadBuffer<XMFLOAT3>*, GDX12UploadBuffer<XMFLOAT3>*>> RootUploads;
         std::vector<std::unique_ptr<Output>> Outputs;
+        std::map<std::tuple<uint64_t, GDX12GeometryStage, UINT>, Output*> OutputIndex;
         UINT DrawCursor = 0;
         UINT WindCursor = 0;
     };
@@ -152,6 +157,7 @@ private:
     Vector3 _eye = Vector3::Zero;
     bool _initialized = false;
     const Output* _arenaOutput = nullptr;
+    static constexpr UINT ParametersPerBuffer = 64;
     GDX12RenderPrimitiveRegistry* _primitiveRegistry = nullptr;
     std::vector<GDX12RenderPrimitiveHandle> _removedPrimitives;
 };

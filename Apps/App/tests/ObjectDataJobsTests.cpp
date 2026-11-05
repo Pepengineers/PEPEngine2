@@ -78,6 +78,22 @@ static std::vector<T> ReadDefault(GDX12UploadBuffer<T>* buffer)
     return result;
 }
 
+class InspectBistroPipeline final : public IRenderPipeline
+{
+public:
+    InspectBistroPipeline(std::shared_ptr<SceneManagerModule> scenes, GDX12DeviceResources*& resources)
+        : _pipeline(std::move(scenes)), _resources(resources) {}
+    void Initialize(RenderPipelineContext& context) override { _resources = &context.Primary; _pipeline.Initialize(context); }
+    void UpdateFrameSettings(RenderPipelineContext& context) override { _pipeline.UpdateFrameSettings(context); }
+    bool PrepareFrame(RenderPipelineContext& context, GDX12CommandList* commands) override { return _pipeline.PrepareFrame(context, commands); }
+    void BuildGraph(GDX12RenderGraph& graph, const RenderPipelineGraphInputs& inputs) override { _pipeline.BuildGraph(graph, inputs); }
+    void Resize(RenderPipelineContext& context) override { _pipeline.Resize(context); }
+    const RenderPipelineBindings& GetBindings() const override { return _pipeline.GetBindings(); }
+private:
+    BistroRenderPipeline _pipeline;
+    GDX12DeviceResources*& _resources;
+};
+
 class ObjectDataApp final : public App
 {
 public:
@@ -139,7 +155,7 @@ public:
         const auto source = ReadUpload(render->GetPrimaryIndirectCommandsCache());
         Require(source.size() == 4, "Static geometry or bottle commands were duplicated/lost");
         for (size_t i = 0; i < source.size(); ++i)
-            Require(source[i].InstanceID == i && source[i].StartInstanceLocation == i && source[i].IndexCountPerInstance == 3,
+            Require(source[i].InstanceID == i && source[i].StartInstanceLocation == i && source[i].IndexCountPerInstance == (i == 3 ? 6u : 3u),
                 "Parallel source command population used an incorrect slot");
 
         for (int frame = 0; frame < 4; ++frame)
@@ -247,6 +263,100 @@ public:
         Require(render->GetRenderPipelineCommonData()->ResetHistory, "Projection change did not reset temporal history");
         camera.FOV -= 1;
     }
+    void CheckSnapshots()
+    {
+        auto render = Locator.GetModule<RenderModule>();
+        auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+        auto& ecs = world.GetECS();
+        Entity wall = InvalidEntity;
+        ecs.ForEach<StaticMeshRenderComponent>([&](Entity entity, const StaticMeshRenderComponent& mesh)
+        { if (mesh._CBufferIndices.size() == 1 && mesh._CBufferIndices[0] == 0) wall = entity; });
+        Require(wall != InvalidEntity && _resources, "Snapshot fixture has no static wall or pipeline resources");
+        Timer.Reset(); Timer.Stop();
+        const auto frame = [&]
+        {
+            Timer.Tick(); render->BeginFrame(); render->Update();
+            _lights.Schedule(_jobs, world, 0).Complete();
+            _gpuData.Schedule(_jobs, world, 0).Complete();
+            render->Render(); render->WaitForUploads();
+        };
+        const auto primitive = [&]
+        {
+            GDX12RenderPrimitiveHandle handle;
+            const UINT instance = ecs.Get<StaticMeshRenderComponent>(wall)._CBufferIndices.at(0);
+            _resources->Primitives.ForEach([&](auto id, const GDX12RenderPrimitive& value)
+            { if (!value.Source && value.FirstInstance == instance) handle = id; });
+            Require(_resources->Primitives.Get(handle) != nullptr, "Static wall was absent from the primitive snapshot");
+            return std::make_pair(handle, *_resources->Primitives.Get(handle));
+        };
+        for (int i = 0; i < 6; ++i) frame();
+        const auto initial = primitive();
+        auto revision = _resources->ReflectionStaticRevision;
+        frame();
+        Require(primitive().first == initial.first && primitive().second.Revision() == initial.second.Revision() &&
+            _resources->ReflectionStaticRevision == revision, "Unchanged static snapshot lost identity or invalidated probes");
+        const auto history = render->GetRenderPipelineCommonData()->HistoryRevision;
+        Timer.Start();
+        for (int i = 0; i < 3; ++i)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(270));
+            frame();
+            Require(Timer.DeltaTime() > 0.25f && render->GetRenderPipelineCommonData()->HistoryRevision == history,
+                "Consecutive slow frames repeatedly invalidated temporal history");
+        }
+        Timer.Stop();
+        const auto& wallRenderer = ecs.Get<StaticMeshRenderComponent>(wall);
+        auto* material = wallRenderer.Materials.at(render->GetPrimaryGPUMesh(wallRenderer.MeshHandler)
+            ->SubMeshes.at(wallRenderer.GetSubMeshIndex(0)).MaterialIndex);
+        material->Roughness = 0.17f; material->DirtyFlag = true;
+        frame();
+        Require(primitive().second.MaterialRevision != initial.second.MaterialRevision &&
+            _resources->ReflectionStaticRevision != revision, "Static material edit reused a stale snapshot");
+        revision = _resources->ReflectionStaticRevision;
+        auto before = primitive().second;
+        auto& transform = ecs.Get<TransformComponent>(wall);
+        transform.Location.x += 30; transform.DirtyFlag = true;
+        frame();
+        Require(primitive().second.TransformRevision != before.TransformRevision &&
+            primitive().second.Bounds.Center.x > before.Bounds.Center.x + 29 &&
+            _resources->ReflectionStaticRevision != revision, "Static transform edit retained cached bounds or probe revision");
+        revision = _resources->ReflectionStaticRevision;
+        ecs.Get<StaticMeshRenderComponent>(wall).Visible = false;
+        frame();
+        Require(!primitive().second.Visible && _resources->ReflectionStaticRevision != revision,
+            "Hidden static mesh remained in the probe/caster snapshot");
+        ecs.Get<StaticMeshRenderComponent>(wall).Visible = true;
+        ecs.Get<StaticMeshRenderComponent>(wall).ReflectionDynamic = true;
+        const auto dynamicRevision = _resources->ReflectionDynamicRevision;
+        frame();
+        Require(primitive().second.Dynamic && _resources->ReflectionDynamicRevision != dynamicRevision,
+            "Static-to-dynamic classification retained cached participation");
+        ecs.Get<StaticMeshRenderComponent>(wall).ReflectionDynamic = false;
+        frame();
+        before = primitive().second;
+        auto& registry = AssetManager::GetInstance().Meshes();
+        const auto mesh = ecs.Get<StaticMeshRenderComponent>(wall).MeshHandler;
+        auto replacement = std::make_unique<Mesh>(*registry.GetMesh(mesh));
+        registry.Unload(mesh);
+        const auto* reimported = registry.Cache(mesh, std::move(replacement));
+        Require(reimported != nullptr, "Cannot reimport snapshot fixture mesh");
+        render->SubmitMesh(reimported, mesh);
+        ecs.Get<StaticMeshRenderComponent>(wall).DirtyFlag = true;
+        revision = _resources->ReflectionStaticRevision;
+        frame();
+        Require(primitive().second.GeometryRevision != before.GeometryRevision &&
+            _resources->ReflectionStaticRevision != revision, "Mesh reimport retained cached geometry metadata");
+        const auto removed = primitive().first;
+        const auto saved = ecs.Get<StaticMeshRenderComponent>(wall);
+        ecs.Remove<StaticMeshRenderComponent>(wall);
+        frame();
+        Require(!_resources->Primitives.Get(removed), "Removed static mesh retained a cached primitive");
+        ecs.Add<StaticMeshRenderComponent>(wall, saved.MeshHandler, saved.Materials, saved.SubMeshIndices);
+        frame();
+        Require(primitive().first.Generation != removed.Generation || primitive().first.Index != removed.Index,
+            "Replacement mesh resurrected a stale primitive handle");
+        std::cout << "Static snapshots: warm reuse, material, transform, visibility, classification, reimport, removal and replacement passed.\n";
+    }
     void RenderBistroFrames()
     {
         auto* render = Locator.GetModule<RenderModule>().get();
@@ -353,13 +463,14 @@ protected:
     {
         auto scenes = std::make_shared<SceneManagerModule>(_scene);
         Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer,
-            std::make_unique<BistroRenderPipeline>(scenes)));
+            std::make_unique<InspectBistroPipeline>(scenes, _resources)));
         ConfigureBistroProps(*scenes, GetJobs());
         Locator.RegisterModule(scenes);
         return BenchmarkEngine::AddModules();
     }
 private:
     std::filesystem::path _scene;
+    GDX12DeviceResources* _resources = nullptr;
 };
 
 int main(int argc, char** argv)
@@ -410,14 +521,15 @@ int main(int argc, char** argv)
         for (const char* name : { "wall", "glass", "label", "cap" }) materials << "newmtl " << name << "\nKd 0.8 0.7 0.6\n";
         materials.close();
         std::ofstream obj(scene / "Interior/interior.obj");
-        obj << "mtllib interior.mtl\nv 0 0 0\nv 2 0 0\nv 0 2 0\nv 0 0 2\ng Wall\nusemtl wall\nf 1 2 3\ng Paris_LiquorBottle_1\n";
-        for (const char* name : { "glass", "label", "cap" }) obj << "usemtl " << name << "\nf " << (std::string_view(name) == "glass" ? "1 2 3" : std::string_view(name) == "label" ? "1 4 2" : "1 3 4") << "\n";
+        obj << "mtllib interior.mtl\nv 0 0 0\nv 20 0 0\nv 0 20 0\nv 0 0 20\ng Wall\nusemtl wall\nf 1 2 3\ng Paris_LiquorBottle_1\n";
+        for (const char* name : { "glass", "label", "cap" }) obj << "usemtl " << name << "\nf " << (std::string_view(name) == "glass" ? "1 3 2" : std::string_view(name) == "label" ? "1 2 4" : "1 4 3\nf 2 3 4") << "\n";
         obj.close();
         ObjectDataApp app(scene);
         Require(app.Initialize(), "GPU object-data fixture initialization failed");
         ShowWindow(app.GetWindow()->GetWindowHandle(), SW_HIDE);
         app.Check(1);
         app.Check(4);
+        app.CheckSnapshots();
         std::cout << "Actual object jobs: selected indirect slots, all frame-slot bounds and immutable source templates passed (1/4 threads).\n";
     }
     catch (const DxException& error) { std::wcerr << error.ToString() << '\n'; return 1; }

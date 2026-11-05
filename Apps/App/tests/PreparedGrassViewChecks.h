@@ -151,6 +151,8 @@ static void TestPreparedGrassViews(GDX12Device& device, GDX12DeviceResources& re
         views.Views[1].ViewProjection = Matrix::CreateTranslation(100000, 0, 0) * vp;
         renderer.PrepareView(views.Views[0], 0);
         renderer.PrepareView(views.Views[1], 0);
+        Require(renderer.ExpansionAccesses(views.Views[1], 0).empty(),
+            "Off-frustum grass scheduled expansion buffers for this view");
         for (auto& readback : readbacks[slot]) readback = device.CreateResource(D3D12_HEAP_TYPE_READBACK,
             CD3DX12_RESOURCE_DESC::Buffer(bytes), D3D12_RESOURCE_STATE_COPY_DEST);
         readA.Target = readbacks[slot][0].Get();
@@ -160,11 +162,18 @@ static void TestPreparedGrassViews(GDX12Device& device, GDX12DeviceResources& re
         if (slot == 0)
         {
             renderer.Expand(commands, views.Views[0], 0);
-            renderer.Expand(commands, views.Views[1], 0);
+            auto overlapping = views.Views[0];
+            overlapping.Key = 7012;
+            renderer.PrepareView(overlapping, 0);
+            renderer.Expand(commands, overlapping, 0);
             bool rejected = false;
             try { std::vector<GDX12RenderBatch> batches; renderer.GatherBatches(views.Views[0], batches); }
             catch (const std::logic_error&) { rejected = true; }
             Require(rejected, "Grass allowed an earlier view to consume an overwritten aliased output");
+            overlapping.ViewProjection = views.Views[1].ViewProjection;
+            renderer.PrepareView(overlapping, 0);
+            Require(renderer.ExpansionAccesses(overlapping, 0).empty(),
+                "Reprepared off-frustum view retained an earlier visible grass output");
             auto staticView = views.Views[1];
             staticView.Filter = GDX12GeometryFilter::Static;
             std::vector<GDX12RenderBatch> staticBatches;
@@ -217,6 +226,47 @@ static void TestPreparedGrassViews(GDX12Device& device, GDX12DeviceResources& re
         "Depth and Equal GBuffer expansions changed the frozen frame positions");
     positions[0]->Unmap(0, &noWrite);
     positions[1]->Unmap(0, &noWrite);
+    for (UINT slot = 0; slot < resources.FrameConstants.size(); ++slot)
+    {
+        resources.CurrFrameConstantsIndex = slot;
+        renderer.BeginFrame(frozenCommon, {grass}, {wind}, controls);
+        auto firstView = GrassTestView(resources, GDX12GrassRenderer::Stage::Depth, vp, eye,
+            resources.FrameConstants[slot]->CameraCB->GetElementAddress(0));
+        firstView.Key = 7200;
+        auto lastView = firstView;
+        for (UINT i = 0; i <= 64; ++i)
+        {
+            auto view = firstView;
+            view.Key += i;
+            if (i == 64) view.ViewProjection = Matrix::CreateTranslation(5, 0, 0) * vp;
+            renderer.PrepareView(view, 0);
+            lastView = view;
+        }
+        views.Views = { firstView, lastView };
+        readA.Target = readbacks[slot][0].Get();
+        readB.Target = readbacks[slot][1].Get();
+        auto* draw = queue->GetCommandList();
+        draw = graph.Execute(draw);
+        queue->ExecuteCommandList(draw); queue->Flush();
+        void *a = nullptr, *b = nullptr;
+        ThrowIfFailed(readbacks[slot][0]->Map(0, nullptr, &a));
+        ThrowIfFailed(readbacks[slot][1]->Map(0, nullptr, &b));
+        bool different = false, coversA = false, coversB = false;
+        for (UINT y = 0; y < footprint.Footprint.Height; ++y)
+            for (UINT x = 0; x < footprint.Footprint.Width; ++x)
+            {
+                const auto offset = footprint.Offset + y * footprint.Footprint.RowPitch + x * sizeof(float);
+                const float da = *reinterpret_cast<const float*>(static_cast<const BYTE*>(a) + offset);
+                const float db = *reinterpret_cast<const float*>(static_cast<const BYTE*>(b) + offset);
+                different |= da != db;
+                coversA |= da > 0;
+                coversB |= db > 0;
+            }
+        readbacks[slot][0]->Unmap(0, &noWrite);
+        readbacks[slot][1]->Unmap(0, &noWrite);
+        Require(different && coversA && coversB,
+            "Prepared grass views across 64 constants reused the wrong projection or frame slot");
+    }
     renderer.BeginFrame(frozenCommon, {}, {}, controls);
     renderer.PublishPrimitives(resources.Primitives, &source);
     Require(!resources.Primitives.Get(firstHandle), "Deleted grass owner retained its render primitive");

@@ -19,7 +19,6 @@ public:
 
 private:
     void LinkInputs(const RenderPipelineGraphInputs&);
-    GDX12RenderGraph::Pass AddGeometry(GDX12RenderGraph&, GDX12GeometryViewPass&, GDX12RenderGraph::Pass prerequisite);
     std::vector<GDX12GeometryViewPass*> GeometryPasses();
     std::shared_ptr<SceneManagerModule> _scenes;
     std::unique_ptr<BistroGrassGeometry> _grass;
@@ -29,7 +28,4 @@ private:
     bool _earlyAO = false;
     GDX12DeviceResources* _resources = nullptr;
     std::vector<std::unique_ptr<GDX12RenderPass>> _geometryJobs;
-    std::vector<std::unique_ptr<GDX12RenderPass>> _retiredGeometryJobs;
-    UINT _graphPatchCount = 0;
-    std::vector<UINT> _graphViewCapacities;
 };

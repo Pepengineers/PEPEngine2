@@ -5,6 +5,7 @@
 #include <cassert>
 #include <stdexcept>
 #include <climits>
+#include <cstring>
 #include <shellapi.h>
 #include <string_view>
 #pragma comment(lib, "shell32.lib")
@@ -883,7 +884,6 @@ const float RenderModule::GetAspectRatio()
 void RenderModule::OnUpdate()
 {
     GDX12_SCOPED_CPU_EVENT("Frame slot wait and upload");
-    if (_timer->DeltaTime() > 0.25f) _RPcommonData.RequestHistoryReset = true;
     uint16_t width, height;
     _window->GetWindowSize(width, height);
     auto context = PipelineContext();
@@ -1049,25 +1049,51 @@ void RenderModule::CollectReflectionScene()
                 const auto* material = renderer.Materials.at(submesh.MaterialIndex);
                 const UINT instanceIndex = renderer._CBufferIndices.at(part);
                 const auto& instance = resources.FrameConstants[resources.CurrFrameConstantsIndex]->InstanceCache->GetCPUData()[instanceIndex];
-                GDX12RenderPrimitive primitive;
-                primitive.Bounds = { instance.BoundingBoxCenter, instance.BoundingBoxExtents };
-                primitive.TransformIndex = instance.TransformIndex;
-                primitive.FirstInstance = instanceIndex;
-                primitive.MaterialIndex = instance.MaterialIndex;
-                primitive.Visible = renderer.Visible;
-                primitive.Dynamic = renderer._reflectionDynamic;
-                primitive.CastsShadows = material->Type != MaterialType::Transparent && !material->ReflectionProbePreview;
-                primitive.CapturedInReflections = !material->ReflectionProbePreview;
-                primitive.GeometryRevision = 14695981039346656037ull;
-                hash(primitive.GeometryRevision, renderer.MeshHandler);
-                hash(primitive.GeometryRevision, mesh->ContentRevision);
-                hash(primitive.GeometryRevision, submeshIndex);
-                primitive.MaterialRevision = 14695981039346656037ull;
-                hash(primitive.MaterialRevision, material);
-                hash(primitive.MaterialRevision, material->_revision);
-                primitive.TransformRevision = 14695981039346656037ull;
-                hash(primitive.TransformRevision, resources.FrameConstants[resources.CurrFrameConstantsIndex]->TransformCache->GetCPUData()[instance.TransformIndex].WorldMatrix);
-                resources.PublishMeshPrimitive(instanceIndex, primitive);
+                const auto& worldMatrix = resources.FrameConstants[resources.CurrFrameConstantsIndex]->TransformCache->GetCPUData()[instance.TransformIndex].WorldMatrix;
+                if (_meshSnapshots.size() <= instanceIndex) _meshSnapshots.resize(size_t(instanceIndex) + 1);
+                auto& cached = _meshSnapshots[instanceIndex];
+                const bool castsShadows = material->Type != MaterialType::Transparent && !material->ReflectionProbePreview;
+                const bool captured = !material->ReflectionProbePreview;
+                const bool unchanged = !renderer._reflectionDynamic && cached.Valid && cached.Handle == renderer.MeshHandler &&
+                    cached.Mesh == mesh && cached.GeometryRevision == mesh->ContentRevision && cached.SubMesh == submeshIndex &&
+                    cached.Material == material && cached.MaterialRevision == material->_revision &&
+                    cached.Primitive.Visible == renderer.Visible && cached.Primitive.CastsShadows == castsShadows &&
+                    cached.Primitive.CapturedInReflections == captured &&
+                    std::memcmp(&cached.Instance, &instance, sizeof(instance)) == 0 &&
+                    std::memcmp(&cached.World, &worldMatrix, sizeof(worldMatrix)) == 0;
+                if (!unchanged)
+                {
+                    GDX12RenderPrimitive primitive;
+                    primitive.Bounds = { instance.BoundingBoxCenter, instance.BoundingBoxExtents };
+                    primitive.TransformIndex = instance.TransformIndex;
+                    primitive.FirstInstance = instanceIndex;
+                    primitive.MaterialIndex = instance.MaterialIndex;
+                    primitive.Visible = renderer.Visible;
+                    primitive.Dynamic = renderer._reflectionDynamic;
+                    primitive.CastsShadows = castsShadows;
+                    primitive.CapturedInReflections = captured;
+                    primitive.GeometryRevision = 14695981039346656037ull;
+                    hash(primitive.GeometryRevision, renderer.MeshHandler);
+                    hash(primitive.GeometryRevision, mesh->ContentRevision);
+                    hash(primitive.GeometryRevision, submeshIndex);
+                    primitive.MaterialRevision = 14695981039346656037ull;
+                    hash(primitive.MaterialRevision, material);
+                    hash(primitive.MaterialRevision, material->_revision);
+                    primitive.TransformRevision = 14695981039346656037ull;
+                    hash(primitive.TransformRevision, worldMatrix);
+                    cached.Handle = renderer.MeshHandler;
+                    cached.Mesh = mesh;
+                    cached.GeometryRevision = mesh->ContentRevision;
+                    cached.SubMesh = submeshIndex;
+                    cached.Material = material;
+                    cached.MaterialRevision = material->_revision;
+                    cached.Instance = instance;
+                    cached.World = worldMatrix;
+                    cached.Primitive = primitive;
+                    cached.Valid = !renderer._reflectionDynamic;
+                    if (cached.Valid) cached.Signature = primitive.Revision();
+                }
+                resources.PublishMeshPrimitive(instanceIndex, cached.Primitive);
                 if (!renderer.Visible || !material->ReflectionProbePreview) continue;
                 GDX12IndirectDrawArgs draw = {};
                 draw.InstanceID = draw.StartInstanceLocation = instanceIndex;
@@ -1101,7 +1127,9 @@ void RenderModule::CollectReflectionScene()
     resources.Primitives.ForEach([&](GDX12RenderPrimitiveHandle handle, const GDX12RenderPrimitive& primitive)
     {
         if (!primitive.Visible || (!primitive.CastsShadows && !primitive.CapturedInReflections)) return;
-        auto signature = primitive.Revision();
+        auto signature = !primitive.Source && !primitive.Dynamic && primitive.InstanceCount == 1 &&
+            primitive.FirstInstance < _meshSnapshots.size() && _meshSnapshots[primitive.FirstInstance].Valid
+            ? _meshSnapshots[primitive.FirstInstance].Signature : primitive.Revision();
         hash(signature, handle.Index);
         hash(signature, handle.Generation);
         hash(resources.GeometryRevision, signature);
@@ -1270,10 +1298,11 @@ void RenderModule::BeginFrame()
 
 void RenderModule::SetFrameGenerationSuspended(bool suspended)
 {
-    if (!_pipeline->GetBindings().FrameGenerationInputs) return;
-    if (!_backBuffer || _backBuffer->GetFrameGeneration().GetStatus().Suspended == suspended) return;
-    _backBuffer->SetFrameGenerationSuspended(suspended);
+    if (_renderingSuspended == suspended) return;
+    _renderingSuspended = suspended;
     _RPcommonData.RequestHistoryReset = true;
+    if (_backBuffer && _pipeline->GetBindings().FrameGenerationInputs)
+        _backBuffer->SetFrameGenerationSuspended(suspended);
 }
 
 const GDX12FrameGenerationStatus& RenderModule::GetFrameGenerationStatus() const

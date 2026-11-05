@@ -67,8 +67,28 @@ static void TestSkinPlacement(GDX12Device& device, GDX12DeviceResources& resourc
         ThrowIfFailed(palette->GetResource().D3DResource->GetHeapProperties(&properties, nullptr));
         Require(properties.Type == D3D12_HEAP_TYPE_DEFAULT, "Skin palettes must use DEFAULT memory");
     }
-    mesh->OutputVertex = resources.GeometryBuffer->AllocateSkinnedVertices(2);
     auto* queue = device.GetCommandQueue();
+    resources.GeometryBuffer->ReserveSkinnedVertices(12);
+    auto* reserveCommands = queue->GetCommandList();
+    ComPtr<ID3D12Resource> reserved = resources.GeometryBuffer->BeginSkinning(reserveCommands);
+    resources.GeometryBuffer->EndSkinning(reserveCommands);
+    queue->ExecuteCommandList(reserveCommands); queue->Flush();
+    const UINT sizes[] = {2, 3, 7};
+    UINT offsets[3];
+    for (UINT i = 0; i < 3; ++i) offsets[i] = resources.GeometryBuffer->AllocateSkinnedVertices(sizes[i]);
+    auto* verifyCommands = queue->GetCommandList();
+    Require(resources.GeometryBuffer->BeginSkinning(verifyCommands) == reserved.Get(),
+        "Reserved skin slices must not replace the shared geometry buffer per attachment");
+    resources.GeometryBuffer->EndSkinning(verifyCommands);
+    queue->ExecuteCommandList(verifyCommands); queue->Flush();
+    for (UINT i = 0; i < 3; ++i)
+    {
+        for (UINT j = i + 1; j < 3; ++j)
+            Require(offsets[i] + sizes[i] <= offsets[j] || offsets[j] + sizes[j] <= offsets[i],
+                "Reserved skin slices overlap");
+        resources.GeometryBuffer->ReleaseSkinnedVertices(offsets[i], sizes[i]);
+    }
+    mesh->OutputVertex = resources.GeometryBuffer->AllocateSkinnedVertices(2);
     const auto heap = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_READBACK);
     const auto desc = CD3DX12_RESOURCE_DESC::Buffer(UINT64(slots) * 2 * sizeof(Vertex));
     ComPtr<ID3D12Resource> readback;

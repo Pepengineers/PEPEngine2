@@ -1,6 +1,7 @@
 #include "Rendering/Grass/GDX12GrassRenderer.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
+#include "Engine.RendererDX12/GDX12LocalLights.h"
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
@@ -175,6 +176,7 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
     frame.WindJobs.clear();
     frame.RootUploads.clear();
     frame.Outputs.clear();
+    frame.OutputIndex.clear();
     _arenaOutput = nullptr;
     const bool controlChange = controls.GrassEnabled != _controls.GrassEnabled || controls.GrassQuality != _controls.GrassQuality ||
         controls.WindEnabled != _controls.WindEnabled || controls.WindQuality != _controls.WindQuality;
@@ -203,6 +205,9 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
             state.PreviousWorld = state.ResetHistory ? source.World : state.Source.World;
             state.SettingsHash = signature;
             state.Source = std::move(source);
+            GrassLocalBounds(state.Source).Transform(state.Bounds, state.Source.World);
+            state.Bounds.Extents.x += state.Source.MaxBendCm;
+            state.Bounds.Extents.z += state.Source.MaxBendCm;
             if (state.Source.WindId) activeWind.insert(state.Source.WindId);
             _drawOrder.push_back(state.Source.Id);
             const UINT ribbons = state.Source.Implementation == GDX12GrassImplementation::CrossedRibbons ? 2u : 1u;
@@ -434,14 +439,15 @@ GDX12GrassRenderer::Stage GDX12GrassRenderer::RenderStage(GDX12GeometryStage sta
 GDX12GrassRenderer::Output* GDX12GrassRenderer::FindOutput(const GDX12GeometryContext& view, UINT patch) const
 {
     if (view.FrameSlot != _resources->CurrFrameConstantsIndex) throw std::invalid_argument("Grass view uses an inactive frame slot");
-    const auto& outputs = _frames.at(view.FrameSlot).Outputs;
-    for (auto it = outputs.rbegin(); it != outputs.rend(); ++it)
-        if ((*it)->View.Key == view.Key && (*it)->View.Stage == view.Stage && (*it)->Patch == patch) return it->get();
-    return nullptr;
+    const auto& index = _frames.at(view.FrameSlot).OutputIndex;
+    const auto found = index.find({ view.Key, view.Stage, patch });
+    return found == index.end() ? nullptr : found->second;
 }
 
 void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patch)
 {
+    auto& frame = CurrentFrame();
+    frame.OutputIndex.erase({ view.Key, view.Stage, patch });
     if (view.Filter == GDX12GeometryFilter::Static || view.Stage == GDX12GeometryStage::Transparency || patch >= _drawOrder.size()) return;
     const auto stage = RenderStage(view.Stage);
     const auto id = _drawOrder.at(patch);
@@ -450,11 +456,13 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
     if ((stage == Stage::Shadow && !s.CastShadows) || (stage == Stage::Capture && !s.CaptureReflections)) return;
     if (stage == Stage::Capture && (!view.CaptureLighting || !view.CameraConstants))
         throw std::invalid_argument("Grass capture requires lighting and camera");
-    auto& frame = CurrentFrame();
+    XMFLOAT4X4 clip;
+    XMStoreFloat4x4(&clip, view.ViewProjection.Transpose());
+    if (!LocalShadowFaceIntersects(clip, state.Bounds)) return;
     Parameters p = {};
     XMStoreFloat4x4(&p.World, s.World.Transpose());
     XMStoreFloat4x4(&p.PreviousWorld, state.PreviousWorld.Transpose());
-    XMStoreFloat4x4(&p.ViewProjection, view.ViewProjection.Transpose());
+    p.ViewProjection = clip;
     p.EyeMaxDistance = XMFLOAT4(view.Eye.x, view.Eye.y, view.Eye.z, s.MaxDistanceCm);
     p.PreviousEye = XMFLOAT4(_previousEye.x, _previousEye.y, _previousEye.z, 0);
     p.Shape = XMFLOAT4(s.HeightCm, s.WidthCm, s.HeightVariation, s.MaxBendCm);
@@ -490,10 +498,12 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
             previousWind = field.Velocity[1].get();
         }
     }
-    if (frame.DrawCursor == frame.DrawParameters.size())
-        frame.DrawParameters.push_back(std::make_unique<GDX12UploadBuffer<Parameters>>(_resources->Device, 1));
-    auto& parameters = frame.DrawParameters[frame.DrawCursor++];
-    parameters->CopyData(0, p);
+    const UINT block = frame.DrawCursor / ParametersPerBuffer;
+    const UINT element = frame.DrawCursor++ % ParametersPerBuffer;
+    if (block == frame.DrawParameters.size())
+        frame.DrawParameters.push_back(std::make_unique<GDX12UploadBuffer<Parameters>>(_resources->Device, ParametersPerBuffer));
+    auto& parameters = frame.DrawParameters[block];
+    parameters->CopyData(element, p);
 
     auto output = std::make_unique<Output>();
     output->View = view;
@@ -505,6 +515,7 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
     output->Patch = patch;
     output->Owner = id;
     output->Constants = parameters.get();
+    output->ConstantIndex = element;
     output->CurrentWind = currentWind;
     output->PreviousWind = previousWind;
     auto& binding = output->Binding;
@@ -527,7 +538,7 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
     }
     binding.DepthFormat = DXGI_FORMAT_D32_FLOAT;
     binding.Heap = _resources->SRV_UAV_Heap.get();
-    binding.CBVs.push_back({ 0, parameters->GetElementAddress(0) });
+    binding.CBVs.push_back({ 0, parameters->GetElementAddress(element) });
     if (view.CameraConstants) binding.CBVs.push_back({ 1, view.CameraConstants });
     binding.CBVs.push_back({ 2, constants->MainCB->GetElementAddress(0) });
     binding.SRVs = { { 0, _vertices->GetSRV()->GPUHandle },
@@ -556,18 +567,19 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
         { &constants->ShadowMaterials->GetResource(), GDX12RenderGraph::Mode::Read },
         { &constants->ShadowLights->GetResource(), GDX12RenderGraph::Mode::Read },
         { &parameters->GetResource(), GDX12RenderGraph::Mode::Read } };
+    frame.OutputIndex[{view.Key, view.Stage, patch}] = output.get();
     frame.Outputs.push_back(std::move(output));
 }
 
-void GDX12GrassRenderer::Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch)
+bool GDX12GrassRenderer::Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch)
 {
     auto* output = FindOutput(view, patch);
-    if (!output) return;
+    if (!output) return false;
     const auto& state = _grass.at(output->Owner);
     const auto& s = state.Source;
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     commands->SetComputeRootSignature(_computeRoot.get());
-    commands->SetComputeRootConstantBufferView(0, output->Constants->GetElementAddress(0));
+    commands->SetComputeRootConstantBufferView(0, output->Constants->GetElementAddress(output->ConstantIndex));
     commands->ResourceBarrier({ _vertices->GetResource().GetUnorderedAccessBarrier(),
         _indices->GetResource().GetUnorderedAccessBarrier(), _arguments->GetResource().GetUnorderedAccessBarrier(),
         output->CurrentWind->GetResource().GetNonPixelShaderResourceBarrier(),
@@ -586,6 +598,7 @@ void GDX12GrassRenderer::Expand(GDX12CommandList* commands, const GDX12GeometryC
     commands->ResourceBarrier({ _vertices->GetResource().GetSRVBarrier(),
         _indices->GetResource().GetGenericReadBarrier(), _arguments->GetResource().GetIndirectArgsBarrier() });
     _arenaOutput = output;
+    return true;
 }
 
 void GDX12GrassRenderer::GatherBatches(const GDX12GeometryContext& view, std::vector<GDX12RenderBatch>& batches) const
@@ -641,8 +654,10 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12GrassRenderer::DrawAccesses() c
     std::vector<GDX12RenderGraph::BufferAccess> accesses = {
         { &_vertices->GetResource(), Mode::Read }, { &_indices->GetResource(), Mode::Read }, { &_arguments->GetResource(), Mode::Read },
         { &constants->ShadowMaterials->GetResource(), Mode::Read }, { &constants->ShadowLights->GetResource(), Mode::Read } };
-    for (const auto& output : _frames.at(_resources->CurrFrameConstantsIndex).Outputs)
-        accesses.push_back({ &output->Constants->GetResource(), Mode::Read });
+    const auto& frame = _frames.at(_resources->CurrFrameConstantsIndex);
+    const UINT blocks = (frame.DrawCursor + ParametersPerBuffer - 1) / ParametersPerBuffer;
+    for (UINT block = 0; block < blocks; ++block)
+        accesses.push_back({ &frame.DrawParameters[block]->GetResource(), Mode::Read });
     return accesses;
 }
 
@@ -656,9 +671,7 @@ void GDX12GrassRenderer::PublishPrimitives(GDX12RenderPrimitiveRegistry& registr
         auto& state = _grass.at(id);
         const auto& s = state.Source;
         GDX12RenderPrimitive primitive;
-        GrassLocalBounds(s).Transform(primitive.Bounds, s.World);
-        primitive.Bounds.Extents.x += s.MaxBendCm;
-        primitive.Bounds.Extents.z += s.MaxBendCm;
+        primitive.Bounds = state.Bounds;
         primitive.Dynamic = true;
         primitive.CastsShadows = s.CastShadows;
         primitive.CapturedInReflections = s.CaptureReflections;

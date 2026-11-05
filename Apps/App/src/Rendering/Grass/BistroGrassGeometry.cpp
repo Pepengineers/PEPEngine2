@@ -121,8 +121,8 @@ void BistroGrassGeometry::PrepareGPU(GDX12CommandList* commands)
 void BistroGrassGeometry::PrepareView(const GDX12GeometryContext& view, UINT patch)
 { if (_gpu) _gpu->PrepareView(view, patch); }
 
-void BistroGrassGeometry::Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch)
-{ if (_gpu) _gpu->Expand(commands, view, patch); }
+bool BistroGrassGeometry::Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch)
+{ return _gpu && _gpu->Expand(commands, view, patch); }
 
 void BistroGrassGeometry::GatherBatches(const GDX12GeometryContext& view, std::vector<GDX12RenderBatch>& batches) const
 { if (_gpu) _gpu->GatherBatches(view, batches); }

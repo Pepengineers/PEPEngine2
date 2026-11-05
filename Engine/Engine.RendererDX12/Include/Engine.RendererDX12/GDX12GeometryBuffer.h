@@ -53,6 +53,7 @@ public:
 	~GDX12GeometryBuffer();
 	void Clear();
 	void AddMesh(const Mesh* mesh, MeshHandle handle, std::uint64_t contentRevision = 0);
+	void ReserveSkinnedVertices(UINT count);
 	UINT AllocateSkinnedVertices(UINT count);
 	void ReleaseSkinnedVertices(UINT offset, UINT count);
 	ID3D12Resource* BeginSkinning(GDX12CommandList* commands);

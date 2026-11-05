@@ -185,6 +185,19 @@ private:
 
     void BuildBackBuffer();
     void CollectReflectionScene();
+    struct MeshSnapshot
+    {
+        MeshHandle Handle;
+        const GPUMesh* Mesh = nullptr;
+        uint64_t GeometryRevision = 0, MaterialRevision = 0, Signature = 0;
+        const GDX12Material* Material = nullptr;
+        UINT SubMesh = UINT_MAX;
+        GDX12InstanceData Instance = {};
+        XMFLOAT4X4 World = {};
+        GDX12RenderPrimitive Primitive;
+        bool Valid = false;
+    };
+    std::vector<MeshSnapshot> _meshSnapshots;
     ShadowVisibilitySystem _shadowVisibility;
     void CollectParticleEmitters();
     void ShareFences();
@@ -220,6 +233,7 @@ private:
     std::unique_ptr<GDX12Device> _secondaryDevice;
     bool _dualGPUMode;
     bool _uiInitialized = false;
+    bool _renderingSuspended = false;
     std::unique_ptr<GDX12GPUTimer> _primaryGPUTimer;
     std::unique_ptr<GDX12GPUTimer> _secondaryGPUTimer;
 
