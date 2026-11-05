@@ -14,6 +14,7 @@ namespace JPH
 class JobSystem;
 class JoltJobSystem;
 struct JoltRuntime;
+struct JoltShapeCache;
 
 class BroadPhaseLayerInterfaceImpl;
 class ObjectVsBroadPhaseLayerFilterImpl;
@@ -50,6 +51,7 @@ private:
     std::unique_ptr<JPH::TempAllocatorImpl> _tempAllocator;
     std::unique_ptr<JoltJobSystem> _jobSystem;
     std::shared_ptr<JoltRuntime> _runtime;
+    std::unique_ptr<JoltShapeCache> _shapeCache;
 
     std::unique_ptr<BroadPhaseLayerInterfaceImpl> _broadPhaseLayerInterface;
     std::unique_ptr<ObjectVsBroadPhaseLayerFilterImpl> _objectVsBroadPhaseLayerFilter;

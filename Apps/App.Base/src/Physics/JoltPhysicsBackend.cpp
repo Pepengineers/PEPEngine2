@@ -7,6 +7,8 @@
 #include <cmath>
 #include <type_traits>
 #include <algorithm>
+#include <map>
+#include <tuple>
 
 #include <Jolt/Jolt.h>
 #include <Jolt/RegisterTypes.h>
@@ -64,6 +66,13 @@ namespace
 
     JPH::Shape::ShapeResult CreateShape(const PhysicsShapeDesc& desc, const DirectX::SimpleMath::Vector3& scale)
     {
+        if (!std::isfinite(scale.x) || !std::isfinite(scale.y) || !std::isfinite(scale.z) ||
+            scale.x <= 0 || scale.y <= 0 || scale.z <= 0)
+        {
+            JPH::Shape::ShapeResult result;
+            result.SetError("Invalid shape scale");
+            return result;
+        }
         return std::visit([&scale](const auto& shape) -> JPH::Shape::ShapeResult
         {
             using T = std::decay_t<decltype(shape)>;
@@ -100,7 +109,8 @@ namespace
                 const float radius = shape.Radius * scale.x;
                 const float halfHeight = shape.HalfHeight * scale.y;
                 if (!isPositive(radius) || !isPositive(halfHeight)) { return invalidShape(); }
-                return JPH::CylinderShapeSettings(halfHeight, radius).Create();
+                return JPH::CylinderShapeSettings(halfHeight, radius,
+                    (std::min)({0.05f, radius * 0.1f, halfHeight * 0.1f})).Create();
             }
 
             else if constexpr (std::is_same_v<T, CapsuleShapeDesc>)
@@ -127,7 +137,7 @@ namespace
                 }
                 return JPH::MeshShapeSettings(std::move(vertices), std::move(triangles)).Create();
             }
-            else
+            else if constexpr (std::is_same_v<T, ConvexCompoundShapeDesc>)
             {
                 if (!shape.Geometry || shape.Geometry->Hulls.empty()) return invalidShape();
                 JPH::StaticCompoundShapeSettings compound;
@@ -152,11 +162,78 @@ namespace
                 }
                 return compound.Create();
             }
+            else
+            {
+                if (!shape.Geometry || shape.Geometry->Children.empty()) return invalidShape();
+                const float uniform = (std::max)({scale.x, scale.y, scale.z});
+                JPH::StaticCompoundShapeSettings compound;
+                for (const auto& child : shape.Geometry->Children)
+                {
+                    const auto& p = child.Position;
+                    const auto& q = child.Rotation;
+                    const float lengthSquared = q.LengthSquared();
+                    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) ||
+                        !std::isfinite(lengthSquared) || lengthSquared <= 0) return invalidShape();
+                    const auto result = std::visit([&](const auto& primitive)
+                    {
+                        return CreateShape(primitive, DirectX::SimpleMath::Vector3(uniform));
+                    }, child.Shape);
+                    if (result.HasError()) return result;
+                    const auto position = p * uniform;
+                    if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z)) return invalidShape();
+                    compound.AddShape(JPH::Vec3(position.x, position.y, position.z),
+                        JPH::Quat(q.x, q.y, q.z, q.w).Normalized(), result.Get());
+                }
+                const auto result = compound.Create();
+                if (result.HasError()) return result;
+                // Parent nonuniform scale must also transform rotated child axes.
+                return result.Get()->ScaleShape(JPH::Vec3(scale.x / uniform, scale.y / uniform, scale.z / uniform));
+            }
 
         },
         desc);
     }
 }
+
+struct JoltShapeCache
+{
+    struct Key
+    {
+        const void* Geometry;
+        size_t Type;
+        DirectX::SimpleMath::Vector3 Scale;
+        bool operator<(const Key& other) const
+        {
+            if (Geometry != other.Geometry) return std::less<const void*>{}(Geometry, other.Geometry);
+            return std::tie(Type, Scale.x, Scale.y, Scale.z) < std::tie(other.Type, other.Scale.x, other.Scale.y, other.Scale.z);
+        }
+    };
+    struct Entry
+    {
+        std::shared_ptr<const void> Geometry;
+        JPH::Shape::ShapeResult Shape;
+    };
+    std::map<Key, Entry> Shapes;
+
+    JPH::Shape::ShapeResult Get(const PhysicsShapeDesc& desc, const DirectX::SimpleMath::Vector3& scale)
+    {
+        const auto geometry = std::visit([](const auto& shape) -> std::shared_ptr<const void>
+        {
+            using T = std::decay_t<decltype(shape)>;
+            if constexpr (std::is_same_v<T, TriangleMeshShapeDesc> || std::is_same_v<T, ConvexCompoundShapeDesc> || std::is_same_v<T, CompoundShapeDesc>)
+                return shape.Geometry;
+            else return {};
+        }, desc);
+        if (!geometry || !std::isfinite(scale.x) || !std::isfinite(scale.y) || !std::isfinite(scale.z) ||
+            scale.x <= 0 || scale.y <= 0 || scale.z <= 0) return CreateShape(desc, scale);
+        const Key key{geometry.get(), desc.index(), scale};
+        const auto found = Shapes.find(key);
+        if (found != Shapes.end()) return found->second.Shape;
+        auto result = CreateShape(desc, scale);
+        if (!result.HasError()) Shapes.emplace(key, Entry{geometry, result});
+        return result;
+    }
+};
 
 namespace ObjectLayers
 {
@@ -256,6 +333,7 @@ struct JoltRuntime
 {
     JoltRuntime()
     {
+        if (!JPH::VerifyJoltVersionID()) throw std::runtime_error("Jolt library and client build definitions do not match");
         JPH::RegisterDefaultAllocator();
         if (JPH::Factory::sInstance) throw std::logic_error("Jolt factory is already owned by another runtime");
         JPH::Trace = JoltTraceImpl;
@@ -286,6 +364,7 @@ void JoltPhysicsBackend::Initialize(JobSystem& jobs, const PhysicsWorldSettings&
     static std::weak_ptr<JoltRuntime> runtime;
     _runtime = runtime.lock();
     if (!_runtime) runtime = _runtime = std::make_shared<JoltRuntime>();
+    _shapeCache = std::make_unique<JoltShapeCache>();
 
     _tempAllocator = std::make_unique<JPH::TempAllocatorImpl>(
         (std::max)(10u * 1024 * 1024, settings.MaxContactConstraints * 512));
@@ -309,6 +388,7 @@ void JoltPhysicsBackend::Initialize(JobSystem& jobs, const PhysicsWorldSettings&
 void JoltPhysicsBackend::Uninitialize()
 {
     _physicsSystem.reset();
+    _shapeCache.reset();
     _objectLayerPairFilter.reset();
     _objectVsBroadPhaseLayerFilter.reset();
     _broadPhaseLayerInterface.reset();
@@ -372,7 +452,7 @@ PhysicsBodyHandle JoltPhysicsBackend::CreateBody(const PhysicsBodyDesc& desc)
     if (!isStatic && std::holds_alternative<TriangleMeshShapeDesc>(desc.Shape))
         throw std::invalid_argument("Triangle mesh bodies must be static");
 
-    const auto shapeResult = CreateShape(desc.Shape, desc.Scale / _settings.WorldUnitsPerMeter);
+    const auto shapeResult = _shapeCache->Get(desc.Shape, desc.Scale / _settings.WorldUnitsPerMeter);
     if (shapeResult.HasError())
     {
         Logger::Error("CreateBody(): {}", shapeResult.GetError().c_str());

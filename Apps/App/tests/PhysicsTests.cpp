@@ -10,6 +10,7 @@
 #include <atomic>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <fstream>
 #include <mutex>
 #include <set>
@@ -160,6 +161,82 @@ static void CheckWorlds(JobSystem& jobs)
     std::cout << "World isolation, pause, subscriptions, collider replacement and unload passed\n";
 }
 
+static void CheckCompoundShapes(JobSystem& jobs)
+{
+    JoltPhysicsBackend physics;
+    PhysicsWorldSettings settings;
+    settings.WorldUnitsPerMeter = 100;
+    physics.Initialize(jobs, settings);
+    auto geometry = std::make_shared<PhysicsCompound>();
+    geometry->Children = {
+        {BoxShapeDesc{{50, 5, 20}}, {1000, 100, -400}, Quaternion::CreateFromAxisAngle(Vector3::UnitZ, XM_PIDIV2)},
+        {CylinderShapeDesc{10, 20}, {1100, 100, -400}},
+        {SphereShapeDesc{10}, {1200, 100, -400}},
+        {CapsuleShapeDesc{10, 10}, {1300, 100, -400}}
+    };
+    PhysicsBodyDesc desc;
+    desc.Shape = CompoundShapeDesc{geometry};
+    const auto first = physics.CreateBody(desc);
+    Require(first.IsValid(), "Primitive compound creation failed");
+    PhysicsRayHit hit;
+    for (const auto& sample : {Vector3(1000, 150, -400), Vector3(1100, 120, -400), Vector3(1108, 120, -400),
+        Vector3(1200, 110, -400), Vector3(1300, 120, -400)})
+    {
+        Require(physics.RayCastStatic({sample.x, 300, sample.z}, {0, -400, 0}, hit) &&
+            std::abs(hit.Position.y - sample.y) < 0.05f, "Compound local transforms or centimeter units are wrong");
+    }
+    Require(!physics.RayCastStatic({1050, 300, -400}, {0, -400, 0}, hit), "Compound filled the space between children");
+    desc.Position = {3000, 0, 0};
+    Require(physics.CreateBody(desc).IsValid(), "Reusing a cooked compound failed");
+    desc.Position = {6000, 0, 0};
+    desc.Scale = {2, 1, 1};
+    Require(physics.CreateBody(desc).IsValid(), "Nonuniformly scaled compound failed");
+    Require(physics.RayCastStatic({8000, 300, -400}, {0, -400, 0}, hit) &&
+        std::abs(hit.Position.y - 150) < 0.05f, "Cooked compound cache ignored scale or rotated child axes");
+    auto invalidGeometry = std::make_shared<PhysicsCompound>(*geometry);
+    invalidGeometry->Children.front().Rotation = {0, 0, 0, 0};
+    auto invalid = desc;
+    invalid.Shape = CompoundShapeDesc{invalidGeometry};
+    Require(!physics.CreateBody(invalid).IsValid(), "Compound accepted an invalid child rotation");
+    invalid = desc;
+    invalid.Scale.x = std::numeric_limits<float>::quiet_NaN();
+    Require(!physics.CreateBody(invalid).IsValid(), "Cooked compound cache accepted a nonfinite scale");
+
+    std::weak_ptr<const PhysicsCompound> retained = geometry;
+    desc.Shape = BoxShapeDesc{};
+    invalid.Shape = BoxShapeDesc{};
+    geometry.reset();
+    invalidGeometry.reset();
+    Require(!retained.expired(), "Cooked compound cache did not retain geometry identity");
+    physics.Uninitialize();
+    Require(retained.expired(), "Uninitializing physics retained cached geometry");
+
+    physics.Initialize(jobs, settings);
+    PhysicsBodyDesc floor;
+    floor.Shape = BoxShapeDesc{{2000, 10, 2000}};
+    floor.Position = {0, -10, 0};
+    Require(physics.CreateBody(floor).IsValid(), "Compound pivot test floor failed");
+    auto baked = std::make_shared<PhysicsCompound>();
+    const Vector3 center(1000, 0, -400);
+    baked->Children.push_back({BoxShapeDesc{{20, 20, 10}}, center});
+    desc.Shape = CompoundShapeDesc{baked};
+    desc.Position = {0, 200, 0};
+    desc.Scale = Vector3::One;
+    desc.Rotation = Quaternion::CreateFromAxisAngle(Vector3::UnitY, XM_PIDIV4);
+    desc.MotionType = PhysicsMotionType::Dynamic;
+    const auto dynamic = physics.CreateBody(desc);
+    Require(dynamic.IsValid(), "Baked primitive compound body failed");
+    Vector3 position;
+    Quaternion rotation;
+    Require(physics.TryGetBodyTransform(dynamic, position, rotation) &&
+        Vector3::Distance(position, desc.Position) < 0.05f, "Compound changed the baked body origin");
+    for (int tick = 0; tick < 180; ++tick) physics.Step(1.f / 60);
+    Require(physics.TryGetBodyTransform(dynamic, position, rotation), "Baked compound body disappeared");
+    const auto restingCenter = Vector3::Transform(center, rotation) + position;
+    Require(std::abs(restingCenter.y - 20) < 3, "Baked compound failed to settle on the real collision floor");
+    std::cout << "Primitive compound offsets, rotations, units, scale, cache lifetime and baked pivots passed\n";
+}
+
 class PhysicsTestApp final : public App
 {
 public:
@@ -280,6 +357,7 @@ int main()
             else for (size_t i = 0; i < positions.size(); ++i)
                 Require(Vector3::Distance(baseline[i], positions[i]) < 0.001f, "Physics result depends on worker count");
             CheckWorlds(jobs);
+            CheckCompoundShapes(jobs);
         }
         CheckFixedPipeline();
         std::cout << "Jolt integration passed: 1000 colliding bodies, 180 ticks, 1/4 shared threads\n";

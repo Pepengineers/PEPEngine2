@@ -15,4 +15,11 @@
       <PreprocessorDefinitions>JPH_DEBUG_RENDERER;JPH_PROFILE_ENABLED;JPH_FLOATING_POINT_EXCEPTIONS_ENABLED;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Platform)'=='x64' and '$(Configuration)'=='Debug' and '$(PEPExternalJoltLibDir)'=='$(PEPRepoRoot)Build\JoltOptimized\Debug\'">
+    <ClCompile><PreprocessorDefinitions>JPH_ENABLE_ASSERTS;%(PreprocessorDefinitions)</PreprocessorDefinitions></ClCompile>
+  </ItemDefinitionGroup>
+  <Target Name="PrepareOptimizedDebugJolt" BeforeTargets="PrepareForBuild"
+          Condition="'$(Platform)'=='x64' and '$(Configuration)'=='Debug' and '$(ConfigurationType)'=='Application' and '$(DesignTimeBuild)'!='true' and '$(PEPExternalJoltLibDir)'=='$(PEPRepoRoot)Build\JoltOptimized\Debug\'">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(PEPRepoRoot)tools\Build-Jolt.ps1&quot; -VisualStudioDirectory &quot;$(VSInstallDir).&quot; -SourceDirectory &quot;$(PEPExternalJoltSourceDir).&quot;" />
+  </Target>
 </Project>
