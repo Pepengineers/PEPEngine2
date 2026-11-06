@@ -94,9 +94,10 @@ namespace
                     shape.HalfExtent.x * scale.x,
                     shape.HalfExtent.y * scale.y,
                     shape.HalfExtent.z * scale.z);
-                if (!isPositive(halfExtent.x) || !isPositive(halfExtent.y) || !isPositive(halfExtent.z)) { return invalidShape(); }
+                if (!isPositive(halfExtent.x) || !isPositive(halfExtent.y) || !isPositive(halfExtent.z) ||
+                    !std::isfinite(shape.ConvexRadiusMeters) || shape.ConvexRadiusMeters < 0) return invalidShape();
                 return JPH::BoxShapeSettings(JPH::Vec3(halfExtent.x, halfExtent.y, halfExtent.z),
-                    (std::min)({0.05f, halfExtent.x * 0.1f, halfExtent.y * 0.1f, halfExtent.z * 0.1f})).Create();
+                    (std::min)({shape.ConvexRadiusMeters, halfExtent.x * 0.1f, halfExtent.y * 0.1f, halfExtent.z * 0.1f})).Create();
             }
 
             else if constexpr (std::is_same_v<T, SphereShapeDesc>)
@@ -163,7 +164,8 @@ namespace
             }
             else if constexpr (std::is_same_v<T, ConvexCompoundShapeDesc>)
             {
-                if (!shape.Geometry || shape.Geometry->Hulls.empty()) return invalidShape();
+                if (!shape.Geometry || shape.Geometry->Hulls.empty() || !std::isfinite(shape.Geometry->ConvexRadiusMeters) ||
+                    shape.Geometry->ConvexRadiusMeters < 0) return invalidShape();
                 JPH::StaticCompoundShapeSettings compound;
                 for (const auto& hull : shape.Geometry->Hulls)
                 {
@@ -178,10 +180,15 @@ namespace
                     JPH::Array<JPH::Vec3> points;
                     for (const auto& p : hull) points.emplace_back((p.x-center.x) * scale.x, (p.y-center.y) * scale.y, (p.z-center.z) * scale.z);
                     // Cook near the origin: baked world coordinates lose precision on thin furniture parts.
-                    JPH::ConvexHullShapeSettings settings(points, 0.001f);
+                    JPH::ConvexHullShapeSettings settings(points, shape.Geometry->ConvexRadiusMeters);
                     settings.mHullTolerance = 0.0001f;
                     const auto result = settings.Create();
-                    if (result.HasError()) return result;
+                    if (result.HasError())
+                    {
+                        Logger::Error("Convex hull failed at center ({}, {}, {}), extent ({}, {}, {})", center.x, center.y, center.z,
+                            maximum.x-minimum.x, maximum.y-minimum.y, maximum.z-minimum.z);
+                        return result;
+                    }
                     compound.AddShape(JPH::Vec3(center.x*scale.x,center.y*scale.y,center.z*scale.z), JPH::Quat::sIdentity(), result.Get());
                 }
                 return compound.Create();
@@ -392,7 +399,7 @@ void JoltPhysicsBackend::Initialize(JobSystem& jobs, const PhysicsWorldSettings&
     if (!_runtime) runtime = _runtime = std::make_shared<JoltRuntime>();
     _shapeCache = std::make_unique<JoltShapeCache>();
 
-    _tempAllocator = std::make_unique<JPH::TempAllocatorImpl>(
+    _tempAllocator = std::make_unique<JPH::TempAllocatorImplWithMallocFallback>(
         (std::max)(10u * 1024 * 1024, settings.MaxContactConstraints * 512));
 
     _jobSystem = std::make_unique<JoltJobSystem>(jobs);
@@ -406,6 +413,7 @@ void JoltPhysicsBackend::Initialize(JobSystem& jobs, const PhysicsWorldSettings&
         *_broadPhaseLayerInterface, *_objectVsBroadPhaseLayerFilter, *_objectLayerPairFilter);
     auto physicsSettings = _physicsSystem->GetPhysicsSettings();
     physicsSettings.mPenetrationSlop = settings.PenetrationSlopMeters;
+    physicsSettings.mSpeculativeContactDistance = (std::min)(physicsSettings.mSpeculativeContactDistance, 2 * settings.PenetrationSlopMeters);
     _physicsSystem->SetPhysicsSettings(physicsSettings);
     _bInitialized = true;
     Logger::Info("Jolt physics backend initialized");
@@ -475,8 +483,6 @@ PhysicsBodyHandle JoltPhysicsBackend::CreateBody(const PhysicsBodyDesc& desc)
     }
 
     const bool isStatic = desc.MotionType == PhysicsMotionType::Static;
-    if (!isStatic && std::holds_alternative<TriangleMeshShapeDesc>(desc.Shape))
-        throw std::invalid_argument("Triangle mesh bodies must be static");
 
     const auto shapeResult = _shapeCache->Get(desc.Shape, desc.Scale / _settings.WorldUnitsPerMeter);
     if (shapeResult.HasError())
@@ -485,6 +491,8 @@ PhysicsBodyHandle JoltPhysicsBackend::CreateBody(const PhysicsBodyDesc& desc)
         return {};
     }
     JPH::ShapeRefC shape = shapeResult.Get();
+    if (!isStatic && shape->MustBeStatic())
+        throw std::invalid_argument("Triangle mesh bodies and compounds must be static");
 
     JPH::BodyCreationSettings settings(
         shape,
@@ -592,6 +600,30 @@ bool JoltPhysicsBackend::OverlapsBox(const DirectX::SimpleMath::Vector3& center,
         center.y / _settings.WorldUnitsPerMeter, center.z / _settings.WorldUnitsPerMeter);
     _physicsSystem->GetNarrowPhaseQuery().CollideShape(shape.Get(), JPH::Vec3::sReplicate(1),
         JPH::RMat44::sTranslation(position), settings, position, collector);
+    return collector.HadHit();
+}
+
+bool JoltPhysicsBackend::OverlapsBody(const PhysicsBodyDesc& desc)
+{
+    if (!_physicsSystem) throw std::logic_error("Physics backend is not initialized");
+    const auto& p = desc.Position;
+    const auto& q = desc.Rotation;
+    const JPH::Quat rotation(q.x, q.y, q.z, q.w);
+    if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) ||
+        !std::isfinite(q.LengthSquared()) || !rotation.IsNormalized())
+        throw std::invalid_argument("Invalid placement transform");
+    const auto result = _shapeCache->Get(desc.Shape, desc.Scale / _settings.WorldUnitsPerMeter);
+    if (result.HasError() || result.Get()->MustBeStatic())
+        throw std::invalid_argument("Placement query requires a valid movable shape");
+    const auto* shape = result.Get().GetPtr();
+    const JPH::RVec3 position = JPH::RVec3(p.x, p.y, p.z) / _settings.WorldUnitsPerMeter;
+    // Jolt queries take a COM transform; descriptors and ECS transforms use the original mesh pivot.
+    const auto transform = JPH::RMat44::sRotationTranslation(rotation, position).PreTranslated(shape->GetCenterOfMass());
+    JPH::CollideShapeSettings settings;
+    settings.mBackFaceMode = JPH::EBackFaceMode::CollideWithBackFaces;
+    JPH::AnyHitCollisionCollector<JPH::CollideShapeCollector> collector;
+    _physicsSystem->GetNarrowPhaseQuery().CollideShape(shape, JPH::Vec3::sReplicate(1),
+        transform, settings, transform.GetTranslation(), collector);
     return collector.HadHit();
 }
 

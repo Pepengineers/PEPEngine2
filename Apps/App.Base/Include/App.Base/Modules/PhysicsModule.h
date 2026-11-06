@@ -29,6 +29,7 @@ public:
     void Step(World& world, float dt);
     void ConfigureWorld(World& world, const PhysicsWorldSettings& settings);
     bool OverlapsBox(World& world, const DirectX::SimpleMath::Vector3& center, const DirectX::SimpleMath::Vector3& halfExtent) const;
+    bool OverlapsBody(World& world, const PhysicsBodyDesc& desc);
     bool RayCastStatic(World& world, const DirectX::SimpleMath::Vector3& origin, const DirectX::SimpleMath::Vector3& displacement, PhysicsRayHit& hit) const;
 
     PhysicsBodyHandle CreateBody(World& world, const PhysicsBodyDesc& desc);

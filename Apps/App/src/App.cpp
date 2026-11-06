@@ -59,6 +59,8 @@ namespace
             Render(Timer);
         }
 
+        void ResetBenchmarkClock() { Timer.Reset(); }
+
     protected:
         bool AddModules() override
         {
@@ -202,6 +204,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
         ConsoleModule{}.Initialize();
         std::filesystem::path benchmarkOutput;
         int benchmarkFrames = 1;
+        int benchmarkWarmupFrames = 0;
         std::wstring budgetArgument;
         int argumentCount = 0;
         auto arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
@@ -236,6 +239,15 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
             if (argument.substr(0, prefix.size()) == prefix)
                 benchmarkOutput = std::wstring(argument.substr(prefix.size()));
             constexpr std::wstring_view framesPrefix = L"-Loading.BenchmarkFrames=";
+            constexpr std::wstring_view warmupPrefix = L"-Loading.BenchmarkWarmupFrames=";
+            if (argument.substr(0, warmupPrefix.size()) == warmupPrefix)
+            {
+                const std::wstring value(argument.substr(warmupPrefix.size()));
+                size_t consumed = 0;
+                benchmarkWarmupFrames = std::stoi(value, &consumed);
+                if (consumed != value.size() || benchmarkWarmupFrames < 0 || benchmarkWarmupFrames > 10000)
+                    throw std::runtime_error("Loading.BenchmarkWarmupFrames must be between 0 and 10000");
+            }
             if (argument.substr(0, framesPrefix.size()) == framesPrefix)
             {
                 const std::wstring value(argument.substr(framesPrefix.size()));
@@ -256,6 +268,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
             app.BenchmarkFrame();
             BenchmarkEngine::GetLocator().GetModule<RenderModule>()->WaitForUploads();
             const auto ready = std::chrono::steady_clock::now();
+            app.ResetBenchmarkClock();
+            for (int frame = 0; frame < benchmarkWarmupFrames; ++frame) app.BenchmarkFrame();
+            const auto measuring = std::chrono::steady_clock::now();
             for (int frame = 1; frame < benchmarkFrames; ++frame) app.BenchmarkFrame();
             BenchmarkEngine::GetLocator().GetModule<RenderModule>()->WaitForUploads();
             const auto sampled = std::chrono::steady_clock::now();
@@ -280,9 +295,11 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
                 << ",\n  \"max_import_tasks\": " << LastLoadingMeasurements.MaxImportTasks
                 << ",\n  \"max_texture_tasks\": " << LastLoadingMeasurements.MaxTextureTasks
                 << ",\n  \"sampled_frames\": " << benchmarkFrames - 1
+                << ",\n  \"warmup_frames\": " << benchmarkWarmupFrames
+                << ",\n  \"physics_count_scale\": " << BistroPhysics::CountScale.GetValue()
                 << ",\n  \"particle_count_scale\": " << BistroParticles::CountScale.GetValue()
                 << ",\n  \"particle_budget\": " << BistroParticles::GetBudget()
-                << ",\n  \"frame_ms\": " << (benchmarkFrames > 1 ? std::chrono::duration<double, std::milli>(sampled - ready).count() / (benchmarkFrames - 1) : 0)
+                << ",\n  \"frame_ms\": " << (benchmarkFrames > 1 ? std::chrono::duration<double, std::milli>(sampled - measuring).count() / (benchmarkFrames - 1) : 0)
                 << ",\n  \"graph_passes\": " << graph.Passes
                 << ",\n  \"graph_culled_passes\": " << graph.CulledPasses
                 << ",\n  \"graph_logical_textures\": " << graph.TransientTextures

@@ -293,6 +293,130 @@ static void CheckCompoundShapes(JobSystem& jobs)
     std::cout << "Primitive compound offsets, rotations, units, scale, cache lifetime and baked pivots passed\n";
 }
 
+static void CheckPlacementQueries(JobSystem& jobs)
+{
+    for (float units : {1.f, 100.f})
+    {
+        JoltPhysicsBackend physics;
+        PhysicsWorldSettings settings;
+        settings.WorldUnitsPerMeter = units;
+        physics.Initialize(jobs, settings);
+        const Vector3 bakedCenter = Vector3(10, 0, -4) * units;
+        const Vector3 legOffset = Vector3(2, 0, 0) * units;
+        auto legs = std::make_shared<PhysicsCompound>();
+        for (float sign : {-1.f, 1.f})
+            legs->Children.push_back({BoxShapeDesc{Vector3(0.25f, 1, 0.25f) * units}, bakedCenter + sign * legOffset});
+        PhysicsBodyDesc query;
+        query.Shape = CompoundShapeDesc{legs};
+        query.Position = Vector3(3, 5, -2) * units;
+        query.Rotation = Quaternion::CreateFromYawPitchRoll(0.6f, 0.2f, -0.1f);
+        query.Scale = {2, 1, 0.5f};
+        const auto gap = Vector3::Transform(bakedCenter * query.Scale, query.Rotation) + query.Position;
+        PhysicsBodyDesc obstacle;
+        obstacle.Shape = BoxShapeDesc{Vector3(0.2f) * units};
+        obstacle.Position = gap;
+        const auto obstacleBody = physics.CreateBody(obstacle);
+        Require(obstacleBody.IsValid(), "Placement query obstacle failed");
+        Require(physics.OverlapsBox(gap, Vector3(6 * units)), "Placement AABB did not enclose the obstacle");
+        Require(!physics.OverlapsBody(query), "Shape query filled the empty space between compound legs");
+        auto shifted = query;
+        shifted.Position -= Vector3::Transform(legOffset * query.Scale, query.Rotation);
+        Require(physics.OverlapsBody(shifted), "Shape query lost rotated, scaled, baked-origin compound overlap");
+        physics.DestroyBody(obstacleBody);
+        Require(!physics.OverlapsBody(shifted), "Shape query retained a destroyed obstacle");
+        obstacle.MotionType = PhysicsMotionType::Dynamic;
+        const auto dynamicObstacle = physics.CreateBody(obstacle);
+        Require(dynamicObstacle.IsValid() && physics.OverlapsBody(shifted), "Shape query ignored a dynamic obstacle");
+        physics.DestroyBody(dynamicObstacle);
+        const auto matchingBody = physics.CreateBody(query);
+        Require(matchingBody.IsValid() && physics.OverlapsBody(query), "Shape query transform differs from body creation");
+        physics.DestroyBody(matchingBody);
+
+        obstacle = PhysicsBodyDesc{};
+        obstacle.Shape = BoxShapeDesc{Vector3(units)};
+        Require(physics.CreateBody(obstacle).IsValid(), "Touching query obstacle failed");
+        PhysicsBodyDesc box;
+        box.Shape = BoxShapeDesc{Vector3(units)};
+        box.Position = {2 * units, 0, 0};
+        Require(physics.OverlapsBody(box), "Shape query missed touching boxes");
+        box.Position.x = 1.99f * units;
+        Require(physics.OverlapsBody(box), "Shape query missed overlapping boxes");
+        box.Position.x = 2.01f * units;
+        Require(!physics.OverlapsBody(box), "Shape query reported separated boxes as overlapping");
+        auto expectInvalid = [&](const PhysicsBodyDesc& invalid)
+        {
+            bool rejected = false;
+            try { physics.OverlapsBody(invalid); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            Require(rejected, "Invalid placement query silently returned a collision result");
+        };
+        auto invalid = box;
+        invalid.Position.x = std::numeric_limits<float>::quiet_NaN();
+        expectInvalid(invalid);
+        invalid = box;
+        invalid.Rotation = {0, 0, 0, 0};
+        expectInvalid(invalid);
+        invalid = box;
+        invalid.Scale.x = std::numeric_limits<float>::infinity();
+        expectInvalid(invalid);
+        invalid = box;
+        invalid.Shape = BoxShapeDesc{{-1, 1, 1}};
+        expectInvalid(invalid);
+        for (float radius : {-1.f, std::numeric_limits<float>::quiet_NaN()})
+        {
+            invalid.Shape=BoxShapeDesc{{1,1,1},radius};
+            expectInvalid(invalid);
+            auto hull=std::make_shared<PhysicsConvexCompound>();
+            hull->Hulls={{{0,0,0},{1,0,0},{0,1,0},{0,0,1}}};
+            hull->ConvexRadiusMeters=radius;
+            invalid.Shape=ConvexCompoundShapeDesc{hull};
+            expectInvalid(invalid);
+        }
+    }
+    std::cout << "Shape-aware placement: compound gaps, baked pivots, transforms, contact, validation and units passed\n";
+}
+
+static void CheckStaticMeshCompound(JobSystem& jobs)
+{
+    for (float units : {1.f, 100.f})
+    {
+        JoltPhysicsBackend physics;
+        PhysicsWorldSettings settings;
+        settings.WorldUnitsPerMeter = units;
+        physics.Initialize(jobs, settings);
+        auto mesh = std::make_shared<PhysicsTriangleMesh>();
+        for (const auto& point : {Vector3(-2, 0, -2), Vector3(2, 0, -2), Vector3(2, 0, 2), Vector3(-2, 0, 2)})
+            mesh->Vertices.push_back(point * units);
+        mesh->Triangles = {{0, 2, 1}, {0, 3, 2}};
+        auto mixed = std::make_shared<PhysicsCompound>();
+        mixed->Children = {
+            {TriangleMeshShapeDesc{mesh}, Vector3(10, 0, -4) * units},
+            {BoxShapeDesc{Vector3(0.5f) * units}, Vector3(14, 0.5f, -4) * units}
+        };
+        PhysicsBodyDesc desc;
+        desc.Shape = CompoundShapeDesc{mixed};
+        Require(physics.CreateBody(desc).IsValid(), "Static mixed mesh and box compound failed");
+        PhysicsRayHit hit;
+        Require(physics.RayCastStatic(Vector3(10, 3, -4) * units, Vector3(0, -5, 0) * units, hit) &&
+            std::abs(hit.Position.y) < 0.001f * units, "Mixed compound mesh child transform is wrong");
+        Require(physics.RayCastStatic(Vector3(14, 3, -4) * units, Vector3(0, -5, 0) * units, hit) &&
+            std::abs(hit.Position.y - units) < 0.001f * units, "Mixed compound box child transform is wrong");
+        for (auto motion : {PhysicsMotionType::Dynamic, PhysicsMotionType::Kinematic})
+        {
+            desc.MotionType = motion;
+            bool rejected = false;
+            try { physics.CreateBody(desc); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            Require(rejected, "Moving body accepted a nested static-only mesh shape");
+        }
+        bool rejected = false;
+        try { physics.OverlapsBody(desc); }
+        catch (const std::invalid_argument&) { rejected = true; }
+        Require(rejected, "Placement query accepted a static-only compound");
+    }
+    std::cout << "Static mixed mesh/box compound and recursive motion restrictions passed\n";
+}
+
 class PhysicsTestApp final : public App
 {
 public:
@@ -429,6 +553,8 @@ int main()
                 Require(Vector3::Distance(baseline[i], positions[i]) < 0.001f, "Physics result depends on worker count");
             CheckWorlds(jobs);
             CheckCompoundShapes(jobs);
+            CheckPlacementQueries(jobs);
+            CheckStaticMeshCompound(jobs);
         }
         CheckFixedPipeline();
         std::cout << "Jolt integration passed: 1000 colliding bodies, 180 ticks, 1/4 shared threads\n";

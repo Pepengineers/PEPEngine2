@@ -27,6 +27,7 @@ enum class PhysicsMotionType : uint8_t
 struct BoxShapeDesc
 {
     DirectX::SimpleMath::Vector3 HalfExtent{ 0.5f, 0.5f, 0.5f };
+    float ConvexRadiusMeters = 0.05f;
 };
 
 struct SphereShapeDesc
@@ -57,10 +58,11 @@ struct TriangleMeshShapeDesc { std::shared_ptr<const PhysicsTriangleMesh> Geomet
 struct PhysicsConvexCompound
 {
     std::vector<std::vector<DirectX::SimpleMath::Vector3>> Hulls;
+    float ConvexRadiusMeters = 0.001f;
 };
 struct ConvexCompoundShapeDesc { std::shared_ptr<const PhysicsConvexCompound> Geometry; };
 
-using CompoundChildShapeDesc = std::variant<BoxShapeDesc, SphereShapeDesc, CapsuleShapeDesc, CylinderShapeDesc, ConvexCompoundShapeDesc>;
+using CompoundChildShapeDesc = std::variant<BoxShapeDesc, SphereShapeDesc, CapsuleShapeDesc, CylinderShapeDesc, ConvexCompoundShapeDesc, TriangleMeshShapeDesc>;
 struct PhysicsCompoundChild
 {
     CompoundChildShapeDesc Shape;

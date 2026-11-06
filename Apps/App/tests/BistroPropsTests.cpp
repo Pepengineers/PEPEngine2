@@ -89,8 +89,15 @@ static void CheckPartition()
     }
     Engine::Core::Mesh mesh(std::move(parts), {});
     const auto partition = PartitionBistroProps(mesh);
+    const auto exterior = PartitionBistroProps(mesh, false);
+    Require(exterior.Props.empty() && exterior.StaticSubMeshes.size() == mesh.GetSubMeshCount(), "Exterior props must remain visible and static");
+    for (const auto* name : {"plate", "cutlery", "napkinholder", "glass_water", "glass_wine", "glass_beer", "glass_detailed", "placemat", "wickerbasket", "coaster"})
+        Require(IsBistroTableware(name), "Table setting family omitted");
+    Require(!IsBistroTableware("window_glass") && !IsBistroTableware("cashregister"), "Architecture selected as tableware");
     Require(partition.StaticSubMeshes == std::vector<uint32_t>({ 0, 6 }), "Background must exclude flying geometry");
     Require(partition.Props.size() == 3, "Case-insensitive prop names must select logical objects");
+    Require(partition.Tableware==std::vector<size_t>({0,2}) && BistroPhysics::GetCount(partition,16)==33,
+        "Tableware scaling selected or multiplied furniture");
     Require(partition.Props[0].SubMeshIndices == std::vector<uint32_t>({ 1, 2, 4 }), "All bottle material sections must move together");
     std::vector<unsigned> visits(mesh.GetSubMeshCount());
     for (auto index : partition.StaticSubMeshes) ++visits.at(index);
@@ -167,16 +174,18 @@ static void CheckInterior(const std::filesystem::path& path)
     const auto mesh = Engine::Core::MeshImporter::ImportSingleMeshAsset(path);
     Require(mesh && mesh->GetSubMeshCount() == 2381, "Bistro Interior geometry must remain intact");
     const auto partition = PartitionBistroProps(*mesh);
-    Require(partition.Props.size() == 346 && partition.StaticSubMeshes.size() == 1427,
-        "Interior must retain its 346 existing props and static remainder");
+    Require(partition.Props.size() == 947 && !partition.StaticSubMeshes.empty(),
+        "Interior must simulate 947 furniture/tableware objects and retain static architecture");
+    Require(partition.Tableware.size()==905 && partition.Props.size()-partition.Tableware.size()==42,
+        "Tableware scaling must be independent of original furniture");
     std::vector<unsigned> visits(mesh->GetSubMeshCount());
     for (auto index : partition.StaticSubMeshes) ++visits.at(index);
     size_t propSections = 0;
     for (const auto& prop : partition.Props)
         for (auto index : prop.SubMeshIndices) { ++visits.at(index); ++propSections; }
-    Require(propSections == 954, "Interior props must retain all their material sections");
+    Require(propSections + partition.StaticSubMeshes.size() == mesh->GetSubMeshCount(), "Interior sections must remain intact");
     for (auto count : visits) Require(count == 1, "Real Interior geometry must not be lost or duplicated");
-    std::cout << "Actual Interior: 346 props, 954 prop submeshes, 1427 static submeshes; exact coverage passed.\n";
+    std::cout << "Actual Interior: " << partition.Props.size() << " props, " << propSections << " prop sections, " << partition.StaticSubMeshes.size() << " static sections; exact coverage passed.\n";
 }
 
 int main(int argc, char** argv)

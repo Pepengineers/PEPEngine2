@@ -212,11 +212,13 @@ inline void ConfigureBistroProps(SceneManagerModule& scenes, JobSystem& jobs)
             if (!configured) { physics.ConfigureWorld(world, BistroPhysics::Settings()); configured = true; }
             auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
             const auto* mesh = render.GetPrimaryGPUMesh(source.MeshHandler);
-            const auto partition = PartitionBistroProps(*mesh->CPUMesh);
-            const auto count = BistroPhysics::GetCount(partition.Props.size(), BistroPhysics::CountScale.GetValue());
+            const auto partition = PartitionBistroProps(*mesh->CPUMesh, name == "Interior_interior");
+            const auto count = BistroPhysics::GetCount(partition, BistroPhysics::CountScale.GetValue());
             render.ReserveTransformCapacity(static_cast<UINT>(count) + 9);
             size_t instances = partition.StaticSubMeshes.size();
-            for (size_t i = 0; i < count; ++i) instances += partition.Props[i % partition.Props.size()].SubMeshIndices.size();
+            for (const auto& prop : partition.Props) instances += prop.SubMeshIndices.size();
+            for (size_t i=0; i<count-partition.Props.size(); ++i)
+                instances += partition.Props[partition.Tableware[i%partition.Tableware.size()]].SubMeshIndices.size();
             render.ReserveInstanceCapacity(static_cast<UINT>(instances));
             CreateBistroPropEntities(world, name, source, *mesh->CPUMesh, partition, jobs, &physics, waves.get());
             if (name == "Interior_interior") CreateBistroParticles(world);

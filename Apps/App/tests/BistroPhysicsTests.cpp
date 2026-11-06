@@ -1,4 +1,5 @@
 #include "../src/BistroProps.h"
+#include "BistroStaticCollisionChecks.h"
 #include "App.Base/Physics/JoltPhysicsBackend.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "App.Base/Systems/DynamicBodyUpdateSystem.h"
@@ -11,6 +12,8 @@
 #include <tuple>
 #include <atomic>
 #include <chrono>
+#include <cstdarg>
+#include <cstdio>
 #include <Jolt/Jolt.h>
 #include <Jolt/Core/IssueReporting.h>
 
@@ -24,9 +27,48 @@ static bool RecordJoltAssert(const char* expression, const char*, const char* fi
 }
 #endif
 
+static void RecordJoltTrace(const char* format, ...)
+{
+    va_list args; va_start(args,format); std::vfprintf(stderr,format,args); va_end(args);
+    std::fputc('\n',stderr); std::fflush(stderr);
+}
+
 static void Require(bool condition, const char* message)
 {
     if (!condition) throw std::runtime_error(message);
+}
+
+template<class RayCast>
+static bool BelowIndoorFloor(const Vector3& center, RayCast cast, PhysicsRayHit& support)
+{
+    if (center.y>=50 || !cast({center.x,65,center.z},support) || support.Normal.y<=.5f ||
+        (std::abs(support.Position.y-39.622f)>=.2f && std::abs(support.Position.y-51.803f)>=.2f) ||
+        center.y>=support.Position.y-2) return false;
+    const auto settings=BistroPhysics::Settings();
+    const float margin=2*settings.PenetrationSlopMeters*settings.WorldUnitsPerMeter;
+    // A body beside the raised floor may overlap its edge within the allowed contact slop.
+    for (const Vector3 offset : {Vector3(margin,0,0),Vector3(-margin,0,0),Vector3(0,0,margin),Vector3(0,0,-margin)})
+    {
+        PhysicsRayHit neighbor;
+        if (!cast(Vector3(center.x,65,center.z)+offset,neighbor) || neighbor.Normal.y<=.5f ||
+            std::abs(neighbor.Position.y-support.Position.y)>.2f) return false;
+    }
+    return true;
+}
+
+static void CheckFloorProbe()
+{
+    const auto step=[](const Vector3& origin, PhysicsRayHit& hit)
+    {
+        hit.Position={origin.x,origin.x>0 ? 51.803f : 39.622f,origin.z};
+        hit.Normal=Vector3::UnitY;
+        return true;
+    };
+    PhysicsRayHit hit;
+    Require(!BelowIndoorFloor({.0512f,43.9014f,0},step,hit),"Floor probe misclassified a body touching the side of a step");
+    Require(BelowIndoorFloor({10,43,0},step,hit) && BelowIndoorFloor({-10,20,0},step,hit),
+        "Floor probe missed penetration inside either floor level");
+    Require(!BelowIndoorFloor({-10,44,0},step,hit),"Floor probe rejected a body above its support");
 }
 
 static void CheckWaveTimeline()
@@ -194,15 +236,28 @@ static void CheckParticipants(PhysicsModule& physics, SceneManagerModule& scenes
 
 static void CheckBudgets()
 {
-    const std::pair<double, size_t> cases[] = {{0,346},{0.5,346},{1,346},{1.25,433},{2,692},{16,5536}};
+    const auto footprint=BistroPhysics::SpawnFootprint({{0,0,0},{100,0,100},{0,0,100},{100,0,0},{50,0,50},{0,0,0}});
+    Require(BistroPhysics::FitsFootprint(footprint,{50,0,50},{49,1,49}) &&
+        !BistroPhysics::FitsFootprint(footprint,{99,0,50},{2,1,2}) &&
+        !BistroPhysics::FitsFootprint(footprint,{200,0,50},{1,1,1}), "Indoor footprint admits overhanging copies");
+    bool degenerate=false;
+    try { BistroPhysics::SpawnFootprint({{0,0,0},{1,0,0},{2,0,0}}); } catch(const std::invalid_argument&) { degenerate=true; }
+    Require(degenerate,"Collinear spawn footprint accepted");
+    const auto diagonal=BistroPhysics::SpawnFootprint({{-100,0,0},{0,0,100},{100,0,0},{0,0,-100}});
+    Require(BistroPhysics::FitsFootprint(diagonal,{0,0,0},{40,1,40}) &&
+        !BistroPhysics::FitsFootprint(diagonal,{50,0,20},{20,1,20}),
+        "Angled indoor boundary admits a box whose center is inside but corner is outside");
+    const std::pair<double, size_t> cases[] = {{0,947},{0.5,947},{1,947},{1.25,1174},{2,1852},{16,14522}};
     for (const auto& [scale, expected] : cases)
-        Require(BistroPhysics::GetCount(346, scale) == expected, "Wrong spawn count");
+        Require(BistroPhysics::GetCount(905, scale, 42) == expected, "Wrong spawn count");
     for (double bad : {-1., 17., std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()})
     {
         bool rejected = false;
-        try { BistroPhysics::GetCount(346, bad); } catch (const std::exception&) { rejected = true; }
+        try { BistroPhysics::GetCount(905, bad, 42); } catch (const std::exception&) { rejected = true; }
         Require(rejected, "Invalid scale accepted");
     }
+    Require(BistroPhysics::GetCount(0,16,42)==42 && BistroPhysics::GetCount(905,16,0)==14480,
+        "Tableware multiplier depends on furniture count");
     bool rejected = false;
     try { BistroPhysics::GetCount(SIZE_MAX, 16); } catch (const std::exception&) { rejected = true; }
     Require(rejected, "Count overflow accepted");
@@ -334,6 +389,19 @@ static void CheckBoxProxies(JobSystem& jobs)
     PhysicsRayHit hit;
     Require(backend.RayCastStatic(origin + Vector3(0,120,0), {0,-150,0}, hit) && std::abs(hit.Position.y - 83) < 2,
         "Table box proxies lost or moved the supporting tabletop");
+    std::vector<SubMesh> doorway;
+    doorway.push_back(boxMesh({-125,150,0},{75,150,5},Quaternion::Identity));
+    doorway.push_back(boxMesh({125,150,0},{75,150,5},Quaternion::Identity));
+    doorway.push_back(boxMesh({0,250,0},{50,50,5},Quaternion::Identity));
+    JoltPhysicsBackend doorwayBackend;
+    doorwayBackend.Initialize(jobs,BistroPhysics::Settings());
+    PhysicsBodyDesc doorwayBody;
+    doorwayBody.Shape=BistroPhysics::StaticShape(Mesh(std::move(doorway),{}),{0,1,2});
+    Require(doorwayBackend.CreateBody(doorwayBody).IsValid() &&
+        !doorwayBackend.RayCastStatic({0,100,-100},{0,0,200},hit) &&
+        doorwayBackend.RayCastStatic({0,250,-100},{0,0,200},hit) &&
+        doorwayBackend.RayCastStatic({-100,100,-100},{0,0,200},hit),
+        "Production simplification/boxing/cooking filled a doorway or removed its lintel/pier");
     std::cout << "Bottle box containment, baked pivots, invalid input, minimum thickness and table gaps/support passed\n";
 }
 
@@ -343,6 +411,8 @@ int main(int argc, char** argv)
     {
         std::cout << std::unitbuf;
         CheckBudgets();
+        CheckFloorProbe();
+        CheckBistroStaticCollision(Require);
         CheckWaveTimeline();
         CheckWaveClock();
         const bool unitOnly = argc > 1 && std::string_view(argv[1]) == "--unit-only";
@@ -366,6 +436,7 @@ int main(int argc, char** argv)
 #ifdef JPH_ENABLE_ASSERTS
         JPH::AssertFailed = RecordJoltAssert;
 #endif
+        JPH::Trace = RecordJoltTrace;
         size_t base = 0, expected = 0;
         std::vector<std::tuple<Entity,Vector3,Vector3>> centers;
         BistroWaves::Controller waves;
@@ -375,9 +446,9 @@ int main(int argc, char** argv)
             options.bCache = true;
             const auto mesh = Engine::Core::MeshImporter::ImportSingleMeshAsset(std::filesystem::path(ASSETS_FOLDER) / "Scenes/Amazon Lumberyard Bistro" / part, options);
             Require(bool(mesh), "Missing real Bistro geometry");
-            const auto partition = PartitionBistroProps(*mesh);
+            const auto partition = PartitionBistroProps(*mesh, std::string_view(part) == "Interior/interior.obj");
             base += partition.Props.size();
-            expected += BistroPhysics::GetCount(partition.Props.size(), scale);
+            expected += BistroPhysics::GetCount(partition, scale);
             std::cout << part << ": " << partition.Props.size() << " originals; static sections=" << partition.StaticSubMeshes.size() << std::endl;
             const auto before = world.GetECS().GetPool<RigidBodyComponent>().Size();
             CreateBistroPropEntities(world, part, StaticMeshRenderComponent({},{}), *mesh, partition, jobs, &physics, &waves);
@@ -386,10 +457,26 @@ int main(int argc, char** argv)
             {
                 if (body.MotionType != PhysicsMotionType::Dynamic) return;
                 if (std::find_if(centers.begin(),centers.end(),[&](const auto& v){return std::get<0>(v)==entity;}) != centers.end()) return;
-                const Vector3 center(BistroPhysics::Bounds(*mesh,render.SubMeshIndices).Center);
-                centers.emplace_back(entity,center,center+ecs.Get<TransformComponent>(entity).Location);
+                const auto sourceBounds = BistroPhysics::Bounds(*mesh,render.SubMeshIndices);
+                if (name.value.find("_PhysicsCopy_") == std::string::npos &&
+                    (name.value.find("Table") != std::string::npos || name.value.find("Chair") != std::string::npos))
+                    for (const auto& child : std::get<CompoundShapeDesc>(ecs.Get<ColliderComponent>(entity).Shape).Geometry->Children)
+                        if (const auto* box = std::get_if<BoxShapeDesc>(&child.Shape))
+                            for (float x : {-1.f,1.f}) for (float y : {-1.f,1.f}) for (float z : {-1.f,1.f})
+                            {
+                                const auto point = Vector3::Transform(box->HalfExtent*Vector3(x,y,z),child.Rotation)+child.Position;
+                                Require(point.y >= sourceBounds.Center.y-sourceBounds.Extents.y-2 &&
+                                    point.y <= sourceBounds.Center.y+sourceBounds.Extents.y+2,
+                                    "Furniture proxy exceeds authored vertical envelope");
+                            }
+                const Vector3 center(sourceBounds.Center);
+                const auto& placement = ecs.Get<TransformComponent>(entity);
+                const auto placedRotation = Quaternion::CreateFromYawPitchRoll(XMConvertToRadians(placement.Rotation.y), XMConvertToRadians(placement.Rotation.x), XMConvertToRadians(placement.Rotation.z));
+                const auto placedCenter = Vector3::Transform(center, placedRotation)+placement.Location;
+                Require(placedCenter.y < 421 && placedCenter.y > 39, "Prop spawned outside the restaurant floor/ceiling");
+                centers.emplace_back(entity,center,placedCenter);
             });
-            Require(ecs.GetPool<RigidBodyComponent>().Size() == before + BistroPhysics::GetCount(partition.Props.size(),scale) + 1, "Lost bodies");
+            Require(ecs.GetPool<RigidBodyComponent>().Size() == before + BistroPhysics::GetCount(partition,scale) + (partition.Props.empty() ? 1 : 2), "Lost bodies");
             std::vector<unsigned> visits(mesh->GetSubMeshCount());
             ecs.ForEach<NameComponent,StaticMeshRenderComponent>([&](Entity, const NameComponent& name, const StaticMeshRenderComponent& render)
             {
@@ -398,17 +485,21 @@ int main(int argc, char** argv)
             });
             for (auto visits : visits) Require(visits == 1, "Source rendered twice or missing");
         }
-        Require(base == 379, "Bistro source object grouping changed");
+        Require(base == 947, "Bistro source object grouping changed");
+        PhysicsRayHit foundation;
+        Require(physics.RayCastStatic(world,{800,30,-650},{0,-100,0},foundation) && foundation.Position.y>=19.9f,
+            "Missing foundation below the exterior ground gap");
         auto& ecs=world.GetECS();
         ecs.ForEach<RigidBodyComponent>([](Entity,const RigidBodyComponent& body){Require(body.Body.IsValid(),"Silently missing Jolt body");});
-        size_t convexParts = 0, primitiveParts = 0, staticTriangles = 0;
+        size_t convexParts = 0, primitiveParts = 0, staticTriangles = 0, staticBoxes = 0, staticPrisms = 0, furnitureBodies = 0;
         ecs.ForEach<ColliderComponent, RigidBodyComponent>([&](Entity entity, const ColliderComponent& collider, const RigidBodyComponent& body)
         {
             if (body.MotionType == PhysicsMotionType::Dynamic)
             {
                 std::string name = ecs.Get<NameComponent>(entity).value;
                 std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-                if (name.find("liquorbottle") != std::string::npos)
+                if (!IsBistroTableware(name)) ++furnitureBodies;
+                if (IsBistroTableware(name))
                 {
                     const auto* bottle = std::get_if<CompoundShapeDesc>(&collider.Shape);
                     Require(bottle && bottle->Geometry->Children.size() == 1 &&
@@ -424,29 +515,40 @@ int main(int argc, char** argv)
             else if (const auto* convex = std::get_if<ConvexCompoundShapeDesc>(&collider.Shape))
             {
                 Require(convex->Geometry->Hulls.size() <= 12, "Collider bake exceeded the furniture hull budget");
-                convexParts += convex->Geometry->Hulls.size();
+                if (body.MotionType == PhysicsMotionType::Static) staticPrisms += convex->Geometry->Hulls.size();
+                        else convexParts += convex->Geometry->Hulls.size();
                 for (const auto& hull : convex->Geometry->Hulls)
                     Require(hull.size() <= 32, "Collider bake exceeded the hull vertex budget");
             }
             else if (const auto* compound = std::get_if<CompoundShapeDesc>(&collider.Shape))
             {
-                Require(compound->Geometry->Children.size() <= 12, "Collider bake exceeded its compound part budget");
+                Require(body.MotionType == PhysicsMotionType::Static || compound->Geometry->Children.size() <= 12, "Collider bake exceeded its compound part budget");
                 for (const auto& child : compound->Geometry->Children)
                     if (const auto* convex = std::get_if<ConvexCompoundShapeDesc>(&child.Shape))
                     {
-                        convexParts += convex->Geometry->Hulls.size();
+                        if (body.MotionType == PhysicsMotionType::Static) staticPrisms += convex->Geometry->Hulls.size();
+                        else convexParts += convex->Geometry->Hulls.size();
                         for (const auto& hull : convex->Geometry->Hulls)
                             Require(hull.size() <= 32, "Mixed collider exceeded the hull vertex budget");
                     }
+                    else if (const auto* triangle = std::get_if<TriangleMeshShapeDesc>(&child.Shape)) staticTriangles += triangle->Geometry->Triangles.size();
+                    else if (body.MotionType == PhysicsMotionType::Static) ++staticBoxes;
                     else ++primitiveParts;
             }
             else ++primitiveParts;
         });
+        Require(furnitureBodies == 42, "Count scaling duplicated furniture instead of indoor tableware");
         Require(convexParts == 0, "Bistro dynamics retained expensive convex hull parts");
         Require(staticTriangles < 3438175, "Bistro collision mesh was not simplified");
-        Require((convexParts + primitiveParts) * base < 2277 * expected, "Bistro collision bake increased the legacy part count");
+        Require(primitiveParts <= expected * 12, "Bistro dynamic part budget exceeded");
         std::cout << "Baked colliders: " << staticTriangles << " static triangles, " << convexParts
-            << " convex parts, " << primitiveParts << " primitive parts\n";
+            << " dynamic convex parts, " << primitiveParts << " dynamic primitive parts, " << staticBoxes << " static boxes, " << staticPrisms << " floor prisms\n";
+        for (const Vector3 point : {Vector3(460.402f,37.0268f,-585.395f),Vector3(614.059f,45.f,-388.402f)})
+        {
+            PhysicsRayHit inside;
+            Require(physics.RayCastStatic(world,point,{0,.1f,0},inside) && Vector3::Distance(inside.Position,point)<.01f,
+                "Cooked indoor floor lacks solid volume below its visible surface");
+        }
         DynamicBodyUpdateSystem sync(physics);
         Require(waves.ParticipantCount() == expected, "Only spawned props must opt into waves");
         float peakSpeed = 0;
@@ -458,11 +560,11 @@ int main(int argc, char** argv)
         std::vector<Vector3> previousVelocities(expected);
         float minimumScatter=FLT_MAX;
         float minimumLaunch=FLT_MAX;
-        size_t chordCrossings=0;
-        std::vector<Vector3> previousCenters;
         std::vector<bool> leftGeometry(centers.size(),false);
+        std::vector<bool> belowFloor(centers.size(),false);
+        std::vector<unsigned> belowFloorSamples(centers.size(),0);
         size_t outside=0;
-        for(const auto& item:centers) previousCenters.push_back(std::get<2>(item));
+        size_t floorPenetrations=0;
         while (waves.GetTimeline().CompletedCycles()<cycles)
         {
             Require(step++ < maxTicks,"Wave timeline exceeded bounded 5..10s intervals");
@@ -511,7 +613,7 @@ int main(int argc, char** argv)
                 peakSpeed = (std::max)(peakSpeed,v.Length());
                 Require(v.Length() <= BistroWaves::MaxSpeed + 0.1f, "Runaway wave velocity");
             });
-            Require(ecs.GetPool<RigidBodyComponent>().Size() == expected+2, "Wave changed body count");
+            Require(ecs.GetPool<RigidBodyComponent>().Size() == expected+3, "Wave changed body count");
             size_t centerIndex=0;
             for (const auto& [entity,center,start] : centers)
             {
@@ -524,21 +626,34 @@ int main(int argc, char** argv)
                 if(Vector3::Distance(c,rendered)>=0.5f) std::cout << "Pivot mismatch " << ecs.Get<NameComponent>(entity).value << " cm=" << Vector3::Distance(c,rendered) << '\n';
                 Require(Vector3::Distance(c,rendered)<0.5f,"Physics/render pivot or rotation mismatch");
                 const auto& name=ecs.Get<NameComponent>(entity).value;
-                const auto delta=c-previousCenters[centerIndex];
-                PhysicsRayHit hit;
-                if ((name.find("Bottle")!=std::string::npos || name.find("bottle")!=std::string::npos) && delta.LengthSquared()>0.000001f &&
-                    physics.RayCastStatic(world,previousCenters[centerIndex],delta,hit) && (c-hit.Position).Dot(hit.Normal)<-0.5f)
+                if (step%15==0 && !belowFloor[centerIndex])
                 {
-                    ++chordCrossings;
-                    if(chordCrossings<=3) std::cout << "Static chord intersection candidate: " << name << " t=" << step/60. << " hit=" << hit.Position.x << ',' << hit.Position.y << ',' << hit.Position.z << '\n';
+                    const auto& shape=std::get<CompoundShapeDesc>(ecs.Get<ColliderComponent>(entity).Shape);
+                    if (shape.Geometry->Children.size()==1)
+                    {
+                        const auto bodyCenter=Vector3::Transform(shape.Geometry->Children.front().Position,rotation)+p;
+                        PhysicsRayHit support;
+                        const bool under=BelowIndoorFloor(bodyCenter,[&](const Vector3& origin,PhysicsRayHit& hit)
+                        { return physics.RayCastStatic(world,origin,{0,-30,0},hit); },support);
+                        belowFloorSamples[centerIndex]=under ? belowFloorSamples[centerIndex]+1 : 0;
+                        if (belowFloorSamples[centerIndex]>=3)
+                        {
+                            belowFloor[centerIndex]=true; ++floorPenetrations;
+                            if (floorPenetrations<=3) std::cout << "Below indoor floor: " << name << " t=" << step/60.
+                                << " center=" << bodyCenter.x << ',' << bodyCenter.y << ',' << bodyCenter.z
+                                << " floor=" << support.Position.y << '\n';
+                        }
+                    }
                 }
-                if(c.y<=-1000 && !leftGeometry[centerIndex])
+                if(c.y<0 && !leftGeometry[centerIndex])
                 {
                     leftGeometry[centerIndex]=true; ++outside;
                     if(outside<=3) std::cout << "Left open geometry: " << name << " t=" << step/60. << " at=" << c.x << ',' << c.y << ',' << c.z << '\n';
                 }
-                previousCenters[centerIndex++]=c;
+                ++centerIndex;
             }
+            if (step%300==0) std::cout << "Progress: " << step << " ticks, " << waves.GetTimeline().CompletedCycles()
+                << " waves, mean physics=" << totalPhysicsMs/tickTimes.size() << " ms, escaped=" << outside << '\n';
         }
         Require(waves.GetTimeline().CompletedCycles() == cycles, "Real Bistro did not complete the requested full waves");
 #ifdef JPH_ENABLE_ASSERTS
@@ -558,7 +673,9 @@ int main(int argc, char** argv)
         std::sort(tickTimes.begin(), tickTimes.end());
         std::cout << "Physics step: threads=" << jobs.GetThreadCount() << ", mean=" << totalPhysicsMs / tickTimes.size()
             << " ms, p95=" << tickTimes[tickTimes.size() * 95 / 100] << " ms\n";
-        std::cout << "Bistro: " << base << " original objects, " << expected << " dynamic bodies, 2 static meshes, scale=" << scale << ", moved=" << moved << "; " << step << " ticks, " << cycles << " full waves, peak speed=" << peakSpeed << " cm/s, minimum applied scatter=" << minimumScatter << " cm/s, minimum launch=" << minimumLaunch << ", outside modeled geometry=" << outside << ", static chord candidates=" << chordCrossings << " passed\n";
+        Require(outside == 0, "Physical props escaped below the modeled floor");
+        Require(floorPenetrations == 0, "Tableware penetrated the indoor floor onto the foundation");
+        std::cout << "Bistro: " << base << " original objects, " << expected << " dynamic bodies, 3 static bodies, scale=" << scale << ", moved=" << moved << "; " << step << " ticks, " << cycles << " full waves, peak speed=" << peakSpeed << " cm/s, minimum applied scatter=" << minimumScatter << " cm/s, minimum launch=" << minimumLaunch << ", outside modeled geometry=" << outside << " passed\n";
         return 0;
     }
     catch(const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

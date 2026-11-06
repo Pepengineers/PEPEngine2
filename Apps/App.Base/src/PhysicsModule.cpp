@@ -47,6 +47,13 @@ bool PhysicsModule::OverlapsBox(World& world, const Vector3& center, const Vecto
     return physics->OverlapsBox(center, halfExtent);
 }
 
+bool PhysicsModule::OverlapsBody(World& world, const PhysicsBodyDesc& desc)
+{
+    auto* physics = GetPhysics(world);
+    if (!physics) throw std::logic_error("World has no physics backend");
+    return physics->OverlapsBody(desc);
+}
+
 bool PhysicsModule::RayCastStatic(World& world, const Vector3& origin, const Vector3& displacement, PhysicsRayHit& hit) const
 {
     auto* physics = GetPhysics(world);

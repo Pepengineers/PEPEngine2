@@ -8,7 +8,7 @@
 namespace JPH
 {
     class PhysicsSystem;
-    class TempAllocatorImpl;
+    class TempAllocatorImplWithMallocFallback;
 }
 
 class JobSystem;
@@ -28,6 +28,8 @@ public:
 
     void Initialize(JobSystem& jobs, const PhysicsWorldSettings& settings = {});
     bool OverlapsBox(const DirectX::SimpleMath::Vector3& center, const DirectX::SimpleMath::Vector3& halfExtent) const;
+    // Serial loading query: movable shapes only, tested against static and dynamic bodies.
+    bool OverlapsBody(const PhysicsBodyDesc& desc);
     bool RayCastStatic(const DirectX::SimpleMath::Vector3& origin, const DirectX::SimpleMath::Vector3& displacement, PhysicsRayHit& hit) const;
     void Uninitialize();
 
@@ -48,7 +50,7 @@ private:
 
     std::unique_ptr<JPH::PhysicsSystem> _physicsSystem;
 
-    std::unique_ptr<JPH::TempAllocatorImpl> _tempAllocator;
+    std::unique_ptr<JPH::TempAllocatorImplWithMallocFallback> _tempAllocator;
     std::unique_ptr<JoltJobSystem> _jobSystem;
     std::shared_ptr<JoltRuntime> _runtime;
     std::unique_ptr<JoltShapeCache> _shapeCache;

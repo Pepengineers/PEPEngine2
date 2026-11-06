@@ -80,7 +80,7 @@ int main(int argc, char** argv)
             interior |= name.value == "Interior_interior";
         });
         check(exterior && interior, "Bistro Exterior and Interior entities must both be present");
-        check(ecs.GetPool<RigidBodyComponent>().Size() == 381, "Bistro must retain its 379 original physical props");
+        check(ecs.GetPool<RigidBodyComponent>().Size() == 950, "Bistro must retain its 947 interior physical props");
         check(ecs.GetPool<ParticleEmitterComponent>().Size() == 8, "Bistro must have eight effect emitters");
         UINT particleBudget = 0;
         ecs.ForEach<ParticleEmitterComponent, TransformComponent>([&](Entity entity, const ParticleEmitterComponent& emitter, const TransformComponent& transform)
@@ -264,7 +264,7 @@ int main(int argc, char** argv)
             }
         if (passed) std::cout << "Bistro effects: eight emitters, mesh fireflies, 1x/4x/fraction/<=0 scales and 90 frames with no debug-layer errors passed.\n";
         if (passed) std::cout << "Background rendering: defaults, runtime CVar, focus, minimize and resize passed.\n";
-        if (passed) std::cout << "Bistro startup: both scene parts, 379 physical props and stable entrance camera passed.\n";
+        if (passed) std::cout << "Bistro startup: both scene parts, 947 interior physical props and stable entrance camera passed.\n";
         if (passed) std::cout << "Image quality UI: automatic enum discovery, draw data, F1 and keyboard/mouse capture passed.\n";
         return passed ? 0 : 1;
     }
