@@ -66,3 +66,10 @@ Engine/Engine.RendererDX12/Shaders/PDBs/
 *.DotSettings.user
 
 *.pdb
+
+# Local clangd/Serena index; retain the portable project settings.
+/compile_commands.json
+/compile_commands.json.tmp
+/.cache/clangd/
+/.serena/*
+!/.serena/project.yml

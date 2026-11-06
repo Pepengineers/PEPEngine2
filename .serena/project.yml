@@ -1,0 +1,34 @@
+project_name: PEPEngine2
+language_servers:
+- cpp
+encoding: utf-8
+ignore_all_files_in_gitignore: true
+ignored_paths:
+- .tmp
+- .worktrees
+- External
+- Assets
+read_only: false
+initial_prompt: C++ compile_commands.json is generated from evaluated Debug/x64 MSBuild
+  settings by tools/Generate-CompileCommands.py. Regenerate after project flags or
+  source lists change. Use scoped symbol queries; shaders are not indexed by this
+  C++ server.
+default_modes: null
+added_modes: null
+included_apis: []
+excluded_apis: []
+excluded_tools: []
+included_optional_tools: []
+fixed_tools: []
+symbol_info_budget: null
+language_backend: null
+agent_interface: null
+line_ending: null
+read_only_memory_patterns: []
+ignored_memory_patterns: []
+ls_specific_settings: {}
+ls_workspace_folders:
+- .
+ls_additional_workspace_folders: []
+activation_command: null
+activation_command_timeout: 180.0
