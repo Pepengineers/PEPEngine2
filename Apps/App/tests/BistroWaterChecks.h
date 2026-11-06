@@ -28,9 +28,11 @@ inline void CheckBistroWaterCounts(World& world, Frame&& frame)
         seed = fluid.GetParticles();
         const auto& settings = fluid.GetSettings();
         ValidateFluidSettings(settings);
-        require(seed && seed->size() == 512 && settings.SimulationEnabled && settings.RenderEnabled,
-            "Bistro water must contain 512 live solver/render particles");
-        require(transform.Location == Vector3(-410,41.3f,-100), "Bistro water must sit outside the doorway");
+        require(seed && seed->size() == 1024 && settings.SimulationEnabled && settings.RenderEnabled,
+            "Bistro water must contain 1024 live solver/render particles");
+        require(transform.Location == BistroWater::Center && transform.Rotation.y == BistroWater::YawDegrees &&
+            settings.ContainerHalfExtentCm == BistroWater::HalfExtent,
+            "Bistro water must span the side street beside the hedge");
         for (const auto& particle : *seed)
             require(std::abs(particle.Position.x) + settings.ParticleRadiusCm < settings.ContainerHalfExtentCm.x &&
                 std::abs(particle.Position.y) + settings.ParticleRadiusCm < settings.ContainerHalfExtentCm.y &&
@@ -55,10 +57,27 @@ inline void CheckBistroWaterCounts(World& world, Frame&& frame)
     });
     require(sharedMesh.IsValid(), "Bistro basin entity missing");
     world.SetPaused(true);
+    const auto pausedAcceleration = ecs.Get<FluidRenderComponent>(first).GetSettings().AccelerationCmPerSecond2;
+    const auto resetRevision = ecs.Get<FluidRenderComponent>(first).GetResetRevision();
+    const auto settingsRevision = ecs.Get<FluidRenderComponent>(first).GetSettingsRevision();
     frame();
-    require(ecs.IsAlive(first) && ecs.Get<FluidRenderComponent>(first).GetParticles() == seed,
+    require(ecs.IsAlive(first) && ecs.Get<FluidRenderComponent>(first).GetParticles() == seed &&
+        ecs.Get<FluidRenderComponent>(first).GetSettings().AccelerationCmPerSecond2 == pausedAcceleration,
         "Paused water must keep its seed and entity");
     world.SetPaused(false);
+    frame();
+    require(ecs.Get<FluidRenderComponent>(first).GetSettings().AccelerationCmPerSecond2 != pausedAcceleration &&
+        ecs.Get<FluidRenderComponent>(first).GetResetRevision() == resetRevision &&
+        ecs.Get<FluidRenderComponent>(first).GetSettingsRevision() == settingsRevision &&
+        ecs.Get<FluidRenderComponent>(first).GetParticles() == seed,
+        "Waves must animate the live solver without resetting its particles");
+    auto& live = ecs.Get<FluidRenderComponent>(first);
+    const auto validAcceleration = live.GetSettings().AccelerationCmPerSecond2;
+    bool rejected = false;
+    try { live.SetAcceleration(Vector3(1e8f,0,0)); }
+    catch (const std::invalid_argument&) { rejected = true; }
+    require(rejected && live.GetSettings().AccelerationCmPerSecond2 == validAcceleration,
+        "Wave forces must reject invalid acceleration without changing the live solver");
     require(BistroWater::Count.SetFromString("2"), "Bistro water growth rejected");
     frame();
     require(ecs.GetPool<FluidRenderComponent>().Size() == 2 &&

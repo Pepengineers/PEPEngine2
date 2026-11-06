@@ -2,6 +2,7 @@
 
 #include "BistroProps.h"
 #include "BistroArch.h"
+#include "BistroWaterLayout.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "App.Base/Modules/RenderModule.h"
@@ -13,11 +14,11 @@ namespace BistroParticles
     inline AutoConsoleVariable<int> Count(L"App.Particles.Count", -1,
         L"Total live Bistro particles: -1 uses CountScale, 0 disables, maximum 4194304",
         EConsoleVariableFlags::Default, [](int value) { return value >= -1 && value <= 4194304; });
-    inline AutoConsoleVariable<double> CountScale(L"App.Particles.CountScale", 1.0,
+    inline AutoConsoleVariable<double> CountScale(L"App.Particles.CountScale", 2.0,
         L"Multiply authored Bistro particle counts; <=0 uses 1, maximum 4194304/250000",
         EConsoleVariableFlags::Default, [](double value) { return value <= 4194304.0 / 250000; });
-    inline AutoConsoleVariable<ParticleSimulation> Simulation(L"App.Particles.Simulation", ParticleSimulation::AnalyticDrag,
-        L"0 analytic drag + trapezoidal position (authored default), 1 MGPU semi-implicit Euler");
+    inline AutoConsoleVariable<ParticleSimulation> Simulation(L"App.Particles.Simulation", ParticleSimulation::SemiImplicitEuler,
+        L"0 analytic drag + trapezoidal position, 1 MGPU semi-implicit Euler (default)");
     inline AutoConsoleVariable<bool> VolumeEnabled(L"App.Particles.Volume.Enabled", false,
         L"Override unbound emitters with box spawn and a reflecting emitter-local simulation volume; Dust/Steam use App.Bounds");
     inline AutoConsoleVariable<float> VolumeHalfExtentX(L"App.Particles.Volume.HalfExtentX", 100.0f,
@@ -187,14 +188,16 @@ namespace BistroParticles
 
         settings = {};
         settings.LifetimeMin = 3; settings.LifetimeMax = 7;
-        settings.Direction = Vector3(0, -1, 0); settings.ConeAngleDegrees = 12;
-        settings.SpeedMin = 20; settings.SpeedMax = 65;
-        settings.Shape = ParticleShape::Box; settings.ShapeExtents = Vector3(180, 10, 140);
-        settings.Acceleration = Vector3(0, -30, 0); settings.Wind = Vector3(25, 0, 8); settings.Drag = 0.4f;
+        settings.Direction = Vector3(0, -1, 0); settings.ConeAngleDegrees = 0;
+        settings.SpeedMin = 120; settings.SpeedMax = 180;
+        settings.Shape = ParticleShape::Box;
+        settings.ShapeExtents = Vector3(BistroWater::HalfExtent.x, 10, BistroWater::HalfExtent.z);
+        settings.Acceleration = Vector3(0, -300, 0); settings.Wind = Vector3::Zero; settings.Drag = 0.05f;
         settings.SizeStart = 3; settings.SizeEnd = 1; settings.AngularVelocity = 3;
         settings.ColorStart = Vector4(2, 0.3f, 1, 0.3f); settings.ColorEnd = Vector4(0.5f, 0.05f, 0.2f, 0);
         settings.Blend = ParticleBlend::Additive; settings.DepthCollision = true;
-        create("BistroSparkRain", {-650, 300, -120}, 1, settings);
+        auto rain = create("BistroSparkRain", BistroWater::Center + Vector3(0, 300, 0), 1, settings);
+        rain.GetComponent<TransformComponent>().Rotation.y = BistroWater::YawDegrees;
         if (weightSum != 16) throw std::logic_error("Bistro particle weights must sum to 16");
         Update(world);
     }

@@ -28,8 +28,9 @@ RWTexture2D<float4> ColorOut : register(u5);
 float3 Ray(float2 pixel)
 {
     float2 ndc = pixel / Size * float2(2, -2) + float2(-1, 1);
-    float4 world = mul(float4(ndc, 1, 1), Camera.InvViewProj);
-    return normalize(world.xyz / world.w - Camera.CameraLocation);
+    // Homogeneous far rays avoid subtracting nearly equal world-space near points.
+    float4 world = mul(float4(ndc, 0, 1), Camera.InvViewProj);
+    return normalize(world.xyz - Camera.CameraLocation * world.w);
 }
 float3 WorldAt(float2 pixel, float eyeDepth)
 {

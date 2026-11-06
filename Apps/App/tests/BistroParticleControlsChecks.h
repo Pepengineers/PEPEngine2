@@ -10,7 +10,8 @@ inline void CheckBistroParticleControls()
         if (!condition) throw std::runtime_error(message);
     };
     using namespace BistroParticles;
-    require(Count.GetValue() == -1 && CountScale.GetValue() == 1 && !VolumeEnabled.GetValue(),
+    require(Count.GetValue() == -1 && CountScale.GetValue() == 2 && !VolumeEnabled.GetValue() &&
+        Simulation.GetValue() == ParticleSimulation::SemiImplicitEuler,
         "Particle controls must preserve authored defaults");
     require(!Count.SetFromString("-2") && !Count.SetFromString("4194305") && !Count.SetFromString("1.5") &&
         !Simulation.SetFromString("2") && !VolumeHalfExtentX.SetFromString("0") &&
@@ -43,7 +44,19 @@ inline void CheckBistroParticleControls()
         });
         return result;
     };
-    require(budget() == 250000, "Default authored particle total changed");
+    require(budget() == 500000, "Bistro must double the authored particle budget");
+    world.GetECS().ForEach<NameComponent, TransformComponent, ParticleEmitterComponent>(
+        [&](Entity, const NameComponent& name, const TransformComponent& transform, const ParticleEmitterComponent& emitter)
+        {
+            if (name.value != "BistroSparkRain") return;
+            const auto& settings = emitter.GetSettings();
+            require(transform.Location == BistroWater::Center + Vector3(0,300,0) &&
+                transform.Rotation.y == BistroWater::YawDegrees &&
+                settings.ShapeExtents == Vector3(BistroWater::HalfExtent.x,10,BistroWater::HalfExtent.z) &&
+                settings.Simulation == ParticleSimulation::SemiImplicitEuler &&
+                settings.ConeAngleDegrees == 0 && settings.Wind == Vector3::Zero,
+                "Rain must fall over the pool's exact rotated footprint using MGPU integration");
+        });
     require(CountScale.SetFromString("0.5"), "Particle count scale rejected");
     Update(world);
     require(budget() == 125000, "Inherited particle count scale changed");
@@ -97,6 +110,8 @@ inline void CheckBistroParticleControls()
         require(emitter.GetSettings().Shape == effect.AuthoredShape && emitter.GetSettings().ShapeExtents == effect.AuthoredExtents &&
             emitter.GetSettings().VolumeEnabled == effect.LayoutVolume, "Disabling the volume must preserve authored confinement");
     });
-    require(budget() == 250000 && VolumeHalfExtentX.SetFromString("100") &&
+    require(CountScale.SetFromString("2") && Simulation.SetFromString("1"), "Particle defaults restore failed");
+    Update(world);
+    require(budget() == 500000 && VolumeHalfExtentX.SetFromString("100") &&
         VolumeHalfExtentY.SetFromString("100") && VolumeHalfExtentZ.SetFromString("100"), "Particle defaults restore failed");
 }

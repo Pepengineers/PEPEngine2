@@ -24,8 +24,9 @@ inline void CheckBistroBounds(BistroApp& app, World& world)
                 require(transform.Location == Vector3(-170,45,-170) && emitter.GetSettings().ShapeExtents == Vector3(8,2,8),
                     "Bounds editing must not change the real emitter");
         });
-    require(console.FindConsoleVariable(L"App.Bounds.BistroWater0.CenterY").GetFloat() == 41.3f &&
-        console.FindConsoleVariable(L"App.Bounds.BistroWater0.HalfExtentX").GetFloat() == 44,
+    require(console.FindConsoleVariable(L"App.Bounds.BistroWater0.CenterY").GetFloat() == BistroWater::Center.y &&
+        std::abs(console.FindConsoleVariable(L"App.Bounds.BistroWater0.HalfExtentX").GetFloat() -
+            (BistroWater::HalfExtent.x + BistroWater::HalfExtent.z) * std::sqrt(0.5f)) < 0.01f,
         "Water bounds must use the fluid container");
     require(console.FindConsoleVariable(L"App.Bounds.BistroGrass0.HalfExtentY").GetFloat() > 15,
         "Grass bounds must include blade height and wind displacement");

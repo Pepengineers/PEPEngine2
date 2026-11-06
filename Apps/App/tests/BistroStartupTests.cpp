@@ -102,7 +102,7 @@ int main(int argc, char** argv)
                 if (!checkDebugLayer || debugResult != E_NOINTERFACE) ThrowIfFailed(debugResult);
             }
         });
-        check(particleBudget == 250000, "Default Bistro budget must be 250000 particles");
+        check(particleBudget == 500000, "Default Bistro budget must be 500000 particles");
         if (checkDebugLayer)
         {
             const bool expected = argc > 2 && std::strcmp(argv[2], "-d3ddebug") == 0;

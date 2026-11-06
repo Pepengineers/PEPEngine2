@@ -52,6 +52,8 @@ class GDX12FluidComponent
 public:
     const GDX12FluidSettings& GetSettings() const { return _settings; }
     void SetSettings(const GDX12FluidSettings& settings);
+    // Continuous forces preserve the live solver and temporal surface history.
+    void SetAcceleration(Vector3 acceleration);
     void SetParticles(std::vector<GDX12FluidParticle> particles);
     const std::shared_ptr<const std::vector<GDX12FluidParticle>>& GetParticles() const { return _particles; }
     void Reset() { ++_resetRevision; }

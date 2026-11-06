@@ -8,7 +8,9 @@
 #include "Engine.Core/AssetManager.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Common/ConsoleVariables.h"
+#include "BistroWaterLayout.h"
 #include <array>
+#include <cmath>
 #include <vector>
 
 namespace BistroWater
@@ -20,10 +22,22 @@ namespace BistroWater
     class Scene
     {
     public:
-        void Update(World& world, float)
+        void Update(World& world, float deltaSeconds)
         {
             RegisterBistroWaterComponents(world);
             auto& ecs = world.GetECS();
+            if (!world.IsPaused() && deltaSeconds > 0 && world.GetTimeScale() > 0)
+            {
+                _waveTime += deltaSeconds * world.GetTimeScale();
+                const auto rotation = Matrix::CreateRotationY(XMConvertToRadians(YawDegrees));
+                for (const auto& basin : _basins)
+                {
+                    auto& fluid = ecs.Get<FluidRenderComponent>(basin.Water);
+                    // Drive the SPH solver continuously; pressure and wall collisions form the waves.
+                    fluid.SetAcceleration(Vector3::TransformNormal(
+                        Vector3(90 * std::cos(_waveTime * 1.1f), -981, 65 * std::sin(_waveTime * 1.7f)), rotation));
+                }
+            }
             const size_t requested = static_cast<size_t>(Count.GetValue());
             while (_basins.size() > requested)
             {
@@ -40,15 +54,17 @@ namespace BistroWater
             while (_basins.size() < requested)
             {
                 const size_t index = _basins.size();
-                // Exterior sidewalk is 23.162 cm high here; the basin base sits at 23.3 cm.
-                const Vector3 position(-410.0f, 41.3f, -100.0f - 160.0f * static_cast<float>(index));
+                const auto offset = Vector3::TransformNormal(Vector3(0, 0,
+                    -(2 * HalfExtent.z + 80) * static_cast<float>(index)),
+                    Matrix::CreateRotationY(XMConvertToRadians(YawDegrees)));
+                const auto position = Center + offset;
                 auto basin = ecs.CreateEntity();
                 basin.AddComponent<NameComponent>("BistroWaterBasin" + std::to_string(index));
-                basin.AddComponent<TransformComponent>(position);
+                basin.AddComponent<TransformComponent>(position, Vector3(0, YawDegrees, 0));
                 basin.AddComponent<StaticMeshRenderComponent>(_mesh, _materials);
                 auto water = ecs.CreateEntity();
                 water.AddComponent<NameComponent>("BistroWater" + std::to_string(index));
-                water.AddComponent<TransformComponent>(position);
+                water.AddComponent<TransformComponent>(position, Vector3(0, YawDegrees, 0));
                 static_cast<GDX12FluidComponent&>(water.AddComponent<FluidRenderComponent>()) = _source;
                 _basins.push_back({water.GetId(), basin.GetId()});
             }
@@ -83,12 +99,12 @@ namespace BistroWater
                     for (UINT offset : {0u, 1u, 2u, 0u, 2u, 3u}) part.Indices.push_back(first + offset);
                 }
             };
-            box({0,-16,0}, {52,2,52});
-            box({-48,0,0}, {4,14,52});
-            box({48,0,0}, {4,14,52});
-            box({0,0,-48}, {44,14,4});
-            box({0,0,48}, {44,14,4});
-            part.Bounds = {{0,-2,0}, {52,16,52}};
+            box({0,-HalfExtent.y-2,0}, {HalfExtent.x+8,2,HalfExtent.z+8});
+            box({-HalfExtent.x-4,0,0}, {4,HalfExtent.y,HalfExtent.z+8});
+            box({HalfExtent.x+4,0,0}, {4,HalfExtent.y,HalfExtent.z+8});
+            box({0,0,-HalfExtent.z-4}, {HalfExtent.x,HalfExtent.y,4});
+            box({0,0,HalfExtent.z+4}, {HalfExtent.x,HalfExtent.y,4});
+            part.Bounds = {{0,-2,0}, {HalfExtent.x+8,HalfExtent.y+2,HalfExtent.z+8}};
             part.SourceNodeName = "BistroWaterBasin";
             Engine::Core::MeshMaterial material;
             material.Name = "BistroWaterStone";
@@ -114,14 +130,14 @@ namespace BistroWater
             else _materials = WorldLoader::BuildMaterialSlots(render, *mesh, "BistroWaterBasin");
 
             GDX12FluidSettings settings;
-            settings.ParticleRadiusCm = 3;
-            settings.SmoothingRadiusCm = 9;
-            settings.ParticleMassKg = 0.125f;
-            settings.ContainerHalfExtentCm = {44,14,44};
-            settings.MaxSubsteps = 4;
-            settings.MaxSpeedCmPerSecond = 180;
-            settings.MaxAccelerationCmPerSecond2 = 3000;
-            settings.PressureStiffnessCm2PerSecond2 = 10000;
+            settings.ParticleRadiusCm = 18;
+            settings.SmoothingRadiusCm = 54;
+            settings.ParticleMassKg = 11.904f;
+            settings.ContainerHalfExtentCm = HalfExtent;
+            settings.MaxSubsteps = 32;
+            settings.MaxSpeedCmPerSecond = 300;
+            settings.MaxAccelerationCmPerSecond2 = 6000;
+            settings.PressureStiffnessCm2PerSecond2 = 40000;
             settings.ViscosityCm2PerSecond = 12;
             settings.Restitution = 0.05f;
             settings.FilterIterations = 2;
@@ -130,11 +146,12 @@ namespace BistroWater
             settings.ScatteringColor = {0.02f,0.12f,0.16f};
             _source.SetSettings(settings);
             std::vector<GDX12FluidParticle> particles;
-            particles.reserve(512);
+            particles.reserve(1024);
             for (UINT y = 0; y < 2; ++y)
-                for (UINT z = 0; z < 16; ++z)
+                for (UINT z = 0; z < 32; ++z)
                     for (UINT x = 0; x < 16; ++x)
-                        particles.push_back({{5.0f * x - 37.5f, 5.0f * y - 5.0f, 5.0f * z - 37.5f}, {}});
+                        particles.push_back({{32.0f * x - 240, 24.0f * y - 19, 15.5f * z - 240.25f},
+                            {35, 15 * std::sin(x * 0.4f + z * 0.3f), 20}});
             _source.SetParticles(std::move(particles));
         }
 
@@ -143,5 +160,6 @@ namespace BistroWater
         Engine::Core::MeshHandle _mesh;
         std::vector<GDX12Material*> _materials;
         GDX12FluidComponent _source;
+        float _waveTime = 0;
     };
 }

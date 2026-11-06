@@ -69,6 +69,14 @@ void GDX12FluidComponent::SetSettings(const GDX12FluidSettings& settings)
     ++_settingsRevision;
 }
 
+void GDX12FluidComponent::SetAcceleration(const Vector3 acceleration)
+{
+    auto settings = _settings;
+    settings.AccelerationCmPerSecond2 = acceleration;
+    ValidateFluidSettings(settings);
+    _settings.AccelerationCmPerSecond2 = acceleration;
+}
+
 void GDX12FluidComponent::SetParticles(std::vector<GDX12FluidParticle> particles)
 {
     if (particles.size() > 1048576) throw std::invalid_argument("Fluid seed exceeds 1048576 particles");

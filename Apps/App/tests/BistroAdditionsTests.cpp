@@ -275,6 +275,9 @@ int main(int argc, char** argv)
         const bool fountainsOnly = argc > 1 && std::strcmp(argv[1], "--fountains-only") == 0;
         const bool archSmoke = argc > 1 && std::strcmp(argv[1], "--arch-smoke") == 0;
         if (archSmoke) Set(L"App.ReflectionProbes.ShowSpheres", "false");
+        const bool waterSmoke = argc > 1 && std::strcmp(argv[1], "--water-smoke") == 0;
+        if (waterSmoke)
+            Set(L"App.ReflectionProbes.ShowSpheres", "false");
         Require(fountainsOnly || (!BistroBounds::Show.GetValue() && !BistroReflections::ShowBounds.GetValue() &&
             !BistroReflections::ShowSpheres.GetValue()), "Bistro debug geometry must be hidden by default");
         Require(BistroPhysics::CountScale.GetValue() == 1.0, "Bistro must default to the original 1x object count");
@@ -292,10 +295,10 @@ int main(int argc, char** argv)
         ComPtr<ID3D12Debug5> names;
         if (SUCCEEDED(debug.As(&names))) names->SetEnableAutoName(TRUE);
         CheckBistroCharacterCounts();
-        CheckBistroParticleControls();
+        if (!waterSmoke) CheckBistroParticleControls();
         BistroApp app(GetModuleHandleW(nullptr));
         Require(app.Initialize(), "Bistro additions initialization failed");
-        CheckBistroGrassCounts();
+        if (!waterSmoke) CheckBistroGrassCounts();
         ShowWindow(app.GetWindow()->GetWindowHandle(), SW_HIDE);
         auto render = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
         auto& world = *BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()->GetWorld();
@@ -374,6 +377,71 @@ int main(int argc, char** argv)
                 Require(message->Severity > D3D12_MESSAGE_SEVERITY_ERROR, message->pDescription);
             }
             std::cout << "Bistro fountains: 60 entrance frames, finite HDR and clean D3D12 debug layer passed.\n";
+            return 0;
+        }
+        if (waterSmoke)
+        {
+            CheckBistroWaterCounts(world, [&] { app.BenchmarkFrame(1.0 / 60); });
+            UINT budget = 0;
+            world.GetECS().ForEach<NameComponent, TransformComponent, ParticleEmitterComponent>(
+                [&](Entity, const NameComponent& name, const TransformComponent& transform, const ParticleEmitterComponent& emitter)
+                {
+                    const auto& settings = emitter.GetSettings();
+                    if (emitter.IsEnabled()) budget += settings.MaxParticles;
+                    if (name.value != "BistroSparkRain") return;
+                    Require(transform.Location == BistroWater::Center + Vector3(0,300,0) &&
+                        transform.Rotation.y == BistroWater::YawDegrees &&
+                        settings.ShapeExtents == Vector3(BistroWater::HalfExtent.x,10,BistroWater::HalfExtent.z) &&
+                        settings.Simulation == ParticleSimulation::SemiImplicitEuler,
+                        "Rain must cover the pool using MGPU integration");
+                });
+            Require(budget == 500000, "Bistro must double its particle budget");
+            Set(L"App.Bounds.Show", "false");
+            Set(L"App.ReflectionProbes.ShowSpheres", "false");
+            Set(L"Render.Upscaler.Provider", "0");
+            Set(L"Render.MotionBlur.Enabled", "false");
+            Set(L"Render.DOF.Enabled", "false");
+            Aim(world, BistroWater::Center + Vector3(0,900,25), BistroWater::Center);
+            for (int frame = 0; frame < 180; ++frame)
+            {
+                app.BenchmarkFrame(1.0 / 60);
+                if (frame == 0 || frame == 60 || frame == 179)
+                {
+                    render->WaitForUploads();
+                    auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+                    SaveImage(ReadHDR(*output), output->GetWidth(), output->GetHeight(),
+                        frame == 0 ? "pool-start" : frame == 60 ? "pool-waves-1s" : "pool-waves-3s");
+                }
+            }
+            world.SetPaused(true);
+            Set(L"Render.Particles.Enabled", "false");
+            app.BenchmarkFrame(1.0 / 60);
+            render->WaitForUploads();
+            auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+            const auto on = ReadHDR(*output);
+            Set(L"Render.Fluid.Enabled", "false");
+            app.BenchmarkFrame(1.0 / 60);
+            render->WaitForUploads();
+            output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+            const auto off = ReadHDR(*output);
+            size_t changed = 0;
+            for (size_t i = 0; i < on.size(); i += 4)
+                if (on[i] != off[i] || on[i+1] != off[i+1] || on[i+2] != off[i+2]) ++changed;
+            Require(changed > 1000, "Street pool must contribute visible water pixels");
+            ComPtr<ID3D12Device> device;
+            ComPtr<ID3D12InfoQueue> info;
+            ThrowIfFailed(output->GetResource()->D3DResource->GetDevice(IID_PPV_ARGS(&device)));
+            ThrowIfFailed(device.As(&info));
+            for (UINT64 index = 0; index < info->GetNumStoredMessages(); ++index)
+            {
+                SIZE_T bytes = 0; info->GetMessage(index, nullptr, &bytes);
+                std::vector<BYTE> storage(bytes);
+                auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+                ThrowIfFailed(info->GetMessage(index, message, &bytes));
+                Require(message->Severity > D3D12_MESSAGE_SEVERITY_ERROR, message->pDescription);
+            }
+            std::cout << "Street pool: 180 GPU frames, wave/pause/count checks, " << changed
+                << " water pixels, finite HDR and clean D3D12 validation passed.\n";
             return 0;
         }
         if (argc > 1 && std::strcmp(argv[1], "--waves-smoke") == 0)
