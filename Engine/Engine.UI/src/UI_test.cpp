@@ -212,7 +212,9 @@ namespace Engine::UI
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
         FrameBegun = true;
+#if defined(_DEBUG)
         DrawSettings();
+#endif
     }
 
     void DrawWorldBox(const DirectX::BoundingBox& box, const DirectX::XMFLOAT4X4& viewProjection,
@@ -300,7 +302,9 @@ namespace Engine::UI
     {
         if (!ImGui::GetCurrentContext()) return false;
         const bool handled = ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam) != 0;
+#if defined(_DEBUG)
         if (message == WM_KEYUP && wParam == VK_F1) { Visible = !Visible; return true; }
+#endif
         const auto& io = ImGui::GetIO();
         return handled || (Visible && ((message >= WM_MOUSEFIRST && message <= WM_MOUSELAST && io.WantCaptureMouse) ||
             (message >= WM_KEYFIRST && message <= WM_KEYLAST && io.WantCaptureKeyboard)));
