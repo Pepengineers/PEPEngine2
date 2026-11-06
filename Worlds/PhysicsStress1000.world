@@ -1,7 +1,7 @@
-# Physics stress test: 1000 dynamic primitives, 32 static bodies and 7 kinematic bodies.
+# Physics stress test: 1000 dynamic primitives, 1 dynamic triangle mesh, 32 static bodies and 7 kinematic bodies.
 # The upper floor feeds two chutes with a 7-unit outlet above the enclosed rotary mill.
 # 10 x 10 x 10 grid: 25 rows of 10 bodies for each of the four shapes.
-# 1039 scene bodies / 2048 body capacity.
+# 1040 scene bodies / 2048 body capacity.
 # Six floor lanes traverse a two-point closed spline: 3 seconds each way.
 World:
   Name: PhysicsStress1000World
@@ -150,6 +150,8 @@ World:
         Source: Assets/Textures/PhysicsStress/Pastel63.png
       - Id: StressPastel64Texture
         Source: Assets/Textures/PhysicsStress/Pastel64.png
+      - Id: SvidetelDiffuse
+        Source: Assets/Textures/friazino_diff.png
     Materials:
       - Id: StressPastel01
         Diffuse: StressPastel01Texture
@@ -279,6 +281,8 @@ World:
         Diffuse: StressPastel63Texture
       - Id: StressPastel64
         Diffuse: StressPastel64Texture
+      - Id: SvidetelMaterial
+        Diffuse: SvidetelDiffuse
     Meshes:
       - Id: StressCubeMesh
         Source: Assets/Models/PhysicsSandbox/UnitCube.obj
@@ -301,6 +305,9 @@ World:
         Source: Assets/Models/PhysicsStress/GuardPanel.obj
         SubmitToRenderer: true
         ImportMaterials: true
+      - Id: SvidetelMesh
+        Source: Assets/Models/Svidetel.fbx
+        SubmitToRenderer: true
 
   Entities:
     - Id: CatchFloor
@@ -1045,6 +1052,23 @@ World:
           Playing: true
           Time: 0.0
           UpdateMode: Fixed
+
+    - Id: Svidetel
+      Components:
+        Name:
+          Value: Svidetel
+        Transform:
+          Location: [100, 86, -10.5]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
 
     - Id: FallingCube0000
       Components:
