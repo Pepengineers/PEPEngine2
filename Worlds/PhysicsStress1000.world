@@ -1,7 +1,7 @@
-# Physics stress test: 1000 dynamic primitives, 1 dynamic triangle mesh, 32 static bodies and 7 kinematic bodies.
+# Physics stress test: 1000 dynamic primitives, 11 dynamic triangle meshes, 32 static bodies and 7 kinematic bodies.
 # The upper floor feeds two chutes with a 7-unit outlet above the enclosed rotary mill.
 # 10 x 10 x 10 grid: 25 rows of 10 bodies for each of the four shapes.
-# 1040 scene bodies / 2048 body capacity.
+# 1050 scene bodies / 2048 body capacity.
 # Six floor lanes traverse a two-point closed spline: 3 seconds each way.
 World:
   Name: PhysicsStress1000World
@@ -1059,6 +1059,176 @@ World:
           Value: Svidetel
         Transform:
           Location: [100, 86, -10.5]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: Svidetel01
+      Components:
+        Name:
+          Value: Svidetel01
+        Transform:
+          Location: [98, 80.5, -6]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: Svidetel02
+      Components:
+        Name:
+          Value: Svidetel02
+        Transform:
+          Location: [98, 80.5, -1.75]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: Svidetel03
+      Components:
+        Name:
+          Value: Svidetel03
+        Transform:
+          Location: [98, 80.5, 2.5]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: Svidetel04
+      Components:
+        Name:
+          Value: Svidetel04
+        Transform:
+          Location: [98, 80.5, 6.75]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: Svidetel05
+      Components:
+        Name:
+          Value: Svidetel05
+        Transform:
+          Location: [98, 80.5, 11]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: Svidetel06
+      Components:
+        Name:
+          Value: Svidetel06
+        Transform:
+          Location: [103, 80.5, -6]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: Svidetel07
+      Components:
+        Name:
+          Value: Svidetel07
+        Transform:
+          Location: [103, 80.5, -1.75]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: Svidetel08
+      Components:
+        Name:
+          Value: Svidetel08
+        Transform:
+          Location: [103, 80.5, 2.5]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: Svidetel09
+      Components:
+        Name:
+          Value: Svidetel09
+        Transform:
+          Location: [103, 80.5, 6.75]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Dynamic
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: Svidetel10
+      Components:
+        Name:
+          Value: Svidetel10
+        Transform:
+          Location: [103, 80.5, 11]
           Rotation: [0, 163, 0]
           Scale: [0.05670802, 0.05670802, 0.05670802]
         RigidBody:
