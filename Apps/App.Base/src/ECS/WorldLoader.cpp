@@ -1420,6 +1420,7 @@ static bool ParseRigidBody(WorldECS::EntityHandle& entity, ryml::NodeRef node)
 }
 
 static bool ParseCollider(
+    const WorldLoadContext& context,
     WorldECS::EntityHandle& entity,
     ryml::NodeRef node)
 {
@@ -1471,6 +1472,27 @@ static bool ParseCollider(
 
         valid = isPositive(shape.Radius) && std::isfinite(shape.HalfCylinderHeight) && shape.HalfCylinderHeight >= 0.0f;
         component.Shape = shape;
+    }
+    else if (type == "TriangleMesh")
+    {
+        const ryml::ConstNodeRef meshNode = node.find_child("Mesh");
+        if (!meshNode.readable() || !meshNode.has_val() || meshNode.val_is_null() || meshNode.val().empty())
+        {
+            Logger::Error("ParseCollider: TriangleMesh collider empty Mesh resource id");
+            return false;
+        }
+
+        std::string meshId;
+        meshNode >> meshId;
+        const auto meshHandle = context.ResolveMesh(meshId);
+        if (!meshHandle.IsValid())
+        {
+            Logger::Error("ParseCollider: Unknown mesh resource '{}' for TriangleMesh collider", meshId);
+            return false;
+        }
+
+        component.Shape = TriangleMeshShapeDesc{meshHandle};
+        valid = true;
     }
     else
     {
@@ -1617,7 +1639,7 @@ static bool LoadEntityComponentsWithoutRefs(
         }
         if (hasCollider)
         {
-            if (!ParseCollider(entity, components["Collider"])) { return false; }
+            if (!ParseCollider(context, entity, components["Collider"])) { return false; }
         }
 
         if (components.has_child("Camera"))
