@@ -16,13 +16,13 @@ namespace BistroWaves
         L"One upward impulse delta speed, 100..500 cm/s; latched at next launch",
         EConsoleVariableFlags::Default, [](double v) { return v >= 100 && v <= 500; });
     inline AutoConsoleVariable<double> ScatterSpeed(L"App.Physics.Waves.ScatterSpeed", 2100,
-        L"One random direction impulse 1 second after launch, 1800..2700 cm/s; next launch; participant speed cap 3000 cm/s",
+        L"One random direction impulse 0.3 seconds after launch, 1800..2700 cm/s; next launch; participant speed cap 3000 cm/s",
         EConsoleVariableFlags::Default, [](double v) { return v >= 1800 && v <= 2700; });
     inline AutoConsoleVariable<uint32_t> Seed(L"App.Physics.Waves.Seed", 12345,
         L"Deterministic intervals/directions keyed by wave serial and entity; next launch, active interval unchanged");
 
     inline constexpr float MaxSpeed = 3000;
-    inline constexpr double ScatterDelay = 1;
+    inline constexpr double ScatterDelay = 0.3;
     struct Settings
     {
         double LaunchSpeed = 500;

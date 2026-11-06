@@ -93,7 +93,7 @@ static void CheckWaveTimeline()
     advance(wait-0.001,settings); Require(launches==0 && scatters==0,"Wave launched before initial random wait");
     advance(0.0011,settings); Require(launches==1 && scatters==0,"Initial wait did not launch once");
     auto edited=settings; ++edited.Seed;
-    advance(ScatterDelay-timeline.Elapsed()-0.001,edited); Require(scatters==0,"Early scatter before one second");
+    advance(0.3-timeline.Elapsed()-0.001,edited); Require(scatters==0,"Early scatter before 0.3 seconds");
     advance(0.0011,edited);
     Require(scatters==1 && launches==1 && scatterSeed==settings.Seed,"Scatter timing or latched seed failed");
     const auto remaining=timeline.CurrentInterval()-timeline.Elapsed();
@@ -124,7 +124,7 @@ static void CheckWaveTimeline()
     }
     Require(!LaunchSpeed.SetFromString("nan") && !LaunchSpeed.SetFromString("501") &&
         !ScatterSpeed.SetFromString("1799") && !ScatterSpeed.SetFromString("2701") && !Seed.SetFromString("-1"),"Invalid wave CVar accepted");
-    std::cout << "Random 5..10s wait, two single impulses 1s apart, stronger scatter, latched settings, abort/serial and seed passed\n";
+    std::cout << "Random 5..10s wait, two single impulses 0.3s apart, stronger scatter, latched settings, abort/serial and seed passed\n";
 }
 
 class WaveTestApp final : public App

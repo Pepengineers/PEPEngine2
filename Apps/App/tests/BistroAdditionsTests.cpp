@@ -303,7 +303,7 @@ int main(int argc, char** argv)
             double end = 0;
             for (uint64_t serial=1; serial<=4; ++serial) end += BistroWaves::Interval(seed,serial);
             capture(0,"waves-start"); capture(launchTick-1,"waves-wait");
-            capture(launchTick+18,"waves-lift"); capture(launchTick+66,"waves-scatter");
+            capture(launchTick+9,"waves-lift"); capture(launchTick+24,"waves-scatter");
             capture(launchTick+180,"waves-fall"); capture(static_cast<unsigned>(std::ceil(end*60)),"waves-three-cycles");
             Require(ecs.GetPool<RigidBodyComponent>().Size() == bodies, "Waves grew body count");
             auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
