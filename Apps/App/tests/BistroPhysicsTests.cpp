@@ -10,6 +10,7 @@
 #include <limits>
 #include <tuple>
 #include <atomic>
+#include <chrono>
 #include <Jolt/Jolt.h>
 #include <Jolt/Core/IssueReporting.h>
 
@@ -254,6 +255,88 @@ static void CheckBakedPivot(JobSystem& jobs)
     std::cout << "Baked pivot, cm/m gravity, triangle contacts and placement queries passed\n";
 }
 
+static void CheckBoxProxies(JobSystem& jobs)
+{
+    using namespace Engine::Core;
+    const auto boxMesh = [](Vector3 center, Vector3 half, Quaternion rotation)
+    {
+        SubMesh part;
+        for (const auto& corner : {Vector3(-1,-1,-1), Vector3(1,-1,-1), Vector3(1,1,-1), Vector3(-1,1,-1),
+            Vector3(-1,-1,1), Vector3(1,-1,1), Vector3(1,1,1), Vector3(-1,1,1)})
+        {
+            Vertex vertex;
+            vertex.Position = Vector3::Transform(corner * half, rotation) + center;
+            part.Vertices.push_back(vertex);
+        }
+        part.Indices = {0,2,1,0,3,2,4,5,6,4,6,7,0,4,7,0,7,3,1,2,6,1,6,5,0,1,5,0,5,4,3,7,6,3,6,2};
+        DirectX::BoundingBox::CreateFromPoints(part.Bounds, part.Vertices.size(), &part.Vertices.front().Position, sizeof(Vertex));
+        return part;
+    };
+    for (const auto& rotation : {Quaternion::Identity, Quaternion::CreateFromYawPitchRoll(0.7f, 0, 0),
+        Quaternion::CreateFromYawPitchRoll(0.7f, 0.8f, -0.3f)})
+    {
+        const Vector3 origin(1000, 200, -400);
+        const Mesh bottle({boxMesh(origin, {4,12,3}, rotation),
+            boxMesh(origin + Vector3::Transform({0,16,0}, rotation), {1,4,1}, rotation)}, {});
+        const auto shape = BistroPhysics::PropShape(bottle, {"Paris_LiquorBottle_Test", {0,1}});
+        const auto* compound = std::get_if<CompoundShapeDesc>(&shape);
+        Require(compound && compound->Geometry->Children.size() == 1, "Bottle proxy must contain exactly one box");
+        const auto& child = compound->Geometry->Children.front();
+        const auto* box = std::get_if<BoxShapeDesc>(&child.Shape);
+        Require(box != nullptr, "Bottle proxy retained non-box geometry");
+        Quaternion inverse; child.Rotation.Conjugate(inverse);
+        for (const auto& part : bottle.GetSubMeshes()) for (const auto& vertex : part.Vertices)
+        {
+            const auto local = Vector3::Transform(vertex.Position - child.Position, inverse);
+            Require(std::abs(local.x) <= box->HalfExtent.x + 0.01f &&
+                std::abs(local.y) <= box->HalfExtent.y + 0.01f && std::abs(local.z) <= box->HalfExtent.z + 0.01f,
+                "Translated or tilted bottle proxy excludes a source vertex");
+        }
+        JoltPhysicsBackend backend;
+        backend.Initialize(jobs, BistroPhysics::Settings());
+        PhysicsBodyDesc body; body.Shape = shape;
+        Require(backend.CreateBody(body).IsValid() && backend.OverlapsBox(origin, {1,1,1}),
+            "Bottle proxy lost its baked position when cooked");
+    }
+    for (const auto& points : {std::vector<Vector3>{}, std::vector<Vector3>{{NAN,0,0}},
+        std::vector<Vector3>{{0,0,0},{0,std::numeric_limits<float>::infinity(),0}}})
+    {
+        bool rejected = false;
+        try { BistroPhysics::BoxProxy(points); } catch (const std::invalid_argument&) { rejected = true; }
+        Require(rejected, "Empty or nonfinite box proxy accepted");
+    }
+    const auto thin = BistroPhysics::BoxProxy({{-2,0,-3},{2,0,-3},{2,0,3},{-2,0,3}});
+    const auto half = std::get<BoxShapeDesc>(thin.Shape).HalfExtent;
+    Require(half.x >= 0.5f && half.y >= 0.5f && half.z >= 0.5f &&
+        std::abs((std::min)({half.x,half.y,half.z}) - 0.5f) < 0.001f,
+        "Thin box proxy did not retain a 0.5 cm minimum half-extent");
+
+    const Vector3 origin(1000, 0, -400);
+    const auto rotation = Quaternion::CreateFromYawPitchRoll(0.4f, 0, 0);
+    std::vector<SubMesh> parts;
+    const auto add = [&](Vector3 center, Vector3 half)
+    { parts.push_back(boxMesh(Vector3::Transform(center, rotation) + origin, half, rotation)); };
+    add({0,80,0}, {50,3,40});
+    for (float x : {-40.f,40.f}) for (float z : {-30.f,30.f}) add({x,38.5f,z}, {3,38.5f,3});
+    PhysicsBodyDesc table;
+    table.Shape = BistroPhysics::PropShape(Mesh(std::move(parts), {}), {"Paris_Table_Test", {0,1,2,3,4}});
+    const auto& children = std::get<CompoundShapeDesc>(table.Shape).Geometry->Children;
+    Require(children.size() > 1 && children.size() <= 12, "Table proxy lost its bounded compound structure");
+    for (const auto& child : children)
+        Require(!std::holds_alternative<ConvexCompoundShapeDesc>(child.Shape), "Table proxy retained a convex hull");
+    JoltPhysicsBackend backend;
+    backend.Initialize(jobs, BistroPhysics::Settings());
+    Require(backend.CreateBody(table).IsValid(), "Table box proxies could not be cooked");
+    Require(!backend.OverlapsBox(origin + Vector3(0,30,0), {5,5,5}), "Table box proxies filled the space underneath");
+    for (float x : {-40.f,40.f}) for (float z : {-30.f,30.f})
+        Require(backend.OverlapsBox(origin + Vector3::Transform({x,30,z}, rotation), {1,1,1}),
+            "Table box proxies lost a supporting leg");
+    PhysicsRayHit hit;
+    Require(backend.RayCastStatic(origin + Vector3(0,120,0), {0,-150,0}, hit) && std::abs(hit.Position.y - 83) < 2,
+        "Table box proxies lost or moved the supporting tabletop");
+    std::cout << "Bottle box containment, baked pivots, invalid input, minimum thickness and table gaps/support passed\n";
+}
+
 int main(int argc, char** argv)
 {
     try
@@ -269,6 +352,7 @@ int main(int argc, char** argv)
         Require(BistroPhysics::CountScale.SetValue(scale), "Invalid test scale");
         JobSystem jobs(argc > 2 ? static_cast<unsigned>(std::stoul(argv[2])) : 4);
         CheckBakedPivot(jobs);
+        CheckBoxProxies(jobs);
         BenchmarkEngine engine;
         auto scenes = std::make_shared<SceneManagerModule>();
         BenchmarkEngine::GetLocator().RegisterModule(scenes);
@@ -318,8 +402,20 @@ int main(int argc, char** argv)
         auto& ecs=world.GetECS();
         ecs.ForEach<RigidBodyComponent>([](Entity,const RigidBodyComponent& body){Require(body.Body.IsValid(),"Silently missing Jolt body");});
         size_t convexParts = 0, primitiveParts = 0, staticTriangles = 0;
-        ecs.ForEach<ColliderComponent, RigidBodyComponent>([&](Entity, const ColliderComponent& collider, const RigidBodyComponent& body)
+        ecs.ForEach<ColliderComponent, RigidBodyComponent>([&](Entity entity, const ColliderComponent& collider, const RigidBodyComponent& body)
         {
+            if (body.MotionType == PhysicsMotionType::Dynamic)
+            {
+                std::string name = ecs.Get<NameComponent>(entity).value;
+                std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+                if (name.find("liquorbottle") != std::string::npos)
+                {
+                    const auto* bottle = std::get_if<CompoundShapeDesc>(&collider.Shape);
+                    Require(bottle && bottle->Geometry->Children.size() == 1 &&
+                        std::holds_alternative<BoxShapeDesc>(bottle->Geometry->Children.front().Shape),
+                        "Real Bistro bottle did not use exactly one box");
+                }
+            }
             if (const auto* triangle = std::get_if<TriangleMeshShapeDesc>(&collider.Shape))
             {
                 Require(body.MotionType == PhysicsMotionType::Static, "Dynamic body received a triangle mesh");
@@ -346,6 +442,7 @@ int main(int argc, char** argv)
             }
             else ++primitiveParts;
         });
+        Require(convexParts == 0, "Bistro dynamics retained expensive convex hull parts");
         Require(staticTriangles < 3438175, "Bistro collision mesh was not simplified");
         Require((convexParts + primitiveParts) * base < 2277 * expected, "Bistro collision bake increased the legacy part count");
         std::cout << "Baked colliders: " << staticTriangles << " static triangles, " << convexParts
@@ -355,6 +452,9 @@ int main(int argc, char** argv)
         float peakSpeed = 0;
         unsigned step=0;
         const size_t maxTicks=600*(cycles+1);
+        std::vector<double> tickTimes;
+        tickTimes.reserve(maxTicks);
+        double totalPhysicsMs = 0;
         std::vector<Vector3> previousVelocities(expected);
         float minimumScatter=FLT_MAX;
         float minimumLaunch=FLT_MAX;
@@ -396,7 +496,12 @@ int main(int argc, char** argv)
                     Require(!invalid,"Scatter clipped or launch exceeded the requested impulse");
                 });
             }
-            physics.Step(world,1.f/60); sync.Schedule(jobs,world,1.f/60).Complete();
+            const auto tickStart = std::chrono::steady_clock::now();
+            physics.Step(world,1.f/60);
+            const double tickMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tickStart).count();
+            tickTimes.push_back(tickMs);
+            totalPhysicsMs += tickMs;
+            sync.Schedule(jobs,world,1.f/60).Complete();
             size_t velocityIndex=0;
             ecs.ForEach<RigidBodyComponent>([&](Entity,const RigidBodyComponent& body)
             {
@@ -450,6 +555,9 @@ int main(int argc, char** argv)
         }
         scenes->OnWorldDestroyed.Broadcast(world);
         physics.Uninitialize();
+        std::sort(tickTimes.begin(), tickTimes.end());
+        std::cout << "Physics step: threads=" << jobs.GetThreadCount() << ", mean=" << totalPhysicsMs / tickTimes.size()
+            << " ms, p95=" << tickTimes[tickTimes.size() * 95 / 100] << " ms\n";
         std::cout << "Bistro: " << base << " original objects, " << expected << " dynamic bodies, 2 static meshes, scale=" << scale << ", moved=" << moved << "; " << step << " ticks, " << cycles << " full waves, peak speed=" << peakSpeed << " cm/s, minimum applied scatter=" << minimumScatter << " cm/s, minimum launch=" << minimumLaunch << ", outside modeled geometry=" << outside << ", static chord candidates=" << chordCrossings << " passed\n";
         return 0;
     }

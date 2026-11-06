@@ -87,12 +87,60 @@ namespace BistroPhysics
         return BuildStaticCollision(mesh, indices, 1.0f);
     }
 
+    inline PhysicsCompoundChild BoxProxy(std::vector<Vector3> points)
+    {
+        if (points.empty()) throw std::invalid_argument("Empty Bistro box proxy");
+        const auto origin = points.front();
+        for (auto& point : points)
+        {
+            point -= origin;
+            if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z))
+                throw std::invalid_argument("Nonfinite Bistro box proxy");
+        }
+        DirectX::BoundingOrientedBox box;
+        DirectX::BoundingOrientedBox::CreateFromPoints(box, points.size(), points.data(), sizeof(Vector3));
+        // Thin furniture surfaces still need a solid collision thickness (centimeters).
+        const Vector3 half((std::max)(box.Extents.x, 0.5f), (std::max)(box.Extents.y, 0.5f), (std::max)(box.Extents.z, 0.5f));
+        return {BoxShapeDesc{half}, Vector3(box.Center) + origin, Quaternion(box.Orientation)};
+    }
+
     inline PhysicsShapeDesc PropShape(const Engine::Core::Mesh& mesh, const BistroPropGroup& prop)
     {
+        std::string lower = prop.Name;
+        std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (lower.find("liquorbottle") != std::string::npos)
+        {
+            std::vector<Vector3> points;
+            for (const auto index : prop.SubMeshIndices)
+                for (const auto& vertex : mesh.GetSubMesh(index).Vertices) points.push_back(vertex.Position);
+            auto compound = std::make_shared<PhysicsCompound>();
+            compound->Children.push_back(BoxProxy(std::move(points)));
+            return CompoundShapeDesc{compound};
+        }
         const Vector3 size = Vector3(Bounds(mesh, prop.SubMeshIndices).Extents) * 2;
         // Thin props cannot use the same detail budget as full-size furniture at 1 cm resolution.
         const auto hulls = static_cast<unsigned>(std::clamp(std::ceil((std::min)({size.x,size.y,size.z}) / 4.f), 4.f, 12.f));
-        return BuildDynamicCollision(mesh, prop.SubMeshIndices, 1.0f, hulls);
+        const auto baked = BuildDynamicCollision(mesh, prop.SubMeshIndices, 1.0f, hulls);
+        auto compound = std::make_shared<PhysicsCompound>();
+        if (const auto* convex = std::get_if<ConvexCompoundShapeDesc>(&baked))
+        {
+            for (const auto& hull : convex->Geometry->Hulls) compound->Children.push_back(BoxProxy(hull));
+        }
+        else if (const auto* mixed = std::get_if<CompoundShapeDesc>(&baked))
+        {
+            for (const auto& child : mixed->Geometry->Children)
+                if (const auto* convex = std::get_if<ConvexCompoundShapeDesc>(&child.Shape))
+                    for (const auto& hull : convex->Geometry->Hulls)
+                    {
+                        auto box = BoxProxy(hull);
+                        box.Position = Vector3::Transform(box.Position, child.Rotation) + child.Position;
+                        box.Rotation *= child.Rotation;
+                        compound->Children.push_back(box);
+                    }
+                else compound->Children.push_back(child);
+        }
+        else return baked;
+        return CompoundShapeDesc{compound};
     }
 }
 
