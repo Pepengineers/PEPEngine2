@@ -17,7 +17,7 @@ namespace BistroReflections
 {
     inline AutoConsoleVariable<bool> ShowBounds(L"App.ReflectionProbes.ShowBounds", false,
         L"Show colored table-sized reflection boxes and capture labels above Bistro tables");
-    inline AutoConsoleVariable<bool> ShowSpheres(L"App.ReflectionProbes.ShowSpheres", true,
+    inline AutoConsoleVariable<bool> ShowSpheres(L"App.ReflectionProbes.ShowSpheres", false,
         L"Show mirror spheres sampling each Bistro probe's own baked cubemap");
 
     struct TableAnchor { Vector3 Centre; float HalfSize; };

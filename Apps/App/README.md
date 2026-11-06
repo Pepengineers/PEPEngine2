@@ -13,6 +13,11 @@ the populations. Character counts apply at startup; zero creates no characters:
 | `App.NPC.Count` | 10 | nonnegative integer (startup) |
 | `App.Fox.Count` | 5 | nonnegative integer (startup) |
 
+`App.Physics.CountScale` defaults to `1`: the original scene props without extra
+tableware copies. Saved values in `Build/bin/x64/Release/App/Config/Engine.ini`
+override this default and survive rebuilds; set it to `1` to restore the original count.
+Layout boxes (`App.Bounds.Show`) default to off and can be enabled from Settings.
+
 Each of the 21 tables has a reflection spawn anchor: 11 on the terrace and 10
 inside. `App.ReflectionProbes.Count=4` picks four random distinct tables. Growing
 the count adds captures at unused tables; surviving captures stay in place.
@@ -20,8 +25,8 @@ Setting zero and then increasing the count reshuffles the selection. Values abov
 21 are rejected. `App.ReflectionProbes.ShowSpheres`
 shows their baked cubemaps on mirrored spheres; `App.ReflectionProbes.ShowBounds`
 independently shows the colored influence boxes and labels. Preview spheres are
-excluded from captures and shadow casting. Spheres default to on; boxes and labels
-default to off. Each sphere samples only its probe's published cubemap, starting
+excluded from captures and shadow casting. Spheres, boxes and labels default to
+off. Each sphere samples only its probe's published cubemap, starting
 at the first populated mip; enabling previews does not trigger a bake. These are
 ordinary sphere meshes with an unlit cubemap material, drawn forward immediately
 after deferred lighting and before SSR/transparency. The pass uses the standard

@@ -237,6 +237,9 @@ int main(int argc, char** argv)
 {
     try
     {
+        Require(!BistroBounds::Show.GetValue() && !BistroReflections::ShowBounds.GetValue() &&
+            !BistroReflections::ShowSpheres.GetValue(), "Bistro debug geometry must be hidden by default");
+        Require(BistroPhysics::CountScale.GetValue() == 1.0, "Bistro must default to the original 1x object count");
         if (argc > 1 && std::strcmp(argv[1], "--routes-only") == 0)
         {
             CheckBistroCharacterCounts();

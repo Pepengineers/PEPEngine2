@@ -15,7 +15,7 @@
 
 namespace BistroBounds
 {
-    inline AutoConsoleVariable<bool> Show(L"App.Bounds.Show", true,
+    inline AutoConsoleVariable<bool> Show(L"App.Bounds.Show", false,
         L"Show layout boxes; Dust/Steam drive their particle volumes, other boxes remain detached. Session only.");
     inline constexpr float InteriorYawDegrees = -28.5f;
 
