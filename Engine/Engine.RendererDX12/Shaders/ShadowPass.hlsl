@@ -54,6 +54,7 @@ void CS(uint3 id : SV_DispatchThreadID)
     }
 }
 #else
+#include "InstancedGeometry.hlsli"
 cbuffer DrawConstants : register(b0) { uint InstanceID; uint CascadeIndex; };
 ConstantBuffer<ShadowCB> CBShadow : register(b1);
 StructuredBuffer<Material> MaterialCache : register(t0);
@@ -69,9 +70,15 @@ struct VertexOutput
     nointerpolation uint MaterialIndex : TEXCOORD1;
 };
 
-VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD)
+VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
 {
-    InstanceData instance = InstanceCache[InstanceID];
+    InstanceData instance = InstanceCache[DrawInstance(InstanceID, instanceID, InstanceCache[InstanceID])];
+    if (instance.SkinOutputVertex != 0xffffffffu)
+    {
+        SkinVertex vertex = ReadSkinVertex(instance, vertexID);
+        position = vertex.Position;
+        uv = vertex.UV;
+    }
     VertexOutput output;
     float4 world = mul(float4(position, 1), TransformCache[instance.TransformIndex].World);
     output.Position = mul(world, CBShadow.ViewProj[CascadeIndex]);

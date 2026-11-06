@@ -283,6 +283,7 @@ public:
     DXGI_FORMAT DepthFormat = DXGI_FORMAT_UNKNOWN;
     GDX12DescriptorHeap* Heap = nullptr;
     std::vector<std::pair<UINT, D3D12_GPU_VIRTUAL_ADDRESS>> CBVs;
+    std::vector<std::pair<UINT, D3D12_GPU_VIRTUAL_ADDRESS>> RootSRVs;
     std::vector<std::pair<UINT, D3D12_GPU_DESCRIPTOR_HANDLE>> SRVs;
     struct Constant { UINT Parameter, Value, Offset; };
     std::vector<Constant> Constants;
@@ -303,6 +304,8 @@ public:
         commands->SetPipelineState(Pipeline);
         if (Heap) commands->SetDescriptorHeaps({ Heap });
         for (const auto& [slot, address] : CBVs) commands->SetGraphicsRootConstantBufferView(slot, address);
+        for (const auto& [slot, address] : RootSRVs)
+            commands->GetCommandList()->SetGraphicsRootShaderResourceView(slot, address);
         for (const auto& [slot, descriptor] : SRVs) commands->SetGraphicsSRV(slot, descriptor);
         for (const auto& value : Constants)
             commands->GetCommandList()->SetGraphicsRoot32BitConstant(value.Parameter, value.Value, value.Offset);

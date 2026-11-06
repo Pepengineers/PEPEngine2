@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine.RendererDX12/GDX12InstanceBatcher.h"
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include <cstdint>
 #include "Engine.RendererDX12/RenderPasses/GDX12GeometryViewPass.h"
@@ -106,6 +107,7 @@ public:
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
+        RSDesc1.InstancedGeometry = true;
 		RSDesc1.NumSingleCBVSlots = 2;
 		RSDesc1.NumSingleSRVSlots = 3;
 		RSDesc1.StaticSamplers = GetStaticSamplers();
@@ -236,6 +238,10 @@ public:
         auto* depthStencil = _outputs[2]->GetTexture();
         GDX12GraphicsBindings binding;
         binding.Root = _opaqueRS.get();
+        const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
+        const auto geometrySlot = static_cast<UINT>(binding.Root->GetGeometryRootParamIndex());
+        binding.RootSRVs = { { geometrySlot, geometryAddress }, { geometrySlot + 1,
+            currentCameraVisBuffers.OpaqueBatches ? currentCameraVisBuffers.OpaqueBatches->VisibleInstancesAddress() : geometryAddress } };
         binding.Pipeline = writeNormals ? _opaquePSO : _depthOnlyPSO;
         binding.IndirectSignature = _opaqueCS.Get();
         binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
@@ -270,7 +276,7 @@ public:
         mesh.Geometry = _resources->GeometryBuffer.get();
         mesh.InstanceCount = meshCount;
         mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _opaqueCS.Get(),
-            meshCount ? currentCameraVisBuffers.VisibleOpaqueCommandsCache->GetResource().D3DResource.Get() : nullptr, 0,
+            meshCount ? (currentCameraVisBuffers.OpaqueBatches ? currentCameraVisBuffers.OpaqueBatches->Commands() : *currentCameraVisBuffers.VisibleOpaqueCommandsCache).GetResource().D3DResource.Get() : nullptr, 0,
             meshCount ? currentCameraVisBuffers.OpaqueDrawCounter->GetResource().D3DResource.Get() : nullptr, 0,
             meshCount, sizeof(GDX12IndirectDrawArgs) };
         _resources->EmitGeometry(cmdList, view, mesh);

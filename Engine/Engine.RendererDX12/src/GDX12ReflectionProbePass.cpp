@@ -94,6 +94,7 @@ GDX12ReflectionProbePass::GDX12ReflectionProbePass()
 void GDX12ReflectionProbePass::Initialize()
 {
     GDX12RootSignatureDesc capture;
+    capture.InstancedGeometry = true;
     capture.Constants.push_back(1);
     capture.NumSingleCBVSlots = 4;
     capture.NumSingleSRVSlots = 11;
@@ -359,6 +360,13 @@ void GDX12ReflectionProbePass::Cull(GDX12CommandList* commands, const UINT camer
     commands->SetComputeSRV(1, constants->ShadowTemplates->GetSRV()->GPUHandle);
     commands->SetComputeSRV(2, constants->ShadowMaterials->GetSRV()->GPUHandle);
     if (count) commands->Dispatch((count + 63) / 64, 1, 1);
+    if (_resources->SkeletalBatchCount)
+    {
+        if (!frame.Batches) frame.Batches = std::make_unique<GDX12InstanceBatcher>(_resources->Device);
+        frame.Batches->Build(commands, *constants->ShadowInstances, *frame.Commands, *frame.Counter,
+            _resources->SkeletalBatchCount, _resources->SkeletalInstanceCount);
+    }
+    else frame.Batches.reset();
     commands->ResourceBarrier({ frame.Commands->GetResource().GetIndirectArgsBarrier(), frame.Counter->GetResource().GetIndirectArgsBarrier() });
 }
 
@@ -368,6 +376,10 @@ GDX12GraphicsBindings GDX12ReflectionProbePass::CaptureBindings(const UINT face,
     auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     GDX12GraphicsBindings binding;
     binding.Root = _captureRoot.get();
+    const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
+    const auto geometrySlot = static_cast<UINT>(binding.Root->GetGeometryRootParamIndex());
+    binding.RootSRVs = { { geometrySlot, geometryAddress }, { geometrySlot + 1,
+        frame.Batches ? frame.Batches->VisibleInstancesAddress() : geometryAddress } };
     binding.Pipeline = _capturePSO;
     binding.IndirectSignature = _signature.Get();
     binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
@@ -434,6 +446,10 @@ void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, const UI
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
     GDX12GraphicsBindings binding;
     binding.Root = _captureRoot.get();
+    const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
+    const auto geometrySlot = static_cast<UINT>(binding.Root->GetGeometryRootParamIndex());
+    binding.RootSRVs = { { geometrySlot, geometryAddress }, { geometrySlot + 1,
+        frame.Batches ? frame.Batches->VisibleInstancesAddress() : geometryAddress } };
     binding.IndirectSignature = _signature.Get();
     binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
     binding.Stage = GDX12GeometryStage::Shadow;
@@ -458,7 +474,7 @@ void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, const UI
     mesh.Geometry = _resources->GeometryBuffer.get();
     mesh.InstanceCount = count;
     mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _signature.Get(),
-        count ? frame.Commands->GetResource().D3DResource.Get() : nullptr, 0,
+        count ? (frame.Batches ? frame.Batches->Commands() : *frame.Commands).GetResource().D3DResource.Get() : nullptr, 0,
         count ? frame.Counter->GetResource().D3DResource.Get() : nullptr, 0, count, sizeof(GDX12IndirectDrawArgs) };
     _resources->EmitGeometry(commands, view, mesh);
 }
@@ -508,7 +524,7 @@ void GDX12ReflectionProbePass::RenderFace(GDX12CommandList* commands, const UINT
     mesh.Geometry = _resources->GeometryBuffer.get();
     mesh.InstanceCount = count;
     mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _signature.Get(),
-        count ? frame.Commands->GetResource().D3DResource.Get() : nullptr, 0,
+        count ? (frame.Batches ? frame.Batches->Commands() : *frame.Commands).GetResource().D3DResource.Get() : nullptr, 0,
         count ? frame.Counter->GetResource().D3DResource.Get() : nullptr, 0, count, sizeof(GDX12IndirectDrawArgs) };
     _resources->EmitGeometry(commands, view, mesh);
 }

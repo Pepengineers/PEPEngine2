@@ -3,6 +3,7 @@
 #include "App.Base/Window.h"
 #include "Engine.UI/UI_test.h"
 #include <cassert>
+#include <chrono>
 #include <stdexcept>
 #include <climits>
 #include <cstring>
@@ -928,7 +929,10 @@ void RenderModule::OnRender()
     _RPcommonData.Jobs = &App::GetInstance()->GetJobs();
     _backBuffer->GetFrameGeneration().BeginRendering(_RPcommonData);
     _primaryResources.BeginMeshPrimitiveUpdate();
+    const auto skeletalStarted = std::chrono::steady_clock::now();
     PrepareSkeletalMeshes();
+    _skeletalPreparationTimeMS = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - skeletalStarted).count();
     if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
         _primaryResources.UpdateMaterialCB(_materials);
     if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
@@ -1326,6 +1330,16 @@ const GDX12FrameGenerationStatus& RenderModule::GetFrameGenerationStatus() const
     if (!_pipeline->GetBindings().FrameGenerationInputs)
         throw std::logic_error("Render pipeline has no frame generation inputs");
     return _backBuffer->GetFrameGeneration().GetStatus();
+}
+
+double RenderModule::GetPrimaryGPUTimeMS()
+{
+    return _primaryGPUTimer ? _primaryGPUTimer->GetTimeMS() : -1.0;
+}
+
+GDX12GPUTimingTotals RenderModule::GetPrimaryGPUTimingTotals()
+{
+    return _primaryGPUTimer ? _primaryGPUTimer->GetSampleTotals() : GDX12GPUTimingTotals{};
 }
 
 D3D12MA::Statistics RenderModule::GetMemoryStatistics() const

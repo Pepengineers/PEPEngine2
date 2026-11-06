@@ -61,12 +61,12 @@ void GDX12GeometryBuffer::ResizeVertexBuffer(const UINT newSize, const UINT upda
         list->CopyBufferRegion(newBuffer.Get(), updateStart * VERTEX_SIZE, uploadBuffer.Get(),
             updateStart * VERTEX_SIZE, updateCount * VERTEX_SIZE);
     auto ready = CD3DX12_RESOURCE_BARRIER::Transition(newBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
-        D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+        (D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
     list->ResourceBarrier(1, &ready);
     queue->ExecuteCommandList(commands);
     queue->Flush();
     _vertexBuffer = newBuffer;
-    _vertexState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+    _vertexState = (D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     _totalVertices = newSize;
     _vertexBufferView.BufferLocation = _vertexBuffer->GetGPUVirtualAddress();
     _vertexBufferView.SizeInBytes = static_cast<UINT>(_totalVertices * VERTEX_SIZE);
@@ -138,9 +138,9 @@ void GDX12GeometryBuffer::EndSkinning(GDX12CommandList* commands)
 {
     if (_vertexState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) return;
     auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(_vertexBuffer.Get(), _vertexState,
-        D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+        (D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
     commands->GetCommandList()->ResourceBarrier(1, &barrier);
-    _vertexState = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+    _vertexState = (D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
 }
 
 void GDX12GeometryBuffer::ResizeIndexBuffer(const UINT newSize)

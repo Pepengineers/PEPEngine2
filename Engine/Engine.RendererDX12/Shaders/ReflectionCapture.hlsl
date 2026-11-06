@@ -35,6 +35,7 @@ void CullCS(uint3 id : SV_DispatchThreadID)
     VisibleCommands[index] = command;
 }
 #else
+#include "InstancedGeometry.hlsli"
 cbuffer DrawConstants : register(b0) { uint InstanceID; };
 ConstantBuffer<MainCB> CBMain : register(b1);
 ConstantBuffer<CameraCB> CBCamera : register(b2);
@@ -81,9 +82,16 @@ struct VertexOutput
     float2 UV : TEXCOORD0;
     nointerpolation uint MaterialIndex : TEXCOORD1;
 };
-VertexOutput VS(float3 position : POSITION, float3 normal : NORMAL, float2 uv : TEXCOORD)
+VertexOutput VS(float3 position : POSITION, float3 normal : NORMAL, float2 uv : TEXCOORD, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
 {
-    InstanceData instance = InstanceCache[InstanceID];
+    InstanceData instance = InstanceCache[DrawInstance(InstanceID, instanceID, InstanceCache[InstanceID])];
+    if (instance.SkinOutputVertex != 0xffffffffu)
+    {
+        SkinVertex vertex = ReadSkinVertex(instance, vertexID);
+        position = vertex.Position;
+        normal = vertex.Normal;
+        uv = vertex.UV;
+    }
     float4x4 world = TransformCache[instance.TransformIndex].World;
     VertexOutput output;
     float4 worldPosition = mul(float4(position, 1), world);
@@ -101,9 +109,9 @@ float4 PS(VertexOutput input) : SV_TARGET
     if (material.RenderLayer == 1) clip(color.a - 0.5f);
     return float4(ShadePBR(material, color.rgb, input.WorldPosition, input.Normal, input.UV), 1);
 }
-VertexOutput ShadowVS(float3 position : POSITION, float3 normal : NORMAL, float2 uv : TEXCOORD)
+VertexOutput ShadowVS(float3 position : POSITION, float3 normal : NORMAL, float2 uv : TEXCOORD, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
 {
-    VertexOutput output = VS(position, normal, uv);
+    VertexOutput output = VS(position, normal, uv, vertexID, instanceID);
     output.Position = mul(float4(output.WorldPosition, 1), CBShadow.ViewProj[0]);
     return output;
 }

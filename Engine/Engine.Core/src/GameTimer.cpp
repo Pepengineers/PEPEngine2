@@ -1,6 +1,8 @@
 #include "Common/GameTimer.h"
 
 #include <windows.h>
+#include <cmath>
+#include <stdexcept>
 
 GameTimer::GameTimer()
     : _secondsPerCount(0.0)
@@ -100,8 +102,9 @@ void GameTimer::Stop()
     }
 }
 
-void GameTimer::Tick()
+void GameTimer::Tick(double fixedDeltaSeconds)
 {
+    if (!std::isfinite(fixedDeltaSeconds)) throw std::invalid_argument("Timer frame step must be finite");
     if (_bStopped)
     {
         _timeDelta = 0.0;
@@ -113,7 +116,7 @@ void GameTimer::Tick()
     _currTime = CurrTime;
 
     // Time difference between this frame and the previous.
-    _timeDelta = (_currTime - _prevTime) * _secondsPerCount;
+    _timeDelta = fixedDeltaSeconds >= 0 ? fixedDeltaSeconds : (_currTime - _prevTime) * _secondsPerCount;
 
     // Prepare for next frame.
     _prevTime = _currTime;

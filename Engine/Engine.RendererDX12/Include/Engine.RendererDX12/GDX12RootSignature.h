@@ -15,6 +15,7 @@ struct GDX12RootSignatureRange
 struct GDX12RootSignatureDesc
 {
     bool VolatileSRVData = false;
+    bool InstancedGeometry = false;
 	UINT NumSingleCBVSlots = 0;
 	UINT NumSingleSRVSlots = 0;
 	UINT NumSingleUAVSlots = 0;
@@ -37,6 +38,7 @@ public:
 	int GetTRootParamIndex(int registerIndex);
 	int GetBRootParamIndex(int registerIndex);
 	int GetURootParamIndex(int registerIndex);
+    int GetGeometryRootParamIndex() const { return _geometryRootParamIndex; }
 
 
 private:
@@ -47,4 +49,5 @@ private:
 	int _cbv0ParamIndex;
 	int _srv0ParamIndex;
 	int _uav0ParamIndex;
+    int _geometryRootParamIndex = -1;
 };

@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine.RendererDX12/GDX12InstanceBatcher.h"
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GeometryViewPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
@@ -35,6 +36,7 @@ public:
     {
         CreateMaps(1);
         GDX12RootSignatureDesc graphics;
+        graphics.InstancedGeometry = true;
         graphics.Constants.push_back(2);
         graphics.NumSingleSRVSlots = 4;
         graphics.StaticSamplers = GetStaticSamplers();
@@ -265,6 +267,13 @@ public:
             commands->SetComputeUAV(0, visibility.Commands->GetUAV()->GPUHandle);
             if (count) commands->Dispatch((count + 63) / 64, 1, 1);
         }
+        if (_resources->SkeletalBatchCount)
+        {
+            if (!visibility.Batches) visibility.Batches = std::make_unique<GDX12InstanceBatcher>(_resources->Device);
+            visibility.Batches->Build(commands, *frame->ShadowInstances, *visibility.Commands, *visibility.Counter,
+                _resources->SkeletalBatchCount, _resources->SkeletalInstanceCount);
+        }
+        else visibility.Batches.reset();
         {
             GDX12_SCOPED_EVENT(commands, "Local shadow draw");
             commands->ResourceBarrier({ visibility.Commands->GetResource().GetIndirectArgsBarrier(),
@@ -276,6 +285,10 @@ public:
             binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
             binding.Heap = _resources->SRV_UAV_Heap.get();
             binding.Root = _graphicsRoot.get();
+            const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
+            const auto geometrySlot = static_cast<UINT>(binding.Root->GetGeometryRootParamIndex());
+            binding.RootSRVs = { { geometrySlot, geometryAddress }, { geometrySlot + 1,
+                visibility.Batches ? visibility.Batches->VisibleInstancesAddress() : geometryAddress } };
             binding.Pipeline = _depthPSO;
             binding.SRVs.push_back({ 0, frame->ShadowMaterials->GetSRV()->GPUHandle });
             binding.SRVs.push_back({ 1, frame->ShadowTransforms->GetSRV()->GPUHandle });
@@ -290,7 +303,7 @@ public:
             mesh.Geometry = _resources->GeometryBuffer.get();
             mesh.InstanceCount = count;
             mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _signature.Get(),
-                count ? visibility.Commands->GetResource().D3DResource.Get() : nullptr, 0,
+                count ? (visibility.Batches ? visibility.Batches->Commands() : *visibility.Commands).GetResource().D3DResource.Get() : nullptr, 0,
                 count ? visibility.Counter->GetResource().D3DResource.Get() : nullptr, 0,
                 count, sizeof(GDX12IndirectDrawArgs) };
             _resources->EmitGeometry(commands, view, mesh);
@@ -412,6 +425,7 @@ private:
     {
         std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> Commands;
         std::unique_ptr<GDX12UploadBuffer<UINT>> Counter;
+        std::unique_ptr<GDX12InstanceBatcher> Batches;
     };
     std::vector<Visibility> _visibility;
     struct CachedShadow
