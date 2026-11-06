@@ -26,7 +26,7 @@ inline void CheckBistroGrassCounts()
     {
         first = entity;
         sharedMaterial = grass.Material;
-        require(IsValidGrassSettings(grass) && GrassBladeCount(ResolveGrassSettings(grass, 2)) == 59360,
+        require(IsValidGrassSettings(grass) && GrassBladeCount(ResolveGrassSettings(grass, 2)) == 60000,
             "Bistro grass settings or blade budget invalid");
         require(grass.Implementation == GDX12GrassImplementation::Ribbon && grass.Segments == 4 &&
             grass.HeightCm == 40 && grass.WidthCm == 3 && grass.MaxBendCm == 20,
@@ -99,14 +99,14 @@ inline void CheckBistroGrassCounts()
     require(GrassBladeCount(ecs.Get<GrassRenderComponent>(first)) == 0,
         "Zero density must remove drawn blades without removing the patch");
     require(BistroGrass::ExtentsXCm.SetFromString("200") && BistroGrass::ExtentsZCm.SetFromString("530") &&
-        BistroGrass::HeightCm.SetFromString("40") && BistroGrass::Density.SetFromString("1400") &&
-        BistroGrass::MaxBlades.SetFromString("65536") && BistroGrass::Segments.SetFromString("4") &&
+        BistroGrass::HeightCm.SetFromString("40") && BistroGrass::Density.SetFromString("1500") &&
+        BistroGrass::MaxBlades.SetFromString("60000") && BistroGrass::Segments.SetFromString("4") &&
         BistroGrass::Implementation.SetFromString("0") && BistroGrass::Algorithm.SetFromString("0") &&
         BistroGrass::WindAngleDegrees.SetFromString("67.5") && BistroGrass::WindSpeed.SetFromString("100") &&
         BistroGrass::GridResolution.SetFromString("0") && BistroGrass::PressureIterations.SetFromString("0"),
         "Grass/wind defaults restore rejected");
     scene.Update(world, 0);
-    require(GrassBladeCount(ecs.Get<GrassRenderComponent>(first)) == 59360,
+    require(GrassBladeCount(ecs.Get<GrassRenderComponent>(first)) == 60000,
         "Restoring controls must preserve the authored default grass budget");
     require(BistroGrass::Count.SetFromString("1"), "Bistro grass reduction rejected");
     scene.Update(world, 0);

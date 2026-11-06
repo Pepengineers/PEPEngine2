@@ -13,8 +13,8 @@ count changes retain the surviving patches and their renderer-owned material.
 | `Count` | 1 | 0..16 independent patches; 0 removes grass and owned wind fields |
 | `ExtentsXCm` | 200 | 1..100000, local X half-width |
 | `ExtentsZCm` | 530 | 1..100000, local Z half-width |
-| `DensityPerSquareMetre` | 1400 | 0..100000, blades per square metre; 0 draws no blades |
-| `MaxBlades` | 65536 | 0..262144 per-patch budget; 0 inherits renderer quality |
+| `DensityPerSquareMetre` | 1500 | 0..100000, blades per square metre; 0 draws no blades |
+| `MaxBlades` | 60000 | 0..262144 per-patch budget; 0 inherits renderer quality |
 | `Implementation` | 0 | 0 Ribbon, 1 CrossedRibbons |
 | `Segments` | 4 | 0..8 segments per blade; 0 inherits renderer quality |
 | `Seed` | 7919 | Unsigned 32-bit root seed; patch index multiplies it |
@@ -28,7 +28,7 @@ count changes retain the surviving patches and their renderer-owned material.
 
 The actual blade count is
 `min(ceil(4 * ExtentsXCm * ExtentsZCm / 10000 * DensityPerSquareMetre), resolved MaxBlades)`.
-Defaults retain 59360 blades over 42.4 square metres beneath the building_02 arch. Changing the area therefore changes density-driven
+Defaults reach the 60000-blade budget over 42.4 square metres beneath the building_02 arch. Changing the area therefore changes density-driven
 counts until the budget is reached. The count is not an allocation-only reserve.
 Grass culling uses the existing `GrassLocalBounds`, including height variation,
 width and maximum bend. Wind coverage uses the rotated horizontal bounds in world XZ,

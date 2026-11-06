@@ -28,7 +28,7 @@ inline void CheckBistroArch(World& world)
         [&](Entity, const GrassRenderComponent& grass, const TransformComponent& transform)
         {
             require(transform.Location == Vector3(1399.6f,23.3f,1369) && transform.Rotation.y == 69 &&
-                grass.ExtentsCm == Vector2(200,530) && GrassBladeCount(grass) == 59360,
+                grass.ExtentsCm == Vector2(200,530) && GrassBladeCount(grass) == 60000,
                 "Grass must cover the entire rotated swarm footprint");
             require(transform.Location.y + grass.HeightCm * (1 + grass.HeightVariation) < 80,
                 "Grass tips must remain below the swarm");

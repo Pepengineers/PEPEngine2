@@ -27,10 +27,10 @@ namespace BistroGrass
     inline AutoConsoleVariable<float> ExtentsZCm(L"App.Grass.ExtentsZCm", BistroArch::HalfLengthCm,
         L"Patch half-width along local Z in cm, 1..100000", EConsoleVariableFlags::Default,
         [](float value) { return value >= 1 && value <= 100000; });
-    inline AutoConsoleVariable<float> Density(L"App.Grass.DensityPerSquareMetre", 1400,
+    inline AutoConsoleVariable<float> Density(L"App.Grass.DensityPerSquareMetre", 1500,
         L"Blades per square metre, 0..100000; actual count = min(ceil(area*density), MaxBlades)",
         EConsoleVariableFlags::Default, [](float value) { return value >= 0 && value <= 100000; });
-    inline AutoConsoleVariable<UINT> MaxBlades(L"App.Grass.MaxBlades", 65536,
+    inline AutoConsoleVariable<UINT> MaxBlades(L"App.Grass.MaxBlades", 60000,
         L"Blade budget per patch, 0 inherits Render.Grass.Quality, maximum 262144",
         EConsoleVariableFlags::Default, [](UINT value) { return value <= 262144; });
     inline AutoConsoleVariable<UINT> Segments(L"App.Grass.Segments", 4,
