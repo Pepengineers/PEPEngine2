@@ -75,6 +75,7 @@ static void CheckWaveTimeline()
 {
     using namespace BistroWaves;
     Settings settings;
+    Require(settings.ScatterSpeed==2100 && ScatterSpeed.GetValue()==settings.ScatterSpeed,"Default scatter speed must be tripled to 2100 cm/s");
     for (uint64_t serial=1; serial<1000; ++serial)
     {
         const auto interval=Interval(settings.Seed,serial);
@@ -122,7 +123,7 @@ static void CheckWaveTimeline()
         Require(rejected,"Invalid wave settings accepted");
     }
     Require(!LaunchSpeed.SetFromString("nan") && !LaunchSpeed.SetFromString("501") &&
-        !ScatterSpeed.SetFromString("599") && !ScatterSpeed.SetFromString("901") && !Seed.SetFromString("-1"),"Invalid wave CVar accepted");
+        !ScatterSpeed.SetFromString("1799") && !ScatterSpeed.SetFromString("2701") && !Seed.SetFromString("-1"),"Invalid wave CVar accepted");
     std::cout << "Random 5..10s wait, two single impulses 1s apart, stronger scatter, latched settings, abort/serial and seed passed\n";
 }
 

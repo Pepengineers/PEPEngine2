@@ -15,9 +15,9 @@ namespace BistroWaves
     inline AutoConsoleVariable<double> LaunchSpeed(L"App.Physics.Waves.LaunchSpeed", 500,
         L"One upward impulse delta speed, 100..500 cm/s; latched at next launch",
         EConsoleVariableFlags::Default, [](double v) { return v >= 100 && v <= 500; });
-    inline AutoConsoleVariable<double> ScatterSpeed(L"App.Physics.Waves.ScatterSpeed", 700,
-        L"One random direction impulse 1 second after launch, 600..900 cm/s; next launch; participant speed cap 3000 cm/s",
-        EConsoleVariableFlags::Default, [](double v) { return v >= 600 && v <= 900; });
+    inline AutoConsoleVariable<double> ScatterSpeed(L"App.Physics.Waves.ScatterSpeed", 2100,
+        L"One random direction impulse 1 second after launch, 1800..2700 cm/s; next launch; participant speed cap 3000 cm/s",
+        EConsoleVariableFlags::Default, [](double v) { return v >= 1800 && v <= 2700; });
     inline AutoConsoleVariable<uint32_t> Seed(L"App.Physics.Waves.Seed", 12345,
         L"Deterministic intervals/directions keyed by wave serial and entity; next launch, active interval unchanged");
 
@@ -26,13 +26,13 @@ namespace BistroWaves
     struct Settings
     {
         double LaunchSpeed = 500;
-        double ScatterSpeed = 700;
+        double ScatterSpeed = 2100;
         uint32_t Seed = 12345;
 
         void Validate() const
         {
             if (!std::isfinite(LaunchSpeed) || LaunchSpeed < 100 || LaunchSpeed > 500 ||
-                !std::isfinite(ScatterSpeed) || ScatterSpeed < 600 || ScatterSpeed > 900)
+                !std::isfinite(ScatterSpeed) || ScatterSpeed < 1800 || ScatterSpeed > 2700)
                 throw std::invalid_argument("Invalid Bistro wave settings");
         }
     };
