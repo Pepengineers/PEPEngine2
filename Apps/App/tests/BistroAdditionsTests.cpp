@@ -275,8 +275,9 @@ int main(int argc, char** argv)
         const bool fountainsOnly = argc > 1 && std::strcmp(argv[1], "--fountains-only") == 0;
         const bool archSmoke = argc > 1 && std::strcmp(argv[1], "--arch-smoke") == 0;
         if (archSmoke) Set(L"App.ReflectionProbes.ShowSpheres", "false");
+        const bool boundsOnly = argc > 1 && std::strcmp(argv[1], "--bounds-only") == 0;
         const bool waterSmoke = argc > 1 && std::strcmp(argv[1], "--water-smoke") == 0;
-        if (waterSmoke)
+        if (waterSmoke || boundsOnly)
             Set(L"App.ReflectionProbes.ShowSpheres", "false");
         Require(fountainsOnly || (!BistroBounds::Show.GetValue() && !BistroReflections::ShowBounds.GetValue() &&
             !BistroReflections::ShowSpheres.GetValue()), "Bistro debug geometry must be hidden by default");
@@ -562,7 +563,7 @@ int main(int argc, char** argv)
             return 0;
         }
         CheckBistroBounds(app, world);
-        std::cout << "Bistro bounds: linked Dust/Steam volumes, detached boxes, visibility and paused drawing passed." << std::endl;
+        std::cout << "Bistro bounds: live transforms, rotation/scale, editable volumes, visibility and paused drawing passed." << std::endl;
         if (argc > 1 && std::strcmp(argv[1], "--bounds-only") == 0) return 0;
         CheckBistroReflectionCounts(world, [&] { app.BenchmarkFrame(); });
         CheckBistroWaterCounts(world, [&] { app.BenchmarkFrame(); });

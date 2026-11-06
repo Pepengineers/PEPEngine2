@@ -10,26 +10,35 @@
 #include "Common/ConsoleVariables.h"
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <memory>
 #include <vector>
 
 namespace BistroBounds
 {
     inline AutoConsoleVariable<bool> Show(L"App.Bounds.Show", false,
-        L"Show layout boxes; Dust/Steam drive their particle volumes, other boxes remain detached. Session only.");
+        L"Show current scene bounds; authored confined effects retain editable layout volumes. Session only.");
     inline constexpr float InteriorYawDegrees = -28.5f;
 
     struct Box
     {
-        Box(const std::string& name, const BoundingBox& bounds, unsigned color, float yawDegrees = 0)
-            : Name(name), Color(color),
-              CenterX(Prefix() + L"CenterX", bounds.Center.x, L"Layout box centre X, world cm"),
-              CenterY(Prefix() + L"CenterY", bounds.Center.y, L"Layout box centre Y, world cm"),
-              CenterZ(Prefix() + L"CenterZ", bounds.Center.z, L"Layout box centre Z, world cm"),
-              HalfExtentX(Prefix() + L"HalfExtentX", (std::max)(0.01f, bounds.Extents.x), L"Layout box half-size X, cm", EConsoleVariableFlags::Default, Positive),
-              HalfExtentY(Prefix() + L"HalfExtentY", (std::max)(0.01f, bounds.Extents.y), L"Layout box half-size Y, cm", EConsoleVariableFlags::Default, Positive),
-              HalfExtentZ(Prefix() + L"HalfExtentZ", (std::max)(0.01f, bounds.Extents.z), L"Layout box half-size Z, cm", EConsoleVariableFlags::Default, Positive),
-              Visible(Prefix() + L"Visible", true, L"Show this layout box; does not disable its particles"), _yawDegrees(yawDegrees) {}
+    private:
+        BoundingBox _bounds;
+        BoundingBox _localBounds;
+        bool _tracked;
+
+    public:
+        Box(const std::string& name, const BoundingBox& bounds, unsigned color, float yawDegrees = 0, bool tracked = false)
+            : _bounds(bounds.Center, Vector3::Max(Vector3(0.01f), Vector3(bounds.Extents))), _localBounds(Vector3::Zero, bounds.Extents),
+              _tracked(tracked), Name(name), Color(color),
+              CenterX(Prefix() + L"CenterX", _bounds.Center.x, L"Bounds centre X, world cm", tracked ? EConsoleVariableFlags::ReadOnly : EConsoleVariableFlags::Default),
+              CenterY(Prefix() + L"CenterY", _bounds.Center.y, L"Bounds centre Y, world cm", tracked ? EConsoleVariableFlags::ReadOnly : EConsoleVariableFlags::Default),
+              CenterZ(Prefix() + L"CenterZ", _bounds.Center.z, L"Bounds centre Z, world cm", tracked ? EConsoleVariableFlags::ReadOnly : EConsoleVariableFlags::Default),
+              HalfExtentX(Prefix() + L"HalfExtentX", _bounds.Extents.x, L"Bounds half-size X, cm", tracked ? EConsoleVariableFlags::ReadOnly : EConsoleVariableFlags::Default, Positive),
+              HalfExtentY(Prefix() + L"HalfExtentY", _bounds.Extents.y, L"Bounds half-size Y, cm", tracked ? EConsoleVariableFlags::ReadOnly : EConsoleVariableFlags::Default, Positive),
+              HalfExtentZ(Prefix() + L"HalfExtentZ", _bounds.Extents.z, L"Bounds half-size Z, cm", tracked ? EConsoleVariableFlags::ReadOnly : EConsoleVariableFlags::Default, Positive),
+              Visible(Prefix() + L"Visible", true, L"Show this bounds box; does not disable its object"), _yawDegrees(yawDegrees)
+        {}
 
         BoundingBox GetBounds() const
         {
@@ -38,24 +47,26 @@ namespace BistroBounds
         }
         float GetYawDegrees() const { return _yawDegrees; }
 
-        void Draw(const XMFLOAT4X4& viewProjection) const
+        const BoundingBox& GetLocalBounds() const { return _localBounds; }
+
+        void Follow(const BoundingBox& local, const Matrix& world)
         {
-            const auto bounds = GetBounds();
-            if (_yawDegrees == 0)
-            {
-                Engine::UI::DrawWorldBox(bounds, viewProjection, Name.c_str(), Color);
-                return;
-            }
-            const auto world = Matrix::CreateRotationY(XMConvertToRadians(_yawDegrees)) *
-                Matrix::CreateTranslation(Vector3(bounds.Center));
+            _localBounds = local;
+            _localBounds.Extents = Vector3::Max(Vector3(0.01f), Vector3(local.Extents));
+            if (_tracked) _localBounds.Transform(_bounds, world);
+            else _bounds.Center = Vector3::Transform(Vector3(local.Center), world);
+        }
+
+        void Draw(const XMFLOAT4X4& viewProjection, const Matrix& world) const
+        {
             XMFLOAT4X4 localViewProjection;
             XMStoreFloat4x4(&localViewProjection, world * XMLoadFloat4x4(&viewProjection));
-            Engine::UI::DrawWorldBox({Vector3::Zero, bounds.Extents}, localViewProjection, Name.c_str(), Color);
+            Engine::UI::DrawWorldBox(_localBounds, localViewProjection, Name.c_str(), Color);
         }
 
         const std::string Name;
         const unsigned Color;
-        AutoConsoleVariable<float> CenterX, CenterY, CenterZ, HalfExtentX, HalfExtentY, HalfExtentZ;
+        AutoConsoleVariableRef<float> CenterX, CenterY, CenterZ, HalfExtentX, HalfExtentY, HalfExtentZ;
         AutoConsoleVariable<bool> Visible;
 
     private:
@@ -67,7 +78,6 @@ namespace BistroBounds
     class Scene
     {
     public:
-        // Authored confined effects use live layout boxes; other additions retain detached snapshots.
         explicit Scene(World& world)
         {
             RegisterBistroGrassComponents(world);
@@ -77,7 +87,10 @@ namespace BistroBounds
             {
                 BoundingBox bounds;
                 local.Transform(bounds, WorldMatrix(ecs.Get<TransformComponent>(entity)));
-                _boxes.push_back(std::make_unique<Box>(ecs.Get<NameComponent>(entity).value, bounds, color));
+                auto box = std::make_unique<Box>(ecs.Get<NameComponent>(entity).value, bounds, color, 0, true);
+                box->Follow(local, WorldMatrix(ecs.Get<TransformComponent>(entity)));
+                _tracked.emplace_back(entity, box.get());
+                _boxes.push_back(std::move(box));
             };
             ecs.ForEach<ParticleEmitterComponent, TransformComponent, NameComponent>(
                 [&](Entity entity, const ParticleEmitterComponent& emitter, const TransformComponent&, const NameComponent& name)
@@ -88,7 +101,7 @@ namespace BistroBounds
                         const auto bounds = name.value == "BistroInteriorDust" ?
                             BoundingBox({559,221,-348}, {694,181,779}) : swarm ? BistroArch::SwarmBounds : BoundingBox({922,227,-293}, {305,175,85.5f});
                         auto box = std::make_unique<Box>(name.value, bounds, 0xff40e8ff, swarm ? BistroArch::YawDegrees : InteriorYawDegrees);
-                        _particleVolumes.emplace_back(entity, box.get());
+                        _particleVolumes.push_back({entity, box.get(), bounds.Center});
                         _boxes.push_back(std::move(box));
                         return;
                     }
@@ -104,49 +117,97 @@ namespace BistroBounds
                 [&](Entity entity, const FluidRenderComponent& fluid, const TransformComponent&, const NameComponent&)
                 { add(entity, {Vector3::Zero, fluid.GetSettings().ContainerHalfExtentCm}, 0xffffb050); });
             ecs.ForEach<SkeletalMeshRenderComponent, TransformComponent, NameComponent>(
-                [&](Entity, const SkeletalMeshRenderComponent& mesh, const TransformComponent& transform, const NameComponent& name)
-                { _boxes.push_back(std::make_unique<Box>(name.value, CharacterBounds(mesh, transform), 0xffff70ff)); });
+                [&](Entity entity, const SkeletalMeshRenderComponent& mesh, const TransformComponent&, const NameComponent&)
+                { add(entity, CharacterBounds(mesh), 0xffff70ff); });
         }
 
-        void UpdateEmitters(World& world) const
+        void UpdateEmitters(World& world)
         {
             auto& ecs = world.GetECS();
-            for (const auto& [entity, box] : _particleVolumes)
+            for (auto& volume : _particleVolumes)
             {
+                const auto entity = volume.Owner;
+                auto* box = volume.Bounds;
+                if (!IsOwner(ecs, entity, *box) || !ecs.Has<ParticleEmitterComponent>(entity) ||
+                    !ecs.Has<BistroParticles::EffectComponent>(entity)) continue;
                 auto& emitter = ecs.Get<ParticleEmitterComponent>(entity);
                 auto& effect = ecs.Get<BistroParticles::EffectComponent>(entity);
                 auto& transform = ecs.Get<TransformComponent>(entity);
                 const auto bounds = box->GetBounds();
-                const Vector3 rotation(0, box->GetYawDegrees(), 0);
-                if (transform.Location != Vector3(bounds.Center) || transform.Rotation != rotation || transform.Scale != Vector3::One)
+                if (!volume.Initialized)
                 {
                     transform.Location = bounds.Center;
-                    transform.Rotation = rotation;
+                    transform.Rotation = {0, box->GetYawDegrees(), 0};
                     transform.Scale = Vector3::One;
                     transform.DirtyFlag = true;
-                    emitter.Reset();
                 }
+                else if (Vector3(bounds.Center) != volume.PreviousCenter)
+                {
+                    transform.Location = bounds.Center;
+                    transform.DirtyFlag = true;
+                }
+                const auto worldMatrix = WorldMatrix(transform);
+                if (!volume.Initialized || worldMatrix != volume.PreviousWorld) emitter.Reset();
+                volume.PreviousCenter = transform.Location;
+                volume.PreviousWorld = worldMatrix;
+                volume.Initialized = true;
+                box->Follow({Vector3::Zero, bounds.Extents}, worldMatrix);
                 const auto& settings = emitter.GetSettings();
                 // Reserve the billboard half-diagonal, so its corners stay inside the visible box too.
                 const float radius = (std::max)(settings.SizeStart, settings.SizeEnd) *
                     (1 + settings.SizeVariation) * settings.RenderScale * 0.707107f;
                 effect.LayoutVolume = true;
-                effect.AuthoredExtents = Vector3::Max(Vector3(0.01f), Vector3(bounds.Extents) - Vector3(radius));
+                const Vector3 scale(std::abs(transform.Scale.x), std::abs(transform.Scale.y), std::abs(transform.Scale.z));
+                effect.AuthoredExtents = Vector3::Max(Vector3(0.01f), Vector3(bounds.Extents) -
+                    Vector3(radius) / Vector3::Max(Vector3(0.00001f), scale));
             }
         }
 
-        void DrawBounds(RenderModule& render) const
+        void DrawBounds(World& world, RenderModule& render)
         {
+            auto& ecs = world.GetECS();
+            for (const auto& [entity, box] : _tracked)
+            {
+                if (!IsOwner(ecs, entity, *box)) continue;
+                auto local = box->GetLocalBounds();
+                if (ecs.Has<ParticleEmitterComponent>(entity))
+                {
+                    const auto& settings = ecs.Get<ParticleEmitterComponent>(entity).GetSettings();
+                    local = {Vector3::Zero, settings.VolumeEnabled ? settings.VolumeHalfExtents :
+                        settings.Shape == ParticleShape::Point ? Vector3::Zero : settings.ShapeExtents};
+                }
+                else if (ecs.Has<GrassRenderComponent>(entity)) local = GrassLocalBounds(ecs.Get<GrassRenderComponent>(entity));
+                else if (ecs.Has<FluidRenderComponent>(entity))
+                    local = {Vector3::Zero, ecs.Get<FluidRenderComponent>(entity).GetSettings().ContainerHalfExtentCm};
+                box->Follow(local, WorldMatrix(ecs.Get<TransformComponent>(entity)));
+            }
+            for (auto& volume : _particleVolumes)
+            {
+                if (!IsOwner(ecs, volume.Owner, *volume.Bounds) || !ecs.Has<ParticleEmitterComponent>(volume.Owner)) continue;
+                const auto& transform = ecs.Get<TransformComponent>(volume.Owner);
+                volume.Bounds->Follow({Vector3::Zero, volume.Bounds->GetBounds().Extents}, WorldMatrix(transform));
+                volume.PreviousCenter = transform.Location;
+            }
             if (!Show.GetValue()) return;
             const auto* common = render.GetRenderPipelineCommonData();
             XMFLOAT4X4 viewProjection;
             XMStoreFloat4x4(&viewProjection, common->CameraView * common->CameraProjection);
-            for (const auto& box : _boxes)
-                if (box->Visible.GetValue())
-                    box->Draw(viewProjection);
+            for (const auto& [entity, box] : _tracked)
+                if (IsOwner(ecs, entity, *box) && box->Visible.GetValue())
+                    box->Draw(viewProjection, WorldMatrix(ecs.Get<TransformComponent>(entity)));
+            for (const auto& volume : _particleVolumes)
+                if (IsOwner(ecs, volume.Owner, *volume.Bounds) && ecs.Has<ParticleEmitterComponent>(volume.Owner) &&
+                    volume.Bounds->Visible.GetValue())
+                    volume.Bounds->Draw(viewProjection, WorldMatrix(ecs.Get<TransformComponent>(volume.Owner)));
         }
 
     private:
+        static bool IsOwner(WorldECS& ecs, Entity entity, const Box& box)
+        {
+            return ecs.IsAlive(entity) && ecs.Has<TransformComponent>(entity) && ecs.Has<NameComponent>(entity) &&
+                ecs.Get<NameComponent>(entity).value == box.Name;
+        }
+
         static Matrix WorldMatrix(const TransformComponent& transform)
         {
             return Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
@@ -154,7 +215,8 @@ namespace BistroBounds
                 XMConvertToRadians(transform.Rotation.z)) * Matrix::CreateTranslation(transform.Location);
         }
 
-        static BoundingBox CharacterBounds(const SkeletalMeshRenderComponent& component, const TransformComponent& transform)
+        // shortcut: character shape uses the startup pose; use animated local bounds when pose-tight boxes are needed.
+        static BoundingBox CharacterBounds(const SkeletalMeshRenderComponent& component)
         {
             auto& assets = Engine::Core::AssetManager::GetInstance();
             const auto* scene = assets.Scenes().GetScene(component.GetScene());
@@ -162,7 +224,6 @@ namespace BistroBounds
             const auto pose = scene->EvaluatePose(component.GetClip(), component.GetTimeSeconds(),
                 component.IsLooping(), component.GetLocalPose());
             const auto& nodes = scene->GetNodes();
-            const auto world = WorldMatrix(transform);
             Vector3 low(FLT_MAX), high(-FLT_MAX);
             bool found = false;
             for (size_t node = 0; node < nodes.size(); ++node)
@@ -194,7 +255,6 @@ namespace BistroBounds
                                     position += Vector3::Transform(source, palette.at(influence.BoneIndex)) * influence.Weight;
                                 }
                             }
-                            position = Vector3::Transform(position, world);
                             low = Vector3::Min(low, position);
                             high = Vector3::Max(high, position);
                             found = true;
@@ -205,7 +265,16 @@ namespace BistroBounds
             return {(low + high) * 0.5f, (high - low) * 0.5f};
         }
 
+        struct ParticleVolume
+        {
+            Entity Owner;
+            Box* Bounds;
+            Vector3 PreviousCenter;
+            Matrix PreviousWorld;
+            bool Initialized = false;
+        };
         std::vector<std::unique_ptr<Box>> _boxes;
-        std::vector<std::pair<Entity, Box*>> _particleVolumes;
+        std::vector<std::pair<Entity, Box*>> _tracked;
+        std::vector<ParticleVolume> _particleVolumes;
     };
 }

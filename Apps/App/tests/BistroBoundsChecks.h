@@ -13,17 +13,12 @@ inline void CheckBistroBounds(BistroApp& app, World& world)
     auto& center = console.FindConsoleVariable(L"App.Bounds.BistroEntranceFountain.CenterX");
     auto& extent = console.FindConsoleVariable(L"App.Bounds.BistroEntranceFountain.HalfExtentX");
     require(center.GetFloat() == -170 && extent.GetFloat() == 8, "Particle spawn bounds are incorrect");
-    require(!extent.SetFromString("0") && !extent.SetFromString("-1") && !extent.SetFromString("nan") &&
-        !center.SetFromString("inf"), "Invalid bounds coordinates/extents accepted");
-    const auto initial = center.GetString();
-    require(center.SetFromString("700") && extent.SetFromString("50"), "Cannot edit detached particle bounds");
-    world.GetECS().ForEach<ParticleEmitterComponent, TransformComponent, NameComponent>(
-        [&](Entity, const ParticleEmitterComponent& emitter, const TransformComponent& transform, const NameComponent& name)
-        {
-            if (name.value == "BistroEntranceFountain")
-                require(transform.Location == Vector3(-170,45,-170) && emitter.GetSettings().ShapeExtents == Vector3(8,2,8),
-                    "Bounds editing must not change the real emitter");
-        });
+    auto& layoutExtent = console.FindConsoleVariable(L"App.Bounds.BistroInteriorDust.HalfExtentX");
+    auto& layoutCenter = console.FindConsoleVariable(L"App.Bounds.BistroInteriorDust.CenterX");
+    require(!layoutExtent.SetFromString("0") && !layoutExtent.SetFromString("-1") && !layoutExtent.SetFromString("nan") &&
+        !layoutCenter.SetFromString("inf"), "Invalid editable bounds coordinates/extents accepted");
+    require(!center.SetFromString("700") && !extent.SetFromString("50"),
+        "Tracked bounds must report the real object instead of accepting detached edits");
     require(console.FindConsoleVariable(L"App.Bounds.BistroWater0.CenterY").GetFloat() == BistroWater::Center.y &&
         std::abs(console.FindConsoleVariable(L"App.Bounds.BistroWater0.HalfExtentX").GetFloat() -
             (BistroWater::HalfExtent.x + BistroWater::HalfExtent.z) * std::sqrt(0.5f)) < 0.01f,
@@ -57,25 +52,20 @@ inline void CheckBistroBounds(BistroApp& app, World& world)
             ++linked;
         });
     require(linked == 2, "Exactly Dust and Steam must be linked to layout volumes");
-    size_t edited = 0;
+    size_t tracked = 0;
     world.GetECS().ForEach<TransformComponent, NameComponent>(
-        [&](Entity, const TransformComponent& transform, const NameComponent& name)
+        [&](Entity, const TransformComponent&, const NameComponent& name)
         {
             if (name.value == "BistroInteriorDust" || name.value == "BistroTableSteam" || name.value == "BistroPlanterFireflies") return;
             const auto key = L"App.Bounds." + std::wstring(name.value.begin(), name.value.end()) + L".CenterY";
             IConsoleVariable* setting = nullptr;
             if (!console.TryFindConsoleVariable(key, setting)) return;
-            const auto before = transform.Location;
-            const auto original = setting->GetString();
-            require(setting->SetFromString("1000") && transform.Location == before,
-                "Editing a bounds centre changed a real effect or character transform");
-            require(setting->SetFromString(original), "Cannot restore detached box centre");
-            ++edited;
+            require(!setting->SetFromString("1000"), "Tracked coordinates must be read-only");
+            ++tracked;
         });
-    require(edited == 22 && console.FindConsoleVariable(L"App.Bounds.BistroNPC0.HalfExtentY").GetFloat() > 25 &&
+    require(tracked == 22 && console.FindConsoleVariable(L"App.Bounds.BistroNPC0.HalfExtentY").GetFloat() > 25 &&
         console.FindConsoleVariable(L"App.Bounds.BistroFox0.HalfExtentY").GetFloat() > 1,
-        "Character bounds must cover the scaled animated mesh, with independent controls for every effect");
-    const auto foxBefore = console.FindConsoleVariable(L"App.Bounds.BistroFox0.CenterX").GetString();
+        "Character bounds must cover the scaled mesh");
     const auto window = app.GetWindow()->GetWindowHandle();
     const auto paused = world.IsPaused();
     world.SetPaused(true);
@@ -106,13 +96,89 @@ inline void CheckBistroBounds(BistroApp& app, World& world)
     console.FindConsoleVariable(L"App.Bounds.Show").SetFromString("true");
     app.BenchmarkFrame();
     require(ImGui::GetDrawData()->TotalVtxCount > 0, "Enabled effect bounds must draw labeled boxes while paused");
+    struct Moved { Entity Id; Vector3 Location; float CenterX; std::wstring Key; };
+    std::vector<Moved> moved;
+    world.GetECS().ForEach<TransformComponent, NameComponent>(
+        [&](Entity entity, TransformComponent& transform, const NameComponent& name)
+        {
+            const auto key = L"App.Bounds." + std::wstring(name.value.begin(), name.value.end()) + L".CenterX";
+            IConsoleVariable* setting = nullptr;
+            if (!console.TryFindConsoleVariable(key, setting)) return;
+            moved.push_back({entity, transform.Location, setting->GetFloat(), key});
+            transform.Location.x += 123;
+            transform.DirtyFlag = true;
+        });
+    require(moved.size() == 25, "Every existing bounds owner must participate in the movement check");
+    app.BenchmarkFrame();
+    for (const auto& object : moved)
+    {
+        require(std::abs(console.FindConsoleVariable(object.Key).GetFloat() - object.CenterX - 123) < 0.01f,
+            "Bounds must follow the current transform, including authored volumes while paused");
+        auto& transform = world.GetECS().Get<TransformComponent>(object.Id);
+        transform.Location = object.Location;
+        transform.DirtyFlag = true;
+    }
+    app.BenchmarkFrame();
+    Entity fountain = InvalidEntity;
+    world.GetECS().ForEach<NameComponent>([&](Entity entity, const NameComponent& name)
+        { if (name.value == "BistroEntranceFountain") fountain = entity; });
+    auto& transform = world.GetECS().Get<TransformComponent>(fountain);
+    const auto savedTransform = transform;
+    transform.Rotation = {25, 63, -17};
+    transform.Scale = {2, 3, 4};
+    transform.DirtyFlag = true;
+    app.BenchmarkFrame();
+    BoundingBox expected;
+    const auto matrix = Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
+        XMConvertToRadians(63.f), XMConvertToRadians(25.f), XMConvertToRadians(-17.f)) *
+        Matrix::CreateTranslation(transform.Location);
+    BoundingBox({0,0,0}, {8,2,8}).Transform(expected, matrix);
+    const auto prefix = L"App.Bounds.BistroEntranceFountain.";
+    require(std::abs(console.FindConsoleVariable(std::wstring(prefix) + L"HalfExtentX").GetFloat() - expected.Extents.x) < 0.01f &&
+        std::abs(console.FindConsoleVariable(std::wstring(prefix) + L"HalfExtentY").GetFloat() - expected.Extents.y) < 0.01f &&
+        std::abs(console.FindConsoleVariable(std::wstring(prefix) + L"HalfExtentZ").GetFloat() - expected.Extents.z) < 0.01f,
+        "Tracked bounds must include pitch, yaw, roll and nonuniform scale");
+    transform = savedTransform;
+    transform.DirtyFlag = true;
+    auto& dustTransform = world.GetECS().Get<TransformComponent>(dustEntity);
+    const auto savedDustTransform = dustTransform;
+    dustTransform.Scale = {0.5f, 2, -1.5f};
+    dustTransform.Rotation = {15, 35, -20};
+    dustTransform.DirtyFlag = true;
+    app.BenchmarkFrame();
+    const auto& dustSettings = dust.GetSettings();
+    const float radius = (std::max)(dustSettings.SizeStart, dustSettings.SizeEnd) *
+        (1 + dustSettings.SizeVariation) * dustSettings.RenderScale * 0.707107f;
+    const auto extents = dustSettings.VolumeHalfExtents;
+    require(std::abs((694 - extents.x) * 0.5f - radius) < 0.01f &&
+        std::abs((181 - extents.y) * 2 - radius) < 0.01f &&
+        std::abs((779 - extents.z) * 1.5f - radius) < 0.01f,
+        "Scaled confined volumes must still reserve the world-space sprite radius");
+    require(dustTransform.Rotation == Vector3(15,35,-20) && dustTransform.Scale == Vector3(0.5f,2,-1.5f),
+        "Live volume bounds must preserve the current rotation and scale");
+    dustTransform = savedDustTransform;
+    dustTransform.DirtyFlag = true;
     world.SetPaused(false);
     app.BenchmarkFrame();
-    require(center.GetFloat() == 700 &&
-        console.FindConsoleVariable(L"App.Bounds.BistroFox0.CenterX").GetString() == foxBefore,
-        "Scene updates must not overwrite detached bounds");
-    require(center.SetFromString(initial) && extent.SetFromString("8"), "Cannot restore bounds fixture");
     console.FindConsoleVariable(L"App.Bounds.Show").SetFromString("false");
+    {
+        World fixture(WorldDesc{});
+        auto& ecs = fixture.GetECS();
+        const Entity owner = ecs.CreateEntity();
+        ecs.Add<NameComponent>(owner, "BoundsOwnerTest");
+        ecs.Add<TransformComponent>(owner, Vector3(10,20,30));
+        ecs.Add<ParticleEmitterComponent>(owner);
+        BistroBounds::Scene bounds(fixture);
+        ecs.DestroyEntity(owner);
+        const Entity replacement = ecs.CreateEntity();
+        require(replacement == owner, "Bounds lifecycle fixture must exercise a recycled entity ID");
+        ecs.Add<NameComponent>(replacement, "BoundsReplacementTest");
+        ecs.Add<TransformComponent>(replacement, Vector3(999,20,30));
+        ecs.Add<ParticleEmitterComponent>(replacement);
+        bounds.DrawBounds(fixture, *BenchmarkEngine::GetLocator().GetModule<RenderModule>());
+        require(console.FindConsoleVariable(L"App.Bounds.BoundsOwnerTest.CenterX").GetFloat() == 10,
+            "A removed object's bounds must not follow a different owner with a recycled ID");
+    }
     world.SetPaused(paused);
     app.MsgProc(window, WM_KEYUP, VK_F1, 0);
 }

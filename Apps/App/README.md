@@ -16,7 +16,12 @@ the populations. Character counts apply at startup; zero creates no characters:
 `App.Physics.CountScale` defaults to `1`: the original scene props without extra
 tableware copies. Saved values in `Build/bin/x64/Release/App/Config/Engine.ini`
 override this default and survive rebuilds; set it to `1` to restore the original count.
-Layout boxes (`App.Bounds.Show`) default to off and can be enabled from Settings.
+Scene bounds (`App.Bounds.Show`) default to off and can be enabled from Settings.
+Boxes follow current position, rotation and scale, including while paused. Particle,
+grass and water dimensions follow their component settings. Character boxes cache
+the startup pose in local space; they follow the character transform without
+recomputing a tight box for each skeletal pose. Tracked coordinates and world AABB
+half-extents are read-only; confined particle layout volumes remain editable.
 
 Each of the 21 tables has a reflection spawn anchor: 11 on the terrace and 10
 inside. `App.ReflectionProbes.Count=4` picks four random distinct tables. Growing
