@@ -45,16 +45,24 @@ float3 DepthPosition(int2 pixel, float depth)
     return world.xyz / world.w;
 }
 
-// shortcut: only frontmost on-screen depth collides; use scene colliders when hidden/off-screen hits are required.
-void CollideDepth(float3 previous, inout float3 position, inout float3 velocity)
+struct ParticleContact
 {
+    float3 Normal;
+    float Time;
+    float Push;
+};
+
+// shortcut: only frontmost on-screen depth collides; use scene colliders when hidden/off-screen hits are required.
+bool FindDepthContact(float3 previous, float3 position, float3 velocity, out ParticleContact contact)
+{
+    contact = (ParticleContact)0;
     float4 clip = mul(float4(position, 1), Camera.ViewProj);
-    if (clip.w <= 0 || clip.z <= 0 || clip.z >= clip.w) return;
+    if (clip.w <= 0 || clip.z <= 0 || clip.z >= clip.w) return false;
     float2 uv = clip.xy / clip.w * float2(0.5f, -0.5f) + 0.5f;
     int2 pixel = int2(floor(uv * RenderSize));
-    if (any(pixel < 1) || any(pixel >= int2(RenderSize) - 1)) return;
+    if (any(pixel < 1) || any(pixel >= int2(RenderSize) - 1)) return false;
     float depth = SceneDepth.Load(int3(pixel, 0));
-    if (depth <= 0) return;
+    if (depth <= 0) return false;
     float3 surface = DepthPosition(pixel, depth);
     float left = SceneDepth.Load(int3(pixel + int2(-1, 0), 0));
     float right = SceneDepth.Load(int3(pixel + int2(1, 0), 0));
@@ -65,11 +73,11 @@ void CollideDepth(float3 previous, inout float3 position, inout float3 velocity)
     int2 dy = abs(top - depth) < abs(bottom - depth) ? int2(0, -1) : int2(0, 1);
     float depthX = dx.x < 0 ? left : right;
     float depthY = dy.y < 0 ? top : bottom;
-    if (depthX <= 0 || depthY <= 0) return;
+    if (depthX <= 0 || depthY <= 0) return false;
     float3 normal = cross(DepthPosition(pixel + dx, depthX) - surface,
         DepthPosition(pixel + dy, depthY) - surface);
     float lengthSquared = dot(normal, normal);
-    if (lengthSquared < 1e-12f) return;
+    if (lengthSquared < 1e-12f) return false;
     normal *= rsqrt(lengthSquared);
     if (dot(normal, Camera.CameraLocation - surface) < 0) normal = -normal;
     float distance = dot(position - surface, normal);
@@ -78,14 +86,18 @@ void CollideDepth(float3 previous, inout float3 position, inout float3 velocity)
     if (incoming < 0 && distance < CollisionRadius && previousDistance >= -CollisionThickness &&
         (previousDistance >= CollisionRadius || distance >= -CollisionThickness))
     {
-        position += normal * (CollisionRadius - distance + 0.01f);
-        velocity -= (1 + CollisionRestitution) * incoming * normal;
+        contact.Normal = normal;
+        contact.Time = saturate((previousDistance - CollisionRadius) / max(previousDistance - distance, 1e-6f));
+        contact.Push = max(0, CollisionRadius - lerp(previousDistance, distance, contact.Time)) + 0.01f;
+        return true;
     }
+    return false;
 }
 
 // shortcut: expanded box corners are conservative; use sphere/box edge sweeps if corner clearance matters.
-void CollideBox(float3 previous, inout float3 position, inout float3 velocity)
+bool FindBoxContact(float3 previous, float3 position, out ParticleContact contact)
 {
+    contact = (ParticleContact)0;
     float3 origin = mul(float4(previous, 1), WorldToCollisionBox).xyz;
     float3 destination = mul(float4(position, 1), WorldToCollisionBox).xyz;
     float3 travel = destination - origin;
@@ -98,7 +110,7 @@ void CollideBox(float3 previous, inout float3 position, inout float3 velocity)
         uint axis = clearance.x < clearance.y ? 0 : 1;
         if (clearance.z < clearance[axis]) axis = 2;
         localNormal[axis] = origin[axis] < 0 ? -1 : 1;
-        destination = origin + localNormal * (clearance[axis] + 0.01f);
+        contact.Push = clearance[axis] + 0.01f;
     }
     else
     {
@@ -106,7 +118,7 @@ void CollideBox(float3 previous, inout float3 position, inout float3 velocity)
         {
             if (abs(travel[axis]) < 1e-6f)
             {
-                if (abs(origin[axis]) > extent[axis]) return;
+                if (abs(origin[axis]) > extent[axis]) return false;
                 continue;
             }
             float a = (-extent[axis] - origin[axis]) / travel[axis];
@@ -119,16 +131,54 @@ void CollideBox(float3 previous, inout float3 position, inout float3 velocity)
                 localNormal[axis] = travel[axis] > 0 ? -1 : 1;
             }
             exit = min(exit, max(a, b));
-            if (entry > exit) return;
+            if (entry > exit) return false;
         }
-        if (dot(localNormal, localNormal) == 0) return;
-        destination = origin + travel * entry + localNormal * 0.01f;
+        if (dot(localNormal, localNormal) == 0) return false;
+        contact.Push = 0.01f;
     }
-    float3 normal = mul(localNormal, transpose((float3x3)WorldToCollisionBox));
-    // Keep the tangential position and discard the unused time after the first contact, as with depth collisions.
-    position = previous + mul(destination - origin, transpose((float3x3)WorldToCollisionBox));
+    contact.Normal = mul(localNormal, transpose((float3x3)WorldToCollisionBox));
+    contact.Time = entry;
+    return true;
+}
+
+void ResolveContact(float3 normal, float step, inout float3 velocity)
+{
     float incoming = dot(velocity, normal);
-    if (incoming < 0) velocity -= (1 + CollisionRestitution) * incoming * normal;
+    if (incoming >= 0) return;
+    // A supporting surface cancels this step's inward gravity instead of generating a fresh bounce.
+    float restitution = -incoming <= max(0, -dot(Acceleration, normal)) * step + 0.01f ? 0 : CollisionRestitution;
+    float impulse = -(1 + restitution) * incoming;
+    float3 tangent = velocity - incoming * normal;
+    tangent *= max(0, 1 - CollisionFriction * impulse / max(length(tangent), 1e-6f));
+    velocity = tangent - restitution * incoming * normal;
+}
+
+// shortcut: resolve at most two contacts per substep; increase the bound for high-speed narrow passages.
+void CollideScene(float3 previous, float step, inout float3 position, inout float3 velocity)
+{
+    float remaining = step;
+    for (uint hit = 0; hit < 2; ++hit)
+    {
+        ParticleContact contact = (ParticleContact)0;
+        bool found = false;
+        if (DepthCollision != 0) found = FindDepthContact(previous, position, velocity, contact);
+        if (CollisionBoxEnabled != 0)
+        {
+            ParticleContact box;
+            if (FindBoxContact(previous, position, box) && (!found || box.Time < contact.Time))
+            {
+                contact = box;
+                found = true;
+            }
+        }
+        if (!found) return;
+        position = lerp(previous, position, contact.Time) + contact.Normal * contact.Push;
+        ResolveContact(contact.Normal, step, velocity);
+        remaining *= 1 - contact.Time;
+        if (hit == 1) return;
+        previous = position;
+        position += velocity * remaining;
+    }
 }
 
 // shortcut: discard remaining travel after a hit; use swept multi-hit integration for tiny boxes or high speeds.
@@ -209,10 +259,8 @@ void Simulate(uint id : SV_DispatchThreadID)
                 Acceleration * (Drag > 0.00001f ? (1 - damping) / Drag : step);
             particle.Position += (oldVelocity + particle.Velocity) * (0.5f * step);
         }
-        if (DepthCollision != 0 && step > 0)
-            CollideDepth(previousPosition, particle.Position, particle.Velocity);
-        if (CollisionBoxEnabled != 0 && step > 0)
-            CollideBox(previousPosition, particle.Position, particle.Velocity);
+        if ((DepthCollision != 0 || CollisionBoxEnabled != 0) && step > 0)
+            CollideScene(previousPosition, step, particle.Position, particle.Velocity);
         if (VolumeEnabled != 0 && step > 0)
             ConfineVolume(particle.Position, particle.Velocity);
     }

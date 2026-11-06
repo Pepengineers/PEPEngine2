@@ -28,6 +28,7 @@ inline void CheckBistroParticleControls()
         if (!fountain) return;
         ++fountains;
         require(settings.DepthCollision && settings.Substeps >= 4 && settings.CollisionRestitution > 0 &&
+            settings.CollisionFriction == 0.2f &&
             settings.CollisionRadius >= (std::max)(settings.SizeStart, settings.SizeEnd) *
                 (1 + settings.SizeVariation) * settings.RenderScale * 0.707107f,
             "Fountains must bounce against scene depth without their sprite corners penetrating surfaces");

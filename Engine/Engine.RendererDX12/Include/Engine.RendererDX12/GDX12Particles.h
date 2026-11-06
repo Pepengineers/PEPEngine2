@@ -62,6 +62,7 @@ struct GDX12ParticleEmitterSettings
     bool DepthCollision = false;
     float CollisionRadius = 1.5f; // World cm, independent of billboard size.
     float CollisionRestitution = 0.45f;
+    float CollisionFriction = 0; // Coulomb friction coefficient; zero preserves tangential speed.
     float CollisionThickness = 10.0f; // Maximum initial penetration in cm.
     bool CollisionBoxEnabled = false;
     Vector3 CollisionBoxCenter = Vector3::Zero; // World-space solid obstacle, independent of camera depth.

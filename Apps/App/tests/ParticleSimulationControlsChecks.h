@@ -129,6 +129,83 @@ static void CheckParticleSimulationControls(GDX12Device& device, GDX12DeviceReso
     emitter.Paused = true;
     render();
     Require(std::abs(distance() - 99) < 0.03f, "Paused bounded particle continued simulating");
+    emitter.Paused = false;
+    emitter.VolumeEnabled = false;
+    emitter.DepthCollision = true;
+    emitter.CollisionRadius = 2;
+    emitter.CollisionRestitution = 0.5f;
+    emitter.SizeStart = emitter.SizeEnd = 30;
+    const auto cameraRight = forward.Cross(Vector3::UnitY);
+    auto tangent = cameraRight;
+    tangent.Normalize();
+    const auto lateral = [&]
+    {
+        const auto coverage = Read(device, *resources.ParticleMotion, 3);
+        const float weight = std::accumulate(coverage.begin(), coverage.end(), 0.0f);
+        Require(weight > 0, "Particle depth-physics fixture has no visible particle");
+        float x = 0;
+        const UINT width = resources.ParticleMotion->GetWidth();
+        for (size_t pixel = 0; pixel < coverage.size(); ++pixel)
+            x += coverage[pixel] * (static_cast<float>(pixel % width) + 0.5f);
+        return (2 * x / weight / width - 1) * distance() * width / resources.ParticleMotion->GetHeight();
+    };
+    for (const auto simulation : {ParticleSimulation::AnalyticDrag, ParticleSimulation::SemiImplicitEuler})
+    {
+        emitter.Simulation = simulation;
+        emitter.Acceleration = Vector3::Zero;
+        for (const float friction : {0.0f, 0.2f, 1.0f})
+        {
+            emitter.World = Matrix::CreateTranslation(eye + forward * 100);
+            emitter.Direction = forward + tangent;
+            emitter.Direction.Normalize();
+            emitter.SpeedMin = emitter.SpeedMax = std::sqrt(2000000.0f);
+            emitter.CollisionFriction = friction;
+            ++emitter.ResetRevision;
+            emitter.DeltaTime = 0;
+            render();
+            emitter.DeltaTime = 0.1f;
+            render();
+            // Hit at .048 s: normal speed 1000 -> -500; tangential impulse is mu * 1500.
+            const float tangentSpeed = (std::max)(0.0f, 1000 - friction * 1500);
+            Require(std::abs(distance() - 121.99f) < 0.03f,
+                "Depth collision discarded the time remaining after impact");
+            Require(std::abs(lateral() - (48 + tangentSpeed * 0.052f)) < 0.8f,
+                "Depth collision did not apply the independent Coulomb friction impulse");
+        }
+        emitter.World = Matrix::CreateTranslation(eye + forward * 147.99f);
+        emitter.SpeedMin = emitter.SpeedMax = 0;
+        emitter.Acceleration = forward * 100;
+        emitter.CollisionFriction = 0.2f;
+        ++emitter.ResetRevision;
+        emitter.DeltaTime = 0;
+        render();
+        emitter.DeltaTime = 0.1f;
+        for (int frame = 0; frame < 20; ++frame)
+        {
+            render();
+            Require(std::abs(distance() - 147.99f) < 0.03f,
+                "Particle resting on scene depth gained bounce energy from gravity");
+        }
+    }
+    emitter.Acceleration = Vector3::Zero;
+    emitter.CollisionFriction = 0;
+    emitter.CollisionRestitution = 1;
+    emitter.SizeStart = emitter.SizeEnd = 10;
+    std::cout << "GPU depth physics: remaining impact time, friction 0/.2/1 and resting gravity contact passed.\n";
+    emitter.CollisionBoxEnabled = true;
+    emitter.CollisionBoxCenter = eye + forward * 120;
+    emitter.CollisionBoxHalfExtents = Vector3(100, 100, 1);
+    emitter.CollisionBoxYawDegrees = 28.5f;
+    emitter.World = Matrix::CreateTranslation(eye + forward * 100);
+    emitter.Direction = forward;
+    emitter.SpeedMin = emitter.SpeedMax = 1000;
+    ++emitter.ResetRevision;
+    emitter.DeltaTime = 0;
+    render();
+    emitter.DeltaTime = 0.1f;
+    render();
+    Require(distance() > 60 && distance() < 80,
+        "Farther scene depth overrode the first impact against the door collider");
     auto* queue = device.GetCommandQueue();
     auto* commands = queue->GetCommandList();
     commands->ResourceBarrier({sceneDepth.GetResource()->GetDepthWriteBarrier()});
@@ -146,6 +223,7 @@ static void CheckParticleSimulationControls(GDX12Device& device, GDX12DeviceReso
     const auto normal = Vector3::TransformNormal(Vector3::UnitZ,
         Matrix::CreateRotationY(XMConvertToRadians(28.5f)));
     const float contactOffset = 3 / forward.Dot(normal);
+    const float reboundSpeed = 1000 * (2 * forward.Dot(normal) * forward.Dot(normal) - 1);
     for (const float side : {-1.0f, 1.0f})
     {
         emitter.World = Matrix::CreateTranslation(eye + forward * (120 + side * 20));
@@ -156,8 +234,10 @@ static void CheckParticleSimulationControls(GDX12Device& device, GDX12DeviceReso
         render();
         emitter.DeltaTime = 0.1f; // Cross the entire thin obstacle in one substep, with no scene depth.
         render();
-        Require(std::abs(distance() - (120 + side * (contactOffset + 0.01f * forward.Dot(normal)))) < 0.03f,
-            "Particle tunneled through the rotated door collider with no visible depth");
+        const float remaining = 0.1f - (20 - contactOffset) / 1000;
+        Require(std::abs(distance() - (120 + side * (contactOffset + 0.01f * forward.Dot(normal) +
+            reboundSpeed * remaining))) < 0.03f,
+            "Particle door collision did not continue the reflected motion for the remaining impact time");
         const float contact = distance();
         emitter.DeltaTime = 0.01f;
         render();

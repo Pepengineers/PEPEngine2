@@ -103,6 +103,12 @@ static void TestCPU()
     Require(!IsValidParticleEmitterSettings(particle), "Invalid lifetime accepted");
     particle = {}; particle.CollisionRestitution = 1.01f;
     Require(!IsValidParticleEmitterSettings(particle), "Energy-gaining particle bounce accepted");
+    particle = {}; particle.CollisionFriction = -0.01f;
+    Require(!IsValidParticleEmitterSettings(particle), "Negative particle collision friction accepted");
+    particle.CollisionFriction = NAN;
+    Require(!IsValidParticleEmitterSettings(particle), "Nonfinite particle collision friction accepted");
+    particle.CollisionFriction = 1.01f;
+    Require(!IsValidParticleEmitterSettings(particle), "Excessive particle collision friction accepted");
     particle = {}; particle.CollisionRadius = 0;
     Require(!IsValidParticleEmitterSettings(particle), "Zero collision radius accepted");
     particle = {}; particle.CollisionThickness = NAN;

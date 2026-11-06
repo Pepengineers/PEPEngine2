@@ -115,6 +115,7 @@ namespace BistroParticles
         settings.Texture = atlas; settings.AtlasColumns = settings.AtlasRows = 8;
         settings.SoftDistance = 2; settings.DepthCollision = true;
         settings.CollisionRadius = 7; // Covers the largest fountain billboard's half-diagonal, including size variation.
+        settings.CollisionFriction = 0.2f;
         // Authored bounds of the closed entrance door and its glass (Exterior nodes 121/123).
         settings.CollisionBoxEnabled = true;
         settings.CollisionBoxCenter = Vector3(-80.037f, 166.15f, -94.836f);

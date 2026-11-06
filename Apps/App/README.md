@@ -154,6 +154,11 @@ rotated solid box matching the closed entrance door also blocks its transparent
 glass and works when the door is hidden or off screen. Other depth collisions
 remain limited to the frontmost visible surface. Fountain collision radii cover
 the largest sprite, including size variation.
+Collision response uses restitution and Coulomb friction (0.2 for the fountains),
+then advances the reflected particle for the remaining substep time. The solver
+selects the earliest depth/door contact and resolves up to two contacts per
+substep; supporting surfaces cancel inward gravity without creating new bounce
+energy. These are GPU visual particles and do not transfer impulses to Jolt bodies.
 See [effects and benchmark commands](../../docs/rendering/scene-techniques.md).
 
 Scene loading prepares independent textures through the App's shared JobSystem,

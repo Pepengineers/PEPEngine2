@@ -84,7 +84,7 @@ cbuffer Emitter : register(b2)
     uint Geometry;
     uint Simulation;
     uint VolumeEnabled;
-    uint EmitterPadding;
+    float CollisionFriction;
     float3 VolumeHalfExtents;
     float VolumePadding;
     float4x4 WorldToEmitter;

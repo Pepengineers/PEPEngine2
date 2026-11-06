@@ -38,7 +38,7 @@ namespace ParticleResources
         UINT Columns, Rows, Substeps, EdgeSamples;
         UINT Seed, Paused; XMFLOAT2 RenderSize;
         UINT DepthCollision; float CollisionRadius, CollisionRestitution, CollisionThickness;
-        UINT Geometry, Simulation, VolumeEnabled, Padding;
+        UINT Geometry, Simulation, VolumeEnabled; float CollisionFriction;
         XMFLOAT3 VolumeHalfExtents; float VolumePadding;
         XMFLOAT4X4 WorldToEmitter;
         XMFLOAT4X4 WorldToCollisionBox;
@@ -147,6 +147,7 @@ namespace ParticleResources
         constants.DepthCollision = emitter.DepthCollision;
         constants.CollisionRadius = emitter.CollisionRadius;
         constants.CollisionRestitution = emitter.CollisionRestitution;
+        constants.CollisionFriction = emitter.CollisionFriction;
         constants.CollisionThickness = emitter.CollisionThickness;
         constants.Geometry = static_cast<UINT>(emitter.Geometry);
         constants.Simulation = static_cast<UINT>(emitter.Simulation);
