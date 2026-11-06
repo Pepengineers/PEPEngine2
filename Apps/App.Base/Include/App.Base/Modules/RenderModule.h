@@ -19,6 +19,7 @@ class GDX12SwapChain;
 class GDX12Device;
 class GDX12CommandList;
 class GDX12GPUTimer;
+struct GDX12GPUTimingTotals;
 struct GDX12FrameGenerationStatus;
 
 struct TransformComponent;
@@ -66,6 +67,9 @@ public:
     GPUTexture* CreateTexture(const std::string& name, const Texture* texture, ETextureType type);
     void WaitForUploads();
     D3D12MA::Statistics GetMemoryStatistics() const;
+    double GetPrimaryGPUTimeMS();
+    GDX12GPUTimingTotals GetPrimaryGPUTimingTotals();
+    double GetSkeletalPreparationTimeMS() const { return _skeletalPreparationTimeMS; }
     const GDX12RenderGraph::Statistics& GetRenderGraphStatistics() const;
     double GetGPUFrameTimeMS() const;
     void WriteRenderGraph(std::ostream& output) const;
@@ -153,6 +157,8 @@ private:
         UINT Instance = 0;
         UINT Material = 0;
         UINT SourceMaterial = 0;
+        UINT Batch = UINT_MAX;
+        UINT BatchStart = 0;
         GDX12Material* ImportedMaterial = nullptr;
         GDX12Material* ActiveMaterial = nullptr;
         std::vector<UINT> BoneNodes;
@@ -182,6 +188,8 @@ private:
     std::map<std::pair<World*, Entity>, SkeletalState> _skeletalStates;
     std::vector<UINT> _freeSkeletalInstances;
     std::unique_ptr<GDX12Skinning> _skinning;
+    bool _skeletalBatchDirty = true;
+    bool _skeletalInstancing = false;
 
     void BuildBackBuffer();
     void CollectReflectionScene();
@@ -235,6 +243,7 @@ private:
     bool _dualGPUMode;
     bool _uiInitialized = false;
     bool _renderingSuspended = false;
+    double _skeletalPreparationTimeMS = 0;
     std::unique_ptr<GDX12GPUTimer> _primaryGPUTimer;
     std::unique_ptr<GDX12GPUTimer> _secondaryGPUTimer;
 

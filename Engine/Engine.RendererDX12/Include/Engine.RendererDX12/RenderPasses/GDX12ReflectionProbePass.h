@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine.RendererDX12/GDX12InstanceBatcher.h"
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include <cstdint>
 #include "Engine.RendererDX12/RenderPasses/GDX12GeometryViewPass.h"
@@ -66,6 +67,7 @@ private:
         std::unique_ptr<GDX12UploadBuffer<GDX12ShadowConstants>> Shadow;
         std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> Commands;
         std::unique_ptr<GDX12UploadBuffer<UINT>> Counter;
+        std::unique_ptr<GDX12InstanceBatcher> Batches;
     };
     struct PreparedView
     {

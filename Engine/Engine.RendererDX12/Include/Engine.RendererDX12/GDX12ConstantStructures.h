@@ -110,12 +110,13 @@ struct GDX12InstanceData
     UINT TransformIndex;
     UINT MaterialIndex;
     UINT ReflectionDynamic = 0;
-    UINT _pad2;
+    UINT SkinOutputVertex = UINT_MAX;
     XMFLOAT3 BoundingBoxCenter;
-    UINT _pad3;
+    UINT SkinBatch = UINT_MAX;
     XMFLOAT3 BoundingBoxExtents;
-    UINT _pad4;
+    UINT SkinBatchStart = 0;
 };
+static_assert(sizeof(GDX12InstanceData) == 48);
 
 struct GDX12IndirectDrawArgs
 {

@@ -59,6 +59,7 @@ public:
 	ID3D12Resource* BeginSkinning(GDX12CommandList* commands);
 	void EndSkinning(GDX12CommandList* commands);
 	const GPUMesh* GetGPUMeshByHandle(MeshHandle handle);
+    D3D12_GPU_VIRTUAL_ADDRESS GetVertexAddress() const { return _vertexBuffer ? _vertexBuffer->GetGPUVirtualAddress() : 0; }
 
 private:
 	friend class RenderModule;

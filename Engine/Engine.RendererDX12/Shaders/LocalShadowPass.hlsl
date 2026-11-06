@@ -35,6 +35,7 @@ void CS(uint3 id : SV_DispatchThreadID)
     VisibleCommands[index] = command;
 }
 #else
+#include "InstancedGeometry.hlsli"
 cbuffer DrawConstants : register(b0) { uint InstanceID; uint LightFaceIndex; };
 StructuredBuffer<Material> Materials : register(t0);
 StructuredBuffer<Transform> Transforms : register(t1);
@@ -50,9 +51,15 @@ struct VertexOutput
     nointerpolation uint MaterialIndex : TEXCOORD1;
 };
 
-VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD)
+VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
 {
-    InstanceData instance = Instances[InstanceID];
+    InstanceData instance = Instances[DrawInstance(InstanceID, instanceID, Instances[InstanceID])];
+    if (instance.SkinOutputVertex != 0xffffffffu)
+    {
+        SkinVertex vertex = ReadSkinVertex(instance, vertexID);
+        position = vertex.Position;
+        uv = vertex.UV;
+    }
     VertexOutput output;
     float4 world = mul(float4(position, 1), Transforms[instance.TransformIndex].World);
     output.Position = mul(world, Lights[LightFaceIndex / 6].ShadowViewProj[LightFaceIndex % 6]);

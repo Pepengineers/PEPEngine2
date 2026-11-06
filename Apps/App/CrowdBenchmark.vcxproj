@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="BistroStartupTests.vcxproj" />
+  <PropertyGroup>
+    <ProjectGuid>{CE763F49-0B40-4EC9-A98A-A9E31AF8A4B6}</ProjectGuid>
+  </PropertyGroup>
+  <ItemGroup>
+    <ClCompile Remove="tests\BistroStartupTests.cpp" />
+    <ClCompile Include="tests\CrowdBenchmark.cpp" />
+  </ItemGroup>
+</Project>

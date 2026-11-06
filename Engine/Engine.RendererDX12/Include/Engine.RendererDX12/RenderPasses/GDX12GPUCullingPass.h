@@ -77,6 +77,24 @@ public:
 			currentCameraVisBuffers.OpaqueDrawCounter->GetResource().GetUAVBarrier(),
 			currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetUAVBarrier(),
 			currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetUAVBarrier() });
+        if (_resources->SkeletalBatchCount)
+        {
+            if (!currentCameraVisBuffers.OpaqueBatches)
+                currentCameraVisBuffers.OpaqueBatches = std::make_unique<GDX12InstanceBatcher>(_resources->Device);
+            if (!currentCameraVisBuffers.TransparentBatches)
+                currentCameraVisBuffers.TransparentBatches = std::make_unique<GDX12InstanceBatcher>(_resources->Device);
+            currentCameraVisBuffers.OpaqueBatches->Build(cmdList, *currentFrameConstants->ShadowInstances,
+                *currentCameraVisBuffers.VisibleOpaqueCommandsCache, *currentCameraVisBuffers.OpaqueDrawCounter,
+                _resources->SkeletalBatchCount, _resources->SkeletalInstanceCount);
+            currentCameraVisBuffers.TransparentBatches->Build(cmdList, *currentFrameConstants->ShadowInstances,
+                *currentCameraVisBuffers.VisibleTransparentCommandsCache, *currentCameraVisBuffers.TransparentDrawCounter,
+                _resources->SkeletalBatchCount, _resources->SkeletalInstanceCount);
+        }
+        else
+        {
+            currentCameraVisBuffers.OpaqueBatches.reset();
+            currentCameraVisBuffers.TransparentBatches.reset();
+        }
 	}
 
 	void ClearDenendencies() override

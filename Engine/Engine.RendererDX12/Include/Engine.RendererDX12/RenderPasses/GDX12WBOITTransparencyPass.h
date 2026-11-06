@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine.RendererDX12/GDX12InstanceBatcher.h"
 #include <cstdint>
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
@@ -64,6 +65,7 @@ public:
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;
+        RSDesc1.InstancedGeometry = true;
 		RSDesc1.NumSingleCBVSlots = 4;
 		RSDesc1.NumSingleSRVSlots = 16;
 		RSDesc1.StaticSamplers = GetStaticSamplers();
@@ -171,6 +173,10 @@ public:
         binding.IndirectSignature = _transparencyCS.Get();
         binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
 		binding.Root = _transparencyRS.get();
+		const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
+		const auto geometrySlot = static_cast<UINT>(binding.Root->GetGeometryRootParamIndex());
+		binding.RootSRVs = { { geometrySlot, geometryAddress }, { geometrySlot + 1,
+		    currentCameraVisBuffers.TransparentBatches ? currentCameraVisBuffers.TransparentBatches->VisibleInstancesAddress() : geometryAddress } };
 		binding.Pipeline = _transparencyPSO;
 		binding.CBVs.push_back({ 1, currentFrameConstants->MainCB->GetElementAddress(0) });
 		binding.CBVs.push_back({ 3, currentFrameConstants->ShadowCB->GetElementAddress(0) });
@@ -220,7 +226,7 @@ public:
         mesh.Geometry = _resources->GeometryBuffer.get();
         mesh.InstanceCount = meshCount;
         mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _transparencyCS.Get(),
-            meshCount ? currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().D3DResource.Get() : nullptr, 0,
+            meshCount ? (currentCameraVisBuffers.TransparentBatches ? currentCameraVisBuffers.TransparentBatches->Commands() : *currentCameraVisBuffers.VisibleTransparentCommandsCache).GetResource().D3DResource.Get() : nullptr, 0,
             meshCount ? currentCameraVisBuffers.TransparentDrawCounter->GetResource().D3DResource.Get() : nullptr, 0,
             meshCount, sizeof(GDX12IndirectDrawArgs) };
         _resources->EmitGeometry(cmdList, view, mesh);

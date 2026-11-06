@@ -44,12 +44,16 @@ void RenderModule::ReleaseSkeletalState(World& world, Entity entity)
         _freeSkeletalInstances.push_back(part.Instance);
     }
     _skeletalStates.erase(it);
+    _skeletalBatchDirty = true;
     ++_primaryResources.ReflectionDynamicRevision;
     if (_skeletalStates.empty()) _skinning.reset();
 }
 
 void RenderModule::PrepareSkeletalMeshes()
 {
+    const bool instancing = GDX12SkeletalInstancingEnabled();
+    _skeletalBatchDirty |= instancing != _skeletalInstancing;
+    _skeletalInstancing = instancing;
     const bool enabled = SkinningEnabled.GetValue();
     const int quality = SkinningQuality.GetInt();
     const bool animate = enabled && quality != 0;
@@ -57,6 +61,40 @@ void RenderModule::PrepareSkeletalMeshes()
     auto& assets = AssetManager::GetInstance();
     auto& meshes = assets.Meshes();
     auto& scenes = assets.Scenes();
+    if (_skeletalStates.empty() && !_dualGPUMode)
+    {
+        UINT64 vertices = 0, attachments = 0;
+        auto worlds = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
+        for (size_t index = 0; index < worlds->GetWorldCount(); ++index)
+            worlds->GetWorld(index)->GetECS().ForEach<SkeletalMeshRenderComponent>(
+                [&](Entity entity, const SkeletalMeshRenderComponent& component)
+                {
+                    if (!worlds->GetWorld(index)->GetECS().Has<TransformComponent>(entity)) return;
+                    const auto* scene = scenes.GetScene(component._scene);
+                    if (!scene) return;
+                    for (const auto& node : scene->GetNodes())
+                        for (const auto handle : node.Meshes)
+                            if (const auto* mesh = meshes.GetMesh(handle))
+                            {
+                                SubmitMesh(mesh, handle);
+                                for (const auto& part : mesh->GetSubMeshes())
+                                {
+                                    if (part.Vertices.empty() || part.Indices.empty()) continue;
+                                    vertices += part.Vertices.size();
+                                    ++attachments;
+                                }
+                            }
+                });
+        const auto extra = attachments > _freeSkeletalInstances.size() ? attachments - _freeSkeletalInstances.size() : 0;
+        if (vertices > UINT_MAX || extra > UINT_MAX - _instanceCount)
+            throw std::overflow_error("Initial skeletal crowd exceeds buffer addressing");
+        EnsureInstanceCapacity(_instanceCount + static_cast<UINT>(extra));
+        if (vertices)
+        {
+            const auto offset = _primaryResources.GeometryBuffer->AllocateSkinnedVertices(static_cast<UINT>(vertices));
+            _primaryResources.GeometryBuffer->ReleaseSkinnedVertices(offset, static_cast<UINT>(vertices));
+        }
+    }
     struct PoseJob final : ParallelJob
     {
         struct Task
@@ -144,9 +182,10 @@ void RenderModule::PrepareSkeletalMeshes()
                                 skinVertices += static_cast<UINT>(source.Vertices.size());
                             }
                         }
-                    if (partCount > UINT_MAX - _instanceCount) throw std::overflow_error("Too many skeletal attachments");
+                    const auto extra = partCount > _freeSkeletalInstances.size() ? partCount - _freeSkeletalInstances.size() : 0;
+                    if (extra > UINT_MAX - _instanceCount) throw std::overflow_error("Too many skeletal attachments");
                     if (partCount && !_skinning) _skinning = std::make_unique<GDX12Skinning>(_primaryDevice.get());
-                    EnsureInstanceCapacity(_instanceCount + static_cast<UINT>(partCount));
+                    EnsureInstanceCapacity(_instanceCount + static_cast<UINT>(extra));
                     // Upload source meshes first so they cannot consume the reserved output range.
                     _primaryResources.GeometryBuffer->ReserveSkinnedVertices(skinVertices);
                     created.Parts.reserve(partCount);
@@ -192,7 +231,7 @@ void RenderModule::PrepareSkeletalMeshes()
                                     part.BoneNodes.push_back(index);
                                     part.InverseBinds.push_back(bone.InverseBind);
                                 }
-                                part.GPU = _skinning->CreateMesh(source, static_cast<UINT>(_primaryResources.FrameConstants.size()));
+                                part.GPU = _skinning->CreateMesh(source, static_cast<UINT>(_primaryResources.FrameConstants.size()), handle, revision);
                                 part.Palette.resize(part.BoneNodes.size() + 1);
                                 part.GPU->OutputVertex = _primaryResources.GeometryBuffer->AllocateSkinnedVertices(part.GPU->VertexCount);
                                 if (_freeSkeletalInstances.empty()) part.Instance = _instanceCount++;
@@ -208,7 +247,7 @@ void RenderModule::PrepareSkeletalMeshes()
                                 draw.IndexCountPerInstance = gpuMesh->SubMeshes[subMesh].IndexCount;
                                 draw.InstanceCount = 1;
                                 draw.StartIndexLocation = gpuMesh->SubMeshes[subMesh].StartIndexLocation;
-                                draw.BaseVertexLocation = static_cast<INT>(ready.GPU->OutputVertex);
+                                draw.BaseVertexLocation = 0;
                                 _primaryResources.IndirectCommandsCache->CopyData(ready.Instance, draw);
                             }
                         }
@@ -221,6 +260,7 @@ void RenderModule::PrepareSkeletalMeshes()
                 }
             }
             auto& state = _skeletalStates.at(key);
+            _skeletalBatchDirty |= state.ComponentRevision != component._revision;
             state.Seen = true;
             if (state.Parts.empty()) return;
             poses.Tasks.push_back({world, entity, &component, &state, scene});
@@ -232,6 +272,31 @@ void RenderModule::PrepareSkeletalMeshes()
         const auto key = it->first;
         ++it;
         ReleaseSkeletalState(*key.first, key.second);
+    }
+    if (_skeletalBatchDirty)
+    {
+        std::map<std::tuple<UINT, UINT, std::uint64_t, UINT, UINT>, std::vector<SkeletalPart*>> batches;
+        for (const auto& task : poses.Tasks)
+            for (auto& part : task.State->Parts)
+            {
+                part.Batch = UINT_MAX;
+                part.BatchStart = 0;
+                if (!instancing) continue;
+                auto* material = task.Component->_materials.empty() ? part.ImportedMaterial :
+                    task.Component->_materials.at(part.SourceMaterial);
+                batches[{part.Mesh.GetValue(), part.Mesh.GetGeneration(), part.MeshRevision, part.SubMesh,
+                    material->_CBufferIndex}].push_back(&part);
+            }
+        UINT batch = 0, first = 0;
+        for (const auto& [key, parts] : batches)
+        {
+            for (auto* part : parts) { part->Batch = batch; part->BatchStart = first; }
+            first += static_cast<UINT>(parts.size());
+            ++batch;
+        }
+        _primaryResources.SkeletalBatchCount = batch;
+        _primaryResources.SkeletalInstanceCount = first;
+        _skeletalBatchDirty = false;
     }
     // Resource creation/release stays on the owner thread; poses and disjoint instance slots run in jobs.
     poses.Schedule(*_RPcommonData.Jobs, poses.Tasks.size(), 1).Complete();
@@ -344,6 +409,9 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
         instance.TransformIndex = transformIt->second.CBufferIndex;
         instance.MaterialIndex = part.Material;
         instance.ReflectionDynamic = 1;
+        instance.SkinOutputVertex = part.GPU->OutputVertex;
+        instance.SkinBatch = part.Batch;
+        instance.SkinBatchStart = part.BatchStart;
         instance.BoundingBoxCenter = part.Bounds.Center;
         instance.BoundingBoxExtents = part.Bounds.Extents;
         frame->InstanceCache->CopyData(part.Instance, instance);

@@ -4,6 +4,8 @@
 #include "Engine.Core/Logging/Logger.h"
 #include <cmath>
 #include <cstdlib>
+#include <cstdint>
+#include <limits>
 #include <stdexcept>
 #include <chrono>
 #include <fstream>
@@ -25,12 +27,18 @@ namespace
     class BistroApp final : public App
     {
     public:
-        explicit BistroApp(const HINSTANCE instance) : App(instance) {}
+        explicit BistroApp(const HINSTANCE instance, unsigned characterSeed = std::random_device{}())
+            : App(instance), _characters(characterSeed) {}
 
         bool Initialize() override
         {
             if (!App::Initialize()) return false;
             auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+            const auto transforms = static_cast<std::uint64_t>(BistroCharacters::NPCCount.GetValue()) +
+                BistroCharacters::FoxCount.GetValue() + BistroReflections::Count.GetValue() +
+                BistroGrass::Count.GetValue() + BistroWater::Count.GetValue();
+            if (transforms > (std::numeric_limits<UINT>::max)()) throw std::overflow_error("Too many Bistro transforms");
+            Locator.GetModule<RenderModule>()->ReserveTransformCapacity(static_cast<UINT>(transforms));
             UpdateSceneAdditions(world, 0);
             _bounds = std::make_unique<BistroBounds::Scene>(world);
             _bounds->UpdateEmitters(world);
@@ -44,7 +52,7 @@ namespace
             return true;
         }
 
-        void BenchmarkFrame()
+        void BenchmarkFrame(double fixedStep = -1)
         {
             MSG message;
             while (PeekMessage(&message, nullptr, 0, 0, PM_REMOVE))
@@ -54,7 +62,7 @@ namespace
             }
             if (!_benchmarkStarted) { Timer.Reset(); _benchmarkStarted = true; }
             Timer.Start();
-            Timer.Tick();
+            Timer.Tick(fixedStep);
             Update(Timer);
             Render(Timer);
         }

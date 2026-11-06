@@ -29,6 +29,7 @@
     <ClInclude Include="src\GDX12ParticleResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ParticlesPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Skinning.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12InstanceBatcher.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12CloudComponent.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ReflectionProbes.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionProbePass.h" />
@@ -180,6 +181,8 @@
     <None Include="Shaders\FullScreenVS.hlsl" />
     <None Include="Shaders\OpaquePass.hlsl" />
     <None Include="Shaders\Skinning.hlsl" />
+    <None Include="Shaders\InstanceBatching.hlsl" />
+    <None Include="Shaders\InstancedGeometry.hlsli" />
     <None Include="Shaders\DeferredLighting.hlsl" />
     <None Include="Shaders\PBRSurface.hlsli" />
     <None Include="Shaders\PBRLighting.hlsli" />

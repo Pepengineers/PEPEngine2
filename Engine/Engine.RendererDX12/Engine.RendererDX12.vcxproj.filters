@@ -247,7 +247,10 @@
   <ItemGroup>
     <ClCompile Include="src\GDX12Skinning.cpp" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Skinning.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12InstanceBatcher.h" />
     <None Include="Shaders\Skinning.hlsl" />
+    <None Include="Shaders\InstanceBatching.hlsl" />
+    <None Include="Shaders\InstancedGeometry.hlsli" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ResourceHandle.h"><Filter>Header Files</Filter></ClInclude>
