@@ -41,7 +41,7 @@ struct GPUMesh
 		{
 			auto& CPUSubMesh = CPUMesh->GetSubMesh(i);
 			SubMeshes.push_back(GPUSubMesh(CPUSubMesh));
-			SubMeshes[i].IndexCount = CPUSubMesh.GetIndexCount();
+			SubMeshes[i].IndexCount = static_cast<std::uint32_t>(CPUSubMesh.GetIndexCount());
 		}
 	}
 };

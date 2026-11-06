@@ -73,7 +73,7 @@ static void BenchmarkGrassPlacement(GDX12Device& device, GDX12DeviceResources& r
     grass.HeightVariation = 0;
     for (UINT y = 0; y < 128; ++y)
         for (UINT x = 0; x < 64; ++x)
-            grass.RootsCm.emplace_back(-63.0f + x * 2, 0, -32.0f + y * 0.5f);
+            grass.RootsCm.emplace_back(-63.0f + x * 2, 0.0f, -32.0f + y * 0.5f);
     for (const bool edited : {false, true})
         MeasurePlacement(device, edited ? "grass-edited-8192" : "grass-unchanged-8192",
             static_cast<UINT>(resources.FrameConstants.size()), [&](GDX12CommandList* commands, UINT slot, UINT iteration)

@@ -63,7 +63,7 @@ void GDX12DeviceResources::Initialize(GDX12Device* device)
 
     GeometryBuffer = std::make_unique<GDX12GeometryBuffer>(device);
 
-    for (int i = 0; i < NumFrameConstantVariable.GetValue(); i++)
+    for (UINT i = 0; i < NumFrameConstantVariable.GetValue(); i++)
     {
         FrameConstants.push_back(std::make_unique<GDX12FrameConstants>(device));
 

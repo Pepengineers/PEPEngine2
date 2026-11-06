@@ -361,6 +361,15 @@ int main(int argc, char** argv)
         ao.SetInputs({ &depth, &normals });
         ao.Initialize();
         auto* queue = device.GetCommandQueue();
+        {
+            auto* commands = queue->GetCommandList();
+            bool rejected = false;
+            try { commands->SetRenderTargets({ nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr }, nullptr); }
+            catch (const std::out_of_range&) { rejected = true; }
+            Require(rejected, "More than eight render targets must be rejected");
+            queue->ExecuteCommandList(commands);
+            queue->Flush();
+        }
         GDX12GPUTimer timer(&device);
         auto run = [&]()
         {

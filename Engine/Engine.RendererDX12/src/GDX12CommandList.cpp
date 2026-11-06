@@ -7,6 +7,8 @@
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
+#include <limits>
+#include <stdexcept>
 
 #if defined(DEBUG) || defined(_DEBUG) || defined(PROFILE_BUILD)
 #include <pix/pix3.h>
@@ -146,6 +148,8 @@ void GDX12CommandList::SetGeometryBuffer(GDX12GeometryBuffer* buffer)
 void GDX12CommandList::SetRenderTargets(const std::initializer_list<GDX12Texture*> rtvTextures,
 	GDX12Texture* dsvTexture)
 {
+	if (rtvTextures.size() > D3D12_SIMULTANEOUS_RENDER_TARGET_COUNT)
+		throw std::out_of_range("Too many render targets");
 	std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> rtvHandles;
 	rtvHandles.reserve(rtvTextures.size());
 
@@ -154,7 +158,7 @@ void GDX12CommandList::SetRenderTargets(const std::initializer_list<GDX12Texture
 	D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle = {};
 	if (dsvTexture && dsvTexture->GetDSV()) { dsvHandle = dsvTexture->GetDSV()->CPUHandle; }
 
-	_commandList->OMSetRenderTargets(rtvHandles.size(), rtvHandles.data(), FALSE,
+	_commandList->OMSetRenderTargets(static_cast<UINT>(rtvHandles.size()), rtvHandles.data(), FALSE,
 		(dsvHandle.ptr != 0) ? &dsvHandle : nullptr );
 }
 
@@ -282,6 +286,8 @@ void GDX12CommandList::ExecuteIndirect(ID3D12CommandSignature* pCommandSignature
 
 void GDX12CommandList::ResourceBarrier(const std::initializer_list<CD3DX12_RESOURCE_BARRIER> barriers)
 {
+	if (barriers.size() > (std::numeric_limits<UINT>::max)())
+		throw std::out_of_range("Too many resource barriers");
 	std::vector<CD3DX12_RESOURCE_BARRIER> filteredBarriers;
 	for (auto& barrier : barriers)
 	{
@@ -293,7 +299,7 @@ void GDX12CommandList::ResourceBarrier(const std::initializer_list<CD3DX12_RESOU
 			filteredBarriers.push_back(barrier);
 		}
 	}
-	if (!filteredBarriers.empty()) { _commandList->ResourceBarrier(filteredBarriers.size(), filteredBarriers.data()); }
+	if (!filteredBarriers.empty()) { _commandList->ResourceBarrier(static_cast<UINT>(filteredBarriers.size()), filteredBarriers.data()); }
 }
 
 void GDX12CommandList::EnhancedTextureBarrier(const std::initializer_list<D3D12_TEXTURE_BARRIER> textureBarriers)

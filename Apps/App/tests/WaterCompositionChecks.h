@@ -79,7 +79,7 @@ static void CheckWaterComposition(GDX12Device& device, GDX12DeviceResources& res
     graph.Compile(false);
 
     GDX12ParticleEmitter emitter;
-    emitter.Id = 887766; emitter.MaxParticles = emitter.BurstTotal = 1; emitter.EmissionRate = 0;
+    emitter.Id = 887766; emitter.MaxParticles = 1; emitter.BurstTotal = 1; emitter.EmissionRate = 0;
     emitter.World = Matrix::CreateTranslation(eye + forward * 60);
     emitter.SpeedMin = emitter.SpeedMax = 0; emitter.Acceleration = Vector3::Zero;
     emitter.LifetimeMin = emitter.LifetimeMax = 10; emitter.DeltaTime = 0;
