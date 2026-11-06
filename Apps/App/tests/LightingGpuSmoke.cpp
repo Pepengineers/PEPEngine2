@@ -75,7 +75,7 @@ static void ShadowUploadSlots(GDX12Device& device)
     }
 }
 
-static void CheckReadback(GDX12Device& device, GDX12Texture& texture, UINT subresource, bool lut, bool depth = false, bool expectCaster = true)
+static std::vector<float> CheckReadback(GDX12Device& device, GDX12Texture& texture, UINT subresource, bool lut, bool depth = false, bool expectCaster = true)
 {
     const auto desc = texture.GetResource()->D3DResource->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
@@ -106,6 +106,7 @@ static void CheckReadback(GDX12Device& device, GDX12Texture& texture, UINT subre
     ThrowIfFailed(readback->Map(0, &readRange, &mapped));
     const auto* data = static_cast<const unsigned char*>(mapped);
     bool foundCaster = false;
+    std::vector<float> depths;
     for (UINT y = 0; y < footprint.Footprint.Height; ++y)
         for (UINT x = 0; x < footprint.Footprint.Width; ++x)
         {
@@ -115,6 +116,7 @@ static void CheckReadback(GDX12Device& device, GDX12Texture& texture, UINT subre
                 const float value = *reinterpret_cast<const float*>(address);
                 Require(std::isfinite(value) && value >= 0.0f && value <= 1.0f, "Invalid shadow atlas depth");
                 foundCaster |= value < 0.999f;
+                depths.push_back(value);
                 continue;
             }
             const auto* pixel = reinterpret_cast<const uint16_t*>(address);
@@ -131,6 +133,7 @@ static void CheckReadback(GDX12Device& device, GDX12Texture& texture, UINT subre
     D3D12_RANGE noWrite = { 0, 0 };
     readback->Unmap(0, &noWrite);
     Require(!depth || foundCaster == expectCaster, "Shadow depth contains the wrong caster coverage");
+    return depths;
 }
 
 static std::vector<float> ReadHDR(GDX12Device& device, GDX12Texture& texture)
@@ -246,6 +249,43 @@ static void CheckShadowVisibilityJobs()
     for (size_t i = 0; i < lights.size(); ++i)
         Require(serial[i].AllCasters == parallel[i].AllCasters && serial[i].StaticCasters == parallel[i].StaticCasters,
             "Parallel light batches must match serial visibility exactly");
+    for (size_t i = 0; i < 128; ++i)
+        casters.push_back({ BoundingBox({ position(random), position(random), position(random) },
+            { extent(random), extent(random), extent(random) }), i + 2, i % 3 == 0 });
+    ShadowVisibilitySystem fourThreadCache;
+    const auto checkCache = [&]()
+    {
+        for (auto* jobs : { &one, &four })
+        {
+            auto& cache = jobs == &one ? system : fourThreadCache;
+            cache.Schedule(*jobs, lights, casters, parallel).Complete();
+            for (size_t i = 0; i < lights.size(); ++i)
+            {
+                const auto reference = BuildLocalShadowVisibility(lights[i], casters);
+                Require(reference.StaticCasters == parallel[i].StaticCasters && reference.AllCasters == parallel[i].AllCasters,
+                    "Cached static/dynamic visibility differs from the full caster scan");
+            }
+        }
+    };
+    checkCache();
+    checkCache();
+    casters[1].Bounds.Center.x += 500; checkCache();
+    ++casters[1].Signature; checkCache(); // Material edit or same-handle geometry reimport.
+    casters[1].Dynamic = true; checkCache();
+    casters[1].Dynamic = false; checkCache();
+    casters.erase(casters.begin() + 1); checkCache();
+    std::reverse(casters.begin(), casters.end()); checkCache();
+    for (auto& light : lights)
+    {
+        light.Position.x += 300;
+        light.Range *= 0.75f;
+        light.OuterCos = 0.8f;
+        BuildLocalLightShadowMatrices(light);
+    }
+    checkCache();
+    lights[0].ShadowFirstSlice = UINT_MAX; checkCache();
+    lights[0].ShadowFirstSlice = 0; checkCache();
+    casters.clear(); checkCache();
     lights.clear();
     system.Schedule(four, lights, casters, parallel).Complete();
     Require(parallel.empty(), "Removing all lights must discard old visibility results");
@@ -430,14 +470,24 @@ int main(int argc, char** argv)
         BuildLocalLightShadowMatrices(spot);
         ShadowVisibilitySystem shadowVisibility;
         JobSystem shadowJobs(4);
-        const auto updateLocal = [&]()
+        const auto updateLocal = [&](bool fullScan = false)
         {
             resources.LocalLights = { point, spot };
             frame->LocalLightCache->Resize(2);
             frame->LocalLightCache->CopyData(0, resources.LocalLights.data(), 2);
             if (resources.LocalShadowCasters)
+            {
                 shadowVisibility.Schedule(shadowJobs, resources.LocalLights, *resources.LocalShadowCasters,
                     resources.LocalShadowVisibility).Complete();
+                for (size_t i = 0; i < resources.LocalLights.size(); ++i)
+                {
+                    const auto reference = BuildLocalShadowVisibility(resources.LocalLights[i], *resources.LocalShadowCasters);
+                    Require(reference.StaticCasters == resources.LocalShadowVisibility[i].StaticCasters &&
+                        reference.AllCasters == resources.LocalShadowVisibility[i].AllCasters,
+                        "GPU shadow readbacks must use the same visibility as the uncached scan");
+                    if (fullScan) resources.LocalShadowVisibility[i] = reference;
+                }
+            }
             else resources.LocalShadowVisibility.clear();
             auto* list = queue->GetCommandList();
             resources.PrepareLocalShadowData();
@@ -697,6 +747,27 @@ int main(int argc, char** argv)
             frame->LocalLightCache->CopyData(0, lights, 2);
             return ReadHDR(device, *deferred.GetOutput(0)->GetTexture());
         };
+        resources.LocalShadowCasters.emplace(1, GDX12LocalShadowCaster{ bounds, 1, false });
+        for (bool dynamic : { false, true })
+        {
+            resources.LocalShadowCasters->front().Dynamic = dynamic;
+            instance.ReflectionDynamic = dynamic;
+            frame->InstanceCache->CopyData(0, instance);
+            updateLocal();
+            const auto cachedDepth = CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true);
+            const auto cachedHDR = renderLighting({ 1, 1, 1 }, { 1, 1, 1 });
+            localShadows.InvalidateCache();
+            updateLocal(true);
+            Require(cachedDepth == CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true) &&
+                cachedHDR == renderLighting({ 1, 1, 1 }, { 1, 1, 1 }),
+                "Cached visibility changed shadow depth or HDR compared with the full scan");
+        }
+        resources.LocalShadowCasters.reset();
+        instance.ReflectionDynamic = 0;
+        frame->InstanceCache->CopyData(0, instance);
+        ++resources.ReflectionStaticRevision;
+        ++resources.ReflectionDynamicRevision;
+        updateLocal();
         const auto ambient = renderLighting({}, {});
         const auto pointLit = renderLighting({ 1, 1, 1 }, {});
         Require(pointLit == renderLighting({ 1, 1, 1 }, {}, -1, true),

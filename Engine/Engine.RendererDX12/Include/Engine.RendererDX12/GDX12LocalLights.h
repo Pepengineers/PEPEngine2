@@ -84,11 +84,12 @@ inline bool LocalShadowIntersects(const GDX12LocalLightConstants& light, const B
 }
 
 inline GDX12LocalShadowVisibility BuildLocalShadowVisibility(const GDX12LocalLightConstants& light,
-    const std::vector<GDX12LocalShadowCaster>& casters)
+    const std::vector<GDX12LocalShadowCaster>& casters, const GDX12LocalShadowVisibility* staticVisibility = nullptr)
 {
     GDX12LocalShadowVisibility result;
     result.StaticCasters.fill(14695981039346656037ull);
     result.AllCasters = result.StaticCasters;
+    if (staticVisibility) result = *staticVisibility;
     if (light.ShadowFirstSlice == UINT_MAX) return result;
     std::vector<GDX12LocalShadowFrustum> faces;
     faces.reserve(LocalShadowFaceCount(light));
@@ -99,8 +100,11 @@ inline GDX12LocalShadowVisibility BuildLocalShadowVisibility(const GDX12LocalLig
         const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
         for (size_t i = 0; i < sizeof(value); ++i) signature = (signature ^ bytes[i]) * 1099511628211ull;
     };
+    // Group signatures so cached static contributions can precede the current dynamic set.
+    for (bool dynamic : { false, true })
     for (const auto& caster : casters)
     {
+        if (caster.Dynamic != dynamic || (staticVisibility && !dynamic)) continue;
         if (!LocalShadowRangeIntersects(light, caster.Bounds)) continue;
         uint64_t signature = caster.Signature;
         hash(signature, caster.Bounds.Center);
