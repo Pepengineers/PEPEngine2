@@ -49,3 +49,11 @@ input, runtime propagation and stable pool revisions. The GPU fixture in
 independent .5 cm/1 cm displacement oracles and to a rotated one-centimetre volume
 with reflected velocity and pause. Build/run these through the coordinator's
 existing App and SecondGroup test projects; no additional engine is needed.
+
+The green mesh swarm (`BistroPlanterFireflies`) fills the building_02 arch,
+centred at `(1399.6, 300, 1369)` cm with a 69-degree yaw. Its layout half-extents
+are `(200, 220, 530)` cm: bottom 80 cm, top 520 cm (about 75% of the 688 cm crown
+above the paving). Spawn and lifetime confinement inset the box by the largest
+mesh radius so the insects clear the road and walls. This authored volume remains
+active when the generic volume override is off, and its `App.Bounds` controls are
+linked to the emitter just like Dust/Steam. Grass covers the same footprint below.

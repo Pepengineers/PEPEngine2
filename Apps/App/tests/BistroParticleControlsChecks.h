@@ -71,8 +71,10 @@ inline void CheckBistroParticleControls()
     world.GetECS().ForEach<ParticleEmitterComponent>([&](Entity, const ParticleEmitterComponent& emitter)
     {
         const auto& settings = emitter.GetSettings();
-        require(settings.Shape == ParticleShape::Box && settings.ShapeExtents == Vector3(20,30,40) &&
-            settings.VolumeEnabled && settings.VolumeHalfExtents == Vector3(20,30,40) &&
+        const auto extents = emitter.GetSettings().Geometry == ParticleGeometry::Firefly ?
+            Vector3(BistroArch::SwarmBounds.Extents) - Vector3(10 * (1 + settings.SizeVariation) * settings.RenderScale * 0.707107f) : Vector3(20,30,40);
+        require(settings.Shape == ParticleShape::Box && settings.ShapeExtents == extents &&
+            settings.VolumeEnabled && settings.VolumeHalfExtents == extents &&
             settings.Simulation == ParticleSimulation::SemiImplicitEuler, "Particle controls did not reach each emitter");
         resetSum += emitter.GetResetRevision();
     });
@@ -93,7 +95,7 @@ inline void CheckBistroParticleControls()
         const ParticleEmitterComponent& emitter)
     {
         require(emitter.GetSettings().Shape == effect.AuthoredShape && emitter.GetSettings().ShapeExtents == effect.AuthoredExtents &&
-            !emitter.GetSettings().VolumeEnabled, "Disabling the volume must restore each authored spawn preset");
+            emitter.GetSettings().VolumeEnabled == effect.LayoutVolume, "Disabling the volume must preserve authored confinement");
     });
     require(budget() == 250000 && VolumeHalfExtentX.SetFromString("100") &&
         VolumeHalfExtentY.SetFromString("100") && VolumeHalfExtentZ.SetFromString("100"), "Particle defaults restore failed");

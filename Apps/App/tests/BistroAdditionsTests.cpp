@@ -9,6 +9,7 @@
 #include "BistroReflectionChecks.h"
 #include "BistroCharacterChecks.h"
 #include "BistroGrassChecks.h"
+#include "BistroArchChecks.h"
 #include "BistroWaterChecks.h"
 #include "BistroParticleControlsChecks.h"
 #include "BistroBoundsChecks.h"
@@ -272,6 +273,8 @@ int main(int argc, char** argv)
     try
     {
         const bool fountainsOnly = argc > 1 && std::strcmp(argv[1], "--fountains-only") == 0;
+        const bool archSmoke = argc > 1 && std::strcmp(argv[1], "--arch-smoke") == 0;
+        if (archSmoke) Set(L"App.ReflectionProbes.ShowSpheres", "false");
         Require(fountainsOnly || (!BistroBounds::Show.GetValue() && !BistroReflections::ShowBounds.GetValue() &&
             !BistroReflections::ShowSpheres.GetValue()), "Bistro debug geometry must be hidden by default");
         Require(BistroPhysics::CountScale.GetValue() == 1.0, "Bistro must default to the original 1x object count");
@@ -296,6 +299,59 @@ int main(int argc, char** argv)
         ShowWindow(app.GetWindow()->GetWindowHandle(), SW_HIDE);
         auto render = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
         auto& world = *BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()->GetWorld();
+        if (archSmoke)
+        {
+            CheckBistroArch(world);
+            world.SetPaused(true);
+            Set(L"Render.Upscaler.Provider", "0");
+            Set(L"Render.DOF.Enabled", "false");
+            Set(L"Render.MotionBlur.Enabled", "false");
+            Set(L"App.ReflectionProbes.ShowSpheres", "false");
+            Aim(world, {520, 340, 1030}, {1400, 240, 1369});
+            // Seed the bounded swarm while keeping the expensive physical props paused.
+            auto& ecs = world.GetECS();
+            ecs.ForEach<ParticleEmitterComponent>([](Entity, ParticleEmitterComponent& emitter)
+            { emitter.Emit(emitter.GetSettings().MaxParticles); });
+            world.SetTimeScale(0);
+            world.SetPaused(false);
+            app.BenchmarkFrame();
+            world.SetPaused(true);
+            for (int frame = 0; frame < 12; ++frame) app.BenchmarkFrame();
+            for (const auto* feature : {L"Render.Particles.DrawEnabled", L"Render.Grass.Enabled"})
+            {
+                Set(feature, "false");
+                for (int frame = 0; frame < 3; ++frame) app.BenchmarkFrame();
+                render->WaitForUploads();
+                auto* image = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+                const auto off = ReadHDR(*image);
+                Set(feature, "true");
+                for (int frame = 0; frame < 3; ++frame) app.BenchmarkFrame();
+                render->WaitForUploads();
+                const auto on = ReadHDR(*image);
+                size_t changed = 0;
+                for (size_t i = 0; i < on.size(); i += 4)
+                    if (on[i] != off[i] || on[i+1] != off[i+1] || on[i+2] != off[i+2]) ++changed;
+                Require(changed > 100, "Arch feature must contribute visible pixels");
+                std::cout << (feature == std::wstring_view(L"Render.Grass.Enabled") ? "Grass" : "Swarm")
+                    << " changed HDR pixels: " << changed << '\n';
+            }
+            render->WaitForUploads();
+            auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+            SaveImage(ReadHDR(*output), output->GetWidth(), output->GetHeight(), "arch-garden");
+            ComPtr<ID3D12Device> device;
+            ThrowIfFailed(output->GetResource()->D3DResource->GetDevice(IID_PPV_ARGS(&device)));
+            ThrowIfFailed(device->GetDeviceRemovedReason());
+            ComPtr<ID3D12InfoQueue> info; ThrowIfFailed(device.As(&info));
+            for (UINT64 i = 0; i < info->GetNumStoredMessages(); ++i)
+            {
+                SIZE_T bytes = 0; info->GetMessage(i, nullptr, &bytes); std::vector<BYTE> storage(bytes);
+                auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+                ThrowIfFailed(info->GetMessage(i, message, &bytes));
+                Require(message->Severity > D3D12_MESSAGE_SEVERITY_ERROR, message->pDescription);
+            }
+            std::cout << "Arch garden: placement, confinement, grass, finite HDR and D3D12 validation passed.\n";
+            return 0;
+        }
         CheckFountainDoor(world, *render);
         if (fountainsOnly)
         {

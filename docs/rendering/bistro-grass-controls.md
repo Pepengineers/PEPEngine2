@@ -11,27 +11,27 @@ count changes retain the surviving patches and their renderer-owned material.
 | CVar after `App.Grass.` | Default | Accepted values / meaning |
 |---|---:|---|
 | `Count` | 1 | 0..16 independent patches; 0 removes grass and owned wind fields |
-| `ExtentsXCm` | 55 | 1..100000, local X half-width |
-| `ExtentsZCm` | 40 | 1..100000, local Z half-width |
+| `ExtentsXCm` | 200 | 1..100000, local X half-width |
+| `ExtentsZCm` | 530 | 1..100000, local Z half-width |
 | `DensityPerSquareMetre` | 1400 | 0..100000, blades per square metre; 0 draws no blades |
-| `MaxBlades` | 2048 | 0..262144 per-patch budget; 0 inherits renderer quality |
-| `Implementation` | 1 | 0 Ribbon, 1 CrossedRibbons |
-| `Segments` | 3 | 0..8 segments per blade; 0 inherits renderer quality |
+| `MaxBlades` | 65536 | 0..262144 per-patch budget; 0 inherits renderer quality |
+| `Implementation` | 0 | 0 Ribbon, 1 CrossedRibbons |
+| `Segments` | 4 | 0..8 segments per blade; 0 inherits renderer quality |
 | `Seed` | 7919 | Unsigned 32-bit root seed; patch index multiplies it |
-| `HeightCm` | 30 | 0.1..10000 |
+| `HeightCm` | 40 | 0.1..10000 |
 | `HeightVariation` | 0.25 | 0..1 relative random height variation |
-| `WidthCm` | 1.4 | 0.01..1000 |
+| `WidthCm` | 3 | 0.01..1000 |
 | `BendSeconds` | 0.15 | 0..10, wind response time |
-| `MaxBendCm` | 12 | 0..10000, bend cap and conservative bounds expansion |
+| `MaxBendCm` | 20 | 0..10000, bend cap and conservative bounds expansion |
 | `LodDistanceCm` | 1500 | 1..1000000, near LOD; far-card/cull distances are 2x/4x |
 | `CastShadows` | true | Directional and local shadow casting |
 
 The actual blade count is
 `min(ceil(4 * ExtentsXCm * ExtentsZCm / 10000 * DensityPerSquareMetre), resolved MaxBlades)`.
-Defaults retain 1232 blades. Changing the area therefore changes density-driven
+Defaults retain 59360 blades over 42.4 square metres beneath the building_02 arch. Changing the area therefore changes density-driven
 counts until the budget is reached. The count is not an allocation-only reserve.
 Grass culling uses the existing `GrassLocalBounds`, including height variation,
-width and maximum bend. Wind coverage automatically covers its horizontal bounds,
+width and maximum bend. Wind coverage uses the rotated horizontal bounds in world XZ,
 with a minimum half-size of 90x70 cm.
 
 ## Wind
@@ -40,9 +40,9 @@ with a minimum half-size of 90x70 cm.
 |---|---:|---|
 | `Enabled` | true | Enable each patch's field |
 | `Algorithm` | 0 | 0 Analytic directional gusts, 1 ProjectedGrid pressure solver |
-| `SpeedCmPerSecond` | 45 | 0..500 base flow speed |
-| `AngleDegrees` | 0 | -180..180, local XZ; 0 means +X, 90 means +Z |
-| `GustAmplitude` | 0.25 | 0..1 relative gust amplitude |
+| `SpeedCmPerSecond` | 100 | 0..500 base flow speed |
+| `AngleDegrees` | 67.5 | -180..180, world XZ; 0 means +X, 90 means +Z |
+| `GustAmplitude` | 0.6 | 0..1 relative gust amplitude |
 | `GustFrequencyHz` | 0.4 | 0..100 |
 | `GustWavelengthCm` | 500 | 1..1000000 |
 | `ForcePerSecond` | 2 | 0..100 projected-grid forcing |
@@ -77,3 +77,10 @@ analytic/projected-grid wind. MGPU's alternate GS/multi-adapter paths, per-LOD
 tufts, cursor injection, obstacle solver, vorticity and SDOF-specific controls are
 not represented by inactive or approximate toggles. Local reflections remain the
 scene's frozen static captures, which exclude moving grass.
+
+The default field is centred at `(1399.6, 23.3, 1369)` cm and rotated 69 degrees
+about Y, sharing the confined firefly swarm footprint. Four-segment tapered ribbons
+and stronger directional gusts match the compute grass silhouette shown in the
+GraphiCon grass article. Both geometry choices expand in compute and draw indexed
+indirect; no geometry-shader pipeline is present. Existing saved INI values still
+override these defaults. Extra count-controlled fields are spaced by their extents.

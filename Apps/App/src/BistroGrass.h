@@ -1,5 +1,6 @@
 #pragma once
 #include "Components/BistroGrassComponents.h"
+#include "BistroArch.h"
 
 #include <cstdint>
 #include "App.Base/ECS/World.h"
@@ -13,42 +14,42 @@
 namespace BistroGrass
 {
     inline AutoConsoleVariable<int> Count(L"App.Grass.Count", 1,
-        L"Bistro entrance grass patches, 0 disables, maximum 16",
+        L"Bistro arch grass fields, 0 disables, maximum 16",
         EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 16; });
 
     enum class Geometry : std::uint8_t { Ribbon, CrossedRibbons, Count };
     enum class WindAlgorithm : std::uint8_t { Analytic, ProjectedGrid, Count };
-    inline AutoConsoleVariable<Geometry> Implementation(L"App.Grass.Implementation", Geometry::CrossedRibbons,
+    inline AutoConsoleVariable<Geometry> Implementation(L"App.Grass.Implementation", Geometry::Ribbon,
         L"0 Ribbon, 1 CrossedRibbons; runtime grass geometry");
-    inline AutoConsoleVariable<float> ExtentsXCm(L"App.Grass.ExtentsXCm", 55,
+    inline AutoConsoleVariable<float> ExtentsXCm(L"App.Grass.ExtentsXCm", BistroArch::HalfWidthCm,
         L"Patch half-width along local X in cm, 1..100000", EConsoleVariableFlags::Default,
         [](float value) { return value >= 1 && value <= 100000; });
-    inline AutoConsoleVariable<float> ExtentsZCm(L"App.Grass.ExtentsZCm", 40,
+    inline AutoConsoleVariable<float> ExtentsZCm(L"App.Grass.ExtentsZCm", BistroArch::HalfLengthCm,
         L"Patch half-width along local Z in cm, 1..100000", EConsoleVariableFlags::Default,
         [](float value) { return value >= 1 && value <= 100000; });
     inline AutoConsoleVariable<float> Density(L"App.Grass.DensityPerSquareMetre", 1400,
         L"Blades per square metre, 0..100000; actual count = min(ceil(area*density), MaxBlades)",
         EConsoleVariableFlags::Default, [](float value) { return value >= 0 && value <= 100000; });
-    inline AutoConsoleVariable<UINT> MaxBlades(L"App.Grass.MaxBlades", 2048,
+    inline AutoConsoleVariable<UINT> MaxBlades(L"App.Grass.MaxBlades", 65536,
         L"Blade budget per patch, 0 inherits Render.Grass.Quality, maximum 262144",
         EConsoleVariableFlags::Default, [](UINT value) { return value <= 262144; });
-    inline AutoConsoleVariable<UINT> Segments(L"App.Grass.Segments", 3,
+    inline AutoConsoleVariable<UINT> Segments(L"App.Grass.Segments", 4,
         L"Segments per blade, 0 inherits Render.Grass.Quality, maximum 8",
         EConsoleVariableFlags::Default, [](UINT value) { return value <= 8; });
     inline AutoConsoleVariable<UINT> Seed(L"App.Grass.Seed", 7919, L"Root distribution seed; patches use distinct multiples");
-    inline AutoConsoleVariable<float> HeightCm(L"App.Grass.HeightCm", 30,
+    inline AutoConsoleVariable<float> HeightCm(L"App.Grass.HeightCm", 40,
         L"Blade height in cm, 0.1..10000", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0.1f && value <= 10000; });
     inline AutoConsoleVariable<float> HeightVariation(L"App.Grass.HeightVariation", 0.25f,
         L"Relative random height variation, 0..1", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0 && value <= 1; });
-    inline AutoConsoleVariable<float> WidthCm(L"App.Grass.WidthCm", 1.4f,
+    inline AutoConsoleVariable<float> WidthCm(L"App.Grass.WidthCm", 3.0f,
         L"Blade width in cm, 0.01..1000", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0.01f && value <= 1000; });
     inline AutoConsoleVariable<float> BendSeconds(L"App.Grass.BendSeconds", 0.15f,
         L"Grass wind response time in seconds, 0..10", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0 && value <= 10; });
-    inline AutoConsoleVariable<float> MaxBendCm(L"App.Grass.MaxBendCm", 12,
+    inline AutoConsoleVariable<float> MaxBendCm(L"App.Grass.MaxBendCm", 20,
         L"Maximum blade bend in cm, 0..10000; also expands culling/wind bounds",
         EConsoleVariableFlags::Default, [](float value) { return value >= 0 && value <= 10000; });
     inline AutoConsoleVariable<float> LodDistanceCm(L"App.Grass.LodDistanceCm", 1500,
@@ -59,13 +60,13 @@ namespace BistroGrass
     inline AutoConsoleVariable<bool> WindEnabled(L"App.Grass.Wind.Enabled", true, L"Enable each grass patch's wind field");
     inline AutoConsoleVariable<WindAlgorithm> Algorithm(L"App.Grass.Wind.Algorithm", WindAlgorithm::Analytic,
         L"0 Analytic directional gusts, 1 ProjectedGrid pressure-solved wind");
-    inline AutoConsoleVariable<float> WindSpeed(L"App.Grass.Wind.SpeedCmPerSecond", 45,
+    inline AutoConsoleVariable<float> WindSpeed(L"App.Grass.Wind.SpeedCmPerSecond", 100,
         L"Base wind speed in cm/s, 0..500", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0 && value <= 500; });
-    inline AutoConsoleVariable<float> WindAngleDegrees(L"App.Grass.Wind.AngleDegrees", 0,
+    inline AutoConsoleVariable<float> WindAngleDegrees(L"App.Grass.Wind.AngleDegrees", 67.5f,
         L"Wind direction in local XZ degrees, -180..180; zero points along +X",
         EConsoleVariableFlags::Default, [](float value) { return value >= -180 && value <= 180; });
-    inline AutoConsoleVariable<float> GustAmplitude(L"App.Grass.Wind.GustAmplitude", 0.25f,
+    inline AutoConsoleVariable<float> GustAmplitude(L"App.Grass.Wind.GustAmplitude", 0.6f,
         L"Relative gust amplitude, 0..1", EConsoleVariableFlags::Default,
         [](float value) { return value >= 0 && value <= 1; });
     inline AutoConsoleVariable<float> GustFrequencyHz(L"App.Grass.Wind.GustFrequencyHz", 0.4f,
@@ -140,8 +141,9 @@ namespace BistroGrass
         auto& wind = controls.Wind;
         controls.WindEnabled = WindEnabled.GetValue();
         wind.Implementation = static_cast<GDX12WindImplementation>(Algorithm.GetValue());
-        wind.ExtentsCm = Vector2((std::max)(90.0f, grass.ExtentsCm.x + grass.MaxBendCm + grass.WidthCm),
-            (std::max)(70.0f, grass.ExtentsCm.y + grass.MaxBendCm + grass.WidthCm));
+        BoundingBox worldBounds;
+        GrassLocalBounds(grass).Transform(worldBounds, Matrix::CreateRotationY(XMConvertToRadians(BistroArch::YawDegrees)));
+        wind.ExtentsCm = Vector2((std::max)(90.0f, worldBounds.Extents.x), (std::max)(70.0f, worldBounds.Extents.z));
         const float angle = XMConvertToRadians(WindAngleDegrees.GetValue());
         wind.Direction = Vector2(std::cos(angle), std::sin(angle));
         wind.SpeedCmPerSecond = WindSpeed.GetValue();
@@ -186,9 +188,10 @@ namespace BistroGrass
             while (_patches.size() < requested)
             {
                 const size_t index = _patches.size();
-                // Exterior sidewalk is at 23.162 cm here; keep the roots above its depth surface.
-                const Vector3 position(-420.0f - 160.0f * static_cast<float>(index % 4), 23.3f,
-                    150.0f + 180.0f * static_cast<float>(index / 4));
+                const auto rotation = Quaternion::CreateFromAxisAngle(Vector3::Up, XMConvertToRadians(BistroArch::YawDegrees));
+                const Vector3 position = BistroArch::GrassPosition + Vector3::Transform(Vector3(
+                    2 * (controls.Grass.ExtentsCm.x + controls.Grass.MaxBendCm + controls.Grass.WidthCm) * static_cast<float>(index % 4),
+                    0, 2 * (controls.Grass.ExtentsCm.y + controls.Grass.MaxBendCm + controls.Grass.WidthCm) * static_cast<float>(index / 4)), rotation);
                 auto wind = ecs.CreateEntity();
                 wind.AddComponent<NameComponent>("BistroGrassWind" + std::to_string(index));
                 wind.AddComponent<TransformComponent>(position);
@@ -197,6 +200,7 @@ namespace BistroGrass
                 auto grass = ecs.CreateEntity();
                 grass.AddComponent<NameComponent>("BistroGrass" + std::to_string(index));
                 grass.AddComponent<TransformComponent>(position);
+                grass.GetComponent<TransformComponent>().Rotation.y = BistroArch::YawDegrees;
                 auto& component = grass.AddComponent<GrassRenderComponent>();
                 component.Material = _material;
                 component.WindEntity = wind.GetId();

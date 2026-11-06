@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BistroProps.h"
+#include "BistroArch.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "App.Base/Modules/RenderModule.h"
@@ -100,7 +101,9 @@ namespace BistroParticles
             settings.MinPixelSize = 0;
             effect.AuthoredShape = settings.Shape;
             effect.AuthoredExtents = settings.ShapeExtents;
+            effect.LayoutVolume = settings.VolumeEnabled;
             entity.AddComponent<ParticleEmitterComponent>().SetSettings(settings);
+            return entity;
         };
 
         GDX12ParticleEmitterSettings settings;
@@ -140,13 +143,19 @@ namespace BistroParticles
 
         settings.LifetimeMin = 4; settings.LifetimeMax = 8;
         settings.SpeedMin = 5; settings.SpeedMax = 25; settings.ConeAngleDegrees = 180;
-        settings.Shape = ParticleShape::Sphere; settings.ShapeExtents = Vector3(140, 50, 130);
-        settings.Acceleration = Vector3::Zero; settings.Wind = Vector3(8, 0, 0);
+        settings.Shape = ParticleShape::Box;
         settings.SizeStart = 10; settings.SizeEnd = 6; settings.AngularVelocity = 1.2f;
+        const float fireflyRadius = (std::max)(settings.SizeStart, settings.SizeEnd) *
+            (1 + settings.SizeVariation) * settings.RenderScale * 0.707107f;
+        settings.ShapeExtents = Vector3(BistroArch::SwarmBounds.Extents) - Vector3(fireflyRadius);
+        settings.VolumeEnabled = true;
+        settings.VolumeHalfExtents = settings.ShapeExtents;
+        settings.Acceleration = Vector3::Zero; settings.Wind = Vector3(8, 0, 0);
         settings.Geometry = ParticleGeometry::Firefly;
         settings.Blend = ParticleBlend::WeightedAlpha;
         settings.ColorStart = Vector4(1, 1, 1, 0.9f); settings.ColorEnd = Vector4(1, 1, 1, 0);
-        create("BistroPlanterFireflies", {-420, 110, 150}, 2, settings);
+        auto fireflies = create("BistroPlanterFireflies", BistroArch::SwarmBounds.Center, 2, settings);
+        fireflies.GetComponent<TransformComponent>().Rotation.y = BistroArch::YawDegrees;
 
         settings = {};
         settings.LifetimeMin = 0.7f; settings.LifetimeMax = 1.8f;

@@ -60,7 +60,7 @@ inline void CheckBistroBounds(BistroApp& app, World& world)
     world.GetECS().ForEach<TransformComponent, NameComponent>(
         [&](Entity, const TransformComponent& transform, const NameComponent& name)
         {
-            if (name.value == "BistroInteriorDust" || name.value == "BistroTableSteam") return;
+            if (name.value == "BistroInteriorDust" || name.value == "BistroTableSteam" || name.value == "BistroPlanterFireflies") return;
             const auto key = L"App.Bounds." + std::wstring(name.value.begin(), name.value.end()) + L".CenterY";
             IConsoleVariable* setting = nullptr;
             if (!console.TryFindConsoleVariable(key, setting)) return;
@@ -71,7 +71,7 @@ inline void CheckBistroBounds(BistroApp& app, World& world)
             require(setting->SetFromString(original), "Cannot restore detached box centre");
             ++edited;
         });
-    require(edited == 23 && console.FindConsoleVariable(L"App.Bounds.BistroNPC0.HalfExtentY").GetFloat() > 25 &&
+    require(edited == 22 && console.FindConsoleVariable(L"App.Bounds.BistroNPC0.HalfExtentY").GetFloat() > 25 &&
         console.FindConsoleVariable(L"App.Bounds.BistroFox0.HalfExtentY").GetFloat() > 1,
         "Character bounds must cover the scaled animated mesh, with independent controls for every effect");
     const auto foxBefore = console.FindConsoleVariable(L"App.Bounds.BistroFox0.CenterX").GetString();

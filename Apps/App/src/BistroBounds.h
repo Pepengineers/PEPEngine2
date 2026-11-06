@@ -67,7 +67,7 @@ namespace BistroBounds
     class Scene
     {
     public:
-        // Only Dust/Steam are linked; the other scene additions retain detached snapshots.
+        // Authored confined effects use live layout boxes; other additions retain detached snapshots.
         explicit Scene(World& world)
         {
             RegisterBistroGrassComponents(world);
@@ -82,11 +82,12 @@ namespace BistroBounds
             ecs.ForEach<ParticleEmitterComponent, TransformComponent, NameComponent>(
                 [&](Entity entity, const ParticleEmitterComponent& emitter, const TransformComponent&, const NameComponent& name)
                 {
-                    if (name.value == "BistroInteriorDust" || name.value == "BistroTableSteam")
+                    if (name.value == "BistroInteriorDust" || name.value == "BistroTableSteam" || name.value == "BistroPlanterFireflies")
                     {
+                        const bool swarm = name.value == "BistroPlanterFireflies";
                         const auto bounds = name.value == "BistroInteriorDust" ?
-                            BoundingBox({559,221,-348}, {694,181,779}) : BoundingBox({922,227,-293}, {305,175,85.5f});
-                        auto box = std::make_unique<Box>(name.value, bounds, 0xff40e8ff, InteriorYawDegrees);
+                            BoundingBox({559,221,-348}, {694,181,779}) : swarm ? BistroArch::SwarmBounds : BoundingBox({922,227,-293}, {305,175,85.5f});
+                        auto box = std::make_unique<Box>(name.value, bounds, 0xff40e8ff, swarm ? BistroArch::YawDegrees : InteriorYawDegrees);
                         _particleVolumes.emplace_back(entity, box.get());
                         _boxes.push_back(std::move(box));
                         return;
