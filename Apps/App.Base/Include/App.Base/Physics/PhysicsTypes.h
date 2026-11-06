@@ -4,6 +4,8 @@
 #include <directxtk/SimpleMath.h>
 #include <variant>
 
+#include "Engine.Core/AssetHandles.h"
+
 struct PhysicsBodyHandle
 {
     uint32_t Value = UINT32_MAX;
@@ -43,7 +45,12 @@ struct CylinderShapeDesc
     float HalfHeight = 0.5f;
 };
 
-using PhysicsShapeDesc = std::variant<BoxShapeDesc, SphereShapeDesc, CapsuleShapeDesc, CylinderShapeDesc>;
+struct TriangleMeshShapeDesc
+{
+    Engine::Core::MeshHandle Mesh;
+};
+
+using PhysicsShapeDesc = std::variant<BoxShapeDesc, SphereShapeDesc, CapsuleShapeDesc, CylinderShapeDesc, TriangleMeshShapeDesc>;
 
 struct PhysicsBodyDesc
 {

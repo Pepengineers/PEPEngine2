@@ -6,6 +6,7 @@
 #include <thread>
 #include <cmath>
 #include <type_traits>
+#include <utility>
 
 #include <Jolt/Jolt.h>
 #include <Jolt/RegisterTypes.h>
@@ -19,9 +20,12 @@
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
+#include <Jolt/Physics/Collision/Shape/MeshShape.h>
+#include <Jolt/Physics/Collision/Shape/OffsetCenterOfMassShape.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 
 #include "Common/Logger.h"
+#include "Engine.Core/AssetManager.h"
 
 #include <Windows.h>
 
@@ -94,6 +98,51 @@ namespace
                 return JPH::CylinderShapeSettings(halfHeight, radius).Create();
             }
             
+            else if constexpr (std::is_same_v<T, TriangleMeshShapeDesc>)
+            {
+                if (!isPositive(scale.x) || !isPositive(scale.y) || !isPositive(scale.z)) { return invalidShape("CreateShape: TriangleMesh requires positive finite scale"); }
+                
+                const auto& allMeshes = Engine::Core::AssetManager::GetInstance().Meshes();
+                const auto& mesh = allMeshes.GetMesh(shape.Mesh);
+                if (!mesh) { return invalidShape("CreateShape: TriangleMesh CPU mesh is unavailable"); }
+                
+                // TODO move list assembly to separate helper
+                JPH::VertexList vertices;
+                JPH::IndexedTriangleList triangles;
+                
+                for (const auto& part : mesh->GetSubMeshes())
+                {
+                    if (part.Indices.size() % 3 != 0) { return invalidShape("CreateShape: TriangleMesh index count must be divisible by 3"); }
+                    if (part.Vertices.size() > UINT32_MAX - vertices.size()) { return invalidShape("CreateShape: TriangleMesh smth wrong with vertices"); }
+                    
+                    const auto& base = static_cast<uint32_t>(vertices.size());
+                    for (const auto& vertex : part.Vertices)
+                    {
+                        const auto& p = vertex.Position;
+                        const float x = p.x * scale.x;
+                        const float y = p.y * scale.y;
+                        const float z = p.z * scale.z;
+                        
+                        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) { return invalidShape("CreateShape: TriangleMesh has a non-finite vertex"); }
+                        
+                        vertices.emplace_back(x, y, z);
+                    }
+                    
+                    for (size_t i = 0; i < part.Indices.size(); i += 3)
+                    {
+                        const auto& a = part.Indices[i];
+                        const auto& b = part.Indices[i + 1];
+                        const auto& c = part.Indices[i + 2];
+                        const auto count = part.Vertices.size();
+                        
+                        if (a >= count || b >= count || c >= count) { return invalidShape("CreateShape: TriangleMesh vertex index is out of range"); }
+                        
+                        triangles.emplace_back(base + a, base + b, base + c, 0u);
+                    }
+                }
+                if (triangles.empty()) { return invalidShape("TriangleMesh has no triangles"); }
+                return JPH::MeshShapeSettings(std::move(vertices), std::move(triangles)).Create();
+            }
             else 
             {
                 static_assert(std::is_same_v<T, CapsuleShapeDesc>, "Unsupported shape type");
@@ -328,6 +377,28 @@ PhysicsBodyHandle JoltPhysicsBackend::CreateBody(const PhysicsBodyDesc& desc)
         motionType,
         isStatic ? ObjectLayers::Static : ObjectLayers::Dynamic
     );
+    
+    // TODO make customizable later
+    if (!isStatic && shape->GetSubType() == JPH::EShapeSubType::Mesh) // set mass and inertia of the scaled to bounds box for obj-model. like in Jolt example
+    {
+        const auto bounds = shape->GetLocalBounds();
+        constexpr float minThickness = 0.01f;
+        constexpr float density = 1000.0f;
+        const auto size = JPH::Vec3::sMax(bounds.GetSize(), JPH::Vec3::sReplicate(minThickness));
+        
+        settings.mOverrideMassProperties =  JPH::EOverrideMassProperties::MassAndInertiaProvided;
+        auto& mass = settings.mMassPropertiesOverride;
+        mass.SetMassAndInertiaOfSolidBox(size, density);
+        
+        const auto& inertia = mass.mInertia.GetDiagonal3();
+        const auto valid = [](float v){ return  std::isfinite(v) && v > 0.0f; };
+        if (!valid(mass.mMass) || !valid(inertia.GetX()) || !valid(inertia.GetY()) || !valid(inertia.GetZ()))
+        {
+            Logger::Error("CreateBody(): invalid TriangleMesh mass or inertia");
+            return {};
+        }
+        settings.SetShape(new JPH::OffsetCenterOfMassShape(shape.GetPtr(), bounds.GetCenter()));
+    }
     
     JPH::BodyInterface& bodyInterface = _physicsSystem->GetBodyInterface();
     
