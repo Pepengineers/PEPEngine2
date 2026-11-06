@@ -114,6 +114,12 @@ namespace BistroParticles
         settings.Blend = ParticleBlend::Additive;
         settings.Texture = atlas; settings.AtlasColumns = settings.AtlasRows = 8;
         settings.SoftDistance = 2; settings.DepthCollision = true;
+        settings.CollisionRadius = 7; // Covers the largest fountain billboard's half-diagonal, including size variation.
+        // Authored bounds of the closed entrance door and its glass (Exterior nodes 121/123).
+        settings.CollisionBoxEnabled = true;
+        settings.CollisionBoxCenter = Vector3(-80.037f, 166.15f, -94.836f);
+        settings.CollisionBoxHalfExtents = Vector3(10.05f, 127.92f, 89.39f);
+        settings.CollisionBoxYawDegrees = 28.5f;
         create("BistroEntranceFountain", {-170, 45, -170}, 4, settings);
 
         settings.SpeedMin = 180; settings.SpeedMax = 290;

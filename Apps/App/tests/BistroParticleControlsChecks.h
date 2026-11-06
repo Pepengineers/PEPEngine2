@@ -18,6 +18,21 @@ inline void CheckBistroParticleControls()
         "Particle controls accepted invalid input");
     World world(WorldDesc{});
     Create(world, nullptr);
+    unsigned fountains = 0;
+    world.GetECS().ForEach<NameComponent, ParticleEmitterComponent>([&](Entity, const NameComponent& name,
+        const ParticleEmitterComponent& emitter)
+    {
+        const auto& settings = emitter.GetSettings();
+        const bool fountain = name.value == "BistroEntranceFountain" || name.value == "BistroBlueFountain";
+        require(settings.CollisionBoxEnabled == fountain, "Only the entrance fountains must collide with the door");
+        if (!fountain) return;
+        ++fountains;
+        require(settings.DepthCollision && settings.Substeps >= 4 && settings.CollisionRestitution > 0 &&
+            settings.CollisionRadius >= (std::max)(settings.SizeStart, settings.SizeEnd) *
+                (1 + settings.SizeVariation) * settings.RenderScale * 0.707107f,
+            "Fountains must bounce against scene depth without their sprite corners penetrating surfaces");
+    });
+    require(fountains == 2, "Both entrance fountains must retain their collision settings");
     const auto budget = [&]
     {
         UINT result = 0;

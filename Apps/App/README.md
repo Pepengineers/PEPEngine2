@@ -149,6 +149,11 @@ from timing. Fractional scales are accepted (0.5 gives 125000); the upper limit
 is 4194304/250000. The JSON includes `particle_count_scale` and `particle_budget`.
 Fireflies use a 120-vertex volumetric instanced mesh with animated wings; the
 other effects use larger billboard sprites.
+Both entrance fountains bounce against the current opaque scene depth. A swept,
+rotated solid box matching the closed entrance door also blocks its transparent
+glass and works when the door is hidden or off screen. Other depth collisions
+remain limited to the frontmost visible surface. Fountain collision radii cover
+the largest sprite, including size variation.
 See [effects and benchmark commands](../../docs/rendering/scene-techniques.md).
 
 Scene loading prepares independent textures through the App's shared JobSystem,

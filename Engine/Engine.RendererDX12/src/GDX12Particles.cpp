@@ -65,7 +65,11 @@ bool IsValidParticleEmitterSettings(const GDX12ParticleEmitterSettings& s)
         !(s.Geometry != ParticleGeometry::Billboard && s.Blend == ParticleBlend::SortedAlpha) &&
         s.AtlasColumns >= 1 && s.AtlasColumns <= 256 && s.AtlasRows >= 1 && s.AtlasRows <= 256 &&
         InRange(s.FramesPerSecond, 0, 1000) && InRange(s.CollisionRadius, 0.01f, 1000000) &&
-        InRange(s.CollisionRestitution, 0, 1) && InRange(s.CollisionThickness, 0, 1000000);
+        InRange(s.CollisionRestitution, 0, 1) && InRange(s.CollisionThickness, 0, 1000000) &&
+        ValidVector(s.CollisionBoxCenter, 1000000) && InRange(s.CollisionBoxYawDegrees, -360, 360) &&
+        InRange(s.CollisionBoxHalfExtents.x, 0.01f, 1000000) &&
+        InRange(s.CollisionBoxHalfExtents.y, 0.01f, 1000000) &&
+        InRange(s.CollisionBoxHalfExtents.z, 0.01f, 1000000);
 }
 
 const std::array<GDX12ParticleMeshVertex, FireflyParticleVertexCount>& GetFireflyParticleMesh()

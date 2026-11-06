@@ -41,10 +41,12 @@ namespace ParticleResources
         UINT Geometry, Simulation, VolumeEnabled, Padding;
         XMFLOAT3 VolumeHalfExtents; float VolumePadding;
         XMFLOAT4X4 WorldToEmitter;
+        XMFLOAT4X4 WorldToCollisionBox;
+        XMFLOAT3 CollisionBoxHalfExtents; UINT CollisionBoxEnabled;
     };
     static_assert(sizeof(Particle) == 64);
     static_assert(sizeof(ParticleDraw) == 96);
-    static_assert(sizeof(EmitterConstants) == 368);
+    static_assert(sizeof(EmitterConstants) == 448);
     static_assert(sizeof(GDX12ParticleMeshVertex) == 44);
 
     template<class T>
@@ -152,6 +154,12 @@ namespace ParticleResources
         constants.VolumeHalfExtents = emitter.VolumeHalfExtents;
         XMStoreFloat4x4(&constants.WorldToEmitter,
             emitter.VolumeEnabled ? emitter.World.Invert().Transpose() : Matrix::Identity);
+        const auto collisionWorld = Matrix::CreateRotationY(XMConvertToRadians(emitter.CollisionBoxYawDegrees)) *
+            Matrix::CreateTranslation(emitter.CollisionBoxCenter);
+        XMStoreFloat4x4(&constants.WorldToCollisionBox,
+            emitter.CollisionBoxEnabled ? collisionWorld.Invert().Transpose() : Matrix::Identity);
+        constants.CollisionBoxHalfExtents = emitter.CollisionBoxHalfExtents;
+        constants.CollisionBoxEnabled = emitter.CollisionBoxEnabled;
         return constants;
     }
 }

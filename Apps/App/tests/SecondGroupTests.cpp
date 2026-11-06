@@ -107,6 +107,12 @@ static void TestCPU()
     Require(!IsValidParticleEmitterSettings(particle), "Zero collision radius accepted");
     particle = {}; particle.CollisionThickness = NAN;
     Require(!IsValidParticleEmitterSettings(particle), "Nonfinite collision thickness accepted");
+    particle = {}; particle.CollisionBoxCenter.x = NAN;
+    Require(!IsValidParticleEmitterSettings(particle), "Nonfinite particle obstacle center accepted");
+    particle = {}; particle.CollisionBoxHalfExtents.z = 0;
+    Require(!IsValidParticleEmitterSettings(particle), "Empty particle obstacle accepted");
+    particle = {}; particle.CollisionBoxYawDegrees = INFINITY;
+    Require(!IsValidParticleEmitterSettings(particle), "Nonfinite particle obstacle rotation accepted");
     particle = {}; particle.Geometry = static_cast<ParticleGeometry>(2);
     Require(!IsValidParticleEmitterSettings(particle), "Unknown particle geometry accepted");
     particle.Geometry = ParticleGeometry::Firefly; particle.Blend = ParticleBlend::SortedAlpha;
@@ -507,7 +513,7 @@ int main(int argc, char** argv)
                     "Particle depth collision differs from independent bounce/stop oracle");
             }
         }
-        CheckParticleSimulationControls(device, resources, particles, executeParticles, eye, forward);
+        CheckParticleSimulationControls(device, resources, particles, executeParticles, *depth, eye, forward);
         std::vector<float> queuedReference;
         for (bool async : {false, true, false})
         {

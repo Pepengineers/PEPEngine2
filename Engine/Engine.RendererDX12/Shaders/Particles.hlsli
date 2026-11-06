@@ -88,4 +88,7 @@ cbuffer Emitter : register(b2)
     float3 VolumeHalfExtents;
     float VolumePadding;
     float4x4 WorldToEmitter;
+    float4x4 WorldToCollisionBox;
+    float3 CollisionBoxHalfExtents;
+    uint CollisionBoxEnabled;
 };

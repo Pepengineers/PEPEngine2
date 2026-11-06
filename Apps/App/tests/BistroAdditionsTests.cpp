@@ -92,6 +92,40 @@ static void SaveImage(const std::vector<uint16_t>& pixels, UINT width, UINT heig
     Require(bool(file), "Cannot save Bistro validation image");
 }
 
+static void CheckFountainDoor(World& world, RenderModule& render)
+{
+    GDX12ParticleEmitterSettings fountain;
+    world.GetECS().ForEach<NameComponent, ParticleEmitterComponent>([&](Entity, const NameComponent& name,
+        const ParticleEmitterComponent& emitter)
+    { if (name.value == "BistroEntranceFountain") fountain = emitter.GetSettings(); });
+    Require(fountain.DepthCollision && fountain.CollisionBoxEnabled, "Entrance fountain lost its scene/door collisions");
+    const auto toDoor = (Matrix::CreateRotationY(XMConvertToRadians(fountain.CollisionBoxYawDegrees)) *
+        Matrix::CreateTranslation(fountain.CollisionBoxCenter)).Invert();
+    unsigned parts = 0;
+    world.GetECS().ForEach<NameComponent, StaticMeshRenderComponent>([&](Entity, const NameComponent& name,
+        const StaticMeshRenderComponent& renderer)
+    {
+        if (name.value != "Exterior_exterior") return;
+        const auto* mesh = render.GetPrimaryGPUMesh(renderer.MeshHandler)->CPUMesh;
+        for (const auto& part : mesh->GetSubMeshes())
+        {
+            if (part.SourceNodeName != "Paris_Building_01_paris_building_01_bottom_121" &&
+                part.SourceNodeName != "Paris_Building_01_paris_building_01_bottom_123") continue;
+            ++parts;
+            for (const auto& vertex : part.Vertices)
+            {
+                const auto point = Vector3::Transform(vertex.Position, toDoor);
+                Require(std::abs(point.x) <= fountain.CollisionBoxHalfExtents.x + 0.01f &&
+                    std::abs(point.y) <= fountain.CollisionBoxHalfExtents.y + 0.01f &&
+                    std::abs(point.z) <= fountain.CollisionBoxHalfExtents.z + 0.01f,
+                    "Fountain collider does not enclose the actual entrance door and glass");
+            }
+        }
+    });
+    Require(parts == 2, "Actual entrance door/glass geometry is missing from the fountain fixture");
+    std::cout << "Bistro fountains: actual closed entrance door and glass fit the collision box.\n";
+}
+
 static void CheckCounts(World& world, size_t probes, size_t grass, size_t water, size_t characters)
 {
     RegisterBistroWaterComponents(world);
@@ -237,8 +271,9 @@ int main(int argc, char** argv)
 {
     try
     {
-        Require(!BistroBounds::Show.GetValue() && !BistroReflections::ShowBounds.GetValue() &&
-            !BistroReflections::ShowSpheres.GetValue(), "Bistro debug geometry must be hidden by default");
+        const bool fountainsOnly = argc > 1 && std::strcmp(argv[1], "--fountains-only") == 0;
+        Require(fountainsOnly || (!BistroBounds::Show.GetValue() && !BistroReflections::ShowBounds.GetValue() &&
+            !BistroReflections::ShowSpheres.GetValue()), "Bistro debug geometry must be hidden by default");
         Require(BistroPhysics::CountScale.GetValue() == 1.0, "Bistro must default to the original 1x object count");
         if (argc > 1 && std::strcmp(argv[1], "--routes-only") == 0)
         {
@@ -261,6 +296,30 @@ int main(int argc, char** argv)
         ShowWindow(app.GetWindow()->GetWindowHandle(), SW_HIDE);
         auto render = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
         auto& world = *BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()->GetWorld();
+        CheckFountainDoor(world, *render);
+        if (fountainsOnly)
+        {
+            Set(L"App.ReflectionProbes.ShowSpheres", "false");
+            Aim(world, {-300, 180, 20}, {-80, 140, -95});
+            for (int frame = 0; frame < 60; ++frame) app.BenchmarkFrame(1.0 / 30);
+            render->WaitForUploads();
+            auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+            SaveImage(ReadHDR(*output), output->GetWidth(), output->GetHeight(), "fountains-entrance");
+            ComPtr<ID3D12Device> device;
+            ThrowIfFailed(output->GetResource()->D3DResource->GetDevice(IID_PPV_ARGS(&device)));
+            ThrowIfFailed(device->GetDeviceRemovedReason());
+            ComPtr<ID3D12InfoQueue> info; ThrowIfFailed(device.As(&info));
+            for (UINT64 index = 0; index < info->GetNumStoredMessages(); ++index)
+            {
+                SIZE_T bytes = 0; info->GetMessage(index, nullptr, &bytes);
+                std::vector<BYTE> storage(bytes);
+                auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+                ThrowIfFailed(info->GetMessage(index, message, &bytes));
+                Require(message->Severity > D3D12_MESSAGE_SEVERITY_ERROR, message->pDescription);
+            }
+            std::cout << "Bistro fountains: 60 entrance frames, finite HDR and clean D3D12 debug layer passed.\n";
+            return 0;
+        }
         if (argc > 1 && std::strcmp(argv[1], "--waves-smoke") == 0)
         {
             world.SetTimeScale(0);

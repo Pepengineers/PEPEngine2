@@ -83,6 +83,54 @@ void CollideDepth(float3 previous, inout float3 position, inout float3 velocity)
     }
 }
 
+// shortcut: expanded box corners are conservative; use sphere/box edge sweeps if corner clearance matters.
+void CollideBox(float3 previous, inout float3 position, inout float3 velocity)
+{
+    float3 origin = mul(float4(previous, 1), WorldToCollisionBox).xyz;
+    float3 destination = mul(float4(position, 1), WorldToCollisionBox).xyz;
+    float3 travel = destination - origin;
+    float3 extent = CollisionBoxHalfExtents + CollisionRadius;
+    float entry = 0, exit = 1;
+    float3 localNormal = 0;
+    if (all(abs(origin) < extent))
+    {
+        float3 clearance = extent - abs(origin);
+        uint axis = clearance.x < clearance.y ? 0 : 1;
+        if (clearance.z < clearance[axis]) axis = 2;
+        localNormal[axis] = origin[axis] < 0 ? -1 : 1;
+        destination = origin + localNormal * (clearance[axis] + 0.01f);
+    }
+    else
+    {
+        for (uint axis = 0; axis < 3; ++axis)
+        {
+            if (abs(travel[axis]) < 1e-6f)
+            {
+                if (abs(origin[axis]) > extent[axis]) return;
+                continue;
+            }
+            float a = (-extent[axis] - origin[axis]) / travel[axis];
+            float b = (extent[axis] - origin[axis]) / travel[axis];
+            float nearTime = min(a, b);
+            if (nearTime >= entry)
+            {
+                entry = nearTime;
+                localNormal = 0;
+                localNormal[axis] = travel[axis] > 0 ? -1 : 1;
+            }
+            exit = min(exit, max(a, b));
+            if (entry > exit) return;
+        }
+        if (dot(localNormal, localNormal) == 0) return;
+        destination = origin + travel * entry + localNormal * 0.01f;
+    }
+    float3 normal = mul(localNormal, transpose((float3x3)WorldToCollisionBox));
+    // Keep the tangential position and discard the unused time after the first contact, as with depth collisions.
+    position = previous + mul(destination - origin, transpose((float3x3)WorldToCollisionBox));
+    float incoming = dot(velocity, normal);
+    if (incoming < 0) velocity -= (1 + CollisionRestitution) * incoming * normal;
+}
+
 // shortcut: discard remaining travel after a hit; use swept multi-hit integration for tiny boxes or high speeds.
 void ConfineVolume(inout float3 position, inout float3 velocity)
 {
@@ -163,6 +211,8 @@ void Simulate(uint id : SV_DispatchThreadID)
         }
         if (DepthCollision != 0 && step > 0)
             CollideDepth(previousPosition, particle.Position, particle.Velocity);
+        if (CollisionBoxEnabled != 0 && step > 0)
+            CollideBox(previousPosition, particle.Position, particle.Velocity);
         if (VolumeEnabled != 0 && step > 0)
             ConfineVolume(particle.Position, particle.Velocity);
     }

@@ -3,7 +3,7 @@
 // Uses the SecondGroupTests camera (near=1, far=10000) and its independent HDR/motion readback.
 template<class Execute>
 static void CheckParticleSimulationControls(GDX12Device& device, GDX12DeviceResources& resources,
-    GDX12ParticlesPass& particles, Execute&& execute, Vector3 eye, Vector3 forward)
+    GDX12ParticlesPass& particles, Execute&& execute, GDX12Texture& sceneDepth, Vector3 eye, Vector3 forward)
 {
     GDX12ParticleEmitter emitter;
     emitter.Id = 901;
@@ -129,5 +129,71 @@ static void CheckParticleSimulationControls(GDX12Device& device, GDX12DeviceReso
     emitter.Paused = true;
     render();
     Require(std::abs(distance() - 99) < 0.03f, "Paused bounded particle continued simulating");
+    auto* queue = device.GetCommandQueue();
+    auto* commands = queue->GetCommandList();
+    commands->ResourceBarrier({sceneDepth.GetResource()->GetDepthWriteBarrier()});
+    commands->GetCommandList()->ClearDepthStencilView(sceneDepth.GetDSV()->CPUHandle, D3D12_CLEAR_FLAG_DEPTH,
+        0, 0, 0, nullptr);
+    queue->ExecuteCommandList(commands); queue->Flush();
+    emitter.Paused = false;
+    emitter.VolumeEnabled = false;
+    emitter.DepthCollision = true;
+    emitter.CollisionBoxEnabled = true;
+    emitter.CollisionBoxCenter = eye + forward * 120;
+    emitter.CollisionBoxHalfExtents = Vector3(100, 100, 1);
+    emitter.CollisionBoxYawDegrees = 28.5f;
+    emitter.CollisionRadius = 2;
+    const auto normal = Vector3::TransformNormal(Vector3::UnitZ,
+        Matrix::CreateRotationY(XMConvertToRadians(28.5f)));
+    const float contactOffset = 3 / forward.Dot(normal);
+    for (const float side : {-1.0f, 1.0f})
+    {
+        emitter.World = Matrix::CreateTranslation(eye + forward * (120 + side * 20));
+        emitter.Direction = forward * -side;
+        emitter.SpeedMin = emitter.SpeedMax = 1000;
+        ++emitter.ResetRevision;
+        emitter.DeltaTime = 0;
+        render();
+        emitter.DeltaTime = 0.1f; // Cross the entire thin obstacle in one substep, with no scene depth.
+        render();
+        Require(std::abs(distance() - (120 + side * (contactOffset + 0.01f * forward.Dot(normal)))) < 0.03f,
+            "Particle tunneled through the rotated door collider with no visible depth");
+        const float contact = distance();
+        emitter.DeltaTime = 0.01f;
+        render();
+        Require((distance() - contact) * side > 4,
+            "Particle did not bounce away from the door on both sides");
+    }
+    emitter.CollisionBoxEnabled = false;
+    ++emitter.ResetRevision;
+    emitter.DeltaTime = 0;
+    render();
+    emitter.DeltaTime = 0.1f;
+    render();
+    Require(std::abs(distance() - 40) < 0.03f, "Disabled door collider still blocked particles");
+    emitter.CollisionBoxEnabled = true;
+    emitter.SpeedMin = emitter.SpeedMax = 0;
+    emitter.World = Matrix::CreateTranslation(emitter.CollisionBoxCenter + normal * 2);
+    ++emitter.ResetRevision;
+    emitter.DeltaTime = 0;
+    render();
+    emitter.DeltaTime = 0.1f;
+    render();
+    Require(std::abs(distance() - (120 + 3.01f * forward.Dot(normal))) < 0.03f,
+        "Particle initially overlapping the door was not pushed out");
+    const auto right = Vector3::TransformNormal(Vector3::UnitX,
+        Matrix::CreateRotationY(XMConvertToRadians(28.5f)));
+    emitter.CollisionBoxHalfExtents.x = 4;
+    emitter.World = Matrix::CreateTranslation(emitter.CollisionBoxCenter + right * 10 - normal * 20);
+    emitter.Direction = normal;
+    emitter.SpeedMin = emitter.SpeedMax = 1000;
+    ++emitter.ResetRevision;
+    emitter.DeltaTime = 0;
+    render();
+    emitter.DeltaTime = 0.1f;
+    render();
+    Require(std::abs(distance() - (120 + 10 * forward.Dot(right) + 80 * forward.Dot(normal))) < 0.03f,
+        "Particle missing the finite door footprint was incorrectly blocked");
+    std::cout << "GPU particle swept rotated door collider: both sides, depth absent and disabled control passed.\n";
     std::cout << "GPU particle integrators, independent draw/simulation switches, pending burst/reset, volume and pause passed.\n";
 }
