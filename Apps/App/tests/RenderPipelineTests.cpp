@@ -30,6 +30,52 @@ public:
     UINT Begins = 0, Ends = 0;
 };
 
+static void TestRenderBounds()
+{
+    GDX12RenderBounds combined;
+    Require(combined.Empty(), "An empty bounds reduction retained geometry");
+    bool rejected = false;
+    try { combined.Get(); } catch (const std::logic_error&) { rejected = true; }
+    Require(rejected, "Empty bounds must not expose infinite extrema");
+    const BoundingBox boxes[] = {
+        {{100000000, -10000000, 7}, {0.25f, 0.001f, 200}},
+        {{-200000000, 5000000, -500}, {12, 30000, 0.01f}},
+        {{0,0,0}, {1e-8f,1e-8f,1e-8f}}, {{-45,5,7}, {0,0,0}},
+        {{1e20f,-1e20f,1e20f}, {1e-6f,0.001f,0.25f}}
+    };
+    const auto contains = [](const BoundingBox& outer, const BoundingBox& inner)
+    {
+        const double a[] = {outer.Center.x, outer.Center.y, outer.Center.z};
+        const double b[] = {inner.Center.x, inner.Center.y, inner.Center.z};
+        const double x[] = {outer.Extents.x, outer.Extents.y, outer.Extents.z};
+        const double y[] = {inner.Extents.x, inner.Extents.y, inner.Extents.z};
+        for (size_t i=0; i<3; ++i) if (a[i]-x[i] > b[i]-y[i] || a[i]+x[i] < b[i]+y[i]) return false;
+        return true;
+    };
+    for (const auto& box : boxes)
+    {
+        GDX12RenderBounds single; single.Add(box);
+        Require(contains(single.Get(), box), "Bounds reduction lost a thin, distant extent");
+        const auto one = single.Get();
+        Require(one.Extents.x >= box.Extents.x && one.Extents.y >= box.Extents.y && one.Extents.z >= box.Extents.z,
+            "Double endpoint rounding erased a distant sub-ULP extent");
+        combined.Add(box);
+    }
+    const auto bounds = combined.Get();
+    for (const auto& box : boxes) Require(contains(bounds, box), "Combined bounds excluded a contributor");
+    GDX12RenderBounds reverse;
+    for (size_t i=std::size(boxes); i>0; --i) reverse.Add(boxes[i-1]);
+    const auto reversed = reverse.Get();
+    Require(std::memcmp(&bounds, &reversed, sizeof(bounds)) == 0, "Bounds depend on reduction order");
+    GDX12RenderBounds casters, captureOnly;
+    casters.Add(boxes[0]); casters.Add(boxes[2]);
+    captureOnly.Add(boxes[1]); captureOnly.Add(boxes[3]); captureOnly.Add(boxes[4]);
+    casters.Merge(GDX12RenderBounds{});
+    captureOnly.Merge(casters);
+    const auto merged = captureOnly.Get();
+    Require(std::memcmp(&bounds, &merged, sizeof(bounds)) == 0, "Caster/capture reduction changed the union");
+}
+
 static void TestPreparedViewPhases()
 {
     PreparedViewPass pass;
@@ -547,6 +593,7 @@ int main()
     try
     {
         TestPrimitiveRecords();
+        TestRenderBounds();
         TestPreparedViewPhases();
         TestPreparedShadowViews();
         TestAliasedGeometryOrdering();

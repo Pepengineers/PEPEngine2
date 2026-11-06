@@ -348,13 +348,47 @@ public:
             _resources->ReflectionStaticRevision != revision, "Mesh reimport retained cached geometry metadata");
         const auto removed = primitive().first;
         const auto saved = ecs.Get<StaticMeshRenderComponent>(wall);
+        transform.Location.x += 1000000;
+        transform.DirtyFlag = true;
+        frame();
+        const auto expanded = _resources->ReflectionSceneBounds;
         ecs.Remove<StaticMeshRenderComponent>(wall);
         frame();
         Require(!_resources->Primitives.Get(removed), "Removed static mesh retained a cached primitive");
+        Require(_resources->ReflectionSceneBounds.Center.x + _resources->ReflectionSceneBounds.Extents.x <
+            expanded.Center.x + expanded.Extents.x - 100000,
+            "Removing the extreme caster retained expanded reflection bounds");
+        transform.Location.x -= 1000000;
+        transform.DirtyFlag = true;
         ecs.Add<StaticMeshRenderComponent>(wall, saved.MeshHandler, saved.Materials, saved.SubMeshIndices);
         frame();
         Require(primitive().first.Generation != removed.Generation || primitive().first.Index != removed.Index,
             "Replacement mesh resurrected a stale primitive handle");
+        struct ExternalSource final : IRenderGeometrySource {} application;
+        GDX12RenderPrimitive extra;
+        extra.Source = &application;
+        extra.Bounds = {{2000000,0,0},{0.25f,1,1}};
+        const auto casterCount = _resources->LocalShadowCasters->size();
+        const auto external = _resources->Primitives.Add(extra);
+        frame();
+        Require(_resources->ReflectionSceneBounds.Center.x + _resources->ReflectionSceneBounds.Extents.x >= 2000000 &&
+            _resources->LocalShadowCasters->size() == casterCount + 1,
+            "Application primitive did not enter the shared snapshot");
+        revision = _resources->ReflectionStaticRevision;
+        auto* editedPrimitive = _resources->Primitives.Get(external);
+        editedPrimitive->Bounds.Center.x = 1500000;
+        frame();
+        Require(_resources->ReflectionStaticRevision != revision &&
+            _resources->ReflectionSceneBounds.Center.x + _resources->ReflectionSceneBounds.Extents.x < 1600000,
+            "Direct application bounds edit retained a stale static reduction");
+        _resources->Primitives.Get(external)->CastsShadows = false;
+        frame();
+        Require(_resources->LocalShadowCasters->size() == casterCount,
+            "Direct application classification edit retained a shadow caster");
+        _resources->Primitives.Remove(external);
+        frame();
+        Require(_resources->ReflectionSceneBounds.Center.x + _resources->ReflectionSceneBounds.Extents.x < 1000000,
+            "Removing an application primitive retained expanded static bounds");
         std::cout << "Static snapshots: warm reuse, material, transform, visibility, classification, reimport, removal and replacement passed.\n";
     }
     void RenderBistroFrames()

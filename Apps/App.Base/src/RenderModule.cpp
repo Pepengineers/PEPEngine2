@@ -1034,7 +1034,7 @@ void RenderModule::CollectReflectionScene()
     for (const auto& light : resources.LocalLights) hash(staticHash, light);
     resources.ReflectionProbes.clear();
     resources.ReflectionPreviewDraws.clear();
-    bool hasBounds = false;
+    GDX12RenderBounds reflectionBounds, casterBounds;
     auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
     for (size_t worldIndex = 0; worldIndex < scenes->GetWorldCount(); ++worldIndex)
     {
@@ -1094,9 +1094,15 @@ void RenderModule::CollectReflectionScene()
                     cached.World = worldMatrix;
                     cached.Primitive = primitive;
                     cached.Valid = !renderer._reflectionDynamic;
-                    if (cached.Valid) cached.Signature = primitive.Revision();
                 }
-                resources.PublishMeshPrimitive(instanceIndex, cached.Primitive);
+                const auto handle = resources.PublishMeshPrimitive(instanceIndex, cached.Primitive);
+                if (cached.Valid && (!unchanged || !(cached.PrimitiveHandle == handle)))
+                {
+                    cached.Signature = cached.Primitive.Revision();
+                    hash(cached.Signature, handle.Index);
+                    hash(cached.Signature, handle.Generation);
+                    cached.PrimitiveHandle = handle;
+                }
                 if (!renderer.Visible || !material->ReflectionProbePreview) continue;
                 GDX12IndirectDrawArgs draw = {};
                 draw.InstanceID = draw.StartInstanceLocation = instanceIndex;
@@ -1130,30 +1136,36 @@ void RenderModule::CollectReflectionScene()
     resources.Primitives.ForEach([&](GDX12RenderPrimitiveHandle handle, const GDX12RenderPrimitive& primitive)
     {
         if (!primitive.Visible || (!primitive.CastsShadows && !primitive.CapturedInReflections)) return;
-        auto signature = !primitive.Source && !primitive.Dynamic && primitive.InstanceCount == 1 &&
-            primitive.FirstInstance < _meshSnapshots.size() && _meshSnapshots[primitive.FirstInstance].Valid
-            ? _meshSnapshots[primitive.FirstInstance].Signature : primitive.Revision();
-        hash(signature, handle.Index);
-        hash(signature, handle.Generation);
+        uint64_t signature;
+        if (!primitive.Source && !primitive.Dynamic && primitive.InstanceCount == 1 &&
+            primitive.FirstInstance < _meshSnapshots.size() && _meshSnapshots[primitive.FirstInstance].Valid &&
+            _meshSnapshots[primitive.FirstInstance].PrimitiveHandle == handle)
+            signature = _meshSnapshots[primitive.FirstInstance].Signature;
+        else
+        {
+            signature = primitive.Revision();
+            hash(signature, handle.Index);
+            hash(signature, handle.Generation);
+        }
         hash(resources.GeometryRevision, signature);
         // Shadow contributors can change probe lighting even when capture geometry is excluded.
         hash(primitive.Dynamic ? dynamicHash : staticHash, signature);
-        if (primitive.CastsShadows) resources.LocalShadowCasters->push_back({ primitive.Bounds, signature, primitive.Dynamic });
-        if (primitive.CapturedInReflections || primitive.CastsShadows)
+        if (primitive.CastsShadows)
         {
-            if (hasBounds) BoundingBox::CreateMerged(resources.ReflectionSceneBounds, resources.ReflectionSceneBounds, primitive.Bounds);
-            else resources.ReflectionSceneBounds = primitive.Bounds;
-            hasBounds = true;
+            resources.LocalShadowCasters->push_back({ primitive.Bounds, signature, primitive.Dynamic });
+            casterBounds.Add(primitive.Bounds);
         }
+        else reflectionBounds.Add(primitive.Bounds);
     });
-    if (!resources.LocalShadowCasters->empty())
+    reflectionBounds.Merge(casterBounds);
+    resources.ReflectionSceneBounds = reflectionBounds.Empty() ? BoundingBox{} : reflectionBounds.Get();
+    if (!casterBounds.Empty())
     {
-        auto casterBounds = resources.LocalShadowCasters->front().Bounds;
-        for (const auto& caster : *resources.LocalShadowCasters) BoundingBox::CreateMerged(casterBounds, casterBounds, caster.Bounds);
+        const auto bounds = casterBounds.Get();
         SubmitCameraShadows(BuildShadowCascades(_RPcommonData.CameraView.Invert(),
             XMConvertToRadians(_RPcommonData.ActiveCameraFOV), GetAspectRatio(),
             _RPcommonData.ActiveCameraNearPlane, _RPcommonData.ActiveCameraFarPlane,
-            Vector3(resources.Lighting.LightDirection), &casterBounds));
+            Vector3(resources.Lighting.LightDirection), &bounds));
     }
     std::sort(resources.ReflectionProbes.begin(), resources.ReflectionProbes.end(),
         [](const auto& a, const auto& b) { return a.Id < b.Id; });

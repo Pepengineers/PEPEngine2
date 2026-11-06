@@ -195,6 +195,7 @@ private:
         GDX12InstanceData Instance = {};
         XMFLOAT4X4 World = {};
         GDX12RenderPrimitive Primitive;
+        GDX12RenderPrimitiveHandle PrimitiveHandle;
         bool Valid = false;
     };
     std::vector<MeshSnapshot> _meshSnapshots;

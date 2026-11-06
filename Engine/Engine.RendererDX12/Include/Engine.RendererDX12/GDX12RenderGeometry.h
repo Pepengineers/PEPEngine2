@@ -4,6 +4,8 @@
 #include "Engine.RendererDX12/GDX12RenderGraph.h"
 #include <limits>
 #include <stdexcept>
+#include <algorithm>
+#include <cmath>
 
 class GDX12Texture;
 class IRenderGeometrySource;
@@ -52,6 +54,55 @@ struct GDX12RenderPrimitiveHandle
     uint64_t Generation = 0;
     bool operator==(const GDX12RenderPrimitiveHandle& other) const
     { return Index == other.Index && Generation == other.Generation; }
+};
+
+class GDX12RenderBounds
+{
+public:
+    void Add(const BoundingBox& bounds)
+    {
+        const double centers[] = { bounds.Center.x, bounds.Center.y, bounds.Center.z };
+        const double extents[] = { bounds.Extents.x, bounds.Extents.y, bounds.Extents.z };
+        for (size_t i = 0; i < 3; ++i)
+        {
+            const double minimum = centers[i] - extents[i], maximum = centers[i] + extents[i];
+            if (minimum < _minimum[i]) _minimum[i] = minimum;
+            if (maximum > _maximum[i]) _maximum[i] = maximum;
+        }
+        _empty = false;
+    }
+    void Merge(const GDX12RenderBounds& other)
+    {
+        if (other.Empty()) return;
+        for (size_t i = 0; i < 3; ++i)
+        {
+            _minimum[i] = (std::min)(_minimum[i], other._minimum[i]);
+            _maximum[i] = (std::max)(_maximum[i], other._maximum[i]);
+        }
+        _empty = false;
+    }
+    bool Empty() const { return _empty; }
+    BoundingBox Get() const
+    {
+        if (_empty) throw std::logic_error("No render bounds to combine");
+        float centers[3], extents[3];
+        for (size_t i = 0; i < 3; ++i)
+        {
+            // Double endpoint arithmetic can also round inward when center and extent have very different magnitudes.
+            const double minimum = _minimum[i] == 0 ? 0 : std::nextafter(_minimum[i], -std::numeric_limits<double>::infinity());
+            const double maximum = _maximum[i] == 0 ? 0 : std::nextafter(_maximum[i], std::numeric_limits<double>::infinity());
+            centers[i] = static_cast<float>((minimum + maximum) * 0.5);
+            const double extent = (std::max)(maximum - centers[i], centers[i] - minimum);
+            extents[i] = static_cast<float>(extent);
+            // Keep thin, distant bounds conservative after rounding the final float center/extent.
+            if (extents[i] < extent) extents[i] = std::nextafter(extents[i], std::numeric_limits<float>::infinity());
+        }
+        return BoundingBox({ centers[0], centers[1], centers[2] }, { extents[0], extents[1], extents[2] });
+    }
+private:
+    double _minimum[3] = { INFINITY, INFINITY, INFINITY };
+    double _maximum[3] = { -INFINITY, -INFINITY, -INFINITY };
+    bool _empty = true;
 };
 
 struct GDX12RenderPrimitive
