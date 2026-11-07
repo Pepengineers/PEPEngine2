@@ -1,0 +1,73 @@
+{
+  "commit": "bd994438a66ebcf7bccf459293193f9e080f41c4",
+  "gpu_before": "NVIDIA GeForce RTX 3060 Laptop GPU, 617.42, 6144 MiB, 58, P8",
+  "gpu_after": "NVIDIA GeForce RTX 3060 Laptop GPU, 617.42, 6144 MiB, 87, P0",
+  "runs": [
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\water\\run-01.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\water\\run-01.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "459172ffba4e8ad5328948bb586f6f5ba1c50574a3ff8b3312faa8d974d3e3f4",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "60d40a818114a74d0ee77395004a1e308e4193c19dbed50b52f947bfb53e0bf9",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243"
+      },
+      "pid": 55188,
+      "elapsed_s": 45.29,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "459172ffba4e8ad5328948bb586f6f5ba1c50574a3ff8b3312faa8d974d3e3f4",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "60d40a818114a74d0ee77395004a1e308e4193c19dbed50b52f947bfb53e0bf9",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243"
+      }
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\water\\run-02.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\water\\run-02.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "459172ffba4e8ad5328948bb586f6f5ba1c50574a3ff8b3312faa8d974d3e3f4",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "60d40a818114a74d0ee77395004a1e308e4193c19dbed50b52f947bfb53e0bf9",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243"
+      },
+      "pid": 27616,
+      "elapsed_s": 47.09,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "459172ffba4e8ad5328948bb586f6f5ba1c50574a3ff8b3312faa8d974d3e3f4",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "60d40a818114a74d0ee77395004a1e308e4193c19dbed50b52f947bfb53e0bf9",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243"
+      }
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\water\\run-03.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\water\\run-03.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "459172ffba4e8ad5328948bb586f6f5ba1c50574a3ff8b3312faa8d974d3e3f4",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "60d40a818114a74d0ee77395004a1e308e4193c19dbed50b52f947bfb53e0bf9",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243"
+      },
+      "pid": 30648,
+      "elapsed_s": 48.31,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "459172ffba4e8ad5328948bb586f6f5ba1c50574a3ff8b3312faa8d974d3e3f4",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "60d40a818114a74d0ee77395004a1e308e4193c19dbed50b52f947bfb53e0bf9",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243"
+      }
+    }
+  ]
+}

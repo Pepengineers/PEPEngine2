@@ -1,0 +1,773 @@
+{
+  "commit": "32e998adef90a66e9e6c162a07ec67419f759fcf",
+  "isolated": [
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-0.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-0.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 53784,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 23.67,
+      "gpu_before": "2026/11/07 05:39:20.162, 65, 95 MiB, 210 MHz, 11.11 W",
+      "gpu_after": "2026/11/07 05:39:44.187, 74, 95 MiB, 2055 MHz, 78.53 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-1.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-1.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 55980,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 22.06,
+      "gpu_before": "2026/11/07 05:40:07.374, 77, 95 MiB, 2040 MHz, 88.00 W",
+      "gpu_after": "2026/11/07 05:40:29.718, 77, 95 MiB, 1905 MHz, 79.11 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-2.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-2.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 35728,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 23.46,
+      "gpu_before": "2026/11/07 05:40:52.035, 76, 95 MiB, 1935 MHz, 34.69 W",
+      "gpu_after": "2026/11/07 05:41:15.782, 79, 95 MiB, 2040 MHz, 80.00 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-3.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-3.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 42932,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 22.06,
+      "gpu_before": "2026/11/07 05:41:37.862, 79, 95 MiB, 2040 MHz, 82.68 W",
+      "gpu_after": "2026/11/07 05:42:00.240, 79, 95 MiB, 2002 MHz, 51.55 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-4.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-4.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 29372,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 23.26,
+      "gpu_before": "2026/11/07 05:42:00.317, 79, 95 MiB, 2002 MHz, 51.55 W",
+      "gpu_after": "2026/11/07 05:42:23.914, 80, 95 MiB, 2040 MHz, 87.15 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-5.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-5.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 38436,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 21.66,
+      "gpu_before": "2026/11/07 05:41:15.845, 79, 95 MiB, 2040 MHz, 80.00 W",
+      "gpu_after": "2026/11/07 05:41:37.786, 79, 95 MiB, 2040 MHz, 82.68 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-6.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-6.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 40476,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 21.86,
+      "gpu_before": "2026/11/07 05:40:29.795, 77, 95 MiB, 1905 MHz, 79.11 W",
+      "gpu_after": "2026/11/07 05:40:51.973, 80, 95 MiB, 2040 MHz, 85.22 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-7.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-01-row-7.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 52988,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 22.68,
+      "gpu_before": "2026/11/07 05:39:44.297, 74, 95 MiB, 2055 MHz, 78.53 W",
+      "gpu_after": "2026/11/07 05:40:07.311, 77, 95 MiB, 2040 MHz, 88.00 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-0.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-0.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 19368,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 22.65,
+      "gpu_before": "2026/11/07 05:45:01.334, 81, 95 MiB, 2040 MHz, 82.00 W",
+      "gpu_after": "2026/11/07 05:45:24.298, 81, 95 MiB, 2040 MHz, 83.56 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-1.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-1.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 53824,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 21.86,
+      "gpu_before": "2026/11/07 05:44:17.104, 80, 95 MiB, 2040 MHz, 69.30 W",
+      "gpu_after": "2026/11/07 05:44:39.240, 80, 95 MiB, 1972 MHz, 78.97 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-2.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-2.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 45628,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 21.86,
+      "gpu_before": "2026/11/07 05:43:30.951, 82, 95 MiB, 2040 MHz, 92.00 W",
+      "gpu_after": "2026/11/07 05:43:53.116, 80, 95 MiB, 2040 MHz, 81.00 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-3.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-3.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 51284,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 21.66,
+      "gpu_before": "2026/11/07 05:42:46.820, 80, 95 MiB, 2040 MHz, 86.42 W",
+      "gpu_after": "2026/11/07 05:43:08.842, 81, 95 MiB, 2040 MHz, 87.81 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-4.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-4.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 56040,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 22.46,
+      "gpu_before": "2026/11/07 05:42:23.986, 80, 95 MiB, 2040 MHz, 87.15 W",
+      "gpu_after": "2026/11/07 05:42:46.743, 80, 95 MiB, 2040 MHz, 86.42 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-5.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-5.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 31944,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 21.66,
+      "gpu_before": "2026/11/07 05:43:08.920, 81, 95 MiB, 2040 MHz, 87.81 W",
+      "gpu_after": "2026/11/07 05:43:30.875, 82, 95 MiB, 2040 MHz, 92.00 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-6.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-6.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 17988,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 23.46,
+      "gpu_before": "2026/11/07 05:43:53.209, 80, 95 MiB, 2040 MHz, 81.00 W",
+      "gpu_after": "2026/11/07 05:44:17.027, 84, 95 MiB, 1950 MHz, 91.47 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-7.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-02-row-7.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 38948,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 21.65,
+      "gpu_before": "2026/11/07 05:44:39.316, 80, 95 MiB, 1972 MHz, 78.97 W",
+      "gpu_after": "2026/11/07 05:45:01.255, 81, 95 MiB, 2040 MHz, 82.00 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-0.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-0.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 3456,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 22.49,
+      "gpu_before": "2026/11/07 05:46:56.490, 82, 95 MiB, 2040 MHz, 90.73 W",
+      "gpu_after": "2026/11/07 05:47:19.291, 81, 95 MiB, 2040 MHz, 82.01 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-1.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-1.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 52932,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 23.47,
+      "gpu_before": "2026/11/07 05:46:09.151, 80, 95 MiB, 2040 MHz, 65.21 W",
+      "gpu_after": "2026/11/07 05:46:32.974, 83, 95 MiB, 1987 MHz, 94.50 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-2.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-2.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 412,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 22.46,
+      "gpu_before": "2026/11/07 05:47:41.969, 81, 95 MiB, 2040 MHz, 83.65 W",
+      "gpu_after": "2026/11/07 05:48:04.700, 81, 95 MiB, 2040 MHz, 77.96 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-3.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-3.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 30404,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 21.66,
+      "gpu_before": "2026/11/07 05:45:24.376, 81, 95 MiB, 2040 MHz, 83.56 W",
+      "gpu_after": "2026/11/07 05:45:46.390, 81, 95 MiB, 1987 MHz, 89.76 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-4.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-4.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 10728,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 23.06,
+      "gpu_before": "2026/11/07 05:46:33.052, 83, 95 MiB, 1987 MHz, 94.50 W",
+      "gpu_after": "2026/11/07 05:46:56.413, 82, 95 MiB, 2040 MHz, 90.73 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-5.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-5.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 44556,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 22.25,
+      "gpu_before": "2026/11/07 05:48:04.778, 81, 95 MiB, 2040 MHz, 77.96 W",
+      "gpu_after": "2026/11/07 05:48:27.307, 81, 95 MiB, 2040 MHz, 81.77 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-6.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-6.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 32336,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 22.26,
+      "gpu_before": "2026/11/07 05:45:46.469, 81, 95 MiB, 1987 MHz, 89.76 W",
+      "gpu_after": "2026/11/07 05:46:09.041, 81, 95 MiB, 2040 MHz, 87.48 W"
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-7.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\isolated\\batch-03-row-7.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 27804,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "elapsed_s": 22.26,
+      "gpu_before": "2026/11/07 05:47:19.353, 81, 95 MiB, 2040 MHz, 82.01 W",
+      "gpu_after": "2026/11/07 05:47:41.893, 81, 95 MiB, 2040 MHz, 83.65 W"
+    }
+  ],
+  "long_matrix": [
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\ao\\conditioning-01.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\ao\\conditioning-01.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      },
+      "pid": 31312,
+      "elapsed_s": 74.15,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5"
+      }
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\ao\\conditioning-02.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\ao\\conditioning-02.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81"
+      },
+      "pid": 37748,
+      "elapsed_s": 76.96,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81"
+      }
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\ao\\run-01.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\ao\\run-01.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81"
+      },
+      "pid": 39752,
+      "elapsed_s": 82.36,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81"
+      }
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\ao\\run-02.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\ao\\run-02.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81"
+      },
+      "pid": 31500,
+      "elapsed_s": 87.55,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81"
+      }
+    },
+    {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\ao\\run-03.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\ao\\run-03.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81"
+      },
+      "pid": 51348,
+      "elapsed_s": 98.2,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Config\\Engine.ini": "fe3491df8b2e1551b1b94857d92c1884ec9dabd79c1fcbe20bb44594b969b64d",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\FluidSolver.hlsl": "31f4e6b8b79c947e40a75de59675ee0365da4b615cb53ae92d5f2d46bd27a7ab",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "bf3d69f6dd5a08dc8f95e388dd70e38da16854f939ebecf12defe4061579c243",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\AmbientOcclusion.hlsl": "113cf280545106d4975169f7f2cfa905d9592d213575af8d0a4c48089a766ea5",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81"
+      }
+    }
+  ],
+  "gpu-cold.txt": "NVIDIA GeForce RTX 3060 Laptop GPU, 617.42, 6144 MiB, 57, P8",
+  "gpu-before.txt": "NVIDIA GeForce RTX 3060 Laptop GPU, 617.42, 6144 MiB, 85, P0",
+  "gpu-after.txt": "NVIDIA GeForce RTX 3060 Laptop GPU, 617.42, 6144 MiB, 86, P0",
+  "telemetry": {
+    "raw_sha256": "ce79c97d7e56e404eead78e63fd506bafaeb297f4f06c8e0af24766373e23445",
+    "complete_rows": 56,
+    "excluded_incomplete_rows": 1,
+    "receipt": {
+      "status": "passed",
+      "stdout": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\diagnostic\\full-matrix.stdout.log",
+      "stderr": "D:\\Project\\PEPEngine2\\Build\\AsyncMatrix-20261107\\diagnostic\\full-matrix.stderr.log",
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81"
+      },
+      "pid": 27504,
+      "elapsed_s": 76.74,
+      "child_exit_code": 0,
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\BistroRenderGraphTests.exe": "2c0d92b9f89f1265a08f249e8f2e5c1f5f67a895248e1c1e92a0e36ce90639b0",
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\BistroRenderGraphTests\\Config\\Engine.ini": "27e00849ed4986fba93666cb4a5dd8b242a4287829a13d7a3e303734fa032c81"
+      }
+    }
+  }
+}

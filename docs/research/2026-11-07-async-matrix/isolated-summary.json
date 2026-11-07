@@ -1,0 +1,1023 @@
+{
+  "primary_metric": "median of three fresh-process GPU medians, 64 warmup + 128 measured frames, CPU drain",
+  "orders": [
+    [
+      0,
+      7,
+      1,
+      6,
+      2,
+      5,
+      3,
+      4
+    ],
+    [
+      4,
+      3,
+      5,
+      2,
+      6,
+      1,
+      7,
+      0
+    ],
+    [
+      3,
+      6,
+      1,
+      4,
+      0,
+      7,
+      2,
+      5
+    ]
+  ],
+  "inputs": [
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-01-row-0.csv",
+      "sha256": "5b5b8ef522b99b9b89147b48b52c3c7c23801122b96fa24e1f4d94d7a76b4f14"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-01-row-1.csv",
+      "sha256": "0fbbb21d763e73ecb8e0ffa1cb0cb7687d05719fd52b4b5e53f38829370a3a86"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-01-row-2.csv",
+      "sha256": "68a78b62c15fe93edcc5fff4e364014abe5c646fa50429117fe2ffcbdfb5787f"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-01-row-3.csv",
+      "sha256": "310d3e77d8f4935e30e3dbcedd538ba8b080465a9fd5e16dcc50aacd1d6d54e0"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-01-row-4.csv",
+      "sha256": "c3520533f2bf537a1d5d34e2467b7a360700a8bc94138b959ee4bdcb70ce1510"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-01-row-5.csv",
+      "sha256": "708d502a1d794e5df95c152293c8da06507cf173b925f9b1bc3fe7d5af1a6368"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-01-row-6.csv",
+      "sha256": "c29b445a620a0e0618416ddb9da80485962f1c2d0f975f2d4d74c0b166e22cbf"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-01-row-7.csv",
+      "sha256": "851635936a1c2b86ef6943efeba1ee928f8194e595fb81a3236dbf2d00c8886d"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-02-row-0.csv",
+      "sha256": "93f268fabe6ea166e8ed2761fd0bfb166a081d6fd6e9733a081b2cbabccfa9b1"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-02-row-1.csv",
+      "sha256": "eaf2e8f93d065e7efaaf365c04bd067b4f95df6e9ec8203bc74409ca8a383ee3"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-02-row-2.csv",
+      "sha256": "ed73c39d021d5192895f7a144e6f379e93cb1abb8fbd736154fff4189d0856fe"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-02-row-3.csv",
+      "sha256": "ba0224a528b112519e57c79ee70697ab9453a2ad2fc3a7f2ca3da4f78ba2a28f"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-02-row-4.csv",
+      "sha256": "b48230e42143f0b278915409ee5491c399ddf4e1f2aed88f01d72c4557f74ecd"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-02-row-5.csv",
+      "sha256": "a662e11655a01a4f76b76f9551d80ca5af2422d6615a95c31b7dc22b2428bb8d"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-02-row-6.csv",
+      "sha256": "4d1669dbc4debba81f285a5c0e9e083a0f669897d72ada9f40766cca5b9db7d8"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-02-row-7.csv",
+      "sha256": "b8534bf078ae3eed2850cb227fc26e206410fadb9a46975d2d39deac05f9475a"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-03-row-0.csv",
+      "sha256": "57ea61456a98b4e37c762928af2975dbd4c379c6698357207a3f2d2aa51137eb"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-03-row-1.csv",
+      "sha256": "50c0189163e9fd1cdd1c63e0d3f42c32735b49396436e1943ab3124ba63d76a6"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-03-row-2.csv",
+      "sha256": "104845eb7763a3706952064430cb0b81815af320ca843f7ad31164483ef374f7"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-03-row-3.csv",
+      "sha256": "57b17c9733cc98fc410e52f1bdd7e11228e1b26180301144f0acbebd1af4ec06"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-03-row-4.csv",
+      "sha256": "bc3ed0bd9900fc5bfe8f148945a9efefaf328c4816e0bc8abeb0bb167a5f2426"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-03-row-5.csv",
+      "sha256": "6f1563e147b5d504ec4b815a36b67203903f2756f59b6ca1b03c8ddf878427de"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-03-row-6.csv",
+      "sha256": "6941d2d12fb81907d5524a1eae60f836beb021c0b7c5124cfd4790b79415284e"
+    },
+    {
+      "path": "D:\\Project\\PEPEngine2\\docs\\research\\2026-11-07-async-matrix\\batch-03-row-7.csv",
+      "sha256": "7615b84072ad07d2d49ab319746c3861883387c2daf80cbe167f63c3d81f4bf1"
+    }
+  ],
+  "matrix": [
+    {
+      "row": 0,
+      "gpu_ms": 12.5619,
+      "improvement_percent": 0.0,
+      "trial_medians": [
+        12.447199999999999,
+        12.5619,
+        12.5701
+      ],
+      "trial_medians_summary": {
+        "n": 3,
+        "median": 12.5619,
+        "min": 12.447199999999999,
+        "max": 12.5701,
+        "p95": 12.5701
+      },
+      "paired_improvement_percent": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "faster_than_direct_trials": 0,
+      "gpu_samples": {
+        "n": 384,
+        "median": 12.5215,
+        "min": 12.2143,
+        "max": 13.3734,
+        "p95": 12.7529
+      },
+      "cpu_submit": {
+        "n": 384,
+        "median": 4.88795,
+        "min": 4.3823,
+        "max": 6.1479,
+        "p95": 5.4606
+      }
+    },
+    {
+      "row": 1,
+      "gpu_ms": 12.3095,
+      "improvement_percent": 2.009250193044043,
+      "trial_medians": [
+        12.24755,
+        12.3095,
+        12.3448
+      ],
+      "trial_medians_summary": {
+        "n": 3,
+        "median": 12.3095,
+        "min": 12.24755,
+        "max": 12.3448,
+        "p95": 12.3448
+      },
+      "paired_improvement_percent": [
+        1.6039751912076516,
+        2.009250193044043,
+        1.7923485095584057
+      ],
+      "faster_than_direct_trials": 3,
+      "gpu_samples": {
+        "n": 384,
+        "median": 12.3013,
+        "min": 11.8497,
+        "max": 13.226,
+        "p95": 12.7232
+      },
+      "cpu_submit": {
+        "n": 384,
+        "median": 5.1404499999999995,
+        "min": 4.6458,
+        "max": 6.3508,
+        "p95": 5.7187
+      }
+    },
+    {
+      "row": 2,
+      "gpu_ms": 12.62645,
+      "improvement_percent": -0.5138553881180341,
+      "trial_medians": [
+        12.62645,
+        12.6249,
+        12.656649999999999
+      ],
+      "trial_medians_summary": {
+        "n": 3,
+        "median": 12.62645,
+        "min": 12.6249,
+        "max": 12.656649999999999,
+        "p95": 12.656649999999999
+      },
+      "paired_improvement_percent": [
+        -1.4400829102127588,
+        -0.5015164903398484,
+        -0.6885386751099842
+      ],
+      "faster_than_direct_trials": 0,
+      "gpu_samples": {
+        "n": 384,
+        "median": 12.6382,
+        "min": 12.3474,
+        "max": 13.3673,
+        "p95": 12.8778
+      },
+      "cpu_submit": {
+        "n": 384,
+        "median": 5.2235,
+        "min": 4.6878,
+        "max": 10.5193,
+        "p95": 5.8703
+      }
+    },
+    {
+      "row": 3,
+      "gpu_ms": 11.88915,
+      "improvement_percent": 5.3554796647003915,
+      "trial_medians": [
+        11.9081,
+        11.867149999999999,
+        11.88915
+      ],
+      "trial_medians_summary": {
+        "n": 3,
+        "median": 11.88915,
+        "min": 11.867149999999999,
+        "max": 11.9081,
+        "p95": 11.9081
+      },
+      "paired_improvement_percent": [
+        4.33109454335111,
+        5.53061240735877,
+        5.41722022895601
+      ],
+      "faster_than_direct_trials": 3,
+      "gpu_samples": {
+        "n": 384,
+        "median": 11.895299999999999,
+        "min": 11.5497,
+        "max": 12.7724,
+        "p95": 12.3126
+      },
+      "cpu_submit": {
+        "n": 384,
+        "median": 5.5229,
+        "min": 4.9205,
+        "max": 7.4987,
+        "p95": 6.5807
+      }
+    },
+    {
+      "row": 4,
+      "gpu_ms": 12.672,
+      "improvement_percent": -0.8764597712129563,
+      "trial_medians": [
+        12.6669,
+        12.672,
+        12.6807
+      ],
+      "trial_medians_summary": {
+        "n": 3,
+        "median": 12.672,
+        "min": 12.6669,
+        "max": 12.6807,
+        "p95": 12.6807
+      },
+      "paired_improvement_percent": [
+        -1.7650555948325763,
+        -0.8764597712129563,
+        -0.8798657130810295
+      ],
+      "faster_than_direct_trials": 0,
+      "gpu_samples": {
+        "n": 384,
+        "median": 12.673,
+        "min": 12.4539,
+        "max": 13.4758,
+        "p95": 12.9239
+      },
+      "cpu_submit": {
+        "n": 384,
+        "median": 5.19505,
+        "min": 4.7249,
+        "max": 6.5121,
+        "p95": 5.8628
+      }
+    },
+    {
+      "row": 5,
+      "gpu_ms": 12.286950000000001,
+      "improvement_percent": 2.188761254268845,
+      "trial_medians": [
+        12.286950000000001,
+        12.2829,
+        12.319199999999999
+      ],
+      "trial_medians_summary": {
+        "n": 3,
+        "median": 12.286950000000001,
+        "min": 12.2829,
+        "max": 12.319199999999999,
+        "p95": 12.319199999999999
+      },
+      "paired_improvement_percent": [
+        1.2874381386978384,
+        2.221001600076422,
+        1.996006396130512
+      ],
+      "faster_than_direct_trials": 3,
+      "gpu_samples": {
+        "n": 384,
+        "median": 12.2972,
+        "min": 11.9337,
+        "max": 13.3192,
+        "p95": 12.7037
+      },
+      "cpu_submit": {
+        "n": 384,
+        "median": 5.250299999999999,
+        "min": 4.7701,
+        "max": 6.3221,
+        "p95": 5.7832
+      }
+    },
+    {
+      "row": 6,
+      "gpu_ms": 12.7073,
+      "improvement_percent": -1.1574682173874917,
+      "trial_medians": [
+        12.6172,
+        12.71245,
+        12.7073
+      ],
+      "trial_medians_summary": {
+        "n": 3,
+        "median": 12.7073,
+        "min": 12.6172,
+        "max": 12.71245,
+        "p95": 12.71245
+      },
+      "paired_improvement_percent": [
+        -1.36576900829104,
+        -1.1984652003279805,
+        -1.0914789858473606
+      ],
+      "faster_than_direct_trials": 0,
+      "gpu_samples": {
+        "n": 384,
+        "median": 12.6761,
+        "min": 12.4334,
+        "max": 13.5608,
+        "p95": 12.9935
+      },
+      "cpu_submit": {
+        "n": 384,
+        "median": 5.3974,
+        "min": 4.8184,
+        "max": 6.8205,
+        "p95": 6.0749
+      }
+    },
+    {
+      "row": 7,
+      "gpu_ms": 11.89375,
+      "improvement_percent": 5.318861000326381,
+      "trial_medians": [
+        11.836400000000001,
+        11.9081,
+        11.89375
+      ],
+      "trial_medians_summary": {
+        "n": 3,
+        "median": 11.89375,
+        "min": 11.836400000000001,
+        "max": 11.9081,
+        "p95": 11.9081
+      },
+      "paired_improvement_percent": [
+        4.907127707436187,
+        5.20462668863787,
+        5.380625452462584
+      ],
+      "faster_than_direct_trials": 3,
+      "gpu_samples": {
+        "n": 384,
+        "median": 11.8794,
+        "min": 11.5323,
+        "max": 13.865,
+        "p95": 12.3331
+      },
+      "cpu_submit": {
+        "n": 384,
+        "median": 5.492,
+        "min": 4.996,
+        "max": 9.4376,
+        "p95": 6.2407
+      }
+    }
+  ],
+  "marginal": [
+    {
+      "effect": "water",
+      "from_row": 0,
+      "to_row": 1,
+      "saved_ms": 0.25239999999999974,
+      "improvement_percent": 2.009250193044043,
+      "paired_saved_ms": [
+        0.19964999999999833,
+        0.25239999999999974,
+        0.22530000000000072
+      ],
+      "faster_trials": 3
+    },
+    {
+      "effect": "water",
+      "from_row": 2,
+      "to_row": 3,
+      "saved_ms": 0.7372999999999994,
+      "improvement_percent": 5.839329344352528,
+      "paired_saved_ms": [
+        0.7183500000000009,
+        0.7577500000000015,
+        0.7674999999999983
+      ],
+      "faster_trials": 3
+    },
+    {
+      "effect": "water",
+      "from_row": 4,
+      "to_row": 5,
+      "saved_ms": 0.38504999999999967,
+      "improvement_percent": 3.038589015151516,
+      "paired_saved_ms": [
+        0.3799499999999991,
+        0.3891000000000009,
+        0.36150000000000126
+      ],
+      "faster_trials": 3
+    },
+    {
+      "effect": "water",
+      "from_row": 6,
+      "to_row": 7,
+      "saved_ms": 0.8135499999999993,
+      "improvement_percent": 6.402225492433478,
+      "paired_saved_ms": [
+        0.7807999999999993,
+        0.8043500000000012,
+        0.8135499999999993
+      ],
+      "faster_trials": 3
+    },
+    {
+      "effect": "particles",
+      "from_row": 0,
+      "to_row": 2,
+      "saved_ms": -0.06455000000000055,
+      "improvement_percent": -0.5138553881180341,
+      "paired_saved_ms": [
+        -0.17925000000000146,
+        -0.06300000000000061,
+        -0.08654999999999902
+      ],
+      "faster_trials": 0
+    },
+    {
+      "effect": "particles",
+      "from_row": 1,
+      "to_row": 3,
+      "saved_ms": 0.4203499999999991,
+      "improvement_percent": 3.414842195052592,
+      "paired_saved_ms": [
+        0.33945000000000114,
+        0.44235000000000113,
+        0.45564999999999856
+      ],
+      "faster_trials": 3
+    },
+    {
+      "effect": "particles",
+      "from_row": 4,
+      "to_row": 6,
+      "saved_ms": -0.03529999999999944,
+      "improvement_percent": -0.2785669191919249,
+      "paired_saved_ms": [
+        0.04969999999999963,
+        -0.040449999999999875,
+        -0.02660000000000018
+      ],
+      "faster_trials": 1
+    },
+    {
+      "effect": "particles",
+      "from_row": 5,
+      "to_row": 7,
+      "saved_ms": 0.3932000000000002,
+      "improvement_percent": 3.200143241406539,
+      "paired_saved_ms": [
+        0.4505499999999998,
+        0.37480000000000047,
+        0.4254499999999979
+      ],
+      "faster_trials": 3
+    },
+    {
+      "effect": "ao",
+      "from_row": 0,
+      "to_row": 4,
+      "saved_ms": -0.11010000000000097,
+      "improvement_percent": -0.8764597712129563,
+      "paired_saved_ms": [
+        -0.21970000000000134,
+        -0.11010000000000097,
+        -0.11059999999999981
+      ],
+      "faster_trials": 0
+    },
+    {
+      "effect": "ao",
+      "from_row": 1,
+      "to_row": 5,
+      "saved_ms": 0.02254999999999896,
+      "improvement_percent": 0.1831918436979496,
+      "paired_saved_ms": [
+        -0.039400000000000546,
+        0.02660000000000018,
+        0.025600000000000733
+      ],
+      "faster_trials": 2
+    },
+    {
+      "effect": "ao",
+      "from_row": 2,
+      "to_row": 6,
+      "saved_ms": -0.08084999999999987,
+      "improvement_percent": -0.6403224976141431,
+      "paired_saved_ms": [
+        0.009249999999999758,
+        -0.08755000000000024,
+        -0.05065000000000097
+      ],
+      "faster_trials": 1
+    },
+    {
+      "effect": "ao",
+      "from_row": 3,
+      "to_row": 7,
+      "saved_ms": -0.0045999999999999375,
+      "improvement_percent": -0.03869073903517428,
+      "paired_saved_ms": [
+        0.0716999999999981,
+        -0.040950000000000486,
+        -0.0045999999999999375
+      ],
+      "faster_trials": 1
+    }
+  ],
+  "trials": [
+    {
+      "batch": 1,
+      "row": 0,
+      "gpu": {
+        "n": 128,
+        "median": 12.447199999999999,
+        "min": 12.2143,
+        "max": 13.2854,
+        "p95": 12.6147
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 4.8756,
+        "min": 4.4021,
+        "max": 6.0183,
+        "p95": 5.3793
+      }
+    },
+    {
+      "batch": 1,
+      "row": 1,
+      "gpu": {
+        "n": 128,
+        "median": 12.24755,
+        "min": 11.8497,
+        "max": 12.9792,
+        "p95": 12.7621
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.1215,
+        "min": 4.7406,
+        "max": 6.1223,
+        "p95": 5.7774
+      }
+    },
+    {
+      "batch": 1,
+      "row": 2,
+      "gpu": {
+        "n": 128,
+        "median": 12.62645,
+        "min": 12.3474,
+        "max": 13.3673,
+        "p95": 12.8635
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.1779,
+        "min": 4.6878,
+        "max": 10.5193,
+        "p95": 5.7951
+      }
+    },
+    {
+      "batch": 1,
+      "row": 3,
+      "gpu": {
+        "n": 128,
+        "median": 11.9081,
+        "min": 11.5497,
+        "max": 12.7724,
+        "p95": 12.3197
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.94445,
+        "min": 5.2735,
+        "max": 7.4987,
+        "p95": 6.7796
+      }
+    },
+    {
+      "batch": 1,
+      "row": 4,
+      "gpu": {
+        "n": 128,
+        "median": 12.6669,
+        "min": 12.4754,
+        "max": 13.3509,
+        "p95": 12.8932
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.19225,
+        "min": 4.8034,
+        "max": 6.3557,
+        "p95": 5.8716
+      }
+    },
+    {
+      "batch": 1,
+      "row": 5,
+      "gpu": {
+        "n": 128,
+        "median": 12.286950000000001,
+        "min": 11.9859,
+        "max": 12.8829,
+        "p95": 12.5932
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.18175,
+        "min": 4.9033,
+        "max": 6.3221,
+        "p95": 5.637
+      }
+    },
+    {
+      "batch": 1,
+      "row": 6,
+      "gpu": {
+        "n": 128,
+        "median": 12.6172,
+        "min": 12.4334,
+        "max": 13.5107,
+        "p95": 12.9935
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.53805,
+        "min": 4.8743,
+        "max": 6.8205,
+        "p95": 6.3288
+      }
+    },
+    {
+      "batch": 1,
+      "row": 7,
+      "gpu": {
+        "n": 128,
+        "median": 11.836400000000001,
+        "min": 11.5446,
+        "max": 13.1942,
+        "p95": 12.3351
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.5743,
+        "min": 4.9966,
+        "max": 7.1284,
+        "p95": 6.3233
+      }
+    },
+    {
+      "batch": 2,
+      "row": 0,
+      "gpu": {
+        "n": 128,
+        "median": 12.5619,
+        "min": 12.2245,
+        "max": 13.2465,
+        "p95": 12.756
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 4.856,
+        "min": 4.3823,
+        "max": 5.604,
+        "p95": 5.3538
+      }
+    },
+    {
+      "batch": 2,
+      "row": 1,
+      "gpu": {
+        "n": 128,
+        "median": 12.3095,
+        "min": 12.0166,
+        "max": 13.0908,
+        "p95": 12.7652
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.0811,
+        "min": 4.6458,
+        "max": 5.7983,
+        "p95": 5.6397
+      }
+    },
+    {
+      "batch": 2,
+      "row": 2,
+      "gpu": {
+        "n": 128,
+        "median": 12.6249,
+        "min": 12.3781,
+        "max": 13.2127,
+        "p95": 12.9085
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.3462,
+        "min": 4.849,
+        "max": 6.5646,
+        "p95": 6.0898
+      }
+    },
+    {
+      "batch": 2,
+      "row": 3,
+      "gpu": {
+        "n": 128,
+        "median": 11.867149999999999,
+        "min": 11.5671,
+        "max": 12.7058,
+        "p95": 12.3095
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.39065,
+        "min": 5.0076,
+        "max": 6.5773,
+        "p95": 5.9202
+      }
+    },
+    {
+      "batch": 2,
+      "row": 4,
+      "gpu": {
+        "n": 128,
+        "median": 12.672,
+        "min": 12.4539,
+        "max": 13.4461,
+        "p95": 12.9239
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.1488499999999995,
+        "min": 4.7249,
+        "max": 6.2806,
+        "p95": 5.66
+      }
+    },
+    {
+      "batch": 2,
+      "row": 5,
+      "gpu": {
+        "n": 128,
+        "median": 12.2829,
+        "min": 11.9337,
+        "max": 13.1072,
+        "p95": 12.8031
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.3857,
+        "min": 4.8908,
+        "max": 6.2465,
+        "p95": 5.8557
+      }
+    },
+    {
+      "batch": 2,
+      "row": 6,
+      "gpu": {
+        "n": 128,
+        "median": 12.71245,
+        "min": 12.4621,
+        "max": 13.5608,
+        "p95": 12.9403
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.3386,
+        "min": 4.9398,
+        "max": 6.024,
+        "p95": 5.8407
+      }
+    },
+    {
+      "batch": 2,
+      "row": 7,
+      "gpu": {
+        "n": 128,
+        "median": 11.9081,
+        "min": 11.5804,
+        "max": 12.7037,
+        "p95": 12.2685
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.39105,
+        "min": 4.996,
+        "max": 7.6929,
+        "p95": 6.1026
+      }
+    },
+    {
+      "batch": 3,
+      "row": 0,
+      "gpu": {
+        "n": 128,
+        "median": 12.5701,
+        "min": 12.3802,
+        "max": 13.3734,
+        "p95": 12.8051
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 4.9331,
+        "min": 4.5744,
+        "max": 6.1479,
+        "p95": 5.4948
+      }
+    },
+    {
+      "batch": 3,
+      "row": 1,
+      "gpu": {
+        "n": 128,
+        "median": 12.3448,
+        "min": 11.9552,
+        "max": 13.226,
+        "p95": 12.671
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.22565,
+        "min": 4.7513,
+        "max": 6.3508,
+        "p95": 5.7744
+      }
+    },
+    {
+      "batch": 3,
+      "row": 2,
+      "gpu": {
+        "n": 128,
+        "median": 12.656649999999999,
+        "min": 12.4099,
+        "max": 13.2874,
+        "p95": 12.8471
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.18385,
+        "min": 4.7283,
+        "max": 6.087,
+        "p95": 5.6969
+      }
+    },
+    {
+      "batch": 3,
+      "row": 3,
+      "gpu": {
+        "n": 128,
+        "median": 11.88915,
+        "min": 11.5907,
+        "max": 12.5563,
+        "p95": 12.2931
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.3248999999999995,
+        "min": 4.9205,
+        "max": 7.0388,
+        "p95": 5.8763
+      }
+    },
+    {
+      "batch": 3,
+      "row": 4,
+      "gpu": {
+        "n": 128,
+        "median": 12.6807,
+        "min": 12.4682,
+        "max": 13.4758,
+        "p95": 12.9372
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.3064,
+        "min": 4.8887,
+        "max": 6.5121,
+        "p95": 6.0466
+      }
+    },
+    {
+      "batch": 3,
+      "row": 5,
+      "gpu": {
+        "n": 128,
+        "median": 12.319199999999999,
+        "min": 11.9429,
+        "max": 13.3192,
+        "p95": 12.6331
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.18335,
+        "min": 4.7701,
+        "max": 6.0434,
+        "p95": 5.6506
+      }
+    },
+    {
+      "batch": 3,
+      "row": 6,
+      "gpu": {
+        "n": 128,
+        "median": 12.7073,
+        "min": 12.4938,
+        "max": 13.4861,
+        "p95": 13.057
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.38645,
+        "min": 4.8184,
+        "max": 6.4039,
+        "p95": 5.963
+      }
+    },
+    {
+      "batch": 3,
+      "row": 7,
+      "gpu": {
+        "n": 128,
+        "median": 11.89375,
+        "min": 11.5323,
+        "max": 13.865,
+        "p95": 12.3331
+      },
+      "cpu_submit": {
+        "n": 128,
+        "median": 5.550800000000001,
+        "min": 5.0242,
+        "max": 9.4376,
+        "p95": 6.3086
+      }
+    }
+  ]
+}
