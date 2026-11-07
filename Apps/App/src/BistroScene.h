@@ -187,15 +187,17 @@ namespace BistroParticles
         create("BistroTableSteam", {550, 130, -350}, 1, settings);
 
         settings = {};
-        settings.LifetimeMin = 3; settings.LifetimeMax = 7;
+        settings.LifetimeMin = 0.65f; settings.LifetimeMax = 0.95f;
         settings.Direction = Vector3(0, -1, 0); settings.ConeAngleDegrees = 0;
-        settings.SpeedMin = 120; settings.SpeedMax = 180;
+        settings.SpeedMin = 300; settings.SpeedMax = 450;
         settings.Shape = ParticleShape::Box;
         settings.ShapeExtents = Vector3(BistroWater::HalfExtent.x, 10, BistroWater::HalfExtent.z);
-        settings.Acceleration = Vector3(0, -300, 0); settings.Wind = Vector3::Zero; settings.Drag = 0.05f;
-        settings.SizeStart = 3; settings.SizeEnd = 1; settings.AngularVelocity = 3;
-        settings.ColorStart = Vector4(2, 0.3f, 1, 0.3f); settings.ColorEnd = Vector4(0.5f, 0.05f, 0.2f, 0);
-        settings.Blend = ParticleBlend::Additive; settings.DepthCollision = true;
+        settings.Acceleration = Vector3(0, -981, 0); settings.Wind = Vector3::Zero; settings.Drag = 0.05f;
+        settings.SizeStart = 2.4f; settings.SizeEnd = 1.2f; settings.AngularVelocity = 0;
+        settings.ColorStart = Vector4(0.8f, 0.95f, 1, 0.12f); settings.ColorEnd = Vector4(0.8f, 0.95f, 1, 0.025f);
+        settings.Geometry = ParticleGeometry::WaterDrop;
+        settings.Blend = ParticleBlend::WeightedAlpha; settings.DepthCollision = true;
+        settings.CollisionRestitution = 0.05f;
         auto rain = create("BistroSparkRain", BistroWater::Center + Vector3(0, 300, 0), 1, settings);
         rain.GetComponent<TransformComponent>().Rotation.y = BistroWater::YawDegrees;
         if (weightSum != 16) throw std::logic_error("Bistro particle weights must sum to 16");

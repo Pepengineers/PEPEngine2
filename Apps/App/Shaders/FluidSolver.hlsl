@@ -23,9 +23,16 @@ float3 Limited(float3 value, float limit)
 {
     return value * min(1.0f, limit / max(length(value), 1e-10f));
 }
+float3 ExternalAcceleration(float3 position)
+{
+    if (WaveAcceleration == 0) return Gravity;
+    float localX = ReferenceUnits != 0 ? position.x : mul(float4(position, 1), WorldToContainer).x;
+    float3 axis = ReferenceUnits != 0 ? float3(1,0,0) : normalize(mul(float4(1,0,0,0), ContainerToWorld).xyz);
+    return Gravity + axis * (WaveAcceleration * clamp(localX / (HalfExtent.x * 0.1f), -1, 1));
+}
 float3 PredictedPosition(FluidParticle particle)
 {
-    return particle.Position + (particle.Velocity + (Gravity + float3(WaveAcceleration,0,0)) * Dt) * PredictionSeconds;
+    return particle.Position + (particle.Velocity + ExternalAcceleration(particle.Position) * Dt) * PredictionSeconds;
 }
 [numthreads(128, 1, 1)]
 void SavePrevious(uint i : SV_DispatchThreadID)
@@ -140,7 +147,7 @@ void Integrate(uint i : SV_DispatchThreadID)
     FluidParticle p = Particles[i];
     float rhoi = Density[i].x;
     float pressureI = Stiffness * (NearStiffness > 0 ? rhoi - RestDensity : max(0, rhoi - RestDensity));
-    float3 acceleration = Gravity + float3(WaveAcceleration,0,0);
+    float3 acceleration = ExternalAcceleration(p.Position);
     float3 position = PredictedPosition(p);
     int3 origin = Cell(position);
     float gradientCoefficient = -45.0f / (Pi * pow(H, 6));

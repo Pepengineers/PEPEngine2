@@ -237,7 +237,7 @@ static void CheckFluidSimulation(GDX12Device& device, GDX12FluidSurfacePass& wat
     settings.WaveAcceleration = 20;
     settings.WavePeriodSeconds = .12f;
     fluid.Component.SetSettings(settings);
-    fluid.Component.SetParticles({{{0,0,0},{}}});
+    fluid.Component.SetParticles({{{-2,0,0},{}},{{2,0,0},{}}});
     const auto drivenRevision = fluid.Component.GetResetRevision();
     const auto advance = [&](UINT frames)
     {
@@ -249,14 +249,20 @@ static void CheckFluidSimulation(GDX12Device& device, GDX12FluidSurfacePass& wat
         float speed = 0; UINT buffers = 0;
         for (const auto& access : water.GetSimulationBufferAccesses())
             if (access.Usage == GDX12RenderGraph::Mode::ReadWrite &&
-                access.Resource->D3DResource->GetDesc().Width == sizeof(Particle))
-            { speed += read(*access.Resource).front().Velocity.x; ++buffers; }
+                access.Resource->D3DResource->GetDesc().Width == 2 * sizeof(Particle))
+            {
+                const auto pair = read(*access.Resource);
+                Require(std::abs(pair[0].Velocity.x + pair[1].Velocity.x) < 1e-5f &&
+                    std::abs(pair[0].Position.x + pair[1].Position.x) < 1e-5f,
+                    "Wave forcing must preserve mirrored streams instead of translating the whole fluid");
+                speed += pair[1].Velocity.x; ++buffers;
+            }
         Require(buffers == 2, "Periodic wave fixture lost its live particle buffers");
         return speed / buffers;
     };
     advance(30);
     const float positivePeak = meanVelocity();
-    Require(positivePeak > .35f && positivePeak < .41f, "Periodic force must accelerate the existing fluid along +X");
+    Require(positivePeak > .35f && positivePeak < .41f, "Periodic force must push the two streams away from the center");
     settings.SimulationEnabled = false;
     fluid.Component.SetSettings(settings); advance(10);
     Require(meanVelocity() == positivePeak, "Pausing must freeze the wave force and particle velocity");
@@ -265,7 +271,7 @@ static void CheckFluidSimulation(GDX12Device& device, GDX12FluidSurfacePass& wat
     Require(meanVelocity() == positivePeak, "Zero timescale must freeze the wave phase");
     settings.TimeScale = 1;
     fluid.Component.SetSettings(settings); advance(60);
-    Require(meanVelocity() < -.35f && meanVelocity() > -.42f, "Wave force must reverse along -X without advancing its phase while paused");
+    Require(meanVelocity() < -.35f && meanVelocity() > -.42f, "Wave force must pull both streams back toward the center and freeze its phase while paused");
     advance(120);
     Require(meanVelocity() < -.35f && meanVelocity() > -.42f, "Wave forcing must persist into later periods");
     advance(60);

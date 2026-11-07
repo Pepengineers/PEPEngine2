@@ -291,7 +291,7 @@ void GDX12ParticlesPass::BeginFrame()
     for (const auto& emitter : snapshot.Emitters)
     {
         sorted |= emitter.Blend == ParticleBlend::SortedAlpha;
-        mesh |= emitter.Geometry != ParticleGeometry::Billboard;
+        mesh |= emitter.Geometry == ParticleGeometry::Firefly;
     }
     const bool drawsChanged = snapshot.Capacity != state.Capacity || sorted != state.Sorted || mesh != state.Mesh;
     const bool constantsChanged = snapshot.Emitters.size() != state.ConstantCount;

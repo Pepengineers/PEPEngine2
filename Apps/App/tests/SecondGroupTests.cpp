@@ -120,8 +120,10 @@ static void TestCPU()
     Require(!IsValidParticleEmitterSettings(particle), "Empty particle obstacle accepted");
     particle = {}; particle.CollisionBoxYawDegrees = INFINITY;
     Require(!IsValidParticleEmitterSettings(particle), "Nonfinite particle obstacle rotation accepted");
-    particle = {}; particle.Geometry = static_cast<ParticleGeometry>(2);
+    particle = {}; particle.Geometry = static_cast<ParticleGeometry>(3);
     Require(!IsValidParticleEmitterSettings(particle), "Unknown particle geometry accepted");
+    particle.Geometry = ParticleGeometry::WaterDrop; particle.Blend = ParticleBlend::SortedAlpha;
+    Require(IsValidParticleEmitterSettings(particle), "Sorted water-drop billboards must be supported");
     particle.Geometry = ParticleGeometry::Firefly; particle.Blend = ParticleBlend::SortedAlpha;
     Require(!IsValidParticleEmitterSettings(particle), "Unsupported globally sorted mesh particles accepted");
     const auto& firefly = GetFireflyParticleMesh();
@@ -486,20 +488,32 @@ int main(int argc, char** argv)
         GDX12ParticleEmitter emitter; emitter.Id = 1; emitter.MaxParticles = 64; emitter.BurstTotal = 16;
         emitter.EmissionRate = 0; emitter.World = Matrix::CreateTranslation(0, 30, -40);
         emitter.SpeedMin = emitter.SpeedMax = 0; emitter.SizeStart = emitter.SizeEnd = 40; emitter.Acceleration = Vector3::Zero;
-        for (auto blend : {ParticleBlend::WeightedAlpha, ParticleBlend::Additive, ParticleBlend::SortedAlpha})
+        for (const auto geometry : {ParticleGeometry::Billboard, ParticleGeometry::WaterDrop})
         {
-            emitter.Blend = blend; ++emitter.ResetRevision; resources.ParticleEmitters = {emitter};
-            const auto before = Read(device, *hdr);
-            executeParticles(particles); list = queue->GetCommandList(); particles.Composite(list, hdr.get());
-            queue->ExecuteCommandList(list); queue->Flush();
-            const auto after = Read(device, *hdr);
-            if (blend == ParticleBlend::WeightedAlpha)
+            emitter.Geometry = geometry;
+            emitter.BurstTotal = geometry == ParticleGeometry::WaterDrop ? 1 : 16;
+            emitter.ColorStart = emitter.ColorEnd = geometry == ParticleGeometry::WaterDrop ? Vector4(.8f,.95f,1,.12f) : Vector4::One;
+            for (auto blend : {ParticleBlend::WeightedAlpha, ParticleBlend::Additive, ParticleBlend::SortedAlpha})
             {
-                const auto weighted = Read(device, *accum);
-                Require(*std::max_element(weighted.begin(), weighted.end()) > 0, "Weighted particles drew no pixels");
+                emitter.Blend = blend; ++emitter.ResetRevision; resources.ParticleEmitters = {emitter};
+                const auto before = Read(device, *hdr);
+                executeParticles(particles); list = queue->GetCommandList(); particles.Composite(list, hdr.get());
+                queue->ExecuteCommandList(list); queue->Flush();
+                const auto after = Read(device, *hdr);
+                if (blend == ParticleBlend::WeightedAlpha)
+                {
+                    const auto weighted = Read(device, *accum);
+                    Require(*std::max_element(weighted.begin(), weighted.end()) > 0, "Weighted particles drew no pixels");
+                }
+                else Require(before != after, "Additive/sorted particles drew no HDR pixels");
+                Require(resources.ParticleMotion, "Particles did not publish motion");
+                if (geometry == ParticleGeometry::WaterDrop)
+                {
+                    const auto coverage = Read(device, *resources.ParticleMotion, 3);
+                    const float opacity = *std::max_element(coverage.begin(), coverage.end());
+                    Require(opacity > 0 && opacity < .11f, "Water drops must render with Fresnel transparency in every blend path");
+                }
             }
-            else Require(before != after, "Additive/sorted particles drew no HDR pixels");
-            Require(resources.ParticleMotion, "Particles did not publish motion");
         }
         ComPtr<ID3D12QueryHeap> meshQuery;
         D3D12_QUERY_HEAP_DESC queryDesc = {}; queryDesc.Type = D3D12_QUERY_HEAP_TYPE_PIPELINE_STATISTICS; queryDesc.Count = 1;

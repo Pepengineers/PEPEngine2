@@ -26,7 +26,7 @@ void Cull(uint id : SV_DispatchThreadID)
     float size = lerp(Sizes.x, Sizes.y, age) * particle.SizeRandom * RenderScale;
     float3 view = mul(float4(particle.Position, 1), Camera.View).xyz;
     float4 clip = mul(float4(particle.Position, 1), Camera.ViewProj);
-    float radius = size * 0.707107f;
+    float radius = size * 0.707107f * (Geometry == ParticleGeometryWaterDrop ? 2.5f : 1);
     float2 margin = radius * float2(length(float3(Camera.ViewProj[0][0], Camera.ViewProj[1][0], Camera.ViewProj[2][0])),
         length(float3(Camera.ViewProj[0][1], Camera.ViewProj[1][1], Camera.ViewProj[2][1])));
     if (-view.z + radius < Camera.NearPlane || -view.z - radius > min(Camera.FarPlane, MaxDistance) ||
@@ -57,13 +57,13 @@ void Cull(uint id : SV_DispatchThreadID)
     draw.ViewDepth = -view.z;
     Draws[drawIndex] = draw;
     uint modeIndex;
-    InterlockedAdd(Counts[Geometry != 0 ? BlendMode + 4 : BlendMode + 1], 1, modeIndex);
+    InterlockedAdd(Counts[Geometry == ParticleGeometryFirefly ? BlendMode + 4 : BlendMode + 1], 1, modeIndex);
     if (BlendMode == 2)
     {
         Keys[modeIndex] = ~asuint(max(0.0f, -view.z)); // Positive distance, far to near.
         Payloads[modeIndex] = drawIndex;
     }
-    else Indices[(BlendMode + (Geometry != 0 ? 2 : 0)) * TotalCapacity + modeIndex] = drawIndex;
+    else Indices[(BlendMode + (Geometry == ParticleGeometryFirefly ? 2 : 0)) * TotalCapacity + modeIndex] = drawIndex;
 }
 
 [numthreads(1, 1, 1)]

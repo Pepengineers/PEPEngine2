@@ -6,7 +6,7 @@
 
 enum class ParticleBlend : std::uint8_t { WeightedAlpha, Additive, SortedAlpha };
 enum class ParticleShape : std::uint8_t { Point, Box, Sphere };
-enum class ParticleGeometry : std::uint8_t { Billboard, Firefly };
+enum class ParticleGeometry : std::uint8_t { Billboard, Firefly, WaterDrop };
 enum class ParticleSimulation : std::uint8_t { AnalyticDrag, SemiImplicitEuler, Count };
 
 struct GDX12ParticleMeshVertex

@@ -23,6 +23,9 @@ inline void CheckBistroWaterCounts(World& world, Frame&& frame)
     require(BistroWater::WaveAcceleration.GetValue() == 4 && BistroWater::WavePeriod.GetValue() == 6 &&
         !BistroWater::WaveAcceleration.SetConfigFromString("nan") && !BistroWater::WavePeriod.SetConfigFromString("0"),
         "Periodic wave controls must reject invalid acceleration and period");
+    require(BistroWater::ParticleCount.GetValue() == 100000 && BistroWater::ParticleRadius.GetValue() == .15f &&
+        !BistroWater::ParticleCount.SetConfigFromString("0") && !BistroWater::ParticleRadius.SetConfigFromString("0.3"),
+        "Water volume and particle radius must have validated startup controls");
     const size_t staticCount = ecs.GetPool<StaticMeshRenderComponent>().Size();
     require(ecs.GetPool<FluidRenderComponent>().Size() == 1, "Default Bistro water count mismatch");
     Entity first = InvalidEntity;
@@ -34,15 +37,15 @@ inline void CheckBistroWaterCounts(World& world, Frame&& frame)
         seed = fluid.GetParticles();
         const auto& settings = fluid.GetSettings();
         ValidateFluidSettings(settings);
-        require(seed && seed->size() >= 40000 && seed->size() <= 60000 && settings.SimulationEnabled && settings.RenderEnabled,
-            "Bistro water must contain approximately 50000 live MGPU particles");
+        require(seed && seed->size() >= 80000 && seed->size() <= 120000 && seed->size() % 2 == 0 && settings.SimulationEnabled && settings.RenderEnabled,
+            "Bistro water must contain approximately 100000 mirrored MGPU particles");
         require(settings.MGPUReference && settings.ParticleMassKg == 1 && settings.RestDensityKgPerCm3 == 630 &&
             settings.SmoothingRadiusCm == 0.2f && settings.PressureStiffnessCm2PerSecond2 == 288 &&
             settings.NearPressureStiffnessCm2PerSecond2 == 2.15f && settings.PredictionSeconds == 1.0f / 120 &&
             settings.MaxSubsteps == 3 && settings.MaxStepSeconds == 1.0f / 180 &&
             settings.ViscosityCm2PerSecond == 0 && settings.Restitution == 0.95f &&
             settings.AccelerationCmPerSecond2 == Vector3(0,-9.81f,0), "Bistro must use the MGPU fluid preset");
-        require(settings.WaveAcceleration == 4 && settings.WavePeriodSeconds == 6,
+        require(settings.WaveAcceleration == 4 && settings.WavePeriodSeconds == 6 && settings.ParticleRadiusCm == 0.15f,
             "Bistro must sustain waves with a periodic force along the narrow-to-narrow axis");
         require(transform.Location == BistroWater::Center && transform.Rotation.y == BistroWater::YawDegrees &&
             transform.Scale == BistroWater::ReferenceScale &&
@@ -50,20 +53,29 @@ inline void CheckBistroWaterCounts(World& world, Frame&& frame)
             "Bistro water must span the side street beside the hedge");
         const auto extent = settings.ContainerHalfExtentCm;
         const float meanDepth = float(seed->size()) / (settings.RestDensityKgPerCm3 * 4 * extent.x * extent.z);
-        require(meanDepth >= settings.SmoothingRadiusCm,
-            "Reference bounds must retain a fluid layer at least one smoothing radius deep across the floor");
+        require(meanDepth >= 3 * settings.SmoothingRadiusCm,
+            "Reference bounds must retain a fluid layer at least three smoothing radii deep across the floor");
         float lowest = 0, highest = 0;
         for (const auto& particle : *seed)
         {
-            require(particle.Velocity == Vector3(BistroWater::WaveSpeed.GetValue(), 0, 0),
-                "The stronger wave impulse must point along local X, from narrow end to narrow end");
-            require(particle.Position.x < 0 && particle.Position.x > -extent.x && BistroWater::HalfExtent.x > BistroWater::HalfExtent.z,
-                "The initial fluid must start at a narrow end, leaving room for a travelling wave");
+            const float direction = particle.Position.x < 0 ? -1.0f : 1.0f;
+            require(particle.Velocity == Vector3(direction * BistroWater::WaveSpeed.GetValue(), 0, 0),
+                "Both halves of the central volume must initially flow toward opposite narrow ends");
+            require(std::abs(particle.Position.x) <= extent.x * .5f + .101f,
+                "Water must fall from the center, leaving room at both ends");
             lowest = (std::min)(lowest, particle.Position.y);
             highest = (std::max)(highest, particle.Position.y);
             require(std::abs(particle.Position.x) < 5.3f && std::abs(particle.Position.z) < 10.1f &&
                 std::abs(particle.Position.y - extent.y * 0.1f) <= extent.y * 0.9f + 0.101f,
                 "MGPU seed must use particle-driven width/depth, 90% bounds and original jitter/offset");
+        }
+        for (size_t i = 0; i < seed->size(); i += 2)
+        {
+            const auto& left = (*seed)[i]; const auto& right = (*seed)[i+1];
+            require(left.Position.x <= 0 && right.Position.x >= 0 &&
+                left.Position.x == -right.Position.x && left.Position.y == right.Position.y && left.Position.z == right.Position.z &&
+                left.Velocity == -right.Velocity,
+                "The central spawn must contain exactly mirrored pairs with zero net horizontal momentum");
         }
         require(highest - lowest > settings.ContainerHalfExtentCm.y, "Water must spawn as a volume instead of two flat layers");
     });

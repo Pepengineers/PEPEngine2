@@ -61,8 +61,8 @@ bool IsValidParticleEmitterSettings(const GDX12ParticleEmitterSettings& s)
         InRange(s.SoftDistance, 0, 1000000) && InRange(s.MaxDistance, 1, 100000000) &&
         InRange(s.MaxDeltaTime, 0.001f, 1) && InRange(s.TimeScale, 0, 100) &&
         static_cast<UINT>(s.Blend) <= static_cast<UINT>(ParticleBlend::SortedAlpha) &&
-        static_cast<UINT>(s.Geometry) <= static_cast<UINT>(ParticleGeometry::Firefly) &&
-        !(s.Geometry != ParticleGeometry::Billboard && s.Blend == ParticleBlend::SortedAlpha) &&
+        static_cast<UINT>(s.Geometry) <= static_cast<UINT>(ParticleGeometry::WaterDrop) &&
+        !(s.Geometry == ParticleGeometry::Firefly && s.Blend == ParticleBlend::SortedAlpha) &&
         s.AtlasColumns >= 1 && s.AtlasColumns <= 256 && s.AtlasRows >= 1 && s.AtlasRows <= 256 &&
         InRange(s.FramesPerSecond, 0, 1000) && InRange(s.CollisionRadius, 0.01f, 1000000) &&
         InRange(s.CollisionRestitution, 0, 1) && InRange(s.CollisionFriction, 0, 1) &&

@@ -91,19 +91,30 @@ are transformed into world cm; sphere radius uses the cube root of the transform
 determinant to preserve volume. The temporary blue/red particle material is removed.
 The physical/optical constant snapshot is 272 bytes, uploaded with CBV alignment.
 
-The initial block occupies 40% of local X at a narrow end, with MGPU lattice
-sizing and +/-0.1 jitter. `App.Water.WaveSpeed` sets the initial +X velocity
-(default 6, [0,12] MGPU units/s; 312 cm/s in this scene).
-`App.Water.WaveAcceleration` (default 4, [0,12] MGPU units/s^2) and
-`App.Water.WavePeriod` (default 6, [1,30] simulation seconds) sustain sloshing
-between the narrow ends. The acceleration is a cosine along local X, evaluated
-at each simulation substep. Its phase advances only with simulated time and
-freezes when paused, globally disabled or at zero timescale. Setting acceleration
-to zero disables the periodic drive. These three CVars are startup-only via the
-App's `Config/Engine.ini`. No particles are periodically reset or respawned.
+The initial volume falls from the center, occupying 50% of local X. Its lattice
+is emitted in mirrored pairs with equal opposite X velocities, so both waves
+reach the narrow ends and meet again in the middle without net horizontal drift.
+`App.Water.WaveSpeed` sets each half's initial speed (default 6, [0,12] MGPU units/s).
+`App.Water.ParticleCount` defaults to 100000 ([10000,300000]), twice the previous
+fluid population; the even X grid may round that target slightly upward.
+The corresponding mean resting depth is approximately 30 cm instead of 15 cm.
+`App.Water.ParticleRadius` defaults to 0.15 ([0.01,0.2] raw units), 1.5 times the
+previous draw radius. It enlarges the rendered volume without retuning SPH kernels.
 
-`BistroSparkRain` is restored above the matching rotated pool footprint, with its
-original budget share; the total particle budget remains 500000.
+`App.Water.WaveAcceleration` (default 4, [0,12] MGPU units/s^2) and
+`App.Water.WavePeriod` (default 6, [1,30] simulation seconds) sustain both waves.
+The periodic force is antisymmetric about local X=0: it pushes both halves
+outward, then inward. A smooth center band avoids a force discontinuity.
+It is evaluated each substep; phase freezes with pause/disable/zero timescale.
+Zero acceleration disables the periodic drive. All five controls are startup-only
+via the App's `Config/Engine.ini`. Particles are never periodically respawned.
+
+`BistroSparkRain` uses non-emissive, weighted-alpha `WaterDrop` billboards above
+the matching pool footprint. They are elongated along the fall, use spherical
+normals and water Fresnel reflectance, and have low opacity rather than pink
+additive emission. Alpha transmission is an approximation; these small drops do
+not sample scene color for lens refraction. Their original budget share and the
+500000 total ordinary-particle budget remain unchanged.
 
 | Field | Default | Units and accepted range |
 | --- | --- | --- |

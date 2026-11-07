@@ -160,7 +160,7 @@ acceleration cm/s², rotation speed rad/s. Color is linear HDR, straight alpha.
 | TimeScale | 1 | 0..100, multiplied with world scale before MaxDeltaTime clamp |
 | Seed | 1 | full uint32 range; Reset restarts sequence with the current seed |
 | Blend | WeightedAlpha | WeightedAlpha, Additive or SortedAlpha |
-| Geometry | Billboard | Billboard or built-in volumetric Firefly; Firefly accepts WeightedAlpha/Additive |
+| Geometry | Billboard | Billboard, WaterDrop, or volumetric Firefly; only Firefly excludes SortedAlpha |
 | Texture | nullptr | renderer-owned primary-GPU color 2D texture; nullptr = white analytic disc |
 | AtlasColumns / AtlasRows | 1 / 1 | each 1..256, no more than texture width/height |
 | FramesPerSecond | 0 | 0 = atlas once over life; otherwise 0..1000 fps, looping |
@@ -222,6 +222,13 @@ visible particle. GPU-generated `D3D12_DRAW_ARGUMENTS` are submitted with
 playback (`FramesPerSecond=0`, also used by Bistro), frame selection is
 `min(Columns*Rows-1, floor(Age/Lifetime * Columns*Rows))` in the compute cull pass.
 The pixel shader samples that frame's cell from the packed texture.
+
+`ParticleGeometry::WaterDrop` keeps the six-vertex billboard path and all three
+blend modes. It draws a 2.5x vertical droplet silhouette with spherical normals,
+water IOR 1.333 Fresnel reflectance and a small specular highlight. Use low-alpha
+cool tint and WeightedAlpha for rain; the material has no additive emission.
+Culling includes the elongated silhouette. Transmission uses alpha compositing,
+not a scene-color refraction lookup; large close-up lenses need a different path.
 
 `ParticleGeometry::Firefly` selects a shared immutable vertex buffer: five closed
 octahedra form a head, body, emissive abdomen and two volumetric wings, with

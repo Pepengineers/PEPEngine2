@@ -30,6 +30,11 @@ VertexOutput VS(uint vertex : SV_VertexID, uint instance : SV_InstanceID)
         corner.x * sin(draw.Rotation) + corner.y * cos(draw.Rotation));
     float2 previousRotated = float2(corner.x * cos(draw.PreviousRotation) - corner.y * sin(draw.PreviousRotation),
         corner.x * sin(draw.PreviousRotation) + corner.y * cos(draw.PreviousRotation));
+    if (draw.Geometry == ParticleGeometryWaterDrop)
+    {
+        rotated.y *= 2.5f;
+        previousRotated.y *= 2.5f;
+    }
     float3 right = float3(Camera.View[0][0], Camera.View[1][0], Camera.View[2][0]);
     float3 up = float3(Camera.View[0][1], Camera.View[1][1], Camera.View[2][1]);
     float3 previousRight = normalize(float3(Camera.PrevViewProjNoJitter[0][0], Camera.PrevViewProjNoJitter[1][0], Camera.PrevViewProjNoJitter[2][0]));
@@ -97,7 +102,21 @@ float4 Shade(VertexOutput input)
     float2 dx = ddx(uv);
     float2 dy = ddy(uv);
     float4 material = 0;
-    if (draw.Geometry != 0)
+    if (draw.Geometry == ParticleGeometryWaterDrop)
+    {
+        float2 p = (input.UV * 2 - 1) * float2(1,-1);
+        float radius = length(p);
+        float coverage = 1 - smoothstep(1 - max(fwidth(radius), 0.001f), 1, radius);
+        float3 normal = float3(p, sqrt(saturate(1 - dot(p,p))));
+        // Water IOR 1.333: Schlick reflectance and a spherical highlight, without emission.
+        float fresnel = 0.02037f + 0.97963f * pow(1 - normal.z, 5);
+        float highlight = pow(saturate(dot(normal, normalize(float3(-.4f,.65f,.65f)))), 64);
+        float3 sky = lerp(float3(.04f,.10f,.14f), float3(.65f,.8f,1), saturate(normal.y * .5f + .5f));
+        // shortcut: alpha transmits the scene; add lens refraction if large close-up drops are needed.
+        material = float4(sky * (.15f + .85f * fresnel) + highlight,
+            coverage * (.15f + .85f * fresnel));
+    }
+    else if (draw.Geometry == ParticleGeometryFirefly)
     {
         // A fixed key light shows the low-poly facets; the abdomen keeps its emissive radiance.
         float light = 0.25f + 0.75f * saturate(dot(normalize(input.Normal), normalize(float3(0.4f, 0.8f, -0.3f))));

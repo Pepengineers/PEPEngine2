@@ -23,14 +23,20 @@ namespace BistroWater
         L"Bistro water basins, 0 disables, maximum 8",
         EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 8; });
     inline AutoConsoleVariable<float> WaveSpeed(L"App.Water.WaveSpeed", 6.0f,
-        L"Initial wave speed along +local X in MGPU units/s, startup only, 0..12",
+        L"Initial mirrored wave speed away from the center in MGPU units/s, startup only, 0..12",
         EConsoleVariableFlags::ReadOnly, [](float value) { return std::isfinite(value) && value >= 0 && value <= 12; });
     inline AutoConsoleVariable<float> WaveAcceleration(L"App.Water.WaveAcceleration", 4.0f,
-        L"Periodic +local X wave acceleration in MGPU units/s^2, startup only, 0..12",
+        L"Periodic mirrored X wave acceleration in MGPU units/s^2, startup only, 0..12",
         EConsoleVariableFlags::ReadOnly, [](float value) { return std::isfinite(value) && value >= 0 && value <= 12; });
     inline AutoConsoleVariable<float> WavePeriod(L"App.Water.WavePeriod", 6.0f,
         L"Wave forcing period in simulation seconds, startup only, 1..30",
         EConsoleVariableFlags::ReadOnly, [](float value) { return std::isfinite(value) && value >= 1 && value <= 30; });
+    inline AutoConsoleVariable<int> ParticleCount(L"App.Water.ParticleCount", 100000,
+        L"Fluid particle target, startup only, 10000..300000", EConsoleVariableFlags::ReadOnly,
+        [](int value) { return value >= 10000 && value <= 300000; });
+    inline AutoConsoleVariable<float> ParticleRadius(L"App.Water.ParticleRadius", 0.15f,
+        L"Fluid render radius in MGPU units, startup only, 0.01..0.2", EConsoleVariableFlags::ReadOnly,
+        [](float value) { return std::isfinite(value) && value >= 0.01f && value <= 0.2f; });
 
     class Scene
     {
@@ -133,7 +139,7 @@ namespace BistroWater
             GDX12FluidSettings settings;
             // Keep MGPU numerical units; only the entity transform converts them to scene cm.
             settings.MGPUReference = true;
-            settings.ParticleRadiusCm = 0.1f;
+            settings.ParticleRadiusCm = ParticleRadius.GetValue();
             settings.SmoothingRadiusCm = 0.2f;
             settings.ParticleMassKg = 1;
             settings.RestDensityKgPerCm3 = 630;
@@ -161,35 +167,38 @@ namespace BistroWater
                 return Vector3::Min(Vector3(std::clamp(width, 5.0f, 20.0f), 10, 20),
                     settings.ContainerHalfExtentCm * 1.8f);
             };
-            const auto grid = [](Vector3 size)
+            const UINT target = static_cast<UINT>(ParticleCount.GetValue());
+            const auto grid = [target](Vector3 size)
             {
-                const float scale = std::cbrt(50000.0f / (size.x * size.y * size.z));
+                const float scale = std::cbrt(float(target) / (size.x * size.y * size.z));
                 return std::array<UINT, 3>{
                     (std::max)(1u, static_cast<UINT>(std::round(scale * size.x))),
                     (std::max)(1u, static_cast<UINT>(std::round(scale * size.y))),
                     (std::max)(1u, static_cast<UINT>(std::round(scale * size.z)))};
             };
-            const auto initial = grid(spawnSize(50000));
+            const auto initial = grid(spawnSize(target));
             auto size = spawnSize(initial[0] * initial[1] * initial[2]);
-            // Release the MGPU lattice from one end so its collapse launches a travelling wave.
-            size.x = (std::min)(size.x, settings.ContainerHalfExtentCm.x * 0.8f);
+            size.x = (std::min)(size.x, settings.ContainerHalfExtentCm.x);
             const auto counts = grid(size);
-            const auto nx = counts[0], ny = counts[1], nz = counts[2];
+            const auto nx = counts[0] + (counts[0] & 1u), ny = counts[1], nz = counts[2];
             constexpr float jitter = 0.1f;
-            const Vector3 center(-settings.ContainerHalfExtentCm.x * 0.55f,
-                settings.ContainerHalfExtentCm.y * 0.1f, 0);
+            const Vector3 center(0, settings.ContainerHalfExtentCm.y * 0.1f, 0);
             std::mt19937 random(0xB15720u);
             std::uniform_real_distribution<float> offset(-jitter, jitter);
             std::vector<GDX12FluidParticle> particles;
             particles.reserve(nx * ny * nz);
-            for (UINT x = 0; x < nx; ++x)
+            for (UINT x = 0; x < nx / 2; ++x)
                 for (UINT y = 0; y < ny; ++y)
                     for (UINT z = 0; z < nz; ++z)
                     {
                         const Vector3 t(nx == 1 ? 0.5f : float(x) / (nx - 1),
                             ny == 1 ? 0.5f : float(y) / (ny - 1), nz == 1 ? 0.5f : float(z) / (nz - 1));
-                        particles.push_back({center + (t - Vector3(0.5f)) * size +
-                            Vector3(offset(random), offset(random), offset(random)), Vector3(WaveSpeed.GetValue(), 0, 0)});
+                        auto position = center + (t - Vector3(0.5f)) * size +
+                            Vector3(offset(random), offset(random), offset(random));
+                        position.x = -std::abs(position.x);
+                        particles.push_back({position, Vector3(-WaveSpeed.GetValue(), 0, 0)});
+                        position.x = -position.x;
+                        particles.push_back({position, Vector3(WaveSpeed.GetValue(), 0, 0)});
                     }
             _source.SetParticles(std::move(particles));
         }

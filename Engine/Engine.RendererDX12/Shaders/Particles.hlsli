@@ -35,6 +35,9 @@ struct ParticleDraw
     uint Geometry;
 };
 
+static const uint ParticleGeometryFirefly = 1;
+static const uint ParticleGeometryWaterDrop = 2;
+
 cbuffer Parameters : register(b0)
 {
     uint Capacity; // Draw: index-list offset.
