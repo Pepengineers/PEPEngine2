@@ -22,6 +22,9 @@ struct GDX12FluidSettings
     float ParticleMassKg = 0.008f;
     float RestDensityKgPerCm3 = 0.001f;
     float PressureStiffnessCm2PerSecond2 = 40000;
+    // Nonzero enables MGPU signed/near-pressure kernels; zero preserves the legacy solver.
+    float NearPressureStiffnessCm2PerSecond2 = 0;
+    float PredictionSeconds = 0;
     float ViscosityCm2PerSecond = 1;
     Vector3 AccelerationCmPerSecond2 = Vector3(0, -981, 0);
     float MaxSpeedCmPerSecond = 1000;
@@ -52,8 +55,6 @@ class GDX12FluidComponent
 public:
     const GDX12FluidSettings& GetSettings() const { return _settings; }
     void SetSettings(const GDX12FluidSettings& settings);
-    // Continuous forces preserve the live solver and temporal surface history.
-    void SetAcceleration(Vector3 acceleration);
     void SetParticles(std::vector<GDX12FluidParticle> particles);
     const std::shared_ptr<const std::vector<GDX12FluidParticle>>& GetParticles() const { return _particles; }
     void Reset() { ++_resetRevision; }

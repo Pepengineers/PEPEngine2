@@ -1,4 +1,4 @@
-// Independently implemented SPH kernels (Muller/Charypar/Gross, SCA 2003).
+// Legacy Muller SPH and MGPU predicted-position signed/near-pressure kernels.
 #include "FluidParameters.hlsli"
 cbuffer DispatchParameters : register(b0)
 {
@@ -6,11 +6,11 @@ cbuffer DispatchParameters : register(b0)
     float Dt; uint3 DispatchPadding;
 };
 StructuredBuffer<FluidParticle> Particles : register(t0);
-StructuredBuffer<float> Density : register(t1);
+StructuredBuffer<float2> Density : register(t1);
 StructuredBuffer<uint2> Sorted : register(t2);
 StructuredBuffer<uint> Offsets : register(t3);
 RWStructuredBuffer<FluidParticle> Next : register(u0);
-RWStructuredBuffer<float> DensityOut : register(u1);
+RWStructuredBuffer<float2> DensityOut : register(u1);
 RWStructuredBuffer<uint2> SortOut : register(u2);
 RWStructuredBuffer<uint> OffsetOut : register(u3);
 static const float Pi = 3.14159265359f;
@@ -22,6 +22,10 @@ uint Key(int3 cell)
 float3 Limited(float3 value, float limit)
 {
     return value * min(1.0f, limit / max(length(value), 1e-10f));
+}
+float3 PredictedPosition(FluidParticle particle)
+{
+    return particle.Position + (particle.Velocity + Gravity * Dt) * PredictionSeconds;
 }
 [numthreads(128, 1, 1)]
 void SavePrevious(uint i : SV_DispatchThreadID)
@@ -35,7 +39,7 @@ void SavePrevious(uint i : SV_DispatchThreadID)
 void Hash(uint i : SV_DispatchThreadID)
 {
     if (i >= Capacity) return;
-    if (i < Count) SortOut[i] = uint2(Key(Cell(Particles[i].Position)), i);
+    if (i < Count) SortOut[i] = uint2(Key(Cell(PredictedPosition(Particles[i]))), i);
     else SortOut[i] = uint2(0xffffffffu, 0xffffffffu);
     OffsetOut[i] = Count;
 }
@@ -63,9 +67,10 @@ void BuildOffsets(uint i : SV_DispatchThreadID)
 void Densities(uint i : SV_DispatchThreadID)
 {
     if (i >= Count) return;
-    float3 position = Particles[i].Position;
+    float3 position = PredictedPosition(Particles[i]);
     int3 origin = Cell(position);
     float density = 0;
+    float nearDensity = 0;
     float h2 = H * H;
     float coefficient = 315.0f / (64.0f * Pi * pow(H, 9));
     for (int z = -1; z <= 1; ++z)
@@ -79,13 +84,23 @@ void Densities(uint i : SV_DispatchThreadID)
             if (Sorted[n].x != key) break;
             FluidParticle neighbor = Particles[Sorted[n].y];
             // Bucket collisions are not cell identity; this also prevents duplicate visits.
-            if (any(Cell(neighbor.Position) != cell)) continue;
-            float3 d = position - neighbor.Position;
-            float q = max(0, h2 - dot(d, d));
-            density += Mass * coefficient * q * q * q;
+            float3 neighborPosition = PredictedPosition(neighbor);
+            if (any(Cell(neighborPosition) != cell)) continue;
+            float3 d = position - neighborPosition;
+            if (NearStiffness > 0)
+            {
+                float q = max(0, H - length(d));
+                density += Mass * 15.0f / (2 * Pi * pow(H, 5)) * q * q;
+                nearDensity += Mass * 15.0f / (Pi * pow(H, 6)) * q * q * q;
+            }
+            else
+            {
+                float q = max(0, h2 - dot(d, d));
+                density += Mass * coefficient * q * q * q;
+            }
         }
     }
-    DensityOut[i] = max(density, RestDensity * 0.01f);
+    DensityOut[i] = max(float2(density, nearDensity), RestDensity * 0.01f);
 }
 void Collide(inout float3 position, inout float3 velocity)
 {
@@ -112,11 +127,13 @@ void Integrate(uint i : SV_DispatchThreadID)
 {
     if (i >= Count) return;
     FluidParticle p = Particles[i];
-    float rhoi = Density[i];
-    float pressureI = Stiffness * max(0, rhoi - RestDensity);
+    float rhoi = Density[i].x;
+    float pressureI = Stiffness * (NearStiffness > 0 ? rhoi - RestDensity : max(0, rhoi - RestDensity));
     float3 acceleration = Gravity;
-    int3 origin = Cell(p.Position);
+    float3 position = PredictedPosition(p);
+    int3 origin = Cell(position);
     float gradientCoefficient = -45.0f / (Pi * pow(H, 6));
+    uint neighborCount = 0;
     for (int z = -1; z <= 1; ++z)
     for (int y = -1; y <= 1; ++y)
     for (int x = -1; x <= 1; ++x)
@@ -129,23 +146,36 @@ void Integrate(uint i : SV_DispatchThreadID)
             uint j = Sorted[n].y;
             if (j == i) continue;
             FluidParticle neighbor = Particles[j];
-            if (any(Cell(neighbor.Position) != cell)) continue;
-            float3 difference = p.Position - neighbor.Position;
+            float3 neighborPosition = PredictedPosition(neighbor);
+            if (any(Cell(neighborPosition) != cell)) continue;
+            float3 difference = position - neighborPosition;
             float distance = length(difference);
             if (distance >= H) continue;
+            ++neighborCount;
             // Deterministic antisymmetric direction for coincident particles.
             float3 direction = distance > 1e-6f ? difference / distance : float3(i < j ? -1 : 1, 0, 0);
-            float rhoj = Density[j];
-            float pressureJ = Stiffness * max(0, rhoj - RestDensity);
+            float rhoj = Density[j].x;
+            float pressureJ = Stiffness * (NearStiffness > 0 ? rhoj - RestDensity : max(0, rhoj - RestDensity));
             float q = H - distance;
             float3 gradient = gradientCoefficient * q * q * direction;
-            acceleration -= Mass * (pressureI / (rhoi * rhoi) + pressureJ / (rhoj * rhoj)) * gradient;
+            if (NearStiffness > 0)
+            {
+                float sharedPressure = (pressureI + pressureJ) * 0.5f;
+                float sharedNearPressure = NearStiffness * (Density[i].y + Density[j].y) * 0.5f;
+                float densityDerivative = -15.0f / (Pi * pow(H, 5)) * q;
+                float nearDerivative = gradientCoefficient * q * q;
+                acceleration -= Mass / rhoi * (sharedPressure * densityDerivative / rhoj +
+                    sharedNearPressure * nearDerivative / Density[j].y) * direction;
+            }
+            else
+                acceleration -= Mass * (pressureI / (rhoi * rhoi) + pressureJ / (rhoj * rhoj)) * gradient;
             float laplacian = -gradientCoefficient * q;
             acceleration += Viscosity * Mass / rhoj * (neighbor.Velocity - p.Velocity) * laplacian;
         }
     }
     acceleration = Limited(acceleration, MaxAcceleration);
     p.Velocity = Limited(p.Velocity + acceleration * Dt, MaxSpeed);
+    if (NearStiffness > 0 && neighborCount < 8) p.Velocity *= max(0, 1 - 0.75f * Dt);
     p.Position += p.Velocity * Dt;
     Collide(p.Position, p.Velocity);
     if (!all(isfinite(p.Position)) || !all(isfinite(p.Velocity)))

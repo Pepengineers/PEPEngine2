@@ -44,6 +44,7 @@ void ValidateFluidSettings(const GDX12FluidSettings& s)
         !Range(s.ParticleRadiusCm, 0.01f, s.SmoothingRadiusCm) ||
         !Range(s.ParticleMassKg, 1e-9f, 100000) || !Range(s.RestDensityKgPerCm3, 1e-8f, 100) ||
         !Range(s.PressureStiffnessCm2PerSecond2, 1, 1e8f) ||
+        !Range(s.NearPressureStiffnessCm2PerSecond2, 0, 1e8f) || !Range(s.PredictionSeconds, 0, 0.05f) ||
         !Range(s.ViscosityCm2PerSecond, 0, 100000) || !Finite(s.AccelerationCmPerSecond2) ||
         s.AccelerationCmPerSecond2.Length() > s.MaxAccelerationCmPerSecond2 ||
         !Range(s.MaxSpeedCmPerSecond, 1, 100000) || !Range(s.MaxAccelerationCmPerSecond2, 1, 1e8f) ||
@@ -67,14 +68,6 @@ void GDX12FluidComponent::SetSettings(const GDX12FluidSettings& settings)
     ValidateFluidSettings(settings);
     _settings = settings;
     ++_settingsRevision;
-}
-
-void GDX12FluidComponent::SetAcceleration(const Vector3 acceleration)
-{
-    auto settings = _settings;
-    settings.AccelerationCmPerSecond2 = acceleration;
-    ValidateFluidSettings(settings);
-    _settings.AccelerationCmPerSecond2 = acceleration;
 }
 
 void GDX12FluidComponent::SetParticles(std::vector<GDX12FluidParticle> particles)

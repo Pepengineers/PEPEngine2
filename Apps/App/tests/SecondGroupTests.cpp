@@ -19,6 +19,7 @@ static void Require(bool value, const char* message)
 #include "SkinPlacementChecks.h"
 #include "GrassPlacementChecks.h"
 #include "PreparedGrassViewChecks.h"
+#include "FluidSimulationChecks.h"
 static void Set(const wchar_t* name, const char* value)
 {
     Require(BenchmarkEngine::GetLocator().GetModule<ConsoleModule>()->FindConsoleVariable(name).SetFromString(value), "CVar write failed");
@@ -355,6 +356,7 @@ int main(int argc, char** argv)
                 waterResolve.GetOutput(0)->GetTexture() == hdr.get(), "Inactive water must preserve depth, motion and HDR identity");
         };
         executeWater(); requireWaterFallback();
+        CheckFluidSimulation(device, water, executeWater);
         GDX12FluidInstance fluid; fluid.Id = 1; fluid.DeltaSeconds = 1.0f / 60;
         GDX12FluidSettings settings; settings.ParticleRadiusCm = 8; settings.SmoothingRadiusCm = 20;
         settings.AccelerationCmPerSecond2 = Vector3::Zero; settings.FilterIterations = 1; settings.FilterRadiusPixels = 2;

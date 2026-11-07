@@ -15,14 +15,15 @@ struct GDX12FluidSurfacePass::Parameters
     float DepthRange, EdgeDepth, IOR, Roughness;
     XMFLOAT3 Absorption; float RefractionPixels;
     XMFLOAT3 Scattering; float MaxThickness;
-    UINT FilterRadius, ResetMotion, Padding[2] = {};
+    UINT FilterRadius, ResetMotion;
+    float NearStiffness, PredictionSeconds;
 };
 
 struct GDX12FluidSurfacePass::State
 {
     struct Particle { XMFLOAT3 Position, Velocity, PreviousPosition; };
     std::unique_ptr<GDX12UploadBuffer<Particle>> Particles[2], SeedUpload;
-    std::unique_ptr<GDX12UploadBuffer<float>> Density;
+    std::unique_ptr<GDX12UploadBuffer<XMFLOAT2>> Density;
     std::unique_ptr<GDX12UploadBuffer<XMUINT2>> Keys;
     std::unique_ptr<GDX12UploadBuffer<UINT>> Offsets;
     std::unique_ptr<GDX12UploadBuffer<Parameters>> Constants;
@@ -234,7 +235,7 @@ void GDX12FluidSurfacePass::PrepareStates()
         state->Capacity = 1;
         while (state->Capacity < state->Count) state->Capacity <<= 1;
         for (auto& buffer : state->Particles) buffer = Buffer<State::Particle>(_resources, state->Count);
-        state->Density = Buffer<float>(_resources, state->Count);
+        state->Density = Buffer<XMFLOAT2>(_resources, state->Count);
         state->Keys = Buffer<XMUINT2>(_resources, state->Capacity);
         state->Offsets = Buffer<UINT>(_resources, state->Capacity);
         state->Constants = std::make_unique<GDX12UploadBuffer<Parameters>>(_resources->Device,
@@ -314,13 +315,19 @@ void GDX12FluidSurfacePass::Simulate(GDX12CommandList* commands, State& state, c
     if (!std::isfinite(elapsed) || elapsed <= 0) return;
     const float h = settings.SmoothingRadiusCm;
     const float sound = std::sqrt(settings.PressureStiffnessCm2PerSecond2);
-    float safeStep = (std::min)(settings.MaxStepSeconds, 0.25f * h / (settings.MaxSpeedCmPerSecond + sound));
-    safeStep = (std::min)(safeStep, 0.25f * std::sqrt(h / settings.MaxAccelerationCmPerSecond2));
-    if (settings.ViscosityCm2PerSecond > 0)
-        safeStep = (std::min)(safeStep, 0.125f * h * h / settings.ViscosityCm2PerSecond);
+    float safeStep = settings.MaxStepSeconds;
+    // MGPU authors fixed substeps and a frame-time cap; legacy SPH retains its CFL bound.
+    if (settings.NearPressureStiffnessCm2PerSecond2 == 0)
+    {
+        safeStep = (std::min)(safeStep, 0.25f * h / (settings.MaxSpeedCmPerSecond + sound));
+        safeStep = (std::min)(safeStep, 0.25f * std::sqrt(h / settings.MaxAccelerationCmPerSecond2));
+        if (settings.ViscosityCm2PerSecond > 0)
+            safeStep = (std::min)(safeStep, 0.125f * h * h / settings.ViscosityCm2PerSecond);
+    }
     // Bounded catch-up: drop excess wall time instead of taking an unstable oversized step.
     const float simulatedTime = (std::min)(elapsed * settings.TimeScale, safeStep * settings.MaxSubsteps);
-    const UINT steps = (std::min)(settings.MaxSubsteps, (std::max)(1u, static_cast<UINT>(std::ceil(simulatedTime / safeStep))));
+    const UINT steps = settings.NearPressureStiffnessCm2PerSecond2 > 0 ? settings.MaxSubsteps :
+        (std::min)(settings.MaxSubsteps, (std::max)(1u, static_cast<UINT>(std::ceil(simulatedTime / safeStep))));
     dispatch.Dt = simulatedTime / steps;
     for (UINT step = 0; step < steps; ++step)
     {
@@ -527,6 +534,8 @@ void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
         parameters.MaxThickness = settings.MaxOpticalThicknessCm;
         parameters.FilterRadius = settings.FilterRadiusPixels;
         parameters.ResetMotion = _commonData->ResetHistory || state.SeedPending || !state.WasRendered;
+        parameters.NearStiffness = settings.NearPressureStiffnessCm2PerSecond2;
+        parameters.PredictionSeconds = settings.PredictionSeconds;
         _commonData->ResetHistory |= state.SeedPending && settings.RenderEnabled;
         state.Constants->CopyData(_resources->CurrFrameConstantsIndex, parameters);
         Simulate(commands, state, settings, instance.DeltaSeconds);

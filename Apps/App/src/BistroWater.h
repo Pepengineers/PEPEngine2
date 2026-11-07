@@ -11,6 +11,7 @@
 #include "BistroWaterLayout.h"
 #include <array>
 #include <cmath>
+#include <random>
 #include <vector>
 
 namespace BistroWater
@@ -22,22 +23,10 @@ namespace BistroWater
     class Scene
     {
     public:
-        void Update(World& world, float deltaSeconds)
+        void Update(World& world, float)
         {
             RegisterBistroWaterComponents(world);
             auto& ecs = world.GetECS();
-            if (!world.IsPaused() && deltaSeconds > 0 && world.GetTimeScale() > 0)
-            {
-                _waveTime += deltaSeconds * world.GetTimeScale();
-                const auto rotation = Matrix::CreateRotationY(XMConvertToRadians(YawDegrees));
-                for (const auto& basin : _basins)
-                {
-                    auto& fluid = ecs.Get<FluidRenderComponent>(basin.Water);
-                    // Drive the SPH solver continuously; pressure and wall collisions form the waves.
-                    fluid.SetAcceleration(Vector3::TransformNormal(
-                        Vector3(90 * std::cos(_waveTime * 1.1f), -981, 65 * std::sin(_waveTime * 1.7f)), rotation));
-                }
-            }
             const size_t requested = static_cast<size_t>(Count.GetValue());
             while (_basins.size() > requested)
             {
@@ -130,28 +119,51 @@ namespace BistroWater
             else _materials = WorldLoader::BuildMaterialSlots(render, *mesh, "BistroWaterBasin");
 
             GDX12FluidSettings settings;
-            settings.ParticleRadiusCm = 18;
-            settings.SmoothingRadiusCm = 54;
-            settings.ParticleMassKg = 11.904f;
+            constexpr float referenceUnitCm = 20;
+            settings.ParticleRadiusCm = 0.1f * referenceUnitCm;
+            settings.SmoothingRadiusCm = 0.2f * referenceUnitCm;
+            settings.ParticleMassKg = 0.0128f;
+            settings.RestDensityKgPerCm3 = 630 * settings.ParticleMassKg /
+                (referenceUnitCm * referenceUnitCm * referenceUnitCm);
+            settings.AccelerationCmPerSecond2 = Vector3(0, -9.81f * referenceUnitCm, 0);
             settings.ContainerHalfExtentCm = HalfExtent;
-            settings.MaxSubsteps = 32;
-            settings.MaxSpeedCmPerSecond = 300;
-            settings.MaxAccelerationCmPerSecond2 = 6000;
-            settings.PressureStiffnessCm2PerSecond2 = 40000;
-            settings.ViscosityCm2PerSecond = 12;
-            settings.Restitution = 0.05f;
+            settings.MaxStepSeconds = 1.0f / 180;
+            settings.MaxSubsteps = 3;
+            settings.MaxSpeedCmPerSecond = 1000;
+            settings.MaxAccelerationCmPerSecond2 = 100000;
+            settings.PressureStiffnessCm2PerSecond2 = 288 * referenceUnitCm * referenceUnitCm;
+            settings.NearPressureStiffnessCm2PerSecond2 = 2.15f * referenceUnitCm * referenceUnitCm;
+            settings.PredictionSeconds = 1.0f / 120;
+            settings.ViscosityCm2PerSecond = 0;
+            settings.Restitution = 0.95f;
             settings.FilterIterations = 2;
             settings.FilterRadiusPixels = 6;
             settings.AbsorptionPerCm = {0.008f,0.002f,0.001f};
             settings.ScatteringColor = {0.02f,0.12f,0.16f};
             _source.SetSettings(settings);
+            // MGPU uses a jittered volume lattice at rest, inside 90% of the container.
+            constexpr float jitter = 0.1f * referenceUnitCm;
+            const Vector3 center(0, HalfExtent.y * 0.1f, 0);
+            auto available = HalfExtent - Vector3(settings.ParticleRadiusCm + jitter + 1);
+            available.y -= center.y;
+            const Vector3 size = available * 1.8f;
+            const float scale = std::cbrt(50000.0f / (size.x * size.y * size.z));
+            const UINT nx = (std::max)(1u, static_cast<UINT>(std::round(scale * size.x)));
+            const UINT ny = (std::max)(1u, static_cast<UINT>(std::round(scale * size.y)));
+            const UINT nz = (std::max)(1u, static_cast<UINT>(std::round(scale * size.z)));
+            std::mt19937 random(0xB15720u);
+            std::uniform_real_distribution<float> offset(-jitter, jitter);
             std::vector<GDX12FluidParticle> particles;
-            particles.reserve(1024);
-            for (UINT y = 0; y < 2; ++y)
-                for (UINT z = 0; z < 32; ++z)
-                    for (UINT x = 0; x < 16; ++x)
-                        particles.push_back({{32.0f * x - 240, 24.0f * y - 19, 15.5f * z - 240.25f},
-                            {35, 15 * std::sin(x * 0.4f + z * 0.3f), 20}});
+            particles.reserve(nx * ny * nz);
+            for (UINT x = 0; x < nx; ++x)
+                for (UINT y = 0; y < ny; ++y)
+                    for (UINT z = 0; z < nz; ++z)
+                    {
+                        const Vector3 t(nx == 1 ? 0.5f : float(x) / (nx - 1),
+                            ny == 1 ? 0.5f : float(y) / (ny - 1), nz == 1 ? 0.5f : float(z) / (nz - 1));
+                        particles.push_back({center + (t - Vector3(0.5f)) * size +
+                            Vector3(offset(random), offset(random), offset(random)), Vector3::Zero});
+                    }
             _source.SetParticles(std::move(particles));
         }
 
@@ -160,6 +172,5 @@ namespace BistroWater
         Engine::Core::MeshHandle _mesh;
         std::vector<GDX12Material*> _materials;
         GDX12FluidComponent _source;
-        float _waveTime = 0;
     };
 }

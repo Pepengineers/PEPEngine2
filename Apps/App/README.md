@@ -1,7 +1,7 @@
 # Bistro App
 
 The scene includes four frozen local reflection cubemaps, one entrance grass
-patch with wind, one small water basin, ten walking human NPCs from the MGPU
+patch with wind, one street-width water basin, ten walking human NPCs from the MGPU
 sample and five walking Khronos foxes inside. Application-only CVars control
 the populations. Character counts apply at startup; zero creates no characters:
 
@@ -12,6 +12,14 @@ the populations. Character counts apply at startup; zero creates no characters:
 | `App.Water.Count` | 1 | 0..8 |
 | `App.NPC.Count` | 10 | nonnegative integer (startup) |
 | `App.Fox.Count` | 5 | nonnegative integer (startup) |
+
+The street basin uses the MGPU fluid model: a jittered volume lattice starts at rest,
+then gravity, signed/near pressure and 95% wall restitution produce its motion.
+Its 51,975 water particles use three simulation substeps and a 1/60-second frame cap;
+coefficients are adapted to the basin's centimetre scale. Other fluid components
+retain the legacy solver unless near pressure is enabled. Run
+`BistroAdditionsTests.exe --water-video` to save a 60-frame, 20 FPS sequence under
+`Build/BistroAdditions/pool-frame-*.ppm`.
 
 `App.Physics.CountScale` defaults to `1`: the original scene props without extra
 tableware copies. Saved values in `Build/bin/x64/Release/App/Config/Engine.ini`

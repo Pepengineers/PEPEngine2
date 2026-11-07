@@ -276,7 +276,8 @@ int main(int argc, char** argv)
         const bool archSmoke = argc > 1 && std::strcmp(argv[1], "--arch-smoke") == 0;
         if (archSmoke) Set(L"App.ReflectionProbes.ShowSpheres", "false");
         const bool boundsOnly = argc > 1 && std::strcmp(argv[1], "--bounds-only") == 0;
-        const bool waterSmoke = argc > 1 && std::strcmp(argv[1], "--water-smoke") == 0;
+        const bool waterVideo = argc > 1 && std::strcmp(argv[1], "--water-video") == 0;
+        const bool waterSmoke = waterVideo || (argc > 1 && std::strcmp(argv[1], "--water-smoke") == 0);
         if (waterSmoke || boundsOnly)
             Set(L"App.ReflectionProbes.ShowSpheres", "false");
         Require(fountainsOnly || (!BistroBounds::Show.GetValue() && !BistroReflections::ShowBounds.GetValue() &&
@@ -402,16 +403,23 @@ int main(int argc, char** argv)
             Set(L"Render.Upscaler.Provider", "0");
             Set(L"Render.MotionBlur.Enabled", "false");
             Set(L"Render.DOF.Enabled", "false");
-            Aim(world, BistroWater::Center + Vector3(0,900,25), BistroWater::Center);
+            Aim(world, BistroWater::Center + (waterVideo ? Vector3(420,330,420) : Vector3(0,900,25)), BistroWater::Center);
             for (int frame = 0; frame < 180; ++frame)
             {
                 app.BenchmarkFrame(1.0 / 60);
-                if (frame == 0 || frame == 60 || frame == 179)
+                if (frame == 0 || frame == 60 || frame == 179 || (waterVideo && frame % 3 == 0))
                 {
                     render->WaitForUploads();
                     auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
-                    SaveImage(ReadHDR(*output), output->GetWidth(), output->GetHeight(),
-                        frame == 0 ? "pool-start" : frame == 60 ? "pool-waves-1s" : "pool-waves-3s");
+                    const auto pixels = ReadHDR(*output);
+                    if (frame == 0 || frame == 60 || frame == 179)
+                        SaveImage(pixels, output->GetWidth(), output->GetHeight(),
+                            frame == 0 ? "pool-start" : frame == 60 ? "pool-waves-1s" : "pool-waves-3s");
+                    if (waterVideo && frame % 3 == 0)
+                    {
+                        const auto name = "pool-frame-" + std::to_string(frame / 3);
+                        SaveImage(pixels, output->GetWidth(), output->GetHeight(), name.c_str());
+                    }
                 }
             }
             world.SetPaused(true);

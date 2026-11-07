@@ -28,16 +28,27 @@ inline void CheckBistroWaterCounts(World& world, Frame&& frame)
         seed = fluid.GetParticles();
         const auto& settings = fluid.GetSettings();
         ValidateFluidSettings(settings);
-        require(seed && seed->size() == 1024 && settings.SimulationEnabled && settings.RenderEnabled,
-            "Bistro water must contain 1024 live solver/render particles");
+        require(seed && seed->size() >= 40000 && seed->size() <= 60000 && settings.SimulationEnabled && settings.RenderEnabled,
+            "Bistro water must contain approximately 50000 live MGPU particles");
+        require(settings.NearPressureStiffnessCm2PerSecond2 > 0 && settings.PredictionSeconds == 1.0f / 120 &&
+            settings.MaxSubsteps == 3 && settings.MaxStepSeconds == 1.0f / 180 &&
+            settings.ViscosityCm2PerSecond == 0 && settings.Restitution == 0.95f &&
+            settings.AccelerationCmPerSecond2 == Vector3(0,-9.81f * 20,0), "Bistro must use the MGPU fluid preset");
         require(transform.Location == BistroWater::Center && transform.Rotation.y == BistroWater::YawDegrees &&
             settings.ContainerHalfExtentCm == BistroWater::HalfExtent,
             "Bistro water must span the side street beside the hedge");
+        float lowest = 0, highest = 0;
         for (const auto& particle : *seed)
+        {
+            require(particle.Velocity == Vector3::Zero, "MGPU volume must spawn at rest");
+            lowest = (std::min)(lowest, particle.Position.y);
+            highest = (std::max)(highest, particle.Position.y);
             require(std::abs(particle.Position.x) + settings.ParticleRadiusCm < settings.ContainerHalfExtentCm.x &&
                 std::abs(particle.Position.y) + settings.ParticleRadiusCm < settings.ContainerHalfExtentCm.y &&
                 std::abs(particle.Position.z) + settings.ParticleRadiusCm < settings.ContainerHalfExtentCm.z,
                 "Bistro water seed must fit inside its container");
+        }
+        require(highest - lowest > BistroWater::HalfExtent.y, "Water must spawn as a volume instead of two flat layers");
     });
     Engine::Core::MeshHandle sharedMesh;
     GDX12Material* sharedMaterial = nullptr;
@@ -66,18 +77,19 @@ inline void CheckBistroWaterCounts(World& world, Frame&& frame)
         "Paused water must keep its seed and entity");
     world.SetPaused(false);
     frame();
-    require(ecs.Get<FluidRenderComponent>(first).GetSettings().AccelerationCmPerSecond2 != pausedAcceleration &&
+    require(ecs.Get<FluidRenderComponent>(first).GetSettings().AccelerationCmPerSecond2 == pausedAcceleration &&
         ecs.Get<FluidRenderComponent>(first).GetResetRevision() == resetRevision &&
         ecs.Get<FluidRenderComponent>(first).GetSettingsRevision() == settingsRevision &&
         ecs.Get<FluidRenderComponent>(first).GetParticles() == seed,
-        "Waves must animate the live solver without resetting its particles");
+        "MGPU motion must keep gravity and the live seed without artificial periodic forces");
     auto& live = ecs.Get<FluidRenderComponent>(first);
-    const auto validAcceleration = live.GetSettings().AccelerationCmPerSecond2;
+    auto invalidSettings = live.GetSettings();
+    invalidSettings.NearPressureStiffnessCm2PerSecond2 = -1;
     bool rejected = false;
-    try { live.SetAcceleration(Vector3(1e8f,0,0)); }
+    try { live.SetSettings(invalidSettings); }
     catch (const std::invalid_argument&) { rejected = true; }
-    require(rejected && live.GetSettings().AccelerationCmPerSecond2 == validAcceleration,
-        "Wave forces must reject invalid acceleration without changing the live solver");
+    require(rejected && live.GetSettingsRevision() == settingsRevision,
+        "Invalid MGPU settings must not change the live solver");
     require(BistroWater::Count.SetFromString("2"), "Bistro water growth rejected");
     frame();
     require(ecs.GetPool<FluidRenderComponent>().Size() == 2 &&
