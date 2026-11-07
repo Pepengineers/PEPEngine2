@@ -41,7 +41,7 @@ public:
     {
         UINT Passes = 0, CulledPasses = 0, TransientTextures = 0, PhysicalTextures = 0;
         UINT64 LogicalBytes = 0, PhysicalBytes = 0;
-        UINT AsyncPasses = 0;
+        UINT AsyncPasses = 0, AsyncJoins = 0;
         mutable double ComputeTimeMS = -1;
         UINT64 ForkFence = 0, ComputeFence = 0;
         std::string JoinBefore;
@@ -85,6 +85,8 @@ private:
         bool SideEffect = false;
         bool AsyncCompute = false;
         bool LastAsync = false;
+        UINT64 LastForkFence = 0, LastComputeFence = 0;
+        std::string LastJoinBefore;
         std::vector<std::pair<uintptr_t, Mode>> LastBuffers;
         std::vector<Pass> ExplicitDependencies, Dependencies;
     };
@@ -106,7 +108,7 @@ private:
     std::unordered_map<SharedResource, Resource> _shared;
     Statistics _statistics;
     bool _compiled = false;
-    std::unique_ptr<GDX12GPUTimer> _computeTimer;
+    std::unordered_map<Pass, std::unique_ptr<GDX12GPUTimer>> _computeTimers;
 };
 
 class GDX12RenderGraphBuilder

@@ -13,6 +13,11 @@ the populations. Character counts apply at startup; zero creates no characters:
 | `App.NPC.Count` | 10 | nonnegative integer (startup) |
 | `App.Fox.Count` | 5 | nonnegative integer (startup) |
 
+`Render.Fluid.AsyncCompute` defaults to false and independently moves only water
+simulation to COMPUTE when available. Surface rasterization, filtering and optics
+stay on DIRECT and consume the same frame's result. Dual-GPU retains DIRECT.
+See [async water validation and matrix commands](../../docs/research/2026-11-07-water-async-compute.md).
+
 The street basin uses the MGPU fluid model: a jittered volume lattice starts at rest,
 then gravity, signed/near pressure and 95% wall restitution produce its motion.
 Its 51,975 water particles use three simulation substeps and a 1/60-second frame cap;

@@ -331,6 +331,9 @@ int main(int argc, char** argv)
         Set(L"Render.Fluid.Enabled", "true");
         Set(L"Render.Fluid.Quality", "2");
         GDX12FluidSurfacePass water; water.Setup(&resources, nullptr, &common); water.SetInputs({depth, motion}); water.Initialize();
+        GDX12FluidSimulationPass waterSimulation(&water);
+        waterSimulation.Setup(&resources, nullptr, &common);
+        Set(L"Render.Fluid.AsyncCompute", asyncMode ? "true" : "false");
         GDX12FluidResolvePass waterResolve(&water);
         waterResolve.Setup(&resources, nullptr, &common);
         waterResolve.SetInputs({ hdr.get(), environment.GetOutput(1) });
@@ -342,13 +345,16 @@ int main(int argc, char** argv)
         waterGraph.ImportShared(GDX12RenderGraph::SharedResource::ReflectionProbes, "Water fixture probes");
         for (auto* input : std::vector<IRenderPassLink*>{ depth, motion, hdr.get(), environment.GetOutput(1) })
             waterGraph.ImportLink("Water fixture input", input);
-        waterGraph.AddPass(water); waterGraph.AddPass(waterResolve); waterGraph.AddPass(waterOutput); waterGraph.Compile(false);
+        waterGraph.AddPass(waterSimulation); waterGraph.AddPass(water); waterGraph.AddPass(waterResolve); waterGraph.AddPass(waterOutput); waterGraph.Compile(false);
+        bool flushWater = true;
         const auto executeWater = [&]
         {
             water.PrepareFrame();
             waterResolve.PrepareFrame();
-            auto* commands = waterGraph.Execute(queue->GetCommandList());
-            queue->ExecuteCommandList(commands); queue->Flush();
+            auto* commands = waterGraph.Execute(queue->GetCommandList(), GetFluidControls().AsyncCompute ? device.TryGetComputeQueue() : nullptr);
+            queue->ExecuteCommandList(commands);
+            resources.FrameConstants[resources.CurrFrameConstantsIndex]->FenceValue = commands->FenceValue;
+            if (flushWater) queue->Flush();
         };
         const auto requireWaterFallback = [&]
         {
@@ -356,7 +362,14 @@ int main(int argc, char** argv)
                 waterResolve.GetOutput(0)->GetTexture() == hdr.get(), "Inactive water must preserve depth, motion and HDR identity");
         };
         executeWater(); requireWaterFallback();
-        CheckFluidSimulation(device, water, executeWater);
+        for (bool async : { false, true, false })
+        {
+            Set(L"Render.Fluid.AsyncCompute", async ? "true" : "false");
+            CheckFluidSimulation(device, water, executeWater);
+            Set(L"Render.Fluid.AsyncCompute", async ? "true" : "false"); executeWater();
+            Require(waterGraph.GetStatistics().AsyncPasses == (async ? 1u : 0u), "Fluid independent queue selection failed");
+        }
+        Set(L"Render.Fluid.AsyncCompute", asyncMode ? "true" : "false");
         GDX12FluidInstance fluid; fluid.Id = 1; fluid.DeltaSeconds = 1.0f / 60;
         GDX12FluidSettings settings; settings.ParticleRadiusCm = 8; settings.SmoothingRadiusCm = 20;
         settings.AccelerationCmPerSecond2 = Vector3::Zero; settings.FilterIterations = 1; settings.FilterRadiusPixels = 2;
@@ -364,7 +377,7 @@ int main(int argc, char** argv)
         fluid.Component.SetParticles({{{-5,20,0},{}},{{5,20,0},{}},{{0,25,5},{}},{{0,15,-5},{}}});
         water.SetInstances({fluid});
         water.PrepareFrame();
-        const auto waterAccesses = water.GetBufferAccesses();
+        const auto waterAccesses = water.GetSimulationBufferAccesses();
         Require(std::count_if(waterAccesses.begin(), waterAccesses.end(), [](const auto& access)
             { return access.Usage == GDX12RenderGraph::Mode::ReadWrite; }) == 5,
             "Fluid first-frame physical particle/sort/density buffers were not declared before graph execution");
@@ -385,9 +398,35 @@ int main(int argc, char** argv)
         }
         settings.RenderEnabled = false; fluid.Component.SetSettings(settings); water.SetInstances({fluid}); executeWater();
         requireWaterFallback();
-        Require(water.GetBufferAccesses().size() >= 6, "Render-disabled fluid lost its simulation state");
+        Require(water.GetSimulationBufferAccesses().size() >= 6, "Render-disabled fluid lost its simulation state");
         water.SetInstances({}); executeWater(); requireWaterFallback();
         settings.RenderEnabled = true; fluid.Component.SetSettings(settings); water.SetInstances({fluid}); executeWater();
+        std::vector<float> queuedDepth, queuedMotionX, queuedMotionY;
+        for (bool async : {false, true, false})
+        {
+            Set(L"Render.Fluid.AsyncCompute", async ? "true" : "false");
+            fluid.Component.Reset();
+            flushWater = false;
+            for (UINT frame = 0; frame < 12; ++frame)
+            {
+                resources.CurrFrameConstantsIndex = frame % resources.FrameConstants.size();
+                queue->CPUWaitForFenceValue(resources.FrameConstants[resources.CurrFrameConstantsIndex]->FenceValue);
+                settings.RenderEnabled = frame < 3 || frame > 8;
+                fluid.Component.SetSettings(settings); water.SetInstances({fluid}); executeWater();
+                if (!settings.RenderEnabled)
+                    Require(waterGraph.GetStatistics().JoinBefore == (async ? "frame retirement" : ""),
+                        "Hidden fluid failed to join at frame retirement");
+            }
+            queue->Flush();
+            const auto depthPixels = Read(device, *water.GetOutput(0)->GetTexture());
+            const auto motionX = Read(device, *water.GetOutput(1)->GetTexture(), 0);
+            const auto motionY = Read(device, *water.GetOutput(1)->GetTexture(), 1);
+            if (queuedDepth.empty()) { queuedDepth = depthPixels; queuedMotionX = motionX; queuedMotionY = motionY; }
+            else Require(queuedDepth == depthPixels && queuedMotionX == motionX && queuedMotionY == motionY,
+                "Queued fluid DIRECT/COMPUTE depth or motion differs");
+        }
+        flushWater = true; resources.CurrFrameConstantsIndex = 0;
+        Set(L"Render.Fluid.AsyncCompute", asyncMode ? "true" : "false");
         std::cout << "GPU fluid graph: first-frame buffers, SPH/NRF, resolve, quality, simulation-only, clear and reset passed.\n";
 
         GDX12ParticlesPass particles; particles.Setup(&resources, nullptr, &common);
@@ -423,6 +462,7 @@ int main(int argc, char** argv)
         };
         const auto executeParticles = [&](GDX12ParticlesPass& pass)
         {
+            Set(L"Render.Particles.AsyncCompute", particleAsync ? "true" : "false");
             prepareParticles();
             auto* commands = queue->GetCommandList();
             resources.ParticleSimulation->InitializePools(commands, &resources);

@@ -13,6 +13,7 @@ public:
     std::vector<GDX12FluidInstance> CollectScene(float deltaSeconds);
 
     GDX12FluidSurfacePass Surface;
+    GDX12FluidSimulationPass Simulation{ &Surface };
     GDX12FluidResolvePass Resolve{ &Surface };
     GDX12WBOITTransparencyPass Transparency{ GDX12WBOITTransparencyPass::DepthPartition::Far };
     GDX12WBOITCompositionPass Composition;

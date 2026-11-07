@@ -2,6 +2,8 @@
 #include "App.Base/App.h"
 #include "../src/BistroScene.h"
 #include "../src/BistroGrass.h"
+#include "../src/BistroWater.h"
+#include <charconv>
 #include <d3d12sdklayers.h>
 #include <cstring>
 #include <iostream>
@@ -81,7 +83,7 @@ class BistroRenderGraphTests final : public App
 {
 public:
     BistroRenderGraphTests() : App(GetModuleHandleW(nullptr)) {}
-    void Frame()
+    void Frame(double step = -1, double elapsed = -1)
     {
         MSG message;
         while (PeekMessage(&message, nullptr, 0, 0, PM_REMOVE))
@@ -91,11 +93,11 @@ public:
         }
         auto render = Locator.GetModule<RenderModule>();
         auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
-        Timer.Tick();
+        if (elapsed >= 0) Timer.Tick(step, elapsed); else Timer.Tick(step);
         render->BeginFrame();
         render->Update();
-        auto work = _lights.Schedule(_jobs, world, 0);
-        _gpuData.Schedule(_jobs, world, 0, work).Complete();
+        auto work = _lights.Schedule(_jobs, world, step >= 0 ? static_cast<float>(step) : 0);
+        _gpuData.Schedule(_jobs, world, step >= 0 ? static_cast<float>(step) : 0, work).Complete();
         render->Render();
     }
 
@@ -272,6 +274,136 @@ public:
         Set(L"Render.Particles.AsyncCompute", "false");
         if (!samples) throw std::runtime_error("Cannot write timing report");
     }
+    void Matrix(int argc, char** argv, bool validation)
+    {
+        int row = -1, warmup = 24, measured = 120;
+        bool withAO = false;
+        for (int i = 2; i < argc; ++i)
+        {
+            const std::string_view option(argv[i]);
+            if (option == "--matrix-ao") { withAO = true; continue; }
+            const auto parse = [&](std::string_view prefix, int& value)
+            {
+                if (option.substr(0, prefix.size()) != prefix) return false;
+                const auto digits = option.substr(prefix.size());
+                const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), value);
+                if (error != std::errc{} || end != digits.data() + digits.size() || value < 0)
+                    throw std::invalid_argument("Invalid matrix integer");
+                return true;
+            };
+            if (!parse("--row=", row) && !parse("--warmup=", warmup) && !parse("--samples=", measured))
+                throw std::invalid_argument("Unknown matrix option");
+        }
+        const int combinations = withAO ? 8 : 4;
+        if (row >= combinations || measured == 0 || warmup > 100000 || measured > 1000000) throw std::invalid_argument("Invalid matrix row or sample count");
+        if (withAO) Set(L"Render.AO.AsyncCompute", "false"); // Requires the later AO implementation.
+        Timer.Reset(); Timer.Start();
+        auto render = Locator.GetModule<RenderModule>();
+        auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+        Set(L"Render.FrameGeneration.Provider", "0"); Set(L"Render.Upscaler.Provider", "0");
+        Set(L"Render.AO.ExecutionPoint", "1");
+        Set(L"Render.Fluid.Enabled", "true"); Set(L"Render.Fluid.Quality", "2"); Set(L"App.Water.Count", "1");
+        Set(L"Render.Particles.Enabled", "true"); Set(L"Render.Particles.DrawEnabled", "true");
+        Set(L"Render.Particles.SimulationEnabled", "true"); Set(L"App.Particles.Count", "250000");
+        BistroGrass::Scene grass; grass.Update(world, 0);
+        BistroWater::Scene water; water.Update(world, 1.0f / 60);
+        BistroParticles::Update(world);
+        auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
+        camera.Location = BistroWater::Center + Vector3(420,330,420);
+        auto direction = BistroWater::Center - camera.Location; direction.Normalize();
+        camera.Rotation = Vector3(XMConvertToDegrees(-std::asin(direction.y)),
+            XMConvertToDegrees(std::atan2(direction.x, direction.z)), 0);
+        camera.DirtyFlag = true;
+        UINT waterInstances = 0; UINT64 waterParticles = 0, particleCapacity = 0;
+        world.GetECS().ForEach<FluidRenderComponent>([&](Entity, FluidRenderComponent& fluid)
+        {
+            auto settings = fluid.GetSettings(); settings.RenderEnabled = settings.SimulationEnabled = true;
+            fluid.SetSettings(settings);
+            ++waterInstances;
+            if (fluid.GetParticles()) waterParticles += fluid.GetParticles()->size();
+        });
+        world.GetECS().ForEach<ParticleEmitterComponent>([&](Entity, ParticleEmitterComponent& emitter)
+        { if (emitter.IsEnabled()) particleCapacity += emitter.GetSettings().MaxParticles; });
+        if (waterInstances != 1 || waterParticles != 51975 || particleCapacity != 250000)
+            throw std::runtime_error("Matrix ECS water/particle population does not match the frozen workload");
+        ComPtr<ID3D12InfoQueue> info;
+        if (validation)
+        {
+            ComPtr<ID3D12Device> device;
+            auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+            ThrowIfFailed(output->GetResource()->D3DResource->GetDevice(IID_PPV_ARGS(&device)));
+            ThrowIfFailed(device.As(&info)); info->ClearStoredMessages();
+        }
+        std::filesystem::create_directories("Build/AsyncWaterMatrix");
+        std::ofstream samples("Build/AsyncWaterMatrix/samples.csv");
+        if (!samples) throw std::runtime_error("Cannot create matrix CSV");
+        samples << "series,order,row,water_async,particles_async,ao_async,sample,dt,gpu_ms,compute_sum_ms,cpu_submit_ms,water_instances,water_particles,particle_capacity,drain\n";
+        std::vector<int> rows;
+        if (row >= 0) rows.push_back(row);
+        else
+        {
+            for (int i = 0; i < combinations; ++i) rows.push_back(i);
+            for (int i = combinations - 1; i >= 0; --i) rows.push_back(i);
+        }
+        for (size_t series = 0; series < rows.size(); ++series)
+        {
+            const int mask = rows[series];
+            render->WaitForUploads();
+            Timer.Reset(); Timer.Start();
+            world.GetECS().ForEach<WindFieldComponent>([](Entity, WindFieldComponent& wind) { wind.Reset(); });
+            world.GetECS().ForEach<GrassRenderComponent>([](Entity, GrassRenderComponent& patch) { patch.ResetHistory(); });
+            Set(L"Render.Fluid.AsyncCompute", mask & 1 ? "true" : "false");
+            Set(L"Render.Particles.AsyncCompute", mask & 2 ? "true" : "false");
+            if (withAO) Set(L"Render.AO.AsyncCompute", mask & 4 ? "true" : "false");
+            world.GetECS().ForEach<FluidRenderComponent>([](Entity, FluidRenderComponent& fluid) { fluid.Reset(); });
+            world.GetECS().ForEach<ParticleEmitterComponent>([](Entity, ParticleEmitterComponent& emitter)
+            { emitter.Reset(); if (emitter.IsEnabled()) emitter.Emit(emitter.GetSettings().MaxParticles); });
+            world.GetECS().Get<CameraComponent>(world.ActiveCamera).InvalidateHistory();
+            render->GetRenderPipelineCommonData()->ResetHistory = true;
+            // Reset frames warm histories identically; measured CPU time excludes the explicit drain.
+            for (int frame = 0; frame < warmup; ++frame) { water.Update(world, 1.0f / 60); Frame(1.0 / 60, (frame + 1) / 60.0); }
+            render->WaitForUploads();
+            std::cout << "Matrix series=" << series << " row=" << mask << " dt=1/60 water=" << waterParticles
+                << " particle_capacity=" << particleCapacity << " CPU-drain" << std::endl;
+            for (int frame = 0; frame < measured; ++frame)
+            {
+                water.Update(world, 1.0f / 60);
+                const auto started = std::chrono::steady_clock::now(); Frame(1.0 / 60, (warmup + frame + 1) / 60.0);
+                const double cpu = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+                render->WaitForUploads();
+                if (info) CheckMessages(*info.Get());
+                const auto& stats = render->GetRenderGraphStatistics();
+                const UINT expected = !!(mask & 1) + !!(mask & 2) + !!(mask & 4);
+                if (stats.AsyncPasses != expected) throw std::runtime_error("Independent matrix queue selection failed");
+                samples << series << ',' << (row >= 0 ? "single" : (series < size_t(combinations) ? "forward" : "reverse")) << ','
+                    << mask << ',' << !!(mask & 1) << ',' << !!(mask & 2) << ',' << !!(mask & 4) << ',' << frame
+                    << ",0.016666666666666667," << render->GetGPUFrameTimeMS() << ',' << stats.ComputeTimeMS << ',' << cpu
+                    << ',' << waterInstances << ',' << waterParticles << ',' << particleCapacity << ",cpu-drain\n";
+            }
+            std::ofstream dot("Build/AsyncWaterMatrix/series-" + std::to_string(series) + ".dot"); render->WriteRenderGraph(dot);
+            if (!dot) throw std::runtime_error("Cannot write matrix graph");
+        }
+        if (validation)
+        {
+            Set(L"Render.Fluid.AsyncCompute", "true"); Set(L"Render.Particles.AsyncCompute", "true");
+            for (bool reuse : {false, true})
+            {
+                Set(L"Render.Graph.ReuseTextures", reuse ? "true" : "false");
+                for (int frame = 0; frame < 3; ++frame) Frame(1.0 / 60, (warmup + measured + frame + 1) / 60.0);
+                render->WaitForUploads(); CheckMessages(*info.Get());
+            }
+            SetWindowPos(GetWindow()->GetWindowHandle(), nullptr, 0, 0, 973, 657, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+            for (int frame = 0; frame < 3; ++frame) Frame(1.0 / 60, (warmup + measured + frame + 4) / 60.0);
+            render->WaitForUploads(); CheckMessages(*info.Get());
+            Set(L"Render.Upscaler.Provider", "1");
+            for (int frame = 0; frame < 3; ++frame) Frame(1.0 / 60, (warmup + measured + frame + 7) / 60.0);
+            render->WaitForUploads(); CheckMessages(*info.Get());
+            std::cout << "Matrix combined water/particles: pooling, queued frames, odd resize and Native/XeSS passed." << std::endl;
+        }
+        if (!samples) throw std::runtime_error("Cannot write matrix samples");
+        Set(L"Render.Fluid.AsyncCompute", "false"); Set(L"Render.Particles.AsyncCompute", "false");
+        if (withAO) Set(L"Render.AO.AsyncCompute", "false");
+    }
 protected:
     bool AddModules() override
     {
@@ -291,23 +423,32 @@ int main(int argc, char** argv)
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
     try
     {
-        const bool timing = argc > 1 && std::string_view(argv[1]) == "--timing";
+        const std::string_view mode = argc > 1 ? argv[1] : "";
+        const bool matrix = mode == "--matrix" || mode == "--matrix-validation" || mode == "--matrix-gpu-validation";
+        const bool timing = mode == "--timing" || matrix;
+        const bool validationMode = mode == "--matrix-validation" || mode == "--matrix-gpu-validation";
         std::cout.setf(std::ios::unitbuf);
         ComPtr<ID3D12Debug> debug;
-        if (!timing)
+        if (!timing || validationMode)
         {
             ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
             debug->EnableDebugLayer();
         }
-        if (argc > 1 && std::string_view(argv[1]) == "--gpu-validation")
+        if (mode == "--gpu-validation" || mode == "--matrix-gpu-validation")
         {
             ComPtr<ID3D12Debug1> validation;
             ThrowIfFailed(debug.As(&validation));
             validation->SetEnableGPUBasedValidation(TRUE);
         }
+        GameTimer fixedClock; fixedClock.Reset(); fixedClock.Tick(1.0 / 60, 2.0);
+        if (std::abs(fixedClock.DeltaTime() - 1.0f / 60) > 1e-7f || std::abs(fixedClock.TotalTime() - 2.0f) > 1e-6f)
+            throw std::runtime_error("Deterministic matrix clock self-check failed");
+        fixedClock.Stop(); fixedClock.Tick(1.0 / 60, 3.0);
+        if (fixedClock.DeltaTime() != 0) throw std::runtime_error("Paused fixed clock advanced");
         BistroRenderGraphTests app;
         if (!app.Initialize()) throw std::runtime_error("Bistro initialization failed");
-        if (timing) app.Time();
+        if (matrix) app.Matrix(argc, argv, validationMode);
+        else if (timing) app.Time();
         else app.Check();
         return 0;
     }

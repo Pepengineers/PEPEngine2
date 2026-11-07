@@ -5,6 +5,8 @@
 #include <d3d12sdklayers.h>
 #include <iostream>
 #include <sstream>
+#include "Common/GameTimer.h"
+#include <cmath>
 #include <stdexcept>
 
 using Graph = GDX12RenderGraph;
@@ -68,6 +70,24 @@ private:
     ID3D12Resource* Readback;
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint;
 };
+
+static void TestCaptureClock()
+{
+    GameTimer timer; timer.Reset();
+    timer.Tick(1.0 / 60, 2.0);
+    Require(std::abs(timer.TotalTime() - 2.0f) < 1e-6f && std::abs(timer.DeltaTime() - 1.0f / 60) < 1e-7f,
+        "Fixed capture clock did not expose the requested delta and elapsed time");
+    timer.Tick();
+    Require(timer.TotalTime() >= 0 && timer.TotalTime() < 1 && timer.DeltaTime() >= 0 && timer.DeltaTime() < 1,
+        "Ordinary Tick inherited the capture's synthetic clock");
+    timer.Stop(); const float stopped = timer.TotalTime(); timer.Tick(1.0 / 60, 3.0);
+    Require(timer.DeltaTime() == 0 && timer.TotalTime() == stopped, "Paused capture clock advanced");
+    timer.Start(); timer.Tick(1.0 / 60, 4.0);
+    Require(std::abs(timer.TotalTime() - 4.0f) < 1e-6f, "Capture clock did not resume");
+    timer.Reset(); Require(timer.TotalTime() == 0 && timer.DeltaTime() == 0, "Clock Reset retained synthetic time");
+    Reject([&] { timer.Tick(1.0 / 60, -1); }, "Negative capture time accepted");
+    Reject([&] { timer.Tick(-1, 0); }, "Negative capture delta accepted");
+}
 
 static void TestCompiler()
 {
@@ -247,20 +267,22 @@ class BufferCopyPass final : public GDX12RenderPass
 {
 public:
     BufferCopyPass(GDX12Resource& buffer, ID3D12Resource* transfer, bool write)
-        : Buffer(buffer), Transfer(transfer), Write(write) {}
+        : Async(write), Buffer(buffer), Transfer(transfer), Write(write) {}
+    bool Async;
+    UINT64 TransferOffset = 0;
     void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
     {
         graph.SetName(Write ? "Async buffer producer" : "Physical buffer reader");
         graph.HasSideEffects();
-        if (Write) graph.AsyncCompute();
+        if (Async) graph.AsyncCompute();
     }
     std::vector<Graph::BufferAccess> GetBufferAccesses() const override
     { return {{ &Buffer, Write ? Mode::Write : Mode::Read }}; }
     void Execute(GDX12CommandList* commands) override
     {
         commands->ResourceBarrier({ Write ? Buffer.GetCopyDestBarrier() : Buffer.GetCopySourceBarrier() });
-        if (Write) commands->GetCommandList()->CopyBufferRegion(Buffer.D3DResource.Get(), 0, Transfer, 0, sizeof(UINT));
-        else commands->GetCommandList()->CopyBufferRegion(Transfer, 0, Buffer.D3DResource.Get(), 0, sizeof(UINT));
+        if (Write) commands->GetCommandList()->CopyBufferRegion(Buffer.D3DResource.Get(), 0, Transfer, TransferOffset, sizeof(UINT));
+        else commands->GetCommandList()->CopyBufferRegion(Transfer, TransferOffset, Buffer.D3DResource.Get(), 0, sizeof(UINT));
     }
 private:
     GDX12Resource& Buffer;
@@ -327,6 +349,113 @@ static void TestAsyncTexture(GDX12Device& device)
     std::cout << "Concurrent texture readers: 400 changing frames, both readbacks, writer/unmanaged joins passed.\n";
 }
 
+static void TestMultipleAsyncQueues(GDX12Device& device)
+{
+    auto* direct = device.GetCommandQueue();
+    auto* compute = device.TryGetComputeQueue();
+    Require(compute, "COMPUTE queue unavailable for multiple-producer fixture");
+    constexpr UINT frames = 12;
+    const auto desc = CD3DX12_RESOURCE_DESC::Buffer(256 * frames);
+    GDX12Resource a, b;
+    a.D3DResource = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
+    b.D3DResource = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
+    auto upload = device.CreateResource(D3D12_HEAP_TYPE_UPLOAD, desc, D3D12_RESOURCE_STATE_GENERIC_READ);
+    auto readback = device.CreateResource(D3D12_HEAP_TYPE_READBACK, desc, D3D12_RESOURCE_STATE_COPY_DEST);
+    auto intermediate = device.CreateResource(D3D12_HEAP_TYPE_READBACK, desc, D3D12_RESOURCE_STATE_COPY_DEST);
+    UINT* mapped;
+    ThrowIfFailed(upload->Map(0, nullptr, reinterpret_cast<void**>(&mapped)));
+    for (UINT i = 0; i < frames; ++i) mapped[64 * i] = 0x12340000 + i;
+    upload->Unmap(0, nullptr);
+    const auto requireSamples = [&](ID3D12Resource* resource, const char* message)
+    {
+        ThrowIfFailed(resource->Map(0, nullptr, reinterpret_cast<void**>(&mapped)));
+        for (UINT i = 0; i < frames; ++i) Require(mapped[64 * i] == 0x12340000 + i, message);
+        resource->Unmap(0, nullptr);
+    };
+    BufferCopyPass first(a, upload.Get(), true), second(b, upload.Get(), true);
+    BufferCopyPass consume(a, readback.Get(), false);
+    TestPass graphics("Independent graphics", {}, true);
+    for (bool async : {false, true, false})
+        for (bool hasConsumer : {true, false})
+        {
+            Graph graph(&device);
+            graph.AddPass(first); graph.AddPass(graphics); graph.AddPass(second);
+            if (hasConsumer) graph.AddPass(consume);
+            graph.Compile();
+            UINT64 finalFence = 0;
+            for (UINT frame = 0; frame < frames; ++frame)
+            {
+                first.TransferOffset = second.TransferOffset = consume.TransferOffset = frame * 256;
+                auto* commands = graph.Execute(direct->GetCommandList(), async ? compute : nullptr);
+                if (!hasConsumer) consume.Execute(commands);
+                direct->ExecuteCommandList(commands);
+                finalFence = commands->FenceValue;
+            }
+            direct->CPUWaitForFenceValue(finalFence);
+            requireSamples(readback.Get(), "First pending producer or final fence lost queued data");
+            Require(graph.GetStatistics().AsyncPasses == (async ? 2u : 0u), "Multiple async producers lost DIRECT fallback");
+            Require(graph.GetStatistics().AsyncJoins == (async ? 1u : 0u), "Independent async producer forced an early DIRECT join");
+            if (async)
+                Require(graph.GetStatistics().JoinBefore == (hasConsumer ? "Physical buffer reader" : "frame retirement"),
+                    "First pending producer joined at the wrong consumer");
+        }
+    // COMPUTE RAW -> WAR -> WAW stays ordered on one queue without a DIRECT round trip.
+    BufferCopyPass asyncRead(a, intermediate.Get(), false), overwrite(a, upload.Get(), true);
+    asyncRead.Async = true;
+    Graph ordered(&device);
+    ordered.AddPass(first); ordered.AddPass(asyncRead); ordered.AddPass(overwrite); ordered.AddPass(consume);
+    ordered.Compile();
+    for (UINT frame = 0; frame < frames; ++frame)
+    {
+        first.TransferOffset = asyncRead.TransferOffset = consume.TransferOffset = frame * 256;
+        overwrite.TransferOffset = ((frame + 1) % frames) * 256;
+        direct->ExecuteCommandList(ordered.Execute(direct->GetCommandList(), compute));
+    }
+    direct->Flush();
+    requireSamples(intermediate.Get(), "COMPUTE RAW/WAR ordering lost the intermediate value");
+    ThrowIfFailed(readback->Map(0, nullptr, reinterpret_cast<void**>(&mapped)));
+    for (UINT frame = 0; frame < frames; ++frame)
+        Require(mapped[64 * frame] == 0x12340000 + ((frame + 1) % frames), "COMPUTE WAW or DIRECT RAW ordering failed");
+    readback->Unmap(0, nullptr);
+    Require(ordered.GetStatistics().AsyncPasses == 3 && ordered.GetStatistics().AsyncJoins == 1,
+        "Same-queue buffer dependencies introduced a premature DIRECT join");
+
+    Graph logical(&device);
+    first.TransferOffset = second.TransferOffset = 0;
+    const auto oldest = logical.AddPass(first);
+    logical.AddPass(second);
+    const auto dependent = logical.AddPass(graphics);
+    logical.DependsOn(dependent, oldest);
+    logical.Compile();
+    direct->ExecuteCommandList(logical.Execute(direct->GetCommandList(), compute)); direct->Flush();
+    Require(logical.GetStatistics().AsyncJoins == 1 && logical.GetStatistics().JoinBefore == "Independent graphics",
+        "Logical dependency on the older pending producer was forgotten");
+
+    // A DIRECT write must wait for an older COMPUTE reader or writer.
+    overwrite.Async = false;
+    for (bool reader : {true, false})
+    {
+        Graph hazard(&device);
+        hazard.AddPass(reader ? asyncRead : first); hazard.AddPass(second); hazard.AddPass(overwrite); hazard.Compile();
+        direct->ExecuteCommandList(hazard.Execute(direct->GetCommandList(), compute)); direct->Flush();
+        Require(hazard.GetStatistics().AsyncJoins == 1 && hazard.GetStatistics().JoinBefore == "Async buffer producer",
+            "DIRECT WAR/WAW against the older pending access escaped the join");
+    }
+    class RecordingFailure final : public TestPass
+    {
+    public:
+        RecordingFailure() : TestPass("Failure after multiple submissions", {}, true) {}
+        void Execute(GDX12CommandList*) override { throw std::runtime_error("Multiple-producer recording failure"); }
+    } failure;
+    Graph failed(&device);
+    failed.AddPass(first); failed.AddPass(second); failed.AddPass(failure); failed.Compile();
+    Reject([&] { failed.Execute(direct->GetCommandList(), compute); }, "Multiple-producer recording failure was swallowed");
+    Require(failed.GetStatistics().AsyncPasses == 2 &&
+        compute->GetFence()->GetCompletedValue() >= failed.GetStatistics().ComputeFence,
+        "Recording failure left an older COMPUTE producer in flight");
+    std::cout << "Multiple async producers: queued RAW/WAR/WAW, logical dependencies, retirement and DIRECT fallback passed.\n";
+}
+
 static void TestAsyncQueues(GDX12Device& device)
 {
     auto* direct = device.GetCommandQueue();
@@ -378,6 +507,7 @@ static void TestAsyncQueues(GDX12Device& device)
         compute->GetFence()->GetCompletedValue() >= failed.GetStatistics().ComputeFence,
         "Failed recording left submitted simulation in flight");
     direct->Flush(); compute->Flush();
+    TestMultipleAsyncQueues(device);
     std::cout << "Async queues: physical RAW/WAR, DIRECT fallback, queued allocators, side-effect join and final fence passed.\n";
 }
 
@@ -386,6 +516,7 @@ int main(int argc, char** argv)
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
     try
     {
+        TestCaptureClock();
         TestCompiler();
         TestPassRecording();
         TestApp app;

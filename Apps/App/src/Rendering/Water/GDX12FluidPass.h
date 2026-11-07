@@ -26,6 +26,8 @@ public:
     void Execute(GDX12CommandList* commands) override;
     void SetInstances(std::vector<GDX12FluidInstance> instances);
     void PrepareFrame();
+    void ExecuteSimulation(GDX12CommandList* commands);
+    std::vector<GDX12RenderGraph::BufferAccess> GetSimulationBufferAccesses() const;
     std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override;
     std::vector<GDX12RenderGraph::BufferAccess> GetResolveBufferAccesses() const;
     IRenderPassLink* GetOpaqueDepth() const { return _inputs[0]; }
@@ -61,6 +63,25 @@ private:
     bool _rendering = false;
     bool _simulating = false;
     bool _prepared = false;
+};
+
+class GDX12FluidSimulationPass final : public GDX12RenderPass
+{
+public:
+    explicit GDX12FluidSimulationPass(GDX12FluidSurfacePass* surface) : _surface(surface) {}
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Fluid simulation");
+        graph.AsyncCompute();
+        graph.Read(SharedResource::Scene);
+        graph.HasSideEffects();
+    }
+    bool IsAsyncComputeEnabled() const override { return GetFluidControls().AsyncCompute; }
+    void Execute(GDX12CommandList* commands) override { _surface->ExecuteSimulation(commands); }
+    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
+    { return _surface->GetSimulationBufferAccesses(); }
+private:
+    GDX12FluidSurfacePass* _surface;
 };
 
 class GDX12FluidResolvePass final : public GDX12RenderPass

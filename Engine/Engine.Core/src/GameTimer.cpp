@@ -129,3 +129,13 @@ void GameTimer::Tick(double fixedDeltaSeconds)
         _timeDelta = 0.0;
     }
 }
+
+void GameTimer::Tick(double fixedDeltaSeconds, double fixedTotalSeconds)
+{
+    if (!std::isfinite(fixedTotalSeconds) || fixedTotalSeconds < 0 || fixedTotalSeconds > 1e7 ||
+        !std::isfinite(fixedDeltaSeconds) || fixedDeltaSeconds < 0 || fixedDeltaSeconds > 60)
+        throw std::invalid_argument("Fixed timer values outside supported range");
+    Tick(fixedDeltaSeconds);
+    if (!_bStopped)
+        _currTime = _baseTime + _pausedTime + static_cast<__int64>(fixedTotalSeconds / _secondsPerCount);
+}

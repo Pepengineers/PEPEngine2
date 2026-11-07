@@ -8,6 +8,8 @@ namespace
 {
     static AutoConsoleVariable<bool> Enabled(L"Render.Fluid.Enabled", true,
         L"Enable fluid components. Default true.", EConsoleVariableFlags::Default);
+    static AutoConsoleVariable<bool> AsyncCompute(L"Render.Fluid.AsyncCompute", false,
+        L"Run fluid simulation on COMPUTE when available. Default false.", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Fluid.Quality", GDX12Quality::Mid,
         L"0 Off, 1 Low, 2 Mid (default), 3 High.", EConsoleVariableFlags::Default);
     bool Finite(const Vector3 value)
@@ -23,7 +25,7 @@ namespace
 GDX12FluidControls GetFluidControls()
 {
     const int quality = Quality.GetInt();
-    return { Enabled.GetValue() && quality != 0, quality };
+    return { Enabled.GetValue() && quality != 0, quality, AsyncCompute.GetValue() };
 }
 
 GDX12FluidSettings ResolveFluidSettings(const GDX12FluidSettings& author, const int quality)

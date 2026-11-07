@@ -24,4 +24,5 @@ public:
 	void Start (); // Call when unpaused.
 	void Stop ();  // Call when paused.
 	void Tick (double fixedDeltaSeconds = -1); // Optional fixed frame step; TotalTime stays wall-clock.
+    void Tick(double fixedDeltaSeconds, double fixedTotalSeconds); // Deterministic capture clock.
 };

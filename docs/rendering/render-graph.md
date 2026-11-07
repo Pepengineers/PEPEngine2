@@ -68,7 +68,7 @@ Build the following projects with MSBuild (`/p:Configuration=Release /p:Platform
 * `Apps/App/RenderGraphTests.vcxproj`: class recording, linked-input validation, failed-recording rollback, dependency hazards, cycles, dead passes, bad accesses, pooled/dedicated pixel identity, queued frames, shared states, descriptor stability, recompilation, resize, fallback/export lifetimes and allocation cleanup, with the D3D12 debug layer.
 * `Apps/App/BistroRenderGraphTests.vcxproj`: complete Bistro HDR readbacks match byte-for-byte with pooling off/on/off, in both AO placements. Temporal effects are disabled for this deterministic comparison, then re-enabled for odd resize and Native/XeSS switching under the debug layer.
 
-The particle simulation pass can opt into COMPUTE; other production passes remain on DIRECT. Cross-adapter async scheduling, pooling of internal SDK resources and buffers, lazy resource creation before pass initialization, and heap aliasing between incompatible texture descriptions are not implemented. New passes must declare hidden reads/writes and conditional forwarding before opting their outputs into pooling.
+Particle and fluid simulation can opt into COMPUTE independently; other production passes remain on DIRECT. Cross-adapter async scheduling, pooling of internal SDK resources and buffers, lazy resource creation before pass initialization, and heap aliasing between incompatible texture descriptions are not implemented. New passes must declare hidden reads/writes and conditional forwarding before opting their outputs into pooling.
 
 ## Particle async scheduling
 
@@ -83,6 +83,14 @@ DOT diagnostics include actual queue selection, physical buffer access identitie
 `SecondGroupTests --async` and `--async-gpu-validation` run the particle oracles through this path. Both ordinary and async runs include direct/async/direct queued frames and branches without a draw consumer. `BistroRenderGraphTests` compares HDR across queue/pooling toggles and AO placements; `--gpu-validation` enables GBV. Its separate `--timing` mode disables validation, freezes dt/camera, seeds 250000 particles and records 24 warm-up plus 120 measured frames per direct/async/direct series in `Build/async-bistro-timing.csv`, with DOT files beside it. A per-frame CPU drain makes timer readback unambiguous; this timing mode does not replace the queued-frame correctness tests or establish general FPS gains.
 
 [2026-11-05 validation and A/B report](../research/2026-11-05-particle-async-compute.md) separates the initial exclusive-depth measurements from the shared-depth follow-up. Applications deploy [Agility SDK 1.619.6](../../External/AgilitySDK/README.md) for correct cross-queue read/read validation; the bundled DXC keeps engine shaders at retail SM 6.8. Async remains default-off with DIRECT fallback.
+
+## Multiple producers and fluid simulation
+
+`IsAsyncComputeEnabled()` selects each eligible pass at runtime. Providing a COMPUTE queue does not enable a technique whose own flag is false. The executor retains all pending producers and physical accesses; another COMPUTE pass uses queue order rather than forcing a DIRECT join. DIRECT consumers wait on the latest pending fence. Conflicting shared-texture layouts still join before DIRECT publishes a new state. DEFAULT buffer read/read accesses join conservatively; immutable upload reads may overlap. Upload/readback heaps retain their fixed states.
+
+`Render.Fluid.AsyncCompute` defaults to false. Bistro runs the solver before geometry and consumes its same-frame particle state at `Fluid surface`; raster/filter/resolve stay DIRECT. Hidden simulation still retires through the final join. Separate solver/render constant records preserve late history updates, and seed uploads retire before collecting buffer-access pointers. Per-producer DOT fences and `AsyncJoins` expose the actual boundaries; `ComputeTimeMS` sums per-pass timers.
+
+The [water report](../research/2026-11-07-water-async-compute.md) documents controls, lifetime, correctness commands and the full-frame `--matrix` harness. It uses dt=1/60, explicit basin creation, fixed clock/camera, per-series wind/water/particle reset and W/P forward/reverse rows. Its labelled CPU drain is distinct from queued-throughput testing. AO remains at its selected execution point; the later AO axis is reserved without an AO implementation.
 
 ## Class API migration checks, 2026-11-02
 

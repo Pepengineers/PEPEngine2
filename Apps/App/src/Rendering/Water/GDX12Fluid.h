@@ -44,7 +44,7 @@ struct GDX12FluidSettings
     float MaxOpticalThicknessCm = 1000;
 };
 
-struct GDX12FluidControls { bool Enabled; int Quality; };
+struct GDX12FluidControls { bool Enabled; int Quality; bool AsyncCompute = false; };
 GDX12FluidControls GetFluidControls();
 GDX12FluidSettings ResolveFluidSettings(const GDX12FluidSettings& author, int quality);
 void ValidateFluidSettings(const GDX12FluidSettings& settings);

@@ -18,6 +18,7 @@ public:
         graph.Write(SharedResource::ParticleSimulation, "Particle simulation pools");
         graph.HasSideEffects();
     }
+    bool IsAsyncComputeEnabled() const override { return GetParticleSettings().AsyncCompute; }
     void Execute(GDX12CommandList* commands) override
     {
         if (_resources->ParticleSimulation)

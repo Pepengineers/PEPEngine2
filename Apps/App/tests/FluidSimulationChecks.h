@@ -47,7 +47,7 @@ static void CheckFluidSimulation(GDX12Device& device, GDX12FluidSurfacePass& wat
         water.SetInstances({fluid}); execute();
         float gap = 8;
         UINT buffers = 0;
-        for (const auto& access : water.GetBufferAccesses())
+        for (const auto& access : water.GetSimulationBufferAccesses())
         {
             if (access.Usage != GDX12RenderGraph::Mode::ReadWrite ||
                 access.Resource->D3DResource->GetDesc().Width != 2 * sizeof(Particle)) continue;
@@ -63,7 +63,7 @@ static void CheckFluidSimulation(GDX12Device& device, GDX12FluidSurfacePass& wat
         settings.SimulationEnabled = false;
         fluid.Component.SetSettings(settings); water.SetInstances({fluid}); execute();
         float pausedGap = 8;
-        for (const auto& access : water.GetBufferAccesses())
+        for (const auto& access : water.GetSimulationBufferAccesses())
             if (access.Usage == GDX12RenderGraph::Mode::ReadWrite &&
                 access.Resource->D3DResource->GetDesc().Width == 2 * sizeof(Particle))
             {
@@ -82,7 +82,7 @@ static void CheckFluidSimulation(GDX12Device& device, GDX12FluidSurfacePass& wat
         fluid.Component.SetParticles({{{-4,0,0},{-1000,0,0}},{{4,0,0},{1000,0,0}}});
         water.SetInstances({fluid}); execute();
         float speed = 1000;
-        for (const auto& access : water.GetBufferAccesses())
+        for (const auto& access : water.GetSimulationBufferAccesses())
             if (access.Usage == GDX12RenderGraph::Mode::ReadWrite &&
                 access.Resource->D3DResource->GetDesc().Width == 2 * sizeof(Particle))
                 speed = (std::min)(speed, std::abs(read(*access.Resource).front().Velocity.x));
@@ -95,7 +95,7 @@ static void CheckFluidSimulation(GDX12Device& device, GDX12FluidSurfacePass& wat
     fluid.Component.SetParticles({{{98.9f,0,0},{200,0,0}}});
     water.SetInstances({fluid}); execute();
     bool bounced = false;
-    for (const auto& access : water.GetBufferAccesses())
+    for (const auto& access : water.GetSimulationBufferAccesses())
         if (access.Usage == GDX12RenderGraph::Mode::ReadWrite &&
             access.Resource->D3DResource->GetDesc().Width == sizeof(Particle))
         {
@@ -115,7 +115,7 @@ static void CheckFluidSimulation(GDX12Device& device, GDX12FluidSurfacePass& wat
     fluid.Component.SetParticles({{{0,0,0},{}}});
     water.SetInstances({fluid}); execute();
     bool stepped = false;
-    for (const auto& access : water.GetBufferAccesses())
+    for (const auto& access : water.GetSimulationBufferAccesses())
         if (access.Usage == GDX12RenderGraph::Mode::ReadWrite &&
             access.Resource->D3DResource->GetDesc().Width == sizeof(Particle))
         {
@@ -128,7 +128,7 @@ static void CheckFluidSimulation(GDX12Device& device, GDX12FluidSurfacePass& wat
     fluid.Component.SetParticles({{{0,0,0},{}}});
     water.SetInstances({fluid}); execute();
     bool fastStepped = false;
-    for (const auto& access : water.GetBufferAccesses())
+    for (const auto& access : water.GetSimulationBufferAccesses())
         if (access.Usage == GDX12RenderGraph::Mode::ReadWrite &&
             access.Resource->D3DResource->GetDesc().Width == sizeof(Particle))
         {
@@ -136,6 +136,62 @@ static void CheckFluidSimulation(GDX12Device& device, GDX12FluidSurfacePass& wat
             fastStepped |= std::abs(p.Position.y + 0.01134f) < 0.00005f;
         }
     Require(fastStepped, "MGPU must retain all three substeps at high frame rates");
+    // Identical nonzero-dt state must survive DIRECT/COMPUTE/DIRECT switches bit-for-bit.
+    settings.RenderEnabled = true;
+    settings.MaxSubsteps = 3;
+    fluid.DeltaSeconds = 1.0f / 60;
+    fluid.Component.SetSettings(settings);
+    fluid.Component.SetParticles({{{-2,0,0},{20,0,0}},{{2,0,0},{-20,0,0}}});
+    std::vector<std::vector<Particle>> reference;
+    for (bool async : {false, true, false})
+    {
+        Require(ConsoleModule{}.FindConsoleVariable(L"Render.Fluid.AsyncCompute").SetFromString(async ? "true" : "false"),
+            "Cannot toggle fluid async in parity fixture");
+        fluid.Component.Reset(); water.SetInstances({fluid});
+        for (UINT frame = 0; frame < 4; ++frame) execute();
+        std::vector<std::vector<Particle>> samples;
+        for (const auto& access : water.GetSimulationBufferAccesses())
+            if (access.Usage == GDX12RenderGraph::Mode::ReadWrite &&
+                access.Resource->D3DResource->GetDesc().Width == 2 * sizeof(Particle))
+                samples.push_back(read(*access.Resource));
+        Require(samples.size() == 2, "Fluid parity fixture lost ping-pong buffers");
+        if (reference.empty()) reference = samples;
+        for (size_t i = 0; i < samples.size(); ++i)
+            Require(std::memcmp(samples[i].data(), reference[i].data(), 2 * sizeof(Particle)) == 0,
+                "DIRECT/COMPUTE fluid solver state differs with identical nonzero dt and reset");
+        fluid.DeltaSeconds = 0; water.SetInstances({fluid}); execute();
+        for (const auto& access : water.GetSimulationBufferAccesses())
+            if (access.Usage == GDX12RenderGraph::Mode::ReadWrite &&
+                access.Resource->D3DResource->GetDesc().Width == 2 * sizeof(Particle))
+            {
+                const auto particles = read(*access.Resource);
+                for (const auto& particle : particles)
+                    Require(std::isfinite(particle.PreviousPosition.y), "Zero-dt fluid motion history became nonfinite");
+                // Four three-substep frames leave buffer zero current; SavePrevious must still run.
+                Require(std::memcmp(&particles[0].Position, &particles[0].PreviousPosition, sizeof(Vector3)) == 0,
+                    "Zero-dt fluid failed to save its displayed previous position");
+                break;
+            }
+        fluid.DeltaSeconds = 1.0f / 60;
+    }
+    fluid.Component.Reset();
+    for (bool async : {false, true, false, true})
+    {
+        Require(ConsoleModule{}.FindConsoleVariable(L"Render.Fluid.AsyncCompute").SetFromString(async ? "true" : "false"),
+            "Cannot toggle a running fluid simulation");
+        water.SetInstances({fluid}); execute();
+    }
+    size_t buffer = 0;
+    for (const auto& access : water.GetSimulationBufferAccesses())
+        if (access.Usage == GDX12RenderGraph::Mode::ReadWrite &&
+            access.Resource->D3DResource->GetDesc().Width == 2 * sizeof(Particle))
+        {
+            const auto particles = read(*access.Resource);
+            Require(buffer < reference.size() && std::memcmp(particles.data(), reference[buffer].data(), 2 * sizeof(Particle)) == 0,
+                "Queue toggles without reset changed the running fluid state");
+            ++buffer;
+        }
+    Require(buffer == 2, "Running fluid toggle fixture lost its buffers");
     water.SetInstances({}); execute();
     std::cout << "GPU fluid: MGPU cohesion/prediction, pause, 95-percent rebound, fixed substeps and legacy pressure isolation passed.\n";
 }

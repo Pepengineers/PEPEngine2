@@ -83,6 +83,7 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& context)
     _passes->Composition.SetConditionalTransparency(&_passes->Transparency);
     _passes->Composition.SetApplyOpaqueAerialPerspective(false);
     auto& passes = _passes->Bindings.PrimaryPasses;
+    passes.insert(passes.begin(), &_water->Simulation);
     passes.insert(std::find(passes.begin(), passes.end(), &_passes->AO), &_water->Surface);
     passes.insert(std::find(passes.begin(), passes.end(), &_passes->Transparency),
         { &_water->Transparency, &_water->Composition, &_water->Resolve });
@@ -114,6 +115,7 @@ bool BistroRenderPipeline::PrepareFrame(RenderPipelineContext& context, GDX12Com
     _water->Resolve.PrepareFrame();
     _passes->BindAmbientOcclusion(context.Common, _earlyAO);
     _passes->PrepareFrame(context, commands);
+    _passes->Bindings.UseAsyncCompute |= GetFluidControls().AsyncCompute;
     const auto passes = GeometryPasses();
     for (UINT i = 0; i < passes.size(); ++i)
     {
@@ -167,6 +169,7 @@ void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipel
 {
     LinkInputs(inputs);
     auto& p = *_passes;
+    graph.AddPass(_water->Simulation);
     graph.AddPass(p.Environment);
     graph.AddPass(p.Culling);
     auto geometryTail = graph.AddPass(*_geometryJobs.at(0));
