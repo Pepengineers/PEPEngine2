@@ -193,8 +193,8 @@ namespace BistroParticles
         settings.Shape = ParticleShape::Box;
         settings.ShapeExtents = Vector3(BistroWater::HalfExtent.x, 10, BistroWater::HalfExtent.z);
         settings.Acceleration = Vector3(0, -981, 0); settings.Wind = Vector3::Zero; settings.Drag = 0.05f;
-        settings.SizeStart = 2.4f; settings.SizeEnd = 1.2f; settings.AngularVelocity = 0;
-        settings.ColorStart = Vector4(0.8f, 0.95f, 1, 0.12f); settings.ColorEnd = Vector4(0.8f, 0.95f, 1, 0.025f);
+        settings.SizeStart = 2.6f; settings.SizeEnd = 1.5f; settings.AngularVelocity = 0;
+        settings.ColorStart = Vector4(0.65f, 0.85f, 1, 0.32f); settings.ColorEnd = Vector4(0.5f, 0.75f, 1, 0.08f);
         settings.Geometry = ParticleGeometry::WaterDrop;
         settings.Blend = ParticleBlend::WeightedAlpha; settings.DepthCollision = true;
         settings.CollisionRestitution = 0.05f;

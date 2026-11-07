@@ -225,8 +225,9 @@ The pixel shader samples that frame's cell from the packed texture.
 
 `ParticleGeometry::WaterDrop` keeps the six-vertex billboard path and all three
 blend modes. It draws a 2.5x vertical droplet silhouette with spherical normals,
-water IOR 1.333 Fresnel reflectance and a small specular highlight. Use low-alpha
-cool tint and WeightedAlpha for rain; the material has no additive emission.
+water IOR 1.333 Fresnel reflectance, stepped blue shading, a dark blue rim and
+a bright highlight. WeightedAlpha preserves semi-transparency without additive
+emission. The core retains 70% of authored alpha instead of becoming invisible.
 Culling includes the elongated silhouette. Transmission uses alpha compositing,
 not a scene-color refraction lookup; large close-up lenses need a different path.
 

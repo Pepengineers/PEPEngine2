@@ -492,9 +492,13 @@ int main(int argc, char** argv)
         {
             emitter.Geometry = geometry;
             emitter.BurstTotal = geometry == ParticleGeometry::WaterDrop ? 1 : 16;
-            emitter.ColorStart = emitter.ColorEnd = geometry == ParticleGeometry::WaterDrop ? Vector4(.8f,.95f,1,.12f) : Vector4::One;
+            emitter.ColorStart = emitter.ColorEnd = geometry == ParticleGeometry::WaterDrop ? Vector4(.65f,.85f,1,.32f) : Vector4::One;
             for (auto blend : {ParticleBlend::WeightedAlpha, ParticleBlend::Additive, ParticleBlend::SortedAlpha})
             {
+                list = queue->GetCommandList();
+                list->ResourceBarrier({accum->GetResource()->GetRenderTargetBarrier()});
+                list->ClearRenderTargetView(accum.get());
+                queue->ExecuteCommandList(list); queue->Flush();
                 emitter.Blend = blend; ++emitter.ResetRevision; resources.ParticleEmitters = {emitter};
                 const auto before = Read(device, *hdr);
                 executeParticles(particles); list = queue->GetCommandList(); particles.Composite(list, hdr.get());
@@ -511,7 +515,14 @@ int main(int argc, char** argv)
                 {
                     const auto coverage = Read(device, *resources.ParticleMotion, 3);
                     const float opacity = *std::max_element(coverage.begin(), coverage.end());
-                    Require(opacity > 0 && opacity < .11f, "Water drops must render with Fresnel transparency in every blend path");
+                    Require(opacity > .18f && opacity < .32f, "Stylized water drops must stay visible and semi-transparent in every blend path");
+                    if (blend == ParticleBlend::WeightedAlpha)
+                    {
+                        const auto rgb = Read(device, *accum);
+                        double red = 0, blue = 0;
+                        for (size_t i = 0; i < rgb.size(); i += 3) { red += rgb[i]; blue += rgb[i+2]; }
+                        Require(blue > 2 * red, "Water drops must retain the saturated blue palette");
+                    }
                 }
             }
         }

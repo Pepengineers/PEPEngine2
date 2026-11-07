@@ -155,8 +155,8 @@ namespace BistroWater
             settings.ViscosityCm2PerSecond = 0;
             settings.Restitution = 0.95f;
             settings.FilterRadiusPixels = 6;
-            settings.AbsorptionPerCm = {0.008f,0.002f,0.001f};
-            settings.ScatteringColor = {0.02f,0.12f,0.16f};
+            settings.AbsorptionPerCm = {0.02f,0.006f,0.0015f};
+            settings.ScatteringColor = {0.015f,0.18f,0.45f};
             _source.SetSettings(settings);
             // Same two-pass spawn sizing as HybridParticleApp::RecreateFluidEmitter.
             const auto spawnSize = [&](UINT count)

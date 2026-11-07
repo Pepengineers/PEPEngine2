@@ -108,13 +108,14 @@ float4 Shade(VertexOutput input)
         float radius = length(p);
         float coverage = 1 - smoothstep(1 - max(fwidth(radius), 0.001f), 1, radius);
         float3 normal = float3(p, sqrt(saturate(1 - dot(p,p))));
-        // Water IOR 1.333: Schlick reflectance and a spherical highlight, without emission.
         float fresnel = 0.02037f + 0.97963f * pow(1 - normal.z, 5);
-        float highlight = pow(saturate(dot(normal, normalize(float3(-.4f,.65f,.65f)))), 64);
-        float3 sky = lerp(float3(.04f,.10f,.14f), float3(.65f,.8f,1), saturate(normal.y * .5f + .5f));
+        float light = saturate(dot(normal, normalize(float3(-.4f,.65f,.65f))));
+        float3 fill = light > .65f ? float3(.18f,.65f,1) :
+            light > .15f ? float3(.04f,.38f,.9f) : float3(.025f,.14f,.58f);
+        float3 paint = lerp(fill, float3(.015f,.08f,.32f), smoothstep(.8f,.98f,radius) * .75f);
+        paint = lerp(paint, float3(.8f,.95f,1), smoothstep(.96f,.995f,light));
         // shortcut: alpha transmits the scene; add lens refraction if large close-up drops are needed.
-        material = float4(sky * (.15f + .85f * fresnel) + highlight,
-            coverage * (.15f + .85f * fresnel));
+        material = float4(paint, coverage * (.7f + .3f * fresnel));
     }
     else if (draw.Geometry == ParticleGeometryFirefly)
     {

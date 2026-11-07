@@ -111,9 +111,11 @@ via the App's `Config/Engine.ini`. Particles are never periodically respawned.
 
 `BistroSparkRain` uses non-emissive, weighted-alpha `WaterDrop` billboards above
 the matching pool footprint. They are elongated along the fall, use spherical
-normals and water Fresnel reflectance, and have low opacity rather than pink
-additive emission. Alpha transmission is an approximation; these small drops do
-not sample scene color for lens refraction. Their original budget share and the
+normals, stepped blue anime-style shading, a blue rim and a bright highlight.
+Authored alpha fades from 0.32 to 0.08, keeping rain visible while semi-transparent.
+Pool absorption/scattering uses a matching blue tint without changing simulation.
+Alpha transmission is an approximation; these small drops do not sample scene
+color for lens refraction. Their original budget share and the
 500000 total ordinary-particle budget remain unchanged.
 
 | Field | Default | Units and accepted range |
