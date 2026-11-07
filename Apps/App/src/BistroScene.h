@@ -187,7 +187,7 @@ namespace BistroParticles
         create("BistroTableSteam", {550, 130, -350}, 1, settings);
 
         settings = {};
-        settings.LifetimeMin = 0.65f; settings.LifetimeMax = 0.95f;
+        settings.LifetimeMin = 1.4f; settings.LifetimeMax = 1.7f;
         settings.Direction = Vector3(0, -1, 0); settings.ConeAngleDegrees = 0;
         settings.SpeedMin = 300; settings.SpeedMax = 450;
         settings.Shape = ParticleShape::Box;
@@ -198,7 +198,7 @@ namespace BistroParticles
         settings.Geometry = ParticleGeometry::WaterDrop;
         settings.Blend = ParticleBlend::WeightedAlpha; settings.DepthCollision = true;
         settings.CollisionRestitution = 0.05f;
-        auto rain = create("BistroSparkRain", BistroWater::Center + Vector3(0, 300, 0), 1, settings);
+        auto rain = create("BistroSparkRain", BistroWater::Center + Vector3(0, 1000, 0), 1, settings);
         rain.GetComponent<TransformComponent>().Rotation.y = BistroWater::YawDegrees;
         if (weightSum != 16) throw std::logic_error("Bistro particle weights must sum to 16");
         Update(world);

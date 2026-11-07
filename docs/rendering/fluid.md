@@ -104,7 +104,7 @@ The virtual side walls extend above the stone rim; this remains a contained wave
 effect, without physical overflow onto the street.
 The corresponding mean resting depth is approximately 61 cm (30 cm at scale 1).
 The horizontal footprint and mirrored MGPU dynamics are unchanged. The pool and
-its Rain emitter sit 3 m closer to the Bistro entrance along the side street.
+its Rain emitter sit 6 m closer to the Bistro entrance along the side street.
 `App.Water.ParticleRadius` defaults to 0.15 ([0.01,0.2] raw units), 1.5 times the
 previous draw radius. It enlarges the rendered volume without retuning SPH kernels.
 
@@ -117,7 +117,9 @@ Zero acceleration disables the periodic drive. These controls are startup-only
 via the App's `Config/Engine.ini`. Particles are never periodically respawned.
 
 `BistroSparkRain` uses non-emissive, weighted-alpha `WaterDrop` billboards above
-the matching pool footprint. They are elongated along the fall, use spherical
+the matching pool footprint, emitted 10 m above the basin center. Their lifetime
+is 1.4–1.7 s so even the slowest drops reach the basin from the raised source.
+They are elongated along the fall, use spherical
 normals, stepped blue anime-style shading, a blue rim and a bright highlight.
 Authored alpha fades from 0.32 to 0.08, keeping rain visible while semi-transparent.
 Pool absorption/scattering uses a matching blue tint without changing simulation.

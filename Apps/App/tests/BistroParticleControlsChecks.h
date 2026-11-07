@@ -55,7 +55,8 @@ inline void CheckBistroParticleControls()
                 settings.ColorStart.w >= .3f && settings.ColorStart.w <= .5f && settings.ColorStart.z > settings.ColorStart.x &&
                 settings.ColorEnd.w > 0 && settings.AngularVelocity == 0,
                 "Rain must use visible semi-transparent blue water drops instead of emissive pink discs");
-            require(transform.Location == BistroWater::Center + Vector3(0,300,0) &&
+            require(transform.Location == BistroWater::Center + Vector3(0,1000,0) &&
+                settings.LifetimeMin >= 1.4f && settings.LifetimeMax >= settings.LifetimeMin &&
                 transform.Rotation.y == BistroWater::YawDegrees &&
                 settings.ShapeExtents == Vector3(BistroWater::HalfExtent.x,10,BistroWater::HalfExtent.z) &&
                 settings.Simulation == ParticleSimulation::SemiImplicitEuler &&

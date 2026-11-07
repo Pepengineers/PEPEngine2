@@ -392,7 +392,8 @@ int main(int argc, char** argv)
                     if (emitter.IsEnabled()) budget += settings.MaxParticles;
                     if (name.value != "BistroSparkRain") return;
                     Require(emitter.IsEnabled() && emitter.GetBurstTotal() > 0, "Overhead Rain must be restored");
-                    Require(transform.Location == BistroWater::Center + Vector3(0,300,0) &&
+                    Require(transform.Location == BistroWater::Center + Vector3(0,1000,0) &&
+                        settings.LifetimeMin >= 1.4f && settings.LifetimeMax >= settings.LifetimeMin &&
                         transform.Rotation.y == BistroWater::YawDegrees &&
                         settings.ShapeExtents == Vector3(BistroWater::HalfExtent.x,10,BistroWater::HalfExtent.z) &&
                         settings.Simulation == ParticleSimulation::SemiImplicitEuler,
