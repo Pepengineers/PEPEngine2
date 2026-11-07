@@ -1,0 +1,972 @@
+{
+  "baseline_ms": [
+    64.4722,
+    78.3013,
+    68.7608
+  ],
+  "median_baseline_ms": 68.7608,
+  "frame": {
+    "mean": 86.22234422222222,
+    "p50": 74.56020000000001,
+    "p95": 110.6902,
+    "min": 55.4906,
+    "max": 581.3301
+  },
+  "physics": {
+    "requested_s": 78.2293107,
+    "simulated_s": 41.78333333333333,
+    "ticks": 2507.0,
+    "debt_start_s": 2.31152,
+    "debt_end_s": 38.7575,
+    "wall_limit_frames": 900.0,
+    "jolt_ms_per_tick": 6.085601515755883
+  },
+  "scopes": {
+    "active_bodies": {
+      "mean": 646.1022222222222,
+      "p50": 840.5,
+      "p95": 947.0,
+      "min": 69.0,
+      "max": 947.0
+    },
+    "begin_frame": {
+      "mean": 6.316140333333333,
+      "p50": 6.14775,
+      "p95": 8.4699,
+      "min": 4.7847,
+      "max": 14.6948
+    },
+    "common_prepare": {
+      "mean": 19.905106666666665,
+      "p50": 19.563000000000002,
+      "p95": 25.1106,
+      "min": 14.9505,
+      "max": 40.6789
+    },
+    "debt_ms": {
+      "mean": 21184.832866666668,
+      "p50": 17876.85,
+      "p95": 37051.5,
+      "min": 2358.28,
+      "max": 38757.5
+    },
+    "ecs_gpu_data": {
+      "mean": 0.733425,
+      "p50": 0.6047,
+      "p95": 1.4698,
+      "min": 0.2236,
+      "max": 1.9587
+    },
+    "ecs_movement": {
+      "mean": 1.5093982222222222,
+      "p50": 1.4541,
+      "p95": 2.2003,
+      "min": 1.0914,
+      "max": 2.9709
+    },
+    "frame_delta_ms": {
+      "mean": 86.92145522222222,
+      "p50": 75.2428,
+      "p95": 111.436,
+      "min": 56.0518,
+      "max": 582.087
+    },
+    "gpu_elapsed": {
+      "mean": 58.38447844444445,
+      "p50": 46.30785,
+      "p95": 52.7196,
+      "min": 42.4786,
+      "max": 633.582
+    },
+    "graph_total": {
+      "mean": 16.97195111111111,
+      "p50": 16.420749999999998,
+      "p95": 24.3513,
+      "min": 9.6642,
+      "max": 39.4784
+    },
+    "grass_collect": {
+      "mean": 0.057091666666666666,
+      "p50": 0.0541,
+      "p95": 0.0827,
+      "min": 0.0346,
+      "max": 0.3066
+    },
+    "grass_prepare": {
+      "mean": 0.19659566666666667,
+      "p50": 0.17980000000000002,
+      "p95": 0.2731,
+      "min": 0.1329,
+      "max": 5.1177
+    },
+    "grass_views": {
+      "mean": 1.0320957777777777,
+      "p50": 0.99265,
+      "p95": 1.4675,
+      "min": 0.6124,
+      "max": 2.5471
+    },
+    "jolt": {
+      "mean": 16.95178111111111,
+      "p50": 16.0148,
+      "p95": 26.3939,
+      "min": 10.2703,
+      "max": 43.6348
+    },
+    "particle_collect": {
+      "mean": 0.03447488888888889,
+      "p50": 0.0327,
+      "p95": 0.0491,
+      "min": 0.0235,
+      "max": 0.1588
+    },
+    "pass:Ambient occlusion": {
+      "mean": 0.06809366666666666,
+      "p50": 0.06575,
+      "p95": 0.0949,
+      "min": 0.0497,
+      "max": 0.1857
+    },
+    "pass:Bistro depth grass": {
+      "mean": 0.0018784444444444445,
+      "p50": 0.0017,
+      "p95": 0.0026,
+      "min": 0.0012,
+      "max": 0.0188
+    },
+    "pass:Bistro depth meshes": {
+      "mean": 0.10223255555555555,
+      "p50": 0.0981,
+      "p95": 0.1389,
+      "min": 0.0514,
+      "max": 0.2742
+    },
+    "pass:Bistro grass simulation": {
+      "mean": 0.06000711111111111,
+      "p50": 0.0568,
+      "p95": 0.0883,
+      "min": 0.042,
+      "max": 0.394
+    },
+    "pass:Clustered deferred lighting": {
+      "mean": 0.033063444444444444,
+      "p50": 0.03135,
+      "p95": 0.0491,
+      "min": 0.022,
+      "max": 0.1467
+    },
+    "pass:Conditional composition": {
+      "mean": 0.03052222222222222,
+      "p50": 0.0287,
+      "p95": 0.0455,
+      "min": 0.0213,
+      "max": 0.2132
+    },
+    "pass:Culling": {
+      "mean": 0.034354,
+      "p50": 0.0323,
+      "p95": 0.0502,
+      "min": 0.0244,
+      "max": 0.0991
+    },
+    "pass:Depth of field": {
+      "mean": 0.09726488888888889,
+      "p50": 0.09384999999999999,
+      "p95": 0.1346,
+      "min": 0.0727,
+      "max": 0.3286
+    },
+    "pass:Environment": {
+      "mean": 0.014273555555555555,
+      "p50": 0.0135,
+      "p95": 0.02,
+      "min": 0.0099,
+      "max": 0.0474
+    },
+    "pass:Far transparency": {
+      "mean": 0.07304588888888888,
+      "p50": 0.07005,
+      "p95": 0.1045,
+      "min": 0.0511,
+      "max": 0.3061
+    },
+    "pass:Fluid resolve": {
+      "mean": 0.035006888888888886,
+      "p50": 0.0332,
+      "p95": 0.0497,
+      "min": 0.024,
+      "max": 0.181
+    },
+    "pass:Fluid simulation": {
+      "mean": 1.2163038888888889,
+      "p50": 1.17635,
+      "p95": 1.6197,
+      "min": 0.8802,
+      "max": 4.2883
+    },
+    "pass:Fluid surface": {
+      "mean": 0.13726288888888888,
+      "p50": 0.13225,
+      "p95": 0.1947,
+      "min": 0.0926,
+      "max": 0.578
+    },
+    "pass:Frame generation inputs": {
+      "mean": 0.001509111111111111,
+      "p50": 0.0014,
+      "p95": 0.0022,
+      "min": 0.0009,
+      "max": 0.0181
+    },
+    "pass:GBuffer": {
+      "mean": 0.06415255555555556,
+      "p50": 0.0616,
+      "p95": 0.0907,
+      "min": 0.0417,
+      "max": 0.2591
+    },
+    "pass:Local shadows": {
+      "mean": 11.760962,
+      "p50": 11.36795,
+      "p95": 17.5876,
+      "min": 5.9231,
+      "max": 30.1769
+    },
+    "pass:Motion blur": {
+      "mean": 0.047232111111111114,
+      "p50": 0.0454,
+      "p95": 0.0635,
+      "min": 0.0347,
+      "max": 0.4848
+    },
+    "pass:Near transparency": {
+      "mean": 0.056078444444444445,
+      "p50": 0.0542,
+      "p95": 0.0821,
+      "min": 0.0401,
+      "max": 0.2041
+    },
+    "pass:Particle simulation": {
+      "mean": 0.48908033333333334,
+      "p50": 0.47795,
+      "p95": 0.6423,
+      "min": 0.3477,
+      "max": 1.3823
+    },
+    "pass:Particles": {
+      "mean": 0.22249044444444444,
+      "p50": 0.2162,
+      "p95": 0.2919,
+      "min": 0.1602,
+      "max": 0.6322
+    },
+    "pass:Reconstruction": {
+      "mean": 0.2548183333333333,
+      "p50": 0.244,
+      "p95": 0.3359,
+      "min": 0.1926,
+      "max": 0.898
+    },
+    "pass:Reflection probe meshes": {
+      "mean": 0.03695277777777778,
+      "p50": 0.0352,
+      "p95": 0.0556,
+      "min": 0.0257,
+      "max": 0.1252
+    },
+    "pass:Reflection probes": {
+      "mean": 0.009395,
+      "p50": 0.0092,
+      "p95": 0.0128,
+      "min": 0.0065,
+      "max": 0.0449
+    },
+    "pass:Screen-space reflections": {
+      "mean": 0.32820577777777776,
+      "p50": 0.31505,
+      "p95": 0.4505,
+      "min": 0.245,
+      "max": 1.0507
+    },
+    "pass:Sun shadows": {
+      "mean": 0.305143,
+      "p50": 0.2914,
+      "p95": 0.4305,
+      "min": 0.2103,
+      "max": 3.422
+    },
+    "pass:Tone map": {
+      "mean": 0.02077588888888889,
+      "p50": 0.0198,
+      "p95": 0.0301,
+      "min": 0.0146,
+      "max": 0.0732
+    },
+    "pass:Transparency composition": {
+      "mean": 0.019288777777777776,
+      "p50": 0.0185,
+      "p95": 0.0275,
+      "min": 0.0137,
+      "max": 0.0835
+    },
+    "physics": {
+      "mean": 21.502559555555557,
+      "p50": 20.4745,
+      "p95": 30.387,
+      "min": 16.6833,
+      "max": 46.0483
+    },
+    "pipeline_prepare": {
+      "mean": 21.276054555555554,
+      "p50": 20.90505,
+      "p95": 26.8451,
+      "min": 15.8312,
+      "max": 44.1379
+    },
+    "prepare_depth": {
+      "mean": 0.005514666666666667,
+      "p50": 0.0051,
+      "p95": 0.0086,
+      "min": 0.0026,
+      "max": 0.0205
+    },
+    "prepare_lighting": {
+      "mean": 1.4988882222222222,
+      "p50": 1.43885,
+      "p95": 2.351,
+      "min": 0.372,
+      "max": 5.8994
+    },
+    "prepare_local": {
+      "mean": 0.777532,
+      "p50": 0.7526999999999999,
+      "p95": 1.1819,
+      "min": 0.5534,
+      "max": 1.5544
+    },
+    "prepare_local_data": {
+      "mean": 0.0014127777777777778,
+      "p50": 0.0012,
+      "p95": 0.0021,
+      "min": 0.0008,
+      "max": 0.071
+    },
+    "prepare_opaque": {
+      "mean": 0.0030444444444444442,
+      "p50": 0.0027,
+      "p95": 0.0041,
+      "min": 0.0017,
+      "max": 0.0998
+    },
+    "prepare_probes": {
+      "mean": 0.016721555555555555,
+      "p50": 0.0161,
+      "p95": 0.023,
+      "min": 0.0117,
+      "max": 0.1275
+    },
+    "prepare_sun": {
+      "mean": 0.005075666666666667,
+      "p50": 0.0049,
+      "p95": 0.0074,
+      "min": 0.0033,
+      "max": 0.01
+    },
+    "present": {
+      "mean": 11.014763888888888,
+      "p50": 0.31675,
+      "p95": 0.5381,
+      "min": 0.2174,
+      "max": 512.929
+    },
+    "render_module": {
+      "mean": 55.75481033333333,
+      "p50": 44.81205,
+      "p95": 69.611,
+      "min": 31.1487,
+      "max": 554.62
+    },
+    "render_total": {
+      "mean": 55.76691944444445,
+      "p50": 44.8262,
+      "p95": 69.6274,
+      "min": 31.1618,
+      "max": 554.639
+    },
+    "render_update": {
+      "mean": 0.03197822222222222,
+      "p50": 0.0309,
+      "p95": 0.0491,
+      "min": 0.0175,
+      "max": 0.1845
+    },
+    "requested_ms": {
+      "mean": 86.92145633333334,
+      "p50": 75.2428,
+      "p95": 111.436,
+      "min": 56.0518,
+      "max": 582.087
+    },
+    "scene_additions": {
+      "mean": 0.1554058888888889,
+      "p50": 0.13745000000000002,
+      "p95": 0.2449,
+      "min": 0.0948,
+      "max": 0.2986
+    },
+    "scene_snapshot": {
+      "mean": 14.417440888888889,
+      "p50": 14.254249999999999,
+      "p95": 17.9536,
+      "min": 10.7303,
+      "max": 26.4097
+    },
+    "skeletal_prepare": {
+      "mean": 5.353608777777778,
+      "p50": 5.29845,
+      "p95": 6.552,
+      "min": 3.8592,
+      "max": 8.0589
+    },
+    "snapshot_aggregate": {
+      "mean": 7.851794444444445,
+      "p50": 7.7576,
+      "p95": 9.9222,
+      "min": 5.7326,
+      "max": 15.269
+    },
+    "snapshot_extract": {
+      "mean": 6.305438333333333,
+      "p50": 6.17925,
+      "p95": 7.8985,
+      "min": 4.8062,
+      "max": 10.6886
+    },
+    "swapchain_begin": {
+      "mean": 0.025396111111111112,
+      "p50": 0.0244,
+      "p95": 0.0421,
+      "min": 0.0106,
+      "max": 0.2308
+    },
+    "ticks": {
+      "mean": 2.7855555555555553,
+      "p50": 3.0,
+      "p95": 5.0,
+      "min": 1.0,
+      "max": 6.0
+    },
+    "total_bodies": {
+      "mean": 950.0,
+      "p50": 950.0,
+      "p95": 950.0,
+      "min": 950.0,
+      "max": 950.0
+    },
+    "ui_begin": {
+      "mean": 6.275070666666666,
+      "p50": 6.1071,
+      "p95": 8.415,
+      "min": 4.7651,
+      "max": 14.6218
+    },
+    "ui_render": {
+      "mean": 0.04994244444444444,
+      "p50": 0.04765,
+      "p95": 0.0695,
+      "min": 0.0375,
+      "max": 0.1785
+    },
+    "update_total": {
+      "mean": 30.45542477777778,
+      "p50": 29.28025,
+      "p95": 40.9173,
+      "min": 23.5076,
+      "max": 55.982
+    },
+    "visibility_wait": {
+      "mean": 0.3545607777777778,
+      "p50": 0.34985,
+      "p95": 0.8366,
+      "min": 0.0006,
+      "max": 1.7471
+    },
+    "wall_limit": {
+      "mean": 1.0,
+      "p50": 1.0,
+      "p95": 1.0,
+      "min": 1.0,
+      "max": 1.0
+    },
+    "water_collect": {
+      "mean": 0.021014111111111112,
+      "p50": 0.02,
+      "p95": 0.0287,
+      "min": 0.016,
+      "max": 0.0999
+    },
+    "water_prepare": {
+      "mean": 0.021249444444444446,
+      "p50": 0.0203,
+      "p95": 0.0286,
+      "min": 0.0165,
+      "max": 0.0695
+    }
+  },
+  "windows": [
+    {
+      "first_frame": 121,
+      "frame_ms": 97.392075,
+      "jolt_per_tick_ms": 4.199998390151515,
+      "gpu_ms": 81.010652
+    },
+    {
+      "first_frame": 421,
+      "frame_ms": 79.64098866666667,
+      "jolt_per_tick_ms": 6.959821716514955,
+      "gpu_ms": 46.696809
+    },
+    {
+      "first_frame": 721,
+      "frame_ms": 81.633969,
+      "jolt_per_tick_ms": 8.019504105571848,
+      "gpu_ms": 47.44597433333333
+    }
+  ],
+  "current": {
+    "commit": "79c8f3b",
+    "frame_ms": [
+      68.5109,
+      71.4788,
+      71.1283
+    ],
+    "median_ms": 71.1283,
+    "fps_from_median": 14.059101651522672,
+    "saving_needed_ms": 21.128299999999996,
+    "saving_needed_percent": 29.70449174238664
+  },
+  "profile_commit": "17355a1",
+  "profile_character_seed": 12345,
+  "ordinary_character_seed": "random_device; not frozen",
+  "ordinary_runs": [
+    {
+      "tag": "head-Debug20Baseline-1",
+      "sample": {
+        "initialize_seconds": 31.5114,
+        "ready_seconds": 41.6151,
+        "budget_mib": 1024,
+        "import_seconds": 1.27923,
+        "texture_seconds": 2.95153,
+        "publish_seconds": 20.4752,
+        "prepared_textures": 308,
+        "max_import_tasks": 1,
+        "max_texture_tasks": 16,
+        "sampled_frames": 300,
+        "warmup_frames": 120,
+        "physics_count_scale": 1,
+        "particle_count_scale": 2,
+        "particle_budget": 500000,
+        "frame_ms": 64.4722,
+        "graph_passes": 27,
+        "graph_culled_passes": 0,
+        "graph_logical_textures": 16,
+        "graph_physical_textures": 10,
+        "graph_logical_bytes": 69074944,
+        "graph_physical_bytes": 42205184,
+        "gpu_allocation_count": 1015,
+        "gpu_block_count": 514,
+        "gpu_allocation_bytes": 3540721664,
+        "gpu_block_bytes": 3672440832,
+        "working_set_bytes": 2282012672,
+        "private_bytes": 6078074880,
+        "peak_working_set_bytes": 4725645312,
+        "peak_commit_bytes": 7629312000
+      },
+      "state": {
+        "status": "passed",
+        "stdout": "D:\\Project\\PEPEngine2\\Build\\Debug20FPS-20261108\\head-Debug20Baseline-1.state.stdout.log",
+        "stderr": "D:\\Project\\PEPEngine2\\Build\\Debug20FPS-20261108\\head-Debug20Baseline-1.state.stderr.log",
+        "fingerprints_before": {
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20Baseline.exe": "e7fad2cf224895a9e988c28868fc8574abba4391d80a0e6ba8930f22a2281b36",
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+        },
+        "pid": 9464,
+        "elapsed_s": 69.79,
+        "child_exit_code": 0,
+        "fingerprints_after": {
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20Baseline.exe": "e7fad2cf224895a9e988c28868fc8574abba4391d80a0e6ba8930f22a2281b36",
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+        }
+      },
+      "telemetry": [
+        {
+          "phase": "before",
+          "value": "52, 210 MHz, 405 MHz, 10.12 W, 0 %",
+          "returncode": 0
+        },
+        {
+          "phase": "after",
+          "value": "70, 2010 MHz, 7151 MHz, 36.21 W, 0 %",
+          "returncode": 0
+        }
+      ]
+    },
+    {
+      "tag": "head-Debug20Baseline-2",
+      "sample": {
+        "initialize_seconds": 33.0623,
+        "ready_seconds": 38.3845,
+        "budget_mib": 1024,
+        "import_seconds": 1.28764,
+        "texture_seconds": 2.61967,
+        "publish_seconds": 21.6115,
+        "prepared_textures": 308,
+        "max_import_tasks": 1,
+        "max_texture_tasks": 16,
+        "sampled_frames": 300,
+        "warmup_frames": 120,
+        "physics_count_scale": 1,
+        "particle_count_scale": 2,
+        "particle_budget": 500000,
+        "frame_ms": 78.3013,
+        "graph_passes": 27,
+        "graph_culled_passes": 0,
+        "graph_logical_textures": 16,
+        "graph_physical_textures": 10,
+        "graph_logical_bytes": 69074944,
+        "graph_physical_bytes": 42205184,
+        "gpu_allocation_count": 1015,
+        "gpu_block_count": 513,
+        "gpu_allocation_bytes": 3540721664,
+        "gpu_block_bytes": 3605331968,
+        "working_set_bytes": 3717959680,
+        "private_bytes": 6031335424,
+        "peak_working_set_bytes": 4720762880,
+        "peak_commit_bytes": 7626989568
+      },
+      "state": {
+        "status": "passed",
+        "stdout": "D:\\Project\\PEPEngine2\\Build\\Debug20FPS-20261108\\head-Debug20Baseline-2.state.stdout.log",
+        "stderr": "D:\\Project\\PEPEngine2\\Build\\Debug20FPS-20261108\\head-Debug20Baseline-2.state.stderr.log",
+        "fingerprints_before": {
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20Baseline.exe": "e7fad2cf224895a9e988c28868fc8574abba4391d80a0e6ba8930f22a2281b36",
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+        },
+        "pid": 8732,
+        "elapsed_s": 69.8,
+        "child_exit_code": 0,
+        "fingerprints_after": {
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20Baseline.exe": "e7fad2cf224895a9e988c28868fc8574abba4391d80a0e6ba8930f22a2281b36",
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+        }
+      },
+      "telemetry": [
+        {
+          "phase": "before",
+          "value": "70, 2010 MHz, 7151 MHz, 36.21 W, 0 %",
+          "returncode": 0
+        },
+        {
+          "phase": "after",
+          "value": "76, 2040 MHz, 7151 MHz, 41.72 W, 0 %",
+          "returncode": 0
+        }
+      ]
+    },
+    {
+      "tag": "head-Debug20Baseline-3",
+      "sample": {
+        "initialize_seconds": 26.6002,
+        "ready_seconds": 32.3238,
+        "budget_mib": 1024,
+        "import_seconds": 1.28532,
+        "texture_seconds": 2.58423,
+        "publish_seconds": 16.683,
+        "prepared_textures": 308,
+        "max_import_tasks": 1,
+        "max_texture_tasks": 16,
+        "sampled_frames": 300,
+        "warmup_frames": 120,
+        "physics_count_scale": 1,
+        "particle_count_scale": 2,
+        "particle_budget": 500000,
+        "frame_ms": 68.7608,
+        "graph_passes": 27,
+        "graph_culled_passes": 0,
+        "graph_logical_textures": 16,
+        "graph_physical_textures": 10,
+        "graph_logical_bytes": 69074944,
+        "graph_physical_bytes": 42205184,
+        "gpu_allocation_count": 1015,
+        "gpu_block_count": 514,
+        "gpu_allocation_bytes": 3540721664,
+        "gpu_block_bytes": 3672440832,
+        "working_set_bytes": 2292125696,
+        "private_bytes": 6102667264,
+        "peak_working_set_bytes": 4724318208,
+        "peak_commit_bytes": 7641542656
+      },
+      "state": {
+        "status": "passed",
+        "stdout": "D:\\Project\\PEPEngine2\\Build\\Debug20FPS-20261108\\head-Debug20Baseline-3.state.stdout.log",
+        "stderr": "D:\\Project\\PEPEngine2\\Build\\Debug20FPS-20261108\\head-Debug20Baseline-3.state.stderr.log",
+        "fingerprints_before": {
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20Baseline.exe": "e7fad2cf224895a9e988c28868fc8574abba4391d80a0e6ba8930f22a2281b36",
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+        },
+        "pid": 29128,
+        "elapsed_s": 61.95,
+        "child_exit_code": 0,
+        "fingerprints_after": {
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20Baseline.exe": "e7fad2cf224895a9e988c28868fc8574abba4391d80a0e6ba8930f22a2281b36",
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+        }
+      },
+      "telemetry": [
+        {
+          "phase": "before",
+          "value": "76, 2040 MHz, 7151 MHz, 41.72 W, 0 %",
+          "returncode": 0
+        },
+        {
+          "phase": "after",
+          "value": "79, 2040 MHz, 7151 MHz, 55.00 W, 0 %",
+          "returncode": 0
+        }
+      ]
+    },
+    {
+      "tag": "current-Debug20Current-1",
+      "sample": {
+        "initialize_seconds": 29.0304,
+        "ready_seconds": 36.4827,
+        "budget_mib": 1024,
+        "import_seconds": 1.30889,
+        "texture_seconds": 3.00986,
+        "publish_seconds": 16.5535,
+        "prepared_textures": 308,
+        "max_import_tasks": 1,
+        "max_texture_tasks": 16,
+        "sampled_frames": 300,
+        "warmup_frames": 120,
+        "physics_count_scale": 1,
+        "particle_count_scale": 2,
+        "particle_budget": 500000,
+        "frame_ms": 68.5109,
+        "graph_passes": 27,
+        "graph_culled_passes": 0,
+        "graph_logical_textures": 16,
+        "graph_physical_textures": 10,
+        "graph_logical_bytes": 69074944,
+        "graph_physical_bytes": 42205184,
+        "gpu_allocation_count": 1015,
+        "gpu_block_count": 514,
+        "gpu_allocation_bytes": 3540721664,
+        "gpu_block_bytes": 3672440832,
+        "working_set_bytes": 2375516160,
+        "private_bytes": 6215258112,
+        "peak_working_set_bytes": 5006061568,
+        "peak_commit_bytes": 7994187776
+      },
+      "state": {
+        "status": "passed",
+        "stdout": "D:\\Project\\PEPEngine2\\Build\\Debug20FPS-20261108\\current-Debug20Current-1.state.stdout.log",
+        "stderr": "D:\\Project\\PEPEngine2\\Build\\Debug20FPS-20261108\\current-Debug20Current-1.state.stderr.log",
+        "fingerprints_before": {
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20Current.exe": "1a606367893e67b1acb528762b9f060966a25ca075d191857dc0922ef83c4b4b",
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+        },
+        "pid": 32220,
+        "elapsed_s": 66.06,
+        "child_exit_code": 0,
+        "fingerprints_after": {
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20Current.exe": "1a606367893e67b1acb528762b9f060966a25ca075d191857dc0922ef83c4b4b",
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+        }
+      },
+      "telemetry": [
+        {
+          "phase": "before",
+          "value": "53, 210 MHz, 405 MHz, 10.13 W, 0 %",
+          "returncode": 0
+        },
+        {
+          "phase": "after",
+          "value": "68, 1927 MHz, 7151 MHz, 32.02 W, 0 %",
+          "returncode": 0
+        }
+      ]
+    },
+    {
+      "tag": "current-Debug20Current-2",
+      "sample": {
+        "initialize_seconds": 27.2492,
+        "ready_seconds": 32.5664,
+        "budget_mib": 1024,
+        "import_seconds": 1.34019,
+        "texture_seconds": 2.75272,
+        "publish_seconds": 16.2742,
+        "prepared_textures": 308,
+        "max_import_tasks": 1,
+        "max_texture_tasks": 16,
+        "sampled_frames": 300,
+        "warmup_frames": 120,
+        "physics_count_scale": 1,
+        "particle_count_scale": 2,
+        "particle_budget": 500000,
+        "frame_ms": 71.4788,
+        "graph_passes": 27,
+        "graph_culled_passes": 0,
+        "graph_logical_textures": 16,
+        "graph_physical_textures": 10,
+        "graph_logical_bytes": 69074944,
+        "graph_physical_bytes": 42205184,
+        "gpu_allocation_count": 1015,
+        "gpu_block_count": 513,
+        "gpu_allocation_bytes": 3540721664,
+        "gpu_block_bytes": 3605331968,
+        "working_set_bytes": 2283479040,
+        "private_bytes": 6016815104,
+        "peak_working_set_bytes": 4728233984,
+        "peak_commit_bytes": 7639265280
+      },
+      "state": {
+        "status": "passed",
+        "stdout": "D:\\Project\\PEPEngine2\\Build\\Debug20FPS-20261108\\current-Debug20Current-2.state.stdout.log",
+        "stderr": "D:\\Project\\PEPEngine2\\Build\\Debug20FPS-20261108\\current-Debug20Current-2.state.stderr.log",
+        "fingerprints_before": {
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20Current.exe": "1a606367893e67b1acb528762b9f060966a25ca075d191857dc0922ef83c4b4b",
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+        },
+        "pid": 27696,
+        "elapsed_s": 63.14,
+        "child_exit_code": 0,
+        "fingerprints_after": {
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20Current.exe": "1a606367893e67b1acb528762b9f060966a25ca075d191857dc0922ef83c4b4b",
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+        }
+      },
+      "telemetry": [
+        {
+          "phase": "before",
+          "value": "68, 1927 MHz, 7151 MHz, 32.02 W, 0 %",
+          "returncode": 0
+        },
+        {
+          "phase": "after",
+          "value": "74, 2055 MHz, 7151 MHz, 41.63 W, 1 %",
+          "returncode": 0
+        }
+      ]
+    },
+    {
+      "tag": "current-Debug20Current-3",
+      "sample": {
+        "initialize_seconds": 26.5932,
+        "ready_seconds": 32.1529,
+        "budget_mib": 1024,
+        "import_seconds": 1.32049,
+        "texture_seconds": 2.80134,
+        "publish_seconds": 16.3114,
+        "prepared_textures": 308,
+        "max_import_tasks": 1,
+        "max_texture_tasks": 16,
+        "sampled_frames": 300,
+        "warmup_frames": 120,
+        "physics_count_scale": 1,
+        "particle_count_scale": 2,
+        "particle_budget": 500000,
+        "frame_ms": 71.1283,
+        "graph_passes": 27,
+        "graph_culled_passes": 0,
+        "graph_logical_textures": 16,
+        "graph_physical_textures": 10,
+        "graph_logical_bytes": 69074944,
+        "graph_physical_bytes": 42205184,
+        "gpu_allocation_count": 1015,
+        "gpu_block_count": 513,
+        "gpu_allocation_bytes": 3540721664,
+        "gpu_block_bytes": 3605331968,
+        "working_set_bytes": 2291097600,
+        "private_bytes": 6040092672,
+        "peak_working_set_bytes": 4722634752,
+        "peak_commit_bytes": 7635349504
+      },
+      "state": {
+        "status": "passed",
+        "stdout": "D:\\Project\\PEPEngine2\\Build\\Debug20FPS-20261108\\current-Debug20Current-3.state.stdout.log",
+        "stderr": "D:\\Project\\PEPEngine2\\Build\\Debug20FPS-20261108\\current-Debug20Current-3.state.stderr.log",
+        "fingerprints_before": {
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20Current.exe": "1a606367893e67b1acb528762b9f060966a25ca075d191857dc0922ef83c4b4b",
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+        },
+        "pid": 8884,
+        "elapsed_s": 62.94,
+        "child_exit_code": 0,
+        "fingerprints_after": {
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20Current.exe": "1a606367893e67b1acb528762b9f060966a25ca075d191857dc0922ef83c4b4b",
+          "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+        }
+      },
+      "telemetry": [
+        {
+          "phase": "before",
+          "value": "74, 2055 MHz, 7151 MHz, 41.63 W, 1 %",
+          "returncode": 0
+        },
+        {
+          "phase": "after",
+          "value": "75, 2055 MHz, 7151 MHz, 41.43 W, 0 %",
+          "returncode": 0
+        }
+      ]
+    }
+  ],
+  "profile_run": {
+    "initialize_seconds": 39.4682,
+    "ready_seconds": 46.7146,
+    "budget_mib": 1024,
+    "import_seconds": 1.32291,
+    "texture_seconds": 2.86842,
+    "publish_seconds": 16.2727,
+    "prepared_textures": 308,
+    "max_import_tasks": 1,
+    "max_texture_tasks": 16,
+    "sampled_frames": 900,
+    "warmup_frames": 120,
+    "physics_count_scale": 1,
+    "particle_count_scale": 2,
+    "particle_budget": 500000,
+    "frame_ms": 86.9711,
+    "graph_passes": 27,
+    "graph_culled_passes": 0,
+    "graph_logical_textures": 16,
+    "graph_physical_textures": 10,
+    "graph_logical_bytes": 69074944,
+    "graph_physical_bytes": 42205184,
+    "gpu_allocation_count": 1015,
+    "gpu_block_count": 514,
+    "gpu_allocation_bytes": 3540721664,
+    "gpu_block_bytes": 3672440832,
+    "working_set_bytes": 3487780864,
+    "private_bytes": 6219726848,
+    "peak_working_set_bytes": 4818468864,
+    "peak_commit_bytes": 7813615616
+  },
+  "profile_state": {
+    "status": "passed",
+    "stdout": "D:\\Project\\PEPEngine2\\Build\\Debug20FPS-20261108\\head-Debug20Profile-1.state.stdout.log",
+    "stderr": "D:\\Project\\PEPEngine2\\Build\\Debug20FPS-20261108\\head-Debug20Profile-1.state.stderr.log",
+    "fingerprints_before": {
+      "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20Profile.exe": "83b5338e403353657946e77dd1dda01121af26e990875327885596fca4507f92",
+      "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+    },
+    "pid": 11104,
+    "elapsed_s": 134.76,
+    "child_exit_code": 0,
+    "fingerprints_after": {
+      "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20Profile.exe": "83b5338e403353657946e77dd1dda01121af26e990875327885596fca4507f92",
+      "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+    }
+  }
+}
