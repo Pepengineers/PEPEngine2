@@ -66,7 +66,7 @@ def geometry():
     basin = np.array(basin).T
     assert not (basin & (~np.array(masks[0]).T | np.array(masks[1]).T)).any(), 'Basin overlaps original scenery or leaves paving'
     ImageDraw.Draw(masks[1]).polygon([tuple(p) for p in pixels], fill=1)
-    return lower, [np.array(m).T for m in masks], digest.hexdigest(), len(floor), len(obstacles)
+    return lower, [np.array(m).T for m in masks], digest.hexdigest(), len(floor), len(obstacles), (center, half, rotation)
 
 
 def curve():
@@ -91,7 +91,7 @@ def curve():
 
 def main():
     OUTPUT.mkdir(parents=True, exist_ok=True)
-    lower, (ground, obstacles), source_hash, floors, blocks = geometry()
+    lower, (ground, obstacles), source_hash, floors, blocks, (basin_center, basin_half, basin_rotation) = geometry()
     points, anchors = curve()
     clearance = distance_transform_edt(ground & ~obstacles) * STEP
     shape = ground.shape
@@ -120,12 +120,26 @@ def main():
             idx = cells(xz)
             failed |= obstacles[idx] | ~ground[idx]
     assert not failed.any(), f'Actor envelope hits scenery at {points[failed][:5].tolist()}'
+    local = (points[:, [0, 2]] - basin_center) @ basin_rotation.T
+    side_clearances = []
+    for sign in (-1, 1):
+        nearby = ((abs(local[:, 0]) < basin_half[0] + 200) &
+                  (sign*local[:, 1] > basin_half[1] + 45) &
+                  (sign*local[:, 1] < basin_half[1] + 300))
+        indices = np.flatnonzero(nearby)
+        runs = np.split(indices, np.flatnonzero(np.diff(indices) > 1) + 1)
+        bypass = next((run for run in runs if len(run) and
+                       local[run, 0].min() < -basin_half[0] and
+                       local[run, 0].max() > basin_half[0]), None)
+        assert bypass is not None, f'Loop does not bypass basin side {sign}'
+        side_clearances.append(float(center_clearance[bypass].min()))
     length = np.linalg.norm(np.diff(points, axis=0), axis=1).sum()
     report = dict(source_sha256=source_hash, anchors=anchors, samples=len(points),
                   floor_triangles=floors, obstacle_triangles=blocks, raster_step_cm=STEP,
                   minimum_raster_clearance_cm=float(center_clearance.min()),
                   actor_envelope_half_width_cm=45, actor_envelope_half_length_cm=65,
                   envelope_collisions=int(failed.sum()), length_m=float(length/100),
+                  basin_bypass_sides=2, basin_side_center_clearance_cm=side_clearances,
                   lap_seconds_at_95_cm_s=float(length/95),
                   limits='Static authoring geometry and one basin; no dynamic obstacle avoidance or foot IK. Raster check, not an exact continuous collision proof.')
     (OUTPUT / 'validation.json').write_text(json.dumps(report, indent=2) + '\n')
@@ -148,6 +162,9 @@ def main():
 
     path = [tuple(pixel(p)) for p in points]
     draw.line(path, fill='#43e4bc', width=4)
+    basin_corners = np.array([[-1, -1], [1, -1], [1, 1], [-1, 1]]) * basin_half @ basin_rotation + basin_center
+    basin_outline = [tuple(pixel(np.array([x, 0, z]))) for x, z in basin_corners]
+    draw.polygon(basin_outline, fill='#285f78', outline='#68c9ed', width=2)
     arc = np.r_[0, np.cumsum(np.linalg.norm(np.diff(points, axis=0), axis=1))]
     for distance in np.arange(700, length, 1800):
         i = int(np.searchsorted(arc, distance))
@@ -159,7 +176,7 @@ def main():
     draw.text((30, 65), 'Схема по исходной геометрии сцены · +X влево, +Z вверх', font=small, fill='#aebbcf')
     x = image.width + 20
     lines = ['Движение по кругу', '', 'Один контур, одно направление.', 'Случайных поворотов нет.', '',
-             'Группы идут колонной:', 'интервал вдоль пути — 1,1 м.', 'Высота — по коллайдеру земли.', '',
+             'Группы идут колонной:', 'интервал вдоль пути — 1,1 м.', 'Бассейн повёрнут на 90°.', 'Обходы с обеих сторон.',
              f'Длина: {length/100:.0f} м', f'Круг при 0,95 м/с: {length/95/60:.1f} мин',
              f'Проверено точек: {len(points):,}', 'Пересечений габарита: 0', '',
              'Зелёный — ось маршрута', 'Жёлтые стрелки — направление', 'Серый — покрытие', 'Тёмный — препятствия / здания', '',
@@ -170,6 +187,10 @@ def main():
     draw.text((x, 925), '10 м', font=small, fill='white')
     destination = ROOT / 'docs/reports/2026-11-08-bistro-people-loop.png'
     canvas.save(destination)
+    pool_pixel = pixel(np.array([basin_center[0], 0, basin_center[1]]))
+    detail = canvas.crop((int(pool_pixel[0]-170), int(pool_pixel[1]-200),
+                          int(pool_pixel[0]+190), int(pool_pixel[1]+220))).resize((720, 840))
+    detail.save(ROOT / 'docs/reports/2026-11-08-bistro-pool-passages.png')
     print(json.dumps(report, indent=2))
 
 
