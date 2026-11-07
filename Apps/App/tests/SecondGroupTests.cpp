@@ -377,6 +377,8 @@ int main(int argc, char** argv)
         fluid.Component.SetParticles({{{-5,20,0},{}},{{5,20,0},{}},{{0,25,5},{}},{{0,15,-5},{}}});
         water.SetInstances({fluid});
         water.PrepareFrame();
+        Require(water.GetOutput(0)->GetTexture() != depth && water.GetOutput(1)->GetTexture() != motion,
+            "Active fluid must publish physical output targets before graph execution");
         const auto waterAccesses = water.GetSimulationBufferAccesses();
         Require(std::count_if(waterAccesses.begin(), waterAccesses.end(), [](const auto& access)
             { return access.Usage == GDX12RenderGraph::Mode::ReadWrite; }) == 5,
@@ -389,14 +391,19 @@ int main(int argc, char** argv)
         Require(waterDepth != blades, "Water sphere/NRF/merge produced no depth change");
         auto* resolved = waterResolve.GetOutput(0)->GetTexture();
         Require(resolved != hdr.get(), "Water resolve is inactive"); Read(device, *resolved);
-        fluid.Component.Reset(); water.SetInstances({fluid}); executeWater();
+        fluid.Component.Reset(); water.SetInstances({fluid}); water.PrepareFrame();
+        Require(water.GetOutput(0)->GetTexture() != depth, "Reset fluid published fallback as a physical write");
+        executeWater();
         for (const char* quality : { "1", "3", "0", "2" })
         {
             Set(L"Render.Fluid.Quality", quality); executeWater();
             if (quality[0] == '0') requireWaterFallback();
             else Require(waterResolve.GetOutput(0)->GetTexture() != hdr.get(), "Fluid quality switch lost water resolve");
         }
-        settings.RenderEnabled = false; fluid.Component.SetSettings(settings); water.SetInstances({fluid}); executeWater();
+        settings.RenderEnabled = false; fluid.Component.SetSettings(settings); water.SetInstances({fluid}); water.PrepareFrame();
+        Require(water.GetOutput(0)->GetTexture() == depth && water.GetOutput(1)->GetTexture() == motion,
+            "Hidden fluid must publish its opaque fallback before graph execution");
+        executeWater();
         requireWaterFallback();
         Require(water.GetSimulationBufferAccesses().size() >= 6, "Render-disabled fluid lost its simulation state");
         water.SetInstances({}); executeWater(); requireWaterFallback();

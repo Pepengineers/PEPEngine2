@@ -34,3 +34,4 @@ GDX12AOSettings GetAmbientOcclusionSettings();
 
 // 0 after depth prepass, 1 before deferred lighting. Snapshotted by RenderModule.
 int GetAmbientOcclusionExecutionPoint();
+bool IsAmbientOcclusionAsyncComputeEnabled();

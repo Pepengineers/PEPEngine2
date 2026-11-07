@@ -274,6 +274,30 @@ public:
         Set(L"Render.Particles.AsyncCompute", "false");
         if (!samples) throw std::runtime_error("Cannot write timing report");
     }
+    void CheckAOPlacements()
+    {
+        Timer.Reset(); Timer.Stop();
+        Set(L"Render.Fluid.AsyncCompute", "false"); Set(L"Render.Particles.AsyncCompute", "false");
+        auto render = Locator.GetModule<RenderModule>();
+        ComPtr<ID3D12Device> device;
+        auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+        ThrowIfFailed(output->GetResource()->D3DResource->GetDevice(IID_PPV_ARGS(&device)));
+        ComPtr<ID3D12InfoQueue> info; ThrowIfFailed(device.As(&info)); info->ClearStoredMessages();
+        for (int early : {0, 1})
+            for (int implementation = 0; implementation < 4; ++implementation)
+                for (bool async : {false, true, false})
+                {
+                    Set(L"Render.AO.ExecutionPoint", early ? "0" : "1");
+                    Set(L"Render.AO.Implementation", std::to_string(implementation).c_str());
+                    Set(L"Render.AO.AsyncCompute", async ? "true" : "false");
+                    for (int frame = 0; frame < 2; ++frame) Frame();
+                    render->WaitForUploads(); CheckMessages(*info.Get());
+                    if (render->GetRenderGraphStatistics().AsyncPasses != (async ? 1u : 0u))
+                        throw std::runtime_error("AO placement queue selection failed");
+                    std::cout << "AO placement early=" << early << " implementation=" << implementation << " async=" << async << " passed." << std::endl;
+                }
+        Set(L"Render.AO.ExecutionPoint", "1"); Set(L"Render.AO.Implementation", "2"); Set(L"Render.AO.AsyncCompute", "false");
+    }
     void Matrix(int argc, char** argv, bool validation)
     {
         int row = -1, warmup = 24, measured = 120;
@@ -296,7 +320,11 @@ public:
         }
         const int combinations = withAO ? 8 : 4;
         if (row >= combinations || measured == 0 || warmup > 100000 || measured > 1000000) throw std::invalid_argument("Invalid matrix row or sample count");
-        if (withAO) Set(L"Render.AO.AsyncCompute", "false"); // Requires the later AO implementation.
+        Set(L"Render.AO.AsyncCompute", "false");
+        if (withAO)
+        {
+            Set(L"Render.AO.Enabled", "true"); Set(L"Render.AO.Implementation", "2"); Set(L"Render.AO.Quality", "2");
+        }
         Timer.Reset(); Timer.Start();
         auto render = Locator.GetModule<RenderModule>();
         auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
@@ -375,6 +403,8 @@ public:
                 const auto& stats = render->GetRenderGraphStatistics();
                 const UINT expected = !!(mask & 1) + !!(mask & 2) + !!(mask & 4);
                 if (stats.AsyncPasses != expected) throw std::runtime_error("Independent matrix queue selection failed");
+                if (validation && withAO && (mask & 4) && stats.JoinBefore != "Clustered deferred lighting")
+                    throw std::runtime_error("Late AO joined before lighting: " + stats.JoinBefore);
                 samples << series << ',' << (row >= 0 ? "single" : (series < size_t(combinations) ? "forward" : "reverse")) << ','
                     << mask << ',' << !!(mask & 1) << ',' << !!(mask & 2) << ',' << !!(mask & 4) << ',' << frame
                     << ",0.016666666666666667," << render->GetGPUFrameTimeMS() << ',' << stats.ComputeTimeMS << ',' << cpu
@@ -386,6 +416,7 @@ public:
         if (validation)
         {
             Set(L"Render.Fluid.AsyncCompute", "true"); Set(L"Render.Particles.AsyncCompute", "true");
+            if (withAO) Set(L"Render.AO.AsyncCompute", "true");
             for (bool reuse : {false, true})
             {
                 Set(L"Render.Graph.ReuseTextures", reuse ? "true" : "false");
@@ -434,7 +465,7 @@ int main(int argc, char** argv)
             ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
             debug->EnableDebugLayer();
         }
-        if (mode == "--gpu-validation" || mode == "--matrix-gpu-validation")
+        if (mode == "--gpu-validation" || mode == "--matrix-gpu-validation" || mode == "--ao-placements-gpu-validation")
         {
             ComPtr<ID3D12Debug1> validation;
             ThrowIfFailed(debug.As(&validation));
@@ -447,7 +478,8 @@ int main(int argc, char** argv)
         if (fixedClock.DeltaTime() != 0) throw std::runtime_error("Paused fixed clock advanced");
         BistroRenderGraphTests app;
         if (!app.Initialize()) throw std::runtime_error("Bistro initialization failed");
-        if (matrix) app.Matrix(argc, argv, validationMode);
+        if (mode == "--ao-placements" || mode == "--ao-placements-gpu-validation") app.CheckAOPlacements();
+        else if (matrix) app.Matrix(argc, argv, validationMode);
         else if (timing) app.Time();
         else app.Check();
         return 0;

@@ -78,7 +78,7 @@ CD3DX12_RESOURCE_BARRIER GDX12Resource::GetIndirectArgsBarrier()
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetUAVBarrier()
 {
-	if (_concurrentRead) throw std::logic_error("UAV barrier during concurrent texture reads");
+	if (_concurrentRead) throw std::logic_error("UAV barrier during concurrent resource reads");
 	auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(D3DResource.Get());
 	return barrier;
 }
@@ -93,7 +93,7 @@ CD3DX12_RESOURCE_BARRIER GDX12Resource::GetTransitionBarrier(D3D12_RESOURCE_STAT
     if (_concurrentRead)
     {
         if (state == D3D12_RESOURCE_STATE_COMMON || (state & _currentState) != state)
-            throw std::logic_error("Concurrent texture reader attempted to change its published state");
+            throw std::logic_error("Concurrent resource reader attempted to change its published state");
         state = _currentState;
     }
     auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(), _currentState, state);
@@ -103,17 +103,19 @@ CD3DX12_RESOURCE_BARRIER GDX12Resource::GetTransitionBarrier(D3D12_RESOURCE_STAT
 
 void GDX12Resource::BeginConcurrentRead()
 {
-    constexpr auto readStates = D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE |
+    auto readStates = D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE |
         D3D12_RESOURCE_STATE_COPY_SOURCE;
+    if (D3DResource && D3DResource->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_BUFFER)
+        readStates |= D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
     if (_concurrentRead || _currentState == D3D12_RESOURCE_STATE_COMMON || (_currentState & ~readStates))
-        throw std::logic_error("Concurrent texture access requires a published read-only state");
+        throw std::logic_error("Concurrent resource access requires a published read-only state");
     _concurrentRead = true;
 }
 
 void GDX12Resource::SetCurrentState(const D3D12_RESOURCE_STATES newState)
 {
 	if (_concurrentRead && newState != _currentState)
-        throw std::logic_error("Concurrent texture state changed outside its queue join");
+        throw std::logic_error("Concurrent resource state changed outside its queue join");
 	_currentState = newState;
 }
 

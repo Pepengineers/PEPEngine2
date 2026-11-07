@@ -134,7 +134,7 @@ void GDX12AmbientOcclusionPass::Execute(GDX12CommandList* commands)
         commands->SetComputeRootSignature(_root.get());
         commands->SetComputeUAV(0, _output.GetUAV()->GPUHandle);
         Dispatch(commands, Neutral, _output.GetWidth(), _output.GetHeight());
-        commands->ResourceBarrier({ _output.GetResource()->GetSRVBarrier() });
+        commands->ResourceBarrier({ _output.GetResource()->GetNonPixelShaderResourceBarrier() });
         return;
     }
 
@@ -159,13 +159,13 @@ void GDX12AmbientOcclusionPass::Execute(GDX12CommandList* commands)
     xe.NDCToViewAdd.y += projection._32 / projection._22;
     xe.DenoiseBlurBeta = settings.DenoisePasses ? 0.2f + settings.Sharpness * 1.0f : 1e4f;
     _xeConstants->CopyData(frame, xe);
-    commands->ResourceBarrier({ _inputs[0]->GetTexture()->GetResource()->GetSRVBarrier(),
-        _inputs[1]->GetTexture()->GetResource()->GetSRVBarrier(), _normals.GetResource()->GetUnorderedAccessBarrier() });
+    commands->ResourceBarrier({ _inputs[0]->GetTexture()->GetResource()->GetNonPixelShaderResourceBarrier(),
+        _inputs[1]->GetTexture()->GetResource()->GetNonPixelShaderResourceBarrier(), _normals.GetResource()->GetUnorderedAccessBarrier() });
     Bind(commands);
     commands->SetComputeSRV(1, _inputs[1]->GetTexture()->GetSRV()->GPUHandle);
     commands->SetComputeUAV(1, _normals.GetUAV()->GPUHandle);
     Dispatch(commands, PrepareNormals, _output.GetWidth(), _output.GetHeight());
-    commands->ResourceBarrier({ _normals.GetResource()->GetSRVBarrier() });
+    commands->ResourceBarrier({ _normals.GetResource()->GetNonPixelShaderResourceBarrier() });
     commands->SetComputeSRV(1, _normals.GetSRV()->GPUHandle);
 
     UINT source = 0;
@@ -179,13 +179,13 @@ void GDX12AmbientOcclusionPass::Execute(GDX12CommandList* commands)
         commands->ResourceBarrier({ _xeDepth.GetResource()->GetUnorderedAccessBarrier() });
         for (UINT mip = 0; mip < 5; ++mip) commands->SetComputeUAV(2 + mip, _depthUAVs[mip].GPUHandle);
         Dispatch(commands, XePrefilter, (_xeDepth.GetWidth() + 1) / 2, (_xeDepth.GetHeight() + 1) / 2);
-        commands->ResourceBarrier({ _xeDepth.GetResource()->GetSRVBarrier(), _xeTerms[0].GetResource()->GetUnorderedAccessBarrier(),
+        commands->ResourceBarrier({ _xeDepth.GetResource()->GetNonPixelShaderResourceBarrier(), _xeTerms[0].GetResource()->GetUnorderedAccessBarrier(),
             _xeEdges.GetResource()->GetUnorderedAccessBarrier() });
         commands->SetComputeSRV(2, _xeDepth.GetSRV()->GPUHandle);
         commands->SetComputeUAV(7, _xeTerms[0].GetUAV()->GPUHandle);
         commands->SetComputeUAV(8, _xeEdges.GetUAV()->GPUHandle);
         Dispatch(commands, XeMain, _output.GetWidth(), _output.GetHeight());
-        commands->ResourceBarrier({ _xeTerms[0].GetResource()->GetSRVBarrier(), _xeEdges.GetResource()->GetSRVBarrier() });
+        commands->ResourceBarrier({ _xeTerms[0].GetResource()->GetNonPixelShaderResourceBarrier(), _xeEdges.GetResource()->GetNonPixelShaderResourceBarrier() });
         commands->SetComputeSRV(4, _xeEdges.GetSRV()->GPUHandle);
         for (int pass = 0; pass < settings.DenoisePasses; ++pass)
         {
@@ -195,7 +195,7 @@ void GDX12AmbientOcclusionPass::Execute(GDX12CommandList* commands)
             commands->SetComputeUAV(7, _xeTerms[target].GetUAV()->GPUHandle);
             commands->GetCommandList()->SetComputeRoot32BitConstant(0, pass + 1 == settings.DenoisePasses, 1);
             Dispatch(commands, XeDenoise, (_output.GetWidth() + 1) / 2, _output.GetHeight());
-            commands->ResourceBarrier({ _xeTerms[target].GetResource()->GetSRVBarrier() });
+            commands->ResourceBarrier({ _xeTerms[target].GetResource()->GetNonPixelShaderResourceBarrier() });
             source = target;
         }
         const float scale = settings.DenoisePasses ? 1.0f : XE_GTAO_OCCLUSION_TERM_SCALE;
@@ -207,7 +207,7 @@ void GDX12AmbientOcclusionPass::Execute(GDX12CommandList* commands)
         commands->ResourceBarrier({ _scratch[0].GetResource()->GetUnorderedAccessBarrier() });
         commands->SetComputeUAV(0, _scratch[0].GetUAV()->GPUHandle);
         Dispatch(commands, settings.Implementation == 0 ? SSAO : HBAO, _output.GetWidth(), _output.GetHeight());
-        commands->ResourceBarrier({ _scratch[0].GetResource()->GetSRVBarrier() });
+        commands->ResourceBarrier({ _scratch[0].GetResource()->GetNonPixelShaderResourceBarrier() });
         for (int pass = 0; pass < settings.DenoisePasses; ++pass)
         {
             const UINT target = 1 - source;
@@ -216,20 +216,20 @@ void GDX12AmbientOcclusionPass::Execute(GDX12CommandList* commands)
             commands->SetComputeUAV(0, _scratch[target].GetUAV()->GPUHandle);
             commands->GetCommandList()->SetComputeRoot32BitConstant(0, pass % 2, 0);
             Dispatch(commands, Blur, _output.GetWidth(), _output.GetHeight());
-            commands->ResourceBarrier({ _scratch[target].GetResource()->GetSRVBarrier() });
+            commands->ResourceBarrier({ _scratch[target].GetResource()->GetNonPixelShaderResourceBarrier() });
             source = target;
         }
     }
-    commands->ResourceBarrier({ _scratch[source].GetResource()->GetSRVBarrier() });
+    commands->ResourceBarrier({ _scratch[source].GetResource()->GetNonPixelShaderResourceBarrier() });
     commands->SetComputeSRV(2, _scratch[source].GetSRV()->GPUHandle);
     if (settings.Implementation != 2)
     {
-        commands->ResourceBarrier({ _xeTerms[0].GetResource()->GetSRVBarrier() });
+        commands->ResourceBarrier({ _xeTerms[0].GetResource()->GetNonPixelShaderResourceBarrier() });
         commands->SetComputeSRV(3, _xeTerms[0].GetSRV()->GPUHandle);
     }
     commands->SetComputeUAV(0, _output.GetUAV()->GPUHandle);
     Dispatch(commands, Resolve, _output.GetWidth(), _output.GetHeight());
-    commands->ResourceBarrier({ _output.GetResource()->GetSRVBarrier() });
+    commands->ResourceBarrier({ _output.GetResource()->GetNonPixelShaderResourceBarrier() });
 }
 
 void GDX12AmbientOcclusionPass::DrawCACAO(GDX12CommandList* commands, const GDX12AOSettings& s, const Matrix& projection)
@@ -283,7 +283,9 @@ void GDX12AmbientOcclusionPass::DrawCACAO(GDX12CommandList* commands, const GDX1
     proj.elements[3][2] *= 0.01f;
     for (int i = 0; i < 4; ++i) identity.elements[i][i] = 1;
     CheckCACAO(FFX_CACAO_D3D12Draw(_cacao, commands->GetCommandList().Get(), &proj, &identity));
-    _scratch[0].GetResource()->GDX12Resource::SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+    _scratch[0].GetResource()->GDX12Resource::SetCurrentState(commands->GetCommandList()->GetType() == D3D12_COMMAND_LIST_TYPE_COMPUTE ?
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE : D3D12_RESOURCE_STATE_GENERIC_READ);
+    commands->ResourceBarrier({ _scratch[0].GetResource()->GetNonPixelShaderResourceBarrier() });
     commands->InvalidateCachedState();
 }
 
@@ -309,4 +311,16 @@ void GDX12AmbientOcclusionPass::ClearDenendencies()
 {
     DestroyCACAO();
     GDX12RenderPass::ClearDenendencies();
+}
+
+std::vector<GDX12RenderGraph::BufferAccess> GDX12AmbientOcclusionPass::GetBufferAccesses() const
+{
+    const auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+    std::vector<GDX12RenderGraph::BufferAccess> accesses = {
+        { &_constants->GetResource(), GDX12RenderGraph::Mode::Read },
+        { &_xeConstants->GetResource(), GDX12RenderGraph::Mode::Read }};
+    if (frame->CameraCB && frame->CameraCB->GetResource().D3DResource)
+        accesses.push_back({ &frame->CameraCB->GetResource(), GDX12RenderGraph::Mode::Read,
+            D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER });
+    return accesses;
 }

@@ -394,9 +394,9 @@ static void TestMultipleAsyncQueues(GDX12Device& device)
             direct->CPUWaitForFenceValue(finalFence);
             requireSamples(readback.Get(), "First pending producer or final fence lost queued data");
             Require(graph.GetStatistics().AsyncPasses == (async ? 2u : 0u), "Multiple async producers lost DIRECT fallback");
-            Require(graph.GetStatistics().AsyncJoins == (async ? 1u : 0u), "Independent async producer forced an early DIRECT join");
+            Require(graph.GetStatistics().AsyncJoins == (async ? (hasConsumer ? 2u : 1u) : 0u), "Independent async producer lost prefix retirement");
             if (async)
-                Require(graph.GetStatistics().JoinBefore == (hasConsumer ? "Physical buffer reader" : "frame retirement"),
+                Require(graph.GetStatistics().JoinBefore == "frame retirement",
                     "First pending producer joined at the wrong consumer");
         }
     // COMPUTE RAW -> WAR -> WAW stays ordered on one queue without a DIRECT round trip.
@@ -428,7 +428,7 @@ static void TestMultipleAsyncQueues(GDX12Device& device)
     logical.DependsOn(dependent, oldest);
     logical.Compile();
     direct->ExecuteCommandList(logical.Execute(direct->GetCommandList(), compute)); direct->Flush();
-    Require(logical.GetStatistics().AsyncJoins == 1 && logical.GetStatistics().JoinBefore == "Independent graphics",
+    Require(logical.GetStatistics().AsyncJoins == 2 && logical.GetStatistics().JoinBefore == "frame retirement",
         "Logical dependency on the older pending producer was forgotten");
 
     // A DIRECT write must wait for an older COMPUTE reader or writer.
@@ -438,7 +438,7 @@ static void TestMultipleAsyncQueues(GDX12Device& device)
         Graph hazard(&device);
         hazard.AddPass(reader ? asyncRead : first); hazard.AddPass(second); hazard.AddPass(overwrite); hazard.Compile();
         direct->ExecuteCommandList(hazard.Execute(direct->GetCommandList(), compute)); direct->Flush();
-        Require(hazard.GetStatistics().AsyncJoins == 1 && hazard.GetStatistics().JoinBefore == "Async buffer producer",
+        Require(hazard.GetStatistics().AsyncJoins == 2 && hazard.GetStatistics().JoinBefore == "frame retirement",
             "DIRECT WAR/WAW against the older pending access escaped the join");
     }
     class RecordingFailure final : public TestPass
@@ -454,6 +454,187 @@ static void TestMultipleAsyncQueues(GDX12Device& device)
         compute->GetFence()->GetCompletedValue() >= failed.GetStatistics().ComputeFence,
         "Recording failure left an older COMPUTE producer in flight");
     std::cout << "Multiple async producers: queued RAW/WAR/WAW, logical dependencies, retirement and DIRECT fallback passed.\n";
+}
+
+class UAVFillPass final : public TestPass
+{
+public:
+    UAVFillPass(const char* name, Graph::Resource token, GDX12Texture& texture, GDX12DeviceResources& resources,
+        float value, Mode usage = Mode::Write)
+        : TestPass(name, {{ token, usage, D3D12_RESOURCE_STATE_UNORDERED_ACCESS }}, true),
+          Texture(texture), Resources(resources), Value(value),
+          CPUHeap(resources.Device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1, D3D12_DESCRIPTOR_HEAP_FLAG_NONE) { Async = true; }
+    void Execute(GDX12CommandList* commands) override
+    {
+        commands->SetDescriptorHeaps({ Resources.SRV_UAV_Heap.get() });
+        const float values[] = { Value, Value, Value, Value };
+        D3D12_UNORDERED_ACCESS_VIEW_DESC view = {}; view.Format = Texture.GetFormat(); view.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        Resources.Device->GetDevice()->CreateUnorderedAccessView(Texture.GetResource()->D3DResource.Get(), nullptr, &view, CPUHeap.GetCPUHandle());
+        commands->GetCommandList()->ClearUnorderedAccessViewFloat(Texture.GetUAV()->GPUHandle,
+            CPUHeap.GetCPUHandle(), Texture.GetResource()->D3DResource.Get(), values, 0, nullptr);
+    }
+private:
+    GDX12Texture& Texture;
+    GDX12DeviceResources& Resources;
+    float Value;
+    GDX12DescriptorHeap CPUHeap;
+};
+
+static void TestAsyncTextureWrites(GDX12Device& device)
+{
+    auto* direct = device.GetCommandQueue(); auto* compute = device.TryGetComputeQueue();
+    GDX12DeviceResources resources; resources.Initialize(&device);
+    GDX12Texture a, b;
+    GDX12RenderHelpers::InitializeComputeTexture(a, resources, 32, 16, DXGI_FORMAT_R32_FLOAT);
+    GDX12RenderHelpers::InitializeComputeTexture(b, resources, 32, 16, DXGI_FORMAT_R32_FLOAT);
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {}; UINT64 size;
+    const auto desc = a.GetResource()->D3DResource->GetDesc();
+    device.GetDevice()->GetCopyableFootprints(&desc, 0, 1, 0, &footprint, nullptr, nullptr, &size);
+    auto readbackA = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(size), D3D12_RESOURCE_STATE_COPY_DEST);
+    auto readbackB = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(size), D3D12_RESOURCE_STATE_COPY_DEST);
+    const auto check = [&](ID3D12Resource* readback, float value)
+    {
+        BYTE* data; ThrowIfFailed(readback->Map(0, nullptr, reinterpret_cast<void**>(&data)));
+        for (UINT y = 0; y < 16; ++y)
+            for (UINT x = 0; x < 32; ++x)
+                Require(reinterpret_cast<float*>(data + footprint.Offset + y * footprint.Footprint.RowPitch)[x] == value,
+                    "Async UAV texture handoff returned stale contents");
+        readback->Unmap(0, nullptr);
+    };
+    for (bool async : {false, true, false})
+    {
+        Graph graph(&device);
+        const auto x = graph.Create("UAV A", &a, true), y = graph.Create("UAV B", &b, true);
+        UAVFillPass first("UAV producer A", x, a, resources, 1), second("UAV producer B", y, b, resources, 2);
+        CopyPass readA("UAV consumer A", x, graph.Import("Readback A"), a, readbackA.Get(), footprint);
+        CopyPass readB("UAV consumer B", y, graph.Import("Readback B"), b, readbackB.Get(), footprint);
+        // Interleaved consumers retire a prefix; whole-graph async lifetimes prevent aliasing.
+        graph.AddPass(first); graph.AddPass(second); graph.AddPass(readA); graph.AddPass(readB); graph.Compile();
+        Require(graph.GetStatistics().PhysicalTextures == 2, "Async UAV outputs shared a physical slot");
+        UINT64 fence = 0;
+        for (UINT frame = 0; frame < 12; ++frame)
+        {
+            auto* commands = graph.Execute(direct->GetCommandList(), async ? compute : nullptr);
+            direct->ExecuteCommandList(commands); fence = commands->FenceValue;
+        }
+        direct->CPUWaitForFenceValue(fence); check(readbackA.Get(), 1); check(readbackB.Get(), 2);
+        Require(graph.GetStatistics().AsyncJoins == (async ? 2u : 0u), "UAV consumer did not retire the needed prefix");
+        std::ostringstream dot; graph.WriteDot(dot);
+        if (async)
+        {
+            Require(dot.str().find("join before UAV consumer A") != std::string::npos &&
+                dot.str().find("join before UAV consumer B") != std::string::npos, "Producer-specific UAV join diagnostics missing");
+        }
+        // Linear disjoint texture lifetimes still cannot alias across eligible async passes.
+        Graph pooled(&device);
+        const auto pa = pooled.Create("Async lifetime A", &a, true), pb = pooled.Create("Async lifetime B", &b, true);
+        UAVFillPass fillA("Lifetime writer A", pa, a, resources, 1), fillB("Lifetime writer B", pb, b, resources, 2);
+        CopyPass copyA("Lifetime reader A", pa, pooled.Import("Copy A"), a, readbackA.Get(), footprint);
+        CopyPass copyB("Lifetime reader B", pb, pooled.Import("Copy B"), b, readbackB.Get(), footprint);
+        pooled.AddPass(fillA); pooled.AddPass(copyA); pooled.AddPass(fillB); pooled.AddPass(copyB); pooled.Compile();
+        Require(pooled.GetStatistics().PhysicalTextures == 2, "Linear pooling ignored async output lifetime");
+    }
+    {
+        Graph graph(&device); const auto x = graph.Import("Retired output", &a), y = graph.Import("Retired second output", &b);
+        UAVFillPass first("Retirement A", x, a, resources, 1), second("Retirement B", y, b, resources, 2);
+        graph.AddPass(first); graph.AddPass(second); graph.Compile(false);
+        auto* commands = graph.Execute(direct->GetCommandList(), compute);
+        CopyPass read("After retirement", x, x, a, readbackA.Get(), footprint);
+        read.Execute(commands); direct->ExecuteCommandList(commands); direct->Flush(); check(readbackA.Get(), 1);
+        Require(graph.GetStatistics().AsyncJoins == 1 && graph.GetStatistics().JoinBefore == "frame retirement",
+            "Unconsumed UAV output escaped final retirement");
+    }
+    // A later owner of a shared read layout survives retirement of an earlier owner.
+    {
+        Graph graph(&device); const auto token = graph.Import("Shared read texture", &a);
+        CopyPass first("Shared reader one", token, graph.Import("First copy"), a, readbackA.Get(), footprint);
+        CopyPass second("Shared reader two", token, graph.Import("Second copy"), a, readbackB.Get(), footprint);
+        first.Async = second.Async = true;
+        class Probe final : public TestPass
+        {
+        public:
+            Probe(GDX12Resource& resource) : TestPass("Prefix lock probe", {}, true), Resource(resource) {}
+            void Execute(GDX12CommandList*) override
+            { Reject([&] { Resource.GetCommonBarrier(); }, "Prefix join unlocked a later texture reader"); }
+        private: GDX12Resource& Resource;
+        } probe(*a.GetResource());
+        const auto older = graph.AddPass(first); graph.AddPass(second);
+        const auto consumer = graph.AddPass(probe); graph.DependsOn(consumer, older); graph.Compile();
+        direct->ExecuteCommandList(graph.Execute(direct->GetCommandList(), compute)); direct->Flush();
+        Require(graph.GetStatistics().AsyncJoins == 2, "Shared readers were joined together before the first consumer");
+        check(readbackA.Get(), 1); check(readbackB.Get(), 1);
+        a.GetResource()->BeginConcurrentRead(); a.GetResource()->EndConcurrentRead();
+    }
+    GDX12Texture aliasTexture;
+    GDX12RenderHelpers::InitializeComputeTexture(aliasTexture, resources, 32, 16, DXGI_FORMAT_R32_FLOAT);
+    {
+        Graph pool(&device);
+        const auto x = pool.Create("Pool alias A", &a, true), y = pool.Create("Pool alias B", &aliasTexture, true);
+        TestPass writeA("Pool write A", {{x, Mode::Write}}, true), readA("Pool read A", {{x, Mode::Read}}, true);
+        TestPass writeB("Pool write B", {{y, Mode::Write}}, true), readB("Pool read B", {{y, Mode::Read}}, true);
+        pool.AddPass(writeA); pool.AddPass(readA); pool.AddPass(writeB); pool.AddPass(readB); pool.Compile();
+        Require(pool.GetStatistics().PhysicalTextures == 1 && a.GetResource() == aliasTexture.GetResource(),
+            "Physical alias fixture did not share a tracked resource");
+    }
+    {
+        GDX12Resource camera;
+        camera.D3DResource = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, CD3DX12_RESOURCE_DESC::Buffer(256), D3D12_RESOURCE_STATE_COMMON);
+        class CBVReader final : public TestPass
+        {
+        public:
+            CBVReader(GDX12Resource& camera, bool async, bool probe = false)
+                : TestPass(probe ? "Shared CBV probe" : "Shared CBV reader", {}, true), Camera(camera), Probe(probe) { Async = async; }
+            std::vector<Graph::BufferAccess> GetBufferAccesses() const override
+            { return {{ &Camera, Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER }}; }
+            void Execute(GDX12CommandList*) override
+            { if (Probe) Reject([&] { Camera.GetCommonBarrier(); }, "Prefix join unlocked a later CBV reader"); }
+        private: GDX12Resource& Camera; bool Probe;
+        } first(camera, true), second(camera, true), probe(camera, false, true);
+        Graph graph(&device);
+        const auto older = graph.AddPass(first); graph.AddPass(second);
+        const auto consumer = graph.AddPass(probe); graph.DependsOn(consumer, older); graph.Compile();
+        direct->ExecuteCommandList(graph.Execute(direct->GetCommandList(), compute)); direct->Flush();
+        Require(graph.GetStatistics().AsyncJoins == 2 && camera.GetCurrentState() == D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,
+            "DEFAULT CBV readers lost their shared state or prefix retirement");
+        camera.BeginConcurrentRead(); camera.EndConcurrentRead();
+    }
+    // Physical aliases, rather than matching logical IDs, carry WAW/RAW/WAR hazards.
+    for (bool readerFirst : {false, true})
+    {
+        Graph graph(&device);
+        const auto x = graph.Import("Alias writer", &a), alias = graph.Import("Alias reader/writer", &aliasTexture);
+        UAVFillPass first("Alias UAV first", x, a, resources, 3);
+        CopyPass priorRead("Alias async read", x, graph.Import("Prior readback"), a, readbackA.Get(), footprint);
+        priorRead.Async = true;
+        UAVFillPass second("Alias UAV second", alias, aliasTexture, resources, 4, Mode::ReadWrite);
+        second.Async = !readerFirst;
+        CopyPass finalRead("Alias DIRECT read", alias, graph.Import("Final readback"), aliasTexture, readbackB.Get(), footprint);
+        if (readerFirst) graph.AddPass(priorRead); else graph.AddPass(first);
+        graph.AddPass(second); graph.AddPass(finalRead); graph.Compile(false);
+        direct->ExecuteCommandList(graph.Execute(direct->GetCommandList(), compute)); direct->Flush(); check(readbackB.Get(), 4);
+        Require(graph.GetStatistics().AsyncJoins == 1, "Alias texture ordering introduced or missed a join");
+    }
+    {
+        Graph graph(&device); const auto x = graph.Import("Bad async texture", &a);
+        TestPass bad("Missing UAV state", {{x, Mode::Write}}, true); bad.Async = true;
+        graph.AddPass(bad); graph.Compile();
+        Reject([&] { graph.Execute(direct->GetCommandList(), compute); }, "Undeclared async UAV output accepted");
+    }
+    {
+        class Failure final : public TestPass
+        {
+        public:
+            Failure() : TestPass("Failure after UAV producers", {}, true) {}
+            void Execute(GDX12CommandList*) override { throw std::runtime_error("UAV recording failure"); }
+        } failure;
+        Graph graph(&device); const auto x = graph.Import("Failure UAV A", &a), y = graph.Import("Failure UAV B", &b);
+        UAVFillPass first("Failure writer A", x, a, resources, 5), second("Failure writer B", y, b, resources, 6);
+        graph.AddPass(first); graph.AddPass(second); graph.AddPass(failure); graph.Compile();
+        Reject([&] { graph.Execute(direct->GetCommandList(), compute); }, "UAV recording failure swallowed");
+        Require(graph.GetStatistics().AsyncPasses == 2 && compute->GetFence()->GetCompletedValue() >= graph.GetStatistics().ComputeFence,
+            "UAV recording failure left output owners in flight");
+    }
+    std::cout << "Async UAV textures: prefix consumers, retained read owners, RAW/WAR/WAW aliases, pooling, retirement/failure and fallback passed.\n";
 }
 
 static void TestAsyncQueues(GDX12Device& device)
@@ -508,6 +689,7 @@ static void TestAsyncQueues(GDX12Device& device)
         "Failed recording left submitted simulation in flight");
     direct->Flush(); compute->Flush();
     TestMultipleAsyncQueues(device);
+    TestAsyncTextureWrites(device);
     std::cout << "Async queues: physical RAW/WAR, DIRECT fallback, queued allocators, side-effect join and final fence passed.\n";
 }
 

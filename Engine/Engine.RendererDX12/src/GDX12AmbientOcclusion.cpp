@@ -24,6 +24,8 @@ namespace
     )
     static AutoConsoleVariable<AOExecutionPoint> ExecutionPoint(L"Render.AO.ExecutionPoint", AOExecutionPoint::BeforeLighting,
         L"0 after depth prepass, 1 before lighting", Runtime);
+    static AutoConsoleVariable<bool> AsyncCompute(L"Render.AO.AsyncCompute", false,
+        L"Run AO on COMPUTE when available. Default false.", Runtime);
     static AutoConsoleVariable<bool> Enabled(L"Render.AO.Enabled", true, L"Enable ambient occlusion", Runtime);
     static AutoConsoleVariable<GDX12Quality> Quality(L"Render.AO.Quality", GDX12Quality::Mid,
         L"0 Off, 1 Low, 2 Mid, 3 High", Runtime);
@@ -110,3 +112,5 @@ GDX12AOSettings GetAmbientOcclusionSettings()
 }
 
 int GetAmbientOcclusionExecutionPoint() { return ExecutionPoint.GetInt(); }
+
+bool IsAmbientOcclusionAsyncComputeEnabled() { return AsyncCompute.GetValue(); }

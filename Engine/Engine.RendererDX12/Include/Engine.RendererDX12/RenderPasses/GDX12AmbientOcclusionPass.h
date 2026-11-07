@@ -12,15 +12,18 @@ public:
     void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
     {
         graph.SetName("Ambient occlusion");
+        graph.AsyncCompute();
         graph.Read(SharedResource::Scene);
-        graph.ReadInputs(_inputs, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
-        graph.Write(_outputs[0], "Ambient occlusion", Lifetime::Dynamic);
+        graph.ReadInputs(_inputs, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        graph.Write(_outputs[0], "Ambient occlusion", Lifetime::Dynamic, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
     }
 
     GDX12AmbientOcclusionPass();
     ~GDX12AmbientOcclusionPass() override;
     void Initialize() override;
     void Execute(GDX12CommandList* commands) override;
+    bool IsAsyncComputeEnabled() const override { return IsAmbientOcclusionAsyncComputeEnabled(); }
+    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override;
     void Resize() override;
     void ClearDenendencies() override;
 

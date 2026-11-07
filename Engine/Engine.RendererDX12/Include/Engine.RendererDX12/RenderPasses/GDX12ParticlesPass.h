@@ -30,6 +30,10 @@ public:
         if (_resources->ParticleSimulation)
             for (auto* resource : _resources->ParticleSimulation->GetPoolResources())
                 result.push_back({ resource, GDX12RenderGraph::Mode::ReadWrite });
+        const auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+        if (frame->CameraCB && frame->CameraCB->GetResource().D3DResource)
+            result.push_back({ &frame->CameraCB->GetResource(), GDX12RenderGraph::Mode::Read,
+                D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER });
         return result;
     }
 };
@@ -60,6 +64,10 @@ public:
         if (_resources->ParticleSimulation)
             for (auto* resource : _resources->ParticleSimulation->GetPoolResources())
                 result.push_back({ resource, GDX12RenderGraph::Mode::Read });
+        const auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+        if (frame->CameraCB && frame->CameraCB->GetResource().D3DResource)
+            result.push_back({ &frame->CameraCB->GetResource(), GDX12RenderGraph::Mode::Read,
+                D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER });
         return result;
     }
     void Execute(GDX12CommandList* commands) override;

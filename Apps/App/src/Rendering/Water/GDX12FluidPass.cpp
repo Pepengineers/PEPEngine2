@@ -267,7 +267,7 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::GetResolveBuf
     if (_resources && _resources->CurrFrameConstantsIndex < _resources->FrameConstants.size())
     {
         const auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-        if (frame->CameraCB) accesses.push_back({ &frame->CameraCB->GetResource(), GDX12RenderGraph::Mode::Read });
+        if (frame->CameraCB) accesses.push_back({ &frame->CameraCB->GetResource(), GDX12RenderGraph::Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER });
         if (frame->ReflectionProbes) accesses.push_back({ &frame->ReflectionProbes->GetResource(), GDX12RenderGraph::Mode::Read });
     }
     return accesses;
@@ -495,7 +495,13 @@ void GDX12FluidSurfacePass::PrepareFrame()
         return;
     }
     CreatePipelines();
-    if (rendering) CreateTargets();
+    if (rendering)
+    {
+        CreateTargets();
+        // Publish storage before the graph resolves dynamic writes; fallback depth is read-only.
+        _depthLink.Target = _depth.get();
+        _motionLink.Target = _motion.get();
+    }
     _prepared = true;
 }
 

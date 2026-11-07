@@ -47,7 +47,7 @@ void CommonRenderPasses::BindAmbientOcclusion(RenderPipelineCommonData& common, 
 
 void CommonRenderPasses::PrepareFrame(RenderPipelineContext& context, GDX12CommandList* commands)
 {
-    Bindings.UseAsyncCompute = GetParticleSettings().AsyncCompute;
+    Bindings.UseAsyncCompute = GetParticleSettings().AsyncCompute || IsAmbientOcclusionAsyncComputeEnabled();
     if (!context.Primary.ParticleSimulation)
         context.Primary.ParticleSimulation = std::make_unique<GDX12ParticleSimulation>();
     context.Primary.ParticleSimulation->BeginFrame(&context.Primary, context.Common);

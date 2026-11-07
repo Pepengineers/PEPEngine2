@@ -36,6 +36,8 @@ public:
     {
         GDX12Resource* Resource;
         Mode Usage;
+        // Explicit constant-buffer reads can share a DEFAULT buffer across queues.
+        D3D12_RESOURCE_STATES State = UnmanagedState;
     };
     struct Statistics
     {

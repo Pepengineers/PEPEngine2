@@ -370,12 +370,24 @@ int main(int argc, char** argv)
             queue->ExecuteCommandList(commands);
             queue->Flush();
         }
+        class AOConsumer final : public GDX12RenderPass
+        {
+        public:
+            void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+            { graph.SetName("AO readback consumer"); graph.ReadInputs(_inputs, D3D12_RESOURCE_STATE_COPY_SOURCE); graph.HasSideEffects(); }
+        } consumer;
+        consumer.SetInputs({ ao.GetOutput(0) });
+        GDX12RenderGraph graph(&device);
+        graph.ImportShared(GDX12RenderGraph::SharedResource::Scene, "AO scene");
+        graph.ImportLink("AO depth", &depth); graph.ImportLink("AO normals", &normals);
+        graph.AddPass(ao); graph.AddPass(consumer); graph.Compile(false);
         GDX12GPUTimer timer(&device);
-        auto run = [&]()
+        auto run = [&](bool async = false)
         {
             auto* commands = queue->GetCommandList();
+            Set(L"Render.AO.AsyncCompute", async ? "true" : "false");
             timer.Start(commands);
-            ao.Execute(commands);
+            commands = graph.Execute(commands, async ? device.TryGetComputeQueue() : nullptr);
             timer.Stop(commands);
             queue->ExecuteCommandList(commands);
             timer.OnCommandListExecuted(commands->FenceValue);
@@ -383,6 +395,24 @@ int main(int argc, char** argv)
             CheckDebug(info.Get());
             return Readback(device, *ao.GetOutput(0)->GetTexture());
         };
+        FillFixture(resources, common, depth, normals, 0);
+        std::vector<std::unique_ptr<GDX12UploadBuffer<GDX12CameraConstants>>> cameras;
+        for (auto& frame : resources.FrameConstants) cameras.push_back(std::move(frame->CameraCB));
+        Set(L"Render.AO.Enabled", "0");
+        for (float value : run(true)) Require(value == 1, "Neutral AO required a camera buffer");
+        for (size_t i = 0; i < cameras.size(); ++i) resources.FrameConstants[i]->CameraCB = std::move(cameras[i]);
+        Set(L"Render.AO.Enabled", "1");
+        for (bool early : {false, true})
+            for (int algorithm = 0; algorithm < 4; ++algorithm)
+            {
+                common.AOAfterDepthPrepass = early;
+                Set(L"Render.AO.ExecutionPoint", early ? "0" : "1");
+                Set(L"Render.AO.Implementation", std::to_string(algorithm)); Set(L"Render.AO.Enabled", "1");
+                FillFixture(resources, common, depth, normals, 1);
+                const auto direct = run(false);
+                Require(run(true) == direct && run(false) == direct, "AO placement queue parity failed");
+            }
+        common.AOAfterDepthPrepass = false; Set(L"Render.AO.ExecutionPoint", "1");
         for (int algorithm = 0; algorithm < 4; ++algorithm)
         {
             Set(L"Render.AO.Implementation", std::to_string(algorithm));
@@ -393,6 +423,9 @@ int main(int argc, char** argv)
             {
                 FillFixture(resources, common, depth, normals, shape);
                 const auto pixels = run();
+                common.ResetUpscalerHistory = false;
+                Require(run(true) == pixels && run(false) == pixels, "AO DIRECT/COMPUTE/DIRECT output differs");
+                Require(!common.ResetUpscalerHistory, "Queue toggle changed AO settings/history");
                 const float minimum = *std::min_element(pixels.begin(), pixels.end());
                 const float mean = std::accumulate(pixels.begin(), pixels.end(), 0.0f) / pixels.size();
                 std::cout << "algorithm=" << algorithm << " shape=" << shape << " min=" << minimum << " mean=" << mean << '\n';
@@ -425,7 +458,7 @@ int main(int argc, char** argv)
             FillFixture(resources, common, depth, normals, 1);
             common.ResetUpscalerHistory = false;
             Set(L"Render.AO.Enabled", "0");
-            for (float p : run()) Require(p == 1, "Disabled AO is not exactly neutral");
+            for (float p : run(true)) Require(p == 1, "Disabled async AO is not exactly neutral");
             Require(common.ResetUpscalerHistory, "AO switch did not request temporal reset");
             Set(L"Render.AO.Enabled", "1");
             Set(L"Render.AO.Quality", "0");

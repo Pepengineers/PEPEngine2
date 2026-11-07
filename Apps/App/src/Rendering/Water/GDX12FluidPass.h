@@ -10,7 +10,7 @@ public:
     {
         graph.SetName("Fluid surface");
         graph.Read(SharedResource::Scene);
-        graph.ReadInputs(_inputs);
+        graph.ReadInputs(_inputs, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
         graph.Write(_outputs[0], "Fluid or opaque depth", Lifetime::Dynamic);
         graph.Write(_outputs[1], "Fluid or opaque motion", Lifetime::Dynamic);
         graph.Fallback(_outputs[0], _inputs[0]);
