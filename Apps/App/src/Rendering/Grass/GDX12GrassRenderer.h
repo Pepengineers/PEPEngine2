@@ -5,6 +5,8 @@
 #include "Engine.RendererDX12/GDX12RootSignature.h"
 #include "Engine.RendererDX12/GDX12RenderGeometry.h"
 #include <array>
+#include "Components/BistroInteractionSource.h"
+#include "Engine.RendererDX12/GDX12Particles.h"
 #include <unordered_map>
 #include <map>
 #include <tuple>
@@ -14,7 +16,7 @@ class GDX12DeviceResources;
 class RenderPipelineCommonData;
 class GDX12Texture;
 
-// Owned by Bistro. All calls use the renderer direct queue.
+// Owned by Bistro. Simulation may use COMPUTE; expansion and draw use DIRECT.
 class GDX12GrassRenderer
 {
 public:
@@ -24,7 +26,9 @@ public:
     ~GDX12GrassRenderer();
     // Wait the current frame-slot fence before reusing staging or replacing its roots.
     void BeginFrame(const RenderPipelineCommonData& common,
-        std::vector<GDX12GrassInstance> grass, std::vector<GDX12WindInstance> wind, GDX12GrassWindControls controls);
+        std::vector<GDX12GrassInstance> grass, std::vector<GDX12WindInstance> wind, GDX12GrassWindControls controls,
+        const std::vector<BistroInteractionSource>& sources = {}, float deltaSeconds = 0);
+    GDX12ParticleInteractionField InteractionField() const;
     void PrepareGPU(GDX12CommandList* commands);
     void PrepareView(const GDX12GeometryContext& view, UINT patch);
     bool Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch);
@@ -57,11 +61,12 @@ private:
         XMFLOAT4 WindArea; // center xy, extents xy
         XMFLOAT4 WindForce; // normalized direction xy, speed, gust amplitude
         XMFLOAT4 WindGust; // frequency, wavelength, maximum speed, unused
+        XMFLOAT4 InteractionArea;
         UINT Count, Segments, Implementation, Seed;
         UINT PointSource, Material, WindMode, Shadow;
         UINT GridResolution, ResetHistory, Padding0, Padding1;
     };
-    static_assert(sizeof(Parameters) == 368);
+    static_assert(sizeof(Parameters) == 384);
     struct WindParameters
     {
         XMFLOAT4 Area; // center xy, extents xy
@@ -71,6 +76,11 @@ private:
         UINT Resolution, Padding0, Padding1, Padding2;
     };
     static_assert(sizeof(WindParameters) == 80);
+    struct InteractionParameters
+    {
+        XMFLOAT4 Area;
+        float DeltaSeconds; UINT SourceCount, Reset, Resolution;
+    };
     struct GrassState
     {
         GDX12GrassInstance Source;
@@ -128,6 +138,8 @@ private:
         std::map<std::tuple<uint64_t, GDX12GeometryStage, UINT>, Output*> OutputIndex;
         UINT DrawCursor = 0;
         UINT WindCursor = 0;
+        std::unique_ptr<GDX12UploadBuffer<BistroInteractionSource>> Sources;
+        std::unique_ptr<GDX12UploadBuffer<InteractionParameters>> InteractionConstants;
     };
     template<typename T> std::unique_ptr<GDX12UploadBuffer<T>> Buffer(UINT count, bool srv, bool uav);
     void Initialize();
@@ -148,7 +160,14 @@ private:
     std::unique_ptr<GDX12RootSignature> _computeRoot, _graphicsRoot, _windRoot;
     ComPtr<ID3D12PipelineState> _expandPSO, _clearPSO;
     std::array<ComPtr<ID3D12PipelineState>, 6> _graphicsPSO;
-    std::array<ComPtr<ID3D12PipelineState>, 6> _windPSO;
+    std::array<ComPtr<ID3D12PipelineState>, 7> _windPSO;
+    std::unique_ptr<GDX12RootSignature> _interactionRoot;
+    ComPtr<ID3D12PipelineState> _interactionPSO;
+    std::unique_ptr<FieldBuffer> _presence, _trail, _previousTrail;
+    static constexpr UINT InteractionResolution = 64;
+    XMFLOAT4 _interactionArea = {};
+    bool _resetInteraction = true;
+    uint64_t _interactionRevision = 0;
     ComPtr<ID3D12CommandSignature> _signature;
     std::unique_ptr<GDX12UploadBuffer<Vertex>> _vertices;
     std::unique_ptr<GDX12UploadBuffer<UINT>> _indices, _arguments;

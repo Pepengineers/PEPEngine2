@@ -168,7 +168,15 @@ void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceRes
         const uint64_t pending = emitter.BurstTotal >= pool.BurstTotal ? emitter.BurstTotal - pool.BurstTotal : 0;
         const UINT burst = static_cast<UINT>((std::min)(pending, uint64_t(emitter.MaxParticles)));
         pool.BurstTotal = emitter.BurstTotal;
-        const auto constants = MakeConstants(emitter, depth->GetWidth(), depth->GetHeight());
+        auto constants = MakeConstants(emitter, depth->GetWidth(), depth->GetHeight());
+        if (emitter.InteractionEnabled && _interaction.Resource)
+        {
+            constants.InteractionArea = _interaction.Area;
+            constants.InteractionResolution = _interaction.Resolution;
+            constants.InteractionFloor = _interaction.FloorCm;
+            commands->ResourceBarrier({ _interaction.Resource->GetNonPixelShaderResourceBarrier() });
+            commands->SetComputeSRV(0, _interaction.SRV);
+        }
         pool.Constants[resources->CurrFrameConstantsIndex]->CopyData(0, constants);
         commands->SetComputeRootConstantBufferView(2, pool.Constants[resources->CurrFrameConstantsIndex]->GetElementAddress(0));
         const UINT parameters[] = { pool.Capacity, burst, state.Capacity, state.ResetMotion };
@@ -180,6 +188,9 @@ void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceRes
         UAV(commands, *pool.Args);
         commands->ResourceBarrier({ pool.Alive[pool.ReadIndex]->GetResource().GetNonPixelShaderResourceBarrier() });
         commands->SetComputeSRV(1, pool.Alive[pool.ReadIndex]->GetSRV()->GPUHandle);
+        // t0 is unused when no field is enabled; still bind a valid read-only descriptor.
+        if (!emitter.InteractionEnabled || !_interaction.Resource)
+            commands->SetComputeSRV(0, pool.Alive[pool.ReadIndex]->GetSRV()->GPUHandle);
         commands->SetComputeUAV(0, pool.Particles->GetUAV()->GPUHandle);
         commands->SetComputeUAV(1, pool.Alive[pool.ReadIndex ^ 1]->GetUAV()->GPUHandle);
         commands->SetComputeUAV(2, pool.Dead->GetUAV()->GPUHandle);

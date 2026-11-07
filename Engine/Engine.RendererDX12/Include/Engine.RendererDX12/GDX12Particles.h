@@ -36,6 +36,7 @@ struct GDX12ParticleEmitterSettings
     ParticleShape Shape = ParticleShape::Point;
     Vector3 ShapeExtents = Vector3(10.0f);
     ParticleSimulation Simulation = ParticleSimulation::AnalyticDrag;
+    bool InteractionEnabled = false;
     bool VolumeEnabled = false;
     Vector3 VolumeHalfExtents = Vector3(100.0f); // Emitter-local cm; contains particle centres.
     Vector3 Acceleration = Vector3(0, -98.1f, 0);
@@ -99,6 +100,16 @@ class GDX12Texture;
 class GDX12Resource;
 class RenderPipelineCommonData;
 
+// Borrowed until GPU frame retirement. Cells: direction XZ, presence [0,1], world top Y.
+struct GDX12ParticleInteractionField
+{
+    GDX12Resource* Resource = nullptr;
+    D3D12_GPU_DESCRIPTOR_HANDLE SRV = {};
+    XMFLOAT4 Area = {}; // world XZ centre and half extents
+    UINT Resolution = 0;
+    float FloorCm = 0;
+};
+
 class GDX12ParticleSimulation
 {
 public:
@@ -107,6 +118,8 @@ public:
     void BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common);
     void InitializePools(GDX12CommandList* commands, GDX12DeviceResources* resources);
     std::vector<GDX12Resource*> GetPoolResources() const;
+    void SetInteractionField(GDX12ParticleInteractionField field) { _interaction = field; }
+    GDX12Resource* GetInteractionResource() const { return _interaction.Resource; }
     void Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,
         RenderPipelineCommonData& common, GDX12Texture* opaqueDepth);
 
@@ -114,4 +127,5 @@ private:
     friend class GDX12ParticlesPass;
     struct State;
     std::unique_ptr<State> _state;
+    GDX12ParticleInteractionField _interaction;
 };

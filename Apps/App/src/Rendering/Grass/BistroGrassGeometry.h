@@ -21,6 +21,7 @@ public:
     std::vector<GDX12RenderGraph::BufferAccess> GetGeometryBufferAccesses(GDX12GeometryStage) const override;
     std::vector<GDX12RenderGraph::BufferAccess> PreparationAccesses() const;
     std::vector<GDX12RenderGraph::BufferAccess> ExpansionAccesses(const GDX12GeometryContext&, UINT patch) const;
+    GDX12ParticleInteractionField InteractionField() const { return _gpu ? _gpu->InteractionField() : GDX12ParticleInteractionField{}; }
     UINT PatchCount() const { return _gpu ? _gpu->PatchCount() : 0; }
     uint64_t GeometryAllocationBytes() const { return _gpu ? _gpu->GeometryAllocationBytes() : 0; }
 
@@ -36,5 +37,7 @@ private:
     std::vector<GDX12GrassInstance> _grass;
     std::vector<GDX12WindInstance> _wind;
     GDX12GrassWindControls _controls = {};
+    std::vector<BistroInteractionSource> _sources;
+    float _deltaSeconds = 0;
     std::unique_ptr<GDX12GrassRenderer> _gpu;
 };

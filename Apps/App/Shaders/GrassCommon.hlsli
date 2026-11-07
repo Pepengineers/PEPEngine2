@@ -20,6 +20,7 @@ cbuffer GrassParameters : register(b0)
     float4 WindArea;
     float4 WindForce;
     float4 WindGust;
+    float4 InteractionArea;
     uint Count, Segments, Implementation, Seed;
     uint PointSource, MaterialIndex, WindMode, Shadow;
     uint GridResolution, ResetHistory, Padding0, Padding1;

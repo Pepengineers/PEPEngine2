@@ -52,6 +52,16 @@ void BistroGrassGeometry::CollectScene(float deltaSeconds)
 {
     _grass.clear();
     _wind.clear();
+    _sources.clear();
+    _deltaSeconds = 0;
+    for (size_t i = 0; i < _scenes->GetWorldCount(); ++i)
+    {
+        auto& world = *_scenes->GetWorld(i);
+        world.GetECS().RegisterComponent<BistroInteractionSource>();
+        _deltaSeconds = (std::max)(_deltaSeconds, world.IsPaused() ? 0.0f : deltaSeconds * world.GetTimeScale());
+        world.GetECS().ForEach<BistroInteractionSource>([&](Entity, const BistroInteractionSource& source)
+        { _sources.push_back(source); });
+    }
     const auto controls = GetGrassWindControls();
     auto& scenes = _scenes;
     if (controls.GrassEnabled && controls.GrassQuality > 0)
@@ -109,9 +119,9 @@ void BistroGrassGeometry::CollectScene(float deltaSeconds)
 
 void BistroGrassGeometry::PrepareFrame(GDX12DeviceResources& resources, const RenderPipelineCommonData& common)
 {
-    if (!_grass.empty() && !_gpu) _gpu = std::make_unique<GDX12GrassRenderer>(&resources);
+    if (!_gpu) _gpu = std::make_unique<GDX12GrassRenderer>(&resources);
     if (!_gpu) return;
-    _gpu->BeginFrame(common, _grass, _wind, _controls);
+    _gpu->BeginFrame(common, _grass, _wind, _controls, _sources, _deltaSeconds);
     _gpu->PublishPrimitives(resources.Primitives, this);
 }
 

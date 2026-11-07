@@ -38,6 +38,13 @@ void CS(uint3 id : SV_DispatchThreadID)
     uint index = Cell(p);
     if (Stage == 0) { Output[index] = 0; return; }
     if (Stage == 5) { Output[index] = Input[index]; return; }
+    if (Stage == 6)
+    {
+        float2 world = Area.xy + ((float2(p) + 0.5f) / Resolution * 2 - 1) * Area.zw;
+        float wave = sin(6.2831853f * (Gust.x * Gust.z + dot(world, Force.xy) / Gust.y));
+        Output[index] = float4(Force.xy * min(Solver.z, Force.z * (1 + Force.w * wave)), 0, 0);
+        return;
+    }
     float2 spacing = Area.zw * 2 / Resolution;
     if (Stage == 1)
     {

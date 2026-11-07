@@ -49,6 +49,17 @@ inline void CheckBistroParallelMovement()
     {
         if (frame == 200) { BistroCharacters::NPCCount.SetFromString("0"); BistroCharacters::FoxCount.SetFromString("0"); }
         serial.Update(serialWorld, 0.1f, serialJobs);
+        size_t sourceCount = 0;
+        serialWorld.GetECS().ForEach<BistroInteractionSource, TransformComponent, NameComponent>(
+            [&](Entity, const BistroInteractionSource& source, const TransformComponent& transform, const NameComponent& name)
+            {
+                if (name.value.find("BistroNPC") != 0 || Vector3(source.PositionRadius.x, source.PositionRadius.y,
+                    source.PositionRadius.z) != transform.Location)
+                    throw std::runtime_error("Interaction snapshot was published before movement or included a fox");
+                ++sourceCount;
+            });
+        if (sourceCount != BistroRoutes::People().Spawns.size() * 2 + 1)
+            throw std::runtime_error("Interaction snapshot silently dropped crowded rank members");
         parallel.Update(parallelWorld, 0.1f, parallelJobs);
         if (snapshot(serialWorld) != snapshot(parallelWorld))
             throw std::runtime_error("Crowd movement depends on worker scheduling/order");

@@ -2,6 +2,7 @@
 #include "App.Base/App.h"
 #include "../src/BistroScene.h"
 #include "../src/BistroGrass.h"
+#include "../src/Components/BistroInteractionSource.h"
 #include "../src/BistroWater.h"
 #include <charconv>
 #include <d3d12sdklayers.h>
@@ -230,6 +231,100 @@ public:
         CheckMessages(*info.Get());
         std::cout << "Bistro graph: pooled/dedicated HDR identity, both AO placements, odd resize and native/XeSS switch passed." << std::endl;
     }
+    void GrassExperiment(bool timing)
+    {
+        Timer.Reset(); Timer.Start();
+        auto render = Locator.GetModule<RenderModule>();
+        auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+        auto& ecs = world.GetECS();
+        ecs.RegisterComponent<BistroInteractionSource>();
+        std::vector<Entity> sources;
+        for (UINT i = 0; i < 32; ++i)
+        {
+            auto entity = ecs.CreateEntity();
+            entity.AddComponent<BistroInteractionSource>(); sources.push_back(entity.GetId());
+        }
+        BistroGrass::Scene grass; grass.Update(world, 0);
+        Set(L"Render.FrameGeneration.Provider", "0"); Set(L"Render.Upscaler.Provider", "0");
+        Set(L"Render.AO.ExecutionPoint", "1");
+        Set(L"App.Particles.Count", "10000"); BistroParticles::Update(world);
+        auto& camera = ecs.Get<TransformComponent>(world.ActiveCamera);
+        camera.Location = BistroArch::GrassPosition + Vector3(450,200,-450);
+        auto direction = BistroArch::GrassPosition + Vector3(0,70,0) - camera.Location; direction.Normalize();
+        camera.Rotation = Vector3(XMConvertToDegrees(-std::asin(direction.y)), XMConvertToDegrees(std::atan2(direction.x,direction.z)),0);
+        camera.DirtyFlag = true;
+        ComPtr<ID3D12InfoQueue> info;
+        if (!timing)
+        {
+            ComPtr<ID3D12Device> device;
+            ThrowIfFailed(render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture()->GetResource()->D3DResource->GetDevice(IID_PPV_ARGS(&device)));
+            ThrowIfFailed(device.As(&info)); info->ClearStoredMessages();
+        }
+        std::filesystem::create_directories("Build/GrassInteraction");
+        std::ofstream samples("Build/GrassInteraction/bistro-timing.csv");
+        samples << "wind,series,async,sample,sources,gpu_ms,compute_sum_ms,cpu_submit_ms,drain\n";
+        BistroWater::Scene water;
+        for (int wind : {0,1})
+        {
+            Set(L"App.Grass.Wind.Algorithm", wind ? "1" : "0"); grass.Update(world, 0);
+            int series = 0;
+            for (bool async : {false,true,true,false})
+            {
+                Set(L"Render.Grass.AsyncCompute", async ? "true" : "false");
+                Set(L"Render.Fluid.AsyncCompute", !timing && async ? "true" : "false");
+                Set(L"Render.Particles.AsyncCompute", !timing && async ? "true" : "false");
+                Set(L"Render.AO.AsyncCompute", !timing && async ? "true" : "false");
+                Set(L"App.Water.Count", timing ? "0" : "1"); water.Update(world, 1.0f/60);
+                ecs.ForEach<ParticleEmitterComponent>([](Entity, ParticleEmitterComponent& emitter)
+                { emitter.Reset(); if (emitter.IsEnabled()) emitter.Emit(emitter.GetSettings().MaxParticles); });
+                ecs.ForEach<WindFieldComponent>([](Entity, WindFieldComponent& field) { field.Reset(); });
+                ecs.ForEach<GrassRenderComponent>([](Entity, GrassRenderComponent& patch) { patch.ResetHistory(); });
+                const int warmup = timing ? 16 : 4, count = timing ? 60 : 8;
+                for (int frame = 0; frame < warmup + count; ++frame)
+                {
+                    for (UINT i = 0; i < sources.size(); ++i)
+                    {
+                        auto& source = ecs.Get<BistroInteractionSource>(sources[i]);
+                        const float x = BistroArch::GrassPosition.x + float(i % 8) * 35 - 120;
+                        const float z = BistroArch::GrassPosition.z + std::sin((frame + i) * 0.05f) * 180;
+                        source.PreviousHeight = frame ? XMFLOAT4(source.PositionRadius.x, source.PositionRadius.y, source.PositionRadius.z,190) : XMFLOAT4(x,23.3f,z,190);
+                        source.PositionRadius = XMFLOAT4(x,23.3f,z,65);
+                    }
+                    water.Update(world, 1.0f/60);
+                    const auto start = std::chrono::steady_clock::now(); Frame(1.0/60,(frame+1)/60.0);
+                    const double cpu = std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+                    if (timing) render->WaitForUploads(); // Explicit CPU drain: not pipelined FPS.
+                    if (frame >= warmup)
+                        samples << wind << ',' << series << ',' << async << ',' << frame-warmup << ",32," << render->GetGPUFrameTimeMS()
+                            << ',' << render->GetRenderGraphStatistics().ComputeTimeMS << ',' << cpu << ',' << timing << '\n';
+                }
+                render->WaitForUploads();
+                if (info) CheckMessages(*info.Get());
+                std::ofstream graph("Build/GrassInteraction/graph-w" + std::to_string(wind) + "-s" + std::to_string(series) + ".dot");
+                render->WriteRenderGraph(graph);
+                if (async && render->GetRenderGraphStatistics().AsyncPasses < 1) throw std::runtime_error("Grass COMPUTE dispatch missing");
+                std::cout << "Grass experiment wind=" << wind << " series=" << series++ << " async=" << async << " passed; CPU-drain=" << timing << std::endl;
+            }
+        }
+        if (!timing)
+        {
+            Set(L"Render.Grass.AsyncCompute", "true"); Set(L"Render.Fluid.AsyncCompute", "true");
+            Set(L"Render.Particles.AsyncCompute", "true"); Set(L"Render.AO.AsyncCompute", "true");
+            for (int scenario = 0; scenario < 4; ++scenario)
+            {
+                Set(L"Render.Wind.Enabled", scenario == 0 ? "false" : "true");
+                Set(L"Render.Grass.Enabled", scenario == 1 ? "false" : "true");
+                Set(L"Render.Graph.ReuseTextures", scenario & 1 ? "true" : "false");
+                if (scenario == 2) ecs.ForEach<GrassRenderComponent>([](Entity, GrassRenderComponent& patch) { ++patch.Seed; patch.ResetHistory(); });
+                SetWindowPos(GetWindow()->GetWindowHandle(),nullptr,0,0,973+scenario,657,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
+                world.SetPaused(scenario == 3);
+                for (int frame=0;frame<4;++frame) Frame(scenario == 3 ? 0 : 1.0/60,(frame+1)/60.0);
+                render->WaitForUploads(); CheckMessages(*info.Get());
+            }
+            world.SetPaused(false);
+            std::cout << "Grass combined async: queued frames, water/particles/AO, disabled wind/grass, seed reset, pause and odd resize passed." << std::endl;
+        }
+    }
     void Time()
     {
         Timer.Reset(); Timer.Stop();
@@ -456,7 +551,7 @@ int main(int argc, char** argv)
     {
         const std::string_view mode = argc > 1 ? argv[1] : "";
         const bool matrix = mode == "--matrix" || mode == "--matrix-validation" || mode == "--matrix-gpu-validation";
-        const bool timing = mode == "--timing" || matrix;
+        const bool timing = mode == "--timing" || mode == "--grass-timing" || matrix;
         const bool validationMode = mode == "--matrix-validation" || mode == "--matrix-gpu-validation";
         std::cout.setf(std::ios::unitbuf);
         ComPtr<ID3D12Debug> debug;
@@ -465,7 +560,7 @@ int main(int argc, char** argv)
             ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
             debug->EnableDebugLayer();
         }
-        if (mode == "--gpu-validation" || mode == "--matrix-gpu-validation" || mode == "--ao-placements-gpu-validation")
+        if (mode == "--gpu-validation" || mode == "--matrix-gpu-validation" || mode == "--ao-placements-gpu-validation" || mode == "--grass-gpu-validation")
         {
             ComPtr<ID3D12Debug1> validation;
             ThrowIfFailed(debug.As(&validation));
@@ -479,6 +574,7 @@ int main(int argc, char** argv)
         BistroRenderGraphTests app;
         if (!app.Initialize()) throw std::runtime_error("Bistro initialization failed");
         if (mode == "--ao-placements" || mode == "--ao-placements-gpu-validation") app.CheckAOPlacements();
+        else if (mode == "--grass-timing" || mode == "--grass-validation" || mode == "--grass-gpu-validation") app.GrassExperiment(timing);
         else if (matrix) app.Matrix(argc, argv, validationMode);
         else if (timing) app.Time();
         else app.Check();

@@ -2,6 +2,7 @@
 
 #include "App.Base/ECS/World.h"
 #include "BistroRoutes.h"
+#include "Components/BistroInteractionSource.h"
 #include "Engine.Core/AssetManager.h"
 #include "Engine.Core/Jobs/JobSystem.h"
 #include "Common/ConsoleVariables.h"
@@ -35,6 +36,7 @@ namespace BistroCharacters
         {
             const bool spawning = !_initialized;
             auto& ecs = world.GetECS();
+            ecs.RegisterComponent<BistroInteractionSource>();
             if (spawning)
             {
                 Spawn(ecs, static_cast<size_t>(NPCCount.GetValue()), false);
@@ -46,6 +48,18 @@ namespace BistroCharacters
             _transforms.clear();
             for (const auto entity : _entities) _transforms.push_back(&ecs.Get<TransformComponent>(entity));
             Schedule(jobs, _groups.size(), 1).Complete();
+            // Publish the complete snapshot only after every movement job has finished.
+            for (const auto& group : _groups)
+                if (!group.Fox)
+                    for (size_t member = 0; member < group.Count; ++member)
+                    {
+                        auto& source = ecs.Get<BistroInteractionSource>(_entities[group.First + member]);
+                        const auto position = _transforms[group.First + member]->Location;
+                        const Vector3 previous(source.PositionRadius.x, source.PositionRadius.y, source.PositionRadius.z);
+                        const auto start = spawning || Vector3::Distance(position, previous) > 500 ? position : previous;
+                        source.PreviousHeight = XMFLOAT4(start.x, start.y, start.z, 190);
+                        source.PositionRadius = XMFLOAT4(position.x, position.y, position.z, 65);
+                    }
         }
 
     protected:
@@ -111,6 +125,7 @@ namespace BistroCharacters
                     skeletal.SetClip(clip);
                     skeletal.SetLooping(true);
                     skeletal.SetTimeSeconds(std::uniform_real_distribution<double>(0, source->GetClips()[clip].DurationSeconds)(_random));
+                    if (!fox) entity.AddComponent<BistroInteractionSource>();
                     _entities.push_back(entity.GetId());
                 }
             }

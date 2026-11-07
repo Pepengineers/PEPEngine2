@@ -30,6 +30,9 @@ public:
         if (_resources->ParticleSimulation)
             for (auto* resource : _resources->ParticleSimulation->GetPoolResources())
                 result.push_back({ resource, GDX12RenderGraph::Mode::ReadWrite });
+        if (_resources->ParticleSimulation)
+            if (auto* interaction = _resources->ParticleSimulation->GetInteractionResource())
+                result.push_back({ interaction, GDX12RenderGraph::Mode::Read });
         const auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
         if (frame->CameraCB && frame->CameraCB->GetResource().D3DResource)
             result.push_back({ &frame->CameraCB->GetResource(), GDX12RenderGraph::Mode::Read,

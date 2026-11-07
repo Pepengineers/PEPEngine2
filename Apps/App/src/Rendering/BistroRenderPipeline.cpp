@@ -12,7 +12,8 @@ namespace
     public:
         explicit GrassFramePreparationPass(BistroGrassGeometry& grass) : _grass(grass) {}
         void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-        { graph.SetName("Bistro wind and grass roots"); graph.Read(SharedResource::Scene); graph.HasSideEffects(); }
+        { graph.SetName("Bistro grass simulation"); graph.AsyncCompute(); graph.Read(SharedResource::Scene); graph.HasSideEffects(); }
+        bool IsAsyncComputeEnabled() const override { return GetGrassWindControls().AsyncCompute; }
         void Execute(GDX12CommandList* commands) override { _grass.PrepareGPU(commands); }
         std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override { return _grass.PreparationAccesses(); }
     private:
@@ -21,18 +22,24 @@ namespace
     class BistroGeometryPass final : public GDX12RenderPass
     {
     public:
-        BistroGeometryPass(GDX12DeviceResources& resources, BistroGrassGeometry& grass, GDX12GeometryViewPass& pass)
-            : _resources(resources), _grass(grass), _pass(pass) { _pass.SetSplitGeometry(true); }
+        BistroGeometryPass(GDX12DeviceResources& resources, BistroGrassGeometry& grass, GDX12GeometryViewPass& pass,
+            int part = 0)
+            : _resources(resources), _grass(grass), _pass(pass), _part(part) { _pass.SetSplitGeometry(true); }
         void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-        { _pass.RecordRenderGraph(graph); }
+        {
+            _pass.RecordRenderGraph(graph);
+            if (_part == 1) graph.SetName("Bistro depth meshes");
+            if (_part == 2) graph.SetName("Bistro depth grass");
+        }
         void Execute(GDX12CommandList* commands) override
         {
-            _pass.BeginGeometry(commands);
+            if (_part != 2) _pass.BeginGeometry(commands);
             const auto capacity = _pass.GetGeometryViewCapacity();
             for (UINT slot = 0; slot < capacity; ++slot)
                 if (const auto* prepared = _pass.GetGeometryView(slot))
                 {
-                    _pass.ExecuteGeometryView(commands, slot);
+                    if (_part != 2) _pass.ExecuteGeometryView(commands, slot);
+                    if (_part == 1) continue;
                     for (UINT patch = 0; patch < _grass.PatchCount(); ++patch)
                     {
                         auto view = *prepared;
@@ -45,12 +52,12 @@ namespace
                         _resources.EmitGeometry(commands, view, {});
                     }
                 }
-            _pass.EndGeometry(commands);
+            if (_part != 1) _pass.EndGeometry(commands);
         }
         std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
         {
             auto accesses = _pass.GetBufferAccesses();
-            const auto capacity = _pass.GetGeometryViewCapacity();
+            const auto capacity = _part == 1 ? 0 : _pass.GetGeometryViewCapacity();
             for (UINT slot = 0; slot < capacity; ++slot)
                 if (const auto* view = _pass.GetGeometryView(slot))
                     for (UINT patch = 0; patch < _grass.PatchCount(); ++patch)
@@ -64,6 +71,7 @@ namespace
         GDX12DeviceResources& _resources;
         BistroGrassGeometry& _grass;
         GDX12GeometryViewPass& _pass;
+        int _part; // 0 whole view, 1 meshes before join, 2 grass and final publication
     };
 }
 
@@ -93,8 +101,11 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& context)
     LinkInputs({ context.BackBuffer });
     _passes->Initialize();
     _geometryJobs.push_back(std::make_unique<GrassFramePreparationPass>(*_grass));
-    for (auto* pass : GeometryPasses())
-        _geometryJobs.push_back(std::make_unique<BistroGeometryPass>(*_resources, *_grass, *pass));
+    _geometryJobs.push_back(std::make_unique<BistroGeometryPass>(*_resources, *_grass, _passes->Depth, 1));
+    _geometryJobs.push_back(std::make_unique<BistroGeometryPass>(*_resources, *_grass, _passes->Depth, 2));
+    const auto geometry = GeometryPasses();
+    for (size_t i = 1; i < geometry.size(); ++i)
+        _geometryJobs.push_back(std::make_unique<BistroGeometryPass>(*_resources, *_grass, *geometry[i]));
 }
 
 void BistroRenderPipeline::UpdateFrameSettings(RenderPipelineContext& context)
@@ -115,7 +126,8 @@ bool BistroRenderPipeline::PrepareFrame(RenderPipelineContext& context, GDX12Com
     _water->Resolve.PrepareFrame();
     _passes->BindAmbientOcclusion(context.Common, _earlyAO);
     _passes->PrepareFrame(context, commands);
-    _passes->Bindings.UseAsyncCompute |= GetFluidControls().AsyncCompute;
+    _passes->Bindings.UseAsyncCompute |= GetFluidControls().AsyncCompute || GetGrassWindControls().AsyncCompute;
+    if (_resources->ParticleSimulation) _resources->ParticleSimulation->SetInteractionField(_grass->InteractionField());
     const auto passes = GeometryPasses();
     for (UINT i = 0; i < passes.size(); ++i)
     {
@@ -169,23 +181,26 @@ void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipel
 {
     LinkInputs(inputs);
     auto& p = *_passes;
+    // Small latency-sensitive work precedes the long water solve on the single COMPUTE queue.
+    const auto grassPreparation = graph.AddPass(*_geometryJobs.at(0));
     graph.AddPass(_water->Simulation);
     graph.AddPass(p.Environment);
     graph.AddPass(p.Culling);
-    auto geometryTail = graph.AddPass(*_geometryJobs.at(0));
+    auto geometryTail = graph.AddPass(*_geometryJobs.at(1));
     const auto addGeometry = [&](UINT index)
     {
         const auto node = graph.AddPass(*_geometryJobs.at(index));
         graph.DependsOn(node, geometryTail);
         geometryTail = node;
     };
-    addGeometry(1);
+    addGeometry(2);
+    graph.DependsOn(geometryTail, grassPreparation);
     graph.AddPass(p.ParticleSimulation);
     if (_earlyAO) graph.AddPass(p.AO);
-    addGeometry(2);
     addGeometry(3);
     addGeometry(4);
     addGeometry(5);
+    addGeometry(6);
     if (!_earlyAO) graph.AddPass(p.AO);
     graph.AddPass(_water->Surface);
     graph.AddPass(p.Lighting);

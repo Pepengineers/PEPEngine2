@@ -24,6 +24,7 @@ static void Set(const wchar_t* name, const char* value)
 {
     Require(BenchmarkEngine::GetLocator().GetModule<ConsoleModule>()->FindConsoleVariable(name).SetFromString(value), "CVar write failed");
 }
+#include "GrassInteractionChecks.h"
 class TestEngine final : public App { public: TestEngine() : App(GetModuleHandleW(nullptr)) {} };
 
 class WaterGraphOutput final : public GDX12RenderPass
@@ -327,6 +328,7 @@ int main(int argc, char** argv)
         {
             TestGrassPlacement(device, resources, common, depth, vp, eye, *grassRenderer);
             TestPreparedGrassViews(device, resources, common, *depth, vp, eye);
+            CheckGrassInteraction(device, resources, common, *depth);
         }
         if (benchmark && (mode == "--benchmark" || mode == "--benchmark-grass")) BenchmarkGrassPlacement(device, resources, common, depth, vp, eye);
 

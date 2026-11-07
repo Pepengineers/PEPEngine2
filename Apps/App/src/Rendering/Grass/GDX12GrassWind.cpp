@@ -6,6 +6,7 @@
 
 namespace
 {
+    static AutoConsoleVariable<bool> GrassAsync(L"Render.Grass.AsyncCompute", false, L"Run Bistro grass interaction and wind on COMPUTE");
     static AutoConsoleVariable<bool> GrassEnabled(L"Render.Grass.Enabled", true, L"Enable grass components", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<GDX12Quality> GrassQuality(L"Render.Grass.Quality", GDX12Quality::Mid, L"Grass: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<bool> WindEnabled(L"Render.Wind.Enabled", true, L"Enable wind components", EConsoleVariableFlags::Default);
@@ -16,7 +17,7 @@ namespace
 
 GDX12GrassWindControls GetGrassWindControls()
 {
-    return { GrassEnabled.GetValue(), GrassQuality.GetInt(), WindEnabled.GetValue(), WindQuality.GetInt() };
+    return { GrassEnabled.GetValue(), GrassQuality.GetInt(), WindEnabled.GetValue(), WindQuality.GetInt(), GrassAsync.GetValue() };
 }
 
 GDX12GrassSettings ResolveGrassSettings(const GDX12GrassSettings& author, const int quality)

@@ -43,10 +43,12 @@ namespace ParticleResources
         XMFLOAT4X4 WorldToEmitter;
         XMFLOAT4X4 WorldToCollisionBox;
         XMFLOAT3 CollisionBoxHalfExtents; UINT CollisionBoxEnabled;
+        XMFLOAT4 InteractionArea;
+        UINT InteractionResolution; float InteractionFloor; XMFLOAT2 InteractionPadding;
     };
     static_assert(sizeof(Particle) == 64);
     static_assert(sizeof(ParticleDraw) == 96);
-    static_assert(sizeof(EmitterConstants) == 448);
+    static_assert(sizeof(EmitterConstants) == 480);
     static_assert(sizeof(GDX12ParticleMeshVertex) == 44);
 
     template<class T>

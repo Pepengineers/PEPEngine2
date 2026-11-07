@@ -6,6 +6,7 @@
 #include <cmath>
 #include <stdexcept>
 #include <unordered_set>
+#include "BistroArch.h"
 
 namespace
 {
@@ -69,7 +70,7 @@ void GDX12GrassRenderer::Initialize()
     GDX12RootSignatureDesc compute;
     compute.VolatileSRVData = true;
     compute.NumSingleCBVSlots = 1;
-    compute.NumSingleSRVSlots = 3;
+    compute.NumSingleSRVSlots = 5;
     compute.NumSingleUAVSlots = 3;
     _computeRoot = std::make_unique<GDX12RootSignature>(_resources->Device, compute);
     GDX12RootSignatureDesc wind;
@@ -78,6 +79,14 @@ void GDX12GrassRenderer::Initialize()
     wind.NumSingleSRVSlots = 2;
     wind.NumSingleUAVSlots = 1;
     _windRoot = std::make_unique<GDX12RootSignature>(_resources->Device, wind);
+    GDX12RootSignatureDesc interaction;
+    interaction.VolatileSRVData = true;
+    interaction.NumSingleCBVSlots = 1;
+    interaction.NumSingleSRVSlots = 1;
+    interaction.NumSingleUAVSlots = 3;
+    _interactionRoot = std::make_unique<GDX12RootSignature>(_resources->Device, interaction);
+    _interactionPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _interactionRoot.get(),
+        APP_SHADERS_FOLDER "GrassInteraction.hlsl", "CS");
     GDX12RootSignatureDesc graphics;
     graphics.VolatileSRVData = true;
     graphics.NumSingleCBVSlots = 4;
@@ -165,7 +174,8 @@ void GDX12GrassRenderer::RetireWind(WindState& state)
 }
 
 void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
-    std::vector<GDX12GrassInstance> grass, std::vector<GDX12WindInstance> wind, GDX12GrassWindControls controls)
+    std::vector<GDX12GrassInstance> grass, std::vector<GDX12WindInstance> wind, GDX12GrassWindControls controls,
+    const std::vector<BistroInteractionSource>& sources, float deltaSeconds)
 {
     auto& frame = CurrentFrame();
     frame.RetiredFields.clear();
@@ -178,6 +188,44 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
     frame.Outputs.clear();
     frame.OutputIndex.clear();
     _arenaOutput = nullptr;
+    if (!_initialized) Initialize();
+    if (!_presence)
+    {
+        _presence = Buffer<XMFLOAT4>(InteractionResolution * InteractionResolution, true, true);
+        _trail = Buffer<XMFLOAT4>(InteractionResolution * InteractionResolution, true, true);
+        _previousTrail = Buffer<XMFLOAT4>(InteractionResolution * InteractionResolution, true, true);
+        BoundingBox area;
+        BistroArch::SwarmBounds.Transform(area, Matrix::CreateTranslation(-Vector3(BistroArch::SwarmBounds.Center)) *
+            Matrix::CreateRotationY(XMConvertToRadians(BistroArch::YawDegrees)) *
+            Matrix::CreateTranslation(Vector3(BistroArch::SwarmBounds.Center)));
+        _interactionArea = XMFLOAT4(area.Center.x, area.Center.z, area.Extents.x + 100, area.Extents.z + 100);
+    }
+    if (!std::isfinite(deltaSeconds) || deltaSeconds < 0) throw std::invalid_argument("Invalid interaction dt");
+    std::vector<BistroInteractionSource> nearby;
+    for (const auto& source : sources)
+    {
+        const auto& p = source.PositionRadius;
+        const auto& q = source.PreviousHeight;
+        if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z) || !std::isfinite(p.w) ||
+            !std::isfinite(q.x) || !std::isfinite(q.y) || !std::isfinite(q.z) || !std::isfinite(q.w) ||
+            p.w <= 0 || p.w > 1000 || q.w <= 0 || q.w > 10000)
+            throw std::invalid_argument("Invalid interaction source");
+        if ((std::min)(p.x, q.x) - p.w > _interactionArea.x + _interactionArea.z ||
+            (std::max)(p.x, q.x) + p.w < _interactionArea.x - _interactionArea.z ||
+            (std::min)(p.z, q.z) - p.w > _interactionArea.y + _interactionArea.w ||
+            (std::max)(p.z, q.z) + p.w < _interactionArea.y - _interactionArea.w) continue;
+        nearby.push_back(source);
+    }
+    const UINT sourceCount = static_cast<UINT>(nearby.size());
+    if (!frame.Sources || frame.Sources->GetElementCount() < (std::max)(1u, sourceCount))
+    {
+        frame.Sources = std::make_unique<GDX12UploadBuffer<BistroInteractionSource>>(_resources->Device,
+            (std::max)(1u, sourceCount), EBufferType::Upload, false);
+        frame.Sources->CreateSRV(_resources->SRV_UAV_Heap.get(), _resources->SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+    }
+    if (sourceCount) frame.Sources->CopyData(0, nearby.data(), sourceCount);
+    if (!frame.InteractionConstants)
+        frame.InteractionConstants = std::make_unique<GDX12UploadBuffer<InteractionParameters>>(_resources->Device, 1);
     const bool controlChange = controls.GrassEnabled != _controls.GrassEnabled || controls.GrassQuality != _controls.GrassQuality ||
         controls.WindEnabled != _controls.WindEnabled || controls.WindQuality != _controls.WindQuality;
     _controls = controls;
@@ -202,12 +250,17 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
             uint64_t rootsHash;
             const auto signature = SettingsHash(source, rootsHash);
             state.ResetHistory = common.ResetHistory || controlChange || state.SettingsHash != signature;
+            _resetInteraction |= state.SettingsHash != signature;
             state.PreviousWorld = state.ResetHistory ? source.World : state.Source.World;
             state.SettingsHash = signature;
             state.Source = std::move(source);
             GrassLocalBounds(state.Source).Transform(state.Bounds, state.Source.World);
             state.Bounds.Extents.x += state.Source.MaxBendCm;
             state.Bounds.Extents.z += state.Source.MaxBendCm;
+            const float interactionReach = state.Source.HeightCm * (1 + state.Source.HeightVariation) *
+                Vector3::TransformNormal(Vector3::UnitY, state.Source.World).Length();
+            state.Bounds.Extents.x += interactionReach;
+            state.Bounds.Extents.z += interactionReach;
             if (state.Source.WindId) activeWind.insert(state.Source.WindId);
             _drawOrder.push_back(state.Source.Id);
             const UINT ribbons = state.Source.Implementation == GDX12GrassImplementation::CrossedRibbons ? 2u : 1u;
@@ -252,7 +305,15 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
         RetireWind(it->second);
         it = _wind.erase(it);
     }
-    if (!_drawOrder.empty() && !_initialized) Initialize();
+    InteractionParameters interaction = {};
+    interaction.Area = _interactionArea;
+    interaction.DeltaSeconds = deltaSeconds;
+    interaction.SourceCount = sourceCount;
+    interaction.Reset = _resetInteraction;
+    if (deltaSeconds > 0 || _resetInteraction) ++_interactionRevision;
+    interaction.Resolution = InteractionResolution;
+    frame.InteractionConstants->CopyData(0, interaction);
+    _resetInteraction = false;
     if (!vertexCapacity)
     {
         frame.DrawParameters.clear();
@@ -336,6 +397,19 @@ void GDX12GrassRenderer::PrepareGPU(GDX12CommandList* commands)
             upload->GetResource().D3DResource.Get(), 0, UINT64(roots->GetElementCount()) * sizeof(XMFLOAT3));
         commands->ResourceBarrier({ roots->GetResource().GetNonPixelShaderResourceBarrier() });
     }
+    commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
+    commands->SetComputeRootSignature(_interactionRoot.get());
+    commands->SetPipelineState(_interactionPSO);
+    commands->SetComputeRootConstantBufferView(0, frame.InteractionConstants->GetElementAddress(0));
+    commands->SetComputeSRV(0, frame.Sources->GetSRV()->GPUHandle);
+    commands->ResourceBarrier({ _trail->GetResource().GetUnorderedAccessBarrier(),
+        _previousTrail->GetResource().GetUnorderedAccessBarrier(), _presence->GetResource().GetUnorderedAccessBarrier() });
+    commands->SetComputeUAV(0, _trail->GetUAV()->GPUHandle);
+    commands->SetComputeUAV(1, _previousTrail->GetUAV()->GPUHandle);
+    commands->SetComputeUAV(2, _presence->GetUAV()->GPUHandle);
+    commands->Dispatch((InteractionResolution + 7) / 8, (InteractionResolution + 7) / 8, 1);
+    commands->ResourceBarrier({ _trail->GetResource().GetUAVBarrier(), _previousTrail->GetResource().GetUAVBarrier(),
+        _presence->GetResource().GetUAVBarrier() });
     for (const auto& job : frame.WindJobs)
     {
         commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
@@ -375,11 +449,20 @@ void GDX12GrassRenderer::UpdateWind(WindState& state, const bool reset)
     float remaining = (std::min)(s.DeltaSeconds * s.TimeScale, s.MaxSubsteps * s.MaxStepSeconds);
     if (s.Implementation == GDX12WindImplementation::Analytic)
     {
-        if (state.Resolution) RetireWind(state);
+        if (state.Resolution != s.GridResolution || state.Advected)
+        {
+            RetireWind(state);
+            for (auto& buffer : state.Velocity) buffer = Buffer<XMFLOAT4>(p.Resolution * p.Resolution, true, true);
+            state.Resolution = s.GridResolution;
+        }
         state.Time += remaining;
+        p.Gust.z = state.Time;
+        WindDispatch(6, p, nullptr, nullptr, state.Velocity[0].get());
+        p.Gust.z = reset ? state.Time : state.PreviousTime;
+        WindDispatch(6, p, nullptr, nullptr, state.Velocity[1].get());
         return;
     }
-    if (state.Resolution != s.GridResolution)
+    if (state.Resolution != s.GridResolution || !state.Advected)
     {
         RetireWind(state);
         for (auto& buffer : state.Velocity) buffer = Buffer<XMFLOAT4>(p.Resolution * p.Resolution, true, true);
@@ -468,6 +551,8 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
     p.Shape = XMFLOAT4(s.HeightCm, s.WidthCm, s.HeightVariation, s.MaxBendCm);
     p.Lod = XMFLOAT4(s.LodDistanceCm, s.FarCardDistanceCm, s.BendSeconds, 0);
     p.Patch = XMFLOAT4(s.ExtentsCm.x, s.ExtentsCm.y, 0, 0);
+    p.InteractionArea = _interactionArea;
+    p.Padding0 = InteractionResolution;
     p.Count = GrassBladeCount(s);
     p.Segments = s.Segments;
     p.Implementation = static_cast<UINT>(s.Implementation);
@@ -490,7 +575,7 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
         p.WindGust = XMFLOAT4(source.GustFrequencyHz, source.GustWavelengthCm, source.MaxSpeedCmPerSecond, 0);
         p.Patch.z = field.Time;
         p.Patch.w = field.PreviousTime;
-        p.WindMode = source.Implementation == GDX12WindImplementation::ProjectedGrid ? 2u : 1u;
+        p.WindMode = 2u;
         p.GridResolution = source.GridResolution;
         if (p.WindMode == 2)
         {
@@ -587,6 +672,10 @@ bool GDX12GrassRenderer::Expand(GDX12CommandList* commands, const GDX12GeometryC
     commands->SetComputeSRV(0, state.Roots[view.FrameSlot]->GetSRV()->GPUHandle);
     commands->SetComputeSRV(1, output->CurrentWind->GetSRV()->GPUHandle);
     commands->SetComputeSRV(2, output->PreviousWind->GetSRV()->GPUHandle);
+    commands->ResourceBarrier({ _trail->GetResource().GetNonPixelShaderResourceBarrier(),
+        _previousTrail->GetResource().GetNonPixelShaderResourceBarrier() });
+    commands->SetComputeSRV(3, _trail->GetSRV()->GPUHandle);
+    commands->SetComputeSRV(4, _previousTrail->GetSRV()->GPUHandle);
     commands->SetComputeUAV(0, _vertices->GetUAV()->GPUHandle);
     commands->SetComputeUAV(1, _indices->GetUAV()->GPUHandle);
     commands->SetComputeUAV(2, _arguments->GetUAV()->GPUHandle);
@@ -625,6 +714,11 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12GrassRenderer::PreparationAcces
         accesses.push_back({ &roots->GetResource(), Mode::Write });
         accesses.push_back({ &upload->GetResource(), Mode::Read });
     }
+    accesses.push_back({ &frame.Sources->GetResource(), Mode::Read });
+    accesses.push_back({ &frame.InteractionConstants->GetResource(), Mode::Read });
+    accesses.push_back({ &_presence->GetResource(), Mode::Write });
+    accesses.push_back({ &_trail->GetResource(), Mode::ReadWrite });
+    accesses.push_back({ &_previousTrail->GetResource(), Mode::Write });
     for (const auto& job : frame.WindJobs)
     {
         accesses.push_back({ &job.Constants->GetResource(), Mode::Read });
@@ -640,7 +734,8 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12GrassRenderer::ExpansionAccesse
     using Mode = GDX12RenderGraph::Mode;
     const auto* output = FindOutput(view, patch);
     if (!output) return {};
-    return { { &_grass.at(output->Owner).Roots[view.FrameSlot]->GetResource(), Mode::Read },
+    return { { &_trail->GetResource(), Mode::Read }, { &_previousTrail->GetResource(), Mode::Read },
+        { &_grass.at(output->Owner).Roots[view.FrameSlot]->GetResource(), Mode::Read },
         { &output->Constants->GetResource(), Mode::Read },
         { &output->CurrentWind->GetResource(), Mode::Read }, { &output->PreviousWind->GetResource(), Mode::Read },
         { &_vertices->GetResource(), Mode::Write }, { &_indices->GetResource(), Mode::Write }, { &_arguments->GetResource(), Mode::Write } };
@@ -686,6 +781,7 @@ void GDX12GrassRenderer::PublishPrimitives(GDX12RenderPrimitiveRegistry& registr
             primitive.DeformationRevision = wind->second.SettingsHash;
             Hash(primitive.DeformationRevision, wind->second.Time);
         }
+        Hash(primitive.DeformationRevision, _interactionRevision);
         primitive.Source = source;
         if (registry.Get(state.Primitive)) registry.Update(state.Primitive, primitive);
         else state.Primitive = registry.Add(primitive);
@@ -711,4 +807,10 @@ uint64_t GDX12GrassRenderer::GeometryAllocationBytes() const
     };
     add(_vertices); add(_indices); add(_arguments);
     return bytes;
+}
+
+GDX12ParticleInteractionField GDX12GrassRenderer::InteractionField() const
+{
+    return { &_presence->GetResource(), _presence->GetSRV()->GPUHandle, _interactionArea,
+        InteractionResolution, BistroArch::GrassPosition.y };
 }

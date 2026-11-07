@@ -1,5 +1,7 @@
 // Dead/alive pool design follows AMD GPUParticles11; explicit reservations replace hidden append counters.
 #include "Particles.hlsli"
+#include "InteractionField.hlsli"
+StructuredBuffer<float4> Interaction : register(t0);
 
 StructuredBuffer<uint> AliveIn : register(t1);
 Texture2D<float> SceneDepth : register(t3);
@@ -241,6 +243,17 @@ void Simulate(uint id : SV_DispatchThreadID)
         InterlockedAdd(Counters[0], 1, slot);
         Dead[slot] = index;
         return;
+    }
+    if (InteractionResolution != 0 && DeltaTime > 0)
+    {
+        float4 contact = SampleInteraction(Interaction, particle.Position.xz, InteractionArea, InteractionResolution);
+        float heightWeight = saturate((contact.w - particle.Position.y) / 40) *
+            saturate((particle.Position.y - InteractionFloor + 20) / 20);
+        float presence = contact.z * heightWeight;
+        float2 away = contact.xy / max(contact.z, 0.001f);
+        away /= max(1, length(away));
+        particle.Velocity = lerp(particle.Velocity, Wind + float3(away.x * 180, 220, away.y * 180),
+            (1 - exp(-10 * DeltaTime)) * presence);
     }
     float step = DeltaTime / Substeps;
     float damping = exp(-Drag * step);

@@ -205,8 +205,7 @@ static void TestPreparedGrassViews(GDX12Device& device, GDX12DeviceResources& re
     renderer.PrepareView(gbufferView, 0);
     auto* commands = queue->GetCommandList();
     renderer.Expand(commands, depthView, 0);
-    auto accesses = renderer.ExpansionAccesses(depthView, 0);
-    auto* vertices = accesses[4].Resource;
+    auto* vertices = renderer.DrawAccesses().front().Resource;
     const UINT64 vertexBytes = vertices->D3DResource->GetDesc().Width;
     std::array<GDX12ResourceHandle, 2> positions;
     for (auto& target : positions) target = device.CreateResource(D3D12_HEAP_TYPE_READBACK,

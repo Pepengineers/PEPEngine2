@@ -1,4 +1,7 @@
 #include "GrassCommon.hlsli"
+#include "InteractionField.hlsli"
+StructuredBuffer<float4> Trail : register(t3);
+StructuredBuffer<float4> PreviousTrail : register(t4);
 #include "ShadowFrustum.hlsli"
 StructuredBuffer<float3> Roots : register(t0);
 StructuredBuffer<float4> Wind : register(t1);
@@ -66,7 +69,7 @@ void ExpandCS(uint3 id : SV_DispatchThreadID)
     float3 previousRootW = mul(float4(root, 1), PreviousWorld).xyz;
     float3 up = mul(float4(0, height, 0, 0), World).xyz;
     float3 previousUp = mul(float4(0, height, 0, 0), PreviousWorld).xyz;
-    float3 extents = abs(up) * 0.5f + (abs(World[0].xyz) + abs(World[2].xyz)) * Shape.y + Shape.w;
+    float3 extents = abs(up) * 0.5f + (abs(World[0].xyz) + abs(World[2].xyz)) * Shape.y + Shape.w + length(up);
     if (!ShadowBoxVisible(rootW + up * 0.5f, extents, ViewProjection)) return;
     float distance = length(rootW - EyeMaxDistance.xyz);
     // Shadow culling has no camera distance cutoff: off-camera casters stay present.
@@ -85,6 +88,18 @@ void ExpandCS(uint3 id : SV_DispatchThreadID)
     InterlockedAdd(Arguments[6], 1, ignored);
     float3 bend = Bend(rootW, false);
     float3 previousBend = Bend(previousRootW, true);
+    float4 contact = SampleInteraction(Trail, rootW.xz, InteractionArea, Padding0);
+    float4 previousContact = SampleInteraction(PreviousTrail, previousRootW.xz, InteractionArea, Padding0);
+    float2 direction = dot(contact.xy, contact.xy) > 1e-6f ? normalize(contact.xy) : float2(1, 0);
+    float2 previousDirection = dot(previousContact.xy, previousContact.xy) > 1e-6f ? normalize(previousContact.xy) : float2(1, 0);
+    bend += float3(direction.x, 0, direction.y) * length(up) * 0.7f * contact.z - up * 0.8f * contact.z;
+    previousBend += float3(previousDirection.x, 0, previousDirection.y) * length(previousUp) * 0.7f * previousContact.z -
+        previousUp * 0.8f * previousContact.z;
+    // Limit the combined wind/contact shape to the stem length, for both motion samples.
+    float3 tip = up + bend;
+    bend = tip * min(1, length(up) / max(length(tip), 1e-6f)) - up;
+    float3 previousTip = previousUp + previousBend;
+    previousBend = previousTip * min(1, length(previousUp) / max(length(previousTip), 1e-6f)) - previousUp;
     float angle = Random(randomId + 3) * 6.2831853f;
     for (uint ribbon = 0; ribbon < ribbons; ++ribbon)
     {

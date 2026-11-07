@@ -94,4 +94,6 @@ cbuffer Emitter : register(b2)
     float4x4 WorldToCollisionBox;
     float3 CollisionBoxHalfExtents;
     uint CollisionBoxEnabled;
+    float4 InteractionArea;
+    uint InteractionResolution; float InteractionFloor; float2 InteractionPadding;
 };

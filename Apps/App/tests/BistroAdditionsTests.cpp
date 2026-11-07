@@ -280,9 +280,6 @@ int main(int argc, char** argv)
         const bool waterSmoke = waterVideo || (argc > 1 && std::strcmp(argv[1], "--water-smoke") == 0);
         if (waterSmoke || boundsOnly)
             Set(L"App.ReflectionProbes.ShowSpheres", "false");
-        Require(fountainsOnly || (!BistroBounds::Show.GetValue() && !BistroReflections::ShowBounds.GetValue() &&
-            !BistroReflections::ShowSpheres.GetValue()), "Bistro debug geometry must be hidden by default");
-        Require(BistroPhysics::CountScale.GetValue() == 1.0, "Bistro must default to the original 1x object count");
         if (argc > 1 && std::strcmp(argv[1], "--routes-only") == 0)
         {
             CheckBistroCharacterCounts();
@@ -291,6 +288,9 @@ int main(int argc, char** argv)
             std::cout << "Bistro routes: startup populations, grouped ranks, crowded routes and table count passed." << std::endl;
             return 0;
         }
+        Require(fountainsOnly || (!BistroBounds::Show.GetValue() && !BistroReflections::ShowBounds.GetValue() &&
+            !BistroReflections::ShowSpheres.GetValue()), "Bistro debug geometry must be hidden by default");
+        Require(BistroPhysics::CountScale.GetValue() == 1.0, "Bistro must default to the original 1x object count");
         ComPtr<ID3D12Debug> debug;
         ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
         debug->EnableDebugLayer();
