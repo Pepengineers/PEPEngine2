@@ -188,7 +188,7 @@ namespace
             _reflections.Update(world, deltaSeconds);
             _grass.Update(world, deltaSeconds);
             _water.Update(world, deltaSeconds);
-            _characters.Update(world, deltaSeconds, _jobs);
+            _characters.Update(world, deltaSeconds, _jobs, Locator.GetModule<PhysicsModule>().get());
         }
 
         BistroReflections::Scene _reflections;

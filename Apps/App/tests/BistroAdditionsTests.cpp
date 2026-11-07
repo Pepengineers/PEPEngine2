@@ -274,7 +274,8 @@ int main(int argc, char** argv)
     {
         const bool fountainsOnly = argc > 1 && std::strcmp(argv[1], "--fountains-only") == 0;
         const bool archSmoke = argc > 1 && std::strcmp(argv[1], "--arch-smoke") == 0;
-        if (archSmoke) Set(L"App.ReflectionProbes.ShowSpheres", "false");
+        const bool routeGround = argc > 1 && std::strcmp(argv[1], "--route-ground") == 0;
+        if (archSmoke || routeGround) Set(L"App.ReflectionProbes.ShowSpheres", "false");
         const bool boundsOnly = argc > 1 && std::strcmp(argv[1], "--bounds-only") == 0;
         const bool waterVideo = argc > 1 && std::strcmp(argv[1], "--water-video") == 0;
         const bool waterSmoke = waterVideo || (argc > 1 && std::strcmp(argv[1], "--water-smoke") == 0);
@@ -285,7 +286,7 @@ int main(int argc, char** argv)
             CheckBistroCharacterCounts();
             Require(BistroReflections::Tables.size() == 21 && BistroReflections::Count.SetFromString("21") &&
                 !BistroReflections::Count.SetFromString("22"), "Table count limit must match all 21 anchors");
-            std::cout << "Bistro routes: startup populations, grouped ranks, crowded routes and table count passed." << std::endl;
+            std::cout << "Bistro routes: startup populations, closed loop, single-file groups, crowded routes and table count passed." << std::endl;
             return 0;
         }
         Require(fountainsOnly || (!BistroBounds::Show.GetValue() && !BistroReflections::ShowBounds.GetValue() &&
@@ -297,9 +298,31 @@ int main(int argc, char** argv)
         ComPtr<ID3D12Debug5> names;
         if (SUCCEEDED(debug.As(&names))) names->SetEnableAutoName(TRUE);
         CheckBistroCharacterCounts();
-        if (!waterSmoke) CheckBistroParticleControls();
+        if (!waterSmoke && !routeGround) CheckBistroParticleControls();
         BistroApp app(GetModuleHandleW(nullptr));
         Require(app.Initialize(), "Bistro additions initialization failed");
+        if (routeGround)
+        {
+            auto physics = BenchmarkEngine::GetLocator().GetModule<PhysicsModule>();
+            auto& routeWorld = *BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()->GetWorld();
+            size_t samples = 0, unsupported = 0;
+            for (const auto& edge : BistroRoutes::People().Edges)
+                for (const auto& point : edge.Points)
+                {
+                    PhysicsRayHit hit;
+                    const bool found = physics->RayCastStatic(routeWorld, point + Vector3(0,50,0), {0,-100,0}, hit);
+                    if (!found || hit.Normal.y <= 0 || std::abs(hit.Position.y + 4.6f - point.y) >= 20)
+                    {
+                        if (unsupported < 20) std::cerr << "Unsupported route sample: " << point.x << ',' << point.y << ',' << point.z
+                            << "; hit=" << found << "; groundY=" << hit.Position.y << "; normalY=" << hit.Normal.y << '\n';
+                        ++unsupported;
+                    }
+                    ++samples;
+                }
+            std::cout << "Human loop: " << samples << " static ground queries; unsupported=" << unsupported << ".\n";
+            Require(unsupported == 0, "Closed human route lost static ground support");
+            return 0;
+        }
         if (!waterSmoke) CheckBistroGrassCounts();
         ShowWindow(app.GetWindow()->GetWindowHandle(), SW_HIDE);
         auto render = BenchmarkEngine::GetLocator().GetModule<RenderModule>();

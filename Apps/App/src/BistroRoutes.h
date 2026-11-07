@@ -64,8 +64,10 @@ namespace BistroRoutes
                 }
                 if (edge.Length() <= 0) throw std::invalid_argument("Empty Bistro route segment");
             }
+            float distance = separation;
             for (size_t edge = 0; edge < Edges.size(); ++edge)
-                for (float distance = separation; distance < Edges[edge].Length(); distance += separation * 1.5f)
+            {
+                for (; distance < Edges[edge].Length(); distance += separation * 1.5f)
                 {
                     Cursor slot{edge, distance};
                     bool free = true;
@@ -73,6 +75,8 @@ namespace BistroRoutes
                         free &= HorizontalDistanceSquared(Position(slot), Position(existing)) >= separation * separation;
                     if (free) Spawns.push_back(slot);
                 }
+                distance -= Edges[edge].Length();
+            }
         }
 
         Vector3 Position(const Cursor& cursor) const
@@ -85,8 +89,15 @@ namespace BistroRoutes
             return Vector3::Lerp(edge.Points[index - 1], edge.Points[index], fraction);
         }
 
-        void Advance(Cursor& cursor, float distance, std::mt19937& random) const
+        void Advance(Cursor& cursor, float distance) const
         {
+            if (distance < 0)
+            {
+                cursor.Forward = !cursor.Forward;
+                Advance(cursor, -distance);
+                cursor.Forward = !cursor.Forward;
+                return;
+            }
             while (distance > 0)
             {
                 const auto& edge = Edges[cursor.Edge];
@@ -98,10 +109,10 @@ namespace BistroRoutes
                 }
                 distance -= remaining;
                 const size_t junction = cursor.Forward ? edge.To : edge.From;
-                std::vector<size_t> choices;
+                size_t choice = cursor.Edge;
                 for (const auto next : Incident[junction])
-                    if (next != cursor.Edge || Incident[junction].size() == 1) choices.push_back(next);
-                cursor.Edge = choices[std::uniform_int_distribution<size_t>(0, choices.size() - 1)(random)];
+                    if (next != cursor.Edge) { choice = next; break; }
+                cursor.Edge = choice;
                 cursor.Forward = Edges[cursor.Edge].From == junction;
                 cursor.Distance = cursor.Forward ? 0 : Edges[cursor.Edge].Length();
             }
@@ -116,36 +127,15 @@ namespace BistroRoutes
 
     inline const Network& People()
     {
-        // shortcut: heights approximate uneven paving; use ground projection when precise foot contact is needed.
-        static const Network network({
-            {1400, 27.762f,-4500},
-            {1650, 27.762f,-4000},
-            {1550,23.426f,-3500},
-            {1250,23.932f,-3000},
-            {950,22.581f,-2400},
-            {350,24.794f,-1650},
-            {-250,24.897f,-1100},
-            {-550,24.243f,-600},
-            {-650,23.096f,-100},
-            {-450,23.875f,500},
-            {0,26.858f,850},
-            {850,26.886f,1250},
-            {1800,23.026f,1600},
-            {2800,22.779f,2000},
-            {3500,20.426f,2300},
-            {3600,20.169f,1900},
-            {4300, 27.762f,1000},
-            {5500, 27.762f,900},
-            {6200, 27.762f,2200},
-            {5800, 27.762f,3700},
-            {4300, 27.762f,3800},
-            {-1300,31.944f,-1200},
-            {-2200, 27.762f,-2000},
-            {-2700, 27.762f,-2400},
-            {3300, 27.762f,2700},
-            {5800, 27.762f,2900},
-            {3200, 27.762f,3400}},
-            {{0,1}, {1,2}, {2,3}, {3,4}, {4,5}, {5,6}, {6,7}, {7,8}, {8,9}, {9,10}, {10,11}, {11,12}, {12,13}, {13,14}, {14,15}, {15,16}, {16,17}, {17,18}, {18,25}, {25,19}, {19,20}, {20,26}, {26,24}, {24,14}, {6,21}, {21,22}, {22,23}, {13,15}}, 110);
+        static const Network network = []
+        {
+            std::vector<Vector3> nodes = {
+#include "BistroPeopleLoop.inl"
+            };
+            std::vector<std::pair<size_t, size_t>> links;
+            for (size_t i = 0; i < nodes.size(); ++i) links.emplace_back(i, (i + 1) % nodes.size());
+            return Network(std::move(nodes), std::move(links), 110);
+        }();
         return network;
     }
 

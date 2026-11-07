@@ -2,6 +2,7 @@
 
 #include "App.Base/ECS/World.h"
 #include "BistroRoutes.h"
+#include "App.Base/Modules/PhysicsModule.h"
 #include "Components/BistroInteractionSource.h"
 #include "Engine.Core/AssetManager.h"
 #include "Engine.Core/Jobs/JobSystem.h"
@@ -13,7 +14,7 @@
 namespace BistroCharacters
 {
     inline AutoConsoleVariable<int> NPCCount(L"App.NPC.Count", 10,
-        L"Initial people count; crowded spawns form wider ranks, 0 disables, applies on startup",
+        L"Initial people count; crowded groups follow in single file, 0 disables, applies on startup",
         EConsoleVariableFlags::ReadOnly, [](int value) { return value >= 0; });
     inline AutoConsoleVariable<int> FoxCount(L"App.Fox.Count", 5,
         L"Initial single-file fox count; spawn positions repeat when crowded, 0 disables, applies on startup",
@@ -24,7 +25,6 @@ namespace BistroCharacters
         struct Group
         {
             BistroRoutes::Cursor Route;
-            std::mt19937 Random;
             size_t First, Count;
             bool Fox;
         };
@@ -32,7 +32,7 @@ namespace BistroCharacters
     public:
         explicit Scene(unsigned seed = std::random_device{}()) : _random(seed) {}
 
-        void Update(World& world, float deltaSeconds, JobSystem& jobs)
+        void Update(World& world, float deltaSeconds, JobSystem& jobs, PhysicsModule* physics = nullptr)
         {
             const bool spawning = !_initialized;
             auto& ecs = world.GetECS();
@@ -45,6 +45,8 @@ namespace BistroCharacters
             }
             _stepSeconds = world.IsPaused() ? 0 : deltaSeconds * world.GetTimeScale();
             if (_groups.empty() || (!spawning && _stepSeconds <= 0)) return;
+            _world = &world;
+            _physics = physics;
             _transforms.clear();
             for (const auto entity : _entities) _transforms.push_back(&ecs.Get<TransformComponent>(entity));
             Schedule(jobs, _groups.size(), 1).Complete();
@@ -67,23 +69,28 @@ namespace BistroCharacters
         {
             auto& group = _groups[index];
             const auto& network = group.Fox ? BistroRoutes::Foxes() : BistroRoutes::People();
-            network.Advance(group.Route, (group.Fox ? 60 : 95) * _stepSeconds, group.Random);
-            const auto center = network.Position(group.Route);
-            auto sample = group.Route;
-            const float length = network.Edges[sample.Edge].Length();
-            sample.Distance = sample.Distance < length ? (std::min)(length, sample.Distance + 1) :
-                (std::max)(0.0f, sample.Distance - 1);
-            auto forward = network.Position(sample) - center;
-            if ((sample.Distance < group.Route.Distance) == group.Route.Forward) forward = -forward;
-            forward.y = 0;
-            forward.Normalize();
-            const Vector3 right(forward.z, 0, -forward.x);
-            const float yaw = XMConvertToDegrees(std::atan2(forward.x, forward.z)) + (group.Fox ? 0 : 180);
+            network.Advance(group.Route, (group.Fox ? 60 : 95) * _stepSeconds);
+            auto route = group.Route;
             for (size_t member = 0; member < group.Count; ++member)
             {
+                if (member) network.Advance(route, -network.Separation);
+                auto position = network.Position(route);
+                auto sample = route;
+                network.Advance(sample, 1);
+                auto forward = network.Position(sample) - position;
+                forward.y = 0;
+                const float yaw = XMConvertToDegrees(std::atan2(forward.x, forward.z)) + (group.Fox ? 0 : 180);
+                if (!group.Fox && _physics)
+                {
+                    PhysicsRayHit hit;
+                    // Cobblestone bevels have steep normals; bound the step against the authored ground height.
+                    if (!_physics->RayCastStatic(*_world, position + Vector3(0, 50, 0), {0, -100, 0}, hit) ||
+                        hit.Normal.y <= 0 || std::abs(hit.Position.y + 4.6f - position.y) >= 20)
+                        throw std::runtime_error("Bistro human route lost its walkable ground");
+                    position.y = hit.Position.y + 4.6f;
+                }
                 auto& transform = *_transforms[group.First + member];
-                const float offset = (static_cast<float>(member) - static_cast<float>(group.Count - 1) * 0.5f) * network.Separation;
-                transform.Location = center + right * offset;
+                transform.Location = position;
                 transform.Rotation = Vector3(0, yaw, 0);
                 transform.DirtyFlag = true;
             }
@@ -113,9 +120,9 @@ namespace BistroCharacters
             for (size_t index = 0; index < groups; ++index)
             {
                 auto route = network.Spawns[slots[index % slots.size()]];
-                route.Forward = std::uniform_int_distribution<int>(0, 1)(_random) != 0;
+                route.Forward = true;
                 const size_t members = requested / groups + (index < requested % groups);
-                _groups.push_back({route, std::mt19937{_random()}, _entities.size(), members, fox});
+                _groups.push_back({route, _entities.size(), members, fox});
                 for (size_t member = 0; member < members; ++member, ++character)
                 {
                     auto entity = ecs.CreateEntity();
@@ -135,6 +142,8 @@ namespace BistroCharacters
         std::vector<Group> _groups;
         std::vector<Entity> _entities;
         std::vector<TransformComponent*> _transforms;
+        World* _world = nullptr;
+        PhysicsModule* _physics = nullptr;
         float _stepSeconds = 0;
         bool _initialized = false;
     };

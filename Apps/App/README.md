@@ -69,23 +69,27 @@ registered by Bistro App, so keep them out of other executables' shared INI file
 Reflection maps bake during initial warmup and remain static until explicitly
 invalidated or their capture settings/topology change. They exclude moving props
 and characters and do not repeatedly capture the scene. This is an in-memory
-bake, without an offline disk cache. Humans follow a connected spline network
-along the street and around the plaza/fountain; foxes follow interior aisles and
-the bar area. Counts use shuffled route spawn positions without an artificial upper bound.
-Once human spawn positions fill, ranks grow sideways (two abreast, then three,
-and so on), spaced 110 cm apart. Each rank shares its route, direction and
-junction choices; each member keeps an independent animation phase. Foxes remain
-single file on their route centers and reuse spawn positions when necessary.
-This is a benchmark: walkers can intersect, never wait for each other, and wide
-human ranks may cross scenery. There is no wall or passage-width avoidance.
+bake, without an offline disk cache. Humans follow one closed street/plaza circuit
+in a fixed direction, without random turns or dead-end reversals. The source-based
+route diagram and validation limits are in
+[the route report](../../docs/reports/2026-11-08-bistro-people-loop.md).
+Counts use shuffled route spawn positions without an artificial upper bound.
+Once human spawn positions fill, groups form single-file columns spaced 110 cm
+along the curve; lateral ranks do not fit the narrow furniture/bollard passages.
+Each member keeps an independent animation phase and follows the same curve,
+including through bends. Human height is projected onto static scene collision.
+Foxes follow the interior aisles with deterministic junction choices and reuse
+spawn positions when necessary. This is a benchmark: walkers never wait for
+each other; dense populations can overlap. Dynamic obstacle avoidance is absent.
 The complete requested population is created during initial world setup; changing
 `App.NPC.Count` or `App.Fox.Count` takes effect on the next startup. Existing saved
 CVar values override the defaults. Counts remain limited by the integer type and
 available CPU/GPU resources, rather than a fixed crowd or spawn-slot maximum.
 Routes respect world pause/time scale and use the existing GPU skinning pipeline.
-The authored nodes, links and sampled Bezier curves are in `src/BistroRoutes.h`.
-Movement uses the App's shared JobSystem with one job per human rank or fox;
-there is no pairwise crowd scan. Each group owns its random generator, so thread
+The loop anchors are in `src/BistroPeopleLoop.inl`; `src/BistroRoutes.h` samples
+the Bezier curves.
+Movement uses the App's shared JobSystem with one job per human group or fox;
+there is no pairwise crowd scan. Route progression is deterministic, so thread
 scheduling cannot change routes. Skeletal pose evaluation, bone palettes and
 bounds also run per character on that pool; entity/resource creation and GPU
 command recording stay on the owner thread. Immutable GPU skinning inputs are

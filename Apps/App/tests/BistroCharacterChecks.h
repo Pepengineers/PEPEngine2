@@ -76,6 +76,22 @@ inline void CheckBistroCharacterCounts()
     {
         if (!condition) throw std::runtime_error(message);
     };
+    const auto& loop = BistroRoutes::People();
+    float lap = 0;
+    for (size_t i = 0; i < loop.Edges.size(); ++i)
+    {
+        require(loop.Incident[i].size() == 2 && loop.Edges[i].From == i &&
+            loop.Edges[i].To == (i + 1) % loop.Nodes.size(), "Human route must be one ordered closed circuit");
+        lap += loop.Edges[i].Length();
+    }
+    require(!loop.Spawns.empty(), "Short route segments must still create spawn positions");
+    for (const auto& spawn : loop.Spawns)
+    {
+        auto cursor = spawn;
+        loop.Advance(cursor, lap * 2);
+        require(cursor.Forward && Vector3::Distance(loop.Position(cursor), loop.Position(spawn)) < 1,
+            "Human walker must return to its start after two laps without reversing");
+    }
     World world(WorldDesc{});
     JobSystem jobs(4);
     BistroCharacters::Scene scene;
@@ -103,7 +119,7 @@ inline void CheckBistroCharacterCounts()
         const auto& transform = ecs.Get<TransformComponent>(entity);
         require(transform.Scale.x > 0 && transform.Scale.y > 0 && transform.Scale.z > 0,
             "Character must use positive calibrated scale");
-        require(transform.Location.y >= (fox ? 39.7f : 20) && transform.Location.y <= (fox ? 52 : 33),
+        require(transform.Location.y >= (fox ? 39.7f : 20) && transform.Location.y <= 50,
             "Characters must stand on the authored Bistro floor/pavement");
         if (fox) firstFox = entity;
         else
@@ -210,7 +226,7 @@ inline void CheckBistroCharacterCounts()
         foxSpawns.push_back(transform.Location);
     });
     require(repeatedFoxSpawn, "Excess single-file foxes must reuse spawn positions");
-    require(rank[0] != InvalidEntity && rank[1] != InvalidEntity && rank[2] != InvalidEntity, "Three-wide human rank missing");
+    require(rank[0] != InvalidEntity && rank[1] != InvalidEntity && rank[2] != InvalidEntity, "Three-member human column missing");
     require(crowd.Get<SkeletalMeshRenderComponent>(rank[0]).GetTimeSeconds() !=
         crowd.Get<SkeletalMeshRenderComponent>(rank[1]).GetTimeSeconds(), "Rank members must retain individual animation phases");
     const auto onRoute = [](const BistroRoutes::Network& network, Vector3 position)
@@ -232,11 +248,13 @@ inline void CheckBistroCharacterCounts()
         const auto& left = crowd.Get<TransformComponent>(rank[0]);
         const auto& middle = crowd.Get<TransformComponent>(rank[1]);
         const auto& right = crowd.Get<TransformComponent>(rank[2]);
-        require(left.Rotation == middle.Rotation && middle.Rotation == right.Rotation &&
-            Vector3::Distance((left.Location + right.Location) * 0.5f, middle.Location) < 0.01f &&
-            std::abs(Vector3::Distance(left.Location, middle.Location) - 110) < 0.01f,
-            "A human rank must turn together and preserve its lateral spacing");
-        require(onRoute(BistroRoutes::People(), middle.Location), "Rank center left the human route");
+        require(onRoute(BistroRoutes::People(), left.Location) && onRoute(BistroRoutes::People(), middle.Location) &&
+            onRoute(BistroRoutes::People(), right.Location), "Every column member must stay on the validated human route");
+        require(Vector3::Distance(left.Location, middle.Location) > 20 &&
+            Vector3::Distance(middle.Location, right.Location) > 20 &&
+            Vector3::Distance(left.Location, middle.Location) <= 110.1f &&
+            Vector3::Distance(middle.Location, right.Location) <= 110.1f,
+            "Human column members must follow within their 110 cm arc spacing");
         crowd.ForEach<SkeletalMeshRenderComponent, NameComponent>([&](Entity entity,
             const SkeletalMeshRenderComponent& mesh, const NameComponent& name)
         {

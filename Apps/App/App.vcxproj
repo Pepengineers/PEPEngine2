@@ -126,6 +126,7 @@
     <ClInclude Include="src\BistroWater.h" />
     <ClInclude Include="src\BistroCharacters.h" />
     <ClInclude Include="src\BistroRoutes.h" />
+    <ClInclude Include="src\BistroPeopleLoop.inl" />
     <ClInclude Include="src\BistroBounds.h" />
   </ItemGroup>
   <ItemGroup>
