@@ -55,7 +55,7 @@ private:
     std::map<uint64_t, std::unique_ptr<State>> _states;
     std::unique_ptr<GDX12RootSignature> _solverRoot, _surfaceRoot;
     ComPtr<ID3D12PipelineState> _save, _hash, _sort, _offsets, _densities, _integrate;
-    ComPtr<ID3D12PipelineState> _sphere, _thicknessDraw, _initialize, _filter, _merge, _resolve;
+    ComPtr<ID3D12PipelineState> _sphere, _referenceParticles, _thicknessDraw, _initialize, _filter, _merge, _resolve;
     std::unique_ptr<GDX12Texture> _raw, _eyeDepth, _scratchDepth, _thickness;
     std::unique_ptr<GDX12Texture> _filtered[2];
     std::unique_ptr<GDX12Texture> _depth, _motion, _geometry, _owner, _color;

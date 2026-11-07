@@ -105,6 +105,29 @@ SurfaceOutput SpherePS(SphereVertex input)
     output.Depth = DeviceDepth(world);
     return output;
 }
+// MGPU FluidParticleDraw.hlsl: opaque .1-unit quads, blue to red at speed 10.
+SphereVertex ReferenceVS(uint vertex : SV_VertexID, uint instance : SV_InstanceID)
+{
+    static const float2 Corners[4] = { float2(-.5,-.5), float2(.5,-.5), float2(-.5,.5), float2(.5,.5) };
+    float3 center = mul(float4(Particles[instance].Position, 1), ContainerToWorld).xyz;
+    float3 right = float3(Camera.View._11, Camera.View._21, Camera.View._31);
+    float3 up = float3(Camera.View._12, Camera.View._22, Camera.View._32);
+    float size = .1f * sqrt(length(ContainerToWorld._11_12_13) * length(ContainerToWorld._31_32_33));
+    SphereVertex output;
+    output.Position = mul(float4(center + size * (right * Corners[vertex].x + up * Corners[vertex].y), 1), Camera.ViewProj);
+    output.ParticleId = instance;
+    return output;
+}
+SurfaceOutput ReferencePS(SphereVertex input)
+{
+    if (input.Position.z < OpaqueDepth[(uint2)input.Position.xy]) discard;
+    float3 center = mul(float4(Particles[input.ParticleId].Position, 1), ContainerToWorld).xyz;
+    SurfaceOutput output;
+    output.EyeDepth = -mul(float4(center, 1), Camera.View).z;
+    output.RawData = float4(0, 0, 0, input.ParticleId);
+    output.Depth = input.Position.z;
+    return output;
+}
 float ThicknessPS(SphereVertex input) : SV_TARGET0
 {
     float front, back; float3 ray;
@@ -191,7 +214,21 @@ void MergeSurface(uint2 p : SV_DispatchThreadID)
     float3 world = WorldAt(float2(p) + 0.5f, z);
     float depth = DeviceDepth(world);
     // shortcut: one nearest interface per pixel; use layered surfaces for nested fluids.
-    if (depth <= DepthOut[p] || depth > 1 || depth <= 0) return;
+    if ((FilterMode == 1 ? depth < DepthOut[p] : depth <= DepthOut[p]) || depth > 1 || depth <= 0) return;
+    if (FilterMode == 1)
+    {
+        FluidParticle particle = Particles[(uint)Raw[p].w];
+        float3 delta = mul(float4(particle.Position - particle.PreviousPosition, 0), ContainerToWorld).xyz;
+        float4 current = mul(float4(world, 1), Camera.ViewProjNoJitter);
+        float4 previous = mul(float4(world - delta, 1), Camera.PrevViewProjNoJitter);
+        float2 motion = previous.w > 1e-5f && current.w > 1e-5f && ResetMotion == 0 ?
+            previous.xy / previous.w - current.xy / current.w : 0;
+        DepthOut[p] = depth;
+        MotionOut[p] = all(isfinite(motion)) ? motion : 0;
+        GeometryOut[p] = float4(saturate(lerp(float3(0,0,1), float3(1,0,0), length(particle.Velocity) / 10)), -1);
+        OwnerOut[p] = OwnerId;
+        return;
+    }
     float3 left = world - NeighborWorld(p, int2(-1, 0), z);
     float3 right = NeighborWorld(p, int2(1, 0), z) - world;
     float3 up = world - NeighborWorld(p, int2(0, -1), z);
@@ -220,6 +257,7 @@ void ResolveWater(uint2 p : SV_DispatchThreadID)
     float3 ray = Ray(pixel);
     float3 world = Camera.CameraLocation + ray * DistanceAt(pixel, depth);
     float4 geometry = Geometry[p];
+    if (geometry.w < 0) { ColorOut[p] = float4(geometry.xyz, 1); return; }
     float3 normal = geometry.xyz;
     float2 uv = pixel / Size;
     float3 refracted = refract(ray, normal, rcp(IOR));

@@ -192,6 +192,48 @@ static void CheckFluidSimulation(GDX12Device& device, GDX12FluidSurfacePass& wat
             ++buffer;
         }
     Require(buffer == 2, "Running fluid toggle fixture lost its buffers");
+    settings.MGPUReference = true;
+    settings.RenderEnabled = false;
+    settings.MaxSubsteps = 1;
+    settings.MaxStepSeconds = 0.001f;
+    settings.ParticleRadiusCm = 0.1f;
+    settings.SmoothingRadiusCm = 0.2f;
+    settings.ParticleMassKg = 1;
+    settings.RestDensityKgPerCm3 = 630;
+    settings.PressureStiffnessCm2PerSecond2 = 288;
+    settings.NearPressureStiffnessCm2PerSecond2 = 2.15f;
+    settings.AccelerationCmPerSecond2 = Vector3::Zero;
+    settings.ContainerHalfExtentCm = Vector3(13, 1.9f, 13.2f);
+    settings.MaxSpeedCmPerSecond = 1;
+    settings.MaxAccelerationCmPerSecond2 = 1;
+    fluid.DeltaSeconds = 0.001f;
+    fluid.ContainerToWorld = Matrix::CreateScale(20) * Matrix::CreateRotationY(0.7f) * Matrix::CreateTranslation(-1831,65,-989);
+    fluid.Component.SetSettings(settings);
+    fluid.Component.SetParticles({{{12.99f,0,0},{100,0,0}}});
+    water.SetInstances({fluid}); execute();
+    bool referenceBounce = false;
+    for (const auto& access : water.GetSimulationBufferAccesses())
+        if (access.Usage == GDX12RenderGraph::Mode::ReadWrite &&
+            access.Resource->D3DResource->GetDesc().Width == sizeof(Particle))
+        {
+            const auto p = read(*access.Resource).front();
+            referenceBounce |= std::abs(p.Position.x - 13) < 1e-5f && std::abs(p.Velocity.x + 94.92875f) < 0.001f;
+        }
+    Require(referenceBounce, "Raw MGPU units must ignore render scale, speed caps and sphere collision margins");
+    fluid.Component.SetParticles({{{-.05f,0,0},{}},{{.05f,0,0},{}}});
+    water.SetInstances({fluid}); execute();
+    const float pi = 3.14159265359f, h = .2f, q = .1f;
+    const float density = 15 / (2 * pi * std::pow(h,5.0f)) * (h*h + q*q);
+    const float nearDensity = 15 / (pi * std::pow(h,6.0f)) * (h*h*h + q*q*q);
+    const float acceleration = ((density - 630) * 288 * (-15 / (pi * std::pow(h,5.0f)) * q) / density +
+        nearDensity * 2.15f * (-45 / (pi * std::pow(h,6.0f)) * q*q) / nearDensity) / density;
+    const float expectedVelocity = acceleration * .001f * (1 - .75f * .001f);
+    bool referencePressure = false;
+    for (const auto& access : water.GetSimulationBufferAccesses())
+        if (access.Usage == GDX12RenderGraph::Mode::ReadWrite &&
+            access.Resource->D3DResource->GetDesc().Width == 2 * sizeof(Particle))
+            referencePressure |= std::abs(read(*access.Resource).front().Velocity.x - expectedVelocity) < 0.002f;
+    Require(referencePressure && expectedVelocity > 0, "GPU pressure must match unscaled MGPU equations, without an acceleration cap");
     water.SetInstances({}); execute();
     std::cout << "GPU fluid: MGPU cohesion/prediction, pause, 95-percent rebound, fixed substeps and legacy pressure isolation passed.\n";
 }

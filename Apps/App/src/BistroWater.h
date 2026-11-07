@@ -16,9 +16,15 @@
 
 namespace BistroWater
 {
+    inline const Vector3 ReferenceHalfExtent(5, 1, 10);
+    inline const Vector3 ReferenceScale(HalfExtent.x / ReferenceHalfExtent.x,
+        HalfExtent.y / ReferenceHalfExtent.y, HalfExtent.z / ReferenceHalfExtent.z);
     inline AutoConsoleVariable<int> Count(L"App.Water.Count", 1,
         L"Bistro water basins, 0 disables, maximum 8",
         EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 8; });
+    inline AutoConsoleVariable<float> WaveSpeed(L"App.Water.WaveSpeed", 6.0f,
+        L"Initial wave speed along +local X in MGPU units/s, startup only, 0..12",
+        EConsoleVariableFlags::ReadOnly, [](float value) { return std::isfinite(value) && value >= 0 && value <= 12; });
 
     class Scene
     {
@@ -53,7 +59,7 @@ namespace BistroWater
                 basin.AddComponent<StaticMeshRenderComponent>(_mesh, _materials);
                 auto water = ecs.CreateEntity();
                 water.AddComponent<NameComponent>("BistroWater" + std::to_string(index));
-                water.AddComponent<TransformComponent>(position, Vector3(0, YawDegrees, 0));
+                water.AddComponent<TransformComponent>(position, Vector3(0, YawDegrees, 0), ReferenceScale);
                 static_cast<GDX12FluidComponent&>(water.AddComponent<FluidRenderComponent>()) = _source;
                 _basins.push_back({water.GetId(), basin.GetId()});
             }
@@ -119,38 +125,48 @@ namespace BistroWater
             else _materials = WorldLoader::BuildMaterialSlots(render, *mesh, "BistroWaterBasin");
 
             GDX12FluidSettings settings;
-            constexpr float referenceUnitCm = 20;
-            settings.ParticleRadiusCm = 0.1f * referenceUnitCm;
-            settings.SmoothingRadiusCm = 0.2f * referenceUnitCm;
-            settings.ParticleMassKg = 0.0128f;
-            settings.RestDensityKgPerCm3 = 630 * settings.ParticleMassKg /
-                (referenceUnitCm * referenceUnitCm * referenceUnitCm);
-            settings.AccelerationCmPerSecond2 = Vector3(0, -9.81f * referenceUnitCm, 0);
-            settings.ContainerHalfExtentCm = HalfExtent;
+            // Keep MGPU numerical units; only the entity transform converts them to scene cm.
+            settings.MGPUReference = true;
+            settings.ParticleRadiusCm = 0.1f;
+            settings.SmoothingRadiusCm = 0.2f;
+            settings.ParticleMassKg = 1;
+            settings.RestDensityKgPerCm3 = 630;
+            settings.AccelerationCmPerSecond2 = Vector3(0, -9.81f, 0);
+            settings.ContainerHalfExtentCm = ReferenceHalfExtent;
             settings.MaxStepSeconds = 1.0f / 180;
             settings.MaxSubsteps = 3;
-            settings.MaxSpeedCmPerSecond = 1000;
-            settings.MaxAccelerationCmPerSecond2 = 100000;
-            settings.PressureStiffnessCm2PerSecond2 = 288 * referenceUnitCm * referenceUnitCm;
-            settings.NearPressureStiffnessCm2PerSecond2 = 2.15f * referenceUnitCm * referenceUnitCm;
+            settings.PressureStiffnessCm2PerSecond2 = 288;
+            settings.NearPressureStiffnessCm2PerSecond2 = 2.15f;
             settings.PredictionSeconds = 1.0f / 120;
             settings.ViscosityCm2PerSecond = 0;
             settings.Restitution = 0.95f;
-            settings.FilterIterations = 2;
-            settings.FilterRadiusPixels = 6;
-            settings.AbsorptionPerCm = {0.008f,0.002f,0.001f};
-            settings.ScatteringColor = {0.02f,0.12f,0.16f};
             _source.SetSettings(settings);
-            // MGPU uses a jittered volume lattice at rest, inside 90% of the container.
-            constexpr float jitter = 0.1f * referenceUnitCm;
-            const Vector3 center(0, HalfExtent.y * 0.1f, 0);
-            auto available = HalfExtent - Vector3(settings.ParticleRadiusCm + jitter + 1);
-            available.y -= center.y;
-            const Vector3 size = available * 1.8f;
-            const float scale = std::cbrt(50000.0f / (size.x * size.y * size.z));
-            const UINT nx = (std::max)(1u, static_cast<UINT>(std::round(scale * size.x)));
-            const UINT ny = (std::max)(1u, static_cast<UINT>(std::round(scale * size.y)));
-            const UINT nz = (std::max)(1u, static_cast<UINT>(std::round(scale * size.z)));
+            // Same two-pass spawn sizing as HybridParticleApp::RecreateFluidEmitter.
+            const auto spawnSize = [&](UINT count)
+            {
+                const float width = count <= 50000 ?
+                    5 + 5 * std::log10(float(count) / 10000) / std::log10(5.0f) :
+                    10 + 10 * std::log10(float(count) / 50000) / std::log10(2.0f);
+                return Vector3::Min(Vector3(std::clamp(width, 5.0f, 20.0f), 10, 20),
+                    settings.ContainerHalfExtentCm * 1.8f);
+            };
+            const auto grid = [](Vector3 size)
+            {
+                const float scale = std::cbrt(50000.0f / (size.x * size.y * size.z));
+                return std::array<UINT, 3>{
+                    (std::max)(1u, static_cast<UINT>(std::round(scale * size.x))),
+                    (std::max)(1u, static_cast<UINT>(std::round(scale * size.y))),
+                    (std::max)(1u, static_cast<UINT>(std::round(scale * size.z)))};
+            };
+            const auto initial = grid(spawnSize(50000));
+            auto size = spawnSize(initial[0] * initial[1] * initial[2]);
+            // Release the MGPU lattice from one end so its collapse launches a travelling wave.
+            size.x = (std::min)(size.x, settings.ContainerHalfExtentCm.x * 0.8f);
+            const auto counts = grid(size);
+            const auto nx = counts[0], ny = counts[1], nz = counts[2];
+            constexpr float jitter = 0.1f;
+            const Vector3 center(-settings.ContainerHalfExtentCm.x * 0.55f,
+                settings.ContainerHalfExtentCm.y * 0.1f, 0);
             std::mt19937 random(0xB15720u);
             std::uniform_real_distribution<float> offset(-jitter, jitter);
             std::vector<GDX12FluidParticle> particles;
@@ -162,7 +178,7 @@ namespace BistroWater
                         const Vector3 t(nx == 1 ? 0.5f : float(x) / (nx - 1),
                             ny == 1 ? 0.5f : float(y) / (ny - 1), nz == 1 ? 0.5f : float(z) / (nz - 1));
                         particles.push_back({center + (t - Vector3(0.5f)) * size +
-                            Vector3(offset(random), offset(random), offset(random)), Vector3::Zero});
+                            Vector3(offset(random), offset(random), offset(random)), Vector3(WaveSpeed.GetValue(), 0, 0)});
                     }
             _source.SetParticles(std::move(particles));
         }

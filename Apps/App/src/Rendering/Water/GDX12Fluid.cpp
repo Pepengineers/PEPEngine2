@@ -44,11 +44,11 @@ void ValidateFluidSettings(const GDX12FluidSettings& s)
     if (!Range(s.MaxStepSeconds, 0.000001f, 0.05f) || s.MaxSubsteps > 64 ||
         !Range(s.TimeScale, 0, 8) || !Range(s.SmoothingRadiusCm, 0.1f, 1000) ||
         !Range(s.ParticleRadiusCm, 0.01f, s.SmoothingRadiusCm) ||
-        !Range(s.ParticleMassKg, 1e-9f, 100000) || !Range(s.RestDensityKgPerCm3, 1e-8f, 100) ||
+        !Range(s.ParticleMassKg, 1e-9f, 100000) || !Range(s.RestDensityKgPerCm3, 1e-8f, s.MGPUReference ? 100000.0f : 100.0f) ||
         !Range(s.PressureStiffnessCm2PerSecond2, 1, 1e8f) ||
         !Range(s.NearPressureStiffnessCm2PerSecond2, 0, 1e8f) || !Range(s.PredictionSeconds, 0, 0.05f) ||
         !Range(s.ViscosityCm2PerSecond, 0, 100000) || !Finite(s.AccelerationCmPerSecond2) ||
-        s.AccelerationCmPerSecond2.Length() > s.MaxAccelerationCmPerSecond2 ||
+        (!s.MGPUReference && s.AccelerationCmPerSecond2.Length() > s.MaxAccelerationCmPerSecond2) ||
         !Range(s.MaxSpeedCmPerSecond, 1, 100000) || !Range(s.MaxAccelerationCmPerSecond2, 1, 1e8f) ||
         !Finite(s.ContainerHalfExtentCm) || s.ContainerHalfExtentCm.x <= s.ParticleRadiusCm ||
         s.ContainerHalfExtentCm.y <= s.ParticleRadiusCm || s.ContainerHalfExtentCm.z <= s.ParticleRadiusCm ||
@@ -68,6 +68,7 @@ void ValidateFluidSettings(const GDX12FluidSettings& s)
 void GDX12FluidComponent::SetSettings(const GDX12FluidSettings& settings)
 {
     ValidateFluidSettings(settings);
+    if (_settings.MGPUReference != settings.MGPUReference) Reset();
     _settings = settings;
     ++_settingsRevision;
 }
@@ -106,8 +107,9 @@ void ValidateFluidInstance(const GDX12FluidInstance& instance)
         if (!Finite(world) || world.Length() > 1e7f)
             throw std::invalid_argument("Fluid container outside supported world range");
     }
-    const Matrix inverse = matrix.Invert();
     const auto& s = instance.Component.GetSettings();
+    if (s.MGPUReference) return;
+    const Matrix inverse = matrix.Invert();
     const Vector3 margin = s.ParticleRadiusCm * Vector3(
         Vector3(inverse._11, inverse._21, inverse._31).Length(),
         Vector3(inverse._12, inverse._22, inverse._32).Length(),

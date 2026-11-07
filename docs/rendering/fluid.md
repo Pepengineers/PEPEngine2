@@ -78,6 +78,32 @@ There is one real implementation (SPH + NRF), so no unused Implementation enum.
 All fields are in `GDX12FluidSettings`, changed with GetSettings/SetSettings.
 Invalid finite/range values throw without changing the component.
 
+During Bistro integration, `MGPUReference=true` keeps particle positions, velocities,
+bounds and all solver coefficients in original MGPU units. Bistro keeps MGPU's
+10x20 horizontal footprint and fits the vertical bound to 2 units, mapping the
+volume into the 520x76x264 cm basin with entity scale (52,38,13.2).
+Its street length is halved; the width is unchanged. The shallower simulation
+bound retains a visible fluid depth and wave height in the scene.
+The existing `Cm`/`Kg` field names denote raw reference values in this mode:
+H=0.2, mass=1, density=630, gravity=-9.81, pressure=288, near pressure=2.15,
+prediction=1/120 s, viscosity=0, damping=0.95, three steps with a 1/60 s frame cap.
+The solver uses point collisions without speed/acceleration caps. Changing the
+mode resets live particles because their coordinate system changes.
+Rendering temporarily follows MGPU's `FluidParticleDraw.hlsl`: opaque 0.1-unit
+camera-facing quads, blue-to-red by speed/10, without NRF or optical shading.
+For the fitted nonuniform transform, billboard size uses the horizontal geometric
+mean scale. The box transform fits the original simulation to the basin. Spawning
+retains MGPU's two-pass lattice and +/-0.1 jitter. The Y offset
+is fitted proportionally to the new height (0.1 instead of the source's 0.5).
+The initial block occupies 40% of local X at one narrow end (X center=-2.75,
+size<=4); the remaining space is initially empty. It receives a +X impulse,
+so the wave travels between the narrow ends, along the basin's 520 cm dimension.
+`App.Water.WaveSpeed` sets this initial velocity in raw MGPU units/s: default 6,
+range [0,12], startup-only via the App's `Config/Engine.ini`. At the fitted X scale,
+6 units/s is 312 cm/s. Zero leaves only the gravity-driven release.
+The overhead `BistroSparkRain` has zero budget and remains disabled; its budget
+temporarily goes to interior dust, preserving the total particle count.
+
 | Field | Default | Units and accepted range |
 | --- | --- | --- |
 | SimulationEnabled / RenderEnabled | true / true | Independent bools: simulate invisibly, or render a frozen solver |

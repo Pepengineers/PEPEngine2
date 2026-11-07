@@ -121,6 +121,12 @@ void GDX12FluidSurfacePass::CreatePipelines()
     desc.RTVFormats[1] = DXGI_FORMAT_R32_FLOAT;
     desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
     ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_sphere)));
+    auto referenceVS = compiler.CompileShader(_resources->Device, APP_SHADERS_FOLDER "FluidSurface.hlsl", nullptr, "ReferenceVS", "vs");
+    auto referencePS = compiler.CompileShader(_resources->Device, APP_SHADERS_FOLDER "FluidSurface.hlsl", nullptr, "ReferencePS", "ps");
+    desc.VS = { referenceVS->GetBufferPointer(), referenceVS->GetBufferSize() };
+    desc.PS = { referencePS->GetBufferPointer(), referencePS->GetBufferSize() };
+    ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_referenceParticles)));
+    desc.VS = { vs->GetBufferPointer(), vs->GetBufferSize() };
     ps = compiler.CompileShader(_resources->Device, APP_SHADERS_FOLDER "FluidSurface.hlsl", nullptr, "ThicknessPS", "ps");
     desc.PS = { ps->GetBufferPointer(), ps->GetBufferSize() };
     desc.DepthStencilState.DepthEnable = false;
@@ -248,12 +254,12 @@ void GDX12FluidSurfacePass::PrepareStates()
         for (UINT i = 0; i < state->Count; ++i)
         {
             const auto& seed = (*source)[i];
-            const auto position = Vector3::Transform(seed.Position, instance.ContainerToWorld);
+            const auto position = settings.MGPUReference ? seed.Position : Vector3::Transform(seed.Position, instance.ContainerToWorld);
             if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z) ||
                 position.Length() > 1e7f) throw std::invalid_argument("Fluid seed outside supported world range");
-            auto velocity = Vector3::TransformNormal(seed.Velocity, instance.ContainerToWorld);
+            auto velocity = settings.MGPUReference ? seed.Velocity : Vector3::TransformNormal(seed.Velocity, instance.ContainerToWorld);
             const float speed = velocity.Length();
-            if (speed > settings.MaxSpeedCmPerSecond) velocity *= settings.MaxSpeedCmPerSecond / speed;
+            if (!settings.MGPUReference && speed > settings.MaxSpeedCmPerSecond) velocity *= settings.MaxSpeedCmPerSecond / speed;
             state->SeedUpload->CopyData(i, { position, velocity, position });
         }
     }
@@ -311,8 +317,8 @@ void GDX12FluidSurfacePass::Simulate(GDX12CommandList* commands, State& state, c
     }
     commands->SetComputeRootSignature(_solverRoot.get());
     commands->SetComputeRootConstantBufferView(1, state.Constants->GetElementAddress(2 * _resources->CurrFrameConstantsIndex));
-    struct Dispatch { UINT Count, Capacity, K, J; float Dt; UINT Padding[3] = {}; };
-    Dispatch dispatch = { state.Count, state.Capacity, 0, 0, 0 };
+    struct Dispatch { UINT Count, Capacity, K, J; float Dt; UINT ReferenceUnits; UINT Padding[2] = {}; };
+    Dispatch dispatch = { state.Count, state.Capacity, 0, 0, 0, settings.MGPUReference ? 1u : 0u };
     const auto setDispatch = [&]() { commands->GetCommandList()->SetComputeRoot32BitConstants(0, 8, &dispatch, 0); };
     setDispatch();
     auto& current = state.Particles[state.Current]->GetResource();
@@ -392,6 +398,7 @@ void GDX12FluidSurfacePass::SurfaceBindings(GDX12CommandList* commands, State& s
     commands->SetComputeRootConstantBufferView(1, state.Constants->GetElementAddress(2 * _resources->CurrFrameConstantsIndex + 1));
     auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     commands->SetComputeRootConstantBufferView(2, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
+    commands->SetComputeSRV(0, state.Particles[state.Current]->GetSRV()->GPUHandle);
     commands->SetComputeSRV(1, _raw->GetSRV()->GPUHandle);
     commands->SetComputeSRV(3, _thickness->GetSRV()->GPUHandle);
     commands->SetComputeSRV(4, _inputs[0]->GetTexture()->GetSRV()->GPUHandle);
@@ -419,13 +426,25 @@ void GDX12FluidSurfacePass::DrawSurface(GDX12CommandList* commands, State& state
     commands->SetGraphicsSRV(4, _inputs[0]->GetTexture()->GetSRV()->GPUHandle);
     commands->SetViewport(_raw->GetViewport());
     commands->SetScissorRect(_raw->GetScissorRect());
-    commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    commands->SetPrimitiveTopology(settings.MGPUReference ? D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP : D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
     commands->ClearRenderTargetView(_raw.get());
     commands->ClearRenderTargetView(_eyeDepth.get());
     commands->ClearDepthStencilView(_scratchDepth.get());
     commands->SetRenderTargets({ _raw.get(), _eyeDepth.get() }, _scratchDepth.get());
-    commands->SetPipelineState(_sphere);
-    commands->DrawInstanced(6, state.Count, 0, 0);
+    commands->SetPipelineState(settings.MGPUReference ? _referenceParticles : _sphere);
+    commands->DrawInstanced(settings.MGPUReference ? 4 : 6, state.Count, 0, 0);
+    if (settings.MGPUReference)
+    {
+        commands->ResourceBarrier({ _raw->GetResource()->GetNonPixelShaderResourceBarrier(),
+            _eyeDepth->GetResource()->GetNonPixelShaderResourceBarrier() });
+        SurfaceBindings(commands, state, owner, 1);
+        commands->SetComputeSRV(2, _eyeDepth->GetSRV()->GPUHandle);
+        commands->SetPipelineState(_merge);
+        commands->Dispatch((_depth->GetWidth() + 7) / 8, (_depth->GetHeight() + 7) / 8, 1);
+        commands->ResourceBarrier({ _depth->GetResource()->GetUAVBarrier(), _motion->GetResource()->GetUAVBarrier(),
+            _geometry->GetResource()->GetUAVBarrier(), _owner->GetResource()->GetUAVBarrier() });
+        return;
+    }
     commands->ClearRenderTargetView(_thickness.get());
     commands->SetRenderTargets({ _thickness.get() }, nullptr);
     commands->SetPipelineState(_thicknessDraw);

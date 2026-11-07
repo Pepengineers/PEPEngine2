@@ -1,4 +1,5 @@
 #include "../src/BistroScene.h"
+#include "BistroParticleControlsChecks.h"
 #include "../src/Components/FlyingPropComponent.h"
 #include "../src/Systems/FlyingPropSystem.h"
 #include "App.Base/ECS/Components/StaticMeshRenderComponent.h"
@@ -43,7 +44,8 @@ static void CheckParticleBudgets()
                 sum += settings.MaxParticles;
                 Require(emitter.GetBurstTotal() >= settings.MaxParticles, "Live budget must be filled without a warmup");
             }
-            if (budget == 1000000) Require(settings.MaxParticles == baseline[index] * 4, "Million budget must scale every effect by four");
+            if (budget == 1000000 && emitter.IsEnabled())
+                Require(settings.MaxParticles == baseline[index] * 4, "Million budget must scale every active effect by four");
             ++index;
         });
         Require(sum == static_cast<UINT>(budget), "Emitter capacities must sum to the exact App budget, including rounding and Off");
@@ -193,6 +195,7 @@ int main(int argc, char** argv)
     try
     {
         Require(argc == 2 || argc == 3, "Pass a test-artifact directory and optionally Bistro Interior OBJ");
+        CheckBistroParticleControls();
         CheckParticleBudgets();
         CheckPartition();
         CheckFlight();

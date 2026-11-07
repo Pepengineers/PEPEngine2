@@ -14,6 +14,8 @@ struct GDX12FluidSettings
 {
     bool SimulationEnabled = true;
     bool RenderEnabled = true;
+    // Temporary integration view: raw MGPU units in container space and speed-colored quads.
+    bool MGPUReference = false;
     float MaxStepSeconds = 1.0f / 240.0f;
     UINT MaxSubsteps = 0;
     float TimeScale = 1;
@@ -49,7 +51,7 @@ GDX12FluidControls GetFluidControls();
 GDX12FluidSettings ResolveFluidSettings(const GDX12FluidSettings& author, int quality);
 void ValidateFluidSettings(const GDX12FluidSettings& settings);
 
-// Immutable seed payload, shared by ECS snapshots; positions/velocities are container-local cm.
+// Immutable seeds: container-local cm, or raw MGPU units when MGPUReference is enabled.
 class GDX12FluidComponent
 {
 public:

@@ -3,7 +3,7 @@
 cbuffer DispatchParameters : register(b0)
 {
     uint Count; uint Capacity; uint SortK; uint SortJ;
-    float Dt; uint3 DispatchPadding;
+    float Dt; uint ReferenceUnits; uint2 DispatchPadding;
 };
 StructuredBuffer<FluidParticle> Particles : register(t0);
 StructuredBuffer<float2> Density : register(t1);
@@ -104,6 +104,17 @@ void Densities(uint i : SV_DispatchThreadID)
 }
 void Collide(inout float3 position, inout float3 velocity)
 {
+    if (ReferenceUnits != 0)
+    {
+        // MGPU collides point centers, without a particle-radius margin or outward-velocity test.
+        for (uint axis = 0; axis < 3; ++axis)
+            if (abs(position[axis]) >= HalfExtent[axis])
+            {
+                position[axis] = sign(position[axis]) * HalfExtent[axis];
+                velocity[axis] *= -Restitution;
+            }
+        return;
+    }
     float3 local = mul(float4(position, 1), WorldToContainer).xyz;
     // World-space sphere support in the local half-spaces, including non-uniform scale.
     float3 margin = Radius * float3(length(WorldToContainer._11_21_31),
@@ -150,10 +161,12 @@ void Integrate(uint i : SV_DispatchThreadID)
             if (any(Cell(neighborPosition) != cell)) continue;
             float3 difference = position - neighborPosition;
             float distance = length(difference);
-            if (distance >= H) continue;
+            if (ReferenceUnits != 0 ? distance > H : distance >= H) continue;
             ++neighborCount;
-            // Deterministic antisymmetric direction for coincident particles.
-            float3 direction = distance > 1e-6f ? difference / distance : float3(i < j ? -1 : 1, 0, 0);
+            // Preserve MGPU's coincident-particle fallback; legacy uses an antisymmetric direction.
+            float3 direction = ReferenceUnits != 0 ?
+                (distance > 0 ? difference / distance : float3(0,-1,0)) :
+                (distance > 1e-6f ? difference / distance : float3(i < j ? -1 : 1, 0, 0));
             float rhoj = Density[j].x;
             float pressureJ = Stiffness * (NearStiffness > 0 ? rhoj - RestDensity : max(0, rhoj - RestDensity));
             float q = H - distance;
@@ -173,8 +186,9 @@ void Integrate(uint i : SV_DispatchThreadID)
             acceleration += Viscosity * Mass / rhoj * (neighbor.Velocity - p.Velocity) * laplacian;
         }
     }
-    acceleration = Limited(acceleration, MaxAcceleration);
-    p.Velocity = Limited(p.Velocity + acceleration * Dt, MaxSpeed);
+    if (ReferenceUnits == 0) acceleration = Limited(acceleration, MaxAcceleration);
+    p.Velocity += acceleration * Dt;
+    if (ReferenceUnits == 0) p.Velocity = Limited(p.Velocity, MaxSpeed);
     if (NearStiffness > 0 && neighborCount < 8) p.Velocity *= max(0, 1 - 0.75f * Dt);
     p.Position += p.Velocity * Dt;
     Collide(p.Position, p.Velocity);

@@ -391,6 +391,7 @@ int main(int argc, char** argv)
                     const auto& settings = emitter.GetSettings();
                     if (emitter.IsEnabled()) budget += settings.MaxParticles;
                     if (name.value != "BistroSparkRain") return;
+                    Require(!emitter.IsEnabled() && emitter.GetBurstTotal() == 0, "Overhead Rain must be disabled");
                     Require(transform.Location == BistroWater::Center + Vector3(0,300,0) &&
                         transform.Rotation.y == BistroWater::YawDegrees &&
                         settings.ShapeExtents == Vector3(BistroWater::HalfExtent.x,10,BistroWater::HalfExtent.z) &&
@@ -403,18 +404,19 @@ int main(int argc, char** argv)
             Set(L"Render.Upscaler.Provider", "0");
             Set(L"Render.MotionBlur.Enabled", "false");
             Set(L"Render.DOF.Enabled", "false");
-            Aim(world, BistroWater::Center + (waterVideo ? Vector3(420,330,420) : Vector3(0,900,25)), BistroWater::Center);
-            for (int frame = 0; frame < 180; ++frame)
+            Aim(world, BistroWater::Center + (waterVideo ? Vector3(340,550,340) : Vector3(0,900,25)), BistroWater::Center);
+            const int waterFrames = waterVideo ? 1200 : 180;
+            for (int frame = 0; frame < waterFrames; ++frame)
             {
                 app.BenchmarkFrame(1.0 / 60);
-                if (frame == 0 || frame == 60 || frame == 179 || (waterVideo && frame % 3 == 0))
+                if (frame == 0 || frame == 60 || frame == waterFrames - 1 || (waterVideo && frame % 3 == 0))
                 {
                     render->WaitForUploads();
                     auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
                     const auto pixels = ReadHDR(*output);
-                    if (frame == 0 || frame == 60 || frame == 179)
+                    if (frame == 0 || frame == 60 || frame == waterFrames - 1)
                         SaveImage(pixels, output->GetWidth(), output->GetHeight(),
-                            frame == 0 ? "pool-start" : frame == 60 ? "pool-waves-1s" : "pool-waves-3s");
+                            frame == 0 ? "pool-start" : frame == 60 ? "pool-waves-1s" : waterVideo ? "pool-waves-20s" : "pool-waves-3s");
                     if (waterVideo && frame % 3 == 0)
                     {
                         const auto name = "pool-frame-" + std::to_string(frame / 3);
@@ -433,10 +435,18 @@ int main(int argc, char** argv)
             render->WaitForUploads();
             output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
             const auto off = ReadHDR(*output);
-            size_t changed = 0;
+            size_t changed = 0, referencePixels = 0;
             for (size_t i = 0; i < on.size(); i += 4)
                 if (on[i] != off[i] || on[i+1] != off[i+1] || on[i+2] != off[i+2]) ++changed;
+            for (size_t i = 0; i < on.size(); i += 4)
+            {
+                const float r = PackedVector::XMConvertHalfToFloat(on[i]);
+                const float g = PackedVector::XMConvertHalfToFloat(on[i+1]);
+                const float b = PackedVector::XMConvertHalfToFloat(on[i+2]);
+                if (g == 0 && r + b > 0.99f && r + b < 1.01f) ++referencePixels;
+            }
             Require(changed > 1000, "Street pool must contribute visible water pixels");
+            Require(referencePixels > 1000, "Pool must use MGPU blue/red speed material instead of optical water");
             ComPtr<ID3D12Device> device;
             ComPtr<ID3D12InfoQueue> info;
             ThrowIfFailed(output->GetResource()->D3DResource->GetDevice(IID_PPV_ARGS(&device)));
@@ -449,7 +459,7 @@ int main(int argc, char** argv)
                 ThrowIfFailed(info->GetMessage(index, message, &bytes));
                 Require(message->Severity > D3D12_MESSAGE_SEVERITY_ERROR, message->pDescription);
             }
-            std::cout << "Street pool: 180 GPU frames, wave/pause/count checks, " << changed
+            std::cout << "Street pool: " << waterFrames << " GPU frames, wave/pause/count checks, " << changed
                 << " water pixels, finite HDR and clean D3D12 validation passed.\n";
             return 0;
         }
