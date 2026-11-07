@@ -1,0 +1,78 @@
+{
+  "date": "2026-11-07",
+  "gpu": "NVIDIA GeForce RTX 3060 Laptop GPU",
+  "driver": "617.42",
+  "vram_mib": 6144,
+  "scope": "DIRECT solver-only fixture; includes SavePrevious and pass barriers; excludes surface rendering and full Bistro frame",
+  "workload": "Frozen concurrent working-tree water changes; jittered basin lattice; 51975 particles; same seed reset each series",
+  "dt_seconds": 0.016666666666666666,
+  "warmup_frames_per_series": 24,
+  "measured_frames_per_series": 120,
+  "series": [
+    {
+      "series": 0,
+      "n": 120,
+      "median_ms": 12.75955,
+      "p95_ms": 14.1261,
+      "mean_ms": 12.657873333333333,
+      "stdev_ms": 1.0368059972442136,
+      "min_ms": 10.836,
+      "max_ms": 15.3006
+    },
+    {
+      "series": 1,
+      "n": 120,
+      "median_ms": 12.84915,
+      "p95_ms": 14.0913,
+      "mean_ms": 12.686288333333334,
+      "stdev_ms": 1.0021491637562578,
+      "min_ms": 10.9466,
+      "max_ms": 15.273
+    },
+    {
+      "series": 2,
+      "n": 120,
+      "median_ms": 12.68585,
+      "p95_ms": 14.0892,
+      "mean_ms": 12.632598333333334,
+      "stdev_ms": 1.053938956899852,
+      "min_ms": 10.7336,
+      "max_ms": 15.3508
+    }
+  ],
+  "clocks": "unaltered",
+  "validation_during_timing": false,
+  "submission": "CPU drain after every measured and warmup frame",
+  "build": "Release x64; diagnostic translation units /Z7 /GL-; cached engine libraries; no async implementation",
+  "validation": "Separate GBV run: 1 warmup + 2 measured steps, no warning/error; no numerical/image parity assertion",
+  "artifact_directory": "D:\\Project\\PEPEngine2\\Build\\AsyncWater-20261107",
+  "executable": "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Release\\WaterTiming\\WaterTiming.exe",
+  "executable_sha256": "196d984bce1abe0ac375638af41b12d74e3825f7878fd42d1541b1877bbd0f43",
+  "samples_sha256": "cced20e66affde3203f40cee94e0e0fa714aac6f7e54e4b125910b160f186bc7",
+  "source_hashes": {
+    "fixture.h": "ff858dc72cf202344cd931e9461b9f8a72d1f1e7a18e4f874504e09ff07ecc36",
+    "Shaders\\FluidParameters.hlsli": "04805083a39c54982e30c9a680826f74555bc95433c759814204a5d136e1576c",
+    "Shaders\\FluidSolver.hlsl": "531858f39da55bfc990f06cd5e7bc8440484646b428e46235eec1160a770db6c",
+    "Shaders\\FluidSurface.hlsl": "bb79f757b1693342968f0611f97381a1f0d078b6326c2e19c5c252afaa31c3ac",
+    "Shaders\\GrassCommon.hlsli": "45449480d9452784fffa7f8e3d88448080087c9708b7634746431456be803de1",
+    "Shaders\\GrassExpand.hlsl": "fb6e6263bb5385d7f22b03c57a59b672a8e78510e290b61406389a79daadb3e9",
+    "Shaders\\GrassRender.hlsl": "dfe8a925c5dccf3150a9550331a6059882cdd11b80ccc10ef75b05b935600199",
+    "Shaders\\WindField.hlsl": "1d72f88ced970e7f91f38ebd72ca4e98a9f8f3e5d6b16fff4b7f153b6c2b90f5",
+    "src\\BistroWater.h": "02d4f62a30a2a9a0e6ad0c9c2536e69063be1f51c3ad347eda13c378c40cc7db",
+    "src\\BistroWaterLayout.h": "ecec9789b9390984dbebf40f9b0be6ddaf58aa218c5704ebb8ac42dc36f41001",
+    "src\\Rendering\\Water\\BistroWaterRendering.cpp": "ea5e43b6a5cecd2cb34dfc42bc4828453c8f29efe7ad2b203f9ce6353741a443",
+    "src\\Rendering\\Water\\BistroWaterRendering.h": "57244a6f503ab2b7466e393d67dd78b7498f30a8fa08519aa823f4d7f9b89e48",
+    "src\\Rendering\\Water\\GDX12Fluid.cpp": "6dc9e95191b44bab17c8a29670a22e23c7eb93b8b2a4d5eeaf8d3065b82a7f71",
+    "src\\Rendering\\Water\\GDX12Fluid.h": "7226488830b1ccf9a2d51e0a7c0c2ee9ef32999415c2273a11cf44f0fa75b0f4",
+    "src\\Rendering\\Water\\GDX12FluidPass.cpp": "ffe2f388b9d4287aebfca687f0015d1f7c41f0d539ed4dc95640974bd41ebc9f",
+    "src\\Rendering\\Water\\GDX12FluidPass.h": "d898316febe4bd19b27b02111359798af4a9cc178cef0d9cdbc7af7352899578",
+    "WaterTiming.cpp": "49a2e9071c86e72189ec42bbeb4301473a1b1508622c1b255bcd8005cb122547",
+    "WaterTiming.vcxproj": "879626dbcd81fad9aacc210bc6a09a1ac4b081379eed504f736708185bd1849d"
+  },
+  "limitations": [
+    "Not FPS or a queued full-frame benchmark",
+    "Not a DIRECT-vs-COMPUTE speedup",
+    "A single three-series session on one GPU",
+    "Does not establish a graphics overlap window"
+  ]
+}
