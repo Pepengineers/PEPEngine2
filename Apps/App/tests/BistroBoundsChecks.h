@@ -19,7 +19,10 @@ inline void CheckBistroBounds(BistroApp& app, World& world)
         !layoutCenter.SetFromString("inf"), "Invalid editable bounds coordinates/extents accepted");
     require(!center.SetFromString("700") && !extent.SetFromString("50"),
         "Tracked bounds must report the real object instead of accepting detached edits");
-    require(console.FindConsoleVariable(L"App.Bounds.BistroWater0.CenterY").GetFloat() == BistroWater::Center.y &&
+    require(console.FindConsoleVariable(L"App.Bounds.BistroWater0.CenterY").GetFloat() ==
+        BistroWater::Center.y + BistroWater::SimulationOffset().y &&
+        console.FindConsoleVariable(L"App.Bounds.BistroWater0.HalfExtentY").GetFloat() ==
+            BistroWater::HalfExtent.y * BistroWater::HeightScale.GetValue() &&
         std::abs(console.FindConsoleVariable(L"App.Bounds.BistroWater0.HalfExtentX").GetFloat() -
             (BistroWater::HalfExtent.x + BistroWater::HalfExtent.z) * std::sqrt(0.5f)) < 0.01f,
         "Water bounds must use the fluid container");

@@ -404,7 +404,8 @@ int main(int argc, char** argv)
             Set(L"Render.Upscaler.Provider", "0");
             Set(L"Render.MotionBlur.Enabled", "false");
             Set(L"Render.DOF.Enabled", "false");
-            Aim(world, BistroWater::Center + (waterVideo ? Vector3(340,550,340) : Vector3(0,900,25)), BistroWater::Center);
+            Aim(world, BistroWater::Center + (waterVideo ? Vector3(480,260,480) : Vector3(0,900,25)),
+                BistroWater::Center + Vector3(0,25,0));
             const int waterFrames = waterVideo ? 1200 : 180;
             for (int frame = 0; frame < waterFrames; ++frame)
             {

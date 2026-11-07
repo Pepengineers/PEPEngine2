@@ -15,6 +15,9 @@ inline void CheckBistroWaterCounts(World& world, Frame&& frame)
     auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
     auto& ecs = world.GetECS();
     require(BistroWater::Count.GetValue() == 1, "Bistro must default to one water basin");
+    require(BistroWater::HeightScale.GetValue() == 2 && !BistroWater::HeightScale.SetConfigFromString("0") &&
+        !BistroWater::HeightScale.SetConfigFromString("4") && !BistroWater::HeightScale.SetConfigFromString("nan"),
+        "Splash height must have a finite validated startup control");
     require(!BistroWater::Count.SetFromString("-1") && !BistroWater::Count.SetFromString("9") &&
         !BistroWater::Count.SetFromString("1.5"), "Invalid Bistro water count accepted");
     require(BistroWater::WaveSpeed.GetValue() == 6 && !BistroWater::WaveSpeed.SetConfigFromString("-1") &&
@@ -47,10 +50,14 @@ inline void CheckBistroWaterCounts(World& world, Frame&& frame)
             settings.AccelerationCmPerSecond2 == Vector3(0,-9.81f,0), "Bistro must use the MGPU fluid preset");
         require(settings.WaveAcceleration == 4 && settings.WavePeriodSeconds == 6 && settings.ParticleRadiusCm == 0.15f,
             "Bistro must sustain waves with a periodic force along the narrow-to-narrow axis");
-        require(transform.Location == BistroWater::Center && transform.Rotation.y == BistroWater::YawDegrees &&
-            transform.Scale == BistroWater::ReferenceScale &&
-            settings.ContainerHalfExtentCm * transform.Scale == BistroWater::HalfExtent,
+        require(transform.Location == BistroWater::Center + BistroWater::SimulationOffset() && transform.Rotation.y == BistroWater::YawDegrees &&
+            transform.Scale == BistroWater::SimulationScale(),
             "Bistro water must span the side street beside the hedge");
+        const auto worldExtent = settings.ContainerHalfExtentCm * transform.Scale;
+        require(worldExtent.x == BistroWater::HalfExtent.x && worldExtent.z == BistroWater::HalfExtent.z &&
+            std::abs(transform.Location.y - worldExtent.y - (BistroWater::Center.y - BistroWater::HalfExtent.y)) < .001f &&
+            transform.Location.y + worldExtent.y > BistroWater::Center.y + BistroWater::HalfExtent.y + 50,
+            "Splash bounds must preserve the floor and leave headroom above the stone rim");
         const auto extent = settings.ContainerHalfExtentCm;
         const float meanDepth = float(seed->size()) / (settings.RestDensityKgPerCm3 * 4 * extent.x * extent.z);
         require(meanDepth >= 3 * settings.SmoothingRadiusCm,

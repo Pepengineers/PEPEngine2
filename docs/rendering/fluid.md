@@ -97,7 +97,14 @@ reach the narrow ends and meet again in the middle without net horizontal drift.
 `App.Water.WaveSpeed` sets each half's initial speed (default 6, [0,12] MGPU units/s).
 `App.Water.ParticleCount` defaults to 100000 ([10000,300000]), twice the previous
 fluid population; the even X grid may round that target slightly upward.
-The corresponding mean resting depth is approximately 30 cm instead of 15 cm.
+`App.Water.HeightScale` (default 2, [1,3], startup-only) stretches the vertical
+MGPU-to-world mapping about the basin floor. The 76 cm stone walls stay in place;
+the simulation ceiling is 76 cm above their rim so crests can rise visibly above it.
+The virtual side walls extend above the stone rim; this remains a contained wave
+effect, without physical overflow onto the street.
+The corresponding mean resting depth is approximately 61 cm (30 cm at scale 1).
+The horizontal footprint and mirrored MGPU dynamics are unchanged. The pool and
+its Rain emitter sit 3 m closer to the Bistro entrance along the side street.
 `App.Water.ParticleRadius` defaults to 0.15 ([0.01,0.2] raw units), 1.5 times the
 previous draw radius. It enlarges the rendered volume without retuning SPH kernels.
 
@@ -106,7 +113,7 @@ previous draw radius. It enlarges the rendered volume without retuning SPH kerne
 The periodic force is antisymmetric about local X=0: it pushes both halves
 outward, then inward. A smooth center band avoids a force discontinuity.
 It is evaluated each substep; phase freezes with pause/disable/zero timescale.
-Zero acceleration disables the periodic drive. All five controls are startup-only
+Zero acceleration disables the periodic drive. These controls are startup-only
 via the App's `Config/Engine.ini`. Particles are never periodically respawned.
 
 `BistroSparkRain` uses non-emissive, weighted-alpha `WaterDrop` billboards above

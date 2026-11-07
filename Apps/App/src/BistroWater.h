@@ -19,6 +19,12 @@ namespace BistroWater
     inline const Vector3 ReferenceHalfExtent(5, 1, 10);
     inline const Vector3 ReferenceScale(HalfExtent.x / ReferenceHalfExtent.x,
         HalfExtent.y / ReferenceHalfExtent.y, HalfExtent.z / ReferenceHalfExtent.z);
+    inline AutoConsoleVariable<float> HeightScale(L"App.Water.HeightScale", 2.0f,
+        L"Vertical MGPU-to-world scale, preserves basin floor, startup only, 1..3",
+        EConsoleVariableFlags::ReadOnly, [](float value) { return std::isfinite(value) && value >= 1 && value <= 3; });
+    // shortcut: virtual walls extend above the rim; use open-top collisions for actual overflow.
+    inline Vector3 SimulationScale() { return ReferenceScale * Vector3(1, HeightScale.GetValue(), 1); }
+    inline Vector3 SimulationOffset() { return Vector3(0, HalfExtent.y * (HeightScale.GetValue() - 1), 0); }
     inline AutoConsoleVariable<int> Count(L"App.Water.Count", 1,
         L"Bistro water basins, 0 disables, maximum 8",
         EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 8; });
@@ -71,7 +77,7 @@ namespace BistroWater
                 basin.AddComponent<StaticMeshRenderComponent>(_mesh, _materials);
                 auto water = ecs.CreateEntity();
                 water.AddComponent<NameComponent>("BistroWater" + std::to_string(index));
-                water.AddComponent<TransformComponent>(position, Vector3(0, YawDegrees, 0), ReferenceScale);
+                water.AddComponent<TransformComponent>(position + SimulationOffset(), Vector3(0, YawDegrees, 0), SimulationScale());
                 static_cast<GDX12FluidComponent&>(water.AddComponent<FluidRenderComponent>()) = _source;
                 _basins.push_back({water.GetId(), basin.GetId()});
             }
