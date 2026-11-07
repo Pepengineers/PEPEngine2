@@ -234,6 +234,43 @@ static void CheckFluidSimulation(GDX12Device& device, GDX12FluidSurfacePass& wat
             access.Resource->D3DResource->GetDesc().Width == 2 * sizeof(Particle))
             referencePressure |= std::abs(read(*access.Resource).front().Velocity.x - expectedVelocity) < 0.002f;
     Require(referencePressure && expectedVelocity > 0, "GPU pressure must match unscaled MGPU equations, without an acceleration cap");
+    settings.WaveAcceleration = 20;
+    settings.WavePeriodSeconds = .12f;
+    fluid.Component.SetSettings(settings);
+    fluid.Component.SetParticles({{{0,0,0},{}}});
+    const auto drivenRevision = fluid.Component.GetResetRevision();
+    const auto advance = [&](UINT frames)
+    {
+        water.SetInstances({fluid});
+        for (UINT frame = 0; frame < frames; ++frame) execute();
+    };
+    const auto meanVelocity = [&]
+    {
+        float speed = 0; UINT buffers = 0;
+        for (const auto& access : water.GetSimulationBufferAccesses())
+            if (access.Usage == GDX12RenderGraph::Mode::ReadWrite &&
+                access.Resource->D3DResource->GetDesc().Width == sizeof(Particle))
+            { speed += read(*access.Resource).front().Velocity.x; ++buffers; }
+        Require(buffers == 2, "Periodic wave fixture lost its live particle buffers");
+        return speed / buffers;
+    };
+    advance(30);
+    const float positivePeak = meanVelocity();
+    Require(positivePeak > .35f && positivePeak < .41f, "Periodic force must accelerate the existing fluid along +X");
+    settings.SimulationEnabled = false;
+    fluid.Component.SetSettings(settings); advance(10);
+    Require(meanVelocity() == positivePeak, "Pausing must freeze the wave force and particle velocity");
+    settings.SimulationEnabled = true; settings.TimeScale = 0;
+    fluid.Component.SetSettings(settings); advance(10);
+    Require(meanVelocity() == positivePeak, "Zero timescale must freeze the wave phase");
+    settings.TimeScale = 1;
+    fluid.Component.SetSettings(settings); advance(60);
+    Require(meanVelocity() < -.35f && meanVelocity() > -.42f, "Wave force must reverse along -X without advancing its phase while paused");
+    advance(120);
+    Require(meanVelocity() < -.35f && meanVelocity() > -.42f, "Wave forcing must persist into later periods");
+    advance(60);
+    Require(meanVelocity() > .35f && meanVelocity() < .41f && fluid.Component.GetResetRevision() == drivenRevision,
+        "Later waves must reverse again without respawning the fluid");
     water.SetInstances({}); execute();
     std::cout << "GPU fluid: MGPU cohesion/prediction, pause, 95-percent rebound, fixed substeps and legacy pressure isolation passed.\n";
 }

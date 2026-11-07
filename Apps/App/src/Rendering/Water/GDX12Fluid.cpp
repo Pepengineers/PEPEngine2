@@ -48,6 +48,7 @@ void ValidateFluidSettings(const GDX12FluidSettings& s)
         !Range(s.PressureStiffnessCm2PerSecond2, 1, 1e8f) ||
         !Range(s.NearPressureStiffnessCm2PerSecond2, 0, 1e8f) || !Range(s.PredictionSeconds, 0, 0.05f) ||
         !Range(s.ViscosityCm2PerSecond, 0, 100000) || !Finite(s.AccelerationCmPerSecond2) ||
+        !Range(s.WaveAcceleration, 0, 10000) || !Range(s.WavePeriodSeconds, 0.1f, 60) ||
         (!s.MGPUReference && s.AccelerationCmPerSecond2.Length() > s.MaxAccelerationCmPerSecond2) ||
         !Range(s.MaxSpeedCmPerSecond, 1, 100000) || !Range(s.MaxAccelerationCmPerSecond2, 1, 1e8f) ||
         !Finite(s.ContainerHalfExtentCm) || s.ContainerHalfExtentCm.x <= s.ParticleRadiusCm ||

@@ -14,7 +14,7 @@ struct GDX12FluidSettings
 {
     bool SimulationEnabled = true;
     bool RenderEnabled = true;
-    // Temporary integration view: raw MGPU units in container space and speed-colored quads.
+    // Keep the solver in container-local MGPU units; rendering converts to world cm.
     bool MGPUReference = false;
     float MaxStepSeconds = 1.0f / 240.0f;
     UINT MaxSubsteps = 0;
@@ -29,6 +29,8 @@ struct GDX12FluidSettings
     float PredictionSeconds = 0;
     float ViscosityCm2PerSecond = 1;
     Vector3 AccelerationCmPerSecond2 = Vector3(0, -981, 0);
+    float WaveAcceleration = 0;
+    float WavePeriodSeconds = 6;
     float MaxSpeedCmPerSecond = 1000;
     float MaxAccelerationCmPerSecond2 = 100000;
     Vector3 ContainerHalfExtentCm = Vector3(100);

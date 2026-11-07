@@ -20,6 +20,9 @@ inline void CheckBistroWaterCounts(World& world, Frame&& frame)
     require(BistroWater::WaveSpeed.GetValue() == 6 && !BistroWater::WaveSpeed.SetConfigFromString("-1") &&
         !BistroWater::WaveSpeed.SetConfigFromString("13") && !BistroWater::WaveSpeed.SetConfigFromString("nan"),
         "Initial wave strength must have a finite, validated startup control");
+    require(BistroWater::WaveAcceleration.GetValue() == 4 && BistroWater::WavePeriod.GetValue() == 6 &&
+        !BistroWater::WaveAcceleration.SetConfigFromString("nan") && !BistroWater::WavePeriod.SetConfigFromString("0"),
+        "Periodic wave controls must reject invalid acceleration and period");
     const size_t staticCount = ecs.GetPool<StaticMeshRenderComponent>().Size();
     require(ecs.GetPool<FluidRenderComponent>().Size() == 1, "Default Bistro water count mismatch");
     Entity first = InvalidEntity;
@@ -39,6 +42,8 @@ inline void CheckBistroWaterCounts(World& world, Frame&& frame)
             settings.MaxSubsteps == 3 && settings.MaxStepSeconds == 1.0f / 180 &&
             settings.ViscosityCm2PerSecond == 0 && settings.Restitution == 0.95f &&
             settings.AccelerationCmPerSecond2 == Vector3(0,-9.81f,0), "Bistro must use the MGPU fluid preset");
+        require(settings.WaveAcceleration == 4 && settings.WavePeriodSeconds == 6,
+            "Bistro must sustain waves with a periodic force along the narrow-to-narrow axis");
         require(transform.Location == BistroWater::Center && transform.Rotation.y == BistroWater::YawDegrees &&
             transform.Scale == BistroWater::ReferenceScale &&
             settings.ContainerHalfExtentCm * transform.Scale == BistroWater::HalfExtent,

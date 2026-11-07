@@ -176,8 +176,7 @@ namespace BistroParticles
         settings.Acceleration = Vector3::Zero; settings.Wind = Vector3(6, 0, 3); settings.Drag = 1;
         settings.SizeStart = 1.8f; settings.SizeEnd = 0.5f;
         settings.ColorStart = Vector4(0.8f, 0.7f, 0.5f, 0.12f); settings.ColorEnd = Vector4(0.8f, 0.7f, 0.5f, 0);
-        // Temporarily give Rain's budget to dust while integrating the MGPU water.
-        create("BistroInteriorDust", {160, 180, -160}, 2, settings);
+        create("BistroInteriorDust", {160, 180, -160}, 1, settings);
 
         settings.LifetimeMin = 2; settings.LifetimeMax = 5;
         settings.SpeedMin = 12; settings.SpeedMax = 35; settings.ConeAngleDegrees = 20;
@@ -197,7 +196,7 @@ namespace BistroParticles
         settings.SizeStart = 3; settings.SizeEnd = 1; settings.AngularVelocity = 3;
         settings.ColorStart = Vector4(2, 0.3f, 1, 0.3f); settings.ColorEnd = Vector4(0.5f, 0.05f, 0.2f, 0);
         settings.Blend = ParticleBlend::Additive; settings.DepthCollision = true;
-        auto rain = create("BistroSparkRain", BistroWater::Center + Vector3(0, 300, 0), 0, settings);
+        auto rain = create("BistroSparkRain", BistroWater::Center + Vector3(0, 300, 0), 1, settings);
         rain.GetComponent<TransformComponent>().Rotation.y = BistroWater::YawDegrees;
         if (weightSum != 16) throw std::logic_error("Bistro particle weights must sum to 16");
         Update(world);

@@ -391,7 +391,7 @@ int main(int argc, char** argv)
                     const auto& settings = emitter.GetSettings();
                     if (emitter.IsEnabled()) budget += settings.MaxParticles;
                     if (name.value != "BistroSparkRain") return;
-                    Require(!emitter.IsEnabled() && emitter.GetBurstTotal() == 0, "Overhead Rain must be disabled");
+                    Require(emitter.IsEnabled() && emitter.GetBurstTotal() > 0, "Overhead Rain must be restored");
                     Require(transform.Location == BistroWater::Center + Vector3(0,300,0) &&
                         transform.Rotation.y == BistroWater::YawDegrees &&
                         settings.ShapeExtents == Vector3(BistroWater::HalfExtent.x,10,BistroWater::HalfExtent.z) &&
@@ -446,7 +446,7 @@ int main(int argc, char** argv)
                 if (g == 0 && r + b > 0.99f && r + b < 1.01f) ++referencePixels;
             }
             Require(changed > 1000, "Street pool must contribute visible water pixels");
-            Require(referencePixels > 1000, "Pool must use MGPU blue/red speed material instead of optical water");
+            Require(referencePixels < 100, "Pool must use transparent optical water instead of the MGPU debug material");
             ComPtr<ID3D12Device> device;
             ComPtr<ID3D12InfoQueue> info;
             ThrowIfFailed(output->GetResource()->D3DResource->GetDevice(IID_PPV_ARGS(&device)));

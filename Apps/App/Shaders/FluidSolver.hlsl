@@ -3,7 +3,7 @@
 cbuffer DispatchParameters : register(b0)
 {
     uint Count; uint Capacity; uint SortK; uint SortJ;
-    float Dt; uint ReferenceUnits; uint2 DispatchPadding;
+    float Dt; uint ReferenceUnits; float WaveAcceleration; uint DispatchPadding;
 };
 StructuredBuffer<FluidParticle> Particles : register(t0);
 StructuredBuffer<float2> Density : register(t1);
@@ -25,7 +25,7 @@ float3 Limited(float3 value, float limit)
 }
 float3 PredictedPosition(FluidParticle particle)
 {
-    return particle.Position + (particle.Velocity + Gravity * Dt) * PredictionSeconds;
+    return particle.Position + (particle.Velocity + (Gravity + float3(WaveAcceleration,0,0)) * Dt) * PredictionSeconds;
 }
 [numthreads(128, 1, 1)]
 void SavePrevious(uint i : SV_DispatchThreadID)
@@ -140,7 +140,7 @@ void Integrate(uint i : SV_DispatchThreadID)
     FluidParticle p = Particles[i];
     float rhoi = Density[i].x;
     float pressureI = Stiffness * (NearStiffness > 0 ? rhoi - RestDensity : max(0, rhoi - RestDensity));
-    float3 acceleration = Gravity;
+    float3 acceleration = Gravity + float3(WaveAcceleration,0,0);
     float3 position = PredictedPosition(p);
     int3 origin = Cell(position);
     float gradientCoefficient = -45.0f / (Pi * pow(H, 6));

@@ -17,4 +17,5 @@ cbuffer FluidParameters : register(b1)
     float3 Absorption; float RefractionPixels;
     float3 Scattering; float MaxThickness;
     uint FilterRadius; uint ResetMotion; float NearStiffness; float PredictionSeconds;
+    uint LocalSimulation; uint3 ParameterPadding;
 };

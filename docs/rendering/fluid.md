@@ -71,38 +71,39 @@ Zero on the three budget fields below means inherit. Resolved Low/Mid/High value
 are MaxSubsteps 16/32/64, FilterIterations 1/2/3, FilterRadiusPixels 8/16/32.
 `ResolveFluidSettings` returns a copy: quality changes never overwrite author
 values; a nonzero budget remains explicit until the caller sets it back to zero.
-There is one real implementation (SPH + NRF), so no unused Implementation enum.
+The solver and NRF material share one render pipeline; no implementation enum is needed.
 
 ## Per-instance fields
 
 All fields are in `GDX12FluidSettings`, changed with GetSettings/SetSettings.
 Invalid finite/range values throw without changing the component.
 
-During Bistro integration, `MGPUReference=true` keeps particle positions, velocities,
-bounds and all solver coefficients in original MGPU units. Bistro keeps MGPU's
-10x20 horizontal footprint and fits the vertical bound to 2 units, mapping the
-volume into the 520x76x264 cm basin with entity scale (52,38,13.2).
-Its street length is halved; the width is unchanged. The shallower simulation
-bound retains a visible fluid depth and wave height in the scene.
-The existing `Cm`/`Kg` field names denote raw reference values in this mode:
+Bistro uses `MGPUReference=true` to keep the solver in original MGPU units.
+The 10x2x20 volume maps into the 520x76x264 cm basin with scale (52,38,13.2).
+The `Cm`/`Kg` physical field names denote raw reference values in this mode:
 H=0.2, mass=1, density=630, gravity=-9.81, pressure=288, near pressure=2.15,
 prediction=1/120 s, viscosity=0, damping=0.95, three steps with a 1/60 s frame cap.
-The solver uses point collisions without speed/acceleration caps. Changing the
-mode resets live particles because their coordinate system changes.
-Rendering temporarily follows MGPU's `FluidParticleDraw.hlsl`: opaque 0.1-unit
-camera-facing quads, blue-to-red by speed/10, without NRF or optical shading.
-For the fitted nonuniform transform, billboard size uses the horizontal geometric
-mean scale. The box transform fits the original simulation to the basin. Spawning
-retains MGPU's two-pass lattice and +/-0.1 jitter. The Y offset
-is fitted proportionally to the new height (0.1 instead of the source's 0.5).
-The initial block occupies 40% of local X at one narrow end (X center=-2.75,
-size<=4); the remaining space is initially empty. It receives a +X impulse,
-so the wave travels between the narrow ends, along the basin's 520 cm dimension.
-`App.Water.WaveSpeed` sets this initial velocity in raw MGPU units/s: default 6,
-range [0,12], startup-only via the App's `Config/Engine.ini`. At the fitted X scale,
-6 units/s is 312 cm/s. Zero leaves only the gravity-driven release.
-The overhead `BistroSparkRain` has zero budget and remains disabled; its budget
-temporarily goes to interior dust, preserving the total particle count.
+Point collisions have no speed/acceleration caps. Changing the coordinate mode
+resets particles; ordinary frame updates and wave forcing preserve the live seed.
+
+Water renders with the transparent NRF/optical material. Raw positions and motion
+are transformed into world cm; sphere radius uses the cube root of the transform
+determinant to preserve volume. The temporary blue/red particle material is removed.
+The physical/optical constant snapshot is 272 bytes, uploaded with CBV alignment.
+
+The initial block occupies 40% of local X at a narrow end, with MGPU lattice
+sizing and +/-0.1 jitter. `App.Water.WaveSpeed` sets the initial +X velocity
+(default 6, [0,12] MGPU units/s; 312 cm/s in this scene).
+`App.Water.WaveAcceleration` (default 4, [0,12] MGPU units/s^2) and
+`App.Water.WavePeriod` (default 6, [1,30] simulation seconds) sustain sloshing
+between the narrow ends. The acceleration is a cosine along local X, evaluated
+at each simulation substep. Its phase advances only with simulated time and
+freezes when paused, globally disabled or at zero timescale. Setting acceleration
+to zero disables the periodic drive. These three CVars are startup-only via the
+App's `Config/Engine.ini`. No particles are periodically reset or respawned.
+
+`BistroSparkRain` is restored above the matching rotated pool footprint, with its
+original budget share; the total particle budget remains 500000.
 
 | Field | Default | Units and accepted range |
 | --- | --- | --- |

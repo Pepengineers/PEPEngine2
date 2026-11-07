@@ -50,7 +50,7 @@ inline void CheckBistroParticleControls()
         {
             if (name.value != "BistroSparkRain") return;
             const auto& settings = emitter.GetSettings();
-            require(!emitter.IsEnabled() && emitter.GetBurstTotal() == 0, "Rain must stay disabled during MGPU integration");
+            require(emitter.IsEnabled() && emitter.GetBurstTotal() > 0, "Rain must be restored above the pool");
             require(transform.Location == BistroWater::Center + Vector3(0,300,0) &&
                 transform.Rotation.y == BistroWater::YawDegrees &&
                 settings.ShapeExtents == Vector3(BistroWater::HalfExtent.x,10,BistroWater::HalfExtent.z) &&

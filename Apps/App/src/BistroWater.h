@@ -25,6 +25,12 @@ namespace BistroWater
     inline AutoConsoleVariable<float> WaveSpeed(L"App.Water.WaveSpeed", 6.0f,
         L"Initial wave speed along +local X in MGPU units/s, startup only, 0..12",
         EConsoleVariableFlags::ReadOnly, [](float value) { return std::isfinite(value) && value >= 0 && value <= 12; });
+    inline AutoConsoleVariable<float> WaveAcceleration(L"App.Water.WaveAcceleration", 4.0f,
+        L"Periodic +local X wave acceleration in MGPU units/s^2, startup only, 0..12",
+        EConsoleVariableFlags::ReadOnly, [](float value) { return std::isfinite(value) && value >= 0 && value <= 12; });
+    inline AutoConsoleVariable<float> WavePeriod(L"App.Water.WavePeriod", 6.0f,
+        L"Wave forcing period in simulation seconds, startup only, 1..30",
+        EConsoleVariableFlags::ReadOnly, [](float value) { return std::isfinite(value) && value >= 1 && value <= 30; });
 
     class Scene
     {
@@ -132,6 +138,8 @@ namespace BistroWater
             settings.ParticleMassKg = 1;
             settings.RestDensityKgPerCm3 = 630;
             settings.AccelerationCmPerSecond2 = Vector3(0, -9.81f, 0);
+            settings.WaveAcceleration = WaveAcceleration.GetValue();
+            settings.WavePeriodSeconds = WavePeriod.GetValue();
             settings.ContainerHalfExtentCm = ReferenceHalfExtent;
             settings.MaxStepSeconds = 1.0f / 180;
             settings.MaxSubsteps = 3;
@@ -140,6 +148,9 @@ namespace BistroWater
             settings.PredictionSeconds = 1.0f / 120;
             settings.ViscosityCm2PerSecond = 0;
             settings.Restitution = 0.95f;
+            settings.FilterRadiusPixels = 6;
+            settings.AbsorptionPerCm = {0.008f,0.002f,0.001f};
+            settings.ScatteringColor = {0.02f,0.12f,0.16f};
             _source.SetSettings(settings);
             // Same two-pass spawn sizing as HybridParticleApp::RecreateFluidEmitter.
             const auto spawnSize = [&](UINT count)
