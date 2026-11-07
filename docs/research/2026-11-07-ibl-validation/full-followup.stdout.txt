@@ -1,0 +1,27 @@
+CPU component budgets, invalid inputs and actual Fox animation passed.
+Loaded SDK layers: D:\Project\PEPEngine2\Build\GrassInteraction\RuntimeFeatures\D3D12\D3D12SDKLayers.dll
+GPU skinning: 128 bones, five influences, rigid attachment and previous position passed.
+DEFAULT skin sources, queued palette slots, pose edits, normals and zero influences passed.
+GPU atmosphere, cloud fBM/ridged, animated IBL, source switching and Off passed.
+GPU projected-grid wind and compact grass indirect depth passed.
+Grass capture slot=0 lit=18.2598 dark=17.25
+Grass capture slot=1 lit=18.2598 dark=17.25
+Grass capture slot=2 lit=18.2598 dark=17.25
+Grass queued frame slots: roots edits/growth, DEFAULT material/light edits, all draw stages, motion, deletion/reuse and disable passed.
+Prepared grass graph passes=11 activeViews=2 indirectSubmissions=2 per frame.
+Grass physical geometry arena: default1patch=1179648 default16patches=1179648 max16patches=515964928 bytes; one arena across all direct-queue views and frame slots.
+Prepared grass: queued common batch consumers, two views, arena overwrite rejection, frozen depth/GBuffer and primitive wind revisions passed.
+Grass interaction: depression, stationary pressure, opposing/dense sources, dt0, offscreen recovery, Firefly response, bounds and exact DIRECT/async GPU state parity passed.
+GPU fluid: MGPU cohesion/prediction, pause, 95-percent rebound, fixed substeps and legacy pressure isolation passed.
+GPU fluid: MGPU cohesion/prediction, pause, 95-percent rebound, fixed substeps and legacy pressure isolation passed.
+GPU fluid: MGPU cohesion/prediction, pause, 95-percent rebound, fixed substeps and legacy pressure isolation passed.
+GPU fluid graph: first-frame buffers, SPH/NRF, resolve, quality, simulation-only, clear and reset passed.
+GPU firefly mesh: 120 vertices, 40 triangles, weighted/additive color and motion, zero GS invocations passed.
+GPU depth physics: remaining impact time, friction 0/.2/1 and resting gravity contact passed.
+GPU particle swept rotated door collider: both sides, depth absent and disabled control passed.
+GPU particle integrators, independent draw/simulation switches, pending burst/reset, volume and pause passed.
+Particle direct/async/direct: queued frame slots, simulation-only joins and toggles passed.
+GPU particle refill: exact 250000/1000000 live particles from first frame and after expiry passed.
+GPU particle spawn/indirect/three blend modes/reset/removal and depth collision off/bounce/stop passed.
+Water Far/behind/resolve/Near/final vs ordinary route: three single-particle blend modes, absent/empty/off, aerial once passed.
+Six-component GPU integration passed with no debug-layer errors.

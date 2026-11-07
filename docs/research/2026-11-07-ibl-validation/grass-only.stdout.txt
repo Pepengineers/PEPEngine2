@@ -1,0 +1,4 @@
+CPU component budgets, invalid inputs and actual Fox animation passed.
+Loaded SDK layers: D:\Project\PEPEngine2\Build\GrassInteraction\RuntimeFeatures\D3D12\D3D12SDKLayers.dll
+Grass interaction: depression, stationary pressure, opposing/dense sources, dt0, offscreen recovery, Firefly response, bounds and exact DIRECT/async GPU state parity passed.
+Grass/particle interaction GPU validation passed without executing environment.

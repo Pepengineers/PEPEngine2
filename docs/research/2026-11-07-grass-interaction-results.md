@@ -2,6 +2,8 @@
 
 2026-11-07. Реализовано в текущем `codex/bistro-rendering` поверх `5a5ce57`, без worktree и push. Окончательный дизайн описан в [обновлённом плане](../plans/2026-11-07-grass-wind-interaction-proposal.md).
 
+**Уточнение validation:** после исходного успешного прогона независимый повтор обнаружил непостоянный IBL-prefix GBV failure. Он воспроизведён до выполнения новой grass/particle функциональности и остаётся нерешённым; общий suite не считается стабильно чистым. Три isolated grass/particle GBV прогона прошли. Доказательства, отклонённые варианты и границы вывода — в [follow-up](2026-11-07-ibl-gbv-followup.md).
+
 ## Результат
 
 Все люди публикуют компактные визуальные источники после завершения movement jobs. Поле 64×64 один раз за кадр объединяет текущую занятость и след движения. Трава читает current/previous историю с фиксированным числом выборок; Firefly читает только текущую занятость. Точные капсульные столкновения, Jolt-объекты и меши в интерфейсе отсутствуют. Общая система частиц получает нейтральный заимствованный field/SRV, с opt-in на emitter; только существующий Bistro Firefly включает его.
@@ -30,7 +32,8 @@ foreach ($project in 'App','SecondGroupTests','BistroRenderGraphTests','RenderPi
 
 | Проверка | Результат |
 | --- | --- |
-| `SecondGroupTests --gpu-validation` | PASS: новые численные проверки плюс существующие skin/wind/grass/water/particles tests; GPU-based validation без D3D12 errors |
+| `SecondGroupTests --gpu-validation` | Исторический PASS одного процесса; независимый повтор дал IBL GBV failure. Общий suite остаётся непостоянным, см. follow-up |
+| `SecondGroupTests --grass-interaction-gpu-validation` | PASS в трёх свежих процессах с полной GBV для новой функциональности; environment не исполняется |
 | `BistroRenderGraphTests --grass-gpu-validation` | PASS: DIRECT/async toggles, Analytic→ProjectedGrid, queued 3 frame slots, совместные water/particles/AO, grass/wind off, seed reset, pause, odd resize |
 | `RenderPipelineTests` | PASS: primitives/batches, pipeline composition, AO rebinding, rebuild и grass lifetime |
 | `BistroAdditionsTests --routes-only` | PASS: полный плотный ряд, позиции snapshot после movement, отсутствие fox sources, одинаковые траектории на 1/4 worker threads, pause/time scale существующих маршрутов |
@@ -68,4 +71,4 @@ RTX 3060 Laptop 6 GiB, NVIDIA 617.42. Один процесс, native rendering,
 
 Это локальное 2D-поле у одной арки с height gate, не точное столкновение и не система всех игровых зон. Gather линейно растёт с числом ближайших людей; экстремальная толпа требует отдельного замера перед tiles/spatial indexing. Дополнительные patches вне поля не получают воздействия людей. Wind Analytic теперь дискретизируется сеткой; субъективная калибровка радиуса/высоты/силы в движении может потребовать настройки.
 
-Проверки на другом GPU, долгий soak, pipelined FPS benchmark, полный performance matrix всех async-комбинаций и pixel oracle с движущейся толпой не выполнялись. Queued validation подтверждает корректность нескольких кадров в полёте, а не их throughput. Художественное качество подтверждено numerical readback и arch HDR smoke; отдельного просмотра видео движения не было. MGPU reference не изменён.
+Проверки на другом GPU, долгий soak, pipelined FPS benchmark, полный performance matrix всех async-комбинаций и pixel oracle с движущейся толпой не выполнялись. Queued validation подтверждает корректность нескольких кадров в полёте, а не их throughput. Численные readback и arch HDR smoke подтверждают поведение; художественное качество анимации не оценивалось, отдельного просмотра видео движения не было. MGPU reference не изменён.

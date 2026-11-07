@@ -15,6 +15,18 @@ static void Require(bool value, const char* message)
 {
     if (!value) throw std::runtime_error(message);
 }
+static void CheckGpuMessages(ID3D12InfoQueue* info, const std::string& phase)
+{
+    for (UINT64 i = 0; info && i < info->GetNumStoredMessages(); ++i)
+    {
+        SIZE_T bytes = 0; ThrowIfFailed(info->GetMessage(i, nullptr, &bytes));
+        std::vector<unsigned char> storage(bytes);
+        auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+        ThrowIfFailed(info->GetMessage(i, message, &bytes));
+        if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR)
+            throw std::runtime_error(phase + ": " + message->pDescription);
+    }
+}
 #include "PlacementTiming.h"
 #include "SkinPlacementChecks.h"
 #include "GrassPlacementChecks.h"
@@ -204,10 +216,12 @@ int main(int argc, char** argv)
     {
         std::cout.setf(std::ios::unitbuf);
         const std::string_view mode = argc > 1 ? argv[1] : "";
+        const bool interactionOnly = mode == "--grass-interaction-gpu-validation";
+        const bool environmentOnly = mode == "--environment-gpu-validation";
         const bool asyncMode = mode == "--async" || mode == "--async-gpu-validation";
         const bool benchmark = mode == "--benchmark" || mode == "--benchmark-skin" ||
             mode == "--benchmark-grass" || mode == "--benchmark-particles";
-        if (!mode.empty() && !benchmark && !asyncMode && mode != "--cpu" && mode != "--gpu-validation")
+        if (!mode.empty() && !benchmark && !asyncMode && !environmentOnly && !interactionOnly && mode != "--cpu" && mode != "--gpu-validation")
             throw std::invalid_argument("Unknown SecondGroupTests mode");
         TestEngine engine;
         TestCPU();
@@ -216,7 +230,7 @@ int main(int argc, char** argv)
         Require(gate && WaitForSingleObject(gate, INFINITE) == WAIT_OBJECT_0, "GPU mutex failed");
         ComPtr<ID3D12Debug> debug;
         if (!benchmark) { ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))); debug->EnableDebugLayer(); }
-        if (mode == "--gpu-validation" || mode == "--async-gpu-validation")
+        if (mode == "--gpu-validation" || mode == "--async-gpu-validation" || environmentOnly || interactionOnly)
         {
             ComPtr<ID3D12Debug1> validation; ThrowIfFailed(debug.As(&validation));
             validation->SetEnableGPUBasedValidation(TRUE);
@@ -230,6 +244,12 @@ int main(int argc, char** argv)
         ComPtr<ID3D12InfoQueue> info;
         if (!benchmark) ThrowIfFailed(device.GetDevice().As(&info));
         diagnosticInfo = info;
+        if (auto sdkLayers = GetModuleHandleW(L"D3D12SDKLayers.dll"))
+        {
+            wchar_t modulePath[MAX_PATH] = {};
+            if (GetModuleFileNameW(sdkLayers, modulePath, MAX_PATH))
+                std::wcout << L"Loaded SDK layers: " << modulePath << L'\n';
+        }
         auto* queue = device.GetCommandQueue();
         RenderPipelineCommonData common;
         common.WindowWidth = common.DownscaledWidth = 129; common.WindowHeight = common.DownscaledHeight = 97;
@@ -261,33 +281,66 @@ int main(int argc, char** argv)
             queue->ExecuteCommandList(commands);
         }
         queue->Flush(); resources.CurrFrameConstantsIndex = 0;
+        if (interactionOnly)
+        {
+            GDX12OpaquePass opaque;
+            opaque.Setup(&resources, nullptr, &common); opaque.Initialize();
+            auto* depth = opaque.GetOutput(2)->GetTexture();
+            auto* commands = queue->GetCommandList();
+            commands->ResourceBarrier({ depth->GetResource()->GetDepthWriteBarrier() });
+            commands->ClearDepthStencilView(depth);
+            queue->ExecuteCommandList(commands); queue->Flush();
+            CheckGrassInteraction(device, resources, common, *depth);
+            ThrowIfFailed(device.GetDevice()->GetDeviceRemovedReason());
+            CheckGpuMessages(info.Get(), "Grass interaction only");
+            GDX12ShaderCompiler::Shutdown();
+            ReleaseMutex(gate); CloseHandle(gate);
+            std::cout << "Grass/particle interaction GPU validation passed without executing environment.\n";
+            return 0;
+        }
         TestSkinning(device, resources);
         if (!benchmark) TestSkinPlacement(device, resources);
         if (benchmark && (mode == "--benchmark" || mode == "--benchmark-skin")) BenchmarkSkinPlacement(device, resources);
         GDX12EnvironmentIBLPass environment; environment.Setup(&resources, nullptr, &common); environment.Initialize();
-        const auto execute = [&](GDX12RenderPass& pass) { auto* list = queue->GetCommandList(); pass.Execute(list); queue->ExecuteCommandList(list); queue->Flush(); };
-        resources.Sky.Source = SkySource::Off; execute(environment);
-        const auto off = Read(device, *environment.GetOutput(3)->GetTexture());
-        Require(*std::max_element(off.begin(), off.end()) == 0, "Off environment is not black");
-        resources.Sky.Source = SkySource::SkyAtmosphere; resources.Sky.Quality = 1; ++resources.Sky.Revision;
-        auto& atmosphere = resources.Sky.Atmosphere;
-        atmosphere.IBL.CubeResolution = 32; atmosphere.IBL.FilterSamples = 16;
-        execute(environment);
-        const auto sky = Read(device, *environment.GetOutput(3)->GetTexture());
-        Require(*std::max_element(sky.begin(), sky.end()) > 0, "Atmosphere source is black");
-        GDX12CloudComponent clouds; environment.SetCloudSource(&clouds); execute(environment);
-        const auto cloud = Read(device, *environment.GetOutput(3)->GetTexture());
-        const auto revision = resources.ReflectionEnvironmentRevision;
-        common.ResetHistory = common.ResetUpscalerHistory = common.RequestHistoryReset = false;
-        clouds.Advance(0.5); execute(environment);
-        const auto animated = Read(device, *environment.GetOutput(3)->GetTexture());
-        Require(cloud != animated && resources.ReflectionEnvironmentRevision == revision && !common.RequestHistoryReset,
-            "Continuous clouds must animate IBL without a temporal discontinuity");
-        auto parameters = clouds.GetParameters(); parameters.Implementation = 1; clouds.SetParameters(parameters); execute(environment);
-        Require(resources.ReflectionEnvironmentRevision > revision, "Cloud implementation change did not invalidate history");
-        environment.SetCloudSource(nullptr); resources.Sky.Source = SkySource::SkyBox; resources.Sky.Quality = 1;
-        resources.Sky.Box.IBL.CubeResolution = 32; resources.Sky.Box.IBL.FilterSamples = 16; ++resources.Sky.Revision; execute(environment);
-        std::cout << "GPU atmosphere, cloud fBM/ridged, animated IBL, source switching and Off passed.\n";
+        UINT environmentStep = 0;
+        const auto execute = [&](GDX12RenderPass& pass)
+        {
+            auto* list = queue->GetCommandList(); pass.Execute(list); queue->ExecuteCommandList(list); queue->Flush();
+            CheckGpuMessages(info.Get(), "Environment step " + std::to_string(environmentStep));
+            ++environmentStep;
+        };
+        for (UINT repeat = 0; repeat < (environmentOnly ? 128u : 1u); ++repeat)
+        {
+            resources.Sky.Source = SkySource::Off; execute(environment);
+            const auto off = Read(device, *environment.GetOutput(3)->GetTexture());
+            Require(*std::max_element(off.begin(), off.end()) == 0, "Off environment is not black");
+            resources.Sky.Source = SkySource::SkyAtmosphere; resources.Sky.Quality = 1; ++resources.Sky.Revision;
+            auto& atmosphere = resources.Sky.Atmosphere;
+            atmosphere.IBL.CubeResolution = 32; atmosphere.IBL.FilterSamples = 16;
+            execute(environment);
+            const auto sky = Read(device, *environment.GetOutput(3)->GetTexture());
+            Require(*std::max_element(sky.begin(), sky.end()) > 0, "Atmosphere source is black");
+            GDX12CloudComponent clouds; environment.SetCloudSource(&clouds); execute(environment);
+            const auto cloud = Read(device, *environment.GetOutput(3)->GetTexture());
+            const auto revision = resources.ReflectionEnvironmentRevision;
+            common.ResetHistory = common.ResetUpscalerHistory = common.RequestHistoryReset = false;
+            clouds.Advance(0.5); execute(environment);
+            const auto animated = Read(device, *environment.GetOutput(3)->GetTexture());
+            Require(cloud != animated && resources.ReflectionEnvironmentRevision == revision && !common.RequestHistoryReset,
+                "Continuous clouds must animate IBL without a temporal discontinuity");
+            auto parameters = clouds.GetParameters(); parameters.Implementation = 1; clouds.SetParameters(parameters); execute(environment);
+            Require(resources.ReflectionEnvironmentRevision > revision, "Cloud implementation change did not invalidate history");
+            environment.SetCloudSource(nullptr); resources.Sky.Source = SkySource::SkyBox; resources.Sky.Quality = 1;
+            resources.Sky.Box.IBL.CubeResolution = 32; resources.Sky.Box.IBL.FilterSamples = 16; ++resources.Sky.Revision; execute(environment);
+            std::cout << "GPU atmosphere, cloud fBM/ridged, animated IBL, source switching and Off passed.\n";
+        }
+        if (environmentOnly)
+        {
+            GDX12ShaderCompiler::Shutdown();
+            ReleaseMutex(gate); CloseHandle(gate);
+            std::cout << "Environment repeated source-switch GPU validation passed before grass initialization.\n";
+            return 0;
+        }
 
         GDX12OpaquePass opaque; opaque.Setup(&resources, nullptr, &common); opaque.Initialize();
         auto* depth = opaque.GetOutput(2)->GetTexture(); auto* motion = opaque.GetOutput(1)->GetTexture();
@@ -654,12 +707,7 @@ int main(int argc, char** argv)
             BenchmarkParticlePlacement(device, resources, common, depth, hdr.get(), accum.get(), reveal.get());
         }
         ThrowIfFailed(device.GetDevice()->GetDeviceRemovedReason());
-        for (UINT64 i = 0; info && i < info->GetNumStoredMessages(); ++i)
-        {
-            SIZE_T size = 0; info->GetMessage(i, nullptr, &size); std::vector<unsigned char> storage(size);
-            auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data()); ThrowIfFailed(info->GetMessage(i, message, &size));
-            if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR) throw std::runtime_error(message->pDescription);
-        }
+        CheckGpuMessages(info.Get(), "SecondGroup final");
         queue->Flush(); grassRenderer.reset(); GDX12ShaderCompiler::Shutdown();
         ReleaseMutex(gate); CloseHandle(gate);
         std::cout << (benchmark ? "Component placement benchmarks passed without the debug layer.\n" :

@@ -1,0 +1,391 @@
+{
+  "pre_followup_head": "f694338",
+  "production_ibl_blob": "cf9e46e34752222c0979088a00408ad843ff2d31",
+  "production_ibl_changed": false,
+  "baseline_executable_run": false,
+  "loaded_sdk_layers": {
+    "observed_module_path": "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\D3D12\\D3D12SDKLayers.dll",
+    "file_version": "1.619.6.0.20260914.1",
+    "sha256": "7ab48d56d1c18708ebcf16c7c9259b2d783e2b935b85add4a244573b9f03cab4"
+  },
+  "runs": {
+    "final-features2": {
+      "status": "passed",
+      "child_exit_code": 0,
+      "elapsed_s": 51.1,
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "8a1d2bcef50f6cdeb055666dcb1ea113a90d8d8c6a61c2f29b8723016f40093b",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\final-features2-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "227d75c4a2bbe9a53c680188a7011aa3b21bafaeaeff625b132dfbd23ce5e3ab",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      },
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "8a1d2bcef50f6cdeb055666dcb1ea113a90d8d8c6a61c2f29b8723016f40093b",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\final-features2-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "227d75c4a2bbe9a53c680188a7011aa3b21bafaeaeff625b132dfbd23ce5e3ab",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      }
+    },
+    "parent-features": {
+      "status": "failed",
+      "child_exit_code": 1,
+      "elapsed_s": 52.5,
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "8a1d2bcef50f6cdeb055666dcb1ea113a90d8d8c6a61c2f29b8723016f40093b",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\parent-features-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      },
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "8a1d2bcef50f6cdeb055666dcb1ea113a90d8d8c6a61c2f29b8723016f40093b",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\parent-features-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      }
+    },
+    "investigate-environment1": {
+      "status": "failed",
+      "child_exit_code": 1,
+      "elapsed_s": 7.43,
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "5cd4b3ab0829d87325c9d7f6d84a1e75c9d39b4dd9f7bc79e507c2e529a91700",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\investigate-environment1-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      },
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "5cd4b3ab0829d87325c9d7f6d84a1e75c9d39b4dd9f7bc79e507c2e529a91700",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\investigate-environment1-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      }
+    },
+    "investigate-environment-names1": {
+      "status": "failed",
+      "child_exit_code": 1,
+      "elapsed_s": 23.86,
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "120838b25d81f3d00e9a28ecc4eb02643cda48f37a8624cc4078b2cdb522fa71",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\investigate-environment-names1-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      },
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "120838b25d81f3d00e9a28ecc4eb02643cda48f37a8624cc4078b2cdb522fa71",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\investigate-environment-names1-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      }
+    },
+    "investigate-environment-ring1": {
+      "status": "failed",
+      "child_exit_code": 1,
+      "elapsed_s": 16.45,
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "d4ee4cdd2f08b393e7d22f6230c88c9b44d8ebee7e8ac572cb81836f2461b42d",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\investigate-environment-ring1-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      },
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "d4ee4cdd2f08b393e7d22f6230c88c9b44d8ebee7e8ac572cb81836f2461b42d",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\investigate-environment-ring1-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      }
+    },
+    "ibl-uav-focused1": {
+      "status": "passed",
+      "child_exit_code": 0,
+      "elapsed_s": 24.66,
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "833ce1fd8ba8c61ba4070337beb823158281f78a7333284adc336d84f257dabf",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\ibl-uav-focused1-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      },
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "833ce1fd8ba8c61ba4070337beb823158281f78a7333284adc336d84f257dabf",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\ibl-uav-focused1-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      }
+    },
+    "ibl-uav-focused2": {
+      "status": "passed",
+      "child_exit_code": 0,
+      "elapsed_s": 24.06,
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "833ce1fd8ba8c61ba4070337beb823158281f78a7333284adc336d84f257dabf",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\ibl-uav-focused2-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      },
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "833ce1fd8ba8c61ba4070337beb823158281f78a7333284adc336d84f257dabf",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\ibl-uav-focused2-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      }
+    },
+    "ibl-uav-focused3": {
+      "status": "failed",
+      "child_exit_code": 1,
+      "elapsed_s": 4.83,
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "833ce1fd8ba8c61ba4070337beb823158281f78a7333284adc336d84f257dabf",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\ibl-uav-focused3-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      },
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "833ce1fd8ba8c61ba4070337beb823158281f78a7333284adc336d84f257dabf",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\ibl-uav-focused3-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      }
+    },
+    "investigate-descriptor-slots1": {
+      "status": "failed",
+      "child_exit_code": 1,
+      "elapsed_s": 20.45,
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "43cac1f706e370c233ff72b40ec0e0bd5de8b57748f38b3a271122d39fa50c83",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\investigate-descriptor-slots1-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      },
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "43cac1f706e370c233ff72b40ec0e0bd5de8b57748f38b3a271122d39fa50c83",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\investigate-descriptor-slots1-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      }
+    },
+    "grass-only-validation1": {
+      "status": "passed",
+      "child_exit_code": 0,
+      "elapsed_s": 24.06,
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "c7203899d9984e353a6a9edec985dab8a760288bbe5702d0f84d761c64ed437e",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\grass-only-validation1-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      },
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "c7203899d9984e353a6a9edec985dab8a760288bbe5702d0f84d761c64ed437e",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\grass-only-validation1-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      }
+    },
+    "grass-only-validation2": {
+      "status": "passed",
+      "child_exit_code": 0,
+      "elapsed_s": 22.05,
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "c7203899d9984e353a6a9edec985dab8a760288bbe5702d0f84d761c64ed437e",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\grass-only-validation2-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      },
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "c7203899d9984e353a6a9edec985dab8a760288bbe5702d0f84d761c64ed437e",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\grass-only-validation2-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      }
+    },
+    "grass-only-validation3": {
+      "status": "passed",
+      "child_exit_code": 0,
+      "elapsed_s": 22.45,
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "c7203899d9984e353a6a9edec985dab8a760288bbe5702d0f84d761c64ed437e",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\grass-only-validation3-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      },
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "c7203899d9984e353a6a9edec985dab8a760288bbe5702d0f84d761c64ed437e",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\grass-only-validation3-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      }
+    },
+    "followup-full-validation": {
+      "status": "passed",
+      "child_exit_code": 0,
+      "elapsed_s": 44.49,
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "c7203899d9984e353a6a9edec985dab8a760288bbe5702d0f84d761c64ed437e",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\followup-full-validation-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      },
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "c7203899d9984e353a6a9edec985dab8a760288bbe5702d0f84d761c64ed437e",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\followup-full-validation-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      }
+    },
+    "final-environment-repro": {
+      "status": "failed",
+      "child_exit_code": 1,
+      "elapsed_s": 19.65,
+      "fingerprints_before": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "c7203899d9984e353a6a9edec985dab8a760288bbe5702d0f84d761c64ed437e",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\final-environment-repro-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      },
+      "fingerprints_after": {
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\RuntimeFeatures\\GrassInteractionFeatures.exe": "c7203899d9984e353a6a9edec985dab8a760288bbe5702d0f84d761c64ed437e",
+        "D:\\Project\\PEPEngine2\\Build\\GrassInteraction\\final-environment-repro-initial.ini": "9fae06fb3527b1c2fb8d58d70814a81dd6c4a8b79d3d87f37480c3b36400a2d5",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassInteraction.hlsl": "c6bc3c4d6ed5f3b3fe9a406518f3c55fd313a56c1d77e0a0e6d7869d13940d56",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassExpand.hlsl": "f1dba2e855df5090889dd622cfc353c28713f9325d38cbeb748e696ea5d4126c",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\GrassCommon.hlsli": "a3c30f0bfccbe9c64530efa966dc5b89d7314d95b0980254f4c4f49161455c13",
+        "D:\\Project\\PEPEngine2\\Apps\\App\\Shaders\\WindField.hlsl": "93b2d0a562dfddd337cf01e3de26a0cccbc7f775d7e371fc65fbf0888274fd2b",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\InteractionField.hlsli": "7d197173f92a3a4dd2f2b01c83be438f60c8abe2bbdec781f40546778bd54c60",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\ParticleSimulation.hlsl": "4b0d0f8e7f883b30d99657f8db41f37d9b056db015c581d7464ca345022342e8",
+        "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\Shaders\\Particles.hlsli": "79736590528571499cf93bbfe72e282414fbb533445990c686e681176d3fe279"
+      }
+    }
+  }
+}
