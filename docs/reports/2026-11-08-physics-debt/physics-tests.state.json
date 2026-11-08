@@ -1,0 +1,10 @@
+{
+  "status": "passed",
+  "stdout": "D:\\Project\\PEPEngine2\\Build\\PhysicsDebt-20261108\\physics-tests.state.stdout.log",
+  "stderr": "D:\\Project\\PEPEngine2\\Build\\PhysicsDebt-20261108\\physics-tests.state.stderr.log",
+  "fingerprints_before": {},
+  "pid": 14784,
+  "child_exit_code": 0,
+  "fingerprints_after": {},
+  "elapsed_s": 0.61
+}
