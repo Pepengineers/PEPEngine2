@@ -17,6 +17,8 @@ public:
     { TickRange(world, dt, 0, GetWorkCount(world)); }
 
 protected:
+    // Small pose-read tasks cost more to schedule than they save in parallel work.
+    size_t GetBatchSize(const JobSystem&) const override { return 256; }
     size_t GetWorkCount(World& world) const override { return world.GetECS().GetPool<RigidBodyComponent>().Size(); }
     void TickRange(World& world, float dt, size_t begin, size_t end) override
     {

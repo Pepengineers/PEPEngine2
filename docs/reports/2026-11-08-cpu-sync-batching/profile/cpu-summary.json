@@ -1,0 +1,19 @@
+{
+  "frames": 1200,
+  "ticks": 3711.0,
+  "per_frame_mean_ms": {
+    "backend_ms": 16.229490166542067,
+    "dynamic_sync_ms": 2.2061143334210835,
+    "physics_ms": 18.750969250215533,
+    "render_ms": 34.286665500077085,
+    "snapshot_ms": 8.987162583259876,
+    "skeletal_ms": 5.077516833444508,
+    "pipeline_prepare_ms": 15.49301391652475,
+    "graph_record_ms": 10.018337916620858
+  },
+  "per_tick_ms": {
+    "backend_ms": 5.248016222002285,
+    "dynamic_sync_ms": 0.7133756939114254,
+    "physics_ms": 6.063369199746332
+  }
+}

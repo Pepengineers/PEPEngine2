@@ -1,0 +1,140 @@
+[
+  {
+    "gpu": "2026/11/08 19:31:34.445, 52, 210 MHz, 10.11 W, 0 %, 0 MiB, 0x0000000000000001, Not Active, Not Active, Not Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:31:34Z"
+  },
+  {
+    "gpu": "2026/11/08 19:31:39.517, 54, 1425 MHz, 21.53 W, 0 %, 191 MiB, 0x0000000000000001, Not Active, Not Active, Not Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:31:39Z"
+  },
+  {
+    "gpu": "2026/11/08 19:31:44.592, 53, 210 MHz, 10.25 W, 0 %, 303 MiB, 0x0000000000000001, Not Active, Not Active, Not Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:31:44Z"
+  },
+  {
+    "gpu": "2026/11/08 19:31:49.660, 55, 1927 MHz, 28.03 W, 0 %, 1558 MiB, 0x0000000000000001, Not Active, Not Active, Not Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:31:49Z"
+  },
+  {
+    "gpu": "2026/11/08 19:31:54.726, 53, 210 MHz, 10.53 W, 0 %, 2092 MiB, 0x0000000000000001, Not Active, Not Active, Not Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:31:54Z"
+  },
+  {
+    "gpu": "2026/11/08 19:31:59.802, 53, 210 MHz, 12.98 W, 14 %, 2712 MiB, 0x0000000000000001, Not Active, Not Active, Not Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:31:59Z"
+  },
+  {
+    "gpu": "2026/11/08 19:32:04.902, 55, 1425 MHz, 21.71 W, 14 %, 2589 MiB, 0x0000000000000001, Not Active, Not Active, Not Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:32:04Z"
+  },
+  {
+    "gpu": "2026/11/08 19:32:09.979, 58, 2100 MHz, 37.94 W, 0 %, 2727 MiB, 0x0000000000000400, Not Active, Not Active, Not Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:32:09Z"
+  },
+  {
+    "gpu": "2026/11/08 19:32:15.036, 58, 2085 MHz, 35.65 W, 1 %, 3589 MiB, 0x0000000000000400, Not Active, Not Active, Not Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:32:15Z"
+  },
+  {
+    "gpu": "2026/11/08 19:32:20.104, 64, 1485 MHz, 74.05 W, 97 %, 3598 MiB, 0x0000000000000004, Not Active, Not Active, Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:32:20Z"
+  },
+  {
+    "gpu": "2026/11/08 19:32:25.164, 66, 1425 MHz, 73.86 W, 99 %, 3598 MiB, 0x0000000000000004, Not Active, Not Active, Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:32:25Z"
+  },
+  {
+    "gpu": "2026/11/08 19:32:30.239, 69, 1747 MHz, 53.87 W, 69 %, 3598 MiB, 0x0000000000000004, Not Active, Not Active, Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:32:30Z"
+  },
+  {
+    "gpu": "2026/11/08 19:32:35.328, 71, 1432 MHz, 75.50 W, 99 %, 3598 MiB, 0x0000000000000004, Not Active, Not Active, Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:32:35Z"
+  },
+  {
+    "gpu": "2026/11/08 19:32:40.410, 72, 1597 MHz, 77.92 W, 91 %, 3598 MiB, 0x0000000000000004, Not Active, Not Active, Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:32:40Z"
+  },
+  {
+    "gpu": "2026/11/08 19:32:45.494, 75, 1597 MHz, 88.96 W, 85 %, 3598 MiB, 0x0000000000000004, Not Active, Not Active, Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:32:45Z"
+  },
+  {
+    "gpu": "2026/11/08 19:32:50.582, 77, 1792 MHz, 72.05 W, 56 %, 3598 MiB, 0x0000000000000004, Not Active, Not Active, Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:32:50Z"
+  },
+  {
+    "gpu": "2026/11/08 19:32:55.662, 77, 1642 MHz, 80.61 W, 78 %, 3598 MiB, 0x0000000000000004, Not Active, Not Active, Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:32:55Z"
+  },
+  {
+    "gpu": "2026/11/08 19:33:00.740, 78, 1717 MHz, 81.35 W, 61 %, 3598 MiB, 0x0000000000000004, Not Active, Not Active, Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:33:00Z"
+  },
+  {
+    "gpu": "2026/11/08 19:33:05.832, 80, 1807 MHz, 75.48 W, 66 %, 3598 MiB, 0x0000000000000004, Not Active, Not Active, Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:33:05Z"
+  },
+  {
+    "gpu": "2026/11/08 19:33:10.908, 81, 1875 MHz, 84.10 W, 67 %, 3598 MiB, 0x0000000000000004, Not Active, Not Active, Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:33:10Z"
+  },
+  {
+    "gpu": "2026/11/08 19:33:15.985, 82, 1672 MHz, 87.46 W, 76 %, 3598 MiB, 0x0000000000000004, Not Active, Not Active, Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:33:15Z"
+  },
+  {
+    "gpu": "2026/11/08 19:33:21.072, 84, 1785 MHz, 88.33 W, 82 %, 3598 MiB, 0x0000000000000004, Not Active, Not Active, Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:33:21Z"
+  },
+  {
+    "gpu": "2026/11/08 19:33:26.159, 85, 1822 MHz, 88.46 W, 81 %, 3598 MiB, 0x0000000000000004, Not Active, Not Active, Active",
+    "gpu_returncode": 0,
+    "ac_line_status": 1,
+    "utc": "2026-11-08T16:33:26Z"
+  }
+]

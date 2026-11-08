@@ -163,16 +163,19 @@ static void CheckWorlds(JobSystem& jobs)
     World first(WorldDesc{}), second(WorldDesc{});
     scenes->OnWorldCreated.Broadcast(first);
     scenes->OnWorldCreated.Broadcast(second);
-    const auto create = [](World& world)
+    const auto create = [](World& world, Vector3 position = Vector3(0, 10, 0))
     {
         auto entity = world.GetECS().CreateEntity();
         entity.AddComponent<RigidBodyComponent>().MotionType = PhysicsMotionType::Dynamic;
         entity.AddComponent<ColliderComponent>();
         // Transform last must also trigger body creation.
-        entity.AddComponent<TransformComponent>(Vector3(0, 10, 0));
+        entity.AddComponent<TransformComponent>(position);
         return entity.GetId();
     };
     auto a = create(first), b = create(second);
+    std::vector<Entity> dynamicEntities{a};
+    for (unsigned i = 1; i < 513; ++i)
+        dynamicEntities.push_back(create(first, Vector3(300.f * (i % 32), 10, 300.f * (i / 32))));
     auto& ecs = first.GetECS();
     auto handle = ecs.Get<RigidBodyComponent>(a).Body;
     Require(handle.IsValid() && second.GetECS().Get<RigidBodyComponent>(b).Body.IsValid(), "Body subscription missed creation");
@@ -183,8 +186,17 @@ static void CheckWorlds(JobSystem& jobs)
         physics->Step(second, 1.0f / 60);
     }
     DynamicBodyUpdateSystem sync(*physics);
-    sync.Schedule(jobs, first, 0).Complete();
+    System& configuredSync = sync;
+    configuredSync.Schedule(jobs, first, 0).Complete();
     sync.Schedule(jobs, second, 0).Complete();
+    for (const auto entity : dynamicEntities)
+    {
+        Vector3 position;
+        Quaternion rotation;
+        Require(physics->TryGetBodyTransform(first, ecs.Get<RigidBodyComponent>(entity).Body, position, rotation) &&
+            Vector3::Distance(position, ecs.Get<TransformComponent>(entity).Location) < 0.001f,
+            "Scheduled dynamic-body synchronization missed a moving body across batch boundaries");
+    }
     Require(ecs.Get<TransformComponent>(a).Location.y < 8, "Physics world did not advance");
     Require(second.GetECS().Get<TransformComponent>(b).Location.y == 10, "Paused world advanced with another world");
     const auto publishedRotation = ecs.Get<TransformComponent>(a).Rotation;

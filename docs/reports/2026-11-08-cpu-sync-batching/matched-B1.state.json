@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "stdout": "D:\\Project\\PEPEngine2\\Build\\CpuSyncOptimize-20261108\\matched-B1.state.stdout.log",
+  "stderr": "D:\\Project\\PEPEngine2\\Build\\CpuSyncOptimize-20261108\\matched-B1.state.stderr.log",
+  "fingerprints_before": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\CpuMatched256.exe": "ccfce81c4658748a341cdadc276088cf0acfc8ce27bfcd015c0b5c14e481f648",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+  },
+  "pid": 32352,
+  "elapsed_s": 129.55,
+  "child_exit_code": 0,
+  "fingerprints_after": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\CpuMatched256.exe": "ccfce81c4658748a341cdadc276088cf0acfc8ce27bfcd015c0b5c14e481f648",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+  }
+}

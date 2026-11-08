@@ -1,0 +1,10 @@
+ECSJobTests.cpp
+JobSystem.cpp
+TaskScheduler.cpp
+Создание кода...
+Sparse ECS range coverage and ordered system jobs passed (1/4 threads).
+JobSystemTests.cpp
+JobSystem.cpp
+TaskScheduler.cpp
+Создание кода...
+Job ranges, dependency chains/fan-in, synchronous work, errors and reuse passed (1/4 threads).

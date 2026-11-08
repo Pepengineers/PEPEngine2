@@ -1,0 +1,27 @@
+{
+  "before": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\CpuSyncProfile.exe": "59d6b99bc7eaf04bdefa84f09c2a7510296e50c1755f0147b690e914f7efd69b",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\App.exe": "2ea2c94b92e83c5073faad725e194f7819959394c2683aae7650a701f916275f",
+    "D:\\Project\\PEPEngine2\\Apps\\App\\src\\App.cpp": "d284de05781fa5d9340edc5d0caa32c55d12aaa51baf40d39f2184d0e55af9e4",
+    "D:\\Project\\PEPEngine2\\Apps\\App.Base\\src\\RenderModule.cpp": "f8a6cf660f5da3c94c757bcac8a93fe14ffbb862f39f8a2859237b506f541b47",
+    "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\src\\GDX12CommandQueue.cpp": "43eb29568f38879ee3070b39c929ed28c365f07466436ef4f9d087503b37f38e",
+    "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\src\\GDX12SwapChain.cpp": "3640abd101d8abc6056bb6b7b2ffde843ca059ed33bfada3632b4810309dc997",
+    "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\src\\GDX12GPUTimer.cpp": "3b7aa4048e8fc3595215d22a6b74ba5f2790936c533d7bcc681a5e094f701cab",
+    "D:\\Project\\PEPEngine2\\Apps\\App.Base\\src\\App.cpp": "f927d1f24b17a9660cab5a5ef0968d59f38519241c457d11a88c81c78817c468",
+    "D:\\Project\\PEPEngine2\\Apps\\App.Base\\Include\\App.Base\\Systems\\GPUDataUpdateSystem.h": "e5fcd3297e02a4937a4c3024658cdeee1cfd49694108f3b68665637b47f0f854"
+  },
+  "head": "174a6aa593955d276f9fc0594d9c7504a886f32e",
+  "after": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\CpuSyncProfile.exe": "59d6b99bc7eaf04bdefa84f09c2a7510296e50c1755f0147b690e914f7efd69b",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\App.exe": "2ea2c94b92e83c5073faad725e194f7819959394c2683aae7650a701f916275f",
+    "D:\\Project\\PEPEngine2\\Apps\\App\\src\\App.cpp": "d284de05781fa5d9340edc5d0caa32c55d12aaa51baf40d39f2184d0e55af9e4",
+    "D:\\Project\\PEPEngine2\\Apps\\App.Base\\src\\RenderModule.cpp": "f8a6cf660f5da3c94c757bcac8a93fe14ffbb862f39f8a2859237b506f541b47",
+    "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\src\\GDX12CommandQueue.cpp": "43eb29568f38879ee3070b39c929ed28c365f07466436ef4f9d087503b37f38e",
+    "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\src\\GDX12SwapChain.cpp": "3640abd101d8abc6056bb6b7b2ffde843ca059ed33bfada3632b4810309dc997",
+    "D:\\Project\\PEPEngine2\\Engine\\Engine.RendererDX12\\src\\GDX12GPUTimer.cpp": "3b7aa4048e8fc3595215d22a6b74ba5f2790936c533d7bcc681a5e094f701cab",
+    "D:\\Project\\PEPEngine2\\Apps\\App.Base\\src\\App.cpp": "f927d1f24b17a9660cab5a5ef0968d59f38519241c457d11a88c81c78817c468",
+    "D:\\Project\\PEPEngine2\\Apps\\App.Base\\Include\\App.Base\\Systems\\GPUDataUpdateSystem.h": "e5fcd3297e02a4937a4c3024658cdeee1cfd49694108f3b68665637b47f0f854"
+  }
+}

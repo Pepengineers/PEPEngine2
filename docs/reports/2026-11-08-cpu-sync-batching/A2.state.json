@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "stdout": "D:\\Project\\PEPEngine2\\Build\\CpuSyncOptimize-20261108\\A2.state.stdout.log",
+  "stderr": "D:\\Project\\PEPEngine2\\Build\\CpuSyncOptimize-20261108\\A2.state.stderr.log",
+  "fingerprints_before": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\CpuSyncBaseline.exe": "66f1e76780c22146a85d374f50e6d76c251337f348dafb621d235154fd418404",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+  },
+  "pid": 22108,
+  "elapsed_s": 114.46,
+  "child_exit_code": 0,
+  "fingerprints_after": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\CpuSyncBaseline.exe": "66f1e76780c22146a85d374f50e6d76c251337f348dafb621d235154fd418404",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+  }
+}

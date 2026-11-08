@@ -27,7 +27,7 @@ public:
 
     JobHandle Schedule(JobSystem& jobs, World& world, float dt, const JobHandle& dependency = {}) &
     {
-        return Schedule(jobs, world, dt, jobs.GetDefaultBatchSize(), dependency);
+        return Schedule(jobs, world, dt, GetBatchSize(jobs), dependency);
     }
 
     JobHandle Schedule(JobSystem& jobs, World& world, float dt, size_t batchSize,
@@ -41,6 +41,7 @@ public:
     }
 
 protected:
+    virtual size_t GetBatchSize(const JobSystem& jobs) const { return jobs.GetDefaultBatchSize(); }
     virtual void Prepare(World&, float) {}
     virtual size_t GetWorkCount(World&) const { return 1; }
     virtual void TickRange(World& world, float dt, size_t, size_t) { Tick(world, dt); }

@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "stdout": "D:\\Project\\PEPEngine2\\Build\\CpuSyncOptimize-20261108\\physics-tests-fresh.state.stdout.log",
+  "stderr": "D:\\Project\\PEPEngine2\\Build\\CpuSyncOptimize-20261108\\physics-tests-fresh.state.stderr.log",
+  "fingerprints_before": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\PhysicsTests\\PhysicsTests.exe": "ef124d5079b3a179e4390835fe8a277efb2a8f2c615e396ca09c0ae086818355"
+  },
+  "pid": 17812,
+  "child_exit_code": 0,
+  "fingerprints_after": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\PhysicsTests\\PhysicsTests.exe": "ef124d5079b3a179e4390835fe8a277efb2a8f2c615e396ca09c0ae086818355"
+  },
+  "elapsed_s": 0.62
+}
