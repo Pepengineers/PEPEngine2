@@ -240,11 +240,13 @@ For a current-scene ordinary measurement, use the fixed INI above and run from
 `Build/bin/x64/Debug/App`:
 
 ```powershell
-.\App.exe -Loading.BenchmarkWarmupFrames=120 -Loading.BenchmarkFrames=301 -Loading.BenchmarkOutput=D:/Project/PEPEngine2/Build/debug-current.json
+.\App.exe '-Loading.BenchmarkWarmupFrames=120' '-Loading.BenchmarkFrames=301' '-Loading.BenchmarkOutput=D:/Project/PEPEngine2/Build/debug-current.json'
 ```
 
 Use BenchmarkFrames=1201 for 1200 samples. Existing benchmark switches are
 unchanged; character-seed/physics/raw-sample fields are emitted with the report.
+Keep each `-Loading.*` argument quoted in PowerShell: unquoted arguments split
+into `-Loading` and `.Benchmark...`, causing an ordinary interactive launch.
 The exact frozen comparison harness is retained as
 `Build/Debug20Optimize-20261108/build_frozen.py`, `measure.py` and
 `run_accepted_pairs.py`; run it sequentially, never alongside builds/tests.
@@ -271,3 +273,41 @@ containment soak or second GPU, and no manual Settings interaction session.
 These results apply to the measured laptop/workload. Sustained 20 FPS remains
 open; the next optimization needs to reduce actual physics/GPU work without
 lowering the requested fidelity, rather than hiding accumulated physics time.
+
+## Independent review of the completed Sol High task
+
+The parent chat reviewed commits `798ce8b`, `d6eb1b4` and `60c2a90`, including
+snapshot invalidation, CVar owner lifetime, pose signatures, compact shadow
+uploads/root reuse and quaternion memoization. No blocking runtime defect was
+identified. One reproducibility defect was fixed above: PowerShell splits
+unquoted `-Loading.*` arguments; an argv probe reproduced it.
+
+All six accepted raw sample sets were checked against their run states and
+physics accounting. Recomputed medians are 64.3901 and 49.4348 ms (+30.253% FPS).
+The BistroRenderPipeline source-hash difference in the current checkout is
+only CRLF versus LF; normalized content matches the recorded frozen source.
+
+ConsoleVariableTests and SettingsCacheTests were freshly compiled and passed.
+RenderPipelineTests, PhysicsTests and LightingGpuTests were independently
+rerun and passed; their binary hashes match the worker's final tested binaries.
+Lighting's depth/HDR checks passed with D3D12 debug layer enabled. The parent
+did not repeat the complete Debug/Release build or the other regression suites.
+
+Two further ordinary App runs used the actual current scene, identical executable
+and INI hashes, 120 warm-up + 1200 measured frames, and no diagnostic timers:
+
+| Control | Mean ms / FPS | Raw p95 ms | Raw frames >50 ms | Requested / simulated s | Debt start → end s | GPU start → end °C |
+|---|---:|---:|---:|---:|---:|---:|
+| [First](2026-11-08-debug-bistro-optimization/independent-current.json) | 49.8492 / 20.0605 | 55.3637 | 629/1200 | 59.7673 / 59.5333 | 0.014608 → 0.248525 | 44 → 73 |
+| [Repeat](2026-11-08-debug-bistro-optimization/independent-hot.json) | 51.5958 / 19.3814 | 59.5212 | 819/1200 | 61.8642 / 61.6000 | 0.008862 → 0.273037 | 58 → 79 |
+
+The second artifact's `hot` name denotes a sequential repeat, not a controlled
+thermal plateau: it started at 58 °C, and CPU temperature/clocks were not captured.
+Both process-boundary GPU samples begin at idle clocks. These controls support
+the lack of margin at 20 FPS; they do not isolate the cause of the variation or
+replace the frozen paired comparison. Neither provides a sustained 20 FPS claim.
+The executable and INI fingerprints remained unchanged throughout both runs.
+
+[Independent review metadata and telemetry](2026-11-08-debug-bistro-optimization/independent-review.json)
+and the `independent-*` run states/test logs retain the checks. No second GPU,
+attached debugger, multi-minute soak or manual Settings session was tested.

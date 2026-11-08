@@ -1,0 +1,64 @@
+{
+  "reviewed_commits": [
+    "798ce8b",
+    "d6eb1b4",
+    "60c2a90"
+  ],
+  "runtime_code_findings": [],
+  "documentation_fix": "Quote -Loading.* PowerShell arguments; verified unquoted arguments split.",
+  "independent_tests": {
+    "RenderPipelineTests": {
+      "exit_code": 0,
+      "elapsed_s": 0.22,
+      "fingerprints": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\RenderPipelineTests\\RenderPipelineTests.exe": "f1dc49eb3a7234f387df8ade71fbf060330def3090f4a9886d38b4979f91f27e"
+      }
+    },
+    "PhysicsTests": {
+      "exit_code": 0,
+      "elapsed_s": 0.62,
+      "fingerprints": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\PhysicsTests\\PhysicsTests.exe": "bef19971162a2013ba81ee609f7fbc1917913610beb16fed6afcdd92b89f42ca"
+      }
+    },
+    "LightingGpuTests": {
+      "exit_code": 0,
+      "elapsed_s": 88.76,
+      "fingerprints": {
+        "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\LightingGpuTests\\LightingGpuTests.exe": "28a4d4376c9bd87509a42078b5b4e9dced831fa2a8e55bf31e00f5b8e31525fc"
+      }
+    },
+    "ConsoleVariableTests+SettingsCacheTests": {
+      "exit_code": 0,
+      "freshly_built": true,
+      "command": "cmd /c docs\\reports\\2026-11-08-debug-bistro-optimization\\test-settings.cmd"
+    }
+  },
+  "controls": [
+    {
+      "tag": "independent-current",
+      "mean_ms": 49.8492,
+      "fps": 20.060502475466006,
+      "p95_ms": 55.3637,
+      "raw_frames_over_50ms": 629,
+      "debt_delta_s": 0.23391689999999998,
+      "gpu_before_csv": "44, 210 MHz, 405 MHz, 9.92 W, 0 %",
+      "gpu_after_csv": "73, 2055 MHz, 7151 MHz, 41.80 W, 2 %"
+    },
+    {
+      "tag": "independent-hot",
+      "mean_ms": 51.5958,
+      "fps": 19.3814225188872,
+      "p95_ms": 59.5212,
+      "raw_frames_over_50ms": 819,
+      "debt_delta_s": 0.26417504999999997,
+      "gpu_before_csv": "58, 210 MHz, 405 MHz, 10.92 W, 0 %",
+      "gpu_after_csv": "79, 2047 MHz, 7151 MHz, 44.01 W, 0 %"
+    }
+  ],
+  "limits": [
+    "No independent Debug/Release rebuild; three regression executables match final worker fingerprints. Console and Settings were freshly compiled.",
+    "No attached debugger, second GPU, multi-minute soak, or manual Settings session.",
+    "GPU telemetry only at process boundaries; CPU telemetry absent. Sequential repeats are not a controlled thermal experiment."
+  ]
+}

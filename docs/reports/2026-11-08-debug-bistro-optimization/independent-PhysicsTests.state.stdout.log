@@ -1,0 +1,14 @@
+Triangle sliver rejection, surviving support and centimeter/meter units passed
+Shared Jolt scheduler: 1 threads, observed 1 execution threads; nested fan-out/fan-in and repeated drain passed
+World isolation, pause, subscriptions, collider replacement and unload passed
+Primitive compound offsets, rotations, units, scale, cache lifetime and baked pivots passed
+Shape-aware placement: compound gaps, baked pivots, transforms, contact, validation and units passed
+Static mixed mesh/box compound and recursive motion restrictions passed
+Triangle sliver rejection, surviving support and centimeter/meter units passed
+Shared Jolt scheduler: 4 threads, observed 4 execution threads; nested fan-out/fan-in and repeated drain passed
+World isolation, pause, subscriptions, collider replacement and unload passed
+Primitive compound offsets, rotations, units, scale, cache lifetime and baked pivots passed
+Shape-aware placement: compound gaps, baked pivots, transforms, contact, validation and units passed
+Static mixed mesh/box compound and recursive motion restrictions passed
+Load cancellation, default/configured fixed phases, pause, time scale and retained catch-up passed
+Jolt integration passed: 1000 colliding bodies, 180 ticks, 1/4 shared threads
