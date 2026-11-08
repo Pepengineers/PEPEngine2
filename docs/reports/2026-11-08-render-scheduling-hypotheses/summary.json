@@ -1,0 +1,257 @@
+{
+  "measured_frames": 1800,
+  "metrics": {
+    "frame_ms": {
+      "mean": 53.64449283331628,
+      "median": 52.09509999305,
+      "p95": 64.8139999956,
+      "max": 89.0092000067
+    },
+    "gpu_ms": {
+      "mean": 48.128506773333335,
+      "median": 48.252928,
+      "p95": 51.401728,
+      "max": 65.419264
+    },
+    "physics_ms": {
+      "mean": 19.10481661119486,
+      "median": 19.20295000075,
+      "p95": 25.2715000063,
+      "max": 51.2109999955
+    },
+    "module_update_ms": {
+      "mean": 0.021241000195342,
+      "median": 0.0200999975204,
+      "p95": 0.0290000140667,
+      "max": 0.0804000049829
+    },
+    "slot_wait_ms": {
+      "mean": 0.0,
+      "median": 0.0,
+      "p95": 0.0,
+      "max": 0.0
+    },
+    "wait_total_ms": {
+      "mean": 0.0,
+      "median": 0.0,
+      "p95": 0.0,
+      "max": 0.0
+    },
+    "timer_wait_ms": {
+      "mean": 0.0,
+      "median": 0.0,
+      "p95": 0.0,
+      "max": 0.0
+    },
+    "other_wait_ms": {
+      "mean": 0.0,
+      "median": 0.0,
+      "p95": 0.0,
+      "max": 0.0
+    },
+    "present_ms": {
+      "mean": 1.9113329998071518,
+      "median": 0.317499995232,
+      "p95": 8.61710000038,
+      "max": 14.4237000048
+    },
+    "submit_ms": {
+      "mean": 0.17389188903074,
+      "median": 0.16669999063,
+      "p95": 0.225299999118,
+      "max": 0.35949999094
+    },
+    "begin_frame_ms": {
+      "mean": 1.7192289445549112,
+      "median": 1.6748999953250001,
+      "p95": 2.09129999578,
+      "max": 3.80149999261
+    },
+    "ui_begin_ms": {
+      "mean": 1.7046538887669722,
+      "median": 1.66059999168,
+      "p95": 2.07619999349,
+      "max": 3.76229999959
+    },
+    "backbuffer_begin_ms": {
+      "mean": 0.013994833322032567,
+      "median": 0.0127999931574,
+      "p95": 0.0209999978542,
+      "max": 0.0714000016451
+    },
+    "render_ms": {
+      "mean": 30.60640799988511,
+      "median": 30.0332000032,
+      "p95": 36.9011999965,
+      "max": 59.7097000033
+    },
+    "snapshot_ms": {
+      "mean": 8.35510294459741,
+      "median": 8.186500005425,
+      "p95": 10.4387000054,
+      "max": 16.9296000004
+    },
+    "pipeline_prepare_ms": {
+      "mean": 14.220818777946223,
+      "median": 13.849050007750002,
+      "p95": 17.7208000124,
+      "max": 26.5265999883
+    },
+    "graph_record_ms": {
+      "mean": 9.128211722316166,
+      "median": 8.847200006245,
+      "p95": 12.2115000039,
+      "max": 24.6384999901
+    },
+    "ecs_gpu_ms": {
+      "mean": 0.5850490555829327,
+      "median": 0.40870000421999997,
+      "p95": 1.2255000025,
+      "max": 3.61389999092
+    },
+    "scene_additions_ms": {
+      "mean": 0.15089638864828278,
+      "median": 0.1461500003935,
+      "p95": 0.195299997926,
+      "max": 0.465700000525
+    },
+    "movement_ms": {
+      "mean": 1.3138405556066222,
+      "median": 1.2906999960549999,
+      "p95": 1.62810000777,
+      "max": 2.38470000029
+    },
+    "skeletal_ms": {
+      "mean": 4.569267610998617,
+      "median": 4.50010000169,
+      "p95": 5.66470000148,
+      "max": 7.40739999712
+    }
+  },
+  "windows": [
+    {
+      "dt_ms": 49.508727615078,
+      "gpu_ms": 48.49708032,
+      "physics_ms": 16.4653343331322,
+      "slot_wait_ms": 0.0,
+      "wait_total_ms": 0.0,
+      "present_ms": 4.593600666323667,
+      "render_ms": 29.182189999869333,
+      "begin_frame_ms": 1.6661690000693,
+      "backbuffer_begin_ms": 0.0138719998300034,
+      "ecs_gpu_ms": 0.4210363338391467,
+      "scene_additions_ms": 0.14625333294270668,
+      "movement_ms": 1.2609973327816,
+      "first": 121,
+      "debt_end_ms": 6.10133644432,
+      "ticks_per_frame": 3.3266666666666667,
+      "blocking_slots": 0
+    },
+    {
+      "dt_ms": 51.342822698256334,
+      "gpu_ms": 47.994630826666665,
+      "physics_ms": 18.6301753336196,
+      "slot_wait_ms": 0.0,
+      "wait_total_ms": 0.0,
+      "present_ms": 2.4852496668695965,
+      "render_ms": 28.704637666145665,
+      "begin_frame_ms": 1.6941649995741668,
+      "backbuffer_begin_ms": 0.015245332916574534,
+      "ecs_gpu_ms": 0.5618926665186467,
+      "scene_additions_ms": 0.14774199922877,
+      "movement_ms": 1.2884623334804666,
+      "first": 421,
+      "debt_end_ms": 242.280688251,
+      "ticks_per_frame": 3.033333333333333,
+      "blocking_slots": 0
+    },
+    {
+      "dt_ms": 52.25557489941467,
+      "gpu_ms": 48.49425408,
+      "physics_ms": 19.783323333463333,
+      "slot_wait_ms": 0.0,
+      "wait_total_ms": 0.0,
+      "present_ms": 1.2642403332888668,
+      "render_ms": 28.447130667023334,
+      "begin_frame_ms": 1.6237220007183,
+      "backbuffer_begin_ms": 0.012930333912371333,
+      "ecs_gpu_ms": 0.6522423331440167,
+      "scene_additions_ms": 0.14286366671325668,
+      "movement_ms": 1.2523803331454333,
+      "first": 721,
+      "debt_end_ms": 1152.28572127,
+      "ticks_per_frame": 2.953333333333333,
+      "blocking_slots": 0
+    },
+    {
+      "dt_ms": 53.017194680868336,
+      "gpu_ms": 48.411757226666666,
+      "physics_ms": 18.2095476669577,
+      "slot_wait_ms": 0.0,
+      "wait_total_ms": 0.0,
+      "present_ms": 2.2826029997073567,
+      "render_ms": 30.776881666382668,
+      "begin_frame_ms": 1.6917836669582667,
+      "backbuffer_begin_ms": 0.0138516662021476,
+      "ecs_gpu_ms": 0.56810999994477,
+      "scene_additions_ms": 0.15000466624896,
+      "movement_ms": 1.3097713328403,
+      "first": 1021,
+      "debt_end_ms": 1257.44330149,
+      "ticks_per_frame": 3.16,
+      "blocking_slots": 0
+    },
+    {
+      "dt_ms": 57.718168273568665,
+      "gpu_ms": 47.55992533333333,
+      "physics_ms": 20.689268333417335,
+      "slot_wait_ms": 0.0,
+      "wait_total_ms": 0.0,
+      "present_ms": 0.33945899943512997,
+      "render_ms": 32.7082129997,
+      "begin_frame_ms": 1.7494019998607666,
+      "backbuffer_begin_ms": 0.013361999988551766,
+      "ecs_gpu_ms": 0.6962063336370633,
+      "scene_additions_ms": 0.15455033376813,
+      "movement_ms": 1.3485660006602334,
+      "first": 1321,
+      "debt_end_ms": 4639.55972355,
+      "ticks_per_frame": 2.7866666666666666,
+      "blocking_slots": 0
+    },
+    {
+      "dt_ms": 59.052949721615335,
+      "gpu_ms": 47.81339285333333,
+      "physics_ms": 20.851250666579,
+      "slot_wait_ms": 0.0,
+      "wait_total_ms": 0.0,
+      "present_ms": 0.5028453332182934,
+      "render_ms": 33.819395000189665,
+      "begin_frame_ms": 1.8901320001486666,
+      "backbuffer_begin_ms": 0.014707667082546767,
+      "ecs_gpu_ms": 0.6108066664139533,
+      "scene_additions_ms": 0.16396433298787333,
+      "movement_ms": 1.4228660007317,
+      "first": 1621,
+      "debt_end_ms": 6688.77715629,
+      "ticks_per_frame": 3.1333333333333333,
+      "blocking_slots": 0
+    }
+  ],
+  "blocking_slot_frames": 0,
+  "actual_wait_calls": 0.0,
+  "max_early_wait_ms": 0.0,
+  "frames_with_slot_wait_above_1ms": 0,
+  "h1_ideal_mean_saving_bound_ms": 0.0,
+  "h1_ideal_fps_bound": 18.56758508131674,
+  "observed_physics_ms_per_tick_including_loop_overhead": 6.232089507095098,
+  "capacity_estimate": {
+    "physics_owner_ms_per_second_at_60hz": 373.9253704257059,
+    "render_cpu_ms_excluding_present": 28.69507500007796,
+    "nonphysics_nonpresent_ms_per_iteration": 32.628343222314264,
+    "conditional_single_owner_render_fps": 19.18806067805878,
+    "owner_ms_required_for_60_ticks_and_20_frames": 1026.4922348719913,
+    "gpu_ms_mean": 48.128506773333335,
+    "assumptions": "Fixed observed mean costs, all Present cost removable, no other waits; not a runtime prediction. Moving game systems to another cadence changes these costs."
+  }
+}

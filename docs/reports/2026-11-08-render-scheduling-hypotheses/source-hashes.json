@@ -1,0 +1,7 @@
+{
+  "Apps/App/src/App.cpp": "d284de05781fa5d9340edc5d0caa32c55d12aaa51baf40d39f2184d0e55af9e4",
+  "Apps/App.Base/src/RenderModule.cpp": "f8a6cf660f5da3c94c757bcac8a93fe14ffbb862f39f8a2859237b506f541b47",
+  "Engine/Engine.RendererDX12/src/GDX12CommandQueue.cpp": "43eb29568f38879ee3070b39c929ed28c365f07466436ef4f9d087503b37f38e",
+  "Engine/Engine.RendererDX12/src/GDX12SwapChain.cpp": "3640abd101d8abc6056bb6b7b2ffde843ca059ed33bfada3632b4810309dc997",
+  "Engine/Engine.RendererDX12/src/GDX12GPUTimer.cpp": "3b7aa4048e8fc3595215d22a6b74ba5f2790936c533d7bcc681a5e094f701cab"
+}

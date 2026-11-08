@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "stdout": "D:\\Project\\PEPEngine2\\Build\\FrameScheduling-20261108\\wait-profile.state.stdout.log",
+  "stderr": "D:\\Project\\PEPEngine2\\Build\\FrameScheduling-20261108\\wait-profile.state.stderr.log",
+  "fingerprints_before": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\FrameScheduleProbe.exe": "7935634c33ea2a483ac041584a15b51204719c46f30befa6be202bc6f48082fe",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+  },
+  "pid": 29984,
+  "elapsed_s": 141.17,
+  "child_exit_code": 0,
+  "fingerprints_after": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\FrameScheduleProbe.exe": "7935634c33ea2a483ac041584a15b51204719c46f30befa6be202bc6f48082fe",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+  }
+}
