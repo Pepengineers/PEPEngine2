@@ -10,7 +10,8 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from scipy.ndimage import distance_transform_edt
+from scipy.ndimage import distance_transform_edt, label
+from scipy.spatial import cKDTree
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'Assets/Scenes/Amazon Lumberyard Bistro/Exterior/exterior.obj'
@@ -18,9 +19,16 @@ OUTPUT = ROOT / 'Build/RouteValidation'
 STEP = 10.0  # cm; the actor envelope below includes a rasterization margin.
 
 
+def is_route_obstacle(group):
+    name = group.lower()
+    return ('building' in name or 'tree_large' in name or
+            name.startswith(('bux_hedge_box', 'bux_hedge_cylinder')) or
+            name in ('paris_street_38', 'paris_street_39'))
+
+
 def geometry():
     vertices, floor, obstacles = [], [], []
-    material = ''
+    material = group = ''
     digest = hashlib.sha256()
     with SOURCE.open('rb') as stream:
         for raw in stream:
@@ -29,6 +37,8 @@ def geometry():
                 vertices.append(tuple(map(float, raw.split()[1:4])))
             elif raw.startswith(b'usemtl '):
                 material = raw.split()[1].decode()
+            elif raw.startswith(b'g '):
+                group = raw.split()[1].decode()
             elif raw.startswith(b'f '):
                 ids = [int(p.split(b'/')[0]) for p in raw.split()[1:]]
                 points = [vertices[i - 1 if i > 0 else i] for i in ids]
@@ -37,7 +47,7 @@ def geometry():
                     low, high = min(p[1] for p in tri), max(p[1] for p in tri)
                     if 'Pavement' in material and high < 55:
                         floor.append(tri)
-                    elif 'Pavement' not in material and low < 220 and high > 50:
+                    elif is_route_obstacle(group) and 'Pavement' not in material and low < 220 and high > 50:
                         obstacles.append(tri)
     vertices = np.array(vertices)
     lower = np.floor(vertices[:, [0, 2]].min(axis=0) / STEP) * STEP - 50
@@ -89,10 +99,41 @@ def curve():
     return np.array(result), len(nodes)
 
 
+def check_loop_shape(points):
+    xz = points[:, [0, 2]]
+    arc = np.r_[0, np.cumsum(np.linalg.norm(np.diff(xz, axis=0), axis=1))]
+    samples = np.arange(0, arc[-1], 25)
+    a = np.c_[np.interp(samples, arc, xz[:, 0]), np.interp(samples, arc, xz[:, 1])]
+    b = np.roll(a, -1, axis=0)
+    pairs = cKDTree((a+b)/2).query_pairs(26, output_type='ndarray')
+    separation = np.abs(pairs[:, 0]-pairs[:, 1])
+    pairs = pairs[(separation > 1) & (separation < len(a)-1)]
+    i, j = pairs.T
+    cross = lambda x, y: x[:, 0]*y[:, 1]-x[:, 1]*y[:, 0]
+    r, s, delta = b[i]-a[i], b[j]-a[j], a[j]-a[i]
+    denominator = cross(r, s)
+    nonparallel = abs(denominator) > 1e-7
+    t = np.divide(cross(delta, s), denominator, out=np.zeros(len(i)), where=nonparallel)
+    u = np.divide(cross(delta, r), denominator, out=np.zeros(len(i)), where=nonparallel)
+    crossing = nonparallel & (t >= 0) & (t <= 1) & (u >= 0) & (u <= 1)
+    collinear = (~nonparallel) & (abs(cross(delta, r)) < 1e-7)
+    overlap = (np.maximum(np.minimum(a[i], b[i]), np.minimum(a[j], b[j])) <=
+               np.minimum(np.maximum(a[i], b[i]), np.maximum(a[j], b[j])) + 1e-7).all(axis=1)
+    assert not (crossing | (collinear & overlap)).any(), 'Loop has self-intersections or shared segments'
+    pairs = cKDTree(a).query_pairs(500, output_type='ndarray')
+    distance_along = abs(samples[pairs[:, 0]]-samples[pairs[:, 1]])
+    distance_along = np.minimum(distance_along, arc[-1]-distance_along)
+    pairs = pairs[distance_along > 400]
+    distances = np.linalg.norm(a[pairs[:, 0]]-a[pairs[:, 1]], axis=1)
+    assert (distances >= 150).all(), 'Separate loop branches share a narrow passage'
+    return float(distances.min()) if len(distances) else None
+
+
 def main():
     OUTPUT.mkdir(parents=True, exist_ok=True)
     lower, (ground, obstacles), source_hash, floors, blocks, (basin_center, basin_half, basin_rotation) = geometry()
     points, anchors = curve()
+    branch_spacing = check_loop_shape(points)
     clearance = distance_transform_edt(ground & ~obstacles) * STEP
     shape = ground.shape
 
@@ -120,19 +161,22 @@ def main():
             idx = cells(xz)
             failed |= obstacles[idx] | ~ground[idx]
     assert not failed.any(), f'Actor envelope hits scenery at {points[failed][:5].tolist()}'
-    local = (points[:, [0, 2]] - basin_center) @ basin_rotation.T
+    x, z = np.indices(shape)
+    local = (np.stack([x*STEP+lower[0], z*STEP+lower[1]], axis=-1)-basin_center) @ basin_rotation.T
     side_clearances = []
     for sign in (-1, 1):
-        nearby = ((abs(local[:, 0]) < basin_half[0] + 200) &
-                  (sign*local[:, 1] > basin_half[1] + 45) &
-                  (sign*local[:, 1] < basin_half[1] + 300))
-        indices = np.flatnonzero(nearby)
-        runs = np.split(indices, np.flatnonzero(np.diff(indices) > 1) + 1)
-        bypass = next((run for run in runs if len(run) and
-                       local[run, 0].min() < -basin_half[0] and
-                       local[run, 0].max() > basin_half[0]), None)
-        assert bypass is not None, f'Loop does not bypass basin side {sign}'
-        side_clearances.append(float(center_clearance[bypass].min()))
+        nearby = ((abs(local[:, :, 0]) < basin_half[0] + 300) &
+                  (sign*local[:, :, 1] > 0) & (sign*local[:, :, 1] < basin_half[1] + 500))
+        for radius in range(70, 201, 5):
+            components, _ = label(nearby & (clearance >= radius))
+            start = set(components[nearby & (local[:, :, 0] < -basin_half[0]-150)])
+            end = set(components[nearby & (local[:, :, 0] > basin_half[0]+150)])
+            if not ((start & end)-{0}):
+                break
+        else:
+            radius += 5
+        assert radius > 70, f'No free passage on basin side {sign}'
+        side_clearances.append(radius-5)
     length = np.linalg.norm(np.diff(points, axis=0), axis=1).sum()
     report = dict(source_sha256=source_hash, anchors=anchors, samples=len(points),
                   floor_triangles=floors, obstacle_triangles=blocks, raster_step_cm=STEP,
@@ -140,8 +184,10 @@ def main():
                   actor_envelope_half_width_cm=45, actor_envelope_half_length_cm=65,
                   envelope_collisions=int(failed.sum()), length_m=float(length/100),
                   basin_bypass_sides=2, basin_side_center_clearance_cm=side_clearances,
+                  self_intersections=0, sampled_nonlocal_branch_spacing_cm=branch_spacing,
+                  ignored_objects='Small fences, hydrants, bollards, streetlights and street furniture',
                   lap_seconds_at_95_cm_s=float(length/95),
-                  limits='Static authoring geometry and one basin; no dynamic obstacle avoidance or foot IK. Raster check, not an exact continuous collision proof.')
+                  limits='Roads and major objects only; small props are deliberately ignored. No dynamic obstacle avoidance or foot IK. Raster check, not an exact continuous collision proof.')
     (OUTPUT / 'validation.json').write_text(json.dumps(report, indent=2) + '\n')
     rgb = np.zeros((*shape, 3), dtype=np.uint8)
     rgb[:] = [20, 25, 34]
@@ -180,7 +226,7 @@ def main():
              f'Длина: {length/100:.0f} м', f'Круг при 0,95 м/с: {length/95/60:.1f} мин',
              f'Проверено точек: {len(points):,}', 'Пересечений габарита: 0', '',
              'Зелёный — ось маршрута', 'Жёлтые стрелки — направление', 'Серый — покрытие', 'Тёмный — препятствия / здания', '',
-             'Проверка статической сцены.', 'Упавшие предметы и встречные', 'NPC пока не обходятся.', 'Это схема, не кадр из игры.']
+             'Только дороги и крупные объекты.', 'Мелкая декорация игнорируется.', 'Нет петель и общих отрезков.', 'Это схема, не кадр из игры.']
     for i, line in enumerate(lines):
         draw.text((x, 125+i*28), line, font=font if i < 14 else small, fill='#e1e8f3')
     draw.line([(x, 910), (x+100, 910)], fill='white', width=3)

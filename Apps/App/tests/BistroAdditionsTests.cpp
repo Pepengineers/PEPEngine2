@@ -310,7 +310,7 @@ int main(int argc, char** argv)
                 for (const auto& point : edge.Points)
                 {
                     PhysicsRayHit hit;
-                    const bool found = physics->RayCastStatic(routeWorld, point + Vector3(0,50,0), {0,-100,0}, hit);
+                    const bool found = physics->RayCastStatic(routeWorld, point + Vector3(0,5,0), {0,-55,0}, hit);
                     if (!found || hit.Normal.y <= 0 || std::abs(hit.Position.y + 4.6f - point.y) >= 20)
                     {
                         if (unsupported < 20) std::cerr << "Unsupported route sample: " << point.x << ',' << point.y << ',' << point.z
