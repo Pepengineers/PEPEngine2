@@ -73,6 +73,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ResourceHandle.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGraph.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12Submission.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGeometrySource.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGeometry.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GeometryViewPass.h" />

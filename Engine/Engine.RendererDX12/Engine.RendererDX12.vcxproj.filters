@@ -16,6 +16,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderHelpers.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12Submission.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Quality.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Reconstruction.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameGeneration.h"><Filter>Header Files</Filter></ClInclude>
