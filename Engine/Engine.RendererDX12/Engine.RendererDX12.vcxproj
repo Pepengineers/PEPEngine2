@@ -73,6 +73,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ResourceHandle.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGraph.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12SnapshotProtocol.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Submission.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGeometrySource.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGeometry.h" />
@@ -99,6 +100,7 @@
   <ItemGroup>
     <ClCompile Include="src\GDX12RenderPass.cpp" />
     <ClCompile Include="src\GDX12RenderGraph.cpp" />
+    <ClCompile Include="src\GDX12SnapshotProtocol.cpp" />
     <ClCompile Include="src\GDX12RenderHelpers.cpp" />
     <ClCompile Include="src\GDX12LightGrid.cpp" />
     <ClCompile Include="src\GDX12Reconstruction.cpp" />
