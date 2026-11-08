@@ -1,6 +1,6 @@
 # MGPU: интеграция первой волны
 
-2026-11-08. **P0/P1/P2a/P3a интегрированы и совместно проверены.** Worktree: `D:\Project\PEPEngine2\.tmp\mgpu-feature-2026-11-08\integrator`, branch `codex/mgpu-integrator`. Основной checkout не изменялся; push не выполнялся.
+2026-11-08. **P0/P1/P2a/P3a интегрированы и совместно проверены.** Worktree: `D:\Project\PEPEngine2\.tmp\mgpu-feature-2026-11-08\integrator`, branch `codex/mgpu-integrator`. Проверки и build outputs изолированы в этом worktree; push не выполнялся.
 
 ## Принятые commits и границы
 
@@ -62,7 +62,7 @@ Graph/queue/App builds дополнительно использовали `/p:F
 
 Test executable paths: `Build/bin/x64/Debug/<target>/<target>.exe`, cwd — его output directory. Snapshot — без аргументов; RenderGraphTests — `--compiler-only` и отдельно `--gpu-validation`; MGPUQueueTests — `--gpu-validation --require-two-adapters`. Только output fixture INI у graph/queue содержит `[ConsoleVariables]` без настроек, чтобы избежать известного unknown `App.Water.HeightScale`. Original output configs сохранены (`Build/P0/Engine.original.ini`, `Build/Integration/queue.Engine.original.ini`); исходный `Config/Engine.ini` не менялся. Runner fingerprinted executable/fixture INI вместе с source inputs.
 
-Compile database обновлена командой `python tools/Generate-CompileCommands.py --msbuild "C:\Program Files\Microsoft Visual Studio\18\Professional\MSBuild\Current\Bin\MSBuild.exe"` через тот же runner (`--cwd . --state Build/Integration/generate-compdb.json --timeout 180 --heartbeat 25`, fingerprints renderer/queue/snapshot projects). Она уже выполнялась к моменту запрета ведущего на новые workloads; после этого новых запусков/повторов не было. Общий Serena project не переактивировался.
+Compile database обновлена командой `python tools/Generate-CompileCommands.py --msbuild "C:\Program Files\Microsoft Visual Studio\18\Professional\MSBuild\Current\Bin\MSBuild.exe"` через тот же runner (`--cwd . --state Build/Integration/generate-compdb.json --timeout 180 --heartbeat 25`, fingerprints renderer/queue/snapshot projects): PASS, ignored local output. Общий Serena project не переактивировался.
 
 ## Конфигурация, передача и следующие границы
 
