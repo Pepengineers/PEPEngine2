@@ -60,14 +60,28 @@ namespace
                 TranslateMessage(&message);
                 DispatchMessage(&message);
             }
-            if (!_benchmarkStarted) { Timer.Reset(); _benchmarkStarted = true; }
+            auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+            if (!_benchmarkStarted)
+            {
+                const auto previous = world.BeforePhysicsStep;
+                world.BeforePhysicsStep = [this, previous](float step)
+                {
+                    if (previous) previous(step);
+                    ++BenchmarkTicks;
+                };
+                Timer.Reset();
+                _benchmarkStarted = true;
+            }
             Timer.Start();
             Timer.Tick(fixedStep);
+            if (!world.IsPaused()) BenchmarkRequested += double(Timer.DeltaTime()) * world.GetTimeScale();
             Update(Timer);
             Render(Timer);
         }
 
         void ResetBenchmarkClock() { Timer.Reset(); }
+        double BenchmarkRequested = 0;
+        uint64_t BenchmarkTicks = 0;
 
     protected:
         bool AddModules() override
@@ -267,7 +281,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
         }
         LocalFree(arguments);
         const auto started = std::chrono::steady_clock::now();
-        BistroApp app(instance);
+        // Keep ordinary benchmark processes on the same character routes and wave seed.
+        BistroApp app(instance, benchmarkOutput.empty() ? std::random_device{}() : 12345u);
         if (!budgetArgument.empty()) ApplyLoadingArgument(budgetArgument);
         if (!app.Initialize()) return EXIT_FAILURE;
         const auto initialized = std::chrono::steady_clock::now();
@@ -278,8 +293,17 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
             const auto ready = std::chrono::steady_clock::now();
             app.ResetBenchmarkClock();
             for (int frame = 0; frame < benchmarkWarmupFrames; ++frame) app.BenchmarkFrame();
+            const auto requestedStart = app.BenchmarkRequested;
+            const auto ticksStart = app.BenchmarkTicks;
+            std::vector<double> frameSamples;
+            frameSamples.reserve(benchmarkFrames - 1);
             const auto measuring = std::chrono::steady_clock::now();
-            for (int frame = 1; frame < benchmarkFrames; ++frame) app.BenchmarkFrame();
+            for (int frame = 1; frame < benchmarkFrames; ++frame)
+            {
+                const auto start = std::chrono::steady_clock::now();
+                app.BenchmarkFrame();
+                frameSamples.push_back(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+            }
             BenchmarkEngine::GetLocator().GetModule<RenderModule>()->WaitForUploads();
             const auto sampled = std::chrono::steady_clock::now();
             auto renderer = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
@@ -304,6 +328,12 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
                 << ",\n  \"max_texture_tasks\": " << LastLoadingMeasurements.MaxTextureTasks
                 << ",\n  \"sampled_frames\": " << benchmarkFrames - 1
                 << ",\n  \"warmup_frames\": " << benchmarkWarmupFrames
+                << ",\n  \"character_seed\": 12345"
+                << ",\n  \"physics_requested_seconds\": " << app.BenchmarkRequested - requestedStart
+                << ",\n  \"physics_ticks\": " << app.BenchmarkTicks - ticksStart
+                << ",\n  \"physics_simulated_seconds\": " << double(app.BenchmarkTicks - ticksStart) * (1.0f / 60.0f)
+                << ",\n  \"physics_debt_start\": " << requestedStart - double(ticksStart) * (1.0f / 60.0f)
+                << ",\n  \"physics_debt_end\": " << app.BenchmarkRequested - double(app.BenchmarkTicks) * (1.0f / 60.0f)
                 << ",\n  \"physics_count_scale\": " << BistroPhysics::CountScale.GetValue()
                 << ",\n  \"particle_count_scale\": " << BistroParticles::CountScale.GetValue()
                 << ",\n  \"particle_budget\": " << BistroParticles::GetBudget()
@@ -321,7 +351,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
                 << ",\n  \"working_set_bytes\": " << memory.WorkingSetSize
                 << ",\n  \"private_bytes\": " << memory.PrivateUsage
                 << ",\n  \"peak_working_set_bytes\": " << memory.PeakWorkingSetSize
-                << ",\n  \"peak_commit_bytes\": " << memory.PeakPagefileUsage << "\n}\n";
+                << ",\n  \"peak_commit_bytes\": " << memory.PeakPagefileUsage
+                << ",\n  \"frame_samples_ms\": [";
+            for (size_t i = 0; i < frameSamples.size(); ++i) report << (i ? ", " : "") << frameSamples[i];
+            report << "]\n}\n";
             report.close();
             if (!report) throw std::runtime_error("Cannot write loading benchmark output");
             return EXIT_SUCCESS;

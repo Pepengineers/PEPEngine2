@@ -658,6 +658,7 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
 
 bool GDX12GrassRenderer::Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch)
 {
+    GDX12_SCOPED_EVENT(commands, "Bistro grass expansion");
     auto* output = FindOutput(view, patch);
     if (!output) return false;
     const auto& state = _grass.at(output->Owner);
