@@ -173,6 +173,7 @@ private:
         SceneHandle Scene;
         std::uint64_t SceneRevision = 0;
         std::uint64_t ComponentRevision = 0;
+        std::uint64_t DeformationRevision = 0;
         std::vector<SkeletalPart> Parts;
         std::vector<Matrix> Pose;
         double SinceUpdate = 0;
@@ -207,6 +208,10 @@ private:
         bool Valid = false;
     };
     std::vector<MeshSnapshot> _meshSnapshots;
+    size_t _staticMeshSnapshotCount = SIZE_MAX;
+    uint64_t _staticMeshSnapshotHash = 14695981039346656037ull;
+    GDX12RenderBounds _staticMeshReflectionBounds, _staticMeshCasterBounds;
+    std::vector<GDX12LocalShadowCaster> _staticMeshCasters;
     ShadowVisibilitySystem _shadowVisibility;
     void CollectParticleEmitters();
     void ShareFences();

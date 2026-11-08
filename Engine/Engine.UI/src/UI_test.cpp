@@ -1,4 +1,5 @@
 #include "Engine.UI/UI_test.h"
+#include "SettingsCache.h"
 #include "Engine.Core/ConsoleModule.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
@@ -10,8 +11,6 @@
 #include <imgui/misc/imgui_stdlib.h>
 #include <imgui/backends/imgui_impl_dx12.h>
 #include <imgui/backends/imgui_impl_win32.h>
-#include <filesystem>
-#include <map>
 #include <memory>
 #include <charconv>
 
@@ -26,11 +25,6 @@ namespace Engine::UI
         bool Visible = true;
         bool FrameBegun = false;
         std::string InvalidVariable;
-
-        std::string Utf8(std::wstring_view text)
-        {
-            return std::filesystem::path(text).u8string();
-        }
 
         template <class T>
         bool InputNumber(const char* label, ImGuiDataType type, std::string& value)
@@ -60,33 +54,19 @@ namespace Engine::UI
                 ImGui::TextWrapped("Readonly settings apply only after restarting the application. Other changes apply live. F1 hides/shows this window.");
                 static ImGuiTextFilter filter;
                 filter.Draw("Search", -90);
-                struct Group
+                static SettingsCache settings;
+                ConsoleModule console;
+                uint64_t revision;
+                const auto variables = console.GetConsoleVariables({}, &revision);
+                settings.Update(variables, revision, filter);
+                const auto drawGroup = [&](auto&& self, const SettingsCache::Group& group) -> void
                 {
-                    std::map<std::string, Group> Children;
-                    std::vector<IConsoleVariable*> Variables;
-                };
-                Group root;
-                for (auto* variable : ConsoleModule{}.GetConsoleVariables())
-                {
-                    const auto name = Utf8(variable->GetName());
-                    if (!filter.PassFilter(name.c_str())) continue;
-                    auto* group = &root;
-                    size_t start = 0;
-                    for (auto dot = name.find('.'); dot != std::string::npos; dot = name.find('.', start))
+                    for (const auto& setting : group.Variables)
                     {
-                        group = &group->Children[name.substr(start, dot - start)];
-                        start = dot + 1;
-                    }
-                    if (!start) group = &root.Children["General"];
-                    group->Variables.push_back(variable);
-                }
-                const auto drawGroup = [&](auto&& self, const Group& group) -> void
-                {
-                    for (auto* variable : group.Variables)
-                    {
-                        const auto name = Utf8(variable->GetName());
-                        const auto dot = name.rfind('.');
-                        const auto label = dot == std::string::npos ? name : name.substr(dot + 1);
+                        if (console.GetConsoleVariableRevision() != revision) break;
+                        auto* variable = variables.at(setting.VariableIndex);
+                        const auto& name = setting.Name;
+                        const auto& label = setting.Label;
                         auto value = variable->GetConfigString();
                         bool changed = false;
                         const bool readOnly = variable->GetFlags() == EConsoleVariableFlags::ReadOnly;
@@ -129,7 +109,7 @@ namespace Engine::UI
                         {
                             ImGui::BeginTooltip();
                             ImGui::TextUnformatted(name.c_str());
-                            ImGui::TextUnformatted(Utf8(variable->GetDescription()).c_str());
+                            ImGui::TextUnformatted(setting.Description.c_str());
                             if (readOnly)
                             {
                                 ImGui::TextUnformatted("Readonly: changes are saved now and apply only after restarting the application.");
@@ -156,7 +136,7 @@ namespace Engine::UI
                     }
                 };
                 ImGui::PushID(filter.IsActive() ? "FilteredSettings" : "SettingsTree");
-                drawGroup(drawGroup, root);
+                drawGroup(drawGroup, settings.Root());
                 ImGui::PopID();
             }
             ImGui::End();

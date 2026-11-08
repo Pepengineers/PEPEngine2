@@ -43,7 +43,7 @@ public:
         graphics.SRVRanges.push_back(GDX12RootSignatureRange(Texture2D_RangeLength));
         _graphicsRoot = std::make_unique<GDX12RootSignature>(_resources->Device, graphics);
         GDX12RootSignatureDesc compute;
-        compute.Constants.push_back(2);
+        compute.Constants.push_back(3);
         compute.NumSingleSRVSlots = 4;
         compute.NumSingleUAVSlots = 2;
         _computeRoot = std::make_unique<GDX12RootSignature>(_resources->Device, compute);
@@ -68,13 +68,10 @@ public:
         pipeline.SampleDesc.Count = 1;
         ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&pipeline, IID_PPV_ARGS(&_depthPSO)));
         D3D_SHADER_MACRO defines[] = { { "SHADOW_CULLING", "1" }, { "STATIC_ONLY", _staticOnly ? "1" : "0" }, { nullptr, nullptr } };
-        const char* entries[] = { "CS", "ClearCS" };
-        ComPtr<ID3D12PipelineState>* targets[] = { &_cullPSO, &_clearPSO };
-        for (UINT i = 0; i < 2; ++i)
-        {
-            *targets[i] = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _computeRoot.get(),
-                SHADERS_FOLDER "LocalShadowPass.hlsl", entries[i], defines);
-        }
+        _cullPSO = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _computeRoot.get(),
+            SHADERS_FOLDER "LocalShadowPass.hlsl", "CS", defines);
+        _counterReset = std::make_unique<GDX12UploadBuffer<UINT>>(_resources->Device, 1, EBufferType::Upload, false);
+        _counterReset->CopyData(0, 0u);
         _signature = GDX12RenderHelpers::CreateIndexedDrawSignature(_resources->Device, _graphicsRoot.get());
 
         _visibility.resize(_resources->FrameConstants.size());
@@ -99,6 +96,7 @@ public:
     void Prepare()
     {
         if (_prepared) return;
+        _compactDynamic = !_staticOnly && _resources->LocalShadowCasters.has_value();
         if (_resources->LocalShadowCasters && _resources->LocalShadowVisibility.size() != _resources->LocalLights.size())
             throw std::logic_error("Prepare shadow visibility before rendering local shadows");
         if (_staticShadows) _staticShadows->Prepare();
@@ -122,6 +120,7 @@ public:
         _cached.resize(_resources->LocalLights.size());
         _preparedCache.resize(_resources->LocalLights.size());
         _dirtyFaces.assign(_resources->LocalLights.size(), 0);
+        _emptyDynamicFaces.assign(_resources->LocalLights.size(), 0);
         _views.clear();
         _viewFaces.clear();
         for (UINT lightIndex = 0; lightIndex < _resources->LocalLights.size(); ++lightIndex)
@@ -136,6 +135,10 @@ public:
             {
                 const auto& visible = _resources->LocalShadowVisibility[lightIndex];
                 casters = _staticOnly ? visible.StaticCasters : visible.AllCasters;
+                if (!_staticOnly)
+                    for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
+                        if (visible.StaticCasters[face] == visible.AllCasters[face])
+                            _emptyDynamicFaces[lightIndex] |= 1u << face;
             }
             const bool force = ShouldRenderLocalShadow(cacheKey, cached ? &cached->Light : nullptr);
             for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
@@ -182,6 +185,31 @@ public:
     void BeginGeometry(GDX12CommandList* commands) override
     {
         if (!_prepared) Prepare();
+        auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+        if (_compactDynamic) _commandCount = frame->DynamicShadowCommandCount;
+        auto& binding = _meshBinding;
+        binding.Stage = GDX12GeometryStage::Shadow;
+        binding.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+        binding.IndirectSignature = _signature.Get();
+        binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
+        binding.Heap = _resources->SRV_UAV_Heap.get();
+        binding.Root = _graphicsRoot.get();
+        const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
+        const auto geometrySlot = static_cast<UINT>(binding.Root->GetGeometryRootParamIndex());
+        binding.RootSRVs = { { geometrySlot, geometryAddress }, { geometrySlot + 1,
+            geometryAddress } };
+        binding.Pipeline = _depthPSO;
+        binding.SRVs = { { 0, frame->ShadowMaterials->GetSRV()->GPUHandle },
+            { 1, frame->ShadowTransforms->GetSRV()->GPUHandle },
+            { 2, frame->ShadowInstances->GetSRV()->GPUHandle },
+            { 3, frame->ShadowLights->GetSRV()->GPUHandle }, { 4, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex) } };
+        binding.Constants = { { 0, 0, 1 } };
+        _faceBinding = binding;
+        _faceBinding.CBVs.clear();
+        _faceBinding.RootSRVs.clear();
+        _faceBinding.SRVs.clear();
+        _meshBindingsRecorded = false;
+        _computeBindingsRecorded = false;
         _dynamicBegun = false;
         if (_staticShadows)
         {
@@ -243,30 +271,38 @@ public:
         if (_staticShadows) slot -= static_cast<UINT>(_views.size());
         const auto [lightIndex, face] = _viewFaces[slot];
         auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+        // The static depth copy still runs; this face has no dynamic caster to cull or draw.
+        if (_emptyDynamicFaces[lightIndex] & (1u << face)) { ++_renderedViews; return; }
         auto& visibility = _visibility[_resources->CurrFrameConstantsIndex];
         const UINT count = _commandCount;
+        const bool canReuse = _splitGeometry || _resources->GeometrySources.empty();
+        const bool reuseCompute = canReuse && _computeBindingsRecorded && commands->UsesComputeRootSignature(_computeRoot.get());
         commands->SetComputeRootSignature(_computeRoot.get());
-        commands->ResourceBarrier({ visibility.Counter->GetResource().GetUnorderedAccessBarrier(),
+        commands->ResourceBarrier({ visibility.Counter->GetResource().GetCopyDestBarrier(),
             visibility.Commands->GetResource().GetUnorderedAccessBarrier() });
-        commands->SetComputeUAV(1, visibility.Counter->GetUAV()->GPUHandle);
+        if (!reuseCompute) commands->SetComputeUAV(1, visibility.Counter->GetUAV()->GPUHandle);
         {
             GDX12_SCOPED_EVENT(commands, "Local shadow clear");
-            commands->SetPipelineState(_clearPSO);
-            commands->Dispatch(1, 1, 1);
-            commands->ResourceBarrier({ visibility.Counter->GetResource().GetUAVBarrier() });
+            commands->GetCommandList()->CopyBufferRegion(visibility.Counter->GetResource().D3DResource.Get(), 0,
+                _counterReset->GetResource().D3DResource.Get(), 0, sizeof(UINT));
+            commands->ResourceBarrier({ visibility.Counter->GetResource().GetUnorderedAccessBarrier() });
         }
         {
             GDX12_SCOPED_EVENT(commands, "Local shadow cull");
             commands->SetPipelineState(_cullPSO);
-            const UINT parameters[] = { lightIndex, face };
-            commands->GetCommandList()->SetComputeRoot32BitConstants(0, 2, parameters, 0);
-            commands->SetComputeSRV(0, frame->ShadowInstances->GetSRV()->GPUHandle);
-            commands->SetComputeSRV(1, frame->ShadowTemplates->GetSRV()->GPUHandle);
-            commands->SetComputeSRV(2, frame->ShadowMaterials->GetSRV()->GPUHandle);
-            commands->SetComputeSRV(3, frame->ShadowLights->GetSRV()->GPUHandle);
-            commands->SetComputeUAV(0, visibility.Commands->GetUAV()->GPUHandle);
+            const UINT parameters[] = { lightIndex, face, count };
+            commands->GetCommandList()->SetComputeRoot32BitConstants(0, 3, parameters, 0);
+            if (!reuseCompute)
+            {
+                commands->SetComputeSRV(0, frame->ShadowInstances->GetSRV()->GPUHandle);
+                commands->SetComputeSRV(1, (_compactDynamic ? frame->DynamicShadowTemplates : frame->ShadowTemplates)->GetSRV()->GPUHandle);
+                commands->SetComputeSRV(2, frame->ShadowMaterials->GetSRV()->GPUHandle);
+                commands->SetComputeSRV(3, frame->ShadowLights->GetSRV()->GPUHandle);
+                commands->SetComputeUAV(0, visibility.Commands->GetUAV()->GPUHandle);
+            }
             if (count) commands->Dispatch((count + 63) / 64, 1, 1);
         }
+        _computeBindingsRecorded = true;
         if (_resources->SkeletalBatchCount)
         {
             if (!visibility.Batches) visibility.Batches = std::make_unique<GDX12InstanceBatcher>(_resources->Device);
@@ -278,28 +314,16 @@ public:
             GDX12_SCOPED_EVENT(commands, "Local shadow draw");
             commands->ResourceBarrier({ visibility.Commands->GetResource().GetIndirectArgsBarrier(),
                 visibility.Counter->GetResource().GetIndirectArgsBarrier() });
-            GDX12GraphicsBindings binding;
-            binding.Stage = GDX12GeometryStage::Shadow;
-            binding.DepthFormat = DXGI_FORMAT_D32_FLOAT;
-            binding.IndirectSignature = _signature.Get();
-            binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
-            binding.Heap = _resources->SRV_UAV_Heap.get();
-            binding.Root = _graphicsRoot.get();
-            const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
-            const auto geometrySlot = static_cast<UINT>(binding.Root->GetGeometryRootParamIndex());
-            binding.RootSRVs = { { geometrySlot, geometryAddress }, { geometrySlot + 1,
-                visibility.Batches ? visibility.Batches->VisibleInstancesAddress() : geometryAddress } };
-            binding.Pipeline = _depthPSO;
-            binding.SRVs.push_back({ 0, frame->ShadowMaterials->GetSRV()->GPUHandle });
-            binding.SRVs.push_back({ 1, frame->ShadowTransforms->GetSRV()->GPUHandle });
-            binding.SRVs.push_back({ 2, frame->ShadowInstances->GetSRV()->GPUHandle });
-            binding.SRVs.push_back({ 3, frame->ShadowLights->GetSRV()->GPUHandle });
-            binding.SRVs.push_back({ 4, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex) });
-            binding.Constants = { { 0, lightIndex * 6 + face, 1 } };
+            _meshBinding.RootSRVs[1].second = visibility.Batches ? visibility.Batches->VisibleInstancesAddress()
+                : _resources->GeometryBuffer->GetVertexAddress();
+            _meshBinding.Constants[0].Value = lightIndex * 6 + face;
+            _faceBinding.Constants[0].Value = lightIndex * 6 + face;
             auto view = *prepared;
             view.IncludeApplicationGeometry = !_splitGeometry;
             GDX12RenderBatch mesh;
-            mesh.Binding = &binding;
+            // Compute culling preserves graphics bindings; application draws and native state invalidation do not.
+            mesh.Binding = canReuse && _meshBindingsRecorded && commands->UsesGraphicsRootSignature(_graphicsRoot.get())
+                ? &_faceBinding : &_meshBinding;
             mesh.Geometry = _resources->GeometryBuffer.get();
             mesh.InstanceCount = count;
             mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _signature.Get(),
@@ -307,6 +331,7 @@ public:
                 count ? visibility.Counter->GetResource().D3DResource.Get() : nullptr, 0,
                 count, sizeof(GDX12IndirectDrawArgs) };
             _resources->EmitGeometry(commands, view, mesh);
+            _meshBindingsRecorded = true;
         }
         ++_renderedViews;
     }
@@ -326,6 +351,7 @@ public:
         _cached.clear();
         _preparedCache.clear();
         _dirtyFaces.clear();
+        _emptyDynamicFaces.clear();
         _views.clear();
         _viewFaces.clear();
         _prepared = false;
@@ -337,7 +363,9 @@ public:
         _signature.Reset();
         _depthPSO.Reset();
         _cullPSO.Reset();
-        _clearPSO.Reset();
+        _counterReset.reset();
+        _meshBinding = {};
+        _faceBinding = {};
     }
 
 private:
@@ -434,7 +462,7 @@ private:
         std::array<uint64_t, 6> Casters;
     };
     std::vector<std::optional<CachedShadow>> _cached, _preparedCache;
-    std::vector<UINT> _dirtyFaces;
+    std::vector<UINT> _dirtyFaces, _emptyDynamicFaces;
     std::vector<GDX12GeometryContext> _views;
     std::vector<std::pair<UINT, UINT>> _viewFaces;
     bool _dynamicBegun = false;
@@ -443,13 +471,18 @@ private:
     std::unique_ptr<GDX12Texture> _maps;
     std::unique_ptr<GDX12LocalShadowPass> _staticShadows;
     std::unique_ptr<GDX12RootSignature> _graphicsRoot, _computeRoot;
-    ComPtr<ID3D12PipelineState> _depthPSO, _cullPSO, _clearPSO;
+    ComPtr<ID3D12PipelineState> _depthPSO, _cullPSO;
+    std::unique_ptr<GDX12UploadBuffer<UINT>> _counterReset;
     ComPtr<ID3D12CommandSignature> _signature;
     uint64_t _staticRevision = 0;
     uint64_t _dynamicRevision = 0;
     bool _staticOnly = false;
+    bool _compactDynamic = false;
     UINT _sliceCount = 0;
     bool _mapsNeedClear = true;
     UINT _renderedViews = 0;
     UINT _commandCount = 0;
+    GDX12GraphicsBindings _meshBinding, _faceBinding;
+    bool _meshBindingsRecorded = false;
+    bool _computeBindingsRecorded = false;
 };

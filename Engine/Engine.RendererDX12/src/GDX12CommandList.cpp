@@ -8,6 +8,7 @@
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
 #include <limits>
+#include <algorithm>
 #include <stdexcept>
 
 #if defined(DEBUG) || defined(_DEBUG) || defined(PROFILE_BUILD)
@@ -99,17 +100,16 @@ void GDX12CommandList::SetPrimitiveTopology(const D3D_PRIMITIVE_TOPOLOGY topolog
 
 void GDX12CommandList::SetDescriptorHeaps(const std::initializer_list<GDX12DescriptorHeap*> heaps)
 {
-	std::vector<ID3D12DescriptorHeap*> rawHeaps;
-	rawHeaps.reserve(heaps.size());
+	if (_currentDescriptorHeaps.size() == heaps.size() &&
+		std::equal(heaps.begin(), heaps.end(), _currentDescriptorHeaps.begin(),
+			[](auto* heap, auto* current) { return heap->GetHeap().Get() == current; })) return;
 
-	for (auto& heap : heaps) { rawHeaps.push_back(heap->GetHeap().Get()); }
-
-	if (_currentDescriptorHeaps == rawHeaps) { return; }
-
-	if (!rawHeaps.empty())
+	if (heaps.size())
 	{
-		_currentDescriptorHeaps = rawHeaps;
-		_commandList->SetDescriptorHeaps(static_cast<UINT>(rawHeaps.size()), rawHeaps.data());
+		_currentDescriptorHeaps.reserve(heaps.size());
+		_currentDescriptorHeaps.clear();
+		for (auto* heap : heaps) _currentDescriptorHeaps.push_back(heap->GetHeap().Get());
+		_commandList->SetDescriptorHeaps(static_cast<UINT>(_currentDescriptorHeaps.size()), _currentDescriptorHeaps.data());
 	}
 }
 
@@ -288,13 +288,22 @@ void GDX12CommandList::ResourceBarrier(const std::initializer_list<CD3DX12_RESOU
 {
 	if (barriers.size() > (std::numeric_limits<UINT>::max)())
 		throw std::out_of_range("Too many resource barriers");
+	const auto needed = [](const D3D12_RESOURCE_BARRIER& barrier)
+	{
+		return barrier.Type != D3D12_RESOURCE_BARRIER_TYPE_TRANSITION ||
+			barrier.Transition.StateBefore != barrier.Transition.StateAfter;
+	};
+	if (std::all_of(barriers.begin(), barriers.end(), needed))
+	{
+		if (barriers.size()) _commandList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.begin());
+		return;
+	}
 	std::vector<CD3DX12_RESOURCE_BARRIER> filteredBarriers;
 	for (auto& barrier : barriers)
 	{
 		//skip transition with equal before and after states
 		const D3D12_RESOURCE_BARRIER& baseBarrier = barrier;
-		if (baseBarrier.Type != D3D12_RESOURCE_BARRIER_TYPE_TRANSITION ||
-			baseBarrier.Transition.StateBefore != baseBarrier.Transition.StateAfter)
+		if (needed(baseBarrier))
 		{
 			filteredBarriers.push_back(barrier);
 		}

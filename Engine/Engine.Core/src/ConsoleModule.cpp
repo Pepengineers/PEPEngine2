@@ -42,6 +42,7 @@ namespace
 
             std::scoped_lock lock(Mutex);
             auto [it, inserted] = Variables.emplace(MakeLookupKey(variableName), variable);
+            if (inserted) ++Revision;
             return inserted || it->second == variable;
         }
 
@@ -66,6 +67,7 @@ namespace
             }
 
             Variables.erase(foundIt);
+            ++Revision;
             return true;
         }
 
@@ -83,9 +85,23 @@ namespace
             return true;
         }
 
-        std::vector<IConsoleVariable*> GetConsoleVariables(std::wstring_view prefix) const
+        std::vector<IConsoleVariable*> GetConsoleVariables(std::wstring_view prefix, uint64_t* revision) const
         {
             std::scoped_lock lock(Mutex);
+            if (revision) *revision = Revision;
+            if (prefix.empty())
+            {
+                if (SortedRevision != Revision)
+                {
+                    SortedVariables.clear();
+                    SortedVariables.reserve(Variables.size());
+                    for (const auto& [key, variable] : Variables) SortedVariables.push_back(variable);
+                    std::sort(SortedVariables.begin(), SortedVariables.end(), [](const auto* left, const auto* right)
+                        { return left->GetName() < right->GetName(); });
+                    SortedRevision = Revision;
+                }
+                return SortedVariables;
+            }
 
             std::vector<IConsoleVariable*> result;
             result.reserve(Variables.size());
@@ -102,6 +118,12 @@ namespace
             });
 
             return result;
+        }
+
+        uint64_t GetRevision() const
+        {
+            std::scoped_lock lock(Mutex);
+            return Revision;
         }
 
         static ConsoleVariableStorage& Get()
@@ -128,6 +150,9 @@ namespace
 
         mutable std::mutex Mutex;
         ConsoleVariableMap Variables;
+        uint64_t Revision = 0;
+        mutable uint64_t SortedRevision = UINT64_MAX;
+        mutable std::vector<IConsoleVariable*> SortedVariables;
     };
 }
 
@@ -360,7 +385,12 @@ IConsoleVariable& ConsoleModule::FindConsoleVariable(std::wstring_view Name) con
     return *variable;
 }
 
-std::vector<IConsoleVariable*> ConsoleModule::GetConsoleVariables(std::wstring_view Prefix) const
+std::vector<IConsoleVariable*> ConsoleModule::GetConsoleVariables(std::wstring_view Prefix, uint64_t* Revision) const
 {
-    return ConsoleVariableStorage::Get().GetConsoleVariables(Prefix);
+    return ConsoleVariableStorage::Get().GetConsoleVariables(Prefix, Revision);
+}
+
+uint64_t ConsoleModule::GetConsoleVariableRevision() const
+{
+    return ConsoleVariableStorage::Get().GetRevision();
 }

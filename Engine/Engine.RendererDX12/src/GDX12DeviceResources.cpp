@@ -85,12 +85,43 @@ void GDX12DeviceResources::PrepareLocalShadowData()
     if (!frame.ShadowTemplatesUpload)
         frame.ShadowTemplatesUpload = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(Device, 0, EBufferType::Upload, false);
     const auto revision = IndirectCommandsCache->GetRevision();
-    if (frame.ShadowTemplateRevision == revision) return;
     const auto count = IndirectCommandsCache->GetElementCount();
-    frame.ShadowTemplatesUpload->Resize(count);
-    if (count) frame.ShadowTemplatesUpload->CopyData(0, IndirectCommandsCache->GetCPUData(), count);
-    frame.ShadowTemplateRevision = revision;
-    frame.ShadowTemplatesDirty = true;
+    if (frame.ShadowTemplateRevision != revision)
+    {
+        frame.ShadowTemplatesUpload->Resize(count);
+        if (count) frame.ShadowTemplatesUpload->CopyData(0, IndirectCommandsCache->GetCPUData(), count);
+        frame.ShadowTemplateRevision = revision;
+        frame.ShadowTemplatesDirty = true;
+    }
+    if (!frame.DynamicShadowTemplatesUpload)
+    {
+        frame.DynamicShadowTemplatesUpload = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(Device, 1, EBufferType::Upload, false);
+        frame.DynamicShadowTemplatesUpload->TrackChanges();
+    }
+    auto& dynamic = *frame.DynamicShadowTemplatesUpload;
+    const auto* instances = frame.InstanceCache->GetCPUData();
+    const auto* templates = IndirectCommandsCache->GetCPUData();
+    const UINT instanceCount = frame.InstanceCache->GetElementCount();
+    auto& packed = frame.DynamicShadowCommands;
+    packed.clear();
+    for (UINT i = 0; i < count; ++i)
+    {
+        const auto& command = templates[i];
+        if (!command.InstanceCount) continue;
+        if (command.InstanceID >= instanceCount)
+            throw std::out_of_range("Shadow template references a missing instance");
+        if (!instances[command.InstanceID].ReflectionDynamic) continue;
+        packed.push_back(command);
+    }
+    frame.DynamicShadowCommandCount = static_cast<UINT>(packed.size());
+    dynamic.Resize(frame.DynamicShadowCommandCount);
+    if (!packed.empty()) dynamic.CopyData(0, packed.data(), frame.DynamicShadowCommandCount);
+    if (frame.DynamicShadowTemplateRevision != dynamic.GetRevision())
+    {
+        frame.DynamicShadowTemplateRevision = dynamic.GetRevision();
+        frame.DynamicShadowTemplatesDirty = true;
+    }
+
 }
 
 void GDX12DeviceResources::UploadLocalShadowData(GDX12CommandList* commands)
@@ -115,6 +146,8 @@ void GDX12DeviceResources::UploadLocalShadowData(GDX12CommandList* commands)
     };
     upload(frame.ShadowTemplatesUpload, frame.ShadowTemplates, frame.ShadowTemplatesDirty);
     frame.ShadowTemplatesDirty = false;
+    upload(frame.DynamicShadowTemplatesUpload, frame.DynamicShadowTemplates, frame.DynamicShadowTemplatesDirty);
+    frame.DynamicShadowTemplatesDirty = false;
     upload(frame.InstanceCache, frame.ShadowInstances);
     upload(frame.MaterialCache, frame.ShadowMaterials);
     upload(frame.LocalLightCache, frame.ShadowLights);
@@ -201,6 +234,15 @@ GDX12RenderPrimitiveHandle GDX12DeviceResources::PublishMeshPrimitive(UINT insta
     else Primitives.Update(entry.Handle, primitive);
     entry.Epoch = _meshPrimitiveEpoch;
     return entry.Handle;
+}
+
+bool GDX12DeviceResources::RetainMeshPrimitive(UINT instance, GDX12RenderPrimitiveHandle handle)
+{
+    if (instance >= _meshPrimitives.size()) return false;
+    auto& entry = _meshPrimitives[instance];
+    if (!(entry.Handle == handle) || !Primitives.Get(handle)) return false;
+    entry.Epoch = _meshPrimitiveEpoch;
+    return true;
 }
 
 void GDX12DeviceResources::RemoveMeshPrimitive(UINT instance)

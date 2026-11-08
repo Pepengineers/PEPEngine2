@@ -273,11 +273,12 @@ public:
         { if (mesh._CBufferIndices.size() == 1 && mesh._CBufferIndices[0] == 0) wall = entity; });
         Require(wall != InvalidEntity && _resources, "Snapshot fixture has no static wall or pipeline resources");
         Timer.Reset(); Timer.Stop();
-        const auto frame = [&]
+        const auto frame = [&](const std::function<void()>& editMirror = {})
         {
             Timer.Tick(); render->BeginFrame(); render->Update();
             _lights.Schedule(_jobs, world, 0).Complete();
             _gpuData.Schedule(_jobs, world, 0).Complete();
+            if (editMirror) editMirror();
             render->Render(); render->WaitForUploads();
         };
         const auto primitive = [&]
@@ -331,6 +332,43 @@ public:
         frame();
         Require(primitive().second.Dynamic && _resources->ReflectionDynamicRevision != dynamicRevision,
             "Static-to-dynamic classification retained cached participation");
+        revision = _resources->ReflectionDynamicRevision;
+        before = primitive().second;
+        frame();
+        Require(_resources->ReflectionDynamicRevision == revision && primitive().second.Revision() == before.Revision(),
+            "Unchanged dynamic snapshot lost its cached signature");
+        frame([&]
+        {
+            auto* buffer = render->GetCurrentPrimaryFrameConstants()->InstanceCache.get();
+            auto instance = buffer->GetCPUData()[before.FirstInstance];
+            instance.BoundingBoxCenter.x += 40;
+            buffer->CopyData(before.FirstInstance, instance);
+        });
+        Require(primitive().second.Bounds.Center.x > before.Bounds.Center.x + 39 &&
+            primitive().second.GeometryRevision == before.GeometryRevision &&
+            primitive().second.MaterialRevision == before.MaterialRevision &&
+            _resources->ReflectionDynamicRevision != revision, "Direct instance mirror edit reused stale dynamic metadata");
+        before = primitive().second;
+        frame([&]
+        {
+            auto* buffer = render->GetCurrentPrimaryFrameConstants()->TransformCache.get();
+            auto transform = buffer->GetCPUData()[before.TransformIndex];
+            transform.WorldMatrix._11 += 0.125f;
+            buffer->CopyData(before.TransformIndex, transform);
+        });
+        Require(primitive().second.TransformRevision != before.TransformRevision &&
+            primitive().second.GeometryRevision == before.GeometryRevision,
+            "Direct transform mirror edit retained a cached transform signature");
+        revision = _resources->ReflectionStaticRevision;
+        frame([&]
+        {
+            auto* buffer = render->GetCurrentPrimaryFrameConstants()->InstanceCache.get();
+            auto instance = buffer->GetCPUData()[before.FirstInstance];
+            instance.ReflectionDynamic = 0;
+            buffer->CopyData(before.FirstInstance, instance);
+        });
+        Require(!primitive().second.Dynamic && _resources->ReflectionStaticRevision != revision,
+            "Direct instance classification edit disagreed with the GPU shadow stream");
         ecs.Get<StaticMeshRenderComponent>(wall).ReflectionDynamic = false;
         frame();
         before = primitive().second;

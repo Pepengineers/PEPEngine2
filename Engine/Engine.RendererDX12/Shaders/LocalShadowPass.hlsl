@@ -2,7 +2,7 @@
 
 #ifdef SHADOW_CULLING
 #include "ShadowFrustum.hlsli"
-cbuffer ViewConstants : register(b0) { uint LightIndex; uint FaceIndex; };
+cbuffer ViewConstants : register(b0) { uint LightIndex; uint FaceIndex; uint CommandCount; };
 StructuredBuffer<InstanceData> Instances : register(t0);
 StructuredBuffer<IndirectDrawArgs> InputCommands : register(t1);
 StructuredBuffer<Material> Materials : register(t2);
@@ -18,7 +18,7 @@ void CS(uint3 id : SV_DispatchThreadID)
 {
     uint count, stride;
     InputCommands.GetDimensions(count, stride);
-    if (id.x >= count) return;
+    if (id.x >= min(count, CommandCount)) return;
     IndirectDrawArgs command = InputCommands[id.x];
     if (command.InstanceCount == 0) return;
     InstanceData instance = Instances[command.InstanceID];

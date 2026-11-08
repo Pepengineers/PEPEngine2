@@ -464,6 +464,11 @@ static void TestPrimitiveRecords()
     resources.EndMeshPrimitiveUpdate();
     const auto revision = resources.Primitives.Get(first)->Revision();
     resources.BeginMeshPrimitiveUpdate();
+    Require(resources.RetainMeshPrimitive(37, first), "Warm primitive could not be retained");
+    resources.EndMeshPrimitiveUpdate();
+    Require(resources.Primitives.Get(first) && resources.Primitives.Get(first)->Revision() == revision,
+        "Retaining a primitive changed metadata or let its epoch expire");
+    resources.BeginMeshPrimitiveUpdate();
     primitive.MaterialRevision = 21;
     const auto same = resources.PublishMeshPrimitive(37, primitive);
     resources.EndMeshPrimitiveUpdate();
@@ -476,9 +481,12 @@ static void TestPrimitiveRecords()
     Require(primitive.Matches(GDX12GeometryFilter::All) && primitive.Matches(GDX12GeometryFilter::Dynamic) &&
         !primitive.Matches(GDX12GeometryFilter::Static), "Primitive static/dynamic filtering changed");
     resources.RemoveMeshPrimitive(37);
+    Require(!resources.RetainMeshPrimitive(37, first), "Removed primitive was retained");
     Require(resources.Primitives.Get(first) == nullptr, "Removed instance retained a primitive");
     resources.BeginMeshPrimitiveUpdate();
     const auto reused = resources.PublishMeshPrimitive(37, primitive);
+    Require(!resources.RetainMeshPrimitive(37, first) && !resources.RetainMeshPrimitive(UINT_MAX, reused),
+        "Retention accepted a stale generation or invalid instance");
     resources.EndMeshPrimitiveUpdate();
     Require(reused.Index == first.Index && reused.Generation != first.Generation && !resources.Primitives.Get(first),
         "Reused instance resurrected an old primitive handle");

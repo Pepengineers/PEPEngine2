@@ -33,7 +33,11 @@ public:
 	void SetPipelineState(ComPtr<ID3D12PipelineState> pso);
 	void SetPipelineState1(ComPtr<ID3D12StateObject> stateObject);
 	void SetGraphicsRootSignature(GDX12RootSignature* rootSignature);
+    bool UsesGraphicsRootSignature(const GDX12RootSignature* rootSignature) const
+    { return _currentGraphicsRootSignature == rootSignature; }
 	void SetComputeRootSignature(GDX12RootSignature* rootSignature);
+    bool UsesComputeRootSignature(const GDX12RootSignature* rootSignature) const
+    { return _currentComputeRootSignature == rootSignature; }
 	void SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY topology);
 	void SetDescriptorHeaps(std::initializer_list<GDX12DescriptorHeap*> heaps);
 	void SetViewport(const D3D12_VIEWPORT& viewport);

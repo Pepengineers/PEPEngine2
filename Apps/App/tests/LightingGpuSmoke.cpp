@@ -27,6 +27,29 @@ static void ShadowUploadSlots(GDX12Device& device)
     ComPtr<ID3D12InfoQueue> info;
     if (SUCCEEDED(device.GetDevice().As(&info))) info->ClearStoredMessages();
     auto& templates = *resources.IndirectCommandsCache;
+    for (auto& frame : resources.FrameConstants) frame->InstanceCache->Resize(1);
+    {
+        GDX12UploadBuffer<UINT> upload(&device, 1, EBufferType::Upload, false);
+        GDX12UploadBuffer<UINT> target(&device, 1, EBufferType::Default, false);
+        upload.CopyData(0, 123u);
+        auto readback = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(sizeof(UINT)),
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr);
+        auto* queue = device.GetCommandQueue();
+        auto* list = queue->GetCommandList();
+        const auto toCopy = target.GetResource().GetCopyDestBarrier();
+        list->ResourceBarrier({ target.GetResource().GetCopyDestBarrier(), toCopy });
+        list->GetCommandList()->CopyBufferRegion(target.GetResource().D3DResource.Get(), 0,
+            upload.GetResource().D3DResource.Get(), 0, sizeof(UINT));
+        list->ResourceBarrier({ target.GetResource().GetCopySourceBarrier() });
+        list->ResourceBarrier({ target.GetResource().GetCopySourceBarrier() });
+        list->ResourceBarrier({});
+        list->GetCommandList()->CopyBufferRegion(readback.Get(), 0, target.GetResource().D3DResource.Get(), 0, sizeof(UINT));
+        queue->ExecuteCommandList(list); queue->Flush();
+        void* data = nullptr;
+        ThrowIfFailed(readback->Map(0, nullptr, &data));
+        Require(*static_cast<UINT*>(data) == 123u, "Mixed/no-op barrier filtering lost an ordered buffer copy");
+        readback->Unmap(0, nullptr);
+    }
     GDX12IndirectDrawArgs draw = {};
     draw.IndexCountPerInstance = 3; draw.InstanceCount = 1;
     for (UINT capacity : { 1u, 9u })
@@ -73,6 +96,31 @@ static void ShadowUploadSlots(GDX12Device& device)
         }
         draw.IndexCountPerInstance = 6; draw.InstanceCount = 1;
     }
+    GDX12IndirectDrawArgs first = {}, second = {};
+    first.InstanceCount = second.InstanceCount = 1;
+    first.IndexCountPerInstance = 3; second.IndexCountPerInstance = 6;
+    second.InstanceID = 1;
+    templates.CopyData(0, first); templates.CopyData(2, second);
+    for (bool swap : { false, true })
+        for (auto& constants : resources.FrameConstants)
+        {
+            resources.CurrFrameConstantsIndex = static_cast<UINT>(&constants - resources.FrameConstants.data());
+            constants->InstanceCache->Resize(2);
+            GDX12InstanceData instance = {};
+            instance.ReflectionDynamic = swap;
+            constants->InstanceCache->CopyData(0, instance);
+            instance.ReflectionDynamic = !swap;
+            constants->InstanceCache->CopyData(1, instance);
+            resources.PrepareLocalShadowData();
+            const auto& expected = swap ? first : second;
+            Require(constants->DynamicShadowCommandCount == 1 &&
+                std::memcmp(constants->DynamicShadowTemplatesUpload->GetCPUData(), &expected, sizeof(expected)) == 0,
+                "Dynamic template compaction lost a command or a direct classification edit");
+        }
+    templates.CopyData(0, GDX12IndirectDrawArgs{}); templates.CopyData(2, GDX12IndirectDrawArgs{});
+    resources.PrepareLocalShadowData();
+    Require(resources.FrameConstants[resources.CurrFrameConstantsIndex]->DynamicShadowCommandCount == 0,
+        "Empty dynamic list retained its previous high-water draw count");
 }
 
 static std::vector<float> CheckReadback(GDX12Device& device, GDX12Texture& texture, UINT subresource, bool lut, bool depth = false, bool expectCaster = true)
@@ -492,7 +540,10 @@ int main(int argc, char** argv)
             auto* list = queue->GetCommandList();
             resources.PrepareLocalShadowData();
             resources.UploadLocalShadowData(list);
+            auto casterSnapshot = fullScan ? std::move(resources.LocalShadowCasters) : std::nullopt;
+            if (fullScan) resources.LocalShadowCasters.reset();
             localShadows.Prepare();
+            if (fullScan) resources.LocalShadowCasters = std::move(casterSnapshot);
             auto visibilitySnapshot = std::move(resources.LocalShadowVisibility);
             localShadows.Execute(list);
             resources.LocalShadowVisibility = std::move(visibilitySnapshot);

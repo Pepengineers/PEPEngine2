@@ -187,12 +187,22 @@ static void CheckWorlds(JobSystem& jobs)
     sync.Schedule(jobs, second, 0).Complete();
     Require(ecs.Get<TransformComponent>(a).Location.y < 8, "Physics world did not advance");
     Require(second.GetECS().Get<TransformComponent>(b).Location.y == 10, "Paused world advanced with another world");
+    const auto publishedRotation = ecs.Get<TransformComponent>(a).Rotation;
+    ecs.Get<TransformComponent>(a).Rotation += Vector3(15, 30, 45);
+    ecs.Get<TransformComponent>(a).DirtyFlag = false;
+    sync.Schedule(jobs, first, 0).Complete();
+    Require(ecs.Get<TransformComponent>(a).Rotation == publishedRotation && ecs.Get<TransformComponent>(a).DirtyFlag,
+        "An unchanged physics quaternion must still overwrite manual ECS rotation edits");
     ecs.Remove<ColliderComponent>(a);
     Vector3 position;
     Quaternion rotation;
     Require(!physics->TryGetBodyTransform(first, handle, position, rotation), "Collider removal leaked physics body");
+    ecs.Get<TransformComponent>(a).Rotation = Vector3(0, 37, 0);
     ecs.Add<ColliderComponent>(a);
     Require(ecs.Get<RigidBodyComponent>(a).Body.IsValid(), "Collider replacement missed body recreation");
+    sync.Schedule(jobs, first, 0).Complete();
+    Require(std::abs(ecs.Get<TransformComponent>(a).Rotation.y - 37) < 0.001f,
+        "A recreated body's changed quaternion retained cached Euler angles");
     scenes->OnWorldDestroyed.Broadcast(first);
     Require(!ecs.Get<RigidBodyComponent>(a).Body.IsValid(), "World unload retained body handle");
     second.SetPaused(false);

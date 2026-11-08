@@ -45,6 +45,11 @@ public:
     std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> InstanceCache;
     // DEFAULT scene snapshot shared by all geometry and lighting consumers before the render graph.
     std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> ShadowTemplatesUpload, ShadowTemplates;
+    std::unique_ptr<GDX12UploadBuffer<GDX12IndirectDrawArgs>> DynamicShadowTemplatesUpload, DynamicShadowTemplates;
+    std::vector<GDX12IndirectDrawArgs> DynamicShadowCommands;
+    UINT DynamicShadowCommandCount = 0;
+    uint64_t DynamicShadowTemplateRevision = 0;
+    bool DynamicShadowTemplatesDirty = false;
     std::unique_ptr<GDX12UploadBuffer<GDX12InstanceData>> ShadowInstances;
     std::unique_ptr<GDX12UploadBuffer<GDX12MaterialConstants>> ShadowMaterials;
     std::unique_ptr<GDX12UploadBuffer<GDX12LocalLightConstants>> ShadowLights;

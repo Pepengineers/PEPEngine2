@@ -308,8 +308,6 @@ void RenderModule::PrepareSkeletalMeshes()
     const auto* frame = GetCurrentPrimaryFrameConstants();
     for (const auto& [owner, state] : _skeletalStates)
     {
-        uint64_t deformation = 14695981039346656037ull;
-        for (const auto& matrix : state.Pose) hash(deformation, matrix);
         for (const auto& part : state.Parts)
         {
             const auto& instance = frame->InstanceCache->GetCPUData()[part.Instance];
@@ -331,7 +329,7 @@ void RenderModule::PrepareSkeletalMeshes()
             hash(primitive.MaterialRevision, part.ActiveMaterial->_revision);
             primitive.TransformRevision = 14695981039346656037ull;
             hash(primitive.TransformRevision, frame->TransformCache->GetCPUData()[instance.TransformIndex].WorldMatrix);
-            primitive.DeformationRevision = deformation;
+            primitive.DeformationRevision = state.DeformationRevision;
             _primaryResources.PublishMeshPrimitive(part.Instance, primitive);
         }
     }
@@ -362,6 +360,17 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
         state.SinceUpdate = due ? std::fmod(state.SinceUpdate, 1.0 / rate) : 0;
     }
     const bool changed = previousPose != state.Pose;
+    if (changed || state.DeformationRevision == 0)
+    {
+        // Pose jobs already own this state; keep the byte-identical signature off the recording thread.
+        uint64_t deformation = 14695981039346656037ull;
+        for (const auto& matrix : state.Pose)
+        {
+            const auto* bytes = reinterpret_cast<const unsigned char*>(&matrix);
+            for (size_t i = 0; i < sizeof(matrix); ++i) deformation = (deformation ^ bytes[i]) * 1099511628211ull;
+        }
+        state.DeformationRevision = deformation;
+    }
     const bool reset = previousPose.empty() || edited || !animate || component._frozen ||
         world.IsPaused() || _RPcommonData.ResetHistory;
     if (reset) previousPose = state.Pose;

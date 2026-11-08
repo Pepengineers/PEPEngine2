@@ -47,6 +47,7 @@ public:
     GDX12RenderPrimitiveRegistry Primitives;
     void BeginMeshPrimitiveUpdate();
     GDX12RenderPrimitiveHandle PublishMeshPrimitive(UINT instance, const GDX12RenderPrimitive& primitive);
+    bool RetainMeshPrimitive(UINT instance, GDX12RenderPrimitiveHandle handle);
     void RemoveMeshPrimitive(UINT instance);
     void EndMeshPrimitiveUpdate();
     void GatherGeometryBatches(const GDX12GeometryContext&, const GDX12RenderBatch& mesh, std::vector<GDX12RenderBatch>&) const;

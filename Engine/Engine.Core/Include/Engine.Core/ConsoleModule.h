@@ -98,6 +98,7 @@ public:
     bool UnregisterConsoleVariable(const IConsoleVariable* variable);
     bool TryFindConsoleVariable(std::wstring_view Name, IConsoleVariable*& OutVariable) const;
     IConsoleVariable& FindConsoleVariable(std::wstring_view Name) const;
-    // Sorted snapshot; the owners must outlive iteration. Prefix matching ignores case.
-    std::vector<IConsoleVariable*> GetConsoleVariables(std::wstring_view Prefix = {}) const;
+    // Sorted snapshot and optional revision are captured together; owners must outlive iteration. Prefix ignores case.
+    std::vector<IConsoleVariable*> GetConsoleVariables(std::wstring_view Prefix = {}, uint64_t* Revision = nullptr) const;
+    uint64_t GetConsoleVariableRevision() const;
 };

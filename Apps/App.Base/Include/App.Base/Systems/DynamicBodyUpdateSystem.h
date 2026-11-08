@@ -32,7 +32,13 @@ protected:
 
                 if (!_physics.TryGetBodyTransform(world, rigidBody.Body, position, rotation)) { return; }
 
-                const auto degrees = RotationDegrees(rotation);
+                if (!rigidBody._hasPhysicsRotation || rigidBody._lastPhysicsRotation != rotation)
+                {
+                    rigidBody._lastPhysicsEuler = RotationDegrees(rotation);
+                    rigidBody._lastPhysicsRotation = rotation;
+                    rigidBody._hasPhysicsRotation = true;
+                }
+                const auto& degrees = rigidBody._lastPhysicsEuler;
 
                 if (transform.Location == position && transform.Rotation == degrees) { return; }
 
