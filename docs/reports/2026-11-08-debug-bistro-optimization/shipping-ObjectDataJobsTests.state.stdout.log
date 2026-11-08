@@ -1,0 +1,10 @@
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\ObjectDataJobsTests\sl.interposer.dll' is signed by NVIDIA and the signature was verified.
+Static snapshots: warm reuse, material, transform, visibility, classification, reimport, removal and replacement passed.
+Actual object jobs: selected indirect slots, all frame-slot bounds and immutable source templates passed (1/4 threads).
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\ObjectDataJobsTests/sl.common.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\ObjectDataJobsTests/sl.directsr.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\ObjectDataJobsTests/sl.dlss.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\ObjectDataJobsTests/sl.dlss_g.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\ObjectDataJobsTests/sl.nis.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\ObjectDataJobsTests/sl.pcl.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\ObjectDataJobsTests/sl.reflex.dll' is signed by NVIDIA and the signature was verified.

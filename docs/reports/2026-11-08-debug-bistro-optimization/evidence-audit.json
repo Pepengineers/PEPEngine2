@@ -1,0 +1,52 @@
+{
+  "checks": [
+    {
+      "run": "A1",
+      "ms": 62.584,
+      "under_50ms": false,
+      "raw_export_sha256": "fde5cf41e021e02f8102333e2c1522a4d56e50ff2694e98e03ea850224b046b6",
+      "committed_json_sha256": "e716b4f79891ff2c40116979604f51cfcd6b6f38557cc21c3e897739a04fc714"
+    },
+    {
+      "run": "B1",
+      "ms": 49.0295,
+      "under_50ms": true,
+      "raw_export_sha256": "5588e61e95c3340e922f697fc5144e146b58419abd61fdd6982e6879febce129",
+      "committed_json_sha256": "fd4f14976a9f1f49fcfff90501c05d38b6229b5ed25e9748c930ad91308e2903"
+    },
+    {
+      "run": "A2",
+      "ms": 64.3901,
+      "under_50ms": false,
+      "raw_export_sha256": "654bc80294ac5e3acbd74dcc9b33d2a84e993ecb2835db5e3f84dd1bfd01b0fb",
+      "committed_json_sha256": "73cd528aef4a60fedd5241c7bd7ed298b66f2003a2c6d2237bacbef200e4a7df"
+    },
+    {
+      "run": "B2",
+      "ms": 49.4348,
+      "under_50ms": true,
+      "raw_export_sha256": "76683e17826595b2c9a72d165d7ce501d7d94f9a15dadd417c67f14ea04727f7",
+      "committed_json_sha256": "4a08a6fdd0387b06edc3efcc408dae4cc8c3c98ebdecd2708111fef473cc0dbb"
+    },
+    {
+      "run": "A3",
+      "ms": 66.0601,
+      "under_50ms": false,
+      "raw_export_sha256": "acf3a639cf392e379842d898d45c13c3202127fad094eab14ac7d187081f9272",
+      "committed_json_sha256": "c5cbc3b7c1787b9a9de759c901fd9b76ae4699035b169277b67c46700ab9fc4f"
+    },
+    {
+      "run": "B3",
+      "ms": 49.9908,
+      "under_50ms": true,
+      "raw_export_sha256": "e75f5c24c29bb96fb36a80db5ad775c35615e0ba385440819055a791123002de",
+      "committed_json_sha256": "23906731913051a8bbe6f7920c7be7e8f015e584008d4651c2d69888bf91e0b8"
+    }
+  ],
+  "equal_telemetry_patch": true,
+  "matching_ini": true,
+  "shader_difference": "LocalShadowPass.hlsl only, matched to root constants per variant",
+  "scatter_points": 1800,
+  "links_checked": true,
+  "json_line_endings": "Git normalizes JSON CRLF to LF; sample values are unchanged. raw_export_sha256 identifies the original Build export; committed_json_sha256 identifies the archived Git blob."
+}

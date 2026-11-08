@@ -1,0 +1,31 @@
+ConsoleVariableTests.cpp
+ConsoleModule.cpp
+Logger.cpp
+RuntimePaths.cpp
+BenchmarkEngine.cpp
+Engine/Engine.Core/src/BenchmarkEngine.cpp(37): warning C4100: "gameTimer": неиспользованный параметр
+Engine/Engine.Core/src/BenchmarkEngine.cpp(45): warning C4100: "gameTimer": неиспользованный параметр
+GameTimer.cpp
+Создание кода...
+Компиляция...
+ini.c
+Создание кода...
+Saved CVar startup reload passed
+Console variable tests passed
+SettingsCacheTests.cpp
+imgui.cpp
+imgui_draw.cpp
+imgui_tables.cpp
+imgui_widgets.cpp
+ConsoleModule.cpp
+Logger.cpp
+RuntimePaths.cpp
+BenchmarkEngine.cpp
+Engine/Engine.Core/src/BenchmarkEngine.cpp(37): warning C4100: "gameTimer": неиспользованный параметр
+Engine/Engine.Core/src/BenchmarkEngine.cpp(45): warning C4100: "gameTimer": неиспользованный параметр
+GameTimer.cpp
+Создание кода...
+Компиляция...
+ini.c
+Создание кода...
+Settings cache: warm reuse, live values, registration/lifetime, replacement and search passed.

@@ -1,0 +1,470 @@
+{
+  "frame_ms": [
+    53.1601,
+    52.7434,
+    53.7141,
+    52.8508
+  ],
+  "mean_frame_ms": 53.1171,
+  "excluded_marker_rows": [],
+  "stage_ms_per_frame": {
+    "Fluid simulation": {
+      "mean": 17.542025,
+      "per_frame": [
+        17.6133,
+        17.3102,
+        17.535,
+        17.7096
+      ],
+      "rows_per_frame": 1
+    },
+    "Fluid SPH simulation": {
+      "mean": 17.542025,
+      "per_frame": [
+        17.6133,
+        17.3102,
+        17.535,
+        17.7096
+      ],
+      "rows_per_frame": 1
+    },
+    "Local shadows": {
+      "mean": 13.556225,
+      "per_frame": [
+        13.4675,
+        13.6129,
+        13.913,
+        13.2315
+      ],
+      "rows_per_frame": 1
+    },
+    "Sun shadows": {
+      "mean": 7.2347425,
+      "per_frame": [
+        7.22646,
+        7.31222,
+        7.22131,
+        7.17898
+      ],
+      "rows_per_frame": 1
+    },
+    "Local shadow draw": {
+      "mean": 6.9068085,
+      "per_frame": [
+        6.879872000000002,
+        6.965314000000001,
+        7.003293000000001,
+        6.778754999999996
+      ],
+      "rows_per_frame": 213
+    },
+    "Bistro grass expansion": {
+      "mean": 3.43052825,
+      "per_frame": [
+        3.9341439999999994,
+        3.571775,
+        3.655618,
+        2.560576
+      ],
+      "rows_per_frame": 31
+    },
+    "Particles": {
+      "mean": 2.873105,
+      "per_frame": [
+        2.87824,
+        2.8337,
+        2.86733,
+        2.91315
+      ],
+      "rows_per_frame": 1
+    },
+    "GPU particles": {
+      "mean": 2.873105,
+      "per_frame": [
+        2.87824,
+        2.8337,
+        2.86733,
+        2.91315
+      ],
+      "rows_per_frame": 1
+    },
+    "Conditional composition": {
+      "mean": 2.51013,
+      "per_frame": [
+        2.52122,
+        2.47331,
+        2.4961,
+        2.54989
+      ],
+      "rows_per_frame": 1
+    },
+    "Sorted and additive HDR particles": {
+      "mean": 2.4881225000000002,
+      "per_frame": [
+        2.49882,
+        2.45181,
+        2.47373,
+        2.52813
+      ],
+      "rows_per_frame": 1
+    },
+    "Local shadow cull": {
+      "mean": 1.8436400000000004,
+      "per_frame": [
+        1.8504000000000005,
+        1.8461499999999995,
+        1.8961800000000006,
+        1.781830000000001
+      ],
+      "rows_per_frame": 213
+    },
+    "GBuffer": {
+      "mean": 1.5342324999999999,
+      "per_frame": [
+        1.55043,
+        1.48746,
+        1.62944,
+        1.4696
+      ],
+      "rows_per_frame": 1
+    },
+    "Screen-space reflections": {
+      "mean": 1.467895,
+      "per_frame": [
+        1.4879,
+        1.42835,
+        1.54378,
+        1.41155
+      ],
+      "rows_per_frame": 1
+    },
+    "AMD SSSR + Reflections Denoiser + specular resolve": {
+      "mean": 1.467895,
+      "per_frame": [
+        1.4879,
+        1.42835,
+        1.54378,
+        1.41155
+      ],
+      "rows_per_frame": 1
+    },
+    "Clustered deferred lighting": {
+      "mean": 1.322112,
+      "per_frame": [
+        1.3424,
+        1.28384,
+        1.397408,
+        1.2648
+      ],
+      "rows_per_frame": 2
+    },
+    "Particle simulation": {
+      "mean": 1.245872,
+      "per_frame": [
+        1.264448,
+        1.22624,
+        1.233664,
+        1.259136
+      ],
+      "rows_per_frame": 2
+    },
+    "Local shadow clear": {
+      "mean": 1.2209344999999994,
+      "per_frame": [
+        0.5946880000000005,
+        1.0945830000000003,
+        1.1477240000000004,
+        2.0467429999999966
+      ],
+      "rows_per_frame": 213
+    },
+    "Reconstruction": {
+      "mean": 1.08544,
+      "per_frame": [
+        1.09952,
+        1.08474,
+        1.08038,
+        1.07712
+      ],
+      "rows_per_frame": 1
+    },
+    "XeSS HDR Upscale": {
+      "mean": 1.08544,
+      "per_frame": [
+        1.09952,
+        1.08474,
+        1.08038,
+        1.07712
+      ],
+      "rows_per_frame": 1
+    },
+    "Bistro depth meshes": {
+      "mean": 0.955368,
+      "per_frame": [
+        0.957632,
+        0.954176,
+        0.955584,
+        0.95408
+      ],
+      "rows_per_frame": 1
+    },
+    "Local shadow copy": {
+      "mean": 0.7041999999999999,
+      "per_frame": [
+        0.689312,
+        0.707008,
+        0.726016,
+        0.694464
+      ],
+      "rows_per_frame": 1
+    },
+    "Transparent Render Pass": {
+      "mean": 0.6076,
+      "per_frame": [
+        0.59968,
+        0.594496,
+        0.620992,
+        0.615232
+      ],
+      "rows_per_frame": 2
+    },
+    "Local shadow scene upload": {
+      "mean": 0.591584,
+      "per_frame": [
+        0.592448,
+        0.591616,
+        0.590752,
+        0.59152
+      ],
+      "rows_per_frame": 1
+    },
+    "Ambient occlusion": {
+      "mean": 0.536144,
+      "per_frame": [
+        0.543296,
+        0.52256,
+        0.55968,
+        0.51904
+      ],
+      "rows_per_frame": 2
+    },
+    "Far transparency": {
+      "mean": 0.42191999999999996,
+      "per_frame": [
+        0.410944,
+        0.413632,
+        0.425216,
+        0.437888
+      ],
+      "rows_per_frame": 1
+    },
+    "Fluid surface": {
+      "mean": 0.39156,
+      "per_frame": [
+        0.398496,
+        0.381824,
+        0.408288,
+        0.377632
+      ],
+      "rows_per_frame": 1
+    },
+    "Fluid NRF surface": {
+      "mean": 0.39156,
+      "per_frame": [
+        0.398496,
+        0.381824,
+        0.408288,
+        0.377632
+      ],
+      "rows_per_frame": 1
+    },
+    "Motion blur": {
+      "mean": 0.366032,
+      "per_frame": [
+        0.379392,
+        0.360512,
+        0.361248,
+        0.362976
+      ],
+      "rows_per_frame": 1
+    },
+    "Feature-aware motion blur": {
+      "mean": 0.366032,
+      "per_frame": [
+        0.379392,
+        0.360512,
+        0.361248,
+        0.362976
+      ],
+      "rows_per_frame": 1
+    },
+    "Near transparency": {
+      "mean": 0.18568,
+      "per_frame": [
+        0.188736,
+        0.180864,
+        0.195776,
+        0.177344
+      ],
+      "rows_per_frame": 1
+    },
+    "Depth of field": {
+      "mean": 0.093024,
+      "per_frame": [
+        0.097056,
+        0.092128,
+        0.091328,
+        0.091584
+      ],
+      "rows_per_frame": 1
+    },
+    "FidelityFX Depth of Field": {
+      "mean": 0.093024,
+      "per_frame": [
+        0.097056,
+        0.092128,
+        0.091328,
+        0.091584
+      ],
+      "rows_per_frame": 1
+    },
+    "Fluid resolve": {
+      "mean": 0.053216,
+      "per_frame": [
+        0.053504,
+        0.052992,
+        0.05472,
+        0.051648
+      ],
+      "rows_per_frame": 1
+    },
+    "Water HDR optics": {
+      "mean": 0.053216,
+      "per_frame": [
+        0.053504,
+        0.052992,
+        0.05472,
+        0.051648
+      ],
+      "rows_per_frame": 1
+    },
+    "Composition Render Pass": {
+      "mean": 0.048752,
+      "per_frame": [
+        0.049664,
+        0.047456,
+        0.049311999999999995,
+        0.048576
+      ],
+      "rows_per_frame": 2
+    },
+    "Cascaded shadow maps": {
+      "mean": 0.044568,
+      "per_frame": [
+        0.045184,
+        0.045856,
+        0.0432,
+        0.044032
+      ],
+      "rows_per_frame": 1
+    },
+    "Reflection probe meshes": {
+      "mean": 0.029584,
+      "per_frame": [
+        0.02976,
+        0.02848,
+        0.030848,
+        0.029248
+      ],
+      "rows_per_frame": 2
+    },
+    "Tone map": {
+      "mean": 0.029575999999999998,
+      "per_frame": [
+        0.029888,
+        0.029632,
+        0.029344,
+        0.02944
+      ],
+      "rows_per_frame": 1
+    },
+    "HDR tone map to display": {
+      "mean": 0.029575999999999998,
+      "per_frame": [
+        0.029888,
+        0.029632,
+        0.029344,
+        0.02944
+      ],
+      "rows_per_frame": 1
+    },
+    "Transparency composition": {
+      "mean": 0.026744,
+      "per_frame": [
+        0.027264,
+        0.025952,
+        0.026944,
+        0.026816
+      ],
+      "rows_per_frame": 1
+    },
+    "Culling": {
+      "mean": 0.014159999999999999,
+      "per_frame": [
+        0.01408,
+        0.014208,
+        0.014176,
+        0.014176
+      ],
+      "rows_per_frame": 1
+    },
+    "GPU Mesh Culling": {
+      "mean": 0.014159999999999999,
+      "per_frame": [
+        0.01408,
+        0.014208,
+        0.014176,
+        0.014176
+      ],
+      "rows_per_frame": 1
+    },
+    "Bistro grass simulation": {
+      "mean": 0.013384,
+      "per_frame": [
+        0.012992,
+        0.0136,
+        0.01344,
+        0.013504
+      ],
+      "rows_per_frame": 1
+    }
+  },
+  "metrics": {
+    "FE_A.TriageSCG.gr__cycles_active.avg.pct_of_peak_sustained_elapsed": [
+      98.129,
+      98.1372,
+      98.1824,
+      98.1578
+    ],
+    "FBSP.TriageSCG.dramc__throughput.avg.pct_of_peak_sustained_elapsed": [
+      47.0304,
+      47.4091,
+      46.577,
+      47.4561
+    ]
+  },
+  "grass_expansion_by_parent_ms": {
+    "Sun shadows": [
+      0.9599040000000001,
+      0.991776,
+      0.981696,
+      0.94752
+    ],
+    "Local shadows": [
+      2.97424,
+      2.579999,
+      2.6739219999999997,
+      1.613056
+    ]
+  }
+}

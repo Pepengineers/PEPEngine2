@@ -1,0 +1,51 @@
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\BistroRenderGraphTests\sl.interposer.dll' is signed by NVIDIA and the signature was verified.
+Bistro earlyAO=0 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=0 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=0 reuse=0 async=1 passes=27 textures=16/16 join=Fluid surface HDR readback identical
+Bistro earlyAO=0 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=0 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=0 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=0 reuse=0 async=1 passes=27 textures=16/16 join=Fluid surface HDR readback identical
+Bistro earlyAO=0 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=0 reuse=1 async=0 passes=27 textures=10/16 join= HDR readback identical
+Bistro earlyAO=0 reuse=1 async=0 passes=27 textures=10/16 join= HDR readback identical
+Bistro earlyAO=0 reuse=1 async=1 passes=27 textures=10/16 join=Fluid surface HDR readback identical
+Bistro earlyAO=0 reuse=1 async=0 passes=27 textures=10/16 join= HDR readback identical
+Bistro earlyAO=0 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=0 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=0 reuse=0 async=1 passes=27 textures=16/16 join=Fluid surface HDR readback identical
+Bistro earlyAO=0 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=1 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=1 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=1 reuse=0 async=1 passes=27 textures=16/16 join=Fluid surface HDR readback identical
+Bistro earlyAO=1 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=1 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=1 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=1 reuse=0 async=1 passes=27 textures=16/16 join=Fluid surface HDR readback identical
+Bistro earlyAO=1 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=1 reuse=1 async=0 passes=27 textures=11/16 join= HDR readback identical
+Bistro earlyAO=1 reuse=1 async=0 passes=27 textures=11/16 join= HDR readback identical
+Bistro earlyAO=1 reuse=1 async=1 passes=27 textures=11/16 join=Fluid surface HDR readback identical
+Bistro earlyAO=1 reuse=1 async=0 passes=27 textures=11/16 join= HDR readback identical
+Bistro earlyAO=1 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=1 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro earlyAO=1 reuse=0 async=1 passes=27 textures=16/16 join=Fluid surface HDR readback identical
+Bistro earlyAO=1 reuse=0 async=0 passes=27 textures=16/16 join= HDR readback identical
+Bistro shared depth: active AO=0 early=0 passed.
+Bistro shared depth: active AO=1 early=0 passed.
+Bistro shared depth: active AO=2 early=0 passed.
+Bistro shared depth: active AO=3 early=0 passed.
+Bistro shared depth: active AO=0 early=1 passed.
+Bistro shared depth: active AO=1 early=1 passed.
+Bistro shared depth: active AO=2 early=1 passed.
+Bistro shared depth: active AO=3 early=1 passed.
+Bistro async: all effects and odd resize started.
+Bistro async: odd resize passed; Native/XeSS switch started.
+Bistro graph: pooled/dedicated HDR identity, both AO placements, odd resize and native/XeSS switch passed.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\BistroRenderGraphTests/sl.common.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\BistroRenderGraphTests/sl.directsr.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\BistroRenderGraphTests/sl.dlss.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\BistroRenderGraphTests/sl.dlss_g.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\BistroRenderGraphTests/sl.nis.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\BistroRenderGraphTests/sl.pcl.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\BistroRenderGraphTests/sl.reflex.dll' is signed by NVIDIA and the signature was verified.

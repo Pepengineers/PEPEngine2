@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "stdout": "D:\\Project\\PEPEngine2\\Build\\Debug20Optimize-20261108\\physics-cache-tests-final.state.stdout.log",
+  "stderr": "D:\\Project\\PEPEngine2\\Build\\Debug20Optimize-20261108\\physics-cache-tests-final.state.stderr.log",
+  "fingerprints_before": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\PhysicsTests\\PhysicsTests.exe": "bef19971162a2013ba81ee609f7fbc1917913610beb16fed6afcdd92b89f42ca"
+  },
+  "pid": 31224,
+  "child_exit_code": 0,
+  "fingerprints_after": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\PhysicsTests\\PhysicsTests.exe": "bef19971162a2013ba81ee609f7fbc1917913610beb16fed6afcdd92b89f42ca"
+  },
+  "elapsed_s": 0.62
+}

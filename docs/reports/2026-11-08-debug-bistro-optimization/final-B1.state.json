@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "stdout": "D:\\Project\\PEPEngine2\\Build\\Debug20Optimize-20261108\\final-B1.state.stdout.log",
+  "stderr": "D:\\Project\\PEPEngine2\\Build\\Debug20Optimize-20261108\\final-B1.state.stderr.log",
+  "fingerprints_before": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20OptDeliver.exe": "75331b86568a3a1f18ec78afddf85ae9fbaba3cf7fa224448523c622780cb770",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+  },
+  "pid": 33800,
+  "elapsed_s": 60.12,
+  "child_exit_code": 0,
+  "fingerprints_after": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20OptDeliver.exe": "75331b86568a3a1f18ec78afddf85ae9fbaba3cf7fa224448523c622780cb770",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+  }
+}

@@ -1,0 +1,12 @@
+[
+  {
+    "phase": "before",
+    "values": "55, 210 MHz, 405 MHz, 10.61 W, 0 %",
+    "returncode": 0
+  },
+  {
+    "phase": "after",
+    "values": "80, 2032 MHz, 7151 MHz, 65.28 W, 0 %",
+    "returncode": 0
+  }
+]

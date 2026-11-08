@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "stdout": "D:\\Project\\PEPEngine2\\Build\\Debug20Optimize-20261108\\complete-soak.state.stdout.log",
+  "stderr": "D:\\Project\\PEPEngine2\\Build\\Debug20Optimize-20261108\\complete-soak.state.stderr.log",
+  "fingerprints_before": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20OptComplete.exe": "1f1e6d8e09dea90c72c65c272cde0441736988cfab67d2418543d9df56805161",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+  },
+  "pid": 15656,
+  "elapsed_s": 109.58,
+  "child_exit_code": 0,
+  "fingerprints_after": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20OptComplete.exe": "1f1e6d8e09dea90c72c65c272cde0441736988cfab67d2418543d9df56805161",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+  }
+}

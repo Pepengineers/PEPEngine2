@@ -1,0 +1,10 @@
+AO diffuse/direct/specular/emissive/baked energy invariants passed
+Shadow occlusion energy: 0 / 399.316
+CPU frustum grid: INI/parallel identity, sphere coverage, jitter, moved camera, variable grid, infinite far passed
+Clustered GPU checks: NVIDIA GeForce RTX 3060 Laptop GPU, WaveOps=1
+Clustered 1x1: sky/flat/layers/mixed/near-far, 0..769 lights match brute force
+Clustered 17x19: sky/flat/layers/mixed/near-far, 0..769 lights match brute force
+Clustered 127x73: sky/flat/layers/mixed/near-far, 0..769 lights match brute force
+Clustered 320x180: sky/flat/layers/mixed/near-far, 0..769 lights match brute force
+Clustered 1280x720: sky/flat/layers/mixed/near-far, 0..769 lights match brute force
+DX12 lighting smoke: cubemap/IBL, cached point/spot shadows, deferred light readback passed; debug layer=1

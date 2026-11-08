@@ -1,0 +1,14 @@
+Instance batch GPU checks: mixed commands, shuffled IDs, empty list, growth and cascade counter offset passed.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\InstancingTests\sl.interposer.dll' is signed by NVIDIA and the signature was verified.
+Instanced/separate HDR relative drift: 0
+Opaque draw commands: 12 separate -> 6 instanced; visible instances 12
+Human individual phase changed pixels: 5400
+Fox individual phase changed pixels: 792
+Instancing: GPU batching, individual phases, A/B image agreement and clean debug layer passed.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\InstancingTests/sl.common.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\InstancingTests/sl.directsr.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\InstancingTests/sl.dlss.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\InstancingTests/sl.dlss_g.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\InstancingTests/sl.nis.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\InstancingTests/sl.pcl.dll' is signed by NVIDIA and the signature was verified.
+File 'D:\Project\PEPEngine2\Build\bin\x64\Debug\InstancingTests/sl.reflex.dll' is signed by NVIDIA and the signature was verified.

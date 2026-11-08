@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "stdout": "D:\\Project\\PEPEngine2\\Build\\Debug20Optimize-20261108\\profile-shipping.state.stdout.log",
+  "stderr": "D:\\Project\\PEPEngine2\\Build\\Debug20Optimize-20261108\\profile-shipping.state.stderr.log",
+  "fingerprints_before": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20ShippingProfile.exe": "151dadc290f691b7f16a5ebc9ab2d248981a05c097e0e691de066bc6c412fb1d",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+  },
+  "pid": 11032,
+  "elapsed_s": 109.69,
+  "child_exit_code": 0,
+  "fingerprints_after": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Debug20ShippingProfile.exe": "151dadc290f691b7f16a5ebc9ab2d248981a05c097e0e691de066bc6c412fb1d",
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\App\\Config\\Engine.ini": "53c782371018e3e7e00f43d7d41594de0112be828a89277c076651a86b16e245"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "stdout": "D:\\Project\\PEPEngine2\\Build\\Debug20Optimize-20261108\\shipping-ObjectDataJobsTests.state.stdout.log",
+  "stderr": "D:\\Project\\PEPEngine2\\Build\\Debug20Optimize-20261108\\shipping-ObjectDataJobsTests.state.stderr.log",
+  "fingerprints_before": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\ObjectDataJobsTests\\ObjectDataJobsTests.exe": "fb6354fa8376da857f080f69e514b942adc517cf6cefe963a35ec93aeef398ce"
+  },
+  "pid": 22468,
+  "child_exit_code": 0,
+  "fingerprints_after": {
+    "D:\\Project\\PEPEngine2\\Build\\bin\\x64\\Debug\\ObjectDataJobsTests\\ObjectDataJobsTests.exe": "fb6354fa8376da857f080f69e514b942adc517cf6cefe963a35ec93aeef398ce"
+  },
+  "elapsed_s": 10.64
+}
