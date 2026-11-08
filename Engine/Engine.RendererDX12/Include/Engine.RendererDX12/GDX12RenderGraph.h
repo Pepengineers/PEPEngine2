@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include "Engine.RendererDX12/GDX12Submission.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include <iosfwd>
 #include <unordered_map>
@@ -31,6 +32,7 @@ public:
         Mode Usage;
         // Omit for nodes that perform multiple internal transitions (SDKs, simulation, captures).
         D3D12_RESOURCE_STATES State = static_cast<D3D12_RESOURCE_STATES>(UINT_MAX);
+        GDX12Submission::TransferVersion Version{};
     };
     struct BufferAccess
     {
@@ -38,6 +40,44 @@ public:
         Mode Usage;
         // Explicit constant-buffer reads can share a DEFAULT buffer across queues.
         D3D12_RESOURCE_STATES State = UnmanagedState;
+    };
+    // IDs index Batches in this compiled plan only; they are never fence values.
+    enum class PlannedBatchId : UINT { Invalid = UINT_MAX };
+    struct BatchDependency
+    {
+        PlannedBatchId Producer, Consumer;
+    };
+    struct PlannedBatch
+    {
+        PlannedBatchId Id;
+        GDX12Submission::Placement Location;
+        // Legacy primary is resolved by the executor, not a fabricated AdapterId.
+        bool LegacyPrimary = false;
+        std::vector<Pass> Passes;
+        std::vector<Access> Accesses;
+    };
+    struct VersionInput
+    {
+        Resource View;
+        GDX12Submission::TransferVersion Version;
+        PlannedBatchId Consumer;
+    };
+    struct PlannedView
+    {
+        Resource View;
+        GDX12Submission::ResourceIdentity Identity;
+        bool Imported, CrossAdapter, LogicalToken;
+        std::vector<Resource> Fallbacks;
+    };
+    struct CompiledPlan
+    {
+        std::vector<PlannedBatch> Batches;
+        std::vector<PlannedView> Views;
+        // Includes per-queue FIFO edges, including same-queue dependencies.
+        std::vector<BatchDependency> Dependencies;
+        // Exact external inputs: runtime must retain reservations and bind import readiness.
+        std::vector<VersionInput> Inputs;
+        bool RequiresNewExecutor = false;
     };
     struct Statistics
     {
@@ -61,7 +101,13 @@ public:
     void ImportShared(SharedResource resource, std::string name);
     void DependsOn(Pass pass, Pass prerequisite);
     void Export(Resource resource);
+    // Register each device-local view once; shared backing views use the same AllocationId.
+    void RegisterResource(Resource resource, GDX12Submission::ResourceIdentity identity, bool crossAdapter = false);
+    void ImportVersion(Resource resource, GDX12Submission::TransferVersion version);
     void Compile(bool reuseTextures = true);
+    // Pure compiler path: no device flush, resource allocation, rebinding or GPU work.
+    void CompilePlan();
+    const CompiledPlan& GetCompiledPlan() const;
     // Returns the final DIRECT list; the caller submits it and retires the frame with its fence.
     GDX12CommandList* Execute(GDX12CommandList* commands, GDX12CommandQueue* computeQueue = nullptr);
     void WriteDot(std::ostream& output) const;
@@ -76,6 +122,9 @@ private:
         GDX12Texture* Texture = nullptr;
         IRenderPassLink* Link = nullptr;
         bool Imported = false, Transient = false, Exported = false;
+        bool Registered = false, CrossAdapter = false, LogicalToken = false;
+        GDX12Submission::ResourceIdentity Identity{};
+        GDX12Submission::TransferVersion ImportedVersion{};
         std::vector<Resource> Fallbacks;
         UINT First = UINT_MAX, Last = 0, Slot = UINT_MAX;
     };
@@ -86,6 +135,8 @@ private:
         GDX12RenderPass* Instance = nullptr;
         bool SideEffect = false;
         bool AsyncCompute = false;
+        bool HasPlacement = false, CompleteAccesses = false;
+        GDX12Submission::Placement Location{};
         bool LastAsync = false;
         UINT64 LastForkFence = 0, LastComputeFence = 0;
         std::string LastJoinBefore;
@@ -98,6 +149,8 @@ private:
         UINT Last;
         std::shared_ptr<GDX12TextureResource> ResourceObject;
     };
+    void CompileInternal(bool reuseTextures, bool allocateTextures);
+    void BuildPlan();
     void CheckResource(Resource resource) const;
     void CheckPass(Pass pass) const;
     void ExpandRead(Resource resource, std::vector<Resource>& result) const;
@@ -110,6 +163,8 @@ private:
     std::unordered_map<SharedResource, Resource> _shared;
     Statistics _statistics;
     bool _compiled = false;
+    bool _resourcesReady = false;
+    CompiledPlan _plan;
     std::unordered_map<Pass, std::unique_ptr<GDX12GPUTimer>> _computeTimers;
 };
 
@@ -122,6 +177,12 @@ public:
     void SetName(std::string name);
     void HasSideEffects();
     void AsyncCompute();
+    void SetPlacement(GDX12Submission::Placement location);
+    // Declaration: all physical texture/buffer accesses use registered graph views.
+    // GetBufferAccesses() is a legacy unmanaged contract and cannot satisfy this declaration.
+    void DeclareCompleteAccesses();
+    void UseVersion(Graph::Resource resource, Graph::Mode mode, GDX12Submission::TransferVersion version,
+        D3D12_RESOURCE_STATES state);
     void Use(Graph::Resource resource, Graph::Mode mode, D3D12_RESOURCE_STATES state = Graph::UnmanagedState);
     void Read(IRenderPassLink* link, D3D12_RESOURCE_STATES state = Graph::UnmanagedState);
     void ReadInputs(const std::vector<IRenderPassLink*>& inputs, D3D12_RESOURCE_STATES state = Graph::UnmanagedState);

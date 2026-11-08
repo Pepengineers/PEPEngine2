@@ -52,6 +52,9 @@ public:
     // Persistent buffers may be replaced during BeginFrame, so declare their physical accesses each frame.
     virtual std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const { return {}; }
     virtual bool IsAsyncComputeEnabled() const { return true; }
+    // Explicit placement must opt into command-list types this pass can record.
+    virtual bool SupportsGraphQueue(GDX12Submission::QueueKind queue) const
+    { return queue == GDX12Submission::QueueKind::Direct; }
     // Used by upscalers to determine downscaled render target size
     // And share it with all other passes
     virtual void QueryRenderTargetResolution() {};

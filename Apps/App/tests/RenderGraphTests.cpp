@@ -148,6 +148,326 @@ static void TestCompiler()
     std::cout << "Graph scheduling, hazards, culling, invalid accesses and cycles passed.\n";
 }
 
+namespace PlanTests
+{
+using namespace GDX12Submission;
+constexpr AdapterId GPU0{ 1 }, GPU1{ 2 };
+constexpr TransferId InputStream{ 1 }, OutputStream{ 2 };
+constexpr TransferVersion InputVersion{ InputStream, Epoch{ 1 }, ProducerInvocationId{ 7 } };
+constexpr TransferVersion OutputVersion{ OutputStream, Epoch{ 1 }, ProducerInvocationId{ 7 } };
+
+class Pass final : public GDX12RenderPass
+{
+public:
+    Pass(const char* name, Placement location, std::vector<Graph::Access> accesses = {}, bool sideEffect = false)
+        : Name(name), Location(location), Accesses(std::move(accesses)), SideEffect(sideEffect) {}
+    void RecordRenderGraph(GDX12RenderGraphBuilder& builder) override
+    {
+        builder.SetName(Name);
+        builder.SetPlacement(Location);
+        if (Complete) builder.DeclareCompleteAccesses();
+        for (const auto& access : Accesses)
+            if (access.Version.IsValid()) builder.UseVersion(access.Id, access.Usage, access.Version, access.State);
+            else builder.Use(access.Id, access.Usage, access.State);
+        if (SideEffect) builder.HasSideEffects();
+    }
+    bool SupportsGraphQueue(QueueKind) const override { return Supported; }
+    std::vector<Graph::BufferAccess> GetBufferAccesses() const override
+    { return HiddenBuffer ? std::vector<Graph::BufferAccess>{ { nullptr, Mode::Write } } : std::vector<Graph::BufferAccess>{}; }
+    bool Complete = true, Supported = true, HiddenBuffer = false;
+private:
+    const char* Name;
+    Placement Location;
+    std::vector<Graph::Access> Accesses;
+    bool SideEffect;
+};
+
+static Graph::Resource View(Graph& graph, const char* name, AdapterId adapter, AllocationId allocation,
+    TransferId stream = TransferId::Invalid, bool imported = false, bool crossAdapter = false, Epoch epoch = Epoch{1})
+{
+    const auto r = imported ? graph.Import(name) : graph.Create(name);
+    graph.RegisterResource(r, { ResourceId{ r + 1ull }, adapter, epoch, stream, allocation }, crossAdapter);
+    return r;
+}
+
+static bool Edge(const Graph::CompiledPlan& plan, Graph::Pass producer, Graph::Pass consumer)
+{
+    auto a = Graph::PlannedBatchId::Invalid, b = Graph::PlannedBatchId::Invalid;
+    for (const auto& batch : plan.Batches)
+        for (auto pass : batch.Passes)
+        {
+            if (pass == producer) a = batch.Id;
+            if (pass == consumer) b = batch.Id;
+        }
+    for (const auto& edge : plan.Dependencies) if (edge.Producer == a && edge.Consumer == b) return true;
+    return false;
+}
+
+static void HAO()
+{
+    Graph graph;
+    const auto depth0 = View(graph, "depth0", GPU0, AllocationId{ 1 }, InputStream);
+    const auto inputShared0 = View(graph, "inputShared0", GPU0, AllocationId{ 2 }, InputStream, false, true);
+    const auto inputShared1 = View(graph, "inputShared1", GPU1, AllocationId{ 2 }, InputStream, false, true);
+    const auto depth1 = View(graph, "depth1", GPU1, AllocationId{ 3 }, InputStream);
+    const auto ao1 = View(graph, "ao1", GPU1, AllocationId{ 4 }, OutputStream);
+    const auto outputShared1 = View(graph, "outputShared1", GPU1, AllocationId{ 5 }, OutputStream, false, true);
+    const auto outputShared0 = View(graph, "outputShared0", GPU0, AllocationId{ 5 }, OutputStream, false, true);
+    const auto ao0 = View(graph, "ao0", GPU0, AllocationId{ 6 }, OutputStream);
+    Pass depth("depth", {GPU0, QueueKind::Direct}, {{depth0, Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET, InputVersion}});
+    Pass exportInput("export input", {GPU0, QueueKind::Copy}, {
+        {depth0, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE, InputVersion},
+        {inputShared0, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST, InputVersion}});
+    Pass importInput("import input", {GPU1, QueueKind::Copy}, {
+        {inputShared1, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE, InputVersion},
+        {depth1, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST, InputVersion}});
+    Pass ao("AO", {GPU1, QueueKind::Compute}, {
+        {depth1, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, InputVersion},
+        {ao1, Mode::Write, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, OutputVersion}});
+    Pass exportAO("export AO", {GPU1, QueueKind::Copy}, {
+        {ao1, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE, OutputVersion},
+        {outputShared1, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST, OutputVersion}});
+    Pass importAO("import AO", {GPU0, QueueKind::Copy}, {
+        {outputShared0, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE, OutputVersion},
+        {ao0, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST, OutputVersion}});
+    Pass lighting("lighting", {GPU0, QueueKind::Direct}, {{ao0, Mode::Read, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, OutputVersion}}, true);
+    graph.AddPass(depth); graph.AddPass(exportInput); graph.AddPass(importInput); graph.AddPass(ao);
+    graph.AddPass(exportAO); graph.AddPass(importAO); graph.AddPass(lighting);
+    graph.CompilePlan();
+    const auto first = graph.GetCompiledPlan();
+    Require(first.Batches.size() == 7 && first.Inputs.empty() && first.RequiresNewExecutor, "HAO plan lost work or fabricated external inputs");
+    for (Graph::Pass p = 1; p < 7; ++p) Require(Edge(first, p - 1, p), "HAO lost exact producer dependency");
+    Require(first.Views[inputShared0].Identity.Allocation == first.Views[inputShared1].Identity.Allocation &&
+        first.Views[inputShared0].Identity.Id != first.Views[inputShared1].Identity.Id, "Shared views lost physical alias identity");
+    graph.CompilePlan();
+    const auto& second = graph.GetCompiledPlan();
+    Require(first.Dependencies.size() == second.Dependencies.size(), "Nondeterministic dependency count");
+    for (size_t i = 0; i < first.Dependencies.size(); ++i)
+        Require(first.Dependencies[i].Producer == second.Dependencies[i].Producer &&
+            first.Dependencies[i].Consumer == second.Dependencies[i].Consumer, "Nondeterministic batch dependencies");
+    for (size_t i = 0; i < first.Batches.size(); ++i)
+        Require(first.Batches[i].Id == second.Batches[i].Id && first.Batches[i].Location == second.Batches[i].Location &&
+            first.Batches[i].Passes == second.Batches[i].Passes, "Nondeterministic batch placement/order");
+    std::ostringstream dot;
+    graph.WriteDot(dot);
+    Require(dot.str().find("adapter=2 COMPUTE") != std::string::npos && dot.str().find("COPY") != std::string::npos,
+        "Placement diagnostics mislabeled explicit queues");
+    Reject([&] { graph.Execute(nullptr); }, "Legacy executor silently accepted COPY/cross-device plan");
+}
+
+static void IndependentProducer()
+{
+    // Two invocations of the same template share no frame counter or completion value.
+    for (unsigned invocation : { 7u, 19u })
+    {
+        const TransferVersion version{ InputStream, Epoch{1}, ProducerInvocationId{invocation} };
+        Graph graph;
+        const auto input = View(graph, "input", GPU1, AllocationId{1}, InputStream, true);
+        const auto output = View(graph, "output", GPU1, AllocationId{2}, InputStream);
+        graph.ImportVersion(input, version);
+        Pass producer("independent producer", {GPU1, QueueKind::Compute}, {
+            {input, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, version},
+            {output, Mode::Write, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, version}});
+        Pass frame("frame", {GPU0, QueueKind::Direct}, {}, true);
+        const auto producerId = graph.AddPass(producer), frameId = graph.AddPass(frame);
+        graph.Export(output);
+        graph.CompilePlan();
+        const auto& plan = graph.GetCompiledPlan();
+        Require(plan.Batches.size() == 2 && plan.Dependencies.empty() && !Edge(plan, producerId, frameId),
+            "Independent producer acquired a frame/Present join");
+        Require(plan.Inputs.size() == 1 && plan.Inputs[0].View == input && plan.Inputs[0].Version == version &&
+            plan.Inputs[0].Consumer == Graph::PlannedBatchId{0}, "External exact input lost invocation/provenance");
+    }
+}
+
+static void ExternalProvenance()
+{
+    Graph graph;
+    const auto input0 = View(graph, "input0", GPU0, AllocationId{1}, InputStream, true);
+    const auto input1 = View(graph, "input1", GPU1, AllocationId{2}, OutputStream, true);
+    graph.ImportVersion(input0, InputVersion); graph.ImportVersion(input1, OutputVersion);
+    Pass read0("read0", {GPU0, QueueKind::Direct}, {{input0, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, InputVersion}}, true);
+    Pass read1("read1", {GPU1, QueueKind::Compute}, {{input1, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, OutputVersion}}, true);
+    graph.AddPass(read0); graph.AddPass(read1); graph.CompilePlan();
+    Require(graph.GetCompiledPlan().Inputs.size() == 2 && graph.GetCompiledPlan().Dependencies.empty(),
+        "Equal invocation numbers on different streams fabricated a producer edge");
+    Reject([&] { graph.ImportVersion(input0, OutputVersion); }, "Wrong-stream import accepted");
+    Reject([&] { graph.ImportVersion(input0, {}); }, "Invalid external version accepted");
+    Reject([&] { graph.Execute(nullptr); }, "Unbound external readiness reached legacy submission");
+}
+
+static void AliasesAndFIFO()
+{
+    Graph graph;
+    const auto a = View(graph, "stream A local", GPU0, AllocationId{100}, InputStream);
+    const auto b = View(graph, "stream A imported view", GPU1, AllocationId{100}, InputStream, false, true);
+    const auto c = View(graph, "different stream, same allocation", GPU0, AllocationId{100}, OutputStream, false, false, Epoch{2});
+    const TransferVersion replacement{OutputStream, Epoch{2}, ProducerInvocationId{3}};
+    Pass writer("writer", {GPU0, QueueKind::Direct}, {{a, Mode::Write, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, InputVersion}});
+    Pass reader("reader", {GPU1, QueueKind::Compute}, {{b, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, InputVersion}}, true);
+    Pass overwrite("overwrite", {GPU0, QueueKind::Copy}, {{c, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST, replacement}}, true);
+    const auto w = graph.AddPass(writer), r = graph.AddPass(reader), o = graph.AddPass(overwrite);
+    graph.CompilePlan();
+    Require(Edge(graph.GetCompiledPlan(), w, r) && Edge(graph.GetCompiledPlan(), r, o) && Edge(graph.GetCompiledPlan(), w, o),
+        "Allocation RAW/WAR/WAW lost across device views or streams");
+    graph.DependsOn(w, o);
+    Reject([&] { graph.CompilePlan(); }, "Alias dependency cycle accepted");
+    Reject([&] { graph.GetCompiledPlan(); }, "Failed compile exposed stale plan");
+
+    Graph fifo;
+    Pass first("first copy", {GPU0, QueueKind::Copy}, {}, true);
+    Pass middle("compute", {GPU1, QueueKind::Compute}, {}, true);
+    Pass last("last copy", {GPU0, QueueKind::Copy}, {}, true);
+    const auto f = fifo.AddPass(first), m = fifo.AddPass(middle), l = fifo.AddPass(last);
+    fifo.DependsOn(f, m); fifo.DependsOn(m, l); // pass DAG l -> m -> f, FIFO f -> l
+    Reject([&] { fifo.CompilePlan(); }, "FIFO-induced wait cycle accepted");
+    Graph backward;
+    Pass early("early", {GPU0, QueueKind::Copy}, {}, true), late("late", {GPU0, QueueKind::Copy}, {}, true);
+    const auto e = backward.AddPass(early), t = backward.AddPass(late);
+    backward.DependsOn(e, t);
+    Reject([&] { backward.CompilePlan(); }, "Backward same-queue wait accepted");
+
+    // Same queue kind on different adapters does not create a FIFO edge.
+    Graph independent;
+    Pass one("GPU0 copy", {GPU0, QueueKind::Copy}, {}, true), two("GPU1 copy", {GPU1, QueueKind::Copy}, {}, true);
+    const auto oneId = independent.AddPass(one), twoId = independent.AddPass(two); independent.CompilePlan();
+    Require(independent.GetCompiledPlan().Dependencies.empty(), "QueueKind alone merged distinct device timelines");
+    independent.DependsOn(twoId, oneId); independent.CompilePlan();
+    Require(Edge(independent.GetCompiledPlan(), oneId, twoId), "Explicit cross-queue dependency was lost");
+}
+
+static void InvalidContracts()
+{
+    Graph identities;
+    const auto a = identities.Create("a"), b = identities.Create("b");
+    const ResourceIdentity identity{ResourceId{1}, GPU0, Epoch{1}, InputStream, AllocationId{1}};
+    auto bad = identity; bad.Allocation = AllocationId::Invalid;
+    Reject([&] { identities.RegisterResource(a, bad, true); }, "Cross-adapter view without allocation accepted");
+    Reject([&] { identities.RegisterResource(a, bad); }, "Transfer view hid its missing allocation");
+    bad = identity; bad.Id = ResourceId::Invalid;
+    Reject([&] { identities.RegisterResource(a, bad); }, "Invalid resource identity accepted");
+    identities.RegisterResource(a, identity);
+    Reject([&] { identities.RegisterResource(b, identity); }, "Duplicate device view identity accepted");
+    Reject([&] { identities.ImportVersion(a, InputVersion); }, "Created view treated as external import");
+    Reject([&] { identities.GetCompiledPlan(); }, "Uncompiled plan exposed");
+
+    for (unsigned failure = 0; failure < 10; ++failure)
+    {
+        Graph graph;
+        const auto resource = View(graph, "physical", GPU0, AllocationId{1});
+        Placement location{ failure == 0 ? GPU1 : GPU0, (failure == 1 || failure == 7) ? QueueKind::Copy : QueueKind::Compute };
+        auto state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+        auto mode = Mode::Write;
+        if (failure == 1 || failure == 2) state = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        if (failure == 7) { state = D3D12_RESOURCE_STATE_COPY_DEST; mode = Mode::ReadWrite; }
+        if (failure == 8) state = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        if (failure == 9) { state = D3D12_RESOURCE_STATE_COPY_DEST; mode = Mode::Read; }
+        Pass pass("invalid contract", location, {{resource, mode, state}}, true);
+        if (failure == 3) pass.Complete = false;
+        if (failure == 4) pass.HiddenBuffer = true;
+        if (failure == 5) pass.Supported = false;
+        if (failure == 6) { location.Queue = static_cast<QueueKind>(255); }
+        if (failure == 6)
+        {
+            Pass invalid("invalid placement", location, {}, true);
+            Reject([&] { graph.AddPass(invalid); }, "Invalid queue placement accepted");
+        }
+        else
+        {
+            graph.AddPass(pass);
+            Reject([&] { graph.CompilePlan(); }, "Invalid placement/access contract accepted");
+        }
+    }
+    Graph unmanaged;
+    const auto hidden = unmanaged.Import("unmanaged hidden resource");
+    Pass tagged("placement is not memory registration", {GPU1, QueueKind::Compute},
+        {{hidden, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE}}, true);
+    unmanaged.AddPass(tagged);
+    Reject([&] { unmanaged.CompilePlan(); }, "Placement made unmanaged resource safe");
+
+    for (unsigned failure = 0; failure < 5; ++failure)
+    {
+        Graph graph;
+        const auto resource = View(graph, "versioned import", GPU0, AllocationId{1}, InputStream, true);
+        if (failure != 0) graph.ImportVersion(resource, InputVersion);
+        auto version = InputVersion;
+        if (failure == 1) version.Invocation = ProducerInvocationId{8};
+        if (failure == 2) version.Transfer = OutputStream;
+        if (failure == 3) version.VersionEpoch = Epoch{2};
+        Pass read("bad exact input", {GPU0, QueueKind::Direct},
+            {{resource, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, failure == 4 ? TransferVersion{} : version}}, true);
+        graph.AddPass(read);
+        Reject([&] { graph.CompilePlan(); }, "Missing/stale/wrong-stream/wrong-epoch version accepted");
+    }
+}
+
+static void ExactFallbackAndAliasedWrites()
+{
+    for (bool directExternalRead : {false, true})
+    {
+        Graph graph;
+        const auto external = View(graph, "exact external fallback", GPU0, AllocationId{1}, InputStream, true);
+        const auto conditional = View(graph, "written conditional output", GPU0, AllocationId{2}, InputStream);
+        graph.ImportVersion(external, InputVersion);
+        graph.AddFallback(conditional, external);
+        Pass writer("conditional writer", {GPU0, QueueKind::Direct}, {{conditional, Mode::Write, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, InputVersion}});
+        std::vector<Graph::Access> reads{{conditional, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, InputVersion}};
+        if (directExternalRead) reads.push_back({external, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, InputVersion});
+        Pass consumer("conditional consumer", {GPU0, QueueKind::Direct}, std::move(reads), true);
+        graph.AddPass(writer); const auto reader = graph.AddPass(consumer); graph.CompilePlan();
+        const auto& inputs = graph.GetCompiledPlan().Inputs;
+        Require(inputs.size() == 1 && inputs[0].View == external && inputs[0].Version == InputVersion &&
+            inputs[0].Consumer == Graph::PlannedBatchId{reader}, directExternalRead ?
+            "Direct external read doubled exact fallback readiness" : "Conditional-only read lost external exact fallback readiness");
+    }
+
+    for (bool differentStream : {false, true})
+    {
+        Graph aliases;
+        const auto a = View(aliases, "alias A", GPU0, AllocationId{1}, InputStream);
+        const auto b = View(aliases, "alias B", GPU0, AllocationId{1}, differentStream ? OutputStream : InputStream);
+        auto other = differentStream ? OutputVersion : InputVersion;
+        if (!differentStream) other.Invocation = ProducerInvocationId{8};
+        Pass bad("incompatible writes", {GPU0, QueueKind::Compute}, {
+            {a, Mode::Write, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, InputVersion},
+            {b, Mode::Write, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, other}}, true);
+        aliases.AddPass(bad);
+        Reject([&] { aliases.CompilePlan(); }, "Conflicting versions of one allocation were silently overwritten in one pass");
+    }
+}
+
+static void ForwardingAndLegacy()
+{
+    Graph graph;
+    const auto input = View(graph, "input", GPU0, AllocationId{1}, TransferId::Invalid, true);
+    const auto forwarded = View(graph, "forwarded", GPU0, AllocationId{2});
+    const auto unused = View(graph, "unused", GPU1, AllocationId{3});
+    graph.AddFallback(forwarded, input);
+    Pass dead("dead", {GPU1, QueueKind::Compute}, {{unused, Mode::Write, D3D12_RESOURCE_STATE_UNORDERED_ACCESS}});
+    Pass forward("forward", {GPU0, QueueKind::Direct}, {{forwarded, Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET}});
+    Pass consumer("consume", {GPU0, QueueKind::Direct}, {{forwarded, Mode::Read, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE}}, true);
+    graph.AddPass(dead); const auto f = graph.AddPass(forward), c = graph.AddPass(consumer);
+    graph.Export(forwarded); graph.CompilePlan();
+    Require(graph.GetExecutionOrder() == std::vector<Graph::Pass>{f, c} && graph.GetStatistics().CulledPasses == 1 &&
+        graph.GetCompiledPlan().Views[forwarded].Fallbacks == std::vector<Graph::Resource>{input}, "Culling/export/forwarding changed in placement plan");
+    Graph legacy;
+    const auto output = legacy.Import("output");
+    TestPass direct("direct", {{output, Mode::Write}}), compute("compute", {{output, Mode::ReadWrite}});
+    compute.Async = true;
+    legacy.AddPass(direct); legacy.AddPass(compute); legacy.Compile();
+    const auto& plan = legacy.GetCompiledPlan();
+    Require(!plan.RequiresNewExecutor && plan.Batches.size() == 2 && plan.Batches[0].LegacyPrimary &&
+        plan.Batches[1].LegacyPrimary && plan.Batches[0].Location.Queue == QueueKind::Direct &&
+        plan.Batches[1].Location.Queue == QueueKind::Compute && Edge(plan, 0, 1), "Legacy DIRECT/async contract changed");
+}
+
+static void Run()
+{
+    HAO(); IndependentProducer(); ExternalProvenance(); AliasesAndFIFO(); InvalidContracts(); ExactFallbackAndAliasedWrites(); ForwardingAndLegacy();
+    std::cout << "Placement compiler: HAO, independent invocations, exact versions, allocation aliases, FIFO cycles and legacy passed.\n";
+}
+}
+
 class TestApp final : public App { public: TestApp() : App(GetModuleHandleW(nullptr)) {} };
 
 class ForwardPass final : public GDX12RenderPass
@@ -701,6 +1021,13 @@ int main(int argc, char** argv)
         TestCaptureClock();
         TestCompiler();
         TestPassRecording();
+        PlanTests::Run();
+        for (int i = 1; i < argc; ++i)
+            if (std::string_view(argv[i]) == "--compiler-only")
+            {
+                std::cout << "Compiler-only tests passed; no GPU fixture initialized.\n";
+                return 0;
+            }
         TestApp app;
         ComPtr<ID3D12Debug> debug;
         ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));

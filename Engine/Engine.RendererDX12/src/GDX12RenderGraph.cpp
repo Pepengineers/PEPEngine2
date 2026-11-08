@@ -11,6 +11,8 @@
 #include <queue>
 #include <stdexcept>
 
+using namespace GDX12Submission;
+
 GDX12RenderGraph::GDX12RenderGraph(GDX12Device* device) : _device(device) {}
 GDX12RenderGraph::~GDX12RenderGraph() = default;
 
@@ -120,16 +122,41 @@ void GDX12RenderGraph::ImportLink(std::string name, IRenderPassLink* link)
 void GDX12RenderGraph::ImportShared(SharedResource resource, std::string name)
 {
     if (_shared.count(resource)) throw std::invalid_argument("Render graph: duplicate shared import");
-    _shared.emplace(resource, Import(std::move(name)));
+    const auto id = Import(std::move(name));
+    _resources[id].LogicalToken = true;
+    _shared.emplace(resource, id);
 }
 
 void GDX12RenderGraphBuilder::SetName(std::string name) { _node.Name = std::move(name); }
 void GDX12RenderGraphBuilder::HasSideEffects() { _node.SideEffect = true; }
 void GDX12RenderGraphBuilder::AsyncCompute() { _node.AsyncCompute = true; }
 
+void GDX12RenderGraphBuilder::SetPlacement(const Placement location)
+{
+    if (!location.IsValid() || _node.HasPlacement)
+        throw std::invalid_argument("Render graph: invalid or duplicate placement");
+    _node.HasPlacement = true;
+    _node.Location = location;
+}
+
+void GDX12RenderGraphBuilder::DeclareCompleteAccesses() { _node.CompleteAccesses = true; }
+
+void GDX12RenderGraphBuilder::UseVersion(const Graph::Resource resource, const Graph::Mode mode,
+    const TransferVersion version, const D3D12_RESOURCE_STATES state)
+{
+    if (!version.IsValid()) throw std::invalid_argument("Render graph: invalid transfer version");
+    for (const auto& access : _node.Accesses)
+        if (access.Id == resource)
+            throw std::invalid_argument("Render graph: duplicate versioned access");
+    Use(resource, mode, state);
+    _node.Accesses.back().Version = version;
+}
+
 void GDX12RenderGraphBuilder::Use(const Graph::Resource resource, const Graph::Mode mode, const D3D12_RESOURCE_STATES state)
 {
     _graph.CheckResource(resource);
+    if (mode != Graph::Mode::Read && mode != Graph::Mode::Write && mode != Graph::Mode::ReadWrite)
+        throw std::invalid_argument("Render graph: invalid access mode");
     for (const auto& access : _node.Accesses)
         if (access.Id == resource)
         {
@@ -181,7 +208,12 @@ void GDX12RenderGraphBuilder::Read(const SharedResource resource)
 void GDX12RenderGraphBuilder::Write(SharedResource resource, std::string name)
 {
     auto found = _graph._shared.find(resource);
-    if (found == _graph._shared.end()) found = _graph._shared.emplace(resource, _graph.Create(std::move(name))).first;
+    if (found == _graph._shared.end())
+    {
+        const auto id = _graph.Create(std::move(name));
+        _graph._resources[id].LogicalToken = true;
+        found = _graph._shared.emplace(resource, id).first;
+    }
     Use(found->second, Graph::Mode::Write);
 }
 
@@ -204,21 +236,171 @@ void GDX12RenderGraph::Export(const Resource resource)
     _compiled = false;
 }
 
-void GDX12RenderGraph::Compile(bool reuseTextures)
+void GDX12RenderGraph::RegisterResource(const Resource resource, const ResourceIdentity identity, const bool crossAdapter)
+{
+    CheckResource(resource);
+    if (identity.Id == ResourceId::Invalid || identity.Adapter == AdapterId::Invalid ||
+        identity.ResourceEpoch == Epoch::Invalid ||
+        ((crossAdapter || identity.Transfer != TransferId::Invalid) && identity.Allocation == AllocationId::Invalid))
+        throw std::invalid_argument("Render graph: invalid resource identity or missing cross-adapter allocation");
+    for (const auto& entry : _resources)
+        if (entry.Registered && entry.Identity.Id == identity.Id)
+            throw std::invalid_argument("Render graph: duplicate resource view identity");
+    auto& entry = _resources[resource];
+    if (entry.Registered || entry.LogicalToken)
+        throw std::invalid_argument("Render graph: resource already registered or is a pipeline token");
+    entry.Registered = true;
+    entry.CrossAdapter = crossAdapter;
+    entry.Identity = identity;
+    _compiled = false;
+}
+
+void GDX12RenderGraph::ImportVersion(const Resource resource, const TransferVersion version)
+{
+    CheckResource(resource);
+    auto& entry = _resources[resource];
+    if (!entry.Imported || !entry.Registered || !version.IsValid() ||
+        version.Transfer != entry.Identity.Transfer || version.VersionEpoch != entry.Identity.ResourceEpoch)
+        throw std::invalid_argument("Render graph: invalid imported version");
+    entry.ImportedVersion = version;
+    _compiled = false;
+}
+
+const GDX12RenderGraph::CompiledPlan& GDX12RenderGraph::GetCompiledPlan() const
+{
+    if (!_compiled) throw std::logic_error("Render graph: plan is not compiled");
+    return _plan;
+}
+
+void GDX12RenderGraph::Compile(const bool reuseTextures) { CompileInternal(reuseTextures, true); }
+void GDX12RenderGraph::CompilePlan() { CompileInternal(false, false); }
+
+void GDX12RenderGraph::CompileInternal(bool reuseTextures, const bool allocateTextures)
 {
     _compiled = false;
+    _resourcesReady = false;
+    _plan = {};
     _order.clear();
     _statistics = {};
     std::vector<Pass> writers(_resources.size(), UINT_MAX);
     std::vector<std::vector<Pass>> readers(_resources.size());
+    struct AllocationUse { Pass Writer = UINT_MAX; std::vector<Pass> Readers; TransferVersion Version{}; };
+    std::unordered_map<AllocationId, AllocationUse> allocations;
+    std::vector<TransferVersion> versions;
+    for (const auto& resource : _resources) versions.push_back(resource.ImportedVersion);
     for (Pass p = 0; p < _nodes.size(); ++p)
     {
         auto& node = _nodes[p];
         node.Dependencies = node.ExplicitDependencies;
+        if (node.HasPlacement)
+        {
+            if (!node.Location.IsValid() || !node.CompleteAccesses ||
+                !node.Instance->SupportsGraphQueue(node.Location.Queue) || !node.Instance->GetBufferAccesses().empty())
+                throw std::logic_error("Render graph: incomplete or unsupported placement contract: " + node.Name);
+            if (node.AsyncCompute && node.Location.Queue != QueueKind::Compute)
+                throw std::logic_error("Render graph: conflicting legacy async and explicit placement");
+        }
+        for (const auto& access : node.Accesses)
+        {
+            const auto& resource = _resources[access.Id];
+            if (node.HasPlacement && !resource.LogicalToken)
+            {
+                if (!resource.Registered || resource.Identity.Adapter != node.Location.Adapter || access.State == UnmanagedState)
+                    throw std::logic_error("Render graph: unmanaged or wrong-device access: " + resource.Name);
+                if (node.Location.Queue == QueueKind::Copy &&
+                    !((access.Usage == Mode::Read && access.State == D3D12_RESOURCE_STATE_COPY_SOURCE) ||
+                      (access.Usage == Mode::Write && access.State == D3D12_RESOURCE_STATE_COPY_DEST)))
+                    throw std::logic_error("Render graph: illegal COPY access: " + resource.Name);
+                const auto computeStates = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER |
+                    D3D12_RESOURCE_STATE_UNORDERED_ACCESS | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE |
+                    D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT | D3D12_RESOURCE_STATE_COPY_SOURCE | D3D12_RESOURCE_STATE_COPY_DEST;
+                if (node.Location.Queue == QueueKind::Compute && (access.State & ~computeStates) != 0)
+                    throw std::logic_error("Render graph: illegal COMPUTE state: " + resource.Name);
+                const auto writeStates = D3D12_RESOURCE_STATE_RENDER_TARGET | D3D12_RESOURCE_STATE_UNORDERED_ACCESS |
+                    D3D12_RESOURCE_STATE_DEPTH_WRITE | D3D12_RESOURCE_STATE_STREAM_OUT |
+                    D3D12_RESOURCE_STATE_COPY_DEST | D3D12_RESOURCE_STATE_RESOLVE_DEST;
+                const auto writeState = access.State & writeStates;
+                if ((access.Usage != Mode::Read && writeState == 0) ||
+                    (access.Usage == Mode::Read && (writeState & ~D3D12_RESOURCE_STATE_UNORDERED_ACCESS) != 0) ||
+                    (writeState != 0 && (access.State != writeState ||
+                        (static_cast<UINT>(writeState) & (static_cast<UINT>(writeState) - 1)) != 0)))
+                    throw std::logic_error("Render graph: resource state conflicts with access mode: " + resource.Name);
+            }
+            if (resource.Registered && !node.HasPlacement)
+                throw std::logic_error("Render graph: registered physical view requires explicit placement");
+            if (access.Version.IsValid())
+            {
+                if (!resource.Registered || access.Version.Transfer != resource.Identity.Transfer ||
+                    access.Version.VersionEpoch != resource.Identity.ResourceEpoch)
+                    throw std::logic_error("Render graph: version does not match resource: " + resource.Name);
+            }
+            else if (resource.Registered && resource.Identity.Transfer != TransferId::Invalid)
+                throw std::logic_error("Render graph: transfer access requires an exact version");
+        }
         const auto depend = [&](const Pass producer)
         {
             if (producer != UINT_MAX && producer != p) node.Dependencies.push_back(producer);
         };
+        // Backing-allocation hazards ignore device, stream and epoch: none retires old readers.
+        // Merge aliases in a single pass before updating the history (no self-dependencies).
+        std::unordered_map<AllocationId, Mode> allocationModes;
+        std::unordered_map<AllocationId, TransferVersion> writtenVersions;
+        for (const auto& access : node.Accesses)
+        {
+            std::vector<Resource> used;
+            if (access.Usage != Mode::Write) ExpandRead(access.Id, used);
+            else used.push_back(access.Id);
+            const auto writtenAllocation = _resources[access.Id].Identity.Allocation;
+            if (access.Usage != Mode::Read && writtenAllocation != AllocationId::Invalid)
+            {
+                const auto inserted = writtenVersions.emplace(writtenAllocation, access.Version);
+                if (!inserted.second && !(inserted.first->second == access.Version))
+                    throw std::logic_error("Render graph: incompatible versions written to one allocation in a pass: " + node.Name);
+            }
+            for (auto id : used)
+            {
+                const auto& resource = _resources[id];
+                if (node.HasPlacement && !resource.LogicalToken &&
+                    (!resource.Registered || resource.Identity.Adapter != node.Location.Adapter))
+                    throw std::logic_error("Render graph: unmanaged or wrong-device fallback");
+                const auto allocation = resource.Identity.Allocation;
+                if (allocation != AllocationId::Invalid)
+                {
+                    const auto mode = id == access.Id ? access.Usage : Mode::Read;
+                    auto result = allocationModes.emplace(allocation, mode);
+                    if (!result.second && result.first->second != mode) result.first->second = Mode::ReadWrite;
+                }
+            }
+            if (access.Usage != Mode::Write && access.Version.IsValid())
+                for (auto id : used)
+                {
+                    const auto& resource = _resources[id];
+                    auto current = versions[id];
+                    const auto allocation = resource.Identity.Allocation;
+                    if (allocation != AllocationId::Invalid && allocations[allocation].Writer != UINT_MAX)
+                        current = allocations[allocation].Version;
+                    if (resource.Identity.Transfer != access.Version.Transfer ||
+                        resource.Identity.ResourceEpoch != access.Version.VersionEpoch || !(current == access.Version))
+                        throw std::logic_error("Render graph: version has no matching producer/import (including fallback): " + node.Name);
+                }
+        }
+        std::unordered_map<AllocationId, Pass> priorAllocationWriters;
+        for (const auto& [allocation, mode] : allocationModes)
+        {
+            auto& history = allocations[allocation];
+            priorAllocationWriters[allocation] = history.Writer;
+            depend(history.Writer);
+            if (mode != Mode::Read) for (auto reader : history.Readers) depend(reader);
+            if (mode != Mode::Read) { history.Readers.clear(); history.Writer = p; history.Version = {}; }
+            else history.Readers.push_back(p);
+        }
+        for (const auto& access : node.Accesses)
+            if (access.Usage != Mode::Read)
+            {
+                versions[access.Id] = access.Version;
+                const auto allocation = _resources[access.Id].Identity.Allocation;
+                if (allocation != AllocationId::Invalid) allocations[allocation].Version = access.Version;
+            }
         // Reads precede writes, including conditional forwarding through other outputs.
         for (const auto& access : node.Accesses)
             if (access.Usage != Mode::Write)
@@ -227,7 +409,10 @@ void GDX12RenderGraph::Compile(bool reuseTextures)
                 ExpandRead(access.Id, inputs);
                 for (auto id : inputs)
                 {
-                    if (writers[id] == UINT_MAX && !_resources[id].Imported)
+                    const auto allocation = _resources[id].Identity.Allocation;
+                    const bool aliasWriter = allocation != AllocationId::Invalid &&
+                        priorAllocationWriters.count(allocation) && priorAllocationWriters.at(allocation) != UINT_MAX;
+                    if (writers[id] == UINT_MAX && !_resources[id].Imported && !aliasWriter)
                         throw std::logic_error("Render graph: " + node.Name + " reads before first write: " + _resources[id].Name);
                     depend(writers[id]);
                     readers[id].push_back(p);
@@ -286,12 +471,17 @@ void GDX12RenderGraph::Compile(bool reuseTextures)
             ExpandRead(r, outputs);
             for (auto id : outputs)
             {
-                if (writers[id] == UINT_MAX && !_resources[id].Imported)
+                auto writer = writers[id];
+                const auto allocation = _resources[id].Identity.Allocation;
+                if (allocation != AllocationId::Invalid && allocations[allocation].Writer != UINT_MAX)
+                    writer = allocations[allocation].Writer;
+                if (writer == UINT_MAX && !_resources[id].Imported)
                     throw std::logic_error("Render graph: exported resource has no writer: " + _resources[id].Name);
-                retain(writers[id]);
+                retain(writer);
             }
         }
     for (auto p : sorted) if (live[p]) _order.push_back(p);
+    BuildPlan();
     _statistics.Passes = static_cast<UINT>(_order.size());
     _statistics.CulledPasses = static_cast<UINT>(_nodes.size() - _order.size());
     for (auto& r : _resources) { r.First = UINT_MAX; r.Last = 0; r.Slot = UINT_MAX; }
@@ -316,7 +506,7 @@ void GDX12RenderGraph::Compile(bool reuseTextures)
             for (auto id : outputs) _resources[id].Last = static_cast<UINT>(_order.size());
         }
     for (auto p : _order)
-        if (_nodes[p].AsyncCompute)
+        if (_nodes[p].AsyncCompute || _nodes[p].HasPlacement)
             for (const auto& access : _nodes[p].Accesses)
             {
                 std::vector<Resource> used;
@@ -327,6 +517,12 @@ void GDX12RenderGraph::Compile(bool reuseTextures)
                     _resources[id].Last = static_cast<UINT>(_order.size());
                 }
             }
+    // Explicit plans own per-device lifetimes in P2b; never pool/rebind them on the legacy device.
+    if (!allocateTextures || _plan.RequiresNewExecutor)
+    {
+        _compiled = true;
+        return;
+    }
     std::vector<Resource> textures;
     for (Resource r = 0; r < _resources.size(); ++r)
         if (_resources[r].Transient && _resources[r].First != UINT_MAX) textures.push_back(r);
@@ -364,13 +560,109 @@ void GDX12RenderGraph::Compile(bool reuseTextures)
     // Choose distinct slots before rebinding; recompiling a previously pooled graph may need to split a slot.
     for (auto id : textures) _resources[id].Texture->BindGraphResource(_slots[_resources[id].Slot].ResourceObject);
     _statistics.PhysicalTextures = static_cast<UINT>(_slots.size());
+    _resourcesReady = true;
     _compiled = true;
+}
+
+void GDX12RenderGraph::BuildPlan()
+{
+    std::vector<bool> live(_nodes.size());
+    for (auto p : _order) live[p] = true;
+    std::vector<std::pair<Pass, Pass>> edges;
+    for (auto p : _order)
+        for (auto producer : _nodes[p].Dependencies) edges.emplace_back(producer, p);
+    // Explicit queues have declared enqueue order. A backward wait cannot jump FIFO.
+    // Legacy passes keep the previous topological scheduling contract.
+    std::vector<std::pair<Placement, Pass>> tails;
+    for (auto p : _order)
+        if (!_nodes[p].HasPlacement)
+        {
+            const Placement location{ AdapterId::Invalid, _nodes[p].AsyncCompute ? QueueKind::Compute : QueueKind::Direct };
+            auto tail = std::find_if(tails.begin(), tails.end(), [&](const auto& entry) { return entry.first == location; });
+            if (tail == tails.end()) tails.emplace_back(location, p);
+            else { edges.emplace_back(tail->second, p); tail->second = p; }
+        }
+    for (Pass p = 0; p < _nodes.size(); ++p)
+        if (live[p] && _nodes[p].HasPlacement)
+        {
+            const auto location = _nodes[p].Location;
+            auto tail = std::find_if(tails.begin(), tails.end(), [&](const auto& entry) { return entry.first == location; });
+            if (tail == tails.end()) tails.emplace_back(location, p);
+            else { edges.emplace_back(tail->second, p); tail->second = p; }
+        }
+    std::sort(edges.begin(), edges.end());
+    edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
+    std::vector<UINT> indegree(_nodes.size());
+    std::vector<std::vector<Pass>> next(_nodes.size());
+    for (const auto& [producer, consumer] : edges)
+    {
+        next[producer].push_back(consumer);
+        ++indegree[consumer];
+    }
+    std::priority_queue<Pass, std::vector<Pass>, std::greater<Pass>> ready;
+    for (auto p : _order) if (!indegree[p]) ready.push(p);
+    std::vector<Pass> sorted;
+    while (!ready.empty())
+    {
+        const auto p = ready.top(); ready.pop(); sorted.push_back(p);
+        for (auto consumer : next[p]) if (--indegree[consumer] == 0) ready.push(consumer);
+    }
+    if (sorted.size() != _order.size())
+        throw std::logic_error("Render graph: expanded wait/FIFO dependency cycle");
+    _order = std::move(sorted);
+    std::vector<PlannedBatchId> batches(_nodes.size(), PlannedBatchId::Invalid);
+    std::vector<bool> written(_resources.size());
+    std::unordered_map<AllocationId, bool> allocationWritten;
+    for (Resource r = 0; r < _resources.size(); ++r)
+    {
+        const auto& entry = _resources[r];
+        _plan.Views.push_back({ r, entry.Identity, entry.Imported, entry.CrossAdapter, entry.LogicalToken, entry.Fallbacks });
+    }
+    for (auto p : _order)
+    {
+        const auto& node = _nodes[p];
+        const auto id = static_cast<PlannedBatchId>(_plan.Batches.size());
+        batches[p] = id;
+        Placement location = node.Location;
+        if (!node.HasPlacement) location.Queue = node.AsyncCompute ? QueueKind::Compute : QueueKind::Direct;
+        // One pass per batch preserves every possible wait boundary; P2b can coalesce safely.
+        _plan.Batches.push_back({ id, location, !node.HasPlacement, { p }, node.Accesses });
+        _plan.RequiresNewExecutor |= node.HasPlacement;
+        for (const auto& access : node.Accesses)
+            if (access.Usage != Mode::Write && access.Version.IsValid())
+            {
+                std::vector<Resource> inputs;
+                ExpandRead(access.Id, inputs);
+                for (auto view : inputs)
+                {
+                    const auto allocation = _resources[view].Identity.Allocation;
+                    if (written[view] || (allocation != AllocationId::Invalid && allocationWritten[allocation])) continue;
+                    const bool duplicate = std::any_of(_plan.Inputs.begin(), _plan.Inputs.end(), [&](const VersionInput& input)
+                    { return input.View == view && input.Version == access.Version && input.Consumer == id; });
+                    if (!duplicate) _plan.Inputs.push_back({ view, access.Version, id });
+                }
+            }
+        for (const auto& access : node.Accesses)
+            if (access.Usage != Mode::Read)
+            {
+                written[access.Id] = true;
+                const auto allocation = _resources[access.Id].Identity.Allocation;
+                if (allocation != AllocationId::Invalid) allocationWritten[allocation] = true;
+            }
+    }
+    for (const auto& [producer, consumer] : edges)
+        _plan.Dependencies.push_back({ batches[producer], batches[consumer] });
+    std::sort(_plan.Dependencies.begin(), _plan.Dependencies.end(), [](const auto& a, const auto& b)
+    { return a.Producer == b.Producer ? a.Consumer < b.Consumer : a.Producer < b.Producer; });
 }
 
 GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12CommandQueue* computeQueue)
 {
     GDX12_SCOPED_CPU_EVENT("Graph recording");
     if (!_compiled) throw std::logic_error("Render graph must be compiled before execution");
+    if (_plan.RequiresNewExecutor)
+        throw std::logic_error("Render graph: explicit placement/version plan requires P2b executor; legacy Execute supports primary DIRECT/COMPUTE only");
+    if (!_resourcesReady) throw std::logic_error("Render graph: CompilePlan does not prepare native resources; call Compile for legacy Execute");
     for (const auto& resource : _resources)
         if (resource.Slot != UINT_MAX && resource.Texture->GetResource() != _slots[resource.Slot].ResourceObject.get())
             throw std::logic_error("Render graph texture changed; recompile after resize: " + resource.Name);
@@ -598,14 +890,24 @@ void GDX12RenderGraph::WriteDot(std::ostream& output) const
             "; COMPUTE fence=" + std::to_string(_statistics.ComputeFence) + "; join before " + _statistics.JoinBefore) << ";\n";
     for (auto p : _order)
     {
-        output << "  p" << p << " [label=" << std::quoted(_nodes[p].Name +
-            (_nodes[p].LastAsync ? " [COMPUTE; fork=" + std::to_string(_nodes[p].LastForkFence) +
+        std::string queueLabel;
+        if (_nodes[p].HasPlacement)
+        {
+            const auto location = _nodes[p].Location;
+            queueLabel = " [adapter=" + std::to_string(static_cast<std::uint64_t>(location.Adapter)) + " " +
+                (location.Queue == QueueKind::Copy ? "COPY" : (location.Queue == QueueKind::Compute ? "COMPUTE" : "DIRECT")) + "]";
+        }
+        else
+            queueLabel = _nodes[p].LastAsync ? " [COMPUTE; fork=" + std::to_string(_nodes[p].LastForkFence) +
                 "; signal=" + std::to_string(_nodes[p].LastComputeFence) + "; join before " + _nodes[p].LastJoinBefore + "]" :
-                (_nodes[p].AsyncCompute ? " [DIRECT; COMPUTE eligible]" : " [DIRECT]"))) << "];\n";
+                (_nodes[p].AsyncCompute ? " [DIRECT; COMPUTE eligible]" : " [DIRECT]");
+        output << "  p" << p << " [label=" << std::quoted(_nodes[p].Name + queueLabel) << "];\n";
         for (const auto& buffer : _nodes[p].LastBuffers)
             output << "  p" << p << " -> b" << buffer.first << " [label=" << std::quoted(
                 buffer.second == Mode::Read ? "read" : (buffer.second == Mode::Write ? "write" : "read/write")) << "];\n";
-        for (auto predecessor : _nodes[p].Dependencies) output << "  p" << predecessor << " -> p" << p << ";\n";
     }
+    for (const auto& edge : _plan.Dependencies)
+        output << "  p" << _plan.Batches[static_cast<UINT>(edge.Producer)].Passes.front() << " -> p" <<
+            _plan.Batches[static_cast<UINT>(edge.Consumer)].Passes.front() << ";\n";
     output << "}\n";
 }
