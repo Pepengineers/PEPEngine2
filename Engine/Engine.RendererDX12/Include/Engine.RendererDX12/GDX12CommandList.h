@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine.RendererDX12\D3DHelpers.h"
+#include "Engine.RendererDX12/GDX12Submission.h"
 
 #if defined(DEBUG) || defined(_DEBUG) || defined(PROFILE_BUILD)
 #include <pix/pix3.h>
@@ -114,6 +115,13 @@ public:
 
 
 private:
+    friend class GDX12CommandQueue;
+    GDX12CommandQueue* _owner = nullptr;
+    GDX12Submission::CompletionPoint _retirement;
+    ComPtr<ID3D12Fence> _retirementFence;
+    bool _submitted = false;
+    void RequireDirect() const;
+    void RequireCompute() const;
     D3D12_COMMAND_LIST_TYPE _type;
 	ComPtr<ID3D12GraphicsCommandList10> _commandList;
 	ComPtr<ID3D12CommandAllocator> _commandAllocator;

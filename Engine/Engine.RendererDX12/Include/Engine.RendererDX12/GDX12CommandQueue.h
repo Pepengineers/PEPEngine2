@@ -5,14 +5,27 @@
 
 class GDX12CommandList;
 
+// Calls on a device/its queues (including imports/reset) require external serialization.
 class GDX12CommandQueue
 {
 public:
-	GDX12CommandQueue(GDX12Device* device, D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT);
+	GDX12CommandQueue(GDX12Device* device, D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT,
+        bool crossAdapterFence = false);
 	D3D12_COMMAND_LIST_TYPE GetType() const { return _type; }
 	~GDX12CommandQueue();
 
+    // Reset drains issued work and invalidates this queue and all imported views of its timeline.
 	void Reset();
+    GDX12Submission::QueueId GetIdentity() const;
+    GDX12Submission::TimelineId GetTimelineIdentity() const;
+    GDX12Submission::CompletionPoint GetLastCompletionPoint() const;
+    GDX12Submission::CompletionPoint SignalCompletion();
+    GDX12Submission::FenceProgress GetCompletionProgress() const;
+    GDX12Submission::FenceProgress GetCompletionProgress(GDX12Submission::TimelineId producer) const;
+    void WaitFor(const GDX12Submission::CompletionPoint& producer);
+    // Export requires a producer constructed with crossAdapterFence=true; handles never escape.
+    GDX12Submission::TimelineId ImportTimeline(GDX12CommandQueue& producer);
+
 
 	const ComPtr<ID3D12CommandQueue>& GetCommandQueue();
 	const ComPtr<ID3D12CommandQueue>& GetPresentCommandQueue();
@@ -32,13 +45,31 @@ public:
 	// Waits for all work submitted to the native queue, including presentation SDKs.
 	void Flush();
 
-	// Do I even need this?
+	// Legacy read-only observation for callers; external mutation is rejected on submission.
 	UINT64 FenceValue;
 
 private:
+    struct TimelineState
+    {
+        GDX12Submission::TimelineId Identity;
+        ComPtr<ID3D12Fence> Fence;
+        uint64_t IssuedValue = 0;
+        bool Active = true;
+        bool CrossAdapter = false;
+    };
+    struct ImportedTimeline
+    {
+        std::weak_ptr<TimelineState> Producer;
+        ComPtr<ID3D12Fence> Fence;
+    };
+    std::shared_ptr<TimelineState> _timeline;
+    std::vector<ImportedTimeline> _imports;
+    GDX12Submission::CompletionPoint _lastCompletion;
+    GDX12Submission::TimelineId _otherTimeline{};
+    uint64_t NextFenceValue() const;
+    ComPtr<ID3D12Fence> ResolveTimeline(GDX12Submission::TimelineId producer) const;
+    void ValidateCommandList(GDX12CommandList* list) const;
     D3D12_COMMAND_LIST_TYPE _type;
-	// We can probably make it work in a separate thread
-	//Imported PEPEngine::Utils::LockThreadQueue in case it helps
 	void ClearCompletedLists();
 
 	ComPtr<ID3D12CommandQueue> _commandQueue;

@@ -1,5 +1,9 @@
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.Core/Logging/Logger.h"
+#include <atomic>
+#include <exception>
+#include <limits>
+#include <stdexcept>
 
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
@@ -21,11 +25,16 @@ GDX12Device::GDX12Device() :
 
 GDX12Device::~GDX12Device()
 {
-    Reset();
+    try { Reset(); }
+    catch (const DxException& error) { OutputDebugStringW(error.ToString().c_str()); }
+    catch (const std::exception& error) { OutputDebugStringA(error.what()); }
+    catch (...) { OutputDebugStringA("GDX12Device shutdown failed; call Reset explicitly to observe errors.\n"); }
 }
 
 HRESULT GDX12Device::Initialize(ComPtr<IDXGIAdapter4> adapter)
 {
+    Reset();
+    if (!adapter) return E_INVALIDARG;
     HRESULT hr = E_FAIL;
     D3D_FEATURE_LEVEL testFeatureLevels[] = 
     {
@@ -57,6 +66,14 @@ HRESULT GDX12Device::Initialize(ComPtr<IDXGIAdapter4> adapter)
     allocatorDesc.pAdapter = _adapter.Get();
     ThrowIfFailed(D3D12MA::CreateAllocator(&allocatorDesc, &_allocator));
 
+    static std::atomic<uint64_t> nextAdapter{1};
+    auto identity = nextAdapter.load();
+    do
+    {
+        if (identity == (std::numeric_limits<uint64_t>::max)())
+            throw std::overflow_error("Submission adapter identities exhausted");
+    } while (!nextAdapter.compare_exchange_weak(identity, identity + 1));
+    _submissionAdapterId = GDX12Submission::AdapterId{identity};
     _commandQueue = std::make_unique<GDX12CommandQueue>(this);
 
     _isInitialized = true;
@@ -70,10 +87,10 @@ void GDX12Device::CollectDeviceFeatures()
     _dsvDescriptorSize = _device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
     _cbvSrvUavDescriptorSize = _device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-    _specs.Features.Init(_device.Get());
+    ThrowIfFailed(_specs.Features.Init(_device.Get()));
 
     DXGI_ADAPTER_DESC1 adapterDesc;
-    _adapter.Get()->GetDesc1(&adapterDesc);
+    ThrowIfFailed(_adapter->GetDesc1(&adapterDesc));
 
     _specs.Name = WStringToString(adapterDesc.Description);
     _specs.DedicatedVideoMemory = adapterDesc.DedicatedVideoMemory;
@@ -85,14 +102,25 @@ void GDX12Device::CollectDeviceFeatures()
 
 void GDX12Device::Reset()
 {
+    // Also invalidate externally owned export queues before releasing the native device.
+    std::exception_ptr failure;
+    while (!_submissionQueues.empty())
+    {
+        try { _submissionQueues.back()->Reset(); }
+        catch (...) { if (!failure) failure = std::current_exception(); }
+    }
+    _copyQueue.reset();
+    _copyQueueAttempted = false;
     _computeQueue.reset();
     _computeQueueAttempted = false;
+    _submissionAdapterId = GDX12Submission::AdapterId::Invalid;
     _commandQueue.reset();
     _allocator.Reset();
     _proxyDevice.Reset();
     _device.Reset();
     _adapter.Reset();
     _isInitialized = false;
+    if (failure) std::rethrow_exception(failure);
 }
 
 const ComPtr<ID3D12Device14>& GDX12Device::GetDevice()
@@ -112,17 +140,41 @@ GDX12CommandQueue* GDX12Device::GetCommandQueue()
 
 GDX12CommandQueue* GDX12Device::TryGetComputeQueue()
 {
+    if (!_isInitialized) throw std::logic_error("COMPUTE queue requires an initialized device");
     if (!_computeQueueAttempted)
     {
         _computeQueueAttempted = true;
         try { _computeQueue = std::make_unique<GDX12CommandQueue>(this, D3D12_COMMAND_LIST_TYPE_COMPUTE); }
-        catch (const DxException&)
+        catch (const DxException& error)
         {
             ThrowIfFailed(_device->GetDeviceRemovedReason());
-            Log::Warning("Renderer", "COMPUTE queue creation failed; using DIRECT particle simulation");
+            Log::Warning("Renderer", "COMPUTE queue unavailable: ", error.ToString(), "; using DIRECT particle simulation");
         }
     }
     return _computeQueue.get();
+}
+
+GDX12CommandQueue* GDX12Device::TryGetCopyQueue()
+{
+    if (!_isInitialized) throw std::logic_error("COPY queue requires an initialized device");
+    if (!_copyQueueAttempted)
+    {
+        _copyQueueAttempted = true;
+        try { _copyQueue = std::make_unique<GDX12CommandQueue>(this, D3D12_COMMAND_LIST_TYPE_COPY); }
+        catch (const DxException& error)
+        {
+            ThrowIfFailed(_device->GetDeviceRemovedReason());
+            Log::Warning("Renderer", "COPY queue unavailable: ", error.ToString(), "; using DIRECT copies");
+        }
+    }
+    return _copyQueue.get();
+}
+
+GDX12CommandQueue* GDX12Device::FindSubmissionQueue(GDX12Submission::TimelineId timeline) const
+{
+    for (auto* queue : _submissionQueues)
+        if (queue->GetTimelineIdentity() == timeline) return queue;
+    return nullptr;
 }
 
 const DeviceSpecs& GDX12Device::GetDeviceFeatures()
@@ -136,7 +188,7 @@ LUID GDX12Device::GetAdapterLuid() const
     if (!_adapter) { return luid; }
 
     DXGI_ADAPTER_DESC1 adapterDesc = {};
-    if (FAILED(_adapter->GetDesc1(&adapterDesc))) { return luid; }
+    ThrowIfFailed(_adapter->GetDesc1(&adapterDesc));
 
     return adapterDesc.AdapterLuid;
 }
