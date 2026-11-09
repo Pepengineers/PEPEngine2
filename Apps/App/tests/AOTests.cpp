@@ -7,8 +7,10 @@
 #include "Engine.Core/ConsoleModule.h"
 #include <d3d12sdklayers.h>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
+#include <exception>
 #include <iostream>
 #include <numeric>
 #include <stdexcept>
@@ -237,6 +239,10 @@ struct GDX12AOTestAccess
     static GDX12Texture& ReducedDepth(GDX12AmbientOcclusionPass& pass) { return pass._grids[1].Depth; }
     static GDX12Texture& ReducedNormals(GDX12AmbientOcclusionPass& pass) { return pass._grids[1].Normals; }
     static GDX12Texture& ReducedVisibility(GDX12AmbientOcclusionPass& pass) { return pass._grids[1].Visibility; }
+    static void CreateStorage(GDX12AmbientOcclusionPass& pass, GDX12Texture& texture, DXGI_FORMAT format, UINT width, UINT height)
+    { pass.CreateTexture(texture, format, width, height); }
+    static GDX12AmbientOcclusionPass::PlacedTexture Bind(GDX12Texture& texture)
+    { return GDX12AmbientOcclusionPass::BindTexture(texture); }
 };
 
 static void CheckReducedGrid(GDX12Device& device, GDX12AmbientOcclusionPass& pass, GDX12Texture& fullDepth)
@@ -285,6 +291,164 @@ static void CheckDebug(ID3D12InfoQueue* info)
         }
     }
     info->ClearStoredMessages();
+}
+
+// Emulate the executor's boundary transitions while keeping this fixture independent of P4.
+static void RecordPlacedAO(GDX12AmbientOcclusionPass& ao, GDX12CommandList* commands,
+    const GDX12AmbientOcclusionPass::PlacedSlot& slot)
+{
+    auto* native = commands->GetCommandList().Get();
+    const auto& accesses = ao.GetPlacedAccesses(slot);
+    for (const auto& access : accesses)
+    {
+        Require(access.Resource->GetCurrentState() == D3D12_RESOURCE_STATE_COMMON, "AO input did not enter at COMMON");
+        const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(access.Native.Get(), D3D12_RESOURCE_STATE_COMMON, access.State);
+        native->ResourceBarrier(1, &barrier);
+    }
+    ao.RecordPlacedSlot(commands, slot);
+    for (const auto& access : accesses)
+    {
+        Require(access.Resource->GetCurrentState() == D3D12_RESOURCE_STATE_COMMON, "AO recorder mutated a boundary tracker");
+        const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(access.Native.Get(), access.State, D3D12_RESOURCE_STATE_COMMON);
+        native->ResourceBarrier(1, &barrier);
+    }
+}
+
+template<class RunLocal>
+static void CheckPlacedAO(GDX12DeviceResources& resources, RenderPipelineCommonData& common, GDX12AmbientOcclusionPass& ao,
+    GDX12Texture& depth, GDX12Texture& normals, GDX12CommandQueue& direct, GDX12CommandQueue& compute,
+    ID3D12InfoQueue* info, const RunLocal& runLocal)
+{
+    using AO = GDX12AmbientOcclusionPass;
+    const auto previous = GetAmbientOcclusionSettings();
+    const UINT width = depth.GetWidth(), height = depth.GetHeight();
+    for (const bool half : { false, true })
+    {
+        const auto resolution = half ? GDX12AOResolution::Half : GDX12AOResolution::Full;
+        const UINT workingWidth = half ? (width + 1) / 2 : width;
+        const UINT workingHeight = half ? (height + 1) / 2 : height;
+        const auto pack = ao.CreatePlacedSlot(AO::PlacedStage::Pack, width, height, resolution);
+        const auto evaluate = ao.CreatePlacedSlot(AO::PlacedStage::Evaluate, width, height, resolution);
+        const auto finalize = ao.CreatePlacedSlot(AO::PlacedStage::Finalize, width, height, resolution);
+        struct TypedPair { GDX12Texture Depth, Normals; };
+        std::array<TypedPair, 2> pairs;
+        GDX12Texture visibility, output;
+        for (auto& pair : pairs)
+        {
+            GDX12AOTestAccess::CreateStorage(ao, pair.Depth, DXGI_FORMAT_R32_FLOAT, workingWidth, workingHeight);
+            GDX12AOTestAccess::CreateStorage(ao, pair.Normals, DXGI_FORMAT_R16G16B16A16_FLOAT, workingWidth, workingHeight);
+        }
+        Require(pairs[0].Depth.GetResource()->D3DResource.Get() != pairs[1].Depth.GetResource()->D3DResource.Get() &&
+            pairs[0].Normals.GetResource()->D3DResource.Get() != pairs[1].Normals.GetResource()->D3DResource.Get(),
+            "CACAO rebind fixture requires different native depth and normal views");
+        GDX12AOTestAccess::CreateStorage(ao, visibility, DXGI_FORMAT_R32_FLOAT, workingWidth, workingHeight);
+        GDX12AOTestAccess::CreateStorage(ao, output, DXGI_FORMAT_R32_FLOAT, width, height);
+        const auto inputs = [&](TypedPair& pair)
+        {
+            return AO::PlacedInputs{ GDX12AOTestAccess::Bind(depth), GDX12AOTestAccess::Bind(normals),
+                GDX12AOTestAccess::Bind(pair.Depth), GDX12AOTestAccess::Bind(pair.Normals),
+                GDX12AOTestAccess::Bind(visibility), GDX12AOTestAccess::Bind(output) };
+        };
+        FillFixture(resources, common, depth, normals, 1, 0.375f, -0.25f);
+        std::vector<float> firstCacao;
+        for (int test = 0; test < 5; ++test)
+        {
+            const bool rebound = test == 4;
+            const int algorithm = rebound ? 3 : test;
+            if (rebound) FillFixture(resources, common, depth, normals, 2, -0.375f, 0.25f);
+            Set(L"Render.AO.Enabled", "1");
+            Set(L"Render.AO.Resolution", half ? "1" : "0");
+            Set(L"Render.AO.Implementation", std::to_string(algorithm));
+            Set(L"Render.AO.Quality", "2");
+            Set(L"Render.AO.Intensity", "1");
+            const auto reference = runLocal(false);
+            const auto frame = ao.CaptureFrameInput();
+            const auto bound = inputs(pairs[rebound]);
+            ao.PreparePlacedSlot(pack, frame, bound);
+            ao.PreparePlacedSlot(evaluate, frame, bound);
+            ao.PreparePlacedSlot(finalize, frame, bound);
+
+            Set(L"Render.AO.Resolution", half ? "0" : "1");
+            Set(L"Render.AO.Implementation", std::to_string((algorithm + 1) % 4));
+            Set(L"Render.AO.Quality", "0");
+            Set(L"Render.AO.Intensity", "0");
+
+            auto* packCommands = direct.GetCommandList();
+            packCommands->ResourceBarrier({ depth.GetResource()->GetCommonBarrier(), normals.GetResource()->GetCommonBarrier() });
+            RecordPlacedAO(ao, packCommands, *pack);
+            direct.ExecuteCommandList(packCommands);
+            direct.Flush();
+
+            const bool lifetimeCheck = algorithm == 3 && !rebound;
+            if (lifetimeCheck)
+            {
+                const auto before = compute.GetLastCompletionPoint();
+                const auto directBefore = direct.GetLastCompletionPoint();
+                GDX12CommandList discardedDirect(resources.Device, D3D12_COMMAND_LIST_TYPE_DIRECT);
+                RecordPlacedAO(ao, &discardedDirect, *pack);
+                RecordPlacedAO(ao, &discardedDirect, *finalize);
+                ThrowIfFailed(discardedDirect.GetCommandList()->Close());
+                GDX12CommandList discarded(resources.Device, D3D12_COMMAND_LIST_TYPE_COMPUTE);
+                RecordPlacedAO(ao, &discarded, *evaluate);
+                ThrowIfFailed(discarded.GetCommandList()->Close());
+                Require(compute.GetLastCompletionPoint().Value() == before.Value() &&
+                    direct.GetLastCompletionPoint().Value() == directBefore.Value(), "Discarded AO recording submitted native work");
+            }
+            auto* evaluateCommands = compute.GetCommandList();
+            RecordPlacedAO(ao, evaluateCommands, *evaluate);
+            if (lifetimeCheck)
+            {
+                const auto retained = evaluate;
+                ComPtr<ID3D12Fence> gate;
+                ThrowIfFailed(resources.Device->GetDevice()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&gate)));
+                ThrowIfFailed(compute.GetCommandQueue()->Wait(gate.Get(), 1));
+                std::exception_ptr failure;
+                GDX12Submission::CompletionPoint pending;
+                try
+                {
+                    compute.ExecuteCommandList(evaluateCommands);
+                    pending = compute.GetLastCompletionPoint();
+                    Require(pending.IsValid() && !pending.IsReachedBy(compute.GetCompletionProgress()), "AO gate did not hold the slot in flight");
+                    bool rejected = false;
+                    try { ao.PreparePlacedSlot(evaluate, frame, inputs(pairs[1])); }
+                    catch (const std::invalid_argument&) { rejected = true; }
+                    Require(rejected, "Retained AO slot accepted a second input binding");
+                }
+                catch (...) { failure = std::current_exception(); }
+                ThrowIfFailed(gate->Signal(1));
+                compute.Flush();
+                if (failure) std::rethrow_exception(failure);
+                Require(pending.IsReachedBy(compute.GetCompletionProgress()), "AO slot did not retire before reuse");
+            }
+            else
+            {
+                compute.ExecuteCommandList(evaluateCommands);
+                compute.Flush();
+            }
+
+            auto* finalizeCommands = direct.GetCommandList();
+            RecordPlacedAO(ao, finalizeCommands, *finalize);
+            direct.ExecuteCommandList(finalizeCommands);
+            direct.Flush();
+            const auto placed = Readback(*resources.Device, output);
+            Require(placed.size() == reference.size(), "Placed AO changed the lighting grid");
+            float maxError = 0;
+            for (size_t i = 0; i < reference.size(); ++i)
+                maxError = (std::max)(maxError, std::abs(reference[i] - placed[i]));
+            std::cout << "Placed AO algorithm=" << algorithm << " half=" << half << " rebound=" << rebound
+                << " maxError=" << maxError << '\n';
+            Require(maxError <= 1e-5f, "Placed AO differs from its local reference");
+            if (lifetimeCheck) firstCacao = placed;
+            if (rebound) Require(placed != firstCacao, "Rebound CACAO fixture did not change the visibility");
+            CheckDebug(info);
+        }
+    }
+    Set(L"Render.AO.Enabled", std::to_string(previous.Enabled));
+    Set(L"Render.AO.Resolution", std::to_string(static_cast<int>(previous.Resolution)));
+    Set(L"Render.AO.Implementation", std::to_string(previous.Implementation));
+    Set(L"Render.AO.Quality", std::to_string(previous.Quality));
+    Set(L"Render.AO.Intensity", std::to_string(previous.Intensity));
+    std::cout << "Placed AO snapshot, cancellation, held slot, retirement and CACAO rebind passed\n";
 }
 
 static void CheckHDR(GDX12DeviceResources& resources)
@@ -683,6 +847,7 @@ int main(int argc, char** argv)
         }
         Set(L"Render.AO.Intensity", "1");
         std::cout << "Queued Full/Half frame-slot readbacks match isolated results for all implementations\n";
+        CheckPlacedAO(resources, common, ao, depth, normals, *queue, *compute, info.Get(), run);
         Set(L"Render.AO.Resolution", "1");
         Set(L"Render.AO.AsyncCompute", "true");
         auto* pendingResize = graph.Execute(queue->GetCommandList(), compute);

@@ -92,6 +92,14 @@ void PrepareNormalsCS(uint3 id : SV_DispatchThreadID)
 }
 
 [numthreads(8, 8, 1)]
+void PackFullCS(uint3 id : SV_DispatchThreadID)
+{
+    if (!InBounds(id.xy)) return;
+    PreparedDepth[id.xy] = Depth[id.xy];
+    PreparedNormals[id.xy] = float4(ViewNormal(Normals[id.xy].xyz) * 0.5f + 0.5f, 1);
+}
+
+[numthreads(8, 8, 1)]
 void PrepareHalfCS(uint3 id : SV_DispatchThreadID)
 {
     uint w, h;

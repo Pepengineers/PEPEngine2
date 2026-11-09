@@ -180,6 +180,9 @@ extern "C"
 	*/
 	FFX_CACAO_Status FFX_CACAO_D3D12InitScreenSizeDependentResources(FFX_CACAO_D3D12Context* context, const FFX_CACAO_D3D12ScreenSizeInfo* info);
 
+	// Call only after all recorded work using the old views has retired. The screen layout must match.
+	FFX_CACAO_Status FFX_CACAO_D3D12RebindPlacedViews(FFX_CACAO_D3D12Context* context, const FFX_CACAO_D3D12ScreenSizeInfo* info);
+
 	/**
 		Destroys screen size dependent resources for the FFX_CACAO_D3D12Context.
 

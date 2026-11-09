@@ -1241,6 +1241,7 @@ static void textureCreateUavFromDesc(Texture* texture, uint32_t index, CbvSrvUav
 struct FFX_CACAO_D3D12Context {
 	FFX_CACAO_Settings   settings;
 	FFX_CACAO_Bool       useDownsampledSsao;
+	bool screenReady;
 
 	ID3D12Device      *device;
 	CbvSrvUavHeap      cbvSrvUavHeap;
@@ -1388,6 +1389,7 @@ error_create_ ## entryPoint:
 	FFX_CACAO_Status errorStatus = FFX_CACAO_STATUS_FAILED;
 
 	context->device = device;
+	context->screenReady = false;
 	CbvSrvUavHeap *cbvSrvUavHeap = &context->cbvSrvUavHeap;
 	errorStatus = cbvSrvUavHeapInit(cbvSrvUavHeap, device, 512);
 	if (errorStatus)
@@ -1661,6 +1663,50 @@ FFX_CACAO_Status FFX_CACAO_D3D12DestroyContext(FFX_CACAO_D3D12Context* context)
 	return FFX_CACAO_STATUS_OK;
 }
 
+static void bindD3D12ScreenViews(FFX_CACAO_D3D12Context* context, const FFX_CACAO_D3D12ScreenSizeInfo* info)
+{
+	context->outputResource = info->outputResource;
+	ID3D12Device* device = context->device;
+	D3D12_CPU_DESCRIPTOR_HANDLE descriptor;
+	// depth buffer input
+	descriptor = context->inputDescriptors[DS_PREPARE_DEPTHS].cpuDescriptor;
+	device->CreateShaderResourceView(info->depthBufferResource, &info->depthBufferSrvDesc, descriptor);
+
+	descriptor = context->inputDescriptors[DS_PREPARE_DEPTHS_MIPS].cpuDescriptor;
+	device->CreateShaderResourceView(info->depthBufferResource, &info->depthBufferSrvDesc, descriptor);
+
+	descriptor = context->inputDescriptors[DS_PREPARE_NORMALS].cpuDescriptor;
+	device->CreateShaderResourceView(info->depthBufferResource, &info->depthBufferSrvDesc, descriptor);
+
+	descriptor = context->inputDescriptors[DS_BILATERAL_UPSAMPLE_PING].cpuDescriptor;
+	descriptor.ptr += context->cbvSrvUavHeap.descriptorElementSize;
+	device->CreateShaderResourceView(info->depthBufferResource, &info->depthBufferSrvDesc, descriptor);
+
+	descriptor = context->inputDescriptors[DS_BILATERAL_UPSAMPLE_PONG].cpuDescriptor;
+	descriptor.ptr += context->cbvSrvUavHeap.descriptorElementSize;
+	device->CreateShaderResourceView(info->depthBufferResource, &info->depthBufferSrvDesc, descriptor);
+
+	// normal buffer input
+	if (info->normalBufferResource)
+	{
+		descriptor = context->inputDescriptors[DS_PREPARE_NORMALS_FROM_INPUT_NORMALS].cpuDescriptor;
+		device->CreateShaderResourceView(info->normalBufferResource, &info->normalBufferSrvDesc, descriptor);
+	}
+
+	// ssao buffer output
+	descriptor = context->outputDescriptors[DS_BILATERAL_UPSAMPLE_PING].cpuDescriptor;
+	device->CreateUnorderedAccessView(info->outputResource, NULL, &info->outputUavDesc, descriptor);
+
+	descriptor = context->outputDescriptors[DS_BILATERAL_UPSAMPLE_PONG].cpuDescriptor;
+	device->CreateUnorderedAccessView(info->outputResource, NULL, &info->outputUavDesc, descriptor);
+
+	descriptor = context->outputDescriptors[DS_APPLY_PING].cpuDescriptor;
+	device->CreateUnorderedAccessView(info->outputResource, NULL, &info->outputUavDesc, descriptor);
+
+	descriptor = context->outputDescriptors[DS_APPLY_PONG].cpuDescriptor;
+	device->CreateUnorderedAccessView(info->outputResource, NULL, &info->outputUavDesc, descriptor);
+}
+
 FFX_CACAO_Status FFX_CACAO_D3D12InitScreenSizeDependentResources(FFX_CACAO_D3D12Context* context, const FFX_CACAO_D3D12ScreenSizeInfo* info)
 {
 	if (context == NULL)
@@ -1685,11 +1731,6 @@ FFX_CACAO_Status FFX_CACAO_D3D12InitScreenSizeDependentResources(FFX_CACAO_D3D12
 
 	FFX_CACAO_BufferSizeInfo *bsi = &context->bufferSizeInfo;
 	FFX_CACAO_UpdateBufferSizeInfo(info->width, info->height, useDownsampledSsao, bsi);
-
-	// =======================================
-	// Init debug SRVs/UAVs
-
-	context->outputResource = info->outputResource;
 
 	// =======================================
 	// Init textures
@@ -1781,44 +1822,6 @@ FFX_CACAO_Status FFX_CACAO_D3D12InitScreenSizeDependentResources(FFX_CACAO_D3D12
 	{
 		D3D12_CPU_DESCRIPTOR_HANDLE descriptor;
 		
-		// depth buffer input
-		descriptor = context->inputDescriptors[DS_PREPARE_DEPTHS].cpuDescriptor;
-		device->CreateShaderResourceView(info->depthBufferResource, &info->depthBufferSrvDesc, descriptor);
-
-		descriptor = context->inputDescriptors[DS_PREPARE_DEPTHS_MIPS].cpuDescriptor;
-		device->CreateShaderResourceView(info->depthBufferResource, &info->depthBufferSrvDesc, descriptor);
-
-		descriptor = context->inputDescriptors[DS_PREPARE_NORMALS].cpuDescriptor;
-		device->CreateShaderResourceView(info->depthBufferResource, &info->depthBufferSrvDesc, descriptor);
-
-		descriptor = context->inputDescriptors[DS_BILATERAL_UPSAMPLE_PING].cpuDescriptor;
-		descriptor.ptr += context->cbvSrvUavHeap.descriptorElementSize;
-		device->CreateShaderResourceView(info->depthBufferResource, &info->depthBufferSrvDesc, descriptor);
-
-		descriptor = context->inputDescriptors[DS_BILATERAL_UPSAMPLE_PONG].cpuDescriptor;
-		descriptor.ptr += context->cbvSrvUavHeap.descriptorElementSize;
-		device->CreateShaderResourceView(info->depthBufferResource, &info->depthBufferSrvDesc, descriptor);
-
-		// normal buffer input
-		if (info->normalBufferResource)
-		{
-			descriptor = context->inputDescriptors[DS_PREPARE_NORMALS_FROM_INPUT_NORMALS].cpuDescriptor;
-			device->CreateShaderResourceView(info->normalBufferResource, &info->normalBufferSrvDesc, descriptor);
-		}
-
-		// ssao buffer output
-		descriptor = context->outputDescriptors[DS_BILATERAL_UPSAMPLE_PING].cpuDescriptor;
-		device->CreateUnorderedAccessView(info->outputResource, NULL, &info->outputUavDesc, descriptor);
-
-		descriptor = context->outputDescriptors[DS_BILATERAL_UPSAMPLE_PONG].cpuDescriptor;
-		device->CreateUnorderedAccessView(info->outputResource, NULL, &info->outputUavDesc, descriptor);
-
-		descriptor = context->outputDescriptors[DS_APPLY_PING].cpuDescriptor;
-		device->CreateUnorderedAccessView(info->outputResource, NULL, &info->outputUavDesc, descriptor);
-
-		descriptor = context->outputDescriptors[DS_APPLY_PONG].cpuDescriptor;
-		device->CreateUnorderedAccessView(info->outputResource, NULL, &info->outputUavDesc, descriptor);
-
 		// load counter input
 		D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
 		srvDesc.Format = context->loadCounter.format;
@@ -1848,6 +1851,8 @@ FFX_CACAO_Status FFX_CACAO_D3D12InitScreenSizeDependentResources(FFX_CACAO_D3D12
 		device->CreateUnorderedAccessView(context->loadCounter.resource, NULL, &uavDesc, descriptor);
 	}
 
+	bindD3D12ScreenViews(context, info);
+	context->screenReady = true;
 
 	return FFX_CACAO_STATUS_OK;
 
@@ -1858,6 +1863,20 @@ error_init_textures:
 	}
 
 	return errorStatus;
+}
+
+FFX_CACAO_Status FFX_CACAO_D3D12RebindPlacedViews(FFX_CACAO_D3D12Context* context, const FFX_CACAO_D3D12ScreenSizeInfo* info)
+{
+	if (!context || !info || !info->depthBufferResource || !info->normalBufferResource || !info->outputResource)
+		return FFX_CACAO_STATUS_INVALID_POINTER;
+	context = getAlignedD3D12ContextPointer(context);
+	if (!context->screenReady ||
+		info->width != context->bufferSizeInfo.inputOutputBufferWidth ||
+		info->height != context->bufferSizeInfo.inputOutputBufferHeight ||
+		info->useDownsampledSsao != context->useDownsampledSsao)
+		return FFX_CACAO_STATUS_INVALID_ARGUMENT;
+	bindD3D12ScreenViews(context, info);
+	return FFX_CACAO_STATUS_OK;
 }
 
 FFX_CACAO_Status FFX_CACAO_D3D12DestroyScreenSizeDependentResources(FFX_CACAO_D3D12Context* context)
@@ -1873,6 +1892,8 @@ FFX_CACAO_Status FFX_CACAO_D3D12DestroyScreenSizeDependentResources(FFX_CACAO_D3
 		context->textures[i]->Release();
 	}
 
+	context->screenReady = false;
+	context->outputResource = NULL;
 	return FFX_CACAO_STATUS_OK;
 }
 
