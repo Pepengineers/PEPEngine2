@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="App.vcxproj" />
+  <Import Project="..\..\MSBuild\Props\PEPEngine.External.ImGui.props" />
+  <PropertyGroup>
+    <ProjectGuid>{55196680-5228-453D-9A04-EE9410B38D19}</ProjectGuid>
+  </PropertyGroup>
+  <ItemGroup>
+    <ClCompile Remove="src\App.cpp" />
+    <ClCompile Include="..\..\Engine\Engine.UI\src\WorldCanvas.cpp" />
+    <ClCompile Include="..\..\Engine\Engine.UI\tests\WorldCanvasTests.cpp" />
+  </ItemGroup>
+  <ItemDefinitionGroup>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+</Project>
