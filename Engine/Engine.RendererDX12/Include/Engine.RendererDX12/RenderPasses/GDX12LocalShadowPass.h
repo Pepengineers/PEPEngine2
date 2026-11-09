@@ -96,11 +96,14 @@ public:
     void Prepare()
     {
         if (_prepared) return;
-        _compactDynamic = !_staticOnly && _resources->LocalShadowCasters.has_value();
-        if (_resources->LocalShadowCasters && _resources->LocalShadowVisibility.size() != _resources->LocalLights.size())
+        const bool perFaceVisibility = _resources->LocalShadowCasters.has_value();
+        _compactDynamic = !_staticOnly && perFaceVisibility;
+        _preparedSceneRevision = _compactDynamic ? _resources->GeometryRevision : _resources->ReflectionStaticRevision;
+        _preparedFallbackDynamicRevision = !_staticOnly && !perFaceVisibility ? _resources->ReflectionDynamicRevision : 0;
+        if (perFaceVisibility && _resources->LocalShadowVisibility.size() != _resources->LocalLights.size())
             throw std::logic_error("Prepare shadow visibility before rendering local shadows");
         if (_staticShadows) _staticShadows->Prepare();
-        if (!_resources->LocalShadowCasters && (_staticRevision != _resources->ReflectionStaticRevision ||
+        if (!perFaceVisibility && (_staticRevision != _resources->ReflectionStaticRevision ||
             (!_staticOnly && _dynamicRevision != _resources->ReflectionDynamicRevision)))
         {
             _cached.clear();
@@ -131,7 +134,7 @@ public:
             auto cacheKey = light;
             if (_staticOnly) cacheKey.ShadowFlags &= ~2u;
             std::array<uint64_t, 6> casters = {};
-            if (_resources->LocalShadowCasters)
+            if (perFaceVisibility)
             {
                 const auto& visible = _resources->LocalShadowVisibility[lightIndex];
                 casters = _staticOnly ? visible.StaticCasters : visible.AllCasters;
@@ -156,6 +159,21 @@ public:
             }
         }
         _prepared = true;
+    }
+
+    std::vector<GDX12ShadowOutput> DescribePreparedShadows(const GDX12ShadowSelection& selection) const
+    {
+        std::vector<GDX12ShadowOutput> result;
+        if (!_prepared || selection.Scope == GDX12ShadowSelection::Mode::Sun) return result;
+        for (const auto& prepared : _preparedCache)
+        {
+            if (!prepared || (prepared->Light.ShadowFlags & 1u) == 0u ||
+                !selection.IncludesLocal(GetLocalShadowKey(prepared->Light))) continue;
+            auto casters = prepared->Casters;
+            if (!_staticOnly && !_compactDynamic) casters.fill(_preparedFallbackDynamicRevision);
+            result.push_back(BuildLocalShadowOutput(prepared->Light, casters, _preparedSceneRevision, _staticOnly));
+        }
+        return result;
     }
 
     UINT GetGeometryViewCapacity() const override
@@ -231,7 +249,7 @@ public:
                 const auto [lightIndex, face] = _viewFaces[slot];
                 const auto& light = _preparedCache[lightIndex]->Light;
                 commands->ResourceBarrier({ _maps->GetResource()->GetDepthWriteBarrier() });
-                commands->GetCommandList()->ClearDepthStencilView(_dsvs[light.ShadowFirstSlice + face]->CPUHandle,
+                commands->GetCommandList()->ClearDepthStencilView(_dsvs[LocalShadowRegion(light, face).Slice]->CPUHandle,
                     D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
             }
         }
@@ -253,7 +271,7 @@ public:
         commands->ResourceBarrier({ _maps->GetResource()->GetDepthWriteBarrier() });
         commands->SetViewport({ 0, 0, static_cast<float>(LocalShadowResolution), static_cast<float>(LocalShadowResolution), 0, 1 });
         commands->SetScissorRect({ 0, 0, LocalShadowResolution, LocalShadowResolution });
-        const auto dsv = _dsvs[light.ShadowFirstSlice + face]->CPUHandle;
+        const auto dsv = _dsvs[LocalShadowRegion(light, face).Slice]->CPUHandle;
         commands->GetCommandList()->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
     }
 
@@ -389,7 +407,7 @@ private:
                 for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
                 {
                     if ((_dirtyFaces[lightIndex] & (1u << face)) == 0) continue;
-                    const UINT slice = light.ShadowFirstSlice + face;
+                    const UINT slice = LocalShadowRegion(light, face).Slice;
                     const CD3DX12_TEXTURE_COPY_LOCATION src(source->D3DResource.Get(), slice);
                     const CD3DX12_TEXTURE_COPY_LOCATION dst(target->D3DResource.Get(), slice);
                     commands->GetCommandList()->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
@@ -476,6 +494,8 @@ private:
     ComPtr<ID3D12CommandSignature> _signature;
     uint64_t _staticRevision = 0;
     uint64_t _dynamicRevision = 0;
+    uint64_t _preparedSceneRevision = 0;
+    uint64_t _preparedFallbackDynamicRevision = 0;
     bool _staticOnly = false;
     bool _compactDynamic = false;
     UINT _sliceCount = 0;

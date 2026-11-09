@@ -1,4 +1,5 @@
 #pragma once
+#include <atomic>
 #include <cstdint>
 #include "Engine.Core/ECS/Component.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
@@ -20,4 +21,20 @@ struct LightComponent : ComponentTag
     uint32_t ShadowRevision = 1;
 
     void InvalidateShadow() { ++ShadowRevision; }
+    uint64_t GetShadowGeneration() const { return _shadowLifetime.Generation; }
+
+private:
+    struct ShadowLifetime
+    {
+        ShadowLifetime() = default;
+        ShadowLifetime(const ShadowLifetime&) : ShadowLifetime() {}
+        ShadowLifetime& operator=(const ShadowLifetime&) { return *this; }
+        // Dense pool moves relocate an existing light.
+        ShadowLifetime(ShadowLifetime&&) noexcept = default;
+        ShadowLifetime& operator=(ShadowLifetime&&) noexcept = default;
+
+        uint64_t Generation = NextGeneration.fetch_add(1, std::memory_order_relaxed);
+        inline static std::atomic<uint64_t> NextGeneration = 1;
+    };
+    ShadowLifetime _shadowLifetime;
 };

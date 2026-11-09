@@ -471,8 +471,9 @@ int main(int argc, char** argv)
         draw.InstanceCount = 1;
         resources.IndirectCommandsCache->CopyData(0, draw);
         const Matrix view = Matrix::CreateLookAt(Vector3(0, 300, -400), Vector3::Zero, Vector3::UnitY);
-        frame->ShadowCB->CopyData(0, BuildShadowCascades(view.Invert(), XMConvertToRadians(60.0f), 1.0f,
-            0.1f, 10000.0f, Vector3(0.35f, -1.0f, 0.25f)));
+        resources.ShadowSettings = BuildShadowCascades(view.Invert(), XMConvertToRadians(60.0f), 1.0f,
+            0.1f, 10000.0f, Vector3(0.35f, -1.0f, 0.25f));
+        frame->ShadowCB->CopyData(0, resources.ShadowSettings);
         const UINT textureSlot = resources.SRV_UAV_Heap->GetAvailableIndex(Texture2D_StartIndex, Texture2D_RangeLength);
         GDX12Texture white;
         GDX12TextureDesc whiteDesc;
@@ -498,6 +499,12 @@ int main(int argc, char** argv)
         resources.PrepareLocalShadowData();
         resources.UploadLocalShadowData(commands);
         resources.IndirectCommandsCache->CopyData(0, GDX12IndirectDrawArgs{});
+        shadows.Prepare();
+        const auto sunOutput = shadows.DescribePreparedShadow({ GDX12ShadowSelection::Mode::Sun, {} });
+        Require(sunOutput && sunOutput->ViewCount() == 4 &&
+            sunOutput->SplitDepths.w == resources.ShadowSettings.SplitDepths.w &&
+            !shadows.DescribePreparedShadow({ GDX12ShadowSelection::Mode::AllLocal, {} }),
+            "Prepared sun must describe its full cascade group only when selected");
         shadows.Execute(commands);
         queue->ExecuteCommandList(commands);
         queue->Flush();
@@ -509,10 +516,12 @@ int main(int argc, char** argv)
         point.EntityId = 1;
         point.ShadowFirstSlice = 0;
         point.ShadowFlags = 1;
+        SetLocalShadowGeneration(point, 10);
         BuildLocalLightShadowMatrices(point);
         GDX12LocalLightConstants spot = point;
         spot.Type = 2;
         spot.EntityId = 2;
+        SetLocalShadowGeneration(spot, 20);
         spot.ShadowFirstSlice = 6;
         spot.Position.y = 30;
         BuildLocalLightShadowMatrices(spot);
@@ -543,6 +552,27 @@ int main(int argc, char** argv)
             auto casterSnapshot = fullScan ? std::move(resources.LocalShadowCasters) : std::nullopt;
             if (fullScan) resources.LocalShadowCasters.reset();
             localShadows.Prepare();
+            const auto outputs = localShadows.DescribePreparedShadows({});
+            size_t outputIndex = 0;
+            for (const auto* light : { &point, &spot })
+            {
+                const auto selected = localShadows.DescribePreparedShadows(
+                    { GDX12ShadowSelection::Mode::SpecificLight, GetLocalShadowKey(*light) });
+                if (light->ShadowFirstSlice == UINT_MAX)
+                {
+                    Require(selected.empty(), "Unshadowed lights must not have prepared output");
+                    continue;
+                }
+                Require(outputIndex < outputs.size() && selected.size() == 1 &&
+                    selected[0].ViewCount() == LocalShadowFaceCount(*light) &&
+                    selected[0].Views[0].Region.Slice == light->ShadowFirstSlice &&
+                    selected[0].MatchesDepthInputs(outputs[outputIndex]),
+                    "Prepared local outputs must preserve the selected light and all of its faces");
+                ++outputIndex;
+            }
+            Require(outputIndex == outputs.size() &&
+                localShadows.DescribePreparedShadows({ GDX12ShadowSelection::Mode::Sun, {} }).empty(),
+                "Prepared local outputs must exclude unshadowed and unselected lights");
             if (fullScan) resources.LocalShadowCasters = std::move(casterSnapshot);
             auto visibilitySnapshot = std::move(resources.LocalShadowVisibility);
             localShadows.Execute(list);
@@ -559,6 +589,10 @@ int main(int argc, char** argv)
         Require(localShadows.GetLastFrameRenderedViews() == 0, "Cached shadows must skip rendering on unchanged frames");
         CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true);
         CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 6, false, true);
+        SetLocalShadowGeneration(point, 11);
+        updateLocal();
+        Require(localShadows.GetLastFrameRenderedViews() == 6 && localShadows.GetLastFrameStaticRenderedViews() == 6,
+            "Recreating a point light in the same slot must replace both cached layers");
         spot.Position.x += 2;
         BuildLocalLightShadowMatrices(spot);
         updateLocal();

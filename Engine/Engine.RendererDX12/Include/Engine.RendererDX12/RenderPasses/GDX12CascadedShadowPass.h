@@ -1,10 +1,12 @@
 #pragma once
 #include "Engine.RendererDX12/GDX12InstanceBatcher.h"
+#include "Engine.RendererDX12/GDX12LocalLights.h"
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GeometryViewPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <array>
 #include <cstring>
+#include <optional>
 
 class GDX12CascadedShadowPass final : public GDX12GeometryViewPass
 {
@@ -32,7 +34,7 @@ public:
     void Initialize() override
     {
         GDX12TextureDesc texture;
-        texture.Width = texture.Height = 4096;
+        texture.Width = texture.Height = 2 * SunShadowCascadeResolution;
         texture.Format = texture.DSVDesc.Format = DXGI_FORMAT_D32_FLOAT;
         texture.SRVDesc.Format = DXGI_FORMAT_R32_FLOAT;
         texture.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -45,7 +47,7 @@ public:
         texture.DSVHeapIndex = texture.DSVHeap->GetAvailableIndex();
         texture.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
         texture.ClearValue = { 1, 0, 0, 0 };
-        const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, 4096, 4096,
+        const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, texture.Width, texture.Height,
             1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
         D3D12_CLEAR_VALUE clear = {};
         clear.Format = DXGI_FORMAT_D32_FLOAT;
@@ -107,8 +109,9 @@ public:
     {
         if (_prepared) return;
         const auto& lighting = _resources->Lighting;
-        _updating = (lighting.SunShadowFlags & 1u) != 0u &&
-            ((lighting.SunShadowFlags & 2u) != 0u || !_rendered ||
+        _preparedFlags = lighting.SunShadowFlags;
+        _updating = (_preparedFlags & 1u) != 0u &&
+            ((_preparedFlags & 2u) != 0u || !_rendered ||
                 _cachedGeometryRevision != _resources->GeometryRevision || _cachedRevision != lighting.SunShadowRevision ||
                 std::memcmp(&_cachedSettings, &_resources->ShadowSettings, sizeof(_cachedSettings)) != 0);
         if (_updating)
@@ -127,6 +130,13 @@ public:
             }
         }
         _prepared = true;
+    }
+
+    std::optional<GDX12ShadowOutput> DescribePreparedShadow(const GDX12ShadowSelection& selection) const
+    {
+        if (!_prepared || !selection.IncludesSun() || (_preparedFlags & 1u) == 0u)
+            return std::nullopt;
+        return BuildSunShadowOutput(_preparedSettings, _preparedRevision, _preparedGeometryRevision, (_preparedFlags & 2u) != 0u);
     }
 
     UINT GetGeometryViewCapacity() const override { return 4; }
@@ -197,10 +207,11 @@ public:
         commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
         commands->ResourceBarrier({ _atlas->GetResource()->GetDepthWriteBarrier() });
         commands->SetRenderTargets({}, _atlas.get());
-        const UINT x = (cascade & 1u) * 2048;
-        const UINT y = (cascade >> 1u) * 2048;
-        commands->SetViewport({ static_cast<float>(x), static_cast<float>(y), 2048.0f, 2048.0f, 0.0f, 1.0f });
-        commands->SetScissorRect({ static_cast<LONG>(x), static_cast<LONG>(y), static_cast<LONG>(x + 2048), static_cast<LONG>(y + 2048) });
+        const auto region = SunShadowRegion(cascade);
+        commands->SetViewport({ static_cast<float>(region.X), static_cast<float>(region.Y),
+            static_cast<float>(region.Width), static_cast<float>(region.Height), 0.0f, 1.0f });
+        commands->SetScissorRect({ static_cast<LONG>(region.X), static_cast<LONG>(region.Y),
+            static_cast<LONG>(region.X + region.Width), static_cast<LONG>(region.Y + region.Height) });
     }
 
     void ExecuteGeometryView(GDX12CommandList* commands, UINT cascade) override
@@ -277,6 +288,7 @@ private:
     GDX12ShadowConstants _preparedSettings;
     uint64_t _preparedGeometryRevision = 0;
     UINT _preparedRevision = 0;
+    UINT _preparedFlags = 0;
     bool _atlasNeedsClear = true;
     template<typename T>
     std::unique_ptr<GDX12UploadBuffer<T>> CreateBuffer(UINT count)

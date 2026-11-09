@@ -6,6 +6,128 @@
 #include <array>
 
 inline constexpr UINT LocalShadowResolution = 256;
+inline constexpr UINT SunShadowCascadeResolution = 2048;
+
+struct GDX12LocalShadowKey
+{
+    UINT EntityId = 0;
+    uint64_t Generation = 0;
+
+    bool operator==(const GDX12LocalShadowKey& other) const
+    { return EntityId == other.EntityId && Generation == other.Generation; }
+};
+
+inline void SetLocalShadowGeneration(GDX12LocalLightConstants& light, uint64_t generation)
+{
+    // CPU snapshot metadata uses two unused words of the existing GPU layout.
+    light._padding[0] = static_cast<UINT>(generation);
+    light._padding[1] = static_cast<UINT>(generation >> 32);
+}
+
+inline GDX12LocalShadowKey GetLocalShadowKey(const GDX12LocalLightConstants& light)
+{
+    return { light.EntityId, (static_cast<uint64_t>(light._padding[1]) << 32) | light._padding[0] };
+}
+
+struct GDX12ShadowSelection
+{
+    enum class Mode { All, Sun, AllLocal, SpecificLight };
+    Mode Scope = Mode::All;
+    GDX12LocalShadowKey Light;
+
+    bool IncludesSun() const { return Scope == Mode::All || Scope == Mode::Sun; }
+    bool IncludesLocal(GDX12LocalShadowKey key) const
+    {
+        return key.Generation != 0 && (Scope == Mode::All || Scope == Mode::AllLocal ||
+            (Scope == Mode::SpecificLight && Light == key));
+    }
+};
+
+struct GDX12ShadowRegion
+{
+    UINT Slice, X, Y, Width, Height;
+};
+
+inline GDX12ShadowRegion SunShadowRegion(UINT cascade)
+{
+    return { 0, (cascade & 1u) * SunShadowCascadeResolution, (cascade >> 1u) * SunShadowCascadeResolution,
+        SunShadowCascadeResolution, SunShadowCascadeResolution };
+}
+
+inline GDX12ShadowRegion LocalShadowRegion(const GDX12LocalLightConstants& light, UINT face)
+{
+    return { light.ShadowFirstSlice + face, 0, 0, LocalShadowResolution, LocalShadowResolution };
+}
+
+struct GDX12ShadowOutput
+{
+    enum class Kind { Sun, Point, Spot };
+    struct View
+    {
+        GDX12ShadowRegion Region;
+        XMFLOAT4X4 ViewProj;
+        uint64_t CasterRevision;
+    };
+
+    Kind Type = Kind::Sun;
+    GDX12LocalShadowKey Light;
+    UINT LightRevision = 0;
+    uint64_t SceneRevision = 0;
+    bool StaticOnly = false;
+    bool EveryFrame = false;
+    XMFLOAT4 SplitDepths = {}, TexelWorldSize = {};
+    std::array<View, 6> Views = {};
+
+    UINT ViewCount() const { return Type == Kind::Sun ? 4u : Type == Kind::Point ? 6u : 1u; }
+
+    // An entire light can be remapped after packing, even if its atlas slices changed.
+    bool MatchesDepthInputs(const GDX12ShadowOutput& other) const
+    {
+        if (Type != other.Type || !(Light == other.Light) || LightRevision != other.LightRevision ||
+            SceneRevision != other.SceneRevision || StaticOnly != other.StaticOnly || EveryFrame != other.EveryFrame ||
+            std::memcmp(&SplitDepths, &other.SplitDepths, sizeof(SplitDepths)) != 0 ||
+            std::memcmp(&TexelWorldSize, &other.TexelWorldSize, sizeof(TexelWorldSize)) != 0)
+            return false;
+        for (UINT i = 0; i < ViewCount(); ++i)
+        {
+            const auto& a = Views[i];
+            const auto& b = other.Views[i];
+            if (a.Region.Width != b.Region.Width || a.Region.Height != b.Region.Height ||
+                a.CasterRevision != b.CasterRevision || std::memcmp(&a.ViewProj, &b.ViewProj, sizeof(a.ViewProj)) != 0)
+                return false;
+        }
+        return true;
+    }
+};
+
+inline GDX12ShadowOutput BuildSunShadowOutput(const GDX12ShadowConstants& cascades,
+    UINT lightRevision, uint64_t sceneRevision, bool everyFrame)
+{
+    GDX12ShadowOutput output;
+    output.LightRevision = lightRevision;
+    output.SceneRevision = sceneRevision;
+    output.EveryFrame = everyFrame;
+    output.SplitDepths = cascades.SplitDepths;
+    output.TexelWorldSize = cascades.TexelWorldSize;
+    for (UINT cascade = 0; cascade < output.ViewCount(); ++cascade)
+        output.Views[cascade] = { SunShadowRegion(cascade), cascades.ViewProj[cascade], 0 };
+    return output;
+}
+
+inline GDX12ShadowOutput BuildLocalShadowOutput(const GDX12LocalLightConstants& light,
+    const std::array<uint64_t, 6>& casters, uint64_t sceneRevision, bool staticOnly)
+{
+    GDX12ShadowOutput output;
+    output.Type = light.Type == 1 ? GDX12ShadowOutput::Kind::Point : GDX12ShadowOutput::Kind::Spot;
+    output.Light = GetLocalShadowKey(light);
+    output.LightRevision = light.ShadowRevision;
+    output.SceneRevision = sceneRevision;
+    output.StaticOnly = staticOnly;
+    output.EveryFrame = !staticOnly && (light.ShadowFlags & 2u) != 0u;
+    for (UINT face = 0; face < output.ViewCount(); ++face)
+        output.Views[face] = { LocalShadowRegion(light, face), light.ShadowViewProj[face], casters[face] };
+    return output;
+}
 
 struct GDX12LocalShadowCaster
 {
@@ -141,7 +263,7 @@ inline bool ShouldRenderLocalShadow(const GDX12LocalLightConstants& light, const
 {
     if (light.ShadowFirstSlice == UINT_MAX) return false;
     if ((light.ShadowFlags & 2u) || !cached) return true;
-    return light.EntityId != cached->EntityId || light.ShadowRevision != cached->ShadowRevision ||
+    return !(GetLocalShadowKey(light) == GetLocalShadowKey(*cached)) || light.ShadowRevision != cached->ShadowRevision ||
         light.Type != cached->Type || light.ShadowFirstSlice != cached->ShadowFirstSlice ||
         std::memcmp(light.ShadowViewProj, cached->ShadowViewProj, sizeof(light.ShadowViewProj)) != 0;
 }
