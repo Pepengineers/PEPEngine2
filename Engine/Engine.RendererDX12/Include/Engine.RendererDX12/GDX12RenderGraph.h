@@ -3,6 +3,7 @@
 #include <cstdint>
 #include "Engine.RendererDX12/GDX12Submission.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
+#include <functional>
 #include <iosfwd>
 #include <optional>
 #include <unordered_map>
@@ -137,6 +138,7 @@ public:
         void CollectCompleted();
         void Drain();
         size_t PendingCount() const;
+        bool IsSubmissionFaulted() const;
     private:
         struct State;
         std::unique_ptr<State> _state;
@@ -170,6 +172,27 @@ public:
     // Pure compiler path: no device flush, resource allocation, rebinding or GPU work.
     void CompilePlan();
     const CompiledPlan& GetCompiledPlan() const;
+    struct LegacyBoundaryView
+    {
+        IRenderPassLink* Link;
+        GDX12Texture* Texture;
+        std::shared_ptr<GDX12Resource> Native;
+    };
+    struct LegacyBoundary
+    {
+        GDX12RenderPass* Replaced;
+        std::vector<LegacyBoundaryView> Inputs;
+        std::vector<LegacyBoundaryView> Outputs;
+    };
+    using SubmitLegacyReplacement = std::function<std::optional<GDX12Submission::CompletionPoint>(
+        const LegacyBoundary&, GDX12Submission::CompletionPoint prefix)>;
+
+    // Call after AddPass and before Compile. Reconfiguring a pass replaces its previous point.
+    void SetLegacySplit(GDX12RenderPass& replaced, std::vector<IRenderPassLink*> inputs,
+        std::vector<IRenderPassLink*> outputs);
+    // A callback may return nullopt only when it has proven no placed work was submitted.
+    GDX12CommandList* ExecuteLegacySplit(GDX12CommandList* commands, GDX12CommandQueue* compute,
+        const SubmitLegacyReplacement& submit);
     // Returns the final DIRECT list; the caller submits it and retires the frame with its fence.
     GDX12CommandList* Execute(GDX12CommandList* commands, GDX12CommandQueue* computeQueue = nullptr);
     void WriteDot(std::ostream& output) const;
@@ -211,7 +234,15 @@ private:
         UINT Last;
         std::shared_ptr<GDX12TextureResource> ResourceObject;
     };
+    struct LegacySplit
+    {
+        std::vector<Resource> Inputs, Outputs;
+    };
     void CompileInternal(bool reuseTextures, bool allocateTextures);
+    void CheckLegacyExecution(GDX12CommandQueue* computeQueue) const;
+    void ResetLegacyStatistics();
+    GDX12CommandList* RecordLegacyRange(GDX12CommandList* commands, GDX12CommandQueue* computeQueue,
+        UINT begin, UINT end);
     void BuildPlan();
     void CheckResource(Resource resource) const;
     void CheckPass(Pass pass) const;
@@ -226,6 +257,8 @@ private:
     Statistics _statistics;
     bool _compiled = false;
     bool _resourcesReady = false;
+    bool _executingSplit = false;
+    std::unordered_map<Pass, LegacySplit> _legacySplits;
     CompiledPlan _plan;
     std::unordered_map<Pass, std::unique_ptr<GDX12GPUTimer>> _computeTimers;
 };

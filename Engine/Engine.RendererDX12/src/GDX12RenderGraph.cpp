@@ -272,11 +272,46 @@ const GDX12RenderGraph::CompiledPlan& GDX12RenderGraph::GetCompiledPlan() const
     return _plan;
 }
 
+void GDX12RenderGraph::SetLegacySplit(GDX12RenderPass& replaced, std::vector<IRenderPassLink*> inputs,
+    std::vector<IRenderPassLink*> outputs)
+{
+    if (_executingSplit) throw std::logic_error("Cannot change legacy splits during execution");
+    const auto node = std::find_if(_nodes.begin(), _nodes.end(), [&](const Node& entry) { return entry.Instance == &replaced; });
+    if (node == _nodes.end() || node->HasPlacement || outputs.empty())
+        throw std::invalid_argument("Legacy split requires a graph-owned legacy pass with physical outputs");
+    const auto resolve = [&](const std::vector<IRenderPassLink*>& links, bool write)
+    {
+        std::vector<Resource> result;
+        for (auto* link : links)
+        {
+            const auto entry = _links.find(link);
+            if (!link || entry == _links.end() || std::find(result.begin(), result.end(), entry->second) != result.end())
+                throw std::invalid_argument("Legacy split has an unknown or duplicate boundary link");
+            if (std::none_of(node->Accesses.begin(), node->Accesses.end(), [&](const Access& access)
+                { return access.Id == entry->second && access.Usage != (write ? Mode::Read : Mode::Write); }))
+                throw std::invalid_argument("Legacy split link is missing a matching access declaration");
+            result.push_back(entry->second);
+        }
+        return result;
+    };
+    LegacySplit split{ resolve(inputs, false), resolve(outputs, true) };
+    for (const auto& access : node->Accesses)
+        if (!_resources[access.Id].LogicalToken)
+        {
+            if ((access.Usage != Mode::Write && std::find(split.Inputs.begin(), split.Inputs.end(), access.Id) == split.Inputs.end()) ||
+                (access.Usage != Mode::Read && std::find(split.Outputs.begin(), split.Outputs.end(), access.Id) == split.Outputs.end()))
+                throw std::invalid_argument("Legacy split omits a declared physical access");
+        }
+    _legacySplits.insert_or_assign(static_cast<Pass>(node - _nodes.begin()), std::move(split));
+    _compiled = false;
+}
+
 void GDX12RenderGraph::Compile(const bool reuseTextures) { CompileInternal(reuseTextures, true); }
 void GDX12RenderGraph::CompilePlan() { CompileInternal(false, false); }
 
 void GDX12RenderGraph::CompileInternal(bool reuseTextures, const bool allocateTextures)
 {
+    if (_executingSplit) throw std::logic_error("Cannot compile a graph during legacy split execution");
     _compiled = false;
     _resourcesReady = false;
     _plan = {};
@@ -517,6 +552,19 @@ void GDX12RenderGraph::CompileInternal(bool reuseTextures, const bool allocateTe
                     _resources[id].Last = static_cast<UINT>(_order.size());
                 }
             }
+    std::vector<Resource> pinned;
+    for (const auto& [pass, split] : _legacySplits)
+    {
+        if (_plan.RequiresNewExecutor || !live[pass])
+            throw std::logic_error("Legacy split requires a live pass in a legacy-only graph");
+        for (auto id : split.Inputs) ExpandRead(id, pinned);
+        for (auto id : split.Outputs) ExpandRead(id, pinned);
+    }
+    for (auto id : pinned)
+    {
+        _resources[id].First = 0;
+        _resources[id].Last = static_cast<UINT>(_order.size());
+    }
     // Explicit plans own per-device lifetimes in P2b; never pool/rebind them on the legacy device.
     if (!allocateTextures || _plan.RequiresNewExecutor)
     {
@@ -820,6 +868,7 @@ GDX12RenderGraph::PlanExecutor::~PlanExecutor()
 }
 
 size_t GDX12RenderGraph::PlanExecutor::PendingCount() const { return _state->Pending.size(); }
+bool GDX12RenderGraph::PlanExecutor::IsSubmissionFaulted() const { return _state->Failed; }
 
 void GDX12RenderGraph::PlanExecutor::CollectCompleted()
 {
@@ -1144,9 +1193,9 @@ std::optional<GDX12RenderGraph::ExecutionReceipt> GDX12RenderGraph::PlanExecutor
     return std::optional<ExecutionReceipt>{ std::move(receipt) };
 }
 
-GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12CommandQueue* computeQueue)
+void GDX12RenderGraph::CheckLegacyExecution(GDX12CommandQueue* computeQueue) const
 {
-    GDX12_SCOPED_CPU_EVENT("Graph recording");
+    if (_executingSplit) throw std::logic_error("Cannot recursively execute a legacy split graph");
     if (!_compiled) throw std::logic_error("Render graph must be compiled before execution");
     if (_plan.RequiresNewExecutor)
         throw std::logic_error("Render graph: explicit placement/version plan requires PlanExecutor; legacy Execute supports primary DIRECT/COMPUTE only");
@@ -1156,16 +1205,10 @@ GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12Com
             throw std::logic_error("Render graph texture changed; recompile after resize: " + resource.Name);
     if (computeQueue && (!_device || computeQueue->GetType() != D3D12_COMMAND_LIST_TYPE_COMPUTE))
         throw std::invalid_argument("Render graph requires a COMPUTE queue on its device");
-    auto* directQueue = _device ? _device->GetCommandQueue() : nullptr;
-    struct TextureAccess { GDX12Resource* Resource; Mode Usage; };
-    struct Pending
-    {
-        Pass Id; UINT64 Fence;
-        std::vector<BufferAccess> Buffers;
-        std::vector<TextureAccess> Textures;
-    };
-    std::vector<Pending> pending;
-    std::vector<GDX12Resource*> ownedReads;
+}
+
+void GDX12RenderGraph::ResetLegacyStatistics()
+{
     _statistics.AsyncPasses = _statistics.AsyncJoins = 0;
     _statistics.ForkFence = _statistics.ComputeFence = 0;
     _statistics.JoinBefore.clear();
@@ -1176,6 +1219,139 @@ GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12Com
         node.LastForkFence = node.LastComputeFence = 0;
         node.LastJoinBefore.clear();
     }
+}
+
+GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12CommandQueue* computeQueue)
+{
+    GDX12_SCOPED_CPU_EVENT("Graph recording");
+    CheckLegacyExecution(computeQueue);
+    ResetLegacyStatistics();
+    return RecordLegacyRange(commands, computeQueue, 0, static_cast<UINT>(_order.size()));
+}
+
+GDX12CommandList* GDX12RenderGraph::ExecuteLegacySplit(GDX12CommandList* commands, GDX12CommandQueue* computeQueue,
+    const SubmitLegacyReplacement& submit)
+{
+    GDX12_SCOPED_CPU_EVENT("Legacy graph split recording");
+    CheckLegacyExecution(computeQueue);
+    auto* direct = _device ? _device->GetCommandQueue() : nullptr;
+    if (!submit || _legacySplits.empty() || !direct || !direct->GetTimelineIdentity().IsValid() ||
+        !commands || commands->GetType() != D3D12_COMMAND_LIST_TYPE_DIRECT)
+        throw std::invalid_argument("Legacy split requires configured points and a live primary DIRECT list");
+    CheckNativeOwner(commands->GetCommandList().Get(), *_device);
+    if (computeQueue && (!computeQueue->GetTimelineIdentity().IsValid() ||
+        computeQueue->GetIdentity().Location.Adapter != _device->GetSubmissionAdapterId()))
+        throw std::invalid_argument("Legacy split COMPUTE queue must be on the primary device");
+    ThrowIfFailed(_device->GetDevice()->GetDeviceRemovedReason());
+    struct ActiveSplit
+    {
+        bool& Active;
+        ~ActiveSplit() { Active = false; }
+    } guard{ _executingSplit };
+    _executingSplit = true;
+    ResetLegacyStatistics();
+
+    UINT begin = 0;
+    for (UINT i = 0; i < _order.size(); ++i)
+    {
+        const auto pass = _order[i];
+        const auto point = _legacySplits.find(pass);
+        if (point == _legacySplits.end()) continue;
+        std::vector<std::pair<GDX12Resource*, GDX12ResourceHandle>> handles;
+        const auto capture = [&](const std::vector<Resource>& ids, bool write)
+        {
+            std::vector<LegacyBoundaryView> views;
+            for (auto id : ids)
+            {
+                const auto& entry = _resources[id];
+                auto* texture = entry.Link->GetTexture();
+                if (!texture || !texture->_resource || !texture->_resource->D3DResource ||
+                    (write && entry.Texture && entry.Texture->GetResource() != texture->GetResource()))
+                    throw std::invalid_argument("Legacy split boundary has no stable texture binding: " + entry.Name);
+                auto* native = texture->_resource.get();
+                auto& handle = native->D3DResource;
+                bool known = false;
+                for (const auto& [owner, other] : handles)
+                    if (other.Get() == handle.Get())
+                    {
+                        if (owner != native)
+                            throw std::invalid_argument("Legacy split boundary has competing native resource trackers");
+                        known = true;
+                    }
+                if (!known)
+                {
+                    CheckNativeOwner(handle.Get(), *_device);
+                    D3D12_HEAP_PROPERTIES heap{};
+                    ThrowIfFailed(handle->GetHeapProperties(&heap, nullptr));
+                    if (heap.Type != D3D12_HEAP_TYPE_DEFAULT)
+                        throw std::invalid_argument("Legacy split boundary requires a DEFAULT resource");
+                    handles.emplace_back(native, handle);
+                }
+                views.push_back({ entry.Link, texture, texture->_resource });
+            }
+            return views;
+        };
+        const LegacyBoundary boundary{ _nodes[pass].Instance, capture(point->second.Inputs, false), capture(point->second.Outputs, true) };
+        const auto validateBoundary = [&]
+        {
+            if (!_compiled) throw std::logic_error("Legacy graph changed during split execution");
+            for (const auto* views : { &boundary.Inputs, &boundary.Outputs })
+                for (const auto& view : *views)
+                    if (view.Link->GetTexture() != view.Texture || view.Texture->GetResource() != view.Native.get())
+                        throw std::logic_error("Legacy split boundary link changed during the segment");
+            for (const auto& [view, handle] : handles)
+                if (view->D3DResource.Get() != handle.Get())
+                    throw std::logic_error("Legacy split boundary native allocation changed during the segment");
+        };
+
+        commands = RecordLegacyRange(commands, computeQueue, begin, i);
+        validateBoundary();
+        for (const auto& [view, handle] : handles)
+            if (view->GetCurrentState() != D3D12_RESOURCE_STATE_COMMON)
+                commands->ResourceBarrier({ view->GetCommonBarrier() });
+        direct->ExecuteCommandList(commands);
+        const auto prefix = direct->GetLastCompletionPoint();
+        const auto replacement = submit(boundary, prefix);
+        ThrowIfFailed(_device->GetDevice()->GetDeviceRemovedReason());
+        validateBoundary();
+        for (const auto& [view, handle] : handles)
+            if (view->GetCurrentState() != D3D12_RESOURCE_STATE_COMMON)
+                throw std::logic_error("Legacy replacement must release its boundary to COMMON");
+        const auto latest = direct->GetLastCompletionPoint();
+        if (!prefix.IsValid() || !(prefix.Timeline() == direct->GetTimelineIdentity()) ||
+            !(latest.Timeline() == prefix.Timeline()))
+            throw std::logic_error("Legacy replacement changed the primary DIRECT timeline");
+        if (replacement)
+        {
+            if (!replacement->IsValid() || !(replacement->Timeline() == prefix.Timeline()) ||
+                replacement->Value() <= prefix.Value() || replacement->Value() > latest.Value())
+                throw std::invalid_argument("Legacy replacement requires an issued primary DIRECT point after the prefix");
+            begin = i + 1;
+        }
+        else
+        {
+            if (latest.Value() != prefix.Value())
+                throw std::logic_error("Legacy fallback requested after primary DIRECT submission advanced");
+            begin = i;
+        }
+        commands = direct->GetCommandList();
+    }
+    return RecordLegacyRange(commands, computeQueue, begin, static_cast<UINT>(_order.size()));
+}
+
+GDX12CommandList* GDX12RenderGraph::RecordLegacyRange(GDX12CommandList* commands, GDX12CommandQueue* computeQueue,
+    UINT begin, UINT end)
+{
+    auto* directQueue = _device ? _device->GetCommandQueue() : nullptr;
+    struct TextureAccess { GDX12Resource* Resource; Mode Usage; };
+    struct Pending
+    {
+        Pass Id; UINT64 Fence;
+        std::vector<BufferAccess> Buffers;
+        std::vector<TextureAccess> Textures;
+    };
+    std::vector<Pending> pending;
+    std::vector<GDX12Resource*> ownedReads;
     const auto heapType = [](GDX12Resource* resource)
     {
         D3D12_HEAP_PROPERTIES properties = {};
@@ -1224,7 +1400,7 @@ GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12Com
     };
     try
     {
-        for (UINT i = 0; i < _order.size(); ++i)
+        for (UINT i = begin; i < end; ++i)
         {
             const auto p = _order[i];
             auto& node = _nodes[p];
@@ -1354,7 +1530,7 @@ GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12Com
             pending.push_back({ p, computeFence, buffers, std::move(textures) });
             ++_statistics.AsyncPasses;
         }
-        join(pending.size(), "frame retirement");
+        join(pending.size(), end == _order.size() ? "frame retirement" : "legacy split boundary");
     }
     catch (...)
     {

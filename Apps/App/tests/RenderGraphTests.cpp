@@ -1578,6 +1578,254 @@ static bool RunPhysical(GDX12Device& primary)
 }
 }
 
+namespace LegacyBridgeTests
+{
+using namespace GDX12Submission;
+
+class LinkedPass final : public GDX12RenderPass
+{
+public:
+    using Recorder = std::function<void(GDX12CommandList*)>;
+    LinkedPass(const char* name, std::vector<IRenderPassLink*> inputs, std::vector<IRenderPassLink*> outputs,
+        Recorder record = {})
+        : Name(name), Inputs(std::move(inputs)), Outputs(std::move(outputs)), Record(std::move(record)) {}
+    void RecordRenderGraph(GDX12RenderGraphBuilder& builder) override
+    {
+        builder.SetName(Name);
+        if (Live) builder.HasSideEffects();
+        if (Async) builder.AsyncCompute();
+        builder.ReadInputs(Inputs, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        for (auto* out : Outputs)
+            builder.Write(out, Name, OutputLifetime, D3D12_RESOURCE_STATE_RENDER_TARGET);
+        if (Forward.first) builder.Fallback(Forward.first, Forward.second);
+    }
+    void Execute(GDX12CommandList* list) override { if (Record) Record(list); }
+    bool Live = true, Async = false;
+    Graph::Lifetime OutputLifetime = Graph::Lifetime::Dynamic;
+    std::pair<IRenderPassLink*, IRenderPassLink*> Forward{};
+private:
+    const char* Name;
+    std::vector<IRenderPassLink*> Inputs, Outputs;
+    Recorder Record;
+};
+
+static void Declarations()
+{
+    GDX12Texture input, other, first, second, unknown;
+    LinkedPass producer("boundary sources", {}, {&input, &other});
+    LinkedPass replaced("two-output replacement", {&input, &other}, {&first, &second});
+    Graph graph;
+    graph.AddPass(producer); graph.AddPass(replaced);
+    Reject([&] { graph.SetLegacySplit(replaced, {&input}, {&first, &second}); }, "Missing boundary read accepted");
+    Reject([&] { graph.SetLegacySplit(replaced, {&input, &other}, {&first}); }, "Missing boundary write accepted");
+    Reject([&] { graph.SetLegacySplit(replaced, {&input, &other, &unknown}, {&first, &second}); }, "Unknown link accepted");
+    Reject([&] { graph.SetLegacySplit(replaced, {&input, &other, &first}, {&first, &second}); }, "Write-only link accepted as input");
+    Reject([&] { graph.SetLegacySplit(replaced, {&input, &other}, {&first, &first, &second}); }, "Duplicate output accepted");
+    graph.SetLegacySplit(replaced, {&input, &other}, {&first, &second});
+    graph.SetLegacySplit(replaced, {&other, &input}, {&second, &first});
+    graph.CompilePlan();
+
+    GDX12Texture unused;
+    LinkedPass dead("culled split", {}, {&unused});
+    dead.Live = false;
+    Graph culled;
+    culled.AddPass(dead);
+    culled.SetLegacySplit(dead, {}, {&unused});
+    Reject([&] { culled.CompilePlan(); }, "Split on a culled node accepted");
+    std::cout << "Legacy split declaration validation passed.\n";
+}
+
+static void Pooling(GDX12Device& device)
+{
+    GDX12DeviceResources resources;
+    resources.Initialize(&device);
+    GDX12Texture scratch, input, alternate, output;
+    for (auto* texture : {&scratch, &input, &alternate, &output})
+        GDX12RenderHelpers::InitializeRenderTarget(*texture, resources, 4, 4, DXGI_FORMAT_R8G8B8A8_UNORM);
+    LinkedPass scratchWriter("early scratch", {}, {&scratch}), scratchReader("retire scratch", {&scratch}, {});
+    LinkedPass produce("boundary input", {}, {&input}), fallback("forwarded candidate", {}, {&alternate});
+    LinkedPass replaced("replacement", {&input}, {&output}), tail("consume boundary", {&output}, {});
+    replaced.Forward = {&input, &alternate};
+    for (auto* pass : {&scratchWriter, &produce, &fallback, &replaced})
+        pass->OutputLifetime = Graph::Lifetime::Transient;
+    Graph graph(&device);
+    for (auto* pass : {&scratchWriter, &scratchReader, &produce, &fallback, &replaced, &tail}) graph.AddPass(*pass);
+    graph.Compile();
+    Require(scratch.GetResource() == input.GetResource(), "Pooling control did not share disjoint lifetimes");
+    graph.SetLegacySplit(replaced, {&input}, {&output});
+    graph.Compile();
+    Require(graph.GetStatistics().PhysicalTextures == 4 && scratch.GetResource() != input.GetResource() &&
+        scratch.GetResource() != alternate.GetResource() && scratch.GetResource() != output.GetResource(),
+        "Legacy split did not isolate the inputs, outputs and fallback candidate");
+}
+
+static void Frame(GDX12Device& device, bool late)
+{
+    auto* direct = device.GetCommandQueue();
+    auto* compute = device.TryGetComputeQueue();
+    auto* copy = device.TryGetCopyQueue();
+    Require(direct && compute && copy, "Legacy bridge fixture requires primary DIRECT, COMPUTE and COPY");
+    const auto adapter = device.GetSubmissionAdapterId();
+    GDX12DeviceResources resources;
+    resources.Initialize(&device);
+    GDX12Texture depth, earlyNormals, lateNormals, visibility, auxiliary, filtered;
+    for (auto* texture : {&depth, &earlyNormals, &lateNormals, &visibility, &auxiliary, &filtered})
+        GDX12RenderHelpers::InitializeRenderTarget(*texture, resources, 4, 4, DXGI_FORMAT_R8G8B8A8_UNORM);
+    auto* normals = late ? &lateNormals : &earlyNormals;
+    const auto clear = [](GDX12Texture& texture, std::array<float, 4> color)
+    {
+        return [&texture, color](GDX12CommandList* list)
+        { list->GetCommandList()->ClearRenderTargetView(texture.GetRTV()->CPUHandle, color.data(), 0, nullptr); };
+    };
+    LinkedPass makeDepth("Depth output", {}, {&depth}, clear(depth, {1, 0, 0, 1}));
+    LinkedPass makeEarly("Early normals", {}, {&earlyNormals}, clear(earlyNormals, {0, 1, 0, 1}));
+    LinkedPass makeLate("Late opaque normals", {}, {&lateNormals}, clear(lateNormals, {0, 0, 1, 1}));
+    unsigned firstLegacy = 0, secondLegacy = 0;
+    LinkedPass first("replace AO pair", {&depth, normals}, {&visibility, &auxiliary},
+        [&](GDX12CommandList*) { ++firstLegacy; });
+    const auto clearFiltered = clear(filtered, {1, 1, 0, 1});
+    LinkedPass second("fallback filter", {&visibility}, {&filtered},
+        [&](GDX12CommandList* list) { ++secondLegacy; clearFiltered(list); });
+    const auto desc = depth.GetResource()->D3DResource->GetDesc();
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprints[4]{};
+    UINT64 end = 0;
+    for (auto& footprint : footprints)
+    {
+        const auto offset = (end + D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT - 1) & ~(UINT64(D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT) - 1);
+        device.GetDevice()->GetCopyableFootprints(&desc, 0, 1, offset, &footprint, nullptr, nullptr, nullptr);
+        end = footprint.Offset + footprint.Footprint.RowPitch * footprint.Footprint.Height;
+    }
+    auto readback = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(end), D3D12_RESOURCE_STATE_COPY_DEST);
+    LinkedPass prefixReader("legacy async prefix reader", {normals}, {},
+        [&](GDX12CommandList* list)
+        {
+            Require(list->GetType() == D3D12_COMMAND_LIST_TYPE_COMPUTE, "Legacy prefix reader lost its COMPUTE placement");
+            const CD3DX12_TEXTURE_COPY_LOCATION src(normals->GetResource()->D3DResource.Get(), 0);
+            const CD3DX12_TEXTURE_COPY_LOCATION dst(readback.Get(), footprints[3]);
+            list->GetCommandList()->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+        });
+    prefixReader.Async = true;
+    LinkedPass consumer("legacy async tail reader", {&visibility, &auxiliary, &filtered}, {},
+        [&](GDX12CommandList* list)
+        {
+            Require(list->GetType() == D3D12_COMMAND_LIST_TYPE_COMPUTE, "Legacy tail reader lost its COMPUTE placement");
+            GDX12Texture* outputs[]{&visibility, &auxiliary, &filtered};
+            for (size_t i = 0; i < 3; ++i)
+            {
+                const CD3DX12_TEXTURE_COPY_LOCATION src(outputs[i]->GetResource()->D3DResource.Get(), 0);
+                const CD3DX12_TEXTURE_COPY_LOCATION dst(readback.Get(), footprints[i]);
+                list->GetCommandList()->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+            }
+        });
+    consumer.Async = true;
+    Graph graph(&device);
+    for (auto* pass : {&makeDepth, &makeEarly, &makeLate, &prefixReader, &first, &second, &consumer}) graph.AddPass(*pass);
+    graph.SetLegacySplit(second, {&visibility}, {&filtered}); // Register out of execution order.
+    graph.SetLegacySplit(first, {&depth, normals}, {&visibility, &auxiliary});
+    graph.SetLegacySplit(second, {&visibility}, {&filtered}); // Update rather than duplicate.
+    graph.Compile();
+
+    ComPtr<ID3D12Fence> gateFence;
+    Graph::PlanExecutor executor(1);
+    PlacedTests::Gate gate(device, *copy, gateFence);
+    std::vector<GDX12RenderPass*> visits;
+    CompletionPoint finalized;
+    auto* tail = graph.ExecuteLegacySplit(direct->GetCommandList(), compute,
+        [&](const Graph::LegacyBoundary& boundary, CompletionPoint prefix) -> std::optional<CompletionPoint>
+        {
+            visits.push_back(boundary.Replaced);
+            if (boundary.Replaced == &second)
+            {
+                Require(prefix.Value() > finalized.Value() && boundary.Inputs[0].Native.get() == visibility.GetResource(),
+                    "Second split lost the first replacement's issued result");
+                return std::nullopt;
+            }
+            Require(boundary.Replaced == &first && boundary.Inputs.size() == 2 && boundary.Outputs.size() == 2 &&
+                boundary.Inputs[0].Link == &depth && boundary.Inputs[1].Link == normals &&
+                boundary.Inputs[1].Native.get() == normals->GetResource() &&
+                boundary.Outputs[0].Native.get() == visibility.GetResource() && prefix.Timeline() == direct->GetTimelineIdentity(),
+                "Legacy boundary returned wrong frame links, views or timeline");
+
+            Graph placed;
+            Graph::ExecutionBindings bindings;
+            bindings.Queues = {{&device, direct}, {&device, copy}};
+            const auto d = PlacedTests::Register(placed, bindings, "depth", device, boundary.Inputs[0].Native, 1, 1, {}, true);
+            const auto n = PlacedTests::Register(placed, bindings, "normals", device, boundary.Inputs[1].Native, 2, 2, {}, true);
+            const auto staging = PlacedTests::Register(placed, bindings, "packed normals", device,
+                PlacedTests::MakeResource(device, D3D12_HEAP_TYPE_DEFAULT, desc), 3, 3);
+            const auto out = PlacedTests::Register(placed, bindings, "AO output", device, boundary.Outputs[0].Native, 4, 4, {}, true);
+            const auto aux = PlacedTests::Register(placed, bindings, "AO auxiliary", device, boundary.Outputs[1].Native, 5, 5, {}, true);
+            PlacedTests::Pass pack("same-DIRECT placed prefix", {adapter, QueueKind::Direct}, {},
+                [](GDX12CommandList&, const Graph::BoundResources&) {});
+            auto delay = PlacedTests::Copy("gated COPY", {adapter, QueueKind::Copy}, n, staging);
+            PlacedTests::Pass finalize("same-DIRECT finalize", {adapter, QueueKind::Direct},
+                {{d, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}, {staging, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
+                 {out, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}, {aux, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+                [=](GDX12CommandList& list, const Graph::BoundResources& views)
+                { list.CopyResource(views.Get(out), views.Get(staging)); list.CopyResource(views.Get(aux), views.Get(d)); });
+            const auto packId = placed.AddPass(pack), delayId = placed.AddPass(delay);
+            placed.AddPass(finalize); placed.DependsOn(delayId, packId); placed.CompilePlan();
+            const auto receipt = executor.TrySubmit(placed, bindings);
+            Require(receipt && receipt->Batches.size() == 3 && !executor.IsSubmissionFaulted(), "Placed bridge invocation did not submit");
+            finalized = receipt->Batches.back();
+            PlacedTests::RequireReached(prefix, *direct);
+            Require(!finalized.IsReachedBy(direct->GetCompletionProgress()), "Gated finalize finished before COPY was released");
+            return finalized;
+        });
+    direct->ExecuteCommandList(tail);
+    const auto tailPoint = direct->GetLastCompletionPoint();
+    const bool orderValid = visits == std::vector<GDX12RenderPass*>{&first, &second} && firstLegacy == 0 && secondLegacy == 1 &&
+        graph.GetStatistics().AsyncPasses == 2 && graph.GetStatistics().AsyncJoins == 2 &&
+        tailPoint.Value() > finalized.Value() && !tailPoint.IsReachedBy(direct->GetCompletionProgress());
+    gate.Open();
+    direct->CPUWaitForFenceValue(tailPoint.Value());
+    executor.Drain();
+    Require(orderValid, "Replacement/fallback order, legacy COMPUTE joins or retirement point is wrong");
+
+    const std::array<BYTE, 4> normalColor{0, BYTE(late ? 0 : 255), BYTE(late ? 255 : 0), 255};
+    const std::array<std::array<BYTE, 4>, 4> expected{{
+        normalColor, {255, 0, 0, 255}, {255, 255, 0, 255}, normalColor }};
+    BYTE* mapped = nullptr;
+    ThrowIfFailed(readback->Map(0, nullptr, reinterpret_cast<void**>(&mapped)));
+    bool equal = true;
+    for (size_t i = 0; i < expected.size(); ++i)
+        for (UINT y = 0; y < footprints[i].Footprint.Height; ++y)
+            for (UINT x = 0; x < footprints[i].Footprint.Width; ++x)
+            {
+                const auto* pixel = mapped + footprints[i].Offset + y * footprints[i].Footprint.RowPitch + x * 4;
+                equal &= std::equal(expected[i].begin(), expected[i].end(), pixel);
+            }
+    readback->Unmap(0, nullptr);
+    Require(equal, "Legacy COMPUTE tail read wrong replacement/fallback contents");
+
+    if (!late)
+        for (bool staleReceipt : {true, false})
+        {
+            unsigned calls = 0;
+            Reject([&] { graph.ExecuteLegacySplit(direct->GetCommandList(), compute,
+                [&](const Graph::LegacyBoundary&, CompletionPoint prefix) -> std::optional<CompletionPoint>
+                {
+                    ++calls;
+                    if (staleReceipt) return prefix;
+                    direct->SignalCompletion();
+                    return std::nullopt;
+                }); }, staleReceipt ? "Legacy bridge accepted its own prefix as a replacement" :
+                "Legacy bridge accepted fallback after the callback issued a DIRECT point");
+            direct->Flush();
+            Require(calls == 1 && firstLegacy == 0 && secondLegacy == 1,
+                "Invalid replacement result ran the legacy node or a later callback");
+        }
+}
+
+static void Run(GDX12Device& device)
+{
+    Pooling(device);
+    Frame(device, false);
+    Frame(device, true);
+    std::cout << "Legacy bridge early/late links, two replacements, multi-output handoff, async readback and prefix progress passed.\n";
+}
+}
+
 int main(int argc, char** argv)
 {
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
@@ -1587,6 +1835,7 @@ int main(int argc, char** argv)
         TestCompiler();
         TestPassRecording();
         PlanTests::Run();
+        LegacyBridgeTests::Declarations();
         for (int i = 1; i < argc; ++i)
             if (std::string_view(argv[i]) == "--compiler-only")
             {
@@ -1625,6 +1874,7 @@ int main(int argc, char** argv)
             PlacedTests::LocalChain(device);
             PlacedTests::ExactAndRetirement(device);
             PlacedTests::TextureUAV(device);
+            LegacyBridgeTests::Run(device);
         }
         if (requireTwo)
         {
