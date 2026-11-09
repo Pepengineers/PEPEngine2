@@ -1,10 +1,13 @@
 #pragma once
 
+enum class GDX12AOResolution : int { Full, Half, Count };
+
 struct GDX12AOSettings
 {
     int Enabled;
     int Quality;
     int Implementation;
+    GDX12AOResolution Resolution;
     int Samples;
     int Directions;
     int Steps;

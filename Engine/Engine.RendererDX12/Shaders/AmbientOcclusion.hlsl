@@ -20,7 +20,8 @@ cbuffer AOParameters : register(b2)
     uint Samples;
     uint Directions, Steps, DenoisePasses, Implementation;
     float Slices, SliceSteps;
-    float2 Padding;
+    uint Half;
+    uint Padding;
 };
 ConstantBuffer<GTAOConstants> Xe : register(b3);
 Texture2D<float> Depth : register(t0);
@@ -28,6 +29,8 @@ Texture2D<float4> Normals : register(t1);
 Texture2D<float> InputAO : register(t2);
 Texture2D<uint> XeInput : register(t3);
 Texture2D<float> Edges : register(t4);
+Texture2D<float> FullDepth : register(t5);
+Texture2D<float4> FullNormals : register(t6);
 RWTexture2D<float> OutputAO : register(u0);
 RWTexture2D<float4> PreparedNormals : register(u1);
 RWTexture2D<float> Depth0 : register(u2);
@@ -37,6 +40,7 @@ RWTexture2D<float> Depth3 : register(u5);
 RWTexture2D<float> Depth4 : register(u6);
 RWTexture2D<uint> XeOutput : register(u7);
 RWTexture2D<unorm float> OutputEdges : register(u8);
+RWTexture2D<float> PreparedDepth : register(u9);
 SamplerState PointClamp : register(s0);
 
 [numthreads(8, 8, 1)]
@@ -55,21 +59,72 @@ bool InBounds(uint2 p)
 }
 
 float LinearDepth(float d) { return XeGTAO_ScreenSpaceToViewSpaceDepth(d, Xe); }
+uint2 RepresentativePixel(uint2 p)
+{
+    uint offset = (uint)Normals[p].w;
+    return p * 2 + uint2(offset & 1u, offset >> 1);
+}
+float3 FullGridPosition(uint2 p, float z)
+{
+    return XeGTAO_ComputeViewspacePosition((p + 0.5f) * (0.5f * Xe.ViewportPixelSize), z, Xe);
+}
 float3 Position(uint2 p)
 {
+    if (Half) return FullGridPosition(RepresentativePixel(p), LinearDepth(Depth[p]));
     return XeGTAO_ComputeViewspacePosition((p + 0.5f) * Xe.ViewportPixelSize, LinearDepth(Depth[p]), Xe);
 }
 float Noise(uint2 p) { return frac(52.9829189f * frac(dot(float2(p), float2(0.06711056f, 0.00583715f)))); }
+
+float3 ViewNormal(float3 worldNormal)
+{
+    float3 normal = mul(worldNormal, (float3x3)Camera.View);
+    normal = dot(normal, normal) > 1e-8f ? normalize(normal) : float3(0, 0, 1);
+    // Both official libraries reconstruct positive-Z view positions.
+    normal.z = -normal.z;
+    return normal;
+}
 
 [numthreads(8, 8, 1)]
 void PrepareNormalsCS(uint3 id : SV_DispatchThreadID)
 {
     if (!InBounds(id.xy)) return;
-    float3 normal = mul(Normals[id.xy].xyz, (float3x3)Camera.View);
-    normal = dot(normal, normal) > 1e-8f ? normalize(normal) : float3(0, 0, 1);
-    // Both official libraries reconstruct positive-Z view positions.
-    normal.z = -normal.z;
-    PreparedNormals[id.xy] = float4(normal * 0.5f + 0.5f, 1);
+    PreparedNormals[id.xy] = float4(ViewNormal(Normals[id.xy].xyz) * 0.5f + 0.5f, 1);
+}
+
+[numthreads(8, 8, 1)]
+void PrepareHalfCS(uint3 id : SV_DispatchThreadID)
+{
+    uint w, h;
+    PreparedDepth.GetDimensions(w, h);
+    if (any(id.xy >= uint2(w, h))) return;
+    uint2 base = id.xy * 2;
+    uint2 representative = base;
+    float nearest = Depth[base];
+    uint sampleIndex = 0;
+    for (uint i = 1; i < 4; ++i)
+    {
+        uint2 p = base + uint2(i & 1u, i >> 1);
+        if (!InBounds(p)) continue;
+        float z = Depth[p];
+        if (z <= nearest) continue;
+        nearest = z;
+        representative = p;
+        sampleIndex = i;
+    }
+    PreparedDepth[id.xy] = nearest;
+    PreparedNormals[id.xy] = float4(ViewNormal(Normals[representative].xyz) * 0.5f + 0.5f, sampleIndex);
+}
+
+[numthreads(8, 8, 1)]
+void PadCACAOCS(uint3 id : SV_DispatchThreadID)
+{
+    uint w, h;
+    PreparedDepth.GetDimensions(w, h);
+    if (any(id.xy >= uint2(w, h))) return;
+    Depth.GetDimensions(w, h);
+    uint2 p = min(id.xy, uint2(w, h) - 1);
+    PreparedDepth[id.xy] = Depth[p];
+    PreparedNormals[id.xy] = Normals[p];
 }
 
 [numthreads(8, 8, 1)]
@@ -179,6 +234,47 @@ void ResolveCS(uint3 id : SV_DispatchThreadID)
 }
 
 [numthreads(8, 8, 1)]
+void UpsampleCS(uint3 id : SV_DispatchThreadID)
+{
+    uint w, h;
+    OutputAO.GetDimensions(w, h);
+    uint2 p = id.xy;
+    if (any(p >= uint2(w, h))) return;
+    float raw = FullDepth[p];
+    float z = LinearDepth(raw);
+    if (raw <= 0 || z >= FadeEndCm)
+    {
+        OutputAO[p] = 1;
+        return;
+    }
+
+    float3 center = FullGridPosition(p, z);
+    float3 normal = ViewNormal(FullNormals[p].xyz);
+    float2 sampleCoord = (p + 0.5f) * 0.5f - 0.5f;
+    int2 base = (int2)floor(sampleCoord);
+    float2 blend = frac(sampleCoord);
+    float sum = 0, weightSum = 0;
+    // A sample on the same sloped surface can have different view depth.
+    float depthTolerance = max(0.01f * RadiusCm, 0.002f * z);
+    for (uint i = 0; i < 4; ++i)
+    {
+        int2 offset = int2(i & 1u, i >> 1);
+        int2 q = clamp(base + offset, int2(0, 0), Xe.ViewportSize - 1);
+        float sampleDepth = Depth[q];
+        if (sampleDepth <= 0) continue;
+        float3 samplePos = FullGridPosition(RepresentativePixel(q), LinearDepth(sampleDepth));
+        float3 sampleNormal = Normals[q].xyz * 2 - 1;
+        float depthWeight = saturate(1 - abs(dot(normal, samplePos - center)) / depthTolerance);
+        float normalWeight = pow(saturate(2 * dot(normal, sampleNormal) - 1), 4);
+        float2 spatialWeight = lerp(1 - blend, blend, float2(offset));
+        float weight = spatialWeight.x * spatialWeight.y * depthWeight * normalWeight;
+        sum += weight * InputAO[q];
+        weightSum += weight;
+    }
+    OutputAO[p] = weightSum > 1e-5f ? saturate(sum / weightSum) : 1;
+}
+
+[numthreads(8, 8, 1)]
 void XePrefilterCS(uint3 id : SV_DispatchThreadID, uint3 thread : SV_GroupThreadID)
 {
     XeGTAO_PrefilterDepths16x16(id.xy, thread.xy, Xe, Depth, PointClamp, Depth0, Depth1, Depth2, Depth3, Depth4);
@@ -191,7 +287,7 @@ void XeMainCS(uint3 id : SV_DispatchThreadID)
     GTAOConstants constants = Xe;
     uint w, h;
     InputAO.GetDimensions(w, h);
-    // Keep the official five-mip path valid even for viewports smaller than 16 pixels.
+    // Sample the padded depth mips while keeping the logical pixel ray and radius.
     constants.NDCToViewMul *= float2(w, h) / float2(Xe.ViewportSize);
     constants.ViewportSize = int2(w, h);
     constants.ViewportPixelSize = 1.0f / float2(w, h);

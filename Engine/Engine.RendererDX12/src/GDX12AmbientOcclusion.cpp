@@ -31,6 +31,8 @@ namespace
         L"0 Off, 1 Low, 2 Mid, 3 High", Runtime);
     static AutoConsoleVariable<AOImplementation> Implementation(L"Render.AO.Implementation", AOImplementation::XeGTAO,
         L"0 SSAO, 1 HBAO, 2 XeGTAO, 3 AMD CACAO", Runtime);
+    static AutoConsoleVariable<GDX12AOResolution> Resolution(L"Render.AO.Resolution", GDX12AOResolution::Full,
+        L"0 Full, 1 Half of the scene render grid (rounded up)", Runtime);
     static AutoConsoleVariable<int> Samples(L"Render.AO.SSAO.Samples", -1, L"Hemisphere samples: -1 preset, 4..64", Runtime,
         [](const int v) { return v == -1 || (v >= 4 && v <= 64); });
     static AutoConsoleVariable<int> Directions(L"Render.AO.HBAO.Directions", -1, L"Azimuth directions: -1 preset, 2..16", Runtime,
@@ -81,6 +83,7 @@ GDX12AOSettings GetAmbientOcclusionSettings()
     s.Enabled = Enabled.GetValue();
     s.Quality = Quality.GetInt();
     s.Implementation = Implementation.GetInt();
+    s.Resolution = Resolution.GetValue();
     const int level = std::max(1, s.Quality) - 1;
     constexpr int samples[] = { 8, 16, 32 };
     constexpr int directions[] = { 4, 6, 8 };

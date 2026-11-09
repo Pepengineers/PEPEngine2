@@ -28,31 +28,45 @@ public:
     void ClearDenendencies() override;
 
 private:
+    friend struct GDX12AOTestAccess;
+
     struct ShaderConstants
     {
         float Radius, Intensity, Bias, HorizonBias;
         float FadeStart, FadeEnd, Sharpness;
         UINT Samples;
         UINT Directions, Steps, DenoisePasses, Implementation;
-        float Slices, SliceSteps, Padding[2];
+        float Slices, SliceSteps;
+        UINT Half, Padding;
     };
-    enum Pipeline : std::uint8_t { PrepareNormals, SSAO, HBAO, Blur, Resolve, XePrefilter, XeMain, XeDenoise, Neutral, PipelineCount };
+    enum Pipeline : std::uint8_t
+    {
+        PrepareNormals, SSAO, HBAO, Blur, Resolve, XePrefilter, XeMain, XeDenoise, Neutral, PrepareHalf, Upsample, PadCACAO, PipelineCount
+    };
+    struct WorkGrid
+    {
+        GDX12Texture Depth, Normals, Scratch[2], XeDepth, XeTerms[2], XeEdges, Visibility;
+        std::array<GDX12Descriptor, 5> DepthUAVs;
+        GDX12Texture CacaoDepth, CacaoNormals, CacaoVisibility;
+        std::vector<uint8_t> CacaoMemory;
+        FFX_CACAO_D3D12Context* Cacao = nullptr;
+        bool CacaoScreenReady = false;
+    };
     void CreateTextures();
+    void CreateGrid(WorkGrid& grid, UINT width, UINT height, bool half);
     void CreateTexture(GDX12Texture& texture, DXGI_FORMAT format, UINT width, UINT height, UINT mips = 1);
     void Bind(GDX12CommandList* commands);
     void Dispatch(GDX12CommandList* commands, Pipeline pipeline, UINT width, UINT height);
-    void DrawCACAO(GDX12CommandList* commands, const GDX12AOSettings& settings, const Matrix& projection);
-    void DestroyCACAO();
+    GDX12Texture& DrawCACAO(GDX12CommandList* commands, WorkGrid& grid, GDX12Texture& depth,
+        const GDX12AOSettings& settings, Matrix projection);
+    void DestroyCACAO(WorkGrid& grid);
 
-    GDX12Texture _output, _normals, _scratch[2], _xeDepth, _xeTerms[2], _xeEdges;
-    std::array<GDX12Descriptor, 5> _depthUAVs;
+    GDX12Texture _output;
+    std::array<WorkGrid, 2> _grids;
     std::array<ComPtr<ID3D12PipelineState>, PipelineCount> _pipelines;
     std::unique_ptr<GDX12RootSignature> _root;
     std::unique_ptr<GDX12UploadBuffer<ShaderConstants>> _constants;
     std::unique_ptr<GDX12UploadBuffer<XeGTAO::GTAOConstants>> _xeConstants;
-    std::vector<uint8_t> _cacaoMemory;
-    FFX_CACAO_D3D12Context* _cacao = nullptr;
-    bool _cacaoScreenReady = false;
     GDX12AOSettings _previous = {};
     bool _hasPrevious = false;
     UINT _frameIndex = 0;
