@@ -34,6 +34,10 @@ public:
     void Uninitialize();
 
     void Step(float dt);
+#ifdef _DEBUG
+    void CollectCollisionTriangles(std::vector<DirectX::SimpleMath::Vector3>& statics,
+        std::vector<DirectX::SimpleMath::Vector3>& moving) const;
+#endif
 
     PhysicsBodyHandle CreateBody(const PhysicsBodyDesc& desc);
     void DestroyBody(PhysicsBodyHandle handle);

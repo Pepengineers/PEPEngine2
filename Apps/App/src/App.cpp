@@ -117,8 +117,7 @@ namespace
             if (world.IsPaused())
             {
                 _gpuData.Schedule(_jobs, world, 0).Complete();
-                _reflections.DrawBounds(world, *Locator.GetModule<RenderModule>());
-                _bounds->DrawBounds(world, *Locator.GetModule<RenderModule>());
+                DrawSceneBounds(world);
                 return;
             }
             const float dt = timer.DeltaTime();
@@ -134,8 +133,7 @@ namespace
                 UpdatePhysics(world, dt);
                 work = _gpuData.Schedule(_jobs, world, dt);
                 work.Complete();
-                _reflections.DrawBounds(world, *Locator.GetModule<RenderModule>());
-                _bounds->DrawBounds(world, *Locator.GetModule<RenderModule>());
+                DrawSceneBounds(world);
             }
             catch (...)
             {
@@ -197,6 +195,14 @@ namespace
         }
 
     private:
+        void DrawSceneBounds(World& world)
+        {
+            if (BistroRenderPipeline::IsCollisionViewEnabled()) return;
+            auto renderer = Locator.GetModule<RenderModule>();
+            _reflections.DrawBounds(world, *renderer);
+            _bounds->DrawBounds(world, *renderer);
+        }
+
         void UpdateSceneAdditions(World& world, float deltaSeconds)
         {
             _reflections.Update(world, deltaSeconds);

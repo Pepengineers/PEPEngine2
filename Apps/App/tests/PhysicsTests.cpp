@@ -25,6 +25,44 @@ static void Require(bool condition, const char* message)
     if (!condition) throw std::runtime_error(message);
 }
 
+#ifdef _DEBUG
+static void CheckCollisionGeometry(JobSystem& jobs)
+{
+    JoltPhysicsBackend physics;
+    PhysicsWorldSettings settings;
+    settings.WorldUnitsPerMeter = 100;
+    physics.Initialize(jobs, settings);
+    auto compound = std::make_shared<PhysicsCompound>();
+    compound->Children.push_back({BoxShapeDesc{{20, 10, 10}}, {40, 0, 0}});
+    compound->Children.push_back({BoxShapeDesc{{5, 5, 5}}, {70, 0, 0}});
+    PhysicsBodyDesc body;
+    body.Shape = CompoundShapeDesc{compound};
+    body.Position = {100, 200, 300};
+    body.Rotation = Quaternion::CreateFromAxisAngle(Vector3::UnitZ, XM_PIDIV2);
+    Require(physics.CreateBody(body).IsValid(), "Static compound fixture failed");
+    body.Shape = BoxShapeDesc{{10, 10, 10}};
+    body.Position = {0, 300, 0};
+    body.Rotation = Quaternion::Identity;
+    body.MotionType = PhysicsMotionType::Dynamic;
+    const auto dynamic = physics.CreateBody(body);
+    Require(dynamic.IsValid(), "Dynamic collision fixture failed");
+
+    std::vector<Vector3> statics, moving;
+    physics.CollectCollisionTriangles(statics, moving);
+    Require(!statics.empty() && !moving.empty(), "Both motion groups should have triangles");
+    BoundingBox bounds;
+    BoundingBox::CreateFromPoints(bounds, statics.size(), statics.data(), sizeof(Vector3));
+    Require(Vector3::Distance(bounds.Center, {100, 247.5f, 300}) < 0.01f &&
+        Vector3::Distance(bounds.Extents, {10, 27.5f, 10}) < 0.01f, "Collision geometry lost child offset, rotation or world units");
+    BoundingBox::CreateFromPoints(bounds, moving.size(), moving.data(), sizeof(Vector3));
+    Require(Vector3::Distance(bounds.Center, body.Position) < 0.01f, "Dynamic collision geometry used the wrong pose");
+    physics.DestroyBody(dynamic);
+    statics.clear(); moving.clear();
+    physics.CollectCollisionTriangles(statics, moving);
+    Require(!statics.empty() && moving.empty(), "Destroyed body remained in the collision view");
+}
+#endif
+
 static void CheckTriangleSanitization(JobSystem& jobs)
 {
     for (float units : {1.f, 100.f})
@@ -567,6 +605,9 @@ int main()
         for (unsigned threads : {1u, 4u})
         {
             JobSystem jobs(threads);
+#ifdef _DEBUG
+            CheckCollisionGeometry(jobs);
+#endif
             CheckTriangleSanitization(jobs);
             CheckJobs(jobs);
             auto positions = CheckBodies(jobs);

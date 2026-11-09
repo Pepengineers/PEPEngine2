@@ -1,6 +1,7 @@
 #include "Engine.UI/UI_test.h"
 #include "SettingsCache.h"
 #include "Engine.Core/ConsoleModule.h"
+#include "Common/RuntimePaths.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
@@ -25,6 +26,9 @@ namespace Engine::UI
         bool Visible = true;
         bool FrameBegun = false;
         std::string InvalidVariable;
+#ifdef _DEBUG
+        std::string LayoutPath;
+#endif
 
         template <class T>
         bool InputNumber(const char* label, ImGuiDataType type, std::string& value)
@@ -51,7 +55,7 @@ namespace Engine::UI
             if (ImGui::Begin("Settings (F1)", &Visible))
             {
                 ImGui::TextWrapped("Changes are saved to Config/Engine.ini automatically. Hover a setting for its description and limits.");
-                ImGui::TextWrapped("Readonly settings apply only after restarting the application. Other changes apply live. F1 hides/shows this window.");
+                ImGui::TextWrapped("Readonly settings apply after restart. Other changes apply live. F1 hides/shows the debug panels.");
                 static ImGuiTextFilter filter;
                 filter.Draw("Search", -90);
                 static SettingsCache settings;
@@ -152,7 +156,17 @@ namespace Engine::UI
         IMGUI_CHECKVERSION();
         ImGui::CreateContext();
         auto& io = ImGui::GetIO();
+#ifdef _DEBUG
+        const auto configDir = Engine::Core::GetExecutableDirectory() / L"Config";
+        std::error_code layoutError;
+        std::filesystem::create_directories(configDir, layoutError);
+        const auto layoutPath = (configDir / L"ImGui.ini").u8string();
+        LayoutPath.assign(reinterpret_cast<const char*>(layoutPath.data()), layoutPath.size());
+        io.IniFilename = layoutError ? nullptr : LayoutPath.c_str();
+        io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+#else
         io.IniFilename = nullptr;
+#endif
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         ImGui::StyleColorsDark();
         Visible = true;
@@ -193,9 +207,26 @@ namespace Engine::UI
         ImGui::NewFrame();
         FrameBegun = true;
 #if defined(_DEBUG)
+        auto dockFlags = ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoDockingOverCentralNode;
+        if (!Visible) dockFlags |= ImGuiDockNodeFlags_KeepAliveOnly;
+        ImGui::DockSpaceOverViewport(0, nullptr, dockFlags);
         DrawSettings();
 #endif
     }
+
+#ifdef _DEBUG
+    bool DebugButton(const char* label)
+    {
+        if (!FrameBegun || !Visible) return false;
+        const auto* viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos({viewport->WorkPos.x + viewport->WorkSize.x - 16, viewport->WorkPos.y + 16},
+            ImGuiCond_FirstUseEver, {1, 0});
+        ImGui::SetNextWindowSize({220, 80}, ImGuiCond_FirstUseEver);
+        const bool clicked = ImGui::Begin("Debug controls") && ImGui::Button(label);
+        ImGui::End();
+        return clicked;
+    }
+#endif
 
     void DrawWorldBox(const DirectX::BoundingBox& box, const DirectX::XMFLOAT4X4& viewProjection,
         const char* label, unsigned int color)

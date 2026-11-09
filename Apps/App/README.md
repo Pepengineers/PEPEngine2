@@ -36,6 +36,13 @@ the startup pose in local space; they follow the character transform without
 recomputing a tight box for each skeletal pose. Tracked coordinates and world AABB
 half-extents are read-only; confined particle layout volumes remain editable.
 
+In Debug builds, press `F1` to show the debug panels. In **Debug controls**, click
+**Show Jolt collisions** to inspect the shapes registered in the current Jolt world.
+Static shapes are translucent green. Dynamic and kinematic shapes have a translucent
+red shell and brighter wireframe. Click **Show scene** to restore the regular view.
+The camera and Jolt physics keep updating as usual. Drag the **Settings** or **Debug controls**
+title bar to a docking target to pin the panel. The layout is saved to `Config/ImGui.ini`.
+
 Each of the 21 tables has a reflection spawn anchor: 11 on the terrace and 10
 inside. `App.ReflectionProbes.Count=4` picks four random distinct tables. Growing
 the count adds captures at unused tables; surviving captures stay in place.

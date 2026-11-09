@@ -38,6 +38,10 @@ class IRenderPipeline
 public:
     virtual ~IRenderPipeline() = default;
     virtual void Initialize(RenderPipelineContext&) = 0;
+    virtual bool AllowsFrameGeneration() const { return true; }
+#ifdef _DEBUG
+    virtual void DrawDebugControls() {}
+#endif
     // Before frame constants/camera uploads, so a changed render grid applies to the same frame.
     virtual void UpdateFrameSettings(RenderPipelineContext&) {}
     // Called once after the frame-slot wait; true requests recompiling the graph.

@@ -1370,8 +1370,19 @@ const GDX12ReconstructionStatus& RenderModule::GetReconstructionStatus() const
 
 void RenderModule::BeginFrame()
 {
-    if (_uiInitialized) Engine::UI::BeginFrame();
-    if (_backBuffer) _backBuffer->BeginFrame(_RPcommonData);
+    if (_uiInitialized)
+    {
+        Engine::UI::BeginFrame();
+#ifdef _DEBUG
+        _pipeline->DrawDebugControls();
+#endif
+    }
+    if (_backBuffer)
+    {
+        if (_pipeline->GetBindings().FrameGenerationInputs)
+            _backBuffer->SetFrameGenerationSuspended(_renderingSuspended || !_pipeline->AllowsFrameGeneration());
+        _backBuffer->BeginFrame(_RPcommonData);
+    }
 }
 
 void RenderModule::SetFrameGenerationSuspended(bool suspended)
@@ -1380,7 +1391,7 @@ void RenderModule::SetFrameGenerationSuspended(bool suspended)
     _renderingSuspended = suspended;
     _RPcommonData.RequestHistoryReset = true;
     if (_backBuffer && _pipeline->GetBindings().FrameGenerationInputs)
-        _backBuffer->SetFrameGenerationSuspended(suspended);
+        _backBuffer->SetFrameGenerationSuspended(suspended || !_pipeline->AllowsFrameGeneration());
 }
 
 const GDX12FrameGenerationStatus& RenderModule::GetFrameGenerationStatus() const

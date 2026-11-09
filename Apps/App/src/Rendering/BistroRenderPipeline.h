@@ -10,6 +10,12 @@ class BistroRenderPipeline final : public IRenderPipeline
 public:
     explicit BistroRenderPipeline(std::shared_ptr<SceneManagerModule>);
     ~BistroRenderPipeline() override;
+    static bool IsCollisionViewEnabled();
+    bool AllowsFrameGeneration() const override { return !IsCollisionViewEnabled(); }
+#ifdef _DEBUG
+    void DrawDebugControls() override;
+    static void ToggleCollisionView();
+#endif
     void Initialize(RenderPipelineContext&) override;
     void UpdateFrameSettings(RenderPipelineContext&) override;
     bool PrepareFrame(RenderPipelineContext&, GDX12CommandList*) override;
@@ -24,6 +30,10 @@ private:
     std::unique_ptr<BistroGrassGeometry> _grass;
     std::unique_ptr<BistroWaterRendering> _water;
     std::unique_ptr<CommonRenderPasses> _passes;
+#ifdef _DEBUG
+    std::unique_ptr<GDX12RenderPass> _collisionPass;
+    bool _collisionViewActive = false;
+#endif
     RenderPipelineCommonData* _common = nullptr;
     bool _earlyAO = false;
     GDX12DeviceResources* _resources = nullptr;

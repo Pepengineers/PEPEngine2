@@ -102,6 +102,33 @@ public:
         render->Render();
     }
 
+#ifdef _DEBUG
+    void CheckCollisionView()
+    {
+        Timer.Reset();
+        Timer.Stop();
+        auto render = Locator.GetModule<RenderModule>();
+        const auto scenePasses = render->GetRenderGraphStatistics().Passes;
+        auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
+        ComPtr<ID3D12Device> device;
+        ThrowIfFailed(output->GetResource()->D3DResource->GetDevice(IID_PPV_ARGS(&device)));
+        ComPtr<ID3D12InfoQueue> info;
+        ThrowIfFailed(device.As(&info));
+        info->ClearStoredMessages();
+        for (bool enabled : {true, false, true, false})
+        {
+            BistroRenderPipeline::ToggleCollisionView();
+            for (int frame = 0; frame < 3; ++frame) Frame();
+            render->WaitForUploads();
+            CheckMessages(*info.Get());
+            if (render->GetRenderGraphStatistics().Passes != (enabled ? 1u : scenePasses) ||
+                render->GetFrameGenerationStatus().Suspended != enabled)
+                throw std::runtime_error("Collision view did not switch the scene graph and frame generation together");
+        }
+        std::cout << "Collision-only graph, frame generation suspension and return to the scene passed\n";
+    }
+#endif
+
     void Check()
     {
         Timer.Reset();
@@ -560,7 +587,7 @@ int main(int argc, char** argv)
             ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
             debug->EnableDebugLayer();
         }
-        if (mode == "--gpu-validation" || mode == "--matrix-gpu-validation" || mode == "--ao-placements-gpu-validation" || mode == "--grass-gpu-validation")
+        if (mode == "--gpu-validation" || mode == "--matrix-gpu-validation" || mode == "--ao-placements-gpu-validation" || mode == "--grass-gpu-validation" || mode == "--collision-view-gpu-validation")
         {
             ComPtr<ID3D12Debug1> validation;
             ThrowIfFailed(debug.As(&validation));
@@ -573,6 +600,10 @@ int main(int argc, char** argv)
         if (fixedClock.DeltaTime() != 0) throw std::runtime_error("Paused fixed clock advanced");
         BistroRenderGraphTests app;
         if (!app.Initialize()) throw std::runtime_error("Bistro initialization failed");
+#ifdef _DEBUG
+        if (mode == "--collision-view" || mode == "--collision-view-gpu-validation") app.CheckCollisionView();
+        else
+#endif
         if (mode == "--ao-placements" || mode == "--ao-placements-gpu-validation") app.CheckAOPlacements();
         else if (mode == "--grass-timing" || mode == "--grass-validation" || mode == "--grass-gpu-validation") app.GrassExperiment(timing);
         else if (matrix) app.Matrix(argc, argv, validationMode);

@@ -27,6 +27,10 @@ public:
     void Uninitialize() override;
 
     void Step(World& world, float dt);
+#ifdef _DEBUG
+    void CollectCollisionTriangles(World& world, std::vector<DirectX::SimpleMath::Vector3>& statics,
+        std::vector<DirectX::SimpleMath::Vector3>& moving) const;
+#endif
     void ConfigureWorld(World& world, const PhysicsWorldSettings& settings);
     bool OverlapsBox(World& world, const DirectX::SimpleMath::Vector3& center, const DirectX::SimpleMath::Vector3& halfExtent) const;
     bool OverlapsBody(World& world, const PhysicsBodyDesc& desc);

@@ -455,6 +455,38 @@ void JoltPhysicsBackend::Step(float dt)
 
 }
 
+#ifdef _DEBUG
+void JoltPhysicsBackend::CollectCollisionTriangles(std::vector<DirectX::SimpleMath::Vector3>& statics,
+    std::vector<DirectX::SimpleMath::Vector3>& moving) const
+{
+    if (!_physicsSystem) return;
+    JPH::BodyIDVector bodies;
+    _physicsSystem->GetBodies(bodies);
+    JPH::AllHitCollisionCollector<JPH::TransformedShapeCollector> leaves;
+    constexpr int batchSize = 64;
+    JPH::Float3 vertices[3 * batchSize];
+    const float units = _settings.WorldUnitsPerMeter;
+    for (const auto id : bodies)
+    {
+        JPH::BodyLockRead lock(_physicsSystem->GetBodyLockInterface(), id);
+        if (!lock.SucceededAndIsInBroadPhase()) continue;
+        const auto& body = lock.GetBody();
+        const auto bounds = body.GetWorldSpaceBounds();
+        auto& output = body.IsStatic() ? statics : moving;
+        leaves.Reset();
+        body.GetTransformedShape().CollectTransformedShapes(bounds, leaves);
+        for (const auto& leaf : leaves.mHits)
+        {
+            JPH::Shape::GetTrianglesContext context;
+            leaf.GetTrianglesStart(context, bounds, JPH::RVec3::sZero());
+            while (const int count = leaf.GetTrianglesNext(context, batchSize, vertices))
+                for (int i = 0; i < 3 * count; ++i)
+                    output.emplace_back(vertices[i].x * units, vertices[i].y * units, vertices[i].z * units);
+        }
+    }
+}
+#endif
+
 PhysicsBodyHandle JoltPhysicsBackend::CreateBody(const PhysicsBodyDesc& desc)
 {
     if (!_bInitialized || !_physicsSystem)

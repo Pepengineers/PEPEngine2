@@ -111,6 +111,7 @@
     <ClCompile Include="src\Rendering\Grass\GDX12GrassRenderer.cpp" />
     <ClInclude Include="src\Components\GrassRenderComponent.h" />
     <ClInclude Include="src\Components\WindFieldComponent.h" />
+    <None Include="Shaders\CollisionView.hlsl" />
     <None Include="Shaders\GrassCommon.hlsli" />
     <None Include="Shaders\GrassExpand.hlsl" />
     <None Include="Shaders\GrassRender.hlsl" />

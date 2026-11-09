@@ -66,6 +66,13 @@ void PhysicsModule::Step(World& world, float dt)
     if (auto* physics = GetPhysics(world); physics && !world.IsPaused()) physics->Step(dt);
 }
 
+#ifdef _DEBUG
+void PhysicsModule::CollectCollisionTriangles(World& world, std::vector<Vector3>& statics, std::vector<Vector3>& moving) const
+{
+    if (auto* physics = GetPhysics(world)) physics->CollectCollisionTriangles(statics, moving);
+}
+#endif
+
 PhysicsBodyHandle PhysicsModule::CreateBody(World& world, const PhysicsBodyDesc& desc)
 {
     auto* physics = GetPhysics(world);
