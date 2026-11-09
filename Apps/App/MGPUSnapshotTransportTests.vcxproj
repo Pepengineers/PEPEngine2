@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="MGPUQueueTests.vcxproj" />
+  <PropertyGroup>
+    <ProjectGuid>{7939C6AE-39B9-4C83-9486-FB9C270E4279}</ProjectGuid>
+  </PropertyGroup>
+  <ItemGroup>
+    <ClCompile Remove="@(ClCompile)" />
+    <ClCompile Include="tests\MGPUSnapshotTransportTests.cpp" />
+    <ClCompile Include="..\..\Engine\Engine.RendererDX12\src\GDX12SnapshotTransport.cpp" />
+  </ItemGroup>
+</Project>
