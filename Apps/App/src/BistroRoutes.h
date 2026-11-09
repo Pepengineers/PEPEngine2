@@ -10,6 +10,8 @@
 
 namespace BistroRoutes
 {
+    inline constexpr float PeopleGroundOffset = 4.6f;
+
     struct Cursor { size_t Edge = 0; float Distance = 0; bool Forward = true; float Waiting = 0; };
 
     struct Edge

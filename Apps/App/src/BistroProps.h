@@ -26,6 +26,7 @@ struct BistroPropPartition
     std::vector<std::uint32_t> StaticSubMeshes;
     std::vector<BistroPropGroup> Props;
     std::vector<size_t> Tableware;
+    bool Interior = true;
 };
 
 inline bool IsBistroTableware(const std::string& lower)
@@ -36,9 +37,10 @@ inline bool IsBistroTableware(const std::string& lower)
     return false;
 }
 
-inline BistroPropPartition PartitionBistroProps(const Engine::Core::Mesh& mesh, bool simulateProps = true)
+inline BistroPropPartition PartitionBistroProps(const Engine::Core::Mesh& mesh, bool interior = true)
 {
     BistroPropPartition result;
+    result.Interior = interior;
     std::unordered_map<std::string, size_t> groups;
     const auto& parts = mesh.GetSubMeshes();
     for (size_t index = 0; index < parts.size(); ++index)
@@ -46,7 +48,7 @@ inline BistroPropPartition PartitionBistroProps(const Engine::Core::Mesh& mesh, 
         const auto& name = parts[index].SourceNodeName;
         std::string lower = name;
         std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        if (!simulateProps || (!IsBistroTableware(lower) && lower.find("chair") == std::string::npos && lower.find("table") == std::string::npos))
+        if (!interior || (!IsBistroTableware(lower) && lower.find("chair") == std::string::npos && lower.find("table") == std::string::npos))
         {
             result.StaticSubMeshes.push_back(static_cast<std::uint32_t>(index));
             continue;
@@ -132,46 +134,6 @@ namespace BistroPhysics
         for (size_t i = 1; i < indices.size(); ++i)
             DirectX::BoundingBox::CreateMerged(bounds, bounds, mesh.GetSubMesh(indices[i]).Bounds);
         return bounds;
-    }
-
-    inline PhysicsShapeDesc StaticShape(const Engine::Core::Mesh& mesh, const std::vector<uint32_t>& indices)
-    {
-        const auto reduced = BuildStaticCollision(mesh, indices, 1.0f);
-        Engine::Core::SubMesh part;
-        for (const auto& position : reduced.Geometry->Vertices)
-        {
-            Engine::Core::Vertex vertex; vertex.Position=position;
-            part.Vertices.push_back(vertex);
-        }
-        for (const auto& triangle : reduced.Geometry->Triangles)
-            part.Indices.insert(part.Indices.end(),triangle.begin(),triangle.end());
-        std::vector<Engine::Core::SubMesh> parts;
-        parts.push_back(std::move(part));
-        auto baked=BistroStaticCollision::Build(Engine::Core::Mesh(std::move(parts),{}),{0});
-        auto compound=std::make_shared<PhysicsCompound>();
-        compound->Children=std::move(baked.Boxes);
-        if (!baked.FloorPrisms->Hulls.empty()) compound->Children.push_back({ConvexCompoundShapeDesc{baked.FloorPrisms}});
-        if (!baked.Remainder->Triangles.empty()) compound->Children.push_back({TriangleMeshShapeDesc{baked.Remainder}});
-        return CompoundShapeDesc{compound};
-    }
-
-    inline PhysicsShapeDesc ExteriorShape(const Engine::Core::Mesh& mesh, const std::vector<uint32_t>& indices)
-    {
-        const auto bounds=Bounds(mesh,indices);
-        const Vector3 center(bounds.Center), half(bounds.Extents);
-        auto compound=std::make_shared<PhysicsCompound>();
-        compound->Children.push_back({BuildStaticCollision(mesh,indices,1.0f)});
-        // Bistro street is at 23.162 cm; the foundation fills unmodeled ground below it.
-        compound->Children.push_back({BoxShapeDesc{{half.x+50,50,half.z+50},0},{center.x,-30,center.z}});
-        const float height=(std::max)(1000.f,center.y+half.y+1000.f);
-        for (float sign : {-1.f,1.f})
-        {
-            compound->Children.push_back({BoxShapeDesc{{25,height*.5f,half.z+50},0},
-                {center.x+sign*(half.x+25),20+height*.5f,center.z}});
-            compound->Children.push_back({BoxShapeDesc{{half.x+50,height*.5f,25},0},
-                {center.x,20+height*.5f,center.z+sign*(half.z+25)}});
-        }
-        return CompoundShapeDesc{compound};
     }
 
     inline PhysicsCompoundChild BoxProxy(std::vector<Vector3> points, const Quaternion* worldToBox = nullptr)
@@ -262,52 +224,14 @@ inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
     const BistroPropPartition& partition, JobSystem& jobs, PhysicsModule* physics = nullptr, BistroWaves::Controller* waves = nullptr)
 {
     auto& ecs = world.GetECS();
-    const size_t count = BistroPhysics::GetCount(partition, BistroPhysics::CountScale.GetValue());
-    if (ecs.GetPool<RigidBodyComponent>().Size() + count + 2 > BistroPhysics::MaxBodies)
-        throw std::length_error("Combined Bistro physics body budget exceeded");
-    struct BakeColliders final : ParallelJob
-    {
-        BakeColliders(const Engine::Core::Mesh& mesh, const BistroPropPartition& partition)
-            : Mesh(mesh), Partition(partition), Props(partition.Props.size()) {}
-        void Execute(size_t index) override
-        {
-            if (index == 0)
-            {
-                if (!Partition.StaticSubMeshes.empty()) Static = Partition.Props.empty()
-                    ? BistroPhysics::ExteriorShape(Mesh, Partition.StaticSubMeshes)
-                    : BistroPhysics::StaticShape(Mesh, Partition.StaticSubMeshes);
-                if (const auto* compound = std::get_if<CompoundShapeDesc>(&Static))
-                {
-                    auto primitives = std::make_shared<PhysicsCompound>(*compound->Geometry);
-                    auto& children = primitives->Children;
-                    if (!children.empty()) if (const auto* mesh = std::get_if<TriangleMeshShapeDesc>(&children.back().Shape))
-                    {
-                        Detail = *mesh;
-                        children.pop_back();
-                    }
-                    if (children.empty()) { Static = Detail; Detail = {}; }
-                    else Static = CompoundShapeDesc{primitives};
-                }
-            }
-            else Props[index - 1] = BistroPhysics::PropShape(Mesh, Partition.Props[index - 1]);
-        }
-        const Engine::Core::Mesh& Mesh;
-        const BistroPropPartition& Partition;
-        PhysicsShapeDesc Static;
-        TriangleMeshShapeDesc Detail;
-        std::vector<PhysicsShapeDesc> Props;
-    } baked(mesh, partition);
-    const auto prepared = baked.Schedule(jobs, partition.Props.size() + 1, 1);
-    if (auto* app = dynamic_cast<App*>(BenchmarkEngine::GetInstance()); app && &app->GetJobs() == &jobs)
-        app->WaitForLoading(prepared);
-    else prepared.Complete();
     const auto create = [&](const std::string& name, const std::vector<uint32_t>& indices,
         const PhysicsShapeDesc& shape, PhysicsMotionType motion, Vector3 offset = Vector3::Zero)
     {
         auto entity = ecs.CreateEntity();
         entity.AddComponent<NameComponent>(name);
         entity.AddComponent<TransformComponent>(offset);
-        entity.AddComponent<StaticMeshRenderComponent>(source.MeshHandler, source.Materials, indices).ReflectionDynamic = motion == PhysicsMotionType::Dynamic;
+        if (!indices.empty())
+            entity.AddComponent<StaticMeshRenderComponent>(source.MeshHandler, source.Materials, indices).ReflectionDynamic = motion == PhysicsMotionType::Dynamic;
         auto& body = entity.AddComponent<RigidBodyComponent>();
         body.MotionType = motion;
         body.ContinuousCollision = motion == PhysicsMotionType::Dynamic;
@@ -320,17 +244,36 @@ inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
             if (physics) physics->AddBodyVelocityImpulse(world, body.Body, Vector3::Zero, BistroWaves::MaxSpeed);
         }
     };
-    if (!partition.StaticSubMeshes.empty())
-        create(sceneName, partition.StaticSubMeshes, baked.Static, PhysicsMotionType::Static);
-    if (baked.Detail.Geometry)
+    if (!partition.Interior)
     {
-        // A large mesh nested beside thousands of boxes exhausts Jolt's 32-bit subshape identifiers.
-        auto detail = ecs.CreateEntity();
-        detail.AddComponent<NameComponent>(sceneName + "_CollisionDetail");
-        detail.AddComponent<TransformComponent>();
-        detail.AddComponent<RigidBodyComponent>().MotionType = PhysicsMotionType::Static;
-        detail.AddComponent<ColliderComponent>(baked.Detail);
+        create(sceneName, partition.StaticSubMeshes, BistroStaticCollision::BuildWalkway(), PhysicsMotionType::Static);
+        return;
     }
+
+    const size_t count = BistroPhysics::GetCount(partition, BistroPhysics::CountScale.GetValue());
+    if (ecs.GetPool<RigidBodyComponent>().Size() + count + 1 > BistroPhysics::MaxBodies)
+        throw std::length_error("Combined Bistro physics body budget exceeded");
+    struct BakeColliders final : ParallelJob
+    {
+        BakeColliders(const Engine::Core::Mesh& mesh, const BistroPropPartition& partition)
+            : Mesh(mesh), Partition(partition), Props(partition.Props.size()) {}
+        void Execute(size_t index) override
+        {
+            Props[index] = BistroPhysics::PropShape(Mesh, Partition.Props[index]);
+        }
+        const Engine::Core::Mesh& Mesh;
+        const BistroPropPartition& Partition;
+        std::vector<PhysicsShapeDesc> Props;
+    } baked(mesh, partition);
+    if (!partition.Props.empty())
+    {
+        const auto prepared = baked.Schedule(jobs, partition.Props.size(), 1);
+        if (auto* app = dynamic_cast<App*>(BenchmarkEngine::GetInstance()); app && &app->GetJobs() == &jobs)
+            app->WaitForLoading(prepared);
+        else prepared.Complete();
+    }
+    const PhysicsShapeDesc room = BistroStaticCollision::BuildRoom();
+    create(sceneName, partition.StaticSubMeshes, room, PhysicsMotionType::Static);
     std::vector<DirectX::BoundingBox> bounds;
     for (size_t index = 0; index < partition.Props.size(); ++index)
     {
@@ -341,9 +284,8 @@ inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
     }
     if (count == partition.Props.size()) return;
     if (!physics) throw std::logic_error("Spawn copies require physics placement queries");
-    constexpr float floorHeight = 39.622f;
-    constexpr float ceilingHeight = 402.78f;
-    constexpr float roofHeight = 420.42f;
+    constexpr float floorHeight = BistroStaticCollision::FloorHeight;
+    constexpr float ceilingHeight = BistroStaticCollision::CeilingHeight;
     auto roomBounds = mesh.GetSubMesh(0).Bounds;
     for (const auto& part : mesh.GetSubMeshes()) DirectX::BoundingBox::CreateMerged(roomBounds, roomBounds, part.Bounds);
     const auto roomMinimum = Vector3(roomBounds.Center)-Vector3(roomBounds.Extents);
@@ -386,7 +328,7 @@ inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
             if (physics->OverlapsBody(world,query)) continue;
             PhysicsRayHit floor, ceiling;
             if (!physics->RayCastStatic(world,center,{0,floorHeight-center.y-2,0},floor) || floor.Normal.y<.5f ||
-                !physics->RayCastStatic(world,center,{0,roofHeight-center.y+2,0},ceiling) || ceiling.Normal.y>-.5f) continue;
+                !physics->RayCastStatic(world,center,{0,ceilingHeight-center.y+2,0},ceiling) || ceiling.Normal.y>-.5f) continue;
             const auto& prop=partition.Props[index];
             create(prop.Name+"_PhysicsCopy_"+std::to_string(copy),prop.SubMeshIndices,baked.Props[index],
                 PhysicsMotionType::Dynamic,query.Position);

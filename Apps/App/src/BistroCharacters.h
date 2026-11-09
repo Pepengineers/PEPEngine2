@@ -85,9 +85,9 @@ namespace BistroCharacters
                     PhysicsRayHit hit;
                     // Query near the authored paving, below ignored street furniture and fence rails.
                     if (!_physics->RayCastStatic(*_world, position + Vector3(0, 5, 0), {0, -55, 0}, hit) ||
-                        hit.Normal.y <= 0 || std::abs(hit.Position.y + 4.6f - position.y) >= 20)
+                        hit.Normal.y <= 0 || std::abs(hit.Position.y + BistroRoutes::PeopleGroundOffset - position.y) >= 20)
                         throw std::runtime_error("Bistro human route lost its walkable ground");
-                    position.y = hit.Position.y + 4.6f;
+                    position.y = hit.Position.y + BistroRoutes::PeopleGroundOffset;
                 }
                 auto& transform = *_transforms[group.First + member];
                 transform.Location = position;
