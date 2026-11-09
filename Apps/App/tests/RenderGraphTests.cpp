@@ -4,6 +4,7 @@
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 #include <d3d12sdklayers.h>
 #include <iostream>
+#include <functional>
 #include <sstream>
 #include "Common/GameTimer.h"
 #include <cmath>
@@ -1013,6 +1014,570 @@ static void TestAsyncQueues(GDX12Device& device)
     std::cout << "Async queues: physical RAW/WAR, DIRECT fallback, queued allocators, side-effect join and final fence passed.\n";
 }
 
+namespace PlacedTests
+{
+using namespace GDX12Submission;
+
+constexpr UINT64 Bytes = 256;
+
+class Pass final : public GDX12RenderPass
+{
+public:
+    using Recorder = std::function<void(GDX12CommandList&, const Graph::BoundResources&)>;
+    Pass(const char* name, Placement location, std::vector<Graph::Access> accesses, Recorder record)
+        : Name(name), Location(location), Accesses(std::move(accesses)), Record(std::move(record)) {}
+    void RecordRenderGraph(GDX12RenderGraphBuilder& builder) override
+    {
+        builder.SetName(Name);
+        builder.SetPlacement(Location);
+        builder.DeclareCompleteAccesses();
+        builder.HasSideEffects();
+        for (const auto& access : Accesses)
+            if (access.Version.IsValid()) builder.UseVersion(access.Id, access.Usage, access.Version, access.State);
+            else builder.Use(access.Id, access.Usage, access.State);
+    }
+    bool SupportsGraphQueue(QueueKind kind) const override { return Location.Queue == kind; }
+    void RecordPlacedCommands(GDX12CommandList* list, const Graph::BoundResources& views) override
+    { Record(*list, views); }
+private:
+    const char* Name;
+    Placement Location;
+    std::vector<Graph::Access> Accesses;
+    Recorder Record;
+};
+
+static Pass Copy(const char* name, Placement location, Graph::Resource from, Graph::Resource to,
+    TransferVersion input = {}, TransferVersion output = {})
+{
+    return Pass(name, location, {{from, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE, input},
+        {to, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST, output}},
+        [=](GDX12CommandList& list, const Graph::BoundResources& views) { list.CopyResource(views.Get(to), views.Get(from)); });
+}
+
+static std::shared_ptr<GDX12Resource> MakeResource(GDX12Device& device, D3D12_HEAP_TYPE type,
+    const D3D12_RESOURCE_DESC& desc = CD3DX12_RESOURCE_DESC::Buffer(Bytes))
+{
+    auto view = std::make_shared<GDX12Resource>();
+    const auto entry = type == D3D12_HEAP_TYPE_UPLOAD ? D3D12_RESOURCE_STATE_GENERIC_READ :
+        type == D3D12_HEAP_TYPE_READBACK ? D3D12_RESOURCE_STATE_COPY_DEST : D3D12_RESOURCE_STATE_COMMON;
+    const CD3DX12_HEAP_PROPERTIES heap(type);
+    ComPtr<ID3D12Resource> resource;
+    ThrowIfFailed(device.GetDevice()->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE,
+        &desc, entry, nullptr, IID_PPV_ARGS(&resource)));
+    view->D3DResource = GDX12ResourceHandle(std::move(resource));
+    view->SetCurrentState(entry);
+    return view;
+}
+
+static Graph::Resource Register(Graph& graph, Graph::ExecutionBindings& bindings, const char* name,
+    GDX12Device& device, std::shared_ptr<GDX12Resource> view, uint64_t id, uint64_t allocation,
+    TransferVersion version = {}, bool imported = false, bool shared = false)
+{
+    const auto key = imported ? graph.Import(name) : graph.Create(name);
+    const ResourceIdentity identity{ ResourceId{id}, device.GetSubmissionAdapterId(),
+        version.IsValid() ? version.VersionEpoch : Epoch{1}, version.Transfer, AllocationId{allocation} };
+    graph.RegisterResource(key, identity, shared);
+    bindings.Views.push_back({ key, identity, std::move(view) });
+    return key;
+}
+
+static void Fill(GDX12Resource& resource, uint32_t generation)
+{
+    void* mapped = nullptr;
+    const D3D12_RANGE empty{0, 0}, written{0, Bytes};
+    ThrowIfFailed(resource.D3DResource->Map(0, &empty, &mapped));
+    for (size_t i = 0; i < Bytes / sizeof(uint32_t); ++i)
+        static_cast<uint32_t*>(mapped)[i] = generation * 7919u + static_cast<uint32_t>(i) * 31u;
+    resource.D3DResource->Unmap(0, &written);
+}
+
+static void CheckPayload(GDX12Resource& resource, uint32_t generation)
+{
+    void* mapped = nullptr;
+    const D3D12_RANGE read{0, Bytes}, empty{0, 0};
+    ThrowIfFailed(resource.D3DResource->Map(0, &read, &mapped));
+    bool equal = true;
+    for (size_t i = 0; i < Bytes / sizeof(uint32_t); ++i)
+        equal &= static_cast<const uint32_t*>(mapped)[i] == generation * 7919u + static_cast<uint32_t>(i) * 31u;
+    resource.D3DResource->Unmap(0, &empty);
+    Require(equal, "Placed graph payload generation/checksum corrupted");
+}
+
+// Test control only. A CPU gate signal never stands in for a queue-issued completion.
+class Gate
+{
+public:
+    Gate(GDX12Device& device, GDX12CommandQueue& queue, ComPtr<ID3D12Fence>& fence) : Fence(fence)
+    {
+        ThrowIfFailed(device.GetDevice()->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&Fence)));
+        ThrowIfFailed(queue.GetCommandQueue()->Wait(Fence.Get(), 1));
+    }
+    ~Gate() { if (!Opened) Fence->Signal(1); }
+    void Open() { ThrowIfFailed(Fence->Signal(1)); Opened = true; }
+private:
+    ComPtr<ID3D12Fence>& Fence;
+    bool Opened = false;
+};
+
+static void RequireReached(CompletionPoint point, GDX12CommandQueue& queue)
+{
+    const auto deadline = GetTickCount64() + 5000;
+    while (!point.IsReachedBy(queue.GetCompletionProgress()) && GetTickCount64() < deadline) Sleep(1);
+    Require(point.IsReachedBy(queue.GetCompletionProgress()), "Expected queue progress did not occur while another queue was gated");
+}
+
+static void LocalChain(GDX12Device& device)
+{
+    auto* direct = device.GetCommandQueue();
+    auto* compute = device.TryGetComputeQueue();
+    auto* copy = device.TryGetCopyQueue();
+    Require(direct && compute && copy, "Placed fixture requires DIRECT, COMPUTE and COPY");
+    const auto adapter = device.GetSubmissionAdapterId();
+    auto upload = MakeResource(device, D3D12_HEAP_TYPE_UPLOAD);
+    auto readback = MakeResource(device, D3D12_HEAP_TYPE_READBACK);
+    Fill(*upload, 19);
+    Graph graph;
+    Graph::ExecutionBindings bindings;
+    bindings.Queues = {{&device, direct}, {&device, compute}, {&device, copy}};
+    const auto in = Register(graph, bindings, "upload", device, upload, 1, 1, {}, true);
+    const auto a = Register(graph, bindings, "direct result", device, MakeResource(device, D3D12_HEAP_TYPE_DEFAULT), 2, 2);
+    const auto b = Register(graph, bindings, "compute result", device, MakeResource(device, D3D12_HEAP_TYPE_DEFAULT), 3, 3);
+    const auto c = Register(graph, bindings, "copy result", device, MakeResource(device, D3D12_HEAP_TYPE_DEFAULT), 4, 4);
+    const auto out = Register(graph, bindings, "readback", device, readback, 5, 5, {}, true);
+    auto load = Copy("DIRECT upload", {adapter, QueueKind::Direct}, in, a);
+    auto computeCopy = Copy("COMPUTE copy", {adapter, QueueKind::Compute}, a, b);
+    auto copyPass = Copy("COPY transfer", {adapter, QueueKind::Copy}, b, c);
+    auto download = Copy("DIRECT readback", {adapter, QueueKind::Direct}, c, out);
+    graph.AddPass(load); graph.AddPass(computeCopy); graph.AddPass(copyPass); graph.AddPass(download);
+    graph.CompilePlan();
+
+    Graph::PlanExecutor executor(1);
+    const auto directBefore = direct->FenceValue, computeBefore = compute->FenceValue, copyBefore = copy->FenceValue;
+    auto invalid = bindings;
+    invalid.Queues.pop_back();
+    Reject([&] { executor.TrySubmit(graph, invalid); }, "Missing COPY queue accepted");
+    invalid = bindings;
+    invalid.Views[b].Identity.ResourceEpoch = Epoch{2};
+    Reject([&] { executor.TrySubmit(graph, invalid); }, "Wrong bound epoch accepted");
+    invalid = bindings;
+    invalid.Views[b].Native = invalid.Views[a].Native;
+    Reject([&] { executor.TrySubmit(graph, invalid); }, "One native object registered under two resource IDs");
+    Require(executor.PendingCount() == 0 && direct->FenceValue == directBefore && compute->FenceValue == computeBefore &&
+        copy->FenceValue == copyBefore, "Invalid plan reached submission");
+    const auto issued = executor.TrySubmit(graph, bindings);
+    Require(issued && issued->Batches.size() == 4 && issued->Batches[0].Timeline() == direct->GetTimelineIdentity() &&
+        issued->Batches[1].Timeline() == compute->GetTimelineIdentity() &&
+        issued->Batches[2].Timeline() == copy->GetTimelineIdentity() &&
+        issued->Batches[3].Timeline() == direct->GetTimelineIdentity(), "Wrong timelines in placed chain receipt");
+    executor.Drain();
+    CheckPayload(*readback, 19);
+    std::cout << "Native placed DIRECT -> COMPUTE -> COPY -> DIRECT payload passed.\n";
+}
+
+static void ExactAndRetirement(GDX12Device& device)
+{
+    auto* direct = device.GetCommandQueue();
+    auto* compute = device.TryGetComputeQueue();
+    auto* copy = device.TryGetCopyQueue();
+    const auto adapter = device.GetSubmissionAdapterId();
+    auto upload = MakeResource(device, D3D12_HEAP_TYPE_UPLOAD);
+    auto readback = MakeResource(device, D3D12_HEAP_TYPE_READBACK);
+    auto local = MakeResource(device, D3D12_HEAP_TYPE_DEFAULT);
+    Fill(*upload, 31);
+    ComPtr<ID3D12Fence> importGateFence;
+    Graph::PlanExecutor executor(1);
+    Gate blockImport(device, *copy, importGateFence);
+    auto* import = copy->GetCommandList();
+    import->CopyResource(local->D3DResource.Get(), upload->D3DResource.Get());
+    copy->ExecuteCommandList(import);
+    const auto ready = copy->GetLastCompletionPoint();
+    Require(ready.IsValid() && !ready.IsReachedBy(copy->GetCompletionProgress()), "Exact fixture did not issue a pending import");
+
+    Graph graph;
+    Graph::ExecutionBindings bindings;
+    bindings.Queues = {{&device, direct}, {&device, compute}, {&device, copy}};
+    const TransferVersion version{TransferId{41}, Epoch{1}, ProducerInvocationId{31}};
+    const auto input = Register(graph, bindings, "reserved local snapshot", device, local, 11, 11, version, true);
+    graph.ImportVersion(input, version);
+    const auto out = Register(graph, bindings, "exact readback", device, readback, 12, 12, {}, true);
+    auto owner = std::make_shared<int>(31);
+    auto invocationOwner = std::make_shared<int>(97);
+    const std::weak_ptr<int> weakOwner = owner, weakInvocation = invocationOwner;
+    const std::weak_ptr<GDX12Resource> weakView = local;
+    bindings.ExactInputs.push_back({input, version, ready, owner});
+    bindings.KeepAlive.push_back(invocationOwner);
+
+    const auto noop = [](GDX12CommandList&, const Graph::BoundResources&) {};
+    Pass prefix("DIRECT independent prefix", {adapter, QueueKind::Direct}, {}, noop);
+    auto consumer = Copy("COMPUTE exact reader", {adapter, QueueKind::Compute}, input, out, version);
+    Pass frame("DIRECT independent frame tail", {adapter, QueueKind::Direct}, {}, noop);
+    bool failRecording = true;
+    Pass join("DIRECT dependent consumer", {adapter, QueueKind::Direct}, {},
+        [&](GDX12CommandList&, const Graph::BoundResources&)
+        {
+            if (!failRecording) return;
+            local->SetCurrentState(D3D12_RESOURCE_STATE_COPY_DEST);
+            throw std::runtime_error("late recording failure");
+        });
+    graph.AddPass(prefix);
+    const auto reader = graph.AddPass(consumer);
+    graph.AddPass(frame);
+    const auto joined = graph.AddPass(join);
+    graph.DependsOn(joined, reader);
+    graph.CompilePlan();
+
+    const auto directBefore = direct->FenceValue, computeBefore = compute->FenceValue;
+    auto invalid = bindings;
+    invalid.ExactInputs.clear();
+    Reject([&] { executor.TrySubmit(graph, invalid); }, "Missing exact input accepted");
+    invalid = bindings;
+    invalid.ExactInputs[0].Version.Invocation = ProducerInvocationId{30};
+    Reject([&] { executor.TrySubmit(graph, invalid); }, "Stale exact input accepted");
+    invalid = bindings;
+    invalid.ExactInputs[0].Reservation.reset();
+    Reject([&] { executor.TrySubmit(graph, invalid); }, "Exact input accepted without reservation lifetime");
+    GDX12CommandQueue stale(&device, D3D12_COMMAND_LIST_TYPE_COPY);
+    const auto stalePoint = stale.SignalCompletion();
+    stale.Reset();
+    invalid = bindings;
+    invalid.ExactInputs[0].Ready = stalePoint;
+    Reject([&] { executor.TrySubmit(graph, invalid); }, "Stale readiness timeline accepted");
+    invalid = {};
+    Reject([&] { executor.TrySubmit(graph, bindings); }, "Late recorder exception lost");
+    Require(executor.PendingCount() == 0 && direct->FenceValue == directBefore && compute->FenceValue == computeBefore &&
+        local->GetCurrentState() == D3D12_RESOURCE_STATE_COMMON, "Late recording failure submitted a prefix or leaked host resource state");
+    failRecording = false;
+
+    const auto issued = executor.TrySubmit(graph, bindings);
+    Require(issued && issued->Batches.size() == 4, "Pending exact import prevented GPU-side submission");
+    RequireReached(issued->Batches[2], *direct);
+    Require(!issued->Batches[1].IsReachedBy(compute->GetCompletionProgress()) &&
+        !issued->Batches[3].IsReachedBy(direct->GetCompletionProgress()), "Exact read or dependent DIRECT pass bypassed the gate");
+    Require(!executor.TrySubmit(graph, bindings), "In-flight limit did not defer a blocked invocation");
+    bindings = {}; owner.reset(); invocationOwner.reset(); local.reset();
+    executor.CollectCompleted();
+    Require(executor.PendingCount() == 1 && !weakOwner.expired() && !weakInvocation.expired() && !weakView.expired(),
+        "Independent DIRECT completion released in-flight resource/slot owners");
+    blockImport.Open();
+    executor.Drain();
+    Require(executor.PendingCount() == 0 && weakOwner.expired() && weakInvocation.expired() && weakView.expired(),
+        "All timelines completed without retiring invocation owners");
+    CheckPayload(*readback, 31);
+    std::cout << "Issued pending Exact, pre-submit rollback, partial join, independent frame progress and retirement passed.\n";
+}
+
+static void TextureUAV(GDX12Device& device)
+{
+    auto* compute = device.TryGetComputeQueue();
+    auto* copy = device.TryGetCopyQueue();
+    const auto adapter = device.GetSubmissionAdapterId();
+    const auto textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_UINT, 2, 2, 1, 1, 1, 0,
+        D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+    auto texture = MakeResource(device, D3D12_HEAP_TYPE_DEFAULT, textureDesc);
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
+    UINT64 required = 0;
+    device.GetDevice()->GetCopyableFootprints(&textureDesc, 0, 1, 0, &footprint, nullptr, nullptr, &required);
+    auto readback = MakeResource(device, D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(required));
+
+    struct Heaps { ComPtr<ID3D12DescriptorHeap> Cpu, Gpu; };
+    auto descriptors = std::make_shared<Heaps>();
+    const std::weak_ptr<Heaps> weakDescriptors = descriptors;
+    D3D12_DESCRIPTOR_HEAP_DESC desc{};
+    desc.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+    desc.NumDescriptors = 1;
+    ThrowIfFailed(device.GetDevice()->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&descriptors->Cpu)));
+    desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+    ThrowIfFailed(device.GetDevice()->CreateDescriptorHeap(&desc, IID_PPV_ARGS(&descriptors->Gpu)));
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uav{};
+    uav.Format = DXGI_FORMAT_R32_UINT;
+    uav.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    const auto cpu = descriptors->Cpu->GetCPUDescriptorHandleForHeapStart();
+    auto* heap = descriptors->Gpu.Get();
+    const auto gpu = heap->GetGPUDescriptorHandleForHeapStart();
+    device.GetDevice()->CreateUnorderedAccessView(texture->D3DResource.Get(), nullptr, &uav, cpu);
+    device.GetDevice()->CreateUnorderedAccessView(texture->D3DResource.Get(), nullptr, &uav, heap->GetCPUDescriptorHandleForHeapStart());
+
+    Graph graph;
+    Graph::ExecutionBindings bindings;
+    bindings.Queues = {{&device, compute}, {&device, copy}};
+    bindings.KeepAlive.push_back(descriptors);
+    const auto target = Register(graph, bindings, "UAV texture", device, texture, 1, 1);
+    const auto output = Register(graph, bindings, "readback footprint", device, readback, 2, 2, {}, true);
+    const auto clear = [&](UINT value)
+    {
+        return Pass("COMPUTE UAV clear", {adapter, QueueKind::Compute},
+            {{target, Mode::Write, D3D12_RESOURCE_STATE_UNORDERED_ACCESS}},
+            [=](GDX12CommandList& list, const Graph::BoundResources& views)
+            {
+                auto* native = list.GetCommandList().Get();
+                ID3D12DescriptorHeap* heaps[]{heap};
+                const UINT pattern[]{value, 0, 0, 0};
+                native->SetDescriptorHeaps(1, heaps);
+                native->ClearUnorderedAccessViewUint(gpu, cpu, views.Get(target), pattern, 0, nullptr);
+            });
+    };
+    auto write = clear(17), overwrite = clear(83);
+    Pass download("COPY texture footprint", {adapter, QueueKind::Copy},
+        {{target, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}, {output, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+        [=](GDX12CommandList& list, const Graph::BoundResources& views)
+        {
+            const CD3DX12_TEXTURE_COPY_LOCATION source(views.Get(target), 0);
+            const CD3DX12_TEXTURE_COPY_LOCATION destination(views.Get(output), footprint);
+            list.GetCommandList()->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+        });
+    graph.AddPass(write); graph.AddPass(overwrite); graph.AddPass(download); graph.CompilePlan();
+    ComPtr<ID3D12Fence> gateFence;
+    Graph::PlanExecutor executor(1);
+    Gate blockUAV(device, *compute, gateFence);
+    auto invalid = bindings;
+    invalid.Views[target].Native = MakeResource(device, D3D12_HEAP_TYPE_DEFAULT,
+        CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_UINT, 2, 2, 1, 1));
+    const auto before = compute->FenceValue;
+    Reject([&] { executor.TrySubmit(graph, invalid); }, "Texture without UAV flag accepted");
+    Require(compute->FenceValue == before, "Illegal UAV access submitted a batch");
+    invalid = {};
+    Require(executor.TrySubmit(graph, bindings).has_value(), "UAV texture submission unexpectedly deferred");
+    bindings = {}; descriptors.reset();
+    executor.CollectCompleted();
+    Require(!weakDescriptors.expired(), "Pending GPU work lost shader-visible descriptor owner");
+    blockUAV.Open();
+    executor.Drain();
+    Require(weakDescriptors.expired(), "Completed GPU work retained descriptor owner");
+    void* mapped = nullptr;
+    const D3D12_RANGE read{0, static_cast<SIZE_T>(required)}, empty{0, 0};
+    ThrowIfFailed(readback->D3DResource->Map(0, &read, &mapped));
+    bool equal = true;
+    for (size_t row = 0; row < 2; ++row)
+    {
+        const auto* pixels = reinterpret_cast<const UINT*>(static_cast<const BYTE*>(mapped) + footprint.Offset + row * footprint.Footprint.RowPitch);
+        equal &= pixels[0] == 83 && pixels[1] == 83;
+    }
+    readback->D3DResource->Unmap(0, &empty);
+    Require(equal, "UAV texture overwrite / COMPUTE-to-COPY handoff corrupted readback");
+    std::cout << "Native UAV texture WAW, COPY footprint and descriptor retirement passed.\n";
+}
+
+struct SharedBuffer
+{
+    ComPtr<ID3D12Heap> Heaps[2];
+    GDX12Resource Views[2];
+};
+
+static std::shared_ptr<SharedBuffer> MakeSharedBuffer(GDX12Device& first, GDX12Device& second)
+{
+    const auto desc = CD3DX12_RESOURCE_DESC::Buffer(Bytes, D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER);
+    const auto a = first.GetDevice()->GetResourceAllocationInfo(0, 1, &desc);
+    const auto b = second.GetDevice()->GetResourceAllocationInfo(0, 1, &desc);
+    const auto invalid = (std::numeric_limits<UINT64>::max)();
+    Require(a.SizeInBytes != invalid && b.SizeInBytes != invalid, "Cross-adapter allocation unsupported");
+    D3D12_HEAP_DESC heap{};
+    heap.Alignment = (std::max)(a.Alignment, b.Alignment);
+    heap.SizeInBytes = (std::max)(a.SizeInBytes, b.SizeInBytes);
+    heap.Properties = CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT);
+    heap.Flags = D3D12_HEAP_FLAG_SHARED | D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER;
+    auto storage = std::make_shared<SharedBuffer>();
+    ThrowIfFailed(first.GetDevice()->CreateHeap(&heap, IID_PPV_ARGS(&storage->Heaps[0])));
+    struct Handle { HANDLE Value = nullptr; ~Handle() { if (Value) CloseHandle(Value); } } handle;
+    ThrowIfFailed(first.GetDevice()->CreateSharedHandle(storage->Heaps[0].Get(), nullptr, GENERIC_ALL, nullptr, &handle.Value));
+    ThrowIfFailed(second.GetDevice()->OpenSharedHandle(handle.Value, IID_PPV_ARGS(&storage->Heaps[1])));
+    GDX12Device* devices[]{&first, &second};
+    for (size_t i = 0; i < 2; ++i)
+    {
+        ComPtr<ID3D12Resource> view;
+        ThrowIfFailed(devices[i]->GetDevice()->CreatePlacedResource(storage->Heaps[i].Get(), 0, &desc,
+            D3D12_RESOURCE_STATE_COMMON, nullptr, IID_PPV_ARGS(&view)));
+        storage->Views[i].D3DResource = GDX12ResourceHandle(std::move(view));
+    }
+    return storage;
+}
+
+static void RemoteExactAndReuse(GDX12Device& first, GDX12Device& second,
+    GDX12CommandQueue& firstCopy, GDX12CommandQueue& secondCopy)
+{
+    auto storage = MakeSharedBuffer(first, second);
+    auto readback1 = MakeResource(second, D3D12_HEAP_TYPE_READBACK);
+    auto readback2 = MakeResource(second, D3D12_HEAP_TYPE_READBACK);
+    ComPtr<ID3D12Fence> producerGateFence, readerGateFence;
+    Graph::PlanExecutor executor(4);
+    Gate holdProducer(first, firstCopy, producerGateFence), holdReader(second, secondCopy, readerGateFence);
+    struct Publication { TransferVersion Version; CompletionPoint Ready; ResourceIdentity Source; };
+
+    const auto publish = [&](unsigned generation)
+    {
+        const TransferVersion version{TransferId{71}, Epoch{1}, ProducerInvocationId{generation}};
+        auto upload = MakeResource(first, D3D12_HEAP_TYPE_UPLOAD);
+        Fill(*upload, generation);
+        Graph graph;
+        Graph::ExecutionBindings bindings;
+        bindings.Queues = {{&first, &firstCopy}};
+        const auto in = Register(graph, bindings, "upload", first, upload, 10 + generation, 10 + generation, {}, true);
+        const auto out = Register(graph, bindings, "export alias", first, {storage, &storage->Views[0]}, 1, 1, version, false, true);
+        auto copy = Copy("remote export", {first.GetSubmissionAdapterId(), QueueKind::Copy}, in, out, {}, version);
+        graph.AddPass(copy); graph.CompilePlan();
+        const auto receipt = executor.TrySubmit(graph, bindings);
+        Require(receipt.has_value(), "Remote producer unexpectedly deferred");
+        return Publication{version, receipt->Batches.front(), bindings.Views[out].Identity};
+    };
+    const auto read = [&](const Publication& publication, std::shared_ptr<GDX12Resource> output, uint64_t key, bool invalidProvenance)
+    {
+        Graph graph;
+        Graph::ExecutionBindings bindings;
+        bindings.Queues = {{&second, &secondCopy}};
+        const auto in = Register(graph, bindings, "exact imported shared view", second, {storage, &storage->Views[1]},
+            2, 1, publication.Version, true, true);
+        graph.ImportVersion(in, publication.Version);
+        const auto out = Register(graph, bindings, "readback", second, output, key, key, {}, true);
+        auto source = publication.Source;
+        if (invalidProvenance) source.Allocation = AllocationId{999};
+        bindings.ExactInputs.push_back({in, publication.Version, publication.Ready, storage, &firstCopy, source});
+        auto copy = Copy("remote exact read", {second.GetSubmissionAdapterId(), QueueKind::Copy}, in, out, publication.Version);
+        graph.AddPass(copy); graph.CompilePlan();
+        const auto receipt = executor.TrySubmit(graph, bindings);
+        Require(receipt.has_value(), "Remote exact reader unexpectedly deferred");
+        return receipt->Batches.front();
+    };
+
+    const auto firstReady = publish(101);
+    Require(!firstReady.Ready.IsReachedBy(firstCopy.GetCompletionProgress()), "Remote ready fixture was not pending");
+    const auto before = secondCopy.FenceValue;
+    Reject([&] { read(firstReady, readback1, 301, true); }, "Remote export without matching allocation provenance accepted");
+    Require(secondCopy.FenceValue == before, "Invalid remote exact binding submitted");
+    const auto firstRead = read(firstReady, readback1, 301, false);
+    const auto secondReady = publish(102);
+    holdProducer.Open();
+    RequireReached(firstReady.Ready, firstCopy);
+    Require(!secondReady.Ready.IsReachedBy(firstCopy.GetCompletionProgress()) &&
+        !firstRead.IsReachedBy(secondCopy.GetCompletionProgress()), "Reused allocation overwrote a pending remote reader");
+    Reject([&] { read(firstReady, readback1, 301, false); }, "Old exact generation accepted after a newer alias writer was queued");
+    const auto secondRead = read(secondReady, readback2, 302, false);
+    Require(executor.PendingCount() >= 3 && !secondRead.IsReachedBy(secondCopy.GetCompletionProgress()),
+        "Remote reader/overwrite chain bypassed its gate");
+    holdReader.Open();
+    executor.Drain();
+    CheckPayload(*readback1, 101); CheckPayload(*readback2, 102);
+    std::cout << "Remote issued Exact, shared provenance and cross-invocation alias WAR passed.\n";
+}
+
+static void TwoAdapters(GDX12Device& first, GDX12Device& second)
+{
+    const auto firstLuid = first.GetAdapterLuid(), secondLuid = second.GetAdapterLuid();
+    Require(firstLuid.HighPart != secondLuid.HighPart || firstLuid.LowPart != secondLuid.LowPart, "Fixture used the same physical GPU twice");
+    GDX12CommandQueue firstCopy(&first, D3D12_COMMAND_LIST_TYPE_COPY, true);
+    GDX12CommandQueue secondCopy(&second, D3D12_COMMAND_LIST_TYPE_COPY, true);
+    auto* compute = second.TryGetComputeQueue();
+    Require(compute, "Secondary COMPUTE queue unavailable");
+    const auto a = first.GetSubmissionAdapterId(), b = second.GetSubmissionAdapterId();
+    auto inputShared = MakeSharedBuffer(first, second), outputShared = MakeSharedBuffer(first, second);
+    auto source = MakeResource(first, D3D12_HEAP_TYPE_DEFAULT);
+    auto imported = MakeResource(second, D3D12_HEAP_TYPE_DEFAULT);
+    auto processed = MakeResource(second, D3D12_HEAP_TYPE_DEFAULT);
+    auto returned = MakeResource(first, D3D12_HEAP_TYPE_DEFAULT);
+    std::array<std::shared_ptr<GDX12Resource>, 2> readbacks;
+    ComPtr<ID3D12Fence> secondGateFence;
+    Graph::PlanExecutor executor(2);
+    Gate holdSecondCopy(second, secondCopy, secondGateFence);
+
+    for (unsigned generation = 0; generation < readbacks.size(); ++generation)
+    {
+        const TransferVersion vin{TransferId{51}, Epoch{1}, ProducerInvocationId{generation + 1u}};
+        const TransferVersion vout{TransferId{52}, Epoch{1}, ProducerInvocationId{generation + 1u}};
+        auto upload = MakeResource(first, D3D12_HEAP_TYPE_UPLOAD);
+        Fill(*upload, generation + 73);
+        readbacks[generation] = MakeResource(first, D3D12_HEAP_TYPE_READBACK);
+        Graph graph;
+        Graph::ExecutionBindings bindings;
+        bindings.Queues = {{&first, first.GetCommandQueue()}, {&first, &firstCopy}, {&second, &secondCopy}, {&second, compute}};
+        const auto in = Register(graph, bindings, "upload", first, upload, 100 + generation, 100 + generation, {}, true);
+        const auto local0 = Register(graph, bindings, "source", first, source, 1, 1, vin);
+        const auto shared0 = Register(graph, bindings, "export view", first, {inputShared, &inputShared->Views[0]}, 2, 2, vin, false, true);
+        const auto shared1 = Register(graph, bindings, "import view", second, {inputShared, &inputShared->Views[1]}, 3, 2, vin, false, true);
+        const auto local1 = Register(graph, bindings, "imported local", second, imported, 4, 4, vin);
+        const auto result1 = Register(graph, bindings, "processed local", second, processed, 5, 5, vout);
+        const auto resultShared1 = Register(graph, bindings, "result export view", second, {outputShared, &outputShared->Views[1]}, 6, 6, vout, false, true);
+        const auto resultShared0 = Register(graph, bindings, "result import view", first, {outputShared, &outputShared->Views[0]}, 7, 6, vout, false, true);
+        const auto result0 = Register(graph, bindings, "returned local", first, returned, 8, 8, vout);
+        const auto out = Register(graph, bindings, "readback", first, readbacks[generation], 110 + generation, 110 + generation, {}, true);
+        auto load = Copy("DIRECT0 source", {a, QueueKind::Direct}, in, local0, {}, vin);
+        auto exportInput = Copy("COPY0 export", {a, QueueKind::Copy}, local0, shared0, vin, vin);
+        auto importInput = Copy("COPY1 import", {b, QueueKind::Copy}, shared1, local1, vin, vin);
+        auto solve = Copy("COMPUTE1 process", {b, QueueKind::Compute}, local1, result1, vin, vout);
+        auto exportResult = Copy("COPY1 export", {b, QueueKind::Copy}, result1, resultShared1, vout, vout);
+        auto importResult = Copy("COPY0 import", {a, QueueKind::Copy}, resultShared0, result0, vout, vout);
+        auto read = Copy("DIRECT0 readback", {a, QueueKind::Direct}, result0, out, vout);
+        graph.AddPass(load); graph.AddPass(exportInput); graph.AddPass(importInput); graph.AddPass(solve);
+        graph.AddPass(exportResult); graph.AddPass(importResult); graph.AddPass(read);
+        graph.CompilePlan();
+        if (!generation)
+        {
+            auto invalid = bindings;
+            invalid.Queues[1].Queue = first.TryGetCopyQueue();
+            Require(invalid.Queues[1].Queue, "Local COPY queue unavailable for capability negative case");
+            const auto firstBefore = first.GetCommandQueue()->FenceValue, secondBefore = secondCopy.FenceValue;
+            Reject([&] { executor.TrySubmit(graph, invalid); }, "Cross-adapter wait accepted non-exportable producer");
+            invalid = bindings;
+            invalid.Views[shared1].Native = invalid.Views[shared0].Native;
+            Reject([&] { executor.TrySubmit(graph, invalid); }, "Foreign native resource view accepted");
+            Require(executor.PendingCount() == 0 && first.GetCommandQueue()->FenceValue == firstBefore &&
+                secondCopy.FenceValue == secondBefore, "Cross-adapter preflight failure submitted work");
+        }
+        const auto receipt = executor.TrySubmit(graph, bindings);
+        Require(receipt && receipt->Batches.size() == 7 && receipt->Batches[1].Timeline() == firstCopy.GetTimelineIdentity() &&
+            receipt->Batches[2].Timeline() == secondCopy.GetTimelineIdentity() &&
+            receipt->Batches[3].Timeline() == compute->GetTimelineIdentity(), "Physical round-trip receipt has wrong placement");
+    }
+    Require(executor.PendingCount() == 2, "Gated physical invocations did not remain in flight");
+    holdSecondCopy.Open();
+    executor.Drain();
+    CheckPayload(*readbacks[0], 73); CheckPayload(*readbacks[1], 74);
+    RemoteExactAndReuse(first, second, firstCopy, secondCopy);
+    std::cout << "Physical adapters " << firstLuid.HighPart << ':' << firstLuid.LowPart << " and "
+        << secondLuid.HighPart << ':' << secondLuid.LowPart << ": two queued HAO round trips, allocation aliases and generations passed.\n";
+}
+
+static void CheckDebug(ID3D12InfoQueue& info)
+{
+    for (UINT64 i = 0; i < info.GetNumStoredMessages(); ++i)
+    {
+        SIZE_T size = 0;
+        ThrowIfFailed(info.GetMessage(i, nullptr, &size));
+        std::vector<BYTE> storage(size);
+        auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+        ThrowIfFailed(info.GetMessage(i, message, &size));
+        if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR) throw std::runtime_error(message->pDescription);
+    }
+}
+
+static bool RunPhysical(GDX12Device& primary)
+{
+    auto& factory = GDX12DeviceFactory::GetFactory();
+    const auto primaryLuid = primary.GetAdapterLuid();
+    for (UINT i = 0;; ++i)
+    {
+        ComPtr<IDXGIAdapter4> adapter;
+        const auto hr = factory->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&adapter));
+        if (hr == DXGI_ERROR_NOT_FOUND) return false;
+        ThrowIfFailed(hr);
+        DXGI_ADAPTER_DESC1 desc{};
+        ThrowIfFailed(adapter->GetDesc1(&desc));
+        if ((desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) ||
+            (desc.AdapterLuid.HighPart == primaryLuid.HighPart && desc.AdapterLuid.LowPart == primaryLuid.LowPart)) continue;
+        const auto support = D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device14), nullptr);
+        if (support == DXGI_ERROR_UNSUPPORTED || support == E_NOTIMPL) continue;
+        ThrowIfFailed(support);
+        GDX12Device secondary;
+        secondary.Role = DEVICE_ROLE_SECONDARY;
+        ThrowIfFailed(secondary.Initialize(adapter));
+        ComPtr<ID3D12InfoQueue> info;
+        ThrowIfFailed(secondary.GetDevice().As(&info));
+        info->ClearStoredMessages();
+        TwoAdapters(primary, secondary);
+        secondary.Reset();
+        CheckDebug(*info.Get());
+        return true;
+    }
+}
+}
+
 int main(int argc, char** argv)
 {
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
@@ -1032,7 +1597,7 @@ int main(int argc, char** argv)
         ComPtr<ID3D12Debug> debug;
         ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
         debug->EnableDebugLayer();
-        bool streamline = false;
+        bool streamline = false, placed = false, requireTwo = false;
         for (int i = 1; i < argc; ++i)
             if (std::string_view(argv[i]) == "--gpu-validation")
             {
@@ -1042,6 +1607,10 @@ int main(int argc, char** argv)
             }
             else if (std::string_view(argv[i]) == "--streamline")
                 streamline = true;
+            else if (std::string_view(argv[i]) == "--placed")
+                placed = true;
+            else if (std::string_view(argv[i]) == "--require-two-adapters")
+                placed = requireTwo = true;
         if (streamline) Require(GDX12StreamlineSDK::Get().Initialize(), "Streamline initialization unavailable for fixture");
         GDX12Device device;
         ThrowIfFailed(device.Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
@@ -1051,15 +1620,18 @@ int main(int argc, char** argv)
         TestPooling(device);
         TestAsyncQueues(device);
         TestAsyncTexture(device);
-        for (UINT64 i = 0; i < info->GetNumStoredMessages(); ++i)
+        if (placed)
         {
-            SIZE_T size = 0;
-            ThrowIfFailed(info->GetMessage(i, nullptr, &size));
-            std::vector<BYTE> storage(size);
-            auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data());
-            ThrowIfFailed(info->GetMessage(i, message, &size));
-            if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR) throw std::runtime_error(message->pDescription);
+            PlacedTests::LocalChain(device);
+            PlacedTests::ExactAndRetirement(device);
+            PlacedTests::TextureUAV(device);
         }
+        if (requireTwo)
+        {
+            Require(PlacedTests::RunPhysical(device), "Physical two-adapter acceptance requested but no compatible adapter found");
+            std::cout << "Native graph physical two-GPU=PASS\n";
+        }
+        PlacedTests::CheckDebug(*info.Get());
         D3D12MA::TotalStatistics stats = {};
         device.GetMemoryAllocator()->CalculateStatistics(&stats);
         Require(stats.Total.Stats.AllocationCount == 0, "Graph leaked GPU allocations");

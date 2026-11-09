@@ -4,6 +4,7 @@
 #include "Engine.RendererDX12/GDX12Submission.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include <iosfwd>
+#include <optional>
 #include <unordered_map>
 
 class GDX12CommandList;
@@ -78,6 +79,67 @@ public:
         // Exact external inputs: runtime must retain reservations and bind import readiness.
         std::vector<VersionInput> Inputs;
         bool RequiresNewExecutor = false;
+    };
+    struct QueueBinding
+    {
+        GDX12Device* Device;
+        GDX12CommandQueue* Queue;
+    };
+    struct ViewBinding
+    {
+        Resource View;
+        GDX12Submission::ResourceIdentity Identity;
+        // An aliasing shared_ptr may retain the placed heap / transport slot owner.
+        std::shared_ptr<GDX12Resource> Native;
+    };
+    struct ExactInputBinding
+    {
+        Resource View;
+        GDX12Submission::TransferVersion Version;
+        GDX12Submission::CompletionPoint Ready;
+        std::shared_ptr<const void> Reservation;
+        // A remote shared export needs both its actual issuer and its source view identity.
+        GDX12CommandQueue* SharedProducer = nullptr;
+        GDX12Submission::ResourceIdentity SharedSource{};
+    };
+    struct ExecutionBindings
+    {
+        std::vector<QueueBinding> Queues;
+        std::vector<ViewBinding> Views;
+        std::vector<ExactInputBinding> ExactInputs;
+        // Immutable per-invocation descriptor, PSO and upload-slot owners.
+        std::vector<std::shared_ptr<const void>> KeepAlive;
+    };
+    struct ExecutionReceipt
+    {
+        std::vector<GDX12Submission::CompletionPoint> Batches;
+    };
+    class PlanExecutor;
+    class BoundResources
+    {
+    public:
+        ID3D12Resource* Get(Resource view) const;
+    private:
+        friend class PlanExecutor;
+        std::vector<std::pair<Resource, ID3D12Resource*>> _views;
+    };
+    // One externally serialized domain for the supplied queues and physical allocations.
+    // Drain before resetting/destroying their queues or devices.
+    class PlanExecutor
+    {
+    public:
+        explicit PlanExecutor(size_t maxInFlight);
+        ~PlanExecutor();
+        PlanExecutor(const PlanExecutor&) = delete;
+        PlanExecutor& operator=(const PlanExecutor&) = delete;
+        // Empty receipt means bounded in-flight capacity was exhausted.
+        std::optional<ExecutionReceipt> TrySubmit(const GDX12RenderGraph& graph, const ExecutionBindings& bindings);
+        void CollectCompleted();
+        void Drain();
+        size_t PendingCount() const;
+    private:
+        struct State;
+        std::unique_ptr<State> _state;
     };
     struct Statistics
     {

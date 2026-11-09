@@ -55,6 +55,8 @@ public:
     // Explicit placement must opt into command-list types this pass can record.
     virtual bool SupportsGraphQueue(GDX12Submission::QueueKind queue) const
     { return queue == GDX12Submission::QueueKind::Direct; }
+    // Record only declared resources, preserving the executor's entry states until release.
+    virtual void RecordPlacedCommands(GDX12CommandList*, const GDX12RenderGraph::BoundResources&);
     // Used by upscalers to determine downscaled render target size
     // And share it with all other passes
     virtual void QueryRenderTargetResolution() {};

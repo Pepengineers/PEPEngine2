@@ -656,12 +656,500 @@ void GDX12RenderGraph::BuildPlan()
     { return a.Producer == b.Producer ? a.Consumer < b.Consumer : a.Producer < b.Producer; });
 }
 
+namespace
+{
+    bool SameIdentity(const ResourceIdentity& a, const ResourceIdentity& b)
+    {
+        return a.Id == b.Id && a.Adapter == b.Adapter && a.ResourceEpoch == b.ResourceEpoch &&
+            a.Transfer == b.Transfer && a.Allocation == b.Allocation;
+    }
+
+    bool SameBacking(const ResourceIdentity& a, const ResourceIdentity& b)
+    {
+        return a.Id == b.Id || (a.Allocation != AllocationId::Invalid && a.Allocation == b.Allocation);
+    }
+
+    void CheckNativeOwner(ID3D12DeviceChild* native, GDX12Device& device)
+    {
+        ComPtr<IUnknown> owner, expected;
+        ThrowIfFailed(native->GetDevice(IID_PPV_ARGS(&owner)));
+        ThrowIfFailed(device.GetDevice().As(&expected));
+        if (owner.Get() != expected.Get())
+            throw std::invalid_argument("Graph executor: native object belongs to another device");
+    }
+
+    FenceProgress CheckProgress(FenceProgress progress)
+    {
+        if (progress.CompletedValue == (std::numeric_limits<uint64_t>::max)())
+            ThrowIfFailed(DXGI_ERROR_DEVICE_REMOVED);
+        return progress;
+    }
+
+    struct PlacedView
+    {
+        GDX12RenderGraph::ViewBinding Binding{};
+        GDX12ResourceHandle Handle;
+        D3D12_RESOURCE_DESC Desc{};
+        D3D12_HEAP_TYPE Heap = D3D12_HEAP_TYPE_DEFAULT;
+        D3D12_RESOURCE_STATES Entry = D3D12_RESOURCE_STATE_COMMON;
+        bool CrossAdapter = false;
+    };
+
+    void CheckAlias(const PlacedView& a, const PlacedView& b)
+    {
+        const auto& x = a.Binding.Identity;
+        const auto& y = b.Binding.Identity;
+        const bool sameNative = a.Handle.Get() == b.Handle.Get();
+        if ((sameNative || x.Id == y.Id) && !(sameNative && SameIdentity(x, y)))
+            throw std::invalid_argument("Graph executor: inconsistent native view identity");
+        if (!SameBacking(x, y) || sameNative) return;
+        if (x.Adapter == y.Adapter)
+            throw std::invalid_argument("Graph executor: one native view per device/backing is required");
+        if (!a.CrossAdapter || !b.CrossAdapter || a.Desc.Width != b.Desc.Width)
+            throw std::invalid_argument("Graph executor: incompatible cross-adapter alias views");
+    }
+
+    void CheckNativeAccess(const PlacedView& view, const GDX12RenderGraph::Access& access)
+    {
+        const auto state = access.State;
+        const auto flags = view.Desc.Flags;
+        const UINT ordinaryStates = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_INDEX_BUFFER |
+            D3D12_RESOURCE_STATE_RENDER_TARGET | D3D12_RESOURCE_STATE_UNORDERED_ACCESS | D3D12_RESOURCE_STATE_DEPTH_WRITE |
+            D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_STREAM_OUT |
+            D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT | D3D12_RESOURCE_STATE_COPY_DEST | D3D12_RESOURCE_STATE_COPY_SOURCE |
+            D3D12_RESOURCE_STATE_RESOLVE_DEST | D3D12_RESOURCE_STATE_RESOLVE_SOURCE;
+        const auto bufferStates = D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_INDEX_BUFFER |
+            D3D12_RESOURCE_STATE_STREAM_OUT | D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
+        if (state == D3D12_RESOURCE_STATE_COMMON || (static_cast<UINT>(state) & ~ordinaryStates) != 0 ||
+            ((state & bufferStates) && view.Desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER) ||
+            ((state & D3D12_RESOURCE_STATE_UNORDERED_ACCESS) && !(flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)) ||
+            ((state & D3D12_RESOURCE_STATE_RENDER_TARGET) && !(flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET)) ||
+            ((state & (D3D12_RESOURCE_STATE_DEPTH_WRITE | D3D12_RESOURCE_STATE_DEPTH_READ)) && !(flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL)) ||
+            ((state & D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE) && (flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE)))
+            throw std::invalid_argument("Graph executor: resource flags do not support the declared state");
+        if (view.Heap == D3D12_HEAP_TYPE_UPLOAD &&
+            (access.Usage != GDX12RenderGraph::Mode::Read || (state & view.Entry) != state))
+            throw std::invalid_argument("Graph executor: upload buffers are fixed GENERIC_READ");
+        if (view.Heap == D3D12_HEAP_TYPE_READBACK &&
+            (access.Usage != GDX12RenderGraph::Mode::Write || state != D3D12_RESOURCE_STATE_COPY_DEST))
+            throw std::invalid_argument("Graph executor: readback buffers are fixed COPY_DEST");
+        if (view.CrossAdapter && state != D3D12_RESOURCE_STATE_COPY_SOURCE && state != D3D12_RESOURCE_STATE_COPY_DEST)
+            throw std::invalid_argument("Graph executor: shared backing views are copy-only");
+    }
+
+    void CheckWaitPath(GDX12CommandQueue& producer, GDX12CommandQueue& consumer)
+    {
+        if (&producer == &consumer) return;
+        if (producer.GetIdentity().Location.Adapter != consumer.GetIdentity().Location.Adapter)
+            consumer.ImportTimeline(producer);
+        CheckProgress(consumer.GetCompletionProgress(producer.GetTimelineIdentity()));
+    }
+
+    void AddIssuedWait(std::vector<CompletionPoint>& waits, CompletionPoint point)
+    {
+        for (auto& previous : waits)
+            if (previous.Timeline() == point.Timeline())
+            {
+                if (previous.Value() < point.Value()) previous = point;
+                return;
+            }
+        waits.push_back(point);
+    }
+}
+
+struct GDX12RenderGraph::PlanExecutor::State
+{
+    struct Batch
+    {
+        QueueBinding Binding{};
+        TimelineId Timeline;
+        ComPtr<ID3D12Fence> Fence;
+        std::vector<Access> Uses;
+        std::vector<size_t> Dependencies;
+        std::vector<CompletionPoint> Waits;
+        std::unique_ptr<GDX12CommandList> Commands;
+        CompletionPoint Point;
+        bool Submitted = false;
+
+        bool Completed() const
+        {
+            return !Submitted || (Point.IsValid() && Point.IsReachedBy(
+                CheckProgress({ Timeline, Fence->GetCompletedValue() })));
+        }
+    };
+    struct Invocation
+    {
+        std::vector<PlacedView> Views;
+        std::vector<Batch> Batches;
+        std::vector<std::shared_ptr<const void>> Owners;
+    };
+
+    explicit State(size_t maxInFlight) : Capacity(maxInFlight) { Pending.reserve(maxInFlight); }
+    size_t Capacity;
+    bool Failed = false;
+    std::vector<Invocation> Pending;
+};
+
+ID3D12Resource* GDX12RenderGraph::BoundResources::Get(Resource view) const
+{
+    for (const auto& entry : _views)
+        if (entry.first == view) return entry.second;
+    throw std::invalid_argument("Graph recorder requested an undeclared physical view");
+}
+
+void GDX12RenderPass::RecordPlacedCommands(GDX12CommandList*, const GDX12RenderGraph::BoundResources&)
+{
+    throw std::logic_error("Explicit placement requires a placed command recorder");
+}
+
+GDX12RenderGraph::PlanExecutor::PlanExecutor(size_t maxInFlight)
+{
+    if (!maxInFlight) throw std::invalid_argument("Graph executor requires nonzero in-flight capacity");
+    _state = std::make_unique<State>(maxInFlight);
+}
+
+GDX12RenderGraph::PlanExecutor::~PlanExecutor()
+{
+    try { Drain(); }
+    catch (...)
+    {
+        // shortcut: retain unresolved GPU owners on fatal teardown until process exit, until device-loss recovery owns them.
+        OutputDebugStringA("Graph executor could not prove GPU retirement during teardown; retaining native owners.\n");
+        _state.release();
+    }
+}
+
+size_t GDX12RenderGraph::PlanExecutor::PendingCount() const { return _state->Pending.size(); }
+
+void GDX12RenderGraph::PlanExecutor::CollectCompleted()
+{
+    auto& pending = _state->Pending;
+    pending.erase(std::remove_if(pending.begin(), pending.end(), [](const State::Invocation& invocation)
+    {
+        return std::all_of(invocation.Batches.begin(), invocation.Batches.end(),
+            [](const State::Batch& batch) { return batch.Completed(); });
+    }), pending.end());
+}
+
+void GDX12RenderGraph::PlanExecutor::Drain()
+{
+    // Observe all dependencies while draining so a failed remote producer cannot hide behind a local wait.
+    while (!_state->Pending.empty())
+    {
+        for (auto& invocation : _state->Pending)
+            for (auto& batch : invocation.Batches)
+                if (batch.Submitted && !batch.Completed())
+                {
+                    auto& queue = *batch.Binding.Queue;
+                    if (!(queue.GetTimelineIdentity() == batch.Timeline))
+                        throw std::logic_error("Graph executor: queue reset before retirement");
+                    CheckProgress({ batch.Timeline, batch.Fence->GetCompletedValue() });
+                    for (const auto& wait : batch.Waits) CheckProgress(queue.GetCompletionProgress(wait.Timeline()));
+                    if (!batch.Point.IsValid()) batch.Point = queue.SignalCompletion();
+                }
+        CollectCompleted();
+        if (!_state->Pending.empty()) Sleep(1);
+    }
+}
+
+std::optional<GDX12RenderGraph::ExecutionReceipt> GDX12RenderGraph::PlanExecutor::TrySubmit(
+    const GDX12RenderGraph& graph, const ExecutionBindings& bindings)
+{
+    if (_state->Failed) throw std::logic_error("Graph executor stopped after a submission failure");
+    const auto& plan = graph.GetCompiledPlan();
+    if (!plan.RequiresNewExecutor ||
+        std::any_of(plan.Batches.begin(), plan.Batches.end(), [](const PlannedBatch& b) { return b.LegacyPrimary; }))
+        throw std::invalid_argument("Graph executor requires an entirely explicitly placed plan");
+    CollectCompleted();
+    if (_state->Pending.size() == _state->Capacity) return std::nullopt;
+
+    State::Invocation work;
+    work.Batches.resize(plan.Batches.size());
+    work.Views.resize(plan.Views.size());
+    work.Owners = bindings.KeepAlive;
+    std::vector<Placement> placements;
+    std::unordered_map<AdapterId, GDX12Device*> devices;
+    for (const auto& binding : bindings.Queues)
+    {
+        if (!binding.Device || !binding.Device->IsInitialized() || !binding.Queue ||
+            !binding.Queue->GetCommandQueue() || !binding.Queue->GetFence())
+            throw std::invalid_argument("Graph executor: missing live queue/device binding");
+        auto& queue = *binding.Queue;
+        const auto location = queue.GetIdentity().Location;
+        if (!queue.GetTimelineIdentity().IsValid() || location.Adapter != binding.Device->GetSubmissionAdapterId() ||
+            std::find(placements.begin(), placements.end(), location) != placements.end() ||
+            queue.GetCommandQueue()->GetDesc().Type != queue.GetType())
+            throw std::invalid_argument("Graph executor: invalid or duplicate queue placement");
+        const auto inserted = devices.emplace(location.Adapter, binding.Device);
+        if (inserted.first->second != binding.Device)
+            throw std::invalid_argument("Graph executor: one device per adapter incarnation");
+        CheckNativeOwner(queue.GetCommandQueue().Get(), *binding.Device);
+        CheckProgress(queue.GetCompletionProgress());
+        ThrowIfFailed(binding.Device->GetDevice()->GetDeviceRemovedReason());
+        placements.push_back(location);
+    }
+
+    for (const auto& binding : bindings.Views)
+    {
+        if (binding.View >= plan.Views.size() || !binding.Native || !binding.Native->D3DResource ||
+            work.Views[binding.View].Handle)
+            throw std::invalid_argument("Graph executor: invalid or duplicate physical view binding");
+        const auto& planned = plan.Views[binding.View];
+        const auto& id = binding.Identity;
+        const auto device = devices.find(id.Adapter);
+        if (planned.LogicalToken || id.Id == ResourceId::Invalid || !SameIdentity(id, planned.Identity) ||
+            device == devices.end())
+            throw std::invalid_argument("Graph executor: physical view identity or epoch differs from the plan");
+        auto& view = work.Views[binding.View];
+        view.Binding = binding;
+        view.Handle = binding.Native->D3DResource;
+        view.Desc = view.Handle->GetDesc();
+        CheckNativeOwner(view.Handle.Get(), *device->second);
+        D3D12_HEAP_PROPERTIES heap{};
+        D3D12_HEAP_FLAGS flags{};
+        ThrowIfFailed(view.Handle->GetHeapProperties(&heap, &flags));
+        view.Heap = heap.Type;
+        view.CrossAdapter = (view.Desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER) != 0;
+        if (view.CrossAdapter != planned.CrossAdapter || (view.CrossAdapter &&
+            (!(flags & D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER) || heap.Type != D3D12_HEAP_TYPE_DEFAULT ||
+                view.Desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER)))
+            throw std::invalid_argument("Graph executor: cross-adapter binding requires a shared buffer view");
+        if (heap.Type == D3D12_HEAP_TYPE_UPLOAD) view.Entry = D3D12_RESOURCE_STATE_GENERIC_READ;
+        else if (heap.Type == D3D12_HEAP_TYPE_READBACK) view.Entry = D3D12_RESOURCE_STATE_COPY_DEST;
+        else if (heap.Type != D3D12_HEAP_TYPE_DEFAULT)
+            throw std::invalid_argument("Graph executor: unsupported heap type");
+        if (binding.Native->GetCurrentState() != view.Entry)
+            throw std::invalid_argument("Graph executor: view was not released to its entry state");
+        for (const auto& other : work.Views)
+            if (&other != &view && other.Handle) CheckAlias(other, view);
+        for (const auto& previous : _state->Pending)
+            for (const auto& other : previous.Views)
+                if (other.Handle) CheckAlias(other, view);
+    }
+
+    for (size_t i = 0; i < plan.Batches.size(); ++i)
+    {
+        auto& batch = work.Batches[i];
+        const auto& planned = plan.Batches[i];
+        const auto location = std::find(placements.begin(), placements.end(), planned.Location);
+        if (location == placements.end() || planned.Passes.size() != 1 || static_cast<size_t>(planned.Id) != i)
+            throw std::invalid_argument("Graph executor: unsupported batch or unavailable queue");
+        const auto& node = graph._nodes[planned.Passes.front()];
+        if (!node.Instance->SupportsGraphQueue(planned.Location.Queue) || !node.Instance->GetBufferAccesses().empty())
+            throw std::invalid_argument("Graph executor: pass changed its placement/access contract");
+        batch.Binding = bindings.Queues[location - placements.begin()];
+        batch.Timeline = batch.Binding.Queue->GetTimelineIdentity();
+        batch.Fence = batch.Binding.Queue->GetFence();
+        for (const auto& access : planned.Accesses)
+        {
+            std::vector<Resource> used;
+            if (access.Usage == Mode::Write) used.push_back(access.Id);
+            else graph.ExpandRead(access.Id, used);
+            for (auto id : used)
+            {
+                if (plan.Views[id].LogicalToken) continue;
+                const auto& view = work.Views[id];
+                if (!view.Handle || view.Binding.Identity.Adapter != planned.Location.Adapter)
+                    throw std::invalid_argument("Graph executor: missing or wrong-device physical view");
+                const Access use{ id, id == access.Id ? access.Usage : Mode::Read, access.State, access.Version };
+                CheckNativeAccess(view, use);
+                const auto prior = std::find_if(batch.Uses.begin(), batch.Uses.end(), [&](const Access& a) { return a.Id == id; });
+                if (prior == batch.Uses.end()) batch.Uses.push_back(use);
+                else
+                {
+                    if (prior->State != use.State || !(prior->Version == use.Version))
+                        throw std::invalid_argument("Graph executor: incompatible simultaneous declarations of one view");
+                    if (prior->Usage != use.Usage) prior->Usage = Mode::ReadWrite;
+                }
+            }
+        }
+    }
+
+    const auto addDependency = [&](size_t from, size_t to)
+    {
+        if (from >= to || to >= work.Batches.size())
+            throw std::invalid_argument("Graph executor: dependency violates topological/FIFO order");
+        auto& source = work.Batches[from];
+        auto& target = work.Batches[to];
+        if (source.Binding.Queue == target.Binding.Queue ||
+            std::find(target.Dependencies.begin(), target.Dependencies.end(), from) != target.Dependencies.end()) return;
+        CheckWaitPath(*source.Binding.Queue, *target.Binding.Queue);
+        target.Dependencies.push_back(from);
+    };
+    for (const auto& edge : plan.Dependencies)
+        addDependency(static_cast<size_t>(edge.Producer), static_cast<size_t>(edge.Consumer));
+
+    // COMMON handoffs also order readers whose whole-resource layout transitions could overlap.
+    for (size_t i = 0; i < work.Batches.size(); ++i)
+    {
+        auto& batch = work.Batches[i];
+        for (const auto& use : batch.Uses)
+        {
+            const auto& identity = work.Views[use.Id].Binding.Identity;
+            for (size_t earlier = i; earlier-- > 0;)
+            {
+                const auto& prior = work.Batches[earlier];
+                if (std::any_of(prior.Uses.begin(), prior.Uses.end(), [&](const Access& a)
+                    { return SameBacking(identity, work.Views[a.Id].Binding.Identity); }))
+                {
+                    addDependency(earlier, i);
+                    break;
+                }
+            }
+            for (const auto& invocation : _state->Pending)
+                for (const auto& prior : invocation.Batches)
+                    if (prior.Binding.Queue != batch.Binding.Queue &&
+                        std::any_of(prior.Uses.begin(), prior.Uses.end(), [&](const Access& a)
+                            { return SameBacking(identity, invocation.Views[a.Id].Binding.Identity); }) &&
+                        !prior.Completed())
+                    {
+                        CheckWaitPath(*prior.Binding.Queue, *batch.Binding.Queue);
+                        AddIssuedWait(batch.Waits, prior.Point);
+                    }
+        }
+    }
+
+    std::vector<const ExactInputBinding*> inputs(plan.Views.size());
+    for (const auto& input : bindings.ExactInputs)
+    {
+        if (input.View >= inputs.size() || inputs[input.View] || !input.Reservation || !input.Ready.IsValid() ||
+            !input.Version.IsValid() || !work.Views[input.View].Handle)
+            throw std::invalid_argument("Graph executor: invalid exact input binding");
+        const auto& view = work.Views[input.View];
+        const auto& identity = view.Binding.Identity;
+        const auto location = input.Ready.Timeline().Producer.Location;
+        if (location.Adapter != identity.Adapter)
+        {
+            const auto& source = input.SharedSource;
+            if (!view.CrossAdapter || !input.SharedProducer ||
+                !(input.SharedProducer->GetTimelineIdentity() == input.Ready.Timeline()) ||
+                location.Queue != QueueKind::Copy || source.Adapter != location.Adapter ||
+                source.Id == ResourceId::Invalid || source.Id == identity.Id || source.Allocation != identity.Allocation ||
+                source.ResourceEpoch != identity.ResourceEpoch || source.Transfer != identity.Transfer)
+                throw std::invalid_argument("Graph executor: foreign exact point lacks shared-export provenance");
+        }
+        else if (input.SharedProducer || input.SharedSource.Id != ResourceId::Invalid)
+            throw std::invalid_argument("Graph executor: local exact input cannot carry a remote export binding");
+        const Access* lastWrite = nullptr;
+        for (const auto& invocation : _state->Pending)
+            for (const auto& batch : invocation.Batches)
+                for (const auto& use : batch.Uses)
+                    if (use.Usage != Mode::Read && SameBacking(identity, invocation.Views[use.Id].Binding.Identity))
+                        lastWrite = &use;
+        if (lastWrite && !(lastWrite->Version == input.Version))
+            throw std::invalid_argument("Graph executor: exact input conflicts with an already queued allocation writer");
+        inputs[input.View] = &input;
+        work.Owners.push_back(input.Reservation);
+    }
+    for (const auto& expected : plan.Inputs)
+    {
+        const auto* input = inputs[expected.View];
+        if (!input || !(input->Version == expected.Version))
+            throw std::invalid_argument("Graph executor: missing or stale exact input version");
+        auto& batch = work.Batches[static_cast<size_t>(expected.Consumer)];
+        if (input->SharedProducer) CheckWaitPath(*input->SharedProducer, *batch.Binding.Queue);
+        const auto progress = CheckProgress(batch.Binding.Queue->GetCompletionProgress(input->Ready.Timeline()));
+        if (!(batch.Timeline == input->Ready.Timeline()) && !input->Ready.IsReachedBy(progress))
+            AddIssuedWait(batch.Waits, input->Ready);
+    }
+    for (const auto& input : bindings.ExactInputs)
+        if (std::none_of(plan.Inputs.begin(), plan.Inputs.end(), [&](const VersionInput& a) { return a.View == input.View; }))
+            throw std::invalid_argument("Graph executor: unexpected exact input binding");
+
+    for (const auto& binding : bindings.Queues)
+    {
+        auto& queue = *binding.Queue;
+        const auto batches = std::count_if(work.Batches.begin(), work.Batches.end(),
+            [&](const State::Batch& batch) { return batch.Binding.Queue == &queue; });
+        if (queue.FenceValue != queue.GetLastCompletionPoint().Value() ||
+            queue.FenceValue > (std::numeric_limits<uint64_t>::max)() - 1 - static_cast<uint64_t>(batches))
+            throw std::invalid_argument("Graph executor: queue fence values unavailable");
+    }
+
+    // Own the allocators up front so invalid recordings can be discarded without queue bookkeeping.
+    try
+    {
+        for (size_t i = 0; i < work.Batches.size(); ++i)
+        {
+            auto& batch = work.Batches[i];
+            batch.Commands = std::make_unique<GDX12CommandList>(batch.Binding.Device, batch.Binding.Queue->GetType());
+            auto* native = batch.Commands->GetCommandList().Get();
+            // COPY uses implicit promotion from COMMON and decays at the submission boundary.
+            const bool explicitTransitions = batch.Binding.Queue->GetType() != D3D12_COMMAND_LIST_TYPE_COPY;
+            BoundResources resources;
+            for (const auto& use : batch.Uses)
+            {
+                const auto& view = work.Views[use.Id];
+                resources._views.emplace_back(use.Id, view.Handle.Get());
+                if (explicitTransitions && view.Heap == D3D12_HEAP_TYPE_DEFAULT && view.Entry != use.State)
+                {
+                    const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(view.Handle.Get(), view.Entry, use.State);
+                    native->ResourceBarrier(1, &barrier);
+                }
+            }
+            graph._nodes[plan.Batches[i].Passes.front()].Instance->RecordPlacedCommands(batch.Commands.get(), resources);
+            for (const auto& use : batch.Uses)
+            {
+                const auto& view = work.Views[use.Id];
+                if (explicitTransitions && view.Heap == D3D12_HEAP_TYPE_DEFAULT && view.Entry != use.State)
+                {
+                    const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(view.Handle.Get(), use.State, view.Entry);
+                    native->ResourceBarrier(1, &barrier);
+                }
+            }
+            ThrowIfFailed(native->Close());
+        }
+        for (const auto& view : work.Views)
+            if (view.Handle && (view.Binding.Native->D3DResource.Get() != view.Handle.Get() ||
+                view.Binding.Native->GetCurrentState() != view.Entry))
+                throw std::logic_error("Graph recorder mutated a bound resource or its boundary state");
+    }
+    catch (...)
+    {
+        for (const auto& view : work.Views)
+            if (view.Handle && (view.Binding.Native->D3DResource.Get() != view.Handle.Get() ||
+                view.Binding.Native->GetCurrentState() != view.Entry))
+            {
+                view.Binding.Native->D3DResource = view.Handle;
+                view.Binding.Native->EndConcurrentRead();
+                view.Binding.Native->SetCurrentState(view.Entry);
+            }
+        throw;
+    }
+
+    ExecutionReceipt receipt;
+    receipt.Batches.resize(work.Batches.size());
+    _state->Pending.push_back(std::move(work));
+    auto& pending = _state->Pending.back();
+    try
+    {
+        for (size_t i = 0; i < pending.Batches.size(); ++i)
+        {
+            auto& batch = pending.Batches[i];
+            auto& queue = *batch.Binding.Queue;
+            for (const auto& wait : batch.Waits) queue.WaitFor(wait);
+            for (auto producer : batch.Dependencies) queue.WaitFor(receipt.Batches[producer]);
+            ID3D12CommandList* native = batch.Commands->GetCommandList().Get();
+            queue.GetCommandQueue()->ExecuteCommandLists(1, &native);
+            batch.Submitted = true;
+            batch.Point = queue.SignalCompletion();
+            receipt.Batches[i] = batch.Point;
+        }
+    }
+    catch (...)
+    {
+        _state->Failed = true;
+        throw;
+    }
+    return std::optional<ExecutionReceipt>{ std::move(receipt) };
+}
+
 GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12CommandQueue* computeQueue)
 {
     GDX12_SCOPED_CPU_EVENT("Graph recording");
     if (!_compiled) throw std::logic_error("Render graph must be compiled before execution");
     if (_plan.RequiresNewExecutor)
-        throw std::logic_error("Render graph: explicit placement/version plan requires P2b executor; legacy Execute supports primary DIRECT/COMPUTE only");
+        throw std::logic_error("Render graph: explicit placement/version plan requires PlanExecutor; legacy Execute supports primary DIRECT/COMPUTE only");
     if (!_resourcesReady) throw std::logic_error("Render graph: CompilePlan does not prepare native resources; call Compile for legacy Execute");
     for (const auto& resource : _resources)
         if (resource.Slot != UINT_MAX && resource.Texture->GetResource() != _slots[resource.Slot].ResourceObject.get())
