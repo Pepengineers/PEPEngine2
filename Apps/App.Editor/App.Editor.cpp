@@ -129,6 +129,8 @@ void EditorApp::OnResize()
 
 void EditorApp::Update(const GameTimer& gameTimer)
 {
+    _hierarchyPanel.ApplyPendingCreate(GetLocator().GetModule<SceneManagerModule>().get());
+    
     App::Update(gameTimer);
 }
 

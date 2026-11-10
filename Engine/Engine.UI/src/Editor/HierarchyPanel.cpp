@@ -2,7 +2,9 @@
 
 #include <string>
 
+#include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Modules/SceneManagerModule.h"
+#include "Engine.Core/BenchmarkEngine.h"
 #include "imgui/imgui.h"
 
 namespace Engine::UI
@@ -14,6 +16,39 @@ namespace Engine::UI
             ImGui::End();
             return;
         }
+
+        ImGui::BeginDisabled(!sceneManager || sceneManager->GetWorldCount() == 0);
+
+        if (ImGui::Button("+"))
+        {
+            ImGui::OpenPopup("CreateObject");
+        }
+
+        if (ImGui::BeginPopup("CreateObject"))
+        {
+            if (ImGui::MenuItem("Empty Object"))
+            {
+                _pendingCreate = CreateKind::Empty;
+            }
+
+            if (ImGui::MenuItem("Camera"))
+            {
+                _pendingCreate = CreateKind::Camera;
+            }
+
+            if (ImGui::MenuItem("Spline"))
+            {
+                _pendingCreate = CreateKind::Spline;
+            }
+
+            ImGui::Separator();
+            ImGui::MenuItem("Mesh (asset required)", nullptr, false, false);
+
+            ImGui::EndPopup();
+        }
+
+        ImGui::EndDisabled();
+        ImGui::Separator();
 
         if (!sceneManager || sceneManager->GetWorldCount() == 0)
         {
@@ -44,7 +79,8 @@ namespace Engine::UI
                 ecs.ForEachEntity([&](Entity entity)
                 {
                     const std::string name = ecs.Has<NameComponent>(entity)
-                        ? ecs.Get<NameComponent>(entity).value : "Entity " + std::to_string(entity);
+                                                 ? ecs.Get<NameComponent>(entity).value
+                                                 : "Entity " + std::to_string(entity);
                     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf
                         | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
                     if (_selectedWorld == world && _selectedEntity == entity)
@@ -67,5 +103,75 @@ namespace Engine::UI
         }
 
         ImGui::End();
+    }
+
+    void HierarchyPanel::ApplyPendingCreate(SceneManagerModule* sceneManager)
+    {
+        const CreateKind kind = _pendingCreate;
+        _pendingCreate = CreateKind::None;
+
+        if (kind == CreateKind::None)
+        {
+            return;
+        }
+
+        World* world = sceneManager ? sceneManager->GetWorld() : nullptr;
+        if (!world)
+        {
+            return;
+        }
+
+        if (kind != CreateKind::Spline)
+        {
+            auto renderer = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+            renderer->GetPrimaryDevice()->GetCommandQueue()->Flush();
+        }
+
+        auto& ecs = world->GetECS();
+        auto entity = ecs.CreateEntity();
+
+        const char* baseName = kind == CreateKind::Camera
+                                   ? "Camera"
+                                   : kind == CreateKind::Spline
+                                   ? "Spline"
+                                   : "Empty";
+
+        entity.AddComponent<NameComponent>(std::string(baseName) + " " + std::to_string(entity.GetId()));
+
+        if (kind == CreateKind::Spline)
+        {
+            entity.AddComponent<SplineCurveComponent>(false, std::vector<SplinePoint>{
+                                                          {Vector3(-50.f, 0.f, 0.f), Vector3::Zero, Vector3::Zero},
+                                                          {Vector3(50.f, 0.f, 0.f), Vector3::Zero, Vector3::Zero}
+                                                      });
+        }
+        else
+        {
+            entity.AddComponent<TransformComponent>();
+
+            if (kind == CreateKind::Camera)
+            {
+                entity.AddComponent<CameraComponent>();
+            }
+
+            //reuploading existing contents because resizing replaces gpu buffers
+            for (size_t i = 0; i < sceneManager->GetWorldCount(); ++i)
+            {
+                auto& worldEcs = sceneManager->GetWorld(i)->GetECS();
+
+                worldEcs.ForEach<TransformComponent>([](Entity, TransformComponent& transform)
+                {
+                    transform.DirtyFlag = true;
+                });
+                
+                worldEcs.ForEach<CameraComponent>([](Entity, CameraComponent& camera)
+                {
+                    camera.DirtyFlag = true;
+                });
+            }
+        }
+        
+        _selectedWorld = world;
+        _selectedEntity = entity.GetId();
     }
 }

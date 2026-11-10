@@ -11,8 +11,12 @@ namespace Engine::UI
     {
     public:
         void Draw(SceneManagerModule* sceneManager);
+        void ApplyPendingCreate(SceneManagerModule* sceneManager);
 
     private:
+        enum class CreateKind { None, Empty, Camera, Spline };
+        CreateKind _pendingCreate = CreateKind::None;
+        
         Entity _selectedEntity = InvalidEntity;
         World* _selectedWorld = nullptr;
     };
