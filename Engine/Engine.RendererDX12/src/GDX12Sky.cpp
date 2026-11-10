@@ -7,10 +7,12 @@
 static AutoConsoleVariable<bool> SkyBoxEnabled(L"Render.SkyBox.Enabled", true,
     L"Enable the selected SkyBox component", EConsoleVariableFlags::Default);
 static AutoConsoleVariable<GDX12Quality> SkyBoxQuality(L"Render.SkyBox.Quality", GDX12Quality::High,
-    L"SkyBox: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default);
+    L"SkyBox: 0 Off, 1 Low, 2 Mid, 3 High, 4 Epic", EConsoleVariableFlags::Default);
+static AutoConsoleVariable<bool> SkyBoxPresetIBLBudgets(L"Render.SkyBox.PresetIBLBudgets", false,
+    L"Use the quality tier's cube resolution and sample count in place of SkyBox component budget overrides.");
 static AutoConsoleVariable<bool> AtmosphereEnabled(L"Render.SkyAtmosphere.Enabled", true,
     L"Enable the selected SkyAtmosphere component", EConsoleVariableFlags::Default);
-static AutoConsoleVariable<GDX12Quality> AtmosphereQuality(L"Render.SkyAtmosphere.Quality", GDX12Quality::Mid,
+static AutoConsoleVariable<GDX12LegacyQuality> AtmosphereQuality(L"Render.SkyAtmosphere.Quality", GDX12LegacyQuality::Mid,
     L"Atmosphere: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default);
 
 UINT GetSkyBoxQuality() { return SkyBoxEnabled.GetValue() ? SkyBoxQuality.GetInt() : 0; }
@@ -96,15 +98,23 @@ void ValidateSkySettings(const SkyAtmosphereSettings& s)
 
 SkyIBLSettings ResolveSkyIBLSettings(const SkyIBLSettings& source, const UINT quality)
 {
-    if (quality < 1 || quality > 3) throw std::invalid_argument("Sky quality must be 1..3 when resolving budgets");
+    if (quality < 1 || quality > 4) throw std::invalid_argument("Sky quality must be 1..4 when resolving budgets");
     auto result = source;
     if (!result.CubeResolution) result.CubeResolution = 128u << (quality - 1);
     if (!result.FilterSamples) result.FilterSamples = 32u << (quality - 1);
     return result;
 }
 
+SkyIBLSettings ResolveSkyBoxIBLSettings(const SkyIBLSettings& source, const UINT quality)
+{
+    auto settings = source;
+    if (SkyBoxPresetIBLBudgets.GetValue()) settings.CubeResolution = settings.FilterSamples = 0;
+    return ResolveSkyIBLSettings(settings, quality);
+}
+
 SkyAtmosphereSettings ResolveSkyAtmosphereSettings(const SkyAtmosphereSettings& source, const UINT quality)
 {
+    if (quality < 1 || quality > 3) throw std::invalid_argument("Atmosphere quality must be 1..3 when resolving budgets");
     ValidateSkySettings(source);
     auto s = source;
     s.IBL = ResolveSkyIBLSettings(source.IBL, quality);

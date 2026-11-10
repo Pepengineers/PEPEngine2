@@ -536,7 +536,7 @@ void GDX12EnvironmentIBLPass::PublishCloudSnapshot(const GDX12CloudEnvironmentIn
     _source = SkySource::SkyBox;
     _cloudSourceRevision = input.Cloud.SourceRevision;
     _cloudLightingRevision = input.Cloud.LightingRevision;
-    _cloudIBL = input.IBL;
+    _resolvedIBL = input.IBL;
     _cloudActive = true;
     _invalidated = false;
 }
@@ -599,12 +599,10 @@ void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
     if (state.Source == SkySource::SkyBox)
     {
         ValidateSkySettings(state.Box);
-        ibl = ResolveSkyIBLSettings(state.Box.IBL, state.Quality);
-        if (cloudActive)
-        {
-            discontinuity |= !SameIBL(_cloudIBL, ibl);
-            _cloudIBL = ibl;
-        }
+        ibl = cloudActive ? ResolveSkyIBLSettings(state.Box.IBL, state.Quality) :
+            ResolveSkyBoxIBLSettings(state.Box.IBL, state.Quality);
+        discontinuity |= !SameIBL(_resolvedIBL, ibl);
+        _resolvedIBL = ibl;
         constants.Box = { state.Box.RadianceMultiplier, std::sin(state.Box.RotationRadians), std::cos(state.Box.RotationRadians), 0 };
         if (!cloudActive && (_boxAsset != state.Box.Cubemap || !_boxTexture->IsInitialized()))
         {

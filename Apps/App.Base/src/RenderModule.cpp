@@ -387,6 +387,29 @@ void RenderModule::WaitForUploads()
     _textureUploadBytes = 0;
 }
 
+void RenderModule::DrainFrameWork()
+{
+    WaitForUploads();
+    const auto drain = [](GDX12Device* device)
+    {
+        if (!device) return;
+        if (auto* compute = device->TryGetComputeQueue()) compute->Flush();
+        if (auto* copy = device->TryGetCopyQueue()) copy->Flush();
+    };
+    if (_secondaryDevice) _secondaryDevice->GetCommandQueue()->Flush();
+    drain(_primaryDevice.get());
+    drain(_secondaryDevice.get());
+    if (_primaryTransferQueue) _primaryTransferQueue->Flush();
+    if (_secondaryTransferQueue) _secondaryTransferQueue->Flush();
+    if (_mgpuRuntime) _mgpuRuntime->Poll();
+}
+
+void RenderModule::ResetWorldHistory()
+{
+    _RPcommonData.RequestHistoryReset = _RPcommonData.ResetUpscalerHistory = true;
+    _pipeline->ResetWorldHistory();
+}
+
 void RenderModule::BeginTextureUploadBatch(std::uint64_t budgetBytes)
 {
     if (!budgetBytes || _textureUploadBudget) throw std::logic_error("Invalid or nested texture upload batch");
@@ -632,9 +655,11 @@ void RenderModule::SubmitLights(std::vector<GDX12LocalLightConstants> lights, co
             resources.Lighting.SunShadowFlags = sky.Atmosphere.SunCastsShadows ? 3u : 0u;
             resources.Lighting.SunShadowRevision = static_cast<UINT>(sky.Revision);
         }
+        ApplyShadowQuality(resources.ShadowQuality, resources.Lighting, resources.LocalLights);
         auto& cache = resources.FrameConstants[resources.CurrFrameConstantsIndex]->LocalLightCache;
         cache->Resize((std::max)(static_cast<UINT>(lights.size()), 1u));
-        if (!lights.empty()) cache->CopyData(0, lights.data(), static_cast<UINT>(lights.size()));
+        if (!resources.LocalLights.empty())
+            cache->CopyData(0, resources.LocalLights.data(), static_cast<UINT>(resources.LocalLights.size()));
         resources.UpdateMainCB(width, height, _timer);
     };
     upload(_primaryResources);
@@ -758,6 +783,14 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     }
 
     const WorldRenderSubscriptions subscriptions = it->second;
+    const bool lastWorld = _worldSubscriptions.size() == 1;
+    if (lastWorld) DrainFrameWork();
+    struct BatchRelease
+    {
+        bool& Active;
+        ~BatchRelease() { Active = false; }
+    } release{_batchWorldRelease};
+    _batchWorldRelease = lastWorld;
 
     auto& ecs = world.GetECS();
     auto& transformPool = ecs.GetPool<TransformComponent>();
@@ -786,6 +819,21 @@ void RenderModule::UnsubscribeFromWorld(World& world)
     {
         OnRenderComponentDestroyed(world, entity, component);
     });
+    ecs.ForEach<TransformComponent>([&](Entity entity, TransformComponent&)
+    {
+        _transformGPUData.erase(entity);
+    });
+    if (lastWorld)
+    {
+        _transformCount = _instanceCount = _cameraCount = 0;
+        _freeSkeletalInstances.clear();
+        _meshSnapshots.clear();
+        _staticMeshSnapshotCount = SIZE_MAX;
+        _staticMeshCasters.clear();
+        _primaryResources.ReflectionProbes.clear();
+        _RPcommonData.ActiveCameraCBufferIndex = UINT_MAX;
+        _RPcommonData.RequestHistoryReset = true;
+    }
     ++_primaryResources.ReflectionStaticRevision;
     ++_primaryResources.ReflectionWorldRevision;
     if (_skyWorld == &world)
@@ -888,14 +936,15 @@ void RenderModule::OnTransformComponentUpdated(World& world, Entity entity, Tran
 
 void RenderModule::OnCameraComponentCreated(World& world, Entity entity, CameraComponent& component)
 {
+    if (!PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS) &&
+        !SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS)) return;
+    component._CBufferIndex = _cameraCount++;
     if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS))
     {
-        component._CBufferIndex = _primaryResources.FrameConstants[0]->CameraCB->GetElementCount();
-
         for (auto& constants : _primaryResources.FrameConstants)
         {
-            auto& CBuffer = constants->CameraCB;
-            CBuffer->Resize(CBuffer->GetElementCount() + 1);
+            if (component._CBufferIndex < constants->CameraVisibilityCommands.size()) continue;
+            constants->CameraCB->Resize(component._CBufferIndex + 1);
 
             constants->CameraVisibilityCommands.push_back(GDX12VisibilityBuffers());
 
@@ -914,12 +963,10 @@ void RenderModule::OnCameraComponentCreated(World& world, Entity entity, CameraC
 
     if (SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS))
     {
-        component._CBufferIndex = _secondaryResources.FrameConstants[0]->CameraCB->GetElementCount();
-
         for (auto& constants : _secondaryResources.FrameConstants)
         {
-            auto& CBuffer = constants->CameraCB;
-            CBuffer->Resize(CBuffer->GetElementCount() + 1);
+            if (component._CBufferIndex < constants->CameraVisibilityCommands.size()) continue;
+            constants->CameraCB->Resize(component._CBufferIndex + 1);
 
             constants->CameraVisibilityCommands.push_back(GDX12VisibilityBuffers());
 
@@ -992,8 +1039,11 @@ void RenderModule::OnRenderComponentCreated(World&, Entity, StaticMeshRenderComp
 void RenderModule::OnRenderComponentDestroyed(World&, Entity, StaticMeshRenderComponent& component)
 {
     // Removed entities must stop participating in every indirect pass, including probes.
-    if (_primaryDevice) _primaryDevice->GetCommandQueue()->Flush();
-    if (_secondaryResources.IndirectCommandsCache && _secondaryDevice) _secondaryDevice->GetCommandQueue()->Flush();
+    if (!_batchWorldRelease)
+    {
+        if (_primaryDevice) _primaryDevice->GetCommandQueue()->Flush();
+        if (_secondaryResources.IndirectCommandsCache && _secondaryDevice) _secondaryDevice->GetCommandQueue()->Flush();
+    }
     const GDX12IndirectDrawArgs empty = {};
     for (const auto index : component._CBufferIndices)
     {
@@ -1020,6 +1070,13 @@ void RenderModule::OnUpdate()
         _primaryDevice->GetCommandQueue()->CollectCompletedLists();
         if (auto* compute = _primaryDevice->TryGetComputeQueue()) compute->CollectCompletedLists();
         _mgpuRuntime->Poll();
+    }
+    const auto shadowQuality = ReadShadowQuality();
+    if (!(shadowQuality == _primaryResources.ShadowQuality))
+    {
+        DrainFrameWork();
+        _primaryResources.ShadowQuality = shadowQuality;
+        _RPcommonData.RequestHistoryReset = true;
     }
     GDX12_SCOPED_CPU_EVENT("Frame slot wait and upload");
     uint16_t width, height;
@@ -1234,6 +1291,8 @@ void RenderModule::CollectReflectionScene()
     hash(staticHash, resources.Lighting.LightRadiance);
     hash(staticHash, resources.Lighting.SunShadowFlags);
     hash(staticHash, resources.Lighting.SunShadowRevision);
+    hash(staticHash, resources.ShadowQuality.SunResolution);
+    hash(staticHash, resources.ShadowQuality.LocalResolution);
     for (const auto& light : resources.LocalLights) hash(staticHash, light);
     resources.ReflectionProbes.clear();
     resources.ReflectionPreviewDraws.clear();
@@ -1421,13 +1480,13 @@ void RenderModule::CollectReflectionScene()
     reflectionBounds.Merge(_staticMeshReflectionBounds);
     reflectionBounds.Merge(casterBounds);
     resources.ReflectionSceneBounds = reflectionBounds.Empty() ? BoundingBox{} : reflectionBounds.Get();
-    if (!casterBounds.Empty())
+    if (resources.ShadowQuality.SunResolution && !casterBounds.Empty())
     {
         const auto bounds = casterBounds.Get();
         SubmitCameraShadows(BuildShadowCascades(_RPcommonData.CameraView.Invert(),
             XMConvertToRadians(_RPcommonData.ActiveCameraFOV), GetAspectRatio(),
             _RPcommonData.ActiveCameraNearPlane, _RPcommonData.ActiveCameraFarPlane,
-            Vector3(resources.Lighting.LightDirection), &bounds));
+            Vector3(resources.Lighting.LightDirection), &bounds, resources.ShadowQuality.SunResolution));
     }
     std::sort(resources.ReflectionProbes.begin(), resources.ReflectionProbes.end(),
         [](const auto& a, const auto& b) { return a.Id < b.Id; });

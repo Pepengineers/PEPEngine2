@@ -11,6 +11,7 @@ public:
     bool PrepareFrame(RenderPipelineContext& context, BistroGrassGeometry& grass, bool visible);
     void RecordTail(GDX12CommandList& commands);
     void RetireFrame(GDX12Submission::CompletionPoint tail);
+    void ResetWorld();
     struct Diagnostics
     {
         GDX12Submission::TransferVersion Version;

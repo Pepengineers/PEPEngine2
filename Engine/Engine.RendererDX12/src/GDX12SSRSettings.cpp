@@ -8,7 +8,7 @@ namespace
     static AutoConsoleVariable<bool> Enabled(L"Render.SSR.Enabled", true,
         L"Enable AMD SSSR and Reflections Denoiser.", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<GDX12Quality> Quality(L"Render.SSR.Quality", GDX12Quality::Mid,
-        L"0 Off, 1 Low, 2 Mid, 3 High. Manual overrides survive preset changes.",
+        L"0 Off, 1 Low, 2 Mid, 3 High, 4 Epic. Manual overrides survive quality changes.",
         EConsoleVariableFlags::Default);
     static AutoConsoleVariable<int> MaxIntersections(L"Render.SSR.MaxIntersections", -1,
         L"Depth hierarchy lookups per ray: -1 preset, 1..1024.",
@@ -42,12 +42,12 @@ GDX12SSRSettings GetSSRSettings()
 {
     const int quality = Quality.GetInt();
     const int preset = (std::max)(quality, 1) - 1;
-    const int intersections[] = { 64, 128, 256 };
-    const int occupancy[] = { 8, 4, 0 };
-    const int mip[] = { 2, 1, 0 };
-    const int samples[] = { 1, 2, 4 };
-    const float cutoff[] = { 0.5f, 0.7f, 0.9f };
-    const float stability[] = { 0.8f, 0.9f, 0.95f };
+    constexpr int intersections[] = { 64, 128, 256, 512 };
+    constexpr int occupancy[] = { 8, 4, 0, 0 };
+    constexpr int mip[] = { 2, 1, 0, 0 };
+    constexpr int samples[] = { 1, 2, 4, 4 };
+    constexpr float cutoff[] = { 0.5f, 0.7f, 0.9f, 0.9f };
+    constexpr float stability[] = { 0.8f, 0.9f, 0.95f, 0.95f };
     const auto inherit = [](auto value, auto defaultValue) { return value == -1 ? defaultValue : value; };
     return { Enabled.GetValue() && quality != 0,
         inherit(MaxIntersections.GetValue(), intersections[preset]),

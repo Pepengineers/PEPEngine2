@@ -15,7 +15,7 @@ namespace
     static AutoConsoleVariable<bool> AsyncCompute(L"Render.Fluid.AsyncCompute", false,
         L"Run fluid simulation on COMPUTE when available. Default false.", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Fluid.Quality", GDX12Quality::Mid,
-        L"0 Off, 1 Low, 2 Mid (default), 3 High.", EConsoleVariableFlags::Default);
+        L"0 Off, 1 Low, 2 Mid (default), 3 High, 4 Epic.", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<bool> MultiGPU(L"Render.Fluid.MultiGPU", false,
         L"Request secondary fluid simulation on the next seed/reset epoch.");
     static AutoConsoleVariable<bool> MultiGPUExact(L"Render.Fluid.MultiGPU.Exact", false,
@@ -45,10 +45,10 @@ GDX12FluidControls GetFluidControls()
 
 GDX12FluidSettings ResolveFluidSettings(const GDX12FluidSettings& author, const int quality)
 {
-    if (quality < 0 || quality > 3) throw std::invalid_argument("Invalid fluid quality");
+    if (quality < 0 || quality > 4) throw std::invalid_argument("Invalid fluid quality");
     auto result = author;
     const UINT level = static_cast<UINT>((std::max)(1, quality));
-    if (!result.MaxSubsteps) result.MaxSubsteps = 16u << (level - 1);
+    if (!result.MaxSubsteps) result.MaxSubsteps = 16u << (std::min)(level - 1, 2u);
     if (!result.FilterIterations) result.FilterIterations = level;
     if (!result.FilterRadiusPixels) result.FilterRadiusPixels = 8u << (level - 1);
     return result;

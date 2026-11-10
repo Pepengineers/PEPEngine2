@@ -142,7 +142,7 @@ private:
     uint64_t _cloudSourceRevision = 0, _cloudLightingRevision = 0;
     uint64_t _inputRevision = 1;
     bool _cloudActive = false;
-    SkyIBLSettings _cloudIBL;
+    SkyIBLSettings _resolvedIBL;
     std::optional<GDX12CloudEnvironmentInputs> _displayedCloud;
 };
 

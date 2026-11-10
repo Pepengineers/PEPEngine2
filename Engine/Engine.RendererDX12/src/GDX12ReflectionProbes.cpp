@@ -7,7 +7,7 @@
 static AutoConsoleVariable<bool> Enabled(L"Render.Reflection.Enabled", true,
     L"Enable local reflection probes. Default true.", EConsoleVariableFlags::Default);
 static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Reflection.Quality", GDX12Quality::Mid,
-    L"0 Off, 1 Low, 2 Mid (default), 3 High.", EConsoleVariableFlags::Default);
+    L"0 Off, 1 Low, 2 Mid (default), 3 High, 4 Epic.", EConsoleVariableFlags::Default);
 GDX12ReflectionSettings GetReflectionSettings()
 {
     GDX12ReflectionSettings result;
@@ -18,11 +18,11 @@ GDX12ReflectionSettings GetReflectionSettings()
 
 GDX12ReflectionCaptureSettings ResolveReflectionCaptureSettings(const GDX12ReflectionCaptureSettings& author, const int quality)
 {
-    if (quality < 0 || quality > 3) throw std::invalid_argument("Invalid reflection quality");
+    if (quality < 0 || quality > 4) throw std::invalid_argument("Invalid reflection quality");
     const UINT level = static_cast<UINT>((std::max)(1, quality) - 1);
     auto result = author;
     if (!result.Resolution) result.Resolution = 64u << level;
-    if (!result.FacesPerFrame) result.FacesPerFrame = level == 2 ? 6u : level + 1;
+    if (!result.FacesPerFrame) result.FacesPerFrame = level >= 2 ? 6u : level + 1;
     if (!result.PrefilterSamples) result.PrefilterSamples = 32u << level;
     return result;
 }

@@ -40,6 +40,12 @@ namespace BistroWater
     inline AutoConsoleVariable<int> ParticleCount(L"App.Water.ParticleCount", 100000,
         L"Fluid particle target, startup only, 10000..300000", EConsoleVariableFlags::ReadOnly,
         [](int value) { return value >= 10000 && value <= 300000; });
+    inline AutoConsoleVariable<UINT> PresetParticleCount(L"App.Water.PresetParticleCount", 0,
+        L"Fluid resolution target on world restart, 25000..100000; 0 uses the legacy target",
+        EConsoleVariableFlags::Default, [](UINT value) { return value == 0 || (value >= 25000 && value <= 100000); });
+    inline AutoConsoleVariable<UINT> FilterRadiusPixels(L"App.Water.FilterRadiusPixels", 6,
+        L"Water surface filter radius on world restart, 1..64 pixels",
+        EConsoleVariableFlags::Default, [](UINT value) { return value >= 1 && value <= 64; });
     inline AutoConsoleVariable<float> ParticleRadius(L"App.Water.ParticleRadius", 0.15f,
         L"Fluid render radius in MGPU units, startup only, 0.01..0.2", EConsoleVariableFlags::ReadOnly,
         [](float value) { return std::isfinite(value) && value >= 0.01f && value <= 0.2f; });
@@ -47,6 +53,12 @@ namespace BistroWater
     class Scene
     {
     public:
+        void ResetWorld()
+        {
+            _basins.clear();
+            if (_mesh.IsValid()) _source = CreateFluidSource();
+        }
+
         void Update(World& world, float)
         {
             RegisterBistroWaterComponents(world);
@@ -141,7 +153,12 @@ namespace BistroWater
             render.SubmitMesh(mesh, _mesh);
             if (auto* material = render.GetMaterialByName("BistroWaterBasin_Material_0")) _materials = {material};
             else _materials = WorldLoader::BuildMaterialSlots(render, *mesh, "BistroWaterBasin");
+            _source = CreateFluidSource();
+        }
 
+    public:
+        static GDX12FluidComponent CreateFluidSource()
+        {
             GDX12FluidSettings settings;
             // Keep MGPU numerical units; only the entity transform converts them to scene cm.
             settings.MGPUReference = true;
@@ -160,10 +177,9 @@ namespace BistroWater
             settings.PredictionSeconds = 1.0f / 120;
             settings.ViscosityCm2PerSecond = 0;
             settings.Restitution = 0.95f;
-            settings.FilterRadiusPixels = 6;
+            settings.FilterRadiusPixels = FilterRadiusPixels.GetValue();
             settings.AbsorptionPerCm = {0.02f,0.006f,0.0015f};
             settings.ScatteringColor = {0.015f,0.18f,0.45f};
-            _source.SetSettings(settings);
             // Same two-pass spawn sizing as HybridParticleApp::RecreateFluidEmitter.
             const auto spawnSize = [&](UINT count)
             {
@@ -173,7 +189,8 @@ namespace BistroWater
                 return Vector3::Min(Vector3(std::clamp(width, 5.0f, 20.0f), 10, 20),
                     settings.ContainerHalfExtentCm * 1.8f);
             };
-            const UINT target = static_cast<UINT>(ParticleCount.GetValue());
+            const UINT preset = PresetParticleCount.GetValue();
+            const UINT target = preset ? preset : static_cast<UINT>(ParticleCount.GetValue());
             const auto grid = [target](Vector3 size)
             {
                 const float scale = std::cbrt(float(target) / (size.x * size.y * size.z));
@@ -187,6 +204,12 @@ namespace BistroWater
             size.x = (std::min)(size.x, settings.ContainerHalfExtentCm.x);
             const auto counts = grid(size);
             const auto nx = counts[0] + (counts[0] & 1u), ny = counts[1], nz = counts[2];
+            if (preset && preset < 100000)
+            {
+                // Preserve represented fluid mass and scale the kernel with average particle spacing.
+                settings.ParticleMassKg = 100000.0f / static_cast<float>(nx * ny * nz);
+                settings.SmoothingRadiusCm *= std::cbrt(settings.ParticleMassKg);
+            }
             constexpr float jitter = 0.1f;
             const Vector3 center(0, settings.ContainerHalfExtentCm.y * 0.1f, 0);
             std::mt19937 random(0xB15720u);
@@ -206,9 +229,13 @@ namespace BistroWater
                         position.x = -position.x;
                         particles.push_back({position, Vector3(WaveSpeed.GetValue(), 0, 0)});
                     }
-            _source.SetParticles(std::move(particles));
+            GDX12FluidComponent source;
+            source.SetSettings(settings);
+            source.SetParticles(std::move(particles));
+            return source;
         }
 
+    private:
         struct Basin { Entity Water; Entity Container; };
         std::vector<Basin> _basins;
         Engine::Core::MeshHandle _mesh;

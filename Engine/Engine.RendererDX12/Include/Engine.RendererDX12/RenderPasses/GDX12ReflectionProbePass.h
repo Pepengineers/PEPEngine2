@@ -5,6 +5,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12GeometryViewPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include <array>
+#include <utility>
 
 class GDX12ReflectionProbePass final : public GDX12GeometryViewPass
 {
@@ -47,6 +48,7 @@ public:
         uint64_t TextureBytes = 0;
     };
     const Statistics& GetStatistics() const { return _statistics; }
+    std::pair<size_t, size_t> GetReadiness() const;
 
 private:
     enum Geometry : std::uint8_t { AllGeometry, StaticGeometry, DynamicGeometry };
@@ -102,6 +104,7 @@ private:
     std::vector<std::unique_ptr<GDX12Descriptor>> _rawRTVs, _depthDSVs, _sunDSV, _filterUAVs, _rawMipSRVs;
     Statistics _statistics;
     GDX12ReflectionSettings _settings;
+    GDX12ShadowQuality _shadowQuality;
     uint64_t _staticRevision = 0;
     uint64_t _environmentRevision = 0;
     uint64_t _frameNumber = 0;

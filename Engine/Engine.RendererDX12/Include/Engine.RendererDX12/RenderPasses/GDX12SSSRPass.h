@@ -1,5 +1,6 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Engine.RendererDX12/GDX12SSRSettings.h"
 struct FfxSssrContext;
 
 // Inputs: lit HDR, reverse-Z depth, world normal/roughness, F0/baked,
@@ -42,7 +43,7 @@ private:
     uint64_t _historyRevision = UINT64_MAX;
     uint64_t _environmentRevision = UINT64_MAX;
     std::array<ID3D12Resource*, 7> _sources = {};
-    bool _wasEnabled = false;
+    GDX12SSRSettings _previousSettings = {};
     void CreateContext();
     void DestroyContext();
 };

@@ -29,6 +29,29 @@ inline void CheckBistroWaterCounts(World& world, Frame&& frame)
     require(BistroWater::ParticleCount.GetValue() == 100000 && BistroWater::ParticleRadius.GetValue() == .15f &&
         !BistroWater::ParticleCount.SetConfigFromString("0") && !BistroWater::ParticleRadius.SetConfigFromString("0.3"),
         "Water volume and particle radius must have validated startup controls");
+    require(!BistroWater::PresetParticleCount.SetFromString("24999") &&
+        !BistroWater::PresetParticleCount.SetFromString("100001") &&
+        !BistroWater::FilterRadiusPixels.SetFromString("0"), "Water preset controls must reject unsupported targets");
+    size_t previousTierCount = 0;
+    for (int quality = 1; quality <= 4; ++quality)
+    {
+        const UINT target = 25000u * static_cast<UINT>(quality);
+        const UINT radius = static_cast<UINT>(quality + 2);
+        require(BistroWater::PresetParticleCount.SetValue(target) && BistroWater::FilterRadiusPixels.SetValue(radius),
+            "Valid Bistro water tier rejected");
+        const auto source = BistroWater::Scene::CreateFluidSource();
+        const auto settings = ResolveFluidSettings(source.GetSettings(), quality);
+        const auto count = source.GetParticles()->size();
+        require(count > previousTierCount && count >= 9 * target / 10 && count <= 11 * target / 10 && count % 2 == 0,
+            "Water tiers must produce distinct nonzero mirrored particle populations near their target");
+        require(settings.FilterIterations == static_cast<UINT>(quality) && settings.FilterRadiusPixels == radius &&
+            settings.MaxSubsteps == 3 && settings.MaxStepSeconds == 1.0f / 180 && settings.ParticleRadiusCm == .15f &&
+            std::abs(static_cast<float>(count) * settings.ParticleMassKg - 100000.0f) < 10000.0f,
+            "Water tier must scale surface work without changing the simulation clock or represented mass");
+        previousTierCount = count;
+    }
+    require(BistroWater::PresetParticleCount.SetValue(0) && BistroWater::FilterRadiusPixels.SetValue(6),
+        "Water preset defaults restore rejected");
     const size_t staticCount = ecs.GetPool<StaticMeshRenderComponent>().Size();
     require(ecs.GetPool<FluidRenderComponent>().Size() == 1, "Default Bistro water count mismatch");
     Entity first = InvalidEntity;

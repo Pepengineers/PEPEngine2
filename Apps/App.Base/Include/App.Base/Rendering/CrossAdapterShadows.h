@@ -60,6 +60,7 @@ public:
         const GDX12Snapshot::PhysicalView& secondaryAtlas, const RasterPlan& primary,
         const RasterPlan& secondary, GDX12Submission::CompletionPoint prefix);
     void RetireFrame(GDX12Submission::CompletionPoint tail);
+    void RetireAtlas(GDX12ShadowAtlas atlas);
 
 private:
     struct Stream;

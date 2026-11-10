@@ -537,6 +537,49 @@ namespace Engine::UI
         catch (...) { ShutdownUI(); throw; }
     }
 
+    static bool SettingsSuspended = false;
+
+    void SuspendSettings(bool suspended) { SettingsSuspended = suspended; }
+
+    int DrawBistroQualityPanel(bool& open, std::string_view status, bool running, bool hasWinner,
+        const char* const* techniques, const char* const* currentTiers, size_t techniqueCount, int& technique, int& tier)
+    {
+        if (!FrameBegun || (!open && !running)) return 0;
+        constexpr const char* tiers[] = {"Off", "Low", "Medium", "High", "Epic"};
+        int action = 0;
+        ImGui::SetNextWindowSizeConstraints(ImVec2(300, 0), ImVec2(460, FLT_MAX));
+        if (ImGui::Begin("Bistro quality (F2)", running ? nullptr : &open, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            ImGui::TextWrapped("%.*s", static_cast<int>(status.size()), status.data());
+            if (running)
+            {
+                if (ImGui::Button("Cancel search")) action = 3;
+            }
+            else
+            {
+                if (ImGui::Button("Performance (60 FPS)")) action = 1;
+                ImGui::SameLine();
+                if (ImGui::Button("Quality (28+ FPS)")) action = 2;
+                if (hasWinner)
+                {
+                    if (ImGui::Button("Apply result")) action = 4;
+                    ImGui::SameLine();
+                    if (ImGui::Button("Save result")) action = 5;
+                }
+                ImGui::Separator();
+                ImGui::Combo("Technique", &technique, techniques, static_cast<int>(techniqueCount));
+                ImGui::Text("Current tier: %s", currentTiers[technique]);
+                ImGui::Combo("Tier", &tier, tiers, static_cast<int>(std::size(tiers)));
+                if (ImGui::Button("Apply preset")) action = 6;
+                ImGui::SameLine();
+                if (ImGui::Button("Restart Bistro")) action = 7;
+                if (ImGui::Button("Load saved profile")) action = 8;
+            }
+        }
+        ImGui::End();
+        return action;
+    }
+
     void BeginFrame()
     {
         if (!ImGui::GetCurrentContext()) return;
@@ -550,12 +593,12 @@ namespace Engine::UI
         auto dockFlags = ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoDockingOverCentralNode;
         if (!Visible) dockFlags |= ImGuiDockNodeFlags_KeepAliveOnly;
         ImGui::DockSpaceOverViewport(0, nullptr, dockFlags);
-        DrawSettings();
+        if (!SettingsSuspended) DrawSettings();
 #endif
     }
 
 #ifdef _DEBUG
-    bool DebugControlsVisible() { return FrameBegun && Visible; }
+    bool DebugControlsVisible() { return FrameBegun && Visible && !SettingsSuspended; }
 
     bool DebugButton(const char* label, std::initializer_list<std::string_view> lines)
     {

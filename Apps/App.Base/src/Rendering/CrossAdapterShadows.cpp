@@ -171,6 +171,7 @@ struct CrossAdapterShadows::Stream
     TransferId Id = TransferId::Invalid;
     Epoch LayoutEpoch = Epoch::Invalid;
     UINT Layers = 0;
+    UINT Extent = 0;
     bool Configured = false;
     std::shared_ptr<Transport> Bank;
     std::array<std::shared_ptr<Frame>, SlotCount> Frames;
@@ -276,13 +277,14 @@ std::optional<CompletionPoint> CrossAdapterShadows::Submit(const Selection& sele
     {
         const auto payloadDesc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_FLOAT, layout.Extent(), layout.Extent(),
             static_cast<UINT16>(layout.Layers()), 1);
-        if (stream.Layers != layout.Layers())
+        if (stream.Layers != layout.Layers() || stream.Extent != layout.Extent())
         {
             if (!std::all_of(stream.Frames.begin(), stream.Frames.end(), available)) return std::nullopt;
             const auto epoch = _runtime.NewEpoch();
             if (stream.Bank && !stream.Bank->Reset(epoch)) return std::nullopt;
             stream.Frames = {};
             stream.Layers = layout.Layers();
+            stream.Extent = layout.Extent();
             stream.LayoutEpoch = epoch;
             stream.Configured = false;
         }
@@ -429,4 +431,13 @@ void CrossAdapterShadows::RetireFrame(CompletionPoint tail)
         stream->AwaitingTail->Tail = tail;
         stream->AwaitingTail = nullptr;
     }
+}
+
+void CrossAdapterShadows::RetireAtlas(GDX12ShadowAtlas atlas)
+{
+    auto& stream = _streams[atlas == GDX12ShadowAtlas::Sun ? 0 : 1];
+    if (!stream) return;
+    Require(!stream->AwaitingTail, "Shadow atlas retirement requires the primary frame tail");
+    if (stream->Bank) _runtime.RetireBank(*stream->Bank);
+    stream.reset();
 }

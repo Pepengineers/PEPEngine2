@@ -8,6 +8,39 @@
 inline constexpr UINT LocalShadowResolution = 256;
 inline constexpr UINT SunShadowCascadeResolution = 2048;
 
+struct GDX12ShadowQuality
+{
+    UINT SunResolution = SunShadowCascadeResolution;
+    UINT LocalResolution = LocalShadowResolution;
+
+    bool operator==(const GDX12ShadowQuality& other) const
+    { return SunResolution == other.SunResolution && LocalResolution == other.LocalResolution; }
+};
+
+constexpr bool IsSunShadowResolution(UINT value)
+{
+    return value == 512 || value == 1024 || value == 2048 || value == 4096;
+}
+
+constexpr bool IsLocalShadowResolution(UINT value)
+{
+    return value == 128 || value == 256 || value == 384 || value == 512 || value == 1024;
+}
+
+GDX12ShadowQuality ReadShadowQuality();
+
+inline void ApplyShadowQuality(const GDX12ShadowQuality& quality, GDX12MainConstants& sun,
+    std::vector<GDX12LocalLightConstants>& local)
+{
+    if (quality.SunResolution == 0) sun.SunShadowFlags = 0;
+    if (quality.LocalResolution != 0) return;
+    for (auto& light : local)
+    {
+        light.ShadowFlags = 0;
+        light.ShadowFirstSlice = UINT_MAX;
+    }
+}
+
 struct GDX12LocalShadowKey
 {
     UINT EntityId = 0;
@@ -48,15 +81,15 @@ struct GDX12ShadowRegion
     UINT Slice, X, Y, Width, Height;
 };
 
-inline GDX12ShadowRegion SunShadowRegion(UINT cascade)
+inline GDX12ShadowRegion SunShadowRegion(UINT cascade, UINT resolution = SunShadowCascadeResolution)
 {
-    return { 0, (cascade & 1u) * SunShadowCascadeResolution, (cascade >> 1u) * SunShadowCascadeResolution,
-        SunShadowCascadeResolution, SunShadowCascadeResolution };
+    return { 0, (cascade & 1u) * resolution, (cascade >> 1u) * resolution, resolution, resolution };
 }
 
-inline GDX12ShadowRegion LocalShadowRegion(const GDX12LocalLightConstants& light, UINT face)
+inline GDX12ShadowRegion LocalShadowRegion(const GDX12LocalLightConstants& light, UINT face,
+    UINT resolution = LocalShadowResolution)
 {
-    return { light.ShadowFirstSlice + face, 0, 0, LocalShadowResolution, LocalShadowResolution };
+    return { light.ShadowFirstSlice + face, 0, 0, resolution, resolution };
 }
 
 struct GDX12ShadowOutput
@@ -101,7 +134,7 @@ struct GDX12ShadowOutput
 };
 
 inline GDX12ShadowOutput BuildSunShadowOutput(const GDX12ShadowConstants& cascades,
-    UINT lightRevision, uint64_t sceneRevision, bool everyFrame)
+    UINT lightRevision, uint64_t sceneRevision, bool everyFrame, UINT resolution = SunShadowCascadeResolution)
 {
     GDX12ShadowOutput output;
     output.LightRevision = lightRevision;
@@ -110,12 +143,12 @@ inline GDX12ShadowOutput BuildSunShadowOutput(const GDX12ShadowConstants& cascad
     output.SplitDepths = cascades.SplitDepths;
     output.TexelWorldSize = cascades.TexelWorldSize;
     for (UINT cascade = 0; cascade < output.ViewCount(); ++cascade)
-        output.Views[cascade] = { SunShadowRegion(cascade), cascades.ViewProj[cascade], 0 };
+        output.Views[cascade] = { SunShadowRegion(cascade, resolution), cascades.ViewProj[cascade], 0 };
     return output;
 }
 
 inline GDX12ShadowOutput BuildLocalShadowOutput(const GDX12LocalLightConstants& light,
-    const std::array<uint64_t, 6>& casters, uint64_t sceneRevision, bool staticOnly)
+    const std::array<uint64_t, 6>& casters, uint64_t sceneRevision, bool staticOnly, UINT resolution = LocalShadowResolution)
 {
     GDX12ShadowOutput output;
     output.Type = light.Type == 1 ? GDX12ShadowOutput::Kind::Point : GDX12ShadowOutput::Kind::Spot;
@@ -125,7 +158,7 @@ inline GDX12ShadowOutput BuildLocalShadowOutput(const GDX12LocalLightConstants& 
     output.StaticOnly = staticOnly;
     output.EveryFrame = !staticOnly && (light.ShadowFlags & 2u) != 0u;
     for (UINT face = 0; face < output.ViewCount(); ++face)
-        output.Views[face] = { LocalShadowRegion(light, face), light.ShadowViewProj[face], casters[face] };
+        output.Views[face] = { LocalShadowRegion(light, face, resolution), light.ShadowViewProj[face], casters[face] };
     return output;
 }
 

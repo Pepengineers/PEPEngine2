@@ -26,7 +26,7 @@ namespace
         return a.Slice == b.Slice && a.X == b.X && a.Y == b.Y && a.Width == b.Width && a.Height == b.Height;
     }
 
-    std::optional<GroupIndex> IndexGroups(GDX12ShadowAtlas atlas, const std::vector<GDX12ShadowOutput>& groups)
+    std::optional<GroupIndex> IndexGroups(GDX12ShadowAtlas atlas, UINT extent, const std::vector<GDX12ShadowOutput>& groups)
     {
         using Kind = GDX12ShadowOutput::Kind;
         GroupIndex index;
@@ -38,7 +38,7 @@ namespace
             {
                 if (group.Type != Kind::Sun || !(group.Light == GDX12LocalShadowKey{})) return std::nullopt;
                 for (UINT view = 0; view < group.ViewCount(); ++view)
-                    if (!SameRegion(group.Views[view].Region, SunShadowRegion(view))) return std::nullopt;
+                    if (!SameRegion(group.Views[view].Region, SunShadowRegion(view, extent))) return std::nullopt;
                 continue;
             }
             if (atlas != GDX12ShadowAtlas::Local || (group.Type != Kind::Spot && group.Type != Kind::Point) ||
@@ -49,7 +49,7 @@ namespace
             for (UINT face = 0; face < group.ViewCount(); ++face)
             {
                 const UINT slice = firstSlice + face;
-                const GDX12ShadowRegion expected{ slice, 0, 0, LocalShadowResolution, LocalShadowResolution };
+                const GDX12ShadowRegion expected{ slice, 0, 0, extent, extent };
                 if (usedSlices[slice] || !SameRegion(group.Views[face].Region, expected)) return std::nullopt;
                 usedSlices.set(slice);
             }
@@ -136,8 +136,11 @@ namespace
 std::optional<GDX12ShadowTransferLayout> GDX12ShadowTransferLayout::Build(GDX12ShadowAtlas atlas,
     std::vector<GDX12ShadowOutput> selected)
 {
-    if (selected.empty() || !IndexGroups(atlas, selected)) return std::nullopt;
-    GDX12ShadowTransferLayout layout(atlas);
+    if (selected.empty()) return std::nullopt;
+    const UINT extent = selected.front().Views[0].Region.Width;
+    if (!(atlas == GDX12ShadowAtlas::Sun ? IsSunShadowResolution(extent) : IsLocalShadowResolution(extent)) ||
+        !IndexGroups(atlas, extent, selected)) return std::nullopt;
+    GDX12ShadowTransferLayout layout(atlas, extent);
     for (const auto& group : selected)
         for (UINT face = 0; face < group.ViewCount(); ++face)
             layout._sourceViews.push_back({ group.Views[face].Region, layout.Layers() });
@@ -148,7 +151,7 @@ std::optional<GDX12ShadowTransferLayout> GDX12ShadowTransferLayout::Build(GDX12S
 std::optional<std::vector<GDX12ShadowTransferView>> GDX12ShadowTransferLayout::ResolveDestination(
     const std::vector<GDX12ShadowOutput>& prepared) const
 {
-    const auto index = IndexGroups(_atlas, prepared);
+    const auto index = IndexGroups(_atlas, _extent, prepared);
     if (!index) return std::nullopt;
     std::vector<GDX12ShadowTransferView> views;
     views.reserve(Layers());

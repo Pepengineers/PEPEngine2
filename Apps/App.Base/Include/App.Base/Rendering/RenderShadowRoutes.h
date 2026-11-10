@@ -30,6 +30,7 @@ public:
         const std::vector<GDX12ShadowOutput>&, const GDX12ShadowSelection&)>;
 
     void PrepareFrame(RenderModule& render);
+    void UpdateQuality();
     void SetApplication(ResolveApplication resolve) { _resolveApplication = std::move(resolve); }
     CrossAdapterSceneReplica::FrameStamp GetFrameStamp() const { return _stamp; }
     CrossAdapterSceneReplica::ResourceView IdentifyPrimaryView(std::shared_ptr<GDX12Resource> native);
@@ -60,6 +61,7 @@ private:
     std::vector<KnownView> _views;
     RenderModule* _render = nullptr;
     GDX12ShadowSelection _selection;
+    GDX12ShadowQuality _quality;
     ResolveApplication _resolveApplication;
     CrossAdapterSceneReplica::FrameStamp _stamp;
     std::uint64_t _invocation = 0;

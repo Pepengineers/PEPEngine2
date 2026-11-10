@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <chrono>
 #include <fstream>
+#include <iomanip>
 #include <psapi.h>
 #include <shellapi.h>
 #pragma comment(lib, "shell32.lib")
@@ -20,22 +21,51 @@
 #include "BistroWater.h"
 #include "BistroCharacters.h"
 #include "BistroBounds.h"
+#include "BistroBenchmarkFlight.h"
+#include "BistroQualityPresets.h"
+#include "Common/RuntimePaths.h"
+#include "Engine.RendererDX12/GDX12Reconstruction.h"
+#include "Engine.RendererDX12/GDX12FrameGeneration.h"
 #include "App.Base/LoadingSettings.h"
 
 namespace
 {
+    using BistroQualitySearch::Profile;
+    using BistroBenchmarkFlight::Phase;
+
+    double QualityTime()
+    {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
+    void CheckQualityConfig(const ConsoleConfigResult& result)
+    {
+        if (!result.Error.empty()) throw std::runtime_error(result.Error);
+    }
+
     class BistroApp final : public App
     {
     public:
         explicit BistroApp(const HINSTANCE instance, unsigned characterSeed = std::random_device{}())
-            : App(instance), _characters(characterSeed) {}
+            : App(instance), _reflections(characterSeed ^ ReflectionSeed), _characterSeed(characterSeed)
+        {
+            _characters.emplace(characterSeed);
+        }
 
         bool Initialize() override
         {
             if (!App::Initialize()) return false;
+            ValidateShadowBudget();
+            ApplySavedResolution();
+            SetupWorld();
+            return true;
+        }
+
+        void SetupWorld()
+        {
             auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
-            const auto transforms = static_cast<std::uint64_t>(BistroCharacters::NPCCount.GetValue()) +
-                BistroCharacters::FoxCount.GetValue() + BistroReflections::Count.GetValue() +
+            const auto transforms = static_cast<std::uint64_t>(BistroCharacters::GetCount(false)) +
+                BistroCharacters::GetCount(true) + BistroReflections::Count.GetValue() +
                 BistroGrass::Count.GetValue() + BistroWater::Count.GetValue();
             if (transforms > (std::numeric_limits<UINT>::max)()) throw std::overflow_error("Too many Bistro transforms");
             Locator.GetModule<RenderModule>()->ReserveTransformCapacity(static_cast<UINT>(transforms));
@@ -49,7 +79,84 @@ namespace
             camera.Rotation = Vector3(0.0f, 117.0f, 0.0f);
             camera.DirtyFlag = true;
             world.GetECS().Get<CameraComponent>(world.ActiveCamera).InvalidateHistory();
-            return true;
+            _indirect.Schedule(_jobs, world, 0).Complete();
+        }
+
+        void RestartWorld(unsigned seed, bool benchmark = false)
+        {
+            auto scenes = Locator.GetModule<SceneManagerModule>();
+            if (scenes->GetWorldCount() > 1) throw std::logic_error("Bistro reset needs a single active world");
+            _bounds.reset();
+            _characters.emplace(seed);
+            _reflections.ResetWorld(benchmark ? ReflectionSeed : _characterSeed ^ ReflectionSeed);
+            _grass = {};
+            _water.ResetWorld();
+            scenes->Initialize();
+            Locator.GetModule<RenderModule>()->ResetWorldHistory();
+            _benchmarkStarted = false;
+            BenchmarkRequested = 0;
+            BenchmarkTicks = 0;
+            SetupWorld();
+            Timer.Reset();
+        }
+
+        void StartQuality(std::optional<Profile> profile, std::filesystem::path output, bool exitWhenDone,
+            std::filesystem::path saveWinner = {})
+        {
+            if (_qualityActive || BistroRenderPipeline::IsCollisionViewEnabled())
+                throw std::runtime_error("Close collision view before starting a Bistro quality run");
+            uint16_t width, height;
+            GetWindow()->GetWindowSize(width, height);
+            if (!width || !height) throw std::runtime_error("Bistro needs a visible client area");
+            const HANDLE lock = CreateMutexW(nullptr, FALSE, L"Local\\PEPEngine2FeatureGpuValidation");
+            if (!lock) throw std::runtime_error("Cannot open the Bistro validation mutex");
+            const auto acquired = WaitForSingleObject(lock, 0);
+            if (acquired != WAIT_OBJECT_0 && acquired != WAIT_ABANDONED)
+            {
+                CloseHandle(lock);
+                throw std::runtime_error("Another GPU validation is running");
+            }
+            _qualityLock.reset(lock);
+            try
+            {
+                auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+                const auto& transform = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
+                _qualityCameraLocation = transform.Location;
+                _qualityCameraRotation = transform.Rotation;
+                _qualityCameraFov = world.GetECS().Get<CameraComponent>(world.ActiveCamera).FOV;
+                _qualityInterrupted = false;
+                _qualityBackground = bInactive;
+                _warmupFlightRatio = 1.18;
+                _qualityProfile = profile;
+                _qualityWidth = width;
+                _qualityHeight = height;
+                _qualityOutput = output.empty() ? Engine::Core::GetExecutableDirectory() / "Benchmarks" /
+                    ("Bistro-" + std::to_string(GetTickCount64())) : std::move(output);
+                if (std::filesystem::exists(_qualityOutput) && !std::filesystem::is_empty(_qualityOutput))
+                    throw std::runtime_error("Choose an empty output directory for the Bistro quality run");
+                std::filesystem::create_directories(_qualityOutput);
+                _qualitySaveWinner = std::move(saveWinner);
+                _qualityExit = exitWhenDone;
+                _qualityRun = 0;
+                _qualityTechniques = BistroQuality::SearchTechniques(ConsoleModule{});
+                _qualityWinner.reset();
+                _winnerPatch.clear();
+                if (profile) _qualitySearch.emplace(*profile, BistroQuality::SearchAxes(_qualityTechniques), width, height);
+                Engine::UI::SuspendSettings(true);
+                _qualityActive = true;
+                _qualityStatus = "Preparing Bistro...";
+            }
+            catch (...)
+            {
+                _qualityLock.reset();
+                throw;
+            }
+        }
+
+        int Run()
+        {
+            const int result = App::Run();
+            return _qualityActive && _qualityExit ? EXIT_FAILURE : result;
         }
 
         void BenchmarkFrame(double fixedStep = -1)
@@ -95,7 +202,7 @@ namespace
                 }
             }
 
-            auto scenes = std::make_shared<SceneManagerModule>(scenePath);
+            auto scenes = std::make_shared<SceneManagerModule>(scenePath, true);
             auto renderer = std::make_shared<RenderModule>(GetWindow(), &Timer,
                 std::make_unique<BistroRenderPipeline>(scenes));
             Locator.RegisterModule(renderer);
@@ -107,15 +214,20 @@ namespace
         void Update(const GameTimer& timer) override
         {
             GDX12_SCOPED_CPU_EVENT("Game update");
-            Locator.GetModule<RenderModule>()->BeginFrame();
-            OnKeyboardInput(timer);
-            Locator.GetModule<RenderModule>()->Update();
+            auto renderer = Locator.GetModule<RenderModule>();
+            ProcessQualityAction();
+            if (_qualityActive) BeginQualityFrame(*renderer);
+            renderer->BeginFrame();
+            DrawQualityPanel();
+            if (!_qualityActive) OnKeyboardInput(timer);
+            renderer->Update();
             auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
             UpdateSceneAdditions(world, timer.DeltaTime());
             _bounds->UpdateEmitters(world);
             BistroParticles::Update(world);
             if (world.IsPaused())
             {
+                _lights.Schedule(_jobs, world, 0).Complete();
                 _gpuData.Schedule(_jobs, world, 0).Complete();
                 DrawSceneBounds(world);
                 return;
@@ -131,6 +243,7 @@ namespace
                 work = _lights.Schedule(_jobs, world, dt, work);
                 work.Complete();
                 UpdatePhysics(world, dt);
+                if (_qualityActive) BenchmarkRequested += dt * world.GetTimeScale();
                 work = _gpuData.Schedule(_jobs, world, dt);
                 work.Complete();
                 DrawSceneBounds(world);
@@ -140,6 +253,17 @@ namespace
                 try { work.Complete(); } catch (...) {}
                 throw;
             }
+        }
+
+        void Render(const GameTimer& timer) override
+        {
+            App::Render(timer);
+            if (_qualityActive) EndQualityFrame(*Locator.GetModule<RenderModule>());
+        }
+
+        void OnPauseChanged(bool paused) override
+        {
+            if (_qualityActive && paused) _qualityInterrupted = true;
         }
 
         void OnMouseDown(WPARAM, int x, int y) override
@@ -155,7 +279,7 @@ namespace
 
         void OnMouseMove(WPARAM buttons, int x, int y) override
         {
-            if (buttons & MK_RBUTTON)
+            if (!_qualityActive && (buttons & MK_RBUTTON))
             {
                 auto* world = Locator.GetModule<SceneManagerModule>()->GetWorld();
                 auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
@@ -195,6 +319,575 @@ namespace
         }
 
     private:
+        static constexpr unsigned QualitySeed = 12345;
+        static constexpr unsigned ReflectionSeed = 0xB1572;
+
+        void ResizeQualityClient(int width, int height)
+        {
+            uint16_t actualWidth, actualHeight;
+            GetWindow()->GetWindowSize(actualWidth, actualHeight);
+            if (actualWidth == width && actualHeight == height) return;
+            GetWindow()->SetWindowSize(static_cast<uint16_t>(width), static_cast<uint16_t>(height));
+            GetWindow()->GetWindowSize(actualWidth, actualHeight);
+            if (actualWidth != width || actualHeight != height)
+                throw std::runtime_error("Bistro window did not reach the requested client size");
+        }
+
+        void ApplySavedResolution()
+        {
+            const auto width = BistroQuality::OutputWidth.GetValue();
+            const auto height = BistroQuality::OutputHeight.GetValue();
+            if ((width == 0) != (height == 0)) throw std::invalid_argument("Bistro output dimensions must be specified together");
+            if (width) ResizeQualityClient(width, height);
+        }
+
+        void ValidateShadowBudget()
+        {
+            const auto primary = Locator.GetModule<RenderModule>()->GetMGPUDevices().Primary;
+            const auto capacity = primary->GetMemoryAllocator()->GetMemoryCapacity(DXGI_MEMORY_SEGMENT_GROUP_LOCAL);
+            if (!capacity) return;
+            const auto quality = ReadShadowQuality();
+            const auto probes = GetReflectionSettings().Enabled && BistroReflections::Count.GetValue() > 0;
+            std::uint64_t slices = 0;
+            Locator.GetModule<SceneManagerModule>()->GetWorld()->GetECS().ForEach<LightComponent>(
+                [&](Entity, const LightComponent& light)
+                {
+                    if (light.Enabled && light.CastShadows && light.Range > 0 && light.Type != LightType::Directional)
+                        slices += light.Type == LightType::Point ? 6 : 1;
+                });
+            const auto local = std::uint64_t(quality.LocalResolution);
+            const auto sun = std::uint64_t(quality.SunResolution);
+            const auto atlasBytes = (2 + probes) * local * local * slices * sizeof(float) +
+                (4 + probes) * sun * sun * sizeof(float);
+            if (atlasBytes > capacity)
+                throw std::runtime_error("Requested Bistro shadow atlases exceed the adapter's local memory capacity");
+        }
+
+        void ApplyPresetPatch(const ConsoleVariablePatch& patch, BistroQuality::ApplyMode mode, unsigned seed)
+        {
+            ConsoleModule console;
+            ConsoleVariablePatch before;
+            uint16_t width, height;
+            GetWindow()->GetWindowSize(width, height);
+            CheckQualityConfig(console.ApplyPatch(patch, &before));
+            try
+            {
+                ValidateShadowBudget();
+                ApplySavedResolution();
+                if (mode == BistroQuality::ApplyMode::RestartWorld) RestartWorld(seed);
+                else if (mode == BistroQuality::ApplyMode::RecreateTechnique)
+                    Locator.GetModule<RenderModule>()->DrainFrameWork();
+            }
+            catch (...)
+            {
+                CheckQualityConfig(console.ApplyPatch(before));
+                ResizeQualityClient(width, height);
+                if (mode == BistroQuality::ApplyMode::RestartWorld) RestartWorld(_characterSeed);
+                throw;
+            }
+        }
+
+        void SetFlightPose(const BistroBenchmarkFlight::Pose& pose)
+        {
+            auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+            auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
+            const auto direction = pose.Target - pose.Position;
+            camera.Location = pose.Position;
+            camera.Rotation = Vector3(
+                XMConvertToDegrees(std::atan2(-direction.y, std::hypot(direction.x, direction.z))),
+                XMConvertToDegrees(std::atan2(direction.x, direction.z)), 0);
+            camera.DirtyFlag = true;
+        }
+
+        static uint64_t WorkloadFingerprint(World& world)
+        {
+            uint64_t hash = 14695981039346656037ull;
+            const auto append = [&](const void* data, size_t count)
+            {
+                const auto* bytes = static_cast<const unsigned char*>(data);
+                for (size_t i = 0; i < count; ++i) hash = (hash ^ bytes[i]) * 1099511628211ull;
+            };
+            auto& ecs = world.GetECS();
+            ecs.ForEach<NameComponent, TransformComponent>([&](Entity entity, const NameComponent& name,
+                const TransformComponent& transform)
+            {
+                append(name.value.c_str(), name.value.size() + 1);
+                append(&transform.Location.x, 3 * sizeof(float));
+                append(&transform.Rotation.x, 3 * sizeof(float));
+                if (ecs.Has<RigidBodyComponent>(entity))
+                {
+                    const auto motion = ecs.Get<RigidBodyComponent>(entity).MotionType;
+                    append(&motion, sizeof(motion));
+                }
+            });
+            return hash;
+        }
+
+        bool PrepareQualityTrial()
+        {
+            if (_qualitySearch)
+            {
+                _qualityRequest = _qualitySearch->Next();
+                if (!_qualityRequest)
+                {
+                    _qualityWinner = _qualitySearch->Winner();
+                    if (_qualityWinner)
+                        _winnerPatch = BistroQuality::ProfilePatch(_qualityTechniques, _qualityWinner->Settings);
+                    FinishQuality(false);
+                    return false;
+                }
+                _trialPatch = BistroQuality::ProfilePatch(_qualityTechniques, _qualityRequest->Settings);
+            }
+            else
+            {
+                if (_qualityRun)
+                {
+                    FinishQuality(false);
+                    return false;
+                }
+                _trialPatch = {{L"Render.Upscaler.Provider", "0"}, {L"Render.FrameGeneration.Provider", "0"},
+                    {L"App.Quality.OutputWidth", std::to_string(_qualityWidth)},
+                    {L"App.Quality.OutputHeight", std::to_string(_qualityHeight)}};
+            }
+
+            ++_qualityRun;
+            _setupStarted = QualityTime();
+            try
+            {
+                ConsoleVariablePatch previous;
+                CheckQualityConfig(ConsoleModule{}.ApplyPatch(_trialPatch, &previous));
+                if (_basePatch.empty()) _basePatch = std::move(previous);
+                ValidateShadowBudget();
+                ApplySavedResolution();
+                RestartWorld(QualitySeed, true);
+            }
+            catch (const std::exception& error)
+            {
+                RejectQualityTrial(error.what());
+                return false;
+            }
+            catch (const DxException& error)
+            {
+                auto* primary = Locator.GetModule<RenderModule>()->GetMGPUDevices().Primary;
+                if (!primary || FAILED(primary->GetDevice()->GetDeviceRemovedReason())) throw;
+                RejectQualityTrial(WStringToString(error.ToString()));
+                return false;
+            }
+            auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+            _qualityWorkload = WorkloadFingerprint(world);
+            const auto before = world.BeforePhysicsStep;
+            world.BeforePhysicsStep = [this, before](float dt)
+            {
+                if (before) before(dt);
+                ++BenchmarkTicks;
+            };
+            SetFlightPose(BistroBenchmarkFlight::SampleRoute(0));
+            world.GetECS().Get<CameraComponent>(world.ActiveCamera).InvalidateHistory();
+            _flight.emplace();
+            _setupFrames = 0;
+            _trialReady = false;
+            _qualityStatus = "Trial " + std::to_string(_qualityRun) + " | Preparing resources";
+            return true;
+        }
+
+        void BeginQualityFrame(RenderModule& renderer)
+        {
+            if (_qualityInterrupted || bInactive != _qualityBackground)
+            {
+                FinishQuality(true);
+                _qualityStatus = "Bistro window activation or pause state changed during the trial.";
+                return;
+            }
+            if (!_flight)
+            {
+                PrepareQualityTrial();
+                return;
+            }
+            if (!_trialReady)
+            {
+                Timer.Tick(0, 0);
+                return;
+            }
+            uint16_t width, height;
+            GetWindow()->GetWindowSize(width, height);
+            if (width != BistroQuality::OutputWidth.GetValue() || height != BistroQuality::OutputHeight.GetValue())
+            {
+                FinishQuality(true);
+                _qualityStatus = "Client size changed during the trial.";
+                return;
+            }
+            SetFlightPose(_flight->BeginFrame(static_cast<std::uint64_t>(renderer.GetFrameSubmissionId()) + 1,
+                QualityTime()));
+        }
+
+        void EndQualityFrame(RenderModule& renderer)
+        {
+            if (!_flight) return;
+            if (!_trialReady)
+            {
+                const auto [ready, total] = renderer.GetWorldProbeReadiness();
+                if (ready < total)
+                {
+                    if (++_setupFrames > 192) RejectQualityTrial("Reflection probes did not finish their initial captures");
+                    return;
+                }
+                renderer.DrainFrameWork();
+                const auto* common = renderer.GetRenderPipelineCommonData();
+                const auto& reconstruction = renderer.GetReconstructionStatus();
+                const auto& generation = renderer.GetFrameGenerationStatus();
+                if (reconstruction.Requested.Provider != GDX12UpscalerProvider::Native ||
+                    reconstruction.Effective != GDX12UpscalerProvider::Native ||
+                    generation.Requested != GDX12FrameGenerationProvider::Off ||
+                    generation.Effective != GDX12FrameGenerationProvider::Off ||
+                    common->DownscaledWidth != common->WindowWidth || common->DownscaledHeight != common->WindowHeight ||
+                    common->ActiveCameraJitterOffsetX != 0 || common->ActiveCameraJitterOffsetY != 0)
+                {
+                    RejectQualityTrial("Bistro quality trial requires native rendering and FG Off");
+                    return;
+                }
+                _setupSeconds = QualityTime() - _setupStarted;
+                _trialReady = true;
+                Timer.Reset();
+                BenchmarkRequested = 0;
+                BenchmarkTicks = 0;
+                _qualityStatus = "Trial " + std::to_string(_qualityRun) + " | 10-second stationary warmup";
+                return;
+            }
+            _flight->EndFrame(QualityTime());
+            if (_flight->State() == Phase::WarmupReady)
+            {
+                _warmupFps = _flight->StableWarmupFps();
+                if (_qualityRequest && !_qualityRequest->RequireFull && _warmupFps &&
+                    *_warmupFps * _warmupFlightRatio < BistroQualitySearch::Search::Target(*_qualityProfile))
+                {
+                    _qualitySearch->Submit({std::nullopt, _warmupFps});
+                    _flight.reset();
+                    return;
+                }
+                _measurementTicks = BenchmarkTicks;
+                _measurementRequested = BenchmarkRequested;
+                _flight->StartFlight();
+                _qualityStatus = "Trial " + std::to_string(_qualityRun) + " | 100-second exterior flight";
+            }
+            else if (_flight->State() == Phase::Complete)
+            {
+                SetFlightPose(BistroBenchmarkFlight::SampleRoute(1));
+                const auto metrics = _flight->Summarize();
+                if (_warmupFps)
+                    _warmupFlightRatio = (std::max)(_warmupFlightRatio, 1.04 * metrics.AverageFps / *_warmupFps);
+                renderer.DrainFrameWork();
+                ExportQualityTrial(renderer, metrics);
+                if (_qualitySearch) _qualitySearch->Submit({metrics.AverageFps, _warmupFps});
+                _flight.reset();
+            }
+        }
+
+        void ExportQualityTrial(RenderModule& renderer, const BistroBenchmarkFlight::Metrics& metrics)
+        {
+            const auto stem = _qualityOutput / ("trial-" + std::to_string(_qualityRun));
+            std::ofstream frames(stem.wstring() + L".csv");
+            frames << std::setprecision(12) << "frame_id,elapsed_seconds,progress,segment,frame_seconds,fps\n";
+            for (const auto& frame : _flight->Samples())
+                frames << frame.FrameId << ',' << frame.Elapsed << ',' << frame.Progress << ',' << frame.Segment
+                    << ',' << frame.Duration << ',' << frame.Fps << '\n';
+            frames.close();
+            if (!frames) throw std::runtime_error("Cannot export Bistro frame samples");
+            auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+            auto physics = Locator.GetModule<PhysicsModule>();
+            size_t moving = 0, sleeping = 0, statics = 0, water = 0, particles = 0;
+            size_t grassBlades = 0;
+            UINT grassSegments = 0, windGrid = 0, windPressure = 0;
+            const auto controls = GetGrassWindControls();
+            if (controls.GrassEnabled && controls.GrassQuality > 0)
+                world.GetECS().ForEach<GrassRenderComponent>([&](Entity, const GrassRenderComponent& grass)
+                {
+                    if (!grass.Enabled || !grass.Material) return;
+                    const auto settings = ResolveGrassSettings(grass, controls.GrassQuality);
+                    const auto count = GrassBladeCount(settings);
+                    if (!count) return;
+                    grassBlades += count;
+                    grassSegments = (std::max)(grassSegments, settings.Segments);
+                    auto& ecs = world.GetECS();
+                    if (!controls.WindEnabled || !controls.WindQuality || grass.WindEntity == InvalidEntity ||
+                        !ecs.Has<WindFieldComponent>(grass.WindEntity)) return;
+                    const auto& wind = ecs.Get<WindFieldComponent>(grass.WindEntity);
+                    if (!wind.Enabled) return;
+                    const auto field = ResolveWindSettings(wind, controls.WindQuality);
+                    windGrid = (std::max)(windGrid, field.GridResolution);
+                    if (field.Implementation == GDX12WindImplementation::ProjectedGrid)
+                        windPressure = (std::max)(windPressure, field.PressureIterations);
+                });
+            world.GetECS().ForEach<RigidBodyComponent>([&](Entity, const RigidBodyComponent& body)
+            {
+                if (body.MotionType != PhysicsMotionType::Dynamic) { ++statics; return; }
+                Vector3 velocity;
+                bool active = false;
+                if (physics->TryGetBodyVelocity(world, body.Body, velocity, active))
+                    ++(active ? moving : sleeping);
+            });
+            if (GetFluidControls().Enabled)
+                world.GetECS().ForEach<FluidRenderComponent>([&](Entity, const FluidRenderComponent& fluid)
+                {
+                    if (const auto& seed = fluid.GetParticles()) water += seed->size();
+                });
+            world.GetECS().ForEach<ParticleEmitterComponent>([&](Entity, const ParticleEmitterComponent& emitter)
+            {
+                if (emitter.IsEnabled()) particles += emitter.GetSettings().MaxParticles;
+            });
+            const double requested = BenchmarkRequested - _measurementRequested;
+            const auto ticks = BenchmarkTicks - _measurementTicks;
+            const auto gpuMemory = renderer.GetMemoryStatistics();
+            auto* primary = renderer.GetMGPUDevices().Primary;
+            const auto luid = primary->GetAdapterLuid();
+            const auto [readyProbes, configuredProbes] = renderer.GetWorldProbeReadiness();
+            D3D12MA::Budget localBudget{};
+            primary->GetMemoryAllocator()->GetBudget(&localBudget, nullptr);
+            PROCESS_MEMORY_COUNTERS_EX memory = {};
+            memory.cb = sizeof(memory);
+            GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory));
+            std::ofstream report(stem.wstring() + L".json");
+            report << std::setprecision(12) << "{\n  \"schema\": " << BistroQuality::SchemaVersion
+                << ",\n  \"route\": " << std::quoted(BistroBenchmarkFlight::RouteVersion)
+                << ",\n  \"adapter_luid\": " << (std::uint64_t(static_cast<std::uint32_t>(luid.HighPart)) << 32 | luid.LowPart)
+                << ",\n  \"adapter\": " << std::quoted(primary->GetDeviceFeatures().Name)
+                << ",\n  \"build\": "
+#ifdef _DEBUG
+                << "\"Debug\""
+#else
+                << "\"Release\""
+#endif
+                << ",\n  \"seed\": " << QualitySeed
+                << ",\n  \"background_window\": " << std::boolalpha << _qualityBackground << std::noboolalpha
+                << ",\n  \"initial_workload\": \"" << std::hex << _qualityWorkload << std::dec << '"'
+                << ",\n  \"prepare_seconds\": " << _setupSeconds
+                << ",\n  \"warmup_protocol_seconds\": " << BistroBenchmarkFlight::WarmupSeconds
+                << ",\n  \"flight_protocol_seconds\": " << BistroBenchmarkFlight::FlightSeconds
+                << ",\n  \"effective_upscaler\": \"Native\",\n  \"effective_frame_generation\": \"Off\""
+                << ",\n  \"render_width\": " << renderer.GetRenderPipelineCommonData()->DownscaledWidth
+                << ",\n  \"render_height\": " << renderer.GetRenderPipelineCommonData()->DownscaledHeight
+                << ",\n  \"sample_count\": " << metrics.FrameCount << ",\n  \"seconds\": " << metrics.Duration
+                << ",\n  \"avg_fps\": " << metrics.AverageFps
+                << ",\n  \"min_frame_seconds\": " << metrics.MinFrameTime
+                << ",\n  \"max_frame_seconds\": " << metrics.MaxFrameTime
+                << ",\n  \"p50_seconds\": " << metrics.P50FrameTime << ",\n  \"p95_seconds\": " << metrics.P95FrameTime
+                << ",\n  \"p99_seconds\": " << metrics.P99FrameTime << ",\n  \"one_percent_low\": " << metrics.OnePercentLow
+                << ",\n  \"point_one_percent_low\": " << metrics.PointOnePercentLow
+                << ",\n  \"physics_ticks\": " << ticks << ",\n  \"physics_requested_seconds\": " << requested
+                << ",\n  \"physics_debt_start\": " << _measurementRequested - _measurementTicks * double(1.0f / 60)
+                << ",\n  \"physics_debt_end\": " << BenchmarkRequested - BenchmarkTicks * double(1.0f / 60)
+                << ",\n  \"active_bodies\": " << moving << ",\n  \"sleeping_bodies\": " << sleeping
+                << ",\n  \"static_bodies\": " << statics << ",\n  \"people\": " << BistroCharacters::GetCount(false)
+                << ",\n  \"foxes\": " << BistroCharacters::GetCount(true)
+                << ",\n  \"water_particles\": " << water << ",\n  \"particle_capacity\": " << particles
+                << ",\n  \"grass_blades\": " << grassBlades << ",\n  \"grass_max_segments\": " << grassSegments
+                << ",\n  \"wind_grid\": " << windGrid << ",\n  \"wind_pressure_iterations\": " << windPressure
+                << ",\n  \"published_probes\": " << readyProbes << ",\n  \"configured_probes\": " << configuredProbes
+                << ",\n  \"gpu_allocation_bytes\": " << gpuMemory.AllocationBytes
+                << ",\n  \"gpu_local_usage_bytes\": " << localBudget.UsageBytes
+                << ",\n  \"gpu_local_budget_bytes\": " << localBudget.BudgetBytes
+                << ",\n  \"process_peak_commit_bytes\": " << memory.PeakPagefileUsage;
+            if (_warmupFps) report << ",\n  \"stable_warmup_fps\": " << *_warmupFps;
+            const auto writePatch = [&](const char* label, const ConsoleVariablePatch& patch)
+            {
+                report << ",\n  " << std::quoted(label) << ": {";
+                const char* separator = "";
+                for (const auto& [key, value] : patch)
+                {
+                    report << separator << "\n    " << std::quoted(std::filesystem::path(key).u8string())
+                        << ": " << std::quoted(value);
+                    separator = ",";
+                }
+                report << "\n  }";
+            };
+            writePatch("candidate", _trialPatch);
+            ConsoleVariablePatch effective;
+            ConsoleModule console;
+            for (const auto& technique : BistroQuality::Techniques)
+                for (size_t i = 0; i < technique.FieldCount; ++i)
+                {
+                    const auto* key = technique.Fields[i].Key;
+                    effective.emplace_back(key, console.FindConsoleVariable(key).GetString());
+                }
+            writePatch("effective_cvars", effective);
+            report << "\n}\n";
+            report.close();
+            if (!report) throw std::runtime_error("Cannot export Bistro trial metrics");
+        }
+
+        void RestoreQualityBaseline()
+        {
+            if (_basePatch.empty()) return;
+            CheckQualityConfig(ConsoleModule{}.ApplyPatch(_basePatch));
+            ResizeQualityClient(_qualityWidth, _qualityHeight);
+            RestartWorld(_characterSeed);
+            auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+            auto& transform = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
+            transform.Location = _qualityCameraLocation;
+            transform.Rotation = _qualityCameraRotation;
+            transform.DirtyFlag = true;
+            auto& camera = world.GetECS().Get<CameraComponent>(world.ActiveCamera);
+            camera.FOV = _qualityCameraFov;
+            camera.InvalidateHistory();
+        }
+
+        void RejectQualityTrial(std::string_view reason)
+        {
+            std::ofstream note(_qualityOutput / ("trial-" + std::to_string(_qualityRun) + ".rejected.txt"));
+            note << reason << '\n';
+            if (_qualitySearch)
+            {
+                RestoreQualityBaseline();
+                _qualitySearch->Submit({std::nullopt, std::nullopt, false});
+                _flight.reset();
+            }
+            else FinishQuality(true);
+            _qualityStatus = "Candidate rejected: " + std::string(reason);
+        }
+
+        void FinishQuality(bool cancelled)
+        {
+            _flight.reset();
+            _qualitySearch.reset();
+            _qualityRequest.reset();
+            _qualityActive = false;
+            Engine::UI::SuspendSettings(false);
+            RestoreQualityBaseline();
+            _basePatch.clear();
+            _qualityLock.reset();
+            _qualityStatus = cancelled ? "Bistro quality run cancelled." : "Bistro quality run complete.";
+            std::ofstream summary(_qualityOutput / "result.json");
+            summary << "{\n  \"schema\": " << BistroQuality::SchemaVersion
+                << ",\n  \"cancelled\": " << std::boolalpha << cancelled << ",\n  \"trials\": " << _qualityRun;
+            if (_qualityWinner)
+            {
+                const auto& winner = *_qualityWinner;
+                _qualityStatus = (winner.TargetReached ? "Target reached: " : "Target not reached. Best measured: ") +
+                    std::to_string(winner.AverageFps) + " FPS at " + std::to_string(winner.Settings.Width) + " × " +
+                    std::to_string(winner.Settings.Height);
+                summary << ",\n  \"profile\": \"" << (*_qualityProfile == Profile::Quality ? "Quality" : "Performance")
+                    << "\",\n  \"targetReached\": " << winner.TargetReached << ",\n  \"stable\": " << winner.Stable
+                    << ",\n  \"avg_fps\": " << std::setprecision(12) << winner.AverageFps
+                    << ",\n  \"width\": " << winner.Settings.Width << ",\n  \"height\": " << winner.Settings.Height
+                    << ",\n  \"tiers\": {";
+                const char* separator = "";
+                for (size_t i = 0; i < _qualityTechniques.size(); ++i)
+                {
+                    summary << separator << "\n    " << std::quoted(_qualityTechniques[i]->Name) << ": "
+                        << std::quoted(BistroQuality::TierNames[winner.Settings.Tiers[i]]);
+                    separator = ",";
+                }
+                summary << "\n  }";
+            }
+            else if (_qualityProfile) summary << ",\n  \"targetReached\": false";
+            summary << "\n}\n";
+            summary.close();
+            if (!summary) throw std::runtime_error("Cannot export Bistro result");
+            if (_qualityWinner && !_qualitySaveWinner.empty())
+                CheckQualityConfig(ConsoleModule{}.SavePatchIni(_qualitySaveWinner, _winnerPatch));
+            if (_qualityExit) PostQuitMessage(cancelled || (_qualityProfile && !_qualityWinner) ? EXIT_FAILURE : EXIT_SUCCESS);
+        }
+
+        std::filesystem::path SavedQualityProfile()
+        {
+            const auto luid = Locator.GetModule<RenderModule>()->GetMGPUDevices().Primary->GetAdapterLuid();
+            const auto file = "Bistro-" + std::to_string(static_cast<std::uint32_t>(luid.HighPart)) + "-" +
+                std::to_string(luid.LowPart) + ".ini";
+            return Engine::Core::GetExecutableDirectory() / "Config" / "Profiles" / file;
+        }
+
+        void ProcessQualityAction()
+        {
+            const bool toggle = !bInactive && (GetAsyncKeyState(VK_F2) & 0x8000);
+            if (toggle && !_qualityPanelKey) _qualityPanel = !_qualityPanel;
+            _qualityPanelKey = toggle;
+            const auto action = std::exchange(_qualityAction, 0);
+            if (!action) return;
+            try
+            {
+                if (action == 1 || action == 2) StartQuality(action == 1 ? Profile::Performance : Profile::Quality, {}, false);
+                if (action == 3) FinishQuality(true);
+                if (action == 4) ApplyPresetPatch(_winnerPatch, BistroQuality::ApplyMode::RestartWorld, QualitySeed);
+                if (action == 5)
+                {
+                    const auto path = SavedQualityProfile();
+                    CheckQualityConfig(ConsoleModule{}.SavePatchIni(path, _winnerPatch));
+                    _qualityStatus = "Saved " + path.u8string();
+                }
+                if (action == 6)
+                {
+                    const auto& technique = BistroQuality::Techniques[_manualTechnique];
+                    const auto patch = BistroQuality::Preset(technique, _manualTier);
+                    if (technique.Mode == BistroQuality::ApplyMode::RestartProcess)
+                    {
+                        CheckQualityConfig(ConsoleModule{}.SavePatchIni(Engine::Core::GetExecutableDirectory() /
+                            "Config" / "BistroSampler.ini", patch));
+                        _qualityStatus = "Restart with -Quality.Overlay=Config/BistroSampler.ini";
+                    }
+                    else
+                    {
+                        ApplyPresetPatch(patch, technique.Mode, _characterSeed);
+                        _qualityStatus = std::string(technique.Name) + ": " + BistroQuality::TierNames[_manualTier];
+                    }
+                }
+                if (action == 7) RestartWorld(_characterSeed);
+                if (action == 8)
+                {
+                    ConsoleVariablePatch patch;
+                    CheckQualityConfig(ConsoleModule::ReadPatchIni(SavedQualityProfile(), patch));
+                    ApplyPresetPatch(patch, BistroQuality::ApplyMode::RestartWorld, _characterSeed);
+                    _qualityStatus = "Applied saved device profile.";
+                }
+            }
+            catch (const std::exception& error)
+            {
+                if (!_bounds || !Locator.GetModule<SceneManagerModule>()->GetWorld()) throw;
+                _qualityStatus = error.what();
+            }
+        }
+
+        void DrawQualityPanel()
+        {
+            if (!_qualityPanel && !_qualityActive) return;
+            static const auto names = []
+            {
+                std::array<const char*, std::size(BistroQuality::Techniques)> values{};
+                for (size_t i = 0; i < values.size(); ++i) values[i] = BistroQuality::Techniques[i].Name;
+                return values;
+            }();
+            std::array<const char*, names.size()> current{};
+            if (!_qualityActive)
+                for (size_t i = 0; i < current.size(); ++i)
+                    current[i] = BistroQuality::CurrentTier(BistroQuality::Techniques[i], ConsoleModule{});
+            _qualityAction = Engine::UI::DrawBistroQualityPanel(_qualityPanel, _qualityStatus, _qualityActive,
+                _qualityWinner.has_value(), names.data(), current.data(), names.size(), _manualTechnique, _manualTier);
+        }
+
+        struct UnlockQuality
+        {
+            void operator()(void* lock) const { ReleaseMutex(lock); CloseHandle(lock); }
+        };
+        std::unique_ptr<void, UnlockQuality> _qualityLock;
+        std::optional<Profile> _qualityProfile;
+        std::optional<BistroQualitySearch::Search> _qualitySearch;
+        std::optional<BistroQualitySearch::Request> _qualityRequest;
+        std::optional<BistroQualitySearch::Selection> _qualityWinner;
+        std::optional<BistroBenchmarkFlight::Sampler> _flight;
+        std::optional<double> _warmupFps;
+        std::filesystem::path _qualityOutput, _qualitySaveWinner;
+        ConsoleVariablePatch _basePatch, _trialPatch, _winnerPatch;
+        std::vector<const BistroQuality::Technique*> _qualityTechniques;
+        std::string _qualityStatus = "Apply a technique preset or run the exterior benchmark.";
+        int _manualTechnique = 0, _manualTier = 2, _qualityAction = 0;
+        uint16_t _qualityWidth = 0, _qualityHeight = 0;
+        size_t _qualityRun = 0, _setupFrames = 0;
+        double _setupStarted = 0, _setupSeconds = 0, _measurementRequested = 0;
+        double _warmupFlightRatio = 1.18;
+        uint64_t _measurementTicks = 0, _qualityWorkload = 0;
+        Vector3 _qualityCameraLocation, _qualityCameraRotation;
+        float _qualityCameraFov = 60;
+        bool _qualityActive = false, _qualityExit = false, _trialReady = false;
+        bool _qualityPanel = false, _qualityPanelKey = false, _qualityInterrupted = false, _qualityBackground = false;
+
         void DrawSceneBounds(World& world)
         {
             if (BistroRenderPipeline::IsCollisionViewEnabled()) return;
@@ -208,13 +901,14 @@ namespace
             _reflections.Update(world, deltaSeconds);
             _grass.Update(world, deltaSeconds);
             _water.Update(world, deltaSeconds);
-            _characters.Update(world, deltaSeconds, _jobs, Locator.GetModule<PhysicsModule>().get());
+            _characters->Update(world, deltaSeconds, _jobs, Locator.GetModule<PhysicsModule>().get());
         }
 
         BistroReflections::Scene _reflections;
         BistroGrass::Scene _grass;
         BistroWater::Scene _water;
-        BistroCharacters::Scene _characters;
+        const unsigned _characterSeed;
+        std::optional<BistroCharacters::Scene> _characters;
         std::unique_ptr<BistroBounds::Scene> _bounds;
         bool _benchmarkStarted = false;
         POINT _lastMousePos = {};
@@ -227,19 +921,63 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
 #if defined(DEBUG) || defined(_DEBUG)
     _CrtSetDbgFlag(_CRTDBG_ALLOC_MEM_DF | _CRTDBG_LEAK_CHECK_DF);
 #endif
+    bool unattendedQuality = false;
     try
     {
-        ConsoleModule{}.Initialize();
         std::filesystem::path benchmarkOutput;
+        std::filesystem::path qualityOverlay, qualityCustom, qualityOutput, qualitySaveWinner;
+        std::optional<Profile> qualityProfile;
         int benchmarkFrames = 1;
         int benchmarkWarmupFrames = 0;
         std::wstring budgetArgument;
         int argumentCount = 0;
         auto arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
         if (!arguments) throw std::runtime_error("Cannot read startup arguments");
+        const std::unique_ptr<void, decltype(&LocalFree)> argumentStorage(arguments, &LocalFree);
         for (int index = 1; index < argumentCount; ++index)
         {
             const std::wstring_view argument(arguments[index]);
+            constexpr std::wstring_view prefix = L"-Quality.Overlay=";
+            constexpr std::wstring_view customPrefix = L"-Quality.Custom=";
+            if (argument.substr(0, prefix.size()) == prefix)
+            {
+                if (!qualityOverlay.empty() || argument.size() == prefix.size())
+                    throw std::invalid_argument("Specify one nonempty Quality.Overlay path");
+                qualityOverlay = argument.substr(prefix.size());
+            }
+            if (argument.substr(0, customPrefix.size()) == customPrefix)
+            {
+                if (!qualityCustom.empty() || argument.size() == customPrefix.size())
+                    throw std::invalid_argument("Specify one nonempty Quality.Custom path");
+                qualityCustom = argument.substr(customPrefix.size());
+            }
+        }
+        ConsoleModule{}.InitializeWithOverlay(qualityOverlay, qualityCustom);
+        for (int index = 1; index < argumentCount; ++index)
+        {
+            const std::wstring_view argument(arguments[index]);
+            constexpr std::wstring_view qualityOutputPrefix = L"-Quality.BenchmarkOutput=";
+            constexpr std::wstring_view qualitySearchPrefix = L"-Quality.Search=";
+            constexpr std::wstring_view qualitySavePrefix = L"-Quality.SaveWinner=";
+            if (argument.substr(0, qualityOutputPrefix.size()) == qualityOutputPrefix)
+            {
+                unattendedQuality = true;
+                qualityOutput = argument.substr(qualityOutputPrefix.size());
+                if (qualityOutput.empty()) throw std::invalid_argument("Quality.BenchmarkOutput must be nonempty");
+            }
+            if (argument.substr(0, qualitySearchPrefix.size()) == qualitySearchPrefix)
+            {
+                unattendedQuality = true;
+                const auto value = argument.substr(qualitySearchPrefix.size());
+                if (value == L"Performance") qualityProfile = Profile::Performance;
+                else if (value == L"Quality") qualityProfile = Profile::Quality;
+                else throw std::invalid_argument("Quality.Search must be Performance or Quality");
+            }
+            if (argument.substr(0, qualitySavePrefix.size()) == qualitySavePrefix)
+            {
+                qualitySaveWinner = argument.substr(qualitySavePrefix.size());
+                if (qualitySaveWinner.empty()) throw std::invalid_argument("Quality.SaveWinner must be nonempty");
+            }
             constexpr std::wstring_view wavesPrefix = L"-App.Physics.Waves.";
             if (argument.substr(0, wavesPrefix.size()) == wavesPrefix)
             {
@@ -258,7 +996,6 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
             {
                 Log::Error("Application", "App.Particles.CountScale must be finite and at most 4194304/250000");
                 Log::Flush();
-                LocalFree(arguments);
                 return EXIT_FAILURE;
             }
             constexpr std::wstring_view budgetPrefix = L"-Loading.TransientBudgetMiB=";
@@ -285,12 +1022,20 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
                     throw std::runtime_error("Loading.BenchmarkFrames must be between 1 and 10000");
             }
         }
-        LocalFree(arguments);
+        if ((!qualityOutput.empty() || qualityProfile) && !benchmarkOutput.empty())
+            throw std::invalid_argument("Choose either the loading benchmark or the quality benchmark");
+        if (!qualitySaveWinner.empty() && !qualityProfile)
+            throw std::invalid_argument("Quality.SaveWinner requires Quality.Search");
         const auto started = std::chrono::steady_clock::now();
         // Keep ordinary benchmark processes on the same character routes and wave seed.
         BistroApp app(instance, benchmarkOutput.empty() ? std::random_device{}() : 12345u);
         if (!budgetArgument.empty()) ApplyLoadingArgument(budgetArgument);
         if (!app.Initialize()) return EXIT_FAILURE;
+        if (!qualityOutput.empty() || qualityProfile)
+        {
+            app.StartQuality(qualityProfile, std::move(qualityOutput), true, std::move(qualitySaveWinner));
+            return app.Run();
+        }
         const auto initialized = std::chrono::steady_clock::now();
         if (!benchmarkOutput.empty())
         {
@@ -375,13 +1120,13 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
     {
         Log::Error("Application", "DirectX failure: ", error.ToString());
         Log::Flush();
-        MessageBoxW(nullptr, error.ToString().c_str(), L"Bistro App", MB_OK | MB_ICONERROR);
+        if (!unattendedQuality) MessageBoxW(nullptr, error.ToString().c_str(), L"Bistro App", MB_OK | MB_ICONERROR);
     }
     catch (const std::exception& error)
     {
         Log::Error("Application", "Application failed: ", error.what());
         Log::Flush();
-        MessageBoxA(nullptr, error.what(), "Bistro App", MB_OK | MB_ICONERROR);
+        if (!unattendedQuality) MessageBoxA(nullptr, error.what(), "Bistro App", MB_OK | MB_ICONERROR);
     }
     return EXIT_FAILURE;
 }

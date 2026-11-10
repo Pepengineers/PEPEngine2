@@ -18,8 +18,11 @@ namespace
         L"Render.Skinning.Enabled", true, L"Freeze skeletal deformation when disabled.",
         EConsoleVariableFlags::Default);
     static AutoConsoleVariable<GDX12Quality> SkinningQuality(
-        L"Render.Skinning.Quality", GDX12Quality::Mid, L"0 Off, 1 Low (15 Hz), 2 Mid (30 Hz), 3 High (60 Hz).",
+        L"Render.Skinning.Quality", GDX12Quality::Mid, L"0 Off, 1 Low (15 Hz), 2 Mid (30 Hz), 3 High and 4 Epic (60 Hz).",
         EConsoleVariableFlags::Default);
+    static AutoConsoleVariable<int> SkinningPoseRate(
+        L"Render.Skinning.PoseRateHz", 0, L"Global pose rate override (1..240 Hz). 0 honors component and quality settings.",
+        EConsoleVariableFlags::Default, [](const int value) { return value >= 0 && value <= 240; });
 
     Matrix EntityWorld(const TransformComponent& transform)
     {
@@ -34,7 +37,7 @@ void RenderModule::ReleaseSkeletalState(World& world, Entity entity)
     const auto it = _skeletalStates.find({&world, entity});
     if (it == _skeletalStates.end()) return;
     // Uploads/descriptors and draw templates are shared with queued raster command lists.
-    _primaryDevice->GetCommandQueue()->Flush();
+    if (!_batchWorldRelease) _primaryDevice->GetCommandQueue()->Flush();
     const GDX12IndirectDrawArgs empty = {};
     for (const auto& part : it->second.Parts)
     {
@@ -46,7 +49,7 @@ void RenderModule::ReleaseSkeletalState(World& world, Entity entity)
     _skeletalStates.erase(it);
     _skeletalBatchDirty = true;
     ++_primaryResources.ReflectionDynamicRevision;
-    if (_skeletalStates.empty()) _skinning.reset();
+    if (_skeletalStates.empty() && !_batchWorldRelease) _skinning.reset();
 }
 
 void RenderModule::PrepareSkeletalMeshes()
@@ -57,7 +60,7 @@ void RenderModule::PrepareSkeletalMeshes()
     const bool enabled = SkinningEnabled.GetValue();
     const int quality = SkinningQuality.GetInt();
     const bool animate = enabled && quality != 0;
-    const double presetRates[] = {0, 15, 30, 60};
+    constexpr double presetRates[] = {0, 15, 30, 60, 60};
     auto& assets = AssetManager::GetInstance();
     auto& meshes = assets.Meshes();
     auto& scenes = assets.Scenes();
@@ -105,17 +108,21 @@ void RenderModule::PrepareSkeletalMeshes()
             SkeletalState* State;
             const SceneAsset* Scene;
         };
-        explicit PoseJob(RenderModule& owner, bool animate, double rate) : Owner(owner), Animate(animate), Rate(rate) {}
+        PoseJob(RenderModule& owner, bool animate, double rate, int rateOverride) :
+            Owner(owner), Animate(animate), Rate(rate), RateOverride(rateOverride) {}
         void Execute(size_t index) override
         {
             auto& task = Tasks[index];
-            Owner.UpdateSkeletalPose(*task.WorldPtr, task.Id, *task.Component, *task.State, *task.Scene, Animate, Rate);
+            const double componentRate = task.Component->GetUpdateRateHz();
+            const double rate = RateOverride ? RateOverride : (componentRate != 0 ? componentRate : Rate);
+            Owner.UpdateSkeletalPose(*task.WorldPtr, task.Id, *task.Component, *task.State, *task.Scene, Animate, rate);
         }
         RenderModule& Owner;
         bool Animate;
         double Rate;
+        int RateOverride;
         std::vector<Task> Tasks;
-    } poses(*this, animate, presetRates[quality]);
+    } poses(*this, animate, presetRates[quality], SkinningPoseRate.GetValue());
     poses.Tasks.reserve(_skeletalStates.size());
     for (auto& entry : _skeletalStates) entry.second.Seen = false;
     auto worlds = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
@@ -336,7 +343,7 @@ void RenderModule::PrepareSkeletalMeshes()
 }
 
 void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshRenderComponent& component,
-    SkeletalState& state, const SceneAsset& scene, bool animate, double presetRate)
+    SkeletalState& state, const SceneAsset& scene, bool animate, double rate)
 {
     auto* frame = GetCurrentPrimaryFrameConstants();
     const bool edited = state.ComponentRevision != component._revision;
@@ -349,7 +356,6 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
         component._time = next;
         state.SinceUpdate += std::abs(dt);
     }
-    const double rate = component._rate == 0 ? presetRate : component._rate;
     const bool due = animate && !component._frozen && state.SinceUpdate >= 1.0 / rate;
     auto previousPose = state.Pose;
     const bool evaluate = state.Pose.empty() || (animate && (edited || due));

@@ -100,12 +100,15 @@ void GDX12SSSRPass::CreateContext()
 void GDX12SSSRPass::Execute(GDX12CommandList* commands)
 {
     const auto settings = GetSSRSettings();
+    const bool settingsChanged = settings != _previousSettings;
+    if (settingsChanged && (settings.Enabled || _previousSettings.Enabled))
+        _commonData->ResetUpscalerHistory = true;
     auto* scene = _inputs[0]->GetTexture();
     if (!settings.Enabled)
     {
         commands->ResourceBarrier({ scene->GetResource()->GetCopySourceBarrier(), _color.GetResource()->GetCopyDestBarrier() });
         commands->CopyResource(_color.GetResource()->D3DResource.Get(), scene->GetResource()->D3DResource.Get());
-        _wasEnabled = false;
+        _previousSettings = settings;
         return;
     }
     std::array<ID3D12Resource*, 7> sources;
@@ -114,7 +117,7 @@ void GDX12SSSRPass::Execute(GDX12CommandList* commands)
     const Matrix view = _commonData->CameraView;
     const Matrix projection = _commonData->CameraProjection;
     const Matrix viewProjection = view * projection;
-    if (!_context || !_wasEnabled || _historyRevision != _commonData->HistoryRevision || sources != _sources ||
+    if (!_context || settingsChanged || _historyRevision != _commonData->HistoryRevision || sources != _sources ||
         _environmentRevision != _resources->ReflectionEnvironmentRevision)
     {
         // SDK 1.1.4 has no reset dispatch flag. Recreate only at actual history discontinuities.
@@ -125,7 +128,7 @@ void GDX12SSSRPass::Execute(GDX12CommandList* commands)
     _environmentRevision = _resources->ReflectionEnvironmentRevision;
     _sources = sources;
     _historyRevision = _commonData->HistoryRevision;
-    _wasEnabled = true;
+    _previousSettings = settings;
     GDX12_SCOPED_EVENT(commands, "AMD SSSR + Reflections Denoiser + specular resolve", Colors::Cyan);
     const UINT slot = _resources->CurrFrameConstantsIndex;
     const XMFLOAT2 jitter = { _commonData->ActiveCameraJitterOffsetX, _commonData->ActiveCameraJitterOffsetY };
@@ -214,7 +217,6 @@ void GDX12SSSRPass::Resize()
     DestroyContext();
     for (auto* texture : { &_color, &_radiance, &_roughness, &_motion, &_fallback })
         texture->Resize(_inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight());
-    _wasEnabled = false;
 }
 
 void GDX12SSSRPass::ClearDenendencies()

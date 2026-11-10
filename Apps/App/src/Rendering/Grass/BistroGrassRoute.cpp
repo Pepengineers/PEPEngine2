@@ -145,6 +145,17 @@ bool BistroGrassRoute::PrepareFrame(RenderPipelineContext& context, BistroGrassG
     return true;
 }
 
+void BistroGrassRoute::ResetWorld()
+{
+    if (_display) throw std::logic_error("Grass readers must retire before a world reset");
+    if (_controller) _controller->Reset();
+    _checkpoint.reset();
+    _checkpointReady = _orderedReady = {};
+    _orderedVersion = {};
+    _resetRevision = 0;
+    _diagnostics = {};
+}
+
 void BistroGrassRoute::RecordTail(GDX12CommandList& commands)
 {
     if (_display) _controller->RecordFrameRelease(commands);

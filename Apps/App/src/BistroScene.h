@@ -17,6 +17,12 @@ namespace BistroParticles
     inline AutoConsoleVariable<double> CountScale(L"App.Particles.CountScale", 2.0,
         L"Multiply authored Bistro particle counts; <=0 uses 1, maximum 4194304/250000",
         EConsoleVariableFlags::Default, [](double value) { return value <= 4194304.0 / 250000; });
+    inline AutoConsoleVariable<UINT> EdgeSamples(L"App.Particles.EdgeSamples", 1,
+        L"Texture samples per particle sprite, 1..4", EConsoleVariableFlags::Default,
+        [](UINT value) { return value >= 1 && value <= 4; });
+    inline AutoConsoleVariable<float> MinPixelSize(L"App.Particles.MinPixelSize", 0.0f,
+        L"Cull particles smaller than this projected size, 0..64 pixels", EConsoleVariableFlags::Default,
+        [](float value) { return value >= 0 && value <= 64; });
     inline AutoConsoleVariable<ParticleSimulation> Simulation(L"App.Particles.Simulation", ParticleSimulation::SemiImplicitEuler,
         L"0 analytic drag + trapezoidal position, 1 MGPU semi-implicit Euler (default)");
     inline AutoConsoleVariable<bool> VolumeEnabled(L"App.Particles.Volume.Enabled", false,
@@ -52,6 +58,8 @@ namespace BistroParticles
     {
         const auto total = static_cast<uint64_t>(GetBudget());
         const auto simulation = Simulation.GetValue();
+        const auto edgeSamples = EdgeSamples.GetValue();
+        const auto minPixelSize = MinPixelSize.GetValue();
         const bool bounded = VolumeEnabled.GetValue();
         const Vector3 halfExtents(VolumeHalfExtentX.GetValue(), VolumeHalfExtentY.GetValue(), VolumeHalfExtentZ.GetValue());
         world.GetECS().ForEach<EffectComponent, ParticleEmitterComponent>(
@@ -64,6 +72,8 @@ namespace BistroParticles
                 const auto volumeExtents = effect.LayoutVolume ? effect.AuthoredExtents : halfExtents;
                 settings.MaxParticles = (std::max)(1u, count);
                 settings.Simulation = simulation;
+                settings.EdgeSamples = edgeSamples;
+                settings.MinPixelSize = minPixelSize;
                 settings.VolumeEnabled = useVolume;
                 settings.VolumeHalfExtents = volumeExtents;
                 settings.Shape = useVolume ? ParticleShape::Box : effect.AuthoredShape;
@@ -71,7 +81,8 @@ namespace BistroParticles
                 const bool reset = current.MaxParticles != settings.MaxParticles || emitter.IsEnabled() != (count != 0) ||
                     current.VolumeEnabled != useVolume || current.Shape != settings.Shape || current.ShapeExtents != settings.ShapeExtents ||
                     (useVolume && current.VolumeHalfExtents != volumeExtents);
-                if (reset || current.Simulation != simulation || current.VolumeHalfExtents != volumeExtents)
+                if (reset || current.Simulation != simulation || current.VolumeHalfExtents != volumeExtents ||
+                    current.EdgeSamples != edgeSamples || current.MinPixelSize != minPixelSize)
                 {
                     emitter.SetSettings(settings);
                     if (reset) emitter.Reset();
@@ -98,8 +109,6 @@ namespace BistroParticles
             settings.Seed = weightSum * 7919;
             settings.EmissionRate = 0;
             settings.Substeps = settings.DepthCollision ? 4 : 1;
-            settings.EdgeSamples = 1;
-            settings.MinPixelSize = 0;
             effect.AuthoredShape = settings.Shape;
             effect.AuthoredExtents = settings.ShapeExtents;
             effect.LayoutVolume = settings.VolumeEnabled;
@@ -235,7 +244,8 @@ inline void ConfigureBistroProps(SceneManagerModule& scenes, JobSystem& jobs)
             auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
             const auto* mesh = render.GetPrimaryGPUMesh(source.MeshHandler);
             const auto partition = PartitionBistroProps(*mesh->CPUMesh, name == "Interior_interior");
-            const auto count = BistroPhysics::GetCount(partition, BistroPhysics::CountScale.GetValue());
+            const auto count = BistroPhysics::GetCount(partition,
+                BistroPhysics::SimulationEnabled.GetValue() ? BistroPhysics::CountScale.GetValue() : 1.0);
             render.ReserveTransformCapacity(static_cast<UINT>(count) + 9);
             size_t instances = partition.StaticSubMeshes.size();
             for (const auto& prop : partition.Props) instances += prop.SubMeshIndices.size();

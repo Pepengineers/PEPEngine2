@@ -12,13 +12,13 @@ struct WorldLighting
 };
 
 template<typename... Components>
-inline WorldLighting CollectWorldLights(ECSStorage<Components...>& ecs)
+inline WorldLighting CollectWorldLights(ECSStorage<Components...>& ecs, bool localShadows = true)
 {
     WorldLighting result;
     result.Main.LightRadiance = {};
     result.Main.SunShadowFlags = 0;
     ecs.template ForEach<TransformComponent, LightComponent>(
-        [&result](Entity entity, TransformComponent& transform, LightComponent& light)
+        [&result, localShadows](Entity entity, TransformComponent& transform, LightComponent& light)
         {
             if (!light.Enabled) return;
             const Matrix rotation = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(transform.Rotation.y),
@@ -44,9 +44,10 @@ inline WorldLighting CollectWorldLights(ECSStorage<Components...>& ecs)
             const float outerAngle = std::clamp(light.OuterAngle, 1.0f, 89.0f);
             data.OuterCos = std::cos(XMConvertToRadians(outerAngle));
             data.InnerCos = std::cos(XMConvertToRadians(std::clamp(light.InnerAngle, 0.0f, outerAngle)));
-            data.ShadowFlags = (light.CastShadows ? 1u : 0u) | (light.ShadowUpdate == ShadowUpdateMode::EveryFrame ? 2u : 0u);
+            if (localShadows)
+                data.ShadowFlags = (light.CastShadows ? 1u : 0u) | (light.ShadowUpdate == ShadowUpdateMode::EveryFrame ? 2u : 0u);
             data.ShadowRevision = light.ShadowRevision;
-            if (light.CastShadows) BuildLocalLightShadowMatrices(data);
+            if (localShadows && light.CastShadows) BuildLocalLightShadowMatrices(data);
             result.Local.push_back(data);
         });
     std::sort(result.Local.begin(), result.Local.end(), [](const auto& a, const auto& b) { return a.EntityId < b.EntityId; });

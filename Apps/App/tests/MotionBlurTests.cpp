@@ -36,7 +36,7 @@ namespace
             const float previous = variable.GetFloat();
             Require(!variable.SetFromString(value) && variable.GetFloat() == previous, "Invalid CVar modified state");
         };
-        reject(L"Render.MotionBlur.Quality", "4");
+        reject(L"Render.MotionBlur.Quality", "5");
         reject(L"Render.MotionBlur.Quality", "-1");
         reject(L"Render.MotionBlur.Samples", "3");
         reject(L"Render.MotionBlur.Samples", "129");
@@ -51,13 +51,15 @@ namespace
         reject(L"Render.MotionBlur.VelocityThreshold", "8.01");
         reject(L"Render.MotionBlur.VelocityThreshold", "nan");
         Set(L"Render.MotionBlur.Samples", "47");
-        for (const auto* quality : { "1", "2", "3" })
+        for (const auto* quality : { "1", "2", "3", "4" })
         {
             Set(L"Render.MotionBlur.Quality", quality);
             Require(GetMotionBlurSettings().Samples == 47, "Quality discarded sample override");
         }
         Set(L"Render.MotionBlur.Samples", "0");
-        Require(GetMotionBlurSettings().Samples == 35, "Sample inheritance failed");
+        Require(GetMotionBlurSettings().Samples == 43, "Epic sample inheritance failed");
+        Set(L"Render.MotionBlur.Quality", "3");
+        Require(GetMotionBlurSettings().Samples == 35, "High preset failed");
         Set(L"Render.MotionBlur.Quality", "1");
         Require(GetMotionBlurSettings().Samples == 19, "Low preset failed");
         Set(L"Render.MotionBlur.Quality", "2");
@@ -318,9 +320,16 @@ int main(int argc, char** argv)
         Set(L"Render.MotionBlur.Enabled", "false");
         execute();
         Require(Transfer(device, *pass.GetOutput(0)->GetTexture()) == colors, "Off is not exact identity");
+        Set(L"Render.MotionBlur.Quality", "4");
         Set(L"Render.MotionBlur.Enabled", "true");
         execute();
         Require(Transfer(device, *pass.GetOutput(0)->GetTexture()) == colors, "Re-enable used old motion");
+        execute();
+        Require(Transfer(device, *pass.GetOutput(0)->GetTexture()) != colors, "Epic did not resume blur");
+        Set(L"Render.MotionBlur.Quality", "1");
+        execute();
+        Require(Transfer(device, *pass.GetOutput(0)->GetTexture()) != colors, "Low did not retain blur");
+        Set(L"Render.MotionBlur.Quality", "2");
         execute();
         const auto positive = Transfer(device, *pass.GetOutput(0)->GetTexture());
         Require(positive != colors, "Moving image was not blurred");

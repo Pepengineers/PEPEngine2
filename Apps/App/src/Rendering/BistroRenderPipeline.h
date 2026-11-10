@@ -21,6 +21,8 @@ public:
     static void ToggleCollisionView();
 #endif
     void Initialize(RenderPipelineContext&) override;
+    void ResetWorldHistory() override;
+    std::pair<size_t, size_t> GetWorldProbeReadiness() const override;
     std::vector<Engine::UI::CanvasId> GetWorldCanvasIds() const override;
     void PrepareMaterialBindings(RenderPipelineContext&, Engine::UI::CrossAdapterUI*) override;
     void UpdateFrameSettings(RenderPipelineContext&) override;

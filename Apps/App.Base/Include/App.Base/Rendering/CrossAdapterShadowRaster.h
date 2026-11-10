@@ -61,11 +61,11 @@ public:
     CrossAdapterShadowRaster(GDX12Device& device, RenderMGPURuntime& runtime, GDX12ShadowAtlas atlas);
     ~CrossAdapterShadowRaster();
 
-    GDX12Snapshot::PhysicalView CreateDepth(UINT localLayers = 0) const;
+    GDX12Snapshot::PhysicalView CreateDepth(UINT localLayers = 0, UINT resolution = 0) const;
     bool IsReady(const Input& input, const Group& group) const;
     CrossAdapterShadows::RasterPlan Prepare(Input input);
     void InvalidateCache();
-    GDX12Snapshot::PhysicalView ReuseDepth(UINT localLayers) const;
+    GDX12Snapshot::PhysicalView ReuseDepth(UINT localLayers, UINT resolution = 0) const;
     GDX12ShadowAtlas Atlas() const { return _atlas; }
 
 private:

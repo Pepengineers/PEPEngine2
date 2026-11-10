@@ -14,7 +14,7 @@ public:
         if (world.GetECS().Get<CameraComponent>(world.ActiveCamera)._CBufferIndex !=
             render->GetRenderPipelineCommonData()->ActiveCameraCBufferIndex) return;
         render->SubmitSky(world);
-        auto lighting = CollectWorldLights(world.GetECS());
+        auto lighting = CollectWorldLights(world.GetECS(), render->GetShadowQuality().LocalResolution != 0);
         render->SubmitLights(std::move(lighting.Local), lighting.Main);
     }
 };

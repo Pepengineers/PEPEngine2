@@ -18,19 +18,7 @@ SamplerComparisonState samShadow : register(s6);
 #include "PBRSurface.hlsli"
 #ifdef GRASS_CAPTURE
 #define PROBE_CAPTURE 1
-float SunVisibility(float3 position, float3 normal, float nDotL)
-{
-    if ((CBMain.SunShadowFlags & 1u) == 0) return 1;
-    float4 projected = mul(float4(position + normal * CBShadow.TexelWorldSize.x * (1 - nDotL), 1), CBShadow.ViewProj[0]);
-    float3 shadow = projected.xyz / projected.w;
-    float2 uv = shadow.xy * float2(0.5f, -0.5f) + 0.5f;
-    if (any(uv < 0) || any(uv > 1) || shadow.z < 0 || shadow.z > 1) return 1;
-    float visibility = 0;
-    for (int y = -1; y <= 1; ++y)
-        for (int x = -1; x <= 1; ++x)
-            visibility += ShadowAtlas.SampleCmpLevelZero(samShadow, uv + float2(x, y) / 1024.0f, shadow.z - 0.00001f);
-    return visibility / 9;
-}
+#include "CSM.hlsli"
 #include "PBR.hlsli"
 #endif
 struct VertexOutput

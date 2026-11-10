@@ -91,7 +91,7 @@ namespace BistroGrass
         L"Maximum wind substeps per frame, 1..16", EConsoleVariableFlags::Default,
         [](UINT value) { return value >= 1 && value <= 16; });
     inline AutoConsoleVariable<UINT> GridResolution(L"App.Grass.Wind.GridResolution", 0,
-        L"Projected-grid resolution, 0 inherits Render.Wind.Quality, or 8..256",
+        L"Wind field resolution (both algorithms), 0 inherits Render.Wind.Quality, or 8..256",
         EConsoleVariableFlags::Default, [](UINT value) { return value == 0 || (value >= 8 && value <= 256); });
     inline AutoConsoleVariable<UINT> PressureIterations(L"App.Grass.Wind.PressureIterations", 0,
         L"Projected-grid pressure solve iterations, 0 inherits Render.Wind.Quality, maximum 128",

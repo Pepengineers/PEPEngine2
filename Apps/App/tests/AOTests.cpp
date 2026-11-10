@@ -57,7 +57,7 @@ static void CheckSettings()
     Set(L"Render.AO.XeGTAO.Slices", "4");
     Set(L"Render.AO.XeGTAO.Steps", "7");
     Set(L"Render.AO.CACAO.Quality", "3");
-    for (int level = 0; level <= 3; ++level)
+    for (int level = 0; level <= 4; ++level)
     {
         Set(L"Render.AO.Quality", std::to_string(level));
         const auto resolved = GetAmbientOcclusionSettings();
@@ -68,10 +68,22 @@ static void CheckSettings()
     }
     for (const auto name : { L"Render.AO.SSAO.Samples", L"Render.AO.HBAO.Directions", L"Render.AO.HBAO.Steps",
         L"Render.AO.DenoisePasses", L"Render.AO.XeGTAO.Slices", L"Render.AO.XeGTAO.Steps", L"Render.AO.CACAO.Quality" }) Set(name, "-1");
-    Require(GetAmbientOcclusionSettings().Samples == 32, "Preset inheritance did not resume");
+    const int samples[] = { 8, 16, 32, 64 };
+    const int horizons[] = { 4, 6, 8, 12 };
+    const int xeSteps[] = { 2, 2, 3, 4 };
+    const int cacao[] = { 1, 2, 4, 4 };
+    for (int level = 1; level <= 4; ++level)
+    {
+        Set(L"Render.AO.Quality", std::to_string(level));
+        const auto effective = GetAmbientOcclusionSettings();
+        const int tier = level - 1;
+        Require(effective.Samples == samples[tier] && effective.Directions == horizons[tier] &&
+            effective.Steps == horizons[tier] && effective.GTAOSlices == level && effective.GTAOSteps == xeSteps[tier] &&
+            effective.DenoisePasses == level && effective.CACAOQuality == cacao[tier], "Wrong inherited AO budget");
+    }
     auto& quality = console.FindConsoleVariable(L"Render.AO.Quality");
-    Require(quality.GetType() == EConsoleVariableType::Enumeration && quality.GetEnumCount() == 4 &&
-        !quality.SetFromString("4"), "AO quality must expose a validated enum dropdown");
+    Require(quality.GetType() == EConsoleVariableType::Enumeration && quality.GetEnumCount() == 5 &&
+        !quality.SetFromString("5"), "AO quality must expose a validated enum dropdown");
     for (const auto name : { L"Render.AO.ExecutionPoint", L"Render.AO.Implementation", L"Render.AO.CACAO.Quality" })
         Require(console.FindConsoleVariable(name).GetType() == EConsoleVariableType::Enumeration,
             "AO mode selectors must expose enum dropdowns");
@@ -687,6 +699,10 @@ int main(int argc, char** argv)
             Set(L"Render.AO.Enabled", "1");
             Set(L"Render.AO.Quality", "0");
             for (float p : run()) Require(p == 1, "Quality Off is not exactly neutral");
+            Set(L"Render.AO.Quality", "4");
+            for (float p : run()) Require(std::isfinite(p) && p >= 0 && p <= 1, "Epic AO returned an invalid visibility");
+            Set(L"Render.AO.Quality", "1");
+            run();
             Set(L"Render.AO.Quality", "2");
             Set(L"Render.AO.DenoisePasses", "0");
             const auto raw = run();

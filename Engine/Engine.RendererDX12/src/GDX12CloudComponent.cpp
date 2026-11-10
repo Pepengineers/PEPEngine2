@@ -6,7 +6,7 @@
 
 static AutoConsoleVariable<bool> Enabled(L"Render.Clouds.Enabled", true,
     L"Allow explicitly selected cloud sources. Default true.", EConsoleVariableFlags::Default);
-static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Clouds.Quality", GDX12Quality::Mid,
+static AutoConsoleVariable<GDX12LegacyQuality> Quality(L"Render.Clouds.Quality", GDX12LegacyQuality::Mid,
     L"0 Off, 1 Low (3 octaves), 2 Mid (5), 3 High (8).", EConsoleVariableFlags::Default);
 
 GDX12CloudComponent::GDX12CloudComponent()

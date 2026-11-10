@@ -111,9 +111,22 @@ public:
             _dynamicRevision = _resources->ReflectionDynamicRevision;
         }
         UINT slices = 0;
-        for (const auto& light : _resources->LocalLights)
-            if (light.ShadowFirstSlice != UINT_MAX) slices = (std::max)(slices, light.ShadowFirstSlice + LocalShadowFaceCount(light));
-        if ((std::max)(slices, 1u) != _sliceCount) CreateMaps((std::max)(slices, 1u));
+        const UINT resolution = _resources->ShadowQuality.LocalResolution;
+        if (resolution != 0)
+            for (const auto& light : _resources->LocalLights)
+                if (light.ShadowFirstSlice != UINT_MAX) slices = (std::max)(slices, light.ShadowFirstSlice + LocalShadowFaceCount(light));
+        if ((std::max)(slices, 1u) != _sliceCount || (std::max)(resolution, 1u) != _maps->GetWidth())
+            CreateMaps((std::max)(slices, 1u));
+        if (slices == 0)
+        {
+            _cached.clear();
+            _preparedCache.clear();
+            _dirtyFaces.clear();
+            _views.clear();
+            _viewFaces.clear();
+            _prepared = true;
+            return;
+        }
         const UINT count = _resources->IndirectCommandsCache->GetElementCount();
         _commandCount = count;
         auto& visibility = _visibility[_resources->CurrFrameConstantsIndex];
@@ -171,7 +184,8 @@ public:
                 !selection.IncludesLocal(GetLocalShadowKey(prepared->Light))) continue;
             auto casters = prepared->Casters;
             if (!_staticOnly && !_compactDynamic) casters.fill(_preparedFallbackDynamicRevision);
-            result.push_back(BuildLocalShadowOutput(prepared->Light, casters, _preparedSceneRevision, _staticOnly));
+            result.push_back(BuildLocalShadowOutput(prepared->Light, casters, _preparedSceneRevision, _staticOnly,
+                _maps->GetWidth()));
         }
         return result;
     }
@@ -184,7 +198,7 @@ public:
     UINT GetGeometryViewCapacity() const override
     {
         UINT faces = 0;
-        if (_resources)
+        if (_resources && _resources->ShadowQuality.LocalResolution != 0)
             for (const auto& light : _resources->LocalLights)
                 if (light.ShadowFirstSlice != UINT_MAX) faces += LocalShadowFaceCount(light);
         return faces * (_staticOnly ? 1 : 2);
@@ -208,6 +222,33 @@ public:
     void BeginGeometry(GDX12CommandList* commands) override
     {
         if (!_prepared) Prepare();
+        _dynamicBegun = false;
+        _renderedViews = 0;
+        if (_staticShadows)
+        {
+            _staticShadows->SetSplitGeometry(_splitGeometry);
+            _staticShadows->BeginGeometry(commands);
+        }
+        if (_mapsNeedClear)
+        {
+            commands->ResourceBarrier({ _maps->GetResource()->GetDepthWriteBarrier() });
+            for (const auto& dsv : _dsvs)
+                commands->GetCommandList()->ClearDepthStencilView(dsv->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
+            _mapsNeedClear = false;
+        }
+        else if (_staticOnly)
+        {
+            for (UINT slot = 0; slot < _views.size(); ++slot)
+            {
+                if (!GetGeometryView(slot)) continue;
+                const auto [lightIndex, face] = _viewFaces[slot];
+                const auto& light = _preparedCache[lightIndex]->Light;
+                commands->ResourceBarrier({ _maps->GetResource()->GetDepthWriteBarrier() });
+                commands->GetCommandList()->ClearDepthStencilView(_dsvs[light.ShadowFirstSlice + face]->CPUHandle,
+                    D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
+            }
+        }
+        if (_views.empty()) return;
         auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
         if (_compactDynamic) _commandCount = frame->DynamicShadowCommandCount;
         auto& binding = _meshBinding;
@@ -233,32 +274,6 @@ public:
         _faceBinding.SRVs.clear();
         _meshBindingsRecorded = false;
         _computeBindingsRecorded = false;
-        _dynamicBegun = false;
-        if (_staticShadows)
-        {
-            _staticShadows->SetSplitGeometry(_splitGeometry);
-            _staticShadows->BeginGeometry(commands);
-        }
-        if (_mapsNeedClear)
-        {
-            commands->ResourceBarrier({ _maps->GetResource()->GetDepthWriteBarrier() });
-            for (const auto& dsv : _dsvs)
-                commands->GetCommandList()->ClearDepthStencilView(dsv->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
-            _mapsNeedClear = false;
-        }
-        else if (_staticOnly)
-        {
-            for (UINT slot = 0; slot < _views.size(); ++slot)
-            {
-                if (!GetGeometryView(slot)) continue;
-                const auto [lightIndex, face] = _viewFaces[slot];
-                const auto& light = _preparedCache[lightIndex]->Light;
-                commands->ResourceBarrier({ _maps->GetResource()->GetDepthWriteBarrier() });
-                commands->GetCommandList()->ClearDepthStencilView(_dsvs[LocalShadowRegion(light, face).Slice]->CPUHandle,
-                    D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
-            }
-        }
-        _renderedViews = 0;
     }
 
     void BindGeometryViewTargets(GDX12CommandList* commands, UINT slot) override
@@ -274,9 +289,9 @@ public:
         const auto& light = _preparedCache[lightIndex]->Light;
         commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
         commands->ResourceBarrier({ _maps->GetResource()->GetDepthWriteBarrier() });
-        commands->SetViewport({ 0, 0, static_cast<float>(LocalShadowResolution), static_cast<float>(LocalShadowResolution), 0, 1 });
-        commands->SetScissorRect({ 0, 0, LocalShadowResolution, LocalShadowResolution });
-        const auto dsv = _dsvs[LocalShadowRegion(light, face).Slice]->CPUHandle;
+        commands->SetViewport(_maps->GetViewport());
+        commands->SetScissorRect(_maps->GetScissorRect());
+        const auto dsv = _dsvs[light.ShadowFirstSlice + face]->CPUHandle;
         commands->GetCommandList()->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
     }
 
@@ -412,7 +427,7 @@ private:
                 for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
                 {
                     if ((_dirtyFaces[lightIndex] & (1u << face)) == 0) continue;
-                    const UINT slice = LocalShadowRegion(light, face).Slice;
+                    const UINT slice = light.ShadowFirstSlice + face;
                     const CD3DX12_TEXTURE_COPY_LOCATION src(source->D3DResource.Get(), slice);
                     const CD3DX12_TEXTURE_COPY_LOCATION dst(target->D3DResource.Get(), slice);
                     commands->GetCommandList()->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
@@ -440,8 +455,9 @@ private:
         _viewFaces.clear();
         _prepared = false;
         _dsvs.clear();
-        const auto resource = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, LocalShadowResolution,
-            LocalShadowResolution, static_cast<UINT16>(slices), 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
+        const UINT resolution = (std::max)(1u, _resources->ShadowQuality.LocalResolution);
+        const auto resource = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, resolution,
+            resolution, static_cast<UINT16>(slices), 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
         D3D12_CLEAR_VALUE clear = {};
         clear.Format = DXGI_FORMAT_D32_FLOAT;
         clear.DepthStencil.Depth = 1;
@@ -449,7 +465,7 @@ private:
         desc.ExternalResource = _resources->Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, resource,
             D3D12_RESOURCE_STATE_COMMON, &clear);
         desc.Format = desc.SRVDesc.Format = DXGI_FORMAT_R32_FLOAT;
-        desc.Width = desc.Height = LocalShadowResolution;
+        desc.Width = desc.Height = resolution;
         desc.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
         desc.SRVHeapIndex = _sliceCount ? _maps->GetSRV()->HeapIndex : desc.SRV_UAV_Heap->GetAvailableIndex(ShadowMaps_StartIndex, ShadowMaps_RangeLength);
         desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;

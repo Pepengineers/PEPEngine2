@@ -218,10 +218,13 @@ CrossAdapterShadowRaster::CrossAdapterShadowRaster(GDX12Device& device, RenderMG
 
 CrossAdapterShadowRaster::~CrossAdapterShadowRaster() = default;
 
-PhysicalView CrossAdapterShadowRaster::CreateDepth(UINT localLayers) const
+PhysicalView CrossAdapterShadowRaster::CreateDepth(UINT localLayers, UINT resolution) const
 {
     const bool sun = _atlas == GDX12ShadowAtlas::Sun;
-    const UINT extent = sun ? 2 * SunShadowCascadeResolution : LocalShadowResolution;
+    if (resolution == 0) resolution = sun ? SunShadowCascadeResolution : LocalShadowResolution;
+    Require(sun ? IsSunShadowResolution(resolution) : IsLocalShadowResolution(resolution),
+        "Invalid shadow raster resolution");
+    const UINT extent = sun ? 2 * resolution : resolution;
     const UINT layers = sun ? 1 : localLayers;
     Require(layers > 0 && layers <= D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION, "Invalid shadow raster atlas slice count");
     const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, extent, extent,
@@ -269,15 +272,20 @@ CrossAdapterShadows::RasterPlan CrossAdapterShadowRaster::Prepare(Input input)
     Require(input.Atlas.Resource && input.Atlas.Resource->D3DResource &&
         input.Atlas.Identity.Adapter == _device.GetSubmissionAdapterId(), "Shadow raster needs a retained device-local atlas");
     const auto atlasDesc = input.Atlas.Resource->D3DResource->GetDesc();
-    const UINT extent = sun ? 2 * SunShadowCascadeResolution : LocalShadowResolution;
+    const UINT resolution = sun ? atlasDesc.Height / 2 : atlasDesc.Height;
+    const UINT extent = sun ? 2 * resolution : resolution;
     Require(atlasDesc.Format == DXGI_FORMAT_R32_TYPELESS && atlasDesc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D &&
         atlasDesc.Width == extent && atlasDesc.Height == extent && atlasDesc.MipLevels == 1 && atlasDesc.SampleDesc.Count == 1 &&
+        (sun ? IsSunShadowResolution(resolution) : IsLocalShadowResolution(resolution)) &&
         (atlasDesc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) && (!sun || atlasDesc.DepthOrArraySize == 1),
         "Invalid native shadow raster atlas");
     std::vector<GDX12ShadowOutput> outputs;
     for (const auto& group : input.Groups) outputs.push_back(group.Output);
-    Require(outputs.empty() || GDX12ShadowTransferLayout::Build(_atlas, std::move(outputs)).has_value(),
-        "Invalid shadow raster group mapping");
+    if (!outputs.empty())
+    {
+        const auto layout = GDX12ShadowTransferLayout::Build(_atlas, std::move(outputs));
+        Require(layout && layout->Extent() == resolution, "Invalid shadow raster group mapping");
+    }
     auto work = std::make_shared<Work>();
     work->Data = std::move(input);
     work->Next = std::make_shared<Cache>();
@@ -290,7 +298,8 @@ CrossAdapterShadows::RasterPlan CrossAdapterShadowRaster::Prepare(Input input)
     const bool sameAtlas = _cache && _cache->Atlas.Identity.Id == next.Atlas.Identity.Id &&
         _cache->AtlasHandle.Get() == next.AtlasHandle.Get();
     if (!sun && !data.Groups.empty())
-        next.StaticAtlas = sameAtlas && _cache->StaticAtlas.Resource ? _cache->StaticAtlas : CreateDepth(atlasDesc.DepthOrArraySize);
+        next.StaticAtlas = sameAtlas && _cache->StaticAtlas.Resource ? _cache->StaticAtlas :
+            CreateDepth(atlasDesc.DepthOrArraySize, resolution);
 
     for (UINT index = 0; index < data.Groups.size(); ++index)
     {
@@ -473,12 +482,17 @@ void CrossAdapterShadowRaster::InvalidateCache()
     _cache.reset();
 }
 
-PhysicalView CrossAdapterShadowRaster::ReuseDepth(UINT localLayers) const
+PhysicalView CrossAdapterShadowRaster::ReuseDepth(UINT localLayers, UINT resolution) const
 {
-    if (_cache && _cache->AtlasHandle.Get() == _cache->Atlas.Resource->D3DResource.Get() &&
-        (_atlas == GDX12ShadowAtlas::Sun || _cache->AtlasHandle->GetDesc().DepthOrArraySize == localLayers))
-        return _cache->Atlas;
-    return CreateDepth(localLayers);
+    const bool sun = _atlas == GDX12ShadowAtlas::Sun;
+    if (resolution == 0) resolution = sun ? SunShadowCascadeResolution : LocalShadowResolution;
+    if (_cache && _cache->AtlasHandle.Get() == _cache->Atlas.Resource->D3DResource.Get())
+    {
+        const auto desc = _cache->AtlasHandle->GetDesc();
+        if (desc.Width == (sun ? 2 * resolution : resolution) && (sun || desc.DepthOrArraySize == localLayers))
+            return _cache->Atlas;
+    }
+    return CreateDepth(localLayers, resolution);
 }
 
 std::optional<CompletionPoint> SubmitPreparedShadows(CrossAdapterShadows& transfer, const GDX12ShadowSelection& selection,
@@ -553,7 +567,7 @@ std::optional<CompletionPoint> SubmitPreparedShadows(CrossAdapterShadows& transf
     CrossAdapterShadows::RasterPlan localPlan, remotePlan;
     try
     {
-        secondary.Atlas = secondaryRaster.ReuseDepth(selected->Layout.Layers());
+        secondary.Atlas = secondaryRaster.ReuseDepth(selected->Layout.Layers(), selected->Layout.Extent());
         secondaryAtlas = secondary.Atlas;
         localPlan = primaryRaster.Prepare(std::move(primary));
         remotePlan = secondaryRaster.Prepare(std::move(secondary));

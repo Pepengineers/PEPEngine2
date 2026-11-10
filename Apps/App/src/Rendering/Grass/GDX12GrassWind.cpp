@@ -11,9 +11,9 @@ namespace
 {
     static AutoConsoleVariable<bool> GrassAsync(L"Render.Grass.AsyncCompute", false, L"Run Bistro grass interaction and wind on COMPUTE");
     static AutoConsoleVariable<bool> GrassEnabled(L"Render.Grass.Enabled", true, L"Enable grass components", EConsoleVariableFlags::Default);
-    static AutoConsoleVariable<GDX12Quality> GrassQuality(L"Render.Grass.Quality", GDX12Quality::Mid, L"Grass: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default);
+    static AutoConsoleVariable<GDX12Quality> GrassQuality(L"Render.Grass.Quality", GDX12Quality::Mid, L"Grass: 0 Off, 1 Low, 2 Mid, 3 High, 4 Epic", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<bool> WindEnabled(L"Render.Wind.Enabled", true, L"Enable wind components", EConsoleVariableFlags::Default);
-    static AutoConsoleVariable<GDX12Quality> WindQuality(L"Render.Wind.Quality", GDX12Quality::Mid, L"Wind: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default);
+    static AutoConsoleVariable<GDX12Quality> WindQuality(L"Render.Wind.Quality", GDX12Quality::Mid, L"Wind: 0 Off, 1 Low, 2 Mid, 3 High, 4 Epic", EConsoleVariableFlags::Default);
     bool Range(const float value, const float low, const float high) { return std::isfinite(value) && value >= low && value <= high; }
     static AutoConsoleVariable<bool> GrassMultiGPU(L"Render.Grass.MultiGPU", false,
         L"Route the authoritative Bistro grass field producer through the secondary adapter");
@@ -41,9 +41,9 @@ GDX12GrassMGPUControls GetGrassMGPUControls()
 GDX12GrassSettings ResolveGrassSettings(const GDX12GrassSettings& author, const int quality)
 {
     auto settings = author;
-    const int q = (std::clamp)(quality, 1, 3) - 1;
-    const UINT budgets[] = { 16384, 65536, 262144 };
-    const UINT segments[] = { 1, 3, 5 };
+    const int q = (std::clamp)(quality, 1, 4) - 1;
+    const UINT budgets[] = { 16384, 65536, 262144, 262144 };
+    const UINT segments[] = { 1, 3, 5, 8 };
     if (!settings.MaxBlades) settings.MaxBlades = budgets[q];
     if (!settings.Segments) settings.Segments = segments[q];
     return settings;
@@ -51,9 +51,9 @@ GDX12GrassSettings ResolveGrassSettings(const GDX12GrassSettings& author, const 
 GDX12WindSettings ResolveWindSettings(const GDX12WindSettings& author, const int quality)
 {
     auto settings = author;
-    const int q = (std::clamp)(quality, 1, 3) - 1;
-    const UINT grids[] = { 32, 64, 128 };
-    const UINT iterations[] = { 8, 20, 40 };
+    const int q = (std::clamp)(quality, 1, 4) - 1;
+    const UINT grids[] = { 32, 64, 128, 256 };
+    const UINT iterations[] = { 8, 20, 40, 80 };
     if (!settings.GridResolution) settings.GridResolution = grids[q];
     if (!settings.PressureIterations) settings.PressureIterations = iterations[q];
     return settings;

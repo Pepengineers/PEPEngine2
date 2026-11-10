@@ -180,6 +180,17 @@ static void CheckInterior(const std::filesystem::path& path)
         "Interior must simulate 947 furniture/tableware objects and retain static architecture");
     Require(partition.Tableware.size()==905 && partition.Props.size()-partition.Tableware.size()==42,
         "Tableware scaling must be independent of original furniture");
+    std::vector<DirectX::BoundingBox> propBounds;
+    for (const auto& prop : partition.Props) propBounds.push_back(BistroPhysics::Bounds(*mesh, prop.SubMeshIndices));
+    const auto low = BistroPhysics::SelectDynamicProps(partition, propBounds, 0.25, true);
+    const auto epic = BistroPhysics::SelectDynamicProps(partition, propBounds, 1, true);
+    const auto off = BistroPhysics::SelectDynamicProps(partition, propBounds, 0, false);
+    Require(std::count(low.begin(), low.end(), true) == 269 &&
+        low == BistroPhysics::SelectDynamicProps(partition, propBounds, 0.25, true),
+        "Low must activate exactly 227 deterministic originals plus 42 furniture props");
+    Require(std::all_of(epic.begin(), epic.end(), [](bool active) { return active; }) &&
+        std::none_of(off.begin(), off.end(), [](bool active) { return active; }),
+        "Epic must keep the original workload and Off must leave only static colliders");
     std::vector<unsigned> visits(mesh->GetSubMeshCount());
     for (auto index : partition.StaticSubMeshes) ++visits.at(index);
     size_t propSections = 0;

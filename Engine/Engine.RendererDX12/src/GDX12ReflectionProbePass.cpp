@@ -55,7 +55,7 @@ namespace
         return result;
     }
 
-    GDX12ShadowConstants ProbeSunShadow(const GDX12DeviceResources& resources)
+    GDX12ShadowConstants ProbeSunShadow(const GDX12DeviceResources& resources, UINT resolution)
     {
         Vector3 direction(resources.Lighting.LightDirection);
         if (direction.LengthSquared() < 1e-8f) direction = -Vector3::UnitY;
@@ -78,7 +78,7 @@ namespace
             minimum.y - 1, maximum.y + 1, (std::max)(0.01f, -maximum.z - 1), -minimum.z + 1);
         GDX12ShadowConstants result;
         XMStoreFloat4x4(&result.ViewProj[0], (view * projection).Transpose());
-        result.TexelWorldSize.x = (std::max)(maximum.x - minimum.x, maximum.y - minimum.y) / 1024;
+        result.TexelWorldSize.x = (std::max)(maximum.x - minimum.x, maximum.y - minimum.y) / resolution;
         return result;
     }
 }
@@ -269,6 +269,14 @@ void GDX12ReflectionProbePass::CreatePublishedTexture(UINT count, UINT resolutio
 
 void GDX12ReflectionProbePass::CreateCaptureTextures(UINT resolution)
 {
+    const UINT sunSize = (std::max)(1u, _resources->ShadowQuality.SunResolution / 2);
+    if (!_sunShadow.IsInitialized() || _sunShadow.GetWidth() != sunSize)
+    {
+        CreateTexture(_sunShadow, sunSize, 1, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, true);
+        _sunShadow.GetResource()->D3DResource->SetName(L"Reflection sun shadow");
+        CreateFaceViews(_sunShadow, _sunDSV, true);
+        _sunShadowNeedsClear = true;
+    }
     if (_captureTextureResolution == resolution) return;
     _resources->Device->GetCommandQueue()->Flush();
     _captureTextureResolution = resolution;
@@ -281,13 +289,6 @@ void GDX12ReflectionProbePass::CreateCaptureTextures(UINT resolution)
     _depth.GetResource()->D3DResource->SetName(L"Reflection restored depth");
     CreateFaceViews(_raw, _rawRTVs, false);
     CreateFaceViews(_depth, _depthDSVs, true);
-    if (!_sunShadow.IsInitialized())
-    {
-        CreateTexture(_sunShadow, 1024, 1, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, true);
-        _sunShadow.GetResource()->D3DResource->SetName(L"Reflection sun shadow");
-        CreateFaceViews(_sunShadow, _sunDSV, true);
-        _sunShadowNeedsClear = true;
-    }
     _filterUAVs.clear();
     _rawMipSRVs.clear();
     for (UINT mip = 0; mip < captureMips; ++mip)
@@ -420,8 +421,8 @@ void GDX12ReflectionProbePass::BindGeometryViewTargets(GDX12CommandList* command
         commands->ResourceBarrier({ _sunShadow.GetResource()->GetDepthWriteBarrier() });
         const auto dsv = _sunDSV[0]->CPUHandle;
         commands->GetCommandList()->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
-        commands->SetViewport({ 0, 0, 1024, 1024, 0, 1 });
-        commands->SetScissorRect({ 0, 0, 1024, 1024 });
+        commands->SetViewport(_sunShadow.GetViewport());
+        commands->SetScissorRect(_sunShadow.GetScissorRect());
         return;
     }
     const auto& prepared = _views[slot];
@@ -590,6 +591,14 @@ void GDX12ReflectionProbePass::WriteProbeData(GDX12CommandList* commands, const 
     frame->UploadReflectionProbeData(commands);
 }
 
+std::pair<size_t, size_t> GDX12ReflectionProbePass::GetReadiness() const
+{
+    if (!_enabled) return {};
+    const auto ready = std::count_if(_probes.begin(), _probes.end(),
+        [](const ProbeState& probe) { return probe.Ready && probe.LastUpdate != 0; });
+    return {static_cast<size_t>(ready), _probes.size()};
+}
+
 void GDX12ReflectionProbePass::Prepare()
 {
     if (_planPrepared) return;
@@ -647,19 +656,22 @@ void GDX12ReflectionProbePass::Prepare()
         CreatePublishedTexture(static_cast<UINT>(submitted.size()), maximumResolution);
     const bool invalidate = _staticRevision != _resources->ReflectionStaticRevision ||
         _environmentRevision != _resources->ReflectionEnvironmentRevision;
-    if (invalidate)
+    const bool shadowQualityChanged = !(_shadowQuality == _resources->ShadowQuality);
+    if (invalidate || shadowQualityChanged)
     {
         if (_staticLocalShadows) _staticLocalShadows->InvalidateCache();
         _face = 0;
         for (auto& probe : _probes)
         {
-            if (probe.Source.Implementation == 2 && probe.Ready && probe.LastUpdate) continue;
+            if (shadowQualityChanged) probe.Ready = false;
+            else if (probe.Source.Implementation == 2 && probe.Ready && probe.LastUpdate) continue;
             probe.BakedFaces = 0;
             probe.LastUpdate = 0;
         }
     }
     _staticRevision = _resources->ReflectionStaticRevision;
     _environmentRevision = _resources->ReflectionEnvironmentRevision;
+    _shadowQuality = _resources->ShadowQuality;
     _settings = settings;
     for (size_t i = 0; i < submitted.size(); ++i)
     {
@@ -699,7 +711,9 @@ void GDX12ReflectionProbePass::Prepare()
     _mips = CubeMipCount(_resolution);
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
     for (UINT face = 0; face < 6; ++face) frame.Cameras->CopyData(face, FaceCamera(state.Source, face, _resolution));
-    frame.Shadow->CopyData(0, ProbeSunShadow(*_resources));
+    const bool sunShadow = (_resources->Lighting.SunShadowFlags & 1u) != 0;
+    const auto shadowSettings = sunShadow ? ProbeSunShadow(*_resources, _sunShadow.GetWidth()) : GDX12ShadowConstants{};
+    frame.Shadow->CopyData(0, shadowSettings);
     _capturePlanned = true;
     _endFace = (std::min)(6u, _face + state.Source.FacesPerFrame);
     const bool bake = state.Source.Implementation == 1 && state.BakedFaces != 63;
@@ -726,7 +740,7 @@ void GDX12ReflectionProbePass::Prepare()
         prepared.Selected = true;
         auto& view = prepared.Context;
         view.Stage = shadow ? GDX12GeometryStage::Shadow : GDX12GeometryStage::ReflectionCapture;
-        view.ViewProjection = shadow ? Matrix(ProbeSunShadow(*_resources).ViewProj[0]).Transpose() :
+        view.ViewProjection = shadow ? Matrix(shadowSettings.ViewProj[0]).Transpose() :
             Matrix(FaceCamera(state.Source, face, _resolution).ViewProj).Transpose();
         view.Eye = state.Source.Position;
         view.CameraConstants = shadow ? 0 : frame.Cameras->GetElementAddress(face);
@@ -750,7 +764,6 @@ void GDX12ReflectionProbePass::Prepare()
             view.ColorFormats[0] = baked ? state.BakedColor->GetFormat() : _raw.GetFormat();
         }
     };
-    const bool sunShadow = (_resources->Lighting.SunShadowFlags & 1u) != 0;
     if (bake)
     {
         if (sunShadow) select(0, StaticGeometry, true, 0, false);

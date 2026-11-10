@@ -40,8 +40,10 @@ protected:
                     XMConvertToRadians(transform.Rotation.z)) * Matrix::CreateTranslation(transform.Location);
                 GDX12TransformConstants constants;
                 XMStoreFloat4x4(&constants.WorldMatrix, XMMatrixTranspose(gpu.World));
-                XMStoreFloat4x4(&constants.PrevWorldMatrix, XMMatrixTranspose(gpu.PrevWorld));
+                XMStoreFloat4x4(&constants.PrevWorldMatrix,
+                    XMMatrixTranspose(gpu.HasPreviousWorld ? gpu.PrevWorld : gpu.World));
                 gpu.PrevWorld = gpu.World;
+                gpu.HasPreviousWorld = true;
                 if (_render->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
                     _render->GetCurrentPrimaryFrameConstants()->TransformCache->CopyData(gpu.CBufferIndex, constants);
                 if (_render->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
@@ -139,11 +141,12 @@ private:
 
             Matrix view = Matrix::CreateLookAt(CameraLocation, CameraTarget, Vector3::Up);
 
-            if (isActiveCamera)
+            const auto sunShadowResolution = renderModule->GetShadowQuality().SunResolution;
+            if (isActiveCamera && sunShadowResolution != 0)
             {
                 const auto& lighting = renderModule->GetLightingSettings();
                 const auto shadows = BuildShadowCascades(view.Invert(), FOV, renderModule->GetAspectRatio(),
-                    camera.NearPlane, camera.FarPlane, Vector3(lighting.LightDirection));
+                    camera.NearPlane, camera.FarPlane, Vector3(lighting.LightDirection), nullptr, sunShadowResolution);
                 renderModule->SubmitCameraShadows(shadows);
             }
 
@@ -164,7 +167,11 @@ private:
 
             if (isActiveCamera)
             {
-                if (reset) ++pipelineCommonData->HistoryRevision;
+                if (reset)
+                {
+                    ++pipelineCommonData->HistoryRevision;
+                    _jitterFrameIndex = 0;
+                }
                 pipelineCommonData->ActiveCameraFOV = camera.FOV;
                 pipelineCommonData->ActiveCameraNearPlane = camera.NearPlane;
                 pipelineCommonData->ActiveCameraFarPlane = camera.FarPlane;

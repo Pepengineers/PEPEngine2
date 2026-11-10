@@ -12,6 +12,7 @@
 #include <cstring>
 #include <thread>
 #include <d3d12sdklayers.h>
+#include "BistroBenchmarkFlightChecks.h"
 
 static void CheckEnumCVars()
 {
@@ -20,12 +21,21 @@ static void CheckEnumCVars()
     for (const auto name : { L"Render.AO.Quality", L"Render.SSR.Quality", L"Render.DOF.Quality",
         L"Render.MotionBlur.Quality", L"Render.Reflection.Quality", L"Render.Grass.Quality",
         L"Render.Wind.Quality", L"Render.Particles.Quality", L"Render.Fluid.Quality",
-        L"Render.Skinning.Quality", L"Render.Clouds.Quality", L"Render.SkyBox.Quality", L"Render.SkyAtmosphere.Quality" })
+        L"Render.Skinning.Quality", L"Render.SkyBox.Quality" })
     {
         const auto& quality = ConsoleModule{}.FindConsoleVariable(name);
-        require(quality.GetType() == EConsoleVariableType::Enumeration && quality.GetEnumCount() == 4 &&
-            quality.GetEnumFirstValue() == 0, "Every effect quality must use an enum dropdown");
+        require(quality.GetType() == EConsoleVariableType::Enumeration && quality.GetEnumCount() == 5 &&
+            quality.GetEnumFirstValue() == 0 && quality.GetEnumValueName(4) == "Epic", "Active quality tiers must include Epic");
     }
+    for (const auto name : { L"Render.Clouds.Quality", L"Render.SkyAtmosphere.Quality" })
+    {
+        auto& quality = ConsoleModule{}.FindConsoleVariable(name);
+        require(quality.GetType() == EConsoleVariableType::Enumeration && quality.GetEnumCount() == 4 &&
+            quality.GetEnumFirstValue() == 0 && !quality.SetFromString("4"), "Deferred technique quality must stop at High");
+    }
+    auto& poseRate = ConsoleModule{}.FindConsoleVariable(L"Render.Skinning.PoseRateHz");
+    require(poseRate.SetFromString("20") && poseRate.GetInt() == 20 && !poseRate.SetFromString("241") &&
+        poseRate.GetInt() == 20 && poseRate.SetFromString("0"), "Named pose rate override must be validated and reversible");
     for (const auto name : { L"Render.Upscaler.Provider", L"Render.Upscaler.Quality",
         L"Render.FrameGeneration.Provider", L"Render.AO.Implementation", L"Render.AO.ExecutionPoint",
         L"Render.AO.CACAO.Quality", L"App.Grass.Implementation", L"App.Grass.Wind.Algorithm", L"App.Particles.Simulation" })
@@ -44,12 +54,93 @@ static void CheckEnumCVars()
     std::cout << "Effect quality/provider/mode CVar metadata passed\n";
 }
 
+static void CheckPresetRegistry()
+{
+    ConsoleModule console;
+    for (const auto& technique : BistroQuality::Techniques)
+        for (int tier = technique.HasOff ? 0 : 1; tier <= 4; ++tier)
+        {
+            ConsoleVariablePatch previous;
+            CheckQualityConfig(console.ApplyPatch(BistroQuality::Preset(technique, tier), &previous));
+            CheckQualityConfig(console.ApplyPatch(previous));
+        }
+    const auto techniques = BistroQuality::SearchTechniques(console);
+    BistroQualitySearch::Candidate candidate{std::vector<int>(techniques.size(), 1), 768, 480};
+    ConsoleVariablePatch previous;
+    CheckQualityConfig(console.ApplyPatch(BistroQuality::ProfilePatch(techniques, candidate), &previous));
+    CheckQualityConfig(console.ApplyPatch(previous));
+    std::cout << "Bistro registry tier patches and full candidate rollback passed\n";
+}
+
+static void CheckWorldReset(BistroApp& app)
+{
+    auto& locator = BenchmarkEngine::GetLocator();
+    auto scenes = locator.GetModule<SceneManagerModule>();
+    auto renderer = locator.GetModule<RenderModule>();
+    const auto snapshot = [&]
+    {
+        using Entry = std::tuple<std::string, float, float, float, float, float, float>;
+        std::vector<Entry> result;
+        scenes->GetWorld()->GetECS().ForEach<NameComponent, TransformComponent>(
+            [&](Entity, const NameComponent& name, const TransformComponent& transform)
+            {
+                const auto& p = transform.Location;
+                const auto& r = transform.Rotation;
+                result.emplace_back(name.value, p.x, p.y, p.z, r.x, r.y, r.z);
+            });
+        std::sort(result.begin(), result.end());
+        return result;
+    };
+    const auto initial = snapshot();
+    const auto cameraSlot = renderer->GetRenderPipelineCommonData()->ActiveCameraCBufferIndex;
+    app.BenchmarkFrame(1.0 / 60);
+    renderer->DrainFrameWork();
+    const auto before = renderer->GetMemoryStatistics();
+
+    ConsoleModule console;
+    ConsoleVariablePatch previous;
+    CheckQualityConfig(console.ApplyPatch({
+        {L"App.Physics.ActiveTablewareFraction", "0.25"}, {L"App.NPC.PresetCount", "2"}, {L"App.Fox.PresetCount", "1"}
+    }, &previous));
+    app.RestartWorld(12345);
+    auto& low = scenes->GetWorld()->GetECS();
+    size_t dynamic = 0, staticBodies = 0;
+    low.ForEach<RigidBodyComponent>([&](Entity, const RigidBodyComponent& body)
+    {
+        ++(body.MotionType == PhysicsMotionType::Dynamic ? dynamic : staticBodies);
+    });
+    if (dynamic != 269 || staticBodies < 680 || low.GetPool<SkeletalMeshRenderComponent>().Size() != 3)
+        throw std::runtime_error("Bistro Low reset lost the requested density or original static bodies");
+    app.BenchmarkFrame(1.0 / 60);
+    CheckQualityConfig(console.ApplyPatch(previous));
+
+    for (int repeat = 0; repeat < 2; ++repeat)
+    {
+        app.RestartWorld(12345);
+        if (snapshot() != initial || app.BenchmarkTicks || app.BenchmarkRequested ||
+            renderer->GetRenderPipelineCommonData()->ActiveCameraCBufferIndex != cameraSlot)
+            throw std::runtime_error("Bistro reset did not reproduce initial transforms, counters and camera slot");
+        app.BenchmarkFrame(1.0 / 60);
+        renderer->DrainFrameWork();
+    }
+    const auto after = renderer->GetMemoryStatistics();
+    if (after.AllocationBytes > before.AllocationBytes + 128ull * 1024 * 1024 ||
+        after.AllocationCount > before.AllocationCount + 256)
+        throw std::runtime_error("Bistro repeated reset exceeded the allocation tolerance");
+    std::cout << "Bistro reset A/B/A and extra A passed: " << before.AllocationCount
+        << " -> " << after.AllocationCount << " allocations, " << before.AllocationBytes
+        << " -> " << after.AllocationBytes << " bytes\n";
+}
+
 int main(int argc, char** argv)
 {
     try
     {
         CheckEnumCVars();
+        CheckPresetRegistry();
+        CheckBistroBenchmarkFlight();
         if (argc > 1 && std::strcmp(argv[1], "--cvars-only") == 0) return 0;
+        const bool resetOnly = argc > 1 && std::strcmp(argv[1], "--reset-only") == 0;
         const bool checkDebugLayer = argc > 1 && std::strcmp(argv[1], "--check-debug-layer") == 0;
         if (!checkDebugLayer)
         {
@@ -59,9 +150,14 @@ int main(int argc, char** argv)
         }
         BistroReflections::ShowBounds.SetFromString("false");
         BistroBounds::Show.SetFromString("false");
-        BistroApp app(GetModuleHandleW(nullptr));
+        BistroApp app(GetModuleHandleW(nullptr), resetOnly ? 12345 : std::random_device{}());
         if (!app.Initialize()) throw std::runtime_error("Bistro startup failed");
         ShowWindow(app.GetWindow()->GetWindowHandle(), SW_HIDE);
+        if (resetOnly)
+        {
+            CheckWorldReset(app);
+            return 0;
+        }
         auto& world = *BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()->GetWorld();
         auto& ecs = world.GetECS();
         bool passed = true;

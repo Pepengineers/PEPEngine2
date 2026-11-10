@@ -158,6 +158,7 @@ void App::UpdatePauseState()
     if (auto render = Locator.GetModule<RenderModule>()) render->SetFrameGenerationSuspended(paused);
     if (paused) Timer.Stop();
     else Timer.Start();
+    OnPauseChanged(paused);
 }
 
 void App::ReportLoading(const std::wstring& stage)
@@ -518,6 +519,7 @@ void App::Update(const GameTimer& gameTimer)
         auto& world = *scenes->GetWorld(i);
         if (world.IsPaused())
         {
+            _lights.Schedule(_jobs, world, 0).Complete();
             _gpuData.Schedule(_jobs, world, 0).Complete();
             continue;
         }

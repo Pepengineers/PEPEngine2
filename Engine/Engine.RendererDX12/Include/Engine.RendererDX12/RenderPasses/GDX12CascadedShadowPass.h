@@ -33,29 +33,7 @@ public:
 
     void Initialize() override
     {
-        GDX12TextureDesc texture;
-        texture.Width = texture.Height = 2 * SunShadowCascadeResolution;
-        texture.Format = texture.DSVDesc.Format = DXGI_FORMAT_D32_FLOAT;
-        texture.SRVDesc.Format = DXGI_FORMAT_R32_FLOAT;
-        texture.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        texture.SRVDesc.Texture2D.MipLevels = 1;
-        texture.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        texture.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
-        texture.SRVHeapIndex = texture.SRV_UAV_Heap->GetAvailableIndex(ShadowMaps_StartIndex, ShadowMaps_RangeLength);
-        texture.CreateDSV = true;
-        texture.DSVHeap = _resources->DSVHeap.get();
-        texture.DSVHeapIndex = texture.DSVHeap->GetAvailableIndex();
-        texture.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-        texture.ClearValue = { 1, 0, 0, 0 };
-        const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, texture.Width, texture.Height,
-            1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
-        D3D12_CLEAR_VALUE clear = {};
-        clear.Format = DXGI_FORMAT_D32_FLOAT;
-        clear.DepthStencil.Depth = 1.0f;
-        texture.ExternalResource = _resources->Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc,
-            D3D12_RESOURCE_STATE_COMMON, &clear);
-        _atlas->Initialize(texture);
-        _atlasNeedsClear = true;
+        CreateAtlas(_resources->ShadowQuality.SunResolution);
 
         GDX12RootSignatureDesc graphics;
         graphics.InstancedGeometry = true;
@@ -108,8 +86,10 @@ public:
     void Prepare()
     {
         if (_prepared) return;
+        if (_cascadeResolution != _resources->ShadowQuality.SunResolution)
+            CreateAtlas(_resources->ShadowQuality.SunResolution);
         const auto& lighting = _resources->Lighting;
-        _preparedFlags = lighting.SunShadowFlags;
+        _preparedFlags = _cascadeResolution != 0 ? lighting.SunShadowFlags : 0;
         _updating = (_preparedFlags & 1u) != 0u &&
             ((_preparedFlags & 2u) != 0u || !_rendered ||
                 _cachedGeometryRevision != _resources->GeometryRevision || _cachedRevision != lighting.SunShadowRevision ||
@@ -136,7 +116,8 @@ public:
     {
         if (!_prepared || !selection.IncludesSun() || (_preparedFlags & 1u) == 0u)
             return std::nullopt;
-        return BuildSunShadowOutput(_preparedSettings, _preparedRevision, _preparedGeometryRevision, (_preparedFlags & 2u) != 0u);
+        return BuildSunShadowOutput(_preparedSettings, _preparedRevision, _preparedGeometryRevision,
+            (_preparedFlags & 2u) != 0u, _cascadeResolution);
     }
 
     void InvalidateCache() { _prepared = _updating = _rendered = false; }
@@ -209,7 +190,7 @@ public:
         commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
         commands->ResourceBarrier({ _atlas->GetResource()->GetDepthWriteBarrier() });
         commands->SetRenderTargets({}, _atlas.get());
-        const auto region = SunShadowRegion(cascade);
+        const auto region = SunShadowRegion(cascade, _cascadeResolution);
         commands->SetViewport({ static_cast<float>(region.X), static_cast<float>(region.Y),
             static_cast<float>(region.Width), static_cast<float>(region.Height), 0.0f, 1.0f });
         commands->SetScissorRect({ static_cast<LONG>(region.X), static_cast<LONG>(region.Y),
@@ -285,12 +266,43 @@ public:
     }
 
 private:
+    void CreateAtlas(UINT resolution)
+    {
+        GDX12TextureDesc texture;
+        texture.Width = texture.Height = (std::max)(1u, 2 * resolution);
+        texture.Format = texture.DSVDesc.Format = DXGI_FORMAT_D32_FLOAT;
+        texture.SRVDesc.Format = DXGI_FORMAT_R32_FLOAT;
+        texture.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        texture.SRVDesc.Texture2D.MipLevels = 1;
+        texture.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        texture.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
+        texture.SRVHeapIndex = _atlas->IsInitialized() ? _atlas->GetSRV()->HeapIndex :
+            texture.SRV_UAV_Heap->GetAvailableIndex(ShadowMaps_StartIndex, ShadowMaps_RangeLength);
+        texture.CreateDSV = true;
+        texture.DSVHeap = _resources->DSVHeap.get();
+        texture.DSVHeapIndex = _atlas->IsInitialized() ? _atlas->GetDSV()->HeapIndex : texture.DSVHeap->GetAvailableIndex();
+        texture.DSVDesc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        texture.ClearValue = { 1, 0, 0, 0 };
+        const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS, texture.Width, texture.Height,
+            1, 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
+        D3D12_CLEAR_VALUE clear = {};
+        clear.Format = DXGI_FORMAT_D32_FLOAT;
+        clear.DepthStencil.Depth = 1.0f;
+        texture.ExternalResource = _resources->Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc,
+            D3D12_RESOURCE_STATE_COMMON, &clear);
+        _atlas->Initialize(texture);
+        _cascadeResolution = resolution;
+        _atlasNeedsClear = true;
+        InvalidateCache();
+    }
+
     std::array<GDX12GeometryContext, 4> _views;
     bool _prepared = false, _updating = false;
     GDX12ShadowConstants _preparedSettings;
     uint64_t _preparedGeometryRevision = 0;
     UINT _preparedRevision = 0;
     UINT _preparedFlags = 0;
+    UINT _cascadeResolution = 0;
     bool _atlasNeedsClear = true;
     template<typename T>
     std::unique_ptr<GDX12UploadBuffer<T>> CreateBuffer(UINT count)

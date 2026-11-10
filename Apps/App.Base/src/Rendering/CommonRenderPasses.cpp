@@ -105,6 +105,7 @@ bool CommonRenderPasses::PrepareFrame(RenderPipelineContext& context, GDX12Comma
     }
     Depth.Prepare();
     Opaque.Prepare();
+    if (_placedShadows) _placedShadows->UpdateQuality();
     SunShadow.Prepare();
     LocalShadow.Prepare();
     Reflections.Prepare();

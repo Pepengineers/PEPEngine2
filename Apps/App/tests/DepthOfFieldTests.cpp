@@ -41,19 +41,28 @@ static void TestSettingsAndOptics()
     Set(L"Render.DOF.Enabled", "true");
     Set(L"Render.DOF.Rings", "0");
     Set(L"Render.DOF.CocLimit", "0");
-    const unsigned rings[] = { 0, 3, 5, 8 };
-    for (int q = 0; q <= 3; ++q)
+    Set(L"Render.DOF.FixedCocLimit", "false");
+    const unsigned rings[] = { 0, 3, 5, 8, 12 };
+    const float limits[] = { 0.0f, 0.025f, 0.05f, 0.1f, 0.1f };
+    for (int q = 0; q <= 4; ++q)
     {
         Set(L"Render.DOF.Quality", std::to_string(q).c_str());
         const auto settings = GetDepthOfFieldSettings();
-        Require(settings.Rings == rings[q] && settings.Enabled == (q != 0), "Quality preset is not applied");
+        Require(settings.Rings == rings[q] && settings.CocLimit == limits[q] && settings.Enabled == (q != 0),
+            "Legacy quality mapping changed");
+    }
+    Set(L"Render.DOF.FixedCocLimit", "true");
+    for (int q : { 1, 2, 3, 4 })
+    {
+        Set(L"Render.DOF.Quality", std::to_string(q).c_str());
+        Require(GetDepthOfFieldSettings().CocLimit == 0.05f, "Named quality changed inherited CoC");
     }
     Set(L"Render.DOF.Rings", "7");
     Set(L"Render.DOF.CocLimit", "0.07");
     Set(L"Render.DOF.FocusDistanceCm", "200");
     Set(L"Render.DOF.FNumber", "0.7");
     Set(L"Render.DOF.SensorHeightMm", "36");
-    for (int q : { 1, 3, 0, 2 })
+    for (int q : { 1, 3, 0, 4, 2 })
     {
         Set(L"Render.DOF.Quality", std::to_string(q).c_str());
         const auto settings = GetDepthOfFieldSettings();
@@ -67,10 +76,11 @@ static void TestSettingsAndOptics()
         for (const char* bad : { "nan", "inf", "-1", "10000001" })
             Require(!cvar.SetFromString(bad) && cvar.GetFloat() == before, "Invalid optical value was accepted");
     }
-    Require(!ConsoleModule{}.FindConsoleVariable(L"Render.DOF.Quality").SetFromString("4"), "Invalid quality accepted");
+    Require(!ConsoleModule{}.FindConsoleVariable(L"Render.DOF.Quality").SetFromString("5"), "Invalid quality accepted");
     Require(!ConsoleModule{}.FindConsoleVariable(L"Render.DOF.Rings").SetFromString("13"), "Invalid ring count accepted");
     Set(L"Render.DOF.Rings", "0");
     Set(L"Render.DOF.CocLimit", "0");
+    Set(L"Render.DOF.FixedCocLimit", "false");
     Set(L"Render.DOF.Quality", "2");
     const auto settings = GetDepthOfFieldSettings();
     Require(settings.Rings == 5 && settings.CocLimit == 0.05f, "Override reset did not restore the preset");
@@ -266,7 +276,7 @@ static void TestGPU(GDX12Device& device, GDX12DeviceResources& resources, unsign
     Set(L"Render.DOF.Enabled", "true");
     Set(L"Render.DOF.Quality", "0");
     Require(Run(device, dof) == pixels, "Quality Off is not an exact copy");
-    Set(L"Render.DOF.Quality", "2");
+    Set(L"Render.DOF.Quality", "4");
     auto focused = Run(device, dof);
     Require(focused == pixels, "In-focus DoF changed HDR pixels");
     for (unsigned y = 0; y < height; ++y)
@@ -274,7 +284,7 @@ static void TestGPU(GDX12Device& device, GDX12DeviceResources& resources, unsign
             depths[y * width + x] = DeviceDepth(x < width / 3 ? 50.0f : x < 2 * width / 3 ? 200.0f : 1600.0f, common.CameraViewToClip);
     Upload(device, depth, depths.data(), 4);
     std::vector<std::vector<uint16_t>> outputs;
-    for (int quality : { 1, 2, 3 })
+    for (int quality : { 1, 2, 3, 4 })
     {
         Set(L"Render.DOF.Quality", std::to_string(quality).c_str());
         GDX12GPUTimer timer(&device);
@@ -322,6 +332,9 @@ static void TestGPU(GDX12Device& device, GDX12DeviceResources& resources, unsign
         outputs.push_back(std::move(output));
     }
     Require(outputs[0] != outputs[1] && outputs[1] != outputs[2], "Quality did not change actual GPU output");
+    Set(L"Render.DOF.Quality", "1");
+    Require(Run(device, dof) == outputs.front(), "Returning from Epic to Low changed the deterministic output");
+    Set(L"Render.DOF.Quality", "4");
     Set(L"Render.DOF.Enabled", "false");
     Require(Run(device, dof) == pixels, "Off after SDK dispatch is not an exact copy");
     Set(L"Render.DOF.Enabled", "true");
@@ -576,7 +589,8 @@ int main(int argc, char** argv)
         Require(loaded.Error.empty() && GetDepthOfFieldSettings().Quality == 3 &&
             GetDepthOfFieldSettings().FocusDistanceCm == 200, "DoF INI values were not loaded before GPU setup");
         for (const auto* name : { L"Render.DOF.Enabled", L"Render.DOF.Quality", L"Render.DOF.FocusDistanceCm",
-            L"Render.DOF.FNumber", L"Render.DOF.SensorHeightMm", L"Render.DOF.CocLimit", L"Render.DOF.Rings", L"Render.DOF.RingMerge" })
+            L"Render.DOF.FNumber", L"Render.DOF.SensorHeightMm", L"Render.DOF.CocLimit", L"Render.DOF.FixedCocLimit",
+            L"Render.DOF.Rings", L"Render.DOF.RingMerge" })
             Require(ConsoleModule{}.FindConsoleVariable(name).GetFlags() == EConsoleVariableFlags::Default, "DoF CVar is not writable at runtime");
         TestSettingsAndOptics();
         if (argc == 2 && std::string(argv[1]) == "--cpu") return 0;

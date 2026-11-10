@@ -71,6 +71,7 @@ protected:
     virtual ~App() override;
 
     virtual void OnResize();
+    virtual void OnPauseChanged(bool) {}
 
     // Convenience overrides for handling mouse input.
     virtual void OnMouseDown(WPARAM btnState, int x, int y)

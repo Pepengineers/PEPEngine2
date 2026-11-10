@@ -19,6 +19,12 @@ namespace BistroReflections
         L"Show colored table-sized reflection boxes and capture labels above Bistro tables");
     inline AutoConsoleVariable<bool> ShowSpheres(L"App.ReflectionProbes.ShowSpheres", true,
         L"Show mirror spheres sampling each Bistro probe's own baked cubemap");
+    inline AutoConsoleVariable<UINT> Resolution(L"App.ReflectionProbes.Resolution", 128,
+        L"Frozen capture face size, a power of two in 16..512", EConsoleVariableFlags::Default,
+        [](UINT value) { return value >= 16 && value <= 512 && (value & (value - 1)) == 0; });
+    inline AutoConsoleVariable<UINT> PrefilterSamples(L"App.ReflectionProbes.PrefilterSamples", 64,
+        L"Frozen capture prefilter samples, 8..1024", EConsoleVariableFlags::Default,
+        [](UINT value) { return value >= 8 && value <= 1024; });
 
     struct TableAnchor { Vector3 Centre; float HalfSize; };
     // OBJ tabletop centres: 11 terrace tables, then all 10 interior tables.
@@ -46,21 +52,32 @@ namespace BistroReflections
         {{638.546f,124.309f,-5.547f},62.810f}}};
     static_assert(Tables.size() <= MaxReflectionProbes);
     inline AutoConsoleVariable<int> Count(L"App.ReflectionProbes.Count", 4,
-        L"Frozen static captures at random unique tables; 0 disables, maximum " +
+        L"Frozen static captures at seeded unique tables; 0 disables, maximum " +
         std::to_wstring(Tables.size()) + L" (the number of tables: 11 terrace + 10 interior)",
         EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= static_cast<int>(Tables.size()); });
 
     class Scene
     {
     public:
-        Scene() { std::iota(_tableOrder.begin(), _tableOrder.end(), size_t{0}); }
+        explicit Scene(unsigned seed = std::random_device{}()) { ResetWorld(seed); }
+
+        void ResetWorld(unsigned seed)
+        {
+            _entities.clear();
+            std::iota(_tableOrder.begin(), _tableOrder.end(), size_t{0});
+            std::mt19937 random(seed);
+            std::shuffle(_tableOrder.begin(), _tableOrder.end(), random);
+        }
 
         void Update(World& world, float)
         {
             auto& ecs = world.GetECS();
             const size_t requested = static_cast<size_t>(Count.GetValue());
             const bool visible = ShowSpheres.GetValue();
-            if (_entities.size() == requested && _visible == visible) return;
+            const auto resolution = Resolution.GetValue();
+            const auto samples = PrefilterSamples.GetValue();
+            if (_entities.size() == requested && _visible == visible &&
+                _resolution == resolution && _samples == samples) return;
             auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
             if (_entities.size() != requested)
             {
@@ -70,7 +87,6 @@ namespace BistroReflections
                     render.ReserveTransformCapacity(static_cast<UINT>(requested - _entities.size()));
                     render.ReserveInstanceCapacity(static_cast<UINT>(requested - _entities.size()));
                 }
-                if (_entities.empty()) std::shuffle(_tableOrder.begin(), _tableOrder.end(), _random);
             }
             if (requested && !_mesh.IsValid()) CreateMesh();
             while (_entities.size() > requested)
@@ -90,9 +106,7 @@ namespace BistroReflections
                 probe.Implementation = 2;
                 probe.Extents = Vector3(table.HalfSize);
                 probe.BlendDistance = 5;
-                probe.Resolution = 128;
                 probe.FacesPerFrame = 6;
-                probe.PrefilterSamples = 64;
                 probe.FarPlane = 15000;
                 _entities.push_back(entity.GetId());
             }
@@ -101,6 +115,9 @@ namespace BistroReflections
             for (size_t index = 0; index < _entities.size(); ++index)
             {
                 const auto entity = _entities[index];
+                auto& probe = ecs.Get<ReflectionProbeComponent>(entity);
+                probe.Resolution = resolution;
+                probe.PrefilterSamples = samples;
                 const auto name = "BistroProbePreview" + std::to_string(index);
                 auto* material = render.GetMaterialByName(name);
                 if (!material) material = render.CreateMaterial(name);
@@ -113,13 +130,15 @@ namespace BistroReflections
                 if (!ecs.Has<StaticMeshRenderComponent>(entity))
                 {
                     auto& transform = ecs.Get<TransformComponent>(entity);
-                    transform.Scale = Vector3(0.8f * ecs.Get<ReflectionProbeComponent>(entity).Extents.x);
+                    transform.Scale = Vector3(0.8f * probe.Extents.x);
                     transform.DirtyFlag = true;
                     ecs.GetEntityHandle(entity).AddComponent<StaticMeshRenderComponent>(_mesh, std::vector<GDX12Material*>{material});
                 }
                 ecs.Get<StaticMeshRenderComponent>(entity).Visible = visible;
             }
             _visible = visible;
+            _resolution = resolution;
+            _samples = samples;
             IndirectCommandBuildSystem{}.Tick(world, 0);
         }
 
@@ -176,8 +195,9 @@ namespace BistroReflections
 
         std::vector<Entity> _entities;
         std::array<size_t, Tables.size()> _tableOrder;
-        std::mt19937 _random{std::random_device{}()};
         Engine::Core::MeshHandle _mesh;
         bool _visible = true;
+        UINT _resolution = Resolution.GetValue();
+        UINT _samples = PrefilterSamples.GetValue();
     };
 }

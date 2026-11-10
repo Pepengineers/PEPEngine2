@@ -68,11 +68,11 @@ struct GDX12SkyState
     uint64_t Revision = 0;
 };
 
-// Exactly two runtime Default controls for each component technique.
 UINT GetSkyBoxQuality();
 UINT GetSkyAtmosphereQuality();
 SkyAtmosphereSettings ResolveSkyAtmosphereSettings(const SkyAtmosphereSettings& settings, UINT quality);
 SkyIBLSettings ResolveSkyIBLSettings(const SkyIBLSettings& settings, UINT quality);
+SkyIBLSettings ResolveSkyBoxIBLSettings(const SkyIBLSettings& settings, UINT quality);
 
 // Matches SkyParameters.hlsli. All lengths below are km except CenterRadius.xyz (cm).
 struct GDX12SkyConstants

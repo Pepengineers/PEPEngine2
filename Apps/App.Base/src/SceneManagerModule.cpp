@@ -15,8 +15,8 @@
 #include "App.Base/Systems/DynamicBodyUpdateSystem.h"
 #include "App.Base/Systems/KinematicBodyUpdateSystem.h"
 
-SceneManagerModule::SceneManagerModule(std::filesystem::path scenePath) :
-    _scenePath(std::move(scenePath))
+SceneManagerModule::SceneManagerModule(std::filesystem::path scenePath, bool retainObjBindings) :
+    _scenePath(std::move(scenePath)), _retainObjBindings(retainObjBindings)
 {
 }
 
@@ -322,6 +322,16 @@ bool SceneManagerModule::LoadWorldContents(World& world)
     try
     {
         OnWorldCreated.Broadcast(world);
+        if (_retainObjBindings && world.GetPath() == _scenePath)
+        {
+            if (_replayScene)
+            {
+                _replayScene(world);
+                return true;
+            }
+            if (WorldLoader::LoadFromFile(world, _scenePath, &_replayScene)) return true;
+        }
+        else
         if (world.Load()) return true;
     }
     catch (...)

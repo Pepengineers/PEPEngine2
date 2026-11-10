@@ -28,7 +28,7 @@ namespace
         L"Run AO on COMPUTE when available. Default false.", Runtime);
     static AutoConsoleVariable<bool> Enabled(L"Render.AO.Enabled", true, L"Enable ambient occlusion", Runtime);
     static AutoConsoleVariable<GDX12Quality> Quality(L"Render.AO.Quality", GDX12Quality::Mid,
-        L"0 Off, 1 Low, 2 Mid, 3 High", Runtime);
+        L"0 Off, 1 Low, 2 Mid, 3 High, 4 Epic", Runtime);
     static AutoConsoleVariable<AOImplementation> Implementation(L"Render.AO.Implementation", AOImplementation::XeGTAO,
         L"0 SSAO, 1 HBAO, 2 XeGTAO, 3 AMD CACAO", Runtime);
     static AutoConsoleVariable<GDX12AOResolution> Resolution(L"Render.AO.Resolution", GDX12AOResolution::Full,
@@ -85,12 +85,12 @@ GDX12AOSettings GetAmbientOcclusionSettings()
     s.Implementation = Implementation.GetInt();
     s.Resolution = Resolution.GetValue();
     const int level = std::max(1, s.Quality) - 1;
-    constexpr int samples[] = { 8, 16, 32 };
-    constexpr int directions[] = { 4, 6, 8 };
-    constexpr int steps[] = { 4, 6, 8 };
-    constexpr int slices[] = { 1, 2, 3 };
-    constexpr int gtaoSteps[] = { 2, 2, 3 };
-    constexpr int cacaoQuality[] = { 1, 2, 4 };
+    constexpr int samples[] = { 8, 16, 32, 64 };
+    constexpr int directions[] = { 4, 6, 8, 12 };
+    constexpr int steps[] = { 4, 6, 8, 12 };
+    constexpr int slices[] = { 1, 2, 3, 4 };
+    constexpr int gtaoSteps[] = { 2, 2, 3, 4 };
+    constexpr int cacaoQuality[] = { 1, 2, 4, 4 };
     s.Samples = Override(Samples.GetValue(), samples[level]);
     s.Directions = Override(Directions.GetValue(), directions[level]);
     s.Steps = Override(Steps.GetValue(), steps[level]);

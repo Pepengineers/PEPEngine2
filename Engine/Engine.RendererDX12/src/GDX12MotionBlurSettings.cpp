@@ -8,7 +8,7 @@ namespace
     static AutoConsoleVariable<bool> Enabled(L"Render.MotionBlur.Enabled", true,
         L"Enable feature-aware motion blur.");
     static AutoConsoleVariable<GDX12Quality> Quality(L"Render.MotionBlur.Quality", GDX12Quality::Mid,
-        L"0=Off, 1=Low (19 samples), 2=Mid (27), 3=High (35).",
+        L"0 Off, 1 Low (19 samples), 2 Mid (27), 3 High (35), 4 Epic (43).",
         EConsoleVariableFlags::Default);
     static AutoConsoleVariable<float> Shutter(L"Render.MotionBlur.ShutterFraction", 0.5f,
         L"Exposure/frame duration, 0..1; 0.5 = 180 degrees, centered exposure.",
@@ -36,7 +36,7 @@ GDX12MotionBlurSettings GetMotionBlurSettings()
 {
     const int quality = Quality.GetInt();
     const int samples = Samples.GetValue();
-    constexpr unsigned presetSamples[] = { 0, 19, 27, 35 };
+    constexpr unsigned presetSamples[] = { 0, 19, 27, 35, 43 };
     const float shutter = Shutter.GetValue();
     return { Enabled.GetValue() && quality != 0 && shutter > 0.0f,
         samples == 0 ? presetSamples[quality] : static_cast<unsigned>(samples),

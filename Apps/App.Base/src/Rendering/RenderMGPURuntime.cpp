@@ -97,6 +97,21 @@ bool RenderMGPURuntime::TryReconfigureBank(GDX12Snapshot::Transport& bank, const
     return bank.TryReconfigure(desc, NewPoolIds(*this));
 }
 
+void RenderMGPURuntime::RetireBank(GDX12Snapshot::Transport& bank)
+{
+    CheckOpen();
+    const auto owned = std::find_if(_banks.begin(), _banks.end(), [&](const Bank& entry)
+        { return entry.Storage.get() == &bank; });
+    if (owned == _banks.end()) throw std::invalid_argument("Cannot retire a bank outside its runtime domain");
+    if (!bank.Reset(NewEpoch())) throw std::logic_error("Cannot reset an unsubmitted snapshot bank");
+    bank.Poll();
+    const auto usage = bank.GetUsage();
+    if (usage.Publications || usage.Readers) throw std::logic_error("Cannot retire a bank with outstanding snapshots");
+    try { bank.Shutdown(); }
+    catch (...) { Fault(); throw; }
+    _banks.erase(owned);
+}
+
 std::optional<GDX12RenderGraph::ExecutionReceipt> RenderMGPURuntime::TrySubmit(const GDX12RenderGraph& graph,
     GDX12RenderGraph::ExecutionBindings bindings, const CommitReceipt& commit)
 {

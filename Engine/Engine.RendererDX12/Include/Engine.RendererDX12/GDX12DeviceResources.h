@@ -73,6 +73,7 @@ public:
     uint64_t ReflectionEnvironmentRevision = 0;
     BoundingBox ReflectionSceneBounds = { XMFLOAT3(0, 0, 0), XMFLOAT3(10000, 10000, 10000) };
     GDX12ShadowConstants ShadowSettings;
+    GDX12ShadowQuality ShadowQuality;
     std::vector<GDX12LocalLightConstants> LocalLights;
     // Complete current caster snapshot; standalone clients without one retain revision-based invalidation.
     std::optional<std::vector<GDX12LocalShadowCaster>> LocalShadowCasters;

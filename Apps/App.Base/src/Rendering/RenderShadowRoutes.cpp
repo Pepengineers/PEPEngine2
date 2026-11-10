@@ -30,13 +30,32 @@ struct RenderShadowRoutes::AtlasRoute
 RenderShadowRoutes::RenderShadowRoutes(GDX12DeviceResources& primary, GDX12Device& secondary, RenderMGPURuntime& runtime,
     GDX12CascadedShadowPass& sun, GDX12LocalShadowPass& local)
     : _primary(primary), _runtime(runtime), _sun(sun), _local(local), _transfer(*primary.Device, secondary, runtime),
-      _replica(runtime, secondary)
+      _replica(runtime, secondary), _quality(primary.ShadowQuality)
 {
     for (auto atlas : { GDX12ShadowAtlas::Sun, GDX12ShadowAtlas::Local })
         _routes[Index(atlas)] = std::make_unique<AtlasRoute>(*primary.Device, secondary, runtime, atlas);
 }
 
 RenderShadowRoutes::~RenderShadowRoutes() = default;
+
+void RenderShadowRoutes::UpdateQuality()
+{
+    const auto& next = _primary.ShadowQuality;
+    if (next == _quality) return;
+    const auto retire = [&](GDX12ShadowAtlas atlas)
+    {
+        _transfer.RetireAtlas(atlas);
+        auto& route = *_routes[Index(atlas)];
+        route.Primary = {};
+        route.Secondary = {};
+        route.Trace.reset();
+        route.PrimaryRaster.InvalidateCache();
+        route.SecondaryRaster.InvalidateCache();
+    };
+    if (next.SunResolution != _quality.SunResolution) retire(GDX12ShadowAtlas::Sun);
+    if (next.LocalResolution != _quality.LocalResolution) retire(GDX12ShadowAtlas::Local);
+    _quality = next;
+}
 
 void RenderShadowRoutes::PrepareFrame(RenderModule& render)
 {

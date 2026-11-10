@@ -1,13 +1,15 @@
 #pragma once
 
-#include "Engine.RendererDX12/GDX12ConstantStructures.h"
+#include "Engine.RendererDX12/GDX12LocalLights.h"
 #include <algorithm>
 #include <cmath>
 
 inline GDX12ShadowConstants BuildShadowCascades(const Matrix& inverseView, float fov, float aspect,
-    float nearPlane, float farPlane, Vector3 lightDirection, const BoundingBox* casterBounds = nullptr)
+    float nearPlane, float farPlane, Vector3 lightDirection, const BoundingBox* casterBounds = nullptr,
+    UINT resolution = SunShadowCascadeResolution)
 {
     GDX12ShadowConstants result;
+    if (resolution == 0) return result;
     float splits[4], texelSizes[4];
     const float shadowFar = (std::min)(farPlane, 6000.0f);
     const Vector3 up = std::abs(lightDirection.y) > 0.99f ? Vector3::UnitZ : Vector3::UnitY;
@@ -36,8 +38,8 @@ inline GDX12ShadowConstants BuildShadowCascades(const Matrix& inverseView, float
         for (const auto& corner : corners) radius = (std::max)(radius, Vector3::Distance(center, corner));
         radius = std::ceil(radius / 16.0f) * 16.0f;
         // Reserve a texel around the sphere for snapping and PCF at cascade edges.
-        radius *= 2048.0f / 2046.0f;
-        const float texelSize = 2.0f * radius / 2048.0f;
+        radius *= static_cast<float>(resolution) / static_cast<float>(resolution - 2);
+        const float texelSize = 2.0f * radius / resolution;
         texelSizes[cascade] = texelSize;
         Vector3 centerLS = Vector3::Transform(center, lightView);
         centerLS.x = std::floor(centerLS.x / texelSize) * texelSize;

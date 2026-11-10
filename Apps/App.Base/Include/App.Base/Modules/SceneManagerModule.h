@@ -14,6 +14,7 @@
 #include "Engine.Core/ECS/Event.h"
 #include "Engine.Core/System.h"
 #include "App.Base/ECS/World.h"
+#include "App.Base/ECS/WorldLoader.h"
 #include "App.Base/ECS/AppConfig.h"
 
 class World;
@@ -32,7 +33,7 @@ public:
     Event<World&> OnWorldCreated;
     Event<World&> OnWorldDestroyed;
 
-    explicit SceneManagerModule(std::filesystem::path scenePath = {});
+    explicit SceneManagerModule(std::filesystem::path scenePath = {}, bool retainObjBindings = false);
     ~SceneManagerModule() override;
 
     void Initialize() override;
@@ -76,6 +77,8 @@ private:
     bool LoadWorldContents(World& world);
 
     std::filesystem::path _scenePath;
+    bool _retainObjBindings;
+    WorldLoader::ObjSceneReplay _replayScene;
     bool LoadConfiguredWorld(
         const SceneWorldConfig& sceneWorldConfig,
         const AppConfig& appConfig

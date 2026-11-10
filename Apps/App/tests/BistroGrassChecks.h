@@ -61,6 +61,21 @@ inline void CheckBistroGrassCounts()
     require(ecs.Get<GrassRenderComponent>(first).ResetRevision == initialGrassRevision &&
         ecs.Get<WindFieldComponent>(firstWind).ResetRevision == initialWindRevision,
         "Unchanged grass controls must not reset GPU history or the wind simulation");
+    for (const UINT tier : {1u, 2u, 3u, 4u, 1u})
+    {
+        const UINT grid = 16u << tier;
+        require(BistroGrass::MaxBlades.SetValue(15000u * tier) && BistroGrass::Segments.SetValue(tier) &&
+            BistroGrass::GridResolution.SetValue(grid), "Grass or wind tier rejected");
+        scene.Update(world, 0);
+        ecs.ForEach<GrassRenderComponent>([&](Entity, const GrassRenderComponent& grass)
+        {
+            const auto& wind = ecs.Get<WindFieldComponent>(grass.WindEntity);
+            require(GrassBladeCount(grass) == 15000u * tier && grass.Segments == tier && grass.Material == sharedMaterial &&
+                grass.HeightCm == 40 && wind.GridResolution == grid && wind.Implementation == GDX12WindImplementation::Analytic,
+                "Bistro grass/wind tiers must reach all authored patches and keep their look and field links");
+        });
+        require(ecs.IsAlive(first) && ecs.IsAlive(firstWind), "A live quality transition replaced a grass or wind owner");
+    }
     require(!BistroGrass::ExtentsXCm.SetFromString("0") && !BistroGrass::WidthCm.SetFromString("0") &&
         !BistroGrass::Density.SetFromString("100001") && !BistroGrass::MaxBlades.SetFromString("262145") &&
         !BistroGrass::Segments.SetFromString("9") && !BistroGrass::Algorithm.SetFromString("2") &&

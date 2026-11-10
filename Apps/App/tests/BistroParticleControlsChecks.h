@@ -120,4 +120,26 @@ inline void CheckBistroParticleControls()
     Update(world);
     require(budget() == 500000 && VolumeHalfExtentX.SetFromString("100") &&
         VolumeHalfExtentY.SetFromString("100") && VolumeHalfExtentZ.SetFromString("100"), "Particle defaults restore failed");
+
+    require(!EdgeSamples.SetFromString("0") && !EdgeSamples.SetFromString("5") &&
+        !MinPixelSize.SetFromString("nan"), "Invalid particle presentation budgets accepted");
+    constexpr float minPixels[] = {1.5f, 0.75f, 0.375f, 0.0f};
+    for (const UINT tier : {1u, 2u, 3u, 4u, 1u})
+    {
+        const UINT expected = 125000u * tier;
+        require(Count.SetValue(static_cast<int>(expected)) && EdgeSamples.SetValue(tier) &&
+            MinPixelSize.SetValue(minPixels[tier - 1]), "Valid particle tier rejected");
+        Update(world);
+        require(budget() == expected, "Particle tier must set the combined emitter budget exactly");
+        world.GetECS().ForEach<ParticleEmitterComponent>([&](Entity, const ParticleEmitterComponent& emitter)
+        {
+            const auto& settings = emitter.GetSettings();
+            require(emitter.IsEnabled() && settings.MaxParticles > 0 && settings.EdgeSamples == tier &&
+                settings.MinPixelSize == minPixels[tier - 1] && settings.Substeps == (settings.DepthCollision ? 4u : 1u),
+                "Every particle effect must stay enabled and keep its collision step budget");
+        });
+    }
+    require(Count.SetValue(-1) && EdgeSamples.SetValue(1) && MinPixelSize.SetValue(0), "Particle tier restore failed");
+    Update(world);
+    require(budget() == 500000, "Legacy particle budget did not restore after tier changes");
 }

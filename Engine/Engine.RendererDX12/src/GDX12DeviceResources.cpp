@@ -19,6 +19,7 @@ static AutoConsoleVariable<UINT> NumFrameConstantVariable(
 void GDX12DeviceResources::Initialize(GDX12Device* device)
 {
     Device = device;
+    ShadowQuality = ReadShadowQuality();
     InputLayouts["Default"] =
     {
         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },

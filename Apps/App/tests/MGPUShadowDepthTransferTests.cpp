@@ -17,7 +17,8 @@ static void Require(bool condition, const char* message)
     if (!condition) throw std::runtime_error(message);
 }
 
-static GDX12ShadowOutput MakeLocal(UINT entity, uint64_t generation, UINT slices, bool point)
+static GDX12ShadowOutput MakeLocal(UINT entity, uint64_t generation, UINT slices, bool point,
+    UINT resolution = LocalShadowResolution)
 {
     GDX12LocalLightConstants light;
     light.EntityId = entity;
@@ -26,7 +27,7 @@ static GDX12ShadowOutput MakeLocal(UINT entity, uint64_t generation, UINT slices
     light.Type = point ? 1 : 2;
     light.ShadowFlags = 1;
     BuildLocalLightShadowMatrices(light);
-    return BuildLocalShadowOutput(light, {}, 17, false);
+    return BuildLocalShadowOutput(light, {}, 17, false, resolution);
 }
 
 static void CheckLayouts()
@@ -74,6 +75,28 @@ static void CheckLayouts()
         "Sun must pack all four quadrants");
     sun.Views[3].Region.X = 0;
     Require(!sunLayout->ResolveDestination({ sun }), "Sun must reject an overlapping quadrant");
+    for (UINT resolution : { 512u, 1024u, 2048u, 4096u })
+    {
+        const auto sizedSun = BuildSunShadowOutput({}, 1, 17, false, resolution);
+        const auto layout = GDX12ShadowTransferLayout::Build(GDX12ShadowAtlas::Sun, { sizedSun });
+        Require(layout && layout->Extent() == resolution && layout->SourceViews()[3].Region.X == resolution &&
+            layout->SourceViews()[3].Region.Y == resolution && layout->ResolveDestination({ sizedSun }),
+            "Sun must pack the actual square cascade resolution");
+    }
+    for (UINT resolution : { 128u, 256u, 512u, 1024u })
+    {
+        const auto sizedSpot = MakeLocal(3, 11, 6, false, resolution);
+        const auto sizedPoint = MakeLocal(2, 10, 0, true, resolution);
+        const auto layout = GDX12ShadowTransferLayout::Build(GDX12ShadowAtlas::Local, { sizedSpot, sizedPoint });
+        Require(layout && layout->Extent() == resolution && layout->Layers() == 7 &&
+            layout->ResolveDestination({ sizedPoint, sizedSpot }),
+            "Local transfer must preserve the point and spot at the actual face resolution");
+        const UINT otherResolution = resolution == 128 ? 256 : 128;
+        const auto wrongSpot = MakeLocal(3, 11, 6, false, otherResolution);
+        Require(!layout->ResolveDestination({ sizedPoint, wrongSpot }) &&
+            !GDX12ShadowTransferLayout::Build(GDX12ShadowAtlas::Local, { sizedPoint, wrongSpot }),
+            "Mixed atlas resolutions must reject packing and restore");
+    }
     std::cout << "Shadow transfer layout: whole groups, compact layers, stable-key relocation and stale rejection passed.\n";
 }
 
@@ -275,6 +298,10 @@ int main(int argc, char** argv)
             { MakeLocal(2, 10, 0, true), MakeLocal(3, 11, 7, false), MakeLocal(4, 12, 6, false) });
         const auto sun = BuildSunShadowOutput({}, 1, 17, false);
         CheckAtlas(device, transfer, GDX12ShadowAtlas::Sun, 1, { sun }, { sun });
+        const auto lowSun = BuildSunShadowOutput({}, 1, 17, false, 512);
+        CheckAtlas(device, transfer, GDX12ShadowAtlas::Sun, 1, { lowSun }, { lowSun });
+        const auto lowPoint = MakeLocal(2, 10, 0, true, 128);
+        CheckAtlas(device, transfer, GDX12ShadowAtlas::Local, 6, { lowPoint }, { lowPoint });
         CheckDebug(*info.Get());
         GDX12ShaderCompiler::Shutdown();
         std::cout << "Typed pack/copy/SV_Depth restore passed with D3D12 debug layer.\n";

@@ -39,8 +39,24 @@ template<class Update> inline void CheckBistroReflectionCounts(World& world, Upd
             require(std::find(occupied.begin(), occupied.end(), table) == occupied.end(), "Two captures occupied the same table");
             occupied.push_back(table);
         });
+        std::sort(occupied.begin(), occupied.end());
+        return occupied;
     };
-    checkAnchors();
+    const auto initialAnchors = checkAnchors();
+    require(!BistroReflections::Resolution.SetFromString("192") &&
+        !BistroReflections::PrefilterSamples.SetFromString("0"), "Invalid frozen capture budgets accepted");
+    for (const UINT faceSize : {64u, 128u, 256u, 512u, 64u, 128u})
+    {
+        require(BistroReflections::Resolution.SetValue(faceSize) && BistroReflections::PrefilterSamples.SetValue(faceSize / 2),
+            "Frozen capture tier rejected");
+        update();
+        ecs.ForEach<ReflectionProbeComponent>([&](Entity, const ReflectionProbeComponent& probe)
+        {
+            require(probe.Resolution == faceSize && probe.PrefilterSamples == faceSize / 2 && probe.FacesPerFrame == 6,
+                "Bistro probe quality must update actual frozen capture budgets");
+        });
+        checkAnchors();
+    }
     require(!BistroReflections::Count.SetFromString("-1") && !BistroReflections::Count.SetFromString("22") &&
         !BistroReflections::Count.SetFromString("1.5"), "Invalid Bistro reflection count accepted");
     require(BistroReflections::Count.SetFromString("21"), "Maximum table capture count rejected");
@@ -59,4 +75,5 @@ template<class Update> inline void CheckBistroReflectionCounts(World& world, Upd
     require(BistroReflections::Count.SetFromString("4"), "Bistro reflection count restore rejected");
     update();
     require(ecs.GetPool<ReflectionProbeComponent>().Size() == 4, "Bistro reflection count did not restore");
+    require(checkAnchors() == initialAnchors, "Restoring the probe count must reuse the same authored tables");
 }

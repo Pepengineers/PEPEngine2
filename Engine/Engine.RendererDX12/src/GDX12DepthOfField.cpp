@@ -8,7 +8,7 @@
 namespace
 {
     static AutoConsoleVariable<bool> Enabled(L"Render.DOF.Enabled", true, L"Enable FidelityFX DoF");
-    static AutoConsoleVariable<GDX12Quality> Quality(L"Render.DOF.Quality", GDX12Quality::Mid, L"0 Off, 1 Low, 2 Mid, 3 High",
+    static AutoConsoleVariable<GDX12Quality> Quality(L"Render.DOF.Quality", GDX12Quality::Mid, L"0 Off, 1 Low, 2 Mid, 3 High, 4 Epic",
         EConsoleVariableFlags::Default);
     static AutoConsoleVariable<float> Focus(L"Render.DOF.FocusDistanceCm", 500.0f, L"Focus distance in cm [1, 1000000]",
         EConsoleVariableFlags::Default, [](const float v) { return v >= 1.0f && v <= 1000000.0f; });
@@ -18,6 +18,8 @@ namespace
         EConsoleVariableFlags::Default, [](const float v) { return v >= 1.0f && v <= 100.0f; });
     static AutoConsoleVariable<float> CocLimit(L"Render.DOF.CocLimit", 0.0f, L"Max full-res CoC radius / image height [0, 0.25]; 0 preset",
         EConsoleVariableFlags::Default, [](const float v) { return v >= 0.0f && v <= 0.25f; });
+    static AutoConsoleVariable<bool> FixedCocLimit(L"Render.DOF.FixedCocLimit", false,
+        L"Use a fixed 0.05 inherited CoC cap at every active quality. Explicit CocLimit still takes precedence.");
     static AutoConsoleVariable<int> Rings(L"Render.DOF.Rings", 0, L"Maximum kernel rings [1, 12]; 0 preset",
         EConsoleVariableFlags::Default, [](const int v) { return v >= 0 && v <= 12; });
     static AutoConsoleVariable<bool> RingMerge(L"Render.DOF.RingMerge", true, L"Merge outer kernel rings using the bilateral mip chain");
@@ -26,12 +28,14 @@ namespace
 GDX12DepthOfFieldSettings GetDepthOfFieldSettings()
 {
     const int quality = Quality.GetInt();
-    const unsigned rings[] = { 0, 3, 5, 8 };
-    const float limits[] = { 0.0f, 0.025f, 0.05f, 0.1f };
+    constexpr unsigned rings[] = { 0, 3, 5, 8, 12 };
+    constexpr float defaultNamedCocLimit = 0.05f;
+    constexpr float limits[] = { 0.0f, 0.025f, defaultNamedCocLimit, 0.1f, 0.1f };
     const int overrideRings = Rings.GetValue();
     const float overrideLimit = CocLimit.GetValue();
+    const float inheritedLimit = quality != 0 && FixedCocLimit.GetValue() ? defaultNamedCocLimit : limits[quality];
     return { Enabled.GetValue() && quality != 0, quality, Focus.GetValue(), Aperture.GetValue(), Sensor.GetValue(),
-        overrideLimit > 0.0f ? overrideLimit : limits[quality],
+        overrideLimit > 0.0f ? overrideLimit : inheritedLimit,
         overrideRings ? static_cast<unsigned>(overrideRings) : rings[quality], RingMerge.GetValue() };
 }
 

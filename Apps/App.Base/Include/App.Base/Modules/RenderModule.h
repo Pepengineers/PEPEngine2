@@ -42,6 +42,7 @@ struct TransformCompGPUData
     UINT NumFramesDirty = -1;
     Matrix World = Identity4x4();
     Matrix PrevWorld = Identity4x4();
+    bool HasPreviousWorld = false;
 };
 
 namespace Engine::UI { class CrossAdapterUI; struct UIPlacementStatus; }
@@ -98,6 +99,10 @@ public:
         const std::vector<CrossAdapterSceneReplica::GrassBatch>& grass, const IRenderGeometrySource* grassSource = nullptr,
         const std::vector<GDX12RenderPrimitiveHandle>& grassPrimitives = {});
     void WaitForUploads();
+    void DrainFrameWork();
+    void ResetWorldHistory();
+    std::pair<size_t, size_t> GetWorldProbeReadiness() const { return _pipeline->GetWorldProbeReadiness(); }
+    const GDX12ShadowQuality& GetShadowQuality() const { return _primaryResources.ShadowQuality; }
     D3D12MA::Statistics GetMemoryStatistics() const;
     double GetPrimaryGPUTimeMS();
     GDX12GPUTimingTotals GetPrimaryGPUTimingTotals();
@@ -334,4 +339,6 @@ private:
     uint64_t _reflectionDynamicHash = 0;
     UINT _instanceCount = 0;
     UINT _transformCount = 0;
+    UINT _cameraCount = 0;
+    bool _batchWorldRelease = false;
 };

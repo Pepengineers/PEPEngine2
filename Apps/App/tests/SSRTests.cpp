@@ -32,7 +32,7 @@ static void SettingsTests()
     }
     Require(console.LoadIni(ini).Error.empty() && GetSSRSettings().SamplesPerQuad == 1,
         "SSR INI override did not reach the frame snapshot");
-    for (auto [name, bad] : { std::pair{ L"Render.SSR.Quality", "4" },
+    for (auto [name, bad] : { std::pair{ L"Render.SSR.Quality", "5" },
         { L"Render.SSR.SamplesPerQuad", "3" }, { L"Render.SSR.MaxIntersections", "0" },
         { L"Render.SSR.MinOccupancy", "33" }, { L"Render.SSR.Thickness", "0" },
         { L"Render.SSR.RoughnessCutoff", "1.01" }, { L"Render.SSR.TemporalStability", "nan" },
@@ -47,6 +47,15 @@ static void SettingsTests()
     Require(GetSSRSettings().SamplesPerQuad == 4, "Preset inheritance failed");
     Set(L"Render.SSR.Quality", "0");
     Require(!GetSSRSettings().Enabled, "Off still enabled");
+    const int intersections[] = { 64, 128, 256, 512 };
+    const int rays[] = { 1, 2, 4, 4 };
+    for (int tier = 1; tier <= 4; ++tier)
+    {
+        Set(L"Render.SSR.Quality", std::to_string(tier).c_str());
+        const auto effective = GetSSRSettings();
+        Require(effective.Enabled && effective.MaxIntersections == intersections[tier - 1] &&
+            effective.SamplesPerQuad == rays[tier - 1], "Wrong inherited SSR budget");
+    }
     Set(L"Render.SSR.Quality", "2");
     Set(L"Render.SSR.Enabled", "false");
     Require(!GetSSRSettings().Enabled, "Enabled=false ignored");
@@ -356,6 +365,10 @@ int main(int argc, char** argv)
             CheckHits(fixture.Result(), fixture.Width, fixture.Height);
             Set(L"Render.SSR.Quality", "0"); fixture.Draw();
             Require(fixture.Result() == fixture.Read(fixture.Color), "Off is not an exact neutral copy");
+            Set(L"Render.SSR.Quality", "4"); fixture.Draw();
+            CheckHits(fixture.Result(), fixture.Width, fixture.Height);
+            Set(L"Render.SSR.Quality", "1"); fixture.Draw();
+            fixture.Result();
             Set(L"Render.SSR.Quality", "3"); fixture.Draw();
             CheckHits(fixture.Result(), fixture.Width, fixture.Height);
             ++fixture.Common.HistoryRevision; fixture.Draw();

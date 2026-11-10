@@ -16,7 +16,7 @@ namespace
     static AutoConsoleVariable<bool> AsyncCompute(L"Render.Particles.AsyncCompute", false,
         L"Run particle simulation on COMPUTE; DIRECT fallback when unavailable", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Particles.Quality", GDX12Quality::Mid,
-        L"GPU particles: 0 Off, 1 Low, 2 Mid, 3 High", EConsoleVariableFlags::Default);
+        L"GPU particles: 0 Off, 1 Low, 2 Mid, 3 High, 4 Epic", EConsoleVariableFlags::Default);
 
     bool InRange(const float value, const float low, const float high)
     {
@@ -104,14 +104,14 @@ const std::array<GDX12ParticleMeshVertex, FireflyParticleVertexCount>& GetFirefl
 
 GDX12ParticleEmitterSettings ResolveParticleEmitterSettings(const GDX12ParticleEmitterSettings& author, const int quality)
 {
-    if (quality < 0 || quality > 3 || !IsValidParticleEmitterSettings(author))
+    if (quality < 0 || quality > 4 || !IsValidParticleEmitterSettings(author))
         throw std::invalid_argument("Invalid particle quality or author settings");
     auto settings = author;
-    const int index = (std::clamp)(quality, 1, 3) - 1;
-    constexpr UINT capacities[] = { 16384, 65536, 131072 };
-    constexpr UINT substeps[] = { 1, 2, 4 };
-    constexpr UINT samples[] = { 1, 2, 4 };
-    constexpr float minPixels[] = { 1.5f, 0.75f, 0.0f };
+    const int index = (std::max)(1, quality) - 1;
+    constexpr UINT capacities[] = { 16384, 65536, 131072, 262144 };
+    constexpr UINT substeps[] = { 1, 2, 4, 8 };
+    constexpr UINT samples[] = { 1, 2, 4, 4 };
+    constexpr float minPixels[] = { 1.5f, 0.75f, 0.0f, 0.0f };
     if (!settings.MaxParticles) settings.MaxParticles = capacities[index];
     if (!settings.Substeps) settings.Substeps = substeps[index];
     if (!settings.EdgeSamples) settings.EdgeSamples = samples[index];

@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include "Engine.Core/Jobs/JobSystem.h"
 #include <functional>
+#include <utility>
 
 class RenderModule;
 class GDX12SwapChain;
@@ -55,6 +56,8 @@ public:
     virtual bool AllowsFrameGeneration() const { return true; }
     virtual std::vector<Engine::UI::CanvasId> GetWorldCanvasIds() const { return {}; }
     virtual void PrepareMaterialBindings(RenderPipelineContext&, Engine::UI::CrossAdapterUI*) {}
+    virtual void ResetWorldHistory() {}
+    virtual std::pair<size_t, size_t> GetWorldProbeReadiness() const { return {}; }
 #ifdef _DEBUG
     virtual void DrawDebugControls(const RenderModule&) {}
 #endif

@@ -37,6 +37,7 @@ public:
         GDX12Submission::Epoch epoch, GDX12Submission::AdapterId producer, GDX12Submission::AdapterId consumer,
         const D3D12_RESOURCE_DESC& desc);
     bool TryReconfigureBank(GDX12Snapshot::Transport& bank, const D3D12_RESOURCE_DESC& desc);
+    void RetireBank(GDX12Snapshot::Transport& bank);
 
     // Runtime supplies Queues. The receipt callback binds transport ownership before another submit or poll.
     std::optional<GDX12RenderGraph::ExecutionReceipt> TrySubmit(const GDX12RenderGraph& graph,

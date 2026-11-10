@@ -143,7 +143,7 @@ static void TestSettings()
     {
         Require(!console->FindConsoleVariable(name).SetFromString(value), "Invalid reflection CVar accepted");
     };
-    reject(L"Render.Reflection.Quality", "4");
+    reject(L"Render.Reflection.Quality", "5");
     GDX12ReflectionProbe author;
     author.Resolution = 32;
     author.FacesPerFrame = 3;
@@ -154,10 +154,10 @@ static void TestSettings()
     Require(settings.Resolution == 32 && settings.FacesPerFrame == 3 && settings.PrefilterSamples == 24,
         "Quality changed explicit overrides");
     author.Resolution = author.FacesPerFrame = author.PrefilterSamples = 0;
-    const UINT resolutions[] = { 64, 128, 256 };
-    const UINT faces[] = { 1, 2, 6 };
-    const UINT samples[] = { 32, 64, 128 };
-    for (int quality = 1; quality <= 3; ++quality)
+    const UINT resolutions[] = { 64, 128, 256, 512 };
+    const UINT faces[] = { 1, 2, 6, 6 };
+    const UINT samples[] = { 32, 64, 128, 256 };
+    for (int quality = 1; quality <= 4; ++quality)
     {
         const auto text = std::to_string(quality);
         Set(L"Render.Reflection.Quality", text.c_str());

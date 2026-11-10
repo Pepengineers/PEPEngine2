@@ -1,6 +1,7 @@
 #include "Engine.RendererDX12/GDX12ShadowCascades.h"
 #include <cassert>
 #include <iostream>
+#include <limits>
 
 int main()
 {
@@ -37,15 +38,22 @@ int main()
         }
     }
 
-    const auto first = BuildShadowCascades(Matrix::Identity, fov, aspect, 0.1f, 10000.0f, sun);
-    const auto shifted = BuildShadowCascades(Matrix::CreateTranslation(0.00001f, 0, 0), fov, aspect, 0.1f, 10000.0f, sun);
-    for (int cascade = 0; cascade < 4; ++cascade)
+    float previousTexelSize = (std::numeric_limits<float>::max)();
+    for (UINT resolution : { 512u, 1024u, 2048u, 4096u })
     {
-        // Crossing a grid boundary may move one texel; fractional texel motion must not occur.
-        const float dx = (first.ViewProj[cascade]._14 - shifted.ViewProj[cascade]._14) * 1024.0f;
-        const float dy = (first.ViewProj[cascade]._24 - shifted.ViewProj[cascade]._24) * 1024.0f;
-        assert(std::abs(dx - std::round(dx)) < 0.001f);
-        assert(std::abs(dy - std::round(dy)) < 0.001f);
+        const auto first = BuildShadowCascades(Matrix::Identity, fov, aspect, 0.1f, 10000.0f, sun, nullptr, resolution);
+        const auto shifted = BuildShadowCascades(Matrix::CreateTranslation(0.00001f, 0, 0),
+            fov, aspect, 0.1f, 10000.0f, sun, nullptr, resolution);
+        assert(first.TexelWorldSize.x < previousTexelSize);
+        previousTexelSize = first.TexelWorldSize.x;
+        for (int cascade = 0; cascade < 4; ++cascade)
+        {
+            // Crossing a grid boundary may move one texel; fractional texel motion must not occur.
+            const float dx = (first.ViewProj[cascade]._14 - shifted.ViewProj[cascade]._14) * (0.5f * resolution);
+            const float dy = (first.ViewProj[cascade]._24 - shifted.ViewProj[cascade]._24) * (0.5f * resolution);
+            assert(std::abs(dx - std::round(dx)) < 0.001f);
+            assert(std::abs(dy - std::round(dy)) < 0.001f);
+        }
     }
     std::cout << "CSM: ordered splits, receiver coverage, finite depth, and texel stabilization passed.\n";
 }

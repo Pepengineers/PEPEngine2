@@ -19,6 +19,18 @@ namespace BistroCharacters
     inline AutoConsoleVariable<int> FoxCount(L"App.Fox.Count", 5,
         L"Initial single-file fox count; spawn positions repeat when crowded, 0 disables, applies on startup",
         EConsoleVariableFlags::ReadOnly, [](int value) { return value >= 0; });
+    inline AutoConsoleVariable<int> PresetNPCCount(L"App.NPC.PresetCount", -1,
+        L"People count override, -1 inherits startup count. Restart Bistro to apply.",
+        EConsoleVariableFlags::Default, [](int value) { return value >= -1 && value <= 10; });
+    inline AutoConsoleVariable<int> PresetFoxCount(L"App.Fox.PresetCount", -1,
+        L"Fox count override, -1 inherits startup count. Restart Bistro to apply.",
+        EConsoleVariableFlags::Default, [](int value) { return value >= -1 && value <= 5; });
+
+    inline int GetCount(bool fox)
+    {
+        const int preset = fox ? PresetFoxCount.GetValue() : PresetNPCCount.GetValue();
+        return preset >= 0 ? preset : fox ? FoxCount.GetValue() : NPCCount.GetValue();
+    }
 
     class Scene : private ParallelJob
     {
@@ -30,7 +42,7 @@ namespace BistroCharacters
         };
 
     public:
-        explicit Scene(unsigned seed = std::random_device{}()) : _random(seed) {}
+        explicit Scene(unsigned seed = std::random_device{}()) : _seed(seed) {}
 
         void Update(World& world, float deltaSeconds, JobSystem& jobs, PhysicsModule* physics = nullptr)
         {
@@ -39,8 +51,8 @@ namespace BistroCharacters
             ecs.RegisterComponent<BistroInteractionSource>();
             if (spawning)
             {
-                Spawn(ecs, static_cast<size_t>(NPCCount.GetValue()), false);
-                Spawn(ecs, static_cast<size_t>(FoxCount.GetValue()), true);
+                Spawn(ecs, static_cast<size_t>(GetCount(false)), false);
+                Spawn(ecs, static_cast<size_t>(GetCount(true)), true);
                 _initialized = true;
             }
             _stepSeconds = world.IsPaused() ? 0 : deltaSeconds * world.GetTimeScale();
@@ -113,8 +125,9 @@ namespace BistroCharacters
             const auto& network = fox ? BistroRoutes::Foxes() : BistroRoutes::People();
             if (network.Spawns.empty()) throw std::runtime_error("Bistro character route has no spawn positions");
             std::vector<size_t> slots(network.Spawns.size());
+            std::mt19937 random(_seed ^ (fox ? 0x9e3779b9u : 0u));
             std::iota(slots.begin(), slots.end(), size_t{0});
-            std::shuffle(slots.begin(), slots.end(), _random);
+            std::shuffle(slots.begin(), slots.end(), random);
             const size_t groups = fox ? requested : (std::min)(requested, slots.size());
             size_t character = 0;
             for (size_t index = 0; index < groups; ++index)
@@ -131,14 +144,14 @@ namespace BistroCharacters
                     auto& skeletal = entity.AddComponent<SkeletalMeshRenderComponent>(handle);
                     skeletal.SetClip(clip);
                     skeletal.SetLooping(true);
-                    skeletal.SetTimeSeconds(std::uniform_real_distribution<double>(0, source->GetClips()[clip].DurationSeconds)(_random));
+                    skeletal.SetTimeSeconds(std::uniform_real_distribution<double>(0, source->GetClips()[clip].DurationSeconds)(random));
                     if (!fox) entity.AddComponent<BistroInteractionSource>();
                     _entities.push_back(entity.GetId());
                 }
             }
         }
 
-        std::mt19937 _random;
+        unsigned _seed;
         std::vector<Group> _groups;
         std::vector<Entity> _entities;
         std::vector<TransformComponent*> _transforms;

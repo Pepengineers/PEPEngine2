@@ -736,6 +736,26 @@ namespace
         return materialSlots;
     }
 
+    struct ObjScenePart
+    {
+        std::string Name;
+        Engine::Core::MeshHandle Mesh;
+        std::vector<GDX12Material*> Materials;
+        UINT SubMeshCount;
+    };
+
+    void SpawnObjScenePart(World& world, RenderModule& render, const ObjScenePart& part)
+    {
+        render.ReserveInstanceCapacity(part.SubMeshCount);
+        if (world.SceneMeshFactory &&
+            world.SceneMeshFactory(part.Name, StaticMeshRenderComponent(part.Mesh, part.Materials))) return;
+        render.ReserveTransformCapacity(2);
+        auto entity = world.GetECS().CreateEntity();
+        entity.AddComponent<NameComponent>(part.Name);
+        entity.AddComponent<TransformComponent>();
+        entity.AddComponent<StaticMeshRenderComponent>(part.Mesh, part.Materials);
+    }
+
     /// Loads one obj file as a renderable world entity.
     bool LoadObjSceneEntity(
         World& world,
@@ -744,7 +764,8 @@ namespace
         const std::filesystem::path& objPath,
         const std::string& sceneName,
         SceneTextureCache& gpuTexturesByPath,
-        DirectX::BoundingBox& outBounds)
+        DirectX::BoundingBox& outBounds,
+        std::vector<ObjScenePart>* bindings = nullptr)
     {
         Engine::Core::MeshHandle sceneMeshHandle = {};
         const Engine::Core::Mesh* sceneMesh = assetManager.LoadMesh(objPath, sceneMeshHandle);
@@ -793,19 +814,11 @@ namespace
 
         renderModule.SubmitMesh(sceneMesh, sceneMeshHandle);
 
-        const auto materialSlots = BuildObjMaterialSlots(renderModule, assetManager, *sceneMesh,
-            sceneName, fallbackMaterial, defaultMaterialTextures, gpuTexturesByPath);
-        renderModule.ReserveInstanceCapacity(static_cast<UINT>(sceneMesh->GetSubMeshCount()));
-        WorldECS& ecs = world.GetECS();
-        if (!world.SceneMeshFactory ||
-            !world.SceneMeshFactory(sceneName, StaticMeshRenderComponent(sceneMeshHandle, materialSlots)))
-        {
-            renderModule.ReserveTransformCapacity(2);
-            auto entity = ecs.CreateEntity();
-            entity.AddComponent<NameComponent>(sceneName);
-            entity.AddComponent<TransformComponent>();
-            entity.AddComponent<StaticMeshRenderComponent>(sceneMeshHandle, materialSlots);
-        }
+        ObjScenePart part{sceneName, sceneMeshHandle,
+            BuildObjMaterialSlots(renderModule, assetManager, *sceneMesh, sceneName, fallbackMaterial,
+                defaultMaterialTextures, gpuTexturesByPath), static_cast<UINT>(sceneMesh->GetSubMeshCount())};
+        SpawnObjScenePart(world, renderModule, part);
+        if (bindings) bindings->push_back(std::move(part));
 
         outBounds = sceneMesh->GetBounds();
         return true;
@@ -985,7 +998,8 @@ namespace
         RenderModule& renderModule,
         Engine::Core::AssetManager& assetManager,
         const std::filesystem::path& sceneRoot,
-        const std::vector<std::filesystem::path>& objPaths)
+        const std::vector<std::filesystem::path>& objPaths,
+        WorldLoader::ObjSceneReplay* replay)
     {
         if (objPaths.empty())
         {
@@ -1008,6 +1022,7 @@ namespace
         bool loadedAnyObject = false;
         DirectX::BoundingBox sceneBounds = {};
         SceneTextureCache gpuTexturesByPath;
+        std::vector<ObjScenePart> bindings;
 
         for (const std::filesystem::path& objPath : objPaths)
         {
@@ -1020,7 +1035,8 @@ namespace
                 objPath,
                 BuildScenePartName(sceneRoot, objPath),
                 gpuTexturesByPath,
-                objBounds))
+                objBounds,
+                replay ? &bindings : nullptr))
             {
                 Log::Error("Loading", "Failed to load scene part: ", objPath);
                 return false;
@@ -1070,6 +1086,14 @@ namespace
         Log::Info("Loading", "Released uploaded CPU texture pixels: ", releasedBytes / (1024u * 1024u), " MiB");
         LastLoadingMeasurements.PublishSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - publishStarted).count();
         Log::Info("Loading", "Scene GPU resources ready in ", LastLoadingMeasurements.PublishSeconds, " s");
+        if (replay)
+        {
+            *replay = [&renderModule, bindings = std::move(bindings), sceneBounds](World& next)
+            {
+                for (const auto& part : bindings) SpawnObjScenePart(next, renderModule, part);
+                CreateCameraForBounds(next, sceneBounds);
+            };
+        }
         return true;
     }
 }
@@ -1212,7 +1236,7 @@ static bool LoadYamlWorld(World& world, const std::filesystem::path& path)
 }
 
 
-bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
+bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path, ObjSceneReplay* replay)
 {
     if (path.empty())
     {
@@ -1248,7 +1272,7 @@ bool WorldLoader::LoadFromFile(World& world, const std::filesystem::path& path)
             return false;
         }
 
-        return LoadObjSceneFiles(world, *renderModule, assetManager, path, CollectSceneObjPaths(path));
+        return LoadObjSceneFiles(world, *renderModule, assetManager, path, CollectSceneObjPaths(path), replay);
     }
 
     if (IsObjPath(path))

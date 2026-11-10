@@ -103,6 +103,18 @@ int main()
             "Point lights need six shadow faces and spot lights one");
         const auto cachedPoint = frame.Local[0];
         const auto cachedSpot = frame.Local[1];
+        auto localOff = CollectWorldLights(ecs, false);
+        Require(localOff.Main.LocalLightCount == 2 && localOff.Local.size() == 2 &&
+            localOff.Local[0].Radiance.x == cachedPoint.Radiance.x && localOff.Local[1].Radiance.x == cachedSpot.Radiance.x &&
+            localOff.Local[0].ShadowFirstSlice == UINT_MAX && localOff.Local[1].ShadowFirstSlice == UINT_MAX,
+            "Local shadow Off must preserve point and spot lighting while reserving no shadow slices");
+        auto unshadowed = frame;
+        unshadowed.Main.SunShadowFlags = 3;
+        unshadowed.Main.LightRadiance = { 1, 2, 3 };
+        ApplyShadowQuality({ 0, 0 }, unshadowed.Main, unshadowed.Local);
+        Require(unshadowed.Main.SunShadowFlags == 0 && unshadowed.Main.LightRadiance.y == 2 &&
+            unshadowed.Local[0].ShadowFlags == 0 && unshadowed.Local[0].ShadowFirstSlice == UINT_MAX,
+            "Applying Off to submitted lights must remove only their shadow participation");
         CheckShadowOutputs(cachedPoint, cachedSpot);
         Require(ShouldRenderLocalShadow(cachedPoint, nullptr), "Cached shadows must render at startup");
         Require(!ShouldRenderLocalShadow(cachedPoint, &cachedPoint), "Unchanged cached shadows must be reused");

@@ -100,6 +100,20 @@ static std::vector<float> Read(GDX12Device& device, GDX12Texture& texture, UINT 
 
 static void TestCPU()
 {
+    const SkyIBLSettings authored = { 256, 64, 0.25f };
+    auto& namedSky = ConsoleModule{}.FindConsoleVariable(L"Render.SkyBox.PresetIBLBudgets");
+    Require(namedSky.SetFromString("false"), "Cannot select legacy SkyBox budgets");
+    const auto legacy = ResolveSkyBoxIBLSettings(authored, 4);
+    Require(legacy.CubeResolution == 256 && legacy.FilterSamples == 64 && legacy.Intensity == 0.25f,
+        "SkyBox quality changed authored overrides");
+    Require(namedSky.SetFromString("true"), "Cannot select named SkyBox budgets");
+    for (UINT tier = 1; tier <= 4; ++tier)
+    {
+        const auto named = ResolveSkyBoxIBLSettings(authored, tier);
+        Require(named.CubeResolution == (128u << (tier - 1)) && named.FilterSamples == (32u << (tier - 1)) &&
+            named.Intensity == 0.25f, "Wrong named SkyBox budget or changed authored lighting");
+    }
+    Require(namedSky.SetFromString("false"), "Cannot restore legacy SkyBox budgets");
     for (UINT quality = 1; quality <= 3; ++quality)
     {
         const auto sky = ResolveSkyAtmosphereSettings({}, quality);
@@ -109,6 +123,17 @@ static void TestCPU()
         Require(ResolveFluidSettings({}, quality).MaxSubsteps > 0, "Fluid stepping missing");
         Require(ResolveParticleEmitterSettings({}, quality).MaxParticles > 0, "Particle budget missing");
     }
+    const auto grassEpic = ResolveGrassSettings({}, 4);
+    const auto windEpic = ResolveWindSettings({}, 4);
+    const auto fluidEpic = ResolveFluidSettings({}, 4);
+    const auto particleEpic = ResolveParticleEmitterSettings({}, 4);
+    Require(IsValidGrassSettings(grassEpic) && grassEpic.MaxBlades == 262144 && grassEpic.Segments == 8 &&
+        IsValidWindSettings(windEpic) && windEpic.GridResolution == 256 && windEpic.PressureIterations == 80,
+        "Grass and wind Epic must fit their validated budgets");
+    ValidateFluidSettings(fluidEpic);
+    Require(fluidEpic.MaxSubsteps == 64 && fluidEpic.FilterIterations == 4 && fluidEpic.FilterRadiusPixels == 64 &&
+        IsValidParticleEmitterSettings(particleEpic) && particleEpic.MaxParticles == 262144 && particleEpic.Substeps == 8,
+        "Fluid and particle Epic must fit their validated budgets");
     auto invalid = SkyAtmosphereSettings(); invalid.MieAnisotropy = NAN;
     bool rejected = false;
     try { ValidateSkySettings(invalid); } catch (const std::invalid_argument&) { rejected = true; }
@@ -309,6 +334,21 @@ int main(int argc, char** argv)
             CheckGpuMessages(info.Get(), "Environment step " + std::to_string(environmentStep));
             ++environmentStep;
         };
+        resources.Sky.Source = SkySource::Off;
+        execute(environment);
+        resources.Sky.Source = SkySource::SkyBox;
+        resources.Sky.Box.IBL = {};
+        for (const UINT tier : { 4u, 1u })
+        {
+            resources.Sky.Quality = tier;
+            const auto before = resources.ReflectionEnvironmentRevision;
+            execute(environment);
+            Require(environment.GetOutput(3)->GetTexture()->GetWidth() == (128u << (tier - 1)) &&
+                resources.ReflectionEnvironmentRevision > before, "SkyBox tier did not rebuild the source cube");
+            const auto rebuilt = resources.ReflectionEnvironmentRevision;
+            execute(environment);
+            Require(resources.ReflectionEnvironmentRevision == rebuilt, "Stable DDS SkyBox rebuilt on the next frame");
+        }
         for (UINT repeat = 0; repeat < (environmentOnly ? 128u : 1u); ++repeat)
         {
             resources.Sky.Source = SkySource::Off; execute(environment);

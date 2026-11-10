@@ -363,6 +363,20 @@ std::vector<Engine::UI::CanvasId> BistroRenderPipeline::GetWorldCanvasIds() cons
     return { BistroUICanvases::Atrium, BistroUICanvases::Terrace };
 }
 
+void BistroRenderPipeline::ResetWorldHistory()
+{
+    _grassRoute->ResetWorld();
+    _grass->RestartLocalSolver();
+    _grassAvailable = false;
+    _cloudEnvironment->CloudSource().Reset();
+    if (_resources->ParticleSimulation) _resources->ParticleSimulation->SetInteractionField({});
+}
+
+std::pair<size_t, size_t> BistroRenderPipeline::GetWorldProbeReadiness() const
+{
+    return _passes->Reflections.GetReadiness();
+}
+
 void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& context, Engine::UI::CrossAdapterUI* controller)
 {
     const double seconds = context.Common.GameTimer ? context.Common.GameTimer->TotalTime() : 0.0;

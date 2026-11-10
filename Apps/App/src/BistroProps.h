@@ -106,6 +106,11 @@ namespace BistroPhysics
     inline AutoConsoleVariable<double> CountScale(L"App.Physics.CountScale", 1.0,
         L"Indoor tableware count, 0..16: >1 multiplies bottles/tableware only; original furniture is independent; reload to apply",
         EConsoleVariableFlags::Default, [](double value) { return value >= 0 && value <= 16; });
+    inline AutoConsoleVariable<double> ActiveTablewareFraction(L"App.Physics.ActiveTablewareFraction", 1.0,
+        L"Fraction of authored tableware with dynamic bodies, 0..1. Restart Bistro to apply.",
+        EConsoleVariableFlags::Default, [](double value) { return value >= 0 && value <= 1; });
+    inline AutoConsoleVariable<bool> SimulationEnabled(L"App.Physics.SimulationEnabled", true,
+        L"Simulate indoor props. When off, keep the authored meshes and static colliders. Restart Bistro to apply.");
 
     inline size_t GetCount(size_t tableware, double scale, size_t furniture = 0)
     {
@@ -119,6 +124,32 @@ namespace BistroPhysics
     inline size_t GetCount(const BistroPropPartition& partition, double scale)
     {
         return GetCount(partition.Tableware.size(), scale, partition.Props.size()-partition.Tableware.size());
+    }
+
+    inline std::vector<bool> SelectDynamicProps(const BistroPropPartition& partition,
+        const std::vector<DirectX::BoundingBox>& bounds, double fraction, bool enabled)
+    {
+        if (bounds.size() != partition.Props.size() || !std::isfinite(fraction) || fraction < 0 || fraction > 1)
+            throw std::invalid_argument("Invalid Bistro dynamic prop selection");
+        std::vector<bool> dynamic(bounds.size(), enabled);
+        if (!enabled || fraction == 1) return dynamic;
+        auto order = partition.Tableware;
+        std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b)
+        {
+            const auto& left = bounds[a].Center;
+            const auto& right = bounds[b].Center;
+            if (left.x != right.x) return left.x < right.x;
+            return left.z < right.z;
+        });
+        const auto active = static_cast<size_t>(std::ceil(fraction * order.size()));
+        size_t picked = 0;
+        for (size_t i = 0; i < order.size(); ++i)
+        {
+            const auto next = (i + 1) * active / order.size();
+            dynamic[order[i]] = next != picked;
+            picked = next;
+        }
+        return dynamic;
     }
 
     inline PhysicsWorldSettings Settings()
@@ -250,7 +281,8 @@ inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
         return;
     }
 
-    const size_t count = BistroPhysics::GetCount(partition, BistroPhysics::CountScale.GetValue());
+    const bool simulate = BistroPhysics::SimulationEnabled.GetValue();
+    const size_t count = BistroPhysics::GetCount(partition, simulate ? BistroPhysics::CountScale.GetValue() : 1.0);
     if (ecs.GetPool<RigidBodyComponent>().Size() + count + 1 > BistroPhysics::MaxBodies)
         throw std::length_error("Combined Bistro physics body budget exceeded");
     struct BakeColliders final : ParallelJob
@@ -275,12 +307,16 @@ inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
     const PhysicsShapeDesc room = BistroStaticCollision::BuildRoom();
     create(sceneName, partition.StaticSubMeshes, room, PhysicsMotionType::Static);
     std::vector<DirectX::BoundingBox> bounds;
+    bounds.reserve(partition.Props.size());
+    for (const auto& prop : partition.Props) bounds.push_back(BistroPhysics::Bounds(mesh, prop.SubMeshIndices));
+    const auto dynamic = BistroPhysics::SelectDynamicProps(partition, bounds,
+        BistroPhysics::ActiveTablewareFraction.GetValue(), simulate);
     for (size_t index = 0; index < partition.Props.size(); ++index)
     {
         const auto& prop = partition.Props[index];
-        bounds.push_back(BistroPhysics::Bounds(mesh, prop.SubMeshIndices));
         // Imported vertices retain their baked positions. Jolt shifts the body origin as it rotates about shape COM.
-        create(prop.Name, prop.SubMeshIndices, baked.Props[index], PhysicsMotionType::Dynamic);
+        create(prop.Name, prop.SubMeshIndices, baked.Props[index],
+            dynamic[index] ? PhysicsMotionType::Dynamic : PhysicsMotionType::Static);
     }
     if (count == partition.Props.size()) return;
     if (!physics) throw std::logic_error("Spawn copies require physics placement queries");

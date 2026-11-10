@@ -25,16 +25,17 @@ public:
         std::vector<GDX12ShadowOutput> selected);
 
     GDX12ShadowAtlas Atlas() const { return _atlas; }
-    UINT Extent() const { return _atlas == GDX12ShadowAtlas::Sun ? SunShadowCascadeResolution : LocalShadowResolution; }
+    UINT Extent() const { return _extent; }
     UINT Layers() const { return static_cast<UINT>(_sourceViews.size()); }
     const std::vector<GDX12ShadowTransferView>& SourceViews() const { return _sourceViews; }
     std::optional<std::vector<GDX12ShadowTransferView>> ResolveDestination(
         const std::vector<GDX12ShadowOutput>& prepared) const;
 
 private:
-    explicit GDX12ShadowTransferLayout(GDX12ShadowAtlas atlas) : _atlas(atlas) {}
+    GDX12ShadowTransferLayout(GDX12ShadowAtlas atlas, UINT extent) : _atlas(atlas), _extent(extent) {}
 
     GDX12ShadowAtlas _atlas;
+    UINT _extent;
     std::vector<GDX12ShadowOutput> _groups;
     std::vector<GDX12ShadowTransferView> _sourceViews;
 };
