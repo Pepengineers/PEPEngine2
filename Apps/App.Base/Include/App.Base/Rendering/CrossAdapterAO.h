@@ -34,6 +34,9 @@ public:
 #endif
 
 private:
+#ifdef _DEBUG
+    friend class BistroRenderGraphTests;
+#endif
     struct Frame;
     struct BoundaryIdentity
     {

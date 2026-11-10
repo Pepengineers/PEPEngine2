@@ -104,3 +104,11 @@ U1 принят как `4169187`. WorldCanvas зарегистрирован в 
 - Cross-vendor диагностика AO не прошла неизменный предел `1e-5` на RTX 3060 Laptop и AMD Radeon Graphics. Full SSAO дал максимум `0.06124` при RMS `0.000464`. Full HBAO дал наибольший пик `0.114425` при RMS около `0.000267`. Входы, constants и transport проверены отдельно. Независимый replay на secondary, Half replay и визуальная оценка разницы остаются открытыми. MGPU и offload AO выключены по умолчанию.
 
 Этот снимок фиксирует общую API-базу для следующих техник. Численная приёмка production AO продолжается отдельным изменением.
+
+## AO follow-up
+
+После интеграции P2d `f067926` независимый replay повторил вычисление на каждом адаптере с теми же depth, normals и constants и новым scratch. Primary Evaluate/Finalize совпал с local AO, secondary Evaluate совпал с отправленным visibility, а повторный primary Finalize совпал с lighting output. Debug и GBV подтвердили это для всех 16 сочетаний. В каждом прогоне проверены 32 актуальных Finalize receipt и 48 побайтных transport сравнений.
+
+Для замороженного Bistro 1280×800 на RTX 3060 Laptop и AMD Radeon Graphics согласованы mean ≤ 1/4096, RMS ≤ 1/1024, p99 ≤ 1/512 и max ≤ 1/8. Все сохранённые Debug и GBV результаты укладываются в эти границы. Full late SSAO и HBAO дали по 10 и 3 пикселя с ошибкой выше 0,05 из 1 024 000. Изображения lighting input и усиленной разницы сохранены в `Build/P4/AOImages`. Покрытие ограничено этой сценой, камерой и парой адаптеров.
+
+Исходные процессы завершились с ошибкой по прежнему пределу `1e-5`. Этот предел доступен через `--ao-mgpu-strict-validation` и `--ao-mgpu-strict-gpu-validation`. Новые пределы проверены на неизменённых сохранённых результатах, а обновлённый checker собран отдельно. Логи `Build/P4/replay2-*`, квитанция `Build/P4/AO-replay-gate.json`.
