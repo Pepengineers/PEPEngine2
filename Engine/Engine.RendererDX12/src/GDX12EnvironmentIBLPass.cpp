@@ -1,9 +1,155 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
+#include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.Core/AssetManager.h"
 #include <cstring>
 #include <cmath>
 #include <stdexcept>
+
+namespace
+{
+    constexpr std::array<UINT, 3> PayloadTextures = { 0, 1, 3 };
+    constexpr UINT DiffuseSize = 32, SpecularSize = 128, SpecularMips = 8;
+    constexpr double MaxUpdateHz = 1000, MaxAgeLimitMs = 60000;
+    AutoConsoleVariable<float> CloudUpdateHz(L"Render.Clouds.UpdateHz", 0.0f,
+        L"Maximum cloud producer update rate in Hz (0 uncapped, 0..1000).",
+        EConsoleVariableFlags::Default, [](const float value)
+        { return std::isfinite(value) && value >= 0 && value <= MaxUpdateHz; });
+    AutoConsoleVariable<float> CloudMaxAgeMs(L"Render.Clouds.MaxAgeMs", 0.0f,
+        L"Cloud snapshot age diagnostic in ms (0 disabled, 0..60000).",
+        EConsoleVariableFlags::Default, [](const float value)
+        { return std::isfinite(value) && value >= 0 && value <= MaxAgeLimitMs; });
+
+    UINT SourceMipCount(UINT size)
+    {
+        UINT mips = 1;
+        while (size > 1)
+        {
+            size >>= 1;
+            ++mips;
+        }
+        return mips;
+    }
+
+    GDX12SkyConstants CloudSkyConstants()
+    {
+        GDX12SkyConstants constants;
+        constants.Mode.x = static_cast<UINT>(SkySource::SkyBox);
+        constants.Box = { 1, 0, 1, 0 };
+        return constants;
+    }
+
+    bool SameIBL(const SkyIBLSettings& first, const SkyIBLSettings& second)
+    {
+        return first.CubeResolution == second.CubeResolution && first.FilterSamples == second.FilterSamples &&
+            first.Intensity == second.Intensity;
+    }
+}
+
+GDX12CloudPublicationSettings GetCloudPublicationSettings()
+{
+    return { CloudUpdateHz.GetValue(), CloudMaxAgeMs.GetValue() };
+}
+
+bool GDX12CloudEnvironmentInputs::IsCompatibleWith(const GDX12CloudEnvironmentInputs& other) const
+{
+    return Cloud.Enabled && other.Cloud.Enabled &&
+        Cloud.SourceRevision == other.Cloud.SourceRevision && SkyRevision == other.SkyRevision &&
+        EnvironmentRevision == other.EnvironmentRevision && Cloud.Quality == other.Cloud.Quality &&
+        Cloud.Parameters.Seed == other.Cloud.Parameters.Seed &&
+        SameIBL(IBL, other.IBL) &&
+        SunRevision == other.SunRevision && SunDirection == other.SunDirection && SunRadiance == other.SunRadiance;
+}
+
+GDX12CloudSnapshotAge GDX12CloudEnvironmentInputs::MeasureAge(const Clock::time_point displayedAt,
+    const double maxAgeMs) const
+{
+    if (displayedAt < CapturedAt || !std::isfinite(maxAgeMs) || maxAgeMs < 0 || maxAgeMs > MaxAgeLimitMs)
+        throw std::invalid_argument("Invalid cloud snapshot display time or age threshold");
+    const double age = std::chrono::duration<double, std::milli>(displayedAt - CapturedAt).count();
+    return { age, maxAgeMs > 0 && age > maxAgeMs };
+}
+
+bool GDX12CloudCadence::TakeTick(const double nowSeconds, const double maxHz)
+{
+    if (!std::isfinite(nowSeconds) || nowSeconds < 0 || !std::isfinite(maxHz) || maxHz < 0 || maxHz > MaxUpdateHz)
+        throw std::invalid_argument("Cloud cadence requires monotonic host time and a rate within [0, 1000] Hz");
+    if (_rate != maxHz || nowSeconds < _origin)
+    {
+        _rate = maxHz;
+        _origin = nowSeconds;
+        _lastTick = -1;
+    }
+    if (_rate == 0) return true;
+    const double tick = std::floor((nowSeconds - _origin) * _rate + 1e-9);
+    if (tick <= _lastTick) return false;
+    _lastTick = tick;
+    return true;
+}
+
+GDX12CloudEnvironmentLayout::GDX12CloudEnvironmentLayout(ID3D12Device& device, const UINT cubeSize)
+    : _cubeSize(cubeSize)
+{
+    if (cubeSize < 16 || cubeSize > 1024)
+        throw std::invalid_argument("Cloud snapshot cube resolution must be 16..1024");
+    const UINT sizes[] = { DiffuseSize, SpecularSize, cubeSize };
+    const UINT mips[] = { 1, SpecularMips, SourceMipCount(cubeSize) };
+    for (size_t i = 0; i < _footprints.size(); ++i)
+    {
+        auto& footprints = _footprints[i];
+        const UINT count = 6 * mips[i];
+        footprints.resize(count);
+        const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R16G16B16A16_FLOAT,
+            sizes[i], sizes[i], 6, static_cast<UINT16>(mips[i]));
+        device.GetCopyableFootprints(&desc, 0, count, _bytes, footprints.data(), nullptr, nullptr, nullptr);
+        const auto& tail = footprints.back();
+        const UINT64 footprintBytes = static_cast<UINT64>(tail.Footprint.RowPitch) * tail.Footprint.Height;
+        constexpr UINT64 alignment = D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT;
+        if (tail.Offset < _bytes || tail.Footprint.Format != DXGI_FORMAT_R16G16B16A16_FLOAT ||
+            tail.Footprint.Height == 0 || tail.Footprint.Height > sizes[i] || tail.Footprint.Depth != 1 ||
+            footprintBytes == 0 || tail.Offset > UINT64_MAX - footprintBytes - alignment)
+            throw std::invalid_argument("Invalid cloud snapshot texture footprint");
+        _bytes = (tail.Offset + footprintBytes + alignment - 1) & ~(alignment - 1);
+    }
+}
+
+void GDX12CloudEnvironmentLayout::Validate(ID3D12Resource& payload) const
+{
+    const auto desc = payload.GetDesc();
+    if (desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER || desc.Width != _bytes)
+        throw std::invalid_argument("Cloud snapshot buffer does not match its layout");
+}
+
+void GDX12CloudEnvironmentLayout::Copy(ID3D12GraphicsCommandList& commands, size_t cube,
+    ID3D12Resource& texture, ID3D12Resource& payload, const bool pack) const
+{
+    const auto& footprints = _footprints[cube];
+    for (UINT i = 0; i < footprints.size(); ++i)
+    {
+        const CD3DX12_TEXTURE_COPY_LOCATION image(&texture, i);
+        const CD3DX12_TEXTURE_COPY_LOCATION buffer(&payload, footprints[i]);
+        commands.CopyTextureRegion(pack ? &buffer : &image, 0, 0, 0, pack ? &image : &buffer, nullptr);
+    }
+}
+
+void GDX12CloudEnvironmentLayout::RecordUnpack(GDX12CommandList* commands,
+    const std::array<ID3D12Resource*, 3>& outputs, ID3D12Resource& payload) const
+{
+    Validate(payload);
+    const UINT widths[] = { DiffuseSize, SpecularSize, _cubeSize };
+    for (size_t i = 0; i < outputs.size(); ++i)
+    {
+        if (!outputs[i]) throw std::invalid_argument("Cloud snapshot is missing an output cube");
+        const auto desc = outputs[i]->GetDesc();
+        if (desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
+            desc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT || desc.Width != widths[i] ||
+            desc.Height != widths[i] || desc.DepthOrArraySize != 6 || desc.SampleDesc.Count != 1 ||
+            desc.MipLevels * 6u != _footprints[i].size())
+            throw std::invalid_argument("Cloud snapshot output does not match its cube layout");
+    }
+    for (size_t i = 0; i < outputs.size(); ++i)
+        Copy(*commands->GetCommandList().Get(), i, *outputs[i], payload, false);
+}
 
 GDX12EnvironmentIBLPass::GDX12EnvironmentIBLPass()
 {
@@ -22,6 +168,11 @@ void GDX12EnvironmentIBLPass::Initialize()
 {
     EnsureOutputs(false, 1);
     CreateTexture(*_textures[2], 128, 128, 1, 1, false);
+    InitializeKernels(false);
+}
+
+void GDX12EnvironmentIBLPass::InitializeKernels(const bool cloudProducer)
+{
     D3D12_SHADER_RESOURCE_VIEW_DESC nullCube = {};
     nullCube.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
     nullCube.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
@@ -50,16 +201,26 @@ void GDX12EnvironmentIBLPass::Initialize()
     _skyRoot = std::make_unique<GDX12RootSignature>(_resources->Device, sky);
     const D3D_SHADER_MACRO defines[] = { { "GLOBAL_SKY_FILTER", "1" }, { nullptr, nullptr } };
     const char* filters[] = { "IrradianceCS", "PrefilterCS", "IntegrateBRDFCS" };
-    for (UINT i = 0; i < 3; ++i)
+    for (UINT i = 0; i < (cloudProducer ? 2u : 3u); ++i)
         _filters[i] = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _filterRoot.get(),
             SHADERS_FOLDER "EnvironmentIBL.hlsl", filters[i], defines);
     const char* entries[] = { "TransmittanceCS", "MultipleScatteringCS", "SkyViewCS", "AerialCS", "SourceCubeCS" };
-    for (UINT i = 0; i < 5; ++i)
+    for (UINT i = cloudProducer ? 4u : 0u; i < 5; ++i)
         _skyPipelines[i] = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _skyRoot.get(),
             SHADERS_FOLDER "SkyAtmosphere.hlsl", entries[i]);
 }
 
-void GDX12EnvironmentIBLPass::Invalidate() { _invalidated = true; }
+void GDX12EnvironmentIBLPass::Invalidate()
+{
+    _invalidated = true;
+    ++_inputRevision;
+}
+
+void GDX12EnvironmentIBLPass::Resize()
+{
+    ++_inputRevision;
+    if (_cloudActive) _invalidated = true;
+}
 
 void GDX12EnvironmentIBLPass::SetCloudSource(GDX12CloudComponent* source)
 {
@@ -118,10 +279,15 @@ void GDX12EnvironmentIBLPass::EnsureOutputs(bool enabled, UINT cubeSize)
     const UINT mips = enabled ? 8 : 1;
     if (_prefilterMips == mips && _textures[3]->GetWidth() == cubeSize) return;
     _resources->Device->GetCommandQueue()->Flush();
-    CreateTexture(*_textures[0], enabled ? 32 : 1, enabled ? 32 : 1, 1, 1, true);
-    CreateTexture(*_textures[1], enabled ? 128 : 1, enabled ? 128 : 1, 1, mips, true);
-    UINT sourceMips = 1;
-    for (UINT size = cubeSize; size > 1; size >>= 1) ++sourceMips;
+    AllocateOutputs(enabled, cubeSize);
+}
+
+void GDX12EnvironmentIBLPass::AllocateOutputs(const bool enabled, const UINT cubeSize)
+{
+    const UINT mips = enabled ? SpecularMips : 1;
+    CreateTexture(*_textures[0], enabled ? DiffuseSize : 1, enabled ? DiffuseSize : 1, 1, 1, true);
+    CreateTexture(*_textures[1], enabled ? SpecularSize : 1, enabled ? SpecularSize : 1, 1, mips, true);
+    const UINT sourceMips = SourceMipCount(cubeSize);
     CreateTexture(*_textures[3], cubeSize, cubeSize, 1, sourceMips, true);
     _sourceUAVs.resize(sourceMips);
     for (UINT mip = 0; mip < sourceMips; ++mip)
@@ -189,14 +355,19 @@ void GDX12EnvironmentIBLPass::EnsureAtmosphere(const SkyAtmosphereSettings& s)
 void GDX12EnvironmentIBLPass::BindSky(GDX12CommandList* commands, const UINT constantIndex)
 {
     auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+    BindSkyConstants(commands, frame->SkyCB->GetElementAddress(constantIndex));
+    if (_commonData->ActiveCameraCBufferIndex != UINT_MAX)
+        commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
+}
+
+void GDX12EnvironmentIBLPass::BindSkyConstants(GDX12CommandList* commands, const D3D12_GPU_VIRTUAL_ADDRESS address)
+{
     commands->SetComputeRootSignature(_skyRoot.get());
-    commands->SetComputeRootConstantBufferView(0, frame->SkyCB->GetElementAddress(constantIndex));
+    commands->SetComputeRootConstantBufferView(0, address);
     commands->SetComputeSRV(0, _null2D.GPUHandle);
     commands->SetComputeSRV(1, _null2D.GPUHandle);
     commands->SetComputeSRV(2, _null2D.GPUHandle);
     commands->SetComputeSRV(3, _nullCube.GPUHandle);
-    if (_commonData->ActiveCameraCBufferIndex != UINT_MAX)
-        commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
 }
 
 void GDX12EnvironmentIBLPass::DispatchLUT(GDX12CommandList* commands, const UINT pipeline, const UINT index)
@@ -209,33 +380,197 @@ void GDX12EnvironmentIBLPass::DispatchLUT(GDX12CommandList* commands, const UINT
     commands->ResourceBarrier({ texture->GetResource()->GetSRVBarrier() });
 }
 
-void GDX12EnvironmentIBLPass::Filter(GDX12CommandList* commands, const UINT samples, const float intensity)
+void GDX12EnvironmentIBLPass::RecordSourceCube(GDX12CommandList* commands)
+{
+    auto* resource = _textures[3]->GetResource();
+    commands->ResourceBarrier({ resource->GetUnorderedAccessBarrier() });
+    commands->SetPipelineState(_skyPipelines[4]);
+    for (UINT mip = 0; mip < _sourceUAVs.size(); ++mip)
+    {
+        const UINT size = (std::max)(1u, _textures[3]->GetWidth() >> mip);
+        commands->SetComputeUAV(3, _sourceUAVs[mip]->GPUHandle);
+        commands->Dispatch((size + 7) / 8, (size + 7) / 8, 6);
+    }
+    commands->ResourceBarrier({ commands->GetType() == D3D12_COMMAND_LIST_TYPE_COMPUTE ?
+        resource->GetNonPixelShaderResourceBarrier() : resource->GetSRVBarrier() });
+}
+
+void GDX12EnvironmentIBLPass::RecordDisabledOutputs(GDX12CommandList* commands)
+{
+    if (!_disabledPixel)
+    {
+        _disabledPixel = std::make_unique<GDX12UploadBuffer<std::array<uint16_t, 4>>>(_resources->Device, 1);
+        constexpr std::array<uint16_t, 4> opaqueBlack = { 0, 0, 0, 0x3c00 };
+        _disabledPixel->CopyData(0, opaqueBlack);
+    }
+    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {
+        0, { DXGI_FORMAT_R16G16B16A16_FLOAT, 1, 1, 1, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT }
+    };
+    const CD3DX12_TEXTURE_COPY_LOCATION source(_disabledPixel->GetResource().D3DResource.Get(), footprint);
+    for (const auto index : PayloadTextures)
+    {
+        auto* output = _textures[index]->GetResource();
+        commands->ResourceBarrier({ output->GetCopyDestBarrier() });
+        for (UINT face = 0; face < 6; ++face)
+        {
+            const CD3DX12_TEXTURE_COPY_LOCATION target(output->D3DResource.Get(), face);
+            commands->GetCommandList()->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
+        }
+        commands->ResourceBarrier({ output->GetSRVBarrier() });
+    }
+}
+
+void GDX12EnvironmentIBLPass::Filter(GDX12CommandList* commands, const UINT samples, const float intensity, const bool display)
 {
     commands->SetComputeRootSignature(_filterRoot.get());
     commands->SetComputeSRV(0, _textures[3]->GetSRV()->GPUHandle);
-    for (UINT i = 0; i < 3; ++i) commands->ResourceBarrier({ _textures[i]->GetResource()->GetUnorderedAccessBarrier() });
-    const auto dispatch = [&](const UINT pipeline, const UINT size, const float roughness, const D3D12_GPU_DESCRIPTOR_HANDLE uav, const UINT slot, const UINT faces)
+    for (UINT i = 0; i < 2; ++i) commands->ResourceBarrier({ _textures[i]->GetResource()->GetUnorderedAccessBarrier() });
+    const auto dispatch = [&](const UINT pipeline, const UINT size, const float roughness, const D3D12_GPU_DESCRIPTOR_HANDLE uav)
     {
         struct { UINT Size; float Roughness; UINT Samples; float Intensity; } parameters = { size, roughness, samples, intensity };
         commands->SetPipelineState(_filters[pipeline]);
         commands->GetCommandList()->SetComputeRoot32BitConstants(0, 4, &parameters, 0);
-        commands->SetComputeUAV(slot, uav);
-        commands->Dispatch((size + 7) / 8, (size + 7) / 8, faces);
+        commands->SetComputeUAV(0, uav);
+        commands->Dispatch((size + 7) / 8, (size + 7) / 8, 6);
     };
-    dispatch(0, _textures[0]->GetWidth(), 0, _textures[0]->GetUAV()->GPUHandle, 0, 6);
+    dispatch(0, _textures[0]->GetWidth(), 0, _textures[0]->GetUAV()->GPUHandle);
     for (UINT mip = 0; mip < _prefilterMips; ++mip)
         dispatch(1, _textures[1]->GetWidth() >> mip, _prefilterMips > 1 ? mip / 7.0f : 0,
-            _prefilterUAVs[mip]->GPUHandle, 0, 6);
-    if (!_brdfReady)
+            _prefilterUAVs[mip]->GPUHandle);
+    if (display)
     {
-        dispatch(2, 128, 0, _textures[2]->GetUAV()->GPUHandle, 1, 1);
-        _brdfReady = true;
+        EnsureBRDF(commands);
+        for (UINT i = 0; i < 2; ++i) commands->ResourceBarrier({ _textures[i]->GetResource()->GetSRVBarrier() });
     }
-    for (UINT i = 0; i < 3; ++i) commands->ResourceBarrier({ _textures[i]->GetResource()->GetSRVBarrier() });
+}
+
+void GDX12EnvironmentIBLPass::EnsureBRDF(GDX12CommandList* commands)
+{
+    if (_brdfReady) return;
+    commands->SetComputeRootSignature(_filterRoot.get());
+    auto* texture = _textures[2].get();
+    commands->ResourceBarrier({ texture->GetResource()->GetUnorderedAccessBarrier() });
+    commands->SetPipelineState(_filters[2]);
+    const struct { UINT Size; float Roughness; UINT Samples; float Intensity; } parameters = { texture->GetWidth(), 0, 0, 0 };
+    commands->GetCommandList()->SetComputeRoot32BitConstants(0, 4, &parameters, 0);
+    commands->SetComputeUAV(1, texture->GetUAV()->GPUHandle);
+    commands->Dispatch((parameters.Size + 7) / 8, (parameters.Size + 7) / 8, 1);
+    commands->ResourceBarrier({ texture->GetResource()->GetSRVBarrier() });
+    _brdfReady = true;
+}
+
+void GDX12EnvironmentIBLPass::ResetEnvironmentHistory()
+{
+    ++_resources->ReflectionEnvironmentRevision;
+    _commonData->ResetHistory = true;
+    _commonData->ResetUpscalerHistory = true;
+    _commonData->RequestHistoryReset = true;
+}
+
+void GDX12EnvironmentIBLPass::ReleaseAtmosphere()
+{
+    if (!_luts[0]->IsInitialized()) return;
+    _resources->Device->GetCommandQueue()->Flush();
+    PublishAtmosphereViews(false);
+    for (auto& lut : _luts) lut = std::make_unique<GDX12Texture>();
+}
+
+std::optional<GDX12CloudEnvironmentInputs> GDX12EnvironmentIBLPass::CaptureCloudInputs()
+{
+    if (!_cloudSource) return std::nullopt;
+    if (!_resources) throw std::logic_error("Cloud environment capture requires Setup");
+    const auto cloud = _cloudSource->CaptureInputs();
+    if (!cloud.Enabled) return std::nullopt;
+    const auto& sky = _resources->Sky;
+    ValidateSkySettings(sky.Box);
+    const auto& lighting = _resources->Lighting;
+    return GDX12CloudEnvironmentInputs{ cloud, ResolveSkyIBLSettings(sky.Box.IBL, cloud.Quality),
+        -Vector3(lighting.LightDirection), Vector3(lighting.LightRadiance),
+        lighting.SunShadowRevision, sky.Revision, _inputRevision, GDX12CloudEnvironmentInputs::Clock::now() };
+}
+
+void GDX12EnvironmentIBLPass::PackCloudPayload(GDX12CommandList* commands, const GDX12CloudEnvironmentLayout& layout,
+    ID3D12Resource& payload)
+{
+    for (size_t i = 0; i < PayloadTextures.size(); ++i)
+    {
+        auto* resource = _textures[PayloadTextures[i]]->GetResource();
+        commands->ResourceBarrier({ resource->GetCopySourceBarrier() });
+        layout.Copy(*commands->GetCommandList().Get(), i, *resource->D3DResource.Get(), payload, true);
+        commands->ResourceBarrier({ resource->GetCommonBarrier() });
+    }
+}
+
+bool GDX12EnvironmentIBLPass::IsCloudDisplayPrepared(const GDX12CloudEnvironmentLayout& layout) const
+{
+    return _brdfReady && _prefilterMips == SpecularMips && _textures[3]->GetWidth() == layout.CubeSize() &&
+        !_luts[0]->IsInitialized();
+}
+
+void GDX12EnvironmentIBLPass::UpdateCloudSkyConstants()
+{
+    auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+    frame->SkyCB->CopyData(0, CloudSkyConstants());
+}
+
+void GDX12EnvironmentIBLPass::RepeatCloudSnapshot(GDX12CommandList* commands, const GDX12CloudEnvironmentInputs& input)
+{
+    if (!_displayedCloud || !_displayedCloud->IsCompatibleWith(input) ||
+        _displayedCloud->Cloud.LightingRevision != input.Cloud.LightingRevision)
+        throw std::logic_error("Cannot repeat a cloud snapshot that has not been installed");
+    for (const auto& texture : _textures)
+        commands->ResourceBarrier({ texture->GetResource()->GetSRVBarrier() });
+    UpdateCloudSkyConstants();
+}
+
+void GDX12EnvironmentIBLPass::PublishCloudSnapshot(const GDX12CloudEnvironmentInputs& input)
+{
+    const bool discontinuity = _invalidated || !_cloudActive || _revision != input.SkyRevision ||
+        _quality != input.Cloud.Quality || _cloudSourceRevision != input.Cloud.SourceRevision ||
+        (_displayedCloud && !_displayedCloud->IsCompatibleWith(input));
+    UpdateCloudSkyConstants();
+    if (discontinuity) ResetEnvironmentHistory();
+    _displayedCloud = input;
+    _revision = input.SkyRevision;
+    _quality = input.Cloud.Quality;
+    _source = SkySource::SkyBox;
+    _cloudSourceRevision = input.Cloud.SourceRevision;
+    _cloudLightingRevision = input.Cloud.LightingRevision;
+    _cloudIBL = input.IBL;
+    _cloudActive = true;
+    _invalidated = false;
+}
+
+GDX12EnvironmentIBLPass::CloudProducer::CloudProducer(GDX12DeviceResources& resources, const GDX12CloudEnvironmentLayout& layout)
+    : _layout(layout), _constants(resources.Device, 1)
+{
+    _cloud.Setup(&resources, nullptr, nullptr);
+    _environment.Setup(&resources, nullptr, nullptr);
+    _environment.InitializeKernels(true);
+    _environment.AllocateOutputs(true, _layout.CubeSize());
+    _constants.CopyData(0, CloudSkyConstants());
+}
+
+void GDX12EnvironmentIBLPass::CloudProducer::Record(GDX12CommandList* commands, const GDX12CloudEnvironmentInputs& input,
+    ID3D12Resource& payload)
+{
+    if ((commands->GetType() != D3D12_COMMAND_LIST_TYPE_DIRECT && commands->GetType() != D3D12_COMMAND_LIST_TYPE_COMPUTE) ||
+        !input.Cloud.Enabled || input.IBL.CubeResolution != _layout.CubeSize())
+        throw std::invalid_argument("Cloud snapshot requires a matching compute-capable producer");
+    _layout.Validate(payload);
+    _cloud.Record(commands, input.Cloud);
+    auto* cloud = _cloud.GetOutput(0)->GetTexture();
+    _environment.BindSkyConstants(commands, _constants.GetElementAddress(0));
+    commands->SetComputeSRV(3, cloud->GetSRV()->GPUHandle);
+    _environment.RecordSourceCube(commands);
+    commands->ResourceBarrier({ cloud->GetResource()->GetCommonBarrier() });
+    _environment.Filter(commands, input.IBL.FilterSamples, input.IBL.Intensity, false);
+    _environment.PackCloudPayload(commands, _layout, payload);
 }
 
 void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
 {
+    _displayedCloud.reset();
     auto state = _resources->Sky;
     const bool cloudActive = _cloudSource && _cloudSource->IsActive();
     bool cloudChanged = cloudActive != _cloudActive;
@@ -254,9 +589,8 @@ void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
         state.Box.RotationRadians = 0;
     }
     _cloudActive = cloudActive;
-    const bool discontinuity = _invalidated || cloudChanged || _revision != state.Revision ||
+    bool discontinuity = _invalidated || cloudChanged || _revision != state.Revision ||
         _quality != state.Quality || _source != state.Source;
-    const bool changed = discontinuity || lightingChanged;
     auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     GDX12SkyConstants constants;
     constants.Mode.x = static_cast<UINT>(state.Source);
@@ -266,6 +600,11 @@ void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
     {
         ValidateSkySettings(state.Box);
         ibl = ResolveSkyIBLSettings(state.Box.IBL, state.Quality);
+        if (cloudActive)
+        {
+            discontinuity |= !SameIBL(_cloudIBL, ibl);
+            _cloudIBL = ibl;
+        }
         constants.Box = { state.Box.RadianceMultiplier, std::sin(state.Box.RotationRadians), std::cos(state.Box.RotationRadians), 0 };
         if (!cloudActive && (_boxAsset != state.Box.Cubemap || !_boxTexture->IsInitialized()))
         {
@@ -308,14 +647,10 @@ void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
         capture.CameraPosition = pack((atmosphere.IBLCapturePositionCm - atmosphere.PlanetCenterCm) * 0.00001f, 0);
         frame->SkyCB->CopyData(1, capture);
     }
+    const bool changed = discontinuity || lightingChanged;
     frame->SkyCB->CopyData(0, constants);
     if (changed) EnsureOutputs(state.Source != SkySource::Off, state.Source == SkySource::Off ? 1 : ibl.CubeResolution);
-    if (changed && state.Source != SkySource::SkyAtmosphere && _luts[0]->IsInitialized())
-    {
-        _resources->Device->GetCommandQueue()->Flush();
-        PublishAtmosphereViews(false);
-        for (auto& lut : _luts) lut = std::make_unique<GDX12Texture>();
-    }
+    if (changed && state.Source != SkySource::SkyAtmosphere) ReleaseAtmosphere();
     if (state.Source != SkySource::SkyBox && _boxTexture->IsInitialized())
     {
         _resources->Device->GetCommandQueue()->Flush();
@@ -325,7 +660,7 @@ void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
     if (!changed && state.Source != SkySource::SkyAtmosphere) return;
     GDX12_SCOPED_EVENT(commands, "Sky source and atmosphere LUTs", Colors::CornflowerBlue);
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-    BindSky(commands, state.Source == SkySource::SkyAtmosphere ? 1 : 0);
+    if (state.Source != SkySource::Off) BindSky(commands, state.Source == SkySource::SkyAtmosphere ? 1 : 0);
     if (state.Source == SkySource::SkyAtmosphere)
     {
         if (changed)
@@ -343,23 +678,17 @@ void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
         commands->SetComputeSRV(3, (cloudActive ? _cloudSource->GetOutput(0)->GetTexture() : _boxTexture.get())->GetSRV()->GPUHandle);
     if (changed)
     {
-        commands->ResourceBarrier({ _textures[3]->GetResource()->GetUnorderedAccessBarrier() });
-        commands->SetPipelineState(_skyPipelines[4]);
-        for (UINT mip = 0; mip < _sourceUAVs.size(); ++mip)
+        if (state.Source == SkySource::Off)
         {
-            const UINT size = (std::max)(1u, _textures[3]->GetWidth() >> mip);
-            commands->SetComputeUAV(3, _sourceUAVs[mip]->GPUHandle);
-            commands->Dispatch((size + 7) / 8, (size + 7) / 8, 6);
+            RecordDisabledOutputs(commands);
+            EnsureBRDF(commands);
         }
-        commands->ResourceBarrier({ _textures[3]->GetResource()->GetSRVBarrier() });
-        Filter(commands, state.Source == SkySource::Off ? 16 : ibl.FilterSamples, state.Source == SkySource::Off ? 0 : ibl.Intensity);
-        if (discontinuity)
+        else
         {
-            ++_resources->ReflectionEnvironmentRevision;
-            _commonData->ResetHistory = true;
-            _commonData->ResetUpscalerHistory = true;
-            _commonData->RequestHistoryReset = true;
+            RecordSourceCube(commands);
+            Filter(commands, ibl.FilterSamples, ibl.Intensity, true);
         }
+        if (discontinuity) ResetEnvironmentHistory();
     }
     if (state.Source == SkySource::SkyAtmosphere)
     {
@@ -392,8 +721,10 @@ void GDX12EnvironmentIBLPass::ClearDenendencies()
     for (auto& pipeline : _filters) pipeline.Reset();
     for (auto& pipeline : _skyPipelines) pipeline.Reset();
     _cloudSource = nullptr;
+    _displayedCloud.reset();
     _sourceUAVs.clear();
     _boxTexture.reset();
+    _disabledPixel.reset();
     _filterRoot.reset();
     _skyRoot.reset();
 }

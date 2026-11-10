@@ -17,6 +17,19 @@ struct GDX12CloudParameters
     Vector3 HorizonColor = Vector3(0.35f, 0.5f, 0.8f);
     Vector3 ZenithColor = Vector3(0.05f, 0.15f, 0.4f);
     Vector3 CloudColor = Vector3(2.0f); // Linear HDR radiance.
+    uint32_t Seed = 0;
+};
+
+struct GDX12CloudInputs
+{
+    GDX12CloudParameters Parameters;
+    Vector2 Phase = Vector2(0.0f);
+    double SimulationSeconds = 0;
+    uint64_t SourceRevision = 0;
+    uint64_t LightingRevision = 0;
+    UINT Quality = 0;
+    UINT Octaves = 0;
+    bool Enabled = false;
 };
 
 // Explicit source, never installed into the scene automatically. One instance per source.
@@ -33,6 +46,9 @@ public:
     UINT GetQuality() const;
     uint64_t GetSourceRevision() const { return _sourceRevision; }
     uint64_t GetLightingRevision() const { return _lightingRevision; }
+    GDX12CloudInputs CaptureInputs();
+    // Only this recorder's private texture and descriptors are touched.
+    void Record(GDX12CommandList* commands, const GDX12CloudInputs& input);
     void Execute(GDX12CommandList* commands) override;
     void ClearDenendencies() override; // Caller retires submitted work first, as for other passes.
 
@@ -44,6 +60,7 @@ private:
     ComPtr<ID3D12PipelineState> _pipeline;
     double _phaseX = 0;
     double _phaseY = 0;
+    double _simulationSeconds = 0;
     uint64_t _sourceRevision = 1;
     uint64_t _lightingRevision = 1;
     uint64_t _renderedRevision = 0;

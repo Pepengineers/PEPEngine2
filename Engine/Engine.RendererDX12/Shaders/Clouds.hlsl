@@ -5,7 +5,7 @@ cbuffer CloudParameters : register(b0)
     float Scale; float Coverage; float Softness; float Padding;
     float3 HorizonColor; float PhaseX;
     float3 ZenithColor; float PhaseY;
-    float3 CloudColor; float Padding2;
+    float3 CloudColor; uint Seed;
     float4 Padding3;
 };
 RWTexture2DArray<float4> Output : register(u0);
@@ -29,7 +29,7 @@ void CloudsCS(uint3 id : SV_DispatchThreadID)
         Output[id] = float4(sky, 0);
         return;
     }
-    float density = CloudDirectionDensity(direction, Scale, float2(PhaseX, PhaseY), Octaves, Implementation);
+    float density = CloudDirectionDensity(direction, Scale, float2(PhaseX, PhaseY), Octaves, Implementation, Seed);
     float opacity = smoothstep(1.0f - Coverage - Softness, 1.0f - Coverage + Softness, density);
     if (Coverage == 0) opacity = 0;
     if (Coverage == 1) opacity = 1;

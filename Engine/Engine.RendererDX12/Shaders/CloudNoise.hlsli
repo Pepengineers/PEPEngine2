@@ -2,10 +2,10 @@
 #define PEPE_CLOUD_NOISE
 // Original implementation for PEPEngine2; no donor/Shadertoy code is incorporated.
 // Standard simplex skew geometry with an integer, 256-lattice-period gradient hash.
-float2 CloudGradient(int2 cell)
+float2 CloudGradient(int2 cell, uint seed)
 {
     uint2 wrapped = uint2(cell) & 255u;
-    uint hash = wrapped.x * 747796405u + wrapped.y * 2891336453u + 277803737u;
+    uint hash = wrapped.x * 747796405u + wrapped.y * 2891336453u + 277803737u + seed * 1597334677u;
     hash = (hash ^ (hash >> 16)) * 2246822519u;
     uint index = (hash ^ (hash >> 13)) & 7u;
     const float2 gradients[8] = {
@@ -15,7 +15,7 @@ float2 CloudGradient(int2 cell)
     return gradients[index];
 }
 
-float CloudSimplex(float2 position, float2 phase)
+float CloudSimplex(float2 position, float2 phase, uint seed)
 {
     const float skew = 0.366025403784f;
     const float unskew = 0.211324865405f;
@@ -30,19 +30,19 @@ float CloudSimplex(float2 position, float2 phase)
         int2 offset = vertex == 0 ? int2(0,0) : (vertex == 1 ? middle : int2(1,1));
         float2 delta = offsetFromCell - float2(offset) + (offset.x + offset.y) * unskew;
         float weight = max(0.5f - dot(delta, delta), 0.0f);
-        sum += weight * weight * weight * weight * dot(CloudGradient(cell + offset), delta);
+        sum += weight * weight * weight * weight * dot(CloudGradient(cell + offset, seed), delta);
     }
     return clamp(70.0f * sum, -1.0f, 1.0f);
 }
 
-float CloudFractal(float2 position, float2 phase, uint octaves, uint implementation)
+float CloudFractal(float2 position, float2 phase, uint octaves, uint implementation, uint seed)
 {
     float total = 0;
     float normalization = 0;
     float amplitude = 1;
     for (uint octave = 0; octave < octaves; ++octave)
     {
-        float value = CloudSimplex(position, phase);
+        float value = CloudSimplex(position, phase, seed);
         value = implementation == 1 ? 1.0f - abs(value) : 0.5f + 0.5f * value;
         total += amplitude * value;
         normalization += amplitude;
@@ -53,14 +53,29 @@ float CloudFractal(float2 position, float2 phase, uint octaves, uint implementat
 }
 
 // Material shaders can call the same 2D noise directly, with their instance's uniforms.
-float CloudDirectionDensity(float3 direction, float scale, float2 phase, uint octaves, uint implementation)
+float CloudDirectionDensity(float3 direction, float scale, float2 phase, uint octaves, uint implementation, uint seed)
 {
     // Direction-space projection avoids longitude seams and singularities at either pole.
     float3 weights = direction * direction;
     float3 position = direction * scale;
     return dot(weights, float3(
-        CloudFractal(position.yz, phase, octaves, implementation),
-        CloudFractal(position.zx, phase, octaves, implementation),
-        CloudFractal(position.xy, phase, octaves, implementation)));
+        CloudFractal(position.yz, phase, octaves, implementation, seed),
+        CloudFractal(position.zx, phase, octaves, implementation, seed),
+        CloudFractal(position.xy, phase, octaves, implementation, seed)));
+}
+
+float CloudDirectionDensity(float3 direction, float scale, float2 phase, uint octaves, uint implementation)
+{
+    return CloudDirectionDensity(direction, scale, phase, octaves, implementation, 0);
+}
+
+float CloudSimplex(float2 position, float2 phase)
+{
+    return CloudSimplex(position, phase, 0);
+}
+
+float CloudFractal(float2 position, float2 phase, uint octaves, uint implementation)
+{
+    return CloudFractal(position, phase, octaves, implementation, 0);
 }
 #endif

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="MGPUQueueTests.vcxproj" />
+  <PropertyGroup>
+    <ProjectGuid>{0B2C4972-F6F1-4D55-93A1-7069FCA3C13B}</ProjectGuid>
+  </PropertyGroup>
+  <ItemGroup>
+    <ClCompile Remove="@(ClCompile)" />
+    <ClCompile Include="tests\MGPUCloudEnvironmentTests.cpp" />
+    <ClCompile Include="..\App.Base\src\Rendering\CrossAdapterEnvironment.cpp" />
+  </ItemGroup>
+</Project>

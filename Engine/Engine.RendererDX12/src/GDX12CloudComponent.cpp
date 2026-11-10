@@ -57,7 +57,9 @@ void GDX12CloudComponent::Advance(const double simulationDeltaSeconds)
 {
     if (!std::isfinite(simulationDeltaSeconds) || simulationDeltaSeconds < 0 || simulationDeltaSeconds > 3600)
         throw std::invalid_argument("Cloud delta must be finite and within [0, 3600] seconds");
-    if (!IsActive() || simulationDeltaSeconds == 0 || (_parameters.Speed.x == 0 && _parameters.Speed.y == 0)) return;
+    if (!IsActive() || simulationDeltaSeconds == 0) return;
+    _simulationSeconds += simulationDeltaSeconds;
+    if (_parameters.Speed.x == 0 && _parameters.Speed.y == 0) return;
     // Hash is periodic in simplex lattice space, so wrapping does not jump the noise field.
     _phaseX = std::fmod(_phaseX + simulationDeltaSeconds * _parameters.Speed.x, 256.0);
     _phaseY = std::fmod(_phaseY + simulationDeltaSeconds * _parameters.Speed.y, 256.0);
@@ -67,6 +69,7 @@ void GDX12CloudComponent::Advance(const double simulationDeltaSeconds)
 void GDX12CloudComponent::Reset()
 {
     _phaseX = _phaseY = 0;
+    _simulationSeconds = 0;
     ++_sourceRevision;
     ++_lightingRevision;
 }
@@ -104,9 +107,8 @@ void GDX12CloudComponent::CreateResources()
     _texture->Initialize(desc);
 }
 
-void GDX12CloudComponent::Execute(GDX12CommandList* commands)
+GDX12CloudInputs GDX12CloudComponent::CaptureInputs()
 {
-    if (!_resources || !_texture) throw std::logic_error("Cloud source requires Setup before Execute");
     const int quality = Quality.GetInt();
     const bool enabled = _parameters.Enabled && Enabled.GetValue() && quality != 0;
     if (_quality != quality || _enabled != enabled)
@@ -116,7 +118,24 @@ void GDX12CloudComponent::Execute(GDX12CommandList* commands)
         ++_sourceRevision;
         ++_lightingRevision;
     }
-    if (_renderedRevision == _lightingRevision) return;
+    const UINT presets[] = { 0, 3, 5, 8 };
+    return { _parameters, Vector2(static_cast<float>(_phaseX), static_cast<float>(_phaseY)),
+        _simulationSeconds, _sourceRevision, _lightingRevision, static_cast<UINT>(quality),
+        _parameters.Octaves ? _parameters.Octaves : presets[quality], enabled };
+}
+
+void GDX12CloudComponent::Execute(GDX12CommandList* commands)
+{
+    const auto input = CaptureInputs();
+    if (_renderedRevision == input.LightingRevision) return;
+    Record(commands, input);
+    _renderedRevision = input.LightingRevision;
+}
+
+void GDX12CloudComponent::Record(GDX12CommandList* commands, const GDX12CloudInputs& input)
+{
+    if (!_resources || !_texture) throw std::logic_error("Cloud source requires Setup before recording");
+    _renderedRevision = 0;
     if (!_texture->IsInitialized()) CreateResources();
     struct Constants
     {
@@ -124,15 +143,14 @@ void GDX12CloudComponent::Execute(GDX12CommandList* commands)
         float Scale, Coverage, Softness, Padding;
         Vector3 Horizon; float PhaseX;
         Vector3 Zenith; float PhaseY;
-        Vector3 Cloud; float Padding2;
+        Vector3 Cloud; UINT Seed;
     };
     static_assert(sizeof(Constants) == 20 * sizeof(UINT));
-    const UINT presets[] = { 0, 3, 5, 8 };
-    Constants constants = { 256, _parameters.Octaves ? _parameters.Octaves : presets[quality],
-        static_cast<UINT>(_parameters.Implementation), enabled ? 1u : 0u,
-        _parameters.Scale, _parameters.Coverage, _parameters.Softness, 0,
-        _parameters.HorizonColor, static_cast<float>(_phaseX), _parameters.ZenithColor,
-        static_cast<float>(_phaseY), _parameters.CloudColor, 0 };
+    const auto& parameters = input.Parameters;
+    const Constants constants = { 256, input.Octaves, static_cast<UINT>(parameters.Implementation),
+        input.Enabled ? 1u : 0u, parameters.Scale, parameters.Coverage, parameters.Softness, 0,
+        parameters.HorizonColor, input.Phase.x, parameters.ZenithColor, input.Phase.y,
+        parameters.CloudColor, parameters.Seed };
     GDX12_SCOPED_EVENT(commands, "Procedural 2D clouds", Colors::CornflowerBlue);
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     commands->SetComputeRootSignature(_root.get());
@@ -141,8 +159,8 @@ void GDX12CloudComponent::Execute(GDX12CommandList* commands)
     commands->SetComputeUAV(0, _texture->GetUAV()->GPUHandle);
     commands->ResourceBarrier({ _texture->GetResource()->GetUnorderedAccessBarrier() });
     commands->Dispatch(32, 32, 6);
-    commands->ResourceBarrier({ _texture->GetResource()->GetSRVBarrier() });
-    _renderedRevision = _lightingRevision;
+    commands->ResourceBarrier({ commands->GetType() == D3D12_COMMAND_LIST_TYPE_COMPUTE ?
+        _texture->GetResource()->GetNonPixelShaderResourceBarrier() : _texture->GetResource()->GetSRVBarrier() });
 }
 
 void GDX12CloudComponent::ClearDenendencies()
