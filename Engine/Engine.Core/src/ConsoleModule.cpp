@@ -411,7 +411,12 @@ ConsoleConfigResult ConsoleModule::SavePatchIni(const std::filesystem::path& Pat
     if (resolved.empty()) return {0, "Empty CVar profile"};
     std::scoped_lock lock(ConfigMutex);
     std::error_code error;
-    if (std::filesystem::equivalent(Path, GetDefaultConfigPath(), error))
+    const auto base = std::filesystem::weakly_canonical(GetDefaultConfigPath(), error);
+    if (error) return {0, error.message()};
+    const auto destination = std::filesystem::weakly_canonical(Path, error);
+    if (error) return {0, error.message()};
+    if (_wcsicmp(base.c_str(), destination.c_str()) == 0 ||
+        std::filesystem::equivalent(Path, base, error))
         return {0, "Cannot replace the base INI with a profile"};
     error.clear();
     if (Path.has_parent_path()) std::filesystem::create_directories(Path.parent_path(), error);
@@ -435,6 +440,9 @@ ConsoleConfigResult ConsoleModule::SavePatchIni(const std::filesystem::path& Pat
     {
         auto backup = Path;
         backup += L".bak";
+        if (std::filesystem::equivalent(backup, base, error))
+            return fail("Cannot use the base INI as a profile backup");
+        error.clear();
         std::filesystem::copy_file(Path, backup, std::filesystem::copy_options::overwrite_existing, error);
     }
     if (error) return fail("Cannot back up CVar profile: " + error.message());
@@ -448,21 +456,38 @@ void ConsoleModule::Initialize()
     InitializeWithOverlay({});
 }
 
-void ConsoleModule::InitializeWithOverlay(const std::filesystem::path& Overlay)
+void ConsoleModule::InitializeWithOverlay(const std::filesystem::path& Overlay, const std::filesystem::path& Overrides)
 {
     if (StartupComplete.load())
     {
-        if (!Overlay.empty()) throw ConsoleConfigError("The startup overlay must be applied before initialization");
+        if (!Overlay.empty() || !Overrides.empty())
+            throw ConsoleConfigError("The startup overlay must be applied before initialization");
         return;
     }
     auto path = GetDefaultConfigPath();
     Log::Info("Config", "Loading INI: ", path);
     auto result = LoadIni(path);
-    if (result.Error.empty() && !Overlay.empty())
+    if (result.Error.empty() && (!Overlay.empty() || !Overrides.empty()))
     {
-        path = Overlay;
         ConsoleVariablePatch patch;
-        result = ReadPatchIni(path, patch);
+        std::unordered_map<const IConsoleVariable*, size_t> locations;
+        for (const auto* layer : {&Overlay, &Overrides})
+        {
+            if (layer->empty()) continue;
+            path = *layer;
+            ConsoleVariablePatch input;
+            result = ReadPatchIni(path, input);
+            if (!result.Error.empty()) break;
+            std::vector<ResolvedValue> resolved;
+            result = ResolvePatch(*this, input, true, resolved);
+            if (!result.Error.empty()) break;
+            for (const auto& [variable, value] : resolved)
+            {
+                const auto [it, inserted] = locations.emplace(variable, patch.size());
+                if (inserted) patch.emplace_back(variable->GetName(), value);
+                else patch[it->second].second = value;
+            }
+        }
         if (result.Error.empty()) result = ApplyPatch(patch);
     }
     if (!result.Error.empty())

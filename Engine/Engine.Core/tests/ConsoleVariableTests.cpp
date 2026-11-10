@@ -217,14 +217,16 @@ int main(int argc, char**)
         catch (const ConsoleConfigError&) { overlayRejected = true; }
         Require(overlayRejected && frames.GetUInt() == 4,
             "An invalid startup overlay must leave all base INI values in place");
-        { std::ofstream file(startupOverlay); file << "[ConsoleVariables]\nTest.Frames=4\nTest.Count=29\n"; }
-        console.InitializeWithOverlay(startupOverlay);
+        { std::ofstream file(startupOverlay); file << "[ConsoleVariables]\nTest.Frames=4\nTest.Count=30\n"; }
+        const auto custom = directory / "custom.ini";
+        { std::ofstream file(custom); file << "[ConsoleVariables]\ntest.count=29\n"; }
+        console.InitializeWithOverlay(startupOverlay, custom);
         const auto originalDirectory = std::filesystem::current_path();
         std::filesystem::current_path(directory);
         StartupProbe app(constructed, frames);
         std::filesystem::current_path(originalDirectory);
         Require(constructed && app.Initialize() && count.GetInt() == 29,
-            "The overlay must take precedence before startup settings are frozen");
+            "Explicit custom values must win over the profile and base before settings are frozen");
         console.Initialize();
         Require(!frames.SetValue(5) && !frames.SetFromString("5") && frames.GetUInt() == 4,
             "ReadOnly must reject typed and text updates after startup");
@@ -323,6 +325,8 @@ int main(int argc, char**)
         AutoConsoleVariable<int> late(L"Test.Late", 1, {}, EConsoleVariableFlags::ReadOnly);
         Require(!late.SetValue(2), "Late registration must not reopen startup writes");
         std::filesystem::remove(startupIni);
+        Require(!console.SavePatchIni(startupIni, previous).Error.empty() && !std::filesystem::exists(startupIni),
+            "Profile save must not create or overwrite the base INI");
         Require(count.SetValue(44) && readSaved() == "[ConsoleVariables]\nTest.Count = 44\n",
             "First runtime edit must create a missing INI with the required section");
         { std::ofstream file(startupIni, std::ios::binary); file << "; Example: [ConsoleVariables]\r\n"; }

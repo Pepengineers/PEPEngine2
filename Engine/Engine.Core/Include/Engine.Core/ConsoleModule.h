@@ -92,7 +92,7 @@ class ConsoleModule final : public Module
 {
 public:
     void Initialize() override;
-    void InitializeWithOverlay(const std::filesystem::path& Overlay);
+    void InitializeWithOverlay(const std::filesystem::path& Overlay, const std::filesystem::path& Overrides = {});
 
     static std::filesystem::path GetDefaultConfigPath();
     ConsoleConfigResult LoadIni(const std::filesystem::path& Path);
