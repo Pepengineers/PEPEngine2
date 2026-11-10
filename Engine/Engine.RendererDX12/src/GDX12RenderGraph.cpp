@@ -291,6 +291,20 @@ const GDX12RenderGraph::CompiledPlan& GDX12RenderGraph::GetCompiledPlan() const
 void GDX12RenderGraph::SetLegacySplit(GDX12RenderPass& replaced, std::vector<IRenderPassLink*> inputs,
     std::vector<IRenderPassLink*> outputs, ResolveLegacyExternalViews resolveExternal)
 {
+    TryResolveLegacyExternalViews tryResolve;
+    if (resolveExternal)
+        tryResolve = [resolve = std::move(resolveExternal)]() -> std::optional<std::vector<LegacyExternalView>>
+        {
+            auto views = resolve();
+            if (views.empty()) return std::nullopt;
+            return views;
+        };
+    SetOptionalLegacySplit(replaced, std::move(inputs), std::move(outputs), std::move(tryResolve));
+}
+
+void GDX12RenderGraph::SetOptionalLegacySplit(GDX12RenderPass& replaced, std::vector<IRenderPassLink*> inputs,
+    std::vector<IRenderPassLink*> outputs, TryResolveLegacyExternalViews resolveExternal)
+{
     if (_executingSplit) throw std::logic_error("Cannot change legacy splits during execution");
     const auto node = std::find_if(_nodes.begin(), _nodes.end(), [&](const Node& entry) { return entry.Instance == &replaced; });
     if (node == _nodes.end() || node->HasPlacement || (outputs.empty() && !resolveExternal))
@@ -310,7 +324,7 @@ void GDX12RenderGraph::SetLegacySplit(GDX12RenderPass& replaced, std::vector<IRe
         }
         return result;
     };
-    LegacySplit split{ resolve(inputs, false), resolve(outputs, true), std::move(resolveExternal) };
+    LegacySplit split{ resolve(inputs, false), resolve(outputs, true), std::move(resolveExternal), {} };
     for (const auto& access : node->Accesses)
         if (!_resources[access.Id].LogicalToken)
         {
@@ -319,6 +333,16 @@ void GDX12RenderGraph::SetLegacySplit(GDX12RenderPass& replaced, std::vector<IRe
                 throw std::invalid_argument("Legacy split omits a declared physical access");
         }
     _legacySplits.insert_or_assign(static_cast<Pass>(node - _nodes.begin()), std::move(split));
+    _compiled = false;
+}
+
+void GDX12RenderGraph::SetLegacyPrefixBefore(GDX12RenderPass& reader, std::function<bool()> enabled)
+{
+    if (_executingSplit) throw std::logic_error("Cannot change legacy splits during execution");
+    const auto node = std::find_if(_nodes.begin(), _nodes.end(), [&](const Node& entry) { return entry.Instance == &reader; });
+    if (node == _nodes.end() || node->HasPlacement || !enabled)
+        throw std::invalid_argument("Legacy prefix requires a graph-owned reader and an enable predicate");
+    _legacySplits.insert_or_assign(static_cast<Pass>(node - _nodes.begin()), LegacySplit{{}, {}, {}, std::move(enabled)});
     _compiled = false;
 }
 
@@ -1282,9 +1306,15 @@ GDX12CommandList* GDX12RenderGraph::ExecuteLegacySplit(GDX12CommandList* command
         const auto pass = _order[i];
         const auto point = _legacySplits.find(pass);
         if (point == _legacySplits.end()) continue;
-        auto external = point->second.ResolveExternal ? point->second.ResolveExternal() : std::vector<LegacyExternalView>{};
+        const bool enabled = !point->second.PrefixEnabled || point->second.PrefixEnabled();
+        if (!_compiled) throw std::logic_error("Legacy graph changed while enabling a prefix");
+        if (!enabled) continue;
+        std::optional<std::vector<LegacyExternalView>> external(std::in_place);
+        if (point->second.ResolveExternal) external = point->second.ResolveExternal();
         if (!_compiled) throw std::logic_error("Legacy graph changed while resolving its boundary");
-        if (point->second.ResolveExternal && external.empty()) continue;
+        if (!external) continue;
+        if (point->second.Outputs.empty() && external->empty() && !point->second.PrefixEnabled)
+            throw std::invalid_argument("Legacy split resolved without a physical boundary");
         std::vector<Captured> handles;
         const auto capture = [&](const std::vector<Resource>& ids, bool write)
         {
@@ -1320,7 +1350,7 @@ GDX12CommandList* GDX12RenderGraph::ExecuteLegacySplit(GDX12CommandList* command
             return views;
         };
         const LegacyBoundary boundary{ _nodes[pass].Instance, capture(point->second.Inputs, false),
-            capture(point->second.Outputs, true), std::move(external) };
+            capture(point->second.Outputs, true), std::move(*external) };
         for (const auto& loan : boundary.ExternalViews)
         {
             const auto& identity = loan.Identity;
@@ -1417,7 +1447,7 @@ GDX12CommandList* GDX12RenderGraph::ExecuteLegacySplit(GDX12CommandList* command
             if (!replacement->IsValid() || !(replacement->Timeline() == prefix.Timeline()) ||
                 replacement->Value() <= prefix.Value() || replacement->Value() > latest.Value())
                 throw std::invalid_argument("Legacy replacement requires an issued primary DIRECT point after the prefix");
-            begin = i + 1;
+            begin = point->second.PrefixEnabled ? i : i + 1;
         }
         else
         {

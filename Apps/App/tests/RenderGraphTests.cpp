@@ -1622,6 +1622,7 @@ static void Declarations()
     Reject([&] { graph.SetLegacySplit(replaced, {&input, &other, &unknown}, {&first, &second}); }, "Unknown link accepted");
     Reject([&] { graph.SetLegacySplit(replaced, {&input, &other, &first}, {&first, &second}); }, "Write-only link accepted as input");
     Reject([&] { graph.SetLegacySplit(replaced, {&input, &other}, {&first, &first, &second}); }, "Duplicate output accepted");
+    Reject([&] { graph.SetLegacyPrefixBefore(replaced, {}); }, "Prefix without enable predicate accepted");
     graph.SetLegacySplit(replaced, {&input, &other}, {&first, &second});
     graph.SetLegacySplit(replaced, {&other, &input}, {&second, &first});
     graph.CompilePlan();
@@ -1658,6 +1659,80 @@ static void Pooling(GDX12Device& device)
     Require(graph.GetStatistics().PhysicalTextures == 4 && scratch.GetResource() != input.GetResource() &&
         scratch.GetResource() != alternate.GetResource() && scratch.GetResource() != output.GetResource(),
         "Legacy split did not isolate the inputs, outputs and fallback candidate");
+}
+
+static void PrefixOnly(GDX12Device& device)
+{
+    auto& direct = *device.GetCommandQueue();
+    unsigned producers = 0, readers = 0, cuts = 0;
+    bool enabled = true, submit = true;
+    LinkedPass producer("prefix producer", {}, {}, [&](GDX12CommandList*) { ++producers; });
+    LinkedPass reader("prefix reader", {}, {}, [&](GDX12CommandList*)
+        { Require(producers == readers + 1, "Prefix reader lost its original producer order"); ++readers; });
+    Graph graph(&device);
+    const auto producerNode = graph.AddPass(producer), readerNode = graph.AddPass(reader);
+    graph.DependsOn(readerNode, producerNode);
+    graph.SetLegacyPrefixBefore(reader, [&] { return enabled; });
+    graph.Compile();
+    const auto run = [&]
+    {
+        auto* tail = graph.ExecuteLegacySplit(direct.GetCommandList(), nullptr,
+            [&](const Graph::LegacyBoundary& boundary, CompletionPoint prefix) -> std::optional<CompletionPoint>
+            {
+                ++cuts;
+                Require(boundary.Replaced == &reader && boundary.Inputs.empty() && boundary.Outputs.empty() &&
+                    boundary.ExternalViews.empty() && prefix.IsValid() && producers == readers + 1,
+                    "Ordering-only cut should issue its prefix before the retained reader");
+                if (!submit) return std::nullopt;
+                direct.ExecuteCommandList(direct.GetCommandList());
+                return direct.GetLastCompletionPoint();
+            });
+        direct.ExecuteCommandList(tail);
+        direct.Flush();
+    };
+    run();
+    submit = false;
+    run();
+    enabled = false;
+    run();
+    Require(producers == 3 && readers == 3 && cuts == 2, "Prefix cut skipped a reader or ran while disabled");
+    std::cout << "Ordering-only legacy prefix preserved the actual reader on submit, fallback and disable.\n";
+}
+
+static void OptionalLoans(GDX12Device& device)
+{
+    GDX12DeviceResources resources;
+    resources.Initialize(&device);
+    GDX12Texture output;
+    GDX12RenderHelpers::InitializeRenderTarget(output, resources, 4, 4, DXGI_FORMAT_R8G8B8A8_UNORM);
+    unsigned legacy = 0, placed = 0;
+    LinkedPass pass("optional shadow atlas writer", {}, {&output}, [&](auto*) { ++legacy; });
+    Graph graph(&device);
+    graph.AddPass(pass);
+    bool selected = false;
+    graph.SetOptionalLegacySplit(pass, {}, {&output}, [&]() -> std::optional<std::vector<Graph::LegacyExternalView>>
+    {
+        if (!selected) return std::nullopt;
+        return std::vector<Graph::LegacyExternalView>{};
+    });
+    graph.Compile();
+    auto* direct = device.GetCommandQueue();
+    for (const bool active : {false, true})
+    {
+        selected = active;
+        auto* tail = graph.ExecuteLegacySplit(direct->GetCommandList(), nullptr,
+            [&](const Graph::LegacyBoundary& boundary, CompletionPoint prefix)
+            {
+                Require(boundary.Outputs.size() == 1 && boundary.ExternalViews.empty() && prefix.IsValid(),
+                    "Optional empty inventory lost its linked atlas");
+                ++placed;
+                direct->ExecuteCommandList(direct->GetCommandList());
+                return std::optional<CompletionPoint>{direct->GetLastCompletionPoint()};
+            });
+        direct->ExecuteCommandList(tail);
+    }
+    direct->Flush();
+    Require(legacy == 1 && placed == 1, "Null and empty legacy inventories must have distinct behavior");
 }
 
 static void Frame(GDX12Device& device, bool late)
@@ -1983,9 +2058,10 @@ static void Frame(GDX12Device& device)
         Require(firstLocal == 0 && secondLocal == 0, "Native view mutation invoked a local fallback");
     }
 
-    ComPtr<ID3D12Fence> copyFence, tailFence;
+    ComPtr<ID3D12Fence> copyFence, computeFence, tailFence;
     Graph::PlanExecutor executor(1);
     PlacedTests::Gate gateCopy(device, *copy, copyFence);
+    PlacedTests::Gate gateCompute(device, *compute, computeFence);
     CompletionPoint finalized;
     auto* finalList = graph.ExecuteLegacySplit(direct->GetCommandList(), compute,
         [&](const Graph::LegacyBoundary& boundary, CompletionPoint prefixPoint) -> std::optional<CompletionPoint>
@@ -2026,24 +2102,22 @@ static void Frame(GDX12Device& device)
     owner.reset();
     gateCopy.Open();
     PlacedTests::RequireReached(beforeTail, *direct);
-    compute->CPUWaitForFenceValue(compute->GetLastCompletionPoint().Value());
+    const auto computePoint = compute->GetLastCompletionPoint();
+    compute->CollectCompletedLists();
+    Require(!lifetime.expired() && !computePoint.IsReachedBy(compute->GetCompletionProgress()),
+        "The legacy loan did not survive a gated COMPUTE list");
+    gateCompute.Open();
+    PlacedTests::RequireReached(computePoint, *compute);
     executor.CollectCompleted();
 
-    // Recycle the earlier completed lists while the real final DIRECT list is still pending.
-    std::vector<GDX12CommandList*> recycled;
-    for (int i = 0; i < 8; ++i) recycled.push_back(direct->GetCommandList());
-    auto* recycledCompute = compute->GetCommandList();
+    direct->CollectCompletedLists();
+    compute->CollectCompletedLists();
     const bool retained = !lifetime.expired() && executor.PendingCount() == 0 &&
         !tailPoint.IsReachedBy(direct->GetCompletionProgress());
     gateTail.Open();
-    direct->CPUWaitForFenceValue(tailPoint.Value());
-    auto* recycledTail = direct->GetCommandList();
-    const bool retired = lifetime.expired();
-    recycled.push_back(recycledTail);
-    direct->ExecuteCommandLists(recycled);
-    compute->ExecuteCommandList(recycledCompute);
-    direct->Flush(); compute->Flush();
-    Require(retained && retired, "External buffer ownership did not follow the actual final DIRECT list");
+    PlacedTests::RequireReached(tailPoint, *direct);
+    direct->CollectCompletedLists();
+    Require(retained && lifetime.expired(), "The legacy loan did not retire at its actual DIRECT tail without list reuse");
     Require(visits == 2 && firstLocal == 0 && secondLocal == 1 && graph.GetStatistics().AsyncJoins == 1,
         "External-buffer replacement/fallback or tail order changed");
     PlacedTests::CheckPayload(*middleResult, 41);
@@ -2108,6 +2182,8 @@ int main(int argc, char** argv)
             PlacedTests::ExactAndRetirement(device);
             PlacedTests::TextureUAV(device);
             LegacyBridgeTests::Run(device);
+            LegacyBridgeTests::PrefixOnly(device);
+            LegacyBridgeTests::OptionalLoans(device);
             LegacyLoanTests::Run(device);
         }
         if (requireTwo)

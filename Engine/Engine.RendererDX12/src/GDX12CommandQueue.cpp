@@ -202,7 +202,7 @@ const ComPtr<ID3D12CommandQueue>& GDX12CommandQueue::GetPresentCommandQueue()
 GDX12CommandList* GDX12CommandQueue::GetCommandList()
 {
     if (!_timeline) throw std::logic_error("Submission queue was reset");
-    ClearCompletedLists();
+    CollectCompletedLists();
     std::unique_ptr<GDX12CommandList> commandList;
     if (!_availableCommandLists.empty())
     {
@@ -307,7 +307,7 @@ void GDX12CommandQueue::Flush()
     CPUWaitForFenceValue(point.Value());
 }
 
-void GDX12CommandQueue::ClearCompletedLists()
+void GDX12CommandQueue::CollectCompletedLists()
 {
     const auto progress = GetCompletionProgress();
     if (progress.CompletedValue == (std::numeric_limits<uint64_t>::max)()) ThrowIfFailed(DXGI_ERROR_DEVICE_REMOVED);
@@ -316,6 +316,7 @@ void GDX12CommandQueue::ClearCompletedLists()
     {
         if ((*it)->_retirement.IsReachedBy(progress))
         {
+            (*it)->_legacyOwners.clear();
             _availableCommandLists.push_back(std::move(*it));
             it = _workingCommandLists.erase(it);
         }

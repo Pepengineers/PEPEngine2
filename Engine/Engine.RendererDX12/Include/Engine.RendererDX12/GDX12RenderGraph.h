@@ -187,6 +187,7 @@ public:
         std::optional<D3D12_RESOURCE_STATES> LegacyAfter;
     };
     using ResolveLegacyExternalViews = std::function<std::vector<LegacyExternalView>()>;
+    using TryResolveLegacyExternalViews = std::function<std::optional<std::vector<LegacyExternalView>>()>;
     struct LegacyBoundary
     {
         GDX12RenderPass* Replaced;
@@ -201,6 +202,12 @@ public:
     // An empty result from a configured resolver keeps that pass in the legacy range.
     void SetLegacySplit(GDX12RenderPass& replaced, std::vector<IRenderPassLink*> inputs,
         std::vector<IRenderPassLink*> outputs, ResolveLegacyExternalViews resolve = {});
+    // nullopt skips the split. An empty inventory is valid when the linked outputs are sufficient.
+    void SetOptionalLegacySplit(GDX12RenderPass& replaced, std::vector<IRenderPassLink*> inputs,
+        std::vector<IRenderPassLink*> outputs, TryResolveLegacyExternalViews resolve);
+    // An ordering-only cut before a live reader. The callback can order external inputs,
+    // and the original reader always records after the cut. False preserves the unsplit range.
+    void SetLegacyPrefixBefore(GDX12RenderPass& reader, std::function<bool()> enabled);
     // A callback may return nullopt only when it has proven no placed work was submitted.
     GDX12CommandList* ExecuteLegacySplit(GDX12CommandList* commands, GDX12CommandQueue* compute,
         const SubmitLegacyReplacement& submit);
@@ -248,7 +255,8 @@ private:
     struct LegacySplit
     {
         std::vector<Resource> Inputs, Outputs;
-        ResolveLegacyExternalViews ResolveExternal;
+        TryResolveLegacyExternalViews ResolveExternal;
+        std::function<bool()> PrefixEnabled;
     };
     void CompileInternal(bool reuseTextures, bool allocateTextures);
     void CheckLegacyExecution(GDX12CommandQueue* computeQueue) const;

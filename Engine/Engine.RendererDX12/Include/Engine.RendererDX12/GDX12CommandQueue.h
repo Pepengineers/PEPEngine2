@@ -35,6 +35,8 @@ public:
 	// Returns a CommandList that you can work with.
 	// If all previously created lists are busy - a new one will be created.
 	GDX12CommandList* GetCommandList();
+    // Releases resources from retired lists without waiting or allocating another list.
+    void CollectCompletedLists();
 	void ExecuteCommandList(GDX12CommandList* commandList);
 	void ExecuteCommandLists(std::vector<GDX12CommandList*>& commandLists);
 
@@ -70,7 +72,6 @@ private:
     ComPtr<ID3D12Fence> ResolveTimeline(GDX12Submission::TimelineId producer) const;
     void ValidateCommandList(GDX12CommandList* list) const;
     D3D12_COMMAND_LIST_TYPE _type;
-	void ClearCompletedLists();
 
 	ComPtr<ID3D12CommandQueue> _commandQueue;
 	ComPtr<ID3D12CommandQueue> _proxyCommandQueue;
