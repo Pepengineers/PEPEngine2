@@ -88,6 +88,9 @@ public:
     BistroGrassShadowReplica(const BistroGrassShadowReplica&) = delete;
     BistroGrassShadowReplica& operator=(const BistroGrassShadowReplica&) = delete;
 
+    // After the shared runtime polls, release idle raster aliases before either field bank can resize.
+    void CollectRetired();
+
     // Prefix already covers the primary grass prepare/import and releases the source to COMMON.
     // An empty result means no native work for this request was submitted.
     std::shared_ptr<const ImportedField> SubmitField(const Field& field, CompletionPoint prefix);

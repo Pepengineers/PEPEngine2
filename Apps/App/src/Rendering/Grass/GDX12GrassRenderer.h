@@ -53,6 +53,8 @@ public:
         const GDX12RenderPrimitiveRegistry& registry, const IRenderGeometrySource& source) const;
     GDX12GrassRenderer(GDX12DeviceResources* resources, ShadowMaterials materials);
     void SetShadowMaterials(ShadowMaterials materials);
+    // Only after the placed shadow invocation has released this renderer slot.
+    void ReleaseShadowFrame();
 
     explicit GDX12GrassRenderer(GDX12DeviceResources* resources);
     ~GDX12GrassRenderer();

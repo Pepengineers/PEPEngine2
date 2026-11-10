@@ -229,6 +229,12 @@ BistroGrassShadowReplica::BistroGrassShadowReplica(RenderMGPURuntime& runtime, G
 {}
 BistroGrassShadowReplica::~BistroGrassShadowReplica() = default;
 
+void BistroGrassShadowReplica::CollectRetired()
+{
+    for (const auto& slot : _impl->RasterSlots)
+        if (slot && slot.use_count() == 1) slot->Renderer->ReleaseShadowFrame();
+}
+
 std::shared_ptr<const BistroGrassShadowReplica::ImportedField> BistroGrassShadowReplica::SubmitField(
     const Field& field, CompletionPoint prefix)
 {
@@ -245,7 +251,9 @@ std::shared_ptr<const BistroGrassShadowReplica::ImportedField> BistroGrassShadow
         return {};
     const auto desc = field.Primary.Resource->D3DResource->GetDesc();
     const UINT64 bytes = UINT64(field.Manifest.ElementCount) * sizeof(XMFLOAT4);
-    if (desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER || desc.Width != bytes || !s.Configure(bytes)) return {};
+    if (desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER || desc.Width != bytes) return {};
+    CollectRetired();
+    if (!s.Configure(bytes)) return {};
     auto* staging = s.FreeSource();
     if (!staging) return {};
 

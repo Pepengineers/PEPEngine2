@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <stdexcept>
 #include <unordered_set>
@@ -93,6 +94,18 @@ void GDX12GrassRenderer::SetShadowMaterials(ShadowMaterials materials)
     if (!materials.Heap || !materials.Buffer || !materials.Table.ptr || !materials.AlphaTable.ptr || !materials.Count)
         throw std::invalid_argument("Invalid native grass shadow material binding");
     _shadowMaterials = materials;
+}
+
+void GDX12GrassRenderer::ReleaseShadowFrame()
+{
+    assert(_shadowMaterials);
+    auto& frame = CurrentFrame();
+    _arenaOutput = nullptr;
+    frame.OutputIndex.clear();
+    frame.Outputs.clear();
+    frame.RootUploads.clear();
+    frame.SnapshotWindOwners.clear();
+    frame.Snapshots = {};
 }
 
 GDX12DescriptorHeap* GDX12GrassRenderer::BindingHeap() const
@@ -280,7 +293,8 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
             auto& roots = state.Roots[slot];
             auto& upload = state.RootsUpload[slot];
             const UINT rootCount = (std::max)(1u, static_cast<UINT>(state.Source.RootsCm.size()));
-            bool dirty = state.RootSignatures[slot] != rootsHash;
+            // Native shadow preparation can be declined before its root copy is recorded.
+            bool dirty = _shadowMaterials || state.RootSignatures[slot] != rootsHash;
             if (!roots || roots->GetElementCount() < rootCount)
             {
                 roots = Buffer<XMFLOAT3>(rootCount, true, false);
@@ -429,6 +443,7 @@ void GDX12GrassRenderer::ResumeLocalSolver(std::shared_ptr<GDX12GrassFieldProduc
 void GDX12GrassRenderer::PrepareGPU(GDX12CommandList* commands)
 {
     auto& frame = CurrentFrame();
+    assert(!_shadowMaterials || frame.RootUploads.size() == _drawOrder.size());
     for (const auto& [roots, upload] : frame.RootUploads)
     {
         commands->ResourceBarrier({ roots->GetResource().GetCopyDestBarrier() });
