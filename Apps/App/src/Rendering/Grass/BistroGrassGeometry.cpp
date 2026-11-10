@@ -117,11 +117,21 @@ void BistroGrassGeometry::CollectScene(float deltaSeconds)
     _controls = controls;
 }
 
-void BistroGrassGeometry::PrepareFrame(GDX12DeviceResources& resources, const RenderPipelineCommonData& common)
+GDX12GrassFieldInputQueue::Tick BistroGrassGeometry::CaptureFieldInputs(uint64_t sequence, uint64_t resetRevision)
+{
+    const auto signature = GDX12GrassRenderer::FieldInputSignature(_grass, _controls);
+    const bool reset = _capturedFieldSignature && *_capturedFieldSignature != signature;
+    _capturedFieldSignature = signature;
+    return { sequence, _wind, _sources, GDX12GrassRenderer::BistroInteractionArea(), _deltaSeconds,
+        _controls.WindQuality, reset, resetRevision, std::chrono::steady_clock::now() };
+}
+
+void BistroGrassGeometry::PrepareFrame(GDX12DeviceResources& resources, const RenderPipelineCommonData& common,
+    const GDX12GrassRenderer::DisplayedFields* fields)
 {
     if (!_gpu) _gpu = std::make_unique<GDX12GrassRenderer>(&resources);
     if (!_gpu) return;
-    _gpu->BeginFrame(common, _grass, _wind, _controls, _sources, _deltaSeconds);
+    _gpu->BeginFrame(common, _grass, _wind, _controls, _sources, _deltaSeconds, fields);
     _gpu->PublishPrimitives(resources.Primitives, this);
 }
 

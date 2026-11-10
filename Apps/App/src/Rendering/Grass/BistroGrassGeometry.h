@@ -13,7 +13,14 @@ public:
     BistroGrassGeometry(std::shared_ptr<SceneManagerModule> scenes, RenderModule& renderer);
     ~BistroGrassGeometry() override;
     void CollectScene(float deltaSeconds);
-    void PrepareFrame(GDX12DeviceResources&, const RenderPipelineCommonData&);
+    GDX12GrassFieldInputQueue::Tick CaptureFieldInputs(uint64_t sequence, uint64_t resetRevision);
+    void PrepareFrame(GDX12DeviceResources&, const RenderPipelineCommonData&,
+        const GDX12GrassRenderer::DisplayedFields* fields = nullptr);
+    std::shared_ptr<const GDX12GrassRenderer::LocalCheckpoint> PrepareLocalCheckpoint()
+    { return _gpu ? _gpu->PrepareLocalCheckpoint() : nullptr; }
+    void ResumeLocalSolver(std::shared_ptr<GDX12GrassFieldProducer> solver, uint64_t resetRevision,
+        GDX12GrassFieldInputQueue pending)
+    { _gpu->ResumeLocalSolver(std::move(solver), resetRevision, std::move(pending)); }
     void PrepareGPU(GDX12CommandList* commands);
     void PrepareView(const GDX12GeometryContext&, UINT patch);
     bool Expand(GDX12CommandList*, const GDX12GeometryContext&, UINT patch);
@@ -34,6 +41,7 @@ private:
     ListenerHandle _created = 0, _destroyed = 0;
     std::map<World*, Subscriptions> _subscriptions;
     uint64_t _owner = 0;
+    std::optional<uint64_t> _capturedFieldSignature;
     std::vector<GDX12GrassInstance> _grass;
     std::vector<GDX12WindInstance> _wind;
     GDX12GrassWindControls _controls = {};
