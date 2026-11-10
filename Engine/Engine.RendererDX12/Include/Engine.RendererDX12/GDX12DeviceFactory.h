@@ -5,6 +5,7 @@
 struct DeviceDesc
 {
     ComPtr<IDXGIAdapter4> Adapter;
+    LUID AdapterLuid{};
     std::wstring Name;
     size_t DedicatedVideoMemory;  // in bytes
     size_t DedicatedSystemMemory; // in bytes

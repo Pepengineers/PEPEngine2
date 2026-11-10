@@ -7,7 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ClCompile Remove="src\App.cpp" />
-    <ClCompile Include="..\..\Engine\Engine.UI\src\WorldCanvas.cpp" />
     <ClCompile Include="..\..\Engine\Engine.UI\tests\WorldCanvasTests.cpp" />
   </ItemGroup>
   <ItemDefinitionGroup>

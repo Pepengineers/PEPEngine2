@@ -50,6 +50,8 @@
     <ClInclude Include="Include\App.Base\Modules\EventManagerModule.h" />
     <ClInclude Include="Include\App.Base\Modules\PhysicsModule.h" />
     <ClInclude Include="Include\App.Base\Modules\RenderModule.h" />
+    <ClInclude Include="Include\App.Base\Rendering\RenderMGPURuntime.h" />
+    <ClInclude Include="Include\App.Base\Rendering\CrossAdapterAO.h" />
     <ClInclude Include="Include\App.Base\Modules\SceneManagerModule.h" />
     <ClInclude Include="Include\App.Base\Physics\JoltPhysicsBackend.h" />
     <ClInclude Include="Include\App.Base\Physics\JoltJobSystem.h" />
@@ -90,6 +92,8 @@
       <Optimization>MaxSpeed</Optimization><BasicRuntimeChecks>Default</BasicRuntimeChecks><SupportJustMyCode>false</SupportJustMyCode>
     </ClCompile>
     <ClCompile Include="src\RenderModule.cpp" />
+    <ClCompile Include="src\Rendering\RenderMGPURuntime.cpp" />
+    <ClCompile Include="src\Rendering\CrossAdapterAO.cpp" />
     <ClCompile Include="src\Rendering\CommonRenderPasses.cpp" />
     <ClCompile Include="src\Rendering\DefaultRenderPipeline.cpp" />
     <ClInclude Include="Include\App.Base\Rendering\IRenderPipeline.h" />

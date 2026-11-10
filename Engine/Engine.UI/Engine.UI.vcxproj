@@ -20,9 +20,12 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.UI\UI_test.h" />
+    <ClInclude Include="Include\Engine.UI\OffscreenUI.h" />
+    <ClInclude Include="Include\Engine.UI\WorldCanvas.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\UI_test.cpp" />
+    <ClCompile Include="src\WorldCanvas.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>

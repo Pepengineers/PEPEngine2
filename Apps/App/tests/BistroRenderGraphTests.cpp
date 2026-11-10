@@ -1,10 +1,12 @@
 #include "Rendering/BistroRenderPipeline.h"
 #include "App.Base/App.h"
+#include "App.Base/Rendering/CrossAdapterAO.h"
 #include "../src/BistroScene.h"
 #include "../src/BistroGrass.h"
 #include "../src/Components/BistroInteractionSource.h"
 #include "../src/BistroWater.h"
 #include <charconv>
+#include <cmath>
 #include <d3d12sdklayers.h>
 #include <cstring>
 #include <iostream>
@@ -31,9 +33,22 @@ static void CheckMessages(ID3D12InfoQueue& info)
     }
 }
 
-static std::vector<BYTE> CaptureHDR(GDX12Texture& texture)
+struct GDX12AOTestAccess
 {
-    auto* resource = texture.GetResource()->D3DResource.Get();
+    static void FreezeNoise(GDX12AmbientOcclusionPass& ao) { ao._frameIndex = 7; }
+    static GDX12AmbientOcclusionPass::FrameInput ObserveFrozenFrame(GDX12AmbientOcclusionPass& ao)
+    {
+        const auto next = ao._frameIndex;
+        FreezeNoise(ao);
+        auto input = ao.CaptureFrameInput();
+        ao._frameIndex = next;
+        return input;
+    }
+};
+
+static std::vector<BYTE> CaptureTexture(GDX12Resource& tracker, UINT pixelBytes)
+{
+    auto* resource = tracker.D3DResource.Get();
     ComPtr<ID3D12Device> device;
     ThrowIfFailed(resource->GetDevice(IID_PPV_ARGS(&device)));
     const auto desc = resource->GetDesc();
@@ -52,10 +67,19 @@ static std::vector<BYTE> CaptureHDR(GDX12Texture& texture)
     ThrowIfFailed(device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&queue)));
     ThrowIfFailed(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&allocator)));
     ThrowIfFailed(device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, allocator.Get(), nullptr, IID_PPV_ARGS(&commands)));
-    const D3D12_RESOURCE_BARRIER barrier = texture.GetResource()->GetCopySourceBarrier();
-    if (barrier.Transition.StateBefore != barrier.Transition.StateAfter) commands->ResourceBarrier(1, &barrier);
+    const auto previousState = tracker.GetCurrentState();
+    if (previousState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+    {
+        const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(resource, previousState, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        commands->ResourceBarrier(1, &barrier);
+    }
     const CD3DX12_TEXTURE_COPY_LOCATION source(resource, 0), destination(readback.Get(), footprint);
     commands->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
+    if (previousState != D3D12_RESOURCE_STATE_COPY_SOURCE)
+    {
+        const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(resource, D3D12_RESOURCE_STATE_COPY_SOURCE, previousState);
+        commands->ResourceBarrier(1, &barrier);
+    }
     ThrowIfFailed(commands->Close());
     ID3D12CommandList* lists[] = { commands.Get() };
     queue->ExecuteCommandLists(1, lists);
@@ -71,19 +95,147 @@ static std::vector<BYTE> CaptureHDR(GDX12Texture& texture)
     if (wait != WAIT_OBJECT_0) throw std::runtime_error("Bistro readback timed out");
     void* mapped;
     ThrowIfFailed(readback->Map(0, nullptr, &mapped));
-    std::vector<BYTE> pixels(size_t(texture.GetWidth()) * texture.GetHeight() * 8);
-    for (UINT y = 0; y < texture.GetHeight(); ++y)
-        std::memcpy(pixels.data() + size_t(y) * texture.GetWidth() * 8,
-            static_cast<const BYTE*>(mapped) + footprint.Offset + y * footprint.Footprint.RowPitch,
-            size_t(texture.GetWidth()) * 8);
+    const size_t rowBytes = size_t(desc.Width) * pixelBytes;
+    std::vector<BYTE> pixels(rowBytes * desc.Height);
+    for (UINT y = 0; y < desc.Height; ++y)
+        std::memcpy(pixels.data() + size_t(y) * rowBytes,
+            static_cast<const BYTE*>(mapped) + footprint.Offset + y * footprint.Footprint.RowPitch, rowBytes);
     readback->Unmap(0, nullptr);
     return pixels;
 }
 
+static std::vector<BYTE> CaptureTexture(GDX12Texture& texture, UINT pixelBytes)
+{
+    return CaptureTexture(*texture.GetResource(), pixelBytes);
+}
+
+static float ReadFloatPixel(const std::vector<BYTE>& pixels, size_t offset)
+{
+    float value;
+    std::memcpy(&value, pixels.data() + offset, sizeof(value));
+    return value;
+}
+
+static void CheckAOReference(const std::vector<BYTE>& visibility, const std::vector<BYTE>& depthPixels, UINT width, UINT height)
+{
+    if (depthPixels.size() != visibility.size()) throw std::runtime_error("Bistro AO depth extent differs");
+    float minimum = 1.0f, maximum = 0.0f;
+    size_t visible = 0, occluded = 0;
+    for (size_t i = 0; i < visibility.size(); i += sizeof(float))
+    {
+        const float z = ReadFloatPixel(depthPixels, i);
+        const float ao = ReadFloatPixel(visibility, i);
+        if (!std::isfinite(z) || !std::isfinite(ao) || z < 0 || z > 1 || ao < 0 || ao > 1)
+            throw std::runtime_error("Bistro AO reference contains invalid depth or visibility");
+        if (z <= 0) continue;
+        ++visible;
+        if (ao < 0.999f) ++occluded;
+        minimum = (std::min)(minimum, ao);
+        maximum = (std::max)(maximum, ao);
+    }
+    std::cout << "AO reference " << width << 'x' << height
+        << " visible=" << visible << " occluded=" << occluded << " min=" << minimum << " max=" << maximum << '\n';
+    if (!visible || !occluded || maximum - minimum <= 0.001f)
+        throw std::runtime_error("Bistro AO reference has no measurable occlusion on visible geometry");
+}
+
+static size_t ChangedPixels(const std::vector<BYTE>& reference, const std::vector<BYTE>& current, size_t pixelBytes)
+{
+    if (reference.size() != current.size()) throw std::runtime_error("Bistro AO input extent changed");
+    size_t changed = 0;
+    for (size_t i = 0; i < reference.size(); i += pixelBytes)
+        changed += std::memcmp(reference.data() + i, current.data() + i, pixelBytes) != 0;
+    return changed;
+}
+
+#ifdef _DEBUG
+static void PrintAOError(const char* label, const std::vector<BYTE>& actual, const std::vector<BYTE>& expected, UINT width)
+{
+    if (actual.size() != expected.size() || actual.empty()) throw std::runtime_error("AO diagnostic extent mismatch");
+    const size_t pixels = actual.size() / sizeof(float);
+    const size_t height = pixels / width;
+    std::vector<float> errors(pixels);
+    std::array<size_t, 40> tiles{};
+    double sum = 0, squares = 0;
+    float maximum = 0;
+    for (size_t i = 0; i < pixels; ++i)
+    {
+        const float error = std::abs(ReadFloatPixel(actual, i * sizeof(float)) -
+            ReadFloatPixel(expected, i * sizeof(float)));
+        errors[i] = error;
+        sum += error;
+        squares += double(error) * error;
+        maximum = (std::max)(maximum, error);
+        if (error > 1e-5f) ++tiles[(i / width) * 5 / height * 8 + (i % width) * 8 / width];
+    }
+    const auto p99 = errors.begin() + static_cast<ptrdiff_t>((pixels - 1) * 99 / 100);
+    std::nth_element(errors.begin(), p99, errors.end());
+    std::cout << label << " max=" << maximum << " mean=" << sum / pixels << " rms=" << std::sqrt(squares / pixels)
+        << " p99=" << *p99 << " errorPixelsByTile=";
+    for (size_t count : tiles) std::cout << count << ',';
+    std::cout << '\n';
+}
+
+static std::vector<BYTE> ReplayFullAO(GDX12AmbientOcclusionPass& ao, GDX12DeviceResources& primary,
+    const CrossAdapterAO::DebugFrame& frame)
+{
+    using AO = GDX12AmbientOcclusionPass;
+    const auto depth = frame.Source[0].lock(), normals = frame.Source[1].lock();
+    if (!depth || !normals) throw std::runtime_error("AO primary pack resources expired");
+    auto& device = *primary.Device;
+    auto& heap = *primary.SRV_UAV_Heap;
+    auto* compute = device.TryGetComputeQueue();
+    if (!compute) throw std::runtime_error("No primary COMPUTE for same-device AO replay");
+    GDX12Resource output;
+    output.D3DResource = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT,
+        CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_FLOAT, frame.Input.Width, frame.Input.Height, 1, 1, 1, 0,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS), D3D12_RESOURCE_STATE_COMMON);
+    GDX12Descriptor depthSRV, normalSRV, outputUAV;
+    const auto describe = [&](GDX12Resource& resource, GDX12Descriptor& descriptor)
+    {
+        D3D12_SHADER_RESOURCE_VIEW_DESC view{};
+        view.Format = resource.D3DResource->GetDesc().Format;
+        view.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        view.Texture2D.MipLevels = 1;
+        descriptor.InitAsSRV(resource.D3DResource.Get(), &view, &heap,
+            heap.GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
+        return AO::PlacedTexture{ &resource, descriptor.GPUHandle };
+    };
+    D3D12_UNORDERED_ACCESS_VIEW_DESC outputView{};
+    outputView.Format = DXGI_FORMAT_R32_FLOAT;
+    outputView.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+    outputUAV.InitAsUAV(output.D3DResource.Get(), nullptr, &outputView, &heap,
+        heap.GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
+    AO::PlacedInputs inputs{};
+    inputs.PreparedDepth = describe(*depth, depthSRV);
+    inputs.PreparedNormals = describe(*normals, normalSRV);
+    inputs.Visibility = { &output, {}, outputUAV.GPUHandle };
+    const auto slot = ao.CreatePlacedSlot(AO::PlacedStage::Evaluate, frame.Input.Width, frame.Input.Height,
+        GDX12AOResolution::Full);
+    ao.PreparePlacedSlot(slot, frame.Input, inputs);
+    auto* commands = compute->GetCommandList();
+    for (const auto& access : ao.GetPlacedAccesses(*slot))
+    {
+        const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(access.Native.Get(), D3D12_RESOURCE_STATE_COMMON, access.State);
+        commands->GetCommandList()->ResourceBarrier(1, &barrier);
+    }
+    ao.RecordPlacedSlot(commands, *slot);
+    for (const auto& access : ao.GetPlacedAccesses(*slot))
+    {
+        const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(access.Native.Get(), access.State, D3D12_RESOURCE_STATE_COMMON);
+        commands->GetCommandList()->ResourceBarrier(1, &barrier);
+    }
+    compute->ExecuteCommandList(commands);
+    compute->Flush();
+    return CaptureTexture(output, sizeof(float));
+}
+#endif
+
 class BistroRenderGraphTests final : public App
 {
 public:
-    BistroRenderGraphTests() : App(GetModuleHandleW(nullptr)) {}
+    explicit BistroRenderGraphTests(bool aoMatrix) : App(GetModuleHandleW(nullptr)), _aoMatrix(aoMatrix) {}
     void Frame(double step = -1, double elapsed = -1)
     {
         MSG message;
@@ -196,7 +348,7 @@ public:
                     render->WaitForUploads();
                     CheckMessages(*info.Get());
                     output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
-                    const auto pixels = CaptureHDR(*output);
+                    const auto pixels = CaptureTexture(*output, 8);
                     if (reference.empty()) reference = pixels;
                     else if (pixels != reference) throw std::runtime_error("Bistro HDR differs from the first dedicated capture (reuse=" +
                         std::to_string(reuse) + ", async=" + std::to_string(async) + ")");
@@ -396,29 +548,183 @@ public:
         Set(L"Render.Particles.AsyncCompute", "false");
         if (!samples) throw std::runtime_error("Cannot write timing report");
     }
-    void CheckAOPlacements()
+    void CheckAOPlacements(bool multiGPU = false)
     {
         Timer.Reset(); Timer.Stop();
         Set(L"Render.Fluid.AsyncCompute", "false"); Set(L"Render.Particles.AsyncCompute", "false");
         auto render = Locator.GetModule<RenderModule>();
-        ComPtr<ID3D12Device> device;
-        auto* output = render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture();
-        ThrowIfFailed(output->GetResource()->D3DResource->GetDevice(IID_PPV_ARGS(&device)));
-        ComPtr<ID3D12InfoQueue> info; ThrowIfFailed(device.As(&info)); info->ClearStoredMessages();
-        for (int early : {0, 1})
-            for (int implementation = 0; implementation < 4; ++implementation)
-                for (bool async : {false, true, false})
+        const auto devices = render->GetMGPUDevices();
+        auto& direct = *devices.Primary->GetCommandQueue();
+        auto& passes = *_bistroPipeline->_passes;
+        const auto& common = *render->GetRenderPipelineCommonData();
+        ComPtr<ID3D12InfoQueue> primaryInfo, secondaryInfo;
+        bool parityFailed = false;
+        ThrowIfFailed(devices.Primary->GetDevice().As(&primaryInfo));
+        primaryInfo->ClearStoredMessages();
+        if (multiGPU)
+        {
+            if (!render->GetMGPURuntime() || !devices.Secondary)
+                throw std::runtime_error("Placed Bistro AO needs two physical adapters");
+            auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+            auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
+            camera.Location = Vector3(-300, 200, 20);
+            camera.Rotation = Vector3(0, 117, 0);
+            camera.DirtyFlag = true;
+            world.GetECS().Get<CameraComponent>(world.ActiveCamera).InvalidateHistory();
+            Set(L"Render.AO.Enabled", "true");
+            Set(L"Render.Upscaler.Provider", "0");
+            Set(L"Render.FrameGeneration.Provider", "0");
+            Set(L"Render.Graph.ReuseTextures", "false");
+            ThrowIfFailed(devices.Secondary->GetDevice().As(&secondaryInfo));
+            secondaryInfo->ClearStoredMessages();
+        }
+        for (int half : {0, 1})
+        {
+            Set(L"Render.AO.Resolution", half ? "1" : "0");
+            for (int early : {0, 1})
+            {
+                Set(L"Render.AO.ExecutionPoint", early ? "0" : "1");
+                for (int implementation = 0; implementation < 4; ++implementation)
                 {
-                    Set(L"Render.AO.ExecutionPoint", early ? "0" : "1");
                     Set(L"Render.AO.Implementation", std::to_string(implementation).c_str());
-                    Set(L"Render.AO.AsyncCompute", async ? "true" : "false");
-                    for (int frame = 0; frame < 2; ++frame) Frame();
-                    render->WaitForUploads(); CheckMessages(*info.Get());
-                    if (render->GetRenderGraphStatistics().AsyncPasses != (async ? 1u : 0u))
-                        throw std::runtime_error("AO placement queue selection failed");
-                    std::cout << "AO placement early=" << early << " implementation=" << implementation << " async=" << async << " passed." << std::endl;
+                    std::vector<BYTE> reference, referenceDepth, referenceNormals;
+                    DirectX::SimpleMath::Matrix view, projection;
+#ifdef _DEBUG
+                    GDX12AmbientOcclusionPass::FrameInput referenceInput{};
+#endif
+                    for (int phase = 0; phase < 3; ++phase)
+                    {
+                        const bool async = phase == 1;
+                        const bool placed = multiGPU && phase == 2;
+                        Set(L"Render.AO.AsyncCompute", async ? "true" : "false");
+                        if (multiGPU) Set(L"Render.AO.MultiGPU", placed ? "true" : "false");
+                        float maxError = 0;
+                        for (int frame = 0; frame < 2; ++frame)
+                        {
+                            const auto previousFinalize = passes.GetLastAmbientOcclusionFinalize();
+                            const auto before = direct.GetLastCompletionPoint();
+                            if (multiGPU) GDX12AOTestAccess::FreezeNoise(passes.AO);
+                            Frame();
+                            if (!multiGPU) continue;
+                            const auto finalize = passes.GetLastAmbientOcclusionFinalize();
+                            const auto tail = direct.GetLastCompletionPoint();
+                            if (placed ? (!finalize.IsValid() || !(finalize.Timeline() == tail.Timeline()) ||
+                                finalize.Value() <= before.Value() || finalize.Value() >= tail.Value())
+                                : (finalize.Value() != previousFinalize.Value()))
+                                throw std::runtime_error("Bistro AO Finalize receipt disagrees with the frame's route");
+
+                            render->WaitForUploads();
+                            if (placed && !finalize.IsReachedBy(direct.GetCompletionProgress()))
+                                throw std::runtime_error("Bistro AO readback preceded Finalize retirement");
+                            if (common.ActiveCameraJitterOffsetX != 0 || common.ActiveCameraJitterOffsetY != 0)
+                                throw std::runtime_error("Bistro AO parity requires a frozen, unjittered camera");
+                            auto& output = *passes.AO.GetOutput(0)->GetTexture();
+                            auto& depth = *passes.Depth.GetOutput(2)->GetTexture();
+                            auto& normals = *(early ? passes.Depth : passes.Opaque).GetOutput(3)->GetTexture();
+                            if (output.GetResource()->D3DResource->GetDesc().Format != DXGI_FORMAT_R32_FLOAT)
+                                throw std::runtime_error("Unexpected Bistro AO lighting input format");
+                            if (depth.GetResource()->D3DResource->GetDesc().Format != DXGI_FORMAT_R32_TYPELESS ||
+                                normals.GetResource()->D3DResource->GetDesc().Format != DXGI_FORMAT_R16G16B16A16_FLOAT)
+                                throw std::runtime_error("Unexpected Bistro AO scene input format");
+                            auto pixels = CaptureTexture(output, sizeof(float));
+                            auto depthPixels = CaptureTexture(depth, sizeof(float));
+                            auto normalPixels = CaptureTexture(normals, 8);
+                            if (reference.empty())
+                            {
+                                CheckAOReference(pixels, depthPixels, output.GetWidth(), output.GetHeight());
+                                reference = std::move(pixels);
+                                referenceDepth = std::move(depthPixels);
+                                referenceNormals = std::move(normalPixels);
+                                view = common.CameraView;
+                                projection = common.CameraViewToClip;
+#ifdef _DEBUG
+                                referenceInput = GDX12AOTestAccess::ObserveFrozenFrame(passes.AO);
+#endif
+                            }
+                            else
+                            {
+                                if (!(view == common.CameraView) || !(projection == common.CameraViewToClip) ||
+                                    pixels.size() != reference.size())
+                                    throw std::runtime_error("Bistro AO camera or render extent changed between routes");
+                                const auto changedDepth = ChangedPixels(referenceDepth, depthPixels, sizeof(float));
+                                const auto changedNormals = ChangedPixels(referenceNormals, normalPixels, 8);
+                                if (changedDepth || changedNormals)
+                                    throw std::runtime_error("Bistro AO frame inputs changed: depth=" +
+                                        std::to_string(changedDepth) + " normals=" + std::to_string(changedNormals));
+                                size_t aboveTolerance = 0;
+                                size_t peakPixel = 0;
+                                for (size_t i = 0; i < pixels.size(); i += sizeof(float))
+                                {
+                                    const float actual = ReadFloatPixel(pixels, i);
+                                    const float expected = ReadFloatPixel(reference, i);
+                                    if (!std::isfinite(actual) || actual < 0 || actual > 1)
+                                        throw std::runtime_error("Invalid Bistro AO visibility");
+                                    const float error = std::abs(actual - expected);
+                                    aboveTolerance += error > 1e-5f;
+                                    if (error > maxError) { maxError = error; peakPixel = i / sizeof(float); }
+                                }
+                                if (maxError > 1e-5f)
+                                {
+                                    if (!placed) throw std::runtime_error("Frozen local AO changed between frames or queue types");
+                                    parityFailed = true;
+#ifdef _DEBUG
+                                    if (frame == 0)
+                                    {
+                                        std::cout << "AO diagnostic half=" << half << " early=" << early
+                                            << " implementation=" << implementation << '\n';
+                                        const auto& captured = passes._placedAO->GetDebugFrame();
+                                        const auto& input = captured.Input;
+                                        if (input.Width != referenceInput.Width || input.Height != referenceInput.Height ||
+                                            input.NoiseIndex != referenceInput.NoiseIndex || !(input.View == referenceInput.View) ||
+                                            !(input.JitteredProjection == referenceInput.JitteredProjection) ||
+                                            std::memcmp(&input.Settings, &referenceInput.Settings, sizeof(input.Settings)))
+                                            throw std::runtime_error("Placed FrameInput differs from local");
+                                        for (size_t channel = 0; channel < captured.Source.size(); ++channel)
+                                        {
+                                            const auto source = captured.Source[channel].lock(), imported = captured.Imported[channel].lock();
+                                            if (!source || !imported) throw std::runtime_error("AO transfer view expired");
+                                            const UINT bytes = channel == 1 ? 8 : 4;
+                                            const auto changed = ChangedPixels(CaptureTexture(*source, bytes),
+                                                CaptureTexture(*imported, bytes), bytes);
+                                            std::cout << "AO transport channel=" << channel << " differing pixels=" << changed << '\n';
+                                            if (changed) throw std::runtime_error("AO typed transport changed payload pixels");
+                                        }
+                                        if (!half) PrintAOError("Primary placed vs primary local",
+                                            ReplayFullAO(passes.AO, *_bistroPipeline->_resources, captured), reference, input.Width);
+                                        PrintAOError("Secondary placed vs primary local", pixels, reference, input.Width);
+                                        CheckMessages(*primaryInfo.Get());
+                                        CheckMessages(*secondaryInfo.Get());
+                                    }
+#endif
+                                    std::cout << "AO difference max=" << maxError << " peak=" << peakPixel % output.GetWidth()
+                                        << ',' << peakPixel / output.GetWidth() << " pixels=" << aboveTolerance << '\n';
+                                }
+                            }
+                            if (placed) std::cout << "AO Finalize=" << finalize.Value() << " tail=" << tail.Value() << '\n';
+                        }
+                        render->WaitForUploads(); CheckMessages(*primaryInfo.Get());
+                        if (secondaryInfo) CheckMessages(*secondaryInfo.Get());
+                        if (render->GetRenderGraphStatistics().AsyncPasses != (async ? 1u : 0u))
+                            throw std::runtime_error("AO placement queue selection failed");
+                        std::cout << "AO placement half=" << half << " early=" << early << " implementation=" << implementation
+                            << " async=" << async << " placed=" << placed << " maxError=" << maxError
+                            << (maxError > 1e-5f ? " outside parity threshold." : " passed.") << std::endl;
+                    }
                 }
+            }
+        }
+        if (multiGPU)
+        {
+            Set(L"Render.AO.MultiGPU", "false");
+            const auto previous = passes.GetLastAmbientOcclusionFinalize();
+            Frame();
+            if (passes.GetLastAmbientOcclusionFinalize().Value() != previous.Value())
+                throw std::runtime_error("Placed AO submitted after toggle off");
+            render->WaitForUploads(); CheckMessages(*primaryInfo.Get()); CheckMessages(*secondaryInfo.Get());
+        }
+        Set(L"Render.AO.Resolution", "0");
         Set(L"Render.AO.ExecutionPoint", "1"); Set(L"Render.AO.Implementation", "2"); Set(L"Render.AO.AsyncCompute", "false");
+        if (parityFailed) throw std::runtime_error("Bistro placed AO exceeded the frozen pixel parity threshold");
     }
     void Matrix(int argc, char** argv, bool validation)
     {
@@ -561,14 +867,19 @@ protected:
     bool AddModules() override
     {
         auto scenes = std::make_shared<SceneManagerModule>(std::filesystem::path(ASSETS_FOLDER) / "Scenes/Amazon Lumberyard Bistro");
-        auto renderer = std::make_shared<RenderModule>(GetWindow(), &Timer,
-            std::make_unique<BistroRenderPipeline>(scenes));
+        auto pipeline = std::make_unique<BistroRenderPipeline>(scenes);
+        _bistroPipeline = pipeline.get();
+        auto renderer = std::make_shared<RenderModule>(GetWindow(), &Timer, std::move(pipeline));
         Locator.RegisterModule(renderer);
-        ConfigureBistroProps(*scenes, GetJobs());
+        if (!_aoMatrix) ConfigureBistroProps(*scenes, GetJobs());
         Locator.RegisterModule(scenes);
         Locator.RegisterModule(std::make_shared<PhysicsModule>(_jobs));
         return BenchmarkEngine::AddModules();
     }
+
+private:
+    bool _aoMatrix;
+    BistroRenderPipeline* _bistroPipeline = nullptr;
 };
 
 int main(int argc, char** argv)
@@ -579,6 +890,8 @@ int main(int argc, char** argv)
         const std::string_view mode = argc > 1 ? argv[1] : "";
         const bool matrix = mode == "--matrix" || mode == "--matrix-validation" || mode == "--matrix-gpu-validation";
         const bool timing = mode == "--timing" || mode == "--grass-timing" || matrix;
+        const bool multiGPUAO = mode == "--ao-mgpu-validation" || mode == "--ao-mgpu-gpu-validation";
+        const bool aoMatrix = multiGPUAO || mode == "--ao-placements" || mode == "--ao-placements-gpu-validation";
         const bool validationMode = mode == "--matrix-validation" || mode == "--matrix-gpu-validation";
         std::cout.setf(std::ios::unitbuf);
         ComPtr<ID3D12Debug> debug;
@@ -587,7 +900,8 @@ int main(int argc, char** argv)
             ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
             debug->EnableDebugLayer();
         }
-        if (mode == "--gpu-validation" || mode == "--matrix-gpu-validation" || mode == "--ao-placements-gpu-validation" || mode == "--grass-gpu-validation" || mode == "--collision-view-gpu-validation")
+        if (mode == "--gpu-validation" || mode == "--matrix-gpu-validation" || mode == "--ao-placements-gpu-validation" ||
+            mode == "--ao-mgpu-gpu-validation" || mode == "--grass-gpu-validation" || mode == "--collision-view-gpu-validation")
         {
             ComPtr<ID3D12Debug1> validation;
             ThrowIfFailed(debug.As(&validation));
@@ -598,13 +912,14 @@ int main(int argc, char** argv)
             throw std::runtime_error("Deterministic matrix clock self-check failed");
         fixedClock.Stop(); fixedClock.Tick(1.0 / 60, 3.0);
         if (fixedClock.DeltaTime() != 0) throw std::runtime_error("Paused fixed clock advanced");
-        BistroRenderGraphTests app;
+        if (aoMatrix) ConsoleModule{}.Initialize();
+        BistroRenderGraphTests app(aoMatrix);
         if (!app.Initialize()) throw std::runtime_error("Bistro initialization failed");
 #ifdef _DEBUG
         if (mode == "--collision-view" || mode == "--collision-view-gpu-validation") app.CheckCollisionView();
         else
 #endif
-        if (mode == "--ao-placements" || mode == "--ao-placements-gpu-validation") app.CheckAOPlacements();
+        if (aoMatrix) app.CheckAOPlacements(multiGPUAO);
         else if (mode == "--grass-timing" || mode == "--grass-validation" || mode == "--grass-gpu-validation") app.GrassExperiment(timing);
         else if (matrix) app.Matrix(argc, argv, validationMode);
         else if (timing) app.Time();

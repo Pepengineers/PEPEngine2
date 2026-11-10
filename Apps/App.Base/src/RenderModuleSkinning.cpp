@@ -61,7 +61,7 @@ void RenderModule::PrepareSkeletalMeshes()
     auto& assets = AssetManager::GetInstance();
     auto& meshes = assets.Meshes();
     auto& scenes = assets.Scenes();
-    if (_skeletalStates.empty() && !_dualGPUMode)
+    if (_skeletalStates.empty())
     {
         UINT64 vertices = 0, attachments = 0;
         auto worlds = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
@@ -136,7 +136,6 @@ void RenderModule::PrepareSkeletalMeshes()
                 ReleaseSkeletalState(*world, entity);
                 return;
             }
-            if (_dualGPUMode) throw std::runtime_error("Skeletal rendering requires the single-GPU pipeline");
             const auto sceneRevision = scenes.GetContentRevision(component._scene);
             const auto key = std::make_pair(world, entity);
             auto found = _skeletalStates.find(key);

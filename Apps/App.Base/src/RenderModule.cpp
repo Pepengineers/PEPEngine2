@@ -2,6 +2,7 @@
 
 #include "App.Base/Window.h"
 #include "Engine.UI/UI_test.h"
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <stdexcept>
@@ -28,15 +29,29 @@
 
 static AutoConsoleVariable<bool> GraphReuseTextures(L"Render.Graph.ReuseTextures", true,
     L"Reuse compatible transient graph textures. Disable to compare output and memory.", EConsoleVariableFlags::Default);
+static AutoConsoleVariable<bool> MGPUEnabled(L"Render.MGPU.Enabled", false,
+    L"Initialize a second render adapter and cross-adapter COPY queues. Restart required.", EConsoleVariableFlags::ReadOnly);
+static AutoConsoleVariable<std::uint64_t> MGPUSecondaryLuid(L"Render.MGPU.SecondaryLuid", 0,
+    L"Packed secondary adapter LUID in decimal. Zero selects the first distinct adapter. Restart required.",
+    EConsoleVariableFlags::ReadOnly);
+
+static std::uint64_t AdapterLuidKey(LUID luid)
+{
+    return (std::uint64_t{static_cast<std::uint32_t>(luid.HighPart)} << 32) | luid.LowPart;
+}
+
+RenderModule::GpuOwners::GpuOwners() = default;
+RenderModule::GpuOwners::~GpuOwners() = default;
 
 RenderModule::RenderModule(Window* window, GameTimer* timer)
     : RenderModule(window, timer, std::make_unique<DefaultRenderPipeline>()) {}
 
 RenderModule::RenderModule(Window* window, GameTimer* timer, std::unique_ptr<IRenderPipeline> pipeline) :
-    _dualGPUMode(false), _window(window), _timer(timer), _pipeline(std::move(pipeline)),
+    _timer(timer), _window(window),
     _primaryPipelineFlags(0), _secondaryPipelineFlags(0)
 {
-    if (!_pipeline) throw std::invalid_argument("Cannot use a null render pipeline");
+    if (!pipeline) throw std::invalid_argument("Cannot use a null render pipeline");
+    _pipeline = std::move(pipeline);
     _RPcommonData.GameTimer = _timer;
 }
 
@@ -56,15 +71,22 @@ void RenderPipelineContext::Resize() { Runtime.OnResize(); }
 
 void RenderModule::RefreshPipelineFlags()
 {
-    _primaryPipelineFlags = _secondaryPipelineFlags = 0;
+    _primaryPipelineFlags = 0;
     for (auto* pass : _pipeline->GetBindings().PrimaryPasses) _primaryPipelineFlags |= pass->GetFlags();
-    for (auto* pass : _pipeline->GetBindings().SecondaryPasses) _secondaryPipelineFlags |= pass->GetFlags();
 }
 
 RenderModule::~RenderModule()
 {
-    if (_primaryDevice && _primaryDevice->GetCommandQueue()) { _primaryDevice->GetCommandQueue()->Flush(); }
-    if (_secondaryDevice && _secondaryDevice->GetCommandQueue()) { _secondaryDevice->GetCommandQueue()->Flush(); }
+    if (!ShutdownMGPU()) return;
+    try
+    {
+        if (_primaryDevice && _primaryDevice->GetCommandQueue()) _primaryDevice->GetCommandQueue()->Flush();
+    }
+    catch (...)
+    {
+        QuarantineGpuOwners();
+        return;
+    }
     if (_uiInitialized) Engine::UI::ShutdownUI();
 
     _primaryGraph.reset();
@@ -72,6 +94,8 @@ RenderModule::~RenderModule()
     _secondaryResources.GeometrySources.clear();
     _pipeline.reset();
     _backBuffer.reset();
+    _secondaryTransferQueue.reset();
+    _primaryTransferQueue.reset();
     GDX12ShaderCompiler::Shutdown();
     GDX12DeviceFactory::Reset();
     GDX12StreamlineSDK::Get().Shutdown();
@@ -100,23 +124,14 @@ void RenderModule::Initialize()
 
     _primaryDevice = std::make_unique<GDX12Device>();
     _primaryDevice->Role = DEVICE_ROLE_PRIMARY;
-    _primaryDevice->Initialize(GDX12DeviceFactory::GetMostPerformantAdapter().Get());
+    ThrowIfFailed(_primaryDevice->Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
     _primaryResources.Initialize(_primaryDevice.get());
     _primaryGPUTimer = std::make_unique<GDX12GPUTimer>(_primaryDevice.get());
 
-    if (false)
-    {
-        _secondaryDevice = std::make_unique<GDX12Device>();
-        _secondaryDevice->Role = DEVICE_ROLE_SECONDARY;
-        _secondaryDevice->Initialize(GDX12DeviceFactory::GetDeviceDescriptors()[1].Adapter.Get());
-        _secondaryResources.Initialize(_secondaryDevice.get());
-        _secondaryGPUTimer = std::make_unique<GDX12GPUTimer>(_secondaryDevice.get());
-        _dualGPUMode = true;
-    }
+    InitializeMGPU();
 
     Log::Info("Renderer", "Creating back buffers");
     BuildBackBuffer();
-    if (_dualGPUMode) { ShareFences(); }
     Log::Info("Renderer", "Configuring render passes and pipeline states");
     auto context = PipelineContext();
     _pipeline->Initialize(context);
@@ -132,16 +147,95 @@ void RenderModule::Initialize()
     Log::Info("Renderer", "Rendering initialization complete");
 }
 
+void RenderModule::InitializeMGPU()
+{
+    _mgpuStatus.PrimaryLuid = AdapterLuidKey(_primaryDevice->GetAdapterLuid());
+    _mgpuStatus.Requested = MGPUEnabled.GetValue();
+    _mgpuStatus.RequestedSecondaryLuid = MGPUSecondaryLuid.GetValue();
+    if (!_mgpuStatus.Requested) return;
+
+    try
+    {
+        const auto adapters = GDX12DeviceFactory::GetDeviceDescriptors();
+        const auto requested = _mgpuStatus.RequestedSecondaryLuid;
+        const auto secondary = std::find_if(adapters.begin(), adapters.end(), [&](const DeviceDesc& desc)
+        {
+            const auto luid = AdapterLuidKey(desc.AdapterLuid);
+            return luid != _mgpuStatus.PrimaryLuid && (requested == 0 || luid == requested);
+        });
+        if (secondary == adapters.end())
+            _mgpuStatus.FallbackReason = requested ? "Requested secondary adapter is unavailable" : "No distinct secondary adapter";
+        else
+        {
+            auto device = std::make_unique<GDX12Device>();
+            device->Role = DEVICE_ROLE_SECONDARY;
+            ThrowIfFailed(device->Initialize(secondary->Adapter));
+            if (!device->TryGetComputeQueue()) throw std::runtime_error("Secondary COMPUTE queue unavailable");
+            auto primaryCopy = std::make_unique<GDX12CommandQueue>(_primaryDevice.get(), D3D12_COMMAND_LIST_TYPE_COPY, true);
+            auto secondaryCopy = std::make_unique<GDX12CommandQueue>(device.get(), D3D12_COMMAND_LIST_TYPE_COPY, true);
+            primaryCopy->ImportTimeline(*secondaryCopy);
+            secondaryCopy->ImportTimeline(*primaryCopy);
+            auto runtime = std::make_unique<RenderMGPURuntime>(RenderMGPUDevices{
+                _primaryDevice.get(), device.get(), primaryCopy.get(), secondaryCopy.get()});
+            _mgpuStatus.ActiveSecondaryLuid = AdapterLuidKey(secondary->AdapterLuid);
+            _mgpuStatus.SecondaryReady = true;
+            _secondaryDevice = std::move(device);
+            _primaryTransferQueue = std::move(primaryCopy);
+            _secondaryTransferQueue = std::move(secondaryCopy);
+            _mgpuRuntime = std::move(runtime);
+        }
+    }
+    catch (const DxException& error) { _mgpuStatus.FallbackReason = WStringToString(error.ToString()); }
+    catch (const std::exception& error) { _mgpuStatus.FallbackReason = error.what(); }
+    if (_mgpuStatus.SecondaryReady)
+        Log::Info("Renderer", "MGPU secondary ready. LUID: ", _mgpuStatus.ActiveSecondaryLuid);
+    else
+        Log::Warning("Renderer", "MGPU startup fell back to primary. ", _mgpuStatus.FallbackReason);
+}
+
 void RenderModule::Uninitialize()
 {
+    ShutdownMGPU();
     UnsubscribeFromSceneManager();
+}
+
+bool RenderModule::ShutdownMGPU() noexcept
+{
+    if (!_gpu) return false;
+    if (!_mgpuRuntime) return true;
+    try
+    {
+        _mgpuRuntime->Shutdown();
+        _primaryDevice->GetCommandQueue()->Flush();
+        _mgpuRuntime.reset();
+        return true;
+    }
+    catch (...)
+    {
+        QuarantineGpuOwners();
+        return false;
+    }
+}
+
+void RenderModule::QuarantineGpuOwners() noexcept
+{
+    // shortcut: retain the complete device domain until process exit when no safe drain is known.
+    _gpu.release();
+    OutputDebugStringA("Renderer GPU retirement failed; retaining device and frame owners until process exit.\n");
+    try
+    {
+        try { throw; }
+        catch (const DxException& error) { Log::Error("Renderer", "GPU retirement failed. HRESULT=", error.ErrorCode); }
+        catch (const std::exception& error) { Log::Error("Renderer", "GPU retirement failed. ", error.what()); }
+        catch (...) { Log::Error("Renderer", "GPU retirement failed with an unknown error."); }
+    }
+    catch (...) {}
 }
 
 void RenderModule::OnResize()
 {
     _RPcommonData.RequestHistoryReset = true;
     _primaryDevice->GetCommandQueue()->Flush();
-    if (_dualGPUMode) { _secondaryDevice->GetCommandQueue()->Flush(); }
 
     uint16_t width, height;
     _window->GetWindowSize(width, height);
@@ -243,9 +337,13 @@ GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* 
 void RenderModule::WaitForUploads()
 {
     if (_primaryTextureCommands) _primaryDevice->GetCommandQueue()->ExecuteCommandList(_primaryTextureCommands);
-    if (_secondaryTextureCommands) _secondaryDevice->GetCommandQueue()->ExecuteCommandList(_secondaryTextureCommands);
+    if (_secondaryTextureCommands)
+    {
+        auto* queue = _secondaryDevice->GetCommandQueue();
+        queue->ExecuteCommandList(_secondaryTextureCommands);
+        queue->Flush();
+    }
     _primaryDevice->GetCommandQueue()->Flush();
-    if (_dualGPUMode) _secondaryDevice->GetCommandQueue()->Flush();
     _primaryTextureCommands = _secondaryTextureCommands = nullptr;
     _textureUploadResources.clear();
     _textureUploadBytes = 0;
@@ -502,18 +600,12 @@ void RenderModule::SubmitLights(std::vector<GDX12LocalLightConstants> lights, co
         resources.UpdateMainCB(width, height, _timer);
     };
     upload(_primaryResources);
-    if (_dualGPUMode) upload(_secondaryResources);
 }
 
 void RenderModule::SubmitCameraShadows(const GDX12ShadowConstants& shadows)
 {
     _primaryResources.ShadowSettings = shadows;
     GetCurrentPrimaryFrameConstants()->ShadowCB->CopyData(0, shadows);
-    if (_dualGPUMode)
-    {
-        _secondaryResources.ShadowSettings = shadows;
-        GetCurrentSecondaryFrameConstants()->ShadowCB->CopyData(0, shadows);
-    }
 }
 
 void RenderModule::SetActiveCamera(CameraComponent* camera)
@@ -863,7 +955,7 @@ void RenderModule::OnRenderComponentDestroyed(World&, Entity, StaticMeshRenderCo
 {
     // Removed entities must stop participating in every indirect pass, including probes.
     if (_primaryDevice) _primaryDevice->GetCommandQueue()->Flush();
-    if (_secondaryDevice) _secondaryDevice->GetCommandQueue()->Flush();
+    if (_secondaryResources.IndirectCommandsCache && _secondaryDevice) _secondaryDevice->GetCommandQueue()->Flush();
     const GDX12IndirectDrawArgs empty = {};
     for (const auto index : component._CBufferIndices)
     {
@@ -884,6 +976,8 @@ const float RenderModule::GetAspectRatio()
 
 void RenderModule::OnUpdate()
 {
+    if (!_gpu) throw std::logic_error("Renderer device domain is quarantined");
+    if (_mgpuRuntime) _mgpuRuntime->Poll();
     GDX12_SCOPED_CPU_EVENT("Frame slot wait and upload");
     uint16_t width, height;
     _window->GetWindowSize(width, height);
@@ -906,26 +1000,11 @@ void RenderModule::OnUpdate()
 
     _primaryResources.UpdateMainCB(width, height, _timer);
     // Materials are uploaded once in OnRender, after lazy component resource creation.
-
-    // same for SecondaryDevice
-    if (_dualGPUMode)
-    {
-        _secondaryResources.CurrFrameConstantsIndex = (_secondaryResources.CurrFrameConstantsIndex + 1) % numFrames;
-
-        auto cmdQueue = _secondaryDevice->GetCommandQueue();
-        auto& frameConsts = _secondaryResources.FrameConstants[_secondaryResources.CurrFrameConstantsIndex];
-
-        if (frameConsts->FenceValue > cmdQueue->GetFence()->GetCompletedValue())
-        {
-            cmdQueue->CPUWaitForFenceValue(frameConsts->FenceValue);
-        }
-
-        _secondaryResources.UpdateMainCB(width, height, _timer);
-    }
 }
 
 void RenderModule::OnRender()
 {
+    if (!_gpu) throw std::logic_error("Renderer device domain is quarantined");
     _RPcommonData.Jobs = &App::GetInstance()->GetJobs();
     _backBuffer->GetFrameGeneration().BeginRendering(_RPcommonData);
     _primaryResources.BeginMeshPrimitiveUpdate();
@@ -948,39 +1027,18 @@ void RenderModule::OnRender()
     if (rebuild || _graphReuseTextures != GraphReuseTextures.GetValue()) RebuildRenderGraph();
 
     auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
-    primarycmdList = _primaryGraph->Execute(primarycmdList,
-        !_dualGPUMode && _pipeline->GetBindings().UseAsyncCompute ? _primaryDevice->TryGetComputeQueue() : nullptr);
+    const auto& bindings = _pipeline->GetBindings();
+    auto* compute = bindings.UseAsyncCompute ? _primaryDevice->TryGetComputeQueue() : nullptr;
+    if (bindings.SubmitLegacyReplacement)
+        primarycmdList = _primaryGraph->ExecuteLegacySplit(primarycmdList, compute, bindings.SubmitLegacyReplacement);
+    else
+        primarycmdList = _primaryGraph->Execute(primarycmdList, compute);
     if (_uiInitialized) Engine::UI::Render(primarycmdList, _backBuffer->GetCurrentBuffer());
     _primaryGPUTimer->Stop(primarycmdList);
     primarycmdQueue->ExecuteCommandList(primarycmdList);
+    if (bindings.RetirePlacedFrame) bindings.RetirePlacedFrame(primarycmdQueue->GetLastCompletionPoint());
     primaryCurrentFrameConsts->FenceValue = primarycmdList->FenceValue;
     _primaryGPUTimer->OnCommandListExecuted(primarycmdList->FenceValue);
-
-    if (_dualGPUMode)
-    {
-        auto secondarycmdQueue = _secondaryDevice->GetCommandQueue();
-        auto secondarycmdList = secondarycmdQueue->GetCommandList();
-        _secondaryGPUTimer->Start(secondarycmdList);
-
-        auto secondaryCurrentFrameConsts = GetCurrentSecondaryFrameConstants();
-        _secondaryResources.PrepareLocalShadowData();
-        _secondaryResources.UploadLocalShadowData(secondarycmdList);
-        secondaryCurrentFrameConsts->UploadReflectionProbeData(secondarycmdList);
-        for (auto* renderPass : _pipeline->GetBindings().SecondaryPasses)
-        {
-            if (renderPass->GetFlagValue(RENDER_PASS_FLAG_SYNC_DEVICES))
-            {
-                secondarycmdQueue->ExecuteCommandList(secondarycmdList);
-                secondarycmdQueue->WaitForOtherFence(secondarycmdList->FenceValue);
-                secondarycmdList = secondarycmdQueue->GetCommandList();
-            }
-            else { renderPass->Execute(secondarycmdList); }
-        }
-        _secondaryGPUTimer->Stop(secondarycmdList);
-        secondarycmdQueue->ExecuteCommandList(secondarycmdList);
-        secondaryCurrentFrameConsts->FenceValue = secondarycmdList->FenceValue;
-        _secondaryGPUTimer->OnCommandListExecuted(secondarycmdList->FenceValue);
-    }
 
     _backBuffer->GetFrameGeneration().EndRendering();
     _backBuffer->Present();
@@ -1254,27 +1312,6 @@ void RenderModule::BuildBackBuffer()
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
-}
-
-void RenderModule::ShareFences()
-{
-    HANDLE primaryhandle;
-    ThrowIfFailed(_primaryDevice->GetDevice()->CreateSharedHandle(
-        _primaryDevice->GetCommandQueue()->GetFence().Get(),
-        nullptr, GENERIC_ALL, nullptr, &primaryhandle));
-
-    ThrowIfFailed(_secondaryDevice->GetDevice()->OpenSharedHandle(
-        primaryhandle,
-        IID_PPV_ARGS(&_secondaryDevice->GetCommandQueue()->GetOtherFence())));
-
-    HANDLE secondaryhandle;
-    ThrowIfFailed(_secondaryDevice->GetDevice()->CreateSharedHandle(
-        _secondaryDevice->GetCommandQueue()->GetFence().Get(),
-        nullptr, GENERIC_ALL, nullptr, &secondaryhandle));
-
-    ThrowIfFailed(_primaryDevice->GetDevice()->OpenSharedHandle(
-        secondaryhandle,
-        IID_PPV_ARGS(&_primaryDevice->GetCommandQueue()->GetOtherFence())));
 }
 
 void RenderModule::SubscribeToSceneManager()

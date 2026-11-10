@@ -10,6 +10,7 @@ void DefaultRenderPipeline::Initialize(RenderPipelineContext& context)
     _passes->Setup(context);
     LinkInputs({ context.BackBuffer });
     _passes->Initialize();
+    _passes->UpdateAmbientOcclusionRoute(context);
 }
 
 void DefaultRenderPipeline::UpdateFrameSettings(RenderPipelineContext& context)
@@ -21,7 +22,8 @@ void DefaultRenderPipeline::UpdateFrameSettings(RenderPipelineContext& context)
 bool DefaultRenderPipeline::PrepareFrame(RenderPipelineContext& context, GDX12CommandList* commands)
 {
     const bool early = GetAmbientOcclusionExecutionPoint() == 0;
-    const bool rebuild = early != _earlyAO;
+    bool rebuild = _passes->UpdateAmbientOcclusionRoute(context);
+    rebuild |= early != _earlyAO;
     _earlyAO = early;
     _passes->BindAmbientOcclusion(context.Common, _earlyAO);
     _passes->PrepareFrame(context, commands);
@@ -61,18 +63,20 @@ void DefaultRenderPipeline::LinkInputs(const RenderPipelineGraphInputs& inputs)
 
 void DefaultRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipelineGraphInputs& inputs)
 {
+    _passes->Bindings.SubmitLegacyReplacement = {};
+    _passes->Bindings.RetirePlacedFrame = {};
     LinkInputs(inputs);
     auto& p = *_passes;
     graph.AddPass(p.Environment);
     graph.AddPass(p.Culling);
     graph.AddPass(p.Depth);
     graph.AddPass(p.ParticleSimulation);
-    if (_earlyAO) graph.AddPass(p.AO);
+    if (_earlyAO) p.AddAmbientOcclusion(graph, _earlyAO);
     graph.AddPass(p.SunShadow);
     graph.AddPass(p.LocalShadow);
     graph.AddPass(p.Reflections);
     graph.AddPass(p.Opaque);
-    if (!_earlyAO) graph.AddPass(p.AO);
+    if (!_earlyAO) p.AddAmbientOcclusion(graph, _earlyAO);
     graph.AddPass(p.Lighting);
     graph.AddPass(p.ReflectionPreview);
     graph.AddPass(p.SSR);

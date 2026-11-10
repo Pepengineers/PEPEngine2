@@ -19,6 +19,8 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12DepthOfFieldPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12MotionBlurPass.h"
 
+class CrossAdapterAO;
+
 // Owns reusable techniques and their lifecycle; each pipeline chooses links and graph order.
 struct CommonRenderPasses
 {
@@ -30,6 +32,9 @@ struct CommonRenderPasses
     void Resize(RenderPipelineContext&);
     void PrepareFrame(RenderPipelineContext&, GDX12CommandList*);
     void BindAmbientOcclusion(RenderPipelineCommonData&, bool early);
+    bool UpdateAmbientOcclusionRoute(RenderPipelineContext&);
+    void AddAmbientOcclusion(GDX12RenderGraph&, bool early);
+    GDX12Submission::CompletionPoint GetLastAmbientOcclusionFinalize() const;
 
     GDX12EnvironmentIBLPass Environment;
     GDX12GPUCullingPass Culling;
@@ -52,4 +57,9 @@ struct CommonRenderPasses
     GDX12OutputToScreenPass Output;
     GDX12FrameGenerationPass FrameGeneration;
     RenderPipelineBindings Bindings;
+
+private:
+    friend class BistroRenderGraphTests;
+    std::unique_ptr<CrossAdapterAO> _placedAO;
+    bool _usePlacedAO = false;
 };

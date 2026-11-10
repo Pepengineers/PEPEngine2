@@ -241,6 +241,7 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& context)
     _passes->Setup(context);
     LinkInputs({ context.BackBuffer });
     _passes->Initialize();
+    _passes->UpdateAmbientOcclusionRoute(context);
     _geometryJobs.push_back(std::make_unique<GrassFramePreparationPass>(*_grass));
     _geometryJobs.push_back(std::make_unique<BistroGeometryPass>(*_resources, *_grass, _passes->Depth, 1));
     _geometryJobs.push_back(std::make_unique<BistroGeometryPass>(*_resources, *_grass, _passes->Depth, 2));
@@ -269,6 +270,7 @@ bool BistroRenderPipeline::PrepareFrame(RenderPipelineContext& context, GDX12Com
 #endif
     const bool early = GetAmbientOcclusionExecutionPoint() == 0;
     rebuild |= early != _earlyAO;
+    rebuild |= _passes->UpdateAmbientOcclusionRoute(context);
     _earlyAO = early;
     _grass->CollectScene(context.Common.GameTimer ? context.Common.GameTimer->DeltaTime() : 0);
     _grass->PrepareFrame(context.Primary, context.Common);
@@ -330,6 +332,8 @@ void BistroRenderPipeline::LinkInputs(const RenderPipelineGraphInputs& inputs)
 
 void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipelineGraphInputs& inputs)
 {
+    _passes->Bindings.SubmitLegacyReplacement = {};
+    _passes->Bindings.RetirePlacedFrame = {};
 #ifdef _DEBUG
     if (_collisionViewActive)
     {
@@ -362,12 +366,12 @@ void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipel
     addGeometry(2);
     graph.DependsOn(geometryTail, grassPreparation);
     graph.AddPass(p.ParticleSimulation);
-    if (_earlyAO) graph.AddPass(p.AO);
+    if (_earlyAO) p.AddAmbientOcclusion(graph, _earlyAO);
     addGeometry(3);
     addGeometry(4);
     addGeometry(5);
     addGeometry(6);
-    if (!_earlyAO) graph.AddPass(p.AO);
+    if (!_earlyAO) p.AddAmbientOcclusion(graph, _earlyAO);
     graph.AddPass(_water->Surface);
     graph.AddPass(p.Lighting);
     graph.AddPass(p.ReflectionPreview);

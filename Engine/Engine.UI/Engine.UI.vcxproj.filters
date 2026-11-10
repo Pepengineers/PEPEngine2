@@ -18,9 +18,18 @@
     <ClInclude Include="Include\Engine.UI\UI_test.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.UI\OffscreenUI.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Include\Engine.UI\WorldCanvas.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\UI_test.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\WorldCanvas.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

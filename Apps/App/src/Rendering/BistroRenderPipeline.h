@@ -24,6 +24,8 @@ public:
     const RenderPipelineBindings& GetBindings() const override;
 
 private:
+    friend class BistroRenderGraphTests;
+
     void LinkInputs(const RenderPipelineGraphInputs&);
     std::vector<GDX12GeometryViewPass*> GeometryPasses();
     std::shared_ptr<SceneManagerModule> _scenes;

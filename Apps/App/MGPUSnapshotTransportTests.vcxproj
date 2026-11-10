@@ -7,6 +7,5 @@
   <ItemGroup>
     <ClCompile Remove="@(ClCompile)" />
     <ClCompile Include="tests\MGPUSnapshotTransportTests.cpp" />
-    <ClCompile Include="..\..\Engine\Engine.RendererDX12\src\GDX12SnapshotTransport.cpp" />
   </ItemGroup>
 </Project>

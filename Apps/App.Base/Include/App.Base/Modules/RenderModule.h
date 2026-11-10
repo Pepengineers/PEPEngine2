@@ -10,6 +10,7 @@
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
 #include "Engine.RendererDX12/GDX12RenderGraph.h"
 #include "App.Base/Rendering/IRenderPipeline.h"
+#include "App.Base/Rendering/RenderMGPURuntime.h"
 #include "App.Base/Systems/ShadowVisibilitySystem.h"
 #include <map>
 
@@ -17,6 +18,7 @@ class SceneManagerModule;
 class World;
 class GDX12SwapChain;
 class GDX12Device;
+class GDX12CommandQueue;
 class GDX12CommandList;
 class GDX12GPUTimer;
 struct GDX12GPUTimingTotals;
@@ -40,6 +42,16 @@ struct TransformCompGPUData
     Matrix PrevWorld = Identity4x4();
 };
 
+struct RenderMGPUStatus
+{
+    bool Requested = false;
+    bool SecondaryReady = false;
+    std::uint64_t RequestedSecondaryLuid = 0;
+    std::uint64_t PrimaryLuid = 0;
+    std::uint64_t ActiveSecondaryLuid = 0;
+    std::string FallbackReason;
+};
+
 class RenderModule final : public Module
 {
 public:
@@ -55,6 +67,13 @@ public:
     void SetFrameGenerationSuspended(bool);
     const GDX12ReconstructionStatus& GetReconstructionStatus() const;
     const GDX12FrameGenerationStatus& GetFrameGenerationStatus() const;
+    const RenderMGPUStatus& GetMGPUStatus() const { return _mgpuStatus; }
+    RenderMGPURuntime* GetMGPURuntime() const { return _gpu ? _mgpuRuntime.get() : nullptr; }
+    bool ShutdownMGPU() noexcept;
+    // Borrowed submission bindings for the renderer's serialized owner.
+    RenderMGPUDevices GetMGPUDevices() const
+    { return _gpu ? RenderMGPUDevices{ _primaryDevice.get(), _secondaryDevice.get(),
+        _primaryTransferQueue.get(), _secondaryTransferQueue.get() } : RenderMGPUDevices{}; }
 
     bool OwnsMaterial(const GDX12Material* material) const;
     GDX12Material* GetMaterialByName(const std::string& name);
@@ -186,9 +205,7 @@ private:
         SkeletalState& state, const SceneAsset& scene, bool animate, double presetRate);
     void DispatchSkeletalMeshes(GDX12CommandList* commands);
     void ReleaseSkeletalState(World& world, Entity entity);
-    std::map<std::pair<World*, Entity>, SkeletalState> _skeletalStates;
     std::vector<UINT> _freeSkeletalInstances;
-    std::unique_ptr<GDX12Skinning> _skinning;
     bool _skeletalBatchDirty = true;
     bool _skeletalInstancing = false;
 
@@ -214,7 +231,8 @@ private:
     std::vector<GDX12LocalShadowCaster> _staticMeshCasters;
     ShadowVisibilitySystem _shadowVisibility;
     void CollectParticleEmitters();
-    void ShareFences();
+    void InitializeMGPU();
+    void QuarantineGpuOwners() noexcept;
     friend struct RenderPipelineContext;
     RenderPipelineContext PipelineContext();
     void RefreshPipelineFlags();
@@ -231,7 +249,6 @@ private:
     std::uint64_t _textureUploadBytes = 0;
     GDX12CommandList* _primaryTextureCommands = nullptr;
     GDX12CommandList* _secondaryTextureCommands = nullptr;
-    std::vector<GDX12ResourceHandle> _textureUploadResources;
 
     GameTimer* _timer;
     Window* _window;
@@ -241,28 +258,47 @@ private:
     
     std::unordered_map<Entity, TransformCompGPUData> _transformGPUData;
     std::unordered_map<World*, WorldRenderSubscriptions> _worldSubscriptions;
-    RenderPipelineCommonData _RPcommonData;
-
-    std::unique_ptr<GDX12Device> _primaryDevice;
-    std::unique_ptr<GDX12Device> _secondaryDevice;
-    bool _dualGPUMode;
+    struct GpuOwners
+    {
+        GpuOwners();
+        ~GpuOwners();
+        RenderPipelineCommonData Common;
+        std::unique_ptr<GDX12Device> PrimaryDevice, SecondaryDevice;
+        std::unique_ptr<GDX12CommandQueue> PrimaryCopy, SecondaryCopy;
+        GDX12DeviceResources Primary, Secondary;
+        std::unique_ptr<GDX12GPUTimer> PrimaryTimer;
+        std::unordered_map<std::string, std::unique_ptr<GPUTexture>> Textures;
+        std::unordered_map<std::string, std::unique_ptr<GDX12Material>> Materials;
+        std::vector<GDX12ResourceHandle> Uploads;
+        std::map<std::pair<World*, Entity>, SkeletalState> SkeletalStates;
+        std::unique_ptr<GDX12Skinning> Skinning;
+        std::unique_ptr<GDX12SwapChain> BackBuffer;
+        std::unique_ptr<IRenderPipeline> Pipeline;
+        std::unique_ptr<GDX12RenderGraph> PrimaryGraph;
+        std::unique_ptr<RenderMGPURuntime> MGPU;
+    };
+    std::unique_ptr<GpuOwners> _gpu = std::make_unique<GpuOwners>();
+    decltype(GpuOwners::Common)& _RPcommonData = _gpu->Common;
+    decltype(GpuOwners::PrimaryDevice)& _primaryDevice = _gpu->PrimaryDevice;
+    decltype(GpuOwners::SecondaryDevice)& _secondaryDevice = _gpu->SecondaryDevice;
+    decltype(GpuOwners::PrimaryCopy)& _primaryTransferQueue = _gpu->PrimaryCopy;
+    decltype(GpuOwners::SecondaryCopy)& _secondaryTransferQueue = _gpu->SecondaryCopy;
+    decltype(GpuOwners::MGPU)& _mgpuRuntime = _gpu->MGPU;
+    decltype(GpuOwners::PrimaryTimer)& _primaryGPUTimer = _gpu->PrimaryTimer;
+    decltype(GpuOwners::Primary)& _primaryResources = _gpu->Primary;
+    decltype(GpuOwners::Secondary)& _secondaryResources = _gpu->Secondary;
+    decltype(GpuOwners::Textures)& _textures = _gpu->Textures;
+    decltype(GpuOwners::Materials)& _materials = _gpu->Materials;
+    decltype(GpuOwners::Uploads)& _textureUploadResources = _gpu->Uploads;
+    decltype(GpuOwners::SkeletalStates)& _skeletalStates = _gpu->SkeletalStates;
+    decltype(GpuOwners::Skinning)& _skinning = _gpu->Skinning;
+    decltype(GpuOwners::BackBuffer)& _backBuffer = _gpu->BackBuffer;
+    decltype(GpuOwners::Pipeline)& _pipeline = _gpu->Pipeline;
+    decltype(GpuOwners::PrimaryGraph)& _primaryGraph = _gpu->PrimaryGraph;
+    RenderMGPUStatus _mgpuStatus;
     bool _uiInitialized = false;
     bool _renderingSuspended = false;
     double _skeletalPreparationTimeMS = 0;
-    std::unique_ptr<GDX12GPUTimer> _primaryGPUTimer;
-    std::unique_ptr<GDX12GPUTimer> _secondaryGPUTimer;
-
-    GDX12DeviceResources _primaryResources;
-    GDX12DeviceResources _secondaryResources;
-    std::unordered_map<std::string, std::unique_ptr<GPUTexture>> _textures;
-    std::unordered_map<std::string, std::unique_ptr<GDX12Material>> _materials;
-
-    // These two resources are made on _primaryDevice only
-    std::unique_ptr<GDX12SwapChain> _backBuffer;
-    
-    // The graph borrows pipeline passes and must be destroyed first.
-    std::unique_ptr<IRenderPipeline> _pipeline;
-    std::unique_ptr<GDX12RenderGraph> _primaryGraph;
     bool _graphReuseTextures = true;
 
     // Flags that are accumulated from every active RenderPass on the device

@@ -124,6 +124,7 @@
     <ClInclude Include="src\BistroProps.h" />
     <ClInclude Include="src\BistroWaves.h" />
     <ClInclude Include="src\BistroScene.h" />
+    <ClInclude Include="src\BistroUICanvases.h" />
     <ClInclude Include="src\BistroReflections.h" />
     <ClInclude Include="src\BistroGrass.h" />
     <ClInclude Include="src\BistroWater.h" />

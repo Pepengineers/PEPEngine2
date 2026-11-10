@@ -1,4 +1,6 @@
 #include "App.Base/Rendering/CommonRenderPasses.h"
+#include "App.Base/Modules/RenderModule.h"
+#include "App.Base/Rendering/CrossAdapterAO.h"
 
 CommonRenderPasses::CommonRenderPasses(GDX12SwapChain* backBuffer, GDX12WBOITTransparencyPass::DepthPartition partition)
     : Transparency(partition), FrameGeneration(backBuffer)
@@ -16,33 +18,59 @@ CommonRenderPasses::CommonRenderPasses(GDX12SwapChain* backBuffer, GDX12WBOITTra
 CommonRenderPasses::~CommonRenderPasses()
 {
     for (auto* pass : Bindings.PrimaryPasses) pass->ClearDenendencies();
-    for (auto* pass : Bindings.SecondaryPasses) pass->ClearDenendencies();
 }
 
 void CommonRenderPasses::Setup(RenderPipelineContext& context)
 {
     for (auto* pass : Bindings.PrimaryPasses) pass->Setup(&context.Primary, &context.Secondary, &context.Common);
-    for (auto* pass : Bindings.SecondaryPasses) pass->Setup(&context.Secondary, &context.Primary, &context.Common);
 }
 
 void CommonRenderPasses::Initialize()
 {
-    auto passes = Bindings.PrimaryPasses;
-    passes.insert(passes.end(), Bindings.SecondaryPasses.begin(), Bindings.SecondaryPasses.end());
-    GDX12RenderPass::InitializeAll(std::move(passes));
+    GDX12RenderPass::InitializeAll(Bindings.PrimaryPasses);
 }
 
 void CommonRenderPasses::Resize(RenderPipelineContext& context)
 {
     Reconstruction.QueryRenderTargetResolution();
     for (auto* pass : Bindings.PrimaryPasses) pass->Resize();
-    for (auto* pass : Bindings.SecondaryPasses) pass->Resize();
 }
 
 void CommonRenderPasses::BindAmbientOcclusion(RenderPipelineCommonData& common, bool early)
 {
     common.AOAfterDepthPrepass = early;
     AO.SetInputs({ Depth.GetOutput(2), (early ? Depth : Opaque).GetOutput(3) });
+}
+
+bool CommonRenderPasses::UpdateAmbientOcclusionRoute(RenderPipelineContext& context)
+{
+    auto* runtime = context.Runtime.GetMGPURuntime();
+    auto* secondary = context.Runtime.GetMGPUDevices().Secondary;
+    const bool enabled = IsMultiGPUAmbientOcclusionEnabled() && runtime && secondary;
+    if (enabled && !_placedAO)
+        _placedAO = std::make_unique<CrossAdapterAO>(AO, context.Primary, *secondary, *runtime);
+    const bool changed = _usePlacedAO != enabled;
+    _usePlacedAO = enabled;
+    return changed;
+}
+
+void CommonRenderPasses::AddAmbientOcclusion(GDX12RenderGraph& graph, bool early)
+{
+    if (!_usePlacedAO)
+    {
+        graph.AddPass(AO);
+        return;
+    }
+    graph.AddPass(*_placedAO);
+    graph.SetLegacySplit(*_placedAO, { Depth.GetOutput(2), (early ? Depth : Opaque).GetOutput(3) }, { AO.GetOutput(0) });
+    Bindings.SubmitLegacyReplacement = [this](const auto& boundary, auto prefix)
+    { return _placedAO->Submit(boundary, prefix); };
+    Bindings.RetirePlacedFrame = [this](auto tail) { _placedAO->RetireFrame(tail); };
+}
+
+GDX12Submission::CompletionPoint CommonRenderPasses::GetLastAmbientOcclusionFinalize() const
+{
+    return _placedAO ? _placedAO->GetLastFinalize() : GDX12Submission::CompletionPoint{};
 }
 
 void CommonRenderPasses::PrepareFrame(RenderPipelineContext& context, GDX12CommandList* commands)

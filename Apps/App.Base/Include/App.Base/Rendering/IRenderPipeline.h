@@ -2,6 +2,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include "Engine.Core/Jobs/JobSystem.h"
+#include <functional>
 
 class RenderModule;
 class GDX12SwapChain;
@@ -22,10 +23,11 @@ struct RenderPipelineContext
 struct RenderPipelineBindings
 {
     std::vector<GDX12RenderPass*> PrimaryPasses;
-    std::vector<GDX12RenderPass*> SecondaryPasses;
     GDX12ReconstructionPass* Reconstruction = nullptr;
     bool FrameGenerationInputs = false;
     bool UseAsyncCompute = false;
+    GDX12RenderGraph::SubmitLegacyReplacement SubmitLegacyReplacement;
+    std::function<void(GDX12Submission::CompletionPoint)> RetirePlacedFrame;
 };
 
 struct RenderPipelineGraphInputs
