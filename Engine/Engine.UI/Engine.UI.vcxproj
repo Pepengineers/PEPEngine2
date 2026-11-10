@@ -20,19 +20,11 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.UI\EditorUI.h" />
-    <ClInclude Include="Include\Engine.UI\Editor\AssetBrowserPanel.h" />
-    <ClInclude Include="Include\Engine.UI\Editor\EditorPanels.h" />
     <ClInclude Include="Include\Engine.UI\Editor\HierarchyPanel.h" />
-    <ClInclude Include="Include\Engine.UI\Editor\InspectorPanel.h" />
-    <ClInclude Include="Include\Engine.UI\UI_test.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\EditorUI.cpp" />
-    <ClCompile Include="src\Editor\AssetBrowserPanel.cpp" />
-    <ClCompile Include="src\Editor\EditorPanels.cpp" />
     <ClCompile Include="src\Editor\HierarchyPanel.cpp" />
-    <ClCompile Include="src\Editor\InspectorPanel.cpp" />
-    <ClCompile Include="src\UI_test.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
@@ -76,26 +68,22 @@
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\..\GlobalSettings.props" />
-    <Import Project="..\..\MSBuild\Props\PEPEngine.External.ImGuizmo.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\..\GlobalSettings.props" />
-      <Import Project="..\..\MSBuild\Props\PEPEngine.External.ImGuizmo.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\..\GlobalSettings.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.Module.Engine.UI.Public.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.ImGui.props" />
-      <Import Project="..\..\MSBuild\Props\PEPEngine.External.ImGuizmo.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\..\GlobalSettings.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.Module.Engine.UI.Public.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.External.ImGui.props" />
-      <Import Project="..\..\MSBuild\Props\PEPEngine.External.ImGuizmo.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" />

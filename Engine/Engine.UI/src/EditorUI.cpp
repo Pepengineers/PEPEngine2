@@ -1,10 +1,14 @@
 ﻿#include <Engine.UI/EditorUI.h>
 
+#include <memory>
+#include <vector>
+
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "imgui/imgui.h"
+#include "imgui/imgui_internal.h"
 #include "imgui/backends/imgui_impl_dx12.h"
 #include "imgui/backends/imgui_impl_win32.h"
 
@@ -14,12 +18,9 @@ namespace Engine::UI
 {
     namespace
     {
-        EditorMode _mode = EditorMode::Edit;
-
-        GDX12DescriptorHeap* _srvHeap = nullptr;
-
-        // slot reserved in heap for ImGui
-        UINT _imguiFontSrvHeapIndex = 0;
+        GDX12Device* _device = nullptr;
+        std::unique_ptr<GDX12DescriptorHeap> _srvHeap;
+        std::vector<UINT> _freeSrvIndices;
     }
 
     void Initialize(const EditorUIInitDesc& initDesc)
@@ -44,12 +45,13 @@ namespace Engine::UI
 
         ImGui_ImplWin32_Init(initDesc.WindowHandle);
 
-        _srvHeap = initDesc.SRVHeap;
-
-        _imguiFontSrvHeapIndex = _srvHeap->GetAvailableIndex();
-
-        D3D12_CPU_DESCRIPTOR_HANDLE fontCpuHandle = _srvHeap->GetCPUHandle(_imguiFontSrvHeapIndex);
-        D3D12_GPU_DESCRIPTOR_HANDLE fontGpuHandle = _srvHeap->GetGPUHandle(_imguiFontSrvHeapIndex);
+        _device = initDesc.Device;
+        _srvHeap = std::make_unique<GDX12DescriptorHeap>(_device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+                                                       64, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+        for (UINT i = _srvHeap->GetNumDescriptors(); i > 0; --i)
+        {
+            _freeSrvIndices.push_back(i - 1);
+        }
 
         ImGui_ImplDX12_InitInfo initInfo = {};
         initInfo.Device = initDesc.Device->GetDevice().Get();
@@ -64,15 +66,19 @@ namespace Engine::UI
                                             D3D12_CPU_DESCRIPTOR_HANDLE* outCpuHandle,
                                             D3D12_GPU_DESCRIPTOR_HANDLE* outGpuHandle)
         {
-            *outCpuHandle = _srvHeap->GetCPUHandle(_imguiFontSrvHeapIndex);
-            *outGpuHandle = _srvHeap->GetGPUHandle(_imguiFontSrvHeapIndex);
+            IM_ASSERT(!_freeSrvIndices.empty());
+            const UINT index = _freeSrvIndices.back();
+            _freeSrvIndices.pop_back();
+            *outCpuHandle = _srvHeap->GetCPUHandle(index);
+            *outGpuHandle = _srvHeap->GetGPUHandle(index);
         };
 
         initInfo.SrvDescriptorFreeFn = [](ImGui_ImplDX12_InitInfo*,
-                                            D3D12_CPU_DESCRIPTOR_HANDLE,
+                                            D3D12_CPU_DESCRIPTOR_HANDLE cpuHandle,
                                             D3D12_GPU_DESCRIPTOR_HANDLE)
         {
-            //nothing to free, so it's empty
+            const SIZE_T stride = _srvHeap->GetCPUHandle(1).ptr - _srvHeap->GetCPUHandle(0).ptr;
+            _freeSrvIndices.push_back(static_cast<UINT>((cpuHandle.ptr - _srvHeap->GetCPUHandle(0).ptr) / stride));
         };
 
         ImGui_ImplDX12_Init(&initInfo);
@@ -80,9 +86,18 @@ namespace Engine::UI
 
     void ShutdownUI()
     {
+        if (!ImGui::GetCurrentContext())
+        {
+            return;
+        }
+
+        _device->GetCommandQueue()->Flush();
         ImGui_ImplDX12_Shutdown();
         ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
+        _srvHeap.reset();
+        _freeSrvIndices.clear();
+        _device = nullptr;
     }
 
     LRESULT WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -112,8 +127,7 @@ namespace Engine::UI
                                         | ImGuiWindowFlags_NoMove
                                         | ImGuiWindowFlags_NoCollapse
                                         | ImGuiWindowFlags_NoBringToFrontOnFocus
-                                        | ImGuiWindowFlags_NoNavFocus
-                                        | ImGuiWindowFlags_MenuBar;
+                                        | ImGuiWindowFlags_NoNavFocus;
 
         if (dockFlags & ImGuiDockNodeFlags_PassthruCentralNode)
         {
@@ -127,7 +141,15 @@ namespace Engine::UI
         ImGui::Begin("EditorDockspace", nullptr, hostFlags);
         ImGui::PopStyleVar(3);
 
-        ImGuiID dockID = ImGui::GetID("EditorDockspace");
+        const ImGuiID dockID = ImGui::GetID("HierarchyDockspace");
+        if (!ImGui::DockBuilderGetNode(dockID))
+        {
+            ImGui::DockBuilderAddNode(dockID, ImGuiDockNodeFlags_DockSpace | dockFlags);
+            ImGui::DockBuilderSetNodeSize(dockID, viewport->WorkSize);
+            const ImGuiID leftDock = ImGui::DockBuilderSplitNode(dockID, ImGuiDir_Left, 0.22f, nullptr, nullptr);
+            ImGui::DockBuilderDockWindow("Hierarchy", leftDock);
+            ImGui::DockBuilderFinish(dockID);
+        }
         ImGui::DockSpace(dockID, ImVec2(0.0f, 0.0f), dockFlags);
     }
 
@@ -165,13 +187,4 @@ namespace Engine::UI
         return ImGui::GetIO().WantCaptureKeyboard;
     }
 
-    EditorMode GetEditorMode()
-    {
-        return _mode;
-    }
-
-    void SetEditorMode(const EditorMode mode)
-    {
-        _mode = mode;
-    }
 }

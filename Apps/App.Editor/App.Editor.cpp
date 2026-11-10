@@ -1,7 +1,7 @@
 #include <App.Base/App.h>
 
 #include "Engine.UI/EditorUI.h"
-#include "Engine.UI/Editor/EditorPanels.h"
+#include "Engine.UI/Editor/HierarchyPanel.h"
 
 class EditorApp : public App
 {
@@ -32,16 +32,13 @@ protected:
     }
 
 private:
-    void ApplyEditorModeToWorld();
-    void ComputeActiveCameraMatrices(Matrix& outView, Matrix& outProj);
     
     POINT _lastMousePos = {};
     float _cameraSpeed = 10.0f;
     float _minCameraSpeed = 0.1f;
     float _maxCameraSpeed = 10000.0f;
 
-    Engine::UI::EditorMode _lastAppliedMode = Engine::UI::EditorMode::Play;
-    Engine::UI::EditorPanels _editorPanels;
+    Engine::UI::HierarchyPanel _hierarchyPanel;
 };
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE prevInstance, PSTR cmdLine, int showCmd)
@@ -101,7 +98,6 @@ bool EditorApp::Initialize()
     desc.BackBufferFormat = static_cast<long>(renderModule->GetBackBufferFormat());
     desc.Device = renderModule->GetPrimaryDevice();
     desc.FrameCount = renderModule->GetFrameConstantsCount();
-    desc.SRVHeap = renderModule->GetSrvHeap();
     desc.WindowHandle = GetWindow()->GetWindowHandle();
 
     Engine::UI::Initialize(desc);
@@ -111,9 +107,6 @@ bool EditorApp::Initialize()
     {
         Engine::UI::Render(cmdList, backBuffer);
     };
-
-    Engine::UI::SetEditorMode(Engine::UI::EditorMode::Edit);
-    ApplyEditorModeToWorld();
 
     return true;
 }
@@ -136,13 +129,6 @@ void EditorApp::OnResize()
 
 void EditorApp::Update(const GameTimer& gameTimer)
 {
-    //sync world pause state if edit/play was toggled
-    if (Engine::UI::GetEditorMode() != _lastAppliedMode)
-    {
-        _lastAppliedMode = Engine::UI::GetEditorMode();
-        ApplyEditorModeToWorld();
-    }
-    
     App::Update(gameTimer);
 }
 
@@ -151,19 +137,7 @@ void EditorApp::Render(const GameTimer& gameTimer)
     Engine::UI::BeginFrame();
     Engine::UI::BeginDockspace();
 
-    Matrix view, proj;
-    ComputeActiveCameraMatrices(view, proj);
-
-    uint16_t width, height;
-    GetWindow()->GetWindowSize(width, height);
-
-    _editorPanels.DrawAll(GetLocator().GetModule<SceneManagerModule>().get(),
-                            reinterpret_cast<const float*>(&view),
-                            reinterpret_cast<const float*>(&proj),
-                            0.0f,
-                            0.0f,
-                            static_cast<float>(width),
-                            static_cast<float>(height));
+    _hierarchyPanel.Draw(GetLocator().GetModule<SceneManagerModule>().get());
 
     Engine::UI::EndDockspace();
     
@@ -177,7 +151,10 @@ void EditorApp::OnMouseDown(WPARAM btnState, int x, int y)
     _lastMousePos.x = x;
     _lastMousePos.y = y;
 
-    SetCapture(GetWindow()->GetWindowHandle());
+    if (!Engine::UI::WantCaptureMouse())
+    {
+        SetCapture(GetWindow()->GetWindowHandle());
+    }
 }
 
 void EditorApp::OnMouseUp(WPARAM btnState, int x, int y)
@@ -191,10 +168,9 @@ void EditorApp::OnMouseUp(WPARAM btnState, int x, int y)
 
 void EditorApp::OnMouseMove(WPARAM btnState, int x, int y)
 {
-    const bool imguiWantsMouse = Engine::UI::WantCaptureMouse() || _editorPanels.IsGizmoEnabled();
-    const bool playMode = Engine::UI::GetEditorMode() == Engine::UI::EditorMode::Play;
+    const bool imguiWantsMouse = Engine::UI::WantCaptureMouse();
     
-    if ((btnState & MK_RBUTTON) != 0 && playMode && !imguiWantsMouse)
+    if ((btnState & MK_RBUTTON) != 0 && !imguiWantsMouse)
     {
         constexpr float mouseSensitivity = 0.15f;
 
@@ -234,6 +210,11 @@ void EditorApp::OnMouseMove(WPARAM btnState, int x, int y)
 
 void EditorApp::OnMouseWheelMove(WPARAM rotation)
 {
+    if (Engine::UI::WantCaptureMouse())
+    {
+        return;
+    }
+
     short wheelDelta = GET_WHEEL_DELTA_WPARAM(rotation);
 
     float speed = _cameraSpeed;
@@ -245,7 +226,7 @@ void EditorApp::OnMouseWheelMove(WPARAM rotation)
 
 void EditorApp::OnKeyboardInput(const GameTimer& gameTimer)
 {
-    if (Engine::UI::WantCaptureKeyboard() || (Engine::UI::GetEditorMode() != Engine::UI::EditorMode::Play))
+    if (Engine::UI::WantCaptureKeyboard())
     {
         return;
     }
@@ -279,65 +260,4 @@ void EditorApp::OnKeyboardInput(const GameTimer& gameTimer)
     {
         camera.DirtyFlag = true;
     }
-}
-
-void EditorApp::ApplyEditorModeToWorld()
-{
-    auto sceneManager = GetLocator().GetModule<SceneManagerModule>();
-    if (!sceneManager)
-    {
-        return;
-    }
-
-    World* world = sceneManager->GetWorld();
-    if (!world)
-    {
-        return;
-    }
-
-    const bool paused = Engine::UI::GetEditorMode() == Engine::UI::EditorMode::Edit;
-    world->SetPaused(paused);
-}
-
-void EditorApp::ComputeActiveCameraMatrices(Matrix& outView, Matrix& outProj)
-{
-    auto sceneManager = GetLocator().GetModule<SceneManagerModule>();
-    auto renderModule = GetLocator().GetModule<RenderModule>();
-
-    outView = Matrix::Identity;
-    outProj = Matrix::Identity;
-
-    if (!sceneManager || !renderModule)
-    {
-        return;
-    }
-
-    World* world = sceneManager->GetWorld();
-    if (!world)
-    {
-        return;
-    }
-
-    auto& ecs = world->GetECS();
-    if (!ecs.IsAlive(world->ActiveCamera))
-    {
-        return;
-    }
-
-    auto& transform = ecs.Get<TransformComponent>(world->ActiveCamera);
-    auto& camera = ecs.Get<CameraComponent>(world->ActiveCamera);
-
-    Matrix rotMatrix = Matrix::CreateFromYawPitchRoll(
-            XMConvertToRadians(transform.Rotation.y),
-            XMConvertToRadians(transform.Rotation.x),
-        XMConvertToRadians(transform.Rotation.z));
-
-    Vector3 forward = rotMatrix.Forward();
-    Vector3 target = transform.Location - forward;
-
-    outView = Matrix::CreateLookAt(transform.Location, target, Vector3::Up);
-    outProj = Matrix::CreatePerspectiveFieldOfView(XMConvertToRadians(camera.FOV),
-                                                    renderModule->GetAspectRatio(),
-                                                    camera.NearPlane,
-                                                    camera.FarPlane);
 }

@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "Common/GameTimer.h"
+#include <functional>
 #include "Common/Module.h"
 
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
@@ -57,6 +58,11 @@ public:
     
     //show screen while loading. does not access scene or ECS state
     void RenderLoadingScreen(float progress);
+
+    std::function<void(GDX12CommandList*, GDX12Texture*)> OnImguiRender;
+    GDX12Device* GetPrimaryDevice() { return _primaryDevice.get(); }
+    UINT GetFrameConstantsCount() const { return static_cast<UINT>(_primaryResources.FrameConstants.size()); }
+    DXGI_FORMAT GetBackBufferFormat() const;
     
     struct WorldRenderSubscriptions
     {

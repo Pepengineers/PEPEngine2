@@ -472,14 +472,6 @@
     <ClInclude Include="spdlog\include\spdlog\stopwatch.h" />
     <ClInclude Include="spdlog\include\spdlog\tweakme.h" />
     <ClInclude Include="spdlog\include\spdlog\version.h" />
-    <ClInclude Include="imguizmo\src\GraphEditor.h" />
-    <ClInclude Include="imguizmo\src\ImCurveEdit.h" />
-    <ClInclude Include="imguizmo\src\ImGradient.h" />
-    <ClInclude Include="imguizmo\src\ImGuizmo.h" />
-    <ClInclude Include="imguizmo\src\ImSequencer.h" />
-    <ClInclude Include="imguizmo\src\ImVectorEditor.h" />
-    <ClInclude Include="imguizmo\src\ImZoomSlider.h" />
-    <ClInclude Include="imguizmo\src\ImLightRig.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="imgui\src\backends\imgui_impl_dx12.cpp" />
@@ -513,14 +505,6 @@
     <ClCompile Include="rapidyaml\src\c4\yml\version.cpp">
       <ObjectFileName>$(IntDir)rapidyaml.ryml.version.obj</ObjectFileName>
     </ClCompile>
-  </ItemGroup>
-<ItemGroup>
-    <ClCompile Include="imguizmo\src\GraphEditor.cpp" />
-    <ClCompile Include="imguizmo\src\ImCurveEdit.cpp" />
-    <ClCompile Include="imguizmo\src\ImGradient.cpp" />
-    <ClCompile Include="imguizmo\src\ImGuizmo.cpp" />
-    <ClCompile Include="imguizmo\src\ImSequencer.cpp" />
-    <ClCompile Include="imguizmo\src\ImVectorEditor.cpp" />
   </ItemGroup>
 
   <ItemGroup>

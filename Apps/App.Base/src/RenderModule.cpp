@@ -355,6 +355,11 @@ void RenderModule::SetActiveCamera(CameraComponent* camera)
     _RPcommonData.ActiveCameraFarPlane = camera->FarPlane;
 }
 
+DXGI_FORMAT RenderModule::GetBackBufferFormat() const
+{
+    return _backBuffer->GetFormat();
+}
+
 void RenderModule::RenderLoadingScreen(float progress)
 {
     progress = (std::max)(0.0f, (std::min)(progress, 1.0f));
@@ -810,6 +815,14 @@ void RenderModule::OnRender()
                 primarycmdList = primarycmdQueue->GetCommandList();
             }
         else { renderPass->Execute(primarycmdList); }
+    }
+
+    if (OnImguiRender)
+    {
+        auto* backBuffer = _backBuffer->GetCurrentBuffer();
+        primarycmdList->ResourceBarrier({backBuffer->GetResource()->GetRenderTargetBarrier()});
+        OnImguiRender(primarycmdList, backBuffer);
+        primarycmdList->ResourceBarrier({backBuffer->GetResource()->GetPresentBarrier()});
     }
 
     _primaryGPUTimer->Stop(primarycmdList);

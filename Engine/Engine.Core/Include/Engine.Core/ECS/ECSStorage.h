@@ -308,6 +308,15 @@ public:
         return count;
     }
 
+    template<typename Func>
+    void ForEachEntity(Func&& func) const
+    {
+        for (size_t i = 1; i < _aliveList.size(); ++i)
+        {
+            if (_aliveList[i]) { func(static_cast<Entity>(i)); }
+        }
+    }
+
     template<typename T, typename... Args>
     T& Add(Entity entity, Args&&... args)
     {

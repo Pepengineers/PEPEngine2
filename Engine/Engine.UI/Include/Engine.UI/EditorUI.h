@@ -4,22 +4,14 @@
 
 class GDX12Texture;
 class GDX12CommandList;
-class GDX12DescriptorHeap;
 class GDX12Device;
 
 namespace Engine::UI
 {
-    enum class EditorMode
-    {
-        Edit,
-        Play
-    };
-
     struct EditorUIInitDesc
     {
         HWND WindowHandle = nullptr;
         GDX12Device* Device = nullptr;
-        GDX12DescriptorHeap* SRVHeap = nullptr;
         UINT FrameCount = 3;
         //to not drag dependencies, it's converted to long
         long BackBufferFormat = 0;
@@ -42,8 +34,6 @@ namespace Engine::UI
     bool WantCaptureMouse();
     bool WantCaptureKeyboard();
 
-    EditorMode GetEditorMode();
-    void SetEditorMode(EditorMode mode);
 }
 
 

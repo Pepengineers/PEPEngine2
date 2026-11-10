@@ -2,59 +2,70 @@
 
 #include <string>
 
-#include "App.Base/ECS/Components/NameComponent.h"
-#include "App.Base/ECS/World.h"
+#include "App.Base/Modules/SceneManagerModule.h"
 #include "imgui/imgui.h"
 
 namespace Engine::UI
 {
-    void HierarchyPanel::Draw(World* world)
+    void HierarchyPanel::Draw(SceneManagerModule* sceneManager)
     {
-        ImGui::Begin("Hierarchy");
-
-        if (!world)
+        if (!ImGui::Begin("Hierarchy"))
         {
-            _selectedEntity = InvalidEntity;
-            ImGui::TextDisabled("No world loaded");
             ImGui::End();
             return;
         }
 
-        auto& ecs = world->GetECS();
-        if (_selectedEntity != InvalidEntity && !ecs.IsAlive(_selectedEntity))
+        if (!sceneManager || sceneManager->GetWorldCount() == 0)
         {
+            _selectedWorld = nullptr;
             _selectedEntity = InvalidEntity;
+            ImGui::TextDisabled("No world loaded");
         }
 
-        bool hasNamedEntities = false;
-
-        ecs.ForEach<NameComponent>(
-            [this, &hasNamedEntities](Entity entity, NameComponent& nameComponent)
-            {
-                hasNamedEntities = true;
-
-                const std::string label = nameComponent.value + "##" + std::to_string(entity);
-                if (ImGui::Selectable(label.c_str(), _selectedEntity == entity))
-                {
-                    _selectedEntity = entity;
-                }
-            });
-
-        if (!hasNamedEntities)
+        for (size_t i = 0; sceneManager && i < sceneManager->GetWorldCount(); ++i)
         {
-            ImGui::TextDisabled("World has no named entities");
+            World* world = sceneManager->GetWorld(i);
+            auto& ecs = world->GetECS();
+            if (_selectedWorld == world && !ecs.IsAlive(_selectedEntity))
+            {
+                _selectedEntity = InvalidEntity;
+            }
+
+            ImGui::PushID(static_cast<int>(i));
+            const std::string worldName = world->GetPath().stem().string();
+            if (ImGui::TreeNodeEx("World", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth,
+                                  "%s", worldName.c_str()))
+            {
+                if (ecs.GetEntityCount() == 0)
+                {
+                    ImGui::TextDisabled("World is empty");
+                }
+
+                ecs.ForEachEntity([&](Entity entity)
+                {
+                    const std::string name = ecs.Has<NameComponent>(entity)
+                        ? ecs.Get<NameComponent>(entity).value : "Entity " + std::to_string(entity);
+                    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf
+                        | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
+                    if (_selectedWorld == world && _selectedEntity == entity)
+                    {
+                        flags |= ImGuiTreeNodeFlags_Selected;
+                    }
+
+                    ImGui::PushID(static_cast<int>(entity));
+                    ImGui::TreeNodeEx("Entity", flags, "%s", name.c_str());
+                    if (ImGui::IsItemClicked())
+                    {
+                        _selectedWorld = world;
+                        _selectedEntity = entity;
+                    }
+                    ImGui::PopID();
+                });
+                ImGui::TreePop();
+            }
+            ImGui::PopID();
         }
 
         ImGui::End();
-    }
-
-    Entity HierarchyPanel::GetSelectedEntity()
-    {
-        return _selectedEntity;
-    }
-
-    void HierarchyPanel::SetSelectedEntity(Entity entity)
-    {
-        _selectedEntity = entity;
     }
 }
