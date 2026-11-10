@@ -18,6 +18,7 @@ public:
         const GDX12GrassRenderer::DisplayedFields* fields = nullptr);
     std::shared_ptr<const GDX12GrassRenderer::LocalCheckpoint> PrepareLocalCheckpoint()
     { return _gpu ? _gpu->PrepareLocalCheckpoint() : nullptr; }
+    void RestartLocalSolver() { if (_gpu) _gpu->RestartLocalSolver(); }
     void ResumeLocalSolver(std::shared_ptr<GDX12GrassFieldProducer> solver, uint64_t resetRevision,
         GDX12GrassFieldInputQueue pending)
     { _gpu->ResumeLocalSolver(std::move(solver), resetRevision, std::move(pending)); }

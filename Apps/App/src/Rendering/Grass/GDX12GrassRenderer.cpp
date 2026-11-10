@@ -191,7 +191,8 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
         }
     }
     const bool routeChange = _usingSnapshot != static_cast<bool>(snapshots.Current);
-    const bool resetRenderHistory = common.ResetHistory || routeChange || _resumeSeed || snapshots.ResetHistory;
+    const bool restartLocal = _restartLocal && !snapshots.Current;
+    const bool resetRenderHistory = common.ResetHistory || routeChange || _resumeSeed || snapshots.ResetHistory || restartLocal;
     _usingSnapshot = static_cast<bool>(snapshots.Current);
     frame.Snapshots = std::move(snapshots);
     frame.LocalSolver.reset();
@@ -212,7 +213,7 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
     _previousEye = _eye;
     _eye = common.CameraView.Invert().Translation();
     if (resetRenderHistory) _previousEye = _eye;
-    bool resetInteraction = routeChange && !_resumeSeed;
+    bool resetInteraction = restartLocal || (routeChange && !_resumeSeed);
     _drawOrder.clear();
     std::unordered_set<uint64_t> activeGrass, activeWind;
     UINT vertexCapacity = 0, indexCapacity = 0;
@@ -335,6 +336,7 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
         }
         frame.LocalSolver = _fieldProducer;
         _resumeSeed = false;
+        _restartLocal = false;
         for (const auto id : _drawOrder)
         {
             auto& state = _grass.at(id);
@@ -365,7 +367,7 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
 std::shared_ptr<const GDX12GrassRenderer::LocalCheckpoint> GDX12GrassRenderer::PrepareLocalCheckpoint()
 {
     auto& frame = CurrentFrame();
-    if (!frame.LocalSolver) return {};
+    if (_restartLocal || !frame.LocalSolver || (_localContinuation && _localContinuation->Size())) return {};
     if (!frame.Checkpoint)
     {
         auto checkpoint = std::make_shared<LocalCheckpoint>();
@@ -379,6 +381,15 @@ std::shared_ptr<const GDX12GrassRenderer::LocalCheckpoint> GDX12GrassRenderer::P
     return frame.Checkpoint;
 }
 
+void GDX12GrassRenderer::RestartLocalSolver()
+{
+    _fieldProducer.reset();
+    _localContinuation.reset();
+    _carryWindDebt = false;
+    _resumeSeed = false;
+    _restartLocal = true;
+}
+
 void GDX12GrassRenderer::ResumeLocalSolver(std::shared_ptr<GDX12GrassFieldProducer> solver,
     uint64_t interactionResetRevision, GDX12GrassFieldInputQueue pending)
 {
@@ -387,6 +398,7 @@ void GDX12GrassRenderer::ResumeLocalSolver(std::shared_ptr<GDX12GrassFieldProduc
     _fieldProducer = std::move(solver);
     _interactionResetRevision = interactionResetRevision;
     _resumeSeed = true;
+    _restartLocal = false;
     _carryWindDebt = true;
     if (pending.Size()) _localContinuation.emplace(std::move(pending));
     else _localContinuation.reset();

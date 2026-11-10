@@ -47,6 +47,7 @@ public:
     GDX12ParticleInteractionField InteractionField() const;
     // Request before recording this frame's local preparation pass.
     std::shared_ptr<const LocalCheckpoint> PrepareLocalCheckpoint();
+    void RestartLocalSolver();
     // Caller has observed the seed receipt; BeginFrame may now advance this solver.
     void ResumeLocalSolver(std::shared_ptr<GDX12GrassFieldProducer> solver, uint64_t interactionResetRevision,
         GDX12GrassFieldInputQueue pending = {});
@@ -143,6 +144,7 @@ private:
     std::shared_ptr<GDX12GrassFieldProducer> _fieldProducer;
     bool _usingSnapshot = false;
     bool _resumeSeed = false;
+    bool _restartLocal = false;
     bool _carryWindDebt = false;
     std::optional<GDX12GrassFieldInputQueue> _localContinuation;
     uint64_t _interactionResetRevision = 0;
