@@ -366,22 +366,28 @@ void GDX12CommandList::ResourceBarrier(const std::initializer_list<CD3DX12_RESOU
 		return barrier.Type != D3D12_RESOURCE_BARRIER_TYPE_TRANSITION ||
 			barrier.Transition.StateBefore != barrier.Transition.StateAfter;
 	};
-	if (std::all_of(barriers.begin(), barriers.end(), needed))
+	const auto* firstNoOp = barriers.begin();
+	while (firstNoOp != barriers.end() && needed(*firstNoOp)) ++firstNoOp;
+	if (firstNoOp == barriers.end())
 	{
 		if (barriers.size()) _commandList->ResourceBarrier(static_cast<UINT>(barriers.size()), barriers.begin());
 		return;
 	}
-	std::vector<CD3DX12_RESOURCE_BARRIER> filteredBarriers;
-	for (auto& barrier : barriers)
+	if (barriers.size() == 1) return;
+
+	D3D12_RESOURCE_BARRIER smallBatch[8];
+	std::vector<D3D12_RESOURCE_BARRIER> largeBatch;
+	auto* filtered = smallBatch;
+	if (barriers.size() > std::size(smallBatch))
 	{
-		//skip transition with equal before and after states
-		const D3D12_RESOURCE_BARRIER& baseBarrier = barrier;
-		if (needed(baseBarrier))
-		{
-			filteredBarriers.push_back(barrier);
-		}
+		largeBatch.resize(barriers.size() - 1);
+		filtered = largeBatch.data();
 	}
-	if (!filteredBarriers.empty()) { _commandList->ResourceBarrier(static_cast<UINT>(filteredBarriers.size()), filteredBarriers.data()); }
+	UINT count = 0;
+	for (auto* barrier = barriers.begin(); barrier != firstNoOp; ++barrier) filtered[count++] = *barrier;
+	for (auto* barrier = firstNoOp + 1; barrier != barriers.end(); ++barrier)
+		if (needed(*barrier)) filtered[count++] = *barrier;
+	if (count) _commandList->ResourceBarrier(count, filtered);
 }
 
 void GDX12CommandList::EnhancedTextureBarrier(const std::initializer_list<D3D12_TEXTURE_BARRIER> textureBarriers)

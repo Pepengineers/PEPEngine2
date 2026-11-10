@@ -973,6 +973,25 @@ static void TestAsyncQueues(GDX12Device& device)
     ThrowIfFailed(upload->Map(0, nullptr, reinterpret_cast<void**>(&mapped)));
     *mapped = 0x1234abcd;
     upload->Unmap(0, nullptr);
+
+    auto* barrierCommands = direct->GetCommandList();
+    const auto common = buffer.GetCommonBarrier();
+    barrierCommands->ResourceBarrier({ common });
+    barrierCommands->ResourceBarrier({ common, buffer.GetCopyDestBarrier() });
+    auto* native = barrierCommands->GetCommandList().Get();
+    native->CopyBufferRegion(buffer.D3DResource.Get(), 0, upload.Get(), 0, sizeof(UINT));
+    const auto toCommon = buffer.GetCommonBarrier();
+    const auto toSource = buffer.GetCopySourceBarrier();
+    const auto copySource = buffer.GetCopySourceBarrier();
+    barrierCommands->ResourceBarrier({ toCommon, common, common, common, common, common, common, toSource, copySource });
+    native->CopyBufferRegion(readback.Get(), 0, buffer.D3DResource.Get(), 0, sizeof(UINT));
+    direct->ExecuteCommandList(barrierCommands);
+    direct->CPUWaitForFenceValue(barrierCommands->FenceValue);
+    ThrowIfFailed(readback->Map(0, nullptr, reinterpret_cast<void**>(&mapped)));
+    const UINT value = *mapped;
+    readback->Unmap(0, nullptr);
+    Require(value == 0x1234abcd, "Mixed resource barrier batches did not preserve the copy transitions");
+
     BufferCopyPass producer(buffer, upload.Get(), true), consumer(buffer, readback.Get(), false);
     for (bool async : {false, true, false})
         for (bool hasConsumer : {true, false})
