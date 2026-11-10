@@ -189,11 +189,25 @@ inline void CheckNativeGrassShadowRetry(GDX12Device& primary, GDX12Device& secon
         return executor.TrySubmit(graph, bindings);
     };
 
+    const std::vector<std::uint64_t> sourceIds{ source.Index };
+    const auto spotView = [](const Replica::PreparedAtlas& prepared) -> const auto&
+    {
+        RequireRetry(prepared.Groups.size() == 1 && prepared.Groups.front(), "G2 retry did not prepare the complete spot");
+        return prepared.Groups.front()->front();
+    };
+    const auto nativeSlot = [&](const Replica::PreparedAtlas& prepared) -> std::weak_ptr<const void>
+    {
+        const auto& app = spotView(prepared);
+        // G2 publishes the slot first, followed by the field and material owners.
+        RequireRetry(app && app->Sources == sourceIds && app->Owners.size() == 3 &&
+            app->Owners[0] && app->Owners[1] == local.Owner && app->Owners[2] == binding.Owner,
+            "G2 retry did not prepare the point-source application and its native owner");
+        return app->Owners.front();
+    };
     UINT rootRecordings = 0, drawRecordings = 0;
     const auto render = [&](const Replica::PreparedAtlas& prepared)
     {
-        RequireRetry(prepared.Groups.size() == 1 && prepared.Groups.front(), "G2 retry did not prepare the complete spot");
-        const auto& app = prepared.Groups.front()->front();
+        const auto& app = spotView(prepared);
         auto accesses = app ? app->Accesses : std::vector<Access>{};
         accesses.push_back({ depth, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE });
         auto owners = app ? app->Owners : std::vector<std::shared_ptr<const void>>{};
@@ -231,10 +245,9 @@ inline void CheckNativeGrassShadowRetry(GDX12Device& primary, GDX12Device& secon
         RequireRetry(!blocker.IsReachedBy(primaryQueue.GetCompletionProgress()), "G2 retry capacity blocker already completed");
 
         const auto rejected = replica.Prepare(secondary, heap, capture, local, groups, binding);
-        refusedSlot = rejected.Roots.Slot;
-        const std::vector<std::uint64_t> sourceIds{ source.Index };
-        RequireRetry(!refusedSlot.expired() && rejected.Roots.PointSources == sourceIds &&
-            rejected.Preparation.size() == 1, "G2 retry did not prepare the point-source root upload");
+        refusedSlot = nativeSlot(rejected);
+        RequireRetry(!refusedSlot.expired() && rejected.Preparation.size() == 1,
+            "G2 retry did not prepare the point-source root upload");
         const auto before = queue.GetLastCompletionPoint();
         RequireRetry(!render(rejected) && rootRecordings == 0 && drawRecordings == 0 &&
             queue.GetLastCompletionPoint().Value() == before.Value(), "G2 retry did not refuse before recording");
@@ -277,15 +290,13 @@ inline void CheckNativeGrassShadowRetry(GDX12Device& primary, GDX12Device& secon
     std::vector<float> grassDepth;
     {
         const auto retry = replica.Prepare(secondary, heap, capture, local, groups, binding);
-        const auto& slot = retry.Roots.Slot;
-        RequireRetry(!slot.expired() && !slot.owner_before(refusedSlot) && !refusedSlot.owner_before(slot) &&
-            retry.Roots.PointSources == std::vector<std::uint64_t>{ source.Index },
+        const auto slot = nativeSlot(retry);
+        RequireRetry(!slot.expired() && !slot.owner_before(refusedSlot) && !refusedSlot.owner_before(slot),
             "G2 retry did not reuse the declined native slot and point source");
         const auto accepted = render(retry);
-        const auto& app = retry.Groups.front()->front();
-        const auto sources = app ? app->RecordedSources : nullptr;
+        const auto& sources = spotView(retry)->RecordedSources;
         RequireRetry(accepted && accepted->Batches.size() == 1 && rootRecordings == 1 && drawRecordings == 1 &&
-            sources && *sources == retry.Roots.PointSources, "G2 retry did not issue its root upload and native draw");
+            sources && *sources == sourceIds, "G2 retry did not issue its root upload and native draw");
         grassDepth = readDepth();
     }
     groups.front().Patches.clear();
