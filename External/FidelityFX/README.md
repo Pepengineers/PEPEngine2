@@ -30,3 +30,9 @@ uses one byte for all three, conflicting with `RWStructuredBuffer<FfxUInt32>`.
 `SSRTests --gpu-validation` checks the real SDK dispatch and reports the stride
 mismatch without this patch; full `BistroRenderGraphTests --gpu-validation`
 also covers particle async scheduling, resize and Native/XeSS switching.
+
+`dof-hdr-precision.patch` selects the SDK's FP32 DoF shaders and intermediate
+surfaces. The FP16 path can overflow weighted color sums before normalization
+when finite scene radiance approaches 65,504. The engine still passes scene-linear
+RGBA16F into and out of DoF. The internal surfaces use more memory on devices
+that previously selected FP16.

@@ -773,11 +773,12 @@ public:
         // Capture the same frame's two material surfaces and the rendered scene that samples them.
         const auto capture = [&](GDX12Texture& texture, UINT pixelBytes, const std::string& name, const char* extension)
         {
-            const auto pixels = CaptureTexture(texture, pixelBytes);
+            auto pixels = CaptureTexture(texture, pixelBytes);
             const auto desc = texture.GetResource()->D3DResource->GetDesc();
             if (pixels.empty() || std::none_of(pixels.begin(), pixels.end(), [](BYTE channel) { return channel != 0; }))
                 throw std::runtime_error("P6 surface has no rasterized content: " + name);
             save(name + "-" + std::to_string(desc.Width) + "x" + std::to_string(desc.Height) + extension, pixels);
+            return pixels;
         };
         for (size_t index = 0; index < BistroUIPosters::Count; ++index)
             capture(*pipeline._posters->Output(index).GetTexture(), 4, "poster-" + std::to_string(index), ".rgba");
@@ -785,10 +786,15 @@ public:
         {
             if (texture.GetResource()->D3DResource->GetDesc().Format != DXGI_FORMAT_R16G16B16A16_FLOAT)
                 throw std::runtime_error("P6 HDR attribution requires RGBA16F storage");
-            capture(texture, 8, name, ".rgba16f");
+            const auto pixels = capture(texture, 8, name, ".rgba16f");
+            size_t nonFinite = 0;
+            // Every half with a saturated exponent encodes NaN or infinity.
+            for (size_t highByte = 1; highByte < pixels.size(); highByte += 2)
+                nonFinite += (pixels[highByte] & 0x7c) == 0x7c;
+            return nonFinite;
         };
         const auto finalHDR = [&] { return render->GetRenderPipelineCommonData()->Upscaler->GetOutput(0)->GetTexture(); };
-        captureHDR(*finalHDR(), "bistro-final");
+        const auto pooledNonFinite = captureHDR(*finalHDR(), "bistro-final");
         if (!requested)
         {
             // Keep the two intermediate textures alive for readback after the frame tail.
@@ -801,10 +807,14 @@ public:
                 composition->GetResource()->D3DResource.Get() == finalHDR()->GetResource()->D3DResource.Get() ||
                 dof->GetResource()->D3DResource.Get() == finalHDR()->GetResource()->D3DResource.Get())
                 throw std::runtime_error("P6 HDR stages must have independent native textures");
-            captureHDR(*composition, "bistro-no-reuse-composition");
-            captureHDR(*dof, "bistro-no-reuse-dof");
-            captureHDR(*finalHDR(), "bistro-no-reuse-final");
+            const auto compositionNonFinite = captureHDR(*composition, "bistro-no-reuse-composition");
+            const auto dofNonFinite = captureHDR(*dof, "bistro-no-reuse-dof");
+            const auto finalNonFinite = captureHDR(*finalHDR(), "bistro-no-reuse-final");
             Set(L"Render.Graph.ReuseTextures", "true");
+            if (compositionNonFinite || dofNonFinite || finalNonFinite || pooledNonFinite)
+                throw std::runtime_error("P6 non-finite HDR channels (composition, DoF, final, pooled final): " +
+                    std::to_string(compositionNonFinite) + ", " + std::to_string(dofNonFinite) + ", " +
+                    std::to_string(finalNonFinite) + ", " + std::to_string(pooledNonFinite));
         }
         checkQueues();
         if (!expectSecondary)
