@@ -2,6 +2,7 @@
 
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include "Engine.RendererDX12/GDX12Device.h"
+#include "Engine.RendererDX12/GDX12Resource.h"
 
 #include "Engine.Core/Types/MeshTypes.h"
 #include "Engine.Core/AssetHandles.h"
@@ -59,7 +60,10 @@ public:
 	ID3D12Resource* BeginSkinning(GDX12CommandList* commands);
 	void EndSkinning(GDX12CommandList* commands);
 	const GPUMesh* GetGPUMeshByHandle(MeshHandle handle);
-    D3D12_GPU_VIRTUAL_ADDRESS GetVertexAddress() const { return _vertexBuffer ? _vertexBuffer->GetGPUVirtualAddress() : 0; }
+    D3D12_GPU_VIRTUAL_ADDRESS GetVertexAddress() const
+    { return _vertexBuffer ? _vertexBuffer->D3DResource->GetGPUVirtualAddress() : 0; }
+    std::shared_ptr<GDX12Resource> ShareVertexResource() const { return _vertexBuffer; }
+    std::shared_ptr<GDX12Resource> ShareIndexResource() const { return _indexBuffer; }
 
 private:
 	friend class RenderModule;
@@ -76,12 +80,13 @@ private:
 	std::vector<Vertex> _vertexDataCPU;
 	std::vector<uint32_t> _indexDataCPU;
 
-	GDX12ResourceHandle _vertexBuffer;
-	GDX12ResourceHandle _indexBuffer;
+	std::shared_ptr<GDX12Resource> _vertexBuffer;
+	std::shared_ptr<GDX12Resource> _indexBuffer;
 	D3D12_VERTEX_BUFFER_VIEW _vertexBufferView;
 	D3D12_INDEX_BUFFER_VIEW _indexBufferView;
 
-	D3D12_RESOURCE_STATES _vertexState = D3D12_RESOURCE_STATE_COMMON;
+	static constexpr auto VertexReadState = static_cast<D3D12_RESOURCE_STATES>(
+        UINT(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER) | UINT(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
 	std::map<UINT, UINT> _freeSkinRanges;
 	std::map<UINT, UINT> _freeIndexRanges;
 	UINT _totalVertices;

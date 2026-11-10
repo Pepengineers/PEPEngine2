@@ -13,6 +13,22 @@
 
 using namespace GDX12Submission;
 
+namespace
+{
+    bool AccessStateMatches(GDX12RenderGraph::Mode mode, D3D12_RESOURCE_STATES state)
+    {
+        using Mode = GDX12RenderGraph::Mode;
+        const auto writeStates = D3D12_RESOURCE_STATE_RENDER_TARGET | D3D12_RESOURCE_STATE_UNORDERED_ACCESS |
+            D3D12_RESOURCE_STATE_DEPTH_WRITE | D3D12_RESOURCE_STATE_STREAM_OUT |
+            D3D12_RESOURCE_STATE_COPY_DEST | D3D12_RESOURCE_STATE_RESOLVE_DEST;
+        const auto write = state & writeStates;
+        if (!write) return mode == Mode::Read;
+        if (mode == Mode::Read && write != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) return false;
+        const auto bits = static_cast<UINT>(write);
+        return state == write && (bits & (bits - 1)) == 0;
+    }
+}
+
 GDX12RenderGraph::GDX12RenderGraph(GDX12Device* device) : _device(device) {}
 GDX12RenderGraph::~GDX12RenderGraph() = default;
 
@@ -273,12 +289,12 @@ const GDX12RenderGraph::CompiledPlan& GDX12RenderGraph::GetCompiledPlan() const
 }
 
 void GDX12RenderGraph::SetLegacySplit(GDX12RenderPass& replaced, std::vector<IRenderPassLink*> inputs,
-    std::vector<IRenderPassLink*> outputs)
+    std::vector<IRenderPassLink*> outputs, ResolveLegacyExternalViews resolveExternal)
 {
     if (_executingSplit) throw std::logic_error("Cannot change legacy splits during execution");
     const auto node = std::find_if(_nodes.begin(), _nodes.end(), [&](const Node& entry) { return entry.Instance == &replaced; });
-    if (node == _nodes.end() || node->HasPlacement || outputs.empty())
-        throw std::invalid_argument("Legacy split requires a graph-owned legacy pass with physical outputs");
+    if (node == _nodes.end() || node->HasPlacement || (outputs.empty() && !resolveExternal))
+        throw std::invalid_argument("Legacy split requires a graph-owned legacy pass and a physical boundary");
     const auto resolve = [&](const std::vector<IRenderPassLink*>& links, bool write)
     {
         std::vector<Resource> result;
@@ -294,7 +310,7 @@ void GDX12RenderGraph::SetLegacySplit(GDX12RenderPass& replaced, std::vector<IRe
         }
         return result;
     };
-    LegacySplit split{ resolve(inputs, false), resolve(outputs, true) };
+    LegacySplit split{ resolve(inputs, false), resolve(outputs, true), std::move(resolveExternal) };
     for (const auto& access : node->Accesses)
         if (!_resources[access.Id].LogicalToken)
         {
@@ -351,14 +367,7 @@ void GDX12RenderGraph::CompileInternal(bool reuseTextures, const bool allocateTe
                     D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT | D3D12_RESOURCE_STATE_COPY_SOURCE | D3D12_RESOURCE_STATE_COPY_DEST;
                 if (node.Location.Queue == QueueKind::Compute && (access.State & ~computeStates) != 0)
                     throw std::logic_error("Render graph: illegal COMPUTE state: " + resource.Name);
-                const auto writeStates = D3D12_RESOURCE_STATE_RENDER_TARGET | D3D12_RESOURCE_STATE_UNORDERED_ACCESS |
-                    D3D12_RESOURCE_STATE_DEPTH_WRITE | D3D12_RESOURCE_STATE_STREAM_OUT |
-                    D3D12_RESOURCE_STATE_COPY_DEST | D3D12_RESOURCE_STATE_RESOLVE_DEST;
-                const auto writeState = access.State & writeStates;
-                if ((access.Usage != Mode::Read && writeState == 0) ||
-                    (access.Usage == Mode::Read && (writeState & ~D3D12_RESOURCE_STATE_UNORDERED_ACCESS) != 0) ||
-                    (writeState != 0 && (access.State != writeState ||
-                        (static_cast<UINT>(writeState) & (static_cast<UINT>(writeState) - 1)) != 0)))
+                if (!AccessStateMatches(access.Usage, access.State))
                     throw std::logic_error("Render graph: resource state conflicts with access mode: " + resource.Name);
             }
             if (resource.Registered && !node.HasPlacement)
@@ -1251,13 +1260,32 @@ GDX12CommandList* GDX12RenderGraph::ExecuteLegacySplit(GDX12CommandList* command
     _executingSplit = true;
     ResetLegacyStatistics();
 
+    struct LoanOwner
+    {
+        ResourceIdentity Identity;
+        std::shared_ptr<GDX12Resource> Native;
+        GDX12ResourceHandle Handle;
+    };
+    struct Captured
+    {
+        GDX12Resource* Native;
+        GDX12ResourceHandle Handle;
+        D3D12_RESOURCE_STATES BoundaryState = D3D12_RESOURCE_STATE_COMMON;
+        D3D12_RESOURCE_STATES SavedState = D3D12_RESOURCE_STATE_COMMON;
+        bool External = false;
+        std::optional<D3D12_RESOURCE_STATES> LegacyAfter;
+    };
+    std::shared_ptr<std::vector<LoanOwner>> frameOwners;
     UINT begin = 0;
     for (UINT i = 0; i < _order.size(); ++i)
     {
         const auto pass = _order[i];
         const auto point = _legacySplits.find(pass);
         if (point == _legacySplits.end()) continue;
-        std::vector<std::pair<GDX12Resource*, GDX12ResourceHandle>> handles;
+        auto external = point->second.ResolveExternal ? point->second.ResolveExternal() : std::vector<LegacyExternalView>{};
+        if (!_compiled) throw std::logic_error("Legacy graph changed while resolving its boundary");
+        if (point->second.ResolveExternal && external.empty()) continue;
+        std::vector<Captured> handles;
         const auto capture = [&](const std::vector<Resource>& ids, bool write)
         {
             std::vector<LegacyBoundaryView> views;
@@ -1271,10 +1299,10 @@ GDX12CommandList* GDX12RenderGraph::ExecuteLegacySplit(GDX12CommandList* command
                 auto* native = texture->_resource.get();
                 auto& handle = native->D3DResource;
                 bool known = false;
-                for (const auto& [owner, other] : handles)
-                    if (other.Get() == handle.Get())
+                for (const auto& other : handles)
+                    if (other.Handle.Get() == handle.Get())
                     {
-                        if (owner != native)
+                        if (other.Native != native)
                             throw std::invalid_argument("Legacy split boundary has competing native resource trackers");
                         known = true;
                     }
@@ -1285,13 +1313,69 @@ GDX12CommandList* GDX12RenderGraph::ExecuteLegacySplit(GDX12CommandList* command
                     ThrowIfFailed(handle->GetHeapProperties(&heap, nullptr));
                     if (heap.Type != D3D12_HEAP_TYPE_DEFAULT)
                         throw std::invalid_argument("Legacy split boundary requires a DEFAULT resource");
-                    handles.emplace_back(native, handle);
+                    handles.push_back({ native, handle });
                 }
                 views.push_back({ entry.Link, texture, texture->_resource });
             }
             return views;
         };
-        const LegacyBoundary boundary{ _nodes[pass].Instance, capture(point->second.Inputs, false), capture(point->second.Outputs, true) };
+        const LegacyBoundary boundary{ _nodes[pass].Instance, capture(point->second.Inputs, false),
+            capture(point->second.Outputs, true), std::move(external) };
+        for (const auto& loan : boundary.ExternalViews)
+        {
+            const auto& identity = loan.Identity;
+            if (!loan.Native || !loan.Native->D3DResource || identity.Adapter != _device->GetSubmissionAdapterId() ||
+                identity.Id == ResourceId::Invalid || identity.ResourceEpoch == Epoch::Invalid ||
+                identity.Allocation == AllocationId::Invalid ||
+                (loan.Usage != Mode::Read && loan.Usage != Mode::Write && loan.Usage != Mode::ReadWrite) ||
+                (loan.Usage != Mode::Read && !loan.LegacyAfter))
+                throw std::invalid_argument("Legacy external view requires a complete primary allocation and state contract");
+            const auto& handle = loan.Native->D3DResource;
+            if (std::any_of(handles.begin(), handles.end(), [&](const Captured& entry)
+                { return entry.Handle.Get() == handle.Get(); }) ||
+                std::any_of(_slots.begin(), _slots.end(), [&](const Slot& slot)
+                { return slot.ResourceObject->D3DResource.Get() == handle.Get(); }))
+                throw std::invalid_argument("Legacy external view duplicates a boundary or bypasses texture pool pinning");
+            CheckNativeOwner(handle.Get(), *_device);
+            D3D12_HEAP_PROPERTIES heap{};
+            ThrowIfFailed(handle->GetHeapProperties(&heap, nullptr));
+            PlacedView view;
+            view.Binding = { 0, identity, loan.Native };
+            view.Handle = handle;
+            view.Desc = handle->GetDesc();
+            view.Heap = heap.Type;
+            if ((view.Desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER) ||
+                (heap.Type != D3D12_HEAP_TYPE_DEFAULT && heap.Type != D3D12_HEAP_TYPE_UPLOAD))
+                throw std::invalid_argument("Legacy external view must be primary-local DEFAULT or UPLOAD");
+            if (heap.Type == D3D12_HEAP_TYPE_UPLOAD)
+            {
+                view.Entry = D3D12_RESOURCE_STATE_GENERIC_READ;
+                if (loan.Native->GetCurrentState() != view.Entry || (loan.LegacyAfter && *loan.LegacyAfter != view.Entry))
+                    throw std::invalid_argument("Legacy UPLOAD view must preserve its fixed GENERIC_READ state");
+            }
+            if (!AccessStateMatches(loan.Usage, loan.PlacedState))
+                throw std::invalid_argument("Legacy external view state conflicts with its access mode");
+            CheckNativeAccess(view, { 0, loan.Usage, loan.PlacedState });
+            if (loan.LegacyAfter && *loan.LegacyAfter != D3D12_RESOURCE_STATE_COMMON)
+            {
+                if (!AccessStateMatches(Mode::Read, *loan.LegacyAfter) && !AccessStateMatches(Mode::Write, *loan.LegacyAfter))
+                    throw std::invalid_argument("Legacy external view has an incompatible resume state");
+                CheckNativeAccess(view, { 0, Mode::Read, *loan.LegacyAfter });
+            }
+
+            if (!frameOwners) frameOwners = std::make_shared<std::vector<LoanOwner>>();
+            bool known = false;
+            for (const auto& prior : *frameOwners)
+                if (prior.Native == loan.Native || prior.Handle.Get() == handle.Get() || SameBacking(prior.Identity, identity))
+                {
+                    if (prior.Native != loan.Native || prior.Handle.Get() != handle.Get() ||
+                        !SameIdentity(prior.Identity, identity))
+                        throw std::invalid_argument("Legacy external view changed canonical owner or identity across replacements");
+                    known = true;
+                }
+            if (!known) frameOwners->push_back({ identity, loan.Native, handle });
+            handles.push_back({ loan.Native.get(), handle, view.Entry, D3D12_RESOURCE_STATE_COMMON, true, loan.LegacyAfter });
+        }
         const auto validateBoundary = [&]
         {
             if (!_compiled) throw std::logic_error("Legacy graph changed during split execution");
@@ -1299,24 +1383,31 @@ GDX12CommandList* GDX12RenderGraph::ExecuteLegacySplit(GDX12CommandList* command
                 for (const auto& view : *views)
                     if (view.Link->GetTexture() != view.Texture || view.Texture->GetResource() != view.Native.get())
                         throw std::logic_error("Legacy split boundary link changed during the segment");
-            for (const auto& [view, handle] : handles)
-                if (view->D3DResource.Get() != handle.Get())
+            for (const auto& entry : handles)
+                if (entry.Native->D3DResource.Get() != entry.Handle.Get())
                     throw std::logic_error("Legacy split boundary native allocation changed during the segment");
         };
 
-        commands = RecordLegacyRange(commands, computeQueue, begin, i);
+        commands = RecordLegacyRange(commands, computeQueue, begin, i, frameOwners);
         validateBoundary();
-        for (const auto& [view, handle] : handles)
-            if (view->GetCurrentState() != D3D12_RESOURCE_STATE_COMMON)
-                commands->ResourceBarrier({ view->GetCommonBarrier() });
+        for (auto& entry : handles)
+        {
+            entry.SavedState = entry.Native->GetCurrentState();
+            if (entry.External && entry.SavedState == UnmanagedState)
+                throw std::logic_error("Legacy prefix left an external tracker without an exact state");
+            if (entry.BoundaryState != D3D12_RESOURCE_STATE_COMMON && entry.SavedState != entry.BoundaryState)
+                throw std::logic_error("Legacy prefix mutated a fixed heap state");
+            if (entry.SavedState != entry.BoundaryState)
+                commands->ResourceBarrier({ entry.Native->GetTransitionBarrier(entry.BoundaryState) });
+        }
         direct->ExecuteCommandList(commands);
         const auto prefix = direct->GetLastCompletionPoint();
         const auto replacement = submit(boundary, prefix);
         ThrowIfFailed(_device->GetDevice()->GetDeviceRemovedReason());
         validateBoundary();
-        for (const auto& [view, handle] : handles)
-            if (view->GetCurrentState() != D3D12_RESOURCE_STATE_COMMON)
-                throw std::logic_error("Legacy replacement must release its boundary to COMMON");
+        for (const auto& entry : handles)
+            if (entry.Native->GetCurrentState() != entry.BoundaryState)
+                throw std::logic_error("Legacy replacement did not restore its boundary state");
         const auto latest = direct->GetLastCompletionPoint();
         if (!prefix.IsValid() || !(prefix.Timeline() == direct->GetTimelineIdentity()) ||
             !(latest.Timeline() == prefix.Timeline()))
@@ -1335,13 +1426,28 @@ GDX12CommandList* GDX12RenderGraph::ExecuteLegacySplit(GDX12CommandList* command
             begin = i;
         }
         commands = direct->GetCommandList();
+        if (frameOwners) commands->_legacyOwners.push_back(frameOwners);
+        for (const auto& entry : handles)
+            if (entry.External)
+            {
+                const auto state = replacement ? entry.LegacyAfter.value_or(entry.SavedState) : entry.SavedState;
+                if (state != entry.BoundaryState)
+                    commands->ResourceBarrier({ entry.Native->GetTransitionBarrier(state) });
+            }
     }
-    return RecordLegacyRange(commands, computeQueue, begin, static_cast<UINT>(_order.size()));
+    return RecordLegacyRange(commands, computeQueue, begin, static_cast<UINT>(_order.size()), frameOwners);
 }
 
 GDX12CommandList* GDX12RenderGraph::RecordLegacyRange(GDX12CommandList* commands, GDX12CommandQueue* computeQueue,
-    UINT begin, UINT end)
+    UINT begin, UINT end, const std::shared_ptr<const void>& owners)
 {
+    const auto retain = [&](GDX12CommandList* list)
+    {
+        if (owners && (list->_legacyOwners.empty() || list->_legacyOwners.back() != owners))
+            list->_legacyOwners.push_back(owners);
+        return list;
+    };
+    retain(commands);
     auto* directQueue = _device ? _device->GetCommandQueue() : nullptr;
     struct TextureAccess { GDX12Resource* Resource; Mode Usage; };
     struct Pending
@@ -1379,7 +1485,7 @@ GDX12CommandList* GDX12RenderGraph::RecordLegacyRange(GDX12CommandList* commands
         if (!count) return;
         directQueue->ExecuteCommandList(commands);
         directQueue->WaitForQueue(*computeQueue, pending[count - 1].Fence);
-        commands = directQueue->GetCommandList();
+        commands = retain(directQueue->GetCommandList());
         _statistics.JoinBefore = before;
         ++_statistics.AsyncJoins;
         for (size_t i = 0; i < count; ++i) _nodes[pending[i].Id].LastJoinBefore = before;
@@ -1510,8 +1616,8 @@ GDX12CommandList* GDX12RenderGraph::RecordLegacyRange(GDX12CommandList* commands
             computeQueue->WaitForQueue(*directQueue, commands->FenceValue);
             _statistics.ForkFence = commands->FenceValue;
             node.LastForkFence = commands->FenceValue;
-            commands = directQueue->GetCommandList();
-            auto* compute = computeQueue->GetCommandList();
+            commands = retain(directQueue->GetCommandList());
+            auto* compute = retain(computeQueue->GetCommandList());
             timer->Start(compute);
             for (const auto& access : textures)
                 if (access.Usage != Mode::Read)

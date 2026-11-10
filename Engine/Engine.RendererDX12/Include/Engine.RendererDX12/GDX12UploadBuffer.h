@@ -118,6 +118,7 @@ void GDX12UploadBuffer<T>::CreateBuffer()
     {
         _buffer.D3DResource = _device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, resourceDesc,
             D3D12_RESOURCE_STATE_GENERIC_READ, nullptr);
+        _buffer.SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
         ThrowIfFailed(_buffer.D3DResource->Map(0, nullptr, reinterpret_cast<void**>(&_mappedData)));
         // Reused heap regions need the same initial contents as fresh committed upload buffers.
         std::memset(_mappedData, 0, _totalBufferSize);

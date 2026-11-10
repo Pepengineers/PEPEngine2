@@ -59,6 +59,7 @@ void GDX12CommandList::Reset()
     _retirement = {};
     _retirementFence.Reset();
     _submitted = false;
+    _legacyOwners.clear();
     InvalidateCachedState();
 }
 
@@ -169,6 +170,11 @@ void GDX12CommandList::SetScissorRect(const D3D12_RECT& scissorRect)
 void GDX12CommandList::SetGeometryBuffer(GDX12GeometryBuffer* buffer)
 {
     RequireDirect();
+    if (buffer && buffer->_vertexBuffer &&
+        buffer->_vertexBuffer->GetCurrentState() != GDX12GeometryBuffer::VertexReadState)
+        ResourceBarrier({ buffer->_vertexBuffer->GetTransitionBarrier(GDX12GeometryBuffer::VertexReadState) });
+    if (buffer && buffer->_indexBuffer && buffer->_indexBuffer->GetCurrentState() != D3D12_RESOURCE_STATE_INDEX_BUFFER)
+        ResourceBarrier({ buffer->_indexBuffer->GetTransitionBarrier(D3D12_RESOURCE_STATE_INDEX_BUFFER) });
 	if (_currentGeometryBuffer == buffer) { return; }
 
 	_currentGeometryBuffer = buffer;

@@ -1,6 +1,7 @@
 #include "App.Base/App.h"
 #include "Engine.RendererDX12/GDX12RenderGraph.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
+#include "Engine.RendererDX12/GDX12UploadBuffer.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 #include <d3d12sdklayers.h>
 #include <iostream>
@@ -1826,6 +1827,237 @@ static void Run(GDX12Device& device)
 }
 }
 
+namespace LegacyLoanTests
+{
+using namespace GDX12Submission;
+
+class BufferPass final : public TestPass
+{
+public:
+    BufferPass(const char* name, std::function<void(GDX12CommandList*)> record, std::vector<Graph::BufferAccess> accesses = {})
+        : TestPass(name, {}, true), Record(std::move(record)), Accesses(std::move(accesses)) {}
+    void Execute(GDX12CommandList* list) override { Record(list); }
+    std::vector<Graph::BufferAccess> GetBufferAccesses() const override { return Accesses; }
+private:
+    std::function<void(GDX12CommandList*)> Record;
+    std::vector<Graph::BufferAccess> Accesses;
+};
+
+static void BufferOnlyDeclaration()
+{
+    Graph graph;
+    BufferPass producer("buffer-only point", [](GDX12CommandList*) {});
+    graph.AddPass(producer);
+    Reject([&] { graph.SetLegacySplit(producer, {}, {}); }, "Boundary-less split accepted without explicit resolver");
+    graph.SetLegacySplit(producer, {}, {}, [] { return std::vector<Graph::LegacyExternalView>{}; });
+    graph.CompilePlan();
+}
+
+static void GeometryOwnership(GDX12Device& device)
+{
+    SubMesh triangle;
+    triangle.Vertices.resize(3);
+    triangle.Indices = {0, 1, 2};
+    Mesh mesh({std::move(triangle)}, DirectX::BoundingBox{});
+    GDX12GeometryBuffer geometry(&device);
+    geometry.AddMesh(&mesh, MeshHandle{1});
+    auto old = geometry.ShareVertexResource();
+    auto oldIndex = geometry.ShareIndexResource();
+    Require(old && old->D3DResource && old->D3DResource->GetGPUVirtualAddress() == geometry.GetVertexAddress(),
+        "Mesh vertex binding did not use its canonical allocation");
+    auto* direct = device.GetCommandQueue();
+    auto* list = direct->GetCommandList();
+    Require(geometry.BeginSkinning(list) == old->D3DResource.Get() &&
+        old->GetCurrentState() == D3D12_RESOURCE_STATE_UNORDERED_ACCESS, "Skinning did not update the canonical vertex state");
+    geometry.EndSkinning(list);
+    Require(old->GetCurrentState() ==
+        (D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+        "Skinning did not restore the vertex read state");
+    list->SetGeometryBuffer(&geometry);
+    Require(oldIndex && oldIndex->GetCurrentState() == D3D12_RESOURCE_STATE_INDEX_BUFFER,
+        "IA bind did not acquire the canonical index view");
+    direct->ExecuteCommandList(list);
+    auto* native = old->D3DResource.Get();
+    auto* nativeIndex = oldIndex->D3DResource.Get();
+    geometry.AddMesh(&mesh, MeshHandle{2});
+    Require(geometry.ShareVertexResource() != old && old->D3DResource.Get() == native &&
+        geometry.ShareIndexResource() != oldIndex && oldIndex->D3DResource.Get() == nativeIndex,
+        "Geometry growth mutated an already-retained allocation");
+    direct->Flush();
+}
+
+static void Frame(GDX12Device& device)
+{
+    auto* direct = device.GetCommandQueue();
+    auto* compute = device.TryGetComputeQueue();
+    auto* copy = device.TryGetCopyQueue();
+    Require(direct && compute && copy, "Legacy loan fixture requires primary DIRECT, COMPUTE and COPY");
+    const auto adapter = device.GetSubmissionAdapterId();
+    auto owner = PlacedTests::MakeResource(device, D3D12_HEAP_TYPE_DEFAULT);
+    auto* loan = owner.get();
+    const std::weak_ptr<GDX12Resource> lifetime = owner;
+    auto legacyUpload = PlacedTests::MakeResource(device, D3D12_HEAP_TYPE_UPLOAD);
+    auto retainedUpload = std::make_shared<GDX12UploadBuffer<UINT>>(&device, UINT(PlacedTests::Bytes / sizeof(UINT)), EBufferType::Upload, false);
+    auto uploadView = std::shared_ptr<GDX12Resource>(retainedUpload, &retainedUpload->GetResource());
+    Require(uploadView->GetCurrentState() == D3D12_RESOURCE_STATE_GENERIC_READ, "UPLOAD tracker lacks its canonical fixed state");
+    PlacedTests::Fill(*legacyUpload, 23);
+    PlacedTests::Fill(*uploadView, 41);
+    auto middleResult = PlacedTests::MakeResource(device, D3D12_HEAP_TYPE_READBACK);
+    auto tailResult = PlacedTests::MakeResource(device, D3D12_HEAP_TYPE_READBACK);
+    const ResourceIdentity loanId{ResourceId{101}, adapter, Epoch{1}, TransferId::Invalid, AllocationId{101}};
+    const ResourceIdentity uploadId{ResourceId{102}, adapter, Epoch{1}, TransferId::Invalid, AllocationId{102}};
+    const auto write = [&](GDX12CommandList* list)
+    {
+        list->ResourceBarrier({loan->GetCopyDestBarrier()});
+        list->CopyResource(loan->D3DResource.Get(), legacyUpload->D3DResource.Get());
+    };
+    unsigned firstLocal = 0, secondLocal = 0, visits = 0;
+    BufferPass prefix("legacy producer", write, {{loan, Mode::Write}});
+    BufferPass first("placed external output", [&](GDX12CommandList*) { ++firstLocal; });
+    BufferPass middle("use first replacement", [&](GDX12CommandList* list)
+    {
+        Require(loan->GetCurrentState() == D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+            "Success did not reacquire declared legacy state");
+        list->ResourceBarrier({loan->GetCopySourceBarrier()});
+        list->CopyResource(middleResult->D3DResource.Get(), loan->D3DResource.Get());
+    }, {{loan, Mode::Read}});
+    BufferPass second("legacy fallback", [&](GDX12CommandList* list)
+    {
+        ++secondLocal;
+        Require(loan->GetCurrentState() == D3D12_RESOURCE_STATE_COPY_SOURCE,
+            "No-submit fallback did not restore the actual post-prefix state");
+        write(list);
+    }, {{loan, Mode::Write}});
+    BufferPass tail("legacy async reader", [&](GDX12CommandList* list)
+    {
+        Require(list->GetType() == D3D12_COMMAND_LIST_TYPE_COMPUTE, "Tail reader lost COMPUTE placement");
+        list->ResourceBarrier({loan->GetCopySourceBarrier()});
+        list->CopyResource(tailResult->D3DResource.Get(), loan->D3DResource.Get());
+    }, {{loan, Mode::Read}});
+    tail.Async = true;
+    Graph graph(&device);
+    const auto prefixId = graph.AddPass(prefix), firstId = graph.AddPass(first), midId = graph.AddPass(middle);
+    const auto secondId = graph.AddPass(second), tailId = graph.AddPass(tail);
+    graph.DependsOn(firstId, prefixId); graph.DependsOn(midId, firstId);
+    graph.DependsOn(secondId, midId); graph.DependsOn(tailId, secondId);
+    enum class Invalid { None, UploadWrite, MissingResume, DuplicateIdentity };
+    Invalid invalid = Invalid::None;
+    const auto resolve = [&]
+    {
+        std::vector<Graph::LegacyExternalView> views{
+            {loanId, owner, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
+            {uploadId, uploadView, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE, std::nullopt}};
+        if (invalid == Invalid::UploadWrite)
+        {
+            views[1].Usage = Mode::Write;
+            views[1].PlacedState = D3D12_RESOURCE_STATE_COPY_DEST;
+            views[1].LegacyAfter = D3D12_RESOURCE_STATE_GENERIC_READ;
+        }
+        else if (invalid == Invalid::MissingResume) views[0].LegacyAfter.reset();
+        else if (invalid == Invalid::DuplicateIdentity) views[1].Identity = loanId;
+        return views;
+    };
+    graph.SetLegacySplit(first, {}, {}, resolve);
+    graph.SetLegacySplit(second, {}, {}, resolve);
+    graph.Compile();
+    const auto before = direct->GetLastCompletionPoint();
+    for (auto fault : {Invalid::UploadWrite, Invalid::MissingResume, Invalid::DuplicateIdentity})
+    {
+        invalid = fault;
+        Reject([&] { graph.ExecuteLegacySplit(direct->GetCommandList(), compute,
+            [](const Graph::LegacyBoundary&, CompletionPoint) -> std::optional<CompletionPoint> { return std::nullopt; }); },
+            "Invalid external view reached a split prefix");
+        Require(direct->GetLastCompletionPoint().Value() == before.Value(), "Invalid external view submitted legacy work");
+    }
+    invalid = Invalid::None;
+    {
+        auto original = loan->D3DResource;
+        Reject([&] { graph.ExecuteLegacySplit(direct->GetCommandList(), compute,
+            [&](const Graph::LegacyBoundary&, CompletionPoint) -> std::optional<CompletionPoint>
+            {
+                loan->D3DResource = middleResult->D3DResource;
+                return std::nullopt;
+            }); }, "Native view rebinding was accepted across a split");
+        loan->D3DResource = std::move(original);
+        direct->Flush();
+        Require(firstLocal == 0 && secondLocal == 0, "Native view mutation invoked a local fallback");
+    }
+
+    ComPtr<ID3D12Fence> copyFence, tailFence;
+    Graph::PlanExecutor executor(1);
+    PlacedTests::Gate gateCopy(device, *copy, copyFence);
+    CompletionPoint finalized;
+    auto* finalList = graph.ExecuteLegacySplit(direct->GetCommandList(), compute,
+        [&](const Graph::LegacyBoundary& boundary, CompletionPoint prefixPoint) -> std::optional<CompletionPoint>
+        {
+            ++visits;
+            Require(boundary.Inputs.empty() && boundary.Outputs.empty() && boundary.ExternalViews.size() == 2 &&
+                boundary.ExternalViews[0].Native.get() == loan && loan->GetCurrentState() == D3D12_RESOURCE_STATE_COMMON &&
+                uploadView->GetCurrentState() == D3D12_RESOURCE_STATE_GENERIC_READ, "Wrong buffer-only boundary release");
+            if (boundary.Replaced == &second)
+            {
+                Require(prefixPoint.Value() > finalized.Value(), "Second split lost the earlier replacement dependency");
+                return std::nullopt;
+            }
+            Require(boundary.Replaced == &first, "Unexpected external-view split");
+            Graph placed;
+            Graph::ExecutionBindings bindings;
+            bindings.Queues = {{&device, direct}, {&device, copy}};
+            const auto in = PlacedTests::Register(placed, bindings, "fixed upload", device,
+                boundary.ExternalViews[1].Native, 102, 102, {}, true);
+            const auto out = PlacedTests::Register(placed, bindings, "loan", device,
+                boundary.ExternalViews[0].Native, 101, 101, {}, true);
+            PlacedTests::Pass pending("gated dependency", {adapter, QueueKind::Copy}, {},
+                [](GDX12CommandList&, const Graph::BoundResources&) {});
+            auto fill = PlacedTests::Copy("write legacy buffer", {adapter, QueueKind::Direct}, in, out);
+            const auto producer = placed.AddPass(pending), consumer = placed.AddPass(fill);
+            placed.DependsOn(consumer, producer); placed.CompilePlan();
+            const auto issued = executor.TrySubmit(placed, bindings);
+            Require(issued.has_value(), "Placed loan submission deferred");
+            finalized = issued->Batches.back();
+            PlacedTests::RequireReached(prefixPoint, *direct);
+            Require(!finalized.IsReachedBy(direct->GetCompletionProgress()), "Loan callback bypassed its gated dependency");
+            return finalized;
+        });
+    const auto beforeTail = direct->GetLastCompletionPoint();
+    PlacedTests::Gate gateTail(device, *direct, tailFence);
+    direct->ExecuteCommandList(finalList);
+    const auto tailPoint = direct->GetLastCompletionPoint();
+    owner.reset();
+    gateCopy.Open();
+    PlacedTests::RequireReached(beforeTail, *direct);
+    compute->CPUWaitForFenceValue(compute->GetLastCompletionPoint().Value());
+    executor.CollectCompleted();
+
+    // Recycle the earlier completed lists while the real final DIRECT list is still pending.
+    std::vector<GDX12CommandList*> recycled;
+    for (int i = 0; i < 8; ++i) recycled.push_back(direct->GetCommandList());
+    auto* recycledCompute = compute->GetCommandList();
+    const bool retained = !lifetime.expired() && executor.PendingCount() == 0 &&
+        !tailPoint.IsReachedBy(direct->GetCompletionProgress());
+    gateTail.Open();
+    direct->CPUWaitForFenceValue(tailPoint.Value());
+    auto* recycledTail = direct->GetCommandList();
+    const bool retired = lifetime.expired();
+    recycled.push_back(recycledTail);
+    direct->ExecuteCommandLists(recycled);
+    compute->ExecuteCommandList(recycledCompute);
+    direct->Flush(); compute->Flush();
+    Require(retained && retired, "External buffer ownership did not follow the actual final DIRECT list");
+    Require(visits == 2 && firstLocal == 0 && secondLocal == 1 && graph.GetStatistics().AsyncJoins == 1,
+        "External-buffer replacement/fallback or tail order changed");
+    PlacedTests::CheckPayload(*middleResult, 41);
+    PlacedTests::CheckPayload(*tailResult, 23);
+    std::cout << "Legacy external views: buffer-only, fixed UPLOAD, two splits, reacquire, fallback and DIRECT tail retention passed.\n";
+}
+
+static void Run(GDX12Device& device)
+{
+    GeometryOwnership(device);
+    Frame(device);
+}
+}
+
 int main(int argc, char** argv)
 {
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
@@ -1836,6 +2068,7 @@ int main(int argc, char** argv)
         TestPassRecording();
         PlanTests::Run();
         LegacyBridgeTests::Declarations();
+        LegacyLoanTests::BufferOnlyDeclaration();
         for (int i = 1; i < argc; ++i)
             if (std::string_view(argv[i]) == "--compiler-only")
             {
@@ -1875,6 +2108,7 @@ int main(int argc, char** argv)
             PlacedTests::ExactAndRetirement(device);
             PlacedTests::TextureUAV(device);
             LegacyBridgeTests::Run(device);
+            LegacyLoanTests::Run(device);
         }
         if (requireTwo)
         {

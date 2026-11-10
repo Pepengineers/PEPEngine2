@@ -23,9 +23,8 @@ void GDX12GeometryBuffer::Clear()
     _meshCache.clear();
     _freeSkinRanges.clear();
     _freeIndexRanges.clear();
-    _vertexState = D3D12_RESOURCE_STATE_COMMON;
-    _vertexBuffer.Reset();
-    _indexBuffer.Reset();
+    _vertexBuffer.reset();
+    _indexBuffer.reset();
     _vertexBufferView = {};
     _indexBufferView = {};
     _totalIndices = 0;
@@ -36,8 +35,10 @@ void GDX12GeometryBuffer::ResizeVertexBuffer(const UINT newSize, const UINT upda
 {
     if (newSize > UINT_MAX / VERTEX_SIZE) throw std::overflow_error("Vertex buffer exceeds 32-bit addressing");
     auto desc = CD3DX12_RESOURCE_DESC::Buffer(newSize * VERTEX_SIZE, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
-    auto newBuffer = _device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc,
+    auto newBuffer = std::make_shared<GDX12Resource>();
+    newBuffer->D3DResource = _device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc,
         D3D12_RESOURCE_STATE_COPY_DEST, nullptr);
+    newBuffer->SetCurrentState(D3D12_RESOURCE_STATE_COPY_DEST);
     auto uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(newSize * VERTEX_SIZE);
     auto uploadBuffer = _device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, uploadDesc,
         D3D12_RESOURCE_STATE_GENERIC_READ, nullptr);
@@ -49,26 +50,22 @@ void GDX12GeometryBuffer::ResizeVertexBuffer(const UINT newSize, const UINT upda
     auto queue = _device->GetCommandQueue();
     auto commands = queue->GetCommandList();
     auto* list = commands->GetCommandList().Get();
-    list->CopyBufferRegion(newBuffer.Get(), 0, uploadBuffer.Get(), 0, newSize * VERTEX_SIZE);
+    list->CopyBufferRegion(newBuffer->D3DResource.Get(), 0, uploadBuffer.Get(), 0, newSize * VERTEX_SIZE);
     if (_vertexBuffer)
     {
-        auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(_vertexBuffer.Get(), _vertexState, D3D12_RESOURCE_STATE_COPY_SOURCE);
-        list->ResourceBarrier(1, &barrier);
+        commands->ResourceBarrier({ _vertexBuffer->GetCopySourceBarrier() });
         // Existing dynamic slices contain the last rendered pose, not their CPU initialization.
-        list->CopyBufferRegion(newBuffer.Get(), 0, _vertexBuffer.Get(), 0, _vertexBufferView.SizeInBytes);
+        list->CopyBufferRegion(newBuffer->D3DResource.Get(), 0, _vertexBuffer->D3DResource.Get(), 0, _vertexBufferView.SizeInBytes);
     }
     if (updateCount)
-        list->CopyBufferRegion(newBuffer.Get(), updateStart * VERTEX_SIZE, uploadBuffer.Get(),
+        list->CopyBufferRegion(newBuffer->D3DResource.Get(), updateStart * VERTEX_SIZE, uploadBuffer.Get(),
             updateStart * VERTEX_SIZE, updateCount * VERTEX_SIZE);
-    auto ready = CD3DX12_RESOURCE_BARRIER::Transition(newBuffer.Get(), D3D12_RESOURCE_STATE_COPY_DEST,
-        (D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
-    list->ResourceBarrier(1, &ready);
+    commands->ResourceBarrier({ newBuffer->GetTransitionBarrier(VertexReadState) });
     queue->ExecuteCommandList(commands);
     queue->Flush();
-    _vertexBuffer = newBuffer;
-    _vertexState = (D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    _vertexBuffer = std::move(newBuffer);
     _totalVertices = newSize;
-    _vertexBufferView.BufferLocation = _vertexBuffer->GetGPUVirtualAddress();
+    _vertexBufferView.BufferLocation = GetVertexAddress();
     _vertexBufferView.SizeInBytes = static_cast<UINT>(_totalVertices * VERTEX_SIZE);
     _vertexBufferView.StrideInBytes = static_cast<UINT>(VERTEX_SIZE);
 }
@@ -124,30 +121,24 @@ void GDX12GeometryBuffer::ReleaseSkinnedVertices(UINT offset, UINT count)
 
 ID3D12Resource* GDX12GeometryBuffer::BeginSkinning(GDX12CommandList* commands)
 {
-    if (_vertexState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
-    {
-        auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(_vertexBuffer.Get(), _vertexState,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        commands->GetCommandList()->ResourceBarrier(1, &barrier);
-        _vertexState = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-    }
-    return _vertexBuffer.Get();
+    if (!_vertexBuffer) throw std::logic_error("Skinning requires an allocated vertex buffer");
+    if (_vertexBuffer->GetCurrentState() != D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+        commands->ResourceBarrier({ _vertexBuffer->GetUnorderedAccessBarrier() });
+    return _vertexBuffer->D3DResource.Get();
 }
 
 void GDX12GeometryBuffer::EndSkinning(GDX12CommandList* commands)
 {
-    if (_vertexState != D3D12_RESOURCE_STATE_UNORDERED_ACCESS) return;
-    auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(_vertexBuffer.Get(), _vertexState,
-        (D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
-    commands->GetCommandList()->ResourceBarrier(1, &barrier);
-    _vertexState = (D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+    if (_vertexBuffer && _vertexBuffer->GetCurrentState() == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+        commands->ResourceBarrier({ _vertexBuffer->GetTransitionBarrier(VertexReadState) });
 }
 
 void GDX12GeometryBuffer::ResizeIndexBuffer(const UINT newSize)
 {
     auto desc = CD3DX12_RESOURCE_DESC::Buffer(newSize * INDEX_SIZE);
 
-    auto newBuffer = _device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc,
+    auto newBuffer = std::make_shared<GDX12Resource>();
+    newBuffer->D3DResource = _device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc,
         D3D12_RESOURCE_STATE_COMMON, nullptr);
 
     auto uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(newSize * INDEX_SIZE);
@@ -162,15 +153,15 @@ void GDX12GeometryBuffer::ResizeIndexBuffer(const UINT newSize)
     auto cmdQueue = _device->GetCommandQueue();
     auto cmdList = cmdQueue->GetCommandList();
 
-    cmdList->GetCommandList()->CopyResource(newBuffer.Get(), uploadBuffer.Get());
+    cmdList->CopyResource(newBuffer->D3DResource.Get(), uploadBuffer.Get());
 
     cmdQueue->ExecuteCommandList(cmdList);
     cmdQueue->Flush();
 
-    _indexBuffer = newBuffer;
+    _indexBuffer = std::move(newBuffer);
     _totalIndices = newSize;
 
-    _indexBufferView.BufferLocation = _indexBuffer->GetGPUVirtualAddress();
+    _indexBufferView.BufferLocation = _indexBuffer->D3DResource->GetGPUVirtualAddress();
     _indexBufferView.SizeInBytes = static_cast<UINT>(_totalIndices * INDEX_SIZE);
     _indexBufferView.Format = DXGI_FORMAT_R32_UINT;
 }

@@ -178,18 +178,29 @@ public:
         GDX12Texture* Texture;
         std::shared_ptr<GDX12Resource> Native;
     };
+    struct LegacyExternalView
+    {
+        GDX12Submission::ResourceIdentity Identity;
+        std::shared_ptr<GDX12Resource> Native;
+        Mode Usage;
+        D3D12_RESOURCE_STATES PlacedState;
+        std::optional<D3D12_RESOURCE_STATES> LegacyAfter;
+    };
+    using ResolveLegacyExternalViews = std::function<std::vector<LegacyExternalView>()>;
     struct LegacyBoundary
     {
         GDX12RenderPass* Replaced;
         std::vector<LegacyBoundaryView> Inputs;
         std::vector<LegacyBoundaryView> Outputs;
+        std::vector<LegacyExternalView> ExternalViews;
     };
     using SubmitLegacyReplacement = std::function<std::optional<GDX12Submission::CompletionPoint>(
         const LegacyBoundary&, GDX12Submission::CompletionPoint prefix)>;
 
     // Call after AddPass and before Compile. Reconfiguring a pass replaces its previous point.
+    // An empty result from a configured resolver keeps that pass in the legacy range.
     void SetLegacySplit(GDX12RenderPass& replaced, std::vector<IRenderPassLink*> inputs,
-        std::vector<IRenderPassLink*> outputs);
+        std::vector<IRenderPassLink*> outputs, ResolveLegacyExternalViews resolve = {});
     // A callback may return nullopt only when it has proven no placed work was submitted.
     GDX12CommandList* ExecuteLegacySplit(GDX12CommandList* commands, GDX12CommandQueue* compute,
         const SubmitLegacyReplacement& submit);
@@ -237,12 +248,13 @@ private:
     struct LegacySplit
     {
         std::vector<Resource> Inputs, Outputs;
+        ResolveLegacyExternalViews ResolveExternal;
     };
     void CompileInternal(bool reuseTextures, bool allocateTextures);
     void CheckLegacyExecution(GDX12CommandQueue* computeQueue) const;
     void ResetLegacyStatistics();
     GDX12CommandList* RecordLegacyRange(GDX12CommandList* commands, GDX12CommandQueue* computeQueue,
-        UINT begin, UINT end);
+        UINT begin, UINT end, const std::shared_ptr<const void>& owners = {});
     void BuildPlan();
     void CheckResource(Resource resource) const;
     void CheckPass(Pass pass) const;

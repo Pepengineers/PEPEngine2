@@ -116,6 +116,9 @@ public:
 
 private:
     friend class GDX12CommandQueue;
+    friend class GDX12RenderGraph;
+    // Held by the queue-owned list until reset is allowed by its issued retirement point.
+    std::vector<std::shared_ptr<const void>> _legacyOwners;
     GDX12CommandQueue* _owner = nullptr;
     GDX12Submission::CompletionPoint _retirement;
     ComPtr<ID3D12Fence> _retirementFence;
