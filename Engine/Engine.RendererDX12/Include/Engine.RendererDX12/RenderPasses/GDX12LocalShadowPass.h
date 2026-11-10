@@ -176,6 +176,11 @@ public:
         return result;
     }
 
+    std::vector<GDX12ShadowOutput> DescribePreparedStaticShadows(const GDX12ShadowSelection& selection) const
+    {
+        return _staticShadows ? _staticShadows->DescribePreparedShadows(selection) : DescribePreparedShadows(selection);
+    }
+
     UINT GetGeometryViewCapacity() const override
     {
         UINT faces = 0;

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="App.vcxproj" />
+  <PropertyGroup>
+    <ProjectGuid>{23D096D6-FD68-4184-8EA0-8A664BA2CBAF}</ProjectGuid>
+  </PropertyGroup>
+  <ItemGroup>
+    <ClCompile Remove="src\App.cpp" />
+    <ClCompile Include="tests\MGPUShadowDepthTransferTests.cpp" />
+    <ClCompile Include="..\..\Engine\Engine.RendererDX12\src\GDX12ShadowDepthTransfer.cpp" />
+  </ItemGroup>
+  <ItemDefinitionGroup>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <Target Name="CopyEngineConfiguration" AfterTargets="Build">
+    <MakeDir Directories="$(TargetDir)Config" />
+    <WriteLinesToFile File="$(TargetDir)Config\Engine.ini" Lines="[ConsoleVariables]" Overwrite="true" />
+  </Target>
+</Project>

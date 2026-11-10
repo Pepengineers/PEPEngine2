@@ -139,6 +139,8 @@ public:
         return BuildSunShadowOutput(_preparedSettings, _preparedRevision, _preparedGeometryRevision, (_preparedFlags & 2u) != 0u);
     }
 
+    void InvalidateCache() { _prepared = _updating = _rendered = false; }
+
     UINT GetGeometryViewCapacity() const override { return 4; }
     const GDX12GeometryContext* GetGeometryView(UINT slot) const override
     { return _prepared && _updating && slot < _views.size() ? &_views[slot] : nullptr; }

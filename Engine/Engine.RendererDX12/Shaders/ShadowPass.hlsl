@@ -54,9 +54,13 @@ void CS(uint3 id : SV_DispatchThreadID)
     }
 }
 #else
+#ifdef SHADOW_REPLICA_IA
+cbuffer DrawConstants : register(b0) { uint InstanceID; uint3 Padding; float4x4 ReplicaViewProj; };
+#else
 #include "InstancedGeometry.hlsli"
 cbuffer DrawConstants : register(b0) { uint InstanceID; uint CascadeIndex; };
 ConstantBuffer<ShadowCB> CBShadow : register(b1);
+#endif
 StructuredBuffer<Material> MaterialCache : register(t0);
 StructuredBuffer<Transform> TransformCache : register(t1);
 StructuredBuffer<InstanceData> InstanceCache : register(t2);
@@ -72,6 +76,9 @@ struct VertexOutput
 
 VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
 {
+#ifdef SHADOW_REPLICA_IA
+    InstanceData instance = InstanceCache[InstanceID];
+#else
     InstanceData instance = InstanceCache[DrawInstance(InstanceID, instanceID, InstanceCache[InstanceID])];
     if (instance.SkinOutputVertex != 0xffffffffu)
     {
@@ -79,9 +86,14 @@ VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID 
         position = vertex.Position;
         uv = vertex.UV;
     }
+#endif
     VertexOutput output;
     float4 world = mul(float4(position, 1), TransformCache[instance.TransformIndex].World);
+#ifdef SHADOW_REPLICA_IA
+    output.Position = mul(world, ReplicaViewProj);
+#else
     output.Position = mul(world, CBShadow.ViewProj[CascadeIndex]);
+#endif
     output.UV = uv;
     output.MaterialIndex = instance.MaterialIndex;
     return output;
@@ -90,6 +102,9 @@ VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID 
 void PS(VertexOutput input)
 {
     Material material = MaterialCache[input.MaterialIndex];
+#ifdef SHADOW_REPLICA_IA
+    if (material.ReflectionProbePreview != 0) clip(-1.0f);
+#endif
     if (material.RenderLayer == 1)
         clip(Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, input.UV).a - 0.5f);
 }
