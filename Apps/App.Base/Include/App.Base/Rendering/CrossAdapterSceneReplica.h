@@ -49,6 +49,7 @@ namespace CrossAdapterSceneReplica
     {
         ResourceView Vertices, Indices;
         UINT VertexCount = 0, IndexCount = 0, MaxRelativeIndex = 0;
+        UINT64 VertexByteOffset = 0, IndexByteOffset = 0;
     };
     struct MeshRange
     {

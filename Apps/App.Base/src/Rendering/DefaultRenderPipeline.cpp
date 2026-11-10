@@ -26,7 +26,7 @@ bool DefaultRenderPipeline::PrepareFrame(RenderPipelineContext& context, GDX12Co
     rebuild |= early != _earlyAO;
     _earlyAO = early;
     _passes->BindAmbientOcclusion(context.Common, _earlyAO);
-    _passes->PrepareFrame(context, commands);
+    rebuild |= _passes->PrepareFrame(context, commands);
     return rebuild;
 }
 
@@ -63,8 +63,7 @@ void DefaultRenderPipeline::LinkInputs(const RenderPipelineGraphInputs& inputs)
 
 void DefaultRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipelineGraphInputs& inputs)
 {
-    _passes->Bindings.SubmitLegacyReplacement = {};
-    _passes->Bindings.RetirePlacedFrame = {};
+    _passes->Bindings.LegacyReplacements.clear();
     LinkInputs(inputs);
     auto& p = *_passes;
     graph.AddPass(p.Environment);
@@ -74,6 +73,7 @@ void DefaultRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipe
     if (_earlyAO) p.AddAmbientOcclusion(graph, _earlyAO);
     graph.AddPass(p.SunShadow);
     graph.AddPass(p.LocalShadow);
+    p.AddShadowRoutes(graph, p.SunShadow, p.LocalShadow);
     graph.AddPass(p.Reflections);
     graph.AddPass(p.Opaque);
     if (!_earlyAO) p.AddAmbientOcclusion(graph, _earlyAO);

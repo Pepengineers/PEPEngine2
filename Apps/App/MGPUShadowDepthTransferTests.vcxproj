@@ -7,7 +7,6 @@
   <ItemGroup>
     <ClCompile Remove="src\App.cpp" />
     <ClCompile Include="tests\MGPUShadowDepthTransferTests.cpp" />
-    <ClCompile Include="..\..\Engine\Engine.RendererDX12\src\GDX12ShadowDepthTransfer.cpp" />
   </ItemGroup>
   <ItemDefinitionGroup>
     <Link>

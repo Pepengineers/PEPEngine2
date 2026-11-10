@@ -698,7 +698,13 @@ GDX12CloudComponent& CrossAdapterEnvironment::CloudSource() { return _state->Clo
 
 const CrossAdapterEnvironment::Diagnostics& CrossAdapterEnvironment::GetDiagnostics() const { return _state->Stats; }
 
-bool CrossAdapterEnvironment::PrepareFrame(const double worldDeltaSeconds)
+CrossAdapterEnvironment::TransportStatus CrossAdapterEnvironment::GetTransportStatus() const
+{
+    const auto& bank = _state->Bank;
+    return { bank ? bank->GetUsage() : GDX12Snapshot::Usage{}, _state->Invocation, bool(bank) };
+}
+
+bool CrossAdapterEnvironment::PrepareFrame(const double worldDeltaSeconds, const bool visible)
 {
     auto& state = *_state;
     state.Executor.CollectCompleted();
@@ -709,6 +715,7 @@ bool CrossAdapterEnvironment::PrepareFrame(const double worldDeltaSeconds)
         state.Attached = attach;
     }
     if (state.Attached) state.Cloud.Advance(worldDeltaSeconds);
+    if (!visible) return false;
     auto input = _environment.CaptureCloudInputs();
     const bool wantsRemote = MultiGPU.GetValue();
     const bool wantsLocal = LocalCompute.GetValue();

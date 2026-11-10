@@ -11,6 +11,7 @@
 #include "Engine.RendererDX12/GDX12RenderGraph.h"
 #include "App.Base/Rendering/IRenderPipeline.h"
 #include "App.Base/Rendering/RenderMGPURuntime.h"
+#include "App.Base/Rendering/CrossAdapterSceneReplica.h"
 #include "App.Base/Systems/ShadowVisibilitySystem.h"
 #include <map>
 
@@ -23,6 +24,7 @@ class GDX12CommandList;
 class GDX12GPUTimer;
 struct GDX12GPUTimingTotals;
 struct GDX12FrameGenerationStatus;
+struct CapturedShadowScene;
 
 struct TransformComponent;
 struct CameraComponent;
@@ -41,6 +43,8 @@ struct TransformCompGPUData
     Matrix World = Identity4x4();
     Matrix PrevWorld = Identity4x4();
 };
+
+namespace Engine::UI { class CrossAdapterUI; struct UIPlacementStatus; }
 
 struct RenderMGPUStatus
 {
@@ -69,7 +73,11 @@ public:
     const GDX12FrameGenerationStatus& GetFrameGenerationStatus() const;
     const RenderMGPUStatus& GetMGPUStatus() const { return _mgpuStatus; }
     RenderMGPURuntime* GetMGPURuntime() const { return _gpu ? _mgpuRuntime.get() : nullptr; }
+    GDX12Submission::FrameSubmissionId GetFrameSubmissionId() const { return GDX12Submission::FrameSubmissionId{_frameSubmission}; }
     bool ShutdownMGPU() noexcept;
+    GDX12Submission::CompletionPoint GetLastLegacyReplacement(const GDX12RenderPass& pass) const;
+    GDX12Submission::CompletionPoint GetLastScreenUIFinalize() const { return _screenUIFinalize; }
+    Engine::UI::UIPlacementStatus GetUIPlacementStatus(Engine::UI::CanvasId surface) const;
     // Borrowed submission bindings for the renderer's serialized owner.
     RenderMGPUDevices GetMGPUDevices() const
     { return _gpu ? RenderMGPUDevices{ _primaryDevice.get(), _secondaryDevice.get(),
@@ -84,6 +92,11 @@ public:
     GPUTexture* GetTextureByName(const std::string& name);
     //returns a pointer to a fully initialized structure that you can specify in materials
     GPUTexture* CreateTexture(const std::string& name, const Texture* texture, ETextureType type);
+    void RetainShadowAlpha(const GPUTexture* texture, const Texture& source);
+    CapturedShadowScene CaptureShadowScene(CrossAdapterSceneReplica::FrameStamp stamp,
+        const std::vector<GDX12ShadowOutput>& groups,
+        const std::vector<CrossAdapterSceneReplica::GrassBatch>& grass, const IRenderGeometrySource* grassSource = nullptr,
+        const std::vector<GDX12RenderPrimitiveHandle>& grassPrimitives = {});
     void WaitForUploads();
     D3D12MA::Statistics GetMemoryStatistics() const;
     double GetPrimaryGPUTimeMS();
@@ -167,6 +180,8 @@ protected:
     bool ShouldRender() override;
 
 private:
+    friend class BistroRenderGraphTests;
+
     struct SkeletalPart
     {
         MeshHandle Mesh;
@@ -233,6 +248,7 @@ private:
     void CollectParticleEmitters();
     void InitializeMGPU();
     void QuarantineGpuOwners() noexcept;
+    void RetireScreenUIForSwapchainChange();
     friend struct RenderPipelineContext;
     RenderPipelineContext PipelineContext();
     void RefreshPipelineFlags();
@@ -268,12 +284,14 @@ private:
         GDX12DeviceResources Primary, Secondary;
         std::unique_ptr<GDX12GPUTimer> PrimaryTimer;
         std::unordered_map<std::string, std::unique_ptr<GPUTexture>> Textures;
+        std::unordered_map<const GPUTexture*, CrossAdapterSceneReplica::AlphaTexture> ShadowAlpha;
         std::unordered_map<std::string, std::unique_ptr<GDX12Material>> Materials;
         std::vector<GDX12ResourceHandle> Uploads;
         std::map<std::pair<World*, Entity>, SkeletalState> SkeletalStates;
         std::unique_ptr<GDX12Skinning> Skinning;
         std::unique_ptr<GDX12SwapChain> BackBuffer;
         std::unique_ptr<IRenderPipeline> Pipeline;
+        std::unique_ptr<Engine::UI::CrossAdapterUI> CrossAdapterUI;
         std::unique_ptr<GDX12RenderGraph> PrimaryGraph;
         std::unique_ptr<RenderMGPURuntime> MGPU;
     };
@@ -295,6 +313,11 @@ private:
     decltype(GpuOwners::BackBuffer)& _backBuffer = _gpu->BackBuffer;
     decltype(GpuOwners::Pipeline)& _pipeline = _gpu->Pipeline;
     decltype(GpuOwners::PrimaryGraph)& _primaryGraph = _gpu->PrimaryGraph;
+    decltype(GpuOwners::CrossAdapterUI)& _crossAdapterUI = _gpu->CrossAdapterUI;
+    std::uint64_t _frameSubmission = 0;
+    std::vector<std::pair<const GDX12RenderPass*, GDX12Submission::CompletionPoint>> _legacyReplacementReceipts;
+    GDX12Submission::CompletionPoint _screenUIFinalize;
+    bool _screenCaptureFallbackLogged = false;
     RenderMGPUStatus _mgpuStatus;
     bool _uiInitialized = false;
     bool _renderingSuspended = false;

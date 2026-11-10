@@ -13,6 +13,7 @@
 #include <map>
 #include <stdexcept>
 #include <tuple>
+#include <unordered_set>
 
 namespace
 {
@@ -43,6 +44,21 @@ namespace
         UINT64 Bytes;
     };
 
+    struct RigidSlice
+    {
+        const Vertex* Vertices;
+        const UINT* Indices;
+        UINT64 VertexByteOffset, VertexBytes;
+        UINT IndexCount, IndexBase;
+    };
+
+    struct RigidChunk
+    {
+        S2R::ResourceView Target;
+        UINT64 Bytes = 0;
+        std::vector<RigidSlice> Slices;
+    };
+
     struct PendingAsset
     {
         std::shared_ptr<Asset> Value;
@@ -63,37 +79,54 @@ namespace
         return view;
     }
 
-    void Access(std::vector<S2R::Access>& accesses, const S2R::ResourceView& view, Mode mode, D3D12_RESOURCE_STATES state)
+    struct Accesses
     {
-        if (std::none_of(accesses.begin(), accesses.end(), [&](const auto& access)
-            { return access.View.Identity.Id == view.Identity.Id; }))
-            accesses.push_back({ view, view.Native->D3DResource, mode, state });
-    }
+        void Add(const S2R::ResourceView& view, Mode mode, D3D12_RESOURCE_STATES state)
+        {
+            if (Ids.insert(view.Identity.Id).second)
+                Ordered.push_back({ view, view.Native->D3DResource, mode, state });
+        }
 
-    S2R::ResourceView Allocate(GDX12Device& device, const S2R::NewIdentity& identity, UINT64 bytes,
-        D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE)
+        std::vector<S2R::Access> Ordered;
+        std::unordered_set<ResourceId> Ids;
+    };
+
+    S2R::ResourceView NewBufferView(GDX12Device& device, const S2R::NewIdentity& identity)
     {
         S2R::ResourceView view{ std::make_shared<GDX12Resource>(), identity() };
         const auto& id = view.Identity;
         if (id.Id == ResourceId::Invalid || id.Adapter != device.GetSubmissionAdapterId() ||
             id.ResourceEpoch == Epoch::Invalid || id.Transfer != TransferId::Invalid || id.Allocation == AllocationId::Invalid)
             throw std::invalid_argument("Invalid secondary shadow buffer identity");
+        return view;
+    }
+
+    S2R::ResourceView Allocate(GDX12Device& device, const S2R::NewIdentity& identity, UINT64 bytes,
+        D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE)
+    {
+        auto view = NewBufferView(device, identity);
         view.Native->D3DResource = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT,
             CD3DX12_RESOURCE_DESC::Buffer(bytes, flags), D3D12_RESOURCE_STATE_COMMON);
         return view;
     }
 
-    BufferUpload StageBuffer(GDX12Device& device, const S2R::NewIdentity& identity, const void* data, UINT64 bytes)
+    template<class Fill>
+    BufferUpload StageBuffer(GDX12Device& device, S2R::ResourceView view, UINT64 bytes, Fill fill)
     {
-        auto view = Allocate(device, identity, bytes);
         auto upload = device.CreateResource(D3D12_HEAP_TYPE_UPLOAD, CD3DX12_RESOURCE_DESC::Buffer(bytes),
             D3D12_RESOURCE_STATE_GENERIC_READ);
         const D3D12_RANGE noRead{ 0, 0 };
         void* mapped = nullptr;
         ThrowIfFailed(upload->Map(0, &noRead, &mapped));
-        std::memcpy(mapped, data, static_cast<size_t>(bytes));
+        fill(static_cast<std::byte*>(mapped));
         upload->Unmap(0, nullptr);
         return { std::move(view), std::move(upload), bytes };
+    }
+
+    BufferUpload StageBuffer(GDX12Device& device, const S2R::NewIdentity& identity, const void* data, UINT64 bytes)
+    {
+        return StageBuffer(device, Allocate(device, identity, bytes), bytes,
+            [&](std::byte* mapped) { std::memcpy(mapped, data, static_cast<size_t>(bytes)); });
     }
 
     template<class T>
@@ -101,7 +134,8 @@ namespace
     { return first <= data.size() && count <= data.size() - first; }
 
     std::optional<PendingAsset> StageGeometry(GDX12Device& device, const S2R::NewIdentity& identity,
-        const Vertex* vertices, size_t vertexCount, const UINT* indices, size_t indexCount, UINT base)
+        const Vertex* vertices, size_t vertexCount, const UINT* indices, size_t indexCount, UINT base,
+        std::vector<RigidChunk>* rigidChunks = nullptr)
     {
         if (!vertexCount || vertexCount > UINT_MAX / sizeof(Vertex) ||
             !indexCount || indexCount > UINT_MAX / sizeof(UINT) || indexCount % 3)
@@ -121,6 +155,28 @@ namespace
                 return {};
         }
 
+        PendingAsset staged;
+        staged.Value = std::make_shared<Asset>();
+        auto& geometry = staged.Value->Geometry;
+        geometry.VertexCount = static_cast<UINT>(vertexCount);
+        geometry.IndexCount = static_cast<UINT>(indexCount);
+        geometry.MaxRelativeIndex = maxIndex;
+        if (rigidChunks)
+        {
+            constexpr UINT64 ChunkBytes = 32ull * 1024 * 1024;
+            const UINT64 vertexBytes = vertexCount * sizeof(Vertex);
+            const UINT64 bytes = vertexBytes + indexCount * sizeof(UINT);
+            if (rigidChunks->empty() || rigidChunks->back().Bytes + bytes > ChunkBytes)
+                rigidChunks->push_back({ NewBufferView(device, identity) });
+            auto& chunk = rigidChunks->back();
+            geometry.Vertices = geometry.Indices = chunk.Target;
+            geometry.VertexByteOffset = chunk.Bytes;
+            geometry.IndexByteOffset = chunk.Bytes + vertexBytes;
+            chunk.Slices.push_back({ vertices, indices, chunk.Bytes, vertexBytes, geometry.IndexCount, base });
+            chunk.Bytes += bytes;
+            return staged;
+        }
+
         std::vector<UINT> relative;
         if (base)
         {
@@ -128,12 +184,6 @@ namespace
             for (size_t i = 0; i < indexCount; ++i) relative.push_back(indices[i] - base);
             indices = relative.data();
         }
-        PendingAsset staged;
-        staged.Value = std::make_shared<Asset>();
-        auto& geometry = staged.Value->Geometry;
-        geometry.VertexCount = static_cast<UINT>(vertexCount);
-        geometry.IndexCount = static_cast<UINT>(indexCount);
-        geometry.MaxRelativeIndex = maxIndex;
         staged.Buffers.push_back(StageBuffer(device, identity, vertices, vertexCount * sizeof(Vertex)));
         geometry.Vertices = staged.Buffers.back().Target;
         staged.Buffers.push_back(StageBuffer(device, identity, indices, indexCount * sizeof(UINT)));
@@ -197,13 +247,12 @@ struct CrossAdapterShadowScene::State
     {
         if (!Identity) throw std::invalid_argument("Shadow scene requires a resource identity allocator");
         Heap->GetAvailableIndex(Texture2D_StartIndex, Texture2D_RangeLength);
-        for (auto& slot : Slots) slot = std::make_shared<S2R::Slot>();
     }
 
     GDX12Device& Device;
     S2R::NewIdentity Identity;
     std::shared_ptr<GDX12DescriptorHeap> Heap;
-    std::array<std::shared_ptr<S2R::Slot>, 3> Slots;
+    std::array<std::shared_ptr<S2R::Slot>, 3> Slots{};
     std::map<AssetKey, std::shared_ptr<const Asset>> Cache;
     std::shared_ptr<GDX12Skinning> Skinning;
     std::uint64_t CacheRevision = 0;
@@ -219,13 +268,20 @@ CrossAdapterShadowScene::CrossAdapterShadowScene(GDX12Device& secondary, S2R::Ne
     : _state(std::make_shared<State>(secondary, std::move(newIdentity)))
 {}
 
+void CrossAdapterShadowScene::CollectRetired()
+{
+    for (auto& slot : _state->Slots)
+        if (slot.use_count() == 1) slot.reset();
+}
+
 PreparedShadowReplica CrossAdapterShadowScene::Prepare(const S2R::Snapshot& source, const ShadowSceneSources& sources)
 {
     if (!source.Stamp.IsValid()) throw std::invalid_argument("Invalid shadow scene frame stamp");
     auto& state = *_state;
     const auto slot = std::find_if(state.Slots.begin(), state.Slots.end(), [](const auto& entry)
-        { return entry.use_count() == 1; });
+        { return !entry || entry.use_count() == 1; });
     if (slot == state.Slots.end()) return {};
+    if (!*slot) *slot = std::make_shared<S2R::Slot>();
     auto* queue = state.Device.GetCommandQueue();
     const auto timeline = queue->GetTimelineIdentity();
     const auto baseline = queue->GetLastCompletionPoint().Value();
@@ -270,6 +326,8 @@ PreparedShadowReplica CrossAdapterShadowScene::Prepare(const S2R::Snapshot& sour
             skins[skin.CasterIndex] = &skin;
         }
     std::vector<SkinDispatch> skinDispatches;
+    std::vector<RigidChunk> rigidChunks;
+    std::vector<const Asset*> rigidAssets(frame.Meshes.size());
     for (UINT i = 0; i < frame.Casters.size(); ++i)
     {
         if (!selected[i]) continue;
@@ -296,7 +354,7 @@ PreparedShadowReplica CrossAdapterShadowScene::Prepare(const S2R::Snapshot& sour
                 {
                     if (const auto* borrowed = Borrow(sources.Meshes, caster.Range))
                         return StageGeometry(state.Device, state.Identity, borrowed->Vertices.data(), borrowed->Vertices.size(),
-                            borrowed->Indices.data(), borrowed->Indices.size(), 0);
+                            borrowed->Indices.data(), borrowed->Indices.size(), 0, &rigidChunks);
                     if (!input.VertexCount || !input.IndexCount || !Fits(input.Vertices, input.FirstVertex, input.VertexCount) ||
                         !Fits(input.Indices, input.FirstIndex, input.IndexCount) ||
                         (input.Addressing != S2R::IndexAddressing::RelativeToRange &&
@@ -305,10 +363,11 @@ PreparedShadowReplica CrossAdapterShadowScene::Prepare(const S2R::Snapshot& sour
                     return StageGeometry(state.Device, state.Identity,
                         input.Vertices.data() + input.FirstVertex, input.VertexCount,
                         input.Indices.data() + input.FirstIndex, input.IndexCount,
-                        input.Addressing == S2R::IndexAddressing::AbsoluteInPayload ? input.FirstVertex : 0);
+                        input.Addressing == S2R::IndexAddressing::AbsoluteInPayload ? input.FirstVertex : 0, &rigidChunks);
                 });
                 if (value)
                 {
+                    rigidAssets[caster.Range] = value.get();
                     mesh.Resident = value->Geometry;
                     mesh.VertexCount = mesh.Resident->VertexCount;
                     mesh.IndexCount = mesh.Resident->IndexCount;
@@ -404,44 +463,87 @@ PreparedShadowReplica CrossAdapterShadowScene::Prepare(const S2R::Snapshot& sour
         else if (value) alpha.SecondaryView = {};
     }
 
+    for (const auto& chunk : rigidChunks)
+        chunk.Target.Native->D3DResource = state.Device.CreateResource(D3D12_HEAP_TYPE_DEFAULT,
+            CD3DX12_RESOURCE_DESC::Buffer(chunk.Bytes), D3D12_RESOURCE_STATE_COMMON);
+
     S2R::Prepare(*slot, state.Device, state.Heap, frame.Stamp, frame, state.Identity);
     auto work = std::make_shared<FrameWork>();
     work->Slot = *slot;
     const auto& replica = (*slot)->Get();
+    std::unordered_set<ResourceId> rasterIds;
+    rasterIds.reserve(replica.RasterAccesses.size());
+    for (const auto& access : replica.RasterAccesses) rasterIds.insert(access.View.Identity.Id);
     const auto used = [&](const S2R::ResourceView& view)
     {
-        return view.Native && std::any_of(replica.RasterAccesses.begin(), replica.RasterAccesses.end(),
-            [&](const auto& access) { return access.View.Identity.Id == view.Identity.Id; });
+        return view.Native && rasterIds.find(view.Identity.Id) != rasterIds.end();
     };
 
-    std::vector<S2R::Access> uploads, skinAccesses;
+    Accesses uploads, skinAccesses;
+    for (const auto& chunk : rigidChunks)
+        if (used(chunk.Target))
+        {
+            uploads.Add(chunk.Target, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST);
+            work->Buffers.push_back(StageBuffer(state.Device, chunk.Target, chunk.Bytes, [&](std::byte* mapped)
+            {
+                for (const auto& slice : chunk.Slices)
+                {
+                    auto* vertices = mapped + slice.VertexByteOffset;
+                    std::memcpy(vertices, slice.Vertices, static_cast<size_t>(slice.VertexBytes));
+                    auto* indices = vertices + slice.VertexBytes;
+                    if (slice.IndexBase == 0)
+                        std::memcpy(indices, slice.Indices, UINT64{slice.IndexCount} * sizeof(UINT));
+                    else
+                        for (UINT i = 0; i < slice.IndexCount; ++i)
+                        {
+                            const UINT relative = slice.Indices[i] - slice.IndexBase;
+                            std::memcpy(indices + UINT64{i} * sizeof(UINT), &relative, sizeof(relative));
+                        }
+                }
+            }));
+        }
     for (auto& skin : skinDispatches)
         if (used(skin.Output))
         {
             const auto& sourceAsset = *skin.Source;
             for (const auto* view : { &sourceAsset.Geometry.Vertices, &sourceAsset.Ranges, &sourceAsset.Influences })
-                Access(skinAccesses, Own(*view, skin.Source), Mode::Read, ShaderRead);
-            Access(skinAccesses, skin.Palette.Target, Mode::Read, ShaderRead);
-            Access(skinAccesses, skin.Output, Mode::Write, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-            Access(uploads, skin.Palette.Target, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST);
+                skinAccesses.Add(Own(*view, skin.Source), Mode::Read, ShaderRead);
+            skinAccesses.Add(skin.Palette.Target, Mode::Read, ShaderRead);
+            skinAccesses.Add(skin.Output, Mode::Write, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+            uploads.Add(skin.Palette.Target, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST);
             work->Buffers.push_back({ skin.Palette.Target, std::move(skin.Palette.Staging), skin.Palette.Bytes });
             work->Skin.push_back(std::move(skin));
         }
+
+    // A chunk read proves that at least one slice was admitted, so resolve publication per caster.
+    std::unordered_set<const Asset*> admittedRigid;
+    if (!rigidChunks.empty())
+        for (size_t group = 0; group < replica.Groups.size(); ++group)
+            if (replica.Groups[group].Reason == S2R::Rejection::None)
+                for (UINT casterIndex : frame.Groups[group])
+                {
+                    const auto& caster = frame.Casters[casterIndex];
+                    if (caster.Kind == S2R::GeometryKind::Static && rigidAssets[caster.Range])
+                        admittedRigid.insert(rigidAssets[caster.Range]);
+                }
 
     std::map<AssetKey, std::shared_ptr<const Asset>> publish;
     for (auto& [key, staged] : pending)
     {
         const auto& value = staged.Value;
-        // A skin's index resource is read only by draws using that immutable source.
-        if (!used(value->Geometry.Indices) && !used(value->Alpha.SecondaryView)) continue;
+        if (std::get<0>(key) == AssetKind::Rigid)
+        {
+            if (admittedRigid.find(value.get()) == admittedRigid.end()) continue;
+        }
+        else if (!used(value->Geometry.Indices) && !used(value->Alpha.SecondaryView)) continue;
         for (auto& buffer : staged.Buffers)
         {
-            Access(uploads, Own(buffer.Target, value), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST);
+            uploads.Add(Own(buffer.Target, value), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST);
             work->Buffers.push_back(std::move(buffer));
         }
         if (staged.Alpha)
         {
-            Access(uploads, Own(value->Alpha.SecondaryView, value), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST);
+            uploads.Add(Own(value->Alpha.SecondaryView, value), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST);
             work->Alpha.push_back(std::move(*staged.Alpha));
         }
         publish.emplace(key, value);
@@ -451,9 +553,9 @@ PreparedShadowReplica CrossAdapterShadowScene::Prepare(const S2R::Snapshot& sour
     result.Replica = { work, &replica };
     result.Upload = { work, slot->get() };
     result.MaterialHeap = state.Heap;
-    const bool needsUpload = !uploads.empty();
+    const bool needsUpload = !uploads.Ordered.empty();
     if (needsUpload)
-        result.Preparation.push_back({ "ShadowSceneAssets", std::move(uploads), [work](GDX12CommandList& commands)
+        result.Preparation.push_back({ "ShadowSceneAssets", std::move(uploads.Ordered), [work](GDX12CommandList& commands)
         {
             auto* list = commands.GetCommandList().Get();
             for (const auto& buffer : work->Buffers)
@@ -465,7 +567,7 @@ PreparedShadowReplica CrossAdapterShadowScene::Prepare(const S2R::Snapshot& sour
     {
         if (!state.Skinning) state.Skinning = std::make_shared<GDX12Skinning>(&state.Device);
         work->Pipeline = state.Skinning;
-        result.Preparation.push_back({ "ShadowSceneSkin", std::move(skinAccesses),
+        result.Preparation.push_back({ "ShadowSceneSkin", std::move(skinAccesses.Ordered),
             [work](GDX12CommandList& commands)
         {
             for (const auto& skin : work->Skin)

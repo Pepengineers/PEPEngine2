@@ -24,6 +24,9 @@
 #include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include "Engine.RendererDX12/GDX12ShadowCascades.h"
 #include "App.Base/Rendering/DefaultRenderPipeline.h"
+#include "App.Base/Rendering/CrossAdapterUI.h"
+#include "Engine.UI/OffscreenUI.h"
+#include <limits>
 #include <cmath>
 #include "Common/ConsoleVariables.h"
 
@@ -129,6 +132,9 @@ void RenderModule::Initialize()
     _primaryGPUTimer = std::make_unique<GDX12GPUTimer>(_primaryDevice.get());
 
     InitializeMGPU();
+    if (_mgpuRuntime)
+        for (const auto& frame : _primaryResources.FrameConstants)
+            frame->MaterialCache->TrackChanges();
 
     Log::Info("Renderer", "Creating back buffers");
     BuildBackBuffer();
@@ -207,6 +213,7 @@ bool RenderModule::ShutdownMGPU() noexcept
     {
         _mgpuRuntime->Shutdown();
         _primaryDevice->GetCommandQueue()->Flush();
+        _crossAdapterUI.reset();
         _mgpuRuntime.reset();
         return true;
     }
@@ -232,6 +239,13 @@ void RenderModule::QuarantineGpuOwners() noexcept
     catch (...) {}
 }
 
+void RenderModule::RetireScreenUIForSwapchainChange()
+{
+    if (!_crossAdapterUI) return;
+    _mgpuRuntime->Poll();
+    _crossAdapterUI->Invalidate(Engine::UI::CanvasId::Invalid);
+}
+
 void RenderModule::OnResize()
 {
     _RPcommonData.RequestHistoryReset = true;
@@ -240,6 +254,7 @@ void RenderModule::OnResize()
     uint16_t width, height;
     _window->GetWindowSize(width, height);
 
+    RetireScreenUIForSwapchainChange();
     _backBuffer->Resize(width, height);
 
     _RPcommonData.WindowWidth = width;
@@ -332,6 +347,29 @@ GPUTexture* RenderModule::CreateTexture(const std::string& name, const Texture* 
     { _textures[name]->SecondaryDeviceTexture = CreateDX12Texture(name, &_secondaryResources, texture, type); }
 
     return _textures[name].get();
+}
+
+void RenderModule::RetainShadowAlpha(const GPUTexture* texture, const Texture& source)
+{
+    if (!_gpu || !_mgpuRuntime) return;
+    auto& retained = _gpu->ShadowAlpha;
+    if (!texture || !texture->PrimaryDeviceTexture ||
+        source.GetDimension() != ETextureDimension::Texture2D || source.GetArraySize() != 1 ||
+        source.IsEmpty() || retained.find(texture) != retained.end()) return;
+
+    if (retained.size() >= TextureHandle::InvalidValue)
+        throw std::overflow_error("Shadow texture handles exhausted");
+    CrossAdapterSceneReplica::AlphaTexture alpha;
+    alpha.Texture = TextureHandle{static_cast<UINT>(retained.size()), 1};
+    alpha.ContentRevision = 1; // Renderer textures are immutable after creation.
+    alpha.Format = texture->PrimaryDeviceTexture->GetFormat();
+    alpha.Width = source.GetWidth();
+    alpha.Height = source.GetHeight();
+    alpha.MipLevels = source.GetMipLevels();
+    alpha.Mips.reserve(alpha.MipLevels);
+    for (const auto& subresource : source.GetSubresources())
+        alpha.Mips.push_back({ subresource.Data, subresource.RowPitch });
+    retained.emplace(texture, std::move(alpha));
 }
 
 void RenderModule::WaitForUploads()
@@ -977,7 +1015,12 @@ const float RenderModule::GetAspectRatio()
 void RenderModule::OnUpdate()
 {
     if (!_gpu) throw std::logic_error("Renderer device domain is quarantined");
-    if (_mgpuRuntime) _mgpuRuntime->Poll();
+    if (_mgpuRuntime)
+    {
+        _primaryDevice->GetCommandQueue()->CollectCompletedLists();
+        if (auto* compute = _primaryDevice->TryGetComputeQueue()) compute->CollectCompletedLists();
+        _mgpuRuntime->Poll();
+    }
     GDX12_SCOPED_CPU_EVENT("Frame slot wait and upload");
     uint16_t width, height;
     _window->GetWindowSize(width, height);
@@ -1005,9 +1048,28 @@ void RenderModule::OnUpdate()
 void RenderModule::OnRender()
 {
     if (!_gpu) throw std::logic_error("Renderer device domain is quarantined");
+    if (_frameSubmission == (std::numeric_limits<std::uint64_t>::max)())
+        throw std::overflow_error("Render frame submission ID exhausted");
+    ++_frameSubmission;
+    _legacyReplacementReceipts.clear();
+    _screenUIFinalize = {};
+    const auto ui = _uiInitialized ? Engine::UI::ReadUIOffloadSettings() : Engine::UI::UIOffloadSettings{};
+    const auto screen = Engine::UI::CanvasId::Invalid;
+    const bool screenRequested = Engine::UI::RequestsUIOffload(ui, screen);
+    if (!screenRequested) _screenCaptureFallbackLogged = false;
+    if (ui.Enabled && _mgpuRuntime && !_crossAdapterUI)
+        _crossAdapterUI = std::make_unique<Engine::UI::CrossAdapterUI>(*_mgpuRuntime, *_primaryDevice, *_secondaryDevice,
+            _pipeline->GetWorldCanvasIds());
+    if (_crossAdapterUI)
+    {
+        const auto now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+        _crossAdapterUI->BeginFrame(GetFrameSubmissionId(), ui, now);
+    }
     _RPcommonData.Jobs = &App::GetInstance()->GetJobs();
     _backBuffer->GetFrameGeneration().BeginRendering(_RPcommonData);
     _primaryResources.BeginMeshPrimitiveUpdate();
+    auto context = PipelineContext();
+    _pipeline->PrepareMaterialBindings(context, _crossAdapterUI.get());
     const auto skeletalStarted = std::chrono::steady_clock::now();
     PrepareSkeletalMeshes();
     _skeletalPreparationTimeMS = std::chrono::duration<double, std::milli>(
@@ -1021,7 +1083,6 @@ void RenderModule::OnRender()
     auto primarycmdList = primarycmdQueue->GetCommandList();
     _primaryGPUTimer->Start(primarycmdList);
     DispatchSkeletalMeshes(primarycmdList);
-    auto context = PipelineContext();
     const bool rebuild = _pipeline->PrepareFrame(context, primarycmdList);
     RefreshPipelineFlags();
     if (rebuild || _graphReuseTextures != GraphReuseTextures.GetValue()) RebuildRenderGraph();
@@ -1029,19 +1090,99 @@ void RenderModule::OnRender()
     auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
     const auto& bindings = _pipeline->GetBindings();
     auto* compute = bindings.UseAsyncCompute ? _primaryDevice->TryGetComputeQueue() : nullptr;
-    if (bindings.SubmitLegacyReplacement)
-        primarycmdList = _primaryGraph->ExecuteLegacySplit(primarycmdList, compute, bindings.SubmitLegacyReplacement);
-    else
+    const auto& replacements = bindings.LegacyReplacements;
+    if (std::none_of(replacements.begin(), replacements.end(), [](const auto& entry) { return bool(entry.Submit); }))
         primarycmdList = _primaryGraph->Execute(primarycmdList, compute);
-    if (_uiInitialized) Engine::UI::Render(primarycmdList, _backBuffer->GetCurrentBuffer());
+    else
+        primarycmdList = _primaryGraph->ExecuteLegacySplit(primarycmdList, compute,
+            [&](const GDX12RenderGraph::LegacyBoundary& boundary, GDX12Submission::CompletionPoint prefix)
+            {
+                const auto route = std::find_if(replacements.begin(), replacements.end(),
+                    [&](const auto& entry) { return entry.Pass == boundary.Replaced; });
+                if (route == replacements.end() || !route->Submit)
+                    throw std::logic_error("Legacy split has no production replacement route");
+                auto point = route->Submit(boundary, prefix);
+                if (point) _legacyReplacementReceipts.emplace_back(boundary.Replaced, *point);
+                return point;
+            });
+    for (const auto& route : replacements)
+        if (route.RecordTail) route.RecordTail(*primarycmdList);
+    if (_uiInitialized)
+    {
+        auto* backbuffer = _backBuffer->GetCurrentBuffer();
+        bool composed = false;
+        if (_crossAdapterUI && screenRequested)
+        {
+            std::shared_ptr<const Engine::UI::DrawData> draw;
+            try { draw = Engine::UI::CaptureScreenFrame(); }
+            catch (const std::invalid_argument& error)
+            {
+                if (!_screenCaptureFallbackLogged)
+                {
+                    Log::Warning("Renderer", "Screen UI snapshot uses local rendering. ", error.what());
+                    _screenCaptureFallbackLogged = true;
+                }
+            }
+            if (draw)
+            {
+                primarycmdList->ResourceBarrier({ backbuffer->GetResource()->GetCommonBarrier() });
+                primarycmdQueue->ExecuteCommandList(primarycmdList);
+                const auto prefix = primarycmdQueue->GetLastCompletionPoint();
+                const auto finalized = _crossAdapterUI->SubmitScreen(std::move(draw), backbuffer->GetResourceOwner(), prefix);
+                const auto latest = primarycmdQueue->GetLastCompletionPoint();
+                if (finalized ? (!(finalized->Timeline() == prefix.Timeline()) || finalized->Value() <= prefix.Value() ||
+                    finalized->Value() != latest.Value()) : latest.Value() != prefix.Value())
+                    throw std::logic_error("Screen UI route returned an invalid primary DIRECT receipt");
+                composed = finalized.has_value();
+                if (finalized) _screenUIFinalize = *finalized;
+                primarycmdList = primarycmdQueue->GetCommandList();
+            }
+        }
+        if (!composed) Engine::UI::Render(primarycmdList, backbuffer);
+    }
     _primaryGPUTimer->Stop(primarycmdList);
     primarycmdQueue->ExecuteCommandList(primarycmdList);
-    if (bindings.RetirePlacedFrame) bindings.RetirePlacedFrame(primarycmdQueue->GetLastCompletionPoint());
+    const auto tail = primarycmdQueue->GetLastCompletionPoint();
+    for (const auto& route : replacements)
+        if (route.Retire) route.Retire(tail);
     primaryCurrentFrameConsts->FenceValue = primarycmdList->FenceValue;
     _primaryGPUTimer->OnCommandListExecuted(primarycmdList->FenceValue);
 
     _backBuffer->GetFrameGeneration().EndRendering();
     _backBuffer->Present();
+}
+
+GDX12Submission::CompletionPoint RenderModule::GetLastLegacyReplacement(const GDX12RenderPass& pass) const
+{
+    const auto found = std::find_if(_legacyReplacementReceipts.begin(), _legacyReplacementReceipts.end(),
+        [&](const auto& entry) { return entry.first == &pass; });
+    return found != _legacyReplacementReceipts.end() ? found->second : GDX12Submission::CompletionPoint{};
+}
+
+Engine::UI::UIPlacementStatus RenderModule::GetUIPlacementStatus(Engine::UI::CanvasId surface) const
+{
+    if (!_gpu || !_primaryDevice) return {};
+    if (_crossAdapterUI) return _crossAdapterUI->GetStatus(surface);
+    using namespace Engine::UI;
+    const auto settings = _uiInitialized ? ReadUIOffloadSettings() : UIOffloadSettings{};
+    UIPlacementStatus status;
+    status.Requested = RequestsUIOffload(settings, surface);
+    status.ActiveAdapter = _primaryDevice->GetSubmissionAdapterId();
+    status.Mode = GetUIOffloadReadMode(settings, surface);
+    if (!status.Requested) return status;
+    if (surface != CanvasId::Invalid)
+    {
+        const auto canvases = _pipeline->GetWorldCanvasIds();
+        if (std::find(canvases.begin(), canvases.end(), surface) == canvases.end())
+        {
+            status.Fallback = "Unknown CanvasId";
+            return status;
+        }
+    }
+    if (!_mgpuStatus.Requested) status.Fallback = "MGPU disabled";
+    else if (!_mgpuStatus.FallbackReason.empty()) status.Fallback = _mgpuStatus.FallbackReason;
+    else status.Fallback = "UI secondary output not ready";
+    return status;
 }
 
 void RenderModule::CollectParticleEmitters()
@@ -1411,13 +1552,18 @@ void RenderModule::BeginFrame()
     {
         Engine::UI::BeginFrame();
 #ifdef _DEBUG
-        _pipeline->DrawDebugControls();
+        _pipeline->DrawDebugControls(*this);
 #endif
     }
     if (_backBuffer)
     {
         if (_pipeline->GetBindings().FrameGenerationInputs)
             _backBuffer->SetFrameGenerationSuspended(_renderingSuspended || !_pipeline->AllowsFrameGeneration());
+        if (_crossAdapterUI && _backBuffer->GetFrameGeneration().NeedsRecreate())
+        {
+            _primaryDevice->GetCommandQueue()->Flush();
+            RetireScreenUIForSwapchainChange();
+        }
         _backBuffer->BeginFrame(_RPcommonData);
     }
 }

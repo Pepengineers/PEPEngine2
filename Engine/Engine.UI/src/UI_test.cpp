@@ -555,14 +555,25 @@ namespace Engine::UI
     }
 
 #ifdef _DEBUG
-    bool DebugButton(const char* label)
+    bool DebugControlsVisible() { return FrameBegun && Visible; }
+
+    bool DebugButton(const char* label, std::initializer_list<std::string_view> lines)
     {
-        if (!FrameBegun || !Visible) return false;
+        if (!DebugControlsVisible()) return false;
         const auto* viewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos({viewport->WorkPos.x + viewport->WorkSize.x - 16, viewport->WorkPos.y + 16},
             ImGuiCond_FirstUseEver, {1, 0});
-        ImGui::SetNextWindowSize({220, 80}, ImGuiCond_FirstUseEver);
-        const bool clicked = ImGui::Begin("Debug controls") && ImGui::Button(label);
+        bool clicked = false;
+        if (ImGui::Begin("Debug controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            clicked = ImGui::Button(label);
+            if (lines.size())
+            {
+                ImGui::Separator();
+                ImGui::TextUnformatted("Placement and freshness (last frame)");
+                for (const auto line : lines) ImGui::TextUnformatted(line.data(), line.data() + line.size());
+            }
+        }
         ImGui::End();
         return clicked;
     }

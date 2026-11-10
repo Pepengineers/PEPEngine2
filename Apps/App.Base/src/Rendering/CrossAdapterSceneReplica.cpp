@@ -123,8 +123,8 @@ namespace
                 mesh.FirstVertex == 0 && mesh.FirstIndex == 0 && range.VertexCount == mesh.VertexCount &&
                 range.IndexCount == mesh.IndexCount && range.VertexCount && range.IndexCount &&
                 range.IndexCount % 3 == 0 && range.MaxRelativeIndex < range.VertexCount &&
-                BufferRange(range.Vertices, device, 0, UINT64{range.VertexCount} * sizeof(Vertex)) &&
-                BufferRange(range.Indices, device, 0, UINT64{range.IndexCount} * sizeof(UINT));
+                BufferRange(range.Vertices, device, range.VertexByteOffset, UINT64{range.VertexCount} * sizeof(Vertex)) &&
+                BufferRange(range.Indices, device, range.IndexByteOffset, UINT64{range.IndexCount} * sizeof(UINT));
         }
         if (!mesh.Mesh.IsValid() || !mesh.ContentRevision || !mesh.VertexCount || !mesh.IndexCount || mesh.IndexCount % 3 ||
             !Fits(mesh.FirstVertex, mesh.VertexCount, mesh.Vertices.size()) ||
@@ -148,7 +148,9 @@ namespace
         if (a.Resident || b.Resident)
         {
             if (!a.Resident || !b.Resident || a.VertexCount != b.VertexCount || a.IndexCount != b.IndexCount ||
-                a.Resident->MaxRelativeIndex != b.Resident->MaxRelativeIndex) return false;
+                a.Resident->MaxRelativeIndex != b.Resident->MaxRelativeIndex ||
+                a.Resident->VertexByteOffset != b.Resident->VertexByteOffset ||
+                a.Resident->IndexByteOffset != b.Resident->IndexByteOffset) return false;
             const auto same = [](const ResourceView& x, const ResourceView& y)
             { return x.Native == y.Native && SameIdentity(x.Identity, y.Identity) && x.Version == y.Version; };
             return same(a.Resident->Vertices, b.Resident->Vertices) && same(a.Resident->Indices, b.Resident->Indices);
@@ -644,8 +646,8 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
                     if (mesh.Resident)
                     {
                         const auto& resident = *mesh.Resident;
-                        draw.Vertices = Vertices(resident.Vertices, 0, resident.VertexCount);
-                        draw.Indices = Indices(resident.Indices, 0, resident.IndexCount);
+                        draw.Vertices = Vertices(resident.Vertices, resident.VertexByteOffset, resident.VertexCount);
+                        draw.Indices = Indices(resident.Indices, resident.IndexByteOffset, resident.IndexCount);
                         access.Raster.Add(resident.Vertices, Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
                         access.Raster.Add(resident.Indices, Mode::Read, D3D12_RESOURCE_STATE_INDEX_BUFFER);
                         if (rangeIndex == UINT_MAX)

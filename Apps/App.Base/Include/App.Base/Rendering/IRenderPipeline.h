@@ -7,6 +7,11 @@
 class RenderModule;
 class GDX12SwapChain;
 class GDX12ReconstructionPass;
+namespace Engine::UI
+{
+    enum class CanvasId : std::uint64_t;
+    class CrossAdapterUI;
+}
 
 struct RenderPipelineContext
 {
@@ -20,14 +25,21 @@ struct RenderPipelineContext
     void Resize();
 };
 
+struct LegacyReplacementRoute
+{
+    GDX12RenderPass* Pass;
+    GDX12RenderGraph::SubmitLegacyReplacement Submit;
+    std::function<void(GDX12Submission::CompletionPoint)> Retire;
+    std::function<void(GDX12CommandList&)> RecordTail;
+};
+
 struct RenderPipelineBindings
 {
     std::vector<GDX12RenderPass*> PrimaryPasses;
     GDX12ReconstructionPass* Reconstruction = nullptr;
     bool FrameGenerationInputs = false;
     bool UseAsyncCompute = false;
-    GDX12RenderGraph::SubmitLegacyReplacement SubmitLegacyReplacement;
-    std::function<void(GDX12Submission::CompletionPoint)> RetirePlacedFrame;
+    std::vector<LegacyReplacementRoute> LegacyReplacements;
 };
 
 struct RenderPipelineGraphInputs
@@ -41,8 +53,10 @@ public:
     virtual ~IRenderPipeline() = default;
     virtual void Initialize(RenderPipelineContext&) = 0;
     virtual bool AllowsFrameGeneration() const { return true; }
+    virtual std::vector<Engine::UI::CanvasId> GetWorldCanvasIds() const { return {}; }
+    virtual void PrepareMaterialBindings(RenderPipelineContext&, Engine::UI::CrossAdapterUI*) {}
 #ifdef _DEBUG
-    virtual void DrawDebugControls() {}
+    virtual void DrawDebugControls(const RenderModule&) {}
 #endif
     // Before frame constants/camera uploads, so a changed render grid applies to the same frame.
     virtual void UpdateFrameSettings(RenderPipelineContext&) {}

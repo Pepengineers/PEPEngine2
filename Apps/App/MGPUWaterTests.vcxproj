@@ -6,8 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ClCompile Remove="src\App.cpp" />
-    <ClCompile Remove="src\Rendering\Water\CrossAdapterWater.cpp" />
-    <ClCompile Include="src\Rendering\Water\CrossAdapterWater.cpp" />
     <ClCompile Include="tests\MGPUWaterTests.cpp" />
   </ItemGroup>
   <ItemDefinitionGroup>

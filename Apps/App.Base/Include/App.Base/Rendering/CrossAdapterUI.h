@@ -26,6 +26,7 @@ namespace Engine::UI
 
     UIOffloadSettings ReadUIOffloadSettings();
     bool RequestsUIOffload(const UIOffloadSettings& settings, CanvasId surface);
+    GDX12Submission::SnapshotReadMode GetUIOffloadReadMode(const UIOffloadSettings& settings, CanvasId surface);
     // The caller supplies monotonic elapsed seconds and validated controls.
     bool UIUpdateDue(double nowSeconds, std::optional<double> lastAdmissionSeconds, double updateHz);
 

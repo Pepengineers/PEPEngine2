@@ -92,11 +92,19 @@ namespace
         return mesh;
     }
 
+    struct DynamicPointCaster
+    {
+        Vector3 Center;
+        GDX12ShadowOutput Static;
+    };
+
     CrossAdapterShadowRaster::Input PrepareInput(GDX12Device& device, RenderMGPURuntime& runtime, PhysicalView atlas,
-        const std::vector<GDX12ShadowOutput>& outputs, uint64_t frame, bool maskedCaster)
+        const std::vector<GDX12ShadowOutput>& outputs, uint64_t frame, bool maskedCaster,
+        const DynamicPointCaster* dynamicPoint = nullptr)
     {
         CrossAdapterShadowRaster::Input input;
         input.Atlas = std::move(atlas);
+        input.PerFaceVisibility = dynamicPoint != nullptr;
         input.Stamp = { FrameSubmissionId{frame}, ProducerInvocationId{frame}, 100 };
         input.MaterialHeap = std::make_shared<GDX12DescriptorHeap>(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
             Texture2D_StartIndex + Texture2D_RangeLength, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
@@ -132,7 +140,12 @@ namespace
             const auto& output = outputs[i];
             const float depth = output.Type == GDX12ShadowOutput::Kind::Spot ? 0.5f : 0.25f;
             const UINT index = static_cast<UINT>(snapshot.Meshes.size());
-            snapshot.Meshes.push_back(Triangle(100 + i, depth));
+            auto mesh = Triangle(100 + i, depth);
+            if (dynamicPoint)
+                for (auto& vertex : mesh.Vertices)
+                    vertex.Position = {dynamicPoint->Center.x, dynamicPoint->Center.y + 2 * vertex.Position.y,
+                        dynamicPoint->Center.z + 2 * vertex.Position.x};
+            snapshot.Meshes.push_back(std::move(mesh));
             Replica::Caster caster;
             caster.SourceId = 100 + i;
             caster.Range = index;
@@ -140,6 +153,11 @@ namespace
             caster.GeometryRevision = 1;
             caster.Transform = GDX12TransformConstants{};
             caster.Bounds = BoundingBox({ 0, 0, depth }, { 0.75f, 0.75f, 0 });
+            if (dynamicPoint)
+            {
+                caster.Bounds = BoundingBox(dynamicPoint->Center, {0, 1.5f, 1.5f});
+                caster.Dynamic = true;
+            }
             snapshot.Groups.push_back({ static_cast<UINT>(snapshot.Casters.size()) });
             if (maskedCaster) snapshot.Groups.back().push_back(0);
             snapshot.Casters.push_back(caster);
@@ -148,7 +166,7 @@ namespace
             group.ReplicaGroup = i;
             if (output.Type != GDX12ShadowOutput::Kind::Sun)
             {
-                group.Static = output;
+                group.Static = dynamicPoint ? dynamicPoint->Static : output;
                 group.Static->StaticOnly = true;
                 group.Static->EveryFrame = false;
             }
@@ -165,7 +183,8 @@ namespace
         return input;
     }
 
-    void CheckDepth(GDX12Device& device, const PhysicalView& atlas, const std::vector<GDX12ShadowOutput>& outputs)
+    void CheckDepth(GDX12Device& device, const PhysicalView& atlas, const std::vector<GDX12ShadowOutput>& outputs,
+        const DynamicPointCaster* dynamicPoint)
     {
         const auto desc = atlas.Resource->D3DResource->GetDesc();
         UINT64 bytes = 0;
@@ -190,16 +209,36 @@ namespace
         ThrowIfFailed(readback->Map(0, &range, &mapped));
         bool correct = true;
         for (const auto& output : outputs)
-            for (UINT face = 0; face < output.ViewCount(); ++face)
+            for (UINT face = 0; face < (dynamicPoint ? 1u : output.ViewCount()); ++face)
             {
                 const auto& region = output.Views[face].Region;
                 const auto& footprint = footprints[region.Slice];
-                const auto offset = footprint.Offset + UINT64(region.Y + region.Height / 2) * footprint.Footprint.RowPitch +
-                    UINT64(region.X + region.Width / 2) * sizeof(float);
+                UINT x = region.Width / 2, y = region.Height / 2;
+                if (dynamicPoint)
+                {
+                    const auto& center = dynamicPoint->Center;
+                    const auto clip = Vector4::Transform(Vector4(center.x, center.y, center.z, 1),
+                        Matrix(output.Views[face].ViewProj).Transpose());
+                    x = static_cast<UINT>(region.Width * (0.5f + 0.5f * clip.x / clip.w));
+                    y = static_cast<UINT>(region.Height * (0.5f - 0.5f * clip.y / clip.w));
+                    Require(x < region.Width && y < region.Height, "Point caster sample is outside its face");
+                }
+                const auto offset = footprint.Offset + UINT64(region.Y + y) * footprint.Footprint.RowPitch +
+                    UINT64(region.X + x) * sizeof(float);
                 float depth;
                 std::memcpy(&depth, static_cast<const unsigned char*>(mapped) + offset, sizeof(float));
-                const float expected = output.Type == GDX12ShadowOutput::Kind::Spot ? 0.5f : 0.25f;
-                correct &= std::abs(depth - expected) < 0.01f;
+                if (dynamicPoint)
+                {
+                    const bool empty = output.Views[face].CasterRevision == dynamicPoint->Static.Views[face].CasterRevision;
+                    correct &= empty ? depth == 1.0f : (depth >= 0 && depth < 1.0f);
+                    std::cout << "Native Local point +X " << (empty ? "out-of-range" : "in-range")
+                        << " dynamic depth=" << depth << '\n';
+                }
+                else
+                {
+                    const float expected = output.Type == GDX12ShadowOutput::Kind::Spot ? 0.5f : 0.25f;
+                    correct &= std::abs(depth - expected) < 0.01f;
+                }
             }
         const D3D12_RANGE noWrites{ 0, 0 };
         readback->Unmap(0, &noWrites);
@@ -244,11 +283,12 @@ namespace
         unsigned commits = 0;
         uint64_t sequence = 0;
         const auto run = [&](CrossAdapterShadowRaster& rasterA, CrossAdapterShadowRaster& rasterB, const PhysicalView& atlas,
-            const std::vector<GDX12ShadowOutput>& outputs, GDX12ShadowSelection selection, bool fail, bool retire = true)
+            const std::vector<GDX12ShadowOutput>& outputs, GDX12ShadowSelection selection, bool fail, bool retire = true,
+            const DynamicPointCaster* dynamicPoint = nullptr)
         {
             ++sequence;
-            auto a = PrepareInput(primary, runtime, atlas, outputs, sequence, true);
-            auto b = PrepareInput(secondary, runtime, {}, outputs, sequence, true);
+            auto a = PrepareInput(primary, runtime, atlas, outputs, sequence, !dynamicPoint, dynamicPoint);
+            auto b = PrepareInput(secondary, runtime, {}, outputs, sequence, !dynamicPoint, dynamicPoint);
             a.CommitLegacy = [&] { ++commits; };
             bool rejectedRecorder = false;
             if (fail)
@@ -265,7 +305,7 @@ namespace
             }
             Require(receipt && receipt->Timeline() == prefix.Timeline() && receipt->Value() > prefix.Value() && commits == before + 1,
                 "Strict shadow plan did not return the actual primary restore receipt");
-            CheckDepth(primary, atlas, outputs);
+            CheckDepth(primary, atlas, outputs, dynamicPoint);
             if (retire) routing.RetireFrame(direct.GetLastCompletionPoint());
             runtime.Poll();
         };
@@ -302,6 +342,26 @@ namespace
         run(localA, localB, localAtlas, { spot, point }, { Mode::All, {} }, false, false);
         run(sunA, sunB, sunAtlas, { sun }, { Mode::All, {} }, false);
         Require(commits == 7, "Unexpected number of accepted shadow cache transactions");
+        GDX12LocalLightConstants light;
+        light.EntityId = 9;
+        SetLocalShadowGeneration(light, 1);
+        light.Type = 1;
+        light.ShadowFlags = 1;
+        light.ShadowFirstSlice = 1;
+        light.Range = 100;
+        BuildLocalLightShadowMatrices(light);
+        for (const bool inRange : {false, true})
+        {
+            const Vector3 center = Vector3(80, 65, 0) * (inRange ? 0.9f : 1.0f);
+            const BoundingBox bounds(center, {0, 1.5f, 1.5f});
+            Require(LocalShadowRangeIntersects(light, bounds) == inRange &&
+                LocalShadowFaceIntersects(light.ShadowViewProj[0], bounds), "Point test did not isolate range from frustum");
+            const auto visible = BuildLocalShadowVisibility(light, {{bounds, 1, true}});
+            const auto output = BuildLocalShadowOutput(light, visible.AllCasters, 100, false);
+            const DynamicPointCaster caster{center, BuildLocalShadowOutput(light, visible.StaticCasters, 100, true)};
+            Require((visible.AllCasters[0] != visible.StaticCasters[0]) == inRange, "Unexpected legacy dynamic-face classification");
+            run(localA, localB, localAtlas, {output}, {Mode::SpecificLight, output.Light}, false, true, &caster);
+        }
         runtime.Shutdown();
     }
 }

@@ -9,6 +9,7 @@
 #include <iterator>
 #include <map>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace
 {
@@ -53,23 +54,29 @@ namespace
         return { { access.View.Native, access.View.Identity }, access.Mode, access.State, access.View.Version };
     }
 
-    void AppendAccess(std::vector<Access>& accesses, Access access)
+    struct RasterAccesses
     {
-        const auto same = std::find_if(accesses.begin(), accesses.end(), [&](const auto& current)
-            { return current.View.Identity.Id == access.View.Identity.Id; });
-        if (same == accesses.end())
+        void Append(Access access)
         {
-            accesses.push_back(std::move(access));
-            return;
+            const auto [it, inserted] = ById.try_emplace(access.View.Identity.Id, Ordered.size());
+            if (inserted)
+            {
+                Ordered.push_back(std::move(access));
+                return;
+            }
+            auto& same = Ordered[it->second];
+            Require(same.View.Resource == access.View.Resource && same.View.Identity.Allocation == access.View.Identity.Allocation &&
+                same.View.Identity.Adapter == access.View.Identity.Adapter &&
+                same.View.Identity.ResourceEpoch == access.View.Identity.ResourceEpoch &&
+                same.View.Identity.Transfer == access.View.Identity.Transfer &&
+                same.Mode == Mode::Read && access.Mode == Mode::Read && same.Version == access.Version,
+                "Conflicting scene reads in a shadow raster stage");
+            same.State |= access.State;
         }
-        Require(same->View.Resource == access.View.Resource && same->View.Identity.Allocation == access.View.Identity.Allocation &&
-            same->View.Identity.Adapter == access.View.Identity.Adapter &&
-            same->View.Identity.ResourceEpoch == access.View.Identity.ResourceEpoch &&
-            same->View.Identity.Transfer == access.View.Identity.Transfer &&
-            same->Mode == Mode::Read && access.Mode == Mode::Read && same->Version == access.Version,
-            "Conflicting scene reads in a shadow raster stage");
-        same->State |= access.State;
-    }
+
+        std::vector<Access> Ordered;
+        std::unordered_map<ResourceId, size_t> ById;
+    };
 }
 
 struct CrossAdapterShadowRaster::Pipeline
@@ -175,9 +182,27 @@ struct CrossAdapterShadowRaster::Work
                     list->IASetIndexBuffer(&draw.Indices);
                     commands.ExecuteIndirect(Mesh->Signature.Get(), 1, replica.Indirect.View.Native->D3DResource.Get(),
                         draw.IndirectByteOffset, nullptr, 0);
+                    if (Data.Trace)
+                    {
+                        auto& evidence = Data.Trace->Groups[view.Group];
+                        evidence.SkinnedDraws += draw.Kind == Replica::GeometryKind::Skinned;
+                        evidence.MaskedDraws += std::binary_search(Data.MaskedSources.begin(), Data.MaskedSources.end(), draw.SourceId);
+                    }
                 }
             }
-            if (application && group.Application[view.Face]) group.Application[view.Face]->Draw(commands);
+            if (application && group.Application[view.Face])
+            {
+                const auto& app = *group.Application[view.Face];
+                app.Draw(commands);
+                if (Data.Trace && app.RecordedSources)
+                {
+                    auto& recorded = Data.Trace->Groups[view.Group].RecordedGrass;
+                    for (const auto source : *app.RecordedSources)
+                        if (std::find(app.Sources.begin(), app.Sources.end(), source) != app.Sources.end() &&
+                            std::find(recorded.begin(), recorded.end(), source) == recorded.end())
+                            recorded.push_back(source);
+                }
+            }
         }
     }
 
@@ -257,6 +282,7 @@ CrossAdapterShadows::RasterPlan CrossAdapterShadowRaster::Prepare(Input input)
     work->Data = std::move(input);
     work->Next = std::make_shared<Cache>();
     auto& data = work->Data;
+    if (data.Trace) std::sort(data.MaskedSources.begin(), data.MaskedSources.end());
     auto& next = *work->Next;
     next.Atlas = data.Atlas;
     next.AtlasHandle = data.Atlas.Resource->D3DResource;
@@ -274,6 +300,13 @@ CrossAdapterShadows::RasterPlan CrossAdapterShadowRaster::Prepare(Input input)
             Require(group.Static && group.Static->StaticOnly, "Local shadow raster requires matching static metadata");
         const auto& output = group.Output;
         const auto& recipe = data.Replica->Groups[group.ReplicaGroup];
+        if (data.Trace)
+        {
+            auto& evidence = data.Trace->Groups.at(index);
+            evidence.AdmittedGrass.reserve(recipe.Grass.size());
+            evidence.RecordedGrass.reserve(recipe.Grass.size());
+            for (const auto& grass : recipe.Grass) evidence.AdmittedGrass.push_back(grass.SourceId);
+        }
         const Cache::Entry* old = nullptr;
         if (sameAtlas && _cache->PerFaceVisibility == data.PerFaceVisibility)
         {
@@ -295,11 +328,13 @@ CrossAdapterShadows::RasterPlan CrossAdapterShadowRaster::Prepare(Input input)
             if (!dirty) continue;
             Work::View dynamic{ index, face, {} };
             Work::View stationary{ index, face, {} };
+            const bool emptyDynamic = !sun && data.PerFaceVisibility &&
+                output.Views[face].CasterRevision == group.Static->Views[face].CasterRevision;
             const GDX12LocalShadowFrustum frustum(output.Views[face].ViewProj);
             for (UINT drawIndex : recipe.Draws)
             {
                 const auto& draw = data.Replica->Draws.at(drawIndex);
-                if (!frustum.Intersects(draw.Bounds)) continue;
+                if ((emptyDynamic && draw.Dynamic) || !frustum.Intersects(draw.Bounds)) continue;
                 if (sun || draw.Dynamic) dynamic.Draws.push_back(drawIndex);
                 else if (staticDirty) stationary.Draws.push_back(drawIndex);
             }
@@ -345,9 +380,11 @@ CrossAdapterShadows::RasterPlan CrossAdapterShadowRaster::Prepare(Input input)
 
     const auto meshAccesses = [&](const std::vector<Work::View>& views)
     {
-        std::vector<Access> accesses;
+        RasterAccesses accesses;
         if (std::none_of(views.begin(), views.end(), [](const auto& view) { return !view.Draws.empty(); })) return accesses;
         Require(data.MaterialHeap && data.Replica->Indirect.View.Native, "Replica mesh draw has no material or indirect binding");
+        accesses.Ordered.reserve(data.Replica->RasterAccesses.size());
+        accesses.ById.reserve(data.Replica->RasterAccesses.size());
         for (const auto& access : data.Replica->RasterAccesses)
         {
             auto use = AsAccess(access);
@@ -355,7 +392,7 @@ CrossAdapterShadows::RasterPlan CrossAdapterShadowRaster::Prepare(Input input)
                 use.State = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
             else if (use.State & D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE)
                 use.State |= D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
-            AppendAccess(accesses, std::move(use));
+            accesses.Append(std::move(use));
         }
         return accesses;
     };
@@ -370,8 +407,8 @@ CrossAdapterShadows::RasterPlan CrossAdapterShadowRaster::Prepare(Input input)
     if (!work->Static.empty())
     {
         auto accesses = meshAccesses(work->Static);
-        accesses.push_back({ next.StaticAtlas, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE });
-        plan.Stages.push_back({ "Shadow static depth", std::move(accesses),
+        accesses.Append({ next.StaticAtlas, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE });
+        plan.Stages.push_back({ "Shadow static depth", std::move(accesses.Ordered),
             [work](GDX12CommandList& commands) { work->Raster(commands, work->Static, true, false); } });
     }
     if (!sun)
@@ -392,13 +429,13 @@ CrossAdapterShadows::RasterPlan CrossAdapterShadowRaster::Prepare(Input input)
             } });
     }
     auto accesses = meshAccesses(work->Final);
-    accesses.push_back({ next.Atlas, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE });
+    accesses.Append({ next.Atlas, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE });
     for (const auto& view : work->Final)
     {
         const auto& group = data.Groups[view.Group];
         const auto& app = group.Application[view.Face];
         if (!app) continue;
-        for (const auto& access : app->Accesses) AppendAccess(accesses, access);
+        for (const auto& access : app->Accesses) accesses.Append(access);
         for (const auto& grass : data.Replica->Groups[group.ReplicaGroup].Grass)
         {
             bool versionedReady = false;
@@ -415,7 +452,7 @@ CrossAdapterShadows::RasterPlan CrossAdapterShadowRaster::Prepare(Input input)
                     else Require(same->Ready.Timeline() == grass.Ready.Timeline() && same->Ready.Value() == grass.Ready.Value(),
                         "Conflicting grass readiness for one version");
                 }
-                AppendAccess(accesses, std::move(access));
+                accesses.Append(std::move(access));
             }
             if (!grass.SamePlan && !versionedReady)
             {
@@ -426,7 +463,7 @@ CrossAdapterShadows::RasterPlan CrossAdapterShadowRaster::Prepare(Input input)
             }
         }
     }
-    plan.Stages.push_back({ "Shadow final depth", std::move(accesses),
+    plan.Stages.push_back({ "Shadow final depth", std::move(accesses.Ordered),
         [work, sun](GDX12CommandList& commands) { work->Raster(commands, work->Final, sun, true); } });
     return plan;
 }
@@ -491,6 +528,26 @@ std::optional<CompletionPoint> SubmitPreparedShadows(CrossAdapterShadows& transf
     }
     primary.Groups = std::move(local);
     secondary.Groups = std::move(remote);
+    const auto trace = secondary.Trace;
+    if (trace)
+    {
+        trace->Stamp = secondary.Stamp;
+        trace->Groups.resize(secondary.Groups.size());
+        for (size_t index = 0; index < secondary.Groups.size(); ++index)
+        {
+            const auto& compact = secondary.Groups[index].Output;
+            const auto& original = outputs[selected->SecondaryGroups[index]];
+            auto& evidence = trace->Groups[index];
+            evidence.Kind = original.Type;
+            evidence.Light = original.Light;
+            evidence.ViewCount = original.ViewCount();
+            for (UINT face = 0; face < evidence.ViewCount; ++face)
+            {
+                evidence.CompactViews[face] = compact.Views[face].Region;
+                evidence.PrimaryViews[face] = original.Views[face].Region;
+            }
+        }
+    }
     const auto primaryAtlas = primary.Atlas;
     PhysicalView secondaryAtlas;
     CrossAdapterShadows::RasterPlan localPlan, remotePlan;
@@ -505,5 +562,10 @@ std::optional<CompletionPoint> SubmitPreparedShadows(CrossAdapterShadows& transf
     catch (const std::exception& error) { OutputDebugStringA(error.what()); return fallback(); }
 
     auto submitted = transfer.Submit(*selected, outputs, primaryAtlas, secondaryAtlas, localPlan, remotePlan, prefix);
+    if (trace && submitted)
+    {
+        trace->Finalize = *submitted;
+        trace->SecondaryDepth = secondaryAtlas.Resource;
+    }
     return submitted ? submitted : fallback();
 }

@@ -84,6 +84,9 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12ShadowDepthTransfer.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -202,6 +205,9 @@
     <ClCompile Include="src\GDX12Resource.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\GDX12ShadowDepthTransfer.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\GDX12DeviceResources.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -217,9 +223,11 @@
     <None Include="Shaders\CSM.hlsli" />
     <None Include="Shaders\EnvironmentIBL.hlsl" />
     <None Include="Shaders\ShadowPass.hlsl" />
+    <None Include="Shaders\ShadowDepthTransfer.hlsl" />
     <None Include="Shaders\LocalShadowPass.hlsl" />
     <None Include="Shaders\ShadowFrustum.hlsli" />
     <None Include="Shaders\FullScreenVS.hlsl" />
+    <None Include="Shaders\UIScreenComposite.hlsl" />
     <None Include="Shaders\OpaquePass.hlsl" />
     <None Include="Shaders\DeferredLighting.hlsl" />
     <None Include="Shaders\LocalShadows.hlsli" />

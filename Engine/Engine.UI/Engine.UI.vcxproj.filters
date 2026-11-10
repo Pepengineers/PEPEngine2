@@ -24,12 +24,18 @@
     <ClInclude Include="Include\Engine.UI\WorldCanvas.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="Include\Engine.UI\UIScreenComposite.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\UI_test.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\WorldCanvas.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="src\UIScreenComposite.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

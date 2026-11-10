@@ -29,7 +29,7 @@ public:
 
     // All heaps created in one high-capacity instance
     std::unique_ptr<GDX12DescriptorHeap> RTVHeap;
-    std::unique_ptr<GDX12DescriptorHeap> SRV_UAV_Heap;
+    std::shared_ptr<GDX12DescriptorHeap> SRV_UAV_Heap;
     std::unique_ptr<GDX12DescriptorHeap> DSVHeap;
 
     std::vector<std::unique_ptr<GDX12FrameConstants>> FrameConstants;

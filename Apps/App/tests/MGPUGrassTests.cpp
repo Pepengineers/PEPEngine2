@@ -1,6 +1,7 @@
 #include "App.Base/App.h"
 #include "Engine.RendererDX12/GDX12DeviceFactory.h"
 #include "GrassMGPURouteChecks.h"
+#include "GrassShadowRetryChecks.h"
 #include <d3d12sdklayers.h>
 #include <iostream>
 #include <string_view>
@@ -82,6 +83,10 @@ int main(int argc, char** argv)
         common.CameraView = Matrix::Identity;
         common.ResetHistory = false;
         RenderMGPURuntime runtime({&primary, &secondary, &copyA, &copyB});
+#ifdef _DEBUG
+        CheckNativeGrassShadowRetry(primary, secondary, runtime);
+        std::cout << "G2 retry passed: native no-record refusal, same PointSource slot and masked depth.\n";
+#endif
         CheckGrassMGPURoute(runtime, resources, secondary, common);
         runtime.Shutdown();
         GDX12ShaderCompiler::Shutdown();

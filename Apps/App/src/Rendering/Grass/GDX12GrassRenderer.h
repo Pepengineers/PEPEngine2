@@ -89,6 +89,7 @@ public:
     const GDX12GrassWindControls& Controls() const { return _controls; }
 
 private:
+    friend class BistroRenderGraphTests;
     struct Vertex
     {
         XMFLOAT3 Position, PreviousPosition, Normal;

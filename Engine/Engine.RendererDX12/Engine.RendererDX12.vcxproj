@@ -71,6 +71,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12RenderPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FrameGenerationPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12ShadowDepthTransfer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ResourceHandle.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGraph.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12SnapshotProtocol.h" />
@@ -139,6 +140,7 @@
     <ClCompile Include="src\GDX12GPUTimer.cpp" />
     <ClCompile Include="src\GDX12GeometryBuffer.cpp" />
     <ClCompile Include="src\GDX12Resource.cpp" />
+    <ClCompile Include="src\GDX12ShadowDepthTransfer.cpp" />
     <ClCompile Include="src\GDX12SwapChain.cpp" />
     <ClCompile Include="src\GDX12StreamlineSDK.cpp" />
     <ClCompile Include="src\GDX12CommandList.cpp" />
@@ -182,9 +184,11 @@
     <None Include="Shaders\Clouds.hlsl" />
     <None Include="Shaders\EnvironmentIBL.hlsl" />
     <None Include="Shaders\ShadowPass.hlsl" />
+    <None Include="Shaders\ShadowDepthTransfer.hlsl" />
     <None Include="Shaders\LocalShadowPass.hlsl" />
     <None Include="Shaders\ShadowFrustum.hlsli" />
     <None Include="Shaders\FullScreenVS.hlsl" />
+    <None Include="Shaders\UIScreenComposite.hlsl" />
     <None Include="Shaders\OpaquePass.hlsl" />
     <None Include="Shaders\Skinning.hlsl" />
     <None Include="Shaders\InstanceBatching.hlsl" />

@@ -1,6 +1,7 @@
 #include "App.Base/Rendering/CommonRenderPasses.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Rendering/CrossAdapterAO.h"
+#include "App.Base/Rendering/RenderShadowRoutes.h"
 
 CommonRenderPasses::CommonRenderPasses(GDX12SwapChain* backBuffer, GDX12WBOITTransparencyPass::DepthPartition partition)
     : Transparency(partition), FrameGeneration(backBuffer)
@@ -32,6 +33,7 @@ void CommonRenderPasses::Initialize()
 
 void CommonRenderPasses::Resize(RenderPipelineContext& context)
 {
+    if (_placedShadows) _placedShadows->Invalidate();
     Reconstruction.QueryRenderTargetResolution();
     for (auto* pass : Bindings.PrimaryPasses) pass->Resize();
 }
@@ -63,9 +65,9 @@ void CommonRenderPasses::AddAmbientOcclusion(GDX12RenderGraph& graph, bool early
     }
     graph.AddPass(*_placedAO);
     graph.SetLegacySplit(*_placedAO, { Depth.GetOutput(2), (early ? Depth : Opaque).GetOutput(3) }, { AO.GetOutput(0) });
-    Bindings.SubmitLegacyReplacement = [this](const auto& boundary, auto prefix)
-    { return _placedAO->Submit(boundary, prefix); };
-    Bindings.RetirePlacedFrame = [this](auto tail) { _placedAO->RetireFrame(tail); };
+    Bindings.LegacyReplacements.push_back({ _placedAO.get(),
+        [this](const auto& boundary, auto prefix) { return _placedAO->Submit(boundary, prefix); },
+        [this](auto tail) { _placedAO->RetireFrame(tail); } });
 }
 
 GDX12Submission::CompletionPoint CommonRenderPasses::GetLastAmbientOcclusionFinalize() const
@@ -73,7 +75,14 @@ GDX12Submission::CompletionPoint CommonRenderPasses::GetLastAmbientOcclusionFina
     return _placedAO ? _placedAO->GetLastFinalize() : GDX12Submission::CompletionPoint{};
 }
 
-void CommonRenderPasses::PrepareFrame(RenderPipelineContext& context, GDX12CommandList* commands)
+void CommonRenderPasses::AddShadowRoutes(GDX12RenderGraph& graph, GDX12RenderPass& sunNode, GDX12RenderPass& localNode)
+{
+    if (!_usePlacedShadows) return;
+    _placedShadows->Configure(graph, sunNode, GDX12ShadowAtlas::Sun, Bindings);
+    _placedShadows->Configure(graph, localNode, GDX12ShadowAtlas::Local, Bindings);
+}
+
+bool CommonRenderPasses::PrepareFrame(RenderPipelineContext& context, GDX12CommandList* commands)
 {
     Bindings.UseAsyncCompute = GetParticleSettings().AsyncCompute || IsAmbientOcclusionAsyncComputeEnabled();
     if (!context.Primary.ParticleSimulation)
@@ -101,4 +110,17 @@ void CommonRenderPasses::PrepareFrame(RenderPipelineContext& context, GDX12Comma
     Reflections.Prepare();
     context.Primary.PrepareLocalShadowData();
     context.Primary.UploadLocalShadowData(commands);
+
+    auto* runtime = context.Runtime.GetMGPURuntime();
+    auto* secondary = context.Runtime.GetMGPUDevices().Secondary;
+    const bool enabled = IsMultiGPUShadowsEnabled() && runtime && secondary;
+    if (enabled)
+    {
+        if (!_placedShadows)
+            _placedShadows = std::make_unique<RenderShadowRoutes>(context.Primary, *secondary, *runtime, SunShadow, LocalShadow);
+        _placedShadows->PrepareFrame(context.Runtime);
+    }
+    else if (_usePlacedShadows)
+        _placedShadows->Invalidate();
+    return std::exchange(_usePlacedShadows, enabled) != enabled;
 }

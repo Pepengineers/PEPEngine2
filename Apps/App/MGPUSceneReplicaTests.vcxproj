@@ -7,7 +7,6 @@
   <ItemGroup>
     <ClCompile Remove="@(ClCompile)" />
     <ClCompile Include="tests\MGPUSceneReplicaTests.cpp" />
-    <ClCompile Include="..\App.Base\src\Rendering\CrossAdapterSceneReplica.cpp" />
   </ItemGroup>
   <ItemDefinitionGroup Condition="'$(S2RValidationWwiseLibDir)'!=''">
     <Link>

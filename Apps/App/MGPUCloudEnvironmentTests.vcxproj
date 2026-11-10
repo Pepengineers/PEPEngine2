@@ -7,6 +7,5 @@
   <ItemGroup>
     <ClCompile Remove="@(ClCompile)" />
     <ClCompile Include="tests\MGPUCloudEnvironmentTests.cpp" />
-    <ClCompile Include="..\App.Base\src\Rendering\CrossAdapterEnvironment.cpp" />
   </ItemGroup>
 </Project>

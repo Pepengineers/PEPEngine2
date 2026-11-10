@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
+#include "Engine.RendererDX12/GDX12SnapshotProtocol.h"
 
 class RenderMGPURuntime;
 
@@ -24,15 +25,23 @@ public:
         uint64_t OverAgeCrossings = 0;
     };
 
+    struct TransportStatus
+    {
+        GDX12Snapshot::Usage Occupied;
+        uint64_t LastReservedInvocation = 0;
+        bool Active = false;
+    };
+
     CrossAdapterEnvironment(GDX12EnvironmentIBLPass& environment, GDX12DeviceResources& primary,
         GDX12Device* secondary = nullptr, RenderMGPURuntime* runtime = nullptr);
     ~CrossAdapterEnvironment() override;
     GDX12CloudComponent& CloudSource();
     const Diagnostics& GetDiagnostics() const;
+    TransportStatus GetTransportStatus() const;
 
     // Once per simulation tick, with world pause and scale already applied.
-    // Returns whether the wrapper currently needs a legacy replacement point.
-    bool PrepareFrame(double worldDeltaSeconds);
+    // Hidden frames advance the clock without admitting GPU work. Returns whether a replacement point is needed.
+    bool PrepareFrame(double worldDeltaSeconds, bool visible = true);
     void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override;
     void Execute(GDX12CommandList* commands) override;
     IRenderPassLink* GetOutput(UINT index) override;

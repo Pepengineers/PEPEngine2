@@ -36,7 +36,6 @@ struct WorldLoadContext
 
     std::unordered_map<std::string, GPUTexture*> TexturesById;
     std::unordered_map<std::string, GDX12Material*> MaterialsById;
-    std::unordered_map<std::wstring, GPUTexture*> ImportedTexturesByPath;
 
     Entity ResolveEntity(const std::string& id) const
     {

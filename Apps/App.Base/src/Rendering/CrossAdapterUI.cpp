@@ -138,6 +138,12 @@ namespace Engine::UI
             (settings.Scope == UIOffloadScope::Canvas && surface != CanvasId::Invalid && settings.Selected == surface));
     }
 
+    SnapshotReadMode GetUIOffloadReadMode(const UIOffloadSettings& settings, CanvasId surface)
+    {
+        return surface != CanvasId::Invalid && settings.Freshness == UIVisualFreshness::Latest
+            ? SnapshotReadMode::LatestCompleted : SnapshotReadMode::ExactVersion;
+    }
+
     bool UIUpdateDue(double nowSeconds, std::optional<double> lastAdmissionSeconds, double updateHz)
     {
         return updateHz == 0 || !lastAdmissionSeconds || nowSeconds - *lastAdmissionSeconds >= 1.0 / updateHz;
@@ -725,8 +731,7 @@ namespace Engine::UI
         for (auto& stream : state.Streams)
         {
             const bool requested = RequestsUIOffload(settings, stream.Key);
-            const auto mode = stream.Key != CanvasId::Invalid && settings.Freshness == UIVisualFreshness::Latest
-                ? SnapshotReadMode::LatestCompleted : SnapshotReadMode::ExactVersion;
+            const auto mode = GetUIOffloadReadMode(settings, stream.Key);
             if (stream.Status.Requested && (!requested || stream.Status.Mode != mode) &&
                 stream.LayoutEpoch != Epoch::Invalid) state.Reset(stream);
             stream.Status = {};
@@ -762,6 +767,7 @@ namespace Engine::UI
         UIPlacementStatus status;
         status.Requested = RequestsUIOffload(_impl->Settings, surface);
         status.ActiveAdapter = _impl->DirectA.Adapter;
+        status.Mode = GetUIOffloadReadMode(_impl->Settings, surface);
         status.Fallback = "Unknown CanvasId";
         return status;
     }

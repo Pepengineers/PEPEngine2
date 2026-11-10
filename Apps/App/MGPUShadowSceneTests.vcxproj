@@ -10,6 +10,5 @@
     <ClCompile Include="tests\MGPUSceneReplicaTests.cpp">
       <PreprocessorDefinitions>main=SceneReplicaRegressionMain;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
-    <ClCompile Include="..\App.Base\src\Rendering\CrossAdapterShadowScene.cpp" />
   </ItemGroup>
 </Project>

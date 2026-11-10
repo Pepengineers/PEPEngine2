@@ -20,6 +20,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12MotionBlurPass.h"
 
 class CrossAdapterAO;
+class RenderShadowRoutes;
 
 // Owns reusable techniques and their lifecycle; each pipeline chooses links and graph order.
 struct CommonRenderPasses
@@ -30,7 +31,9 @@ struct CommonRenderPasses
     void Setup(RenderPipelineContext&);
     void Initialize();
     void Resize(RenderPipelineContext&);
-    void PrepareFrame(RenderPipelineContext&, GDX12CommandList*);
+    bool PrepareFrame(RenderPipelineContext&, GDX12CommandList*);
+    RenderShadowRoutes* GetShadowRoutes() const { return _usePlacedShadows ? _placedShadows.get() : nullptr; }
+    void AddShadowRoutes(GDX12RenderGraph&, GDX12RenderPass& sunNode, GDX12RenderPass& localNode);
     void BindAmbientOcclusion(RenderPipelineCommonData&, bool early);
     bool UpdateAmbientOcclusionRoute(RenderPipelineContext&);
     void AddAmbientOcclusion(GDX12RenderGraph&, bool early);
@@ -62,4 +65,6 @@ private:
     friend class BistroRenderGraphTests;
     std::unique_ptr<CrossAdapterAO> _placedAO;
     bool _usePlacedAO = false;
+    std::unique_ptr<RenderShadowRoutes> _placedShadows;
+    bool _usePlacedShadows = false;
 };

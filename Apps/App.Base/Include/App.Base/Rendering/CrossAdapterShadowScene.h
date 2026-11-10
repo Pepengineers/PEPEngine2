@@ -48,6 +48,9 @@ public:
     CrossAdapterShadowScene(const CrossAdapterShadowScene&) = delete;
     CrossAdapterShadowScene& operator=(const CrossAdapterShadowScene&) = delete;
 
+    // Run after executor collection, even when no atlas will prepare this frame.
+    void CollectRetired();
+
     // An empty result means all slots are retained by work awaiting its last secondary reader.
     PreparedShadowReplica Prepare(const CrossAdapterSceneReplica::Snapshot& snapshot, const ShadowSceneSources& sources);
 

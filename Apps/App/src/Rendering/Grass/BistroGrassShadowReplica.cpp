@@ -414,7 +414,7 @@ std::vector<BistroGrassShadowReplica::GroupBatches> BistroGrassShadowReplica::Ma
         auto& batches = result[index].emplace();
         for (const auto& handle : group.Patches)
             batches.push_back({ capture.Frame, group.ReplicaGroup, handle.Index, &device, field.Owner,
-                false, field.Ready, {{ { field.View.Resource, field.View.Identity, field.Version },
+                false, field.Ready, {{ { field.View.Resource, field.View.Identity, field.Version, field.Owner },
                     field.View.Resource->D3DResource, Graph::Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE }} });
     }
     return result;

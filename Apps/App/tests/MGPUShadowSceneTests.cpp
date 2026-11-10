@@ -98,16 +98,17 @@ void Submit(GDX12Device& device, Graph::PlanExecutor& executor, const PreparedSh
 }
 
 template<class T>
-std::vector<T> Read(GDX12Device& device, const ResourceView& view, size_t count)
+std::vector<T> Read(GDX12Device& device, const ResourceView& view, size_t count, UINT64 offset = 0)
 {
     const UINT64 bytes = count * sizeof(T);
-    Require(view.Native->D3DResource->GetDesc().Width == bytes, "Unexpected shadow buffer size");
+    const UINT64 width = view.Native->D3DResource->GetDesc().Width;
+    Require(offset <= width && bytes <= width - offset, "Unexpected shadow buffer range");
     auto readback = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(bytes),
         D3D12_RESOURCE_STATE_COPY_DEST);
     auto& queue = *device.GetCommandQueue();
     auto* list = queue.GetCommandList();
     list->ResourceBarrier({ view.Native->GetCopySourceBarrier() });
-    list->GetCommandList()->CopyBufferRegion(readback.Get(), 0, view.Native->D3DResource.Get(), 0, bytes);
+    list->GetCommandList()->CopyBufferRegion(readback.Get(), 0, view.Native->D3DResource.Get(), offset, bytes);
     list->ResourceBarrier({ view.Native->GetCommonBarrier() });
     queue.ExecuteCommandList(list);
     queue.Flush();
@@ -124,8 +125,10 @@ const ResourceView& FindView(const PreparedFrame& frame, D3D12_GPU_VIRTUAL_ADDRE
 {
     const auto found = std::find_if(frame.RasterAccesses.begin(), frame.RasterAccesses.end(), [&](const Access& access)
     {
-        return access.Handle->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_BUFFER &&
-            access.Handle->GetGPUVirtualAddress() == address;
+        const auto desc = access.Handle->GetDesc();
+        if (desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER) return false;
+        const auto base = access.Handle->GetGPUVirtualAddress();
+        return address >= base && address - base < desc.Width;
     });
     Require(found != frame.RasterAccesses.end(), "Shadow raster did not declare the IA resource");
     return found->View;
@@ -229,6 +232,15 @@ void TestReplicaAccessIndex(GDX12Device& device)
     collision.Version.Invocation = ProducerInvocationId{2};
     reject(transferred, collision, "A transfer version change was accepted for an existing resource");
 
+    for (const auto& invalid : { ResidentGeometry{ first, second, 3, 3, 2, 4, 0 },
+        ResidentGeometry{ first, second, 3, 3, 2, 0, 2 } })
+    {
+        snapshot.Meshes[0].Resident = invalid;
+        Prepare(slot, device, heap, snapshot.Stamp, snapshot, identity);
+        Require(slot->Get().Groups[0].Reason == Rejection::MissingGeometry && slot->Get().Draws.empty(),
+            "Out-of-bounds or unaligned resident slice was accepted");
+    }
+
     snapshot.Meshes[0].Resident = ResidentGeometry{ first, second, 3, 3, 2 };
     const auto duplicateUpload = identity();
     UINT uploadRequests = 0;
@@ -276,6 +288,39 @@ void TestReplicaAccessIndex(GDX12Device& device)
     Require(!firstOwner.expired(), "Prepared access dropped its resource owner");
     slot.reset();
     Require(firstOwner.expired(), "Retired access still retained its resource owner");
+}
+
+void TestRetiredGrassSlots(GDX12Device& device, CrossAdapterShadowScene& scene)
+{
+    std::array<PreparedShadowReplica, 2> recipes;
+    std::array<std::weak_ptr<int>, 2> owners;
+    for (size_t i = 0; i < recipes.size(); ++i)
+    {
+        auto owner = std::make_shared<int>(0);
+        owners[i] = owner;
+        Snapshot grass;
+        grass.Stamp = { FrameSubmissionId{10 + i}, ProducerInvocationId{10 + i}, 10 };
+        grass.Groups = {{0}};
+        Caster caster;
+        caster.SourceId = 1;
+        caster.Kind = GeometryKind::ExpandedGrass;
+        caster.Range = 0;
+        caster.Transform.emplace();
+        caster.Bounds.emplace();
+        grass.Casters.push_back(caster);
+        grass.GrassBatches.push_back({grass.Stamp, 0, caster.SourceId, &device, std::move(owner), true});
+        recipes[i] = scene.Prepare(grass, {});
+        Require(recipes[i].Replica && recipes[i].Replica->Groups[0].Grass.size() == 1,
+            "Grass ownership fixture did not prepare a real slot");
+    }
+    scene.CollectRetired();
+    Require(!owners[0].expired() && !owners[1].expired(), "Busy scene recipes lost their grass owners");
+    recipes[1] = {};
+    scene.CollectRetired();
+    Require(!owners[0].expired() && owners[1].expired(), "Retired second atlas slot kept its grass owner");
+    recipes[0] = {};
+    scene.CollectRetired();
+    Require(owners[0].expired(), "Retired first atlas slot kept its grass owner");
 }
 
 void TestGrassMaterials(GDX12Device& device, CrossAdapterShadowScene& scene, Graph::PlanExecutor& executor)
@@ -359,6 +404,82 @@ void TestGrassMaterials(GDX12Device& device, CrossAdapterShadowScene& scene, Gra
     const auto warm = scene.Prepare(grass, {});
     Require(warm.Replica->Groups[0].Reason == Rejection::None && warm.Preparation.empty() && !warm.Commit &&
         AlphaView(*warm.Replica).Identity.Id == resident.Identity.Id, "Grass alpha did not reuse the resident upload");
+}
+
+void TestPackedRigid(GDX12Device& device, CrossAdapterShadowScene& scene, Graph::PlanExecutor& executor)
+{
+    Snapshot snapshot;
+    snapshot.Stamp = { FrameSubmissionId{20}, ProducerInvocationId{20}, 20 };
+    snapshot.Materials.resize(1);
+    snapshot.Groups = {{0, 1}, {2}};
+    for (UINT i = 0; i < 3; ++i)
+    {
+        MeshRange mesh;
+        mesh.Mesh = Engine::Core::MeshHandle{30 + i, 1};
+        mesh.ContentRevision = 1;
+        snapshot.Meshes.push_back(std::move(mesh));
+
+        Caster caster;
+        caster.SourceId = i;
+        caster.Range = i;
+        caster.MaterialIndex = i == 2 ? UINT_MAX : 0;
+        caster.GeometryRevision = 1;
+        caster.Transform.emplace();
+        caster.Bounds.emplace();
+        snapshot.Casters.push_back(caster);
+    }
+
+    Engine::Core::SubMesh source;
+    source.Vertices.resize(3);
+    source.Vertices[0].Position.x = 17;
+    source.Indices = {0, 1, 2};
+    auto& second = snapshot.Meshes[1];
+    second.Vertices.resize(4);
+    second.Vertices[1].Position.x = 29;
+    second.Indices = {99, 2, 3, 1};
+    second.FirstVertex = second.FirstIndex = 1;
+    second.VertexCount = second.IndexCount = 3;
+    second.Addressing = IndexAddressing::AbsoluteInPayload;
+    const ShadowSceneSources coldSources{{&source, nullptr, &source}, {}, {}};
+    {
+        const auto canceled = scene.Prepare(snapshot, coldSources);
+        Require(canceled.Replica->Groups[0].Reason == Rejection::None && canceled.Commit,
+            "Cold packed scene was not prepared");
+    }
+    Require(scene.Prepare(snapshot, {}).Replica->Groups[0].Reason == Rejection::MissingGeometry,
+        "Canceled chunk was visible on retry");
+
+    const auto cold = scene.Prepare(snapshot, coldSources);
+    const auto& frame = *cold.Replica;
+    Require(frame.Groups[0].Draws.size() == 2 && frame.Groups[1].Reason == Rejection::MissingMaterial &&
+        cold.Preparation.size() == 1 && cold.Preparation[0].Accesses.size() == 1,
+        "Two rigid ranges did not share one chunk copy");
+    const auto& a = frame.Draws[0];
+    const auto& b = frame.Draws[1];
+    const auto& chunk = FindView(frame, a.Vertices.BufferLocation);
+    const auto base = chunk.Native->D3DResource->GetGPUVirtualAddress();
+    Require(FindView(frame, a.Indices.BufferLocation).Identity.Id == chunk.Identity.Id &&
+        FindView(frame, b.Vertices.BufferLocation).Identity.Id == chunk.Identity.Id &&
+        FindView(frame, b.Indices.BufferLocation).Identity.Id == chunk.Identity.Id &&
+        a.Vertices.BufferLocation == base && b.Vertices.BufferLocation > a.Indices.BufferLocation &&
+        b.Indices.BufferLocation > b.Vertices.BufferLocation && b.Arguments.StartIndexLocation == 0 &&
+        b.Arguments.BaseVertexLocation == 0, "Packed IA views did not use canonical, slice-relative offsets");
+    Submit(device, executor, cold);
+    executor.Drain();
+    Require(Read<Vertex>(device, chunk, 3)[0].Position.x == 17 &&
+        Read<Vertex>(device, chunk, 3, b.Vertices.BufferLocation - base)[0].Position.x == 29 &&
+        Read<UINT>(device, chunk, 3, b.Indices.BufferLocation - base) == std::vector<UINT>{1, 2, 0},
+        "Packed rigid readback differs from its selected vertex and index slices");
+
+    snapshot.Stamp = { FrameSubmissionId{21}, ProducerInvocationId{21}, 21 };
+    second.Vertices.clear();
+    second.Indices.clear();
+    snapshot.Casters[2].MaterialIndex = 0;
+    const auto warm = scene.Prepare(snapshot, {});
+    Require(warm.Replica->Groups[0].Draws.size() == 2 && warm.Replica->Groups[1].Reason == Rejection::MissingGeometry &&
+        warm.Preparation.empty() && !warm.Commit &&
+        warm.Replica->Draws[1].Vertices.BufferLocation == b.Vertices.BufferLocation,
+        "Warm chunk lost an admitted slice or published a rejected slice");
 }
 
 void TestScene(GDX12Device& device)
@@ -515,7 +636,9 @@ void TestScene(GDX12Device& device)
     first = {};
     second = {};
     changed = {};
+    TestRetiredGrassSlots(device, scene);
     TestGrassMaterials(device, scene, executor);
+    TestPackedRigid(device, scene, executor);
     std::cout << "Shadow scene residency, canceled preparation, in-flight slots, grass materials, alpha mips and exact skin palettes passed\n";
 }
 }

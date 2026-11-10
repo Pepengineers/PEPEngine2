@@ -41,6 +41,7 @@ public:
     uint64_t GeometryAllocationBytes() const { return _gpu ? _gpu->GeometryAllocationBytes() : 0; }
 
 private:
+    friend class BistroRenderGraphTests;
     void Subscribe(World& world);
     void Unsubscribe(World& world);
     struct Subscriptions { ListenerHandle GrassCreated, GrassUpdated, WindCreated, WindUpdated; };

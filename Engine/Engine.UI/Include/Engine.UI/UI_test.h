@@ -3,6 +3,10 @@
 #include <Windows.h>
 #include <dxgiformat.h>
 #include <DirectXCollision.h>
+#ifdef _DEBUG
+#include <initializer_list>
+#include <string_view>
+#endif
 
 class GDX12Device;
 class GDX12CommandList;
@@ -13,7 +17,8 @@ namespace Engine::UI
     void Initialize(HWND window, GDX12Device* device, int framesInFlight, DXGI_FORMAT format);
     void BeginFrame();
 #ifdef _DEBUG
-    bool DebugButton(const char* label);
+    bool DebugControlsVisible();
+    bool DebugButton(const char* label, std::initializer_list<std::string_view> lines = {});
 #endif
     void DrawWorldBox(const DirectX::BoundingBox& box, const DirectX::XMFLOAT4X4& viewProjection,
         const char* label, unsigned int color);

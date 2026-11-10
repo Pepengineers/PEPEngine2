@@ -431,6 +431,15 @@ namespace
         render(0);
         CHECK(controller.GetDiagnostics().Submitted == 1 && controller.GetDiagnostics().Repeats == 1);
 
+        const auto beforeHidden = controller.CloudSource().CaptureInputs().SimulationSeconds;
+        const auto submittedWhileVisible = controller.GetDiagnostics().Submitted;
+        CHECK(!controller.PrepareFrame(0.05, false));
+        const auto afterHidden = controller.CloudSource().CaptureInputs().SimulationSeconds;
+        CHECK(std::abs(afterHidden - beforeHidden - 0.05) < 1e-9);
+        CHECK(!controller.PrepareFrame(0, false));
+        CHECK(controller.CloudSource().CaptureInputs().SimulationSeconds == afterHidden);
+        CHECK(controller.GetDiagnostics().Submitted == submittedWhileVisible);
+
         auto& producer = secondary ? *secondary : device;
         auto* compute = producer.TryGetComputeQueue();
         CHECK(compute);

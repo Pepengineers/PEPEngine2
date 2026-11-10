@@ -6,9 +6,10 @@
   </PropertyGroup>
   <ItemGroup>
     <ClCompile Remove="@(ClCompile)" />
+    <ClCompile Include="src\Rendering\Grass\BistroGrassShadowReplica.cpp" />
+    <ClCompile Include="src\Rendering\Grass\CrossAdapterGrass.cpp" />
     <ClCompile Include="src\Rendering\Grass\GDX12GrassWind.cpp" />
     <ClCompile Include="src\Rendering\Grass\GDX12GrassRenderer.cpp" />
-    <ClCompile Include="src\Rendering\Grass\CrossAdapterGrass.cpp" />
     <ClCompile Include="tests\MGPUGrassTests.cpp" />
   </ItemGroup>
   <ItemDefinitionGroup>

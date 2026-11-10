@@ -88,6 +88,7 @@ public:
 	bool HasRTV();
 	D3D12_CLEAR_VALUE& GetClearValue();
 	GDX12TextureResource* GetResource();
+	std::shared_ptr<GDX12TextureResource> GetResourceOwner() const { return _resource; }
 	DXGI_FORMAT GetFormat();
 	ETextureSemantic GetSemantic() const;
 	D3D12_VIEWPORT GetViewport();

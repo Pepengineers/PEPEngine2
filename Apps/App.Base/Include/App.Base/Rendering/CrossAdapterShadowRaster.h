@@ -15,6 +15,8 @@ public:
         std::vector<CrossAdapterShadows::Access> Accesses;
         std::vector<std::shared_ptr<const void>> Owners;
         std::function<void(GDX12CommandList&)> Draw;
+        // The application recorder fills this only when it actually emits native draws.
+        std::shared_ptr<const std::vector<std::uint64_t>> RecordedSources;
     };
     struct Group
     {
@@ -22,6 +24,22 @@ public:
         std::optional<GDX12ShadowOutput> Static;
         UINT ReplicaGroup = UINT_MAX;
         std::array<std::optional<ApplicationView>, 6> Application;
+    };
+    struct GroupTrace
+    {
+        GDX12ShadowOutput::Kind Kind = GDX12ShadowOutput::Kind::Sun;
+        GDX12LocalShadowKey Light;
+        std::array<GDX12ShadowRegion, 6> CompactViews{}, PrimaryViews{};
+        UINT ViewCount = 0;
+        std::size_t SkinnedDraws = 0, MaskedDraws = 0;
+        std::vector<std::uint64_t> AdmittedGrass, RecordedGrass;
+    };
+    struct SubmissionTrace
+    {
+        CrossAdapterSceneReplica::FrameStamp Stamp;
+        GDX12Submission::CompletionPoint Finalize;
+        std::vector<GroupTrace> Groups;
+        std::shared_ptr<GDX12Resource> SecondaryDepth;
     };
     struct Input
     {
@@ -36,6 +54,8 @@ public:
         std::vector<CrossAdapterShadows::Readiness> ExactInputs;
         bool PerFaceVisibility = false;
         std::function<void()> CommitLegacy;
+        std::shared_ptr<SubmissionTrace> Trace;
+        std::vector<std::uint64_t> MaskedSources;
     };
 
     CrossAdapterShadowRaster(GDX12Device& device, RenderMGPURuntime& runtime, GDX12ShadowAtlas atlas);
