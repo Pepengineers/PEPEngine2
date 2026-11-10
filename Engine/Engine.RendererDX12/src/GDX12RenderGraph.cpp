@@ -63,9 +63,10 @@ GDX12RenderGraph::Resource GDX12RenderGraph::Create(std::string name, GDX12Textu
 {
     if (transient && (!texture || !texture->IsInitialized() || !texture->CanShareGraphResource()))
         throw std::invalid_argument("Render graph: transient texture must be initialized and engine-owned: " + name);
-    for (const auto& resource : _resources)
-        if (texture && resource.Texture == texture)
-            throw std::invalid_argument("Render graph: register each texture only once: " + name);
+    if (texture)
+        for (const auto& resource : _resources)
+            if (resource.Texture == texture)
+                throw std::invalid_argument("Render graph: register each texture only once: " + name);
     _compiled = false;
     ResourceInfo resource;
     resource.Name = std::move(name);
@@ -109,7 +110,8 @@ GDX12RenderGraph::Pass GDX12RenderGraph::AddPass(GDX12RenderPass& pass)
     auto shared = _shared;
     Node node;
     node.Instance = &pass;
-    GDX12RenderGraphBuilder builder(*this, node);
+    std::unordered_map<Resource, size_t> accessIndices;
+    GDX12RenderGraphBuilder builder(*this, node, accessIndices);
     try
     {
         pass.RecordRenderGraph(builder);
@@ -117,6 +119,9 @@ GDX12RenderGraph::Pass GDX12RenderGraph::AddPass(GDX12RenderPass& pass)
     }
     catch (...)
     {
+        for (size_t i = 0; i < _resources.size(); ++i)
+            if (_resources[i].Registered && (i >= resources.size() || !resources[i].Registered))
+                _registeredResourceIds.erase(_resources[i].Identity.Id);
         _resources = std::move(resources);
         _links = std::move(links);
         _shared = std::move(shared);
@@ -161,9 +166,8 @@ void GDX12RenderGraphBuilder::UseVersion(const Graph::Resource resource, const G
     const TransferVersion version, const D3D12_RESOURCE_STATES state)
 {
     if (!version.IsValid()) throw std::invalid_argument("Render graph: invalid transfer version");
-    for (const auto& access : _node.Accesses)
-        if (access.Id == resource)
-            throw std::invalid_argument("Render graph: duplicate versioned access");
+    if (_accessIndices.count(resource))
+        throw std::invalid_argument("Render graph: duplicate versioned access");
     Use(resource, mode, state);
     _node.Accesses.back().Version = version;
 }
@@ -173,13 +177,15 @@ void GDX12RenderGraphBuilder::Use(const Graph::Resource resource, const Graph::M
     _graph.CheckResource(resource);
     if (mode != Graph::Mode::Read && mode != Graph::Mode::Write && mode != Graph::Mode::ReadWrite)
         throw std::invalid_argument("Render graph: invalid access mode");
-    for (const auto& access : _node.Accesses)
-        if (access.Id == resource)
-        {
-            if (access.Usage == Graph::Mode::Read && mode == Graph::Mode::Read && access.State == state) return;
-            throw std::invalid_argument("Render graph: conflicting access; declare ReadWrite once: " + _node.Name);
-        }
-    _node.Accesses.push_back({ resource, mode, state });
+    const auto [entry, inserted] = _accessIndices.try_emplace(resource, _node.Accesses.size());
+    if (!inserted)
+    {
+        const auto& access = _node.Accesses[entry->second];
+        if (access.Usage == Graph::Mode::Read && mode == Graph::Mode::Read && access.State == state) return;
+        throw std::invalid_argument("Render graph: conflicting access; declare ReadWrite once: " + _node.Name);
+    }
+    try { _node.Accesses.push_back({ resource, mode, state }); }
+    catch (...) { _accessIndices.erase(entry); throw; }
 }
 
 GDX12RenderGraph::Resource GDX12RenderGraphBuilder::Find(IRenderPassLink* link) const
@@ -259,12 +265,12 @@ void GDX12RenderGraph::RegisterResource(const Resource resource, const ResourceI
         identity.ResourceEpoch == Epoch::Invalid ||
         ((crossAdapter || identity.Transfer != TransferId::Invalid) && identity.Allocation == AllocationId::Invalid))
         throw std::invalid_argument("Render graph: invalid resource identity or missing cross-adapter allocation");
-    for (const auto& entry : _resources)
-        if (entry.Registered && entry.Identity.Id == identity.Id)
-            throw std::invalid_argument("Render graph: duplicate resource view identity");
+    if (_registeredResourceIds.count(identity.Id))
+        throw std::invalid_argument("Render graph: duplicate resource view identity");
     auto& entry = _resources[resource];
     if (entry.Registered || entry.LogicalToken)
         throw std::invalid_argument("Render graph: resource already registered or is a pipeline token");
+    _registeredResourceIds.insert(identity.Id);
     entry.Registered = true;
     entry.CrossAdapter = crossAdapter;
     entry.Identity = identity;
@@ -790,6 +796,43 @@ namespace
             throw std::invalid_argument("Graph executor: incompatible cross-adapter alias views");
     }
 
+    class PlacedViewIndex
+    {
+    public:
+        void Add(const PlacedView& view)
+        {
+            const auto check = [&](auto& index, auto key)
+            {
+                const auto [entry, inserted] = index.try_emplace(key, &view);
+                if (!inserted) CheckAlias(*entry->second, view);
+            };
+            const auto& identity = view.Binding.Identity;
+            check(_byId, identity.Id);
+            check(_byNative, view.Handle.Get());
+            if (identity.Allocation != AllocationId::Invalid)
+            {
+                // The backing representative checks shared compatibility. A separate
+                // device representative catches same-device aliases even across that pair.
+                check(_byAllocation, identity.Allocation);
+                check(_byAdapter[identity.Adapter], identity.Allocation);
+            }
+        }
+
+        const PlacedView* Backing(const PlacedView& view) const
+        {
+            const auto& identity = view.Binding.Identity;
+            // Equal IDs have already been checked for identical allocation identity.
+            return identity.Allocation == AllocationId::Invalid
+                ? _byId.at(identity.Id) : _byAllocation.at(identity.Allocation);
+        }
+
+    private:
+        std::unordered_map<ResourceId, const PlacedView*> _byId;
+        std::unordered_map<ID3D12Resource*, const PlacedView*> _byNative;
+        std::unordered_map<AllocationId, const PlacedView*> _byAllocation;
+        std::unordered_map<AdapterId, std::unordered_map<AllocationId, const PlacedView*>> _byAdapter;
+    };
+
     void CheckNativeAccess(const PlacedView& view, const GDX12RenderGraph::Access& access)
     {
         const auto state = access.State;
@@ -971,6 +1014,11 @@ std::optional<GDX12RenderGraph::ExecutionReceipt> GDX12RenderGraph::PlanExecutor
         placements.push_back(location);
     }
 
+    PlacedViewIndex viewIndex;
+    for (const auto& previous : _state->Pending)
+        for (const auto& view : previous.Views)
+            if (view.Handle) viewIndex.Add(view);
+
     for (const auto& binding : bindings.Views)
     {
         if (binding.View >= plan.Views.size() || !binding.Native || !binding.Native->D3DResource ||
@@ -1002,13 +1050,11 @@ std::optional<GDX12RenderGraph::ExecutionReceipt> GDX12RenderGraph::PlanExecutor
             throw std::invalid_argument("Graph executor: unsupported heap type");
         if (binding.Native->GetCurrentState() != view.Entry)
             throw std::invalid_argument("Graph executor: view was not released to its entry state");
-        for (const auto& other : work.Views)
-            if (&other != &view && other.Handle) CheckAlias(other, view);
-        for (const auto& previous : _state->Pending)
-            for (const auto& other : previous.Views)
-                if (other.Handle) CheckAlias(other, view);
+        viewIndex.Add(view);
     }
 
+    static constexpr size_t NoIndex = (std::numeric_limits<size_t>::max)();
+    std::vector<size_t> useIndices(work.Views.size(), NoIndex);
     for (size_t i = 0; i < plan.Batches.size(); ++i)
     {
         auto& batch = work.Batches[i];
@@ -1035,16 +1081,22 @@ std::optional<GDX12RenderGraph::ExecutionReceipt> GDX12RenderGraph::PlanExecutor
                     throw std::invalid_argument("Graph executor: missing or wrong-device physical view");
                 const Access use{ id, id == access.Id ? access.Usage : Mode::Read, access.State, access.Version };
                 CheckNativeAccess(view, use);
-                const auto prior = std::find_if(batch.Uses.begin(), batch.Uses.end(), [&](const Access& a) { return a.Id == id; });
-                if (prior == batch.Uses.end()) batch.Uses.push_back(use);
+                auto& index = useIndices[id];
+                if (index == NoIndex)
+                {
+                    index = batch.Uses.size();
+                    batch.Uses.push_back(use);
+                }
                 else
                 {
-                    if (prior->State != use.State || !(prior->Version == use.Version))
+                    auto& prior = batch.Uses[index];
+                    if (prior.State != use.State || !(prior.Version == use.Version))
                         throw std::invalid_argument("Graph executor: incompatible simultaneous declarations of one view");
-                    if (prior->Usage != use.Usage) prior->Usage = Mode::ReadWrite;
+                    if (prior.Usage != use.Usage) prior.Usage = Mode::ReadWrite;
                 }
             }
         }
+        for (const auto& use : batch.Uses) useIndices[use.Id] = NoIndex;
     }
 
     const auto addDependency = [&](size_t from, size_t to)
@@ -1061,33 +1113,43 @@ std::optional<GDX12RenderGraph::ExecutionReceipt> GDX12RenderGraph::PlanExecutor
     for (const auto& edge : plan.Dependencies)
         addDependency(static_cast<size_t>(edge.Producer), static_cast<size_t>(edge.Consumer));
 
+    struct BackingUses
+    {
+        size_t LastBatch = NoIndex;
+        std::vector<const State::Batch*> PendingBatches;
+        const Access* LastPendingWrite = nullptr;
+    };
+    std::unordered_map<const PlacedView*, BackingUses> backingUses;
+    for (const auto& invocation : _state->Pending)
+        for (const auto& batch : invocation.Batches)
+            for (const auto& use : batch.Uses)
+            {
+                auto& history = backingUses[viewIndex.Backing(invocation.Views[use.Id])];
+                if (history.PendingBatches.empty() || history.PendingBatches.back() != &batch)
+                    history.PendingBatches.push_back(&batch);
+                if (use.Usage != Mode::Read) history.LastPendingWrite = &use;
+            }
+
     // COMMON handoffs also order readers whose whole-resource layout transitions could overlap.
     for (size_t i = 0; i < work.Batches.size(); ++i)
     {
         auto& batch = work.Batches[i];
+        std::unordered_set<const State::Batch*> checkedPending;
         for (const auto& use : batch.Uses)
         {
-            const auto& identity = work.Views[use.Id].Binding.Identity;
-            for (size_t earlier = i; earlier-- > 0;)
+            auto& history = backingUses[viewIndex.Backing(work.Views[use.Id])];
+            if (history.LastBatch != i)
             {
-                const auto& prior = work.Batches[earlier];
-                if (std::any_of(prior.Uses.begin(), prior.Uses.end(), [&](const Access& a)
-                    { return SameBacking(identity, work.Views[a.Id].Binding.Identity); }))
-                {
-                    addDependency(earlier, i);
-                    break;
-                }
+                if (history.LastBatch != NoIndex) addDependency(history.LastBatch, i);
+                history.LastBatch = i;
             }
-            for (const auto& invocation : _state->Pending)
-                for (const auto& prior : invocation.Batches)
-                    if (prior.Binding.Queue != batch.Binding.Queue &&
-                        std::any_of(prior.Uses.begin(), prior.Uses.end(), [&](const Access& a)
-                            { return SameBacking(identity, invocation.Views[a.Id].Binding.Identity); }) &&
-                        !prior.Completed())
-                    {
-                        CheckWaitPath(*prior.Binding.Queue, *batch.Binding.Queue);
-                        AddIssuedWait(batch.Waits, prior.Point);
-                    }
+            for (const auto* prior : history.PendingBatches)
+                if (prior->Binding.Queue != batch.Binding.Queue && checkedPending.insert(prior).second &&
+                    !prior->Completed())
+                {
+                    CheckWaitPath(*prior->Binding.Queue, *batch.Binding.Queue);
+                    AddIssuedWait(batch.Waits, prior->Point);
+                }
         }
     }
 
@@ -1112,22 +1174,20 @@ std::optional<GDX12RenderGraph::ExecutionReceipt> GDX12RenderGraph::PlanExecutor
         }
         else if (input.SharedProducer || input.SharedSource.Id != ResourceId::Invalid)
             throw std::invalid_argument("Graph executor: local exact input cannot carry a remote export binding");
-        const Access* lastWrite = nullptr;
-        for (const auto& invocation : _state->Pending)
-            for (const auto& batch : invocation.Batches)
-                for (const auto& use : batch.Uses)
-                    if (use.Usage != Mode::Read && SameBacking(identity, invocation.Views[use.Id].Binding.Identity))
-                        lastWrite = &use;
+        const auto history = backingUses.find(viewIndex.Backing(view));
+        const auto* lastWrite = history == backingUses.end() ? nullptr : history->second.LastPendingWrite;
         if (lastWrite && !(lastWrite->Version == input.Version))
             throw std::invalid_argument("Graph executor: exact input conflicts with an already queued allocation writer");
         inputs[input.View] = &input;
         work.Owners.push_back(input.Reservation);
     }
+    std::vector<bool> expectedInputs(plan.Views.size());
     for (const auto& expected : plan.Inputs)
     {
         const auto* input = inputs[expected.View];
         if (!input || !(input->Version == expected.Version))
             throw std::invalid_argument("Graph executor: missing or stale exact input version");
+        expectedInputs[expected.View] = true;
         auto& batch = work.Batches[static_cast<size_t>(expected.Consumer)];
         if (input->SharedProducer) CheckWaitPath(*input->SharedProducer, *batch.Binding.Queue);
         const auto progress = CheckProgress(batch.Binding.Queue->GetCompletionProgress(input->Ready.Timeline()));
@@ -1135,7 +1195,7 @@ std::optional<GDX12RenderGraph::ExecutionReceipt> GDX12RenderGraph::PlanExecutor
             AddIssuedWait(batch.Waits, input->Ready);
     }
     for (const auto& input : bindings.ExactInputs)
-        if (std::none_of(plan.Inputs.begin(), plan.Inputs.end(), [&](const VersionInput& a) { return a.View == input.View; }))
+        if (!expectedInputs[input.View])
             throw std::invalid_argument("Graph executor: unexpected exact input binding");
 
     for (const auto& binding : bindings.Queues)

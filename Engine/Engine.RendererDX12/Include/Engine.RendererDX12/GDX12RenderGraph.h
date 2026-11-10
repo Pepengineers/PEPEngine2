@@ -7,6 +7,7 @@
 #include <iosfwd>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 
 class GDX12CommandList;
 class GDX12CommandQueue;
@@ -269,6 +270,7 @@ private:
     void ExpandRead(Resource resource, std::vector<Resource>& result) const;
     GDX12Device* _device;
     std::vector<ResourceInfo> _resources;
+    std::unordered_set<GDX12Submission::ResourceId> _registeredResourceIds;
     std::vector<Node> _nodes;
     std::vector<Pass> _order;
     std::vector<Slot> _slots;
@@ -310,8 +312,10 @@ public:
     void Export(IRenderPassLink* link);
 private:
     friend class GDX12RenderGraph;
-    GDX12RenderGraphBuilder(Graph& graph, Graph::Node& node) : _graph(graph), _node(node) {}
+    GDX12RenderGraphBuilder(Graph& graph, Graph::Node& node, std::unordered_map<Graph::Resource, size_t>& accessIndices)
+        : _graph(graph), _node(node), _accessIndices(accessIndices) {}
     Graph::Resource Find(IRenderPassLink* link) const;
     Graph& _graph;
     Graph::Node& _node;
+    std::unordered_map<Graph::Resource, size_t>& _accessIndices;
 };
