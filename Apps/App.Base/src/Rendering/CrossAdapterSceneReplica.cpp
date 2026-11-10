@@ -10,6 +10,8 @@
 #include <map>
 #include <stdexcept>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace CrossAdapterSceneReplica
 {
@@ -52,22 +54,47 @@ namespace
             SUCCEEDED(native->GetHeapProperties(&heap, nullptr)) && heap.Type == D3D12_HEAP_TYPE_DEFAULT;
     }
 
-    void AddAccess(std::vector<Access>& accesses, const ResourceView& view, Mode mode, D3D12_RESOURCE_STATES state)
+    class AccessList
     {
-        for (auto& access : accesses)
+    public:
+        explicit AccessList(std::vector<Access>& accesses) : _accesses(accesses) {}
+
+        void Add(const ResourceView& view, Mode mode, D3D12_RESOURCE_STATES state)
         {
-            const auto& old = access.View;
-            if (old.Identity.Id != view.Identity.Id && old.Identity.Allocation != view.Identity.Allocation &&
-                old.Native->D3DResource.Get() != view.Native->D3DResource.Get())
-                continue;
-            if (old.Native != view.Native || !SameIdentity(old.Identity, view.Identity) ||
-                !(old.Version == view.Version) || access.Mode != mode)
+            const auto& id = view.Identity;
+            auto* native = view.Native->D3DResource.Get();
+            if (const auto existing = _byId.find(id.Id); existing != _byId.end())
+            {
+                auto& access = _accesses[existing->second];
+                const auto& old = access.View;
+                if (old.Native != view.Native || access.Handle.Get() != native || !SameIdentity(old.Identity, id) ||
+                    !(old.Version == view.Version) || access.Mode != mode)
+                    throw std::invalid_argument("Conflicting scene replica view identity");
+                access.State |= state;
+                return;
+            }
+            if (_allocations.find(id.Allocation) != _allocations.end() ||
+                _resources.find(native) != _resources.end())
                 throw std::invalid_argument("Conflicting scene replica view identity");
-            access.State |= state;
-            return;
+
+            _byId.emplace(id.Id, _accesses.size());
+            _allocations.insert(id.Allocation);
+            _resources.insert(native);
+            _accesses.push_back({ view, view.Native->D3DResource, mode, state });
         }
-        accesses.push_back({ view, view.Native->D3DResource, mode, state });
-    }
+
+    private:
+        std::vector<Access>& _accesses;
+        std::unordered_map<ResourceId, std::size_t> _byId;
+        std::unordered_set<AllocationId> _allocations;
+        std::unordered_set<ID3D12Resource*> _resources;
+    };
+
+    struct AccessLists
+    {
+        explicit AccessLists(PreparedFrame& frame) : Upload(frame.UploadAccesses), Raster(frame.RasterAccesses) {}
+        AccessList Upload, Raster;
+    };
 
     bool Finite(const XMFLOAT3& v)
     { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
@@ -330,13 +357,13 @@ struct Slot::Storage
     std::vector<AlphaUpload> AlphaUploads;
     std::vector<std::shared_ptr<const void>> ExternalOwners;
 
-    ResourceView Destination(const D3D12_RESOURCE_DESC& desc, const NewIdentity& newIdentity)
+    ResourceView Destination(const D3D12_RESOURCE_DESC& desc, const NewIdentity& newIdentity, AccessList& upload)
     {
         ResourceView view{ std::make_shared<GDX12Resource>(), newIdentity() };
         if (!ValidIdentity(view, Device->GetSubmissionAdapterId()) || view.Identity.Transfer != TransferId::Invalid)
             throw std::invalid_argument("Invalid owned scene replica resource identity");
         view.Native->D3DResource = Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
-        AddAccess(Frame.UploadAccesses, view, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST);
+        upload.Add(view, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST);
         return view;
     }
 
@@ -350,10 +377,11 @@ struct Slot::Storage
     }
 
     template<class T>
-    Buffer UploadBuffer(const std::vector<T>& data, const NewIdentity& newIdentity, D3D12_RESOURCE_STATES state, bool srv)
+    Buffer UploadBuffer(const std::vector<T>& data, const NewIdentity& newIdentity, AccessLists& access,
+        D3D12_RESOURCE_STATES state, bool srv)
     {
         const UINT64 bytes = UINT64{data.size()} * sizeof(T);
-        auto view = Destination(CD3DX12_RESOURCE_DESC::Buffer(bytes), newIdentity);
+        auto view = Destination(CD3DX12_RESOURCE_DESC::Buffer(bytes), newIdentity, access.Upload);
         auto upload = Device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, CD3DX12_RESOURCE_DESC::Buffer(bytes),
             D3D12_RESOURCE_STATE_GENERIC_READ);
         void* mapped = nullptr;
@@ -362,7 +390,7 @@ struct Slot::Storage
         std::memcpy(mapped, data.data(), static_cast<size_t>(bytes));
         upload->Unmap(0, nullptr);
         Uploads.push_back({ std::move(upload), view.Native->D3DResource, bytes });
-        AddAccess(Frame.RasterAccesses, view, Mode::Read, state);
+        access.Raster.Add(view, Mode::Read, state);
         Buffer buffer{ view };
         if (srv)
         {
@@ -376,16 +404,16 @@ struct Slot::Storage
         return buffer;
     }
 
-    UINT BindAlpha(const AlphaTexture& alpha, const AlphaLayout& layout, const NewIdentity& newIdentity)
+    UINT BindAlpha(const AlphaTexture& alpha, const AlphaLayout& layout, const NewIdentity& newIdentity, AccessLists& access)
     {
         auto view = alpha.SecondaryView;
         if (!view.Native)
         {
-            view = Destination(layout.Desc, newIdentity);
+            view = Destination(layout.Desc, newIdentity, access.Upload);
             AlphaUploads.push_back(MakeAlphaUpload(*Device, alpha, layout, view.Native->D3DResource));
         }
         else ExternalOwners.push_back(view.Owner);
-        AddAccess(Frame.RasterAccesses, view, Mode::Read, PixelRead);
+        access.Raster.Add(view, Mode::Read, PixelRead);
 
         if (alpha.SecondarySRVIndex != UINT_MAX) return alpha.SecondarySRVIndex - Texture2D_StartIndex;
         auto descriptor = std::make_unique<GDX12Descriptor>();
@@ -543,6 +571,7 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
     storage->Device = &secondary;
     storage->Heap = heap;
     auto& frame = storage->Frame;
+    AccessLists access(frame);
     frame.Stamp = expected;
     frame.Groups.resize(snapshot.Groups.size());
     frame.MeshToLocal.assign(snapshot.Meshes.size(), UINT_MAX);
@@ -577,7 +606,7 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
         {
             const UINT alpha = alphaCanonical[original.AlphaTextureIndex];
             if (alphaSlots[alpha] == UINT_MAX)
-                alphaSlots[alpha] = storage->BindAlpha(snapshot.AlphaTextures[alpha], *alphaLayouts[alpha], newIdentity);
+                alphaSlots[alpha] = storage->BindAlpha(snapshot.AlphaTextures[alpha], *alphaLayouts[alpha], newIdentity, access);
             material.DiffuseIndex = alphaSlots[alpha];
         }
         localIndex = static_cast<UINT>(materials.size());
@@ -617,8 +646,8 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
                         const auto& resident = *mesh.Resident;
                         draw.Vertices = Vertices(resident.Vertices, 0, resident.VertexCount);
                         draw.Indices = Indices(resident.Indices, 0, resident.IndexCount);
-                        AddAccess(frame.RasterAccesses, resident.Vertices, Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
-                        AddAccess(frame.RasterAccesses, resident.Indices, Mode::Read, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+                        access.Raster.Add(resident.Vertices, Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+                        access.Raster.Add(resident.Indices, Mode::Read, D3D12_RESOURCE_STATE_INDEX_BUFFER);
                         if (rangeIndex == UINT_MAX)
                         {
                             rangeIndex = static_cast<UINT>(frame.PackedRanges.size());
@@ -649,8 +678,8 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
                     draw.Vertices = Vertices(range.Vertices, range.VertexByteOffset, range.VertexCount);
                     draw.Indices = Indices(range.Indices, range.IndexByteOffset, range.IndexCount);
                     draw.Arguments.IndexCountPerInstance = range.IndexCount;
-                    AddAccess(frame.RasterAccesses, range.Vertices, Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
-                    AddAccess(frame.RasterAccesses, range.Indices, Mode::Read, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+                    access.Raster.Add(range.Vertices, Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+                    access.Raster.Add(range.Indices, Mode::Read, D3D12_RESOURCE_STATE_INDEX_BUFFER);
                     storage->ExternalOwners.push_back(range.Vertices.Owner);
                     storage->ExternalOwners.push_back(range.Indices.Owner);
                 }
@@ -671,8 +700,8 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
 
     if (!vertices.empty())
     {
-        const auto vb = storage->UploadBuffer(vertices, newIdentity, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, false);
-        const auto ib = storage->UploadBuffer(indices, newIdentity, D3D12_RESOURCE_STATE_INDEX_BUFFER, false);
+        const auto vb = storage->UploadBuffer(vertices, newIdentity, access, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, false);
+        const auto ib = storage->UploadBuffer(indices, newIdentity, access, D3D12_RESOURCE_STATE_INDEX_BUFFER, false);
         for (auto& draw : frame.Draws)
             if (draw.Kind == GeometryKind::Static && !draw.Vertices.BufferLocation)
             {
@@ -682,13 +711,13 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
     }
     if (!frame.Draws.empty())
     {
-        frame.Instances = storage->UploadBuffer(instances, newIdentity, ShaderRead, true);
-        frame.Transforms = storage->UploadBuffer(transforms, newIdentity, ShaderRead, true);
-        frame.Indirect = storage->UploadBuffer(indirect, newIdentity, ShaderRead | D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, true);
+        frame.Instances = storage->UploadBuffer(instances, newIdentity, access, ShaderRead, true);
+        frame.Transforms = storage->UploadBuffer(transforms, newIdentity, access, ShaderRead, true);
+        frame.Indirect = storage->UploadBuffer(indirect, newIdentity, access, ShaderRead | D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, true);
     }
     if (!materials.empty())
     {
-        frame.Materials = storage->UploadBuffer(materials, newIdentity, ShaderRead | PixelRead, true);
+        frame.Materials = storage->UploadBuffer(materials, newIdentity, access, ShaderRead | PixelRead, true);
         frame.AlphaTable = heap->GetGPUHandle(Texture2D_StartIndex);
     }
     slot->_storage = std::move(storage);

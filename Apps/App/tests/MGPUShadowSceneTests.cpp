@@ -1,5 +1,6 @@
 #include "App.Base/Rendering/CrossAdapterShadowScene.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
+#include "Engine.RendererDX12/GDX12DescriptorHeap.h"
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.RendererDX12/GDX12DeviceFactory.h"
 #include "Engine.RendererDX12/GDX12Resource.h"
@@ -146,6 +147,135 @@ void ExpectSkin(GDX12Device& device, const PreparedFrame& frame, float x, float 
     Require(std::abs(first.Position.x - x) < 0.0001f && std::abs(first.PreviousPosition.x - previousX) < 0.0001f &&
         std::abs(first.Normal.x - nx) < 0.0001f && std::abs(first.Normal.y - ny) < 0.0001f,
         "Secondary skin output differs from the frozen palette");
+}
+
+void TestReplicaAccessIndex(GDX12Device& device)
+{
+    auto slot = std::make_shared<Slot>();
+    auto heap = std::make_shared<GDX12DescriptorHeap>(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+        Texture2D_StartIndex + Texture2D_RangeLength, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
+    std::uint64_t id = 1;
+    const auto identity = [&]
+    {
+        return ResourceIdentity{ ResourceId{id++}, device.GetSubmissionAdapterId(), Epoch{1},
+            TransferId::Invalid, AllocationId{id++} };
+    };
+    const auto buffer = [&]
+    {
+        auto native = std::make_shared<GDX12Resource>();
+        native->D3DResource = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT,
+            CD3DX12_RESOURCE_DESC::Buffer(3 * sizeof(Vertex)), D3D12_RESOURCE_STATE_COMMON);
+        return ResourceView{ std::move(native), identity(), {}, std::make_shared<int>(0) };
+    };
+    Snapshot snapshot;
+    snapshot.Stamp = { FrameSubmissionId{6}, ProducerInvocationId{6}, 6 };
+    snapshot.Groups.resize(1);
+    snapshot.Materials.resize(1);
+    const auto append = [&](const ResourceView& vertices, const ResourceView& indices)
+    {
+        const auto index = static_cast<UINT>(snapshot.Meshes.size());
+        MeshRange mesh;
+        mesh.Mesh = Engine::Core::MeshHandle{index + 1, 1};
+        mesh.ContentRevision = 1;
+        mesh.VertexCount = mesh.IndexCount = 3;
+        mesh.Resident = ResidentGeometry{ vertices, indices, 3, 3, 2 };
+        snapshot.Meshes.push_back(std::move(mesh));
+
+        Caster caster;
+        caster.SourceId = index;
+        caster.Range = index;
+        caster.GeometryRevision = 1;
+        caster.MaterialIndex = 0;
+        caster.Transform.emplace();
+        caster.Bounds.emplace();
+        snapshot.Casters.push_back(caster);
+        snapshot.Groups[0].push_back(index);
+    };
+
+    const auto first = buffer();
+    const auto second = buffer();
+    append(first, second);
+    const auto reject = [&](const ResourceView& vertices, const ResourceView& indices, const char* message)
+    {
+        snapshot.Meshes[0].Resident = ResidentGeometry{ vertices, indices, 3, 3, 2 };
+        try { Prepare(slot, device, heap, snapshot.Stamp, snapshot, identity); }
+        catch (const std::invalid_argument& error)
+        {
+            Require(std::string_view(error.what()) == "Conflicting scene replica view identity", message);
+            return;
+        }
+        throw std::runtime_error(message);
+    };
+
+    auto collision = second;
+    collision.Identity.Id = first.Identity.Id;
+    reject(first, collision, "ResourceId-only collision was accepted");
+    collision = second;
+    collision.Identity.Allocation = first.Identity.Allocation;
+    reject(first, collision, "AllocationId-only collision was accepted");
+    collision = second;
+    collision.Native = std::make_shared<GDX12Resource>();
+    collision.Native->D3DResource = first.Native->D3DResource;
+    reject(first, collision, "Native-resource-only collision was accepted");
+    collision.Identity = first.Identity;
+    reject(first, collision, "A different tracker was accepted for an existing resource");
+    collision = first;
+    collision.Identity.ResourceEpoch = Epoch{2};
+    reject(first, collision, "An identity change was accepted for an existing resource");
+    auto transferred = first;
+    transferred.Identity.Transfer = TransferId{1};
+    transferred.Version = { TransferId{1}, Epoch{1}, ProducerInvocationId{1} };
+    collision = transferred;
+    collision.Version.Invocation = ProducerInvocationId{2};
+    reject(transferred, collision, "A transfer version change was accepted for an existing resource");
+
+    snapshot.Meshes[0].Resident = ResidentGeometry{ first, second, 3, 3, 2 };
+    const auto duplicateUpload = identity();
+    UINT uploadRequests = 0;
+    try
+    {
+        Prepare(slot, device, heap, snapshot.Stamp, snapshot, [&]
+        {
+            ++uploadRequests;
+            return duplicateUpload;
+        });
+    }
+    catch (const std::invalid_argument& error)
+    {
+        Require(uploadRequests == 2 && std::string_view(error.what()) == "Conflicting scene replica view identity",
+            "Wrong upload collision failure");
+        uploadRequests = 0;
+    }
+    Require(uploadRequests == 0, "Duplicate upload identity was accepted");
+
+    snapshot.Meshes.clear();
+    snapshot.Casters.clear();
+    snapshot.Groups[0].clear();
+    constexpr UINT accessCount = 512;
+    std::vector<ResourceId> expectedIds;
+    std::weak_ptr<const void> firstOwner;
+    for (UINT i = 0; i < accessCount; ++i)
+    {
+        const auto view = i == 0 ? first : buffer();
+        if (i == 1) firstOwner = view.Owner;
+        append(view, view);
+        expectedIds.push_back(view.Identity.Id);
+    }
+    Prepare(slot, device, heap, snapshot.Stamp, snapshot, identity);
+    const auto& frame = slot->Get();
+    Require(frame.Draws.size() == accessCount && frame.UploadAccesses.size() == 4 &&
+        frame.RasterAccesses.size() == accessCount + 4, "Access list did not merge repeated resources");
+    for (UINT i = 0; i < accessCount; ++i)
+    {
+        const auto& access = frame.RasterAccesses[i];
+        Require(access.View.Identity.Id == expectedIds[i] && access.Mode == Graph::Mode::Read &&
+            access.State == (D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_INDEX_BUFFER),
+            "Access order or combined states changed");
+    }
+    snapshot.Meshes.clear();
+    Require(!firstOwner.expired(), "Prepared access dropped its resource owner");
+    slot.reset();
+    Require(firstOwner.expired(), "Retired access still retained its resource owner");
 }
 
 void TestGrassMaterials(GDX12Device& device, CrossAdapterShadowScene& scene, Graph::PlanExecutor& executor)
@@ -411,6 +541,7 @@ int main(int argc, char** argv)
         ComPtr<ID3D12InfoQueue> info;
         ThrowIfFailed(device.GetDevice().As(&info));
         TestScene(device);
+        TestReplicaAccessIndex(device);
         for (UINT64 i = 0; i < info->GetNumStoredMessages(); ++i)
         {
             SIZE_T bytes = 0;
