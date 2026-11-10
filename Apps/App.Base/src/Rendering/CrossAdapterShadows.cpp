@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
+#include <unordered_map>
 
 namespace
 {
@@ -65,16 +66,21 @@ namespace
         Graph::Resource Bind(const char* name, const PhysicalView& view, bool imported = true, bool shared = false)
         {
             Require(view.Resource && view.Resource->D3DResource, "Missing placed shadow resource");
-            for (const auto& existing : Bindings.Views)
+            auto* native = view.Resource->D3DResource.Get();
+            const auto physical = ViewByNative.find(native);
+            if (const auto known = ViewById.find(view.Identity.Id); known != ViewById.end())
             {
-                if (existing.Identity.Id != view.Identity.Id &&
-                    existing.Native->D3DResource.Get() != view.Resource->D3DResource.Get()) continue;
-                Require(existing.Native == view.Resource && SameIdentity(existing.Identity, view.Identity),
+                const auto& existing = Bindings.Views[known->second];
+                Require(physical != ViewByNative.end() && physical->second == known->second &&
+                    existing.Native == view.Resource && SameIdentity(existing.Identity, view.Identity),
                     "Placed shadow view has conflicting canonical identities");
                 return existing.View;
             }
+            Require(physical == ViewByNative.end(), "Placed shadow view has conflicting canonical identities");
             const auto id = imported ? GraphPlan.Import(name) : GraphPlan.Create(name);
             GraphPlan.RegisterResource(id, view.Identity, shared);
+            ViewById.emplace(view.Identity.Id, Bindings.Views.size());
+            ViewByNative.emplace(native, Bindings.Views.size());
             Bindings.Views.push_back({ id, view.Identity, view.Resource });
             return id;
         }
@@ -148,6 +154,8 @@ namespace
         std::vector<std::unique_ptr<Stage>> Passes;
         GDX12RenderGraph GraphPlan;
         Graph::ExecutionBindings Bindings;
+        std::unordered_map<ResourceId, size_t> ViewById;
+        std::unordered_map<ID3D12Resource*, size_t> ViewByNative;
     };
 }
 
