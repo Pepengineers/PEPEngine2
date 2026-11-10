@@ -274,7 +274,6 @@ PreparedShadowReplica CrossAdapterShadowScene::Prepare(const S2R::Snapshot& sour
     {
         if (!selected[i]) continue;
         auto& caster = frame.Casters[i];
-        if (caster.Kind == S2R::GeometryKind::ExpandedGrass) continue;
         if (caster.Kind == S2R::GeometryKind::Static && caster.Range < frame.Meshes.size() && !meshSeen[caster.Range])
         {
             meshSeen[caster.Range] = true;

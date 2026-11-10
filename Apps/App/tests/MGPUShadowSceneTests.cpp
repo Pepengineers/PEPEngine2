@@ -148,6 +148,89 @@ void ExpectSkin(GDX12Device& device, const PreparedFrame& frame, float x, float 
         "Secondary skin output differs from the frozen palette");
 }
 
+void TestGrassMaterials(GDX12Device& device, CrossAdapterShadowScene& scene, Graph::PlanExecutor& executor)
+{
+    Snapshot grass;
+    grass.Stamp = { FrameSubmissionId{4}, ProducerInvocationId{4}, 4 };
+    grass.Groups = {{0, 1}};
+    const auto owner = std::make_shared<int>(0);
+    for (UINT i = 0; i < 2; ++i)
+    {
+        Caster caster;
+        caster.SourceId = i;
+        caster.Kind = GeometryKind::ExpandedGrass;
+        caster.Range = i;
+        caster.Transform.emplace();
+        caster.Bounds.emplace();
+        grass.Casters.push_back(caster);
+        grass.GrassBatches.push_back({ grass.Stamp, 0, caster.SourceId, &device, owner, true });
+    }
+
+    {
+        const auto legacy = scene.Prepare(grass, {});
+        Require(legacy.Replica->Groups[0].Reason == Rejection::None && legacy.Replica->Groups[0].Grass.size() == 2 &&
+            !legacy.Replica->Materials.View.Native && legacy.Replica->UploadAccesses.empty(),
+            "Application-owned grass unexpectedly needed replica materials");
+    }
+
+    AlphaTexture alpha;
+    alpha.Texture = Engine::Core::TextureHandle{2, 1};
+    alpha.ContentRevision = 1;
+    alpha.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+    alpha.Width = alpha.Height = alpha.MipLevels = 2;
+    grass.AlphaTextures = { alpha };
+    alpha.Mips = {{std::vector<std::byte>(16), 8}, {std::vector<std::byte>(4), 4}};
+    alpha.Mips[0].Bytes[3] = std::byte{37};
+    alpha.Mips[1].Bytes[3] = std::byte{83};
+    grass.Materials.resize(1);
+    grass.Materials[0].Value.RenderLayer = 1;
+    grass.Materials[0].Value.DiffuseIndex = 123;
+    grass.Materials[0].AlphaTextureIndex = 0;
+    grass.Materials[0].AlphaRevision = 1;
+    grass.Casters[1].MaterialIndex = 0;
+
+    const auto rejected = [&](const ShadowSceneSources& sources, Rejection reason)
+    {
+        const auto frame = scene.Prepare(grass, sources);
+        const auto& group = frame.Replica->Groups[0];
+        Require(group.Reason == reason && group.Grass.empty() && group.Draws.empty() &&
+            frame.Replica->MaterialToLocal[0] == UINT_MAX && frame.Replica->UploadAccesses.empty() &&
+            frame.Preparation.empty() && !frame.Commit, "Rejected grass group leaked part of its recipe");
+    };
+    rejected({}, Rejection::MissingAlpha);
+    auto incomplete = alpha;
+    incomplete.Mips.pop_back();
+    rejected({{}, {&incomplete}, {}}, Rejection::MissingAlpha);
+    grass.Casters[1].MaterialIndex = 1;
+    rejected({{}, {&alpha}, {}}, Rejection::MissingMaterial);
+    grass.Casters[1].MaterialIndex = 0;
+
+    const auto cold = scene.Prepare(grass, {{}, {&alpha}, {}});
+    const auto& replica = *cold.Replica;
+    Require(replica.Groups[0].Reason == Rejection::None && replica.Groups[0].Grass.size() == 2 &&
+        replica.Draws.empty() && !replica.Indirect.View.Native && replica.MaterialToLocal == std::vector<UINT>{0} &&
+        replica.Materials.SRV.ptr && replica.AlphaTable.ptr && cold.Commit && cold.Preparation.size() == 1,
+        "Grass-only group did not produce its remapped material bindings");
+    Submit(device, executor, cold);
+    executor.Drain();
+    const auto material = Read<GDX12MaterialConstants>(device, replica.Materials.View, 1)[0];
+    Require(material.RenderLayer == 1 && material.DiffuseIndex > 0 && material.DiffuseIndex != 123,
+        "Grass material retained the primary diffuse descriptor index");
+    const auto& resident = AlphaView(replica);
+    DirectX::ScratchImage image;
+    ThrowIfFailed(DirectX::CaptureTexture(device.GetCommandQueue()->GetCommandQueue().Get(),
+        resident.Native->D3DResource.Get(), false, image, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COMMON));
+    const auto* top = image.GetImage(0, 0, 0);
+    const auto* last = image.GetImage(1, 0, 0);
+    Require(top && last && top->pixels[3] == 37 && last->pixels[3] == 83, "Grass alpha lost part of its mip chain");
+
+    grass.Stamp = { FrameSubmissionId{5}, ProducerInvocationId{5}, 5 };
+    for (auto& batch : grass.GrassBatches) batch.Stamp = grass.Stamp;
+    const auto warm = scene.Prepare(grass, {});
+    Require(warm.Replica->Groups[0].Reason == Rejection::None && warm.Preparation.empty() && !warm.Commit &&
+        AlphaView(*warm.Replica).Identity.Id == resident.Identity.Id, "Grass alpha did not reuse the resident upload");
+}
+
 void TestScene(GDX12Device& device)
 {
     std::uint64_t id = 1;
@@ -299,7 +382,11 @@ void TestScene(GDX12Device& device)
     const auto& changedDraw = changed.Replica->Draws[0];
     Require(Read<Vertex>(device, FindView(*changed.Replica, changedDraw.Vertices.BufferLocation), 3)[0].Position.x == 19,
         "Changed rigid vertex payload was not uploaded");
-    std::cout << "Shadow scene residency, canceled preparation, in-flight slots, alpha mips and exact skin palettes passed\n";
+    first = {};
+    second = {};
+    changed = {};
+    TestGrassMaterials(device, scene, executor);
+    std::cout << "Shadow scene residency, canceled preparation, in-flight slots, grass materials, alpha mips and exact skin palettes passed\n";
 }
 }
 

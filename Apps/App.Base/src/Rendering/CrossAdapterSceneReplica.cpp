@@ -510,9 +510,10 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
             const auto& grass = snapshot.GrassBatches[caster.Range];
             if (grass.GroupIndex != group || grass.SourceId != caster.SourceId) return Rejection::MissingGeometry;
             if (!(grass.Stamp == expected)) return Rejection::StaleGeometry;
-            return validGrass[caster.Range] ? Rejection::None : Rejection::MissingGeometry;
+            if (!validGrass[caster.Range]) return Rejection::MissingGeometry;
+            if (caster.MaterialIndex == UINT_MAX) return Rejection::None;
         }
-        if (caster.Kind == GeometryKind::Static)
+        else if (caster.Kind == GeometryKind::Static)
         {
             if (caster.Range >= meshCanonical.size() || meshCanonical[caster.Range] == UINT_MAX ||
                 !validMeshes[meshCanonical[caster.Range]])
@@ -563,6 +564,26 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
     std::vector<GDX12TransformConstants> transforms;
     std::vector<GDX12InstanceData> instances;
     std::vector<GDX12IndirectDrawArgs> indirect;
+    const auto bindMaterial = [&](UINT sourceIndex)
+    {
+        auto& localIndex = frame.MaterialToLocal[sourceIndex];
+        if (localIndex != UINT_MAX) return localIndex;
+
+        const auto& original = snapshot.Materials[sourceIndex];
+        auto material = original.Value;
+        material.DiffuseIndex = material.NormalIndex = material.DisplacementIndex = 0;
+        material.SpecularIndex = material.RoughnessIndex = material.EmissiveIndex = 0;
+        if (material.RenderLayer == 1)
+        {
+            const UINT alpha = alphaCanonical[original.AlphaTextureIndex];
+            if (alphaSlots[alpha] == UINT_MAX)
+                alphaSlots[alpha] = storage->BindAlpha(snapshot.AlphaTextures[alpha], *alphaLayouts[alpha], newIdentity);
+            material.DiffuseIndex = alphaSlots[alpha];
+        }
+        localIndex = static_cast<UINT>(materials.size());
+        materials.push_back(material);
+        return localIndex;
+    };
     for (size_t i = 0; i < snapshot.Groups.size(); ++i)
     {
         auto& group = frame.Groups[i];
@@ -572,29 +593,14 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
             const auto& caster = snapshot.Casters[casterIndex];
             if (caster.Kind == GeometryKind::ExpandedGrass)
             {
+                if (caster.MaterialIndex != UINT_MAX) bindMaterial(caster.MaterialIndex);
                 group.Grass.push_back(snapshot.GrassBatches[caster.Range]);
                 continue;
             }
             auto& drawIndex = casterToDraw[casterIndex];
             if (drawIndex == UINT_MAX)
             {
-                auto& materialIndex = frame.MaterialToLocal[caster.MaterialIndex];
-                if (materialIndex == UINT_MAX)
-                {
-                    const auto& original = snapshot.Materials[caster.MaterialIndex];
-                    auto material = original.Value;
-                    material.DiffuseIndex = material.NormalIndex = material.DisplacementIndex = 0;
-                    material.SpecularIndex = material.RoughnessIndex = material.EmissiveIndex = 0;
-                    if (material.RenderLayer == 1)
-                    {
-                        const UINT alpha = alphaCanonical[original.AlphaTextureIndex];
-                        if (alphaSlots[alpha] == UINT_MAX)
-                            alphaSlots[alpha] = storage->BindAlpha(snapshot.AlphaTextures[alpha], *alphaLayouts[alpha], newIdentity);
-                        material.DiffuseIndex = alphaSlots[alpha];
-                    }
-                    materialIndex = static_cast<UINT>(materials.size());
-                    materials.push_back(material);
-                }
+                const UINT materialIndex = bindMaterial(caster.MaterialIndex);
 
                 drawIndex = static_cast<UINT>(frame.Draws.size());
                 const bool dynamic = caster.Dynamic || caster.Kind != GeometryKind::Static;
@@ -678,8 +684,11 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
     {
         frame.Instances = storage->UploadBuffer(instances, newIdentity, ShaderRead, true);
         frame.Transforms = storage->UploadBuffer(transforms, newIdentity, ShaderRead, true);
-        frame.Materials = storage->UploadBuffer(materials, newIdentity, ShaderRead | PixelRead, true);
         frame.Indirect = storage->UploadBuffer(indirect, newIdentity, ShaderRead | D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, true);
+    }
+    if (!materials.empty())
+    {
+        frame.Materials = storage->UploadBuffer(materials, newIdentity, ShaderRead | PixelRead, true);
         frame.AlphaTable = heap->GetGPUHandle(Texture2D_StartIndex);
     }
     slot->_storage = std::move(storage);
