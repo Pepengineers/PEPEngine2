@@ -36,6 +36,11 @@ public:
     void Dispatch(GDX12CommandList* commands, GDX12GeometryBuffer& geometry,
         GDX12SkinMesh& mesh, UINT frameSlot, const std::vector<GDX12SkinPalette>& palette);
 
+    static std::vector<SkinVertexRange> ValidateSource(const SubMesh& source);
+    void RecordDispatch(GDX12CommandList& commands, UINT vertexCount, UINT outputVertex, UINT boneCount,
+        D3D12_GPU_VIRTUAL_ADDRESS vertices, D3D12_GPU_VIRTUAL_ADDRESS ranges, D3D12_GPU_VIRTUAL_ADDRESS influences,
+        D3D12_GPU_VIRTUAL_ADDRESS palette, D3D12_GPU_VIRTUAL_ADDRESS output) const;
+
 private:
     std::map<std::tuple<std::uintptr_t, UINT, UINT, std::uint64_t>, std::weak_ptr<const GDX12SkinSource>> _sources;
     GDX12Device* _device;

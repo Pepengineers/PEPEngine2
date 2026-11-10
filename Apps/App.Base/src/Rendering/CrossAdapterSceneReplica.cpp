@@ -85,8 +85,20 @@ namespace
         return mesh.Addressing == IndexAddressing::AbsoluteInPayload ? index - mesh.FirstVertex : index;
     }
 
-    bool ValidMesh(const MeshRange& mesh)
+    bool BufferRange(const ResourceView& view, GDX12Device& device, UINT64 offset, UINT64 bytes);
+
+    bool ValidMesh(const MeshRange& mesh, GDX12Device& device)
     {
+        if (mesh.Resident)
+        {
+            const auto& range = *mesh.Resident;
+            return mesh.Mesh.IsValid() && mesh.ContentRevision && mesh.Vertices.empty() && mesh.Indices.empty() &&
+                mesh.FirstVertex == 0 && mesh.FirstIndex == 0 && range.VertexCount == mesh.VertexCount &&
+                range.IndexCount == mesh.IndexCount && range.VertexCount && range.IndexCount &&
+                range.IndexCount % 3 == 0 && range.MaxRelativeIndex < range.VertexCount &&
+                BufferRange(range.Vertices, device, 0, UINT64{range.VertexCount} * sizeof(Vertex)) &&
+                BufferRange(range.Indices, device, 0, UINT64{range.IndexCount} * sizeof(UINT));
+        }
         if (!mesh.Mesh.IsValid() || !mesh.ContentRevision || !mesh.VertexCount || !mesh.IndexCount || mesh.IndexCount % 3 ||
             !Fits(mesh.FirstVertex, mesh.VertexCount, mesh.Vertices.size()) ||
             !Fits(mesh.FirstIndex, mesh.IndexCount, mesh.Indices.size()) ||
@@ -106,6 +118,14 @@ namespace
 
     bool SameMesh(const MeshRange& a, const MeshRange& b)
     {
+        if (a.Resident || b.Resident)
+        {
+            if (!a.Resident || !b.Resident || a.VertexCount != b.VertexCount || a.IndexCount != b.IndexCount ||
+                a.Resident->MaxRelativeIndex != b.Resident->MaxRelativeIndex) return false;
+            const auto same = [](const ResourceView& x, const ResourceView& y)
+            { return x.Native == y.Native && SameIdentity(x.Identity, y.Identity) && x.Version == y.Version; };
+            return same(a.Resident->Vertices, b.Resident->Vertices) && same(a.Resident->Indices, b.Resident->Indices);
+        }
         if (a.VertexCount != b.VertexCount || a.IndexCount != b.IndexCount ||
             std::memcmp(a.Vertices.data() + a.FirstVertex, b.Vertices.data() + b.FirstVertex,
                 static_cast<size_t>(a.VertexCount) * sizeof(Vertex)) != 0)
@@ -211,10 +231,53 @@ namespace
         return layout;
     }
 
+    AlphaUpload MakeAlphaUpload(GDX12Device& device, const AlphaTexture& alpha, const AlphaLayout& layout,
+        const GDX12ResourceHandle& destination)
+    {
+        auto upload = device.CreateResource(D3D12_HEAP_TYPE_UPLOAD, CD3DX12_RESOURCE_DESC::Buffer(layout.UploadBytes),
+            D3D12_RESOURCE_STATE_GENERIC_READ);
+        void* mapped = nullptr;
+        const D3D12_RANGE noRead{ 0, 0 };
+        ThrowIfFailed(upload->Map(0, &noRead, &mapped));
+        for (UINT mip = 0; mip < alpha.MipLevels; ++mip)
+        {
+            const auto& input = alpha.Mips[mip];
+            const auto& footprint = layout.Footprints[mip];
+            auto* dst = static_cast<std::byte*>(mapped) + footprint.Offset;
+            for (UINT row = 0; row < layout.Rows[mip]; ++row)
+                std::memcpy(dst + UINT64{row} * footprint.Footprint.RowPitch,
+                    input.Bytes.data() + UINT64{row} * input.RowPitch, static_cast<size_t>(layout.RowBytes[mip]));
+        }
+        upload->Unmap(0, nullptr);
+        return { std::move(upload), destination, layout.Footprints };
+    }
+
+    bool IsMaterialHeap(GDX12DescriptorHeap& heap, GDX12Device& device)
+    {
+        ComPtr<ID3D12Device14> owner;
+        return heap.GetHeap() && SUCCEEDED(heap.GetHeap()->GetDevice(IID_PPV_ARGS(&owner))) &&
+            owner.Get() == device.GetDevice().Get() && heap.GetType() == D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV &&
+            (heap.GetFlags() & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) &&
+            heap.GetNumDescriptors() >= Texture2D_StartIndex + Texture2D_RangeLength;
+    }
+
+    void BindAlphaDescriptor(GDX12Descriptor& descriptor, const AlphaTexture& alpha, const ResourceView& view,
+        GDX12DescriptorHeap& heap)
+    {
+        D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
+        desc.Format = alpha.Format;
+        desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+        desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        desc.Texture2D.MipLevels = alpha.MipLevels;
+        const auto index = heap.GetAvailableIndex(Texture2D_StartIndex, Texture2D_RangeLength);
+        descriptor.InitAsSRV(view.Native->D3DResource.Get(), &desc, &heap, index);
+    }
+
     bool SameAlpha(const AlphaTexture& a, const AlphaTexture& b)
     {
         if (a.Format != b.Format || a.Width != b.Width || a.Height != b.Height ||
-            a.MipLevels != b.MipLevels || a.Mips.size() != b.Mips.size() || a.SecondaryView.Native != b.SecondaryView.Native)
+            a.MipLevels != b.MipLevels || a.Mips.size() != b.Mips.size() || a.SecondaryView.Native != b.SecondaryView.Native ||
+            a.SecondarySRVIndex != b.SecondarySRVIndex || a.SecondarySRVHeap != b.SecondarySRVHeap)
             return false;
         if (a.SecondaryView.Native)
             return SameIdentity(a.SecondaryView.Identity, b.SecondaryView.Identity) && a.SecondaryView.Version == b.SecondaryView.Version;
@@ -242,7 +305,6 @@ namespace
     {
         GDX12ResourceHandle Source, Destination;
         UINT64 Bytes;
-        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Footprints;
     };
 
     D3D12_VERTEX_BUFFER_VIEW Vertices(const ResourceView& view, UINT64 offset, UINT count)
@@ -265,6 +327,7 @@ struct Slot::Storage
     PreparedFrame Frame;
     std::vector<std::unique_ptr<GDX12Descriptor>> Descriptors;
     std::vector<Upload> Uploads;
+    std::vector<AlphaUpload> AlphaUploads;
     std::vector<std::shared_ptr<const void>> ExternalOwners;
 
     ResourceView Destination(const D3D12_RESOURCE_DESC& desc, const NewIdentity& newIdentity)
@@ -298,7 +361,7 @@ struct Slot::Storage
         ThrowIfFailed(upload->Map(0, &noRead, &mapped));
         std::memcpy(mapped, data.data(), static_cast<size_t>(bytes));
         upload->Unmap(0, nullptr);
-        Uploads.push_back({ std::move(upload), view.Native->D3DResource, bytes, {} });
+        Uploads.push_back({ std::move(upload), view.Native->D3DResource, bytes });
         AddAccess(Frame.RasterAccesses, view, Mode::Read, state);
         Buffer buffer{ view };
         if (srv)
@@ -319,38 +382,61 @@ struct Slot::Storage
         if (!view.Native)
         {
             view = Destination(layout.Desc, newIdentity);
-            auto upload = Device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, CD3DX12_RESOURCE_DESC::Buffer(layout.UploadBytes),
-                D3D12_RESOURCE_STATE_GENERIC_READ);
-            void* mapped = nullptr;
-            const D3D12_RANGE noRead{ 0, 0 };
-            ThrowIfFailed(upload->Map(0, &noRead, &mapped));
-            for (UINT mip = 0; mip < alpha.MipLevels; ++mip)
-            {
-                const auto& input = alpha.Mips[mip];
-                const auto& footprint = layout.Footprints[mip];
-                auto* dst = static_cast<std::byte*>(mapped) + footprint.Offset;
-                for (UINT row = 0; row < layout.Rows[mip]; ++row)
-                    std::memcpy(dst + UINT64{row} * footprint.Footprint.RowPitch,
-                        input.Bytes.data() + UINT64{row} * input.RowPitch, static_cast<size_t>(layout.RowBytes[mip]));
-            }
-            upload->Unmap(0, nullptr);
-            Uploads.push_back({ std::move(upload), view.Native->D3DResource, 0, layout.Footprints });
+            AlphaUploads.push_back(MakeAlphaUpload(*Device, alpha, layout, view.Native->D3DResource));
         }
         else ExternalOwners.push_back(view.Owner);
         AddAccess(Frame.RasterAccesses, view, Mode::Read, PixelRead);
 
+        if (alpha.SecondarySRVIndex != UINT_MAX) return alpha.SecondarySRVIndex - Texture2D_StartIndex;
         auto descriptor = std::make_unique<GDX12Descriptor>();
-        D3D12_SHADER_RESOURCE_VIEW_DESC desc{};
-        desc.Format = alpha.Format;
-        desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-        desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        desc.Texture2D.MipLevels = alpha.MipLevels;
-        const auto index = Heap->GetAvailableIndex(Texture2D_StartIndex, Texture2D_RangeLength);
-        descriptor->InitAsSRV(view.Native->D3DResource.Get(), &desc, Heap.get(), index);
+        BindAlphaDescriptor(*descriptor, alpha, view, *Heap);
+        const auto index = descriptor->HeapIndex;
         Descriptors.push_back(std::move(descriptor));
         return index - Texture2D_StartIndex;
     }
 };
+
+std::optional<StagedAlpha> StageAlpha(GDX12Device& device, GDX12DescriptorHeap& heap,
+    const AlphaTexture& source, const NewIdentity& newIdentity)
+{
+    if (source.SecondarySRVIndex != UINT_MAX || source.SecondarySRVHeap || !IsMaterialHeap(heap, device)) return {};
+    const auto layout = DescribeAlpha(source, device);
+    if (!layout) return {};
+    auto view = source.SecondaryView;
+    std::optional<AlphaUpload> upload;
+    if (!view.Native)
+    {
+        view = { std::make_shared<GDX12Resource>(), newIdentity() };
+        if (!ValidIdentity(view, device.GetSubmissionAdapterId()) || view.Identity.Transfer != TransferId::Invalid)
+            throw std::invalid_argument("Invalid resident alpha resource identity");
+        view.Native->D3DResource = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, layout->Desc, D3D12_RESOURCE_STATE_COMMON);
+        upload = MakeAlphaUpload(device, source, *layout, view.Native->D3DResource);
+    }
+    auto descriptor = std::make_shared<GDX12Descriptor>();
+    BindAlphaDescriptor(*descriptor, source, view, heap);
+    AlphaTexture texture;
+    texture.Texture = source.Texture;
+    texture.ContentRevision = source.ContentRevision;
+    texture.Format = source.Format;
+    texture.Width = source.Width;
+    texture.Height = source.Height;
+    texture.MipLevels = source.MipLevels;
+    texture.SecondaryView = std::move(view);
+    texture.SecondarySRVIndex = descriptor->HeapIndex;
+    texture.SecondarySRVHeap = &heap;
+    return StagedAlpha{ std::move(texture), std::move(descriptor), std::move(upload) };
+}
+
+void RecordAlphaUpload(GDX12CommandList& commands, const AlphaUpload& upload)
+{
+    auto* list = commands.GetCommandList().Get();
+    for (UINT mip = 0; mip < upload.Footprints.size(); ++mip)
+    {
+        const CD3DX12_TEXTURE_COPY_LOCATION dst(upload.Destination.Get(), mip);
+        const CD3DX12_TEXTURE_COPY_LOCATION src(upload.Source.Get(), upload.Footprints[mip]);
+        list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
+    }
+}
 
 bool FrameStamp::IsValid() const
 {
@@ -375,11 +461,7 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
     slot->_storage.reset();
     if (!expected.IsValid() || !(snapshot.Stamp == expected) || !secondary.GetDevice() || !heap || !newIdentity)
         throw std::invalid_argument("Scene replica snapshot, device or heap is unavailable");
-    ComPtr<ID3D12Device14> owner;
-    ThrowIfFailed(heap->GetHeap()->GetDevice(IID_PPV_ARGS(&owner)));
-    if (owner.Get() != secondary.GetDevice().Get() || heap->GetType() != D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV ||
-        !(heap->GetFlags() & D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) ||
-        heap->GetNumDescriptors() < Texture2D_StartIndex + Texture2D_RangeLength)
+    if (!IsMaterialHeap(*heap, secondary))
         throw std::invalid_argument("Scene replica needs the secondary bindless SRV heap");
 
     for (const auto count : { snapshot.Meshes.size(), snapshot.DynamicGeometry.size(), snapshot.GrassBatches.size(),
@@ -387,7 +469,7 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
         if (count >= UINT_MAX) throw std::length_error("Scene replica source count exceeds the shader index range");
 
     std::vector<bool> validMeshes;
-    for (const auto& mesh : snapshot.Meshes) validMeshes.push_back(ValidMesh(mesh));
+    for (const auto& mesh : snapshot.Meshes) validMeshes.push_back(ValidMesh(mesh, secondary));
     const auto meshCanonical = Canonicalize(snapshot.Meshes, validMeshes, [](const MeshRange& mesh)
     {
         return std::make_tuple(mesh.Mesh.GetValue(), mesh.Mesh.GetGeneration(), mesh.ContentRevision, mesh.Submesh);
@@ -400,7 +482,11 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
     std::vector<bool> validAlpha;
     for (const auto& alpha : snapshot.AlphaTextures)
     {
-        alphaLayouts.push_back(DescribeAlpha(alpha, secondary));
+        const bool descriptorMatches = alpha.SecondarySRVIndex == UINT_MAX ? !alpha.SecondarySRVHeap :
+            alpha.SecondaryView.Native && alpha.SecondarySRVHeap == heap.get() &&
+                alpha.SecondarySRVIndex >= Texture2D_StartIndex &&
+                alpha.SecondarySRVIndex < Texture2D_StartIndex + Texture2D_RangeLength;
+        alphaLayouts.push_back(descriptorMatches ? DescribeAlpha(alpha, secondary) : std::nullopt);
         validAlpha.push_back(alphaLayouts.back().has_value());
     }
     const auto alphaCanonical = Canonicalize(snapshot.AlphaTextures, validAlpha, [](const AlphaTexture& alpha)
@@ -518,10 +604,23 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
                 if (caster.Kind == GeometryKind::Static)
                 {
                     const UINT meshIndex = meshCanonical[caster.Range];
+                    const auto& mesh = snapshot.Meshes[meshIndex];
                     auto& rangeIndex = frame.MeshToLocal[meshIndex];
-                    if (rangeIndex == UINT_MAX)
+                    if (mesh.Resident)
                     {
-                        const auto& mesh = snapshot.Meshes[meshIndex];
+                        const auto& resident = *mesh.Resident;
+                        draw.Vertices = Vertices(resident.Vertices, 0, resident.VertexCount);
+                        draw.Indices = Indices(resident.Indices, 0, resident.IndexCount);
+                        AddAccess(frame.RasterAccesses, resident.Vertices, Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+                        AddAccess(frame.RasterAccesses, resident.Indices, Mode::Read, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+                        if (rangeIndex == UINT_MAX)
+                        {
+                            rangeIndex = static_cast<UINT>(frame.PackedRanges.size());
+                            frame.PackedRanges.push_back({ 0, resident.IndexCount, 0 });
+                        }
+                    }
+                    else if (rangeIndex == UINT_MAX)
+                    {
                         if (!Fits(vertices.size(), mesh.VertexCount, UINT_MAX / sizeof(Vertex)) ||
                             !Fits(indices.size(), mesh.IndexCount, UINT_MAX / sizeof(UINT)))
                             throw std::length_error("Packed scene replica geometry exceeds D3D12 IA limits");
@@ -569,7 +668,7 @@ void Prepare(const std::shared_ptr<Slot>& slot, GDX12Device& secondary,
         const auto vb = storage->UploadBuffer(vertices, newIdentity, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, false);
         const auto ib = storage->UploadBuffer(indices, newIdentity, D3D12_RESOURCE_STATE_INDEX_BUFFER, false);
         for (auto& draw : frame.Draws)
-            if (draw.Kind == GeometryKind::Static)
+            if (draw.Kind == GeometryKind::Static && !draw.Vertices.BufferLocation)
             {
                 draw.Vertices = Vertices(vb.View, 0, static_cast<UINT>(vertices.size()));
                 draw.Indices = Indices(ib.View, 0, static_cast<UINT>(indices.size()));
@@ -598,15 +697,7 @@ void RecordUploads(GDX12CommandList& commands, const Slot& slot)
         if (access.View.Native->D3DResource.Get() != access.Handle.Get())
             throw std::logic_error("Scene replica upload target changed after preparation");
     for (const auto& upload : slot._storage->Uploads)
-    {
-        if (upload.Footprints.empty())
-            list->CopyBufferRegion(upload.Destination.Get(), 0, upload.Source.Get(), 0, upload.Bytes);
-        else for (UINT mip = 0; mip < upload.Footprints.size(); ++mip)
-        {
-            const CD3DX12_TEXTURE_COPY_LOCATION dst(upload.Destination.Get(), mip);
-            const CD3DX12_TEXTURE_COPY_LOCATION src(upload.Source.Get(), upload.Footprints[mip]);
-            list->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
-        }
-    }
+        list->CopyBufferRegion(upload.Destination.Get(), 0, upload.Source.Get(), 0, upload.Bytes);
+    for (const auto& upload : slot._storage->AlphaUploads) RecordAlphaUpload(commands, upload);
 }
 }

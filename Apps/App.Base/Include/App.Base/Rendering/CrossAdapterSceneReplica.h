@@ -12,6 +12,7 @@
 #include <vector>
 
 class GDX12CommandList;
+class GDX12Descriptor;
 class GDX12DescriptorHeap;
 class GDX12Device;
 
@@ -44,6 +45,11 @@ namespace CrossAdapterSceneReplica
     };
 
     enum class IndexAddressing { RelativeToRange, AbsoluteInPayload };
+    struct ResidentGeometry
+    {
+        ResourceView Vertices, Indices;
+        UINT VertexCount = 0, IndexCount = 0, MaxRelativeIndex = 0;
+    };
     struct MeshRange
     {
         Engine::Core::MeshHandle Mesh;
@@ -53,6 +59,7 @@ namespace CrossAdapterSceneReplica
         std::vector<std::uint32_t> Indices;
         UINT FirstVertex = 0, VertexCount = 0, FirstIndex = 0, IndexCount = 0;
         IndexAddressing Addressing = IndexAddressing::RelativeToRange;
+        std::optional<ResidentGeometry> Resident;
     };
 
     enum class GeometryKind { Static, Skinned, ExpandedGrass };
@@ -89,6 +96,8 @@ namespace CrossAdapterSceneReplica
         UINT Width = 0, Height = 0, MipLevels = 0;
         std::vector<AlphaMip> Mips;
         ResourceView SecondaryView;
+        UINT SecondarySRVIndex = UINT_MAX;
+        const GDX12DescriptorHeap* SecondarySRVHeap = nullptr;
     };
 
     struct Material
@@ -166,6 +175,21 @@ namespace CrossAdapterSceneReplica
     };
 
     using NewIdentity = std::function<GDX12Submission::ResourceIdentity()>;
+
+    struct AlphaUpload
+    {
+        GDX12ResourceHandle Source, Destination;
+        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> Footprints;
+    };
+    struct StagedAlpha
+    {
+        AlphaTexture Texture;
+        std::shared_ptr<GDX12Descriptor> Descriptor;
+        std::optional<AlphaUpload> Upload;
+    };
+    std::optional<StagedAlpha> StageAlpha(GDX12Device& device, GDX12DescriptorHeap& heap,
+        const AlphaTexture& source, const NewIdentity& newIdentity);
+    void RecordAlphaUpload(GDX12CommandList& commands, const AlphaUpload& upload);
 
     class Slot
     {
