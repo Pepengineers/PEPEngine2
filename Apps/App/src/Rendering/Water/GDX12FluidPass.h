@@ -1,7 +1,22 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
-#include "Rendering/Water/GDX12Fluid.h"
+#include "Rendering/Water/GDX12FluidSolver.h"
 #include <map>
+#include <optional>
+
+struct GDX12FluidDisplay
+{
+    struct View
+    {
+        std::shared_ptr<GDX12Resource> Resource;
+        D3D12_GPU_DESCRIPTOR_HANDLE SRV{};
+    };
+    View Current, Previous;
+    GDX12FluidSettings Settings;
+    Matrix Transform = Matrix::Identity, PreviousTransform = Matrix::Identity;
+    UINT Count = 0;
+    bool HistoryValid = false;
+};
 
 class GDX12FluidSurfacePass final : public GDX12RenderPass
 {
@@ -25,6 +40,7 @@ public:
     void Initialize() override;
     void Execute(GDX12CommandList* commands) override;
     void SetInstances(std::vector<GDX12FluidInstance> instances);
+    void SetRoutedDisplay(std::uint64_t owner, std::optional<GDX12FluidDisplay> display);
     void PrepareFrame();
     void ExecuteSimulation(GDX12CommandList* commands);
     std::vector<GDX12RenderGraph::BufferAccess> GetSimulationBufferAccesses() const;
@@ -41,20 +57,28 @@ private:
         GDX12Texture* GetTexture() override { return Target; }
         bool IsInitialized() override { return Target && Target->IsInitialized(); }
     };
-    struct Parameters;
     struct State;
+    struct ParticleView
+    {
+        GDX12Resource& Resource;
+        D3D12_GPU_DESCRIPTOR_HANDLE SRV;
+        UINT Count;
+    };
     void CreatePipelines();
     void CreateTargets();
     void ReleaseTargets();
     void PrepareStates();
-    void Simulate(GDX12CommandList* commands, State& state, const GDX12FluidSettings& settings, float elapsed);
-    void DrawSurface(GDX12CommandList* commands, State& state, UINT owner, const GDX12FluidSettings& settings);
-    void SurfaceBindings(GDX12CommandList* commands, State& state, UINT owner, UINT mode = 0);
+    void DrawSurface(GDX12CommandList* commands, const ParticleView& particles,
+        const GDX12FluidDisplay::View* previous, D3D12_GPU_VIRTUAL_ADDRESS constants, UINT owner,
+        const GDX12FluidSettings& settings);
+    void SurfaceBindings(GDX12CommandList* commands, D3D12_GPU_VIRTUAL_ADDRESS constants, UINT owner, UINT mode = 0);
     Link _depthLink, _motionLink, _geometryLink, _ownerLink;
     std::vector<GDX12FluidInstance> _instances;
     std::map<uint64_t, std::unique_ptr<State>> _states;
-    std::unique_ptr<GDX12RootSignature> _solverRoot, _surfaceRoot;
-    ComPtr<ID3D12PipelineState> _save, _hash, _sort, _offsets, _densities, _integrate;
+    std::uint64_t _routedOwner = 0;
+    std::optional<GDX12FluidDisplay> _routedDisplay;
+    GDX12FluidSolver _solver;
+    std::unique_ptr<GDX12RootSignature> _surfaceRoot;
     ComPtr<ID3D12PipelineState> _sphere, _thicknessDraw, _initialize, _filter, _merge, _resolve;
     std::unique_ptr<GDX12Texture> _raw, _eyeDepth, _scratchDepth, _thickness;
     std::unique_ptr<GDX12Texture> _filtered[2];

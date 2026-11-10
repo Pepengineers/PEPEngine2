@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="App.vcxproj" />
+  <PropertyGroup>
+    <ProjectGuid>{AF403BBD-F955-449D-93AE-A55CF30F232C}</ProjectGuid>
+  </PropertyGroup>
+  <ItemGroup>
+    <ClCompile Remove="src\App.cpp" />
+    <ClCompile Remove="src\Rendering\Water\CrossAdapterWater.cpp" />
+    <ClCompile Include="src\Rendering\Water\CrossAdapterWater.cpp" />
+    <ClCompile Include="tests\MGPUWaterTests.cpp" />
+  </ItemGroup>
+  <ItemDefinitionGroup>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+</Project>

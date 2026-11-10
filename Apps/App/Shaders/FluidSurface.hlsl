@@ -18,6 +18,7 @@ TextureCube<float4> Environment : register(t7);
 Texture2D<float4> Geometry : register(t11);
 Texture2D<float> WaterDepth : register(t12);
 Texture2D<uint> Owner : register(t13);
+StructuredBuffer<FluidParticle> PreviousDisplayedParticles : register(t14);
 RWTexture2D<float> DepthOut : register(u0);
 RWTexture2D<float2> MotionOut : register(u1);
 RWTexture2D<float4> GeometryOut : register(u2);
@@ -105,9 +106,18 @@ SurfaceOutput SpherePS(SphereVertex input)
     FluidParticle particle = Particles[input.ParticleId];
     SurfaceOutput output;
     output.EyeDepth = -mul(float4(world, 1), Camera.View).z;
-    float3 displacement = particle.Position - particle.PreviousPosition;
-    // shortcut: raw basins are static; use a previous transform before supporting moving basins.
-    if (LocalSimulation != 0) displacement = mul(float4(displacement, 0), ContainerToWorld).xyz;
+    float3 displacement;
+    if (SnapshotMotion != 0)
+    {
+        float3 previous = PreviousDisplayedParticles[input.ParticleId].Position;
+        if (LocalSimulation != 0) previous = mul(float4(previous, 1), PreviousContainerToWorld).xyz;
+        displacement = ParticleWorld(particle.Position) - previous;
+    }
+    else
+    {
+        displacement = particle.Position - particle.PreviousPosition;
+        if (LocalSimulation != 0) displacement = mul(float4(displacement, 0), ContainerToWorld).xyz;
+    }
     output.RawData = float4(output.EyeDepth, displacement);
     output.Depth = DeviceDepth(world);
     return output;

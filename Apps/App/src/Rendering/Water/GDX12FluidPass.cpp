@@ -5,53 +5,18 @@
 #include <set>
 #include <stdexcept>
 
-struct GDX12FluidSurfacePass::Parameters
-{
-    XMFLOAT4X4 ContainerToWorld, WorldToContainer;
-    XMFLOAT3 HalfExtent; float Radius;
-    XMFLOAT3 Gravity; float H;
-    float Mass, RestDensity, Stiffness, Viscosity;
-    float MaxSpeed, MaxAcceleration, Restitution, Sigma;
-    float DepthRange, EdgeDepth, IOR, Roughness;
-    XMFLOAT3 Absorption; float RefractionPixels;
-    XMFLOAT3 Scattering; float MaxThickness;
-    UINT FilterRadius, ResetMotion;
-    float NearStiffness, PredictionSeconds;
-    UINT LocalSimulation, Padding[3];
-};
-
 struct GDX12FluidSurfacePass::State
 {
-    struct Particle { XMFLOAT3 Position, Velocity, PreviousPosition; };
-    std::unique_ptr<GDX12UploadBuffer<Particle>> Particles[2], SeedUpload;
-    std::unique_ptr<GDX12UploadBuffer<XMFLOAT2>> Density;
-    std::unique_ptr<GDX12UploadBuffer<XMUINT2>> Keys;
-    std::unique_ptr<GDX12UploadBuffer<UINT>> Offsets;
-    std::unique_ptr<GDX12UploadBuffer<Parameters>> Constants;
+    GDX12FluidSolver::Buffers Solver;
+    GDX12FluidSolver::Head SolverHead;
+    std::unique_ptr<GDX12UploadBuffer<GDX12FluidParameters>> Constants;
     std::shared_ptr<const std::vector<GDX12FluidParticle>> Source;
     uint64_t Revision = 0;
     uint64_t SettingsRevision = 0;
-    UINT Count = 0, Capacity = 0, Current = 0;
-    bool SeedPending = true;
     UINT SeedFrameSlot = UINT_MAX;
     bool WasRendered = false;
     bool ResetThisFrame = false;
-    float WaveTime = 0;
-    Parameters FrameParameters = {};
 };
-
-namespace
-{
-    template<class T>
-    std::unique_ptr<GDX12UploadBuffer<T>> Buffer(GDX12DeviceResources* resources, UINT count)
-    {
-        auto buffer = std::make_unique<GDX12UploadBuffer<T>>(resources->Device, count, EBufferType::Default, false);
-        auto* heap = resources->SRV_UAV_Heap.get();
-        buffer->CreateSRV(heap, heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
-        buffer->CreateUAV(heap, heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength));
-        return buffer;
-    }
-}
 
 GDX12FluidSurfacePass::GDX12FluidSurfacePass()
 {
@@ -64,8 +29,7 @@ GDX12FluidSurfacePass::~GDX12FluidSurfacePass() = default;
 
 void GDX12FluidSurfacePass::Initialize()
 {
-    static_assert(sizeof(Parameters) == 272);
-    static_assert(sizeof(State::Particle) == 36);
+    static_assert(sizeof(GDX12FluidParameters) == 336);
     auto* depth = _inputs[0]->GetTexture();
     auto* motion = _inputs[1]->GetTexture();
     if (!depth->GetWidth() || !depth->GetHeight() || depth->GetWidth() != motion->GetWidth() ||
@@ -77,25 +41,12 @@ void GDX12FluidSurfacePass::Initialize()
 
 void GDX12FluidSurfacePass::CreatePipelines()
 {
-    if (_solverRoot) return;
-    GDX12RootSignatureDesc solver;
-    solver.VolatileSRVData = true;
-    solver.Constants = { 8 };
-    solver.NumSingleCBVSlots = 1;
-    solver.NumSingleSRVSlots = 4;
-    solver.NumSingleUAVSlots = 4;
-    _solverRoot = std::make_unique<GDX12RootSignature>(_resources->Device, solver);
-    _save = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "SavePrevious");
-    _hash = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Hash");
-    _sort = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Sort");
-    _offsets = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "BuildOffsets");
-    _densities = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Densities");
-    _integrate = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _solverRoot.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Integrate");
+    if (_surfaceRoot) return;
     GDX12RootSignatureDesc surface;
     surface.VolatileSRVData = true;
     surface.Constants = { 4 };
     surface.NumSingleCBVSlots = 2;
-    surface.NumSingleSRVSlots = 14;
+    surface.NumSingleSRVSlots = 15;
     surface.NumSingleUAVSlots = 6;
     surface.StaticSamplers = GetStaticSamplers();
     _surfaceRoot = std::make_unique<GDX12RootSignature>(_resources->Device, surface);
@@ -209,7 +160,8 @@ void GDX12FluidSurfacePass::PrepareStates()
         const auto& author = instance.Component.GetSettings();
         auto& state = *found->second;
         const bool active = _controls.Enabled && (author.SimulationEnabled || author.RenderEnabled);
-        if (active && (state.Source != source || state.Revision != instance.Component.GetResetRevision())) retire = true;
+        if (active && (state.Source != source || state.Revision != instance.Component.GetResetRevision()) &&
+            (instance.Id != _routedOwner || state.Solver.Count)) retire = true;
         if (state.WasRendered && (!_controls.Enabled || !author.RenderEnabled ||
             state.SettingsRevision != instance.Component.GetSettingsRevision())) _commonData->ResetHistory = true;
     }
@@ -231,33 +183,29 @@ void GDX12FluidSurfacePass::PrepareStates()
         if (!source || source->empty() || !_controls.Enabled ||
             (!author.SimulationEnabled && !author.RenderEnabled)) continue;
         auto& state = _states[instance.Id];
-        if (state && state->Source == source && state->Revision == instance.Component.GetResetRevision()) continue;
-        state = std::make_unique<State>();
-        state->Source = source;
-        state->Revision = instance.Component.GetResetRevision();
-        state->Count = static_cast<UINT>(source->size());
-        state->Capacity = 1;
-        while (state->Capacity < state->Count) state->Capacity <<= 1;
-        for (auto& buffer : state->Particles) buffer = Buffer<State::Particle>(_resources, state->Count);
-        state->Density = Buffer<XMFLOAT2>(_resources, state->Count);
-        state->Keys = Buffer<XMUINT2>(_resources, state->Capacity);
-        state->Offsets = Buffer<UINT>(_resources, state->Capacity);
-        state->Constants = std::make_unique<GDX12UploadBuffer<Parameters>>(_resources->Device,
-            2 * static_cast<UINT>(_resources->FrameConstants.size()));
-        state->SeedUpload = std::make_unique<GDX12UploadBuffer<State::Particle>>(_resources->Device,
-            state->Count, EBufferType::Upload, false);
-        const auto& settings = instance.Component.GetSettings();
-        for (UINT i = 0; i < state->Count; ++i)
+        const bool routed = _routedOwner && instance.Id == _routedOwner;
+        if (state && state->Source == source && state->Revision == instance.Component.GetResetRevision())
         {
-            const auto& seed = (*source)[i];
-            const auto position = settings.MGPUReference ? seed.Position : Vector3::Transform(seed.Position, instance.ContainerToWorld);
-            if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z) ||
-                position.Length() > 1e7f) throw std::invalid_argument("Fluid seed outside supported world range");
-            auto velocity = settings.MGPUReference ? seed.Velocity : Vector3::TransformNormal(seed.Velocity, instance.ContainerToWorld);
-            const float speed = velocity.Length();
-            if (!settings.MGPUReference && speed > settings.MaxSpeedCmPerSecond) velocity *= settings.MaxSpeedCmPerSecond / speed;
-            state->SeedUpload->CopyData(i, { position, velocity, position });
+            if (!routed && !state->Solver.Count)
+                state->Solver = GDX12FluidSolver::CreateBuffers(_resources->Device, _resources->SRV_UAV_Heap.get(), instance);
+            continue;
         }
+        if (routed && state && !state->Solver.Count)
+        {
+            state->Source = source;
+            state->Revision = instance.Component.GetResetRevision();
+            state->WasRendered = false;
+            _commonData->ResetHistory = true;
+            continue;
+        }
+        auto replacement = std::make_unique<State>();
+        replacement->Source = source;
+        replacement->Revision = instance.Component.GetResetRevision();
+        if (!routed)
+            replacement->Solver = GDX12FluidSolver::CreateBuffers(_resources->Device, _resources->SRV_UAV_Heap.get(), instance);
+        replacement->Constants = std::make_unique<GDX12UploadBuffer<GDX12FluidParameters>>(_resources->Device,
+            2 * static_cast<UINT>(_resources->FrameConstants.size()));
+        state = std::move(replacement);
     }
 }
 
@@ -280,13 +228,14 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::GetSimulation
     std::vector<GDX12RenderGraph::BufferAccess> accesses;
     for (const auto& [id, state] : _states)
     {
+        if (!state->Solver.Count || (_routedOwner && id == _routedOwner)) continue;
         accesses.push_back({ &state->Constants->GetResource(), GDX12RenderGraph::Mode::Read });
-        for (const auto& particles : state->Particles)
+        for (const auto& particles : state->Solver.Particles)
             accesses.push_back({ &particles->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
-        accesses.push_back({ &state->Density->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
-        accesses.push_back({ &state->Keys->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
-        accesses.push_back({ &state->Offsets->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
-        if (state->SeedPending && state->SeedUpload) accesses.push_back({ &state->SeedUpload->GetResource(), GDX12RenderGraph::Mode::Read });
+        accesses.push_back({ &state->Solver.Density->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
+        accesses.push_back({ &state->Solver.Keys->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
+        accesses.push_back({ &state->Solver.Offsets->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
+        if (state->SolverHead.SeedPending && state->Solver.SeedUpload) accesses.push_back({ &state->Solver.SeedUpload->GetResource(), GDX12RenderGraph::Mode::Read });
     }
     return accesses;
 }
@@ -296,108 +245,27 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::GetBufferAcce
     if (!_rendering) return {};
     auto accesses = GetResolveBufferAccesses();
     for (const auto& [id, state] : _states)
-        for (const auto& particles : state->Particles)
+    {
+        if (!state->Solver.Count || (_routedOwner && id == _routedOwner)) continue;
+        for (const auto& particles : state->Solver.Particles)
             accesses.push_back({ &particles->GetResource(), GDX12RenderGraph::Mode::Read });
+    }
+    if (_routedDisplay)
+    {
+        accesses.push_back({ _routedDisplay->Current.Resource.get(), GDX12RenderGraph::Mode::Read });
+        if (_routedDisplay->HistoryValid && _routedDisplay->Previous.Resource != _routedDisplay->Current.Resource)
+            accesses.push_back({ _routedDisplay->Previous.Resource.get(), GDX12RenderGraph::Mode::Read });
+    }
     return accesses;
 }
 
-void GDX12FluidSurfacePass::Simulate(GDX12CommandList* commands, State& state, const GDX12FluidSettings& settings, const float elapsed)
-{
-    if (state.SeedPending)
-    {
-        auto& target = state.Particles[state.Current]->GetResource();
-        commands->ResourceBarrier({ target.GetCopyDestBarrier() });
-        commands->CopyResource(target.D3DResource.Get(), state.SeedUpload->GetResource().D3DResource.Get());
-        state.SeedPending = false;
-        state.SeedFrameSlot = _resources->CurrFrameConstantsIndex;
-    }
-    commands->SetComputeRootSignature(_solverRoot.get());
-    commands->SetComputeRootConstantBufferView(1, state.Constants->GetElementAddress(2 * _resources->CurrFrameConstantsIndex));
-    struct Dispatch { UINT Count, Capacity, K, J; float Dt; UINT ReferenceUnits; float WaveAcceleration = 0; UINT Padding = 0; };
-    Dispatch dispatch = { state.Count, state.Capacity, 0, 0, 0, settings.MGPUReference ? 1u : 0u };
-    const auto setDispatch = [&]() { commands->GetCommandList()->SetComputeRoot32BitConstants(0, 8, &dispatch, 0); };
-    setDispatch();
-    auto& current = state.Particles[state.Current]->GetResource();
-    commands->ResourceBarrier({ current.GetUnorderedAccessBarrier() });
-    commands->SetComputeUAV(0, state.Particles[state.Current]->GetUAV()->GPUHandle);
-    commands->SetPipelineState(_save);
-    commands->Dispatch((state.Count + 127) / 128, 1, 1);
-    commands->ResourceBarrier({ current.GetUAVBarrier() });
-    if (!settings.SimulationEnabled || settings.TimeScale == 0) return;
-    if (!std::isfinite(elapsed) || elapsed <= 0) return;
-    const float h = settings.SmoothingRadiusCm;
-    const float sound = std::sqrt(settings.PressureStiffnessCm2PerSecond2);
-    float safeStep = settings.MaxStepSeconds;
-    // MGPU authors fixed substeps and a frame-time cap; legacy SPH retains its CFL bound.
-    if (settings.NearPressureStiffnessCm2PerSecond2 == 0)
-    {
-        safeStep = (std::min)(safeStep, 0.25f * h / (settings.MaxSpeedCmPerSecond + sound));
-        safeStep = (std::min)(safeStep, 0.25f * std::sqrt(h / settings.MaxAccelerationCmPerSecond2));
-        if (settings.ViscosityCm2PerSecond > 0)
-            safeStep = (std::min)(safeStep, 0.125f * h * h / settings.ViscosityCm2PerSecond);
-    }
-    // Bounded catch-up: drop excess wall time instead of taking an unstable oversized step.
-    const float simulatedTime = (std::min)(elapsed * settings.TimeScale, safeStep * settings.MaxSubsteps);
-    const UINT steps = settings.NearPressureStiffnessCm2PerSecond2 > 0 ? settings.MaxSubsteps :
-        (std::min)(settings.MaxSubsteps, (std::max)(1u, static_cast<UINT>(std::ceil(simulatedTime / safeStep))));
-    dispatch.Dt = simulatedTime / steps;
-    for (UINT step = 0; step < steps; ++step)
-    {
-        if (settings.WaveAcceleration > 0)
-        {
-            dispatch.WaveAcceleration = settings.WaveAcceleration * std::cos(XM_2PI *
-                (state.WaveTime + dispatch.Dt * 0.5f) / settings.WavePeriodSeconds);
-            state.WaveTime = std::fmod(state.WaveTime + dispatch.Dt, settings.WavePeriodSeconds);
-        }
-        auto& input = *state.Particles[state.Current];
-        auto& output = *state.Particles[1 - state.Current];
-        commands->ResourceBarrier({ input.GetResource().GetNonPixelShaderResourceBarrier(),
-            state.Keys->GetResource().GetUnorderedAccessBarrier(), state.Offsets->GetResource().GetUnorderedAccessBarrier() });
-        commands->SetComputeSRV(0, input.GetSRV()->GPUHandle);
-        commands->SetComputeUAV(2, state.Keys->GetUAV()->GPUHandle);
-        commands->SetComputeUAV(3, state.Offsets->GetUAV()->GPUHandle);
-        dispatch.K = dispatch.J = 0;
-        setDispatch();
-        commands->SetPipelineState(_hash);
-        commands->Dispatch((state.Capacity + 127) / 128, 1, 1);
-        commands->ResourceBarrier({ state.Keys->GetResource().GetUAVBarrier(), state.Offsets->GetResource().GetUAVBarrier() });
-        commands->SetPipelineState(_sort);
-        for (UINT k = 2; k <= state.Capacity; k <<= 1)
-        for (UINT j = k >> 1; j > 0; j >>= 1)
-        {
-            dispatch.K = k;
-            dispatch.J = j;
-            setDispatch();
-            commands->Dispatch((state.Capacity + 127) / 128, 1, 1);
-            commands->ResourceBarrier({ state.Keys->GetResource().GetUAVBarrier() });
-        }
-        commands->ResourceBarrier({ state.Keys->GetResource().GetNonPixelShaderResourceBarrier() });
-        commands->SetComputeSRV(2, state.Keys->GetSRV()->GPUHandle);
-        commands->SetPipelineState(_offsets);
-        commands->Dispatch((state.Count + 127) / 128, 1, 1);
-        commands->ResourceBarrier({ state.Offsets->GetResource().GetNonPixelShaderResourceBarrier(),
-            state.Density->GetResource().GetUnorderedAccessBarrier() });
-        commands->SetComputeSRV(3, state.Offsets->GetSRV()->GPUHandle);
-        commands->SetComputeUAV(1, state.Density->GetUAV()->GPUHandle);
-        commands->SetPipelineState(_densities);
-        commands->Dispatch((state.Count + 127) / 128, 1, 1);
-        commands->ResourceBarrier({ state.Density->GetResource().GetNonPixelShaderResourceBarrier(),
-            output.GetResource().GetUnorderedAccessBarrier() });
-        commands->SetComputeSRV(1, state.Density->GetSRV()->GPUHandle);
-        commands->SetComputeUAV(0, output.GetUAV()->GPUHandle);
-        commands->SetPipelineState(_integrate);
-        commands->Dispatch((state.Count + 127) / 128, 1, 1);
-        commands->ResourceBarrier({ output.GetResource().GetUAVBarrier() });
-        state.Current = 1 - state.Current;
-    }
-}
-
-void GDX12FluidSurfacePass::SurfaceBindings(GDX12CommandList* commands, State& state, const UINT owner, const UINT mode)
+void GDX12FluidSurfacePass::SurfaceBindings(GDX12CommandList* commands, D3D12_GPU_VIRTUAL_ADDRESS constants,
+    const UINT owner, const UINT mode)
 {
     commands->SetComputeRootSignature(_surfaceRoot.get());
     UINT dispatch[] = { _depth->GetWidth(), _depth->GetHeight(), owner, mode };
     commands->GetCommandList()->SetComputeRoot32BitConstants(0, 4, dispatch, 0);
-    commands->SetComputeRootConstantBufferView(1, state.Constants->GetElementAddress(2 * _resources->CurrFrameConstantsIndex + 1));
+    commands->SetComputeRootConstantBufferView(1, constants);
     auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     commands->SetComputeRootConstantBufferView(2, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
     commands->SetComputeSRV(1, _raw->GetSRV()->GPUHandle);
@@ -410,20 +278,24 @@ void GDX12FluidSurfacePass::SurfaceBindings(GDX12CommandList* commands, State& s
     commands->SetComputeUAV(3, _owner->GetUAV()->GPUHandle);
 }
 
-void GDX12FluidSurfacePass::DrawSurface(GDX12CommandList* commands, State& state, const UINT owner,
+void GDX12FluidSurfacePass::DrawSurface(GDX12CommandList* commands, const ParticleView& particles,
+    const GDX12FluidDisplay::View* previous, D3D12_GPU_VIRTUAL_ADDRESS constants, const UINT owner,
     const GDX12FluidSettings& settings)
 {
-    commands->ResourceBarrier({ state.Particles[state.Current]->GetResource().GetSRVBarrier(),
+    commands->ResourceBarrier({ particles.Resource.GetSRVBarrier(),
         _raw->GetResource()->GetRenderTargetBarrier(), _eyeDepth->GetResource()->GetRenderTargetBarrier(),
         _scratchDepth->GetResource()->GetDepthWriteBarrier(), _thickness->GetResource()->GetRenderTargetBarrier(),
         _inputs[0]->GetTexture()->GetResource()->GetSRVBarrier() });
+    if (previous && previous->Resource.get() != &particles.Resource)
+        commands->ResourceBarrier({previous->Resource->GetSRVBarrier()});
     commands->SetGraphicsRootSignature(_surfaceRoot.get());
     const UINT dispatch[] = { _depth->GetWidth(), _depth->GetHeight(), owner, 0 };
     commands->GetCommandList()->SetGraphicsRoot32BitConstants(0, 4, dispatch, 0);
-    commands->SetGraphicsRootConstantBufferView(1, state.Constants->GetElementAddress(2 * _resources->CurrFrameConstantsIndex + 1));
+    commands->SetGraphicsRootConstantBufferView(1, constants);
     auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     commands->SetGraphicsRootConstantBufferView(2, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
-    commands->SetGraphicsSRV(0, state.Particles[state.Current]->GetSRV()->GPUHandle);
+    commands->SetGraphicsSRV(0, particles.SRV);
+    commands->SetGraphicsSRV(14, previous ? previous->SRV : particles.SRV);
     commands->SetGraphicsSRV(4, _inputs[0]->GetTexture()->GetSRV()->GPUHandle);
     commands->SetViewport(_raw->GetViewport());
     commands->SetScissorRect(_raw->GetScissorRect());
@@ -433,11 +305,11 @@ void GDX12FluidSurfacePass::DrawSurface(GDX12CommandList* commands, State& state
     commands->ClearDepthStencilView(_scratchDepth.get());
     commands->SetRenderTargets({ _raw.get(), _eyeDepth.get() }, _scratchDepth.get());
     commands->SetPipelineState(_sphere);
-    commands->DrawInstanced(6, state.Count, 0, 0);
+    commands->DrawInstanced(6, particles.Count, 0, 0);
     commands->ClearRenderTargetView(_thickness.get());
     commands->SetRenderTargets({ _thickness.get() }, nullptr);
     commands->SetPipelineState(_thicknessDraw);
-    commands->DrawInstanced(6, state.Count, 0, 0);
+    commands->DrawInstanced(6, particles.Count, 0, 0);
     commands->ResourceBarrier({ _raw->GetResource()->GetNonPixelShaderResourceBarrier(),
         _thickness->GetResource()->GetNonPixelShaderResourceBarrier(),
         _eyeDepth->GetResource()->GetCopySourceBarrier(), _filtered[0]->GetResource()->GetCopyDestBarrier() });
@@ -447,7 +319,7 @@ void GDX12FluidSurfacePass::DrawSurface(GDX12CommandList* commands, State& state
     for (UINT pass = 0; pass <= settings.FilterIterations * 2; ++pass)
     {
         const UINT mode = pass == settings.FilterIterations * 2 ? 2 : pass % 2;
-        SurfaceBindings(commands, state, owner, mode);
+        SurfaceBindings(commands, constants, owner, mode);
         commands->ResourceBarrier({ _filtered[current]->GetResource()->GetNonPixelShaderResourceBarrier(),
             _filtered[1 - current]->GetResource()->GetUnorderedAccessBarrier() });
         commands->SetComputeSRV(2, _filtered[current]->GetSRV()->GPUHandle);
@@ -457,7 +329,7 @@ void GDX12FluidSurfacePass::DrawSurface(GDX12CommandList* commands, State& state
         current = 1 - current;
     }
     commands->ResourceBarrier({ _filtered[current]->GetResource()->GetNonPixelShaderResourceBarrier() });
-    SurfaceBindings(commands, state, owner);
+    SurfaceBindings(commands, constants, owner);
     commands->SetComputeSRV(2, _filtered[current]->GetSRV()->GPUHandle);
     commands->SetPipelineState(_merge);
     commands->Dispatch((_depth->GetWidth() + 7) / 8, (_depth->GetHeight() + 7) / 8, 1);
@@ -473,8 +345,8 @@ void GDX12FluidSurfacePass::PrepareFrame()
     PrepareStates();
     // The frame-slot wait covers the final DIRECT fence and its COMPUTE join.
     for (auto& [id, state] : _states)
-        if (!state->SeedPending && state->SeedFrameSlot == _resources->CurrFrameConstantsIndex)
-            state->SeedUpload.reset();
+        if (!state->SolverHead.SeedPending && state->SeedFrameSlot == _resources->CurrFrameConstantsIndex)
+            state->Solver.SeedUpload.reset();
     _depthLink.Target = _inputs[0]->GetTexture();
     _motionLink.Target = _inputs[1]->GetTexture();
     bool rendering = false;
@@ -485,7 +357,7 @@ void GDX12FluidSurfacePass::PrepareFrame()
         if (!seed || seed->empty()) continue;
         const auto& settings = instance.Component.GetSettings();
         rendering |= _controls.Enabled && settings.RenderEnabled;
-        _simulating |= _controls.Enabled && settings.SimulationEnabled;
+        _simulating |= _controls.Enabled && settings.SimulationEnabled && (!_routedOwner || instance.Id != _routedOwner);
     }
     const bool changed = rendering != _rendering || previousControls.Enabled != _controls.Enabled ||
         previousControls.Quality != _controls.Quality;
@@ -519,6 +391,15 @@ void GDX12FluidSurfacePass::SetInstances(std::vector<GDX12FluidInstance> instanc
     _prepared = false;
 }
 
+void GDX12FluidSurfacePass::SetRoutedDisplay(std::uint64_t owner, std::optional<GDX12FluidDisplay> display)
+{
+    if (display && (!owner || !display->Current.Resource || !display->Count ||
+        (display->HistoryValid && !display->Previous.Resource)))
+        throw std::invalid_argument("Invalid fluid snapshot display binding");
+    _routedOwner = owner;
+    _routedDisplay = std::move(display);
+}
+
 void GDX12FluidSurfacePass::ExecuteSimulation(GDX12CommandList* commands)
 {
     if (!_prepared) PrepareFrame();
@@ -530,40 +411,19 @@ void GDX12FluidSurfacePass::ExecuteSimulation(GDX12CommandList* commands)
         auto found = _states.find(instance.Id);
         if (found == _states.end()) continue;
         auto& state = *found->second;
+        if (!state.Solver.Count || (_routedOwner && instance.Id == _routedOwner)) continue;
         const auto settings = ResolveFluidSettings(instance.Component.GetSettings(), _controls.Quality);
         if (!settings.RenderEnabled && !settings.SimulationEnabled) continue;
-        Parameters parameters = {};
-        XMStoreFloat4x4(&parameters.ContainerToWorld, XMMatrixTranspose(instance.ContainerToWorld));
-        XMStoreFloat4x4(&parameters.WorldToContainer, XMMatrixTranspose(instance.ContainerToWorld.Invert()));
-        parameters.HalfExtent = settings.ContainerHalfExtentCm;
-        parameters.Radius = settings.ParticleRadiusCm;
-        parameters.Gravity = settings.AccelerationCmPerSecond2;
-        parameters.H = settings.SmoothingRadiusCm;
-        parameters.Mass = settings.ParticleMassKg;
-        parameters.RestDensity = settings.RestDensityKgPerCm3;
-        parameters.Stiffness = settings.PressureStiffnessCm2PerSecond2;
-        parameters.Viscosity = settings.ViscosityCm2PerSecond;
-        parameters.MaxSpeed = settings.MaxSpeedCmPerSecond;
-        parameters.MaxAcceleration = settings.MaxAccelerationCmPerSecond2;
-        parameters.Restitution = settings.Restitution;
-        parameters.Sigma = settings.FilterSigmaCm;
-        parameters.DepthRange = settings.FilterDepthRangeCm;
-        parameters.EdgeDepth = settings.FilterEdgeCm;
-        parameters.IOR = settings.IOR;
-        parameters.Roughness = settings.Roughness;
-        parameters.Absorption = settings.AbsorptionPerCm;
-        parameters.RefractionPixels = settings.RefractionPixels;
-        parameters.Scattering = settings.ScatteringColor;
-        parameters.MaxThickness = settings.MaxOpticalThicknessCm;
-        parameters.FilterRadius = settings.FilterRadiusPixels;
-        parameters.ResetMotion = _commonData->ResetHistory || state.SeedPending || !state.WasRendered;
-        parameters.NearStiffness = settings.NearPressureStiffnessCm2PerSecond2;
-        parameters.PredictionSeconds = settings.PredictionSeconds;
-        parameters.LocalSimulation = settings.MGPUReference ? 1u : 0u;
-        state.FrameParameters = parameters;
-        state.ResetThisFrame = state.SeedPending;
-        state.Constants->CopyData(2 * _resources->CurrFrameConstantsIndex, parameters);
-        Simulate(commands, state, settings, instance.DeltaSeconds);
+        _solver.Initialize(_resources->Device);
+        const auto parameters = MakeFluidParameters(instance.ContainerToWorld, settings);
+        const bool seedPending = state.SolverHead.SeedPending;
+        state.ResetThisFrame = seedPending;
+        const UINT constants = 2 * _resources->CurrFrameConstantsIndex;
+        state.Constants->CopyData(constants, parameters);
+        const auto steps = GDX12FluidSolver::PlanSteps(settings, instance.DeltaSeconds * settings.TimeScale);
+        state.SolverHead = _solver.Record(*commands, state.Solver, state.SolverHead, settings, steps,
+            state.Constants->GetElementAddress(constants), GDX12FluidSolver::Boundary::LegacyTracked);
+        if (seedPending) state.SeedFrameSlot = _resources->CurrFrameConstantsIndex;
     }
 }
 
@@ -582,16 +442,30 @@ void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
         auto found = _states.find(instance.Id);
         if (found == _states.end()) continue;
         auto& state = *found->second;
-        const auto settings = ResolveFluidSettings(instance.Component.GetSettings(), _controls.Quality);
-        if (!settings.RenderEnabled && !settings.SimulationEnabled) { state.WasRendered = false; continue; }
-        _commonData->ResetHistory |= settings.RenderEnabled && !state.WasRendered;
-        auto parameters = state.FrameParameters;
+        const auto author = ResolveFluidSettings(instance.Component.GetSettings(), _controls.Quality);
+        if (!author.RenderEnabled && !author.SimulationEnabled) { state.WasRendered = false; continue; }
+        const bool routed = _routedOwner && instance.Id == _routedOwner;
+        const auto* display = routed && _routedDisplay ? &*_routedDisplay : nullptr;
+        const auto& settings = display ? display->Settings : author;
+        const auto& transform = display ? display->Transform : instance.ContainerToWorld;
+        const bool drawing = author.RenderEnabled && (!routed || display);
+        _commonData->ResetHistory |= drawing != state.WasRendered;
+        auto parameters = MakeFluidParameters(transform, settings);
         if (settings.MGPUReference)
-            parameters.Radius *= std::cbrt(std::abs(instance.ContainerToWorld.Determinant()));
-        parameters.ResetMotion = _commonData->ResetHistory || state.ResetThisFrame || !state.WasRendered;
-        _commonData->ResetHistory |= state.ResetThisFrame && settings.RenderEnabled;
-        state.Constants->CopyData(2 * _resources->CurrFrameConstantsIndex + 1, parameters);
-        if (settings.RenderEnabled)
+            parameters.Radius *= std::cbrt(std::abs(transform.Determinant()));
+        parameters.ResetMotion = _commonData->ResetHistory || state.ResetThisFrame || !state.WasRendered ||
+            (display && !display->HistoryValid);
+        _commonData->ResetHistory |= state.ResetThisFrame && drawing;
+        if (display)
+        {
+            parameters.SnapshotMotion = 1;
+            XMStoreFloat4x4(&parameters.PreviousContainerToWorld,
+                XMMatrixTranspose(display->HistoryValid ? display->PreviousTransform : transform));
+        }
+        const UINT surfaceSlot = 2 * _resources->CurrFrameConstantsIndex + 1;
+        state.Constants->CopyData(surfaceSlot, parameters);
+        const auto constants = state.Constants->GetElementAddress(surfaceSlot);
+        if (author.RenderEnabled)
         {
             if (!initialized)
             {
@@ -599,16 +473,29 @@ void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
                     _inputs[1]->GetTexture()->GetResource()->GetNonPixelShaderResourceBarrier(),
                     _depth->GetResource()->GetUnorderedAccessBarrier(), _motion->GetResource()->GetUnorderedAccessBarrier(),
                     _geometry->GetResource()->GetUnorderedAccessBarrier(), _owner->GetResource()->GetUnorderedAccessBarrier() });
-                SurfaceBindings(commands, state, owner);
+                SurfaceBindings(commands, constants, owner);
                 commands->SetPipelineState(_initialize);
                 commands->Dispatch((_depth->GetWidth() + 7) / 8, (_depth->GetHeight() + 7) / 8, 1);
                 commands->ResourceBarrier({ _depth->GetResource()->GetUAVBarrier(), _motion->GetResource()->GetUAVBarrier(),
                     _geometry->GetResource()->GetUAVBarrier(), _owner->GetResource()->GetUAVBarrier() });
                 initialized = true;
             }
-            DrawSurface(commands, state, owner, settings);
+            if (display)
+            {
+                DrawSurface(commands, {*display->Current.Resource, display->Current.SRV, display->Count},
+                    display->HistoryValid ? &display->Previous : nullptr, constants, owner, settings);
+                commands->ResourceBarrier({display->Current.Resource->GetCommonBarrier()});
+                if (display->HistoryValid && display->Previous.Resource != display->Current.Resource)
+                    commands->ResourceBarrier({display->Previous.Resource->GetCommonBarrier()});
+            }
+            else if (drawing)
+            {
+                auto& particles = *state.Solver.Particles[state.SolverHead.Current];
+                DrawSurface(commands, {particles.GetResource(), particles.GetSRV()->GPUHandle, state.Solver.Count},
+                    nullptr, constants, owner, settings);
+            }
         }
-        state.WasRendered = settings.RenderEnabled;
+        state.WasRendered = drawing;
         state.SettingsRevision = instance.Component.GetSettingsRevision();
     }
     if (initialized)
@@ -640,7 +527,8 @@ GDX12Texture* GDX12FluidSurfacePass::Resolve(GDX12CommandList* commands, GDX12Te
         ++owner;
         auto found = _states.find(instance.Id);
         if (found == _states.end() || !instance.Component.GetSettings().RenderEnabled) continue;
-        SurfaceBindings(commands, *found->second, owner);
+        const auto constants = found->second->Constants->GetElementAddress(2 * _resources->CurrFrameConstantsIndex + 1);
+        SurfaceBindings(commands, constants, owner);
         commands->SetComputeSRV(6, background->GetSRV()->GPUHandle);
         commands->SetComputeSRV(7, environment->GetSRV()->GPUHandle);
         commands->SetComputeSRV(9, _resources->ReflectionRadianceSRV.GPUHandle);
@@ -691,15 +579,11 @@ void GDX12FluidSurfacePass::ClearDenendencies()
     GDX12RenderPass::ClearDenendencies();
     _states.clear();
     _instances.clear();
+    _routedDisplay.reset();
+    _routedOwner = 0;
     ReleaseTargets();
-    _solverRoot.reset();
+    _solver = GDX12FluidSolver{};
     _surfaceRoot.reset();
-    _save.Reset();
-    _hash.Reset();
-    _sort.Reset();
-    _offsets.Reset();
-    _densities.Reset();
-    _integrate.Reset();
     _sphere.Reset();
     _thicknessDraw.Reset();
     _initialize.Reset();

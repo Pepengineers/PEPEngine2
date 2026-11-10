@@ -48,7 +48,16 @@ struct GDX12FluidSettings
     float MaxOpticalThicknessCm = 1000;
 };
 
-struct GDX12FluidControls { bool Enabled; int Quality; bool AsyncCompute = false; };
+struct GDX12FluidControls
+{
+    bool Enabled;
+    int Quality;
+    bool AsyncCompute = false;
+    bool MultiGPU = false;
+    bool MultiGPUExact = false;
+    float MultiGPUUpdateHz = 0;
+    float MultiGPUMaxAgeMs = 0;
+};
 GDX12FluidControls GetFluidControls();
 GDX12FluidSettings ResolveFluidSettings(const GDX12FluidSettings& author, int quality);
 void ValidateFluidSettings(const GDX12FluidSettings& settings);
@@ -77,6 +86,8 @@ struct GDX12FluidInstance
     float DeltaSeconds = 0;
     GDX12FluidComponent Component;
     Matrix ContainerToWorld = Matrix::Identity;
+    float WorldTimeScale = 1;
+    bool Paused = false;
 };
 
 void ValidateFluidInstance(const GDX12FluidInstance& instance);
