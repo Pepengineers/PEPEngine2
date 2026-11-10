@@ -135,7 +135,7 @@ namespace Engine::UI
         {
             explicit Recording(std::shared_ptr<Impl> renderer)
                 : Renderer(std::move(renderer)), Descriptors(&Renderer->Device,
-                    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 5, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) {}
+                    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 6, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) {}
 
             std::shared_ptr<Impl> Renderer;
             GDX12DescriptorHeap Descriptors;
@@ -226,6 +226,7 @@ namespace Engine::UI
             device.GetDevice()->CreateShaderResourceView(scratch.Get(), &srv, heap.GetCPUHandle(3 + index));
         }
         device.GetDevice()->CreateUnorderedAccessView(recording->Output.Get(), nullptr, nullptr, heap.GetCPUHandle(2));
+        device.GetDevice()->CreateShaderResourceView(nullptr, &srv, heap.GetCPUHandle(5));
 
         const auto id = static_cast<std::uint64_t>(frame.Id);
         const EffectConstants constants{grid.Width, grid.Height, static_cast<UINT>(id ^ (id >> 32)), profile.Stars,
@@ -240,6 +241,8 @@ namespace Engine::UI
             commands.SetComputeUAV(0, heap.GetGPUHandle(uav));
             commands.Dispatch(DivideUp(grid.Width, 8), DivideUp(grid.Height, 8), 1);
         };
+        // Replace the preceding canvas's SRV binding after switching heaps on the same list.
+        commands.SetComputeSRV(0, heap.GetGPUHandle(5));
         dispatch(state.Gradient[variant], 0);
         commands.ResourceBarrier({CD3DX12_RESOURCE_BARRIER::Transition(recording->Scratch[0].Get(),
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)});
