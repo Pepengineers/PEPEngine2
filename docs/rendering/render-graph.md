@@ -1,6 +1,8 @@
 # Render graph
 
-`GDX12RenderGraph` schedules the primary rendering pipeline. Every primary pass derives from `GDX12RenderPass` and implements `RecordRenderGraph(builder)` alongside `Execute(commands)`. `AddPass(pass)` records the class directly; there are no execution callbacks or captured pipeline-building lambdas.
+`GDX12RenderGraph` provides both the primary texture graph described below and placed dependency plans for multiple adapters. A placed pass declares its adapter and Direct/Compute/Copy queue, complete resource accesses and versions; `CompilePlan` and the persistent `PlanExecutor` issue the queue dependencies. The legacy split bridge connects those plans to the primary frame with issued prefix and tail points. Background snapshots use independent invocations of the same dependency model. See the [MGPU guide](multi-gpu.md) and [device/queue contract](../adr/0011-mgpu-logical-graph-and-device-queues.md).
+
+In the primary texture graph, each pass derives from `GDX12RenderPass` and implements `RecordRenderGraph(builder)` alongside `Execute(commands)`. `AddPass(pass)` records the class directly.
 
 `RenderModule::ConfigureRenderPipeline` creates the pass objects and connects their input links. `RebuildRenderGraph` imports the scene/swapchain, enqueues those objects (moving AO after the depth prepass when requested), and compiles. Each pass itself declares its reads, writes, transient outputs, hidden cache dependencies and conditional forwarding. Input links are the resource identity, so the renderer no longer maintains a second list of the same resource connections.
 
