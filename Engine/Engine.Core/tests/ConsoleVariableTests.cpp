@@ -210,12 +210,21 @@ int main(int argc, char**)
         { std::ofstream file(startupIni, std::ios::binary); file <<
             "\xEF\xBB\xBF; Keep this comment\r\n[ConsoleVariables]\r\n"
             "test.count = 20 ; duplicate\r\nTest.Count=28\r\nTest.Frames=4\r\nTest.Ref=6\r\n"; }
+        const auto startupOverlay = directory / "startup.ini";
+        { std::ofstream file(startupOverlay); file << "[ConsoleVariables]\nTest.Frames=3\nTest.Unknown=1\n"; }
+        bool overlayRejected = false;
+        try { console.InitializeWithOverlay(startupOverlay); }
+        catch (const ConsoleConfigError&) { overlayRejected = true; }
+        Require(overlayRejected && frames.GetUInt() == 4,
+            "An invalid startup overlay must leave all base INI values in place");
+        { std::ofstream file(startupOverlay); file << "[ConsoleVariables]\nTest.Frames=4\nTest.Count=29\n"; }
+        console.InitializeWithOverlay(startupOverlay);
         const auto originalDirectory = std::filesystem::current_path();
         std::filesystem::current_path(directory);
         StartupProbe app(constructed, frames);
         std::filesystem::current_path(originalDirectory);
-        Require(constructed && app.Initialize() && count.GetInt() == 28,
-            "Valid startup INI must work independently of the current directory");
+        Require(constructed && app.Initialize() && count.GetInt() == 29,
+            "The overlay must take precedence before startup settings are frozen");
         console.Initialize();
         Require(!frames.SetValue(5) && !frames.SetFromString("5") && frames.GetUInt() == 4,
             "ReadOnly must reject typed and text updates after startup");
@@ -247,6 +256,44 @@ int main(int argc, char**)
             "Concurrent edits of different CVars must not lose persisted values");
         Require(count.SetValue(43) && scale.SetValue(1.75f), "Cannot restore concurrent-test values");
         const auto saved = readSaved();
+        const auto patchPath = directory / "candidate.ini";
+        const auto readPatch = [&](std::string_view contents, ConsoleVariablePatch& patch)
+        {
+            { std::ofstream file(patchPath, std::ios::binary); file << contents; }
+            return ConsoleModule::ReadPatchIni(patchPath, patch);
+        };
+        ConsoleVariablePatch patch;
+        Require(!ConsoleModule::ReadPatchIni(directory / "missing.ini", patch).Error.empty(),
+            "An explicitly requested overlay must exist");
+        Require(!readPatch("[ConsoleVariables]\nTest.Count=70\ninvalid syntax\n", patch).Error.empty() &&
+            patch.empty(), "Invalid syntax must not expose a partial patch");
+        Require(readPatch("[ConsoleVariables]\nTest.Count=70\nTest.Scale=3.5\n", patch).Error.empty(),
+            "A valid overlay must parse");
+        ConsoleVariablePatch previous;
+        Require(console.ApplyPatch(patch, &previous).Error.empty() && count.GetInt() == 70 &&
+            scale.GetFloat() == 3.5f && readSaved() == saved && frames.GetConfigString() == "5",
+            "Trial patches must affect only live values, without saving");
+        Require(console.ApplyPatch(previous).Error.empty() && count.GetInt() == 43 &&
+            scale.GetFloat() == 1.75f && readSaved() == saved, "Rollback must restore the live values");
+        for (const auto& invalidPatch : std::vector<ConsoleVariablePatch>{
+            {{L"Test.Count", "70"}, {L"test.count", "80"}},
+            {{L"Test.Count", "70"}, {L"Test.Missing", "1"}},
+            {{L"Test.Count", "70"}, {L"Test.Scale", "nan"}},
+            {{L"Test.Count", "70"}, {L"Test.Frames", "5"}}})
+        {
+            Require(!console.ApplyPatch(invalidPatch).Error.empty() && count.GetInt() == 43 &&
+                readSaved() == saved, "Invalid patches must leave every live and persisted value intact");
+        }
+        const auto profile = directory / "profile.ini";
+        for (const auto* values : {&patch, &previous})
+        {
+            const auto result = console.SavePatchIni(profile, *values);
+            if (!result.Error.empty()) throw std::runtime_error("Profile save failed: " + result.Error);
+        }
+        const auto loadedProfile = ConsoleModule::ReadPatchIni(profile, patch);
+        if (!loadedProfile.Error.empty()) throw std::runtime_error("Profile load failed: " + loadedProfile.Error);
+        Require(patch == previous && std::filesystem::exists(directory / "profile.ini.bak") &&
+            readSaved() == saved, "Explicit profile save must round-trip separately and retain a backup");
         Require(saved.find("\xEF\xBB\xBF; Keep this comment\r\n") == 0 &&
             saved.find("test.count = 43 ; duplicate\r\nTest.Count=43\r\n") != std::string::npos &&
             saved.find("Test.Frames=5\r\nTest.Ref=7\r\n") != std::string::npos &&

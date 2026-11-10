@@ -123,6 +123,12 @@ public:
         return ConsoleVariableDetail::ParseValue(text, value) && SetValue(value);
     }
 
+    bool IsValidString(std::string_view text) const override
+    {
+        TValue value{};
+        return ConsoleVariableDetail::ParseValue(text, value) && IsValidValue(value);
+    }
+
     bool GetBool() const override { return static_cast<bool>(GetValue()); }
     std::string GetString() const override { return FormatValue(GetValue()); }
     bool SetConfigFromString(std::string_view text) override
@@ -140,6 +146,16 @@ public:
     uint32_t GetUInt() const override { return static_cast<uint32_t>(GetValue()); }
 
 private:
+    bool SetTransientFromString(std::string_view text) override
+    {
+        TValue value{};
+        if (!ConsoleVariableDetail::ParseValue(text, value) || !IsValidValue(value)) return false;
+        std::scoped_lock lock(ValueMutex);
+        if (!CanSetValue()) return false;
+        SetTypedValue(value);
+        return true;
+    }
+
     bool UpdateValue(TValue value, bool configEdit)
     {
         std::scoped_lock lock(ValueMutex);

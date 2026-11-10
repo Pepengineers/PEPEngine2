@@ -9,6 +9,7 @@
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "Common/Module.h"
@@ -33,6 +34,8 @@ struct ConsoleConfigResult
     int ErrorLine = 0;
     std::string Error;
 };
+
+using ConsoleVariablePatch = std::vector<std::pair<std::wstring, std::string>>;
 
 class ConsoleConfigError final : public std::runtime_error
 {
@@ -62,6 +65,7 @@ public:
     virtual int GetEnumFirstValue() const = 0;
     virtual std::string_view GetEnumValueName(int Value) const = 0;
     virtual bool SetFromString(std::string_view Value) = 0;
+    virtual bool IsValidString(std::string_view Value) const = 0;
     virtual std::string GetString() const = 0;
     // Settings edits may save ReadOnly values for the next startup.
     virtual bool SetConfigFromString(std::string_view Value) = 0;
@@ -77,6 +81,8 @@ protected:
     bool SaveConfigValue(std::string_view Value) const;
 
 private:
+    friend class ConsoleModule;
+    virtual bool SetTransientFromString(std::string_view Value) = 0;
     std::wstring Name;
     std::wstring Description;
     EConsoleVariableFlags Flags;
@@ -86,9 +92,14 @@ class ConsoleModule final : public Module
 {
 public:
     void Initialize() override;
+    void InitializeWithOverlay(const std::filesystem::path& Overlay);
 
     static std::filesystem::path GetDefaultConfigPath();
     ConsoleConfigResult LoadIni(const std::filesystem::path& Path);
+    static ConsoleConfigResult ReadPatchIni(const std::filesystem::path& Path, ConsoleVariablePatch& Out);
+    // Call between frames, with jobs quiescent. ReadOnly settings can only be patched during startup.
+    ConsoleConfigResult ApplyPatch(const ConsoleVariablePatch& Patch, ConsoleVariablePatch* Previous = nullptr) const;
+    ConsoleConfigResult SavePatchIni(const std::filesystem::path& Path, const ConsoleVariablePatch& Patch) const;
 
     void Uninitialize() override
     {
