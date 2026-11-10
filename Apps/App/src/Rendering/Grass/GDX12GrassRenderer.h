@@ -35,6 +35,25 @@ public:
         std::shared_ptr<GDX12Resource> Packed;
     };
 
+    struct ShadowPatch
+    {
+        GDX12RenderPrimitiveHandle Handle;
+        GDX12GrassInstance Instance;
+        BoundingBox Bounds;
+    };
+    struct ShadowMaterials
+    {
+        GDX12DescriptorHeap* Heap = nullptr;
+        GDX12Resource* Buffer = nullptr;
+        D3D12_GPU_DESCRIPTOR_HANDLE Table = {};
+        D3D12_GPU_DESCRIPTOR_HANDLE AlphaTable = {};
+        UINT Count = 0;
+    };
+    std::optional<std::vector<ShadowPatch>> FreezeShadowPatches(
+        const GDX12RenderPrimitiveRegistry& registry, const IRenderGeometrySource& source) const;
+    GDX12GrassRenderer(GDX12DeviceResources* resources, ShadowMaterials materials);
+    void SetShadowMaterials(ShadowMaterials materials);
+
     explicit GDX12GrassRenderer(GDX12DeviceResources* resources);
     ~GDX12GrassRenderer();
     // Wait the current frame-slot fence before reusing staging or replacing its roots.
@@ -134,10 +153,12 @@ private:
     template<typename T> std::unique_ptr<GDX12UploadBuffer<T>> Buffer(UINT count, bool srv, bool uav);
     void Initialize();
     Frame& CurrentFrame();
+    GDX12DescriptorHeap* BindingHeap() const;
     Output* FindOutput(const GDX12GeometryContext&, UINT patch) const;
     static Stage RenderStage(GDX12GeometryStage);
 
     GDX12DeviceResources* _resources;
+    std::optional<ShadowMaterials> _shadowMaterials;
     GDX12GrassWindControls _controls;
     std::vector<Frame> _frames;
     std::unordered_map<uint64_t, GrassState> _grass;

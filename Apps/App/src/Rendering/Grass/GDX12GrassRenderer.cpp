@@ -82,6 +82,24 @@ uint64_t GDX12GrassRenderer::FieldInputSignature(const std::vector<GDX12GrassIns
 }
 
 GDX12GrassRenderer::GDX12GrassRenderer(GDX12DeviceResources* resources) : _resources(resources), _frames(resources->FrameConstants.size()) {}
+GDX12GrassRenderer::GDX12GrassRenderer(GDX12DeviceResources* resources, ShadowMaterials materials)
+    : GDX12GrassRenderer(resources)
+{
+    SetShadowMaterials(materials);
+}
+
+void GDX12GrassRenderer::SetShadowMaterials(ShadowMaterials materials)
+{
+    if (!materials.Heap || !materials.Buffer || !materials.Table.ptr || !materials.AlphaTable.ptr || !materials.Count)
+        throw std::invalid_argument("Invalid native grass shadow material binding");
+    _shadowMaterials = materials;
+}
+
+GDX12DescriptorHeap* GDX12GrassRenderer::BindingHeap() const
+{
+    return _shadowMaterials ? _shadowMaterials->Heap : _resources->SRV_UAV_Heap.get();
+}
+
 GDX12GrassRenderer::~GDX12GrassRenderer()
 { if (_primitiveRegistry) RemovePrimitives(*_primitiveRegistry); }
 GDX12GrassRenderer::Frame& GDX12GrassRenderer::CurrentFrame() { return _frames.at(_resources->CurrFrameConstantsIndex); }
@@ -90,7 +108,7 @@ template<typename T>
 std::unique_ptr<GDX12UploadBuffer<T>> GDX12GrassRenderer::Buffer(UINT count, const bool srv, const bool uav)
 {
     auto buffer = std::make_unique<GDX12UploadBuffer<T>>(_resources->Device, count, EBufferType::Default, false);
-    auto* heap = _resources->SRV_UAV_Heap.get();
+    auto* heap = BindingHeap();
     if (srv) buffer->CreateSRV(heap, heap->GetAvailableIndex(ConstantsResources));
     if (uav) buffer->CreateUAV(heap, heap->GetAvailableIndex(ConstantsResources));
     return buffer;
@@ -122,6 +140,7 @@ void GDX12GrassRenderer::Initialize()
     for (UINT i = 0; i < _graphicsPSO.size(); ++i)
     {
         const auto stage = static_cast<Stage>(i);
+        if (_shadowMaterials && stage != Stage::Shadow) continue;
         const bool depth = stage == Stage::Depth || stage == Stage::Shadow;
         const bool capture = stage == Stage::Capture;
         D3D_SHADER_MACRO captureDefines[] = { { "GRASS_CAPTURE", "1" }, { nullptr, nullptr } };
@@ -179,9 +198,10 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
 {
     auto& frame = CurrentFrame();
     DisplayedFields snapshots = fields ? *fields : DisplayedFields{};
+    if (_shadowMaterials && !snapshots.Current) throw std::invalid_argument("Native grass shadow requires a captured field");
     if (snapshots.Current)
     {
-        if (snapshots.Current->GetHeap() != _resources->SRV_UAV_Heap.get())
+        if (snapshots.Current->GetHeap() != BindingHeap())
             throw std::invalid_argument("Grass snapshot must use the renderer's device-local heap");
         if (!snapshots.Previous || snapshots.Previous->GetHeap() != snapshots.Current->GetHeap() ||
             !snapshots.Current->GetLayout().IsCompatibleWith(snapshots.Previous->GetLayout()))
@@ -219,10 +239,12 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
     UINT vertexCapacity = 0, indexCapacity = 0;
     if (controls.GrassEnabled && controls.GrassQuality > 0)
     {
+        const auto materialCount = _shadowMaterials ? _shadowMaterials->Count :
+            _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->MaterialCache->GetElementCount();
         for (auto& source : grass)
         {
             if (!source.Id || !IsValidGrassSettings(source) || !ValidWorld(source.World) ||
-                source.MaterialIndex >= _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->MaterialCache->GetElementCount())
+                source.MaterialIndex >= materialCount)
                 throw std::invalid_argument("Invalid grass instance");
             static_cast<GDX12GrassSettings&>(source) = ResolveGrassSettings(source, controls.GrassQuality);
             const UINT count = GrassBladeCount(source);
@@ -457,6 +479,7 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
     frame.OutputIndex.erase({ view.Key, view.Stage, patch });
     if (view.Filter == GDX12GeometryFilter::Static || view.Stage == GDX12GeometryStage::Transparency || patch >= _drawOrder.size()) return;
     const auto stage = RenderStage(view.Stage);
+    if (_shadowMaterials && stage != Stage::Shadow) throw std::invalid_argument("Native grass shadow slot has a non-shadow view");
     const auto id = _drawOrder.at(patch);
     const auto& state = _grass.at(id);
     const auto& s = state.Source;
@@ -540,7 +563,7 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
     output->ConstantIndex = element;
     output->Fields = fieldViews;
     auto& binding = output->Binding;
-    auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+    const auto* constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex].get();
     binding.Root = _graphicsRoot.get();
     binding.Pipeline = _graphicsPSO.at(static_cast<size_t>(stage));
     binding.IndirectSignature = _signature.Get();
@@ -558,13 +581,16 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
         binding.ColorFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
     }
     binding.DepthFormat = DXGI_FORMAT_D32_FLOAT;
-    binding.Heap = _resources->SRV_UAV_Heap.get();
+    binding.Heap = BindingHeap();
     binding.CBVs.push_back({ 0, parameters->GetElementAddress(element) });
-    if (view.CameraConstants) binding.CBVs.push_back({ 1, view.CameraConstants });
-    binding.CBVs.push_back({ 2, constants->MainCB->GetElementAddress(0) });
+    if (!_shadowMaterials)
+    {
+        if (view.CameraConstants) binding.CBVs.push_back({ 1, view.CameraConstants });
+        binding.CBVs.push_back({ 2, constants->MainCB->GetElementAddress(0) });
+    }
     binding.SRVs = { { 0, _vertices->GetSRV()->GPUHandle },
-        { 1, constants->ShadowMaterials->GetSRV()->GPUHandle },
-        { 8, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex) } };
+        { 1, _shadowMaterials ? _shadowMaterials->Table : constants->ShadowMaterials->GetSRV()->GPUHandle },
+        { 8, _shadowMaterials ? _shadowMaterials->AlphaTable : BindingHeap()->GetGPUHandle(Texture2D_StartIndex) } };
     if (stage == Stage::Capture)
     {
         const auto& lighting = output->Lighting;
@@ -585,9 +611,10 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
         { &_vertices->GetResource(), GDX12RenderGraph::Mode::Read },
         { &_indices->GetResource(), GDX12RenderGraph::Mode::Read },
         { &_arguments->GetResource(), GDX12RenderGraph::Mode::Read },
-        { &constants->ShadowMaterials->GetResource(), GDX12RenderGraph::Mode::Read },
-        { &constants->ShadowLights->GetResource(), GDX12RenderGraph::Mode::Read },
+        { _shadowMaterials ? _shadowMaterials->Buffer : &constants->ShadowMaterials->GetResource(), GDX12RenderGraph::Mode::Read },
         { &parameters->GetResource(), GDX12RenderGraph::Mode::Read } };
+    if (!_shadowMaterials)
+        batch.BufferAccesses.push_back({ &constants->ShadowLights->GetResource(), GDX12RenderGraph::Mode::Read });
     frame.OutputIndex[{view.Key, view.Stage, patch}] = output.get();
     frame.Outputs.push_back(std::move(output));
 }
@@ -602,7 +629,7 @@ bool GDX12GrassRenderer::Expand(GDX12CommandList* commands, const GDX12GeometryC
     if (!output) return false;
     const auto& state = _grass.at(output->Owner);
     const auto& s = state.Source;
-    commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
+    commands->SetDescriptorHeaps({ BindingHeap() });
     commands->SetComputeRootSignature(_computeRoot.get());
     commands->SetComputeRootConstantBufferView(0, output->Constants->GetElementAddress(output->ConstantIndex));
     commands->ResourceBarrier({ _vertices->GetResource().GetUnorderedAccessBarrier(),
@@ -678,7 +705,8 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12GrassRenderer::DrawAccesses() c
     const auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
     std::vector<GDX12RenderGraph::BufferAccess> accesses = {
         { &_vertices->GetResource(), Mode::Read }, { &_indices->GetResource(), Mode::Read }, { &_arguments->GetResource(), Mode::Read },
-        { &constants->ShadowMaterials->GetResource(), Mode::Read }, { &constants->ShadowLights->GetResource(), Mode::Read } };
+        { _shadowMaterials ? _shadowMaterials->Buffer : &constants->ShadowMaterials->GetResource(), Mode::Read } };
+    if (!_shadowMaterials) accesses.push_back({ &constants->ShadowLights->GetResource(), Mode::Read });
     const auto& frame = _frames.at(_resources->CurrFrameConstantsIndex);
     const UINT blocks = (frame.DrawCursor + ParametersPerBuffer - 1) / ParametersPerBuffer;
     for (UINT block = 0; block < blocks; ++block)
@@ -725,6 +753,24 @@ void GDX12GrassRenderer::PublishPrimitives(GDX12RenderPrimitiveRegistry& registr
         if (registry.Get(state.Primitive)) registry.Update(state.Primitive, primitive);
         else state.Primitive = registry.Add(primitive);
     }
+}
+
+std::optional<std::vector<GDX12GrassRenderer::ShadowPatch>> GDX12GrassRenderer::FreezeShadowPatches(
+    const GDX12RenderPrimitiveRegistry& registry, const IRenderGeometrySource& source) const
+{
+    std::vector<ShadowPatch> patches;
+    for (const auto id : _drawOrder)
+    {
+        const auto& state = _grass.at(id);
+        if (!state.Source.CastShadows) continue;
+        const auto* primitive = registry.Get(state.Primitive);
+        if (!primitive || primitive->Source != &source || !primitive->CastsShadows ||
+            primitive->MaterialIndex != state.Source.MaterialIndex || primitive->MaterialRevision != state.Source.MaterialRevision)
+            return {};
+        if (!primitive->Visible) continue;
+        patches.push_back({state.Primitive, state.Source, primitive->Bounds});
+    }
+    return patches;
 }
 
 void GDX12GrassRenderer::RemovePrimitives(GDX12RenderPrimitiveRegistry& registry)

@@ -135,6 +135,15 @@ void BistroGrassGeometry::PrepareFrame(GDX12DeviceResources& resources, const Re
     _gpu->PublishPrimitives(resources.Primitives, this);
 }
 
+std::optional<BistroGrassGeometry::ShadowScene> BistroGrassGeometry::CaptureShadowScene(
+    const GDX12DeviceResources& resources) const
+{
+    if (!_gpu) return {};
+    auto patches = _gpu->FreezeShadowPatches(resources.Primitives, *this);
+    if (!patches) return {};
+    return ShadowScene{std::move(*patches), _wind, _controls};
+}
+
 void BistroGrassGeometry::PrepareGPU(GDX12CommandList* commands)
 { if (_gpu) _gpu->PrepareGPU(commands); }
 

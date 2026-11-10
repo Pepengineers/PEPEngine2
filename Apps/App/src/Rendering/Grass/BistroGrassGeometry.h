@@ -12,6 +12,13 @@ class BistroGrassGeometry final : public IRenderGeometrySource
 public:
     BistroGrassGeometry(std::shared_ptr<SceneManagerModule> scenes, RenderModule& renderer);
     ~BistroGrassGeometry() override;
+    struct ShadowScene
+    {
+        std::vector<GDX12GrassRenderer::ShadowPatch> Patches;
+        std::vector<GDX12WindInstance> Wind;
+        GDX12GrassWindControls Controls;
+    };
+    std::optional<ShadowScene> CaptureShadowScene(const GDX12DeviceResources& resources) const;
     void CollectScene(float deltaSeconds);
     GDX12GrassFieldInputQueue::Tick CaptureFieldInputs(uint64_t sequence, uint64_t resetRevision);
     void PrepareFrame(GDX12DeviceResources&, const RenderPipelineCommonData&,
