@@ -1579,6 +1579,8 @@ static bool RunPhysical(GDX12Device& primary)
 }
 }
 
+#include "MGPUPlanScaleChecks.h"
+
 namespace LegacyBridgeTests
 {
 using namespace GDX12Submission;
@@ -2180,6 +2182,7 @@ int main(int argc, char** argv)
         {
             PlacedTests::LocalChain(device);
             PlacedTests::ExactAndRetirement(device);
+            PlacedTests::PlanScaleChecks(device);
             PlacedTests::TextureUAV(device);
             LegacyBridgeTests::Run(device);
             LegacyBridgeTests::PrefixOnly(device);
