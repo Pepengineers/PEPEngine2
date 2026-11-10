@@ -73,3 +73,5 @@ Engine/Engine.RendererDX12/Shaders/PDBs/
 /.cache/clangd/
 /.serena/*
 !/.serena/project.yml
+
+*.tmp/
