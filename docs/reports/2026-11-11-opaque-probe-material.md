@@ -45,3 +45,7 @@ ReflectionProbeTests запускался из собственного runtime 
 ## Ограничения
 
 Screenshot-specific temporal smear визуально не воспроизведён. Поздний preview pass устранён, а GPU readbacks покрывают перекрытия и общие depth/normal/motion данные. Release и offload на двух физических адаптерах не проверялись. Сохранение World в YAML в проекте остаётся существующим stub, добавлено чтение static mesh CastsShadows и API для skeletal component. Чужой BistroAdditionsTests.cpp не редактировался.
+
+## Независимая приёмка
+
+Основной чат проверил коммит `8a86dd67`: production callers обоих pipelines, освобождение emissive alpha у существующих GBuffer writers, SSR mask, согласованность C++/HLSL instance layout и фильтрацию caster snapshots до MGPU transport. Сверены восемь runner state JSON (passed / exit 0) и reflection/lighting GPU readback logs. После освобождения ресурса исполнителем независимо повторён ObjectDataJobsTests: passed / exit 0, 9,84 с; исходный INI восстановлен. Артефакт: `Build/OpaqueProbeMaterial/reviewer-ObjectDataJobsTests.json`. `git diff d8b89d49..8a86dd67 --check` прошёл. Подтверждённых блокирующих замечаний к проверенному изменению не осталось; визуальное ограничение выше сохраняется.
