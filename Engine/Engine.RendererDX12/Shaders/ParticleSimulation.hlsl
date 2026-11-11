@@ -111,7 +111,8 @@ bool FindBoxContact(float3 previous, float3 position, out ParticleContact contac
         float3 clearance = extent - abs(origin);
         uint axis = clearance.x < clearance.y ? 0 : 1;
         if (clearance.z < clearance[axis]) axis = 2;
-        localNormal[axis] = origin[axis] < 0 ? -1 : 1;
+        // Avoid dynamic vector writes: FXC otherwise forces the enclosing simulation loops to unroll.
+        localNormal = float3(axis == 0, axis == 1, axis == 2) * (origin[axis] < 0 ? -1 : 1);
         contact.Push = clearance[axis] + 0.01f;
     }
     else
@@ -129,8 +130,7 @@ bool FindBoxContact(float3 previous, float3 position, out ParticleContact contac
             if (nearTime >= entry)
             {
                 entry = nearTime;
-                localNormal = 0;
-                localNormal[axis] = travel[axis] > 0 ? -1 : 1;
+                localNormal = float3(axis == 0, axis == 1, axis == 2) * (travel[axis] > 0 ? -1 : 1);
             }
             exit = min(exit, max(a, b));
             if (entry > exit) return false;
@@ -343,15 +343,14 @@ void Spawn(uint id : SV_DispatchThreadID)
     particle.Rotation = particle.PreviousRotation = Random(state) * 6.283185307f;
     particle.Seed = state;
     Pool[index] = particle;
-    uint slot;
-    InterlockedAdd(Counters[2], 1, slot);
-    AliveOut[slot] = index;
+    // All reserved spawn lanes survive; append their contiguous range after simulation survivors.
+    AliveOut[Counters[2] + id] = index;
 }
 
 [numthreads(1, 1, 1)]
 void PublishAlive()
 {
-    Counters[1] = Counters[2];
+    Counters[1] = Counters[2] + Counters[3];
     Counters[6] += Counters[3];
     DispatchArgs(6, Counters[1]);
 }
