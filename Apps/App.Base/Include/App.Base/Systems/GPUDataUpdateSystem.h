@@ -57,8 +57,9 @@ protected:
                     ecs.Has<CircleMovementComponent>(entity) || ecs.Has<SplineFollowComponent>(entity) ||
                     ecs.Has<LookAtTargetComponent>(entity) ||
                     (ecs.Has<RigidBodyComponent>(entity) && ecs.Get<RigidBodyComponent>(entity).MotionType != PhysicsMotionType::Static);
-                renderer.DirtyFlag |= renderer._reflectionDynamic != dynamic;
+                renderer.DirtyFlag |= renderer._reflectionDynamic != dynamic || renderer._castsShadows != renderer.CastsShadows;
                 renderer._reflectionDynamic = dynamic;
+                renderer._castsShadows = renderer.CastsShadows;
                 if (changed || renderer.DirtyFlag)
                 {
                     renderer._numFramesDirty = _numFrames;
@@ -94,6 +95,7 @@ private:
             else BoundingBox::CreateMerged(renderer.Bounds, renderer.Bounds, bounds);
             GDX12InstanceData instance = {};
             instance.ReflectionDynamic = renderer._reflectionDynamic ? 1u : 0u;
+            instance.CastsShadows = renderer.CastsShadows ? 1u : 0u;
             instance.TransformIndex = transform.CBufferIndex;
             instance.MaterialIndex = renderer.Materials.at(submesh.MaterialIndex)->_CBufferIndex;
             instance.BoundingBoxCenter = bounds.Center;

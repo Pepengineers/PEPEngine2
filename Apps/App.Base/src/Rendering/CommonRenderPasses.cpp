@@ -7,7 +7,7 @@ CommonRenderPasses::CommonRenderPasses(GDX12SwapChain* backBuffer, GDX12WBOITTra
     : Transparency(partition), FrameGeneration(backBuffer)
 {
     Bindings.PrimaryPasses = { &Environment, &Culling, &Depth, &ParticleSimulation, &SunShadow,
-        &LocalShadow, &Reflections, &Opaque, &AO, &Lighting, &ReflectionPreview, &SSR,
+        &LocalShadow, &Reflections, &Opaque, &AO, &Lighting, &SSR,
         &Transparency, &Particles, &Composition, &DepthOfField, &MotionBlur,
         &Reconstruction, &Output, &FrameGeneration };
     Bindings.Reconstruction = &Reconstruction;

@@ -41,7 +41,6 @@ void RenderModule::CollectReflectionScene()
     hash(staticHash, resources.ShadowQuality.LocalResolution);
     for (const auto& light : resources.LocalLights) hash(staticHash, light);
     resources.ReflectionProbes.clear();
-    resources.ReflectionPreviewDraws.clear();
     GDX12RenderBounds reflectionBounds, casterBounds;
     size_t staticMeshCount = 0;
     size_t reusedSubmeshes = 0;
@@ -113,9 +112,10 @@ void RenderModule::CollectReflectionScene()
                 const auto& worldMatrix = transforms[instance.TransformIndex].WorldMatrix;
                 if (_meshSnapshots.size() <= instanceIndex) _meshSnapshots.resize(size_t(instanceIndex) + 1);
                 auto& cached = _meshSnapshots[instanceIndex];
-                const bool castsShadows = material->Type != MaterialType::Transparent && !material->ReflectionProbePreview;
+                const bool castsShadows = instance.CastsShadows != 0 &&
+                    material->Type != MaterialType::Transparent && !material->ReflectionProbePreview;
                 const bool captured = !material->ReflectionProbePreview;
-                cacheGroup &= instance.ReflectionDynamic == 0 && captured &&
+                cacheGroup &= instance.ReflectionDynamic == 0 &&
                     instance.TransformIndex == transformIndex && instanceIndex == first + part;
                 const bool sameGeometry = cached.Valid && cached.Handle == renderer.MeshHandler &&
                     cached.Mesh == mesh && cached.GeometryRevision == mesh->ContentRevision && cached.SubMesh == submeshIndex;
@@ -187,14 +187,7 @@ void RenderModule::CollectReflectionScene()
                     hash(cached.Signature, handle.Generation);
                     cached.PrimitiveHandle = handle;
                 }
-                if (!renderer.Visible || !material->ReflectionProbePreview) continue;
-                GDX12IndirectDrawArgs draw = {};
-                draw.InstanceID = draw.StartInstanceLocation = instanceIndex;
-                draw.InstanceCount = 1;
-                draw.IndexCountPerInstance = submesh.IndexCount;
-                draw.StartIndexLocation = submesh.StartIndexLocation;
-                draw.BaseVertexLocation = submesh.StartVertexLocation;
-                resources.ReflectionPreviewDraws.push_back(draw);
+
             }
             if (cacheGroup && partCount)
             {

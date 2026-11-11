@@ -69,11 +69,31 @@ void CS(uint3 dispatch : SV_DispatchThreadID)
     }
     float3 position = WorldPosition(pixel, size, depth);
     float4 albedo = GAlbedo[pixel], normal = GNormal[pixel], f0 = GF0[pixel];
+    float4 emissive = GEmissive[pixel];
+    if (emissive.a > 0)
+    {
+        uint count, stride;
+        ReflectionProbes.GetDimensions(count, stride);
+        float3 radiance = 0;
+        if (emissive.a <= count)
+        {
+            uint index = (uint)emissive.a - 1;
+            ReflectionProbeData probe = ReflectionProbes[index];
+            if (probe.Intensity > 0)
+            {
+                float3 view = SafeNormalize(CBCamera.CameraLocation - position);
+                radiance = LocalReflectionRadiance.SampleLevel(samLinearClamp,
+                    float4(reflect(-view, SafeNormalize(normal.xyz)), index), probe.MinMip).rgb;
+            }
+        }
+        SceneColor[pixel] = float4(radiance, 1);
+        return;
+    }
     PBRSurface s;
     s.Albedo = albedo.rgb; s.Metallic = albedo.a;
     s.Normal = SafeNormalize(normal.xyz); s.Roughness = normal.w;
     s.F0 = f0.rgb; s.Baked = f0.a > 0.5f;
-    s.Emissive = GEmissive[pixel].rgb;
+    s.Emissive = emissive.rgb;
     float3 v = SafeNormalize(CBCamera.CameraLocation - position);
     float3 result = ShadeSunAndIBL(s, position, v, AmbientOcclusion[pixel]);
     if (s.Baked != 0)

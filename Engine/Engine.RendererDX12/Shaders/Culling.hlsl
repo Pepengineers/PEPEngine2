@@ -54,10 +54,9 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
     if (IsBoxVisible(instanceID))
     {
         Material mat = MaterialCache[InstanceCache[instanceID].MaterialIndex];
-        if (mat.ReflectionProbePreview != 0) return;
         
         //opaque and masked
-        if (mat.RenderLayer != 2)
+        if (mat.RenderLayer != 2 || mat.ReflectionProbePreview != 0)
         {
             uint writeIndex;
             InterlockedAdd(OpaqueCounterBuffer[0], 1, writeIndex);

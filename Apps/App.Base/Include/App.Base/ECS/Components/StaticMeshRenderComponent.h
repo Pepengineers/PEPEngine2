@@ -18,6 +18,8 @@ struct StaticMeshRenderComponent : ComponentTag
 
     bool DirtyFlag;
     bool Visible = true;
+    bool CastsShadows = true;
+    bool _castsShadows = true;
     bool ReflectionDynamic = false;
     bool _reflectionDynamic = false;
 

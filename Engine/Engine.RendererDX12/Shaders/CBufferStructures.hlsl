@@ -111,6 +111,7 @@ struct InstanceData
     uint SkinBatch;
     float3 BoundingBoxExtents;
     uint SkinBatchStart;
+    uint CastsShadows;
 };
 
 struct IndirectDrawArgs

@@ -21,6 +21,8 @@ public:
     double GetUpdateRateHz() const { return _rate; }
     bool IsFrozen() const { return _frozen; }
     bool IsLooping() const { return _loop; }
+    bool GetCastsShadows() const { return _castsShadows; }
+    void SetCastsShadows(bool enabled) { _castsShadows = enabled; }
     const auto& GetLocalPose() const { return _localPose; }
     const auto& GetMaterials() const { return _materials; }
 
@@ -82,6 +84,7 @@ private:
     double _rate = 0;
     bool _frozen = false;
     bool _loop = true;
+    bool _castsShadows = true;
     std::uint64_t _revision = 1;
     std::vector<DirectX::SimpleMath::Matrix> _localPose;
     std::vector<GDX12Material*> _materials;

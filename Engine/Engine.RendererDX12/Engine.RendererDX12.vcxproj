@@ -33,7 +33,6 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12CloudComponent.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ReflectionProbes.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionProbePass.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReflectionPreviewPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DepthOfField.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DepthOfFieldPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\D3DHelpers.h" />
@@ -131,7 +130,6 @@
     <ClCompile Include="src\D3DHelpers.cpp" />
     <ClCompile Include="src\GDX12ReflectionProbes.cpp" />
     <ClCompile Include="src\GDX12ReflectionProbePass.cpp" />
-    <ClCompile Include="src\GDX12ReflectionPreviewPass.cpp" />
     <ClCompile Include="src\GDX12SSRSettings.cpp" />
     <ClCompile Include="src\GDX12SSSRPass.cpp" />
     <ClCompile Include="src\GDX12MotionBlurSettings.cpp" />
@@ -171,7 +169,6 @@
     <None Include="Shaders\ReflectionProbes.hlsli" />
     <None Include="Shaders\BufferClear.hlsl" />
     <None Include="Shaders\SSSR.hlsl" />
-    <None Include="Shaders\ReflectionPreview.hlsl" />
     <None Include="Shaders\CBufferStructures.hlsl" />
     <None Include="Shaders\CompositionPass.hlsl" />
     <None Include="Shaders\MotionBlur.hlsl" />

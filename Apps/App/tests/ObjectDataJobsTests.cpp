@@ -302,7 +302,8 @@ public:
                     }
                     const auto* material = renderer.Materials.at(mesh->SubMeshes.at(renderer.GetSubMeshIndex(part)).MaterialIndex);
                     const auto& instance = instances[index];
-                    const bool casts = material->Type != MaterialType::Transparent && !material->ReflectionProbePreview;
+                    const bool casts = instance.CastsShadows != 0 && material->Type != MaterialType::Transparent &&
+                        !material->ReflectionProbePreview;
                     const BoundingBox bounds(instance.BoundingBoxCenter, instance.BoundingBoxExtents);
                     Require(published && published->TransformIndex == instance.TransformIndex &&
                         published->MaterialIndex == instance.MaterialIndex && published->Visible == renderer.Visible &&
@@ -347,6 +348,19 @@ public:
         frame([&] { editedSlot->CopyData(instanceIndex, originalInstance); });
         Require(primitive().second.Bounds.Center.x == originalInstance.BoundingBoxCenter.x &&
             _resources->ReflectionStaticRevision != revision, "Static snapshot reused an edit from another frame slot");
+        const auto shadowRevision = _resources->StaticMeshShadowRevision;
+        ecs.Get<StaticMeshRenderComponent>(wall).CastsShadows = false;
+        for (int i = 0; i < 4; ++i)
+        {
+            frame();
+            Require(!primitive().second.CastsShadows && primitive().second.Visible,
+                "Disabling object shadows hid geometry or left a stale frame slot");
+        }
+        Require(_resources->StaticMeshShadowRevision != shadowRevision,
+            "Disabling a static caster retained cached local shadow visibility");
+        ecs.Get<StaticMeshRenderComponent>(wall).CastsShadows = true;
+        frame();
+        Require(primitive().second.CastsShadows, "Re-enabling object shadows retained the disabled state");
         const auto history = render->GetRenderPipelineCommonData()->HistoryRevision;
         Timer.Start();
         for (int i = 0; i < 3; ++i)

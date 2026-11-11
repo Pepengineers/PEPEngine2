@@ -4,7 +4,6 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12CascadedShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12EnvironmentIBLPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ReflectionProbePass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionPreviewPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
@@ -49,7 +48,6 @@ struct CommonRenderPasses
     GDX12OpaquePass Opaque{ GDX12OpaquePass::Stage::GBuffer };
     GDX12AmbientOcclusionPass AO;
     GDX12DeferredLightingPass Lighting;
-    GDX12ReflectionPreviewPass ReflectionPreview;
     GDX12SSSRPass SSR;
     GDX12WBOITTransparencyPass Transparency;
     GDX12ParticlesPass Particles;

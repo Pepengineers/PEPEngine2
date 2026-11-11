@@ -89,7 +89,6 @@ public:
     std::unique_ptr<GDX12ParticleSimulation> ParticleSimulation;
     GDX12Texture* ParticleMotion = nullptr; // Borrowed for this frame only, owned by the particles pass.
     std::vector<GDX12ReflectionProbe> ReflectionProbes;
-    std::vector<GDX12IndirectDrawArgs> ReflectionPreviewDraws;
     GDX12Descriptor ReflectionRadianceSRV;
     uint64_t ReflectionWorldRevision = 0;
     uint64_t ReflectionStaticRevision = 0;

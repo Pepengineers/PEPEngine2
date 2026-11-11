@@ -454,8 +454,6 @@ void BistroRenderPipeline::LinkInputs(const RenderPipelineGraphInputs& inputs)
         p.Opaque.GetOutput(5), p.Opaque.GetOutput(2), p.SunShadow.GetOutput(0), p.Environment.GetOutput(0),
         p.Environment.GetOutput(1), p.Environment.GetOutput(2), p.Environment.GetOutput(3),
         p.LocalShadow.GetOutput(0), p.AO.GetOutput(0) });
-    p.ReflectionPreview.SetInputs({ p.Lighting.GetOutput(0), p.Opaque.GetOutput(2), p.Opaque.GetOutput(1),
-        p.Opaque.GetOutput(3), p.Opaque.GetOutput(4) });
     p.SSR.SetInputs({ p.Lighting.GetOutput(0), p.Opaque.GetOutput(2), p.Opaque.GetOutput(3),
         p.Opaque.GetOutput(4), p.Opaque.GetOutput(1), p.Environment.GetOutput(1), p.Environment.GetOutput(2) });
     auto& water = *_water;
@@ -545,7 +543,6 @@ void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipel
     p.Bindings.LegacyReplacements.push_back({ &_water->Surface,
         [this](const auto&, auto prefix) { return _water->SubmitExact(prefix); }, {}, {} });
     graph.AddPass(p.Lighting);
-    graph.AddPass(p.ReflectionPreview);
     const auto hdr = graph.AddPass(p.SSR);
     const auto farTransparency = graph.AddPass(_water->Transparency);
     graph.DependsOn(farTransparency, hdr);

@@ -84,15 +84,24 @@ struct PS_OUTPUT
 
 PS_OUTPUT PS(VS_OUTPUT_PS_INPUT pin)
 {
-    PS_OUTPUT output;
+    PS_OUTPUT output = (PS_OUTPUT)0;
     
     Material material = MaterialCache[pin.MaterialIndex];
-    float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
-    if (material.RenderLayer == 1) clip(color.a - 0.5f);
     
     float2 currentNDC = pin.PosCSNoJitter.xy / pin.PosCSNoJitter.w;
     float2 prevNDC = pin.PrevPosCSNoJitter.xy / pin.PrevPosCSNoJitter.w;
     float2 velocity = pin.PrevPosCSNoJitter.w > 0.00001f ? prevNDC - currentNDC : 0;
+    output.Velocity = velocity;
+    if (material.ReflectionProbePreview != 0)
+    {
+        output.NormalRoughness = float4(SafeNormalize(pin.Normal), 1);
+        output.F0Baked = float4(0, 0, 0, 1);
+        // All 32 valid slots are exact in FP16; saturated invalid slots remain out of range.
+        output.Emissive.a = min(material.ReflectionProbePreview, 65504u);
+        return output;
+    }
+    float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
+    if (material.RenderLayer == 1) clip(color.a - 0.5f);
 
     PBRSurface surface = SamplePBRSurface(material, color.rgb, pin.PosW, pin.Normal, pin.TexC);
     output.AlbedoMetallic = float4(surface.Albedo, surface.Metallic);
@@ -107,6 +116,7 @@ PS_OUTPUT PS(VS_OUTPUT_PS_INPUT pin)
 float4 PrepassPS(VS_OUTPUT_PS_INPUT pin) : SV_TARGET0
 {
     Material material = MaterialCache[pin.MaterialIndex];
+    if (material.ReflectionProbePreview != 0) return float4(SafeNormalize(pin.Normal), 1);
     float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC);
     if (material.RenderLayer == 1) clip(color.a - 0.5f);
     PBRSurface surface = SamplePBRSurface(material, color.rgb, pin.PosW, pin.Normal, pin.TexC);
@@ -143,6 +153,6 @@ DepthVertex DepthVS(VS_INPUT vin, uint vertexID : SV_VertexID, uint instanceID :
 void DepthPS(DepthVertex pin)
 {
     Material material = MaterialCache[pin.MaterialIndex];
-    if (material.RenderLayer == 1)
+    if (material.RenderLayer == 1 && material.ReflectionProbePreview == 0)
         clip(Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, pin.TexC).a - 0.5f);
 }

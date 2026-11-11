@@ -1,9 +1,8 @@
 #pragma once
-#include "Engine.RendererDX12/RenderPasses/GDX12ReflectionPreviewPass.h"
 
-// Exercise the forward mesh material with independent cube slices and mip colors.
-template<class Render> static void TestReflectionPreview(GDX12Device& device, GDX12DeviceResources& resources,
-    UINT width, UINT height, Render&& render)
+// Exercise the opaque mesh material with independent cube slices and mip colors.
+template<class Render, class CheckGeometry> static void TestReflectionPreview(GDX12Device& device, GDX12DeviceResources& resources,
+    UINT width, UINT height, Render&& render, CheckGeometry&& checkGeometry)
 {
     GDX12Texture cubes;
     GDX12TextureDesc desc;
@@ -46,10 +45,17 @@ template<class Render> static void TestReflectionPreview(GDX12Device& device, GD
         const auto pixels = render(slot, cubes.GetSRV()->GPUHandle, true);
         for (UINT c = 0; c < 3; ++c)
             Require(std::abs(pixels[center + c] - colors[slot - 1][c]) < 0.001f,
-                "Forward preview material must sample its own cube slice and first populated mip without lighting");
+                "Opaque preview material must sample its own cube slice and first populated mip without lighting");
+    }
+    for (UINT invalid : {33u, UINT_MAX})
+    {
+        const auto pixels = render(invalid, cubes.GetSRV()->GPUHandle, true);
+        for (UINT c = 0; c < 3; ++c)
+            Require(pixels[center + c] == 0, "Invalid cubemap slot must produce an opaque black placeholder");
     }
     const auto unpublished = render(1, cubes.GetSRV()->GPUHandle, false);
     for (UINT c = 0; c < 3; ++c)
         Require(unpublished[center + c] == 0, "Unpublished cubemap must produce an opaque black placeholder");
-    std::cout << "Forward mesh preview: exact cube/mip, unlit radiance and unpublished material passed.\n";
+    checkGeometry(cubes.GetSRV()->GPUHandle);
+    std::cout << "Opaque cubemap material: exact cube/mip, unlit radiance and unpublished material passed.\n";
 }

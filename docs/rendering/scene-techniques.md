@@ -17,6 +17,12 @@
 | Направленный, точечный и прожекторный свет с тенями | `LightComponent` | Sun и светильники Bistro |
 
 Статические меши, материалы и прозрачность — базовые `StaticMeshRenderComponent`.
+Отбрасывание теней отдельного меша управляется `StaticMeshRenderComponent::CastsShadows`
+или `SkeletalMeshRenderComponent::SetCastsShadows(bool)`, по умолчанию включено.
+Для static mesh тот же `CastsShadows` читается из YAML. Переключение обновляет
+sun/local shadows и тени внутри reflection capture, сохраняя видимость объекта
+и получение освещения. Preview-сферы Bistro используют opaque-материал собственной
+cubemap и явно выключают отбрасывание теней.
 Камера, transform, velocity, spline/circle/look-at и локальный `FlyingPropComponent`
 управляют сценой, но не являются отдельными графическими эффектами.
 AO (SSAO/HBAO/XeGTAO/CACAO), SSSR, DoF, motion blur, depth prepass,

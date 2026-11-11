@@ -115,8 +115,9 @@ struct GDX12InstanceData
     UINT SkinBatch = UINT_MAX;
     XMFLOAT3 BoundingBoxExtents;
     UINT SkinBatchStart = 0;
+    UINT CastsShadows = 1;
 };
-static_assert(sizeof(GDX12InstanceData) == 48);
+static_assert(sizeof(GDX12InstanceData) == 52);
 
 struct GDX12IndirectDrawArgs
 {

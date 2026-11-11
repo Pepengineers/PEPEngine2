@@ -22,6 +22,7 @@ void CS(uint3 id : SV_DispatchThreadID)
     IndirectDrawArgs command = InputCommands[id.x];
     if (command.InstanceCount == 0) return;
     InstanceData instance = Instances[command.InstanceID];
+    if (instance.CastsShadows == 0) return;
 #if STATIC_ONLY
     if (instance.ReflectionDynamic != 0) return;
 #else
@@ -49,6 +50,7 @@ struct VertexOutput
     float4 Position : SV_POSITION;
     float2 UV : TEXCOORD0;
     nointerpolation uint MaterialIndex : TEXCOORD1;
+    nointerpolation uint CastsShadows : TEXCOORD2;
 };
 
 VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
@@ -65,12 +67,15 @@ VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID 
     output.Position = mul(world, Lights[LightFaceIndex / 6].ShadowViewProj[LightFaceIndex % 6]);
     output.UV = uv;
     output.MaterialIndex = instance.MaterialIndex;
+    output.CastsShadows = instance.CastsShadows;
     return output;
 }
 
 void PS(VertexOutput input)
 {
+    if (input.CastsShadows == 0) clip(-1.0f);
     Material material = Materials[input.MaterialIndex];
+    if (material.ReflectionProbePreview != 0) clip(-1.0f);
     if (material.RenderLayer == 1) clip(Textures[material.DiffuseIndex].Sample(samAnisotropicWrap, input.UV).a - 0.5f);
 }
 #endif

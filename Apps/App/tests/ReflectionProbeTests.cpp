@@ -202,7 +202,7 @@ private:
     HANDLE _mutex;
 };
 
-static std::vector<float> ReadTexture(GDX12Device& device, GDX12Texture& texture, UINT subresource, bool signedValues = false)
+static std::vector<float> ReadTexture(GDX12Device& device, GDX12Texture& texture, UINT subresource, bool signedValues = false, UINT channels = 3)
 {
     const auto desc = texture.GetResource()->D3DResource->GetDesc();
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {};
@@ -226,6 +226,7 @@ static std::vector<float> ReadTexture(GDX12Device& device, GDX12Texture& texture
     D3D12_RANGE range = { 0, static_cast<SIZE_T>(bytes) };
     ThrowIfFailed(readback->Map(0, &range, &mapped));
     const bool hdr = desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
+    const bool motion = desc.Format == DXGI_FORMAT_R16G16_FLOAT;
     const bool depth = desc.Format == DXGI_FORMAT_R32_TYPELESS || desc.Format == DXGI_FORMAT_D32_FLOAT;
     std::vector<float> result;
     for (UINT y = 0; y < footprint.Footprint.Height; ++y)
@@ -233,9 +234,9 @@ static std::vector<float> ReadTexture(GDX12Device& device, GDX12Texture& texture
         {
             const auto* pixel = reinterpret_cast<const uint16_t*>(static_cast<const unsigned char*>(mapped) +
                 footprint.Offset + y * footprint.Footprint.RowPitch + x * (hdr ? 8 : 4));
-            for (UINT c = 0; c < (depth ? 1u : 3u); ++c)
+            for (UINT c = 0; c < (depth ? 1u : motion ? 2u : channels); ++c)
             {
-                const float value = depth ? *reinterpret_cast<const float*>(pixel) : hdr ? PackedVector::XMConvertHalfToFloat(pixel[c]) : reinterpret_cast<const unsigned char*>(pixel)[c] / 255.0f;
+                const float value = depth ? *reinterpret_cast<const float*>(pixel) : (hdr || motion) ? PackedVector::XMConvertHalfToFloat(pixel[c]) : reinterpret_cast<const unsigned char*>(pixel)[c] / 255.0f;
                 Require(std::isfinite(value) && (signedValues || value >= 0), "Nonfinite/negative reflected HDR");
                 result.push_back(value);
             }
@@ -402,6 +403,8 @@ int main(int argc, char** argv)
         Vector3 locations[] = { Vector3(0, 0, 100), Vector3(0, 0, 200), Vector3(100, 0, 0) };
         Vector3 scales[] = { Vector3(60), Vector3(60), Vector3(20) };
         bool dynamic[] = { false, true, false };
+        bool castsShadows[] = {true, true, true};
+        Vector3 previewMotion = Vector3::Zero;
         resources.Lighting.SunShadowFlags = 0;
         resources.Lighting.LightRadiance = {};
         resources.ReflectionSceneBounds = BoundingBox(XMFLOAT3(0, 0, 100), XMFLOAT3(200, 200, 200));
@@ -420,11 +423,15 @@ int main(int argc, char** argv)
                 GDX12TransformConstants transform;
                 const Matrix world = Matrix::CreateScale(scales[i]) * Matrix::CreateTranslation(locations[i]);
                 XMStoreFloat4x4(&transform.WorldMatrix, world.Transpose());
+                const Matrix previous = Matrix::CreateScale(scales[i]) * Matrix::CreateTranslation(
+                    locations[i] - (i == 2 ? previewMotion : Vector3::Zero));
+                XMStoreFloat4x4(&transform.PrevWorldMatrix, previous.Transpose());
                 frame->TransformCache->CopyData(i, transform);
                 frame->MaterialCache->CopyData(i, material[i]);
                 GDX12InstanceData instance = {};
                 instance.TransformIndex = instance.MaterialIndex = i;
                 instance.ReflectionDynamic = dynamic[i] ? 1u : 0u;
+                instance.CastsShadows = castsShadows[i] ? 1u : 0u;
                 BoundingBox bounds;
                 unitBounds.Transform(bounds, world);
                 instance.BoundingBoxCenter = bounds.Center;
@@ -558,6 +565,34 @@ int main(int argc, char** argv)
         render();
         Require(Center(face(4), 32).y > 3.5f, "Full dynamic mode reused stale static radiance");
         locations[0].z = 100;
+        const auto captureLocation = locations[2];
+        const auto captureScale = scales[2];
+        const auto captureMaterial = material[2];
+        for (UINT mode : {0u, 1u})
+        {
+            resources.ReflectionProbes[0].Implementation = mode;
+            locations[2] = Vector3(20000, 0, 25);
+            scales[2] = Vector3(80);
+            material[2].EmissiveColor = {12, 0, 12};
+            material[2].ReflectionProbePreview = 1;
+            ++resources.ReflectionStaticRevision;
+            render();
+            const auto withoutPreview = face(4);
+            locations[2].x = 0;
+            ++resources.ReflectionStaticRevision;
+            render();
+            Require(face(4) == withoutPreview, "Opaque cubemap material captured itself");
+            material[2].ReflectionProbePreview = 0;
+            ++resources.ReflectionStaticRevision;
+            render();
+            const auto capturedEmitter = Center(face(4), 32);
+            Require(capturedEmitter.x > 10 && capturedEmitter.z > 10,
+                "Self-capture fixture must contribute when it is an ordinary emissive material");
+        }
+        locations[2] = captureLocation;
+        scales[2] = captureScale;
+        material[2] = captureMaterial;
+        ++resources.ReflectionStaticRevision;
         resources.ReflectionProbes[0].Implementation = 2;
         render();
         Require(reflections.GetStatistics().CapturedFaces == 6 &&
@@ -723,6 +758,18 @@ int main(int argc, char** argv)
         const auto lit = Center(face(4), 32);
         std::cout << "Off-camera sun caster: shadow=" << shadowed.x << ", lit=" << lit.x << "\n";
         Require(lit.x > shadowed.x + 1, "Probe sun shadows missed an off-camera caster");
+        locations[2].x = 100;
+        castsShadows[2] = false;
+        ++resources.ReflectionStaticRevision;
+        render();
+        Require(std::abs(Center(face(4), 32).x - lit.x) < 0.05f,
+            "Object CastsShadows=false still shaded receivers inside a reflection probe");
+        castsShadows[2] = true;
+        ++resources.ReflectionStaticRevision;
+        render();
+        Require(Center(face(4), 32).x < lit.x - 1,
+            "Re-enabling object shadows did not invalidate reflection shadow data");
+        locations[2].x = 1000;
         resources.Lighting.SunShadowFlags = 0;
         resources.Lighting.LightRadiance = {};
         material[0].EmissiveColor = { 4, 0, 0 };
@@ -808,18 +855,9 @@ int main(int argc, char** argv)
             environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0), ao.GetOutput(0) };
         deferred.SetInputs(lightingInputs);
         deferred.Initialize();
-        GDX12ReflectionPreviewPass preview;
-        preview.Setup(&resources, nullptr, &common);
-        preview.SetInputs({deferred.GetOutput(0), opaque.GetOutput(2), opaque.GetOutput(1), opaque.GetOutput(3), opaque.GetOutput(4)});
-        preview.Initialize();
-        GDX12RenderGraph lightingGraph(&device);
-        lightingGraph.ImportShared(GDX12RenderGraph::SharedResource::Scene, "Scene");
-        lightingGraph.ImportShared(GDX12RenderGraph::SharedResource::Environment, "Atmosphere");
-        lightingGraph.ImportShared(GDX12RenderGraph::SharedResource::ReflectionProbes, "Probes");
-        for (auto* input : lightingInputs) lightingGraph.ImportLink("Lighting input", input);
-        lightingGraph.ImportLink("HDR readback", deferred.GetOutput(0));
-        lightingGraph.AddPass(deferred);
-        lightingGraph.Compile(false);
+        std::unique_ptr<GDX12RenderGraph> lightingGraph;
+        GDX12OpaquePass* surfaceOpaque = &opaque;
+        GDX12OpaquePass* surfacePrepass = nullptr;
         GDX12WBOITTransparencyPass transparency;
         transparency.Setup(&resources, nullptr, &common);
         transparency.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
@@ -867,6 +905,32 @@ int main(int argc, char** argv)
             create(visibility.TransparentDrawCounter, 1);
         }
         common.ActiveCameraCBufferIndex = 0;
+        const auto linkSurface = [&](GDX12OpaquePass& target, GDX12OpaquePass* depth)
+        {
+            surfaceOpaque = &target;
+            surfacePrepass = depth;
+            auto inputs = lightingInputs;
+            inputs[0] = target.GetOutput(0);
+            inputs[1] = target.GetOutput(3);
+            inputs[2] = target.GetOutput(4);
+            inputs[3] = target.GetOutput(5);
+            inputs[4] = target.GetOutput(2);
+            deferred.SetInputs(inputs);
+            auto* aoSource = depth && common.AOAfterDepthPrepass ? depth : &target;
+            ao.SetInputs({aoSource->GetOutput(2), aoSource->GetOutput(3)});
+            transparency.SetInputs({target.GetOutput(2), mainShadows.GetOutput(0), environment.GetOutput(0),
+                environment.GetOutput(1), environment.GetOutput(2), localShadows.GetOutput(0)});
+            xess.SetInputs({target.GetOutput(2), target.GetOutput(1), composition.GetOutput(0)});
+            lightingGraph = std::make_unique<GDX12RenderGraph>(&device);
+            lightingGraph->ImportShared(GDX12RenderGraph::SharedResource::Scene, "Scene");
+            lightingGraph->ImportShared(GDX12RenderGraph::SharedResource::Environment, "Atmosphere");
+            lightingGraph->ImportShared(GDX12RenderGraph::SharedResource::ReflectionProbes, "Probes");
+            for (auto* input : inputs) lightingGraph->ImportLink("Lighting input", input);
+            lightingGraph->ImportLink("HDR readback", deferred.GetOutput(0));
+            lightingGraph->AddPass(deferred);
+            lightingGraph->Compile(false);
+        };
+        linkSurface(opaque, nullptr);
         resources.ReflectionProbes[0].Intensity = 3;
         material[0].Metallic = 1;
         material[0].Roughness = 0.1f;
@@ -900,30 +964,19 @@ int main(int argc, char** argv)
             {
                 resources.ReflectionRadianceSRV.GPUHandle = testRadiance;
                 GDX12ReflectionProbeData data;
-                data.Intensity = published ? 1.0f : 0.0f;
+                data.Intensity = published ? 7.0f : 0.0f;
                 data.MinMip = data.MaxMip = 1;
                 for (UINT i = 0; i < 2; ++i) frame->ReflectionProbesUpload->CopyData(i, data);
                 frame->UploadReflectionProbeData(list);
             }
-            resources.ReflectionPreviewDraws.clear();
-            for (UINT i = 0; i < 3; ++i)
-                if (material[i].ReflectionProbePreview)
-                {
-                    GDX12IndirectDrawArgs draw = {};
-                    draw.InstanceID = draw.StartInstanceLocation = i;
-                    draw.InstanceCount = 1;
-                    draw.IndexCountPerInstance = part.IndexCount;
-                    draw.StartIndexLocation = part.StartIndexLocation;
-                    draw.BaseVertexLocation = part.StartVertexLocation;
-                    resources.ReflectionPreviewDraws.push_back(draw);
-                }
             mainShadows.Execute(list);
             mainCulling.Execute(list);
-            opaque.Execute(list);
-            ao.Execute(list);
+            if (surfacePrepass) surfacePrepass->Execute(list);
+            if (surfacePrepass && common.AOAfterDepthPrepass) ao.Execute(list);
+            surfaceOpaque->Execute(list);
+            if (!surfacePrepass || !common.AOAfterDepthPrepass) ao.Execute(list);
             deferred.Prepare();
-            lightingGraph.Execute(list);
-            preview.Execute(list);
+            lightingGraph->Execute(list);
             transparency.Execute(list);
             composition.Execute(list);
             xess.Execute(list);
@@ -1004,13 +1057,66 @@ int main(int argc, char** argv)
         material[2].RenderLayer = 0;
         scales[0] = Vector3(120);
         material[0].EmissiveColor = {6,6,6};
-        TestReflectionPreview(device, resources, deferred.GetOutput(0)->GetTexture()->GetWidth(),
-            deferred.GetOutput(0)->GetTexture()->GetHeight(), [&](UINT slot, D3D12_GPU_DESCRIPTOR_HANDLE map, bool ready)
+        const auto savedLighting = resources.Lighting;
+        const bool savedDynamic = dynamic[0];
+        resources.Lighting.LightRadiance = {100, 100, 100};
+        Set(L"Render.AO.Enabled", "1");
+        for (bool early : {true, false})
         {
-            material[2].ReflectionProbePreview = slot;
-            surface(true, map, ready);
-            return ReadTexture(device, *deferred.GetOutput(0)->GetTexture(), 0);
-        });
+            common.AOAfterDepthPrepass = early;
+            linkSurface(gbuffer, &prepass);
+            TestReflectionPreview(device, resources, deferred.GetOutput(0)->GetTexture()->GetWidth(),
+                deferred.GetOutput(0)->GetTexture()->GetHeight(), [&](UINT slot, D3D12_GPU_DESCRIPTOR_HANDLE map, bool ready)
+            {
+                material[2].ReflectionProbePreview = slot;
+                ++resources.ReflectionStaticRevision;
+                surface(true, map, ready);
+                return ReadTexture(device, *deferred.GetOutput(0)->GetTexture(), 0);
+            }, [&](D3D12_GPU_DESCRIPTOR_HANDLE map)
+            {
+                const size_t pixel = size_t(common.DownscaledHeight / 2) * common.DownscaledWidth + common.DownscaledWidth / 2;
+                material[2].ReflectionProbePreview = 1;
+                material[0].RenderLayer = 0;
+                material[0].EmissiveColor = {0, 0, 8};
+                dynamic[0] = true;
+                locations[0] = Vector3(0, 0, 100);
+                surface(true, map);
+                const auto behind = ReadTexture(device, *deferred.GetOutput(0)->GetTexture(), 0);
+                Require(behind[pixel * 3] == 4 && behind[pixel * 3 + 2] == 0,
+                    "Dynamic opaque object behind the sphere changed its cubemap color");
+                locations[0].z = -50;
+                surface(true, map);
+                Require(ReadTexture(device, *deferred.GetOutput(0)->GetTexture(), 0)[pixel * 3 + 2] > 7,
+                    "Dynamic opaque object in front of the sphere failed ordinary depth testing");
+                locations[0].x = 20000;
+                previewMotion = Vector3(4, 0, 0);
+                surface(true, map);
+                const auto depth = ReadTexture(device, *gbuffer.GetOutput(2)->GetTexture(), 0);
+                const auto normal = ReadTexture(device, *gbuffer.GetOutput(3)->GetTexture(), 0, true);
+                const auto earlyNormal = ReadTexture(device, *prepass.GetOutput(3)->GetTexture(), 0, true);
+                const auto mask = ReadTexture(device, *gbuffer.GetOutput(4)->GetTexture(), 0, false, 4);
+                const auto marker = ReadTexture(device, *gbuffer.GetOutput(5)->GetTexture(), 0, false, 4);
+                const auto motion = ReadTexture(device, *gbuffer.GetOutput(1)->GetTexture(), 0, true);
+                Require(depth[pixel] > 0 && normal[pixel * 3 + 2] < -0.99f &&
+                    (!early || earlyNormal[pixel * 3 + 2] == normal[pixel * 3 + 2]),
+                    "Opaque cubemap material did not publish ordinary depth/prepass normals");
+                Require(mask[pixel * 4 + 3] == 1 && marker[pixel * 4 + 3] == 1,
+                    "Opaque cubemap material lost its SSR exclusion or cubemap slot");
+                Require(std::abs(motion[pixel * 2]) > 0.01f && std::abs(motion[pixel * 2 + 1]) < 0.001f,
+                    "Opaque cubemap material lost object motion vectors");
+                previewMotion = Vector3::Zero;
+                surface(true, map);
+                const auto stopped = ReadTexture(device, *gbuffer.GetOutput(1)->GetTexture(), 0, true);
+                Require(stopped[pixel * 2] == 0 && stopped[pixel * 2 + 1] == 0,
+                    "Stopped opaque cubemap material retained stale motion");
+            });
+        }
+        linkSurface(opaque, nullptr);
+        Set(L"Render.AO.Enabled", "0");
+        resources.Lighting = savedLighting;
+        dynamic[0] = savedDynamic;
+        material[0].RenderLayer = 2;
+        material[0].EmissiveColor = {6, 6, 6};
         const size_t centerPixel = (size_t(common.DownscaledHeight / 2) * common.DownscaledWidth + common.DownscaledWidth / 2) * 3;
         const auto glass = [&](float z, bool sphere)
         {

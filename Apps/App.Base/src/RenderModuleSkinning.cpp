@@ -323,7 +323,8 @@ void RenderModule::PrepareSkeletalMeshes()
             primitive.FirstInstance = part.Instance;
             primitive.MaterialIndex = part.Material;
             primitive.Dynamic = true;
-            primitive.CastsShadows = part.ActiveMaterial->Type != MaterialType::Transparent && !part.ActiveMaterial->ReflectionProbePreview;
+            primitive.CastsShadows = instance.CastsShadows != 0 &&
+                part.ActiveMaterial->Type != MaterialType::Transparent && !part.ActiveMaterial->ReflectionProbePreview;
             primitive.CapturedInReflections = !part.ActiveMaterial->ReflectionProbePreview;
             primitive.GeometryRevision = 14695981039346656037ull;
             hash(primitive.GeometryRevision, state.SceneRevision);
@@ -423,6 +424,7 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
         instance.TransformIndex = transformIt->second.CBufferIndex;
         instance.MaterialIndex = part.Material;
         instance.ReflectionDynamic = 1;
+        instance.CastsShadows = component.GetCastsShadows() ? 1u : 0u;
         instance.SkinOutputVertex = part.GPU->OutputVertex;
         instance.SkinBatch = part.Batch;
         instance.SkinBatchStart = part.BatchStart;

@@ -135,6 +135,7 @@ namespace BistroReflections
                     ecs.GetEntityHandle(entity).AddComponent<StaticMeshRenderComponent>(_mesh, std::vector<GDX12Material*>{material});
                 }
                 ecs.Get<StaticMeshRenderComponent>(entity).Visible = visible;
+                ecs.Get<StaticMeshRenderComponent>(entity).CastsShadows = false;
             }
             _visible = visible;
             _resolution = resolution;

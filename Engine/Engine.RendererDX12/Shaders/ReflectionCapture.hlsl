@@ -23,6 +23,7 @@ void CullCS(uint3 id : SV_DispatchThreadID)
     IndirectDrawArgs command = InputCommands[id.x];
     if (command.InstanceCount == 0) return;
     InstanceData instance = Instances[command.InstanceID];
+    if (Shadow != 0 && instance.CastsShadows == 0) return;
     // shortcut: transparent surfaces are excluded, add transparency capture when glass must appear inside probes.
     Material material = Materials[instance.MaterialIndex];
     if (material.RenderLayer == 2 || material.ReflectionProbePreview != 0) return;
@@ -69,6 +70,7 @@ struct VertexOutput
     float3 Normal : NORMAL;
     float2 UV : TEXCOORD0;
     nointerpolation uint MaterialIndex : TEXCOORD1;
+    nointerpolation uint CastsShadows : TEXCOORD2;
 };
 VertexOutput VS(float3 position : POSITION, float3 normal : NORMAL, float2 uv : TEXCOORD, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
 {
@@ -88,11 +90,13 @@ VertexOutput VS(float3 position : POSITION, float3 normal : NORMAL, float2 uv : 
     output.Normal = TransformNormal(normal, (float3x3)world);
     output.UV = uv;
     output.MaterialIndex = instance.MaterialIndex;
+    output.CastsShadows = instance.CastsShadows;
     return output;
 }
 float4 PS(VertexOutput input) : SV_TARGET
 {
     Material material = MaterialCache[input.MaterialIndex];
+    if (material.ReflectionProbePreview != 0) clip(-1.0f);
     float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, input.UV);
     if (material.RenderLayer == 1) clip(color.a - 0.5f);
     return float4(ShadePBR(material, color.rgb, input.WorldPosition, input.Normal, input.UV), 1);
@@ -105,7 +109,9 @@ VertexOutput ShadowVS(float3 position : POSITION, float3 normal : NORMAL, float2
 }
 void ShadowPS(VertexOutput input)
 {
+    if (input.CastsShadows == 0) clip(-1.0f);
     Material material = MaterialCache[input.MaterialIndex];
+    if (material.ReflectionProbePreview != 0) clip(-1.0f);
     if (material.RenderLayer == 1)
         clip(Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, input.UV).a - 0.5f);
 }

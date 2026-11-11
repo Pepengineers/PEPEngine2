@@ -530,6 +530,20 @@ int main(int argc, char** argv)
         queue->Flush();
         CheckReadback(device, *shadows.GetOutput(0)->GetTexture(), 0, false, true);
         resources.IndirectCommandsCache->CopyData(0, draw);
+        for (UINT casts : {0u, 1u})
+        {
+            instance.CastsShadows = casts;
+            frame->InstanceCache->CopyData(0, instance);
+            ++resources.GeometryRevision;
+            commands = queue->GetCommandList();
+            resources.PrepareLocalShadowData();
+            resources.UploadLocalShadowData(commands);
+            shadows.Prepare();
+            shadows.Execute(commands);
+            queue->ExecuteCommandList(commands);
+            queue->Flush();
+            CheckReadback(device, *shadows.GetOutput(0)->GetTexture(), 0, false, true, casts != 0);
+        }
 
         GDX12LocalLightConstants point;
         point.Position = { 0, 20, 0 };
@@ -664,6 +678,20 @@ int main(int argc, char** argv)
         Require(localShadows.GetLastFrameRenderedViews() == 7, "Switching to spatial snapshots must initialize both lights");
         updateLocal();
         Require(localShadows.GetLastFrameRenderedViews() == 0, "Unchanged caster snapshots must reuse both lights");
+        const auto checkObjectShadowToggle = [&]
+        {
+            const auto caster = resources.LocalShadowCasters->front();
+            for (UINT casts : {0u, 1u})
+            {
+                instance.CastsShadows = casts;
+                frame->InstanceCache->CopyData(0, instance);
+                resources.LocalShadowCasters->clear();
+                if (casts) resources.LocalShadowCasters->push_back(caster);
+                updateLocal();
+                CheckReadback(device, *localShadows.GetOutput(0)->GetTexture(), 3, false, true, casts != 0);
+            }
+        };
+        checkObjectShadowToggle();
         const auto moveCaster = [&](float x)
         {
             GDX12TransformConstants transform;
@@ -696,6 +724,7 @@ int main(int argc, char** argv)
         updateLocal();
         Require(localShadows.GetLastFrameStaticRenderedViews() == 5 && localShadows.GetLastFrameRenderedViews() == 5,
             "Reclassifying a caster must update both depth caches of its light");
+        checkObjectShadowToggle();
         resources.LocalShadowCasters->clear();
         draw.InstanceCount = 0;
         resources.IndirectCommandsCache->CopyData(0, draw);

@@ -261,6 +261,31 @@ static void CheckBistroInstancing()
         "Batching must preserve every visible instance while reducing draw commands");
     std::cout << "Opaque draw commands: " << separateDrawCount << " separate -> " << drawCount
         << " instanced; visible instances " << expandedCount << '\n';
+    auto& noShadowActor = world.GetECS().Get<SkeletalMeshRenderComponent>(actors[0]);
+    Require(noShadowActor.GetCastsShadows(), "Skeletal objects must cast shadows by default");
+    for (bool casts : {false, true})
+    {
+        noShadowActor.SetCastsShadows(casts);
+        for (int slot = 0; slot < 3; ++slot)
+        {
+            Capture(app, *render);
+            const auto* frame = render->GetCurrentPrimaryFrameConstants();
+            const auto transform = render->GetTransformGPUData(actors[0]).CBufferIndex;
+            const auto peerTransform = render->GetTransformGPUData(actors[1]).CBufferIndex;
+            bool found = false;
+            for (UINT i = 0; i < frame->InstanceCache->GetElementCount(); ++i)
+            {
+                const auto& instance = frame->InstanceCache->GetCPUData()[i];
+                if (instance.TransformIndex == peerTransform && instance.SkinOutputVertex != UINT_MAX)
+                    Require(instance.CastsShadows != 0, "Object shadow toggle changed its shared-material peer");
+                if (instance.TransformIndex != transform || instance.SkinOutputVertex == UINT_MAX) continue;
+                found = true;
+                Require(bool(instance.CastsShadows) == casts,
+                    "Skeletal shadow toggle failed to reach the current frame slot");
+            }
+            Require(found, "Skeletal shadow toggle lost the object's render instances");
+        }
+    }
     auto previous = instanced;
     for (const size_t changedActor : {size_t{1}, size_t{3}})
     {

@@ -1805,6 +1805,7 @@ static bool ParseStaticMeshRender(
         meshHandle,
         materials
     );
+    if (node.has_child("CastsShadows")) node["CastsShadows"] >> component.CastsShadows;
 
     if (const Engine::Core::Mesh* cpuMesh = context.ResolveCpuMesh(meshId))
     {

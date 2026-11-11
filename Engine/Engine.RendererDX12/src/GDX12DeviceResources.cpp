@@ -112,7 +112,7 @@ void GDX12DeviceResources::PrepareLocalShadowData()
         if (!command.InstanceCount) continue;
         if (command.InstanceID >= instanceCount)
             throw std::out_of_range("Shadow template references a missing instance");
-        if (!instances[command.InstanceID].ReflectionDynamic) continue;
+        if (!instances[command.InstanceID].ReflectionDynamic || !instances[command.InstanceID].CastsShadows) continue;
         packed.push_back(command);
     }
     frame.DynamicShadowCommandCount = static_cast<UINT>(packed.size());

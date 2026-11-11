@@ -40,6 +40,7 @@ void CS(uint3 id : SV_DispatchThreadID)
     if (id.x >= count) return;
     IndirectDrawArgs command = InputCommands[id.x];
     InstanceData instance = InstanceCache[command.InstanceID];
+    if (instance.CastsShadows == 0) return;
     Material material = MaterialCache[instance.MaterialIndex];
     if (material.RenderLayer == 2 || material.ReflectionProbePreview != 0) return;
     for (uint cascade = 0; cascade < 4; ++cascade)
@@ -72,6 +73,7 @@ struct VertexOutput
     float4 Position : SV_POSITION;
     float2 UV : TEXCOORD0;
     nointerpolation uint MaterialIndex : TEXCOORD1;
+    nointerpolation uint CastsShadows : TEXCOORD2;
 };
 
 VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
@@ -96,15 +98,15 @@ VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID 
 #endif
     output.UV = uv;
     output.MaterialIndex = instance.MaterialIndex;
+    output.CastsShadows = instance.CastsShadows;
     return output;
 }
 
 void PS(VertexOutput input)
 {
+    if (input.CastsShadows == 0) clip(-1.0f);
     Material material = MaterialCache[input.MaterialIndex];
-#ifdef SHADOW_REPLICA_IA
     if (material.ReflectionProbePreview != 0) clip(-1.0f);
-#endif
     if (material.RenderLayer == 1)
         clip(Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, input.UV).a - 0.5f);
 }
