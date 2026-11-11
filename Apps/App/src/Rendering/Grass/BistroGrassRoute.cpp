@@ -89,11 +89,14 @@ bool BistroGrassRoute::PrepareFrame(RenderPipelineContext& context, BistroGrassG
             auto input = grass.CaptureFieldInputs(sequence, _resetRevision);
             _controller->Capture(std::move(input));
             _controller->Pump(controls, now);
+            const auto inputStatus = _controller->GetInputStatus();
+            _diagnostics.PendingSeconds = inputStatus.PendingSeconds;
+            _diagnostics.MissingSeconds = inputStatus.MissingSeconds;
             if (_controller->GetState() == State::ResetRequired)
             {
-                const auto status = _controller->GetInputStatus();
-                Log::Warning("Renderer", "Grass field epoch reset. Pending seconds ", status.PendingSeconds,
-                    ", missing seconds ", status.MissingSeconds, ", first missing sequence ", status.FirstMissing);
+                _diagnostics.ResetRequired = true;
+                Log::Warning("Renderer", "Grass field epoch reset. Pending seconds ", inputStatus.PendingSeconds,
+                    ", missing seconds ", inputStatus.MissingSeconds, ", first missing sequence ", inputStatus.FirstMissing);
                 _controller->Reset();
                 grass.RestartLocalSolver();
                 context.Common.RequestHistoryReset = true;
@@ -125,6 +128,8 @@ bool BistroGrassRoute::PrepareFrame(RenderPipelineContext& context, BistroGrassG
             _diagnostics.Exact = _display->Exact;
             _diagnostics.AgeMs = _display->AgeMs;
             _diagnostics.OverAge = _display->OverAge;
+            for (const auto& wind : _display->Fields.Current->GetLayout().Wind)
+                _diagnostics.WindDebtSeconds = (std::max)(_diagnostics.WindDebtSeconds, wind.WindDebtSeconds);
             grass.PrepareFrame(context.Primary, context.Common, &_display->Fields);
             return true;
         }

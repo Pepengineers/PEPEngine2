@@ -347,7 +347,30 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
             _localContinuation->Reset();
             _localContinuation.reset();
         }
-        if (_localContinuation && _localContinuation->Size())
+        if (controls.UpdateHz >= 0)
+        {
+            if (!_localContinuation) _localContinuation.emplace();
+            auto& pending = *_localContinuation;
+            const auto now = std::chrono::steady_clock::now();
+            pending.Push({pending.LastSeen() + 1, wind, sources, area, deltaSeconds,
+                controls.WindQuality, resetWind, _interactionResetRevision, now});
+            const bool due = resetInteraction || resetWind || _lastLocalSolve == std::chrono::steady_clock::time_point{} ||
+                controls.UpdateHz == 0 || std::chrono::duration<double>(now - _lastLocalSolve).count() >= 1.0 / controls.UpdateHz;
+            if (due && pending.Size())
+            {
+                const auto count = (std::min)(pending.Size(), GDX12GrassFieldProducer::MaxStepsPerInvocation);
+                std::vector<GDX12GrassFieldProducer::Inputs> batch;
+                for (size_t i = 0; i < count; ++i) batch.push_back(pending.At(i).Inputs());
+                batch.front().NeedNeutralWind = vertexCapacity != 0;
+                _fieldProducer->PrepareBatch(slot, batch.data(), batch.size());
+                _fieldProducer->Commit(slot);
+                _lastLocalInput = pending.At(count - 1).CapturedAt;
+                for (size_t i = 0; i < count; ++i) pending.Commit(pending.Front()->Sequence);
+                _lastLocalSolve = now;
+                frame.LocalSolver = _fieldProducer;
+            }
+        }
+        else if (_localContinuation && _localContinuation->Size())
         {
             auto& pending = *_localContinuation;
             const auto count = (std::min)(pending.Size(), GDX12GrassFieldProducer::MaxStepsPerInvocation);
@@ -370,7 +393,7 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
             _fieldProducer->Prepare(slot, current);
             _fieldProducer->Commit(slot);
         }
-        frame.LocalSolver = _fieldProducer;
+        if (controls.UpdateHz < 0) frame.LocalSolver = _fieldProducer;
         _resumeSeed = false;
         _restartLocal = false;
         for (const auto id : _drawOrder)
@@ -424,6 +447,29 @@ void GDX12GrassRenderer::RestartLocalSolver()
     _carryWindDebt = false;
     _resumeSeed = false;
     _restartLocal = true;
+    _lastLocalSolve = _lastLocalInput = {};
+}
+
+GDX12GrassRenderer::LocalSimulationStatus GDX12GrassRenderer::GetLocalSimulationStatus() const
+{
+    LocalSimulationStatus result;
+    result.Ready = _fieldProducer && !_restartLocal;
+    if (_lastLocalInput != std::chrono::steady_clock::time_point{})
+        result.AgeMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - _lastLocalInput).count();
+    if (_localContinuation)
+    {
+        result.DebtSeconds = _localContinuation->PendingSeconds();
+        result.MissingSeconds = _localContinuation->MissingSeconds();
+    }
+    if (result.Ready)
+    {
+        double windDebt = 0;
+        for (const auto& wind : _fieldProducer->CurrentSnapshot().Wind)
+            windDebt = (std::max)(windDebt, wind.WindDebtSeconds);
+        result.DebtSeconds += windDebt;
+        result.AgeMs += windDebt * 1000;
+    }
+    return result;
 }
 
 void GDX12GrassRenderer::ResumeLocalSolver(std::shared_ptr<GDX12GrassFieldProducer> solver,
@@ -514,7 +560,7 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
     p.Lod = XMFLOAT4(s.LodDistanceCm, s.FarCardDistanceCm, s.BendSeconds, 0);
     p.Patch = XMFLOAT4(s.ExtentsCm.x, s.ExtentsCm.y, 0, 0);
     const auto& layout = frame.Snapshots.Current ? frame.Snapshots.Current->GetLayout() :
-        _fieldProducer->Snapshot(_resources->CurrFrameConstantsIndex);
+        _fieldProducer->CurrentSnapshot();
     p.InteractionArea = layout.InteractionArea;
     p.Padding0 = layout.InteractionGrid;
     p.Count = GrassBladeCount(s);
@@ -556,6 +602,12 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
             p.GridResolution = field->Resolution;
             fieldViews[0] = ViewOf(*field->Current);
             fieldViews[1] = ViewOf(*field->Previous);
+        }
+        if (_controls.UpdateHz >= 0 && !frame.LocalSolver)
+        {
+            fieldViews[1] = fieldViews[0];
+            fieldViews[3] = fieldViews[2];
+            p.Patch.w = p.Patch.z;
         }
     }
     const UINT block = frame.DrawCursor / ParametersPerBuffer;
@@ -734,7 +786,7 @@ void GDX12GrassRenderer::PublishPrimitives(GDX12RenderPrimitiveRegistry& registr
     const auto& frame = CurrentFrame();
     const auto& snapshots = frame.Snapshots;
     const auto& layout = snapshots.Current ? snapshots.Current->GetLayout() :
-        _fieldProducer->Snapshot(_resources->CurrFrameConstantsIndex);
+        _fieldProducer->CurrentSnapshot();
     _primitiveRegistry = &registry;
     for (auto handle : _removedPrimitives) registry.Remove(handle);
     _removedPrimitives.clear();
@@ -814,7 +866,7 @@ GDX12ParticleInteractionField GDX12GrassRenderer::InteractionField() const
     const auto slot = _resources->CurrFrameConstantsIndex;
     const auto& snapshot = _frames.at(slot).Snapshots.Current;
     if (!_fieldProducer && !snapshot) return {};
-    const auto& layout = snapshot ? snapshot->GetLayout() : _fieldProducer->Snapshot(slot);
+    const auto& layout = snapshot ? snapshot->GetLayout() : _fieldProducer->CurrentSnapshot();
     const auto view = snapshot ? snapshot->Presence() : ViewOf(_fieldProducer->Presence());
     return { view.Resource, view.SRV, layout.InteractionArea, layout.InteractionGrid, BistroArch::GrassPosition.y };
 }

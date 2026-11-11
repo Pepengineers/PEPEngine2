@@ -26,6 +26,8 @@ public:
     std::shared_ptr<const GDX12GrassRenderer::LocalCheckpoint> PrepareLocalCheckpoint()
     { return _gpu ? _gpu->PrepareLocalCheckpoint() : nullptr; }
     void RestartLocalSolver() { if (_gpu) _gpu->RestartLocalSolver(); }
+    GDX12GrassRenderer::LocalSimulationStatus GetLocalSimulationStatus() const
+    { return _gpu ? _gpu->GetLocalSimulationStatus() : GDX12GrassRenderer::LocalSimulationStatus{}; }
     void ResumeLocalSolver(std::shared_ptr<GDX12GrassFieldProducer> solver, uint64_t resetRevision,
         GDX12GrassFieldInputQueue pending)
     { _gpu->ResumeLocalSolver(std::move(solver), resetRevision, std::move(pending)); }

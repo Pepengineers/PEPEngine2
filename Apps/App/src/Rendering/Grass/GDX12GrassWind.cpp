@@ -22,6 +22,9 @@ namespace
     static AutoConsoleVariable<float> GrassUpdateHz(L"Render.Grass.MultiGPU.UpdateHz", 0,
         L"Grass producer invocations per second [0, 240]; 0 uncapped", EConsoleVariableFlags::Default,
         [](float value) { return Range(value, 0, 240); });
+    static AutoConsoleVariable<float> LocalUpdateHz(L"Render.Grass.UpdateHz", -1,
+        L"Primary field cadence: -1 legacy, 0 uncapped ordered inputs, positive Hz retains pending inputs.",
+        EConsoleVariableFlags::Default, [](float value) { return Range(value, -1, 240); });
     static AutoConsoleVariable<float> GrassMaxAgeMs(L"Render.Grass.MultiGPU.MaxAgeMs", 0,
         L"Grass display age diagnostic [0, 60000] ms; 0 disables the threshold", EConsoleVariableFlags::Default,
         [](float value) { return Range(value, 0, 60000); });
@@ -30,7 +33,7 @@ namespace
 
 GDX12GrassWindControls GetGrassWindControls()
 {
-    return { GrassEnabled.GetValue(), GrassQuality.GetInt(), WindEnabled.GetValue(), WindQuality.GetInt(), GrassAsync.GetValue() };
+    return { GrassEnabled.GetValue(), GrassQuality.GetInt(), WindEnabled.GetValue(), WindQuality.GetInt(), GrassAsync.GetValue(), LocalUpdateHz.GetValue() };
 }
 
 GDX12GrassMGPUControls GetGrassMGPUControls()

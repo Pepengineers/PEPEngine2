@@ -346,6 +346,86 @@ namespace
         }
         Require(!search.Winner(), "Invalid measurements produced a winner");
     }
+
+    void TestMGPUPlacementAndFreshness()
+    {
+        MGPUSettings pair;
+        pair.Enabled = true;
+        pair.Primary = 11;
+        pair.Secondary = 22;
+        Search search(Profile::Performance, {{OffGroup::Never, false, 2, 2}}, 768, 480, pair);
+        std::set<Candidate> measured;
+        const auto result = Run(search, [&](const Request& request, int)
+        {
+            measured.insert(request.Settings);
+            const auto& policy = request.Settings.MGPU;
+            const bool water = policy.Water.Secondary;
+            const bool grass = policy.Grass.Secondary;
+            return Result{water && !grass ? 70.0 : 63.0, std::nullopt};
+        });
+        Require(result.TargetReached && result.Settings.MGPU.Water.Secondary &&
+            !result.Settings.MGPU.Grass.Secondary, "MGPU search missed the mixed placement at equal quality");
+        Require(measured.size() == 81, "MGPU placement identity or equal-quality exploration lost a route or cadence");
+        Require(result.Settings.MGPU.Water.UpdateHz == 0 && result.Settings.MGPU.Grass.UpdateHz == 0,
+            "MGPU selected a lower temporal quality without a performance need");
+        auto different = result.Settings;
+        ++different.MGPU.Secondary;
+        Require(!(different == result.Settings), "Candidates for different adapter pairs compare equal");
+
+        FreshnessMeasurements samples;
+        TechniqueMeasurement sample;
+        sample.Active = sample.RequestedSecondary = sample.EffectiveSecondary = sample.Ready = true;
+        sample.SourceAgeMs = 30;
+        samples.Observe(sample, 0, Profile::Performance);
+        Require(samples.Valid(), "A permitted snapshot was rejected");
+        sample.SourceAgeMs = 34;
+        samples.Observe(sample, 1, Profile::Performance);
+        Require(!samples.Valid(), "Freshness used current FPS instead of the fixed target budget");
+        samples = {};
+        sample.SourceAgeMs = 1;
+        sample.EffectiveSecondary = false;
+        samples.Observe(sample, 0, Profile::Quality);
+        Require(!samples.Valid(), "A hidden fallback was accepted as MGPU");
+        samples = {};
+        sample.EffectiveSecondary = true;
+        sample.MissingSeconds = 0.01;
+        samples.Observe(sample, 0, Profile::Quality);
+        Require(!samples.Valid(), "A lost simulation input was accepted");
+        samples = {};
+        Require(!samples.Valid(true), "A required route passed without any measurement");
+        sample.MissingSeconds = 0;
+        sample.SimulationDebtSeconds = 0.001;
+        samples.Observe(sample, 2, Profile::Quality);
+        sample.SimulationDebtSeconds = 0.005;
+        samples.Observe(sample, 4, Profile::Quality);
+        Require(!samples.Valid(), "Growing debt below the age cap was accepted or late first sample hid it");
+        Require(FreshnessBudgetMs(Profile::Quality) > 66.66 && FreshnessBudgetMs(Profile::Quality) < 66.67,
+            "Quality freshness budget used the 28 FPS acceptance threshold");
+        samples = {};
+        for (int second = 0; second < 100; ++second)
+        {
+            sample.SimulationDebtSeconds = 0.001 + second * 0.00001;
+            samples.Observe(sample, second, Profile::Quality);
+        }
+        Require(!samples.Valid(), "A slow persistent debt trend passed the gate");
+        samples = {};
+        for (int second = 0; second < 100; ++second)
+        {
+            sample.SimulationDebtSeconds = (second % 3) * 0.001;
+            samples.Observe(sample, second, Profile::Quality);
+        }
+        Require(samples.Valid(), "Bounded cadence sawtooth was mistaken for growing debt");
+
+        Search unstable(Profile::Performance, {{OffGroup::Never, false, 2, 2}}, 768, 480, pair);
+        int measurements = 0;
+        while (auto request = unstable.Next())
+        {
+            Require(++measurements < 200, "Unstable MGPU confirmation did not terminate");
+            unstable.Submit({measurements <= 81 ? 70.0 : 61.0, std::nullopt});
+        }
+        Require(!unstable.Winner() || !unstable.Winner()->TargetReached,
+            "An unstable MGPU finalist claimed target success");
+    }
 }
 
 int main()
@@ -366,6 +446,7 @@ int main()
         TestNonmonotonicTiersAndCpuShift();
         TestInvalidRecoveryTerminates();
         TestInvalidMeasurementsTerminate();
+        TestMGPUPlacementAndFreshness();
         std::cout << "Bistro quality search checks passed\n";
         return 0;
     }

@@ -69,6 +69,28 @@ static void CheckPresetRegistry()
     ConsoleVariablePatch previous;
     CheckQualityConfig(console.ApplyPatch(BistroQuality::ProfilePatch(techniques, candidate), &previous));
     CheckQualityConfig(console.ApplyPatch(previous));
+    candidate.MGPU.Enabled = true;
+    candidate.MGPU.Primary = 101;
+    candidate.MGPU.Secondary = 202;
+    candidate.MGPU.Water = {true, false, 30};
+    candidate.MGPU.Grass = {false, false, 60};
+    const auto policy = BistroQuality::ProfilePatch(techniques, candidate, BistroQualitySearch::Profile::Quality);
+    CheckQualityConfig(console.ApplyPatch(policy, &previous));
+    if (!BistroQuality::MGPUProfile.GetValue() || BistroQuality::SecondaryLuid.GetValue() != 202 ||
+        !GetFluidControls().MultiGPU || GetFluidControls().MultiGPUExact || GetFluidControls().UpdateHz != 30 ||
+        GetGrassMGPUControls().Enabled || GetGrassWindControls().UpdateHz != 60)
+        throw std::runtime_error("MGPU profile did not apply independent placement and cadence");
+    const auto saved = BistroQuality::SavedProfilePatch(policy, candidate);
+    const auto path = std::filesystem::temp_directory_path() / ("BistroMGPUProfile-" + std::to_string(GetCurrentProcessId()) + ".ini");
+    CheckQualityConfig(console.SavePatchIni(path, saved));
+    ConsoleVariablePatch restored;
+    CheckQualityConfig(ConsoleModule::ReadPatchIni(path, restored));
+    std::filesystem::remove(path);
+    auto expected = saved;
+    std::sort(expected.begin(), expected.end());
+    std::sort(restored.begin(), restored.end());
+    if (restored != expected) throw std::runtime_error("MGPU profile round-trip lost a policy field");
+    CheckQualityConfig(console.ApplyPatch(previous));
     std::cout << "Bistro registry tier patches and full candidate rollback passed\n";
 }
 

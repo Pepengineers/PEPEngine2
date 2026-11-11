@@ -28,6 +28,9 @@ namespace
     static AutoConsoleVariable<float> MultiGPUMaxAgeMs(L"Render.Fluid.MultiGPU.MaxAgeMs", 0.0f,
         L"Fluid snapshot age diagnostic threshold (0 disabled, up to 60000 ms).",
         EConsoleVariableFlags::Default, [](float v) { return std::isfinite(v) && v >= 0 && v <= 60000; });
+    static AutoConsoleVariable<float> UpdateHz(L"Render.Fluid.UpdateHz", -1.0f,
+        L"Primary fluid cadence: -1 legacy frame steps, 0 uncapped ordered time, positive Hz retains pending input time.",
+        EConsoleVariableFlags::Default, [](float v) { return std::isfinite(v) && v >= -1 && v <= 240; });
     bool Finite(const Vector3 value)
     {
         return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
@@ -42,7 +45,7 @@ GDX12FluidControls GetFluidControls()
 {
     const int quality = Quality.GetInt();
     return { Enabled.GetValue() && quality != 0, quality, AsyncCompute.GetValue(),
-        MultiGPU.GetValue(), MultiGPUExact.GetValue(), MultiGPUUpdateHz.GetValue(), MultiGPUMaxAgeMs.GetValue() };
+        MultiGPU.GetValue(), MultiGPUExact.GetValue(), MultiGPUUpdateHz.GetValue(), MultiGPUMaxAgeMs.GetValue(), UpdateHz.GetValue() };
 }
 
 GDX12FluidSettings ResolveFluidSettings(const GDX12FluidSettings& author, const int quality)

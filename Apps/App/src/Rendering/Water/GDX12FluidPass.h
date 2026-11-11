@@ -43,6 +43,8 @@ public:
     void SetRoutedDisplay(std::uint64_t owner, std::optional<GDX12FluidDisplay> display);
     void PrepareFrame();
     void ExecuteSimulation(GDX12CommandList* commands);
+    struct LocalSimulationStatus { double DebtSeconds = 0, MissingSeconds = 0; bool Active = false; };
+    LocalSimulationStatus GetLocalSimulationStatus() const;
     std::vector<GDX12RenderGraph::BufferAccess> GetSimulationBufferAccesses() const;
     std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override;
     std::vector<GDX12RenderGraph::BufferAccess> GetResolveBufferAccesses() const;

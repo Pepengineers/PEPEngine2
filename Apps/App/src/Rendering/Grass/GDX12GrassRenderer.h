@@ -69,6 +69,8 @@ public:
     // Request before recording this frame's local preparation pass.
     std::shared_ptr<const LocalCheckpoint> PrepareLocalCheckpoint();
     void RestartLocalSolver();
+    struct LocalSimulationStatus { double AgeMs = 0, DebtSeconds = 0, MissingSeconds = 0; bool Ready = false; };
+    LocalSimulationStatus GetLocalSimulationStatus() const;
     // Caller has observed the seed receipt; BeginFrame may now advance this solver.
     void ResumeLocalSolver(std::shared_ptr<GDX12GrassFieldProducer> solver, uint64_t interactionResetRevision,
         GDX12GrassFieldInputQueue pending = {});
@@ -171,6 +173,7 @@ private:
     bool _restartLocal = false;
     bool _carryWindDebt = false;
     std::optional<GDX12GrassFieldInputQueue> _localContinuation;
+    std::chrono::steady_clock::time_point _lastLocalSolve{}, _lastLocalInput{};
     uint64_t _interactionResetRevision = 0;
     std::vector<uint64_t> _drawOrder;
     std::unique_ptr<GDX12RootSignature> _computeRoot, _graphicsRoot;

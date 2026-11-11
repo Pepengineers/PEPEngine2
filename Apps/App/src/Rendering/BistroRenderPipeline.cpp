@@ -214,6 +214,33 @@ namespace
 BistroRenderPipeline::BistroRenderPipeline(std::shared_ptr<SceneManagerModule> scenes) : _scenes(std::move(scenes)) {}
 BistroRenderPipeline::~BistroRenderPipeline() = default;
 
+std::array<BistroQualitySearch::TechniqueMeasurement, 2> BistroRenderPipeline::GetQualityMeasurements() const
+{
+    std::array<BistroQualitySearch::TechniqueMeasurement, 2> result{};
+    const auto water = _water->GetMGPUWaterDiagnostics();
+    const auto grass = _grassRoute->GetDiagnostics();
+    const auto grassControls = GetGrassWindControls();
+    const auto localWater = _water->Surface.GetLocalSimulationStatus();
+    const auto localGrass = _grass->GetLocalSimulationStatus();
+    result[0] = {GetFluidControls().Enabled && (localWater.Active || water.Requested), water.Requested, water.SecondaryOwns,
+        !water.Requested || water.SourceAgeSeconds >= 0,
+        water.SecondaryOwns ? water.SourceAgeSeconds * 1000 : localWater.DebtSeconds * 1000,
+        water.SecondaryOwns ? (std::max)(0.0, water.Desired - water.Completed) : localWater.DebtSeconds,
+        water.Unrepresented + localWater.MissingSeconds + (water.ResetRequired || water.FirstMissingInput ? 1 : 0), water.SolverInvocations};
+    result[1] = {grassControls.GrassEnabled && grassControls.GrassQuality > 0 && _grass->PatchCount() > 0, GetGrassMGPUControls().Enabled,
+        grass.Version.IsValid(), grass.LocalAuthoritative || grass.Version.IsValid(), grass.AgeMs + grass.WindDebtSeconds * 1000,
+        grass.PendingSeconds + grass.WindDebtSeconds,
+        grass.MissingSeconds + (grass.ResetRequired ? 1 : 0), grass.Sequence};
+    if (!grass.Version.IsValid())
+    {
+        result[1].Ready = localGrass.Ready;
+        result[1].SourceAgeMs = localGrass.AgeMs;
+        result[1].SimulationDebtSeconds = localGrass.DebtSeconds;
+        result[1].MissingSeconds += localGrass.MissingSeconds;
+    }
+    return result;
+}
+
 bool BistroRenderPipeline::IsCollisionViewEnabled()
 {
 #ifdef _DEBUG

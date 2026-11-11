@@ -18,6 +18,8 @@ public:
         GDX12Submission::CompletionPoint Import, Acquire, Tail;
         std::uint64_t Sequence = 0;
         double AgeMs = 0;
+        double PendingSeconds = 0, MissingSeconds = 0, WindDebtSeconds = 0;
+        bool ResetRequired = false;
         bool Exact = false, OverAge = false, LocalAuthoritative = false;
     };
     const Diagnostics& GetDiagnostics() const { return _diagnostics; }

@@ -4,6 +4,9 @@
 #include <cmath>
 #include <set>
 #include <stdexcept>
+#include <chrono>
+#include <deque>
+#include <cassert>
 
 struct GDX12FluidSurfacePass::State
 {
@@ -16,6 +19,10 @@ struct GDX12FluidSurfacePass::State
     UINT SeedFrameSlot = UINT_MAX;
     bool WasRendered = false;
     bool ResetThisFrame = false;
+    struct InputSpan { GDX12FluidProducerInput Input; double Remaining; };
+    std::deque<InputSpan> Pending;
+    double DesiredTime = 0, IssuedTime = 0, MissingTime = 0;
+    std::chrono::steady_clock::time_point LastSolve{};
 };
 
 GDX12FluidSurfacePass::GDX12FluidSurfacePass()
@@ -204,7 +211,7 @@ void GDX12FluidSurfacePass::PrepareStates()
         if (!routed)
             replacement->Solver = GDX12FluidSolver::CreateBuffers(_resources->Device, _resources->SRV_UAV_Heap.get(), instance);
         replacement->Constants = std::make_unique<GDX12UploadBuffer<GDX12FluidParameters>>(_resources->Device,
-            2 * static_cast<UINT>(_resources->FrameConstants.size()));
+            3 * static_cast<UINT>(_resources->FrameConstants.size()));
         state = std::move(replacement);
     }
 }
@@ -418,13 +425,73 @@ void GDX12FluidSurfacePass::ExecuteSimulation(GDX12CommandList* commands)
         const auto parameters = MakeFluidParameters(instance.ContainerToWorld, settings);
         const bool seedPending = state.SolverHead.SeedPending;
         state.ResetThisFrame = seedPending;
-        const UINT constants = 2 * _resources->CurrFrameConstantsIndex;
+        const UINT constants = 3 * _resources->CurrFrameConstantsIndex;
+        if (_controls.UpdateHz >= 0)
+        {
+            const GDX12FluidProducerInput input(instance, _controls.Quality);
+            const double elapsed = input.Elapsed();
+            state.DesiredTime += elapsed;
+            if (elapsed > 0)
+            {
+                if (state.MissingTime > 0) state.MissingTime += elapsed;
+                else if (!state.Pending.empty() && state.Pending.back().Input == input)
+                    state.Pending.back().Remaining += elapsed;
+                else if (state.Pending.size() < 16) state.Pending.push_back({input, elapsed});
+                else state.MissingTime += elapsed;
+            }
+            const auto now = std::chrono::steady_clock::now();
+            if (!seedPending && _controls.UpdateHz > 0 &&
+                std::chrono::duration<double>(now - state.LastSolve).count() < 1.0 / _controls.UpdateHz) continue;
+            UINT recorded = 0;
+            while (!state.Pending.empty() && recorded < 2)
+            {
+                auto& pending = state.Pending.front();
+                const auto quantum = pending.Input.LogicalTick();
+                if (pending.Remaining < quantum && state.Pending.size() == 1 && !state.MissingTime) break;
+                const auto seconds = (std::min)(pending.Remaining, quantum);
+                const auto& captured = pending.Input;
+                state.Constants->CopyData(constants + recorded,
+                    MakeFluidParameters(captured.Instance().ContainerToWorld, captured.Settings()));
+                const auto steps = GDX12FluidSolver::PlanSteps(captured.Settings(), static_cast<float>(seconds));
+                state.SolverHead = _solver.Record(*commands, state.Solver, state.SolverHead, captured.Settings(), steps,
+                    state.Constants->GetElementAddress(constants + recorded), GDX12FluidSolver::Boundary::LegacyTracked);
+                ++recorded;
+                state.IssuedTime += seconds;
+                pending.Remaining -= seconds;
+                if (pending.Remaining <= 0) state.Pending.pop_front();
+            }
+            if (seedPending && !recorded)
+            {
+                state.Constants->CopyData(constants, parameters);
+                state.SolverHead = _solver.Record(*commands, state.Solver, state.SolverHead, settings, {},
+                    state.Constants->GetElementAddress(constants), GDX12FluidSolver::Boundary::LegacyTracked);
+            }
+            if (recorded || seedPending) state.LastSolve = now;
+            if (seedPending) state.SeedFrameSlot = _resources->CurrFrameConstantsIndex;
+            double retained = state.MissingTime;
+            for (const auto& span : state.Pending) retained += span.Remaining;
+            assert(std::abs(state.DesiredTime - state.IssuedTime - retained) < 1e-7 * (1 + state.DesiredTime));
+            continue;
+        }
         state.Constants->CopyData(constants, parameters);
         const auto steps = GDX12FluidSolver::PlanSteps(settings, instance.DeltaSeconds * settings.TimeScale);
         state.SolverHead = _solver.Record(*commands, state.Solver, state.SolverHead, settings, steps,
             state.Constants->GetElementAddress(constants), GDX12FluidSolver::Boundary::LegacyTracked);
         if (seedPending) state.SeedFrameSlot = _resources->CurrFrameConstantsIndex;
     }
+}
+
+GDX12FluidSurfacePass::LocalSimulationStatus GDX12FluidSurfacePass::GetLocalSimulationStatus() const
+{
+    LocalSimulationStatus result;
+    for (const auto& [id, state] : _states)
+    {
+        if (!state->Solver.Count || (_routedOwner && id == _routedOwner)) continue;
+        result.Active = true;
+        result.DebtSeconds = (std::max)(result.DebtSeconds, (std::max)(0.0, state->DesiredTime - state->IssuedTime));
+        result.MissingSeconds += state->MissingTime;
+    }
+    return result;
 }
 
 void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
@@ -462,7 +529,7 @@ void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
             XMStoreFloat4x4(&parameters.PreviousContainerToWorld,
                 XMMatrixTranspose(display->HistoryValid ? display->PreviousTransform : transform));
         }
-        const UINT surfaceSlot = 2 * _resources->CurrFrameConstantsIndex + 1;
+        const UINT surfaceSlot = 3 * _resources->CurrFrameConstantsIndex + 2;
         state.Constants->CopyData(surfaceSlot, parameters);
         const auto constants = state.Constants->GetElementAddress(surfaceSlot);
         if (author.RenderEnabled)
