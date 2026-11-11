@@ -26,6 +26,7 @@
     <ClInclude Include="Include\App.Base\ECS\Components\CircleMovementComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\LookAtTargetComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\NameComponent.h" />
+    <ClInclude Include="Include\App.Base\ECS\Components\ParentComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\SplineCurveComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\SplineFollowComponent.h" />
     <ClInclude Include="Include\App.Base\ECS\Components\StaticMeshRenderComponent.h" />

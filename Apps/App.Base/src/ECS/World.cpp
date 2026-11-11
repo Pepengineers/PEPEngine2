@@ -35,6 +35,55 @@ void World::SetName(std::string name) {
 
 const std::filesystem::path& World::GetPath() const { return _desc.WorldFilePath; }
 
+Entity World::GetParent(Entity child) const
+{
+    if (!_ecs.Has<ParentComponent>(child))
+    {
+        return InvalidEntity;
+    }
+    
+    const Entity parent = _ecs.Get<ParentComponent>(child).Parent;
+    return _ecs.IsAlive(parent) ? parent : InvalidEntity;
+}
+
+bool World::CanSetParent(Entity child, Entity parent) const
+{
+    if (!_ecs.IsAlive(child) || (parent != InvalidEntity && !_ecs.IsAlive(parent)) || GetParent(child) == parent)
+    {
+        return false;
+    }
+    
+    //to remove cycling
+    for (Entity ancestor = parent; ancestor != InvalidEntity; ancestor = GetParent(ancestor))
+    {
+        if (ancestor == child)
+        {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+bool World::SetParent(Entity child, Entity parent)
+{
+    if (!CanSetParent(child, parent))
+    {
+        return false;
+    }
+    
+    if (parent == InvalidEntity)
+    {
+        _ecs.Remove<ParentComponent>(child);
+    }
+    else
+    {
+        _ecs.Add<ParentComponent>(child, parent);
+    }
+    
+    return true;
+}
+
 WorldECS& World::GetECS()
 {
     return _ecs;

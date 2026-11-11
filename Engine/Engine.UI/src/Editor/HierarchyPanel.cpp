@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "imgui_internal.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Engine.Core/BenchmarkEngine.h"
@@ -56,50 +57,186 @@ namespace Engine::UI
             _selectedEntity = InvalidEntity;
             ImGui::TextDisabled("No world loaded");
         }
+        
+        const bool cutShortcut = ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_X);
+        const bool pasteShortcut = ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_V);
+        
+        World* pasteWorld = nullptr;
+        Entity pasteParent = InvalidEntity;
+        bool cutSourceAlive = false;
 
         for (size_t i = 0; sceneManager && i < sceneManager->GetWorldCount(); ++i)
         {
             World* world = sceneManager->GetWorld(i);
             auto& ecs = world->GetECS();
-            if (_selectedWorld == world && !ecs.IsAlive(_selectedEntity))
+            
+            if (_selectedWorld == world && _selectedEntity != InvalidEntity && !ecs.IsAlive(_selectedEntity))
             {
+                _selectedWorld = nullptr;
                 _selectedEntity = InvalidEntity;
             }
 
-            ImGui::PushID(static_cast<int>(i));
-            const std::string worldName = world->GetPath().stem().string();
-            if (ImGui::TreeNodeEx("World", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth,
-                                  "%s", worldName.c_str()))
+            const auto markCut = [&](Entity entity)
             {
-                if (ecs.GetEntityCount() == 0)
+                _cutWorld = world;
+                _cutEntity = entity;
+            };
+            
+            const auto canPaste = [&](Entity parent)
+            {
+                return _cutWorld == world && world->CanSetParent(_cutEntity, parent);
+            };
+            
+            const auto queuePaste = [&](Entity parent)
+            {
+                pasteWorld = world;
+                pasteParent = parent;
+            };
+            
+            const auto handleRow = [&](Entity entity)
+            {
+                if (ImGui::IsItemClicked() || ImGui::IsItemClicked(ImGuiMouseButton_Right))
+                {
+                    _selectedWorld = world;
+                    _selectedEntity = entity;
+                }
+                    
+                if (ImGui::BeginPopupContextItem())
+                {
+                    if (entity != InvalidEntity && ImGui::MenuItem("Cut", "Ctrl+X"))
+                    {
+                        markCut(entity);
+                    }
+                    
+                    const char* label = entity == InvalidEntity ? "Paste at Root" : "Paste as Child";
+                    
+                    if (ImGui::MenuItem(label, "Ctrl+V", false, canPaste(entity)))
+                    {
+                        queuePaste(entity);
+                    }
+                    
+                    ImGui::EndPopup();
+                }
+            };
+            
+            std::unordered_map<Entity, std::vector<Entity>> children;
+            ecs.ForEachEntity([&](Entity entity)
+            {
+                children[world->GetParent(entity)].push_back(entity);
+            });
+            
+            ImGui::PushID(static_cast<int>(i));
+            
+            const auto drawEntity = [&](const auto& self, Entity entity) -> void
+            {
+                const auto childList = children.find(entity);
+                const bool hasChildren = childList != children.end();
+                
+                const std::string name = ecs.Has<NameComponent>(entity) ? ecs.Get<NameComponent>(entity).value : "Entity " + std::to_string(entity);
+                
+                ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth;
+                if (hasChildren)
+                {
+                    flags |= ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_DefaultOpen;
+                }
+                else
+                {
+                    flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                }
+                
+                if (_selectedWorld == world && _selectedEntity == entity)
+                {
+                    flags |= ImGuiTreeNodeFlags_Selected;
+                }
+                
+                ImGui::PushID(static_cast<int>(entity));
+                    
+                const bool isCut = _cutWorld == world && _cutEntity == entity;
+                if (isCut)
+                {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+                }
+                
+                const bool open = ImGui::TreeNodeEx("Entity", flags, "%s", name.c_str());
+                
+                if (isCut)
+                {
+                    ImGui::PopStyleColor();
+                }
+                
+                handleRow(entity);
+                
+                if (open && hasChildren)
+                {
+                    for (Entity child : childList->second)
+                    {
+                        self(self, child);
+                    }
+                    
+                    ImGui::TreePop();
+                }
+                    
+                ImGui::PopID();
+            };
+            
+            ImGuiTreeNodeFlags worldFlags = ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth;
+            if (_selectedWorld == world && _selectedEntity == InvalidEntity)
+            {
+                worldFlags |= ImGuiTreeNodeFlags_Selected;
+            }
+            
+            const std::string worldName = world->GetPath().stem().string();
+            const bool worldOpen = ImGui::TreeNodeEx("World", worldFlags, "%s", worldName.c_str());
+            
+            handleRow(InvalidEntity);
+            
+            if (worldOpen)
+            {
+                const auto roots = children.find(InvalidEntity);
+                if (roots == children.end())
                 {
                     ImGui::TextDisabled("World is empty");
                 }
-
-                ecs.ForEachEntity([&](Entity entity)
+                else
                 {
-                    const std::string name = ecs.Has<NameComponent>(entity)
-                                                 ? ecs.Get<NameComponent>(entity).value
-                                                 : "Entity " + std::to_string(entity);
-                    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf
-                        | ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth;
-                    if (_selectedWorld == world && _selectedEntity == entity)
+                    for (Entity entity : roots->second)
                     {
-                        flags |= ImGuiTreeNodeFlags_Selected;
+                        drawEntity(drawEntity, entity);
                     }
-
-                    ImGui::PushID(static_cast<int>(entity));
-                    ImGui::TreeNodeEx("Entity", flags, "%s", name.c_str());
-                    if (ImGui::IsItemClicked())
-                    {
-                        _selectedWorld = world;
-                        _selectedEntity = entity;
-                    }
-                    ImGui::PopID();
-                });
+                }
+                
                 ImGui::TreePop();
             }
+            
             ImGui::PopID();
+            
+            if (_selectedWorld == world)
+            {
+                if (cutShortcut && ecs.IsAlive(_selectedEntity))
+                {
+                    markCut(_selectedEntity);
+                }
+                
+                if (pasteShortcut && canPaste(_selectedEntity))
+                {
+                    queuePaste(_selectedEntity);
+                }
+            }
+            
+            cutSourceAlive |= _cutWorld == world && ecs.IsAlive(_cutEntity);
+        }
+        
+        if (pasteWorld && pasteWorld == _cutWorld && pasteWorld->SetParent(_cutEntity, pasteParent))
+        {
+            _selectedWorld = pasteWorld;
+            _selectedEntity = _cutEntity;
+            cutSourceAlive = false;
+        }
+        
+        if (!cutSourceAlive)
+        {
+            _cutWorld = nullptr;
+            _cutEntity = InvalidEntity;
         }
 
         ImGui::End();
@@ -163,14 +300,14 @@ namespace Engine::UI
                 {
                     transform.DirtyFlag = true;
                 });
-                
+
                 worldEcs.ForEach<CameraComponent>([](Entity, CameraComponent& camera)
                 {
                     camera.DirtyFlag = true;
                 });
             }
         }
-        
+
         _selectedWorld = world;
         _selectedEntity = entity.GetId();
     }

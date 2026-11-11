@@ -2,6 +2,7 @@
 
 #include "Engine.Core/ECS/Entity.h"
 
+struct SplineCurveComponent;
 class World;
 class SceneManagerModule;
 
@@ -19,5 +20,8 @@ namespace Engine::UI
         
         Entity _selectedEntity = InvalidEntity;
         World* _selectedWorld = nullptr;
+        
+        World* _cutWorld = nullptr;
+        Entity _cutEntity = InvalidEntity;
     };
 }

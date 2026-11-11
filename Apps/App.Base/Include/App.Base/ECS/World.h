@@ -13,6 +13,7 @@
 #include "App.Base/ECS/Components/StaticMeshRenderComponent.h"
 #include "App.Base/ECS/Components/TransformComponent.h"
 #include "App.Base/ECS/Components/VelocityComponent.h"
+#include "Components/ParentComponent.h"
 
 struct WorldDesc {
     std::filesystem::path WorldFilePath;
@@ -29,7 +30,8 @@ using WorldECS = ECSStorage<
     CircleMovementComponent,
     SplineCurveComponent,
     SplineFollowComponent,
-    LookAtTargetComponent
+    LookAtTargetComponent,
+    ParentComponent
 >;
 
 class World {
@@ -57,6 +59,11 @@ public:
     void SetName(std::string name);
 
     const std::filesystem::path& GetPath() const;
+    
+    
+    Entity GetParent(Entity child) const;
+    bool CanSetParent(Entity child, Entity parent) const;
+    bool SetParent(Entity child, Entity parent);
 
     Entity ActiveCamera = InvalidEntity;
 
