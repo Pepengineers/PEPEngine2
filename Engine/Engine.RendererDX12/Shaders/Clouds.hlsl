@@ -29,9 +29,12 @@ void CloudsCS(uint3 id : SV_DispatchThreadID)
         Output[id] = float4(sky, 0);
         return;
     }
+    if (Coverage == 0 || Coverage == 1)
+    {
+        Output[id] = float4(lerp(sky, CloudColor, Coverage), 1);
+        return;
+    }
     float density = CloudDirectionDensity(direction, Scale, float2(PhaseX, PhaseY), Octaves, Implementation, Seed);
     float opacity = smoothstep(1.0f - Coverage - Softness, 1.0f - Coverage + Softness, density);
-    if (Coverage == 0) opacity = 0;
-    if (Coverage == 1) opacity = 1;
     Output[id] = float4(lerp(sky, CloudColor, opacity), 1);
 }

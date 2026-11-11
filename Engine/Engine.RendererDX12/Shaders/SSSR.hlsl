@@ -33,20 +33,22 @@ void Prepare(uint3 id : SV_DispatchThreadID)
     if (any(id.xy >= uint2(width, height))) return;
     float4 normal = NormalRoughness[id.xy];
     float roughness = normal.w;
-    float2 ndc = (float2(id.xy) + 0.5f) / float2(width, height) * float2(2, -2) + float2(-1, 1);
-    float4 world = mul(float4(ndc, Depth[id.xy], 1), CBCamera.InvViewProj);
-    float3 position = world.xyz / world.w;
-    float3 view = normalize(CBCamera.CameraLocation - position);
-    float3 direction = reflect(-view, normalize(normal.xyz));
+    float depth = Depth[id.xy];
+    bool reflective = depth > 0 && F0Baked[id.xy].a < 0.5f;
     float3 fallback = 0;
-    if (Depth[id.xy] > 0 && F0Baked[id.xy].a < 0.5f)
+    if (reflective)
     {
+        float2 ndc = (float2(id.xy) + 0.5f) / float2(width, height) * float2(2, -2) + float2(-1, 1);
+        float4 world = mul(float4(ndc, depth, 1), CBCamera.InvViewProj);
+        float3 position = world.xyz / world.w;
+        float3 view = normalize(CBCamera.CameraLocation - position);
+        float3 direction = reflect(-view, normalize(normal.xyz));
         fallback = Environment.SampleLevel(LinearClamp, direction, roughness * 7).rgb;
         fallback = SampleReflectionRadiance(position, direction, roughness, fallback);
     }
     FallbackOut[id.xy] = float4(fallback, 1);
     // Supply alpha roughness explicitly: SDK 1.1.4 forwards this flag to the denoiser too.
-    RoughnessOut[id.xy] = Depth[id.xy] > 0 && F0Baked[id.xy].a < 0.5f ? roughness * roughness : 1;
+    RoughnessOut[id.xy] = reflective ? roughness * roughness : 1;
     // SDK samples history at uv + motion; raster jitter is excluded from the shared motion buffer.
     MotionOut[id.xy] = Motion[id.xy] * float2(0.5f, -0.5f) + JitterDeltaUV;
 }

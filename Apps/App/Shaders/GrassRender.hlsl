@@ -64,10 +64,10 @@ void AlphaTest(float2 uv)
 void DepthPS(DepthOutput input) { AlphaTest(input.UV); }
 PBRSurface Surface(VertexOutput input, bool front)
 {
-    AlphaTest(input.UV);
     Material material = MaterialCache[MaterialIndex];
-    float3 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, input.UV).rgb;
-    return SamplePBRSurface(material, color, input.WorldPosition, front ? input.Normal : -input.Normal, input.UV);
+    float4 color = Texture2DCache[material.DiffuseIndex].Sample(samAnisotropicWrap, input.UV);
+    if (material.RenderLayer == 1) clip(color.a - 0.5f);
+    return SamplePBRSurface(material, color.rgb, input.WorldPosition, front ? input.Normal : -input.Normal, input.UV);
 }
 float4 PrepassPS(VertexOutput input, bool front : SV_IsFrontFace) : SV_TARGET0
 {

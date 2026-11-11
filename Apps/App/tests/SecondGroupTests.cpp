@@ -75,7 +75,7 @@ static std::vector<float> Read(GDX12Device& device, GDX12Texture& texture, UINT 
     ThrowIfFailed(readback->Map(0, &range, &mapped));
     const bool hdr = desc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT;
     const bool rgba32 = desc.Format == DXGI_FORMAT_R32G32B32A32_FLOAT;
-    const UINT channels = hdr ? 3 : 1;
+    const UINT channels = hdr && channel != 3 ? 3 : 1;
     std::vector<float> result;
     for (UINT y = 0; y < footprint.Footprint.Height; ++y)
         for (UINT x = 0; x < footprint.Footprint.Width; ++x)
@@ -84,7 +84,7 @@ static std::vector<float> Read(GDX12Device& device, GDX12Texture& texture, UINT 
                 y * footprint.Footprint.RowPitch + x * (hdr ? 8 : rgba32 ? 16 : 4);
             for (UINT c = 0; c < channels; ++c)
             {
-                const float value = hdr ? PackedVector::XMConvertHalfToFloat(reinterpret_cast<const uint16_t*>(pixel)[c]) : reinterpret_cast<const float*>(pixel)[channel];
+                const float value = hdr ? PackedVector::XMConvertHalfToFloat(reinterpret_cast<const uint16_t*>(pixel)[channel == 3 ? 3 : c]) : reinterpret_cast<const float*>(pixel)[channel];
                 Require(std::isfinite(value), "Nonfinite GPU output");
                 result.push_back(value);
             }
@@ -370,6 +370,23 @@ int main(int argc, char** argv)
                 "Continuous clouds must animate IBL without a temporal discontinuity");
             auto parameters = clouds.GetParameters(); parameters.Implementation = 1; clouds.SetParameters(parameters); execute(environment);
             Require(resources.ReflectionEnvironmentRevision > revision, "Cloud implementation change did not invalidate history");
+            parameters.HorizonColor = parameters.ZenithColor = Vector3(0.25f, 0.5f, 1);
+            parameters.CloudColor = Vector3(2, 4, 8);
+            for (bool enabled : {false, true})
+                for (float coverage : {0.0f, 1.0f})
+                {
+                    parameters.Enabled = enabled; parameters.Coverage = coverage;
+                    clouds.SetParameters(parameters); execute(clouds);
+                    auto& texture = *clouds.GetOutput(0)->GetTexture();
+                    const auto rgb = Read(device, texture);
+                    const auto alpha = Read(device, texture, 3);
+                    const Vector3 expected = enabled && coverage == 1 ? parameters.CloudColor : parameters.HorizonColor;
+                    for (size_t i = 0; i < rgb.size(); i += 3)
+                        Require(rgb[i] == expected.x && rgb[i + 1] == expected.y && rgb[i + 2] == expected.z,
+                            "Cloud coverage endpoint changed source color");
+                    Require(std::all_of(alpha.begin(), alpha.end(), [enabled](float value) { return value == (enabled ? 1 : 0); }),
+                        "Cloud coverage endpoint changed the enabled mask");
+                }
             environment.SetCloudSource(nullptr); resources.Sky.Source = SkySource::SkyBox; resources.Sky.Quality = 1;
             resources.Sky.Box.IBL.CubeResolution = 32; resources.Sky.Box.IBL.FilterSamples = 16; ++resources.Sky.Revision; execute(environment);
             std::cout << "GPU atmosphere, cloud fBM/ridged, animated IBL, source switching and Off passed.\n";
@@ -725,7 +742,7 @@ int main(int argc, char** argv)
         emitter.LifetimeMin = emitter.LifetimeMax = 0.15f; emitter.DeltaTime = 0.1f;
         emitter.SizeStart = emitter.SizeEnd = 10; emitter.SizeVariation = 0; emitter.SoftDistance = 0;
         emitter.ColorStart = emitter.ColorEnd = Vector4(0, 0, 0, 1); emitter.Blend = ParticleBlend::Additive;
-        for (UINT count : {250000u, 1000000u})
+        for (UINT count : {1u, 255u, 256u, 257u, 250000u, 1000000u})
         {
             emitter.MaxParticles = count; emitter.BurstTotal = 0; emitter.ResetRevision = count;
             for (UINT frame = 0; frame < 3; ++frame)
@@ -733,10 +750,19 @@ int main(int argc, char** argv)
                 emitter.BurstTotal += count; resources.ParticleEmitters = {emitter}; executeParticles(particles);
                 const auto coverage = Read(device, *resources.ParticleMotion, 3);
                 Require(*std::max_element(coverage.begin(), coverage.end()) == static_cast<float>(count),
-                    "GPU refill must maintain the exact 250k/1M live count through particle deaths");
+                    "GPU refill must maintain the exact live count through particle deaths");
             }
         }
-        std::cout << "GPU particle refill: exact 250000/1000000 live particles from first frame and after expiry passed.\n";
+        std::cout << "GPU particle refill: exact 1/255/256/257/250000/1000000 live particles from first frame and after expiry passed.\n";
+        emitter.MaxParticles = 1024; emitter.BurstTotal = 0; ++emitter.ResetRevision;
+        emitter.LifetimeMin = emitter.LifetimeMax = 0.25f;
+        for (UINT expected : {257u, 514u, 771u, 771u, 771u})
+        {
+            emitter.BurstTotal += 257; resources.ParticleEmitters = {emitter}; executeParticles(particles);
+            const auto coverage = Read(device, *resources.ParticleMotion, 3);
+            Require(*std::max_element(coverage.begin(), coverage.end()) == static_cast<float>(expected),
+                "GPU spawn must append after survivors while recycling only the expired cohort");
+        }
         resources.ParticleEmitters.clear(); executeParticles(particles); Require(!resources.ParticleMotion, "Removed emitter retained motion");
         Set(L"Render.Fluid.Enabled", "false"); executeWater(); requireWaterFallback();
         std::cout << "GPU particle spawn/indirect/three blend modes/reset/removal and depth collision off/bounce/stop passed.\n";

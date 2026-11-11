@@ -35,7 +35,7 @@ void CS(uint3 id : SV_DispatchThreadID)
 {
     if (any(id.xy >= Resolution)) return;
     int2 p = int2(id.xy);
-    uint index = Cell(p);
+    uint index = id.y * Resolution + id.x;
     if (Stage == 0) { Output[index] = 0; return; }
     if (Stage == 5) { Output[index] = Input[index]; return; }
     if (Stage == 6)

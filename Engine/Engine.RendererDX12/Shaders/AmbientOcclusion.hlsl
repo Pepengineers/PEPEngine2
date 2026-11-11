@@ -168,22 +168,25 @@ void SSAOCS(uint3 id : SV_DispatchThreadID)
 void HBAOCS(uint3 id : SV_DispatchThreadID)
 {
     uint2 p = id.xy;
-    if (!InBounds(p)) return;
+    uint width, height;
+    Depth.GetDimensions(width, height);
+    if (any(p >= uint2(width, height))) return;
     if (Depth[p] <= 0) { OutputAO[p] = 1; return; }
     float3 center = Position(p), normal = Normals[p].xyz * 2 - 1;
     float radiusPixels = RadiusCm / max(center.z * abs(Xe.NDCToViewMul_x_PixelSize.y), 1e-5f);
     float rotation = Noise(p) * 2 * XE_GTAO_PI;
     float occlusion = 0;
+    float directionStep = 2 * XE_GTAO_PI / Directions;
     for (uint direction = 0; direction < Directions; ++direction)
     {
-        float angle = rotation + direction * (2 * XE_GTAO_PI / Directions);
+        float angle = rotation + direction * directionStep;
         float2 ray = float2(cos(angle), sin(angle));
         float horizon = HorizonBias;
         for (uint step = 0; step < Steps; ++step)
         {
             float distancePixels = max(1, radiusPixels * (step + 0.5f) / Steps);
             int2 q = int2(round(float2(p) + ray * distancePixels));
-            if (any(q < 0) || !InBounds(q) || Depth[q] <= 0) continue;
+            if (any(q < 0) || any(uint2(q) >= uint2(width, height)) || Depth[q] <= 0) continue;
             float3 delta = Position(q) - center;
             float distanceSquared = dot(delta, delta);
             if (distanceSquared < 1e-6f || distanceSquared >= RadiusCm * RadiusCm) continue;

@@ -149,7 +149,6 @@ void Gather(uint2 p : SV_DispatchThreadID)
     float4 center = Color[p];
     // Spatially fixed low discrepancy jitter avoids introducing temporal shimmer.
     uint sequence = 1 + p.x + p.y * Size.x;
-    float jitter = Halton(sequence, 2) * 2.0f - 1.0f;
     int2 tile = p / TileSize;
     float2 edge = (float2(p % TileSize) + 0.5f) / TileSize - 0.5f;
     bool horizontal = abs(edge.x) > abs(edge.y);
@@ -164,6 +163,7 @@ void Gather(uint2 p : SV_DispatchThreadID)
         Result[p] = center;
         return;
     }
+    float jitter = Halton(sequence, 2) * 2.0f - 1.0f;
     // Canonical line orientation makes centered exposure invariant to velocity sign.
     if (dominant.x < 0 || (dominant.x == 0 && dominant.y < 0)) dominant = -dominant;
     float2 wn = dominant / extent;
@@ -178,9 +178,9 @@ void Gather(uint2 p : SV_DispatchThreadID)
     float weightSum = Samples / (CenterWeight * centerRadius);
     float3 colorDelta = 0;
     float centerDepth = LinearDepth(p);
+    float jitterScale = min(0.95f, 0.95f * 27.0f / Samples);
     for (uint i = 0; i < Samples; ++i)
     {
-        float jitterScale = min(0.95f, 0.95f * 27.0f / Samples);
         float t = lerp(-1.0f, 1.0f, (i + 1.0f + jitter * jitterScale) / (Samples + 1.0f));
         float2 direction = (i & 1) != 0 ? wc : wn;
         float distance = abs(t) * extent;
