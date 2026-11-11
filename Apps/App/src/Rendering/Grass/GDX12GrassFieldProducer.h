@@ -92,6 +92,7 @@ public:
     void Record(GDX12CommandList& commands, UINT slot, ID3D12Resource* packed = nullptr) const;
     void AppendAccesses(UINT slot, std::vector<GDX12RenderGraph::BufferAccess>& accesses) const;
     const SnapshotLayout& Snapshot(UINT slot) const { return _frames.at(slot).Layout; }
+    const SnapshotLayout& CurrentSnapshot() const { return Snapshot(_preparedSlot.value()); }
     bool MatchesCurrent(const Inputs& inputs) const
     { return _preparedSlot && Snapshot(*_preparedSlot).Matches(inputs); }
     bool CanInstall(const GDX12Device& device, const GDX12DescriptorHeap& heap, size_t slots) const

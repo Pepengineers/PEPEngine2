@@ -657,6 +657,7 @@ bool CrossAdapterWater::State::Select(Ticket ticket, Metadata& metadata)
     metadata.Displayed = true;
     Counters.SnapshotAgeSeconds = std::chrono::duration<double>(HostClock::now() - metadata.Captured).count();
     Counters.DisplaySimulationLag = (std::max)(0.0, Time->GetProgress().CompletedTime - metadata.Time);
+    Counters.DisplayedSimulationTime = metadata.Time;
     Counters.OverAge = MaxAgeMs > 0 && Counters.SnapshotAgeSeconds * 1000 > MaxAgeMs;
     if (!Time->GetProgress().FirstMissingInput)
         Counters.Status = Counters.OverAge ? "over-age" : "displaying";
@@ -803,6 +804,8 @@ CrossAdapterWater::Diagnostics CrossAdapterWater::GetDiagnostics() const
         result.InFlight = time.IssuedTime - time.CompletedTime;
         result.Unrepresented = time.UnrepresentedElapsed;
         result.FirstMissingInput = time.FirstMissingInput;
+        if (result.DisplayedSimulationTime >= 0)
+            result.SourceAgeSeconds = (std::max)(0.0, time.DesiredTime - result.DisplayedSimulationTime);
     }
     return result;
 }

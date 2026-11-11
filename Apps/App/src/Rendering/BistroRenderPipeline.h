@@ -1,6 +1,7 @@
 #pragma once
 #include "App.Base/Rendering/CommonRenderPasses.h"
 #include "App.Base/Modules/SceneManagerModule.h"
+#include "BistroMGPUQuality.h"
 
 class BistroGrassGeometry;
 class BistroGrassRoute;
@@ -30,6 +31,7 @@ public:
     void BuildGraph(GDX12RenderGraph&, const RenderPipelineGraphInputs&) override;
     void Resize(RenderPipelineContext&) override;
     const RenderPipelineBindings& GetBindings() const override;
+    std::array<BistroQualitySearch::TechniqueMeasurement, 2> GetQualityMeasurements() const;
 
 private:
     friend class BistroRenderGraphTests;

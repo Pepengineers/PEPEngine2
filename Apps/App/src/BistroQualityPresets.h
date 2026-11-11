@@ -7,7 +7,7 @@
 
 namespace BistroQuality
 {
-    inline constexpr int SchemaVersion = 1;
+    inline constexpr int SchemaVersion = 2;
     inline constexpr const char* TierNames[] = {"Off", "Low", "Medium", "High", "Epic"};
 
     inline AutoConsoleVariable<int> OutputWidth(L"App.Quality.OutputWidth", 0,
@@ -16,6 +16,15 @@ namespace BistroQuality
     inline AutoConsoleVariable<int> OutputHeight(L"App.Quality.OutputHeight", 0,
         L"Saved Bistro client height. 0 uses the startup size.", EConsoleVariableFlags::Default,
         [](int value) { return value >= 0 && value <= 16384; });
+    inline AutoConsoleVariable<bool> MGPUProfile(L"App.Quality.MGPU.Enabled", false,
+        L"This benchmark profile includes explicit placement and freshness policy.");
+    inline AutoConsoleVariable<uint64_t> PrimaryLuid(L"App.Quality.MGPU.PrimaryLuid", 0,
+        L"Primary adapter used to validate the saved profile; 0 is an older unbound profile.");
+    inline AutoConsoleVariable<uint64_t> SecondaryLuid(L"App.Quality.MGPU.SecondaryLuid", 0,
+        L"Secondary adapter used to validate the saved profile; 0 is an older unbound profile.");
+    inline AutoConsoleVariable<int> TargetProfile(L"App.Quality.TargetProfile", 0,
+        L"Freshness target: 0 Performance (60 FPS), 1 Quality (30 FPS).", EConsoleVariableFlags::Default,
+        [](int value) { return value == 0 || value == 1; });
 
     using BistroQualitySearch::Axis;
     using BistroQualitySearch::Candidate;
@@ -199,7 +208,8 @@ namespace BistroQuality
         return axes;
     }
 
-    inline ConsoleVariablePatch ProfilePatch(const std::vector<const Technique*>& techniques, const Candidate& candidate)
+    inline ConsoleVariablePatch ProfilePatch(const std::vector<const Technique*>& techniques, const Candidate& candidate,
+        BistroQualitySearch::Profile profile = BistroQualitySearch::Profile::Performance)
     {
         if (candidate.Tiers.size() != techniques.size()) throw std::invalid_argument("Invalid Bistro quality candidate");
         ConsoleVariablePatch patch{
@@ -212,6 +222,38 @@ namespace BistroQuality
             auto fields = Preset(*techniques[i], candidate.Tiers[i]);
             patch.insert(patch.end(), std::make_move_iterator(fields.begin()), std::make_move_iterator(fields.end()));
         }
+        if (candidate.MGPU.Enabled)
+        {
+            patch.insert(patch.end(), {
+                {L"App.Quality.MGPU.Enabled", "true"},
+                {L"App.Quality.MGPU.PrimaryLuid", std::to_string(candidate.MGPU.Primary)},
+                {L"App.Quality.MGPU.SecondaryLuid", std::to_string(candidate.MGPU.Secondary)},
+                {L"App.Quality.TargetProfile", profile == BistroQualitySearch::Profile::Performance ? "0" : "1"},
+                {L"Render.AO.MultiGPU", "false"}, {L"Render.Clouds.MultiGPU", "false"},
+                {L"Render.UI.Offload", "false"}, {L"Render.Shadows.MultiGPU", "false"}
+            });
+            for (const auto& [prefix, route] : {
+                std::pair{L"Render.Fluid", candidate.MGPU.Water}, std::pair{L"Render.Grass", candidate.MGPU.Grass}})
+            {
+                const std::wstring key(prefix);
+                patch.emplace_back(key + L".MultiGPU", route.Secondary ? "true" : "false");
+                patch.emplace_back(key + L".MultiGPU.Exact", route.Exact ? "true" : "false");
+                patch.emplace_back(key + L".MultiGPU.UpdateHz", std::to_string(route.UpdateHz));
+                patch.emplace_back(key + L".MultiGPU.MaxAgeMs", std::to_string(BistroQualitySearch::FreshnessBudgetMs(profile)));
+                patch.emplace_back(key + L".UpdateHz", std::to_string(route.UpdateHz));
+            }
+        }
         return patch;
+    }
+
+    inline ConsoleVariablePatch SavedProfilePatch(const ConsoleVariablePatch& live, const Candidate& candidate)
+    {
+        auto saved = live;
+        if (candidate.MGPU.Enabled)
+        {
+            saved.emplace_back(L"Render.MGPU.Enabled", "true");
+            saved.emplace_back(L"Render.MGPU.SecondaryLuid", std::to_string(candidate.MGPU.Secondary));
+        }
+        return saved;
     }
 }

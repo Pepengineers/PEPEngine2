@@ -54,6 +54,7 @@ struct GDX12GrassWindControls
     bool WindEnabled = true;
     int WindQuality = 2;
     bool AsyncCompute = false;
+    float UpdateHz = -1;
 };
 GDX12GrassWindControls GetGrassWindControls();
 struct GDX12GrassMGPUControls

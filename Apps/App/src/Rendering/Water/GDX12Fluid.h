@@ -57,6 +57,7 @@ struct GDX12FluidControls
     bool MultiGPUExact = false;
     float MultiGPUUpdateHz = 0;
     float MultiGPUMaxAgeMs = 0;
+    float UpdateHz = -1;
 };
 GDX12FluidControls GetFluidControls();
 GDX12FluidSettings ResolveFluidSettings(const GDX12FluidSettings& author, int quality);
