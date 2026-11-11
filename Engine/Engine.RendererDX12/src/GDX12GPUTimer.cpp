@@ -10,7 +10,6 @@ GDX12GPUTimer::GDX12GPUTimer()
     , _timestampFrequency(0)
     , _timeMS(-1.0)
     , _activeFrameIndex(0)
-    , _frameFenceValues{}
 {
 }
 
@@ -27,22 +26,37 @@ GDX12GPUTimer::~GDX12GPUTimer()
 
 void GDX12GPUTimer::Initialize(GDX12Device* device)
 {
+    Initialize(device, device ? device->GetCommandQueue() : nullptr);
+}
+
+void GDX12GPUTimer::Initialize(GDX12Device* device, GDX12CommandQueue* queue, UINT sampleCount)
+{
     Reset();
 
-    if (!device) { return; }
+    if (!device || !queue) { return; }
 
-    _commandQueue = device->GetCommandQueue();
+    const bool copyQueue = queue->GetType() == D3D12_COMMAND_LIST_TYPE_COPY;
+    if (copyQueue)
+    {
+        D3D12_FEATURE_DATA_D3D12_OPTIONS3 options{};
+        if (FAILED(device->GetDevice()->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS3, &options, sizeof(options))) ||
+            !options.CopyQueueTimestampQueriesSupported)
+        { return; }
+    }
+
+    _commandQueue = queue;
     ThrowIfFailed(_commandQueue->GetCommandQueue()->GetTimestampFrequency(&_timestampFrequency));
+    _samples.resize(sampleCount);
 
     D3D12_QUERY_HEAP_DESC queryHeapDesc = {};
-    queryHeapDesc.Count = BufferedFrameCount * QueryCount;
+    queryHeapDesc.Count = sampleCount * QueryCount;
     queryHeapDesc.NodeMask = 0;
-    queryHeapDesc.Type = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+    queryHeapDesc.Type = copyQueue ? D3D12_QUERY_HEAP_TYPE_COPY_QUEUE_TIMESTAMP : D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
 
     ThrowIfFailed(device->GetDevice()->CreateQueryHeap(&queryHeapDesc, IID_PPV_ARGS(&_queryHeap)));
 
     CD3DX12_HEAP_PROPERTIES readbackHeapProperties(D3D12_HEAP_TYPE_READBACK);
-    CD3DX12_RESOURCE_DESC readbackBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(UINT64) * BufferedFrameCount * QueryCount);
+    CD3DX12_RESOURCE_DESC readbackBufferDesc = CD3DX12_RESOURCE_DESC::Buffer(sizeof(UINT64) * sampleCount * QueryCount);
 
     ThrowIfFailed(device->GetDevice()->CreateCommittedResource(
         &readbackHeapProperties, D3D12_HEAP_FLAG_NONE,
@@ -63,24 +77,25 @@ void GDX12GPUTimer::Reset()
     _timestampFrequency = 0;
     _timeMS = -1.0;
     _activeFrameIndex = 0;
-    _frameFenceValues.fill(0);
+    _samples.clear();
 }
 
-void GDX12GPUTimer::Start(GDX12CommandList* commandList)
+bool GDX12GPUTimer::Start(GDX12CommandList* commandList, bool waitForSlot)
 {
-    if (!commandList) { return; }
+    if (!commandList || !_queryHeap) { return false; }
 
     UpdateResolvedFrames();
 
-    if (!_queryHeap) { return; }
-
-    if (_frameFenceValues[_activeFrameIndex] != 0 && _commandQueue && _commandQueue->GetFence()->GetCompletedValue() < _frameFenceValues[_activeFrameIndex])
+    const auto& sample = _samples[_activeFrameIndex];
+    if (sample.FenceValue && sample.TimeMS < 0.0)
     {
-        _commandQueue->CPUWaitForFenceValue(_frameFenceValues[_activeFrameIndex]);
+        if (!waitForSlot) { return false; }
+        _commandQueue->CPUWaitForFenceValue(sample.FenceValue);
         UpdateResolvedFrames();
     }
 
     commandList->GetCommandList()->EndQuery(_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, GetStartQueryIndex(_activeFrameIndex));
+    return true;
 }
 
 void GDX12GPUTimer::Stop(GDX12CommandList* commandList)
@@ -98,14 +113,23 @@ void GDX12GPUTimer::Stop(GDX12CommandList* commandList)
 
 void GDX12GPUTimer::OnCommandListExecuted(UINT64 fenceValue)
 {
-    _frameFenceValues[_activeFrameIndex] = fenceValue;
-    _activeFrameIndex = (_activeFrameIndex + 1) % BufferedFrameCount;
+    _samples[_activeFrameIndex] = { fenceValue, -1.0 };
+    _activeFrameIndex = (_activeFrameIndex + 1) % static_cast<UINT>(_samples.size());
 }
 
 double GDX12GPUTimer::GetTimeMS()
 {
     UpdateResolvedFrames();
     return _timeMS;
+}
+
+double GDX12GPUTimer::GetTimeMS(UINT64 fenceValue)
+{
+    if (!fenceValue) { return -1.0; }
+    UpdateResolvedFrames();
+    for (const auto& sample : _samples)
+    { if (sample.FenceValue == fenceValue) { return sample.TimeMS; } }
+    return -1.0;
 }
 
 void GDX12GPUTimer::UpdateResolvedFrames()
@@ -116,10 +140,11 @@ void GDX12GPUTimer::UpdateResolvedFrames()
     UINT64 latestResolvedFenceValue = 0;
     double latestResolvedTimeMS = _timeMS;
 
-    for (UINT frameIndex = 0; frameIndex < BufferedFrameCount; ++frameIndex)
+    for (UINT frameIndex = 0; frameIndex < _samples.size(); ++frameIndex)
     {
-        const UINT64 fenceValue = _frameFenceValues[frameIndex];
-        if (fenceValue == 0 || completedFenceValue < fenceValue) { continue; }
+        auto& sample = _samples[frameIndex];
+        const UINT64 fenceValue = sample.FenceValue;
+        if (fenceValue == 0 || sample.TimeMS >= 0.0 || completedFenceValue < fenceValue) { continue; }
 
         const UINT startQueryIndex = GetStartQueryIndex(frameIndex);
         const UINT endQueryIndex = GetEndQueryIndex(frameIndex);
@@ -127,6 +152,7 @@ void GDX12GPUTimer::UpdateResolvedFrames()
         const UINT64 endTimestamp = _mappedReadbackData[endQueryIndex];
         const UINT64 elapsedTicks = endTimestamp > startTimestamp ? endTimestamp - startTimestamp : 0;
         const double resolvedTimeMS = static_cast<double>(elapsedTicks) * 1000.0 / static_cast<double>(_timestampFrequency);
+        sample.TimeMS = resolvedTimeMS;
 
         if (fenceValue >= latestResolvedFenceValue)
         {
@@ -134,7 +160,6 @@ void GDX12GPUTimer::UpdateResolvedFrames()
             latestResolvedTimeMS = resolvedTimeMS;
         }
 
-        _frameFenceValues[frameIndex] = 0;
     }
 
     if (latestResolvedFenceValue != 0) { _timeMS = latestResolvedTimeMS; }

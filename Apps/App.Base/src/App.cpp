@@ -284,6 +284,10 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         {
             PostQuitMessage(0);
         }
+        else if (wParam == VK_F8)
+        {
+            if (auto renderModule = Locator.GetModule<RenderModule>()) { renderModule->DumpFrameGraphDebugReport(); }
+        }
         return 0;
     }
 

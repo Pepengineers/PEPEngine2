@@ -39,6 +39,7 @@ public:
     void Uninitialize() override;
 
     void OnResize();
+    void DumpFrameGraphDebugReport() const;
 
     GDX12Material* GetMaterialByName(const std::string& name);
 
@@ -109,7 +110,7 @@ protected:
 
 private:
     GDX12DeviceResources& GetDeviceResources(EDeviceRole role);
-    void BuildBackBuffer();
+    void BuildBackBuffer(GDX12DeviceResources& presentResources);
     void ConfigureFrameGraph(FrameGraph& graph);
     void CompileFrameGraph(FrameGraph& graph);
     void UploadSceneResources(GDX12DeviceResources& resources, uint32_t flags);

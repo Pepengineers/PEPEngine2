@@ -48,11 +48,6 @@ namespace
             if (nodeDefinition.DeviceRole != DEVICE_ROLE_PRIMARY && nodeDefinition.DeviceRole != DEVICE_ROLE_SECONDARY) { throw std::invalid_argument("ERROR: " + nodeDefinition.Id + ": device role is not supported. Use DEVICE_ROLE_PRIMARY or DEVICE_ROLE_SECONDARY."); }
             if (passDescription.PrimaryOnly && nodeDefinition.DeviceRole != DEVICE_ROLE_PRIMARY) { throw std::invalid_argument("ERROR: " + nodeDefinition.Id + ": pass was assigned to the secondary device but requires the primary device. Add this pass with "
                 "AddPrimaryGPUPass()."); }
-            for (const auto& portEntry : passDescription.Outputs)
-            {
-                if (HasUsage(portEntry.second.Usages, ResourceUsage::Present) && nodeDefinition.DeviceRole != DEVICE_ROLE_PRIMARY)
-                { throw std::invalid_argument("ERROR: " + nodeDefinition.Id + ": presentation pass was assigned to the secondary device. Add GDX12OutputToScreenPass on the primary device."); }
-            }
             nodeDependencies[nodeDefinition.Id];
         }
     }
@@ -537,32 +532,44 @@ FrameGraphPlan CompileFrameGraph(const FrameGraphDefinition& graphDefinition, co
 std::string FrameGraphPlan::GetDebugReport(const FrameGraphDefinition& definition) const
 {
     std::ostringstream out;
-    out << "FrameGraph slots=" << FrameSlotCount << " CopyCount=" << CopyCount << '\n';
+    out << "[Execution plan | " << FrameSlotCount << " slots]\n";
     for (const auto& id : Order)
     {
-        out << "DIRECT batch " << id;
+        out << "  " << id << " | " << GetDeviceRoleName(definition.Nodes.at(id).DeviceRole);
         auto dependencies = Dependencies.find(id);
-        if (dependencies != Dependencies.end())
-        { for (const auto& dependency : dependencies->second) { out << " wait=" << dependency; } }
+        if (dependencies != Dependencies.end() && !dependencies->second.empty())
+        {
+            out << " | after: ";
+            const char* separator = "";
+            for (const auto& dependency : dependencies->second)
+            { out << separator << dependency; separator = ", "; }
+        }
         out << '\n';
     }
+    out << "\n[Resource placement]\n";
     for (const auto& entry : Resources)
     {
         const auto& p = entry.second;
-        out << FormatPinAddress(entry.first) << " storage=" << GetMemoryTypeName(p.Storage)
-            << " type=" << GetResourceTypeName(p.Description.Type) << " format=" << GetTextureFormatName(p.Description.Format)
-            << " extent=" << p.Description.Width << 'x' << p.Description.Height << " layers=" << p.Description.ArraySize
-            << " capacity=" << p.Description.Capacity << " usages=" << uint32_t(p.Description.Usages)
-            << " export=" << p.Export << " payload=" << (p.BufferPayload ? "footprint buffer" : "native")
-            << " copies=" << p.CopyCount << " transport=" << (UseCopyQueue ? "COPY" : "DIRECT")
-            << " reason=" << (p.CopyCount ? "minimum materializations; " : "compatible original allocation; ")
-            << (UseCopyQueue ? "COPY allows independent frame slots" : "DIRECT transport policy") << '\n';
-        if (p.Consumers.empty()) { out << "  unused output (producer retained)\n"; }
+        out << "  " << FormatPinAddress(entry.first) << " | " << GetMemoryTypeName(p.Storage)
+            << " | " << GetResourceTypeName(p.Description.Type);
+        if (p.Description.IsBuffer()) { out << " capacity=" << p.Description.Capacity; }
+        else
+        {
+            out << ' ' << GetTextureFormatName(p.Description.Format) << ' ' << p.Description.Width << 'x' << p.Description.Height;
+            if (p.Description.ArraySize > 1) { out << " layers=" << p.Description.ArraySize; }
+        }
+        out << " | usages=" << uint32_t(p.Description.Usages);
+        if (p.CopyCount) { out << " | copies=" << p.CopyCount; }
+        if (p.Export) { out << " export"; }
+        if (p.BufferPayload && (p.Export || p.Storage == MemoryType::Shared)) { out << " via footprint buffer"; }
+        if (p.Consumers.empty()) { out << " | unused"; }
+        out << '\n';
         for (const auto& [target, access] : p.Consumers)
         {
             const bool remote = definition.Nodes.at(entry.first.Node).DeviceRole != definition.Nodes.at(target.Node).DeviceRole;
-            out << "  -> " << FormatPinAddress(target) << " access=" << (access == MemoryType::Local ? "Local" : "Shared")
-                << " replica=" << NeedsFrameGraphLocalCopy(p.Storage, access, remote) << '\n';
+            out << "    -> " << FormatPinAddress(target) << " | " << GetMemoryTypeName(access);
+            if (NeedsFrameGraphLocalCopy(p.Storage, access, remote)) { out << " replica"; }
+            out << '\n';
         }
     }
     return out.str();

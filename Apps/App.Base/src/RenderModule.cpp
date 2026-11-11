@@ -555,7 +555,12 @@ void RenderModule::OnRender()
     _backBuffer->Present();
 }
 
-void RenderModule::BuildBackBuffer()
+void RenderModule::DumpFrameGraphDebugReport() const
+{
+    if (_frameGraph) { OutputDebugStringA(_frameGraph->GetDebugReport().c_str()); }
+}
+
+void RenderModule::BuildBackBuffer(GDX12DeviceResources& presentResources)
 {
     uint16_t width, height;
     _window->GetWindowSize(width, height);
@@ -563,15 +568,15 @@ void RenderModule::BuildBackBuffer()
     width = (std::max)(uint16_t(1), width);
     height = (std::max)(uint16_t(1), height);
 
-    _backBuffer = std::make_unique<GDX12SwapChain>(_primaryDevice.get(), _window->GetWindowHandle(),
-        DXGI_FORMAT_R8G8B8A8_UNORM, 2, width, height, _primaryResources.RTVHeap.get());
+    _backBuffer = std::make_unique<GDX12SwapChain>(presentResources.Device, _window->GetWindowHandle(),
+        DXGI_FORMAT_R8G8B8A8_UNORM, 2, width, height, presentResources.RTVHeap.get());
 
     GDX12TextureDesc desc;
     desc.CreateSRV = false;
-    desc.DSVHeap = _primaryResources.DSVHeap.get();
+    desc.DSVHeap = presentResources.DSVHeap.get();
 
     desc.CreateDSV = true;
-    desc.DSVHeapIndex = _primaryResources.DSVHeap->GetAvailableIndex();
+    desc.DSVHeapIndex = presentResources.DSVHeap->GetAvailableIndex();
     desc.Format = desc.DSVDesc.Format = DXGI_FORMAT_D32_FLOAT;
     desc.Width = width;
     desc.Height = height;
@@ -589,6 +594,19 @@ void RenderModule::BuildBackBuffer()
 
 void RenderModule::CompileFrameGraph(FrameGraph& graph)
 {
+    std::optional<EDeviceRole> presentRole;
+    for (const auto& [id, node] : graph.GetDefinition().Nodes)
+    {
+        for (const auto& [pin, port] : node.Description.Outputs)
+        {
+            if (!HasUsage(port.Usages, ResourceUsage::Present)) { continue; }
+            if (presentRole && *presentRole != node.DeviceRole)
+            { throw std::invalid_argument("ERROR: All presentation passes must use the same GPU as the swap chain."); }
+            presentRole = node.DeviceRole;
+        }
+    }
+    if (!presentRole) { throw std::invalid_argument("ERROR: Given Render pipeline has no presentation pass. Add GDX12OutputToScreenPass to the pipeline."); }
+
     if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
     const auto primaryFlags = graph.GetDevicePassFlags(DEVICE_ROLE_PRIMARY);
     const auto secondaryFlags = graph.GetDevicePassFlags(DEVICE_ROLE_SECONDARY);
@@ -624,23 +642,21 @@ void RenderModule::CompileFrameGraph(FrameGraph& graph)
         _secondaryResources.Initialize(_secondaryDevice.get());
     }
 
-    if (!_backBuffer) { BuildBackBuffer(); }
+    auto& presentResources = GetDeviceResources(*presentRole);
+    if (!_backBuffer || _backBuffer->GetCurrentBuffer()->GetDevice() != presentResources.Device)
+    {
+        _frameGraph.reset();
+        _backBuffer.reset();
+        BuildBackBuffer(presentResources);
+    }
 
     UploadSceneResources(_primaryResources, primaryFlags);
     if (dualGPUMode) { UploadSceneResources(_secondaryResources, secondaryFlags); }
     graph.SetDeviceResources(&_primaryResources, dualGPUMode ? &_secondaryResources : nullptr, &_RPcommonData);
 
-    bool hasPresentPass = false;
-    for (const auto& entry : graph.GetDefinition().Nodes)
-    {
-        for (const auto& port : entry.second.Description.Outputs)
-        { hasPresentPass |= HasUsage(port.second.Usages, ResourceUsage::Present); }
-    }
-    if (!hasPresentPass) { throw std::invalid_argument("ERROR: Given Render pipeline has no presentation pass. Add GDX12OutputToScreenPass to the pipeline."); }
-
     _frameGraph = graph.Compile();
     MarkSceneDataDirty();
-    OutputDebugStringA(_frameGraph->GetDebugReport().c_str());
+    DumpFrameGraphDebugReport();
 }
 
 void RenderModule::ResizeSceneBuffers(GDX12DeviceResources& resources, uint32_t flags)
@@ -715,9 +731,9 @@ void RenderModule::ConfigureFrameGraph(FrameGraph& fg)
     auto opaque = fg.AddPrimaryGPUPass<GDX12OpaquePass>("Opaque");
     auto transparency = fg.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
     auto composition = fg.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
-    auto clear = fg.AddPrimaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
-    auto upscale = fg.AddPrimaryGPUPass<GDX12XeSSUpscalePass>("XeSS");
-    auto output = fg.AddPrimaryGPUPass<GDX12OutputToScreenPass>("Output To Screen");
+    auto clear = fg.AddSecondaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
+    auto upscale = fg.AddSecondaryGPUPass<GDX12XeSSUpscalePass>("XeSS");
+    auto output = fg.AddSecondaryGPUPass<GDX12OutputToScreenPass>("Output To Screen");
 
     fg.ConnectNodes(backBuffer, clear.GetInput("InTexture"));
     fg.ConnectNodes(depthStencil, clear.GetInput("InDepthBuffer"));
