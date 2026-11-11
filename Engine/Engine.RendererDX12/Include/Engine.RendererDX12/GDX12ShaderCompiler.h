@@ -31,9 +31,6 @@ private:
 	ComPtr<ID3DBlob> CompileShaderDXC(const std::wstring& filename, const D3D_SHADER_MACRO* defines,
 		const std::string& entrypoint, const std::string& shaderType);
 
-	ComPtr<ID3DBlob> CompileShaderFXC(const std::wstring& filename, const D3D_SHADER_MACRO* defines,
-		const std::string& entrypoint, const std::string& shaderType);
-
 	static GDX12ShaderCompiler* _instance;
 
 	ComPtr<IDxcCompiler3> _dxcCompiler;

@@ -40,6 +40,11 @@ static void CheckShaderDefines(GDX12Device& device)
     };
     auto& compiler = GDX12ShaderCompiler::GetInstance();
     const auto path = SOLUTION_DIR L"Apps/App/tests/shaders/CompilerDefines.hlsl";
+    GDX12Device unsupported;
+    bool rejectedModel = false;
+    try { compiler.CompileShader(&unsupported, path, defines, "CS", "cs"); }
+    catch (const std::invalid_argument&) { rejectedModel = true; }
+    Require(rejectedModel, "A device without a supported shader model must fail before compilation");
     const auto shader = compiler.CompileShader(&device, path, defines, "CS", "cs");
     Require(shader && shader->GetBufferSize(), "Multiple short shader defines were not preserved");
     bool rejected = false;

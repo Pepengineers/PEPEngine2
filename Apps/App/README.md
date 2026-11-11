@@ -1,5 +1,10 @@
 # Bistro App
 
+The renderer requires Direct3D 12 with Shader Model 6.0 or newer on every participating
+adapter. Engine and test shaders use DXC; SM5.1/FXC fallback is no longer supported.
+The shader target follows the adapter up to SM6.8, the bundled compiler's limit.
+Wave operations and other optional GPU features retain their own capability checks.
+
 The scene includes four frozen local reflection cubemaps, one entrance grass
 patch with wind, one street-width water basin, ten walking human NPCs from the MGPU
 sample and five walking Khronos foxes inside. Application-only CVars control

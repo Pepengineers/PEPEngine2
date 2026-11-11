@@ -57,9 +57,16 @@ HRESULT GDX12Device::Initialize(ComPtr<IDXGIAdapter4> adapter)
     }
     if (FAILED(hr)) { OutputDebugStringA("ERROR: FAILED TO CREATE DX12DEVICE\n"); return hr; }
 
+    CollectDeviceFeatures();
+    if (_specs.Features.HighestShaderModel() < D3D_SHADER_MODEL_6_0)
+    {
+        Log::Error("Renderer", "GPU adapter ", _specs.Name, " requires Shader Model 6.0 or newer; reported ",
+            ShaderModelToString(_specs.Features.HighestShaderModel()));
+        Reset();
+        return DXGI_ERROR_UNSUPPORTED;
+    }
     _proxyDevice = GDX12StreamlineSDK::Get().CreateProxyDevice(_device, Role == DEVICE_ROLE_PRIMARY);
     _device = GDX12StreamlineSDK::Get().GetNativeDevice(_proxyDevice ? _proxyDevice : _device);
-    CollectDeviceFeatures();
 
     D3D12MA::ALLOCATOR_DESC allocatorDesc = {};
     allocatorDesc.pDevice = _device.Get();
