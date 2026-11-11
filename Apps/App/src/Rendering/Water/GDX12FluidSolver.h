@@ -83,5 +83,5 @@ public:
 
 private:
     std::unique_ptr<GDX12RootSignature> _root;
-    ComPtr<ID3D12PipelineState> _save, _hash, _sort, _offsets, _densities, _integrate;
+    ComPtr<ID3D12PipelineState> _save, _hash, _sort, _presort, _mergeTail, _offsets, _densities, _integrate;
 };

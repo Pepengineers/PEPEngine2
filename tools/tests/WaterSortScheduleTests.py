@@ -14,6 +14,8 @@ def schedule(capacity, tile):
     """Yield dispatches as (local, [(k, j), ...]) compare stages."""
     assert capacity > 0 and capacity & (capacity - 1) == 0
     assert tile > 0 and tile & (tile - 1) == 0
+    if capacity == 1:
+        return
     prefix = []
     k = 2
     while k <= min(capacity, tile):
@@ -134,7 +136,7 @@ class WaterSortScheduleTests(unittest.TestCase):
 
     def test_dispatch_counts(self):
         # Sorting only: Hash/BuildOffsets/density/integration are excluded.
-        for exponent, tile, expected in ((16, 512, 36), (16, 2048, 21),
+        for exponent, tile, expected in ((16, 512, 36), (16, 1024, 28), (16, 2048, 21),
                                          (20, 512, 78), (20, 2048, 55)):
             with self.subTest(exponent=exponent, tile=tile):
                 remainder = max(0, exponent - (tile.bit_length() - 1))
@@ -142,6 +144,8 @@ class WaterSortScheduleTests(unittest.TestCase):
                 self.assertEqual(len(list(schedule(1 << exponent, tile))), expected)
         self.assertEqual(16 * 17 // 2, 136)
         self.assertEqual(20 * 21 // 2, 210)
+        for tile in (512, 1024, 2048):
+            self.assertEqual(list(schedule(1, tile)), [])
 
 
 if __name__ == "__main__":
