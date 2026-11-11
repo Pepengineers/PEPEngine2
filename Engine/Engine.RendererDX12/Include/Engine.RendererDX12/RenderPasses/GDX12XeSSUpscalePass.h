@@ -79,7 +79,7 @@ public:
 		params.inputHeight = renderSize.y;
 		params.resetHistory = _resetHistory;
 		params.exposureScale = 1.f;
-		cmdList->BeginPixEvent("XeSS Upscale", Colors::Blue);
+		cmdList->BeginPixEvent("XeSS Upscale", Colors::OrangeRed);
 		Check(xessD3D12Execute(_context, cmdList->GetCommandList().Get(), &params), "execute");
 		cmdList->EndPixEvent();
 		_resetHistory = false;

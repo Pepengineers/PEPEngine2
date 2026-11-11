@@ -79,7 +79,7 @@ public:
 		GDX12Texture* transparencyAccum = context.GetInputTexture(InAccumulationTexture).GetTexture();
 		GDX12Texture* transparencyRevealage = context.GetInputTexture(InRevealageTexture).GetTexture();
 
-		cmdList->BeginPixEvent("Composition Render Pass", Colors::Bisque);
+		cmdList->BeginPixEvent("Composition Pass", Colors::Gold);
 		cmdList->SetViewport(OUT_Result->GetViewport());
 		cmdList->SetScissorRect(OUT_Result->GetScissorRect());
 		cmdList->SetGraphicsRootSignature(_compositionRS.get());

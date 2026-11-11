@@ -618,7 +618,7 @@ void RenderModule::CompileFrameGraph(FrameGraph& graph)
             return desc.AdapterLuid.LowPart != primaryLuid.LowPart || desc.AdapterLuid.HighPart != primaryLuid.HighPart;
         });
         if (secondary == adapters.end()) { throw std::runtime_error("ERROR: Given FrameGraph assigns passes to the secondary GPU, but no second adapter is available. Use "
-            "AddPrimaryPass() for these passes or provide a second compatible GPU."); }
+            "AddPrimaryGPUPass() for these passes or provide a second compatible GPU."); }
         _secondaryDevice->Role = DEVICE_ROLE_SECONDARY;
         ThrowIfFailed(_secondaryDevice->Initialize(secondary->Adapter));
         _secondaryResources.Initialize(_secondaryDevice.get());
@@ -711,13 +711,13 @@ void RenderModule::ConfigureFrameGraph(FrameGraph& fg)
     const auto backBuffer = fg.ImportTexture("back-buffer", [this]() { return _backBuffer->GetCurrentBuffer(); });
     const auto depthStencil = fg.ImportTexture("depth-stencil", [this]() { return _depthStencil.get(); });
 
-    auto culling = fg.AddPrimaryPass<GDX12GPUCullingPass>("Culling");
-    auto opaque = fg.AddPrimaryPass<GDX12OpaquePass>("Opaque");
-    auto transparency = fg.AddPrimaryPass<GDX12WBOITTransparencyPass>("Transparency");
-    auto composition = fg.AddPrimaryPass<GDX12WBOITCompositionPass>("Composition");
-    auto clear = fg.AddPrimaryPass<GDX12TextureClearPass>("Clear");
-    auto upscale = fg.AddPrimaryPass<GDX12XeSSUpscalePass>("XeSS");
-    auto output = fg.AddPrimaryPass<GDX12OutputToScreenPass>("Output");
+    auto culling = fg.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
+    auto opaque = fg.AddPrimaryGPUPass<GDX12OpaquePass>("Opaque");
+    auto transparency = fg.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
+    auto composition = fg.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
+    auto clear = fg.AddPrimaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
+    auto upscale = fg.AddPrimaryGPUPass<GDX12XeSSUpscalePass>("XeSS");
+    auto output = fg.AddPrimaryGPUPass<GDX12OutputToScreenPass>("Output To Screen");
 
     fg.ConnectNodes(backBuffer, clear.GetInput("InTexture"));
     fg.ConnectNodes(depthStencil, clear.GetInput("InDepthBuffer"));

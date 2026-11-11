@@ -132,7 +132,7 @@ public:
 		const auto& draws = context.GetInputDrawStream(InDrawStream);
 		auto& currentFrameConstants = resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
 
-		cmdList->BeginPixEvent("Transparent Render Pass", Colors::Aqua);
+		cmdList->BeginPixEvent("Transparency Pass", Colors::Aqua);
 		cmdList->SetViewport(OUT_Accumulation->GetViewport());
 		cmdList->SetScissorRect(OUT_Accumulation->GetScissorRect());
 		cmdList->SetGraphicsRootSignature(_transparencyRS.get());

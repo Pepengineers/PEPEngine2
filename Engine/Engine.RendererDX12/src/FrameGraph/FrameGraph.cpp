@@ -688,7 +688,6 @@ struct CompiledFrameGraph::Runtime
         auto* renderPass = Passes.at(nodeDefinition.Id).get();
         auto* passTimer = Timers.at(nodeDefinition.Id).get();
 
-        commandList->BeginPixEvent(nodeDefinition.Id, Colors::CornflowerBlue);
         passTimer->Start(commandList);
         PassInitContext initContext(deviceResources, Common, nodeDefinition, Plan, Sources);
         PassExecutionContext executionContext(initContext, commandList, Frame, GetCurrentFrameSlotResourcesIndex(), portBindings);
@@ -698,7 +697,6 @@ struct CompiledFrameGraph::Runtime
         renderPass->Execute(executionContext);
         RestorePassResourceStates(nodeDefinition, portBindings, commandList);
         passTimer->Stop(commandList);
-        commandList->EndPixEvent();
 
         if (BatchLocalPasses)
         {

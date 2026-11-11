@@ -58,12 +58,13 @@ public:
     ~FrameGraph() = default;
     FrameGraph(const FrameGraph&) = delete;
     FrameGraph& operator=(const FrameGraph&) = delete;
-    template<class T, class... Args> NodeHandle AddPrimaryPass(NodeId id, Args&&... args)
+    // The id identifies a node instance in the graph. Each pass owns its PIX labels.
+    template<class T, class... Args> NodeHandle AddPrimaryGPUPass(NodeId id, Args&&... args)
     { return AddPass<T>(std::move(id), DEVICE_ROLE_PRIMARY, std::forward<Args>(args)...); }
-    template<class T, class... Args> NodeHandle AddSecondaryPass(NodeId id, Args&&... args)
+    template<class T, class... Args> NodeHandle AddSecondaryGPUPass(NodeId id, Args&&... args)
     {
         if (!_secondary) { throw std::invalid_argument("ERROR: Node '" + id + "' is assigned to the secondary device, but that device is not registered. Pass a secondary GDX12Device to the "
-            "FrameGraph constructor or use AddPrimaryPass()."); }
+            "FrameGraph constructor or use AddPrimaryGPUPass()."); }
         return AddPass<T>(std::move(id), DEVICE_ROLE_SECONDARY, std::forward<Args>(args)...);
     }
     void ConnectNodes(const OutputPinRef& output, const InputPinRef& input);

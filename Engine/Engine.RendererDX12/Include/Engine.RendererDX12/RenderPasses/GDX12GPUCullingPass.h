@@ -75,7 +75,7 @@ public:
 		const auto& transparent = context.GetOutputDrawStream(OutTransparentDrawStream);
 		auto& currentFrameConstants = resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
 
-		cmdList->BeginPixEvent("GPU Mesh Culling", Colors::Blue);
+		cmdList->BeginPixEvent("Frustum Culling", Colors::CornflowerBlue);
 
 		cmdList->SetComputeRootSignature(_bufferClearRS.get());
 		cmdList->SetPipelineState(_bufferClearPSO);

@@ -32,7 +32,7 @@ public:
 		auto* cmdList = context.GetCommandList();
 		auto* target = context.GetInputTexture(InTexture).GetTexture();
 		auto* depth = context.GetInputTexture(InDepthBuffer).GetTexture();
-		cmdList->BeginPixEvent("Texture Clear", Colors::ForestGreen);
+		cmdList->BeginPixEvent("Texture Clear", Colors::SlateGray);
 		cmdList->SetRenderTargets({target}, depth);
 		cmdList->ClearRenderTargetView(target);
 		cmdList->ClearDepthStencilView(depth);

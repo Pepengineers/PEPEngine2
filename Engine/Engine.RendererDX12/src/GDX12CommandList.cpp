@@ -319,10 +319,10 @@ void GDX12CommandList::EnhancedTextureBarrier(std::initializer_list<D3D12_TEXTUR
 
 void GDX12CommandList::BeginPixEvent(const std::string& name, XMVECTOR color)
 {
-	UINT64 pixColor = (static_cast<UINT64>(XMVectorGetW(color) * 255.0f) << 24) |
-		(static_cast<UINT64>(XMVectorGetZ(color) * 255.0f) << 16) |
-		(static_cast<UINT64>(XMVectorGetY(color) * 255.0f) << 8) |
-		(static_cast<UINT64>(XMVectorGetX(color) * 255.0f));
+	const UINT64 pixColor = PIX_COLOR(
+		static_cast<UINT8>(XMVectorGetX(color) * 255.0f),
+		static_cast<UINT8>(XMVectorGetY(color) * 255.0f),
+		static_cast<UINT8>(XMVectorGetZ(color) * 255.0f));
 
 	PIXBeginEvent(_commandList.Get(), pixColor, name.c_str());
 }

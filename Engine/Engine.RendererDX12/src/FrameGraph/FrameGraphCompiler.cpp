@@ -47,7 +47,7 @@ namespace
             const auto& passDescription = nodeDefinition.Description;
             if (nodeDefinition.DeviceRole != DEVICE_ROLE_PRIMARY && nodeDefinition.DeviceRole != DEVICE_ROLE_SECONDARY) { throw std::invalid_argument("ERROR: " + nodeDefinition.Id + ": device role is not supported. Use DEVICE_ROLE_PRIMARY or DEVICE_ROLE_SECONDARY."); }
             if (passDescription.PrimaryOnly && nodeDefinition.DeviceRole != DEVICE_ROLE_PRIMARY) { throw std::invalid_argument("ERROR: " + nodeDefinition.Id + ": pass was assigned to the secondary device but requires the primary device. Add this pass with "
-                "AddPrimaryPass()."); }
+                "AddPrimaryGPUPass()."); }
             for (const auto& portEntry : passDescription.Outputs)
             {
                 if (HasUsage(portEntry.second.Usages, ResourceUsage::Present) && nodeDefinition.DeviceRole != DEVICE_ROLE_PRIMARY)

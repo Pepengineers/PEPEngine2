@@ -109,7 +109,7 @@ public:
 		const auto& draws = context.GetInputDrawStream(InDrawStream);
 		auto& currentFrameConstants = resources->FrameConstants[context.GetFrameSlotResourcesIndex()];
 
-		cmdList->BeginPixEvent("Opaque Render Pass", Colors::ForestGreen);
+		cmdList->BeginPixEvent("Opaque Pass", Colors::ForestGreen);
 		cmdList->SetViewport(OUT_Accumulation->GetViewport());
 		cmdList->SetScissorRect(OUT_Accumulation->GetScissorRect());
 		cmdList->SetGraphicsRootSignature(_opaqueRS.get());
