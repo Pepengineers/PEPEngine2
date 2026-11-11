@@ -11,6 +11,12 @@ class GDX12GPUTimer
     static constexpr UINT BufferedFrameCount = 3;
 
 public:
+    struct TimestampRange
+    {
+        UINT64 Begin;
+        UINT64 End;
+    };
+
     GDX12GPUTimer();
     explicit GDX12GPUTimer(GDX12Device* device);
     ~GDX12GPUTimer();
@@ -26,6 +32,12 @@ public:
     bool IsAvailable() const { return _queryHeap.Get() != nullptr; }
     double GetTimeMS();
     double GetTimeMS(UINT64 fenceValue);
+
+    // For callers that own the sample slot and wait for its submissions before reading it.
+    void RecordBegin(GDX12CommandList* commandList, UINT sampleIndex);
+    void RecordEndAndResolve(GDX12CommandList* commandList, UINT sampleIndex);
+    TimestampRange ReadResolvedTimestamps(UINT sampleIndex) const;
+    UINT64 GetTimestampFrequency() const { return _timestampFrequency; }
 
 private:
     void UpdateResolvedFrames();

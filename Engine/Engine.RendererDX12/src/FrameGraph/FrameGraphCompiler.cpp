@@ -529,20 +529,31 @@ FrameGraphPlan CompileFrameGraph(const FrameGraphDefinition& graphDefinition, co
     return executionPlan;
 }
 
-std::string FrameGraphPlan::GetDebugReport(const FrameGraphDefinition& definition) const
+std::string FrameGraphPlan::GetDebugReport(const FrameGraphDefinition& definition, const FrameGraphCompileData& compileData) const
 {
+    const auto isImported = [&](const NodeId& id)
+    {
+        const auto& outputs = definition.Nodes.at(id).Description.Outputs;
+        return std::any_of(outputs.begin(), outputs.end(), [&](const auto& output)
+        { return GetPortCompileData(compileData, {id, output.first}).Imported.has_value(); });
+    };
+
     std::ostringstream out;
     out << "[Execution plan | " << FrameSlotCount << " slots]\n";
     for (const auto& id : Order)
     {
+        if (isImported(id)) { continue; }
         out << "  " << id << " | " << GetDeviceRoleName(definition.Nodes.at(id).DeviceRole);
         auto dependencies = Dependencies.find(id);
-        if (dependencies != Dependencies.end() && !dependencies->second.empty())
+        if (dependencies != Dependencies.end())
         {
-            out << " | after: ";
-            const char* separator = "";
+            const char* separator = " | after: ";
             for (const auto& dependency : dependencies->second)
-            { out << separator << dependency; separator = ", "; }
+            {
+                if (isImported(dependency)) { continue; }
+                out << separator << dependency;
+                separator = ", ";
+            }
         }
         out << '\n';
     }

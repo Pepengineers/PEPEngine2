@@ -208,10 +208,19 @@ struct CompiledFrameGraph::Runtime
         size_t Measured = 0;
     };
 
-    struct FrameCopyTiming
+    struct QueueTimestampSample
+    {
+        GDX12CommandQueue* Queue = nullptr;
+        UINT64 Frequency = 0;
+        GDX12GPUTimer::TimestampRange Timestamps{};
+    };
+
+    struct CompletedFrameTiming
     {
         uint64_t FrameNumber;
-        std::array<DeviceCopyTiming, 2> Devices{};
+        std::array<DeviceCopyTiming, 2> CopyTimes{};
+        // Two devices, each with a DIRECT and a COPY queue.
+        std::array<QueueTimestampSample, 4> QueueSamples{};
     };
 
     // GDX12FrameConstants's brother of FrameGraph
@@ -224,6 +233,7 @@ struct CompiledFrameGraph::Runtime
         std::vector<ComPtr<ID3D12Resource>> ExternalResources;
         std::optional<uint64_t> SubmittedFrame;
         std::vector<CopySample> CopySamples;
+        std::vector<GDX12CommandQueue*> UsedQueues;
     };
     struct PassBatch
     {
@@ -238,12 +248,13 @@ struct CompiledFrameGraph::Runtime
     FrameGraphPlan Plan;
     std::map<NodeId, std::unique_ptr<GDX12RenderPass>> Passes;
     std::map<NodeId, std::unique_ptr<GDX12GPUTimer>> Timers;
+    std::map<GDX12CommandQueue*, GDX12GPUTimer> FrameQueueTimers;
     // The pair identifies the source pin and whether this is its export or import.
     std::map<GDX12CommandQueue*, std::map<std::pair<PinAddress, bool>, GDX12GPUTimer>> TransportTimers;
     std::map<NodeId, std::function<GDX12Texture*()>> Imports;
     std::map<PinAddress, PinAddress> Sources;
     std::vector<FrameSlotResources> FrameSlots;
-    std::optional<FrameCopyTiming> LastCompletedCopyTiming;
+    std::optional<CompletedFrameTiming> LastCompletedFrameTiming;
     uint64_t Frame = 0;
     uint64_t Generation = 0;
     uint64_t CopyBytes = 0;
@@ -266,24 +277,111 @@ struct CompiledFrameGraph::Runtime
     void WaitForCurrentFrameSlotResources()
     {
         if (FrameSlots.empty()) { return; }
-        auto& frameResources = FrameSlots[GetCurrentFrameSlotResourcesIndex()];
+        const auto slot = GetCurrentFrameSlotResourcesIndex();
+        auto& frameResources = FrameSlots[slot];
         for (const auto& point : frameResources.Completions) { GDX12CommandQueue::CPUwait(point); }
         if (frameResources.SubmittedFrame)
         {
-            FrameCopyTiming timing{*frameResources.SubmittedFrame};
+            CompletedFrameTiming timing{*frameResources.SubmittedFrame};
             for (const auto& sample : frameResources.CopySamples)
             {
-                auto& device = timing.Devices[sample.Device == DEVICE_ROLE_PRIMARY ? 0 : 1];
+                auto& device = timing.CopyTimes[sample.Device == DEVICE_ROLE_PRIMARY ? 0 : 1];
                 ++device.Copies;
                 const double ms = sample.Timer->GetTimeMS(sample.FenceValue);
                 if (ms >= 0.0) { device.TimeMS += ms; ++device.Measured; }
             }
-            LastCompletedCopyTiming = timing;
+            for (size_t i = 0; i < frameResources.UsedQueues.size(); ++i)
+            {
+                auto* queue = frameResources.UsedQueues[i];
+                const auto& timer = FrameQueueTimers.at(queue);
+                timing.QueueSamples[i].Queue = queue;
+                if (timer.IsAvailable())
+                {
+                    timing.QueueSamples[i].Frequency = timer.GetTimestampFrequency();
+                    timing.QueueSamples[i].Timestamps = timer.ReadResolvedTimestamps(slot);
+                }
+            }
+            LastCompletedFrameTiming = timing;
             frameResources.SubmittedFrame.reset();
             frameResources.CopySamples.clear();
+            frameResources.UsedQueues.clear();
         }
         frameResources.Completions.clear();
         frameResources.ExternalResources.clear();
+    }
+
+    void WriteGPUFrameTiming(std::ostream& out) const
+    {
+        if (!LastCompletedFrameTiming) { out << "\n[GPU frame timings]\n    Pending\n"; return; }
+
+        struct Span
+        {
+            double Begin = (std::numeric_limits<double>::max)();
+            double End = (std::numeric_limits<double>::lowest)();
+            bool Used = false;
+            bool Complete = true;
+        };
+
+        LARGE_INTEGER qpcFrequency{}, qpcOrigin{};
+        QueryPerformanceFrequency(&qpcFrequency);
+        QueryPerformanceCounter(&qpcOrigin);
+        const auto& frame = *LastCompletedFrameTiming;
+        std::array<Span, 2> spans;
+        for (const auto& sample : frame.QueueSamples)
+        {
+            if (!sample.Queue) { continue; }
+            const auto role = sample.Queue->GetCompletionPoint().Device->Role;
+            auto& span = spans[role == DEVICE_ROLE_PRIMARY ? 0 : 1];
+            span.Used = true;
+            UINT64 gpuNow = 0, cpuNow = 0;
+            if (!sample.Frequency || sample.Timestamps.End < sample.Timestamps.Begin || qpcFrequency.QuadPart <= 0 ||
+                FAILED(sample.Queue->GetCommandQueue()->GetClockCalibration(&gpuNow, &cpuNow)))
+            {
+                span.Complete = false;
+                continue;
+            }
+
+            // Compare timestamps from different queues on the common QPC timeline.
+            const double calibrationMS = (static_cast<double>(cpuNow) - qpcOrigin.QuadPart) * 1000.0 / qpcFrequency.QuadPart;
+            const auto toMS = [&](UINT64 ticks)
+            {
+                const double delta = ticks >= gpuNow ? static_cast<double>(ticks - gpuNow) : -static_cast<double>(gpuNow - ticks);
+                return calibrationMS + delta * 1000.0 / sample.Frequency;
+            };
+            span.Begin = (std::min)(span.Begin, toMS(sample.Timestamps.Begin));
+            span.End = (std::max)(span.End, toMS(sample.Timestamps.End));
+        }
+
+        const auto writeSpan = [&](const char* name, const Span& span, double excludedGap = 0.0)
+        {
+            out << "    " << name << ": ";
+            if (!span.Complete) { out << "unavailable (incomplete queue timestamps)"; }
+            else if (span.Used) { out << span.End - span.Begin - excludedGap << " ms"; }
+            else { out << "idle"; }
+            out << '\n';
+        };
+
+        out << "\n[GPU frame " << frame.FrameNumber << " timings]\n";
+        const auto& [primary, secondary] = spans;
+        if (!Secondary)
+        {
+            writeSpan("total-frame", primary);
+            return;
+        }
+
+        writeSpan("primary", primary);
+        writeSpan("secondary", secondary);
+
+        const Span frameSpan{
+            (std::min)(primary.Begin, secondary.Begin), (std::max)(primary.End, secondary.End),
+            primary.Used || secondary.Used, primary.Complete && secondary.Complete};
+        double gap = 0.0;
+        if (frameSpan.Complete && primary.Used && secondary.Used)
+        {
+            // Count overlapping GPU spans once and exclude any gap between them.
+            gap = (std::max)(0.0, (std::max)(primary.Begin, secondary.Begin) - (std::min)(primary.End, secondary.End));
+        }
+        writeSpan("total-frame", frameSpan, gap);
     }
 
     // Collects device capabilities, imported texture descriptions, and pass resource requirements.
@@ -468,9 +566,23 @@ struct CompiledFrameGraph::Runtime
         }
     }
 
-    // Submission returns a fence point. Slot reuse waits for these points.
+    GDX12CommandList* GetFrameCommandList(GDX12CommandQueue* queue, FrameSlotResources& frameResources)
+    {
+        auto* commands = queue->GetCommandList();
+        if (std::find(frameResources.UsedQueues.begin(), frameResources.UsedQueues.end(), queue) == frameResources.UsedQueues.end())
+        {
+            auto [timer, inserted] = FrameQueueTimers.try_emplace(queue);
+            if (inserted) { timer->second.Initialize(queue->GetCompletionPoint().Device, queue, CompileData.FrameSlotCount); }
+            timer->second.RecordBegin(commands, GetCurrentFrameSlotResourcesIndex());
+            frameResources.UsedQueues.push_back(queue);
+        }
+        return commands;
+    }
+
+    // Update the end timestamp in each existing submission. The last submission leaves the final timestamp.
     GDX12CompletionPoint SubmitCommandList(GDX12CommandQueue* queue, GDX12CommandList* commands, FrameSlotResources& frameResources)
     {
+        FrameQueueTimers.at(queue).RecordEndAndResolve(commands, GetCurrentFrameSlotResourcesIndex());
         queue->ExecuteCommandList(commands);
         auto point = queue->GetCompletionPoint();
         frameResources.Completions.push_back(point);
@@ -480,6 +592,7 @@ struct CompiledFrameGraph::Runtime
     void SubmitLocalBatch(GDX12CommandQueue* queue, FrameSlotResources& frameResources)
     {
         if (LocalBatch.Lists.empty()) { return; }
+        FrameQueueTimers.at(queue).RecordEndAndResolve(LocalBatch.Lists.back(), GetCurrentFrameSlotResourcesIndex());
         queue->ExecuteCommandLists(LocalBatch.Lists);
         const auto point = queue->GetCompletionPoint();
         frameResources.Completions.push_back(point);
@@ -503,14 +616,14 @@ struct CompiledFrameGraph::Runtime
         if (useCopy)
         {
             direct->GPUWait(ready);
-            auto* release = direct->GetCommandList();
+            auto* release = GetFrameCommandList(direct, frameResources);
             TransitionFrameGraphResource(release, source, D3D12_RESOURCE_STATE_COMMON);
             TransitionFrameGraphResource(release, target, D3D12_RESOURCE_STATE_COMMON);
             dependency = SubmitCommandList(direct, release, frameResources);
         }
         // Queue waits order GPU work without waiting for completion on the CPU.
         queue->GPUWait(dependency);
-        auto* commands = queue->GetCommandList();
+        auto* commands = GetFrameCommandList(queue, frameResources);
         commands->BeginPixEvent((exporting ? "Export " : "Import ") + sourcePin.Node + "." + sourcePin.Pin, Colors::Orange);
         if (!useCopy)
         {
@@ -739,7 +852,7 @@ struct CompiledFrameGraph::Runtime
             { commandQueue->GPUWait(nodeCompletions[dependencyId]); }
         }
         auto portBindings = PreparePassBindings(nodeDefinition, commandQueue, frameResources);
-        auto* commandList = commandQueue->GetCommandList();
+        auto* commandList = GetFrameCommandList(commandQueue, frameResources);
         auto* renderPass = Passes.at(nodeDefinition.Id).get();
         auto* passTimer = Timers.at(nodeDefinition.Id).get();
 
@@ -865,45 +978,48 @@ std::string CompiledFrameGraph::GetDebugReport() const
 {
     std::ostringstream out;
     out << std::fixed << std::setprecision(6);
-    out << "FrameGraph | generation " << _runtime->Generation << '\n';
-    out << "\n[Cross-GPU copies]\n"
-        << "  Planned per frame: " << _runtime->Plan.CopyCount
-        << " | Transport: " << (_runtime->Plan.UseCopyQueue ? "COPY" : "DIRECT") << '\n'
-        << "  Submitted so far: " << _runtime->CopyCommands << " commands, " << _runtime->CopyBytes << " bytes\n";
-    if (const auto& timing = _runtime->LastCompletedCopyTiming)
+    out << "\nFRAME GRAPH INFO:";
+    _runtime->WriteGPUFrameTiming(out);
+    if (_runtime->Secondary)
     {
-        out << "  Frame " << timing->FrameNumber << " totals:\n";
-        for (const auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
+        out << "\n[Cross-GPU copies]\n"
+            << "  Planned per frame: " << _runtime->Plan.CopyCount
+            << " | Transport: " << (_runtime->Plan.UseCopyQueue ? "COPY" : "DIRECT") << '\n'
+            << "  Submitted so far: " << _runtime->CopyCommands << " commands, " << _runtime->CopyBytes << " bytes\n";
+        if (const auto& timing = _runtime->LastCompletedFrameTiming)
         {
-            if (role == DEVICE_ROLE_SECONDARY && !_runtime->Secondary) { continue; }
-            const auto& device = timing->Devices[role == DEVICE_ROLE_PRIMARY ? 0 : 1];
-            out << "    " << GetDeviceRoleName(role) << ": ";
-            if (device.Copies && !device.Measured) { out << "unavailable"; }
-            else { out << device.TimeMS << " ms"; }
-            if (device.Measured < device.Copies)
+            out << "  Frame " << timing->FrameNumber << " totals:\n";
+            for (const auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
             {
-                out << " | WARNING: " << (device.Copies - device.Measured) << '/' << device.Copies
-                    << " timers were unable to return a result. Total timings are incomplete.";
+                const auto& device = timing->CopyTimes[role == DEVICE_ROLE_PRIMARY ? 0 : 1];
+                out << "    " << GetDeviceRoleName(role) << ": ";
+                if (device.Copies && !device.Measured) { out << "unavailable"; }
+                else { out << device.TimeMS << " ms"; }
+                if (device.Measured < device.Copies)
+                {
+                    out << " | WARNING: " << (device.Copies - device.Measured) << '/' << device.Copies
+                        << " timers were unable to return a result. Total timings are incomplete.";
+                }
+                out << '\n';
             }
-            out << '\n';
         }
-    }
-    else { out << "  Frame totals: pending\n"; }
+        else { out << "  Frame totals: pending\n"; }
 
-    if (!_runtime->TransportTimers.empty()) { out << "  Latest individual transfers:\n"; }
-    for (auto& [queue, timers] : _runtime->TransportTimers)
-    {
-        const auto role = queue->GetCompletionPoint().Device->Role;
-        const char* queueName = queue->GetType() == D3D12_COMMAND_LIST_TYPE_COPY ? "COPY" : "DIRECT";
-        for (auto& [key, timer] : timers)
+        if (!_runtime->TransportTimers.empty()) { out << "  Latest individual transfers:\n"; }
+        for (auto& [queue, timers] : _runtime->TransportTimers)
         {
-            out << "    " << (key.second ? "Export " : "Import ") << key.first.Node << '.' << key.first.Pin
-                << " | " << GetDeviceRoleName(role) << '/' << queueName << " | ";
-            const double ms = timer.GetTimeMS();
-            if (!timer.IsAvailable()) { out << "unsupported"; }
-            else if (ms < 0.0) { out << "pending"; }
-            else { out << ms << " ms"; }
-            out << '\n';
+            const auto role = queue->GetCompletionPoint().Device->Role;
+            const char* queueName = queue->GetType() == D3D12_COMMAND_LIST_TYPE_COPY ? "COPY" : "DIRECT";
+            for (auto& [key, timer] : timers)
+            {
+                out << "    " << (key.second ? "Export " : "Import ") << key.first.Node << '.' << key.first.Pin
+                    << " | " << GetDeviceRoleName(role) << '/' << queueName << " | ";
+                const double ms = timer.GetTimeMS();
+                if (!timer.IsAvailable()) { out << "unsupported"; }
+                else if (ms < 0.0) { out << "pending"; }
+                else { out << ms << " ms"; }
+                out << '\n';
+            }
         }
     }
     out << "\n[GPU pass timings]\n";
@@ -918,16 +1034,17 @@ std::string CompiledFrameGraph::GetDebugReport() const
         out << '\n';
     }
 
-    out << '\n' << _runtime->Plan.GetDebugReport(_runtime->Definition);
+    out << '\n' << _runtime->Plan.GetDebugReport(_runtime->Definition, _runtime->CompileData);
 
     bool hasPortOverrides = false;
     for (const auto& node : _runtime->Definition.Nodes)
     {
         for (const auto& pin : node.second.Description.Outputs)
         {
-            if (pin.second.RequestedMemory == MemoryType::Auto) { continue; }
+            const auto storage = pin.second.RequestedMemory;
+            if (storage == MemoryType::Auto || (storage == MemoryType::Local && _runtime->Imports.count(node.first))) { continue; }
             if (!hasPortOverrides) { out << "\n[Port overrides]\n"; hasPortOverrides = true; }
-            out << "  " << node.first << '.' << pin.first << " storage=" << GetMemoryTypeName(pin.second.RequestedMemory) << '\n';
+            out << "  " << node.first << '.' << pin.first << " storage=" << GetMemoryTypeName(storage) << '\n';
         }
         for (const auto& pin : node.second.Description.Inputs)
         {

@@ -73,7 +73,7 @@ struct FrameGraphPlan
     uint32_t FrameSlotCount = 0;
     uint32_t CopyCount = 0;
     bool UseCopyQueue = false;
-    std::string GetDebugReport(const FrameGraphDefinition& definition) const;
+    std::string GetDebugReport(const FrameGraphDefinition& definition, const FrameGraphCompileData& compileData) const;
 };
 
 // Validate topology, resolve resource descriptions and choose minimum-copy memory placements.

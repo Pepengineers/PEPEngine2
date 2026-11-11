@@ -94,21 +94,35 @@ bool GDX12GPUTimer::Start(GDX12CommandList* commandList, bool waitForSlot)
         UpdateResolvedFrames();
     }
 
-    commandList->GetCommandList()->EndQuery(_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, GetStartQueryIndex(_activeFrameIndex));
+    RecordBegin(commandList, _activeFrameIndex);
     return true;
 }
 
 void GDX12GPUTimer::Stop(GDX12CommandList* commandList)
 {
     if (!commandList) { return; }
+    RecordEndAndResolve(commandList, _activeFrameIndex);
+}
 
+void GDX12GPUTimer::RecordBegin(GDX12CommandList* commandList, UINT sampleIndex)
+{
+    if (!_queryHeap) { return; }
+    commandList->GetCommandList()->EndQuery(_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, GetStartQueryIndex(sampleIndex));
+}
+
+void GDX12GPUTimer::RecordEndAndResolve(GDX12CommandList* commandList, UINT sampleIndex)
+{
     if (!_queryHeap || !_readbackBuffer) { return; }
-
-    commandList->GetCommandList()->EndQuery(_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, GetEndQueryIndex(_activeFrameIndex));
+    commandList->GetCommandList()->EndQuery(_queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, GetEndQueryIndex(sampleIndex));
     commandList->GetCommandList()->ResolveQueryData(
         _queryHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP,
-        GetStartQueryIndex(_activeFrameIndex), QueryCount,
-        _readbackBuffer.Get(), GetReadbackOffset(_activeFrameIndex));
+        GetStartQueryIndex(sampleIndex), QueryCount,
+        _readbackBuffer.Get(), GetReadbackOffset(sampleIndex));
+}
+
+GDX12GPUTimer::TimestampRange GDX12GPUTimer::ReadResolvedTimestamps(UINT sampleIndex) const
+{
+    return {_mappedReadbackData[GetStartQueryIndex(sampleIndex)], _mappedReadbackData[GetEndQueryIndex(sampleIndex)]};
 }
 
 void GDX12GPUTimer::OnCommandListExecuted(UINT64 fenceValue)
@@ -146,11 +160,8 @@ void GDX12GPUTimer::UpdateResolvedFrames()
         const UINT64 fenceValue = sample.FenceValue;
         if (fenceValue == 0 || sample.TimeMS >= 0.0 || completedFenceValue < fenceValue) { continue; }
 
-        const UINT startQueryIndex = GetStartQueryIndex(frameIndex);
-        const UINT endQueryIndex = GetEndQueryIndex(frameIndex);
-        const UINT64 startTimestamp = _mappedReadbackData[startQueryIndex];
-        const UINT64 endTimestamp = _mappedReadbackData[endQueryIndex];
-        const UINT64 elapsedTicks = endTimestamp > startTimestamp ? endTimestamp - startTimestamp : 0;
+        const auto timestamps = ReadResolvedTimestamps(frameIndex);
+        const UINT64 elapsedTicks = timestamps.End > timestamps.Begin ? timestamps.End - timestamps.Begin : 0;
         const double resolvedTimeMS = static_cast<double>(elapsedTicks) * 1000.0 / static_cast<double>(_timestampFrequency);
         sample.TimeMS = resolvedTimeMS;
 
