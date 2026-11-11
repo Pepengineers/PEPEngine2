@@ -7,7 +7,8 @@ class ShadowVisibilitySystem final : public ParallelJob
 {
 public:
     JobHandle Schedule(JobSystem& jobs, const std::vector<GDX12LocalLightConstants>& lights,
-        const std::vector<GDX12LocalShadowCaster>& casters, std::vector<GDX12LocalShadowVisibility>& visibility) &
+        const std::vector<GDX12LocalShadowCaster>& casters, std::vector<GDX12LocalShadowVisibility>& visibility,
+        const std::vector<GDX12LocalShadowCaster>& meshStatic = {}, uint64_t meshRevision = 0) &
     {
         EnsureIdle();
         _lights = &lights;
@@ -15,12 +16,19 @@ public:
         _dynamic.clear();
         for (const auto& caster : casters)
             (caster.Dynamic ? _dynamic : _nextStatic).push_back(caster);
-        _staticChanged = _static.size() != _nextStatic.size() ||
-            !std::equal(_static.begin(), _static.end(), _nextStatic.begin(), [](const auto& a, const auto& b)
+        _staticChanged = !_hasStatic || _meshRevision != meshRevision || _otherStaticCount != _nextStatic.size() ||
+            !std::equal(_nextStatic.begin(), _nextStatic.end(), _static.begin(), [](const auto& a, const auto& b)
             {
                 return a.Signature == b.Signature && std::memcmp(&a.Bounds, &b.Bounds, sizeof(a.Bounds)) == 0;
             });
-        if (_staticChanged) _static.swap(_nextStatic);
+        if (_staticChanged)
+        {
+            _hasStatic = true;
+            _meshRevision = meshRevision;
+            _otherStaticCount = _nextStatic.size();
+            _nextStatic.insert(_nextStatic.end(), meshStatic.begin(), meshStatic.end());
+            _static.swap(_nextStatic);
+        }
         _cache.resize(lights.size());
         _visibility = &visibility;
         visibility.resize(lights.size());
@@ -56,7 +64,10 @@ private:
     };
     std::vector<CachedStatic> _cache;
     std::vector<GDX12LocalShadowCaster> _static, _nextStatic, _dynamic;
+    uint64_t _meshRevision = 0;
+    size_t _otherStaticCount = 0;
     bool _staticChanged = false;
+    bool _hasStatic = false;
     const std::vector<GDX12LocalLightConstants>* _lights = nullptr;
     std::vector<GDX12LocalShadowVisibility>* _visibility = nullptr;
 };

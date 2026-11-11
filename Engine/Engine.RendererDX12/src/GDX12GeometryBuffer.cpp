@@ -21,6 +21,7 @@ void GDX12GeometryBuffer::Clear()
     _vertexDataCPU.clear();
     _indexDataCPU.clear();
     _meshCache.clear();
+    ++_meshCacheRevision;
     _freeSkinRanges.clear();
     _freeIndexRanges.clear();
     _vertexBuffer.reset();
@@ -252,6 +253,7 @@ void GDX12GeometryBuffer::AddMesh(const Mesh* mesh, const MeshHandle handle, con
     ResizeVertexBuffer(static_cast<UINT>(_vertexDataCPU.size()), vertexStart, vertexCount);
     ResizeIndexBuffer(static_cast<UINT>(_indexDataCPU.size()));
     _meshCache[handle.GetValue()] = std::move(replacement);
+    ++_meshCacheRevision;
 }
 
 const GPUMesh* GDX12GeometryBuffer::GetGPUMeshByHandle(const MeshHandle handle)

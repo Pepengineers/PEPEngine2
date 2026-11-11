@@ -95,6 +95,7 @@ public:
 
     void Prepare()
     {
+        GDX12_SCOPED_CPU_EVENT("Local shadow pass preparation");
         if (_prepared) return;
         const bool perFaceVisibility = _resources->LocalShadowCasters.has_value();
         _compactDynamic = !_staticOnly && perFaceVisibility;

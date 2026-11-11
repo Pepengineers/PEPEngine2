@@ -82,6 +82,7 @@ void GDX12DeviceResources::Initialize(GDX12Device* device)
 
 void GDX12DeviceResources::PrepareLocalShadowData()
 {
+    GDX12_SCOPED_CPU_EVENT("Local shadow instance preparation");
     auto& frame = *FrameConstants[CurrFrameConstantsIndex];
     if (!frame.ShadowTemplatesUpload)
         frame.ShadowTemplatesUpload = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(Device, 0, EBufferType::Upload, false);
@@ -237,31 +238,12 @@ GDX12RenderPrimitiveHandle GDX12DeviceResources::PublishMeshPrimitive(UINT insta
     return entry.Handle;
 }
 
-bool GDX12DeviceResources::RetainMeshPrimitive(UINT instance, GDX12RenderPrimitiveHandle handle)
-{
-    if (instance >= _meshPrimitives.size()) return false;
-    auto& entry = _meshPrimitives[instance];
-    if (!(entry.Handle == handle) || !Primitives.Get(handle)) return false;
-    entry.Epoch = _meshPrimitiveEpoch;
-    return true;
-}
-
 void GDX12DeviceResources::RemoveMeshPrimitive(UINT instance)
 {
     if (instance >= _meshPrimitives.size()) return;
     auto& entry = _meshPrimitives[instance];
     Primitives.Remove(entry.Handle);
     entry = {};
-}
-
-void GDX12DeviceResources::EndMeshPrimitiveUpdate()
-{
-    for (auto& entry : _meshPrimitives)
-        if (entry.Handle.Index != UINT_MAX && entry.Epoch != _meshPrimitiveEpoch)
-        {
-            Primitives.Remove(entry.Handle);
-            entry = {};
-        }
 }
 
 void GDX12DeviceResources::GatherGeometryBatches(const GDX12GeometryContext& view,

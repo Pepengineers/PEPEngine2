@@ -100,6 +100,10 @@
       <Optimization>MaxSpeed</Optimization><BasicRuntimeChecks>Default</BasicRuntimeChecks><SupportJustMyCode>false</SupportJustMyCode>
     </ClCompile>
     <ClCompile Include="src\RenderModule.cpp" />
+    <ClCompile Include="src\RenderModuleSnapshot.cpp">
+      <Optimization>MaxSpeed</Optimization><InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks><SupportJustMyCode>false</SupportJustMyCode>
+    </ClCompile>
     <ClCompile Include="src\RenderModuleMGPU.cpp" />
     <ClCompile Include="src\Rendering\RenderMGPURuntime.cpp" />
     <ClCompile Include="src\Rendering\CrossAdapterAO.cpp" />

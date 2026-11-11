@@ -301,15 +301,19 @@ static void CheckShadowVisibilityJobs()
         casters.push_back({ BoundingBox({ position(random), position(random), position(random) },
             { extent(random), extent(random), extent(random) }), i + 2, i % 3 == 0 });
     ShadowVisibilitySystem fourThreadCache;
+    std::vector<GDX12LocalShadowCaster> meshStatic;
+    uint64_t meshRevision = 0;
     const auto checkCache = [&]()
     {
+        auto combined = casters;
+        combined.insert(combined.end(), meshStatic.begin(), meshStatic.end());
         for (auto* jobs : { &one, &four })
         {
             auto& cache = jobs == &one ? system : fourThreadCache;
-            cache.Schedule(*jobs, lights, casters, parallel).Complete();
+            cache.Schedule(*jobs, lights, casters, parallel, meshStatic, meshRevision).Complete();
             for (size_t i = 0; i < lights.size(); ++i)
             {
-                const auto reference = BuildLocalShadowVisibility(lights[i], casters);
+                const auto reference = BuildLocalShadowVisibility(lights[i], combined);
                 Require(reference.StaticCasters == parallel[i].StaticCasters && reference.AllCasters == parallel[i].AllCasters,
                     "Cached static/dynamic visibility differs from the full caster scan");
             }
@@ -317,6 +321,13 @@ static void CheckShadowVisibilityJobs()
     };
     checkCache();
     checkCache();
+    meshStatic.push_back({BoundingBox({ 10, 20, 30 }, { 4, 5, 6 }), 50, false});
+    ++meshRevision; checkCache();
+    checkCache();
+    meshStatic.front().Bounds.Center.x += 1000;
+    ++meshRevision; checkCache();
+    meshStatic.clear();
+    ++meshRevision; checkCache();
     casters[1].Bounds.Center.x += 500; checkCache();
     ++casters[1].Signature; checkCache(); // Material edit or same-handle geometry reimport.
     casters[1].Dynamic = true; checkCache();
@@ -331,9 +342,18 @@ static void CheckShadowVisibilityJobs()
         BuildLocalLightShadowMatrices(light);
     }
     checkCache();
+    lights[1].Direction = { 0.5f, -0.8660254f, 0 };
+    BuildLocalLightShadowMatrices(lights[1]);
+    checkCache();
     lights[0].ShadowFirstSlice = UINT_MAX; checkCache();
     lights[0].ShadowFirstSlice = 0; checkCache();
     casters.clear(); checkCache();
+    ShadowVisibilitySystem firstFrame;
+    meshStatic.push_back({BoundingBox({ 10, 20, 30 }, { 4, 5, 6 }), 50, false});
+    firstFrame.Schedule(four, lights, casters, parallel, meshStatic, 0).Complete();
+    for (size_t i = 0; i < lights.size(); ++i)
+        Require(parallel[i].StaticCasters == BuildLocalShadowVisibility(lights[i], meshStatic).StaticCasters,
+            "Initial mesh caster list must be visible even at revision zero");
     lights.clear();
     system.Schedule(four, lights, casters, parallel).Complete();
     Require(parallel.empty(), "Removing all lights must discard old visibility results");

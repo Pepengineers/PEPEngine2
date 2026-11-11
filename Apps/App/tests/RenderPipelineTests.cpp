@@ -511,6 +511,15 @@ static void TestPrimitiveRecords()
     resources.EndMeshPrimitiveUpdate();
     Require(resources.Primitives.Get(sparse) && !resources.Primitives.Get(low),
         "Retiring a missing low instance removed a retained high instance");
+    const auto membership = resources.Primitives.GetMembershipRevision();
+    resources.BeginMeshPrimitiveUpdate();
+    Require(resources.RetainKnownMeshPrimitives(4096, 1, membership),
+        "Stable sparse GPU instance could not be retained by range");
+    resources.EndMeshPrimitiveUpdate();
+    Require(resources.Primitives.Get(sparse), "Range retention let a validated primitive expire");
+    resources.RemoveMeshPrimitive(4096);
+    Require(!resources.RetainKnownMeshPrimitives(4096, 1, membership),
+        "Range retention accepted an obsolete membership revision");
     rejected = false;
     try { resources.PublishMeshPrimitive(UINT_MAX, primitive); } catch (const std::invalid_argument&) { rejected = true; }
     Require(rejected, "Invalid GPU instance index was accepted");

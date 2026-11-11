@@ -60,6 +60,7 @@ public:
 	ID3D12Resource* BeginSkinning(GDX12CommandList* commands);
 	void EndSkinning(GDX12CommandList* commands);
 	const GPUMesh* GetGPUMeshByHandle(MeshHandle handle);
+    uint64_t GetMeshCacheRevision() const { return _meshCacheRevision; }
     D3D12_GPU_VIRTUAL_ADDRESS GetVertexAddress() const
     { return _vertexBuffer ? _vertexBuffer->D3DResource->GetGPUVirtualAddress() : 0; }
     std::shared_ptr<GDX12Resource> ShareVertexResource() const { return _vertexBuffer; }
@@ -76,6 +77,7 @@ private:
 
 	//MeshHandle -> GPUMesh Map
 	std::unordered_map<std::uint32_t, std::unique_ptr<GPUMesh>> _meshCache;
+    uint64_t _meshCacheRevision = 0;
 
 	std::vector<Vertex> _vertexDataCPU;
 	std::vector<uint32_t> _indexDataCPU;

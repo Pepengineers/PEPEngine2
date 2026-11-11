@@ -601,6 +601,7 @@ std::pair<size_t, size_t> GDX12ReflectionProbePass::GetReadiness() const
 
 void GDX12ReflectionProbePass::Prepare()
 {
+    GDX12_SCOPED_CPU_EVENT("Reflection probe preparation");
     if (_planPrepared) return;
     _views = {};
     _capturePlanned = _staticShadowsPlanned = false;

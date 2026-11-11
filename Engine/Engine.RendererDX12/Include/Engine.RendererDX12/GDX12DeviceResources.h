@@ -47,9 +47,33 @@ public:
     GDX12RenderPrimitiveRegistry Primitives;
     void BeginMeshPrimitiveUpdate();
     GDX12RenderPrimitiveHandle PublishMeshPrimitive(UINT instance, const GDX12RenderPrimitive& primitive);
-    bool RetainMeshPrimitive(UINT instance, GDX12RenderPrimitiveHandle handle);
+    bool RetainMeshPrimitive(UINT instance, GDX12RenderPrimitiveHandle handle)
+    {
+        if (instance >= _meshPrimitives.size()) return false;
+        auto& entry = _meshPrimitives[instance];
+        if (!(entry.Handle == handle) || !Primitives.Get(handle)) return false;
+        entry.Epoch = _meshPrimitiveEpoch;
+        return true;
+    }
+    // Retain a range whose handles were already checked at this membership revision.
+    bool RetainKnownMeshPrimitives(UINT first, size_t count, uint64_t membershipRevision)
+    {
+        if (Primitives.GetMembershipRevision() != membershipRevision ||
+            first >= _meshPrimitives.size() || count > _meshPrimitives.size() - first) return false;
+        auto* entries = _meshPrimitives.data() + first;
+        for (size_t i = 0; i < count; ++i) entries[i].Epoch = _meshPrimitiveEpoch;
+        return true;
+    }
     void RemoveMeshPrimitive(UINT instance);
-    void EndMeshPrimitiveUpdate();
+    void EndMeshPrimitiveUpdate()
+    {
+        for (auto& entry : _meshPrimitives)
+            if (entry.Handle.Index != UINT_MAX && entry.Epoch != _meshPrimitiveEpoch)
+            {
+                Primitives.Remove(entry.Handle);
+                entry = {};
+            }
+    }
     void GatherGeometryBatches(const GDX12GeometryContext&, const GDX12RenderBatch& mesh, std::vector<GDX12RenderBatch>&) const;
     void EmitGeometry(GDX12CommandList*, const GDX12GeometryContext&, const GDX12RenderBatch& mesh);
     std::vector<GDX12RenderGraph::BufferAccess> GetGeometryBufferAccesses(GDX12GeometryStage stage) const;
@@ -75,8 +99,11 @@ public:
     GDX12ShadowConstants ShadowSettings;
     GDX12ShadowQuality ShadowQuality;
     std::vector<GDX12LocalLightConstants> LocalLights;
-    // Complete current caster snapshot; standalone clients without one retain revision-based invalidation.
+    // When present, these casters plus StaticMeshShadowCasters form the current shadow snapshot.
     std::optional<std::vector<GDX12LocalShadowCaster>> LocalShadowCasters;
+    // Advance the revision whenever mesh caster membership, bounds, or signatures change.
+    std::vector<GDX12LocalShadowCaster> StaticMeshShadowCasters;
+    uint64_t StaticMeshShadowRevision = 0;
     std::vector<GDX12LocalShadowVisibility> LocalShadowVisibility;
     void Initialize(GDX12Device* device);
     void UpdateMainCB(UINT width, UINT height, GameTimer* timer);

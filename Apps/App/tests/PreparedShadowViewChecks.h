@@ -1,4 +1,5 @@
 #pragma once
+#include "Engine.RendererDX12/GDX12DeviceFactory.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12CascadedShadowPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include <stdexcept>
@@ -7,9 +8,11 @@ inline void TestPreparedShadowViews()
 {
     const auto require = [](bool value, const char* message)
     { if (!value) throw std::runtime_error(message); };
+    GDX12Device device;
     GDX12DeviceResources resources;
     RenderPipelineCommonData common;
     resources.ShadowSettings = {};
+    resources.ShadowQuality.SunResolution = 0;
     resources.Lighting.SunShadowFlags = 0;
     GDX12CascadedShadowPass disabled;
     disabled.Setup(&resources, nullptr, &common);
@@ -17,6 +20,9 @@ inline void TestPreparedShadowViews()
     for (UINT slot = 0; slot < disabled.GetGeometryViewCapacity(); ++slot)
         require(!disabled.GetGeometryView(slot), "Disabled sun published geometry preparation views");
 
+    ThrowIfFailed(device.Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
+    resources.Initialize(&device);
+    resources.ShadowQuality.SunResolution = 128;
     resources.Lighting.SunShadowFlags = 1;
     resources.CurrFrameConstantsIndex = 2;
     common.CameraView = Matrix::CreateTranslation(-3, -4, -5);

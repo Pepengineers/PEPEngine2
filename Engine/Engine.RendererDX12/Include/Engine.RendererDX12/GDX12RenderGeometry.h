@@ -159,6 +159,7 @@ public:
         auto& slot = _slots[index];
         slot.Primitive = primitive;
         slot.Alive = true;
+        ++_membershipRevision;
         return { index, slot.Generation };
     }
     GDX12RenderPrimitive* Get(GDX12RenderPrimitiveHandle handle)
@@ -180,6 +181,7 @@ public:
         if (!Get(handle)) return;
         auto& slot = _slots[handle.Index];
         slot.Alive = false;
+        ++_membershipRevision;
         if (slot.Generation == (std::numeric_limits<uint64_t>::max)()) return;
         ++slot.Generation;
         _free.push_back(handle.Index);
@@ -189,10 +191,12 @@ public:
         for (UINT i = 0; i < _slots.size(); ++i)
             if (_slots[i].Alive) visitor(GDX12RenderPrimitiveHandle{ i, _slots[i].Generation }, _slots[i].Primitive);
     }
+    uint64_t GetMembershipRevision() const { return _membershipRevision; }
 private:
     struct Slot { GDX12RenderPrimitive Primitive; uint64_t Generation = 1; bool Alive = false; };
     std::vector<Slot> _slots;
     std::vector<UINT> _free;
+    uint64_t _membershipRevision = 0;
 };
 
 enum class GDX12DrawKind : std::uint8_t { Direct, Indexed, Indirect };

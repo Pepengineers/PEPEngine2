@@ -245,10 +245,30 @@ private:
         bool Valid = false;
     };
     std::vector<MeshSnapshot> _meshSnapshots;
+    struct SnapshotMaterial
+    {
+        const GDX12Material* Material;
+        uint64_t Revision;
+        MaterialType Type;
+        bool Preview;
+    };
+    struct StaticRendererSnapshot
+    {
+        MeshHandle Mesh;
+        uint64_t MeshCacheRevision = 0;
+        uint64_t PrimitiveMembershipRevision = 0;
+        std::vector<SnapshotMaterial> Materials;
+        std::vector<uint32_t> SubMeshes;
+        size_t Count = 0;
+        bool Visible = false;
+    };
+    std::vector<StaticRendererSnapshot> _staticRendererSnapshots;
+    std::vector<GDX12InstanceData> _staticSnapshotInstances;
     size_t _staticMeshSnapshotCount = SIZE_MAX;
     uint64_t _staticMeshSnapshotHash = 14695981039346656037ull;
+    uint64_t _snapshotPrimitiveMembershipRevision = 0;
+    std::vector<GDX12RenderPrimitiveHandle> _nonStaticMeshPrimitives;
     GDX12RenderBounds _staticMeshReflectionBounds, _staticMeshCasterBounds;
-    std::vector<GDX12LocalShadowCaster> _staticMeshCasters;
     ShadowVisibilitySystem _shadowVisibility;
     void CollectParticleEmitters();
     void InitializeMGPU();

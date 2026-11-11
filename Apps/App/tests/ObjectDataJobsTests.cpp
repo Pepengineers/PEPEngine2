@@ -280,6 +280,40 @@ public:
             _gpuData.Schedule(_jobs, world, 0).Complete();
             if (editMirror) editMirror();
             render->Render(); render->WaitForUploads();
+            const auto* slot = render->GetCurrentPrimaryFrameConstants();
+            const auto* instances = slot->InstanceCache->GetCPUData();
+            std::vector<const GDX12RenderPrimitive*> byInstance(slot->InstanceCache->GetElementCount(), nullptr);
+            _resources->Primitives.ForEach([&](auto, const GDX12RenderPrimitive& value)
+            {
+                if (!value.Source) byInstance.at(value.FirstInstance) = &value;
+            });
+            size_t staticCasters = 0;
+            ecs.ForEach<StaticMeshRenderComponent>([&](Entity entity, const StaticMeshRenderComponent& renderer)
+            {
+                const auto* mesh = render->GetPrimaryGPUMesh(renderer.MeshHandler);
+                for (size_t part = 0; part < renderer.GetSubMeshCount(mesh->SubMeshes.size()); ++part)
+                {
+                    const auto index = renderer._CBufferIndices.at(part);
+                    const auto* published = byInstance.at(index);
+                    if (!ecs.Has<TransformComponent>(entity))
+                    {
+                        Require(!published, "Snapshot retained a renderer without a transform");
+                        continue;
+                    }
+                    const auto* material = renderer.Materials.at(mesh->SubMeshes.at(renderer.GetSubMeshIndex(part)).MaterialIndex);
+                    const auto& instance = instances[index];
+                    const bool casts = material->Type != MaterialType::Transparent && !material->ReflectionProbePreview;
+                    const BoundingBox bounds(instance.BoundingBoxCenter, instance.BoundingBoxExtents);
+                    Require(published && published->TransformIndex == instance.TransformIndex &&
+                        published->MaterialIndex == instance.MaterialIndex && published->Visible == renderer.Visible &&
+                        published->Dynamic == bool(instance.ReflectionDynamic) && published->CastsShadows == casts &&
+                        std::memcmp(&published->Bounds, &bounds, sizeof(bounds)) == 0,
+                        "Incremental primitive differs from the current ECS and frame-slot scan");
+                    staticCasters += renderer.Visible && !instance.ReflectionDynamic && casts;
+                }
+            });
+            Require(_resources->StaticMeshShadowCasters.size() == staticCasters,
+                "Persistent static caster membership differs from the frame-slot scan");
         };
         const auto primitive = [&]
         {
@@ -296,6 +330,23 @@ public:
         frame();
         Require(primitive().first == initial.first && primitive().second.Revision() == initial.second.Revision() &&
             _resources->ReflectionStaticRevision == revision, "Unchanged static snapshot lost identity or invalidated probes");
+        GDX12InstanceData originalInstance;
+        GDX12UploadBuffer<GDX12InstanceData>* editedSlot = nullptr;
+        const auto instanceIndex = initial.second.FirstInstance;
+        frame([&]
+        {
+            editedSlot = render->GetCurrentPrimaryFrameConstants()->InstanceCache.get();
+            originalInstance = editedSlot->GetCPUData()[instanceIndex];
+            auto edited = originalInstance;
+            edited.BoundingBoxCenter.x += 75;
+            editedSlot->CopyData(instanceIndex, edited);
+        });
+        Require(primitive().second.Bounds.Center.x == originalInstance.BoundingBoxCenter.x + 75 &&
+            _resources->ReflectionStaticRevision != revision, "Static snapshot ignored a direct frame slot edit");
+        revision = _resources->ReflectionStaticRevision;
+        frame([&] { editedSlot->CopyData(instanceIndex, originalInstance); });
+        Require(primitive().second.Bounds.Center.x == originalInstance.BoundingBoxCenter.x &&
+            _resources->ReflectionStaticRevision != revision, "Static snapshot reused an edit from another frame slot");
         const auto history = render->GetRenderPipelineCommonData()->HistoryRevision;
         Timer.Start();
         for (int i = 0; i < 3; ++i)
@@ -306,6 +357,7 @@ public:
                 "Consecutive slow frames repeatedly invalidated temporal history");
         }
         Timer.Stop();
+        world.SetPaused(true);
         const auto& wallRenderer = ecs.Get<StaticMeshRenderComponent>(wall);
         auto* material = wallRenderer.Materials.at(render->GetPrimaryGPUMesh(wallRenderer.MeshHandler)
             ->SubMeshes.at(wallRenderer.GetSubMeshIndex(0)).MaterialIndex);
@@ -326,6 +378,7 @@ public:
         frame();
         Require(!primitive().second.Visible && _resources->ReflectionStaticRevision != revision,
             "Hidden static mesh remained in the probe/caster snapshot");
+        world.SetPaused(false);
         ecs.Get<StaticMeshRenderComponent>(wall).Visible = true;
         ecs.Get<StaticMeshRenderComponent>(wall).ReflectionDynamic = true;
         const auto dynamicRevision = _resources->ReflectionDynamicRevision;
@@ -406,11 +459,14 @@ public:
         GDX12RenderPrimitive extra;
         extra.Source = &application;
         extra.Bounds = {{2000000,0,0},{0.25f,1,1}};
-        const auto casterCount = _resources->LocalShadowCasters->size();
+        const auto countCasters = [&] {
+            return _resources->LocalShadowCasters->size() + _resources->StaticMeshShadowCasters.size();
+        };
+        const auto casterCount = countCasters();
         const auto external = _resources->Primitives.Add(extra);
         frame();
         Require(_resources->ReflectionSceneBounds.Center.x + _resources->ReflectionSceneBounds.Extents.x >= 2000000 &&
-            _resources->LocalShadowCasters->size() == casterCount + 1,
+            countCasters() == casterCount + 1,
             "Application primitive did not enter the shared snapshot");
         revision = _resources->ReflectionStaticRevision;
         auto* editedPrimitive = _resources->Primitives.Get(external);
@@ -421,12 +477,21 @@ public:
             "Direct application bounds edit retained a stale static reduction");
         _resources->Primitives.Get(external)->CastsShadows = false;
         frame();
-        Require(_resources->LocalShadowCasters->size() == casterCount,
+        Require(countCasters() == casterCount,
             "Direct application classification edit retained a shadow caster");
         _resources->Primitives.Remove(external);
         frame();
         Require(_resources->ReflectionSceneBounds.Center.x + _resources->ReflectionSceneBounds.Extents.x < 1000000,
             "Removing an application primitive retained expanded static bounds");
+        const auto destroyed = primitive().first;
+        ecs.DestroyEntity(wall);
+        auto recycled = ecs.CreateEntity();
+        Require(static_cast<Entity>(recycled) == wall, "Snapshot fixture did not reuse the entity ID");
+        recycled.AddComponent<TransformComponent>(Vector3(250, 0, 0));
+        recycled.AddComponent<StaticMeshRenderComponent>(saved.MeshHandler, saved.Materials, saved.SubMeshIndices);
+        frame();
+        Require(!_resources->Primitives.Get(destroyed) && !(primitive().first == destroyed),
+            "Recycled entity retained the destroyed renderer's primitive identity");
         std::cout << "Static snapshots: warm reuse, material, transform, visibility, classification, reimport, removal and replacement passed.\n";
     }
     void RenderBistroFrames()

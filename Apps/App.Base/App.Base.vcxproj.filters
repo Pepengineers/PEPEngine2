@@ -155,6 +155,9 @@
     <ClCompile Include="src\RenderModule.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="src\RenderModuleSnapshot.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="src\RenderModuleMGPU.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

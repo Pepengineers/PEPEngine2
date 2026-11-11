@@ -67,7 +67,8 @@ JobHandle RenderPipelineContext::PrepareScene()
 {
     Runtime.CollectReflectionScene();
     return Runtime._shadowVisibility.Schedule(*Common.Jobs, Primary.LocalLights,
-        *Primary.LocalShadowCasters, Primary.LocalShadowVisibility);
+        *Primary.LocalShadowCasters, Primary.LocalShadowVisibility,
+        Primary.StaticMeshShadowCasters, Primary.StaticMeshShadowRevision);
 }
 
 void RenderPipelineContext::Resize() { Runtime.OnResize(); }
@@ -828,8 +829,12 @@ void RenderModule::UnsubscribeFromWorld(World& world)
         _transformCount = _instanceCount = _cameraCount = 0;
         _freeSkeletalInstances.clear();
         _meshSnapshots.clear();
+        _staticRendererSnapshots.clear();
+        _staticSnapshotInstances.clear();
+        _nonStaticMeshPrimitives.clear();
         _staticMeshSnapshotCount = SIZE_MAX;
-        _staticMeshCasters.clear();
+        _primaryResources.StaticMeshShadowCasters.clear();
+        ++_primaryResources.StaticMeshShadowRevision;
         _primaryResources.ReflectionProbes.clear();
         _RPcommonData.ActiveCameraCBufferIndex = UINT_MAX;
         _RPcommonData.RequestHistoryReset = true;
@@ -1266,239 +1271,6 @@ void RenderModule::CollectParticleEmitters()
                 XMConvertToRadians(transform.Rotation.z)) * Matrix::CreateTranslation(transform.Location);
             _primaryResources.ParticleEmitters.push_back(emitter);
         });
-    }
-}
-
-void RenderModule::CollectReflectionScene()
-{
-    GDX12_SCOPED_CPU_EVENT("Scene snapshot");
-    uint64_t staticHash = 14695981039346656037ull;
-    uint64_t dynamicHash = staticHash;
-    const auto hash = [](uint64_t& result, const auto& value)
-    {
-        const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
-        for (size_t i = 0; i < sizeof(value); ++i) result = (result ^ bytes[i]) * 1099511628211ull;
-    };
-    auto& resources = _primaryResources;
-    const auto& frame = *resources.FrameConstants[resources.CurrFrameConstantsIndex];
-    const auto* instances = frame.InstanceCache->GetCPUData();
-    const auto* transforms = frame.TransformCache->GetCPUData();
-    if (!resources.LocalShadowCasters) resources.LocalShadowCasters.emplace();
-    resources.LocalShadowCasters->clear();
-    resources.GeometryRevision = 14695981039346656037ull;
-    hash(staticHash, resources.ReflectionEnvironmentRevision);
-    hash(staticHash, resources.Lighting.LightDirection);
-    hash(staticHash, resources.Lighting.LightRadiance);
-    hash(staticHash, resources.Lighting.SunShadowFlags);
-    hash(staticHash, resources.Lighting.SunShadowRevision);
-    hash(staticHash, resources.ShadowQuality.SunResolution);
-    hash(staticHash, resources.ShadowQuality.LocalResolution);
-    for (const auto& light : resources.LocalLights) hash(staticHash, light);
-    resources.ReflectionProbes.clear();
-    resources.ReflectionPreviewDraws.clear();
-    GDX12RenderBounds reflectionBounds, casterBounds;
-    size_t staticMeshCount = 0;
-    bool staticMeshesChanged = false;
-    UINT lastTransform = UINT_MAX;
-    uint64_t lastTransformSignature = 0;
-    auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
-    for (size_t worldIndex = 0; worldIndex < scenes->GetWorldCount(); ++worldIndex)
-    {
-        auto* world = scenes->GetWorld(worldIndex);
-        auto& ecs = world->GetECS();
-        hash(staticHash, world);
-        ecs.ForEach<StaticMeshRenderComponent>([&](Entity entity, StaticMeshRenderComponent& renderer)
-        {
-            if (!ecs.Has<TransformComponent>(entity)) return;
-            const auto* mesh = GetPrimaryGPUMesh(renderer.MeshHandler);
-            for (size_t part = 0; part < renderer.GetSubMeshCount(mesh->SubMeshes.size()); ++part)
-            {
-                const auto submeshIndex = renderer.GetSubMeshIndex(part);
-                const auto& submesh = mesh->SubMeshes.at(submeshIndex);
-                const auto* material = renderer.Materials.at(submesh.MaterialIndex);
-                const UINT instanceIndex = renderer._CBufferIndices.at(part);
-                const auto& instance = instances[instanceIndex];
-                const auto& worldMatrix = transforms[instance.TransformIndex].WorldMatrix;
-                if (_meshSnapshots.size() <= instanceIndex) _meshSnapshots.resize(size_t(instanceIndex) + 1);
-                auto& cached = _meshSnapshots[instanceIndex];
-                const bool castsShadows = material->Type != MaterialType::Transparent && !material->ReflectionProbePreview;
-                const bool captured = !material->ReflectionProbePreview;
-                const bool sameGeometry = cached.Valid && cached.Handle == renderer.MeshHandler &&
-                    cached.Mesh == mesh && cached.GeometryRevision == mesh->ContentRevision && cached.SubMesh == submeshIndex;
-                const bool sameMaterial = cached.Valid && cached.Material == material && cached.MaterialRevision == material->_revision;
-                const bool sameWorld = cached.Valid && std::memcmp(&cached.World, &worldMatrix, sizeof(worldMatrix)) == 0;
-                const bool unchanged = sameGeometry && sameMaterial && sameWorld &&
-                    cached.Primitive.Dynamic == (instance.ReflectionDynamic != 0) &&
-                    cached.Primitive.Visible == renderer.Visible && cached.Primitive.CastsShadows == castsShadows &&
-                    cached.Primitive.CapturedInReflections == captured &&
-                    std::memcmp(&cached.Instance, &instance, sizeof(instance)) == 0;
-                if (!unchanged)
-                {
-                    GDX12RenderPrimitive primitive = cached.Primitive;
-                    primitive.Bounds = { instance.BoundingBoxCenter, instance.BoundingBoxExtents };
-                    primitive.TransformIndex = instance.TransformIndex;
-                    primitive.FirstInstance = instanceIndex;
-                    primitive.MaterialIndex = instance.MaterialIndex;
-                    primitive.Visible = renderer.Visible;
-                    primitive.Dynamic = instance.ReflectionDynamic != 0;
-                    primitive.CastsShadows = castsShadows;
-                    primitive.CapturedInReflections = captured;
-                    if (!sameGeometry)
-                    {
-                        primitive.GeometryRevision = 14695981039346656037ull;
-                        hash(primitive.GeometryRevision, renderer.MeshHandler);
-                        hash(primitive.GeometryRevision, mesh->ContentRevision);
-                        hash(primitive.GeometryRevision, submeshIndex);
-                    }
-                    if (!sameMaterial)
-                    {
-                        primitive.MaterialRevision = 14695981039346656037ull;
-                        hash(primitive.MaterialRevision, material);
-                        hash(primitive.MaterialRevision, material->_revision);
-                    }
-                    if (!sameWorld)
-                    {
-                        if (lastTransform != instance.TransformIndex)
-                        {
-                            lastTransform = instance.TransformIndex;
-                            lastTransformSignature = 14695981039346656037ull;
-                            hash(lastTransformSignature, worldMatrix);
-                        }
-                        primitive.TransformRevision = lastTransformSignature;
-                    }
-                    cached.Handle = renderer.MeshHandler;
-                    cached.Mesh = mesh;
-                    cached.GeometryRevision = mesh->ContentRevision;
-                    cached.SubMesh = submeshIndex;
-                    cached.Material = material;
-                    cached.MaterialRevision = material->_revision;
-                    cached.Instance = instance;
-                    cached.World = worldMatrix;
-                    cached.Primitive = primitive;
-                    cached.Valid = true;
-                }
-                const auto handle = unchanged && resources.RetainMeshPrimitive(instanceIndex, cached.PrimitiveHandle)
-                    ? cached.PrimitiveHandle : resources.PublishMeshPrimitive(instanceIndex, cached.Primitive);
-                if (!cached.Primitive.Dynamic)
-                {
-                    ++staticMeshCount;
-                    staticMeshesChanged |= !unchanged || !(cached.PrimitiveHandle == handle);
-                }
-                if (cached.Valid && (!unchanged || !(cached.PrimitiveHandle == handle)))
-                {
-                    cached.Signature = cached.Primitive.Revision();
-                    hash(cached.Signature, handle.Index);
-                    hash(cached.Signature, handle.Generation);
-                    cached.PrimitiveHandle = handle;
-                }
-                if (!renderer.Visible || !material->ReflectionProbePreview) continue;
-                GDX12IndirectDrawArgs draw = {};
-                draw.InstanceID = draw.StartInstanceLocation = instanceIndex;
-                draw.InstanceCount = 1;
-                draw.IndexCountPerInstance = submesh.IndexCount;
-                draw.StartIndexLocation = submesh.StartIndexLocation;
-                draw.BaseVertexLocation = submesh.StartVertexLocation;
-                resources.ReflectionPreviewDraws.push_back(draw);
-            }
-        });
-        ecs.ForEach<ReflectionProbeComponent>([&](Entity entity, ReflectionProbeComponent& component)
-        {
-            if (!component.Enabled || !ecs.Has<TransformComponent>(entity)) return;
-            const auto& transform = ecs.Get<TransformComponent>(entity);
-            GDX12ReflectionProbe probe;
-            probe.Id = ((_primaryResources.ReflectionWorldRevision * 65599 + worldIndex) << 32) | entity;
-            probe.Position = transform.Location + component.CaptureOffset;
-            probe.BoxMin = transform.Location - component.Extents;
-            probe.BoxMax = transform.Location + component.Extents;
-            probe.BlendDistance = component.BlendDistance;
-            probe.Intensity = component.Intensity;
-            probe.NearPlane = component.NearPlane;
-            probe.FarPlane = component.FarPlane;
-            static_cast<GDX12ReflectionCaptureSettings&>(probe) = component;
-            probe.Revision = component.Revision;
-            if (!IsValidReflectionProbe(probe)) throw std::invalid_argument("Invalid ReflectionProbeComponent");
-            resources.ReflectionProbes.push_back(probe);
-        });
-    }
-    resources.EndMeshPrimitiveUpdate();
-    const bool rebuildStatic = staticMeshesChanged || staticMeshCount != _staticMeshSnapshotCount;
-    if (rebuildStatic)
-    {
-        _staticMeshSnapshotCount = staticMeshCount;
-        _staticMeshSnapshotHash = 14695981039346656037ull;
-        _staticMeshReflectionBounds = {};
-        _staticMeshCasterBounds = {};
-        _staticMeshCasters.clear();
-    }
-    resources.Primitives.ForEach([&](GDX12RenderPrimitiveHandle handle, const GDX12RenderPrimitive& primitive)
-    {
-        if (!primitive.Visible || (!primitive.CastsShadows && !primitive.CapturedInReflections)) return;
-        uint64_t signature;
-        const bool meshSnapshot = !primitive.Source && primitive.InstanceCount == 1 &&
-            primitive.FirstInstance < _meshSnapshots.size() && _meshSnapshots[primitive.FirstInstance].Valid &&
-            _meshSnapshots[primitive.FirstInstance].PrimitiveHandle == handle;
-        if (meshSnapshot && !primitive.Dynamic)
-        {
-            if (rebuildStatic)
-            {
-                signature = _meshSnapshots[primitive.FirstInstance].Signature;
-                hash(_staticMeshSnapshotHash, signature);
-                if (primitive.CastsShadows)
-                {
-                    _staticMeshCasters.push_back({ primitive.Bounds, signature, false });
-                    _staticMeshCasterBounds.Add(primitive.Bounds);
-                }
-                else _staticMeshReflectionBounds.Add(primitive.Bounds);
-            }
-            return;
-        }
-        else
-        {
-            if (meshSnapshot) signature = _meshSnapshots[primitive.FirstInstance].Signature;
-            else
-            {
-                signature = primitive.Revision();
-                hash(signature, handle.Index);
-                hash(signature, handle.Generation);
-            }
-        }
-        hash(resources.GeometryRevision, signature);
-        // Shadow contributors can change probe lighting even when capture geometry is excluded.
-        hash(primitive.Dynamic ? dynamicHash : staticHash, signature);
-        if (primitive.CastsShadows)
-        {
-            resources.LocalShadowCasters->push_back({ primitive.Bounds, signature, primitive.Dynamic });
-            casterBounds.Add(primitive.Bounds);
-        }
-        else reflectionBounds.Add(primitive.Bounds);
-    });
-    // Rebuild the static reduction on membership changes so removing an extreme shrinks its bounds.
-    hash(staticHash, _staticMeshSnapshotHash);
-    hash(resources.GeometryRevision, _staticMeshSnapshotHash);
-    resources.LocalShadowCasters->insert(resources.LocalShadowCasters->end(), _staticMeshCasters.begin(), _staticMeshCasters.end());
-    casterBounds.Merge(_staticMeshCasterBounds);
-    reflectionBounds.Merge(_staticMeshReflectionBounds);
-    reflectionBounds.Merge(casterBounds);
-    resources.ReflectionSceneBounds = reflectionBounds.Empty() ? BoundingBox{} : reflectionBounds.Get();
-    if (resources.ShadowQuality.SunResolution && !casterBounds.Empty())
-    {
-        const auto bounds = casterBounds.Get();
-        SubmitCameraShadows(BuildShadowCascades(_RPcommonData.CameraView.Invert(),
-            XMConvertToRadians(_RPcommonData.ActiveCameraFOV), GetAspectRatio(),
-            _RPcommonData.ActiveCameraNearPlane, _RPcommonData.ActiveCameraFarPlane,
-            Vector3(resources.Lighting.LightDirection), &bounds, resources.ShadowQuality.SunResolution));
-    }
-    std::sort(resources.ReflectionProbes.begin(), resources.ReflectionProbes.end(),
-        [](const auto& a, const auto& b) { return a.Id < b.Id; });
-    if (_reflectionStaticHash != staticHash)
-    {
-        ++resources.ReflectionStaticRevision;
-        _reflectionStaticHash = staticHash;
-    }
-    if (_reflectionDynamicHash != dynamicHash)
-    {
-        ++resources.ReflectionDynamicRevision;
-        _reflectionDynamicHash = dynamicHash;
     }
 }
 
