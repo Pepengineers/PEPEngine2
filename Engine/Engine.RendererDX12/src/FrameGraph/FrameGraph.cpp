@@ -202,6 +202,11 @@ struct CompiledFrameGraph::Runtime
         std::map<FrameGraphPhysicalResource*, GDX12CompletionPoint> LastUse;
         std::vector<ComPtr<ID3D12Resource>> ExternalResources;
     };
+    struct PassBatch
+    {
+        std::vector<GDX12CommandList*> Lists;
+        std::vector<GDX12GPUTimer*> Timers;
+    };
     GDX12DeviceResources* Primary = nullptr;
     GDX12DeviceResources* Secondary = nullptr;
     RenderPipelineCommonData* Common = nullptr;
@@ -218,6 +223,8 @@ struct CompiledFrameGraph::Runtime
     uint64_t CopyBytes = 0;
     uint64_t CopyCommands = 0;
     bool ResourceRebuildRequested = false;
+    bool BatchLocalPasses = false;
+    PassBatch LocalBatch;
     std::vector<std::string> Fallbacks;
 
     GDX12DeviceResources* GetDeviceResources(EDeviceRole role) const { return role == DEVICE_ROLE_PRIMARY ? Primary : Secondary; }
@@ -402,6 +409,20 @@ struct CompiledFrameGraph::Runtime
             if (retry) { continue; }
             FrameSlots = std::move(newFrameSlots);
             Plan = std::move(plan);
+            // Explicit order dependencies can require a pass to finish even without a resource barrier.
+            BatchLocalPasses = !Secondary && Definition.OrderDependencies.empty() &&
+                std::all_of(Plan.Resources.begin(), Plan.Resources.end(), [](const auto& entry)
+            {
+                const auto& resource = entry.second;
+                return resource.Storage == MemoryType::Local && !resource.Export &&
+                    std::all_of(resource.Consumers.begin(), resource.Consumers.end(), [](const auto& consumer)
+                    { return consumer.second == MemoryType::Local; });
+            });
+            if (BatchLocalPasses)
+            {
+                LocalBatch.Lists.reserve(Passes.size());
+                LocalBatch.Timers.reserve(Passes.size());
+            }
             ++Generation;
             return;
         }
@@ -414,6 +435,17 @@ struct CompiledFrameGraph::Runtime
         auto point = queue->GetCompletionPoint();
         frameResources.Completions.push_back(point);
         return point;
+    }
+
+    void SubmitLocalBatch(GDX12CommandQueue* queue, FrameSlotResources& frameResources)
+    {
+        if (LocalBatch.Lists.empty()) { return; }
+        queue->ExecuteCommandLists(LocalBatch.Lists);
+        const auto point = queue->GetCompletionPoint();
+        frameResources.Completions.push_back(point);
+        for (auto* timer : LocalBatch.Timers) { timer->OnCommandListExecuted(point.Value); }
+        LocalBatch.Lists.clear();
+        LocalBatch.Timers.clear();
     }
 
     // Copy between two representations on one device; shared mappings carry data across adapters.
@@ -565,9 +597,18 @@ struct CompiledFrameGraph::Runtime
     {
         auto* commandList = executionContext.GetCommandList();
         auto* commandQueue = executionContext.GetDevice()->GetCommandQueue();
+        constexpr auto externalReadStates = D3D12_RESOURCE_STATE_GENERIC_READ | D3D12_RESOURCE_STATE_DEPTH_READ;
         for (const auto& externalUse : renderPass.GetExternalResources(executionContext))
         {
             if (!externalUse.Resource || !externalUse.Resource->D3DResource) { continue; }
+            if (BatchLocalPasses)
+            {
+                const bool waitOnAnotherQueue = externalUse.Ready.Value && externalUse.Ready.Queue != commandQueue;
+                const bool isReadOnly = externalUse.State != D3D12_RESOURCE_STATE_COMMON &&
+                    (externalUse.State & ~externalReadStates) == 0;
+                // Keep earlier passes ahead of the wait or a write with no graph resource edge.
+                if (waitOnAnotherQueue || !isReadOnly) { SubmitLocalBatch(commandQueue, frameResources); }
+            }
             commandQueue->GPUWait(externalUse.Ready);
             frameResources.ExternalResources.push_back(externalUse.Resource->D3DResource);
             D3D12_HEAP_PROPERTIES heapProperties = {};
@@ -630,15 +671,18 @@ struct CompiledFrameGraph::Runtime
         { frameResources.Resources.at({nodeDefinition.Id,outputEntry.first}).ProducerReady = completionPoint; }
     }
 
-    // Record one pass in the same order as its waits, resource preparation and completion bookkeeping.
-    void RecordAndSubmitPass(const NodeDefinition& nodeDefinition, FrameSlotResources& frameResources,
+    // Record in plan order, preserving separate command-list state for each pass.
+    void RecordPass(const NodeDefinition& nodeDefinition, FrameSlotResources& frameResources,
         std::map<NodeId, GDX12CompletionPoint>& nodeCompletions)
     {
         auto* deviceResources = GetDeviceResources(nodeDefinition.DeviceRole);
         deviceResources->CurrFrameConstantsIndex = GetCurrentFrameSlotResourcesIndex();
         auto* commandQueue = deviceResources->Device->GetCommandQueue();
-        for (const auto& dependencyId : Plan.Dependencies.at(nodeDefinition.Id))
-        { commandQueue->GPUWait(nodeCompletions[dependencyId]); }
+        if (!BatchLocalPasses)
+        {
+            for (const auto& dependencyId : Plan.Dependencies.at(nodeDefinition.Id))
+            { commandQueue->GPUWait(nodeCompletions[dependencyId]); }
+        }
         auto portBindings = PreparePassBindings(nodeDefinition, commandQueue, frameResources);
         auto* commandList = commandQueue->GetCommandList();
         auto* renderPass = Passes.at(nodeDefinition.Id).get();
@@ -655,6 +699,13 @@ struct CompiledFrameGraph::Runtime
         RestorePassResourceStates(nodeDefinition, portBindings, commandList);
         passTimer->Stop(commandList);
         commandList->EndPixEvent();
+
+        if (BatchLocalPasses)
+        {
+            LocalBatch.Lists.push_back(commandList);
+            LocalBatch.Timers.push_back(passTimer);
+            return;
+        }
 
         const auto completionPoint = SubmitCommandList(commandQueue, commandList, frameResources);
         passTimer->OnCommandListExecuted(completionPoint.Value);
@@ -678,8 +729,9 @@ struct CompiledFrameGraph::Runtime
                 RefreshImportedTexture(nodeId, frameResources);
                 continue;
             }
-            RecordAndSubmitPass(nodeDefinition, frameResources, nodeCompletions);
+            RecordPass(nodeDefinition, frameResources, nodeCompletions);
         }
+        if (BatchLocalPasses) { SubmitLocalBatch(Primary->Device->GetCommandQueue(), frameResources); }
         ++Frame;
     }
 };

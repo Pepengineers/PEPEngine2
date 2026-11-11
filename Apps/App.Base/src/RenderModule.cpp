@@ -715,9 +715,8 @@ void RenderModule::ConfigureFrameGraph(FrameGraph& fg)
     auto opaque = fg.AddPrimaryPass<GDX12OpaquePass>("Opaque");
     auto transparency = fg.AddPrimaryPass<GDX12WBOITTransparencyPass>("Transparency");
     auto composition = fg.AddPrimaryPass<GDX12WBOITCompositionPass>("Composition");
-
     auto clear = fg.AddPrimaryPass<GDX12TextureClearPass>("Clear");
-    auto upscale = fg.AddSecondaryPass<GDX12XeSSUpscalePass>("XeSS");
+    auto upscale = fg.AddPrimaryPass<GDX12XeSSUpscalePass>("XeSS");
     auto output = fg.AddPrimaryPass<GDX12OutputToScreenPass>("Output");
 
     fg.ConnectNodes(backBuffer, clear.GetInput("InTexture"));
