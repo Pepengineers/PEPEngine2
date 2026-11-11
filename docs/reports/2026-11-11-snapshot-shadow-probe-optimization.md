@@ -102,3 +102,13 @@ Release, физические MGPU-маршруты и покадровое ви
 ```
 
 `BenchmarkFrames=601` даёт 600 per-frame samples. Камера и seed задаются существующим benchmark entry point. Runtime DLL и INI исходного baseline после сборок побайтно совпадают с сохранённой копией. В обоих вариантах 308 prepared textures, 29 graph passes, physics count scale 1, particle count scale 2 и particle budget 500 000. Кандидат сохраняет 24 784 static-mesh submesh records по CPU-счётчикам.
+
+## Независимая приёмка основным чатом
+
+Проверена реализация `e016329f` и отчёт `d16f5f7f`. По замечаниям проверки исполнитель исправил первое заполнение static visibility при revision 0 и добавил regression assertion. После промежуточных результатов 3,48 и 3,26 мс потребована дополнительная итерация: пакетное сохранение проверенных instance ranges и сохранение списка dynamic/application primitives устранили повторный steady-state обход статической части registry.
+
+Независимый пересчёт `qpc3-scopes.csv` по 600 полным Scene preparation интервалам подтвердил snapshot mean 1,867561 мс / p95 2,418600 мс и Scene preparation 4,909049 / 5,971900 мс. Каждый выбранный кадр содержит ровно один snapshot и counters, 24 784 reused + visited records и ноль static rebuilds. Объединение shadow/probe интервалов, полностью содержащихся в Scene preparation, составляет 1,017611 / 1,210800 мс; небольшая разница с таблицей объясняется границей внешнего scope. Независимый пересчёт `frame_samples_ms` обычной B/A/B серии подтвердил 47,066654 / 58,251026 / 48,671515 мс mean и 53,2790 / 67,4678 / 57,7716 мс p95.
+
+Проверены конечные state JSON всех пяти suites: passed, exit 0, fingerprints до и после совпадают. После передачи ресурса исполнителем основной чат отдельно повторил RenderPipelineTests и ObjectDataJobsTests: оба passed / exit 0 (2,03 и 10,24 с). Исходный INI восстановлен в finally. Состояния и логи: `Build/SnapshotOptimization/reviewer-RenderPipelineTests.json` и `reviewer-ObjectDataJobsTests.json`. Проверены production callers разделённых caster lists и `git diff bde36a6b..HEAD --check`; ошибок не обнаружено. Посторонняя правка BistroAdditionsTests.cpp сохранена вне коммитов задачи.
+
+Приёмка ограничена CPU snapshot и подготовкой shadow/probe в измеренном Bistro workload: ориентир mean <=2 мс достигнут, подтверждённых блокирующих дефектов в проверенном патче не осталось. Это не утверждение об отсутствии других bottlenecks движка. Долг физики продолжает расти, GPU drawing shadows/fluid отдельно не оптимизировался. PIX-after отсутствует; baseline PIX и candidate QPC не являются одинаковым инструментированием. Release, физический MGPU, длительный thermal soak и визуальное A/B полной сцены не проверены.
