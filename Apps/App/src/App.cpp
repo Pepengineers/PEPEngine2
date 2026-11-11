@@ -126,7 +126,6 @@ namespace
                 _qualityCameraFov = world.GetECS().Get<CameraComponent>(world.ActiveCamera).FOV;
                 _qualityInterrupted = false;
                 _qualityBackground = bInactive;
-                _warmupFlightRatio = 1.18;
                 _qualityProfile = profile;
                 _qualityWidth = width;
                 _qualityHeight = height;
@@ -557,13 +556,6 @@ namespace
             if (_flight->State() == Phase::WarmupReady)
             {
                 _warmupFps = _flight->StableWarmupFps();
-                if (_qualityRequest && !_qualityRequest->RequireFull && _warmupFps &&
-                    *_warmupFps * _warmupFlightRatio < BistroQualitySearch::Search::Target(*_qualityProfile))
-                {
-                    _qualitySearch->Submit({std::nullopt, _warmupFps});
-                    _flight.reset();
-                    return;
-                }
                 _measurementTicks = BenchmarkTicks;
                 _measurementRequested = BenchmarkRequested;
                 _flight->StartFlight();
@@ -573,8 +565,6 @@ namespace
             {
                 SetFlightPose(BistroBenchmarkFlight::SampleRoute(1));
                 const auto metrics = _flight->Summarize();
-                if (_warmupFps)
-                    _warmupFlightRatio = (std::max)(_warmupFlightRatio, 1.04 * metrics.AverageFps / *_warmupFps);
                 renderer.DrainFrameWork();
                 ExportQualityTrial(renderer, metrics);
                 if (_qualitySearch) _qualitySearch->Submit({metrics.AverageFps, _warmupFps});
@@ -778,7 +768,11 @@ namespace
                 }
                 summary << "\n  }";
             }
-            else if (_qualityProfile) summary << ",\n  \"targetReached\": false";
+            else if (_qualityProfile)
+            {
+                summary << ",\n  \"targetReached\": false";
+                if (!cancelled) _qualityStatus = "No valid measured candidate. Original settings restored.";
+            }
             summary << "\n}\n";
             summary.close();
             if (!summary) throw std::runtime_error("Cannot export Bistro result");
@@ -881,7 +875,6 @@ namespace
         uint16_t _qualityWidth = 0, _qualityHeight = 0;
         size_t _qualityRun = 0, _setupFrames = 0;
         double _setupStarted = 0, _setupSeconds = 0, _measurementRequested = 0;
-        double _warmupFlightRatio = 1.18;
         uint64_t _measurementTicks = 0, _qualityWorkload = 0;
         Vector3 _qualityCameraLocation, _qualityCameraRotation;
         float _qualityCameraFov = 60;

@@ -1,6 +1,7 @@
 #include "../src/BistroQualitySearch.h"
 
 #include <iostream>
+#include <limits>
 #include <map>
 
 namespace
@@ -125,6 +126,15 @@ namespace
         });
         Require(result.TargetReached && result.Settings.Tiers == std::vector<int>({3, 2}),
             "A failed borderline confirmation hid a stable half-group improvement");
+
+        Search spike(Profile::Performance, {{}}, 768, 480);
+        const auto stable = Run(spike, [](const Request& request, int visit)
+        {
+            const auto tier = request.Settings.Tiers[0];
+            return Result{tier == 4 ? (visit == 1 ? 75.0 : 50.0) : tier == 3 ? 65.0 : 70.0,
+                std::nullopt};
+        });
+        Require(stable.Settings.Tiers[0] == 3, "A single fast outlier pruned the stable High candidate");
     }
 
     void TestFallbackAndRollback()
@@ -202,6 +212,85 @@ namespace
         catch (const std::invalid_argument&) { rejected = true; }
         Require(rejected, "Search accepted a cyclic prerequisite");
     }
+
+    void TestSwapAfterPassingGroup()
+    {
+        Search search(Profile::Performance, {{OffGroup::Never, false, 3, 4},
+            {OffGroup::Never, false, 1, 3}, {OffGroup::Never, false, 1, 3}}, 768, 480);
+        const auto winner = Run(search, [](const Request& request, int)
+        {
+            const auto& tiers = request.Settings.Tiers;
+            if (tiers == std::vector<int>({4, 1, 2})) return Result{70.0, std::nullopt};
+            return Result{tiers == std::vector<int>({3, 2, 2}) || tiers == std::vector<int>({3, 3, 3}) ?
+                65.0 : 50.0, std::nullopt};
+        });
+        Require(winner.Settings.Tiers == std::vector<int>({4, 1, 2}),
+            "Passing group pruned a higher-ranked swap");
+    }
+
+    void TestMeasuredReserves()
+    {
+        Search performance(Profile::Performance, {{OffGroup::Post, false, 1, 1}}, 768, 480);
+        const auto reserve = Run(performance, [](const Request&, int) { return Result{50.0, std::nullopt}; });
+        Require(!reserve.TargetReached && reserve.Settings.Tiers[0] == 1,
+            "Unreachable Performance lost its measured reserve or disabled an effect without a gain");
+
+        Search quality(Profile::Quality, {{OffGroup::Never}}, 1280, 800);
+        const auto graphics = Run(quality, [](const Request& request, int)
+        {
+            return Result{request.Settings.Height == 800 ? 25.0 : 20.0, std::nullopt};
+        });
+        Require(!graphics.TargetReached && graphics.AverageFps == 25 && graphics.Settings.Height == 800 &&
+            graphics.Settings.Tiers[0] == 4, "Reserve discarded resolution or quality without a speed gain");
+    }
+
+    void TestNonmonotonicTiersAndCpuShift()
+    {
+        Search performance(Profile::Performance, {{}}, 768, 480);
+        const auto skippedTier = Run(performance, [](const Request& request, int)
+        {
+            Require(request.RequireFull, "Stationary warmup cannot prove a candidate fails its full route");
+            return Result{request.Settings.Tiers[0] == 3 ? 50.0 : 65.0, 45.0};
+        });
+        Require(skippedTier.Settings.Tiers[0] == 4, "A failed intermediate tier hid a passing Epic tier");
+
+        for (const int secondMax : {3, 4})
+        {
+            Search mixed(Profile::Performance, {{OffGroup::Never, false, 3, 4},
+                {OffGroup::Never, false, 1, secondMax}}, 768, 480);
+            const auto combined = Run(mixed, [secondMax](const Request& request, int)
+            {
+                return Result{request.Settings.Tiers == std::vector<int>({3, 1}) ||
+                    request.Settings.Tiers == std::vector<int>({4, secondMax}) ? 65.0 : 50.0, std::nullopt};
+            });
+            Require(combined.Settings.Tiers == std::vector<int>({4, secondMax}),
+                "Direct group probe skipped an axis or its tier bound");
+        }
+
+        Search quality(Profile::Quality, {{}, {OffGroup::Never, true}}, 768, 480);
+        const auto shifted = Run(quality, [](const Request& request, int)
+        {
+            const auto& tiers = request.Settings.Tiers;
+            return Result{tiers[1] > 2 ? 25.0 : tiers[0] <= 2 ? 40.0 : tiers[1] == 2 ? 29.0 : 25.0,
+                std::nullopt};
+        });
+        Require(shifted.Settings.Tiers == std::vector<int>({4, 2}),
+            "CPU change did not recheck graphics under a changed bottleneck");
+    }
+
+    void TestInvalidMeasurementsTerminate()
+    {
+        Search search(Profile::Performance, {{OffGroup::Post}, {OffGroup::Simulation}}, 1280, 800);
+        size_t count = 0;
+        while (auto request = search.Next())
+        {
+            Require(++count < 100, "Invalid candidates kept restarting the search");
+            Require(search.Next()->Settings == request->Settings, "Next changed an outstanding request");
+            search.Submit({count % 2 ? std::numeric_limits<double>::quiet_NaN() :
+                std::numeric_limits<double>::infinity(), std::nullopt});
+        }
+        Require(!search.Winner(), "Invalid measurements produced a winner");
+    }
 }
 
 int main()
@@ -216,6 +305,10 @@ int main()
         TestFallbackAndRollback();
         TestConfirmationAndCancel();
         TestPrerequisites();
+        TestSwapAfterPassingGroup();
+        TestMeasuredReserves();
+        TestNonmonotonicTiersAndCpuShift();
+        TestInvalidMeasurementsTerminate();
         std::cout << "Bistro quality search checks passed\n";
         return 0;
     }
