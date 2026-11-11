@@ -90,6 +90,9 @@ namespace BistroQualitySearch
                 case Phase::Confirm:
                     _request = Request{_confirm->Settings, true};
                     break;
+                case Phase::Recover:
+                    if (!RequestDeferred()) StartConfirmation();
+                    break;
                 case Phase::Done:
                     return std::nullopt;
                 }
@@ -137,6 +140,13 @@ namespace BistroQualitySearch
             case Phase::Confirm:
                 SubmitConfirmation(measured);
                 break;
+            case Phase::Recover:
+                if (measured)
+                {
+                    if (measured->TargetReached) _finalists.push_back(*measured);
+                    else RememberFallback(*measured);
+                }
+                break;
             case Phase::Done:
                 throw std::logic_error("Quality search is already complete");
             }
@@ -151,7 +161,7 @@ namespace BistroQualitySearch
         const std::optional<Selection>& Winner() const { return _winner; }
 
     private:
-        enum class Phase { Coarse, Graphics, Cpu, Disable, Restore, Confirm, Done };
+        enum class Phase { Coarse, Graphics, Cpu, Disable, Restore, Confirm, Recover, Done };
 
         // A fixed minimum and relative tolerance avoid optimizing small timing fluctuations.
         static double Noise(double fps) { return (std::max)(0.25, 0.01 * fps); }
@@ -232,8 +242,29 @@ namespace BistroQualitySearch
             while (_cursor < _batch.size())
             {
                 const bool canPrune = _batchBest && (!optimize || ComfortablyAboveTarget(*_batchBest));
-                if (optimize && canPrune && Rank(_batch[_cursor]) < Rank(_batchBest->Settings)) return false;
+                if (optimize && canPrune && Rank(_batch[_cursor]) < Rank(_batchBest->Settings))
+                {
+                    _deferred.insert(_batch.begin() + _cursor, _batch.end());
+                    return false;
+                }
                 RequestOnce(_batch[_cursor++], requireFull);
+                if (_request) return true;
+            }
+            return false;
+        }
+
+        bool RequestDeferred()
+        {
+            while (!_deferred.empty())
+            {
+                const auto best = std::max_element(_deferred.begin(), _deferred.end(),
+                    [&](const Candidate& a, const Candidate& b) { return Rank(a) < Rank(b); });
+                // Keep lower-ranked probes deferred until the remaining finalist also fails.
+                if (std::any_of(_finalists.begin(), _finalists.end(),
+                    [&](const Selection& finalist) { return Rank(finalist.Settings) > Rank(*best); })) return false;
+                const auto candidate = *best;
+                _deferred.erase(best);
+                RequestOnce(candidate, true);
                 if (_request) return true;
             }
             return false;
@@ -560,7 +591,8 @@ namespace BistroQualitySearch
                     RememberFallback(confirmed);
                 }
             }
-            StartConfirmation();
+            if (!_confirmingFallback && !_deferred.empty()) _phase = Phase::Recover;
+            else StartConfirmation();
         }
 
         Profile _profile;
@@ -573,7 +605,7 @@ namespace BistroQualitySearch
         bool _fromOff = false;
         bool _confirmingFallback = false;
         size_t _cursor = 0;
-        std::set<Candidate> _visited;
+        std::set<Candidate> _visited, _deferred;
         std::vector<Candidate> _batch;
         std::vector<Selection> _finalists, _offOptions, _fallbackOptions;
         std::optional<Request> _request;
