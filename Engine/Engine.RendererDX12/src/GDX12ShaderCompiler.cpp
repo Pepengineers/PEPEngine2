@@ -4,47 +4,10 @@
 #include "Engine.RendererDX12/GDX12Device.h"
 
 #include <filesystem>
-#include <map>
+#include <stdexcept>
 
 #include <dxc/dxcapi.h>
 #include <dxc/d3d12shader.h>
-
-namespace
-{
-    class ShaderIncludes final : public ID3DInclude
-    {
-    public:
-        explicit ShaderIncludes(const std::filesystem::path& source) : _sourceDirectory(source.parent_path()) {}
-
-        HRESULT __stdcall Open(D3D_INCLUDE_TYPE, LPCSTR name, LPCVOID parent, LPCVOID* data, UINT* size) override
-        {
-            try
-            {
-                const auto owner = _files.find(parent);
-                const auto directory = owner == _files.end() ? _sourceDirectory : owner->second.Path.parent_path();
-                auto path = directory / name;
-                if (!std::filesystem::is_regular_file(path)) path = std::filesystem::path(SHADERS_FOLDER) / name;
-                std::ifstream input(path, std::ios::binary);
-                if (!input) return E_FAIL;
-                File file{ path, std::vector<char>(std::istreambuf_iterator<char>(input), {}) };
-                if (input.bad() || file.Bytes.size() > UINT_MAX) return E_FAIL;
-                const auto byteCount = static_cast<UINT>(file.Bytes.size());
-                file.Bytes.push_back('\0');
-                const auto contents = file.Bytes.data();
-                const auto inserted = _files.emplace(contents, std::move(file));
-                *data = inserted.first->second.Bytes.data();
-                *size = byteCount;
-                return S_OK;
-            }
-            catch (...) { return E_FAIL; }
-        }
-        HRESULT __stdcall Close(LPCVOID data) override { _files.erase(data); return S_OK; }
-    private:
-        struct File { std::filesystem::path Path; std::vector<char> Bytes; };
-        std::filesystem::path _sourceDirectory;
-        std::map<LPCVOID, File> _files;
-    };
-}
 
 GDX12ShaderCompiler* GDX12ShaderCompiler::_instance = nullptr;
 
@@ -73,13 +36,7 @@ void GDX12ShaderCompiler::Initialize()
 
 ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShader(GDX12Device* device, const std::wstring& filename, const D3D_SHADER_MACRO* defines, const std::string& entrypoint, const std::string& shaderType)
 {
-    std::string target = GetShaderTargetForModel(device, shaderType);
-
-    if (device->GetDeviceFeatures().Features.HighestShaderModel() == D3D_SHADER_MODEL_5_1)
-    {
-        return CompileShaderFXC(filename, defines, entrypoint, target);
-    }
-    else return CompileShaderDXC(filename, defines, entrypoint, target);
+    return CompileShaderDXC(filename, defines, entrypoint, GetShaderTargetForModel(device, shaderType));
 }
 
 GDX12ShaderCompiler::GDX12ShaderCompiler()
@@ -96,35 +53,12 @@ void GDX12ShaderCompiler::Shutdown()
 
 std::string GDX12ShaderCompiler::GetShaderTargetForModel(GDX12Device* device, const std::string& shaderType)
 {
+    const auto model = device->GetDeviceFeatures().Features.HighestShaderModel();
+    if (model < D3D_SHADER_MODEL_6_0)
+        throw std::invalid_argument("Shader compilation requires Shader Model 6.0 or newer (DXC)");
     // shortcut: bundled DXC 1.8 signs retail shaders through SM 6.8; raise with the compiler upgrade.
-    const auto targetModel = (std::min)(device->GetDeviceFeatures().Features.HighestShaderModel(), D3D_SHADER_MODEL_6_8);
-
-    UINT modelMajor = (targetModel >> 4) & 0xF;
-    UINT modelMinor = targetModel & 0xF;
-
-    std::string targetVersion;
-
-    switch (modelMajor) {
-    case 6:
-        if (modelMinor >= 8 && targetModel >= D3D_SHADER_MODEL_6_8) { targetVersion = "6_8"; }
-        else if (modelMinor >= 7 && targetModel >= D3D_SHADER_MODEL_6_7) { targetVersion = "6_7"; }
-        else if (modelMinor >= 6 && targetModel >= D3D_SHADER_MODEL_6_6) { targetVersion = "6_6"; }
-        else if (modelMinor >= 5 && targetModel >= D3D_SHADER_MODEL_6_5) { targetVersion = "6_5"; }
-        else if (modelMinor >= 4 && targetModel >= D3D_SHADER_MODEL_6_4) { targetVersion = "6_4"; }
-        else if (modelMinor >= 3 && targetModel >= D3D_SHADER_MODEL_6_3) { targetVersion = "6_3"; }
-        else if (modelMinor >= 2 && targetModel >= D3D_SHADER_MODEL_6_2) { targetVersion = "6_2"; }
-        else if (modelMinor >= 1 && targetModel >= D3D_SHADER_MODEL_6_1) { targetVersion = "6_1"; }
-        else { targetVersion = "6_0"; }
-        break;
-    case 5:
-        targetVersion = "5_1";
-        break;
-    default:
-        targetVersion = "5_1";
-        break;
-    }
-
-    return shaderType + "_" + targetVersion;
+    const auto targetModel = (std::min)(model, D3D_SHADER_MODEL_6_8);
+    return shaderType + "_6_" + std::to_string(targetModel & 0xF);
 }
 
 ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filename, const D3D_SHADER_MACRO* defines, const std::string& entrypoint, const std::string& shaderType)
@@ -242,51 +176,4 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
 
     Log::Info("Shader", "Compiled ", filename, " [", entrypoint, ", ", shaderType, ']');
     return d3dBlob;
-}
-
-ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderFXC(const std::wstring& filename, const D3D_SHADER_MACRO* defines, const std::string& entrypoint, const std::string& shaderType)
-{
-    Log::Info("Shader", "Compiling ", filename, " [", entrypoint, ", ", shaderType, ']');
-    UINT compileFlags = 0;
-#if defined(DEBUG) || defined(_DEBUG)  
-    compileFlags = D3DCOMPILE_DEBUG | D3DCOMPILE_SKIP_OPTIMIZATION;
-#endif
-
-    HRESULT hr = S_OK;
-
-    std::wstring prettyPathToShader = std::filesystem::weakly_canonical(filename).wstring();
-    ComPtr<ID3DBlob> byteCode = nullptr;
-    ComPtr<ID3DBlob> errors;
-    ShaderIncludes includes(prettyPathToShader);
-    hr = D3DCompileFromFile(prettyPathToShader.c_str(), defines, &includes, entrypoint.c_str(), shaderType.c_str(), compileFlags, 0, &byteCode, &errors);
-
-    std::wstring compilerLog;
-    if (errors) 
-    {
-        Log::Warning("Shader", "Compiler diagnostics for ", filename, ": ",
-            std::string_view(static_cast<const char*>(errors->GetBufferPointer()), errors->GetBufferSize()));
-        const char* ptr = (const char*)errors->GetBufferPointer();
-        size_t len = errors->GetBufferSize();
-        int need = MultiByteToWideChar(CP_ACP, 0, ptr, (int)len, nullptr, 0);
-        compilerLog.resize(need);
-        MultiByteToWideChar(CP_ACP, 0, ptr, (int)len, compilerLog.data(), need);
-    }
-
-    if (FAILED(hr)) 
-    {
-        Log::Error("Shader", "Compilation failed: ", filename, " [", entrypoint, ", ", shaderType, ']');
-        std::wstringstream det;
-
-        std::wstring strCopy = prettyPathToShader;
-        for (auto& ch : strCopy) if (ch == L' ') ch = L'\u00A0';
-        prettyPathToShader = strCopy;
-
-        det << L"Path to the shader: " << prettyPathToShader << L"\n";
-        if (!compilerLog.empty()) det << L"\n" << compilerLog;
-
-        ThrowIfFailed(hr);
-    }
-
-    Log::Info("Shader", "Compiled ", filename, " [", entrypoint, ", ", shaderType, ']');
-    return byteCode;
 }

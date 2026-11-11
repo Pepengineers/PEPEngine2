@@ -1,4 +1,4 @@
-"""CPU-only shader checks. Set DXC and FXC to the Windows SDK compiler paths."""
+"""CPU-only shader checks. Set DXC to the Windows SDK compiler path."""
 import os
 from pathlib import Path
 import re
@@ -11,7 +11,6 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 SHADERS = ROOT / "Engine/Engine.RendererDX12/Shaders"
 DXC = os.environ.get("DXC") or shutil.which("dxc")
-FXC = os.environ.get("FXC") or shutil.which("fxc")
 
 
 @unittest.skipUnless(DXC, "Set DXC to run shader compiler checks")
@@ -45,17 +44,11 @@ class LightingShaderTests(unittest.TestCase):
                 if name == "TransparentPass":
                     self.assertNotRegex(signature, r"TEXCOORD\s+2\s")
 
-    @unittest.skipUnless(FXC, "Set FXC to check SM5.1 probe culling")
-    def test_probe_culling_sm51(self):
-        output = ROOT / "Build/ShaderLightingScalarization"
-        output.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(dir=output) as directory:
+    def test_probe_culling_sm6(self):
+        for profile in ["cs_6_0", "cs_6_8"]:
             for entry in ["ClearCS", "CullCS"]:
-                with self.subTest(entry=entry):
-                    subprocess.run([FXC, "/nologo", "/T", "cs_5_1", "/E", entry,
-                                    "/D", "PROBE_CULLING=1", "/Fo", str(Path(directory) / "shader.dxbc"),
-                                    str(SHADERS / "ReflectionCapture.hlsl")],
-                                   check=True, capture_output=True, text=True)
+                with self.subTest(profile=profile, entry=entry):
+                    self.compile(SHADERS / "ReflectionCapture.hlsl", entry, profile, "PROBE_CULLING=1")
 
 
 if __name__ == "__main__":

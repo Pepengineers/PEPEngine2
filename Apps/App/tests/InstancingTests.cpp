@@ -3,9 +3,7 @@
 #undef main
 #include "Engine.RendererDX12/GDX12InstanceBatcher.h"
 #include "Engine.RendererDX12/GDX12DeviceFactory.h"
-#include <d3dcompiler.h>
 #include <set>
-#pragma comment(lib, "d3dcompiler.lib")
 
 static void CheckDebugMessages(ID3D12Device* device)
 {
@@ -78,12 +76,9 @@ template<class T> static void Upload(GDX12Device& device, GDX12UploadBuffer<T>& 
 
 static std::vector<UINT> ReadVisibleIDs(GDX12Device& device, GDX12InstanceBatcher& batcher)
 {
-    const char shaderSource[] =
-        "StructuredBuffer<uint> IDs:register(t0); RWStructuredBuffer<uint> Output:register(u0);"
-        "[numthreads(64,1,1)] void CS(uint3 id:SV_DispatchThreadID){if(id.x<5)Output[id.x]=IDs[id.x];}";
-    ComPtr<ID3DBlob> shader, errors;
-    ThrowIfFailed(D3DCompile(shaderSource, sizeof(shaderSource) - 1, nullptr, nullptr, nullptr,
-        "CS", "cs_5_0", 0, 0, &shader, &errors));
+    const auto shader = GDX12ShaderCompiler::GetInstance().CompileShader(&device,
+        SOLUTION_DIR L"Apps/App/tests/shaders/ReadVisibleIDs.hlsl", nullptr, "CS", "cs");
+    ComPtr<ID3DBlob> errors;
     CD3DX12_ROOT_PARAMETER parameters[2];
     parameters[0].InitAsShaderResourceView(0);
     parameters[1].InitAsUnorderedAccessView(0);
