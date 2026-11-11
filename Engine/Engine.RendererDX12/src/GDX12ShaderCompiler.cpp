@@ -166,13 +166,17 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
         while (define->Name && define->Definition)
         {
             std::string defineStr = std::string(define->Name) + "=" + define->Definition;
-            arguments.push_back(L"-D");
             std::wstring defineWide(defineStr.begin(), defineStr.end());
             storage.push_back(defineWide);
-            arguments.push_back(storage.back().c_str());
 
             define++;
         }
+    }
+    // Take pointers only after the strings stop moving (including short strings).
+    for (const auto& define : storage)
+    {
+        arguments.push_back(L"-D");
+        arguments.push_back(define.c_str());
     }
 
     DxcBuffer sourceBuffer;
@@ -181,11 +185,11 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
     sourceBuffer.Encoding = DXC_CP_UTF8;
 
     ComPtr<IDxcResult> results;
-    HRESULT hr = _dxcCompiler->Compile(&sourceBuffer, arguments.data(), (UINT32)arguments.size(), 
-        _dxcIncludeHandler.Get(), IID_PPV_ARGS(&results));
+    ThrowIfFailed(_dxcCompiler->Compile(&sourceBuffer, arguments.data(), (UINT32)arguments.size(),
+        _dxcIncludeHandler.Get(), IID_PPV_ARGS(&results)));
 
     ComPtr<IDxcBlobUtf8> errors;
-    if (SUCCEEDED(hr)) results->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&errors), nullptr);
+    ThrowIfFailed(results->GetOutput(DXC_OUT_ERRORS, IID_PPV_ARGS(&errors), nullptr));
 
     if (errors != nullptr && errors->GetStringLength() > 0)
     {
@@ -205,7 +209,8 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
 
     ComPtr<IDxcBlobUtf16> outputName;
     HRESULT compileStatus;
-    if (SUCCEEDED(results->GetStatus(&compileStatus)) && FAILED(compileStatus))
+    ThrowIfFailed(results->GetStatus(&compileStatus));
+    if (FAILED(compileStatus))
     {
         Log::Error("Shader", "Compilation failed: ", filename, " [", entrypoint, ", ", shaderType, ']');
         if (errors != nullptr && errors->GetStringLength() > 0)
@@ -219,15 +224,12 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
     //save .pdb file for debugging
     ComPtr<IDxcBlob> pdbBlob;
     ComPtr<IDxcBlobWide> pdbName;
-    results->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(&pdbBlob), &pdbName);
-    const wchar_t* pdbNameStr = pdbName->GetStringPointer();
-    std::wstring pdbFilePath = std::wstring(SHADERS_FOLDER) + L"/PDBs/" + pdbNameStr;
-    std::ofstream pdbFile(pdbFilePath, std::ios::binary);
-    if (pdbFile.is_open())
+    if (SUCCEEDED(results->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(&pdbBlob), &pdbName)) && pdbBlob && pdbName)
     {
-        pdbFile.write(static_cast<const char*>(pdbBlob->GetBufferPointer()),
-            pdbBlob->GetBufferSize());
-        pdbFile.close();
+        std::wstring pdbFilePath = std::wstring(SHADERS_FOLDER) + L"/PDBs/" + pdbName->GetStringPointer();
+        std::ofstream pdbFile(pdbFilePath, std::ios::binary);
+        if (pdbFile.is_open())
+            pdbFile.write(static_cast<const char*>(pdbBlob->GetBufferPointer()), pdbBlob->GetBufferSize());
     }
 
     //IDxcBlob to ID3DBlob conversion
@@ -235,7 +237,7 @@ ComPtr<ID3DBlob> GDX12ShaderCompiler::CompileShaderDXC(const std::wstring& filen
     ThrowIfFailed(results->GetOutput(DXC_OUT_OBJECT, IID_PPV_ARGS(&dxcBlob), &outputName));
 
     ComPtr<ID3DBlob> d3dBlob;
-    D3DCreateBlob(dxcBlob->GetBufferSize(), &d3dBlob);
+    ThrowIfFailed(D3DCreateBlob(dxcBlob->GetBufferSize(), &d3dBlob));
     memcpy(d3dBlob->GetBufferPointer(), dxcBlob->GetBufferPointer(), dxcBlob->GetBufferSize());
 
     Log::Info("Shader", "Compiled ", filename, " [", entrypoint, ", ", shaderType, ']');

@@ -20,6 +20,35 @@ static void Require(bool condition, const char* message)
     if (!condition) throw std::runtime_error(message);
 }
 
+static void CheckStringConversions()
+{
+    for (size_t length : { 0u, 1u, 511u, 512u, 8192u })
+    {
+        const std::string narrow(length, 'x');
+        const std::wstring wide(length, L'x');
+        Require(StringToWString(narrow) == wide, "Narrow conversion truncated or read past its buffer");
+        Require(WStringToString(wide) == narrow, "Wide conversion truncated or read past its buffer");
+    }
+    std::cout << "Empty, boundary and long string conversion checks passed\n";
+}
+
+static void CheckShaderDefines(GDX12Device& device)
+{
+    const D3D_SHADER_MACRO defines[] = {
+        { "A", "1" }, { "B", "2" }, { "C", "3" }, { "D", "4" },
+        { "E", "5" }, { "F", "6" }, { "G", "7" }, { "H", "8" }, { nullptr, nullptr }
+    };
+    auto& compiler = GDX12ShaderCompiler::GetInstance();
+    const auto path = SOLUTION_DIR L"Apps/App/tests/shaders/CompilerDefines.hlsl";
+    const auto shader = compiler.CompileShader(&device, path, defines, "CS", "cs");
+    Require(shader && shader->GetBufferSize(), "Multiple short shader defines were not preserved");
+    bool rejected = false;
+    try { compiler.CompileShader(&device, path, nullptr, "CS", "cs"); }
+    catch (const DxException&) { rejected = true; }
+    Require(rejected, "Invalid shader must report a compilation failure");
+    std::cout << "Shader define lifetime and compiler error checks passed\n";
+}
+
 static void ShadowUploadSlots(GDX12Device& device)
 {
     GDX12DeviceResources resources;
@@ -364,6 +393,7 @@ int main(int argc, char** argv)
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
     try
     {
+        CheckStringConversions();
         CheckShadowVisibilityJobs();
         CheckLightGridSettings();
         BenchmarkEngine engine;
@@ -382,6 +412,7 @@ int main(int argc, char** argv)
         if (!benchmark) debug->EnableDebugLayer();
         GDX12Device device;
         ThrowIfFailed(device.Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
+        CheckShaderDefines(device);
         GDX12DeviceResources resources;
         resources.Initialize(&device);
         ComPtr<ID3D12InfoQueue> info;
@@ -829,6 +860,38 @@ int main(int argc, char** argv)
         visibility.VisibleTransparentCommandsCache->CreateUAV(resources.SRV_UAV_Heap.get(), resources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
         visibility.OpaqueDrawCounter->CreateUAV(resources.SRV_UAV_Heap.get(), resources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
         visibility.TransparentDrawCounter->CreateUAV(resources.SRV_UAV_Heap.get(), resources.SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        auto counters = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(2 * sizeof(UINT)),
+            D3D12_RESOURCE_STATE_COPY_DEST, nullptr);
+        for (UINT layer : { 0u, 2u })
+        for (UINT enabled : { 0u, 1u })
+        {
+            auto testMaterial = material;
+            testMaterial.RenderLayer = layer;
+            frame->MaterialCache->CopyData(0, testMaterial);
+            auto testDraw = draw;
+            testDraw.InstanceCount = enabled;
+            resources.IndirectCommandsCache->CopyData(0, testDraw);
+            auto* list = queue->GetCommandList();
+            resources.PrepareLocalShadowData();
+            resources.UploadLocalShadowData(list);
+            culling.Execute(list);
+            auto& opaqueCounter = visibility.OpaqueDrawCounter->GetResource();
+            auto& transparentCounter = visibility.TransparentDrawCounter->GetResource();
+            list->ResourceBarrier({ opaqueCounter.GetCopySourceBarrier(), transparentCounter.GetCopySourceBarrier() });
+            list->GetCommandList()->CopyBufferRegion(counters.Get(), 0, opaqueCounter.D3DResource.Get(), 0, sizeof(UINT));
+            list->GetCommandList()->CopyBufferRegion(counters.Get(), sizeof(UINT), transparentCounter.D3DResource.Get(), 0, sizeof(UINT));
+            queue->ExecuteCommandList(list);
+            queue->Flush();
+            void* mapped = nullptr;
+            ThrowIfFailed(counters->Map(0, nullptr, &mapped));
+            const auto* counts = static_cast<const UINT*>(mapped);
+            const bool correct = counts[0] == (layer == 0 ? enabled : 0) && counts[1] == (layer == 2 ? enabled : 0);
+            counters->Unmap(0, nullptr);
+            Require(correct, "Culling must exclude disabled draws from both command counters");
+        }
+        frame->MaterialCache->CopyData(0, material);
+        resources.IndirectCommandsCache->CopyData(0, draw);
+        std::cout << "Enabled/disabled opaque and transparent culling checks passed\n";
         GDX12MainConstants lighting;
         lighting.RenderTargetSize = { 64, 64 };
         lighting.LightRadiance = {};

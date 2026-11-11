@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <DirectXMath.h>
 #include <string>
+#include <system_error>
 #include <wrl/client.h>
 #include <directx-headers/directx/d3d12.h>
 #include <directx-headers/directx/d3dx12.h>
@@ -40,16 +41,24 @@ static XMFLOAT4X4 Identity4x4 ()
 
 inline std::wstring StringToWString (const std::string& sourceString)
 {
-	WCHAR Buffer[512];
-	MultiByteToWideChar(CP_ACP, 0, sourceString.c_str(), -1, Buffer, 512);
-	return std::wstring(Buffer);
+    const int count = MultiByteToWideChar(CP_ACP, 0, sourceString.c_str(), -1, nullptr, 0);
+    if (!count) throw std::system_error(GetLastError(), std::system_category(), "MultiByteToWideChar");
+    std::wstring result(count, L'\0');
+    if (!MultiByteToWideChar(CP_ACP, 0, sourceString.c_str(), -1, result.data(), count))
+        throw std::system_error(GetLastError(), std::system_category(), "MultiByteToWideChar");
+    result.pop_back(); // The API count includes the terminating null.
+    return result;
 }
 
 inline std::string WStringToString(const std::wstring& sourceString)
 {
-    CHAR Buffer[512];
-    WideCharToMultiByte(CP_ACP, 0, sourceString.c_str(), -1, Buffer, 512, NULL, NULL);
-    return std::string(Buffer);
+    const int count = WideCharToMultiByte(CP_ACP, 0, sourceString.c_str(), -1, nullptr, 0, nullptr, nullptr);
+    if (!count) throw std::system_error(GetLastError(), std::system_category(), "WideCharToMultiByte");
+    std::string result(count, '\0');
+    if (!WideCharToMultiByte(CP_ACP, 0, sourceString.c_str(), -1, result.data(), count, nullptr, nullptr))
+        throw std::system_error(GetLastError(), std::system_category(), "WideCharToMultiByte");
+    result.pop_back();
+    return result;
 }
 
 class DxException

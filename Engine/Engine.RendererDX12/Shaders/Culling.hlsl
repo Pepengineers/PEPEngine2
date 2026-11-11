@@ -49,7 +49,9 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
     if (drawIndex >= numDraws)
         return;
     
-    uint instanceID = InputCommands[drawIndex].StartInstanceLocation;
+    IndirectDrawArgs command = InputCommands[drawIndex];
+    if (command.InstanceCount == 0) return;
+    uint instanceID = command.InstanceID;
     
     if (IsBoxVisible(instanceID))
     {
@@ -60,16 +62,14 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
         {
             uint writeIndex;
             InterlockedAdd(OpaqueCounterBuffer[0], 1, writeIndex);
-            OpaqueVisibleCommands[writeIndex] = InputCommands[drawIndex];
-            return;
+            OpaqueVisibleCommands[writeIndex] = command;
         }
         //transparent
-        if (mat.RenderLayer == 2)
+        else
         {
             uint writeIndex;
             InterlockedAdd(TransparentCounterBuffer[0], 1, writeIndex);
-            TransparentVisibleCommands[writeIndex] = InputCommands[drawIndex];
-            return;
+            TransparentVisibleCommands[writeIndex] = command;
         }
     }
 }

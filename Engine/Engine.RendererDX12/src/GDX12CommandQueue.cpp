@@ -311,15 +311,14 @@ void GDX12CommandQueue::CollectCompletedLists()
 {
     const auto progress = GetCompletionProgress();
     if (progress.CompletedValue == (std::numeric_limits<uint64_t>::max)()) ThrowIfFailed(DXGI_ERROR_DEVICE_REMOVED);
-    auto it = _workingCommandLists.begin();
-    while (it != _workingCommandLists.end())
+    for (auto& list : _workingCommandLists)
     {
-        if ((*it)->_retirement.IsReachedBy(progress))
+        if (list && list->_retirement.IsReachedBy(progress))
         {
-            (*it)->_legacyOwners.clear();
-            _availableCommandLists.push_back(std::move(*it));
-            it = _workingCommandLists.erase(it);
+            list->_legacyOwners.clear();
+            _availableCommandLists.push_back(std::move(list));
         }
-        else ++it;
     }
+    _workingCommandLists.erase(std::remove(_workingCommandLists.begin(), _workingCommandLists.end(), nullptr),
+        _workingCommandLists.end());
 }
