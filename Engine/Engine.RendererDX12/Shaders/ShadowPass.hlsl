@@ -39,6 +39,7 @@ void CS(uint3 id : SV_DispatchThreadID)
     InputCommands.GetDimensions(count, stride);
     if (id.x >= count) return;
     IndirectDrawArgs command = InputCommands[id.x];
+    if (command.InstanceCount == 0) return;
     InstanceData instance = InstanceCache[command.InstanceID];
     if (instance.CastsShadows == 0) return;
     Material material = MaterialCache[instance.MaterialIndex];

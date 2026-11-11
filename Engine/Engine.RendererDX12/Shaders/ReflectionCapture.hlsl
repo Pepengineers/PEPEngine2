@@ -29,8 +29,8 @@ void CullCS(uint3 id : SV_DispatchThreadID)
     if (material.RenderLayer == 2 || material.ReflectionProbePreview != 0) return;
     if (Geometry == 1 && instance.ReflectionDynamic != 0) return;
     if (Geometry == 2 && instance.ReflectionDynamic == 0) return;
-    float4x4 matrix = Shadow != 0 ? CBShadow.ViewProj[0] : CBCamera.ViewProj;
-    if (!ShadowBoxVisible(instance.BoundingBoxCenter, instance.BoundingBoxExtents, matrix)) return;
+    float4x4 viewProj = Shadow != 0 ? CBShadow.ViewProj[0] : CBCamera.ViewProj;
+    if (!ShadowBoxVisible(instance.BoundingBoxCenter, instance.BoundingBoxExtents, viewProj)) return;
     uint index;
     InterlockedAdd(Counter[0], 1, index);
     VisibleCommands[index] = command;
