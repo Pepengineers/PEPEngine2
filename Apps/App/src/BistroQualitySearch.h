@@ -75,12 +75,13 @@ namespace BistroQualitySearch
                 {
                 case Phase::Coarse:
                     if (_coarseFirst) _request = Request{_coarseFirst->Settings, true};
-                    else RequestOnce(_coarse, AtMinimumTiers());
+                    else RequestOnce(_coarse, true);
                     break;
                 case Phase::Graphics:
                 case Phase::Cpu:
                 case Phase::Restore:
-                    if (!RequestNeighbor(_phase == Phase::Restore)) FinishNeighborhood();
+                    if (_neighborFirst) _request = Request{_neighborFirst->Settings, true};
+                    else if (!RequestNeighbor(true)) FinishNeighborhood();
                     break;
                 case Phase::Disable:
                     if (_offRepeat) _request = Request{_offRepeat->Settings, true};
@@ -112,8 +113,24 @@ namespace BistroQualitySearch
             case Phase::Graphics:
             case Phase::Cpu:
             case Phase::Restore:
+            {
+                const auto first = std::exchange(_neighborFirst, std::nullopt);
+                if (!first && measured && _phase != Phase::Restore &&
+                    ComfortablyAboveTarget(*measured) && Better(*measured, *_base))
+                {
+                    // Confirm the speed margin before it can prune lower-ranked alternatives.
+                    _neighborFirst = measured;
+                    break;
+                }
+                if (first && measured)
+                {
+                    measured->Stable = std::abs(first->AverageFps - measured->AverageFps) <= Noise(first->AverageFps);
+                    measured->AverageFps = (std::min)(first->AverageFps, measured->AverageFps);
+                    measured->TargetReached = measured->AverageFps >= Target(_profile);
+                }
                 if (measured) ConsiderNeighbor(*measured);
                 break;
+            }
             case Phase::Disable:
                 SubmitDisable(measured);
                 break;
@@ -172,6 +189,9 @@ namespace BistroQualitySearch
             {
                 _phase = Phase::Disable;
                 _offBase = measured.value_or(Selection{_coarse, 0, false, false});
+                if (!measured)
+                    for (auto it = _fallbackOptions.rbegin(); it != _fallbackOptions.rend(); ++it)
+                        if (it->Settings == _coarse) { _offBase = *it; break; }
                 _offGroup = OffGroup::Post;
                 BuildDisableBatch();
             }
@@ -212,7 +232,6 @@ namespace BistroQualitySearch
             while (_cursor < _batch.size())
             {
                 const bool canPrune = _batchBest && (!optimize || ComfortablyAboveTarget(*_batchBest));
-                if (_phase != Phase::Disable && _cursor == _groupCount && canPrune) return false;
                 if (optimize && canPrune && Rank(_batch[_cursor]) < Rank(_batchBest->Settings)) return false;
                 RequestOnce(_batch[_cursor++], requireFull);
                 if (_request) return true;
@@ -240,7 +259,11 @@ namespace BistroQualitySearch
             if (!a.TargetReached && std::abs(a.AverageFps - b.AverageFps) > Noise(b.AverageFps))
                 return a.AverageFps > b.AverageFps;
             const auto aRank = Rank(a.Settings), bRank = Rank(b.Settings);
-            return aRank == bRank ? a.AverageFps > b.AverageFps + Noise(b.AverageFps) : aRank > bRank;
+            if (aRank != bRank) return aRank > bRank;
+            const auto aPixels = static_cast<long long>(a.Settings.Width) * a.Settings.Height;
+            const auto bPixels = static_cast<long long>(b.Settings.Width) * b.Settings.Height;
+            if (aPixels != bPixels) return aPixels > bPixels;
+            return a.AverageFps > b.AverageFps + Noise(b.AverageFps);
         }
 
         bool ComfortablyAboveTarget(const Selection& selection) const
@@ -250,7 +273,7 @@ namespace BistroQualitySearch
 
         void RememberFallback(const Selection& measured)
         {
-            if (_profile != Profile::Quality || !AtMinimumHeight() || measured.TargetReached) return;
+            if (measured.TargetReached) return;
             _fallbackOptions.push_back(measured);
             if (!_fallback || Better(measured, *_fallback)) _fallback = measured;
         }
@@ -300,6 +323,7 @@ namespace BistroQualitySearch
 
         void BuildNeighborhood()
         {
+            // shortcut: bounded groups can miss multi-axis optima; exhaustive search needs an explicit offline budget.
             _batch.clear();
             _cursor = 0;
             _batchBest.reset();
@@ -307,7 +331,6 @@ namespace BistroQualitySearch
             std::vector<size_t> raise, lower;
             for (size_t i = 0; i < _axes.size(); ++i)
             {
-                if (_phase == Phase::Restore && candidate.Tiers[i] != 0) continue;
                 if (_profile == Profile::Quality && _phase != Phase::Restore && _axes[i].Cpu != (_phase == Phase::Cpu)) continue;
                 if (!PrerequisitesActive(candidate, i)) continue;
                 if (candidate.Tiers[i] < _axes[i].MaxTier) raise.push_back(i);
@@ -318,7 +341,6 @@ namespace BistroQualitySearch
             std::vector<size_t> alternating[2];
             for (size_t i = 0; i < raise.size(); ++i) alternating[i % 2].push_back(raise[i]);
             for (const auto& group : alternating) QueueGroup(group, candidate, false);
-            _groupCount = _batch.size();
             for (size_t i = 0; i < raise.size(); ++i)
             {
                 QueueGroup({raise[i]}, candidate, false);
@@ -336,30 +358,49 @@ namespace BistroQualitySearch
                 --swap.Tiers[down];
                 _batch.push_back(std::move(swap));
             }
+            // Probe beyond a failed intermediate tier without assuming monotonic GPU/CPU costs.
+            for (int tier = 2; tier <= 4; ++tier)
+            {
+                auto group = candidate;
+                bool raised = false;
+                for (const auto axis : raise)
+                {
+                    const auto targetTier = (std::clamp)(tier, _axes[axis].MinTier, _axes[axis].MaxTier);
+                    if (targetTier <= candidate.Tiers[axis]) continue;
+                    if (targetTier > RaisedTier(candidate, axis))
+                    {
+                        auto single = candidate;
+                        single.Tiers[axis] = targetTier;
+                        _batch.push_back(std::move(single));
+                    }
+                    group.Tiers[axis] = targetTier;
+                    raised = true;
+                }
+                if (raised) _batch.push_back(std::move(group));
+            }
             if (_phase == Phase::Graphics || _phase == Phase::Cpu)
             {
                 const auto higherRank = [&](const Candidate& a, const Candidate& b) { return Rank(a) > Rank(b); };
-                const auto endOfGroups = _batch.begin() + _groupCount;
-                std::stable_sort(_batch.begin(), endOfGroups, higherRank);
-                std::stable_sort(endOfGroups, _batch.end(), higherRank);
                 const auto baseRank = Rank(candidate);
-                _batch.erase(std::remove_if(endOfGroups, _batch.end(),
+                _batch.erase(std::remove_if(_batch.begin(), _batch.end(),
                     [&](const Candidate& item) { return Rank(item) < baseRank; }), _batch.end());
+                std::stable_sort(_batch.begin(), _batch.end(), higherRank);
             }
         }
 
         void ConsiderNeighbor(const Selection& measured)
         {
             if (measured.TargetReached) _finalists.push_back(measured);
-            else if (_phase != Phase::Restore) return;
+            else
+            {
+                RememberFallback(measured);
+                if (_phase != Phase::Restore) return;
+            }
             if (_phase == Phase::Restore && !measured.TargetReached &&
                 measured.AverageFps < _base->AverageFps - Noise(_base->AverageFps)) return;
             if (Better(measured, *_base) && (!_batchBest || Better(measured, *_batchBest)))
             {
                 _batchBest = measured;
-                // When raising every eligible axis works, partial raises and swaps cannot improve its rank.
-                if (_phase != Phase::Restore && ComfortablyAboveTarget(measured) && measured.Settings == _batch.front())
-                    _cursor = _batch.size();
             }
         }
 
@@ -372,10 +413,7 @@ namespace BistroQualitySearch
                     StartOptimization(*_batchBest, true);
                     return;
                 }
-                if (_phase == Phase::Cpu)
-                    for (const auto& axis : _axes)
-                        if (axis.Prerequisite && !_base->Settings.Tiers[*axis.Prerequisite] &&
-                            _batchBest->Settings.Tiers[*axis.Prerequisite]) _phase = Phase::Graphics;
+                if (_phase == Phase::Cpu) _phase = Phase::Graphics;
                 _base = _batchBest;
                 if (_phase == Phase::Restore) RememberFallback(*_base);
                 BuildNeighborhood();
@@ -534,11 +572,11 @@ namespace BistroQualitySearch
         Selection _offBase{};
         bool _fromOff = false;
         bool _confirmingFallback = false;
-        size_t _cursor = 0, _groupCount = 0;
+        size_t _cursor = 0;
         std::set<Candidate> _visited;
         std::vector<Candidate> _batch;
         std::vector<Selection> _finalists, _offOptions, _fallbackOptions;
         std::optional<Request> _request;
-        std::optional<Selection> _coarseFirst, _base, _batchBest, _fallback, _offRepeat, _confirm, _confirmedFallback, _winner;
+        std::optional<Selection> _coarseFirst, _neighborFirst, _base, _batchBest, _fallback, _offRepeat, _confirm, _confirmedFallback, _winner;
     };
 }

@@ -151,12 +151,7 @@ namespace BistroBenchmarkFlight
             }
             if (nowSeconds < _lastCompletion) throw std::invalid_argument("Bistro frame clock went backwards");
             const double elapsed = nowSeconds - *_phaseStart;
-            if (_phase == Phase::Flight && elapsed >= FlightSeconds)
-            {
-                _phase = Phase::Complete;
-                return SampleRoute(1);
-            }
-            const double progress = _phase == Phase::Flight ? elapsed / FlightSeconds : 0;
+            const double progress = _phase == Phase::Flight ? (std::min)(elapsed / FlightSeconds, 1.0) : 0;
             const auto pose = SampleRoute(progress);
             _pending = FrameSample{frameId, elapsed, progress, pose.Segment, 0, 0};
             _frameStart = nowSeconds;

@@ -89,6 +89,33 @@ namespace
             "FPS lows did not use the mean duration of the slowest ceil(N * fraction) frames");
     }
 
+    void TestFinalInterFrameStall()
+    {
+        Sampler sampler;
+        double now = 0;
+        std::uint64_t frameId = 0;
+        while (sampler.State() == Phase::Warmup)
+        {
+            sampler.BeginFrame(frameId++, now);
+            sampler.EndFrame(++now);
+        }
+        sampler.StartFlight();
+        for (int i = 0; i < 99; ++i)
+        {
+            sampler.BeginFrame(frameId++, now);
+            sampler.EndFrame(++now);
+        }
+        now += 2;
+        const auto pose = sampler.BeginFrame(frameId++, now);
+        Require(pose.Position == SampleRoute(1).Position, "Stalled final frame went beyond the route endpoint");
+        sampler.EndFrame(now + 0.25);
+        const auto metrics = sampler.Summarize();
+        Require(metrics.FrameCount == 100 && Near(metrics.Duration, 101.25) &&
+            Near(metrics.AverageFps, 100.0 / 101.25), "Final inter-frame stall disappeared from average FPS");
+        Require(Near(sampler.Samples().back().Duration, 2.25) && sampler.Samples().back().Progress == 1,
+            "Final stalled sample lost its duration or clamped route progress");
+    }
+
     void TestUnstableWarmup()
     {
         Sampler sampler;
@@ -108,6 +135,7 @@ inline void CheckBistroBenchmarkFlight()
 {
     TestRoute();
     TestWarmupAndFlight();
+    TestFinalInterFrameStall();
     TestUnstableWarmup();
     std::cout << "Bistro benchmark flight checks passed\n";
 }
