@@ -7,4 +7,8 @@
     <ClCompile Include="tests\SecondGroupTests.cpp" />
   </ItemGroup>
   <ItemDefinitionGroup><Link><SubSystem>Console</SubSystem></Link></ItemDefinitionGroup>
+  <Target Name="CopyEngineConfiguration" AfterTargets="Build">
+    <MakeDir Directories="$(TargetDir)Config" />
+    <WriteLinesToFile File="$(TargetDir)Config\Engine.ini" Lines="[ConsoleVariables];Render.NumFrames = 3" Overwrite="true" />
+  </Target>
 </Project>
