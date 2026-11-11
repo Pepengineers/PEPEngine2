@@ -50,9 +50,7 @@ struct VS_OUTPUT_PS_INPUT
     float3 PosW : POSITION;
     float2 TexC : TEXCOORD;
     float3 Normal : NORMAL;
-    float3 Tangent : TANGENT;
     uint MaterialIndex : TEXCOORD1;
-    float LinearDepth : TEXCOORD2;
 };
 
 VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
@@ -66,7 +64,6 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint vertexID : SV_VertexID, uint instanceID
         vin.Pos = vertex.Position;
         vin.Normal = vertex.Normal;
         vin.TexC = vertex.UV;
-        vin.Tangent = vertex.Tangent;
     }
     float4x4 World = TransformCache[instance.TransformIndex].World;
     
@@ -74,11 +71,8 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint vertexID : SV_VertexID, uint instanceID
     vout.PosW = posW.xyz;
 
     vout.Normal = TransformNormal(vin.Normal, (float3x3) World);
-    vout.Tangent = normalize(mul(vin.Tangent, (float3x3) World));
     vout.PosCS = mul(posW, CBCamera.ViewProj);
     vout.TexC = vin.TexC;
-    float3 viewPos = mul(posW, CBCamera.View).xyz;
-    vout.LinearDepth = abs(viewPos.z);
     vout.MaterialIndex = instance.MaterialIndex;
     
     return vout;
