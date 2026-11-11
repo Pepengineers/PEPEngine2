@@ -244,6 +244,40 @@ namespace
             graphics.Settings.Tiers[0] == 4, "Reserve discarded resolution or quality without a speed gain");
     }
 
+    void TestLateConfirmationRevisitsPrunedCandidates()
+    {
+        for (const auto profile : {Profile::Performance, Profile::Quality})
+            for (const bool invalid : {false, true})
+            for (const bool highPasses : {false, true})
+            {
+                Search search(profile, {{}}, 768, 480);
+                int epicVisits = 0, highVisits = 0, requests = 0;
+                const auto winner = Run(search, [&](const Request& request, int visit)
+                {
+                    Require(++requests < 20, "Late confirmation recovery kept retrying candidates");
+                    const auto tier = request.Settings.Tiers[0];
+                    const auto target = Search::Target(profile);
+                    if (tier == 4)
+                    {
+                        ++epicVisits;
+                        if (visit >= 3)
+                            return invalid ? Result{std::nullopt, std::nullopt, false} :
+                                Result{target - 10, std::nullopt};
+                        return Result{target + 15, std::nullopt};
+                    }
+                    if (tier == 3)
+                    {
+                        ++highVisits;
+                        return Result{target + (highPasses ? 5 : -5), std::nullopt};
+                    }
+                    return Result{target + 10, std::nullopt};
+                });
+                Require(winner.TargetReached && winner.Settings.Tiers[0] == (highPasses ? 3 : 2) &&
+                    epicVisits == 3 && highVisits == (highPasses ? 2 : 1),
+                    "Late failed or invalid Epic confirmation hid the stable High candidate");
+            }
+    }
+
     void TestNonmonotonicTiersAndCpuShift()
     {
         Search performance(Profile::Performance, {{}}, 768, 480);
@@ -278,6 +312,27 @@ namespace
             "CPU change did not recheck graphics under a changed bottleneck");
     }
 
+    void TestInvalidRecoveryTerminates()
+    {
+        for (const auto profile : {Profile::Performance, Profile::Quality})
+        {
+            Search search(profile, {{}}, 768, 480);
+            std::map<int, int> visits;
+            int requests = 0;
+            while (auto request = search.Next())
+            {
+                Require(++requests < 12, "Failed recovery restarted the same candidates");
+                const auto tier = request->Settings.Tiers[0];
+                const int visit = ++visits[tier];
+                search.Submit((tier == 2 || tier == 4) && visit <= 2 ?
+                    Result{Search::Target(profile) + 15, std::nullopt} :
+                    Result{std::nullopt, std::nullopt, false});
+            }
+            Require(!search.Winner() && visits[4] == 3 && visits[3] == 1 && visits[2] == 3,
+                "Failed deferred measurements or finalists produced a winner or repeated a failed probe");
+        }
+    }
+
     void TestInvalidMeasurementsTerminate()
     {
         Search search(Profile::Performance, {{OffGroup::Post}, {OffGroup::Simulation}}, 1280, 800);
@@ -307,7 +362,9 @@ int main()
         TestPrerequisites();
         TestSwapAfterPassingGroup();
         TestMeasuredReserves();
+        TestLateConfirmationRevisitsPrunedCandidates();
         TestNonmonotonicTiersAndCpuShift();
+        TestInvalidRecoveryTerminates();
         TestInvalidMeasurementsTerminate();
         std::cout << "Bistro quality search checks passed\n";
         return 0;
