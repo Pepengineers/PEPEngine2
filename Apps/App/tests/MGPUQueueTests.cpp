@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include <d3d12sdklayers.h>
 #include <dxc/dxcapi.h>
+#include <algorithm>
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
@@ -224,6 +225,32 @@ static void TestLocal(GDX12Device& device)
     std::cout << "Single physical GPU DIRECT/COMPUTE/COPY chain, provenance, negative commands and retirement passed.\n";
 }
 
+static void TestMixedRetirement(GDX12Device& device)
+{
+    GDX12CommandQueue queue(&device, D3D12_COMMAND_LIST_TYPE_COPY);
+    std::vector<GDX12CommandList*> recording, submitted;
+    for (UINT i = 0; i < 32; ++i)
+    {
+        auto* list = queue.GetCommandList();
+        (i % 2 ? recording : submitted).push_back(list);
+    }
+    queue.ExecuteCommandLists(submitted);
+    queue.Flush();
+    queue.CollectCompletedLists();
+    queue.CollectCompletedLists();
+    for (auto it = submitted.rbegin(); it != submitted.rend(); ++it)
+    {
+        auto* recycled = queue.GetCommandList();
+        Require(recycled == *it, "Mixed retirement lost a completed list or changed reuse order");
+        Require(std::find(recording.begin(), recording.end(), recycled) == recording.end(),
+            "Mixed retirement recycled a recording list");
+    }
+    queue.ExecuteCommandLists(recording);
+    queue.ExecuteCommandLists(submitted);
+    queue.Flush();
+    std::cout << "Mixed command-list retirement and reuse checks passed\n";
+}
+
 static void TestComputeDxrBinding(GDX12Device& device)
 {
     D3D12_FEATURE_DATA_D3D12_OPTIONS5 options{};
@@ -443,6 +470,7 @@ int main(int argc, char** argv)
         GDX12Device device; ThrowIfFailed(device.Initialize(adapter));
         ComPtr<ID3D12InfoQueue> info; ThrowIfFailed(device.GetDevice().As(&info)); info->ClearStoredMessages();
         TestLocal(device);
+        TestMixedRetirement(device);
         TestComputeDxrBinding(device);
         const bool two = TestSecondPhysicalAdapter(device);
         device.GetCommandQueue()->Flush(); CheckDebug(*info.Get());
