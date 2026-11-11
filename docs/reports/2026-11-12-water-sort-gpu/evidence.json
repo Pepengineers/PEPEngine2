@@ -1,0 +1,137 @@
+{
+  "runs": [
+    {
+      "run": "WaterSortBench1",
+      "adapter": "NVIDIA GeForce RTX 4080 SUPER",
+      "queue": "compute",
+      "debug_layer": false,
+      "timestamp_frequency": 1000000000,
+      "scope": "sort dispatches and UAV barriers; upload and offsets excluded",
+      "executable_sha256": "023c343e2a6e04a44086d18e6e953a7181c0c68774b5d61f7d21a140f4bcf017",
+      "source_sha256": {
+        "Apps\\App\\Shaders\\FluidSolver.hlsl": "4d4544a5591393744089a22c6f766e917ab10592119c04d0540a362225906cac",
+        "Apps\\App\\Shaders\\FluidParameters.hlsli": "42f01c24fec6d34e95a2cd8b13df09ce2034907fa09fe2807c1bfddadfbd4d15",
+        "Apps\\App\\src\\Rendering\\Water\\GDX12Fluid.cpp": "ae8993a24299a607c731734bec1354136423dcb5062088a8380f48b12b215f96",
+        "Apps\\App\\src\\Rendering\\Water\\GDX12FluidSolver.h": "cd1aebf593c17834b52802af4bea8a07da9440a2f6c00a90994c34384cbbf4eb",
+        "Apps\\App\\tests\\FluidSortGpuTests.cpp": "c87846e5a55f98ccd434d53b0d47348b9b97bcee4a4abe71d295329189da634a",
+        "Apps\\App\\FluidSortGpuTests.vcxproj": "02261672b461bc1d87884feed0243e8268cd0c9d3aba355477b2e67e9f65cf15",
+        "Engine\\Engine.RendererDX12\\src\\GDX12ShaderCompiler.cpp": "417a1e337e8df6e1edbfc092f293d2e21140549eafe08d8cd03e3b538723cba1",
+        "Engine\\Engine.RendererDX12\\Include\\Engine.RendererDX12\\GDX12ShaderCompiler.h": "45c3a776bd2fdb7544769a08f23b24d3d893396893a234ed08e8201b4c1a4fe8",
+        "Engine\\Engine.RendererDX12\\src\\GDX12Device.cpp": "41bfe4b81cf307615e7cb38e7f526714cec099c5d44e43c32254678dba0cc370"
+      },
+      "all_inputs_unchanged": true
+    },
+    {
+      "run": "WaterSortBench2",
+      "adapter": "NVIDIA GeForce RTX 4080 SUPER",
+      "queue": "compute",
+      "debug_layer": false,
+      "timestamp_frequency": 1000000000,
+      "scope": "sort dispatches and UAV barriers; upload and offsets excluded",
+      "executable_sha256": "023c343e2a6e04a44086d18e6e953a7181c0c68774b5d61f7d21a140f4bcf017",
+      "source_sha256": {
+        "Apps\\App\\Shaders\\FluidSolver.hlsl": "4d4544a5591393744089a22c6f766e917ab10592119c04d0540a362225906cac",
+        "Apps\\App\\Shaders\\FluidParameters.hlsli": "42f01c24fec6d34e95a2cd8b13df09ce2034907fa09fe2807c1bfddadfbd4d15",
+        "Apps\\App\\src\\Rendering\\Water\\GDX12Fluid.cpp": "ae8993a24299a607c731734bec1354136423dcb5062088a8380f48b12b215f96",
+        "Apps\\App\\src\\Rendering\\Water\\GDX12FluidSolver.h": "cd1aebf593c17834b52802af4bea8a07da9440a2f6c00a90994c34384cbbf4eb",
+        "Apps\\App\\tests\\FluidSortGpuTests.cpp": "c87846e5a55f98ccd434d53b0d47348b9b97bcee4a4abe71d295329189da634a",
+        "Apps\\App\\FluidSortGpuTests.vcxproj": "02261672b461bc1d87884feed0243e8268cd0c9d3aba355477b2e67e9f65cf15",
+        "Engine\\Engine.RendererDX12\\src\\GDX12ShaderCompiler.cpp": "417a1e337e8df6e1edbfc092f293d2e21140549eafe08d8cd03e3b538723cba1",
+        "Engine\\Engine.RendererDX12\\Include\\Engine.RendererDX12\\GDX12ShaderCompiler.h": "45c3a776bd2fdb7544769a08f23b24d3d893396893a234ed08e8201b4c1a4fe8",
+        "Engine\\Engine.RendererDX12\\src\\GDX12Device.cpp": "41bfe4b81cf307615e7cb38e7f526714cec099c5d44e43c32254678dba0cc370"
+      },
+      "all_inputs_unchanged": true
+    },
+    {
+      "run": "WaterSortBench3",
+      "adapter": "NVIDIA GeForce RTX 4080 SUPER",
+      "queue": "compute",
+      "debug_layer": false,
+      "timestamp_frequency": 1000000000,
+      "scope": "sort dispatches and UAV barriers; upload and offsets excluded",
+      "executable_sha256": "023c343e2a6e04a44086d18e6e953a7181c0c68774b5d61f7d21a140f4bcf017",
+      "source_sha256": {
+        "Apps\\App\\Shaders\\FluidSolver.hlsl": "4d4544a5591393744089a22c6f766e917ab10592119c04d0540a362225906cac",
+        "Apps\\App\\Shaders\\FluidParameters.hlsli": "42f01c24fec6d34e95a2cd8b13df09ce2034907fa09fe2807c1bfddadfbd4d15",
+        "Apps\\App\\src\\Rendering\\Water\\GDX12Fluid.cpp": "ae8993a24299a607c731734bec1354136423dcb5062088a8380f48b12b215f96",
+        "Apps\\App\\src\\Rendering\\Water\\GDX12FluidSolver.h": "cd1aebf593c17834b52802af4bea8a07da9440a2f6c00a90994c34384cbbf4eb",
+        "Apps\\App\\tests\\FluidSortGpuTests.cpp": "c87846e5a55f98ccd434d53b0d47348b9b97bcee4a4abe71d295329189da634a",
+        "Apps\\App\\FluidSortGpuTests.vcxproj": "02261672b461bc1d87884feed0243e8268cd0c9d3aba355477b2e67e9f65cf15",
+        "Engine\\Engine.RendererDX12\\src\\GDX12ShaderCompiler.cpp": "417a1e337e8df6e1edbfc092f293d2e21140549eafe08d8cd03e3b538723cba1",
+        "Engine\\Engine.RendererDX12\\Include\\Engine.RendererDX12\\GDX12ShaderCompiler.h": "45c3a776bd2fdb7544769a08f23b24d3d893396893a234ed08e8201b4c1a4fe8",
+        "Engine\\Engine.RendererDX12\\src\\GDX12Device.cpp": "41bfe4b81cf307615e7cb38e7f526714cec099c5d44e43c32254678dba0cc370"
+      },
+      "all_inputs_unchanged": true
+    },
+    {
+      "run": "WaterSortDirect1",
+      "adapter": "NVIDIA GeForce RTX 4080 SUPER",
+      "queue": "direct",
+      "debug_layer": false,
+      "timestamp_frequency": 1000000000,
+      "scope": "sort dispatches and UAV barriers; upload and offsets excluded",
+      "executable_sha256": "d327dfd892ba91e3f7b77280733682250e6a14905932b0c42baaf3b7ded5aee8",
+      "source_sha256": {
+        "Apps\\App\\Shaders\\FluidSolver.hlsl": "fbbd54a025be866df6f07902842cb0afb51386a717cdc2cd3a35059f7f469649",
+        "Apps\\App\\Shaders\\FluidParameters.hlsli": "42f01c24fec6d34e95a2cd8b13df09ce2034907fa09fe2807c1bfddadfbd4d15",
+        "Apps\\App\\src\\Rendering\\Water\\GDX12Fluid.cpp": "ae8993a24299a607c731734bec1354136423dcb5062088a8380f48b12b215f96",
+        "Apps\\App\\src\\Rendering\\Water\\GDX12FluidSolver.h": "cd1aebf593c17834b52802af4bea8a07da9440a2f6c00a90994c34384cbbf4eb",
+        "Apps\\App\\tests\\FluidSortGpuTests.cpp": "9c0d494a8b76961ae68318aa638027d1d1b790c4f116e9850e4801206ab35761",
+        "Apps\\App\\FluidSortGpuTests.vcxproj": "02261672b461bc1d87884feed0243e8268cd0c9d3aba355477b2e67e9f65cf15",
+        "Engine\\Engine.RendererDX12\\src\\GDX12ShaderCompiler.cpp": "417a1e337e8df6e1edbfc092f293d2e21140549eafe08d8cd03e3b538723cba1",
+        "Engine\\Engine.RendererDX12\\Include\\Engine.RendererDX12\\GDX12ShaderCompiler.h": "45c3a776bd2fdb7544769a08f23b24d3d893396893a234ed08e8201b4c1a4fe8",
+        "Engine\\Engine.RendererDX12\\src\\GDX12Device.cpp": "41bfe4b81cf307615e7cb38e7f526714cec099c5d44e43c32254678dba0cc370"
+      },
+      "all_inputs_unchanged": true
+    },
+    {
+      "run": "WaterSortDirect2",
+      "adapter": "NVIDIA GeForce RTX 4080 SUPER",
+      "queue": "direct",
+      "debug_layer": false,
+      "timestamp_frequency": 1000000000,
+      "scope": "sort dispatches and UAV barriers; upload and offsets excluded",
+      "executable_sha256": "d327dfd892ba91e3f7b77280733682250e6a14905932b0c42baaf3b7ded5aee8",
+      "source_sha256": {
+        "Apps\\App\\Shaders\\FluidSolver.hlsl": "fbbd54a025be866df6f07902842cb0afb51386a717cdc2cd3a35059f7f469649",
+        "Apps\\App\\Shaders\\FluidParameters.hlsli": "42f01c24fec6d34e95a2cd8b13df09ce2034907fa09fe2807c1bfddadfbd4d15",
+        "Apps\\App\\src\\Rendering\\Water\\GDX12Fluid.cpp": "ae8993a24299a607c731734bec1354136423dcb5062088a8380f48b12b215f96",
+        "Apps\\App\\src\\Rendering\\Water\\GDX12FluidSolver.h": "cd1aebf593c17834b52802af4bea8a07da9440a2f6c00a90994c34384cbbf4eb",
+        "Apps\\App\\tests\\FluidSortGpuTests.cpp": "9c0d494a8b76961ae68318aa638027d1d1b790c4f116e9850e4801206ab35761",
+        "Apps\\App\\FluidSortGpuTests.vcxproj": "02261672b461bc1d87884feed0243e8268cd0c9d3aba355477b2e67e9f65cf15",
+        "Engine\\Engine.RendererDX12\\src\\GDX12ShaderCompiler.cpp": "417a1e337e8df6e1edbfc092f293d2e21140549eafe08d8cd03e3b538723cba1",
+        "Engine\\Engine.RendererDX12\\Include\\Engine.RendererDX12\\GDX12ShaderCompiler.h": "45c3a776bd2fdb7544769a08f23b24d3d893396893a234ed08e8201b4c1a4fe8",
+        "Engine\\Engine.RendererDX12\\src\\GDX12Device.cpp": "41bfe4b81cf307615e7cb38e7f526714cec099c5d44e43c32254678dba0cc370"
+      },
+      "all_inputs_unchanged": true
+    },
+    {
+      "run": "WaterSortDirect3",
+      "adapter": "NVIDIA GeForce RTX 4080 SUPER",
+      "queue": "direct",
+      "debug_layer": false,
+      "timestamp_frequency": 1000000000,
+      "scope": "sort dispatches and UAV barriers; upload and offsets excluded",
+      "executable_sha256": "d327dfd892ba91e3f7b77280733682250e6a14905932b0c42baaf3b7ded5aee8",
+      "source_sha256": {
+        "Apps\\App\\Shaders\\FluidSolver.hlsl": "fbbd54a025be866df6f07902842cb0afb51386a717cdc2cd3a35059f7f469649",
+        "Apps\\App\\Shaders\\FluidParameters.hlsli": "42f01c24fec6d34e95a2cd8b13df09ce2034907fa09fe2807c1bfddadfbd4d15",
+        "Apps\\App\\src\\Rendering\\Water\\GDX12Fluid.cpp": "ae8993a24299a607c731734bec1354136423dcb5062088a8380f48b12b215f96",
+        "Apps\\App\\src\\Rendering\\Water\\GDX12FluidSolver.h": "cd1aebf593c17834b52802af4bea8a07da9440a2f6c00a90994c34384cbbf4eb",
+        "Apps\\App\\tests\\FluidSortGpuTests.cpp": "9c0d494a8b76961ae68318aa638027d1d1b790c4f116e9850e4801206ab35761",
+        "Apps\\App\\FluidSortGpuTests.vcxproj": "02261672b461bc1d87884feed0243e8268cd0c9d3aba355477b2e67e9f65cf15",
+        "Engine\\Engine.RendererDX12\\src\\GDX12ShaderCompiler.cpp": "417a1e337e8df6e1edbfc092f293d2e21140549eafe08d8cd03e3b538723cba1",
+        "Engine\\Engine.RendererDX12\\Include\\Engine.RendererDX12\\GDX12ShaderCompiler.h": "45c3a776bd2fdb7544769a08f23b24d3d893396893a234ed08e8201b4c1a4fe8",
+        "Engine\\Engine.RendererDX12\\src\\GDX12Device.cpp": "41bfe4b81cf307615e7cb38e7f526714cec099c5d44e43c32254678dba0cc370"
+      },
+      "all_inputs_unchanged": true
+    }
+  ],
+  "validation": {
+    "status": "passed",
+    "exe_sha256": "d327dfd892ba91e3f7b77280733682250e6a14905932b0c42baaf3b7ded5aee8",
+    "inputs_unchanged": true,
+    "log": "Build/WaterSortGpu/WaterSortSelectedValidate.stdout.log"
+  },
+  "raw_samples_sha256": "5e53b2546803ed8df67e24c8b88b660a77138c6b8864ef869666eee364a4add5"
+}

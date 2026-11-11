@@ -6,10 +6,12 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <string>
 #include <tuple>
 
 namespace
 {
+    constexpr UINT SortTileSize = 1024;
     static AutoConsoleVariable<bool> Enabled(L"Render.Fluid.Enabled", true,
         L"Enable fluid components. Default true.", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<bool> AsyncCompute(L"Render.Fluid.AsyncCompute", false,
@@ -252,6 +254,10 @@ void GDX12FluidSolver::Initialize(GDX12Device* device)
     _save = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "SavePrevious");
     _hash = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Hash");
     _sort = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Sort");
+    const auto tileSize = std::to_string(SortTileSize);
+    const D3D_SHADER_MACRO sortDefines[] = {{"WATER_SORT_TILE_SIZE", tileSize.c_str()}, {nullptr, nullptr}};
+    _presort = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "PresortCS", sortDefines);
+    _mergeTail = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "MergeTailCS", sortDefines);
     _offsets = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "BuildOffsets");
     _densities = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Densities");
     _integrate = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Integrate");
@@ -372,14 +378,28 @@ GDX12FluidSolver::Head GDX12FluidSolver::Record(GDX12CommandList& commands, Buff
         commands.SetPipelineState(_hash);
         commands.Dispatch((buffers.Capacity + 127) / 128, 1, 1);
         commands.ResourceBarrier({keys.UAV(), offsets.UAV()});
-        commands.SetPipelineState(_sort);
-        for (UINT k = 2; k <= buffers.Capacity; k <<= 1)
-        for (UINT j = k >> 1; j > 0; j >>= 1)
+        const UINT tileGroups = (buffers.Capacity + SortTileSize - 1) / SortTileSize;
+        if (buffers.Capacity > 1)
         {
+            commands.SetPipelineState(_presort);
+            commands.Dispatch(tileGroups, 1, 1);
+            commands.ResourceBarrier({keys.UAV()});
+        }
+        for (UINT k = SortTileSize * 2; k <= buffers.Capacity; k <<= 1)
+        {
+            commands.SetPipelineState(_sort);
             dispatch.K = k;
-            dispatch.J = j;
+            for (UINT j = k >> 1; j >= SortTileSize; j >>= 1)
+            {
+                dispatch.J = j;
+                setDispatch();
+                commands.Dispatch((buffers.Capacity + 127) / 128, 1, 1);
+                commands.ResourceBarrier({keys.UAV()});
+            }
+            dispatch.J = 0;
             setDispatch();
-            commands.Dispatch((buffers.Capacity + 127) / 128, 1, 1);
+            commands.SetPipelineState(_mergeTail);
+            commands.Dispatch(tileGroups, 1, 1);
             commands.ResourceBarrier({keys.UAV()});
         }
         commands.ResourceBarrier({keys.To(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)});
