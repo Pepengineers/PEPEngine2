@@ -656,7 +656,6 @@ void RenderModule::CompileFrameGraph(FrameGraph& graph)
 
     _frameGraph = graph.Compile();
     MarkSceneDataDirty();
-    DumpFrameGraphDebugReport();
 }
 
 void RenderModule::ResizeSceneBuffers(GDX12DeviceResources& resources, uint32_t flags)
@@ -731,9 +730,9 @@ void RenderModule::ConfigureFrameGraph(FrameGraph& fg)
     auto opaque = fg.AddPrimaryGPUPass<GDX12OpaquePass>("Opaque");
     auto transparency = fg.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
     auto composition = fg.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
-    auto clear = fg.AddSecondaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
-    auto upscale = fg.AddSecondaryGPUPass<GDX12XeSSUpscalePass>("XeSS");
-    auto output = fg.AddSecondaryGPUPass<GDX12OutputToScreenPass>("Output To Screen");
+    auto clear = fg.AddPrimaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
+    auto upscale = fg.AddPrimaryGPUPass<GDX12XeSSUpscalePass>("XeSS");
+    auto output = fg.AddPrimaryGPUPass<GDX12OutputToScreenPass>("Output To Screen");
 
     fg.ConnectNodes(backBuffer, clear.GetInput("InTexture"));
     fg.ConnectNodes(depthStencil, clear.GetInput("InDepthBuffer"));
