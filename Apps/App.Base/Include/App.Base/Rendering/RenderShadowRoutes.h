@@ -67,12 +67,6 @@ private:
     CrossAdapterShadows _transfer;
     CrossAdapterShadowScene _replica;
     std::array<std::unique_ptr<AtlasRoute>, 2> _routes;
-    struct KnownView
-    {
-        std::weak_ptr<GDX12Resource> Native;
-        GDX12Submission::ResourceIdentity Identity;
-    };
-    std::vector<KnownView> _views;
     RenderModule* _render = nullptr;
     GDX12ShadowSelection _selection;
     GDX12ShadowQuality _quality;

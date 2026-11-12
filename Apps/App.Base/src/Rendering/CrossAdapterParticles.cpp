@@ -74,11 +74,26 @@ CrossAdapterParticles::~CrossAdapterParticles() = default;
 
 bool CrossAdapterParticles::PrepareFrame(RenderPipelineCommonData& common)
 {
+    _frameStarted = std::chrono::steady_clock::now();
     _common = &common;
     _requested = _primary.ParticleEmitters;
     const auto controls = GetParticleMGPUControls();
     const bool active = GetParticleSettings().Enabled && !(_requested.empty()) &&
         (controls.Scheduled || controls.Secondary || controls.UpdateEveryNFrames != 1);
+    if ((active || _active || _publishPending) && _primary.ParticleSimulation)
+    {
+        auto* queue = _primary.Device->GetCommandQueue();
+        GDX12CommandList* release = nullptr;
+        for (const auto& pool : _primary.ParticleSimulation->CaptureCheckpoint().Pools)
+            for (const auto& buffer : pool.Buffers)
+                if (buffer->GetCurrentState() != D3D12_RESOURCE_STATE_COMMON)
+                {
+                    if (!release) release = queue->GetCommandList();
+                    release->ResourceBarrier({buffer->GetCommonBarrier()});
+                }
+        // The previous draw and this release share the primary DIRECT timeline.
+        if (release) queue->ExecuteCommandList(release);
+    }
     if (active) CaptureDisplayHistory();
     if (_publishPending) Publish();
     if (_active && (!active || controls.Secondary != _ownsSecondary))
@@ -259,7 +274,7 @@ std::optional<CompletionPoint> CrossAdapterParticles::Submit(const Graph::Legacy
         const auto loan = std::find_if(boundary.ExternalViews.begin(), boundary.ExternalViews.end(),
             [&](const auto& view) { return view.Native.get() == field.Resource; });
         Require(loan != boundary.ExternalViews.end(), "Particle interaction field was not loaned by the graph");
-        reads.push_back({{loan->Native, loan->Identity}, Graph::Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE});
+        reads.push_back({{loan->Native, loan->Identity}, Graph::Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE, _interactionVersion});
         writes.push_back({input->Interaction, Graph::Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST});
     }
     const UINT64 cameraOffset = UINT64(_common->ActiveCameraCBufferIndex) * camera.GetElementSize();

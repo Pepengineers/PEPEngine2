@@ -45,6 +45,33 @@ std::uint64_t RenderMGPURuntime::NextId()
     return _nextId++;
 }
 
+ResourceIdentity RenderMGPURuntime::IdentifyResource(const std::shared_ptr<GDX12Resource>& resource, GDX12Device& device)
+{
+    CheckOpen();
+    const auto adapter = device.GetSubmissionAdapterId();
+    if (!resource || !resource->D3DResource || FindDevice(adapter) != &device)
+        throw std::invalid_argument("Cannot identify a resource outside its MGPU runtime");
+    _resources.erase(std::remove_if(_resources.begin(), _resources.end(),
+        [](const auto& entry) { return entry.Native.expired(); }), _resources.end());
+    for (const auto& bank : _banks)
+        for (const auto& slot : bank.Storage->GetSlots())
+            for (const auto* view : {&slot.Export, &slot.Import, &slot.Local})
+                if (view->Resource == resource)
+                {
+                    if (view->Identity.Adapter != adapter) throw std::invalid_argument("Snapshot adapter mismatch");
+                    return view->Identity;
+                }
+    for (const auto& entry : _resources)
+        if (entry.Native.lock() == resource)
+        {
+            if (entry.Identity.Adapter != adapter) throw std::invalid_argument("Resource adapter mismatch");
+            return entry.Identity;
+        }
+    const ResourceIdentity identity{NewResourceId(), adapter, NewEpoch(), TransferId::Invalid, NewAllocationId()};
+    _resources.push_back({resource, identity});
+    return identity;
+}
+
 ResourceId RenderMGPURuntime::NewResourceId() { return ResourceId{NextId()}; }
 AllocationId RenderMGPURuntime::NewAllocationId() { return AllocationId{NextId()}; }
 TransferId RenderMGPURuntime::NewTransferId() { return TransferId{NextId()}; }

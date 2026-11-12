@@ -20,7 +20,7 @@ namespace
         size_t requests = 0;
         while (auto request = search.Next())
         {
-            Require(++requests < 200, "Synthetic search did not terminate");
+            Require(++requests < (request->Settings.MGPU.Enabled ? 2000u : 200u), "Synthetic search did not terminate");
             const int visit = ++visits[request->Settings];
             Require(visit == 1 || request->RequireFull, "Search duplicated a warmup-only candidate");
             search.Submit(measure(*request, visit));
@@ -365,7 +365,9 @@ namespace
         });
         Require(result.TargetReached && result.Settings.MGPU.Water.Secondary &&
             !result.Settings.MGPU.Grass.Secondary, "MGPU search missed the mixed placement at equal quality");
-        Require(measured.size() == 81, "MGPU placement identity or equal-quality exploration lost a route or cadence");
+        Require(measured.size() > 10, "MGPU placement exploration did not measure alternatives");
+        Require(result.Settings.MGPU.Reflections.FilterSamples == 256,
+            "MGPU search lost the existing Epic reflection filtering quality");
         Require(result.Settings.MGPU.Water.UpdateHz == 0 && result.Settings.MGPU.Grass.UpdateHz == 0,
             "MGPU selected a lower temporal quality without a performance need");
         auto different = result.Settings;
@@ -416,15 +418,39 @@ namespace
         }
         Require(samples.Valid(), "Bounded cadence sawtooth was mistaken for growing debt");
 
+        ReflectionSearchSettings canonical;
+        canonical.Count = 1; canonical.DistanceMetres = 10; canonical.Schedule = 3;
+        canonical.SecondaryFaces = {3, 63, 63, 63};
+        canonical.Canonicalize();
+        Require(canonical.Schedule == 2 && canonical.SecondaryFaces[1] == 0,
+            "Equivalent single-probe schedules or inactive faces multiplied candidates");
+        canonical.DistanceMetres = -1; canonical.Placement = 2;
+        canonical.Canonicalize();
+        Require(canonical.Schedule == 0 && canonical.Placement == 0 && canonical.SecondaryFaces[0] == 63,
+            "Always-near placement was not canonicalized");
         Search unstable(Profile::Performance, {{OffGroup::Never, false, 2, 2}}, 768, 480, pair);
-        int measurements = 0;
-        while (auto request = unstable.Next())
+        const auto stable = Run(unstable, [&](const Request& request, int visit)
         {
-            Require(++measurements < 200, "Unstable MGPU confirmation did not terminate");
-            unstable.Submit({measurements <= 81 ? 70.0 : 61.0, std::nullopt});
-        }
-        Require(!unstable.Winner() || !unstable.Winner()->TargetReached,
-            "An unstable MGPU finalist claimed target success");
+            const auto& p = request.Settings.MGPU;
+            const bool secondary = p.Water.Secondary || p.Grass.Secondary || p.Sun.Secondary || p.Particles.Secondary ||
+                p.Reflections.Placement || std::any_of(p.Reflections.SecondaryFaces.begin(), p.Reflections.SecondaryFaces.end(),
+                    [](unsigned mask) { return mask != 0; });
+            return Result{secondary ? (visit == 1 ? 70.0 : 61.0) : 65.0, std::nullopt};
+        });
+        Require(stable.TargetReached && stable.Stable && stable.AverageFps == 65,
+            "An unstable MGPU finalist discarded the measured stable primary alternative");
+
+        pair.LocalShadows = {{17, {}}, {42, {}}};
+        Search units(Profile::Performance, {{OffGroup::Never, false, 2, 2}}, 768, 480, pair);
+        const auto mixed = Run(units, [&](const Request& request, int)
+        {
+            const auto& p = request.Settings.MGPU;
+            return Result{63.0 + (p.Sun.Secondary ? 3 : 0) + (p.Particles.Secondary ? 3 : 0) +
+                (p.LocalShadows[0].Route.Secondary ? 3 : 0) - (p.LocalShadows[1].Route.Secondary ? 8 : 0), std::nullopt};
+        });
+        Require(mixed.Settings.MGPU.Sun.Secondary && mixed.Settings.MGPU.Particles.Secondary &&
+            mixed.Settings.MGPU.LocalShadows[0].Route.Secondary && !mixed.Settings.MGPU.LocalShadows[1].Route.Secondary,
+            "Joint search missed independent shadow and particle placement");
     }
 }
 

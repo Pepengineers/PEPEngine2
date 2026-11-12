@@ -1,74 +1,68 @@
-# MGPU Quality / Performance: реализация и проверки
+# MGPU Quality/Performance: отчёт реализации
 
-Дата начала: 12 ноября 2026. Основание: утверждённый `docs/plans/2026-11-12-mgpu-quality-search-design.md`, ADR-0013 и разрешение реализации в текущем чате.
+Основание: утверждённый план `docs/plans/2026-11-12-mgpu-quality-search-design.md` и ADR-0013. Реализация разрешена пользователем 12 ноября 2026.
 
-## Исходное состояние
+## Этапы
 
-- Ветка `codex/bistro-rendering`, исходный HEAD `7acaf950`. Более новые изменения относительно плана `8deb1496` сохранены.
-- Посторонние изменения: `Apps/App/tests/BistroAdditionsTests.cpp`, `External/External.Libraries/External.Libraries.vcxproj`, рабочие деревья `inih` и `rapidyaml`, `tools/tests/__pycache__/`. В коммиты задачи не включаются.
-- Целевая пара: RTX 5050 primary / Arc B570 secondary на MisSpec. Прежние измерения из отчёта 2026-11-11 относятся к другому сценарию и не доказывают пользу нового поиска.
+| Этап | Код и локальный коммит | Подтверждённые проверки |
+|---|---|---|
+| 1. Кандидат, профиль, измерения, вода/трава | `485daaa3` | CPU поиска, identity, freshness, fallback, пропущенные входы, долг |
+| 2. Sun и отдельные local shadows | `bcbecf0e` | CPU selection/routing/depth; целевые two-GPU + GBV: Exact/Latest, depth+metadata, ограниченная очередь, retirement |
+| 3. Частицы secondary / primary draw | `557aeb5e` | CPU времени; целевые two-GPU + GBV: checkpoint, Exact/Latest, cadence, смена владельца, reset, история движения |
+| 4. Reflection probes и near/far | `28979dc` | CPU schedule; целевые two-GPU debug: 1–4 probes, оба режима, все расписания, whole/per-face, обе near/far-политики, R/1,2R, partial-cycle transition, reset |
+| 5. Совместный поиск, replay и сравнение | Код интегрирован, аппаратная интеграция продолжается | CPU поиска и profile round-trip/rollback; полная Release-сборка локально и на MidSpec |
 
-## Выполнение
+Этапы 1–4 зафиксированы по отдельности. Общая приёмка полной движущейся сцены, визуального качества, победителей и FPS ещё не завершена.
 
-| Этап | Состояние |
-|---|---|
-| Модель кандидата, приёмка измерений, профиль, вода/трава | Код и CPU-тесты готовы; проверка интеграции продолжается |
-| Солнечные и индивидуальные локальные тени | Код интегрирован; direct mesh raster прошёл two-GPU/GBV; завершается cleanup |
-| Частицы secondary / отображение primary | CPU и two-GPU/GBV fixture прошли; полная сцена и FPS ещё не проверены |
-| Независимые оси отражений, расписание, near/far и перенос граней | Код интегрирован; 1–4 probes/masks/schedules проходят two-GPU debug; GBV indirect ограничен внешним воспроизведённым отказом |
-| Совместный поиск, replay и последовательные A/B на MisSpec | Совместный поиск и профиль реализованы, CPU проходят; аппаратный поиск/replay и A/B ещё не выполнены |
+## Реализация
 
-## Проверки и ограничения
+- Сохранены существующие маршруты воды/травы и граф рендера. Новые маршруты используют общую инфраструктуру COPY, completion points и lifetime. Частицы сохраняют весь входной интервал времени; shadow depth публикуется с матрицами/метаданными того же снимка.
+- Для отражений отдельно выбираются количество из фиксированной базы четырёх, разрешение, фильтрация, Full Dynamic / Baked+dynamic, расписание, маски граней и дистанция. Расстояние до ближайшей точки influence box; вход при R, выход за 1,2R. Дальние не голодают. Шесть согласованных граней публикуются после фильтрации и GPU completion.
+- Поиск проверяет primary при том же пространственном и временном качестве; затем соседние размещения и сочетания. Сохраняются пороги native Performance 60 FPS и Quality minimum 28 FPS, без upscale/FG. Это адаптивный поиск, без обещания глобального оптимума.
+- Профиль schema 3 сохраняет сценарий, seeds, пару LUID/роли и фактическую политику. Несовместимая пара/сценарий отклоняются. Метрики различают requested/effective, дополнительные задержки probes и полный возраст граней, долг, байты, ожидания и память. `visual_accepted=false` не подменяет визуальную проверку.
+- Новые маршруты консервативно синхронизированы; вторичная GPU сама по себе не считается выигрышем. Их стоимость и целесообразность должны подтверждаться обычными прогонами.
 
-- Прочитаны план, ADR, CONTEXT и отчёт MisSpec; проверены ветка, index и рабочее дерево.
-- Прежний host Codex недоступен. Пользователь запустил подготовленный скрипт OpenSSH; вход по отдельному ключу проверен, отпечаток сервера совпал с присланным пользователем. Пароль и ключи находятся вне репозитория.
-- MisSpec: NVIDIA RTX 5050, драйвер `32.0.16.2114`; Intel Arc B570, `32.0.101.8864`. Также присутствуют iGPU и виртуальные адаптеры; они не входят в целевую пару. Удалённый исходный HEAD `d04ea7d0`; непроиндексированный `Apps/App/App.vcxproj.user` сохраняется.
-- До новых runtime-правок прошли Release-сборки `Engine.RendererDX12` и `App.Base` (VS 2026, v145). Логи: `Build/mgpu-quality-renderer-baseline.log`, `Build/mgpu-quality-base-baseline.log`.
-- CPU `BistroQualitySearchTests`: MSVC 14.52, C++17, `/W4 /WX`, успешно. Покрыты идентичность пары, 81 сочетание маршрутов/частоты воды и травы, fixed-target freshness, fallback, потерянные входы, отсутствие обязательных измерений и рост долга. Это синтетическая проверка логики, не аппаратный FPS.
-- CPU `ReflectionScheduleTests`: успешно. Проверены 1/4/6/24-кадровые циклы, ближайшая точка box, R/1,2R, reset, обе near/far-политики, маски граней, эквивалентность расписаний одной пробы и отсутствие голодания дальних.
-- Обновлённый `GDX12ReflectionProbePass.cpp` отдельно скомпилирован. Полная сборка интеграции, GPU/GBV, визуальная приёмка и измерения ещё предстоят.
-- Single-GPU/MGPU выигрыш не установлен. Числовые проверки возраста не заменяют визуальную приёмку.
+## Среда и сохранность
 
-## Продолжение после остановки сессии
+- Ветка `codex/bistro-rendering`; более новые изменения после плана `8deb1496` сохранены. Чужие правки `BistroAdditionsTests.cpp`, External/submodules и 34 staged-файла SPH-отчёта не включены в коммиты. Push не выполнялся.
+- SSH к MidSpec восстановлен отдельным ключом; отпечаток проверен по сообщению пользователя. Ключи/пароли вне репозитория.
+- Целевая пара: RTX 5050, драйвер `32.0.16.2114`; Arc B570, драйвер `32.0.101.8864`. Третьи адаптеры не используются. Локальная GPU RTX 4080 SUPER не заменяет целевые проверки.
+- На MidSpec используется отдельный checkout `C:/Users/MidSpec/Documents/PEPEngine2-MGPU`; исходный `PEPEngine2` и пользовательский `App.vcxproj.user` сохранены. Assets/External общие. MSVC 14.52/v145, Release.
+- SSH session 0 не создаёт swap chain. Полная сцена запускается временной задачей `PEPEngine-MGPU-Validation` в пользовательской интерактивной сессии; процессы, SHA256 exe/overlay/config и stdout/stderr записываются в `Build/mgpu-quality`. Обычные замеры и GPU-профилирование не смешиваются.
 
-- Текущий HEAD перед продолжением `674bca2e`; новые perf-коммиты сохранены. 34 чужих staged-файла SPH-отчёта не включаются в коммиты MGPU.
-- Повторный SSH к MidSpec успешен; удалённая исходная ветка остаётся на `d04ea7d0`, пользовательский `App.vcxproj.user` сохранён.
-- Release `MGPUShadowRoutingTests` и `MGPUShadowSelectionTests` собраны. Routing `--cpu` и Selection прошли. DepthTransfer `--cpu` сначала отклонил проверку partial publication; после диагностической пересборки прошёл, причина ещё исследуется. GPU-тест не запускался.
-- CPU regression совместного поиска сначала воспроизвёл отсутствие независимых Sun/local/particle placement, затем прошёл после перехода к измеряемым соседним сочетаниям. Модель и интеграция этого поиска входят в следующий этап.
-- Source compile восьми App/water/grass translation units прошёл; имеется прежнее предупреждение C4244 в BistroBounds.h.
-- CPU ReflectionScheduleTests повторно прошёл: добавлено разделение полного возраста грани и дополнительного запаздывания относительно неизменяемого номинального расписания.
-- Реальные two-GPU/GBV, визуальная приёмка, A/B и replay ещё не выполнены. Числа FPS и выигрыш не заявляются.
+## Проверки и найденные ошибки
 
-## Аппаратная интеграция после восстановления SSH
+- CPU `BistroQualitySearchTests` и `ReflectionScheduleTests`: `/W4 /WX`, PASS; `ParticleTime`, ShadowSelection/Routing/DepthTransfer: PASS. `BistroStartupTests --cvars-only` на MidSpec: registry, полный profile round-trip/rollback и benchmark flight PASS.
+- Reflection primary `--debug` на RTX 4080 SUPER: radiance/cache/baked/dynamic/depth/filter/parallax/overlap/resize/queued slots PASS. Это дополнительная проверка, не результат для целевой пары.
+- На MidSpec `MGPUShadowDepthTransferTests --gpu-validation`, `MGPUShadowRoutingTests --gpu-validation`, `MGPUParticleTests --gpu-validation`: PASS. Shadow mesh raster использует прямой draw в существующем CPU loop готовых аргументов.
+- `ReflectionProbeTests --mgpu-debug`: полная матрица PASS. Исправлены descriptor heap перед фильтрацией полностью импортированной пробы и отсутствующие application material inputs на границе графа. Regression с дополнительным материалом PASS.
+- Полная сцена проходит создание графа, импорт Bistro и подготовку GPU-ресурсов. DXGI перечисляет RTX 5050 дважды (LUID 101620 и 47217); движок использует High Performance enumeration и фактическую пару 47217 / 59621. Проверка отклонила ошибочный тестовый overlay 101620 / 59621; overlay исправлен после native enumeration и проверки LUID самого D3D12-устройства. Проверка идентичности сохранена.
+- По подсказке пользователя проверен `E:/Study/DX12/Graphics/GDeviceFactory.cpp`. Его сравнение описаний адаптеров не перенесено: оно может объединить две настоящие одинаковые карты. Native D3DKMT на MidSpec показал у alias 101620 `IndirectDisplayDevice=1`, `RenderSupported=0`, у физической RTX 5050 47217 — `IndirectDisplayDevice=0`, `RenderSupported=1`. Фильтр исключает только indirect display; роли и выбор основной не расширялись.
+- Полная сцена выявила и локализовала интеграционные дефекты: отсутствующий CPU material cache для вторичной травы в reflections; состояние предыдущего particle draw перед новым графовым доступом; разные идентификаторы общих shadow/particle/reflection ресурсов; отсутствующая точная версия импортированного grass snapshot. Исправления сохраняют строгие проверки графа; повтор полного сценария продолжается.
+- После исправлений `MGPUParticleTests --gpu-validation` и `SecondGroupTests --gpu-validation` PASS. В последнем fixture устранён отсутствовавший `LocalLights` во входном lighting snapshot; валидатор production-входа также проверяет его. Повтор частиц с проверками канонических идентификаторов и измерением возраста после фактического расчёта/копирования PASS.
+- Возраст water/grass/particles учитывает также текущий интервал от захвата входа до наблюдения результата, а не только разность логических времён. Проверка этого изменения в полной сцене продолжается.
+- GBV для reflections заблокирован отдельно воспроизведённым отказом constant+draw ExecuteIndirect на Arc в текущей комбинации runtime/driver/GBV. Без GBV тот же минимальный draw проходит; повтор NVIDIA-контроля с GBV на физическом LUID 47217 прошёл. DRED указывает page fault на secondary indirect draw. Точная принадлежность дефекта драйверу или runtime не установлена. [Матрица и минимальный reproducer](2026-11-12-mgpu-quality-search/validation-limit.md).
+- Выявлен отдельный воспроизводимый дефект `/O2` MSVC 14.52 в aggregate reset fixture; scalar invalidation устраняет ложный отказ теста. Production layout не менялся; reproducer сохранён рядом с матрицей.
 
-- Этап 1 зафиксирован локальным коммитом `485daaa3`. Последующие этапы пока не завершены: остаются ошибки аппаратной корректности; их нельзя считать принятыми по одной сборке.
-- На MisSpec создан отдельный checkout `C:/Users/MidSpec/Documents/PEPEngine2-MGPU` на основе `674bca2e`, с общими Assets/External и зависимостями. Исходный checkout и пользовательский `.vcxproj.user` сохранены. Передаваемые исходники перечислены с SHA256 в `Build/mgpu-quality/source-manifest.json`; ключи SSH вне репозитория.
-- Полная локальная Release-сборка App прошла. На MisSpec прошли Release-сборки ShadowDepthTransfer, ShadowRouting, Particles, ReflectionProbe и BistroStartup fixtures. Имеются предупреждения отсутствующих PDB внешних библиотек; они не считаются результатом GPU-проверки.
-- CPU: Search `/W4 /WX`, ReflectionSchedule `/W4 /WX`, ParticleTime, ShadowRouting/Selection и ShadowDepthTransfer прошли. Добавлены regression на выбор стабильного primary при нестабильном secondary и на сохранение номинальных deadlines probes при задержке нескольких циклов.
-- ShadowDepthTransfer на RTX 5050 / Arc B570 с GBV прошёл: typed packing, cross-adapter copy, восстановление SV_Depth. ShadowRouting не прошёл: у point-light 8 на втором кадре все шесть secondary slices остаются 1 вместо 0,25 ещё до переноса. Readback подтвердил корректные indirect arguments, instances, transforms, materials, vertices и CPU frustum; исследуется исполнение draw.
-- Particle fixture на целевой паре с GBV прошёл после исправления writable boundary и публикации последнего simulated state перед сменой владельца. Проверены Exact/Latest, cadence, время, input history, reset и возврат primary. Это не замер ускорения.
-- ReflectionProbe primary `--debug` на RTX 4080 SUPER прошёл прежний набор radiance/cache/baked/dynamic/depth/filter/parallax/overlap/resize/queued-slots. Целевой `--mgpu` на Arc не прошёл: DRED показывает device removal/page fault на ExecuteIndirect первого вторичного захвата; проверка останавливается с ошибкой, fallback не засчитывается. Дамп и DRED-лог находятся в `Build/mgpu-quality` изолированного checkout.
-- В CPU-тесте invalid partial shadow layout выявлен воспроизводимый дефект оптимизации MSVC 14.52: aggregate reset после копирования структуры игнорируется при `/O2`, но работает при `/Od`; scalar width invalidation устраняет ложное падение fixture. Минимальный reproducer и asm находятся в `Build/mgpu-quality/ShadowRegionResetMiscompile*`. Production layout для обхода не менялся.
-- Профиль сохраняет schema/scenario/world seed/probe seed и пару LUID; replay отклоняет несовместимый сценарий/пару. Полная проверка apply/cancel/reset/replay на целевой сцене ещё предстоит.
-- Обычных Release A/B, полного Quality/Performance поиска, визуальной приёмки движущейся сцены и аппаратного replay победителя пока нет. Single-GPU/MGPU выигрыш не установлен. Отладочные GBV/DRED прогоны не используются как показатели FPS.
+## Измерения и оставшаяся работа
 
-### Уточнение по indirect draw
+По указанию пользователя сборки, ревью, GPU-проверки и замеры переданы Sol в режиме medium; основной чат выполняет реализацию и исправления. Доказательства и журналы: [независимая проверка](2026-11-12-mgpu-quality-search-terra-validation.md).
 
-- После прямого mesh draw ShadowRouting прошёл весь two-GPU/GBV fixture. Mesh raster уже имел CPU loop и готовые draw arguments; качество и выбранная GPU сохранены.
-- Reflection --mgpu-debug прошёл 1–4 probes, оба режима, все расписания и маски. Исправлена отсутствующая descriptor heap при primary-фильтрации полностью импортированной пробы.
-- Минимальный native D3D12 reproducer подтвердил отказ constant+draw ExecuteIndirect только с GBV на Arc, независимо от Upload/Default и root size 1/20; RTX 5050 проходит. Матрица и исходники: [validation-limit.md](2026-11-12-mgpu-quality-search/validation-limit.md). Это внешний блокер полной GBV-проверки отражений, а не доказанный production-дефект драйвера.
-- BistroStartupTests --cvars-only на MisSpec прошёл: registry, полный round-trip/rollback профиля и benchmark flight.
+Полный debug-пролёт 17 завершился без падения: 10 с прогрева + 100,197 с измерительного полёта. Это проверка исполнения, не FPS: при переносе всех работ вырос долг симуляций, freshness gate отклонил результат. В общую приёмку добавлен фактический долг физики, помимо воды/травы/частиц. Причины отмены теперь сохраняются в JSON; прежние прерывания локализованы как потеря активации окна. Single-GPU initial capture исправлен передачей completion point в существующий Reflections.OnSubmitted.
 
-### Локальная фиксация этапов
+Обычные Release-прогоны без диагностики, native 1280×720, четыре probes 64/filter 16, одинаковые seed и расписания (smoke-конфигурация, не найденный профиль):
 
-- Этап 2: bcbecf0e. Cleanup прямого mesh draw пересобран на MisSpec; ShadowRouting --gpu-validation повторно прошёл. Полная удалённая Release-сборка App прошла.
-- Этап 3: CPU ParticleTime и целевой MGPUParticleTests --gpu-validation прошли; checkpoint, полный учёт времени, смена владельца и displayed motion history включены в код. Проверка полной сцены остаётся общей частью этапа 5.
-- Reflection near/far GPU fixture: оба размещения, R/1,2R и возврат из незавершённого дальнего цикла прошли с debug layer.
+| Размещение | FPS | Ограничение результата |
+|---|---:|---|
+| Все проверяемые маршруты secondary, исходный перенос | 0,61259 | Долг физики 7,79 → 101,62 с; недопустимо |
+| Те же настройки качества, все маршруты primary, тот же exe | 20,99098 | Один проход; цель Quality 28 / Performance 60 не достигнута |
+| Probes primary, остальные проверяемые маршруты secondary | 5,61954 | Долг физики 4,03 → 31,39 с; недопустимо |
+| MGPU выключен, после исправления initial capture | 24,96576 | Другая сборка; не прямое A/B с предыдущими строками |
 
-### Этап 4: отражения
+Повторов финалистов ещё нет, подтверждённого выигрыша MGPU нет. Монитор первой пары не обнаружил конкурирующих GPU-тестов. Debug/GBV и отдельные диагностические запуски не используются как замеры FPS.
 
-- Реализованы независимые count/resolution/filter/schedule/mode/placement, четыре фиксированные базовые пробы, перенос целой пробы и граней, сборка и публикация после завершения GPU.
-- Целевой ReflectionProbeTests --mgpu-debug повторно прошёл всю матрицу 1–4 probes / Full Dynamic / Baked+dynamic / masks / schedules, оба near/far-размещения, пороги R/1,2R, смену режима при незавершённом цикле и reset. CPU ReflectionScheduleTests повторно прошёл.
-- Полная сцена обнаружила пропущенные входы динамических UI-материалов в reflection split. Исправлено явным включением material inputs; соответствующий GPU regression прошёл. Сцена теперь проходит построение графа и загружается в интерактивной сессии MidSpec.
-- В стоимость переноса отражений включены также поля травы приложения. Полная сцена, визуальная приёмка и обычные FPS остаются проверками интеграции этапа 5.
-- Этап 3 зафиксирован коммитом `557aeb5e`.
+Профилирование выявило постоянное пересоздание transport banks и копирование всей геометрии при подготовке secondary reflections. Разделены существующие каналы обновляемых текстур/результатов; статические материалы сохраняют общий канал. После правки steady-state bank creates = 0, reflection submit снизился с 1445–1532 до 404–410 мс в диагностических запусках. Затем неизменная геометрия стала переиспользоваться, активные skin allocations копируются диапазонами каждый capture; revision/смена native resource/reset требуют полного обновления. Объём геометрии снизился с 703 892 012 до 8 182 720 байт, подготовка буферов — с 250 до 6,6–6,8 мс. Эти времена вложены и не суммируются. Проверка границ/соседей copy, lifetime skin allocations, меняющихся и замороженных skin contents и полная reflection matrix/reset прошли у Sol.
+
+Обычный secondary03 после range-copy: 2,51705 FPS, долг физики 7,28 → 76,44 с, VRAM primary/secondary около 4,207/5,229 ГБ. Вариант по-прежнему недопустим. Отдельная диагностика texture breakdown: local shadow atlas 256×256×755, 197 918 720 байт / 78,85 мс; env cube 512, шесть граней и десять mip — 16 809 480 байт / 8,87 мс; остальные env inputs вместе около 6,45 мс. Общий env/shadow перенос 215 989 264 байт / около 94 мс. Число слоёв задано назначениями shadow slices; неиспользуемый запас не установлен. Перенос depth не сокращался ценой согласованности с displayed metadata. Полные поиски и replay продолжаются на фиксированной сборке.
+
+Остаются: завершить полную сцену и проверку apply/reset/cancel; визуально проверить движущиеся тени/частицы/отражения и переходы; выполнить последовательные Release A/B при одинаковом качестве; завершить Quality/Performance поиск, повторить финалистов и replay сохранённых победителей. Дистанции 5/10/20/40 м ещё не откалиброваны по изображению. RDP открыт пользователем; окно запуска и загрузка Bistro наблюдались. Полная визуальная приёмка ещё не выполнена.

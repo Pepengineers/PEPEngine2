@@ -1049,7 +1049,10 @@ std::optional<GDX12RenderGraph::ExecutionReceipt> GDX12RenderGraph::PlanExecutor
         else if (heap.Type != D3D12_HEAP_TYPE_DEFAULT)
             throw std::invalid_argument("Graph executor: unsupported heap type");
         if (binding.Native->GetCurrentState() != view.Entry)
-            throw std::invalid_argument("Graph executor: view was not released to its entry state");
+            throw std::invalid_argument("Graph executor: " + graph._resources[binding.View].Name + " view " +
+                std::to_string(binding.View) + " was not released to entry state " + std::to_string(view.Entry) +
+                "; actual state " + std::to_string(binding.Native->GetCurrentState()) +
+                ", width " + std::to_string(view.Desc.Width));
         viewIndex.Add(view);
     }
 

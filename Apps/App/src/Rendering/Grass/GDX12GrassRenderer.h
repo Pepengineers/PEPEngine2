@@ -50,7 +50,7 @@ public:
         UINT Count = 0;
     };
     std::optional<std::vector<ShadowPatch>> FreezeShadowPatches(
-        const GDX12RenderPrimitiveRegistry& registry, const IRenderGeometrySource& source) const;
+        const GDX12RenderPrimitiveRegistry& registry, const IRenderGeometrySource& source, bool shadowCastersOnly = true) const;
     GDX12GrassRenderer(GDX12DeviceResources* resources, ShadowMaterials materials);
     void SetShadowMaterials(ShadowMaterials materials);
     // Only after the placed shadow invocation has released this renderer slot.

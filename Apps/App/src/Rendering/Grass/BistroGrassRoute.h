@@ -16,13 +16,20 @@ public:
     {
         GDX12Submission::TransferVersion Version;
         GDX12Submission::CompletionPoint Import, Acquire, Tail;
-        std::uint64_t Sequence = 0;
+        std::uint64_t Sequence = 0, ExportBytes = 0, ImportBytes = 0;
         double AgeMs = 0;
         double PendingSeconds = 0, MissingSeconds = 0, WindDebtSeconds = 0;
         bool ResetRequired = false;
         bool Exact = false, OverAge = false, LocalAuthoritative = false;
     };
-    const Diagnostics& GetDiagnostics() const { return _diagnostics; }
+    Diagnostics GetDiagnostics() const
+    {
+        auto result = _diagnostics;
+        if (result.Version.IsValid())
+            result.AgeMs += std::chrono::duration<double, std::milli>(CrossAdapterGrass::Clock::now() - _selectedAt).count();
+        result.OverAge = result.AgeMs > GetGrassMGPUControls().MaxAgeMs;
+        return result;
+    }
     const CrossAdapterGrass::Frame* GetDisplay() const { return _display ? &*_display : nullptr; }
 
 private:
@@ -34,5 +41,6 @@ private:
     GDX12Submission::TransferVersion _orderedVersion;
     GDX12Submission::CompletionPoint _orderedReady;
     Diagnostics _diagnostics;
+    CrossAdapterGrass::Clock::time_point _selectedAt{};
     std::uint64_t _resetRevision = 0;
 };

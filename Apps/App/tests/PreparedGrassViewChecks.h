@@ -277,7 +277,14 @@ static void TestPreparedGrassViews(GDX12Device& device, GDX12DeviceResources& re
     capacity.MaxBlades = 2048;
     capacity.Segments = 3;
     Require(GrassBladeCount(capacity) == 1232, "Default Bistro grass footprint lost its characterized blade count");
+    capacity.CastShadows = false;
     renderer.BeginFrame(frozenCommon, {capacity}, {}, controls);
+    renderer.PublishPrimitives(resources.Primitives, &source);
+    const auto shadowPatches = renderer.FreezeShadowPatches(resources.Primitives, source);
+    const auto reflectionPatches = renderer.FreezeShadowPatches(resources.Primitives, source, false);
+    Require(shadowPatches && shadowPatches->empty() && reflectionPatches && reflectionPatches->size() == 1,
+        "Reflection capture omitted visible grass that does not cast shadows");
+    capacity.CastShadows = true;
     const auto defaultBytes = renderer.GeometryAllocationBytes();
     std::vector<GDX12GrassInstance> patches(16, capacity);
     for (UINT i = 0; i < patches.size(); ++i) patches[i].Id += i;

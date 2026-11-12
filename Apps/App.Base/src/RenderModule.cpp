@@ -157,6 +157,7 @@ void RenderModule::Initialize()
 void RenderModule::InitializeMGPU()
 {
     _mgpuStatus.PrimaryLuid = AdapterLuidKey(_primaryDevice->GetAdapterLuid());
+    Log::Info("Renderer", "MGPU primary LUID: ", _mgpuStatus.PrimaryLuid);
     _mgpuStatus.Requested = MGPUEnabled.GetValue();
     _mgpuStatus.RequestedSecondaryLuid = MGPUSecondaryLuid.GetValue();
     if (!_mgpuStatus.Requested) return;

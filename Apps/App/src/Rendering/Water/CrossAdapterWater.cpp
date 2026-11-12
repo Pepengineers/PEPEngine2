@@ -155,7 +155,7 @@ struct CrossAdapterWater::State
     bool PublishCurrent = false;
     std::optional<GDX12FluidProducerInput> Input, EpochSeed, HeadInput;
     Matrix DisplayTransform = Matrix::Identity;
-    HostClock::time_point LastProducer;
+    HostClock::time_point LastProducer, FrameStarted;
     float MaxAgeMs = 0;
     std::optional<Clock> Time;
     std::shared_ptr<SolverSlot> Slot;
@@ -513,6 +513,8 @@ std::optional<CompletionPoint> CrossAdapterWater::State::SubmitSolve(bool exact)
                 const auto imported = ReceiptPoint(graph, issued, importPass);
                 boundary = ReceiptPoint(graph, issued, handoffPass);
                 Bank->CommitExact(ticket, produced, exported, exported, imported, imported);
+                Counters.ExportBytes += Seed->size() * sizeof(GDX12FluidSolver::Particle);
+                Counters.ImportBytes += Seed->size() * sizeof(GDX12FluidSolver::Particle);
                 Local[solve.Credit.LocalSlot] = metadata;
                 Require(Bank->BindReader(solve.HandoffReader->Id, *boundary), "Water Exact handoff receipt rejected");
                 Require(Select(ticket, *Local[solve.Credit.LocalSlot]), "Water Exact display admission failed after submit");
@@ -568,6 +570,7 @@ bool CrossAdapterWater::State::TryExport(Output& output)
     {
         const auto point = issued.Batches.front();
         Bank->CommitExport(ticket, point, point);
+        Counters.ExportBytes += Seed->size() * sizeof(GDX12FluidSolver::Particle);
     }).has_value();
 }
 
@@ -596,6 +599,7 @@ bool CrossAdapterWater::State::TryImport(Output& output)
     {
         const auto point = issued.Batches.front();
         Bank->CommitImport(ticket, point, point);
+        Counters.ImportBytes += Seed->size() * sizeof(GDX12FluidSolver::Particle);
         if (Local[local] && !Local[local]->Displayed) ++Counters.DiscardedReady;
         Local[local] = output.Snapshot;
     }).has_value();
@@ -669,6 +673,7 @@ void CrossAdapterWater::Tick(const GDX12FluidInstance* instance, const GDX12Flui
 {
     auto& s = *_state;
     Require(!s.AwaitingTail, "Previous water frame did not receive its tail receipt");
+    s.FrameStarted = HostClock::now();
     s.Selected.reset();
     s.DemandExact = false;
     s.Counters.Requested = controls.MultiGPU;
@@ -805,7 +810,8 @@ CrossAdapterWater::Diagnostics CrossAdapterWater::GetDiagnostics() const
         result.Unrepresented = time.UnrepresentedElapsed;
         result.FirstMissingInput = time.FirstMissingInput;
         if (result.DisplayedSimulationTime >= 0)
-            result.SourceAgeSeconds = (std::max)(0.0, time.DesiredTime - result.DisplayedSimulationTime);
+            result.SourceAgeSeconds = (std::max)(0.0, time.DesiredTime - result.DisplayedSimulationTime) +
+                std::chrono::duration<double>(HostClock::now() - s.FrameStarted).count();
     }
     return result;
 }

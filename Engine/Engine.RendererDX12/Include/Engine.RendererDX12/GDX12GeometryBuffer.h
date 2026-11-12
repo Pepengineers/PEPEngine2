@@ -57,6 +57,7 @@ public:
 	void ReserveSkinnedVertices(UINT count);
 	UINT AllocateSkinnedVertices(UINT count);
 	void ReleaseSkinnedVertices(UINT offset, UINT count);
+    const std::map<UINT, UINT>& GetSkinnedVertexRanges() const { return _skinnedRanges; }
 	ID3D12Resource* BeginSkinning(GDX12CommandList* commands);
 	void EndSkinning(GDX12CommandList* commands);
 	const GPUMesh* GetGPUMeshByHandle(MeshHandle handle);
@@ -91,6 +92,7 @@ private:
 	static constexpr auto VertexReadState = static_cast<D3D12_RESOURCE_STATES>(
         UINT(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER) | UINT(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
 	std::map<UINT, UINT> _freeSkinRanges;
+    std::map<UINT, UINT> _skinnedRanges;
 	std::map<UINT, UINT> _freeIndexRanges;
 	UINT _totalVertices;
 	UINT _totalIndices;

@@ -2,6 +2,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Rendering/Water/GDX12FluidSolver.h"
 #include <map>
+#include <chrono>
 #include <optional>
 
 struct GDX12FluidDisplay
@@ -43,7 +44,7 @@ public:
     void SetRoutedDisplay(std::uint64_t owner, std::optional<GDX12FluidDisplay> display);
     void PrepareFrame();
     void ExecuteSimulation(GDX12CommandList* commands);
-    struct LocalSimulationStatus { double DebtSeconds = 0, MissingSeconds = 0; bool Active = false; };
+    struct LocalSimulationStatus { double DebtSeconds = 0, MissingSeconds = 0, AgeMs = 0; bool Active = false; };
     LocalSimulationStatus GetLocalSimulationStatus() const;
     std::vector<GDX12RenderGraph::BufferAccess> GetSimulationBufferAccesses() const;
     std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override;
@@ -76,6 +77,7 @@ private:
     void SurfaceBindings(GDX12CommandList* commands, D3D12_GPU_VIRTUAL_ADDRESS constants, UINT owner, UINT mode = 0);
     Link _depthLink, _motionLink, _geometryLink, _ownerLink;
     std::vector<GDX12FluidInstance> _instances;
+    std::chrono::steady_clock::time_point _frameStarted{};
     std::map<uint64_t, std::unique_ptr<State>> _states;
     std::uint64_t _routedOwner = 0;
     std::optional<GDX12FluidDisplay> _routedDisplay;

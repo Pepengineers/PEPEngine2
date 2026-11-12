@@ -57,6 +57,8 @@ void CommonRenderPasses::AddReflectionRoute(GDX12RenderGraph& graph, GDX12Render
     std::vector<IRenderPassLink*> materialInputs)
 {
     if (_placedReflections) _placedReflections->Configure(graph, node, Bindings, std::move(materialInputs));
+    else Bindings.LegacyReplacements.push_back({nullptr, {},
+        [this](auto tail) { Reflections.OnSubmitted(tail); }, {}});
 }
 
 void CommonRenderPasses::Initialize()

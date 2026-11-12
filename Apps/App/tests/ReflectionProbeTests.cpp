@@ -458,6 +458,7 @@ int main(int argc, char** argv)
         std::unique_ptr<GDX12RenderGraph> placedGraph;
         RenderPipelineBindings placedBindings;
         GDX12Device* diagnosticSecondary = nullptr;
+        std::function<void(GDX12CommandList*)> writeSkinMarker;
         const auto render = [&](bool waitForGPU = true)
         {
             ++testFrame;
@@ -466,6 +467,7 @@ int main(int argc, char** argv)
             if (frame->FenceValue) queue->CPUWaitForFenceValue(frame->FenceValue);
             upload();
             auto* list = queue->GetCommandList();
+            if (writeSkinMarker) writeSkinMarker(list);
             resources.PrepareLocalShadowData();
             resources.UploadLocalShadowData(list);
             localShadows.Prepare();
@@ -557,14 +559,113 @@ int main(int argc, char** argv)
             }
             Require(adapter && device.GetDeviceFeatures().Name.find("5050") != std::string::npos,
                 "MGPU reflection acceptance requires RTX 5050 primary and Arc B570 secondary");
+            const auto renderAdapters = GDX12DeviceFactory::GetDeviceDescriptors();
+            Require(std::count_if(renderAdapters.begin(), renderAdapters.end(), [](const auto& item)
+                { return item.Name.find(L"5050") != std::wstring::npos; }) == 1,
+                "Indirect display alias was counted as another RTX 5050 render adapter");
             secondary.Role = DEVICE_ROLE_SECONDARY;
             ThrowIfFailed(secondary.Initialize(adapter));
             diagnosticSecondary = &secondary;
             std::cout << "Primary: " << device.GetDeviceFeatures().Name << "; secondary: " << secondary.GetDeviceFeatures().Name << '\n';
             GDX12CommandQueue copyA(&device, D3D12_COMMAND_LIST_TYPE_COPY, true), copyB(&secondary, D3D12_COMMAND_LIST_TYPE_COPY, true);
             RenderMGPURuntime runtime({&device, &secondary, &copyA, &copyB});
+            {
+                GDX12GeometryBuffer geometry(&device);
+                geometry.ReserveSkinnedVertices(8);
+                Require(geometry.GetSkinnedVertexRanges().empty(), "Skin reserve left an active range");
+                const auto first = geometry.AllocateSkinnedVertices(3);
+                const auto second = geometry.AllocateSkinnedVertices(2);
+                Require(geometry.GetSkinnedVertexRanges().at(first) == 3 &&
+                    geometry.GetSkinnedVertexRanges().at(second) == 2, "Active skin ranges missing");
+                geometry.ReleaseSkinnedVertices(first, 3);
+                Require(!geometry.GetSkinnedVertexRanges().count(first), "Released skin range remains active");
+                Require(geometry.AllocateSkinnedVertices(3) == first, "Skin range was not reused");
+                geometry.Clear();
+                Require(geometry.GetSkinnedVertexRanges().empty(), "Clear retained active skin ranges");
+
+                CrossAdapterWork work(runtime);
+                CrossAdapterWork::Channel channel;
+                GDX12UploadBuffer<UINT> input(&device, 8, EBufferType::Upload, false);
+                for (UINT i = 0; i < 8; ++i) input.CopyData(i, i + 10);
+                auto source = work.Identify(input.ShareResource(), device);
+                auto target = work.Allocate(secondary, 8 * sizeof(UINT));
+                work.Copy(channel, device, secondary, {{source, target}});
+                input.CopyData(2, 99u);
+                CrossAdapterWork::CopyRegion region{source, target};
+                region.SourceOffset = 2 * sizeof(UINT);
+                region.DestinationOffset = 4 * sizeof(UINT);
+                region.Bytes = sizeof(UINT);
+                work.Copy(channel, device, secondary, {region});
+                for (const bool destination : {false, true})
+                {
+                    auto invalid = region;
+                    (destination ? invalid.DestinationOffset : invalid.SourceOffset) = 8 * sizeof(UINT);
+                    bool rejected = false;
+                    try { work.Copy(channel, device, secondary, {invalid}); }
+                    catch (const std::exception&) { rejected = true; }
+                    Require(rejected, "Out-of-bounds snapshot range accepted");
+                }
+                auto readback = secondary.CreateResource(D3D12_HEAP_TYPE_READBACK,
+                    CD3DX12_RESOURCE_DESC::Buffer(8 * sizeof(UINT)), D3D12_RESOURCE_STATE_COPY_DEST);
+                work.Run("Range copy readback", secondary,
+                    {{target, GDX12RenderGraph::Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}},
+                    [&](GDX12CommandList& commands) { commands.GetCommandList()->CopyResource(readback.Get(), target.Resource->D3DResource.Get()); });
+                void* mapped = nullptr;
+                ThrowIfFailed(readback->Map(0, nullptr, &mapped));
+                for (UINT i = 0; i < 8; ++i)
+                    Require(static_cast<UINT*>(mapped)[i] == (i == 4 ? 99u : i + 10), "Range copy changed neighboring bytes");
+                readback->Unmap(0, nullptr);
+                runtime.RetireBank(*channel.Bank);
+                std::cout << "Snapshot range copy bounds/neighbors and skin allocation lifetime passed\n";
+            }
+            const auto skinOffset = resources.GeometryBuffer->AllocateSkinnedVertices(1);
+            GDX12UploadBuffer<Vertex> skinUpload(&device, 1, EBufferType::Upload, false);
+            Vertex skinMarker{};
+            writeSkinMarker = [&](GDX12CommandList* commands)
+            {
+                if (testFrame % 2 == 0) return; // Frozen poses still need copying when a later capture is scheduled.
+                skinMarker.Position.x = static_cast<float>(testFrame);
+                skinUpload.CopyData(0, skinMarker);
+                auto vertices = resources.GeometryBuffer->ShareVertexResource();
+                const auto state = vertices->GetCurrentState();
+                commands->ResourceBarrier({vertices->GetCopyDestBarrier()});
+                commands->GetCommandList()->CopyBufferRegion(vertices->D3DResource.Get(), skinOffset * sizeof(Vertex),
+                    skinUpload.GetResource().D3DResource.Get(), 0, sizeof(Vertex));
+                commands->ResourceBarrier({vertices->GetTransitionBarrier(state)});
+            };
+            UINT checkedSkinCaptures = 0;
             CrossAdapterReflections route(resources, secondary, runtime, [&] { return std::vector<GDX12Texture*>{&white}; },
                 common, reflections, environment);
+            route.SetApplication({}, [&](GDX12DeviceResources& remote, GDX12ReflectionProbePass&, CrossAdapterWork&, UINT64&)
+            {
+                Require(remote.FrameConstants[0]->MaterialCache->GetElementCount() ==
+                    resources.FrameConstants[resources.CurrFrameConstantsIndex]->MaterialCache->GetElementCount(),
+                    "Secondary application material indices have no matching CPU cache");
+                auto& target = *remote.FrameConstants[0]->MaterialCache;
+                auto& source = *resources.FrameConstants[resources.CurrFrameConstantsIndex]->MaterialCache;
+                target.TrackChanges();
+                Require(std::memcmp(target.GetCPUData(), source.GetCPUData(),
+                    source.GetElementCount() * sizeof(GDX12MaterialConstants)) == 0,
+                    "Secondary material cache contents differ from primary");
+                auto vertices = remote.GeometryBuffer->ShareVertexResource();
+                const auto state = vertices->GetCurrentState();
+                auto readback = secondary.CreateResource(D3D12_HEAP_TYPE_READBACK,
+                    CD3DX12_RESOURCE_DESC::Buffer(sizeof(Vertex)), D3D12_RESOURCE_STATE_COPY_DEST);
+                auto* commands = secondary.GetCommandQueue()->GetCommandList();
+                commands->ResourceBarrier({vertices->GetCopySourceBarrier()});
+                commands->GetCommandList()->CopyBufferRegion(readback.Get(), 0, vertices->D3DResource.Get(),
+                    skinOffset * sizeof(Vertex), sizeof(Vertex));
+                commands->ResourceBarrier({vertices->GetTransitionBarrier(state)});
+                secondary.GetCommandQueue()->ExecuteCommandList(commands);
+                secondary.GetCommandQueue()->Flush();
+                void* mapped = nullptr;
+                ThrowIfFailed(readback->Map(0, nullptr, &mapped));
+                Require(std::memcmp(mapped, &skinMarker, sizeof(Vertex)) == 0,
+                    "Secondary geometry retained stale animated or frozen skin vertices");
+                readback->Unmap(0, nullptr);
+                ++checkedSkinCaptures;
+                return std::vector<CrossAdapterWork::Use>{};
+            }, {});
             struct MaterialCapture final : GDX12RenderPass
             {
                 GDX12ReflectionProbePass& Pass;
@@ -666,6 +767,9 @@ int main(int argc, char** argv)
                 }
             }
             std::cout << "Both near/far placements, hysteresis and partial-cycle transitions passed\n";
+            Require(checkedSkinCaptures > 1, "Animated geometry cache was not exercised after its initial copy");
+            writeSkinMarker = {};
+            resources.GeometryBuffer->ReleaseSkinnedVertices(skinOffset, 1);
             resources.ReflectionProbes.clear();
             render();
             Require(!route.HasSecondaryWork(), "Disabled probes retained remote work");

@@ -29,10 +29,16 @@ int main(int argc, char** argv)
         for (UINT i = 0;; ++i)
         {
             ComPtr<IDXGIAdapter1> candidate;
-            if (factory->EnumAdapters1(i, &candidate) == DXGI_ERROR_NOT_FOUND) break;
+            if (factory->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&candidate)) == DXGI_ERROR_NOT_FOUND) break;
             DXGI_ADAPTER_DESC1 description; Check(candidate->GetDesc1(&description));
             if (description.VendorId == vendor && !(description.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) && (vendor != 0x8086 || std::wstring(description.Description).find(L"B570") != std::wstring::npos))
-            { adapter = candidate; std::wcout << description.Description << L'\n'; break; }
+            {
+                adapter = candidate;
+                std::wcout << description.Description << L'\n';
+                std::cout << "LUID=" << ((static_cast<unsigned long long>(static_cast<UINT>(description.AdapterLuid.HighPart)) << 32) |
+                    description.AdapterLuid.LowPart) << '\n';
+                break;
+            }
         }
         if (!adapter) throw std::runtime_error("Requested physical adapter not found");
         ComPtr<ID3D12Device> device; Check(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&device)));

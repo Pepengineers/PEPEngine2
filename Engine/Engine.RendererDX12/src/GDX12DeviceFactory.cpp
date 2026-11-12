@@ -4,6 +4,29 @@
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 #include <algorithm>
+#include <d3dkmthk.h>
+#pragma comment(lib, "gdi32.lib")
+
+namespace
+{
+bool IsIndirectDisplayAdapter(LUID luid)
+{
+    D3DKMT_OPENADAPTERFROMLUID adapter{};
+    adapter.AdapterLuid = luid;
+    if (D3DKMTOpenAdapterFromLuid(&adapter) < 0) return false;
+    D3DKMT_ADAPTERTYPE type{};
+    D3DKMT_QUERYADAPTERINFO query{};
+    query.hAdapter = adapter.hAdapter;
+    query.Type = KMTQAITYPE_ADAPTERTYPE;
+    query.pPrivateDriverData = &type;
+    query.PrivateDriverDataSize = sizeof(type);
+    const auto status = D3DKMTQueryAdapterInfo(&query);
+    D3DKMT_CLOSEADAPTER close{};
+    close.hAdapter = adapter.hAdapter;
+    D3DKMTCloseAdapter(&close);
+    return status >= 0 && type.IndirectDisplayDevice;
+}
+}
 
 ComPtr<IDXGIFactory7> GDX12DeviceFactory::_dxgiFactory = nullptr;
 ComPtr<IDXGIFactory7> GDX12DeviceFactory::_dxgiFactoryProxy = nullptr;
@@ -61,6 +84,7 @@ std::vector<DeviceDesc> GDX12DeviceFactory::GetDeviceDescriptors()
         DXGI_ADAPTER_DESC1 adapterDesc{};
         if (FAILED(adapter.As(&adapter4)) || FAILED(adapter->GetDesc1(&adapterDesc))) continue;
         if (adapterDesc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue;
+        if (IsIndirectDisplayAdapter(adapterDesc.AdapterLuid)) continue;
         if (std::any_of(devices.begin(), devices.end(), [&](const DeviceDesc& desc)
             { return desc.AdapterLuid.HighPart == adapterDesc.AdapterLuid.HighPart &&
                 desc.AdapterLuid.LowPart == adapterDesc.AdapterLuid.LowPart; })) continue;

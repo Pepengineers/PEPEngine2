@@ -8,7 +8,7 @@ class CrossAdapterWork
 {
 public:
     using View = GDX12Snapshot::PhysicalView;
-    struct Use { View Resource; GDX12RenderGraph::Mode Mode; D3D12_RESOURCE_STATES State; };
+    struct Use { View Resource; GDX12RenderGraph::Mode Mode; D3D12_RESOURCE_STATES State; GDX12Submission::TransferVersion Version{}; };
     using Record = std::function<void(GDX12CommandList&)>;
     struct Channel
     {
@@ -30,15 +30,25 @@ public:
         std::function<void(GDX12CommandList&, GDX12Resource&)> pack,
         std::function<void(GDX12CommandList&, GDX12Resource&)> unpack);
     double WaitMilliseconds = 0;
+    struct Profile
+    {
+        double RunMs = 0, TransferMs = 0, ReconfigureMs = 0, AllocateMs = 0;
+        UINT64 Runs = 0, Transfers = 0, BankCreates = 0, BufferAllocations = 0;
+    };
+    static bool ProfilingEnabled();
+    Profile GetProfile() const { return _profile; }
     struct CopyRegion
     {
         View Source, Destination;
         UINT SourceSubresource = UINT_MAX, DestinationSubresource = UINT_MAX;
+        GDX12Submission::TransferVersion SourceVersion{};
+        UINT64 SourceOffset = 0, DestinationOffset = 0, Bytes = 0;
     };
     UINT64 Copy(Channel& channel, GDX12Device& producer, GDX12Device& consumer,
         const std::vector<CopyRegion>& regions);
 private:
+    void ImportVersion(GDX12RenderGraph& graph, GDX12RenderGraph::ExecutionBindings& bindings,
+        GDX12RenderGraph::Resource id, const Use& use);
     RenderMGPURuntime& _runtime;
-    struct Identity { std::weak_ptr<GDX12Resource> Native; GDX12Submission::ResourceIdentity Id; };
-    std::vector<Identity> _identities;
+    Profile _profile;
 };

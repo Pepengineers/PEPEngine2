@@ -140,7 +140,6 @@ struct BistroGrassShadowReplica::Impl
     std::shared_ptr<const ImportedField> Current;
     Ticket Publication;
     std::array<std::uint64_t, 2> OpenReaders = {};
-    bool ReaderSubmitted = false;
     // Three frames of primary/secondary sun/local. Runtime owners keep a slot
     // busy until the last issued plan using it retires.
     std::array<std::shared_ptr<NativeSlot>, 12> RasterSlots;
@@ -373,7 +372,6 @@ void BistroGrassShadowReplica::BindReader(const Reader& reader, CompletionPoint 
         "Grass shadow reader does not belong to the current field");
     Require(s.Bank->BindReader(reader.Id, secondaryTail), "Grass shadow reader receipt rejected");
     *open = 0;
-    s.ReaderSubmitted = true;
 }
 
 void BistroGrassShadowReplica::CancelReader(const Reader& reader)
@@ -392,11 +390,11 @@ void BistroGrassShadowReplica::FinishField()
     if (!s.Current) return;
     Require(std::none_of(s.OpenReaders.begin(), s.OpenReaders.end(), [](auto reader) { return reader != 0; }),
         "Bind or cancel grass shadow readers before closing the field");
-    Require(s.ReaderSubmitted ? s.Bank->ReleaseExact(s.Publication) : s.Bank->Cancel(s.Publication),
+    // Other routes may have polled completed readers; retirement also preserves still-pending reader fences.
+    Require(s.Bank->Cancel(s.Publication),
         "Grass shadow field demand could not close");
     s.Current.reset();
     s.Publication = {};
-    s.ReaderSubmitted = false;
 }
 
 std::vector<BistroGrassShadowReplica::GroupBatches> BistroGrassShadowReplica::MakeBatches(

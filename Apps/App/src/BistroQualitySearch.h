@@ -50,9 +50,10 @@ namespace BistroQualitySearch
     {
     public:
         Search(Profile profile, std::vector<Axis> axes, int width, int height, MGPUSettings mgpu = {},
-            std::optional<size_t> waterAxis = {}, std::optional<size_t> grassAxis = {})
+            std::optional<size_t> waterAxis = {}, std::optional<size_t> grassAxis = {},
+            std::array<std::optional<size_t>, 3> scheduledAxes = {})
             : _profile(profile), _axes(std::move(axes)), _width(width), _height(height),
-              _waterAxis(waterAxis), _grassAxis(grassAxis)
+              _waterAxis(waterAxis), _grassAxis(grassAxis), _scheduledAxes(scheduledAxes)
         {
             if (width <= 0 || height <= 0) throw std::invalid_argument("Invalid quality search dimensions");
             if (mgpu.Enabled && (!mgpu.Primary || !mgpu.Secondary || mgpu.Primary == mgpu.Secondary))
@@ -108,21 +109,12 @@ namespace BistroQualitySearch
             if (_explorePlacement)
             {
                 _explorePlacement = false;
-                const auto& base = _request->Settings;
-                for (int water = 0; water != 3; ++water)
-                    for (int grass = 0; grass != 3; ++grass)
-                    for (int waterHz : {0, 60, 30})
-                    for (int grassHz : {0, 60, 30})
-                    {
-                        auto candidate = base;
-                        candidate.MGPU.Water = {water != 0, water == 1, waterHz};
-                        candidate.MGPU.Grass = {grass != 0, grass == 1, grassHz};
-                        if (_waterAxis && (*_waterAxis >= candidate.Tiers.size() || !candidate.Tiers[*_waterAxis])) candidate.MGPU.Water = {};
-                        if (_grassAxis && (*_grassAxis >= candidate.Tiers.size() || !candidate.Tiers[*_grassAxis])) candidate.MGPU.Grass = {};
-                        if (_placementVisited.insert(candidate).second) _placements.push_back(std::move(candidate));
-                    }
+                _placements.clear();
+                _placementVisited.clear();
                 _placementCursor = 0;
                 _placementBest.reset();
+                _placementAnchor.reset();
+                AddPlacementNeighbors(_request->Settings);
                 if (!_placements.empty())
                     _placementRequest = Request{_placements[_placementCursor++], true};
             }
@@ -138,6 +130,8 @@ namespace BistroQualitySearch
                 {
                     const Selection measured{_placementRequest->Settings, *result.AverageFps,
                         *result.AverageFps >= Target(_profile), true};
+                    if (measured.TargetReached) _finalists.push_back(measured);
+                    else RememberFallback(measured);
                     if (!_placementBest || Better(measured, *_placementBest)) _placementBest = measured;
                 }
                 _placementRequest.reset();
@@ -145,6 +139,16 @@ namespace BistroQualitySearch
                 {
                     _placementRequest = Request{_placements[_placementCursor++], true};
                     return;
+                }
+                if (_placementBest && (!_placementAnchor || Better(*_placementBest, *_placementAnchor)))
+                {
+                    _placementAnchor = _placementBest;
+                    AddPlacementNeighbors(_placementBest->Settings);
+                    if (_placementCursor < _placements.size())
+                    {
+                        _placementRequest = Request{_placements[_placementCursor++], true};
+                        return;
+                    }
                 }
                 _placements.clear();
                 if (_placementBest)
@@ -216,6 +220,95 @@ namespace BistroQualitySearch
     private:
         enum class Phase { Coarse, Graphics, Cpu, Disable, Restore, Confirm, Recover, Done };
 
+        void AddPlacementNeighbors(const Candidate& base)
+        {
+            const auto append = [&](Candidate candidate)
+            {
+                if (_waterAxis && (*_waterAxis >= candidate.Tiers.size() || !candidate.Tiers[*_waterAxis])) candidate.MGPU.Water = {};
+                if (_grassAxis && (*_grassAxis >= candidate.Tiers.size() || !candidate.Tiers[*_grassAxis])) candidate.MGPU.Grass = {};
+                const auto off = [&](const auto& axis) { return axis && (*axis >= candidate.Tiers.size() || !candidate.Tiers[*axis]); };
+                if (off(_scheduledAxes[0])) candidate.MGPU.Sun = {};
+                if (off(_scheduledAxes[1])) for (auto& light : candidate.MGPU.LocalShadows) light.Route = {};
+                if (off(_scheduledAxes[2])) candidate.MGPU.Particles = {};
+                if (!candidate.MGPU.Water.Secondary) candidate.MGPU.Water.Exact = false;
+                if (!candidate.MGPU.Grass.Secondary) candidate.MGPU.Grass.Exact = false;
+                candidate.MGPU.Reflections.Canonicalize();
+                // Every route is compared with primary at exactly the same spatial and temporal quality.
+                auto primary = candidate;
+                primary.MGPU.Water.Secondary = primary.MGPU.Grass.Secondary = false;
+                primary.MGPU.Sun.Secondary = primary.MGPU.Particles.Secondary = false;
+                for (auto& light : primary.MGPU.LocalShadows) light.Route.Secondary = false;
+                primary.MGPU.Reflections.Placement = 0;
+                primary.MGPU.Reflections.SecondaryFaces = {};
+                primary.MGPU.Water.Exact = primary.MGPU.Grass.Exact = false;
+                if (_placementVisited.insert(primary).second) _placements.push_back(std::move(primary));
+                if (_placementVisited.insert(candidate).second) _placements.push_back(std::move(candidate));
+            };
+            append(base);
+            auto together = base;
+            together.MGPU.Water.Secondary = together.MGPU.Grass.Secondary = true;
+            together.MGPU.Sun.Secondary = together.MGPU.Particles.Secondary = true;
+            for (auto& light : together.MGPU.LocalShadows) light.Route.Secondary = true;
+            together.MGPU.Reflections.SecondaryFaces.fill(63);
+            append(together);
+            for (int unit = 0; unit != 2; ++unit)
+                for (int route = 0; route != 3; ++route)
+                    for (int hz : {0, 60, 30})
+                    {
+                        auto candidate = base;
+                        (unit ? candidate.MGPU.Grass : candidate.MGPU.Water) = {route != 0, route == 1, hz};
+                        append(std::move(candidate));
+                    }
+            for (size_t unit = 0; unit < base.MGPU.LocalShadows.size() + 2; ++unit)
+                for (int route = 0; route != 3; ++route)
+                    for (int interval : {1, 2})
+                    {
+                        auto candidate = base;
+                        auto& policy = unit == 0 ? candidate.MGPU.Sun : unit == 1 ? candidate.MGPU.Particles :
+                            candidate.MGPU.LocalShadows[unit - 2].Route;
+                        policy = {route != 0, route != 2, interval};
+                        append(std::move(candidate));
+                    }
+            // Whole-probe and face placement, then both distance partitions. Improvements seed the next neighborhood.
+            for (int probe = 0; probe < base.MGPU.Reflections.Count; ++probe)
+                for (unsigned mask : {0u, 63u, 21u, 42u, 1u, 2u, 4u, 8u, 16u, 32u})
+                {
+                    auto candidate = base;
+                    candidate.MGPU.Reflections.Placement = 0;
+                    candidate.MGPU.Reflections.SecondaryFaces[probe] = mask;
+                    append(std::move(candidate));
+                }
+            for (int probe = 0; probe < base.MGPU.Reflections.Count; ++probe)
+                for (unsigned face = 0; face < 6; ++face)
+                {
+                    auto candidate = base;
+                    candidate.MGPU.Reflections.Placement = 0;
+                    candidate.MGPU.Reflections.SecondaryFaces[probe] ^= 1u << face;
+                    append(std::move(candidate));
+                }
+            for (int placement = 0; placement != 3; ++placement)
+            {
+                auto candidate = base;
+                candidate.MGPU.Reflections.Placement = placement;
+                append(std::move(candidate));
+            }
+            const auto vary = [&](auto member, const auto& values)
+            {
+                for (int value : values)
+                {
+                    auto candidate = base;
+                    candidate.MGPU.Reflections.*member = value;
+                    append(std::move(candidate));
+                }
+            };
+            vary(&ReflectionSearchSettings::Count, std::array{0, 1, 2, 3, 4});
+            vary(&ReflectionSearchSettings::Resolution, std::array{64, 128, 256, 512});
+            vary(&ReflectionSearchSettings::FilterSamples, std::array{32, 64, 128, 256});
+            vary(&ReflectionSearchSettings::DistanceMetres, std::array{5, 10, 20, 40, -1});
+            vary(&ReflectionSearchSettings::Schedule, std::array{0, 1, 2, 3});
+            vary(&ReflectionSearchSettings::Implementation, std::array{0, 1});
+        }
+
         // A fixed minimum and relative tolerance avoid optimizing small timing fluctuations.
         static double Noise(double fps) { return (std::max)(0.25, 0.01 * fps); }
         bool AtMinimumHeight() const { return _coarse.Height <= 480; }
@@ -286,7 +379,12 @@ namespace BistroQualitySearch
         void RequestOnce(const Candidate& candidate, bool requireFull)
         {
             auto key = candidate;
-            if (key.MGPU.Enabled) { key.MGPU.Water = {}; key.MGPU.Grass = {}; }
+            if (key.MGPU.Enabled)
+            {
+                key.MGPU.Water = {}; key.MGPU.Grass = {}; key.MGPU.Sun = {}; key.MGPU.Particles = {};
+                for (auto& light : key.MGPU.LocalShadows) light.Route = {};
+                key.MGPU.Reflections = {};
+            }
             if (_visited.insert(key).second)
             {
                 _request = Request{candidate, requireFull};
@@ -355,11 +453,15 @@ namespace BistroQualitySearch
             if (aPixels != bPixels) return aPixels > bPixels;
             if (a.Settings.MGPU.Enabled)
             {
+                if (a.Settings.MGPU.Reflections.Quality() != b.Settings.MGPU.Reflections.Quality())
+                    return a.Settings.MGPU.Reflections.Quality() > b.Settings.MGPU.Reflections.Quality();
                 const auto cadence = [](const MGPUSettings& settings)
                 {
                     const auto water = settings.Water.UpdateHz ? settings.Water.UpdateHz : 241;
                     const auto grass = settings.Grass.UpdateHz ? settings.Grass.UpdateHz : 241;
-                    return std::pair{(std::min)(water, grass), water + grass};
+                    int interval = settings.Sun.Interval + settings.Particles.Interval;
+                    for (const auto& light : settings.LocalShadows) interval += light.Route.Interval;
+                    return std::make_tuple((std::min)(water, grass), water + grass, -interval);
                 };
                 if (cadence(a.Settings.MGPU) != cadence(b.Settings.MGPU))
                     return cadence(a.Settings.MGPU) > cadence(b.Settings.MGPU);
@@ -681,12 +783,13 @@ namespace BistroQualitySearch
         std::vector<Selection> _finalists, _offOptions, _fallbackOptions;
         std::optional<Request> _request;
         std::optional<size_t> _waterAxis, _grassAxis;
+        std::array<std::optional<size_t>, 3> _scheduledAxes;
         bool _explorePlacement = false;
         size_t _placementCursor = 0;
         std::vector<Candidate> _placements;
         std::set<Candidate> _placementVisited;
         std::optional<Request> _placementRequest;
-        std::optional<Selection> _placementBest;
+        std::optional<Selection> _placementBest, _placementAnchor;
         std::optional<Selection> _coarseFirst, _neighborFirst, _base, _batchBest, _fallback, _offRepeat, _confirm, _confirmedFallback, _winner;
     };
 }

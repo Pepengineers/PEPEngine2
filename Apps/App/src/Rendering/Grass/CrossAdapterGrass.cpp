@@ -138,6 +138,7 @@ struct CrossAdapterGrass::Impl
     const TransferId SeedStream, FieldStream;
     Epoch ActiveEpoch = Epoch::Invalid;
     D3D12_RESOURCE_DESC Desc = {};
+    uint64_t ExportBytes = 0, ImportBytes = 0;
     bool SeedConfigured = false, FieldConfigured = false;
     std::shared_ptr<Transport> SeedBank, FieldBank;
     std::shared_ptr<GDX12DescriptorHeap> SecondaryHeap;
@@ -309,6 +310,7 @@ bool CrossAdapterGrass::Impl::Start(std::shared_ptr<const GDX12GrassRenderer::Lo
         {
             const auto ep = plan.Point(submitted, exported), ip = plan.Point(submitted, imported);
             bank.CommitExact(ticket, plan.Point(submitted, stage), ep, ep, ip, ip);
+            ExportBytes += Desc.Width; ImportBytes += Desc.Width;
             SolverBusy[0] = plan.Point(submitted, seeded);
             Require(bank.BindReader(reader->Id, SolverBusy[0]) && bank.ReleaseExact(ticket), "Grass seed lease binding failed");
             solver->Commit(0);
@@ -407,6 +409,7 @@ bool CrossAdapterGrass::Impl::Solve(Clock::time_point now)
                 publication.Ready = plan.Point(submitted, imported);
                 bank.CommitExact(ticket, SolverBusy[slot], publication.Exported, publication.Exported,
                     publication.Ready, publication.Ready);
+                ExportBytes += Desc.Width; ImportBytes += Desc.Width;
                 publication.ExactPin = true;
             }
             else Require(bank.BindProducer(ticket, SolverBusy[slot]), "Grass Latest producer receipt binding failed");
@@ -463,6 +466,7 @@ void CrossAdapterGrass::Impl::PumpCopies()
             {
                 pending.Exported = plan.Point(receipt, pass);
                 bank.CommitExport(ticket, pending.Exported, pending.Exported);
+                ExportBytes += Desc.Width;
             });
             if (!submitted) break;
         }
@@ -488,6 +492,7 @@ void CrossAdapterGrass::Impl::PumpCopies()
         {
             pending.Ready = plan.Point(receipt, pass);
             bank.CommitImport(ticket, pending.Ready, pending.Ready);
+            ImportBytes += Desc.Width;
         });
         if (!submitted) break;
     }
@@ -827,6 +832,6 @@ void CrossAdapterGrass::Reset() { _impl->Clear(); }
 CrossAdapterGrass::InputStatus CrossAdapterGrass::GetInputStatus() const
 {
     const auto& state = *_impl;
-    return {state.Authority.Sequence, state.Inputs.FirstMissing(), state.Inputs.PendingSeconds(),
+    return {state.Authority.Sequence, state.Inputs.FirstMissing(), state.ExportBytes, state.ImportBytes, state.Inputs.PendingSeconds(),
         state.Inputs.MissingSeconds(), state.Inputs.SupersededSeconds()};
 }

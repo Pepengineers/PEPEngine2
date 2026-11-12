@@ -2,6 +2,7 @@
 #include "Engine.RendererDX12/GDX12DeviceFactory.h"
 #include "GrassMGPURouteChecks.h"
 #include "GrassShadowRetryChecks.h"
+#include "Rendering/Grass/BistroGrassShadowReplica.h"
 #include <d3d12sdklayers.h>
 #include <iostream>
 #include <string_view>
@@ -74,6 +75,8 @@ int main(int argc, char** argv)
         ThrowIfFailed(primary.Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
         secondary.Role = DEVICE_ROLE_SECONDARY;
         ThrowIfFailed(secondary.Initialize(SecondAdapter(primary.GetAdapterLuid())));
+        std::cout << "Grass adapter LUIDs: primary=" << primary.GetAdapterLuid().LowPart
+                  << " secondary=" << secondary.GetAdapterLuid().LowPart << '\n';
         GDX12CommandQueue copyA(&primary, D3D12_COMMAND_LIST_TYPE_COPY, true);
         GDX12CommandQueue copyB(&secondary, D3D12_COMMAND_LIST_TYPE_COPY, true);
         GDX12DeviceResources resources;
@@ -87,6 +90,36 @@ int main(int argc, char** argv)
         CheckNativeGrassShadowRetry(primary, secondary, runtime);
         std::cout << "G2 retry passed: native no-record refusal, same PointSource slot and masked depth.\n";
 #endif
+        {
+            BistroGrassShadowReplica replica(runtime, primary, secondary);
+            auto source = std::make_shared<GDX12Resource>();
+            source->D3DResource = primary.CreateResource(D3D12_HEAP_TYPE_DEFAULT,
+                CD3DX12_RESOURCE_DESC::Buffer(256), D3D12_RESOURCE_STATE_COMMON);
+            for (const bool consume : {false, true})
+            {
+                BistroGrassShadowReplica::Field field{};
+                field.Frame = {GDX12Submission::FrameSubmissionId{1}, GDX12Submission::ProducerInvocationId{1}, 1};
+                field.Manifest.ElementCount = 16;
+                field.Primary = {source, runtime.IdentifyResource(source, primary)};
+                field.Owner = source;
+                primary.GetCommandQueue()->ExecuteCommandList(primary.GetCommandQueue()->GetCommandList());
+                const auto imported = replica.SubmitField(field, primary.GetCommandQueue()->GetLastCompletionPoint());
+                if (!imported) throw std::runtime_error("Grass field lifecycle setup failed");
+                auto* importer = runtime.GetQueue(imported->ImportReady.Timeline().Producer.Location);
+                importer->CPUWaitForFenceValue(imported->ImportReady.Value());
+                if (consume)
+                {
+                    const auto reader = replica.AcquireReader(imported);
+                    if (!reader) throw std::runtime_error("Grass field lifecycle reader missing");
+                    secondary.GetCommandQueue()->ExecuteCommandList(secondary.GetCommandQueue()->GetCommandList());
+                    replica.BindReader(*reader, secondary.GetCommandQueue()->GetLastCompletionPoint());
+                    secondary.GetCommandQueue()->Flush();
+                }
+                runtime.Poll();
+                replica.FinishField();
+            }
+            std::cout << "Grass field closes after intervening Poll with zero or completed readers.\n";
+        }
         CheckGrassMGPURoute(runtime, resources, secondary, common);
         runtime.Shutdown();
         GDX12ShaderCompiler::Shutdown();

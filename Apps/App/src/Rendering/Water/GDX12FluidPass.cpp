@@ -347,6 +347,7 @@ void GDX12FluidSurfacePass::DrawSurface(GDX12CommandList* commands, const Partic
 void GDX12FluidSurfacePass::PrepareFrame()
 {
     if (_prepared) return;
+    _frameStarted = std::chrono::steady_clock::now();
     const auto previousControls = _controls;
     _controls = GetFluidControls();
     PrepareStates();
@@ -491,6 +492,9 @@ GDX12FluidSurfacePass::LocalSimulationStatus GDX12FluidSurfacePass::GetLocalSimu
         result.DebtSeconds = (std::max)(result.DebtSeconds, (std::max)(0.0, state->DesiredTime - state->IssuedTime));
         result.MissingSeconds += state->MissingTime;
     }
+    if (result.Active)
+        result.AgeMs = result.DebtSeconds * 1000 +
+            std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - _frameStarted).count();
     return result;
 }
 
