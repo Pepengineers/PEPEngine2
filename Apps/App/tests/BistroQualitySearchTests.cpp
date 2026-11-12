@@ -429,6 +429,8 @@ namespace
         Require(canonical.Schedule == 0 && canonical.Placement == 0 && canonical.SecondaryFaces[0] == 63,
             "Always-near placement was not canonicalized");
         Search unstable(Profile::Performance, {{OffGroup::Never, false, 2, 2}}, 768, 480, pair);
+        unstable.SetTransferCostEstimate([](const Candidate& candidate) -> std::optional<double>
+            { return candidate.MGPU.Water.Secondary ? 10.0 : 0.0; });
         const auto stable = Run(unstable, [&](const Request& request, int visit)
         {
             const auto& p = request.Settings.MGPU;
@@ -450,7 +452,53 @@ namespace
         });
         Require(mixed.Settings.MGPU.Sun.Secondary && mixed.Settings.MGPU.Particles.Secondary &&
             mixed.Settings.MGPU.LocalShadows[0].Route.Secondary && !mixed.Settings.MGPU.LocalShadows[1].Route.Secondary,
-            "Joint search missed independent shadow and particle placement");
+            "Joint search missed the beneficial local-light count and particle placement");
+
+        pair.LocalShadows.clear();
+        for (unsigned id = 135; id; --id) pair.LocalShadows.push_back({id, {}});
+        Search counts(Profile::Performance, {{OffGroup::Never, false, 2, 2}}, 768, 480, pair);
+        std::set<size_t> visitedCounts;
+        const auto counted = Run(counts, [&](const Request& request, int)
+        {
+            const auto& lights = request.Settings.MGPU.LocalShadows;
+            size_t count = 0;
+            bool primarySeen = false;
+            for (size_t i = 0; i < lights.size(); ++i)
+            {
+                Require(lights[i].Entity == i + 1, "Count search did not canonicalize light order");
+                if (!lights[i].Route.Secondary) primarySeen = true;
+                else { Require(!primarySeen, "Count search selected a non-nested light set"); ++count; }
+            }
+            visitedCounts.insert(count);
+            return Result{80.0 - std::abs(static_cast<double>(count) - 50.0), std::nullopt};
+        });
+        Require(std::count_if(counted.Settings.MGPU.LocalShadows.begin(), counted.Settings.MGPU.LocalShadows.end(),
+            [](const auto& light) { return light.Route.Secondary; }) == 50,
+            "Count refinement missed the measured optimum between coarse counts");
+        for (const size_t count : {size_t{0}, size_t{33}, size_t{67}, size_t{101}, size_t{135}})
+            Require(visitedCounts.count(count) != 0, "Count search omitted a representative fraction");
+
+        const auto invalidTrace = [&](bool ordered)
+        {
+            Search search(Profile::Quality, {{OffGroup::Never, false, 2, 2}}, 768, 480, pair);
+            if (ordered) search.SetTransferCostEstimate([](const Candidate& candidate) -> std::optional<double>
+            {
+                if (candidate.MGPU.Particles.Secondary) return std::nullopt;
+                return candidate.MGPU.Water.Secondary ? 1.0 : 0.0;
+            });
+            std::multiset<Candidate> trace;
+            for (int step = 0; step < 2000; ++step)
+            {
+                const auto request = search.Next();
+                if (!request) return trace;
+                Require(request->RequireFull, "Cost hint replaced a full-flight request");
+                trace.insert(request->Settings);
+                search.Submit({30.0, std::nullopt, false});
+            }
+            throw std::runtime_error("Cost-ordered invalid search did not terminate");
+        };
+        Require(invalidTrace(false) == invalidTrace(true),
+            "Transfer cost ordering discarded unknown candidates or changed the measured candidate multiset");
     }
 }
 

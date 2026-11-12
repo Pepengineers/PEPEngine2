@@ -6,6 +6,8 @@
 #include <optional>
 #include <thread>
 #include <vector>
+#include <map>
+#include <string>
 
 namespace GDX12Snapshot { class Transport; }
 
@@ -28,6 +30,25 @@ public:
     RenderMGPURuntime& operator=(const RenderMGPURuntime&) = delete;
 
     GDX12Submission::ResourceIdentity IdentifyResource(const std::shared_ptr<GDX12Resource>& resource, GDX12Device& device);
+    struct TransferCalibration
+    {
+        GDX12Submission::AdapterId Producer{}, Consumer{};
+        UINT64 Bytes = 0;
+        double ColdMs = 0, MinimumMs = 0, MedianMs = 0, P95Ms = 0;
+    };
+    struct TransferLoad
+    {
+        UINT64 Transfers = 0, UnknownTransfers = 0;
+        double OptimisticMilliseconds = 0;
+    };
+    void SetTransferCalibration(std::vector<TransferCalibration> samples);
+    std::optional<double> EstimateTransferMilliseconds(GDX12Submission::AdapterId producer,
+        GDX12Submission::AdapterId consumer, UINT64 bytes) const;
+    void ObserveSynchronousTransfer(GDX12Submission::AdapterId producer, GDX12Submission::AdapterId consumer, UINT64 bytes,
+        const char* technique = "snapshot");
+    TransferLoad GetTransferLoad() const { return _transferLoad; }
+    const std::map<std::string, TransferLoad>& GetTechniqueTransferLoads() const { return _techniqueTransferLoads; }
+    void ResetTransferLoad() { _transferLoad = {}; _techniqueTransferLoads.clear(); }
     GDX12Submission::ResourceId NewResourceId();
     GDX12Submission::AllocationId NewAllocationId();
     GDX12Submission::TransferId NewTransferId();
@@ -68,5 +89,8 @@ private:
     std::vector<Bank> _banks;
     struct KnownResource { std::weak_ptr<GDX12Resource> Native; GDX12Submission::ResourceIdentity Identity; };
     std::vector<KnownResource> _resources;
+    std::vector<TransferCalibration> _transferCalibration;
+    TransferLoad _transferLoad;
+    std::map<std::string, TransferLoad> _techniqueTransferLoads;
     GDX12RenderGraph::PlanExecutor _executor;
 };

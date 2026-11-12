@@ -19,7 +19,7 @@ CrossAdapterReflections::CrossAdapterReflections(GDX12DeviceResources& primary, 
     RenderMGPURuntime& runtime, MaterialTextures materials, RenderPipelineCommonData& common,
     GDX12ReflectionProbePass& pass, GDX12EnvironmentIBLPass& environment)
     : _primary(primary), _secondaryDevice(secondary), _runtime(runtime), _materials(std::move(materials)), _common(common),
-      _pass(pass), _environment(environment), _work(runtime)
+      _pass(pass), _environment(environment), _work(runtime, "reflection-probes")
 {
     for (const auto& frame : _primary.FrameConstants) frame->MaterialCache->TrackChanges();
     _pass.EnableSecondaryCapture(true);

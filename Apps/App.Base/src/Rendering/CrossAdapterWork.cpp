@@ -234,6 +234,7 @@ CompletionPoint CrossAdapterWork::Transfer(Channel& channel, GDX12Device& produc
         Require(receipt.has_value(), "Snapshot graph submission capacity exhausted");
         submitted = true;
         Wait(receipt->Batches.back());
+        _runtime.ObserveSynchronousTransfer(a, b, bytes, _technique);
         if (profiling)
         {
             ++_profile.Transfers;
@@ -248,6 +249,70 @@ CompletionPoint CrossAdapterWork::Transfer(Channel& channel, GDX12Device& produc
     }
 }
 
+
+RenderMGPURuntime::TransferCalibration CrossAdapterWork::Calibrate(GDX12Device& producer, GDX12Device& consumer, UINT64 bytes)
+{
+    Require(bytes && bytes % sizeof(UINT) == 0 && bytes <= SIZE_MAX, "Invalid calibration payload size");
+    auto source = Allocate(producer, bytes);
+    auto destination = Allocate(consumer, bytes);
+    const auto desc = CD3DX12_RESOURCE_DESC::Buffer(bytes);
+    auto upload = producer.CreateResource(D3D12_HEAP_TYPE_UPLOAD, desc, D3D12_RESOURCE_STATE_GENERIC_READ);
+    UINT* pattern = nullptr;
+    const D3D12_RANGE empty{0, 0};
+    ThrowIfFailed(upload->Map(0, &empty, reinterpret_cast<void**>(&pattern)));
+    for (size_t index = 0; index < bytes / sizeof(UINT); ++index) pattern[index] = static_cast<UINT>(index) ^ 0xa57c391du;
+    upload->Unmap(0, nullptr);
+    auto* prepare = producer.GetCommandQueue()->GetCommandList();
+    prepare->ResourceBarrier({source.Resource->GetCopyDestBarrier()});
+    prepare->GetCommandList()->CopyResource(source.Resource->D3DResource.Get(), upload.Get());
+    prepare->ResourceBarrier({source.Resource->GetCommonBarrier()});
+    producer.GetCommandQueue()->ExecuteCommandList(prepare);
+    Wait(producer.GetCommandQueue()->GetLastCompletionPoint());
+
+    RenderMGPURuntime::TransferCalibration result{producer.GetSubmissionAdapterId(), consumer.GetSubmissionAdapterId(), bytes};
+    Channel channel;
+    try
+    {
+        const auto copy = [&]
+        {
+            const auto start = Clock::now();
+            Copy(channel, producer, consumer, {{source, destination}});
+            return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+        };
+        result.ColdMs = copy();
+        for (int warmup = 0; warmup < 3; ++warmup) copy();
+        std::array<double, 20> samples{};
+        for (auto& sample : samples) sample = copy();
+        std::sort(samples.begin(), samples.end());
+        result.MinimumMs = samples.front();
+        result.MedianMs = (samples[9] + samples[10]) * 0.5;
+        result.P95Ms = samples[18];
+        auto readback = consumer.CreateResource(D3D12_HEAP_TYPE_READBACK, desc, D3D12_RESOURCE_STATE_COPY_DEST);
+        auto* verify = consumer.GetCommandQueue()->GetCommandList();
+        verify->ResourceBarrier({destination.Resource->GetCopySourceBarrier()});
+        verify->GetCommandList()->CopyResource(readback.Get(), destination.Resource->D3DResource.Get());
+        verify->ResourceBarrier({destination.Resource->GetCommonBarrier()});
+        consumer.GetCommandQueue()->ExecuteCommandList(verify);
+        Wait(consumer.GetCommandQueue()->GetLastCompletionPoint());
+        void* mapped = nullptr;
+        const D3D12_RANGE range{0, static_cast<SIZE_T>(bytes)};
+        ThrowIfFailed(readback->Map(0, &range, &mapped));
+        const auto* actual = static_cast<const UINT*>(mapped);
+        bool valid = true;
+        for (size_t index = 0; index < bytes / sizeof(UINT); ++index)
+            if (actual[index] != (static_cast<UINT>(index) ^ 0xa57c391du)) { valid = false; break; }
+        readback->Unmap(0, &empty);
+        Require(valid, "MGPU transfer calibration content mismatch");
+        _runtime.RetireBank(*channel.Bank);
+        channel.Bank.reset();
+    }
+    catch (...)
+    {
+        if (channel.Bank && !_runtime.IsStopped()) _runtime.RetireBank(*channel.Bank);
+        throw;
+    }
+    return result;
+}
 
 UINT64 CrossAdapterWork::Copy(Channel& channel, GDX12Device& producer, GDX12Device& consumer,
     const std::vector<CopyRegion>& regions)

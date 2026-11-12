@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -69,11 +70,14 @@ namespace BistroQualitySearch
             }
             _coarse.Width = width;
             _coarse.Height = height;
+            std::sort(mgpu.LocalShadows.begin(), mgpu.LocalShadows.end());
             _coarse.MGPU = mgpu;
             RestartCoarseTiers();
         }
 
         static double Target(Profile profile) { return profile == Profile::Performance ? 60.0 : 28.0; }
+        void SetTransferCostEstimate(std::function<std::optional<double>(const Candidate&)> estimate)
+        { _transferCostEstimate = std::move(estimate); }
 
         std::optional<Request> Next()
         {
@@ -99,6 +103,10 @@ namespace BistroQualitySearch
                 case Phase::Confirm:
                     _request = Request{_confirm->Settings, true};
                     break;
+                case Phase::Refine:
+                    _request = Request{_confirm->Settings, true};
+                    _explorePlacement = true;
+                    break;
                 case Phase::Recover:
                     if (!RequestDeferred()) StartConfirmation();
                     break;
@@ -114,7 +122,10 @@ namespace BistroQualitySearch
                 _placementCursor = 0;
                 _placementBest.reset();
                 _placementAnchor.reset();
+                _detailCursor = 0;
+                _localCountStep = (std::max)(size_t{1}, _request->Settings.MGPU.LocalShadows.size() / 8);
                 AddPlacementNeighbors(_request->Settings);
+                OrderPendingPlacements();
                 if (!_placements.empty())
                     _placementRequest = Request{_placements[_placementCursor++], true};
             }
@@ -140,10 +151,24 @@ namespace BistroQualitySearch
                     _placementRequest = Request{_placements[_placementCursor++], true};
                     return;
                 }
-                if (_placementBest && (!_placementAnchor || Better(*_placementBest, *_placementAnchor)))
+                if (_phase == Phase::Refine)
+                {
+                    while (_detailCursor < DetailUnits(_request->Settings))
+                    {
+                        AddDetailedPlacement(_placementBest ? _placementBest->Settings : _request->Settings);
+                        OrderPendingPlacements();
+                        if (_placementCursor < _placements.size())
+                        {
+                            _placementRequest = Request{_placements[_placementCursor++], true};
+                            return;
+                        }
+                    }
+                }
+                else if (_placementBest && (!_placementAnchor || Better(*_placementBest, *_placementAnchor)))
                 {
                     _placementAnchor = _placementBest;
                     AddPlacementNeighbors(_placementBest->Settings);
+                    OrderPendingPlacements();
                     if (_placementCursor < _placements.size())
                     {
                         _placementRequest = Request{_placements[_placementCursor++], true};
@@ -195,6 +220,15 @@ namespace BistroQualitySearch
             case Phase::Confirm:
                 SubmitConfirmation(measured);
                 break;
+            case Phase::Refine:
+                if (measured)
+                {
+                    _confirm = measured;
+                    _phase = Phase::Confirm;
+                    _refinementConfirmation = true;
+                }
+                else StartConfirmation();
+                break;
             case Phase::Recover:
                 if (measured)
                 {
@@ -218,86 +252,232 @@ namespace BistroQualitySearch
         const std::optional<Selection>& Winner() const { return _winner; }
 
     private:
-        enum class Phase { Coarse, Graphics, Cpu, Disable, Restore, Confirm, Recover, Done };
+        enum class Phase { Coarse, Graphics, Cpu, Disable, Restore, Confirm, Refine, Recover, Done };
+
+        void OrderPendingPlacements()
+        {
+            if (!_transferCostEstimate) return;
+            const auto cost = [&](const Candidate& candidate)
+            {
+                const auto value = _transferCostEstimate(candidate);
+                return value && std::isfinite(*value) && *value >= 0 ? *value : std::numeric_limits<double>::infinity();
+            };
+            std::stable_sort(_placements.begin() + _placementCursor, _placements.end(),
+                [&](const Candidate& a, const Candidate& b) { return cost(a) < cost(b); });
+        }
+
+        void AppendPlacement(Candidate candidate)
+        {
+            if (_waterAxis && (*_waterAxis >= candidate.Tiers.size() || !candidate.Tiers[*_waterAxis])) candidate.MGPU.Water = {};
+            if (_grassAxis && (*_grassAxis >= candidate.Tiers.size() || !candidate.Tiers[*_grassAxis])) candidate.MGPU.Grass = {};
+            const auto off = [&](const auto& axis) { return axis && (*axis >= candidate.Tiers.size() || !candidate.Tiers[*axis]); };
+            if (off(_scheduledAxes[0])) candidate.MGPU.Sun = {};
+            if (off(_scheduledAxes[1])) for (auto& light : candidate.MGPU.LocalShadows) light.Route = {};
+            if (off(_scheduledAxes[2])) candidate.MGPU.Particles = {};
+            if (!candidate.MGPU.Water.Secondary) candidate.MGPU.Water.Exact = false;
+            if (!candidate.MGPU.Grass.Secondary) candidate.MGPU.Grass.Exact = false;
+            candidate.MGPU.Reflections.Canonicalize();
+            // Every route is compared with primary at exactly the same spatial and temporal quality.
+            auto primary = candidate;
+            primary.MGPU.Water.Secondary = primary.MGPU.Grass.Secondary = false;
+            primary.MGPU.Sun.Secondary = primary.MGPU.Particles.Secondary = false;
+            for (auto& light : primary.MGPU.LocalShadows) light.Route.Secondary = false;
+            primary.MGPU.Reflections.Placement = 0;
+            primary.MGPU.Reflections.SecondaryFaces = {};
+            primary.MGPU.Water.Exact = primary.MGPU.Grass.Exact = false;
+            if (_placementVisited.insert(primary).second) _placements.push_back(std::move(primary));
+            if (_placementVisited.insert(candidate).second) _placements.push_back(std::move(candidate));
+        }
 
         void AddPlacementNeighbors(const Candidate& base)
         {
-            const auto append = [&](Candidate candidate)
-            {
-                if (_waterAxis && (*_waterAxis >= candidate.Tiers.size() || !candidate.Tiers[*_waterAxis])) candidate.MGPU.Water = {};
-                if (_grassAxis && (*_grassAxis >= candidate.Tiers.size() || !candidate.Tiers[*_grassAxis])) candidate.MGPU.Grass = {};
-                const auto off = [&](const auto& axis) { return axis && (*axis >= candidate.Tiers.size() || !candidate.Tiers[*axis]); };
-                if (off(_scheduledAxes[0])) candidate.MGPU.Sun = {};
-                if (off(_scheduledAxes[1])) for (auto& light : candidate.MGPU.LocalShadows) light.Route = {};
-                if (off(_scheduledAxes[2])) candidate.MGPU.Particles = {};
-                if (!candidate.MGPU.Water.Secondary) candidate.MGPU.Water.Exact = false;
-                if (!candidate.MGPU.Grass.Secondary) candidate.MGPU.Grass.Exact = false;
-                candidate.MGPU.Reflections.Canonicalize();
-                // Every route is compared with primary at exactly the same spatial and temporal quality.
-                auto primary = candidate;
-                primary.MGPU.Water.Secondary = primary.MGPU.Grass.Secondary = false;
-                primary.MGPU.Sun.Secondary = primary.MGPU.Particles.Secondary = false;
-                for (auto& light : primary.MGPU.LocalShadows) light.Route.Secondary = false;
-                primary.MGPU.Reflections.Placement = 0;
-                primary.MGPU.Reflections.SecondaryFaces = {};
-                primary.MGPU.Water.Exact = primary.MGPU.Grass.Exact = false;
-                if (_placementVisited.insert(primary).second) _placements.push_back(std::move(primary));
-                if (_placementVisited.insert(candidate).second) _placements.push_back(std::move(candidate));
-            };
+            const auto append = [&](Candidate candidate) { AppendPlacement(std::move(candidate)); };
             append(base);
+            if (_phase == Phase::Refine) return;
             auto together = base;
             together.MGPU.Water.Secondary = together.MGPU.Grass.Secondary = true;
             together.MGPU.Sun.Secondary = together.MGPU.Particles.Secondary = true;
             for (auto& light : together.MGPU.LocalShadows) light.Route.Secondary = true;
+            together.MGPU.Reflections.Placement = 0;
             together.MGPU.Reflections.SecondaryFaces.fill(63);
             append(together);
-            for (int unit = 0; unit != 2; ++unit)
-                for (int route = 0; route != 3; ++route)
-                    for (int hz : {0, 60, 30})
-                    {
-                        auto candidate = base;
-                        (unit ? candidate.MGPU.Grass : candidate.MGPU.Water) = {route != 0, route == 1, hz};
-                        append(std::move(candidate));
-                    }
-            for (size_t unit = 0; unit < base.MGPU.LocalShadows.size() + 2; ++unit)
-                for (int route = 0; route != 3; ++route)
-                    for (int interval : {1, 2})
-                    {
-                        auto candidate = base;
-                        auto& policy = unit == 0 ? candidate.MGPU.Sun : unit == 1 ? candidate.MGPU.Particles :
-                            candidate.MGPU.LocalShadows[unit - 2].Route;
-                        policy = {route != 0, route != 2, interval};
-                        append(std::move(candidate));
-                    }
-            // Whole-probe and face placement, then both distance partitions. Improvements seed the next neighborhood.
-            for (int probe = 0; probe < base.MGPU.Reflections.Count; ++probe)
-                for (unsigned mask : {0u, 63u, 21u, 42u, 1u, 2u, 4u, 8u, 16u, 32u})
+            for (int group = 0; group < 6; ++group)
+            {
+                auto candidate = base;
+                if (group == 0) candidate.MGPU.Water.Secondary = !candidate.MGPU.Water.Secondary;
+                if (group == 1) candidate.MGPU.Grass.Secondary = !candidate.MGPU.Grass.Secondary;
+                if (group == 2) candidate.MGPU.Sun.Secondary = !candidate.MGPU.Sun.Secondary;
+                if (group == 3) candidate.MGPU.Particles.Secondary = !candidate.MGPU.Particles.Secondary;
+                if (group == 4) continue;
+                if (group == 5)
                 {
-                    auto candidate = base;
                     candidate.MGPU.Reflections.Placement = 0;
-                    candidate.MGPU.Reflections.SecondaryFaces[probe] = mask;
-                    append(std::move(candidate));
+                    for (auto& mask : candidate.MGPU.Reflections.SecondaryFaces) mask ^= 63u;
                 }
-            for (int probe = 0; probe < base.MGPU.Reflections.Count; ++probe)
-                for (unsigned face = 0; face < 6; ++face)
+                if (group < 2)
                 {
-                    auto candidate = base;
-                    candidate.MGPU.Reflections.Placement = 0;
-                    candidate.MGPU.Reflections.SecondaryFaces[probe] ^= 1u << face;
-                    append(std::move(candidate));
+                    auto exact = candidate;
+                    (group ? exact.MGPU.Grass : exact.MGPU.Water).Exact = true;
+                    append(std::move(exact));
                 }
+                append(std::move(candidate));
+            }
+            const auto lights = base.MGPU.LocalShadows.size();
+            for (size_t count : {size_t{0}, lights / 4, lights / 2, 3 * lights / 4, lights})
+            {
+                auto candidate = base;
+                SetLocalCount(candidate, count);
+                append(std::move(candidate));
+            }
             for (int placement = 0; placement != 3; ++placement)
             {
                 auto candidate = base;
                 candidate.MGPU.Reflections.Placement = placement;
                 append(std::move(candidate));
             }
+            if (_phase == Phase::Coarse)
+            {
+                AddReflectionQualityNeighbors(base, append);
+                AddTimingQualityNeighbors(base, append);
+            }
+        }
+
+        size_t DetailUnits(const Candidate& base) const
+        { return 10 + base.MGPU.Reflections.Count; }
+
+        static void SetLocalCount(Candidate& candidate, size_t count)
+        {
+            for (size_t index = 0; index < candidate.MGPU.LocalShadows.size(); ++index)
+                candidate.MGPU.LocalShadows[index].Route.Secondary = index < count;
+        }
+
+        void AddDetailedPlacement(const Candidate& base)
+        {
+            // shortcut: coordinate refinement is order-dependent; exhaustive combinations need an offline budget.
+            const size_t units = 5;
+            const auto step = _detailCursor++;
+            const auto unit = step % units;
+            if (step >= 2 * units)
+            {
+                const auto probe = step - 2 * units;
+                for (unsigned mask : {0u, 63u, 21u, 42u, 1u, 2u, 4u, 8u, 16u, 32u})
+                {
+                    auto candidate = base;
+                    candidate.MGPU.Reflections.Placement = 0;
+                    candidate.MGPU.Reflections.SecondaryFaces[probe] = mask;
+                    AppendPlacement(std::move(candidate));
+                }
+                for (unsigned face = 0; face < 6; ++face)
+                {
+                    auto candidate = base;
+                    candidate.MGPU.Reflections.Placement = 0;
+                    candidate.MGPU.Reflections.SecondaryFaces[probe] ^= 1u << face;
+                    AppendPlacement(std::move(candidate));
+                }
+                return;
+            }
+            if (step < units)
+            {
+                if (unit == 4)
+                {
+                    const auto count = static_cast<size_t>(std::count_if(base.MGPU.LocalShadows.begin(), base.MGPU.LocalShadows.end(),
+                        [](const auto& light) { return light.Route.Secondary; }));
+                    for (size_t next : {count > _localCountStep ? count - _localCountStep : 0,
+                        (std::min)(count + _localCountStep, base.MGPU.LocalShadows.size())})
+                    {
+                        auto candidate = base;
+                        SetLocalCount(candidate, next);
+                        AppendPlacement(std::move(candidate));
+                    }
+                    if (_localCountStep > 1)
+                    {
+                        _localCountStep = (_localCountStep + 1) / 2;
+                        --_detailCursor;
+                    }
+                    return;
+                }
+                auto candidate = base;
+                if (unit < 2)
+                {
+                    auto& route = unit ? candidate.MGPU.Grass : candidate.MGPU.Water;
+                    route.Secondary = !route.Secondary;
+                    auto exact = candidate;
+                    (unit ? exact.MGPU.Grass : exact.MGPU.Water).Exact = true;
+                    AppendPlacement(std::move(exact));
+                }
+                else
+                {
+                    auto& route = unit == 2 ? candidate.MGPU.Sun : candidate.MGPU.Particles;
+                    route.Secondary = !route.Secondary;
+                }
+                AppendPlacement(std::move(candidate));
+                return;
+            }
+            if (unit < 2)
+            {
+                for (int hz : {0, 60, 30})
+                    for (bool exact : {false, true})
+                    {
+                        auto candidate = base;
+                        auto& route = unit ? candidate.MGPU.Grass : candidate.MGPU.Water;
+                        route.UpdateHz = hz;
+                        route.Exact = exact;
+                        AppendPlacement(std::move(candidate));
+                    }
+            }
+            else
+            {
+                for (int interval : {1, 2})
+                    for (bool exact : {false, true})
+                    {
+                        auto candidate = base;
+                        if (unit == 4)
+                        {
+                            for (auto& light : candidate.MGPU.LocalShadows)
+                                if (light.Route.Secondary) { light.Route.Interval = interval; light.Route.Exact = exact; }
+                        }
+                        else
+                        {
+                            auto& changed = unit == 2 ? candidate.MGPU.Sun : candidate.MGPU.Particles;
+                            changed.Interval = interval;
+                            changed.Exact = exact;
+                        }
+                        AppendPlacement(std::move(candidate));
+                    }
+            }
+        }
+
+        template<class Emit>
+        void AddTimingQualityNeighbors(const Candidate& base, Emit&& append) const
+        {
+            for (int unit = 0; unit < 2; ++unit)
+                for (int hz : {0, 60, 30})
+                {
+                    auto candidate = base;
+                    (unit ? candidate.MGPU.Grass : candidate.MGPU.Water).UpdateHz = hz;
+                    append(std::move(candidate));
+                }
+            for (int unit = 0; unit < 3; ++unit)
+                for (int interval : {1, 2})
+                {
+                    auto candidate = base;
+                    if (unit == 0) candidate.MGPU.Sun.Interval = interval;
+                    if (unit == 1) candidate.MGPU.Particles.Interval = interval;
+                    if (unit == 2) for (auto& light : candidate.MGPU.LocalShadows) light.Route.Interval = interval;
+                    append(std::move(candidate));
+                }
+        }
+
+        template<class Emit>
+        void AddReflectionQualityNeighbors(const Candidate& base, Emit&& append) const
+        {
             const auto vary = [&](auto member, const auto& values)
             {
                 for (int value : values)
                 {
                     auto candidate = base;
                     candidate.MGPU.Reflections.*member = value;
+                    candidate.MGPU.Reflections.Canonicalize();
                     append(std::move(candidate));
                 }
             };
@@ -378,14 +558,7 @@ namespace BistroQualitySearch
 
         void RequestOnce(const Candidate& candidate, bool requireFull)
         {
-            auto key = candidate;
-            if (key.MGPU.Enabled)
-            {
-                key.MGPU.Water = {}; key.MGPU.Grass = {}; key.MGPU.Sun = {}; key.MGPU.Particles = {};
-                for (auto& light : key.MGPU.LocalShadows) light.Route = {};
-                key.MGPU.Reflections = {};
-            }
-            if (_visited.insert(key).second)
+            if (_visited.insert(candidate).second)
             {
                 _request = Request{candidate, requireFull};
                 _explorePlacement = candidate.MGPU.Enabled;
@@ -531,6 +704,11 @@ namespace BistroQualitySearch
             _cursor = 0;
             _batchBest.reset();
             const auto& candidate = _base->Settings;
+            if (candidate.MGPU.Enabled && _phase != Phase::Cpu)
+            {
+                AddReflectionQualityNeighbors(candidate, [&](Candidate value) { _batch.push_back(std::move(value)); });
+                AddTimingQualityNeighbors(candidate, [&](Candidate value) { _batch.push_back(std::move(value)); });
+            }
             std::vector<size_t> raise, lower;
             for (size_t i = 0; i < _axes.size(); ++i)
             {
@@ -669,6 +847,8 @@ namespace BistroQualitySearch
                 _phase = Phase::Restore;
                 BuildNeighborhood();
             }
+            else if (_coarse.MGPU.Enabled && BeginRefinement(Selection{_coarse, 0, false, false}))
+                _confirmingFallback = true;
             else _phase = Phase::Done;
         }
 
@@ -734,12 +914,30 @@ namespace BistroQualitySearch
                 else AdvanceCoarse(std::nullopt);
                 return;
             }
-            _phase = Phase::Confirm;
+            if (!BeginRefinement(*_confirm)) _phase = Phase::Confirm;
+        }
+
+        bool BeginRefinement(const Selection& selection)
+        {
+            if (!selection.Settings.MGPU.Enabled) return false;
+            auto key = selection.Settings;
+            key.MGPU.Water.Secondary = key.MGPU.Grass.Secondary = false;
+            key.MGPU.Water.Exact = key.MGPU.Grass.Exact = false;
+            key.MGPU.Sun.Secondary = key.MGPU.Particles.Secondary = false;
+            for (auto& light : key.MGPU.LocalShadows) light.Route.Secondary = false;
+            key.MGPU.Reflections.Placement = 0;
+            key.MGPU.Reflections.SecondaryFaces = {};
+            if (!_refined.insert(key).second) return false;
+            _confirm = selection;
+            _refinementOrigin = selection;
+            _phase = Phase::Refine;
+            return true;
         }
 
         void SubmitConfirmation(const std::optional<Selection>& measured)
         {
             const auto first = std::exchange(_confirm, std::nullopt);
+            const bool refined = std::exchange(_refinementConfirmation, false);
             if (measured)
             {
                 auto confirmed = *measured;
@@ -750,6 +948,11 @@ namespace BistroQualitySearch
                     (!confirmed.Settings.MGPU.Enabled || confirmed.Stable);
                 if (confirmed.TargetReached)
                 {
+                    if (refined && Better(confirmed, *_refinementOrigin))
+                    {
+                        StartOptimization(confirmed, _fromOff);
+                        return;
+                    }
                     _winner = confirmed;
                     _phase = Phase::Done;
                     return;
@@ -786,6 +989,12 @@ namespace BistroQualitySearch
         std::array<std::optional<size_t>, 3> _scheduledAxes;
         bool _explorePlacement = false;
         size_t _placementCursor = 0;
+        size_t _detailCursor = 0;
+        size_t _localCountStep = 1;
+        bool _refinementConfirmation = false;
+        std::set<Candidate> _refined;
+        std::optional<Selection> _refinementOrigin;
+        std::function<std::optional<double>(const Candidate&)> _transferCostEstimate;
         std::vector<Candidate> _placements;
         std::set<Candidate> _placementVisited;
         std::optional<Request> _placementRequest;

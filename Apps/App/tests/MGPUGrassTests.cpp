@@ -3,6 +3,7 @@
 #include "GrassMGPURouteChecks.h"
 #include "GrassShadowRetryChecks.h"
 #include "Rendering/Grass/BistroGrassShadowReplica.h"
+#include "App.Base/Rendering/CrossAdapterWork.h"
 #include <d3d12sdklayers.h>
 #include <iostream>
 #include <string_view>
@@ -58,10 +59,14 @@ int main(int argc, char** argv)
     try
     {
         const bool gbv = argc == 2 && std::string_view(argv[1]) == "--gpu-validation";
-        if (argc != 1 && !gbv) throw std::invalid_argument("Expected only --gpu-validation");
+        const bool calibration = argc == 2 && std::string_view(argv[1]) == "--calibration";
+        if (argc != 1 && !gbv && !calibration) throw std::invalid_argument("Expected --gpu-validation or --calibration");
         ComPtr<ID3D12Debug> debug;
-        ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
-        debug->EnableDebugLayer();
+        if (!calibration)
+        {
+            ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
+            debug->EnableDebugLayer();
+        }
         if (gbv)
         {
             ComPtr<ID3D12Debug1> validation;
@@ -86,6 +91,50 @@ int main(int argc, char** argv)
         common.CameraView = Matrix::Identity;
         common.ResetHistory = false;
         RenderMGPURuntime runtime({&primary, &secondary, &copyA, &copyB});
+        if (calibration)
+        {
+            CrossAdapterWork work(runtime);
+            std::vector<RenderMGPURuntime::TransferCalibration> samples;
+            std::cout << "producer_luid,consumer_luid,bytes,cold_ms,min_ms,median_ms,p95_ms\n";
+            for (const bool reverse : {false, true})
+                for (const UINT64 bytes : {UINT64{4096}, UINT64{65536}, UINT64{262144}, UINT64{1048576},
+                    UINT64{8388608}, UINT64{41943040}, UINT64{197918720}})
+                {
+                    auto& from = reverse ? secondary : primary;
+                    auto& to = reverse ? primary : secondary;
+                    const auto sample = work.Calibrate(from, to, bytes);
+                    if (!(sample.ColdMs > 0 && sample.MinimumMs > 0 && sample.MinimumMs <= sample.MedianMs &&
+                        sample.MedianMs <= sample.P95Ms)) throw std::runtime_error("Invalid calibration statistics");
+                    samples.push_back(sample);
+                    std::cout << from.GetAdapterLuid().LowPart << ',' << to.GetAdapterLuid().LowPart << ',' << bytes << ','
+                        << sample.ColdMs << ',' << sample.MinimumMs << ',' << sample.MedianMs << ',' << sample.P95Ms << '\n';
+                }
+            runtime.SetTransferCalibration(samples);
+            for (const auto& sample : samples)
+            {
+                runtime.ResetTransferLoad();
+                runtime.ObserveSynchronousTransfer(sample.Producer, sample.Consumer, sample.Bytes);
+                const auto load = runtime.GetTransferLoad();
+                if (load.Transfers != 1 || load.UnknownTransfers ||
+                    std::abs(load.OptimisticMilliseconds - sample.MinimumMs) > 0.000001)
+                    throw std::runtime_error("Directional calibration endpoint estimate mismatch");
+            }
+            runtime.ResetTransferLoad();
+            runtime.ObserveSynchronousTransfer(samples[0].Producer, samples[0].Consumer, 4);
+            runtime.ObserveSynchronousTransfer(samples[0].Producer, samples[0].Consumer, samples[6].Bytes + 4);
+            if (runtime.GetTransferLoad().UnknownTransfers != 2)
+                throw std::runtime_error("Calibration extrapolated outside sampled sizes");
+            auto invalid = samples;
+            invalid[0].MedianMs = 0;
+            bool rejected = false;
+            try { runtime.SetTransferCalibration(invalid); }
+            catch (const std::invalid_argument&) { rejected = true; }
+            if (!rejected) throw std::runtime_error("Invalid calibration curve was accepted");
+            runtime.Shutdown();
+            GDX12ShaderCompiler::Shutdown();
+            std::cout << "Transfer calibration contents, both directions, statistics and sampled range checks passed\n";
+            return 0;
+        }
 #ifdef _DEBUG
         CheckNativeGrassShadowRetry(primary, secondary, runtime);
         std::cout << "G2 retry passed: native no-record refusal, same PointSource slot and masked depth.\n";
