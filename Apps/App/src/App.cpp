@@ -185,6 +185,7 @@ namespace
                     });
                     std::sort(pair.LocalShadows.begin(), pair.LocalShadows.end());
                     std::optional<size_t> waterAxis = _qualityTechniques.size(), grassAxis = _qualityTechniques.size();
+                    std::optional<size_t> reflectionAxis;
                     std::array<std::optional<size_t>, 3> scheduledAxes{};
                     auto axes = BistroQuality::SearchAxes(_qualityTechniques);
                     for (size_t i = 0; i < _qualityTechniques.size(); ++i)
@@ -195,10 +196,14 @@ namespace
                         if (name == "Sun shadows") scheduledAxes[0] = i;
                         if (name == "Local shadows") scheduledAxes[1] = i;
                         if (name == "Particles") scheduledAxes[2] = i;
-                        if (pair.Enabled && name == "Reflection probes") axes[i].MinTier = axes[i].MaxTier = 1;
+                        if (pair.Enabled && name == "Reflection probes")
+                        {
+                            axes[i].MinTier = axes[i].MaxTier = 1;
+                            reflectionAxis = i;
+                        }
                     }
                     _qualitySearch.emplace(*profile, std::move(axes), width, height,
-                        pair, waterAxis, grassAxis, scheduledAxes);
+                        pair, waterAxis, grassAxis, scheduledAxes, reflectionAxis);
                 }
                 Engine::UI::SuspendSettings(true);
                 _qualityActive = true;

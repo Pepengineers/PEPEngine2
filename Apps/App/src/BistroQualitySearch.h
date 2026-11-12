@@ -52,11 +52,13 @@ namespace BistroQualitySearch
     public:
         Search(Profile profile, std::vector<Axis> axes, int width, int height, MGPUSettings mgpu = {},
             std::optional<size_t> waterAxis = {}, std::optional<size_t> grassAxis = {},
-            std::array<std::optional<size_t>, 3> scheduledAxes = {})
+            std::array<std::optional<size_t>, 3> scheduledAxes = {}, std::optional<size_t> reflectionAxis = {})
             : _profile(profile), _axes(std::move(axes)), _width(width), _height(height),
-              _waterAxis(waterAxis), _grassAxis(grassAxis), _scheduledAxes(scheduledAxes)
+              _waterAxis(waterAxis), _grassAxis(grassAxis), _reflectionAxis(reflectionAxis), _scheduledAxes(scheduledAxes)
         {
             if (width <= 0 || height <= 0) throw std::invalid_argument("Invalid quality search dimensions");
+            if (_reflectionAxis && *_reflectionAxis >= _axes.size())
+                throw std::invalid_argument("Invalid reflection quality axis");
             if (mgpu.Enabled && (!mgpu.Primary || !mgpu.Secondary || mgpu.Primary == mgpu.Secondary))
                 throw std::invalid_argument("MGPU quality search requires two distinct fixed adapters");
             for (const auto& axis : _axes)
@@ -607,6 +609,7 @@ namespace BistroQualitySearch
             {
                 const auto tier = candidate.Tiers[i];
                 if (!tier) continue;
+                if (candidate.MGPU.Enabled && _reflectionAxis == i && !candidate.MGPU.Reflections.Count) continue;
                 ++rank[0];
                 const bool cpu = _profile == Profile::Quality && _axes[i].Cpu;
                 ++rank[(cpu ? 9 : 5) - tier];
@@ -985,7 +988,7 @@ namespace BistroQualitySearch
         std::vector<Candidate> _batch;
         std::vector<Selection> _finalists, _offOptions, _fallbackOptions;
         std::optional<Request> _request;
-        std::optional<size_t> _waterAxis, _grassAxis;
+        std::optional<size_t> _waterAxis, _grassAxis, _reflectionAxis;
         std::array<std::optional<size_t>, 3> _scheduledAxes;
         bool _explorePlacement = false;
         size_t _placementCursor = 0;
