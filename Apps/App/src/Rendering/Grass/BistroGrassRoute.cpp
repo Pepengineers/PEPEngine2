@@ -69,6 +69,7 @@ bool BistroGrassRoute::PrepareFrame(RenderPipelineContext& context, BistroGrassG
     const auto frame = context.Runtime.GetFrameSubmissionId();
     const auto sequence = static_cast<std::uint64_t>(frame);
     const auto now = CrossAdapterGrass::Clock::now();
+    _selectedAt = now;
     if (visible || (_controller && _controller->GetState() != State::Primary))
         grass.CollectScene(context.Common.GameTimer ? context.Common.GameTimer->DeltaTime() : 0);
 
@@ -90,6 +91,8 @@ bool BistroGrassRoute::PrepareFrame(RenderPipelineContext& context, BistroGrassG
             _controller->Capture(std::move(input));
             _controller->Pump(controls, now);
             const auto inputStatus = _controller->GetInputStatus();
+            _diagnostics.ExportBytes = inputStatus.ExportBytes;
+            _diagnostics.ImportBytes = inputStatus.ImportBytes;
             _diagnostics.PendingSeconds = inputStatus.PendingSeconds;
             _diagnostics.MissingSeconds = inputStatus.MissingSeconds;
             if (_controller->GetState() == State::ResetRequired)

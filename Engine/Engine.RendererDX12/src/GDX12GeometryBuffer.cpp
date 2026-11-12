@@ -23,6 +23,7 @@ void GDX12GeometryBuffer::Clear()
     _meshCache.clear();
     ++_meshCacheRevision;
     _freeSkinRanges.clear();
+    _skinnedRanges.clear();
     _freeIndexRanges.clear();
     _vertexBuffer.reset();
     _indexBuffer.reset();
@@ -88,6 +89,7 @@ UINT GDX12GeometryBuffer::AllocateSkinnedVertices(const UINT count)
         const UINT remaining = it->second - count;
         _freeSkinRanges.erase(it);
         if (remaining) _freeSkinRanges.emplace(offset + count, remaining);
+        _skinnedRanges.emplace(offset, count);
         return offset;
     }
     if (count > UINT_MAX / VERTEX_SIZE - _totalVertices)
@@ -95,12 +97,14 @@ UINT GDX12GeometryBuffer::AllocateSkinnedVertices(const UINT count)
     const UINT offset = _totalVertices;
     _vertexDataCPU.resize(_totalVertices + count);
     ResizeVertexBuffer(_totalVertices + count);
+    _skinnedRanges.emplace(offset, count);
     return offset;
 }
 
 void GDX12GeometryBuffer::ReleaseSkinnedVertices(UINT offset, UINT count)
 {
     if (!count) return;
+    _skinnedRanges.erase(offset);
     auto next = _freeSkinRanges.lower_bound(offset);
     if (next != _freeSkinRanges.begin())
     {

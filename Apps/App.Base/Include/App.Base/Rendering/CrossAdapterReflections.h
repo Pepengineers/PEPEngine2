@@ -18,7 +18,7 @@ public:
     bool HasSecondaryWork() const;
     using PrepareApplication = std::function<std::vector<CrossAdapterWork::Use>(GDX12DeviceResources&, GDX12ReflectionProbePass&, CrossAdapterWork&, UINT64&)>;
     using DrawApplication = std::function<void(GDX12CommandList&, GDX12ReflectionProbePass&, UINT)>;
-    using ApplicationInputs = std::function<std::vector<std::shared_ptr<GDX12Resource>>() >;
+    using ApplicationInputs = std::function<std::vector<CrossAdapterWork::Use>(CrossAdapterWork&)>;
     void SetApplication(ApplicationInputs inputs, PrepareApplication prepare, DrawApplication draw)
     { _applicationInputs = std::move(inputs); _prepareApplication = std::move(prepare); _drawApplication = std::move(draw); }
     struct Diagnostics { UINT64 SceneBytes = 0, ResultBytes = 0; double WaitMs = 0; };
@@ -29,6 +29,7 @@ private:
     {
         std::shared_ptr<GDX12TextureResource> Source;
         std::unique_ptr<GDX12Texture> Texture;
+        CrossAdapterWork::Channel RefreshChannel;
     };
     GDX12Texture* MirrorTexture(GDX12Texture* source, bool material, bool refresh);
     void PrepareScene();
@@ -45,9 +46,11 @@ private:
     std::unique_ptr<GDX12DeviceResources> _secondary;
     std::unique_ptr<GDX12ReflectionProbePass> _capture;
     CrossAdapterWork _work;
-    CrossAdapterWork::Channel _sceneChannel, _resultChannel;
+    CrossAdapterWork::Channel _sceneChannel, _resultChannel, _publishedChannel;
     std::map<GDX12Texture*, TextureMirror> _textures;
     View _vertices, _indices;
+    std::weak_ptr<GDX12Resource> _vertexSource, _indexSource;
+    uint64_t _geometryRevision = 0;
     UINT64 _sceneBytes = 0, _resultBytes = 0;
     PrepareApplication _prepareApplication;
     DrawApplication _drawApplication;

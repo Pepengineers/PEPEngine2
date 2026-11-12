@@ -4,6 +4,7 @@
 #include "App.Base/Rendering/RenderMGPURuntime.h"
 #include "Engine.RendererDX12/GDX12SnapshotTransport.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
+#include <chrono>
 
 struct ParticleMGPUControls
 {
@@ -25,6 +26,7 @@ public:
     bool PrepareFrame(RenderPipelineCommonData& common);
     void Configure(GDX12RenderGraph& graph, RenderPipelineBindings& bindings, IRenderPassLink* depth);
     void ResetWorld();
+    void SetInteractionVersion(GDX12Submission::TransferVersion version) { _interactionVersion = version; }
     struct Diagnostics
     {
         bool Requested = false, Secondary = false, Exact = true, Ready = false, OverAge = false;
@@ -35,9 +37,18 @@ public:
         GDX12Submission::CompletionPoint Producer, Imported;
         std::string Fallback;
     };
-    Diagnostics GetDiagnostics() const { auto result = _diagnostics; result.WaitMs = _work.WaitMilliseconds; return result; }
+    Diagnostics GetDiagnostics() const
+    {
+        auto result = _diagnostics;
+        result.WaitMs = _work.WaitMilliseconds;
+        if (result.Ready)
+            result.AgeMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - _frameStarted).count();
+        result.OverAge = result.AgeMs > _controls.MaxAgeMs;
+        return result;
+    }
 
 private:
+    GDX12Submission::TransferVersion _interactionVersion{};
     struct Input;
     using Channel = CrossAdapterWork::Channel;
     struct History;
@@ -62,6 +73,7 @@ private:
     ParticleMGPUControls _controls;
     bool _active = false, _ownsSecondary = false, _initialized = false, _publishPending = false;
     double _completedSourceTime = 0;
+    std::chrono::steady_clock::time_point _frameStarted;
     std::vector<std::shared_ptr<Input>> _inputs;
     std::vector<std::shared_ptr<History>> _history;
     std::vector<GDX12ParticleEmitter> _requested;

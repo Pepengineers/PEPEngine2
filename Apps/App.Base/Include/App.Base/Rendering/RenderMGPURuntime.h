@@ -27,6 +27,7 @@ public:
     RenderMGPURuntime(const RenderMGPURuntime&) = delete;
     RenderMGPURuntime& operator=(const RenderMGPURuntime&) = delete;
 
+    GDX12Submission::ResourceIdentity IdentifyResource(const std::shared_ptr<GDX12Resource>& resource, GDX12Device& device);
     GDX12Submission::ResourceId NewResourceId();
     GDX12Submission::AllocationId NewAllocationId();
     GDX12Submission::TransferId NewTransferId();
@@ -65,5 +66,7 @@ private:
     bool _submitting = false;
     bool _stopped = false;
     std::vector<Bank> _banks;
+    struct KnownResource { std::weak_ptr<GDX12Resource> Native; GDX12Submission::ResourceIdentity Identity; };
+    std::vector<KnownResource> _resources;
     GDX12RenderGraph::PlanExecutor _executor;
 };

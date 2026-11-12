@@ -18,7 +18,7 @@ public:
         std::vector<GDX12WindInstance> Wind;
         GDX12GrassWindControls Controls;
     };
-    std::optional<ShadowScene> CaptureShadowScene(const GDX12DeviceResources& resources) const;
+    std::optional<ShadowScene> CaptureShadowScene(const GDX12DeviceResources& resources, bool shadowCastersOnly = true) const;
     void CollectScene(float deltaSeconds);
     GDX12GrassFieldInputQueue::Tick CaptureFieldInputs(uint64_t sequence, uint64_t resetRevision);
     void PrepareFrame(GDX12DeviceResources&, const RenderPipelineCommonData&,

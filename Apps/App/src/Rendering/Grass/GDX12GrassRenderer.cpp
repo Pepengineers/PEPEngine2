@@ -545,7 +545,7 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
     const auto& state = _grass.at(id);
     const auto& s = state.Source;
     if ((stage == Stage::Shadow && !s.CastShadows) || (stage == Stage::Capture && !s.CaptureReflections)) return;
-    if (stage == Stage::Capture && (!view.CaptureLighting || !view.CameraConstants))
+    if (stage == Stage::Capture && (!view.CaptureLighting || !view.CameraConstants || !view.CaptureLighting->LocalLights))
         throw std::invalid_argument("Grass capture requires lighting and camera");
     XMFLOAT4X4 clip;
     XMStoreFloat4x4(&clip, view.ViewProjection.Transpose());
@@ -828,15 +828,15 @@ void GDX12GrassRenderer::PublishPrimitives(GDX12RenderPrimitiveRegistry& registr
 }
 
 std::optional<std::vector<GDX12GrassRenderer::ShadowPatch>> GDX12GrassRenderer::FreezeShadowPatches(
-    const GDX12RenderPrimitiveRegistry& registry, const IRenderGeometrySource& source) const
+    const GDX12RenderPrimitiveRegistry& registry, const IRenderGeometrySource& source, bool shadowCastersOnly) const
 {
     std::vector<ShadowPatch> patches;
     for (const auto id : _drawOrder)
     {
         const auto& state = _grass.at(id);
-        if (!state.Source.CastShadows) continue;
+        if (shadowCastersOnly && !state.Source.CastShadows) continue;
         const auto* primitive = registry.Get(state.Primitive);
-        if (!primitive || primitive->Source != &source || !primitive->CastsShadows ||
+        if (!primitive || primitive->Source != &source || (shadowCastersOnly && !primitive->CastsShadows) ||
             primitive->MaterialIndex != state.Source.MaterialIndex || primitive->MaterialRevision != state.Source.MaterialRevision)
             return {};
         if (!primitive->Visible) continue;

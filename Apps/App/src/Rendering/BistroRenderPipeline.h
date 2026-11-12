@@ -31,7 +31,7 @@ public:
     void BuildGraph(GDX12RenderGraph&, const RenderPipelineGraphInputs&) override;
     void Resize(RenderPipelineContext&) override;
     const RenderPipelineBindings& GetBindings() const override;
-    std::array<BistroQualitySearch::TechniqueMeasurement, 2> GetQualityMeasurements() const;
+    std::vector<BistroQualitySearch::TechniqueMeasurement> GetQualityMeasurements() const;
 
 private:
     friend class BistroRenderGraphTests;

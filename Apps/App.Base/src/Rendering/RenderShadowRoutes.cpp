@@ -106,7 +106,6 @@ void RenderShadowRoutes::PrepareFrame(RenderModule& render)
     _resolveApplication = {};
     for (const auto& route : _routes) route->Trace.reset();
     _selection = _transfer.ReadSelection(_local.DescribePreparedShadows({}));
-    _views.erase(std::remove_if(_views.begin(), _views.end(), [](const auto& entry) { return entry.Native.expired(); }), _views.end());
 }
 
 void RenderShadowRoutes::Configure(Graph& graph, GDX12RenderPass& node, GDX12ShadowAtlas atlas,
@@ -158,13 +157,8 @@ const Raster::SubmissionTrace* RenderShadowRoutes::GetTrace(GDX12ShadowAtlas atl
 
 Replica::ResourceView RenderShadowRoutes::IdentifyPrimaryView(std::shared_ptr<GDX12Resource> native)
 {
-    const auto found = std::find_if(_views.begin(), _views.end(), [&](const auto& entry)
-        { return entry.Native.lock() == native; });
-    if (found != _views.end()) return { std::move(native), found->Identity, {}, {} };
-    const ResourceIdentity identity{ _runtime.NewResourceId(), _primary.Device->GetSubmissionAdapterId(),
-        _runtime.NewEpoch(), TransferId::Invalid, _runtime.NewAllocationId() };
-    _views.push_back({ native, identity });
-    return { std::move(native), identity, {}, {} };
+    const auto identity = _runtime.IdentifyResource(native, *_primary.Device);
+    return {std::move(native), identity, {}, {}};
 }
 
 std::optional<std::vector<Graph::LegacyExternalView>> RenderShadowRoutes::PrepareBoundary(GDX12ShadowAtlas atlas)

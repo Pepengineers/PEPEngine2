@@ -15,7 +15,7 @@ public:
         double AcceptedDebt = 0, InFlight = 0, Unrepresented = 0, ResetSuperseded = 0;
         double SnapshotAgeSeconds = -1, DisplaySimulationLag = 0;
         double DisplayedSimulationTime = -1, SourceAgeSeconds = -1;
-        std::uint64_t FirstMissingInput = 0, SolverInvocations = 0;
+        std::uint64_t FirstMissingInput = 0, SolverInvocations = 0, ExportBytes = 0, ImportBytes = 0;
         std::uint64_t SkippedPublications = 0, DiscardedReady = 0, ExactDeferrals = 0;
     };
 

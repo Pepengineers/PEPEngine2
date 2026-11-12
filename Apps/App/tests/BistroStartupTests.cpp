@@ -1,5 +1,6 @@
 #include <cstdint>
 #include "App.Base/App.h"
+#include "App.Base/Rendering/CrossAdapterParticles.h"
 // Exercise the real bootstrap: the other scene tests register their own modules.
 #define WinMain BistroEntryPointForTest
 #include "../src/App.cpp"
@@ -74,12 +75,23 @@ static void CheckPresetRegistry()
     candidate.MGPU.Secondary = 202;
     candidate.MGPU.Water = {true, false, 30};
     candidate.MGPU.Grass = {false, false, 60};
+    candidate.MGPU.Sun = {true, false, 2};
+    candidate.MGPU.Particles = {true, true, 2};
+    candidate.MGPU.LocalShadows = {{17, {true, false, 2}}, {42, {false, true, 1}}};
+    candidate.MGPU.Reflections = {3, 128, 32, 10, 3, 1, 0, {21, 63, 0, 0}};
     const auto policy = BistroQuality::ProfilePatch(techniques, candidate, BistroQualitySearch::Profile::Quality);
+    BistroQuality::RegisterProfileShadowVariables(policy);
     CheckQualityConfig(console.ApplyPatch(policy, &previous));
     if (!BistroQuality::MGPUProfile.GetValue() || BistroQuality::SecondaryLuid.GetValue() != 202 ||
         !GetFluidControls().MultiGPU || GetFluidControls().MultiGPUExact || GetFluidControls().UpdateHz != 30 ||
         GetGrassMGPUControls().Enabled || GetGrassWindControls().UpdateHz != 60)
         throw std::runtime_error("MGPU profile did not apply independent placement and cadence");
+    if (!ReadShadowUpdatePolicy().Secondary || !ReadShadowUpdatePolicy().Latest ||
+        ReadShadowUpdatePolicy().Interval != 2 || !ReadShadowUpdatePolicy(17).Secondary ||
+        ReadShadowUpdatePolicy(42).Secondary || !GetParticleMGPUControls().Secondary ||
+        GetReflectionSettings().Policy.Update != GDX12ReflectionSchedule::Schedule::OneFace ||
+        GetReflectionSettings().Policy.FullUpdateDistanceMetres != 10)
+        throw std::runtime_error("MGPU profile lost independent shadow, particle or probe policy");
     const auto saved = BistroQuality::SavedProfilePatch(policy, candidate);
     const auto path = std::filesystem::temp_directory_path() / ("BistroMGPUProfile-" + std::to_string(GetCurrentProcessId()) + ".ini");
     CheckQualityConfig(console.SavePatchIni(path, saved));

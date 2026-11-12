@@ -98,7 +98,7 @@ public:
     std::optional<Reader> AcquireReader(const std::shared_ptr<const ImportedField>& field);
     void BindReader(const Reader& reader, CompletionPoint secondaryTail);
     void CancelReader(const Reader& reader);
-    // Close the demand after both atlas admission outcomes, before the next runtime Poll.
+    // Close the demand after both atlas admission outcomes; submitted reader fences remain protected.
     void FinishField();
 
 private:

@@ -5,6 +5,9 @@
 #include <cstdint>
 #include <limits>
 #include <tuple>
+#include <array>
+#include <vector>
+#include <string>
 
 namespace BistroQualitySearch
 {
@@ -20,12 +23,60 @@ namespace BistroQualitySearch
         bool operator<(const RouteSettings& other) const { return Key() < other.Key(); }
     };
 
+    struct ScheduledRoute
+    {
+        bool Secondary = false, Exact = true;
+        int Interval = 1;
+        auto Key() const { return std::tie(Secondary, Exact, Interval); }
+        bool operator==(const ScheduledRoute& other) const { return Key() == other.Key(); }
+        bool operator<(const ScheduledRoute& other) const { return Key() < other.Key(); }
+    };
+
+    struct LocalShadowRoute
+    {
+        std::uint32_t Entity = 0;
+        ScheduledRoute Route;
+        auto Key() const { return std::tie(Entity, Route); }
+        bool operator==(const LocalShadowRoute& other) const { return Key() == other.Key(); }
+        bool operator<(const LocalShadowRoute& other) const { return Key() < other.Key(); }
+    };
+
+    struct ReflectionSearchSettings
+    {
+        int Count = 4, Resolution = 256, FilterSamples = 64;
+        int DistanceMetres = -1, Schedule = 0, Implementation = 0, Placement = 0;
+        std::array<unsigned, 4> SecondaryFaces{};
+        auto Key() const { return std::tie(Count, Resolution, FilterSamples, DistanceMetres, Schedule,
+            Implementation, Placement, SecondaryFaces); }
+        void Canonicalize()
+        {
+            if (!Count) { *this = {}; Count = 0; return; }
+            for (size_t i = static_cast<size_t>(Count); i < SecondaryFaces.size(); ++i) SecondaryFaces[i] = 0;
+            if (Count == 1) { if (Schedule == 1) Schedule = 0; if (Schedule == 3) Schedule = 2; }
+            if (DistanceMetres == -1)
+            {
+                Schedule = 0;
+                if (Placement) for (int i = 0; i < Count; ++i) SecondaryFaces[i] = Placement == 2 ? 63u : 0u;
+                Placement = 0;
+            }
+            if (Placement) SecondaryFaces = {};
+        }
+        auto Quality() const { return std::make_tuple(Count, Resolution, FilterSamples,
+            DistanceMetres < 0 ? 100000 : DistanceMetres, -Schedule); }
+        bool operator==(const ReflectionSearchSettings& other) const { return Key() == other.Key(); }
+        bool operator<(const ReflectionSearchSettings& other) const { return Key() < other.Key(); }
+    };
+
     struct MGPUSettings
     {
         bool Enabled = false;
         std::uint64_t Primary = 0, Secondary = 0;
         RouteSettings Water, Grass;
-        auto Key() const { return std::tie(Enabled, Primary, Secondary, Water, Grass); }
+        ScheduledRoute Sun, Particles;
+        std::vector<LocalShadowRoute> LocalShadows;
+        ReflectionSearchSettings Reflections;
+        auto Key() const { return std::tie(Enabled, Primary, Secondary, Water, Grass, Sun, Particles,
+            LocalShadows, Reflections); }
         bool operator==(const MGPUSettings& other) const { return Key() == other.Key(); }
         bool operator<(const MGPUSettings& other) const { return Key() < other.Key(); }
     };
@@ -40,6 +91,9 @@ namespace BistroQualitySearch
         bool Active = false, RequestedSecondary = false, EffectiveSecondary = false, Ready = false;
         double SourceAgeMs = 0, SimulationDebtSeconds = 0, MissingSeconds = 0;
         std::uint64_t SourceSequence = 0;
+        std::string Name;
+        double FullSourceAgeMs = 0, WaitMs = 0;
+        std::uint64_t ExportBytes = 0, ImportBytes = 0;
     };
 
     struct FreshnessMeasurements

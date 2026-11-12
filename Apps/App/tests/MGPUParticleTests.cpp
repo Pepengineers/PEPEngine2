@@ -179,6 +179,7 @@ Result Run(GDX12DeviceResources& resources, GDX12Device& secondary, RenderMGPURu
         if (changingInputs) cameraData.InvViewProj._43 = 0.01f * frame;
         camera.CopyData(0, cameraData);
         Check(route.PrepareFrame(common), "Scheduled particle route was inactive");
+        const auto preparedAt = std::chrono::steady_clock::now();
         resources.ParticleSimulation->SetInteractionField({&interaction.GetResource(), interaction.GetSRV()->GPUHandle,
             XMFLOAT4(0, 0, 2, 2), 2, -10});
         for (UINT cell = 0; cell < 4; ++cell)
@@ -193,7 +194,10 @@ Result Run(GDX12DeviceResources& resources, GDX12Device& secondary, RenderMGPURu
             { return bindings.LegacyReplacements.front().Submit(boundary, prefix); });
         queue.ExecuteCommandList(commands);
         queue.Flush();
+        const auto finishedAt = std::chrono::steady_clock::now();
         const auto status = route.GetDiagnostics();
+        Check(status.AgeMs >= std::chrono::duration<double, std::milli>(finishedAt - preparedAt).count(),
+            "Particle source age omitted frame execution and transfer time");
         Check(std::abs(status.SourceTime - sourceTime) < 1e-6, "Particle source age stopped advancing while paused");
         Check(status.Debt <= 0.25 + 3 * 0.025 + 1e-6, "Particle cadence accumulated unbounded time debt");
         const auto displayed = resources.ParticleSimulation->CaptureCheckpoint();
@@ -220,6 +224,9 @@ Result Run(GDX12DeviceResources& resources, GDX12Device& secondary, RenderMGPURu
         previousDisplayed = std::move(particles);
         previousEmitter = displayedId;
         previousReset = displayedReset;
+        auto* displayedRead = queue.GetCommandList();
+        displayedRead->ResourceBarrier({displayed.Pools.front().Buffers[0]->GetNonPixelShaderResourceBarrier()});
+        queue.ExecuteCommandList(displayedRead);
     }
     Set(L"Render.Particles.Scheduled", "false");
     Set(L"Render.Particles.MultiGPU", "false");
@@ -237,12 +244,13 @@ Result Run(GDX12DeviceResources& resources, GDX12Device& secondary, RenderMGPURu
     result.Status = route.GetDiagnostics();
     Check(std::abs(result.Status.Desired - result.Status.Completed) < 1e-6,
         "Particle route handoff lost unprocessed simulation steps");
-    if (result.Status.Debt != 0 || result.Status.AgeMs != 0)
+    if (result.Status.Debt != 0 || result.Status.SourceTime != result.Status.DisplayedSourceTime)
         std::cerr << "Handoff: desired=" << result.Status.Desired << " completed=" << result.Status.Completed
             << " displayed=" << result.Status.Displayed << " source=" << result.Status.SourceTime
             << " displayedSource=" << result.Status.DisplayedSourceTime << " ageMs=" << result.Status.AgeMs
             << " debt=" << result.Status.Debt << '\n';
-    Check(result.Status.Debt == 0 && result.Status.AgeMs == 0, "Particle handoff left stale age or debt diagnostics");
+    Check(result.Status.Debt == 0 && result.Status.SourceTime == result.Status.DisplayedSourceTime,
+        "Particle handoff left stale source time or debt diagnostics");
     return result;
 }
 
@@ -287,6 +295,19 @@ int main(int argc, char** argv)
         GDX12DeviceResources resources;
         resources.Initialize(&primary);
         RenderMGPURuntime runtime({&primary, &secondary, &copyA, &copyB});
+        {
+            CrossAdapterWork first(runtime), second(runtime);
+            const auto source = first.Allocate(primary, 256);
+            const auto again = second.Identify(source.Resource, primary);
+            Check(source.Identity.Id == again.Identity.Id && source.Identity.Allocation == again.Identity.Allocation,
+                "Shared routes assigned competing native resource identities");
+            const auto bank = runtime.CreateBank(runtime.NewTransferId(), runtime.NewEpoch(),
+                secondary.GetSubmissionAdapterId(), primary.GetSubmissionAdapterId(), CD3DX12_RESOURCE_DESC::Buffer(256));
+            const auto& local = bank->GetSlots()[0].Local;
+            Check(second.Identify(local.Resource, primary).Identity.Id == local.Identity.Id,
+                "Shared route lost snapshot transport identity");
+            runtime.RetireBank(*bank);
+        }
         for (const bool changing : {false, true})
         {
             const auto reference = Run(resources, secondary, runtime, false, 1, true, changing, false);

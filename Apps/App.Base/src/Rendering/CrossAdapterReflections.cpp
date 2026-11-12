@@ -1,6 +1,8 @@
 #include "App.Base/Rendering/CrossAdapterReflections.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
+#include "Engine.Core/Logging/Logger.h"
 #include <algorithm>
+#include <chrono>
 #include <stdexcept>
 
 namespace
@@ -8,6 +10,9 @@ namespace
 using Graph = GDX12RenderGraph;
 using namespace GDX12Submission;
 constexpr auto ShaderRead = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+using ProfileClock = std::chrono::steady_clock;
+double Milliseconds(ProfileClock::time_point begin, ProfileClock::time_point end)
+{ return std::chrono::duration<double, std::milli>(end - begin).count(); }
 }
 
 CrossAdapterReflections::CrossAdapterReflections(GDX12DeviceResources& primary, GDX12Device& secondary,
@@ -15,7 +20,10 @@ CrossAdapterReflections::CrossAdapterReflections(GDX12DeviceResources& primary, 
     GDX12ReflectionProbePass& pass, GDX12EnvironmentIBLPass& environment)
     : _primary(primary), _secondaryDevice(secondary), _runtime(runtime), _materials(std::move(materials)), _common(common),
       _pass(pass), _environment(environment), _work(runtime)
-{ _pass.EnableSecondaryCapture(true); }
+{
+    for (const auto& frame : _primary.FrameConstants) frame->MaterialCache->TrackChanges();
+    _pass.EnableSecondaryCapture(true);
+}
 CrossAdapterReflections::~CrossAdapterReflections() = default;
 
 bool CrossAdapterReflections::HasSecondaryWork() const
@@ -27,7 +35,19 @@ bool CrossAdapterReflections::HasSecondaryWork() const
 void CrossAdapterReflections::ResetWorld()
 {
     if (_capture) _capture->ResetHistory();
+    const auto retire = [this](CrossAdapterWork::Channel& channel)
+    {
+        if (channel.Bank) _runtime.RetireBank(*channel.Bank);
+        channel = {};
+    };
+    for (auto& item : _textures) retire(item.second.RefreshChannel);
+    retire(_sceneChannel);
+    retire(_resultChannel);
+    retire(_publishedChannel);
     _textures.clear();
+    _vertexSource.reset();
+    _indexSource.reset();
+    _geometryRevision = 0;
     _sceneBytes = _resultBytes = 0;
     _work.WaitMilliseconds = 0;
 }
@@ -54,13 +74,18 @@ GDX12Texture* CrossAdapterReflections::MirrorTexture(GDX12Texture* source, bool 
         mirror.Texture->Initialize(desc);
     }
     if (changed || refresh)
-        _sceneBytes += _work.Copy(_sceneChannel, *_primary.Device, _secondaryDevice,
+        // Repeated textures keep their own size-stable bank; one-time material uploads share staging.
+        _sceneBytes += _work.Copy(refresh ? mirror.RefreshChannel : _sceneChannel, *_primary.Device, _secondaryDevice,
             {{_work.Identify(mirror.Source, *_primary.Device), _work.Identify(mirror.Texture->GetResourceOwner(), _secondaryDevice)}});
     return mirror.Texture.get();
 }
 
 void CrossAdapterReflections::PrepareScene()
 {
+    const bool profiling = CrossAdapterWork::ProfilingEnabled();
+    const auto started = profiling ? ProfileClock::now() : ProfileClock::time_point{};
+    const auto bytesBefore = _sceneBytes;
+    UINT64 geometryBytes = 0;
     if (!_secondary)
     {
         _secondary = std::make_unique<GDX12DeviceResources>();
@@ -114,41 +139,94 @@ void CrossAdapterReflections::PrepareScene()
     buffer(source.ShadowInstances, target.ShadowInstances);
     buffer(source.ShadowTransforms, target.ShadowTransforms);
     buffer(source.ShadowMaterials, target.ShadowMaterials);
+    target.MaterialCache->Resize(source.MaterialCache->GetElementCount());
+    if (source.MaterialCache->GetElementCount())
+        target.MaterialCache->CopyData(0, source.MaterialCache->GetCPUData(), source.MaterialCache->GetElementCount());
     buffer(source.ShadowLights, target.ShadowLights);
     if (source.DisplayShadowPolicy) buffer(source.DisplayShadowLights, target.DisplayShadowLights);
-    const auto geometry = [&](std::shared_ptr<GDX12Resource> from, View& to)
+    const auto vertexSource = _primary.GeometryBuffer->ShareVertexResource();
+    const auto indexSource = _primary.GeometryBuffer->ShareIndexResource();
+    const auto geometryRevision = _primary.GeometryBuffer->GetMeshCacheRevision();
+    const auto geometry = [&](const std::shared_ptr<GDX12Resource>& from, View& to, bool vertices)
     {
         const auto bytes = from->D3DResource->GetDesc().Width;
         if (!to.Resource || to.Resource->D3DResource->GetDesc().Width != bytes) to = _work.Allocate(_secondaryDevice, bytes);
-        copies.push_back({_work.Identify(std::move(from), *_primary.Device), to});
+        const auto source = _work.Identify(from, *_primary.Device);
+        if ((vertices ? _vertexSource : _indexSource).lock() != from || _geometryRevision != geometryRevision)
+        {
+            copies.push_back({source, to});
+            geometryBytes += bytes;
+        }
+        else if (vertices)
+            for (const auto& [first, count] : _primary.GeometryBuffer->GetSkinnedVertexRanges())
+            {
+                CrossAdapterWork::CopyRegion range{source, to};
+                range.SourceOffset = range.DestinationOffset = UINT64(first) * sizeof(Vertex);
+                range.Bytes = UINT64(count) * sizeof(Vertex);
+                copies.push_back(range);
+                geometryBytes += range.Bytes;
+            }
     };
-    geometry(_primary.GeometryBuffer->ShareVertexResource(), _vertices);
-    geometry(_primary.GeometryBuffer->ShareIndexResource(), _indices);
+    geometry(vertexSource, _vertices, true);
+    geometry(indexSource, _indices, false);
     scene.GeometryBuffer->SetSnapshotBuffers(_vertices.Resource, _indices.Resource);
     scene.IndirectCommandsCache->Resize(_primary.IndirectCommandsCache->GetElementCount());
     if (_primary.IndirectCommandsCache->GetElementCount())
         scene.IndirectCommandsCache->CopyData(0, _primary.IndirectCommandsCache->GetCPUData(), _primary.IndirectCommandsCache->GetElementCount());
     _sceneBytes += _work.Copy(_sceneChannel, *_primary.Device, _secondaryDevice, copies);
+    _vertexSource = vertexSource;
+    _indexSource = indexSource;
+    _geometryRevision = geometryRevision;
+    const auto buffersBytes = _sceneBytes;
+    const auto buffersDone = profiling ? ProfileClock::now() : ProfileClock::time_point{};
     for (auto* texture : _materials())
     {
         const auto flags = texture->GetResource()->D3DResource->GetDesc().Flags;
         MirrorTexture(texture, true, (flags & (D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET | D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)) != 0);
     }
+    const auto materialsBytes = _sceneBytes;
+    const auto materialsDone = profiling ? ProfileClock::now() : ProfileClock::time_point{};
+    const auto environmentTexture = [&](GDX12Texture* source, UINT item)
+    {
+        const auto before = _sceneBytes;
+        const auto begin = profiling ? ProfileClock::now() : ProfileClock::time_point{};
+        auto* mirrored = MirrorTexture(source, false, true);
+        if (profiling && mirrored)
+        {
+            const auto desc = source->GetResource()->D3DResource->GetDesc();
+            Log::Info("MGPU.Profile", "reflection_texture source_time=", _pass.FrameSourceTime(), " item=", item,
+                " bytes=", _sceneBytes - before, " ms=", Milliseconds(begin, ProfileClock::now()),
+                " width=", desc.Width, " height=", desc.Height, " layers=", desc.DepthOrArraySize,
+                " mips=", desc.MipLevels, " format=", static_cast<UINT>(desc.Format));
+        }
+        return mirrored;
+    };
     std::vector<IRenderPassLink*> inputs;
-    for (UINT index = 0; index < 4; ++index) inputs.push_back(MirrorTexture(_environment.GetOutput(index)->GetTexture(), false, true));
-    inputs.push_back(MirrorTexture(_pass.CaptureLocalShadows(), false, true));
+    for (UINT index = 0; index < 4; ++index) inputs.push_back(environmentTexture(_environment.GetOutput(index)->GetTexture(), index));
+    inputs.push_back(environmentTexture(_pass.CaptureLocalShadows(), 4));
     _capture->SetInputs(inputs);
-    if (auto* transmittance = MirrorTexture(_environment.CaptureTransmittance(), false, true))
+    if (auto* transmittance = environmentTexture(_environment.CaptureTransmittance(), 5))
     {
         auto view = transmittance->ShaderViewDescription();
         scene.SkyTransmittanceSRV.InitAsSRV(transmittance->GetResource()->D3DResource.Get(), &view,
             scene.SRV_UAV_Heap.get(), scene.SkyTransmittanceSRV.HeapIndex);
     }
+    const auto environmentBytes = _sceneBytes;
+    const auto environmentDone = profiling ? ProfileClock::now() : ProfileClock::time_point{};
     auto work = _pass.ScheduledWork();
     for (auto& item : work) { item.Faces = item.SecondaryFaces; item.SecondaryFaces = 0; }
     _capture->SetRemoteWork(std::move(work), _pass.FrameSourceTime());
     _capture->Prepare();
     _applicationReads = _prepareApplication ? _prepareApplication(scene, *_capture, _work, _sceneBytes) : std::vector<CrossAdapterWork::Use>{};
+    if (profiling)
+        Log::Info("MGPU.Profile", "reflection_prepare source_time=", _pass.FrameSourceTime(),
+            " buffers_ms=", Milliseconds(started, buffersDone), " material_ms=", Milliseconds(buffersDone, materialsDone),
+            " environment_ms=", Milliseconds(materialsDone, environmentDone),
+            " capture_prepare_application_ms=", Milliseconds(environmentDone, ProfileClock::now()),
+            " geometry_bytes=", geometryBytes, " other_buffer_payload_bytes=", buffersBytes - bytesBefore - geometryBytes,
+            " material_texture_bytes=", materialsBytes - buffersBytes,
+            " environment_shadow_texture_bytes=", environmentBytes - materialsBytes,
+            " application_bytes=", _sceneBytes - environmentBytes);
 }
 
 std::vector<CrossAdapterWork::Use> CrossAdapterReflections::PrimaryUses()
@@ -178,7 +256,8 @@ std::vector<CrossAdapterWork::Use> CrossAdapterReflections::PrimaryUses()
     add(_pass.CaptureLocalShadows()->GetResourceOwner());
     if (auto* transmittance = _environment.CaptureTransmittance()) add(transmittance->GetResourceOwner());
     for (auto* texture : _materials()) add(texture->GetResourceOwner());
-    if (_applicationInputs) for (const auto& resource : _applicationInputs()) add(resource);
+    if (_applicationInputs)
+        for (auto use : _applicationInputs(_work)) uses.push_back(std::move(use));
     const auto writable = [&](std::shared_ptr<GDX12Resource> resource)
     {
         add(resource);
@@ -229,8 +308,15 @@ void CrossAdapterReflections::Configure(Graph& graph, GDX12RenderPass& node, Ren
 
 CompletionPoint CrossAdapterReflections::Submit(GDX12RenderPass& node, CompletionPoint prefix)
 {
+    const bool profiling = CrossAdapterWork::ProfilingEnabled();
+    const auto now = [profiling] { return profiling ? ProfileClock::now() : ProfileClock::time_point{}; };
+    const auto started = now();
+    const auto before = _work.GetProfile();
+    const auto waitBefore = _work.WaitMilliseconds;
     _work.Wait(prefix);
+    const auto prefixDone = now();
     PrepareScene();
+    const auto sceneDone = now();
     std::vector<CrossAdapterWork::Use> secondaryReads;
     const auto read = [&](std::shared_ptr<GDX12Resource> resource, D3D12_RESOURCE_STATES state = ShaderRead)
     { secondaryReads.push_back({_work.Identify(std::move(resource), _secondaryDevice), Graph::Mode::Read, state}); };
@@ -258,6 +344,7 @@ CompletionPoint CrossAdapterReflections::Submit(GDX12RenderPass& node, Completio
         commands.ResourceBarrier({_capture->PublishedTexture().GetResource()->GetTransitionBarrier(D3D12_RESOURCE_STATE_COMMON)});
     });
     _capture->OnSubmitted(captured);
+    const auto captureDone = now();
     std::vector<CrossAdapterWork::CopyRegion> copies;
     for (UINT probe = 0; probe < _pass.ScheduledWork().size(); ++probe)
         for (UINT face = 0; face < 6; ++face)
@@ -284,11 +371,26 @@ CompletionPoint CrossAdapterReflections::Submit(GDX12RenderPass& node, Completio
                 const UINT sub = (probe * 6 + face) * _pass.PublishedMips() + mip;
                 copies.push_back({source, destination, sub, sub});
             }
-        _resultBytes += _work.Copy(_resultChannel, _secondaryDevice, *_primary.Device, copies);
+        _resultBytes += _work.Copy(_publishedChannel, _secondaryDevice, *_primary.Device, copies);
         _pass.ImportPublished(probe, _capture->PublishedSourceTimes(probe));
     }
+    const auto copiesDone = now();
     const auto published = _work.Run("Reflection primary faces and publication", *_primary.Device, PrimaryUses(),
         [&](GDX12CommandList& commands) { node.Execute(&commands); });
     _pass.OnSubmitted(published);
+    if (profiling)
+    {
+        const auto ended = now();
+        const auto after = _work.GetProfile();
+        Log::Info("MGPU.Profile", "reflection_submit source_time=", _pass.FrameSourceTime(),
+            " total_ms=", Milliseconds(started, ended), " prefix_ms=", Milliseconds(started, prefixDone),
+            " prepare_ms=", Milliseconds(prefixDone, sceneDone), " secondary_capture_filter_ms=", Milliseconds(sceneDone, captureDone),
+            " result_copy_ms=", Milliseconds(captureDone, copiesDone), " primary_publish_ms=", Milliseconds(copiesDone, ended),
+            " wait_ms=", _work.WaitMilliseconds - waitBefore, " work_run_ms=", after.RunMs - before.RunMs,
+            " work_transfer_ms=", after.TransferMs - before.TransferMs,
+            " bank_reconfigure_ms=", after.ReconfigureMs - before.ReconfigureMs, " buffer_allocate_ms=", after.AllocateMs - before.AllocateMs,
+            " runs=", after.Runs - before.Runs, " transfers=", after.Transfers - before.Transfers,
+            " bank_creates=", after.BankCreates - before.BankCreates, " buffer_allocations=", after.BufferAllocations - before.BufferAllocations);
+    }
     return published;
 }

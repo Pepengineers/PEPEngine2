@@ -1,5 +1,6 @@
 #include "App.Base/Rendering/CrossAdapterWork.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include "Common/ConsoleVariables.h"
 #include <algorithm>
 #include <chrono>
 #include <limits>
@@ -10,6 +11,8 @@ using Graph = GDX12RenderGraph;
 using namespace GDX12Submission;
 using namespace GDX12Snapshot;
 using Clock = std::chrono::steady_clock;
+AutoConsoleVariable<bool> ProfileWork(L"Render.MGPU.DiagnosticTimings", false,
+    L"Collect MGPU CPU wall timings and reflection transfer categories; profiling only, not ordinary benchmarks.");
 void Require(bool value, const char* message) { if (!value) throw std::logic_error(message); }
 class Batch final : public GDX12RenderPass
 {
@@ -59,23 +62,27 @@ private:
 
 CrossAdapterWork::View CrossAdapterWork::Identify(std::shared_ptr<GDX12Resource> resource, GDX12Device& device)
 {
-    _identities.erase(std::remove_if(_identities.begin(), _identities.end(),
-        [](const auto& entry) { return entry.Native.expired(); }), _identities.end());
-    for (const auto& entry : _identities)
-        if (entry.Native.lock() == resource) return {std::move(resource), entry.Id};
-    ResourceIdentity id{_runtime.NewResourceId(), device.GetSubmissionAdapterId(), _runtime.NewEpoch(),
-        TransferId::Invalid, _runtime.NewAllocationId()};
-    _identities.push_back({resource, id});
-    return {std::move(resource), id};
+    const auto identity = _runtime.IdentifyResource(resource, device);
+    return {std::move(resource), identity};
 }
 
 CrossAdapterWork::View CrossAdapterWork::Allocate(GDX12Device& device, UINT64 bytes)
 {
+    const bool profiling = ProfilingEnabled();
+    const auto started = profiling ? Clock::now() : Clock::time_point{};
     auto resource = std::make_shared<GDX12Resource>();
     resource->D3DResource = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT,
         CD3DX12_RESOURCE_DESC::Buffer(bytes), D3D12_RESOURCE_STATE_COMMON);
-    return Identify(std::move(resource), device);
+    auto view = Identify(std::move(resource), device);
+    if (profiling)
+    {
+        ++_profile.BufferAllocations;
+        _profile.AllocateMs += std::chrono::duration<double, std::milli>(Clock::now() - started).count();
+    }
+    return view;
 }
+
+bool CrossAdapterWork::ProfilingEnabled() { return ProfileWork.GetValue(); }
 
 void CrossAdapterWork::Wait(CompletionPoint point)
 {
@@ -87,8 +94,21 @@ void CrossAdapterWork::Wait(CompletionPoint point)
     _runtime.Poll();
 }
 
+void CrossAdapterWork::ImportVersion(Graph& graph, Graph::ExecutionBindings& bindings, Graph::Resource id, const Use& use)
+{
+    if (!use.Version.IsValid()) return;
+    Require(use.Mode == Graph::Mode::Read, "An imported snapshot must remain immutable");
+    auto* direct = _runtime.GetQueue({use.Resource.Identity.Adapter, QueueKind::Direct});
+    Require(direct, "Snapshot input has no consumer DIRECT timeline");
+    // The frame owner has acquired this exact snapshot before the legacy split and retains its reader through the tail.
+    graph.ImportVersion(id, use.Version);
+    bindings.ExactInputs.push_back({id, use.Version, direct->GetLastCompletionPoint(), use.Resource.Resource});
+}
+
 CompletionPoint CrossAdapterWork::Run(const char* name, GDX12Device& device, std::vector<Use> uses, Record record)
 {
+    const bool profiling = ProfilingEnabled();
+    const auto started = profiling ? Clock::now() : Clock::time_point{};
     Graph graph;
     Graph::ExecutionBindings bindings;
     std::vector<Graph::Access> accesses;
@@ -98,7 +118,8 @@ CompletionPoint CrossAdapterWork::Run(const char* name, GDX12Device& device, std
         const auto id = graph.Import(name);
         graph.RegisterResource(id, use.Resource.Identity);
         bindings.Views.push_back({id, use.Resource.Identity, use.Resource.Resource});
-        accesses.push_back({id, use.Mode, use.State, {}});
+        ImportVersion(graph, bindings, id, use);
+        accesses.push_back({id, use.Mode, use.State, use.Version});
         resources.emplace_back(use.Resource.Resource, use.State);
     }
     Batch batch(name, {device.GetSubmissionAdapterId(), QueueKind::Direct}, std::move(accesses),
@@ -109,6 +130,11 @@ CompletionPoint CrossAdapterWork::Run(const char* name, GDX12Device& device, std
     Require(receipt && receipt->Batches.size() == 1, "Snapshot graph submission capacity exhausted");
     const auto done = receipt->Batches.back();
     Wait(done);
+    if (profiling)
+    {
+        ++_profile.Runs;
+        _profile.RunMs += std::chrono::duration<double, std::milli>(Clock::now() - started).count();
+    }
     return done;
 }
 
@@ -117,6 +143,8 @@ CompletionPoint CrossAdapterWork::Transfer(Channel& channel, GDX12Device& produc
     std::function<void(GDX12CommandList&, GDX12Resource&)> pack,
     std::function<void(GDX12CommandList&, GDX12Resource&)> unpack)
 {
+    const bool profiling = ProfilingEnabled();
+    const auto started = profiling ? Clock::now() : Clock::time_point{};
     const auto a = producer.GetSubmissionAdapterId(), b = consumer.GetSubmissionAdapterId();
     if (!channel.Bank || channel.Bytes != bytes || channel.Producer != a || channel.Consumer != b)
     {
@@ -130,6 +158,11 @@ CompletionPoint CrossAdapterWork::Transfer(Channel& channel, GDX12Device& produc
         channel.Bytes = bytes;
         channel.Producer = a;
         channel.Consumer = b;
+        if (profiling)
+        {
+            ++_profile.BankCreates;
+            _profile.ReconfigureMs += std::chrono::duration<double, std::milli>(Clock::now() - started).count();
+        }
     }
     Require(channel.Invocation < (std::numeric_limits<UINT64>::max)(), "Snapshot invocation exhausted");
     const TransferVersion version{channel.Id, channel.EpochId, ProducerInvocationId{++channel.Invocation}};
@@ -164,12 +197,16 @@ CompletionPoint CrossAdapterWork::Transfer(Channel& channel, GDX12Device& produc
             {reader->View.Resource, D3D12_RESOURCE_STATE_COPY_SOURCE}};
         for (const auto& use : source)
         {
-            packUses.push_back({bind(use.Resource), use.Mode, use.State, {}});
+            const auto id = bind(use.Resource);
+            ImportVersion(graph, bindings, id, use);
+            packUses.push_back({id, use.Mode, use.State, use.Version});
             packResources.emplace_back(use.Resource.Resource, use.State);
         }
         for (const auto& use : destination)
         {
-            unpackUses.push_back({bind(use.Resource), use.Mode, use.State, {}});
+            const auto id = bind(use.Resource);
+            ImportVersion(graph, bindings, id, use);
+            unpackUses.push_back({id, use.Mode, use.State, use.Version});
             unpackResources.emplace_back(use.Resource.Resource, use.State);
         }
         Batch prepare("Snapshot pack", {a, QueueKind::Direct}, std::move(packUses), std::move(packResources),
@@ -197,6 +234,11 @@ CompletionPoint CrossAdapterWork::Transfer(Channel& channel, GDX12Device& produc
         Require(receipt.has_value(), "Snapshot graph submission capacity exhausted");
         submitted = true;
         Wait(receipt->Batches.back());
+        if (profiling)
+        {
+            ++_profile.Transfers;
+            _profile.TransferMs += std::chrono::duration<double, std::milli>(Clock::now() - started).count();
+        }
         return receipt->Batches.back();
     }
     catch (...)
@@ -215,10 +257,10 @@ UINT64 CrossAdapterWork::Copy(Channel& channel, GDX12Device& producer, GDX12Devi
     std::vector<Copy> copies;
     std::vector<Use> reads, writes;
     UINT64 bytes = 0;
-    const auto add = [](std::vector<Use>& uses, const View& view, GDX12RenderGraph::Mode mode, D3D12_RESOURCE_STATES state)
+    const auto add = [](std::vector<Use>& uses, const View& view, GDX12RenderGraph::Mode mode, D3D12_RESOURCE_STATES state, TransferVersion version = {})
     {
         if (std::none_of(uses.begin(), uses.end(), [&](const auto& use) { return use.Resource.Resource == view.Resource; }))
-            uses.push_back({view, mode, state});
+            uses.push_back({view, mode, state, version});
     };
     for (const auto& region : regions)
     {
@@ -228,16 +270,20 @@ UINT64 CrossAdapterWork::Copy(Channel& channel, GDX12Device& producer, GDX12Devi
         Require(desc.Dimension == target.Dimension && desc.Format == target.Format, "Incompatible snapshot copy resource");
         add(reads, region.Source, Graph::Mode::Read,
             region.Source.Resource->GetCurrentState() == D3D12_RESOURCE_STATE_GENERIC_READ ?
-                D3D12_RESOURCE_STATE_GENERIC_READ : D3D12_RESOURCE_STATE_COPY_SOURCE);
+                D3D12_RESOURCE_STATE_GENERIC_READ : D3D12_RESOURCE_STATE_COPY_SOURCE, region.SourceVersion);
         add(writes, region.Destination, Graph::Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST);
         if (desc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER)
         {
-            Require(desc.Width == target.Width, "Incompatible snapshot buffer size");
+            const UINT64 count = region.Bytes ? region.Bytes : desc.Width;
+            Require((region.Bytes || desc.Width == target.Width) &&
+                region.SourceOffset <= desc.Width && count <= desc.Width - region.SourceOffset &&
+                region.DestinationOffset <= target.Width && count <= target.Width - region.DestinationOffset,
+                "Snapshot buffer range is outside its allocation");
             bytes = (bytes + 511) & ~UINT64(511);
             D3D12_PLACED_SUBRESOURCE_FOOTPRINT location{};
             location.Offset = bytes;
-            copies.push_back({region, UINT_MAX, location, desc.Width});
-            bytes += desc.Width;
+            copies.push_back({region, UINT_MAX, location, count});
+            bytes += count;
             continue;
         }
         const UINT count = desc.MipLevels * (desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE3D ? 1 : desc.DepthOrArraySize);
@@ -267,7 +313,7 @@ UINT64 CrossAdapterWork::Copy(Channel& channel, GDX12Device& producer, GDX12Devi
             for (const auto& copy : copies)
                 if (copy.Subresource == UINT_MAX)
                     commands.GetCommandList()->CopyBufferRegion(payload.D3DResource.Get(), copy.Footprint.Offset,
-                        copy.Region.Source.Resource->D3DResource.Get(), 0, copy.Bytes);
+                        copy.Region.Source.Resource->D3DResource.Get(), copy.Region.SourceOffset, copy.Bytes);
                 else
                 {
                     const CD3DX12_TEXTURE_COPY_LOCATION source(copy.Region.Source.Resource->D3DResource.Get(), copy.Region.SourceSubresource);
@@ -279,7 +325,7 @@ UINT64 CrossAdapterWork::Copy(Channel& channel, GDX12Device& producer, GDX12Devi
         {
             for (const auto& copy : copies)
                 if (copy.Subresource == UINT_MAX)
-                    commands.GetCommandList()->CopyBufferRegion(copy.Region.Destination.Resource->D3DResource.Get(), 0,
+                    commands.GetCommandList()->CopyBufferRegion(copy.Region.Destination.Resource->D3DResource.Get(), copy.Region.DestinationOffset,
                         payload.D3DResource.Get(), copy.Footprint.Offset, copy.Bytes);
                 else
                 {

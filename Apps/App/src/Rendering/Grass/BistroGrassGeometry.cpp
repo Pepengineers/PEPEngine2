@@ -136,10 +136,10 @@ void BistroGrassGeometry::PrepareFrame(GDX12DeviceResources& resources, const Re
 }
 
 std::optional<BistroGrassGeometry::ShadowScene> BistroGrassGeometry::CaptureShadowScene(
-    const GDX12DeviceResources& resources) const
+    const GDX12DeviceResources& resources, bool shadowCastersOnly) const
 {
     if (!_gpu) return {};
-    auto patches = _gpu->FreezeShadowPatches(resources.Primitives, *this);
+    auto patches = _gpu->FreezeShadowPatches(resources.Primitives, *this, shadowCastersOnly);
     if (!patches) return {};
     return ShadowScene{std::move(*patches), _wind, _controls};
 }

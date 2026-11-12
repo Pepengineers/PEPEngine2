@@ -44,6 +44,7 @@ public:
     {
         uint64_t LastIssued = 0;
         uint64_t FirstMissing = 0;
+        uint64_t ExportBytes = 0, ImportBytes = 0;
         double PendingSeconds = 0;
         double MissingSeconds = 0;
         double SupersededSeconds = 0;
