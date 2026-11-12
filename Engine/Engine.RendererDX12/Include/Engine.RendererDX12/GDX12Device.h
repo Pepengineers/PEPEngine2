@@ -8,10 +8,11 @@ class GDX12CommandQueue;
 struct DeviceSpecs
 {
 	D3D_FEATURE_LEVEL MaxFeatureLevel;
-	std::string Name;
+	std::string Name;  // UTF-8
 	size_t DedicatedVideoMemory;  // in bytes
 	size_t DedicatedSystemMemory; // in bytes
 	size_t SharedSystemMemory;    // in bytes
+	unsigned PCIeGeneration = 0;  // 0 when unavailable or not applicable
 	CD3DX12FeatureSupport Features;
 };
 
@@ -36,7 +37,7 @@ public:
 	GDX12CommandQueue* GetCopyCommandQueue();
 	void Flush();
 	HRESULT TryFlush() noexcept;
-	const DeviceSpecs& GetDeviceFeatures();
+	const DeviceSpecs& GetDeviceFeatures() const;
 	LUID GetAdapterLuid() const;
 	const bool IsInitialized();
 

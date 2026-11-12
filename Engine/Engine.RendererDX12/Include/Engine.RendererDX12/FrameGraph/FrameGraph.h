@@ -171,6 +171,7 @@ public:
     uint32_t GetDevicePassFlags(EDeviceRole role) const;
     uint32_t GetCurrentFrameSlotResourcesIndex() const;
     bool UsesDevice(EDeviceRole role) const;
+    const GDX12Device* GetActiveDevice(EDeviceRole role) const;
     // Access the owned pass by identifier and C++ type; throws for imports or a mismatched type.
     template<class T> T& GetPass(const NodeId& id)
     {

@@ -5,9 +5,7 @@
 #include "App.Base/RenderingMetrics.h"
 
 #include "Engine.RendererDX12/GDX12Device.h"
-#include "Engine.RendererDX12/GDX12DeviceFactory.h"
 
-#include <cfgmgr32.h>
 #include <intrin.h>
 
 #include <algorithm>
@@ -22,12 +20,6 @@
 
 #include <ryml.hpp>
 #include <ryml_std.hpp>
-
-#include <initguid.h>
-#include <devpkey.h>
-#include <pciprop.h>
-
-#pragma comment(lib, "Cfgmgr32.lib")
 
 namespace
 {
@@ -122,51 +114,6 @@ namespace
         return {};
     }
 
-    std::string GetAdapterName(LUID luid)
-    {
-        ComPtr<IDXGIAdapter1> adapter;
-        if (FAILED(GDX12DeviceFactory::GetFactory()->EnumAdapterByLuid(luid, IID_PPV_ARGS(&adapter)))) { return {}; }
-        DXGI_ADAPTER_DESC1 desc{};
-        if (FAILED(adapter->GetDesc1(&desc))) { return {}; }
-
-        const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, desc.Description, -1, nullptr, 0, nullptr, nullptr);
-        if (size <= 1) { return {}; }
-        std::string name(size, '\0');
-        if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, desc.Description, -1, name.data(), size, nullptr, nullptr))
-        { return {}; }
-        name.pop_back();
-        return name;
-    }
-
-    unsigned GetDevicePCIeGeneration(GDX12Device& gpu)
-    {
-        if (gpu.GetDeviceFeatures().Features.UMA()) { return 0; }
-
-        DISPLAYCONFIG_ADAPTER_NAME adapter{};
-        adapter.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADAPTER_NAME;
-        adapter.header.size = sizeof(adapter);
-        adapter.header.adapterId = gpu.GetAdapterLuid();
-        if (DisplayConfigGetDeviceInfo(&adapter.header) != ERROR_SUCCESS) { return 0; }
-
-        WCHAR instanceId[MAX_DEVICE_ID_LEN]{};
-        DEVPROPTYPE type = DEVPROP_TYPE_EMPTY;
-        ULONG size = sizeof(instanceId);
-        if (CM_Get_Device_Interface_PropertyW(adapter.adapterDevicePath, &DEVPKEY_Device_InstanceId, &type,
-                reinterpret_cast<PBYTE>(instanceId), &size, 0) != CR_SUCCESS || type != DEVPROP_TYPE_STRING)
-        { return 0; }
-
-        DEVINST device = 0;
-        if (CM_Locate_DevNodeW(&device, instanceId, CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS) { return 0; }
-
-        ULONG generation = 0;
-        size = sizeof(generation);
-        if (CM_Get_DevNode_PropertyW(device, &DEVPKEY_PciDevice_CurrentLinkSpeed, &type,
-                reinterpret_cast<PBYTE>(&generation), &size, 0) != CR_SUCCESS ||
-            type != DEVPROP_TYPE_UINT32 || size != sizeof(generation) || generation > 7)
-        { return 0; }
-        return generation;
-    }
-
     void WriteHardwareName(ryml::NodeRef node, const std::string& name)
     {
         if (name.empty()) { node << nullptr; return; }
@@ -181,32 +128,35 @@ namespace
     }
 }
 
-void RenderingMetrics::Initialize(GDX12Device* primary, GDX12Device* secondary)
+void RenderingMetrics::Initialize()
 {
-    _initialized = false;
-    ResetInterval();
-    _history.clear();
-
     _cpuName = GetCPUName();
     _ramBytes = GetInstalledRAMBytes();
     _motherboardName = GetMotherboardName();
-    _adapters.clear();
-    const auto addAdapter = [&](EDeviceRole role, GDX12Device* device)
-    {
-        if (!device) { return; }
-        const auto luid = device->GetAdapterLuid();
-        _adapters.push_back({role, GetAdapterName(luid), GetDevicePCIeGeneration(*device)});
-    };
-    addAdapter(DEVICE_ROLE_PRIMARY, primary);
-    addAdapter(DEVICE_ROLE_SECONDARY, secondary);
-    _initialized = true;
+    BeginRun("", std::chrono::seconds::zero());
+}
+
+void RenderingMetrics::BeginRun(const char* pipeline, std::chrono::seconds duration)
+{
+    _pipeline = pipeline;
+    _runDuration = duration;
+    _activeRenderTime = {};
+    ResetInterval();
+    _history.clear();
+
+    _collecting = true;
 }
 
 void RenderingMetrics::RecordPresentedFrame(const CompiledFrameGraph& frameGraph)
 {
-    if (!_initialized) { return; }
+    if (!_collecting) { return; }
 
     const auto now = Clock::now();
+    if (_runDuration.count() > 0)
+    {
+        if (_lastPresent) { _activeRenderTime += now - *_lastPresent; }
+        _lastPresent = now;
+    }
     if (!_intervalStart)
     {
         _intervalStart = now;
@@ -215,26 +165,43 @@ void RenderingMetrics::RecordPresentedFrame(const CompiledFrameGraph& frameGraph
 
     ++_presentCount;
     const std::chrono::duration<double> interval = now - *_intervalStart;
-    if (interval < std::chrono::seconds(1)) { return; }
+    const bool completed = _runDuration.count() > 0 && _activeRenderTime >= _runDuration;
+    if (interval < std::chrono::seconds(1) && !completed) { return; }
 
     auto frame = frameGraph.GetLatestFrameMetrics();
     _history.push_back({_presentCount / interval.count(), frame.PrimaryMS, frame.SecondaryMS,
         frame.CrossGPUCopies, std::move(frame.PassTimings)});
     _intervalStart = now;
     _presentCount = 0;
+    if (completed)
+    {
+        _collecting = false;
+        SaveReport(frameGraph);
+        OnRunCompleted.Broadcast();
+    }
 }
 
 void RenderingMetrics::ResetInterval()
 {
     _intervalStart.reset();
+    _lastPresent.reset();
     _presentCount = 0;
 }
 
-std::string RenderingMetrics::ToJson() const
+std::string RenderingMetrics::ToJson(const CompiledFrameGraph& frameGraph) const
 {
     ryml::Tree report;
     auto root = report.rootref();
     root |= ryml::MAP;
+    if (_runDuration.count() > 0)
+    {
+        auto run = root["run"];
+        run |= ryml::MAP;
+        run["pipeline"] << _pipeline;
+        run["pipeline"] |= ryml::VAL_DQUO;
+        run["target_seconds"] << _runDuration.count();
+        run["active_render_seconds"] << std::chrono::duration<double>(_activeRenderTime).count();
+    }
     auto hardware = root["hardware"];
     hardware |= ryml::MAP;
     WriteHardwareName(hardware["cpu_name"], _cpuName);
@@ -244,18 +211,23 @@ std::string RenderingMetrics::ToJson() const
 
     auto adapters = hardware["adapters"];
     adapters |= ryml::SEQ;
-    for (const auto& adapter : _adapters)
+    const auto* primary = frameGraph.GetActiveDevice(DEVICE_ROLE_PRIMARY);
+    const auto* secondary = frameGraph.GetActiveDevice(DEVICE_ROLE_SECONDARY);
+    const std::array activeDevices{primary, secondary};
+    for (const auto* adapter : activeDevices)
     {
+        if (!adapter) { continue; }
+        const auto& specs = adapter->GetDeviceFeatures();
         auto node = adapters.append_child();
         node |= ryml::MAP;
-        node["role"] = GetDeviceRoleName(adapter.Role);
-        node["name"] << adapter.Name;
+        node["role"] = GetDeviceRoleName(adapter->Role);
+        node["name"] << specs.Name;
         node["name"] |= ryml::VAL_DQUO;
-        if (adapter.PCIeGeneration) { node["pcie_generation"] << adapter.PCIeGeneration; }
+        if (specs.PCIeGeneration) { node["pcie_generation"] << specs.PCIeGeneration; }
         else { node["pcie_generation"] << nullptr; }
     }
 
-    const bool usesTwoGPUs = _adapters.size() > 1;
+    const bool usesTwoGPUs = primary && secondary;
     auto samples = root["samples"];
     samples |= ryml::SEQ;
     for (const auto& sample : _history)
@@ -267,13 +239,14 @@ std::string RenderingMetrics::ToJson() const
         WriteGPUTime(node["gpu_secondary_frame_ms"], sample.GPUSecondaryFrameMS);
         auto passTimings = node["render_pass_timings"];
         passTimings |= ryml::MAP;
-        for (const auto& adapter : _adapters)
+        for (const auto* adapter : activeDevices)
         {
-            auto passes = passTimings[GetDeviceRoleName(adapter.Role)];
+            if (!adapter) { continue; }
+            auto passes = passTimings[GetDeviceRoleName(adapter->Role)];
             passes |= ryml::SEQ;
             for (const auto& timing : sample.PassTimings)
             {
-                if (timing.Device != adapter.Role) { continue; }
+                if (timing.Device != adapter->Role) { continue; }
                 auto pass = passes.append_child();
                 pass |= ryml::MAP;
                 pass["name"] << timing.Name;
@@ -294,10 +267,8 @@ std::string RenderingMetrics::ToJson() const
     return ryml::emitrs_json<std::string>(report);
 }
 
-void RenderingMetrics::SaveReport() const
+void RenderingMetrics::SaveReport(const CompiledFrameGraph& frameGraph) const
 {
-    if (!_initialized) { return; }
-
     const auto now = std::chrono::system_clock::now();
     const auto timestamp = std::chrono::system_clock::to_time_t(now);
     const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
@@ -305,7 +276,9 @@ void RenderingMetrics::SaveReport() const
     gmtime_s(&utc, &timestamp);
 
     std::wostringstream fileName;
-    fileName << L"render-metrics-" << std::put_time(&utc, L"%Y%m%d-%H%M%S")
+    fileName << L"render-metrics-";
+    if (!_pipeline.empty()) { fileName << std::wstring(_pipeline.begin(), _pipeline.end()) << L'-'; }
+    fileName << std::put_time(&utc, L"%Y%m%d-%H%M%S")
         << L'-' << std::setfill(L'0') << std::setw(3) << milliseconds << L"Z-" << GetCurrentProcessId() << L".json";
     const auto directory = std::filesystem::path(SOLUTION_DIR) / L"Reports";
     const auto path = directory / fileName.str();
@@ -318,7 +291,7 @@ void RenderingMetrics::SaveReport() const
         std::ofstream report;
         report.exceptions(std::ios::failbit | std::ios::badbit);
         report.open(temporaryPath, std::ios::binary);
-        report << ToJson() << '\n';
+        report << ToJson(frameGraph) << '\n';
         report.close();
 
         if (!MoveFileW(temporaryPath.c_str(), path.c_str()))
@@ -329,6 +302,6 @@ void RenderingMetrics::SaveReport() const
     {
         std::error_code ignored;
         std::filesystem::remove(temporaryPath, ignored);
-        OutputDebugStringA((std::string("ERROR: Unable to save render metrics report. ") + error.what() + '\n').c_str());
+        OutputDebugStringA((std::string("ERROR: Unable to save benchmarking report. ") + error.what() + '\n').c_str());
     }
 }

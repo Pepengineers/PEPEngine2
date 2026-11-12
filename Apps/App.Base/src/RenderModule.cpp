@@ -7,19 +7,35 @@
 #include "Common/ConsoleVariables.h"
 
 #include "Engine.RendererDX12/GDX12SwapChain.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12TextureClearPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12OpaquePass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12OutputToScreenPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12FSRUpscalePass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12NISUpscalePass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12XeSSUpscalePass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
+#include "Engine.RendererDX12/GDX12StreamlineSDK.h"
+
+namespace
+{
+    void ConfigureDefaultPipeline(FrameGraph& graph, const FrameGraphInputs& inputs)
+    {
+        graph.SetTransportQueuePolicy(TransportQueuePolicy::Auto);
+        auto culling = graph.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
+        auto opaque = graph.AddPrimaryGPUPass<GDX12OpaquePass>("Opaque");
+        auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
+        auto composition = graph.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
+        auto clear = graph.AddPrimaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
+        auto output = graph.AddPrimaryGPUPass<GDX12OutputToScreenPass>("Output To Screen");
+
+        graph.ConnectNodes(inputs.BackBuffer, clear.GetInput("InTexture"));
+        graph.ConnectNodes(inputs.DepthStencil, clear.GetInput("InDepthBuffer"));
+        graph.ConnectNodes(clear.GetOutput("OutClearedTexture"), output.GetInput("InBackBuffer"));
+        graph.ConnectNodes(culling.GetOutput("OutOpaqueDrawStream"), opaque.GetInput("InDrawStream"));
+        graph.ConnectNodes(culling.GetOutput("OutTransparentDrawStream"), transparency.GetInput("InDrawStream"));
+        graph.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), transparency.GetInput("InDepthBuffer"));
+        graph.ConnectNodes(opaque.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
+        graph.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
+        graph.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
+        graph.ConnectNodes(composition.GetOutput("OutColorTexture"), output.GetInput("InColorTexture"));
+    }
+}
 
 RenderModule::RenderModule(Window* window, GameTimer* timer) :
-    _window(window), _timer(timer)
+    _timer(timer), _window(window)
 {
     _RPcommonData.GameTimer = _timer;
 }
@@ -46,13 +62,25 @@ void RenderModule::Initialize()
 
     _primaryDevice = std::make_unique<GDX12Device>();
     _secondaryDevice = std::make_unique<GDX12Device>();
-    FrameGraph graph(_primaryDevice.get(), _secondaryDevice.get());
-    ConfigureFrameGraph(graph);
-    CompileFrameGraph(graph);
-    _metrics.Initialize(
-        _frameGraph->UsesDevice(DEVICE_ROLE_PRIMARY) ? _primaryDevice.get() : nullptr,
-        _frameGraph->UsesDevice(DEVICE_ROLE_SECONDARY) ? _secondaryDevice.get() : nullptr);
+    SetGraphicsPipeline(ConfigureDefaultPipeline);
+    _metrics.Initialize();
     SubscribeToSceneManager();
+}
+
+void RenderModule::SetGraphicsPipeline(PipelineConfiguration configure)
+{
+    FrameGraph graph(_primaryDevice.get(), _secondaryDevice.get());
+    const FrameGraphInputs inputs{
+        graph.ImportTexture("back-buffer", [this]() { return _backBuffer->GetCurrentBuffer(); }),
+        graph.ImportTexture("depth-stencil", [this]() { return _depthStencil.get(); })
+    };
+    configure(graph, inputs);
+    CompileFrameGraph(graph);
+}
+
+void RenderModule::StartBenchmarkRun(const char* name, std::chrono::seconds duration)
+{
+    _metrics.BeginRun(name, duration);
 }
 
 void RenderModule::Uninitialize()
@@ -62,21 +90,22 @@ void RenderModule::Uninitialize()
 
 void RenderModule::OnResize()
 {
+    if (!_frameGraph) { return; }
     ResetMetricsInterval();
     uint16_t width, height;
     _window->GetWindowSize(width, height);
 
     _renderingSuspended = !width || !height;
-    if (_frameGraph) { _frameGraph->WaitForGPUCompletion(); }
+    _frameGraph->WaitForGPUCompletion();
     if (_renderingSuspended) { return; }
 
-    if (_frameGraph) { _frameGraph->ReleaseFrameSlotResourcesForResize(); }
+    _frameGraph->ReleaseFrameSlotResourcesForResize();
     _backBuffer->Resize(width, height);
     _depthStencil->Resize(width, height);
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
-    if (_frameGraph) { _frameGraph->ResizeFrameSlotResources({width, height}); }
+    _frameGraph->ResizeFrameSlotResources({width, height});
 }
 
 GDX12Material* RenderModule::GetMaterialByName(const std::string& name)
@@ -722,36 +751,6 @@ void RenderModule::MarkSceneDataDirty()
         ecs.ForEach<CameraComponent>([](Entity, CameraComponent& camera) { camera.DirtyFlag = true; });
         ecs.ForEach<StaticMeshRenderComponent>([](Entity, StaticMeshRenderComponent& renderer) { renderer.DirtyFlag = true; });
     }
-}
-
-void RenderModule::ConfigureFrameGraph(FrameGraph& fg)
-{
-    fg.SetTransportQueuePolicy(TransportQueuePolicy::Auto);
-
-    const auto backBuffer = fg.ImportTexture("back-buffer", [this]() { return _backBuffer->GetCurrentBuffer(); });
-    const auto depthStencil = fg.ImportTexture("depth-stencil", [this]() { return _depthStencil.get(); });
-
-    auto culling = fg.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
-    auto opaque = fg.AddPrimaryGPUPass<GDX12OpaquePass>("Opaque");
-    auto transparency = fg.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
-    auto composition = fg.AddPrimaryGPUPass<GDX12WBOITCompositionPass>("Composition");
-    auto clear = fg.AddPrimaryGPUPass<GDX12TextureClearPass>("Back Buffer Clear");
-    auto upscale = fg.AddPrimaryGPUPass<GDX12XeSSUpscalePass>("XeSS");
-    auto output = fg.AddPrimaryGPUPass<GDX12OutputToScreenPass>("Output To Screen");
-
-    fg.ConnectNodes(backBuffer, clear.GetInput("InTexture"));
-    fg.ConnectNodes(depthStencil, clear.GetInput("InDepthBuffer"));
-    fg.ConnectNodes(clear.GetOutput("OutClearedTexture"), output.GetInput("InBackBuffer"));
-    fg.ConnectNodes(culling.GetOutput("OutOpaqueDrawStream"), opaque.GetInput("InDrawStream"));
-    fg.ConnectNodes(culling.GetOutput("OutTransparentDrawStream"), transparency.GetInput("InDrawStream"));
-    fg.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), transparency.GetInput("InDepthBuffer"));
-    fg.ConnectNodes(opaque.GetOutput("OutColorTexture"), composition.GetInput("InOpaqueTexture"));
-    fg.ConnectNodes(transparency.GetOutput("OutAccumulationTexture"), composition.GetInput("InAccumulationTexture"));
-    fg.ConnectNodes(transparency.GetOutput("OutRevealageTexture"), composition.GetInput("InRevealageTexture"));
-    fg.ConnectNodes(composition.GetOutput("OutColorTexture"), upscale.GetInput("InColorTexture"));
-    fg.ConnectNodes(opaque.GetOutput("OutDepthBuffer"), upscale.GetInput("InDepthBuffer"));
-    fg.ConnectNodes(opaque.GetOutput("OutVelocityBuffer"), upscale.GetInput("InVelocityBuffer"));
-    fg.ConnectNodes(upscale.GetOutput("OutColorTexture"), output.GetInput("InColorTexture"));
 }
 
 void RenderModule::SubscribeToSceneManager()

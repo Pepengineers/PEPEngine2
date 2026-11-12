@@ -8,8 +8,6 @@ public:
     EditorApp& operator =(const EditorApp& rhs) = delete;
     ~EditorApp() override;
 
-    bool Initialize() override;
-
 protected:
     void OnResize() override;
     void Update(const GameTimer& gameTimer) override;
@@ -63,16 +61,6 @@ EditorApp::EditorApp(HINSTANCE hInstance)
 
 EditorApp::~EditorApp()
 {
-}
-
-bool EditorApp::Initialize()
-{
-    if (!App::Initialize())
-    {
-        return false;
-    }
-
-    return true;
 }
 
 void EditorApp::OnResize()

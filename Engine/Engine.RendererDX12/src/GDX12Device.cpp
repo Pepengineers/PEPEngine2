@@ -3,6 +3,55 @@
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 
+#include <cfgmgr32.h>
+#include <initguid.h>
+#include <devpkey.h>
+#include <pciprop.h>
+
+#pragma comment(lib, "Cfgmgr32.lib")
+
+namespace
+{
+    std::string ToUTF8(const wchar_t* text)
+    {
+        const int size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, -1, nullptr, 0, nullptr, nullptr);
+        if (size <= 1) { return {}; }
+
+        std::string result(size, '\0');
+        if (!WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, text, -1, result.data(), size, nullptr, nullptr))
+        { return {}; }
+        result.pop_back();
+        return result;
+    }
+
+    unsigned GetPCIeGeneration(LUID adapterLuid)
+    {
+        DISPLAYCONFIG_ADAPTER_NAME adapter{};
+        adapter.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_ADAPTER_NAME;
+        adapter.header.size = sizeof(adapter);
+        adapter.header.adapterId = adapterLuid;
+        if (DisplayConfigGetDeviceInfo(&adapter.header) != ERROR_SUCCESS) { return 0; }
+
+        WCHAR instanceId[MAX_DEVICE_ID_LEN]{};
+        DEVPROPTYPE type = DEVPROP_TYPE_EMPTY;
+        ULONG size = sizeof(instanceId);
+        if (CM_Get_Device_Interface_PropertyW(adapter.adapterDevicePath, &DEVPKEY_Device_InstanceId, &type,
+                reinterpret_cast<PBYTE>(instanceId), &size, 0) != CR_SUCCESS || type != DEVPROP_TYPE_STRING)
+        { return 0; }
+
+        DEVINST device = 0;
+        if (CM_Locate_DevNodeW(&device, instanceId, CM_LOCATE_DEVNODE_NORMAL) != CR_SUCCESS) { return 0; }
+
+        ULONG generation = 0;
+        size = sizeof(generation);
+        if (CM_Get_DevNode_PropertyW(device, &DEVPKEY_PciDevice_CurrentLinkSpeed, &type,
+                reinterpret_cast<PBYTE>(&generation), &size, 0) != CR_SUCCESS ||
+            type != DEVPROP_TYPE_UINT32 || size != sizeof(generation) || generation > 7)
+        { return 0; }
+        return generation;
+    }
+}
+
 GDX12Device::GDX12Device() :
     _isInitialized(false),
     _rtvDescriptorSize(0),
@@ -62,13 +111,16 @@ void GDX12Device::CollectDeviceFeatures()
 
     _specs.Features.Init(_device.Get());
 
-    DXGI_ADAPTER_DESC1 adapterDesc;
-    _adapter.Get()->GetDesc1(&adapterDesc);
+    DXGI_ADAPTER_DESC1 adapterDesc{};
+    const HRESULT adapterResult = _adapter->GetDesc1(&adapterDesc);
 
-    _specs.Name = WStringToString(adapterDesc.Description);
+    _specs.Name = ToUTF8(adapterDesc.Description);
     _specs.DedicatedVideoMemory = adapterDesc.DedicatedVideoMemory;
     _specs.DedicatedSystemMemory = adapterDesc.DedicatedSystemMemory;
     _specs.SharedSystemMemory = adapterDesc.SharedSystemMemory;
+    _specs.PCIeGeneration = SUCCEEDED(adapterResult) && !_specs.Features.UMA()
+        ? GetPCIeGeneration(adapterDesc.AdapterLuid)
+        : 0;
 }
 
 void GDX12Device::Reset()
@@ -114,7 +166,7 @@ HRESULT GDX12Device::TryFlush() noexcept
     return FAILED(directResult) ? directResult : copyResult;
 }
 
-const DeviceSpecs& GDX12Device::GetDeviceFeatures()
+const DeviceSpecs& GDX12Device::GetDeviceFeatures() const
 {
     return _specs;
 }

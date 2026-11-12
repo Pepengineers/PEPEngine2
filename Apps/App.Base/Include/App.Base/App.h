@@ -9,6 +9,7 @@
 
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.RendererDX12/D3DHelpers.h"
+#include "Engine.RendererDX12/RenderPasses/RenderPassIncludes.h"
 
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Modules/SceneManagerModule.h"

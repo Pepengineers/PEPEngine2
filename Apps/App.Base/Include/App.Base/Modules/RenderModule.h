@@ -32,9 +32,17 @@ struct TransformCompGPUData
     Matrix PrevWorld = Identity4x4();
 };
 
+struct FrameGraphInputs
+{
+    OutputPinRef BackBuffer;
+    OutputPinRef DepthStencil;
+};
+
 class RenderModule final : public Module
 {
 public:
+    using PipelineConfiguration = void (*)(FrameGraph&, const FrameGraphInputs&);
+
     RenderModule(Window* window, GameTimer* timer);
     ~RenderModule() override;
 
@@ -43,8 +51,11 @@ public:
 
     void OnResize();
     void DumpFrameGraphDebugReport() const;
-    void SaveMetricsReport() const { _metrics.SaveReport(); }
     void ResetMetricsInterval() { _metrics.ResetInterval(); }
+
+    void SetGraphicsPipeline(PipelineConfiguration configure);
+    void StartBenchmarkRun(const char* name, std::chrono::seconds duration);
+    Event<>& OnBenchmarkRunCompleted() { return _metrics.OnRunCompleted; }
 
     using MetricsSample = RenderingMetrics::Sample;
     // Read on the application thread. Sampling may invalidate references to individual entries.
@@ -120,7 +131,6 @@ protected:
 private:
     GDX12DeviceResources& GetDeviceResources(EDeviceRole role);
     void BuildBackBuffer(GDX12DeviceResources& presentResources);
-    void ConfigureFrameGraph(FrameGraph& graph);
     void CompileFrameGraph(FrameGraph& graph);
     void UploadSceneResources(GDX12DeviceResources& resources, uint32_t flags);
     void ResizeSceneBuffers(GDX12DeviceResources& resources, uint32_t flags);
@@ -155,7 +165,7 @@ private:
     std::unordered_map<std::string, std::unique_ptr<GDX12Material>> _materials;
     std::unordered_map<uint32_t, const Mesh*> _meshes;
 
-    // The swap chain and display depth belong to the primary device.
+    // The swap chain and display depth belong to the presenting device.
     std::unique_ptr<GDX12SwapChain> _backBuffer;
     std::unique_ptr<GDX12Texture> _depthStencil;
     

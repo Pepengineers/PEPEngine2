@@ -290,10 +290,6 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         {
             if (auto renderModule = Locator.GetModule<RenderModule>()) { renderModule->DumpFrameGraphDebugReport(); }
         }
-        else if (wParam == VK_F9)
-        {
-            if (auto renderModule = Locator.GetModule<RenderModule>()) { renderModule->SaveMetricsReport(); }
-        }
         return 0;
     }
 

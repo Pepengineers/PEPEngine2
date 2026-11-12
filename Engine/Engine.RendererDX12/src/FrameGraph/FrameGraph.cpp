@@ -1162,6 +1162,11 @@ bool CompiledFrameGraph::UsesDevice(EDeviceRole role) const
     return false;
 }
 
+const GDX12Device* CompiledFrameGraph::GetActiveDevice(EDeviceRole role) const
+{
+    return UsesDevice(role) ? _runtime->GetDeviceResources(role)->Device : nullptr;
+}
+
 uint32_t CompiledFrameGraph::GetDevicePassFlags(EDeviceRole role) const
 {
     uint32_t flags = 0;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Engine.Core/ECS/Event.h"
 #include "Engine.RendererDX12/FrameGraph/FrameGraph.h"
 
 #include <chrono>
@@ -20,31 +21,29 @@ public:
         std::vector<FrameGraphPassTiming> PassTimings;
     };
 
-    void Initialize(GDX12Device* primary, GDX12Device* secondary);
+    void Initialize();
+    void BeginRun(const char* pipeline, std::chrono::seconds duration);
     void RecordPresentedFrame(const CompiledFrameGraph& frameGraph);
     void ResetInterval();
-    void SaveReport() const;
+    Event<> OnRunCompleted;
 
     // Read on the application thread. Sampling may invalidate references to individual entries.
     const std::vector<Sample>& GetHistory() const { return _history; }
 
 private:
-    struct AdapterInfo
-    {
-        EDeviceRole Role;
-        std::string Name;
-        unsigned PCIeGeneration;
-    };
-
-    std::string ToJson() const;
+    void SaveReport(const CompiledFrameGraph& frameGraph) const;
+    std::string ToJson(const CompiledFrameGraph& frameGraph) const;
 
     using Clock = std::chrono::steady_clock;
-    bool _initialized = false;
+    bool _collecting = false;
+    std::string _pipeline;
+    std::chrono::seconds _runDuration{};
+    Clock::duration _activeRenderTime{};
+    std::optional<Clock::time_point> _lastPresent;
     std::optional<Clock::time_point> _intervalStart;
     std::uint64_t _presentCount = 0;
     std::vector<Sample> _history;
     std::string _cpuName;
     std::uint64_t _ramBytes = 0;
     std::string _motherboardName;
-    std::vector<AdapterInfo> _adapters;
 };

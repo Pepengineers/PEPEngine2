@@ -5,6 +5,8 @@
 #include "ffx-api/ffx_upscale.h"
 #include "ffx-api/dx12/ffx_api_dx12.h"
 
+#include <algorithm>
+
 class GDX12FSRUpscalePass : public GDX12RenderPass
 {
 public:
@@ -102,7 +104,7 @@ public:
 		dispatch.jitterOffset = {-frame->ActiveCameraJitterOffsetX, -frame->ActiveCameraJitterOffsetY};
 		dispatch.enableSharpening = true;
 		dispatch.sharpness = 1.f;
-		dispatch.frameTimeDelta = std::max(frame->GameTimer->DeltaTime() * 1000.f, 1.f);
+		dispatch.frameTimeDelta = (std::max)(frame->GameTimer->DeltaTime() * 1000.f, 1.f);
 		dispatch.reset = _resetHistory;
 		dispatch.preExposure = 1.f;
 		dispatch.viewSpaceToMetersFactor = 1.f;
