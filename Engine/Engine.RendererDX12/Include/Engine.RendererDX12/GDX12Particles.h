@@ -3,6 +3,8 @@
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include "Engine.RendererDX12/GDX12Material.h"
 #include <array>
+#include <memory>
+#include <vector>
 
 enum class ParticleBlend : std::uint8_t { WeightedAlpha, Additive, SortedAlpha };
 enum class ParticleShape : std::uint8_t { Point, Box, Sphere };
@@ -115,13 +117,39 @@ class GDX12ParticleSimulation
 public:
     GDX12ParticleSimulation();
     ~GDX12ParticleSimulation();
-    void BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common);
+    void BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common,
+        const GDX12ParticleSettings* capturedSettings = nullptr);
     void InitializePools(GDX12CommandList* commands, GDX12DeviceResources* resources);
     std::vector<GDX12Resource*> GetPoolResources() const;
     void SetInteractionField(GDX12ParticleInteractionField field) { _interaction = field; }
     GDX12Resource* GetInteractionResource() const { return _interaction.Resource; }
+    GDX12ParticleInteractionField GetInteractionField() const { return _interaction; }
     void Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,
-        RenderPipelineCommonData& common, GDX12Texture* opaqueDepth);
+        RenderPipelineCommonData& common, GDX12Texture* opaqueDepth,
+        D3D12_GPU_VIRTUAL_ADDRESS camera = 0, bool preserveTime = false);
+
+    struct Checkpoint
+    {
+        struct Pool
+        {
+            UINT Capacity, ReadIndex;
+            uint64_t ResetRevision, BurstTotal;
+            bool Initialized;
+            std::array<std::shared_ptr<GDX12Resource>, 6> Buffers;
+        };
+        std::vector<GDX12ParticleEmitter> Emitters;
+        std::vector<Pool> Pools;
+        bool Active = false, ResetMotion = false;
+        UINT Capacity = 0;
+        UINT64 Bytes = 0;
+    };
+    Checkpoint CaptureCheckpoint() const;
+    std::vector<std::shared_ptr<GDX12Resource>> GetConstantResources(UINT frame) const;
+    void RestoreCheckpointMetadata(const Checkpoint& checkpoint);
+    static void RecordCheckpoint(GDX12CommandList& commands, const Checkpoint& checkpoint,
+        GDX12Resource& payload, bool restore);
+    void RecordDisplayHistory(GDX12CommandList& commands, GDX12DeviceResources& resources,
+        uint64_t emitter, D3D12_GPU_DESCRIPTOR_HANDLE previous, bool valid);
 
 private:
     friend class GDX12ParticlesPass;

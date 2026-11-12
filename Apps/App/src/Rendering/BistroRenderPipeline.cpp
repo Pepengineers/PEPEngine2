@@ -555,7 +555,7 @@ void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipel
     };
     addGeometry(2);
     graph.DependsOn(geometryTail, grassPreparation);
-    graph.AddPass(p.ParticleSimulation);
+    p.AddParticleSimulation(graph);
     if (_earlyAO) p.AddAmbientOcclusion(graph, _earlyAO);
     if (p.GetShadowRoutes())
         geometryTail = _grassShadows->AddBoundary(graph, geometryTail, p.Bindings);

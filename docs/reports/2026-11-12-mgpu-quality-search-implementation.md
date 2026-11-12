@@ -58,3 +58,9 @@
 - Reflection --mgpu-debug прошёл 1–4 probes, оба режима, все расписания и маски. Исправлена отсутствующая descriptor heap при primary-фильтрации полностью импортированной пробы.
 - Минимальный native D3D12 reproducer подтвердил отказ constant+draw ExecuteIndirect только с GBV на Arc, независимо от Upload/Default и root size 1/20; RTX 5050 проходит. Матрица и исходники: [validation-limit.md](2026-11-12-mgpu-quality-search/validation-limit.md). Это внешний блокер полной GBV-проверки отражений, а не доказанный production-дефект драйвера.
 - BistroStartupTests --cvars-only на MisSpec прошёл: registry, полный round-trip/rollback профиля и benchmark flight.
+
+### Локальная фиксация этапов
+
+- Этап 2: bcbecf0e. Cleanup прямого mesh draw пересобран на MisSpec; ShadowRouting --gpu-validation повторно прошёл. Полная удалённая Release-сборка App прошла.
+- Этап 3: CPU ParticleTime и целевой MGPUParticleTests --gpu-validation прошли; checkpoint, полный учёт времени, смена владельца и displayed motion history включены в код. Проверка полной сцены остаётся общей частью этапа 5.
+- Reflection near/far GPU fixture: оба размещения, R/1,2R и возврат из незавершённого дальнего цикла прошли с debug layer.
