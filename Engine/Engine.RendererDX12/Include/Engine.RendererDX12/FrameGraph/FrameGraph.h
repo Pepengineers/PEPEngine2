@@ -123,10 +123,27 @@ private:
     FrameGraphCompileData _compileData;
 };
 
-struct FrameGraphGPUFrameTimes
+struct FrameGraphCrossGPUCopyStats
+{
+    uint64_t ResourceCount = 0;
+    uint64_t Bytes = 0;
+    double ExportMS = -1.0;
+    double ImportMS = -1.0;
+};
+
+struct FrameGraphPassTiming
+{
+    NodeId Name;
+    EDeviceRole Device;
+    double TimeMS;
+};
+
+struct FrameGraphPerFrameMetrics
 {
     double PrimaryMS = -1.0;
     double SecondaryMS = -1.0;
+    FrameGraphCrossGPUCopyStats CrossGPUCopies;
+    std::vector<FrameGraphPassTiming> PassTimings;
 };
 
 // Owns executable passes, the resolved plan and per-slot allocations after successful graph compilation.
@@ -147,8 +164,8 @@ public:
     void ReleaseFrameSlotResourcesForResize();
     void ResizeFrameSlotResources(UInt2 display);
     const FrameGraphPlan& GetExecutionPlan() const;
-    // Read GPU durations for the latest completed frame. Unavailable durations are -1.0.
-    FrameGraphGPUFrameTimes GetLatestGPUFrameTimes() const;
+    // Read metrics for the latest completed frame. Unavailable durations are -1.0.
+    FrameGraphPerFrameMetrics GetLatestFrameMetrics() const;
     // Describe placement, requested policies, fallbacks, GPU timings and cumulative copy statistics.
     std::string GetDebugReport() const;
     uint32_t GetDevicePassFlags(EDeviceRole role) const;

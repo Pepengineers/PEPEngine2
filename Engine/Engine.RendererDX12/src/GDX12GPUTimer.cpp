@@ -125,10 +125,23 @@ GDX12GPUTimer::TimestampRange GDX12GPUTimer::ReadResolvedTimestamps(UINT sampleI
     return {_mappedReadbackData[GetStartQueryIndex(sampleIndex)], _mappedReadbackData[GetEndQueryIndex(sampleIndex)]};
 }
 
+double GDX12GPUTimer::ReadResolvedTimeMS(UINT sampleIndex) const
+{
+    if (!_mappedReadbackData || !_timestampFrequency) { return -1.0; }
+    const auto timestamps = ReadResolvedTimestamps(sampleIndex);
+    const UINT64 elapsedTicks = timestamps.End > timestamps.Begin ? timestamps.End - timestamps.Begin : 0;
+    return static_cast<double>(elapsedTicks) * 1000.0 / static_cast<double>(_timestampFrequency);
+}
+
 void GDX12GPUTimer::OnCommandListExecuted(UINT64 fenceValue)
 {
-    _samples[_activeFrameIndex] = { fenceValue, -1.0 };
+    OnCommandListExecuted(fenceValue, _activeFrameIndex);
     _activeFrameIndex = (_activeFrameIndex + 1) % static_cast<UINT>(_samples.size());
+}
+
+void GDX12GPUTimer::OnCommandListExecuted(UINT64 fenceValue, UINT sampleIndex)
+{
+    _samples[sampleIndex] = {fenceValue, -1.0};
 }
 
 double GDX12GPUTimer::GetTimeMS()
@@ -160,15 +173,12 @@ void GDX12GPUTimer::UpdateResolvedFrames()
         const UINT64 fenceValue = sample.FenceValue;
         if (fenceValue == 0 || sample.TimeMS >= 0.0 || completedFenceValue < fenceValue) { continue; }
 
-        const auto timestamps = ReadResolvedTimestamps(frameIndex);
-        const UINT64 elapsedTicks = timestamps.End > timestamps.Begin ? timestamps.End - timestamps.Begin : 0;
-        const double resolvedTimeMS = static_cast<double>(elapsedTicks) * 1000.0 / static_cast<double>(_timestampFrequency);
-        sample.TimeMS = resolvedTimeMS;
+        sample.TimeMS = ReadResolvedTimeMS(frameIndex);
 
         if (fenceValue >= latestResolvedFenceValue)
         {
             latestResolvedFenceValue = fenceValue;
-            latestResolvedTimeMS = resolvedTimeMS;
+            latestResolvedTimeMS = sample.TimeMS;
         }
 
     }

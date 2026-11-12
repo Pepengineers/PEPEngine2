@@ -194,18 +194,30 @@ struct CompiledFrameGraph::Runtime
         std::map<EDeviceRole, GDX12CompletionPoint> LocalCopyReady;
     };
 
+    enum class CopyScope { Local, CrossGPU, CrossGPUAfterExport };
+
     struct CopySample
     {
         GDX12GPUTimer* Timer;
         EDeviceRole Device;
         UINT64 FenceValue;
+        bool Exporting;
+        uint64_t ResourceBytes;
     };
 
-    struct DeviceCopyTiming
+    struct CopyTiming
     {
         double TimeMS = 0.0;
         size_t Copies = 0;
         size_t Measured = 0;
+
+        void Add(double ms)
+        {
+            ++Copies;
+            if (ms >= 0.0) { TimeMS += ms; ++Measured; }
+        }
+
+        double GetCompleteTimeMS() const { return Measured == Copies ? TimeMS : -1.0; }
     };
 
     struct QueueTimestampSample
@@ -218,7 +230,8 @@ struct CompiledFrameGraph::Runtime
     struct CompletedFrameTiming
     {
         uint64_t FrameNumber;
-        std::array<DeviceCopyTiming, 2> CopyTimes{};
+        std::array<CopyTiming, 2> CopyTimes{};
+        FrameGraphCrossGPUCopyStats CrossGPUCopies;
         // Two devices, each with a DIRECT and a COPY queue.
         std::array<QueueTimestampSample, 4> QueueSamples{};
     };
@@ -267,6 +280,9 @@ struct CompiledFrameGraph::Runtime
     GDX12DeviceResources* GetDeviceResources(EDeviceRole role) const { return role == DEVICE_ROLE_PRIMARY ? Primary : Secondary; }
     FrameGraphSharedResources& GetSharedResources(Materialization& material) { return material.SharedAllocationAlias ? *material.SharedAllocationAlias : material.Shared; }
     uint32_t GetCurrentFrameSlotResourcesIndex() const { return uint32_t(Frame % CompileData.FrameSlotCount); }
+    // Keep the latest retired frame's pass timestamps intact through submission and Present.
+    uint32_t GetPassTimingSlotCount() const { return CompileData.FrameSlotCount + 1; }
+    uint32_t GetPassTimingSlot(uint64_t frame) const { return uint32_t(frame % GetPassTimingSlotCount()); }
 
     void WaitForGPUCompletion()
     {
@@ -283,13 +299,20 @@ struct CompiledFrameGraph::Runtime
         if (frameResources.SubmittedFrame)
         {
             CompletedFrameTiming timing{*frameResources.SubmittedFrame};
+            CopyTiming exports, imports;
             for (const auto& sample : frameResources.CopySamples)
             {
-                auto& device = timing.CopyTimes[sample.Device == DEVICE_ROLE_PRIMARY ? 0 : 1];
-                ++device.Copies;
                 const double ms = sample.Timer->GetTimeMS(sample.FenceValue);
-                if (ms >= 0.0) { device.TimeMS += ms; ++device.Measured; }
+                timing.CopyTimes[sample.Device == DEVICE_ROLE_PRIMARY ? 0 : 1].Add(ms);
+                (sample.Exporting ? exports : imports).Add(ms);
+                if (sample.ResourceBytes)
+                {
+                    ++timing.CrossGPUCopies.ResourceCount;
+                    timing.CrossGPUCopies.Bytes += sample.ResourceBytes;
+                }
             }
+            timing.CrossGPUCopies.ExportMS = exports.GetCompleteTimeMS();
+            timing.CrossGPUCopies.ImportMS = imports.GetCompleteTimeMS();
             for (size_t i = 0; i < frameResources.UsedQueues.size(); ++i)
             {
                 auto* queue = frameResources.UsedQueues[i];
@@ -608,7 +631,8 @@ struct CompiledFrameGraph::Runtime
         queue->ExecuteCommandLists(LocalBatch.Lists);
         const auto point = queue->GetCompletionPoint();
         frameResources.Completions.push_back(point);
-        for (auto* timer : LocalBatch.Timers) { timer->OnCommandListExecuted(point.Value); }
+        const auto timingSlot = GetPassTimingSlot(Frame);
+        for (auto* timer : LocalBatch.Timers) { timer->OnCommandListExecuted(point.Value, timingSlot); }
         LocalBatch.Lists.clear();
         LocalBatch.Timers.clear();
     }
@@ -616,7 +640,7 @@ struct CompiledFrameGraph::Runtime
     // Copy between two representations on one device; shared mappings carry data across adapters.
     GDX12CompletionPoint TransferResourceData(FrameGraphPhysicalResource& source, FrameGraphPhysicalResource& target,
         const GDX12CompletionPoint& ready, bool useCopy, FrameSlotResources& frameResources,
-        const PinAddress& sourcePin, bool exporting, bool crossesAdapters)
+        const PinAddress& sourcePin, bool exporting, CopyScope scope)
     {
         auto* device = source.DeviceResources->Device;
         auto* direct = device->GetCommandQueue();
@@ -658,8 +682,11 @@ struct CompiledFrameGraph::Runtime
         commands->EndPixEvent();
         auto completion = SubmitCommandList(queue, commands, frameResources);
         if (timed) { timer->second.OnCommandListExecuted(completion.Value); }
-        if (crossesAdapters)
-        { frameResources.CopySamples.push_back({&timer->second, device->Role, timed ? completion.Value : 0}); }
+        if (scope != CopyScope::Local)
+        {
+            const uint64_t bytes = scope == CopyScope::CrossGPU ? statistics.Bytes : 0;
+            frameResources.CopySamples.push_back({&timer->second, device->Role, timed ? completion.Value : 0, exporting, bytes});
+        }
         frameResources.LastUse[&source] = completion;
         frameResources.LastUse[&target] = completion;
         return completion;
@@ -688,7 +715,7 @@ struct CompiledFrameGraph::Runtime
                 const bool hasRemoteConsumer = std::any_of(resource.Consumers.begin(), resource.Consumers.end(), [&](const auto& consumer)
                 { return Definition.Nodes.at(consumer.first.Node).DeviceRole != producerRole; });
                 material.SharedReady = TransferResourceData(*material.ProducerResource, *shared, material.ProducerReady,
-                    Plan.UseCopyQueue, frameResources, source, true, hasRemoteConsumer);
+                    Plan.UseCopyQueue, frameResources, source, true, hasRemoteConsumer ? CopyScope::CrossGPU : CopyScope::Local);
             }
             else { material.SharedReady = material.ProducerReady; }
         }
@@ -698,8 +725,11 @@ struct CompiledFrameGraph::Runtime
         if (!material.LocalCopyReady.count(device))
         {
             if (!material.LocalCopies.count(device)) { material.LocalCopies[device] = CreateFrameGraphNative(owner, resource.Description); }
+            auto scope = CopyScope::Local;
+            // Count the resource once, even when transport uses both an export and an import.
+            if (remote) { scope = resource.Export ? CopyScope::CrossGPUAfterExport : CopyScope::CrossGPU; }
             material.LocalCopyReady[device] = TransferResourceData(*shared, *material.LocalCopies.at(device), material.SharedReady,
-                Plan.UseCopyQueue, frameResources, source, false, remote);
+                Plan.UseCopyQueue, frameResources, source, false, scope);
         }
         return {material.LocalCopies.at(device).get(), material.LocalCopyReady.at(device)};
     }
@@ -867,8 +897,9 @@ struct CompiledFrameGraph::Runtime
         auto* commandList = GetFrameCommandList(commandQueue, frameResources);
         auto* renderPass = Passes.at(nodeDefinition.Id).get();
         auto* passTimer = Timers.at(nodeDefinition.Id).get();
+        const auto timingSlot = GetPassTimingSlot(Frame);
 
-        passTimer->Start(commandList);
+        passTimer->RecordBegin(commandList, timingSlot);
         PassInitContext initContext(deviceResources, Common, nodeDefinition, Plan, Sources);
         PassExecutionContext executionContext(initContext, commandList, Frame, GetCurrentFrameSlotResourcesIndex(), portBindings);
 
@@ -876,7 +907,7 @@ struct CompiledFrameGraph::Runtime
         PreparePassResourceStates(nodeDefinition.Description, portBindings, commandList);
         renderPass->Execute(executionContext);
         RestorePassResourceStates(nodeDefinition, portBindings, commandList);
-        passTimer->Stop(commandList);
+        passTimer->RecordEndAndResolve(commandList, timingSlot);
 
         if (BatchLocalPasses)
         {
@@ -886,7 +917,7 @@ struct CompiledFrameGraph::Runtime
         }
 
         const auto completionPoint = SubmitCommandList(commandQueue, commandList, frameResources);
-        passTimer->OnCommandListExecuted(completionPoint.Value);
+        passTimer->OnCommandListExecuted(completionPoint.Value, timingSlot);
         TrackPassCompletion(nodeDefinition, portBindings, completionPoint, frameResources, nodeCompletions);
     }
 
@@ -958,7 +989,10 @@ std::unique_ptr<CompiledFrameGraph> FrameGraph::Compile()
         const auto& node = runtime->Definition.Nodes.at(entry.first);
         PassInitContext context(runtime->GetDeviceResources(node.DeviceRole), _common, node, runtime->Plan, runtime->Sources);
         entry.second->Initialize(context);
-        runtime->Timers[entry.first] = std::make_unique<GDX12GPUTimer>(runtime->GetDeviceResources(node.DeviceRole)->Device);
+        auto* device = runtime->GetDeviceResources(node.DeviceRole)->Device;
+        auto timer = std::make_unique<GDX12GPUTimer>();
+        timer->Initialize(device, device->GetCommandQueue(), runtime->GetPassTimingSlotCount());
+        runtime->Timers[entry.first] = std::move(timer);
     }
     auto graph = std::unique_ptr<CompiledFrameGraph>(new CompiledFrameGraph(std::move(runtime)));
     _definition->IsCompiled = true;
@@ -987,12 +1021,22 @@ void CompiledFrameGraph::ReleaseFrameSlotResourcesForResize()
 }
 uint32_t CompiledFrameGraph::GetCurrentFrameSlotResourcesIndex() const { return _runtime->GetCurrentFrameSlotResourcesIndex(); }
 const FrameGraphPlan& CompiledFrameGraph::GetExecutionPlan() const { return _runtime->Plan; }
-FrameGraphGPUFrameTimes CompiledFrameGraph::GetLatestGPUFrameTimes() const
+FrameGraphPerFrameMetrics CompiledFrameGraph::GetLatestFrameMetrics() const
 {
     const auto& frame = _runtime->LastCompletedFrameTiming;
     if (!frame) { return {}; }
     const auto [primary, secondary] = _runtime->CalculateGPUFrameSpans(*frame);
-    return {primary.DurationMS(), secondary.DurationMS()};
+    FrameGraphPerFrameMetrics metrics{primary.DurationMS(), secondary.DurationMS(), frame->CrossGPUCopies};
+    const auto timingSlot = _runtime->GetPassTimingSlot(frame->FrameNumber);
+    metrics.PassTimings.reserve(_runtime->Timers.size());
+    for (const auto& id : _runtime->Plan.Order)
+    {
+        const auto timer = _runtime->Timers.find(id);
+        if (timer == _runtime->Timers.end()) { continue; }
+        const auto role = _runtime->Definition.Nodes.at(id).DeviceRole;
+        metrics.PassTimings.push_back({id, role, timer->second->ReadResolvedTimeMS(timingSlot)});
+    }
+    return metrics;
 }
 
 std::string CompiledFrameGraph::GetDebugReport() const

@@ -18,6 +18,7 @@
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <utility>
 
 #include <ryml.hpp>
 #include <ryml_std.hpp>
@@ -216,8 +217,9 @@ void RenderingMetrics::RecordPresentedFrame(const CompiledFrameGraph& frameGraph
     const std::chrono::duration<double> interval = now - *_intervalStart;
     if (interval < std::chrono::seconds(1)) { return; }
 
-    const auto gpuTimes = frameGraph.GetLatestGPUFrameTimes();
-    _history.push_back({_presentCount / interval.count(), gpuTimes.PrimaryMS, gpuTimes.SecondaryMS});
+    auto frame = frameGraph.GetLatestFrameMetrics();
+    _history.push_back({_presentCount / interval.count(), frame.PrimaryMS, frame.SecondaryMS,
+        frame.CrossGPUCopies, std::move(frame.PassTimings)});
     _intervalStart = now;
     _presentCount = 0;
 }
@@ -253,6 +255,7 @@ std::string RenderingMetrics::ToJson() const
         else { node["pcie_generation"] << nullptr; }
     }
 
+    const bool usesTwoGPUs = _adapters.size() > 1;
     auto samples = root["samples"];
     samples |= ryml::SEQ;
     for (const auto& sample : _history)
@@ -262,6 +265,31 @@ std::string RenderingMetrics::ToJson() const
         node["fps"] << sample.FPS;
         WriteGPUTime(node["gpu_primary_frame_ms"], sample.GPUPrimaryFrameMS);
         WriteGPUTime(node["gpu_secondary_frame_ms"], sample.GPUSecondaryFrameMS);
+        auto passTimings = node["render_pass_timings"];
+        passTimings |= ryml::MAP;
+        for (const auto& adapter : _adapters)
+        {
+            auto passes = passTimings[GetDeviceRoleName(adapter.Role)];
+            passes |= ryml::SEQ;
+            for (const auto& timing : sample.PassTimings)
+            {
+                if (timing.Device != adapter.Role) { continue; }
+                auto pass = passes.append_child();
+                pass |= ryml::MAP;
+                pass["name"] << timing.Name;
+                pass["name"] |= ryml::VAL_DQUO;
+                WriteGPUTime(pass["time_ms"], timing.TimeMS);
+            }
+        }
+        if (usesTwoGPUs)
+        {
+            auto copies = node["cross_gpu_copies"];
+            copies |= ryml::MAP;
+            copies["resource_count"] << sample.CrossGPUCopies.ResourceCount;
+            copies["bytes"] << sample.CrossGPUCopies.Bytes;
+            WriteGPUTime(copies["export_ms"], sample.CrossGPUCopies.ExportMS);
+            WriteGPUTime(copies["import_ms"], sample.CrossGPUCopies.ImportMS);
+        }
     }
     return ryml::emitrs_json<std::string>(report);
 }

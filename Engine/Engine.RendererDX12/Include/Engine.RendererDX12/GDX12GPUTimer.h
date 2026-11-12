@@ -36,7 +36,9 @@ public:
     // For callers that own the sample slot and wait for its submissions before reading it.
     void RecordBegin(GDX12CommandList* commandList, UINT sampleIndex);
     void RecordEndAndResolve(GDX12CommandList* commandList, UINT sampleIndex);
+    void OnCommandListExecuted(UINT64 fenceValue, UINT sampleIndex);
     TimestampRange ReadResolvedTimestamps(UINT sampleIndex) const;
+    double ReadResolvedTimeMS(UINT sampleIndex) const;
     UINT64 GetTimestampFrequency() const { return _timestampFrequency; }
 
 private:

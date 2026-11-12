@@ -16,6 +16,8 @@ public:
         double FPS = 0.0;
         double GPUPrimaryFrameMS = -1.0;
         double GPUSecondaryFrameMS = -1.0;
+        FrameGraphCrossGPUCopyStats CrossGPUCopies;
+        std::vector<FrameGraphPassTiming> PassTimings;
     };
 
     void Initialize(GDX12Device* primary, GDX12Device* secondary);
