@@ -27,6 +27,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Sky.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Particles.h" />
     <ClInclude Include="src\GDX12ParticleResources.h" />
+    <ClInclude Include="src\GDX12ParticleOffload.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ParticlesPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Skinning.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12InstanceBatcher.h" />
@@ -92,6 +93,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\GDX12RenderPass.cpp" />
+    <ClCompile Include="src\GDX12ParticleOffload.cpp" />
     <ClCompile Include="src\GDX12RenderGraph.cpp" />
     <ClCompile Include="src\GDX12RenderHelpers.cpp" />
     <ClCompile Include="src\GDX12LightGrid.cpp" />

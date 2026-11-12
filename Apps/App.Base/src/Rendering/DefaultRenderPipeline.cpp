@@ -61,6 +61,7 @@ void DefaultRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipe
 {
     LinkInputs(inputs);
     auto& p = *_passes;
+    graph.AddPass(p.ParticleOffload);
     graph.AddPass(p.Environment);
     graph.AddPass(p.Culling);
     graph.AddPass(p.Depth);

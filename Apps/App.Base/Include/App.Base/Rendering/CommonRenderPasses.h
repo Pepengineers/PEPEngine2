@@ -38,6 +38,7 @@ struct CommonRenderPasses
     GDX12GPUCullingPass Culling;
     GDX12OpaquePass Depth{ GDX12OpaquePass::Stage::DepthPrepass };
     GDX12ParticleSimulationPass ParticleSimulation;
+    GDX12ParticleOffloadPass ParticleOffload;
     GDX12CascadedShadowPass SunShadow;
     GDX12LocalShadowPass LocalShadow;
     GDX12ReflectionProbePass Reflections;

@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <algorithm>
 #include <cmath>
+#include <unordered_set>
 
 namespace ParticleResources
 {
@@ -13,6 +14,7 @@ namespace ParticleResources
         XMFLOAT3 Velocity; float Rotation;
         float PreviousAge, PreviousRotation, SizeRandom;
         UINT Seed;
+        XMUINT2 Identity;
     };
     struct ParticleDraw
     {
@@ -46,7 +48,7 @@ namespace ParticleResources
         XMFLOAT4 InteractionArea;
         UINT InteractionResolution; float InteractionFloor; XMFLOAT2 InteractionPadding;
     };
-    static_assert(sizeof(Particle) == 64);
+    static_assert(sizeof(Particle) == 72);
     static_assert(sizeof(ParticleDraw) == 96);
     static_assert(sizeof(EmitterConstants) == 480);
     static_assert(sizeof(GDX12ParticleMeshVertex) == 44);
@@ -98,15 +100,15 @@ namespace ParticleResources
         }
     };
 
-    inline std::unique_ptr<GDX12RootSignature> CreateRoot(GDX12DeviceResources* resources)
+    inline std::unique_ptr<GDX12RootSignature> CreateRoot(GDX12DeviceResources* resources, bool simulation = false)
     {
         GDX12RootSignatureDesc root;
         root.VolatileSRVData = true;
         root.Constants = { 4 };
         root.NumSingleCBVSlots = 2;
         root.NumSingleSRVSlots = 4;
-        root.SRVRanges.emplace_back(Texture2D_RangeLength);
-        root.NumSingleUAVSlots = 12;
+        if (!simulation) root.SRVRanges.emplace_back(Texture2D_RangeLength);
+        root.NumSingleUAVSlots = simulation ? 5 : 12;
         root.StaticSamplers.emplace_back(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR,
             D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP);
         return std::make_unique<GDX12RootSignature>(resources->Device, root);
@@ -169,7 +171,7 @@ namespace ParticleResources
 
 struct GDX12ParticleSimulation::State
 {
-    explicit State(GDX12DeviceResources* resources);
+    explicit State(GDX12DeviceResources* resources, bool withoutDepth = false);
     bool Active = false;
     bool ResetMotion = false;
     UINT Capacity = 0;
@@ -178,4 +180,8 @@ struct GDX12ParticleSimulation::State
     std::unique_ptr<GDX12RootSignature> Root;
     std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> Compute;
     ComPtr<ID3D12CommandSignature> DispatchSignature;
+    std::unique_ptr<class GDX12ParticleOffload> Offload;
+    bool AdapterResolved = false;
+    ComPtr<IDXGIAdapter4> Secondary;
+    std::unordered_set<uint64_t> Offloaded, DepthWarnings;
 };

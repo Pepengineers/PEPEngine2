@@ -41,6 +41,11 @@ GDX12ParticleSettings GetParticleSettings()
     return { Enabled.GetValue() && quality != 0, quality, DrawEnabled.GetValue(), SimulationEnabled.GetValue(), AsyncCompute.GetValue() };
 }
 
+bool CanOffloadParticleEmitter(const GDX12ParticleEmitterSettings& settings)
+{
+    return settings.SharedSimulation && !settings.DepthCollision;
+}
+
 bool IsValidParticleEmitterSettings(const GDX12ParticleEmitterSettings& s)
 {
     return s.MaxParticles <= 1048576 && s.Substeps <= 16 && s.EdgeSamples <= 4 &&

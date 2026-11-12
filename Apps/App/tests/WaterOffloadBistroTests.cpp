@@ -3,6 +3,7 @@
 #include "App.Base/App.h"
 #include "../src/BistroScene.h"
 #include "../src/BistroWater.h"
+#include "App.Base/ECS/Components/ParticleEmitterComponent.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12DeviceFactory.h"
@@ -161,7 +162,7 @@ public:
             }
         throw std::runtime_error("Cannot find displayed position buffer");
     }
-    void Check(const std::filesystem::path& directory)
+    void Check(const std::filesystem::path& directory, bool withParticles)
     {
         std::filesystem::create_directories(directory);
         auto render = Locator.GetModule<RenderModule>();
@@ -181,6 +182,25 @@ public:
         UINT count = 0;
         ecs.ForEach<FluidRenderComponent>([&](Entity, FluidRenderComponent& fluid) { count += static_cast<UINT>(fluid.GetParticles()->size()); });
         Require(count > 0, "No water particles");
+        std::vector<Entity> particleEntities;
+        if (withParticles) Set(L"Render.Grass.AsyncCompute", "true");
+        if (withParticles)
+            for (UINT i = 0; i < 7; ++i)
+            {
+                auto entity = ecs.CreateEntity();
+                entity.AddComponent<TransformComponent>(BistroWater::Center + Vector3(float(i % 3) * 65 - 65, 130 + float(i / 3) * 50, 0));
+                auto& emitter = entity.AddComponent<ParticleEmitterComponent>();
+                GDX12ParticleEmitterSettings settings;
+                settings.MaxParticles = 32; settings.EmissionRate = 0; settings.SharedSimulation = i != 0;
+                settings.DepthCollision = i == 6; settings.InteractionEnabled = i == 3;
+                settings.Blend = i == 1 || i == 4 ? ParticleBlend::Additive : i == 0 || i == 2 || i == 5 ? ParticleBlend::SortedAlpha : ParticleBlend::WeightedAlpha;
+                settings.Geometry = i == 3 || i == 4 ? ParticleGeometry::Firefly : i == 5 ? ParticleGeometry::WaterDrop : ParticleGeometry::Billboard;
+                settings.SizeStart = settings.SizeEnd = 40; settings.SoftDistance = 10;
+                settings.SpeedMin = settings.SpeedMax = 10; settings.Acceleration = Vector3::Zero;
+                settings.LifetimeMin = settings.LifetimeMax = 30;
+                settings.ColorStart = settings.ColorEnd = Vector4(2, .5f, .2f, .8f);
+                emitter.SetSettings(settings); emitter.Emit(16); particleEntities.push_back(entity.GetId());
+            }
         std::cout << "Water image fixture particles=" << count << " primary=" << render->GetPrimaryDevice()->GetDeviceFeatures().Name << '\n';
         Timer.Reset(); Timer.Start(); Frame();
         Require(_pipeline->_water->Surface.GetSimulationBufferAccesses().empty(), "Fixture is using the single-GPU solver");
@@ -190,6 +210,43 @@ public:
         while (Positions(count) == initial && std::chrono::steady_clock::now() < deadline);
         Require(Positions(count) != initial, "Secondary solver never changed displayed positions before deadline");
         Capture(directory, "advanced");
+        if (withParticles)
+        {
+            const auto* resources = _pipeline->_resources;
+            Require(resources->ParticleSimulation->GetImportedResource(), "Mixed fixture did not create a shared particle display");
+            const auto checkVisible = [&]
+            {
+                Require(resources->ParticleMotion, "Particles produced no motion/coverage target");
+                const auto bytes = Read(*render->GetPrimaryDevice(), *resources->ParticleMotion->GetResource(), 16);
+                bool visible = false;
+                for (size_t pixel = 0; pixel < bytes.size() / 16; ++pixel)
+                {
+                    XMFLOAT4 sample; std::memcpy(&sample, bytes.data() + pixel * 16, 16);
+                    Require(std::isfinite(sample.x) && std::isfinite(sample.y), "Particle motion is nonfinite");
+                    visible |= sample.w > 0;
+                }
+                Require(visible, "Particle fixture produced no visible particles");
+            };
+            checkVisible();
+            for (UINT index = 1; index <= 5; ++index)
+            {
+                ecs.ForEach<ParticleEmitterComponent>([&](Entity id, ParticleEmitterComponent& emitter)
+                    { emitter.SetEnabled(id == particleEntities[index]); });
+                for (int i = 0; i < 4; ++i) Frame();
+                Require(resources->ParticleSimulation->GetPoolResources().empty(), "Imported-only fixture retained local simulation");
+                checkVisible(); DebugErrors(render->GetPrimaryDevice()->GetDevice().Get()); DebugErrors(_secondary.Get());
+                std::cout << "PASS imported-only visible particle geometry/blend fixture=" << index << '\n';
+                // Enabling another emitter explicitly starts a new effect after removal.
+                if (index < 5) ecs.Get<ParticleEmitterComponent>(particleEntities[index + 1]).Emit(16);
+            }
+            for (const auto entity : particleEntities)
+            {
+                auto& emitter = ecs.Get<ParticleEmitterComponent>(entity); emitter.SetEnabled(true); emitter.Emit(16);
+            }
+            for (int i = 0; i < 4; ++i) Frame(); checkVisible();
+            Set(L"Render.Grass.AsyncCompute", "false");
+            std::cout << "PASS mixed particle color/motion with local + imported, three blends, billboard/mesh/drop, soft/depth and shared interaction\n";
+        }
         ecs.ForEach<FluidRenderComponent>([](Entity, FluidRenderComponent& fluid)
         { auto settings = fluid.GetSettings(); settings.SimulationEnabled = false; fluid.SetSettings(settings); });
         for (int i = 0; i < 12; ++i) Frame(); Capture(directory, "paused");
@@ -200,6 +257,14 @@ public:
             Frame();
         }
         Capture(directory, "moved", true);
+        if (withParticles)
+        {
+            auto& emitter = ecs.Get<ParticleEmitterComponent>(particleEntities[1]);
+            auto settings = emitter.GetSettings(); settings.DepthCollision = true; emitter.SetSettings(settings);
+            Frame(); settings.DepthCollision = false; emitter.SetSettings(settings); emitter.Reset(); emitter.Emit(8);
+            Frame(); settings.MaxParticles = 65; emitter.SetSettings(settings); Frame();
+            ecs.Get<ParticleEmitterComponent>(particleEntities[2]).SetEnabled(false); Frame();
+        }
         ecs.ForEach<FluidRenderComponent>([](Entity, FluidRenderComponent& fluid)
         { auto settings = fluid.GetSettings(); settings.SimulationEnabled = true; fluid.SetSettings(settings); fluid.Reset(); });
         for (int i = 0; i < 4; ++i) Frame(); Capture(directory, "reset");
@@ -235,14 +300,15 @@ int main(int argc, char** argv)
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
     try
     {
-        bool gpuValidation = false;
+        bool gpuValidation = false, withParticles = false;
         std::filesystem::path output = "Build/WaterOffloadBistro";
         for (int i = 1; i < argc; ++i)
         {
             const std::string argument = argv[i];
             if (argument == "--gpu-validation") gpuValidation = true;
+            else if (argument == "--particles") withParticles = true;
             else if (argument == "--output" && i + 1 < argc) output = argv[++i];
-            else throw std::invalid_argument("Usage: [--gpu-validation] [--output directory]");
+            else throw std::invalid_argument("Usage: [--gpu-validation] [--particles] [--output directory]");
         }
         ComPtr<ID3D12Debug> debug; ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug))); debug->EnableDebugLayer();
         if (gpuValidation)
@@ -250,7 +316,7 @@ int main(int argc, char** argv)
             ComPtr<ID3D12Debug1> validation; ThrowIfFailed(debug.As(&validation)); validation->SetEnableGPUBasedValidation(TRUE);
         }
         std::pair<ComPtr<ID3D12Device>, ComPtr<ID3D12Device>> devices;
-        { BistroRenderGraphTests app; Require(app.Initialize(), "Bistro initialization failed"); app.Check(output); devices = app.Devices(); }
+        { BistroRenderGraphTests app; Require(app.Initialize(), "Bistro initialization failed"); app.Check(output, withParticles); devices = app.Devices(); }
         DebugErrors(devices.first.Get()); DebugErrors(devices.second.Get());
         ThrowIfFailed(devices.first->GetDeviceRemovedReason()); ThrowIfFailed(devices.second->GetDeviceRemovedReason());
         std::cout << "PASS queued Bistro shutdown\n";
