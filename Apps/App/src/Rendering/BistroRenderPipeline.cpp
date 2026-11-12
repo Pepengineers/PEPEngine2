@@ -332,6 +332,14 @@ std::vector<BistroQualitySearch::TechniqueMeasurement> BistroRenderPipeline::Get
     return result;
 }
 
+std::optional<D3D12_RESOURCE_DESC> BistroRenderPipeline::GetReflectionShadowDescription() const
+{
+    if (!_passes) return std::nullopt;
+    auto* texture = _passes->LocalShadow.GetOutput(0)->GetTexture();
+    if (!texture || !texture->IsInitialized()) return std::nullopt;
+    return texture->GetResource()->D3DResource->GetDesc();
+}
+
 bool BistroRenderPipeline::IsCollisionViewEnabled()
 {
 #ifdef _DEBUG

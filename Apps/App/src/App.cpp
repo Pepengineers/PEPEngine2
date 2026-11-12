@@ -165,6 +165,7 @@ namespace
                 _qualityRun = 0;
                 _transferCalibration.clear();
                 _transferHints.clear();
+                _reflectionTransferBytes = {};
                 _qualityTechniques = BistroQuality::SearchTechniques(ConsoleModule{});
                 _qualityWinner.reset();
                 _winnerPatch.clear();
@@ -533,6 +534,7 @@ namespace
             _setupStarted = QualityTime();
             try
             {
+                if (_qualitySearch) ExportTransferHint(*Locator.GetModule<RenderModule>());
                 ConsoleVariablePatch previous;
                 Locator.GetModule<RenderModule>()->DrainFrameWork();
                 BistroQuality::RegisterProfileShadowVariables(_trialPatch);
@@ -591,7 +593,18 @@ namespace
             if (_transferCalibration.size() == 2 * std::size(sizes))
             {
                 runtime.SetTransferCalibration(_transferCalibration);
-                _qualitySearch->SetTransferCostEstimate([this](const auto& candidate) { return TransferOrderingCost(candidate); });
+                if (const auto source = _qualityPipeline->GetReflectionShadowDescription())
+                    for (size_t tier = 0; tier < _reflectionTransferBytes.size(); ++tier)
+                    {
+                        auto desc = *source;
+                        const auto resolution = std::stoul(BistroQuality::Local[0].Values[tier]);
+                        desc.Width = desc.Height = (std::max)(1ul, resolution);
+                        if (!resolution) desc.DepthOrArraySize = 1;
+                        devices.Primary->GetDevice()->GetCopyableFootprints(&desc, 0, desc.MipLevels * desc.DepthOrArraySize,
+                            0, nullptr, nullptr, nullptr, &_reflectionTransferBytes[tier]);
+                    }
+                _qualitySearch->SetTransferCostEstimate([this, &runtime](const auto& candidate)
+                    { return TransferOrderingCost(candidate, runtime); });
                 std::ofstream report(_qualityOutput / "transfer-calibration.json");
                 report << std::setprecision(12) << "{\"schema\":1,\"path\":\"synchronous snapshot pack/export/import/unpack\","
                     << "\"physical_maximum\":false,\"content_verified\":true,\"warmup_copies\":3,\"steady_samples\":20,"
@@ -625,9 +638,49 @@ namespace
             return candidate;
         }
 
-        std::optional<double> TransferOrderingCost(const BistroQualitySearch::Candidate& candidate) const
+        UINT64 MandatoryReflectionTransferBytes(const BistroQualitySearch::Candidate& candidate) const
+        {
+            const auto& probes = candidate.MGPU.Reflections;
+            if (!probes.Count || (!probes.Placement && std::none_of(probes.SecondaryFaces.begin(), probes.SecondaryFaces.end(),
+                [](unsigned mask) { return mask != 0; }))) return 0;
+            for (size_t axis = 0; axis < _qualityTechniques.size(); ++axis)
+                if (std::string_view(_qualityTechniques[axis]->Name) == "Local shadows")
+                    return _reflectionTransferBytes.at(candidate.Tiers.at(axis));
+            return 0;
+        }
+
+        std::optional<double> MandatoryReflectionTransferMs(const BistroQualitySearch::Candidate& candidate,
+            const RenderMGPURuntime& runtime) const
+        {
+            const auto bytes = MandatoryReflectionTransferBytes(candidate);
+            if (!bytes || _transferCalibration.empty()) return std::nullopt;
+            return runtime.EstimateTransferMilliseconds(_transferCalibration.front().Producer,
+                _transferCalibration.front().Consumer, bytes);
+        }
+
+        void ExportTransferHint(RenderModule& renderer) const
+        {
+            const auto* runtime = renderer.GetMGPURuntime();
+            if (!runtime || !_qualityRequest) return;
+            const auto bytes = MandatoryReflectionTransferBytes(_qualityRequest->Settings);
+            const auto estimate = MandatoryReflectionTransferMs(_qualityRequest->Settings, *runtime);
+            std::ofstream report(_qualityOutput / ("transfer-hint-" + std::to_string(_qualityRun) + ".json"));
+            report << std::setprecision(12) << "{\"schema\":1,\"usage\":\"ordering only\",\"mandatory_reflection_packet_bytes\":" << bytes
+                << ",\"estimated_ms\":";
+            if (estimate) report << *estimate; else report << "null";
+            report << ",\"freshness_budget_ms\":" << BistroQualitySearch::FreshnessBudgetMs(*_qualityProfile)
+                << ",\"estimated_over_budget\":" << std::boolalpha
+                << (estimate && *estimate > BistroQualitySearch::FreshnessBudgetMs(*_qualityProfile))
+                << ",\"hard_rejected\":false,\"coverage\":\"one mandatory synchronous packet per secondary reflection capture; other costs unknown\"}\n";
+            report.close();
+            if (!report) throw std::runtime_error("Cannot export transfer feasibility hint");
+        }
+
+        std::optional<double> TransferOrderingCost(const BistroQualitySearch::Candidate& candidate,
+            const RenderMGPURuntime& runtime) const
         {
             double cost = 0;
+            bool measuredReflections = false;
             const auto workload = TransferWorkload(candidate);
             for (const auto* technique : {"particles", "reflection-probes"})
                 for (auto hint = _transferHints.rbegin(); hint != _transferHints.rend(); ++hint)
@@ -638,8 +691,14 @@ namespace
                     if (std::string_view(technique) == "reflection-probes" &&
                         !(hint->Settings.MGPU.Reflections == candidate.MGPU.Reflections)) continue;
                     const auto found = hint->Costs.find(technique);
-                    if (found != hint->Costs.end()) { cost += found->second; break; }
+                    if (found != hint->Costs.end())
+                    {
+                        cost += found->second;
+                        measuredReflections |= std::string_view(technique) == "reflection-probes";
+                        break;
+                    }
                 }
+            if (!measuredReflections) cost += MandatoryReflectionTransferMs(candidate, runtime).value_or(0);
             // Unknown paths remain eligible; the estimate only orders trials of the same workload.
             return cost;
         }
@@ -1170,6 +1229,7 @@ namespace
             std::map<std::string, double> Costs;
         };
         std::vector<TransferHint> _transferHints;
+        std::array<UINT64, 5> _reflectionTransferBytes{};
         std::optional<double> _warmupFps;
         BistroRenderPipeline* _qualityPipeline = nullptr;
         std::map<std::string, BistroQualitySearch::FreshnessMeasurements> _freshness;
