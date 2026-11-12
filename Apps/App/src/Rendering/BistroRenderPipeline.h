@@ -32,6 +32,7 @@ public:
     void Resize(RenderPipelineContext&) override;
     const RenderPipelineBindings& GetBindings() const override;
     std::vector<BistroQualitySearch::TechniqueMeasurement> GetQualityMeasurements() const;
+    std::optional<D3D12_RESOURCE_DESC> GetReflectionShadowDescription() const;
 
 private:
     friend class BistroRenderGraphTests;
