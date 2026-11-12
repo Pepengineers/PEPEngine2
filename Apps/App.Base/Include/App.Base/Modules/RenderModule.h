@@ -165,6 +165,7 @@ public:
 
     const float GetAspectRatio();
     GDX12FrameConstants* GetCurrentPrimaryFrameConstants();
+    std::vector<GDX12Texture*> GetReflectionMaterialTextures() const;
     GDX12FrameConstants* GetCurrentSecondaryFrameConstants();
     const GPUMesh* GetPrimaryGPUMesh(MeshHandle handle);
     const GPUMesh* GetSecondaryGPUMesh(MeshHandle handle);

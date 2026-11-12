@@ -1,6 +1,7 @@
 #pragma once
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include <cstdint>
+#include "Engine.RendererDX12/GDX12ReflectionSchedule.h"
 
 constexpr UINT MaxReflectionProbes = 32;
 
@@ -11,6 +12,7 @@ struct GDX12ReflectionCaptureSettings
     UINT FacesPerFrame = 0;
     UINT PrefilterSamples = 0;
     UINT UpdateInterval = 1;
+    UINT SecondaryFaces = 0;
 };
 
 struct GDX12ReflectionProbe : GDX12ReflectionCaptureSettings
@@ -30,6 +32,8 @@ struct GDX12ReflectionSettings
 {
     bool Enabled = true;
     int Quality = 2;
+    bool Scheduled = false;
+    GDX12ReflectionSchedule::Policy Policy;
 };
 
 GDX12ReflectionSettings GetReflectionSettings();

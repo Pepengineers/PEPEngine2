@@ -1,5 +1,8 @@
 #include "Rendering/BistroRenderPipeline.h"
 #include "App.Base/Modules/RenderModule.h"
+#include "App.Base/Rendering/CrossAdapterParticles.h"
+#include "App.Base/Rendering/RenderShadowRoutes.h"
+#include "App.Base/Rendering/CrossAdapterReflections.h"
 #include "App.Base/Rendering/CrossAdapterEnvironment.h"
 #include "Rendering/UI/BistroUIPosters.h"
 #include "BistroUICanvases.h"
@@ -211,6 +214,18 @@ namespace
     };
 }
 
+struct BistroRenderPipeline::ReflectionGrass
+{
+    std::optional<BistroGrassGeometry::ShadowScene> Scene;
+    GDX12GrassFieldProducer::SnapshotLayout Layout;
+    std::shared_ptr<GDX12Resource> Source;
+    std::shared_ptr<const void> Owner;
+    CrossAdapterWork::View Remote;
+    CrossAdapterWork::Channel Channel;
+    std::unique_ptr<GDX12GrassRenderer> Renderer;
+    bool Prepared = false;
+};
+
 BistroRenderPipeline::BistroRenderPipeline(std::shared_ptr<SceneManagerModule> scenes) : _scenes(std::move(scenes)) {}
 BistroRenderPipeline::~BistroRenderPipeline() = default;
 
@@ -370,6 +385,56 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& context)
     _passes->Setup(context);
     LinkInputs({ context.BackBuffer });
     _passes->Initialize();
+    _reflectionGrass = std::make_unique<ReflectionGrass>();
+    if (auto* route = _passes->GetReflectionRoute())
+        route->SetApplication(
+            [this]
+            {
+                return _reflectionGrass->Source ? std::vector<std::shared_ptr<GDX12Resource>>{_reflectionGrass->Source} :
+                    std::vector<std::shared_ptr<GDX12Resource>>{};
+            },
+            [this](GDX12DeviceResources& resources, GDX12ReflectionProbePass& capture, CrossAdapterWork& work, UINT64& copiedBytes)
+            {
+                auto& state = *_reflectionGrass;
+                state.Prepared = false;
+                if (!state.Scene || state.Scene->Patches.empty()) return std::vector<CrossAdapterWork::Use>{};
+                if (!state.Source) throw std::logic_error("Reflection grass has no corresponding field snapshot");
+                const auto bytes = state.Source->D3DResource->GetDesc().Width;
+                if (!state.Remote.Resource || state.Remote.Resource->D3DResource->GetDesc().Width != bytes)
+                    state.Remote = work.Allocate(*resources.Device, bytes);
+                copiedBytes += work.Copy(state.Channel, *_resources->Device, *resources.Device,
+                    {{work.Identify(state.Source, *_resources->Device), state.Remote}});
+                auto snapshot = std::make_shared<GDX12GrassFieldSnapshot>(*resources.SRV_UAV_Heap,
+                    *state.Remote.Resource, state.Layout, state.Remote.Resource);
+                if (!state.Renderer) state.Renderer = std::make_unique<GDX12GrassRenderer>(&resources);
+                std::vector<GDX12GrassInstance> instances;
+                for (const auto& patch : state.Scene->Patches) instances.push_back(patch.Instance);
+                const GDX12GrassRenderer::DisplayedFields fields{snapshot, snapshot, true};
+                state.Renderer->BeginFrame(*_common, std::move(instances), state.Scene->Wind, state.Scene->Controls, {}, 0, &fields);
+                for (UINT slot = 0; slot < capture.GetGeometryViewCapacity(); ++slot)
+                    if (const auto* view = capture.GetGeometryView(slot))
+                        for (UINT patch = 0; patch < state.Renderer->PatchCount(); ++patch) state.Renderer->PrepareView(*view, patch);
+                return std::vector<CrossAdapterWork::Use>{{state.Remote, GDX12RenderGraph::Mode::Read,
+                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE}};
+            },
+            [this](GDX12CommandList& commands, GDX12ReflectionProbePass& capture, UINT slot)
+            {
+                auto& state = *_reflectionGrass;
+                if (!state.Scene || state.Scene->Patches.empty()) return;
+                if (!state.Prepared) { state.Renderer->PrepareGPU(&commands); state.Prepared = true; }
+                const auto& view = *capture.GetGeometryView(slot);
+                for (UINT patch = 0; patch < state.Renderer->PatchCount(); ++patch)
+                {
+                    if (!state.Renderer->Expand(&commands, view, patch, true)) continue;
+                    capture.BindGeometryViewTargets(&commands, slot);
+                    auto draw = view;
+                    draw.BatchOffset = patch;
+                    draw.BatchCount = 1;
+                    std::vector<GDX12RenderBatch> batches;
+                    state.Renderer->GatherBatches(draw, batches);
+                    for (const auto& batch : batches) GDX12EmitRenderBatch(&commands, draw, batch);
+                }
+            });
     _cloudEnvironment = std::make_unique<CrossAdapterEnvironment>(_passes->Environment, context.Primary,
         context.Runtime.GetMGPUDevices().Secondary, context.Runtime.GetMGPURuntime());
     _passes->UpdateAmbientOcclusionRoute(context);
@@ -454,6 +519,31 @@ bool BistroRenderPipeline::PrepareFrame(RenderPipelineContext& context, GDX12Com
     _passes->Bindings.UseAsyncCompute |= GetFluidControls().AsyncCompute || GetGrassWindControls().AsyncCompute;
     if (_resources->ParticleSimulation)
         _resources->ParticleSimulation->SetInteractionField(_grassAvailable ? _grass->InteractionField() : GDX12ParticleInteractionField{});
+    auto& reflectionGrass = *_reflectionGrass;
+    reflectionGrass.Scene.reset();
+    reflectionGrass.Source.reset();
+    reflectionGrass.Owner.reset();
+    if (auto* route = _passes->GetReflectionRoute(); route && route->HasSecondaryWork() && _grassAvailable)
+    {
+        reflectionGrass.Scene = _grass->CaptureShadowScene(*_resources);
+        if (reflectionGrass.Scene && !reflectionGrass.Scene->Patches.empty())
+        {
+            if (const auto* displayed = _grassRoute->GetDisplay())
+            {
+                reflectionGrass.Layout = displayed->Fields.Current->GetLayout();
+                reflectionGrass.Source = displayed->CurrentView.Resource;
+                reflectionGrass.Owner = displayed->Fields.Current;
+            }
+            else
+            {
+                const auto checkpoint = _grass->PrepareLocalCheckpoint();
+                if (!checkpoint) throw std::logic_error("Cannot capture primary grass for secondary reflections");
+                reflectionGrass.Layout = checkpoint->Layout;
+                reflectionGrass.Source = checkpoint->Packed;
+                reflectionGrass.Owner = checkpoint;
+            }
+        }
+    }
     if (!_grassAvailable) return rebuild;
     if (auto* shadows = _passes->GetShadowRoutes())
         _grassShadows->PrepareFrame(context, *_grass, *_grassRoute, *shadows);
@@ -563,6 +653,7 @@ void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipel
     addGeometry(4);
     p.AddShadowRoutes(graph, *_geometryJobs.at(3), *_geometryJobs.at(4));
     addGeometry(5);
+    p.AddReflectionRoute(graph, *_geometryJobs.at(5), {&_posters->Output(0), &_posters->Output(1)});
     addGeometry(6);
     if (!_earlyAO) p.AddAmbientOcclusion(graph, _earlyAO);
     const auto waterSurface = graph.AddPass(_water->Surface);

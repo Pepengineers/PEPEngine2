@@ -13,6 +13,7 @@
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/ConsoleModule.h"
 #include "App.Base/App.h"
+#include "App.Base/Rendering/CrossAdapterReflections.h"
 #include "App.Base/LoadingSettings.h"
 #include <d3d12sdklayers.h>
 #include <cmath>
@@ -302,9 +303,13 @@ int main(int argc, char** argv)
         ComPtr<ID3D12Debug> debug;
         if (!benchmark)
         {
+            ComPtr<ID3D12DeviceRemovedExtendedDataSettings> dredSettings;
+            ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&dredSettings)));
+            dredSettings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+            dredSettings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
             ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
             debug->EnableDebugLayer();
-            if (!(argc > 1 && std::strcmp(argv[1], "--debug") == 0))
+            if (!(argc > 1 && (std::strcmp(argv[1], "--debug") == 0 || std::strcmp(argv[1], "--mgpu-debug") == 0)))
             {
                 ComPtr<ID3D12Debug1> validation;
                 ThrowIfFailed(debug.As(&validation));
@@ -450,6 +455,9 @@ int main(int argc, char** argv)
             configuredProbe.Implementation = 1;
         GDX12GPUTimer timer(&device);
         UINT testFrame = 0;
+        std::unique_ptr<GDX12RenderGraph> placedGraph;
+        RenderPipelineBindings placedBindings;
+        GDX12Device* diagnosticSecondary = nullptr;
         const auto render = [&](bool waitForGPU = true)
         {
             ++testFrame;
@@ -466,9 +474,52 @@ int main(int argc, char** argv)
             reflections.Prepare();
             // Composition and standalone execution must share one pending capture plan.
             reflections.Prepare();
-            reflections.Execute(list);
+            if (placedGraph)
+            {
+                try
+                {
+                    list = placedGraph->ExecuteLegacySplit(list, nullptr, [&](const auto& boundary, auto prefix)
+                        { return placedBindings.LegacyReplacements.front().Submit(boundary, prefix); });
+                }
+                catch (...)
+                {
+                    if (!diagnosticSecondary || SUCCEEDED(diagnosticSecondary->GetDevice()->GetDeviceRemovedReason())) throw;
+                    ComPtr<ID3D12InfoQueue> failures;
+                    if (SUCCEEDED(diagnosticSecondary->GetDevice().As(&failures)))
+                        for (UINT64 i = 0; i < failures->GetNumStoredMessages(); ++i)
+                        {
+                            SIZE_T size = 0;
+                            failures->GetMessage(i, nullptr, &size);
+                            std::vector<BYTE> bytes(size);
+                            auto* message = reinterpret_cast<D3D12_MESSAGE*>(bytes.data());
+                            failures->GetMessage(i, message, &size);
+                            if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR) std::cerr << message->pDescription << '\n';
+                        }
+                    ComPtr<ID3D12DeviceRemovedExtendedData1> dred;
+                    if (SUCCEEDED(diagnosticSecondary->GetDevice().As(&dred)))
+                    {
+                        D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT1 output{};
+                        dred->GetAutoBreadcrumbsOutput1(&output);
+                        for (auto* node = output.pHeadAutoBreadcrumbNode; node; node = node->pNext)
+                        {
+                            const UINT completed = node->pLastBreadcrumbValue ? *node->pLastBreadcrumbValue : 0;
+                            std::cerr << "DRED completed=" << completed << "/" << node->BreadcrumbCount << '\n';
+                            for (UINT i = completed > 5 ? completed - 5 : 0; i < (std::min)(completed + 8, node->BreadcrumbCount); ++i)
+                                std::cerr << "  " << i << " op=" << node->pCommandHistory[i] << '\n';
+                        }
+                        D3D12_DRED_PAGE_FAULT_OUTPUT1 fault{};
+                        dred->GetPageFaultAllocationOutput1(&fault);
+                        std::cerr << "DRED page fault=" << fault.PageFaultVA << '\n';
+                    }
+                    // Device removal can deadlock driver cleanup; retain the failure diagnostics first.
+                    std::cerr << "Secondary device removed at frame " << testFrame << '\n';
+                    ExitProcess(1);
+                }
+            }
+            else reflections.Execute(list);
             timer.Stop(list);
             queue->ExecuteCommandList(list);
+            reflections.OnSubmitted(queue->GetLastCompletionPoint());
             frame->FenceValue = list->FenceValue;
             timer.OnCommandListExecuted(list->FenceValue);
             if (waitForGPU) queue->Flush();
@@ -490,6 +541,150 @@ int main(int argc, char** argv)
             const UINT mips = texture->GetResource()->D3DResource->GetDesc().MipLevels;
             return ReadTexture(device, *texture, index * mips + mip);
         };
+        if (argc > 1 && (std::strcmp(argv[1], "--mgpu") == 0 || std::strcmp(argv[1], "--mgpu-debug") == 0))
+        {
+            GDX12Device secondary;
+            ComPtr<IDXGIAdapter4> adapter;
+            for (UINT index = 0;; ++index)
+            {
+                ComPtr<IDXGIAdapter4> item;
+                if (GDX12DeviceFactory::GetFactory()->EnumAdapterByGpuPreference(index,
+                    DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&item)) == DXGI_ERROR_NOT_FOUND) break;
+                DXGI_ADAPTER_DESC1 desc{};
+                ThrowIfFailed(item->GetDesc1(&desc));
+                if (desc.VendorId == 0x8086 && std::wstring_view(desc.Description).find(L"B570") != std::wstring_view::npos)
+                { adapter = item; break; }
+            }
+            Require(adapter && device.GetDeviceFeatures().Name.find("5050") != std::string::npos,
+                "MGPU reflection acceptance requires RTX 5050 primary and Arc B570 secondary");
+            secondary.Role = DEVICE_ROLE_SECONDARY;
+            ThrowIfFailed(secondary.Initialize(adapter));
+            diagnosticSecondary = &secondary;
+            std::cout << "Primary: " << device.GetDeviceFeatures().Name << "; secondary: " << secondary.GetDeviceFeatures().Name << '\n';
+            GDX12CommandQueue copyA(&device, D3D12_COMMAND_LIST_TYPE_COPY, true), copyB(&secondary, D3D12_COMMAND_LIST_TYPE_COPY, true);
+            RenderMGPURuntime runtime({&device, &secondary, &copyA, &copyB});
+            CrossAdapterReflections route(resources, secondary, runtime, [&] { return std::vector<GDX12Texture*>{&white}; },
+                common, reflections, environment);
+            struct MaterialCapture final : GDX12RenderPass
+            {
+                GDX12ReflectionProbePass& Pass;
+                GDX12Texture& Material;
+                MaterialCapture(GDX12ReflectionProbePass& pass, GDX12Texture& material) : Pass(pass), Material(material) {}
+                void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+                {
+                    Pass.RecordRenderGraph(graph);
+                    graph.Read(&Material, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+                }
+                void Execute(GDX12CommandList* commands) override { Pass.Execute(commands); }
+                std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override { return Pass.GetBufferAccesses(); }
+            } materialCapture(reflections, white);
+            placedGraph = std::make_unique<GDX12RenderGraph>(&device);
+            using Graph = GDX12RenderGraph;
+            placedGraph->ImportShared(Graph::SharedResource::Scene, "Probe fixture scene");
+            placedGraph->ImportShared(Graph::SharedResource::Environment, "Probe fixture environment");
+            for (UINT index = 0; index < 4; ++index) placedGraph->ImportLink("Environment input", environment.GetOutput(index));
+            placedGraph->ImportLink("Local shadow input", localShadows.GetOutput(0));
+            placedGraph->ImportLink("Application material input", &white);
+            placedGraph->AddPass(materialCapture);
+            route.Configure(*placedGraph, materialCapture, placedBindings, {&white});
+            placedGraph->Compile(false);
+            Set(L"Render.Reflection.Schedule.Enabled", "true");
+            Set(L"Render.Reflection.FullUpdateDistanceMetres", "0");
+            for (int implementation : {0, 1})
+                for (UINT count = 1; count <= 4; ++count)
+                {
+                    resources.ReflectionProbes.clear();
+                    for (UINT index = 0; index < count; ++index)
+                    {
+                        auto configured = probe;
+                        configured.Id = index + 1;
+                        configured.Resolution = 32;
+                        configured.PrefilterSamples = 8;
+                        configured.Implementation = implementation;
+                        resources.ReflectionProbes.push_back(configured);
+                    }
+                    Set(L"Render.Reflection.Schedule", "0");
+                    reflections.ResetHistory(); route.ResetWorld();
+                    render();
+                    std::vector<std::vector<float>> reference;
+                    for (UINT index = 0; index < count * 6; ++index) reference.push_back(face(index));
+                    for (UINT mask : {63u, 21u, 42u, 1u, 0u})
+                    {
+                        for (UINT index = 0; index < count; ++index)
+                            resources.ReflectionProbes[index].SecondaryFaces = index % 2 ? (mask ^ 63u) : mask;
+                        for (int schedule : {0, 1, 2, 3})
+                        {
+                            Set(L"Render.Reflection.Schedule", std::to_string(schedule).c_str());
+                            reflections.ResetHistory(); route.ResetWorld();
+                            for (UINT frame = 0; frame < count * 6; ++frame)
+                            {
+                                render();
+                                const auto& stats = reflections.GetStatistics();
+                                Require(stats.RequestedSecondaryFaces == stats.EffectiveSecondaryFaces,
+                                    "Reflection fixture silently fell back from its requested face placement");
+                            }
+                            Require(reflections.GetReadiness().first == count, "Scheduled MGPU probes never became ready");
+                            for (UINT index = 0; index < count * 6; ++index)
+                            {
+                                const auto actual = face(index);
+                                Require(actual.size() == reference[index].size(), "MGPU face dimensions changed");
+                                for (size_t pixel = 0; pixel < actual.size(); ++pixel)
+                                    Require(std::isfinite(actual[pixel]) && std::abs(actual[pixel] - reference[index][pixel]) < 0.05f,
+                                        "MGPU face radiance differs from the equal-quality primary reference");
+                            }
+                        }
+                    }
+                    std::cout << "Probe count=" << count << " mode=" << implementation << " placements/schedules passed\n";
+                }
+            Set(L"Render.Reflection.Schedule", "3");
+            Set(L"Render.Reflection.FullUpdateDistanceMetres", "10");
+            for (int placement : {1, 2})
+            {
+                Set(L"Render.Reflection.Placement", std::to_string(placement).c_str());
+                reflections.ResetHistory(); route.ResetWorld();
+                for (const auto [cameraX, isNear] : {std::pair{1400.0f, true}, {1600.0f, true},
+                    {1800.0f, false}, {1600.0f, false}, {1400.0f, true}})
+                {
+                    common.CameraView = Matrix::CreateTranslation(-cameraX, 0, 0);
+                    ++resources.ReflectionEnvironmentRevision;
+                    render();
+                    unsigned scheduled = 0;
+                    for (const auto& work : reflections.ScheduledWork())
+                    {
+                        Require(work.Near == isNear, "GPU probe schedule lost box-distance hysteresis");
+                        Require(!isNear || work.Faces == 63, "Near probe did not capture all six faces");
+                        const bool secondary = isNear == (placement == 2);
+                        Require(work.SecondaryFaces == (secondary ? work.Faces : 0),
+                            "Near/far probe placement was not applied");
+                        for (unsigned face = 0; face < 6; ++face) scheduled += (work.Faces >> face) & 1u;
+                    }
+                    Require(scheduled == (isNear ? 24u : 1u), "Near/far schedule changed its nominal work");
+                    const auto& stats = reflections.GetStatistics();
+                    Require(stats.RequestedSecondaryFaces == stats.EffectiveSecondaryFaces,
+                        "Near/far transition silently fell back");
+                    if (isNear) Require(reflections.GetReadiness().first == 4, "Near transition did not publish complete probes");
+                }
+            }
+            std::cout << "Both near/far placements, hysteresis and partial-cycle transitions passed\n";
+            resources.ReflectionProbes.clear();
+            render();
+            Require(!route.HasSecondaryWork(), "Disabled probes retained remote work");
+            queue->Flush(); secondary.GetCommandQueue()->Flush();
+            ComPtr<ID3D12InfoQueue> secondaryInfo;
+            ThrowIfFailed(secondary.GetDevice().As(&secondaryInfo));
+            for (UINT64 index = 0; index < secondaryInfo->GetNumStoredMessages(); ++index)
+            {
+                SIZE_T size = 0;
+                secondaryInfo->GetMessage(index, nullptr, &size);
+                std::vector<BYTE> bytes(size);
+                auto* message = reinterpret_cast<D3D12_MESSAGE*>(bytes.data());
+                ThrowIfFailed(secondaryInfo->GetMessage(index, message, &size));
+                if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR) throw std::runtime_error(message->pDescription);
+            }
+            runtime.Shutdown();
+            std::cout << "MGPU probe GPU validation, all faces, both implementations, schedules and reset passed\n";
+            return 0;
+        }
         for (UINT i = 0; i < 5; ++i)
         {
             locations[1].x += 0.01f;

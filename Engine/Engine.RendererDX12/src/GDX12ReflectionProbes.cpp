@@ -8,11 +8,25 @@ static AutoConsoleVariable<bool> Enabled(L"Render.Reflection.Enabled", true,
     L"Enable local reflection probes. Default true.", EConsoleVariableFlags::Default);
 static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Reflection.Quality", GDX12Quality::Mid,
     L"0 Off, 1 Low, 2 Mid (default), 3 High, 4 Epic.", EConsoleVariableFlags::Default);
+static AutoConsoleVariable<bool> Scheduled(L"Render.Reflection.Schedule.Enabled", false,
+    L"Use the benchmark probe schedule and distance policy");
+static AutoConsoleVariable<int> Schedule(L"Render.Reflection.Schedule", 0,
+    L"0 all probes, 1 one whole probe, 2 one face each, 3 one face total per frame", EConsoleVariableFlags::Default,
+    [](int value) { return value >= 0 && value <= 3; });
+static AutoConsoleVariable<float> FullDistance(L"Render.Reflection.FullUpdateDistanceMetres", 0,
+    L"Distance to influence box for full updates: 0 disabled, -1 always, otherwise metres", EConsoleVariableFlags::Default,
+    [](float value) { return std::isfinite(value) && (value == -1 || value >= 0); });
+static AutoConsoleVariable<int> Placement(L"Render.Reflection.Placement", 0,
+    L"0 per-probe face masks, 1 near primary / far secondary, 2 near secondary / far primary", EConsoleVariableFlags::Default,
+    [](int value) { return value >= 0 && value <= 2; });
 GDX12ReflectionSettings GetReflectionSettings()
 {
     GDX12ReflectionSettings result;
     result.Quality = Quality.GetInt();
     result.Enabled = Enabled.GetValue() && result.Quality != 0;
+    result.Scheduled = Scheduled.GetValue();
+    result.Policy = {static_cast<GDX12ReflectionSchedule::Schedule>(Schedule.GetValue()), FullDistance.GetValue(),
+        static_cast<GDX12ReflectionSchedule::Placement>(Placement.GetValue())};
     return result;
 }
 
@@ -42,7 +56,7 @@ bool IsValidReflectionProbe(const GDX12ReflectionProbe& probe)
     const bool validResolution = probe.Resolution == 0 || (probe.Resolution >= 16 && probe.Resolution <= 512 &&
         (probe.Resolution & (probe.Resolution - 1)) == 0);
     return probe.Implementation >= 0 && probe.Implementation <= 2 && validResolution &&
-        probe.FacesPerFrame <= 6 && (probe.PrefilterSamples == 0 ||
+        probe.FacesPerFrame <= 6 && probe.SecondaryFaces <= 63 && (probe.PrefilterSamples == 0 ||
             (probe.PrefilterSamples >= 8 && probe.PrefilterSamples <= 1024)) &&
         std::isfinite(probe.BlendDistance) && probe.BlendDistance > 0 &&
         std::isfinite(probe.Intensity) && probe.Intensity >= 0 && probe.Intensity <= 16 &&

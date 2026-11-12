@@ -1461,3 +1461,19 @@ void RenderModule::WriteRenderGraph(std::ostream& output) const
 {
     _primaryGraph->WriteDot(output);
 }
+
+std::vector<GDX12Texture*> RenderModule::GetReflectionMaterialTextures() const
+{
+    std::vector<GDX12Texture*> result;
+    for (const auto& item : _materials)
+    {
+        const auto& material = *item.second;
+        for (const auto* texture : {material.Diffuse, material.Normal, material.Displacement,
+            material.Specular, material.RoughnessMap, material.Emissive})
+            if (texture && texture->PrimaryDeviceTexture)
+                result.push_back(texture->PrimaryDeviceTexture);
+    }
+    std::sort(result.begin(), result.end());
+    result.erase(std::unique(result.begin(), result.end()), result.end());
+    return result;
+}

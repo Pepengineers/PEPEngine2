@@ -73,6 +73,7 @@ void DefaultRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipe
     graph.AddPass(p.LocalShadow);
     p.AddShadowRoutes(graph, p.SunShadow, p.LocalShadow);
     graph.AddPass(p.Reflections);
+    p.AddReflectionRoute(graph, p.Reflections);
     graph.AddPass(p.Opaque);
     if (!_earlyAO) p.AddAmbientOcclusion(graph, _earlyAO);
     graph.AddPass(p.Lighting);
