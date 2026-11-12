@@ -22,6 +22,7 @@
 #include "BistroCharacters.h"
 #include "BistroBounds.h"
 #include "BistroBenchmarkFlight.h"
+#include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include "BistroQualityPresets.h"
 #include "Common/RuntimePaths.h"
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
@@ -1082,6 +1083,9 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
             const auto ready = std::chrono::steady_clock::now();
             app.ResetBenchmarkClock();
             for (int frame = 0; frame < benchmarkWarmupFrames; ++frame) app.BenchmarkFrame();
+            auto renderer = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+            renderer->WaitForUploads();
+            const auto gpuStart = renderer->GetPrimaryGPUTimingTotals();
             const auto requestedStart = app.BenchmarkRequested;
             const auto ticksStart = app.BenchmarkTicks;
             std::vector<double> frameSamples;
@@ -1095,7 +1099,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
             }
             BenchmarkEngine::GetLocator().GetModule<RenderModule>()->WaitForUploads();
             const auto sampled = std::chrono::steady_clock::now();
-            auto renderer = BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+            const auto gpuEnd = renderer->GetPrimaryGPUTimingTotals();
+            const auto gpuSamples = gpuEnd.Count - gpuStart.Count;
             const auto gpuMemory = renderer->GetMemoryStatistics();
             const auto graph = renderer->GetRenderGraphStatistics();
             std::ofstream graphOutput(benchmarkOutput.wstring() + L".dot");
@@ -1127,6 +1132,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
                 << ",\n  \"particle_count_scale\": " << BistroParticles::CountScale.GetValue()
                 << ",\n  \"particle_budget\": " << BistroParticles::GetBudget()
                 << ",\n  \"frame_ms\": " << (benchmarkFrames > 1 ? std::chrono::duration<double, std::milli>(sampled - measuring).count() / (benchmarkFrames - 1) : 0)
+                << ",\n  \"primary_frame_gpu_samples\": " << gpuSamples
+                << ",\n  \"primary_frame_gpu_ms_excluding_water_import\": " << (gpuSamples ? (gpuEnd.Milliseconds - gpuStart.Milliseconds) / gpuSamples : 0)
                 << ",\n  \"graph_passes\": " << graph.Passes
                 << ",\n  \"graph_culled_passes\": " << graph.CulledPasses
                 << ",\n  \"graph_logical_textures\": " << graph.TransientTextures

@@ -1,0 +1,6 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="App.vcxproj" />
+  <PropertyGroup><ProjectGuid>{FDF77419-14A8-4D03-A0CB-A24A11AE54D8}</ProjectGuid></PropertyGroup>
+  <ItemGroup><ClCompile Remove="src\App.cpp" /><ClCompile Include="tests\WaterOffloadBistroTests.cpp" /></ItemGroup>
+  <ItemDefinitionGroup><Link><SubSystem>Console</SubSystem><AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies></Link></ItemDefinitionGroup>
+</Project>
