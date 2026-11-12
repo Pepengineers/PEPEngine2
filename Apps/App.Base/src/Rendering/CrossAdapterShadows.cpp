@@ -161,11 +161,24 @@ namespace
 
 struct CrossAdapterShadows::Stream
 {
+    struct Sample
+    {
+        GDX12ShadowTransferLayout Layout;
+        double SourceTime;
+        TransferVersion Version;
+    };
     struct Frame
     {
         PhysicalView Payload;
         std::shared_ptr<GDX12Resource> PrimaryOwner;
         CompletionPoint Tail;
+    };
+    struct Publication
+    {
+        Reservation Credit;
+        std::shared_ptr<Frame> Source;
+        std::shared_ptr<const Sample> Data;
+        CompletionPoint Produced, Exported;
     };
 
     TransferId Id = TransferId::Invalid;
@@ -180,9 +193,15 @@ struct CrossAdapterShadows::Stream
     ID3D12Resource* InitializedNative = nullptr;
     ResourceId InitializedAtlasId = ResourceId::Invalid;
     GDX12ShadowDepthTransfer::InitializedSlices InitializedSlices;
+    std::array<std::optional<Publication>, SlotCount> Pending;
+    std::array<std::shared_ptr<const Sample>, SlotCount> Imported;
+    std::shared_ptr<const Sample> Displayed;
+    std::vector<GDX12ShadowOutput> DisplayedOutputs;
+    uint64_t FrameSequence = 0;
+    Statistics Stats;
 };
 
-bool IsMultiGPUShadowsEnabled() { return Enabled.GetValue(); }
+bool IsMultiGPUShadowsEnabled() { return Enabled.GetValue() || IsShadowPolicyEnabled(); }
 
 CrossAdapterShadows::CrossAdapterShadows(GDX12Device& primary, GDX12Device& secondary, RenderMGPURuntime& runtime)
     : _primary(primary), _secondary(secondary), _runtime(runtime) {}
@@ -192,6 +211,15 @@ CrossAdapterShadows::~CrossAdapterShadows() = default;
 GDX12ShadowSelection CrossAdapterShadows::ReadSelection(const std::vector<GDX12ShadowOutput>& preparedLocal)
 {
     using Mode = GDX12ShadowSelection::Mode;
+    if (IsShadowPolicyEnabled())
+    {
+        GDX12ShadowSelection result;
+        result.Scope = Mode::Set;
+        result.SunSelected = ReadShadowUpdatePolicy().Secondary;
+        for (const auto& output : preparedLocal)
+            if (ReadShadowUpdatePolicy(output.Light.EntityId).Secondary) result.Lights.push_back(output.Light);
+        return result;
+    }
     const int mode = SelectionMode.GetValue();
     const auto slot = EntitySlot.GetValue();
     if (mode != _chosenMode || slot != _chosenSlot)
@@ -241,9 +269,15 @@ std::optional<CrossAdapterShadows::Selection> CrossAdapterShadows::Select(GDX12S
 
 std::optional<CompletionPoint> CrossAdapterShadows::Submit(const Selection& selection,
     const std::vector<GDX12ShadowOutput>& primaryPrepared, const PhysicalView& primaryAtlas,
-    const PhysicalView& secondaryAtlas, const RasterPlan& primary, const RasterPlan& secondary, CompletionPoint prefix)
+    const PhysicalView& secondaryAtlas, const RasterPlan& primary, const RasterPlan& secondary, CompletionPoint prefix,
+    bool latest, bool update, double sourceTime)
 {
-    if (!IsMultiGPUShadowsEnabled()) return std::nullopt;
+    if (!IsMultiGPUShadowsEnabled() && !IsShadowPolicyEnabled()) return std::nullopt;
+    const auto atlasIndex = selection.Layout.Atlas() == GDX12ShadowAtlas::Sun ? 0 : 1;
+    if (sourceTime == 0) sourceTime = ShadowSourceTimeSeconds();
+    if (latest && _streams[atlasIndex] && _streams[atlasIndex]->Displayed)
+        return SubmitLatest(selection, primaryPrepared, primaryAtlas, secondaryAtlas, primary, secondary, prefix, update, sourceTime);
+    if (!update && _streams[atlasIndex] && _streams[atlasIndex]->Displayed) return prefix;
     Require(!_runtime.IsStopped(), "Shadow submit domain is stopped");
     const auto& layout = selection.Layout;
     const auto destination = layout.ResolveDestination(primaryPrepared);
@@ -396,6 +430,16 @@ std::optional<CompletionPoint> CrossAdapterShadows::Submit(const Selection& sele
             stream.InitializedNative = primaryAtlas.Resource->D3DResource.Get();
             stream.InitializedAtlasId = primaryAtlas.Identity.Id;
             stream.InitializedSlices = initialized;
+            auto sample = std::make_shared<Stream::Sample>(Stream::Sample{ layout, sourceTime, version });
+            stream.Displayed = sample;
+            stream.DisplayedOutputs = *layout.ResolveSnapshot(primaryPrepared);
+            ++stream.Stats.Produced;
+            ++stream.Stats.ExactJoins;
+            const auto bytes = uint64_t(layout.Extent()) * layout.Extent() * layout.Layers() * sizeof(float);
+            stream.Stats.ExportBytes += bytes;
+            stream.Stats.ImportBytes += bytes;
+            for (size_t i = 0; i < bank.GetSlots().size(); ++i)
+                if (bank.GetSlots()[i].Local.Identity.Id == reader->View.Identity.Id) stream.Imported[i] = sample;
         });
         if (!receipt)
         {
@@ -420,6 +464,273 @@ std::optional<CompletionPoint> CrossAdapterShadows::Submit(const Selection& sele
     }
 }
 
+
+std::optional<CompletionPoint> CrossAdapterShadows::SubmitPrimary(const RasterPlan& raster, CompletionPoint prefix)
+{
+    if (raster.Stages.empty()) { if (raster.Commit) raster.Commit(); return prefix; }
+    Plan plan;
+    plan.Raster(raster, { _primary.GetSubmissionAdapterId(), QueueKind::Direct });
+    plan.GraphPlan.CompilePlan();
+    const auto receipt = _runtime.TrySubmit(plan.GraphPlan, std::move(plan.Bindings), [&](const auto&)
+    { if (raster.Commit) raster.Commit(); });
+    return receipt ? std::optional<CompletionPoint>(receipt->Batches.back()) : std::nullopt;
+}
+
+const std::vector<GDX12ShadowOutput>& CrossAdapterShadows::GetDisplayedOutputs(GDX12ShadowAtlas atlas) const
+{
+    static const std::vector<GDX12ShadowOutput> empty;
+    const auto& stream = _streams[atlas == GDX12ShadowAtlas::Sun ? 0 : 1];
+    return stream ? stream->DisplayedOutputs : empty;
+}
+
+double CrossAdapterShadows::GetDisplayedSourceTime(GDX12ShadowAtlas atlas) const
+{
+    const auto& stream = _streams[atlas == GDX12ShadowAtlas::Sun ? 0 : 1];
+    return stream && stream->Displayed ? stream->Displayed->SourceTime : 0;
+}
+
+CrossAdapterShadows::Statistics CrossAdapterShadows::GetStatistics(GDX12ShadowAtlas atlas) const
+{
+    const auto& stream = _streams[atlas == GDX12ShadowAtlas::Sun ? 0 : 1];
+    if (!stream) return {};
+    auto result = stream->Stats;
+    for (const auto& pending : stream->Pending) result.Pending += pending.has_value();
+    return result;
+}
+
+void CrossAdapterShadows::AdvanceLatest(Stream& stream)
+{
+    auto& bank = *stream.Bank;
+    const Placement produce{ _secondary.GetSubmissionAdapterId(), QueueKind::Direct };
+    const Placement exportLocation{ produce.Adapter, QueueKind::Copy };
+    const Placement importLocation{ _primary.GetSubmissionAdapterId(), QueueKind::Copy };
+    auto& exportQueue = *_runtime.GetQueue(exportLocation);
+    const auto reached = [&](CompletionPoint point, Placement placement)
+    { return point.IsValid() && point.IsReachedBy(_runtime.GetQueue(placement)->GetCompletionProgress()); };
+    for (auto& pending : stream.Pending)
+    {
+        if (!pending) continue;
+        auto& publication = *pending;
+        const auto ticket = publication.Credit.Publication;
+        const auto version = publication.Data->Version;
+        try
+        {
+            if (!publication.Exported.IsValid())
+            {
+                if (!reached(publication.Produced, produce)) continue;
+                const auto ready = bank.PrepareExport(ticket);
+                if (!ready) continue;
+                const auto& shared = bank.GetSlots().at(publication.Credit.SharedSlot);
+                Plan plan;
+                plan.Bindings.KeepAlive = { stream.Bank, publication.Source, publication.Data };
+                const auto source = plan.Bind("Completed shadow depth", publication.Source->Payload);
+                const auto target = plan.Bind("Shadow Latest export", shared.Export, false, true);
+                plan.GraphPlan.ImportVersion(source, version);
+                plan.Bindings.ExactInputs.push_back({ source, version, *ready, stream.Bank });
+                plan.Add("Shadow Latest export", exportLocation, {
+                    { source, Graph::Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE, version },
+                    { target, Graph::Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST, version } },
+                    [&, ticket](GDX12CommandList& list, const Graph::BoundResources&)
+                    { bank.RecordExportCopies(ticket, *list.GetCommandList().Get()); });
+                plan.GraphPlan.CompilePlan();
+                const auto receipt = _runtime.TrySubmit(plan.GraphPlan, std::move(plan.Bindings), [&](const auto& result)
+                { bank.CommitExport(ticket, result.Batches.at(0), result.Batches.at(0)); });
+                if (!receipt)
+                {
+                    Require(bank.Cancel(ticket), "Unsubmitted shadow export cancellation failed");
+                    pending.reset();
+                    continue;
+                }
+                publication.Exported = receipt->Batches.at(0);
+                stream.Stats.ExportBytes += uint64_t(publication.Data->Layout.Extent()) * publication.Data->Layout.Extent() *
+                    publication.Data->Layout.Layers() * sizeof(float);
+            }
+            if (!reached(publication.Exported, exportLocation)) continue;
+            const auto imported = bank.PrepareImport(ticket);
+            if (imported.Status == Result::Deferred || imported.Status == Result::NotReady) continue;
+            Require(imported.Status == Result::Accepted, "Shadow Latest import was rejected");
+            const auto& shared = bank.GetSlots().at(imported.SharedSlot);
+            Plan plan;
+            plan.Bindings.KeepAlive = { stream.Bank, publication.Source, publication.Data };
+            const auto source = plan.Bind("Completed shadow export", shared.Import, true, true);
+            const auto target = plan.Bind("Shadow Latest local depth", bank.GetSlots().at(imported.LocalSlot).Local, false);
+            plan.GraphPlan.ImportVersion(source, version);
+            plan.Bindings.ExactInputs.push_back({ source, version, imported.ExportReady, stream.Bank,
+                &exportQueue, shared.Export.Identity });
+            plan.Add("Shadow Latest import", importLocation, {
+                { source, Graph::Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE, version },
+                { target, Graph::Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST, version } },
+                [&, ticket](GDX12CommandList& list, const Graph::BoundResources&)
+                { bank.RecordImportCopies(ticket, *list.GetCommandList().Get()); });
+            plan.GraphPlan.CompilePlan();
+            const auto receipt = _runtime.TrySubmit(plan.GraphPlan, std::move(plan.Bindings), [&](const auto& result)
+            { bank.CommitImport(ticket, result.Batches.at(0), result.Batches.at(0)); });
+            if (receipt)
+            {
+                stream.Imported.at(imported.LocalSlot) = publication.Data;
+                stream.Stats.ImportBytes += uint64_t(publication.Data->Layout.Extent()) * publication.Data->Layout.Extent() *
+                    publication.Data->Layout.Layers() * sizeof(float);
+            }
+            else Require(bank.Cancel(ticket), "Unsubmitted shadow import cancellation failed");
+            pending.reset();
+        }
+        catch (...)
+        {
+            if (!_runtime.IsStopped()) bank.Cancel(ticket);
+            throw;
+        }
+    }
+}
+
+std::optional<CompletionPoint> CrossAdapterShadows::SubmitLatest(const Selection& selection,
+    const std::vector<GDX12ShadowOutput>& prepared, const PhysicalView& primaryAtlas,
+    const PhysicalView& secondaryAtlas, const RasterPlan& primary, const RasterPlan& secondary,
+    CompletionPoint prefix, bool update, double sourceTime)
+{
+    auto& stream = *_streams[selection.Layout.Atlas() == GDX12ShadowAtlas::Sun ? 0 : 1];
+    auto& bank = *stream.Bank;
+    const Placement directA{ _primary.GetSubmissionAdapterId(), QueueKind::Direct };
+    const Placement directB{ _secondary.GetSubmissionAdapterId(), QueueKind::Direct };
+    auto& direct = *_runtime.GetQueue(directA);
+    Require(!stream.AwaitingTail, "Previous shadow frame has no tail receipt");
+    Require(stream.Extent == selection.Layout.Extent() && stream.Layers == selection.Layout.Layers(),
+        "Shadow Latest layout must start a new stream before resizing");
+    bank.Poll();
+    // Selection retires the older displayed slot before imports need another local credit.
+    const auto selected = bank.SelectLatest(FrameSubmissionId{ ++stream.FrameSequence }).Current;
+    AdvanceLatest(stream);
+    CompletionPoint final = prefix;
+    if (!primary.Stages.empty())
+    {
+        Plan local;
+        local.Raster(primary, directA);
+        local.GraphPlan.CompilePlan();
+        const auto receipt = _runtime.TrySubmit(local.GraphPlan, std::move(local.Bindings), [&](const auto&)
+        { if (primary.Commit) primary.Commit(); });
+        Require(receipt.has_value(), "Shadow Latest primary work was not submitted");
+        final = receipt->Batches.back();
+    }
+    if (selected.IsValid())
+    {
+        const auto sample = stream.Imported.at(selected.LocalSlot);
+        Require(sample && sample->Version == selected.Version, "Shadow import selected without its metadata");
+        if (!stream.Displayed || sample->Version.Invocation > stream.Displayed->Version.Invocation)
+        {
+            const auto paired = sample->Layout.ResolveSnapshot(prepared);
+            Require(paired.has_value(), "Displayed shadow snapshot no longer fits the current light layout");
+            const auto reader = bank.AcquireReader(selected.Publication, direct);
+            Require(reader.has_value(), "Displayed shadow snapshot has no reader credit");
+            bool readerBound = false;
+            try
+            {
+                const auto restore = _restore->PrepareRestore(sample->Layout, *paired, primaryAtlas.Resource,
+                    reader->View.Resource, stream.InitializedSlices);
+                Require(static_cast<bool>(restore), "Paired shadow restore was rejected");
+                Plan plan;
+                plan.Bindings.KeepAlive = { stream.Bank, _restore, restore, sample, primaryAtlas.Resource };
+                const auto source = plan.Bind("Displayed shadow snapshot", reader->View);
+                const auto target = plan.Bind("Primary shadow atlas", primaryAtlas);
+                const auto version = reader->Lease.View.Version;
+                plan.GraphPlan.ImportVersion(source, version);
+                plan.Bindings.ExactInputs.push_back({ source, version, reader->Lease.View.ImportReady, stream.Bank });
+                plan.Add("Restore paired Latest shadow", directA, {
+                    { source, Graph::Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE, version },
+                    { target, Graph::Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE } },
+                    [&, restore, source, target](GDX12CommandList& list, const Graph::BoundResources& views)
+                    { _restore->RecordRestore(list, *restore, views.Get(target), views.Get(source)); });
+                plan.GraphPlan.CompilePlan();
+                const auto receipt = _runtime.TrySubmit(plan.GraphPlan, std::move(plan.Bindings), [&](const auto& result)
+                {
+                    Require(bank.BindReader(reader->Lease.Id, result.Batches.at(0)), "Shadow Latest reader receipt rejected");
+                    readerBound = true;
+                });
+                Require(receipt.has_value(), "Paired shadow restore was not submitted");
+                final = receipt->Batches.at(0);
+                stream.Displayed = sample;
+                stream.DisplayedOutputs = *paired;
+            }
+            catch (...)
+            {
+                if (!readerBound && !_runtime.IsStopped()) bank.CancelReader(reader->Lease.Id);
+                throw;
+            }
+        }
+    }
+    if (update)
+    {
+        const auto slot = std::find_if(stream.Frames.begin(), stream.Frames.end(), [&](const auto& frame)
+        {
+            return !frame || (frame.use_count() == 1 &&
+                (!frame->Tail.IsValid() || frame->Tail.IsReachedBy(direct.GetCompletionProgress())));
+        });
+        if (slot != stream.Frames.end())
+        {
+            if (!*slot)
+            {
+                auto desc = CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_FLOAT, stream.Extent, stream.Extent,
+                    static_cast<UINT16>(stream.Layers), 1, 1, 0, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+                auto frame = std::make_shared<Stream::Frame>();
+                auto texture = std::make_shared<GDX12Resource>();
+                texture->D3DResource = _secondary.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
+                frame->Payload = { std::move(texture), { _runtime.NewResourceId(), directB.Adapter, stream.LayoutEpoch,
+                    stream.Id, _runtime.NewAllocationId() } };
+                *slot = std::move(frame);
+            }
+            auto& frame = **slot;
+            Require(_invocation < (std::numeric_limits<std::uint64_t>::max)(), "Shadow invocation ID exhausted");
+            const TransferVersion version{ stream.Id, stream.LayoutEpoch, ProducerInvocationId{ ++_invocation } };
+            const auto credit = bank.Reserve(version, SnapshotReadMode::LatestCompleted, *_runtime.GetQueue(directB),
+                frame.Payload.Resource->D3DResource, frame.Payload.Identity.Allocation);
+            if (credit.Status == Result::Accepted)
+            {
+                try
+                {
+                    auto sample = std::make_shared<Stream::Sample>(Stream::Sample{ selection.Layout, sourceTime, version });
+                    auto pack = _pack->PreparePack(selection.Layout, secondaryAtlas.Resource, frame.Payload.Resource);
+                    Plan plan;
+                    plan.Bindings.KeepAlive = { *slot, stream.Bank, _pack, pack, sample };
+                    const auto depth = plan.Bind("Secondary shadow atlas", secondaryAtlas);
+                    const auto payload = plan.Bind("Shadow Latest producer", frame.Payload, false);
+                    const auto raster = plan.Raster(secondary, directB);
+                    const auto packed = plan.Add("Pack Latest shadow", directB, {
+                        { depth, Graph::Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE },
+                        { payload, Graph::Mode::Write, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, version } },
+                        [&, pack, depth, payload](GDX12CommandList& list, const Graph::BoundResources& views)
+                        { _pack->RecordPack(list, *pack, views.Get(depth), views.Get(payload)); });
+                    if (raster) plan.GraphPlan.DependsOn(packed, *raster);
+                    plan.GraphPlan.CompilePlan();
+                    const auto batch = plan.BatchIndex(packed);
+                    const auto receipt = _runtime.TrySubmit(plan.GraphPlan, std::move(plan.Bindings), [&](const auto& result)
+                    {
+                        Require(bank.BindProducer(credit.Publication, result.Batches.at(batch)), "Shadow Latest producer rejected");
+                        if (secondary.Commit) secondary.Commit();
+                    });
+                    if (receipt)
+                    {
+                        auto& pending = stream.Pending.at(credit.SharedSlot);
+                        Require(!pending, "Shadow Latest publication overlaps an outstanding slot");
+                        pending = Stream::Publication{ credit, *slot, sample, receipt->Batches.at(batch), {} };
+                        ++stream.Stats.Produced;
+                    }
+                    else Require(bank.Cancel(credit.Publication), "Unsubmitted shadow producer cancellation failed");
+                }
+                catch (...)
+                {
+                    if (!_runtime.IsStopped()) bank.Cancel(credit.Publication);
+                    throw;
+                }
+            }
+            else
+            {
+                Require(credit.Status == Result::Deferred, "Shadow Latest producer reservation was rejected");
+                ++stream.Stats.LatestSkipped;
+            }
+        }
+        else ++stream.Stats.LatestSkipped;
+    }
+    return final;
+}
+
 void CrossAdapterShadows::RetireFrame(CompletionPoint tail)
 {
     for (auto& stream : _streams)
@@ -438,6 +749,13 @@ void CrossAdapterShadows::RetireAtlas(GDX12ShadowAtlas atlas)
     auto& stream = _streams[atlas == GDX12ShadowAtlas::Sun ? 0 : 1];
     if (!stream) return;
     Require(!stream->AwaitingTail, "Shadow atlas retirement requires the primary frame tail");
-    if (stream->Bank) _runtime.RetireBank(*stream->Bank);
+    if (stream->Bank)
+    {
+        // Policy/ownership changes may arrive while Latest copies still read the old epoch.
+        for (auto adapter : { _primary.GetSubmissionAdapterId(), _secondary.GetSubmissionAdapterId() })
+            for (auto queue : { QueueKind::Direct, QueueKind::Copy })
+                _runtime.GetQueue({ adapter, queue })->Flush();
+        _runtime.RetireBank(*stream->Bank);
+    }
     stream.reset();
 }

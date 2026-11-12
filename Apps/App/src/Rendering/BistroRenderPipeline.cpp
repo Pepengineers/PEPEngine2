@@ -392,6 +392,7 @@ std::vector<Engine::UI::CanvasId> BistroRenderPipeline::GetWorldCanvasIds() cons
 
 void BistroRenderPipeline::ResetWorldHistory()
 {
+    _passes->ResetWorldHistory();
     _grassRoute->ResetWorld();
     _grass->RestartLocalSolver();
     _grassAvailable = false;

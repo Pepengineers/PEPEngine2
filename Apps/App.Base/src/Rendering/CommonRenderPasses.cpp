@@ -26,6 +26,14 @@ void CommonRenderPasses::Setup(RenderPipelineContext& context)
     for (auto* pass : Bindings.PrimaryPasses) pass->Setup(&context.Primary, &context.Secondary, &context.Common);
 }
 
+void CommonRenderPasses::ResetWorldHistory()
+{
+    SunShadow.ResetUpdateSchedule();
+    LocalShadow.ResetUpdateSchedule();
+    if (_placedShadows) _placedShadows->Invalidate();
+    Reflections.ResetHistory();
+}
+
 void CommonRenderPasses::Initialize()
 {
     GDX12RenderPass::InitializeAll(Bindings.PrimaryPasses);
@@ -84,6 +92,16 @@ void CommonRenderPasses::AddShadowRoutes(GDX12RenderGraph& graph, GDX12RenderPas
 
 bool CommonRenderPasses::PrepareFrame(RenderPipelineContext& context, GDX12CommandList* commands)
 {
+    EnsureShadowUpdatePolicies(context.Primary.LocalLights);
+    auto& display = *context.Primary.FrameConstants[context.Primary.CurrFrameConstantsIndex];
+    display.DisplayShadowPolicy = IsShadowPolicyEnabled();
+    if (display.DisplayShadowPolicy)
+    {
+        display.DisplayShadowCB->CopyData(0, context.Primary.ShadowSettings);
+        display.DisplayShadowLights->Resize((std::max)(1u, static_cast<UINT>(context.Primary.LocalLights.size())));
+        if (!context.Primary.LocalLights.empty())
+            display.DisplayShadowLights->CopyData(0, context.Primary.LocalLights.data(), static_cast<UINT>(context.Primary.LocalLights.size()));
+    }
     Bindings.UseAsyncCompute = GetParticleSettings().AsyncCompute || IsAmbientOcclusionAsyncComputeEnabled();
     if (!context.Primary.ParticleSimulation)
         context.Primary.ParticleSimulation = std::make_unique<GDX12ParticleSimulation>();

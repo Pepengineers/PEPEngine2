@@ -19,6 +19,9 @@ static void CheckShadowOutputs(const GDX12LocalLightConstants& point, const GDX1
     const GDX12ShadowSelection localOnly{ Mode::AllLocal, {} };
     const GDX12ShadowSelection onePoint{ Mode::SpecificLight, pointKey };
     const GDX12ShadowSelection oneSpot{ Mode::SpecificLight, spotKey };
+    const GDX12ShadowSelection independent{ Mode::Set, {}, { pointKey }, true };
+    Require(independent.IncludesSun() && independent.IncludesLocal(pointKey) && !independent.IncludesLocal(spotKey),
+        "Independent Sun/local placement included an unselected light");
     Require(all.IncludesSun() && all.IncludesLocal(pointKey) && all.IncludesLocal(spotKey) &&
         sunOnly.IncludesSun() && !sunOnly.IncludesLocal(pointKey) &&
         !localOnly.IncludesSun() && localOnly.IncludesLocal(pointKey) && localOnly.IncludesLocal(spotKey) &&
@@ -37,10 +40,23 @@ static void CheckShadowOutputs(const GDX12LocalLightConstants& point, const GDX1
     auto relocated = spot;
     relocated.ShadowFirstSlice = 0;
     const auto remapped = BuildLocalShadowOutput(relocated, {}, 5, false);
+    Require(!remapped.MatchesDestination(spotOutput) && pointOutput.MatchesDestination(pointOutput),
+        "Retained depth must be invalidated when an atlas slot changes owner");
     Require(oneSpot.IncludesLocal(GetLocalShadowKey(relocated)) && remapped.Views[0].Region.Slice == 0 &&
         remapped.MatchesDepthInputs(spotOutput) && ShouldRenderLocalShadow(relocated, &spot),
         "Remapping may reuse matching imported depth, but requires repainting a different local atlas slice");
     auto changed = pointOutput;
+    auto displayed = point;
+    displayed.Position.x += 100;
+    displayed.Radiance.x += 10;
+    const auto emitted = displayed;
+    Require(ApplyShadowSnapshot(displayed, pointOutput), "Compatible shadow metadata was rejected");
+    Require(displayed.Position.x == emitted.Position.x && displayed.Radiance.x == emitted.Radiance.x &&
+        displayed.ShadowPosition.x == point.Position.x && displayed.ShadowRange == point.Range,
+        "A stale shadow must retain its projection origin without freezing current light emission");
+    auto recycled = pointOutput;
+    ++recycled.Light.Generation;
+    Require(!ApplyShadowSnapshot(displayed, recycled), "Recycled light accepted old shadow metadata");
     ++changed.Views[5].CasterRevision;
     Require(!changed.MatchesDepthInputs(pointOutput), "A stale point face must reject the entire publication");
     changed = pointOutput;
@@ -87,6 +103,12 @@ int main()
 {
     try
     {
+        std::vector<uint64_t> everyOther;
+        for (uint64_t frame = 1; frame <= 8; ++frame)
+            if (ShadowUpdateDue(frame, 2, frame > 1)) everyOther.push_back(frame);
+        Require(everyOther == std::vector<uint64_t>({ 1, 2, 4, 6, 8 }) &&
+            ShadowUpdateDue(5, 4, false) && !ShadowUpdateDue(5, 4, true),
+            "Shadow cadence must retain nominal deadlines and initialize immediately after reset");
         ECSStorage<TransformComponent, LightComponent> ecs;
         auto point = ecs.CreateEntity();
         point.AddComponent<TransformComponent>(Vector3(10, 20, 30));

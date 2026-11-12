@@ -58,12 +58,28 @@ public:
     std::optional<GDX12Submission::CompletionPoint> Submit(const Selection& selection,
         const std::vector<GDX12ShadowOutput>& primaryPrepared, const GDX12Snapshot::PhysicalView& primaryAtlas,
         const GDX12Snapshot::PhysicalView& secondaryAtlas, const RasterPlan& primary,
-        const RasterPlan& secondary, GDX12Submission::CompletionPoint prefix);
+        const RasterPlan& secondary, GDX12Submission::CompletionPoint prefix,
+        bool latest = false, bool update = true, double sourceTime = 0);
+    const std::vector<GDX12ShadowOutput>& GetDisplayedOutputs(GDX12ShadowAtlas atlas) const;
+    double GetDisplayedSourceTime(GDX12ShadowAtlas atlas) const;
+    struct Statistics
+    {
+        uint64_t Produced = 0, ExportBytes = 0, ImportBytes = 0, ExactJoins = 0, LatestSkipped = 0;
+        size_t Pending = 0;
+    };
+    Statistics GetStatistics(GDX12ShadowAtlas atlas) const;
+    std::optional<GDX12Submission::CompletionPoint> SubmitPrimary(const RasterPlan& raster,
+        GDX12Submission::CompletionPoint prefix);
     void RetireFrame(GDX12Submission::CompletionPoint tail);
     void RetireAtlas(GDX12ShadowAtlas atlas);
 
 private:
     struct Stream;
+    void AdvanceLatest(Stream& stream);
+    std::optional<GDX12Submission::CompletionPoint> SubmitLatest(const Selection& selection,
+        const std::vector<GDX12ShadowOutput>& prepared, const GDX12Snapshot::PhysicalView& primaryAtlas,
+        const GDX12Snapshot::PhysicalView& secondaryAtlas, const RasterPlan& primary,
+        const RasterPlan& secondary, GDX12Submission::CompletionPoint prefix, bool update, double sourceTime);
     GDX12Device& _primary;
     GDX12Device& _secondary;
     RenderMGPURuntime& _runtime;

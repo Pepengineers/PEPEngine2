@@ -5,12 +5,12 @@ float LocalVisibility(LocalLight light, float3 position, float3 normal, float nD
     if (light.ShadowFirstSlice == 0xffffffffu || (light.ShadowFlags & 1u) == 0u) return 1;
     uint width, height, slices;
     LocalShadowMaps.GetDimensions(width, height, slices);
-    float bias = light.Range / width * (0.1f + 0.2f * (1.0f - nDotL));
+    float bias = light.ShadowRange / width * (0.1f + 0.2f * (1.0f - nDotL));
     float3 biasedPosition = position + normal * bias;
     uint face = 0;
     if (light.Type == 1u)
     {
-        float3 offset = biasedPosition - light.Position, a = abs(offset);
+        float3 offset = biasedPosition - light.ShadowPosition, a = abs(offset);
         if (a.x >= a.y && a.x >= a.z) face = offset.x >= 0 ? 0 : 1;
         else if (a.y >= a.z) face = offset.y >= 0 ? 2 : 3;
         else face = offset.z >= 0 ? 4 : 5;

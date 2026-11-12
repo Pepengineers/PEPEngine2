@@ -5,6 +5,7 @@ class DefaultRenderPipeline final : public IRenderPipeline
 {
 public:
     void Initialize(RenderPipelineContext&) override;
+    void ResetWorldHistory() override { if (_passes) _passes->ResetWorldHistory(); }
     void UpdateFrameSettings(RenderPipelineContext&) override;
     bool PrepareFrame(RenderPipelineContext&, GDX12CommandList*) override;
     void BuildGraph(GDX12RenderGraph&, const RenderPipelineGraphInputs&) override;

@@ -237,7 +237,13 @@ namespace
                 else
                 {
                     const float expected = output.Type == GDX12ShadowOutput::Kind::Spot ? 0.5f : 0.25f;
-                    correct &= std::abs(depth - expected) < 0.01f;
+                    const bool matches = std::abs(depth - expected) < 0.01f;
+                    correct &= matches;
+                    if (!matches)
+                        std::cerr << "Shadow depth mismatch: kind=" << static_cast<int>(output.Type)
+                            << " entity=" << output.Light.EntityId << " generation=" << output.Light.Generation
+                            << " face=" << face << " slice=" << region.Slice << " x=" << region.X + x
+                            << " y=" << region.Y + y << " actual=" << depth << " expected=" << expected << '\n';
                 }
             }
         const D3D12_RANGE noWrites{ 0, 0 };
@@ -257,6 +263,80 @@ namespace
             auto* message = reinterpret_cast<D3D12_MESSAGE*>(data.data());
             ThrowIfFailed(info->GetMessage(i, message, &size));
             if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR) throw std::runtime_error(message->pDescription);
+        }
+    }
+
+    template<class T>
+    std::vector<T> ReadDiagnosticBuffer(GDX12Device& device, const std::shared_ptr<GDX12Resource>& source)
+    {
+        const auto bytes = source->D3DResource->GetDesc().Width;
+        Require(bytes % sizeof(T) == 0, "Diagnostic buffer stride mismatch");
+        const auto readback = device.CreateResource(D3D12_HEAP_TYPE_READBACK, CD3DX12_RESOURCE_DESC::Buffer(bytes),
+            D3D12_RESOURCE_STATE_COPY_DEST);
+        auto* queue = device.GetCommandQueue();
+        auto* commands = queue->GetCommandList();
+        const auto previous = source->GetCurrentState();
+        commands->ResourceBarrier({ source->GetCopySourceBarrier() });
+        commands->GetCommandList()->CopyBufferRegion(readback.Get(), 0, source->D3DResource.Get(), 0, bytes);
+        commands->ResourceBarrier({ source->GetTransitionBarrier(previous) });
+        queue->ExecuteCommandList(commands);
+        queue->Flush();
+        const D3D12_RANGE range{ 0, static_cast<SIZE_T>(bytes) };
+        void* data = nullptr;
+        ThrowIfFailed(readback->Map(0, &range, &data));
+        std::vector<T> result(static_cast<size_t>(bytes / sizeof(T)));
+        std::memcpy(result.data(), data, static_cast<size_t>(bytes));
+        const D3D12_RANGE noWrites{ 0, 0 };
+        readback->Unmap(0, &noWrites);
+        return result;
+    }
+
+    void DiagnoseReplica(GDX12Device& device, const Replica::PreparedFrame& replica,
+        const std::vector<CrossAdapterShadowRaster::Group>& groups)
+    {
+        const auto arguments = ReadDiagnosticBuffer<GDX12IndirectDrawArgs>(device, replica.Indirect.View.Native);
+        const auto instances = ReadDiagnosticBuffer<GDX12InstanceData>(device, replica.Instances.View.Native);
+        const auto transforms = ReadDiagnosticBuffer<GDX12TransformConstants>(device, replica.Transforms.View.Native);
+        const auto materials = ReadDiagnosticBuffer<GDX12MaterialConstants>(device, replica.Materials.View.Native);
+        for (const auto& group : groups)
+        {
+            const auto& output = group.Output;
+            const auto& recipe = replica.Groups.at(group.ReplicaGroup);
+            const auto& matrix = output.Views[0].ViewProj;
+            std::cerr << "Secondary recipe entity=" << output.Light.EntityId << " draws=" << recipe.Draws.size()
+                << " matrix diagonal=" << matrix._11 << ',' << matrix._22 << ',' << matrix._33 << ',' << matrix._44 << '\n';
+            for (const auto index : recipe.Draws)
+            {
+                const auto& draw = replica.Draws.at(index);
+                const auto& args = arguments.at(static_cast<size_t>(draw.IndirectByteOffset / sizeof(GDX12IndirectDrawArgs)));
+                const auto& instance = instances.at(args.InstanceID);
+                const auto& transform = transforms.at(instance.TransformIndex).WorldMatrix;
+                const auto& material = materials.at(instance.MaterialIndex);
+                std::cerr << "Secondary draw source=" << draw.SourceId << " CPU instance=" << draw.Arguments.InstanceID
+                    << " GPU instance=" << args.InstanceID << " indexCount=" << args.IndexCountPerInstance
+                    << " instanceCount=" << args.InstanceCount << " firstIndex=" << args.StartIndexLocation
+                    << " baseVertex=" << args.BaseVertexLocation << " casts=" << instance.CastsShadows
+                    << " material=" << instance.MaterialIndex << " layer=" << material.RenderLayer
+                    << " preview=" << material.ReflectionProbePreview << " transform diagonal=" << transform._11
+                    << ',' << transform._22 << ',' << transform._33 << ',' << transform._44
+                    << " face0Visible=" << GDX12LocalShadowFrustum(matrix).Intersects(draw.Bounds) << '\n';
+                const auto findBuffer = [&](D3D12_GPU_VIRTUAL_ADDRESS address)
+                {
+                    const auto found = std::find_if(replica.RasterAccesses.begin(), replica.RasterAccesses.end(), [&](const auto& access)
+                    { return access.View.Native->D3DResource->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_BUFFER &&
+                        access.View.Native->D3DResource->GetGPUVirtualAddress() == address; });
+                    Require(found != replica.RasterAccesses.end(), "Diagnostic geometry buffer is missing");
+                    return found->View.Native;
+                };
+                const auto vertices = ReadDiagnosticBuffer<Engine::Core::Vertex>(device, findBuffer(draw.Vertices.BufferLocation));
+                const auto indices = ReadDiagnosticBuffer<UINT>(device, findBuffer(draw.Indices.BufferLocation));
+                for (UINT corner = 0; corner < 3; ++corner)
+                {
+                    const auto vertexIndex = INT64(indices.at(args.StartIndexLocation + corner)) + args.BaseVertexLocation;
+                    const auto& vertex = vertices.at(static_cast<size_t>(vertexIndex)).Position;
+                    std::cerr << "Secondary vertex=" << vertexIndex << " position=" << vertex.x << ',' << vertex.y << ',' << vertex.z << '\n';
+                }
+            }
         }
     }
 
@@ -287,8 +367,15 @@ namespace
             const DynamicPointCaster* dynamicPoint = nullptr)
         {
             ++sequence;
+            std::cout << "Exact shadow fixture: frame=" << sequence << " selection=" << static_cast<int>(selection.Scope)
+                << " entity=" << selection.Light.EntityId << " groups=" << outputs.size()
+                << " reject=" << fail << " dynamic=" << (dynamicPoint != nullptr) << std::endl;
             auto a = PrepareInput(primary, runtime, atlas, outputs, sequence, !dynamicPoint, dynamicPoint);
             auto b = PrepareInput(secondary, runtime, {}, outputs, sequence, !dynamicPoint, dynamicPoint);
+            b.Trace = std::make_shared<CrossAdapterShadowRaster::SubmissionTrace>();
+            const auto trace = b.Trace;
+            const auto diagnosticReplica = b.Replica;
+            const auto diagnosticGroups = b.Groups;
             a.CommitLegacy = [&] { ++commits; };
             bool rejectedRecorder = false;
             if (fail)
@@ -305,7 +392,32 @@ namespace
             }
             Require(receipt && receipt->Timeline() == prefix.Timeline() && receipt->Value() > prefix.Value() && commits == before + 1,
                 "Strict shadow plan did not return the actual primary restore receipt");
-            CheckDepth(primary, atlas, outputs, dynamicPoint);
+            try
+            {
+                CheckDepth(primary, atlas, outputs, dynamicPoint);
+            }
+            catch (...)
+            {
+                CheckDebug(primary);
+                CheckDebug(secondary);
+                DiagnoseReplica(secondary, *diagnosticReplica, diagnosticGroups);
+                std::vector<GDX12ShadowOutput> compactOutputs;
+                for (const auto& group : trace->Groups)
+                {
+                    std::cerr << "Secondary recorded mesh draws=" << group.MeshDraws << " entity=" << group.Light.EntityId << '\n';
+                    const auto found = std::find_if(outputs.begin(), outputs.end(), [&](const auto& output)
+                    { return output.Type == group.Kind && output.Light == group.Light; });
+                    Require(found != outputs.end(), "Secondary diagnostic lost its source light");
+                    auto output = *found;
+                    for (UINT face = 0; face < group.ViewCount; ++face) output.Views[face].Region = group.CompactViews[face];
+                    compactOutputs.push_back(output);
+                }
+                std::cerr << "Checking secondary raster before transport: groups=" << compactOutputs.size() << '\n';
+                Require(trace->SecondaryDepth != nullptr, "Secondary diagnostic has no raster depth");
+                CheckDepth(secondary, { trace->SecondaryDepth, {} }, compactOutputs, dynamicPoint);
+                std::cerr << "Secondary raster depth matches; primary import/restore does not\n";
+                throw;
+            }
             if (retire) routing.RetireFrame(direct.GetLastCompletionPoint());
             runtime.Poll();
         };
@@ -362,6 +474,55 @@ namespace
             Require((visible.AllCasters[0] != visible.StaticCasters[0]) == inRange, "Unexpected legacy dynamic-face classification");
             run(localA, localB, localAtlas, {output}, {Mode::SpecificLight, output.Light}, false, true, &caster);
         }
+        for (const auto atlasKind : { GDX12ShadowAtlas::Sun, GDX12ShadowAtlas::Local })
+        {
+            CrossAdapterShadows latest(primary, secondary, runtime);
+            CrossAdapterShadowRaster aRaster(primary, runtime, atlasKind), bRaster(secondary, runtime, atlasKind);
+            const auto atlas = aRaster.CreateDepth(6);
+            auto output = atlasKind == GDX12ShadowAtlas::Sun ? sun : compact;
+            const GDX12ShadowSelection selection{ atlasKind == GDX12ShadowAtlas::Sun ? Mode::Sun : Mode::SpecificLight,
+                output.Light };
+            const auto step = [&](bool update, double sourceTime, bool drain = true)
+            {
+                std::cout << "Latest shadow fixture: atlas=" << static_cast<int>(atlasKind) << " frame=" << sequence + 1
+                    << " update=" << update << " sourceTime=" << sourceTime << std::endl;
+                auto a = PrepareInput(primary, runtime, atlas, { output }, ++sequence, false);
+                auto b = PrepareInput(secondary, runtime, {}, { output }, sequence, false);
+                a.CommitLegacy = [] {};
+                const auto prefix = direct.SignalCompletion();
+                const auto receipt = SubmitPreparedShadows(latest, selection, aRaster, std::move(a), bRaster,
+                    std::move(b), prefix, true, update, sourceTime);
+                Require(receipt && receipt->Timeline() == prefix.Timeline() && receipt->Value() >= prefix.Value(),
+                    "Latest shadow lost the primary continuation receipt");
+                CheckDepth(primary, atlas, { output }, nullptr);
+                latest.RetireFrame(direct.GetLastCompletionPoint());
+                if (drain)
+                    for (auto adapter : { primary.GetSubmissionAdapterId(), secondary.GetSubmissionAdapterId() })
+                        for (auto queue : { QueueKind::Direct, QueueKind::Copy }) runtime.GetQueue({ adapter, queue })->Flush();
+                runtime.Poll();
+            };
+            step(true, 100);
+            Require(latest.GetDisplayedSourceTime(atlasKind) == 100, "Latest did not bootstrap a complete snapshot");
+            output.Views[0].ViewProj._41 += 0.01f;
+            ++output.Views[0].CasterRevision;
+            step(true, 200);
+            Require(latest.GetDisplayedSourceTime(atlasKind) == 100 &&
+                latest.GetDisplayedOutputs(atlasKind).front().Views[0].ViewProj._41 != output.Views[0].ViewProj._41,
+                "Latest published producer metadata before the matching depth was imported");
+            for (unsigned i = 0; i < 4; ++i) step(false, 200);
+            Require(latest.GetDisplayedSourceTime(atlasKind) == 200 &&
+                latest.GetDisplayedOutputs(atlasKind).front().Views[0].ViewProj._41 == output.Views[0].ViewProj._41,
+                "Latest did not publish the completed depth and its source matrices together");
+            const auto stats = latest.GetStatistics(atlasKind);
+            Require(stats.Produced == 2 && stats.ExactJoins == 1 && stats.ExportBytes == stats.ImportBytes &&
+                stats.ExportBytes > 0 && stats.Pending == 0,
+                "Latest shadow diagnostics lost a transfer or counted it as another Exact join");
+            for (unsigned i = 0; i < 4; ++i) step(true, 300 + i, false);
+            Require(latest.GetStatistics(atlasKind).Pending <= 3,
+                "Latest shadow queued an unbounded producer backlog");
+            latest.RetireAtlas(atlasKind);
+            Require(latest.GetDisplayedOutputs(atlasKind).empty(), "Retired shadow epoch retained a displayed snapshot");
+        }
         runtime.Shutdown();
     }
 }
@@ -372,7 +533,7 @@ int main(int argc, char** argv)
     try
     {
         const std::string_view option = argc == 2 ? argv[1] : "";
-        Require(argc == 1 || option == "--cpu" || option == "--gpu-validation", "Unknown S2 routing option");
+        Require(argc == 1 || option == "--cpu" || option == "--gpu-debug" || option == "--gpu-validation", "Unknown shadow routing option");
         CheckSelection();
         if (option == "--cpu") return 0;
         ComPtr<ID3D12Debug> debug;

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="..\..\..\Apps\App\MGPUShadowDepthTransferTests.vcxproj" />
+  <PropertyGroup>
+    <ShadowReproOptimization Condition="'$(ShadowReproOptimization)'==''">MaxSpeed</ShadowReproOptimization>
+    <OutDir>$(MSBuildThisFileDirectory)ShadowRegionResetMiscompile\$(ShadowReproOptimization)\</OutDir>
+    <IntDir>$(OutDir)obj\</IntDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Remove="@(ProjectReference)" />
+    <ClCompile Remove="@(ClCompile)" />
+    <ClCompile Include="$(MSBuildThisFileDirectory)ShadowRegionResetMiscompile.cpp" />
+  </ItemGroup>
+  <ItemDefinitionGroup>
+    <ClCompile><Optimization>$(ShadowReproOptimization)</Optimization><AssemblerOutput>AssemblyAndSourceCode</AssemblerOutput><AssemblerListingLocation>$(IntDir)</AssemblerListingLocation></ClCompile><Link><GenerateMapFile>true</GenerateMapFile><MapFileName>$(OutDir)ShadowLayoutRepro.map</MapFileName></Link>
+  </ItemDefinitionGroup>
+</Project>

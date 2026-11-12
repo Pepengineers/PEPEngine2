@@ -31,7 +31,7 @@ public:
         GDX12LocalShadowKey Light;
         std::array<GDX12ShadowRegion, 6> CompactViews{}, PrimaryViews{};
         UINT ViewCount = 0;
-        std::size_t SkinnedDraws = 0, MaskedDraws = 0;
+        std::size_t MeshDraws = 0, SkinnedDraws = 0, MaskedDraws = 0;
         std::vector<std::uint64_t> AdmittedGrass, RecordedGrass;
     };
     struct SubmissionTrace
@@ -81,4 +81,5 @@ private:
 
 std::optional<GDX12Submission::CompletionPoint> SubmitPreparedShadows(CrossAdapterShadows& transfer,
     const GDX12ShadowSelection& selection, CrossAdapterShadowRaster& primaryRaster, CrossAdapterShadowRaster::Input primary,
-    CrossAdapterShadowRaster& secondaryRaster, CrossAdapterShadowRaster::Input secondary, GDX12Submission::CompletionPoint prefix);
+    CrossAdapterShadowRaster& secondaryRaster, CrossAdapterShadowRaster::Input secondary, GDX12Submission::CompletionPoint prefix,
+    bool latest = false, bool update = true, double sourceTime = 0);
