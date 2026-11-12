@@ -94,6 +94,8 @@ public:
     void Resize() override;
     void Execute(GDX12CommandList* commands) override;
     void Invalidate();
+    GDX12Texture* CaptureTransmittance() const
+    { return _source == SkySource::SkyAtmosphere && _luts[0] && _luts[0]->IsInitialized() ? _luts[0].get() : nullptr; }
     void ClearDenendencies() override;
     void SetCloudSource(GDX12CloudComponent* source);
     std::optional<GDX12CloudEnvironmentInputs> CaptureCloudInputs();

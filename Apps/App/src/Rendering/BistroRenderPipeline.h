@@ -47,6 +47,8 @@ private:
     std::unique_ptr<BistroUIPosters> _posters;
     bool _posterGraphChanged = false;
     std::unique_ptr<CommonRenderPasses> _passes;
+    struct ReflectionGrass;
+    std::unique_ptr<ReflectionGrass> _reflectionGrass;
     std::unique_ptr<CrossAdapterEnvironment> _cloudEnvironment;
     bool _cloudSplit = false;
 #ifdef _DEBUG

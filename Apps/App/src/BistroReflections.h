@@ -20,11 +20,20 @@ namespace BistroReflections
     inline AutoConsoleVariable<bool> ShowSpheres(L"App.ReflectionProbes.ShowSpheres", true,
         L"Show mirror spheres sampling each Bistro probe's own baked cubemap");
     inline AutoConsoleVariable<UINT> Resolution(L"App.ReflectionProbes.Resolution", 128,
-        L"Frozen capture face size, a power of two in 16..512", EConsoleVariableFlags::Default,
+        L"Capture face size, a power of two in 16..512", EConsoleVariableFlags::Default,
         [](UINT value) { return value >= 16 && value <= 512 && (value & (value - 1)) == 0; });
     inline AutoConsoleVariable<UINT> PrefilterSamples(L"App.ReflectionProbes.PrefilterSamples", 64,
-        L"Frozen capture prefilter samples, 8..1024", EConsoleVariableFlags::Default,
+        L"Capture prefilter samples, 8..1024", EConsoleVariableFlags::Default,
         [](UINT value) { return value >= 8 && value <= 1024; });
+    inline AutoConsoleVariable<int> Implementation(L"App.ReflectionProbes.Implementation", 2,
+        L"0 full dynamic, 1 baked static with dynamic overlay, 2 frozen manual capture", EConsoleVariableFlags::Default,
+        [](int value) { return value >= 0 && value <= 2; });
+    inline std::array<AutoConsoleVariable<UINT>,4> SecondaryFaces{{
+        {L"App.ReflectionProbes.SecondaryFaces0", 0, L"Secondary face mask for the first seeded probe", EConsoleVariableFlags::Default, [](UINT v) { return v <= 63; }},
+        {L"App.ReflectionProbes.SecondaryFaces1", 0, L"Secondary face mask for the second seeded probe", EConsoleVariableFlags::Default, [](UINT v) { return v <= 63; }},
+        {L"App.ReflectionProbes.SecondaryFaces2", 0, L"Secondary face mask for the third seeded probe", EConsoleVariableFlags::Default, [](UINT v) { return v <= 63; }},
+        {L"App.ReflectionProbes.SecondaryFaces3", 0, L"Secondary face mask for the fourth seeded probe", EConsoleVariableFlags::Default, [](UINT v) { return v <= 63; }}
+    }};
 
     struct TableAnchor { Vector3 Centre; float HalfSize; };
     // OBJ tabletop centres: 11 terrace tables, then all 10 interior tables.
@@ -76,8 +85,11 @@ namespace BistroReflections
             const bool visible = ShowSpheres.GetValue();
             const auto resolution = Resolution.GetValue();
             const auto samples = PrefilterSamples.GetValue();
+            const auto implementation = Implementation.GetValue();
+            std::array<UINT,4> masks{};
+            for (size_t i = 0; i < masks.size(); ++i) masks[i] = SecondaryFaces[i].GetValue();
             if (_entities.size() == requested && _visible == visible &&
-                _resolution == resolution && _samples == samples) return;
+                _resolution == resolution && _samples == samples && _implementation == implementation && _masks == masks) return;
             auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
             if (_entities.size() != requested)
             {
@@ -103,7 +115,7 @@ namespace BistroReflections
                 entity.AddComponent<NameComponent>("BistroReflection" + std::to_string(index));
                 entity.AddComponent<TransformComponent>(position);
                 auto& probe = entity.AddComponent<ReflectionProbeComponent>();
-                probe.Implementation = 2;
+                probe.Implementation = implementation;
                 probe.Extents = Vector3(table.HalfSize);
                 probe.BlendDistance = 5;
                 probe.FacesPerFrame = 6;
@@ -118,6 +130,8 @@ namespace BistroReflections
                 auto& probe = ecs.Get<ReflectionProbeComponent>(entity);
                 probe.Resolution = resolution;
                 probe.PrefilterSamples = samples;
+                probe.Implementation = implementation;
+                probe.SecondaryFaces = index < masks.size() ? masks[index] : 0;
                 const auto name = "BistroProbePreview" + std::to_string(index);
                 auto* material = render.GetMaterialByName(name);
                 if (!material) material = render.CreateMaterial(name);
@@ -140,6 +154,8 @@ namespace BistroReflections
             _visible = visible;
             _resolution = resolution;
             _samples = samples;
+            _implementation = implementation;
+            _masks = masks;
             IndirectCommandBuildSystem{}.Tick(world, 0);
         }
 
@@ -200,5 +216,7 @@ namespace BistroReflections
         bool _visible = true;
         UINT _resolution = Resolution.GetValue();
         UINT _samples = PrefilterSamples.GetValue();
+        int _implementation = -1;
+        std::array<UINT,4> _masks{};
     };
 }

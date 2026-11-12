@@ -14,4 +14,8 @@
       <AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
+  <Target Name="CopyEngineConfiguration" AfterTargets="Build">
+    <MakeDir Directories="$(TargetDir)Config" />
+    <WriteLinesToFile File="$(TargetDir)Config\Engine.ini" Lines="[ConsoleVariables]" Overwrite="true" />
+  </Target>
 </Project>

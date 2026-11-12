@@ -65,6 +65,7 @@ public:
     { return _vertexBuffer ? _vertexBuffer->D3DResource->GetGPUVirtualAddress() : 0; }
     std::shared_ptr<GDX12Resource> ShareVertexResource() const { return _vertexBuffer; }
     std::shared_ptr<GDX12Resource> ShareIndexResource() const { return _indexBuffer; }
+    void SetSnapshotBuffers(std::shared_ptr<GDX12Resource> vertices, std::shared_ptr<GDX12Resource> indices);
 
 private:
 	friend class RenderModule;

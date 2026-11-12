@@ -64,3 +64,11 @@
 - Этап 2: bcbecf0e. Cleanup прямого mesh draw пересобран на MisSpec; ShadowRouting --gpu-validation повторно прошёл. Полная удалённая Release-сборка App прошла.
 - Этап 3: CPU ParticleTime и целевой MGPUParticleTests --gpu-validation прошли; checkpoint, полный учёт времени, смена владельца и displayed motion history включены в код. Проверка полной сцены остаётся общей частью этапа 5.
 - Reflection near/far GPU fixture: оба размещения, R/1,2R и возврат из незавершённого дальнего цикла прошли с debug layer.
+
+### Этап 4: отражения
+
+- Реализованы независимые count/resolution/filter/schedule/mode/placement, четыре фиксированные базовые пробы, перенос целой пробы и граней, сборка и публикация после завершения GPU.
+- Целевой ReflectionProbeTests --mgpu-debug повторно прошёл всю матрицу 1–4 probes / Full Dynamic / Baked+dynamic / masks / schedules, оба near/far-размещения, пороги R/1,2R, смену режима при незавершённом цикле и reset. CPU ReflectionScheduleTests повторно прошёл.
+- Полная сцена обнаружила пропущенные входы динамических UI-материалов в reflection split. Исправлено явным включением material inputs; соответствующий GPU regression прошёл. Сцена теперь проходит построение графа и загружается в интерактивной сессии MidSpec.
+- В стоимость переноса отражений включены также поля травы приложения. Полная сцена, визуальная приёмка и обычные FPS остаются проверками интеграции этапа 5.
+- Этап 3 зафиксирован коммитом `557aeb5e`.

@@ -3,6 +3,7 @@
 #include "App.Base/Rendering/CrossAdapterAO.h"
 #include "App.Base/Rendering/RenderShadowRoutes.h"
 #include "App.Base/Rendering/CrossAdapterParticles.h"
+#include "App.Base/Rendering/CrossAdapterReflections.h"
 
 CommonRenderPasses::CommonRenderPasses(GDX12SwapChain* backBuffer, GDX12WBOITTransparencyPass::DepthPartition partition)
     : Transparency(partition), FrameGeneration(backBuffer)
@@ -27,8 +28,13 @@ void CommonRenderPasses::Setup(RenderPipelineContext& context)
     for (auto* pass : Bindings.PrimaryPasses) pass->Setup(&context.Primary, &context.Secondary, &context.Common);
     if (auto* runtime = context.Runtime.GetMGPURuntime())
         if (auto* secondary = context.Runtime.GetMGPUDevices().Secondary)
+        {
             _placedParticles = std::make_unique<CrossAdapterParticles>(context.Primary, *secondary, *runtime,
                 ParticleSimulation, Particles);
+            _placedReflections = std::make_unique<CrossAdapterReflections>(context.Primary, *secondary, *runtime,
+                [render = &context.Runtime] { return render->GetReflectionMaterialTextures(); },
+                context.Common, Reflections, Environment);
+        }
 }
 
 void CommonRenderPasses::AddParticleSimulation(GDX12RenderGraph& graph)
@@ -39,11 +45,18 @@ void CommonRenderPasses::AddParticleSimulation(GDX12RenderGraph& graph)
 
 void CommonRenderPasses::ResetWorldHistory()
 {
-    if (_placedParticles) _placedParticles->ResetWorld();
+    if (_placedReflections) _placedReflections->ResetWorld();
     SunShadow.ResetUpdateSchedule();
     LocalShadow.ResetUpdateSchedule();
+    if (_placedParticles) _placedParticles->ResetWorld();
     if (_placedShadows) _placedShadows->Invalidate();
     Reflections.ResetHistory();
+}
+
+void CommonRenderPasses::AddReflectionRoute(GDX12RenderGraph& graph, GDX12RenderPass& node,
+    std::vector<IRenderPassLink*> materialInputs)
+{
+    if (_placedReflections) _placedReflections->Configure(graph, node, Bindings, std::move(materialInputs));
 }
 
 void CommonRenderPasses::Initialize()

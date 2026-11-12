@@ -97,6 +97,7 @@ public:
 	UINT GetHeight();
 	GDX12Texture* GetTexture() override;
 	bool IsInitialized() override;
+    D3D12_SHADER_RESOURCE_VIEW_DESC ShaderViewDescription() const { return _desc.SRVDesc; }
 
 private:
 	friend class GDX12RenderGraph;

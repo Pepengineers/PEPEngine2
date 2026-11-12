@@ -19,8 +19,9 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12MotionBlurPass.h"
 
 class CrossAdapterAO;
-class CrossAdapterParticles;
 class RenderShadowRoutes;
+class CrossAdapterParticles;
+class CrossAdapterReflections;
 
 // Owns reusable techniques and their lifecycle; each pipeline chooses links and graph order.
 struct CommonRenderPasses
@@ -34,9 +35,11 @@ struct CommonRenderPasses
     bool PrepareFrame(RenderPipelineContext&, GDX12CommandList*);
     RenderShadowRoutes* GetShadowRoutes() const { return _usePlacedShadows ? _placedShadows.get() : nullptr; }
     void AddShadowRoutes(GDX12RenderGraph&, GDX12RenderPass& sunNode, GDX12RenderPass& localNode);
-    void ResetWorldHistory();
     void AddParticleSimulation(GDX12RenderGraph&);
+    void ResetWorldHistory();
     CrossAdapterParticles* GetParticleRoute() const { return _placedParticles.get(); }
+    CrossAdapterReflections* GetReflectionRoute() const { return _placedReflections.get(); }
+    void AddReflectionRoute(GDX12RenderGraph&, GDX12RenderPass& node, std::vector<IRenderPassLink*> materialInputs = {});
     void BindAmbientOcclusion(RenderPipelineCommonData&, bool early);
     bool UpdateAmbientOcclusionRoute(RenderPipelineContext&);
     void AddAmbientOcclusion(GDX12RenderGraph&, bool early);
@@ -70,4 +73,5 @@ private:
     std::unique_ptr<RenderShadowRoutes> _placedShadows;
     bool _usePlacedShadows = false;
     std::unique_ptr<CrossAdapterParticles> _placedParticles;
+    std::unique_ptr<CrossAdapterReflections> _placedReflections;
 };
