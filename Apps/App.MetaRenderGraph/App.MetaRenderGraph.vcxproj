@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{85AC3362-37C9-4D75-B420-FE0AEDEB8301}</ProjectGuid>
+    <RootNamespace>MetaRenderGraph</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\..\GlobalSettings.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.Module.App.Base.Public.props" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\..\GlobalSettings.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.Module.App.Base.Public.props" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros">
+    <LocalDebuggerWorkingDirectory>$(PEPRepoRoot)</LocalDebuggerWorkingDirectory>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.UI\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\App.Base\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\External.Libraries\;$(PEPRepoRoot)External\External.Libraries\dxc\lib\$(Platform)\;$(PEPRepoRoot)External\External.Libraries\pix\lib\;$(PEPRepoRoot)External\External.Libraries\assimp\lib\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtk\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtex\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\ffx-api\lib\;$(PEPRepoRoot)External\External.Libraries\xess\lib\;$(PEPRepoRoot)External\External.Libraries\directstorage\lib\;$(PEPRepoRoot)External\External.Libraries\directxmesh\lib\;$(PEPRepoRoot)External\External.Libraries\wwise\lib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.UI.lib;App.Base.lib;External.Libraries.lib;dxcompiler.lib;dxil.lib;WinPixEventRuntime.lib;assimp-vc143-mtd.lib;DirectXTK12.lib;DirectXTex.lib;amd_fidelityfx_loader_dx12.lib;libxess.lib;dstorage.lib;DirectXMesh.lib;AkSoundEngine.lib;AkMemoryMgr.lib;AkStreamMgr.lib;CommunicationCentral.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>xcopy /Y /D "$(PEPRepoRoot)External\Runtime\*.dll" "$(TargetDir)"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\Engine.UI\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\App.Base\;$(PEPRepoRoot)Build\bin\$(Platform)\$(Configuration)\External.Libraries\;$(PEPRepoRoot)External\External.Libraries\dxc\lib\$(Platform)\;$(PEPRepoRoot)External\External.Libraries\pix\lib\;$(PEPRepoRoot)External\External.Libraries\assimp\lib\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtk\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtex\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\ffx-api\lib\;$(PEPRepoRoot)External\External.Libraries\xess\lib\;$(PEPRepoRoot)External\External.Libraries\directstorage\lib\;$(PEPRepoRoot)External\External.Libraries\directxmesh\lib\;$(PEPRepoRoot)External\External.Libraries\wwise\lib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.UI.lib;App.Base.lib;External.Libraries.lib;dxcompiler.lib;dxil.lib;WinPixEventRuntime.lib;assimp-vc143-mt.lib;DirectXTK12.lib;DirectXTex.lib;amd_fidelityfx_loader_dx12.lib;libxess.lib;dstorage.lib;DirectXMesh.lib;AkSoundEngine.lib;AkMemoryMgr.lib;AkStreamMgr.lib;CommunicationCentral.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>xcopy /Y /D "$(PEPRepoRoot)External\Runtime\*.dll" "$(TargetDir)"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\App.cpp" />
+    <ClCompile Include="src\MetaApplication.cpp" />
+    <ClInclude Include="src\MetaApplication.h" />
+    <None Include="Configs\Startup.ini" />
+    <None Include="Configs\SmokeWorld.yaml" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\App.Base\App.Base.vcxproj">
+      <Project>{748BEB74-A374-45CC-BD7D-7456DFD9AD83}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\Engine\Engine.Core\Engine.Core.vcxproj">
+      <Project>{555AFC47-4F0B-4BA4-9D25-27342E51C84F}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\Engine\Engine.RendererDX12\Engine.RendererDX12.vcxproj">
+      <Project>{33A65DAB-170E-49A8-9DD4-49F754ECDEB2}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\Engine\Engine.UI\Engine.UI.vcxproj">
+      <Project>{84C6F207-2A49-42E8-92F5-D2EA420C6856}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\..\External\External.Libraries\External.Libraries.vcxproj">
+      <Project>{2FB10E73-84E6-40F9-BE47-10340341981B}</Project>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="CopyReconstructionSDKFiles" AfterTargets="Build">
+    <ItemGroup>
+      <ReconstructionSDKRuntime Include="$(PEPRepoRoot)External\Runtime\amd_fidelityfx*.dll;$(PEPRepoRoot)External\Runtime\libxess*.dll;$(PEPRepoRoot)External\Runtime\libxell.dll;$(PEPRepoRoot)External\Runtime\sl*.dll;$(PEPRepoRoot)External\Runtime\nvngx*.dll" />
+      <ReconstructionSDKNotice Include="$(PEPRepoRoot)External\Runtime\Licenses\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ReconstructionSDKRuntime)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ReconstructionSDKNotice)" DestinationFiles="@(ReconstructionSDKNotice->'$(TargetDir)Licenses\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyMetaStartup" AfterTargets="Build">
+    <MakeDir Directories="$(TargetDir)Configs" />
+    <Copy SourceFiles="$(ProjectDir)Configs\Startup.ini;$(ProjectDir)Configs\SmokeWorld.yaml" DestinationFolder="$(TargetDir)Configs" SkipUnchangedFiles="true" />
+  </Target>
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>
