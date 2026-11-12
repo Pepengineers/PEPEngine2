@@ -44,6 +44,28 @@ namespace
         if (!result.Error.empty()) throw std::runtime_error(result.Error);
     }
 
+    void LogQualityForeground()
+    {
+        const auto window = GetForegroundWindow();
+        DWORD pid = 0;
+        if (window) GetWindowThreadProcessId(window, &pid);
+        wchar_t title[1024]{};
+        if (window) GetWindowTextW(window, title, static_cast<int>(std::size(title)));
+        std::wstring image(32768, L'\0');
+        DWORD length = static_cast<DWORD>(image.size());
+        DWORD error = 0;
+        const auto process = pid ? OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) : nullptr;
+        if (process)
+        {
+            if (!QueryFullProcessImageNameW(process, 0, image.data(), &length)) error = GetLastError();
+            CloseHandle(process);
+        }
+        else error = pid ? GetLastError() : ERROR_NOT_FOUND;
+        image.resize(error ? 0 : length);
+        Log::Warning("Quality", "Foreground observed at cancellation: hwnd=", reinterpret_cast<uintptr_t>(window),
+            ", pid=", pid, ", title=", title, ", process=", image, ", process_query_error=", error);
+    }
+
     class BistroApp final : public App
     {
     public:
@@ -552,6 +574,7 @@ namespace
         {
             if (_qualityInterrupted || bInactive != _qualityBackground)
             {
+                if (bInactive != _qualityBackground) LogQualityForeground();
                 FinishQuality(true, _qualityInterrupted ? "Pause was requested during the trial." :
                     "Window activation changed during the trial: expected inactive=" + std::to_string(_qualityBackground) +
                     ", actual inactive=" + std::to_string(bInactive));

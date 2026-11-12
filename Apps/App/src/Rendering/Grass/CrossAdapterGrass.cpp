@@ -282,7 +282,8 @@ bool CrossAdapterGrass::Impl::Start(std::shared_ptr<const GDX12GrassRenderer::Lo
     {
         auto localSnapshot = std::make_shared<GDX12GrassFieldSnapshot>(*Primary.SRV_UAV_Heap,
             *checkpoint->Packed, checkpoint->Layout, checkpoint->Packed);
-        const auto localCheckpoint = View(checkpoint->Packed, DirectA);
+        const PhysicalView localCheckpoint{checkpoint->Packed,
+            Runtime.IdentifyResource(checkpoint->Packed, *Primary.Device)};
         const auto& shared = bank.GetSlots().at(credit.SharedSlot);
         Plan plan;
         plan.Bindings.KeepAlive = {checkpoint, solver, SecondaryHeap, SeedBank};

@@ -1463,7 +1463,21 @@ GDX12CommandList* GDX12RenderGraph::ExecuteLegacySplit(GDX12CommandList* command
                 {
                     if (prior.Native != loan.Native || prior.Handle.Get() != handle.Get() ||
                         !SameIdentity(prior.Identity, identity))
-                        throw std::invalid_argument("Legacy external view changed canonical owner or identity across replacements");
+                    {
+                        const auto describe = [](const ResourceIdentity& value)
+                        {
+                            return std::to_string(static_cast<uint64_t>(value.Id)) + "/" +
+                                std::to_string(static_cast<uint64_t>(value.Adapter)) + "/" +
+                                std::to_string(static_cast<uint64_t>(value.ResourceEpoch)) + "/" +
+                                std::to_string(static_cast<uint64_t>(value.Transfer)) + "/" +
+                                std::to_string(static_cast<uint64_t>(value.Allocation));
+                        };
+                        throw std::invalid_argument("Legacy external view changed canonical owner or identity across replacements: pass=" +
+                            _nodes[pass].Name + ", prior/current id/adapter/epoch/transfer/allocation=" + describe(prior.Identity) +
+                            " -> " + describe(identity) + ", same_native=" + std::to_string(prior.Native == loan.Native) +
+                            ", same_handle=" + std::to_string(prior.Handle.Get() == handle.Get()) +
+                            ", width=" + std::to_string(view.Desc.Width));
+                    }
                     known = true;
                 }
             if (!known) frameOwners->push_back({ identity, loan.Native, handle });
