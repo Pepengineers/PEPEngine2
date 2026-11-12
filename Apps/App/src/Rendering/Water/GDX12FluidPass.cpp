@@ -1,14 +1,24 @@
 #include "Rendering/Water/GDX12FluidPass.h"
+#include "Rendering/Water/GDX12WaterOffload.h"
+#include "Engine.RendererDX12/GDX12DeviceFactory.h"
+#include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <algorithm>
 #include <cmath>
 #include <set>
 #include <stdexcept>
 
+namespace
+{
+    AutoConsoleVariable<int> WaterAdapter(L"Render.Fluid.SecondaryAdapter", -1,
+        L"Water solver adapter in the renderer hardware list; -1 keeps single GPU. Startup only.", EConsoleVariableFlags::ReadOnly);
+}
+
 struct GDX12FluidSurfacePass::State
 {
     GDX12FluidSolver::Buffers Solver;
     GDX12FluidSolver::Head SolverHead;
+    std::unique_ptr<GDX12WaterOffload> Offload;
     std::unique_ptr<GDX12UploadBuffer<GDX12FluidParameters>> Constants;
     std::shared_ptr<const std::vector<GDX12FluidParticle>> Source;
     uint64_t Revision = 0;
@@ -16,6 +26,7 @@ struct GDX12FluidSurfacePass::State
     UINT SeedFrameSlot = UINT_MAX;
     bool WasRendered = false;
     bool ResetThisFrame = false;
+    Matrix PreviousContainer = Matrix::Identity;
 
 };
 
@@ -30,7 +41,7 @@ GDX12FluidSurfacePass::~GDX12FluidSurfacePass() = default;
 
 void GDX12FluidSurfacePass::Initialize()
 {
-    static_assert(sizeof(GDX12FluidParameters) == 272);
+    static_assert(sizeof(GDX12FluidParameters) == 336);
     auto* depth = _inputs[0]->GetTexture();
     auto* motion = _inputs[1]->GetTexture();
     if (!depth->GetWidth() || !depth->GetHeight() || depth->GetWidth() != motion->GetWidth() ||
@@ -187,7 +198,19 @@ void GDX12FluidSurfacePass::PrepareStates()
         auto replacement = std::make_unique<State>();
         replacement->Source = source;
         replacement->Revision = instance.Component.GetResetRevision();
-        replacement->Solver = GDX12FluidSolver::CreateBuffers(_resources->Device, _resources->SRV_UAV_Heap.get(), instance);
+        replacement->PreviousContainer = instance.ContainerToWorld;
+        const int adapter = WaterAdapter.GetValue();
+        if (adapter >= 0)
+        {
+            const auto adapters = GDX12DeviceFactory::GetDeviceDescriptors();
+            if (static_cast<size_t>(adapter) >= adapters.size()) throw std::invalid_argument("Water secondary adapter index out of range");
+            auto resolved = instance;
+            resolved.Component.SetSettings(ResolveFluidSettings(author, _controls.Quality));
+            replacement->Offload = std::make_unique<GDX12WaterOffload>(_resources->Device,
+                _resources->SRV_UAV_Heap.get(), adapters[adapter].Adapter, resolved);
+            replacement->Offload->Start();
+        }
+        else replacement->Solver = GDX12FluidSolver::CreateBuffers(_resources->Device, _resources->SRV_UAV_Heap.get(), instance);
         replacement->Constants = std::make_unique<GDX12UploadBuffer<GDX12FluidParameters>>(_resources->Device,
             2 * static_cast<UINT>(_resources->FrameConstants.size()));
         state = std::move(replacement);
@@ -213,6 +236,7 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::GetSimulation
     std::vector<GDX12RenderGraph::BufferAccess> accesses;
     for (const auto& [id, state] : _states)
     {
+        if (state->Offload) continue;
         if (!state->Solver.Count) continue;
         accesses.push_back({ &state->Constants->GetResource(), GDX12RenderGraph::Mode::Read });
         for (const auto& particles : state->Solver.Particles)
@@ -231,6 +255,11 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::GetBufferAcce
     auto accesses = GetResolveBufferAccesses();
     for (const auto& [id, state] : _states)
     {
+        if (state->Offload)
+        {
+            accesses.push_back({&state->Offload->DisplayParticles().GetResource(), GDX12RenderGraph::Mode::Read});
+            continue;
+        }
         if (!state->Solver.Count) continue;
         for (const auto& particles : state->Solver.Particles)
             accesses.push_back({ &particles->GetResource(), GDX12RenderGraph::Mode::Read });
@@ -321,8 +350,21 @@ void GDX12FluidSurfacePass::PrepareFrame()
     PrepareStates();
     // The frame-slot wait covers the final DIRECT fence and its COMPUTE join.
     for (auto& [id, state] : _states)
-        if (!state->SolverHead.SeedPending && state->SeedFrameSlot == _resources->CurrFrameConstantsIndex)
+        if (!state->Offload && !state->SolverHead.SeedPending && state->SeedFrameSlot == _resources->CurrFrameConstantsIndex)
             state->Solver.SeedUpload.reset();
+    for (const auto& instance : _instances)
+    {
+        const auto found = _states.find(instance.Id);
+        if (found == _states.end() || !found->second->Offload) continue;
+        auto input = instance;
+        auto settings = ResolveFluidSettings(instance.Component.GetSettings(), _controls.Quality);
+        settings.SimulationEnabled &= _controls.Enabled;
+        input.Component.SetSettings(settings);
+        auto& state = *found->second;
+        state.Offload->Update(input);
+        state.ResetThisFrame = !state.WasRendered;
+        state.Offload->UpdateDisplay();
+    }
     _depthLink.Target = _inputs[0]->GetTexture();
     _motionLink.Target = _inputs[1]->GetTexture();
     bool rendering = false;
@@ -378,6 +420,7 @@ void GDX12FluidSurfacePass::ExecuteSimulation(GDX12CommandList* commands)
         auto found = _states.find(instance.Id);
         if (found == _states.end()) continue;
         auto& state = *found->second;
+        if (state.Offload) continue;
         if (!state.Solver.Count) continue;
         const auto settings = ResolveFluidSettings(instance.Component.GetSettings(), _controls.Quality);
         if (!settings.RenderEnabled && !settings.SimulationEnabled) continue;
@@ -417,6 +460,7 @@ void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
         const bool drawing = author.RenderEnabled;
         _commonData->ResetHistory |= drawing != state.WasRendered;
         auto parameters = MakeFluidParameters(transform, settings);
+        XMStoreFloat4x4(&parameters.PreviousContainerToWorld, XMMatrixTranspose(state.PreviousContainer));
         if (settings.ReferenceModel)
             parameters.Radius *= std::cbrt(std::abs(transform.Determinant()));
         parameters.ResetMotion = _commonData->ResetHistory || state.ResetThisFrame || !state.WasRendered;
@@ -441,12 +485,13 @@ void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
             }
             if (drawing)
             {
-                auto& particles = *state.Solver.Particles[state.SolverHead.Current];
-                DrawSurface(commands, {particles.GetResource(), particles.GetSRV()->GPUHandle, state.Solver.Count},
+                auto& particles = state.Offload ? state.Offload->DisplayParticles() : *state.Solver.Particles[state.SolverHead.Current];
+                DrawSurface(commands, {particles.GetResource(), particles.GetSRV()->GPUHandle, particles.GetElementCount()},
                     constants, owner, settings);
             }
         }
         state.WasRendered = drawing;
+        state.PreviousContainer = transform;
         state.SettingsRevision = instance.Component.GetSettingsRevision();
     }
     if (initialized)

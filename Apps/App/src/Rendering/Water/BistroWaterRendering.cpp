@@ -49,7 +49,8 @@ std::vector<GDX12FluidInstance> BistroWaterRendering::CollectScene(float deltaSe
             instance.ContainerToWorld = Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
                 XMConvertToRadians(transform.Rotation.y), XMConvertToRadians(transform.Rotation.x),
                 XMConvertToRadians(transform.Rotation.z)) * Matrix::CreateTranslation(transform.Location);
-            instance.DeltaSeconds = world.IsPaused() ? 0 : deltaSeconds * world.GetTimeScale();
+            instance.ClockScale = world.IsPaused() ? 0 : world.GetTimeScale();
+            instance.DeltaSeconds = deltaSeconds * instance.ClockScale;
             ValidateFluidInstance(instance);
             instances.push_back(std::move(instance));
         });

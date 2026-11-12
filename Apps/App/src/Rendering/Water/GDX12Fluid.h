@@ -81,6 +81,7 @@ struct GDX12FluidInstance
 {
     uint64_t Id = 0;
     float DeltaSeconds = 0;
+    float ClockScale = 1;
     GDX12FluidComponent Component;
     Matrix ContainerToWorld = Matrix::Identity;
 };

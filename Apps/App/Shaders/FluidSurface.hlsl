@@ -106,8 +106,8 @@ SurfaceOutput SpherePS(SphereVertex input)
     SurfaceOutput output;
     output.EyeDepth = -mul(float4(world, 1), Camera.View).z;
     float3 displacement = particle.Position - particle.PreviousPosition;
-    // shortcut: raw basins are static; use a previous transform before supporting moving basins.
-    if (LocalSimulation != 0) displacement = mul(float4(displacement, 0), ContainerToWorld).xyz;
+    if (LocalSimulation != 0) displacement = ParticleWorld(particle.Position) -
+        mul(float4(particle.PreviousPosition, 1), PreviousContainerToWorld).xyz;
     output.RawData = float4(output.EyeDepth, displacement);
     output.Depth = DeviceDepth(world);
     return output;

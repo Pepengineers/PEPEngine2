@@ -93,7 +93,8 @@ void GDX12FluidComponent::SetParticles(std::vector<GDX12FluidParticle> particles
 void ValidateFluidInstance(const GDX12FluidInstance& instance)
 {
     ValidateFluidSettings(instance.Component.GetSettings());
-    if (!std::isfinite(instance.DeltaSeconds) || instance.DeltaSeconds < 0 || instance.DeltaSeconds > 3600)
+    if (!std::isfinite(instance.DeltaSeconds) || instance.DeltaSeconds < 0 || instance.DeltaSeconds > 3600 ||
+        !std::isfinite(instance.ClockScale) || instance.ClockScale < 0)
         throw std::invalid_argument("Invalid fluid frame time");
     const auto& matrix = instance.ContainerToWorld;
     const auto* values = reinterpret_cast<const float*>(&matrix);
@@ -130,6 +131,7 @@ GDX12FluidParameters MakeFluidParameters(const Matrix& container, const GDX12Flu
     GDX12FluidParameters p{};
     XMStoreFloat4x4(&p.ContainerToWorld, XMMatrixTranspose(container));
     XMStoreFloat4x4(&p.WorldToContainer, XMMatrixTranspose(container.Invert()));
+    p.PreviousContainerToWorld = p.ContainerToWorld;
     p.HalfExtent = settings.ContainerHalfExtentCm;
     p.Radius = settings.ParticleRadiusCm;
     p.Gravity = settings.AccelerationCmPerSecond2;
@@ -209,8 +211,19 @@ GDX12FluidSolver::Buffers GDX12FluidSolver::CreateBuffers(GDX12Device* device, G
     buffers.Keys = SolverBuffer<XMUINT2>(device, heap, buffers.Capacity);
     buffers.Offsets = SolverBuffer<UINT>(device, heap, buffers.Capacity);
     buffers.SeedUpload = std::make_unique<GDX12UploadBuffer<Particle>>(device, buffers.Count, EBufferType::Upload, false);
+    const auto particles = MakeSeed(instance);
+    buffers.SeedUpload->CopyData(0, particles.data(), buffers.Count);
+    return buffers;
+}
+
+std::vector<GDX12FluidSolver::Particle> GDX12FluidSolver::MakeSeed(const GDX12FluidInstance& instance)
+{
+    ValidateFluidInstance(instance);
+    const auto& seed = instance.Component.GetParticles();
+    if (!seed || seed->empty()) throw std::invalid_argument("Fluid solver requires seed particles");
+    std::vector<Particle> particles(seed->size());
     const auto& settings = instance.Component.GetSettings();
-    for (UINT i = 0; i < buffers.Count; ++i)
+    for (size_t i = 0; i < seed->size(); ++i)
     {
         const auto& initial = (*seed)[i];
         const auto position = settings.ReferenceModel ? initial.Position : Vector3::Transform(initial.Position, instance.ContainerToWorld);
@@ -219,9 +232,9 @@ GDX12FluidSolver::Buffers GDX12FluidSolver::CreateBuffers(GDX12Device* device, G
         auto velocity = settings.ReferenceModel ? initial.Velocity : Vector3::TransformNormal(initial.Velocity, instance.ContainerToWorld);
         const float speed = velocity.Length();
         if (!settings.ReferenceModel && speed > settings.MaxSpeedCmPerSecond) velocity *= settings.MaxSpeedCmPerSecond / speed;
-        buffers.SeedUpload->CopyData(i, {position, velocity, position});
+        particles[i] = {position, velocity, position};
     }
-    return buffers;
+    return particles;
 }
 
 float GDX12FluidSolver::SafeStep(const GDX12FluidSettings& settings)
