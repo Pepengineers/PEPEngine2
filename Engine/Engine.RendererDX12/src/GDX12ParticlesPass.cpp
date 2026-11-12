@@ -1,5 +1,5 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
-#include "GDX12ParticleResources.h"
+#include "GDX12ParticleOffload.h"
 #include <algorithm>
 #include <stdexcept>
 
@@ -29,7 +29,7 @@ struct GDX12ParticlesPass::State
     void Initialize(GDX12DeviceResources* resources)
     {
         Root = CreateRoot(resources);
-        for (const auto* entry : { "Cull", "ClearDraws", "BuildDrawArgs" })
+        for (const auto* entry : { "Cull", "CullImported", "ClearDraws", "BuildDrawArgs" })
             CompileCompute(resources, "ParticleRender.hlsl", entry, Root.get());
 
         D3D12_INDIRECT_ARGUMENT_DESC argument = {};
@@ -378,20 +378,33 @@ void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
     for (UINT i = 0; i < state.ConstantCount; ++i)
     {
         const auto& emitter = simulation.Emitters[i];
-        auto& pool = *simulation.Pools.at(emitter.Id);
         commands->SetComputeRootConstantBufferView(2, state.Constants[_resources->CurrFrameConstantsIndex]->GetElementAddress(i));
-        const UINT parameters[] = {pool.Capacity, 0, state.Capacity, state.ResetMotion};
+        UINT base = 0;
+        const bool imported = simulation.Offload && simulation.Offload->Find(emitter.Id, base);
+        const UINT parameters[] = {emitter.MaxParticles, base, state.Capacity, state.ResetMotion};
         commands->GetCommandList()->SetComputeRoot32BitConstants(0, 4, parameters, 0);
-        commands->ResourceBarrier({pool.Particles->GetResource().GetNonPixelShaderResourceBarrier(),
-            pool.Alive[pool.ReadIndex]->GetResource().GetNonPixelShaderResourceBarrier(),
-            pool.Counters->GetResource().GetNonPixelShaderResourceBarrier(), pool.Args->GetResource().GetIndirectArgsBarrier()});
-        commands->SetComputeSRV(0, pool.Particles->GetSRV()->GPUHandle);
-        commands->SetComputeSRV(1, pool.Alive[pool.ReadIndex]->GetSRV()->GPUHandle);
-        commands->SetComputeSRV(2, pool.Counters->GetSRV()->GPUHandle);
         if (emitter.Texture)
             commands->ResourceBarrier({emitter.Texture->PrimaryDeviceTexture->GetResource()->GetSRVBarrier()});
-        commands->SetPipelineState(state.Compute.at("Cull"));
-        commands->ExecuteIndirect(state.DispatchSignature.Get(), 1, pool.Args->GetResource().D3DResource.Get(), 24, nullptr);
+        if (imported)
+        {
+            auto& display = simulation.Offload->Display();
+            commands->ResourceBarrier({display.GetResource().GetNonPixelShaderResourceBarrier()});
+            commands->SetComputeSRV(0, display.GetSRV()->GPUHandle);
+            commands->SetPipelineState(state.Compute.at("CullImported"));
+            commands->Dispatch((emitter.MaxParticles + 255) / 256, 1, 1);
+        }
+        else
+        {
+            auto& pool = *simulation.Pools.at(emitter.Id);
+            commands->ResourceBarrier({pool.Particles->GetResource().GetNonPixelShaderResourceBarrier(),
+                pool.Alive[pool.ReadIndex]->GetResource().GetNonPixelShaderResourceBarrier(),
+                pool.Counters->GetResource().GetNonPixelShaderResourceBarrier(), pool.Args->GetResource().GetIndirectArgsBarrier()});
+            commands->SetComputeSRV(0, pool.Particles->GetSRV()->GPUHandle);
+            commands->SetComputeSRV(1, pool.Alive[pool.ReadIndex]->GetSRV()->GPUHandle);
+            commands->SetComputeSRV(2, pool.Counters->GetSRV()->GPUHandle);
+            commands->SetPipelineState(state.Compute.at("Cull"));
+            commands->ExecuteIndirect(state.DispatchSignature.Get(), 1, pool.Args->GetResource().D3DResource.Get(), 24, nullptr);
+        }
         UAV(commands, *state.Counts);
         UAV(commands, *state.Draws);
         UAV(commands, *state.Indices);

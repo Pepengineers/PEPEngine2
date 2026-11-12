@@ -141,6 +141,9 @@ void GDX12CommandQueue::ExecuteCommandLists(std::vector<GDX12CommandList*>& comm
     _commandQueue->ExecuteCommandLists(static_cast<UINT>(native.size()), native.data());
     // A failed Signal must not let an allocator with already submitted work be recycled.
     for (auto* list : commandLists) list->_submitted = true;
+    for (auto* list : commandLists)
+        for (const auto& signal : list->_signals)
+            ThrowIfFailed(_commandQueue->Signal(signal.first.Get(), signal.second));
     const auto point = Signal();
     for (auto* list : commandLists)
     {

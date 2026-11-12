@@ -40,12 +40,14 @@ void DispatchArgs(uint offset, uint count)
     Args[offset + 2] = 1;
 }
 
+#ifndef PARTICLE_NO_DEPTH
 float3 DepthPosition(int2 pixel, float depth)
 {
     float2 ndc = (float2(pixel) + 0.5f) / RenderSize * float2(2, -2) + float2(-1, 1);
     float4 world = mul(float4(ndc, depth, 1), Camera.InvViewProj);
     return world.xyz / world.w;
 }
+#endif
 
 struct ParticleContact
 {
@@ -55,6 +57,7 @@ struct ParticleContact
 };
 
 // shortcut: only frontmost on-screen depth collides; use scene colliders when hidden/off-screen hits are required.
+#ifndef PARTICLE_NO_DEPTH
 bool FindDepthContact(float3 previous, float3 position, float3 velocity, out ParticleContact contact)
 {
     contact = (ParticleContact)0;
@@ -95,6 +98,7 @@ bool FindDepthContact(float3 previous, float3 position, float3 velocity, out Par
     }
     return false;
 }
+#endif
 
 // shortcut: expanded box corners are conservative; use sphere/box edge sweeps if corner clearance matters.
 bool FindBoxContact(float3 previous, float3 position, out ParticleContact contact)
@@ -163,7 +167,9 @@ void CollideScene(float3 previous, float step, inout float3 position, inout floa
     {
         ParticleContact contact = (ParticleContact)0;
         bool found = false;
+#ifndef PARTICLE_NO_DEPTH
         if (DepthCollision != 0) found = FindDepthContact(previous, position, velocity, contact);
+#endif
         if (CollisionBoxEnabled != 0)
         {
             ParticleContact box;
@@ -239,6 +245,8 @@ void Simulate(uint id : SV_DispatchThreadID)
     particle.Age += DeltaTime;
     if (particle.Age >= particle.Lifetime)
     {
+        particle.Lifetime = 0;
+        Pool[index] = particle;
         uint slot;
         InterlockedAdd(Counters[0], 1, slot);
         Dead[slot] = index;
@@ -280,6 +288,8 @@ void Simulate(uint id : SV_DispatchThreadID)
     particle.Rotation += AngularVelocity * DeltaTime;
     if (!all(isfinite(particle.Position)) || !all(isfinite(particle.Velocity)))
     {
+        particle.Lifetime = 0;
+        Pool[index] = particle;
         uint slot;
         InterlockedAdd(Counters[0], 1, slot);
         Dead[slot] = index;
@@ -342,6 +352,8 @@ void Spawn(uint id : SV_DispatchThreadID)
     particle.SizeRandom = 1 + (Random(state) * 2 - 1) * SizeVariation;
     particle.Rotation = particle.PreviousRotation = Random(state) * 6.283185307f;
     particle.Seed = state;
+    uint birth = Counters[6] + id + 1;
+    particle.Identity = uint2(birth, Counters[7] + (birth <= Counters[6] ? 1u : 0u));
     Pool[index] = particle;
     // All reserved spawn lanes survive; append their contiguous range after simulation survivors.
     AliveOut[Counters[2] + id] = index;
@@ -351,6 +363,8 @@ void Spawn(uint id : SV_DispatchThreadID)
 void PublishAlive()
 {
     Counters[1] = Counters[2] + Counters[3];
+    uint previous = Counters[6];
     Counters[6] += Counters[3];
+    if (Counters[6] < previous) Counters[7] += 1;
     DispatchArgs(6, Counters[1]);
 }

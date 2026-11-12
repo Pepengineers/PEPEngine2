@@ -12,6 +12,7 @@ struct Particle
     float PreviousRotation;
     float SizeRandom;
     uint Seed;
+    uint2 Identity;
 };
 
 struct ParticleDraw

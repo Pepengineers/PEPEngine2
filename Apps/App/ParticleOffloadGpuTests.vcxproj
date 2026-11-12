@@ -1,0 +1,9 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="App.vcxproj" />
+  <PropertyGroup><ProjectGuid>{F06D2523-D401-4EF1-B78D-83B7BFA3DFA8}</ProjectGuid></PropertyGroup>
+  <ItemGroup>
+    <ClCompile Remove="@(ClCompile)" />
+    <ClCompile Include="tests\ParticleOffloadGpuTests.cpp" />
+  </ItemGroup>
+  <ItemDefinitionGroup><Link><SubSystem>Console</SubSystem><AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies></Link></ItemDefinitionGroup>
+</Project>

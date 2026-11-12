@@ -4,7 +4,7 @@
 CommonRenderPasses::CommonRenderPasses(GDX12SwapChain* backBuffer, GDX12WBOITTransparencyPass::DepthPartition partition)
     : Transparency(partition), FrameGeneration(backBuffer)
 {
-    Bindings.PrimaryPasses = { &Environment, &Culling, &Depth, &ParticleSimulation, &SunShadow,
+    Bindings.PrimaryPasses = { &Environment, &Culling, &Depth, &ParticleOffload, &ParticleSimulation, &SunShadow,
         &LocalShadow, &Reflections, &Opaque, &AO, &Lighting, &SSR,
         &Transparency, &Particles, &Composition, &DepthOfField, &MotionBlur,
         &Reconstruction, &Output, &FrameGeneration };

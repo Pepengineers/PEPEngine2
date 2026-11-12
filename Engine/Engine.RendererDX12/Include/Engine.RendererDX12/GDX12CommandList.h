@@ -28,6 +28,9 @@ public:
     void InvalidateCachedState();
 
 	UINT64 FenceValue;
+    // Cross-device consumers may observe these signals only after this list executes.
+    void SignalOnSubmit(ComPtr<ID3D12Fence> fence, uint64_t value);
+    bool HasSubmissionSignals() const { return !_signals.empty(); }
 
 	// State Management
 	void SetPipelineState(ComPtr<ID3D12PipelineState> pso);
@@ -119,6 +122,7 @@ private:
     UINT64 _retirement = 0;
     ComPtr<ID3D12Fence> _retirementFence;
     bool _submitted = false;
+    std::vector<std::pair<ComPtr<ID3D12Fence>, uint64_t>> _signals;
     void RequireDirect() const;
     void RequireCompute() const;
     D3D12_COMMAND_LIST_TYPE _type;

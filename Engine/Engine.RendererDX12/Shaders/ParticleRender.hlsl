@@ -11,11 +11,8 @@ RWStructuredBuffer<uint> Payloads : register(u9);
 RWStructuredBuffer<uint> DrawArgs : register(u10);
 RWStructuredBuffer<uint> SortData : register(u11);
 
-[numthreads(256, 1, 1)]
-void Cull(uint id : SV_DispatchThreadID)
+void CullParticle(Particle particle)
 {
-    if (id >= PoolCounters[1]) return;
-    Particle particle = Pool[AliveIn[id]];
     if (Paused != 0)
     {
         particle.Previous = particle.Position;
@@ -64,6 +61,20 @@ void Cull(uint id : SV_DispatchThreadID)
         Payloads[modeIndex] = drawIndex;
     }
     else Indices[(BlendMode + (Geometry == ParticleGeometryFirefly ? 2 : 0)) * TotalCapacity + modeIndex] = drawIndex;
+}
+
+[numthreads(256, 1, 1)]
+void Cull(uint id : SV_DispatchThreadID)
+{
+    if (id < PoolCounters[1]) CullParticle(Pool[AliveIn[id]]);
+}
+
+[numthreads(256, 1, 1)]
+void CullImported(uint id : SV_DispatchThreadID)
+{
+    if (id >= Capacity) return;
+    Particle particle = Pool[BurstCount + id];
+    if (particle.Lifetime > particle.Age) CullParticle(particle);
 }
 
 [numthreads(1, 1, 1)]

@@ -61,6 +61,7 @@ struct GDX12ParticleEmitterSettings
     UINT AtlasRows = 1;
     float FramesPerSecond = 0.0f; // Zero plays the entire atlas once over the lifetime.
     bool DepthCollision = false;
+    bool SharedSimulation = false; // Explicit opt-in; depth collision always stays on the primary GPU.
     float CollisionRadius = 1.5f; // World cm, independent of billboard size.
     float CollisionRestitution = 0.45f;
     float CollisionFriction = 0; // Coulomb friction coefficient; zero preserves tangential speed.
@@ -82,6 +83,7 @@ struct GDX12ParticleSettings
 
 GDX12ParticleSettings GetParticleSettings();
 bool IsValidParticleEmitterSettings(const GDX12ParticleEmitterSettings& settings);
+bool CanOffloadParticleEmitter(const GDX12ParticleEmitterSettings& settings);
 GDX12ParticleEmitterSettings ResolveParticleEmitterSettings(const GDX12ParticleEmitterSettings& author, int quality);
 
 struct GDX12ParticleEmitter : GDX12ParticleEmitterSettings
@@ -118,6 +120,10 @@ public:
     void BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common);
     void InitializePools(GDX12CommandList* commands, GDX12DeviceResources* resources);
     std::vector<GDX12Resource*> GetPoolResources() const;
+    std::vector<GDX12Resource*> GetOffloadResources() const;
+    GDX12Resource* GetImportedResource() const;
+    GDX12Resource* GetOffloadInteractionResource() const;
+    void ExecuteOffload(GDX12CommandList* commands);
     void SetInteractionField(GDX12ParticleInteractionField field) { _interaction = field; }
     GDX12Resource* GetInteractionResource() const { return _interaction.Resource; }
     void Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,
@@ -125,6 +131,7 @@ public:
 
 private:
     friend class GDX12ParticlesPass;
+    friend class GDX12ParticleOffload;
     struct State;
     std::unique_ptr<State> _state;
     GDX12ParticleInteractionField _interaction;

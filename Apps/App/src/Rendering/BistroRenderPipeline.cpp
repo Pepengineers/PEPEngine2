@@ -318,10 +318,11 @@ bool BistroRenderPipeline::PrepareFrame(RenderPipelineContext& context, GDX12Com
     _water->Surface.PrepareFrame();
     _water->Resolve.PrepareFrame();
     _passes->BindAmbientOcclusion(context.Common, _earlyAO);
+    if (!_resources->ParticleSimulation) _resources->ParticleSimulation = std::make_unique<GDX12ParticleSimulation>();
+    _resources->ParticleSimulation->SetInteractionField(_grass->InteractionField());
     _passes->PrepareFrame(context, commands);
     _passes->Bindings.UseAsyncCompute |= _posters->UsesAsyncCompute();
     _passes->Bindings.UseAsyncCompute |= GetFluidControls().AsyncCompute || GetGrassWindControls().AsyncCompute;
-    if (_resources->ParticleSimulation) _resources->ParticleSimulation->SetInteractionField(_grass->InteractionField());
     const auto passes = GeometryPasses();
     for (UINT i = 0; i < passes.size(); ++i)
     {
@@ -390,6 +391,7 @@ void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipel
     auto& p = *_passes;
     // Small latency-sensitive work precedes the long water solve on the single COMPUTE queue.
     const auto grassPreparation = graph.AddPass(*_geometryJobs.at(0));
+    graph.AddPass(p.ParticleOffload);
     _posters->AddPasses(graph);
     const auto waterSimulation = graph.AddPass(_water->Simulation);
     graph.AddPass(p.Environment);

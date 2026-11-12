@@ -37,8 +37,8 @@ static void CheckGrassInteraction(GDX12Device& device, GDX12DeviceResources& res
 {
     struct Vertex { XMFLOAT3 Position, Previous, Normal; XMFLOAT2 UV; };
     struct Particle { XMFLOAT3 Position; float Age; XMFLOAT3 Previous; float Lifetime;
-        XMFLOAT3 Velocity; float Rotation; XMFLOAT4 Rest; };
-    static_assert(sizeof(Vertex) == 44 && sizeof(Particle) == 64);
+        XMFLOAT3 Velocity; float Rotation; XMFLOAT4 Rest; XMUINT2 Identity; };
+    static_assert(sizeof(Vertex) == 44 && sizeof(Particle) == 72);
     auto* queue = device.GetCommandQueue();
     auto frozen = common; frozen.ResetHistory = false;
     const UINT savedSlot = resources.CurrFrameConstantsIndex;

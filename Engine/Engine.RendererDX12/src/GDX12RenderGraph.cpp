@@ -521,7 +521,16 @@ GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12Com
                 GDX12_SCOPED_EVENT(list, node.Name.c_str());
                 node.Instance->Execute(list);
             };
-            if (!node.LastAsync) { record(commands); continue; }
+            if (!node.LastAsync)
+            {
+                record(commands);
+                if (commands->HasSubmissionSignals())
+                {
+                    directQueue->ExecuteCommandList(commands);
+                    commands = directQueue->GetCommandList();
+                }
+                continue;
+            }
             std::vector<TextureAccess> textures;
             for (const auto& access : node.Accesses)
                 if (auto* texture = textureFor(access))

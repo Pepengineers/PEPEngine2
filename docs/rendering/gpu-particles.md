@@ -4,6 +4,59 @@
 
 Optional particle async реализован 2026-11-05, default-off: [проверки, консервативный depth join, timings и чистый полный Bistro GBV после SSSR counter fix](../research/2026-11-05-particle-async-compute.md).
 
+## Explicit secondary-GPU simulation
+
+Set `ParticleEmitterComponent::GetSettings()`'s copied settings field
+`SharedSimulation = true`, then apply it with `SetSettings()`. The default is false;
+component copying and ECS collection carry this author setting automatically.
+`CanOffloadParticleEmitter()` centrally requires the mark and `DepthCollision == false`.
+Marked depth-colliding emitters stay local with collisions intact, with a diagnostic
+on entry into that condition. Soft particles, box/volume collision and interaction
+fields remain supported; all drawing and scene-depth reads stay on the primary.
+
+Select `Render.Particles.SecondaryAdapter` at startup using the hardware-list index.
+The default `-1` follows `Render.Fluid.SecondaryAdapter` when water has a selected
+secondary; otherwise it retains single-GPU simulation. Both techniques must use
+the same secondary index. A missing or primary adapter falls back to local particles.
+
+All eligible marked emitters use one persistent secondary device/worker and one
+three-slot exchange. Each accepted immutable frame snapshot advances the original
+six-stage solver once with that snapshot's dt, time scale, transform, settings and
+burst total. Busy-worker frames are not accumulated into a time debt; progression
+can be slower. Cumulative bursts remain pending until an executed, unpaused step;
+reset cancels requests from the preceding reset revision, as in the local path.
+The real shared interaction field is captured once per accepted batch and copied
+to the secondary once for all consumers. No scene depth or camera is transferred;
+the secondary simulation shader compiles out depth collision entirely.
+
+A publication carries a 32-byte header, one 32-byte record per emitter and 36 bytes
+per allocated particle slot. Fixed capacity avoids a synchronous live-count readback.
+The particle data contains position/age/lifetime/rotation/size and a 64-bit birth ID;
+velocities, dead/alive lists and solver scratch stay on the secondary. There is one
+contiguous export `CopyBufferRegion` and one import per publication, regardless of
+emitter count. GPU packing and history dispatches may run once per emitter.
+Ready/free fences protect slot reuse. The primary only imports completed publications
+and otherwise repeats its last displayed state. Culling, all blends/geometries and
+the common SortedAlpha sort consume local and imported particles together.
+
+The exchange pass precedes opaque depth. A required interaction snapshot is signalled
+at submission of that prefix, independently of the remaining scene. Emitters without
+an interaction field can start directly from their CPU snapshot. Primary rendering
+never performs a CPU wait for the secondary in an ordinary frame. Reconfiguration,
+allocation and shutdown may drain queues.
+
+**Changing GPU placement explicitly resets that emitter's live particles**, logged
+as `placement reset`. Already consumed bursts are retained across the move, so they
+are not emitted a second time; pending bursts remain pending. Capacity changes reset
+only the resized pool. Removing or resetting another emitter rebuilds coherent
+offsets/generations without resetting unaffected secondary pools. Their last displayed
+state is remapped locally while waiting for the new publication. Motion uses the
+previous displayed state and birth ID; repeat display has zero simulation motion,
+while camera motion remains. Camera-history resets do not erase particle positions.
+
+Build and hardware evidence: [particle MGPU report](../reports/2026-11-13-particle-mgpu.md).
+The historical implementation-status paragraphs below describe the earlier local path.
+
 
 Implementation status: **UNVERIFIED / НЕПРОВЕРЕНО**. No builds, shader compilation,
 tests, GPU fixtures, benchmarks or separate review/cleanup/verification passes were
@@ -281,7 +334,7 @@ WBOIT ordering with transparent meshes. Additive energy is drawn after alpha mod
 Motion/depth of overlapping transparent layers is a coverage-weighted approximation,
 not an exact per-layer history/depth solution. Transparent DoF/refraction, lighting
 and shadow casting, arbitrary imported particle meshes, GPU child/subemitters,
-multi-GPU and SSAA are outside this implementation. Very large HDR overlap can
+SSAA is outside this implementation. Very large HDR overlap can
 overflow existing RGBA16F WBOIT/HDR targets; practical overlap budgets require GPU
 measurement. No visual quality, GPU timing, debug-layer cleanliness, build success
 or long-run stability is claimed.

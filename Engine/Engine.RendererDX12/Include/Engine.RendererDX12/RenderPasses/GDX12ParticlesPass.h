@@ -1,6 +1,33 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 
+class GDX12ParticleOffloadPass final : public GDX12RenderPass
+{
+public:
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
+    {
+        graph.SetName("Particle shared simulation exchange");
+        graph.Write(SharedResource::ParticleSimulation, "Particle simulation pools");
+        graph.HasSideEffects();
+    }
+    void Execute(GDX12CommandList* commands) override
+    {
+        if (_resources->ParticleSimulation) _resources->ParticleSimulation->ExecuteOffload(commands);
+    }
+    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
+    {
+        std::vector<GDX12RenderGraph::BufferAccess> result;
+        if (const auto* simulation = _resources->ParticleSimulation.get())
+        {
+            for (auto* resource : simulation->GetOffloadResources())
+                result.push_back({resource, GDX12RenderGraph::Mode::ReadWrite});
+            if (auto* field = simulation->GetOffloadInteractionResource())
+                result.push_back({field, GDX12RenderGraph::Mode::Read});
+        }
+        return result;
+    }
+};
+
 class GDX12ParticleSimulationPass final : public GDX12RenderPass
 {
 public:
@@ -65,8 +92,12 @@ public:
     {
         std::vector<GDX12RenderGraph::BufferAccess> result;
         if (_resources->ParticleSimulation)
+        {
             for (auto* resource : _resources->ParticleSimulation->GetPoolResources())
                 result.push_back({ resource, GDX12RenderGraph::Mode::Read });
+            if (auto* imported = _resources->ParticleSimulation->GetImportedResource())
+                result.push_back({imported, GDX12RenderGraph::Mode::Read});
+        }
         const auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
         if (frame->CameraCB && frame->CameraCB->GetResource().D3DResource)
             result.push_back({ &frame->CameraCB->GetResource(), GDX12RenderGraph::Mode::Read,

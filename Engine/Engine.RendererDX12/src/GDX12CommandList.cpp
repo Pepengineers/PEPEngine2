@@ -60,7 +60,14 @@ void GDX12CommandList::Reset()
     _retirement = {};
     _retirementFence.Reset();
     _submitted = false;
+    _signals.clear();
     InvalidateCachedState();
+}
+
+void GDX12CommandList::SignalOnSubmit(ComPtr<ID3D12Fence> fence, uint64_t value)
+{
+    if (_submitted || !fence || !value) throw std::invalid_argument("Invalid command list completion signal");
+    _signals.emplace_back(std::move(fence), value);
 }
 
 void GDX12CommandList::InvalidateCachedState()
