@@ -43,6 +43,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "External.Libraries", "Exter
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "App", "Apps\App\App.vcxproj", "{0D306CE9-D821-4207-96A8-6BCA9028C7A1}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "App.MetaRenderGraph", "Apps\App.MetaRenderGraph\App.MetaRenderGraph.vcxproj", "{85AC3362-37C9-4D75-B420-FE0AEDEB8301}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -51,6 +53,12 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{85AC3362-37C9-4D75-B420-FE0AEDEB8301}.Debug|x64.ActiveCfg = Debug|x64
+		{85AC3362-37C9-4D75-B420-FE0AEDEB8301}.Debug|x64.Build.0 = Debug|x64
+		{85AC3362-37C9-4D75-B420-FE0AEDEB8301}.Debug|x86.ActiveCfg = Debug|x64
+		{85AC3362-37C9-4D75-B420-FE0AEDEB8301}.Release|x64.ActiveCfg = Release|x64
+		{85AC3362-37C9-4D75-B420-FE0AEDEB8301}.Release|x64.Build.0 = Release|x64
+		{85AC3362-37C9-4D75-B420-FE0AEDEB8301}.Release|x86.ActiveCfg = Release|x64
 		{0D306CE9-D821-4207-96A8-6BCA9028C7A1}.Debug|x64.ActiveCfg = Debug|x64
 		{0D306CE9-D821-4207-96A8-6BCA9028C7A1}.Debug|x64.Build.0 = Debug|x64
 		{0D306CE9-D821-4207-96A8-6BCA9028C7A1}.Debug|x86.ActiveCfg = Debug|x64
@@ -118,6 +126,7 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
+		{85AC3362-37C9-4D75-B420-FE0AEDEB8301} = {DF44F2A7-ABF6-4C6B-989E-BB2FD4F02308}
 		{0D306CE9-D821-4207-96A8-6BCA9028C7A1} = {DF44F2A7-ABF6-4C6B-989E-BB2FD4F02308}
 		{A7E6392C-1A8A-43BA-A14E-B37A17FC03C2} = {DF44F2A7-ABF6-4C6B-989E-BB2FD4F02308}
 		{4426F0B0-3B9A-47A6-9C88-D22988FBFCB4} = {DF44F2A7-ABF6-4C6B-989E-BB2FD4F02308}

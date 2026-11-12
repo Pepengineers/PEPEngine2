@@ -1,0 +1,14 @@
+World:
+  Name: MetaRenderGraph procedural reference
+  ActiveCamera: Camera
+  Entities:
+    - Id: Camera
+      Components:
+        Transform:
+          Location: [0, 0, -400]
+          Rotation: [0, 0, 0]
+          Scale: [1, 1, 1]
+        Camera:
+          FOV: 60
+          NearPlane: 1
+          FarPlane: 10000
