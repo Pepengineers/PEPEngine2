@@ -1,0 +1,150 @@
+<?xml version='1.0' encoding='utf-8'?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{0D306CE9-D821-4207-96A8-6BCA9028C7A1}</ProjectGuid>
+    <RootNamespace>BistroApp</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="I:\PEPEngine2\GlobalSettings.props" />
+    <Import Project="I:\PEPEngine2\MSBuild\Props\PEPEngine.Module.App.Base.Public.props" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="I:\PEPEngine2\GlobalSettings.props" />
+    <Import Project="I:\PEPEngine2\MSBuild\Props\PEPEngine.Module.App.Base.Public.props" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>APP_SHADERS_FOLDER=LR"(I:\PEPEngine2\Apps\App/Shaders\\)";_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>I:\PEPEngine2\Apps\App/src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(PEPRepoRoot)Build\PerformanceAnalysis\accepted\Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(PEPRepoRoot)Build\PerformanceAnalysis\accepted\Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(PEPRepoRoot)Build\PerformanceAnalysis\accepted\Build\bin\$(Platform)\$(Configuration)\Engine.UI\;$(PEPRepoRoot)Build\PerformanceAnalysis\accepted\Build\bin\$(Platform)\$(Configuration)\App.Base\;$(PEPRepoRoot)Build\PerformanceAnalysis\accepted\Build\bin\$(Platform)\$(Configuration)\External.Libraries\;$(PEPRepoRoot)External\External.Libraries\dxc\lib\$(Platform)\;$(PEPRepoRoot)External\External.Libraries\pix\lib\;$(PEPRepoRoot)External\External.Libraries\assimp\lib\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtk\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtex\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\ffx-api\lib\;$(PEPRepoRoot)External\External.Libraries\xess\lib\;$(PEPRepoRoot)External\External.Libraries\directstorage\lib\;$(PEPRepoRoot)External\External.Libraries\directxmesh\lib\;$(PEPRepoRoot)External\External.Libraries\wwise\lib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.UI.lib;App.Base.lib;External.Libraries.lib;dxcompiler.lib;dxil.lib;WinPixEventRuntime.lib;assimp-vc143-mtd.lib;DirectXTK12.lib;DirectXTex.lib;amd_fidelityfx_loader_dx12.lib;libxess.lib;dstorage.lib;DirectXMesh.lib;AkSoundEngine.lib;AkMemoryMgr.lib;AkStreamMgr.lib;CommunicationCentral.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>xcopy /Y /D "$(PEPRepoRoot)External\Runtime\*.dll" "$(TargetDir)"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>APP_SHADERS_FOLDER=LR"(I:\PEPEngine2\Apps\App/Shaders\\)";NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <AdditionalIncludeDirectories>I:\PEPEngine2\Apps\App/src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>$(PEPRepoRoot)Build\PerformanceAnalysis\accepted\Build\bin\$(Platform)\$(Configuration)\Engine.Core\;$(PEPRepoRoot)Build\PerformanceAnalysis\accepted\Build\bin\$(Platform)\$(Configuration)\Engine.RendererDX12\;$(PEPRepoRoot)Build\PerformanceAnalysis\accepted\Build\bin\$(Platform)\$(Configuration)\Engine.UI\;$(PEPRepoRoot)Build\PerformanceAnalysis\accepted\Build\bin\$(Platform)\$(Configuration)\App.Base\;$(PEPRepoRoot)Build\PerformanceAnalysis\accepted\Build\bin\$(Platform)\$(Configuration)\External.Libraries\;$(PEPRepoRoot)External\External.Libraries\dxc\lib\$(Platform)\;$(PEPRepoRoot)External\External.Libraries\pix\lib\;$(PEPRepoRoot)External\External.Libraries\assimp\lib\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtk\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\directxtex\lib\$(Platform)\$(Configuration)\;$(PEPRepoRoot)External\External.Libraries\ffx-api\lib\;$(PEPRepoRoot)External\External.Libraries\xess\lib\;$(PEPRepoRoot)External\External.Libraries\directstorage\lib\;$(PEPRepoRoot)External\External.Libraries\directxmesh\lib\;$(PEPRepoRoot)External\External.Libraries\wwise\lib\;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>Engine.Core.lib;Engine.RendererDX12.lib;Engine.UI.lib;App.Base.lib;External.Libraries.lib;dxcompiler.lib;dxil.lib;WinPixEventRuntime.lib;assimp-vc143-mt.lib;DirectXTK12.lib;DirectXTex.lib;amd_fidelityfx_loader_dx12.lib;libxess.lib;dstorage.lib;DirectXMesh.lib;AkSoundEngine.lib;AkMemoryMgr.lib;AkStreamMgr.lib;CommunicationCentral.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+    <PostBuildEvent>
+      <Command>xcopy /Y /D "$(PEPRepoRoot)External\Runtime\*.dll" "$(TargetDir)"</Command>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\Water\GDX12Fluid.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\Water\GDX12FluidPass.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\Water\BistroWaterRendering.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\Water\CrossAdapterWater.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\Water\GDX12FluidClock.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\Water\GDX12FluidSolver.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Components\FluidRenderComponent.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Components\BistroWaterComponents.h" />
+    <None Include="I:\PEPEngine2\Apps\App\Shaders\FluidParameters.hlsli" />
+    <None Include="I:\PEPEngine2\Apps\App\Shaders\FluidSolver.hlsl" />
+    <None Include="I:\PEPEngine2\Apps\App\Shaders\FluidSurface.hlsl" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\BistroRenderPipeline.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\UI\BistroUIPosters.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\Grass\GDX12GrassWind.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\Grass\GDX12GrassRenderer.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Components\GrassRenderComponent.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Components\WindFieldComponent.h" />
+    <None Include="I:\PEPEngine2\Apps\App\Shaders\CollisionView.hlsl" />
+    <None Include="I:\PEPEngine2\Apps\App\Shaders\GrassCommon.hlsli" />
+    <None Include="I:\PEPEngine2\Apps\App\Shaders\GrassExpand.hlsl" />
+    <None Include="I:\PEPEngine2\Apps\App\Shaders\GrassRender.hlsl" />
+    <None Include="I:\PEPEngine2\Apps\App\Shaders\WindField.hlsl" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\Grass\BistroGrassGeometry.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\Grass\BistroGrassRoute.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\Grass\BistroGrassShadowReplica.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\Grass\BistroGrassShadowRoute.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\Grass\CrossAdapterGrass.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Rendering\Grass\GDX12GrassFieldProducer.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Components\BistroGrassComponents.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Systems\FlyingPropSystem.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\Components\FlyingPropComponent.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\BistroProps.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\BistroWaves.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\BistroScene.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\BistroUICanvases.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\BistroReflections.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\BistroGrass.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\BistroWater.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\BistroCharacters.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\BistroRoutes.h" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\BistroPeopleLoop.inl" />
+    <ClInclude Include="I:\PEPEngine2\Apps\App\src\BistroBounds.h" />
+  </ItemGroup>
+  <ItemGroup>
+    </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="CopyReconstructionSDKFiles" AfterTargets="Build">
+    <ItemGroup>
+      <ReconstructionSDKRuntime Include="$(PEPRepoRoot)External\Runtime\amd_fidelityfx*.dll;$(PEPRepoRoot)External\Runtime\libxess*.dll;$(PEPRepoRoot)External\Runtime\libxell.dll;$(PEPRepoRoot)External\Runtime\sl*.dll;$(PEPRepoRoot)External\Runtime\nvngx*.dll" />
+      <ReconstructionSDKNotice Include="$(PEPRepoRoot)External\Runtime\Licenses\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ReconstructionSDKRuntime)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ReconstructionSDKNotice)" DestinationFiles="@(ReconstructionSDKNotice-&gt;'$(TargetDir)Licenses\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+<ItemGroup><ClCompile Include="I:\PEPEngine2\Build\SphSolverPerf\SphSolverPerf.cpp" /><ClCompile Include="I:\PEPEngine2\Build\SphSolverPerf\GDX12Fluid.cpp" /></ItemGroup><ItemDefinitionGroup><Link><SubSystem>Console</SubSystem><AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies></Link></ItemDefinitionGroup></Project>

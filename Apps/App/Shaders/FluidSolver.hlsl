@@ -131,6 +131,7 @@ void BuildOffsets(uint i : SV_DispatchThreadID)
 void Densities(uint i : SV_DispatchThreadID)
 {
     if (i >= Count) return;
+    i = Sorted[i].y;
     float3 position = PredictedPosition(Particles[i]);
     int3 origin = Cell(position);
     float density = 0;
@@ -201,6 +202,7 @@ void Collide(inout float3 position, inout float3 velocity)
 void Integrate(uint i : SV_DispatchThreadID)
 {
     if (i >= Count) return;
+    i = Sorted[i].y;
     FluidParticle p = Particles[i];
     float rhoi = Density[i].x;
     float pressureI = Stiffness * (NearStiffness > 0 ? rhoi - RestDensity : max(0, rhoi - RestDensity));
