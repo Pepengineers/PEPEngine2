@@ -46,13 +46,20 @@ namespace
         if (!result.Error.empty()) throw std::runtime_error(result.Error);
     }
 
-    void LogQualityForeground()
+    void LogQualityForeground(HWND appWindow)
     {
         const auto window = GetForegroundWindow();
         DWORD pid = 0;
         if (window) GetWindowThreadProcessId(window, &pid);
         wchar_t title[1024]{};
         if (window) GetWindowTextW(window, title, static_cast<int>(std::size(title)));
+        wchar_t windowClass[256]{};
+        if (window) GetClassNameW(window, windowClass, static_cast<int>(std::size(windowClass)));
+        const auto root = window ? GetAncestor(window, GA_ROOT) : nullptr;
+        const auto owner = window ? GetWindow(window, GW_OWNER) : nullptr;
+        DWORD rootPid = 0, ownerPid = 0;
+        if (root) GetWindowThreadProcessId(root, &rootPid);
+        if (owner) GetWindowThreadProcessId(owner, &ownerPid);
         std::wstring image(32768, L'\0');
         DWORD length = static_cast<DWORD>(image.size());
         DWORD error = 0;
@@ -65,7 +72,11 @@ namespace
         else error = pid ? GetLastError() : ERROR_NOT_FOUND;
         image.resize(error ? 0 : length);
         Log::Warning("Quality", "Foreground observed at cancellation: hwnd=", reinterpret_cast<uintptr_t>(window),
-            ", pid=", pid, ", title=", title, ", process=", image, ", process_query_error=", error);
+            ", pid=", pid, ", title=", title, ", class=", windowClass,
+            ", root=", reinterpret_cast<uintptr_t>(root), ", root_pid=", rootPid,
+            ", owner=", reinterpret_cast<uintptr_t>(owner), ", owner_pid=", ownerPid,
+            ", app_hwnd=", reinterpret_cast<uintptr_t>(appWindow), ", app_visible=", IsWindowVisible(appWindow),
+            ", app_iconic=", IsIconic(appWindow), ", process=", image, ", process_query_error=", error);
     }
 
     class BistroApp final : public App
@@ -547,7 +558,9 @@ namespace
                 if (_basePatch.empty()) _basePatch = std::move(previous);
                 ValidateShadowBudget();
                 ApplySavedResolution();
+                Log::Info("Quality", "Trial ", _qualityRun, " restarting world after ", QualityTime() - _setupStarted, " setup seconds");
                 RestartWorld(QualitySeed, true);
+                Log::Info("Quality", "Trial ", _qualityRun, " world ready after ", QualityTime() - _setupStarted, " setup seconds");
             }
             catch (const std::exception& error)
             {
@@ -712,9 +725,15 @@ namespace
         {
             if (_qualityInterrupted || bInactive != _qualityBackground)
             {
-                if (bInactive != _qualityBackground) LogQualityForeground();
+                const char* phase = !_flight ? "preparation" : !_trialReady ? "resource setup" :
+                    _flight->State() == Phase::Warmup ? "warmup" :
+                    _flight->State() == Phase::WarmupReady ? "warmup ready" :
+                    _flight->State() == Phase::Flight ? "flight" : "complete";
+                Log::Warning("Quality", "Trial ", _qualityRun, " interrupted in ", phase,
+                    ", seconds since setup start=", QualityTime() - _setupStarted);
+                if (bInactive != _qualityBackground) LogQualityForeground(GetWindow()->GetWindowHandle());
                 FinishQuality(true, _qualityInterrupted ? "Pause was requested during the trial." :
-                    "Window activation changed during the trial: expected inactive=" + std::to_string(_qualityBackground) +
+                    "Window activation changed during " + std::string(phase) + ": expected inactive=" + std::to_string(_qualityBackground) +
                     ", actual inactive=" + std::to_string(bInactive));
                 return;
             }
