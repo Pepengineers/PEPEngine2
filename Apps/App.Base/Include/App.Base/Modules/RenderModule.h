@@ -10,8 +10,6 @@
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
 #include "Engine.RendererDX12/GDX12RenderGraph.h"
 #include "App.Base/Rendering/IRenderPipeline.h"
-#include "App.Base/Rendering/RenderMGPURuntime.h"
-#include "App.Base/Rendering/CrossAdapterSceneReplica.h"
 #include "App.Base/Systems/ShadowVisibilitySystem.h"
 #include <map>
 
@@ -24,7 +22,6 @@ class GDX12CommandList;
 class GDX12GPUTimer;
 struct GDX12GPUTimingTotals;
 struct GDX12FrameGenerationStatus;
-struct CapturedShadowScene;
 
 struct TransformComponent;
 struct CameraComponent;
@@ -45,18 +42,6 @@ struct TransformCompGPUData
     bool HasPreviousWorld = false;
 };
 
-namespace Engine::UI { class CrossAdapterUI; struct UIPlacementStatus; }
-
-struct RenderMGPUStatus
-{
-    bool Requested = false;
-    bool SecondaryReady = false;
-    std::uint64_t RequestedSecondaryLuid = 0;
-    std::uint64_t PrimaryLuid = 0;
-    std::uint64_t ActiveSecondaryLuid = 0;
-    std::string FallbackReason;
-};
-
 class RenderModule final : public Module
 {
 public:
@@ -72,17 +57,8 @@ public:
     void SetFrameGenerationSuspended(bool);
     const GDX12ReconstructionStatus& GetReconstructionStatus() const;
     const GDX12FrameGenerationStatus& GetFrameGenerationStatus() const;
-    const RenderMGPUStatus& GetMGPUStatus() const { return _mgpuStatus; }
-    RenderMGPURuntime* GetMGPURuntime() const { return _gpu ? _mgpuRuntime.get() : nullptr; }
-    GDX12Submission::FrameSubmissionId GetFrameSubmissionId() const { return GDX12Submission::FrameSubmissionId{_frameSubmission}; }
-    bool ShutdownMGPU() noexcept;
-    GDX12Submission::CompletionPoint GetLastLegacyReplacement(const GDX12RenderPass& pass) const;
-    GDX12Submission::CompletionPoint GetLastScreenUIFinalize() const { return _screenUIFinalize; }
-    Engine::UI::UIPlacementStatus GetUIPlacementStatus(Engine::UI::CanvasId surface) const;
-    // Borrowed submission bindings for the renderer's serialized owner.
-    RenderMGPUDevices GetMGPUDevices() const
-    { return _gpu ? RenderMGPUDevices{ _primaryDevice.get(), _secondaryDevice.get(),
-        _primaryTransferQueue.get(), _secondaryTransferQueue.get() } : RenderMGPUDevices{}; }
+    GDX12Device* GetPrimaryDevice() const { return _primaryDevice.get(); }
+    std::uint64_t GetFrameSubmissionId() const { return _frameSubmission; }
 
     bool OwnsMaterial(const GDX12Material* material) const;
     GDX12Material* GetMaterialByName(const std::string& name);
@@ -93,11 +69,6 @@ public:
     GPUTexture* GetTextureByName(const std::string& name);
     //returns a pointer to a fully initialized structure that you can specify in materials
     GPUTexture* CreateTexture(const std::string& name, const Texture* texture, ETextureType type);
-    void RetainShadowAlpha(const GPUTexture* texture, const Texture& source);
-    CapturedShadowScene CaptureShadowScene(CrossAdapterSceneReplica::FrameStamp stamp,
-        const std::vector<GDX12ShadowOutput>& groups,
-        const std::vector<CrossAdapterSceneReplica::GrassBatch>& grass, const IRenderGeometrySource* grassSource = nullptr,
-        const std::vector<GDX12RenderPrimitiveHandle>& grassPrimitives = {});
     void WaitForUploads();
     void DrainFrameWork();
     void ResetWorldHistory();
@@ -165,18 +136,12 @@ public:
 
     const float GetAspectRatio();
     GDX12FrameConstants* GetCurrentPrimaryFrameConstants();
-    std::vector<GDX12Texture*> GetReflectionMaterialTextures() const;
-    GDX12FrameConstants* GetCurrentSecondaryFrameConstants();
     const GPUMesh* GetPrimaryGPUMesh(MeshHandle handle);
-    const GPUMesh* GetSecondaryGPUMesh(MeshHandle handle);
     GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetPrimaryIndirectCommandsCache();
-    GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetSecondaryIndirectCommandsCache();
 
     uint32_t GetPrimaryPipelineFlags();
-    uint32_t GetSecondaryPipelineFlags();
     RenderPipelineCommonData* GetRenderPipelineCommonData();
     bool PrimaryPipelineHasFlag(uint32_t flag);
-    bool SecondaryPipelineHasFlag(uint32_t flag);
 
 protected:
     void OnUpdate() override;
@@ -272,9 +237,7 @@ private:
     GDX12RenderBounds _staticMeshReflectionBounds, _staticMeshCasterBounds;
     ShadowVisibilitySystem _shadowVisibility;
     void CollectParticleEmitters();
-    void InitializeMGPU();
     void QuarantineGpuOwners() noexcept;
-    void RetireScreenUIForSwapchainChange();
     friend struct RenderPipelineContext;
     RenderPipelineContext PipelineContext();
     void RefreshPipelineFlags();
@@ -290,7 +253,6 @@ private:
     std::uint64_t _textureUploadBudget = 0;
     std::uint64_t _textureUploadBytes = 0;
     GDX12CommandList* _primaryTextureCommands = nullptr;
-    GDX12CommandList* _secondaryTextureCommands = nullptr;
 
     GameTimer* _timer;
     Window* _window;
@@ -305,32 +267,23 @@ private:
         GpuOwners();
         ~GpuOwners();
         RenderPipelineCommonData Common;
-        std::unique_ptr<GDX12Device> PrimaryDevice, SecondaryDevice;
-        std::unique_ptr<GDX12CommandQueue> PrimaryCopy, SecondaryCopy;
-        GDX12DeviceResources Primary, Secondary;
+        std::unique_ptr<GDX12Device> PrimaryDevice;
+        GDX12DeviceResources Primary;
         std::unique_ptr<GDX12GPUTimer> PrimaryTimer;
         std::unordered_map<std::string, std::unique_ptr<GPUTexture>> Textures;
-        std::unordered_map<const GPUTexture*, CrossAdapterSceneReplica::AlphaTexture> ShadowAlpha;
         std::unordered_map<std::string, std::unique_ptr<GDX12Material>> Materials;
         std::vector<GDX12ResourceHandle> Uploads;
         std::map<std::pair<World*, Entity>, SkeletalState> SkeletalStates;
         std::unique_ptr<GDX12Skinning> Skinning;
         std::unique_ptr<GDX12SwapChain> BackBuffer;
         std::unique_ptr<IRenderPipeline> Pipeline;
-        std::unique_ptr<Engine::UI::CrossAdapterUI> CrossAdapterUI;
         std::unique_ptr<GDX12RenderGraph> PrimaryGraph;
-        std::unique_ptr<RenderMGPURuntime> MGPU;
     };
     std::unique_ptr<GpuOwners> _gpu = std::make_unique<GpuOwners>();
     decltype(GpuOwners::Common)& _RPcommonData = _gpu->Common;
     decltype(GpuOwners::PrimaryDevice)& _primaryDevice = _gpu->PrimaryDevice;
-    decltype(GpuOwners::SecondaryDevice)& _secondaryDevice = _gpu->SecondaryDevice;
-    decltype(GpuOwners::PrimaryCopy)& _primaryTransferQueue = _gpu->PrimaryCopy;
-    decltype(GpuOwners::SecondaryCopy)& _secondaryTransferQueue = _gpu->SecondaryCopy;
-    decltype(GpuOwners::MGPU)& _mgpuRuntime = _gpu->MGPU;
     decltype(GpuOwners::PrimaryTimer)& _primaryGPUTimer = _gpu->PrimaryTimer;
     decltype(GpuOwners::Primary)& _primaryResources = _gpu->Primary;
-    decltype(GpuOwners::Secondary)& _secondaryResources = _gpu->Secondary;
     decltype(GpuOwners::Textures)& _textures = _gpu->Textures;
     decltype(GpuOwners::Materials)& _materials = _gpu->Materials;
     decltype(GpuOwners::Uploads)& _textureUploadResources = _gpu->Uploads;
@@ -339,12 +292,7 @@ private:
     decltype(GpuOwners::BackBuffer)& _backBuffer = _gpu->BackBuffer;
     decltype(GpuOwners::Pipeline)& _pipeline = _gpu->Pipeline;
     decltype(GpuOwners::PrimaryGraph)& _primaryGraph = _gpu->PrimaryGraph;
-    decltype(GpuOwners::CrossAdapterUI)& _crossAdapterUI = _gpu->CrossAdapterUI;
     std::uint64_t _frameSubmission = 0;
-    std::vector<std::pair<const GDX12RenderPass*, GDX12Submission::CompletionPoint>> _legacyReplacementReceipts;
-    GDX12Submission::CompletionPoint _screenUIFinalize;
-    bool _screenCaptureFallbackLogged = false;
-    RenderMGPUStatus _mgpuStatus;
     bool _uiInitialized = false;
     bool _renderingSuspended = false;
     double _skeletalPreparationTimeMS = 0;
@@ -353,7 +301,6 @@ private:
     // Flags that are accumulated from every active RenderPass on the device
     // Defines which resources should be uploaded onto respective GPU
     uint32_t _primaryPipelineFlags;
-    uint32_t _secondaryPipelineFlags;
     World* _skyWorld = nullptr;
     uint64_t _skyHash = 0;
     uint64_t _reflectionStaticHash = 0;

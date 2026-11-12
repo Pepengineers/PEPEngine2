@@ -57,16 +57,12 @@ public:
 	void ReserveSkinnedVertices(UINT count);
 	UINT AllocateSkinnedVertices(UINT count);
 	void ReleaseSkinnedVertices(UINT offset, UINT count);
-    const std::map<UINT, UINT>& GetSkinnedVertexRanges() const { return _skinnedRanges; }
 	ID3D12Resource* BeginSkinning(GDX12CommandList* commands);
 	void EndSkinning(GDX12CommandList* commands);
 	const GPUMesh* GetGPUMeshByHandle(MeshHandle handle);
     uint64_t GetMeshCacheRevision() const { return _meshCacheRevision; }
     D3D12_GPU_VIRTUAL_ADDRESS GetVertexAddress() const
     { return _vertexBuffer ? _vertexBuffer->D3DResource->GetGPUVirtualAddress() : 0; }
-    std::shared_ptr<GDX12Resource> ShareVertexResource() const { return _vertexBuffer; }
-    std::shared_ptr<GDX12Resource> ShareIndexResource() const { return _indexBuffer; }
-    void SetSnapshotBuffers(std::shared_ptr<GDX12Resource> vertices, std::shared_ptr<GDX12Resource> indices);
 
 private:
 	friend class RenderModule;

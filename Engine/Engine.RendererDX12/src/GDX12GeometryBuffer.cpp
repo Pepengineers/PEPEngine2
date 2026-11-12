@@ -265,23 +265,3 @@ const GPUMesh* GDX12GeometryBuffer::GetGPUMeshByHandle(const MeshHandle handle)
     const auto it = _meshCache.find(handle.GetValue());
     return it != _meshCache.end() && it->second->SourceHandle == handle ? it->second.get() : nullptr;
 }
-
-void GDX12GeometryBuffer::SetSnapshotBuffers(std::shared_ptr<GDX12Resource> vertices,
-    std::shared_ptr<GDX12Resource> indices)
-{
-    for (const auto& buffer : {vertices, indices})
-    {
-        if (!buffer || !buffer->D3DResource || buffer->D3DResource->GetDesc().Dimension != D3D12_RESOURCE_DIMENSION_BUFFER ||
-            buffer->D3DResource->GetDesc().Width > UINT_MAX) throw std::invalid_argument("Invalid geometry snapshot buffer");
-        ComPtr<ID3D12Device> owner;
-        ThrowIfFailed(buffer->D3DResource->GetDevice(IID_PPV_ARGS(&owner)));
-        if (owner.Get() != static_cast<ID3D12Device*>(_device->GetDevice().Get()))
-            throw std::invalid_argument("Geometry snapshot belongs to another adapter");
-    }
-    _vertexBuffer = std::move(vertices);
-    _indexBuffer = std::move(indices);
-    _vertexBufferView = {_vertexBuffer->D3DResource->GetGPUVirtualAddress(),
-        static_cast<UINT>(_vertexBuffer->D3DResource->GetDesc().Width), sizeof(Vertex)};
-    _indexBufferView = {_indexBuffer->D3DResource->GetGPUVirtualAddress(),
-        static_cast<UINT>(_indexBuffer->D3DResource->GetDesc().Width), DXGI_FORMAT_R32_UINT};
-}

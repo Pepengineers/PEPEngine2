@@ -10,10 +10,8 @@
 #include <chrono>
 #include <fstream>
 #include <iomanip>
-#include <map>
 #include <psapi.h>
 #include <shellapi.h>
-#include <d3d12sdklayers.h>
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "psapi.lib")
 #include "BistroScene.h"
@@ -29,7 +27,6 @@
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
 #include "Engine.RendererDX12/GDX12FrameGeneration.h"
 #include "App.Base/LoadingSettings.h"
-#include "App.Base/Rendering/CrossAdapterWork.h"
 
 namespace
 {
@@ -83,7 +80,7 @@ namespace
     {
     public:
         explicit BistroApp(const HINSTANCE instance, unsigned characterSeed = std::random_device{}())
-            : App(instance), _reflections(BistroQuality::MGPUProfile.GetValue() ? ReflectionSeed : characterSeed ^ ReflectionSeed), _characterSeed(characterSeed)
+            : App(instance), _reflections(characterSeed ^ ReflectionSeed), _characterSeed(characterSeed)
         {
             _characters.emplace(characterSeed);
         }
@@ -91,7 +88,6 @@ namespace
         bool Initialize() override
         {
             if (!App::Initialize()) return false;
-            ValidateQualityHardware();
             ValidateShadowBudget();
             ApplySavedResolution();
             SetupWorld();
@@ -125,7 +121,7 @@ namespace
             if (scenes->GetWorldCount() > 1) throw std::logic_error("Bistro reset needs a single active world");
             _bounds.reset();
             _characters.emplace(seed);
-            _reflections.ResetWorld(benchmark || BistroQuality::MGPUProfile.GetValue() ? ReflectionSeed : _characterSeed ^ ReflectionSeed);
+            _reflections.ResetWorld(benchmark ? ReflectionSeed : _characterSeed ^ ReflectionSeed);
             _grass = {};
             _water.ResetWorld();
             scenes->Initialize();
@@ -174,48 +170,10 @@ namespace
                 _qualitySaveWinner = std::move(saveWinner);
                 _qualityExit = exitWhenDone;
                 _qualityRun = 0;
-                _transferCalibration.clear();
-                _transferHints.clear();
-                _reflectionTransferBytes = {};
                 _qualityTechniques = BistroQuality::SearchTechniques(ConsoleModule{});
                 _qualityWinner.reset();
                 _winnerPatch.clear();
-                if (profile)
-                {
-                    const auto& status = Locator.GetModule<RenderModule>()->GetMGPUStatus();
-                    if (status.Requested && !status.SecondaryReady)
-                        throw std::runtime_error("MGPU search requires the requested secondary adapter: " + status.FallbackReason);
-                    BistroQualitySearch::MGPUSettings pair;
-                    pair.Enabled = status.Requested;
-                    pair.Primary = status.PrimaryLuid;
-                    pair.Secondary = status.ActiveSecondaryLuid;
-                    world.GetECS().ForEach<LightComponent>([&](Entity entity, const LightComponent& light)
-                    {
-                        if (light.Type != LightType::Directional && light.Enabled && light.CastShadows && light.Range > 0)
-                            pair.LocalShadows.push_back({entity, {}});
-                    });
-                    std::sort(pair.LocalShadows.begin(), pair.LocalShadows.end());
-                    std::optional<size_t> waterAxis = _qualityTechniques.size(), grassAxis = _qualityTechniques.size();
-                    std::optional<size_t> reflectionAxis;
-                    std::array<std::optional<size_t>, 3> scheduledAxes{};
-                    auto axes = BistroQuality::SearchAxes(_qualityTechniques);
-                    for (size_t i = 0; i < _qualityTechniques.size(); ++i)
-                    {
-                        if (std::string_view(_qualityTechniques[i]->Name) == "Water") waterAxis = i;
-                        const std::string_view name(_qualityTechniques[i]->Name);
-                        if (name == "Grass") grassAxis = i;
-                        if (name == "Sun shadows") scheduledAxes[0] = i;
-                        if (name == "Local shadows") scheduledAxes[1] = i;
-                        if (name == "Particles") scheduledAxes[2] = i;
-                        if (pair.Enabled && name == "Reflection probes")
-                        {
-                            axes[i].MinTier = axes[i].MaxTier = 1;
-                            reflectionAxis = i;
-                        }
-                    }
-                    _qualitySearch.emplace(*profile, std::move(axes), width, height,
-                        pair, waterAxis, grassAxis, scheduledAxes, reflectionAxis);
-                }
+                if (profile) _qualitySearch.emplace(*profile, BistroQuality::SearchAxes(_qualityTechniques), width, height);
                 Engine::UI::SuspendSettings(true);
                 _qualityActive = true;
                 _qualityStatus = "Preparing Bistro...";
@@ -277,9 +235,8 @@ namespace
             }
 
             auto scenes = std::make_shared<SceneManagerModule>(scenePath, true);
-            auto pipeline = std::make_unique<BistroRenderPipeline>(scenes);
-            _qualityPipeline = pipeline.get();
-            auto renderer = std::make_shared<RenderModule>(GetWindow(), &Timer, std::move(pipeline));
+            auto renderer = std::make_shared<RenderModule>(GetWindow(), &Timer,
+                std::make_unique<BistroRenderPipeline>(scenes));
             Locator.RegisterModule(renderer);
             ConfigureBistroProps(*scenes, GetJobs());
             Locator.RegisterModule(scenes);
@@ -394,26 +351,8 @@ namespace
         }
 
     private:
-        static constexpr unsigned QualitySeed = BistroQuality::WorldSeed;
-        static constexpr unsigned ReflectionSeed = BistroQuality::ProbeSeed;
-
-        void ValidateQualityHardware()
-        {
-            if (!BistroQuality::MGPUProfile.GetValue()) return;
-            if (BistroQuality::SavedSchema.GetValue() != BistroQuality::SchemaVersion ||
-                BistroQuality::SavedScenario.GetValue() != BistroQuality::ScenarioVersion ||
-                BistroQuality::SavedWorldSeed.GetValue() != QualitySeed || BistroQuality::SavedProbeSeed.GetValue() != ReflectionSeed)
-                throw std::runtime_error("Saved MGPU profile uses a different benchmark scenario; rerun the search");
-            const auto& actual = Locator.GetModule<RenderModule>()->GetMGPUStatus();
-            if (!actual.Requested || !actual.SecondaryReady ||
-                BistroQuality::PrimaryLuid.GetValue() != actual.PrimaryLuid ||
-                BistroQuality::SecondaryLuid.GetValue() != actual.ActiveSecondaryLuid)
-                throw std::runtime_error("Saved MGPU profile pair " + std::to_string(BistroQuality::PrimaryLuid.GetValue()) +
-                    "/" + std::to_string(BistroQuality::SecondaryLuid.GetValue()) + " differs from active pair " +
-                    std::to_string(actual.PrimaryLuid) + "/" + std::to_string(actual.ActiveSecondaryLuid) +
-                    " (requested=" + std::to_string(actual.Requested) + ", ready=" + std::to_string(actual.SecondaryReady) +
-                    "); rerun the search");
-        }
+        static constexpr unsigned QualitySeed = 12345;
+        static constexpr unsigned ReflectionSeed = 0xB1572;
 
         void ResizeQualityClient(int width, int height)
         {
@@ -436,7 +375,7 @@ namespace
 
         void ValidateShadowBudget()
         {
-            const auto primary = Locator.GetModule<RenderModule>()->GetMGPUDevices().Primary;
+            const auto primary = Locator.GetModule<RenderModule>()->GetPrimaryDevice();
             const auto capacity = primary->GetMemoryAllocator()->GetMemoryCapacity(DXGI_MEMORY_SEGMENT_GROUP_LOCAL);
             if (!capacity) return;
             const auto quality = ReadShadowQuality();
@@ -463,11 +402,9 @@ namespace
             uint16_t width, height;
             GetWindow()->GetWindowSize(width, height);
             Locator.GetModule<RenderModule>()->DrainFrameWork();
-            BistroQuality::RegisterProfileShadowVariables(patch);
             CheckQualityConfig(console.ApplyPatch(patch, &before));
             try
             {
-                ValidateQualityHardware();
                 ValidateShadowBudget();
                 ApplySavedResolution();
                 if (mode == BistroQuality::ApplyMode::RestartWorld) RestartWorld(seed, benchmark);
@@ -528,11 +465,11 @@ namespace
                 {
                     _qualityWinner = _qualitySearch->Winner();
                     if (_qualityWinner)
-                        _winnerPatch = BistroQuality::ProfilePatch(_qualityTechniques, _qualityWinner->Settings, *_qualityProfile);
+                        _winnerPatch = BistroQuality::ProfilePatch(_qualityTechniques, _qualityWinner->Settings);
                     FinishQuality(false);
                     return false;
                 }
-                _trialPatch = BistroQuality::ProfilePatch(_qualityTechniques, _qualityRequest->Settings, *_qualityProfile);
+                _trialPatch = BistroQuality::ProfilePatch(_qualityTechniques, _qualityRequest->Settings);
             }
             else
             {
@@ -550,17 +487,13 @@ namespace
             _setupStarted = QualityTime();
             try
             {
-                if (_qualitySearch) ExportTransferHint(*Locator.GetModule<RenderModule>());
                 ConsoleVariablePatch previous;
                 Locator.GetModule<RenderModule>()->DrainFrameWork();
-                BistroQuality::RegisterProfileShadowVariables(_trialPatch);
                 CheckQualityConfig(ConsoleModule{}.ApplyPatch(_trialPatch, &previous));
                 if (_basePatch.empty()) _basePatch = std::move(previous);
                 ValidateShadowBudget();
                 ApplySavedResolution();
-                Log::Info("Quality", "Trial ", _qualityRun, " restarting world after ", QualityTime() - _setupStarted, " setup seconds");
                 RestartWorld(QualitySeed, true);
-                Log::Info("Quality", "Trial ", _qualityRun, " world ready after ", QualityTime() - _setupStarted, " setup seconds");
             }
             catch (const std::exception& error)
             {
@@ -569,7 +502,7 @@ namespace
             }
             catch (const DxException& error)
             {
-                auto* primary = Locator.GetModule<RenderModule>()->GetMGPUDevices().Primary;
+                auto* primary = Locator.GetModule<RenderModule>()->GetPrimaryDevice();
                 if (!primary || FAILED(primary->GetDevice()->GetDeviceRemovedReason())) throw;
                 RejectQualityTrial(WStringToString(error.ToString()));
                 return false;
@@ -587,138 +520,8 @@ namespace
             _flight.emplace();
             _setupFrames = 0;
             _trialReady = false;
-            _freshness = {};
-            _routeSamples.clear();
-            _freshnessRequired.clear();
             _qualityStatus = "Trial " + std::to_string(_qualityRun) + " | Preparing resources";
             return true;
-        }
-
-        bool PrepareTransferCalibration(RenderModule& renderer)
-        {
-            static constexpr UINT64 sizes[]{4096, 65536, 262144, 1048576, 8388608, 41943040, 197918720};
-            if (_transferCalibration.size() == 2 * std::size(sizes)) return false;
-            auto& runtime = *renderer.GetMGPURuntime();
-            const auto devices = renderer.GetMGPUDevices();
-            renderer.DrainFrameWork();
-            if (_transferCalibration.empty()) runtime.SetTransferCalibration({});
-            const auto index = _transferCalibration.size();
-            auto& producer = *(index % 2 ? devices.Secondary : devices.Primary);
-            auto& consumer = *(index % 2 ? devices.Primary : devices.Secondary);
-            CrossAdapterWork work(runtime);
-            _qualityStatus = "Calibrating GPU transfers " + std::to_string(index + 1) + "/" + std::to_string(2 * std::size(sizes));
-            _transferCalibration.push_back(work.Calibrate(producer, consumer, sizes[index / 2]));
-            if (_transferCalibration.size() == 2 * std::size(sizes))
-            {
-                runtime.SetTransferCalibration(_transferCalibration);
-                if (const auto source = _qualityPipeline->GetReflectionShadowDescription())
-                    for (size_t tier = 0; tier < _reflectionTransferBytes.size(); ++tier)
-                    {
-                        auto desc = *source;
-                        const auto resolution = std::stoul(BistroQuality::Local[0].Values[tier]);
-                        desc.Width = desc.Height = (std::max)(1ul, resolution);
-                        if (!resolution) desc.DepthOrArraySize = 1;
-                        devices.Primary->GetDevice()->GetCopyableFootprints(&desc, 0, desc.MipLevels * desc.DepthOrArraySize,
-                            0, nullptr, nullptr, nullptr, &_reflectionTransferBytes[tier]);
-                    }
-                _qualitySearch->SetTransferCostEstimate([this, &runtime](const auto& candidate)
-                    { return TransferOrderingCost(candidate, runtime); });
-                std::ofstream report(_qualityOutput / "transfer-calibration.json");
-                report << std::setprecision(12) << "{\"schema\":1,\"path\":\"synchronous snapshot pack/export/import/unpack\","
-                    << "\"physical_maximum\":false,\"content_verified\":true,\"warmup_copies\":3,\"steady_samples\":20,"
-                    << "\"primary_luid\":" << renderer.GetMGPUStatus().PrimaryLuid
-                    << ",\"secondary_luid\":" << renderer.GetMGPUStatus().ActiveSecondaryLuid << ",\"samples\":[";
-                for (size_t sample = 0; sample < _transferCalibration.size(); ++sample)
-                {
-                    const auto& value = _transferCalibration[sample];
-                    report << (sample ? "," : "") << "{\"direction\":\"" << (sample % 2 ? "secondary-primary" : "primary-secondary")
-                        << "\",\"bytes\":" << value.Bytes << ",\"cold_ms\":" << value.ColdMs
-                        << ",\"minimum_ms\":" << value.MinimumMs << ",\"median_ms\":" << value.MedianMs
-                        << ",\"p95_ms\":" << value.P95Ms << ",\"optimistic_payload_hz\":" << 1000 / value.MinimumMs
-                        << ",\"median_payload_bytes_per_second\":" << value.Bytes * 1000 / value.MedianMs << "}";
-                }
-                report << "]}\n";
-                report.close();
-                if (!report) throw std::runtime_error("Cannot export GPU transfer calibration");
-            }
-            Timer.Reset();
-            return true;
-        }
-
-        static BistroQualitySearch::Candidate TransferWorkload(BistroQualitySearch::Candidate candidate)
-        {
-            candidate.MGPU.Water.Secondary = candidate.MGPU.Grass.Secondary = false;
-            candidate.MGPU.Water.Exact = candidate.MGPU.Grass.Exact = false;
-            candidate.MGPU.Sun.Secondary = candidate.MGPU.Particles.Secondary = false;
-            for (auto& light : candidate.MGPU.LocalShadows) light.Route.Secondary = false;
-            candidate.MGPU.Reflections.Placement = 0;
-            candidate.MGPU.Reflections.SecondaryFaces = {};
-            return candidate;
-        }
-
-        UINT64 MandatoryReflectionTransferBytes(const BistroQualitySearch::Candidate& candidate) const
-        {
-            const auto& probes = candidate.MGPU.Reflections;
-            if (!probes.Count || (!probes.Placement && std::none_of(probes.SecondaryFaces.begin(), probes.SecondaryFaces.end(),
-                [](unsigned mask) { return mask != 0; }))) return 0;
-            for (size_t axis = 0; axis < _qualityTechniques.size(); ++axis)
-                if (std::string_view(_qualityTechniques[axis]->Name) == "Local shadows")
-                    return _reflectionTransferBytes.at(candidate.Tiers.at(axis));
-            return 0;
-        }
-
-        std::optional<double> MandatoryReflectionTransferMs(const BistroQualitySearch::Candidate& candidate,
-            const RenderMGPURuntime& runtime) const
-        {
-            const auto bytes = MandatoryReflectionTransferBytes(candidate);
-            if (!bytes || _transferCalibration.empty()) return std::nullopt;
-            return runtime.EstimateTransferMilliseconds(_transferCalibration.front().Producer,
-                _transferCalibration.front().Consumer, bytes);
-        }
-
-        void ExportTransferHint(RenderModule& renderer) const
-        {
-            const auto* runtime = renderer.GetMGPURuntime();
-            if (!runtime || !_qualityRequest) return;
-            const auto bytes = MandatoryReflectionTransferBytes(_qualityRequest->Settings);
-            const auto estimate = MandatoryReflectionTransferMs(_qualityRequest->Settings, *runtime);
-            std::ofstream report(_qualityOutput / ("transfer-hint-" + std::to_string(_qualityRun) + ".json"));
-            report << std::setprecision(12) << "{\"schema\":1,\"usage\":\"ordering only\",\"mandatory_reflection_packet_bytes\":" << bytes
-                << ",\"estimated_ms\":";
-            if (estimate) report << *estimate; else report << "null";
-            report << ",\"freshness_budget_ms\":" << BistroQualitySearch::FreshnessBudgetMs(*_qualityProfile)
-                << ",\"estimated_over_budget\":" << std::boolalpha
-                << (estimate && *estimate > BistroQualitySearch::FreshnessBudgetMs(*_qualityProfile))
-                << ",\"hard_rejected\":false,\"coverage\":\"one mandatory synchronous packet per secondary reflection capture; other costs unknown\"}\n";
-            report.close();
-            if (!report) throw std::runtime_error("Cannot export transfer feasibility hint");
-        }
-
-        std::optional<double> TransferOrderingCost(const BistroQualitySearch::Candidate& candidate,
-            const RenderMGPURuntime& runtime) const
-        {
-            double cost = 0;
-            bool measuredReflections = false;
-            const auto workload = TransferWorkload(candidate);
-            for (const auto* technique : {"particles", "reflection-probes"})
-                for (auto hint = _transferHints.rbegin(); hint != _transferHints.rend(); ++hint)
-                {
-                    if (!(TransferWorkload(hint->Settings) == workload)) continue;
-                    if (std::string_view(technique) == "particles" &&
-                        !(hint->Settings.MGPU.Particles == candidate.MGPU.Particles)) continue;
-                    if (std::string_view(technique) == "reflection-probes" &&
-                        !(hint->Settings.MGPU.Reflections == candidate.MGPU.Reflections)) continue;
-                    const auto found = hint->Costs.find(technique);
-                    if (found != hint->Costs.end())
-                    {
-                        cost += found->second;
-                        measuredReflections |= std::string_view(technique) == "reflection-probes";
-                        break;
-                    }
-                }
-            if (!measuredReflections) cost += MandatoryReflectionTransferMs(candidate, runtime).value_or(0);
-            // Unknown paths remain eligible; the estimate only orders trials of the same workload.
-            return cost;
         }
 
         void BeginQualityFrame(RenderModule& renderer)
@@ -737,7 +540,6 @@ namespace
                     ", actual inactive=" + std::to_string(bInactive));
                 return;
             }
-            if (_qualitySearch && renderer.GetMGPUStatus().SecondaryReady && PrepareTransferCalibration(renderer)) return;
             if (!_flight)
             {
                 PrepareQualityTrial();
@@ -752,10 +554,7 @@ namespace
             GetWindow()->GetWindowSize(width, height);
             if (width != BistroQuality::OutputWidth.GetValue() || height != BistroQuality::OutputHeight.GetValue())
             {
-                FinishQuality(true, "Client size changed during the trial: expected " +
-                    std::to_string(BistroQuality::OutputWidth.GetValue()) + "x" +
-                    std::to_string(BistroQuality::OutputHeight.GetValue()) + ", actual " +
-                    std::to_string(width) + "x" + std::to_string(height));
+                FinishQuality(true, "Client size changed during the trial.");
                 return;
             }
             SetFlightPose(_flight->BeginFrame(static_cast<std::uint64_t>(renderer.GetFrameSubmissionId()) + 1,
@@ -788,57 +587,17 @@ namespace
                     return;
                 }
                 _setupSeconds = QualityTime() - _setupStarted;
-                if (auto* runtime = renderer.GetMGPURuntime()) runtime->ResetTransferLoad();
                 _trialReady = true;
-                if (BistroQuality::MGPUProfile.GetValue())
-                {
-                    _freshnessRequired.insert("physics");
-                    for (const auto& sample : _qualityPipeline->GetQualityMeasurements())
-                        if (sample.Active) _freshnessRequired.insert(sample.Name);
-                }
                 Timer.Reset();
                 BenchmarkRequested = 0;
                 BenchmarkTicks = 0;
                 _qualityStatus = "Trial " + std::to_string(_qualityRun) + " | 10-second stationary warmup";
                 return;
             }
-            const bool measuring = _flight->State() == Phase::Flight;
             _flight->EndFrame(QualityTime());
-            if (measuring && BistroQuality::MGPUProfile.GetValue())
-            {
-                auto sample = _qualityPipeline->GetQualityMeasurements();
-                const double physicsDebt = (std::max)(0.0, BenchmarkRequested - BenchmarkTicks * double(1.0f / 60));
-                BistroQualitySearch::TechniqueMeasurement physics;
-                physics.Name = "physics";
-                physics.Active = physics.Ready = true;
-                physics.SourceAgeMs = physicsDebt * 1000;
-                physics.SimulationDebtSeconds = physicsDebt;
-                physics.SourceSequence = BenchmarkTicks;
-                sample.push_back(std::move(physics));
-                const auto target = BistroQuality::TargetProfile.GetValue() == 0 ? Profile::Performance : Profile::Quality;
-                std::set<std::string> observed;
-                for (auto& value : sample)
-                {
-                    observed.insert(value.Name);
-                    if (!value.Active && _freshnessRequired.count(value.Name))
-                    {
-                        value.Active = true;
-                        value.Ready = false;
-                    }
-                    _freshness[value.Name].Observe(value, _flight->Samples().back().Elapsed, target);
-                }
-                for (const auto& name : _freshnessRequired)
-                    if (!observed.count(name)) ++_freshness[name].MissingFrames;
-                _routeSamples.push_back(sample);
-            }
             if (_flight->State() == Phase::WarmupReady)
             {
                 _warmupFps = _flight->StableWarmupFps();
-                if (auto* runtime = renderer.GetMGPURuntime())
-                {
-                    _warmupTransferLoad = runtime->GetTransferLoad();
-                    runtime->ResetTransferLoad();
-                }
                 _measurementTicks = BenchmarkTicks;
                 _measurementRequested = BenchmarkRequested;
                 _flight->StartFlight();
@@ -849,44 +608,13 @@ namespace
                 SetFlightPose(BistroBenchmarkFlight::SampleRoute(1));
                 const auto metrics = _flight->Summarize();
                 renderer.DrainFrameWork();
-                ExportQualityTrial(renderer, metrics, ValidateGpuMessages(renderer));
-                bool temporalValid = true;
-                for (const auto& [name, value] : _freshness)
-                    temporalValid &= value.Valid(_freshnessRequired.count(name) != 0);
-                for (const auto& name : _freshnessRequired)
-                    temporalValid &= _freshness.count(name) != 0;
-                if (_qualitySearch) _qualitySearch->Submit({metrics.AverageFps, _warmupFps, temporalValid});
+                ExportQualityTrial(renderer, metrics);
+                if (_qualitySearch) _qualitySearch->Submit({metrics.AverageFps, _warmupFps});
                 _flight.reset();
             }
         }
 
-        static bool ValidateGpuMessages(RenderModule& renderer)
-        {
-            bool enabled = false;
-            const auto devices = renderer.GetMGPUDevices();
-            for (auto* device : {devices.Primary, devices.Secondary})
-            {
-                if (!device) continue;
-                ComPtr<ID3D12InfoQueue> messages;
-                const auto result = device->GetDevice().As(&messages);
-                if (result == E_NOINTERFACE) continue;
-                ThrowIfFailed(result);
-                enabled = true;
-                for (UINT64 index = 0; index < messages->GetNumStoredMessages(); ++index)
-                {
-                    SIZE_T size = 0;
-                    ThrowIfFailed(messages->GetMessage(index, nullptr, &size));
-                    std::vector<BYTE> bytes(size);
-                    auto* message = reinterpret_cast<D3D12_MESSAGE*>(bytes.data());
-                    ThrowIfFailed(messages->GetMessage(index, message, &size));
-                    if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR)
-                        throw std::runtime_error(device->GetDeviceFeatures().Name + ": " + message->pDescription);
-                }
-            }
-            return enabled;
-        }
-
-        void ExportQualityTrial(RenderModule& renderer, const BistroBenchmarkFlight::Metrics& metrics, bool debugValidation)
+        void ExportQualityTrial(RenderModule& renderer, const BistroBenchmarkFlight::Metrics& metrics)
         {
             const auto stem = _qualityOutput / ("trial-" + std::to_string(_qualityRun));
             std::ofstream frames(stem.wstring() + L".csv");
@@ -896,23 +624,6 @@ namespace
                     << ',' << frame.Duration << ',' << frame.Fps << '\n';
             frames.close();
             if (!frames) throw std::runtime_error("Cannot export Bistro frame samples");
-            if (!_routeSamples.empty())
-            {
-                std::ofstream routes(stem.wstring() + L"-routes.csv");
-                routes << std::setprecision(12) << "frame_id,technique,active,requested_secondary,effective_secondary,ready,source_age_ms,simulation_debt_seconds,missing_seconds,source_sequence,full_source_age_ms,wait_ms,export_bytes,import_bytes\n";
-                for (size_t frame = 0; frame < _routeSamples.size(); ++frame)
-                    for (size_t technique = 0; technique < _routeSamples[frame].size(); ++technique)
-                    {
-                        const auto& value = _routeSamples[frame][technique];
-                        routes << _flight->Samples()[frame].FrameId << ',' << value.Name << ','
-                            << value.Active << ',' << value.RequestedSecondary << ',' << value.EffectiveSecondary << ','
-                            << value.Ready << ',' << value.SourceAgeMs << ',' << value.SimulationDebtSeconds << ','
-                            << value.MissingSeconds << ',' << value.SourceSequence << ',' << value.FullSourceAgeMs << ',' << value.WaitMs << ','
-                            << value.ExportBytes << ',' << value.ImportBytes << '\n';
-                    }
-                routes.close();
-                if (!routes) throw std::runtime_error("Cannot export Bistro route samples");
-            }
             auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
             auto physics = Locator.GetModule<PhysicsModule>();
             size_t moving = 0, sleeping = 0, statics = 0, water = 0, particles = 0;
@@ -958,24 +669,11 @@ namespace
             const double requested = BenchmarkRequested - _measurementRequested;
             const auto ticks = BenchmarkTicks - _measurementTicks;
             const auto gpuMemory = renderer.GetMemoryStatistics();
-            auto* primary = renderer.GetMGPUDevices().Primary;
+            auto* primary = renderer.GetPrimaryDevice();
             const auto luid = primary->GetAdapterLuid();
             const auto [readyProbes, configuredProbes] = renderer.GetWorldProbeReadiness();
-            const auto transferLoad = renderer.GetMGPURuntime() ? renderer.GetMGPURuntime()->GetTransferLoad() :
-                RenderMGPURuntime::TransferLoad{};
-            if (_qualitySearch && _qualityRequest && metrics.FrameCount && renderer.GetMGPURuntime())
-            {
-                TransferHint hint{_qualityRequest->Settings, {}};
-                for (const auto& [name, load] : renderer.GetMGPURuntime()->GetTechniqueTransferLoads())
-                    if (load.Transfers > load.UnknownTransfers)
-                        hint.Costs[name] = load.OptimisticMilliseconds / metrics.FrameCount;
-                _transferHints.push_back(std::move(hint));
-            }
             D3D12MA::Budget localBudget{};
             primary->GetMemoryAllocator()->GetBudget(&localBudget, nullptr);
-            D3D12MA::Budget secondaryBudget{};
-            if (auto* secondary = renderer.GetMGPUDevices().Secondary)
-                secondary->GetMemoryAllocator()->GetBudget(&secondaryBudget, nullptr);
             PROCESS_MEMORY_COUNTERS_EX memory = {};
             memory.cb = sizeof(memory);
             GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory));
@@ -990,17 +688,10 @@ namespace
 #else
                 << "\"Release\""
 #endif
-                << ",\n  \"debug_layer\": " << (debugValidation ? "true" : "false")
                 << ",\n  \"seed\": " << QualitySeed
                 << ",\n  \"background_window\": " << std::boolalpha << _qualityBackground << std::noboolalpha
                 << ",\n  \"initial_workload\": \"" << std::hex << _qualityWorkload << std::dec << '"'
                 << ",\n  \"prepare_seconds\": " << _setupSeconds
-                << ",\n  \"synchronous_transfer_estimate_ms\": " << transferLoad.OptimisticMilliseconds
-                << ",\n  \"synchronous_transfer_calls\": " << transferLoad.Transfers
-                << ",\n  \"synchronous_transfer_unknown_calls\": " << transferLoad.UnknownTransfers
-                << ",\n  \"transfer_estimate_usage\": \"ordering only; sampled synchronous packets; native async paths unknown\""
-                << ",\n  \"warmup_synchronous_transfer_estimate_ms\": " << _warmupTransferLoad.OptimisticMilliseconds
-                << ",\n  \"warmup_synchronous_transfer_unknown_calls\": " << _warmupTransferLoad.UnknownTransfers
                 << ",\n  \"warmup_protocol_seconds\": " << BistroBenchmarkFlight::WarmupSeconds
                 << ",\n  \"flight_protocol_seconds\": " << BistroBenchmarkFlight::FlightSeconds
                 << ",\n  \"effective_upscaler\": \"Native\",\n  \"effective_frame_generation\": \"Off\""
@@ -1026,27 +717,8 @@ namespace
                 << ",\n  \"gpu_allocation_bytes\": " << gpuMemory.AllocationBytes
                 << ",\n  \"gpu_local_usage_bytes\": " << localBudget.UsageBytes
                 << ",\n  \"gpu_local_budget_bytes\": " << localBudget.BudgetBytes
-                << ",\n  \"secondary_local_usage_bytes\": " << secondaryBudget.UsageBytes
-                << ",\n  \"secondary_local_budget_bytes\": " << secondaryBudget.BudgetBytes
                 << ",\n  \"process_peak_commit_bytes\": " << memory.PeakPagefileUsage;
             if (_warmupFps) report << ",\n  \"stable_warmup_fps\": " << *_warmupFps;
-            const auto& mgpu = renderer.GetMGPUStatus();
-            report << ",\n  \"mgpu_requested\": " << std::boolalpha << mgpu.Requested
-                << ",\n  \"secondary_ready\": " << mgpu.SecondaryReady
-                << ",\n  \"secondary_luid\": " << mgpu.ActiveSecondaryLuid
-                << ",\n  \"secondary_adapter\": " << std::quoted(renderer.GetMGPUDevices().Secondary ?
-                    renderer.GetMGPUDevices().Secondary->GetDeviceFeatures().Name : "")
-                << ",\n  \"visual_quality_verified\": false,\n  \"freshness\": [";
-            size_t freshnessIndex = 0;
-            for (const auto& [name, value] : _freshness)
-            {
-                report << (freshnessIndex++ ? "," : "") << "{\"technique\":\"" << name
-                    << "\",\"valid\":" << value.Valid(_freshnessRequired.count(name) != 0) << ",\"samples\":" << value.Samples
-                    << ",\"fallback_frames\":" << value.FallbackFrames << ",\"missing_frames\":" << value.MissingFrames
-                    << ",\"over_age_frames\":" << value.OverAgeFrames << ",\"max_source_age_ms\":" << value.MaxSourceAgeMs
-                    << ",\"max_simulation_debt_seconds\":" << value.MaxDebtSeconds << "}";
-            }
-            report << "]" << std::noboolalpha;
             const auto writePatch = [&](const char* label, const ConsoleVariablePatch& patch)
             {
                 report << ",\n  " << std::quoted(label) << ": {";
@@ -1068,9 +740,6 @@ namespace
                     const auto* key = technique.Fields[i].Key;
                     effective.emplace_back(key, console.FindConsoleVariable(key).GetString());
                 }
-            for (const auto& [key, value] : _trialPatch)
-                if (std::none_of(effective.begin(), effective.end(), [&](const auto& field) { return field.first == key; }))
-                    effective.emplace_back(key, console.FindConsoleVariable(key).GetString());
             writePatch("effective_cvars", effective);
             report << "\n}\n";
             report.close();
@@ -1153,17 +822,15 @@ namespace
             summary.close();
             if (!summary) throw std::runtime_error("Cannot export Bistro result");
             if (_qualityWinner && !_qualitySaveWinner.empty())
-                CheckQualityConfig(ConsoleModule{}.SavePatchIni(_qualitySaveWinner,
-                    BistroQuality::SavedProfilePatch(_winnerPatch, _qualityWinner->Settings)));
+                CheckQualityConfig(ConsoleModule{}.SavePatchIni(_qualitySaveWinner, _winnerPatch));
             if (_qualityExit) PostQuitMessage(cancelled || (_qualityProfile && !_qualityWinner) ? EXIT_FAILURE : EXIT_SUCCESS);
         }
 
         std::filesystem::path SavedQualityProfile()
         {
-            const auto luid = Locator.GetModule<RenderModule>()->GetMGPUDevices().Primary->GetAdapterLuid();
-            const auto& status = Locator.GetModule<RenderModule>()->GetMGPUStatus();
+            const auto luid = Locator.GetModule<RenderModule>()->GetPrimaryDevice()->GetAdapterLuid();
             const auto file = "Bistro-" + std::to_string(static_cast<std::uint32_t>(luid.HighPart)) + "-" +
-                std::to_string(luid.LowPart) + (status.Requested ? "-secondary-" + std::to_string(status.ActiveSecondaryLuid) : "") + ".ini";
+                std::to_string(luid.LowPart) + ".ini";
             return Engine::Core::GetExecutableDirectory() / "Config" / "Profiles" / file;
         }
 
@@ -1182,8 +849,7 @@ namespace
                 if (action == 5)
                 {
                     const auto path = SavedQualityProfile();
-                    CheckQualityConfig(ConsoleModule{}.SavePatchIni(path,
-                        BistroQuality::SavedProfilePatch(_winnerPatch, _qualityWinner->Settings)));
+                    CheckQualityConfig(ConsoleModule{}.SavePatchIni(path, _winnerPatch));
                     _qualityStatus = "Saved " + path.u8string();
                 }
                 if (action == 6)
@@ -1245,20 +911,7 @@ namespace
         std::optional<BistroQualitySearch::Request> _qualityRequest;
         std::optional<BistroQualitySearch::Selection> _qualityWinner;
         std::optional<BistroBenchmarkFlight::Sampler> _flight;
-        std::vector<RenderMGPURuntime::TransferCalibration> _transferCalibration;
-        RenderMGPURuntime::TransferLoad _warmupTransferLoad;
-        struct TransferHint
-        {
-            BistroQualitySearch::Candidate Settings;
-            std::map<std::string, double> Costs;
-        };
-        std::vector<TransferHint> _transferHints;
-        std::array<UINT64, 5> _reflectionTransferBytes{};
         std::optional<double> _warmupFps;
-        BistroRenderPipeline* _qualityPipeline = nullptr;
-        std::map<std::string, BistroQualitySearch::FreshnessMeasurements> _freshness;
-        std::set<std::string> _freshnessRequired;
-        std::vector<std::vector<BistroQualitySearch::TechniqueMeasurement>> _routeSamples;
         std::filesystem::path _qualityOutput, _qualitySaveWinner;
         ConsoleVariablePatch _basePatch, _trialPatch, _winnerPatch;
         std::vector<const BistroQuality::Technique*> _qualityTechniques;
@@ -1337,13 +990,6 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
                 qualityCustom = argument.substr(customPrefix.size());
             }
         }
-        for (const auto& path : {ConsoleModule::GetDefaultConfigPath(), qualityOverlay, qualityCustom})
-        {
-            if (path.empty() || !std::filesystem::exists(path)) continue;
-            ConsoleVariablePatch patch;
-            CheckQualityConfig(ConsoleModule::ReadPatchIni(path, patch));
-            BistroQuality::RegisterProfileShadowVariables(patch);
-        }
         ConsoleModule{}.InitializeWithOverlay(qualityOverlay, qualityCustom);
         for (int index = 1; index < argumentCount; ++index)
         {
@@ -1420,8 +1066,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR, int)
             throw std::invalid_argument("Quality.SaveWinner requires Quality.Search");
         const auto started = std::chrono::steady_clock::now();
         // Keep ordinary benchmark processes on the same character routes and wave seed.
-        BistroApp app(instance, benchmarkOutput.empty() && !BistroQuality::MGPUProfile.GetValue() ?
-            std::random_device{}() : BistroQuality::WorldSeed);
+        BistroApp app(instance, benchmarkOutput.empty() ? std::random_device{}() : 12345u);
         if (!budgetArgument.empty()) ApplyLoadingArgument(budgetArgument);
         if (!app.Initialize()) return EXIT_FAILURE;
         if (!qualityOutput.empty() || qualityProfile)

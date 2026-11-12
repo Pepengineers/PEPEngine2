@@ -13,7 +13,6 @@
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.Core/ConsoleModule.h"
 #include "App.Base/App.h"
-#include "App.Base/Rendering/CrossAdapterReflections.h"
 #include "App.Base/LoadingSettings.h"
 #include <d3d12sdklayers.h>
 #include <cmath>
@@ -303,13 +302,9 @@ int main(int argc, char** argv)
         ComPtr<ID3D12Debug> debug;
         if (!benchmark)
         {
-            ComPtr<ID3D12DeviceRemovedExtendedDataSettings> dredSettings;
-            ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&dredSettings)));
-            dredSettings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
-            dredSettings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
             ThrowIfFailed(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)));
             debug->EnableDebugLayer();
-            if (!(argc > 1 && (std::strcmp(argv[1], "--debug") == 0 || std::strcmp(argv[1], "--mgpu-debug") == 0)))
+            if (!(argc > 1 && std::strcmp(argv[1], "--debug") == 0))
             {
                 ComPtr<ID3D12Debug1> validation;
                 ThrowIfFailed(debug.As(&validation));
@@ -332,13 +327,13 @@ int main(int argc, char** argv)
         resources.Sky.Source = SkySource::SkyBox;
         resources.Sky.Quality = 3;
         GDX12EnvironmentIBLPass environment;
-        environment.Setup(&resources, nullptr, &common);
+        environment.Setup(&resources, &common);
         environment.Initialize();
         GDX12LocalShadowPass localShadows;
-        localShadows.Setup(&resources, nullptr, &common);
+        localShadows.Setup(&resources, &common);
         localShadows.Initialize();
         GDX12ReflectionProbePass reflections;
-        reflections.Setup(&resources, nullptr, &common);
+        reflections.Setup(&resources, &common);
         reflections.SetInputs({ environment.GetOutput(0), environment.GetOutput(1), environment.GetOutput(2),
             environment.GetOutput(3), localShadows.GetOutput(0) });
         reflections.Initialize();
@@ -455,10 +450,6 @@ int main(int argc, char** argv)
             configuredProbe.Implementation = 1;
         GDX12GPUTimer timer(&device);
         UINT testFrame = 0;
-        std::unique_ptr<GDX12RenderGraph> placedGraph;
-        RenderPipelineBindings placedBindings;
-        GDX12Device* diagnosticSecondary = nullptr;
-        std::function<void(GDX12CommandList*)> writeSkinMarker;
         const auto render = [&](bool waitForGPU = true)
         {
             ++testFrame;
@@ -467,7 +458,6 @@ int main(int argc, char** argv)
             if (frame->FenceValue) queue->CPUWaitForFenceValue(frame->FenceValue);
             upload();
             auto* list = queue->GetCommandList();
-            if (writeSkinMarker) writeSkinMarker(list);
             resources.PrepareLocalShadowData();
             resources.UploadLocalShadowData(list);
             localShadows.Prepare();
@@ -476,52 +466,9 @@ int main(int argc, char** argv)
             reflections.Prepare();
             // Composition and standalone execution must share one pending capture plan.
             reflections.Prepare();
-            if (placedGraph)
-            {
-                try
-                {
-                    list = placedGraph->ExecuteLegacySplit(list, nullptr, [&](const auto& boundary, auto prefix)
-                        { return placedBindings.LegacyReplacements.front().Submit(boundary, prefix); });
-                }
-                catch (...)
-                {
-                    if (!diagnosticSecondary || SUCCEEDED(diagnosticSecondary->GetDevice()->GetDeviceRemovedReason())) throw;
-                    ComPtr<ID3D12InfoQueue> failures;
-                    if (SUCCEEDED(diagnosticSecondary->GetDevice().As(&failures)))
-                        for (UINT64 i = 0; i < failures->GetNumStoredMessages(); ++i)
-                        {
-                            SIZE_T size = 0;
-                            failures->GetMessage(i, nullptr, &size);
-                            std::vector<BYTE> bytes(size);
-                            auto* message = reinterpret_cast<D3D12_MESSAGE*>(bytes.data());
-                            failures->GetMessage(i, message, &size);
-                            if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR) std::cerr << message->pDescription << '\n';
-                        }
-                    ComPtr<ID3D12DeviceRemovedExtendedData1> dred;
-                    if (SUCCEEDED(diagnosticSecondary->GetDevice().As(&dred)))
-                    {
-                        D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT1 output{};
-                        dred->GetAutoBreadcrumbsOutput1(&output);
-                        for (auto* node = output.pHeadAutoBreadcrumbNode; node; node = node->pNext)
-                        {
-                            const UINT completed = node->pLastBreadcrumbValue ? *node->pLastBreadcrumbValue : 0;
-                            std::cerr << "DRED completed=" << completed << "/" << node->BreadcrumbCount << '\n';
-                            for (UINT i = completed > 5 ? completed - 5 : 0; i < (std::min)(completed + 8, node->BreadcrumbCount); ++i)
-                                std::cerr << "  " << i << " op=" << node->pCommandHistory[i] << '\n';
-                        }
-                        D3D12_DRED_PAGE_FAULT_OUTPUT1 fault{};
-                        dred->GetPageFaultAllocationOutput1(&fault);
-                        std::cerr << "DRED page fault=" << fault.PageFaultVA << '\n';
-                    }
-                    // Device removal can deadlock driver cleanup; retain the failure diagnostics first.
-                    std::cerr << "Secondary device removed at frame " << testFrame << '\n';
-                    ExitProcess(1);
-                }
-            }
-            else reflections.Execute(list);
+            reflections.Execute(list);
             timer.Stop(list);
             queue->ExecuteCommandList(list);
-            reflections.OnSubmitted(queue->GetLastCompletionPoint());
             frame->FenceValue = list->FenceValue;
             timer.OnCommandListExecuted(list->FenceValue);
             if (waitForGPU) queue->Flush();
@@ -543,252 +490,6 @@ int main(int argc, char** argv)
             const UINT mips = texture->GetResource()->D3DResource->GetDesc().MipLevels;
             return ReadTexture(device, *texture, index * mips + mip);
         };
-        if (argc > 1 && (std::strcmp(argv[1], "--mgpu") == 0 || std::strcmp(argv[1], "--mgpu-debug") == 0))
-        {
-            GDX12Device secondary;
-            ComPtr<IDXGIAdapter4> adapter;
-            for (UINT index = 0;; ++index)
-            {
-                ComPtr<IDXGIAdapter4> item;
-                if (GDX12DeviceFactory::GetFactory()->EnumAdapterByGpuPreference(index,
-                    DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&item)) == DXGI_ERROR_NOT_FOUND) break;
-                DXGI_ADAPTER_DESC1 desc{};
-                ThrowIfFailed(item->GetDesc1(&desc));
-                if (desc.VendorId == 0x8086 && std::wstring_view(desc.Description).find(L"B570") != std::wstring_view::npos)
-                { adapter = item; break; }
-            }
-            Require(adapter && device.GetDeviceFeatures().Name.find("5050") != std::string::npos,
-                "MGPU reflection acceptance requires RTX 5050 primary and Arc B570 secondary");
-            const auto renderAdapters = GDX12DeviceFactory::GetDeviceDescriptors();
-            Require(std::count_if(renderAdapters.begin(), renderAdapters.end(), [](const auto& item)
-                { return item.Name.find(L"5050") != std::wstring::npos; }) == 1,
-                "Indirect display alias was counted as another RTX 5050 render adapter");
-            secondary.Role = DEVICE_ROLE_SECONDARY;
-            ThrowIfFailed(secondary.Initialize(adapter));
-            diagnosticSecondary = &secondary;
-            std::cout << "Primary: " << device.GetDeviceFeatures().Name << "; secondary: " << secondary.GetDeviceFeatures().Name << '\n';
-            GDX12CommandQueue copyA(&device, D3D12_COMMAND_LIST_TYPE_COPY, true), copyB(&secondary, D3D12_COMMAND_LIST_TYPE_COPY, true);
-            RenderMGPURuntime runtime({&device, &secondary, &copyA, &copyB});
-            {
-                GDX12GeometryBuffer geometry(&device);
-                geometry.ReserveSkinnedVertices(8);
-                Require(geometry.GetSkinnedVertexRanges().empty(), "Skin reserve left an active range");
-                const auto first = geometry.AllocateSkinnedVertices(3);
-                const auto second = geometry.AllocateSkinnedVertices(2);
-                Require(geometry.GetSkinnedVertexRanges().at(first) == 3 &&
-                    geometry.GetSkinnedVertexRanges().at(second) == 2, "Active skin ranges missing");
-                geometry.ReleaseSkinnedVertices(first, 3);
-                Require(!geometry.GetSkinnedVertexRanges().count(first), "Released skin range remains active");
-                Require(geometry.AllocateSkinnedVertices(3) == first, "Skin range was not reused");
-                geometry.Clear();
-                Require(geometry.GetSkinnedVertexRanges().empty(), "Clear retained active skin ranges");
-
-                CrossAdapterWork work(runtime);
-                CrossAdapterWork::Channel channel;
-                GDX12UploadBuffer<UINT> input(&device, 8, EBufferType::Upload, false);
-                for (UINT i = 0; i < 8; ++i) input.CopyData(i, i + 10);
-                auto source = work.Identify(input.ShareResource(), device);
-                auto target = work.Allocate(secondary, 8 * sizeof(UINT));
-                work.Copy(channel, device, secondary, {{source, target}});
-                input.CopyData(2, 99u);
-                CrossAdapterWork::CopyRegion region{source, target};
-                region.SourceOffset = 2 * sizeof(UINT);
-                region.DestinationOffset = 4 * sizeof(UINT);
-                region.Bytes = sizeof(UINT);
-                work.Copy(channel, device, secondary, {region});
-                for (const bool destination : {false, true})
-                {
-                    auto invalid = region;
-                    (destination ? invalid.DestinationOffset : invalid.SourceOffset) = 8 * sizeof(UINT);
-                    bool rejected = false;
-                    try { work.Copy(channel, device, secondary, {invalid}); }
-                    catch (const std::exception&) { rejected = true; }
-                    Require(rejected, "Out-of-bounds snapshot range accepted");
-                }
-                auto readback = secondary.CreateResource(D3D12_HEAP_TYPE_READBACK,
-                    CD3DX12_RESOURCE_DESC::Buffer(8 * sizeof(UINT)), D3D12_RESOURCE_STATE_COPY_DEST);
-                work.Run("Range copy readback", secondary,
-                    {{target, GDX12RenderGraph::Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE}},
-                    [&](GDX12CommandList& commands) { commands.GetCommandList()->CopyResource(readback.Get(), target.Resource->D3DResource.Get()); });
-                void* mapped = nullptr;
-                ThrowIfFailed(readback->Map(0, nullptr, &mapped));
-                for (UINT i = 0; i < 8; ++i)
-                    Require(static_cast<UINT*>(mapped)[i] == (i == 4 ? 99u : i + 10), "Range copy changed neighboring bytes");
-                readback->Unmap(0, nullptr);
-                runtime.RetireBank(*channel.Bank);
-                std::cout << "Snapshot range copy bounds/neighbors and skin allocation lifetime passed\n";
-            }
-            const auto skinOffset = resources.GeometryBuffer->AllocateSkinnedVertices(1);
-            GDX12UploadBuffer<Vertex> skinUpload(&device, 1, EBufferType::Upload, false);
-            Vertex skinMarker{};
-            writeSkinMarker = [&](GDX12CommandList* commands)
-            {
-                if (testFrame % 2 == 0) return; // Frozen poses still need copying when a later capture is scheduled.
-                skinMarker.Position.x = static_cast<float>(testFrame);
-                skinUpload.CopyData(0, skinMarker);
-                auto vertices = resources.GeometryBuffer->ShareVertexResource();
-                const auto state = vertices->GetCurrentState();
-                commands->ResourceBarrier({vertices->GetCopyDestBarrier()});
-                commands->GetCommandList()->CopyBufferRegion(vertices->D3DResource.Get(), skinOffset * sizeof(Vertex),
-                    skinUpload.GetResource().D3DResource.Get(), 0, sizeof(Vertex));
-                commands->ResourceBarrier({vertices->GetTransitionBarrier(state)});
-            };
-            UINT checkedSkinCaptures = 0;
-            CrossAdapterReflections route(resources, secondary, runtime, [&] { return std::vector<GDX12Texture*>{&white}; },
-                common, reflections, environment);
-            route.SetApplication({}, [&](GDX12DeviceResources& remote, GDX12ReflectionProbePass&, CrossAdapterWork&, UINT64&)
-            {
-                Require(remote.FrameConstants[0]->MaterialCache->GetElementCount() ==
-                    resources.FrameConstants[resources.CurrFrameConstantsIndex]->MaterialCache->GetElementCount(),
-                    "Secondary application material indices have no matching CPU cache");
-                auto& target = *remote.FrameConstants[0]->MaterialCache;
-                auto& source = *resources.FrameConstants[resources.CurrFrameConstantsIndex]->MaterialCache;
-                target.TrackChanges();
-                Require(std::memcmp(target.GetCPUData(), source.GetCPUData(),
-                    source.GetElementCount() * sizeof(GDX12MaterialConstants)) == 0,
-                    "Secondary material cache contents differ from primary");
-                auto vertices = remote.GeometryBuffer->ShareVertexResource();
-                const auto state = vertices->GetCurrentState();
-                auto readback = secondary.CreateResource(D3D12_HEAP_TYPE_READBACK,
-                    CD3DX12_RESOURCE_DESC::Buffer(sizeof(Vertex)), D3D12_RESOURCE_STATE_COPY_DEST);
-                auto* commands = secondary.GetCommandQueue()->GetCommandList();
-                commands->ResourceBarrier({vertices->GetCopySourceBarrier()});
-                commands->GetCommandList()->CopyBufferRegion(readback.Get(), 0, vertices->D3DResource.Get(),
-                    skinOffset * sizeof(Vertex), sizeof(Vertex));
-                commands->ResourceBarrier({vertices->GetTransitionBarrier(state)});
-                secondary.GetCommandQueue()->ExecuteCommandList(commands);
-                secondary.GetCommandQueue()->Flush();
-                void* mapped = nullptr;
-                ThrowIfFailed(readback->Map(0, nullptr, &mapped));
-                Require(std::memcmp(mapped, &skinMarker, sizeof(Vertex)) == 0,
-                    "Secondary geometry retained stale animated or frozen skin vertices");
-                readback->Unmap(0, nullptr);
-                ++checkedSkinCaptures;
-                return std::vector<CrossAdapterWork::Use>{};
-            }, {});
-            struct MaterialCapture final : GDX12RenderPass
-            {
-                GDX12ReflectionProbePass& Pass;
-                GDX12Texture& Material;
-                MaterialCapture(GDX12ReflectionProbePass& pass, GDX12Texture& material) : Pass(pass), Material(material) {}
-                void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-                {
-                    Pass.RecordRenderGraph(graph);
-                    graph.Read(&Material, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
-                }
-                void Execute(GDX12CommandList* commands) override { Pass.Execute(commands); }
-                std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override { return Pass.GetBufferAccesses(); }
-            } materialCapture(reflections, white);
-            placedGraph = std::make_unique<GDX12RenderGraph>(&device);
-            using Graph = GDX12RenderGraph;
-            placedGraph->ImportShared(Graph::SharedResource::Scene, "Probe fixture scene");
-            placedGraph->ImportShared(Graph::SharedResource::Environment, "Probe fixture environment");
-            for (UINT index = 0; index < 4; ++index) placedGraph->ImportLink("Environment input", environment.GetOutput(index));
-            placedGraph->ImportLink("Local shadow input", localShadows.GetOutput(0));
-            placedGraph->ImportLink("Application material input", &white);
-            placedGraph->AddPass(materialCapture);
-            route.Configure(*placedGraph, materialCapture, placedBindings, {&white});
-            placedGraph->Compile(false);
-            Set(L"Render.Reflection.Schedule.Enabled", "true");
-            Set(L"Render.Reflection.FullUpdateDistanceMetres", "0");
-            for (int implementation : {0, 1})
-                for (UINT count = 1; count <= 4; ++count)
-                {
-                    resources.ReflectionProbes.clear();
-                    for (UINT index = 0; index < count; ++index)
-                    {
-                        auto configured = probe;
-                        configured.Id = index + 1;
-                        configured.Resolution = 32;
-                        configured.PrefilterSamples = 8;
-                        configured.Implementation = implementation;
-                        resources.ReflectionProbes.push_back(configured);
-                    }
-                    Set(L"Render.Reflection.Schedule", "0");
-                    reflections.ResetHistory(); route.ResetWorld();
-                    render();
-                    std::vector<std::vector<float>> reference;
-                    for (UINT index = 0; index < count * 6; ++index) reference.push_back(face(index));
-                    for (UINT mask : {63u, 21u, 42u, 1u, 0u})
-                    {
-                        for (UINT index = 0; index < count; ++index)
-                            resources.ReflectionProbes[index].SecondaryFaces = index % 2 ? (mask ^ 63u) : mask;
-                        for (int schedule : {0, 1, 2, 3})
-                        {
-                            Set(L"Render.Reflection.Schedule", std::to_string(schedule).c_str());
-                            reflections.ResetHistory(); route.ResetWorld();
-                            for (UINT frame = 0; frame < count * 6; ++frame)
-                            {
-                                render();
-                                const auto& stats = reflections.GetStatistics();
-                                Require(stats.RequestedSecondaryFaces == stats.EffectiveSecondaryFaces,
-                                    "Reflection fixture silently fell back from its requested face placement");
-                            }
-                            Require(reflections.GetReadiness().first == count, "Scheduled MGPU probes never became ready");
-                            for (UINT index = 0; index < count * 6; ++index)
-                            {
-                                const auto actual = face(index);
-                                Require(actual.size() == reference[index].size(), "MGPU face dimensions changed");
-                                for (size_t pixel = 0; pixel < actual.size(); ++pixel)
-                                    Require(std::isfinite(actual[pixel]) && std::abs(actual[pixel] - reference[index][pixel]) < 0.05f,
-                                        "MGPU face radiance differs from the equal-quality primary reference");
-                            }
-                        }
-                    }
-                    std::cout << "Probe count=" << count << " mode=" << implementation << " placements/schedules passed\n";
-                }
-            Set(L"Render.Reflection.Schedule", "3");
-            Set(L"Render.Reflection.FullUpdateDistanceMetres", "10");
-            for (int placement : {1, 2})
-            {
-                Set(L"Render.Reflection.Placement", std::to_string(placement).c_str());
-                reflections.ResetHistory(); route.ResetWorld();
-                for (const auto [cameraX, isNear] : {std::pair{1400.0f, true}, {1600.0f, true},
-                    {1800.0f, false}, {1600.0f, false}, {1400.0f, true}})
-                {
-                    common.CameraView = Matrix::CreateTranslation(-cameraX, 0, 0);
-                    ++resources.ReflectionEnvironmentRevision;
-                    render();
-                    unsigned scheduled = 0;
-                    for (const auto& work : reflections.ScheduledWork())
-                    {
-                        Require(work.Near == isNear, "GPU probe schedule lost box-distance hysteresis");
-                        Require(!isNear || work.Faces == 63, "Near probe did not capture all six faces");
-                        const bool secondary = isNear == (placement == 2);
-                        Require(work.SecondaryFaces == (secondary ? work.Faces : 0),
-                            "Near/far probe placement was not applied");
-                        for (unsigned face = 0; face < 6; ++face) scheduled += (work.Faces >> face) & 1u;
-                    }
-                    Require(scheduled == (isNear ? 24u : 1u), "Near/far schedule changed its nominal work");
-                    const auto& stats = reflections.GetStatistics();
-                    Require(stats.RequestedSecondaryFaces == stats.EffectiveSecondaryFaces,
-                        "Near/far transition silently fell back");
-                    if (isNear) Require(reflections.GetReadiness().first == 4, "Near transition did not publish complete probes");
-                }
-            }
-            std::cout << "Both near/far placements, hysteresis and partial-cycle transitions passed\n";
-            Require(checkedSkinCaptures > 1, "Animated geometry cache was not exercised after its initial copy");
-            writeSkinMarker = {};
-            resources.GeometryBuffer->ReleaseSkinnedVertices(skinOffset, 1);
-            resources.ReflectionProbes.clear();
-            render();
-            Require(!route.HasSecondaryWork(), "Disabled probes retained remote work");
-            queue->Flush(); secondary.GetCommandQueue()->Flush();
-            ComPtr<ID3D12InfoQueue> secondaryInfo;
-            ThrowIfFailed(secondary.GetDevice().As(&secondaryInfo));
-            for (UINT64 index = 0; index < secondaryInfo->GetNumStoredMessages(); ++index)
-            {
-                SIZE_T size = 0;
-                secondaryInfo->GetMessage(index, nullptr, &size);
-                std::vector<BYTE> bytes(size);
-                auto* message = reinterpret_cast<D3D12_MESSAGE*>(bytes.data());
-                ThrowIfFailed(secondaryInfo->GetMessage(index, message, &size));
-                if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR) throw std::runtime_error(message->pDescription);
-            }
-            runtime.Shutdown();
-            std::cout << "MGPU probe GPU validation, all faces, both implementations, schedules and reset passed\n";
-            return 0;
-        }
         for (UINT i = 0; i < 5; ++i)
         {
             locations[1].x += 0.01f;
@@ -1132,20 +833,20 @@ int main(int argc, char** argv)
         }
 
         GDX12XeSSUpscalePass xess;
-        xess.Setup(&resources, nullptr, &common);
+        xess.Setup(&resources, &common);
         GDX12CascadedShadowPass mainShadows;
-        mainShadows.Setup(&resources, nullptr, &common);
+        mainShadows.Setup(&resources, &common);
         mainShadows.Initialize();
         GDX12GPUCullingPass mainCulling;
-        mainCulling.Setup(&resources, nullptr, &common);
+        mainCulling.Setup(&resources, &common);
         GDX12OpaquePass opaque;
-        opaque.Setup(&resources, nullptr, &common);
+        opaque.Setup(&resources, &common);
         opaque.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
         opaque.Initialize();
         GDX12DeferredLightingPass deferred;
-        deferred.Setup(&resources, nullptr, &common);
+        deferred.Setup(&resources, &common);
         GDX12AmbientOcclusionPass ao;
-        ao.Setup(&resources, nullptr, &common);
+        ao.Setup(&resources, &common);
         ao.SetInputs({ opaque.GetOutput(2), opaque.GetOutput(3) });
         ao.Initialize();
         Set(L"Render.AO.Enabled", "0");
@@ -1158,13 +859,13 @@ int main(int argc, char** argv)
         GDX12OpaquePass* surfaceOpaque = &opaque;
         GDX12OpaquePass* surfacePrepass = nullptr;
         GDX12WBOITTransparencyPass transparency;
-        transparency.Setup(&resources, nullptr, &common);
+        transparency.Setup(&resources, &common);
         transparency.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
         transparency.SetInputs({ opaque.GetOutput(2), mainShadows.GetOutput(0), environment.GetOutput(0),
             environment.GetOutput(1), environment.GetOutput(2), localShadows.GetOutput(0) });
         transparency.Initialize();
         GDX12WBOITCompositionPass composition;
-        composition.Setup(&resources, nullptr, &common);
+        composition.Setup(&resources, &common);
         composition.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
         composition.SetInputs({ deferred.GetOutput(0), transparency.GetOutput(0), transparency.GetOutput(1) });
         composition.Initialize();
@@ -1179,7 +880,7 @@ int main(int argc, char** argv)
         displayDesc.RTVHeapIndex = resources.RTVHeap->GetAvailableIndex();
         display.Initialize(displayDesc);
         GDX12OutputToScreenPass output;
-        output.Setup(&resources, nullptr, &common);
+        output.Setup(&resources, &common);
         output.SetInputs({ xess.GetOutput(0), &display });
         output.Initialize();
         GDX12RenderGraph outputGraph(&device);
@@ -1293,11 +994,11 @@ int main(int argc, char** argv)
         const auto referenceAlbedo = ReadTexture(device, *opaque.GetOutput(0)->GetTexture(), 0);
         const auto descriptorsBefore = NextTextureDescriptors(resources);
         GDX12OpaquePass prepass(GDX12OpaquePass::Stage::DepthPrepass);
-        prepass.Setup(&resources, nullptr, &common);
+        prepass.Setup(&resources, &common);
         prepass.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
         prepass.Initialize();
         GDX12OpaquePass gbuffer(GDX12OpaquePass::Stage::GBuffer);
-        gbuffer.Setup(&resources, nullptr, &common);
+        gbuffer.Setup(&resources, &common);
         gbuffer.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
         gbuffer.SetInputs({ prepass.GetOutput(2) });
         gbuffer.Initialize();

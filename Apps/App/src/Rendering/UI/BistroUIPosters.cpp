@@ -2,7 +2,7 @@
 #include "../../BistroUICanvases.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Modules/SceneManagerModule.h"
-#include "App.Base/Rendering/CrossAdapterUI.h"
+#include "Engine.UI/OffscreenUI.h"
 #include "Common/ConsoleVariables.h"
 #include "Engine.Core/AssetManager.h"
 #include "Engine.RendererDX12/GDX12Material.h"
@@ -123,11 +123,7 @@ struct BistroUIPosters::Impl
         { _numOutputs = 1; }
         void RecordRenderGraph(GDX12RenderGraphBuilder& builder) override;
         void Execute(GDX12CommandList* commands) override;
-        bool SupportsGraphQueue(GDX12Submission::QueueKind queue) const override
-        {
-            return queue == GDX12Submission::QueueKind::Direct ||
-                (Effects && queue == GDX12Submission::QueueKind::Compute);
-        }
+        bool IsAsyncComputeEnabled() const override { return Effects && AsyncCompute.GetValue(); }
         IRenderPassLink* GetOutput(UINT index) override;
 
     private:
@@ -145,7 +141,6 @@ struct BistroUIPosters::Impl
         TextureLink EffectLink, TargetLink;
         Frame* Current = nullptr;
         bool SeparateEffects = false;
-        bool Requested = false;
         Pass EffectPass, Raster;
     };
 
@@ -175,7 +170,7 @@ struct BistroUIPosters::Impl
         {
             const auto state = weak.lock();
             if (!state || !IsBistro(world)) return;
-            state->SceneChanged |= state->Worlds.try_emplace(&world).second;
+            state->Worlds.try_emplace(&world);
             // This factory runs after RenderModule has subscribed to the world's component events.
             auto previous = std::move(world.SceneMeshFactory);
             world.SceneMeshFactory = [weak, &world, previous = std::move(previous)](
@@ -189,10 +184,10 @@ struct BistroUIPosters::Impl
         });
         WorldDestroyed = scenes.OnWorldDestroyed.AddListener([weak](World& world)
         {
-            if (const auto state = weak.lock()) state->SceneChanged |= state->Worlds.erase(&world) != 0;
+            if (const auto state = weak.lock()) state->Worlds.erase(&world);
         });
         for (std::size_t i = 0; i < scenes.GetWorldCount(); ++i)
-            if (auto* world = scenes.GetWorld(i); world && IsBistro(*world)) SceneChanged |= Worlds.try_emplace(world).second;
+            if (auto* world = scenes.GetWorld(i); world && IsBistro(*world)) Worlds.try_emplace(world);
     }
 
     void Spawn(World& world)
@@ -237,26 +232,19 @@ struct BistroUIPosters::Impl
         }
     }
 
-    bool Prepare(GDX12DeviceResources& primary, UINT slot, double animationSeconds, CrossAdapterUI* controller)
+    bool Prepare(GDX12DeviceResources& primary, UINT slot, double animationSeconds)
     {
         if (slot != primary.CurrFrameConstantsIndex || slot >= primary.FrameConstants.size() || !primary.Device)
             throw std::invalid_argument("Bistro posters require the current primary frame slot");
-        const auto progress = primary.Device->GetCommandQueue()->GetCompletionProgress();
-        if (progress.CompletedValue == UINT64_MAX) ThrowIfFailed(DXGI_ERROR_DEVICE_REMOVED);
-        if (primary.FrameConstants[slot]->FenceValue > progress.CompletedValue)
+        const auto completed = primary.Device->GetCommandQueue()->GetFence()->GetCompletedValue();
+        if (completed == UINT64_MAX) ThrowIfFailed(DXGI_ERROR_DEVICE_REMOVED);
+        if (primary.FrameConstants[slot]->FenceValue > completed)
             throw std::logic_error("Bistro poster slot is still in flight");
 
         for (auto& [world, entities] : Worlds)
             if (entities[0] == InvalidEntity || entities[1] == InvalidEntity) Spawn(*world);
         const bool visible = !Worlds.empty();
         bool rebuild = false;
-        Controller = controller;
-        if (controller && SceneChanged)
-        {
-            controller->Invalidate(BistroUICanvases::Atrium);
-            controller->Invalidate(BistroUICanvases::Terrace);
-        }
-        SceneChanged = false;
         if (visible)
         {
             if (!Raster)
@@ -269,8 +257,6 @@ struct BistroUIPosters::Impl
                 Effects = std::move(effects);
             }
             const auto inputs = Posters.BuildFrames(animationSeconds);
-            bool moving = false;
-            for (const auto& entry : Worlds) moving |= !entry.first->IsPaused();
             for (auto* surface : Surfaces())
             {
                 const auto i = surface->Index;
@@ -298,7 +284,6 @@ struct BistroUIPosters::Impl
                 surface->EffectLink.Texture = frame.Effect.get();
                 surface->Binding.PrimaryDeviceTexture = frame.Target.get();
                 surface->Material->DirtyFlag = true;
-                if (controller) controller->PumpLatest(input, moving);
             }
         }
         const bool localAsync = AsyncCompute.GetValue();
@@ -314,10 +299,8 @@ struct BistroUIPosters::Impl
                     surface->Material->DirtyFlag = true;
                 }
             }
-            const bool requested = visible && controller && controller->GetStatus(surface->Current->Input->Id).Requested;
-            const bool separate = visible && !requested && localAsync;
-            rebuild |= surface->Requested != requested || surface->SeparateEffects != separate;
-            surface->Requested = requested;
+            const bool separate = visible && localAsync;
+            rebuild |= surface->SeparateEffects != separate;
             surface->SeparateEffects = separate;
         }
         return rebuild;
@@ -327,14 +310,12 @@ struct BistroUIPosters::Impl
     std::weak_ptr<SceneManagerModule> Scenes;
     ListenerHandle WorldCreated = 0, WorldDestroyed = 0;
     std::map<World*, std::array<Entity, Count>> Worlds;
-    bool SceneChanged = false;
     MeshHandle Mesh;
     BistroUICanvases::Posters Posters;
     Surface Atrium, Terrace;
     std::unique_ptr<OffscreenRenderer> Raster;
     std::unique_ptr<CanvasEffects> Effects;
     std::vector<std::array<Frame, Count>> Slots;
-    CrossAdapterUI* Controller = nullptr;
 };
 
 void BistroUIPosters::Impl::Pass::RecordRenderGraph(GDX12RenderGraphBuilder& builder)
@@ -386,10 +367,9 @@ BistroUIPosters::BistroUIPosters(RenderModule& render, const std::shared_ptr<Sce
 
 BistroUIPosters::~BistroUIPosters() = default;
 
-bool BistroUIPosters::PrepareFrame(GDX12DeviceResources& primary, UINT frameSlot, double animationSeconds,
-    Engine::UI::CrossAdapterUI* controller)
+bool BistroUIPosters::PrepareFrame(GDX12DeviceResources& primary, UINT frameSlot, double animationSeconds)
 {
-    return _impl->Prepare(primary, frameSlot, animationSeconds, controller);
+    return _impl->Prepare(primary, frameSlot, animationSeconds);
 }
 
 GDX12RenderPass& BistroUIPosters::RasterPass(std::size_t index) const
@@ -408,7 +388,6 @@ void BistroUIPosters::AddPasses(GDX12RenderGraph& graph) const
     {
         if (surface->SeparateEffects) graph.AddPass(surface->EffectPass);
         graph.AddPass(surface->Raster);
-        if (surface->Requested) graph.SetLegacySplit(surface->Raster, {}, {&surface->TargetLink});
     }
 }
 
@@ -421,31 +400,4 @@ void BistroUIPosters::DeclareMaterialReads(GDX12RenderGraphBuilder& builder) con
 bool BistroUIPosters::UsesAsyncCompute() const
 {
     return _impl->Atrium.SeparateEffects || _impl->Terrace.SeparateEffects;
-}
-
-bool BistroUIPosters::HasRoutes() const
-{
-    return _impl->Atrium.Requested || _impl->Terrace.Requested;
-}
-
-bool BistroUIPosters::HandlesReplacement(const GDX12RenderGraph::LegacyBoundary& boundary) const
-{
-    return boundary.Replaced == &_impl->Atrium.Raster || boundary.Replaced == &_impl->Terrace.Raster;
-}
-
-std::optional<GDX12Submission::CompletionPoint> BistroUIPosters::SubmitReplacement(
-    const GDX12RenderGraph::LegacyBoundary& boundary, GDX12Submission::CompletionPoint prefix)
-{
-    for (auto* surface : _impl->Surfaces())
-        if (boundary.Replaced == &surface->Raster)
-        {
-            if (!surface->Requested || !_impl->Controller || !surface->Current) return {};
-            auto& frame = *surface->Current;
-            if (boundary.Outputs.size() != 1 || boundary.Outputs.front().Link != &surface->TargetLink ||
-                boundary.Outputs.front().Texture != frame.Target.get() ||
-                boundary.Outputs.front().Native.get() != frame.Target->GetResource())
-                throw std::logic_error("Bistro poster replacement target differs from its material slot");
-            return _impl->Controller->SubmitCanvas(*frame.Input, boundary.Outputs.front().Native, prefix);
-        }
-    return {};
 }

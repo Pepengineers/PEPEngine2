@@ -23,7 +23,7 @@ namespace Engine::UI
             GDX12ResourceHandle Input, Target;
         };
 
-        explicit Impl(GDX12Device& device) : Device(device), Adapter(device.GetSubmissionAdapterId())
+        explicit Impl(GDX12Device& device) : Device(device)
         {
             ThrowIfFailed(Device.GetDevice().As(&Identity));
             GDX12RootSignatureDesc root;
@@ -67,7 +67,6 @@ namespace Engine::UI
         }
 
         GDX12Device& Device;
-        GDX12Submission::AdapterId Adapter;
         ComPtr<IUnknown> Identity;
         std::unique_ptr<GDX12RootSignature> Root;
         ComPtr<ID3D12PipelineState> Pipeline;
@@ -85,7 +84,9 @@ namespace Engine::UI
         GDX12ResourceHandle input, GDX12ResourceHandle target) const
     {
         auto& state = *_impl;
-        if (state.Adapter != state.Device.GetSubmissionAdapterId())
+        ComPtr<IUnknown> currentDevice;
+        ThrowIfFailed(state.Device.GetDevice().As(&currentDevice));
+        if (state.Identity != currentDevice)
             throw std::logic_error("Screen composite belongs to a retired device incarnation");
         if (commands.GetType() != D3D12_COMMAND_LIST_TYPE_DIRECT || !input || !target || input.Get() == target.Get())
             throw std::invalid_argument("Screen composite requires a DIRECT list and distinct source and target");

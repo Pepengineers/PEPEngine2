@@ -46,7 +46,6 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12GeometryBuffer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Material.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12SharedTexture.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ShadowCascades.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12LocalLights.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12LightGrid.h" />
@@ -61,21 +60,14 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OpaquePass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredLightingPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OutputToScreenPass.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SyncPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureClearPass.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureCopyFromSharedMemoryPass.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureCopyToSharedMemoryPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITTransparencyPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GPUCullingPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12RenderPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FrameGenerationPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12ShadowDepthTransfer.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12ResourceHandle.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGraph.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12SnapshotProtocol.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12SnapshotTransport.h" />
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12Submission.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGeometrySource.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGeometry.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GeometryViewPass.h" />
@@ -101,8 +93,6 @@
   <ItemGroup>
     <ClCompile Include="src\GDX12RenderPass.cpp" />
     <ClCompile Include="src\GDX12RenderGraph.cpp" />
-    <ClCompile Include="src\GDX12SnapshotProtocol.cpp" />
-    <ClCompile Include="src\GDX12SnapshotTransport.cpp" />
     <ClCompile Include="src\GDX12RenderHelpers.cpp" />
     <ClCompile Include="src\GDX12LightGrid.cpp" />
     <ClCompile Include="src\GDX12Reconstruction.cpp" />
@@ -138,7 +128,6 @@
     <ClCompile Include="src\GDX12GPUTimer.cpp" />
     <ClCompile Include="src\GDX12GeometryBuffer.cpp" />
     <ClCompile Include="src\GDX12Resource.cpp" />
-    <ClCompile Include="src\GDX12ShadowDepthTransfer.cpp" />
     <ClCompile Include="src\GDX12SwapChain.cpp" />
     <ClCompile Include="src\GDX12StreamlineSDK.cpp" />
     <ClCompile Include="src\GDX12CommandList.cpp" />
@@ -181,7 +170,6 @@
     <None Include="Shaders\Clouds.hlsl" />
     <None Include="Shaders\EnvironmentIBL.hlsl" />
     <None Include="Shaders\ShadowPass.hlsl" />
-    <None Include="Shaders\ShadowDepthTransfer.hlsl" />
     <None Include="Shaders\LocalShadowPass.hlsl" />
     <None Include="Shaders\ShadowFrustum.hlsli" />
     <None Include="Shaders\FullScreenVS.hlsl" />

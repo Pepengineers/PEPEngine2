@@ -11,7 +11,7 @@ static void BenchmarkParticlePlacement(GDX12Device& device, GDX12DeviceResources
     auto previousSimulation = std::move(resources.ParticleSimulation);
     resources.ParticleSimulation = std::make_unique<GDX12ParticleSimulation>();
     GDX12ParticlesPass particles;
-    particles.Setup(&resources, nullptr, &common);
+    particles.Setup(&resources, &common);
     particles.SetInputs({depth, accum, reveal});
     particles.Initialize();
     GDX12ParticleEmitter emitter;

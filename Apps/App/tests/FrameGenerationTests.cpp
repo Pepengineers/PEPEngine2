@@ -81,7 +81,7 @@ static void GPU(HWND window)
         GDX12SwapChain swap(&device, window, DXGI_FORMAT_R8G8B8A8_UNORM, 2, common.WindowWidth, common.WindowHeight, resources.RTVHeap.get());
         GDX12Texture color, depth, motion;
         GDX12ReconstructionPass sr;
-        sr.Setup(&resources, nullptr, &common);
+        sr.Setup(&resources, &common);
         const auto targets = [&]
         {
             MakeTarget(resources, color, common.DownscaledWidth, common.DownscaledHeight, DXGI_FORMAT_R16G16B16A16_FLOAT);
@@ -90,7 +90,7 @@ static void GPU(HWND window)
         };
         targets(); sr.SetInputs({&depth, &motion, &color}); sr.Initialize();
         GDX12OutputToScreenPass output;
-        output.Setup(&resources, nullptr, &common); output.SetInputs({sr.GetOutput(0), &swap}); output.Initialize();
+        output.Setup(&resources, &common); output.SetInputs({sr.GetOutput(0), &swap}); output.Initialize();
         auto& fg = swap.GetFrameGeneration();
         const auto frame = [&]
         {

@@ -1,7 +1,6 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
-#include "Engine.RendererDX12/GDX12ParticleTime.h"
 #include <algorithm>
 #include <cmath>
 
@@ -113,8 +112,7 @@ namespace ParticleResources
         return std::make_unique<GDX12RootSignature>(resources->Device, root);
     }
 
-    inline EmitterConstants MakeConstants(const GDX12ParticleEmitter& emitter, UINT width, UINT height,
-        bool preserveTime = false)
+    inline EmitterConstants MakeConstants(const GDX12ParticleEmitter& emitter, UINT width, UINT height)
     {
         EmitterConstants constants = {};
         XMStoreFloat4x4(&constants.World, XMMatrixTranspose(emitter.World));
@@ -123,10 +121,7 @@ namespace ParticleResources
         constants.Extents = emitter.ShapeExtents;
         constants.Shape = static_cast<UINT>(emitter.Shape);
         constants.Acceleration = emitter.Acceleration;
-        const auto time = preserveTime ? ResolveParticleTime(emitter.DeltaTime, emitter.TimeScale, emitter.MaxDeltaTime,
-            emitter.Substeps, emitter.Paused) : GDX12ParticleTime{emitter.Paused ? 0 :
-                (std::min)(emitter.DeltaTime * emitter.TimeScale, emitter.MaxDeltaTime), emitter.Substeps};
-        constants.DeltaTime = time.Delta;
+        constants.DeltaTime = emitter.Paused ? 0 : (std::min)(emitter.DeltaTime * emitter.TimeScale, emitter.MaxDeltaTime);
         constants.Wind = emitter.Wind;
         constants.Drag = emitter.Drag;
         constants.ColorStart = emitter.ColorStart;
@@ -146,7 +141,7 @@ namespace ParticleResources
         constants.Blend = static_cast<UINT>(emitter.Blend);
         constants.Columns = emitter.AtlasColumns;
         constants.Rows = emitter.AtlasRows;
-        constants.Substeps = time.Substeps;
+        constants.Substeps = emitter.Substeps;
         constants.EdgeSamples = emitter.EdgeSamples;
         constants.Seed = emitter.Seed;
         constants.Paused = emitter.Paused;
@@ -177,7 +172,6 @@ struct GDX12ParticleSimulation::State
     explicit State(GDX12DeviceResources* resources);
     bool Active = false;
     bool ResetMotion = false;
-    bool DisplayHistoryApplied = false;
     UINT Capacity = 0;
     std::vector<GDX12ParticleEmitter> Emitters;
     std::unordered_map<uint64_t, std::unique_ptr<ParticleResources::Pool>> Pools;

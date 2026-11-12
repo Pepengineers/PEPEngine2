@@ -61,7 +61,7 @@ static void CheckWaterComposition(GDX12Device& device, GDX12DeviceResources& res
     noAerial.SetInputs({ background.get(), allTransparency.GetOutput(0), allTransparency.GetOutput(1), &depth });
     const std::vector<GDX12RenderPass*> passes{ &surface, &simulation, &farTransparency, &behind, &resolve, &nearTransparency,
         &fullParticles, &finalComposition, &allTransparency, &referenceParticles, &reference, &noAerial };
-    for (auto* pass : passes) pass->Setup(&resources, nullptr, &common);
+    for (auto* pass : passes) pass->Setup(&resources, &common);
     GDX12RenderPass::InitializeAll(passes);
     WaterGraphOutput output;
     output.SetInputs({ finalComposition.GetOutput(0), reference.GetOutput(0), noAerial.GetOutput(0) });

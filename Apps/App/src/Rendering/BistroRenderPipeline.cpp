@@ -1,32 +1,23 @@
 #include "Rendering/BistroRenderPipeline.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12CloudComponent.h"
 #include "App.Base/Modules/RenderModule.h"
-#include "App.Base/Rendering/CrossAdapterParticles.h"
-#include "App.Base/Rendering/RenderShadowRoutes.h"
-#include "App.Base/Rendering/CrossAdapterReflections.h"
-#include "App.Base/Rendering/CrossAdapterEnvironment.h"
 #include "Rendering/UI/BistroUIPosters.h"
-#include "BistroUICanvases.h"
 #include <stdexcept>
 #include "Common/GameTimer.h"
 #include "Rendering/Grass/BistroGrassGeometry.h"
-#include "Rendering/Grass/BistroGrassRoute.h"
-#include "Rendering/Grass/BistroGrassShadowRoute.h"
 #include "Rendering/Water/BistroWaterRendering.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GeometryViewPass.h"
 #ifdef _DEBUG
 #include "App.Base/Modules/PhysicsModule.h"
-#include "App.Base/Rendering/CrossAdapterAO.h"
-#include "App.Base/Rendering/CrossAdapterShadows.h"
-#include "App.Base/Rendering/CrossAdapterUI.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.UI/UI_test.h"
-#include <iomanip>
-#include <sstream>
 #include <utility>
 #endif
 
 namespace
 {
+    AutoConsoleVariable<bool> BistroClouds(L"Render.Clouds.Bistro", false,
+        L"Enable the procedural cloud source in Bistro.");
 #ifdef _DEBUG
     bool ShowCollisions = false;
 
@@ -214,131 +205,8 @@ namespace
     };
 }
 
-struct BistroRenderPipeline::ReflectionGrass
-{
-    std::optional<BistroGrassGeometry::ShadowScene> Scene;
-    GDX12GrassFieldProducer::SnapshotLayout Layout;
-    std::shared_ptr<GDX12Resource> Source;
-    GDX12Submission::TransferVersion SourceVersion{};
-    std::shared_ptr<const void> Owner;
-    CrossAdapterWork::View Remote;
-    CrossAdapterWork::Channel Channel;
-    std::unique_ptr<GDX12GrassRenderer> Renderer;
-    bool Prepared = false;
-};
-
 BistroRenderPipeline::BistroRenderPipeline(std::shared_ptr<SceneManagerModule> scenes) : _scenes(std::move(scenes)) {}
 BistroRenderPipeline::~BistroRenderPipeline() = default;
-
-std::vector<BistroQualitySearch::TechniqueMeasurement> BistroRenderPipeline::GetQualityMeasurements() const
-{
-    std::vector<BistroQualitySearch::TechniqueMeasurement> result(2);
-    const auto water = _water->GetMGPUWaterDiagnostics();
-    const auto grass = _grassRoute->GetDiagnostics();
-    const auto grassControls = GetGrassWindControls();
-    const auto localWater = _water->Surface.GetLocalSimulationStatus();
-    const auto localGrass = _grass->GetLocalSimulationStatus();
-    result[0] = {GetFluidControls().Enabled && (localWater.Active || water.Requested), water.Requested, water.SecondaryOwns,
-        !water.Requested || water.SourceAgeSeconds >= 0,
-        water.SecondaryOwns ? water.SourceAgeSeconds * 1000 : localWater.AgeMs,
-        water.SecondaryOwns ? (std::max)(0.0, water.Desired - water.Completed) : localWater.DebtSeconds,
-        water.Unrepresented + localWater.MissingSeconds + (water.ResetRequired || water.FirstMissingInput ? 1 : 0), water.SolverInvocations};
-    result[1] = {grassControls.GrassEnabled && grassControls.GrassQuality > 0 && _grass->PatchCount() > 0, GetGrassMGPUControls().Enabled,
-        grass.Version.IsValid(), grass.LocalAuthoritative || grass.Version.IsValid(), grass.AgeMs + grass.WindDebtSeconds * 1000,
-        grass.PendingSeconds + grass.WindDebtSeconds,
-        grass.MissingSeconds + (grass.ResetRequired ? 1 : 0), grass.Sequence};
-    if (!grass.Version.IsValid())
-    {
-        result[1].Ready = localGrass.Ready;
-        result[1].SourceAgeMs = localGrass.AgeMs;
-        result[1].SimulationDebtSeconds = localGrass.DebtSeconds;
-        result[1].MissingSeconds += localGrass.MissingSeconds;
-    }
-    result[0].Name = "water";
-    result[1].Name = "grass";
-    result[0].ExportBytes = water.ExportBytes; result[0].ImportBytes = water.ImportBytes;
-    result[1].ExportBytes = grass.ExportBytes; result[1].ImportBytes = grass.ImportBytes;
-    BistroQualitySearch::TechniqueMeasurement particle;
-    particle.Name = "particles";
-    particle.Active = GetParticleSettings().Enabled && GetParticleSettings().SimulationEnabled && !_resources->ParticleEmitters.empty();
-    particle.RequestedSecondary = GetParticleMGPUControls().Secondary;
-    if (const auto* route = _passes->GetParticleRoute())
-    {
-        const auto& state = route->GetDiagnostics();
-        particle.EffectiveSecondary = state.Secondary;
-        particle.Ready = state.Ready;
-        particle.SourceAgeMs = state.AgeMs;
-        particle.SimulationDebtSeconds = state.Debt;
-        particle.WaitMs = state.WaitMs;
-        particle.ExportBytes = particle.ImportBytes = state.InputBytes + state.OutputBytes;
-    }
-    else particle.Ready = !particle.RequestedSecondary;
-    result.push_back(particle);
-    const auto shadow = [&](bool sun, GDX12LocalShadowKey key, bool active, double source)
-    {
-        BistroQualitySearch::TechniqueMeasurement sample;
-        sample.Name = sun ? "sun-shadow" : "local-shadow-" + std::to_string(key.EntityId);
-        sample.Active = active;
-        sample.RequestedSecondary = ReadShadowUpdatePolicy(sun ? 0 : key.EntityId).Secondary;
-        if (const auto* routes = _passes->GetShadowRoutes())
-            for (const auto& unit : routes->GetDiagnostics())
-                if (unit.Sun == sun && (sun || unit.Light == key))
-                {
-                    source = unit.SourceTime;
-                    sample.EffectiveSecondary = unit.EffectiveSecondary;
-                    sample.ExportBytes = unit.Transfer.ExportBytes;
-                    sample.ImportBytes = unit.Transfer.ImportBytes;
-                    sample.SourceSequence = unit.Transfer.Produced;
-                }
-        sample.Ready = source > 0;
-        sample.SourceAgeMs = sample.Ready ? (std::max)(0.0, (ShadowSourceTimeSeconds() - source) * 1000) : 0;
-        result.push_back(sample);
-    };
-    shadow(true, {}, (_resources->Lighting.SunShadowFlags & 1) != 0 && _resources->ShadowQuality.SunResolution != 0,
-        _passes->SunShadow.GetDisplayedSourceTime());
-    for (const auto& light : _resources->LocalLights)
-    {
-        const auto key = GetLocalShadowKey(light);
-        shadow(false, key, (light.ShadowFlags & 1) != 0 && _resources->ShadowQuality.LocalResolution != 0,
-            _passes->LocalShadow.GetDisplayedSourceTime(key));
-    }
-    const auto& reflection = _passes->Reflections.GetStatistics();
-    const auto ready = _passes->Reflections.GetReadiness();
-    BistroQualitySearch::TechniqueMeasurement probe;
-    probe.Name = "reflection-probes";
-    probe.Active = GetReflectionSettings().Enabled && ready.second != 0;
-    probe.RequestedSecondary = reflection.RequestedSecondaryFaces != 0;
-    probe.EffectiveSecondary = reflection.EffectiveSecondaryFaces != 0;
-    probe.Ready = ready.first == ready.second;
-    probe.MissingSeconds = reflection.RequestedSecondaryFaces != reflection.EffectiveSecondaryFaces ? 1 : 0;
-    probe.FullSourceAgeMs = reflection.MaxFaceAgeSeconds * 1000;
-    probe.SourceAgeMs = reflection.AdditionalLagSeconds * 1000;
-    if (const auto* route = _passes->GetReflectionRoute())
-    {
-        const auto diagnostics = route->GetDiagnostics();
-        probe.WaitMs = diagnostics.WaitMs;
-        probe.ExportBytes = probe.ImportBytes = diagnostics.SceneBytes + diagnostics.ResultBytes;
-    }
-    result.push_back(probe);
-    for (const auto& age : _passes->Reflections.GetFaceAges())
-    {
-        auto face = probe;
-        face.Name = "reflection-" + std::to_string(age.Probe) + "-face-" + std::to_string(age.Face);
-        face.FullSourceAgeMs = age.Seconds * 1000;
-        face.WaitMs = 0;
-        face.ExportBytes = face.ImportBytes = 0;
-        result.push_back(std::move(face));
-    }
-    return result;
-}
-
-std::optional<D3D12_RESOURCE_DESC> BistroRenderPipeline::GetReflectionShadowDescription() const
-{
-    if (!_passes) return std::nullopt;
-    auto* texture = _passes->LocalShadow.GetOutput(0)->GetTexture();
-    if (!texture || !texture->IsInitialized()) return std::nullopt;
-    return texture->GetResource()->D3DResource->GetDesc();
-}
 
 bool BistroRenderPipeline::IsCollisionViewEnabled()
 {
@@ -350,91 +218,9 @@ bool BistroRenderPipeline::IsCollisionViewEnabled()
 }
 
 #ifdef _DEBUG
-void BistroRenderPipeline::DrawDebugControls(const RenderModule& render)
+void BistroRenderPipeline::DrawDebugControls(const RenderModule&)
 {
-    using namespace Engine::UI;
-    if (!DebugControlsVisible()) return;
-
-    const auto placement = [](bool secondary) { return secondary ? "secondary" : "primary"; };
-    const auto freshness = [](bool exact) { return exact ? "Exact" : "Latest"; };
-    const auto fallback = [&](std::string_view reason) -> std::string_view
-    {
-        const auto& mgpu = render.GetMGPUStatus();
-        if (!mgpu.Requested) return "MGPU disabled";
-        if (!mgpu.FallbackReason.empty()) return mgpu.FallbackReason;
-        return reason;
-    };
-    const auto line = [](std::string_view name, std::string_view requested, std::string_view effective,
-        std::string_view mode, double ageMs = -1, bool overAge = false, std::string_view reason = {})
-    {
-        std::ostringstream text;
-        text << name << " | requested " << requested << " | active " << effective << " | " << mode;
-        if (ageMs >= 0) text << " | " << std::fixed << std::setprecision(1) << ageMs << " ms";
-        if (overAge) text << " | OVER AGE";
-        if (!reason.empty()) text << " | " << reason;
-        return text.str();
-    };
-
-    const auto water = _water->GetMGPUWaterDiagnostics();
-    const auto grass = _grassRoute->GetDiagnostics();
-    const auto grassControls = GetGrassMGPUControls();
-    const auto cloud = _cloudEnvironment->GetDiagnostics();
-    using CloudRoute = CrossAdapterEnvironment::Route;
-    const auto cloudPlacement = [](CloudRoute route)
-    {
-        switch (route)
-        {
-        case CloudRoute::SecondaryCompute: return "secondary COMPUTE";
-        case CloudRoute::LocalCompute: return "primary COMPUTE";
-        default: return "primary DIRECT";
-        }
-    };
-    ConsoleModule console;
-    const bool cloudExact = !console.FindConsoleVariable(L"Render.Clouds.Latest").GetBool();
-    const bool aoRequested = IsMultiGPUAmbientOcclusionEnabled();
-    const bool aoActive = _passes->GetLastAmbientOcclusionFinalize().IsValid();
-    const auto* shadows = _passes->GetShadowRoutes();
-    using ShadowScope = GDX12ShadowSelection::Mode;
-    const auto scope = static_cast<ShadowScope>(console.FindConsoleVariable(L"Render.Shadows.MultiGPU.Selection").GetInt());
-    const bool shadowsRequested = IsMultiGPUShadowsEnabled();
-    const bool sunRequested = shadowsRequested && (scope == ShadowScope::All || scope == ShadowScope::Sun);
-    const bool localRequested = shadowsRequested && scope != ShadowScope::Sun;
-    const bool sunActive = shadows && shadows->GetTrace(GDX12ShadowAtlas::Sun);
-    const bool localActive = shadows && shadows->GetTrace(GDX12ShadowAtlas::Local);
-    const auto exactLine = [&](const char* name, bool requested, bool active)
-    {
-        return line(name, placement(requested), placement(active), "Exact", -1, false,
-            requested && !active ? fallback("No secondary receipt") : std::string_view{});
-    };
-
-    const auto* secondary = render.GetMGPUDevices().Secondary;
-    const auto uiLine = [&](const char* name, CanvasId surface)
-    {
-        const auto status = render.GetUIPlacementStatus(surface);
-        const bool active = secondary && status.ActiveAdapter == secondary->GetSubmissionAdapterId();
-        const bool exact = status.Mode == GDX12Submission::SnapshotReadMode::ExactVersion;
-        return line(name, placement(status.Requested), placement(active), freshness(exact),
-            status.Displayed.IsValid() ? status.Age.Milliseconds : -1, status.Age.OverAge, status.Fallback);
-    };
-
-    if (DebugButton(ShowCollisions ? "Show scene###CollisionView" : "Show Jolt collisions###CollisionView", {
-        exactLine("AO", aoRequested, aoActive),
-        exactLine("Sun shadows", sunRequested, sunActive),
-        exactLine("Local shadows", localRequested, localActive),
-        line("Water", placement(water.Requested), placement(water.SecondaryOwns), freshness(water.Exact),
-            water.SnapshotAgeSeconds >= 0 ? water.SnapshotAgeSeconds * 1000 : -1, water.OverAge,
-            water.Requested && !water.SecondaryOwns ? fallback(water.Status) : std::string_view(water.Status)),
-        line("Grass", placement(grassControls.Enabled), placement(grass.Version.IsValid()), freshness(grassControls.Exact),
-            grass.Version.IsValid() ? grass.AgeMs : -1, grass.OverAge,
-            grassControls.Enabled && !grass.Version.IsValid() ? fallback("No secondary field selected") : std::string_view{}),
-        line("Clouds", cloudPlacement(cloud.Requested), cloudPlacement(cloud.Effective), freshness(cloudExact),
-            cloud.DisplayedInvocation ? cloud.DisplayAge.Milliseconds : -1, cloud.DisplayAge.OverAge,
-            cloud.Requested == CloudRoute::SecondaryCompute && cloud.Effective != cloud.Requested ?
-                fallback("No secondary snapshot selected") : std::string_view{}),
-        uiLine("UI screen", CanvasId::Invalid),
-        uiLine("UI Atrium", BistroUICanvases::Atrium),
-        uiLine("UI Terrace", BistroUICanvases::Terrace)
-    }))
+    if (Engine::UI::DebugButton(ShowCollisions ? "Show scene###CollisionView" : "Show Jolt collisions###CollisionView"))
         ToggleCollisionView();
 }
 
@@ -451,11 +237,10 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& context)
     _resources = &context.Primary;
     _earlyAO = GetAmbientOcclusionExecutionPoint() == 0;
     _grass = std::make_unique<BistroGrassGeometry>(_scenes, context.Runtime);
-    _grassRoute = std::make_unique<BistroGrassRoute>();
-    _grassShadows = std::make_unique<BistroGrassShadowRoute>();
     context.Primary.GeometrySources.push_back(_grass.get());
     _water = std::make_unique<BistroWaterRendering>(_scenes);
     _posters = std::make_unique<BistroUIPosters>(context.Runtime, _scenes);
+    _clouds = std::make_unique<GDX12CloudComponent>();
     _passes = std::make_unique<CommonRenderPasses>(context.BackBuffer, GDX12WBOITTransparencyPass::DepthPartition::Near);
     _passes->Composition.SetConditionalTransparency(&_passes->Transparency);
     _passes->Composition.SetApplyOpaqueAerialPerspective(false);
@@ -469,61 +254,6 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& context)
     _passes->Setup(context);
     LinkInputs({ context.BackBuffer });
     _passes->Initialize();
-    _reflectionGrass = std::make_unique<ReflectionGrass>();
-    if (auto* route = _passes->GetReflectionRoute())
-        route->SetApplication(
-            [this](CrossAdapterWork& work)
-            {
-                const auto& state = *_reflectionGrass;
-                return state.Source ? std::vector<CrossAdapterWork::Use>{{work.Identify(state.Source, *_resources->Device),
-                    GDX12RenderGraph::Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, state.SourceVersion}} :
-                    std::vector<CrossAdapterWork::Use>{};
-            },
-            [this](GDX12DeviceResources& resources, GDX12ReflectionProbePass& capture, CrossAdapterWork& work, UINT64& copiedBytes)
-            {
-                auto& state = *_reflectionGrass;
-                state.Prepared = false;
-                if (!state.Scene || state.Scene->Patches.empty()) return std::vector<CrossAdapterWork::Use>{};
-                if (!state.Source) throw std::logic_error("Reflection grass has no corresponding field snapshot");
-                const auto bytes = state.Source->D3DResource->GetDesc().Width;
-                if (!state.Remote.Resource || state.Remote.Resource->D3DResource->GetDesc().Width != bytes)
-                    state.Remote = work.Allocate(*resources.Device, bytes);
-                copiedBytes += work.Copy(state.Channel, *_resources->Device, *resources.Device,
-                    {{work.Identify(state.Source, *_resources->Device), state.Remote, UINT_MAX, UINT_MAX, state.SourceVersion}});
-                auto snapshot = std::make_shared<GDX12GrassFieldSnapshot>(*resources.SRV_UAV_Heap,
-                    *state.Remote.Resource, state.Layout, state.Remote.Resource);
-                if (!state.Renderer) state.Renderer = std::make_unique<GDX12GrassRenderer>(&resources);
-                std::vector<GDX12GrassInstance> instances;
-                for (const auto& patch : state.Scene->Patches) instances.push_back(patch.Instance);
-                const GDX12GrassRenderer::DisplayedFields fields{snapshot, snapshot, true};
-                state.Renderer->BeginFrame(*_common, std::move(instances), state.Scene->Wind, state.Scene->Controls, {}, 0, &fields);
-                for (UINT slot = 0; slot < capture.GetGeometryViewCapacity(); ++slot)
-                    if (const auto* view = capture.GetGeometryView(slot))
-                        for (UINT patch = 0; patch < state.Renderer->PatchCount(); ++patch) state.Renderer->PrepareView(*view, patch);
-                return std::vector<CrossAdapterWork::Use>{{state.Remote, GDX12RenderGraph::Mode::Read,
-                    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE}};
-            },
-            [this](GDX12CommandList& commands, GDX12ReflectionProbePass& capture, UINT slot)
-            {
-                auto& state = *_reflectionGrass;
-                if (!state.Scene || state.Scene->Patches.empty()) return;
-                if (!state.Prepared) { state.Renderer->PrepareGPU(&commands); state.Prepared = true; }
-                const auto& view = *capture.GetGeometryView(slot);
-                for (UINT patch = 0; patch < state.Renderer->PatchCount(); ++patch)
-                {
-                    if (!state.Renderer->Expand(&commands, view, patch, true)) continue;
-                    capture.BindGeometryViewTargets(&commands, slot);
-                    auto draw = view;
-                    draw.BatchOffset = patch;
-                    draw.BatchCount = 1;
-                    std::vector<GDX12RenderBatch> batches;
-                    state.Renderer->GatherBatches(draw, batches);
-                    for (const auto& batch : batches) GDX12EmitRenderBatch(&commands, draw, batch);
-                }
-            });
-    _cloudEnvironment = std::make_unique<CrossAdapterEnvironment>(_passes->Environment, context.Primary,
-        context.Runtime.GetMGPUDevices().Secondary, context.Runtime.GetMGPURuntime());
-    _passes->UpdateAmbientOcclusionRoute(context);
     _geometryJobs.push_back(std::make_unique<GrassFramePreparationPass>(*_grass, _grassAvailable));
     _geometryJobs.push_back(std::make_unique<BistroGeometryPass>(*_resources, *_grass, _grassAvailable, _passes->Depth, 1, _posters.get()));
     _geometryJobs.push_back(std::make_unique<BistroGeometryPass>(*_resources, *_grass, _grassAvailable, _passes->Depth, 2));
@@ -536,18 +266,11 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& context)
     }
 }
 
-std::vector<Engine::UI::CanvasId> BistroRenderPipeline::GetWorldCanvasIds() const
-{
-    return { BistroUICanvases::Atrium, BistroUICanvases::Terrace };
-}
-
 void BistroRenderPipeline::ResetWorldHistory()
 {
     _passes->ResetWorldHistory();
-    _grassRoute->ResetWorld();
-    _grass->RestartLocalSolver();
+    _clouds->Reset();
     _grassAvailable = false;
-    _cloudEnvironment->CloudSource().Reset();
     if (_resources->ParticleSimulation) _resources->ParticleSimulation->SetInteractionField({});
 }
 
@@ -556,10 +279,10 @@ std::pair<size_t, size_t> BistroRenderPipeline::GetWorldProbeReadiness() const
     return _passes->Reflections.GetReadiness();
 }
 
-void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& context, Engine::UI::CrossAdapterUI* controller)
+void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& context)
 {
     const double seconds = context.Common.GameTimer ? context.Common.GameTimer->TotalTime() : 0.0;
-    _posterGraphChanged = _posters->PrepareFrame(context.Primary, context.Primary.CurrFrameConstantsIndex, seconds, controller);
+    _posterGraphChanged = _posters->PrepareFrame(context.Primary, context.Primary.CurrFrameConstantsIndex, seconds);
 }
 
 void BistroRenderPipeline::UpdateFrameSettings(RenderPipelineContext& context)
@@ -575,71 +298,30 @@ void BistroRenderPipeline::UpdateFrameSettings(RenderPipelineContext& context)
 bool BistroRenderPipeline::PrepareFrame(RenderPipelineContext& context, GDX12CommandList* commands)
 {
     bool rebuild = std::exchange(_posterGraphChanged, false);
-    const bool showCollisions = IsCollisionViewEnabled();
-    _grassShadows->CollectRetired();
-    _grassAvailable = _grassRoute->PrepareFrame(context, *_grass, !showCollisions);
     const float delta = context.Common.GameTimer ? context.Common.GameTimer->DeltaTime() : 0;
-    _water->PrepareFrame(_water->CollectScene(delta), context.Runtime.GetMGPURuntime(), context.Primary,
-        context.Runtime.GetMGPUDevices().Secondary, context.Runtime.GetFrameSubmissionId(), !showCollisions);
+    _passes->Environment.SetCloudSource(BistroClouds.GetValue() ? _clouds.get() : nullptr);
     const auto* world = _scenes->GetWorld();
-    const double cloudDelta = world && !world->IsPaused() ? delta * world->GetTimeScale() : 0.0;
+    if (BistroClouds.GetValue()) _clouds->Advance(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0.0);
+
 #ifdef _DEBUG
+    const bool showCollisions = IsCollisionViewEnabled();
     rebuild |= std::exchange(_collisionViewActive, showCollisions) != showCollisions;
-    if (showCollisions)
-    {
-        _cloudEnvironment->PrepareFrame(cloudDelta, false);
-        return rebuild;
-    }
+    if (showCollisions) return rebuild;
 #endif
     const bool early = GetAmbientOcclusionExecutionPoint() == 0;
     rebuild |= early != _earlyAO;
-    rebuild |= _passes->UpdateAmbientOcclusionRoute(context);
     _earlyAO = early;
+    _grass->CollectScene(delta);
+    _grass->PrepareFrame(context.Primary, context.Common);
+    _grassAvailable = true;
+    _water->Surface.SetInstances(_water->CollectScene(delta));
     _water->Surface.PrepareFrame();
     _water->Resolve.PrepareFrame();
     _passes->BindAmbientOcclusion(context.Common, _earlyAO);
-    rebuild |= _passes->PrepareFrame(context, commands);
-    const bool cloudSplit = _cloudEnvironment->PrepareFrame(cloudDelta);
-    rebuild |= std::exchange(_cloudSplit, cloudSplit) != cloudSplit;
+    _passes->PrepareFrame(context, commands);
     _passes->Bindings.UseAsyncCompute |= _posters->UsesAsyncCompute();
     _passes->Bindings.UseAsyncCompute |= GetFluidControls().AsyncCompute || GetGrassWindControls().AsyncCompute;
-    if (_resources->ParticleSimulation)
-        _resources->ParticleSimulation->SetInteractionField(_grassAvailable ? _grass->InteractionField() : GDX12ParticleInteractionField{});
-    if (auto* particles = _passes->GetParticleRoute())
-    {
-        const auto* displayed = _grassAvailable ? _grassRoute->GetDisplay() : nullptr;
-        particles->SetInteractionVersion(displayed ? displayed->CurrentView.Version : GDX12Submission::TransferVersion{});
-    }
-    auto& reflectionGrass = *_reflectionGrass;
-    reflectionGrass.Scene.reset();
-    reflectionGrass.Source.reset();
-    reflectionGrass.SourceVersion = {};
-    reflectionGrass.Owner.reset();
-    if (auto* route = _passes->GetReflectionRoute(); route && route->HasSecondaryWork() && _grassAvailable)
-    {
-        reflectionGrass.Scene = _grass->CaptureShadowScene(*_resources, false);
-        if (reflectionGrass.Scene && !reflectionGrass.Scene->Patches.empty())
-        {
-            if (const auto* displayed = _grassRoute->GetDisplay())
-            {
-                reflectionGrass.Layout = displayed->Fields.Current->GetLayout();
-                reflectionGrass.Source = displayed->CurrentView.Resource;
-                reflectionGrass.SourceVersion = displayed->CurrentView.Version;
-                reflectionGrass.Owner = displayed->Fields.Current;
-            }
-            else
-            {
-                const auto checkpoint = _grass->PrepareLocalCheckpoint();
-                if (!checkpoint) throw std::logic_error("Cannot capture primary grass for secondary reflections");
-                reflectionGrass.Layout = checkpoint->Layout;
-                reflectionGrass.Source = checkpoint->Packed;
-                reflectionGrass.Owner = checkpoint;
-            }
-        }
-    }
-    if (!_grassAvailable) return rebuild;
-    if (auto* shadows = _passes->GetShadowRoutes())
-        _grassShadows->PrepareFrame(context, *_grass, *_grassRoute, *shadows);
+    if (_resources->ParticleSimulation) _resources->ParticleSimulation->SetInteractionField(_grass->InteractionField());
     const auto passes = GeometryPasses();
     for (UINT i = 0; i < passes.size(); ++i)
     {
@@ -689,19 +371,13 @@ void BistroRenderPipeline::LinkInputs(const RenderPipelineGraphInputs& inputs)
 
 void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipelineGraphInputs& inputs)
 {
-    _passes->Bindings.LegacyReplacements.clear();
-    _passes->Bindings.LegacyReplacements.push_back({ nullptr, {},
-        [this](auto tail) { _water->RetireFrame(tail); }, {} });
-    _passes->Bindings.LegacyReplacements.push_back({ nullptr, {},
-        [this](auto tail) { _grassShadows->FinishFrame(); _grassRoute->RetireFrame(tail); },
-        [this](auto& commands) { _grassRoute->RecordTail(commands); } });
 #ifdef _DEBUG
     if (_collisionViewActive)
     {
         if (!_collisionPass)
         {
             auto pass = std::make_unique<BistroCollisionPass>(*_scenes);
-            pass->Setup(_resources, nullptr, _common);
+            pass->Setup(_resources, _common);
             pass->SetInputs({inputs.BackBuffer});
             pass->Initialize();
             _collisionPass = std::move(pass);
@@ -715,19 +391,8 @@ void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipel
     // Small latency-sensitive work precedes the long water solve on the single COMPUTE queue.
     const auto grassPreparation = graph.AddPass(*_geometryJobs.at(0));
     _posters->AddPasses(graph);
-    if (_posters->HasRoutes())
-        for (size_t index = 0; index < BistroUIPosters::Count; ++index)
-            p.Bindings.LegacyReplacements.push_back({ &_posters->RasterPass(index),
-                [this](const auto& boundary, auto prefix) { return _posters->SubmitReplacement(boundary, prefix); }, {}, {} });
     const auto waterSimulation = graph.AddPass(_water->Simulation);
-    graph.AddPass(*_cloudEnvironment);
-    if (_cloudSplit)
-    {
-        graph.SetLegacySplit(*_cloudEnvironment, {}, { p.Environment.GetOutput(0), p.Environment.GetOutput(1),
-            p.Environment.GetOutput(2), p.Environment.GetOutput(3) });
-        p.Bindings.LegacyReplacements.push_back({ _cloudEnvironment.get(),
-            [this](const auto& boundary, auto prefix) { return _cloudEnvironment->Submit(boundary, prefix); }, {}, {} });
-    }
+    graph.AddPass(p.Environment);
     graph.AddPass(p.Culling);
     auto geometryTail = graph.AddPass(*_geometryJobs.at(1));
     const auto addGeometry = [&](UINT index)
@@ -739,21 +404,14 @@ void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipel
     addGeometry(2);
     graph.DependsOn(geometryTail, grassPreparation);
     p.AddParticleSimulation(graph);
-    if (_earlyAO) p.AddAmbientOcclusion(graph, _earlyAO);
-    if (p.GetShadowRoutes())
-        geometryTail = _grassShadows->AddBoundary(graph, geometryTail, p.Bindings);
+    if (_earlyAO) p.AddAmbientOcclusion(graph);
     addGeometry(3);
     addGeometry(4);
-    p.AddShadowRoutes(graph, *_geometryJobs.at(3), *_geometryJobs.at(4));
     addGeometry(5);
-    p.AddReflectionRoute(graph, *_geometryJobs.at(5), {&_posters->Output(0), &_posters->Output(1)});
     addGeometry(6);
-    if (!_earlyAO) p.AddAmbientOcclusion(graph, _earlyAO);
+    if (!_earlyAO) p.AddAmbientOcclusion(graph);
     const auto waterSurface = graph.AddPass(_water->Surface);
     graph.DependsOn(waterSurface, waterSimulation);
-    graph.SetLegacyPrefixBefore(_water->Surface, [this] { return _water->WantsExactBoundary(); });
-    p.Bindings.LegacyReplacements.push_back({ &_water->Surface,
-        [this](const auto&, auto prefix) { return _water->SubmitExact(prefix); }, {}, {} });
     graph.AddPass(p.Lighting);
     const auto hdr = graph.AddPass(p.SSR);
     const auto farTransparency = graph.AddPass(_water->Transparency);

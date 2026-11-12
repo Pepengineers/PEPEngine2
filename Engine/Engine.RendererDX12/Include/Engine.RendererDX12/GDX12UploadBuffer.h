@@ -8,7 +8,6 @@
 #include "Engine.RendererDX12/GDX12Resource.h"
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
 #include <cstring>
-#include <memory>
 #include <utility>
 #include <atomic>
 #include <stdexcept>
@@ -27,7 +26,6 @@ public:
     ~GDX12UploadBuffer();
 
     GDX12Resource& GetResource();
-    std::shared_ptr<GDX12Resource> ShareResource() const { return _buffer; }
 
     void CopyData(UINT elementIndex, const T& data);
     void CopyData(UINT elementIndex, const T* data, UINT count);
@@ -61,7 +59,7 @@ private:
     void CreateBuffer();
 
     GDX12Device* _device;
-    std::shared_ptr<GDX12Resource> _buffer = std::make_shared<GDX12Resource>();
+    GDX12Resource _buffer;
     BYTE* _mappedData = nullptr;
 
     UINT _elementCount;
@@ -113,15 +111,15 @@ void GDX12UploadBuffer<T>::CreateBuffer()
     if (_bufferType == EBufferType::Default)
     {
         resourceDesc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-        _buffer->D3DResource = _device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, resourceDesc,
+        _buffer.D3DResource = _device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, resourceDesc,
             D3D12_RESOURCE_STATE_COMMON, nullptr);
     }
     else
     {
-        _buffer->D3DResource = _device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, resourceDesc,
+        _buffer.D3DResource = _device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, resourceDesc,
             D3D12_RESOURCE_STATE_GENERIC_READ, nullptr);
-        _buffer->SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
-        ThrowIfFailed(_buffer->D3DResource->Map(0, nullptr, reinterpret_cast<void**>(&_mappedData)));
+        _buffer.SetCurrentState(D3D12_RESOURCE_STATE_GENERIC_READ);
+        ThrowIfFailed(_buffer.D3DResource->Map(0, nullptr, reinterpret_cast<void**>(&_mappedData)));
         // Reused heap regions need the same initial contents as fresh committed upload buffers.
         std::memset(_mappedData, 0, _totalBufferSize);
     }
@@ -130,9 +128,9 @@ void GDX12UploadBuffer<T>::CreateBuffer()
 template<typename T>
 GDX12UploadBuffer<T>::~GDX12UploadBuffer()
 {
-    if (_buffer->D3DResource && _mappedData)
+    if (_buffer.D3DResource && _mappedData)
     {
-        _buffer->D3DResource->Unmap(0, nullptr);
+        _buffer.D3DResource->Unmap(0, nullptr);
         _mappedData = nullptr;
     }
 }
@@ -155,7 +153,7 @@ void GDX12UploadBuffer<T>::CreateSRV(GDX12DescriptorHeap* inHeap, UINT HeapIndex
     srvDesc.Buffer.NumElements = _elementCount;
     srvDesc.Buffer.StructureByteStride = sizeof(T);
 
-    _srv->InitAsSRV(_buffer->D3DResource.Get(), &srvDesc, inHeap, HeapIndex);
+    _srv->InitAsSRV(_buffer.D3DResource.Get(), &srvDesc, inHeap, HeapIndex);
 }
 
 template<typename T>
@@ -183,7 +181,7 @@ void GDX12UploadBuffer<T>::CreateUAV(GDX12DescriptorHeap* inHeap, UINT HeapIndex
     uavDesc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_NONE;
     uavDesc.Format = DXGI_FORMAT_UNKNOWN;
 
-    _uav->InitAsUAV(_buffer->D3DResource.Get(), nullptr, &uavDesc, inHeap, HeapIndex);
+    _uav->InitAsUAV(_buffer.D3DResource.Get(), nullptr, &uavDesc, inHeap, HeapIndex);
 }
 
 template<typename T>
@@ -195,13 +193,13 @@ GDX12Descriptor* GDX12UploadBuffer<T>::GetUAV()
 template<typename T>
 GDX12Resource& GDX12UploadBuffer<T>::GetResource()
 {
-    return *_buffer;
+    return _buffer;
 }
 
 template<typename T>
 void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T& data)
 {
-    if (!_buffer->D3DResource) return;
+    if (!_buffer.D3DResource) return;
     if (elementIndex >= _elementCount) return;
     CopyData(elementIndex, &data, 1);
 }
@@ -209,7 +207,7 @@ void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T& data)
 template<typename T>
 void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T* data, UINT count)
 {
-    if (!_buffer->D3DResource) return;
+    if (!_buffer.D3DResource) return;
     if (elementIndex > _elementCount || count > _elementCount - elementIndex) return;
 
     if (_bufferType == EBufferType::Upload && _mappedData)
@@ -260,6 +258,6 @@ UINT GDX12UploadBuffer<T>::GetElementSize()
 template<typename T>
 D3D12_GPU_VIRTUAL_ADDRESS GDX12UploadBuffer<T>::GetElementAddress(UINT elementIndex)
 {
-    if (!_buffer->D3DResource) return 0;
-    return _buffer->D3DResource->GetGPUVirtualAddress() + elementIndex * _elementByteSize;
+    if (!_buffer.D3DResource) return 0;
+    return _buffer.D3DResource->GetGPUVirtualAddress() + elementIndex * _elementByteSize;
 }

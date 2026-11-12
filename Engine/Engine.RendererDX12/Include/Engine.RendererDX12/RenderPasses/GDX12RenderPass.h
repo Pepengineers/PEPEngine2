@@ -27,7 +27,6 @@ enum ERenderPassFlags : std::uint16_t
     RENDER_PASS_FLAG_USE_INSTANCES = 1 << 4,
     RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION = 1 << 5,
     RENDER_PASS_FLAG_UPSCALER = 1 << 6,
-    RENDER_PASS_FLAG_SYNC_DEVICES = 1 << 7,
     RENDER_PASS_FLAG_USE_JITTER = 1 << 8,
     RENDER_PASS_FLAG_USE_STREAMLINE = 1 << 9
 };
@@ -38,12 +37,11 @@ class GDX12RenderPass
 {
 public:
     GDX12RenderPass() : _flags(RENDER_PASS_FLAG_NONE), _resources(nullptr), 
-        _otherResources(nullptr), _commonData(nullptr), _numInputs(0), _numOutputs(0) {}
+        _commonData(nullptr), _numInputs(0), _numOutputs(0) {}
     virtual ~GDX12RenderPass() = default;
-    virtual void Setup(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData)
+    virtual void Setup(GDX12DeviceResources* initOnResources, RenderPipelineCommonData* commonData)
     {
         _resources = initOnResources;
-        _otherResources = otherResources;
         _commonData = commonData;
     };
     virtual void Resize() {};
@@ -52,11 +50,6 @@ public:
     // Persistent buffers may be replaced during BeginFrame, so declare their physical accesses each frame.
     virtual std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const { return {}; }
     virtual bool IsAsyncComputeEnabled() const { return true; }
-    // Explicit placement must opt into command-list types this pass can record.
-    virtual bool SupportsGraphQueue(GDX12Submission::QueueKind queue) const
-    { return queue == GDX12Submission::QueueKind::Direct; }
-    // Record only declared resources, preserving the executor's entry states until release.
-    virtual void RecordPlacedCommands(GDX12CommandList*, const GDX12RenderGraph::BoundResources&);
     // Used by upscalers to determine downscaled render target size
     // And share it with all other passes
     virtual void QueryRenderTargetResolution() {};
@@ -118,9 +111,7 @@ protected:
 
     // These are the resources the pass was initialized on
     GDX12DeviceResources* _resources;
-    // These are the other resources, that might be needed in mGPU passes
     // Might be null
-    GDX12DeviceResources* _otherResources;
 
     std::vector<IRenderPassLink*> _inputs;
     std::vector<IRenderPassLink*> _outputs;

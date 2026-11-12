@@ -33,23 +33,6 @@ public:
     void Initialize() override;
     void Prepare();
     void ResetHistory();
-    void OnSubmitted(GDX12Submission::CompletionPoint point);
-    void EnableSecondaryCapture(bool enabled) { _secondaryCapture = enabled; }
-    const std::vector<GDX12ReflectionSchedule::Work>& ScheduledWork() const { return _scheduledWork; }
-    double FrameSourceTime() const { return _frameSourceTime; }
-    void SetRemoteWork(std::vector<GDX12ReflectionSchedule::Work> work, double sourceTime)
-    { _remoteWork = std::move(work); _remoteSourceTime = sourceTime; }
-    struct FacePayload { GDX12Texture* Texture; UINT Subresource; double SourceTime; };
-    FacePayload RawFace(UINT probe, UINT face);
-    GDX12Texture& PublishedTexture() { return _published; }
-    GDX12Texture* CaptureLocalShadows() { return _inputs[4]->GetTexture(); }
-    UINT PublishedMips() const { return _publishedMips; }
-    bool PublishedThisFrame(UINT probe) const { return _probes.at(probe).LastUpdate == _frameNumber; }
-    const std::array<double, 6>& PublishedSourceTimes(UINT probe) const { return _probes.at(probe).PublishedTimes; }
-    void ImportFace(UINT probe, UINT face, double sourceTime);
-    void ImportPublished(UINT probe, const std::array<double, 6>& sourceTimes);
-    bool CanImportPublished(UINT probe, const std::array<double, 6>& times) const
-    { return _probes.at(probe).CapturedFaces == 63 && _probes.at(probe).SourceTimes == times; }
     UINT GetGeometryViewCapacity() const override { return static_cast<UINT>(_views.size()); }
     const GDX12GeometryContext* GetGeometryView(UINT slot) const override;
     void BeginGeometry(GDX12CommandList* commands) override;
@@ -64,14 +47,9 @@ public:
         UINT BakedFaces = 0;
         UINT PublishedProbes = 0;
         uint64_t TextureBytes = 0;
-        double MaxFaceAgeSeconds = 0;
-        double AdditionalLagSeconds = 0;
-        UINT RequestedSecondaryFaces = 0, EffectiveSecondaryFaces = 0;
     };
-    const Statistics& GetStatistics() { if (_resources) PollPublications(); return _statistics; }
+    const Statistics& GetStatistics() const { return _statistics; }
     std::pair<size_t, size_t> GetReadiness();
-    struct FaceAge { uint64_t Probe; UINT Face; double Seconds; };
-    std::vector<FaceAge> GetFaceAges() const;
 
 private:
     enum Geometry : std::uint8_t { AllGeometry, StaticGeometry, DynamicGeometry };
@@ -84,10 +62,7 @@ private:
         uint64_t LastUpdate = 0;
         bool Ready = false;
         UINT CapturedFaces = 0, NextFace = 0;
-        bool RebakePending = false, PublicationRecorded = false;
-        uint64_t Epoch = 0;
-        std::array<double, 6> SourceTimes{}, PublishedTimes{};
-        GDX12ReflectionSchedule::PublicationClock Clock;
+        bool RebakePending = false;
         std::unique_ptr<GDX12Texture> Raw;
         std::vector<std::unique_ptr<GDX12Descriptor>> RawRTVs, RawMipSRVs;
         std::unique_ptr<GDX12Texture> BakedColor, BakedDepth;
@@ -112,8 +87,6 @@ private:
         bool Selected = false;
     };
 
-    void PollPublications();
-    void UpdateAgeStatistics();
     void CreatePublishedTexture(UINT count, UINT resolution);
     void CreateCaptureTextures(UINT resolution);
     void SelectProbe(UINT probe);
@@ -127,14 +100,6 @@ private:
     void FilterAndPublish(GDX12CommandList* commands, UINT probe);
     void WriteProbeData(GDX12CommandList* commands, bool enabled);
 
-    struct PendingPublication
-    {
-        UINT Probe;
-        uint64_t Epoch;
-        std::array<double, 6> Sources;
-        GDX12Submission::CompletionPoint Completion;
-    };
-    std::deque<PendingPublication> _publications;
     std::vector<ProbeState> _probes;
     std::vector<FrameData> _frames;
     std::unique_ptr<GDX12RootSignature> _captureRoot, _cullRoot, _filterRoot;
@@ -157,7 +122,6 @@ private:
     UINT _captureTextureResolution = 0;
     UINT _publishedResolution = 0;
     UINT _publishedMips = 0;
-    double _frameSourceTime = 0;
     bool _enabled = false;
     std::vector<PreparedView> _views;
     GDX12ReflectionSchedule::Scheduler _scheduler;
@@ -165,8 +129,4 @@ private:
     bool _capturePlanned = false;
     bool _staticShadowsPlanned = false;
     bool _publishedNeedsTransition = false;
-    bool _secondaryCapture = false;
-    double _remoteSourceTime = 0;
-    std::optional<std::vector<GDX12ReflectionSchedule::Work>> _remoteWork;
-    std::vector<GDX12ReflectionSchedule::Work> _scheduledWork;
 };

@@ -97,9 +97,6 @@
     <ClInclude Include="src\Rendering\Water\GDX12FluidPass.h" />
     <ClCompile Include="src\Rendering\Water\GDX12FluidPass.cpp" />
     <ClInclude Include="src\Rendering\Water\BistroWaterRendering.h" />
-    <ClCompile Include="src\Rendering\Water\CrossAdapterWater.cpp" />
-    <ClInclude Include="src\Rendering\Water\CrossAdapterWater.h" />
-    <ClInclude Include="src\Rendering\Water\GDX12FluidClock.h" />
     <ClInclude Include="src\Rendering\Water\GDX12FluidSolver.h" />
     <ClCompile Include="src\Rendering\Water\BistroWaterRendering.cpp" />
     <ClInclude Include="src\Components\FluidRenderComponent.h" />
@@ -124,15 +121,6 @@
     <None Include="Shaders\WindField.hlsl" />
     <ClCompile Include="src\Rendering\Grass\BistroGrassGeometry.cpp" />
     <ClInclude Include="src\Rendering\Grass\BistroGrassGeometry.h" />
-    <ClCompile Include="src\Rendering\Grass\BistroGrassRoute.cpp" />
-    <ClInclude Include="src\Rendering\Grass\BistroGrassRoute.h" />
-    <ClCompile Include="src\Rendering\Grass\BistroGrassShadowReplica.cpp" />
-    <ClInclude Include="src\Rendering\Grass\BistroGrassShadowReplica.h" />
-    <ClCompile Include="src\Rendering\Grass\BistroGrassShadowRoute.cpp" />
-    <ClInclude Include="src\Rendering\Grass\BistroGrassShadowRoute.h" />
-    <ClCompile Include="src\Rendering\Grass\CrossAdapterGrass.cpp" />
-    <ClInclude Include="src\Rendering\Grass\CrossAdapterGrass.h" />
-    <ClInclude Include="src\Rendering\Grass\GDX12GrassFieldProducer.h" />
     <ClInclude Include="src\Components\BistroGrassComponents.h" />
     <ClInclude Include="src\Systems\FlyingPropSystem.h" />
     <ClInclude Include="src\Components\FlyingPropComponent.h" />

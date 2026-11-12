@@ -8,7 +8,7 @@ using namespace ParticleResources;
 GDX12ParticleSimulation::State::State(GDX12DeviceResources* resources)
 {
     Root = CreateRoot(resources);
-    for (const auto* entry : { "InitializePool", "PrepareSimulation", "Simulate", "PrepareSpawn", "Spawn", "PublishAlive", "ApplyDisplayHistory" })
+    for (const auto* entry : { "InitializePool", "PrepareSimulation", "Simulate", "PrepareSpawn", "Spawn", "PublishAlive" })
         Compute[entry] = GDX12RenderHelpers::CreateComputePipeline(resources->Device, Root.get(),
             SHADERS_FOLDER "ParticleSimulation.hlsl", entry);
     D3D12_INDIRECT_ARGUMENT_DESC argument = {};
@@ -36,12 +36,10 @@ std::vector<GDX12Resource*> GDX12ParticleSimulation::GetPoolResources() const
     return result;
 }
 
-void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common,
-    const GDX12ParticleSettings* capturedSettings)
+void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common)
 {
     resources->ParticleMotion = nullptr;
-    if (_state) _state->DisplayHistoryApplied = false;
-    const auto global = capturedSettings ? *capturedSettings : GetParticleSettings();
+    const auto global = GetParticleSettings();
     if (resources->ParticleEmitters.empty())
     {
         if (_state)
@@ -152,7 +150,7 @@ void GDX12ParticleSimulation::InitializePools(GDX12CommandList* commands, GDX12D
 }
 
 void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,
-    RenderPipelineCommonData& common, GDX12Texture* depth, D3D12_GPU_VIRTUAL_ADDRESS camera, bool preserveTime)
+    RenderPipelineCommonData& common, GDX12Texture* depth)
 {
     if (!_state || !_state->Active) return;
     auto& state = *_state;
@@ -162,8 +160,7 @@ void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceRes
     commands->ResourceBarrier({depth->GetResource()->GetNonPixelShaderResourceBarrier()});
     commands->SetComputeSRV(3, depth->GetSRV()->GPUHandle);
     auto& frame = resources->FrameConstants[resources->CurrFrameConstantsIndex];
-    commands->SetComputeRootConstantBufferView(1, camera ? camera :
-        frame->CameraCB->GetElementAddress(common.ActiveCameraCBufferIndex));
+    commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(common.ActiveCameraCBufferIndex));
     for (const auto& emitter : state.Emitters)
     {
         if (emitter.Paused) continue;
@@ -171,7 +168,7 @@ void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceRes
         const uint64_t pending = emitter.BurstTotal >= pool.BurstTotal ? emitter.BurstTotal - pool.BurstTotal : 0;
         const UINT burst = static_cast<UINT>((std::min)(pending, uint64_t(emitter.MaxParticles)));
         pool.BurstTotal = emitter.BurstTotal;
-        auto constants = MakeConstants(emitter, depth->GetWidth(), depth->GetHeight(), preserveTime);
+        auto constants = MakeConstants(emitter, depth->GetWidth(), depth->GetHeight());
         if (emitter.InteractionEnabled && _interaction.Resource)
         {
             constants.InteractionArea = _interaction.Area;
@@ -226,100 +223,4 @@ void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceRes
             pool.Alive[pool.ReadIndex ^ 1]->GetResource().GetNonPixelShaderResourceBarrier() });
         pool.ReadIndex ^= 1;
     }
-}
-
-GDX12ParticleSimulation::Checkpoint GDX12ParticleSimulation::CaptureCheckpoint() const
-{
-    Checkpoint result;
-    if (!_state) return result;
-    result.Emitters = _state->Emitters;
-    result.Active = _state->Active;
-    result.ResetMotion = _state->ResetMotion;
-    result.Capacity = _state->Capacity;
-    for (const auto& emitter : result.Emitters)
-    {
-        const auto& pool = *_state->Pools.at(emitter.Id);
-        result.Pools.push_back({pool.Capacity, pool.ReadIndex, pool.ResetRevision, pool.BurstTotal,
-            pool.Initialized, {pool.Particles->ShareResource(), pool.Alive[0]->ShareResource(),
-                pool.Alive[1]->ShareResource(), pool.Dead->ShareResource(), pool.Counters->ShareResource(),
-                pool.Args->ShareResource()}});
-        for (const auto& buffer : result.Pools.back().Buffers) result.Bytes += buffer->D3DResource->GetDesc().Width;
-    }
-    return result;
-}
-
-std::vector<std::shared_ptr<GDX12Resource>> GDX12ParticleSimulation::GetConstantResources(UINT frame) const
-{
-    std::vector<std::shared_ptr<GDX12Resource>> result;
-    if (_state)
-        for (const auto& emitter : _state->Emitters)
-            result.push_back(_state->Pools.at(emitter.Id)->Constants.at(frame)->ShareResource());
-    return result;
-}
-
-void GDX12ParticleSimulation::RestoreCheckpointMetadata(const Checkpoint& checkpoint)
-{
-    if (!_state || checkpoint.Emitters.size() != checkpoint.Pools.size() ||
-        checkpoint.Pools.size() != _state->Pools.size() || checkpoint.Capacity != _state->Capacity)
-        throw std::invalid_argument("Particle checkpoint layout differs from the current pools");
-    for (size_t i = 0; i < checkpoint.Pools.size(); ++i)
-    {
-        const auto& source = checkpoint.Pools[i];
-        const auto found = _state->Pools.find(checkpoint.Emitters[i].Id);
-        if (found == _state->Pools.end() || source.Capacity != found->second->Capacity || source.ReadIndex > 1 ||
-            source.ResetRevision != checkpoint.Emitters[i].ResetRevision)
-            throw std::invalid_argument("Particle checkpoint emitter identity or reset revision differs");
-    }
-    _state->Active = checkpoint.Active;
-    _state->ResetMotion = checkpoint.ResetMotion;
-    _state->Emitters = checkpoint.Emitters;
-    for (size_t i = 0; i < checkpoint.Pools.size(); ++i)
-    {
-        const auto& source = checkpoint.Pools[i];
-        auto& pool = *_state->Pools.at(checkpoint.Emitters[i].Id);
-        pool.ReadIndex = source.ReadIndex;
-        pool.ResetRevision = source.ResetRevision;
-        pool.BurstTotal = source.BurstTotal;
-        pool.Initialized = source.Initialized;
-    }
-}
-
-void GDX12ParticleSimulation::RecordCheckpoint(GDX12CommandList& commands, const Checkpoint& checkpoint,
-    GDX12Resource& payload, bool restore)
-{
-    if (!payload.D3DResource || payload.D3DResource->GetDesc().Dimension != D3D12_RESOURCE_DIMENSION_BUFFER ||
-        payload.D3DResource->GetDesc().Width < checkpoint.Bytes)
-        throw std::invalid_argument("Particle checkpoint payload is too small");
-    commands.ResourceBarrier({payload.GetTransitionBarrier(restore ? D3D12_RESOURCE_STATE_COPY_SOURCE :
-        D3D12_RESOURCE_STATE_COPY_DEST)});
-    UINT64 offset = 0;
-    for (const auto& pool : checkpoint.Pools)
-        for (const auto& buffer : pool.Buffers)
-        {
-            const auto bytes = buffer->D3DResource->GetDesc().Width;
-            commands.ResourceBarrier({buffer->GetTransitionBarrier(restore ? D3D12_RESOURCE_STATE_COPY_DEST :
-                D3D12_RESOURCE_STATE_COPY_SOURCE)});
-            if (restore) commands.GetCommandList()->CopyBufferRegion(buffer->D3DResource.Get(), 0,
-                payload.D3DResource.Get(), offset, bytes);
-            else commands.GetCommandList()->CopyBufferRegion(payload.D3DResource.Get(), offset,
-                buffer->D3DResource.Get(), 0, bytes);
-            offset += bytes;
-        }
-}
-
-void GDX12ParticleSimulation::RecordDisplayHistory(GDX12CommandList& commands, GDX12DeviceResources& resources,
-    uint64_t emitter, D3D12_GPU_DESCRIPTOR_HANDLE previous, bool valid)
-{
-    auto& pool = *_state->Pools.at(emitter);
-    commands.SetComputeRootSignature(_state->Root.get());
-    commands.SetDescriptorHeaps({resources.SRV_UAV_Heap.get()});
-    const UINT parameters[] = {pool.Capacity, 0, _state->Capacity, valid ? 1u : 0u};
-    commands.GetCommandList()->SetComputeRoot32BitConstants(0, 4, parameters, 0);
-    UAV(&commands, *pool.Particles);
-    commands.SetComputeUAV(0, pool.Particles->GetUAV()->GPUHandle);
-    commands.SetComputeSRV(2, previous);
-    commands.SetPipelineState(_state->Compute.at("ApplyDisplayHistory"));
-    commands.Dispatch((pool.Capacity + 255) / 256, 1, 1);
-    UAV(&commands, *pool.Particles);
-    _state->DisplayHistoryApplied = true;
 }

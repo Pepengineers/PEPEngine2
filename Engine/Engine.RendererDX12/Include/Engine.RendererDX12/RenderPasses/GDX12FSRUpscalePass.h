@@ -50,9 +50,9 @@ public:
 
 	}
 
-	void Setup(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData) override
+	void Setup(GDX12DeviceResources* initOnResources, RenderPipelineCommonData* commonData) override
 	{
-		GDX12RenderPass::Setup(initOnResources, otherResources, commonData);
+		GDX12RenderPass::Setup(initOnResources, commonData);
 
 		BuildFSRContext();
 		QueryRenderTargetResolution();

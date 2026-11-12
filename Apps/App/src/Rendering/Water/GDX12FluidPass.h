@@ -2,22 +2,6 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Rendering/Water/GDX12FluidSolver.h"
 #include <map>
-#include <chrono>
-#include <optional>
-
-struct GDX12FluidDisplay
-{
-    struct View
-    {
-        std::shared_ptr<GDX12Resource> Resource;
-        D3D12_GPU_DESCRIPTOR_HANDLE SRV{};
-    };
-    View Current, Previous;
-    GDX12FluidSettings Settings;
-    Matrix Transform = Matrix::Identity, PreviousTransform = Matrix::Identity;
-    UINT Count = 0;
-    bool HistoryValid = false;
-};
 
 class GDX12FluidSurfacePass final : public GDX12RenderPass
 {
@@ -41,11 +25,8 @@ public:
     void Initialize() override;
     void Execute(GDX12CommandList* commands) override;
     void SetInstances(std::vector<GDX12FluidInstance> instances);
-    void SetRoutedDisplay(std::uint64_t owner, std::optional<GDX12FluidDisplay> display);
     void PrepareFrame();
     void ExecuteSimulation(GDX12CommandList* commands);
-    struct LocalSimulationStatus { double DebtSeconds = 0, MissingSeconds = 0, AgeMs = 0; bool Active = false; };
-    LocalSimulationStatus GetLocalSimulationStatus() const;
     std::vector<GDX12RenderGraph::BufferAccess> GetSimulationBufferAccesses() const;
     std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override;
     std::vector<GDX12RenderGraph::BufferAccess> GetResolveBufferAccesses() const;
@@ -72,15 +53,12 @@ private:
     void ReleaseTargets();
     void PrepareStates();
     void DrawSurface(GDX12CommandList* commands, const ParticleView& particles,
-        const GDX12FluidDisplay::View* previous, D3D12_GPU_VIRTUAL_ADDRESS constants, UINT owner,
+        D3D12_GPU_VIRTUAL_ADDRESS constants, UINT owner,
         const GDX12FluidSettings& settings);
     void SurfaceBindings(GDX12CommandList* commands, D3D12_GPU_VIRTUAL_ADDRESS constants, UINT owner, UINT mode = 0);
     Link _depthLink, _motionLink, _geometryLink, _ownerLink;
     std::vector<GDX12FluidInstance> _instances;
-    std::chrono::steady_clock::time_point _frameStarted{};
     std::map<uint64_t, std::unique_ptr<State>> _states;
-    std::uint64_t _routedOwner = 0;
-    std::optional<GDX12FluidDisplay> _routedDisplay;
     GDX12FluidSolver _solver;
     std::unique_ptr<GDX12RootSignature> _surfaceRoot;
     ComPtr<ID3D12PipelineState> _sphere, _thicknessDraw, _initialize, _filter, _merge, _resolve;

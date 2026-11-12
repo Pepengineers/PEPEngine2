@@ -16,7 +16,7 @@ public:
 
     GDX12ReconstructionPass();
     ~GDX12ReconstructionPass() override;
-    void Setup(GDX12DeviceResources*, GDX12DeviceResources*, RenderPipelineCommonData*) override;
+    void Setup(GDX12DeviceResources*, RenderPipelineCommonData*) override;
     void Initialize() override;
     void Execute(GDX12CommandList*) override;
     void Resize() override;

@@ -2,7 +2,6 @@
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
 #include "Engine.RendererDX12/GDX12RenderGraph.h"
-#include "Engine.RendererDX12/GDX12UploadBuffer.h"
 #include <limits>
 #include <stdexcept>
 #include <algorithm>
@@ -24,7 +23,6 @@ struct GDX12CaptureLighting
     GDX12Texture* BRDF = nullptr;
     GDX12Texture* LocalShadows = nullptr;
     D3D12_GPU_VIRTUAL_ADDRESS ShadowConstants = 0;
-    GDX12UploadBuffer<GDX12LocalLightConstants>* LocalLights = nullptr;
 };
 
 struct GDX12GeometryContext

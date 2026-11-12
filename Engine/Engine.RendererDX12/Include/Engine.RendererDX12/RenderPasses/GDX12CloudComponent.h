@@ -37,7 +37,7 @@ class GDX12CloudComponent final : public GDX12RenderPass
 {
 public:
     GDX12CloudComponent();
-    void Setup(GDX12DeviceResources* resources, GDX12DeviceResources* other, RenderPipelineCommonData* common) override;
+    void Setup(GDX12DeviceResources* resources, RenderPipelineCommonData* common) override;
     void SetParameters(const GDX12CloudParameters& parameters);
     const GDX12CloudParameters& GetParameters() const { return _parameters; }
     void Advance(double simulationDeltaSeconds); // Pass zero while paused; once per simulation tick.

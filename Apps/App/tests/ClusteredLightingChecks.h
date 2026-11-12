@@ -168,7 +168,7 @@ static void CheckClusteredLighting(GDX12DeviceResources& resources, RenderPipeli
         for (UINT i = 0; i < 5; ++i) inputs[i] = &gbuffer[i];
         inputs[11] = &gbuffer[5];
         GDX12DeferredLightingPass clustered;
-        clustered.Setup(&resources, nullptr, &common);
+        clustered.Setup(&resources, &common);
         clustered.SetInputs(inputs);
         clustered.Initialize();
         GDX12RenderGraph graph(&device);

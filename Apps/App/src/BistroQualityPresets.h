@@ -2,18 +2,12 @@
 
 #include "BistroQualitySearch.h"
 #include "Common/ConsoleVariables.h"
-#include "Engine.RendererDX12/GDX12LocalLights.h"
 #include <array>
 #include <iterator>
 
 namespace BistroQuality
 {
-    inline constexpr int SchemaVersion = 3;
-    inline constexpr unsigned ScenarioVersion = 1, WorldSeed = 12345, ProbeSeed = 0xB1572;
-    inline AutoConsoleVariable<unsigned> SavedSchema(L"App.Quality.Schema", 0, L"Saved benchmark profile schema; 0 is a legacy profile.");
-    inline AutoConsoleVariable<unsigned> SavedScenario(L"App.Quality.Scenario", 0, L"Bistro exterior flight scenario version.");
-    inline AutoConsoleVariable<unsigned> SavedWorldSeed(L"App.Quality.WorldSeed", 0, L"Saved fixed benchmark world seed.");
-    inline AutoConsoleVariable<unsigned> SavedProbeSeed(L"App.Quality.ProbeSeed", 0, L"Saved fixed nested probe seed.");
+    inline constexpr int SchemaVersion = 1;
     inline constexpr const char* TierNames[] = {"Off", "Low", "Medium", "High", "Epic"};
 
     inline AutoConsoleVariable<int> OutputWidth(L"App.Quality.OutputWidth", 0,
@@ -22,15 +16,6 @@ namespace BistroQuality
     inline AutoConsoleVariable<int> OutputHeight(L"App.Quality.OutputHeight", 0,
         L"Saved Bistro client height. 0 uses the startup size.", EConsoleVariableFlags::Default,
         [](int value) { return value >= 0 && value <= 16384; });
-    inline AutoConsoleVariable<bool> MGPUProfile(L"App.Quality.MGPU.Enabled", false,
-        L"This benchmark profile includes explicit placement and freshness policy.");
-    inline AutoConsoleVariable<uint64_t> PrimaryLuid(L"App.Quality.MGPU.PrimaryLuid", 0,
-        L"Primary adapter used to validate the saved profile; 0 is an older unbound profile.");
-    inline AutoConsoleVariable<uint64_t> SecondaryLuid(L"App.Quality.MGPU.SecondaryLuid", 0,
-        L"Secondary adapter used to validate the saved profile; 0 is an older unbound profile.");
-    inline AutoConsoleVariable<int> TargetProfile(L"App.Quality.TargetProfile", 0,
-        L"Freshness target: 0 Performance (60 FPS), 1 Quality (30 FPS).", EConsoleVariableFlags::Default,
-        [](int value) { return value == 0 || value == 1; });
 
     using BistroQualitySearch::Axis;
     using BistroQualitySearch::Candidate;
@@ -214,8 +199,7 @@ namespace BistroQuality
         return axes;
     }
 
-    inline ConsoleVariablePatch ProfilePatch(const std::vector<const Technique*>& techniques, const Candidate& candidate,
-        BistroQualitySearch::Profile profile = BistroQualitySearch::Profile::Performance)
+    inline ConsoleVariablePatch ProfilePatch(const std::vector<const Technique*>& techniques, const Candidate& candidate)
     {
         if (candidate.Tiers.size() != techniques.size()) throw std::invalid_argument("Invalid Bistro quality candidate");
         ConsoleVariablePatch patch{
@@ -228,101 +212,6 @@ namespace BistroQuality
             auto fields = Preset(*techniques[i], candidate.Tiers[i]);
             patch.insert(patch.end(), std::make_move_iterator(fields.begin()), std::make_move_iterator(fields.end()));
         }
-        if (candidate.MGPU.Enabled)
-        {
-            patch.erase(std::remove_if(patch.begin(), patch.end(), [](const auto& value)
-                { return value.first == L"App.ReflectionProbes.Resolution" || value.first == L"App.ReflectionProbes.PrefilterSamples"; }), patch.end());
-            patch.insert(patch.end(), {
-                {L"App.Quality.Schema", std::to_string(SchemaVersion)},
-                {L"App.Quality.Scenario", std::to_string(ScenarioVersion)},
-                {L"App.Quality.WorldSeed", std::to_string(WorldSeed)},
-                {L"App.Quality.ProbeSeed", std::to_string(ProbeSeed)},
-                {L"App.Quality.MGPU.Enabled", "true"},
-                {L"App.Quality.MGPU.PrimaryLuid", std::to_string(candidate.MGPU.Primary)},
-                {L"App.Quality.MGPU.SecondaryLuid", std::to_string(candidate.MGPU.Secondary)},
-                {L"App.Quality.TargetProfile", profile == BistroQualitySearch::Profile::Performance ? "0" : "1"},
-                {L"Render.AO.MultiGPU", "false"}, {L"Render.Clouds.MultiGPU", "false"},
-                {L"Render.UI.Offload", "false"}, {L"Render.Shadows.MultiGPU", "true"},
-                {L"Render.Shadows.Policy.Enabled", "true"}
-            });
-            for (const auto& [prefix, route] : {
-                std::pair{L"Render.Fluid", candidate.MGPU.Water}, std::pair{L"Render.Grass", candidate.MGPU.Grass}})
-            {
-                const std::wstring key(prefix);
-                patch.emplace_back(key + L".MultiGPU", route.Secondary ? "true" : "false");
-                patch.emplace_back(key + L".MultiGPU.Exact", route.Exact ? "true" : "false");
-                patch.emplace_back(key + L".MultiGPU.UpdateHz", std::to_string(route.UpdateHz));
-                patch.emplace_back(key + L".MultiGPU.MaxAgeMs", std::to_string(BistroQualitySearch::FreshnessBudgetMs(profile)));
-                patch.emplace_back(key + L".UpdateHz", std::to_string(route.UpdateHz));
-            }
-            const auto shadow = [&](const std::wstring& prefix, const BistroQualitySearch::ScheduledRoute& route)
-            {
-                patch.emplace_back(prefix + L".Secondary", route.Secondary ? "true" : "false");
-                patch.emplace_back(prefix + L".Latest", route.Exact ? "false" : "true");
-                patch.emplace_back(prefix + L".Interval", std::to_string(route.Interval));
-            };
-            shadow(L"Render.Shadows.Policy.Sun", candidate.MGPU.Sun);
-            for (const auto& light : candidate.MGPU.LocalShadows)
-                shadow(L"Render.Shadows.Policy.Local." + std::to_wstring(light.Entity), light.Route);
-            const auto& particles = candidate.MGPU.Particles;
-            patch.insert(patch.end(), {
-                {L"Render.Particles.Scheduled", "true"},
-                {L"Render.Particles.MultiGPU", particles.Secondary ? "true" : "false"},
-                {L"Render.Particles.Exact", particles.Exact ? "true" : "false"},
-                {L"Render.Particles.UpdateEveryNFrames", std::to_string(particles.Interval)},
-                {L"Render.Particles.MaxAgeMs", std::to_string(BistroQualitySearch::FreshnessBudgetMs(profile))}
-            });
-            const auto& reflections = candidate.MGPU.Reflections;
-            patch.insert(patch.end(), {
-                {L"App.ReflectionProbes.Count", std::to_string(reflections.Count)},
-                {L"App.ReflectionProbes.Resolution", std::to_string(reflections.Resolution)},
-                {L"App.ReflectionProbes.PrefilterSamples", std::to_string(reflections.FilterSamples)},
-                {L"App.ReflectionProbes.Implementation", std::to_string(reflections.Implementation)},
-                {L"Render.Reflection.Schedule.Enabled", "true"},
-                {L"Render.Reflection.Schedule", std::to_string(reflections.Schedule)},
-                {L"Render.Reflection.FullUpdateDistanceMetres", std::to_string(reflections.DistanceMetres)},
-                {L"Render.Reflection.Placement", std::to_string(reflections.Placement)}
-            });
-            for (size_t probe = 0; probe < reflections.SecondaryFaces.size(); ++probe)
-                patch.emplace_back(L"App.ReflectionProbes.SecondaryFaces" + std::to_wstring(probe),
-                    std::to_string(reflections.SecondaryFaces[probe]));
-        }
         return patch;
-    }
-
-    inline void RegisterProfileShadowVariables(const ConsoleVariablePatch& patch)
-    {
-        constexpr std::wstring_view prefix = L"Render.Shadows.Policy.Local.";
-        std::vector<GDX12LocalLightConstants> lights;
-        for (const auto& [key, value] : patch)
-        {
-            if (key.compare(0, prefix.size(), prefix) != 0) continue;
-            const auto dot = key.find(L'.', prefix.size());
-            if (dot == std::wstring::npos) throw std::invalid_argument("Missing local shadow policy property");
-            const auto suffix = key.substr(dot);
-            if (suffix != L".Secondary" && suffix != L".Latest" && suffix != L".Interval")
-                throw std::invalid_argument("Unknown local shadow policy property");
-            const auto number = key.substr(prefix.size(), dot - prefix.size());
-            if (number.empty() || number.find_first_not_of(L"0123456789") != std::wstring::npos)
-                throw std::invalid_argument("Invalid local shadow entity");
-            const auto id = std::stoull(number);
-            if (!id || id > UINT_MAX || std::to_wstring(id) != number)
-                throw std::invalid_argument("Invalid local shadow entity");
-            GDX12LocalLightConstants light{};
-            light.EntityId = static_cast<UINT>(id);
-            lights.push_back(light);
-        }
-        EnsureShadowUpdatePolicies(lights);
-    }
-
-    inline ConsoleVariablePatch SavedProfilePatch(const ConsoleVariablePatch& live, const Candidate& candidate)
-    {
-        auto saved = live;
-        if (candidate.MGPU.Enabled)
-        {
-            saved.emplace_back(L"Render.MGPU.Enabled", "true");
-            saved.emplace_back(L"Render.MGPU.SecondaryLuid", std::to_string(candidate.MGPU.Secondary));
-        }
-        return saved;
     }
 }

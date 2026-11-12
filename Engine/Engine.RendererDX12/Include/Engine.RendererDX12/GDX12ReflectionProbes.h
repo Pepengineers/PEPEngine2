@@ -12,7 +12,6 @@ struct GDX12ReflectionCaptureSettings
     UINT FacesPerFrame = 0;
     UINT PrefilterSamples = 0;
     UINT UpdateInterval = 1;
-    UINT SecondaryFaces = 0;
 };
 
 struct GDX12ReflectionProbe : GDX12ReflectionCaptureSettings

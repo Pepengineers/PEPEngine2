@@ -312,7 +312,7 @@ namespace Engine::UI
         };
 
         Impl(GDX12Device& device, unsigned slots)
-            : Device(device), Adapter(device.GetSubmissionAdapterId()), Native(device.GetDevice()),
+            : Device(device), Native(device.GetDevice()),
               OwnerThread(std::this_thread::get_id()),
               SrvHeap(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, slots * TexturesPerSlot,
                   D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE),
@@ -357,7 +357,6 @@ namespace Engine::UI
         }
 
         GDX12Device& Device;
-        GDX12Submission::AdapterId Adapter;
         ComPtr<ID3D12Device14> Native;
         ComPtr<IUnknown> DeviceIdentity;
         std::thread::id OwnerThread;
@@ -386,7 +385,7 @@ namespace Engine::UI
         auto& state = *_impl;
         if (std::this_thread::get_id() != state.OwnerThread)
             throw std::logic_error("Offscreen UI recording must run on the ImGui owner thread");
-        if (state.Device.GetSubmissionAdapterId() != state.Adapter)
+        if (state.Device.GetDevice().Get() != state.Native.Get())
             throw std::logic_error("Offscreen UI renderer belongs to a retired device incarnation");
         if (commands.GetType() != D3D12_COMMAND_LIST_TYPE_DIRECT || !frame || !target)
             throw std::invalid_argument("Offscreen UI requires a DIRECT list, target, and draw data");

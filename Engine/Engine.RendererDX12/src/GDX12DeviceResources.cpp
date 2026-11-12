@@ -73,7 +73,6 @@ void GDX12DeviceResources::Initialize(GDX12Device* device)
         FrameConstants[i]->InstanceCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
         FrameConstants[i]->ReflectionProbes->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
         FrameConstants[i]->LocalLightCache->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-        FrameConstants[i]->DisplayShadowLights->CreateSRV(SRV_UAV_Heap.get(), SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
     }
 
     IndirectCommandsCache = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(device, 0, EBufferType::Upload, false);
@@ -182,12 +181,9 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
             material->DirtyFlag = false;
             ++material->_revision;
             material->_numPrimaryFramesDirty = NumFrameConstantVariable.GetValue();
-            material->_numSecondaryFramesDirty = NumFrameConstantVariable.GetValue();
         }
 
-        auto& numFramesDirty = Device->Role == DEVICE_ROLE_PRIMARY
-            ? material->_numPrimaryFramesDirty
-            : material->_numSecondaryFramesDirty;
+        auto& numFramesDirty = material->_numPrimaryFramesDirty;
 
         if (numFramesDirty > 0)
         {
@@ -206,7 +202,7 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
             const auto textureIndex = [this](const GPUTexture* texture)
             {
                 if (!texture) return 0u;
-                auto* gpu = Device->Role == DEVICE_ROLE_PRIMARY ? texture->PrimaryDeviceTexture : texture->SecondaryDeviceTexture;
+                auto* gpu = texture->PrimaryDeviceTexture;
                 return gpu ? gpu->GetSRV()->HeapIndex - Texture2D_StartIndex : 0u;
             };
             materialConstants.DiffuseIndex = textureIndex(material->Diffuse);

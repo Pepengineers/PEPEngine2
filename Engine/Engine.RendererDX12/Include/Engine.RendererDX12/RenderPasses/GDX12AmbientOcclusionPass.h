@@ -27,46 +27,6 @@ public:
     void Resize() override;
     void ClearDenendencies() override;
 
-    struct FrameInput
-    {
-        GDX12AOSettings Settings;
-        UINT Width, Height;
-        Matrix View, JitteredProjection;
-        UINT NoiseIndex, LocalCameraIndex;
-    };
-
-    // All descriptors refer to the native resource represented by the sole state tracker.
-    struct PlacedTexture
-    {
-        GDX12Resource* Resource = nullptr;
-        D3D12_GPU_DESCRIPTOR_HANDLE SRV{}, UAV{};
-    };
-    struct PlacedInputs
-    {
-        PlacedTexture Depth, Normals, PreparedDepth, PreparedNormals, Visibility, Output;
-    };
-    enum class PlacedStage { Pack, Evaluate, Finalize };
-    struct PlacedAccess
-    {
-        GDX12Resource* Resource;
-        GDX12ResourceHandle Native;
-        GDX12RenderGraph::Mode Mode;
-        D3D12_RESOURCE_STATES State;
-    };
-    class PlacedSlot;
-
-    FrameInput CaptureFrameInput();
-    void RecordLocalFrame(GDX12CommandList* commands, const FrameInput& input);
-    void UpdateHistory(const FrameInput& input, bool placed);
-    // Initialize a secondary recorder before creating any slots for it.
-    void InitializePlacedDevice(GDX12DeviceResources& resources);
-    std::shared_ptr<PlacedSlot> CreatePlacedSlot(PlacedStage stage, UINT width, UINT height, GDX12AOResolution resolution);
-    // The slot, its recorder and the supplied texture/descriptor owners must outlive GPU work.
-    // Reuse is allowed only after retirement of the previous invocation.
-    void PreparePlacedSlot(const std::shared_ptr<PlacedSlot>& slot, const FrameInput& frame, const PlacedInputs& inputs);
-    const std::vector<PlacedAccess>& GetPlacedAccesses(const PlacedSlot& slot) const;
-    void RecordPlacedSlot(GDX12CommandList* commands, const PlacedSlot& slot);
-
 private:
     friend struct GDX12AOTestAccess;
 
@@ -81,8 +41,7 @@ private:
     };
     enum Pipeline : std::uint8_t
     {
-        PrepareNormals, SSAO, HBAO, Blur, Resolve, XePrefilter, XeMain, XeDenoise, Neutral, PrepareHalf, Upsample, PadCACAO,
-        PackFull, PipelineCount
+        PrepareNormals, SSAO, HBAO, Blur, Resolve, XePrefilter, XeMain, XeDenoise, Neutral, PrepareHalf, Upsample, PadCACAO, PipelineCount
     };
     struct WorkGrid
     {
@@ -93,30 +52,14 @@ private:
         FFX_CACAO_D3D12Context* Cacao = nullptr;
         bool CacaoScreenReady = false;
     };
-    struct RecordingConstants;
-    struct ConstantBindings
-    {
-        D3D12_GPU_VIRTUAL_ADDRESS View, AO, Xe;
-    };
-    class ScratchStates;
-
     void CreateTextures();
     void CreateGrid(WorkGrid& grid, UINT width, UINT height, bool half);
-    void CreateScratch(WorkGrid& grid, UINT width, UINT height);
     void CreateTexture(GDX12Texture& texture, DXGI_FORMAT format, UINT width, UINT height, UINT mips = 1);
-    static PlacedTexture BindTexture(GDX12Texture& texture);
-    static RecordingConstants MakeRecordingConstants(const FrameInput& frame);
-    void Bind(GDX12CommandList* commands, ConstantBindings constants);
+    void Bind(GDX12CommandList* commands);
     void Dispatch(GDX12CommandList* commands, Pipeline pipeline, UINT width, UINT height);
-    void RecordPrepare(GDX12CommandList* commands, UINT width, UINT height, Pipeline pipeline,
-        PlacedTexture depth, PlacedTexture normals, PlacedTexture preparedDepth, PlacedTexture preparedNormals);
-    void RecordEvaluate(GDX12CommandList* commands, WorkGrid& grid, const RecordingConstants& frame, ConstantBindings bindings,
-        PlacedTexture depth, PlacedTexture normals, PlacedTexture resolved, ScratchStates& states);
-    void RecordUpsample(GDX12CommandList* commands, UINT width, UINT height,
-        const PlacedInputs& inputs);
-    void PrepareCACAO(WorkGrid& grid, PlacedTexture depth, PlacedTexture normals, bool placed);
-    GDX12Texture& DrawCACAO(GDX12CommandList* commands, WorkGrid& grid, const RecordingConstants& frame, ScratchStates& states);
-    static void DestroyCACAO(WorkGrid& grid);
+    GDX12Texture& DrawCACAO(GDX12CommandList* commands, WorkGrid& grid, GDX12Texture& depth,
+        const GDX12AOSettings& settings, Matrix projection);
+    void DestroyCACAO(WorkGrid& grid);
 
     GDX12Texture _output;
     std::array<WorkGrid, 2> _grids;
@@ -126,6 +69,5 @@ private:
     std::unique_ptr<GDX12UploadBuffer<XeGTAO::GTAOConstants>> _xeConstants;
     GDX12AOSettings _previous = {};
     bool _hasPrevious = false;
-    bool _previousPlaced = false;
     UINT _frameIndex = 0;
 };

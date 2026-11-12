@@ -101,11 +101,9 @@ struct GDX12LocalLightConstants
     UINT ShadowRevision = 1;
     UINT ShadowFlags = 0; // Bit 0: casts shadows; bit 1: every-frame updates.
     UINT _padding[3] = {};
-    XMFLOAT3 ShadowPosition = {};
-    float ShadowRange = 600.0f;
     XMFLOAT4X4 ShadowViewProj[6] = {};
 };
-static_assert(sizeof(GDX12LocalLightConstants) == 480);
+static_assert(sizeof(GDX12LocalLightConstants) == 464);
 
 struct GDX12InstanceData
 {

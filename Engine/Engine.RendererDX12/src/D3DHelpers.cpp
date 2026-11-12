@@ -3,30 +3,9 @@
 #include <Engine.RendererDX12/D3DHelpers.h>
 #include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
-#include <map>
-#include <memory>
 
 namespace
 {
-    AutoConsoleVariable<bool> ShadowPolicyEnabled(L"Render.Shadows.Policy.Enabled", false,
-        L"Apply saved independent shadow placement and update intervals");
-    struct ShadowPolicyVariables
-    {
-        AutoConsoleVariable<bool> Secondary, Latest;
-        AutoConsoleVariable<UINT> Interval;
-        explicit ShadowPolicyVariables(const std::wstring& prefix)
-            : Secondary(prefix + L".Secondary", false, L"Execute this shadow on the secondary adapter"),
-              Latest(prefix + L".Latest", false, L"Use the latest completed shadow snapshot"),
-              Interval(prefix + L".Interval", 1, L"Frames between shadow updates, 1..4", EConsoleVariableFlags::Default,
-                  [](UINT value) { return value >= 1 && value <= 4; }) {}
-        GDX12ShadowUpdatePolicy Read() const { return { Secondary.GetValue(), Latest.GetValue(), Interval.GetValue() }; }
-    };
-    ShadowPolicyVariables SunPolicy(L"Render.Shadows.Policy.Sun");
-    std::map<UINT, std::unique_ptr<ShadowPolicyVariables>>& LocalPolicies()
-    {
-        static std::map<UINT, std::unique_ptr<ShadowPolicyVariables>> policies;
-        return policies;
-    }
     AutoConsoleVariable<UINT> SunShadowSize(L"Render.Shadows.Sun.Resolution", SunShadowCascadeResolution,
         L"Texels per sun cascade: 0 Off, 512, 1024, 2048 or 4096. Applies at the frame boundary.",
         EConsoleVariableFlags::Default, [](UINT value) { return value == 0 || IsSunShadowResolution(value); });
@@ -36,26 +15,6 @@ namespace
     AutoConsoleVariable<UINT> TextureAnisotropy(L"Render.Textures.Anisotropy", 8u,
         L"Anisotropic material filtering: 2, 4, 8 or 16. Restart required for static samplers.",
         EConsoleVariableFlags::ReadOnly, [](UINT value) { return value == 2 || value == 4 || value == 8 || value == 16; });
-}
-
-bool IsShadowPolicyEnabled() { return ShadowPolicyEnabled.GetValue(); }
-
-void EnsureShadowUpdatePolicies(const std::vector<GDX12LocalLightConstants>& lights)
-{
-    auto& policies = LocalPolicies();
-    for (const auto& light : lights)
-        if (light.EntityId && policies.find(light.EntityId) == policies.end())
-            policies.emplace(light.EntityId, std::make_unique<ShadowPolicyVariables>(
-                L"Render.Shadows.Policy.Local." + std::to_wstring(light.EntityId)));
-}
-
-GDX12ShadowUpdatePolicy ReadShadowUpdatePolicy(UINT entity)
-{
-    if (!IsShadowPolicyEnabled()) return {};
-    if (entity == 0) return SunPolicy.Read();
-    const auto& policies = LocalPolicies();
-    const auto found = policies.find(entity);
-    return found == policies.end() ? GDX12ShadowUpdatePolicy{} : found->second->Read();
 }
 
 GDX12ShadowQuality ReadShadowQuality()

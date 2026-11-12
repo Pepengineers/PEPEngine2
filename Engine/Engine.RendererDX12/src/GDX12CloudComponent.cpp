@@ -16,12 +16,12 @@ GDX12CloudComponent::GDX12CloudComponent()
     _outputs.push_back(_texture.get());
 }
 
-void GDX12CloudComponent::Setup(GDX12DeviceResources* resources, GDX12DeviceResources* other,
+void GDX12CloudComponent::Setup(GDX12DeviceResources* resources,
     RenderPipelineCommonData* common)
 {
     if (_texture && _texture->IsInitialized() && resources != _resources)
         throw std::invalid_argument("A cloud component cannot migrate between device resources");
-    GDX12RenderPass::Setup(resources, other, common);
+    GDX12RenderPass::Setup(resources, common);
 }
 
 void GDX12CloudComponent::SetParameters(const GDX12CloudParameters& parameters)

@@ -222,8 +222,7 @@ namespace
         const std::uint8_t green,
         const std::uint8_t blue,
         const std::uint8_t alpha,
-        const Engine::Core::ETextureType textureType,
-        bool retainShadowAlpha = false)
+        const Engine::Core::ETextureType textureType)
     {
         Engine::Core::Texture texture = CreateSingleColorTexture(red, green, blue, alpha, textureType);
 
@@ -233,7 +232,6 @@ namespace
             gpuTexture = renderModule.GetTextureByName(textureName);
         }
 
-        if (retainShadowAlpha) renderModule.RetainShadowAlpha(gpuTexture, texture);
         return gpuTexture;
     }
 
@@ -257,8 +255,7 @@ namespace
 
         const std::string textureName = sceneName + "_DiffuseColor_" + std::to_string(red) + "_" + std::to_string(green) + "_" + std::to_string(blue);
 
-        return CreateSolidGpuTexture(renderModule, textureName, red, green, blue, 255, Engine::Core::ETextureType::Color,
-            material.Type == Engine::Core::EMaterialType::Masked);
+        return CreateSolidGpuTexture(renderModule, textureName, red, green, blue, 255, Engine::Core::ETextureType::Color);
     }
 
     struct SceneDefaultMaterialTextures
@@ -413,13 +410,7 @@ namespace
 
     /// Loads a texture through AssetManager, creates the corresponding GPU texture and caches it by normalized path and semantic type.
     /// Returns an already created GPU texture when the same source texture is requested again.
-    struct SceneTexture
-    {
-        GPUTexture* Texture;
-        Engine::Core::TextureHandle Source;
-        std::uint64_t SourceRevision = 0;
-    };
-    using SceneTextureCache = std::unordered_map<std::wstring, SceneTexture>;
+    using SceneTextureCache = std::unordered_map<std::wstring, GPUTexture*>;
 
     GPUTexture* LoadSceneGpuTexture(
         RenderModule& renderModule,
@@ -427,8 +418,7 @@ namespace
         const std::filesystem::path& texturePath,
         const Engine::Core::ETextureType textureType,
         const std::string& sceneName,
-        SceneTextureCache& gpuTexturesByPath,
-        bool retainShadowAlpha = false)
+        SceneTextureCache& gpuTexturesByPath)
     {
         if (texturePath.empty())
         {
@@ -439,19 +429,10 @@ namespace
         const auto cachedTextureIterator = gpuTexturesByPath.find(textureKey);
         if (cachedTextureIterator != gpuTexturesByPath.end())
         {
-            const auto& entry = cachedTextureIterator->second;
-            const auto& textures = assetManager.Textures();
-            if (retainShadowAlpha && renderModule.GetMGPURuntime() && entry.Source.IsValid() &&
-                entry.SourceRevision && entry.SourceRevision == textures.GetContentRevision(entry.Source))
-            {
-                if (const auto* uploaded = textures.GetTexture(entry.Source))
-                    renderModule.RetainShadowAlpha(entry.Texture, *uploaded);
-            }
-            return entry.Texture;
+            return cachedTextureIterator->second;
         }
 
-        Engine::Core::TextureHandle source;
-        const Engine::Core::Texture* texture = assetManager.LoadTexture(texturePath, source);
+        const Engine::Core::Texture* texture = assetManager.LoadTexture(texturePath);
         if (texture == nullptr)
         {
             return nullptr;
@@ -467,9 +448,7 @@ namespace
 
         if (gpuTexture != nullptr)
         {
-            if (created && retainShadowAlpha) renderModule.RetainShadowAlpha(gpuTexture, *texture);
-            const auto revision = created ? assetManager.Textures().GetContentRevision(source) : 0;
-            gpuTexturesByPath.emplace(textureKey, SceneTexture{gpuTexture, created ? source : Engine::Core::TextureHandle{}, revision});
+            gpuTexturesByPath.emplace(textureKey, gpuTexture);
         }
 
         return gpuTexture;
@@ -483,8 +462,7 @@ namespace
         const std::filesystem::path& diffuseTexturePath,
         const std::filesystem::path& opacityTexturePath,
         const std::string& sceneName,
-        SceneTextureCache& gpuTexturesByPath,
-        bool retainShadowAlpha)
+        SceneTextureCache& gpuTexturesByPath)
     {
         if (diffuseTexturePath.empty())
         {
@@ -494,14 +472,14 @@ namespace
         if (opacityTexturePath.empty())
         {
             return LoadSceneGpuTexture(renderModule, assetManager, diffuseTexturePath, Engine::Core::ETextureType::Color, sceneName,
-                gpuTexturesByPath, retainShadowAlpha);
+                gpuTexturesByPath);
         }
 
         const std::wstring textureKey = BuildMergedOpacityTextureCacheKey(diffuseTexturePath, opacityTexturePath);
         const auto cachedTextureIterator = gpuTexturesByPath.find(textureKey);
         if (cachedTextureIterator != gpuTexturesByPath.end())
         {
-            return cachedTextureIterator->second.Texture;
+            return cachedTextureIterator->second;
         }
 
         const Engine::Core::Texture* diffuseTexture = assetManager.LoadTexture(diffuseTexturePath);
@@ -509,14 +487,14 @@ namespace
         if (diffuseTexture == nullptr || opacityTexture == nullptr)
         {
             return LoadSceneGpuTexture(renderModule, assetManager, diffuseTexturePath, Engine::Core::ETextureType::Color, sceneName,
-                gpuTexturesByPath, retainShadowAlpha);
+                gpuTexturesByPath);
         }
 
         std::unique_ptr<Engine::Core::Texture> mergedTexture = TryCreateDiffuseTextureWithOpacityAlpha(*diffuseTexture, *opacityTexture);
         if (mergedTexture == nullptr)
         {
             return LoadSceneGpuTexture(renderModule, assetManager, diffuseTexturePath, Engine::Core::ETextureType::Color, sceneName,
-                gpuTexturesByPath, retainShadowAlpha);
+                gpuTexturesByPath);
         }
 
         const std::string textureName = sceneName + "_Texture_" + std::to_string(gpuTexturesByPath.size());
@@ -529,8 +507,7 @@ namespace
 
         if (gpuTexture != nullptr)
         {
-            if (created) renderModule.RetainShadowAlpha(gpuTexture, *mergedTexture);
-            gpuTexturesByPath.emplace(textureKey, SceneTexture{gpuTexture, {}});
+            gpuTexturesByPath.emplace(textureKey, gpuTexture);
         }
 
         return gpuTexture;
@@ -678,8 +655,7 @@ namespace
                     diffuseTexturePath,
                     materials[materialIndex].OpacityTexturePath,
                     sceneName,
-                    gpuTexturesByPath,
-                    materials[materialIndex].Type == Engine::Core::EMaterialType::Masked);
+                    gpuTexturesByPath);
             }
 
             if (textures.Diffuse == nullptr)

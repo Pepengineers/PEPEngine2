@@ -268,7 +268,7 @@ static void TestGPU(GDX12Device& device, GDX12DeviceResources& resources, unsign
     Upload(device, color, pixels.data(), 8);
     Upload(device, depth, depths.data(), 4);
     GDX12DepthOfFieldPass dof;
-    dof.Setup(&resources, nullptr, &common);
+    dof.Setup(&resources, &common);
     dof.SetInputs({ &color, &depth });
     dof.Initialize();
     Set(L"Render.DOF.Enabled", "false");
@@ -397,7 +397,7 @@ static void TestDepthEdges(GDX12Device& device, GDX12DeviceResources& resources)
     Upload(device, color, pixels.data(), 8);
     Upload(device, depth, depths.data(), 4);
     GDX12DepthOfFieldPass dof;
-    dof.Setup(&resources, nullptr, &common);
+    dof.Setup(&resources, &common);
     dof.SetInputs({ &color, &depth });
     dof.Initialize();
     Set(L"Render.DOF.Quality", "3");
@@ -424,7 +424,7 @@ static void TestXeSSGrid(GDX12Device& device, GDX12DeviceResources& resources)
     common.ActiveCameraFOV = 30;
     common.CameraViewToClip = Projection(30);
     GDX12XeSSUpscalePass upscale;
-    upscale.Setup(&resources, nullptr, &common);
+    upscale.Setup(&resources, &common);
     const auto width = common.DownscaledWidth;
     const auto height = common.DownscaledHeight;
     GDX12Texture color, depth, motion;
@@ -442,7 +442,7 @@ static void TestXeSSGrid(GDX12Device& device, GDX12DeviceResources& resources)
     Upload(device, motion, zeroMotion.data(), 4);
     Set(L"Render.DOF.Quality", "2");
     GDX12DepthOfFieldPass nativeDof;
-    nativeDof.Setup(&resources, nullptr, &common);
+    nativeDof.Setup(&resources, &common);
     nativeDof.SetInputs({ &color, &depth });
     nativeDof.Initialize();
     upscale.SetInputs(std::vector<IRenderPassLink*>{ &depth, &motion, nativeDof.GetOutput(0) });
@@ -472,7 +472,7 @@ static void TestXeSSGrid(GDX12Device& device, GDX12DeviceResources& resources)
     // A fresh context removes the previous path's history from the ordering comparison.
     upscale.ClearDenendencies();
     GDX12XeSSUpscalePass upscaleSharp;
-    upscaleSharp.Setup(&resources, nullptr, &common);
+    upscaleSharp.Setup(&resources, &common);
     upscaleSharp.SetInputs(std::vector<IRenderPassLink*>{ &depth, &motion, &color });
     upscaleSharp.Initialize();
     GDX12Texture fullDepth;
@@ -483,7 +483,7 @@ static void TestXeSSGrid(GDX12Device& device, GDX12DeviceResources& resources)
             fullDepths[y * 640 + x] = DeviceDepth(x < 640 / 3 ? 50.0f : 1600.0f, common.CameraViewToClip);
     Upload(device, fullDepth, fullDepths.data(), 4);
     GDX12DepthOfFieldPass outputDof;
-    outputDof.Setup(&resources, nullptr, &common);
+    outputDof.Setup(&resources, &common);
     outputDof.SetInputs({ upscaleSharp.GetOutput(0), &fullDepth });
     outputDof.Initialize();
     for (unsigned frame = 0; frame < 12; ++frame)
@@ -560,7 +560,7 @@ static void TestToneMapping(GDX12Device& device, GDX12DeviceResources& resources
     display.Initialize(desc);
     RenderPipelineCommonData common;
     GDX12OutputToScreenPass tone;
-    tone.Setup(&resources, nullptr, &common);
+    tone.Setup(&resources, &common);
     tone.SetInputs({ &hdr, &display });
     tone.Initialize();
     auto* commands = device.GetCommandQueue()->GetCommandList();

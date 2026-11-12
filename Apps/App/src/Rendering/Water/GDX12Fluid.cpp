@@ -7,7 +7,6 @@
 #include <cmath>
 #include <stdexcept>
 #include <string>
-#include <tuple>
 
 namespace
 {
@@ -18,19 +17,6 @@ namespace
         L"Run fluid simulation on COMPUTE when available. Default false.", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Fluid.Quality", GDX12Quality::Mid,
         L"0 Off, 1 Low, 2 Mid (default), 3 High, 4 Epic.", EConsoleVariableFlags::Default);
-    static AutoConsoleVariable<bool> MultiGPU(L"Render.Fluid.MultiGPU", false,
-        L"Request secondary fluid simulation on the next seed/reset epoch.");
-    static AutoConsoleVariable<bool> MultiGPUExact(L"Render.Fluid.MultiGPU.Exact", false,
-        L"Request Exact fluid snapshots on the next seed/reset epoch. Otherwise use Latest completed.");
-    static AutoConsoleVariable<float> MultiGPUUpdateHz(L"Render.Fluid.MultiGPU.UpdateHz", 0.0f,
-        L"Maximum secondary fluid producer update rate (0 uncapped, up to 240 Hz).",
-        EConsoleVariableFlags::Default, [](float v) { return std::isfinite(v) && v >= 0 && v <= 240; });
-    static AutoConsoleVariable<float> MultiGPUMaxAgeMs(L"Render.Fluid.MultiGPU.MaxAgeMs", 0.0f,
-        L"Fluid snapshot age diagnostic threshold (0 disabled, up to 60000 ms).",
-        EConsoleVariableFlags::Default, [](float v) { return std::isfinite(v) && v >= 0 && v <= 60000; });
-    static AutoConsoleVariable<float> UpdateHz(L"Render.Fluid.UpdateHz", -1.0f,
-        L"Primary fluid cadence: -1 legacy frame steps, 0 uncapped ordered time, positive Hz retains pending input time.",
-        EConsoleVariableFlags::Default, [](float v) { return std::isfinite(v) && v >= -1 && v <= 240; });
     bool Finite(const Vector3 value)
     {
         return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
@@ -44,8 +30,7 @@ namespace
 GDX12FluidControls GetFluidControls()
 {
     const int quality = Quality.GetInt();
-    return { Enabled.GetValue() && quality != 0, quality, AsyncCompute.GetValue(),
-        MultiGPU.GetValue(), MultiGPUExact.GetValue(), MultiGPUUpdateHz.GetValue(), MultiGPUMaxAgeMs.GetValue(), UpdateHz.GetValue() };
+    return { Enabled.GetValue() && quality != 0, quality, AsyncCompute.GetValue() };
 }
 
 GDX12FluidSettings ResolveFluidSettings(const GDX12FluidSettings& author, const int quality)
@@ -64,12 +49,12 @@ void ValidateFluidSettings(const GDX12FluidSettings& s)
     if (!Range(s.MaxStepSeconds, 0.000001f, 0.05f) || s.MaxSubsteps > 64 ||
         !Range(s.TimeScale, 0, 8) || !Range(s.SmoothingRadiusCm, 0.1f, 1000) ||
         !Range(s.ParticleRadiusCm, 0.01f, s.SmoothingRadiusCm) ||
-        !Range(s.ParticleMassKg, 1e-9f, 100000) || !Range(s.RestDensityKgPerCm3, 1e-8f, s.MGPUReference ? 100000.0f : 100.0f) ||
+        !Range(s.ParticleMassKg, 1e-9f, 100000) || !Range(s.RestDensityKgPerCm3, 1e-8f, s.ReferenceModel ? 100000.0f : 100.0f) ||
         !Range(s.PressureStiffnessCm2PerSecond2, 1, 1e8f) ||
         !Range(s.NearPressureStiffnessCm2PerSecond2, 0, 1e8f) || !Range(s.PredictionSeconds, 0, 0.05f) ||
         !Range(s.ViscosityCm2PerSecond, 0, 100000) || !Finite(s.AccelerationCmPerSecond2) ||
         !Range(s.WaveAcceleration, 0, 10000) || !Range(s.WavePeriodSeconds, 0.1f, 60) ||
-        (!s.MGPUReference && s.AccelerationCmPerSecond2.Length() > s.MaxAccelerationCmPerSecond2) ||
+        (!s.ReferenceModel && s.AccelerationCmPerSecond2.Length() > s.MaxAccelerationCmPerSecond2) ||
         !Range(s.MaxSpeedCmPerSecond, 1, 100000) || !Range(s.MaxAccelerationCmPerSecond2, 1, 1e8f) ||
         !Finite(s.ContainerHalfExtentCm) || s.ContainerHalfExtentCm.x <= s.ParticleRadiusCm ||
         s.ContainerHalfExtentCm.y <= s.ParticleRadiusCm || s.ContainerHalfExtentCm.z <= s.ParticleRadiusCm ||
@@ -89,7 +74,7 @@ void ValidateFluidSettings(const GDX12FluidSettings& s)
 void GDX12FluidComponent::SetSettings(const GDX12FluidSettings& settings)
 {
     ValidateFluidSettings(settings);
-    if (_settings.MGPUReference != settings.MGPUReference) Reset();
+    if (_settings.ReferenceModel != settings.ReferenceModel) Reset();
     _settings = settings;
     ++_settingsRevision;
 }
@@ -129,7 +114,7 @@ void ValidateFluidInstance(const GDX12FluidInstance& instance)
             throw std::invalid_argument("Fluid container outside supported world range");
     }
     const auto& s = instance.Component.GetSettings();
-    if (s.MGPUReference) return;
+    if (s.ReferenceModel) return;
     const Matrix inverse = matrix.Invert();
     const Vector3 margin = s.ParticleRadiusCm * Vector3(
         Vector3(inverse._11, inverse._21, inverse._31).Length(),
@@ -168,48 +153,8 @@ GDX12FluidParameters MakeFluidParameters(const Matrix& container, const GDX12Flu
     p.FilterRadius = settings.FilterRadiusPixels;
     p.NearStiffness = settings.NearPressureStiffnessCm2PerSecond2;
     p.PredictionSeconds = settings.PredictionSeconds;
-    p.LocalSimulation = settings.MGPUReference ? 1u : 0u;
+    p.LocalSimulation = settings.ReferenceModel ? 1u : 0u;
     return p;
-}
-
-GDX12FluidProducerInput::GDX12FluidProducerInput(const GDX12FluidInstance& instance, int quality)
-    : _instance(instance), _settings(ResolveFluidSettings(instance.Component.GetSettings(), quality)), _quality(quality)
-{
-    ValidateFluidInstance(instance);
-    if (!std::isfinite(instance.WorldTimeScale) || instance.WorldTimeScale < 0)
-        throw std::invalid_argument("Invalid fluid world time scale");
-    if (_settings.MGPUReference) _instance.ContainerToWorld = Matrix::Identity;
-}
-
-double GDX12FluidProducerInput::Elapsed() const
-{
-    return _instance.Paused || !_settings.SimulationEnabled ? 0 :
-        static_cast<double>(_instance.DeltaSeconds) * _settings.TimeScale;
-}
-
-double GDX12FluidProducerInput::LogicalTick() const
-{
-    const double scaledTick = static_cast<double>(_instance.WorldTimeScale) * _settings.TimeScale / 60;
-    const double solverLimit = GDX12FluidSolver::SafeStep(_settings) * _settings.MaxSubsteps;
-    return (std::min)(scaledTick, solverLimit);
-}
-
-bool operator==(const GDX12FluidProducerInput& a, const GDX12FluidProducerInput& b)
-{
-    const auto solver = [](const GDX12FluidSettings& s)
-    {
-        return std::tie(s.SimulationEnabled, s.MGPUReference, s.MaxStepSeconds, s.MaxSubsteps, s.TimeScale,
-            s.SmoothingRadiusCm, s.ParticleRadiusCm, s.ParticleMassKg, s.RestDensityKgPerCm3,
-            s.PressureStiffnessCm2PerSecond2, s.NearPressureStiffnessCm2PerSecond2, s.PredictionSeconds,
-            s.ViscosityCm2PerSecond, s.AccelerationCmPerSecond2, s.WaveAcceleration, s.WavePeriodSeconds,
-            s.MaxSpeedCmPerSecond, s.MaxAccelerationCmPerSecond2, s.ContainerHalfExtentCm, s.Restitution);
-    };
-    const auto& ac = a._instance.Component;
-    const auto& bc = b._instance.Component;
-    return a._instance.Id == b._instance.Id && a._quality == b._quality &&
-        ac.GetResetRevision() == bc.GetResetRevision() && ac.GetSettingsRevision() == bc.GetSettingsRevision() &&
-        ac.GetParticles() == bc.GetParticles() && a._instance.ContainerToWorld == b._instance.ContainerToWorld &&
-        solver(a._settings) == solver(b._settings);
 }
 
 namespace
@@ -223,25 +168,6 @@ namespace
         return buffer;
     }
 
-    struct SolverRecordingBuffer
-    {
-        GDX12Resource& Resource;
-        bool Placed;
-        D3D12_RESOURCE_STATES State = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-
-        CD3DX12_RESOURCE_BARRIER To(D3D12_RESOURCE_STATES next)
-        {
-            if (!Placed) return Resource.GetTransitionBarrier(next);
-            const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(Resource.D3DResource.Get(), State, next);
-            State = next;
-            return barrier;
-        }
-
-        CD3DX12_RESOURCE_BARRIER UAV()
-        {
-            return Placed ? CD3DX12_RESOURCE_BARRIER::UAV(Resource.D3DResource.Get()) : Resource.GetUAVBarrier();
-        }
-    };
 }
 
 void GDX12FluidSolver::Initialize(GDX12Device* device)
@@ -287,12 +213,12 @@ GDX12FluidSolver::Buffers GDX12FluidSolver::CreateBuffers(GDX12Device* device, G
     for (UINT i = 0; i < buffers.Count; ++i)
     {
         const auto& initial = (*seed)[i];
-        const auto position = settings.MGPUReference ? initial.Position : Vector3::Transform(initial.Position, instance.ContainerToWorld);
+        const auto position = settings.ReferenceModel ? initial.Position : Vector3::Transform(initial.Position, instance.ContainerToWorld);
         if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z) ||
             position.Length() > 1e7f) throw std::invalid_argument("Fluid seed outside supported world range");
-        auto velocity = settings.MGPUReference ? initial.Velocity : Vector3::TransformNormal(initial.Velocity, instance.ContainerToWorld);
+        auto velocity = settings.ReferenceModel ? initial.Velocity : Vector3::TransformNormal(initial.Velocity, instance.ContainerToWorld);
         const float speed = velocity.Length();
-        if (!settings.MGPUReference && speed > settings.MaxSpeedCmPerSecond) velocity *= settings.MaxSpeedCmPerSecond / speed;
+        if (!settings.ReferenceModel && speed > settings.MaxSpeedCmPerSecond) velocity *= settings.MaxSpeedCmPerSecond / speed;
         buffers.SeedUpload->CopyData(i, {position, velocity, position});
     }
     return buffers;
@@ -327,38 +253,35 @@ GDX12FluidSolver::Steps GDX12FluidSolver::PlanSteps(const GDX12FluidSettings& se
 }
 
 GDX12FluidSolver::Head GDX12FluidSolver::Record(GDX12CommandList& commands, Buffers& buffers, Head head,
-    const GDX12FluidSettings& settings, Steps steps, D3D12_GPU_VIRTUAL_ADDRESS constants, Boundary boundary) const
+    const GDX12FluidSettings& settings, Steps steps, D3D12_GPU_VIRTUAL_ADDRESS constants) const
 {
     if (!_root || head.Current > 1 || buffers.Count == 0 || (head.SeedPending && !buffers.SeedUpload))
         throw std::logic_error("Fluid solver state is not ready for recording");
     if (steps.Count > settings.MaxSubsteps || (steps.Count && (!std::isfinite(steps.Dt) || steps.Dt < 0)))
         throw std::invalid_argument("Invalid fluid substep plan");
-    const bool placed = boundary == Boundary::PlacedUav;
-    SolverRecordingBuffer particles[] = {
-        {buffers.Particles[0]->GetResource(), placed}, {buffers.Particles[1]->GetResource(), placed}
-    };
-    SolverRecordingBuffer density{buffers.Density->GetResource(), placed};
-    SolverRecordingBuffer keys{buffers.Keys->GetResource(), placed};
-    SolverRecordingBuffer offsets{buffers.Offsets->GetResource(), placed};
-    auto& current = particles[head.Current];
+    GDX12Resource* particles[] = { &buffers.Particles[0]->GetResource(), &buffers.Particles[1]->GetResource() };
+    auto& density = buffers.Density->GetResource();
+    auto& keys = buffers.Keys->GetResource();
+    auto& offsets = buffers.Offsets->GetResource();
+    auto& current = *particles[head.Current];
     if (head.SeedPending)
     {
-        commands.ResourceBarrier({current.To(D3D12_RESOURCE_STATE_COPY_DEST)});
-        commands.CopyResource(current.Resource.D3DResource.Get(), buffers.SeedUpload->GetResource().D3DResource.Get());
+        commands.ResourceBarrier({current.GetTransitionBarrier(D3D12_RESOURCE_STATE_COPY_DEST)});
+        commands.CopyResource(current.D3DResource.Get(), buffers.SeedUpload->GetResource().D3DResource.Get());
         head.SeedPending = false;
     }
 
     commands.SetComputeRootSignature(_root.get());
     commands.SetComputeRootConstantBufferView(1, constants);
     struct Dispatch { UINT Count, Capacity, K, J; float Dt; UINT ReferenceUnits; float WaveAcceleration = 0; UINT Padding = 0; };
-    Dispatch dispatch = {buffers.Count, buffers.Capacity, 0, 0, 0, settings.MGPUReference ? 1u : 0u};
+    Dispatch dispatch = {buffers.Count, buffers.Capacity, 0, 0, 0, settings.ReferenceModel ? 1u : 0u};
     const auto setDispatch = [&] { commands.GetCommandList()->SetComputeRoot32BitConstants(0, 8, &dispatch, 0); };
     setDispatch();
-    commands.ResourceBarrier({current.To(D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
+    commands.ResourceBarrier({current.GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
     commands.SetComputeUAV(0, buffers.Particles[head.Current]->GetUAV()->GPUHandle);
     commands.SetPipelineState(_save);
     commands.Dispatch((buffers.Count + 127) / 128, 1, 1);
-    commands.ResourceBarrier({current.UAV()});
+    commands.ResourceBarrier({current.GetUAVBarrier()});
 
     dispatch.Dt = steps.Dt;
     for (UINT step = 0; step < steps.Count; ++step)
@@ -369,10 +292,10 @@ GDX12FluidSolver::Head GDX12FluidSolver::Record(GDX12CommandList& commands, Buff
                 (head.WaveTime + dispatch.Dt * 0.5f) / settings.WavePeriodSeconds);
             head.WaveTime = std::fmod(head.WaveTime + dispatch.Dt, settings.WavePeriodSeconds);
         }
-        auto& input = particles[head.Current];
-        auto& output = particles[1 - head.Current];
-        commands.ResourceBarrier({input.To(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
-            keys.To(D3D12_RESOURCE_STATE_UNORDERED_ACCESS), offsets.To(D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
+        auto& input = *particles[head.Current];
+        auto& output = *particles[1 - head.Current];
+        commands.ResourceBarrier({input.GetTransitionBarrier(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+            keys.GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS), offsets.GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
         commands.SetComputeSRV(0, buffers.Particles[head.Current]->GetSRV()->GPUHandle);
         commands.SetComputeUAV(2, buffers.Keys->GetUAV()->GPUHandle);
         commands.SetComputeUAV(3, buffers.Offsets->GetUAV()->GPUHandle);
@@ -380,13 +303,13 @@ GDX12FluidSolver::Head GDX12FluidSolver::Record(GDX12CommandList& commands, Buff
         setDispatch();
         commands.SetPipelineState(_hash);
         commands.Dispatch((buffers.Capacity + 127) / 128, 1, 1);
-        commands.ResourceBarrier({keys.UAV(), offsets.UAV()});
+        commands.ResourceBarrier({keys.GetUAVBarrier(), offsets.GetUAVBarrier()});
         const UINT tileGroups = (buffers.Capacity + SortTileSize - 1) / SortTileSize;
         if (buffers.Capacity > 1)
         {
             commands.SetPipelineState(_presort);
             commands.Dispatch(tileGroups, 1, 1);
-            commands.ResourceBarrier({keys.UAV()});
+            commands.ResourceBarrier({keys.GetUAVBarrier()});
         }
         for (UINT k = SortTileSize * 2; k <= buffers.Capacity; k <<= 1)
         {
@@ -397,50 +320,32 @@ GDX12FluidSolver::Head GDX12FluidSolver::Record(GDX12CommandList& commands, Buff
                 dispatch.J = j;
                 setDispatch();
                 commands.Dispatch((buffers.Capacity + 127) / 128, 1, 1);
-                commands.ResourceBarrier({keys.UAV()});
+                commands.ResourceBarrier({keys.GetUAVBarrier()});
             }
             dispatch.J = 0;
             setDispatch();
             commands.SetPipelineState(_mergeTail);
             commands.Dispatch(tileGroups, 1, 1);
-            commands.ResourceBarrier({keys.UAV()});
+            commands.ResourceBarrier({keys.GetUAVBarrier()});
         }
-        commands.ResourceBarrier({keys.To(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)});
+        commands.ResourceBarrier({keys.GetTransitionBarrier(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)});
         commands.SetComputeSRV(2, buffers.Keys->GetSRV()->GPUHandle);
         commands.SetPipelineState(_offsets);
         commands.Dispatch((buffers.Count + 127) / 128, 1, 1);
-        commands.ResourceBarrier({offsets.To(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
-            density.To(D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
+        commands.ResourceBarrier({offsets.GetTransitionBarrier(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+            density.GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
         commands.SetComputeSRV(3, buffers.Offsets->GetSRV()->GPUHandle);
         commands.SetComputeUAV(1, buffers.Density->GetUAV()->GPUHandle);
         commands.SetPipelineState(_densities);
         commands.Dispatch((buffers.Count + 127) / 128, 1, 1);
-        commands.ResourceBarrier({density.To(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
-            output.To(D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
+        commands.ResourceBarrier({density.GetTransitionBarrier(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+            output.GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
         commands.SetComputeSRV(1, buffers.Density->GetSRV()->GPUHandle);
         commands.SetComputeUAV(0, buffers.Particles[1 - head.Current]->GetUAV()->GPUHandle);
         commands.SetPipelineState(_integrate);
         commands.Dispatch((buffers.Count + 127) / 128, 1, 1);
-        commands.ResourceBarrier({output.UAV()});
+        commands.ResourceBarrier({output.GetUAVBarrier()});
         head.Current = 1 - head.Current;
-    }
-    if (placed)
-    {
-        constexpr auto uav = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
-        commands.ResourceBarrier({particles[0].To(uav), particles[1].To(uav),
-            density.To(uav), keys.To(uav), offsets.To(uav)});
     }
     return head;
 }
-
-void GDX12FluidSolver::RecordPublish(GDX12CommandList& commands, ID3D12Resource& particles,
-    ID3D12Resource& destination, UINT count)
-{
-    const auto src = particles.GetDesc(), dst = destination.GetDesc();
-    const auto bytes = static_cast<UINT64>(count) * sizeof(Particle);
-    if (!bytes || &particles == &destination || src.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER ||
-        dst.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER || src.Width != bytes || dst.Width != bytes)
-        throw std::invalid_argument("Fluid publish requires matching distinct particle buffers");
-    commands.GetCommandList()->CopyBufferRegion(&destination, 0, &particles, 0, bytes);
-}
-

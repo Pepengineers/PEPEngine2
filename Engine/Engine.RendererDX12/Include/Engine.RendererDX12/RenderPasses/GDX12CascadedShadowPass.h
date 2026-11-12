@@ -6,7 +6,6 @@
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <array>
 #include <cstring>
-#include <optional>
 
 class GDX12CascadedShadowPass final : public GDX12GeometryViewPass
 {
@@ -86,12 +85,6 @@ public:
     void Prepare()
     {
         if (_prepared) return;
-        const auto policy = ReadShadowUpdatePolicy();
-        const bool policyChanged = !(_policy == policy) || _policyEnabled != IsShadowPolicyEnabled();
-        _policy = policy;
-        _policyEnabled = IsShadowPolicyEnabled();
-        if (policyChanged) { _rendered = false; _policyFrame = 0; }
-        ++_policyFrame;
         if (_cascadeResolution != _resources->ShadowQuality.SunResolution)
             CreateAtlas(_resources->ShadowQuality.SunResolution);
         const auto& lighting = _resources->Lighting;
@@ -100,15 +93,11 @@ public:
             ((_preparedFlags & 2u) != 0u || !_rendered ||
                 _cachedGeometryRevision != _resources->GeometryRevision || _cachedRevision != lighting.SunShadowRevision ||
                 std::memcmp(&_cachedSettings, &_resources->ShadowSettings, sizeof(_cachedSettings)) != 0);
-        if (_rendered && !_updating) _cachedSourceTime = ShadowSourceTimeSeconds();
-        if (_policyEnabled && !policy.Secondary && !ShadowUpdateDue(_policyFrame, policy.Interval, _rendered))
-            _updating = false;
         if (_updating)
         {
             _preparedSettings = _resources->ShadowSettings;
             _preparedGeometryRevision = _resources->GeometryRevision;
             _preparedRevision = lighting.SunShadowRevision;
-            _preparedSourceTime = ShadowSourceTimeSeconds();
             for (UINT cascade = 0; cascade < 4; ++cascade)
             {
                 auto& view = _views[cascade];
@@ -119,24 +108,10 @@ public:
                 view.DepthFormat = DXGI_FORMAT_D32_FLOAT;
             }
         }
-        if (_policyEnabled && !policy.Secondary)
-            _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->DisplayShadowCB->CopyData(
-                0, _updating ? _preparedSettings : _cachedSettings);
         _prepared = true;
     }
 
-    double GetDisplayedSourceTime() const { return _updating ? _preparedSourceTime : _cachedSourceTime; }
-
-    std::optional<GDX12ShadowOutput> DescribePreparedShadow(const GDX12ShadowSelection& selection) const
-    {
-        if (!_prepared || !selection.IncludesSun() || (_preparedFlags & 1u) == 0u)
-            return std::nullopt;
-        return BuildSunShadowOutput(_preparedSettings, _preparedRevision, _preparedGeometryRevision,
-            (_preparedFlags & 2u) != 0u, _cascadeResolution);
-    }
-
     void InvalidateCache() { _prepared = _updating = _rendered = false; }
-    void ResetUpdateSchedule() { _policyFrame = 0; InvalidateCache(); }
 
     UINT GetGeometryViewCapacity() const override { return 4; }
     const GDX12GeometryContext* GetGeometryView(UINT slot) const override
@@ -262,7 +237,6 @@ public:
             _rendered = true;
             _cachedSettings = _preparedSettings;
             _cachedRevision = _preparedRevision;
-            _cachedSourceTime = _preparedSourceTime;
         }
         _prepared = false;
         _updating = false;
@@ -343,8 +317,4 @@ private:
     uint64_t _cachedGeometryRevision = 0;
     UINT _cachedRevision = 0;
     bool _rendered = false;
-    GDX12ShadowUpdatePolicy _policy;
-    bool _policyEnabled = false;
-    uint64_t _policyFrame = 0;
-    double _preparedSourceTime = 0, _cachedSourceTime = 0;
 };

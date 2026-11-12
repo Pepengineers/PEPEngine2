@@ -60,9 +60,9 @@ GDX12ReconstructionPass::GDX12ReconstructionPass()
 
 GDX12ReconstructionPass::~GDX12ReconstructionPass() { ClearDenendencies(); }
 
-void GDX12ReconstructionPass::Setup(GDX12DeviceResources* resources, GDX12DeviceResources* other, RenderPipelineCommonData* common)
+void GDX12ReconstructionPass::Setup(GDX12DeviceResources* resources, RenderPipelineCommonData* common)
 {
-    GDX12RenderPass::Setup(resources, other, common);
+    GDX12RenderPass::Setup(resources, common);
     Configure();
 }
 
@@ -77,7 +77,7 @@ void GDX12ReconstructionPass::Configure()
     try
     {
         _provider = CreateProvider(_status.Requested);
-        if (_provider) _provider->Setup(_resources, _otherResources, _commonData);
+        if (_provider) _provider->Setup(_resources, _commonData);
         if (_provider && (!_commonData->DownscaledWidth || !_commonData->DownscaledHeight))
             throw std::runtime_error("SDK returned an empty render grid");
         _status.Effective = _status.Requested.Provider;

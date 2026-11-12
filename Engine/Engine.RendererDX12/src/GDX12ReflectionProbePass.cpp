@@ -4,12 +4,9 @@
 #include <cassert>
 #include <cmath>
 #include <stdexcept>
-#include <chrono>
 
 namespace
 {
-    double SourceTime()
-    { return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
     UINT CubeMipCount(UINT resolution)
     {
         UINT count = 1;
@@ -416,9 +413,7 @@ GDX12GraphicsBindings GDX12ReflectionProbePass::CaptureBindings(const UINT face,
     binding.SRVs.push_back({ 2, constants->ShadowInstances->GetSRV()->GPUHandle });
     binding.SRVs.push_back({ 3, _sunShadow.GetSRV()->GPUHandle });
     for (UINT i = 0; i < 3; ++i) binding.SRVs.push_back({ 4 + i, _inputs[i]->GetTexture()->GetSRV()->GPUHandle });
-    auto& lights = _staticLocalShadows && localShadows == _staticLocalShadows->GetOutput(0)->GetTexture() ?
-        *constants->ShadowLights : constants->LightingLocalLights();
-    binding.SRVs.push_back({ 7, lights.GetSRV()->GPUHandle });
+    binding.SRVs.push_back({ 7, constants->ShadowLights->GetSRV()->GPUHandle });
     binding.SRVs.push_back({ 8, localShadows->GetSRV()->GPUHandle });
     binding.SRVs.push_back({ 9, _inputs[3]->GetTexture()->GetSRV()->GPUHandle });
     binding.CBVs.push_back({ 4, _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->SkyCB->GetElementAddress(0) });
@@ -588,9 +583,6 @@ void GDX12ReflectionProbePass::FilterAndPublish(GDX12CommandList* commands, cons
             commands->GetCommandList()->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
         }
     commands->ResourceBarrier({ _published.GetResource()->GetSRVBarrier() });
-    state.PublishedTimes = state.SourceTimes;
-    if (_settings.Scheduled) state.PublicationRecorded = true;
-    else state.Clock.Publish(state.SourceTimes, SourceTime());
     state.CapturedFaces = 0;
     if (state.RebakePending) { state.BakedFaces = 0; state.RebakePending = false; }
     state.Ready = true;
@@ -623,77 +615,20 @@ void GDX12ReflectionProbePass::WriteProbeData(GDX12CommandList* commands, const 
 
 std::pair<size_t, size_t> GDX12ReflectionProbePass::GetReadiness()
 {
-    if (_resources) PollPublications();
     if (!_enabled) return {};
     const auto ready = std::count_if(_probes.begin(), _probes.end(),
-        [&](const ProbeState& probe) { return probe.Ready && probe.LastUpdate != 0 &&
-            (!_settings.Scheduled || probe.Clock.Ready()); });
+        [](const ProbeState& probe) { return probe.Ready && probe.LastUpdate != 0; });
     return {static_cast<size_t>(ready), _probes.size()};
-}
-
-std::vector<GDX12ReflectionProbePass::FaceAge> GDX12ReflectionProbePass::GetFaceAges() const
-{
-    std::vector<FaceAge> result;
-    const auto now = SourceTime();
-    for (const auto& probe : _probes)
-        for (UINT face = 0; face < 6; ++face)
-            result.push_back({probe.Source.Id, face, probe.Clock.FullAge(now, face)});
-    return result;
-}
-
-void GDX12ReflectionProbePass::UpdateAgeStatistics()
-{
-    _statistics.MaxFaceAgeSeconds = _statistics.AdditionalLagSeconds = 0;
-    const auto now = SourceTime();
-    for (const auto& probe : _probes)
-    {
-        for (UINT face = 0; face < 6; ++face)
-            _statistics.MaxFaceAgeSeconds = (std::max)(_statistics.MaxFaceAgeSeconds, probe.Clock.FullAge(now, face));
-        _statistics.AdditionalLagSeconds = (std::max)(_statistics.AdditionalLagSeconds, probe.Clock.AdditionalLag(now));
-    }
-}
-
-void GDX12ReflectionProbePass::PollPublications()
-{
-    const auto completed = _resources->Device->GetCommandQueue()->GetCompletionProgress();
-    while (!_publications.empty() && _publications.front().Completion.IsReachedBy(completed))
-    {
-        const auto& publication = _publications.front();
-        if (publication.Probe < _probes.size() && _probes[publication.Probe].Epoch == publication.Epoch)
-            _probes[publication.Probe].Clock.Publish(publication.Sources, SourceTime());
-        _publications.pop_front();
-    }
-    UpdateAgeStatistics();
-}
-
-void GDX12ReflectionProbePass::OnSubmitted(GDX12Submission::CompletionPoint point)
-{
-    for (UINT index = 0; index < _probes.size(); ++index)
-    {
-        auto& probe = _probes[index];
-        if (probe.PublicationRecorded)
-        {
-            _publications.push_back({index, probe.Epoch, probe.PublishedTimes, point});
-            probe.PublicationRecorded = false;
-        }
-    }
-    PollPublications();
 }
 
 void GDX12ReflectionProbePass::Prepare()
 {
     GDX12_SCOPED_CPU_EVENT("Reflection probe preparation");
     if (_planPrepared) return;
-    PollPublications();
     _views.clear();
-    _scheduledWork.clear();
     _capturePlanned = _staticShadowsPlanned = false;
     ++_frameNumber;
     _statistics.CapturedFaces = _statistics.BakedFaces = _statistics.PublishedProbes = 0;
-    _statistics.RequestedSecondaryFaces = _statistics.EffectiveSecondaryFaces = 0;
-    _statistics.MaxFaceAgeSeconds = 0;
-    _statistics.AdditionalLagSeconds = 0;
-    _frameSourceTime = _remoteWork ? _remoteSourceTime : SourceTime();
     const auto settings = GetReflectionSettings();
     if (!settings.Enabled || _resources->ReflectionProbes.empty())
     {
@@ -728,7 +663,6 @@ void GDX12ReflectionProbePass::Prepare()
         for (auto& probe : _probes)
             _statistics.TextureBytes -= AllocationBytes(_resources->Device, probe.BakedColor.get()) +
                 AllocationBytes(_resources->Device, probe.BakedDepth.get()) + AllocationBytes(_resources->Device, probe.Raw.get());
-        _publications.clear();
         _probes.clear();
         _probes.resize(submitted.size());
         _activeProbe = _roundRobinProbe = 0;
@@ -750,9 +684,6 @@ void GDX12ReflectionProbePass::Prepare()
             probe.CapturedFaces = probe.BakedFaces = probe.NextFace = 0;
             probe.RebakePending = false;
             probe.LastUpdate = 0;
-            probe.Clock.Reset();
-            ++probe.Epoch;
-            probe.PublicationRecorded = false;
         }
         else if (invalidate && !(probe.Source.Implementation == 2 && probe.Ready && probe.LastUpdate))
         {
@@ -769,13 +700,7 @@ void GDX12ReflectionProbePass::Prepare()
     _settings = settings;
     _enabled = true;
     std::vector<GDX12ReflectionSchedule::Work> work(_probes.size());
-    if (_remoteWork)
-    {
-        work = std::move(*_remoteWork);
-        _remoteWork.reset();
-        if (work.size() != _probes.size()) throw std::logic_error("Remote reflection topology differs from its source");
-    }
-    else if (settings.Scheduled)
+    if (settings.Scheduled)
     {
         const auto camera = _commonData->CameraView.Invert().Translation();
         std::vector<GDX12ReflectionSchedule::Probe> schedule;
@@ -783,7 +708,7 @@ void GDX12ReflectionProbePass::Prepare()
         {
             const auto& probe = state.Source;
             schedule.push_back({probe.Id, GDX12ReflectionSchedule::DistanceToBox({camera.x,camera.y,camera.z},
-                {probe.BoxMin.x,probe.BoxMin.y,probe.BoxMin.z}, {probe.BoxMax.x,probe.BoxMax.y,probe.BoxMax.z}), probe.SecondaryFaces});
+                {probe.BoxMin.x,probe.BoxMin.y,probe.BoxMin.z}, {probe.BoxMax.x,probe.BoxMax.y,probe.BoxMax.z})});
         }
         work = _scheduler.Select(schedule, settings.Policy);
     }
@@ -804,9 +729,6 @@ void GDX12ReflectionProbePass::Prepare()
         }
     }
     CreateCaptureTextures(maximumResolution);
-    _scheduledWork = work;
-    for (size_t index = 0; index < _probes.size(); ++index)
-        _probes[index].Clock.ScheduleFaces(work[index].Faces, _frameSourceTime);
     _views.resize(_probes.size() * 14);
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];
     const bool sunShadow = (_resources->Lighting.SunShadowFlags & 1u) != 0;
@@ -820,10 +742,7 @@ void GDX12ReflectionProbePass::Prepare()
         for (UINT face = 0; face < 6; ++face)
         {
             frame.Cameras->CopyData(index * 6 + face, FaceCamera(state.Source, face, _resolution));
-            if (work[index].SecondaryFaces & (1u << face)) ++_statistics.RequestedSecondaryFaces;
         }
-        if (_secondaryCapture) work[index].Faces &= ~work[index].SecondaryFaces;
-        if (!work[index].Faces) continue;
         _capturePlanned = true;
         const bool bake = state.Source.Implementation == 1 && state.BakedFaces != 63;
         const bool frozen = state.Source.Implementation == 2;
@@ -880,7 +799,7 @@ void GDX12ReflectionProbePass::Prepare()
         {
             // shortcut: baked receivers retain static-only shadows, use dynamic capture for moving shadow reception.
             _staticLocalShadows = std::make_unique<GDX12LocalShadowPass>(true);
-            _staticLocalShadows->Setup(_resources, nullptr, _commonData);
+            _staticLocalShadows->Setup(_resources, _commonData);
             _staticLocalShadows->Initialize();
         }
         _staticLocalShadows->Prepare();
@@ -890,9 +809,6 @@ void GDX12ReflectionProbePass::Prepare()
         {
             view.Lighting.LocalShadows = view.Filter == StaticGeometry ?
                 _staticLocalShadows->GetOutput(0)->GetTexture() : _inputs[4]->GetTexture();
-            const auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-            view.Lighting.LocalLights = view.Filter == StaticGeometry ?
-                constants->ShadowLights.get() : &constants->LightingLocalLights();
         }
     _planPrepared = true;
 }
@@ -927,7 +843,6 @@ void GDX12ReflectionProbePass::EndGeometry(GDX12CommandList* commands)
         else
         {
             state.CapturedFaces |= 1u << view.Face;
-            state.SourceTimes[view.Face] = _frameSourceTime;
             ++_statistics.CapturedFaces;
         }
     }
@@ -939,12 +854,6 @@ void GDX12ReflectionProbePass::EndGeometry(GDX12CommandList* commands)
             FilterAndPublish(commands, index);
             if (!_settings.Scheduled) _roundRobinProbe = (index + 1) % static_cast<UINT>(_probes.size());
         }
-        if (state.Ready)
-            for (unsigned face = 0; face < 6; ++face)
-                _statistics.MaxFaceAgeSeconds = (std::max)(_statistics.MaxFaceAgeSeconds,
-                    state.Clock.FullAge(SourceTime(), face));
-        _statistics.AdditionalLagSeconds = (std::max)(_statistics.AdditionalLagSeconds,
-            state.Clock.AdditionalLag(SourceTime()));
     }
     WriteProbeData(commands, _enabled);
     _planPrepared = false;
@@ -952,62 +861,22 @@ void GDX12ReflectionProbePass::EndGeometry(GDX12CommandList* commands)
 
 void GDX12ReflectionProbePass::ResetHistory()
 {
-    _publications.clear();
     for (auto& probe : _probes)
     {
         probe.Ready = false;
         probe.CapturedFaces = probe.BakedFaces = probe.NextFace = 0;
         probe.LastUpdate = 0;
         probe.RebakePending = false;
-        probe.SourceTimes = probe.PublishedTimes = {};
-        probe.Clock.Reset();
-        ++probe.Epoch;
-        probe.PublicationRecorded = false;
     }
     _scheduler.Reset();
     _roundRobinProbe = 0;
     _frameNumber = 0;
-    _remoteWork.reset();
-    _scheduledWork.clear();
     _planPrepared = _capturePlanned = _staticShadowsPlanned = false;
     if (_staticLocalShadows) _staticLocalShadows->InvalidateCache();
 }
 
-GDX12ReflectionProbePass::FacePayload GDX12ReflectionProbePass::RawFace(UINT probe, UINT face)
-{
-    if (face >= 6) throw std::out_of_range("Reflection face");
-    auto& state = _probes.at(probe);
-    const UINT mips = CubeMipCount(state.Source.Resolution);
-    return {state.Raw.get(), face * _publishedMips + (_publishedMips - mips), state.SourceTimes[face]};
-}
-
-void GDX12ReflectionProbePass::ImportFace(UINT probe, UINT face, double sourceTime)
-{
-    if (face >= 6 || sourceTime != _frameSourceTime) throw std::logic_error("Incompatible reflection face snapshot");
-    auto& state = _probes.at(probe);
-    state.SourceTimes[face] = sourceTime;
-    state.CapturedFaces |= 1u << face;
-    ++_statistics.EffectiveSecondaryFaces;
-}
-
-void GDX12ReflectionProbePass::ImportPublished(UINT probe, const std::array<double, 6>& sourceTimes)
-{
-    auto& state = _probes.at(probe);
-    if (state.CapturedFaces != 63 || state.SourceTimes != sourceTimes)
-        throw std::logic_error("Filtered reflection cube does not match the assembled faces");
-    state.PublishedTimes = sourceTimes;
-    state.Clock.Publish(sourceTimes, SourceTime());
-    state.Published = state.Source;
-    state.CapturedFaces = 0;
-    state.Ready = true;
-    state.LastUpdate = _frameNumber;
-    if (state.RebakePending) { state.BakedFaces = 0; state.RebakePending = false; }
-    ++_statistics.PublishedProbes;
-}
-
 void GDX12ReflectionProbePass::ClearDenendencies()
 {
-    _publications.clear();
     GDX12RenderPass::ClearDenendencies();
     if (_staticLocalShadows) _staticLocalShadows->ClearDenendencies();
     _staticLocalShadows.reset();
