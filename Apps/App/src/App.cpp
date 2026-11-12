@@ -10,6 +10,7 @@
 #include <chrono>
 #include <fstream>
 #include <iomanip>
+#include <map>
 #include <psapi.h>
 #include <shellapi.h>
 #include <d3d12sdklayers.h>
@@ -28,6 +29,7 @@
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
 #include "Engine.RendererDX12/GDX12FrameGeneration.h"
 #include "App.Base/LoadingSettings.h"
+#include "App.Base/Rendering/CrossAdapterWork.h"
 
 namespace
 {
@@ -161,6 +163,8 @@ namespace
                 _qualitySaveWinner = std::move(saveWinner);
                 _qualityExit = exitWhenDone;
                 _qualityRun = 0;
+                _transferCalibration.clear();
+                _transferHints.clear();
                 _qualityTechniques = BistroQuality::SearchTechniques(ConsoleModule{});
                 _qualityWinner.reset();
                 _winnerPatch.clear();
@@ -570,6 +574,76 @@ namespace
             return true;
         }
 
+        bool PrepareTransferCalibration(RenderModule& renderer)
+        {
+            static constexpr UINT64 sizes[]{4096, 65536, 262144, 1048576, 8388608, 41943040, 197918720};
+            if (_transferCalibration.size() == 2 * std::size(sizes)) return false;
+            auto& runtime = *renderer.GetMGPURuntime();
+            const auto devices = renderer.GetMGPUDevices();
+            renderer.DrainFrameWork();
+            if (_transferCalibration.empty()) runtime.SetTransferCalibration({});
+            const auto index = _transferCalibration.size();
+            auto& producer = *(index % 2 ? devices.Secondary : devices.Primary);
+            auto& consumer = *(index % 2 ? devices.Primary : devices.Secondary);
+            CrossAdapterWork work(runtime);
+            _qualityStatus = "Calibrating GPU transfers " + std::to_string(index + 1) + "/" + std::to_string(2 * std::size(sizes));
+            _transferCalibration.push_back(work.Calibrate(producer, consumer, sizes[index / 2]));
+            if (_transferCalibration.size() == 2 * std::size(sizes))
+            {
+                runtime.SetTransferCalibration(_transferCalibration);
+                _qualitySearch->SetTransferCostEstimate([this](const auto& candidate) { return TransferOrderingCost(candidate); });
+                std::ofstream report(_qualityOutput / "transfer-calibration.json");
+                report << std::setprecision(12) << "{\"schema\":1,\"path\":\"synchronous snapshot pack/export/import/unpack\","
+                    << "\"physical_maximum\":false,\"content_verified\":true,\"warmup_copies\":3,\"steady_samples\":20,"
+                    << "\"primary_luid\":" << renderer.GetMGPUStatus().PrimaryLuid
+                    << ",\"secondary_luid\":" << renderer.GetMGPUStatus().ActiveSecondaryLuid << ",\"samples\":[";
+                for (size_t sample = 0; sample < _transferCalibration.size(); ++sample)
+                {
+                    const auto& value = _transferCalibration[sample];
+                    report << (sample ? "," : "") << "{\"direction\":\"" << (sample % 2 ? "secondary-primary" : "primary-secondary")
+                        << "\",\"bytes\":" << value.Bytes << ",\"cold_ms\":" << value.ColdMs
+                        << ",\"minimum_ms\":" << value.MinimumMs << ",\"median_ms\":" << value.MedianMs
+                        << ",\"p95_ms\":" << value.P95Ms << ",\"optimistic_payload_hz\":" << 1000 / value.MinimumMs
+                        << ",\"median_payload_bytes_per_second\":" << value.Bytes * 1000 / value.MedianMs << "}";
+                }
+                report << "]}\n";
+                report.close();
+                if (!report) throw std::runtime_error("Cannot export GPU transfer calibration");
+            }
+            Timer.Reset();
+            return true;
+        }
+
+        static BistroQualitySearch::Candidate TransferWorkload(BistroQualitySearch::Candidate candidate)
+        {
+            candidate.MGPU.Water.Secondary = candidate.MGPU.Grass.Secondary = false;
+            candidate.MGPU.Water.Exact = candidate.MGPU.Grass.Exact = false;
+            candidate.MGPU.Sun.Secondary = candidate.MGPU.Particles.Secondary = false;
+            for (auto& light : candidate.MGPU.LocalShadows) light.Route.Secondary = false;
+            candidate.MGPU.Reflections.Placement = 0;
+            candidate.MGPU.Reflections.SecondaryFaces = {};
+            return candidate;
+        }
+
+        std::optional<double> TransferOrderingCost(const BistroQualitySearch::Candidate& candidate) const
+        {
+            double cost = 0;
+            const auto workload = TransferWorkload(candidate);
+            for (const auto* technique : {"particles", "reflection-probes"})
+                for (auto hint = _transferHints.rbegin(); hint != _transferHints.rend(); ++hint)
+                {
+                    if (!(TransferWorkload(hint->Settings) == workload)) continue;
+                    if (std::string_view(technique) == "particles" &&
+                        !(hint->Settings.MGPU.Particles == candidate.MGPU.Particles)) continue;
+                    if (std::string_view(technique) == "reflection-probes" &&
+                        !(hint->Settings.MGPU.Reflections == candidate.MGPU.Reflections)) continue;
+                    const auto found = hint->Costs.find(technique);
+                    if (found != hint->Costs.end()) { cost += found->second; break; }
+                }
+            // Unknown paths remain eligible; the estimate only orders trials of the same workload.
+            return cost;
+        }
+
         void BeginQualityFrame(RenderModule& renderer)
         {
             if (_qualityInterrupted || bInactive != _qualityBackground)
@@ -580,6 +654,7 @@ namespace
                     ", actual inactive=" + std::to_string(bInactive));
                 return;
             }
+            if (_qualitySearch && renderer.GetMGPUStatus().SecondaryReady && PrepareTransferCalibration(renderer)) return;
             if (!_flight)
             {
                 PrepareQualityTrial();
@@ -630,6 +705,7 @@ namespace
                     return;
                 }
                 _setupSeconds = QualityTime() - _setupStarted;
+                if (auto* runtime = renderer.GetMGPURuntime()) runtime->ResetTransferLoad();
                 _trialReady = true;
                 if (BistroQuality::MGPUProfile.GetValue())
                 {
@@ -675,6 +751,11 @@ namespace
             if (_flight->State() == Phase::WarmupReady)
             {
                 _warmupFps = _flight->StableWarmupFps();
+                if (auto* runtime = renderer.GetMGPURuntime())
+                {
+                    _warmupTransferLoad = runtime->GetTransferLoad();
+                    runtime->ResetTransferLoad();
+                }
                 _measurementTicks = BenchmarkTicks;
                 _measurementRequested = BenchmarkRequested;
                 _flight->StartFlight();
@@ -797,6 +878,16 @@ namespace
             auto* primary = renderer.GetMGPUDevices().Primary;
             const auto luid = primary->GetAdapterLuid();
             const auto [readyProbes, configuredProbes] = renderer.GetWorldProbeReadiness();
+            const auto transferLoad = renderer.GetMGPURuntime() ? renderer.GetMGPURuntime()->GetTransferLoad() :
+                RenderMGPURuntime::TransferLoad{};
+            if (_qualitySearch && _qualityRequest && metrics.FrameCount && renderer.GetMGPURuntime())
+            {
+                TransferHint hint{_qualityRequest->Settings, {}};
+                for (const auto& [name, load] : renderer.GetMGPURuntime()->GetTechniqueTransferLoads())
+                    if (load.Transfers > load.UnknownTransfers)
+                        hint.Costs[name] = load.OptimisticMilliseconds / metrics.FrameCount;
+                _transferHints.push_back(std::move(hint));
+            }
             D3D12MA::Budget localBudget{};
             primary->GetMemoryAllocator()->GetBudget(&localBudget, nullptr);
             D3D12MA::Budget secondaryBudget{};
@@ -821,6 +912,12 @@ namespace
                 << ",\n  \"background_window\": " << std::boolalpha << _qualityBackground << std::noboolalpha
                 << ",\n  \"initial_workload\": \"" << std::hex << _qualityWorkload << std::dec << '"'
                 << ",\n  \"prepare_seconds\": " << _setupSeconds
+                << ",\n  \"synchronous_transfer_estimate_ms\": " << transferLoad.OptimisticMilliseconds
+                << ",\n  \"synchronous_transfer_calls\": " << transferLoad.Transfers
+                << ",\n  \"synchronous_transfer_unknown_calls\": " << transferLoad.UnknownTransfers
+                << ",\n  \"transfer_estimate_usage\": \"ordering only; sampled synchronous packets; native async paths unknown\""
+                << ",\n  \"warmup_synchronous_transfer_estimate_ms\": " << _warmupTransferLoad.OptimisticMilliseconds
+                << ",\n  \"warmup_synchronous_transfer_unknown_calls\": " << _warmupTransferLoad.UnknownTransfers
                 << ",\n  \"warmup_protocol_seconds\": " << BistroBenchmarkFlight::WarmupSeconds
                 << ",\n  \"flight_protocol_seconds\": " << BistroBenchmarkFlight::FlightSeconds
                 << ",\n  \"effective_upscaler\": \"Native\",\n  \"effective_frame_generation\": \"Off\""
@@ -1065,6 +1162,14 @@ namespace
         std::optional<BistroQualitySearch::Request> _qualityRequest;
         std::optional<BistroQualitySearch::Selection> _qualityWinner;
         std::optional<BistroBenchmarkFlight::Sampler> _flight;
+        std::vector<RenderMGPURuntime::TransferCalibration> _transferCalibration;
+        RenderMGPURuntime::TransferLoad _warmupTransferLoad;
+        struct TransferHint
+        {
+            BistroQualitySearch::Candidate Settings;
+            std::map<std::string, double> Costs;
+        };
+        std::vector<TransferHint> _transferHints;
         std::optional<double> _warmupFps;
         BistroRenderPipeline* _qualityPipeline = nullptr;
         std::map<std::string, BistroQualitySearch::FreshnessMeasurements> _freshness;

@@ -19,7 +19,8 @@ public:
         UINT64 Bytes = 0, Invocation = 0;
         GDX12Submission::AdapterId Producer{}, Consumer{};
     };
-    explicit CrossAdapterWork(RenderMGPURuntime& runtime) : _runtime(runtime) {}
+    explicit CrossAdapterWork(RenderMGPURuntime& runtime, const char* technique = "snapshot")
+        : _runtime(runtime), _technique(technique) {}
     View Identify(std::shared_ptr<GDX12Resource> resource, GDX12Device& device);
     View Allocate(GDX12Device& device, UINT64 bytes);
     void Wait(GDX12Submission::CompletionPoint point);
@@ -46,9 +47,11 @@ public:
     };
     UINT64 Copy(Channel& channel, GDX12Device& producer, GDX12Device& consumer,
         const std::vector<CopyRegion>& regions);
+    RenderMGPURuntime::TransferCalibration Calibrate(GDX12Device& producer, GDX12Device& consumer, UINT64 bytes);
 private:
     void ImportVersion(GDX12RenderGraph& graph, GDX12RenderGraph::ExecutionBindings& bindings,
         GDX12RenderGraph::Resource id, const Use& use);
     RenderMGPURuntime& _runtime;
+    const char* _technique;
     Profile _profile;
 };

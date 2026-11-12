@@ -60,7 +60,7 @@ ParticleMGPUControls GetParticleMGPUControls()
 
 CrossAdapterParticles::CrossAdapterParticles(GDX12DeviceResources& primary, GDX12Device& secondary,
     RenderMGPURuntime& runtime, GDX12ParticleSimulationPass& simulation, GDX12ParticlesPass& draw)
-    : _primary(primary), _runtime(runtime), _work(runtime), _simulation(simulation), _draw(draw),
+    : _primary(primary), _runtime(runtime), _work(runtime, "particles"), _simulation(simulation), _draw(draw),
       _inputChannel(std::make_unique<Channel>()), _outputChannel(std::make_unique<Channel>())
 {
     _secondary.Device = &secondary;

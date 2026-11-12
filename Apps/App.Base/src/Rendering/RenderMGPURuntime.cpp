@@ -2,6 +2,7 @@
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12SnapshotTransport.h"
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 
 using namespace GDX12Submission;
@@ -70,6 +71,48 @@ ResourceIdentity RenderMGPURuntime::IdentifyResource(const std::shared_ptr<GDX12
     const ResourceIdentity identity{NewResourceId(), adapter, NewEpoch(), TransferId::Invalid, NewAllocationId()};
     _resources.push_back({resource, identity});
     return identity;
+}
+
+void RenderMGPURuntime::SetTransferCalibration(std::vector<TransferCalibration> samples)
+{
+    CheckOpen();
+    for (const auto& sample : samples)
+        if (!FindDevice(sample.Producer) || !FindDevice(sample.Consumer) || sample.Producer == sample.Consumer ||
+            !sample.Bytes || !std::isfinite(sample.ColdMs) || !std::isfinite(sample.MinimumMs) ||
+            !std::isfinite(sample.MedianMs) || !std::isfinite(sample.P95Ms) || sample.ColdMs <= 0 ||
+            sample.MinimumMs <= 0 || sample.MinimumMs > sample.MedianMs || sample.MedianMs > sample.P95Ms)
+            throw std::invalid_argument("Invalid MGPU transfer calibration sample");
+    _transferCalibration = std::move(samples);
+    ResetTransferLoad();
+}
+
+void RenderMGPURuntime::ObserveSynchronousTransfer(AdapterId producer, AdapterId consumer, UINT64 bytes, const char* technique)
+{
+    if (_transferCalibration.empty()) return;
+    const auto estimate = EstimateTransferMilliseconds(producer, consumer, bytes);
+    for (auto* load : {&_transferLoad, &_techniqueTransferLoads[technique]})
+    {
+        ++load->Transfers;
+        if (estimate) load->OptimisticMilliseconds += *estimate;
+        else ++load->UnknownTransfers;
+    }
+}
+
+std::optional<double> RenderMGPURuntime::EstimateTransferMilliseconds(AdapterId producer, AdapterId consumer, UINT64 bytes) const
+{
+    if (!bytes) return 0;
+    const TransferCalibration* lower = nullptr;
+    const TransferCalibration* upper = nullptr;
+    for (const auto& sample : _transferCalibration)
+    {
+        if (sample.Producer != producer || sample.Consumer != consumer) continue;
+        if (sample.Bytes <= bytes && (!lower || sample.Bytes > lower->Bytes)) lower = &sample;
+        if (sample.Bytes >= bytes && (!upper || sample.Bytes < upper->Bytes)) upper = &sample;
+    }
+    if (!lower || !upper) return std::nullopt;
+    const double weight = upper->Bytes == lower->Bytes ? 0 :
+        double(bytes - lower->Bytes) / double(upper->Bytes - lower->Bytes);
+    return lower->MinimumMs + weight * (upper->MinimumMs - lower->MinimumMs);
 }
 
 ResourceId RenderMGPURuntime::NewResourceId() { return ResourceId{NextId()}; }
