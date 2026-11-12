@@ -39,14 +39,28 @@ public:
     void RetireFrame(GDX12Submission::CompletionPoint tail);
     void Invalidate();
     const CrossAdapterShadowRaster::SubmissionTrace* GetTrace(GDX12ShadowAtlas atlas) const;
+    struct UnitDiagnostics
+    {
+        GDX12LocalShadowKey Light;
+        bool Sun = false, RequestedSecondary = false, EffectiveSecondary = false, Latest = false;
+        UINT Interval = 1;
+        double SourceTime = 0;
+        CrossAdapterShadows::Statistics Transfer;
+        double AgeMilliseconds() const { return SourceTime > 0 ? (ShadowSourceTimeSeconds() - SourceTime) * 1000 : -1; }
+    };
+    const std::vector<UnitDiagnostics>& GetDiagnostics() const { return _diagnostics; }
 
 private:
     struct AtlasRoute;
     std::optional<std::vector<GDX12RenderGraph::LegacyExternalView>> PrepareBoundary(GDX12ShadowAtlas atlas);
     std::optional<GDX12Submission::CompletionPoint> Submit(GDX12ShadowAtlas atlas,
         const GDX12RenderGraph::LegacyBoundary& boundary, GDX12Submission::CompletionPoint prefix);
+    GDX12Submission::CompletionPoint SubmitPolicy(GDX12ShadowAtlas atlas, CrossAdapterShadowRaster::Input primary,
+        CrossAdapterShadowRaster::Input secondary, GDX12Submission::CompletionPoint prefix);
+    void ClearUnits(GDX12ShadowAtlas atlas);
 
     GDX12DeviceResources& _primary;
+    GDX12Device& _secondary;
     RenderMGPURuntime& _runtime;
     GDX12CascadedShadowPass& _sun;
     GDX12LocalShadowPass& _local;
@@ -65,4 +79,8 @@ private:
     ResolveApplication _resolveApplication;
     CrossAdapterSceneReplica::FrameStamp _stamp;
     std::uint64_t _invocation = 0;
+    std::uint64_t _policyFrame = 0;
+    double _sourceTime = 0;
+    bool _policyEnabled = false;
+    std::vector<UnitDiagnostics> _diagnostics;
 };

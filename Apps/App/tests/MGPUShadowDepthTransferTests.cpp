@@ -55,18 +55,29 @@ static void CheckLayouts()
     auto stale = primaryPoint;
     ++stale.Views[5].CasterRevision;
     Require(!mixed->ResolveDestination({ stale, primarySpot }), "One stale point face must reject the full group");
+    stale.Views[0].ViewProj._41 += 3;
+    const auto snapshot = mixed->ResolveSnapshot({ stale, primarySpot });
+    Require(snapshot && mixed->ResolveDestination(*snapshot) &&
+        (*snapshot)[0].Views[0].Region.Slice == stale.Views[0].Region.Slice &&
+        (*snapshot)[0].Views[0].ViewProj._41 == point.Views[0].ViewProj._41 &&
+        (*snapshot)[0].Views[5].CasterRevision == point.Views[5].CasterRevision,
+        "Latest restore must pair old matrices/revisions with the current destination slices");
+    Require(!mixed->ResolveSnapshot({ recycled, primarySpot }) && !mixed->ResolveSnapshot({ primarySpot }),
+        "Latest metadata must reject missing and recycled lights");
+    auto changedType = primaryPoint;
+    changedType.Type = GDX12ShadowOutput::Kind::Spot;
+    Require(!mixed->ResolveSnapshot({ changedType, primarySpot }), "Latest metadata accepted another light type");
     auto overlap = untouched;
     overlap.Views[0].Region.Slice = 5;
     Require(!mixed->ResolveDestination({ primaryPoint, overlap, primarySpot }),
         "Restore must never overwrite a slice owned by an unselected light");
     auto partial = point;
-    partial.Views[5].Region = {};
+    partial.Views[5].Region.Width = 0;
     const auto outOfRange = MakeLocal(2, 10, D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION - 5, true);
-    Require(!GDX12ShadowTransferLayout::Build(GDX12ShadowAtlas::Local, { partial }) &&
-        !GDX12ShadowTransferLayout::Build(GDX12ShadowAtlas::Local, { spot, spot }) &&
-        !GDX12ShadowTransferLayout::Build(GDX12ShadowAtlas::Local, { outOfRange }) &&
-        !GDX12ShadowTransferLayout::Build(GDX12ShadowAtlas::Local, {}),
-        "Partial, duplicate, out-of-range and empty publications must not create a transfer");
+    Require(!GDX12ShadowTransferLayout::Build(GDX12ShadowAtlas::Local, { partial }), "Partial publication created a transfer");
+    Require(!GDX12ShadowTransferLayout::Build(GDX12ShadowAtlas::Local, { spot, spot }), "Duplicate publication created a transfer");
+    Require(!GDX12ShadowTransferLayout::Build(GDX12ShadowAtlas::Local, { outOfRange }), "Out-of-range publication created a transfer");
+    Require(!GDX12ShadowTransferLayout::Build(GDX12ShadowAtlas::Local, {}), "Empty publication created a transfer");
 
     auto sun = BuildSunShadowOutput({}, 1, 17, false);
     const auto sunLayout = GDX12ShadowTransferLayout::Build(GDX12ShadowAtlas::Sun, { sun });

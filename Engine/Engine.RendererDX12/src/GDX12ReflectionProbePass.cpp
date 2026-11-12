@@ -397,7 +397,9 @@ GDX12GraphicsBindings GDX12ReflectionProbePass::CaptureBindings(const UINT face,
     binding.SRVs.push_back({ 2, constants->ShadowInstances->GetSRV()->GPUHandle });
     binding.SRVs.push_back({ 3, _sunShadow.GetSRV()->GPUHandle });
     for (UINT i = 0; i < 3; ++i) binding.SRVs.push_back({ 4 + i, _inputs[i]->GetTexture()->GetSRV()->GPUHandle });
-    binding.SRVs.push_back({ 7, constants->ShadowLights->GetSRV()->GPUHandle });
+    auto& lights = _staticLocalShadows && localShadows == _staticLocalShadows->GetOutput(0)->GetTexture() ?
+        *constants->ShadowLights : constants->LightingLocalLights();
+    binding.SRVs.push_back({ 7, lights.GetSRV()->GPUHandle });
     binding.SRVs.push_back({ 8, localShadows->GetSRV()->GPUHandle });
     binding.SRVs.push_back({ 9, _inputs[3]->GetTexture()->GetSRV()->GPUHandle });
     binding.CBVs.push_back({ 4, _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->SkyCB->GetElementAddress(0) });
@@ -760,6 +762,9 @@ void GDX12ReflectionProbePass::Prepare()
             prepared.Lighting.LocalShadows = geometry == StaticGeometry ?
                 _staticLocalShadows->GetOutput(0)->GetTexture() : _inputs[4]->GetTexture();
             prepared.Lighting.ShadowConstants = frame.Shadow->GetElementAddress(0);
+            auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+            prepared.Lighting.LocalLights = geometry == StaticGeometry ?
+                constants->ShadowLights.get() : &constants->LightingLocalLights();
             view.CaptureLighting = &prepared.Lighting;
             view.ColorTargetCount = 1;
             view.ColorFormats[0] = baked ? state.BakedColor->GetFormat() : _raw.GetFormat();

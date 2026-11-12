@@ -163,7 +163,7 @@ public:
         lighting.Prefiltered = _inputs[3]->GetTexture();
         lighting.BRDF = _inputs[4]->GetTexture();
         lighting.LocalShadows = _inputs[5]->GetTexture();
-        lighting.ShadowConstants = currentFrameConstants->ShadowCB->GetElementAddress(0);
+        lighting.ShadowConstants = currentFrameConstants->LightingShadowConstants().GetElementAddress(0);
         view.CaptureLighting = &lighting;
         GDX12GraphicsBindings binding;
         binding.Stage = view.Stage;
@@ -179,7 +179,7 @@ public:
 		    currentCameraVisBuffers.TransparentBatches ? currentCameraVisBuffers.TransparentBatches->VisibleInstancesAddress() : geometryAddress } };
 		binding.Pipeline = _transparencyPSO;
 		binding.CBVs.push_back({ 1, currentFrameConstants->MainCB->GetElementAddress(0) });
-		binding.CBVs.push_back({ 3, currentFrameConstants->ShadowCB->GetElementAddress(0) });
+		binding.CBVs.push_back({ 3, currentFrameConstants->LightingShadowConstants().GetElementAddress(0) });
 		binding.CBVs.push_back({ 2, currentFrameConstants->CameraCB->
 			GetElementAddress(_commonData->ActiveCameraCBufferIndex) });
 		binding.Heap = _resources->SRV_UAV_Heap.get();
@@ -188,7 +188,7 @@ public:
 		binding.SRVs.push_back({ 2, currentFrameConstants->ShadowInstances->GetSRV()->GPUHandle });
 		for (UINT input = 1; input < 5; ++input)
 			binding.SRVs.push_back({ 2 + input, _inputs[input]->GetTexture()->GetSRV()->GPUHandle });
-		binding.SRVs.push_back({ 7, currentFrameConstants->ShadowLights->GetSRV()->GPUHandle });
+		binding.SRVs.push_back({ 7, currentFrameConstants->LightingLocalLights().GetSRV()->GPUHandle });
 		binding.SRVs.push_back({ 8, _inputs[5]->GetTexture()->GetSRV()->GPUHandle });
 		binding.SRVs.push_back({ 9, _resources->ReflectionRadianceSRV.GPUHandle });
 		binding.SRVs.push_back({ 10, currentFrameConstants->ReflectionProbes->GetSRV()->GPUHandle });

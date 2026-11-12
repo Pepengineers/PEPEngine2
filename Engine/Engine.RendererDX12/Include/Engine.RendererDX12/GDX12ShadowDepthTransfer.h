@@ -28,6 +28,9 @@ public:
     UINT Extent() const { return _extent; }
     UINT Layers() const { return static_cast<UINT>(_sourceViews.size()); }
     const std::vector<GDX12ShadowTransferView>& SourceViews() const { return _sourceViews; }
+    const std::vector<GDX12ShadowOutput>& Outputs() const { return _groups; }
+    std::optional<std::vector<GDX12ShadowOutput>> ResolveSnapshot(
+        const std::vector<GDX12ShadowOutput>& prepared) const;
     std::optional<std::vector<GDX12ShadowTransferView>> ResolveDestination(
         const std::vector<GDX12ShadowOutput>& prepared) const;
 

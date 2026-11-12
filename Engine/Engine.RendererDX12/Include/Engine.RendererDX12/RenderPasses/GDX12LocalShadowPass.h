@@ -97,6 +97,7 @@ public:
     {
         GDX12_SCOPED_CPU_EVENT("Local shadow pass preparation");
         if (_prepared) return;
+        ++_policyFrame;
         const bool perFaceVisibility = _resources->LocalShadowCasters.has_value();
         _compactDynamic = !_staticOnly && perFaceVisibility;
         _preparedSceneRevision = _compactDynamic ? _resources->GeometryRevision : _resources->ReflectionStaticRevision;
@@ -160,7 +161,24 @@ public:
             const bool force = ShouldRenderLocalShadow(cacheKey, cached ? &cached->Light : nullptr);
             for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
                 if (force || cached->Casters[face] != casters[face]) _dirtyFaces[lightIndex] |= 1u << face;
-            _preparedCache[lightIndex] = CachedShadow{ light, casters };
+            const auto policy = ReadShadowUpdatePolicy(light.EntityId);
+            const bool unchanged = _dirtyFaces[lightIndex] == 0;
+            _preparedCache[lightIndex] = CachedShadow{ light, casters, ShadowSourceTimeSeconds(), policy };
+            if (!_staticOnly && IsShadowPolicyEnabled() && !policy.Secondary && cached && cached->Policy == policy &&
+                GetLocalShadowKey(cached->Light) == GetLocalShadowKey(light) && cached->Light.Type == light.Type &&
+                cached->Light.ShadowFirstSlice == light.ShadowFirstSlice && !ShadowUpdateDue(_policyFrame, policy.Interval, true))
+            {
+                _dirtyFaces[lightIndex] = 0;
+                _preparedCache[lightIndex] = cached;
+                if (unchanged) _preparedCache[lightIndex]->SourceTime = ShadowSourceTimeSeconds();
+            }
+            if (!_staticOnly && IsShadowPolicyEnabled() && !policy.Secondary)
+            {
+                auto displayed = light;
+                ApplyShadowSnapshot(displayed, BuildLocalShadowOutput(_preparedCache[lightIndex]->Light,
+                    _preparedCache[lightIndex]->Casters, _preparedSceneRevision, false, resolution));
+                _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->DisplayShadowLights->CopyData(lightIndex, displayed);
+            }
             for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
             {
                 GDX12GeometryContext view = { GDX12GeometryStage::Shadow, Matrix(light.ShadowViewProj[face]).Transpose(), Vector3(light.Position) };
@@ -195,6 +213,15 @@ public:
     {
         return _staticShadows ? _staticShadows->DescribePreparedShadows(selection) : DescribePreparedShadows(selection);
     }
+
+    double GetDisplayedSourceTime(GDX12LocalShadowKey key) const
+    {
+        const auto& cache = _prepared ? _preparedCache : _cached;
+        for (const auto& entry : cache)
+            if (entry && GetLocalShadowKey(entry->Light) == key) return entry->SourceTime;
+        return 0;
+    }
+    void ResetUpdateSchedule() { _policyFrame = 0; InvalidateCache(); }
 
     UINT GetGeometryViewCapacity() const override
     {
@@ -500,6 +527,8 @@ private:
     {
         GDX12LocalLightConstants Light;
         std::array<uint64_t, 6> Casters;
+        double SourceTime = 0;
+        GDX12ShadowUpdatePolicy Policy;
     };
     std::vector<std::optional<CachedShadow>> _cached, _preparedCache;
     std::vector<UINT> _dirtyFaces, _emptyDynamicFaces;
@@ -507,6 +536,7 @@ private:
     std::vector<std::pair<UINT, UINT>> _viewFaces;
     bool _dynamicBegun = false;
     bool _prepared = false;
+    uint64_t _policyFrame = 0;
     std::vector<std::unique_ptr<GDX12Descriptor>> _dsvs;
     std::unique_ptr<GDX12Texture> _maps;
     std::unique_ptr<GDX12LocalShadowPass> _staticShadows;

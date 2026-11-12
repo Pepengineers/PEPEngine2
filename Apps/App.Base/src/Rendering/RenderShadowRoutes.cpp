@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <limits>
 #include <utility>
+#include <map>
 
 namespace
 {
@@ -19,17 +20,30 @@ size_t Index(GDX12ShadowAtlas atlas) { return static_cast<size_t>(atlas); }
 
 struct RenderShadowRoutes::AtlasRoute
 {
+    struct Unit
+    {
+        Unit(GDX12Device& primary, GDX12Device& secondary, RenderMGPURuntime& runtime, GDX12ShadowAtlas atlas)
+            : PrimaryRaster(primary, runtime, atlas), SecondaryRaster(secondary, runtime, atlas),
+              Transfer(primary, secondary, runtime) {}
+        Raster PrimaryRaster, SecondaryRaster;
+        CrossAdapterShadows Transfer;
+        GDX12ShadowUpdatePolicy Policy;
+        std::optional<GDX12ShadowOutput> Displayed;
+        double SourceTime = 0;
+        ID3D12Resource* Atlas = nullptr;
+    };
     AtlasRoute(GDX12Device& primary, GDX12Device& secondary, RenderMGPURuntime& runtime, GDX12ShadowAtlas atlas)
         : PrimaryRaster(primary, runtime, atlas), SecondaryRaster(secondary, runtime, atlas) {}
 
     Raster PrimaryRaster, SecondaryRaster;
     Raster::Input Primary, Secondary;
     std::shared_ptr<const Raster::SubmissionTrace> Trace;
+    std::map<std::pair<UINT, uint64_t>, std::unique_ptr<Unit>> Units;
 };
 
 RenderShadowRoutes::RenderShadowRoutes(GDX12DeviceResources& primary, GDX12Device& secondary, RenderMGPURuntime& runtime,
     GDX12CascadedShadowPass& sun, GDX12LocalShadowPass& local)
-    : _primary(primary), _runtime(runtime), _sun(sun), _local(local), _transfer(*primary.Device, secondary, runtime),
+    : _primary(primary), _secondary(secondary), _runtime(runtime), _sun(sun), _local(local), _transfer(*primary.Device, secondary, runtime),
       _replica(runtime, secondary), _quality(primary.ShadowQuality)
 {
     for (auto atlas : { GDX12ShadowAtlas::Sun, GDX12ShadowAtlas::Local })
@@ -45,6 +59,7 @@ void RenderShadowRoutes::UpdateQuality()
     const auto retire = [&](GDX12ShadowAtlas atlas)
     {
         _transfer.RetireAtlas(atlas);
+        ClearUnits(atlas);
         auto& route = *_routes[Index(atlas)];
         route.Primary = {};
         route.Secondary = {};
@@ -64,6 +79,30 @@ void RenderShadowRoutes::PrepareFrame(RenderModule& render)
     if (_invocation == (std::numeric_limits<std::uint64_t>::max)())
         throw std::overflow_error("Shadow replica invocation ID exhausted");
     _stamp = { render.GetFrameSubmissionId(), ProducerInvocationId{++_invocation}, _primary.GeometryRevision };
+    _sourceTime = ShadowSourceTimeSeconds();
+    if (_policyEnabled != IsShadowPolicyEnabled())
+    {
+        ClearUnits(GDX12ShadowAtlas::Sun);
+        ClearUnits(GDX12ShadowAtlas::Local);
+        _policyEnabled = IsShadowPolicyEnabled();
+        _policyFrame = 0;
+    }
+    ++_policyFrame;
+    _diagnostics.clear();
+    if (_policyEnabled)
+    {
+        if (_sun.DescribePreparedShadow({}))
+        {
+            const auto policy = ReadShadowUpdatePolicy();
+            _diagnostics.push_back({ {}, true, policy.Secondary, false, policy.Latest, policy.Interval, _sun.GetDisplayedSourceTime() });
+        }
+        for (const auto& output : _local.DescribePreparedShadows({}))
+        {
+            const auto policy = ReadShadowUpdatePolicy(output.Light.EntityId);
+            _diagnostics.push_back({ output.Light, false, policy.Secondary, false, policy.Latest, policy.Interval,
+                _local.GetDisplayedSourceTime(output.Light) });
+        }
+    }
     _resolveApplication = {};
     for (const auto& route : _routes) route->Trace.reset();
     _selection = _transfer.ReadSelection(_local.DescribePreparedShadows({}));
@@ -83,10 +122,27 @@ void RenderShadowRoutes::Configure(Graph& graph, GDX12RenderPass& node, GDX12Sha
         bindings.LegacyReplacements.push_back({ nullptr, {}, [this](auto tail) { RetireFrame(tail); }, {} });
 }
 
-void RenderShadowRoutes::RetireFrame(CompletionPoint tail) { _transfer.RetireFrame(tail); }
+void RenderShadowRoutes::RetireFrame(CompletionPoint tail)
+{
+    _transfer.RetireFrame(tail);
+    for (const auto& route : _routes)
+        for (const auto& [key, unit] : route->Units) unit->Transfer.RetireFrame(tail);
+}
+
+void RenderShadowRoutes::ClearUnits(GDX12ShadowAtlas atlas)
+{
+    auto& units = _routes[Index(atlas)]->Units;
+    for (const auto& [key, unit] : units) unit->Transfer.RetireAtlas(atlas);
+    units.clear();
+}
 
 void RenderShadowRoutes::Invalidate()
 {
+    _policyFrame = 0;
+    _sun.ResetUpdateSchedule();
+    _local.ResetUpdateSchedule();
+    ClearUnits(GDX12ShadowAtlas::Sun);
+    ClearUnits(GDX12ShadowAtlas::Local);
     for (const auto& route : _routes)
     {
         route->PrimaryRaster.InvalidateCache();
@@ -295,6 +351,8 @@ std::optional<std::vector<Graph::LegacyExternalView>> RenderShadowRoutes::Prepar
     }
     a.Replica = std::move(primary);
     if (application.Prepare) application.Prepare(capture, a, b, lend);
+    if (IsShadowPolicyEnabled() && std::any_of(b.Groups.begin(), b.Groups.end(),
+        [&](const auto& group) { return !route.SecondaryRaster.IsReady(b, group); })) return fallback();
     if (std::none_of(b.Groups.begin(), b.Groups.end(), [&](const auto& group) { return route.SecondaryRaster.IsReady(b, group); }))
         return fallback();
     return loans;
@@ -309,9 +367,135 @@ std::optional<CompletionPoint> RenderShadowRoutes::Submit(GDX12ShadowAtlas atlas
     route.Primary.Atlas = { target.Native, target.Identity };
     auto primary = std::exchange(route.Primary, {});
     auto secondary = std::exchange(route.Secondary, {});
+    if (IsShadowPolicyEnabled()) return SubmitPolicy(atlas, std::move(primary), std::move(secondary), prefix);
     const auto trace = secondary.Trace;
     const auto receipt = SubmitPreparedShadows(_transfer, _selection, route.PrimaryRaster, std::move(primary),
         route.SecondaryRaster, std::move(secondary), prefix);
     if (receipt) route.Trace = trace;
     return receipt;
+}
+
+
+CompletionPoint RenderShadowRoutes::SubmitPolicy(GDX12ShadowAtlas atlas, Raster::Input primary,
+    Raster::Input secondary, CompletionPoint prefix)
+{
+    auto& route = *_routes[Index(atlas)];
+    const auto keyOf = [](const auto& output) { return std::pair{ output.Light.EntityId, output.Light.Generation }; };
+    const auto require = [](bool condition, const char* message)
+    { if (!condition) throw std::logic_error(message); };
+    for (auto it = route.Units.begin(); it != route.Units.end();)
+    {
+        if (std::any_of(primary.Groups.begin(), primary.Groups.end(), [&](const auto& group)
+            { return keyOf(group.Output) == it->first; })) { ++it; continue; }
+        it->second->Transfer.RetireAtlas(atlas);
+        it = route.Units.erase(it);
+    }
+    const auto originalCommit = primary.CommitLegacy;
+    primary.CommitLegacy = [] {};
+    const auto replicaCommit = secondary.CommitLegacy;
+    auto replicaSubmitted = std::make_shared<bool>(false);
+    secondary.CommitLegacy = [replicaCommit, replicaSubmitted]
+    {
+        if (*replicaSubmitted) return;
+        if (replicaCommit) replicaCommit();
+        *replicaSubmitted = true;
+    };
+    auto local = primary;
+    local.Groups.clear();
+    std::vector<AtlasRoute::Unit*> updatedPrimary;
+    for (const auto& group : primary.Groups)
+    {
+        const auto policy = ReadShadowUpdatePolicy(group.Output.Light.EntityId);
+        auto& owner = route.Units[keyOf(group.Output)];
+        if (owner && (!(owner->Policy == policy) || owner->Atlas != primary.Atlas.Resource->D3DResource.Get() ||
+            (owner->Displayed && !owner->Displayed->MatchesDestination(group.Output))))
+        {
+            owner->Transfer.RetireAtlas(atlas);
+            owner.reset();
+        }
+        if (!owner)
+        {
+            owner = std::make_unique<AtlasRoute::Unit>(*_primary.Device, _secondary, _runtime, atlas);
+            owner->Policy = policy;
+            owner->Atlas = primary.Atlas.Resource->D3DResource.Get();
+        }
+        const bool due = ShadowUpdateDue(_policyFrame, policy.Interval, owner->Displayed.has_value());
+        if (!policy.Secondary && due)
+        {
+            require(route.PrimaryRaster.IsReady(primary, group), "Primary shadow policy lacks a complete scene recipe");
+            local.Groups.push_back(group);
+            updatedPrimary.push_back(owner.get());
+        }
+    }
+    if (!local.Groups.empty())
+    {
+        const auto rendered = local.Groups;
+        const auto receipt = _transfer.SubmitPrimary(route.PrimaryRaster.Prepare(std::move(local)), prefix);
+        require(receipt.has_value(), "Primary shadow policy was not submitted");
+        prefix = *receipt;
+        for (size_t i = 0; i < updatedPrimary.size(); ++i)
+        {
+            updatedPrimary[i]->Displayed = rendered[i].Output;
+            updatedPrimary[i]->SourceTime = _sourceTime;
+        }
+    }
+    auto trace = std::make_shared<Raster::SubmissionTrace>();
+    trace->Stamp = _stamp;
+    for (const auto& group : primary.Groups)
+    {
+        auto& unit = *route.Units.at(keyOf(group.Output));
+        if (unit.Policy.Secondary)
+        {
+            auto a = primary;
+            a.Groups = { group };
+            auto b = secondary;
+            const auto remote = std::find_if(secondary.Groups.begin(), secondary.Groups.end(), [&](const auto& candidate)
+            { return keyOf(candidate.Output) == keyOf(group.Output); });
+            require(remote != secondary.Groups.end() && unit.SecondaryRaster.IsReady(secondary, *remote),
+                "Requested secondary shadow has no complete replica; refusing hidden primary fallback");
+            b.Groups = { *remote };
+            b.Trace = std::make_shared<Raster::SubmissionTrace>();
+            if (*replicaSubmitted) { b.Preparation.clear(); b.Upload.reset(); }
+            const auto evidence = b.Trace;
+            GDX12ShadowSelection selection{ atlas == GDX12ShadowAtlas::Sun ?
+                GDX12ShadowSelection::Mode::Sun : GDX12ShadowSelection::Mode::SpecificLight, group.Output.Light };
+            const bool due = ShadowUpdateDue(_policyFrame, unit.Policy.Interval, unit.Displayed.has_value());
+            const auto receipt = SubmitPreparedShadows(unit.Transfer, selection, unit.PrimaryRaster, std::move(a),
+                unit.SecondaryRaster, std::move(b), prefix, unit.Policy.Latest, due, _sourceTime);
+            require(receipt.has_value(), "Requested secondary shadow was not submitted; refusing hidden primary fallback");
+            prefix = *receipt;
+            const auto& displayed = unit.Transfer.GetDisplayedOutputs(atlas);
+            require(displayed.size() == 1, "Shadow publication metadata is incomplete");
+            unit.Displayed = displayed.front();
+            unit.SourceTime = unit.Transfer.GetDisplayedSourceTime(atlas);
+            trace->Groups.insert(trace->Groups.end(), evidence->Groups.begin(), evidence->Groups.end());
+        }
+        require(unit.Displayed.has_value(), "Shadow policy has no complete initial snapshot");
+        if (!unit.Policy.Secondary && unit.Displayed->MatchesDepthInputs(group.Output))
+            unit.SourceTime = atlas == GDX12ShadowAtlas::Sun ? _sun.GetDisplayedSourceTime() :
+                _local.GetDisplayedSourceTime(group.Output.Light);
+        auto& frame = *_primary.FrameConstants[_primary.CurrFrameConstantsIndex];
+        if (atlas == GDX12ShadowAtlas::Sun)
+            frame.DisplayShadowCB->CopyData(0, ShadowSnapshotConstants(*unit.Displayed));
+        else
+        {
+            const auto light = std::find_if(_primary.LocalLights.begin(), _primary.LocalLights.end(), [&](const auto& current)
+            { return GetLocalShadowKey(current) == unit.Displayed->Light; });
+            require(light != _primary.LocalLights.end(), "Displayed shadow light was recycled");
+            auto displayed = *light;
+            require(ApplyShadowSnapshot(displayed, *unit.Displayed), "Displayed shadow metadata is incompatible");
+            frame.DisplayShadowLights->CopyData(static_cast<UINT>(light - _primary.LocalLights.begin()), displayed);
+        }
+        const auto diagnostic = std::find_if(_diagnostics.begin(), _diagnostics.end(), [&](const auto& item)
+        { return item.Sun == (atlas == GDX12ShadowAtlas::Sun) && item.Light == group.Output.Light; });
+        if (diagnostic != _diagnostics.end())
+        {
+            diagnostic->EffectiveSecondary = unit.Policy.Secondary;
+            diagnostic->SourceTime = unit.SourceTime;
+            diagnostic->Transfer = unit.Transfer.GetStatistics(atlas);
+        }
+    }
+    if (originalCommit) originalCommit();
+    if (!trace->Groups.empty()) { trace->Finalize = prefix; route.Trace = trace; }
+    return prefix;
 }

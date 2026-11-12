@@ -4,6 +4,8 @@
 #include <cmath>
 #include <vector>
 #include <array>
+#include <chrono>
+#include <algorithm>
 
 inline constexpr UINT LocalShadowResolution = 256;
 inline constexpr UINT SunShadowCascadeResolution = 2048;
@@ -28,6 +30,22 @@ constexpr bool IsLocalShadowResolution(UINT value)
 }
 
 GDX12ShadowQuality ReadShadowQuality();
+
+struct GDX12ShadowUpdatePolicy
+{
+    bool Secondary = false;
+    bool Latest = false;
+    UINT Interval = 1;
+    bool operator==(const GDX12ShadowUpdatePolicy& other) const
+    { return Secondary == other.Secondary && Latest == other.Latest && Interval == other.Interval; }
+};
+bool IsShadowPolicyEnabled();
+void EnsureShadowUpdatePolicies(const std::vector<GDX12LocalLightConstants>& lights);
+GDX12ShadowUpdatePolicy ReadShadowUpdatePolicy(UINT entity = 0);
+inline bool ShadowUpdateDue(uint64_t frame, UINT interval, bool ready)
+{ return !ready || frame % interval == 0; }
+inline double ShadowSourceTimeSeconds()
+{ return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count(); }
 
 inline void ApplyShadowQuality(const GDX12ShadowQuality& quality, GDX12MainConstants& sun,
     std::vector<GDX12LocalLightConstants>& local)
@@ -64,15 +82,18 @@ inline GDX12LocalShadowKey GetLocalShadowKey(const GDX12LocalLightConstants& lig
 
 struct GDX12ShadowSelection
 {
-    enum class Mode { All, Sun, AllLocal, SpecificLight };
+    enum class Mode { All, Sun, AllLocal, SpecificLight, Set };
     Mode Scope = Mode::All;
     GDX12LocalShadowKey Light;
+    std::vector<GDX12LocalShadowKey> Lights;
+    bool SunSelected = false;
 
-    bool IncludesSun() const { return Scope == Mode::All || Scope == Mode::Sun; }
+    bool IncludesSun() const { return Scope == Mode::All || Scope == Mode::Sun || (Scope == Mode::Set && SunSelected); }
     bool IncludesLocal(GDX12LocalShadowKey key) const
     {
         return key.Generation != 0 && (Scope == Mode::All || Scope == Mode::AllLocal ||
-            (Scope == Mode::SpecificLight && Light == key));
+            (Scope == Mode::SpecificLight && Light == key) ||
+            (Scope == Mode::Set && std::find(Lights.begin(), Lights.end(), key) != Lights.end()));
     }
 };
 
@@ -109,15 +130,30 @@ struct GDX12ShadowOutput
     bool StaticOnly = false;
     bool EveryFrame = false;
     XMFLOAT4 SplitDepths = {}, TexelWorldSize = {};
+    XMFLOAT3 Position = {};
+    float Range = 0;
     std::array<View, 6> Views = {};
 
     UINT ViewCount() const { return Type == Kind::Sun ? 4u : Type == Kind::Point ? 6u : 1u; }
+
+    bool MatchesDestination(const GDX12ShadowOutput& other) const
+    {
+        if (Type != other.Type || !(Light == other.Light) || StaticOnly != other.StaticOnly) return false;
+        for (UINT face = 0; face < ViewCount(); ++face)
+        {
+            const auto& a = Views[face].Region;
+            const auto& b = other.Views[face].Region;
+            if (a.Slice != b.Slice || a.X != b.X || a.Y != b.Y || a.Width != b.Width || a.Height != b.Height) return false;
+        }
+        return true;
+    }
 
     // An entire light can be remapped after packing, even if its atlas slices changed.
     bool MatchesDepthInputs(const GDX12ShadowOutput& other) const
     {
         if (Type != other.Type || !(Light == other.Light) || LightRevision != other.LightRevision ||
             SceneRevision != other.SceneRevision || StaticOnly != other.StaticOnly || EveryFrame != other.EveryFrame ||
+            std::memcmp(&Position, &other.Position, sizeof(Position)) != 0 || Range != other.Range ||
             std::memcmp(&SplitDepths, &other.SplitDepths, sizeof(SplitDepths)) != 0 ||
             std::memcmp(&TexelWorldSize, &other.TexelWorldSize, sizeof(TexelWorldSize)) != 0)
             return false;
@@ -154,12 +190,33 @@ inline GDX12ShadowOutput BuildLocalShadowOutput(const GDX12LocalLightConstants& 
     output.Type = light.Type == 1 ? GDX12ShadowOutput::Kind::Point : GDX12ShadowOutput::Kind::Spot;
     output.Light = GetLocalShadowKey(light);
     output.LightRevision = light.ShadowRevision;
+    output.Position = light.Position;
+    output.Range = light.Range;
     output.SceneRevision = sceneRevision;
     output.StaticOnly = staticOnly;
     output.EveryFrame = !staticOnly && (light.ShadowFlags & 2u) != 0u;
     for (UINT face = 0; face < output.ViewCount(); ++face)
         output.Views[face] = { LocalShadowRegion(light, face, resolution), light.ShadowViewProj[face], casters[face] };
     return output;
+}
+
+inline bool ApplyShadowSnapshot(GDX12LocalLightConstants& light, const GDX12ShadowOutput& snapshot)
+{
+    if (!(GetLocalShadowKey(light) == snapshot.Light) || snapshot.StaticOnly ||
+        snapshot.Type != (light.Type == 1 ? GDX12ShadowOutput::Kind::Point : GDX12ShadowOutput::Kind::Spot)) return false;
+    light.ShadowPosition = snapshot.Position;
+    light.ShadowRange = snapshot.Range;
+    for (UINT face = 0; face < snapshot.ViewCount(); ++face) light.ShadowViewProj[face] = snapshot.Views[face].ViewProj;
+    return true;
+}
+
+inline GDX12ShadowConstants ShadowSnapshotConstants(const GDX12ShadowOutput& snapshot)
+{
+    GDX12ShadowConstants result{};
+    result.SplitDepths = snapshot.SplitDepths;
+    result.TexelWorldSize = snapshot.TexelWorldSize;
+    for (UINT cascade = 0; cascade < 4; ++cascade) result.ViewProj[cascade] = snapshot.Views[cascade].ViewProj;
+    return result;
 }
 
 struct GDX12LocalShadowCaster
@@ -278,6 +335,8 @@ inline GDX12LocalShadowVisibility BuildLocalShadowVisibility(const GDX12LocalLig
 
 inline void BuildLocalLightShadowMatrices(GDX12LocalLightConstants& light)
 {
+    light.ShadowPosition = light.Position;
+    light.ShadowRange = light.Range;
     const Vector3 position(light.Position);
     const Vector3 directions[] = { Vector3::UnitX, -Vector3::UnitX, Vector3::UnitY, -Vector3::UnitY, Vector3::UnitZ, -Vector3::UnitZ };
     const Vector3 ups[] = { Vector3::UnitY, Vector3::UnitY, -Vector3::UnitZ, Vector3::UnitZ, Vector3::UnitY, Vector3::UnitY };

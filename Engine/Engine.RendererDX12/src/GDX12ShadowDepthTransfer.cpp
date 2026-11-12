@@ -165,6 +165,24 @@ std::optional<std::vector<GDX12ShadowTransferView>> GDX12ShadowTransferLayout::R
     return views;
 }
 
+std::optional<std::vector<GDX12ShadowOutput>> GDX12ShadowTransferLayout::ResolveSnapshot(
+    const std::vector<GDX12ShadowOutput>& prepared) const
+{
+    const auto index = IndexGroups(_atlas, _extent, prepared);
+    if (!index) return std::nullopt;
+    auto paired = prepared;
+    for (const auto& source : _groups)
+    {
+        const auto match = index->find(GroupKey(source));
+        if (match == index->end() || match->second->Type != source.Type) return std::nullopt;
+        const auto destination = static_cast<size_t>(match->second - prepared.data());
+        paired[destination] = source;
+        for (UINT face = 0; face < source.ViewCount(); ++face)
+            paired[destination].Views[face].Region = match->second->Views[face].Region;
+    }
+    return paired;
+}
+
 struct GDX12ShadowDepthTransfer::Pack
 {
     Pack(GDX12Device& device, std::vector<GDX12ShadowTransferView> regions,

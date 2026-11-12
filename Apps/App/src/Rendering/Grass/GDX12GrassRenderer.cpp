@@ -665,7 +665,7 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
         binding.SRVs.insert(binding.SRVs.end(), {
             { 2, lighting.SunShadow->GetSRV()->GPUHandle }, { 3, lighting.Irradiance->GetSRV()->GPUHandle },
             { 4, lighting.Prefiltered->GetSRV()->GPUHandle }, { 5, lighting.BRDF->GetSRV()->GPUHandle },
-            { 6, constants->ShadowLights->GetSRV()->GPUHandle }, { 7, lighting.LocalShadows->GetSRV()->GPUHandle } });
+            { 6, lighting.LocalLights->GetSRV()->GPUHandle }, { 7, lighting.LocalShadows->GetSRV()->GPUHandle } });
     }
     auto& batch = output->Batch;
     batch.Binding = &binding;
@@ -681,7 +681,8 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
         { _shadowMaterials ? _shadowMaterials->Buffer : &constants->ShadowMaterials->GetResource(), GDX12RenderGraph::Mode::Read },
         { &parameters->GetResource(), GDX12RenderGraph::Mode::Read } };
     if (!_shadowMaterials)
-        batch.BufferAccesses.push_back({ &constants->ShadowLights->GetResource(), GDX12RenderGraph::Mode::Read });
+        batch.BufferAccesses.push_back({ stage == Stage::Capture ? &output->Lighting.LocalLights->GetResource() :
+            &constants->LightingLocalLights().GetResource(), GDX12RenderGraph::Mode::Read });
     frame.OutputIndex[{view.Key, view.Stage, patch}] = output.get();
     frame.Outputs.push_back(std::move(output));
 }
@@ -773,7 +774,11 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12GrassRenderer::DrawAccesses() c
     std::vector<GDX12RenderGraph::BufferAccess> accesses = {
         { &_vertices->GetResource(), Mode::Read }, { &_indices->GetResource(), Mode::Read }, { &_arguments->GetResource(), Mode::Read },
         { _shadowMaterials ? _shadowMaterials->Buffer : &constants->ShadowMaterials->GetResource(), Mode::Read } };
-    if (!_shadowMaterials) accesses.push_back({ &constants->ShadowLights->GetResource(), Mode::Read });
+    if (!_shadowMaterials)
+    {
+        accesses.push_back({ &constants->LightingLocalLights().GetResource(), Mode::Read });
+        accesses.push_back({ &constants->ShadowLights->GetResource(), Mode::Read });
+    }
     const auto& frame = _frames.at(_resources->CurrFrameConstantsIndex);
     const UINT blocks = (frame.DrawCursor + ParametersPerBuffer - 1) / ParametersPerBuffer;
     for (UINT block = 0; block < blocks; ++block)

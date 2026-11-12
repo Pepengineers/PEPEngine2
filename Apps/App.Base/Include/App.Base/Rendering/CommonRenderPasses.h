@@ -33,6 +33,7 @@ struct CommonRenderPasses
     bool PrepareFrame(RenderPipelineContext&, GDX12CommandList*);
     RenderShadowRoutes* GetShadowRoutes() const { return _usePlacedShadows ? _placedShadows.get() : nullptr; }
     void AddShadowRoutes(GDX12RenderGraph&, GDX12RenderPass& sunNode, GDX12RenderPass& localNode);
+    void ResetWorldHistory();
     void BindAmbientOcclusion(RenderPipelineCommonData&, bool early);
     bool UpdateAmbientOcclusionRoute(RenderPipelineContext&);
     void AddAmbientOcclusion(GDX12RenderGraph&, bool early);

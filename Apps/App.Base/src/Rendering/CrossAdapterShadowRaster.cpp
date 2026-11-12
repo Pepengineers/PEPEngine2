@@ -2,7 +2,6 @@
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
-#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12RootSignature.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include <algorithm>
@@ -89,7 +88,6 @@ struct CrossAdapterShadowRaster::Pipeline
         root.SRVRanges.emplace_back(Texture2D_RangeLength);
         root.StaticSamplers = GetStaticSamplers();
         Root = std::make_unique<GDX12RootSignature>(&device, root);
-        Signature = GDX12RenderHelpers::CreateIndexedDrawSignature(&device, Root.get());
         const D3D_SHADER_MACRO defines[] = { { "SHADOW_REPLICA_IA", "1" }, { nullptr, nullptr } };
         auto& compiler = GDX12ShaderCompiler::GetInstance();
         const auto vs = compiler.CompileShader(&device, SHADERS_FOLDER "ShadowPass.hlsl", defines, "VS", "vs");
@@ -121,7 +119,6 @@ struct CrossAdapterShadowRaster::Pipeline
 
     std::unique_ptr<GDX12RootSignature> Root;
     ComPtr<ID3D12PipelineState> PSO;
-    ComPtr<ID3D12CommandSignature> Signature;
 };
 
 struct CrossAdapterShadowRaster::Cache
@@ -180,11 +177,14 @@ struct CrossAdapterShadowRaster::Work
                     const auto& draw = replica.Draws[index];
                     list->IASetVertexBuffers(0, 1, &draw.Vertices);
                     list->IASetIndexBuffer(&draw.Indices);
-                    commands.ExecuteIndirect(Mesh->Signature.Get(), 1, replica.Indirect.View.Native->D3DResource.Get(),
-                        draw.IndirectByteOffset, nullptr, 0);
+                    const auto& args = draw.Arguments;
+                    list->SetGraphicsRoot32BitConstant(0, args.InstanceID, 0);
+                    commands.DrawIndexedInstanced(args.IndexCountPerInstance, args.InstanceCount,
+                        args.StartIndexLocation, args.BaseVertexLocation, args.StartInstanceLocation);
                     if (Data.Trace)
                     {
                         auto& evidence = Data.Trace->Groups[view.Group];
+                        ++evidence.MeshDraws;
                         evidence.SkinnedDraws += draw.Kind == Replica::GeometryKind::Skinned;
                         evidence.MaskedDraws += std::binary_search(Data.MaskedSources.begin(), Data.MaskedSources.end(), draw.SourceId);
                     }
@@ -391,15 +391,15 @@ CrossAdapterShadows::RasterPlan CrossAdapterShadowRaster::Prepare(Input input)
     {
         RasterAccesses accesses;
         if (std::none_of(views.begin(), views.end(), [](const auto& view) { return !view.Draws.empty(); })) return accesses;
-        Require(data.MaterialHeap && data.Replica->Indirect.View.Native, "Replica mesh draw has no material or indirect binding");
+        Require(data.MaterialHeap != nullptr, "Replica mesh draw has no material binding");
         accesses.Ordered.reserve(data.Replica->RasterAccesses.size());
         accesses.ById.reserve(data.Replica->RasterAccesses.size());
         for (const auto& access : data.Replica->RasterAccesses)
         {
+            if (data.Replica->Indirect.View.Native && access.View.Identity.Id == data.Replica->Indirect.View.Identity.Id)
+                continue;
             auto use = AsAccess(access);
-            if (use.View.Identity.Id == data.Replica->Indirect.View.Identity.Id)
-                use.State = D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT;
-            else if (use.State & D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE)
+            if (use.State & D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE)
                 use.State |= D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
             accesses.Append(std::move(use));
         }
@@ -497,7 +497,8 @@ PhysicalView CrossAdapterShadowRaster::ReuseDepth(UINT localLayers, UINT resolut
 
 std::optional<CompletionPoint> SubmitPreparedShadows(CrossAdapterShadows& transfer, const GDX12ShadowSelection& selection,
     CrossAdapterShadowRaster& primaryRaster, CrossAdapterShadowRaster::Input primary,
-    CrossAdapterShadowRaster& secondaryRaster, CrossAdapterShadowRaster::Input secondary, CompletionPoint prefix)
+    CrossAdapterShadowRaster& secondaryRaster, CrossAdapterShadowRaster::Input secondary, CompletionPoint prefix,
+    bool latest, bool update, double sourceTime)
 {
     const auto fallback = [&]() -> std::optional<CompletionPoint>
     {
@@ -575,7 +576,8 @@ std::optional<CompletionPoint> SubmitPreparedShadows(CrossAdapterShadows& transf
     catch (const DxException& error) { OutputDebugStringW(error.ToString().c_str()); return fallback(); }
     catch (const std::exception& error) { OutputDebugStringA(error.what()); return fallback(); }
 
-    auto submitted = transfer.Submit(*selected, outputs, primaryAtlas, secondaryAtlas, localPlan, remotePlan, prefix);
+    auto submitted = transfer.Submit(*selected, outputs, primaryAtlas, secondaryAtlas, localPlan, remotePlan, prefix,
+        latest, update, sourceTime);
     if (trace && submitted)
     {
         trace->Finalize = *submitted;
