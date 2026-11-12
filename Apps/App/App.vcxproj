@@ -94,6 +94,8 @@
     <ClCompile Include="src\App.cpp" />
     <ClInclude Include="src\Rendering\Water\GDX12Fluid.h" />
     <ClCompile Include="src\Rendering\Water\GDX12Fluid.cpp" />
+    <ClCompile Include="src\Rendering\Water\GDX12WaterOffload.cpp" />
+    <ClInclude Include="src\Rendering\Water\GDX12WaterOffload.h" />
     <ClInclude Include="src\Rendering\Water\GDX12FluidPass.h" />
     <ClCompile Include="src\Rendering\Water\GDX12FluidPass.cpp" />
     <ClInclude Include="src\Rendering\Water\BistroWaterRendering.h" />
@@ -104,6 +106,7 @@
     <None Include="Shaders\FluidParameters.hlsli" />
     <None Include="Shaders\FluidSolver.hlsl" />
     <None Include="Shaders\FluidSurface.hlsl" />
+    <None Include="Shaders\WaterTransfer.hlsl" />
     <ClCompile Include="src\Rendering\BistroRenderPipeline.cpp" />
     <ClInclude Include="src\Rendering\BistroRenderPipeline.h" />
     <ClCompile Include="src\Rendering\UI\BistroUIPosters.cpp" />

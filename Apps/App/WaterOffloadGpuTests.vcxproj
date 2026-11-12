@@ -1,0 +1,11 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="App.vcxproj" />
+  <PropertyGroup><ProjectGuid>{557E6A8C-C7C0-413D-903D-CE9A3F9B2BC8}</ProjectGuid></PropertyGroup>
+  <ItemGroup>
+    <ClCompile Remove="@(ClCompile)" />
+    <ClCompile Include="tests\WaterOffloadGpuTests.cpp" />
+    <ClCompile Include="src\Rendering\Water\GDX12Fluid.cpp" />
+    <ClCompile Include="src\Rendering\Water\GDX12WaterOffload.cpp" />
+  </ItemGroup>
+  <ItemDefinitionGroup><Link><SubSystem>Console</SubSystem><AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies></Link></ItemDefinitionGroup>
+</Project>

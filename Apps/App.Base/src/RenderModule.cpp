@@ -30,6 +30,8 @@
 
 static AutoConsoleVariable<bool> GraphReuseTextures(L"Render.Graph.ReuseTextures", true,
     L"Reuse compatible transient graph textures. Disable to compare output and memory.", EConsoleVariableFlags::Default);
+static AutoConsoleVariable<int> PrimaryAdapter(L"Render.PrimaryAdapter", 0,
+    L"Primary adapter in the renderer hardware list. Startup only.", EConsoleVariableFlags::ReadOnly);
 RenderModule::GpuOwners::GpuOwners() = default;
 RenderModule::GpuOwners::~GpuOwners() = default;
 
@@ -110,7 +112,11 @@ void RenderModule::Initialize()
     }
 
     _primaryDevice = std::make_unique<GDX12Device>();
-    ThrowIfFailed(_primaryDevice->Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
+    const auto adapters = GDX12DeviceFactory::GetDeviceDescriptors();
+    const int primaryAdapter = PrimaryAdapter.GetValue();
+    if (primaryAdapter < 0 || static_cast<size_t>(primaryAdapter) >= adapters.size())
+        throw std::invalid_argument("Primary adapter index out of range");
+    ThrowIfFailed(_primaryDevice->Initialize(adapters[primaryAdapter].Adapter));
     _primaryResources.Initialize(_primaryDevice.get());
     _primaryGPUTimer = std::make_unique<GDX12GPUTimer>(_primaryDevice.get());
 

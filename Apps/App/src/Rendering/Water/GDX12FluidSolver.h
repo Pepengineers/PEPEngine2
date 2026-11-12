@@ -19,6 +19,7 @@ struct GDX12FluidParameters
     UINT FilterRadius, ResetMotion;
     float NearStiffness, PredictionSeconds;
     UINT LocalSimulation, Padding[3];
+    XMFLOAT4X4 PreviousContainerToWorld;
 };
 
 GDX12FluidParameters MakeFluidParameters(const Matrix& container, const GDX12FluidSettings& settings);
@@ -49,6 +50,7 @@ public:
 
     void Initialize(GDX12Device* device);
     static Buffers CreateBuffers(GDX12Device* device, GDX12DescriptorHeap* heap, const GDX12FluidInstance& instance);
+    static std::vector<Particle> MakeSeed(const GDX12FluidInstance& instance);
     static float SafeStep(const GDX12FluidSettings& settings);
     static Steps PlanSteps(const GDX12FluidSettings& settings, float scaledElapsed);
 
