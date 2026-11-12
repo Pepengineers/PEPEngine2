@@ -78,6 +78,12 @@ static void CheckGrassMGPURoute(RenderMGPURuntime& runtime, GDX12DeviceResources
         direct.Flush();
     }
     tick.InteractionResetRevision = checkpoint->Layout.InteractionResetRevision;
+    const auto sameIdentity = [](const ResourceIdentity& a, const ResourceIdentity& b)
+    {
+        return a.Id == b.Id && a.Adapter == b.Adapter && a.ResourceEpoch == b.ResourceEpoch &&
+            a.Transfer == b.Transfer && a.Allocation == b.Allocation;
+    };
+    const auto checkpointIdentity = runtime.IdentifyResource(checkpoint->Packed, *primary.Device);
     require(route.TryStart(checkpoint, tick, checkpointReady), "Grass could not seed secondary from a primary checkpoint");
 
     const GDX12GrassMGPUControls latest{true, false, 0, 10};
@@ -111,6 +117,9 @@ static void CheckGrassMGPURoute(RenderMGPURuntime& runtime, GDX12DeviceResources
         require(frozen.has_value() && frozen->Sequence == 6 &&
             frozen->Fields.Current->GetLayout().InteractionTimeSeconds == checkpoint->Layout.InteractionTimeSeconds,
             "First Latest frame replaced the authoritative primary checkpoint");
+        require(sameIdentity(frozen->CurrentView.Identity, checkpointIdentity) &&
+            sameIdentity(runtime.IdentifyResource(checkpoint->Packed, *primary.Device), checkpointIdentity),
+            "Grass seed changed the runtime canonical checkpoint identity");
         retire(*frozen);
     }
 
@@ -210,12 +219,16 @@ static void CheckGrassMGPURoute(RenderMGPURuntime& runtime, GDX12DeviceResources
     direct.Flush();
     runtime.Poll();
     pending.InteractionResetRevision = returned->Layout.InteractionResetRevision;
+    const auto returnedIdentity = runtime.IdentifyResource(returned->Packed, *primary.Device);
     require(route.TryStart(returned, pending, returnedReady),
         "Cancelled Exact or retired display leaked a reader pin across the next epoch");
 
     {
         const auto anchor = route.Select(static_cast<FrameSubmissionId>(7), pending.Sequence, pending.CapturedAt);
         require(anchor.has_value() && anchor->Sequence == pending.Sequence, "Grass restart lost its primary anchor");
+        require(sameIdentity(anchor->CurrentView.Identity, returnedIdentity) &&
+            sameIdentity(runtime.IdentifyResource(returned->Packed, *primary.Device), returnedIdentity),
+            "Grass restart changed the runtime canonical checkpoint identity");
         retire(*anchor);
     }
 
