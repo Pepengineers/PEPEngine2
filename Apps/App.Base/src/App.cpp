@@ -157,6 +157,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         {
             bAppPaused = true;
             Timer.Stop();
+            if (auto renderModule = Locator.GetModule<RenderModule>()) { renderModule->ResetMetricsInterval(); }
         }
         else
         {
@@ -183,6 +184,7 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 bAppPaused = true;
                 bMinimized = true;
                 bMaximized = false;
+                if (auto renderModule = Locator.GetModule<RenderModule>()) { renderModule->ResetMetricsInterval(); }
             }
             else if (wParam == SIZE_MAXIMIZED)
             {
@@ -287,6 +289,10 @@ LRESULT App::MsgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         else if (wParam == VK_F8)
         {
             if (auto renderModule = Locator.GetModule<RenderModule>()) { renderModule->DumpFrameGraphDebugReport(); }
+        }
+        else if (wParam == VK_F9)
+        {
+            if (auto renderModule = Locator.GetModule<RenderModule>()) { renderModule->SaveMetricsReport(); }
         }
         return 0;
     }

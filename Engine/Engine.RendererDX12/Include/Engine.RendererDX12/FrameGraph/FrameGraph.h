@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <type_traits>
 
 class CompiledFrameGraph;
@@ -122,6 +123,12 @@ private:
     FrameGraphCompileData _compileData;
 };
 
+struct FrameGraphGPUFrameTimes
+{
+    double PrimaryMS = -1.0;
+    double SecondaryMS = -1.0;
+};
+
 // Owns executable passes, the resolved plan and per-slot allocations after successful graph compilation.
 class CompiledFrameGraph
 {
@@ -140,6 +147,8 @@ public:
     void ReleaseFrameSlotResourcesForResize();
     void ResizeFrameSlotResources(UInt2 display);
     const FrameGraphPlan& GetExecutionPlan() const;
+    // Read GPU durations for the latest completed frame. Unavailable durations are -1.0.
+    FrameGraphGPUFrameTimes GetLatestGPUFrameTimes() const;
     // Describe placement, requested policies, fallbacks, GPU timings and cumulative copy statistics.
     std::string GetDebugReport() const;
     uint32_t GetDevicePassFlags(EDeviceRole role) const;

@@ -33,6 +33,7 @@
     <ClInclude Include="Include\App.Base\ECS\WorldLoader.h" />
     <ClInclude Include="Include\App.Base\Modules\EventManagerModule.h" />
     <ClInclude Include="Include\App.Base\Modules\RenderModule.h" />
+    <ClInclude Include="Include\App.Base\RenderingMetrics.h" />
     <ClInclude Include="Include\App.Base\Modules\SceneManagerModule.h" />
     <ClInclude Include="Include\App.Base\SceneTraversal.h" />
     <ClInclude Include="Include\App.Base\Systems\CircleMovementSystem.h" />
@@ -45,6 +46,7 @@
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
     <ClCompile Include="src\RenderModule.cpp" />
+    <ClCompile Include="src\RenderingMetrics.cpp" />
     <ClCompile Include="src\SceneManagerModule.cpp" />
     <ClCompile Include="src\SceneTraversal.cpp" />
     <ClCompile Include="src\Window.cpp" />

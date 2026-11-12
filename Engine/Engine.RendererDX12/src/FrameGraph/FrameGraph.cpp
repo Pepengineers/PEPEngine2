@@ -310,23 +310,27 @@ struct CompiledFrameGraph::Runtime
         frameResources.ExternalResources.clear();
     }
 
-    void WriteGPUFrameTiming(std::ostream& out) const
+    struct GPUTimeSpan
     {
-        if (!LastCompletedFrameTiming) { out << "\n[GPU frame timings]\n    Pending\n"; return; }
+        double Begin = (std::numeric_limits<double>::max)();
+        double End = (std::numeric_limits<double>::lowest)();
+        bool Used = false;
+        bool Complete = true;
+        double ExcludedGap = 0.0;
 
-        struct Span
+        double DurationMS() const
         {
-            double Begin = (std::numeric_limits<double>::max)();
-            double End = (std::numeric_limits<double>::lowest)();
-            bool Used = false;
-            bool Complete = true;
-        };
+            if (!Used || !Complete) { return -1.0; }
+            return End - Begin - ExcludedGap;
+        }
+    };
 
+    std::array<GPUTimeSpan, 2> CalculateGPUFrameSpans(const CompletedFrameTiming& frame) const
+    {
         LARGE_INTEGER qpcFrequency{}, qpcOrigin{};
         QueryPerformanceFrequency(&qpcFrequency);
         QueryPerformanceCounter(&qpcOrigin);
-        const auto& frame = *LastCompletedFrameTiming;
-        std::array<Span, 2> spans;
+        std::array<GPUTimeSpan, 2> spans;
         for (const auto& sample : frame.QueueSamples)
         {
             if (!sample.Queue) { continue; }
@@ -352,17 +356,25 @@ struct CompiledFrameGraph::Runtime
             span.End = (std::max)(span.End, toMS(sample.Timestamps.End));
         }
 
-        const auto writeSpan = [&](const char* name, const Span& span, double excludedGap = 0.0)
+        return spans;
+    }
+
+    void WriteGPUFrameTiming(std::ostream& out) const
+    {
+        if (!LastCompletedFrameTiming) { out << "\n[GPU frame timings]\n    Pending\n"; return; }
+
+        const auto& frame = *LastCompletedFrameTiming;
+        const auto [primary, secondary] = CalculateGPUFrameSpans(frame);
+        const auto writeSpan = [&](const char* name, const GPUTimeSpan& span)
         {
             out << "    " << name << ": ";
             if (!span.Complete) { out << "unavailable (incomplete queue timestamps)"; }
-            else if (span.Used) { out << span.End - span.Begin - excludedGap << " ms"; }
+            else if (span.Used) { out << span.DurationMS() << " ms"; }
             else { out << "idle"; }
             out << '\n';
         };
 
         out << "\n[GPU frame " << frame.FrameNumber << " timings]\n";
-        const auto& [primary, secondary] = spans;
         if (!Secondary)
         {
             writeSpan("total-frame", primary);
@@ -371,17 +383,16 @@ struct CompiledFrameGraph::Runtime
 
         writeSpan("primary", primary);
         writeSpan("secondary", secondary);
-
-        const Span frameSpan{
+        GPUTimeSpan total{
             (std::min)(primary.Begin, secondary.Begin), (std::max)(primary.End, secondary.End),
             primary.Used || secondary.Used, primary.Complete && secondary.Complete};
-        double gap = 0.0;
-        if (frameSpan.Complete && primary.Used && secondary.Used)
+        if (total.Complete && primary.Used && secondary.Used)
         {
             // Count overlapping GPU spans once and exclude any gap between them.
-            gap = (std::max)(0.0, (std::max)(primary.Begin, secondary.Begin) - (std::min)(primary.End, secondary.End));
+            total.ExcludedGap = (std::max)(0.0,
+                (std::max)(primary.Begin, secondary.Begin) - (std::min)(primary.End, secondary.End));
         }
-        writeSpan("total-frame", frameSpan, gap);
+        writeSpan("total-frame", total);
     }
 
     // Collects device capabilities, imported texture descriptions, and pass resource requirements.
@@ -546,6 +557,7 @@ struct CompiledFrameGraph::Runtime
             }
             if (retry) { continue; }
             FrameSlots = std::move(newFrameSlots);
+            LastCompletedFrameTiming.reset();
             Plan = std::move(plan);
             // Explicit order dependencies can require a pass to finish even without a resource barrier.
             BatchLocalPasses = !Secondary && Definition.OrderDependencies.empty() &&
@@ -971,9 +983,18 @@ void CompiledFrameGraph::ReleaseFrameSlotResourcesForResize()
 {
     _runtime->WaitForGPUCompletion();
     _runtime->FrameSlots.clear();
+    _runtime->LastCompletedFrameTiming.reset();
 }
 uint32_t CompiledFrameGraph::GetCurrentFrameSlotResourcesIndex() const { return _runtime->GetCurrentFrameSlotResourcesIndex(); }
 const FrameGraphPlan& CompiledFrameGraph::GetExecutionPlan() const { return _runtime->Plan; }
+FrameGraphGPUFrameTimes CompiledFrameGraph::GetLatestGPUFrameTimes() const
+{
+    const auto& frame = _runtime->LastCompletedFrameTiming;
+    if (!frame) { return {}; }
+    const auto [primary, secondary] = _runtime->CalculateGPUFrameSpans(*frame);
+    return {primary.DurationMS(), secondary.DurationMS()};
+}
+
 std::string CompiledFrameGraph::GetDebugReport() const
 {
     std::ostringstream out;

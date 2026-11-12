@@ -49,6 +49,9 @@ void RenderModule::Initialize()
     FrameGraph graph(_primaryDevice.get(), _secondaryDevice.get());
     ConfigureFrameGraph(graph);
     CompileFrameGraph(graph);
+    _metrics.Initialize(
+        _frameGraph->UsesDevice(DEVICE_ROLE_PRIMARY) ? _primaryDevice.get() : nullptr,
+        _frameGraph->UsesDevice(DEVICE_ROLE_SECONDARY) ? _secondaryDevice.get() : nullptr);
     SubscribeToSceneManager();
 }
 
@@ -59,6 +62,7 @@ void RenderModule::Uninitialize()
 
 void RenderModule::OnResize()
 {
+    ResetMetricsInterval();
     uint16_t width, height;
     _window->GetWindowSize(width, height);
 
@@ -553,6 +557,7 @@ void RenderModule::OnRender()
     if (!_frameGraph || _renderingSuspended) { return; }
     _frameGraph->ExecuteFrame();
     _backBuffer->Present();
+    _metrics.RecordPresentedFrame(*_frameGraph);
 }
 
 void RenderModule::DumpFrameGraphDebugReport() const

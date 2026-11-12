@@ -1,5 +1,6 @@
 #pragma once
 
+#include "App.Base/RenderingMetrics.h"
 #include "Common/GameTimer.h"
 #include "Common/Module.h"
 
@@ -7,6 +8,8 @@
 #include "Engine.RendererDX12/FrameGraph/FrameGraph.h"
 #include "Engine.Core/ECS/Entity.h"
 #include "Engine.Core/ECS/Event.h"
+
+#include <vector>
 
 class SceneManagerModule;
 class World;
@@ -40,6 +43,12 @@ public:
 
     void OnResize();
     void DumpFrameGraphDebugReport() const;
+    void SaveMetricsReport() const { _metrics.SaveReport(); }
+    void ResetMetricsInterval() { _metrics.ResetInterval(); }
+
+    using MetricsSample = RenderingMetrics::Sample;
+    // Read on the application thread. Sampling may invalidate references to individual entries.
+    const std::vector<MetricsSample>& GetMetricsHistory() const { return _metrics.GetHistory(); }
 
     GDX12Material* GetMaterialByName(const std::string& name);
 
@@ -151,5 +160,7 @@ private:
     std::unique_ptr<GDX12Texture> _depthStencil;
     
     std::unique_ptr<CompiledFrameGraph> _frameGraph;
+
+    RenderingMetrics _metrics;
 
 };
