@@ -18,7 +18,6 @@ struct GPUTexture
 {
 	std::string Name;
 	GDX12Texture* PrimaryDeviceTexture = nullptr;
-	GDX12Texture* SecondaryDeviceTexture = nullptr;
 };
 
 class GDX12Material
@@ -57,11 +56,10 @@ private:
 		Emissive(nullptr), Displacement(nullptr), Metallic(0.f), Roughness(1.f), Opacity(1.f),
 		SpecularColor(0.04f, 0.04f, 0.04f), EmissiveColor(0.0f, 0.0f, 0.0f),
 		HasNormalMap(false), HasSpecularMap(false), HasRoughnessMap(false), HasEmissiveMap(false),
-		UseBakedLighting(false), DirtyFlag(true), _CBufferIndex(0), _numPrimaryFramesDirty(0), _numSecondaryFramesDirty(0), Type(MaterialType::Opaque)
+		UseBakedLighting(false), DirtyFlag(true), _CBufferIndex(0), _numPrimaryFramesDirty(0), Type(MaterialType::Opaque)
 	{
 
 	}
     uint64_t _revision = 0;
 	UINT _numPrimaryFramesDirty;
-	UINT _numSecondaryFramesDirty;
 };

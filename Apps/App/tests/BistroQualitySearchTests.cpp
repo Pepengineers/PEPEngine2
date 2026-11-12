@@ -20,7 +20,7 @@ namespace
         size_t requests = 0;
         while (auto request = search.Next())
         {
-            Require(++requests < (request->Settings.MGPU.Enabled ? 2000u : 200u), "Synthetic search did not terminate");
+            Require(++requests < 200, "Synthetic search did not terminate");
             const int visit = ++visits[request->Settings];
             Require(visit == 1 || request->RequireFull, "Search duplicated a warmup-only candidate");
             search.Submit(measure(*request, visit));
@@ -346,160 +346,6 @@ namespace
         }
         Require(!search.Winner(), "Invalid measurements produced a winner");
     }
-
-    void TestMGPUPlacementAndFreshness()
-    {
-        MGPUSettings pair;
-        pair.Enabled = true;
-        pair.Primary = 11;
-        pair.Secondary = 22;
-        Search search(Profile::Performance, {{OffGroup::Never, false, 2, 2}}, 768, 480, pair);
-        std::set<Candidate> measured;
-        const auto result = Run(search, [&](const Request& request, int)
-        {
-            measured.insert(request.Settings);
-            const auto& policy = request.Settings.MGPU;
-            const bool water = policy.Water.Secondary;
-            const bool grass = policy.Grass.Secondary;
-            return Result{water && !grass ? 70.0 : 63.0, std::nullopt};
-        });
-        Require(result.TargetReached && result.Settings.MGPU.Water.Secondary &&
-            !result.Settings.MGPU.Grass.Secondary, "MGPU search missed the mixed placement at equal quality");
-        Require(measured.size() > 10, "MGPU placement exploration did not measure alternatives");
-        Require(result.Settings.MGPU.Reflections.FilterSamples == 256,
-            "MGPU search lost the existing Epic reflection filtering quality");
-        Require(result.Settings.MGPU.Water.UpdateHz == 0 && result.Settings.MGPU.Grass.UpdateHz == 0,
-            "MGPU selected a lower temporal quality without a performance need");
-        auto different = result.Settings;
-        ++different.MGPU.Secondary;
-        Require(!(different == result.Settings), "Candidates for different adapter pairs compare equal");
-
-        FreshnessMeasurements samples;
-        TechniqueMeasurement sample;
-        sample.Active = sample.RequestedSecondary = sample.EffectiveSecondary = sample.Ready = true;
-        sample.SourceAgeMs = 30;
-        samples.Observe(sample, 0, Profile::Performance);
-        Require(samples.Valid(), "A permitted snapshot was rejected");
-        sample.SourceAgeMs = 34;
-        samples.Observe(sample, 1, Profile::Performance);
-        Require(!samples.Valid(), "Freshness used current FPS instead of the fixed target budget");
-        samples = {};
-        sample.SourceAgeMs = 1;
-        sample.EffectiveSecondary = false;
-        samples.Observe(sample, 0, Profile::Quality);
-        Require(!samples.Valid(), "A hidden fallback was accepted as MGPU");
-        samples = {};
-        sample.EffectiveSecondary = true;
-        sample.MissingSeconds = 0.01;
-        samples.Observe(sample, 0, Profile::Quality);
-        Require(!samples.Valid(), "A lost simulation input was accepted");
-        samples = {};
-        Require(!samples.Valid(true), "A required route passed without any measurement");
-        sample.MissingSeconds = 0;
-        sample.SimulationDebtSeconds = 0.001;
-        samples.Observe(sample, 2, Profile::Quality);
-        sample.SimulationDebtSeconds = 0.005;
-        samples.Observe(sample, 4, Profile::Quality);
-        Require(!samples.Valid(), "Growing debt below the age cap was accepted or late first sample hid it");
-        Require(FreshnessBudgetMs(Profile::Quality) > 66.66 && FreshnessBudgetMs(Profile::Quality) < 66.67,
-            "Quality freshness budget used the 28 FPS acceptance threshold");
-        samples = {};
-        for (int second = 0; second < 100; ++second)
-        {
-            sample.SimulationDebtSeconds = 0.001 + second * 0.00001;
-            samples.Observe(sample, second, Profile::Quality);
-        }
-        Require(!samples.Valid(), "A slow persistent debt trend passed the gate");
-        samples = {};
-        for (int second = 0; second < 100; ++second)
-        {
-            sample.SimulationDebtSeconds = (second % 3) * 0.001;
-            samples.Observe(sample, second, Profile::Quality);
-        }
-        Require(samples.Valid(), "Bounded cadence sawtooth was mistaken for growing debt");
-
-        ReflectionSearchSettings canonical;
-        canonical.Count = 1; canonical.DistanceMetres = 10; canonical.Schedule = 3;
-        canonical.SecondaryFaces = {3, 63, 63, 63};
-        canonical.Canonicalize();
-        Require(canonical.Schedule == 2 && canonical.SecondaryFaces[1] == 0,
-            "Equivalent single-probe schedules or inactive faces multiplied candidates");
-        canonical.DistanceMetres = -1; canonical.Placement = 2;
-        canonical.Canonicalize();
-        Require(canonical.Schedule == 0 && canonical.Placement == 0 && canonical.SecondaryFaces[0] == 63,
-            "Always-near placement was not canonicalized");
-        Search unstable(Profile::Performance, {{OffGroup::Never, false, 2, 2}}, 768, 480, pair);
-        unstable.SetTransferCostEstimate([](const Candidate& candidate) -> std::optional<double>
-            { return candidate.MGPU.Water.Secondary ? 10.0 : 0.0; });
-        const auto stable = Run(unstable, [&](const Request& request, int visit)
-        {
-            const auto& p = request.Settings.MGPU;
-            const bool secondary = p.Water.Secondary || p.Grass.Secondary || p.Sun.Secondary || p.Particles.Secondary ||
-                p.Reflections.Placement || std::any_of(p.Reflections.SecondaryFaces.begin(), p.Reflections.SecondaryFaces.end(),
-                    [](unsigned mask) { return mask != 0; });
-            return Result{secondary ? (visit == 1 ? 70.0 : 61.0) : 65.0, std::nullopt};
-        });
-        Require(stable.TargetReached && stable.Stable && stable.AverageFps == 65,
-            "An unstable MGPU finalist discarded the measured stable primary alternative");
-
-        pair.LocalShadows = {{17, {}}, {42, {}}};
-        Search units(Profile::Performance, {{OffGroup::Never, false, 2, 2}}, 768, 480, pair);
-        const auto mixed = Run(units, [&](const Request& request, int)
-        {
-            const auto& p = request.Settings.MGPU;
-            return Result{63.0 + (p.Sun.Secondary ? 3 : 0) + (p.Particles.Secondary ? 3 : 0) +
-                (p.LocalShadows[0].Route.Secondary ? 3 : 0) - (p.LocalShadows[1].Route.Secondary ? 8 : 0), std::nullopt};
-        });
-        Require(mixed.Settings.MGPU.Sun.Secondary && mixed.Settings.MGPU.Particles.Secondary &&
-            mixed.Settings.MGPU.LocalShadows[0].Route.Secondary && !mixed.Settings.MGPU.LocalShadows[1].Route.Secondary,
-            "Joint search missed the beneficial local-light count and particle placement");
-
-        pair.LocalShadows.clear();
-        for (unsigned id = 135; id; --id) pair.LocalShadows.push_back({id, {}});
-        Search counts(Profile::Performance, {{OffGroup::Never, false, 2, 2}}, 768, 480, pair);
-        std::set<size_t> visitedCounts;
-        const auto counted = Run(counts, [&](const Request& request, int)
-        {
-            const auto& lights = request.Settings.MGPU.LocalShadows;
-            size_t count = 0;
-            bool primarySeen = false;
-            for (size_t i = 0; i < lights.size(); ++i)
-            {
-                Require(lights[i].Entity == i + 1, "Count search did not canonicalize light order");
-                if (!lights[i].Route.Secondary) primarySeen = true;
-                else { Require(!primarySeen, "Count search selected a non-nested light set"); ++count; }
-            }
-            visitedCounts.insert(count);
-            return Result{80.0 - std::abs(static_cast<double>(count) - 50.0), std::nullopt};
-        });
-        Require(std::count_if(counted.Settings.MGPU.LocalShadows.begin(), counted.Settings.MGPU.LocalShadows.end(),
-            [](const auto& light) { return light.Route.Secondary; }) == 50,
-            "Count refinement missed the measured optimum between coarse counts");
-        for (const size_t count : {size_t{0}, size_t{33}, size_t{67}, size_t{101}, size_t{135}})
-            Require(visitedCounts.count(count) != 0, "Count search omitted a representative fraction");
-
-        const auto invalidTrace = [&](bool ordered)
-        {
-            Search search(Profile::Quality, {{OffGroup::Never, false, 2, 2}}, 768, 480, pair);
-            if (ordered) search.SetTransferCostEstimate([](const Candidate& candidate) -> std::optional<double>
-            {
-                if (candidate.MGPU.Particles.Secondary) return std::nullopt;
-                return candidate.MGPU.Water.Secondary ? 1.0 : 0.0;
-            });
-            std::multiset<Candidate> trace;
-            for (int step = 0; step < 2000; ++step)
-            {
-                const auto request = search.Next();
-                if (!request) return trace;
-                Require(request->RequireFull, "Cost hint replaced a full-flight request");
-                trace.insert(request->Settings);
-                search.Submit({30.0, std::nullopt, false});
-            }
-            throw std::runtime_error("Cost-ordered invalid search did not terminate");
-        };
-        Require(invalidTrace(false) == invalidTrace(true),
-            "Transfer cost ordering discarded unknown candidates or changed the measured candidate multiset");
-    }
 }
 
 int main()
@@ -520,7 +366,6 @@ int main()
         TestNonmonotonicTiersAndCpuShift();
         TestInvalidRecoveryTerminates();
         TestInvalidMeasurementsTerminate();
-        TestMGPUPlacementAndFreshness();
         std::cout << "Bistro quality search checks passed\n";
         return 0;
     }

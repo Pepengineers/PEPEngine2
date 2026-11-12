@@ -1,14 +1,11 @@
 #pragma once
 #include "App.Base/Rendering/CommonRenderPasses.h"
 #include "App.Base/Modules/SceneManagerModule.h"
-#include "BistroMGPUQuality.h"
 
 class BistroGrassGeometry;
-class BistroGrassRoute;
-class BistroGrassShadowRoute;
+class GDX12CloudComponent;
 class BistroWaterRendering;
 class BistroUIPosters;
-class CrossAdapterEnvironment;
 
 class BistroRenderPipeline final : public IRenderPipeline
 {
@@ -24,15 +21,12 @@ public:
     void Initialize(RenderPipelineContext&) override;
     void ResetWorldHistory() override;
     std::pair<size_t, size_t> GetWorldProbeReadiness() const override;
-    std::vector<Engine::UI::CanvasId> GetWorldCanvasIds() const override;
-    void PrepareMaterialBindings(RenderPipelineContext&, Engine::UI::CrossAdapterUI*) override;
+    void PrepareMaterialBindings(RenderPipelineContext&) override;
     void UpdateFrameSettings(RenderPipelineContext&) override;
     bool PrepareFrame(RenderPipelineContext&, GDX12CommandList*) override;
     void BuildGraph(GDX12RenderGraph&, const RenderPipelineGraphInputs&) override;
     void Resize(RenderPipelineContext&) override;
     const RenderPipelineBindings& GetBindings() const override;
-    std::vector<BistroQualitySearch::TechniqueMeasurement> GetQualityMeasurements() const;
-    std::optional<D3D12_RESOURCE_DESC> GetReflectionShadowDescription() const;
 
 private:
     friend class BistroRenderGraphTests;
@@ -41,17 +35,12 @@ private:
     std::vector<GDX12GeometryViewPass*> GeometryPasses();
     std::shared_ptr<SceneManagerModule> _scenes;
     std::unique_ptr<BistroGrassGeometry> _grass;
-    std::unique_ptr<BistroGrassRoute> _grassRoute;
-    std::unique_ptr<BistroGrassShadowRoute> _grassShadows;
     bool _grassAvailable = true;
     std::unique_ptr<BistroWaterRendering> _water;
     std::unique_ptr<BistroUIPosters> _posters;
     bool _posterGraphChanged = false;
+    std::unique_ptr<GDX12CloudComponent> _clouds;
     std::unique_ptr<CommonRenderPasses> _passes;
-    struct ReflectionGrass;
-    std::unique_ptr<ReflectionGrass> _reflectionGrass;
-    std::unique_ptr<CrossAdapterEnvironment> _cloudEnvironment;
-    bool _cloudSplit = false;
 #ifdef _DEBUG
     std::unique_ptr<GDX12RenderPass> _collisionPass;
     bool _collisionViewActive = false;

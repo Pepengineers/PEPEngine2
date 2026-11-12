@@ -50,8 +50,9 @@ const ComPtr<ID3D12CommandAllocator>& GDX12CommandList::GetCommandAllocator()
 
 void GDX12CommandList::Reset()
 {
-    if (_submitted && (!_retirementFence || !_retirement.IsReachedBy(
-        { _retirement.Timeline(), _retirementFence->GetCompletedValue() })))
+    if (_submitted && (!_retirementFence || !_retirement ||
+        _retirementFence->GetCompletedValue() == (std::numeric_limits<UINT64>::max)() ||
+        _retirementFence->GetCompletedValue() < _retirement))
         throw std::logic_error("Cannot reset an allocator before its queue-issued retirement point");
 	ThrowIfFailed(_commandAllocator->Reset());
 	ThrowIfFailed(_commandList->Reset(_commandAllocator.Get(), nullptr));
@@ -59,7 +60,6 @@ void GDX12CommandList::Reset()
     _retirement = {};
     _retirementFence.Reset();
     _submitted = false;
-    _legacyOwners.clear();
     InvalidateCachedState();
 }
 

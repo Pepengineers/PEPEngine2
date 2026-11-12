@@ -4,31 +4,12 @@
 StructuredBuffer<float4> Interaction : register(t0);
 
 StructuredBuffer<uint> AliveIn : register(t1);
-StructuredBuffer<Particle> DisplayedPool : register(t2);
 Texture2D<float> SceneDepth : register(t3);
 RWStructuredBuffer<Particle> Pool : register(u0);
 RWStructuredBuffer<uint> AliveOut : register(u1);
 RWStructuredBuffer<uint> Dead : register(u2);
 RWStructuredBuffer<uint> Counters : register(u3);
 RWStructuredBuffer<uint> Args : register(u4);
-
-[numthreads(256, 1, 1)]
-void ApplyDisplayHistory(uint id : SV_DispatchThreadID)
-{
-    if (id >= Capacity) return;
-    Particle particle = Pool[id];
-    Particle previous = particle;
-    if (ResetMotion != 0)
-    {
-        Particle displayed = DisplayedPool[id];
-        if (displayed.Seed == particle.Seed && displayed.Lifetime > 0 && displayed.Age <= particle.Age)
-            previous = displayed;
-    }
-    particle.Previous = previous.Position;
-    particle.PreviousAge = previous.Age;
-    particle.PreviousRotation = previous.Rotation;
-    Pool[id] = particle;
-}
 
 uint Hash(uint value)
 {

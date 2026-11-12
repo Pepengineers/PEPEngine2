@@ -20,7 +20,7 @@ namespace BistroWater
     inline const Vector3 ReferenceScale(HalfExtent.x / ReferenceHalfExtent.x,
         HalfExtent.y / ReferenceHalfExtent.y, HalfExtent.z / ReferenceHalfExtent.z);
     inline AutoConsoleVariable<float> HeightScale(L"App.Water.HeightScale", 2.0f,
-        L"Vertical MGPU-to-world scale, preserves basin floor, startup only, 1..3",
+        L"Vertical Simulation-to-world scale, preserves basin floor, startup only, 1..3",
         EConsoleVariableFlags::ReadOnly, [](float value) { return std::isfinite(value) && value >= 1 && value <= 3; });
     // shortcut: virtual walls extend above the rim; use open-top collisions for actual overflow.
     inline Vector3 SimulationScale() { return ReferenceScale * Vector3(1, HeightScale.GetValue(), 1); }
@@ -29,10 +29,10 @@ namespace BistroWater
         L"Bistro water basins, 0 disables, maximum 8",
         EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 8; });
     inline AutoConsoleVariable<float> WaveSpeed(L"App.Water.WaveSpeed", 6.0f,
-        L"Initial mirrored wave speed away from the center in MGPU units/s, startup only, 0..12",
+        L"Initial mirrored wave speed away from the center in simulation units/s, startup only, 0..12",
         EConsoleVariableFlags::ReadOnly, [](float value) { return std::isfinite(value) && value >= 0 && value <= 12; });
     inline AutoConsoleVariable<float> WaveAcceleration(L"App.Water.WaveAcceleration", 4.0f,
-        L"Periodic mirrored X wave acceleration in MGPU units/s^2, startup only, 0..12",
+        L"Periodic mirrored X wave acceleration in simulation units/s^2, startup only, 0..12",
         EConsoleVariableFlags::ReadOnly, [](float value) { return std::isfinite(value) && value >= 0 && value <= 12; });
     inline AutoConsoleVariable<float> WavePeriod(L"App.Water.WavePeriod", 6.0f,
         L"Wave forcing period in simulation seconds, startup only, 1..30",
@@ -47,7 +47,7 @@ namespace BistroWater
         L"Water surface filter radius on world restart, 1..64 pixels",
         EConsoleVariableFlags::Default, [](UINT value) { return value >= 1 && value <= 64; });
     inline AutoConsoleVariable<float> ParticleRadius(L"App.Water.ParticleRadius", 0.15f,
-        L"Fluid render radius in MGPU units, startup only, 0.01..0.2", EConsoleVariableFlags::ReadOnly,
+        L"Fluid render radius in simulation units, startup only, 0.01..0.2", EConsoleVariableFlags::ReadOnly,
         [](float value) { return std::isfinite(value) && value >= 0.01f && value <= 0.2f; });
 
     class Scene
@@ -160,8 +160,8 @@ namespace BistroWater
         static GDX12FluidComponent CreateFluidSource()
         {
             GDX12FluidSettings settings;
-            // Keep MGPU numerical units; only the entity transform converts them to scene cm.
-            settings.MGPUReference = true;
+            // Keep solver numerical units; only the entity transform converts them to scene cm.
+            settings.ReferenceModel = true;
             settings.ParticleRadiusCm = ParticleRadius.GetValue();
             settings.SmoothingRadiusCm = 0.2f;
             settings.ParticleMassKg = 1;

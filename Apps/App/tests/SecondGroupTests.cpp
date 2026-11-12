@@ -309,7 +309,7 @@ int main(int argc, char** argv)
         if (interactionOnly)
         {
             GDX12OpaquePass opaque;
-            opaque.Setup(&resources, nullptr, &common); opaque.Initialize();
+            opaque.Setup(&resources, &common); opaque.Initialize();
             auto* depth = opaque.GetOutput(2)->GetTexture();
             auto* commands = queue->GetCommandList();
             commands->ResourceBarrier({ depth->GetResource()->GetDepthWriteBarrier() });
@@ -326,7 +326,7 @@ int main(int argc, char** argv)
         TestSkinning(device, resources);
         if (!benchmark) TestSkinPlacement(device, resources);
         if (benchmark && (mode == "--benchmark" || mode == "--benchmark-skin")) BenchmarkSkinPlacement(device, resources);
-        GDX12EnvironmentIBLPass environment; environment.Setup(&resources, nullptr, &common); environment.Initialize();
+        GDX12EnvironmentIBLPass environment; environment.Setup(&resources, &common); environment.Initialize();
         UINT environmentStep = 0;
         const auto execute = [&](GDX12RenderPass& pass)
         {
@@ -399,7 +399,7 @@ int main(int argc, char** argv)
             return 0;
         }
 
-        GDX12OpaquePass opaque; opaque.Setup(&resources, nullptr, &common); opaque.Initialize();
+        GDX12OpaquePass opaque; opaque.Setup(&resources, &common); opaque.Initialize();
         auto* depth = opaque.GetOutput(2)->GetTexture(); auto* motion = opaque.GetOutput(1)->GetTexture();
         const auto makeColor = [&](DXGI_FORMAT format, XMFLOAT4 clear)
         {
@@ -444,12 +444,12 @@ int main(int argc, char** argv)
 
         Set(L"Render.Fluid.Enabled", "true");
         Set(L"Render.Fluid.Quality", "2");
-        GDX12FluidSurfacePass water; water.Setup(&resources, nullptr, &common); water.SetInputs({depth, motion}); water.Initialize();
+        GDX12FluidSurfacePass water; water.Setup(&resources, &common); water.SetInputs({depth, motion}); water.Initialize();
         GDX12FluidSimulationPass waterSimulation(&water);
-        waterSimulation.Setup(&resources, nullptr, &common);
+        waterSimulation.Setup(&resources, &common);
         Set(L"Render.Fluid.AsyncCompute", asyncMode ? "true" : "false");
         GDX12FluidResolvePass waterResolve(&water);
-        waterResolve.Setup(&resources, nullptr, &common);
+        waterResolve.Setup(&resources, &common);
         waterResolve.SetInputs({ hdr.get(), environment.GetOutput(1) });
         waterResolve.Initialize();
         WaterGraphOutput waterOutput;
@@ -550,7 +550,7 @@ int main(int argc, char** argv)
         Set(L"Render.Fluid.AsyncCompute", asyncMode ? "true" : "false");
         std::cout << "GPU fluid graph: first-frame buffers, SPH/NRF, resolve, quality, simulation-only, clear and reset passed.\n";
 
-        GDX12ParticlesPass particles; particles.Setup(&resources, nullptr, &common);
+        GDX12ParticlesPass particles; particles.Setup(&resources, &common);
         particles.SetInputs({water.GetOutput(0), accum.get(), reveal.get()}); particles.Initialize();
         resources.ParticleSimulation = std::make_unique<GDX12ParticleSimulation>();
         Set(L"Render.Particles.Enabled", "true");
@@ -558,7 +558,7 @@ int main(int argc, char** argv)
         Set(L"Render.Particles.DrawEnabled", "true");
         Set(L"Render.Particles.SimulationEnabled", "true");
         GDX12ParticleSimulationPass simulationPass;
-        simulationPass.Setup(&resources, nullptr, &common);
+        simulationPass.Setup(&resources, &common);
         simulationPass.SetInputs({depth});
         const auto makeParticleGraph = [&](bool draw)
         {

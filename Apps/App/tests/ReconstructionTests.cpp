@@ -117,7 +117,7 @@ static void TestGPU(GDX12Device& device, GDX12DeviceResources& resources)
     common.GameTimer = &timer;
     GDX12Texture color, depth, motion;
     GDX12ReconstructionPass pass;
-    pass.Setup(&resources, nullptr, &common);
+    pass.Setup(&resources, &common);
     pass.SetInputs({ &depth, &motion, &color });
     auto* stable = pass.GetOutput(0);
     const auto inputs = [&]

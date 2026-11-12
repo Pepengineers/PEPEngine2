@@ -43,12 +43,12 @@ public:
     TestApp() : App(GetModuleHandleW(nullptr)) {}
 };
 
-static GDX12Submission::CompletionPoint Submit(GDX12CommandQueue& queue, GDX12CommandList& commands)
+static UINT64 Submit(GDX12CommandQueue& queue, GDX12CommandList& commands)
 {
     ThrowIfFailed(commands.GetCommandList()->Close());
     ID3D12CommandList* lists[] = {commands.GetCommandList().Get()};
     queue.GetCommandQueue()->ExecuteCommandLists(1, lists);
-    return queue.SignalCompletion();
+    return queue.Signal();
 }
 
 static GDX12ResourceHandle MakeTarget(GDX12Device& device, UINT width, UINT height)
@@ -80,7 +80,7 @@ static GDX12ResourceHandle MakeImage(GDX12Device& device, Pixel pixel, DXGI_FORM
     commands.ResourceBarrier({CD3DX12_RESOURCE_BARRIER::Transition(image.Get(),
         D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)});
     auto& queue = *device.GetCommandQueue();
-    queue.CPUWaitForFenceValue(Submit(queue, commands).Value());
+    queue.CPUWaitForFenceValue(Submit(queue, commands));
     return image;
 }
 
@@ -241,7 +241,7 @@ static std::array<std::vector<Pixel>, 2> TestScreen(GDX12Device& device)
         Render(&commands, &screenTarget);
         direct.Record(device, commands, *screenTarget.GetResource()->D3DResource.Get(), D3D12_RESOURCE_STATE_COMMON);
         auto& queue = *device.GetCommandQueue();
-        queue.CPUWaitForFenceValue(Submit(queue, commands).Value());
+        queue.CPUWaitForFenceValue(Submit(queue, commands));
 
         const auto foreground = offscreen.Read();
         auto& legacy = references[scale - 1];
@@ -302,7 +302,7 @@ static void TestInflight(GDX12Device& device, std::array<std::shared_ptr<const D
         std::unique_ptr<GDX12CommandList> Commands;
         std::shared_ptr<const void> Owner;
         Readback Output;
-        GDX12Submission::CompletionPoint Done;
+        UINT64 Done;
     } recorded[2];
     struct Gate
     {
@@ -331,13 +331,13 @@ static void TestInflight(GDX12Device& device, std::array<std::shared_ptr<const D
         output.Output.Record(device, *output.Commands, *nativeTarget, D3D12_RESOURCE_STATE_RENDER_TARGET);
         output.Done = Submit(queue, *output.Commands);
     }
-    Require(!oldDrawData.expired() && !recorded[0].Done.IsReachedBy(queue.GetCompletionProgress()),
+    Require(!oldDrawData.expired() && queue.GetFence()->GetCompletedValue() < recorded[0].Done,
         "Resize fixture lost its draw data or was not in flight");
     GDX12CommandList retry(&device);
     const auto retryTarget = MakeTarget(device, Width, Height);
     Require(!renderer.TryRecord(retry, retryTarget, oldDrawData.lock()), "Live ring slot was overwritten");
     ThrowIfFailed(gate.Fence->Signal(1));
-    queue.CPUWaitForFenceValue(recorded[1].Done.Value());
+    queue.CPUWaitForFenceValue(recorded[1].Done);
     gate.Fence.Reset();
 
     for (UINT i = 0; i < 2; ++i)
@@ -357,7 +357,7 @@ static void TestInflight(GDX12Device& device, std::array<std::shared_ptr<const D
     auto replacement = MakeImage(device, {255, 255, 255, 255}, OffscreenFormat);
     auto recovered = renderer.TryRecord(retry, retryTarget, replay, {{ImageId, replacement}});
     Require(recovered != nullptr, "Retired UI slot was not reusable");
-    queue.CPUWaitForFenceValue(Submit(queue, retry).Value());
+    queue.CPUWaitForFenceValue(Submit(queue, retry));
     replay.reset();
     recovered.reset();
     Require(oldDrawData.expired(), "Retired draw data is still pinned");
@@ -400,7 +400,6 @@ static void TestForeignTexture(GDX12Device& primary, const std::shared_ptr<const
     }
     if (!foreignAdapter) ThrowIfFailed(factory->EnumWarpAdapter(IID_PPV_ARGS(&foreignAdapter)));
     GDX12Device foreign;
-    foreign.Role = DEVICE_ROLE_SECONDARY;
     ThrowIfFailed(foreign.Initialize(foreignAdapter));
     ComPtr<ID3D12InfoQueue> info;
     ThrowIfFailed(foreign.GetDevice().As(&info));
@@ -409,14 +408,14 @@ static void TestForeignTexture(GDX12Device& primary, const std::shared_ptr<const
     auto target = MakeTarget(foreign, Width, Height);
     const auto wrongImage = MakeImage(primary, {0, 0, 0, 255}, OffscreenFormat);
     Reject([&] { auto unused = renderer.TryRecord(commands, target, frame, {{ImageId, wrongImage}}); },
-        "Secondary renderer accepted primary image binding");
+        "Renderer accepted a foreign-device image binding");
     const auto image = MakeImage(foreign, {255, 0, 255, 255}, OffscreenFormat);
     auto owner = renderer.TryRecord(commands, target, frame, {{ImageId, image}});
     Require(owner != nullptr, "Foreign binding rejection left a partial recording");
     Readback output;
     output.Record(foreign, commands, *target.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET);
     auto& queue = *foreign.GetCommandQueue();
-    queue.CPUWaitForFenceValue(Submit(queue, commands).Value());
+    queue.CPUWaitForFenceValue(Submit(queue, commands));
     ExpectPixel(output.Read()[10 * Width + 50], {255, 0, 255, 255});
     CheckDebug(*info.Get());
 }

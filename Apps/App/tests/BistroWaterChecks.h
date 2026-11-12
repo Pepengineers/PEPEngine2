@@ -65,7 +65,7 @@ inline void CheckBistroWaterCounts(World& world, Frame&& frame)
         ValidateFluidSettings(settings);
         require(seed && seed->size() >= 80000 && seed->size() <= 120000 && seed->size() % 2 == 0 && settings.SimulationEnabled && settings.RenderEnabled,
             "Bistro water must contain approximately 100000 mirrored MGPU particles");
-        require(settings.MGPUReference && settings.ParticleMassKg == 1 && settings.RestDensityKgPerCm3 == 630 &&
+        require(settings.ReferenceModel && settings.ParticleMassKg == 1 && settings.RestDensityKgPerCm3 == 630 &&
             settings.SmoothingRadiusCm == 0.2f && settings.PressureStiffnessCm2PerSecond2 == 288 &&
             settings.NearPressureStiffnessCm2PerSecond2 == 2.15f && settings.PredictionSeconds == 1.0f / 120 &&
             settings.MaxSubsteps == 3 && settings.MaxStepSeconds == 1.0f / 180 &&

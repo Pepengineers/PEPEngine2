@@ -16,7 +16,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderHelpers.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12Submission.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Quality.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Reconstruction.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameGeneration.h"><Filter>Header Files</Filter></ClInclude>
@@ -84,9 +83,6 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12ShadowDepthTransfer.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12AppendBuffer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -116,16 +112,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\IRenderPassLink.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureCopyToSharedMemoryPass.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12SharedTexture.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12StreamlineSDK.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TextureCopyFromSharedMemoryPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FSRUpscalePass.h">
@@ -135,9 +122,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OutputToScreenPass.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12SyncPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12XeSSUpscalePass.h">
@@ -205,9 +189,6 @@
     <ClCompile Include="src\GDX12Resource.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\GDX12ShadowDepthTransfer.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="src\GDX12DeviceResources.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -223,7 +204,6 @@
     <None Include="Shaders\CSM.hlsli" />
     <None Include="Shaders\EnvironmentIBL.hlsl" />
     <None Include="Shaders\ShadowPass.hlsl" />
-    <None Include="Shaders\ShadowDepthTransfer.hlsl" />
     <None Include="Shaders\LocalShadowPass.hlsl" />
     <None Include="Shaders\ShadowFrustum.hlsli" />
     <None Include="Shaders\FullScreenVS.hlsl" />
@@ -267,16 +247,10 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGraph.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12SnapshotProtocol.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12SnapshotTransport.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGeometrySource.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGeometry.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GeometryViewPass.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GeometryBatchPass.h"><Filter>Header Files</Filter></ClInclude>
     <ClCompile Include="src\GDX12RenderGraph.cpp"><Filter>Source Files</Filter></ClCompile>
-    <ClCompile Include="src\GDX12SnapshotProtocol.cpp"><Filter>Source Files</Filter></ClCompile>
-    <ClCompile Include="src\GDX12SnapshotTransport.cpp"><Filter>Source Files</Filter></ClCompile>
-  </ItemGroup>
-  <ItemGroup>
   </ItemGroup>
 </Project>

@@ -97,7 +97,7 @@ public:
         for (UINT face = 0; face < 6; ++face) Upload(Environment, blue, 8, face);
         const uint16_t dfg[] = { Half(1), 0, 0, 0 };
         Upload(DFG, dfg, 8);
-        SSR.Setup(&Resources, nullptr, &Common);
+        SSR.Setup(&Resources, &Common);
         SSR.SetInputs({ &Color, &Depth, &Normal, &F0, &Motion, &Environment, &DFG });
         SSR.Initialize();
         Fill();
@@ -312,7 +312,7 @@ static void CheckToneMap(Fixture& fixture)
     desc.RTVDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
     display.Initialize(desc);
     GDX12OutputToScreenPass toneMap;
-    toneMap.Setup(&fixture.Resources, nullptr, &fixture.Common);
+    toneMap.Setup(&fixture.Resources, &fixture.Common);
     toneMap.SetInputs({ fixture.SSR.GetOutput(0), &display });
     toneMap.Initialize();
     auto* queue = fixture.Device.GetCommandQueue();

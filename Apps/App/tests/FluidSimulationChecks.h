@@ -192,7 +192,7 @@ static void CheckFluidSimulation(GDX12Device& device, GDX12FluidSurfacePass& wat
             ++buffer;
         }
     Require(buffer == 2, "Running fluid toggle fixture lost its buffers");
-    settings.MGPUReference = true;
+    settings.ReferenceModel = true;
     settings.RenderEnabled = false;
     settings.MaxSubsteps = 1;
     settings.MaxStepSeconds = 0.001f;

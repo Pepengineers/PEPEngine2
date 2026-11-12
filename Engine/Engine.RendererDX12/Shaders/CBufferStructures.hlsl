@@ -98,8 +98,6 @@ struct LocalLight
     uint ShadowRevision;
     uint ShadowFlags;
     uint3 _padding;
-    float3 ShadowPosition;
-    float ShadowRange;
     float4x4 ShadowViewProj[6];
 };
 

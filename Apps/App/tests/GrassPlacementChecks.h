@@ -271,7 +271,6 @@ static void TestGrassStages(GDX12Device& device, GDX12DeviceResources& resources
         lighting.Irradiance = lighting.Prefiltered = &cube;
         lighting.LocalShadows = &neutralArray;
         lighting.ShadowConstants = frame.ShadowCB->GetElementAddress(0);
-        lighting.LocalLights = &frame.LightingLocalLights();
         const auto draw = [&](GDX12GrassRenderer::Stage stage)
         {
             auto* commands = queue->GetCommandList();

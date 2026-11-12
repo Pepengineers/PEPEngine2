@@ -1,6 +1,6 @@
 #pragma once
 #include <cstdint>
-#include "Rendering/Grass/GDX12GrassFieldProducer.h"
+#include "Rendering/Grass/GDX12GrassWind.h"
 #include "Engine.RendererDX12/GDX12UploadBuffer.h"
 #include "Engine.RendererDX12/GDX12RootSignature.h"
 #include "Engine.RendererDX12/GDX12RenderGeometry.h"
@@ -8,7 +8,6 @@
 #include "Components/BistroInteractionSource.h"
 #include "Engine.RendererDX12/GDX12Particles.h"
 #include <unordered_map>
-#include <unordered_set>
 #include <map>
 #include <tuple>
 
@@ -23,62 +22,16 @@ class GDX12GrassRenderer
 public:
     enum class Stage : std::uint8_t { Full, GBuffer, PrepassNormals, Depth, Shadow, Capture };
     using CaptureLighting = GDX12CaptureLighting;
-    struct DisplayedFields
-    {
-        std::shared_ptr<const GDX12GrassFieldSnapshot> Current, Previous;
-        bool ResetHistory = false;
-    };
-
-    struct LocalCheckpoint
-    {
-        GDX12GrassFieldProducer::SnapshotLayout Layout;
-        std::shared_ptr<GDX12Resource> Packed;
-    };
-
-    struct ShadowPatch
-    {
-        GDX12RenderPrimitiveHandle Handle;
-        GDX12GrassInstance Instance;
-        BoundingBox Bounds;
-    };
-    struct ShadowMaterials
-    {
-        GDX12DescriptorHeap* Heap = nullptr;
-        GDX12Resource* Buffer = nullptr;
-        D3D12_GPU_DESCRIPTOR_HANDLE Table = {};
-        D3D12_GPU_DESCRIPTOR_HANDLE AlphaTable = {};
-        UINT Count = 0;
-    };
-    std::optional<std::vector<ShadowPatch>> FreezeShadowPatches(
-        const GDX12RenderPrimitiveRegistry& registry, const IRenderGeometrySource& source, bool shadowCastersOnly = true) const;
-    GDX12GrassRenderer(GDX12DeviceResources* resources, ShadowMaterials materials);
-    void SetShadowMaterials(ShadowMaterials materials);
-    // Only after the placed shadow invocation has released this renderer slot.
-    void ReleaseShadowFrame();
-
     explicit GDX12GrassRenderer(GDX12DeviceResources* resources);
     ~GDX12GrassRenderer();
     // Wait the current frame-slot fence before reusing staging or replacing its roots.
     void BeginFrame(const RenderPipelineCommonData& common,
         std::vector<GDX12GrassInstance> grass, std::vector<GDX12WindInstance> wind, GDX12GrassWindControls controls,
-        const std::vector<BistroInteractionSource>& sources = {}, float deltaSeconds = 0,
-        const DisplayedFields* fields = nullptr);
-    static XMFLOAT4 BistroInteractionArea();
-    static uint64_t FieldInputSignature(const std::vector<GDX12GrassInstance>& grass, const GDX12GrassWindControls& controls);
+        const std::vector<BistroInteractionSource>& sources = {}, float deltaSeconds = 0);
     GDX12ParticleInteractionField InteractionField() const;
-    // Request before recording this frame's local preparation pass.
-    std::shared_ptr<const LocalCheckpoint> PrepareLocalCheckpoint();
-    void RestartLocalSolver();
-    struct LocalSimulationStatus { double AgeMs = 0, DebtSeconds = 0, MissingSeconds = 0; bool Ready = false; };
-    LocalSimulationStatus GetLocalSimulationStatus() const;
-    // Caller has observed the seed receipt; BeginFrame may now advance this solver.
-    void ResumeLocalSolver(std::shared_ptr<GDX12GrassFieldProducer> solver, uint64_t interactionResetRevision,
-        GDX12GrassFieldInputQueue pending = {});
     void PrepareGPU(GDX12CommandList* commands);
     void PrepareView(const GDX12GeometryContext& view, UINT patch);
-    // A placed caller can provide the packed views' NON_PIXEL_SHADER_RESOURCE state in its graph.
-    bool Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch,
-        bool packedFieldStateDeclared = false);
+    bool Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch);
     void GatherBatches(const GDX12GeometryContext& view, std::vector<GDX12RenderBatch>& batches) const;
     std::vector<GDX12RenderGraph::BufferAccess> PreparationAccesses() const;
     std::vector<GDX12RenderGraph::BufferAccess> ExpansionAccesses(const GDX12GeometryContext& view, UINT patch) const;
@@ -91,7 +44,6 @@ public:
     const GDX12GrassWindControls& Controls() const { return _controls; }
 
 private:
-    friend class BistroRenderGraphTests;
     struct Vertex
     {
         XMFLOAT3 Position, PreviousPosition, Normal;
@@ -115,6 +67,20 @@ private:
         UINT GridResolution, ResetHistory, Padding0, Padding1;
     };
     static_assert(sizeof(Parameters) == 384);
+    struct WindParameters
+    {
+        XMFLOAT4 Area; // center xy, extents xy
+        XMFLOAT4 Force; // direction xy, speed, gust amplitude
+        XMFLOAT4 Gust; // frequency, wavelength, time, dt
+        XMFLOAT4 Solver; // force, damping, max speed, unused
+        UINT Resolution, Padding0, Padding1, Padding2;
+    };
+    static_assert(sizeof(WindParameters) == 80);
+    struct InteractionParameters
+    {
+        XMFLOAT4 Area;
+        float DeltaSeconds; UINT SourceCount, Reset, Resolution;
+    };
     struct GrassState
     {
         GDX12GrassInstance Source;
@@ -126,7 +92,25 @@ private:
         GDX12RenderPrimitiveHandle Primitive;
         BoundingBox Bounds;
     };
-    using FieldView = GDX12GrassFieldSnapshot::View;
+    using FieldBuffer = GDX12UploadBuffer<XMFLOAT4>;
+    struct WindState
+    {
+        GDX12WindInstance Source;
+        std::array<std::unique_ptr<FieldBuffer>, 2> Velocity, Pressure;
+        std::unique_ptr<FieldBuffer> Advected, Divergence;
+        float Time = 0;
+        float PreviousTime = 0;
+        UINT Resolution = 0;
+        bool Initialized = false;
+        bool ResetHistory = true;
+        uint64_t SettingsHash = 0;
+    };
+    struct WindJob
+    {
+        UINT Stage, Resolution;
+        GDX12UploadBuffer<WindParameters>* Constants;
+        FieldBuffer *Input, *Pressure, *Output;
+    };
     struct Output
     {
         GDX12GeometryContext View;
@@ -135,53 +119,59 @@ private:
         uint64_t Owner = 0;
         GDX12UploadBuffer<Parameters>* Constants = nullptr;
         UINT ConstantIndex = 0;
-        std::array<FieldView, 4> Fields;
+        FieldBuffer *CurrentWind = nullptr, *PreviousWind = nullptr;
         GDX12GraphicsBindings Binding;
         GDX12RenderBatch Batch;
     };
     struct Frame
     {
         std::vector<std::unique_ptr<GDX12UploadBuffer<Parameters>>> DrawParameters;
+        std::vector<std::unique_ptr<GDX12UploadBuffer<WindParameters>>> WindParametersBuffers;
         // Descriptors and upload mappings must survive every referencing command list.
+        std::vector<std::unique_ptr<FieldBuffer>> RetiredFields;
         std::vector<std::unique_ptr<GDX12UploadBuffer<Vertex>>> RetiredVertices;
         std::vector<std::unique_ptr<GDX12UploadBuffer<UINT>>> RetiredIndices;
         std::vector<GrassState> RetiredGrass;
+        std::vector<WindJob> WindJobs;
         std::vector<std::pair<GDX12UploadBuffer<XMFLOAT3>*, GDX12UploadBuffer<XMFLOAT3>*>> RootUploads;
         std::vector<std::unique_ptr<Output>> Outputs;
         std::map<std::tuple<uint64_t, GDX12GeometryStage, UINT>, Output*> OutputIndex;
         UINT DrawCursor = 0;
-        DisplayedFields Snapshots;
-        std::shared_ptr<GDX12GrassFieldProducer> LocalSolver;
-        std::shared_ptr<const LocalCheckpoint> Checkpoint;
-        std::unordered_set<uint64_t> SnapshotWindOwners;
+        UINT WindCursor = 0;
+        std::unique_ptr<GDX12UploadBuffer<BistroInteractionSource>> Sources;
+        std::unique_ptr<GDX12UploadBuffer<InteractionParameters>> InteractionConstants;
     };
     template<typename T> std::unique_ptr<GDX12UploadBuffer<T>> Buffer(UINT count, bool srv, bool uav);
     void Initialize();
+    void UpdateWind(WindState& state, bool reset);
+    void WindDispatch(UINT stage, const WindParameters& parameters,
+        FieldBuffer* input, FieldBuffer* pressure, FieldBuffer* output);
+    void RetireWind(WindState& state);
     Frame& CurrentFrame();
-    GDX12DescriptorHeap* BindingHeap() const;
     Output* FindOutput(const GDX12GeometryContext&, UINT patch) const;
     static Stage RenderStage(GDX12GeometryStage);
 
     GDX12DeviceResources* _resources;
-    std::optional<ShadowMaterials> _shadowMaterials;
     GDX12GrassWindControls _controls;
     std::vector<Frame> _frames;
     std::unordered_map<uint64_t, GrassState> _grass;
-    std::shared_ptr<GDX12GrassFieldProducer> _fieldProducer;
-    bool _usingSnapshot = false;
-    bool _resumeSeed = false;
-    bool _restartLocal = false;
-    bool _carryWindDebt = false;
-    std::optional<GDX12GrassFieldInputQueue> _localContinuation;
-    std::chrono::steady_clock::time_point _lastLocalSolve{}, _lastLocalInput{};
-    uint64_t _interactionResetRevision = 0;
+    std::unordered_map<uint64_t, WindState> _wind;
     std::vector<uint64_t> _drawOrder;
-    std::unique_ptr<GDX12RootSignature> _computeRoot, _graphicsRoot;
+    std::unique_ptr<GDX12RootSignature> _computeRoot, _graphicsRoot, _windRoot;
     ComPtr<ID3D12PipelineState> _expandPSO, _clearPSO;
     std::array<ComPtr<ID3D12PipelineState>, 6> _graphicsPSO;
+    std::array<ComPtr<ID3D12PipelineState>, 7> _windPSO;
+    std::unique_ptr<GDX12RootSignature> _interactionRoot;
+    ComPtr<ID3D12PipelineState> _interactionPSO;
+    std::unique_ptr<FieldBuffer> _presence, _trail, _previousTrail;
+    static constexpr UINT InteractionResolution = 64;
+    XMFLOAT4 _interactionArea = {};
+    bool _resetInteraction = true;
+    uint64_t _interactionRevision = 0;
     ComPtr<ID3D12CommandSignature> _signature;
     std::unique_ptr<GDX12UploadBuffer<Vertex>> _vertices;
     std::unique_ptr<GDX12UploadBuffer<UINT>> _indices, _arguments;
+    std::unique_ptr<FieldBuffer> _neutralWind;
     Vector3 _previousEye = Vector3::Zero;
     Vector3 _eye = Vector3::Zero;
     bool _initialized = false;

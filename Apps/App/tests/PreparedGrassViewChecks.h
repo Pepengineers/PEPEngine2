@@ -280,10 +280,13 @@ static void TestPreparedGrassViews(GDX12Device& device, GDX12DeviceResources& re
     capacity.CastShadows = false;
     renderer.BeginFrame(frozenCommon, {capacity}, {}, controls);
     renderer.PublishPrimitives(resources.Primitives, &source);
-    const auto shadowPatches = renderer.FreezeShadowPatches(resources.Primitives, source);
-    const auto reflectionPatches = renderer.FreezeShadowPatches(resources.Primitives, source, false);
-    Require(shadowPatches && shadowPatches->empty() && reflectionPatches && reflectionPatches->size() == 1,
-        "Reflection capture omitted visible grass that does not cast shadows");
+    UINT reflectionOnlyPrimitives = 0;
+    resources.Primitives.ForEach([&](GDX12RenderPrimitiveHandle, const GDX12RenderPrimitive& primitive)
+    {
+        if (primitive.Source == &source && primitive.Visible && !primitive.CastsShadows && primitive.CapturedInReflections)
+            ++reflectionOnlyPrimitives;
+    });
+    Require(reflectionOnlyPrimitives == 1, "Visible grass without shadows must remain available to reflection capture");
     capacity.CastShadows = true;
     const auto defaultBytes = renderer.GeometryAllocationBytes();
     std::vector<GDX12GrassInstance> patches(16, capacity);

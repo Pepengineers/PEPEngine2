@@ -15,8 +15,6 @@ GDX12FrameConstants::GDX12FrameConstants(GDX12Device* device)
     SkyCB->CopyData(0, GDX12SkyConstants{});
     MainCB = std::make_unique<GDX12UploadBuffer<GDX12MainConstants>>(device, 1, EBufferType::Upload, true);
     ShadowCB = std::make_unique<GDX12UploadBuffer<GDX12ShadowConstants>>(device, 1, EBufferType::Upload, true);
-    DisplayShadowCB = std::make_unique<GDX12UploadBuffer<GDX12ShadowConstants>>(device, 1, EBufferType::Upload, true);
-    DisplayShadowLights = std::make_unique<GDX12UploadBuffer<GDX12LocalLightConstants>>(device, 1, EBufferType::Upload, false);
     LocalLightCache = std::make_unique<GDX12UploadBuffer<GDX12LocalLightConstants>>(device, 1, EBufferType::Upload, false);
     TransformCache = std::make_unique<GDX12UploadBuffer<GDX12TransformConstants>>(device, 0, EBufferType::Upload, false);
     InstanceCache = std::make_unique<GDX12UploadBuffer<GDX12InstanceData>>(device, 0, EBufferType::Upload, false);

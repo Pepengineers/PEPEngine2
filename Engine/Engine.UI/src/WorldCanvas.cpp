@@ -143,7 +143,7 @@ namespace Engine::UI
             GDX12ResourceHandle Output;
         };
 
-        explicit Impl(GDX12Device& device) : Device(device), Adapter(device.GetSubmissionAdapterId())
+        explicit Impl(GDX12Device& device) : Device(device)
         {
             ThrowIfFailed(device.GetDevice().As(&Identity));
             D3D12_FEATURE_DATA_FORMAT_SUPPORT format{OffscreenFormat};
@@ -173,7 +173,6 @@ namespace Engine::UI
         }
 
         GDX12Device& Device;
-        GDX12Submission::AdapterId Adapter;
         ComPtr<IUnknown> Identity;
         std::unique_ptr<GDX12RootSignature> Root;
         ComPtr<ID3D12PipelineState> Gradient[2], Blur, Finish[2];
@@ -191,7 +190,9 @@ namespace Engine::UI
         GDX12ResourceHandle output) const
     {
         auto& state = *_impl;
-        if (state.Adapter != state.Device.GetSubmissionAdapterId())
+        ComPtr<IUnknown> currentDevice;
+        ThrowIfFailed(state.Device.GetDevice().As(&currentDevice));
+        if (state.Identity != currentDevice)
             throw std::logic_error("Canvas effects belong to a retired device incarnation");
         if ((commands.GetType() != D3D12_COMMAND_LIST_TYPE_DIRECT && commands.GetType() != D3D12_COMMAND_LIST_TYPE_COMPUTE) ||
             !output || frame.Id == CanvasId::Invalid || !std::isfinite(frame.TimeSeconds) || frame.TimeSeconds < 0)

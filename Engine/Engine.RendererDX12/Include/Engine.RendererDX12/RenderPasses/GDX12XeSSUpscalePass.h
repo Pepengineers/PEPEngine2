@@ -18,9 +18,9 @@ public:
 
     ~GDX12XeSSUpscalePass() override { DestroyContext(); }
 
-    void Setup(GDX12DeviceResources* resources, GDX12DeviceResources* other, RenderPipelineCommonData* common) override
+    void Setup(GDX12DeviceResources* resources, RenderPipelineCommonData* common) override
     {
-        GDX12RenderPass::Setup(resources, other, common);
+        GDX12RenderPass::Setup(resources, common);
         _commonData->Upscaler = this;
         BuildContext();
         QueryRenderTargetResolution();

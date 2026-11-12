@@ -88,11 +88,6 @@ App::App(HINSTANCE hInstance)
 App::~App()
 {
     Log::Info("Application", "Shutting down application resources");
-    if (const auto render = Locator.GetModule<RenderModule>(); render && !render->ShutdownMGPU())
-    {
-        Locator.UnregisterModule<RenderModule>();
-        return;
-    }
     //ordering is important
     Locator.UnregisterModule<SceneManagerModule>();
     Locator.UnregisterModule<PhysicsModule>();

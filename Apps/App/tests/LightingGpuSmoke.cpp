@@ -443,24 +443,24 @@ int main(int argc, char** argv)
         resources.Sky.Quality = 3;
         resources.Sky.Box.IBL.CubeResolution = 1024;
         GDX12EnvironmentIBLPass environment;
-        environment.Setup(&resources, nullptr, &common);
+        environment.Setup(&resources, &common);
         environment.Initialize();
         GDX12CascadedShadowPass shadows;
-        shadows.Setup(&resources, nullptr, &common);
+        shadows.Setup(&resources, &common);
         shadows.Initialize();
         GDX12LocalShadowPass localShadows;
-        localShadows.Setup(&resources, nullptr, &common);
+        localShadows.Setup(&resources, &common);
         localShadows.Initialize();
         GDX12OpaquePass opaque;
-        opaque.Setup(&resources, nullptr, &common);
+        opaque.Setup(&resources, &common);
         opaque.SetInputs({});
         opaque.Initialize();
         GDX12AmbientOcclusionPass ao;
-        ao.Setup(&resources, nullptr, &common);
+        ao.Setup(&resources, &common);
         ao.SetInputs({ opaque.GetOutput(2), opaque.GetOutput(3) });
         ao.Initialize();
         GDX12DeferredLightingPass deferred;
-        deferred.Setup(&resources, nullptr, &common);
+        deferred.Setup(&resources, &common);
         const std::vector<IRenderPassLink*> lightingInputs = { opaque.GetOutput(0), opaque.GetOutput(3), opaque.GetOutput(4), opaque.GetOutput(5),
             opaque.GetOutput(2), shadows.GetOutput(0), environment.GetOutput(0), environment.GetOutput(1),
             environment.GetOutput(2), environment.GetOutput(3), localShadows.GetOutput(0), ao.GetOutput(0) };
@@ -475,9 +475,9 @@ int main(int argc, char** argv)
         lightingGraph.AddPass(deferred);
         lightingGraph.Compile(false);
         GDX12GPUCullingPass culling;
-        culling.Setup(&resources, nullptr, &common);
+        culling.Setup(&resources, &common);
         GDX12WBOITTransparencyPass transparency;
-        transparency.Setup(&resources, nullptr, &common);
+        transparency.Setup(&resources, &common);
         transparency.SetInputs({ opaque.GetOutput(2), shadows.GetOutput(0), environment.GetOutput(0), environment.GetOutput(1), environment.GetOutput(2), localShadows.GetOutput(0) });
         transparency.Initialize();
         auto* queue = device.GetCommandQueue();
@@ -556,11 +556,6 @@ int main(int argc, char** argv)
         resources.UploadLocalShadowData(commands);
         resources.IndirectCommandsCache->CopyData(0, GDX12IndirectDrawArgs{});
         shadows.Prepare();
-        const auto sunOutput = shadows.DescribePreparedShadow({ GDX12ShadowSelection::Mode::Sun, {} });
-        Require(sunOutput && sunOutput->ViewCount() == 4 &&
-            sunOutput->SplitDepths.w == resources.ShadowSettings.SplitDepths.w &&
-            !shadows.DescribePreparedShadow({ GDX12ShadowSelection::Mode::AllLocal, {} }),
-            "Prepared sun must describe its full cascade group only when selected");
         shadows.Execute(commands);
         queue->ExecuteCommandList(commands);
         queue->Flush();
@@ -622,27 +617,6 @@ int main(int argc, char** argv)
             auto casterSnapshot = fullScan ? std::move(resources.LocalShadowCasters) : std::nullopt;
             if (fullScan) resources.LocalShadowCasters.reset();
             localShadows.Prepare();
-            const auto outputs = localShadows.DescribePreparedShadows({});
-            size_t outputIndex = 0;
-            for (const auto* light : { &point, &spot })
-            {
-                const auto selected = localShadows.DescribePreparedShadows(
-                    { GDX12ShadowSelection::Mode::SpecificLight, GetLocalShadowKey(*light) });
-                if (light->ShadowFirstSlice == UINT_MAX)
-                {
-                    Require(selected.empty(), "Unshadowed lights must not have prepared output");
-                    continue;
-                }
-                Require(outputIndex < outputs.size() && selected.size() == 1 &&
-                    selected[0].ViewCount() == LocalShadowFaceCount(*light) &&
-                    selected[0].Views[0].Region.Slice == light->ShadowFirstSlice &&
-                    selected[0].MatchesDepthInputs(outputs[outputIndex]),
-                    "Prepared local outputs must preserve the selected light and all of its faces");
-                ++outputIndex;
-            }
-            Require(outputIndex == outputs.size() &&
-                localShadows.DescribePreparedShadows({ GDX12ShadowSelection::Mode::Sun, {} }).empty(),
-                "Prepared local outputs must exclude unshadowed and unselected lights");
             if (fullScan) resources.LocalShadowCasters = std::move(casterSnapshot);
             auto visibilitySnapshot = std::move(resources.LocalShadowVisibility);
             localShadows.Execute(list);

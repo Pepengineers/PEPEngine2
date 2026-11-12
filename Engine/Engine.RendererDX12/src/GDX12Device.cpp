@@ -1,8 +1,6 @@
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.Core/Logging/Logger.h"
-#include <atomic>
 #include <exception>
-#include <limits>
 #include <stdexcept>
 
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
@@ -18,8 +16,7 @@ GDX12Device::GDX12Device() :
     _isInitialized(false),
     _rtvDescriptorSize(0),
     _dsvDescriptorSize(0),
-    _cbvSrvUavDescriptorSize(0),
-    Role(DEVICE_ROLE_PRIMARY)
+    _cbvSrvUavDescriptorSize(0)
 {
 }
 
@@ -65,7 +62,7 @@ HRESULT GDX12Device::Initialize(ComPtr<IDXGIAdapter4> adapter)
         Reset();
         return DXGI_ERROR_UNSUPPORTED;
     }
-    _proxyDevice = GDX12StreamlineSDK::Get().CreateProxyDevice(_device, Role == DEVICE_ROLE_PRIMARY);
+    _proxyDevice = GDX12StreamlineSDK::Get().CreateProxyDevice(_device, true);
     _device = GDX12StreamlineSDK::Get().GetNativeDevice(_proxyDevice ? _proxyDevice : _device);
 
     D3D12MA::ALLOCATOR_DESC allocatorDesc = {};
@@ -73,14 +70,6 @@ HRESULT GDX12Device::Initialize(ComPtr<IDXGIAdapter4> adapter)
     allocatorDesc.pAdapter = _adapter.Get();
     ThrowIfFailed(D3D12MA::CreateAllocator(&allocatorDesc, &_allocator));
 
-    static std::atomic<uint64_t> nextAdapter{1};
-    auto identity = nextAdapter.load();
-    do
-    {
-        if (identity == (std::numeric_limits<uint64_t>::max)())
-            throw std::overflow_error("Submission adapter identities exhausted");
-    } while (!nextAdapter.compare_exchange_weak(identity, identity + 1));
-    _submissionAdapterId = GDX12Submission::AdapterId{identity};
     _commandQueue = std::make_unique<GDX12CommandQueue>(this);
 
     _isInitialized = true;
@@ -109,25 +98,14 @@ void GDX12Device::CollectDeviceFeatures()
 
 void GDX12Device::Reset()
 {
-    // Also invalidate externally owned export queues before releasing the native device.
-    std::exception_ptr failure;
-    while (!_submissionQueues.empty())
-    {
-        try { _submissionQueues.back()->Reset(); }
-        catch (...) { if (!failure) failure = std::current_exception(); }
-    }
-    _copyQueue.reset();
-    _copyQueueAttempted = false;
     _computeQueue.reset();
     _computeQueueAttempted = false;
-    _submissionAdapterId = GDX12Submission::AdapterId::Invalid;
     _commandQueue.reset();
     _allocator.Reset();
     _proxyDevice.Reset();
     _device.Reset();
     _adapter.Reset();
     _isInitialized = false;
-    if (failure) std::rethrow_exception(failure);
 }
 
 const ComPtr<ID3D12Device14>& GDX12Device::GetDevice()
@@ -159,29 +137,6 @@ GDX12CommandQueue* GDX12Device::TryGetComputeQueue()
         }
     }
     return _computeQueue.get();
-}
-
-GDX12CommandQueue* GDX12Device::TryGetCopyQueue()
-{
-    if (!_isInitialized) throw std::logic_error("COPY queue requires an initialized device");
-    if (!_copyQueueAttempted)
-    {
-        _copyQueueAttempted = true;
-        try { _copyQueue = std::make_unique<GDX12CommandQueue>(this, D3D12_COMMAND_LIST_TYPE_COPY); }
-        catch (const DxException& error)
-        {
-            ThrowIfFailed(_device->GetDeviceRemovedReason());
-            Log::Warning("Renderer", "COPY queue unavailable: ", error.ToString(), "; using DIRECT copies");
-        }
-    }
-    return _copyQueue.get();
-}
-
-GDX12CommandQueue* GDX12Device::FindSubmissionQueue(GDX12Submission::TimelineId timeline) const
-{
-    for (auto* queue : _submissionQueues)
-        if (queue->GetTimelineIdentity() == timeline) return queue;
-    return nullptr;
 }
 
 const DeviceSpecs& GDX12Device::GetDeviceFeatures()

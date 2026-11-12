@@ -335,7 +335,6 @@ void GDX12ParticlesPass::BeginFrame()
     {
         const auto& emitter = snapshot.Emitters[i];
         auto constants = MakeConstants(emitter, width, height);
-        if (snapshot.DisplayHistoryApplied) constants.Paused = 0;
         if (emitter.Texture)
         {
             auto* texture = emitter.Texture->PrimaryDeviceTexture;

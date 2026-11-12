@@ -50,19 +50,6 @@
     <ClInclude Include="Include\App.Base\Modules\EventManagerModule.h" />
     <ClInclude Include="Include\App.Base\Modules\PhysicsModule.h" />
     <ClInclude Include="Include\App.Base\Modules\RenderModule.h" />
-    <ClInclude Include="Include\App.Base\Rendering\RenderMGPURuntime.h" />
-    <ClInclude Include="Include\App.Base\Rendering\CrossAdapterAO.h" />
-    <ClInclude Include="Include\App.Base\Rendering\CrossAdapterParticles.h" />
-    <ClInclude Include="Include\App.Base\Rendering\CrossAdapterWork.h" />
-    <ClInclude Include="Include\App.Base\Rendering\CrossAdapterReflections.h" />
-    <ClInclude Include="Include\App.Base\Rendering\CrossAdapterEnvironment.h" />
-    <ClInclude Include="Include\App.Base\Rendering\CrossAdapterUI.h" />
-    <ClInclude Include="Include\App.Base\Rendering\CrossAdapterSceneReplica.h" />
-    <ClInclude Include="Include\App.Base\Rendering\CrossAdapterShadowRaster.h" />
-    <ClInclude Include="Include\App.Base\Rendering\CrossAdapterShadows.h" />
-    <ClInclude Include="Include\App.Base\Rendering\CrossAdapterShadowScene.h" />
-    <ClInclude Include="Include\App.Base\Rendering\RenderShadowSceneCapture.h" />
-    <ClInclude Include="Include\App.Base\Rendering\RenderShadowRoutes.h" />
     <ClInclude Include="Include\App.Base\Modules\SceneManagerModule.h" />
     <ClInclude Include="Include\App.Base\Physics\JoltPhysicsBackend.h" />
     <ClInclude Include="Include\App.Base\Physics\JoltJobSystem.h" />
@@ -107,19 +94,6 @@
       <Optimization>MaxSpeed</Optimization><InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks><SupportJustMyCode>false</SupportJustMyCode>
     </ClCompile>
-    <ClCompile Include="src\RenderModuleMGPU.cpp" />
-    <ClCompile Include="src\Rendering\RenderMGPURuntime.cpp" />
-    <ClCompile Include="src\Rendering\CrossAdapterAO.cpp" />
-    <ClCompile Include="src\Rendering\CrossAdapterParticles.cpp" />
-    <ClCompile Include="src\Rendering\CrossAdapterWork.cpp" />
-    <ClCompile Include="src\Rendering\CrossAdapterReflections.cpp" />
-    <ClCompile Include="src\Rendering\CrossAdapterEnvironment.cpp" />
-    <ClCompile Include="src\Rendering\CrossAdapterUI.cpp" />
-    <ClCompile Include="src\Rendering\CrossAdapterSceneReplica.cpp" />
-    <ClCompile Include="src\Rendering\CrossAdapterShadowRaster.cpp" />
-    <ClCompile Include="src\Rendering\CrossAdapterShadows.cpp" />
-    <ClCompile Include="src\Rendering\CrossAdapterShadowScene.cpp" />
-    <ClCompile Include="src\Rendering\RenderShadowRoutes.cpp" />
     <ClCompile Include="src\Rendering\CommonRenderPasses.cpp" />
     <ClCompile Include="src\Rendering\DefaultRenderPipeline.cpp" />
     <ClInclude Include="Include\App.Base\Rendering\IRenderPipeline.h" />

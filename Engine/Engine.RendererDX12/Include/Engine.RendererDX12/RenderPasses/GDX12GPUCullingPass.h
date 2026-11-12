@@ -16,9 +16,9 @@ public:
 	GDX12GPUCullingPass()
 	{ _flags = RENDER_PASS_FLAG_USE_CAMERAS | RENDER_PASS_FLAG_USE_INSTANCES; }
 
-	void Setup(GDX12DeviceResources* initOnResources, GDX12DeviceResources* otherResources, RenderPipelineCommonData* commonData) override
+	void Setup(GDX12DeviceResources* initOnResources, RenderPipelineCommonData* commonData) override
 	{
-		GDX12RenderPass::Setup(initOnResources, otherResources, commonData);
+		GDX12RenderPass::Setup(initOnResources, commonData);
 
 		// Root Signatures
 		GDX12RootSignatureDesc RSDesc1;

@@ -15,7 +15,7 @@ inline void TestPreparedShadowViews()
     resources.ShadowQuality.SunResolution = 0;
     resources.Lighting.SunShadowFlags = 0;
     GDX12CascadedShadowPass disabled;
-    disabled.Setup(&resources, nullptr, &common);
+    disabled.Setup(&resources, &common);
     disabled.Prepare();
     for (UINT slot = 0; slot < disabled.GetGeometryViewCapacity(); ++slot)
         require(!disabled.GetGeometryView(slot), "Disabled sun published geometry preparation views");
@@ -27,7 +27,7 @@ inline void TestPreparedShadowViews()
     resources.CurrFrameConstantsIndex = 2;
     common.CameraView = Matrix::CreateTranslation(-3, -4, -5);
     GDX12CascadedShadowPass sun;
-    sun.Setup(&resources, nullptr, &common);
+    sun.Setup(&resources, &common);
     require(!sun.GetGeometryView(0), "Unprepared sun published a view");
     sun.Prepare();
     require(sun.GetGeometryViewCapacity() == 4 && !sun.GetGeometryView(4), "Sun view topology changed");
@@ -52,8 +52,8 @@ inline void TestPreparedShadowViews()
     resources.LocalLights[2].Type = 2;
     resources.LocalLights[2].ShadowFirstSlice = 6;
     GDX12LocalShadowPass local, staticLocal(true);
-    local.Setup(&resources, nullptr, &common);
-    staticLocal.Setup(&resources, nullptr, &common);
+    local.Setup(&resources, &common);
+    staticLocal.Setup(&resources, &common);
     require(local.GetGeometryViewCapacity() == 14 && staticLocal.GetGeometryViewCapacity() == 7,
         "Local shadow topology allocated unshadowed lights or six slots for a spot");
     for (UINT slot = 0; slot < local.GetGeometryViewCapacity(); ++slot)

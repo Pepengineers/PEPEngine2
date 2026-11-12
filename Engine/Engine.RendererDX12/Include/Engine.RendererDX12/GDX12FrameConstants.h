@@ -38,12 +38,6 @@ public:
     std::unique_ptr<GDX12UploadBuffer<GDX12MainConstants>> MainCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12ShadowConstants>> ShadowCB;
     std::unique_ptr<GDX12UploadBuffer<GDX12LocalLightConstants>> LocalLightCache;
-    // Display metadata may belong to an older depth snapshot than this frame's raster inputs.
-    std::unique_ptr<GDX12UploadBuffer<GDX12ShadowConstants>> DisplayShadowCB;
-    std::unique_ptr<GDX12UploadBuffer<GDX12LocalLightConstants>> DisplayShadowLights;
-    bool DisplayShadowPolicy = false;
-    auto& LightingShadowConstants() const { return DisplayShadowPolicy ? *DisplayShadowCB : *ShadowCB; }
-    auto& LightingLocalLights() const { return DisplayShadowPolicy ? *DisplayShadowLights : *ShadowLights; }
 
     //Dirty flag notify updating
     std::unique_ptr<GDX12UploadBuffer<GDX12TransformConstants>> TransformCache;

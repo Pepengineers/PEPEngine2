@@ -46,8 +46,6 @@ protected:
                 gpu.HasPreviousWorld = true;
                 if (_render->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
                     _render->GetCurrentPrimaryFrameConstants()->TransformCache->CopyData(gpu.CBufferIndex, constants);
-                if (_render->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
-                    _render->GetCurrentSecondaryFrameConstants()->TransformCache->CopyData(gpu.CBufferIndex, constants);
                 --gpu.NumFramesDirty;
             }
             if (ecs.Has<StaticMeshRenderComponent>(entity))
@@ -70,9 +68,6 @@ protected:
                     if (_render->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
                         UpdateInstances(_render->GetPrimaryGPUMesh(renderer.MeshHandler),
                             _render->GetCurrentPrimaryFrameConstants(), gpu, renderer);
-                    if (_render->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
-                        UpdateInstances(_render->GetSecondaryGPUMesh(renderer.MeshHandler),
-                            _render->GetCurrentSecondaryFrameConstants(), gpu, renderer);
                     --renderer._numFramesDirty;
                 }
             }
@@ -196,8 +191,7 @@ private:
             }
             // Jitter current camera proj matrix if it is needed
             if (isActiveCamera &&
-                (renderModule->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_JITTER) ||
-                    renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_JITTER)))
+                renderModule->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_JITTER))
             {
                 ++_jitterFrameIndex;
 
@@ -232,11 +226,6 @@ private:
                 CBuffer->CopyData(camera._CBufferIndex, objConstants);
             }
 
-            if (renderModule->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_CAMERAS))
-            {
-                auto& CBuffer = renderModule->GetCurrentSecondaryFrameConstants()->CameraCB;
-                CBuffer->CopyData(camera._CBufferIndex, objConstants);
-            }
 
             camera._numFramesDirty--;
         }

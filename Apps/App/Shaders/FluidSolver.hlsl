@@ -1,4 +1,4 @@
-// Legacy Muller SPH and MGPU predicted-position signed/near-pressure kernels.
+// Muller SPH and reference predicted-position signed/near-pressure kernels.
 #include "FluidParameters.hlsli"
 cbuffer DispatchParameters : register(b0)
 {
@@ -171,7 +171,7 @@ void Collide(inout float3 position, inout float3 velocity)
 {
     if (ReferenceUnits != 0)
     {
-        // MGPU collides point centers, without a particle-radius margin or outward-velocity test.
+        // The reference model collides point centers, without a particle-radius margin or outward-velocity test.
         for (uint axis = 0; axis < 3; ++axis)
             if (abs(position[axis]) >= HalfExtent[axis])
             {
@@ -229,7 +229,7 @@ void Integrate(uint i : SV_DispatchThreadID)
             float distance = length(difference);
             if (ReferenceUnits != 0 ? distance > H : distance >= H) continue;
             ++neighborCount;
-            // Preserve MGPU's coincident-particle fallback; legacy uses an antisymmetric direction.
+            // Preserve the reference model's coincident-particle fallback; legacy uses an antisymmetric direction.
             float3 direction = ReferenceUnits != 0 ?
                 (distance > 0 ? difference / distance : float3(0,-1,0)) :
                 (distance > 1e-6f ? difference / distance : float3(i < j ? -1 : 1, 0, 0));

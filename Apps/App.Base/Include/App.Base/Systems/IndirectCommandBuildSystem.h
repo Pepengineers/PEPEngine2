@@ -22,8 +22,6 @@ protected:
             {
                 if (_render->PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
                     Build(_render->GetPrimaryGPUMesh(renderer.MeshHandler), _render->GetPrimaryIndirectCommandsCache(), renderer);
-                if (_render->SecondaryPipelineHasFlag(RENDER_PASS_FLAG_USE_INSTANCES))
-                    Build(_render->GetSecondaryGPUMesh(renderer.MeshHandler), _render->GetSecondaryIndirectCommandsCache(), renderer);
             });
     }
 private:

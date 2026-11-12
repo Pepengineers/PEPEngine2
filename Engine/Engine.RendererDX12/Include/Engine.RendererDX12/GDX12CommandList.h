@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Engine.RendererDX12\D3DHelpers.h"
-#include "Engine.RendererDX12/GDX12Submission.h"
 
 #if defined(DEBUG) || defined(_DEBUG) || defined(PROFILE_BUILD)
 #include <pix/pix3.h>
@@ -116,11 +115,8 @@ public:
 
 private:
     friend class GDX12CommandQueue;
-    friend class GDX12RenderGraph;
-    // Held by the queue-owned list until reset is allowed by its issued retirement point.
-    std::vector<std::shared_ptr<const void>> _legacyOwners;
     GDX12CommandQueue* _owner = nullptr;
-    GDX12Submission::CompletionPoint _retirement;
+    UINT64 _retirement = 0;
     ComPtr<ID3D12Fence> _retirementFence;
     bool _submitted = false;
     void RequireDirect() const;

@@ -49,43 +49,10 @@ std::vector<GDX12FluidInstance> BistroWaterRendering::CollectScene(float deltaSe
             instance.ContainerToWorld = Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
                 XMConvertToRadians(transform.Rotation.y), XMConvertToRadians(transform.Rotation.x),
                 XMConvertToRadians(transform.Rotation.z)) * Matrix::CreateTranslation(transform.Location);
-            instance.Paused = world.IsPaused();
-            instance.WorldTimeScale = world.GetTimeScale();
-            instance.DeltaSeconds = instance.Paused ? 0 : deltaSeconds * instance.WorldTimeScale;
+            instance.DeltaSeconds = world.IsPaused() ? 0 : deltaSeconds * world.GetTimeScale();
             ValidateFluidInstance(instance);
             instances.push_back(std::move(instance));
         });
     }
     return instances;
-}
-
-void BistroWaterRendering::PrepareFrame(std::vector<GDX12FluidInstance> instances, RenderMGPURuntime* runtime,
-    GDX12DeviceResources& primary, GDX12Device* secondary, GDX12Submission::FrameSubmissionId frame,
-    bool surfaceEligible)
-{
-    const GDX12FluidInstance* candidate = nullptr;
-    for (const auto& instance : instances)
-    {
-        const auto& seed = instance.Component.GetParticles();
-        if (!seed || seed->empty()) continue;
-        if (instance.Id == _routeCandidate)
-        {
-            candidate = &instance;
-            break;
-        }
-        if (!candidate || instance.Id < candidate->Id) candidate = &instance;
-    }
-    _routeCandidate = candidate ? candidate->Id : 0;
-    Surface.SetRoutedDisplay(0, {});
-    _crossAdapter.Tick(candidate, GetFluidControls(), runtime, primary, secondary, surfaceEligible);
-    _crossAdapter.SelectFrame(frame);
-    Surface.SetRoutedDisplay(_crossAdapter.RoutedOwner(), _crossAdapter.Display());
-    Surface.SetInstances(std::move(instances));
-}
-
-std::optional<GDX12Submission::CompletionPoint> BistroWaterRendering::SubmitExact(GDX12Submission::CompletionPoint prefix)
-{
-    auto receipt = _crossAdapter.SubmitExact(prefix);
-    if (receipt) Surface.SetRoutedDisplay(_crossAdapter.RoutedOwner(), _crossAdapter.Display());
-    return receipt;
 }

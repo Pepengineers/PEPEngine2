@@ -91,12 +91,12 @@ static void Transition(GDX12CommandList& commands, const GDX12ResourceHandle& re
     commands.ResourceBarrier({CD3DX12_RESOURCE_BARRIER::Transition(resource.Get(), before, after)});
 }
 
-static GDX12Submission::CompletionPoint Submit(GDX12CommandQueue& queue, GDX12CommandList& commands)
+static UINT64 Submit(GDX12CommandQueue& queue, GDX12CommandList& commands)
 {
     ThrowIfFailed(commands.GetCommandList()->Close());
     ID3D12CommandList* lists[] = {commands.GetCommandList().Get()};
     queue.GetCommandQueue()->ExecuteCommandLists(1, lists);
-    return queue.SignalCompletion();
+    return queue.Signal();
 }
 
 struct Images
@@ -146,11 +146,11 @@ static std::unique_ptr<PendingFrame> RecordFrame(GDX12Device& device, GDX12Comma
     return pending;
 }
 
-static GDX12Submission::CompletionPoint SubmitFrame(PendingFrame& pending, GDX12CommandQueue& producer,
+static UINT64 SubmitFrame(PendingFrame& pending, GDX12CommandQueue& producer,
     GDX12CommandQueue& consumer)
 {
     const auto ready = Submit(producer, pending.Effects);
-    if (&producer != &consumer) consumer.WaitFor(ready);
+    if (&producer != &consumer) consumer.WaitForQueue(producer, ready);
     return Submit(consumer, pending.Raster);
 }
 
@@ -171,7 +171,7 @@ static Images RenderFrame(GDX12Device& device, GDX12CommandQueue& producer, Canv
     auto pending = RecordFrame(device, producer, effects, raster, frame);
     try
     {
-        consumer.CPUWaitForFenceValue(SubmitFrame(*pending, producer, consumer).Value());
+        consumer.CPUWaitForFenceValue(SubmitFrame(*pending, producer, consumer));
     }
     catch (...)
     {
@@ -204,10 +204,10 @@ static std::array<Images, 2> RenderQualityChange(GDX12Device& device, CanvasEffe
     const auto oldDone = SubmitFrame(*old, direct, direct);
     next = RecordFrame(device, direct, effects, raster, medium);
     const auto nextDone = SubmitFrame(*next, direct, direct);
-    Require(!oldDone.IsReachedBy(direct.GetCompletionProgress()) && old->RasterOutput.Get() != next->RasterOutput.Get(),
+    Require(direct.GetFence()->GetCompletedValue() < oldDone && old->RasterOutput.Get() != next->RasterOutput.Get(),
         "Quality resize did not retain distinct surface slots while the old frame was in flight");
     ThrowIfFailed(gate.Fence->Signal(1));
-    direct.CPUWaitForFenceValue(nextDone.Value());
+    direct.CPUWaitForFenceValue(nextDone);
     gate.Fence.Reset();
     return {ReadFrame(direct, *old), ReadFrame(direct, *next)};
 }

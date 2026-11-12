@@ -134,7 +134,7 @@ public:
 
 GDX12FluidInstance Instance(UINT count, bool reference=false) {
     GDX12FluidInstance result; GDX12FluidSettings s;
-    s.MGPUReference=reference; s.MaxSubsteps=3; s.SmoothingRadiusCm=.2f; s.ParticleRadiusCm=.01f;
+    s.ReferenceModel=reference; s.MaxSubsteps=3; s.SmoothingRadiusCm=.2f; s.ParticleRadiusCm=.01f;
     s.ParticleMassKg=.001f; s.RestDensityKgPerCm3=1; s.PressureStiffnessCm2PerSecond2=10;
     s.NearPressureStiffnessCm2PerSecond2=reference ? 2.15f : 0; s.PredictionSeconds=1.f/120;
     s.AccelerationCmPerSecond2=Vector3(0,-1,0); s.ViscosityCm2PerSecond=.01f;
@@ -180,7 +180,7 @@ GDX12FluidSolver::Head RecordManual(Fixture& f, GDX12CommandList& c, Buffers& b,
         c.GetCommandList()->CopyResource(current.D3DResource.Get(),b.SeedUpload->GetResource().D3DResource.Get()); head.SeedPending=false;
     }
     c.SetComputeRootSignature(f.Root.get()); c.SetComputeRootConstantBufferView(1,constants);
-    Dispatch d{b.Count,b.Capacity}; d.Reference=settings.MGPUReference ? 1u : 0u;
+    Dispatch d{b.Count,b.Capacity}; d.Reference=settings.ReferenceModel ? 1u : 0u;
     Fixture::Constants(c,d); c.ResourceBarrier({current.GetUnorderedAccessBarrier()});
     c.SetComputeUAV(0,b.Particles[head.Current]->GetUAV()->GPUHandle); c.SetPipelineState(f.Save); c.Dispatch((b.Count+127)/128,1,1); c.ResourceBarrier({current.GetUAVBarrier()});
     d.Dt=steps.Dt;
@@ -221,25 +221,18 @@ void ValidateSimulation(Fixture& f) {
         GDX12UploadBuffer<GDX12FluidParameters> constants(&f.Device,1);
         constants.CopyData(0,MakeFluidParameters(instance.ContainerToWorld,settings));
         std::vector<Snapshot> expected;
-        // Baseline, all tiles, production tracked/placed, then a completed DIRECT/COMPUTE/DIRECT sequence.
-        for (UINT route=0;route<(count==2049 ? 7u : 6u);++route) {
+        // Baseline, all tiles, production, then a completed DIRECT/COMPUTE/DIRECT sequence.
+        for (UINT route=0;route<(count==2049 ? 6u : 5u);++route) {
             auto b=GDX12FluidSolver::CreateBuffers(&f.Device,f.Heap.get(),instance); GDX12FluidSolver::Head head;
             UINT totalSteps=0;
             for (UINT frame=0;frame<3;++frame) {
                 f.Queue->Flush();
-                f.Queue=route==6 && frame!=1 ? f.Device.GetCommandQueue() : compute;
+                f.Queue=route==5 && frame!=1 ? f.Device.GetCommandQueue() : compute;
                 const GDX12FluidSolver::Steps steps{frame==0 ? 1u : 3u,.0001f};
                 totalSteps+=steps.Count;
                 auto* c=f.Begin();
                 if (route<4) head=RecordManual(f,*c,b,head,settings,steps,constants.GetElementAddress(0),f.Variants[route]);
-                else {
-                    const bool placed=route==5;
-                    GDX12Resource* resources[]={&b.Particles[0]->GetResource(),&b.Particles[1]->GetResource(),&b.Density->GetResource(),&b.Keys->GetResource(),&b.Offsets->GetResource()};
-                    if (placed) for (auto* resource:resources) c->ResourceBarrier({resource->GetUnorderedAccessBarrier()});
-                    head=production.Record(*c,b,head,settings,steps,constants.GetElementAddress(0),placed ? GDX12FluidSolver::Boundary::PlacedUav : GDX12FluidSolver::Boundary::LegacyTracked);
-                    // Placed recording intentionally does not mutate the legacy state tracker.
-                    if (placed) for (auto* resource:resources) resource->SetCurrentState(D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                }
+                else head=production.Record(*c,b,head,settings,steps,constants.GetElementAddress(0));
                 f.Submit(c);
                 Snapshot sample{f.Read(*b.Particles[0]),f.Read(*b.Particles[1]),f.Read(*b.Density),f.Read(*b.Keys),f.Read(*b.Offsets)};
                 for (const auto* particles : {&sample.A,&sample.B})
@@ -258,7 +251,7 @@ void ValidateSimulation(Fixture& f) {
             }
         }
         std::cout << "Exact simulation passed Count=" << count << " Reference=" << reference
-                  << " (1+3+3 substeps, all tiles, production tracked/placed"
+                  << " (1+3+3 substeps, all tiles, production"
                   << (count==2049 ? ", DIRECT/COMPUTE/DIRECT)\n" : ")\n");
     }
 }

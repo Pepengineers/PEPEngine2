@@ -3,29 +3,25 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
-#include <deque>
 #include <stdexcept>
 #include <vector>
 
 namespace GDX12ReflectionSchedule
 {
     enum class Schedule { All, WholeProbe, FaceEach, OneFace };
-    enum class Placement { Fixed, NearPrimary, NearSecondary };
     struct Policy
     {
         Schedule Update = Schedule::All;
         float FullUpdateDistanceMetres = 0; // 0 disables distance scheduling; -1 means always full.
-        Placement Gpu = Placement::Fixed;
     };
     struct Probe
     {
         std::uint64_t Id;
         float Distance;
-        unsigned SecondaryFaces;
     };
     struct Work
     {
-        unsigned Faces = 0, SecondaryFaces = 0;
+        unsigned Faces = 0;
         bool Near = false;
     };
 
@@ -49,69 +45,6 @@ namespace GDX12ReflectionSchedule
         return value;
     }
 
-    // The schedule advances independently of completion. A slow producer cannot move its deadline.
-    class PublicationClock
-    {
-    public:
-        void Reset() { *this = {}; }
-        void ScheduleFaces(unsigned mask, double sourceTime)
-        {
-            if (mask > 63 || !std::isfinite(sourceTime) || sourceTime < _lastTime)
-                throw std::invalid_argument("Invalid reflection source time");
-            _lastTime = sourceTime;
-            for (unsigned face = 0; face < 6; ++face)
-                if (mask & (1u << face)) _pending[face] = sourceTime;
-            _mask |= mask;
-            if (_mask == 63)
-            {
-                _due.push_back({_pending, sourceTime});
-                _mask = 0;
-            }
-        }
-        void Publish(const std::array<double, 6>& sources, double completedTime)
-        {
-            if (!std::isfinite(completedTime) || completedTime < _lastTime)
-                throw std::invalid_argument("Invalid reflection completion time");
-            for (double source : sources)
-                if (!std::isfinite(source) || source < 0 || source > completedTime)
-                    throw std::invalid_argument("Invalid reflection publication");
-            _displayed = sources;
-            _ready = true;
-            bool completed = false;
-            while (!_due.empty() && MatchesExpected(_due.front().Sources))
-            {
-                const auto lag = completedTime - _due.front().Deadline;
-                _completedLag = completed ? (std::max)(_completedLag, lag) : lag;
-                completed = true;
-                _due.pop_front();
-            }
-        }
-        bool Ready() const { return _ready; }
-        double AdditionalLag(double now) const
-        {
-            return _due.empty() ? _completedLag : (std::max)(_completedLag, now - _due.front().Deadline);
-        }
-        double FullAge(double now, unsigned face) const
-        {
-            if (face >= 6) throw std::out_of_range("Reflection face");
-            return _ready ? (std::max)(0.0, now - _displayed[face]) : 0;
-        }
-    private:
-        bool MatchesExpected(const std::array<double, 6>& expected) const
-        {
-            if (!_ready) return false;
-            for (unsigned face = 0; face < 6; ++face)
-                if (_displayed[face] < expected[face]) return false;
-            return true;
-        }
-        struct Publication { std::array<double, 6> Sources; double Deadline; };
-        std::deque<Publication> _due;
-        std::array<double, 6> _pending{}, _displayed{};
-        unsigned _mask = 0;
-        double _lastTime = 0, _completedLag = 0;
-        bool _ready = false;
-    };
-
     class Scheduler
     {
     public:
@@ -120,11 +53,11 @@ namespace GDX12ReflectionSchedule
         std::vector<Work> Select(const std::vector<Probe>& probes, const Policy& policy)
         {
             if (!std::isfinite(policy.FullUpdateDistanceMetres) || policy.FullUpdateDistanceMetres < -1 ||
-                static_cast<unsigned>(policy.Update) > 3 || static_cast<unsigned>(policy.Gpu) > 2)
+                static_cast<unsigned>(policy.Update) > 3)
                 throw std::invalid_argument("Invalid reflection update policy");
             for (size_t i = 0; i < probes.size(); ++i)
             {
-                if (!std::isfinite(probes[i].Distance) || probes[i].Distance < 0 || probes[i].SecondaryFaces > 63)
+                if (!std::isfinite(probes[i].Distance) || probes[i].Distance < 0)
                     throw std::invalid_argument("Invalid reflection scheduling input");
                 for (size_t j = 0; j < i; ++j)
                     if (probes[i].Id == probes[j].Id) throw std::invalid_argument("Duplicate reflection probe identity");
@@ -174,13 +107,6 @@ namespace GDX12ReflectionSchedule
                     ++_cursor;
                     break;
                 }
-            }
-            for (size_t i = 0; i < probes.size(); ++i)
-            {
-                unsigned mask = probes[i].SecondaryFaces;
-                if (policy.Gpu == Placement::NearPrimary) mask = work[i].Near ? 0u : 63u;
-                if (policy.Gpu == Placement::NearSecondary) mask = work[i].Near ? 63u : 0u;
-                work[i].SecondaryFaces = work[i].Faces & mask;
             }
             return work;
         }

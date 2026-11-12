@@ -14,8 +14,8 @@ struct GDX12FluidSettings
 {
     bool SimulationEnabled = true;
     bool RenderEnabled = true;
-    // Keep the solver in container-local MGPU units; rendering converts to world cm.
-    bool MGPUReference = false;
+    // Keep the solver in container-local reference units; rendering converts to world cm.
+    bool ReferenceModel = false;
     float MaxStepSeconds = 1.0f / 240.0f;
     UINT MaxSubsteps = 0;
     float TimeScale = 1;
@@ -24,7 +24,7 @@ struct GDX12FluidSettings
     float ParticleMassKg = 0.008f;
     float RestDensityKgPerCm3 = 0.001f;
     float PressureStiffnessCm2PerSecond2 = 40000;
-    // Nonzero enables MGPU signed/near-pressure kernels; zero preserves the legacy solver.
+    // Nonzero enables signed/near-pressure kernels; zero preserves the legacy solver.
     float NearPressureStiffnessCm2PerSecond2 = 0;
     float PredictionSeconds = 0;
     float ViscosityCm2PerSecond = 1;
@@ -53,17 +53,13 @@ struct GDX12FluidControls
     bool Enabled;
     int Quality;
     bool AsyncCompute = false;
-    bool MultiGPU = false;
-    bool MultiGPUExact = false;
-    float MultiGPUUpdateHz = 0;
-    float MultiGPUMaxAgeMs = 0;
-    float UpdateHz = -1;
+
 };
 GDX12FluidControls GetFluidControls();
 GDX12FluidSettings ResolveFluidSettings(const GDX12FluidSettings& author, int quality);
 void ValidateFluidSettings(const GDX12FluidSettings& settings);
 
-// Immutable seeds: container-local cm, or raw MGPU units when MGPUReference is enabled.
+// Immutable seeds: container-local cm, or raw reference units when ReferenceModel is enabled.
 class GDX12FluidComponent
 {
 public:
@@ -87,8 +83,6 @@ struct GDX12FluidInstance
     float DeltaSeconds = 0;
     GDX12FluidComponent Component;
     Matrix ContainerToWorld = Matrix::Identity;
-    float WorldTimeScale = 1;
-    bool Paused = false;
 };
 
 void ValidateFluidInstance(const GDX12FluidInstance& instance);

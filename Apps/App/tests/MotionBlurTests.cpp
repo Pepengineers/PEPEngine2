@@ -286,7 +286,7 @@ int main(int argc, char** argv)
         depth.GetResource()->D3DResource->SetName(L"Fixture.Depth");
         motion.GetResource()->D3DResource->SetName(L"Fixture.Motion");
         GDX12MotionBlurPass pass;
-        pass.Setup(&resources, nullptr, &common);
+        pass.Setup(&resources, &common);
         pass.SetInputs({ &color, &depth, &motion });
         pass.Initialize();
         auto* queue = device.GetCommandQueue();
@@ -559,7 +559,7 @@ int main(int argc, char** argv)
         WritePPM("Build/MotionBlur/native.ppm", native, 1280, 720);
 
         GDX12XeSSUpscalePass xess;
-        xess.Setup(&resources, nullptr, &common);
+        xess.Setup(&resources, &common);
         xess.SetInputs({ &depth, pass.GetOutput(1), pass.GetOutput(0) });
         workload(common.DownscaledWidth, common.DownscaledHeight);
         xess.Initialize();
@@ -647,7 +647,7 @@ int main(int argc, char** argv)
         GDX12Texture display;
         InitializeTexture(display, resources, 1280, 720, DXGI_FORMAT_R8G8B8A8_UNORM);
         GDX12OutputToScreenPass toneMap;
-        toneMap.Setup(&resources, nullptr, &common);
+        toneMap.Setup(&resources, &common);
         toneMap.SetInputs({ xess.GetOutput(0), &display });
         toneMap.Initialize();
         auto* finalFrame = queue->GetCommandList();

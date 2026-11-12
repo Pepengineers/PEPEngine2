@@ -91,7 +91,7 @@ public:
         commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
         commands->SetComputeRootConstantBufferView(0, frame->MainCB->GetElementAddress(0));
         commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
-        commands->SetComputeRootConstantBufferView(2, frame->LightingShadowConstants().GetElementAddress(0));
+        commands->SetComputeRootConstantBufferView(2, frame->ShadowCB->GetElementAddress(0));
         for (UINT i = 0; i < _numInputs; ++i)
         {
             auto* texture = _inputs[i]->GetTexture();
@@ -101,7 +101,7 @@ public:
         commands->SetComputeRootConstantBufferView(4, grid.Constants->GetElementAddress(0));
         commands->SetComputeSRV(15, _resources->SkyTransmittanceSRV.GPUHandle);
         commands->SetComputeSRV(16, _resources->SkyViewSRV.GPUHandle);
-        commands->SetComputeSRV(11, frame->LightingLocalLights().GetSRV()->GPUHandle);
+        commands->SetComputeSRV(11, frame->ShadowLights->GetSRV()->GPUHandle);
         commands->SetComputeSRV(12, _resources->ReflectionRadianceSRV.GPUHandle);
         commands->SetComputeSRV(13, frame->ReflectionProbes->GetSRV()->GPUHandle);
         commands->SetComputeSRV(17, grid.Masks->GetSRV()->GPUHandle);

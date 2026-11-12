@@ -2,36 +2,20 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include "Engine.Core/Jobs/JobSystem.h"
-#include <functional>
 #include <utility>
 
 class RenderModule;
 class GDX12SwapChain;
 class GDX12ReconstructionPass;
-namespace Engine::UI
-{
-    enum class CanvasId : std::uint64_t;
-    class CrossAdapterUI;
-}
-
 struct RenderPipelineContext
 {
     RenderModule& Runtime;
     GDX12DeviceResources& Primary;
-    GDX12DeviceResources& Secondary;
     RenderPipelineCommonData& Common;
     GDX12SwapChain* BackBuffer;
 
     JobHandle PrepareScene();
     void Resize();
-};
-
-struct LegacyReplacementRoute
-{
-    GDX12RenderPass* Pass;
-    GDX12RenderGraph::SubmitLegacyReplacement Submit;
-    std::function<void(GDX12Submission::CompletionPoint)> Retire;
-    std::function<void(GDX12CommandList&)> RecordTail;
 };
 
 struct RenderPipelineBindings
@@ -40,7 +24,6 @@ struct RenderPipelineBindings
     GDX12ReconstructionPass* Reconstruction = nullptr;
     bool FrameGenerationInputs = false;
     bool UseAsyncCompute = false;
-    std::vector<LegacyReplacementRoute> LegacyReplacements;
 };
 
 struct RenderPipelineGraphInputs
@@ -54,8 +37,7 @@ public:
     virtual ~IRenderPipeline() = default;
     virtual void Initialize(RenderPipelineContext&) = 0;
     virtual bool AllowsFrameGeneration() const { return true; }
-    virtual std::vector<Engine::UI::CanvasId> GetWorldCanvasIds() const { return {}; }
-    virtual void PrepareMaterialBindings(RenderPipelineContext&, Engine::UI::CrossAdapterUI*) {}
+    virtual void PrepareMaterialBindings(RenderPipelineContext&) {}
     virtual void ResetWorldHistory() {}
     virtual std::pair<size_t, size_t> GetWorldProbeReadiness() const { return {}; }
 #ifdef _DEBUG
