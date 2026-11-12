@@ -1,0 +1,94 @@
+{
+  "SphAttribution.samples": {
+    "variants": [
+      {
+        "median_ms": 4.866048,
+        "p10_ms": 4.339712,
+        "p90_ms": 5.46304,
+        "mean_ms": 4.925506064516129,
+        "stage_mean_ms": {
+          "save": 0.019588129032258064,
+          "hash": 0.009777548387096774,
+          "sort": 0.2539189677419355,
+          "offsets": 0.004723612903225807,
+          "densities": 2.287616,
+          "integrate": 2.349881806451613
+        }
+      },
+      {
+        "median_ms": 1.46432,
+        "p10_ms": 1.401856,
+        "p90_ms": 2.10432,
+        "mean_ms": 1.633346064516129,
+        "stage_mean_ms": {
+          "save": 0.01912567741935484,
+          "hash": 0.008987870967741935,
+          "sort": 0.2249135483870968,
+          "offsets": 0.00452541935483871,
+          "densities": 0.5166905806451613,
+          "integrate": 0.8591029677419355
+        }
+      }
+    ],
+    "median_improvement_pct": 69.9074074074074,
+    "candidate_wins": 31,
+    "pairs": 31
+  },
+  "SphPaired1.samples": {
+    "variants": [
+      {
+        "median_ms": 5.117952,
+        "p10_ms": 4.501504,
+        "p90_ms": 5.6832,
+        "mean_ms": 5.1033349019607845
+      },
+      {
+        "median_ms": 1.529856,
+        "p10_ms": 1.416192,
+        "p90_ms": 2.55488,
+        "mean_ms": 1.8188649411764706
+      }
+    ],
+    "median_improvement_pct": 70.10804321728692,
+    "candidate_wins": 51,
+    "pairs": 51
+  },
+  "SphPaired2.samples": {
+    "variants": [
+      {
+        "median_ms": 5.725184,
+        "p10_ms": 4.649984,
+        "p90_ms": 6.288384,
+        "mean_ms": 5.743816784313726
+      },
+      {
+        "median_ms": 1.641472,
+        "p10_ms": 1.412096,
+        "p90_ms": 2.889728,
+        "mean_ms": 1.9608997647058823
+      }
+    ],
+    "median_improvement_pct": 71.32892148095154,
+    "candidate_wins": 51,
+    "pairs": 51
+  },
+  "SphPaired3.samples": {
+    "variants": [
+      {
+        "median_ms": 5.70368,
+        "p10_ms": 4.497408,
+        "p90_ms": 7.246848,
+        "mean_ms": 5.888120470588235
+      },
+      {
+        "median_ms": 1.536,
+        "p10_ms": 1.420288,
+        "p90_ms": 2.907136,
+        "mean_ms": 1.9155827450980392
+      }
+    ],
+    "median_improvement_pct": 73.07001795332137,
+    "candidate_wins": 51,
+    "pairs": 51
+  }
+}

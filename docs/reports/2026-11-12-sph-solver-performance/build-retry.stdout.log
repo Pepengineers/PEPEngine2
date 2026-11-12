@@ -1,0 +1,125 @@
+Версия MSBuild 18.12.2-1.26514.2+04f6ca984 для .NET Framework
+Сборка начата 12.11.2026 15:03:03.
+
+     1>Проект "I:\PEPEngine2\Build\SphSolverPerf\SphSolverPerf.vcxproj" в узле 1 (целевые объекты Build).
+     1>PrepareAgilitySDK:
+         powershell -NoProfile -ExecutionPolicy Bypass -File "I:\PEPEngine2\tools\Prepare-AgilitySDK.ps1" -Destination "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\D3D12" -Architecture x64
+       PrepareForBuild:
+         Создание каталога "I:\PEPEngine2\Build\obj\x64\Release\SphSolverPerf\".
+         Структурированный вывод включен. Форматирование диагностики компилятора будет отражать иерархию ошибок. Подробнее см. https://aka.ms/cpp/structured-output.
+         Создание каталога "I:\PEPEngine2\Build\obj\x64\Release\SphSolverPerf\SphSolverPerf.tlog\".
+       InitializeBuildStatus:
+         Создание "I:\PEPEngine2\Build\obj\x64\Release\SphSolverPerf\SphSolverPerf.tlog\unsuccessfulbuild", так как было задано "AlwaysCreate".
+         Обращение к "I:\PEPEngine2\Build\obj\x64\Release\SphSolverPerf\SphSolverPerf.tlog\unsuccessfulbuild".
+       ClCompile:
+         C:\Program Files\Microsoft Visual Studio\18\Professional\VC\Tools\MSVC\14.52.37025\bin\HostX64\x64\CL.exe /c /II:\PEPEngine2\Apps\App/src /II:\PEPEngine2\Apps\App.Base\Include /II:\PEPEngine2\External\External.Libraries\jolt\JoltPhysics\ /II:\PEPEngine2\Engine\Engine.UI\Include /II:\PEPEngine2\Engine\Engine.RendererDX12\Include /II:\PEPEngine2\External\External.Libraries\pix\Include /II:\PEPEngine2\External\External.Libraries\D3D12MemoryAllocator\include /II:\PEPEngine2\External\External.Libraries\xess\Include /I"I:\PEPEngine2\External\External.Libraries\nvidia-sdk\Include" /I"I:\PEPEngine2\Build\Dependencies\FidelityFX-SDK-c6efa6bf7f2027b3ec94f28578bb5965eabb9e55\sdk\include" /II:\PEPEngine2\Engine\Engine.Core\Include /II:\PEPEngine2\External\External.Libraries\wwise\Include /II:\PEPEngine2\External\External.Libraries\wwise\Include\wwise /II:\PEPEngine2\External\External.Libraries\directxmesh\Include /II:\PEPEngine2\External\External.Libraries\directstorage\Include /I"I:\PEPEngine2\External\External.Libraries\ffx-api\Include" /II:\PEPEngine2\External\External.Libraries\debugdrawer\Include /II:\PEPEngine2\External\External.Libraries\directxtex\Include /I"I:\PEPEngine2\External\External.Libraries\directx-headers\Include" /II:\PEPEngine2\External\External.Libraries\directxtk\Include /II:\PEPEngine2\External\External.Libraries\spdlog\include /II:\PEPEngine2\External\External.Libraries\assimp\Include /Zi /nologo /W3 /WX- /diagnostics:column /sdl /MP /O2 /Oi /GL /D "APP_SHADERS_FOLDER=LR\"(I:\PEPEngine2\Apps\App/Shaders\\)\"" /D NDEBUG /D _CONSOLE /D JPH_DEBUG_RENDERER /D JPH_PROFILE_ENABLED /D JPH_FLOATING_POINT_EXCEPTIONS_ENABLED /D NOMINMAX /D JPH_OBJECT_STREAM /D PEP_ENABLE_ASSET_DEBUG_LOGS=0 /D "SOLUTION_DIR=LR\"(I:\PEPEngine2\)\"" /D "PROJECT_DIR=LR\"(I:\PEPEngine2\Build\SphSolverPerf\)\"" /D "ASSETS_FOLDER=LR\"(I:\PEPEngine2\Assets\\)\"" /D "TEXTURES_FOLDER=LR\"(I:\PEPEngine2\Assets\Textures\\)\"" /D "MODELS_FOLDER=LR\"(I:\PEPEngine2\Assets\Models\\)\"" /D "SHADERS_FOLDER=LR\"(I:\PEPEngine2\Engine\Engine.RendererDX12\Shaders\\)\"" /D _UNICODE /D UNICODE /Gm- /EHsc /MD /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /std:c++17 /permissive- /Fo"I:\PEPEngine2\Build\obj\x64\Release\SphSolverPerf\\" /Fd"I:\PEPEngine2\Build\obj\x64\Release\SphSolverPerf\vc145.pdb" /external:W3 /Gd /TP /FC /errorReport:queue /utf-8 I:\PEPEngine2\Build\SphSolverPerf\SphSolverPerf.cpp I:\PEPEngine2\Build\SphSolverPerf\GDX12Fluid.cpp
+         SphSolverPerf.cpp
+         GDX12Fluid.cpp
+       Link:
+         C:\Program Files\Microsoft Visual Studio\18\Professional\VC\Tools\MSVC\14.52.37025\bin\HostX64\x64\link.exe /ERRORREPORT:QUEUE /OUT:"I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\SphSolverPerf.exe" /NOLOGO /LIBPATH:I:\PEPEngine2\Build\PerformanceAnalysis\accepted\Build\bin\x64\Release\Engine.Core\ /LIBPATH:I:\PEPEngine2\Build\PerformanceAnalysis\accepted\Build\bin\x64\Release\Engine.RendererDX12\ /LIBPATH:I:\PEPEngine2\Build\PerformanceAnalysis\accepted\Build\bin\x64\Release\Engine.UI\ /LIBPATH:I:\PEPEngine2\Build\PerformanceAnalysis\accepted\Build\bin\x64\Release\App.Base\ /LIBPATH:I:\PEPEngine2\Build\PerformanceAnalysis\accepted\Build\bin\x64\Release\External.Libraries\ /LIBPATH:I:\PEPEngine2\External\External.Libraries\dxc\lib\x64\ /LIBPATH:I:\PEPEngine2\External\External.Libraries\pix\lib\ /LIBPATH:I:\PEPEngine2\External\External.Libraries\assimp\lib\Release\ /LIBPATH:I:\PEPEngine2\External\External.Libraries\directxtk\lib\x64\Release\ /LIBPATH:I:\PEPEngine2\External\External.Libraries\directxtex\lib\x64\Release\ /LIBPATH:"I:\PEPEngine2\External\External.Libraries\ffx-api\lib\\" /LIBPATH:I:\PEPEngine2\External\External.Libraries\xess\lib\ /LIBPATH:I:\PEPEngine2\External\External.Libraries\directstorage\lib\ /LIBPATH:I:\PEPEngine2\External\External.Libraries\directxmesh\lib\ /LIBPATH:I:\PEPEngine2\External\External.Libraries\wwise\lib\ /LIBPATH:I:\PEPEngine2\External\External.Libraries\jolt\lib\Win64\Release\ /LIBPATH:"I:\PEPEngine2\External\External.Libraries\nvidia-sdk\lib\\" /LIBPATH:"I:\PEPEngine2\Build\Dependencies\FidelityFX-SDK-c6efa6bf7f2027b3ec94f28578bb5965eabb9e55\sdk\bin\ffx_sdk" d3d12.lib dxgi.lib d3dcompiler.lib Engine.Core.lib Engine.RendererDX12.lib Engine.UI.lib App.Base.lib External.Libraries.lib dxcompiler.lib dxil.lib WinPixEventRuntime.lib "assimp-vc143-mt.lib" DirectXTK12.lib DirectXTex.lib amd_fidelityfx_loader_dx12.lib libxess.lib dstorage.lib DirectXMesh.lib AkSoundEngine.lib AkMemoryMgr.lib AkStreamMgr.lib CommunicationCentral.lib Jolt.lib dxgi.lib ffx_dof_x64.lib ffx_sssr_x64.lib ffx_denoiser_x64.lib ffx_backend_dx12_x64.lib kernel32.lib user32.lib gdi32.lib winspool.lib comdlg32.lib advapi32.lib shell32.lib ole32.lib oleaut32.lib uuid.lib odbc32.lib odbccp32.lib /MANIFEST /MANIFESTUAC:"level='asInvoker' uiAccess='false'" /manifest:embed /DEBUG /PDB:"I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\SphSolverPerf.pdb" /SUBSYSTEM:CONSOLE /OPT:REF /OPT:ICF /LTCG:incremental /LTCGOUT:"I:\PEPEngine2\Build\obj\x64\Release\SphSolverPerf\SphSolverPerf.iobj" /TLBID:1 /DYNAMICBASE /NXCOMPAT /IMPLIB:"I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\SphSolverPerf.lib" /MACHINE:X64 I:\PEPEngine2\Build\obj\x64\Release\SphSolverPerf\SphSolverPerf.obj
+         I:\PEPEngine2\Build\obj\x64\Release\SphSolverPerf\GDX12Fluid.obj
+            Создается библиотека I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\SphSolverPerf.lib и объект I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\SphSolverPerf.exp
+         Создание кода
+         Previous IPDB not found, fall back to full compilation.
+         All 5327 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+         Создание кода завершено
+     1>DirectXTK12.lib(SimpleMath.obj) : warning LNK4099: "DirectXTK12.pdb" PDB не найден с "DirectXTK12.lib(SimpleMath.obj)" или на "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\DirectXTK12.pdb"; компоновка объекта выполняется как при отсутствии отладочных данных [I:\PEPEngine2\Build\SphSolverPerf\SphSolverPerf.vcxproj]
+     1>DirectXTK12.lib(pch.obj) : warning LNK4099: "DirectXTK12.pdb" PDB не найден с "DirectXTK12.lib(pch.obj)" или на "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\DirectXTK12.pdb"; компоновка объекта выполняется как при отсутствии отладочных данных [I:\PEPEngine2\Build\SphSolverPerf\SphSolverPerf.vcxproj]
+         SphSolverPerf.vcxproj -> I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\SphSolverPerf.exe
+       PostBuildEvent:
+         xcopy /Y /D "I:\PEPEngine2\External\Runtime\*.dll" "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\"
+         :VCEnd
+         I:\PEPEngine2\External\Runtime\Ak3DAudioBedMixer.dll
+         I:\PEPEngine2\External\Runtime\AkAudioInput.dll
+         I:\PEPEngine2\External\Runtime\AkCompressor.dll
+         I:\PEPEngine2\External\Runtime\AkDelay.dll
+         I:\PEPEngine2\External\Runtime\AkFlanger.dll
+         I:\PEPEngine2\External\Runtime\AkGain.dll
+         I:\PEPEngine2\External\Runtime\AkGuitarDistortion.dll
+         I:\PEPEngine2\External\Runtime\AkHarmonizer.dll
+         I:\PEPEngine2\External\Runtime\AkMatrixReverb.dll
+         I:\PEPEngine2\External\Runtime\AkMeter.dll
+         I:\PEPEngine2\External\Runtime\AkParametricEQ.dll
+         I:\PEPEngine2\External\Runtime\AkPeakLimiter.dll
+         I:\PEPEngine2\External\Runtime\AkPitchShifter.dll
+         I:\PEPEngine2\External\Runtime\AkRecorder.dll
+         I:\PEPEngine2\External\Runtime\AkRecorderADM.dll
+         I:\PEPEngine2\External\Runtime\AkReflect.dll
+         I:\PEPEngine2\External\Runtime\AkRoomVerb.dll
+         I:\PEPEngine2\External\Runtime\AkSidechain.dll
+         I:\PEPEngine2\External\Runtime\AkSilenceGenerator.dll
+         I:\PEPEngine2\External\Runtime\AkSineTone.dll
+         I:\PEPEngine2\External\Runtime\AkSoundEngineDLL.dll
+         I:\PEPEngine2\External\Runtime\AkSoundSeedAir.dll
+         I:\PEPEngine2\External\Runtime\AkStereoDelay.dll
+         I:\PEPEngine2\External\Runtime\AkSynthOne.dll
+         I:\PEPEngine2\External\Runtime\AkTimeStretch.dll
+         I:\PEPEngine2\External\Runtime\AkToneGen.dll
+         I:\PEPEngine2\External\Runtime\AkTremolo.dll
+         I:\PEPEngine2\External\Runtime\amd_fidelityfx_framegeneration_dx12.dll
+         I:\PEPEngine2\External\Runtime\amd_fidelityfx_loader_dx12.dll
+         I:\PEPEngine2\External\Runtime\amd_fidelityfx_upscaler_dx12.dll
+         I:\PEPEngine2\External\Runtime\assimp-vc143-mt.dll
+         I:\PEPEngine2\External\Runtime\assimp-vc143-mtd.dll
+         I:\PEPEngine2\External\Runtime\Auro.dll
+         I:\PEPEngine2\External\Runtime\dstorage.dll
+         I:\PEPEngine2\External\Runtime\dstoragecore.dll
+         I:\PEPEngine2\External\Runtime\dxcompiler.dll
+         I:\PEPEngine2\External\Runtime\dxil.dll
+         I:\PEPEngine2\External\Runtime\iZotope.dll
+         I:\PEPEngine2\External\Runtime\libxell.dll
+         I:\PEPEngine2\External\Runtime\libxess.dll
+         I:\PEPEngine2\External\Runtime\libxess_fg.dll
+         I:\PEPEngine2\External\Runtime\MasteringSuite.dll
+         I:\PEPEngine2\External\Runtime\McDSP.dll
+         I:\PEPEngine2\External\Runtime\nvngx_dlss.dll
+         I:\PEPEngine2\External\Runtime\nvngx_dlssg.dll
+         I:\PEPEngine2\External\Runtime\sl.common.dll
+         I:\PEPEngine2\External\Runtime\sl.directsr.dll
+         I:\PEPEngine2\External\Runtime\sl.dlss.dll
+         I:\PEPEngine2\External\Runtime\sl.dlss_g.dll
+         I:\PEPEngine2\External\Runtime\sl.interposer.dll
+         I:\PEPEngine2\External\Runtime\sl.nis.dll
+         I:\PEPEngine2\External\Runtime\sl.pcl.dll
+         I:\PEPEngine2\External\Runtime\sl.reflex.dll
+         I:\PEPEngine2\External\Runtime\WinPixEventRuntime.dll
+         I:\PEPEngine2\External\Runtime\WwiseProjectDatabase.dll
+         ╤ъюяшЁютрэю Їрщыют: 55.
+       FinalizeBuildStatus:
+         Файл "I:\PEPEngine2\Build\obj\x64\Release\SphSolverPerf\SphSolverPerf.tlog\unsuccessfulbuild" удаляется.
+         Обращение к "I:\PEPEngine2\Build\obj\x64\Release\SphSolverPerf\SphSolverPerf.tlog\SphSolverPerf.lastbuildstate".
+       CopyEngineConfiguration:
+         Создание каталога "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Config".
+         Копирование файла из "I:\PEPEngine2\Config\Engine.ini" в "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Config\Engine.ini".
+       CopyCollisionBakingLicenses:
+         Создание каталога "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\meshoptimizer".
+         Копирование файла из "I:\PEPEngine2\External\External.Libraries\meshoptimizer\LICENSE.md" в "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\meshoptimizer\LICENSE.md".
+         Создание каталога "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\vhacd".
+         Копирование файла из "I:\PEPEngine2\External\External.Libraries\vhacd\LICENSE" в "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\vhacd\LICENSE".
+       CopyReconstructionSDKFiles:
+         Создание каталога "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\Intel".
+         Создание каталога "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\Intel".
+         Создание каталога "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\NVIDIA".
+         Создание каталога "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\AMD-FSR".
+         Создание каталога "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\NVIDIA".
+         Создание каталога "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\NVIDIA".
+         Копирование файла из "I:\PEPEngine2\External\Runtime\Licenses\NVIDIA\nis.license.txt" в "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\NVIDIA\nis.license.txt".
+         Копирование файла из "I:\PEPEngine2\External\Runtime\Licenses\AMD-FSR\license.md" в "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\AMD-FSR\license.md".
+         Копирование файла из "I:\PEPEngine2\External\Runtime\Licenses\NVIDIA\nvngx_dlss.license.txt" в "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\NVIDIA\nvngx_dlss.license.txt".
+         Копирование файла из "I:\PEPEngine2\External\Runtime\Licenses\NVIDIA\license.txt" в "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\NVIDIA\license.txt".
+         Копирование файла из "I:\PEPEngine2\External\Runtime\Licenses\Intel\third-party-programs.txt" в "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\Intel\third-party-programs.txt".
+         Копирование файла из "I:\PEPEngine2\External\Runtime\Licenses\Intel\LICENSE.txt" в "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\Intel\LICENSE.txt".
+         Копирование файла из "I:\PEPEngine2\External\Runtime\Licenses\NVIDIA\reflex.license.txt" в "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\Licenses\NVIDIA\reflex.license.txt".
+     1>Сборка проекта "I:\PEPEngine2\Build\SphSolverPerf\SphSolverPerf.vcxproj" завершена (целевые объекты Build).
+
+Сборка успешно завершена.
+
+       "I:\PEPEngine2\Build\SphSolverPerf\SphSolverPerf.vcxproj" (целевой объект Build ) (1) ->
+       (Целевой объект Link) -> 
+         DirectXTK12.lib(SimpleMath.obj) : warning LNK4099: "DirectXTK12.pdb" PDB не найден с "DirectXTK12.lib(SimpleMath.obj)" или на "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\DirectXTK12.pdb"; компоновка объекта выполняется как при отсутствии отладочных данных [I:\PEPEngine2\Build\SphSolverPerf\SphSolverPerf.vcxproj]
+         DirectXTK12.lib(pch.obj) : warning LNK4099: "DirectXTK12.pdb" PDB не найден с "DirectXTK12.lib(pch.obj)" или на "I:\PEPEngine2\Build\bin\x64\Release\SphSolverPerf\DirectXTK12.pdb"; компоновка объекта выполняется как при отсутствии отладочных данных [I:\PEPEngine2\Build\SphSolverPerf\SphSolverPerf.vcxproj]
+
+    Предупреждений: 2
+    Ошибок: 0
+
+Прошло времени 00:00:11.40

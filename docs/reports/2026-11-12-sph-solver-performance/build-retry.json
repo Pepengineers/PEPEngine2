@@ -1,0 +1,10 @@
+{
+  "status": "passed",
+  "stdout": "I:\\PEPEngine2\\Build\\SphSolverPerf\\build-retry.stdout.log",
+  "stderr": "I:\\PEPEngine2\\Build\\SphSolverPerf\\build-retry.stderr.log",
+  "fingerprints_before": {},
+  "pid": 52008,
+  "child_exit_code": 0,
+  "fingerprints_after": {},
+  "elapsed_s": 11.85
+}

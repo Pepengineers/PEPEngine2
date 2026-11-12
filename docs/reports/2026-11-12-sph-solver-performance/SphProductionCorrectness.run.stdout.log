@@ -1,0 +1,28 @@
+Adapter: NVIDIA GeForce RTX 4080 SUPER
+Sort oracle passed Count=1
+Sort oracle passed Count=2
+Sort oracle passed Count=3
+Sort oracle passed Count=511
+Sort oracle passed Count=512
+Sort oracle passed Count=513
+Sort oracle passed Count=1023
+Sort oracle passed Count=1024
+Sort oracle passed Count=1025
+Sort oracle passed Count=2047
+Sort oracle passed Count=2048
+Sort oracle passed Count=2049
+Sort oracle passed Count=4095
+Sort oracle passed Count=4096
+Sort oracle passed Count=4097
+Sort oracle passed Count=51975
+Sort oracle passed Count=1048576
+Exact simulation passed Count=3 Reference=0 (1+3+3 substeps, all tiles, production tracked/placed)
+Exact simulation passed Count=3 Reference=1 (1+3+3 substeps, all tiles, production tracked/placed)
+Exact simulation passed Count=1023 Reference=0 (1+3+3 substeps, all tiles, production tracked/placed)
+Exact simulation passed Count=1023 Reference=1 (1+3+3 substeps, all tiles, production tracked/placed)
+Exact simulation passed Count=1025 Reference=0 (1+3+3 substeps, all tiles, production tracked/placed)
+Exact simulation passed Count=1025 Reference=1 (1+3+3 substeps, all tiles, production tracked/placed)
+Exact simulation passed Count=2049 Reference=0 (1+3+3 substeps, all tiles, production tracked/placed, DIRECT/COMPUTE/DIRECT)
+Exact simulation passed Count=2049 Reference=1 (1+3+3 substeps, all tiles, production tracked/placed, DIRECT/COMPUTE/DIRECT)
+Exact simulation passed Count=51975 Reference=0 (1+3+3 substeps, all tiles, production tracked/placed)
+Exact simulation passed Count=51975 Reference=1 (1+3+3 substeps, all tiles, production tracked/placed)
