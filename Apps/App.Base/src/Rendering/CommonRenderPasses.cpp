@@ -2,6 +2,7 @@
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Rendering/CrossAdapterAO.h"
 #include "App.Base/Rendering/RenderShadowRoutes.h"
+#include "App.Base/Rendering/CrossAdapterParticles.h"
 
 CommonRenderPasses::CommonRenderPasses(GDX12SwapChain* backBuffer, GDX12WBOITTransparencyPass::DepthPartition partition)
     : Transparency(partition), FrameGeneration(backBuffer)
@@ -24,10 +25,21 @@ CommonRenderPasses::~CommonRenderPasses()
 void CommonRenderPasses::Setup(RenderPipelineContext& context)
 {
     for (auto* pass : Bindings.PrimaryPasses) pass->Setup(&context.Primary, &context.Secondary, &context.Common);
+    if (auto* runtime = context.Runtime.GetMGPURuntime())
+        if (auto* secondary = context.Runtime.GetMGPUDevices().Secondary)
+            _placedParticles = std::make_unique<CrossAdapterParticles>(context.Primary, *secondary, *runtime,
+                ParticleSimulation, Particles);
+}
+
+void CommonRenderPasses::AddParticleSimulation(GDX12RenderGraph& graph)
+{
+    if (_placedParticles) _placedParticles->Configure(graph, Bindings, Depth.GetOutput(2));
+    else graph.AddPass(ParticleSimulation);
 }
 
 void CommonRenderPasses::ResetWorldHistory()
 {
+    if (_placedParticles) _placedParticles->ResetWorld();
     SunShadow.ResetUpdateSchedule();
     LocalShadow.ResetUpdateSchedule();
     if (_placedShadows) _placedShadows->Invalidate();
@@ -105,9 +117,12 @@ bool CommonRenderPasses::PrepareFrame(RenderPipelineContext& context, GDX12Comma
     Bindings.UseAsyncCompute = GetParticleSettings().AsyncCompute || IsAmbientOcclusionAsyncComputeEnabled();
     if (!context.Primary.ParticleSimulation)
         context.Primary.ParticleSimulation = std::make_unique<GDX12ParticleSimulation>();
-    context.Primary.ParticleSimulation->BeginFrame(&context.Primary, context.Common);
+    if (!_placedParticles || !_placedParticles->PrepareFrame(context.Common))
+    {
+        context.Primary.ParticleSimulation->BeginFrame(&context.Primary, context.Common);
+        context.Primary.ParticleSimulation->InitializePools(commands, &context.Primary);
+    }
     Particles.BeginFrame();
-    context.Primary.ParticleSimulation->InitializePools(commands, &context.Primary);
     GDX12_SCOPED_CPU_EVENT("Scene preparation");
     auto visibility = context.PrepareScene();
     try

@@ -67,7 +67,7 @@ void DefaultRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipe
     graph.AddPass(p.Environment);
     graph.AddPass(p.Culling);
     graph.AddPass(p.Depth);
-    graph.AddPass(p.ParticleSimulation);
+    p.AddParticleSimulation(graph);
     if (_earlyAO) p.AddAmbientOcclusion(graph, _earlyAO);
     graph.AddPass(p.SunShadow);
     graph.AddPass(p.LocalShadow);
