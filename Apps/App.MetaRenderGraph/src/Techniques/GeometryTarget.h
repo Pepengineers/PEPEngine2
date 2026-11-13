@@ -11,5 +11,6 @@ struct GeometryTarget {
     std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> Rtvs;
     UINT Width=0,Height=0;
     bool Clear=false;
+    std::vector<Access> AdditionalReads;
 };
 }

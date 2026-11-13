@@ -42,6 +42,10 @@ SceneGeometry::SceneGeometry(RenderPipelineContext& c):_resources(c.Primary),_sl
     p.VS={vs->GetBufferPointer(),vs->GetBufferSize()}; p.PS={ps->GetBufferPointer(),ps->GetBufferSize()};
     ThrowIfFailed(r.Device->GetDevice()->CreateGraphicsPipelineState(&p,IID_PPV_ARGS(&_depth)));
     vs=compiler.CompileShader(r.Device,SHADERS_FOLDER "OpaquePass.hlsl",nullptr,"VS","vs");
+    ps=compiler.CompileShader(r.Device,SHADERS_FOLDER "OpaquePass.hlsl",nullptr,"PrepassPS","ps");
+    p.VS={vs->GetBufferPointer(),vs->GetBufferSize()};p.PS={ps->GetBufferPointer(),ps->GetBufferSize()};p.NumRenderTargets=1;p.RTVFormats[0]=DXGI_FORMAT_R16G16B16A16_FLOAT;
+    ThrowIfFailed(r.Device->GetDevice()->CreateGraphicsPipelineState(&p,IID_PPV_ARGS(&_depthNormals)));
+    vs=compiler.CompileShader(r.Device,SHADERS_FOLDER "OpaquePass.hlsl",nullptr,"VS","vs");
     ps=compiler.CompileShader(r.Device,SHADERS_FOLDER "OpaquePass.hlsl",nullptr,"PS","ps");
     p.VS={vs->GetBufferPointer(),vs->GetBufferSize()}; p.PS={ps->GetBufferPointer(),ps->GetBufferSize()};
     p.DepthStencilState.DepthFunc=D3D12_COMPARISON_FUNC_EQUAL; p.DepthStencilState.DepthWriteMask=D3D12_DEPTH_WRITE_MASK_ZERO;
@@ -68,6 +72,7 @@ void SceneGeometry::BufferFor(Buffer& b,UINT64 bytes,UINT stride,bool upload) {
 void SceneGeometry::Resize(UINT width,UINT height) {
     _width=width; _height=height;
     for(auto& s:_slots) {
+        s.PlannedBindings.clear();
         for(UINT i=0;i<5;++i) {
             if(!s.Color[i]) { s.Color[i]=std::make_unique<GDX12Texture>(); GDX12RenderHelpers::InitializeRenderTarget(*s.Color[i],_resources,width,height,Formats[i],{0,0,0,0}); }
             else s.Color[i]->Resize(width,height);
@@ -75,6 +80,9 @@ void SceneGeometry::Resize(UINT width,UINT height) {
         auto desc=CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS,width,height,1,1,1,0,D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
         D3D12_CLEAR_VALUE clear{}; clear.Format=DXGI_FORMAT_D32_FLOAT;
         s.Depth=_resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,desc,D3D12_RESOURCE_STATE_COMMON,&clear);
+        if(!s.DepthView)s.DepthView=std::make_unique<GDX12Texture>();
+        GDX12TextureDesc depthView;depthView.ExternalResource=s.Depth;depthView.Width=width;depthView.Height=height;depthView.Format=DXGI_FORMAT_R32_FLOAT;depthView.SRVDesc.Format=DXGI_FORMAT_R32_FLOAT;depthView.SRV_UAV_Heap=_resources.SRV_UAV_Heap.get();depthView.SRVHeapIndex=s.DepthView->IsInitialized()?s.DepthView->GetSRV()->HeapIndex:depthView.SRV_UAV_Heap->GetAvailableIndex(105000);depthView.SRVDesc.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;depthView.SRVDesc.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;depthView.SRVDesc.Texture2D.MipLevels=1;s.DepthView->Initialize(depthView);
+        if(!s.PrepassNormals){s.PrepassNormals=std::make_unique<GDX12Texture>();GDX12RenderHelpers::InitializeRenderTarget(*s.PrepassNormals,_resources,width,height,DXGI_FORMAT_R16G16B16A16_FLOAT,{0,0,0,0});}else s.PrepassNormals->Resize(width,height);
         auto* heap=_resources.DSVHeap.get(); D3D12_DEPTH_STENCIL_VIEW_DESC dsv{};
         dsv.Format=DXGI_FORMAT_D32_FLOAT; dsv.ViewDimension=D3D12_DSV_DIMENSION_TEXTURE2D;
         s.Dsv.InitAsDSV(s.Depth.Get(),&dsv,heap,s.Dsv.HeapIndex==UINT_MAX?heap->GetAvailableIndex():s.Dsv.HeapIndex);
@@ -93,7 +101,7 @@ void SceneGeometry::Resize(UINT width,UINT height) {
     }
 }
 void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork> skin) {
-    auto& s=_slots.at(index); auto& f=*_resources.FrameConstants.at(index);
+    auto& s=_slots.at(index); auto& f=*_resources.FrameConstants.at(index);s.EarlyAO=_common.AOAfterDepthPrepass;
     // CPU preparation is complete. These per-frame uploads cannot change until
     // the returned frame fence; workers only record copies of assigned ranges.
     auto input=[&](Buffer& destination,auto& buffer) {
@@ -154,8 +162,8 @@ void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork>
         s.SceneReadback=_resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(bytes),D3D12_RESOURCE_STATE_COPY_DEST);
     }
 }
-Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target) {
-    auto& s=_slots.at(index);
+Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechnique& append,const AppendTechnique& earlyAO) {
+    auto& s=_slots.at(index);s.PlannedBindings.clear();
     Graph g;
     for(UINT i=0;i<8;++i) g.Resources.push_back({"scene buffer "+std::to_string(i),0,0,true,true});
     for(UINT i=0;i<4;++i) g.Resources.push_back({"frozen upload "+std::to_string(i),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_GENERIC_READ});
@@ -218,29 +226,48 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target) {
     g.Operations[4].Accesses.push_back({s.FrameIds[1],Mode::Read,D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
     for(UINT op:{s.Batches?9u:5u,s.Batches?10u:6u})for(UINT i=0;i<2;++i)g.Operations[op].Accesses.push_back({s.FrameIds[i],Mode::Read,D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
     for(UINT i=0;i<2;++i)g.Operations[s.Batches?12:8].Accesses.push_back({s.FrameIds[i],Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE});
+    s.PrepassId=Id(g.Resources.size());g.Resources.push_back({"depth prepass normals",0,0});
+    if(s.EarlyAO)g.Operations[s.Batches?9:5].Accesses.push_back({s.PrepassId,Mode::Write,D3D12_RESOURCE_STATE_RENDER_TARGET});
     _shadows->Append(g,index);
     GeometryTarget depthTarget;
-    depthTarget.View={GDX12GeometryStage::Depth,_common.CameraView*_common.CameraProjection,_common.CameraView.Invert().Translation(),s.Camera};
+    depthTarget.View={s.EarlyAO?GDX12GeometryStage::DepthNormals:GDX12GeometryStage::Depth,_common.CameraView*_common.CameraProjection,_common.CameraView.Invert().Translation(),s.Camera};
     depthTarget.View.Key=1;depthTarget.View.FrameSlot=index;depthTarget.View.DepthFormat=DXGI_FORMAT_D32_FLOAT;
     depthTarget.Depth=17;depthTarget.Dsv=s.Dsv.CPUHandle;depthTarget.Width=_width;depthTarget.Height=_height;
     depthTarget.Camera=s.FrameIds[1];
+    if(s.EarlyAO){depthTarget.Colors={s.PrepassId};depthTarget.Rtvs={s.PrepassNormals->GetRTV()->CPUHandle};depthTarget.View.ColorTargetCount=1;depthTarget.View.ColorFormats[0]=DXGI_FORMAT_R16G16B16A16_FLOAT;}
     auto gbufferTarget=depthTarget;gbufferTarget.View.Stage=GDX12GeometryStage::GBuffer;gbufferTarget.Dsv=s.ReadDepth.CPUHandle;
-    gbufferTarget.View.ColorTargetCount=5;
+    gbufferTarget.View.ColorTargetCount=5;gbufferTarget.Colors.clear();gbufferTarget.Rtvs.clear();
     for(UINT i=0;i<5;++i){gbufferTarget.Colors.push_back(12+i);gbufferTarget.Rtvs.push_back(s.Color[i]->GetRTV()->CPUHandle);gbufferTarget.View.ColorFormats[i]=Formats[i];}
     auto targets=_shadows->Targets(index);
     for(auto& shadow:targets){shadow.View.Eye=depthTarget.View.Eye;shadow.View.CameraConstants=s.Camera;shadow.Camera=s.FrameIds[1];}
     targets.insert(targets.begin(),gbufferTarget);targets.insert(targets.begin(),depthTarget);
-    _grass->Append(g,index,Resources(index,target,false),s.Buffers[2].Srv,targets);
+    Id earlyEnd=Invalid;
+    s.PlannedBindings=_grass->Append(g,index,Resources(index,target,false),s.Buffers[2].Srv,targets,false,
+        [&](const GeometryTarget& view,Graph& graph,std::vector<ID3D12Resource*>& bindings){
+            if(s.EarlyAO && earlyAO && view.View.Key==1 && view.View.Stage==GDX12GeometryStage::GBuffer){earlyAO(graph,bindings);earlyEnd=Id(graph.Operations.size()-1);}
+        });
     _shadows->RepeatReadbacks(g,index);
     s.FinalCopy=Id(g.Operations.size());g.Operations.push_back(g.Operations[s.Batches?11:7]);
     s.FinalReadback=Id(g.Operations.size());g.Operations.push_back(g.Operations[s.Batches?12:8]);
     s.BatchReadOperation=Invalid;
     if(s.Batches){s.BatchReadOperation=Id(g.Operations.size());g.Operations.push_back({"skeletal packed command readback",{{s.BatchIds[1],Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{s.BatchIds[2],Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{s.BatchIds[4],Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{s.BatchIds[5],Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST}}});}
+    if(append)append(g,s.PlannedBindings);
     s.Names.clear();for(const auto& operation:g.Operations)s.Names.push_back(operation.Name);
-    return Compile(g);
+    if(earlyEnd==Invalid)return Compile(g);
+    // Keep immutable callback IDs while placing AO after mesh+grass depth and
+    // before both GBuffer producers. Discard the redundant initial diagnostic
+    // copies; the final readbacks remain after the completed geometry views.
+    const Id mesh=s.Batches?10:6,copy=s.Batches?11:7,read=s.Batches?12:8;
+    std::vector<Id> order;
+    for(Id id=0;id<g.Operations.size();++id){if(id==mesh || id==copy || id==read)continue;order.push_back(id);if(id==earlyEnd)order.push_back(mesh);}
+    std::vector<Id> remap(g.Operations.size(),Invalid);for(Id i=0;i<order.size();++i)remap[order[i]]=i;
+    Graph reordered;reordered.Resources=std::move(g.Resources);
+    for(auto id:order){auto op=std::move(g.Operations[id]);for(auto& dep:op.Dependencies){dep=remap.at(dep);if(dep==Invalid)throw std::logic_error("Early AO removed an explicit producer");}reordered.Operations.push_back(std::move(op));}
+    auto schedule=Compile(reordered);for(auto& packet:schedule.Packets)if(packet.Operation!=Invalid)packet.Operation=order.at(packet.Operation);return schedule;
 }
 std::vector<ID3D12Resource*> SceneGeometry::Resources(UINT index,ID3D12Resource* target,bool grass) const {
-    const auto& s=_slots.at(index); std::vector<ID3D12Resource*> result;
+    const auto& s=_slots.at(index);if(grass && !s.PlannedBindings.empty())return s.PlannedBindings;
+    std::vector<ID3D12Resource*> result;
     for(auto& b:s.Buffers) result.push_back(b.Data.Get());
     for(UINT i=0;i<4;++i) result.push_back(s.Buffers[i].Source.Get());
     for(auto& c:s.Color) result.push_back(c->GetResource()->D3DResource.Get());
@@ -252,6 +279,7 @@ std::vector<ID3D12Resource*> SceneGeometry::Resources(UINT index,ID3D12Resource*
     if(s.Batches){for(auto* resource:s.Batcher->RecordingResources())result.push_back(resource);result.push_back(s.BatchCounter.Get());result.push_back(s.BatchReadback.Get());}
     for(const auto& buffer:s.FrameBuffers)result.push_back(buffer.Data.Get());
     for(const auto& buffer:s.FrameBuffers)result.push_back(buffer.Source.Get());
+    result.push_back(s.PrepassNormals->GetResource()->D3DResource.Get());
     const auto shadows=_shadows->Resources(index); result.insert(result.end(),shadows.begin(),shadows.end());
     if(grass){const auto& bindings=_grass->Resources(index);result.insert(result.end(),bindings.begin(),bindings.end());}
     return result;
@@ -294,7 +322,7 @@ void SceneGeometry::Record(UINT index,Id op,UINT bucket,ID3D12GraphicsCommandLis
         for(UINT i=0;i<4;++i) cmd->SetComputeRootDescriptorTable(_cullRoot->GetURootParamIndex(i),b[4+i].Uav.GPUHandle);
         if(s.Draws) cmd->Dispatch((s.Draws+63)/64,1,1);
     } else if(op==3 || op==4) {
-        const bool depth=op==3; cmd->SetGraphicsRootSignature(_drawRoot->GetRootSignature().Get()); cmd->SetPipelineState(depth?_depth.Get():_gbuffer.Get());
+        const bool depth=op==3; cmd->SetGraphicsRootSignature(_drawRoot->GetRootSignature().Get()); cmd->SetPipelineState(depth?(s.EarlyAO?_depthNormals.Get():_depth.Get()):_gbuffer.Get());
         cmd->SetGraphicsRootConstantBufferView(_drawRoot->GetBRootParamIndex(1),s.Main);
         cmd->SetGraphicsRootConstantBufferView(_drawRoot->GetBRootParamIndex(2),s.Camera);
         const UINT buffers[]={2,3,0}; for(UINT i=0;i<3;++i) cmd->SetGraphicsRootDescriptorTable(_drawRoot->GetTRootParamIndex(i),b[buffers[i]].Srv.GPUHandle);
@@ -307,8 +335,9 @@ void SceneGeometry::Record(UINT index,Id op,UINT bucket,ID3D12GraphicsCommandLis
         D3D12_VIEWPORT vp{0,0,float(_width),float(_height),0,1}; D3D12_RECT rect{0,0,LONG(_width),LONG(_height)};
         cmd->RSSetViewports(1,&vp); cmd->RSSetScissorRects(1,&rect);
         D3D12_CPU_DESCRIPTOR_HANDLE rt[5]; for(UINT i=0;i<5;++i) rt[i]=s.Color[i]->GetRTV()->CPUHandle;
-        const auto dsv=depth?s.Dsv.CPUHandle:s.ReadDepth.CPUHandle; cmd->OMSetRenderTargets(depth?0:5,rt,FALSE,&dsv);
-        if(depth) cmd->ClearDepthStencilView(dsv,D3D12_CLEAR_FLAG_DEPTH,0,0,0,nullptr);
+        const auto dsv=depth?s.Dsv.CPUHandle:s.ReadDepth.CPUHandle;if(depth && s.EarlyAO)rt[0]=s.PrepassNormals->GetRTV()->CPUHandle;
+        cmd->OMSetRenderTargets(depth?(s.EarlyAO?1:0):5,rt,FALSE,&dsv);
+        if(depth){cmd->ClearDepthStencilView(dsv,D3D12_CLEAR_FLAG_DEPTH,0,0,0,nullptr);if(s.EarlyAO){const float zero[4]={};cmd->ClearRenderTargetView(rt[0],zero,0,nullptr);}}
         else { const float clear[4]={}; for(auto handle:rt) cmd->ClearRenderTargetView(handle,clear,0,nullptr); }
         cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         if(s.Draws && s.Geometry.VertexResource) {

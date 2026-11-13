@@ -1,5 +1,6 @@
 #include "MetaApplication.h"
 #include "MetaRenderPipeline.h"
+#include "App.Base/ECS/Components/ReflectionProbeComponent.h"
 #include "App.Base/App.h"
 #include "Common/RuntimePaths.h"
 #include "Engine.Core/ConsoleModule.h"
@@ -15,6 +16,7 @@ void RunDirectExecutionGpuTests(GDX12Device&);
 void CheckGeometryGpuEvidence(const std::filesystem::path&);
 void CheckShadowGpuEvidence(const std::filesystem::path&);
 void CheckGrassGpuEvidence(const std::filesystem::path&);
+void CheckReflectionGpuEvidence(const std::filesystem::path&);
 
 namespace
 {
@@ -115,6 +117,8 @@ namespace
                 if(i==2) { auto& transform=light.GetComponent<TransformComponent>(); transform.Rotation={40,30,0}; }
                 settings.Range=1000; settings.ShadowUpdate=ShadowUpdateMode::EveryFrame;
             }
+            auto probe=world.GetECS().CreateEntity();probe.AddComponent<TransformComponent>(FixtureOrigin+Vector3{0,30,-100});
+            auto& reflection=probe.AddComponent<ReflectionProbeComponent>();reflection.Resolution=32;reflection.FacesPerFrame=6;reflection.PrefilterSamples=16;reflection.Implementation=1;reflection.UpdateInterval=2;reflection.Extents=Vector3(1000);
             auto wind=world.GetECS().CreateEntity(); _wind=wind.GetId(); wind.AddComponent<TransformComponent>(FixtureOrigin);
             auto& field=wind.AddComponent<WindFieldComponent>(); field.GridResolution=16; field.PressureIterations=4; field.MaxSubsteps=1;
             auto grass=world.GetECS().CreateEntity(); _grass=grass.GetId(); grass.AddComponent<TransformComponent>(FixtureOrigin+Vector3{0,-76.7f,0});
@@ -134,7 +138,7 @@ namespace
             auto& component = emitter.AddComponent<ParticleEmitterComponent>();
             component.SetSettings(particles);
             component.Emit(64);
-            SetWindowTextW(GetWindow()->GetWindowHandle(), L"MetaRenderGraph U4 - geometry and shadows");
+            SetWindowTextW(GetWindow()->GetWindowHandle(), L"MetaRenderGraph U5 - lighting and reflections");
             return true;
         }
         void Smoke()
@@ -192,6 +196,7 @@ namespace
             CheckGeometryGpuEvidence(Engine::Core::GetExecutableDirectory()/"Logs");
             CheckShadowGpuEvidence(Engine::Core::GetExecutableDirectory()/"Logs");
             CheckGrassGpuEvidence(Engine::Core::GetExecutableDirectory()/"Logs");
+            CheckReflectionGpuEvidence(Engine::Core::GetExecutableDirectory()/"Logs");
             _pipeline->SetVerification(false);
             for(int i=0;i<4;++i)frame();
             _pipeline->ValidateQueued();

@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12LightGrid.h"
 #include <stdexcept>
+namespace Meta { class SceneLighting; }
 
 class GDX12DeferredLightingPass final : public GDX12RenderPass
 {
@@ -116,6 +117,7 @@ public:
         _color.reset(); _root.reset(); _pipeline.Reset(); _grids.clear();
     }
 private:
+    friend class Meta::SceneLighting;
     bool _prepared = false;
     struct FrameGrid
     {

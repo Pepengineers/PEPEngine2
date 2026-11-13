@@ -29,6 +29,16 @@ void Executor::Drain() {
     Owner(); _device.GetCommandQueue()->Flush();
     for(auto& s:_slots) if(s.Poisoned) throw std::logic_error("submission failed; executor quarantined");
 }
+void Executor::Reserve(uint32_t count) {
+    Owner();if(!_begun)throw std::logic_error("Reserve requires a retired slot after Begin");
+    auto& lists=_slots.at(_slot).Lists;
+    while(lists.size()<count) {
+        List list;
+        ThrowIfFailed(_device.GetDevice()->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&list.Allocator)));
+        ThrowIfFailed(_device.GetDevice()->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,list.Allocator.Get(),nullptr,IID_PPV_ARGS(&list.Commands)));
+        ThrowIfFailed(list.Commands->Close());lists.push_back(std::move(list));
+    }
+}
 uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Resource*>& resources,
     const Record& record,GDX12CommandList* prefix,GDX12CommandList* suffix,bool serial,
     const std::atomic<bool>* cancellation,std::ostream* trace) {
@@ -86,6 +96,17 @@ uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Reso
                     ThrowIfFailed(closeResult);
                 } catch(...) { if(!closed[index]) { cmd->Close(); closed[index]=1; } throw; }
             }};
+            if(p.OwnerRecording && j>0 && j<=p.Lists) {
+                try {
+                    if(cancellation && cancellation->load())throw std::runtime_error("owner recording cancelled");
+                    leaf.Continue(); // before any workers or submissions exist
+                } catch(...) {
+                    for(size_t pending=0;pending<total;++pending)if(!closed[pending]){slot.Lists[pending].Commands->Close();closed[pending]=1;}
+                    throw;
+                }
+                leaf.Name="owner-prepared list "+std::to_string(i)+":"+std::to_string(j);
+                leaf.Continue=[]{};
+            }
             if(j==0 || j==p.Lists+1) group.Children.push_back(std::move(leaf));
             else buckets.Children.push_back(std::move(leaf));
         }

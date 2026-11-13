@@ -25,6 +25,9 @@ struct Operation {
     std::vector<Id> Dependencies;
     bool SideEffect = false;
     uint32_t Lists = 1;
+    // A concrete owner-only cold recorder, e.g. the SDK's first lazy constant
+    // ring allocation. Resources and packet boundaries are still plan-owned.
+    bool OwnerRecording = false;
 };
 struct Graph { std::vector<Resource> Resources; std::vector<Operation> Operations; };
 struct Barrier { Id Resource; State Before, After; bool Uav = false; };
@@ -34,6 +37,7 @@ struct Packet {
     std::vector<Access> Accesses;
     std::vector<Barrier> Before, After;
     uint32_t Lists;
+    bool OwnerRecording = false;
 };
 struct Schedule {
     std::vector<Packet> Packets;

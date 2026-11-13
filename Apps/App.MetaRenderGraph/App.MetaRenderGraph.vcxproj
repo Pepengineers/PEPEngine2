@@ -103,14 +103,26 @@
     <ClCompile Include="src\Graph\MetaGraphRecorder.cpp" />
     <ClCompile Include="src\DirectFixture.cpp" />
     <ClCompile Include="src\Techniques\SceneGeometry.cpp" />
+    <ClCompile Include="src\Techniques\SceneEnvironment.cpp" />
+    <ClCompile Include="src\Techniques\SceneAO.cpp" />
+    <ClCompile Include="src\Techniques\SceneReflections.cpp" />
+    <ClCompile Include="src\Techniques\SceneLighting.cpp" />
     <ClCompile Include="src\Techniques\SceneShadows.cpp" />
     <ClCompile Include="src\Techniques\SceneGrass.cpp" />
     <ClCompile Include="tests\DirectExecutionGpuTests.cpp" />
     <ClCompile Include="tests\GeometryGpuTests.cpp" />
+    <ClCompile Include="tests\LightingGpuTests.cpp" />
+    <ClCompile Include="tests\ReflectionGpuTests.cpp" />
     <ClCompile Include="tests\ShadowGpuTests.cpp" />
     <ClCompile Include="tests\GrassGpuTests.cpp" />
     <ClCompile Include="src\MetaRenderPipeline.cpp" />
     <ClInclude Include="src\MetaApplication.h" />
+    <ClInclude Include="src\Techniques\NativeWork.h" />
+    <ClInclude Include="src\Techniques\SceneEnvironment.h" />
+    <ClInclude Include="src\Techniques\SceneAO.h" />
+    <ClInclude Include="src\Techniques\SceneReflections.h" />
+    <ClInclude Include="src\Techniques\SceneLighting.h" />
+    <None Include="Shaders\ShadowAtlasCopy.hlsl" />
     <None Include="Configs\Startup.ini" />
     <None Include="Configs\SmokeWorld.yaml" />
   </ItemGroup>

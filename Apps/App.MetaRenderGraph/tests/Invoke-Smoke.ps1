@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot/../../..").Path
 $output = Join-Path $repo "Build/bin/x64/$Configuration/$Target"
-$evidence = Join-Path $repo "Build/Verification/meta-render-graph-u4/$Configuration-$Target"
+$evidence = Join-Path $repo "Build/Verification/meta-render-graph-u5/$Configuration-$Target"
 New-Item -ItemType Directory -Force $evidence | Out-Null
 $protected = @("$repo/Config/Engine.ini", "$repo/Build/bin/x64/$Configuration/App/Config/Engine.ini")
 $before = @{}
@@ -33,9 +33,9 @@ if (($text | Select-String 'GPU adapter:' -AllMatches).Matches.Count -ne 1) { th
 if ($text -match '\[Particles\].*Offload|\[Water\].*Offload') { throw 'Unexpected offload runtime' }
 if ($text -match '\[ERROR\]|GPU retirement failed') { throw 'Runtime reported an error' }
 if ($text -notmatch 'Runtime legacy graph Execute calls=0') { throw 'Legacy execution counter did not remain zero' }
-if ($text -notmatch 'PASS DirectExecutionGpuTests:' -or $text -notmatch 'U4 scene geometry DIRECT executor selected') { throw 'Missing execution evidence' }
-foreach ($marker in @('PASS GeometryGpuTests:','PASS ShadowGpuTests:','PASS GrassGpuTests:','Queued geometry frames drained; three slot readbacks validated')) {
-    if ($text -notmatch [regex]::Escape($marker)) { throw "Missing U4 evidence: $marker" }
+if ($text -notmatch 'PASS DirectExecutionGpuTests:' -or $text -notmatch 'U5 lighting/reflections DIRECT executor selected') { throw 'Missing execution evidence' }
+foreach ($marker in @('PASS GeometryGpuTests:','PASS ShadowGpuTests:','PASS GrassGpuTests:','PASS ReflectionGpuTests readbacks:','Queued geometry frames drained; three slot readbacks validated')) {
+    if ($text -notmatch [regex]::Escape($marker)) { throw "Missing U5 evidence: $marker" }
 }
 if ($text -notmatch 'Smoke passed: 12 presented frames' -or $text -notmatch 'Smoke shutdown complete') { throw 'Missing runtime success markers' }
 if ((Get-FileHash "$output/Config/Engine.ini").Hash -ne (Get-FileHash "$output/Configs/Startup.ini").Hash) { throw 'Startup INI was not restored' }
@@ -49,3 +49,7 @@ Copy-Item "$output/Logs/reference.dot" "$evidence/reference.dot"
 Copy-Item "$output/Config/Engine.ini" "$evidence/effective.ini"
 $before | ConvertTo-Json | Set-Content "$evidence/protected-config-hashes.json"
 Write-Output "PASS $Configuration ${Target}: exit=0; device initializations=1; poison ignored; production INIs unchanged; 12 frames/resize/shutdown; D3D12 errors=0"
+
+if ($Target -eq 'App.MetaRenderGraph') {
+    Get-ChildItem "$output/Logs/environment-*" -File | Copy-Item -Destination $evidence
+}
