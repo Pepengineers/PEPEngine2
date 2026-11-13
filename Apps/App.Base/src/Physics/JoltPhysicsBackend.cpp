@@ -21,6 +21,7 @@
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/Shape/CylinderShape.h>
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
+#include <Jolt/Physics/Collision/Shape/ConvexHullShape.h>
 #include <Jolt/Physics/Collision/Shape/OffsetCenterOfMassShape.h>
 #include <Jolt/Physics/Body/BodyLock.h>
 
@@ -143,6 +144,37 @@ namespace
                 if (triangles.empty()) { return invalidShape("TriangleMesh has no triangles"); }
                 return JPH::MeshShapeSettings(std::move(vertices), std::move(triangles)).Create();
             }
+
+            else if constexpr (std::is_same_v<T, ConvexHullShapeDesc>)
+            {
+                if (!isPositive(scale.x) || !isPositive(scale.y) || !isPositive(scale.z)) { return invalidShape("CreateShape: ConvexHull requires positive finite scale"); }
+                
+                const auto* mesh = Engine::Core::AssetManager::GetInstance().Meshes().GetMesh(shape.Mesh);
+                if (!mesh) { return invalidShape("CreateShape: ConvexHull CPU mesh is unavailable"); }
+                
+                JPH::Array <JPH::Vec3> points;
+                
+                for (const auto& part : mesh->GetSubMeshes())
+                {
+                    for (const auto& vertex : part.Vertices)
+                    {
+                        const auto& p = vertex.Position;
+                        const float x = p.x * scale.x;
+                        const float y = p.y * scale.y;
+                        const float z = p.z * scale.z;
+                        
+                        if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) { return invalidShape("ConvexHull has a non-finite vertex"); }
+                        points.emplace_back(x, y, z);
+                    }
+                }
+                
+                auto result = JPH::ConvexHullShapeSettings(points).Create();
+                if (result.HasError()) { return result; }
+                
+                if (!isPositive(result.Get()->GetVolume())) { return invalidShape("CreateShape: ConvexHull invalid volume after generation"); } // xd
+                return result;
+            }
+            
             else 
             {
                 static_assert(std::is_same_v<T, CapsuleShapeDesc>, "Unsupported shape type");

@@ -50,7 +50,12 @@ struct TriangleMeshShapeDesc
     Engine::Core::MeshHandle Mesh;
 };
 
-using PhysicsShapeDesc = std::variant<BoxShapeDesc, SphereShapeDesc, CapsuleShapeDesc, CylinderShapeDesc, TriangleMeshShapeDesc>;
+struct ConvexHullShapeDesc
+{
+    Engine::Core::MeshHandle Mesh;
+};
+
+using PhysicsShapeDesc = std::variant<BoxShapeDesc, SphereShapeDesc, CapsuleShapeDesc, CylinderShapeDesc, TriangleMeshShapeDesc, ConvexHullShapeDesc>;
 
 struct PhysicsBodyDesc
 {

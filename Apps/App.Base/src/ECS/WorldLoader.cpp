@@ -1473,12 +1473,12 @@ static bool ParseCollider(
         valid = isPositive(shape.Radius) && std::isfinite(shape.HalfCylinderHeight) && shape.HalfCylinderHeight >= 0.0f;
         component.Shape = shape;
     }
-    else if (type == "TriangleMesh")
+    else if (type == "TriangleMesh" || type == "ConvexHull")
     {
         const ryml::ConstNodeRef meshNode = node.find_child("Mesh");
         if (!meshNode.readable() || !meshNode.has_val() || meshNode.val_is_null() || meshNode.val().empty())
         {
-            Logger::Error("ParseCollider: TriangleMesh collider empty Mesh resource id");
+            Logger::Error("ParseCollider: {} collider empty Mesh resource id", type);
             return false;
         }
 
@@ -1491,7 +1491,8 @@ static bool ParseCollider(
             return false;
         }
 
-        component.Shape = TriangleMeshShapeDesc{meshHandle};
+        if (type == "TriangleMesh") { component.Shape = TriangleMeshShapeDesc{meshHandle}; }
+        else (component.Shape = ConvexHullShapeDesc{meshHandle}); 
         valid = true;
     }
     else
