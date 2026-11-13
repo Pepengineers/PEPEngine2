@@ -1,7 +1,7 @@
-# Physics stress test: 1000 dynamic primitives, 11 dynamic convex hulls, 32 static bodies and 7 kinematic bodies.
+# Physics stress test: 1000 dynamic primitives, 11 dynamic convex hulls, 38 static bodies (6 triangle meshes) and 7 kinematic bodies.
 # The upper floor feeds two chutes with a 7-unit outlet above the enclosed rotary mill.
 # 10 x 10 x 10 grid: 25 rows of 10 bodies for each of the four shapes.
-# 1050 scene bodies / 2048 body capacity.
+# 1056 scene bodies / 2048 body capacity.
 # Six floor lanes traverse a two-point closed spline: 3 seconds each way.
 World:
   Name: PhysicsStress1000World
@@ -487,6 +487,109 @@ World:
           AngularVelocity: [0, 22.5, 0]
         StaticMeshRender:
           Mesh: StressCubeMesh
+
+    # Floor top is -95.5; expose the upper third of each 10-unit model.
+    - Id: MillSvidetel01
+      Components:
+        Name:
+          Value: MillSvidetel01
+        Transform:
+          Location: [88, -101.92833, -18]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: MillSvidetel02
+      Components:
+        Name:
+          Value: MillSvidetel02
+        Transform:
+          Location: [108, -101.92833, -25]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: MillSvidetel03
+      Components:
+        Name:
+          Value: MillSvidetel03
+        Transform:
+          Location: [128, -101.92833, -18]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: MillSvidetel04
+      Components:
+        Name:
+          Value: MillSvidetel04
+        Transform:
+          Location: [88, -101.92833, 18]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: MillSvidetel05
+      Components:
+        Name:
+          Value: MillSvidetel05
+        Transform:
+          Location: [108, -101.92833, 25]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
+
+    - Id: MillSvidetel06
+      Components:
+        Name:
+          Value: MillSvidetel06
+        Transform:
+          Location: [128, -101.92833, 18]
+          Rotation: [0, 163, 0]
+          Scale: [0.05670802, 0.05670802, 0.05670802]
+        RigidBody:
+          MotionType: Static
+        Collider:
+          Type: TriangleMesh
+          Mesh: SvidetelMesh
+        StaticMeshRender:
+          Mesh: SvidetelMesh
+          Materials: [SvidetelMaterial]
 
     - Id: RampUpper
       Components:
