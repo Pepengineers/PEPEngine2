@@ -95,6 +95,11 @@
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
     <ClCompile Include="src\MetaApplication.cpp" />
+    <ClCompile Include="src\Graph\MetaGraphCompiler.cpp" />
+    <ClCompile Include="src\Graph\MetaGraphExecutor.cpp" />
+    <ClCompile Include="src\DirectFixture.cpp" />
+    <ClCompile Include="tests\DirectExecutionGpuTests.cpp" />
+    <ClCompile Include="src\MetaRenderPipeline.cpp" />
     <ClInclude Include="src\MetaApplication.h" />
     <None Include="Configs\Startup.ini" />
     <None Include="Configs\SmokeWorld.yaml" />

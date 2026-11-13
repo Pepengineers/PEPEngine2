@@ -1,0 +1,6 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="App.MetaRenderGraph.vcxproj" />
+  <PropertyGroup><ProjectGuid>{EA71549A-D25A-4A8E-86CE-512B8DE2219D}</ProjectGuid></PropertyGroup>
+  <ItemGroup><ClCompile Remove="src\App.cpp" /><ClCompile Include="tests\DirectExecutionGpuMain.cpp" /></ItemGroup>
+  <ItemDefinitionGroup><Link><SubSystem>Console</SubSystem></Link></ItemDefinitionGroup>
+</Project>

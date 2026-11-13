@@ -1,11 +1,11 @@
 param(
     [ValidateSet('Debug', 'Release')][string]$Configuration = 'Debug',
-    [ValidateSet('App.MetaRenderGraph', 'ApplicationSmokeTests')][string]$Target = 'ApplicationSmokeTests'
+    [ValidateSet('App.MetaRenderGraph', 'ApplicationSmokeTests', 'DirectExecutionGpuTests')][string]$Target = 'ApplicationSmokeTests'
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot/../../..").Path
 $output = Join-Path $repo "Build/bin/x64/$Configuration/$Target"
-$evidence = Join-Path $repo "Build/Verification/meta-render-graph-u1/$Configuration-$Target"
+$evidence = Join-Path $repo "Build/Verification/meta-render-graph-u2/$Configuration-$Target"
 New-Item -ItemType Directory -Force $evidence | Out-Null
 $protected = @("$repo/Config/Engine.ini", "$repo/Build/bin/x64/$Configuration/App/Config/Engine.ini")
 $before = @{}
@@ -32,12 +32,15 @@ $text | Set-Content "$evidence/runtime.log"
 if (($text | Select-String 'GPU adapter:' -AllMatches).Matches.Count -ne 1) { throw 'Expected exactly one initialized GDX12Device in runtime log' }
 if ($text -match '\[Particles\].*Offload|\[Water\].*Offload') { throw 'Unexpected offload runtime' }
 if ($text -match '\[ERROR\]|GPU retirement failed') { throw 'Runtime reported an error' }
+if ($text -notmatch 'Runtime legacy graph Execute calls=0') { throw 'Legacy execution counter did not remain zero' }
+if ($text -notmatch 'PASS DirectExecutionGpuTests:' -or $text -notmatch 'U2 native DIRECT executor selected') { throw 'Missing U2 execution evidence' }
 if ($text -notmatch 'Smoke passed: 8 presented frames' -or $text -notmatch 'Smoke shutdown complete') { throw 'Missing runtime success markers' }
 if ((Get-FileHash "$output/Config/Engine.ini").Hash -ne (Get-FileHash "$output/Configs/Startup.ini").Hash) { throw 'Startup INI was not restored' }
 foreach ($path in $protected) {
     $after = if (Test-Path $path) { (Get-FileHash $path).Hash } else { 'absent' }
     if ($before[$path] -ne $after) { throw "Production INI changed: $path" }
 }
+Copy-Item "$output/Logs/direct-schedule.txt" "$evidence/direct-schedule.txt"
 Copy-Item "$output/Logs/reference.dot" "$evidence/reference.dot"
 Copy-Item "$output/Config/Engine.ini" "$evidence/effective.ini"
 $before | ConvertTo-Json | Set-Content "$evidence/protected-config-hashes.json"

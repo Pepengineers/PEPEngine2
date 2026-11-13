@@ -63,6 +63,9 @@ public:
     void Export(Resource resource);
     void Compile(bool reuseTextures = true);
     // Returns the final DIRECT list; the caller submits it and retires the frame with its fence.
+    // Process-wide diagnostic, used to prove an opt-in executor never enters
+    // this legacy path (including through a helper).
+    static uint64_t GetExecuteCallCount();
     GDX12CommandList* Execute(GDX12CommandList* commands, GDX12CommandQueue* computeQueue = nullptr);
     void WriteDot(std::ostream& output) const;
     const Statistics& GetStatistics() const;

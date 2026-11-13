@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include "Engine.Core/Jobs/JobSystem.h"
 #include <utility>
+#include <functional>
 
 class RenderModule;
 class GDX12SwapChain;
@@ -47,6 +48,13 @@ public:
     virtual void UpdateFrameSettings(RenderPipelineContext&) {}
     // Called once after the frame-slot wait; true requests recompiling the graph.
     virtual bool PrepareFrame(RenderPipelineContext&, GDX12CommandList*) = 0;
+    // Opt-in execution seam. The selected owner consumes the prefix and records
+    // the suffix before submission, returns the actual frame-slot completion.
+    virtual bool OwnsExecution() const { return false; }
+    virtual void RebuildExecution(RenderPipelineContext&) {}
+    virtual uint64_t ExecuteFrame(RenderPipelineContext&, GDX12CommandList*,
+        const std::function<void(GDX12CommandList*)>&) { throw std::logic_error("No execution owner"); }
+    virtual void WriteExecution(std::ostream&) const {}
     virtual void BuildGraph(GDX12RenderGraph&, const RenderPipelineGraphInputs&) = 0;
     virtual void Resize(RenderPipelineContext&) = 0;
     virtual const RenderPipelineBindings& GetBindings() const = 0;
