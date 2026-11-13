@@ -920,7 +920,9 @@ void RenderModule::OnRender()
     auto primarycmdQueue = _primaryDevice->GetCommandQueue();
     auto primarycmdList = primarycmdQueue->GetCommandList();
     _primaryGPUTimer->Start(primarycmdList);
-    DispatchSkeletalMeshes(primarycmdList);
+    // Explicit owners freeze skin work and declare its resources in their plan.
+    // Legacy callers retain their existing pre-graph dispatch path.
+    if (!_pipeline->OwnsScenePreparation()) DispatchSkeletalMeshes(primarycmdList);
     const bool rebuild = _pipeline->PrepareFrame(context, primarycmdList);
     RefreshPipelineFlags();
     if (rebuild || _graphReuseTextures != GraphReuseTextures.GetValue()) RebuildRenderGraph();

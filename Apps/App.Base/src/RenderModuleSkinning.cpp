@@ -446,3 +446,12 @@ void RenderModule::DispatchSkeletalMeshes(GDX12CommandList* commands)
     }
     _primaryResources.GeometryBuffer->EndSkinning(commands);
 }
+
+std::vector<GDX12SkinningWork> RenderModule::FreezeSkeletalMeshes() {
+    std::vector<GDX12SkinningWork> result;
+    for(auto& [owner,state]:_skeletalStates) {
+        if(!state.Dispatch) continue;
+        for(auto& part:state.Parts) result.push_back(_skinning->Freeze(*part.GPU,_primaryResources.CurrFrameConstantsIndex,part.Palette));
+    }
+    return result;
+}

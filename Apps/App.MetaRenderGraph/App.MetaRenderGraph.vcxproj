@@ -99,7 +99,9 @@
     <ClCompile Include="src\Graph\MetaGraphExecutor.cpp" />
     <ClCompile Include="src\Graph\MetaGraphRecorder.cpp" />
     <ClCompile Include="src\DirectFixture.cpp" />
+    <ClCompile Include="src\Techniques\SceneGeometry.cpp" />
     <ClCompile Include="tests\DirectExecutionGpuTests.cpp" />
+    <ClCompile Include="tests\GeometryGpuTests.cpp" />
     <ClCompile Include="src\MetaRenderPipeline.cpp" />
     <ClInclude Include="src\MetaApplication.h" />
     <None Include="Configs\Startup.ini" />

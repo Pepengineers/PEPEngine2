@@ -5,23 +5,34 @@
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.Core/Logging/Logger.h"
+#include "Common/RuntimePaths.h"
+#include "App.Base/Modules/RenderModule.h"
+#include <fstream>
 void MetaRenderPipeline::Initialize(RenderPipelineContext& c) {
-    _fixture=std::make_unique<Meta::DirectFixture>(*c.Primary.Device,static_cast<uint32_t>(c.Primary.FrameConstants.size()));
+    _geometry=std::make_unique<Meta::SceneGeometry>(c.Primary);
+    _sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_GEOMETRY,true);
+    _sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_MATERIALS,true);
+    _bindings.PrimaryPasses={&_sceneFlags};
     _executor=std::make_unique<Meta::Executor>(*c.Primary.Device,static_cast<uint32_t>(c.Primary.FrameConstants.size()),64);
-    Log::Info("MetaRenderGraph","U3 parallel DIRECT executor selected; legacy graph Execute disabled");
+    Log::Info("MetaRenderGraph","U4 scene geometry DIRECT executor selected; legacy graph Execute disabled");
 }
 void MetaRenderPipeline::BuildGraph(GDX12RenderGraph&,const RenderPipelineGraphInputs&) {
     throw std::logic_error("Meta pipeline cannot build legacy graph");
 }
-void MetaRenderPipeline::RebuildExecution(RenderPipelineContext&) {
-    _schedule=_fixture->Plan(D3D12_RESOURCE_STATE_PRESENT,D3D12_RESOURCE_STATE_PRESENT);
+void MetaRenderPipeline::RebuildExecution(RenderPipelineContext& c) {
+    _executor->Drain();
+    _geometry->Resize(c.Common.WindowWidth,c.Common.WindowHeight);
+}
+bool MetaRenderPipeline::PrepareFrame(RenderPipelineContext& c,GDX12CommandList*) {
+    c.PrepareScene().Complete();
+    return false;
 }
 uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext& c,GDX12CommandList* prefix,
     const std::function<void(GDX12CommandList*)>& finish) {
     const auto slot=c.Primary.CurrFrameConstantsIndex;
     _executor->Begin(slot);
-    _fixture->Validate(slot);
-    _fixture->Prepare(slot,(_frame++%16)+1);
+    _geometry->Freeze(slot,c.Common.ActiveCameraCBufferIndex,c.Runtime.FreezeSkeletalMeshes());
+    _schedule=_geometry->Plan(slot);
     auto* target=c.BackBuffer->GetCurrentBuffer();
     // Explicit plan returns the target to PRESENT. UI helpers run sequentially
     // in a separate suffix with this same boundary; no global tracker mutation
@@ -30,9 +41,25 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext& c,GDX12CommandL
         throw std::logic_error("UI boundary requires a PRESENT target tracker");
     auto* suffix=c.Primary.Device->GetCommandQueue()->GetCommandList();
     finish(suffix);
-    const auto point=_executor->Execute(_schedule,_fixture->Resources(slot,target->GetResource()->D3DResource.Get()),
+    if(_verify) {
+        const auto stem=(Engine::Core::GetExecutableDirectory()/"Logs"/("geometry-"+std::to_string(_frame))).string();
+        const auto bindings=_geometry->Resources(slot,target->GetResource()->D3DResource.Get());
+        const auto record=[&](Meta::Id op,uint32_t list,ID3D12GraphicsCommandList* cmd) { _geometry->Record(slot,op,list,cmd,target->GetResource()->D3DResource.Get()); };
+        _executor->Execute(_schedule,bindings,record,prefix,nullptr,true);
+        _executor->Drain();
+        const auto serial=_geometry->Readback(slot,stem+"-serial");
+        _executor->Begin(slot);
+        std::ofstream trace(stem+"-cpu.json");
+        const auto completion=_executor->Execute(_schedule,bindings,record,nullptr,suffix,false,nullptr,&trace);
+        _executor->Drain();
+        const auto parallel=_geometry->Readback(slot,stem+"-parallel");
+        if(serial!=parallel) throw std::runtime_error("Geometry serial/parallel buffers or images differ");
+        Log::Info("MetaRenderGraph","Geometry serial/parallel exact comparison passed frame=",_frame," bytes=",serial.size());
+        ++_frame; return completion;
+    }
+    const auto point=_executor->Execute(_schedule,_geometry->Resources(slot,target->GetResource()->D3DResource.Get()),
         [&](Meta::Id op,uint32_t list,ID3D12GraphicsCommandList* cmd) {
-            _fixture->Record(slot,op,list,cmd,target->GetResource()->D3DResource.Get(),target->GetRTV()->CPUHandle,target->GetWidth(),target->GetHeight());
+            _geometry->Record(slot,op,list,cmd,target->GetResource()->D3DResource.Get());
         },prefix,suffix);
     return point;
 }
