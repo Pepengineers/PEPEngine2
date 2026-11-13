@@ -15,7 +15,7 @@ public:
     void Validate(uint32_t slot) const; // caller must wait for executor slot
 private:
     struct Slot {
-        GDX12ResourceHandle Upload, Data, Readback, A, B, Pixel;
+        GDX12ResourceHandle Upload, Data, Readback, A, B, Pixel, Independent, IndependentReadback;
         uint32_t Seed=0; bool Used=false;
     };
     GDX12Device& _device;

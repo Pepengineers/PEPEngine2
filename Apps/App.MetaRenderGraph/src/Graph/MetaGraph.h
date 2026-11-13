@@ -9,7 +9,12 @@ using State = uint32_t; // D3D12 legacy resource-state bits; CPU tests need no d
 constexpr State UnorderedAccess = 0x8;
 constexpr Id Invalid = ~Id(0);
 enum class Mode { Read, Write, ReadWrite };
-struct Resource { std::string Name; State Initial, Final; bool Unordered = false; };
+struct Resource {
+    std::string Name; State Initial, Final; bool Unordered = false;
+    // DEFAULT-heap buffers decay to COMMON after each ExecuteCommandLists.
+    // Upload/readback heaps have fixed states and must leave this false.
+    bool Decays = false;
+};
 struct Access { Id Resource; Mode Usage; State Required; };
 // Each operation is one packet, containing one or more independently recorded lists.
 // Accesses describe the boundary of the entire packet. Internal changes must be
@@ -33,6 +38,7 @@ struct Packet {
 struct Schedule {
     std::vector<Packet> Packets;
     std::vector<State> FinalStates;
+    std::vector<bool> Decays;
     void Write(std::ostream&) const;
 };
 Schedule Compile(const Graph&);

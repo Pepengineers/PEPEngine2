@@ -35,6 +35,12 @@ int main() { try {
     Check(s.Packets[0].Operation==0 && s.Packets[1].Operation==1 && s.Packets[1].Lists==2,"stable independent order");
     Check(Depends(s,2,0)&&Depends(s,2,1),"multi-input packet");
     Check(Compile({}).Packets.size()==1,"empty graph completion");
+    Graph decay; decay.Resources={{"DEFAULT buffer",0,0,true,true}};
+    decay.Operations={{"upload",{{0,Mode::Write,1024}}},{"UAV",{{0,Mode::ReadWrite,8}}},{"UAV again",{{0,Mode::ReadWrite,8}}}};
+    s=Compile(decay);
+    Check(s.Decays[0] && s.Packets.back().Before.empty(),"buffer must decay before terminal packet");
+    for(size_t i=0;i<3;++i) Check(s.Packets[i].Before.size()==1 && s.Packets[i].Before[0].Before==0 && !s.Packets[i].Before[0].Uav,"per-submission COMMON contract");
+    decay.Resources[0].Final=8; rejects(decay);
     std::cout << "PASS PlanTests: WAR/RAW/WAW, diamond, UAV, boundaries, cycle/unknown, empty, multi-list, multi-input, determinism\n";
     return 0;
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;} }

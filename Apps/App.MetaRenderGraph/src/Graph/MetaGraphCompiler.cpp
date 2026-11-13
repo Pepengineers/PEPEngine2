@@ -38,6 +38,10 @@ Schedule Compile(const Graph& g) {
         }
     }
     Schedule out;
+    for(const auto& r:g.Resources) {
+        if(r.Decays && r.Final!=0) throw std::invalid_argument("decaying buffer must end in COMMON");
+        out.Decays.push_back(r.Decays);
+    }
     std::vector<Id> remap(n,Invalid);
     std::vector<State> states;
     std::vector<bool> lastWrite(g.Resources.size(),false), accessed(g.Resources.size(),false);
@@ -62,6 +66,7 @@ Schedule Compile(const Graph& g) {
         }
         remap[next]=static_cast<Id>(out.Packets.size());
         out.Packets.push_back(std::move(p));
+        for(Id r=0;r<states.size();++r) if(g.Resources[r].Decays) states[r]=0;
     }
     // Final transitions are a separate terminal packet joined with all work.
     Packet terminal{Invalid,{}, {}, {}, {}, 1};
@@ -74,6 +79,7 @@ Schedule Compile(const Graph& g) {
     return out;
 }
 void Schedule::Write(std::ostream& os) const {
+    for(Id i=0;i<Decays.size();++i) if(Decays[i]) os << "resource " << i << " decays to COMMON at each packet submission\n";
     for(Id i=0;i<Packets.size();++i) {
         const auto& p=Packets[i];
         os << "packet " << i << " DIRECT op=" << p.Operation << " lists=" << p.Lists << " deps=";

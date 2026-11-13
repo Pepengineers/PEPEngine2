@@ -44,10 +44,12 @@ float4 ps(V v):SV_Target { return v.color; }
         s.Upload=d.CreateResource(D3D12_HEAP_TYPE_UPLOAD,desc,D3D12_RESOURCE_STATE_GENERIC_READ);
         desc.Flags=D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
         s.Data=d.CreateResource(D3D12_HEAP_TYPE_DEFAULT,desc,D3D12_RESOURCE_STATE_COMMON);
+        s.Independent=d.CreateResource(D3D12_HEAP_TYPE_DEFAULT,desc,D3D12_RESOURCE_STATE_COMMON);
         desc.Flags=D3D12_RESOURCE_FLAG_NONE;
         s.Readback=d.CreateResource(D3D12_HEAP_TYPE_READBACK,desc,D3D12_RESOURCE_STATE_COPY_DEST);
         s.A=d.CreateResource(D3D12_HEAP_TYPE_READBACK,desc,D3D12_RESOURCE_STATE_COPY_DEST);
         s.B=d.CreateResource(D3D12_HEAP_TYPE_READBACK,desc,D3D12_RESOURCE_STATE_COPY_DEST);
+        s.IndependentReadback=d.CreateResource(D3D12_HEAP_TYPE_READBACK,desc,D3D12_RESOURCE_STATE_COPY_DEST);
         s.Pixel=d.CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(256),D3D12_RESOURCE_STATE_COPY_DEST);
     }
 }
@@ -59,12 +61,13 @@ void DirectFixture::Prepare(uint32_t index,uint32_t seed) {
 }
 Schedule DirectFixture::Plan(State initial,State final) const {
     Graph g;
-    g.Resources={{"data",D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_COMMON,true},
+    g.Resources={{"data",D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_COMMON,true,true},
         {"upload",D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_GENERIC_READ},
         {"result",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST},
         {"reader A",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST},
         {"reader B",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST},
-        {"target",initial,final}, {"pixel",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST}};
+        {"target",initial,final}, {"pixel",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST},
+        {"independent buckets",0,0,true,true}, {"independent result",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST}};
     g.Operations={
         {"upload",{{0,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST},{1,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ}},{},false,2},
         {"transform",{{0,Mode::ReadWrite,D3D12_RESOURCE_STATE_UNORDERED_ACCESS}}},
@@ -75,16 +78,20 @@ Schedule DirectFixture::Plan(State initial,State final) const {
         {"draw",{{0,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},{5,Mode::Write,D3D12_RESOURCE_STATE_RENDER_TARGET}},{},true},
         {"readback",{{0,Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{2,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST},
             {5,Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{6,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST}}},
-        {"empty side effect",{},{7},true}};
+        {"empty side effect",{},{7},true},
+        {"independent upload",{{7,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST},{1,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ}},{},false,4},
+        {"independent readback",{{7,Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{8,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST}}}};
     return Compile(g);
 }
 std::vector<ID3D12Resource*> DirectFixture::Resources(uint32_t i,ID3D12Resource* target) const {
-    const auto& s=_slots.at(i); return {s.Data.Get(),s.Upload.Get(),s.Readback.Get(),s.A.Get(),s.B.Get(),target,s.Pixel.Get()};
+    const auto& s=_slots.at(i); return {s.Data.Get(),s.Upload.Get(),s.Readback.Get(),s.A.Get(),s.B.Get(),target,s.Pixel.Get(),s.Independent.Get(),s.IndependentReadback.Get()};
 }
 void DirectFixture::Record(uint32_t i,Id op,uint32_t list,ID3D12GraphicsCommandList* cmd,
     ID3D12Resource* target,D3D12_CPU_DESCRIPTOR_HANDLE rtv,uint32_t width,uint32_t height) {
     auto& s=_slots.at(i);
-    if(op==0) cmd->CopyBufferRegion(s.Data.Get(),list*8,s.Upload.Get(),list*8,8);
+    if(op==9) cmd->CopyBufferRegion(s.Independent.Get(),list*4,s.Upload.Get(),list*4,4);
+    else if(op==10) cmd->CopyBufferRegion(s.IndependentReadback.Get(),0,s.Independent.Get(),0,16);
+    else if(op==0) cmd->CopyBufferRegion(s.Data.Get(),list*8,s.Upload.Get(),list*8,8);
     else if(op==1 || op==2 || op==5) {
         cmd->SetComputeRootSignature(_root.Get()); cmd->SetPipelineState(_compute.Get());
         cmd->SetComputeRootUnorderedAccessView(0,s.Data->GetGPUVirtualAddress()); cmd->Dispatch(1,1,1);
@@ -118,6 +125,7 @@ void DirectFixture::Validate(uint32_t i) const {
         if(!valid) throw std::runtime_error("DIRECT fixture buffer result mismatch");
     };
     check(s.A.Get(),4,3); check(s.B.Get(),4,3); check(s.Readback.Get(),8,7);
+    check(s.IndependentReadback.Get(),1,0);
     void* data=nullptr; D3D12_RANGE range{0,4}; ThrowIfFailed(s.Pixel->Map(0,&range,&data));
     const auto* pixel=static_cast<const uint8_t*>(data);
     const bool valid=pixel[0]==s.Seed*8+7 && pixel[1]==0 && pixel[2]==255 && pixel[3]==255;

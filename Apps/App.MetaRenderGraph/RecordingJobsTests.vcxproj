@@ -1,0 +1,9 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+  <Import Project="App.MetaRenderGraph.vcxproj" />
+  <PropertyGroup><ProjectGuid>{F4A65B06-62E6-4E8F-82B4-E4CD7C8F353A}</ProjectGuid></PropertyGroup>
+  <ItemGroup>
+    <ClCompile Remove="src\App.cpp;src\MetaApplication.cpp;src\Graph\MetaGraphExecutor.cpp;src\DirectFixture.cpp;src\MetaRenderPipeline.cpp;tests\DirectExecutionGpuTests.cpp" />
+    <ClCompile Include="tests\RecordingJobsTests.cpp" />
+  </ItemGroup>
+  <ItemDefinitionGroup><Link><SubSystem>Console</SubSystem></Link></ItemDefinitionGroup>
+</Project>
