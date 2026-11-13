@@ -11,10 +11,9 @@ public:
 	static constexpr const char* OutColorTexture = "OutColorTexture";
 
 	explicit GDX12NISUpscalePass(float upscaleRatio = 1.5f, float sharpness = 0.1f)
-		: _viewportHandle(_nextViewport.fetch_add(1)), _upscaleRatio(upscaleRatio)
+		: _viewportHandle(_nextViewport.fetch_add(1)), _defaultUpscaleRatio(upscaleRatio)
 	{
-		if (!std::isfinite(upscaleRatio) || upscaleRatio < 1.f || upscaleRatio > 3.f)
-		{ throw std::invalid_argument("ERROR: Given NIS upscale ratio is outside [1, 3]. Pass an upscale ratio between 1 and 3."); }
+		ValidateUpscaleRatio(upscaleRatio);
 		SetSharpness(sharpness);
 		_flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_STREAMLINE;
 	}
@@ -32,6 +31,8 @@ public:
 
 	void Describe(PassDescription& s) const override
 	{
+		s.AddParameter("UpscaleRatio", _defaultUpscaleRatio);
+		s.AddParameter("Sharpness", _sharpness);
 		// Streamline is initialized against the primary device by RenderModule.
 		s.PrimaryOnly = true;
 		auto& source = s.AddInputTexture(InColorTexture);
@@ -45,6 +46,8 @@ public:
 
 	void ResolveResourceRequirements(PassResourceRequirementsContext& context) override
 	{
+		const auto upscaleRatio = context.GetParameter<float>("UpscaleRatio");
+		ValidateUpscaleRatio(upscaleRatio);
 		auto& sdk = GDX12StreamlineSDK::Get();
 		if (!sdk.IsEnabled()) { throw std::runtime_error("ERROR: NIS requires initialized Streamline. Initialize GDX12StreamlineSDK and register the primary device "
 			"before compiling this pass."); }
@@ -54,14 +57,17 @@ public:
 		adapter.deviceLUIDSizeInBytes = sizeof(luid);
 		Check(sdk.IsFeatureSupported(sl::kFeatureNIS, adapter), "check device support");
 		const auto displaySize = context.GetDisplaySize();
-		const UInt2 renderSize = {static_cast<uint32_t>(displaySize.x / _upscaleRatio), static_cast<uint32_t>(displaySize.y / _upscaleRatio)};
+		const UInt2 renderSize = {static_cast<uint32_t>(displaySize.x / upscaleRatio), static_cast<uint32_t>(displaySize.y / upscaleRatio)};
 		if (!renderSize.x || !renderSize.y) { throw std::runtime_error("ERROR: NIS input resolution is zero. Use non-zero display dimensions and an upscale ratio that produces a "
 			"non-zero input size."); }
 		context.RequireTextureSize(InColorTexture, renderSize);
 	}
 
-	void Initialize(PassInitContext&) override
-	{ SetOptions(_sharpness); }
+	void Initialize(PassInitContext& context) override
+	{
+		SetSharpness(context.GetParameter<float>("Sharpness"));
+		SetOptions(_sharpness);
+	}
 
 	void OnResourcesRecreated(PassInitContext&) override
 	{
@@ -106,10 +112,16 @@ public:
 private:
 	inline static std::atomic<uint32_t> _nextViewport{0x200000};
 	sl::ViewportHandle _viewportHandle;
-	const float _upscaleRatio;
+	const float _defaultUpscaleRatio;
 	float _sharpness = 0.1f;
 	float _appliedSharpness = -1.f;
 	bool _configured = false;
+
+	static void ValidateUpscaleRatio(float upscaleRatio)
+	{
+		if (!std::isfinite(upscaleRatio) || upscaleRatio < 1.f || upscaleRatio > 3.f)
+		{ throw std::invalid_argument("ERROR: Given NIS upscale ratio is outside [1, 3]. Use an upscale ratio between 1 and 3."); }
+	}
 
 	void SetOptions(float sharpness)
 	{

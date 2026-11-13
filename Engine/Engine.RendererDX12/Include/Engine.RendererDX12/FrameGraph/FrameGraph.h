@@ -19,6 +19,21 @@ class NodeHandle
 public:
     InputPinRef GetInput(const PinId& id) const;
     OutputPinRef GetOutput(const PinId& id) const;
+    template<class T> void SetParameter(const std::string& name, T value) const
+    {
+        const auto definition = _definition.lock();
+        if (!definition) { throw std::logic_error("ERROR: Given FrameGraph handle refers to a destroyed graph."); }
+        if (definition->IsCompiled) { throw std::logic_error("ERROR: Unable to set a render pass parameter on a compiled graph."); }
+
+        auto& parameters = definition->Nodes.at(_id).Description._parameters;
+        const auto parameter = parameters.find(name);
+        if (parameter == parameters.end())
+        { throw std::invalid_argument("ERROR: " + _id + ": parameter '" + name + "' is not declared. Declare it in Describe()."); }
+        auto* storedValue = std::any_cast<std::decay_t<T>>(&parameter->second);
+        if (!storedValue)
+        { throw std::invalid_argument("ERROR: " + _id + ": incorrect type for parameter '" + name + "'."); }
+        *storedValue = value;
+    }
 private:
     friend class FrameGraph;
     NodeHandle(std::weak_ptr<FrameGraphDefinition> definition, NodeId id) : _definition(std::move(definition)), _id(std::move(id)) {}

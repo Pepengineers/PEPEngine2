@@ -16,11 +16,9 @@ public:
 	static constexpr const char* OutColorTexture = "OutColorTexture";
 
 	explicit GDX12FSRUpscalePass(FfxApiUpscaleQualityMode quality = FFX_UPSCALE_QUALITY_MODE_QUALITY)
-		: _quality(quality)
+		: _defaultQuality(quality)
 	{
-		if (quality < FFX_UPSCALE_QUALITY_MODE_NATIVEAA || quality > FFX_UPSCALE_QUALITY_MODE_ULTRA_PERFORMANCE)
-		{ throw std::invalid_argument("ERROR: Given FSR quality mode is unsupported. Pass a FfxApiUpscaleQualityMode from "
-			"FFX_UPSCALE_QUALITY_MODE_NATIVEAA through FFX_UPSCALE_QUALITY_MODE_ULTRA_PERFORMANCE."); }
+		ValidateQuality(quality);
 		_flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_JITTER;
 	}
 
@@ -29,6 +27,9 @@ public:
 
 	void Describe(PassDescription& s) const override
 	{
+		s.AddParameter("Quality", _defaultQuality);
+		s.AddParameter("EnableSharpening", true);
+		s.AddParameter("Sharpness", 1.f);
 		const auto read = ResourceUsage::PixelShaderRead | ResourceUsage::NonPixelShaderRead;
 		auto& source = s.AddInputTexture(InColorTexture);
 		source.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
@@ -48,6 +49,12 @@ public:
 
 	void ResolveResourceRequirements(PassResourceRequirementsContext& context) override
 	{
+		const auto quality = context.GetParameter<FfxApiUpscaleQualityMode>("Quality");
+		ValidateQuality(quality);
+		_enableSharpening = context.GetParameter<bool>("EnableSharpening");
+		_sharpness = context.GetParameter<float>("Sharpness");
+		if (!(_sharpness >= 0.f && _sharpness <= 1.f))
+		{ throw std::invalid_argument("ERROR: FSR Sharpness must be between 0 and 1."); }
 		ReleaseContext();
 		const auto displaySize = context.GetDisplaySize();
 		ffxCreateBackendDX12Desc backend = {};
@@ -65,7 +72,7 @@ public:
 		query.header.type = FFX_API_QUERY_DESC_TYPE_UPSCALE_GETRENDERRESOLUTIONFROMQUALITYMODE;
 		query.displayWidth = displaySize.x;
 		query.displayHeight = displaySize.y;
-		query.qualityMode = _quality;
+		query.qualityMode = quality;
 		UInt2 renderSize;
 		query.pOutRenderWidth = &renderSize.x;
 		query.pOutRenderHeight = &renderSize.y;
@@ -102,8 +109,8 @@ public:
 		dispatch.cameraFar = frame->ActiveCameraNearPlane;
 		dispatch.cameraFovAngleVertical = XMConvertToRadians(frame->ActiveCameraFOV);
 		dispatch.jitterOffset = {-frame->ActiveCameraJitterOffsetX, -frame->ActiveCameraJitterOffsetY};
-		dispatch.enableSharpening = true;
-		dispatch.sharpness = 1.f;
+		dispatch.enableSharpening = _enableSharpening;
+		dispatch.sharpness = _sharpness;
 		dispatch.frameTimeDelta = (std::max)(frame->GameTimer->DeltaTime() * 1000.f, 1.f);
 		dispatch.reset = _resetHistory;
 		dispatch.preExposure = 1.f;
@@ -121,9 +128,18 @@ public:
 	{ _resetHistory = true; }
 
 private:
-	const FfxApiUpscaleQualityMode _quality;
+	const FfxApiUpscaleQualityMode _defaultQuality;
 	ffxContext _context = nullptr;
 	bool _resetHistory = true;
+	bool _enableSharpening = true;
+	float _sharpness = 1.f;
+
+	static void ValidateQuality(FfxApiUpscaleQualityMode quality)
+	{
+		if (quality < FFX_UPSCALE_QUALITY_MODE_NATIVEAA || quality > FFX_UPSCALE_QUALITY_MODE_ULTRA_PERFORMANCE)
+		{ throw std::invalid_argument("ERROR: Given FSR quality mode is unsupported. Use a FfxApiUpscaleQualityMode from "
+			"FFX_UPSCALE_QUALITY_MODE_NATIVEAA through FFX_UPSCALE_QUALITY_MODE_ULTRA_PERFORMANCE."); }
+	}
 
 	void ReleaseContext()
 	{

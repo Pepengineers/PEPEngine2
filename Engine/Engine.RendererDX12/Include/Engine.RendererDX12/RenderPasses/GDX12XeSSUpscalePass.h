@@ -12,11 +12,9 @@ public:
 	static constexpr const char* OutColorTexture = "OutColorTexture";
 
 	explicit GDX12XeSSUpscalePass(xess_quality_settings_t quality = XESS_QUALITY_SETTING_ULTRA_QUALITY_PLUS)
-		: _quality(quality)
+		: _defaultQuality(quality)
 	{
-		if (quality < XESS_QUALITY_SETTING_ULTRA_PERFORMANCE || quality > XESS_QUALITY_SETTING_AA)
-		{ throw std::invalid_argument("ERROR: Given XeSS quality mode is unsupported. Pass an xess_quality_settings_t value from "
-			"XESS_QUALITY_SETTING_ULTRA_PERFORMANCE through XESS_QUALITY_SETTING_AA."); }
+		ValidateQuality(quality);
 		_flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_JITTER;
 	}
 
@@ -25,6 +23,7 @@ public:
 
 	void Describe(PassDescription& s) const override
 	{
+		s.AddParameter("Quality", _defaultQuality);
 		auto& source = s.AddInputTexture(InColorTexture);
 		source.Formats = {DXGI_FORMAT_R8G8B8A8_UNORM};
 		source.Usages = ResourceUsage::NonPixelShaderRead;
@@ -43,16 +42,18 @@ public:
 
 	void ResolveResourceRequirements(PassResourceRequirementsContext& context) override
 	{
+		const auto quality = context.GetParameter<xess_quality_settings_t>("Quality");
+		ValidateQuality(quality);
 		ReleaseContext();
 		const auto displaySize = context.GetDisplaySize();
 		Check(xessD3D12CreateContext(context.GetDevice()->GetDevice().Get(), &_context), "create context");
 		xess_d3d12_init_params_t params = {};
 		params.outputResolution = {displaySize.x, displaySize.y};
-		params.qualitySetting = _quality;
+		params.qualitySetting = quality;
 		params.initFlags = XESS_INIT_FLAG_INVERTED_DEPTH | XESS_INIT_FLAG_LDR_INPUT_COLOR | XESS_INIT_FLAG_USE_NDC_VELOCITY;
 		Check(xessD3D12Init(_context, &params), "initialize context");
 		xess_2d_t recommended{}, minimum{}, maximum{};
-		Check(xessGetOptimalInputResolution(_context, &params.outputResolution, _quality,
+		Check(xessGetOptimalInputResolution(_context, &params.outputResolution, quality,
 			&recommended, &minimum, &maximum), "query input resolution");
 		const UInt2 renderSize = {recommended.x, recommended.y};
 		if (!renderSize.x || !renderSize.y) { throw std::runtime_error("ERROR: XeSS returned a zero or invalid input resolution. Use non-zero display dimensions and a supported XeSS "
@@ -90,8 +91,15 @@ public:
 
 private:
 	xess_context_handle_t _context = nullptr;
-	const xess_quality_settings_t _quality;
+	const xess_quality_settings_t _defaultQuality;
 	bool _resetHistory = true;
+
+	static void ValidateQuality(xess_quality_settings_t quality)
+	{
+		if (quality < XESS_QUALITY_SETTING_ULTRA_PERFORMANCE || quality > XESS_QUALITY_SETTING_AA)
+		{ throw std::invalid_argument("ERROR: Given XeSS quality mode is unsupported. Use an xess_quality_settings_t value from "
+			"XESS_QUALITY_SETTING_ULTRA_PERFORMANCE through XESS_QUALITY_SETTING_AA."); }
+	}
 
 	void ReleaseContext()
 	{

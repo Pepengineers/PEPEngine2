@@ -81,6 +81,7 @@ public:
     GDX12Device* GetDevice() const { return _resources->Device; }
     GDX12DeviceResources* GetDeviceResources() const { return _resources; }
     const RenderPipelineCommonData* GetFrameData() const { return _common; }
+    template<class T> T GetParameter(const std::string& name) const { return _node.Description.GetParameter<T>(name); }
     const ResourceDescription& GetInputResourceDescription(const PinId& id) const
     {
         _node.Description.GetInputDescription(id);
@@ -199,6 +200,7 @@ public:
     GDX12DeviceResources* GetDeviceResources() const { return _resources; }
     const RenderPipelineCommonData* GetFrameData() const { return _common; }
     UInt2 GetDisplaySize() const { return _compileData.DisplaySize; }
+    template<class T> T GetParameter(const std::string& name) const { return _node.Description.GetParameter<T>(name); }
     void RequireTextureSize(const PinId& id, UInt2 size)
     { _node.Description.GetPortDescription(id); _compileData.Ports.at({_node.Id, id}).RequiredTextureSize = size; }
     void SetOutputBufferCapacity(const PinId& id, uint64_t capacity)

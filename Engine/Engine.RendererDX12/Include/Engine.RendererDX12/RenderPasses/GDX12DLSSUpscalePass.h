@@ -14,9 +14,7 @@ public:
 	explicit GDX12DLSSUpscalePass(sl::DLSSMode quality = sl::DLSSMode::eMaxQuality)
 		: _viewportHandle(_nextViewport.fetch_add(1)), _quality(quality)
 	{
-		if (quality < sl::DLSSMode::eMaxPerformance || quality > sl::DLSSMode::eDLAA)
-		{ throw std::invalid_argument("ERROR: Given DLSS quality mode is unsupported. Pass a supported sl::DLSSMode from eMaxPerformance through "
-			"eDLAA; eOff is not an upscaling mode."); }
+		ValidateQuality(quality);
 		_flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_JITTER | RENDER_PASS_FLAG_USE_STREAMLINE;
 	}
 
@@ -25,6 +23,7 @@ public:
 
 	void Describe(PassDescription& s) const override
 	{
+		s.AddParameter("Quality", _quality);
 		// Streamline is initialized against the primary device by RenderModule.
 		s.PrimaryOnly = true;
 		auto& source = s.AddInputTexture(InColorTexture);
@@ -45,6 +44,9 @@ public:
 
 	void ResolveResourceRequirements(PassResourceRequirementsContext& context) override
 	{
+		const auto quality = context.GetParameter<sl::DLSSMode>("Quality");
+		ValidateQuality(quality);
+		_quality = quality;
 		auto& sdk = GDX12StreamlineSDK::Get();
 		if (!sdk.IsEnabled()) { throw std::runtime_error("ERROR: DLSS requires initialized Streamline. Initialize GDX12StreamlineSDK and register the primary device "
 			"before compiling this pass."); }
@@ -125,9 +127,15 @@ public:
 private:
 	inline static std::atomic<uint32_t> _nextViewport{0x100000};
 	sl::ViewportHandle _viewportHandle;
-	const sl::DLSSMode _quality;
+	sl::DLSSMode _quality;
 	bool _configured = false;
 	bool _resetHistory = true;
+
+	static void ValidateQuality(sl::DLSSMode quality)
+	{
+		if (quality < sl::DLSSMode::eMaxPerformance || quality > sl::DLSSMode::eDLAA)
+		{ throw std::invalid_argument("ERROR: Given DLSS quality mode is unsupported. Use a sl::DLSSMode from eMaxPerformance through eDLAA."); }
+	}
 
 	void CreateFeature(UInt2 displaySize)
 	{

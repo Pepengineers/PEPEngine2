@@ -1,11 +1,13 @@
 #pragma once
 
 #include <dxgiformat.h>
+#include <any>
 #include <cstdint>
 #include <initializer_list>
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -94,12 +96,30 @@ struct PassDescription
     PortDescription& AddOutputBuffer(PinId id, ResourceType type = ResourceType::StructuredBuffer);
     PortDescription& AddInputDrawStream(PinId id);
     PortDescription& AddOutputDrawStream(PinId id);
+    template<class T> void AddParameter(std::string name, T defaultValue)
+    {
+        static_assert(std::is_arithmetic_v<T> || std::is_enum_v<T>, "Render pass parameters must be numeric, bool or enum.");
+        if (name.empty() || !_parameters.try_emplace(name, defaultValue).second)
+        { throw std::invalid_argument("ERROR: Render pass parameter '" + name + "' is empty or already declared."); }
+    }
+    template<class T> T GetParameter(const std::string& name) const
+    {
+        const auto parameter = _parameters.find(name);
+        if (parameter == _parameters.end())
+        { throw std::invalid_argument("ERROR: Render pass parameter '" + name + "' is not declared."); }
+        const auto* value = std::any_cast<T>(&parameter->second);
+        if (!value)
+        { throw std::invalid_argument("ERROR: Incorrect type for render pass parameter '" + name + "'."); }
+        return *value;
+    }
     void RequireSameTextureSize(std::initializer_list<PinId> ids) { SameTextureSizeGroups.emplace_back(ids); }
     const PortDescription& GetPortDescription(const PinId& id) const;
     const PortDescription& GetInputDescription(const PinId& id) const;
     const PortDescription& GetOutputDescription(const PinId& id) const;
     void ValidatePorts(const NodeId& node) const;
 private:
+    friend class NodeHandle;
+    std::map<std::string, std::any> _parameters;
     PortDescription& AddPort(PinId id, bool input, ResourceType type);
 };
 
