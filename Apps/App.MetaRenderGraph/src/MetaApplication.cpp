@@ -1,4 +1,5 @@
 #include "MetaApplication.h"
+#include "MetaRenderPipeline.h"
 #include "App.Base/App.h"
 #include "Common/RuntimePaths.h"
 #include "Engine.Core/ConsoleModule.h"
@@ -6,6 +7,8 @@
 #include <d3d12sdklayers.h>
 #include <fstream>
 #include <stdexcept>
+
+void RunDirectExecutionGpuTests(GDX12Device&);
 
 namespace
 {
@@ -30,14 +33,20 @@ namespace
         Require(!console.FindConsoleVariable(L"Render.Particles.AsyncCompute").GetBool(), "Particle async must be disabled");
         Require(!console.FindConsoleVariable(L"Render.AO.AsyncCompute").GetBool(), "AO async must be disabled");
         IConsoleVariable* water = nullptr;
-        Require(!console.TryFindConsoleVariable(L"Render.Fluid.SecondaryAdapter", water), "U1 must not link Bistro water runtime");
-        Log::Info("MetaRenderGraph", "REFERENCE ONLY; primary=0; particle secondary=-1; water runtime absent; single DIRECT execution");
+        Require(!console.TryFindConsoleVariable(L"Render.Fluid.SecondaryAdapter", water), "Experiment must not link Bistro water runtime");
+        Log::Info("MetaRenderGraph", "U2 PLAN EXECUTOR; primary=0; particle secondary=-1; water runtime absent; single DIRECT execution");
     }
 
     class MetaApplication final : public App
     {
     public:
         MetaApplication() : App(GetModuleHandleW(nullptr)) {}
+        bool AddModules() override
+        {
+            Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer, std::make_unique<MetaRenderPipeline>()));
+            Locator.RegisterModule(std::make_shared<SceneManagerModule>());
+            return BenchmarkEngine::AddModules();
+        }
         bool Initialize() override
         {
             if (!App::Initialize()) return false;
@@ -49,13 +58,13 @@ namespace
             GDX12ParticleEmitterSettings particles;
             particles.Seed = 13;
             particles.MaxParticles = 256;
-            particles.SharedSimulation = true; // Eligible emitter still stays on the primary GPU.
+            particles.SharedSimulation = true; // Authoring fixture retained; particle passes migrate in U6.
             particles.Blend = ParticleBlend::Additive;
             particles.EmissionRate = 0;
             auto& component = emitter.AddComponent<ParticleEmitterComponent>();
             component.SetSettings(particles);
             component.Emit(64);
-            SetWindowTextW(GetWindow()->GetWindowHandle(), L"MetaRenderGraph U1 - procedural reference only");
+            SetWindowTextW(GetWindow()->GetWindowHandle(), L"MetaRenderGraph U2 - DIRECT plan");
             return true;
         }
         void Smoke()
@@ -63,6 +72,7 @@ namespace
             auto renderer = Locator.GetModule<RenderModule>();
             ComPtr<ID3D12InfoQueue> info;
             ThrowIfFailed(renderer->GetPrimaryDevice()->GetDevice().As(&info));
+            RunDirectExecutionGpuTests(*renderer->GetPrimaryDevice());
             Timer.Reset();
             Timer.Stop(); // Fixed zero dt: reproducible initial burst, no wall-clock simulation.
             const auto frame = [&]
@@ -83,6 +93,8 @@ namespace
             Require(width != 1280 && width > 0 && height > 0, "Resize did not change client extent");
             Require(renderer->GetFrameSubmissionId() == before + 4, "Frames did not submit after resize");
             renderer->DrainFrameWork();
+            Require(GDX12RenderGraph::GetExecuteCallCount() == 0, "Experiment called legacy graph Execute");
+            Log::Info("MetaRenderGraph", "Runtime legacy graph Execute calls=0");
             for (UINT64 i = 0; i < info->GetNumStoredMessages(); ++i)
             {
                 SIZE_T size = 0;
@@ -97,7 +109,7 @@ namespace
             renderer->WriteRenderGraph(graph);
             Require(bool(graph), "Cannot write reference graph");
             Log::Info("MetaRenderGraph", "Smoke passed: 8 presented frames, actual window resize to ", width, "x", height,
-                "; D3D12 errors=0; seed=13; dt=0; burst=64");
+                "; D3D12 errors=0; fixture seeds=1..8; transform=8*x+7; dt=0");
             // Exercise the normal window close / WM_DESTROY / WM_QUIT loop as well.
             PostMessageW(GetWindow()->GetWindowHandle(), WM_CLOSE, 0, 0);
             Require(Run() == 0, "Window shutdown failed");
