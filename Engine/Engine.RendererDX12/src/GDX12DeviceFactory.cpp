@@ -4,7 +4,49 @@
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 
+#include <d3dkmthk.h>
+
 #include <algorithm>
+
+#pragma comment(lib, "Gdi32.lib")
+
+namespace
+{
+    struct AdapterIdentity
+    {
+        LUID Luid;
+        std::wstring PhysicalKey;
+        bool IndirectDisplay = false;
+    };
+
+    AdapterIdentity GetAdapterIdentity(LUID luid)
+    {
+        AdapterIdentity identity{luid, {}};
+        D3DKMT_OPENADAPTERFROMLUID opened{luid};
+        if (D3DKMTOpenAdapterFromLuid(&opened) != 0) { return identity; }
+
+        // A logical adapter for an indirect display can use the same physical render GPU.
+        D3DKMT_ADAPTERTYPE type{};
+        D3DKMT_QUERYADAPTERINFO query{opened.hAdapter, KMTQAITYPE_ADAPTERTYPE, &type, sizeof(type)};
+        if (D3DKMTQueryAdapterInfo(&query) == 0) { identity.IndirectDisplay = type.IndirectDisplayDevice != 0; }
+
+        D3DKMT_PHYSICAL_ADAPTER_COUNT count{};
+        query = {opened.hAdapter, KMTQAITYPE_PHYSICALADAPTERCOUNT, &count, sizeof(count)};
+        WCHAR key[512]{};
+        if (D3DKMTQueryAdapterInfo(&query) == 0 && count.Count == 1)
+        {
+            UINT length = _countof(key);
+            D3DKMT_QUERY_PHYSICAL_ADAPTER_PNP_KEY pnp{0, D3DKMT_PNP_KEY_HARDWARE, key, &length};
+            query = {opened.hAdapter, KMTQAITYPE_PHYSICALADAPTERPNPKEY, &pnp, sizeof(pnp)};
+            if (D3DKMTQueryAdapterInfo(&query) != 0) { key[0] = L'\0'; }
+        }
+
+        D3DKMT_CLOSEADAPTER close{opened.hAdapter};
+        D3DKMTCloseAdapter(&close);
+        identity.PhysicalKey = key;
+        return identity;
+    }
+}
 
 ComPtr<IDXGIFactory7> GDX12DeviceFactory::_dxgiFactory = nullptr;
 ComPtr<IDXGIFactory7> GDX12DeviceFactory::_dxgiFactoryProxy = nullptr;
@@ -51,7 +93,7 @@ std::vector<DeviceDesc> GDX12DeviceFactory::GetDeviceDescriptors()
     if (!_isInitialized) { ThrowIfFailed(Initialize()); }
 
     std::vector<DeviceDesc> devices;
-    std::vector<LUID> adapterIds;
+    std::vector<AdapterIdentity> adapterIds;
     ComPtr<IDXGIAdapter1> adapter1;
     for (UINT adapterIndex = 0;; ++adapterIndex)
     {
@@ -70,8 +112,14 @@ std::vector<DeviceDesc> GDX12DeviceFactory::GetDeviceDescriptors()
             continue;
         }
         const auto luid = adapterDesc.AdapterLuid;
-        if (std::any_of(adapterIds.begin(), adapterIds.end(), [luid](const LUID& id)
-            { return id.LowPart == luid.LowPart && id.HighPart == luid.HighPart; }))
+        if (std::any_of(adapterIds.begin(), adapterIds.end(), [luid](const AdapterIdentity& id)
+            { return id.Luid.LowPart == luid.LowPart && id.Luid.HighPart == luid.HighPart; }))
+        { continue; }
+
+        auto identity = GetAdapterIdentity(luid);
+        const auto duplicate = std::find_if(adapterIds.begin(), adapterIds.end(), [&identity](const AdapterIdentity& id)
+        { return !identity.PhysicalKey.empty() && identity.PhysicalKey == id.PhysicalKey; });
+        if (duplicate != adapterIds.end() && (!duplicate->IndirectDisplay || identity.IndirectDisplay))
         { continue; }
 
         DeviceDesc desc = {};
@@ -81,8 +129,16 @@ std::vector<DeviceDesc> GDX12DeviceFactory::GetDeviceDescriptors()
         desc.DedicatedSystemMemory = adapterDesc.DedicatedSystemMemory;
         desc.SharedSystemMemory = adapterDesc.SharedSystemMemory;
 
-        devices.push_back(desc);
-        adapterIds.push_back(luid);
+        if (duplicate != adapterIds.end())
+        {
+            devices[duplicate - adapterIds.begin()] = std::move(desc);
+            *duplicate = std::move(identity);
+        }
+        else
+        {
+            devices.push_back(std::move(desc));
+            adapterIds.push_back(std::move(identity));
+        }
     }
 
     return devices;

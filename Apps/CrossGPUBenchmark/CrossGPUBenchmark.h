@@ -31,4 +31,4 @@ NodeHandle AddBenchmarkPass(FrameGraph& graph, EDeviceRole role, const char* nam
 using ConfigureCrossGPUWorkload = NodeHandle (*)(FrameGraph&, const CrossGPUStage&, bool& verified);
 
 int RunCrossGPUBenchmark(HINSTANCE instance, const char* name, bool textures,
-    std::vector<CrossGPUStage> stages, ConfigureCrossGPUWorkload configure, const char* stagePrefix);
+    std::vector<CrossGPUStage> stages, ConfigureCrossGPUWorkload configure, const char* arguments);

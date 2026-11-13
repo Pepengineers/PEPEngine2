@@ -3,39 +3,31 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 
 #include <memory>
+#include <vector>
 
 inline constexpr DXGI_FORMAT SyntheticTextureFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
 
-class SyntheticTexturePass : public GDX12RenderPass
-{
-protected:
-    explicit SyntheticTexturePass(UINT extent);
-    void InitializeShader(PassInitContext& context, const char* entry, bool readsTexture);
-    GDX12CommandList* Bind(PassExecutionContext& context);
-    void Dispatch(GDX12CommandList& commands, UINT seed = 0) const;
-
-    const UINT _extent;
-    const UINT _groupsPerRow;
-
-private:
-    std::unique_ptr<GDX12RootSignature> _rootSignature;
-    ComPtr<ID3D12PipelineState> _pipeline;
-};
-
-class SyntheticTextureWritePass final : public SyntheticTexturePass
+class SyntheticTextureWritePass final : public GDX12RenderPass
 {
 public:
-    explicit SyntheticTextureWritePass(UINT extent) : SyntheticTexturePass(extent) {}
+    explicit SyntheticTextureWritePass(UINT extent);
 
     void Describe(PassDescription& description) const override;
     void Initialize(PassInitContext& context) override;
+    void OnResourcesRecreated(PassInitContext&) override { _initializedSlots.clear(); }
     void Execute(PassExecutionContext& context) override;
+
+private:
+    const UINT _extent;
+    std::unique_ptr<GDX12RootSignature> _rootSignature;
+    ComPtr<ID3D12PipelineState> _pipeline;
+    std::vector<bool> _initializedSlots;
 };
 
-class SyntheticTextureReadPass final : public SyntheticTexturePass
+class SyntheticTextureReadPass final : public GDX12RenderPass
 {
 public:
-    SyntheticTextureReadPass(UINT extent, bool* verified = nullptr) : SyntheticTexturePass(extent), _verified(verified) {}
+    SyntheticTextureReadPass(UINT extent, bool* verified = nullptr);
 
     void Describe(PassDescription& description) const override;
     void Initialize(PassInitContext& context) override;
@@ -45,6 +37,10 @@ private:
     void ValidateChecksum(PassExecutionContext& context, GDX12CommandList& commands, GDX12Resource& checksum);
     UINT ExpectedChecksum(UINT group) const;
 
+    const UINT _extent;
+    const UINT _groupsPerRow;
+    std::unique_ptr<GDX12RootSignature> _rootSignature;
+    ComPtr<ID3D12PipelineState> _pipeline;
     bool* _verified;
     bool _validationRecorded = false;
     UINT _validationSeed = 0;

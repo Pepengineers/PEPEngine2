@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdio>
 #include <fstream>
+#include <sstream>
 
 #include <ryml.hpp>
 #include <ryml_std.hpp>
@@ -38,7 +39,7 @@ void AddCrossGPUStages(std::vector<CrossGPUStage>& stages, EDeviceRole producer,
 
 namespace
 {
-    constexpr auto StageDuration = std::chrono::seconds(7);
+    constexpr auto StageDuration = std::chrono::seconds(10);
     constexpr float WarmupSeconds = 1.0f;
     constexpr unsigned FrameSlots = 3;
 
@@ -65,6 +66,7 @@ namespace
     struct AdapterCapabilities
     {
         std::string Name;
+        std::string Luid;
         bool RowMajorTextures;
     };
 
@@ -91,13 +93,59 @@ namespace
         return result;
     }
 
+    std::string AdapterLuid(const DeviceDesc& adapter)
+    {
+        DXGI_ADAPTER_DESC3 description{};
+        ThrowIfFailed(adapter.Adapter->GetDesc3(&description));
+        char value[17]{};
+        std::snprintf(value, sizeof(value), "%08lX%08lX",
+            static_cast<unsigned long>(description.AdapterLuid.HighPart), description.AdapterLuid.LowPart);
+        return value;
+    }
+
+    std::vector<DeviceDesc> GetBenchmarkAdapters()
+    {
+        auto adapters = GDX12DeviceFactory::GetDeviceDescriptors();
+        adapters.erase(std::remove_if(adapters.begin(), adapters.end(), [](const DeviceDesc& adapter)
+        {
+            return FAILED(D3D12CreateDevice(adapter.Adapter.Get(), D3D_FEATURE_LEVEL_11_0, __uuidof(ID3D12Device), nullptr));
+        }), adapters.end());
+        return adapters;
+    }
+
+    int ListAdapters(const std::vector<DeviceDesc>& adapters)
+    {
+        ryml::Tree tree;
+        auto root = tree.rootref();
+        root |= ryml::MAP;
+        auto devices = root["adapters"];
+        devices |= ryml::SEQ;
+        for (const auto& adapter : adapters)
+        {
+            auto node = devices.append_child();
+            node |= ryml::MAP;
+            WriteString(node["name"], UTF8(adapter.Name));
+            WriteString(node["luid"], AdapterLuid(adapter));
+        }
+        const auto json = ryml::emitrs_json<std::string>(tree);
+        return std::puts(json.c_str()) == EOF ? 1 : 0;
+    }
+
+    DeviceDesc FindAdapter(const std::vector<DeviceDesc>& adapters, const std::string& luid)
+    {
+        const auto match = std::find_if(adapters.begin(), adapters.end(), [&luid](const DeviceDesc& adapter)
+        { return AdapterLuid(adapter) == luid; });
+        if (match == adapters.end()) { throw std::invalid_argument("Selected adapter is unavailable: " + luid); }
+        return *match;
+    }
+
     class CrossGPUApp final : public App
     {
     public:
         CrossGPUApp(HINSTANCE instance, const char* name, bool textures, std::vector<CrossGPUStage> stages,
-            ConfigureCrossGPUWorkload configure)
+            ConfigureCrossGPUWorkload configure, std::vector<DeviceDesc> adapters)
             : App(instance), _name(name), _textures(textures), _stages(std::move(stages)),
-              _configure(configure), _results(_stages.size())
+              _configure(configure), _results(_stages.size()), _selectedAdapters(std::move(adapters))
         {
             const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count();
@@ -114,14 +162,13 @@ namespace
         {
             if (!App::Initialize()) { return false; }
             _render = GetLocator().GetModule<RenderModule>().get();
-            for (const auto& adapter : GDX12DeviceFactory::GetDeviceDescriptors())
+            for (const auto& adapter : _selectedAdapters)
             {
                 ComPtr<ID3D12Device> device;
                 ThrowIfFailed(D3D12CreateDevice(adapter.Adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)));
                 D3D12_FEATURE_DATA_D3D12_OPTIONS options{};
                 ThrowIfFailed(device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options)));
-                _adapters.push_back({UTF8(adapter.Name), options.CrossAdapterRowMajorTextureSupported != FALSE});
-                if (_adapters.size() == 2) { break; }
+                _adapters.push_back({UTF8(adapter.Name), AdapterLuid(adapter), options.CrossAdapterRowMajorTextureSupported != FALSE});
             }
 
             std::filesystem::create_directories(_directory);
@@ -145,7 +192,9 @@ namespace
     protected:
         bool AddModules() override
         {
-            Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer));
+            const auto primary = _selectedAdapters.empty() ? nullptr : _selectedAdapters[0].Adapter;
+            const auto secondary = _selectedAdapters.size() < 2 ? nullptr : _selectedAdapters[1].Adapter;
+            Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer, primary, secondary));
             return BenchmarkEngine::AddModules();
         }
 
@@ -184,7 +233,7 @@ namespace
             const bool producerSupported = Adapter(stage.Producer).RowMajorTextures;
             const bool consumerSupported = Adapter(ConsumerRole(stage)).RowMajorTextures;
             if (stage.Storage == MemoryType::Shared && (!producerSupported || !consumerSupported))
-            { return "A shared ROW_MAJOR UAV texture requires both adapters to accept its resource flags."; }
+            { return "A shared ROW_MAJOR render target requires both adapters to accept ALLOW_RENDER_TARGET."; }
             if (stage.Access == MemoryType::Shared && !consumerSupported)
             { return "The consumer cannot bind a shared ROW_MAJOR texture as an SRV."; }
             return {};
@@ -252,6 +301,7 @@ namespace
                 node |= ryml::MAP;
                 node["role"] = i == 0 ? "primary" : "secondary";
                 WriteString(node["name"], _adapters[i].Name);
+                WriteString(node["luid"], _adapters[i].Luid);
                 node["cross_adapter_row_major_texture_supported"] = _adapters[i].RowMajorTextures ? "true" : "false";
             }
             auto stages = root["stages"];
@@ -300,6 +350,7 @@ namespace
         std::vector<CrossGPUStage> _stages;
         ConfigureCrossGPUWorkload _configure;
         std::vector<StageResult> _results;
+        std::vector<DeviceDesc> _selectedAdapters;
         std::vector<AdapterCapabilities> _adapters;
         std::filesystem::path _directory;
         RenderModule* _render = nullptr;
@@ -313,12 +364,49 @@ namespace
 }
 
 int RunCrossGPUBenchmark(HINSTANCE instance, const char* name, bool textures,
-    std::vector<CrossGPUStage> stages, ConfigureCrossGPUWorkload configure, const char* stagePrefix)
+    std::vector<CrossGPUStage> stages, ConfigureCrossGPUWorkload configure, const char* arguments)
 {
-    // An optional stage name or prefix lets a failed stage be reproduced in isolation.
-    if (*stagePrefix)
+    std::string stagePrefix;
+    std::vector<DeviceDesc> adapters;
+    try
     {
-        stages.erase(std::remove_if(stages.begin(), stages.end(), [stagePrefix](const CrossGPUStage& stage)
+        adapters = GetBenchmarkAdapters();
+        std::istringstream input(arguments);
+        std::string option;
+        input >> option;
+        if (option == "--list-devices") { return ListAdapters(adapters); }
+        if (option == "--adapters")
+        {
+            std::string primary;
+            std::string secondary;
+            if (!(input >> primary >> secondary) || primary == secondary)
+            { throw std::invalid_argument("--adapters requires two distinct adapter LUIDs."); }
+            auto selected = std::vector<DeviceDesc>{FindAdapter(adapters, primary), FindAdapter(adapters, secondary)};
+            adapters = std::move(selected);
+            input >> stagePrefix;
+        }
+        else
+        {
+            stagePrefix = std::move(option);
+            if (adapters.size() > 2) { adapters.resize(2); }
+        }
+        if (input >> option) { throw std::invalid_argument("Unexpected argument: " + option); }
+    }
+    catch (const DxException& error)
+    {
+        std::fprintf(stderr, "%s\n", UTF8(error.ToString()).c_str());
+        return 1;
+    }
+    catch (const std::exception& error)
+    {
+        std::fprintf(stderr, "%s\n", error.what());
+        return 1;
+    }
+
+    // An optional stage name or prefix lets a failed stage be reproduced in isolation.
+    if (!stagePrefix.empty())
+    {
+        stages.erase(std::remove_if(stages.begin(), stages.end(), [&stagePrefix](const CrossGPUStage& stage)
             { return stage.Name.rfind(stagePrefix, 0) != 0; }), stages.end());
         if (stages.empty())
         {
@@ -326,7 +414,7 @@ int RunCrossGPUBenchmark(HINSTANCE instance, const char* name, bool textures,
             return 1;
         }
     }
-    CrossGPUApp app(instance, name, textures, std::move(stages), configure);
+    CrossGPUApp app(instance, name, textures, std::move(stages), configure, std::move(adapters));
     std::string failure;
     try
     {

@@ -17,11 +17,11 @@ namespace
     }
 }
 
-int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR stagePrefix, int)
+int WINAPI WinMain(HINSTANCE instance, HINSTANCE, PSTR arguments, int)
 {
     std::vector<CrossGPUStage> stages;
     AddCrossGPUStages(stages, DEVICE_ROLE_PRIMARY, 128, 1, "128MiB_x1");
     AddCrossGPUStages(stages, DEVICE_ROLE_SECONDARY, 32, 4, "32MiB_x4");
     AddCrossGPUStages(stages, DEVICE_ROLE_PRIMARY, 32, 1, "32MiB_x1");
-    return RunCrossGPUBenchmark(instance, "buffer-benchmark", false, std::move(stages), Configure, stagePrefix);
+    return RunCrossGPUBenchmark(instance, "buffer-benchmark", false, std::move(stages), Configure, arguments);
 }

@@ -43,7 +43,8 @@ class RenderModule final : public Module
 public:
     using PipelineConfiguration = void (*)(FrameGraph&, const FrameGraphInputs&);
 
-    RenderModule(Window* window, GameTimer* timer);
+    RenderModule(Window* window, GameTimer* timer, ComPtr<IDXGIAdapter4> primaryAdapter = {},
+        ComPtr<IDXGIAdapter4> secondaryAdapter = {});
     ~RenderModule() override;
 
     void Initialize() override;
@@ -157,6 +158,8 @@ private:
     uint32_t _instanceCount = 0;
     RenderPipelineCommonData _RPcommonData;
 
+    ComPtr<IDXGIAdapter4> _primaryAdapter;
+    ComPtr<IDXGIAdapter4> _secondaryAdapter;
     std::unique_ptr<GDX12Device> _primaryDevice;
     std::unique_ptr<GDX12Device> _secondaryDevice;
 

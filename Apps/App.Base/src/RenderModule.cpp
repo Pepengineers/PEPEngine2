@@ -33,8 +33,9 @@ namespace
     }
 }
 
-RenderModule::RenderModule(Window* window, GameTimer* timer) :
-    _timer(timer), _window(window)
+RenderModule::RenderModule(Window* window, GameTimer* timer, ComPtr<IDXGIAdapter4> primaryAdapter,
+    ComPtr<IDXGIAdapter4> secondaryAdapter)
+    : _timer(timer), _window(window), _primaryAdapter(std::move(primaryAdapter)), _secondaryAdapter(std::move(secondaryAdapter))
 {
     _RPcommonData.GameTimer = _timer;
 }
@@ -653,7 +654,7 @@ void RenderModule::CompileFrameGraph(FrameGraph& graph)
     if (!_primaryDevice->IsInitialized())
     {
         _primaryDevice->Role = DEVICE_ROLE_PRIMARY;
-        const auto adapter = GDX12DeviceFactory::GetMostPerformantAdapter();
+        const auto adapter = _primaryAdapter ? _primaryAdapter : GDX12DeviceFactory::GetMostPerformantAdapter();
         if (!adapter) { throw std::runtime_error("ERROR: No suitable GPU adapter found."); }
         ThrowIfFailed(_primaryDevice->Initialize(adapter));
         _primaryResources.Initialize(_primaryDevice.get());
@@ -662,18 +663,23 @@ void RenderModule::CompileFrameGraph(FrameGraph& graph)
     const bool dualGPUMode = graph.UsesDevice(DEVICE_ROLE_SECONDARY);
     if (dualGPUMode && !_secondaryDevice->IsInitialized())
     {
-        auto adapters = GDX12DeviceFactory::GetDeviceDescriptors();
-        auto secondary = std::find_if(adapters.begin(), adapters.end(), [this](const auto& adapter)
+        auto adapter = _secondaryAdapter;
+        if (!adapter)
         {
-            DXGI_ADAPTER_DESC3 desc = {};
-            ThrowIfFailed(adapter.Adapter->GetDesc3(&desc));
             const auto primaryLuid = _primaryDevice->GetAdapterLuid();
-            return desc.AdapterLuid.LowPart != primaryLuid.LowPart || desc.AdapterLuid.HighPart != primaryLuid.HighPart;
-        });
-        if (secondary == adapters.end()) { throw std::runtime_error("ERROR: Given FrameGraph assigns passes to the secondary GPU, but no second adapter is available. Use "
+            const auto adapters = GDX12DeviceFactory::GetDeviceDescriptors();
+            const auto secondary = std::find_if(adapters.begin(), adapters.end(), [primaryLuid](const auto& entry)
+            {
+                DXGI_ADAPTER_DESC3 desc = {};
+                ThrowIfFailed(entry.Adapter->GetDesc3(&desc));
+                return desc.AdapterLuid.LowPart != primaryLuid.LowPart || desc.AdapterLuid.HighPart != primaryLuid.HighPart;
+            });
+            if (secondary != adapters.end()) { adapter = secondary->Adapter; }
+        }
+        if (!adapter) { throw std::runtime_error("ERROR: Given FrameGraph assigns passes to the secondary GPU, but no second adapter is available. Use "
             "AddPrimaryGPUPass() for these passes or provide a second compatible GPU."); }
         _secondaryDevice->Role = DEVICE_ROLE_SECONDARY;
-        ThrowIfFailed(_secondaryDevice->Initialize(secondary->Adapter));
+        ThrowIfFailed(_secondaryDevice->Initialize(adapter));
         _secondaryResources.Initialize(_secondaryDevice.get());
     }
 
