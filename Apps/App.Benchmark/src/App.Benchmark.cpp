@@ -18,7 +18,6 @@ namespace
 {
     void ConfigureSingleGPUXeSS(FrameGraph& graph, const FrameGraphInputs& inputs)
     {
-        graph.SetTransportQueuePolicy(TransportQueuePolicy::Auto);
         auto culling = graph.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
         auto opaque = graph.AddPrimaryGPUPass<GDX12OpaquePass>("Opaque");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
@@ -44,7 +43,6 @@ namespace
 
     void ConfigureDualGPUXeSS(FrameGraph& graph, const FrameGraphInputs& inputs)
     {
-        graph.SetTransportQueuePolicy(TransportQueuePolicy::Auto);
         auto culling = graph.AddPrimaryGPUPass<GDX12GPUCullingPass>("Frustum Culling");
         auto opaque = graph.AddPrimaryGPUPass<GDX12OpaquePass>("Opaque");
         auto transparency = graph.AddPrimaryGPUPass<GDX12WBOITTransparencyPass>("Transparency");
