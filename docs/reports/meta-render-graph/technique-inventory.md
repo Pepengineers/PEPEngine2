@@ -1,10 +1,30 @@
 # U1 technique inventory
 
+## Current U5 source status — 2026-11-14
+
+Accepted U4 base: `71f6f4258f26dc4d61ce8800f935a5ce9423d7f0`.
+**Реализовано, тесты и runtime validation отложены пользователем.** The final U5
+source has not been built or executed; independent originating-chat review and a
+new validation authorization are required. Historical U5.1 checks cover an earlier
+partial binary only. See [05-lighting-reflections.md](05-lighting-reflections.md)
+for exact contracts, earlier evidence, memory/SDK costs and pending acceptance.
+
+| U5 position | New packet/access path | Validation status / concrete ownership |
+|---|---|---|
+| Environment IBL, off/DDS/atmosphere, optional local clouds | `SceneEnvironment.*`; explicit upload/cloud/LUT/source/filter/BRDF/aerial packets; persistent output fences | Historical five-case original-pass baseline + eight-step cloud lifecycle passed before the ban. Current refinements are unvalidated. Cold allocation/descriptor work stays on owner. |
+| Reflection probes | `SceneReflections.*`; original scheduler/cache CPU preparation; native mesh culling/batching and interleaved grass capture, GGX filter, publication copy + dependent metadata upload | Source connected. Public readiness uses a submitted GPU fence. Separate A/B caches; original static/dynamic/frozen rules; valid-mip readbacks and new fixture/check source prepared, not run. |
+| AO / deferred lighting | `SceneAO.*`, `SceneLighting.*`; prepass normals and early ordering, late GBuffer inputs, SSAO/HBAO/XeGTAO/CACAO, clustered grid upload, actual lighting/shadow/IBL/probe accesses | Source connected, unbuilt/unrun. Neutral AO fallback. Per-slot AO state and global temporal index. Original U4 shadow depth is packed into lighting layouts; static-only local views feed baked probes. |
+| SSR / opaque composition | `SceneLighting.*`; original SSSR prepare + SDK + resolve, disabled copy-through, opaque aerial composition with neutral transparency, diagnostic HDR display | Source connected, unbuilt/unrun. Separate persistent A/B SDK histories; real reset/extent keys; frame-slot imports retain history. First lazy-ring SDK dispatch is explicitly owner-recorded. |
+
+One GPU / DIRECT and existing parallel CPU recording remain the source contract.
+U5 is not accepted. U6 and subsequent stages are not authorized. The older U4
+section below documents the accepted prerequisite and its own evidence.
+
 ## Current U4 migration status вЂ” 2026-11-13
 
-Accepted base: `64f0ab1` (U3). U4.1вЂ“U4.4 are implemented; originating-chat review is pending.
+Accepted base: `64f0ab1` (U3). U4.1вЂ“U4.4 are implemented; originating-chat review was accepted at `71f6f425`.
 See [04-geometry-shadows.md](04-geometry-shadows.md) for exact commands, artifacts,
-hardware, API changes, measured CPU traces, memory and limits. U5 is not started.
+hardware, API changes, measured CPU traces, memory and limits. U5.1 progress is recorded above.
 
 | U4 position | New packet/access path | Verified result / temporary parts |
 |---|---|---|

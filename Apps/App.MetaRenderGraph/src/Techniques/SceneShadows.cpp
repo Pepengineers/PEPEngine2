@@ -3,9 +3,13 @@
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include <fstream>
 #include <algorithm>
+#include <filesystem>
 
 namespace Meta {
 SceneShadows::SceneShadows(GDX12DeviceResources& r):_resources(r),_slots(r.FrameConstants.size()) {
+    GDX12RootSignatureDesc pack;pack.Constants={4};pack.NumSingleSRVSlots=1;pack.NumSingleUAVSlots=1;
+    _packRoot=std::make_unique<GDX12RootSignature>(r.Device,pack);
+    _packPipeline=GDX12RenderHelpers::CreateComputePipeline(r.Device,_packRoot.get(),(std::filesystem::path(PROJECT_DIR)/"Shaders/ShadowAtlasCopy.hlsl").c_str(),"CS");
     // The same local-shadow frustum and static/dynamic filters also consume the
     // four matrices produced by BuildShadowCascades. Each view owns its constants.
     GDX12RootSignatureDesc root; root.Constants={3}; root.NumSingleSRVSlots=4; root.NumSingleUAVSlots=2;
@@ -68,8 +72,14 @@ void SceneShadows::Freeze(UINT index,const std::array<D3D12_GPU_DESCRIPTOR_HANDL
             v.Resolution=input.Resolution; auto desc=CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_TYPELESS,v.Resolution,v.Resolution,1,1,1,0,D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);
             D3D12_CLEAR_VALUE clear{}; clear.Format=DXGI_FORMAT_D32_FLOAT; clear.DepthStencil.Depth=1;
             v.Depth=_resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,desc,D3D12_RESOURCE_STATE_COMMON,&clear);
+            v.StaticDepth=_resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,desc,D3D12_RESOURCE_STATE_COMMON,&clear);
             D3D12_DEPTH_STENCIL_VIEW_DESC dsv{}; dsv.Format=DXGI_FORMAT_D32_FLOAT; dsv.ViewDimension=D3D12_DSV_DIMENSION_TEXTURE2D;
             auto* heap=_resources.DSVHeap.get(); v.Dsv.InitAsDSV(v.Depth.Get(),&dsv,heap,v.Dsv.HeapIndex==UINT_MAX?heap->GetAvailableIndex():v.Dsv.HeapIndex);
+            v.StaticDsv.InitAsDSV(v.StaticDepth.Get(),&dsv,heap,v.StaticDsv.HeapIndex==UINT_MAX?heap->GetAvailableIndex():v.StaticDsv.HeapIndex);
+            D3D12_SHADER_RESOURCE_VIEW_DESC srv{};srv.Format=DXGI_FORMAT_R32_FLOAT;srv.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;srv.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;srv.Texture2D.MipLevels=1;
+            auto* views=_resources.SRV_UAV_Heap.get();
+            v.DepthSrv.InitAsSRV(v.Depth.Get(),&srv,views,v.DepthSrv.HeapIndex==UINT_MAX?views->GetAvailableIndex(105000):v.DepthSrv.HeapIndex);
+            v.StaticSrv.InitAsSRV(v.StaticDepth.Get(),&srv,views,v.StaticSrv.HeapIndex==UINT_MAX?views->GetAvailableIndex(105000):v.StaticSrv.HeapIndex);
             _resources.Device->GetDevice()->GetCopyableFootprints(&desc,0,1,0,&v.Footprint,nullptr,nullptr,&v.DepthBytes);
             v.Readback=_resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(v.DepthBytes+8),D3D12_RESOURCE_STATE_COPY_DEST);
         }
@@ -94,6 +104,10 @@ void SceneShadows::Append(Graph& g,UINT index) {
         g.Operations.push_back({name+" readback",{{base+2,Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{base+4,Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},
             {base+5,Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{base+6,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST}}});
     }
+    for(UINT i=0;i<s.Views.size();++i) {
+        const Id id=Id(g.Resources.size());g.Resources.push_back({"static lighting shadow "+std::to_string(i),0,0});
+        g.Operations[s.FirstOperation+i*4+2].Accesses.push_back({id,Mode::Write,D3D12_RESOURCE_STATE_DEPTH_WRITE});
+    }
 }
 std::vector<ID3D12Resource*> SceneShadows::Resources(UINT index) const {
     std::vector<ID3D12Resource*> result;
@@ -102,10 +116,12 @@ std::vector<ID3D12Resource*> SceneShadows::Resources(UINT index) const {
         for(UINT i=0;i<2;++i) { result.push_back(v.Commands[i]->GetResource().D3DResource.Get()); result.push_back(v.Counts[i]->GetResource().D3DResource.Get()); }
         result.push_back(v.Depth.Get()); result.push_back(v.Readback.Get());
     }
+    for(const auto& view:_slots.at(index).Views)result.push_back(view->StaticDepth.Get());
     return result;
 }
 bool SceneShadows::Record(UINT index,Id operation,UINT bucket,ID3D12GraphicsCommandList* cmd) const {
     const auto& s=_slots.at(index);
+    if(s.PackedWork.Record(operation,cmd))return true;
     for(auto repeat:s.Repeated) if(repeat.first==operation) operation=repeat.second;
     if(operation<s.FirstOperation || operation>=s.FirstOperation+s.Views.size()*4) return false;
     const auto& v=*s.Views[(operation-s.FirstOperation)/4]; const UINT stage=(operation-s.FirstOperation)%4;
@@ -134,6 +150,11 @@ bool SceneShadows::Record(UINT index,Id operation,UINT bucket,ID3D12GraphicsComm
         cmd->ClearDepthStencilView(v.Dsv.CPUHandle,D3D12_CLEAR_FLAG_DEPTH,1,0,0,nullptr);
         cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST); cmd->IASetVertexBuffers(0,1,&s.Geometry.Vertices); cmd->IASetIndexBuffer(&s.Geometry.Indices);
         for(UINT part=0;part<2;++part) if(s.Draws) cmd->ExecuteIndirect(_signature.Get(),s.Draws,v.Commands[part]->GetResource().D3DResource.Get(),0,v.Counts[part]->GetResource().D3DResource.Get(),0);
+        // Static-only probe receivers retain static-only local shadowing.
+        // Grass is dynamic in the existing reflection implementation.
+        cmd->OMSetRenderTargets(0,nullptr,FALSE,&v.StaticDsv.CPUHandle);
+        cmd->ClearDepthStencilView(v.StaticDsv.CPUHandle,D3D12_CLEAR_FLAG_DEPTH,1,0,0,nullptr);
+        if(s.Draws)cmd->ExecuteIndirect(_signature.Get(),s.Draws,v.Commands[0]->GetResource().D3DResource.Get(),0,v.Counts[0]->GetResource().D3DResource.Get(),0);
     } else {
         D3D12_TEXTURE_COPY_LOCATION dst{}; dst.pResource=v.Readback.Get(); dst.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT; dst.PlacedFootprint=v.Footprint;
         D3D12_TEXTURE_COPY_LOCATION src{}; src.pResource=v.Depth.Get(); src.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX; cmd->CopyTextureRegion(&dst,0,0,0,&src,nullptr);
@@ -175,4 +196,125 @@ std::vector<uint8_t> SceneShadows::Readback(UINT index,const std::string& stem) 
     }
     return result;
 }
+void SceneShadows::AppendLighting(Graph &graph, std::vector<ID3D12Resource *> &bindings, UINT index)
+{
+    auto &s = _slots.at(index);
+    s.PackedWork.Commands.clear();
+    UINT slices = 1;
+    for (const auto &light : _resources.LocalLights)
+        if ((light.ShadowFlags & 1) && light.ShadowFirstSlice != UINT_MAX)
+            slices = (std::max)(slices, light.ShadowFirstSlice + LocalShadowFaceCount(light));
+    const UINT sunSize =
+        (_resources.Lighting.SunShadowFlags & 1) ? (std::max)(1u, _resources.ShadowQuality.SunResolution * 2) : 1;
+    const UINT localSize = (std::max)(1u, _resources.ShadowQuality.LocalResolution);
+    const auto ensure = [&](PackedDepth &output, UINT width, UINT height, UINT count, bool array) {
+        if (output.Width == width && output.Height == height && output.Slices == count)
+            return;
+        output.Width = width;
+        output.Height = height;
+        output.Slices = count;
+        GDX12TextureDesc desc;
+        desc.Width = width;
+        desc.Height = height;
+        desc.Format = desc.SRVDesc.Format = desc.UAVDesc.Format = DXGI_FORMAT_R32_FLOAT;
+        desc.SRV_UAV_Heap = _resources.SRV_UAV_Heap.get();
+        desc.CreateUAV = true;
+        desc.SRVHeapIndex = output.Texture.IsInitialized() ? output.Texture.GetSRV()->HeapIndex
+                                                           : desc.SRV_UAV_Heap->GetAvailableIndex(105000);
+        desc.UAVHeapIndex = output.Texture.IsInitialized() ? output.Texture.GetUAV()->HeapIndex
+                                                           : desc.SRV_UAV_Heap->GetAvailableIndex(105000);
+        desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+        if (!array)
+        {
+            desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+            desc.SRVDesc.Texture2D.MipLevels = 1;
+        }
+        else
+        {
+            desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+            desc.SRVDesc.Texture2DArray.MipLevels = 1;
+            desc.SRVDesc.Texture2DArray.ArraySize = count;
+        }
+        desc.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+        desc.UAVDesc.Texture2DArray.ArraySize = count;
+        desc.ExternalResource = _resources.Device->CreateResource(
+            D3D12_HEAP_TYPE_DEFAULT,
+            CD3DX12_RESOURCE_DESC::Tex2D(DXGI_FORMAT_R32_FLOAT, width, height, UINT16(count), 1, 1, 0,
+                                         D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),
+            D3D12_RESOURCE_STATE_COMMON);
+        output.Texture.Initialize(desc);
+        D3D12_DESCRIPTOR_HEAP_DESC clearHeap{};
+        clearHeap.Type = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+        clearHeap.NumDescriptors = 1;
+        output.ClearHeap.Reset();
+        ThrowIfFailed(
+            _resources.Device->GetDevice()->CreateDescriptorHeap(&clearHeap, IID_PPV_ARGS(&output.ClearHeap)));
+        _resources.Device->GetDevice()->CreateUnorderedAccessView(
+            desc.ExternalResource.Get(), nullptr, &desc.UAVDesc,
+            output.ClearHeap->GetCPUDescriptorHandleForHeapStart());
+    };
+    ensure(s.SunAtlas, sunSize, sunSize, 1, false);
+    ensure(s.Local, localSize, localSize, slices, true);
+    ensure(s.StaticLocal, localSize, localSize, slices, true);
+    const auto resource = [&](ID3D12Resource *r) {
+        return NativeWork::ResourceFor(graph, bindings, r, "lighting shadow atlas");
+    };
+    auto *heap = _resources.SRV_UAV_Heap->GetHeap().Get();
+    for (auto *output : {&s.SunAtlas, &s.Local, &s.StaticLocal})
+    {
+        auto *target = output->Texture.GetResource()->D3DResource.Get();
+        const auto gpu = output->Texture.GetUAV()->GPUHandle;
+        const auto cpu = output->ClearHeap->GetCPUDescriptorHandleForHeapStart();
+        s.PackedWork.Add(graph, "initialize lighting shadow fallback",
+                         {{resource(target), Mode::Write, UnorderedAccess}}, [=](auto *cmd) {
+                             cmd->SetDescriptorHeaps(1, &heap);
+                             const float white[4] = {1, 1, 1, 1};
+                             cmd->ClearUnorderedAccessViewFloat(gpu, cpu, target, white, 0, nullptr);
+                         });
+    }
+    const auto copy = [&](const View &view, GDX12Descriptor &srv, PackedDepth &output, UINT slice, UINT x, UINT y,
+                          bool statics) {
+        auto *source = statics ? view.StaticDepth.Get() : view.Depth.Get();
+        auto *target = output.Texture.GetResource()->D3DResource.Get();
+        auto *root = _packRoot.get();
+        auto *pso = _packPipeline.Get();
+        const auto input = srv.GPUHandle, write = output.Texture.GetUAV()->GPUHandle;
+        const UINT size = view.Resolution;
+        // A lossless layout copy only. The source contains the actual U4 mesh /
+        // grass shadow draws; no shadow evaluation is replaced by this kernel.
+        s.PackedWork.Add(graph, statics ? "pack static probe shadow" : "pack rendered lighting shadow",
+                         {{resource(source), Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
+                          {resource(target), Mode::Write, UnorderedAccess}},
+                         [=](auto *cmd) {
+                             cmd->SetDescriptorHeaps(1, &heap);
+                             cmd->SetComputeRootSignature(root->GetRootSignature().Get());
+                             cmd->SetPipelineState(pso);
+                             const UINT c[] = {size, x, y, slice};
+                             cmd->SetComputeRoot32BitConstants(0, 4, c, 0);
+                             cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(0), input);
+                             cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), write);
+                             cmd->Dispatch((size + 7) / 8, (size + 7) / 8, 1);
+                         });
+    };
+    UINT sun = 0, local = 0;
+    std::vector<UINT> localSlices;
+    for (const auto &light : _resources.LocalLights)
+        if (light.ShadowFlags & 1)
+            for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
+                localSlices.push_back(light.ShadowFirstSlice + face);
+    for (const auto &view : s.Views)
+    {
+        const UINT slice = view->Sun ? 0 : localSlices.at(local);
+        const UINT x = view->Sun ? (sun & 1) * view->Resolution : 0, y = view->Sun ? (sun >> 1) * view->Resolution : 0;
+        copy(*view, view->DepthSrv, view->Sun ? s.SunAtlas : s.Local, slice, x, y, false);
+        if (!view->Sun)
+        {
+            copy(*view, view->StaticSrv, s.StaticLocal, slice, 0, 0, true);
+            ++local;
+        }
+        else
+            ++sun;
+    }
 }
+
+} // namespace Meta

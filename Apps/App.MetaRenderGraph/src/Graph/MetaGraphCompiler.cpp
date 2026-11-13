@@ -51,7 +51,7 @@ Schedule Compile(const Graph& g) {
         for(Id i=0;i<n;++i) if(remap[i]==Invalid && std::all_of(deps[i].begin(),deps[i].end(),[&](Id d){return remap[d]!=Invalid;})) {next=i;break;}
         if(next==Invalid) throw std::invalid_argument("dependency cycle");
         const auto& op=g.Operations[next];
-        Packet p{next,{},op.Accesses,{},{},op.Lists};
+        Packet p{next,{},op.Accesses,{},{},op.Lists,op.OwnerRecording};
         for(auto d:deps[next]) p.Dependencies.push_back(remap[d]);
         std::sort(p.Dependencies.begin(),p.Dependencies.end());
         for(auto a:op.Accesses) {
@@ -85,6 +85,7 @@ void Schedule::Write(std::ostream& os) const {
         os << "packet " << i << " DIRECT op=" << p.Operation << " lists=" << p.Lists << " deps=";
         for(auto d:p.Dependencies) os << d << ',';
         os << '\n';
+        if(p.OwnerRecording)os << " owner-recorded cold initialization\n";
         for(auto a:p.Accesses) os << " access " << a.Resource << " mode=" << int(a.Usage) << " state=" << a.Required << '\n';
         for(auto b:p.Before) os << " barrier " << b.Resource << ' ' << b.Before << "->" << b.After << (b.Uav?" UAV":" transition") << '\n';
     }

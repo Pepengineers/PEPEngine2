@@ -7,73 +7,158 @@
 #include "Engine.Core/Logging/Logger.h"
 #include "Common/RuntimePaths.h"
 #include "App.Base/Modules/RenderModule.h"
+#include "App.Base/Modules/SceneManagerModule.h"
+#include "Engine.Core/BenchmarkEngine.h"
+#include "Common/ConsoleVariables.h"
 #include <fstream>
-void MetaRenderPipeline::Initialize(RenderPipelineContext& c) {
-    _geometry=std::make_unique<Meta::SceneGeometry>(c);
-    _sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_GEOMETRY,true);
-    _sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_MATERIALS,true);
-    _bindings.PrimaryPasses={&_sceneFlags};
-    _executor=std::make_unique<Meta::Executor>(*c.Primary.Device,static_cast<uint32_t>(c.Primary.FrameConstants.size()),512);
-    Log::Info("MetaRenderGraph","U4 scene geometry DIRECT executor selected; legacy graph Execute disabled");
+namespace
+{
+AutoConsoleVariable<bool> MetaClouds(L"Meta.Clouds.Enabled", false, L"Select the local MetaRenderGraph cloud source.",
+                                     EConsoleVariableFlags::Default);
 }
-void MetaRenderPipeline::BuildGraph(GDX12RenderGraph&,const RenderPipelineGraphInputs&) {
+void RunEnvironmentGpuTests(GDX12DeviceResources &, RenderPipelineCommonData &);
+
+void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
+{
+    _geometry = std::make_unique<Meta::SceneGeometry>(c);
+    _environment = std::make_unique<Meta::SceneEnvironment>(c.Primary, c.Common);
+    _lighting = std::make_unique<Meta::SceneLighting>(c.Primary, c.Common);
+    _sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_GEOMETRY, true);
+    _sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_MATERIALS, true);
+    _bindings.PrimaryPasses = {&_sceneFlags};
+    _executor = std::make_unique<Meta::Executor>(*c.Primary.Device,
+                                                 static_cast<uint32_t>(c.Primary.FrameConstants.size()), 1024);
+    Log::Info("MetaRenderGraph", "U5 lighting/reflections DIRECT executor selected; legacy graph Execute disabled");
+}
+void MetaRenderPipeline::BuildGraph(GDX12RenderGraph &, const RenderPipelineGraphInputs &)
+{
     throw std::logic_error("Meta pipeline cannot build legacy graph");
 }
-void MetaRenderPipeline::RebuildExecution(RenderPipelineContext& c) {
+void MetaRenderPipeline::RebuildExecution(RenderPipelineContext &c)
+{
     _executor->Drain();
-    _geometry->Resize(c.Common.WindowWidth,c.Common.WindowHeight);
+    _geometry->Resize(c.Common.WindowWidth, c.Common.WindowHeight);
+    _environment->Resize();
 }
-bool MetaRenderPipeline::PrepareFrame(RenderPipelineContext& c,GDX12CommandList*) {
-    _geometry->PrepareGrass(c,_verify?1.f/60.f:c.Common.GameTimer->DeltaTime());
+bool MetaRenderPipeline::PrepareFrame(RenderPipelineContext &c, GDX12CommandList *)
+{
+    c.Common.AOAfterDepthPrepass = GetAmbientOcclusionExecutionPoint() == 0 && GetAmbientOcclusionSettings().IsActive();
+    _geometry->PrepareGrass(c, _verify ? 1.f / 60.f : c.Common.GameTimer->DeltaTime());
     c.PrepareScene().Complete();
     return false;
 }
-void MetaRenderPipeline::ValidateQueued() {
+void MetaRenderPipeline::ValidateQueued()
+{
     _executor->Drain();
-    for(UINT slot=0;slot<_geometry->SlotCount();++slot) {
-        const auto stem=(Engine::Core::GetExecutableDirectory()/"Logs"/("queued-slot-"+std::to_string(slot))).string();
-        if(_geometry->Readback(slot,stem).empty())throw std::runtime_error("Empty queued geometry result");
+    for (UINT slot = 0; slot < _geometry->SlotCount(); ++slot)
+    {
+        const auto stem =
+            (Engine::Core::GetExecutableDirectory() / "Logs" / ("queued-slot-" + std::to_string(slot))).string();
+        if (_lighting->Readback(slot, stem).empty() || _geometry->Readback(slot, stem).empty())
+            throw std::runtime_error("Empty queued geometry result");
     }
-    Log::Info("MetaRenderGraph","Queued geometry frames drained; three slot readbacks validated");
+    Log::Info("MetaRenderGraph", "Queued geometry frames drained; three slot readbacks validated");
 }
-uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext& c,GDX12CommandList* prefix,
-    const std::function<void(GDX12CommandList*)>& finish) {
-    const auto slot=c.Primary.CurrFrameConstantsIndex;
+uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12CommandList *prefix,
+                                          const std::function<void(GDX12CommandList *)> &finish)
+{
+    const bool verify = _verify;
+    const auto slot = c.Primary.CurrFrameConstantsIndex;
     _executor->Begin(slot);
-    _geometry->Freeze(slot,c.Common.ActiveCameraCBufferIndex,c.Runtime.FreezeSkeletalMeshes());
-    auto* target=c.BackBuffer->GetCurrentBuffer();
-    _geometry->Select(_verify);
-    _schedule=_geometry->Plan(slot,target->GetResource()->D3DResource.Get());
+    _geometry->Freeze(slot, c.Common.ActiveCameraCBufferIndex, c.Runtime.FreezeSkeletalMeshes());
+    if (verify && !_environmentTestsRun)
+    {
+        RunEnvironmentGpuTests(c.Primary, c.Common);
+        _environment->RestoreViewsAfterBaseline();
+        _environmentTestsRun = true;
+    }
+    if (_cloudsEnabled != MetaClouds.GetValue())
+    {
+        _cloudsEnabled = MetaClouds.GetValue();
+        GDX12CloudParameters parameters;
+        parameters.Enabled = _cloudsEnabled;
+        _environment->SetClouds(parameters);
+    }
+    const auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
+    const auto *world = scenes->GetWorld();
+    const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
+    _environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0);
+    _lighting->Freeze(*_geometry, slot);
+    auto *target = c.BackBuffer->GetCurrentBuffer();
+    bool recordingSerial = verify;
+    const auto append = [&](Meta::Graph &g, std::vector<ID3D12Resource *> &bindings) {
+        _environment->Append(g, bindings);
+        _lighting->Append(g, bindings, *_geometry, *_environment, target, recordingSerial);
+    };
+    const auto earlyAO = [&](Meta::Graph &g, std::vector<ID3D12Resource *> &bindings) {
+        _lighting->AppendAO(g, bindings);
+    };
+    const auto reserve = [&] {
+        uint64_t lists = 0;
+        for (const auto &packet : _schedule.Packets)
+            lists += uint64_t(packet.Lists) + 2;
+        if (lists > UINT32_MAX)
+            throw std::length_error("Native plan list capacity overflow");
+        _executor->Reserve(uint32_t(lists));
+    };
+    _geometry->Select(verify);
+    _schedule = _geometry->Plan(slot, target->GetResource()->D3DResource.Get(), append, earlyAO);
+    reserve();
     // Explicit plan returns the target to PRESENT. UI helpers run sequentially
     // in a separate suffix with this same boundary; no global tracker mutation
     // occurs inside any plan recording callback.
-    if (target->GetResource()->GetCurrentState()!=D3D12_RESOURCE_STATE_PRESENT)
+    if (target->GetResource()->GetCurrentState() != D3D12_RESOURCE_STATE_PRESENT)
         throw std::logic_error("UI boundary requires a PRESENT target tracker");
-    auto* suffix=c.Primary.Device->GetCommandQueue()->GetCommandList();
+    auto *suffix = c.Primary.Device->GetCommandQueue()->GetCommandList();
     finish(suffix);
-    if(_verify) {
-        const auto stem=(Engine::Core::GetExecutableDirectory()/"Logs"/("geometry-"+std::to_string(_frame))).string();
-        const auto bindings=_geometry->Resources(slot,target->GetResource()->D3DResource.Get());
-        const auto record=[&](Meta::Id op,uint32_t list,ID3D12GraphicsCommandList* cmd) { _geometry->Record(slot,op,list,cmd,target->GetResource()->D3DResource.Get()); };
-        _executor->Execute(_schedule,bindings,record,prefix,nullptr,true);
+    if (verify)
+    {
+        const auto stem =
+            (Engine::Core::GetExecutableDirectory() / "Logs" / ("geometry-" + std::to_string(_frame))).string();
+        const auto bindings = _geometry->PlannedResources(slot);
+        const auto record = [&](Meta::Id op, uint32_t list, ID3D12GraphicsCommandList *cmd) {
+            if (!_environment->Record(op, cmd) && !_lighting->Record(op, cmd))
+                _geometry->Record(slot, op, list, cmd, target->GetResource()->D3DResource.Get());
+        };
+        const auto serialCompletion = _executor->Execute(_schedule, bindings, record, prefix, nullptr, true);
+        _lighting->Submitted(true, serialCompletion);
         _executor->Drain();
-        const auto serial=_geometry->Readback(slot,stem+"-serial");
+        auto serial = _geometry->Readback(slot, stem + "-serial");
+        const auto serialLighting = _lighting->Readback(slot, stem + "-serial");
+        serial.insert(serial.end(), serialLighting.begin(), serialLighting.end());
         _executor->Begin(slot);
         _geometry->Select(false);
-        _schedule=_geometry->Plan(slot,target->GetResource()->D3DResource.Get());
-        std::ofstream schedule(stem+"-schedule.txt");_schedule.Write(schedule);
-        std::ofstream operations(stem+"-operations.txt");_geometry->WriteOperations(slot,operations);
-        std::ofstream trace(stem+"-cpu.json");
-        const auto completion=_executor->Execute(_schedule,_geometry->Resources(slot,target->GetResource()->D3DResource.Get()),record,nullptr,suffix,false,nullptr,&trace);
+        recordingSerial = false;
+        _schedule = _geometry->Plan(slot, target->GetResource()->D3DResource.Get(), append, earlyAO);
+        reserve();
+        std::ofstream schedule(stem + "-schedule.txt");
+        _schedule.Write(schedule);
+        std::ofstream operations(stem + "-operations.txt");
+        _geometry->WriteOperations(slot, operations);
+        std::ofstream trace(stem + "-cpu.json");
+        const auto completion = _executor->Execute(_schedule, _geometry->PlannedResources(slot), record, nullptr,
+                                                   suffix, false, nullptr, &trace);
+        _environment->Submitted(completion);
+        _lighting->Submitted(false, completion);
         _executor->Drain();
-        const auto parallel=_geometry->Readback(slot,stem+"-parallel");
-        if(serial!=parallel) throw std::runtime_error("Geometry serial/parallel buffers or images differ");
-        Log::Info("MetaRenderGraph","Geometry serial/parallel exact comparison passed frame=",_frame," bytes=",serial.size());
-        ++_frame; return completion;
+        auto parallel = _geometry->Readback(slot, stem + "-parallel");
+        const auto parallelLighting = _lighting->Readback(slot, stem + "-parallel");
+        parallel.insert(parallel.end(), parallelLighting.begin(), parallelLighting.end());
+        if (serial != parallel)
+            throw std::runtime_error("Geometry serial/parallel buffers or images differ");
+        Log::Info("MetaRenderGraph", "Geometry serial/parallel exact comparison passed frame=", _frame,
+                  " bytes=", serial.size());
+        ++_frame;
+        return completion;
     }
-    const auto point=_executor->Execute(_schedule,_geometry->Resources(slot,target->GetResource()->D3DResource.Get()),
-        [&](Meta::Id op,uint32_t list,ID3D12GraphicsCommandList* cmd) {
-            _geometry->Record(slot,op,list,cmd,target->GetResource()->D3DResource.Get());
-        },prefix,suffix);
+    const auto point = _executor->Execute(
+        _schedule, _geometry->PlannedResources(slot),
+        [&](Meta::Id op, uint32_t list, ID3D12GraphicsCommandList *cmd) {
+            if (!_environment->Record(op, cmd) && !_lighting->Record(op, cmd))
+                _geometry->Record(slot, op, list, cmd, target->GetResource()->D3DResource.Get());
+        },
+        prefix, suffix);
+    _environment->Submitted(point);
+    _lighting->Submitted(false, point);
     return point;
 }

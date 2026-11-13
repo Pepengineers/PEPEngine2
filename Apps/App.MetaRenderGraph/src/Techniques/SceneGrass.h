@@ -10,8 +10,9 @@ public:
     explicit SceneGrass(RenderPipelineContext&);
     void Prepare(RenderPipelineContext&,float dt);
     void Select(bool serial) { _mode=serial?0:1; }
-    void Append(Graph&,UINT slot,const std::vector<ID3D12Resource*>& existing,GDX12Descriptor& materials,
-        const std::vector<GeometryTarget>& targets);
+    std::vector<ID3D12Resource*> Append(Graph&,UINT slot,const std::vector<ID3D12Resource*>& existing,GDX12Descriptor& materials,
+        const std::vector<GeometryTarget>& targets,bool viewsOnly=false,
+        const std::function<void(const GeometryTarget&,Graph&,std::vector<ID3D12Resource*>&)>& beforeView={});
     const std::vector<ID3D12Resource*>& Resources(UINT slot) const;
     bool Record(UINT slot,Id,ID3D12GraphicsCommandList*) const;
     std::vector<uint8_t> Readback(UINT slot,const std::string& stem) const;
@@ -23,7 +24,7 @@ private:
             std::array<std::unique_ptr<GDX12Texture>,5> Color;
         };
         std::vector<ID3D12Resource*> Bindings;
-        std::vector<std::function<void(ID3D12GraphicsCommandList*)>> Commands;
+        std::vector<std::pair<Id,std::function<void(ID3D12GraphicsCommandList*)>>> Commands;
         Id First=Invalid;
         GDX12ResourceHandle Readback;
         UINT64 Bytes=0;

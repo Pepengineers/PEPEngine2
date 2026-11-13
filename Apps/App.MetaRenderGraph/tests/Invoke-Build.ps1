@@ -4,7 +4,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot/../../..").Path
-$evidence = Join-Path $repo 'Build/Verification/meta-render-graph-u4'
+$evidence = Join-Path $repo 'Build/Verification/meta-render-graph-u5'
 New-Item -ItemType Directory -Force $evidence | Out-Null
 $folder = if ($Target -in @('App','BaseRenderPipelineTests','RenderGraphTests','RenderPipelineTests','BistroRenderGraphTests')) { 'App' } else { 'App.MetaRenderGraph' }
 $log = Join-Path $evidence "$Target-$Configuration-build.log"

@@ -17,9 +17,9 @@ void SceneGrass::Prepare(RenderPipelineContext& c,float dt) {
     _gpu[1]->PublishPrimitives(_resources.Primitives,&_scene);
 }
 const std::vector<ID3D12Resource*>& SceneGrass::Resources(UINT slot) const { return _frames[_mode].at(slot).Bindings; }
-void SceneGrass::Append(Graph& g,UINT slot,const std::vector<ID3D12Resource*>& existing,GDX12Descriptor& materials,const std::vector<GeometryTarget>& targets) {
+std::vector<ID3D12Resource*> SceneGrass::Append(Graph& g,UINT slot,const std::vector<ID3D12Resource*>& existing,GDX12Descriptor& materials,const std::vector<GeometryTarget>& targets,bool viewsOnly,const std::function<void(const GeometryTarget&,Graph&,std::vector<ID3D12Resource*>&)>& beforeView) {
     auto& gpu=*_gpu[_mode]; auto& frame=gpu.CurrentFrame(); auto& recorded=_frames[_mode].at(slot);
-    recorded.First=Id(g.Operations.size()); recorded.Bindings.clear(); recorded.Commands.clear();
+    if(!viewsOnly){recorded.First=Id(g.Operations.size());recorded.Bindings.clear();recorded.Commands.clear();}
     recorded.Version=gpu._interactionRevision; recorded.Patches=gpu.PatchCount();
     std::vector<ID3D12Resource*> all=existing;
     const auto resource=[&](ID3D12Resource* native) {
@@ -39,9 +39,10 @@ void SceneGrass::Append(Graph& g,UINT slot,const std::vector<ID3D12Resource*>& e
             if(found==unique.end()) unique.push_back(item);
             else if(found->Required!=item.Required || found->Usage!=item.Usage) throw std::logic_error("Conflicting frozen grass access");
         }
-        g.Operations.push_back({std::move(name),std::move(unique)}); recorded.Commands.push_back(std::move(command));
+        const Id id=Id(g.Operations.size());g.Operations.push_back({std::move(name),std::move(unique)});recorded.Commands.emplace_back(id,std::move(command));
     };
     ID3D12DescriptorHeap* heap=_resources.SRV_UAV_Heap->GetHeap().Get();
+    if(!viewsOnly) {
     for(const auto& [roots,upload]:frame.RootUploads) {
         const auto dst=roots->GetResource().D3DResource.Get(),src=upload->GetResource().D3DResource.Get(); const auto bytes=UINT64(roots->GetElementCount())*sizeof(XMFLOAT3);
         add("grass root upload",{access(roots,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST),access(upload,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ)},[=](auto* cmd){cmd->CopyBufferRegion(dst,0,src,0,bytes);});
@@ -66,7 +67,9 @@ void SceneGrass::Append(Graph& g,UINT slot,const std::vector<ID3D12Resource*>& e
         if(job.Pressure) accesses.push_back(access(job.Pressure,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
         add("grass wind stage "+std::to_string(job.Stage),accesses,[=](auto* cmd){cmd->SetDescriptorHeaps(1,&heap);cmd->SetComputeRootSignature(root.Get());cmd->SetPipelineState(pipeline.Get());cmd->SetComputeRootConstantBufferView(b,cb);cmd->SetComputeRootDescriptorTable(t,input);cmd->SetComputeRootDescriptorTable(t+1,pressure);cmd->SetComputeRootDescriptorTable(u,output);cmd->Dispatch(groups,groups,1);});
     }
+    }
     auto views=targets;
+    if(!viewsOnly) {
     constexpr UINT probeSize=128;
     constexpr DXGI_FORMAT formats[]={DXGI_FORMAT_R8G8B8A8_UNORM,DXGI_FORMAT_R16G16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT};
     if(!recorded.ProbeCameras) recorded.ProbeCameras=std::make_unique<GDX12UploadBuffer<GDX12CameraConstants>>(_resources.Device,6);
@@ -98,7 +101,10 @@ void SceneGrass::Append(Graph& g,UINT slot,const std::vector<ID3D12Resource*>& e
         add("grass probe clear face "+std::to_string(face),clear,[=](auto* cmd){cmd->ClearDepthStencilView(dsv,D3D12_CLEAR_FLAG_DEPTH,0,0,0,nullptr);const float zero[4]={};for(auto rtv:rtvs)cmd->ClearRenderTargetView(rtv,zero,0,nullptr);});
         views.push_back(depth);views.push_back(gbuffer);
     }
-    for(const auto& target:views) for(UINT patch=0;patch<gpu.PatchCount();++patch) {
+    }
+    for(const auto& target:views) {
+      if(beforeView)beforeView(target,g,all);
+      for(UINT patch=0;patch<gpu.PatchCount();++patch) {
         if((target.View.Key>>60)==3 && !gpu._grass.at(gpu._drawOrder.at(patch)).Source.CaptureReflections)continue;
         gpu.PrepareView(target.View,patch,&materials); const auto* output=gpu.FindOutput(target.View,patch); if(!output) continue;
         const auto& state=gpu._grass.at(output->Owner);
@@ -119,9 +125,10 @@ void SceneGrass::Append(Graph& g,UINT slot,const std::vector<ID3D12Resource*>& e
         std::vector<Access> draw={access(gpu._vertices.get(),Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),access(gpu._indices.get(),Mode::Read,D3D12_RESOURCE_STATE_INDEX_BUFFER),access(gpu._arguments.get(),Mode::Read,D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT),
             access(output->Constants,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ),{2,Mode::Read,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
             {target.Depth,target.View.Stage==GDX12GeometryStage::GBuffer?Mode::Read:Mode::Write,State(target.View.Stage==GDX12GeometryStage::GBuffer?D3D12_RESOURCE_STATE_DEPTH_READ:D3D12_RESOURCE_STATE_DEPTH_WRITE)}};
+        draw.insert(draw.end(),target.AdditionalReads.begin(),target.AdditionalReads.end());
         for(auto color:target.Colors) draw.push_back({color,Mode::Write,D3D12_RESOURCE_STATE_RENDER_TARGET});
         draw.push_back(access(_resources.FrameConstants[slot]->MainCB.get(),Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ));
-        if(target.Camera!=Invalid)draw.push_back({target.Camera,Mode::Read,(target.View.Key>>60)==3?State(D3D12_RESOURCE_STATE_GENERIC_READ):State(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)});
+        if(target.Camera!=Invalid){D3D12_HEAP_PROPERTIES heapType{};ThrowIfFailed(all.at(target.Camera)->GetHeapProperties(&heapType,nullptr));draw.push_back({target.Camera,Mode::Read,heapType.Type==D3D12_HEAP_TYPE_UPLOAD?State(D3D12_RESOURCE_STATE_GENERIC_READ):State(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)});}
         add(name+" ExecuteIndirect",draw,[=](auto* cmd){
             cmd->SetDescriptorHeaps(1,&heap);cmd->SetGraphicsRootSignature(binding.Root->GetRootSignature().Get());cmd->SetPipelineState(binding.Pipeline.Get());
             for(const auto& cbv:binding.CBVs)cmd->SetGraphicsRootConstantBufferView(binding.Root->GetBRootParamIndex(cbv.first),cbv.second);
@@ -131,6 +138,8 @@ void SceneGrass::Append(Graph& g,UINT slot,const std::vector<ID3D12Resource*>& e
             cmd->ExecuteIndirect(batch.Draw.Signature,1,batch.Draw.Arguments,0,nullptr,0);
         });
     }
+    }
+    if(viewsOnly)return all;
     std::vector<ID3D12Resource*> fields={gpu._trail->GetResource().D3DResource.Get(),gpu._previousTrail->GetResource().D3DResource.Get(),gpu._presence->GetResource().D3DResource.Get()};
     for(const auto& [id,wind]:gpu._wind) for(const auto& velocity:wind.Velocity) fields.push_back(velocity->GetResource().D3DResource.Get());
     if(gpu._arguments) fields.push_back(gpu._arguments->GetResource().D3DResource.Get());
@@ -145,9 +154,10 @@ void SceneGrass::Append(Graph& g,UINT slot,const std::vector<ID3D12Resource*>& e
     std::vector<Access> imageReads={{resource(recorded.ProbeReadback.Get()),Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST}};for(auto* image:images)imageReads.push_back({resource(image),Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE});
     const auto probeReadback=recorded.ProbeReadback.Get();const auto footprints=recorded.ProbeFootprints;
     add("grass diagnostic probe GBuffer readback",imageReads,[=](auto* cmd){for(UINT i=0;i<images.size();++i){D3D12_TEXTURE_COPY_LOCATION dst{};dst.pResource=probeReadback;dst.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;dst.PlacedFootprint=footprints[i];D3D12_TEXTURE_COPY_LOCATION src{};src.pResource=images[i];src.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;cmd->CopyTextureRegion(&dst,0,0,0,&src,nullptr);}});
+    return all;
 }
 bool SceneGrass::Record(UINT slot,Id id,ID3D12GraphicsCommandList* cmd) const {
-    const auto& frame=_frames[_mode].at(slot);if(id<frame.First || id>=frame.First+frame.Commands.size())return false;frame.Commands[id-frame.First](cmd);return true;
+    const auto& frame=_frames[_mode].at(slot);const auto found=std::find_if(frame.Commands.begin(),frame.Commands.end(),[id](const auto& entry){return entry.first==id;});if(found==frame.Commands.end())return false;found->second(cmd);return true;
 }
 std::vector<uint8_t> SceneGrass::Readback(UINT slot,const std::string& stem) const {
     const auto& frame=_frames[_mode].at(slot);void* mapped=nullptr;D3D12_RANGE read{0,SIZE_T(frame.Bytes)},none{};ThrowIfFailed(frame.Readback->Map(0,&read,&mapped));

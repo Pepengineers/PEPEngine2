@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot/../../..").Path
 $output = Join-Path $repo "Build/bin/x64/Debug/$Target"
-$evidence = Join-Path $repo 'Build/Verification/meta-render-graph-u4'
+$evidence = Join-Path $repo 'Build/Verification/meta-render-graph-u5'
 $label = if ($Custom) { "$Target-custom" } else { "$Target-default" }
 # Test output only; production config is never edited.
 New-Item -ItemType Directory -Force "$output/Config" | Out-Null

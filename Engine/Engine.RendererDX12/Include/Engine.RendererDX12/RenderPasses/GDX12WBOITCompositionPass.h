@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
+namespace Meta { class SceneLighting; }
 
 class GDX12WBOITCompositionPass : public GDX12RenderPass
 {
@@ -161,6 +162,7 @@ public:
 	}
 
 private:
+    friend class Meta::SceneLighting;
     bool _applyOpaqueAerialPerspective = true;
     GDX12ParticlesPass* _particles = nullptr;
     struct Link final : IRenderPassLink

@@ -17,6 +17,9 @@ public:
     Executor(GDX12Device&, uint32_t slots, uint32_t listCapacity, unsigned threads = 4);
     ~Executor();
     void Begin(uint32_t slot);
+    // Explicit owner-only capacity growth after Begin retired the selected slot.
+    // Execute still rejects an unreserved plan; workers never allocate lists.
+    void Reserve(uint32_t lists);
     uint64_t Execute(const Schedule&, const std::vector<ID3D12Resource*>&, const Record&,
         GDX12CommandList* prefix = nullptr, GDX12CommandList* suffix = nullptr,
         bool serial = false, const std::atomic<bool>* cancellation = nullptr,
