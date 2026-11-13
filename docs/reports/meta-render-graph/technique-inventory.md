@@ -1,5 +1,17 @@
 # U1 technique inventory
 
+U4 progress (2026-11-13): object/instance/material/transform uploads, GPU culling,
+depth/GBuffer now have a native packet path in `App.MetaRenderGraph/Techniques/SceneGeometry`.
+Eight Debug serial/parallel scene pairs passed exact buffer/image comparison,
+movement, invisible/empty commands, three slots, resize and shutdown. See
+`04-geometry-shadows.md` for evidence and limits. Skinning, shadows and grass
+remain pending; U4 as a whole is not accepted.
+
+U4.2 update: skin palette upload/deformation now use explicit frozen plan operations,
+with actual animated ECS geometry and expected GPU vertex readback in eight Debug
+serial/parallel pairs. Cascaded/local shadow and grass rows remain pending. Production
+and Release checks for the shared seam are still pending.
+
 Baseline source: `dd012c0f` (2026-11-13). This is a source inventory of both current Default and Bistro compositions, not a claim that the U1 procedural fixture exercises Bistro. U1 links only App.Base/Engine. File names below are relative to the repository root; `DX/` means `Engine/Engine.RendererDX12/src/`, `Pass/` means `DX/` with the `GDX12` pass file named in the row, and `Bistro/` means `Apps/App/src/Rendering/`.
 
 All legacy passes share `GDX12Resource::_currentState`, descriptor heaps, `GDX12DeviceResources`, frame constants and common camera/history state. `GetTransitionBarrier` mutates state during recording. No row is safe for arbitrary parallel recording merely because its geometry is split. Until U8, compute shaders must be recorded on DIRECT. Existing fixture names refer to `Apps/App/tests/`; they are starting points, not checks run in U1.

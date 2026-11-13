@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot/../../..").Path
 $output = Join-Path $repo "Build/bin/x64/$Configuration/$Target"
-$evidence = Join-Path $repo "Build/Verification/meta-render-graph-u3/$Configuration-$Target"
+$evidence = Join-Path $repo "Build/Verification/meta-render-graph-u4/$Configuration-$Target"
 New-Item -ItemType Directory -Force $evidence | Out-Null
 $protected = @("$repo/Config/Engine.ini", "$repo/Build/bin/x64/$Configuration/App/Config/Engine.ini")
 $before = @{}
@@ -33,7 +33,7 @@ if (($text | Select-String 'GPU adapter:' -AllMatches).Matches.Count -ne 1) { th
 if ($text -match '\[Particles\].*Offload|\[Water\].*Offload') { throw 'Unexpected offload runtime' }
 if ($text -match '\[ERROR\]|GPU retirement failed') { throw 'Runtime reported an error' }
 if ($text -notmatch 'Runtime legacy graph Execute calls=0') { throw 'Legacy execution counter did not remain zero' }
-if ($text -notmatch 'PASS DirectExecutionGpuTests:' -or $text -notmatch 'U3 parallel DIRECT executor selected') { throw 'Missing U3 execution evidence' }
+if ($text -notmatch 'PASS DirectExecutionGpuTests:' -or $text -notmatch 'U4 scene geometry DIRECT executor selected') { throw 'Missing U3 execution evidence' }
 if ($text -notmatch 'Smoke passed: 8 presented frames' -or $text -notmatch 'Smoke shutdown complete') { throw 'Missing runtime success markers' }
 if ((Get-FileHash "$output/Config/Engine.ini").Hash -ne (Get-FileHash "$output/Configs/Startup.ini").Hash) { throw 'Startup INI was not restored' }
 foreach ($path in $protected) {

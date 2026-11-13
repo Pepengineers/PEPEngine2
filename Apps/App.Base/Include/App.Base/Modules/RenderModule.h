@@ -86,6 +86,7 @@ public:
 
     //Uploads Mesh geometry to GPU
     void SubmitMesh(const Mesh* mesh, MeshHandle handle);
+    std::vector<GDX12SkinningWork> FreezeSkeletalMeshes();
     void ReserveInstanceCapacity(UINT additionalInstances);
     void ReserveTransformCapacity(UINT additionalTransforms);
 
