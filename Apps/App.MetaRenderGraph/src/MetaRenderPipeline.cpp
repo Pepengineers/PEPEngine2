@@ -7,8 +7,8 @@
 #include "Engine.Core/Logging/Logger.h"
 void MetaRenderPipeline::Initialize(RenderPipelineContext& c) {
     _fixture=std::make_unique<Meta::DirectFixture>(*c.Primary.Device,static_cast<uint32_t>(c.Primary.FrameConstants.size()));
-    _executor=std::make_unique<Meta::Executor>(*c.Primary.Device,static_cast<uint32_t>(c.Primary.FrameConstants.size()),16);
-    Log::Info("MetaRenderGraph","U2 native DIRECT executor selected; legacy graph Execute disabled");
+    _executor=std::make_unique<Meta::Executor>(*c.Primary.Device,static_cast<uint32_t>(c.Primary.FrameConstants.size()),64);
+    Log::Info("MetaRenderGraph","U3 parallel DIRECT executor selected; legacy graph Execute disabled");
 }
 void MetaRenderPipeline::BuildGraph(GDX12RenderGraph&,const RenderPipelineGraphInputs&) {
     throw std::logic_error("Meta pipeline cannot build legacy graph");
