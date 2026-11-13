@@ -5,15 +5,20 @@
 #include "Engine.Core/ConsoleModule.h"
 #include "Engine.Core/Logging/Logger.h"
 #include "Engine.Core/AssetManager.h"
+#include "Components/BistroGrassComponents.h"
+#include "Components/BistroInteractionSource.h"
 #include <d3d12sdklayers.h>
 #include <fstream>
 #include <stdexcept>
 
 void RunDirectExecutionGpuTests(GDX12Device&);
 void CheckGeometryGpuEvidence(const std::filesystem::path&);
+void CheckShadowGpuEvidence(const std::filesystem::path&);
+void CheckGrassGpuEvidence(const std::filesystem::path&);
 
 namespace
 {
+    const Vector3 FixtureOrigin{1399.6f,100,1369};
     void Require(bool value, const char* message)
     {
         if (!value) throw std::runtime_error(message);
@@ -36,7 +41,8 @@ namespace
         Require(!console.FindConsoleVariable(L"Render.AO.AsyncCompute").GetBool(), "AO async must be disabled");
         IConsoleVariable* water = nullptr;
         Require(!console.TryFindConsoleVariable(L"Render.Fluid.SecondaryAdapter", water), "Experiment must not link Bistro water runtime");
-        Log::Info("MetaRenderGraph", "U2 PLAN EXECUTOR; primary=0; particle secondary=-1; water runtime absent; single DIRECT execution");
+        Require(!console.FindConsoleVariable(L"Render.Grass.AsyncCompute").GetBool(),"Grass async must be disabled");
+        Log::Info("MetaRenderGraph", "U4 SCENE EXECUTOR; primary=0; particle secondary=-1; water runtime absent; single DIRECT execution");
     }
 
     class MetaApplication final : public App
@@ -46,9 +52,13 @@ namespace
         bool _smoke;
         std::vector<Entity> _objects;
         Entity _animated=InvalidEntity;
+        Entity _animatedPeer=InvalidEntity;
+        Entity _grass=InvalidEntity,_wind=InvalidEntity,_interaction=InvalidEntity;
+        MetaRenderPipeline* _pipeline=nullptr;
         bool AddModules() override
         {
-            Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer, std::make_unique<MetaRenderPipeline>(_smoke)));
+            auto pipeline=std::make_unique<MetaRenderPipeline>(_smoke);_pipeline=pipeline.get();
+            Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer, std::move(pipeline)));
             Locator.RegisterModule(std::make_shared<SceneManagerModule>());
             return BenchmarkEngine::AddModules();
         }
@@ -78,7 +88,7 @@ namespace
             material->Diffuse=renderer->CreateTexture("Meta U4 cyan",&texture,Engine::Core::ETextureType::Color);
             for(int i=0;i<3;++i) {
                 auto object=world.GetECS().CreateEntity(); auto& transform=object.AddComponent<TransformComponent>();
-                transform.Location={float((i-1)*160),0,float(i*30)};
+                transform.Location=FixtureOrigin+Vector3{float((i-1)*160),0,float(i*30)};
                 object.AddComponent<StaticMeshRenderComponent>(handle,std::vector<GDX12Material*>{material});
                 _objects.push_back(object.GetId());
             }
@@ -95,8 +105,24 @@ namespace
             Engine::Core::AnimationClip clip; clip.Name="Translate"; clip.DurationSeconds=2; clip.Tracks={track};
             Require(sceneRegistry.Cache(sceneHandle,std::make_unique<Engine::Core::SceneAsset>(std::vector<Engine::Core::SceneNode>{node},std::vector<uint32_t>{0},std::vector<Engine::Core::AnimationClip>{clip}))!=nullptr,"Cannot cache animated scene");
             auto animated=world.GetECS().CreateEntity(); _animated=animated.GetId();
-            animated.AddComponent<TransformComponent>(Vector3{0,140,20});
+            animated.AddComponent<TransformComponent>(FixtureOrigin+Vector3{0,140,20});
             auto& skin=animated.AddComponent<SkeletalMeshRenderComponent>(sceneHandle); skin.SetClip(0); skin.SetMaterials({material});
+            auto peer=world.GetECS().CreateEntity();_animatedPeer=peer.GetId();peer.AddComponent<TransformComponent>(FixtureOrigin+Vector3{160,140,20});
+            auto& peerSkin=peer.AddComponent<SkeletalMeshRenderComponent>(sceneHandle);peerSkin.SetClip(0);peerSkin.SetTimeSeconds(.25);peerSkin.SetMaterials({material});
+            for(UINT i=0;i<3;++i) {
+                auto light=world.GetECS().CreateEntity(); light.AddComponent<TransformComponent>(FixtureOrigin+Vector3{float(i*200),50,-200});
+                auto& settings=light.AddComponent<LightComponent>(); settings.Type=i==0?LightType::Point:i==1?LightType::Spot:LightType::Directional;
+                if(i==2) { auto& transform=light.GetComponent<TransformComponent>(); transform.Rotation={40,30,0}; }
+                settings.Range=1000; settings.ShadowUpdate=ShadowUpdateMode::EveryFrame;
+            }
+            auto wind=world.GetECS().CreateEntity(); _wind=wind.GetId(); wind.AddComponent<TransformComponent>(FixtureOrigin);
+            auto& field=wind.AddComponent<WindFieldComponent>(); field.GridResolution=16; field.PressureIterations=4; field.MaxSubsteps=1;
+            auto grass=world.GetECS().CreateEntity(); _grass=grass.GetId(); grass.AddComponent<TransformComponent>(FixtureOrigin+Vector3{0,-76.7f,0});
+            auto& patch=grass.AddComponent<GrassRenderComponent>(); patch.Material=material; patch.WindEntity=_wind;
+            patch.ExtentsCm={160,160}; patch.MaxBlades=256; patch.Segments=3; patch.HeightCm=90; patch.WidthCm=5; patch.Seed=13;
+            for(int z=0;z<16;++z)for(int x=0;x<16;++x)patch.RootsCm.push_back({float(x*20-150),0,float(z*20-150)});
+            world.GetECS().RegisterComponent<BistroInteractionSource>();
+            auto interaction=world.GetECS().CreateEntity();_interaction=interaction.GetId();interaction.AddComponent<BistroInteractionSource>();
             auto emitter = world.GetECS().CreateEntity();
             emitter.AddComponent<TransformComponent>();
             GDX12ParticleEmitterSettings particles;
@@ -108,7 +134,7 @@ namespace
             auto& component = emitter.AddComponent<ParticleEmitterComponent>();
             component.SetSettings(particles);
             component.Emit(64);
-            SetWindowTextW(GetWindow()->GetWindowHandle(), L"MetaRenderGraph U2 - DIRECT plan");
+            SetWindowTextW(GetWindow()->GetWindowHandle(), L"MetaRenderGraph U4 - geometry and shadows");
             return true;
         }
         void Smoke()
@@ -125,7 +151,7 @@ namespace
                 auto& world=*Locator.GetModule<SceneManagerModule>()->GetWorld(); auto& ecs=world.GetECS();
                 for(UINT i=0;i<_objects.size();++i) {
                     auto& transform=ecs.Get<TransformComponent>(_objects[i]);
-                    transform.Location={float((int(i)-1)*160)+(frameIndex==1 && i==0?80.f:0.f),0,float(i*30)};
+                    transform.Location=FixtureOrigin+Vector3{float((int(i)-1)*160)+(frameIndex==1 && i==0?80.f:0.f),0,float(i*30)};
                     if(frameIndex==5 && i==0) transform.Location.x=100000;
                     transform.DirtyFlag=true;
                     auto& object=ecs.Get<StaticMeshRenderComponent>(_objects[i]);
@@ -134,7 +160,17 @@ namespace
                 }
                 IndirectCommandBuildSystem commands; commands.Schedule(GetJobs(),world,0).Complete();
                 auto& skin=ecs.Get<SkeletalMeshRenderComponent>(_animated); skin.SetTimeSeconds(frameIndex*0.1);
-                auto& animated=ecs.Get<TransformComponent>(_animated); animated.Location.x=frameIndex==3 || frameIndex==6?100000.f:0.f; animated.DirtyFlag=true;
+                auto& animated=ecs.Get<TransformComponent>(_animated); animated.Location.x=FixtureOrigin.x+(frameIndex==3 || frameIndex==6?100000.f:0.f); animated.DirtyFlag=true;
+                auto& peerSkin=ecs.Get<SkeletalMeshRenderComponent>(_animatedPeer);peerSkin.SetTimeSeconds(frameIndex*.1+.25);
+                auto& peer=ecs.Get<TransformComponent>(_animatedPeer);peer.Location.x=FixtureOrigin.x+(frameIndex==3 || frameIndex==6?100000.f:160.f);peer.DirtyFlag=true;
+                auto& patch=ecs.Get<GrassRenderComponent>(_grass);patch.Enabled=frameIndex!=3 && frameIndex!=6;
+                auto& field=ecs.Get<WindFieldComponent>(_wind);field.Paused=frameIndex==2;
+                if(frameIndex==4){++field.ResetRevision;++patch.ResetRevision;patch.Implementation=GDX12GrassImplementation::CrossedRibbons;}
+                if(frameIndex==7)field.Implementation=GDX12WindImplementation::Analytic;
+                auto& grassTransform=ecs.Get<TransformComponent>(_grass);grassTransform.Location.x=FixtureOrigin.x+(frameIndex==5?40:0);grassTransform.DirtyFlag=true;
+                auto& source=ecs.Get<BistroInteractionSource>(_interaction);
+                source.PositionRadius={FixtureOrigin.x+float(frameIndex*20),23.3f,FixtureOrigin.z,45};
+                source.PreviousHeight={FixtureOrigin.x+float(frameIndex?frameIndex*20-20:0),23.3f,FixtureOrigin.z,190};
                 MSG message{};
                 while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE))
                 { TranslateMessage(&message); DispatchMessageW(&message); }
@@ -142,6 +178,8 @@ namespace
                 Render(Timer);
             };
             for (int i = 0; i < 4; ++i) frame();
+            const auto initialMemory=renderer->GetMemoryStatistics();
+            Log::Info("MetaRenderGraph","U4 resource allocation before resize bytes=",initialMemory.AllocationBytes," count=",initialMemory.AllocationCount," block bytes=",initialMemory.BlockBytes);
             const auto before = renderer->GetFrameSubmissionId();
             Require(SetWindowPos(GetWindow()->GetWindowHandle(), nullptr, 0, 0, 800, 600,
                 SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) != FALSE, "Window resize failed");
@@ -152,6 +190,13 @@ namespace
             Require(renderer->GetFrameSubmissionId() == before + 4, "Frames did not submit after resize");
             renderer->DrainFrameWork();
             CheckGeometryGpuEvidence(Engine::Core::GetExecutableDirectory()/"Logs");
+            CheckShadowGpuEvidence(Engine::Core::GetExecutableDirectory()/"Logs");
+            CheckGrassGpuEvidence(Engine::Core::GetExecutableDirectory()/"Logs");
+            _pipeline->SetVerification(false);
+            for(int i=0;i<4;++i)frame();
+            _pipeline->ValidateQueued();
+            const auto finalMemory=renderer->GetMemoryStatistics();
+            Log::Info("MetaRenderGraph","U4 resource allocation after queued frames bytes=",finalMemory.AllocationBytes," count=",finalMemory.AllocationCount," block bytes=",finalMemory.BlockBytes);
             Require(GDX12RenderGraph::GetExecuteCallCount() == 0, "Experiment called legacy graph Execute");
             Log::Info("MetaRenderGraph", "Runtime legacy graph Execute calls=0");
             for (UINT64 i = 0; i < info->GetNumStoredMessages(); ++i)
@@ -167,8 +212,8 @@ namespace
             std::ofstream graph(root / "reference.dot");
             renderer->WriteRenderGraph(graph);
             Require(bool(graph), "Cannot write reference graph");
-            Log::Info("MetaRenderGraph", "Smoke passed: 8 presented frames, actual window resize to ", width, "x", height,
-                "; D3D12 errors=0; fixture seeds=1..8; transform=8*x+7; dt=0");
+            Log::Info("MetaRenderGraph", "Smoke passed: 12 presented frames, actual window resize to ", width, "x", height,
+                "; D3D12 errors=0; 8 scene serial/parallel pairs + 4 queued frames; animation inputs fixed; host dt=0; compared wind/interaction dt=1/60");
             // Exercise the normal window close / WM_DESTROY / WM_QUIT loop as well.
             PostMessageW(GetWindow()->GetWindowHandle(), WM_CLOSE, 0, 0);
             Require(Run() == 0, "Window shutdown failed");
