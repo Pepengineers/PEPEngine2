@@ -56,10 +56,10 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>APP_SHADERS_FOLDER=LR"($(PEPRepoRoot)Apps\App\Shaders\\)";_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(PEPRepoRoot)Apps\App\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -77,10 +77,10 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>APP_SHADERS_FOLDER=LR"($(PEPRepoRoot)Apps\App\Shaders\\)";NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir)src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(PEPRepoRoot)Apps\App\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -94,14 +94,21 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
+    <ClCompile Include="..\App\src\Rendering\Grass\GDX12GrassRenderer.cpp" />
+    <ClCompile Include="..\App\src\Rendering\Grass\GDX12GrassWind.cpp" />
+    <ClCompile Include="..\App\src\Rendering\Grass\BistroGrassGeometry.cpp" />
     <ClCompile Include="src\MetaApplication.cpp" />
     <ClCompile Include="src\Graph\MetaGraphCompiler.cpp" />
     <ClCompile Include="src\Graph\MetaGraphExecutor.cpp" />
     <ClCompile Include="src\Graph\MetaGraphRecorder.cpp" />
     <ClCompile Include="src\DirectFixture.cpp" />
     <ClCompile Include="src\Techniques\SceneGeometry.cpp" />
+    <ClCompile Include="src\Techniques\SceneShadows.cpp" />
+    <ClCompile Include="src\Techniques\SceneGrass.cpp" />
     <ClCompile Include="tests\DirectExecutionGpuTests.cpp" />
     <ClCompile Include="tests\GeometryGpuTests.cpp" />
+    <ClCompile Include="tests\ShadowGpuTests.cpp" />
+    <ClCompile Include="tests\GrassGpuTests.cpp" />
     <ClCompile Include="src\MetaRenderPipeline.cpp" />
     <ClInclude Include="src\MetaApplication.h" />
     <None Include="Configs\Startup.ini" />

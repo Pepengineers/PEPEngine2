@@ -11,7 +11,11 @@ constexpr DXGI_FORMAT Formats[]={DXGI_FORMAT_R8G8B8A8_UNORM,DXGI_FORMAT_R16G16_F
     DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT};
 constexpr State ShaderRead=D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 }
-SceneGeometry::SceneGeometry(GDX12DeviceResources& r):_resources(r),_slots(r.FrameConstants.size()) {
+SceneGeometry::SceneGeometry(RenderPipelineContext& c):_resources(c.Primary),_slots(c.Primary.FrameConstants.size()),_common(c.Common) {
+    auto& r=c.Primary; _grass=std::make_unique<SceneGrass>(c);
+    _emptyVertices=r.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,CD3DX12_RESOURCE_DESC::Buffer(64,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),D3D12_RESOURCE_STATE_COMMON);
+    _emptyIndices=r.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,CD3DX12_RESOURCE_DESC::Buffer(64),D3D12_RESOURCE_STATE_COMMON);
+    _shadows=std::make_unique<SceneShadows>(r);
     GDX12RootSignatureDesc d;
     d.NumSingleCBVSlots=1; d.NumSingleSRVSlots=3; d.NumSingleUAVSlots=4;
     _cullRoot=std::make_unique<GDX12RootSignature>(r.Device,d);
@@ -52,8 +56,8 @@ void SceneGeometry::BufferFor(Buffer& b,UINT64 bytes,UINT stride,bool upload) {
     auto desc=CD3DX12_RESOURCE_DESC::Buffer(bytes,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     b.Data=_resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,desc,D3D12_RESOURCE_STATE_COMMON);
     auto* heap=_resources.SRV_UAV_Heap.get();
-    const auto srvIndex=b.Srv.HeapIndex==UINT_MAX?heap->GetAvailableIndex(ConstantsResources):b.Srv.HeapIndex;
-    const auto uavIndex=b.Uav.HeapIndex==UINT_MAX?heap->GetAvailableIndex(ConstantsResources):b.Uav.HeapIndex;
+    const auto srvIndex=b.Srv.HeapIndex==UINT_MAX?heap->GetAvailableIndex(105000):b.Srv.HeapIndex;
+    const auto uavIndex=b.Uav.HeapIndex==UINT_MAX?heap->GetAvailableIndex(105000):b.Uav.HeapIndex;
     D3D12_SHADER_RESOURCE_VIEW_DESC srv{}; srv.Format=DXGI_FORMAT_UNKNOWN; srv.ViewDimension=D3D12_SRV_DIMENSION_BUFFER;
     srv.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING; srv.Buffer.NumElements=UINT(bytes/stride); srv.Buffer.StructureByteStride=stride;
     b.Srv.InitAsSRV(b.Data.Get(),&srv,heap,srvIndex);
@@ -80,7 +84,8 @@ void SceneGeometry::Resize(UINT width,UINT height) {
         for(UINT i=0;i<6;++i) {
             auto resource=i<5?s.Color[i]->GetResource()->D3DResource.Get():s.Depth.Get();
             const auto shape=resource->GetDesc(); UINT64 size=0;
-            _resources.Device->GetDevice()->GetCopyableFootprints(&shape,0,1,offset,&s.Footprints[i],nullptr,nullptr,&size);
+            _resources.Device->GetDevice()->GetCopyableFootprints(&shape,0,1,0,&s.Footprints[i],nullptr,nullptr,&size);
+            s.Footprints[i].Offset=offset;
             offset=(offset+size+511)&~UINT64(511);
         }
         s.ImageBytes=offset;
@@ -91,12 +96,12 @@ void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork>
     auto& s=_slots.at(index); auto& f=*_resources.FrameConstants.at(index);
     // CPU preparation is complete. These per-frame uploads cannot change until
     // the returned frame fence; workers only record copies of assigned ranges.
-    auto input=[&](UINT i,auto& buffer) {
-        BufferFor(s.Buffers[i],UINT64(buffer->GetElementCount())*buffer->GetElementSize(),buffer->GetElementSize(),true);
+    auto input=[&](Buffer& destination,auto& buffer) {
+        BufferFor(destination,UINT64(buffer->GetElementCount())*buffer->GetElementSize(),buffer->GetElementSize(),true);
         void* data=nullptr; D3D12_RANGE noRead{};
-        ThrowIfFailed(s.Buffers[i].Source->Map(0,&noRead,&data));
+        ThrowIfFailed(destination.Source->Map(0,&noRead,&data));
         const UINT64 bytes=UINT64(buffer->GetElementCount())*buffer->GetElementSize();
-        std::memset(data,0,SIZE_T(s.Buffers[i].Bytes));
+        std::memset(data,0,SIZE_T(destination.Bytes));
         if(bytes) {
             // Material uploads have no CPU mirror in the production path.
             void* original=nullptr; const D3D12_RANGE range{0,SIZE_T(bytes)};
@@ -104,15 +109,29 @@ void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork>
             std::memcpy(data,original,SIZE_T(bytes));
             const D3D12_RANGE noWrite{}; buffer->GetResource().D3DResource->Unmap(0,&noWrite);
         }
-        s.Buffers[i].Source->Unmap(0,nullptr);
+        destination.Source->Unmap(0,nullptr);
     };
-    input(0,f.InstanceCache); input(1,_resources.IndirectCommandsCache); input(2,f.MaterialCache); input(3,f.TransformCache);
+    input(s.Buffers[0],f.InstanceCache); input(s.Buffers[1],_resources.IndirectCommandsCache); input(s.Buffers[2],f.MaterialCache); input(s.Buffers[3],f.TransformCache);
+    input(s.FrameBuffers[0],f.MainCB);input(s.FrameBuffers[1],f.CameraCB);
+    s.FrameStrides={f.MainCB->GetElementSize(),f.CameraCB->GetElementSize()};
     s.Draws=_resources.IndirectCommandsCache->GetElementCount();
     for(UINT i:{4u,6u}) BufferFor(s.Buffers[i],UINT64((std::max)(s.Draws,1u))*sizeof(GDX12IndirectDrawArgs),sizeof(GDX12IndirectDrawArgs));
     for(UINT i:{5u,7u}) BufferFor(s.Buffers[i],4,4);
-    s.Camera=f.CameraCB->GetElementAddress(camera); s.Main=f.MainCB->GetElementAddress(0);
+    s.Camera=s.FrameBuffers[1].Data->GetGPUVirtualAddress()+UINT64(camera)*s.FrameStrides[1];s.Main=s.FrameBuffers[0].Data->GetGPUVirtualAddress();
     s.Geometry=_resources.GeometryBuffer->FreezeRecordingBinding();
+    if(!s.Geometry.VertexResource){s.Geometry.VertexResource=_emptyVertices.Get();s.Geometry.Vertices={_emptyVertices->GetGPUVirtualAddress(),64,sizeof(Vertex)};}
+    if(!s.Geometry.IndexResource){s.Geometry.IndexResource=_emptyIndices.Get();s.Geometry.Indices={_emptyIndices->GetGPUVirtualAddress(),64,DXGI_FORMAT_R32_UINT};}
+    _shadows->Freeze(index,{s.Buffers[0].Srv.GPUHandle,s.Buffers[1].Srv.GPUHandle,s.Buffers[2].Srv.GPUHandle,s.Buffers[3].Srv.GPUHandle},s.Draws,s.Geometry);
     s.Skin=std::move(skin);
+    s.Batches=_resources.SkeletalBatchCount;s.InstanceCount=_resources.SkeletalInstanceCount;
+    if(s.Batches) {
+        if(!s.Batcher)s.Batcher=std::make_unique<GDX12InstanceBatcher>(_resources.Device);
+        s.Batcher->ReserveRecording(s.Draws,s.Batches,s.InstanceCount);
+        if(!s.BatchCounter)s.BatchCounter=_resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,CD3DX12_RESOURCE_DESC::Buffer(4,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),D3D12_RESOURCE_STATE_COMMON);
+        const UINT64 bytes=4+UINT64(s.Draws)*sizeof(GDX12IndirectDrawArgs)+UINT64(s.InstanceCount)*4;
+        if(!s.BatchReadback || s.BatchReadback->GetDesc().Width!=bytes)s.BatchReadback=_resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(bytes),D3D12_RESOURCE_STATE_COPY_DEST);
+        s.InstanceSnapshot.assign(f.InstanceCache->GetCPUData(),f.InstanceCache->GetCPUData()+f.InstanceCache->GetElementCount());
+    }
     s.SkinBindings.clear(); s.SkinDeclarations.clear(); s.SkinIds.clear();
     for(const auto& work:s.Skin) {
         std::array<Id,5> ids{};
@@ -128,14 +147,15 @@ void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork>
         s.SkinIds.push_back(ids);
     }
     UINT64 bytes=0; for(UINT i=0;i<8;++i) { s.Offsets[i]=bytes; bytes+=s.Buffers[i].Bytes; }
+    s.FrameOffset=bytes;for(const auto& buffer:s.FrameBuffers)bytes+=buffer.Bytes;
     s.SkinOffset=bytes; for(const auto& skin:s.Skin) bytes+=UINT64(skin.VertexCount)*sizeof(Vertex);
     if(s.SceneBytes!=bytes) {
         s.SceneBytes=bytes;
         s.SceneReadback=_resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(bytes),D3D12_RESOURCE_STATE_COPY_DEST);
     }
 }
-Schedule SceneGeometry::Plan(UINT index) const {
-    const auto& s=_slots.at(index);
+Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target) {
+    auto& s=_slots.at(index);
     Graph g;
     for(UINT i=0;i<8;++i) g.Resources.push_back({"scene buffer "+std::to_string(i),0,0,true,true});
     for(UINT i=0;i<4;++i) g.Resources.push_back({"frozen upload "+std::to_string(i),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_GENERIC_READ});
@@ -180,9 +200,46 @@ Schedule SceneGeometry::Plan(UINT index) const {
     for(UINT i=12;i<18;++i) readback.Accesses.push_back({i,Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE});
     readback.Accesses.push_back({21,Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE});
     g.Operations.push_back(readback);
+    if(s.Batches) {
+        for(UINT i=0;i<6;++i){s.BatchIds[i]=Id(g.Resources.size());g.Resources.push_back({"skeletal batching "+std::to_string(i),i==5?State(D3D12_RESOURCE_STATE_COPY_DEST):0,i==5?State(D3D12_RESOURCE_STATE_COPY_DEST):0,i!=5,i!=5});}
+        for(UINT op:{5u,6u}) {
+            auto& accesses=g.Operations[op].Accesses;
+            accesses.erase(std::remove_if(accesses.begin(),accesses.end(),[](auto a){return a.Resource==4 || a.Resource==5;}),accesses.end());
+            accesses.push_back({s.BatchIds[1],Mode::Read,D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT});accesses.push_back({s.BatchIds[4],Mode::Read,D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT});
+            accesses.push_back({s.BatchIds[2],Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE});
+        }
+        std::vector<Operation> batching;
+        batching.push_back({"skeletal private counter snapshot",{{5,Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{s.BatchIds[4],Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST}}});
+        for(UINT stage=0;stage<3;++stage){Operation operation{"skeletal batching stage "+std::to_string(stage),{{0,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},{4,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE}}};for(UINT i=0;i<5;++i)operation.Accesses.push_back({s.BatchIds[i],Mode::ReadWrite,UnorderedAccess});batching.push_back(operation);}
+        g.Operations.insert(g.Operations.begin()+5,batching.begin(),batching.end());
+    }
+    for(UINT i=0;i<4;++i){s.FrameIds[i]=Id(g.Resources.size());const State state=i<2?0:State(D3D12_RESOURCE_STATE_GENERIC_READ);g.Resources.push_back({"frame constants "+std::to_string(i),state,state,i<2,i<2});}
+    for(UINT i=0;i<2;++i){g.Operations[2].Accesses.push_back({s.FrameIds[i],Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST});g.Operations[2].Accesses.push_back({s.FrameIds[i+2],Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ});}
+    g.Operations[4].Accesses.push_back({s.FrameIds[1],Mode::Read,D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
+    for(UINT op:{s.Batches?9u:5u,s.Batches?10u:6u})for(UINT i=0;i<2;++i)g.Operations[op].Accesses.push_back({s.FrameIds[i],Mode::Read,D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
+    for(UINT i=0;i<2;++i)g.Operations[s.Batches?12:8].Accesses.push_back({s.FrameIds[i],Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE});
+    _shadows->Append(g,index);
+    GeometryTarget depthTarget;
+    depthTarget.View={GDX12GeometryStage::Depth,_common.CameraView*_common.CameraProjection,_common.CameraView.Invert().Translation(),s.Camera};
+    depthTarget.View.Key=1;depthTarget.View.FrameSlot=index;depthTarget.View.DepthFormat=DXGI_FORMAT_D32_FLOAT;
+    depthTarget.Depth=17;depthTarget.Dsv=s.Dsv.CPUHandle;depthTarget.Width=_width;depthTarget.Height=_height;
+    depthTarget.Camera=s.FrameIds[1];
+    auto gbufferTarget=depthTarget;gbufferTarget.View.Stage=GDX12GeometryStage::GBuffer;gbufferTarget.Dsv=s.ReadDepth.CPUHandle;
+    gbufferTarget.View.ColorTargetCount=5;
+    for(UINT i=0;i<5;++i){gbufferTarget.Colors.push_back(12+i);gbufferTarget.Rtvs.push_back(s.Color[i]->GetRTV()->CPUHandle);gbufferTarget.View.ColorFormats[i]=Formats[i];}
+    auto targets=_shadows->Targets(index);
+    for(auto& shadow:targets){shadow.View.Eye=depthTarget.View.Eye;shadow.View.CameraConstants=s.Camera;shadow.Camera=s.FrameIds[1];}
+    targets.insert(targets.begin(),gbufferTarget);targets.insert(targets.begin(),depthTarget);
+    _grass->Append(g,index,Resources(index,target,false),s.Buffers[2].Srv,targets);
+    _shadows->RepeatReadbacks(g,index);
+    s.FinalCopy=Id(g.Operations.size());g.Operations.push_back(g.Operations[s.Batches?11:7]);
+    s.FinalReadback=Id(g.Operations.size());g.Operations.push_back(g.Operations[s.Batches?12:8]);
+    s.BatchReadOperation=Invalid;
+    if(s.Batches){s.BatchReadOperation=Id(g.Operations.size());g.Operations.push_back({"skeletal packed command readback",{{s.BatchIds[1],Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{s.BatchIds[2],Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{s.BatchIds[4],Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{s.BatchIds[5],Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST}}});}
+    s.Names.clear();for(const auto& operation:g.Operations)s.Names.push_back(operation.Name);
     return Compile(g);
 }
-std::vector<ID3D12Resource*> SceneGeometry::Resources(UINT index,ID3D12Resource* target) const {
+std::vector<ID3D12Resource*> SceneGeometry::Resources(UINT index,ID3D12Resource* target,bool grass) const {
     const auto& s=_slots.at(index); std::vector<ID3D12Resource*> result;
     for(auto& b:s.Buffers) result.push_back(b.Data.Get());
     for(UINT i=0;i<4;++i) result.push_back(s.Buffers[i].Source.Get());
@@ -192,10 +249,22 @@ std::vector<ID3D12Resource*> SceneGeometry::Resources(UINT index,ID3D12Resource*
     result.push_back(s.Geometry.VertexResource?s.Geometry.VertexResource:s.Buffers[0].Data.Get());
     result.push_back(s.Geometry.IndexResource?s.Geometry.IndexResource:s.Buffers[1].Data.Get());
     result.insert(result.end(),s.SkinBindings.begin(),s.SkinBindings.end());
+    if(s.Batches){for(auto* resource:s.Batcher->RecordingResources())result.push_back(resource);result.push_back(s.BatchCounter.Get());result.push_back(s.BatchReadback.Get());}
+    for(const auto& buffer:s.FrameBuffers)result.push_back(buffer.Data.Get());
+    for(const auto& buffer:s.FrameBuffers)result.push_back(buffer.Source.Get());
+    const auto shadows=_shadows->Resources(index); result.insert(result.end(),shadows.begin(),shadows.end());
+    if(grass){const auto& bindings=_grass->Resources(index);result.insert(result.end(),bindings.begin(),bindings.end());}
     return result;
 }
 void SceneGeometry::Record(UINT index,Id op,UINT bucket,ID3D12GraphicsCommandList* cmd,ID3D12Resource* target) const {
     const auto& s=_slots.at(index); const auto& b=s.Buffers;
+    if(_shadows->Record(index,op,bucket,cmd)) return;
+    if(_grass->Record(index,op,cmd)) return;
+    if(op==s.BatchReadOperation){const auto buffers=s.Batcher->RecordingResources();cmd->CopyBufferRegion(s.BatchReadback.Get(),0,s.BatchCounter.Get(),0,4);cmd->CopyBufferRegion(s.BatchReadback.Get(),4,buffers[1],0,UINT64(s.Draws)*sizeof(GDX12IndirectDrawArgs));cmd->CopyBufferRegion(s.BatchReadback.Get(),4+UINT64(s.Draws)*sizeof(GDX12IndirectDrawArgs),buffers[2],0,UINT64(s.InstanceCount)*4);return;}
+    if(op==s.FinalCopy)op=s.Batches?11:7;
+    if(op==s.FinalReadback)op=s.Batches?12:8;
+    if(s.Batches && op>=5 && op<9){if(op==5)cmd->CopyBufferRegion(s.BatchCounter.Get(),0,b[5].Data.Get(),0,4);else s.Batcher->RecordStage(cmd,op-6,s.Draws,s.Batches,b[0].Data->GetGPUVirtualAddress(),b[4].Data->GetGPUVirtualAddress(),s.BatchCounter->GetGPUVirtualAddress());return;}
+    if(s.Batches && op>=9)op-=4;
     if(op==0) {
         for(const auto& skin:s.Skin) cmd->CopyBufferRegion(skin.Resources[1],0,skin.Resources[0],0,UINT64(skin.BoneCount)*sizeof(GDX12SkinPalette));
         return;
@@ -210,6 +279,7 @@ void SceneGeometry::Record(UINT index,Id op,UINT bucket,ID3D12GraphicsCommandLis
             for(UINT element=begin;element<end;++element)
                 cmd->CopyBufferRegion(b[i].Data.Get(),UINT64(element)*stride,b[i].Source.Get(),UINT64(element)*stride,stride);
         }
+        for(UINT i=0;i<2;++i){const auto& buffer=s.FrameBuffers[i];const UINT stride=s.FrameStrides[i],count=UINT(buffer.Bytes/stride);for(UINT element=count*bucket/4;element<count*(bucket+1)/4;++element)cmd->CopyBufferRegion(buffer.Data.Get(),UINT64(element)*stride,buffer.Source.Get(),UINT64(element)*stride,stride);}
         return;
     }
     ID3D12DescriptorHeap* heap=_resources.SRV_UAV_Heap->GetHeap().Get(); cmd->SetDescriptorHeaps(1,&heap);
@@ -233,7 +303,7 @@ void SceneGeometry::Record(UINT index,Id op,UINT bucket,ID3D12GraphicsCommandLis
         // Valid bindings even for branches unused by static geometry.
         const auto vertex=s.Geometry.Vertices.BufferLocation;
         cmd->SetGraphicsRootShaderResourceView(geom,vertex?vertex:b[0].Data->GetGPUVirtualAddress());
-        cmd->SetGraphicsRootShaderResourceView(geom+1,b[0].Data->GetGPUVirtualAddress());
+        cmd->SetGraphicsRootShaderResourceView(geom+1,s.Batches?s.Batcher->VisibleInstancesAddress():b[0].Data->GetGPUVirtualAddress());
         D3D12_VIEWPORT vp{0,0,float(_width),float(_height),0,1}; D3D12_RECT rect{0,0,LONG(_width),LONG(_height)};
         cmd->RSSetViewports(1,&vp); cmd->RSSetScissorRects(1,&rect);
         D3D12_CPU_DESCRIPTOR_HANDLE rt[5]; for(UINT i=0;i<5;++i) rt[i]=s.Color[i]->GetRTV()->CPUHandle;
@@ -243,11 +313,12 @@ void SceneGeometry::Record(UINT index,Id op,UINT bucket,ID3D12GraphicsCommandLis
         cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         if(s.Draws && s.Geometry.VertexResource) {
             cmd->IASetVertexBuffers(0,1,&s.Geometry.Vertices); cmd->IASetIndexBuffer(&s.Geometry.Indices);
-            cmd->ExecuteIndirect(_signature.Get(),s.Draws,b[4].Data.Get(),0,b[5].Data.Get(),0);
+            cmd->ExecuteIndirect(_signature.Get(),s.Draws,s.Batches?s.Batcher->RecordingResources()[1]:b[4].Data.Get(),0,s.Batches?s.BatchCounter.Get():b[5].Data.Get(),0);
         }
     } else if(op==5) cmd->CopyResource(target,s.Color[0]->GetResource()->D3DResource.Get());
     else if(op==6) {
         for(UINT i=0;i<8;++i) cmd->CopyBufferRegion(s.SceneReadback.Get(),s.Offsets[i],b[i].Data.Get(),0,b[i].Bytes);
+        UINT64 frameOffset=s.FrameOffset;for(const auto& buffer:s.FrameBuffers){cmd->CopyBufferRegion(s.SceneReadback.Get(),frameOffset,buffer.Data.Get(),0,buffer.Bytes);frameOffset+=buffer.Bytes;}
         UINT64 offset=s.SkinOffset;
         for(const auto& skin:s.Skin) {
             const UINT64 bytes=UINT64(skin.VertexCount)*sizeof(Vertex);
@@ -274,8 +345,9 @@ std::vector<uint8_t> SceneGeometry::Readback(UINT index,const std::string& stem)
     std::memcpy(commands.data(),bytes+s.Offsets[4],commands.size()*sizeof(commands[0]));
     std::sort(commands.begin(),commands.end(),[](auto& a,auto& b){return a.InstanceID<b.InstanceID;});
     auto first=reinterpret_cast<const uint8_t*>(commands.data());
-    result.insert(result.end(),first,first+commands.size()*sizeof(commands[0]));
+    if(!commands.empty())result.insert(result.end(),first,first+commands.size()*sizeof(commands[0]));
     for(UINT value:{count,transparent}) { const auto* p=reinterpret_cast<const uint8_t*>(&value); result.insert(result.end(),p,p+4); }
+    result.insert(result.end(),bytes+s.FrameOffset,bytes+s.SkinOffset);
     result.insert(result.end(),bytes+s.SkinOffset,bytes+s.SceneBytes);
     if(!stem.empty()) { std::ofstream out(stem+"-skin.bin",std::ios::binary); out.write(reinterpret_cast<const char*>(bytes+s.SkinOffset),s.SceneBytes-s.SkinOffset); }
     if(!stem.empty()) { std::ofstream out(stem+"-scene.bin",std::ios::binary); out.write(reinterpret_cast<const char*>(bytes),s.SceneBytes); }
@@ -297,6 +369,21 @@ std::vector<uint8_t> SceneGeometry::Readback(UINT index,const std::string& stem)
         for(UINT y=0;y<_height;++y) for(UINT x=0;x<_width;++x) covered+=*reinterpret_cast<const float*>(bytes+fp.Offset+UINT64(y)*fp.Footprint.RowPitch+x*4)>0;
         meta<<"depth_covered_pixels="<<covered<<"\n";
     }
-    s.ImageReadback->Unmap(0,&noWrite); return result;
+    s.ImageReadback->Unmap(0,&noWrite);
+    if(s.Batches) {
+        void* mapped=nullptr;D3D12_RANGE range{0,SIZE_T(s.BatchReadback->GetDesc().Width)};ThrowIfFailed(s.BatchReadback->Map(0,&range,&mapped));const auto* bytes=static_cast<const uint8_t*>(mapped);UINT count=0;std::memcpy(&count,bytes,4);
+        if(count>s.Draws)throw std::runtime_error("Packed draw count exceeds capacity");
+        std::vector<GDX12IndirectDrawArgs> packed(count);std::memcpy(packed.data(),bytes+4,count*sizeof(GDX12IndirectDrawArgs));
+        const auto* visible=reinterpret_cast<const UINT*>(bytes+4+UINT64(s.Draws)*sizeof(GDX12IndirectDrawArgs));UINT maxInstances=0;
+        std::vector<UINT> normalizedVisible;
+        for(auto& command:packed){maxInstances=(std::max)(maxInstances,command.InstanceCount);const auto& instance=s.InstanceSnapshot.at(command.InstanceID);if(instance.SkinBatch!=UINT_MAX){std::vector<UINT> ids(visible+instance.SkinBatchStart,visible+instance.SkinBatchStart+command.InstanceCount);std::sort(ids.begin(),ids.end());normalizedVisible.insert(normalizedVisible.end(),ids.begin(),ids.end());command.InstanceID=UINT_MAX-instance.SkinBatch;}}
+        std::sort(packed.begin(),packed.end(),[](auto& a,auto& b){return a.InstanceID<b.InstanceID;});std::sort(normalizedVisible.begin(),normalizedVisible.end());
+        const auto* commands=reinterpret_cast<const uint8_t*>(packed.data());if(!packed.empty())result.insert(result.end(),commands,commands+packed.size()*sizeof(packed[0]));
+        const auto* visibleBytes=reinterpret_cast<const uint8_t*>(normalizedVisible.data());if(!normalizedVisible.empty())result.insert(result.end(),visibleBytes,visibleBytes+normalizedVisible.size()*4);
+        if(!stem.empty()){std::ofstream meta(stem+"-batch.txt");meta<<"draws="<<count<<" max_instances="<<maxInstances<<"\n";}
+        s.BatchReadback->Unmap(0,&noWrite);
+    }
+    const auto shadows=_shadows->Readback(index,stem); result.insert(result.end(),shadows.begin(),shadows.end());
+    const auto grass=_grass->Readback(index,stem);result.insert(result.end(),grass.begin(),grass.end());return result;
 }
 }

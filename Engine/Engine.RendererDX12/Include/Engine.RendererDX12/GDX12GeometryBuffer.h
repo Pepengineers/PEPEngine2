@@ -72,7 +72,7 @@ public:
         ID3D12Resource* IndexResource;
     };
     RecordingBinding FreezeRecordingBinding() const {
-        return {_vertexBufferView, _indexBufferView,
+        return {_vertexBuffer ? _vertexBufferView : D3D12_VERTEX_BUFFER_VIEW{}, _indexBuffer ? _indexBufferView : D3D12_INDEX_BUFFER_VIEW{},
             _vertexBuffer ? _vertexBuffer->D3DResource.Get() : nullptr,
             _indexBuffer ? _indexBuffer->D3DResource.Get() : nullptr};
     }

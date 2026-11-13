@@ -1,16 +1,27 @@
 # U1 technique inventory
 
-U4 progress (2026-11-13): object/instance/material/transform uploads, GPU culling,
-depth/GBuffer now have a native packet path in `App.MetaRenderGraph/Techniques/SceneGeometry`.
-Eight Debug serial/parallel scene pairs passed exact buffer/image comparison,
-movement, invisible/empty commands, three slots, resize and shutdown. See
-`04-geometry-shadows.md` for evidence and limits. Skinning, shadows and grass
-remain pending; U4 as a whole is not accepted.
+## Current U4 migration status — 2026-11-13
 
-U4.2 update: skin palette upload/deformation now use explicit frozen plan operations,
-with actual animated ECS geometry and expected GPU vertex readback in eight Debug
-serial/parallel pairs. Cascaded/local shadow and grass rows remain pending. Production
-and Release checks for the shared seam are still pending.
+Accepted base: `64f0ab1` (U3). U4.1–U4.4 are implemented; originating-chat review is pending.
+See [04-geometry-shadows.md](04-geometry-shadows.md) for exact commands, artifacts,
+hardware, API changes, measured CPU traces, memory and limits. U5 is not started.
+
+| U4 position | New packet/access path | Verified result / temporary parts |
+|---|---|---|
+| Object/material/frame uploads, GPU culling, ExecuteIndirect | `Apps/App.MetaRenderGraph/src/Techniques/SceneGeometry.*`: private immutable instance/template/material/transform/main/camera snapshots; four upload buckets; count reset/culling; native instance-batching stages | Debug/Release exact GPU bytes/images; five objects become four draws with two instances in one batch. CPU scene preparation/source freezing remains on owner. |
+| Skeletal pose/deformation | `RenderModule::FreezeSkeletalMeshes`, `GDX12SkinningWork`; explicit palette copy and deformation packets | Two animated instances share immutable mesh data and retain separate times/palettes; expected GPU vertex positions and exact A/B. Cold source creation/loading remains owner-sequential. |
+| Depth/GBuffer, mesh/grass views | `SceneGeometry` and `SceneGrass`: explicit attachments/accesses, native depth/GBuffer PSOs and indirect draws | Motion, invisible/far/empty visibility, all five GBuffer outputs and depth compared; three frame slots, resize and queued frames. Diagnostic albedo output. |
+| Cascaded/local shadows, static/dynamic/update/cache variants | `SceneShadows.*`: private frame-slot/view matrices, descriptors, static/dynamic culling children, depth and readback packets; existing cascade/local matrix and shader algorithms | Four cascades, six point faces, spot, camera isolation and moving/animated casters. Diagnostic per-view targets replace packed atlas; selected cached views currently redraw. Shadow draws remain per-instance GPU commands. |
+| Grass/wind/interaction; depth/GBuffer/shadow/probe expansion | `SceneGrass.*`: existing Bistro ECS snapshots/settings/LOD/prepared jobs; explicit root uploads, interaction versions, wind stages, argument clear, expansion and draw accesses | Ribbon/CrossedRibbons and projected/analytic wind; pause/reset/transform/no patches; previous-field/version bytes; six diagnostic probe geometry/GBuffer faces. Shared expansion arena has GPU WAR/RAW edges. Full probe capture lighting/readiness remains U5. |
+
+Both final Meta configurations passed 12 presented frames: eight serial/parallel pairs
+and four queued frames, zero legacy graph Execute and zero D3D12 ERROR/CORRUPTION.
+Production App Debug/Release builds, legacy default/custom GPU checks and composition/
+grass-lifetime tests passed. CPU planner/recording tests and inherited U3 GPU/error/
+retirement checks passed. Every frame trace shows meaningful native recording on
+three workers. This is a small real ECS/geometry integration fixture, not full Bistro
+scene acceptance, a PIX capture, GPU async/mGPU, or a performance claim. Readbacks
+and duplicate reference grass state are explicit diagnostic costs.
 
 Baseline source: `dd012c0f` (2026-11-13). This is a source inventory of both current Default and Bistro compositions, not a claim that the U1 procedural fixture exercises Bistro. U1 links only App.Base/Engine. File names below are relative to the repository root; `DX/` means `Engine/Engine.RendererDX12/src/`, `Pass/` means `DX/` with the `GDX12` pass file named in the row, and `Bistro/` means `Apps/App/src/Rendering/`.
 
@@ -40,4 +51,4 @@ All legacy passes share `GDX12Resource::_currentState`, descriptor heaps, `GDX12
 | Existing MGPU water transport/worker | `Bistro/Water/GDX12WaterOffload.cpp`, `GDX12FluidPass.cpp` | secondary solver packed positions → shared copy/import/display | Own worker, DIRECT/COMPUTE/COPY submissions, waits, ready/consumed slots, readback waits; cannot run beside new executor | `WaterOffloadGpuTests.cpp`, `WaterOffloadBistroTests.cpp`; **U9** transport fixture, **U10** integration |
 | Existing MGPU particle transport/worker (dd012c0f) | `DX/GDX12ParticleOffload.cpp`, `GDX12ParticleSimulation.cpp` | eligible depth-independent emitters + interaction field → shared packed payload/metadata → primary display | Own worker, submits/CPU waits at allocation and per secondary iteration, ready/consumed state. Adapter -1 may inherit water selection; both must be disabled. Common payload, no per-emitter transport copies. | `ParticleOffloadGpuTests.cpp`; **U9** transport fixture, **U11** integration |
 
-U2 owns explicit one-DIRECT plan/executor and real buffer fixture, U3 owns recording jobs; neither is implemented here. U12 must revisit every row against actual runtime evidence. Current source-specific tests may cover more variants than the U1 fixture; none is automatically accepted for the new executor.
+U2's single-DIRECT executor and U3's recording jobs are accepted prerequisites. Current U4 migration evidence is listed above; U5–U12 ownership in the baseline table remains future work. U12 must revisit every row against actual runtime evidence. Source-specific tests are not automatically acceptance of a new executor path.

@@ -6,6 +6,7 @@
 #include <map>
 
 class RenderModule;
+namespace Meta { class SceneGrass; }
 
 class BistroGrassGeometry final : public IRenderGeometrySource
 {
@@ -26,6 +27,7 @@ public:
     uint64_t GeometryAllocationBytes() const { return _gpu ? _gpu->GeometryAllocationBytes() : 0; }
 
 private:
+    friend class Meta::SceneGrass;
     friend class BistroRenderGraphTests;
     void Subscribe(World& world);
     void Unsubscribe(World& world);

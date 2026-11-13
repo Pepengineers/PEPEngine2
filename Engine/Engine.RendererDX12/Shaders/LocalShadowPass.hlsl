@@ -55,7 +55,11 @@ struct VertexOutput
 
 VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
 {
+#ifdef SHADOW_UNBATCHED
+    InstanceData instance = Instances[InstanceID];
+#else
     InstanceData instance = Instances[DrawInstance(InstanceID, instanceID, Instances[InstanceID])];
+#endif
     if (instance.SkinOutputVertex != 0xffffffffu)
     {
         SkinVertex vertex = ReadSkinVertex(instance, vertexID);
