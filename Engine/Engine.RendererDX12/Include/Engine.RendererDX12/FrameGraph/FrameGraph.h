@@ -7,7 +7,17 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <type_traits>
+
+class FrameGraphSharedResourceUnsupported : public std::runtime_error
+{
+public:
+    FrameGraphSharedResourceUnsupported(const std::string& message, HRESULT errorCode)
+        : std::runtime_error(message), ErrorCode(errorCode) {}
+
+    const HRESULT ErrorCode;
+};
 
 class CompiledFrameGraph;
 

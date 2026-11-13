@@ -524,8 +524,14 @@ struct CompiledFrameGraph::Runtime
                 for (auto& entry : plan.Resources)
                 {
                     if (entry.first.Node != *it || entry.second.Alias.Node.empty()) { continue; }
-                    auto original = Sources.at(entry.second.Alias);
-                    plan.Resources.at(original).Description.Usages |= entry.second.Description.Usages;
+                    auto& original = plan.Resources.at(Sources.at(entry.second.Alias));
+                    const auto& alias = entry.second;
+                    original.Description.Usages |= alias.Description.Usages;
+                    if (alias.Storage == MemoryType::Shared)
+                    {
+                        for (auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
+                        { original.SharedTextureUsages[role] |= alias.SharedTextureUsages[role]; }
+                    }
                 }
             }
             std::vector<FrameSlotResources> newFrameSlots(CompileData.FrameSlotCount);
@@ -545,9 +551,10 @@ struct CompiledFrameGraph::Runtime
                     { material.LocalResource = CreateFrameGraphNative(owner, resource.Description); material.ProducerResource = material.LocalResource.get(); }
                     if (resource.Storage == MemoryType::Shared || resource.Export)
                     {
-                        const HRESULT result = TryCreateFrameGraphShared(owner, other ? other : owner, resource.Description, resource.BufferPayload, material.Shared);
+                        const HRESULT result = TryCreateFrameGraphShared(owner, other ? other : owner, resource, material.Shared);
                         if (FAILED(result))
                         {
+                            if (result != DXGI_ERROR_UNSUPPORTED && result != E_INVALIDARG) { ThrowIfFailed(result); }
                             // Reconsider only Auto choices; fixed memory requirements remain constraints.
                             bool narrowed = false;
                             const auto policy = Definition.Nodes.at(entry.first.Node).Description.Outputs.at(entry.first.Pin).RequestedMemory;
@@ -561,7 +568,12 @@ struct CompiledFrameGraph::Runtime
                                     && CompileData.Ports.at(target).Capabilities.Shared)
                                 { CompileData.Ports.at(target).Capabilities.Shared = false; narrowed = true; }
                             }
-                            if (!narrowed) { ThrowIfFailed(result); }
+                            if (!narrowed)
+                            {
+                                throw FrameGraphSharedResourceUnsupported(
+                                    "ERROR: FrameGraph shared resource '" + entry.first.Node + "." + entry.first.Pin
+                                    + "' could not be created on the selected devices.", result);
+                            }
                             Fallbacks.push_back(entry.first.Node + "." + entry.first.Pin + ": Auto excluded a shared candidate rejected by actual resource creation");
                             retry = true;
                             break;
@@ -709,7 +721,7 @@ struct CompiledFrameGraph::Runtime
             if (resource.Export)
             {
                 if (!sharedSet.Producer)
-                { ThrowIfFailed(TryCreateFrameGraphShared(material.ProducerResource->DeviceResources, owner, resource.Description, resource.BufferPayload, sharedSet)); }
+                { ThrowIfFailed(TryCreateFrameGraphShared(material.ProducerResource->DeviceResources, owner, resource, sharedSet)); }
                 auto* shared = &sharedSet.GetDeviceMapping(material.ProducerResource->DeviceResources->Device);
                 const auto producerRole = Definition.Nodes.at(source.Node).DeviceRole;
                 const bool hasRemoteConsumer = std::any_of(resource.Consumers.begin(), resource.Consumers.end(), [&](const auto& consumer)

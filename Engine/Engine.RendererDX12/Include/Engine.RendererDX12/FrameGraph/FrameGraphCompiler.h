@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/FrameGraph/PassDescription.h"
 #include "Engine.RendererDX12/GDX12Device.h"
 
+#include <array>
 #include <optional>
 
 enum class TransportQueuePolicy { Auto, ForceDirect, ForceCopy };
@@ -63,6 +64,7 @@ struct ResourcePlan
     bool BufferPayload = false;
     PinAddress Alias;
     std::map<PinAddress, MemoryType> Consumers;
+    std::array<ResourceUsage, 2> SharedTextureUsages{};
     uint32_t CopyCount = 0;
 };
 struct FrameGraphPlan

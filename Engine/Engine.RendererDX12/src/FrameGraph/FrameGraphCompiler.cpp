@@ -445,6 +445,20 @@ namespace
             savedChoice->TotalCopies = totalCopies;
             savedChoice->AliasChoices = choiceEntry.second.AliasChoices;
         }
+        if (savedChoice)
+        {
+            auto& plan = savedChoice->PlacementPlan;
+            if (!plan.Description.IsBuffer() && !plan.BufferPayload)
+            {
+                if (plan.Storage == MemoryType::Shared) { plan.SharedTextureUsages[nodeDefinition.DeviceRole] = portDescription.Usages; }
+                for (const auto& [target, access] : plan.Consumers)
+                {
+                    if (access != MemoryType::Shared) { continue; }
+                    const auto role = graphDefinition.Nodes.at(target.Node).DeviceRole;
+                    plan.SharedTextureUsages[role] |= graphDefinition.GetPortDescription(target).Usages;
+                }
+            }
+        }
         return savedChoice.get();
     }
 

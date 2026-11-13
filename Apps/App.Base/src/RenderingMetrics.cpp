@@ -136,9 +136,11 @@ void RenderingMetrics::Initialize()
     BeginRun("", std::chrono::seconds::zero());
 }
 
-void RenderingMetrics::BeginRun(const char* pipeline, std::chrono::seconds duration)
+void RenderingMetrics::BeginRun(const char* pipeline, std::chrono::seconds duration, const std::filesystem::path& reportDirectory)
 {
     _pipeline = pipeline;
+    _reportDirectory = reportDirectory;
+    _lastReportPath.clear();
     _runDuration = duration;
     _activeRenderTime = {};
     ResetInterval();
@@ -176,7 +178,7 @@ void RenderingMetrics::RecordPresentedFrame(const CompiledFrameGraph& frameGraph
     if (completed)
     {
         _collecting = false;
-        SaveReport(frameGraph);
+        _lastReportPath = SaveReport(frameGraph);
         OnRunCompleted.Broadcast();
     }
 }
@@ -267,7 +269,7 @@ std::string RenderingMetrics::ToJson(const CompiledFrameGraph& frameGraph) const
     return ryml::emitrs_json<std::string>(report);
 }
 
-void RenderingMetrics::SaveReport(const CompiledFrameGraph& frameGraph) const
+std::filesystem::path RenderingMetrics::SaveReport(const CompiledFrameGraph& frameGraph) const
 {
     const auto now = std::chrono::system_clock::now();
     const auto timestamp = std::chrono::system_clock::to_time_t(now);
@@ -280,7 +282,7 @@ void RenderingMetrics::SaveReport(const CompiledFrameGraph& frameGraph) const
     if (!_pipeline.empty()) { fileName << std::wstring(_pipeline.begin(), _pipeline.end()) << L'-'; }
     fileName << std::put_time(&utc, L"%Y%m%d-%H%M%S")
         << L'-' << std::setfill(L'0') << std::setw(3) << milliseconds << L"Z-" << GetCurrentProcessId() << L".json";
-    const auto directory = std::filesystem::path(SOLUTION_DIR) / L"Reports";
+    const auto directory = _reportDirectory.empty() ? std::filesystem::path(SOLUTION_DIR) / L"Reports" : _reportDirectory;
     const auto path = directory / fileName.str();
     auto temporaryPath = path;
     temporaryPath += L".tmp";
@@ -297,11 +299,13 @@ void RenderingMetrics::SaveReport(const CompiledFrameGraph& frameGraph) const
         if (!MoveFileW(temporaryPath.c_str(), path.c_str()))
         { throw std::system_error(static_cast<int>(GetLastError()), std::system_category(), "publish render metrics report"); }
         OutputDebugStringW((L"Render metrics saved to " + path.wstring() + L"\n").c_str());
+        return path;
     }
     catch (const std::exception& error)
     {
         std::error_code ignored;
         std::filesystem::remove(temporaryPath, ignored);
         OutputDebugStringA((std::string("ERROR: Unable to save benchmarking report. ") + error.what() + '\n').c_str());
+        return {};
     }
 }

@@ -54,8 +54,9 @@ public:
     void ResetMetricsInterval() { _metrics.ResetInterval(); }
 
     void SetGraphicsPipeline(PipelineConfiguration configure);
-    void StartBenchmarkRun(const char* name, std::chrono::seconds duration);
+    void StartBenchmarkRun(const char* name, std::chrono::seconds duration, const std::filesystem::path& reportDirectory = {});
     Event<>& OnBenchmarkRunCompleted() { return _metrics.OnRunCompleted; }
+    const std::filesystem::path& GetLastBenchmarkReportPath() const { return _metrics.GetLastReportPath(); }
 
     using MetricsSample = RenderingMetrics::Sample;
     // Read on the application thread. Sampling may invalidate references to individual entries.

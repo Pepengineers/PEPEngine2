@@ -41,6 +41,16 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "External", "External", "{02
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "External.Libraries", "External\External.Libraries\External.Libraries.vcxproj", "{2FB10E73-84E6-40F9-BE47-10340341981B}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "App.Benchmark.Buffers", "Apps\App.Benchmark.Buffers\App.Benchmark.Buffers.vcxproj", "{FEF6496C-FD33-4C0A-BA8B-EAE8C84FB1BB}"
+	ProjectSection(ProjectDependencies) = postProject
+		{748BEB74-A374-45CC-BD7D-7456DFD9AD83} = {748BEB74-A374-45CC-BD7D-7456DFD9AD83}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "App.Benchmark.RowMajorTextures", "Apps\App.Benchmark.RowMajorTextures\App.Benchmark.RowMajorTextures.vcxproj", "{0A277DE2-3AB9-4A7B-A52F-C9A0C79EA4C6}"
+	ProjectSection(ProjectDependencies) = postProject
+		{748BEB74-A374-45CC-BD7D-7456DFD9AD83} = {748BEB74-A374-45CC-BD7D-7456DFD9AD83}
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -49,6 +59,18 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{0A277DE2-3AB9-4A7B-A52F-C9A0C79EA4C6}.Debug|x64.ActiveCfg = Debug|x64
+		{0A277DE2-3AB9-4A7B-A52F-C9A0C79EA4C6}.Debug|x64.Build.0 = Debug|x64
+		{0A277DE2-3AB9-4A7B-A52F-C9A0C79EA4C6}.Debug|x86.ActiveCfg = Debug|x64
+		{0A277DE2-3AB9-4A7B-A52F-C9A0C79EA4C6}.Release|x64.ActiveCfg = Release|x64
+		{0A277DE2-3AB9-4A7B-A52F-C9A0C79EA4C6}.Release|x64.Build.0 = Release|x64
+		{0A277DE2-3AB9-4A7B-A52F-C9A0C79EA4C6}.Release|x86.ActiveCfg = Release|x64
+		{FEF6496C-FD33-4C0A-BA8B-EAE8C84FB1BB}.Debug|x64.ActiveCfg = Debug|x64
+		{FEF6496C-FD33-4C0A-BA8B-EAE8C84FB1BB}.Debug|x64.Build.0 = Debug|x64
+		{FEF6496C-FD33-4C0A-BA8B-EAE8C84FB1BB}.Debug|x86.ActiveCfg = Debug|x64
+		{FEF6496C-FD33-4C0A-BA8B-EAE8C84FB1BB}.Release|x64.ActiveCfg = Release|x64
+		{FEF6496C-FD33-4C0A-BA8B-EAE8C84FB1BB}.Release|x64.Build.0 = Release|x64
+		{FEF6496C-FD33-4C0A-BA8B-EAE8C84FB1BB}.Release|x86.ActiveCfg = Release|x64
 		{A7E6392C-1A8A-43BA-A14E-B37A17FC03C2}.Debug|x64.ActiveCfg = Debug|x64
 		{A7E6392C-1A8A-43BA-A14E-B37A17FC03C2}.Debug|x64.Build.0 = Debug|x64
 		{A7E6392C-1A8A-43BA-A14E-B37A17FC03C2}.Debug|x86.ActiveCfg = Debug|Win32
@@ -110,6 +132,8 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
+		{0A277DE2-3AB9-4A7B-A52F-C9A0C79EA4C6} = {DF44F2A7-ABF6-4C6B-989E-BB2FD4F02308}
+		{FEF6496C-FD33-4C0A-BA8B-EAE8C84FB1BB} = {DF44F2A7-ABF6-4C6B-989E-BB2FD4F02308}
 		{A7E6392C-1A8A-43BA-A14E-B37A17FC03C2} = {DF44F2A7-ABF6-4C6B-989E-BB2FD4F02308}
 		{4426F0B0-3B9A-47A6-9C88-D22988FBFCB4} = {DF44F2A7-ABF6-4C6B-989E-BB2FD4F02308}
 		{555AFC47-4F0B-4BA4-9D25-27342E51C84F} = {1166A9E2-2D9F-470C-90EC-0C51727CCDE2}

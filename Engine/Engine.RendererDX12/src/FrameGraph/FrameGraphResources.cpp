@@ -345,10 +345,12 @@ FrameGraphPhysicalResource& FrameGraphSharedResources::GetDeviceMapping(GDX12Dev
 }
 
 HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceResources* other,
-    const ResourceDescription& description, bool bufferPayload, FrameGraphSharedResources& result)
+    const ResourcePlan& plan, FrameGraphSharedResources& result)
 {
     CheckOwner(producer);
     CheckOwner(other);
+    const auto& description = plan.Description;
+    const bool bufferPayload = plan.BufferPayload;
     FrameGraphSharedResources created;
     if (bufferPayload && description.IsBuffer()) { throw std::invalid_argument("ERROR: GPU buffer transport was configured with a texture-footprint payload. Transport GPU buffers directly "
         "without enabling a texture-footprint payload."); }
@@ -392,7 +394,10 @@ HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceRes
         }
         else
         {
-            desc = NativeTextureDescription(description);
+            // The native description must match on both GPUs. Only shared bindings require texture flags.
+            auto sharedDescription = description;
+            sharedDescription.Usages = plan.SharedTextureUsages[DEVICE_ROLE_PRIMARY] | plan.SharedTextureUsages[DEVICE_ROLE_SECONDARY];
+            desc = NativeTextureDescription(sharedDescription);
             desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
         }
         desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
@@ -413,7 +418,9 @@ HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceRes
             }
             else
             {
-                mapping->Texture = CreateTexture(mapping->DeviceResources, description, resource->D3DResource);
+                auto mappingDescription = description;
+                mappingDescription.Usages = plan.SharedTextureUsages[mapping->DeviceResources->Device->Role];
+                mapping->Texture = CreateTexture(mapping->DeviceResources, mappingDescription, resource->D3DResource);
             }
         }
         created.Allocations.push_back(std::move(allocation));

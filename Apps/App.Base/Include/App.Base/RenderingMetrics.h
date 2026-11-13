@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
@@ -22,21 +23,24 @@ public:
     };
 
     void Initialize();
-    void BeginRun(const char* pipeline, std::chrono::seconds duration);
+    void BeginRun(const char* pipeline, std::chrono::seconds duration, const std::filesystem::path& reportDirectory = {});
     void RecordPresentedFrame(const CompiledFrameGraph& frameGraph);
     void ResetInterval();
     Event<> OnRunCompleted;
 
     // Read on the application thread. Sampling may invalidate references to individual entries.
     const std::vector<Sample>& GetHistory() const { return _history; }
+    const std::filesystem::path& GetLastReportPath() const { return _lastReportPath; }
 
 private:
-    void SaveReport(const CompiledFrameGraph& frameGraph) const;
+    std::filesystem::path SaveReport(const CompiledFrameGraph& frameGraph) const;
     std::string ToJson(const CompiledFrameGraph& frameGraph) const;
 
     using Clock = std::chrono::steady_clock;
     bool _collecting = false;
     std::string _pipeline;
+    std::filesystem::path _reportDirectory;
+    std::filesystem::path _lastReportPath;
     std::chrono::seconds _runDuration{};
     Clock::duration _activeRenderTime{};
     std::optional<Clock::time_point> _lastPresent;

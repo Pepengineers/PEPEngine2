@@ -77,9 +77,9 @@ void RenderModule::SetGraphicsPipeline(PipelineConfiguration configure)
     CompileFrameGraph(graph);
 }
 
-void RenderModule::StartBenchmarkRun(const char* name, std::chrono::seconds duration)
+void RenderModule::StartBenchmarkRun(const char* name, std::chrono::seconds duration, const std::filesystem::path& reportDirectory)
 {
-    _metrics.BeginRun(name, duration);
+    _metrics.BeginRun(name, duration, reportDirectory);
 }
 
 void RenderModule::Uninitialize()
@@ -653,7 +653,9 @@ void RenderModule::CompileFrameGraph(FrameGraph& graph)
     if (!_primaryDevice->IsInitialized())
     {
         _primaryDevice->Role = DEVICE_ROLE_PRIMARY;
-        ThrowIfFailed(_primaryDevice->Initialize(GDX12DeviceFactory::GetMostPerformantAdapter()));
+        const auto adapter = GDX12DeviceFactory::GetMostPerformantAdapter();
+        if (!adapter) { throw std::runtime_error("ERROR: No suitable GPU adapter found."); }
+        ThrowIfFailed(_primaryDevice->Initialize(adapter));
         _primaryResources.Initialize(_primaryDevice.get());
     }
 
@@ -833,5 +835,8 @@ bool RenderModule::ShouldTick()
 
 bool RenderModule::ShouldRender()
 {
-    return _frameGraph && !_renderingSuspended && _RPcommonData.ActiveCameraCBufferIndex != UINT(-1);
+    if (!_frameGraph || _renderingSuspended) { return false; }
+    if (_RPcommonData.ActiveCameraCBufferIndex != UINT(-1)) { return true; }
+    const auto flags = GetDevicePassFlags(DEVICE_ROLE_PRIMARY) | GetDevicePassFlags(DEVICE_ROLE_SECONDARY);
+    return (flags & RENDER_PASS_FLAG_USE_CAMERAS) == 0;
 }
