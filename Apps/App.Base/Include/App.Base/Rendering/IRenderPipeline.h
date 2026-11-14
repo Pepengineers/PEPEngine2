@@ -54,6 +54,7 @@ public:
     virtual bool OwnsScreenUI() const { return false; }
     virtual bool OwnsScenePreparation() const { return false; }
     virtual void RebuildExecution(RenderPipelineContext&) {}
+    virtual void DrainExecution() {}
     virtual uint64_t ExecuteFrame(RenderPipelineContext&, GDX12CommandList*,
         const std::function<void(GDX12CommandList*)>&) { throw std::logic_error("No execution owner"); }
     virtual void WriteExecution(std::ostream&) const {}

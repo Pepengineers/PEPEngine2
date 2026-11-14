@@ -29,7 +29,8 @@ struct NativeWork
         const Id id = Id(bindings.size());
         graph.Resources.push_back(
             {name, initial, initial, (shape.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0,
-             heap.Type == D3D12_HEAP_TYPE_DEFAULT && shape.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER});
+             heap.Type == D3D12_HEAP_TYPE_DEFAULT && shape.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER,
+             heap.Type == D3D12_HEAP_TYPE_UPLOAD ? Heap::Upload : heap.Type == D3D12_HEAP_TYPE_READBACK ? Heap::Readback : Heap::Default});
         bindings.push_back(resource);
         return id;
     }

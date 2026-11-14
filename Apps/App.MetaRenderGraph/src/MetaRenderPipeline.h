@@ -24,7 +24,12 @@ class MetaRenderPipeline final : public IRenderPipeline
     }
     void ValidateQueued();
     bool OwnsScreenUI() const override { return true; }
-    void PrepareMaterialBindings(RenderPipelineContext&) override { _post->PrepareMaterials(); }
+    void PrepareMaterialBindings(RenderPipelineContext& c) override
+    {
+        _executor->Begin(c.Primary.CurrFrameConstantsIndex);
+        _post->PrepareMaterials();
+    }
+    void DrainExecution() override { if (_executor) _executor->Drain(); }
     void UpdateFrameSettings(RenderPipelineContext& c) override
     {
         _post->UpdateSettings();
@@ -50,7 +55,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     }
     bool PrepareFrame(RenderPipelineContext &, GDX12CommandList *) override;
     void BuildGraph(GDX12RenderGraph &, const RenderPipelineGraphInputs &) override;
-    void Resize(RenderPipelineContext &) override { _post->Resize(); }
+    void Resize(RenderPipelineContext &) override { _executor->Drain(); _post->Resize(); }
     const RenderPipelineBindings &GetBindings() const override
     {
         return _bindings;

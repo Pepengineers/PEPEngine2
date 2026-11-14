@@ -87,7 +87,7 @@ std::vector<uint8_t> NativeCapture(GDX12DeviceResources &r, Meta::SceneEnvironme
         }
         const auto read = Meta::Id(bindings.size());
         bindings.push_back(readback[i].Buffer.Get());
-        graph.Resources.push_back({"readback", D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_DEST});
+        graph.Resources.push_back({"readback", D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_DEST, false, false, Meta::Heap::Readback});
         graph.Operations.push_back({"environment lifecycle readback",
                                     {{id, Meta::Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
                                      {read, Meta::Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}}});
@@ -236,7 +236,7 @@ void RunEnvironmentGpuTests(GDX12DeviceResources &r, RenderPipelineCommonData &c
             const auto read = Meta::Id(bindings.size());
             bindings.push_back(readback[i].Buffer.Get());
             graph.Resources.push_back(
-                {"environment readback", D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_DEST});
+                {"environment readback", D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_COPY_DEST, false, false, Meta::Heap::Readback});
             graph.Operations.push_back({"environment output readback",
                                         {{id, Meta::Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
                                          {read, Meta::Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}}});

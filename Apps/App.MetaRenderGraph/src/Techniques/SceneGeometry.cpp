@@ -149,7 +149,7 @@ void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork>
             else {
                 ids[j]=23+Id(s.SkinBindings.size()); s.SkinBindings.push_back(work.Resources[j]);
                 const State initial=j==0?State(D3D12_RESOURCE_STATE_GENERIC_READ):0;
-                s.SkinDeclarations.push_back({"skin input "+std::to_string(ids[j]),initial,initial,j==1,j!=0});
+                s.SkinDeclarations.push_back({"skin input "+std::to_string(ids[j]),initial,initial,j==1,j!=0,j==0?Heap::Upload:Heap::Default});
             }
         }
         s.SkinIds.push_back(ids);
@@ -162,19 +162,20 @@ void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork>
         s.SceneReadback=_resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(bytes),D3D12_RESOURCE_STATE_COPY_DEST);
     }
 }
-Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechnique& append,const AppendTechnique& earlyAO,const AppendTechnique& prelude) {
+Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechnique& append,const AppendTechnique& earlyAO,const AppendTechnique& prelude,bool singleDirect) {
     auto& s=_slots.at(index);s.PlannedBindings.clear();
     Graph g;
     for(UINT i=0;i<8;++i) g.Resources.push_back({"scene buffer "+std::to_string(i),0,0,true,true});
-    for(UINT i=0;i<4;++i) g.Resources.push_back({"frozen upload "+std::to_string(i),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_GENERIC_READ});
+    for(UINT i=0;i<4;++i) g.Resources.push_back({"frozen upload "+std::to_string(i),D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_GENERIC_READ,false,false,Heap::Upload});
     for(UINT i=0;i<5;++i) g.Resources.push_back({"GBuffer "+std::to_string(i),0,0});
     g.Resources.push_back({"depth",0,0}); g.Resources.push_back({"diagnostic output",0,0});
-    g.Resources.push_back({"image readback",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST});
-    g.Resources.push_back({"scene readback",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST});
+    g.Resources.push_back({"image readback",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST,false,false,Heap::Readback});
+    g.Resources.push_back({"scene readback",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST,false,false,Heap::Readback});
     g.Resources.push_back({"scene vertices",0,0,true,true});
     g.Resources.push_back({"scene indices",0,0,false,true});
     g.Resources.insert(g.Resources.end(),s.SkinDeclarations.begin(),s.SkinDeclarations.end());
     Operation palettes{"skin palette uploads"}, skinning{"skin deformation"};
+    palettes.Target=Queue::Copy; skinning.Target=Queue::Compute;
     const auto add=[](Operation& op,Access access) {
         if(std::none_of(op.Accesses.begin(),op.Accesses.end(),[&](const auto& a){return a.Resource==access.Resource;})) op.Accesses.push_back(access);
     };
@@ -185,13 +186,14 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechn
     }
     if(!s.Skin.empty()) skinning.Accesses.push_back({21,Mode::Write,UnorderedAccess});
     g.Operations.push_back(palettes); g.Operations.push_back(skinning);
-    Operation upload{"scene upload buckets"}; upload.Lists=4;
+    Operation upload{"scene upload buckets"}; upload.Lists=4; upload.Target=Queue::Copy;
     for(UINT i=0;i<4;++i) { upload.Accesses.push_back({i,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST}); upload.Accesses.push_back({8+i,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ}); }
     g.Operations.push_back(upload);
     g.Operations.push_back({"reset visible counts",{{5,Mode::Write,UnorderedAccess},{7,Mode::Write,UnorderedAccess}}});
     Operation cull{"GPU scene culling"}; for(UINT i=0;i<3;++i) cull.Accesses.push_back({i,Mode::Read,ShaderRead});
     for(UINT i=4;i<8;++i) cull.Accesses.push_back({i,Mode::ReadWrite,UnorderedAccess});
-    g.Operations.push_back(cull);
+    cull.Target=Queue::Compute; for(auto& a:cull.Accesses) if(a.Usage==Mode::Read) a.Required=D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    g.Operations[3].Target=Queue::Compute; g.Operations.push_back(cull);
     Operation depth{"scene depth ExecuteIndirect"};
     for(UINT i:{0u,2u,3u}) depth.Accesses.push_back({i,Mode::Read,ShaderRead});
     for(UINT i:{4u,5u}) depth.Accesses.push_back({i,Mode::Read,D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT});
@@ -209,7 +211,7 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechn
     readback.Accesses.push_back({21,Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE});
     g.Operations.push_back(readback);
     if(s.Batches) {
-        for(UINT i=0;i<6;++i){s.BatchIds[i]=Id(g.Resources.size());g.Resources.push_back({"skeletal batching "+std::to_string(i),i==5?State(D3D12_RESOURCE_STATE_COPY_DEST):0,i==5?State(D3D12_RESOURCE_STATE_COPY_DEST):0,i!=5,i!=5});}
+        for(UINT i=0;i<6;++i){s.BatchIds[i]=Id(g.Resources.size());g.Resources.push_back({"skeletal batching "+std::to_string(i),i==5?State(D3D12_RESOURCE_STATE_COPY_DEST):0,i==5?State(D3D12_RESOURCE_STATE_COPY_DEST):0,i!=5,i!=5,i==5?Heap::Readback:Heap::Default});}
         for(UINT op:{5u,6u}) {
             auto& accesses=g.Operations[op].Accesses;
             accesses.erase(std::remove_if(accesses.begin(),accesses.end(),[](auto a){return a.Resource==4 || a.Resource==5;}),accesses.end());
@@ -221,7 +223,7 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechn
         for(UINT stage=0;stage<3;++stage){Operation operation{"skeletal batching stage "+std::to_string(stage),{{0,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},{4,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE}}};for(UINT i=0;i<5;++i)operation.Accesses.push_back({s.BatchIds[i],Mode::ReadWrite,UnorderedAccess});batching.push_back(operation);}
         g.Operations.insert(g.Operations.begin()+5,batching.begin(),batching.end());
     }
-    for(UINT i=0;i<4;++i){s.FrameIds[i]=Id(g.Resources.size());const State state=i<2?0:State(D3D12_RESOURCE_STATE_GENERIC_READ);g.Resources.push_back({"frame constants "+std::to_string(i),state,state,i<2,i<2});}
+    for(UINT i=0;i<4;++i){s.FrameIds[i]=Id(g.Resources.size());const State state=i<2?0:State(D3D12_RESOURCE_STATE_GENERIC_READ);g.Resources.push_back({"frame constants "+std::to_string(i),state,state,i<2,i<2,i<2?Heap::Default:Heap::Upload});}
     for(UINT i=0;i<2;++i){g.Operations[2].Accesses.push_back({s.FrameIds[i],Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST});g.Operations[2].Accesses.push_back({s.FrameIds[i+2],Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ});}
     g.Operations[4].Accesses.push_back({s.FrameIds[1],Mode::Read,D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
     for(UINT op:{s.Batches?9u:5u,s.Batches?10u:6u})for(UINT i=0;i<2;++i)g.Operations[op].Accesses.push_back({s.FrameIds[i],Mode::Read,D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
@@ -255,7 +257,7 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechn
     const Id preludeBegin=Id(g.Operations.size());
     if(prelude)prelude(g,s.PlannedBindings);
     s.Names.clear();for(const auto& operation:g.Operations)s.Names.push_back(operation.Name);
-    if(earlyEnd==Invalid && !append && preludeBegin==g.Operations.size())return Compile(g);
+    if(earlyEnd==Invalid && !append && preludeBegin==g.Operations.size())return Compile(g,singleDirect);
     // Keep callback IDs while placing UI producers first and early AO before
     // GBuffer. Full scene output replaces diagnostic swapchain copies, whose
     // extents need not match the render grid; final readbacks remain intact.
@@ -266,7 +268,7 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechn
     std::vector<Id> remap(g.Operations.size(),Invalid);for(Id i=0;i<order.size();++i)remap[order[i]]=i;
     Graph reordered;reordered.Resources=std::move(g.Resources);
     for(auto id:order){auto op=std::move(g.Operations[id]);for(auto& dep:op.Dependencies){dep=remap.at(dep);if(dep==Invalid)throw std::logic_error("Early AO removed an explicit producer");}reordered.Operations.push_back(std::move(op));}
-    auto schedule=Compile(reordered);for(auto& packet:schedule.Packets)if(packet.Operation!=Invalid)packet.Operation=order.at(packet.Operation);return schedule;
+    auto schedule=Compile(reordered,singleDirect);for(auto& packet:schedule.Packets)if(packet.Operation!=Invalid)packet.Operation=order.at(packet.Operation);return schedule;
 }
 std::vector<ID3D12Resource*> SceneGeometry::Resources(UINT index,ID3D12Resource* target,bool grass) const {
     const auto& s=_slots.at(index);if(grass && !s.PlannedBindings.empty())return s.PlannedBindings;

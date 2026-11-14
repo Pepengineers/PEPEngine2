@@ -59,15 +59,15 @@ void DirectFixture::Prepare(uint32_t index,uint32_t seed) {
     for(uint32_t i=0;i<4;++i) static_cast<uint32_t*>(mapped)[i]=seed+i;
     s.Upload->Unmap(0,nullptr);
 }
-Schedule DirectFixture::Plan(State initial,State final) const {
+Schedule DirectFixture::Plan(State initial,State final,bool asyncQueues) const {
     Graph g;
     g.Resources={{"data",D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_COMMON,true,true},
-        {"upload",D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_GENERIC_READ},
-        {"result",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST},
-        {"reader A",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST},
-        {"reader B",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST},
-        {"target",initial,final}, {"pixel",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST},
-        {"independent buckets",0,0,true,true}, {"independent result",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST}};
+        {"upload",D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_GENERIC_READ,false,false,Heap::Upload},
+        {"result",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST,false,false,Heap::Readback},
+        {"reader A",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST,false,false,Heap::Readback},
+        {"reader B",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST,false,false,Heap::Readback},
+        {"target",initial,final}, {"pixel",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST,false,false,Heap::Readback},
+        {"independent buckets",0,0,true,true}, {"independent result",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST,false,false,Heap::Readback}};
     g.Operations={
         {"upload",{{0,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST},{1,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ}},{},false,2},
         {"transform",{{0,Mode::ReadWrite,D3D12_RESOURCE_STATE_UNORDERED_ACCESS}}},
@@ -81,7 +81,19 @@ Schedule DirectFixture::Plan(State initial,State final) const {
         {"empty side effect",{},{7},true},
         {"independent upload",{{7,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST},{1,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ}},{},false,4},
         {"independent readback",{{7,Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{8,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST}}}};
-    return Compile(g);
+    if(!asyncQueues) return Compile(g);
+    g.Operations[0].Target=Queue::Copy;
+    for(Id id:{1u,2u,4u,5u}) g.Operations[id].Target=Queue::Compute;
+    g.Operations[9].Target=g.Operations[10].Target=Queue::Copy;
+    // Keep callback IDs stable while scheduling an independent DIRECT prefix
+    // before any consumer wait on the upload/transform chain.
+    for(auto& op:g.Operations) for(auto& dep:op.Dependencies) ++dep;
+    g.Operations.insert(g.Operations.begin(),
+        Operation{"independent DIRECT target clear",{{5,Mode::Write,D3D12_RESOURCE_STATE_RENDER_TARGET}}});
+    auto schedule=Compile(g);
+    for(auto& packet:schedule.Packets) if(packet.Operation!=Invalid)
+        packet.Operation=packet.Operation==0?11:packet.Operation-1;
+    return schedule;
 }
 std::vector<ID3D12Resource*> DirectFixture::Resources(uint32_t i,ID3D12Resource* target) const {
     const auto& s=_slots.at(i); return {s.Data.Get(),s.Upload.Get(),s.Readback.Get(),s.A.Get(),s.B.Get(),target,s.Pixel.Get(),s.Independent.Get(),s.IndependentReadback.Get()};
@@ -89,7 +101,8 @@ std::vector<ID3D12Resource*> DirectFixture::Resources(uint32_t i,ID3D12Resource*
 void DirectFixture::Record(uint32_t i,Id op,uint32_t list,ID3D12GraphicsCommandList* cmd,
     ID3D12Resource* target,D3D12_CPU_DESCRIPTOR_HANDLE rtv,uint32_t width,uint32_t height) {
     auto& s=_slots.at(i);
-    if(op==9) cmd->CopyBufferRegion(s.Independent.Get(),list*4,s.Upload.Get(),list*4,4);
+    if(op==11) { const float clear[4]={0,0,0,1}; cmd->ClearRenderTargetView(rtv,clear,0,nullptr); }
+    else if(op==9) cmd->CopyBufferRegion(s.Independent.Get(),list*4,s.Upload.Get(),list*4,4);
     else if(op==10) cmd->CopyBufferRegion(s.IndependentReadback.Get(),0,s.Independent.Get(),0,16);
     else if(op==0) cmd->CopyBufferRegion(s.Data.Get(),list*8,s.Upload.Get(),list*8,8);
     else if(op==1 || op==2 || op==5) {
