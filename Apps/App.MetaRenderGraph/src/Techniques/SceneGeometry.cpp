@@ -11,11 +11,15 @@ constexpr DXGI_FORMAT Formats[]={DXGI_FORMAT_R8G8B8A8_UNORM,DXGI_FORMAT_R16G16_F
     DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT};
 constexpr State ShaderRead=D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 }
-SceneGeometry::SceneGeometry(RenderPipelineContext& c):_resources(c.Primary),_slots(c.Primary.FrameConstants.size()),_common(c.Common) {
-    auto& r=c.Primary; _grass=std::make_unique<SceneGrass>(c);
+SceneGeometry::SceneGeometry(RenderPipelineContext& c, bool opaqueOnly):_resources(c.Primary),_slots(c.Primary.FrameConstants.size()),_common(c.Common),_opaqueOnly(opaqueOnly) {
+    auto& r=c.Primary; if (!opaqueOnly) _grass=std::make_unique<SceneGrass>(c);
+    for (auto& frame : r.FrameConstants) {
+        frame->MaterialCache->TrackChanges();
+        if (!opaqueOnly) { frame->MainCB->TrackChanges(); frame->CameraCB->TrackChanges(); }
+    }
     _emptyVertices=r.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,CD3DX12_RESOURCE_DESC::Buffer(64,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),D3D12_RESOURCE_STATE_COMMON);
     _emptyIndices=r.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,CD3DX12_RESOURCE_DESC::Buffer(64),D3D12_RESOURCE_STATE_COMMON);
-    _shadows=std::make_unique<SceneShadows>(r);
+    if (!opaqueOnly) _shadows=std::make_unique<SceneShadows>(r);
     GDX12RootSignatureDesc d;
     d.NumSingleCBVSlots=1; d.NumSingleSRVSlots=3; d.NumSingleUAVSlots=4;
     _cullRoot=std::make_unique<GDX12RootSignature>(r.Device,d);
@@ -55,7 +59,7 @@ SceneGeometry::SceneGeometry(RenderPipelineContext& c):_resources(c.Primary),_sl
 void SceneGeometry::BufferFor(Buffer& b,UINT64 bytes,UINT stride,bool upload) {
     bytes=(std::max)(bytes,UINT64(stride));
     if(b.Data && b.Bytes==bytes) return;
-    b.Bytes=bytes;
+    b.Bytes=bytes; b.Revision=0;
     if(upload) b.Source=_resources.Device->CreateResource(D3D12_HEAP_TYPE_UPLOAD,CD3DX12_RESOURCE_DESC::Buffer(bytes),D3D12_RESOURCE_STATE_GENERIC_READ);
     auto desc=CD3DX12_RESOURCE_DESC::Buffer(bytes,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
     b.Data=_resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,desc,D3D12_RESOURCE_STATE_COMMON);
@@ -106,21 +110,35 @@ void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork>
     // the returned frame fence; workers only record copies of assigned ranges.
     auto input=[&](Buffer& destination,auto& buffer) {
         BufferFor(destination,UINT64(buffer->GetElementCount())*buffer->GetElementSize(),buffer->GetElementSize(),true);
+        const auto revision = buffer->GetRevision();
+        destination.Upload = destination.Revision != revision ||
+            destination.Origin.Get() != buffer->GetResource().D3DResource.Get();
+        if (!destination.Upload) return;
         void* data=nullptr; D3D12_RANGE noRead{};
         ThrowIfFailed(destination.Source->Map(0,&noRead,&data));
         const UINT64 bytes=UINT64(buffer->GetElementCount())*buffer->GetElementSize();
         std::memset(data,0,SIZE_T(destination.Bytes));
         if(bytes) {
-            // Material uploads have no CPU mirror in the production path.
-            void* original=nullptr; const D3D12_RANGE range{0,SIZE_T(bytes)};
-            ThrowIfFailed(buffer->GetResource().D3DResource->Map(0,&range,&original));
-            std::memcpy(data,original,SIZE_T(bytes));
-            const D3D12_RANGE noWrite{}; buffer->GetResource().D3DResource->Unmap(0,&noWrite);
+            // Upload heaps are write-combined; snapshots must read the cached CPU mirror.
+            const auto* source = buffer->GetCPUData();
+            const UINT stride = buffer->GetElementSize();
+            if (stride == sizeof(*source)) std::memcpy(data, source, SIZE_T(bytes));
+            else for (UINT i = 0; i < buffer->GetElementCount(); ++i)
+                std::memcpy(static_cast<BYTE*>(data) + UINT64(i) * stride, source + i, sizeof(*source));
         }
         destination.Source->Unmap(0,nullptr);
+        destination.Revision = revision;
+        destination.Origin = buffer->GetResource().D3DResource;
     };
     input(s.Buffers[0],f.InstanceCache); input(s.Buffers[1],_resources.IndirectCommandsCache); input(s.Buffers[2],f.MaterialCache); input(s.Buffers[3],f.TransformCache);
-    input(s.FrameBuffers[0],f.MainCB);input(s.FrameBuffers[1],f.CameraCB);
+    if (_opaqueOnly) {
+        s.FrameBuffers[0].Data = f.MainCB->GetResource().D3DResource;
+        s.FrameBuffers[0].Bytes = UINT64(f.MainCB->GetElementCount()) * f.MainCB->GetElementSize();
+        s.FrameBuffers[1].Data = f.CameraCB->GetResource().D3DResource;
+        s.FrameBuffers[1].Bytes = UINT64(f.CameraCB->GetElementCount()) * f.CameraCB->GetElementSize();
+    } else {
+        input(s.FrameBuffers[0],f.MainCB);input(s.FrameBuffers[1],f.CameraCB);
+    }
     s.FrameStrides={f.MainCB->GetElementSize(),f.CameraCB->GetElementSize()};
     s.Draws=_resources.IndirectCommandsCache->GetElementCount();
     for(UINT i:{4u,6u}) BufferFor(s.Buffers[i],UINT64((std::max)(s.Draws,1u))*sizeof(GDX12IndirectDrawArgs),sizeof(GDX12IndirectDrawArgs));
@@ -129,7 +147,7 @@ void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork>
     s.Geometry=_resources.GeometryBuffer->FreezeRecordingBinding();
     if(!s.Geometry.VertexResource){s.Geometry.VertexResource=_emptyVertices.Get();s.Geometry.Vertices={_emptyVertices->GetGPUVirtualAddress(),64,sizeof(Vertex)};}
     if(!s.Geometry.IndexResource){s.Geometry.IndexResource=_emptyIndices.Get();s.Geometry.Indices={_emptyIndices->GetGPUVirtualAddress(),64,DXGI_FORMAT_R32_UINT};}
-    _shadows->Freeze(index,{s.Buffers[0].Srv.GPUHandle,s.Buffers[1].Srv.GPUHandle,s.Buffers[2].Srv.GPUHandle,s.Buffers[3].Srv.GPUHandle},s.Draws,s.Geometry);
+    if (_shadows) _shadows->Freeze(index,{s.Buffers[0].Srv.GPUHandle,s.Buffers[1].Srv.GPUHandle,s.Buffers[2].Srv.GPUHandle,s.Buffers[3].Srv.GPUHandle},s.Draws,s.Geometry);
     s.Skin=std::move(skin);
     s.Batches=_resources.SkeletalBatchCount;s.InstanceCount=_resources.SkeletalInstanceCount;
     if(s.Batches) {
@@ -187,7 +205,7 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechn
     if(!s.Skin.empty()) skinning.Accesses.push_back({21,Mode::Write,UnorderedAccess});
     g.Operations.push_back(palettes); g.Operations.push_back(skinning);
     Operation upload{"scene upload buckets"}; upload.Lists=4; upload.Target=Queue::Copy;
-    for(UINT i=0;i<4;++i) { upload.Accesses.push_back({i,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST}); upload.Accesses.push_back({8+i,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ}); }
+    for(UINT i=0;i<4;++i) if (s.Buffers[i].Upload) { upload.Accesses.push_back({i,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST}); upload.Accesses.push_back({8+i,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ}); }
     g.Operations.push_back(upload);
     g.Operations.push_back({"reset visible counts",{{5,Mode::Write,UnorderedAccess},{7,Mode::Write,UnorderedAccess}}});
     Operation cull{"GPU scene culling"}; for(UINT i=0;i<3;++i) cull.Accesses.push_back({i,Mode::Read,ShaderRead});
@@ -223,14 +241,24 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechn
         for(UINT stage=0;stage<3;++stage){Operation operation{"skeletal batching stage "+std::to_string(stage),{{0,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},{4,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE}}};for(UINT i=0;i<5;++i)operation.Accesses.push_back({s.BatchIds[i],Mode::ReadWrite,UnorderedAccess});batching.push_back(operation);}
         g.Operations.insert(g.Operations.begin()+5,batching.begin(),batching.end());
     }
-    for(UINT i=0;i<4;++i){s.FrameIds[i]=Id(g.Resources.size());const State state=i<2?0:State(D3D12_RESOURCE_STATE_GENERIC_READ);g.Resources.push_back({"frame constants "+std::to_string(i),state,state,i<2,i<2,i<2?Heap::Default:Heap::Upload});}
-    for(UINT i=0;i<2;++i){g.Operations[2].Accesses.push_back({s.FrameIds[i],Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST});g.Operations[2].Accesses.push_back({s.FrameIds[i+2],Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ});}
-    g.Operations[4].Accesses.push_back({s.FrameIds[1],Mode::Read,D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
-    for(UINT op:{s.Batches?9u:5u,s.Batches?10u:6u})for(UINT i=0;i<2;++i)g.Operations[op].Accesses.push_back({s.FrameIds[i],Mode::Read,D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
-    for(UINT i=0;i<2;++i)g.Operations[s.Batches?12:8].Accesses.push_back({s.FrameIds[i],Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE});
+    for (UINT i = 0; i < (_opaqueOnly ? 2u : 4u); ++i) {
+        s.FrameIds[i] = Id(g.Resources.size());
+        const bool uploadHeap = _opaqueOnly || i >= 2;
+        const State state = uploadHeap ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : 0;
+        g.Resources.push_back({"frame constants " + std::to_string(i), state, state,
+            !uploadHeap, !uploadHeap, uploadHeap ? Heap::Upload : Heap::Default});
+    }
+    if (!_opaqueOnly) for (UINT i = 0; i < 2; ++i) if (s.FrameBuffers[i].Upload) {
+        g.Operations[2].Accesses.push_back({s.FrameIds[i], Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST});
+        g.Operations[2].Accesses.push_back({s.FrameIds[i+2], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
+    }
+    const State frameRead = _opaqueOnly ? D3D12_RESOURCE_STATE_GENERIC_READ : D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER;
+    g.Operations[4].Accesses.push_back({s.FrameIds[1],Mode::Read,frameRead});
+    for(UINT op:{s.Batches?9u:5u,s.Batches?10u:6u})for(UINT i=0;i<2;++i)g.Operations[op].Accesses.push_back({s.FrameIds[i],Mode::Read,frameRead});
+    for(UINT i=0;i<2;++i)g.Operations[s.Batches?12:8].Accesses.push_back({s.FrameIds[i],Mode::Read,_opaqueOnly ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : State(D3D12_RESOURCE_STATE_COPY_SOURCE)});
     s.PrepassId=Id(g.Resources.size());g.Resources.push_back({"depth prepass normals",0,0});
     if(s.EarlyAO)g.Operations[s.Batches?9:5].Accesses.push_back({s.PrepassId,Mode::Write,D3D12_RESOURCE_STATE_RENDER_TARGET});
-    _shadows->Append(g,index);
+    if (_shadows) _shadows->Append(g,index);
     GeometryTarget depthTarget;
     depthTarget.View={s.EarlyAO?GDX12GeometryStage::DepthNormals:GDX12GeometryStage::Depth,_common.CameraView*_common.CameraProjection,_common.CameraView.Invert().Translation(),s.Camera};
     depthTarget.View.Key=1;depthTarget.View.FrameSlot=index;depthTarget.View.DepthFormat=DXGI_FORMAT_D32_FLOAT;
@@ -240,15 +268,16 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechn
     auto gbufferTarget=depthTarget;gbufferTarget.View.Stage=GDX12GeometryStage::GBuffer;gbufferTarget.Dsv=s.ReadDepth.CPUHandle;
     gbufferTarget.View.ColorTargetCount=5;gbufferTarget.Colors.clear();gbufferTarget.Rtvs.clear();
     for(UINT i=0;i<5;++i){gbufferTarget.Colors.push_back(12+i);gbufferTarget.Rtvs.push_back(s.Color[i]->GetRTV()->CPUHandle);gbufferTarget.View.ColorFormats[i]=Formats[i];}
-    auto targets=_shadows->Targets(index);
+    auto targets=_shadows ? _shadows->Targets(index) : std::vector<GeometryTarget>{};
     for(auto& shadow:targets){shadow.View.Eye=depthTarget.View.Eye;shadow.View.CameraConstants=s.Camera;shadow.Camera=s.FrameIds[1];}
     targets.insert(targets.begin(),gbufferTarget);targets.insert(targets.begin(),depthTarget);
     Id earlyEnd=Invalid;
-    s.PlannedBindings=_grass->Append(g,index,Resources(index,target,false),s.Buffers[2].Srv,targets,false,
+    if (_grass) s.PlannedBindings=_grass->Append(g,index,Resources(index,target,false),s.Buffers[2].Srv,targets,false,
         [&](const GeometryTarget& view,Graph& graph,std::vector<ID3D12Resource*>& bindings){
             if(s.EarlyAO && earlyAO && view.View.Key==1 && view.View.Stage==GDX12GeometryStage::GBuffer){earlyAO(graph,bindings);earlyEnd=Id(graph.Operations.size()-1);}
         });
-    _shadows->RepeatReadbacks(g,index);
+    else s.PlannedBindings=Resources(index,target,false);
+    if (_shadows) _shadows->RepeatReadbacks(g,index);
     s.FinalCopy=Id(g.Operations.size());g.Operations.push_back(g.Operations[s.Batches?11:7]);
     s.FinalReadback=Id(g.Operations.size());g.Operations.push_back(g.Operations[s.Batches?12:8]);
     s.BatchReadOperation=Invalid;
@@ -275,7 +304,7 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechn
             if (readback && (operation.SideEffect || std::any_of(accesses.begin(), accesses.end(), [&](const Access& access) {
                 return access.Usage != Mode::Read && g.Resources.at(access.Resource).Memory != Heap::Readback;
             }))) throw std::logic_error("Diagnostic readback also writes a scene resource");
-            return readback;
+            return readback || operation.Accesses.empty();
         }), order.end());
     std::vector<Id> remap(g.Operations.size(),Invalid);for(Id i=0;i<order.size();++i)remap[order[i]]=i;
     Graph reordered;reordered.Resources=std::move(g.Resources);
@@ -295,16 +324,16 @@ std::vector<ID3D12Resource*> SceneGeometry::Resources(UINT index,ID3D12Resource*
     result.insert(result.end(),s.SkinBindings.begin(),s.SkinBindings.end());
     if(s.Batches){for(auto* resource:s.Batcher->RecordingResources())result.push_back(resource);result.push_back(s.BatchCounter.Get());result.push_back(s.BatchReadback.Get());}
     for(const auto& buffer:s.FrameBuffers)result.push_back(buffer.Data.Get());
-    for(const auto& buffer:s.FrameBuffers)result.push_back(buffer.Source.Get());
+    if (!_opaqueOnly) for(const auto& buffer:s.FrameBuffers)result.push_back(buffer.Source.Get());
     result.push_back(s.PrepassNormals->GetResource()->D3DResource.Get());
-    const auto shadows=_shadows->Resources(index); result.insert(result.end(),shadows.begin(),shadows.end());
-    if(grass){const auto& bindings=_grass->Resources(index);result.insert(result.end(),bindings.begin(),bindings.end());}
+    if (_shadows) { const auto shadows=_shadows->Resources(index); result.insert(result.end(),shadows.begin(),shadows.end()); }
+    if(grass && _grass){const auto& bindings=_grass->Resources(index);result.insert(result.end(),bindings.begin(),bindings.end());}
     return result;
 }
 void SceneGeometry::Record(UINT index,Id op,UINT bucket,ID3D12GraphicsCommandList* cmd,ID3D12Resource* target) const {
     const auto& s=_slots.at(index); const auto& b=s.Buffers;
-    if(_shadows->Record(index,op,bucket,cmd)) return;
-    if(_grass->Record(index,op,cmd)) return;
+    if(_shadows && _shadows->Record(index,op,bucket,cmd)) return;
+    if(_grass && _grass->Record(index,op,cmd)) return;
     if(op==s.BatchReadOperation){const auto buffers=s.Batcher->RecordingResources();cmd->CopyBufferRegion(s.BatchReadback.Get(),0,s.BatchCounter.Get(),0,4);cmd->CopyBufferRegion(s.BatchReadback.Get(),4,buffers[1],0,UINT64(s.Draws)*sizeof(GDX12IndirectDrawArgs));cmd->CopyBufferRegion(s.BatchReadback.Get(),4+UINT64(s.Draws)*sizeof(GDX12IndirectDrawArgs),buffers[2],0,UINT64(s.InstanceCount)*4);return;}
     if(op==s.FinalCopy)op=s.Batches?11:7;
     if(op==s.FinalReadback)op=s.Batches?12:8;
@@ -319,12 +348,22 @@ void SceneGeometry::Record(UINT index,Id op,UINT bucket,ID3D12GraphicsCommandLis
     if(op==0) {
         // Four disjoint buckets of each destination share one packet prologue.
         for(UINT i=0;i<4;++i) {
+            if (!b[i].Upload) continue;
             const UINT stride=i==0?sizeof(GDX12InstanceData):i==1?sizeof(GDX12IndirectDrawArgs):i==2?sizeof(GDX12MaterialConstants):sizeof(GDX12TransformConstants);
             const UINT count=UINT(b[i].Bytes/stride),begin=count*bucket/4,end=count*(bucket+1)/4;
-            for(UINT element=begin;element<end;++element)
-                cmd->CopyBufferRegion(b[i].Data.Get(),UINT64(element)*stride,b[i].Source.Get(),UINT64(element)*stride,stride);
+            if (end > begin)
+                cmd->CopyBufferRegion(b[i].Data.Get(), UINT64(begin) * stride,
+                    b[i].Source.Get(), UINT64(begin) * stride, UINT64(end - begin) * stride);
         }
-        for(UINT i=0;i<2;++i){const auto& buffer=s.FrameBuffers[i];const UINT stride=s.FrameStrides[i],count=UINT(buffer.Bytes/stride);for(UINT element=count*bucket/4;element<count*(bucket+1)/4;++element)cmd->CopyBufferRegion(buffer.Data.Get(),UINT64(element)*stride,buffer.Source.Get(),UINT64(element)*stride,stride);}
+        if (!_opaqueOnly) for (UINT i = 0; i < 2; ++i) {
+            const auto& buffer = s.FrameBuffers[i];
+            if (!buffer.Upload) continue;
+            const UINT stride = s.FrameStrides[i], count = UINT(buffer.Bytes / stride);
+            const UINT begin = count * bucket / 4, end = count * (bucket + 1) / 4;
+            if (end > begin)
+                cmd->CopyBufferRegion(buffer.Data.Get(), UINT64(begin) * stride,
+                    buffer.Source.Get(), UINT64(begin) * stride, UINT64(end - begin) * stride);
+        }
         return;
     }
     ID3D12DescriptorHeap* heap=_resources.SRV_UAV_Heap->GetHeap().Get(); cmd->SetDescriptorHeaps(1,&heap);

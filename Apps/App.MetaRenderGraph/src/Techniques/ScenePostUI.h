@@ -18,10 +18,12 @@ namespace Meta
 class ScenePostUI
 {
 public:
-    explicit ScenePostUI(RenderPipelineContext&);
+    explicit ScenePostUI(RenderPipelineContext&, bool opaqueOnly = false);
     ~ScenePostUI();
     GDX12ReconstructionPass& Reconstruction() { return _reconstruction; }
-    std::vector<GDX12RenderPass*> Passes() { return {&_dof, &_blur, &_reconstruction, &_output}; }
+    std::vector<GDX12RenderPass*> Passes(bool opaqueOnly = false) {
+        return opaqueOnly ? std::vector<GDX12RenderPass*>{&_output} : std::vector<GDX12RenderPass*>{&_dof, &_blur, &_reconstruction, &_output};
+    }
     void BeginPlan() { _work.Commands.clear(); }
     void Submitted(UINT slot) { _exports.at(slot) = _pendingExports; }
     bool AllowsFrameGeneration() const;
@@ -32,6 +34,8 @@ public:
     void Reset();
     void Append(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr,
         GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion,
+        GDX12Texture* target, const std::function<void(GDX12CommandList*)>& finish);
+    void AppendOpaque(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr,
         GDX12Texture* target, const std::function<void(GDX12CommandList*)>& finish);
     void AppendPosters(Graph&, std::vector<ID3D12Resource*>&, bool record = true);
     bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd); }

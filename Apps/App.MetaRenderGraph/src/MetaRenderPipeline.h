@@ -12,7 +12,8 @@
 class MetaRenderPipeline final : public IRenderPipeline
 {
   public:
-    explicit MetaRenderPipeline(bool verify = false) : _verify(verify), _diagnosticReadbacks(verify)
+    explicit MetaRenderPipeline(bool verify = false, bool opaqueOnly = false)
+        : _verify(verify), _diagnosticReadbacks(verify), _opaqueOnly(opaqueOnly)
     {
     }
     void SetVerification(bool verify)
@@ -32,7 +33,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     void PrepareMaterialBindings(RenderPipelineContext& c) override
     {
         _executor->Begin(c.Primary.CurrFrameConstantsIndex);
-        _post->PrepareMaterials();
+        if (!_opaqueOnly) _post->PrepareMaterials();
     }
     void DrainExecution() override {
         if (_executor) _executor->Drain();
@@ -43,6 +44,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     }
     void UpdateFrameSettings(RenderPipelineContext& c) override
     {
+        if (_opaqueOnly) return;
         _post->UpdateSettings();
         if (_post->Reconstruction().ApplySettings()) c.Resize();
     }
@@ -62,7 +64,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     }
     bool AllowsFrameGeneration() const override
     {
-        return !_verify && _post && _post->AllowsFrameGeneration();
+        return !_opaqueOnly && !_verify && _post && _post->AllowsFrameGeneration();
     }
     bool PrepareFrame(RenderPipelineContext &, GDX12CommandList *) override;
     void BuildGraph(GDX12RenderGraph &, const RenderPipelineGraphInputs &) override;
@@ -103,6 +105,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     Meta::Schedule _schedule;
     uint32_t _frame = 0;
     bool _verify = false;
+    bool _opaqueOnly = false;
     // The diagnostic host also reads queued frames after paired comparison ends.
     bool _diagnosticReadbacks = false;
     bool _cloudsEnabled = false;

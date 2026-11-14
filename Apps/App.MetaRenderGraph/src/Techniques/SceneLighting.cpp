@@ -20,9 +20,11 @@ void MatrixBytes(float *target, const Matrix &value)
     std::memcpy(target, &value, sizeof(value));
 }
 } // namespace
-SceneLighting::SceneLighting(GDX12DeviceResources &r, RenderPipelineCommonData &c)
-    : _resources(r), _common(c), _reflections(r, c), _frames(r.FrameConstants.size())
+SceneLighting::SceneLighting(GDX12DeviceResources &r, RenderPipelineCommonData &c, bool opaqueOnly)
+    : _resources(r), _common(c), _opaqueOnly(opaqueOnly), _frames(r.FrameConstants.size())
 {
+    if (!opaqueOnly) _reflections = std::make_unique<SceneReflections>(r, c);
+    _deferred._opaqueOnly = opaqueOnly;
     _deferred.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION,true);
     _composition.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION,true);
 }
@@ -45,11 +47,11 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
 {
     if (_pendingReset)
     {
-        _reflections.Reset();
+        if (_reflections) _reflections->Reset();
         _forceReset = {true, true};
         _pendingReset = false;
     }
-    _reflections.Freeze();
+    if (_reflections) _reflections->Freeze();
     _ssrSettings = GetSSRSettings();
     _gridSettings = GetLightGridSettings();
     _slot = slot;
@@ -58,12 +60,15 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
     frame.Width = scene.DepthView->GetWidth();
     frame.Height = scene.DepthView->GetHeight();
     auto *normals = scene.EarlyAO ? scene.PrepassNormals.get() : scene.Color[2].get();
-    if (!frame.AO)
-        frame.AO = std::make_unique<SceneAO>(_resources, _common, scene.DepthView.get(), normals);
-    frame.AO->Freeze(scene.DepthView.get(), normals, _aoTemporalIndex);
-    // The existing CPU cache builder supplies static/dynamic probe decisions.
-    // Its old GPU upload/Execute paths are not called by this executor.
-    _resources.PrepareLocalShadowData();
+    if (!_opaqueOnly)
+    {
+        if (!frame.AO)
+            frame.AO = std::make_unique<SceneAO>(_resources, _common, scene.DepthView.get(), normals);
+        frame.AO->Freeze(scene.DepthView.get(), normals, _aoTemporalIndex);
+        // The existing CPU cache builder supplies static/dynamic probe decisions.
+        // Its old GPU upload/Execute paths are not called by this executor.
+        _resources.PrepareLocalShadowData();
+    }
     auto &constants = *_resources.FrameConstants.at(slot);
     constants.ShadowCB->CopyData(0, _resources.ShadowSettings);
     if (!constants.LocalLightCache->GetElementCount())
@@ -71,6 +76,7 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
         constants.LocalLightCache->Resize(1);
         constants.LocalLightCache->CopyData(0, GDX12LocalLightConstants{});
     }
+    if (_opaqueOnly) return;
     const UINT count = constants.LocalLightCache->GetElementCount();
     if (!constants.ShadowLights)
     {
@@ -88,12 +94,12 @@ void SceneLighting::AppendAO(Graph &graph, std::vector<ID3D12Resource *> &bindin
 }
 bool SceneLighting::Record(Id id, ID3D12GraphicsCommandList *commands) const
 {
-    return _work[_mode].Record(id, commands) || _reflections.Record(id, commands) ||
-           _frames.at(_slot).AO->Record(id, commands);
+    return _work[_mode].Record(id, commands) || (_reflections && _reflections->Record(id, commands)) ||
+           (_frames.at(_slot).AO && _frames.at(_slot).AO->Record(id, commands));
 }
 void SceneLighting::Submitted(bool serial, uint64_t fence)
 {
-    _reflections.Submitted(serial, fence);
+    if (_reflections) _reflections->Submitted(serial, fence);
 }
 void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings, SceneGeometry &geometry,
                            SceneEnvironment &environment, GDX12Texture *target, bool serial)
@@ -112,29 +118,43 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     };
     const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
     auto *heap = _resources.SRV_UAV_Heap->GetHeap().Get();
-    auto *lightSource = constants.LocalLightCache->GetResource().D3DResource.Get();
-    auto *lightTarget = constants.ShadowLights->GetResource().D3DResource.Get();
-    const UINT64 lightBytes = UINT64(constants.LocalLightCache->GetElementCount()) * sizeof(GDX12LocalLightConstants);
-    work.Add(graph, "local-light snapshot upload",
-             {{resource(&constants.LocalLightCache->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
-              {resource(&constants.ShadowLights->GetResource()), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
-             [=](auto *cmd) { cmd->CopyBufferRegion(lightTarget, 0, lightSource, 0, lightBytes); });
-    geometry._shadows->AppendLighting(graph, bindings, _slot);
-    _reflections.Append(graph, bindings, geometry, environment, _slot, serial);
-    if (!scene.EarlyAO)
-        AppendAO(graph, bindings);
+    auto* lights = _opaqueOnly ? constants.LocalLightCache.get() : constants.ShadowLights.get();
+    if (!_opaqueOnly)
+    {
+        auto *lightSource = constants.LocalLightCache->GetResource().D3DResource.Get();
+        auto *lightTarget = constants.ShadowLights->GetResource().D3DResource.Get();
+        const UINT64 lightBytes = UINT64(constants.LocalLightCache->GetElementCount()) * sizeof(GDX12LocalLightConstants);
+        work.Add(graph, "local-light snapshot upload",
+                 {{resource(&constants.LocalLightCache->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
+                  {resource(&constants.ShadowLights->GetResource()), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+                 [=](auto *cmd) { cmd->CopyBufferRegion(lightTarget, 0, lightSource, 0, lightBytes); });
+    }
+    if (!_opaqueOnly)
+    {
+        geometry._shadows->AppendLighting(graph, bindings, _slot);
+        _reflections->Append(graph, bindings, geometry, environment, _slot, serial);
+        if (!scene.EarlyAO)
+            AppendAO(graph, bindings);
+    }
     _deferred.Setup(&_resources, &_common);
     _deferred.SetInputs({scene.Color[0].get(), scene.Color[2].get(), scene.Color[3].get(), scene.Color[4].get(),
-                         scene.DepthView.get(), geometry._shadows->LightingSun(_slot), environment.Output(0),
+                         scene.DepthView.get(), _opaqueOnly ? scene.DepthView.get() : geometry._shadows->LightingSun(_slot), environment.Output(0),
                          environment.Output(1), environment.Output(2), environment.Output(3),
-                         geometry._shadows->LightingLocal(_slot), frame.AO->Output()});
+                         _opaqueOnly ? scene.DepthView.get() : geometry._shadows->LightingLocal(_slot),
+                         _opaqueOnly ? scene.DepthView.get() : frame.AO->Output()});
     if (!_initialized)
     {
         _deferred.Initialize();
-        GDX12RenderHelpers::InitializeRenderTarget(_neutralAccum, _resources, frame.Width, frame.Height,
-                                                   DXGI_FORMAT_R16G16B16A16_FLOAT, {0, 0, 0, 0});
-        GDX12RenderHelpers::InitializeRenderTarget(_neutralReveal, _resources, frame.Width, frame.Height,
-                                                   DXGI_FORMAT_R16_FLOAT, {1, 1, 1, 1});
+        if (_opaqueOnly) for (auto& grid : _deferred._grids)
+            grid.Upload->CreateSRV(_resources.SRV_UAV_Heap.get(),
+                _resources.SRV_UAV_Heap->GetAvailableIndex(105000));
+        if (!_opaqueOnly)
+        {
+            GDX12RenderHelpers::InitializeRenderTarget(_neutralAccum, _resources, frame.Width, frame.Height,
+                                                       DXGI_FORMAT_R16G16B16A16_FLOAT, {0, 0, 0, 0});
+            GDX12RenderHelpers::InitializeRenderTarget(_neutralReveal, _resources, frame.Width, frame.Height,
+                                                       DXGI_FORMAT_R16_FLOAT, {1, 1, 1, 1});
+        }
     }
     else if (_deferred._color->GetWidth() != frame.Width || _deferred._color->GetHeight() != frame.Height)
     {
@@ -142,9 +162,12 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         // is a concrete resize section, never a recording-worker wait.
         _resources.Device->GetCommandQueue()->Flush();
         _deferred.Resize();
-        _neutralAccum.Resize(frame.Width, frame.Height);
-        _neutralReveal.Resize(frame.Width, frame.Height);
-        _composition.Resize();
+        if (!_opaqueOnly)
+        {
+            _neutralAccum.Resize(frame.Width, frame.Height);
+            _neutralReveal.Resize(frame.Width, frame.Height);
+            _composition.Resize();
+        }
         _forceReset = {true, true};
     }
     _deferred._gridSystem.Build(_deferred._grid, _common.CameraProjection, _common.CameraView,
@@ -158,33 +181,41 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         grid.Upload->CopyData(0, _deferred._grid.Masks.data(), words);
     grid.Constants->CopyData(0, _deferred._grid.Constants);
     _deferred._prepared = true;
-    const UINT64 gridBytes = UINT64(words) * sizeof(UINT);
-    auto *gridSource = grid.Upload->GetResource().D3DResource.Get();
-    auto *gridTarget = grid.Masks->GetResource().D3DResource.Get();
-    work.Add(graph, "clustered-light mask upload",
-             {{resource(&grid.Upload->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
-              {resource(&grid.Masks->GetResource()), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
-             [=](auto *cmd) {
-                 if (gridBytes)
-                     cmd->CopyBufferRegion(gridTarget, 0, gridSource, 0, gridBytes);
-             });
+    auto* masks = _opaqueOnly ? grid.Upload.get() : grid.Masks.get();
+    if (!_opaqueOnly)
+    {
+        const UINT64 gridBytes = UINT64(words) * sizeof(UINT);
+        auto *gridSource = grid.Upload->GetResource().D3DResource.Get();
+        auto *gridTarget = grid.Masks->GetResource().D3DResource.Get();
+        work.Add(graph, "clustered-light mask upload",
+                 {{resource(&grid.Upload->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
+                  {resource(&grid.Masks->GetResource()), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
+                 [=](auto *cmd) {
+                     if (gridBytes)
+                         cmd->CopyBufferRegion(gridTarget, 0, gridSource, 0, gridBytes);
+                 });
+    }
     // Placed RT/UAV initialization has its own declared state and packet.
     auto *hdr = _deferred._color->GetResource()->D3DResource.Get();
     work.Add(graph, "initialize deferred HDR target",
              {texture(_deferred._color.get(), Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET)},
              [hdr](auto *cmd) { cmd->DiscardResource(hdr, nullptr); });
     auto lighting = environment.Reads(graph, bindings);
-    for (auto *input : _deferred._inputs)
-        lighting.push_back(texture(input->GetTexture(), Mode::Read, read));
-    lighting.push_back(texture(_reflections.Published(serial), Mode::Read, read));
-    lighting.push_back({resource(&constants.ReflectionProbes->GetResource()), Mode::Read, read});
-    lighting.push_back({resource(&constants.ShadowLights->GetResource()), Mode::Read, read});
-    lighting.push_back({resource(&grid.Masks->GetResource()), Mode::Read, read});
+    for (UINT i = 0; i < _deferred._inputs.size(); ++i)
+        if (!_opaqueOnly || (i != 5 && i != 10 && i != 11))
+            lighting.push_back(texture(_deferred._inputs[i]->GetTexture(), Mode::Read, read));
+    if (_reflections)
+    {
+        lighting.push_back(texture(_reflections->Published(serial), Mode::Read, read));
+        lighting.push_back({resource(&constants.ReflectionProbes->GetResource()), Mode::Read, read});
+    }
+    lighting.push_back({resource(&lights->GetResource()), Mode::Read, _opaqueOnly ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : read});
+    lighting.push_back({resource(&masks->GetResource()), Mode::Read, _opaqueOnly ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : read});
     lighting.push_back({resource(&grid.Constants->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
     lighting.push_back({resource(&constants.ShadowCB->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
     lighting.push_back({resource(&constants.SkyCB->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
-    lighting.push_back({scene.FrameIds[0], Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
-    lighting.push_back({scene.FrameIds[1], Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
+    lighting.push_back({scene.FrameIds[0], Mode::Read, _opaqueOnly ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : State(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)});
+    lighting.push_back({scene.FrameIds[1], Mode::Read, _opaqueOnly ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : State(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)});
     lighting.push_back(texture(_deferred._color.get(), Mode::Write, UnorderedAccess));
     // Environment outputs can occur in both the explicit pass inputs and LUT
     // reads; normalize identical physical reads, rejecting state disagreements.
@@ -205,17 +236,18 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 18> inputs{};
     for (UINT i = 0; i < 12; ++i)
         inputs[i < 11 ? i : 14] = _deferred._inputs[i]->GetTexture()->GetSRV()->GPUHandle;
-    inputs[11] = constants.ShadowLights->GetSRV()->GPUHandle;
-    inputs[12] = _reflections.Radiance(serial);
+    inputs[11] = lights->GetSRV()->GPUHandle;
+    if (_reflections) inputs[12] = _reflections->Radiance(serial);
     inputs[13] = constants.ReflectionProbes->GetSRV()->GPUHandle;
     inputs[15] = _resources.SkyTransmittanceSRV.GPUHandle;
     inputs[16] = _resources.SkyViewSRV.GPUHandle;
-    inputs[17] = grid.Masks->GetSRV()->GPUHandle;
+    inputs[17] = masks->GetSRV()->GPUHandle;
     const std::array<D3D12_GPU_VIRTUAL_ADDRESS, 5> cbvs{
         scene.Main, scene.Camera, constants.ShadowCB->GetElementAddress(0), constants.SkyCB->GetElementAddress(0),
         grid.Constants->GetElementAddress(0)};
     const auto output = _deferred._color->GetUAV()->GPUHandle;
     const UINT width = frame.Width, height = frame.Height;
+    const bool opaqueOnly = _opaqueOnly;
     work.Add(graph, "clustered deferred lighting", unique(lighting), [=](auto *cmd) {
         cmd->SetDescriptorHeaps(1, &heap);
         cmd->SetComputeRootSignature(root->GetRootSignature().Get());
@@ -223,10 +255,18 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         for (UINT i = 0; i < 5; ++i)
             cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(i), cbvs[i]);
         for (UINT i = 0; i < 18; ++i)
-            cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(i), inputs[i]);
+            if (!opaqueOnly || (i != 5 && i != 10 && i != 12 && i != 13 && i != 14))
+                cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(i), inputs[i]);
         cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), output);
         cmd->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
     });
+    if (_opaqueOnly)
+    {
+        _initialized = true;
+        if (!_hdrContinuation) throw std::logic_error("Opaque lighting requires a display continuation");
+        _hdrContinuation(graph, bindings, _deferred._color.get(), nullptr);
+        return;
+    }
     auto &ssr = _ssr[_mode];
     const std::vector<IRenderPassLink *> ssrInputs{_deferred._color.get(), scene.DepthView.get(), scene.Color[2].get(),
                                                    scene.Color[3].get(),   scene.Color[1].get(),  environment.Output(1),
@@ -268,7 +308,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         const Matrix view = _common.CameraView, projection = _common.CameraProjection,
                      viewProjection = view * projection;
         const XMFLOAT2 jitter{_common.ActiveCameraJitterOffsetX, _common.ActiveCameraJitterOffsetY};
-        const auto history = _reflections.History(serial);
+        const auto history = _reflections->History(serial);
         // Frame-local GBuffer addresses rotate with frame slots. They are not
         // history discontinuities. The SDK's private denoiser history persists
         // across those imports and is retired/recreated only on real resets.
@@ -297,7 +337,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
             srvs[i] = p._inputs[i]->GetTexture()->GetSRV()->GPUHandle;
         srvs[7] = p._radiance.GetSRV()->GPUHandle;
         srvs[8] = p._fallback.GetSRV()->GPUHandle;
-        srvs[9] = _reflections.Radiance(serial);
+        srvs[9] = _reflections->Radiance(serial);
         srvs[10] = constants.ReflectionProbes->GetSRV()->GPUHandle;
         const auto bind = [=](auto *cmd, bool resolvedInputs) {
             cmd->SetDescriptorHeaps(1, &heap);
@@ -311,7 +351,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         std::vector<Access> ssrReads;
         for (auto *input : p._inputs)
             ssrReads.push_back(texture(input->GetTexture(), Mode::Read, read));
-        ssrReads.push_back(texture(_reflections.Published(serial), Mode::Read, read));
+        ssrReads.push_back(texture(_reflections->Published(serial), Mode::Read, read));
         ssrReads.push_back({resource(&constants.ReflectionProbes->GetResource()), Mode::Read, read});
         ssrReads.push_back({scene.FrameIds[1], Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
         ssrReads.push_back({resource(&p._constants->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
@@ -448,7 +488,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     });
     auto* displayHDR = _composition.OUT_Result.get();
     if (_hdrContinuation)
-        displayHDR = _hdrContinuation(graph, bindings, &p._color, _reflections.Published(serial));
+        displayHDR = _hdrContinuation(graph, bindings, &p._color, _reflections->Published(serial));
     if (!_hdrContinuation)
     {
     // A diagnostic display of intermediate HDR only; U7 reconstruction, output
@@ -559,7 +599,7 @@ std::vector<uint8_t> SceneLighting::Readback(UINT slot, const std::string &stem)
         }
     }
     frame.Readback->Unmap(0, &noWrite);
-    const auto probes = _reflections.Readback(slot, stem);
+    const auto probes = _reflections->Readback(slot, stem);
     result.insert(result.end(), probes.begin(), probes.end());
     if (!stem.empty())
     {

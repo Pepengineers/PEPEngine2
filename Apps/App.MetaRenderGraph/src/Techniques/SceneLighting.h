@@ -9,7 +9,7 @@ namespace Meta
 class SceneLighting
 {
   public:
-    SceneLighting(GDX12DeviceResources &, RenderPipelineCommonData &);
+    SceneLighting(GDX12DeviceResources &, RenderPipelineCommonData &, bool opaqueOnly = false);
     ~SceneLighting();
     void Freeze(SceneGeometry &, UINT slot);
     void AppendAO(Graph &, std::vector<ID3D12Resource *> &);
@@ -20,11 +20,11 @@ class SceneLighting
     void SetHDRContinuation(HDRContinuation continuation) { _hdrContinuation = std::move(continuation); }
     bool Record(Id, ID3D12GraphicsCommandList *) const;
     void Submitted(bool serial, uint64_t fence);
-    D3D12_GPU_DESCRIPTOR_HANDLE ProbeRadiance(bool serial) const { return _reflections.Radiance(serial); }
+    D3D12_GPU_DESCRIPTOR_HANDLE ProbeRadiance(bool serial) const { return _reflections->Radiance(serial); }
     void Reset();
     std::pair<size_t, size_t> Readiness() const
     {
-        return _pendingReset ? std::pair<size_t, size_t>{} : _reflections.Readiness();
+        return _pendingReset || !_reflections ? std::pair<size_t, size_t>{} : _reflections->Readiness();
     }
     std::vector<uint8_t> Readback(UINT slot, const std::string &stem) const;
     // Append consumers in this frame's graph. These pointers do not publish a
@@ -55,7 +55,8 @@ class SceneLighting
     HDRContinuation _hdrContinuation;
     GDX12DeviceResources &_resources;
     RenderPipelineCommonData &_common;
-    SceneReflections _reflections;
+    std::unique_ptr<SceneReflections> _reflections;
+    bool _opaqueOnly = false;
     std::vector<Frame> _frames;
     GDX12DeferredLightingPass _deferred;
     GDX12WBOITCompositionPass _composition;

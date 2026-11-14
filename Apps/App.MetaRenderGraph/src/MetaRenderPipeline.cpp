@@ -57,17 +57,19 @@ void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
 {
     // Slot-local AO and paired scene owners exceed the legacy transient range.
     c.Primary.SRV_UAV_Heap->UseTransientDescriptorTail();
-    _post = std::make_unique<Meta::ScenePostUI>(c);
-    _geometry = std::make_unique<Meta::SceneGeometry>(c);
+    _post = std::make_unique<Meta::ScenePostUI>(c, _opaqueOnly);
+    _geometry = std::make_unique<Meta::SceneGeometry>(c, _opaqueOnly);
     _environment = std::make_unique<Meta::SceneEnvironment>(c.Primary, c.Common);
-    _lighting = std::make_unique<Meta::SceneLighting>(c.Primary, c.Common);
-    _waterParticles = std::make_unique<Meta::SceneWaterParticles>(c);
+    _lighting = std::make_unique<Meta::SceneLighting>(c.Primary, c.Common, _opaqueOnly);
+    if (!_opaqueOnly) _waterParticles = std::make_unique<Meta::SceneWaterParticles>(c);
     _sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_GEOMETRY, true);
     _sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_MATERIALS, true);
-    _bindings.PrimaryPasses = _post->Passes();
+    _bindings.PrimaryPasses = _post->Passes(_opaqueOnly);
     _bindings.PrimaryPasses.push_back(&_sceneFlags);
-    _bindings.Reconstruction = &_post->Reconstruction();
-    _bindings.FrameGenerationInputs = true;
+    _bindings.Reconstruction = _opaqueOnly ? nullptr : &_post->Reconstruction();
+    _bindings.FrameGenerationInputs = !_opaqueOnly;
+    if (_opaqueOnly && (MetaWater.GetValue() || MetaParticles.GetValue() || MetaCrossAdapter.GetValue()))
+        throw std::invalid_argument("Opaque Bistro does not include secondary-adapter techniques");
     const auto frames=static_cast<uint32_t>(c.Primary.FrameConstants.size());
     if (MetaWater.GetValue() || MetaParticles.GetValue()) {
         if (_verify || MetaCrossAdapter.GetValue())
@@ -106,12 +108,13 @@ void MetaRenderPipeline::BuildGraph(GDX12RenderGraph &, const RenderPipelineGrap
 void MetaRenderPipeline::RebuildExecution(RenderPipelineContext &c)
 {
     _executor->Drain();
-    _waterParticles->Resize();
+    if (_waterParticles) _waterParticles->Resize();
     _geometry->Resize(c.Common.DownscaledWidth, c.Common.DownscaledHeight);
     _environment->Resize();
 }
 bool MetaRenderPipeline::PrepareFrame(RenderPipelineContext &c, GDX12CommandList *)
 {
+    if (_opaqueOnly) { c.Common.AOAfterDepthPrepass = false; return false; }
     c.Common.AOAfterDepthPrepass = GetAmbientOcclusionExecutionPoint() == 0 && GetAmbientOcclusionSettings().IsActive();
     _geometry->PrepareGrass(c, _verify ? 1.f / 60.f : c.Common.GameTimer->DeltaTime());
     c.PrepareScene().Complete();
@@ -134,20 +137,20 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
 {
     struct ResetOnFailure
     {
-        Meta::SceneWaterParticles& Techniques;
+        Meta::SceneWaterParticles* Techniques;
         int Exceptions = std::uncaught_exceptions();
-        ~ResetOnFailure() { if (std::uncaught_exceptions() > Exceptions) Techniques.Reset(); }
-    } resetOnFailure{*_waterParticles};
+        ~ResetOnFailure() { if (Techniques && std::uncaught_exceptions() > Exceptions) Techniques->Reset(); }
+    } resetOnFailure{_waterParticles.get()};
     const bool verify = _verify;
     const auto slot = c.Primary.CurrFrameConstantsIndex;
-    _geometry->Freeze(slot, c.Common.ActiveCameraCBufferIndex, c.Runtime.FreezeSkeletalMeshes());
+    _geometry->Freeze(slot, c.Common.ActiveCameraCBufferIndex, _opaqueOnly ? std::vector<GDX12SkinningWork>{} : c.Runtime.FreezeSkeletalMeshes());
     if (verify && !_environmentTestsRun)
     {
         RunEnvironmentGpuTests(c.Primary, c.Common);
         _environment->RestoreViewsAfterBaseline();
         _environmentTestsRun = true;
     }
-    if (_cloudsEnabled != MetaClouds.GetValue())
+    if (!_opaqueOnly && _cloudsEnabled != MetaClouds.GetValue())
     {
         _cloudsEnabled = MetaClouds.GetValue();
         GDX12CloudParameters parameters;
@@ -159,13 +162,14 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
     const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
     _environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0);
     _lighting->Freeze(*_geometry, slot);
-    _waterParticles->Prepare(float(delta));
+    if (_waterParticles) _waterParticles->Prepare(float(delta));
     auto *target = c.BackBuffer->GetCurrentBuffer();
     bool recordingSerial = verify;
     const auto append = [&](Meta::Graph &g, std::vector<ID3D12Resource *> &bindings) {
         _post->BeginPlan();
         _environment->Append(g, bindings);
         _lighting->SetHDRContinuation([&](auto& graph, auto& resources, auto* hdr, auto* probes) {
+            if (_opaqueOnly) { _post->AppendOpaque(graph, resources, hdr, target, finish); return hdr; }
             auto* finalHDR = _waterParticles->Append(graph, resources, *_geometry, *_environment, hdr, probes,
                 _lighting->ProbeRadiance(recordingSerial), recordingSerial);
             // Diagnostic A/B still compares the existing geometry/lighting readbacks.
@@ -188,7 +192,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         _lighting->AppendAO(g, bindings);
     };
     const auto prelude = [&](Meta::Graph& graph, std::vector<ID3D12Resource*>& resources) {
-        _post->AppendPosters(graph, resources, !verify || recordingSerial);
+        if (!_opaqueOnly) _post->AppendPosters(graph, resources, !verify || recordingSerial);
     };
     const auto reserve = [&] {
         uint64_t lists = 0;
@@ -223,13 +227,20 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
     _schedule = _geometry->Plan(slot, target->GetResource()->D3DResource.Get(), append, earlyAO, prelude,
         verify || !MetaAsyncQueues.GetValue(), _diagnosticReadbacks);
     reserve();
+    if (_opaqueOnly && (_frame++ == 0 || _frame == _geometry->SlotCount() + 1))
+    {
+        const auto name = _frame == 1 ? "opaque-operations.txt" : "opaque-steady-operations.txt";
+        std::ofstream operations(Engine::Core::GetExecutableDirectory() / "Logs" / name);
+        _geometry->WriteOperations(slot, operations, &_schedule);
+        Log::Info("MetaRenderGraph", "Bistro opaque: depth prepass, GBuffer, PBR, static IBL, display; legacy Execute calls=", GDX12RenderGraph::GetExecuteCallCount());
+    }
     if (verify)
     {
         const auto stem =
             (Engine::Core::GetExecutableDirectory() / "Logs" / ("geometry-" + std::to_string(_frame))).string();
         const auto bindings = _geometry->PlannedResources(slot);
         const auto record = [&](Meta::Id op, uint32_t list, ID3D12GraphicsCommandList *cmd) {
-            if (!_environment->Record(op, cmd) && !_lighting->Record(op, cmd) && !_waterParticles->Record(op, cmd) && !_post->Record(op, cmd))
+            if (!_environment->Record(op, cmd) && !_lighting->Record(op, cmd) && !(_waterParticles && _waterParticles->Record(op, cmd)) && !_post->Record(op, cmd))
                 _geometry->Record(slot, op, list, cmd, target->GetResource()->D3DResource.Get());
         };
         const auto serialCompletion = execute(bindings,record,prefix,true);
@@ -269,7 +280,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         [&](Meta::Id op, uint32_t list, ID3D12GraphicsCommandList *cmd) {
             if (!(_crossAdapter && _crossAdapter->Record(op,cmd)) && !(_waterTransfer && _waterTransfer->Record(op,cmd)) &&
                 !(_particleTransfer && _particleTransfer->Record(op,cmd)) &&
-                !_environment->Record(op, cmd) && !_lighting->Record(op, cmd) && !_waterParticles->Record(op, cmd) && !_post->Record(op, cmd))
+                !_environment->Record(op, cmd) && !_lighting->Record(op, cmd) && !(_waterParticles && _waterParticles->Record(op, cmd)) && !_post->Record(op, cmd))
                 _geometry->Record(slot, op, list, cmd, target->GetResource()->D3DResource.Get());
         },
         prefix);

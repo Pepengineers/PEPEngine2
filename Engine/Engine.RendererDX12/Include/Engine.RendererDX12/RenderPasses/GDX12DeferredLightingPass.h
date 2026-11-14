@@ -47,7 +47,8 @@ public:
         const bool waveOps = SUCCEEDED(_resources->Device->GetDevice()->CheckFeatureSupport(
             D3D12_FEATURE_D3D12_OPTIONS1, &options, sizeof(options))) && options.WaveOps &&
             _resources->Device->GetDeviceFeatures().Features.HighestShaderModel() >= D3D_SHADER_MODEL_6_0;
-        const D3D_SHADER_MACRO defines[] = { { "DEFERRED_WAVE_OPS", waveOps ? "1" : "0" }, { nullptr, nullptr } };
+        const D3D_SHADER_MACRO defines[] = { { "DEFERRED_WAVE_OPS", waveOps ? "1" : "0" },
+            { "DEFERRED_OPAQUE_ONLY", _opaqueOnly ? "1" : "0" }, { nullptr, nullptr } };
         _pipeline = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(),
             SHADERS_FOLDER "DeferredLighting.hlsl", "CS", defines);
         _grids.resize(_resources->FrameConstants.size());
@@ -118,6 +119,7 @@ public:
     }
 private:
     friend class Meta::SceneLighting;
+    bool _opaqueOnly = false;
     bool _prepared = false;
     struct FrameGrid
     {
