@@ -1,3 +1,30 @@
+# Current cross-adapter transport source status — 2026-11-14
+
+Base: local `codex/bistro-rendering` at
+`19fdc78a00d837c50595d99bb7db7b3dfe7b0349`, including the ordinary reviewed U8
+merge. This section supersedes the earlier one-device/future-transport status.
+**Source implemented; unbuilt/unrun, hardware acceptance pending.**
+
+| Boundary | Source ownership / publication | Deferred evidence |
+|---|---|---|
+| Explicit physical pair | `CrossAdapterTransfer`: actual primary LUID + explicit hardware secondary DXGI index; only two contexts, no same-device/software fallback. | Actual adapters/LUIDs/sharing support have not been exercised. |
+| Common submissions | `QueueSubmission` owns all executor Wait/Execute/Signal transactions for both devices; native resource/list owner, device incarnation and issued token checks. Existing Executor is the per-loop recording context. | Native queue timeline and failure injection pending. |
+| Deterministic fixture | Independent secondary COMPUTE produce/pack → secondary COPY export → shared ready fence → separate primary COPY import → two DIRECT reader copies in the real opt-in Meta frame plan. | Header/data bytes and GPU execution pending; no water/particle migration or visualization claim. |
+| Three lifetimes | Three fixed packed/shared/display slots: export completion / import completion / all display readers plus leases. One atomic metadata/size/sequence/generation/data publication. | Ring rotations, two readers, full-ring and no-Present scenarios pending. |
+| Strict / LatestCompleted | Strict links an issued export through import to the selected reader; optional exact sequence returns unavailable without inventing future fences. Latest retains completed Current while separate COPY import fills Pending; import/secondary terminals are outside frame DIRECT join. | Distinct version selection and absence of future-producer waits pending. |
+| Independent producer / lifecycle | Frozen inputs and separate Recorder/JobSystem; compute-only steps under publication backpressure. Source-connected parallel recording contexts; safe world-drain pause/resume and canceled reservation cleanup. Whole-domain quarantine on unknown submission/removal, including before any saved token. | CPU overlap, cancellation/removal/shutdown/resize and regression acceptance pending. |
+
+Startup opt-in is `Meta.CrossAdapter.Enabled=false` by default with an explicit
+`Meta.CrossAdapter.SecondaryAdapter`; selection 0=Strict, 1=LatestCompleted.
+Production App remains unchanged; old water/particle workers stay disabled in
+the experiment. [09-cross-adapter-transport.md](09-cross-adapter-transport.md)
+records exact API, lifetime/queue boundaries, memory counts and static review.
+**NOT RUN:** all builds/compilation/tests/scripts/apps/GPU/readbacks/visuals/
+benchmarks/profiling. No hardware acceptance, measured overlap or speedup.
+Originating-chat review/local merge remain separate; no next stage started.
+
+---
+
 # Current async single-GPU source status — 2026-11-14
 
 Base: local `codex/bistro-rendering` at
