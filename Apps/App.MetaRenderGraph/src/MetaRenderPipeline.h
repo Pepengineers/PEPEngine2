@@ -11,7 +11,7 @@
 class MetaRenderPipeline final : public IRenderPipeline
 {
   public:
-    explicit MetaRenderPipeline(bool verify = false) : _verify(verify)
+    explicit MetaRenderPipeline(bool verify = false) : _verify(verify), _diagnosticReadbacks(verify)
     {
     }
     void SetVerification(bool verify)
@@ -24,6 +24,7 @@ class MetaRenderPipeline final : public IRenderPipeline
             if (_post) _post->Reset();
         }
         _verify = verify;
+        _diagnosticReadbacks |= verify;
     }
     void ValidateQueued();
     bool OwnsScreenUI() const override { return true; }
@@ -98,6 +99,8 @@ class MetaRenderPipeline final : public IRenderPipeline
     Meta::Schedule _schedule;
     uint32_t _frame = 0;
     bool _verify = false;
+    // The diagnostic host also reads queued frames after paired comparison ends.
+    bool _diagnosticReadbacks = false;
     bool _cloudsEnabled = false;
     bool _environmentTestsRun = false;
 };
