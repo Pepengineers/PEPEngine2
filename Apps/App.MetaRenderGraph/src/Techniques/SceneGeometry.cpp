@@ -162,7 +162,7 @@ void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork>
         s.SceneReadback=_resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(bytes),D3D12_RESOURCE_STATE_COPY_DEST);
     }
 }
-Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechnique& append,const AppendTechnique& earlyAO,const AppendTechnique& prelude,bool singleDirect) {
+Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechnique& append,const AppendTechnique& earlyAO,const AppendTechnique& prelude,bool singleDirect,bool diagnosticReadbacks) {
     auto& s=_slots.at(index);s.PlannedBindings.clear();
     Graph g;
     for(UINT i=0;i<8;++i) g.Resources.push_back({"scene buffer "+std::to_string(i),0,0,true,true});
@@ -257,17 +257,29 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechn
     const Id preludeBegin=Id(g.Operations.size());
     if(prelude)prelude(g,s.PlannedBindings);
     s.Names.clear();for(const auto& operation:g.Operations)s.Names.push_back(operation.Name);
-    if(earlyEnd==Invalid && !append && preludeBegin==g.Operations.size())return Compile(g,singleDirect);
+    if(diagnosticReadbacks && earlyEnd==Invalid && !append && preludeBegin==g.Operations.size())return Compile(g,singleDirect);
     // Keep callback IDs while placing UI producers first and early AO before
     // GBuffer. Full scene output replaces diagnostic swapchain copies, whose
-    // extents need not match the render grid; final readbacks remain intact.
+    // extents need not match the render grid. Readbacks belong to the diagnostic host.
     const Id mesh=s.Batches?10:6,copy=s.Batches?11:7,read=s.Batches?12:8;
     std::vector<Id> order;
     for(Id id=preludeBegin;id<g.Operations.size();++id)order.push_back(id);
     for(Id id=0;id<preludeBegin;++id){if(append && (id==copy || id==s.FinalCopy))continue;if(earlyEnd!=Invalid && (id==mesh || id==copy || id==read))continue;order.push_back(id);if(id==earlyEnd)order.push_back(mesh);}
+    if (!diagnosticReadbacks)
+        order.erase(std::remove_if(order.begin(), order.end(), [&](Id id) {
+            const auto& operation = g.Operations[id];
+            const auto& accesses = operation.Accesses;
+            const bool readback = std::any_of(accesses.begin(), accesses.end(), [&](const Access& access) {
+                return g.Resources.at(access.Resource).Memory == Heap::Readback;
+            });
+            if (readback && (operation.SideEffect || std::any_of(accesses.begin(), accesses.end(), [&](const Access& access) {
+                return access.Usage != Mode::Read && g.Resources.at(access.Resource).Memory != Heap::Readback;
+            }))) throw std::logic_error("Diagnostic readback also writes a scene resource");
+            return readback;
+        }), order.end());
     std::vector<Id> remap(g.Operations.size(),Invalid);for(Id i=0;i<order.size();++i)remap[order[i]]=i;
     Graph reordered;reordered.Resources=std::move(g.Resources);
-    for(auto id:order){auto op=std::move(g.Operations[id]);for(auto& dep:op.Dependencies){dep=remap.at(dep);if(dep==Invalid)throw std::logic_error("Early AO removed an explicit producer");}reordered.Operations.push_back(std::move(op));}
+    for(auto id:order){auto op=std::move(g.Operations[id]);for(auto& dep:op.Dependencies){dep=remap.at(dep);if(dep==Invalid)throw std::logic_error("Scene plan removed an explicit producer");}reordered.Operations.push_back(std::move(op));}
     auto schedule=Compile(reordered,singleDirect);for(auto& packet:schedule.Packets)if(packet.Operation!=Invalid)packet.Operation=order.at(packet.Operation);return schedule;
 }
 std::vector<ID3D12Resource*> SceneGeometry::Resources(UINT index,ID3D12Resource* target,bool grass) const {

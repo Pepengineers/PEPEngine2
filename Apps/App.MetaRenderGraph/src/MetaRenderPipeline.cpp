@@ -191,7 +191,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
     };
     _geometry->Select(verify);
     _schedule = _geometry->Plan(slot, target->GetResource()->D3DResource.Get(), append, earlyAO, prelude,
-        verify || !MetaAsyncQueues.GetValue());
+        verify || !MetaAsyncQueues.GetValue(), _diagnosticReadbacks);
     reserve();
     if (verify)
     {
@@ -212,7 +212,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         _geometry->Select(false);
         recordingSerial = false;
         _schedule = _geometry->Plan(slot, target->GetResource()->D3DResource.Get(), append, earlyAO, prelude,
-            !MetaAsyncQueues.GetValue());
+            !MetaAsyncQueues.GetValue(), _diagnosticReadbacks);
         reserve();
         std::ofstream schedule(stem + "-schedule.txt");
         _schedule.Write(schedule);
