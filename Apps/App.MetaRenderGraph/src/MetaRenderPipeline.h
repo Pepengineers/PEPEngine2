@@ -29,7 +29,7 @@ class MetaRenderPipeline final : public IRenderPipeline
         _executor->Begin(c.Primary.CurrFrameConstantsIndex);
         _post->PrepareMaterials();
     }
-    void DrainExecution() override { if (_executor) _executor->Drain(); }
+    void DrainExecution() override { if (_executor) _executor->Drain(); if (_post) _post->ReleasePresentation(); }
     void UpdateFrameSettings(RenderPipelineContext& c) override
     {
         _post->UpdateSettings();

@@ -27,6 +27,7 @@ public:
     bool AllowsFrameGeneration() const;
     void UpdateSettings();
     void PrepareMaterials();
+    void ReleasePresentation() { for (auto& slot : _slots) slot.CompositeOwner.reset(); }
     void Resize(); // Caller drains the executor and the presentation queue first.
     void Reset();
     void Append(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr,

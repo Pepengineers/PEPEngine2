@@ -41,6 +41,40 @@ int main() { try {
     Check(s.Decays[0] && s.Packets.back().Before.empty(),"buffer must decay before terminal packet");
     for(size_t i=0;i<3;++i) Check(s.Packets[i].Before.size()==1 && s.Packets[i].Before[0].Before==0 && !s.Packets[i].Before[0].Uav,"per-submission COMMON contract");
     decay.Resources[0].Final=8; rejects(decay);
+    Graph queues;
+    queues.Resources={{"buffer",0,0,true,true}};
+    queues.Operations={{"copy",{{0,Mode::Write,0x400}}},{"compute",{{0,Mode::ReadWrite,8}}},
+        {"direct reader",{{0,Mode::Read,0x800}}},{"compute reader",{{0,Mode::Read,0x800}}},
+        {"copy reuse",{{0,Mode::Write,0x400}}}};
+    queues.Operations[0].Target=queues.Operations[4].Target=Queue::Copy;
+    queues.Operations[1].Target=queues.Operations[3].Target=Queue::Compute;
+    s=Compile(queues);
+    Check(Depends(s,4,2)&&Depends(s,4,3),"COPY reuse must join both queue readers");
+    Check(s.Packets[0].Target==Queue::Copy && s.Packets[1].Target==Queue::Compute,"queue placement lost");
+    for(const auto& p:Compile(queues,true).Packets) Check(p.Target==Queue::Direct,"single-DIRECT override lost");
+    bad=queues; bad.Operations[1].Accesses[0].Required=4; rejects(bad);
+    bad=queues; bad.Operations[0].Accesses[0].Required=8; rejects(bad);
+    bad=queues; bad.Operations[0].Dependencies={4}; rejects(bad);
+    Graph fixed;
+    fixed.Resources={{"upload",0xac3,0xac3,false,false,Heap::Upload},
+        {"readback",0x400,0x400,false,false,Heap::Readback}};
+    fixed.Operations={{"copy",{{0,Mode::Read,0xac3},{1,Mode::Write,0x400}}}};
+    fixed.Operations[0].Target=Queue::Copy;
+    s=Compile(fixed);
+    Check(s.Packets[0].Before.empty()&&s.Packets[0].After.empty(),"fixed heaps must never transition");
+    bad=fixed; bad.Operations[0].Accesses[0].Usage=Mode::Write; rejects(bad);
+    bad=fixed; bad.Operations[0].Accesses[1].Usage=Mode::Read; rejects(bad);
+    bad=fixed; bad.Resources[0].Final=0; rejects(bad);
+    bad=fixed; bad.Resources[1].Decays=true; rejects(bad);
+    Graph imported;
+    imported.Resources={{"SRV texture",0xc0,0xc0}};
+    imported.Operations={{"compute",{{0,Mode::Read,0x40}}}};
+    imported.Operations[0].Target=Queue::Compute;
+    s=Compile(imported);
+    Check(s.Packets.size()==3 && s.Packets[0].Target==Queue::Direct && s.Packets[0].Operation==Invalid,
+        "illegal imported COMPUTE state needs a DIRECT release");
+    Check(Depends(s,1,0)&&s.Packets[1].After.size()==1&&s.Packets[1].After[0].After==0,
+        "texture handoff must release and fence before queue acquire");
     std::cout << "PASS PlanTests: WAR/RAW/WAW, diamond, UAV, boundaries, cycle/unknown, empty, multi-list, multi-input, determinism\n";
     return 0;
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;} }

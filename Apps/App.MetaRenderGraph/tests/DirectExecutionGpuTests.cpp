@@ -42,6 +42,21 @@ void RunDirectExecutionGpuTests(GDX12Device& device) {
         Check(executor.Tokens().back()>0,"missing submitted token");
     }
     executor.Drain(); fixture.Validate(0); fixture.Validate(1);
+    // The same exact numeric/pixel oracle must execute on actual COPY/COMPUTE lists.
+    const auto asyncSchedule=fixture.Plan(D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_COMMON,true);
+    std::ofstream asyncTrace(Engine::Core::GetExecutableDirectory()/"Logs/async-schedule.txt");
+    asyncSchedule.Write(asyncTrace);
+    Check(asyncSchedule.Packets.front().Target==Meta::Queue::Direct,"async independent DIRECT prefix missing");
+    for(uint32_t frame=0;frame<8;++frame) {
+        const auto slot=frame%2;
+        executor.Begin(slot); fixture.Validate(slot); fixture.Prepare(slot,frame/2+1);
+        executor.Execute(asyncSchedule,fixture.Resources(slot,target.Get()),[&](Meta::Id op,uint32_t list,ID3D12GraphicsCommandList* cmd) {
+            fixture.Record(slot,op,list,cmd,target.Get(),rtv,32,32);
+        },nullptr,nullptr,frame%2==0);
+        for(auto token:executor.Tokens()) Check(token>0,"async packet completion not issued");
+    }
+    executor.Drain(); fixture.Validate(0); fixture.Validate(1);
+    Log::Info("MetaRenderGraph","PASS AsyncQueuesGpuTests: COPY/COMPUTE/DIRECT; exact two-reader WAR/pixel/buffer; serial/parallel; 8 frames/2 slots");
     D3D12_RANGE seamRange{0,4}; ThrowIfFailed(seamReadback->Map(0,&seamRange,&mapped));
     const bool seamValid=static_cast<const uint32_t*>(mapped)[0]==0x12345678;
     seamReadback->Unmap(0,&noRead);

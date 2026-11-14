@@ -41,10 +41,9 @@ namespace
         Require(console.FindConsoleVariable(L"Render.Particles.SecondaryAdapter").GetInt() == -1, "Particle offload must be disabled");
         Require(!console.FindConsoleVariable(L"Render.Particles.AsyncCompute").GetBool(), "Particle async must be disabled");
         Require(!console.FindConsoleVariable(L"Render.AO.AsyncCompute").GetBool(), "AO async must be disabled");
-        IConsoleVariable* water = nullptr;
-        Require(!console.TryFindConsoleVariable(L"Render.Fluid.SecondaryAdapter", water), "Experiment must not link Bistro water runtime");
+        Require(console.FindConsoleVariable(L"Render.Fluid.SecondaryAdapter").GetInt() == -1, "Water offload must be disabled");
         Require(!console.FindConsoleVariable(L"Render.Grass.AsyncCompute").GetBool(),"Grass async must be disabled");
-        Log::Info("MetaRenderGraph", "U4 SCENE EXECUTOR; primary=0; particle secondary=-1; water runtime absent; single DIRECT execution");
+        Log::Info("MetaRenderGraph", "U8 SCENE EXECUTOR; primary=0; particle/water secondary=-1; local-only simulation; explicit Meta queues");
     }
 
     class MetaApplication final : public App
@@ -204,6 +203,14 @@ namespace
             Log::Info("MetaRenderGraph","U4 resource allocation after queued frames bytes=",finalMemory.AllocationBytes," count=",finalMemory.AllocationCount," block bytes=",finalMemory.BlockBytes);
             Require(GDX12RenderGraph::GetExecuteCallCount() == 0, "Experiment called legacy graph Execute");
             Log::Info("MetaRenderGraph", "Runtime legacy graph Execute calls=0");
+            std::ofstream validation(Engine::Core::GetExecutableDirectory()/"Logs/d3d12-messages.txt");
+            const auto discarded=info->GetNumMessagesDiscardedByMessageCountLimit();
+            validation << "stored=" << info->GetNumStoredMessages()
+                << " allowed=" << info->GetNumMessagesAllowedByStorageFilter()
+                << " denied=" << info->GetNumMessagesDeniedByStorageFilter()
+                << " discarded=" << discarded << " limit=" << info->GetMessageCountLimit() << '\n';
+            bool validationFailed=discarded!=0;
+            UINT64 severityCounts[5]{};
             for (UINT64 i = 0; i < info->GetNumStoredMessages(); ++i)
             {
                 SIZE_T size = 0;
@@ -211,8 +218,13 @@ namespace
                 std::vector<BYTE> bytes(size);
                 auto* message = reinterpret_cast<D3D12_MESSAGE*>(bytes.data());
                 ThrowIfFailed(info->GetMessage(i, message, &size));
-                if (message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR) throw std::runtime_error(message->pDescription);
+                validation << "severity=" << message->Severity << " id=" << message->ID << " " << message->pDescription << '\n';
+                ++severityCounts[message->Severity];
+                validationFailed |= message->Severity <= D3D12_MESSAGE_SEVERITY_ERROR;
             }
+            for(UINT i=0;i<5;++i) validation << "severity_count " << i << " " << severityCounts[i] << '\n';
+            validation.close();
+            Require(!validationFailed,"D3D12 validation failed; see Logs/d3d12-messages.txt");
             const auto root = Engine::Core::GetExecutableDirectory() / "Logs";
             std::ofstream graph(root / "reference.dot");
             renderer->WriteRenderGraph(graph);

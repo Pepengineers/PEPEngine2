@@ -160,6 +160,10 @@ uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Reso
         for(uint32_t j=0;j<p.Lists+2;++j) {
             const auto index=offsets[q]+used[q]++;
             auto* cmd=lists[index]->Commands.Get();
+#ifdef _DEBUG
+            const auto label=L"Meta packet "+std::to_wstring(i)+L" operation "+std::to_wstring(p.Operation)+L" list "+std::to_wstring(j);
+            ThrowIfFailed(cmd->SetName(label.c_str()));
+#endif
             if(cmd->GetType()!=ListType(p.Target)) throw std::logic_error("packet/list queue mismatch");
             packets.back().push_back(cmd);
             RecordingGroup leaf{"list "+std::to_string(i)+":"+std::to_string(j),{},[&,i,j,cmd,index] {

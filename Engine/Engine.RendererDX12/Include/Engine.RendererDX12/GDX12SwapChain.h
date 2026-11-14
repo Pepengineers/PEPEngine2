@@ -19,6 +19,7 @@ public:
 
     void Resize(UINT width, UINT height);
     void Present();
+    bool NeedsPresentationReset() const;
     void BeginFrame(RenderPipelineCommonData&);
     void SetFrameGenerationSuspended(bool);
     GDX12FrameGeneration& GetFrameGeneration();

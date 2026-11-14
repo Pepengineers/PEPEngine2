@@ -357,7 +357,8 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
             cmd->SetGraphicsRootConstantBufferView(root->GetBRootParamIndex(3), shadowCB);
             cmd->SetGraphicsRootConstantBufferView(root->GetBRootParamIndex(4), sky);
             for (UINT i = 0; i < 12; ++i)
-                cmd->SetGraphicsRootDescriptorTable(root->GetTRootParamIndex(i), srvs[i]);
+                if (!shadow || i < 3 || i >= 10)
+                    cmd->SetGraphicsRootDescriptorTable(root->GetTRootParamIndex(i), srvs[i]);
             const auto geometryRoot = root->GetGeometryRootParamIndex();
             cmd->SetGraphicsRootShaderResourceView(geometryRoot, vb.BufferLocation);
             cmd->SetGraphicsRootShaderResourceView(geometryRoot + 1, visible);
