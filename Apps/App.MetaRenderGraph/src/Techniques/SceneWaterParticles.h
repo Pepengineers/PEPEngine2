@@ -5,6 +5,7 @@
 namespace Meta
 {
 class WaterTransfer;
+class ParticleTransfer;
 enum class PublicationSelection;
 // Preparation and recording are owner-only. Kernels and shaders are
 // the production implementations; execution/submission belongs to Executor.
@@ -20,6 +21,7 @@ public:
     void Reset();
     void Resize(); // caller drained Executor
     void SetWaterTransfer(WaterTransfer* transfer, std::function<PublicationSelection()> selection);
+    void SetParticleTransfer(ParticleTransfer* transfer, std::function<PublicationSelection()> selection);
     GDX12Texture* Depth() const { return _depth; }
     GDX12Texture* Motion() const { return _motion; }
     GDX12Texture* ParticleMotion() const { return _particleMotion; }
@@ -39,5 +41,8 @@ private:
     bool _reset = false;
     WaterTransfer* _transfer = nullptr;
     std::function<PublicationSelection()> _selection;
+    ParticleTransfer* _particleTransfer = nullptr;
+    std::function<PublicationSelection()> _particleSelection;
+    bool _particleReset = false;
 };
 }

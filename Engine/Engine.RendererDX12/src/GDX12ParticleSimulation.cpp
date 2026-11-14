@@ -228,7 +228,7 @@ void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, Render
     state.Offloaded = std::move(offloaded);
     for (const auto& emitter : emitters)
     {
-        if (state.Offloaded.count(emitter.Id)) continue;
+        if (state.Offloaded.count(emitter.Id) || state.ExternalOffsets.count(emitter.Id)) continue;
         const auto& pool = *state.Pools.at(emitter.Id);
         state.ResetMotion |= !pool.Initialized || pool.ResetRevision != emitter.ResetRevision;
     }

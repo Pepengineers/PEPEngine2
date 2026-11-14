@@ -416,16 +416,20 @@ void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands,
         if (emitterIds && std::find(emitterIds->begin(), emitterIds->end(), emitter.Id) == emitterIds->end()) continue;
         commands->SetComputeRootConstantBufferView(2, state.Constants[_resources->CurrFrameConstantsIndex]->GetElementAddress(i));
         UINT base = 0;
-        const bool imported = simulation.Offload && simulation.Offload->Find(emitter.Id, base);
+        const auto external = simulation.ExternalOffsets.find(emitter.Id);
+        const bool externallySimulated = external != simulation.ExternalOffsets.end();
+        if (externallySimulated) base = external->second;
+        const bool imported = externallySimulated || (simulation.Offload && simulation.Offload->Find(emitter.Id, base));
         const UINT parameters[] = {emitter.MaxParticles, base, state.Capacity, state.ResetMotion};
         commands->GetCommandList()->SetComputeRoot32BitConstants(0, 4, parameters, 0);
         if (emitter.Texture && !emitterIds)
             commands->ResourceBarrier({emitter.Texture->PrimaryDeviceTexture->GetResource()->GetSRVBarrier()});
         if (imported)
         {
-            auto& display = simulation.Offload->Display();
-            commands->ResourceBarrier({display.GetResource().GetNonPixelShaderResourceBarrier()});
-            commands->SetComputeSRV(0, display.GetSRV()->GPUHandle);
+            auto* resource = externallySimulated ? simulation.ExternalDisplay : &simulation.Offload->Display().GetResource();
+            const auto srv = externallySimulated ? simulation.ExternalSRV : simulation.Offload->Display().GetSRV()->GPUHandle;
+            commands->ResourceBarrier({resource->GetNonPixelShaderResourceBarrier()});
+            commands->SetComputeSRV(0, srv);
             commands->SetPipelineState(state.Compute.at("CullImported"));
             commands->Dispatch((emitter.MaxParticles + 255) / 256, 1, 1);
         }

@@ -7,6 +7,7 @@
 #include "Techniques/ScenePostUI.h"
 #include "Graph/CrossAdapterTransfer.h"
 #include "Techniques/WaterTransfer.h"
+#include "Techniques/ParticleTransfer.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 class MetaRenderPipeline final : public IRenderPipeline
 {
@@ -16,7 +17,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     }
     void SetVerification(bool verify)
     {
-        if (verify && _waterTransfer) throw std::invalid_argument("Meta.Water cannot run single-GPU verification mode");
+        if (verify && (_waterTransfer || _particleTransfer)) throw std::invalid_argument("Meta.Water cannot run single-GPU verification mode");
         if (_verify != verify && _lighting)
         {
             _lighting->Reset();
@@ -36,6 +37,7 @@ class MetaRenderPipeline final : public IRenderPipeline
         if (_executor) _executor->Drain();
         if (_crossAdapter) _crossAdapter->Stop();
         if (_waterTransfer) _waterTransfer->Stop();
+        if (_particleTransfer) _particleTransfer->Stop();
     }
     void UpdateFrameSettings(RenderPipelineContext& c) override
     {
@@ -92,7 +94,9 @@ class MetaRenderPipeline final : public IRenderPipeline
     GDX12GPUCullingPass _sceneFlags;
     std::unique_ptr<Meta::ScenePostUI> _post;
     std::unique_ptr<Meta::CrossAdapterTransfer> _crossAdapter;
+    std::shared_ptr<Meta::SimulationDomain> _simulationDomain;
     std::unique_ptr<Meta::WaterTransfer> _waterTransfer;
+    std::unique_ptr<Meta::ParticleTransfer> _particleTransfer;
     std::unique_ptr<Meta::Executor> _executor;
     Meta::Schedule _schedule;
     uint32_t _frame = 0;

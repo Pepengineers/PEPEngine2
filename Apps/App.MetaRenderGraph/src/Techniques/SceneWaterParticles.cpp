@@ -1,5 +1,6 @@
 #include "SceneWaterParticles.h"
 #include "WaterTransfer.h"
+#include "ParticleTransfer.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
@@ -50,6 +51,11 @@ void SceneWaterParticles::SetWaterTransfer(WaterTransfer* transfer, std::functio
     _transfer = transfer;
     _selection = std::move(selection);
 }
+void SceneWaterParticles::SetParticleTransfer(ParticleTransfer* transfer, std::function<PublicationSelection()> selection)
+{
+    _particleTransfer = transfer;
+    _particleSelection = std::move(selection);
+}
 void SceneWaterParticles::Prepare(float delta)
 {
     _instances = _collector->CollectScene(delta);
@@ -75,7 +81,7 @@ void SceneWaterParticles::Prepare(float delta)
     for (const auto& emitter : _resources.ParticleEmitters)
         _groups[emitter.DepthCollision ? 1 : 0].Emitters.push_back(emitter.Id);
 }
-void SceneWaterParticles::Reset() { _reset = true; }
+void SceneWaterParticles::Reset() { _reset = _particleReset = true; }
 void SceneWaterParticles::Resize()
 {
     for (auto& path : _paths) path = std::make_unique<Path>();
@@ -114,6 +120,19 @@ GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resour
     auto* simulation = _resources.ParticleSimulation.get();
     simulation->SetInteractionField(geometry.InteractionField());
     simulation->BeginFrame(&_resources, _common, true);
+    if (_particleTransfer)
+    {
+        const auto* world = _scenes->GetWorld();
+        _particleTransfer->Update(*simulation, geometry.InteractionField(),
+            world && !world->IsPaused() ? float(world->GetTimeScale()) : 0.f, _particleReset);
+        _particleReset = false;
+        _particleTransfer->Bind(*simulation);
+        _particleTransfer->Append(graph, bindings, _particleSelection());
+        const auto& remote = _particleTransfer->Emitters();
+        for (auto& group : _groups)
+            group.Emitters.erase(std::remove_if(group.Emitters.begin(), group.Emitters.end(),
+                [&](uint64_t id) { return std::find(remote.begin(), remote.end(), id) != remote.end(); }), group.Emitters.end());
+    }
     auto& particles = path.Particles;
     particles.Setup(&_resources, &_common);
     const auto inputs = [&](GDX12WBOITTransparencyPass& pass) {
@@ -248,7 +267,7 @@ GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resour
         accesses.insert(accesses.end(), groupPools[group].begin(), groupPools[group].end());
         const auto ids = _groups[group].Emitters;
         packet(group == 0 ? "particle group A clear/cull" : "particle group B append/global SortedAlpha radix", accesses,
-            [&particles, ids, group](auto* commands) { particles.PrepareRenderGroup(commands, ids, group == 0, group == 1); });
+            [this, &particles, ids, group](auto* commands) { particles.PrepareRenderGroup(commands, ids, group == 0, group == 1 && !_particleTransfer); });
     };
     prepareGroup(0);
     const auto transparency = [&](GDX12WBOITTransparencyPass& pass, const char* name) {
@@ -328,6 +347,14 @@ GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resour
     });
     transparency(path.Near, "near mesh transparency clear/draw");
     prepareGroup(1);
+    if (_particleTransfer)
+    {
+        auto accesses = preparationAccess;
+        if (auto* display = _particleTransfer->Display()) accesses.push_back(read(display));
+        const auto ids = _particleTransfer->Emitters();
+        packet("particle secondary append/global SortedAlpha radix", accesses,
+            [&particles, ids](auto* commands) { particles.PrepareRenderGroup(commands, ids, false, true); });
+    }
     particleAccess.push_back(textureRead(path.Near.GetOutput(0)->GetTexture()));
     particleAccess.back().Usage = Mode::ReadWrite;
     particleAccess.push_back(textureRead(path.Near.GetOutput(1)->GetTexture()));
