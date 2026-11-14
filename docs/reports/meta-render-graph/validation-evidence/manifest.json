@@ -1,0 +1,142 @@
+{
+  "source_commit": "a287c9a5da3b5462fc12e68cdaaa2eb46867abfc",
+  "base": "ee20d6f8dd47e9cc92402a03397125c9cc6643d2",
+  "remote": "https://github.com/Pepengineers/PEPEngine2.git",
+  "branch": "codex/meta-render-graph-u1-u8-validation",
+  "scope": "Native/FSR correctness only; all frame generation and other reconstruction providers excluded",
+  "acceptance": "Not independently accepted. Performance A/B, longer run and GPU overlap timeline remain pending; U9/U10 blocked.",
+  "environment": "RTX 5050, driver 621.14, disconnected RDP session 2; no visible FPS claim",
+  "final_fsr_labels": {
+    "Debug": "candidate-fsr-transient-tail03",
+    "Release": "candidate-fsr-final-release04"
+  },
+  "provenance": {
+    "run": "candidate-fsr-final-release04",
+    "head": "a287c9a5da3b5462fc12e68cdaaa2eb46867abfc",
+    "compiled_tracked_diff_matches": true,
+    "new_sources_match_snapshot": true
+  },
+  "preservation": {
+    "head": "2ee25daede82062a27bcd9d2add2d0b3ffbdb71c",
+    "staged_patch_sha256": "00925df035cc4fa0808bc972678ca838be730e7c13f278c8db0bd9ad23d931aa",
+    "unstaged_empty": true,
+    "user_file_sha256": "c06a75b13f855a94d46616796e024c52b499f8f92cf00ccb571ddbc6ff574676"
+  },
+  "compile_database": {
+    "translation_units": 163,
+    "sha256": "17b0c58819492565d8b59dd9b3585498c820b87a684a2911b512942633ef8648",
+    "new_gpu_tests_present": true,
+    "unexpanded_properties": false
+  },
+  "tables": [
+    {
+      "path": "ao-ssr-coverage.csv",
+      "bytes": 1061,
+      "sha256": "2557eeeb9e2a74695aadcb8569ea3208c8020b00d69eb3d47bb5706ed1c92416"
+    },
+    {
+      "path": "fsr-accumulation.csv",
+      "bytes": 46719,
+      "sha256": "6eae957dea095a3093f4d74d43831786e8ca754e3b0baeb957a25b3da37935f8"
+    },
+    {
+      "path": "fsr-debug.csv",
+      "bytes": 2966,
+      "sha256": "61ba272798dba738716d6bf21a9bde72c54461a805effc3e7ce13a7b2d012963"
+    },
+    {
+      "path": "fsr-numeric.csv",
+      "bytes": 3713,
+      "sha256": "ba0c3c237c9e60141a96be3d899dce442e07fc221ae3dc0a0f0cf08499746763"
+    },
+    {
+      "path": "fsr-release.csv",
+      "bytes": 2966,
+      "sha256": "61ba272798dba738716d6bf21a9bde72c54461a805effc3e7ce13a7b2d012963"
+    },
+    {
+      "path": "fsr-workload.csv",
+      "bytes": 4025,
+      "sha256": "1ae45e87ac03624c35628516f93252e243b8851d84e751cc80802718f08f866b"
+    },
+    {
+      "path": "queued-water-motion.csv",
+      "bytes": 85,
+      "sha256": "4aa054baa96882a5eaedd26801af4a0204a8eec4079a6c3b74d2d46e5d390092"
+    },
+    {
+      "path": "run-index.csv",
+      "bytes": 6548,
+      "sha256": "e774193b8aeea14b6572f707567e2dd5bf18e38a348d35ea656267dc4e790f04"
+    }
+  ],
+  "local_full_raw_index": {
+    "path": "C:\\Users\\MidSpec\\.codex\\worktrees\\meta-render-graph-u1-u8-validation\\PEPEngine2\\Build\\Verification\\meta-render-graph-u1-u8\\handoff\\manifest.json",
+    "bytes": 34003935,
+    "sha256": "8646ba524942c7949480908461cb709c8d54d9b9b810eea3b5285203c6376338",
+    "indexed_files": 64760
+  },
+  "selected_final_raw_samples": [
+    {
+      "path": "C:\\Users\\MidSpec\\.codex\\worktrees\\meta-render-graph-u1-u8-validation\\PEPEngine2\\Build\\Verification\\meta-render-graph-u1-u8\\candidate-fsr-final-release04-artifacts\\geometry-15-parallel-particles-render-buffer-0.bin",
+      "bytes": 24,
+      "sha256": "eaa098e3fe38871c6186625bb6789602f31ec2867342d674fbed8091524cfd95"
+    },
+    {
+      "path": "C:\\Users\\MidSpec\\.codex\\worktrees\\meta-render-graph-u1-u8-validation\\PEPEngine2\\Build\\Verification\\meta-render-graph-u1-u8\\candidate-fsr-final-release04-artifacts\\geometry-15-parallel-water-image-4.bin",
+      "bytes": 3637192,
+      "sha256": "4cc7900614240b26d145abd58ce8d197e9e8b859319df22ed7a5243fd6688779"
+    },
+    {
+      "path": "C:\\Users\\MidSpec\\.codex\\worktrees\\meta-render-graph-u1-u8-validation\\PEPEngine2\\Build\\Verification\\meta-render-graph-u1-u8\\candidate-fsr-final-release04-artifacts\\geometry-15-post-image-3.bin",
+      "bytes": 8192000,
+      "sha256": "60097e78d6135522c7fac10cd73c2df014017d62fcc12d12515de19cd2d958d1"
+    },
+    {
+      "path": "C:\\Users\\MidSpec\\.codex\\worktrees\\meta-render-graph-u1-u8-validation\\PEPEngine2\\Build\\Verification\\meta-render-graph-u1-u8\\candidate-fsr-final-release04-artifacts\\geometry-39-parallel-particles-render-buffer-0.bin",
+      "bytes": 24,
+      "sha256": "eaa098e3fe38871c6186625bb6789602f31ec2867342d674fbed8091524cfd95"
+    },
+    {
+      "path": "C:\\Users\\MidSpec\\.codex\\worktrees\\meta-render-graph-u1-u8-validation\\PEPEngine2\\Build\\Verification\\meta-render-graph-u1-u8\\candidate-fsr-final-release04-artifacts\\geometry-39-parallel-water-image-4.bin",
+      "bytes": 1937520,
+      "sha256": "3b652963f213037442f561869fbb90d95ecaa7d1550a42d5fc99d91aae6657e3"
+    },
+    {
+      "path": "C:\\Users\\MidSpec\\.codex\\worktrees\\meta-render-graph-u1-u8-validation\\PEPEngine2\\Build\\Verification\\meta-render-graph-u1-u8\\candidate-fsr-final-release04-artifacts\\geometry-39-post-image-3.bin",
+      "bytes": 4363008,
+      "sha256": "6be50985864147957aadcb354526c0e45f7c9e2fbba856e3fdf5da73a19eb53c"
+    },
+    {
+      "path": "C:\\Users\\MidSpec\\.codex\\worktrees\\meta-render-graph-u1-u8-validation\\PEPEngine2\\Build\\Verification\\meta-render-graph-u1-u8\\candidate-fsr-transient-tail03-artifacts\\geometry-15-parallel-particles-render-buffer-0.bin",
+      "bytes": 24,
+      "sha256": "eaa098e3fe38871c6186625bb6789602f31ec2867342d674fbed8091524cfd95"
+    },
+    {
+      "path": "C:\\Users\\MidSpec\\.codex\\worktrees\\meta-render-graph-u1-u8-validation\\PEPEngine2\\Build\\Verification\\meta-render-graph-u1-u8\\candidate-fsr-transient-tail03-artifacts\\geometry-15-parallel-water-image-4.bin",
+      "bytes": 3637192,
+      "sha256": "58aa8b5159bf1909c2e1b1bde3c7b7db4d8c7d6d1ec8f5c7e748c925ba8bb501"
+    },
+    {
+      "path": "C:\\Users\\MidSpec\\.codex\\worktrees\\meta-render-graph-u1-u8-validation\\PEPEngine2\\Build\\Verification\\meta-render-graph-u1-u8\\candidate-fsr-transient-tail03-artifacts\\geometry-15-post-image-3.bin",
+      "bytes": 8192000,
+      "sha256": "5050ba1a1af21ef723362c716243547a31dfd55e4104dfeb148b55edf83a7993"
+    },
+    {
+      "path": "C:\\Users\\MidSpec\\.codex\\worktrees\\meta-render-graph-u1-u8-validation\\PEPEngine2\\Build\\Verification\\meta-render-graph-u1-u8\\candidate-fsr-transient-tail03-artifacts\\geometry-39-parallel-particles-render-buffer-0.bin",
+      "bytes": 24,
+      "sha256": "eaa098e3fe38871c6186625bb6789602f31ec2867342d674fbed8091524cfd95"
+    },
+    {
+      "path": "C:\\Users\\MidSpec\\.codex\\worktrees\\meta-render-graph-u1-u8-validation\\PEPEngine2\\Build\\Verification\\meta-render-graph-u1-u8\\candidate-fsr-transient-tail03-artifacts\\geometry-39-parallel-water-image-4.bin",
+      "bytes": 1937520,
+      "sha256": "3b652963f213037442f561869fbb90d95ecaa7d1550a42d5fc99d91aae6657e3"
+    },
+    {
+      "path": "C:\\Users\\MidSpec\\.codex\\worktrees\\meta-render-graph-u1-u8-validation\\PEPEngine2\\Build\\Verification\\meta-render-graph-u1-u8\\candidate-fsr-transient-tail03-artifacts\\geometry-39-post-image-3.bin",
+      "bytes": 4363008,
+      "sha256": "627b91d754b67097f2b924ab0501d0e9b68a812776c49d51073dfdd8c1a603fb"
+    }
+  ],
+  "caveat": "Raw images/buffers remain on MisSpec; tables are numeric extracts. Read report for older source versions and partial-process coverage. This manifest is not acceptance of old runs as final-source proof."
+}

@@ -1,7 +1,7 @@
 # U1–U8 validation on MisSpec
 
 2026-11-14. Intermediate review checkpoint. **U1–U8 are not independently accepted;
-U9/U10 remain prohibited.** No U11, Bistro merge, PR, push or external upload.
+U9/U10 remain prohibited.** No U11, Bistro merge or PR. Push is authorized only for the task branch.
 
 Frozen base: `ee20d6f8dd47e9cc92402a03397125c9cc6643d2` (tree
 `03ee597493fb4cdf4c92a994e0cfab9382c61bce`). Branch:
@@ -156,8 +156,12 @@ projects / 163 translation units, including the three new GPU test sources. The
 smoke runner passed PowerShell syntax parsing; its full smoke suite was not rerun.
 Original checkout preservation was verified again after the final workloads.
 
-The incremental `ee20d6..HEAD` bundle and compact evidence archive stay on MisSpec.
-The archive contains report/coverage/numeric records and a path/hash manifest;
-large images, buffers and traces remain at their recorded local paths. No source
-payload is uploaded through chat. Only prepared paths, sizes and SHA256 are returned
-for the separately authorized transfer/review workflow.
+The user selected Git commits on `codex/meta-render-graph-u1-u8-validation` for
+transfer and review. The prepared bundle/archive remain local and are not the
+transfer mechanism. Source fixes are committed as `791db96c` and `a287c9a5`.
+`validation-evidence/` carries compact raw numeric tables, run statuses and a
+manifest with source/binary fingerprints and selected raw path/hash references.
+Large images, buffers and traces remain on MisSpec; the full local index records
+64,760 files / 50,525,720,744 bytes. No ordinary FPS or GPU-overlap result is claimed.
+The branch remains an intermediate correctness checkpoint pending independent
+review and the measurements listed above.
