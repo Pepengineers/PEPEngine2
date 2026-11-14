@@ -1,30 +1,39 @@
 # App.MetaRenderGraph
 
-Experimental executable using the Meta execution plan alongside the production
-App. Its current scene is procedural: it does **not** load the Amazon Lumberyard
-Bistro model. Moving Bistro to this executor is a separate task.
+Experimental executable using the Meta execution plan alongside production App.
+The ordinary launch now loads the original Bistro interior and exterior with
+static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored lights,
+static SkyBox/IBL and HDR display transform. Alpha-tested cutouts use OpaquePass;
+blended materials are omitted. No shadow, AO, SSR, reflection-probe, grass, water,
+particle, transparency, reconstruction, post-effect or screen-UI passes execute.
+The world is paused to exclude simulation; the camera remains free.
 
-U1–U11 implementation is complete in source at merge `eef2fe07`, including U11
-`11657349`. The combined source and its new scene content have not been built or
-run in this implementation phase.
+This is stage 1 of the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+After the ordinary smoke, the user measures CPU/GPU load and FPS and chooses the
+next stage. Final architecture/performance comparison waits until migration ends.
 
-The ordinary path records geometry, lighting, water/particles and post/UI as Meta
-packets. `RenderModule` selects `MetaRenderPipeline::ExecuteFrame`; it does not
-call the old graph for this executable. Native geometry recording uses nested
-jobs; SDK/post/UI and water/particle recording include owner-thread sections.
+Controls match App: WASD movement, Q/E down/up, right mouse to look, Shift for
+speed, mouse wheel to change speed. FPS and frame time appear in the title bar.
+The initial camera is at the Bistro entrance, as in App. The startup viewport is
+1280x800; render resolution is native. The first frame's declared operations are
+written to `Logs/opaque-operations.txt` beside the executable. The first reused
+frame slot is recorded in `Logs/opaque-steady-operations.txt`; unchanged static
+scene buffers have no upload/copy packets there. Camera constants and light-grid
+inputs bind their existing frame-local upload resources directly.
+
+The existing `--smoke` procedural diagnostic host remains separate. It is not the
+short ordinary smoke required for acceptance and is not run for this migration.
 
 ## Build and ordinary launch
 
-The implementation handoff is source-only. Run these commands only when a build
-and application run are requested. From a Visual Studio developer command prompt
-at the repository root:
+From a Visual Studio developer command prompt at the repository root:
 
 ```bat
-msbuild Apps\App.MetaRenderGraph\App.MetaRenderGraph.vcxproj /t:Build /p:Configuration=Debug /p:Platform=x64 /m:1 /nr:false
-Build\bin\x64\Debug\App.MetaRenderGraph\App.MetaRenderGraph.exe
+msbuild Apps\App.MetaRenderGraph\App.MetaRenderGraph.vcxproj /t:Build /p:Configuration=Release /p:Platform=x64 /m:1 /nr:false
+Build\bin\x64\Release\App.MetaRenderGraph\App.MetaRenderGraph.exe
 ```
 
-Release x64 is the other project configuration. Build through the repository's
+Debug x64 is the other project configuration. Build through the repository's
 existing toolset and SDK settings. Production App has separate output/config
 paths and retains its existing executor.
 
@@ -33,6 +42,12 @@ diagnostic harness, including readbacks/comparisons and resize scenarios; it is
 not the short ordinary smoke required by the current acceptance rules.
 
 ## Configuration
+
+The settings below also describe the retained procedural implementation. The
+ordinary opaque stage does not enable extra techniques through these switches;
+secondary-adapter opt-ins are rejected. Shadow resolutions are zero for the
+ordinary stage; `--smoke` restores its previous small diagnostic shadow sizes.
+
 
 The build copies `Configs/Startup.ini` beside the executable. On every launch,
 `PrepareStartup` copies that file over the executable's `Config/Engine.ini`
@@ -85,7 +100,7 @@ independent producers. Particle publication has one combined payload export and
 one import; the shared interaction-field input is transferred separately.
 Imported and local particles use the common transparency sort/resolve.
 
-The ordinary procedural scene now creates water and four continuous emitter
+The retained procedural diagnostic scene creates water and four continuous emitter
 groups near the camera: local depth-independent, local depth-collision, eligible
 secondary, and marked depth-collision fallback. With offload disabled all remain
 local; with local async enabled the depth-collision groups use COMPUTE. This is
@@ -93,6 +108,9 @@ scene content, not a new test harness.
 
 ## Current result and limits
 
+- The Bistro opaque stage passed Release build and ordinary visual smoke. The
+  final short entrance-view measurement was 356 FPS and 97% GPU utilization;
+  the user accepted the result. See the [stage report](../../docs/reports/2026-11-15-meta-opaque-bistro.md).
 - The earlier local DIRECT launch displayed procedural planes and grass on an
   RTX 3060 Laptop GPU and exited normally. See the
   [local smoke report](../../docs/reports/meta-render-graph/local-direct-smoke-2026-11-14.md).

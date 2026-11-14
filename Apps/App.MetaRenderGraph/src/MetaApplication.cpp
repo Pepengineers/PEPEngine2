@@ -12,6 +12,9 @@
 #include <d3d12sdklayers.h>
 #include <fstream>
 #include <stdexcept>
+#include <algorithm>
+#include <WindowsX.h>
+#include "Engine.UI/UI_test.h"
 
 void RunDirectExecutionGpuTests(GDX12Device&);
 void CheckGeometryGpuEvidence(const std::filesystem::path&);
@@ -29,12 +32,18 @@ namespace
 
     // Runs before BenchmarkEngine's constructor reads and locks startup CVars.
     // Both files belong exclusively to this executable's output directory.
-    void PrepareStartup()
+    void PrepareStartup(bool smoke)
     {
         const auto root = Engine::Core::GetExecutableDirectory();
         std::filesystem::create_directories(root / "Config");
         std::filesystem::copy_file(root / "Configs/Startup.ini", root / "Config/Engine.ini",
             std::filesystem::copy_options::overwrite_existing);
+        if (smoke)
+        {
+            std::ofstream config(root / "Config/Engine.ini", std::ios::app);
+            config << "\nRender.Shadows.Sun.Resolution = 512\nRender.Shadows.Local.Resolution = 128\n";
+            Require(bool(config), "Cannot configure procedural diagnostics");
+        }
         // Initialize the registry now so the invariant is checked before any device is opened.
         ConsoleModule console;
         console.Initialize();
@@ -60,15 +69,37 @@ namespace
         MetaRenderPipeline* _pipeline=nullptr;
         bool AddModules() override
         {
-            auto pipeline=std::make_unique<MetaRenderPipeline>(_smoke);_pipeline=pipeline.get();
+            auto pipeline=std::make_unique<MetaRenderPipeline>(_smoke, !_smoke);_pipeline=pipeline.get();
             Locator.RegisterModule(std::make_shared<RenderModule>(GetWindow(), &Timer, std::move(pipeline)));
-            Locator.RegisterModule(std::make_shared<SceneManagerModule>());
+            if (_smoke) Locator.RegisterModule(std::make_shared<SceneManagerModule>());
+            else
+            {
+                const auto path = std::filesystem::path(ASSETS_FOLDER) / "Scenes/Amazon Lumberyard Bistro";
+                for (const auto* part : {"Exterior/exterior.obj", "Interior/interior.obj"})
+                    Require(std::filesystem::is_regular_file(path / part), "Missing Bistro scene part");
+                Locator.RegisterModule(std::make_shared<SceneManagerModule>(path));
+            }
             return BenchmarkEngine::AddModules();
         }
         bool Initialize() override
         {
             if (!App::Initialize()) return false;
             auto scenes = Locator.GetModule<SceneManagerModule>();
+            if (!_smoke)
+            {
+                auto& world = *scenes->GetWorld();
+                world.SetPaused(true);
+                world.GetECS().ForEach<LightComponent>([](Entity, LightComponent& light) { light.CastShadows = false; });
+                auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
+                camera.Location = {-300, 200, 20};
+                camera.Rotation = {0, 117, 0};
+                camera.DirtyFlag = true;
+                world.GetECS().Get<CameraComponent>(world.ActiveCamera).InvalidateHistory();
+                IndirectCommandBuildSystem commands;
+                commands.Schedule(GetJobs(), world, 0).Complete();
+                Log::Info("MetaRenderGraph", "Loaded Bistro interior/exterior; static opaque only; simulation paused");
+                return true;
+            }
             Require(scenes->LoadWorld(Engine::Core::GetExecutableDirectory() / "Configs/SmokeWorld.yaml"), "Cannot create smoke world");
             auto& world = *scenes->GetWorld();
             auto renderer=Locator.GetModule<RenderModule>();
@@ -182,6 +213,60 @@ namespace
             SetWindowTextW(GetWindow()->GetWindowHandle(), L"MetaRenderGraph - procedural water and particle scene");
             return true;
         }
+        POINT _lastMousePos{};
+        float _cameraSpeed = 500.f;
+        void OnMouseDown(WPARAM, int x, int y) override
+        {
+            _lastMousePos = { x, y };
+            SetCapture(GetWindow()->GetWindowHandle());
+        }
+
+        void OnMouseUp(WPARAM, int, int) override
+        {
+            ReleaseCapture();
+        }
+
+        void OnMouseMove(WPARAM buttons, int x, int y) override
+        {
+            if (!_smoke && (buttons & MK_RBUTTON))
+            {
+                auto* world = Locator.GetModule<SceneManagerModule>()->GetWorld();
+                auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
+                camera.Rotation.x = std::clamp(camera.Rotation.x + (y - _lastMousePos.y) * 0.15f, -89.0f, 89.0f);
+                camera.Rotation.y = std::remainder(camera.Rotation.y - (x - _lastMousePos.x) * 0.15f, 360.0f);
+                camera.DirtyFlag = true;
+            }
+            _lastMousePos = { x, y };
+        }
+
+        void OnMouseWheelMove(WPARAM rotation) override
+        {
+            _cameraSpeed = std::clamp(_cameraSpeed * (GET_WHEEL_DELTA_WPARAM(rotation) > 0 ? 1.25f : 0.8f), 0.1f, 10000.0f);
+        }
+
+        void OnKeyboardInput(const GameTimer& timer) override
+        {
+            if (_smoke || bInactive || Engine::UI::WantsKeyboardInput()) return;
+            auto* world = Locator.GetModule<SceneManagerModule>()->GetWorld();
+            auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
+            const auto rotation = Matrix::CreateFromYawPitchRoll(
+                XMConvertToRadians(camera.Rotation.y), XMConvertToRadians(camera.Rotation.x), 0.0f);
+            Vector3 movement = Vector3::Zero;
+            if (GetAsyncKeyState('W') & 0x8000) movement -= rotation.Forward();
+            if (GetAsyncKeyState('S') & 0x8000) movement += rotation.Forward();
+            if (GetAsyncKeyState('A') & 0x8000) movement += rotation.Right();
+            if (GetAsyncKeyState('D') & 0x8000) movement -= rotation.Right();
+            if (GetAsyncKeyState('Q') & 0x8000) movement -= Vector3::Up;
+            if (GetAsyncKeyState('E') & 0x8000) movement += Vector3::Up;
+            if (movement.LengthSquared() > 0.0f)
+            {
+                movement.Normalize();
+                const float boost = (GetAsyncKeyState(VK_SHIFT) & 0x8000) ? 4.0f : 1.0f;
+                camera.Location += movement * _cameraSpeed * boost * timer.DeltaTime();
+                camera.DirtyFlag = true;
+            }
+        }
+
         void Smoke()
         {
             auto renderer = Locator.GetModule<RenderModule>();
@@ -272,7 +357,7 @@ int RunMetaApplication(bool smoke)
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
     try
     {
-        PrepareStartup();
+        PrepareStartup(smoke);
         if (smoke)
         {
             ComPtr<ID3D12Debug> debug;

@@ -13,12 +13,18 @@ class SceneReflections;
 // no shared resource tracker, heap allocator, ECS or queue access on workers.
 class SceneGeometry {
 public:
-    explicit SceneGeometry(RenderPipelineContext&);
+    explicit SceneGeometry(RenderPipelineContext&, bool opaqueOnly = false);
     void PrepareGrass(RenderPipelineContext& c,float dt) { _grass->Prepare(c,dt); }
     GDX12ParticleInteractionField InteractionField() const { return _grass->InteractionField(); }
-    void Select(bool serial) { _grass->Select(serial); }
+    void Select(bool serial) { if (_grass) _grass->Select(serial); }
     UINT SlotCount() const { return UINT(_slots.size()); }
-    void WriteOperations(UINT slot,std::ostream& out) const { const auto& names=_slots.at(slot).Names;for(UINT i=0;i<names.size();++i)out<<i<<' '<<names[i]<<'\n'; }
+    void WriteOperations(UINT slot, std::ostream& out, const Schedule* schedule = nullptr) const {
+        const auto& names = _slots.at(slot).Names;
+        for (UINT i = 0; i < names.size(); ++i)
+            if (!schedule || std::any_of(schedule->Packets.begin(), schedule->Packets.end(),
+                [i](const auto& packet) { return packet.Operation == i; }))
+                out << i << ' ' << names[i] << '\n';
+    }
     void Resize(UINT width, UINT height); // caller has drained all slots
     void Freeze(UINT slot, UINT camera, std::vector<GDX12SkinningWork> skin);
     using AppendTechnique = std::function<void(Graph&,std::vector<ID3D12Resource*>&)>;
@@ -36,7 +42,9 @@ private:
     friend class SceneLighting;
     friend class SceneReflections;
     struct Buffer {
-        GDX12ResourceHandle Source, Data;
+        GDX12ResourceHandle Source, Data, Origin;
+        uint64_t Revision = 0;
+        bool Upload = false;
         UINT64 Bytes=0;
         GDX12Descriptor Srv, Uav;
     };
@@ -85,6 +93,7 @@ private:
     GDX12ResourceHandle _emptyVertices,_emptyIndices;
     ComPtr<ID3D12PipelineState> _cull, _clear, _depth, _depthNormals, _gbuffer;
     ComPtr<ID3D12CommandSignature> _signature;
+    bool _opaqueOnly = false;
     UINT _width=0,_height=0;
 };
 }

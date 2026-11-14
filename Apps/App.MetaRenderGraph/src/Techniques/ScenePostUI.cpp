@@ -16,13 +16,14 @@ namespace
 AutoConsoleVariable<bool> CollisionView(L"Meta.Debug.Collisions", false, L"Display the existing Jolt collision view.");
 }
 #endif
-ScenePostUI::ScenePostUI(RenderPipelineContext& c)
+ScenePostUI::ScenePostUI(RenderPipelineContext& c, bool opaqueOnly)
     : _resources(c.Primary), _common(c.Common), _swapchain(c.BackBuffer), _slots(c.Primary.FrameConstants.size()), _exports(c.Primary.FrameConstants.size())
 {
     _dof.Setup(&_resources, &_common);
     _blur.Setup(&_resources, &_common);
     _reconstruction.Setup(&_resources, &_common);
     _output.Setup(&_resources, &_common);
+    if (opaqueOnly) return;
     _posters = std::make_unique<BistroUIPosters>(c.Runtime,
         BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>());
 #ifdef _DEBUG
@@ -225,6 +226,17 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
     }
     Packet(graph, bindings, "frame end / PRESENT handoff", {{resource(target), Mode::ReadWrite}}, finish,
         {screenId}, nullptr, D3D12_RESOURCE_STATE_PRESENT);
+}
+void ScenePostUI::AppendOpaque(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+    GDX12Texture* hdr, GDX12Texture* target, const std::function<void(GDX12CommandList*)>& finish)
+{
+    _output.SetInputs({hdr, target});
+    if (!_outputInitialized) { _output.Initialize(); _outputInitialized = true; }
+    const auto output = Packet(graph, bindings, "opaque HDR display transform",
+        {{hdr->GetResource(), Mode::Read}, {target->GetResource(), Mode::Write}},
+        [this](auto* cmd) { _output.Execute(cmd); }, {}, target);
+    Packet(graph, bindings, "frame end / PRESENT handoff", {{target->GetResource(), Mode::ReadWrite}},
+        finish, {output}, nullptr, D3D12_RESOURCE_STATE_PRESENT);
 }
 void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bindings, bool record)
 {

@@ -1,5 +1,7 @@
 #include "CBufferStructures.hlsl"
+#if !DEFERRED_OPAQUE_ONLY
 #define LOCAL_REFLECTION_PROBES 1
+#endif
 ConstantBuffer<MainCB> CBMain : register(b0);
 ConstantBuffer<CameraCB> CBCamera : register(b1);
 ConstantBuffer<ShadowCB> CBShadow : register(b2);
@@ -70,6 +72,7 @@ void CS(uint3 dispatch : SV_DispatchThreadID)
     float3 position = WorldPosition(pixel, size, depth);
     float4 albedo = GAlbedo[pixel], normal = GNormal[pixel], f0 = GF0[pixel];
     float4 emissive = GEmissive[pixel];
+#if !DEFERRED_OPAQUE_ONLY
     if (emissive.a > 0)
     {
         uint count, stride;
@@ -89,13 +92,18 @@ void CS(uint3 dispatch : SV_DispatchThreadID)
         SceneColor[pixel] = float4(radiance, 1);
         return;
     }
+#endif
     PBRSurface s;
     s.Albedo = albedo.rgb; s.Metallic = albedo.a;
     s.Normal = SafeNormalize(normal.xyz); s.Roughness = normal.w;
     s.F0 = f0.rgb; s.Baked = f0.a > 0.5f;
     s.Emissive = emissive.rgb;
     float3 v = SafeNormalize(CBCamera.CameraLocation - position);
+#if DEFERRED_OPAQUE_ONLY
+    float3 result = ShadeSunAndIBL(s, position, v);
+#else
     float3 result = ShadeSunAndIBL(s, position, v, AmbientOcclusion[pixel]);
+#endif
     if (s.Baked != 0)
     {
         SceneColor[pixel] = float4(result, 1);
