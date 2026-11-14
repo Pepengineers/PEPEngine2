@@ -118,9 +118,10 @@ public:
     GDX12ParticleSimulation();
     ~GDX12ParticleSimulation();
     void BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common, bool localOnly = false);
-    void InitializePools(GDX12CommandList* commands, GDX12DeviceResources* resources);
-    std::vector<GDX12Resource*> GetPoolResources() const;
-    std::vector<GDX12Resource*> GetConstantResources(UINT slot) const;
+    void InitializePools(GDX12CommandList* commands, GDX12DeviceResources* resources,
+        const std::vector<uint64_t>* emitterIds = nullptr);
+    std::vector<GDX12Resource*> GetPoolResources(const std::vector<uint64_t>* emitterIds = nullptr) const;
+    std::vector<GDX12Resource*> GetConstantResources(UINT slot, const std::vector<uint64_t>* emitterIds = nullptr) const;
     std::vector<GDX12Resource*> GetOffloadResources() const;
     GDX12Resource* GetImportedResource() const;
     GDX12Resource* GetOffloadInteractionResource() const;
@@ -128,7 +129,8 @@ public:
     void SetInteractionField(GDX12ParticleInteractionField field) { _interaction = field; }
     GDX12Resource* GetInteractionResource() const { return _interaction.Resource; }
     void Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,
-        RenderPipelineCommonData& common, GDX12Texture* opaqueDepth);
+        RenderPipelineCommonData& common, GDX12Texture* opaqueDepth,
+        const std::vector<uint64_t>* emitterIds = nullptr);
 
 private:
     friend class GDX12ParticlesPass;

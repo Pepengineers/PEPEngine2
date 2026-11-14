@@ -465,7 +465,8 @@ void SceneEnvironment::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
                                            upload ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : 0,
                                            upload ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : 0,
                                            (native->GetDesc().Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0,
-                                           !upload && native->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_BUFFER});
+                                           !upload && native->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_BUFFER,
+                                           upload ? Heap::Upload : Heap::Default});
                 bindings.push_back(native);
             }
             operation.Accesses.push_back(access);

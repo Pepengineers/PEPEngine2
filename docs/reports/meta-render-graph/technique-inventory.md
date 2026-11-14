@@ -1,3 +1,37 @@
+# Current async single-GPU source status вЂ” 2026-11-14
+
+Base: local `codex/bistro-rendering` at
+`c444d58a30b0921c2d126dbf252ce116a0e6d196`, including the reviewed post/UI merge.
+This section supersedes earlier queue/authorization status statements below.
+**Source implemented; unbuilt/unrun, no runtime acceptance.**
+
+| Technique / boundary | Queue placement and ownership | Deferred evidence |
+|---|---|---|
+| Minimal existing buffer fixture | `DirectFixture::Plan(..., true)` adds independent DIRECT clear, COPY upload, COMPUTE transforms, DIRECT/COMPUTE readers and DIRECT draw. Default fixture callers stay DIRECT. | Source only; no invocation/test scenario added or run. |
+| Scene/material/frame and skin uploads | Four immutable scene upload buckets and palettes COPY; actual culling/count reset and skin deformation COMPUTE; depth/GBuffer ExecuteIndirect DIRECT. | Bytes, scene output and GPU timeline pending. |
+| Particle simulation groups | Depth-independent A DIRECT; local depth-collision B COMPUTE; physically separate per-emitter pools and actual depth/interaction dependency. CPU preparation/recording stays owner-only. | Seeds/pause/reset/bursts/collisions and mixed output pending. |
+| Decomposed particle consumer | Independent DIRECT clear/cull A excludes B pools and unused depth/atlas acquisitions. B append joins later; one global SortedAlpha sort, original combined drawing and one near WBOIT resolve. Particle draws remain after the join. | Water on/off independence, sorted alpha, WBOIT and motion pending. |
+| Water/transparency | Existing owner-only water solver/surface/optics on DIRECT; mesh transparency can precede B consumer join. Original shaders and resolve boundaries retained. | No water async/parallel CPU claim. |
+| Geometry/grass/shadows/environment/probes/AO/lighting | Existing native worker recorders retained; unselected work remains DIRECT. | Current source has no new runtime validation. |
+| Post/reconstruction/FG/UI/posters | SDK/UI/post owner-only DIRECT, original per-slot provider links and retained FG state exports. Poster texture material reads restricted to DIRECT consumers. | All providers/FG/history/visuals pending; no SDK queue migration claim. |
+| Retirement/lifecycle/errors | Actual queue/list identities and issued per-queue fence tokens; selected slot retired before material/owner preparation; terminal DIRECT joins queues; previous-frame GPU waits protect persistent resources even without prefix. Shutdown owner drain includes executor queues. | No per-frame global CPU drain/Flush introduced. Partial submit aborts; unknown completion quarantines. |
+| Heap/state compiler | Explicit physical DEFAULT/UPLOAD/READBACK contracts; fixed upload/readback states; buffer decay and COMMON texture releases; queue-legal union states/UAV barriers and all-reader WAR dependencies. | Cross-queue DEFAULT readers are conservatively ordered, not advertised as concurrent. |
+
+`Meta.Async.Queues=false` retains the single-DIRECT placement reference in the
+experimental application. [08-async-single-gpu.md](08-async-single-gpu.md) records
+coverage, errors, retirement, source review and remaining limits. No secondary
+device/transport/offload worker, production pipeline switch, PR or Bistro merge.
+No overlap, correctness, timings, memory figure or speedup has been measured.
+
+**NOT RUN:** builds, C++/HLSL compilation, CPU/GPU/unit/integration/regression
+tests, smoke/validation scripts, applications, GBV/debug-layer checks, readbacks,
+images/visual checks, benchmarks or profiling. Existing test files received only
+heap declarations; the reusable DirectFixture gained opt-in queue placement.
+No new executable test was added.
+Independent originating-chat review and later authorized runtime acceptance remain.
+
+---
+
 # Current post/UI source status вЂ” 2026-11-14
 
 Authorized implementation base: local `codex/bistro-rendering`
@@ -51,10 +85,10 @@ acceptance. U7 remains unauthorized. Existing inventory bytes below are preserve
 
 # U1 technique inventory
 
-## Current U5 source status — 2026-11-14
+## Current U5 source status пїЅ 2026-11-14
 
 Accepted U4 base: `71f6f4258f26dc4d61ce8800f935a5ce9423d7f0`.
-**Реализовано, тесты и runtime validation отложены пользователем.** The final U5
+**пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ, пїЅпїЅпїЅпїЅпїЅ пїЅ runtime validation пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ.** The final U5
 source has not been built or executed; independent originating-chat review and a
 new validation authorization are required. Historical U5.1 checks cover an earlier
 partial binary only. See [05-lighting-reflections.md](05-lighting-reflections.md)

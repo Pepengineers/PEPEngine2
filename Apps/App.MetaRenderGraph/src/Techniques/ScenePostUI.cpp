@@ -252,7 +252,8 @@ void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bind
         // Conservative material read domain includes shadow/probe capture and
         // transparent geometry; all are ordered after this frame's UI upload.
         for (Id id = 0; id < consumers; ++id)
-            graph.Operations[id].Accesses.push_back({targetId, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+            if (graph.Operations[id].Target == Queue::Direct)
+                graph.Operations[id].Accesses.push_back({targetId, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
     }
 }
 }

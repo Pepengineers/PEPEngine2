@@ -92,6 +92,8 @@ public:
     std::vector<GDX12Resource*> NativeResources() const;
     GDX12Texture* MotionOutput() const;
     void PrepareRenderData(GDX12CommandList* commands);
+    void PrepareRenderGroup(GDX12CommandList* commands, const std::vector<uint64_t>& emitterIds,
+        bool clear, bool finalize);
     void DrawWeightedAndMotion(GDX12CommandList* commands);
     std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
     {
@@ -115,6 +117,8 @@ public:
     void ClearDenendencies() override;
 
 private:
+    void PrepareRenderData(GDX12CommandList* commands, const std::vector<uint64_t>* emitterIds,
+        bool clear, bool finalize);
     bool _localOnly = false;
     struct State;
     std::unique_ptr<State> _state;

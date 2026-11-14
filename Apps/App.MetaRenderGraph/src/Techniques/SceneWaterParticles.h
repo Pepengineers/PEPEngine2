@@ -4,7 +4,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
 namespace Meta
 {
-// All preparation and recording is owner-only in U6. Kernels and shaders are
+// Preparation and recording are owner-only. Kernels and shaders are
 // the production implementations; execution/submission belongs to Executor.
 class SceneWaterParticles
 {

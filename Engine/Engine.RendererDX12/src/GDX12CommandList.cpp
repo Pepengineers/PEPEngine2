@@ -33,10 +33,11 @@ GDX12CommandList::GDX12CommandList(GDX12Device* device, D3D12_COMMAND_LIST_TYPE 
 }
 
 GDX12CommandList::GDX12CommandList(ID3D12GraphicsCommandList* borrowed)
-    : FenceValue(0), _type(D3D12_COMMAND_LIST_TYPE_DIRECT)
+    : FenceValue(0), _type(borrowed ? borrowed->GetType() : D3D12_COMMAND_LIST_TYPE_DIRECT)
 {
-    if (!borrowed || borrowed->GetType() != D3D12_COMMAND_LIST_TYPE_DIRECT)
-        throw std::invalid_argument("Native technique requires a DIRECT list");
+    if (!borrowed || (_type != D3D12_COMMAND_LIST_TYPE_DIRECT &&
+        _type != D3D12_COMMAND_LIST_TYPE_COMPUTE && _type != D3D12_COMMAND_LIST_TYPE_COPY))
+        throw std::invalid_argument("Native technique requires a DIRECT/COMPUTE/COPY list");
     ThrowIfFailed(borrowed->QueryInterface(IID_PPV_ARGS(&_commandList)));
     InvalidateCachedState();
 }
@@ -451,5 +452,3 @@ void GDX12CommandList::BuildRaytracingAccelerationStructure(const D3D12_BUILD_RA
     RequireCompute();
 	_commandList->BuildRaytracingAccelerationStructure(pDesc, 0, nullptr);
 }
-
-

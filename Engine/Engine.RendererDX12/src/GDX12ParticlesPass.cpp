@@ -368,6 +368,18 @@ void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
 
 void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands)
 {
+    PrepareRenderData(commands, nullptr, true, true);
+}
+
+void GDX12ParticlesPass::PrepareRenderGroup(GDX12CommandList* commands,
+    const std::vector<uint64_t>& emitterIds, bool clear, bool finalize)
+{
+    PrepareRenderData(commands, &emitterIds, clear, finalize);
+}
+
+void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands,
+    const std::vector<uint64_t>* emitterIds, bool clear, bool finalize)
+{
     if (!_state || !_state->Active) return;
     auto& state = *_state;
     auto& simulation = *_resources->ParticleSimulation->_state;
@@ -376,8 +388,13 @@ void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands)
     commands->SetComputeRootSignature(state.Root.get());
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-    commands->ResourceBarrier({ depth->GetResource()->GetSRVBarrier() });
-    commands->SetComputeSRV(3, depth->GetSRV()->GPUHandle);
+    // Culling uses camera/constants only; grouped preparation must not acquire
+    // the raster depth or atlas while another queue consumes scene depth.
+    if (!emitterIds)
+    {
+        commands->ResourceBarrier({ depth->GetResource()->GetSRVBarrier() });
+        commands->SetComputeSRV(3, depth->GetSRV()->GPUHandle);
+    }
     commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
     UAV(commands, *state.Draws);
     UAV(commands, *state.Counts);
@@ -387,18 +404,22 @@ void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands)
     UAV(commands, *state.DrawArgs);
     UAV(commands, *state.SortParameters);
     state.BindGlobalUAVs(commands);
-    commands->SetPipelineState(state.Compute.at("ClearDraws"));
-    commands->Dispatch(1, 1, 1);
+    if (clear)
+    {
+        commands->SetPipelineState(state.Compute.at("ClearDraws"));
+        commands->Dispatch(1, 1, 1);
+    }
     UAV(commands, *state.Counts);
     for (UINT i = 0; i < state.ConstantCount; ++i)
     {
         const auto& emitter = simulation.Emitters[i];
+        if (emitterIds && std::find(emitterIds->begin(), emitterIds->end(), emitter.Id) == emitterIds->end()) continue;
         commands->SetComputeRootConstantBufferView(2, state.Constants[_resources->CurrFrameConstantsIndex]->GetElementAddress(i));
         UINT base = 0;
         const bool imported = simulation.Offload && simulation.Offload->Find(emitter.Id, base);
         const UINT parameters[] = {emitter.MaxParticles, base, state.Capacity, state.ResetMotion};
         commands->GetCommandList()->SetComputeRoot32BitConstants(0, 4, parameters, 0);
-        if (emitter.Texture)
+        if (emitter.Texture && !emitterIds)
             commands->ResourceBarrier({emitter.Texture->PrimaryDeviceTexture->GetResource()->GetSRVBarrier()});
         if (imported)
         {
@@ -426,10 +447,13 @@ void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands)
         UAV(commands, *state.Keys[0]);
         UAV(commands, *state.Payloads[0]);
     }
-    commands->SetPipelineState(state.Compute.at("BuildDrawArgs"));
-    commands->Dispatch(1, 1, 1);
-    commands->ResourceBarrier({ state.DrawArgs->GetResource().GetIndirectArgsBarrier() });
-    if (state.Sorted) state.Sort(commands);
+    if (finalize)
+    {
+        commands->SetPipelineState(state.Compute.at("BuildDrawArgs"));
+        commands->Dispatch(1, 1, 1);
+        commands->ResourceBarrier({ state.DrawArgs->GetResource().GetIndirectArgsBarrier() });
+        if (state.Sorted) state.Sort(commands);
+    }
 }
 
 void GDX12ParticlesPass::DrawWeightedAndMotion(GDX12CommandList* commands)

@@ -91,9 +91,9 @@ void SceneShadows::Append(Graph& g,UINT index) {
     for(UINT i=0;i<s.Views.size();++i) {
         const Id base=Id(g.Resources.size()); const std::string name=(s.Views[i]->Sun?"cascade ":"local face ")+std::to_string(i);
         s.Views[i]->DepthId=base+5;
-        g.Resources.push_back({name+" constants",D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_GENERIC_READ});
+        g.Resources.push_back({name+" constants",D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_GENERIC_READ,false,false,Heap::Upload});
         for(UINT part=0;part<2;++part) { g.Resources.push_back({name+" commands",0,0,true,true}); g.Resources.push_back({name+" count",0,0,true,true}); }
-        g.Resources.push_back({name+" depth",0,0}); g.Resources.push_back({name+" readback",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST});
+        g.Resources.push_back({name+" depth",0,0}); g.Resources.push_back({name+" readback",D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COPY_DEST,false,false,Heap::Readback});
         g.Operations.push_back({name+" reset",{{base+2,Mode::Write,UnorderedAccess},{base+4,Mode::Write,UnorderedAccess}}});
         g.Operations.push_back({name+" cull static/dynamic",{{0,Mode::Read,shader},{1,Mode::Read,shader},{2,Mode::Read,shader},{base,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ},
             {base+1,Mode::Write,UnorderedAccess},{base+2,Mode::ReadWrite,UnorderedAccess},{base+3,Mode::Write,UnorderedAccess},{base+4,Mode::ReadWrite,UnorderedAccess}},{},false,2});

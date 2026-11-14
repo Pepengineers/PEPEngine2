@@ -22,7 +22,7 @@ public:
     void Resize(UINT width, UINT height); // caller has drained all slots
     void Freeze(UINT slot, UINT camera, std::vector<GDX12SkinningWork> skin);
     using AppendTechnique = std::function<void(Graph&,std::vector<ID3D12Resource*>&)>;
-    Schedule Plan(UINT slot,ID3D12Resource* target,const AppendTechnique& append = {},const AppendTechnique& earlyAO = {},const AppendTechnique& prelude = {});
+    Schedule Plan(UINT slot,ID3D12Resource* target,const AppendTechnique& append = {},const AppendTechnique& earlyAO = {},const AppendTechnique& prelude = {},bool singleDirect = true);
     const std::vector<ID3D12Resource*>& PlannedResources(UINT slot) const { return _slots.at(slot).PlannedBindings; }
     // Frame-slot inputs for future graph consumers; access declarations and the
     // frame completion fence still govern their lifetime and readiness.

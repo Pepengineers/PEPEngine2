@@ -74,12 +74,13 @@ void GDX12ParticleSimulation::ExecuteOffload(GDX12CommandList* commands)
         _state->Offload->Record(commands, _state->Emitters, _interaction, _state->ResetMotion);
 }
 
-std::vector<GDX12Resource*> GDX12ParticleSimulation::GetPoolResources() const
+std::vector<GDX12Resource*> GDX12ParticleSimulation::GetPoolResources(const std::vector<uint64_t>* emitterIds) const
 {
     std::vector<GDX12Resource*> result;
     if (_state && _state->Active)
         for (const auto& entry : _state->Pools)
         {
+            if (emitterIds && std::find(emitterIds->begin(), emitterIds->end(), entry.first) == emitterIds->end()) continue;
             const auto& pool = *entry.second;
             result.insert(result.end(), { &pool.Particles->GetResource(), &pool.Alive[0]->GetResource(),
                 &pool.Alive[1]->GetResource(), &pool.Dead->GetResource(), &pool.Counters->GetResource(), &pool.Args->GetResource() });
@@ -235,7 +236,8 @@ void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, Render
     state.Emitters = std::move(emitters);
 }
 
-void GDX12ParticleSimulation::InitializePools(GDX12CommandList* commands, GDX12DeviceResources* resources)
+void GDX12ParticleSimulation::InitializePools(GDX12CommandList* commands, GDX12DeviceResources* resources,
+    const std::vector<uint64_t>* emitterIds)
 {
     if (!_state || !_state->Active) return;
     auto& state = *_state;
@@ -244,6 +246,7 @@ void GDX12ParticleSimulation::InitializePools(GDX12CommandList* commands, GDX12D
     commands->SetDescriptorHeaps({resources->SRV_UAV_Heap.get()});
     for (const auto& emitter : state.Emitters)
     {
+        if (emitterIds && std::find(emitterIds->begin(), emitterIds->end(), emitter.Id) == emitterIds->end()) continue;
         if (state.Offloaded.count(emitter.Id)) continue;
         auto& pool = *state.Pools.at(emitter.Id);
         if (pool.Initialized && pool.ResetRevision == emitter.ResetRevision) continue;
@@ -274,7 +277,7 @@ void GDX12ParticleSimulation::InitializePools(GDX12CommandList* commands, GDX12D
 }
 
 void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceResources* resources,
-    RenderPipelineCommonData& common, GDX12Texture* depth)
+    RenderPipelineCommonData& common, GDX12Texture* depth, const std::vector<uint64_t>* emitterIds)
 {
     if (!_state || !_state->Active) return;
     auto& state = *_state;
@@ -283,13 +286,22 @@ void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceRes
     commands->SetDescriptorHeaps({resources->SRV_UAV_Heap.get()});
     if (depth)
     {
-        commands->ResourceBarrier({depth->GetResource()->GetNonPixelShaderResourceBarrier()});
+        const bool samplesDepth = !emitterIds || std::any_of(state.Emitters.begin(), state.Emitters.end(),
+            [&](const auto& emitter) {
+                return emitter.DepthCollision &&
+                    std::find(emitterIds->begin(), emitterIds->end(), emitter.Id) != emitterIds->end();
+            });
+        // Keep valid root arguments for all kernels; depth-independent groups
+        // bind the descriptor without acquiring a resource they never sample.
+        if (samplesDepth)
+            commands->ResourceBarrier({depth->GetResource()->GetNonPixelShaderResourceBarrier()});
         commands->SetComputeSRV(3, depth->GetSRV()->GPUHandle);
         auto& frame = resources->FrameConstants[resources->CurrFrameConstantsIndex];
         commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(common.ActiveCameraCBufferIndex));
     }
     for (const auto& emitter : state.Emitters)
     {
+        if (emitterIds && std::find(emitterIds->begin(), emitterIds->end(), emitter.Id) == emitterIds->end()) continue;
         if (emitter.Paused || state.Offloaded.count(emitter.Id)) continue;
         auto& pool = *state.Pools.at(emitter.Id);
         const uint64_t pending = emitter.BurstTotal >= pool.BurstTotal ? emitter.BurstTotal - pool.BurstTotal : 0;
@@ -352,10 +364,13 @@ void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceRes
     }
 }
 
-std::vector<GDX12Resource*> GDX12ParticleSimulation::GetConstantResources(UINT slot) const
+std::vector<GDX12Resource*> GDX12ParticleSimulation::GetConstantResources(UINT slot,
+    const std::vector<uint64_t>* emitterIds) const
 {
     std::vector<GDX12Resource*> result;
     if (_state && _state->Active)
-        for (const auto& entry : _state->Pools) result.push_back(&entry.second->Constants.at(slot)->GetResource());
+        for (const auto& entry : _state->Pools)
+            if (!emitterIds || std::find(emitterIds->begin(), emitterIds->end(), entry.first) != emitterIds->end())
+                result.push_back(&entry.second->Constants.at(slot)->GetResource());
     return result;
 }

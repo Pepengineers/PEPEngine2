@@ -8,7 +8,7 @@ class DirectFixture {
 public:
     DirectFixture(GDX12Device&, uint32_t slots);
     void Prepare(uint32_t slot, uint32_t seed);
-    Schedule Plan(State targetInitial, State targetFinal) const;
+    Schedule Plan(State targetInitial, State targetFinal, bool asyncQueues = false) const;
     std::vector<ID3D12Resource*> Resources(uint32_t slot, ID3D12Resource* target) const;
     void Record(uint32_t slot, Id operation, uint32_t list, ID3D12GraphicsCommandList*,
         ID3D12Resource* target, D3D12_CPU_DESCRIPTOR_HANDLE rtv, uint32_t width, uint32_t height);
