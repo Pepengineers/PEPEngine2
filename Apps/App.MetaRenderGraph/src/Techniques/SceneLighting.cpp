@@ -446,6 +446,8 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     auto* displayHDR = _composition.OUT_Result.get();
     if (_hdrContinuation)
         displayHDR = _hdrContinuation(graph, bindings, &p._color, _reflections.Published(serial));
+    if (!_hdrContinuation)
+    {
     // A diagnostic display of intermediate HDR only; U7 reconstruction, output
     // providers, frame generation and the full post chain remain untouched.
     if (!_displayRoot)
@@ -498,6 +500,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
                  cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
                  cmd->DrawInstanced(3, 1, 0, 0);
              });
+    }
     const std::array<GDX12Texture *, 4> images{frame.AO->Output(), _deferred._color.get(), &p._color,
                                                _composition.OUT_Result.get()};
     UINT64 bytes = 0;

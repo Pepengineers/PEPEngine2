@@ -232,7 +232,7 @@ struct BistroUIPosters::Impl
         }
     }
 
-    bool Prepare(GDX12DeviceResources& primary, UINT slot, double animationSeconds)
+    bool Prepare(GDX12DeviceResources& primary, UINT slot, double animationSeconds, bool localDirect)
     {
         if (slot != primary.CurrFrameConstantsIndex || slot >= primary.FrameConstants.size() || !primary.Device)
             throw std::invalid_argument("Bistro posters require the current primary frame slot");
@@ -286,7 +286,7 @@ struct BistroUIPosters::Impl
                 surface->Material->DirtyFlag = true;
             }
         }
-        const bool localAsync = AsyncCompute.GetValue();
+        const bool localAsync = !localDirect && AsyncCompute.GetValue();
         for (auto* surface : Surfaces())
         {
             if (!visible)
@@ -367,9 +367,9 @@ BistroUIPosters::BistroUIPosters(RenderModule& render, const std::shared_ptr<Sce
 
 BistroUIPosters::~BistroUIPosters() = default;
 
-bool BistroUIPosters::PrepareFrame(GDX12DeviceResources& primary, UINT frameSlot, double animationSeconds)
+bool BistroUIPosters::PrepareFrame(GDX12DeviceResources& primary, UINT frameSlot, double animationSeconds, bool localDirect)
 {
-    return _impl->Prepare(primary, frameSlot, animationSeconds);
+    return _impl->Prepare(primary, frameSlot, animationSeconds, localDirect);
 }
 
 GDX12RenderPass& BistroUIPosters::RasterPass(std::size_t index) const
@@ -380,6 +380,12 @@ GDX12RenderPass& BistroUIPosters::RasterPass(std::size_t index) const
 IRenderPassLink& BistroUIPosters::Output(std::size_t index) const
 {
     return _impl->Surfaces().at(index)->TargetLink;
+}
+
+std::vector<GDX12Texture*> BistroUIPosters::NativeTargets(std::size_t index) const
+{
+    auto* frame = _impl->Surfaces().at(index)->Current;
+    return frame ? std::vector<GDX12Texture*>{frame->Effect.get(), frame->Target.get()} : std::vector<GDX12Texture*>{};
 }
 
 void BistroUIPosters::AddPasses(GDX12RenderGraph& graph) const
