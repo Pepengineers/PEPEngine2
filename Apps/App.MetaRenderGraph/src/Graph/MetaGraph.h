@@ -18,7 +18,8 @@ struct Resource {
 struct Access { Id Resource; Mode Usage; State Required; };
 // Each operation is one packet, containing one or more independently recorded lists.
 // Accesses describe the boundary of the entire packet. Internal changes must be
-// explicit operations; callbacks may not perform undeclared transitions.
+// explicit operations or a strict recording-local scope restored to the packet
+// boundary before closing; callbacks may not perform undeclared transitions.
 struct Operation {
     std::string Name;
     std::vector<Access> Accesses;

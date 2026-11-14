@@ -32,6 +32,15 @@ GDX12CommandList::GDX12CommandList(GDX12Device* device, D3D12_COMMAND_LIST_TYPE 
 			nullptr, IID_PPV_ARGS(&_commandList)));
 }
 
+GDX12CommandList::GDX12CommandList(ID3D12GraphicsCommandList* borrowed)
+    : FenceValue(0), _type(D3D12_COMMAND_LIST_TYPE_DIRECT)
+{
+    if (!borrowed || borrowed->GetType() != D3D12_COMMAND_LIST_TYPE_DIRECT)
+        throw std::invalid_argument("Native technique requires a DIRECT list");
+    ThrowIfFailed(borrowed->QueryInterface(IID_PPV_ARGS(&_commandList)));
+    InvalidateCachedState();
+}
+
 GDX12CommandList::~GDX12CommandList()
 {
 	_commandList.Reset();
@@ -50,6 +59,7 @@ const ComPtr<ID3D12CommandAllocator>& GDX12CommandList::GetCommandAllocator()
 
 void GDX12CommandList::Reset()
 {
+    if (!_commandAllocator) throw std::logic_error("Cannot reset a borrowed list");
     if (_submitted && (!_retirementFence || !_retirement ||
         _retirementFence->GetCompletedValue() == (std::numeric_limits<UINT64>::max)() ||
         _retirementFence->GetCompletedValue() < _retirement))

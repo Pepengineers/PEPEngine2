@@ -78,6 +78,7 @@ CD3DX12_RESOURCE_BARRIER GDX12Resource::GetIndirectArgsBarrier()
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetUAVBarrier()
 {
+    GDX12RecordingStates::Find(D3DResource.Get()); // validate the native packet allow-list
 	if (_concurrentRead) throw std::logic_error("UAV barrier during concurrent resource reads");
 	auto barrier = CD3DX12_RESOURCE_BARRIER::UAV(D3DResource.Get());
 	return barrier;
@@ -90,6 +91,12 @@ CD3DX12_RESOURCE_BARRIER GDX12Resource::GetSRVBarrier()
 
 CD3DX12_RESOURCE_BARRIER GDX12Resource::GetTransitionBarrier(D3D12_RESOURCE_STATES state)
 {
+    if (auto* local = GDX12RecordingStates::Find(D3DResource.Get()))
+    {
+        auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(D3DResource.Get(), *local, state);
+        *local = state;
+        return barrier;
+    }
     if (_concurrentRead)
     {
         if (state == D3D12_RESOURCE_STATE_COMMON || (state & _currentState) != state)
@@ -114,6 +121,7 @@ void GDX12Resource::BeginConcurrentRead()
 
 void GDX12Resource::SetCurrentState(const D3D12_RESOURCE_STATES newState)
 {
+    if (auto* local = GDX12RecordingStates::Find(D3DResource.Get())) { *local = newState; return; }
 	if (_concurrentRead && newState != _currentState)
         throw std::logic_error("Concurrent resource state changed outside its queue join");
 	_currentState = newState;
@@ -121,6 +129,7 @@ void GDX12Resource::SetCurrentState(const D3D12_RESOURCE_STATES newState)
 
 D3D12_RESOURCE_STATES GDX12Resource::GetCurrentState()
 {
+    if (auto* local = GDX12RecordingStates::Find(D3DResource.Get())) return *local;
 	return _currentState;
 }
 
@@ -135,4 +144,28 @@ void GDX12Resource::ResetState()
 {
 	_currentState = D3D12_RESOURCE_STATE_COMMON;
     _concurrentRead = false;
+}
+
+thread_local GDX12RecordingStates* GDX12RecordingStates::_active = nullptr;
+GDX12RecordingStates::GDX12RecordingStates(const std::vector<Binding>& states) : _states(states), _boundary(states)
+{
+    if (_active) throw std::logic_error("Nested recording state scope");
+    _active = this;
+}
+GDX12RecordingStates::~GDX12RecordingStates() { _active = nullptr; }
+D3D12_RESOURCE_STATES* GDX12RecordingStates::Find(ID3D12Resource* resource)
+{
+    if (!_active) return nullptr;
+    for (auto& entry : _active->_states) if (entry.first == resource) return &entry.second;
+    throw std::logic_error("Undeclared resource in native recording packet");
+}
+void GDX12RecordingStates::Finish(ID3D12GraphicsCommandList* commands)
+{
+    for (size_t i = 0; i < _states.size(); ++i)
+        if (_states[i].second != _boundary[i].second)
+        {
+            const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(_states[i].first,
+                _states[i].second, _boundary[i].second);
+            commands->ResourceBarrier(1, &barrier);
+        }
 }

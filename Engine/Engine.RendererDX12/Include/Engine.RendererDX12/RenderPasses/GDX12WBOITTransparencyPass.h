@@ -5,6 +5,8 @@
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 
+namespace Meta { class SceneWaterParticles; }
+
 class GDX12WBOITTransparencyPass : public GDX12RenderPass
 {
 public:
@@ -259,6 +261,7 @@ public:
 	}
 
 private:
+    friend class Meta::SceneWaterParticles;
     void UpdateReadOnlyDepth()
     {
         D3D12_DEPTH_STENCIL_VIEW_DESC desc = {};

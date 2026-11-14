@@ -15,6 +15,9 @@ class SceneLighting
     void AppendAO(Graph &, std::vector<ID3D12Resource *> &);
     void Append(Graph &, std::vector<ID3D12Resource *> &, SceneGeometry &, SceneEnvironment &, GDX12Texture *target,
                 bool serial);
+    using HDRContinuation = std::function<GDX12Texture*(Graph&, std::vector<ID3D12Resource*>&,
+        GDX12Texture*, GDX12Texture*)>;
+    void SetHDRContinuation(HDRContinuation continuation) { _hdrContinuation = std::move(continuation); }
     bool Record(Id, ID3D12GraphicsCommandList *) const;
     void Submitted(bool serial, uint64_t fence);
     void Reset();
@@ -48,6 +51,7 @@ class SceneLighting
         UINT64 Bytes = 0;
         UINT Width = 0, Height = 0;
     };
+    HDRContinuation _hdrContinuation;
     GDX12DeviceResources &_resources;
     RenderPipelineCommonData &_common;
     SceneReflections _reflections;

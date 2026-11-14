@@ -1,3 +1,25 @@
+# Current U6 source status - 2026-11-14
+
+U6 explicitly authorized on U5 `a322796512233fc303fed4d54860081ca6a62767`.
+Implemented in source; builds/tests/acceptance deferred by the user. Independent
+originating-chat static review is pending. U5/U4 sections below are historical:
+their older authorization statements and binaries do not validate U6.
+
+| U6 position | New packet/access path | Status / ownership |
+|---|---|---|
+| Water solver/surface/resolve | `SceneWaterParticles.*`, App-owned fluid pass, original SPH/surface/NRF/optics kernels | Source connected, unbuilt/unrun. Local-only; private diagnostic histories; combined depth/motion feed downstream consumers. |
+| Particle pools/controls/collision | Explicit initialization and simulation/dispatch packets, opaque depth and current grass field | Source connected, unbuilt/unrun. Original seeds/pause/reset/bursts/time/collision; depth-dependent input groups. |
+| Particle render/global sort/motion | All-emitter culling/radix sort, weighted/feature-motion, SortedAlpha/additive packets | Source connected, unbuilt/unrun. One global sort across groups; no offload workers/private submits. |
+| Transparency/WBOIT | Original far/near shaders on U4 immutable geometry; far resolve -> water optics -> near mesh+particles resolve | Source connected, unbuilt/unrun. Clear once per far/near boundary; opaque aerial once from ReflectedHDR; final HDR displayed. |
+
+Owner-only U6 recording is an explicit KTD5 sequential CPU section. A strict
+recording-local state scope restores declared packet boundaries. No U6 CPU
+parallelism or GPU async claim. See [06-water-particles.md](06-water-particles.md)
+for accesses/history/fallback/reset/resize, future payload/input fields and unrun
+acceptance. U7 remains unauthorized. Existing inventory bytes below are preserved.
+
+---
+
 # U1 technique inventory
 
 ## Current U5 source status — 2026-11-14

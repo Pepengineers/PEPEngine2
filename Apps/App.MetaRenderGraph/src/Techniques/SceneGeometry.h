@@ -15,6 +15,7 @@ class SceneGeometry {
 public:
     explicit SceneGeometry(RenderPipelineContext&);
     void PrepareGrass(RenderPipelineContext& c,float dt) { _grass->Prepare(c,dt); }
+    GDX12ParticleInteractionField InteractionField() const { return _grass->InteractionField(); }
     void Select(bool serial) { _grass->Select(serial); }
     UINT SlotCount() const { return UINT(_slots.size()); }
     void WriteOperations(UINT slot,std::ostream& out) const { const auto& names=_slots.at(slot).Names;for(UINT i=0;i<names.size();++i)out<<i<<' '<<names[i]<<'\n'; }
@@ -31,6 +32,7 @@ public:
     void Record(UINT slot, Id operation, UINT bucket, ID3D12GraphicsCommandList*, ID3D12Resource* target) const;
     std::vector<uint8_t> Readback(UINT slot, const std::string& stem) const; // after GPU completion
 private:
+    friend class SceneWaterParticles;
     friend class SceneLighting;
     friend class SceneReflections;
     struct Buffer {
