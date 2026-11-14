@@ -80,10 +80,10 @@ are same-frame graph inputs, subject to resource accesses and Executor's fence.
 ## Histories, fallback and lifecycle
 
 Original seeds, reset revisions, burst totals, pause/time-scale, analytic-drag and
-semi-implicit kernels, depth/box/volume collisions and interaction constants are
+semi-implicit numerical kernels, depth/box/volume collisions and interaction constants are
 preserved. Water inputs are collected by the App-owned Bistro collector, including
-world pause/time scale and container transforms. No numerical kernel or HLSL was
-changed. Pool initialization remains separate from simulation so reset while
+world pause/time scale and container transforms. No numerical kernel was changed;
+the review correction below adds an opt-in unbatched transparent vertex-shader path. Pool initialization remains separate from simulation so reset while
 paused follows the original behavior.
 
 Water's depth/motion outputs are passed to particle drawing and near composition,
@@ -148,3 +148,61 @@ layers around water, previous-display motion, multiple queued slots and
 resize/reset/disabled/re-enabled behavior, plus production legacy defaults.
 Only after originating-chat code review and fresh user authorization may those
 checks run. Stop after this source handoff; do not start U7.
+
+## Independent-review P1 corrections (source only)
+
+Correction base: `2ee25daede82062a27bcd9d2add2d0b3ffbdb71c`. These changes
+address two defects confirmed by the originating-chat review. They are not
+compile/runtime acceptance; all previously listed prohibitions remain in force.
+
+1. **Transparent skeletal instance identity.** U4's opaque compaction does not
+   build a transparent remap. The original U6 Far/Near binding incorrectly used
+   vertex bytes as `VisibleSkinInstances`, while transparent instances could have
+   `SkinBatch != UINT_MAX`. Both Meta transparency passes now opt into
+   `SetUnbatchedDraws(true)` before Initialize. Only their VS is configured with
+   `TRANSPARENT_UNBATCHED`: it loads `InstanceCache[root InstanceID]` directly,
+   then uses the unchanged SkinOutputVertex path. The original transparent
+   culling commands already preserve one source instance per draw; neither
+   SV_InstanceID/StartInstanceLocation nor opaque remap is used to select the
+   source instance. The unused remap root slot is no longer bound to vertex data.
+   Static meshes, skeletal instancing off/on, multiple transparent instances in
+   a batch and mixed opaque/transparent material parts use their own root IDs.
+   Existing production transparency callers retain the default batched VS.
+2. **Renderer-owned particle atlas boundary.** `CreateDX12Texture` explicitly
+   publishes all mips as ALL_SHADER_RESOURCE, including the wrapper. Active
+   particle rendering now uses `NativeWork::ImportReadOnlyTexture`, with
+   Initial=Final=ALL_SHADER_RESOURCE and nondecaying texture semantics. It checks
+   the wrapper's published state and rejects incompatible existing declarations
+   or earlier writes/state accesses instead of rewriting an alias's contract.
+   Duplicate emitters sharing an atlas reuse the same physical graph ID. The
+   recording-local scope restores SRV state, so both actual resource and external
+   wrapper retain their original boundary after serial/parallel and later frames.
+   All mips remain in that union. Disabled rendering skips unused atlas imports;
+   active atlas validation still runs in the original particle BeginFrame. An
+   atlas also used by bindless mesh materials therefore retains its renderer
+   asset state instead of ending in COMMON. Pending upload ordering retains the
+   existing renderer upload/primary queue lifecycle; this import invents no ready
+   token and performs no transition or submission during CPU preparation.
+
+Read-only inspection covered RenderModuleSkinning's batch assignment and command
+construction, Culling.hlsl's unchanged transparent command stream, TransparentPass
+VS/InstancedGeometry skin reads, legacy transparency Initialize/Execute callers,
+particle BeginFrame validation/disabled behavior, CreateDX12Texture's all-mip
+upload transition and wrapper publication, NativeWork physical aliasing, compiler
+initial/final transitions, and U6 scope boundary restoration. `git diff --check`
+is the only diff hygiene check; no tests, builds, shader compilation, applications,
+validation scripts or GPU workloads were executed for these corrections.
+Independent rereview is required before MR/merge. U7 is owned by the originating
+chat and is not started here.
+
+### Originating-chat rereview and local integration
+
+The originating chat transferred the final correction diff from MisSpec to
+`D:\Project\PEPEngine2` and independently reviewed both fixes and their callers.
+Both reported P1 findings are resolved in source; no further blocking finding
+was identified in that review. Local `git diff --check --ignore-submodules=all`
+passed. The unrelated `BistroAdditionsTests.cpp` working file was preserved.
+The user authorized ordinary local branch merging into `codex/bistro-rendering`
+and U7 implementation on this computer, without a GitHub pull request. Tests,
+builds and application/GPU runs remain deferred until the U10 stage; this source
+review is not runtime acceptance.

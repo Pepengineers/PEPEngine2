@@ -33,6 +33,38 @@ struct NativeWork
         bindings.push_back(resource);
         return id;
     }
+    // Renderer-owned assets are already published in SRV state by their upload
+    // path. Import that boundary without changing the wrapper or claiming COMMON.
+    static Id ImportReadOnlyTexture(Graph &graph, std::vector<ID3D12Resource *> &bindings,
+                                    GDX12Resource &resource, State published, const std::string &name)
+    {
+        auto *native = resource.D3DResource.Get();
+        if (!native || bindings.size() != graph.Resources.size() ||
+            native->GetDesc().Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
+            State(resource.GetCurrentState()) != published)
+            throw std::logic_error("Invalid published texture import");
+        D3D12_HEAP_PROPERTIES heap{};
+        ThrowIfFailed(native->GetHeapProperties(&heap, nullptr));
+        if (heap.Type != D3D12_HEAP_TYPE_DEFAULT)
+            throw std::logic_error("Published texture import requires a DEFAULT texture");
+        const auto found = std::find(bindings.begin(), bindings.end(), native);
+        if (found != bindings.end())
+        {
+            const Id id = Id(found - bindings.begin());
+            const auto &declaration = graph.Resources.at(id);
+            if (declaration.Initial != published || declaration.Final != published || declaration.Decays)
+                throw std::logic_error("Conflicting published texture boundary");
+            for (const auto &operation : graph.Operations)
+                for (auto access : operation.Accesses)
+                    if (access.Resource == id && (access.Usage != Mode::Read || access.Required != published))
+                        throw std::logic_error("Published texture import conflicts with an earlier writer/state");
+            return id;
+        }
+        const Id id = Id(bindings.size());
+        graph.Resources.push_back({name, published, published});
+        bindings.push_back(native);
+        return id;
+    }
     Id Add(Graph &graph, std::string name, std::vector<Access> accesses,
            std::function<void(ID3D12GraphicsCommandList *)> record, std::vector<Id> dependencies = {})
     {

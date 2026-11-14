@@ -44,6 +44,9 @@ public:
 	// Input 0 - DepthStencil; input 6 - optional nearest separator/scene depth for depth partitions
 	// Output 0 - TransparencyAccumulation
 	// Output 1 - RevealageTexture
+    // Select before Initialize. Per-instance indirect commands carry the actual
+    // instance ID and must not use the opaque compact-batch remap.
+    void SetUnbatchedDraws(bool enabled) { _unbatchedDraws = enabled; }
 	void Initialize() override
 	{
 		IN_DepthStencil = _inputs[0];
@@ -61,7 +64,8 @@ public:
 
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
-		_transparencyVS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", nullptr, "VS", "vs");
+        const D3D_SHADER_MACRO unbatched[] = {{"TRANSPARENT_UNBATCHED", "1"}, {nullptr, nullptr}};
+		_transparencyVS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", _unbatchedDraws ? unbatched : nullptr, "VS", "vs");
 		_transparencyPS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", nullptr, _partition == DepthPartition::Far ? "PSFar" :
             _partition == DepthPartition::Near ? "PSNear" : "PS", "ps");
 
@@ -286,5 +290,6 @@ private:
 	IRenderPassLink* IN_DepthStencil;
     DepthPartition _partition;
     GDX12WBOITTransparencyPass* _reuse;
+    bool _unbatchedDraws = false;
     bool _rendered = false;
 };
