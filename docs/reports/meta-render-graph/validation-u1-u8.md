@@ -200,3 +200,14 @@ cancelled/unstarted entries. There is no complete A/B series or performance clai
 The benchmark instrumentation/protocol commit remains historical review material;
 it is not an accepted feature. No more workloads are authorized by this checkpoint.
 U9/U10 remain blocked pending independent review and a separate user instruction.
+
+The user's final acceptance criterion is now only: starts, submits GPU work,
+produces a result and has no obvious crash/error. Earlier exactness/tolerance,
+edge/variant/parity matrices and performance gates are withdrawn. No additional
+run was made after the stop. Plan/AGENTS policy updates are owned by the reviewer.
+Unfinished benchmark runtime code is isolated at local branch
+`codex/meta-render-graph-benchmark-wip` / `df572e23be8a16f2fc9c1bd386e79d5661ddfaed`;
+it is removed from the current task-branch runtime without rewriting history.
+The completed focused interaction fixture and saved raw evidence remain available
+for source review, without becoming mandatory acceptance gates. Historical numeric
+tables/protocols remain evidence only and do not require repeating their checks.

@@ -29,8 +29,6 @@ public:
     void SetLocalExecution(bool enabled) { _localOnly = enabled; }
     std::vector<GDX12Resource*> NativeResources() const;
     GDX12Texture* NativeColor() const { return _rendering ? _color.get() : nullptr; }
-    struct SimulationWork { uint64_t Steps=0; double Seconds=0; UINT Particles=0; };
-    const SimulationWork& LastSimulationWork() const { return _simulationWork; }
     void ExecuteSimulation(GDX12CommandList* commands);
     std::vector<GDX12RenderGraph::BufferAccess> GetSimulationBufferAccesses() const;
     std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override;
@@ -72,7 +70,6 @@ private:
     std::unique_ptr<GDX12Texture> _filtered[2];
     std::unique_ptr<GDX12Texture> _depth, _motion, _geometry, _owner, _color;
     GDX12FluidControls _controls = { false, 0 };
-    SimulationWork _simulationWork;
     bool _localOnly = false;
     bool _rendering = false;
     bool _simulating = false;

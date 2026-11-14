@@ -10,12 +10,8 @@
 #include "Components/BistroInteractionSource.h"
 #include "Components/FluidRenderComponent.h"
 #include "Engine.UI/UI_test.h"
-#include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include <d3d12sdklayers.h>
 #include <fstream>
-#include <iomanip>
-#include <chrono>
-#include <cmath>
 #include <stdexcept>
 
 void RunDirectExecutionGpuTests(GDX12Device&);
@@ -96,8 +92,8 @@ namespace
     class MetaApplication final : public App
     {
     public:
-        explicit MetaApplication(bool smoke,bool benchmark=false) : App(GetModuleHandleW(nullptr)),_smoke(smoke),_benchmark(benchmark) {}
-        bool _smoke,_benchmark;
+        explicit MetaApplication(bool smoke) : App(GetModuleHandleW(nullptr)),_smoke(smoke) {}
+        bool _smoke;
         std::vector<Entity> _objects;
         Entity _animated=InvalidEntity;
         Entity _animatedPeer=InvalidEntity;
@@ -182,10 +178,6 @@ namespace
             particles.SharedSimulation = true; // Authoring fixture retained; particle passes migrate in U6.
             particles.Blend = ParticleBlend::Additive;
             particles.EmissionRate = 0;
-            if(_benchmark) {
-                particles.LifetimeMin=particles.LifetimeMax=120;
-                particles.VolumeEnabled=true;particles.VolumeHalfExtents=Vector3(70);
-            }
             auto& component = emitter.AddComponent<ParticleEmitterComponent>();
             component.SetSettings(particles);
             component.Emit(64);
@@ -213,82 +205,6 @@ namespace
             water.SetParticles(std::move(seeds));
             SetWindowTextW(GetWindow()->GetWindowHandle(), L"MetaRenderGraph U5 - lighting and reflections");
             return true;
-        }
-        void Benchmark(const MetaBenchmark& options)
-        {
-            Require(!_smoke,"Ordinary benchmark cannot enable smoke instrumentation");
-            auto renderer=Locator.GetModule<RenderModule>();
-            auto& device=*renderer->GetPrimaryDevice();
-            ComPtr<ID3D12InfoQueue> info;
-            Require(FAILED(device.GetDevice().As(&info)),"Ordinary benchmark requires the D3D12 debug layer disabled");
-            const auto set=[](const wchar_t* name,int value) {
-                Require(ConsoleModule{}.FindConsoleVariable(name).SetFromString(std::to_string(value)),"Benchmark CVar rejected");
-            };
-            set(L"Meta.Async.Queues",!options.Direct);set(L"Meta.Record.Serial",options.Serial);
-            set(L"Render.FrameGeneration.Provider",0);set(L"Render.Upscaler.Provider",options.FSR?2:0);
-            set(L"Render.Upscaler.Quality",2);set(L"Render.DOF.Enabled",0);set(L"Render.MotionBlur.Enabled",0);
-            Engine::UI::SuspendSettings(true);
-            struct RestoreSettings { ~RestoreSettings(){Engine::UI::SuspendSettings(false);} } restore;
-            const auto root=Engine::Core::GetExecutableDirectory()/"Logs";
-            std::ofstream settings(root/"benchmark-settings.txt");
-            settings<<"synthetic-scene=v1; seeds=13,12345,12346,12347,12348; emitters=5; burst=80; lifetime=120; volume_half_extents=70; water=64; water_x=20*sin(frame/60); resolution=1280x800\n"
-                <<"warmup="<<options.Warmup<<" scored="<<options.Frames<<" direct="<<options.Direct<<" serial="<<options.Serial<<" fsr="<<options.FSR<<" trace="<<options.Trace<<" proof="<<options.Proof<<"\n"
-                <<"dt=1/60; vsync=0 (swapchain constructor); framecap=none (explicit loop); debug=0; gbv=0; fg=0; jolt=not-in-host; profiler=external-only-if-trace-run\n";
-            for(auto name:{L"Render.NumFrames",L"Render.AO.Enabled",L"Render.SSR.Enabled",L"Render.Fluid.Enabled",L"Render.Fluid.Quality",L"Meta.Clouds.Enabled",L"Render.Shadows.Sun.Resolution",L"Render.Shadows.Local.Resolution"})
-                settings<<std::string(name,name+wcslen(name))<<'='<<ConsoleModule{}.FindConsoleVariable(name).GetInt()<<'\n';
-            Require(bool(settings),"Cannot write benchmark settings");settings.close();
-            auto& world=*Locator.GetModule<SceneManagerModule>()->GetWorld();
-            auto* common=renderer->GetRenderPipelineCommonData();
-            Timer.Reset();
-            const auto tick=[&](unsigned index) {
-                MSG message{};while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)) {TranslateMessage(&message);DispatchMessageW(&message);}
-                Require(!world.IsPaused(),"Benchmark simulation paused");
-                Timer.Tick(1./60.,double(index+1)/60.);
-                auto& transform=world.GetECS().Get<TransformComponent>(_fluid);
-                transform.Location.x=FixtureOrigin.x+20.f*std::sin(float(index)/60.f);transform.DirtyFlag=true;
-                const auto before=renderer->GetFrameSubmissionId();
-                Update(Timer);Render(Timer);
-                Require(renderer->GetFrameSubmissionId()==before+1,"Benchmark skipped frame submission");
-                Require(common->WindowWidth==1280 && common->WindowHeight==800,"Benchmark output size changed");
-                const auto& status=_pipeline->ReconstructionStatus();
-                Require(unsigned(status.Effective)==(options.FSR?2u:0u) && status.FallbackReason.empty(),"Benchmark reconstruction fallback");
-            };
-            for(unsigned i=0;i<options.Warmup;++i) tick(i);
-            renderer->DrainFrameWork();
-            _pipeline->CaptureBenchmark(device,(root/"benchmark-before").string());
-            auto totals=renderer->GetPrimaryGPUTimingTotals();const auto initial=totals;
-            std::ofstream raw(root/"benchmark-frames.csv");raw<<std::setprecision(12);
-            raw<<"frame,dt,simulated_seconds,water_substeps,water_simulated_seconds,water_step_debt_seconds,water_particles,particle_dt,packets,frame_submission,cpu_frame_ms,record_work_ms,owner_record_ms,submit_ms,execute_ms,gpu_resolved_count,gpu_resolved_sum_ms,gpu_latest_ms,allocation_bytes,allocation_count\n";
-            double simulated=0,waterSeconds=0,debt=0;uint64_t waterSteps=0;
-            const auto started=std::chrono::steady_clock::now();
-            for(unsigned i=0;i<options.Frames;++i) {
-                if(options.Trace && i==0) _pipeline->TraceNextFrame();
-                const auto frameStarted=std::chrono::steady_clock::now();tick(options.Warmup+i);
-                const double frameMS=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-frameStarted).count();
-                const auto work=_pipeline->SimulationWork();const auto timing=_pipeline->LastTimings();
-                Require(work.Steps>0 && work.Particles==64 && _pipeline->PacketCount()>10,"Benchmark omitted simulation or GPU packets");
-                simulated+=Timer.DeltaTime();waterSeconds+=work.Seconds;waterSteps+=work.Steps;debt+=(std::max)(0.,Timer.DeltaTime()-work.Seconds);
-                const auto memory=renderer->GetMemoryStatistics();
-                const auto next=renderer->GetPrimaryGPUTimingTotals();
-                raw<<i<<','<<Timer.DeltaTime()<<','<<simulated<<','<<work.Steps<<','<<waterSeconds<<','<<debt<<','<<work.Particles<<','<<Timer.DeltaTime()<<','<<_pipeline->PacketCount()<<','<<renderer->GetFrameSubmissionId()<<','<<frameMS<<','<<timing.RecordingWorkMS<<','<<timing.OwnerRecordMS<<','<<timing.SubmitMS<<','<<timing.ExecuteMS<<','<<next.Count-totals.Count<<','<<next.Milliseconds-totals.Milliseconds<<','<<renderer->GetPrimaryGPUTimeMS()<<','<<memory.AllocationBytes<<','<<memory.AllocationCount<<'\n';
-                totals=next;
-                if(options.Proof && (i==149 || i==299 || i==899)) {
-                    renderer->DrainFrameWork();
-                    _pipeline->CaptureBenchmark(device,(root/("benchmark-proof-"+std::to_string(i))).string());
-                }
-            }
-            renderer->DrainFrameWork();
-            const auto ended=std::chrono::steady_clock::now();totals=renderer->GetPrimaryGPUTimingTotals();
-            Require(totals.Count-initial.Count==options.Frames && totals.Milliseconds>initial.Milliseconds,"Benchmark has missing/zero GPU timestamp samples");
-            Require(bool(raw),"Cannot write benchmark frames");raw.close();
-            _pipeline->CaptureBenchmark(device,(root/"benchmark-after").string());
-            std::ofstream summary(root/"benchmark-summary.csv");summary<<std::setprecision(12);
-            summary<<"frames,wall_with_drain_ms,gpu_count,gpu_sum_ms,simulated_seconds,water_substeps,water_simulated_seconds,water_step_debt_seconds\n"
-                <<options.Frames<<','<<std::chrono::duration<double,std::milli>(ended-started).count()<<','<<totals.Count-initial.Count<<','<<totals.Milliseconds-initial.Milliseconds<<','<<simulated<<','<<waterSteps<<','<<waterSeconds<<','<<debt<<'\n';
-            Require(bool(summary),"Cannot write benchmark summary");
-            Require(GDX12RenderGraph::GetExecuteCallCount()==0,"Benchmark called legacy graph");
-            Log::Info("MetaRenderGraph","PASS ordinary synthetic benchmark; frames=",options.Frames," GPU samples=",totals.Count-initial.Count," water steps=",waterSteps);
-            PostMessageW(GetWindow()->GetWindowHandle(),WM_CLOSE,0,0);Require(Run()==0,"Benchmark shutdown failed");
         }
         void ParticleInteraction() {
             auto renderer=Locator.GetModule<RenderModule>();
@@ -505,7 +421,7 @@ namespace
     };
 }
 
-int RunMetaApplication(bool smoke, bool focused, bool gbv, bool sceneOnly, MetaValidationMatrix matrix, unsigned firstCase, MetaBenchmark benchmark)
+int RunMetaApplication(bool smoke, bool focused, bool gbv, bool sceneOnly, MetaValidationMatrix matrix, unsigned firstCase)
 {
     SetErrorMode(SEM_NOGPFAULTERRORBOX | SEM_FAILCRITICALERRORS);
     try
@@ -525,10 +441,9 @@ int RunMetaApplication(bool smoke, bool focused, bool gbv, bool sceneOnly, MetaV
             }
         }
         {
-            MetaApplication app(smoke,benchmark.Frames!=0);
+            MetaApplication app(smoke);
             Require(app.Initialize(), "Application initialization failed");
-            if(benchmark.Frames) app.Benchmark(benchmark);
-            else if(matrix==MetaValidationMatrix::ParticleInteraction) app.ParticleInteraction();
+            if(matrix==MetaValidationMatrix::ParticleInteraction) app.ParticleInteraction();
             else if(matrix==MetaValidationMatrix::AO_SSR) app.TechniqueMatrix(firstCase);
             else if(matrix==MetaValidationMatrix::FSR) app.FSRChecks();
             else if (smoke) app.Smoke(focused,sceneOnly);

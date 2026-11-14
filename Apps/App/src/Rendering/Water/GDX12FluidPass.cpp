@@ -412,7 +412,6 @@ void GDX12FluidSurfacePass::SetInstances(std::vector<GDX12FluidInstance> instanc
 
 void GDX12FluidSurfacePass::ExecuteSimulation(GDX12CommandList* commands)
 {
-    _simulationWork={};
     if (!_prepared) PrepareFrame();
     if (!_rendering && !_simulating) return;
     GDX12_SCOPED_EVENT(commands, "Fluid SPH simulation", Colors::Aqua);
@@ -436,9 +435,6 @@ void GDX12FluidSurfacePass::ExecuteSimulation(GDX12CommandList* commands)
         const auto steps = GDX12FluidSolver::PlanSteps(settings, instance.DeltaSeconds * settings.TimeScale);
         state.SolverHead = _solver.Record(*commands, state.Solver, state.SolverHead, settings, steps,
             state.Constants->GetElementAddress(constants));
-        _simulationWork.Steps+=steps.Count;
-        _simulationWork.Seconds+=double(steps.Count)*steps.Dt;
-        _simulationWork.Particles+=state.Solver.Count;
         if (seedPending) state.SeedFrameSlot = _resources->CurrFrameConstantsIndex;
     }
 }
