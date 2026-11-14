@@ -18,7 +18,7 @@ date: 2026-11-13
 
 Новые `Apps/App.MetaRenderGraph/src/Graph/MetaGraphRecorder.*`, необходимые изменения compiler/executor U2. JobSystem расширяется в `Engine/Engine.Core/Include/Engine.Core/Jobs/JobSystem.h` и `Engine/Engine.Core/src/Jobs/JobSystem.cpp` только если текущий контракт не покрывает continuation. Сохранить существующие call sites.
 
-Тесты: `Apps/App.MetaRenderGraph/tests/RecordingJobsTests.cpp`, дополнения `DirectExecutionGpuTests.cpp`; `Engine/Engine.Core/tests/JobSystemTests.cpp` при изменении job API. Отчёт `docs/reports/meta-render-graph/03-recording-jobs.md`.
+Пути fixtures как ориентиры (создание и расширение не требуются): `Apps/App.MetaRenderGraph/tests/RecordingJobsTests.cpp`, дополнения `DirectExecutionGpuTests.cpp`; `Engine/Engine.Core/tests/JobSystemTests.cpp` при изменении job API. Отчёт `docs/reports/meta-render-graph/03-recording-jobs.md`.
 
 ## Approach
 
@@ -28,15 +28,10 @@ date: 2026-11-13
 4. CPU Ready публикуется после завершения записи и закрытия/проверки всех нужных lists. Queue submitter сериализует отправку, но не блокирует recording workers. Готовый ранний packet может быть отправлен до завершения поздней независимой recording group.
 5. Оставить режим последовательной записи того же плана для сравнения. CPU buckets не заменяют GPU-driven ExecuteIndirect обычными CPU draw loops. Гранулярность выбирать по объёму записи; не создавать job/list на каждый мелкий объект по умолчанию.
 
-## Test Scenarios
+## Smoke-check
 
-- 0/1/N buckets, разный порядок завершения и намеренно задержанный bucket дают тот же массив логических результатов и GPU readback, что serial recording.
-- Parent→children→continuation работает при одном доступном worker и при обычном pool, без starvation/deadlock.
-- Две top-level groups реально пересекаются на CPU trace; это не доказательство GPU async и так не маркируется.
-- Несколько buckets пишут раздельные диапазоны одного destination: barriers только на границах группы, данные не перемешиваются.
-- Job error/cancellation during shutdown не отправляет неполную пачку и сохраняет lifetime уже отправленных списков.
-- Allocator, descriptor и upload ranges не переиспользуются, пока их прежний GPU-потребитель не завершён; повторные кадры проходят debug layer.
+Применяется [общий порядок проверки](00-meta-plan.md#verification-contract). Сцена работает с параллельной записью команд и выдаёт GPU-результат. Достаточно обычного короткого запуска без явных ошибок; уже полученный результат можно использовать повторно без нового прогона.
 
 ## Acceptance and Handoff
 
-CPU и GPU tests проходят, serial/parallel результаты совпадают, CPU trace показывает параллельную запись. Отчёт фиксирует nesting/continuation API, владельцев ресурсов записи, поведение ошибки и доказательство раннего submission. Число workers и timings приводятся без обещания GPU/FPS-прироста. Локальный коммит. Следующее задание: [U4](04-geometry-shadows.md).
+Зафиксировать API nesting/continuation и владельцев ресурсов записи. Кратко записать commit, выбранный режим и итог: работает / не работает / не запускалось, с причиной при наличии. Локальный коммит только своих изменений. Следующее задание: [U4](04-geometry-shadows.md); переходить только в разрешённых пользователем пределах.
