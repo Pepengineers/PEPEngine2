@@ -134,7 +134,7 @@ void RunDirectExecutionGpuTests(GDX12Device& device) {
     executor.Drain(); fixture.Validate(0);
     for(bool cancel:{false,true}) {
         Meta::Graph g;
-        g.Resources={{"data",0,0,false,true},{"upload",D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_GENERIC_READ}};
+        g.Resources={{"data",0,0,false,true},{"upload",D3D12_RESOURCE_STATE_GENERIC_READ,D3D12_RESOURCE_STATE_GENERIC_READ,false,false,Meta::Heap::Upload}};
         g.Operations={{"early upload",{{0,Meta::Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST},{1,Meta::Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ}}},{"late independent",{}}};
         const auto partialPlan=Meta::Compile(g);
         Meta::Executor partial(device,1,16);

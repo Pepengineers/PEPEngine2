@@ -256,6 +256,7 @@ void RenderModule::WaitForUploads()
 
 void RenderModule::DrainFrameWork()
 {
+    if (_pipeline && _pipeline->OwnsExecution()) _pipeline->DrainExecution();
     WaitForUploads();
     if (!_pipeline->OwnsExecution())
         if (auto* compute = _primaryDevice->TryGetComputeQueue()) compute->Flush();

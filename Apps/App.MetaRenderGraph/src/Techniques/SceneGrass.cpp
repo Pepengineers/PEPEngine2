@@ -28,7 +28,7 @@ std::vector<ID3D12Resource*> SceneGrass::Append(Graph& g,UINT slot,const std::ve
         D3D12_HEAP_PROPERTIES heap{}; ThrowIfFailed(native->GetHeapProperties(&heap,nullptr));
         const State initial=heap.Type==D3D12_HEAP_TYPE_UPLOAD?State(D3D12_RESOURCE_STATE_GENERIC_READ):heap.Type==D3D12_HEAP_TYPE_READBACK?State(D3D12_RESOURCE_STATE_COPY_DEST):0;
         const bool decays=heap.Type==D3D12_HEAP_TYPE_DEFAULT && native->GetDesc().Dimension==D3D12_RESOURCE_DIMENSION_BUFFER;
-        g.Resources.push_back({"grass resource "+std::to_string(id),initial,initial,(native->GetDesc().Flags&D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)!=0,decays});
+        g.Resources.push_back({"grass resource "+std::to_string(id),initial,initial,(native->GetDesc().Flags&D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS)!=0,decays,heap.Type==D3D12_HEAP_TYPE_UPLOAD?Heap::Upload:heap.Type==D3D12_HEAP_TYPE_READBACK?Heap::Readback:Heap::Default});
         return id;
     };
     const auto access=[&](auto* buffer,Mode mode,State state) { return Access{resource(buffer->GetResource().D3DResource.Get()),mode,state}; };

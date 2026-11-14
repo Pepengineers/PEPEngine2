@@ -9,11 +9,14 @@ using State = uint32_t; // D3D12 legacy resource-state bits; CPU tests need no d
 constexpr State UnorderedAccess = 0x8;
 constexpr Id Invalid = ~Id(0);
 enum class Mode { Read, Write, ReadWrite };
+enum class Queue { Direct, Compute, Copy };
+enum class Heap { Default, Upload, Readback };
 struct Resource {
     std::string Name; State Initial, Final; bool Unordered = false;
     // DEFAULT-heap buffers decay to COMMON after each ExecuteCommandLists.
     // Upload/readback heaps have fixed states and must leave this false.
     bool Decays = false;
+    Heap Memory = Heap::Default;
 };
 struct Access { Id Resource; Mode Usage; State Required; };
 // Each operation is one packet, containing one or more independently recorded lists.
@@ -29,6 +32,7 @@ struct Operation {
     // A concrete owner-only cold recorder, e.g. the SDK's first lazy constant
     // ring allocation. Resources and packet boundaries are still plan-owned.
     bool OwnerRecording = false;
+    Queue Target = Queue::Direct;
 };
 struct Graph { std::vector<Resource> Resources; std::vector<Operation> Operations; };
 struct Barrier { Id Resource; State Before, After; bool Uav = false; };
@@ -39,12 +43,14 @@ struct Packet {
     std::vector<Barrier> Before, After;
     uint32_t Lists;
     bool OwnerRecording = false;
+    Queue Target = Queue::Direct;
 };
 struct Schedule {
     std::vector<Packet> Packets;
     std::vector<State> FinalStates;
     std::vector<bool> Decays;
+    std::vector<Heap> Memory;
     void Write(std::ostream&) const;
 };
-Schedule Compile(const Graph&);
+Schedule Compile(const Graph&, bool singleDirect = false);
 }
