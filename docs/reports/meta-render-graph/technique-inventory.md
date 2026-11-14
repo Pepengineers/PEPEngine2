@@ -1,4 +1,33 @@
-# Current two-device water source status — 2026-11-14
+# Current integration status — 2026-11-14
+
+Source head: `eef2fe07` (`codex/bistro-rendering`), including U11 `11657349`.
+**Source implementation complete; combined runtime not run.** This is the current status;
+all stage snapshots below are historical, including their old authorization and
+pending-check statements. The current [Verification Contract](../../plans/2026-11-13-meta-render-graph/00-meta-plan.md#verification-contract)
+supersedes their numerical, edge-case, timeline and matrix acceptance demands.
+
+The executable currently hosts a procedural scene, **not the Bistro model**.
+Reusing Bistro techniques does not constitute loading Bistro. Its migration is
+explicitly deferred by the user.
+
+| Area | Current source state |
+|---|---|
+| Geometry, shadows, grass, environment, probes, AO/SSR, lighting | Explicit Meta operations and retained native recorders; completed MisSpec binding fixes integrated. |
+| Local water, particles and transparency | Render adapters connected; ordinary scene creates water and four continuous emitter groups near the camera, with common transparency/history. |
+| Post/UI/reconstruction | Existing explicit packets; integrated backbuffer lifetime and downscaled-render fixes. Current scope is Native/FSR; FG and other providers deferred. |
+| Single-GPU placement | `Meta.Async.Queues=false` selects DIRECT; `true` enables selected COMPUTE/COPY work. Ordinary plans omit diagnostic readback copies; some diagnostic buffers remain allocated. |
+| Cross-adapter / water | Source U9/U10 independent producers and publication lifetimes retained. No new local MGPU runtime result. |
+| Particle MGPU / shared batch | U11 connects all marked depth-independent emitters, one particle payload export/import, real interaction input, common sort/resolve and a device/submission domain shared with water. DepthCollision remains primary. Source reviewed; not run. |
+
+The earlier [local DIRECT smoke](local-direct-smoke-2026-11-14.md) displayed planes
+and grass on an RTX 3060 Laptop GPU. The newer `1fc3b05f` / `11753b2d` / U11 integration
+is source-reviewed only and has not been run. It does not establish visual results
+for the new ordinary water/particle content. See the [U12 handoff](12-acceptance.md)
+and [launch guide](../../../Apps/App.MetaRenderGraph/README.md).
+
+---
+
+# Historical two-device water source status — 2026-11-14
 
 Base: local `75cb0cf35c3229d398b400a0f7bc2c199baeae86`, reviewed transport merge.
 **Source implemented; unbuilt/unrun; hardware/runtime acceptance pending.**
