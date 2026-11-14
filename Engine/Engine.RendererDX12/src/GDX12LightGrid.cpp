@@ -31,30 +31,40 @@ UINT GDX12LightGrid::DepthSlice(const float z) const
         0.0f, float(Constants.Size.z - 1)));
 }
 
-void GDX12LightGridBuildSystem::Build(GDX12LightGrid& grid, const Matrix& projection, const Matrix& view,
-    float nearPlane, const float farPlane, const UINT width, const UINT height, const std::vector<GDX12LocalLightConstants>& lights,
-    JobSystem* jobs, GDX12LightGridSettings settings)
+GDX12LightGridConstants BuildLightGridConstants(const Matrix& projection, const Matrix& view,
+    float nearPlane, float farPlane, UINT width, UINT height, size_t lightCount, GDX12LightGridSettings settings)
 {
-    EnsureIdle();
-    GDX12_SCOPED_CPU_EVENT("CPU light grid");
     if (!width || !height || width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION || height > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
         !std::isfinite(nearPlane) || nearPlane <= 0 ||
         !(farPlane == 0 || farPlane > nearPlane) || XMMatrixIsNaN(projection) || XMMatrixIsInfinite(projection) ||
         XMMatrixIsNaN(view) || XMMatrixIsInfinite(view) || projection._11 <= 0 || projection._22 <= 0 ||
-        projection._34 != -1 || projection._44 != 0 || lights.size() > UINT_MAX ||
+        projection._34 != -1 || projection._44 != 0 || lightCount > UINT_MAX ||
         settings.TileSize < 8 || settings.TileSize > 1024 || settings.DepthSlices < 1 || settings.DepthSlices > 128 ||
         !std::isfinite(settings.FarDepthCm) || settings.FarDepthCm < 1 || settings.FarDepthCm > 1e9f)
         throw std::invalid_argument("Invalid perspective light grid inputs");
     const bool infinite = farPlane == 0 || std::isinf(farPlane);
     const float gridFar = (std::max)(nearPlane * 2, infinite ? settings.FarDepthCm : (std::min)(farPlane, settings.FarDepthCm));
     if (!std::isfinite(gridFar)) throw std::invalid_argument("Invalid light grid depth range");
-    grid.Constants.Size = { (width - 1) / settings.TileSize + 1, (height - 1) / settings.TileSize + 1,
-        settings.DepthSlices, static_cast<UINT>((lights.size() + 31) / 32) };
-    grid.Constants.Depth = { settings.DepthSlices / std::log2(gridFar / nearPlane), 0, float(settings.TileSize), nearPlane };
-    grid.Constants.Depth.y = -std::log2(nearPlane) * grid.Constants.Depth.x;
-    const size_t cells = size_t(grid.Constants.Size.x) * grid.Constants.Size.y * settings.DepthSlices;
-    if (grid.Constants.Size.w && cells > (UINT_MAX / sizeof(UINT)) / grid.Constants.Size.w)
+    GDX12LightGridConstants constants;
+    constants.Size = { (width - 1) / settings.TileSize + 1, (height - 1) / settings.TileSize + 1,
+        settings.DepthSlices, static_cast<UINT>((lightCount + 31) / 32) };
+    constants.Depth = { settings.DepthSlices / std::log2(gridFar / nearPlane), 0, float(settings.TileSize), nearPlane };
+    constants.Depth.y = -std::log2(nearPlane) * constants.Depth.x;
+    const size_t cells = size_t(constants.Size.x) * constants.Size.y * settings.DepthSlices;
+    if (constants.Size.w && cells > (UINT_MAX / sizeof(UINT)) / constants.Size.w)
         throw std::length_error("Light grid exceeds the upload buffer size limit");
+    return constants;
+}
+
+void GDX12LightGridBuildSystem::Build(GDX12LightGrid& grid, const Matrix& projection, const Matrix& view,
+    float nearPlane, const float farPlane, const UINT width, const UINT height, const std::vector<GDX12LocalLightConstants>& lights,
+    JobSystem* jobs, GDX12LightGridSettings settings)
+{
+    EnsureIdle();
+    GDX12_SCOPED_CPU_EVENT("CPU light grid");
+    grid.Constants = BuildLightGridConstants(projection, view, nearPlane, farPlane, width, height, lights.size(), settings);
+    const bool infinite = farPlane == 0 || std::isinf(farPlane);
+    const size_t cells = size_t(grid.Constants.Size.x) * grid.Constants.Size.y * settings.DepthSlices;
     grid.Masks.resize((std::max)(size_t(1), cells * grid.Constants.Size.w));
     _grid = &grid; _projection = projection; _width = width; _height = height;
     _z.resize(size_t(settings.DepthSlices) + 1);

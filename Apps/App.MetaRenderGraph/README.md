@@ -56,6 +56,14 @@ probe shadow maps or readbacks. Scene buffers stay resident; caster bounds are
 reduced only when scene data changes. Atlas and visibility buffers belong to
 the frame slot, and lighting declares the atlas read in the Meta graph.
 
+The ordinary light grid is built by `LightGrid.hlsl` on the GPU. Its source SRV
+and mask UAV stay in VRAM; source uploads occur only when their revision or
+resource identity changes. One compute pass writes complete mask words without
+atomics or a separate clear. Neighboring cells in one depth slice share a light
+index across the wave; wave bounds reject irrelevant lights. No mask data is
+built on or read back to the CPU. Small frame constants still use upload buffers.
+The retained diagnostic mode and production App keep their existing CPU builder.
+
 
 The build copies `Configs/Startup.ini` beside the executable. On every launch,
 `PrepareStartup` copies that file over the executable's `Config/Engine.ini`
