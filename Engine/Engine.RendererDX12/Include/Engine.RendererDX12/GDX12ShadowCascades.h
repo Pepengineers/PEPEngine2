@@ -3,24 +3,37 @@
 #include "Engine.RendererDX12/GDX12LocalLights.h"
 #include <algorithm>
 #include <cmath>
+#include <stdexcept>
 
 inline GDX12ShadowConstants BuildShadowCascades(const Matrix& inverseView, float fov, float aspect,
     float nearPlane, float farPlane, Vector3 lightDirection, const BoundingBox* casterBounds = nullptr,
-    UINT resolution = SunShadowCascadeResolution)
+    UINT resolution = SunShadowCascadeResolution, const GDX12SunCascadeSettings& settings = {})
 {
     GDX12ShadowConstants result;
-    if (resolution == 0) return result;
-    float splits[4], texelSizes[4];
-    const float shadowFar = (std::min)(farPlane, 6000.0f);
+    result.CascadeCount = 0;
+    if (settings.Count < 1 || settings.Count > 4 || !std::isfinite(settings.MaxDistance) || settings.MaxDistance < 0)
+        throw std::invalid_argument("Invalid sun cascade settings");
+    const float shadowFar = farPlane > 0 ? (std::min)(farPlane, settings.MaxDistance) : settings.MaxDistance;
+    if (resolution == 0 || shadowFar <= nearPlane) return result;
+    if (resolution <= 2 || !std::isfinite(nearPlane) || nearPlane <= 0)
+        throw std::invalid_argument("Invalid sun cascade resolution or near plane");
+    float splits[4] = {shadowFar, shadowFar, shadowFar, shadowFar}, texelSizes[4] = {};
+    const float ratios[] = {settings.Splits.x, settings.Splits.y, settings.Splits.z};
+    if (!settings.AutomaticSplits)
+        for (UINT i = 0; i + 1 < settings.Count; ++i)
+            if (!std::isfinite(ratios[i]) || ratios[i] <= (i ? ratios[i - 1] : 0) || ratios[i] >= 1)
+                throw std::invalid_argument("Sun cascade splits must be ordered fractions between zero and one");
+    result.CascadeCount = settings.Count;
     const Vector3 up = std::abs(lightDirection.y) > 0.99f ? Vector3::UnitZ : Vector3::UnitY;
     lightDirection.Normalize();
     const Matrix lightView = Matrix::CreateLookAt(Vector3::Zero, lightDirection, up);
     float previous = nearPlane;
-    for (int cascade = 0; cascade < 4; ++cascade)
+    for (UINT cascade = 0; cascade < settings.Count; ++cascade)
     {
-        const float fraction = (cascade + 1) / 4.0f;
-        const float split = 0.7f * nearPlane * std::pow(shadowFar / nearPlane, fraction) +
-            0.3f * (nearPlane + (shadowFar - nearPlane) * fraction);
+        const float fraction = float(cascade + 1) / settings.Count;
+        const float split = cascade + 1 == settings.Count ? shadowFar : settings.AutomaticSplits ?
+            0.7f * nearPlane * std::pow(shadowFar / nearPlane, fraction) + 0.3f * (nearPlane + (shadowFar - nearPlane) * fraction) :
+            nearPlane + (shadowFar - nearPlane) * ratios[cascade];
         splits[cascade] = split;
         Vector3 corners[8];
         int index = 0;

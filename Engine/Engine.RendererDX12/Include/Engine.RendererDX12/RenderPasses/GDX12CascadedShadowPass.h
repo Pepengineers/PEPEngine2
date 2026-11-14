@@ -98,7 +98,7 @@ public:
             _preparedSettings = _resources->ShadowSettings;
             _preparedGeometryRevision = _resources->GeometryRevision;
             _preparedRevision = lighting.SunShadowRevision;
-            for (UINT cascade = 0; cascade < 4; ++cascade)
+            for (UINT cascade = 0; cascade < _preparedSettings.CascadeCount; ++cascade)
             {
                 auto& view = _views[cascade];
                 view = { GDX12GeometryStage::Shadow, Matrix(_preparedSettings.ViewProj[cascade]).Transpose(),
@@ -115,7 +115,7 @@ public:
 
     UINT GetGeometryViewCapacity() const override { return 4; }
     const GDX12GeometryContext* GetGeometryView(UINT slot) const override
-    { return _prepared && _updating && slot < _views.size() ? &_views[slot] : nullptr; }
+    { return _prepared && _updating && slot < _preparedSettings.CascadeCount ? &_views[slot] : nullptr; }
 
     void BeginGeometry(GDX12CommandList* commands) override
     {
@@ -157,7 +157,7 @@ public:
             commands->SetComputeUAV(cascade, visibility.Commands[cascade]->GetUAV()->GPUHandle);
         if (count) commands->Dispatch((count + 63) / 64, 1, 1);
 
-        for (UINT cascade = 0; cascade < 4; ++cascade)
+        for (UINT cascade = 0; cascade < _preparedSettings.CascadeCount; ++cascade)
         {
             auto& batches = visibility.Batches[cascade];
             if (_resources->SkeletalBatchCount)

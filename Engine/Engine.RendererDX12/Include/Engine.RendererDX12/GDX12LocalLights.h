@@ -8,13 +8,28 @@
 inline constexpr UINT LocalShadowResolution = 256;
 inline constexpr UINT SunShadowCascadeResolution = 2048;
 
+struct GDX12SunCascadeSettings
+{
+    UINT Count = 4;
+    float MaxDistance = 6000.0f;
+    bool AutomaticSplits = true;
+    XMFLOAT3 Splits = {0.067f, 0.2f, 0.467f};
+
+    bool operator==(const GDX12SunCascadeSettings& other) const
+    {
+        return Count == other.Count && MaxDistance == other.MaxDistance && AutomaticSplits == other.AutomaticSplits &&
+            Splits.x == other.Splits.x && Splits.y == other.Splits.y && Splits.z == other.Splits.z;
+    }
+};
+
 struct GDX12ShadowQuality
 {
     UINT SunResolution = SunShadowCascadeResolution;
     UINT LocalResolution = LocalShadowResolution;
+    GDX12SunCascadeSettings SunCascades;
 
     bool operator==(const GDX12ShadowQuality& other) const
-    { return SunResolution == other.SunResolution && LocalResolution == other.LocalResolution; }
+    { return SunResolution == other.SunResolution && LocalResolution == other.LocalResolution && SunCascades == other.SunCascades; }
 };
 
 constexpr bool IsSunShadowResolution(UINT value)

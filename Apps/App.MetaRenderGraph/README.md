@@ -50,7 +50,7 @@ secondary-adapter opt-ins are rejected. Ordinary sun shadows use App's default
 zero. `--smoke` restores its previous small diagnostic shadow sizes.
 
 The ordinary sun path uses App's `ShadowPass.hlsl` and `CSM.hlsli`: one GPU
-culling dispatch for four cascades, then four ExecuteIndirect draws directly
+culling dispatch for the active cascades, then one ExecuteIndirect draw per cascade directly
 into the lighting atlas. There are no intermediate depth maps, packing kernels,
 probe shadow maps or readbacks. Scene buffers stay resident; caster bounds are
 reduced only when scene data changes. Atlas and visibility buffers belong to
@@ -63,6 +63,29 @@ atomics or a separate clear. Neighboring cells in one depth slice share a light
 index across the wave; wave bounds reject irrelevant lights. No mask data is
 built on or read back to the CPU. Small frame constants still use upload buffers.
 The retained diagnostic mode and production App keep their existing CPU builder.
+
+Sun CSM settings use the URP-style count, maximum distance and normalized split
+boundaries. These CVars apply at the frame boundary in App and MetaRenderGraph:
+
+| CVar under `Render.Shadows.Sun.` | Default | Meaning |
+|---|---|---|
+| `Resolution` | `2048` | Texels **per cascade**, retaining the existing meaning; `0` disables sun shadows. Allowed sizes: 512, 1024, 2048, 4096. |
+| `CascadeCount` | `4` | Active cascades, 1 through 4. |
+| `MaxDistance` | `6000` | Maximum distance in scene units (Bistro: centimetres), capped by camera far plane. At or below the camera near plane, sun shadowing is omitted. |
+| `AutomaticSplits` | `true` | Preserve the existing logarithmic/linear distribution. Set `false` to use the split controls below. |
+| `CascadeSplit1` | `0.067` | First normalized boundary; used with 2–4 cascades. |
+| `CascadeSplit2` | `0.2` | Second normalized boundary; used with 3–4 cascades. |
+| `CascadeSplit3` | `0.467` | Third normalized boundary; used with 4 cascades. |
+
+Manual boundaries divide the range from camera near plane to the effective
+maximum shadow distance. Active boundaries must increase strictly within `(0,1)`;
+invalid scalar values are rejected by the console. An unordered active tuple
+emits a warning and retains the last valid tuple for that cascade count, so
+editing several controls cannot crash rendering. Inactive boundaries are ignored.
+The final active cascade fades to unshadowed lighting. The atlas remains 2x2;
+inactive cascades are not culled or drawn. URP's Shadow Resolution instead means
+the maximum **whole atlas** size; this project intentionally preserves its
+existing per-cascade resolution setting.
 
 
 The build copies `Configs/Startup.ini` beside the executable. On every launch,

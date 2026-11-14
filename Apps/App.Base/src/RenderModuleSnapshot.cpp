@@ -38,6 +38,10 @@ void RenderModule::CollectReflectionScene()
     hash(staticHash, resources.Lighting.SunShadowFlags);
     hash(staticHash, resources.Lighting.SunShadowRevision);
     hash(staticHash, resources.ShadowQuality.SunResolution);
+    hash(staticHash, resources.ShadowQuality.SunCascades.Count);
+    hash(staticHash, resources.ShadowQuality.SunCascades.MaxDistance);
+    hash(staticHash, resources.ShadowQuality.SunCascades.AutomaticSplits);
+    hash(staticHash, resources.ShadowQuality.SunCascades.Splits);
     hash(staticHash, resources.ShadowQuality.LocalResolution);
     for (const auto& light : resources.LocalLights) hash(staticHash, light);
     resources.ReflectionProbes.clear();
@@ -307,7 +311,8 @@ void RenderModule::CollectReflectionScene()
         SubmitCameraShadows(BuildShadowCascades(_RPcommonData.CameraView.Invert(),
             XMConvertToRadians(_RPcommonData.ActiveCameraFOV), GetAspectRatio(),
             _RPcommonData.ActiveCameraNearPlane, _RPcommonData.ActiveCameraFarPlane,
-            Vector3(resources.Lighting.LightDirection), &bounds, resources.ShadowQuality.SunResolution));
+            Vector3(resources.Lighting.LightDirection), &bounds, resources.ShadowQuality.SunResolution,
+            resources.ShadowQuality.SunCascades));
     }
     std::sort(resources.ReflectionProbes.begin(), resources.ReflectionProbes.end(),
         [](const auto& a, const auto& b) { return a.Id < b.Id; });

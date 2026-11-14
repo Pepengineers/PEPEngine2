@@ -11,7 +11,7 @@ float2 SunShadowTexelSize()
 #ifdef PROBE_CAPTURE
 float SunVisibility(float3 position, float3 normal, float nDotL)
 {
-    if ((CBMain.SunShadowFlags & 1u) == 0) return 1;
+    if ((CBMain.SunShadowFlags & 1u) == 0 || CBShadow.CascadeCount == 0) return 1;
     float4 projected = mul(float4(position + normal * CBShadow.TexelWorldSize.x * (1 - nDotL), 1), CBShadow.ViewProj[0]);
     float3 shadow = projected.xyz / projected.w;
     float2 uv = shadow.xy * float2(0.5f, -0.5f) + 0.5f;
@@ -46,9 +46,10 @@ float SampleCascade(uint cascade, float3 position, float3 normal, float nDotL, f
 
 float SunVisibility(float3 position, float3 normal, float nDotL)
 {
-    if ((CBMain.SunShadowFlags & 1u) == 0u) return 1.0f;
+    uint cascadeCount = min(CBShadow.CascadeCount, 4u);
+    if ((CBMain.SunShadowFlags & 1u) == 0u || cascadeCount == 0) return 1.0f;
     float depth = -mul(float4(position, 1), CBCamera.View).z;
-    if (depth <= 0.0f || depth >= CBShadow.SplitDepths.w) return 1.0f;
+    if (depth <= 0.0f || depth >= CBShadow.SplitDepths[cascadeCount - 1]) return 1.0f;
     uint cascade = depth > CBShadow.SplitDepths.x ? 1u : 0u;
     cascade += depth > CBShadow.SplitDepths.y ? 1u : 0u;
     cascade += depth > CBShadow.SplitDepths.z ? 1u : 0u;
@@ -59,7 +60,7 @@ float SunVisibility(float3 position, float3 normal, float nDotL)
     float blend = saturate((depth - blendStart) / max(CBShadow.SplitDepths[cascade] - blendStart, 0.001f));
     if (blend > 0.0f)
     {
-        float next = cascade < 3 ? SampleCascade(cascade + 1, position, normal, nDotL, texelSize) : 1.0f;
+        float next = cascade + 1 < cascadeCount ? SampleCascade(cascade + 1, position, normal, nDotL, texelSize) : 1.0f;
         visibility = lerp(visibility, next, blend);
     }
     return visibility;
