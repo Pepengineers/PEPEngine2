@@ -20,10 +20,11 @@ public:
 
     // Call after waiting the primary frame slot and before material uploads.
     // True requests recompiling the graph.
-    bool PrepareFrame(GDX12DeviceResources& primary, UINT frameSlot, double animationSeconds);
+    bool PrepareFrame(GDX12DeviceResources& primary, UINT frameSlot, double animationSeconds, bool localDirect = false);
 
     GDX12RenderPass& RasterPass(std::size_t index) const;
     IRenderPassLink& Output(std::size_t index) const;
+    std::vector<GDX12Texture*> NativeTargets(std::size_t index) const;
     void AddPasses(GDX12RenderGraph& graph) const;
     void DeclareMaterialReads(GDX12RenderGraphBuilder& builder) const;
     bool UsesAsyncCompute() const;

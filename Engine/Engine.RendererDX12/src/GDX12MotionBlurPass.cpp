@@ -68,6 +68,22 @@ void GDX12MotionBlurPass::ResizeTiles(const UINT tileSize)
 
 void GDX12MotionBlurPass::Execute(GDX12CommandList* commands)
 {
+    PrepareRecording();
+    RecordCommands(commands);
+}
+
+void GDX12MotionBlurPass::PrepareRecording()
+{
+    const auto settings = GetMotionBlurSettings();
+    const float scale = (std::max)(float(_color->GetWidth()) / _commonData->WindowWidth,
+                                  float(_color->GetHeight()) / _commonData->WindowHeight);
+    const UINT tileSize = (std::max)(8u, UINT(std::ceil(settings.MaxRadius * scale)));
+    if (settings.Enabled && _wasEnabled && !_commonData->ResetHistory && _tileSize != tileSize)
+        ResizeTiles(tileSize);
+}
+
+void GDX12MotionBlurPass::RecordCommands(GDX12CommandList* commands)
+{
     const auto settings = GetMotionBlurSettings();
     const UINT width = _color->GetWidth();
     const UINT height = _color->GetHeight();
@@ -76,7 +92,7 @@ void GDX12MotionBlurPass::Execute(GDX12CommandList* commands)
     const UINT tileSize = (std::max)(8u, static_cast<UINT>(std::ceil(settings.MaxRadius * scale)));
     _commonData->ResetHistory |= settings.Enabled != _wasEnabled;
     const bool blur = settings.Enabled && _wasEnabled && !_commonData->ResetHistory;
-    if (blur && _tileSize != tileSize) ResizeTiles(tileSize);
+    if (blur && _tileSize != tileSize) throw std::logic_error("Motion blur recording requires owner tile preparation");
     _wasEnabled = settings.Enabled;
     struct Parameters
     {

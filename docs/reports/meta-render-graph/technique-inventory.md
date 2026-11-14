@@ -1,3 +1,32 @@
+# Current post/UI source status — 2026-11-14
+
+Authorized implementation base: local `codex/bistro-rendering`
+`214c4ff19dd5047a941d9e31dde19ab4b7d0ca25` (corrected water/particle merge).
+The source paths below are connected but **unbuilt/unrun; no runtime acceptance**.
+This current section supersedes earlier authorization/status statements; historical
+report bytes and evidence below do not validate the new code.
+
+| Inventory position | Explicit packet/access path | Status and deferred evidence |
+|---|---|---|
+| DoF, motion blur, complete particle/water motion | `ScenePostUI.*`: original DoF SDK; complete-motion/velocity/tile/neighbor/gather or copy; camera and all scratch accesses | Source only. Owner preparation and recording; native output/history/image checks deferred. |
+| Native and XeSS/FSR/DLSS/NIS reconstruction | Existing provider bindings in explicit DIRECT SDK boundary; current per-slot depth/motion/HDR links; render grid set before scene resize/freeze | Source only. Existing support fallback retained; every SDK/hardware path runtime pending. |
+| HDR output/display | Existing OutputToScreen tone-map pass consumes reconstructed HDR and writes current output-grid backbuffer | Source only. Diagnostic full-resource copies removed from continued scene path; color/resize checks deferred. |
+| UI offscreen/posters/world canvas | `BistroUIPosters` local-DIRECT effects/raster prelude, explicit effect/target writes and material reads including capture/shadows | Source only. Owner-only internal scratch/upload section; fonts/animation/world visibility/lifetime checks deferred. |
+| Screen Engine.UI | Explicit capture/font upload/offscreen raster and ScreenComposite packets; per-slot target and retained recording owners | Source only. Existing screen content has no external image bindings; arbitrary future external images require the existing TextureBinding contract. |
+| Frame generation / SDK / Present | Primary-DIRECT prepare/tag boundary after display; exported depth/motion stay NON_PIXEL_SHADER_RESOURCE through terminal packet and Present; owner EndRendering/Present callbacks | Source only. All Off/AMD/NVIDIA/Intel paths runtime pending; unsupported fallback remains existing SDK behavior. |
+| Skinning and preparation outside legacy graph | Existing explicit palette/deformation and immutable scene uploads from geometry stage remain in use | No new parallelism/runtime claim. |
+| Debug/collision-only variants | Shared original Jolt renderer, owner triangle/upload preparation, explicit display/upload packet; `Meta.Debug.Collisions` suspends FG and resets history | Source only. Existing intermediate HDR/geometry diagnostic paths retained for fixture callers; diagnostic A/B does not validate post/water/particles. |
+
+See [07-post-ui.md](07-post-ui.md) for state exports, lifecycle, source review and
+the exact list of checks not run. Geometry/lighting retain their existing worker
+recording; post/UI/SDK and water/particles are explicitly owner-only CPU sections.
+Production App remains on its existing pipeline. No async/MGPU/offload workers.
+All testing/builds/application runs remain prohibited through implementation and
+review of the water MGPU stage. Stop here for originating-chat static review;
+no next stage is started by this inventory update.
+
+---
+
 # Current U6 source status - 2026-11-14
 
 U6 explicitly authorized on U5 `a322796512233fc303fed4d54860081ca6a62767`.

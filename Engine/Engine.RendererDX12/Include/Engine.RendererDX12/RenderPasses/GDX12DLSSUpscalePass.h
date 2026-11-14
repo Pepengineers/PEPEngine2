@@ -31,6 +31,12 @@ public:
 	{
 		GDX12RenderPass::SetInputs(std::move(inputs));
 		MatchOutputCount(static_cast<UINT>(_inputs.size() > 2 ? _inputs.size() - 2 : 0));
+        if (_inputs.size() >= 2)
+        {
+            IN_DepthBuffer = _inputs[0];
+            IN_MotionVectors = _inputs[1];
+            IN_Textures.assign(_inputs.begin() + 2, _inputs.end());
+        }
 	}
 
 	IRenderPassLink* GetOutput(UINT index) override

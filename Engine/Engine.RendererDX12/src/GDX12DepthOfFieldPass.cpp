@@ -63,21 +63,15 @@ void GDX12DepthOfFieldPass::DestroyContext()
 
 void GDX12DepthOfFieldPass::Execute(GDX12CommandList* commands)
 {
+    PrepareRecording();
+    RecordCommands(commands);
+}
+
+void GDX12DepthOfFieldPass::PrepareRecording()
+{
     const auto settings = GetDepthOfFieldSettings();
     auto* color = _inputs[0]->GetTexture();
-    auto* depth = _inputs[1]->GetTexture();
-    // The SDK's four bilateral mip levels require at least 8 half-resolution texels.
-    const bool enabled = settings.Enabled && color->GetWidth() >= 16 && color->GetHeight() >= 16;
-    if (_wasEnabled != enabled) _commonData->ResetUpscalerHistory = true;
-    _wasEnabled = enabled;
-    GDX12_SCOPED_EVENT(commands, "FidelityFX Depth of Field", Colors::Purple);
-    if (!enabled)
-    {
-        commands->ResourceBarrier({ color->GetResource()->GetCopySourceBarrier(), _output.GetResource()->GetCopyDestBarrier() });
-        commands->CopyResource(_output.GetResource()->D3DResource.Get(), color->GetResource()->D3DResource.Get());
-        return;
-    }
-
+    if (!settings.Enabled || color->GetWidth() < 16 || color->GetHeight() < 16) return;
     if (!_context || _context->Rings != settings.Rings || _context->CocLimit != settings.CocLimit ||
         _context->RingMerge != settings.RingMerge)
     {
@@ -107,7 +101,26 @@ void GDX12DepthOfFieldPass::Execute(GDX12CommandList* commands)
 
     if (_resources->FrameConstants.size() > FFX_MAX_QUEUED_FRAMES)
         _resources->Device->GetCommandQueue()->Flush();
+}
 
+void GDX12DepthOfFieldPass::RecordCommands(GDX12CommandList* commands)
+{
+    const auto settings = GetDepthOfFieldSettings();
+    auto* color = _inputs[0]->GetTexture();
+    auto* depth = _inputs[1]->GetTexture();
+    // The SDK's four bilateral mip levels require at least 8 half-resolution texels.
+    const bool enabled = settings.Enabled && color->GetWidth() >= 16 && color->GetHeight() >= 16;
+    if (_wasEnabled != enabled) _commonData->ResetUpscalerHistory = true;
+    _wasEnabled = enabled;
+    GDX12_SCOPED_EVENT(commands, "FidelityFX Depth of Field", Colors::Purple);
+    if (!enabled)
+    {
+        commands->ResourceBarrier({ color->GetResource()->GetCopySourceBarrier(), _output.GetResource()->GetCopyDestBarrier() });
+        commands->CopyResource(_output.GetResource()->D3DResource.Get(), color->GetResource()->D3DResource.Get());
+        return;
+    }
+
+    if (!_context) throw std::logic_error("DoF recording requires owner preparation");
     const auto& projection = _commonData->CameraViewToClip;
     const auto coc = CalculateDepthOfFieldCoc(settings, XMConvertToRadians(_commonData->ActiveCameraFOV),
         color->GetHeight(), projection._33, projection._34, projection._43);
