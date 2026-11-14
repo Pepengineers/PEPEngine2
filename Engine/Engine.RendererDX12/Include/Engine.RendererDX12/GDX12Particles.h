@@ -112,6 +112,8 @@ struct GDX12ParticleInteractionField
     float FloorCm = 0;
 };
 
+namespace Meta { class ParticleTransfer; }
+
 class GDX12ParticleSimulation
 {
 public:
@@ -135,6 +137,7 @@ public:
 private:
     friend class GDX12ParticlesPass;
     friend class GDX12ParticleOffload;
+    friend class Meta::ParticleTransfer;
     struct State;
     std::unique_ptr<State> _state;
     GDX12ParticleInteractionField _interaction;

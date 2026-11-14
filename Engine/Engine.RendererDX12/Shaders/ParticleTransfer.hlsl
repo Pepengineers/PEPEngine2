@@ -71,3 +71,16 @@ void AdvanceDisplay(uint id : SV_DispatchThreadID)
     p.PreviousRotation = same ? previous.Rotation : p.Rotation;
     Display[DisplayBase + id] = p;
 }
+
+// Repeat/seed touches only the displayed state, never a pending COPY import.
+[numthreads(256, 1, 1)]
+void RepeatDisplay(uint id : SV_DispatchThreadID)
+{
+    if (id >= Count) return;
+    Particle p = (Particle)0;
+    if ((ClearHistory & 1) == 0) p = Display[DisplayBase + id];
+    p.Previous = p.Position;
+    p.PreviousAge = p.Age;
+    p.PreviousRotation = p.Rotation;
+    Display[DisplayBase + id] = p;
+}

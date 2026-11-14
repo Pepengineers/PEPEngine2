@@ -32,6 +32,18 @@ AutoConsoleVariable<int> MetaWaterAdapter(L"Meta.Water.SecondaryAdapter", -1,
     L"Explicit secondary DXGI hardware index for Meta water; startup only.", EConsoleVariableFlags::Default);
 AutoConsoleVariable<int> MetaWaterSelection(L"Meta.Water.Selection", 1,
     L"0: Strict newest issued water; 1: LatestCompleted, retain ready water during import.", EConsoleVariableFlags::Default);
+AutoConsoleVariable<bool> MetaParticles(L"Meta.Particles.Enabled", false,
+    L"Startup opt-in: eligible particle emitters use the shared Meta secondary domain.", EConsoleVariableFlags::Default);
+AutoConsoleVariable<int> MetaParticleAdapter(L"Meta.Particles.SecondaryAdapter", -1,
+    L"Secondary adapter; -1 shares Meta.Water.SecondaryAdapter when Meta water is enabled.", EConsoleVariableFlags::Default);
+AutoConsoleVariable<int> MetaParticleSelection(L"Meta.Particles.Selection", 1,
+    L"0: StrictPublication; 1: LatestCompleted particle publication.", EConsoleVariableFlags::Default);
+Meta::PublicationSelection ParticleSelection()
+{
+    const int selection = MetaParticleSelection.GetValue();
+    if (selection != 0 && selection != 1) throw std::invalid_argument("Meta.Particles.Selection must be 0 or 1");
+    return selection == 0 ? Meta::PublicationSelection::StrictPublication : Meta::PublicationSelection::LatestCompleted;
+}
 Meta::PublicationSelection WaterSelection()
 {
     const int selection = MetaWaterSelection.GetValue();
@@ -57,13 +69,25 @@ void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
     _bindings.Reconstruction = &_post->Reconstruction();
     _bindings.FrameGenerationInputs = true;
     const auto frames=static_cast<uint32_t>(c.Primary.FrameConstants.size());
-    if (MetaWater.GetValue()) {
+    if (MetaWater.GetValue() || MetaParticles.GetValue()) {
         if (_verify || MetaCrossAdapter.GetValue())
-            throw std::invalid_argument("Meta.Water requires ordinary Meta host and excludes the deterministic CrossAdapter fixture");
-        WaterSelection();
-        _waterTransfer = std::make_unique<Meta::WaterTransfer>(*c.Primary.Device, *c.Primary.SRV_UAV_Heap, MetaWaterAdapter.GetValue());
-        _waterParticles->SetWaterTransfer(_waterTransfer.get(), WaterSelection);
-        _executor = std::make_unique<Meta::Executor>(_waterTransfer->Submissions(), 0, frames, 1024);
+            throw std::invalid_argument("Meta simulation offload requires ordinary host and excludes the CrossAdapter fixture");
+        const int adapter = MetaWater.GetValue() ? MetaWaterAdapter.GetValue() : MetaParticleAdapter.GetValue();
+        if (MetaWater.GetValue() && MetaParticles.GetValue() && MetaParticleAdapter.GetValue() >= 0 &&
+            MetaParticleAdapter.GetValue() != adapter)
+            throw std::invalid_argument("Meta water and particles must use the same secondary adapter");
+        _simulationDomain = std::make_shared<Meta::SimulationDomain>(*c.Primary.Device, adapter);
+        if (MetaWater.GetValue()) {
+            WaterSelection();
+            _waterTransfer = std::make_unique<Meta::WaterTransfer>(_simulationDomain, *c.Primary.SRV_UAV_Heap);
+            _waterParticles->SetWaterTransfer(_waterTransfer.get(), WaterSelection);
+        }
+        if (MetaParticles.GetValue()) {
+            ParticleSelection();
+            _particleTransfer = std::make_unique<Meta::ParticleTransfer>(_simulationDomain, c.Primary);
+            _waterParticles->SetParticleTransfer(_particleTransfer.get(), ParticleSelection);
+        }
+        _executor = std::make_unique<Meta::Executor>(_simulationDomain->Submissions, 0, frames, 1024);
     } else if(MetaCrossAdapter.GetValue()) {
         if(_verify) throw std::invalid_argument("CrossAdapter producer requires ordinary Meta host, not single-GPU verification mode");
         if(MetaPublicationSelection.GetValue()!=0 && MetaPublicationSelection.GetValue()!=1)
@@ -73,7 +97,7 @@ void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
         _executor=std::make_unique<Meta::Executor>(_crossAdapter->Submissions(),0,frames,1024);
         _crossAdapter->Start();
     } else _executor=std::make_unique<Meta::Executor>(*c.Primary.Device,frames,1024);
-    Log::Info("MetaRenderGraph", "Queue packet executor selected; cross-adapter=",bool(_crossAdapter),"; water=",bool(_waterTransfer),"; legacy graph Execute disabled");
+    Log::Info("MetaRenderGraph", "Queue packet executor selected; cross-adapter=",bool(_crossAdapter),"; water=",bool(_waterTransfer),"; particles=",bool(_particleTransfer),"; legacy graph Execute disabled");
 }
 void MetaRenderPipeline::BuildGraph(GDX12RenderGraph &, const RenderPipelineGraphInputs &)
 {
@@ -176,16 +200,22 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
     };
     const auto execute = [&](const std::vector<ID3D12Resource*>& bindings,const Meta::Executor::Record& record,
         GDX12CommandList* first,bool serial=false,std::ostream* trace=nullptr) {
-        const auto waits = _waterTransfer ? _waterTransfer->Waits(_schedule) :
+        auto waits = _waterTransfer ? _waterTransfer->Waits(_schedule) :
             _crossAdapter ? _crossAdapter->Waits(_schedule) : std::vector<Meta::PacketWait>{};
+        if (_particleTransfer) {
+            const auto particleWaits = _particleTransfer->Waits(_schedule);
+            waits.insert(waits.end(), particleWaits.begin(), particleWaits.end());
+        }
         try {
             const auto point=_executor->Execute(_schedule,bindings,record,first,nullptr,serial,nullptr,trace,waits);
             if(_crossAdapter) _crossAdapter->RetireFrame(_schedule,_executor->Completions(),true);
             if (_waterTransfer) _waterTransfer->RetireFrame(_schedule, _executor->Completions(), true);
+            if (_particleTransfer) _particleTransfer->RetireFrame(_schedule, _executor->Completions(), true);
             return point;
         } catch(...) {
             if(_crossAdapter) try { _crossAdapter->RetireFrame(_schedule,_executor->Completions(),false); } catch(...) {}
             if (_waterTransfer) try { _waterTransfer->RetireFrame(_schedule, _executor->Completions(), false); } catch (...) {}
+            if (_particleTransfer) try { _particleTransfer->RetireFrame(_schedule, _executor->Completions(), false); } catch (...) {}
             throw;
         }
     };
@@ -238,6 +268,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         _geometry->PlannedResources(slot),
         [&](Meta::Id op, uint32_t list, ID3D12GraphicsCommandList *cmd) {
             if (!(_crossAdapter && _crossAdapter->Record(op,cmd)) && !(_waterTransfer && _waterTransfer->Record(op,cmd)) &&
+                !(_particleTransfer && _particleTransfer->Record(op,cmd)) &&
                 !_environment->Record(op, cmd) && !_lighting->Record(op, cmd) && !_waterParticles->Record(op, cmd) && !_post->Record(op, cmd))
                 _geometry->Record(slot, op, list, cmd, target->GetResource()->D3DResource.Get());
         },
