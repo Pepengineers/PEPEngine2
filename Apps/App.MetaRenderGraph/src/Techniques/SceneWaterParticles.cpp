@@ -124,23 +124,28 @@ GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resour
     global.push_back(read(&frame.SkyCB->GetResource()));
     global.push_back(read(&frame.ShadowCB->GetResource()));
     global.push_back(read(&frame.ShadowLights->GetResource()));
-    Id tail = Invalid;
     const auto packet = [&](const std::string& name, std::vector<Access> accesses,
-                            std::function<void(GDX12CommandList*)> record) {
+                            std::function<void(GDX12CommandList*)> record, Queue target = Queue::Direct) {
         std::vector<Access> unique;
         for (auto a : accesses)
         {
             // All packet boundaries are explicit read states. Private transitions
             // return to that state; DEFAULT-buffer decay is executor-owned.
             a.Required = readState(bindings.at(a.Resource));
+            if (target == Queue::Compute)
+            {
+                D3D12_HEAP_PROPERTIES heap{};
+                ThrowIfFailed(bindings.at(a.Resource)->GetHeapProperties(&heap, nullptr));
+                if (heap.Type == D3D12_HEAP_TYPE_DEFAULT && a.Required != D3D12_RESOURCE_STATE_COMMON)
+                    a.Required = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+            }
             auto found = std::find_if(unique.begin(), unique.end(), [&](auto b) { return a.Resource == b.Resource; });
             if (found == unique.end()) unique.push_back(a);
             else if (a.Usage != Mode::Read) found->Usage = Mode::ReadWrite;
         }
         std::vector<GDX12RecordingStates::Binding> states;
         for (auto a : unique) states.emplace_back(bindings.at(a.Resource), D3D12_RESOURCE_STATES(a.Required));
-        std::vector<Id> dependencies; if (tail != Invalid) dependencies.push_back(tail);
-        tail = _work.Add(graph, name, unique, [this, &path, states, record](auto* commands) {
+        const Id id = _work.Add(graph, name, unique, [this, &path, states, record](auto* commands) {
             GDX12RecordingStates tracker(states);
             GDX12CommandList borrowed(commands);
             // Original render helpers look up the active primary simulation.
@@ -150,8 +155,9 @@ GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resour
             catch (...) { _reset = true; throw; }
             if (borrowed.HasSubmissionSignals()) throw std::logic_error("U6 cannot publish private submission signals");
             tracker.Finish(commands);
-        }, dependencies);
-        graph.Operations[tail].OwnerRecording = true;
+        });
+        graph.Operations[id].OwnerRecording = true;
+        graph.Operations[id].Target = target;
     };
     const auto appendResources = [&](std::vector<Access>& accesses, const std::vector<GDX12Resource*>& resources, Mode mode) {
         for (auto* value : resources)
@@ -168,18 +174,34 @@ GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resour
     waterAccess.push_back(textureRead(scene.DepthView.get())); waterAccess.push_back(textureRead(scene.Color[1].get()));
     packet("water seed/SPH hash-sort-density-integrate", waterAccess, [&water](auto* commands) { water.ExecuteSimulation(commands); });
     packet("water surface/thickness/NRF/merge depth-motion", waterAccess, [&water](auto* commands) { water.Execute(commands); });
-    auto simAccess = global;
-    appendResources(simAccess, simulation->GetPoolResources(), Mode::ReadWrite);
-    appendResources(simAccess, simulation->GetConstantResources(slot), Mode::Read);
-    if (auto* interaction = simulation->GetInteractionResource()) simAccess.push_back(read(interaction));
-    simAccess.push_back(textureRead(scene.DepthView.get()));
-    packet("particle pool initialization/reset", simAccess, [this, simulation](auto* commands) { simulation->InitializePools(commands, &_resources); });
     auto* opaqueDepth = scene.DepthView.get();
-    packet("particle simulate/death/spawn/burst/publish", simAccess, [this, simulation, opaqueDepth](auto* commands) {
-        simulation->Execute(commands, &_resources, _common, opaqueDepth);
-    });
-    auto particleAccess = simAccess;
+    std::array<std::vector<Access>, 2> groupPools;
+    for (size_t group = 0; group < _groups.size(); ++group)
+    {
+        const auto ids = _groups[group].Emitters;
+        appendResources(groupPools[group], simulation->GetPoolResources(&ids), Mode::Read);
+        if (ids.empty()) continue;
+        auto simAccess = groupPools[group];
+        for (auto& a : simAccess) a.Usage = Mode::ReadWrite;
+        const auto initAccess = simAccess;
+        appendResources(simAccess, simulation->GetConstantResources(slot, &ids), Mode::Read);
+        simAccess.push_back(read(&frame.CameraCB->GetResource()));
+        if (_groups[group].DepthCollision) simAccess.push_back(textureRead(opaqueDepth));
+        if (auto* interaction = simulation->GetInteractionResource()) simAccess.push_back(read(interaction));
+        const auto target = !serial && group == 1 ? Queue::Compute : Queue::Direct;
+        const auto name = group == 0 ? "particle group A " : "particle group B ";
+        packet(std::string(name) + "pool initialization/reset", initAccess,
+            [this, simulation, ids](auto* commands) { simulation->InitializePools(commands, &_resources, &ids); }, target);
+        packet(std::string(name) + "simulate/death/spawn/burst/publish", simAccess,
+            [this, simulation, opaqueDepth, ids](auto* commands) {
+                simulation->Execute(commands, &_resources, _common, opaqueDepth, &ids);
+            }, target);
+    }
+    // Shared draw buffers stay on DIRECT. The first cull reads only A's pools;
+    // B is joined at its append, then all SortedAlpha keys are sorted together.
+    std::vector<Access> particleAccess{read(&frame.CameraCB->GetResource())};
     appendResources(particleAccess, particles.NativeResources(), Mode::ReadWrite);
+    const auto preparationAccess = particleAccess;
     particleAccess.push_back(textureRead(_depth));
     if (_particleMotion) // Active particle rendering validated its atlas inputs in BeginFrame.
         for (const auto& emitter : _resources.ParticleEmitters)
@@ -192,8 +214,14 @@ GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resour
                                                                published, "renderer particle atlas");
                 particleAccess.push_back({id, Mode::Read, published});
             }
-    packet("particle cull all groups/global SortedAlpha radix", particleAccess,
-        [&particles](auto* commands) { particles.PrepareRenderData(commands); });
+    const auto prepareGroup = [&](size_t group) {
+        auto accesses = preparationAccess;
+        accesses.insert(accesses.end(), groupPools[group].begin(), groupPools[group].end());
+        const auto ids = _groups[group].Emitters;
+        packet(group == 0 ? "particle group A clear/cull" : "particle group B append/global SortedAlpha radix", accesses,
+            [&particles, ids, group](auto* commands) { particles.PrepareRenderGroup(commands, ids, group == 0, group == 1); });
+    };
+    prepareGroup(0);
     const auto transparency = [&](GDX12WBOITTransparencyPass& pass, const char* name) {
         auto* accum = pass.GetOutput(0)->GetTexture(); auto* reveal = pass.GetOutput(1)->GetTexture();
         auto accesses = global;
@@ -270,6 +298,7 @@ GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resour
         water.Resolve(commands, background, environmentMap);
     });
     transparency(path.Near, "near mesh transparency clear/draw");
+    prepareGroup(1);
     particleAccess.push_back(textureRead(path.Near.GetOutput(0)->GetTexture()));
     particleAccess.back().Usage = Mode::ReadWrite;
     particleAccess.push_back(textureRead(path.Near.GetOutput(1)->GetTexture()));

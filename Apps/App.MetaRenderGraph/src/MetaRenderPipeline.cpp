@@ -16,6 +16,8 @@ namespace
 {
 AutoConsoleVariable<bool> MetaClouds(L"Meta.Clouds.Enabled", false, L"Select the local MetaRenderGraph cloud source.",
                                      EConsoleVariableFlags::Default);
+AutoConsoleVariable<bool> MetaAsyncQueues(L"Meta.Async.Queues", true,
+    L"Place explicit local work on COMPUTE/COPY; false retains the single-DIRECT reference.", EConsoleVariableFlags::Default);
 }
 void RunEnvironmentGpuTests(GDX12DeviceResources &, RenderPipelineCommonData &);
 
@@ -34,7 +36,7 @@ void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
     _bindings.FrameGenerationInputs = true;
     _executor = std::make_unique<Meta::Executor>(*c.Primary.Device,
                                                  static_cast<uint32_t>(c.Primary.FrameConstants.size()), 1024);
-    Log::Info("MetaRenderGraph", "Post/UI DIRECT executor selected; legacy graph Execute disabled");
+    Log::Info("MetaRenderGraph", "Single-GPU queue packet executor selected; legacy graph Execute disabled");
 }
 void MetaRenderPipeline::BuildGraph(GDX12RenderGraph &, const RenderPipelineGraphInputs &)
 {
@@ -77,7 +79,6 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
     } resetOnFailure{*_waterParticles};
     const bool verify = _verify;
     const auto slot = c.Primary.CurrFrameConstantsIndex;
-    _executor->Begin(slot);
     _geometry->Freeze(slot, c.Common.ActiveCameraCBufferIndex, c.Runtime.FreezeSkeletalMeshes());
     if (verify && !_environmentTestsRun)
     {
@@ -129,7 +130,8 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         _executor->Reserve(uint32_t(lists));
     };
     _geometry->Select(verify);
-    _schedule = _geometry->Plan(slot, target->GetResource()->D3DResource.Get(), append, earlyAO, prelude);
+    _schedule = _geometry->Plan(slot, target->GetResource()->D3DResource.Get(), append, earlyAO, prelude,
+        verify || !MetaAsyncQueues.GetValue());
     reserve();
     if (verify)
     {
@@ -149,7 +151,8 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         _executor->Begin(slot);
         _geometry->Select(false);
         recordingSerial = false;
-        _schedule = _geometry->Plan(slot, target->GetResource()->D3DResource.Get(), append, earlyAO, prelude);
+        _schedule = _geometry->Plan(slot, target->GetResource()->D3DResource.Get(), append, earlyAO, prelude,
+            !MetaAsyncQueues.GetValue());
         reserve();
         std::ofstream schedule(stem + "-schedule.txt");
         _schedule.Write(schedule);
