@@ -1,4 +1,5 @@
 #include "SceneShadows.h"
+#include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include <fstream>

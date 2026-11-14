@@ -41,10 +41,10 @@ namespace
         Require(console.FindConsoleVariable(L"Render.Particles.SecondaryAdapter").GetInt() == -1, "Particle offload must be disabled");
         Require(!console.FindConsoleVariable(L"Render.Particles.AsyncCompute").GetBool(), "Particle async must be disabled");
         Require(!console.FindConsoleVariable(L"Render.AO.AsyncCompute").GetBool(), "AO async must be disabled");
-        IConsoleVariable* water = nullptr;
-        Require(!console.TryFindConsoleVariable(L"Render.Fluid.SecondaryAdapter", water), "Experiment must not link Bistro water runtime");
+        Require(console.FindConsoleVariable(L"Render.Fluid.SecondaryAdapter").GetInt() == -1, "Water offload must be disabled");
         Require(!console.FindConsoleVariable(L"Render.Grass.AsyncCompute").GetBool(),"Grass async must be disabled");
-        Log::Info("MetaRenderGraph", "U4 SCENE EXECUTOR; primary=0; particle secondary=-1; water runtime absent; single DIRECT execution");
+        Log::Info("MetaRenderGraph", "SCENE EXECUTOR; primary=0; particle/water secondary=-1; Meta.Async.Queues=",
+            console.FindConsoleVariable(L"Meta.Async.Queues").GetBool());
     }
 
     class MetaApplication final : public App
