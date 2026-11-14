@@ -50,17 +50,20 @@ UINT GDX12DescriptorHeap::GetNumDescriptors()
 
 UINT GDX12DescriptorHeap::GetAvailableIndex(const UINT startIndex, const UINT maxRange)
 {
-    if (startIndex >= _numDescriptors) throw std::out_of_range("Descriptor allocation starts outside heap");
-    const UINT remaining = _numDescriptors - startIndex;
-    const UINT count = maxRange == 0 ? remaining : (std::min)(maxRange, remaining);
+    const bool tail = _transientDescriptorTail && startIndex == TextureResources_StartIndex && maxRange == TextureResources_RangeLength;
+    const UINT first = tail ? TextureCube_StartIndex + TextureCube_RangeLength : startIndex;
+    if (first >= _numDescriptors) throw std::out_of_range("Descriptor allocation starts outside heap");
+    const UINT remaining = _numDescriptors - first;
+    const UINT count = tail || maxRange == 0 ? remaining : (std::min)(maxRange, remaining);
     for (UINT offset = 0; offset < count; ++offset)
     {
-        const UINT index = startIndex + offset;
+        const UINT index = first + offset;
         if (_occupanceRegistry[index]) continue;
         _occupanceRegistry[index] = true;
         return index;
     }
-    throw std::runtime_error("Descriptor allocation range exhausted");
+    throw std::runtime_error("Descriptor allocation range exhausted: type=" + std::to_string(_type) +
+        " start=" + std::to_string(first) + " count=" + std::to_string(count));
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE GDX12DescriptorHeap::GetCPUHandle(const UINT index) const

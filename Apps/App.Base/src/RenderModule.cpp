@@ -160,6 +160,7 @@ void RenderModule::QuarantineGpuOwners() noexcept
 void RenderModule::OnResize()
 {
     _RPcommonData.RequestHistoryReset = true;
+    if (_pipeline->OwnsExecution()) _pipeline->DrainExecution();
     _primaryDevice->GetCommandQueue()->Flush();
 
     uint16_t width, height;
@@ -1096,6 +1097,7 @@ void RenderModule::BeginFrame()
     {
         if (_pipeline->GetBindings().FrameGenerationInputs)
             _backBuffer->SetFrameGenerationSuspended(_renderingSuspended || !_pipeline->AllowsFrameGeneration());
+        if (_pipeline->OwnsExecution() && _backBuffer->NeedsPresentationReset()) _pipeline->DrainExecution();
         _backBuffer->BeginFrame(_RPcommonData);
     }
 }

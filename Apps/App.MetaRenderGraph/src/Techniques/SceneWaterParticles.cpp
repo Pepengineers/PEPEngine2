@@ -29,7 +29,13 @@ struct SceneWaterParticles::Path
     GDX12WBOITCompositionPass FarComposition, NearComposition;
     bool Initialized = false;
     UINT Width = 0, Height = 0;
-    Path() { Far.SetUnbatchedDraws(true); Near.SetUnbatchedDraws(true); Water.SetLocalExecution(true); Particles.SetLocalExecution(true); NearComposition.SetApplyOpaqueAerialPerspective(false); }
+    Path() {
+        Far.SetUnbatchedDraws(true); Near.SetUnbatchedDraws(true);
+        Water.SetLocalExecution(true); Particles.SetLocalExecution(true);
+        NearComposition.SetApplyOpaqueAerialPerspective(false);
+        for (auto* pass : std::array<GDX12RenderPass*, 4>{&Far, &Near, &FarComposition, &NearComposition})
+            pass->SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+    }
     ~Path()
     {
         Water.ClearDenendencies(); Particles.ClearDenendencies();
@@ -84,7 +90,7 @@ void SceneWaterParticles::Resize()
 }
 GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings,
     SceneGeometry& geometry, SceneEnvironment& environment, GDX12Texture* reflectedHDR,
-    GDX12Texture* probes, bool serial)
+    GDX12Texture* probes, D3D12_GPU_DESCRIPTOR_HANDLE probeRadiance, bool serial)
 {
     if (_reset) { _resources.Device->GetCommandQueue()->Flush(); Resize(); _reset = false; }
     auto& path = *_paths[serial ? 0 : 1];
@@ -277,7 +283,7 @@ GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resour
         for (UINT i = 1; i < 5; ++i) srv[2+i] = pass._inputs[i]->GetTexture()->GetSRV()->GPUHandle;
         srv[7] = frame.ShadowLights->GetSRV()->GPUHandle;
         srv[8] = pass._inputs[5]->GetTexture()->GetSRV()->GPUHandle;
-        srv[9] = _resources.ReflectionRadianceSRV.GPUHandle;
+        srv[9] = probeRadiance;
         srv[10] = frame.ReflectionProbes->GetSRV()->GPUHandle;
         srv[11] = _resources.SkyTransmittanceSRV.GPUHandle;
         srv[12] = _resources.SkyAerialRadianceSRV.GPUHandle;
@@ -323,8 +329,8 @@ GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resour
     resolveAccess.push_back(textureRead(path.FarComposition.GetOutput(0)->GetTexture()));
     auto* background = path.FarComposition.GetOutput(0)->GetTexture();
     auto* environmentMap = environment.Output(1)->GetTexture();
-    packet("water optics/refraction/probe resolve", resolveAccess, [&water, background, environmentMap](auto* commands) {
-        water.Resolve(commands, background, environmentMap);
+    packet("water optics/refraction/probe resolve", resolveAccess, [&water, background, environmentMap, probeRadiance](auto* commands) {
+        water.Resolve(commands, background, environmentMap, probeRadiance);
     });
     transparency(path.Near, "near mesh transparency clear/draw");
     prepareGroup(1);
