@@ -18,7 +18,7 @@ Environment/IBL, optional clouds, reflection probes, AO, deferred lighting и SS
 
 Adapters в `Apps/App.MetaRenderGraph/src/Techniques/` и MetaRenderPipeline. Источники: `Apps/App.Base/Rendering/CommonRenderPasses` по фактическим Include/src путям, `Apps/App/src/Rendering/BistroRenderPipeline.cpp`, renderer passes EnvironmentIBL/ReflectionProbe/AmbientOcclusion/DeferredLighting/SSSR и cloud source.
 
-Тесты: `Apps/App.MetaRenderGraph/tests/LightingGpuTests.cpp`, `ReflectionGpuTests.cpp`. Ориентиры существующих checks: `Apps/App/LightingGpuTests.vcxproj`, `AOTests.vcxproj`, `ReflectionProbeTests.vcxproj`, `SSRBistroTests.vcxproj`. Отчёт `docs/reports/meta-render-graph/05-lighting-reflections.md`.
+Пути fixtures как ориентиры (создание и расширение не требуются): `Apps/App.MetaRenderGraph/tests/LightingGpuTests.cpp`, `ReflectionGpuTests.cpp`. Ориентиры существующих checks: `Apps/App/LightingGpuTests.vcxproj`, `AOTests.vcxproj`, `ReflectionProbeTests.vcxproj`, `SSRBistroTests.vcxproj`. Отчёт `docs/reports/meta-render-graph/05-lighting-reflections.md`.
 
 ## Approach
 
@@ -26,17 +26,12 @@ Adapters в `Apps/App.MetaRenderGraph/src/Techniques/` и MetaRenderPipeline. И
 2. U5.2: probe capture/filter/publication с их geometry views и текущим расписанием обновления. Probe result публикуется после необходимых этапов, а не после одной CPU recording job; cache semantics сохраняются.
 3. U5.3: AO в поддерживаемых early/late вариантах и deferred lighting. Реальные depth/normal/lighting reads/writes входят в план. Один API packet не обязан соответствовать одному shader dispatch.
 4. U5.4: SSR и composition с предыдущими результатами. Отделить persistent history от frame-local resources. Не делить проходы исключительно ради количества jobs; параллелить независимую запись по доступным inputs/state contracts.
-5. Для каждого optional pass описать disabled/fallback выход, чтобы потребители не читали отсутствующую либо устаревшую texture. Обновить inventory и baseline после подгруппы.
+5. Для каждого optional pass описать disabled/fallback выход, чтобы потребители не читали отсутствующую либо устаревшую texture. Обновить inventory после подключения подгрупп.
 
-## Test Scenarios
+## Smoke-check
 
-- Serial/parallel recording одного плана дают одинаковые outputs при фиксированных scene/camera и истории.
-- Early/late AO: корректный порядок input depth и отсутствие сломанного lighting после переключения.
-- Probe впервые готов, повторно используется из cache и обновляется после движения сцены согласно текущим правилам; старые данные не публикуются как новые.
-- Clouds выключены/включены, мир paused/time-scaled: source и история соответствуют текущему поведению.
-- SSR off/on, camera cut/reset и resize не оставляют неинициализированные history reads.
-- Ни одна техника не вызывает скрытый queue submit/CPU wait из recording worker; debug layer чист на fixture.
+Применяется [общий порядок проверки](00-meta-plan.md#verification-contract). Новый путь отображает освещение и отражения. Достаточно обычного короткого запуска без явных ошибок; уже полученный результат можно использовать повторно без нового прогона.
 
 ## Acceptance and Handoff
 
-Пройденные новые fixtures, сравнение с baseline при тех же настройках, explicit packets/accesses для всех U5-техник. Существующие GPU тесты без подключения нового executor не засчитывать как единственное доказательство. Локальный коммит и отчёт с реальными dependencies для воды/прозрачности. Следующее задание: [U6](06-water-particles.md).
+Указать зависимости освещения и отражений для воды/прозрачности. Кратко записать commit, выбранный режим и итог: работает / не работает / не запускалось, с причиной при наличии. Локальный коммит только своих изменений. Следующее задание: [U6](06-water-particles.md); переходить только в разрешённых пользователем пределах.
