@@ -27,6 +27,9 @@ public:
     void SetInstances(std::vector<GDX12FluidInstance> instances);
     void PrepareFrame();
     void SetLocalExecution(bool enabled) { _localOnly = enabled; }
+    // Opt-in recording-only display: caller owns seed/history and GPU lifetime.
+    using ExternalDisplay = std::map<uint64_t, GDX12UploadBuffer<GDX12FluidSolver::Particle>*>;
+    void SetExternalDisplay(ExternalDisplay display) { _externalOnly = true; _externalDisplay = std::move(display); }
     std::vector<GDX12Resource*> NativeResources() const;
     GDX12Texture* NativeColor() const { return _rendering ? _color.get() : nullptr; }
     void ExecuteSimulation(GDX12CommandList* commands);
@@ -70,6 +73,8 @@ private:
     std::unique_ptr<GDX12Texture> _depth, _motion, _geometry, _owner, _color;
     GDX12FluidControls _controls = { false, 0 };
     bool _localOnly = false;
+    bool _externalOnly = false;
+    ExternalDisplay _externalDisplay;
     bool _rendering = false;
     bool _simulating = false;
     bool _prepared = false;

@@ -4,6 +4,8 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
 namespace Meta
 {
+class WaterTransfer;
+enum class PublicationSelection;
 // Preparation and recording are owner-only. Kernels and shaders are
 // the production implementations; execution/submission belongs to Executor.
 class SceneWaterParticles
@@ -17,6 +19,7 @@ public:
     bool Record(Id id, ID3D12GraphicsCommandList* commands) const { return _work.Record(id, commands); }
     void Reset();
     void Resize(); // caller drained Executor
+    void SetWaterTransfer(WaterTransfer* transfer, std::function<PublicationSelection()> selection);
     GDX12Texture* Depth() const { return _depth; }
     GDX12Texture* Motion() const { return _motion; }
     GDX12Texture* ParticleMotion() const { return _particleMotion; }
@@ -34,5 +37,7 @@ private:
     NativeWork _work;
     GDX12Texture *_depth = nullptr, *_motion = nullptr, *_particleMotion = nullptr;
     bool _reset = false;
+    WaterTransfer* _transfer = nullptr;
+    std::function<PublicationSelection()> _selection;
 };
 }

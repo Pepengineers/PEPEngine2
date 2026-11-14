@@ -1,5 +1,15 @@
 # Cross-adapter transport — source implementation
 
+## Water-stage prerequisite correction — source only
+
+The subsequent water integration pins `LastSubmittedDisplay` in this fixture.
+After Strict queued a newer pending import and its DIRECT readers, switching to
+Latest cannot select an older Current and regress the payload. Latest reuses the
+last submitted display; preceding DIRECT FIFO already contains its import wait,
+so the repeated consumer adds no future wait. The pin is included in FreeDisplay
+retirement. This narrow source correction has no build/test/runtime acceptance;
+all original hardware gates remain pending.
+
 Date: 2026-11-14 (Europe/Moscow). Checkout: `D:\Project\PEPEngine2`.
 Branch: `codex/meta-render-graph-u9`.
 Base: **local** `codex/bistro-rendering` at

@@ -112,6 +112,8 @@
     <ClCompile Include="src\Techniques\SceneReflections.cpp" />
     <ClCompile Include="src\Techniques\SceneLighting.cpp" />
     <ClCompile Include="src\Techniques\SceneWaterParticles.cpp" />
+    <ClCompile Include="src\Techniques\WaterTransfer.cpp" />
+    <ClInclude Include="src\Techniques\WaterTransfer.h" />
     <ClCompile Include="..\App\src\Rendering\Water\GDX12Fluid.cpp" />
     <ClCompile Include="..\App\src\Rendering\Water\GDX12FluidPass.cpp" />
     <ClCompile Include="..\App\src\Rendering\Water\GDX12WaterOffload.cpp" />
