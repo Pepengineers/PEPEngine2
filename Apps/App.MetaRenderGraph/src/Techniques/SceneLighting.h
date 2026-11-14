@@ -52,7 +52,11 @@ class SceneLighting
         std::array<D3D12_PLACED_SUBRESOURCE_FOOTPRINT, 4> Footprints;
         UINT64 Bytes = 0;
         UINT Width = 0, Height = 0;
+        uint64_t LightRevision = 0;
+        GDX12ResourceHandle LightSource;
+        bool UploadLights = false;
     };
+    void AppendGpuLightGrid(Graph&, std::vector<ID3D12Resource*>&, const SceneGeometry&);
     HDRContinuation _hdrContinuation;
     GDX12DeviceResources &_resources;
     RenderPipelineCommonData &_common;
@@ -65,6 +69,8 @@ class SceneLighting
     std::array<std::unique_ptr<GDX12SSSRPass>, 2> _ssr;
     std::array<NativeWork, 2> _work;
     GDX12Texture _neutralAccum, _neutralReveal;
+    std::unique_ptr<GDX12RootSignature> _gridRoot;
+    ComPtr<ID3D12PipelineState> _gridBuild;
     std::unique_ptr<GDX12RootSignature> _displayRoot;
     ComPtr<ID3D12PipelineState> _displayPipeline;
     std::array<bool, 2> _forceReset{true, true};

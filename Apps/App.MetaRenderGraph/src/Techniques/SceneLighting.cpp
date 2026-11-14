@@ -25,6 +25,21 @@ SceneLighting::SceneLighting(GDX12DeviceResources &r, RenderPipelineCommonData &
 {
     if (!opaqueOnly) _reflections = std::make_unique<SceneReflections>(r, c);
     if (opaqueOnly) _sunShadows = std::make_unique<SceneSunShadows>(r, c);
+    if (opaqueOnly)
+    {
+        for (auto& frame : r.FrameConstants) frame->LocalLightCache->TrackChanges();
+        GDX12RootSignatureDesc root;
+        root.Constants = {9};
+        root.NumSingleCBVSlots = 2;
+        root.NumSingleSRVSlots = 1;
+        root.NumSingleUAVSlots = 1;
+        _gridRoot = std::make_unique<GDX12RootSignature>(r.Device, root);
+        D3D12_FEATURE_DATA_D3D12_OPTIONS1 options{};
+        const bool waves = SUCCEEDED(r.Device->GetDevice()->CheckFeatureSupport(
+            D3D12_FEATURE_D3D12_OPTIONS1, &options, sizeof(options))) && options.WaveOps;
+        const D3D_SHADER_MACRO defines[] = {{"LIGHT_GRID_WAVE_OPS", waves ? "1" : "0"}, {nullptr, nullptr}};
+        _gridBuild = GDX12RenderHelpers::CreateComputePipeline(r.Device, _gridRoot.get(), SHADERS_FOLDER "LightGrid.hlsl", "BuildCS", defines);
+    }
     _deferred._opaqueOnly = opaqueOnly;
     _deferred.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION,true);
     _composition.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION,true);
@@ -79,7 +94,6 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
         constants.LocalLightCache->Resize(1);
         constants.LocalLightCache->CopyData(0, GDX12LocalLightConstants{});
     }
-    if (_opaqueOnly) return;
     const UINT count = constants.LocalLightCache->GetElementCount();
     if (!constants.ShadowLights)
     {
@@ -90,6 +104,67 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
     }
     else
         constants.ShadowLights->Resize(count);
+    if (_opaqueOnly)
+    {
+        auto& source = *constants.LocalLightCache;
+        frame.UploadLights = frame.LightRevision != source.GetRevision() ||
+            frame.LightSource.Get() != source.GetResource().D3DResource.Get();
+        if (frame.UploadLights)
+        {
+            for (const auto& light : _resources.LocalLights)
+                if (!std::isfinite(light.Position.x) || !std::isfinite(light.Position.y) || !std::isfinite(light.Position.z) ||
+                    !std::isfinite(light.Range) || light.Range <= 0)
+                    throw std::invalid_argument("Invalid light grid sphere");
+            frame.LightRevision = source.GetRevision();
+            frame.LightSource = source.GetResource().D3DResource;
+        }
+    }
+}
+
+void SceneLighting::AppendGpuLightGrid(Graph& graph, std::vector<ID3D12Resource*>& bindings, const SceneGeometry& geometry)
+{
+    const auto& scene = geometry._slots.at(_slot);
+    const auto& frame = _frames.at(_slot);
+    auto& grid = _deferred._grids.at(_slot);
+    const auto layout = BuildLightGridConstants(_common.CameraProjection, _common.CameraView,
+        _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane, frame.Width, frame.Height,
+        _resources.LocalLights.size(), _gridSettings);
+    const UINT words = UINT((std::max)(size_t(1), size_t(layout.Size.x) * layout.Size.y * layout.Size.z * layout.Size.w));
+    grid.Masks->Resize(words);
+    grid.Constants->CopyData(0, layout);
+    const auto resource = [&](GDX12Resource& value) {
+        return NativeWork::ResourceFor(graph, bindings, value.D3DResource.Get(), "GPU light grid resource");
+    };
+    const Id masks = resource(grid.Masks->GetResource());
+    const Id constants = resource(grid.Constants->GetResource());
+    auto& lights = *_resources.FrameConstants.at(_slot)->ShadowLights;
+    const Id sources = resource(lights.GetResource());
+    const UINT groups = layout.Size.w ? ((layout.Size.x * layout.Size.y + 63) / 64) * layout.Size.z * layout.Size.w : 1;
+    std::array<UINT, 9> parameters{frame.Width, frame.Height, UINT(_resources.LocalLights.size()), groups};
+    const float projection[] = {_common.CameraProjection._11, _common.CameraProjection._22,
+        _common.CameraProjection._31, _common.CameraProjection._32, _common.ActiveCameraFarPlane};
+    std::memcpy(parameters.data() + 4, projection, sizeof(projection));
+    auto* root = _gridRoot.get();
+    auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
+    auto* build = _gridBuild.Get();
+    const auto camera = scene.Camera;
+    const auto gridCB = grid.Constants->GetElementAddress(0);
+    const auto srv = lights.GetSRV()->GPUHandle;
+    const auto uav = grid.Masks->GetUAV()->GPUHandle;
+    _work[_mode].Add(graph, "GPU light grid masks",
+        {{masks, Mode::Write, UnorderedAccess}, {sources, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
+         {scene.FrameIds[1], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
+         {constants, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}}, [=](auto* cmd) {
+        cmd->SetDescriptorHeaps(1, &heap);
+        cmd->SetComputeRootSignature(root->GetRootSignature().Get());
+        cmd->SetPipelineState(build);
+        cmd->SetComputeRoot32BitConstants(0, UINT(parameters.size()), parameters.data(), 0);
+        cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(1), camera);
+        cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(2), gridCB);
+        cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(0), srv);
+        cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), uav);
+        cmd->Dispatch((std::min)(groups, 65535u), (groups + 65534) / 65535, 1);
+    });
 }
 void SceneLighting::AppendAO(Graph &graph, std::vector<ID3D12Resource *> &bindings)
 {
@@ -125,8 +200,8 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     if (_sunShadows) _sunShadows->Append(graph, bindings, _slot,
         {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle,
          scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle}, scene.Draws, scene.Geometry);
-    auto* lights = _opaqueOnly ? constants.LocalLightCache.get() : constants.ShadowLights.get();
-    if (!_opaqueOnly)
+    auto* lights = constants.ShadowLights.get();
+    if (!_opaqueOnly || frame.UploadLights)
     {
         auto *lightSource = constants.LocalLightCache->GetResource().D3DResource.Get();
         auto *lightTarget = constants.ShadowLights->GetResource().D3DResource.Get();
@@ -153,7 +228,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     {
         _deferred.Initialize();
         if (_opaqueOnly) for (auto& grid : _deferred._grids)
-            grid.Upload->CreateSRV(_resources.SRV_UAV_Heap.get(),
+            grid.Masks->CreateUAV(_resources.SRV_UAV_Heap.get(),
                 _resources.SRV_UAV_Heap->GetAvailableIndex(105000));
         if (!_opaqueOnly)
         {
@@ -177,20 +252,20 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         }
         _forceReset = {true, true};
     }
-    _deferred._gridSystem.Build(_deferred._grid, _common.CameraProjection, _common.CameraView,
-                                _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane, frame.Width, frame.Height,
-                                _resources.LocalLights, _common.Jobs, _gridSettings);
     auto &grid = _deferred._grids.at(_slot);
-    const UINT words = UINT(_deferred._grid.Masks.size());
-    grid.Upload->Resize(words);
-    grid.Masks->Resize(words);
-    if (words)
-        grid.Upload->CopyData(0, _deferred._grid.Masks.data(), words);
-    grid.Constants->CopyData(0, _deferred._grid.Constants);
-    _deferred._prepared = true;
-    auto* masks = _opaqueOnly ? grid.Upload.get() : grid.Masks.get();
-    if (!_opaqueOnly)
+    auto* masks = grid.Masks.get();
+    if (_opaqueOnly) AppendGpuLightGrid(graph, bindings, geometry);
+    else
     {
+        _deferred._gridSystem.Build(_deferred._grid, _common.CameraProjection, _common.CameraView,
+            _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane, frame.Width, frame.Height,
+            _resources.LocalLights, _common.Jobs, _gridSettings);
+        const UINT words = UINT(_deferred._grid.Masks.size());
+        grid.Upload->Resize(words);
+        grid.Masks->Resize(words);
+        if (words)
+            grid.Upload->CopyData(0, _deferred._grid.Masks.data(), words);
+        grid.Constants->CopyData(0, _deferred._grid.Constants);
         const UINT64 gridBytes = UINT64(words) * sizeof(UINT);
         auto *gridSource = grid.Upload->GetResource().D3DResource.Get();
         auto *gridTarget = grid.Masks->GetResource().D3DResource.Get();
@@ -202,6 +277,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
                          cmd->CopyBufferRegion(gridTarget, 0, gridSource, 0, gridBytes);
                  });
     }
+    _deferred._prepared = true;
     // Placed RT/UAV initialization has its own declared state and packet.
     auto *hdr = _deferred._color->GetResource()->D3DResource.Get();
     work.Add(graph, "initialize deferred HDR target",
@@ -216,8 +292,8 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         lighting.push_back(texture(_reflections->Published(serial), Mode::Read, read));
         lighting.push_back({resource(&constants.ReflectionProbes->GetResource()), Mode::Read, read});
     }
-    lighting.push_back({resource(&lights->GetResource()), Mode::Read, _opaqueOnly ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : read});
-    lighting.push_back({resource(&masks->GetResource()), Mode::Read, _opaqueOnly ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : read});
+    lighting.push_back({resource(&lights->GetResource()), Mode::Read, read});
+    lighting.push_back({resource(&masks->GetResource()), Mode::Read, read});
     lighting.push_back({resource(&grid.Constants->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
     lighting.push_back({resource(&constants.ShadowCB->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
     lighting.push_back({resource(&constants.SkyCB->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});

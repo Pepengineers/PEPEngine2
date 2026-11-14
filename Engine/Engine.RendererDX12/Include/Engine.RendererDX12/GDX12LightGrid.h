@@ -17,6 +17,10 @@ struct GDX12LightGridConstants
 };
 static_assert(sizeof(GDX12LightGridConstants) == 32);
 
+GDX12LightGridConstants BuildLightGridConstants(const Matrix& projection, const Matrix& view,
+    float nearPlane, float farPlane, UINT width, UINT height, size_t lightCount,
+    GDX12LightGridSettings settings = GetLightGridSettings());
+
 struct GDX12LightGrid
 {
     UINT DepthSlice(float z) const;
