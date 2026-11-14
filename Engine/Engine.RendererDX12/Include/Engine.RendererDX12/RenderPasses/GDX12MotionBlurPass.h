@@ -3,6 +3,8 @@
 
 // Inputs: linear HDR, reverse-Z depth, unjittered prevNDC-currentNDC motion.
 // Outputs: linear HDR at the input grid, complete NDC motion (including sky/particle coverage).
+namespace Meta { class ScenePostUI; }
+
 class GDX12MotionBlurPass final : public GDX12RenderPass
 {
 public:
@@ -20,10 +22,13 @@ public:
     GDX12MotionBlurPass();
     void Initialize() override;
     void Execute(GDX12CommandList* commands) override;
+    void PrepareRecording(); // Owner-only allocation/retirement before explicit recording.
+    void RecordCommands(GDX12CommandList* commands);
     void Resize() override;
     void ClearDenendencies() override;
 
 private:
+    friend class Meta::ScenePostUI;
     void ResizeTiles(UINT tileSize);
     std::unique_ptr<GDX12Texture> _color, _motion, _velocity, _tileMax, _neighborMax;
     std::unique_ptr<GDX12RootSignature> _root;

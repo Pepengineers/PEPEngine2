@@ -4,6 +4,7 @@
 #include "Techniques/SceneEnvironment.h"
 #include "Techniques/SceneLighting.h"
 #include "Techniques/SceneWaterParticles.h"
+#include "Techniques/ScenePostUI.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 class MetaRenderPipeline final : public IRenderPipeline
 {
@@ -17,14 +18,23 @@ class MetaRenderPipeline final : public IRenderPipeline
         {
             _lighting->Reset();
             if (_waterParticles) _waterParticles->Reset();
+            if (_post) _post->Reset();
         }
         _verify = verify;
     }
     void ValidateQueued();
+    bool OwnsScreenUI() const override { return true; }
+    void PrepareMaterialBindings(RenderPipelineContext&) override { _post->PrepareMaterials(); }
+    void UpdateFrameSettings(RenderPipelineContext& c) override
+    {
+        _post->UpdateSettings();
+        if (_post->Reconstruction().ApplySettings()) c.Resize();
+    }
     void Initialize(RenderPipelineContext &) override;
     void ResetWorldHistory() override
     {
         if (_waterParticles) _waterParticles->Reset();
+        if (_post) _post->Reset();
         if (_environment)
             _environment->ResetClouds();
         if (_lighting)
@@ -36,13 +46,11 @@ class MetaRenderPipeline final : public IRenderPipeline
     }
     bool AllowsFrameGeneration() const override
     {
-        return false;
+        return !_verify && _post && _post->AllowsFrameGeneration();
     }
     bool PrepareFrame(RenderPipelineContext &, GDX12CommandList *) override;
     void BuildGraph(GDX12RenderGraph &, const RenderPipelineGraphInputs &) override;
-    void Resize(RenderPipelineContext &) override
-    {
-    }
+    void Resize(RenderPipelineContext &) override { _post->Resize(); }
     const RenderPipelineBindings &GetBindings() const override
     {
         return _bindings;
@@ -70,6 +78,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     std::unique_ptr<Meta::SceneLighting> _lighting;
     std::unique_ptr<Meta::SceneWaterParticles> _waterParticles;
     GDX12GPUCullingPass _sceneFlags;
+    std::unique_ptr<Meta::ScenePostUI> _post;
     std::unique_ptr<Meta::Executor> _executor;
     Meta::Schedule _schedule;
     uint32_t _frame = 0;

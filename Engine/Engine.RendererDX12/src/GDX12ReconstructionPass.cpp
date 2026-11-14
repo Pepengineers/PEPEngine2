@@ -115,6 +115,12 @@ void GDX12ReconstructionPass::LinkOutput()
     _commonData->Upscaler = this;
 }
 
+void GDX12ReconstructionPass::SetInputs(std::vector<IRenderPassLink*> inputs)
+{
+    GDX12RenderPass::SetInputs(std::move(inputs));
+    if (_provider) _provider->SetInputs(_inputs);
+}
+
 void GDX12ReconstructionPass::Initialize()
 {
     if (_provider)

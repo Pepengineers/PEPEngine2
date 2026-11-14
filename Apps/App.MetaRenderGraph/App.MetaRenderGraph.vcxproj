@@ -122,12 +122,16 @@
     <ClCompile Include="tests\ShadowGpuTests.cpp" />
     <ClCompile Include="tests\GrassGpuTests.cpp" />
     <ClCompile Include="src\MetaRenderPipeline.cpp" />
+    <ClCompile Include="src\Techniques\ScenePostUI.cpp" />
+    <ClCompile Include="..\App\src\Rendering\UI\BistroUIPosters.cpp" />
     <ClInclude Include="src\MetaApplication.h" />
     <ClInclude Include="src\Techniques\NativeWork.h" />
     <ClInclude Include="src\Techniques\SceneEnvironment.h" />
     <ClInclude Include="src\Techniques\SceneAO.h" />
     <ClInclude Include="src\Techniques\SceneReflections.h" />
     <ClInclude Include="src\Techniques\SceneLighting.h" />
+    <ClInclude Include="src\Techniques\ScenePostUI.h" />
+    <ClInclude Include="..\App\src\Rendering\BistroCollisionPass.h" />
     <None Include="Shaders\ShadowAtlasCopy.hlsl" />
     <None Include="Configs\Startup.ini" />
     <None Include="Configs\SmokeWorld.yaml" />
