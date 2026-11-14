@@ -39,8 +39,11 @@ bool BarrierStateAllowed(Queue queue, State state) {
 }
 }
 Executor::Executor(GDX12Device& d,uint32_t slots,uint32_t capacity,unsigned threads)
-    :_device(d),_compute(std::make_unique<GDX12CommandQueue>(&d,D3D12_COMMAND_LIST_TYPE_COMPUTE)),
-    _copy(std::make_unique<GDX12CommandQueue>(&d,D3D12_COMMAND_LIST_TYPE_COPY)),_jobs(threads),_slots(slots) {
+    :Executor(std::make_shared<QueueSubmission>(d),0,slots,capacity,threads) {}
+Executor::Executor(std::shared_ptr<QueueSubmission> submissions,Id device,uint32_t slots,uint32_t capacity,unsigned threads)
+    :_submissions(std::move(submissions)),_deviceId(device),
+    _device(_submissions ? _submissions->Device(device):throw std::invalid_argument("missing submission domain")),
+    _jobs(threads),_slots(slots) {
     if(!slots || !capacity) throw std::invalid_argument("empty executor capacity");
     for(uint32_t i=0;i<slots;++i) {
         _slot=i; _begun=true; Reserve(capacity);
@@ -52,31 +55,31 @@ Executor::~Executor() {
         for(auto& s:_slots) for(auto& lists:s.Lists) for(auto& l:lists) {
             l.Commands.Detach(); l.Allocator.Detach();
         }
-        // Unknown completion must retain queues as well as their submitted lists.
-        _compute.release(); _copy.release();
     }
 }
 void Executor::Owner() const { if(std::this_thread::get_id()!=_owner) throw std::logic_error("executor requires owner thread"); }
-GDX12CommandQueue& Executor::SubmissionQueue(Queue queue) {
-    switch(queue) {
-    case Queue::Direct: return *_device.GetCommandQueue();
-    case Queue::Compute: return *_compute;
-    case Queue::Copy: return *_copy;
-    }
-    throw std::invalid_argument("unknown submission queue");
+CompletionToken Executor::Token(Queue q,uint64_t value) const {
+    return {_deviceId,q,value,_submissions->Incarnation()};
 }
 void Executor::Begin(uint32_t index) {
-    Owner(); auto& slot=_slots.at(index);
+    Owner(); _submissions->CheckHealth(); auto& slot=_slots.at(index);
     if(_aborted) throw std::logic_error("partial frame aborted; drain and recreate execution/resources");
     if(slot.Poisoned) throw std::logic_error("executor slot quarantined after submission failure");
     for(auto queue:{Queue::Direct,Queue::Compute,Queue::Copy})
-        SubmissionQueue(queue).CPUWaitForFenceValue(slot.Fences[QueueIndex(queue)]);
+        if(auto value=slot.Fences[QueueIndex(queue)]) _submissions->Wait(Token(queue,value));
     _slot=index; _begun=true; _tokens.clear();
 }
+bool Executor::TryBegin(uint32_t index) {
+    Owner(); _submissions->CheckHealth(); const auto& slot=_slots.at(index);
+    if(_aborted || slot.Poisoned) throw std::logic_error("recording context aborted/quarantined");
+    for(auto queue:{Queue::Direct,Queue::Compute,Queue::Copy})
+        if(auto value=slot.Fences[QueueIndex(queue)]) if(!_submissions->Complete(Token(queue,value))) return false;
+    _slot=index; _begun=true; _tokens.clear(); return true;
+}
 void Executor::Drain() {
-    Owner();
+    Owner(); _submissions->CheckHealth();
     for(auto& slot:_slots) for(auto queue:{Queue::Direct,Queue::Compute,Queue::Copy})
-        SubmissionQueue(queue).CPUWaitForFenceValue(slot.Fences[QueueIndex(queue)]);
+        if(auto value=slot.Fences[QueueIndex(queue)]) _submissions->Wait(Token(queue,value));
     for(auto& slot:_slots) if(slot.Poisoned) throw std::logic_error("submission failed; executor quarantined");
 }
 void Executor::Reserve(uint32_t count) {
@@ -93,13 +96,19 @@ void Executor::Reserve(uint32_t count) {
 }
 uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Resource*>& resources,
     const Record& record,GDX12CommandList* prefix,GDX12CommandList* suffix,bool serial,
-    const std::atomic<bool>* cancellation,std::ostream* trace) {
+    const std::atomic<bool>* cancellation,std::ostream* trace,const std::vector<PacketWait>& waits) {
     Owner(); if(!_begun) throw std::logic_error("Begin required"); _begun=false;
     auto& slot=_slots[_slot]; _tokens.assign(schedule.Packets.size(),0);
+    _completions.assign(schedule.Packets.size(),{});
+    if(schedule.Device!=_deviceId) throw std::invalid_argument("schedule belongs to another device context");
+    for(const auto& wait:waits) {
+        if(wait.Packet>=schedule.Packets.size()) throw std::invalid_argument("external wait has no packet");
+        _submissions->Complete(wait.Token); // rejects unissued/stale tokens, does NOT wait
+    }
     if(resources.size()!=schedule.Decays.size() || resources.size()!=schedule.Memory.size())
         throw std::invalid_argument("resource binding count mismatch");
     for(size_t i=0;i<resources.size();++i) {
-        if(!resources[i]) throw std::invalid_argument("unbound resource");
+        _submissions->ValidateResource(_deviceId,resources[i]);
         D3D12_HEAP_PROPERTIES heap{}; D3D12_HEAP_FLAGS flags{};
         ThrowIfFailed(resources[i]->GetHeapProperties(&heap,&flags));
         const auto desc=resources[i]->GetDesc();
@@ -111,12 +120,14 @@ uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Reso
     }
     if(schedule.Packets.empty()) throw std::invalid_argument("missing terminal packet");
     const auto& terminal=schedule.Packets.back();
-    if(terminal.Target!=Queue::Direct || terminal.Operation!=Invalid)
-        throw std::invalid_argument("terminal packet must retire on DIRECT");
+    if(terminal.Target!=schedule.TerminalQueue || terminal.Operation!=Invalid ||
+        (schedule.FrameBoundary && terminal.Target!=Queue::Direct))
+        throw std::invalid_argument("invalid terminal queue boundary");
     for(Id i=0;i+1<schedule.Packets.size();++i)
         if(std::find(terminal.Dependencies.begin(),terminal.Dependencies.end(),i)==terminal.Dependencies.end())
             throw std::invalid_argument("terminal packet must join all prior packets");
-    if((prefix && prefix->GetType()!=D3D12_COMMAND_LIST_TYPE_DIRECT) ||
+    if((!schedule.FrameBoundary && (prefix || suffix)) ||
+        (prefix && prefix->GetType()!=D3D12_COMMAND_LIST_TYPE_DIRECT) ||
         (suffix && suffix->GetType()!=D3D12_COMMAND_LIST_TYPE_DIRECT))
         throw std::invalid_argument("prefix/suffix must be DIRECT lists");
     std::array<size_t,3> counts{};
@@ -190,7 +201,6 @@ uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Reso
         group.Children.push_back(std::move(buckets)); groups.push_back(std::move(group));
     }
     Recorder recorder(_jobs,std::move(groups),serial,cancellation);
-    auto& direct=SubmissionQueue(Queue::Direct);
     bool submitted=false;
     uint64_t prefixFence=0;
     std::array<bool,3> queueStarted{};
@@ -204,36 +214,39 @@ uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Reso
             }
             if(i==0 && prefix) {
                 slot.Poisoned=true; submitted=true;
-                direct.ExecuteCommandList(prefix);
+                _submissions->Submit(_deviceId,Queue::Direct,{}, {},prefix);
                 slot.Fences[0]=prefixFence=prefix->FenceValue; slot.Poisoned=false;
             }
             const auto target=schedule.Packets[i].Target;
-            auto& q=SubmissionQueue(target);
+            std::vector<CompletionToken> dependencies;
             // Only published fences enter native waits; failed recording cannot
             // strand another queue behind a token that will never be signalled.
-            if(target!=Queue::Direct && !queueStarted[QueueIndex(target)]) {
+            if(schedule.FrameBoundary && target!=Queue::Direct && !queueStarted[QueueIndex(target)]) {
                 // Persistent resources can be shared across slots; their prior
                 // frame's DIRECT terminal joins every queue before a new writer.
-                if(_previousCompletion) q.WaitForQueue(direct,_previousCompletion);
-                if(prefixFence) q.WaitForQueue(direct,prefixFence);
+                if(_previousCompletion) dependencies.push_back(Token(Queue::Direct,_previousCompletion));
+                if(prefixFence) dependencies.push_back(Token(Queue::Direct,prefixFence));
                 queueStarted[QueueIndex(target)]=true;
             }
             for(auto dep:schedule.Packets[i].Dependencies) {
                 if(!_tokens[dep]) throw std::logic_error("dependency has no submitted completion token");
-                const auto producer=schedule.Packets[dep].Target;
-                if(producer!=target) q.WaitForQueue(SubmissionQueue(producer),_tokens[dep]);
+                dependencies.push_back(_completions[dep]);
             }
+            for(const auto& wait:waits) if(wait.Packet==i) dependencies.push_back(wait.Token);
             slot.Poisoned=true; submitted=true;
-            q.GetCommandQueue()->ExecuteCommandLists(static_cast<UINT>(packets[i].size()),packets[i].data());
-            const auto fence=q.Signal(); slot.Fences[QueueIndex(target)]=fence; _tokens[i]=fence; slot.Poisoned=false;
+            const auto token=_submissions->Submit(_deviceId,target,packets[i],dependencies);
+            slot.Fences[QueueIndex(target)]=token.Value; _tokens[i]=token.Value;
+            _completions[i]=token; slot.Poisoned=false;
             recorder.Mark("submit packet "+std::to_string(i));
         }
         if(suffix) {
             slot.Poisoned=true; submitted=true;
-            direct.ExecuteCommandList(suffix); slot.Fences[0]=suffix->FenceValue; slot.Poisoned=false;
+            _submissions->Submit(_deviceId,Queue::Direct,{}, {},suffix);
+            slot.Fences[0]=suffix->FenceValue; slot.Poisoned=false;
         }
         recorder.Finish(); if(trace) recorder.WriteTrace(*trace);
-        return _previousCompletion=slot.Fences[0];
+        if(schedule.FrameBoundary) _previousCompletion=slot.Fences[0];
+        return slot.Fences[QueueIndex(schedule.TerminalQueue)];
     } catch(...) {
         recorder.Finish();
         if(submitted) _aborted=true;
