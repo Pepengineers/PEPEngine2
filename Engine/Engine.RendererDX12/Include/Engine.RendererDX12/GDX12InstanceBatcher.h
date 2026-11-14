@@ -6,6 +6,7 @@
 #include "Engine.RendererDX12/GDX12UploadBuffer.h"
 #include <algorithm>
 #include <stdexcept>
+#include <array>
 
 // Own one batcher per waited frame/view; sequential faces may reuse it after their draw.
 class GDX12InstanceBatcher
@@ -85,6 +86,30 @@ public:
 
     GDX12UploadBuffer<GDX12IndirectDrawArgs>& Commands() { return *_commands; }
     D3D12_GPU_VIRTUAL_ADDRESS VisibleInstancesAddress() { return _visible->GetElementAddress(0); }
+
+    // Native recording seam: reserve on the owner before workers, then declare
+    // UAV/read/indirect states externally. No tracker, allocation or submission.
+    void ReserveRecording(UINT capacity,UINT batches,UINT instances) {
+        Ensure(_groups,batches);Ensure(_commands,capacity);Ensure(_visible,instances);Ensure(_sourceCount,1);
+    }
+    std::array<ID3D12Resource*,4> RecordingResources() const {
+        return {_groups->GetResource().D3DResource.Get(),_commands->GetResource().D3DResource.Get(),
+            _visible->GetResource().D3DResource.Get(),_sourceCount->GetResource().D3DResource.Get()};
+    }
+    void RecordStage(ID3D12GraphicsCommandList* list,UINT stage,UINT capacity,UINT batches,
+        D3D12_GPU_VIRTUAL_ADDRESS instances,D3D12_GPU_VIRTUAL_ADDRESS commands,D3D12_GPU_VIRTUAL_ADDRESS counter) const {
+        const ComPtr<ID3D12PipelineState> pipelines[]={_clear,_append,_finalize};
+        list->SetComputeRootSignature(_root.Get());list->SetPipelineState(pipelines[stage].Get());
+        const UINT values[]={capacity,batches,0};list->SetComputeRoot32BitConstants(0,3,values,0);
+        list->SetComputeRootShaderResourceView(1,instances);list->SetComputeRootShaderResourceView(2,commands);
+        const auto resources=RecordingResources();
+        list->SetComputeRootUnorderedAccessView(3,resources[0]->GetGPUVirtualAddress());
+        list->SetComputeRootUnorderedAccessView(4,resources[1]->GetGPUVirtualAddress());
+        list->SetComputeRootUnorderedAccessView(5,counter);list->SetComputeRootUnorderedAccessView(6,resources[2]->GetGPUVirtualAddress());
+        list->SetComputeRootUnorderedAccessView(7,resources[3]->GetGPUVirtualAddress());
+        const UINT elements=stage==1?capacity:(std::max)(batches,1u),groups=(elements+63)/64;
+        list->Dispatch((std::min)(groups,65535u),(groups+65534)/65535,1);
+    }
 
 private:
     template<class T> void Ensure(std::unique_ptr<GDX12UploadBuffer<T>>& buffer, UINT count)

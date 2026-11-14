@@ -199,7 +199,7 @@ void GDX12FluidSurfacePass::PrepareStates()
         replacement->Source = source;
         replacement->Revision = instance.Component.GetResetRevision();
         replacement->PreviousContainer = instance.ContainerToWorld;
-        const int adapter = WaterAdapter.GetValue();
+        const int adapter = _localOnly ? -1 : WaterAdapter.GetValue();
         if (adapter >= 0)
         {
             const auto adapters = GDX12DeviceFactory::GetDeviceDescriptors();
@@ -393,6 +393,7 @@ void GDX12FluidSurfacePass::PrepareFrame()
         return;
     }
     CreatePipelines();
+    if (_localOnly) _solver.Initialize(_resources->Device);
     if (rendering)
     {
         CreateTargets();
@@ -605,4 +606,15 @@ void GDX12FluidResolvePass::ClearDenendencies()
 {
     GDX12RenderPass::ClearDenendencies();
     _color.Target = nullptr;
+}
+
+std::vector<GDX12Resource*> GDX12FluidSurfacePass::NativeResources() const
+{
+    std::vector<GDX12Resource*> result;
+    const auto add = [&](GDX12Texture* texture) { if (texture) result.push_back(texture->GetResource()); };
+    for (auto* texture : {_raw.get(), _eyeDepth.get(), _scratchDepth.get(), _thickness.get(),
+        _filtered[0].get(), _filtered[1].get(), _depth.get(), _motion.get(), _geometry.get(), _owner.get(), _color.get()}) add(texture);
+    for (auto access : GetSimulationBufferAccesses()) result.push_back(access.Resource);
+    for (auto access : GetResolveBufferAccesses()) result.push_back(access.Resource);
+    return result;
 }

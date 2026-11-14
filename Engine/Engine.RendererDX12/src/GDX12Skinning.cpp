@@ -182,3 +182,20 @@ void GDX12Skinning::RecordDispatch(GDX12CommandList& commands, UINT vertexCount,
     const UINT groups = (vertexCount + 63) / 64;
     list->Dispatch((std::min)(groups, 65535u), (groups + 65534) / 65535, 1);
 }
+
+GDX12SkinningWork GDX12Skinning::Freeze(GDX12SkinMesh& mesh,UINT slot,const std::vector<GDX12SkinPalette>& palette) {
+    auto& upload=*mesh.PaletteUploads.at(slot);
+    if(palette.size()!=upload.GetElementCount()) throw std::invalid_argument("Skin palette size changed");
+    upload.CopyData(0,palette.data(),UINT(palette.size()));
+    return {_rootSignature,_pipeline,{upload.GetResource().D3DResource.Get(),mesh.Palettes.at(slot)->GetResource().D3DResource.Get(),
+        mesh.Source->Vertices->GetResource().D3DResource.Get(),mesh.Source->Ranges->GetResource().D3DResource.Get(),
+        mesh.Source->Influences->GetResource().D3DResource.Get()},mesh.VertexCount,mesh.OutputVertex,UINT(palette.size())};
+}
+void GDX12SkinningWork::Record(ID3D12GraphicsCommandList* list,D3D12_GPU_VIRTUAL_ADDRESS output) const {
+    list->SetComputeRootSignature(Root.Get()); list->SetPipelineState(Pipeline.Get());
+    const UINT constants[]={VertexCount,OutputVertex,BoneCount}; list->SetComputeRoot32BitConstants(0,3,constants,0);
+    for(UINT i=0;i<3;++i) list->SetComputeRootShaderResourceView(i+1,Resources[i+2]->GetGPUVirtualAddress());
+    list->SetComputeRootShaderResourceView(4,Resources[1]->GetGPUVirtualAddress());
+    list->SetComputeRootUnorderedAccessView(5,output);
+    const UINT groups=(VertexCount+63)/64; list->Dispatch((std::min)(groups,65535u),(groups+65534)/65535,1);
+}

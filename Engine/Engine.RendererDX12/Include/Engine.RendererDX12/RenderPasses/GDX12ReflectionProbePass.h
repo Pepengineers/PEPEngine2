@@ -6,6 +6,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
 #include <array>
 #include <utility>
+namespace Meta { class SceneReflections; }
 
 class GDX12ReflectionProbePass final : public GDX12GeometryViewPass
 {
@@ -52,6 +53,7 @@ public:
     std::pair<size_t, size_t> GetReadiness();
 
 private:
+    friend class Meta::SceneReflections;
     enum Geometry : std::uint8_t { AllGeometry, StaticGeometry, DynamicGeometry };
 
     struct ProbeState
@@ -106,6 +108,11 @@ private:
     ComPtr<ID3D12PipelineState> _capturePSO, _skyPSO, _shadowPSO, _cullPSO, _clearPSO, _filterPSO;
     ComPtr<ID3D12CommandSignature> _signature;
     std::unique_ptr<GDX12LocalShadowPass> _staticLocalShadows;
+    // Optional external executor-owned capture shadows. Null retains the
+    // production pass's existing static cache and input ownership.
+    GDX12Texture* _externalStaticShadows = nullptr;
+    GDX12Texture* _externalDynamicShadows = nullptr;
+    const GDX12ReflectionSettings* _externalSettings = nullptr;
     GDX12Texture _published, _filtered, _depth, _sunShadow;
     bool _sunShadowNeedsClear = true;
     std::vector<std::unique_ptr<GDX12Descriptor>> _depthDSVs, _sunDSV, _filterUAVs;

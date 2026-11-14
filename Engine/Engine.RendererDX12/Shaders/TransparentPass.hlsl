@@ -57,7 +57,13 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint vertexID : SV_VertexID, uint instanceID
 {
     VS_OUTPUT_PS_INPUT vout = (VS_OUTPUT_PS_INPUT) 0.0f;
 	
+#if defined(TRANSPARENT_UNBATCHED)
+    // The transparent culling stream preserves one command per source instance.
+    // SkinBatch may describe an opaque batch and is irrelevant to this stream.
+    InstanceData instance = InstanceCache[CBIndirectConstants.InstanceID];
+#else
     InstanceData instance = InstanceCache[DrawInstance(CBIndirectConstants.InstanceID, instanceID, InstanceCache[CBIndirectConstants.InstanceID])];
+#endif
     if (instance.SkinOutputVertex != 0xffffffffu)
     {
         SkinVertex vertex = ReadSkinVertex(instance, vertexID);

@@ -31,7 +31,7 @@ class ApplicationPipeline final : public IRenderPipeline
 public:
     void Initialize(RenderPipelineContext& context) override
     {
-        _clear.Setup(&context.Primary, &context.Secondary, &context.Common);
+        _clear.Setup(&context.Primary, &context.Common);
         Resize(context);
     }
     bool PrepareFrame(RenderPipelineContext&, GDX12CommandList*) override { return false; }
@@ -84,6 +84,7 @@ public:
             if (!_custom) _gpuData.Schedule(_jobs, _world, 0).Complete();
             renderer->Render();
         }
+        Require(GDX12RenderGraph::GetExecuteCallCount() >= 3, "Default/custom legacy pipeline stopped executing its graph");
         renderer->OnResize();
         Require(renderer->GetRenderGraphStatistics().Passes == passCount, "Resize duplicated render passes");
         for (UINT64 index = 0; index < info->GetNumStoredMessages(); ++index)

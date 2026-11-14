@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/GDX12GeometryBuffer.h"
 #include "Engine.RendererDX12/GDX12UploadBuffer.h"
 #include <tuple>
+#include <array>
 
 struct GDX12SkinPalette
 {
@@ -28,6 +29,16 @@ struct GDX12SkinMesh
 
 bool GDX12SkeletalInstancingEnabled();
 
+// Frozen after the frame-slot fence. Recording owns no queue/state tracker
+// and writes only its preassigned output vertex range.
+struct GDX12SkinningWork {
+    ComPtr<ID3D12RootSignature> Root;
+    ComPtr<ID3D12PipelineState> Pipeline;
+    std::array<ID3D12Resource*,5> Resources{}; // palette upload/default, vertices/ranges/influences
+    UINT VertexCount=0, OutputVertex=0, BoneCount=0;
+    void Record(ID3D12GraphicsCommandList*, D3D12_GPU_VIRTUAL_ADDRESS output) const;
+};
+
 class GDX12Skinning
 {
 public:
@@ -37,6 +48,7 @@ public:
         GDX12SkinMesh& mesh, UINT frameSlot, const std::vector<GDX12SkinPalette>& palette);
 
     static std::vector<SkinVertexRange> ValidateSource(const SubMesh& source);
+    GDX12SkinningWork Freeze(GDX12SkinMesh&, UINT frameSlot, const std::vector<GDX12SkinPalette>&);
     void RecordDispatch(GDX12CommandList& commands, UINT vertexCount, UINT outputVertex, UINT boneCount,
         D3D12_GPU_VIRTUAL_ADDRESS vertices, D3D12_GPU_VIRTUAL_ADDRESS ranges, D3D12_GPU_VIRTUAL_ADDRESS influences,
         D3D12_GPU_VIRTUAL_ADDRESS palette, D3D12_GPU_VIRTUAL_ADDRESS output) const;
