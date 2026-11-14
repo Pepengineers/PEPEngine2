@@ -162,7 +162,7 @@ void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork>
         s.SceneReadback=_resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(bytes),D3D12_RESOURCE_STATE_COPY_DEST);
     }
 }
-Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechnique& append,const AppendTechnique& earlyAO) {
+Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechnique& append,const AppendTechnique& earlyAO,const AppendTechnique& prelude) {
     auto& s=_slots.at(index);s.PlannedBindings.clear();
     Graph g;
     for(UINT i=0;i<8;++i) g.Resources.push_back({"scene buffer "+std::to_string(i),0,0,true,true});
@@ -252,14 +252,17 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechn
     s.BatchReadOperation=Invalid;
     if(s.Batches){s.BatchReadOperation=Id(g.Operations.size());g.Operations.push_back({"skeletal packed command readback",{{s.BatchIds[1],Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{s.BatchIds[2],Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{s.BatchIds[4],Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},{s.BatchIds[5],Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST}}});}
     if(append)append(g,s.PlannedBindings);
+    const Id preludeBegin=Id(g.Operations.size());
+    if(prelude)prelude(g,s.PlannedBindings);
     s.Names.clear();for(const auto& operation:g.Operations)s.Names.push_back(operation.Name);
-    if(earlyEnd==Invalid)return Compile(g);
-    // Keep immutable callback IDs while placing AO after mesh+grass depth and
-    // before both GBuffer producers. Discard the redundant initial diagnostic
-    // copies; the final readbacks remain after the completed geometry views.
+    if(earlyEnd==Invalid && !append && preludeBegin==g.Operations.size())return Compile(g);
+    // Keep callback IDs while placing UI producers first and early AO before
+    // GBuffer. Full scene output replaces diagnostic swapchain copies, whose
+    // extents need not match the render grid; final readbacks remain intact.
     const Id mesh=s.Batches?10:6,copy=s.Batches?11:7,read=s.Batches?12:8;
     std::vector<Id> order;
-    for(Id id=0;id<g.Operations.size();++id){if(id==mesh || id==copy || id==read)continue;order.push_back(id);if(id==earlyEnd)order.push_back(mesh);}
+    for(Id id=preludeBegin;id<g.Operations.size();++id)order.push_back(id);
+    for(Id id=0;id<preludeBegin;++id){if(append && (id==copy || id==s.FinalCopy))continue;if(earlyEnd!=Invalid && (id==mesh || id==copy || id==read))continue;order.push_back(id);if(id==earlyEnd)order.push_back(mesh);}
     std::vector<Id> remap(g.Operations.size(),Invalid);for(Id i=0;i<order.size();++i)remap[order[i]]=i;
     Graph reordered;reordered.Resources=std::move(g.Resources);
     for(auto id:order){auto op=std::move(g.Operations[id]);for(auto& dep:op.Dependencies){dep=remap.at(dep);if(dep==Invalid)throw std::logic_error("Early AO removed an explicit producer");}reordered.Operations.push_back(std::move(op));}

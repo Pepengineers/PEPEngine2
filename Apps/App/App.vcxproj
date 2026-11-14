@@ -109,6 +109,7 @@
     <None Include="Shaders\WaterTransfer.hlsl" />
     <ClCompile Include="src\Rendering\BistroRenderPipeline.cpp" />
     <ClInclude Include="src\Rendering\BistroRenderPipeline.h" />
+    <ClInclude Include="src\Rendering\BistroCollisionPass.h" />
     <ClCompile Include="src\Rendering\UI\BistroUIPosters.cpp" />
     <ClInclude Include="src\Rendering\UI\BistroUIPosters.h" />
     <ClInclude Include="src\Rendering\Grass\GDX12GrassWind.h" />

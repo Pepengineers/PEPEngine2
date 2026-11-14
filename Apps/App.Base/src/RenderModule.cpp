@@ -932,7 +932,7 @@ void RenderModule::OnRender()
     auto* compute = bindings.UseAsyncCompute ? _primaryDevice->TryGetComputeQueue() : nullptr;
     uint64_t completion;
     const auto finish = [&](GDX12CommandList* list) {
-        if (_uiInitialized) Engine::UI::Render(list, _backBuffer->GetCurrentBuffer());
+        if (_uiInitialized && !_pipeline->OwnsScreenUI()) Engine::UI::Render(list, _backBuffer->GetCurrentBuffer());
         _primaryGPUTimer->Stop(list);
     };
     if (_pipeline->OwnsExecution())

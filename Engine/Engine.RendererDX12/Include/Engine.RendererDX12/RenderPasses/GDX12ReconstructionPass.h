@@ -2,6 +2,8 @@
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 
+namespace Meta { class ScenePostUI; }
+
 class GDX12ReconstructionPass final : public GDX12RenderPass
 {
 public:
@@ -17,6 +19,7 @@ public:
     GDX12ReconstructionPass();
     ~GDX12ReconstructionPass() override;
     void Setup(GDX12DeviceResources*, RenderPipelineCommonData*) override;
+    void SetInputs(std::vector<IRenderPassLink*> inputs) override;
     void Initialize() override;
     void Execute(GDX12CommandList*) override;
     void Resize() override;
@@ -26,6 +29,7 @@ public:
     const GDX12ReconstructionStatus& GetStatus() const { return _status; }
 
 private:
+    friend class Meta::ScenePostUI;
     struct StableOutputLink final : IRenderPassLink
     {
         IRenderPassLink* Target = nullptr;
