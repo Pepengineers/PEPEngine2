@@ -1,6 +1,7 @@
 #pragma once
 #include "SceneAO.h"
 #include "SceneReflections.h"
+#include "SceneSunShadows.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12SSSRPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
@@ -56,6 +57,7 @@ class SceneLighting
     GDX12DeviceResources &_resources;
     RenderPipelineCommonData &_common;
     std::unique_ptr<SceneReflections> _reflections;
+    std::unique_ptr<SceneSunShadows> _sunShadows;
     bool _opaqueOnly = false;
     std::vector<Frame> _frames;
     GDX12DeferredLightingPass _deferred;

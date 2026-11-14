@@ -24,6 +24,7 @@ SceneLighting::SceneLighting(GDX12DeviceResources &r, RenderPipelineCommonData &
     : _resources(r), _common(c), _opaqueOnly(opaqueOnly), _frames(r.FrameConstants.size())
 {
     if (!opaqueOnly) _reflections = std::make_unique<SceneReflections>(r, c);
+    if (opaqueOnly) _sunShadows = std::make_unique<SceneSunShadows>(r, c);
     _deferred._opaqueOnly = opaqueOnly;
     _deferred.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION,true);
     _composition.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION,true);
@@ -70,6 +71,8 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
         _resources.PrepareLocalShadowData();
     }
     auto &constants = *_resources.FrameConstants.at(slot);
+    if (_sunShadows) _sunShadows->Freeze(slot, std::any_of(scene.Buffers.begin(), scene.Buffers.begin() + 4,
+        [](const auto& buffer) { return buffer.Upload; }));
     constants.ShadowCB->CopyData(0, _resources.ShadowSettings);
     if (!constants.LocalLightCache->GetElementCount())
     {
@@ -94,7 +97,8 @@ void SceneLighting::AppendAO(Graph &graph, std::vector<ID3D12Resource *> &bindin
 }
 bool SceneLighting::Record(Id id, ID3D12GraphicsCommandList *commands) const
 {
-    return _work[_mode].Record(id, commands) || (_reflections && _reflections->Record(id, commands)) ||
+    return _work[_mode].Record(id, commands) || (_sunShadows && _sunShadows->Record(_slot, id, commands)) ||
+           (_reflections && _reflections->Record(id, commands)) ||
            (_frames.at(_slot).AO && _frames.at(_slot).AO->Record(id, commands));
 }
 void SceneLighting::Submitted(bool serial, uint64_t fence)
@@ -118,6 +122,9 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     };
     const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
     auto *heap = _resources.SRV_UAV_Heap->GetHeap().Get();
+    if (_sunShadows) _sunShadows->Append(graph, bindings, _slot,
+        {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle,
+         scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle}, scene.Draws, scene.Geometry);
     auto* lights = _opaqueOnly ? constants.LocalLightCache.get() : constants.ShadowLights.get();
     if (!_opaqueOnly)
     {
@@ -138,7 +145,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     }
     _deferred.Setup(&_resources, &_common);
     _deferred.SetInputs({scene.Color[0].get(), scene.Color[2].get(), scene.Color[3].get(), scene.Color[4].get(),
-                         scene.DepthView.get(), _opaqueOnly ? scene.DepthView.get() : geometry._shadows->LightingSun(_slot), environment.Output(0),
+                         scene.DepthView.get(), _sunShadows ? _sunShadows->Output(_slot) : geometry._shadows->LightingSun(_slot), environment.Output(0),
                          environment.Output(1), environment.Output(2), environment.Output(3),
                          _opaqueOnly ? scene.DepthView.get() : geometry._shadows->LightingLocal(_slot),
                          _opaqueOnly ? scene.DepthView.get() : frame.AO->Output()});
@@ -202,7 +209,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
              [hdr](auto *cmd) { cmd->DiscardResource(hdr, nullptr); });
     auto lighting = environment.Reads(graph, bindings);
     for (UINT i = 0; i < _deferred._inputs.size(); ++i)
-        if (!_opaqueOnly || (i != 5 && i != 10 && i != 11))
+        if (!_opaqueOnly || (i != 10 && i != 11))
             lighting.push_back(texture(_deferred._inputs[i]->GetTexture(), Mode::Read, read));
     if (_reflections)
     {
@@ -255,7 +262,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         for (UINT i = 0; i < 5; ++i)
             cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(i), cbvs[i]);
         for (UINT i = 0; i < 18; ++i)
-            if (!opaqueOnly || (i != 5 && i != 10 && i != 12 && i != 13 && i != 14))
+            if (!opaqueOnly || (i != 10 && i != 12 && i != 13 && i != 14))
                 cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(i), inputs[i]);
         cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), output);
         cmd->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
