@@ -28,7 +28,7 @@ struct SceneWaterParticles::Path
     GDX12WBOITCompositionPass FarComposition, NearComposition;
     bool Initialized = false;
     UINT Width = 0, Height = 0;
-    Path() { Water.SetLocalExecution(true); Particles.SetLocalExecution(true); NearComposition.SetApplyOpaqueAerialPerspective(false); }
+    Path() { Far.SetUnbatchedDraws(true); Near.SetUnbatchedDraws(true); Water.SetLocalExecution(true); Particles.SetLocalExecution(true); NearComposition.SetApplyOpaqueAerialPerspective(false); }
     ~Path()
     {
         Water.ClearDenendencies(); Particles.ClearDenendencies();
@@ -181,8 +181,17 @@ GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resour
     auto particleAccess = simAccess;
     appendResources(particleAccess, particles.NativeResources(), Mode::ReadWrite);
     particleAccess.push_back(textureRead(_depth));
-    for (const auto& emitter : _resources.ParticleEmitters)
-        if (emitter.Texture) particleAccess.push_back(textureRead(emitter.Texture->PrimaryDeviceTexture));
+    if (_particleMotion) // Active particle rendering validated its atlas inputs in BeginFrame.
+        for (const auto& emitter : _resources.ParticleEmitters)
+            if (emitter.Texture)
+            {
+                auto* atlas = emitter.Texture->PrimaryDeviceTexture;
+                if (!atlas) throw std::logic_error("Particle atlas has no primary texture");
+                constexpr State published = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
+                const Id id = NativeWork::ImportReadOnlyTexture(graph, bindings, *atlas->GetResource(),
+                                                               published, "renderer particle atlas");
+                particleAccess.push_back({id, Mode::Read, published});
+            }
     packet("particle cull all groups/global SortedAlpha radix", particleAccess,
         [&particles](auto* commands) { particles.PrepareRenderData(commands); });
     const auto transparency = [&](GDX12WBOITTransparencyPass& pass, const char* name) {
@@ -237,7 +246,8 @@ GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resour
             for (UINT i = 0; i < srv.size(); ++i) commands->SetGraphicsSRV(i, srv[i]);
             const auto geometryRoot = root->GetGeometryRootParamIndex();
             cmd->SetGraphicsRootShaderResourceView(UINT(geometryRoot), geom.Vertices.BufferLocation);
-            cmd->SetGraphicsRootShaderResourceView(UINT(geometryRoot)+1, geom.Vertices.BufferLocation);
+            // TRANSPARENT_UNBATCHED reads the command's root instance directly;
+            // t1/space1 (VisibleSkinInstances) is unused and is not bound to vertices.
             cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             cmd->IASetVertexBuffers(0, 1, &geom.Vertices); cmd->IASetIndexBuffer(&geom.Indices);
             // Buffers enter GENERIC_READ, including INDIRECT_ARGUMENT.
