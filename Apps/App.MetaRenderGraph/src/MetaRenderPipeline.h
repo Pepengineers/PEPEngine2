@@ -5,6 +5,7 @@
 #include "Techniques/SceneLighting.h"
 #include "Techniques/SceneWaterParticles.h"
 #include "Techniques/ScenePostUI.h"
+#include "Graph/CrossAdapterTransfer.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 class MetaRenderPipeline final : public IRenderPipeline
 {
@@ -29,7 +30,10 @@ class MetaRenderPipeline final : public IRenderPipeline
         _executor->Begin(c.Primary.CurrFrameConstantsIndex);
         _post->PrepareMaterials();
     }
-    void DrainExecution() override { if (_executor) _executor->Drain(); }
+    void DrainExecution() override {
+        if (_executor) _executor->Drain();
+        if (_crossAdapter) _crossAdapter->Stop();
+    }
     void UpdateFrameSettings(RenderPipelineContext& c) override
     {
         _post->UpdateSettings();
@@ -84,6 +88,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     std::unique_ptr<Meta::SceneWaterParticles> _waterParticles;
     GDX12GPUCullingPass _sceneFlags;
     std::unique_ptr<Meta::ScenePostUI> _post;
+    std::unique_ptr<Meta::CrossAdapterTransfer> _crossAdapter;
     std::unique_ptr<Meta::Executor> _executor;
     Meta::Schedule _schedule;
     uint32_t _frame = 0;

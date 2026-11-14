@@ -56,6 +56,10 @@ Schedule Compile(const Graph& g, bool singleDirect) {
         }
     }
     Schedule out;
+    out.Device=g.Device; out.FrameBoundary=g.FrameBoundary; out.TerminalQueue=g.TerminalQueue;
+    Name(g.TerminalQueue);
+    if(g.Device>1 || (g.FrameBoundary && g.TerminalQueue!=Queue::Direct))
+        throw std::invalid_argument("invalid device/terminal boundary");
     for(const auto& r:g.Resources) {
         if(r.Memory!=Heap::Default && r.Memory!=Heap::Upload && r.Memory!=Heap::Readback)
             throw std::invalid_argument("unknown resource heap");
@@ -106,19 +110,23 @@ Schedule Compile(const Graph& g, bool singleDirect) {
             if(g.Resources[a.Resource].Decays) states[a.Resource]=0;
         }
     }
-    Packet terminal{Invalid,{}, {}, {}, {},1};
+    Packet terminal{Invalid,{}, {}, {}, {},1,false,g.TerminalQueue};
     for(Id i=0;i<out.Packets.size();++i) terminal.Dependencies.push_back(i);
     for(Id r=0;r<states.size();++r) {
         const auto prev=last[r];
-        if(prev!=Invalid && out.Packets[prev].Target!=Queue::Direct && states[r]!=0 && g.Resources[r].Memory==Heap::Default) {
+        if(prev!=Invalid && out.Packets[prev].Target!=g.TerminalQueue && states[r]!=0 && g.Resources[r].Memory==Heap::Default) {
             out.Packets[prev].After.push_back({r,states[r],0,false}); states[r]=0;
         }
+        if(g.Resources[r].Memory==Heap::Default &&
+            (!Legal(g.TerminalQueue,states[r]) || !Legal(g.TerminalQueue,g.Resources[r].Final)))
+            throw std::invalid_argument("terminal queue cannot export resource state");
         if(states[r]!=g.Resources[r].Final) terminal.Before.push_back({r,states[r],g.Resources[r].Final,false});
         states[r]=g.Resources[r].Final;
     }
     out.Packets.push_back(std::move(terminal)); out.FinalStates=std::move(states); return out;
 }
 void Schedule::Write(std::ostream& os) const {
+    os<<"device "<<Device<<" frame-boundary="<<FrameBoundary<<" terminal="<<Name(TerminalQueue)<<'\n';
     for(Id i=0;i<Decays.size();++i) if(Decays[i]) os<<"resource "<<i<<" decays to COMMON at each packet submission\n";
     for(Id i=0;i<Packets.size();++i) {
         const auto& p=Packets[i];
