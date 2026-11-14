@@ -18,6 +18,14 @@ AutoConsoleVariable<bool> MetaClouds(L"Meta.Clouds.Enabled", false, L"Select the
                                      EConsoleVariableFlags::Default);
 AutoConsoleVariable<bool> MetaAsyncQueues(L"Meta.Async.Queues", true,
     L"Place explicit local work on COMPUTE/COPY; false retains the single-DIRECT reference.", EConsoleVariableFlags::Default);
+AutoConsoleVariable<bool> MetaCrossAdapter(L"Meta.CrossAdapter.Enabled", false,
+    L"Startup opt-in: deterministic independent two-adapter buffer producer (Meta app only).", EConsoleVariableFlags::Default);
+AutoConsoleVariable<int> MetaSecondaryAdapter(L"Meta.CrossAdapter.SecondaryAdapter", -1,
+    L"Explicit DXGI EnumAdapters1 hardware index, distinct from actual primary LUID; no automatic fallback.", EConsoleVariableFlags::Default);
+AutoConsoleVariable<int> MetaPublicationSelection(L"Meta.CrossAdapter.Selection", 1,
+    L"0: StrictPublication (newest issued export); 1: LatestCompleted (retain ready display during import).", EConsoleVariableFlags::Default);
+AutoConsoleVariable<int> MetaProducerSeed(L"Meta.CrossAdapter.Seed", 1,
+    L"Deterministic producer seed, frozen independently of primary Present.", EConsoleVariableFlags::Default);
 }
 void RunEnvironmentGpuTests(GDX12DeviceResources &, RenderPipelineCommonData &);
 
@@ -34,9 +42,17 @@ void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
     _bindings.PrimaryPasses.push_back(&_sceneFlags);
     _bindings.Reconstruction = &_post->Reconstruction();
     _bindings.FrameGenerationInputs = true;
-    _executor = std::make_unique<Meta::Executor>(*c.Primary.Device,
-                                                 static_cast<uint32_t>(c.Primary.FrameConstants.size()), 1024);
-    Log::Info("MetaRenderGraph", "Single-GPU queue packet executor selected; legacy graph Execute disabled");
+    const auto frames=static_cast<uint32_t>(c.Primary.FrameConstants.size());
+    if(MetaCrossAdapter.GetValue()) {
+        if(_verify) throw std::invalid_argument("CrossAdapter producer requires ordinary Meta host, not single-GPU verification mode");
+        if(MetaPublicationSelection.GetValue()!=0 && MetaPublicationSelection.GetValue()!=1)
+            throw std::invalid_argument("Meta.CrossAdapter.Selection must be 0 or 1");
+        _crossAdapter=std::make_unique<Meta::CrossAdapterTransfer>(*c.Primary.Device,MetaSecondaryAdapter.GetValue(),frames);
+        _crossAdapter->SetSeed(uint32_t(MetaProducerSeed.GetValue()));
+        _executor=std::make_unique<Meta::Executor>(_crossAdapter->Submissions(),0,frames,1024);
+        _crossAdapter->Start();
+    } else _executor=std::make_unique<Meta::Executor>(*c.Primary.Device,frames,1024);
+    Log::Info("MetaRenderGraph", "Queue packet executor selected; cross-adapter=",bool(_crossAdapter),"; legacy graph Execute disabled");
 }
 void MetaRenderPipeline::BuildGraph(GDX12RenderGraph &, const RenderPipelineGraphInputs &)
 {
@@ -114,6 +130,13 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
             return finalHDR;
         });
         _lighting->Append(g, bindings, *_geometry, *_environment, target, recordingSerial);
+        if(_crossAdapter) {
+            const int selection=MetaPublicationSelection.GetValue();
+            if(selection!=0 && selection!=1) throw std::invalid_argument("Meta.CrossAdapter.Selection must be 0 or 1");
+            _crossAdapter->SetSeed(uint32_t(MetaProducerSeed.GetValue()));
+            _crossAdapter->Append(g,bindings,slot,selection==0 ? Meta::PublicationSelection::StrictPublication:
+                Meta::PublicationSelection::LatestCompleted);
+        }
     };
     const auto earlyAO = [&](Meta::Graph &g, std::vector<ID3D12Resource *> &bindings) {
         _lighting->AppendAO(g, bindings);
@@ -129,6 +152,18 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
             throw std::length_error("Native plan list capacity overflow");
         _executor->Reserve(uint32_t(lists));
     };
+    const auto execute = [&](const std::vector<ID3D12Resource*>& bindings,const Meta::Executor::Record& record,
+        GDX12CommandList* first,bool serial=false,std::ostream* trace=nullptr) {
+        const auto waits=_crossAdapter ? _crossAdapter->Waits(_schedule):std::vector<Meta::PacketWait>{};
+        try {
+            const auto point=_executor->Execute(_schedule,bindings,record,first,nullptr,serial,nullptr,trace,waits);
+            if(_crossAdapter) _crossAdapter->RetireFrame(_schedule,_executor->Completions(),true);
+            return point;
+        } catch(...) {
+            if(_crossAdapter) try { _crossAdapter->RetireFrame(_schedule,_executor->Completions(),false); } catch(...) {}
+            throw;
+        }
+    };
     _geometry->Select(verify);
     _schedule = _geometry->Plan(slot, target->GetResource()->D3DResource.Get(), append, earlyAO, prelude,
         verify || !MetaAsyncQueues.GetValue());
@@ -142,7 +177,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
             if (!_environment->Record(op, cmd) && !_lighting->Record(op, cmd) && !_waterParticles->Record(op, cmd) && !_post->Record(op, cmd))
                 _geometry->Record(slot, op, list, cmd, target->GetResource()->D3DResource.Get());
         };
-        const auto serialCompletion = _executor->Execute(_schedule, bindings, record, prefix, nullptr, true);
+        const auto serialCompletion = execute(bindings,record,prefix,true);
         _lighting->Submitted(true, serialCompletion);
         _executor->Drain();
         auto serial = _geometry->Readback(slot, stem + "-serial");
@@ -159,8 +194,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         std::ofstream operations(stem + "-operations.txt");
         _geometry->WriteOperations(slot, operations);
         std::ofstream trace(stem + "-cpu.json");
-        const auto completion = _executor->Execute(_schedule, _geometry->PlannedResources(slot), record, nullptr,
-                                                   nullptr, false, nullptr, &trace);
+        const auto completion = execute(_geometry->PlannedResources(slot),record,nullptr,false,&trace);
         _post->Submitted(slot);
         _environment->Submitted(completion);
         _lighting->Submitted(false, completion);
@@ -175,13 +209,13 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         ++_frame;
         return completion;
     }
-    const auto point = _executor->Execute(
-        _schedule, _geometry->PlannedResources(slot),
+    const auto point = execute(
+        _geometry->PlannedResources(slot),
         [&](Meta::Id op, uint32_t list, ID3D12GraphicsCommandList *cmd) {
-            if (!_environment->Record(op, cmd) && !_lighting->Record(op, cmd) && !_waterParticles->Record(op, cmd) && !_post->Record(op, cmd))
+            if (!(_crossAdapter && _crossAdapter->Record(op,cmd)) && !_environment->Record(op, cmd) && !_lighting->Record(op, cmd) && !_waterParticles->Record(op, cmd) && !_post->Record(op, cmd))
                 _geometry->Record(slot, op, list, cmd, target->GetResource()->D3DResource.Get());
         },
-        prefix, nullptr);
+        prefix);
     _post->Submitted(slot);
     _environment->Submitted(point);
     _lighting->Submitted(false, point);

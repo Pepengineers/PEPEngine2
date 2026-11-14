@@ -34,7 +34,13 @@ struct Operation {
     bool OwnerRecording = false;
     Queue Target = Queue::Direct;
 };
-struct Graph { std::vector<Resource> Resources; std::vector<Operation> Operations; };
+// Resource IDs are local to Device; shared allocations bind separate local handles.
+struct Graph {
+    std::vector<Resource> Resources; std::vector<Operation> Operations;
+    Id Device = 0;
+    bool FrameBoundary = true;
+    Queue TerminalQueue = Queue::Direct;
+};
 struct Barrier { Id Resource; State Before, After; bool Uav = false; };
 struct Packet {
     Id Operation;
@@ -50,6 +56,9 @@ struct Schedule {
     std::vector<State> FinalStates;
     std::vector<bool> Decays;
     std::vector<Heap> Memory;
+    Id Device = 0;
+    bool FrameBoundary = true;
+    Queue TerminalQueue = Queue::Direct;
     void Write(std::ostream&) const;
 };
 Schedule Compile(const Graph&, bool singleDirect = false);
