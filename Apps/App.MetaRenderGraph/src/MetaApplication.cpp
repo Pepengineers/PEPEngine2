@@ -89,7 +89,9 @@ namespace
             {
                 auto& world = *scenes->GetWorld();
                 world.SetPaused(true);
-                world.GetECS().ForEach<LightComponent>([](Entity, LightComponent& light) { light.CastShadows = false; });
+                world.GetECS().ForEach<LightComponent>([](Entity, LightComponent& light) {
+                    if (light.Type != LightType::Directional) light.CastShadows = false;
+                });
                 auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
                 camera.Location = {-300, 200, 20};
                 camera.Rotation = {0, 117, 0};
@@ -97,7 +99,7 @@ namespace
                 world.GetECS().Get<CameraComponent>(world.ActiveCamera).InvalidateHistory();
                 IndirectCommandBuildSystem commands;
                 commands.Schedule(GetJobs(), world, 0).Complete();
-                Log::Info("MetaRenderGraph", "Loaded Bistro interior/exterior; static opaque only; simulation paused");
+                Log::Info("MetaRenderGraph", "Loaded Bistro interior/exterior; static opaque and sun shadows; simulation paused");
                 return true;
             }
             Require(scenes->LoadWorld(Engine::Core::GetExecutableDirectory() / "Configs/SmokeWorld.yaml"), "Cannot create smoke world");

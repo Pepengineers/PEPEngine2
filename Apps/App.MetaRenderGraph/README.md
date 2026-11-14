@@ -3,12 +3,12 @@
 Experimental executable using the Meta execution plan alongside production App.
 The ordinary launch now loads the original Bistro interior and exterior with
 static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored lights,
-static SkyBox/IBL and HDR display transform. Alpha-tested cutouts use OpaquePass;
-blended materials are omitted. No shadow, AO, SSR, reflection-probe, grass, water,
+static SkyBox/IBL, cascaded sun shadows and HDR display transform. Alpha-tested
+cutouts use OpaquePass; blended materials are omitted. No local-shadow, AO, SSR, reflection-probe, grass, water,
 particle, transparency, reconstruction, post-effect or screen-UI passes execute.
 The world is paused to exclude simulation; the camera remains free.
 
-This is stage 1 of the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+This adds the sun-shadow stage of the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
 After the ordinary smoke, the user measures CPU/GPU load and FPS and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
@@ -45,8 +45,16 @@ not the short ordinary smoke required by the current acceptance rules.
 
 The settings below also describe the retained procedural implementation. The
 ordinary opaque stage does not enable extra techniques through these switches;
-secondary-adapter opt-ins are rejected. Shadow resolutions are zero for the
-ordinary stage; `--smoke` restores its previous small diagnostic shadow sizes.
+secondary-adapter opt-ins are rejected. Ordinary sun shadows use App's default
+2048 texels per cascade (4096x4096 depth atlas); local shadow resolution stays
+zero. `--smoke` restores its previous small diagnostic shadow sizes.
+
+The ordinary sun path uses App's `ShadowPass.hlsl` and `CSM.hlsli`: one GPU
+culling dispatch for four cascades, then four ExecuteIndirect draws directly
+into the lighting atlas. There are no intermediate depth maps, packing kernels,
+probe shadow maps or readbacks. Scene buffers stay resident; caster bounds are
+reduced only when scene data changes. Atlas and visibility buffers belong to
+the frame slot, and lighting declares the atlas read in the Meta graph.
 
 
 The build copies `Configs/Startup.ini` beside the executable. On every launch,
@@ -108,6 +116,9 @@ scene content, not a new test harness.
 
 ## Current result and limits
 
+- Sun shadows built in Release and displayed in the ordinary Bistro launch.
+  Further runtime checks were stopped at the user's request; user acceptance
+  is pending. See the [sun-shadow report](../../docs/reports/2026-11-15-meta-sun-shadows.md).
 - The Bistro opaque stage passed Release build and ordinary visual smoke. The
   final short entrance-view measurement was 356 FPS and 97% GPU utilization;
   the user accepted the result. See the [stage report](../../docs/reports/2026-11-15-meta-opaque-bistro.md).

@@ -23,9 +23,7 @@ float3 ShadeSunAndIBL(PBRSurface s, float3 position, float3 v, float ambientVisi
 #ifdef SKY_RENDERING_HLSLI
     direct *= SkySunTransmittance(position, l);
 #endif
-#if !DEFERRED_OPAQUE_ONLY
     if (any(direct > 0)) direct *= SunVisibility(position, s.Normal, saturate(dot(s.Normal, l)));
-#endif
     float nDotV = saturate(dot(s.Normal, v));
     float3 irradiance = IrradianceEnvironment.SampleLevel(samLinearClamp, s.Normal, 0).rgb;
     float3 prefiltered = PrefilteredEnvironment.SampleLevel(samLinearClamp, reflect(-v, s.Normal), s.Roughness * 7).rgb;

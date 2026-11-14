@@ -123,6 +123,7 @@
     <ClCompile Include="..\App\src\Rendering\Water\BistroWaterRendering.cpp" />
     <ClInclude Include="src\Techniques\SceneWaterParticles.h" />
     <ClCompile Include="src\Techniques\SceneShadows.cpp" />
+    <ClCompile Include="src\Techniques\SceneSunShadows.cpp" />
     <ClCompile Include="src\Techniques\SceneGrass.cpp" />
     <ClCompile Include="tests\DirectExecutionGpuTests.cpp" />
     <ClCompile Include="tests\GeometryGpuTests.cpp" />
