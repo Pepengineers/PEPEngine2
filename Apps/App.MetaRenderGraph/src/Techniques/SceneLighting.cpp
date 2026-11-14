@@ -23,6 +23,8 @@ void MatrixBytes(float *target, const Matrix &value)
 SceneLighting::SceneLighting(GDX12DeviceResources &r, RenderPipelineCommonData &c)
     : _resources(r), _common(c), _reflections(r, c), _frames(r.FrameConstants.size())
 {
+    _deferred.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION,true);
+    _composition.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION,true);
 }
 SceneLighting::~SceneLighting()
 {
@@ -297,13 +299,14 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         srvs[8] = p._fallback.GetSRV()->GPUHandle;
         srvs[9] = _reflections.Radiance(serial);
         srvs[10] = constants.ReflectionProbes->GetSRV()->GPUHandle;
-        const auto bind = [=](auto *cmd) {
+        const auto bind = [=](auto *cmd, bool resolvedInputs) {
             cmd->SetDescriptorHeaps(1, &heap);
             cmd->SetComputeRootSignature(ssrRoot->GetRootSignature().Get());
             cmd->SetComputeRootConstantBufferView(ssrRoot->GetBRootParamIndex(0), camera);
             cmd->SetComputeRootConstantBufferView(ssrRoot->GetBRootParamIndex(1), ssrCB);
             for (UINT i = 0; i < 11; ++i)
-                cmd->SetComputeRootDescriptorTable(ssrRoot->GetTRootParamIndex(i), srvs[i]);
+                if(resolvedInputs || (i!=7 && i!=8))
+                    cmd->SetComputeRootDescriptorTable(ssrRoot->GetTRootParamIndex(i), srvs[i]);
         };
         std::vector<Access> ssrReads;
         for (auto *input : p._inputs)
@@ -319,7 +322,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         const auto roughness = p._roughness.GetUAV()->GPUHandle, motion = p._motion.GetUAV()->GPUHandle,
                    fallback = p._fallback.GetUAV()->GPUHandle;
         work.Add(graph, "SSSR prepare roughness/motion/environment fallback", unique(prepareAccess), [=](auto *cmd) {
-            bind(cmd);
+            bind(cmd,false);
             cmd->SetPipelineState(prepare);
             cmd->SetComputeRootDescriptorTable(ssrRoot->GetURootParamIndex(0), roughness);
             cmd->SetComputeRootDescriptorTable(ssrRoot->GetURootParamIndex(1), motion);
@@ -378,7 +381,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         resolveAccess.push_back(texture(&p._color, Mode::Write, UnorderedAccess));
         const auto color = p._color.GetUAV()->GPUHandle;
         work.Add(graph, "SSR specular composition", unique(resolveAccess), [=](auto *cmd) {
-            bind(cmd);
+            bind(cmd,true);
             cmd->SetPipelineState(resolve);
             cmd->SetComputeRootDescriptorTable(ssrRoot->GetURootParamIndex(2), color);
             cmd->Dispatch((width + 7) / 8, (height + 7) / 8, 1);

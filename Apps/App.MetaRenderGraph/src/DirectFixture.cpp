@@ -85,14 +85,20 @@ Schedule DirectFixture::Plan(State initial,State final,bool asyncQueues) const {
     g.Operations[0].Target=Queue::Copy;
     for(Id id:{1u,2u,4u,5u}) g.Operations[id].Target=Queue::Compute;
     g.Operations[9].Target=g.Operations[10].Target=Queue::Copy;
+    g.Operations.push_back({"COPY reuse after all readers",{{0,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST},
+        {1,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ}},{},false,1,false,Queue::Copy});
+    g.Operations.push_back({"read reused COPY value",{{0,Mode::Read,D3D12_RESOURCE_STATE_COPY_SOURCE},
+        {8,Mode::Write,D3D12_RESOURCE_STATE_COPY_DEST}},{},false,1,false,Queue::Copy});
     // Keep callback IDs stable while scheduling an independent DIRECT prefix
     // before any consumer wait on the upload/transform chain.
     for(auto& op:g.Operations) for(auto& dep:op.Dependencies) ++dep;
     g.Operations.insert(g.Operations.begin(),
         Operation{"independent DIRECT target clear",{{5,Mode::Write,D3D12_RESOURCE_STATE_RENDER_TARGET}}});
     auto schedule=Compile(g);
-    for(auto& packet:schedule.Packets) if(packet.Operation!=Invalid)
-        packet.Operation=packet.Operation==0?11:packet.Operation-1;
+    for(auto& packet:schedule.Packets) if(packet.Operation!=Invalid) {
+        if(packet.Operation==0) packet.Operation=11;
+        else if(packet.Operation<=11) --packet.Operation;
+    }
     return schedule;
 }
 std::vector<ID3D12Resource*> DirectFixture::Resources(uint32_t i,ID3D12Resource* target) const {
@@ -104,6 +110,8 @@ void DirectFixture::Record(uint32_t i,Id op,uint32_t list,ID3D12GraphicsCommandL
     if(op==11) { const float clear[4]={0,0,0,1}; cmd->ClearRenderTargetView(rtv,clear,0,nullptr); }
     else if(op==9) cmd->CopyBufferRegion(s.Independent.Get(),list*4,s.Upload.Get(),list*4,4);
     else if(op==10) cmd->CopyBufferRegion(s.IndependentReadback.Get(),0,s.Independent.Get(),0,16);
+    else if(op==12) cmd->CopyBufferRegion(s.Data.Get(),0,s.Upload.Get(),0,16);
+    else if(op==13) cmd->CopyBufferRegion(s.IndependentReadback.Get(),0,s.Data.Get(),0,16);
     else if(op==0) cmd->CopyBufferRegion(s.Data.Get(),list*8,s.Upload.Get(),list*8,8);
     else if(op==1 || op==2 || op==5) {
         cmd->SetComputeRootSignature(_root.Get()); cmd->SetPipelineState(_compute.Get());

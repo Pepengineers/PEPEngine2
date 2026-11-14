@@ -226,7 +226,7 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
     Packet(graph, bindings, "frame end / PRESENT handoff", {{resource(target), Mode::ReadWrite}}, finish,
         {screenId}, nullptr, D3D12_RESOURCE_STATE_PRESENT);
 }
-void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bindings)
+void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bindings,bool record)
 {
     for (Id id = 0; id < bindings.size(); ++id)
         for (const auto& slot : _exports)
@@ -245,9 +245,11 @@ void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bind
         if (images.empty()) continue;
         auto* effect = images[0]; auto* target = images[1];
         auto* pass = &_posters->RasterPass(index);
-        Packet(graph, bindings, "world canvas effects / offscreen poster raster DIRECT boundary",
-            {{effect->GetResource(), Mode::ReadWrite}, {target->GetResource(), Mode::Write}},
-            [pass](auto* cmd) { pass->Execute(cmd); }, {}, target);
+        NativeWork::ResourceFor(graph, bindings, effect->GetResource()->D3DResource.Get(), "poster effects");
+        if(record)
+            Packet(graph, bindings, "world canvas effects / offscreen poster raster DIRECT boundary",
+                {{effect->GetResource(), Mode::ReadWrite}, {target->GetResource(), Mode::Write}},
+                [pass](auto* cmd) { pass->Execute(cmd); }, {}, target);
         const auto targetId = NativeWork::ResourceFor(graph, bindings, target->GetResource()->D3DResource.Get(), "poster material");
         // Conservative material read domain includes shadow/probe capture and
         // transparent geometry; all are ordered after this frame's UI upload.

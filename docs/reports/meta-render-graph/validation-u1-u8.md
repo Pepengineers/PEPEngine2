@@ -1,102 +1,163 @@
 # U1–U8 validation on MisSpec
 
-Date: 2026-11-14 (Europe/Moscow). **In progress; phase not accepted.** U9/U10
-remain blocked pending independent acceptance. No U11, Bistro merge, PR or push.
+2026-11-14. Intermediate review checkpoint. **U1–U8 are not independently accepted;
+U9/U10 remain prohibited.** No U11, Bistro merge, PR, push or external upload.
 
-Frozen base: `ee20d6f8dd47e9cc92402a03397125c9cc6643d2`, tree
-`03ee597493fb4cdf4c92a994e0cfab9382c61bce`.
-Task branch: `codex/meta-render-graph-u1-u8-validation`.
-Worktree: `C:/Users/MidSpec/.codex/worktrees/meta-render-graph-u1-u8-validation/PEPEngine2`.
-Local evidence root (paths below are relative to this worktree):
-`Build/Verification/meta-render-graph-u1-u8/`.
+Frozen base: `ee20d6f8dd47e9cc92402a03397125c9cc6643d2` (tree
+`03ee597493fb4cdf4c92a994e0cfab9382c61bce`). Branch:
+`codex/meta-render-graph-u1-u8-validation`. Worktree:
+`C:/Users/MidSpec/.codex/worktrees/meta-render-graph-u1-u8-validation/PEPEngine2`.
+Evidence paths below are relative to `Build/Verification/meta-render-graph-u1-u8/`.
+
+## Current scope
+
+The user's latest instruction excludes **all frame generation and all reconstruction
+providers except Native/FSR** from required acceptance. Earlier FG/provider results
+remain historical evidence; no further excluded-provider runs are authorized by this
+checkpoint. Added FG counters, SDK logging hooks and foreground-window manipulation
+were removed. Existing presentation safety/lifecycle fixes remain.
+
+The workstation runs this process in disconnected RDP session 2 (`MidSpec`, `Disc`).
+Intel SDK diagnostics explicitly reported `0x087A0001` / `DXGI_STATUS_OCCLUDED`.
+This explained failed generation-count checks, including the original standalone
+FrameGenerationTests. These are excluded results, not evidence of unsupported GPUs.
+Ordinary visible-desktop FPS is unmeasured. Disconnected-session renderer timings
+would require their own frozen, matched, non-skipping workload protocol; none have
+been accepted or substituted for desktop FPS here.
 
 ## Ownership and preservation
 
-The previous U6 chat was idle and no build/engine/test workload was running at
-claim time. The atomic exclusive claim is in the original checkout at
-`.tmp/meta-render-graph-validation/owner.json`, owner chat
-`01a1d930-ecb6-7251-99a2-4c4785c3c5a5`, scope U1–U8. Every workload rereads that
-claim and checks competing processes. Workloads are serialized, including CPU
-tests and builds. The historical D-drive MGPU lease remains released and untouched.
+The original U6 checkout was idle when the atomic claim was created at
+`C:/Users/MidSpec/Documents/PEPEngine2/.tmp/meta-render-graph-validation/owner.json`.
+Owner chat: `01a1d930-ecb6-7251-99a2-4c4785c3c5a5`, scope U1–U8. Every workload
+rereads that claim and checks competing processes. All workloads are serialized.
+The historical MGPU lease remains released and untouched.
 
-Original U6 HEAD is `2ee25daede82062a27bcd9d2add2d0b3ffbdb71c`. Its five staged
-fixes and foreign untracked `Apps/App/App.vcxproj.user` are preserved. Original
-staged patch SHA256: `00925DF035CC4FA0808BC972678CA838BE730E7C13F278C8DB0BD9AD23D931AA`.
-Unstaged patch was empty. Foreign user file SHA256:
+Original HEAD: `2ee25daede82062a27bcd9d2add2d0b3ffbdb71c`. Its five staged fixes
+and untracked `Apps/App/App.vcxproj.user` are preserved. Original staged patch
+SHA256: `00925DF035CC4FA0808BC972678CA838BE730E7C13F278C8DB0BD9AD23D931AA`;
+unstaged patch was empty. User-file SHA256:
 `C06A75B13F855A94D46616796E024C52B499F8F92CF00CCB571DDBC6FF574676`.
-No reset/clean/stash was used. Worktree submodules and 614 cached LFS payloads
-were hydrated separately; old executables are not evidence.
+No reset/clean/stash was used. Submodules and 614 cached LFS payloads were hydrated
+in the isolated worktree. Only task-owned diagnostic edits were reverted.
 
-## Coverage and declared oracles
+## Evidence and coverage
 
-Runtime evidence currently uses Debug x64, VS18 Professional/v145, one
-RTX 5050 device. Builds use `/m:1 /nr:false`; output/obj are worktree-local and
-separate by configuration/project. Build/run JSON, complete stdout/stderr and
-MSBuild logs remain in the evidence root. Labels below identify those files.
-`pass` applies only to the named oracle, never the whole unit.
+One RTX 5050 GPU/device is initialized. VS18 Professional/v145, x64. Builds use
+`/m:1 /nr:false`. Runtime JSON fingerprints each executable; source snapshots store
+the tracked diff and hashes/copies of untracked test sources. Effective startup INI
+is saved; runtime FSR changes are enumerated in `fsr-checks.csv`.
 
-| Requirement | Test / command or label | Oracle | Current result / gap |
-|---|---|---|---|
-| U1 fresh experimental build | `frozen-meta-debug-build`, `candidate-meta-debug-build02` | Fresh compile/link with own output/config | Frozen source failed missing texture include; candidate Debug build passed. First relink failed on unhydrated Wwise LFS pointer; hydration resolved it. Candidate Release build passed (`candidate-meta-release-build01`); legacy builds not-run. |
-| U1 startup single-device/local-only | `MetaApplication::PrepareStartup`, smoke | Primary=0, both secondary adapters=-1; local-only adapters; one initialized device, no offload | Obsolete absent-water-CVar invariant replaced with explicit water adapter=-1. Full poison/config/hash oracle pending. |
-| U2/U8 CPU dependencies/states | `candidate-plan-debug-run01` / PlanTests | RAW/WAR/WAW, all readers, UAV, cycles, decay; COPY reuse joins DIRECT+COMPUTE readers; invalid states rejected; fixed heaps never transition; imported texture release | **pass**. Target source-list link defect fixed. |
-| U3 nested recording | `candidate-recording-debug-run01` / RecordingJobsTests | 0/1/37 indexed buckets, delays, nested continuation, one/four threads, serial/parallel, error/cancel/shutdown | **pass**. |
-| U2/U3 DIRECT GPU execution | DirectExecutionGpuTests in smoke | Exact `4*x+3` reader values, `8*x+7` result, exact pixel, disjoint buckets, prefix/suffix sentinel; early submission; failed tokens; delayed reuse | Fixture reports pass. In first run delayed slot wait=152 ms. Overall scene debug layer still fails; do not infer clean fixture layer from final whole-run failure. |
-| U8 real queue chain/fork/join | Added async invocation in DirectExecutionGpuTests | Same exact values/pixel on actual COPY/COMPUTE/DIRECT native list types; two slots; serial/parallel; every token issued | Fixture reports pass for eight frames. Schedule exported as `async-schedule.txt`. Late wait/prefix GPU-progress and async error/cancel fixtures remain pending. No overlap claim. |
-| U4 geometry/skin/shadows/grass | Scene smoke geometry readbacks | Exact canonicalized serial-DIRECT vs parallel-async scene buffers/images; skin expected pose tolerance 0.001; eight frames and three slots | All eight comparisons and queued-slot readbacks completed in `candidate-meta-debug-smoke03`; whole run **fail** on D3D12 error. Not a Bistro acceptance. |
-| U5 environment/clouds | Existing original-pass environment and lifecycle fixture in smoke | Existing exact original-pass/serial/parallel readbacks for off/DDS/atmosphere/cloud cases; lifecycle histories | Runs as part of smoke; final metrics/index pending. Full AO early/late, all implementations and probe/cache/SSR histories pending. |
-| U6 water | New executor with actual FluidInstance | Same seed/inputs/real dt/steps; numeric state and combined depth/motion/image tolerance declared before run | **not-run**. Current host contains no water component; linked water code is not water execution evidence. |
-| U6 particles and transparency | New executor mixed-group fixtures | Birth/death/burst/reset/pause/timeScale, collisions, equal real steps, global interleaved SortedAlpha and shared WBOIT | **not-run** beyond inherited single additive burst. Full state/numeric/image oracle required. |
-| U7 native post/UI/history | Scene smoke | Color/depth/motion, UI/posters, camera cut/reset/resize readbacks at declared tolerance | Native path executes, but no post image/history oracle yet. D3D12 error blocks acceptance. |
-| U7 providers / FG | Per-provider focused runs | Effective selected/fallback status plus input/output/history and presentation lifecycle | **not-run**. No provider marked unavailable without actual capability evidence. |
-| U8 resize/shutdown | Scene smoke with retained screen composition owners | Drain before releasing owners and before both explicit resize and provider-triggered recreation; no stale backbuffer references | Before fix CRT abort in CreateSwapChainForHwnd. After fix resize and normal destruction complete; overall layer failure remains. Provider/suspend recreation pending. |
-| Debug layer / GBV | `diagnostic-meta-debug-smoke04` | All messages saved with IDs, severity and discarded counts; zero ERROR/CORRUPTION and zero overflow | `candidate-meta-debug-smoke05` **pass**: ERROR/CORRUPTION=0, warnings=87, discarded=0. Prior named run had 630 errors (IDs 538/527). Focused GBV not-run. |
-| Legacy regression | Fresh App Debug/Release + affected legacy suites | Existing production oracles; configs unchanged | **not-run**. |
-| Ordinary performance | Fresh Release A/B, below | Frozen equivalent inputs, raw samples and all runs retained | **not-run**; gated on correctness. |
-| CPU/GPU timelines | Separate instrumented runs | Real recording spans and queue work/waits/overlap | **not-run** for this candidate; queue existence proves no overlap. |
+Completed checks are reused. `--scene-smoke` skips the previously completed isolated
+fixtures. `--ao-ssr-matrix --matrix-start=N` resumes at the first unfinished case.
+`--fsr-check` checks FSR only. The final handoff manifest identifies exact source
+commits, binaries, run labels and hashes; older binaries are not final-source proof.
 
-## Performance protocol (before collecting timing data)
+| Scope | Evidence | Result / actual oracle |
+|---|---|---|
+| CPU compiler | `candidate-plan-debug-run01` | PASS RAW/WAR/WAW/all readers/UAV/cycles/decay, queue legality, COPY reuse after DIRECT+COMPUTE readers, fixed upload/readback heaps and imported release states. |
+| CPU recording | `candidate-recording-debug-run01` | PASS 0/1/37 buckets, nested continuations, serial/parallel, one/four threads, error/cancel/shutdown. Not repeated. |
+| Actual queue execution | `candidate-executor-focused01` | PASS COPY/COMPUTE/DIRECT fork/join and two slots, exact pixel/buffers, early DIRECT completion before late COPY recording, late failure/cancellation after progress, poisoned-executor rejection and drain. Async slot reuse waited 154 ms. |
+| Focused GBV | `candidate-executor-gbv01` | PASS: errors=0, warnings=35, informational=1. No timing claim. |
+| Local water numerics | `candidate-water-debug-smoke01` | PASS original independent numerical checks through Meta executor, 321 states: actual solver, DIRECT/COMPUTE, pause/time scale/reset, pressure/cohesion/prediction/collision, real substeps, reference model and periodic waves. |
+| Local particles | `candidate-particles-debug-smoke01` | PASS 99 frames, controls/birth/death/burst/reset/pause/volume/depth/box/friction; displacement tolerance 0.03 cm. Mixed DIRECT/COMPUTE four-emitter SortedAlpha/WBOIT image tolerance 0.003; expected RGB (0.5625,0.3125,0.125), revealage 1/16. |
+| Combined geometry/water/particles | `candidate-integrated-scene04` | PASS 8 serial-DIRECT/parallel-async pairs, actual resize, 4 queued frames and shutdown. Original skin/geometry/shadow/grass/probe readback oracles pass. Layer errors/corruption/discarded=0; warnings=60. |
+| Presented water motion | `candidate-local-water-motion-scene07` | PASS local-coordinate reference-fluid model at dt=0: all 7,662 visible final-frame water pixels move. Maximum error vs projection of an 8 cm container translation is 3.07229e-5 NDC, inside the predeclared FP32-world/FP16-storage bound. Initial reset, resize and shutdown pass. World-coordinate solver numerics are covered separately. |
+| Environment/clouds | EnvironmentGpuTests in completed smoke runs | PASS exact original-pass baseline and serial/parallel images for off/DDS/atmosphere/clouds/advanced phase and lifecycle cases. |
+| AO / SSR | `ao-ssr-coverage.csv` | PASS 20 cases / 40 pairs, indexed to matrix02–06 and ssr-matrix07: SSAO/HBAO/XeGTAO/CACAO × full/half × early/late, and four SSR qualities. Each PASS row follows image comparison and InfoQueue validation. Not rerun after scope narrowed. |
+| Native post / UI, historical | `candidate-post-matrix04`, cases 0–3 | PASS 3 frames each: disabled DoF/blur exact HDR pass-through, visible enabled effects, native color identity, nonempty posters/effects, 682 opaque green UI pixels verified in final display pixels. Tests of other providers were subsequently removed. |
+| FSR Debug | `candidate-fsr-correctness01` | PASS 40 paired frames with real 1/60 simulation, default stability, NativeAA/Quality/Balanced/Performance/UltraPerformance, camera cut, context restart and resize to 897×608. Requested/effective FSR=2, no fallback, output extents and finite HDR verified. Errors=0; warnings=131. |
+| FSR Release | `candidate-fsr-release-correctness02` | PASS same FSR-only protocol in Release. This is correctness validation with the debug layer, not ordinary timing. |
+| Final transient-tail policy | `candidate-transient-tail-build48`, `candidate-transient-tail-release-build04`, `candidate-fsr-transient-tail03`, `candidate-fsr-final-release04` | PASS final Meta Debug/Release builds and 40 paired FSR frames in each configuration. Final Release: 88.16 s, errors/corruption/discarded=0, warnings=131. No performance interpretation. |
+| Legacy regression evidence | `legacy-base-default01`, `legacy-base-custom01` | Original BaseRenderPipelineTests default/custom GPU paths passed. Final production App Debug/Release builds passed (`legacy-final-debug-build02`, `legacy-final-release-build02`), including the shared water signature and descriptor header. |
 
-For each key comparison use at least three alternating fresh-process pairs,
-120 warmup frames followed by 300 scored frames per process. Freeze executable
-SHA256, source commit/diff, configuration, scene/camera, seed 12345, all counts,
-quality, real applied controls, GPU/driver, workers and workload. Retain slow,
-failed and timed-out runs. Changed fingerprints are failed/censored evidence.
-Use ordinary Release without debug layer, GBV, profiler, FG, VSync or frame cap.
-Report scatter, median, mean, p95/p99, CPU recording/submission and owner sections,
-GPU time, memory, simulated seconds/fixed ticks/debt and actual water steps/counts.
-Follow with a longer candidate run: 120 warmup + 1800 scored frames.
+Engine.log appends. Read the named run's sliced `runtime.log`; older artifact folders
+can contain stale files copied from earlier runs. A frame marker, per-run source
+snapshot and current buffer manifest are required. The runner now copies only files
+written during that runtime. Full InfoQueue export includes storage filter details:
+the observed filter denied INFO (severity 3) only, with no denied error severities,
+IDs or categories. Discarded-message overflow remains fatal.
 
-Meta single-DIRECT vs Meta async uses `Meta.Async.Queues=false/true` on the same
-frozen scene. CPU serial/parallel recording is a separate axis. Legacy-vs-Meta
-requires the same supported scene and settings. The current Meta host always loads
-SmokeWorld and adds synthetic U4 geometry/grass/emitter, even outside `--smoke`;
-its FPS cannot be compared to production Bistro as an executor speedup. The
-matching legacy/new host path has not been established yet. No scene/quality or
-physics reduction may be used to improve candidate numbers.
+## Fixes
 
-## Fixes and current failure
+Commit `791db96c1a79c7f4eb2818dda6dd0c20c7285b83` repaired the missing shadow include,
+obsolete startup invariant, CPU test source lists, retained backbuffer owners during
+resize/recreation and invalid SRVs bound while recording probe shadow depth.
+Temporary termination/PDB diagnostics were removed after the CRT abort was traced to
+swapchain resize. Debug packet names and complete InfoQueue reporting remain.
 
-Minimal fixes so far: missing SceneShadows texture-resource include; explicit
-disabled water secondary adapter at startup; CPU test targets scoped to actual
-CPU sources; presentation owners released after executor drain before both
-window resize and FG/provider recreation. ScreenComposite recordings retain a
-COM handle to the target; freeing them only in pipeline Resize occurred after
-swapchain recreation and caused the observed abort.
+Subsequent corrections:
 
-`diagnostic-smoke02-artifacts/Engine.log` contains the PDB stack through
-GDX12DeviceFactory::CreateSwapChain → GDX12SwapChain::Resize → RenderModule::OnResize.
-`candidate-meta-debug-smoke03-artifacts/` preserves all subsequent raw outputs;
-its final error is ClearDepthStencilView with assumed SRV state instead of
-DEPTH_WRITE. Temporary FatalDiagnostic/PDB instrumentation was removed after
-diagnosis; Release build validates the cleaned host. Debug packet labels and complete InfoQueue export make the next
-failure attributable and remain fatal, including discarded-message overflow.
+- Water optics and transparent meshes now receive the current path's frozen probe
+  radiance SRV. The shared global descriptor could refer to the other paired path's
+  published texture on the next frame. Legacy water callers keep the default SRV.
+- XeGTAO depth prefilter declares its bound normals SRV read. SSR preparation omits
+  radiance/fallback SRVs while the fallback resource is being written as UAV.
+- Internal deferred and far/near WBOIT targets use the reconstruction render grid.
+  They previously remained at window resolution when FSR/XeSS changed input size.
+- Slot-local AO and paired owners exceeded 399 transient descriptors. The final
+  Meta-only policy allocates new generic transient views in heap tail 105000+;
+  the legacy 399-slot range and fixed shader-array domains are not widened.
+  Exhaustion errors identify heap type/start/count. The validation HDR owner is
+  destroyed after executor drain on exception unwinding.
+- Paired scene validation rasterizes posters once, then both paths read the same
+  completed texture. This preserves the original backend ownership ring capacity.
 
-The reflection shadow recorder incorrectly bound lighting SRV slots 3–9 while
-writing the sun depth target. Matching the production shadow binding subset
-removed all 630 validation errors; full scene smoke05 passed. The copied artifacts
-include every InfoQueue message and severity/discard counts.
+## Image oracle
 
-No performance, full U6/U7 correctness, complete lifecycle or phase
-acceptance claim is made. This report will be updated with exact candidate commit,
-binary/config hashes, numeric tables and artifact manifest as validation proceeds.
+The original exact final-HDR test exposed both the probe-SRV defect and legal atomic
+particle append permutations. A controlled diagnostic copied reference draw records
+into the candidate: all eight scene images then matched exactly after the SRV fix.
+This was causal evidence only. The substitution and its environment switch were removed.
+A DIRECT/DIRECT reproduction also exhibited the original additive discrepancy.
+
+The checker requires exact particle state/counters/dead lists, identical alive-index
+membership, identical canonical draw records, ordered weighted/sorted records and
+identical additive membership. Far HDR, water optics, near WBOIT accumulation /
+revealage, water depth/motion and opaque depth remain exact. It does not change
+sorting, rendering quality or the solver to make a comparison pass.
+
+Only accumulation-order differences use an arithmetic bound. For n contributions,
+u is one full ULP (2^-10 for FP16, 2^-23 for FP32), gamma=n*u/(1-n*u). Nonnegative
+sums use 2*gamma/(1-gamma)*max(a,b) plus 2*n*minimum-normal for underflow. Signed
+particle XY sums use the absolute-sum bound 8*gamma*n; the static-camera billboard
+fixture checks both projected positions inside [-2,2] before applying it. Nonfinite
+values and n*u>=0.5 are rejected. Per-frame CSVs retain changed-value counts,
+maximum absolute error and fraction of the bound. These conservative arithmetic
+bounds are not image-quality tolerances fitted to a failed screenshot. See
+[Microsoft floating-point rules](https://learn.microsoft.com/en-us/windows/win32/direct3d11/floating-point-rules)
+and [output-merger precision](https://learn.microsoft.com/en-us/windows/win32/direct3d11/d3d10-graphics-programming-guide-output-merger-stage).
+
+FSR additionally requires its requested provider without fallback, exact unchanged
+HDR inputs through disabled post effects, correct display-sized output, all-finite
+motion/color samples and HDR peaks above 1. At Debug default frame 15, input peak
+RGB=27.2188 and FSR output peak=29.4375 (not clipped to LDR). Tiny negative ringing
+values are preserved, not clamped by the test. `fsr-checks.csv` records preset,
+render/output dimensions, history/context generations, simulation dt and allocation
+statistics; `geometry-N-fsr-numeric.csv` records image metrics. All four completed
+FSR protocols retain `fsr-workload.csv`: each frame has 80 actual rendered particles
+(64 additive, 8 weighted, 8 sorted alpha) and dt=1/60; no empty-workload pass. A decoded display
+PNG was inspected and contains the expected geometry, grass, water and particles.
+
+## Remaining review / measurements
+
+This is a synthetic supported-technique fixture, not the full production Bistro
+scene. No Bistro FPS, ordinary renderer A/B speedup or GPU-overlap claim is made.
+Future timings require frozen matching scene/settings/seed/clocks/counts, three
+alternating fresh-process pairs (120 warmup + 300 scored), a 120+1800 candidate
+run, raw samples and scatter. CPU recording mode and queue placement are separate
+axes. Disconnected-session timings must prove that the workload and real simulation
+steps remain active and must be labelled accordingly. Actual GPU overlap requires
+a separate timeline. Independent review of the final source and these evidence
+limits is still required before U1–U8 acceptance or starting U9/U10.
+
+The compile database was regenerated with `tools/Generate-CompileCommands.py`: 44
+projects / 163 translation units, including the three new GPU test sources. The
+smoke runner passed PowerShell syntax parsing; its full smoke suite was not rerun.
+Original checkout preservation was verified again after the final workloads.
+
+The incremental `ee20d6..HEAD` bundle and compact evidence archive stay on MisSpec.
+The archive contains report/coverage/numeric records and a path/hash manifest;
+large images, buffers and traces remain at their recorded local paths. No source
+payload is uploaded through chat. Only prepared paths, sizes and SHA256 are returned
+for the separately authorized transfer/review workflow.

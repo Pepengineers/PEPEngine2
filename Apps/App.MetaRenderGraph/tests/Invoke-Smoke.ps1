@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path "$PSScriptRoot/../../..").Path
 $output = Join-Path $repo "Build/bin/x64/$Configuration/$Target"
-$evidence = Join-Path $repo "Build/Verification/meta-render-graph-u5/$Configuration-$Target"
+$evidence = Join-Path $repo "Build/Verification/meta-render-graph-u1-u8/$Configuration-$Target-full-smoke"
 New-Item -ItemType Directory -Force $evidence | Out-Null
 $protected = @("$repo/Config/Engine.ini", "$repo/Build/bin/x64/$Configuration/App/Config/Engine.ini")
 $before = @{}
@@ -25,7 +25,7 @@ $arguments = if ($Target -eq 'App.MetaRenderGraph') { @('--smoke') } else { @() 
 $start = @{FilePath = "$output/$Target.exe"; WorkingDirectory = $repo; WindowStyle = 'Hidden'; PassThru = $true}
 if ($arguments.Count) { $start.ArgumentList = $arguments }
 $process = Start-Process @start
-if (-not $process.WaitForExit(60000)) { Stop-Process -Id $process.Id; throw 'GPU smoke exceeded 60 seconds' }
+if (-not $process.WaitForExit(180000)) { Stop-Process -Id $process.Id; throw 'GPU smoke exceeded 180 seconds' }
 if ($process.ExitCode -ne 0) { throw "GPU smoke exit code $($process.ExitCode); see $log" }
 $text = (Get-Content $log -Raw).Substring($previous)
 $text | Set-Content "$evidence/runtime.log"
@@ -33,9 +33,9 @@ if (($text | Select-String 'GPU adapter:' -AllMatches).Matches.Count -ne 1) { th
 if ($text -match '\[Particles\].*Offload|\[Water\].*Offload') { throw 'Unexpected offload runtime' }
 if ($text -match '\[ERROR\]|GPU retirement failed') { throw 'Runtime reported an error' }
 if ($text -notmatch 'Runtime legacy graph Execute calls=0') { throw 'Legacy execution counter did not remain zero' }
-if ($text -notmatch 'PASS DirectExecutionGpuTests:' -or $text -notmatch 'U5 lighting/reflections DIRECT executor selected') { throw 'Missing execution evidence' }
+if ($text -notmatch 'PASS DirectExecutionGpuTests:' -or $text -notmatch 'Single-GPU queue packet executor selected; legacy graph Execute disabled') { throw 'Missing execution evidence' }
 foreach ($marker in @('PASS GeometryGpuTests:','PASS ShadowGpuTests:','PASS GrassGpuTests:','PASS ReflectionGpuTests readbacks:','Queued geometry frames drained; three slot readbacks validated')) {
-    if ($text -notmatch [regex]::Escape($marker)) { throw "Missing U5 evidence: $marker" }
+    if ($text -notmatch [regex]::Escape($marker)) { throw "Missing U1-U8 evidence: $marker" }
 }
 if ($text -notmatch 'Smoke passed: 12 presented frames' -or $text -notmatch 'Smoke shutdown complete') { throw 'Missing runtime success markers' }
 if ((Get-FileHash "$output/Config/Engine.ini").Hash -ne (Get-FileHash "$output/Configs/Startup.ini").Hash) { throw 'Startup INI was not restored' }

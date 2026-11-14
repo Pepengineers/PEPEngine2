@@ -22,7 +22,10 @@ class MetaRenderPipeline final : public IRenderPipeline
         }
         _verify = verify;
     }
-    void ValidateQueued();
+    void SkipIsolatedFixtures() { _environmentTestsRun = true; }
+    void EnablePostVerification() { _verifyPost = true; }
+    const GDX12ReconstructionStatus& ReconstructionStatus() const { return _post->Reconstruction().GetStatus(); }
+    void ValidateQueued(GDX12Device&,RenderPipelineCommonData&);
     bool OwnsScreenUI() const override { return true; }
     void PrepareMaterialBindings(RenderPipelineContext& c) override
     {
@@ -84,10 +87,13 @@ class MetaRenderPipeline final : public IRenderPipeline
     std::unique_ptr<Meta::SceneWaterParticles> _waterParticles;
     GDX12GPUCullingPass _sceneFlags;
     std::unique_ptr<Meta::ScenePostUI> _post;
+    std::array<std::unique_ptr<GDX12Texture>,2> _validationHDR;
     std::unique_ptr<Meta::Executor> _executor;
     Meta::Schedule _schedule;
     uint32_t _frame = 0;
+    UINT _lastSlot = 0;
     bool _verify = false;
+    bool _verifyPost = false;
     bool _cloudsEnabled = false;
     bool _environmentTestsRun = false;
 };

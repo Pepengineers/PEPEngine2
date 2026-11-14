@@ -13,13 +13,15 @@ public:
     ~SceneWaterParticles();
     void Prepare(float delta);
     GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&,
-        GDX12Texture* reflectedHDR, GDX12Texture* probes, bool serial);
+        GDX12Texture* reflectedHDR, GDX12Texture* probes, D3D12_GPU_DESCRIPTOR_HANDLE probeRadiance, bool serial);
     bool Record(Id id, ID3D12GraphicsCommandList* commands) const { return _work.Record(id, commands); }
     void Reset();
     void Resize(); // caller drained Executor
     GDX12Texture* Depth() const { return _depth; }
     GDX12Texture* Motion() const { return _motion; }
     GDX12Texture* ParticleMotion() const { return _particleMotion; }
+    std::vector<GDX12Texture*> DiagnosticImages(bool serial) const;
+    std::vector<std::pair<std::string,GDX12Resource*>> DiagnosticBuffers(bool serial) const;
     struct InputGroup { std::vector<uint64_t> Emitters; bool DepthCollision = false; };
     const std::array<InputGroup, 2>& InputGroups() const { return _groups; }
 private:

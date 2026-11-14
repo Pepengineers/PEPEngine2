@@ -505,7 +505,7 @@ void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
 }
 
 GDX12Texture* GDX12FluidSurfacePass::Resolve(GDX12CommandList* commands, GDX12Texture* background,
-    GDX12Texture* environment)
+    GDX12Texture* environment, D3D12_GPU_DESCRIPTOR_HANDLE probeRadiance)
 {
     if (!_rendering) return background;
     if (background->GetFormat() != DXGI_FORMAT_R16G16B16A16_FLOAT ||
@@ -528,7 +528,7 @@ GDX12Texture* GDX12FluidSurfacePass::Resolve(GDX12CommandList* commands, GDX12Te
         SurfaceBindings(commands, constants, owner);
         commands->SetComputeSRV(6, background->GetSRV()->GPUHandle);
         commands->SetComputeSRV(7, environment->GetSRV()->GPUHandle);
-        commands->SetComputeSRV(9, _resources->ReflectionRadianceSRV.GPUHandle);
+        commands->SetComputeSRV(9, probeRadiance.ptr ? probeRadiance : _resources->ReflectionRadianceSRV.GPUHandle);
         auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
         commands->SetComputeSRV(10, frame->ReflectionProbes->GetSRV()->GPUHandle);
         commands->SetComputeSRV(11, _geometry->GetSRV()->GPUHandle);

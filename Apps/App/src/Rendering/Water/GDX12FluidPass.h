@@ -36,7 +36,8 @@ public:
     IRenderPassLink* GetOpaqueDepth() const { return _inputs[0]; }
     void Resize() override;
     void ClearDenendencies() override;
-    GDX12Texture* Resolve(GDX12CommandList* commands, GDX12Texture* background, GDX12Texture* environment);
+    GDX12Texture* Resolve(GDX12CommandList* commands, GDX12Texture* background, GDX12Texture* environment,
+        D3D12_GPU_DESCRIPTOR_HANDLE probeRadiance = {});
 private:
     struct Link final : IRenderPassLink
     {

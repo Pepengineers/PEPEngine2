@@ -118,6 +118,9 @@
     <ClCompile Include="tests\DirectExecutionGpuTests.cpp" />
     <ClCompile Include="tests\GeometryGpuTests.cpp" />
     <ClCompile Include="tests\LightingGpuTests.cpp" />
+    <ClCompile Include="tests\LocalWaterGpuTests.cpp" />
+    <ClCompile Include="tests\LocalParticlesGpuTests.cpp" />
+    <ClCompile Include="tests\TechniqueImageReadback.cpp" />
     <ClCompile Include="tests\ReflectionGpuTests.cpp" />
     <ClCompile Include="tests\ShadowGpuTests.cpp" />
     <ClCompile Include="tests\GrassGpuTests.cpp" />

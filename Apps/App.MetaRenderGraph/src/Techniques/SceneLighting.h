@@ -20,6 +20,7 @@ class SceneLighting
     void SetHDRContinuation(HDRContinuation continuation) { _hdrContinuation = std::move(continuation); }
     bool Record(Id, ID3D12GraphicsCommandList *) const;
     void Submitted(bool serial, uint64_t fence);
+    D3D12_GPU_DESCRIPTOR_HANDLE ProbeRadiance(bool serial) const { return _reflections.Radiance(serial); }
     void Reset();
     std::pair<size_t, size_t> Readiness() const
     {

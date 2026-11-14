@@ -56,6 +56,23 @@ void RunDirectExecutionGpuTests(GDX12Device& device) {
         for(auto token:executor.Tokens()) Check(token>0,"async packet completion not issued");
     }
     executor.Drain(); fixture.Validate(0); fixture.Validate(1);
+    executor.Begin(0); fixture.Prepare(0,7);
+    const auto asyncPrefixBaseline=device.GetCommandQueue()->FenceValue;
+    auto* directFence=device.GetCommandQueue()->GetFence().Get();
+    std::atomic<bool> independentPrefixComplete{false};
+    std::ofstream asyncCpuTrace(Engine::Core::GetExecutableDirectory()/"Logs/async-cpu-trace.json");
+    executor.Execute(asyncSchedule,fixture.Resources(0,target.Get()),[&](Meta::Id op,uint32_t list,ID3D12GraphicsCommandList* cmd) {
+        if(op==0 && list==0) {
+            const auto limit=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+            while(directFence->GetCompletedValue()<=asyncPrefixBaseline && std::chrono::steady_clock::now()<limit)
+                std::this_thread::yield();
+            Check(directFence->GetCompletedValue()>asyncPrefixBaseline,"independent DIRECT prefix blocked by late COPY recording");
+            independentPrefixComplete=true;
+        }
+        fixture.Record(0,op,list,cmd,target.Get(),rtv,32,32);
+    },nullptr,nullptr,false,nullptr,&asyncCpuTrace);
+    executor.Drain(); fixture.Validate(0);
+    Check(independentPrefixComplete,"async prefix GPU-progress oracle did not run");
     Log::Info("MetaRenderGraph","PASS AsyncQueuesGpuTests: COPY/COMPUTE/DIRECT; exact two-reader WAR/pixel/buffer; serial/parallel; 8 frames/2 slots");
     D3D12_RANGE seamRange{0,4}; ThrowIfFailed(seamReadback->Map(0,&seamRange,&mapped));
     const bool seamValid=static_cast<const uint32_t*>(mapped)[0]==0x12345678;
@@ -125,7 +142,7 @@ void RunDirectExecutionGpuTests(GDX12Device& device) {
     } releaseOnError{gate.Get()};
     executor.Begin(0); fixture.Prepare(0,11);
     ThrowIfFailed(device.GetCommandQueue()->GetCommandQueue()->Wait(gate.Get(),1));
-    executor.Execute(schedule,fixture.Resources(0,target.Get()),[&](Meta::Id op,uint32_t list,ID3D12GraphicsCommandList* cmd) {
+    executor.Execute(asyncSchedule,fixture.Resources(0,target.Get()),[&](Meta::Id op,uint32_t list,ID3D12GraphicsCommandList* cmd) {
         fixture.Record(0,op,list,cmd,target.Get(),rtv,32,32);
     });
     Check(device.GetCommandQueue()->GetFence()->GetCompletedValue()<executor.Retirement(0),"delayed slot retired prematurely");
@@ -174,5 +191,31 @@ void RunDirectExecutionGpuTests(GDX12Device& device) {
         Check(rejected,"partial frame reused stale resource-state assumptions");
         partial.Drain();
     }
-    Log::Info("MetaRenderGraph","PASS DirectExecutionGpuTests: 8 frames/2 slots; prefix/suffix sentinel; upload multi-list; UAV dispatch; diamond WAR; draw pixel+buffer readbacks; recording failure tokens=0; delayed slot wait ms=",elapsed);
+    for(bool cancel:{false,true}) {
+        auto partialTarget=device.CreateResource(D3D12_HEAP_TYPE_DEFAULT,desc,D3D12_RESOURCE_STATE_COMMON);
+        device.GetDevice()->CreateRenderTargetView(partialTarget.Get(),nullptr,rtv);
+        Meta::Executor partial(device,1,64);
+        partial.Begin(0); fixture.Prepare(0,17);
+        const auto baseline=device.GetCommandQueue()->FenceValue;
+        std::atomic<bool> cancellation{false}; bool failed=false;
+        try {
+            partial.Execute(asyncSchedule,fixture.Resources(0,partialTarget.Get()),[&](Meta::Id op,uint32_t list,ID3D12GraphicsCommandList* cmd) {
+                if(op==0 && list==0) {
+                    const auto limit=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+                    while(directFence->GetCompletedValue()<=baseline && std::chrono::steady_clock::now()<limit)
+                        std::this_thread::yield();
+                    Check(directFence->GetCompletedValue()>baseline,"async error fixture never made independent GPU progress");
+                    if(cancel) cancellation=true;
+                    else throw std::runtime_error("async COPY recording failure");
+                }
+                fixture.Record(0,op,list,cmd,partialTarget.Get(),rtv,32,32);
+            },nullptr,nullptr,false,&cancellation);
+        } catch(const std::runtime_error&) { failed=true; }
+        Check(failed && partial.Tokens().front()>baseline,"async recording error lost the issued DIRECT token");
+        for(size_t i=1;i<partial.Tokens().size();++i) Check(partial.Tokens()[i]==0,"async failed packet published a token");
+        bool rejected=false; try { partial.Begin(0); } catch(const std::logic_error&) { rejected=true; }
+        Check(rejected,"partial async frame reused stale state");
+        partial.Drain();
+    }
+    Log::Info("MetaRenderGraph","PASS DirectExecutionGpuTests: 8 frames/2 slots; prefix/suffix sentinel; upload multi-list; UAV dispatch; diamond WAR; draw pixel+buffer readbacks; recording failure tokens=0; async prefix/late COPY error/cancel; delayed async slot wait ms=",elapsed);
 }

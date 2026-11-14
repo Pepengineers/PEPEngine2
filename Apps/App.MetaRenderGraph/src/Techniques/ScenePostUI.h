@@ -21,6 +21,8 @@ public:
     explicit ScenePostUI(RenderPipelineContext&);
     ~ScenePostUI();
     GDX12ReconstructionPass& Reconstruction() { return _reconstruction; }
+    std::vector<GDX12Texture*> DiagnosticImages() { return {_dof.GetOutput(0)->GetTexture(),
+        _blur.GetOutput(0)->GetTexture(),_blur.GetOutput(1)->GetTexture(),_reconstruction.GetOutput(0)->GetTexture()}; }
     std::vector<GDX12RenderPass*> Passes() { return {&_dof, &_blur, &_reconstruction, &_output}; }
     void BeginPlan() { _work.Commands.clear(); }
     void Submitted(UINT slot) { _exports.at(slot) = _pendingExports; }
@@ -33,7 +35,7 @@ public:
     void Append(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr,
         GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion,
         GDX12Texture* target, const std::function<void(GDX12CommandList*)>& finish);
-    void AppendPosters(Graph&, std::vector<ID3D12Resource*>&);
+    void AppendPosters(Graph&, std::vector<ID3D12Resource*>&,bool record = true);
     bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd); }
 private:
     Id Packet(Graph&, std::vector<ID3D12Resource*>&, const char*,
