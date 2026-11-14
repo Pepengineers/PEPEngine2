@@ -629,7 +629,7 @@ void GDX12ReflectionProbePass::Prepare()
     _capturePlanned = _staticShadowsPlanned = false;
     ++_frameNumber;
     _statistics.CapturedFaces = _statistics.BakedFaces = _statistics.PublishedProbes = 0;
-    const auto settings = GetReflectionSettings();
+    const auto settings = _externalSettings ? *_externalSettings : GetReflectionSettings();
     if (!settings.Enabled || _resources->ReflectionProbes.empty())
     {
         if (_resources->ReflectionProbes.empty())
@@ -793,7 +793,7 @@ void GDX12ReflectionProbePass::Prepare()
                 select(8 + face, frozen ? StaticGeometry : state.Source.Implementation == 1 ? DynamicGeometry : AllGeometry,
                     false, face, false);
     }
-    if (_staticShadowsPlanned)
+    if (_staticShadowsPlanned && !_externalStaticShadows)
     {
         if (!_staticLocalShadows)
         {
@@ -808,7 +808,8 @@ void GDX12ReflectionProbePass::Prepare()
         if (view.Selected && view.Context.Stage == GDX12GeometryStage::ReflectionCapture)
         {
             view.Lighting.LocalShadows = view.Filter == StaticGeometry ?
-                _staticLocalShadows->GetOutput(0)->GetTexture() : _inputs[4]->GetTexture();
+                (_externalStaticShadows ? _externalStaticShadows : _staticLocalShadows->GetOutput(0)->GetTexture()) :
+                (_externalDynamicShadows ? _externalDynamicShadows : _inputs[4]->GetTexture());
         }
     _planPrepared = true;
 }
@@ -830,7 +831,7 @@ void GDX12ReflectionProbePass::BeginGeometry(GDX12CommandList* commands)
         commands->GetCommandList()->ClearDepthStencilView(_sunDSV[0]->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
         _sunShadowNeedsClear = false;
     }
-    if (_staticShadowsPlanned) _staticLocalShadows->Execute(commands);
+    if (_staticShadowsPlanned && !_externalStaticShadows) _staticLocalShadows->Execute(commands);
 }
 
 void GDX12ReflectionProbePass::EndGeometry(GDX12CommandList* commands)
@@ -880,6 +881,8 @@ void GDX12ReflectionProbePass::ClearDenendencies()
     GDX12RenderPass::ClearDenendencies();
     if (_staticLocalShadows) _staticLocalShadows->ClearDenendencies();
     _staticLocalShadows.reset();
+    _externalStaticShadows = _externalDynamicShadows = nullptr;
+    _externalSettings = nullptr;
     _frames.clear();
     _probes.clear();
     _views.clear();

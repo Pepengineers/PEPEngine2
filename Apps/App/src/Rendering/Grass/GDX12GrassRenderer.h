@@ -15,6 +15,7 @@ class GDX12CommandList;
 class GDX12DeviceResources;
 class RenderPipelineCommonData;
 class GDX12Texture;
+namespace Meta { class SceneGrass; }
 
 // Owned by Bistro. Simulation may use COMPUTE; expansion and draw use DIRECT.
 class GDX12GrassRenderer
@@ -22,7 +23,7 @@ class GDX12GrassRenderer
 public:
     enum class Stage : std::uint8_t { Full, GBuffer, PrepassNormals, Depth, Shadow, Capture };
     using CaptureLighting = GDX12CaptureLighting;
-    explicit GDX12GrassRenderer(GDX12DeviceResources* resources);
+    explicit GDX12GrassRenderer(GDX12DeviceResources* resources, UINT descriptorStart = ConstantsResources);
     ~GDX12GrassRenderer();
     // Wait the current frame-slot fence before reusing staging or replacing its roots.
     void BeginFrame(const RenderPipelineCommonData& common,
@@ -30,7 +31,7 @@ public:
         const std::vector<BistroInteractionSource>& sources = {}, float deltaSeconds = 0);
     GDX12ParticleInteractionField InteractionField() const;
     void PrepareGPU(GDX12CommandList* commands);
-    void PrepareView(const GDX12GeometryContext& view, UINT patch);
+    void PrepareView(const GDX12GeometryContext& view, UINT patch, GDX12Descriptor* materialOverride = nullptr);
     bool Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch);
     void GatherBatches(const GDX12GeometryContext& view, std::vector<GDX12RenderBatch>& batches) const;
     std::vector<GDX12RenderGraph::BufferAccess> PreparationAccesses() const;
@@ -44,6 +45,7 @@ public:
     const GDX12GrassWindControls& Controls() const { return _controls; }
 
 private:
+    friend class Meta::SceneGrass;
     struct Vertex
     {
         XMFLOAT3 Position, PreviousPosition, Normal;
@@ -152,6 +154,7 @@ private:
     static Stage RenderStage(GDX12GeometryStage);
 
     GDX12DeviceResources* _resources;
+    UINT _descriptorStart;
     GDX12GrassWindControls _controls;
     std::vector<Frame> _frames;
     std::unordered_map<uint64_t, GrassState> _grass;

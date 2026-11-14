@@ -6,6 +6,7 @@
 #include <array>
 #include <filesystem>
 #include <climits>
+namespace Meta { class SceneEnvironment; }
 
 // Outputs: diffuse irradiance, GGX radiance (8 mips when enabled), DFG, source cube.
 class GDX12EnvironmentIBLPass final : public GDX12RenderPass
@@ -30,6 +31,7 @@ public:
     void ClearDenendencies() override;
     void SetCloudSource(GDX12CloudComponent* source);
 private:
+    friend class Meta::SceneEnvironment;
     void InitializeKernels();
     void LoadEnvironment(const std::filesystem::path& asset);
     void CreateTexture(GDX12Texture& texture, UINT width, UINT height, UINT depth, UINT mips, bool cube);

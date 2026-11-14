@@ -50,7 +50,7 @@ namespace
     }
 }
 
-GDX12GrassRenderer::GDX12GrassRenderer(GDX12DeviceResources* resources) : _resources(resources), _frames(resources->FrameConstants.size()) {}
+GDX12GrassRenderer::GDX12GrassRenderer(GDX12DeviceResources* resources,UINT descriptorStart) : _resources(resources), _descriptorStart(descriptorStart), _frames(resources->FrameConstants.size()) {}
 GDX12GrassRenderer::~GDX12GrassRenderer()
 { if (_primitiveRegistry) RemovePrimitives(*_primitiveRegistry); }
 GDX12GrassRenderer::Frame& GDX12GrassRenderer::CurrentFrame() { return _frames.at(_resources->CurrFrameConstantsIndex); }
@@ -60,8 +60,8 @@ std::unique_ptr<GDX12UploadBuffer<T>> GDX12GrassRenderer::Buffer(UINT count, con
 {
     auto buffer = std::make_unique<GDX12UploadBuffer<T>>(_resources->Device, count, EBufferType::Default, false);
     auto* heap = _resources->SRV_UAV_Heap.get();
-    if (srv) buffer->CreateSRV(heap, heap->GetAvailableIndex(ConstantsResources));
-    if (uav) buffer->CreateUAV(heap, heap->GetAvailableIndex(ConstantsResources));
+    if (srv) buffer->CreateSRV(heap, heap->GetAvailableIndex(_descriptorStart));
+    if (uav) buffer->CreateUAV(heap, heap->GetAvailableIndex(_descriptorStart));
     return buffer;
 }
 
@@ -221,7 +221,7 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
     {
         frame.Sources = std::make_unique<GDX12UploadBuffer<BistroInteractionSource>>(_resources->Device,
             (std::max)(1u, sourceCount), EBufferType::Upload, false);
-        frame.Sources->CreateSRV(_resources->SRV_UAV_Heap.get(), _resources->SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
+        frame.Sources->CreateSRV(_resources->SRV_UAV_Heap.get(), _resources->SRV_UAV_Heap->GetAvailableIndex(_descriptorStart));
     }
     if (sourceCount) frame.Sources->CopyData(0, nearby.data(), sourceCount);
     if (!frame.InteractionConstants)
@@ -527,7 +527,7 @@ GDX12GrassRenderer::Output* GDX12GrassRenderer::FindOutput(const GDX12GeometryCo
     return found == index.end() ? nullptr : found->second;
 }
 
-void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patch)
+void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patch, GDX12Descriptor* materialOverride)
 {
     auto& frame = CurrentFrame();
     frame.OutputIndex.erase({ view.Key, view.Stage, patch });
@@ -624,7 +624,7 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
     if (view.CameraConstants) binding.CBVs.push_back({ 1, view.CameraConstants });
     binding.CBVs.push_back({ 2, constants->MainCB->GetElementAddress(0) });
     binding.SRVs = { { 0, _vertices->GetSRV()->GPUHandle },
-        { 1, constants->ShadowMaterials->GetSRV()->GPUHandle },
+        { 1, materialOverride ? materialOverride->GPUHandle : constants->ShadowMaterials->GetSRV()->GPUHandle },
         { 8, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex) } };
     if (stage == Stage::Capture)
     {
@@ -646,9 +646,9 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
         { &_vertices->GetResource(), GDX12RenderGraph::Mode::Read },
         { &_indices->GetResource(), GDX12RenderGraph::Mode::Read },
         { &_arguments->GetResource(), GDX12RenderGraph::Mode::Read },
-        { &constants->ShadowMaterials->GetResource(), GDX12RenderGraph::Mode::Read },
-        { &constants->ShadowLights->GetResource(), GDX12RenderGraph::Mode::Read },
         { &parameters->GetResource(), GDX12RenderGraph::Mode::Read } };
+    if(constants->ShadowMaterials) batch.BufferAccesses.push_back({&constants->ShadowMaterials->GetResource(),GDX12RenderGraph::Mode::Read});
+    if(constants->ShadowLights) batch.BufferAccesses.push_back({&constants->ShadowLights->GetResource(),GDX12RenderGraph::Mode::Read});
     frame.OutputIndex[{view.Key, view.Stage, patch}] = output.get();
     frame.Outputs.push_back(std::move(output));
 }

@@ -7,6 +7,7 @@ using namespace ParticleResources;
 
 struct GDX12ParticlesPass::State
 {
+    bool LocalOnly = false;
     UINT Capacity = 0;
     bool Sorted = false;
     bool Mesh = false;
@@ -100,6 +101,13 @@ struct GDX12ParticlesPass::State
         }
         if (mesh)
         {
+            if (LocalOnly)
+            {
+                FireflyVertices = std::make_unique<Buffer<GDX12ParticleMeshVertex>>(resources->Device,
+                    FireflyParticleVertexCount, EBufferType::Upload, false);
+                FireflyVertices->CopyData(0, GetFireflyParticleMesh().data(), FireflyParticleVertexCount);
+                return;
+            }
             FireflyVertices = std::make_unique<Buffer<GDX12ParticleMeshVertex>>(resources->Device, FireflyParticleVertexCount, EBufferType::Default, false);
             Buffer<GDX12ParticleMeshVertex> upload(resources->Device, FireflyParticleVertexCount, EBufferType::Upload, false);
             upload.CopyData(0, GetFireflyParticleMesh().data(), FireflyParticleVertexCount);
@@ -280,6 +288,7 @@ void GDX12ParticlesPass::BeginFrame()
     if (!_state)
     {
         _state = std::make_unique<State>();
+        _state->LocalOnly = _localOnly;
         _state->Initialize(_resources);
     }
     auto& state = *_state;
@@ -353,6 +362,12 @@ void GDX12ParticlesPass::BeginFrame()
 
 void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
 {
+    PrepareRenderData(commands);
+    DrawWeightedAndMotion(commands);
+}
+
+void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands)
+{
     if (!_state || !_state->Active) return;
     auto& state = *_state;
     auto& simulation = *_resources->ParticleSimulation->_state;
@@ -415,6 +430,14 @@ void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
     commands->Dispatch(1, 1, 1);
     commands->ResourceBarrier({ state.DrawArgs->GetResource().GetIndirectArgsBarrier() });
     if (state.Sorted) state.Sort(commands);
+}
+
+void GDX12ParticlesPass::DrawWeightedAndMotion(GDX12CommandList* commands)
+{
+    if (!_state || !_state->Active) return;
+    auto& state = *_state;
+    auto* depth = _inputs[0]->GetTexture();
+    commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     commands->ResourceBarrier({ state.Draws->GetResource().GetSRVBarrier(), state.Indices->GetResource().GetSRVBarrier(),
         state.Payloads[0]->GetResource().GetSRVBarrier(), depth->GetResource()->GetSRVBarrier(),
         _inputs[1]->GetTexture()->GetResource()->GetRenderTargetBarrier(),
@@ -487,4 +510,23 @@ void GDX12ParticlesPass::ClearDenendencies()
     if (_resources) _resources->ParticleMotion = nullptr;
     _state.reset();
     GDX12RenderPass::ClearDenendencies();
+}
+
+std::vector<GDX12Resource*> GDX12ParticlesPass::NativeResources() const
+{
+    std::vector<GDX12Resource*> result;
+    if (!_state || !_state->Active) return result;
+    auto& s = *_state;
+    for (auto* buffer : {s.Counts.get(), s.Indices.get(), s.DrawArgs.get(), s.SortParameters.get(),
+        s.Keys[0].get(), s.Keys[1].get(), s.Payloads[0].get(), s.Payloads[1].get(), s.Sum.get(), s.Reduced.get()})
+        if (buffer) result.push_back(&buffer->GetResource());
+    result.push_back(&s.Draws->GetResource());
+    result.push_back(&s.Constants.at(_resources->CurrFrameConstantsIndex)->GetResource());
+    if (s.FireflyVertices) result.push_back(&s.FireflyVertices->GetResource());
+    if (s.MotionTexture) result.push_back(s.MotionTexture->GetResource());
+    return result;
+}
+GDX12Texture* GDX12ParticlesPass::MotionOutput() const
+{
+    return _state && _state->Active ? _state->MotionTexture.get() : nullptr;
 }

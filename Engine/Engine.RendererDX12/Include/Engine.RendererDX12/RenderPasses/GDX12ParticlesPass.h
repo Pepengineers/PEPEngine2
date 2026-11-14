@@ -88,6 +88,11 @@ public:
     ~GDX12ParticlesPass() override;
     void Initialize() override;
     void BeginFrame();
+    void SetLocalExecution(bool enabled) { _localOnly = enabled; }
+    std::vector<GDX12Resource*> NativeResources() const;
+    GDX12Texture* MotionOutput() const;
+    void PrepareRenderData(GDX12CommandList* commands);
+    void DrawWeightedAndMotion(GDX12CommandList* commands);
     std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
     {
         std::vector<GDX12RenderGraph::BufferAccess> result;
@@ -110,6 +115,7 @@ public:
     void ClearDenendencies() override;
 
 private:
+    bool _localOnly = false;
     struct State;
     std::unique_ptr<State> _state;
 };

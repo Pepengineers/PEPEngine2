@@ -2,6 +2,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12SSRSettings.h"
 struct FfxSssrContext;
+namespace Meta { class SceneLighting; }
 
 // Inputs: lit HDR, reverse-Z depth, world normal/roughness, F0/baked,
 // unjittered prevNDC-currentNDC motion, prefiltered global environment, DFG LUT.
@@ -26,6 +27,7 @@ public:
     void ClearDenendencies() override;
 
 private:
+    friend class Meta::SceneLighting;
     struct Constants
     {
         XMFLOAT2 JitterDeltaUV;

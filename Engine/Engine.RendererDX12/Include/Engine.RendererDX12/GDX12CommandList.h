@@ -19,6 +19,8 @@ class GDX12CommandList
 {
 public:
 	GDX12CommandList(GDX12Device* device, D3D12_COMMAND_LIST_TYPE type = D3D12_COMMAND_LIST_TYPE_DIRECT);
+    // Borrow an already open executor list. No allocator, reset or submission ownership.
+    explicit GDX12CommandList(ID3D12GraphicsCommandList* borrowed);
 	D3D12_COMMAND_LIST_TYPE GetType() const { return _type; }
 	~GDX12CommandList();
 

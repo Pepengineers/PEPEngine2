@@ -6,10 +6,14 @@
 #include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include <algorithm>
+#include <atomic>
 #include <ostream>
 #include <iomanip>
 #include <queue>
 #include <stdexcept>
+
+namespace { std::atomic<uint64_t> LegacyExecuteCalls{0}; }
+uint64_t GDX12RenderGraph::GetExecuteCallCount() { return LegacyExecuteCalls.load(std::memory_order_relaxed); }
 
 GDX12RenderGraph::GDX12RenderGraph(GDX12Device* device) : _device(device) {}
 GDX12RenderGraph::~GDX12RenderGraph() = default;
@@ -369,6 +373,7 @@ void GDX12RenderGraph::Compile(bool reuseTextures)
 
 GDX12CommandList* GDX12RenderGraph::Execute(GDX12CommandList* commands, GDX12CommandQueue* computeQueue)
 {
+    LegacyExecuteCalls.fetch_add(1, std::memory_order_relaxed);
     GDX12_SCOPED_CPU_EVENT("Graph recording");
     if (!_compiled) throw std::logic_error("Render graph must be compiled before execution");
     for (const auto& resource : _resources)

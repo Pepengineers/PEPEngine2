@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
+namespace Meta { class SceneLighting; class SceneWaterParticles; }
 
 class GDX12WBOITCompositionPass : public GDX12RenderPass
 {
@@ -19,6 +20,10 @@ public:
         if (_front) graph.Fallback(_outputs[0], _inputs[0]);
     }
 
+    void RefreshInputLinks()
+    {
+        IN_OpaqueScene = _inputs[0]; IN_TransparencyAccum = _inputs[1]; IN_Revealage = _inputs[2];
+    }
     void SetParticles(GDX12ParticlesPass* particles) { _particles = particles; }
     void SetApplyOpaqueAerialPerspective(bool apply) { _applyOpaqueAerialPerspective = apply; }
     void SetConditionalTransparency(GDX12WBOITTransparencyPass* transparency) { _front = transparency; }
@@ -161,6 +166,8 @@ public:
 	}
 
 private:
+    friend class Meta::SceneLighting;
+    friend class Meta::SceneWaterParticles;
     bool _applyOpaqueAerialPerspective = true;
     GDX12ParticlesPass* _particles = nullptr;
     struct Link final : IRenderPassLink

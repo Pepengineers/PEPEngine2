@@ -169,7 +169,7 @@ void RenderModule::OnResize()
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
-    const bool rebuild = static_cast<bool>(_primaryGraph);
+    const bool rebuild = static_cast<bool>(_primaryGraph) || _pipeline->OwnsExecution();
     _primaryGraph.reset();
     auto context = PipelineContext();
     _pipeline->Resize(context);
@@ -257,7 +257,8 @@ void RenderModule::WaitForUploads()
 void RenderModule::DrainFrameWork()
 {
     WaitForUploads();
-    if (auto* compute = _primaryDevice->TryGetComputeQueue()) compute->Flush();
+    if (!_pipeline->OwnsExecution())
+        if (auto* compute = _primaryDevice->TryGetComputeQueue()) compute->Flush();
 }
 
 void RenderModule::ResetWorldHistory()
@@ -919,7 +920,9 @@ void RenderModule::OnRender()
     auto primarycmdQueue = _primaryDevice->GetCommandQueue();
     auto primarycmdList = primarycmdQueue->GetCommandList();
     _primaryGPUTimer->Start(primarycmdList);
-    DispatchSkeletalMeshes(primarycmdList);
+    // Explicit owners freeze skin work and declare its resources in their plan.
+    // Legacy callers retain their existing pre-graph dispatch path.
+    if (!_pipeline->OwnsScenePreparation()) DispatchSkeletalMeshes(primarycmdList);
     const bool rebuild = _pipeline->PrepareFrame(context, primarycmdList);
     RefreshPipelineFlags();
     if (rebuild || _graphReuseTextures != GraphReuseTextures.GetValue()) RebuildRenderGraph();
@@ -927,13 +930,23 @@ void RenderModule::OnRender()
     auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
     const auto& bindings = _pipeline->GetBindings();
     auto* compute = bindings.UseAsyncCompute ? _primaryDevice->TryGetComputeQueue() : nullptr;
-    primarycmdList = _primaryGraph->Execute(primarycmdList, compute);
-    if (_uiInitialized) Engine::UI::Render(primarycmdList, _backBuffer->GetCurrentBuffer());
-    _primaryGPUTimer->Stop(primarycmdList);
-    primarycmdQueue->ExecuteCommandList(primarycmdList);
+    uint64_t completion;
+    const auto finish = [&](GDX12CommandList* list) {
+        if (_uiInitialized) Engine::UI::Render(list, _backBuffer->GetCurrentBuffer());
+        _primaryGPUTimer->Stop(list);
+    };
+    if (_pipeline->OwnsExecution())
+        completion = _pipeline->ExecuteFrame(context, primarycmdList, finish);
+    else
+    {
+        primarycmdList = _primaryGraph->Execute(primarycmdList, compute);
+        finish(primarycmdList);
+        primarycmdQueue->ExecuteCommandList(primarycmdList);
+        completion = primarycmdList->FenceValue;
+    }
     ++_frameSubmission;
-    primaryCurrentFrameConsts->FenceValue = primarycmdList->FenceValue;
-    _primaryGPUTimer->OnCommandListExecuted(primarycmdList->FenceValue);
+    primaryCurrentFrameConsts->FenceValue = completion;
+    _primaryGPUTimer->OnCommandListExecuted(completion);
 
     _backBuffer->GetFrameGeneration().EndRendering();
     _backBuffer->Present();
@@ -1125,6 +1138,13 @@ void RenderModule::RebuildRenderGraph()
 {
     _primaryDevice->GetCommandQueue()->Flush();
     _graphReuseTextures = GraphReuseTextures.GetValue();
+    if (_pipeline->OwnsExecution())
+    {
+        auto context = PipelineContext();
+        _pipeline->RebuildExecution(context);
+        _RPcommonData.RequestHistoryReset = true;
+        return;
+    }
     auto graph = std::make_unique<GDX12RenderGraph>(_primaryDevice.get());
     graph->ImportShared(GDX12RenderGraph::SharedResource::Scene, "Scene and frame buffers");
     graph->ImportLink("Swapchain", _backBuffer.get());
@@ -1136,7 +1156,8 @@ void RenderModule::RebuildRenderGraph()
 
 const GDX12RenderGraph::Statistics& RenderModule::GetRenderGraphStatistics() const
 {
-    return _primaryGraph->GetStatistics();
+    static const GDX12RenderGraph::Statistics empty{};
+    return _primaryGraph ? _primaryGraph->GetStatistics() : empty;
 }
 
 double RenderModule::GetGPUFrameTimeMS() const
@@ -1146,5 +1167,6 @@ double RenderModule::GetGPUFrameTimeMS() const
 
 void RenderModule::WriteRenderGraph(std::ostream& output) const
 {
-    _primaryGraph->WriteDot(output);
+    if (_pipeline->OwnsExecution()) _pipeline->WriteExecution(output);
+    else _primaryGraph->WriteDot(output);
 }
