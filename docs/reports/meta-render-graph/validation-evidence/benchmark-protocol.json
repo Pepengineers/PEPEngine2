@@ -1,0 +1,932 @@
+{
+  "version": 1,
+  "base_correctness_commit": "ae68ca24d3426f1f849c2048ef06aa8ccb54d330",
+  "host": "MIDSPEC",
+  "adapter": "RTX 5050 driver621.14",
+  "session": "RDP session2 disconnected; renderer submission timings only, no visible desktop FPS",
+  "settings": "Synthetic v1; seeds13 +12345..12348; five emitters burst80, emission0, benchmark-only lifetime120s and local bounded volume half-extents70cm; water64 with bounded x=20*sin(frame/60); fixed real dt1/60; 1280x800; FSR Quality or Native; AO/SSR/DOF/blur/clouds off; FG/VSync/debug/GBV/framecap/profiler off; Jolt not registered",
+  "comparison": "Queue axis: parallel recording held fixed. CPU recording axis: DIRECT queue placement held fixed. Each adjacent pair alternates A/B order; every item launches a fresh process. One frozen Release binary for all items.",
+  "counts_proof": "Native and FSR 120+1800 deterministic proof replays with snapshots after warmup, scored149/299/899 and final; 80 rendered particles, nonzero visible water and actual solver substeps. Proof timings excluded. Ordinary snapshots only before/after timed interval.",
+  "metrics": "Raw CPU frame wall; sum worker list record microseconds (not elapsed wall); owner recording; submit native waits/Execute/Signal; executor wall; delayed GPU latest + resolved counts/sums; GPU total joins all queues; wall includes final drain and CSV/memory-stat collection. No performance superiority implied by CPU recording alone.",
+  "frozen_inputs": [
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/App.MetaRenderGraph.exe",
+      "bytes": 7698432,
+      "sha256": "3a4b6548b93b6d061a566f297dd03e76a686ae1745c70a505f8f63bb3d1e26bb"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/Ak3DAudioBedMixer.dll",
+      "bytes": 1215464,
+      "sha256": "386eb4857f7478e151df623a38490b64a18db59e405c65fcc23326d283cdd7f7"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkAudioInput.dll",
+      "bytes": 1223144,
+      "sha256": "85638a44a714cfd2e493da6dac963213f0a9aedb5d04f4cc2a8349a191be6e60"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkCompressor.dll",
+      "bytes": 1266664,
+      "sha256": "754064a4ea696d51907b6dd5ef871da41674609730c39361d541079ec174d921"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkDelay.dll",
+      "bytes": 1227240,
+      "sha256": "d69f276a6a47bf70c652f34f3086fdaf7d59f207ff08887cff3d1ea2566615e3"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkFlanger.dll",
+      "bytes": 1261544,
+      "sha256": "59e390586ecfe2a1099f905b9e424a3d421bfc2a96a3e7490cdff4f11956b1af"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkGain.dll",
+      "bytes": 1221096,
+      "sha256": "153cddb682bfc82e2f6f228832c817c6694452a8d25f4dc4946290f870ba4a8a"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkGuitarDistortion.dll",
+      "bytes": 1277928,
+      "sha256": "3a0c4289857f7f104f2eb8796caaea2ea163fd7c7893e1a3637dbd1a3141b3eb"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkHarmonizer.dll",
+      "bytes": 1374696,
+      "sha256": "f5dea950246ef4153d64912493abc82729b22d94fa64f841114065802b658b46"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkMatrixReverb.dll",
+      "bytes": 1305576,
+      "sha256": "f893ce7139a4750ef2dff961b509d58f1b1b89d6c58f0e20715bf3ede0e40f88"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkMeter.dll",
+      "bytes": 1268712,
+      "sha256": "3182b8d7b0f7089f9a4cafcaa0ebdf003c2003eead687b7183016793e620fc52"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkParametricEQ.dll",
+      "bytes": 1263592,
+      "sha256": "3b9f060f5b3c13aad380d0c2e0dbd95ba5b101b23018c193ec0fc5985a89f8eb"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkPeakLimiter.dll",
+      "bytes": 1233384,
+      "sha256": "ad8dcca3ddf91d336ed36b6ca506cf203436c67d8800882f5d79e5c6f08fcb92"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkPitchShifter.dll",
+      "bytes": 1270760,
+      "sha256": "637d910610864fa0d9e60da33d39ee9e4f0ce7318a1020660a2611fd6b3721b6"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkRecorder.dll",
+      "bytes": 1220584,
+      "sha256": "639791c7fbeaac3ab9d3f0aa169d50f3df7db172ec6474cfaa37b0fd9daaa4ef"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkRecorderADM.dll",
+      "bytes": 1268360,
+      "sha256": "95bb24ac9a9631f13d810599a12e212fd15ba7eaedad109cc2618354ab924b24"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkReflect.dll",
+      "bytes": 1612264,
+      "sha256": "b21174f04ef965c866867051ab6d5f1ac020ab60244ce6e8d10fe8375e7c62c8"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkRoomVerb.dll",
+      "bytes": 1380840,
+      "sha256": "6feecfe73563db2cce0dce7b259364e9380eb8c8f5eb57deed76d1e9daed994d"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkSidechain.dll",
+      "bytes": 1270248,
+      "sha256": "0d0338f2299859ccefe8e150708ab0e717c595bacb923584afcd8c776143ecfd"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkSilenceGenerator.dll",
+      "bytes": 1209480,
+      "sha256": "c438a073f77bf4790e07019f587318c4e881a95bed5919ee66a96a36080b505f"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkSineTone.dll",
+      "bytes": 1222120,
+      "sha256": "149e2824c456d368b8bcd1b000eed0be1eb04c76ddc1389fee9b9695babd4231"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkSoundEngineDLL.dll",
+      "bytes": 7623144,
+      "sha256": "3fc0b3d7b075c84a41f43a2f64509682b9de9764e82e9dae826438287552ca96"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkSoundSeedAir.dll",
+      "bytes": 1344488,
+      "sha256": "fd22ff748b20237241586c40d7e715a2a7a5a85476478b2a21dc59fa3708bfac"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkStereoDelay.dll",
+      "bytes": 1283560,
+      "sha256": "177cfdb86a191f87f0bb2e26144abb3350850c0ad951c3cc9fffb3a6db764184"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkSynthOne.dll",
+      "bytes": 1293800,
+      "sha256": "83e47032c8a6944ab1c79821ff67523946769c6fd67ddadd68f636c1b3b9c4e0"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkTimeStretch.dll",
+      "bytes": 1388520,
+      "sha256": "dd7396434acffa68873e5f7df35080e62dbff3309aadee608a8e0aeeea911570"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkToneGen.dll",
+      "bytes": 1255048,
+      "sha256": "e55b67970892ca2c5cec085d9fdd88cc56f26731fa2b31c10ecb619cfc6c1dc9"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/AkTremolo.dll",
+      "bytes": 1256424,
+      "sha256": "7fa18f698adc688dd1f325474c2cc4f882a6456ac0e4cb05e21049a723a96b2b"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/amd_fidelityfx_framegeneration_dx12.dll",
+      "bytes": 29679376,
+      "sha256": "e6843252f58b0341a0d80f6a20bc0d840643ee95bc48c22cac08745344577bb6"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/amd_fidelityfx_loader_dx12.dll",
+      "bytes": 39184,
+      "sha256": "e2191d3c0828be45eb8affd4e3ec0378f2293adc345b772a7170edcf3b021ecb"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/amd_fidelityfx_upscaler_dx12.dll",
+      "bytes": 57664272,
+      "sha256": "aad4fccccb29084a655f9a4f9f613bd22c8c03fb4a0f8840148cc6543b4ccace"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/assimp-vc143-mt.dll",
+      "bytes": 5758976,
+      "sha256": "3663bb512c0821062307de7b9590934d647c45fc4d2ed580fa33b846d8fd10cb"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/assimp-vc143-mtd.dll",
+      "bytes": 20305408,
+      "sha256": "ce5da812e6e585c8952eb02e6fb06c23df1171eeeb7a69f6faf54a29f3987e14"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/Auro.dll",
+      "bytes": 4263912,
+      "sha256": "5023162f65b5edffc95b6eb303d8796852cef58db29cdd146a968634832eedab"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/dstorage.dll",
+      "bytes": 206904,
+      "sha256": "cae65787f61514bec6f012f44546e68b19e39d8854a9ab52af813370d44b272a"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/dstoragecore.dll",
+      "bytes": 1482784,
+      "sha256": "cf85b19a92a8276f8baca0db9bbcd60735bad50768deb303d310e84d5f4fdd11"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/dxcompiler.dll",
+      "bytes": 17837088,
+      "sha256": "5888d3e590f5bfd8743484e7f31313996734adec5741506271a5c6368cbe8ba9"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/dxil.dll",
+      "bytes": 1494048,
+      "sha256": "0cf5fa4b90f74550166108b3870c883f4a85243976b246b1da3ea90ad5b92015"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/iZotope.dll",
+      "bytes": 2100200,
+      "sha256": "953652a703cf7ba39ae5ff0ca9da2ed11d35a26a5525ea0fe9eecea438e81a92"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/libxell.dll",
+      "bytes": 415368,
+      "sha256": "d2030dcd694fda8f2ec7e044b13e6db8f0b56d4ba9113a5efad334e3f3ded8c7"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/libxess.dll",
+      "bytes": 77795704,
+      "sha256": "251659dd84a3e84de67c886a4186e01f3eca49b00641906fe38bb6b807e5d5b7"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/libxess_fg.dll",
+      "bytes": 22957432,
+      "sha256": "ec5e0c65e075570c6ede72618bb666d0be0c2e10b2ea9762c0fe8cb8e375ab27"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/MasteringSuite.dll",
+      "bytes": 1373672,
+      "sha256": "b83d85cdc47e8da9c385fb4985722d98de36162d7d320911df8fa3291f492336"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/McDSP.dll",
+      "bytes": 1518568,
+      "sha256": "4102db4a0e8cb9cd85bf598d9247796d38c11902cde19f35a5333ae7c4989289"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/nvngx_dlss.dll",
+      "bytes": 58956912,
+      "sha256": "d00b5b0ab29c3ca101b70c3a5ecb3a01b7ef33766a3383a28a18623083e6123e"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/nvngx_dlssg.dll",
+      "bytes": 7506544,
+      "sha256": "8d59d49b36410dd6b62fef2503a5871d347415bd85d943fa0848563a95dd50c7"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/sl.common.dll",
+      "bytes": 843904,
+      "sha256": "38eea3b4209afc455636ea372b5933d65fcc13becec6c84d101dcfc4d8648f75"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/sl.directsr.dll",
+      "bytes": 369792,
+      "sha256": "e3bbaf3e5eb906a63b3f00413c2d1c4c585ab3a2ee1946fcfa9ee2d804001c8e"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/sl.dlss.dll",
+      "bytes": 422016,
+      "sha256": "18871eea87c90345da97d8109faa81ea7d5840e8d99b51b55b0e46cfa177f84e"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/sl.dlss_g.dll",
+      "bytes": 637056,
+      "sha256": "3ed9538df724993bea8a050195a6a78b9c8c8a566d5b05ade477aab3c390e90f"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/sl.interposer.dll",
+      "bytes": 652928,
+      "sha256": "b1d7395aebd7b9722841d64dcf7433680020b6a8e421f851c16d5ba0c2182edf"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/sl.nis.dll",
+      "bytes": 1155712,
+      "sha256": "f9f3873c00e2737b22df1bf7605d4fdc7978dbf2955df4e152c5b52aada13b79"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/sl.pcl.dll",
+      "bytes": 360064,
+      "sha256": "5698c38e722318681f215c9fe68e45b9bedd51378acc699d8eee26e961e57770"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/sl.reflex.dll",
+      "bytes": 388736,
+      "sha256": "443577e869352436ff7ec8f4d9c90418d3e95368436ce219261e0f4f07a38122"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/WinPixEventRuntime.dll",
+      "bytes": 241152,
+      "sha256": "b5c420cf81b6dd899e6e55a7cc59b264bdfed2ec343e9a6af00607122c4789c6"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/WwiseProjectDatabase.dll",
+      "bytes": 5250024,
+      "sha256": "5b98d234ddb0232676a0b1a509a66745889d97643332b01c1330ebb53b2a6141"
+    },
+    {
+      "path": "Apps/App.MetaRenderGraph/Configs/SmokeWorld.yaml",
+      "bytes": 320,
+      "sha256": "b100e0915547f3e91aa507b37fcc728160bb03fc431d5cd0bc820c43a7fc8bcb"
+    },
+    {
+      "path": "Apps/App.MetaRenderGraph/Configs/Startup.ini",
+      "bytes": 578,
+      "sha256": "3b55753932b4f182887d95bf6e1415155689d0ae8875111050c32a735ac29c21"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/AmbientOcclusion.hlsl",
+      "bytes": 11527,
+      "sha256": "b0e474ca87040aa5ddd80a691119c23d3fdbabe515ac2268e89aceb848512b34"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/BufferClear.hlsl",
+      "bytes": 247,
+      "sha256": "76e6d5a02fc5c4932e3b7a1cf88655e4f3e55b70a790b44ab36d1a1566d8aa94"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/CanvasEffects.hlsl",
+      "bytes": 3349,
+      "sha256": "137519cf179f6e8ac184c28ea26114905da491d48530aaa553d52539c2cd0cc2"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/CBufferStructures.hlsl",
+      "bytes": 2772,
+      "sha256": "3195dfbb7b8f4ec44478acd10d85a97e12892296eb4fba4a8194a8e4b52a8d6a"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/Clouds.hlsl",
+      "bytes": 1546,
+      "sha256": "740dcdcfbd0d7dbacc13504514ebde0637a479a0f65b58709df1a1287bc17f39"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/CompositionPass.hlsl",
+      "bytes": 1747,
+      "sha256": "2f34609eb29487e964ff16835e0e5e7096989af9f925e299aec9a4919f46d6b1"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/Culling.hlsl",
+      "bytes": 2609,
+      "sha256": "0521e1437020ec3f10fa5fd23cb7b9feeb401b8988739bf3a888afbf46591a64"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/DeferredLighting.hlsl",
+      "bytes": 5263,
+      "sha256": "84de096a7a2b3105a63af28ad81dbabf7a71409e3d8353597858e7a59759ef68"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/EnvironmentIBL.hlsl",
+      "bytes": 5115,
+      "sha256": "4834db236842ea958a1de2455e4a3fa5b7744431e515445e1f842da9c5d075dd"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/FullScreenVS.hlsl",
+      "bytes": 422,
+      "sha256": "d4ab16449b5be8571c5c56871216486bef5a94cd3559f73275400e56fda75bad"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/InstanceBatching.hlsl",
+      "bytes": 2487,
+      "sha256": "49004dad87c7c43031fe49a6715bbf9d18c096ca68e64ff1507ada025328ef93"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/LocalShadowPass.hlsl",
+      "bytes": 3290,
+      "sha256": "78d3de20406751a50ae6b3e9ec7bbb2306715947cf9e2966554c5891cbde2648"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/MotionBlur.hlsl",
+      "bytes": 8060,
+      "sha256": "6f870f931912389870b4d6a527465d1c7460ed05364789e8e1bb4c869a90dae0"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/OpaquePass.hlsl",
+      "bytes": 5717,
+      "sha256": "d5b7d6e02d54c78fabb5c8d1e7b1ee27efa5502d1308b9bcfada7705bda895bb"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/ParticleRaster.hlsl",
+      "bytes": 8296,
+      "sha256": "7deb2a03e3c4022054c63a827da249ff6a1ca0880eab12a50ebdcf99f103960a"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/ParticleRender.hlsl",
+      "bytes": 4605,
+      "sha256": "9e17965ae4fd04aa44a04249765ccfcddf9470bc72282d4f7f79b00cf3c8e102"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/ParticleSimulation.hlsl",
+      "bytes": 14145,
+      "sha256": "1f5793da09b391e360be7261608df4504db12bd2a2dd256e13bbe47f591e8f96"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/ParticleSort.hlsl",
+      "bytes": 2847,
+      "sha256": "d5f847227e6ec11cc4e3c2c718937680e55ea3776ea52c8c03fcac8e89d0e5db"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/ParticleTransfer.hlsl",
+      "bytes": 3248,
+      "sha256": "b8952901b7eb6906d1ba6c6939190cb4005b3250175fc7f27a8e1c435f066965"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/ReflectionCapture.hlsl",
+      "bytes": 5747,
+      "sha256": "a5fc2c2be480d36949b1e97142e59e6e34a17e771c866395b42ee63e44f5773a"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/ShadowPass.hlsl",
+      "bytes": 4412,
+      "sha256": "c4d9e90bb1eb8adb90ce92370d078584e0a377e577fc543a2129af603fa56e24"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/Skinning.hlsl",
+      "bytes": 2855,
+      "sha256": "82d15bcba165c9377eddff635f945cb9710f9fbda9730356ea94d16f707e35a9"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/SkyAtmosphere.hlsl",
+      "bytes": 9476,
+      "sha256": "de98f8aaff83350bc3bf289759350f355655c3b2bc90afd596d4009cbc2f1863"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/SSSR.hlsl",
+      "bytes": 3337,
+      "sha256": "28ec8a35bfe08168cd4f76a8a6d42f036e1e749c6a110b43fb5a85a72a255937"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/ToneMap.hlsl",
+      "bytes": 363,
+      "sha256": "a2d9ce306d3991e5df3c60c1a52be390358e0645ffe7cbaef916332702455254"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/TransparentPass.hlsl",
+      "bytes": 4406,
+      "sha256": "2bd001f4989d8077015e39e5660ff39fc47fdcdf3b03144f18cc2b4458b4c9a1"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/UIScreenComposite.hlsl",
+      "bytes": 468,
+      "sha256": "bc24e89a05f3d7b916172b52340e63ab687c36112630280fbb488081cb51107e"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/CloudNoise.hlsli",
+      "bytes": 3413,
+      "sha256": "680dc2be76de949aa9136cbb45f84b5067a4574c71a69ecea7f2eed745520aa2"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/CSM.hlsli",
+      "bytes": 3007,
+      "sha256": "a308467272d060901a5b1ab4ac02b507f08e0abd6ac9fcb3f00fbb20eaacd4c8"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/InstancedGeometry.hlsli",
+      "bytes": 1026,
+      "sha256": "53d5617dd3b45be24a6e44c3a3b772dab70b225e8efc34923e2d573507eb9768"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/InteractionField.hlsli",
+      "bytes": 653,
+      "sha256": "9e89c2a9caff14f4a7d1c7acb2dc3d8cb4442826ac71ffdc34c901cd904273a1"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/LocalShadows.hlsli",
+      "bytes": 1485,
+      "sha256": "00a44f30708763e753211fc73de7fd2d1eae7b3b23d778cff61409d89b2b4d21"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/Particles.hlsli",
+      "bytes": 2201,
+      "sha256": "eb0675e173bd882103a1efecc7e992d9ff4f4b6cf7f4f70ec0d59ac414e89e0a"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/PBR.hlsli",
+      "bytes": 571,
+      "sha256": "5b0f903ecba59c3c393bfa2aaddbbc0732adfac53d1198485758ff0f344b9144"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/PBRLighting.hlsli",
+      "bytes": 2917,
+      "sha256": "8e401e0a2834c93cfd6e2cc1a14a58464dfdf58c350044981540fc8cf56b3086"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/PBRMath.hlsli",
+      "bytes": 1496,
+      "sha256": "7c4511e93207c927629648ee10e23679d68a3857370eb7ce698970170b62c248"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/PBRSurface.hlsli",
+      "bytes": 2366,
+      "sha256": "4218ca52e717927914c0ef14e71707e7218eba741a7192bcfd4c2f30216f87d8"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/ReflectionProbes.hlsli",
+      "bytes": 2416,
+      "sha256": "ac01d9cb9269748dcf5612f70dec21432fb903cca9fc8be7b605f78884475e53"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/ShadowFrustum.hlsli",
+      "bytes": 735,
+      "sha256": "1749bc25f768a876b18231d9e0ea76584d537c17dffa74e89f1529fd7bfe0a9d"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/SkyParameters.hlsli",
+      "bytes": 3625,
+      "sha256": "312594063c696ff4833558b8f1c52aa07c84c688b1eb5db416c246a48f46ec12"
+    },
+    {
+      "path": "Engine/Engine.RendererDX12/Shaders/SkyRendering.hlsli",
+      "bytes": 2397,
+      "sha256": "3b146c561532fc87864243084d7c94f8782db3eee205ddf60bc37713d6930125"
+    },
+    {
+      "path": "Apps/App/Shaders/CollisionView.hlsl",
+      "bytes": 256,
+      "sha256": "40afe174462c6178164327557adcda677b0f405ca0098415249dbf0323ce51e5"
+    },
+    {
+      "path": "Apps/App/Shaders/FluidSolver.hlsl",
+      "bytes": 10706,
+      "sha256": "46389c7c3fc4ffe86170c6c48e607b95942482471c9802fab8cdd3d967a3af64"
+    },
+    {
+      "path": "Apps/App/Shaders/FluidSurface.hlsl",
+      "bytes": 11887,
+      "sha256": "96e9cecbe9c1fe4796c0bf10769fed6ae7b96611ab306a45d64582ae3ff6bec0"
+    },
+    {
+      "path": "Apps/App/Shaders/GrassExpand.hlsl",
+      "bytes": 7548,
+      "sha256": "b4f7f162bfa66e27a6a0c04425b28abbfa8f344c907a618a8861e3b2adcb4835"
+    },
+    {
+      "path": "Apps/App/Shaders/GrassInteraction.hlsl",
+      "bytes": 2493,
+      "sha256": "74bb07533abd81e3d4d55b0bf929c1bf16d20bdc7e5b8a485dbcd044d4b9dd15"
+    },
+    {
+      "path": "Apps/App/Shaders/GrassRender.hlsl",
+      "bytes": 4005,
+      "sha256": "bf2bd761fe1da999e39ca3c1ace4b3c221a186d4986c87f113a2bdf11ba5a96f"
+    },
+    {
+      "path": "Apps/App/Shaders/WaterTransfer.hlsl",
+      "bytes": 703,
+      "sha256": "ade88dbb4fd3c803366ab7d8d2e265dcd3df5ca1dbb45502ab80cf0b40681604"
+    },
+    {
+      "path": "Apps/App/Shaders/WindField.hlsl",
+      "bytes": 3630,
+      "sha256": "3d0c06795416f5c7d1bdd595a6af6c686eba295c4ee4c306e7c878fbb0b8b143"
+    },
+    {
+      "path": "Apps/App/Shaders/FluidParameters.hlsli",
+      "bytes": 828,
+      "sha256": "9ee1990f51a12447a1dc9cd1e00d2be3c38e48ed3e5aa6325a7fc443f3ab2967"
+    },
+    {
+      "path": "Apps/App/Shaders/GrassCommon.hlsli",
+      "bytes": 647,
+      "sha256": "9a95beae2b927b04022a4359c135b8cca1bf2c4f6926eb12ddc2484eba392eef"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/D3D12/D3D12Core.dll",
+      "bytes": 5035320,
+      "sha256": "37fa14281a58cc834076971873006feb8a8d25cddc908d1a345bda1b149ffc7d"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/D3D12/d3d12SDKLayers.dll",
+      "bytes": 4965680,
+      "sha256": "7ab48d56d1c18708ebcf16c7c9259b2d783e2b935b85add4a244573b9f03cab4"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/D3D12/D3D12StateObjectCompiler.dll",
+      "bytes": 2749760,
+      "sha256": "023ba81d3a9c37ae805b746bb9c77bf2f6659044ee2fef2604154b507faca817"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/Configs/SmokeWorld.yaml",
+      "bytes": 320,
+      "sha256": "b100e0915547f3e91aa507b37fcc728160bb03fc431d5cd0bc820c43a7fc8bcb"
+    },
+    {
+      "path": "Build/bin/x64/Release/App.MetaRenderGraph/Configs/Startup.ini",
+      "bytes": 578,
+      "sha256": "3b55753932b4f182887d95bf6e1415155689d0ae8875111050c32a735ac29c21"
+    }
+  ],
+  "series": [
+    {
+      "label": "ordinary-native-queues-01-direct",
+      "provider": "native",
+      "axis": "queues",
+      "pair": 1,
+      "mode": "direct",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--direct"
+      ]
+    },
+    {
+      "label": "ordinary-native-queues-02-async",
+      "provider": "native",
+      "axis": "queues",
+      "pair": 1,
+      "mode": "async",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark"
+      ]
+    },
+    {
+      "label": "ordinary-native-queues-03-async",
+      "provider": "native",
+      "axis": "queues",
+      "pair": 2,
+      "mode": "async",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark"
+      ]
+    },
+    {
+      "label": "ordinary-native-queues-04-direct",
+      "provider": "native",
+      "axis": "queues",
+      "pair": 2,
+      "mode": "direct",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--direct"
+      ]
+    },
+    {
+      "label": "ordinary-native-queues-05-direct",
+      "provider": "native",
+      "axis": "queues",
+      "pair": 3,
+      "mode": "direct",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--direct"
+      ]
+    },
+    {
+      "label": "ordinary-native-queues-06-async",
+      "provider": "native",
+      "axis": "queues",
+      "pair": 3,
+      "mode": "async",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark"
+      ]
+    },
+    {
+      "label": "ordinary-native-recording-01-serial",
+      "provider": "native",
+      "axis": "recording",
+      "pair": 1,
+      "mode": "serial",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--direct",
+        "--serial"
+      ]
+    },
+    {
+      "label": "ordinary-native-recording-02-parallel",
+      "provider": "native",
+      "axis": "recording",
+      "pair": 1,
+      "mode": "parallel",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--direct"
+      ]
+    },
+    {
+      "label": "ordinary-native-recording-03-parallel",
+      "provider": "native",
+      "axis": "recording",
+      "pair": 2,
+      "mode": "parallel",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--direct"
+      ]
+    },
+    {
+      "label": "ordinary-native-recording-04-serial",
+      "provider": "native",
+      "axis": "recording",
+      "pair": 2,
+      "mode": "serial",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--direct",
+        "--serial"
+      ]
+    },
+    {
+      "label": "ordinary-native-recording-05-serial",
+      "provider": "native",
+      "axis": "recording",
+      "pair": 3,
+      "mode": "serial",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--direct",
+        "--serial"
+      ]
+    },
+    {
+      "label": "ordinary-native-recording-06-parallel",
+      "provider": "native",
+      "axis": "recording",
+      "pair": 3,
+      "mode": "parallel",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--direct"
+      ]
+    },
+    {
+      "label": "ordinary-native-long-async01",
+      "provider": "native",
+      "axis": "long",
+      "mode": "async",
+      "warmup": 120,
+      "scored": 1800,
+      "arguments": [
+        "--benchmark-long"
+      ]
+    },
+    {
+      "label": "ordinary-fsr-queues-01-direct",
+      "provider": "fsr",
+      "axis": "queues",
+      "pair": 1,
+      "mode": "direct",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--fsr",
+        "--direct"
+      ]
+    },
+    {
+      "label": "ordinary-fsr-queues-02-async",
+      "provider": "fsr",
+      "axis": "queues",
+      "pair": 1,
+      "mode": "async",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--fsr"
+      ]
+    },
+    {
+      "label": "ordinary-fsr-queues-03-async",
+      "provider": "fsr",
+      "axis": "queues",
+      "pair": 2,
+      "mode": "async",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--fsr"
+      ]
+    },
+    {
+      "label": "ordinary-fsr-queues-04-direct",
+      "provider": "fsr",
+      "axis": "queues",
+      "pair": 2,
+      "mode": "direct",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--fsr",
+        "--direct"
+      ]
+    },
+    {
+      "label": "ordinary-fsr-queues-05-direct",
+      "provider": "fsr",
+      "axis": "queues",
+      "pair": 3,
+      "mode": "direct",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--fsr",
+        "--direct"
+      ]
+    },
+    {
+      "label": "ordinary-fsr-queues-06-async",
+      "provider": "fsr",
+      "axis": "queues",
+      "pair": 3,
+      "mode": "async",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--fsr"
+      ]
+    },
+    {
+      "label": "ordinary-fsr-recording-01-serial",
+      "provider": "fsr",
+      "axis": "recording",
+      "pair": 1,
+      "mode": "serial",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--fsr",
+        "--direct",
+        "--serial"
+      ]
+    },
+    {
+      "label": "ordinary-fsr-recording-02-parallel",
+      "provider": "fsr",
+      "axis": "recording",
+      "pair": 1,
+      "mode": "parallel",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--fsr",
+        "--direct"
+      ]
+    },
+    {
+      "label": "ordinary-fsr-recording-03-parallel",
+      "provider": "fsr",
+      "axis": "recording",
+      "pair": 2,
+      "mode": "parallel",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--fsr",
+        "--direct"
+      ]
+    },
+    {
+      "label": "ordinary-fsr-recording-04-serial",
+      "provider": "fsr",
+      "axis": "recording",
+      "pair": 2,
+      "mode": "serial",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--fsr",
+        "--direct",
+        "--serial"
+      ]
+    },
+    {
+      "label": "ordinary-fsr-recording-05-serial",
+      "provider": "fsr",
+      "axis": "recording",
+      "pair": 3,
+      "mode": "serial",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--fsr",
+        "--direct",
+        "--serial"
+      ]
+    },
+    {
+      "label": "ordinary-fsr-recording-06-parallel",
+      "provider": "fsr",
+      "axis": "recording",
+      "pair": 3,
+      "mode": "parallel",
+      "warmup": 120,
+      "scored": 300,
+      "arguments": [
+        "--benchmark",
+        "--fsr",
+        "--direct"
+      ]
+    },
+    {
+      "label": "ordinary-fsr-long-async01",
+      "provider": "fsr",
+      "axis": "long",
+      "mode": "async",
+      "warmup": 120,
+      "scored": 1800,
+      "arguments": [
+        "--benchmark-long",
+        "--fsr"
+      ]
+    }
+  ]
+}

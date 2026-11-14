@@ -74,7 +74,9 @@ static std::vector<float> Read(GDX12Device& device, GDX12Texture& texture, UINT 
 #include "../../App/tests/ParticleSimulationControlsChecks.h"
 }
 
-void RunLocalParticlesGpuTests(GDX12Device& device)
+void CaptureTechniqueBuffers(GDX12Device&,const Meta::Schedule&,const std::vector<ID3D12Resource*>&,
+    const std::vector<std::pair<std::string,GDX12Resource*>>&,const std::string&);
+void RunLocalParticlesGpuTests(GDX12Device& device,bool interactionOnly)
 {
     const wchar_t* controls[]={L"Render.Particles.Enabled",L"Render.Particles.DrawEnabled",L"Render.Particles.SimulationEnabled"};
     struct Restore {
@@ -117,6 +119,12 @@ void RunLocalParticlesGpuTests(GDX12Device& device)
     particles.SetInputs({depth,&accum,&reveal}); particles.Initialize();
     Meta::Executor executor(device,1,128);
     UINT frame=0; bool asyncPlacement=true;
+    GDX12UploadBuffer<XMFLOAT4> fieldUpload(&device,16,EBufferType::Upload,false),field(&device,16,EBufferType::Default,false);
+    if(interactionOnly) {
+        field.CreateSRV(resources.SRV_UAV_Heap.get(),resources.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex,TextureResources_RangeLength));
+        for(UINT i=0;i<16;++i) fieldUpload.CopyData(i,XMFLOAT4(.25f,.1f,.75f,30));
+        simulation.SetInteractionField({&field.GetResource(),field.GetSRV()->GPUHandle,{0,0,100,100},4,-10});
+    }
     const auto root=Engine::Core::GetExecutableDirectory()/"Logs/local-particles";
     std::filesystem::create_directories(root);
     const auto execute=[&](GDX12ParticlesPass& pass) {
@@ -140,13 +148,18 @@ void RunLocalParticlesGpuTests(GDX12Device& device)
                 const bool upload=graph.Resources[id].Memory==Meta::Heap::Upload;
                 auto state=upload || desc.Dimension==D3D12_RESOURCE_DIMENSION_BUFFER?D3D12_RESOURCE_STATE_GENERIC_READ:D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
                 if(queue==Meta::Queue::Compute && !upload) state=D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-                accesses.push_back({id,upload?Meta::Mode::Read:Meta::Mode::ReadWrite,Meta::State(state)});
+                const bool fieldRead=interactionOnly && resource==&field.GetResource() && std::string(name)!="produce interaction field";
+                accesses.push_back({id,upload || fieldRead?Meta::Mode::Read:Meta::Mode::ReadWrite,Meta::State(state)});
             }
             graph.Operations.push_back({name,accesses,{},false,1,true,queue}); callbacks.push_back(std::move(callback));
         };
         add("one shared accumulation clear",{accum.GetResource(),reveal.GetResource(),hdr.GetResource()},Meta::Queue::Direct,[&](auto* cmd) {
             cmd->ResourceBarrier({accum.GetResource()->GetRenderTargetBarrier(),reveal.GetResource()->GetRenderTargetBarrier(),hdr.GetResource()->GetRenderTargetBarrier()});
             cmd->ClearRenderTargetView(&accum); cmd->ClearRenderTargetView(&reveal); cmd->ClearRenderTargetView(&hdr);
+        });
+        if(interactionOnly) add("produce interaction field",{&fieldUpload.GetResource(),&field.GetResource()},Meta::Queue::Direct,[&](auto* cmd) {
+            cmd->ResourceBarrier({field.GetResource().GetCopyDestBarrier()});
+            cmd->GetCommandList()->CopyBufferRegion(field.GetResource().D3DResource.Get(),0,fieldUpload.GetResource().D3DResource.Get(),0,16*sizeof(XMFLOAT4));
         });
         std::array<std::vector<uint64_t>,2> groups;
         for(const auto& emitter:resources.ParticleEmitters) groups[emitter.DepthCollision?1:0].push_back(emitter.Id);
@@ -157,7 +170,8 @@ void RunLocalParticlesGpuTests(GDX12Device& device)
             const auto constants=simulation.GetConstantResources(resources.CurrFrameConstantsIndex,&ids);
             inputs.insert(inputs.end(),constants.begin(),constants.end()); inputs.push_back(camera);
             if(group) inputs.push_back(depth->GetResource());
-            const auto queue=group && asyncPlacement?Meta::Queue::Compute:Meta::Queue::Direct;
+            if(interactionOnly) inputs.push_back(&field.GetResource());
+            const auto queue=(group || interactionOnly) && asyncPlacement?Meta::Queue::Compute:Meta::Queue::Direct;
             add("initialize local particle group",inputs,queue,[&,ids](auto* cmd){simulation.InitializePools(cmd,&resources,&ids);});
             add("simulate local particle group",inputs,queue,[&,ids](auto* cmd){simulation.Execute(cmd,&resources,common,depth,&ids);});
         }
@@ -184,11 +198,15 @@ void RunLocalParticlesGpuTests(GDX12Device& device)
             const auto found=std::find(bindings.begin(),bindings.end(),resource->D3DResource.Get());
             resource->SetCurrentState(D3D12_RESOURCE_STATES(schedule.FinalStates.at(found-bindings.begin())));
         }
+        if(interactionOnly) {
+            const auto pool=simulation.GetPoolResources();Require(!pool.empty(),"Missing interaction pool");
+            CaptureTechniqueBuffers(device,schedule,bindings,{{"particles",pool[0]}},(root/("interaction-"+std::to_string(frame))).string());
+        }
         ++frame;
     };
-    CheckParticleSimulationControls(device,resources,particles,execute,*depth,eye,forward);
+    if(!interactionOnly) CheckParticleSimulationControls(device,resources,particles,execute,*depth,eye,forward);
     // Four depth-interleaved emitters exercise one global sort and one shared accumulation.
-    for(auto blend:{ParticleBlend::SortedAlpha,ParticleBlend::WeightedAlpha}) {
+    if(!interactionOnly) for(auto blend:{ParticleBlend::SortedAlpha,ParticleBlend::WeightedAlpha}) {
         std::vector<std::vector<float>> reference;
         for(bool mixed:{false,true}) {
             resources.ParticleEmitters.clear(); asyncPlacement=mixed;
@@ -215,6 +233,40 @@ void RunLocalParticlesGpuTests(GDX12Device& device)
             } else Require(std::abs(outputs[2][center]-.0625f)<.003f,"WBOIT producers cleared the shared revealage or lost a group");
         }
     }
+    if(interactionOnly) {
+        std::ofstream checks(root/"interaction-checks.csv");
+        checks<<"compute,enabled,position_x,position_y,position_z,velocity_x,velocity_y,velocity_z,max_error\n";
+        std::vector<float> reference;
+        for(bool compute:{false,true}) for(bool enabled:{false,true}) {
+            asyncPlacement=compute;
+            GDX12ParticleEmitter emitter;emitter.Id=1701;emitter.ResetRevision=100+frame;
+            emitter.MaxParticles=4;emitter.BurstTotal=1;emitter.EmissionRate=0;
+            emitter.SpeedMin=emitter.SpeedMax=0;emitter.Acceleration=Vector3::Zero;emitter.Drag=0;
+            emitter.SizeStart=emitter.SizeEnd=10;emitter.LifetimeMin=emitter.LifetimeMax=10;
+            emitter.Substeps=1;emitter.Simulation=ParticleSimulation::SemiImplicitEuler;emitter.InteractionEnabled=enabled;
+            emitter.DeltaTime=0;resources.ParticleEmitters={emitter};execute(particles);
+            resources.ParticleEmitters[0].DeltaTime=.1f;execute(particles);
+            const auto file=root/("interaction-"+std::to_string(frame-1)+"-particles.bin");
+            std::ifstream raw(file,std::ios::binary);std::vector<float> state(4*18);raw.read(reinterpret_cast<char*>(state.data()),state.size()*4);Require(bool(raw),"Missing interaction state");
+            size_t alive=4;for(size_t i=0;i<4;++i) if(state[i*18+7]>0) {Require(alive==4,"Unexpected interaction birth count");alive=i;}
+            Require(alive<4,"Interaction particle died");
+            const float blend=enabled?float((1-std::exp(-1.))*.75*.75):0.f;
+            const float velocity[]={60*blend,220*blend,24*blend};double error=0;
+            for(size_t i=0;i<3;++i) {
+                error=(std::max)(error,double(std::abs(state[alive*18+i]-.1f*velocity[i])));
+                error=(std::max)(error,double(std::abs(state[alive*18+8+i]-velocity[i])));
+            }
+            Require(error<2e-4,"Interaction displacement/velocity differs from CPU oracle");
+            std::vector<float> measured;for(size_t i:{size_t(0),size_t(1),size_t(2),size_t(8),size_t(9),size_t(10)}) measured.push_back(state[alive*18+i]);
+            if(!compute && enabled) reference=measured;
+            if(compute && enabled) for(size_t i=0;i<measured.size();++i) Require(std::abs(measured[i]-reference[i])<1e-6f,"Interaction DIRECT/COMPUTE mismatch");
+            checks<<compute<<','<<enabled;for(float value:measured) checks<<','<<value;checks<<','<<error<<'\n';
+        }
+        Require(bool(checks),"Cannot save interaction checks");
+        Log::Info("MetaRenderGraph","PASS particle interaction: CPU displacement/velocity oracle, enabled/disabled controls, declared field producer, DIRECT/COMPUTE; frames=",frame);
+    }
     executor.Drain(); particles.ClearDenendencies(); opaque.ClearDenendencies();
     Log::Info("MetaRenderGraph","PASS LocalParticlesGpuTests: numeric displacement tolerance=.03cm; controls/burst/reset/death/volume/depth/box; mixed DIRECT/COMPUTE SortedAlpha/WBOIT image tolerance=.003; frames=",frame);
 }
+
+void RunParticleInteractionGpuTests(GDX12Device& device) { RunLocalParticlesGpuTests(device,true); }

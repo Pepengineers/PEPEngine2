@@ -22,6 +22,7 @@ public:
     void Wait(size_t group); // owner only, throws on error/cancellation
     void Finish(); // joins native task callbacks as well as logical results
     void Mark(const std::string&); // owner submission marker in the same clock
+    double RecordingWorkMS() const;
     void WriteTrace(std::ostream&) const; // Chrome trace JSON, microseconds
 private:
     struct Impl;

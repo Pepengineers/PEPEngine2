@@ -120,6 +120,12 @@ void Recorder::Mark(const std::string& name) {
     std::lock_guard<std::mutex> lock(_impl->Mutex);
     _impl->Events.push_back({name,0,_impl->Now(),0});
 }
+double Recorder::RecordingWorkMS() const {
+    std::lock_guard<std::mutex> lock(_impl->Mutex);
+    int64_t total=0;
+    for(const auto& e:_impl->Events) if(e.Name.rfind("list ",0)==0) total+=e.Duration;
+    return double(total)/1000.;
+}
 void Recorder::WriteTrace(std::ostream& out) const {
     std::lock_guard<std::mutex> lock(_impl->Mutex);
     out << "{\"traceEvents\":[";

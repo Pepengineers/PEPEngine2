@@ -1,4 +1,5 @@
 #pragma once
+#include "Rendering/Water/GDX12FluidPass.h"
 #include "SceneLighting.h"
 #include "Rendering/Water/BistroWaterRendering.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
@@ -12,6 +13,8 @@ public:
     explicit SceneWaterParticles(RenderPipelineContext&);
     ~SceneWaterParticles();
     void Prepare(float delta);
+    GDX12FluidSurfacePass::SimulationWork SimulationWork() const;
+    std::vector<std::pair<std::string,GDX12Resource*>> WaterBuffers() const;
     GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&,
         GDX12Texture* reflectedHDR, GDX12Texture* probes, D3D12_GPU_DESCRIPTOR_HANDLE probeRadiance, bool serial);
     bool Record(Id id, ID3D12GraphicsCommandList* commands) const { return _work.Record(id, commands); }

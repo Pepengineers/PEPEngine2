@@ -73,6 +73,14 @@ std::vector<std::pair<std::string,GDX12Resource*>> SceneWaterParticles::Diagnost
             result.emplace_back("render-buffer-"+std::to_string(i),buffers[i]);
     return result;
 }
+GDX12FluidSurfacePass::SimulationWork SceneWaterParticles::SimulationWork() const { return _paths[1]->Water.LastSimulationWork(); }
+std::vector<std::pair<std::string,GDX12Resource*>> SceneWaterParticles::WaterBuffers() const {
+    std::vector<std::pair<std::string,GDX12Resource*>> result;
+    for(const auto& a:_paths[1]->Water.GetSimulationBufferAccesses())
+        if(a.Resource->D3DResource->GetDesc().Dimension==D3D12_RESOURCE_DIMENSION_BUFFER)
+            result.emplace_back("water-"+std::to_string(result.size()),a.Resource);
+    return result;
+}
 void SceneWaterParticles::Prepare(float delta)
 {
     _instances = _collector->CollectScene(delta);

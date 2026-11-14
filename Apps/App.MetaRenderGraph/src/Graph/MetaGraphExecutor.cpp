@@ -2,6 +2,7 @@
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include <algorithm>
+#include <chrono>
 #include <limits>
 #include <stdexcept>
 namespace Meta {
@@ -94,6 +95,9 @@ void Executor::Reserve(uint32_t count) {
 uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Resource*>& resources,
     const Record& record,GDX12CommandList* prefix,GDX12CommandList* suffix,bool serial,
     const std::atomic<bool>* cancellation,std::ostream* trace) {
+    const auto started=std::chrono::steady_clock::now();
+    const auto ms=[](auto begin) { return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-begin).count(); };
+    _timings={};
     Owner(); if(!_begun) throw std::logic_error("Begin required"); _begun=false;
     auto& slot=_slots[_slot]; _tokens.assign(schedule.Packets.size(),0);
     if(resources.size()!=schedule.Decays.size() || resources.size()!=schedule.Memory.size())
@@ -204,8 +208,11 @@ uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Reso
             // Owner-only SDK sections no longer delay submission of earlier packets.
             for(auto& ownerRecord:ownerRecords[i]) {
                 if(cancellation && cancellation->load()) throw std::runtime_error("owner recording cancelled");
+                const auto ownerStarted=std::chrono::steady_clock::now();
                 ownerRecord();
+                _timings.OwnerRecordMS+=ms(ownerStarted);
             }
+            const auto submitStarted=std::chrono::steady_clock::now();
             if(i==0 && prefix) {
                 slot.Poisoned=true; submitted=true;
                 direct.ExecuteCommandList(prefix);
@@ -230,6 +237,7 @@ uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Reso
             slot.Poisoned=true; submitted=true;
             q.GetCommandQueue()->ExecuteCommandLists(static_cast<UINT>(packets[i].size()),packets[i].data());
             const auto fence=q.Signal(); slot.Fences[QueueIndex(target)]=fence; _tokens[i]=fence; slot.Poisoned=false;
+            _timings.SubmitMS+=ms(submitStarted);
             recorder.Mark("submit packet "+std::to_string(i));
         }
         if(suffix) {
@@ -237,6 +245,8 @@ uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Reso
             direct.ExecuteCommandList(suffix); slot.Fences[0]=suffix->FenceValue; slot.Poisoned=false;
         }
         recorder.Finish(); if(trace) recorder.WriteTrace(*trace);
+        _timings.RecordingWorkMS=recorder.RecordingWorkMS();
+        _timings.ExecuteMS=ms(started);
         return _previousCompletion=slot.Fences[0];
     } catch(...) {
         recorder.Finish();

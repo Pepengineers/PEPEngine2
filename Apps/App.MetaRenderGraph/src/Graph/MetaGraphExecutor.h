@@ -31,6 +31,8 @@ public:
         std::ostream* trace = nullptr);
     void Drain();
     // Each value belongs to the queue selected by its packet, not one timeline.
+    struct Timings { double RecordingWorkMS=0, OwnerRecordMS=0, SubmitMS=0, ExecuteMS=0; };
+    const Timings& LastTimings() const { return _timings; }
     const std::vector<uint64_t>& Tokens() const { return _tokens; }
     uint64_t Retirement(uint32_t slot) const { return _slots.at(slot).Fences[0]; }
 private:
@@ -50,6 +52,7 @@ private:
     std::vector<uint64_t> _tokens;
     uint64_t _previousCompletion=0; // DIRECT terminal protects cross-frame persistent resources
     uint32_t _slot=0;
+    Timings _timings;
     bool _begun=false;
     bool _aborted=false; // partial frame requires resource-state rebuild
 };

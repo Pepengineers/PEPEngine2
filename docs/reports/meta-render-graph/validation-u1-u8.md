@@ -165,3 +165,25 @@ Large images, buffers and traces remain on MisSpec; the full local index records
 64,760 files / 50,525,720,744 bytes. No ordinary FPS or GPU-overlap result is claimed.
 The branch remains an intermediate correctness checkpoint pending independent
 review and the measurements listed above.
+
+## Follow-up benchmark freeze and missing interaction coverage
+
+The focused `--particle-interaction` test passed in Release with the debug layer:
+known field (.25,.1,.75,30), nonzero dt=.1, independent CPU displacement/velocity
+oracle, disabled-field negative control and DIRECT/COMPUTE parity. Maximum error
+9.53674e-7; debug-layer errors/corruption/discarded=0, warnings=2. The field is
+produced by a DIRECT copy and declared read by the simulation packet; the exported
+schedule retains its cross-queue dependency. Earlier suites were not repeated.
+`independent-raw-release.json` independently decodes saved FSR frames15/39 with
+Python struct/hashlib; it does not use the C++ checker or numeric CSV as an oracle.
+
+The reproducible benchmark runs the same synthetic geometry/water/particle scene,
+with a benchmark-only lifetime of120s and bounded particle volume70cm to retain
+its80-particle load through the long run. Water movement is bounded20*sin(frame/60).
+Native and FSR proof replays each retained80 particles and meaningful visible water
+at warmup/end and the short/long midpoints; their checkpoint readbacks exclude them
+from ordinary timings. Actual water work is5 substeps/frame (9000 scored steps in
+each long replay). Jolt is not registered in this host and is not claimed tested.
+`benchmark-protocol.json` freezes the executable/DLL/shader/config hashes, exact
+fresh-process order and120+300 /120+1800 counts before ordinary measurements.
+Performance results and a separate GPU timeline remain pending at this checkpoint.

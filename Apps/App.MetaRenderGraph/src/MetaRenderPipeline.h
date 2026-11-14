@@ -1,5 +1,6 @@
 #pragma once
 #include "App.Base/Rendering/IRenderPipeline.h"
+#include "Graph/MetaGraphExecutor.h"
 #include "Techniques/SceneGeometry.h"
 #include "Techniques/SceneEnvironment.h"
 #include "Techniques/SceneLighting.h"
@@ -25,6 +26,11 @@ class MetaRenderPipeline final : public IRenderPipeline
     void SkipIsolatedFixtures() { _environmentTestsRun = true; }
     void EnablePostVerification() { _verifyPost = true; }
     const GDX12ReconstructionStatus& ReconstructionStatus() const { return _post->Reconstruction().GetStatus(); }
+    const Meta::Executor::Timings& LastTimings() const { return _executor->LastTimings(); }
+    auto SimulationWork() const { return _waterParticles->SimulationWork(); }
+    size_t PacketCount() const { return _schedule.Packets.size(); }
+    void CaptureBenchmark(GDX12Device&,const std::string&);
+    void TraceNextFrame() { _traceNextFrame=true; }
     void ValidateQueued(GDX12Device&,RenderPipelineCommonData&);
     bool OwnsScreenUI() const override { return true; }
     void PrepareMaterialBindings(RenderPipelineContext& c) override
@@ -92,6 +98,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     Meta::Schedule _schedule;
     uint32_t _frame = 0;
     UINT _lastSlot = 0;
+    bool _traceNextFrame = false;
     bool _verify = false;
     bool _verifyPost = false;
     bool _cloudsEnabled = false;

@@ -1,0 +1,246 @@
+{
+  "run": "candidate-fsr-final-release04-artifacts",
+  "oracle": "Python stdlib raw bytes; no C++ checker/numeric CSV",
+  "frames": [
+    {
+      "frame": 15,
+      "counts": [
+        80,
+        8,
+        64,
+        8,
+        0,
+        0
+      ],
+      "source_hdr": {
+        "rgb_min": 0.0,
+        "rgb_max": 27.1875,
+        "all_finite": true,
+        "values": 1818596
+      },
+      "fsr_output": {
+        "rgb_min": -1.9073486328125e-06,
+        "rgb_max": 29.375,
+        "all_finite": true,
+        "values": 4096000
+      },
+      "exact_comparisons": {
+        "water-0": true,
+        "water-1": true,
+        "water-3": true,
+        "water-stages-0": true,
+        "water-stages-1": true,
+        "water-stages-2": true,
+        "water-stages-3": true
+      },
+      "max_abs_hdr_delta": 0.046875,
+      "max_abs_particle_motion_delta": 2.86102294921875e-06,
+      "files": {
+        "geometry-15-parallel-particles-render-buffer-0.bin": {
+          "bytes": 24,
+          "sha256": "eaa098e3fe38871c6186625bb6789602f31ec2867342d674fbed8091524cfd95"
+        },
+        "geometry-15-parallel-water-image-4.bin": {
+          "bytes": 3637192,
+          "sha256": "4cc7900614240b26d145abd58ce8d197e9e8b859319df22ed7a5243fd6688779"
+        },
+        "geometry-15-post-image-3.bin": {
+          "bytes": 8192000,
+          "sha256": "60097e78d6135522c7fac10cd73c2df014017d62fcc12d12515de19cd2d958d1"
+        },
+        "geometry-15-serial-water-image-0.bin": {
+          "bytes": 1818596,
+          "sha256": "1cae76a46719f7f157d23abc986cb4ad795d733bbf33d64b3d67104dc3944f80"
+        },
+        "geometry-15-parallel-water-image-0.bin": {
+          "bytes": 1818596,
+          "sha256": "1cae76a46719f7f157d23abc986cb4ad795d733bbf33d64b3d67104dc3944f80"
+        },
+        "geometry-15-serial-water-image-1.bin": {
+          "bytes": 1818596,
+          "sha256": "8bbb6062238d220be39132dbd21fd8d348d4a58a11d0a31c72d9eaf3732cc3b1"
+        },
+        "geometry-15-parallel-water-image-1.bin": {
+          "bytes": 1818596,
+          "sha256": "8bbb6062238d220be39132dbd21fd8d348d4a58a11d0a31c72d9eaf3732cc3b1"
+        },
+        "geometry-15-serial-water-image-3.bin": {
+          "bytes": 1818596,
+          "sha256": "9014b324205bbbed5bc2d6df2613773cf9173b447dfa0c10ec5d66124c1e9ced"
+        },
+        "geometry-15-parallel-water-image-3.bin": {
+          "bytes": 1818596,
+          "sha256": "9014b324205bbbed5bc2d6df2613773cf9173b447dfa0c10ec5d66124c1e9ced"
+        },
+        "geometry-15-serial-water-stages-image-0.bin": {
+          "bytes": 3637192,
+          "sha256": "735d43351e9069cc4e02dc308837b8053ea5ced1930661f56f63333a5e3e4078"
+        },
+        "geometry-15-parallel-water-stages-image-0.bin": {
+          "bytes": 3637192,
+          "sha256": "735d43351e9069cc4e02dc308837b8053ea5ced1930661f56f63333a5e3e4078"
+        },
+        "geometry-15-serial-water-stages-image-1.bin": {
+          "bytes": 3637192,
+          "sha256": "f94a5f641613a6a1b21395ab74cbf10f6a67fc34b7b7cea3141324687066b7c6"
+        },
+        "geometry-15-parallel-water-stages-image-1.bin": {
+          "bytes": 3637192,
+          "sha256": "f94a5f641613a6a1b21395ab74cbf10f6a67fc34b7b7cea3141324687066b7c6"
+        },
+        "geometry-15-serial-water-stages-image-2.bin": {
+          "bytes": 3637192,
+          "sha256": "67943cb2bbb821caa907b2bde57701bdb459c1d11dbfda6a951b9916e16030b6"
+        },
+        "geometry-15-parallel-water-stages-image-2.bin": {
+          "bytes": 3637192,
+          "sha256": "67943cb2bbb821caa907b2bde57701bdb459c1d11dbfda6a951b9916e16030b6"
+        },
+        "geometry-15-serial-water-stages-image-3.bin": {
+          "bytes": 909298,
+          "sha256": "adad8a45504f8dd604614cb45abbf2dbc649653a7009d41235aed44ce6e2f554"
+        },
+        "geometry-15-parallel-water-stages-image-3.bin": {
+          "bytes": 909298,
+          "sha256": "adad8a45504f8dd604614cb45abbf2dbc649653a7009d41235aed44ce6e2f554"
+        },
+        "geometry-15-serial-water-image-2.bin": {
+          "bytes": 3637192,
+          "sha256": "58aa8b5159bf1909c2e1b1bde3c7b7db4d8c7d6d1ec8f5c7e748c925ba8bb501"
+        },
+        "geometry-15-parallel-water-image-2.bin": {
+          "bytes": 3637192,
+          "sha256": "4cc7900614240b26d145abd58ce8d197e9e8b859319df22ed7a5243fd6688779"
+        },
+        "geometry-15-serial-water-stages-image-4.bin": {
+          "bytes": 7274384,
+          "sha256": "dac08d002858aa7c0dcf98a0cf67f77a80c3e20a5bf858bfe4eb6a16fd16caa6"
+        },
+        "geometry-15-parallel-water-stages-image-4.bin": {
+          "bytes": 7274384,
+          "sha256": "05aeaf644ef63529cb9796d466aebfdfeb9d596b660bc20eedaadd915bcdd1bd"
+        }
+      }
+    },
+    {
+      "frame": 39,
+      "counts": [
+        80,
+        8,
+        64,
+        8,
+        0,
+        0
+      ],
+      "source_hdr": {
+        "rgb_min": 0.0,
+        "rgb_max": 64.125,
+        "all_finite": true,
+        "values": 968760
+      },
+      "fsr_output": {
+        "rgb_min": -0.0006241798400878906,
+        "rgb_max": 66.125,
+        "all_finite": true,
+        "values": 2181504
+      },
+      "exact_comparisons": {
+        "water-0": true,
+        "water-1": true,
+        "water-3": true,
+        "water-stages-0": true,
+        "water-stages-1": true,
+        "water-stages-2": true,
+        "water-stages-3": true
+      },
+      "max_abs_hdr_delta": 0.125,
+      "max_abs_particle_motion_delta": 1.1444091796875e-05,
+      "files": {
+        "geometry-39-parallel-particles-render-buffer-0.bin": {
+          "bytes": 24,
+          "sha256": "eaa098e3fe38871c6186625bb6789602f31ec2867342d674fbed8091524cfd95"
+        },
+        "geometry-39-parallel-water-image-4.bin": {
+          "bytes": 1937520,
+          "sha256": "3b652963f213037442f561869fbb90d95ecaa7d1550a42d5fc99d91aae6657e3"
+        },
+        "geometry-39-post-image-3.bin": {
+          "bytes": 4363008,
+          "sha256": "6be50985864147957aadcb354526c0e45f7c9e2fbba856e3fdf5da73a19eb53c"
+        },
+        "geometry-39-serial-water-image-0.bin": {
+          "bytes": 968760,
+          "sha256": "92eb342af0b0e7ba4b6d618b894b6673f43b6278a46349a4c8f29eadbd120494"
+        },
+        "geometry-39-parallel-water-image-0.bin": {
+          "bytes": 968760,
+          "sha256": "92eb342af0b0e7ba4b6d618b894b6673f43b6278a46349a4c8f29eadbd120494"
+        },
+        "geometry-39-serial-water-image-1.bin": {
+          "bytes": 968760,
+          "sha256": "fc1717543c884d43aacfef57bb945777506af48fb182178878680971194537ec"
+        },
+        "geometry-39-parallel-water-image-1.bin": {
+          "bytes": 968760,
+          "sha256": "fc1717543c884d43aacfef57bb945777506af48fb182178878680971194537ec"
+        },
+        "geometry-39-serial-water-image-3.bin": {
+          "bytes": 968760,
+          "sha256": "72e238c0087de6874d72bb042f6bdf796ce790538a9da6316a1d7faf0aee97eb"
+        },
+        "geometry-39-parallel-water-image-3.bin": {
+          "bytes": 968760,
+          "sha256": "72e238c0087de6874d72bb042f6bdf796ce790538a9da6316a1d7faf0aee97eb"
+        },
+        "geometry-39-serial-water-stages-image-0.bin": {
+          "bytes": 1937520,
+          "sha256": "a9efbd51e8082d3967999fdb7597de1a6620aa28d928466cad8ca16064095c40"
+        },
+        "geometry-39-parallel-water-stages-image-0.bin": {
+          "bytes": 1937520,
+          "sha256": "a9efbd51e8082d3967999fdb7597de1a6620aa28d928466cad8ca16064095c40"
+        },
+        "geometry-39-serial-water-stages-image-1.bin": {
+          "bytes": 1937520,
+          "sha256": "0543998b3afab25b98abf7b2343d7e786cb77da61cdf13ecf026a3dd7b13530c"
+        },
+        "geometry-39-parallel-water-stages-image-1.bin": {
+          "bytes": 1937520,
+          "sha256": "0543998b3afab25b98abf7b2343d7e786cb77da61cdf13ecf026a3dd7b13530c"
+        },
+        "geometry-39-serial-water-stages-image-2.bin": {
+          "bytes": 1937520,
+          "sha256": "ce75e250fc97bb5155e5c7d5c08d00285c51967253896ae439778d5e43394b38"
+        },
+        "geometry-39-parallel-water-stages-image-2.bin": {
+          "bytes": 1937520,
+          "sha256": "ce75e250fc97bb5155e5c7d5c08d00285c51967253896ae439778d5e43394b38"
+        },
+        "geometry-39-serial-water-stages-image-3.bin": {
+          "bytes": 484380,
+          "sha256": "2b1f77efba3855462be54aa912322ecbc4067826828309e43263dde89009d2ba"
+        },
+        "geometry-39-parallel-water-stages-image-3.bin": {
+          "bytes": 484380,
+          "sha256": "2b1f77efba3855462be54aa912322ecbc4067826828309e43263dde89009d2ba"
+        },
+        "geometry-39-serial-water-image-2.bin": {
+          "bytes": 1937520,
+          "sha256": "e530a404fbed6acd4fdbdaf361bb00fee4ec8313b089df55d6f4a064a3cab4c9"
+        },
+        "geometry-39-parallel-water-image-2.bin": {
+          "bytes": 1937520,
+          "sha256": "3b652963f213037442f561869fbb90d95ecaa7d1550a42d5fc99d91aae6657e3"
+        },
+        "geometry-39-serial-water-stages-image-4.bin": {
+          "bytes": 3875040,
+          "sha256": "08d114f105adf367f8ef1bd4061aa84237eff2689831fd5ef12d971ae9b6d1e3"
+        },
+        "geometry-39-parallel-water-stages-image-4.bin": {
+          "bytes": 3875040,
+          "sha256": "a72a5d28a6eb43164ae055e763edc0e0d2d044499bceaabcbce77bd7048fb25d"
+        }
+      }
+    }
+  ]
+}

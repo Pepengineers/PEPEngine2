@@ -20,9 +20,11 @@ AutoConsoleVariable<bool> MetaClouds(L"Meta.Clouds.Enabled", false, L"Select the
 AutoConsoleVariable<bool> MetaAsyncQueues(L"Meta.Async.Queues", true,
     L"Place explicit local work on COMPUTE/COPY; false retains the single-DIRECT reference.", EConsoleVariableFlags::Default);
 }
+namespace { AutoConsoleVariable<bool> MetaRecordSerial(L"Meta.Record.Serial",false,
+    L"Record Meta native command lists serially on the owner.",EConsoleVariableFlags::Default); }
 void RunEnvironmentGpuTests(GDX12DeviceResources &, RenderPipelineCommonData &);
 void RunLocalWaterGpuTests(GDX12DeviceResources &, RenderPipelineCommonData &);
-void RunLocalParticlesGpuTests(GDX12Device&);
+void RunLocalParticlesGpuTests(GDX12Device&,bool interactionOnly=false);
 void CheckWaterParticleEvidence(const std::string&,const Matrix&,const Matrix&,unsigned);
 void CheckWaterMotionEvidence(const std::string&,const Matrix&,const Matrix&,unsigned,bool);
 std::vector<uint8_t> CaptureTechniqueImages(GDX12Device&,const Meta::Schedule&,
@@ -66,6 +68,14 @@ bool MetaRenderPipeline::PrepareFrame(RenderPipelineContext &c, GDX12CommandList
     _geometry->PrepareGrass(c, _verify ? 1.f / 60.f : c.Common.GameTimer->DeltaTime());
     c.PrepareScene().Complete();
     return false;
+}
+void MetaRenderPipeline::CaptureBenchmark(GDX12Device& device,const std::string& stem) {
+    _executor->Drain();
+    auto buffers=_waterParticles->DiagnosticBuffers(false);
+    auto water=_waterParticles->WaterBuffers();buffers.insert(buffers.end(),water.begin(),water.end());
+    CaptureTechniqueBuffers(device,_schedule,_geometry->PlannedResources(_lastSlot),buffers,stem);
+    CaptureTechniqueImages(device,_schedule,_geometry->PlannedResources(_lastSlot),
+        {_post->DiagnosticImages()[3],_waterParticles->Depth(),_geometry->Depth(_lastSlot)},stem);
 }
 void MetaRenderPipeline::ValidateQueued(GDX12Device& device,RenderPipelineCommonData& common)
 {
@@ -230,13 +240,16 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         ++_frame;
         return completion;
     }
+    std::ofstream trace;
+    if(_traceNextFrame) trace.open(Engine::Core::GetExecutableDirectory()/"Logs/benchmark-recording.json");
+    _traceNextFrame=false;
     const auto point = _executor->Execute(
         _schedule, _geometry->PlannedResources(slot),
         [&](Meta::Id op, uint32_t list, ID3D12GraphicsCommandList *cmd) {
             if (!_environment->Record(op, cmd) && !_lighting->Record(op, cmd) && !_waterParticles->Record(op, cmd) && !_post->Record(op, cmd))
                 _geometry->Record(slot, op, list, cmd, target->GetResource()->D3DResource.Get());
         },
-        prefix, nullptr);
+        prefix, nullptr,MetaRecordSerial.GetValue(),nullptr,trace.is_open()?&trace:nullptr);
     _post->Submitted(slot);
     _environment->Submitted(point);
     _lighting->Submitted(false, point);

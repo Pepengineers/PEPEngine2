@@ -1,0 +1,72 @@
+{
+  "snapshots": [
+    {
+      "snapshot": "benchmark-before",
+      "counts": [
+        80,
+        8,
+        64,
+        8,
+        0,
+        0
+      ],
+      "visible_water_pixels": 3277,
+      "water_sha256": "1e07c589e74d1f6d96454492a61de9627789229b72fe19dc0e58853ef5f7b762"
+    },
+    {
+      "snapshot": "benchmark-proof-149",
+      "counts": [
+        80,
+        8,
+        64,
+        8,
+        0,
+        0
+      ],
+      "visible_water_pixels": 3234,
+      "water_sha256": "73652a6e4b907fe146c9ca186360d45aed9b68f411a8c6c89d7505c90d5c1258"
+    },
+    {
+      "snapshot": "benchmark-proof-299",
+      "counts": [
+        80,
+        8,
+        64,
+        8,
+        0,
+        0
+      ],
+      "visible_water_pixels": 3305,
+      "water_sha256": "c301b73e77e87977a501bffafbb2abb7fa016da8324d8d1ac0631da2302354cd"
+    },
+    {
+      "snapshot": "benchmark-proof-899",
+      "counts": [
+        80,
+        8,
+        64,
+        8,
+        0,
+        0
+      ],
+      "visible_water_pixels": 3243,
+      "water_sha256": "01c3c6ca6fd52e456adb12d46d7a76f746dc490e23e285c414b3d83f16ea8b0a"
+    },
+    {
+      "snapshot": "benchmark-after",
+      "counts": [
+        80,
+        8,
+        64,
+        8,
+        0,
+        0
+      ],
+      "visible_water_pixels": 3318,
+      "water_sha256": "d925d05c58455792e6ee2e67d4bd8f8a8b747cccf62b56095b0a8d0dab49f029"
+    }
+  ],
+  "frames": 1800,
+  "real_water_steps": 9000,
+  "timing_status": "instrumented checkpoint readbacks; not ordinary timing"
+}
