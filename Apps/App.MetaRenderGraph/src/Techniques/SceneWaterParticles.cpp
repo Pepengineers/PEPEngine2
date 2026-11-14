@@ -1,4 +1,5 @@
 #include "SceneWaterParticles.h"
+#include "WaterTransfer.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
@@ -44,9 +45,31 @@ SceneWaterParticles::SceneWaterParticles(RenderPipelineContext& context)
     for (auto& path : _paths) path = std::make_unique<Path>();
 }
 SceneWaterParticles::~SceneWaterParticles() = default;
+void SceneWaterParticles::SetWaterTransfer(WaterTransfer* transfer, std::function<PublicationSelection()> selection)
+{
+    _transfer = transfer;
+    _selection = std::move(selection);
+}
 void SceneWaterParticles::Prepare(float delta)
 {
     _instances = _collector->CollectScene(delta);
+    if (_transfer)
+    {
+        std::vector<GDX12FluidInstance> inputs;
+        const auto controls = GetFluidControls();
+        for (auto input : _instances)
+        {
+            const auto& seed = input.Component.GetParticles();
+            if (!seed || seed->empty()) continue;
+            auto settings = ResolveFluidSettings(input.Component.GetSettings(), controls.Quality);
+            settings.SimulationEnabled &= controls.Enabled;
+            input.Component.SetSettings(settings);
+            inputs.push_back(std::move(input));
+        }
+        _transfer->Update(inputs, _reset);
+        if (_reset) Resize();
+        _reset = false;
+    }
     _groups = {};
     _groups[1].DepthCollision = true;
     for (const auto& emitter : _resources.ParticleEmitters)
@@ -74,6 +97,11 @@ GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resour
     water.SetInputs({scene.DepthView.get(), scene.Color[1].get()});
     water.Initialize();
     water.SetInstances(_instances);
+    if (_transfer)
+    {
+        _transfer->Append(graph, bindings, _selection());
+        water.SetExternalDisplay(_transfer->Displays());
+    }
     water.PrepareFrame();
     _depth = water.GetOutput(0)->GetTexture();
     _motion = water.GetOutput(1)->GetTexture();
@@ -172,7 +200,8 @@ GDX12Texture* SceneWaterParticles::Append(Graph& graph, std::vector<ID3D12Resour
     auto waterAccess = global;
     appendResources(waterAccess, water.NativeResources(), Mode::ReadWrite);
     waterAccess.push_back(textureRead(scene.DepthView.get())); waterAccess.push_back(textureRead(scene.Color[1].get()));
-    packet("water seed/SPH hash-sort-density-integrate", waterAccess, [&water](auto* commands) { water.ExecuteSimulation(commands); });
+    if (!_transfer)
+        packet("water seed/SPH hash-sort-density-integrate", waterAccess, [&water](auto* commands) { water.ExecuteSimulation(commands); });
     packet("water surface/thickness/NRF/merge depth-motion", waterAccess, [&water](auto* commands) { water.Execute(commands); });
     auto* opaqueDepth = scene.DepthView.get();
     std::array<std::vector<Access>, 2> groupPools;

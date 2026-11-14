@@ -88,7 +88,7 @@ struct CrossAdapterTransfer::Impl {
     std::exception_ptr Failure;
     uint32_t Seed=1;
     uint64_t Steps=0, LastDisplayed=0;
-    Id Current=Invalid, Pending=Invalid, FrameDisplay=Invalid;
+    Id Current=Invalid, Pending=Invalid, FrameDisplay=Invalid, LastSubmittedDisplay=Invalid;
     uint32_t FrameSlot=0;
     std::array<Id,2> Readers{Invalid,Invalid};
     std::thread::id Owner=std::this_thread::get_id();
@@ -158,7 +158,7 @@ struct CrossAdapterTransfer::Impl {
     }
     bool FreeDisplay(Id i) const {
         const auto& d=Display[i];
-        if(i==Current || i==Pending || d.Pins || (d.Imported && !Submit->Complete(d.Imported))) return false;
+        if(i==Current || i==Pending || i==LastSubmittedDisplay || d.Pins || (d.Imported && !Submit->Complete(d.Imported))) return false;
         for(auto reader:d.Readers) if(reader && !Submit->Complete(reader)) return false;
         return true;
     }
@@ -264,6 +264,9 @@ struct CrossAdapterTransfer::Impl {
             }
         }
         FrameDisplay=mode==PublicationSelection::StrictPublication && Pending!=Invalid ? Pending:Current;
+        if(mode==PublicationSelection::LatestCompleted && LastSubmittedDisplay!=Invalid &&
+            (FrameDisplay==Invalid || Display[FrameDisplay].Metadata.Sequence<LastDisplayed))
+            FrameDisplay=LastSubmittedDisplay;
         if(required) {
             FrameDisplay=Invalid;
             for(Id i:{Pending,Current}) if(i!=Invalid && Display[i].Metadata.Sequence==required) FrameDisplay=i;
@@ -354,6 +357,8 @@ bool CrossAdapterTransfer::Record(Id operation,ID3D12GraphicsCommandList* cmd) {
 std::vector<PacketWait> CrossAdapterTransfer::Waits(const Schedule& schedule) const {
     const auto& p=*_impl;
     if(p.FrameDisplay==Invalid) return {};
+    // Prior DIRECT readers already queued the import wait for this display.
+    if(p.FrameDisplay==p.LastSubmittedDisplay) return {};
     return {{PacketFor(schedule,p.Readers[0]),p.Display[p.FrameDisplay].Imported}};
 }
 void CrossAdapterTransfer::RetireFrame(const Schedule& schedule,const std::vector<CompletionToken>& tokens,bool success) {
@@ -372,7 +377,7 @@ void CrossAdapterTransfer::RetireFrame(const Schedule& schedule,const std::vecto
         auto& last=d.Readers[0]; if(token.Value>last.Value) last=token;
     }
     if(!d.Pins) throw std::logic_error("display lease underflow");
-    if(success) p.LastDisplayed=d.Metadata.Sequence;
+    if(success) { p.LastDisplayed=d.Metadata.Sequence; p.LastSubmittedDisplay=p.FrameDisplay; }
     --d.Pins; p.FrameDisplay=Invalid; p.Readers={Invalid,Invalid}; p.Wake.notify_all();
 }
 uint64_t CrossAdapterTransfer::SubmittedSteps() const {
