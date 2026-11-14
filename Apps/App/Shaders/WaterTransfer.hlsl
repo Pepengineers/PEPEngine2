@@ -18,3 +18,13 @@ void AdvanceDisplay(uint i : SV_DispatchThreadID)
     if (HasNew != 0) p.Position = Received[i];
     Display[i] = p;
 }
+
+// A retained display still advances history while a new epoch has no ready import.
+[numthreads(128, 1, 1)]
+void RepeatDisplay(uint i : SV_DispatchThreadID)
+{
+    if (i >= Count) return;
+    Particle p = Display[i];
+    p.PreviousPosition = p.Position;
+    Display[i] = p;
+}

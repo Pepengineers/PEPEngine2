@@ -1,3 +1,28 @@
+# Current two-device water source status — 2026-11-14
+
+Base: local `75cb0cf35c3229d398b400a0f7bc2c199baeae86`, reviewed transport merge.
+**Source implemented; unbuilt/unrun; hardware/runtime acceptance pending.**
+This supersedes older water placement/status statements below.
+
+| Boundary | Source ownership | Remaining evidence |
+|---|---|---|
+| Water solver/SPH | One secondary device/independent producer for all instances; original solver/settings/kernels, immutable wall-clock inputs and actual step intervals | Numerical comparisons and independent Present pause pending |
+| Pack/export/import | Float3 positions only; COMPUTE Solver/Pack, secondary COPY export, standalone primary COPY import; common QueueSubmission/Executor and bounded packed/shared/received lifetimes | Exact bytes, ring rotations/errors and device timelines pending |
+| Display/surface/resolve | Explicit primary DIRECT seed/history; original surface/optics/container/camera history; Strict/Latest retain newest submitted display; no legacy offload worker | First/repeated/mode-switch motion, images and lifecycle pending |
+| Multiple instances/lifecycle | Cold drain, unchanged solver/display preservation, isolated reset, world Stop/restart and quarantine; fixed descriptor bounds | Multi-instance controls/removal/reset/resize/shutdown/device health pending |
+| Particles/transparency | Existing local A/B pools and primary depth collision, combined SortedAlpha/WBOIT; no particle offload | Runtime acceptance pending; next particle stage not started |
+
+Startup opt-in defaults: `Meta.Water.Enabled=false`,
+`Meta.Water.SecondaryAdapter=-1`, `Meta.Water.Selection=1` (0 Strict, 1 Latest).
+Water excludes the deterministic CrossAdapter fixture and single-GPU verification.
+Production App retains its existing path. The fixture also pins its last submitted
+display across Strict-to-Latest switches. See [10-mgpu-water.md](10-mgpu-water.md).
+Tests/builds/compilation, applications, GPU/readbacks/visuals, validation scripts
+and profiling were not run. No correctness/overlap/performance/hardware acceptance
+claim. Independent originating-chat review remains pending; no push/PR/Bistro merge.
+
+---
+
 # Current cross-adapter transport source status — 2026-11-14
 
 Base: local `codex/bistro-rendering` at

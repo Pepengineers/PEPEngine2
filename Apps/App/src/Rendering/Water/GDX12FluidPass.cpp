@@ -199,8 +199,14 @@ void GDX12FluidSurfacePass::PrepareStates()
         replacement->Source = source;
         replacement->Revision = instance.Component.GetResetRevision();
         replacement->PreviousContainer = instance.ContainerToWorld;
-        const int adapter = _localOnly ? -1 : WaterAdapter.GetValue();
-        if (adapter >= 0)
+        const int adapter = _localOnly || _externalOnly ? -1 : WaterAdapter.GetValue();
+        if (_externalOnly)
+        {
+            const auto display = _externalDisplay.find(instance.Id);
+            if (display == _externalDisplay.end() || !display->second || display->second->GetElementCount() != source->size())
+                throw std::invalid_argument("External fluid display does not match its immutable seed");
+        }
+        else if (adapter >= 0)
         {
             const auto adapters = GDX12DeviceFactory::GetDeviceDescriptors();
             if (static_cast<size_t>(adapter) >= adapters.size()) throw std::invalid_argument("Water secondary adapter index out of range");
@@ -236,7 +242,7 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::GetSimulation
     std::vector<GDX12RenderGraph::BufferAccess> accesses;
     for (const auto& [id, state] : _states)
     {
-        if (state->Offload) continue;
+        if (_externalOnly || state->Offload) continue;
         if (!state->Solver.Count) continue;
         accesses.push_back({ &state->Constants->GetResource(), GDX12RenderGraph::Mode::Read });
         for (const auto& particles : state->Solver.Particles)
@@ -255,6 +261,11 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::GetBufferAcce
     auto accesses = GetResolveBufferAccesses();
     for (const auto& [id, state] : _states)
     {
+        if (_externalOnly)
+        {
+            accesses.push_back({&_externalDisplay.at(id)->GetResource(), GDX12RenderGraph::Mode::Read});
+            continue;
+        }
         if (state->Offload)
         {
             accesses.push_back({&state->Offload->DisplayParticles().GetResource(), GDX12RenderGraph::Mode::Read});
@@ -393,7 +404,7 @@ void GDX12FluidSurfacePass::PrepareFrame()
         return;
     }
     CreatePipelines();
-    if (_localOnly) _solver.Initialize(_resources->Device);
+    if (_localOnly && !_externalOnly) _solver.Initialize(_resources->Device);
     if (rendering)
     {
         CreateTargets();
@@ -412,6 +423,7 @@ void GDX12FluidSurfacePass::SetInstances(std::vector<GDX12FluidInstance> instanc
 
 void GDX12FluidSurfacePass::ExecuteSimulation(GDX12CommandList* commands)
 {
+    if (_externalOnly) return;
     if (!_prepared) PrepareFrame();
     if (!_rendering && !_simulating) return;
     GDX12_SCOPED_EVENT(commands, "Fluid SPH simulation", Colors::Aqua);
@@ -486,7 +498,8 @@ void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
             }
             if (drawing)
             {
-                auto& particles = state.Offload ? state.Offload->DisplayParticles() : *state.Solver.Particles[state.SolverHead.Current];
+                auto& particles = _externalOnly ? *_externalDisplay.at(instance.Id) :
+                    state.Offload ? state.Offload->DisplayParticles() : *state.Solver.Particles[state.SolverHead.Current];
                 DrawSurface(commands, {particles.GetResource(), particles.GetSRV()->GPUHandle, particles.GetElementCount()},
                     constants, owner, settings);
             }
@@ -616,5 +629,6 @@ std::vector<GDX12Resource*> GDX12FluidSurfacePass::NativeResources() const
         _filtered[0].get(), _filtered[1].get(), _depth.get(), _motion.get(), _geometry.get(), _owner.get(), _color.get()}) add(texture);
     for (auto access : GetSimulationBufferAccesses()) result.push_back(access.Resource);
     for (auto access : GetResolveBufferAccesses()) result.push_back(access.Resource);
+    if (_externalOnly) for (const auto& [id, display] : _externalDisplay) result.push_back(&display->GetResource());
     return result;
 }
