@@ -43,6 +43,8 @@ void RunEnvironmentGpuTests(GDX12DeviceResources &, RenderPipelineCommonData &);
 
 void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
 {
+    // Slot-local AO and paired scene owners exceed the legacy transient range.
+    c.Primary.SRV_UAV_Heap->UseTransientDescriptorTail();
     _post = std::make_unique<Meta::ScenePostUI>(c);
     _geometry = std::make_unique<Meta::SceneGeometry>(c);
     _environment = std::make_unique<Meta::SceneEnvironment>(c.Primary, c.Common);
@@ -140,7 +142,8 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         _post->BeginPlan();
         _environment->Append(g, bindings);
         _lighting->SetHDRContinuation([&](auto& graph, auto& resources, auto* hdr, auto* probes) {
-            auto* finalHDR = _waterParticles->Append(graph, resources, *_geometry, *_environment, hdr, probes, recordingSerial);
+            auto* finalHDR = _waterParticles->Append(graph, resources, *_geometry, *_environment, hdr, probes,
+                _lighting->ProbeRadiance(recordingSerial), recordingSerial);
             // Diagnostic A/B still compares the existing geometry/lighting readbacks.
             // Stateful post/SDK and screen UI execute once on the displayed frame.
             if (!verify || !recordingSerial)
@@ -161,7 +164,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         _lighting->AppendAO(g, bindings);
     };
     const auto prelude = [&](Meta::Graph& graph, std::vector<ID3D12Resource*>& resources) {
-        _post->AppendPosters(graph, resources);
+        _post->AppendPosters(graph, resources, !verify || recordingSerial);
     };
     const auto reserve = [&] {
         uint64_t lists = 0;

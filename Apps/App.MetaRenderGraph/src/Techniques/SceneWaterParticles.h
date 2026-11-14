@@ -15,7 +15,7 @@ public:
     ~SceneWaterParticles();
     void Prepare(float delta);
     GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&,
-        GDX12Texture* reflectedHDR, GDX12Texture* probes, bool serial);
+        GDX12Texture* reflectedHDR, GDX12Texture* probes, D3D12_GPU_DESCRIPTOR_HANDLE probeRadiance, bool serial);
     bool Record(Id id, ID3D12GraphicsCommandList* commands) const { return _work.Record(id, commands); }
     void Reset();
     void Resize(); // caller drained Executor

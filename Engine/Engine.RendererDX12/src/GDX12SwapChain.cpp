@@ -111,6 +111,8 @@ void GDX12SwapChain::Present()
     _frameGeneration->AfterPresent();
 }
 
+bool GDX12SwapChain::NeedsPresentationReset() const { return _frameGeneration->NeedsRecreate(); }
+
 void GDX12SwapChain::BeginFrame(RenderPipelineCommonData& common)
 {
     if (_frameGeneration->NeedsRecreate())

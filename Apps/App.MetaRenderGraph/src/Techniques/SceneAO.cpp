@@ -255,7 +255,8 @@ void SceneAO::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings)
         for (UINT mip = 0; mip < 5; ++mip)
             uavs[2 + mip] = &grid.DepthUAVs[mip];
         dispatch("XeGTAO depth pyramid", p.XePrefilter, grid.XeDepth.GetWidth() / 2, grid.XeDepth.GetHeight() / 2,
-                 {access(depth, Mode::Read, read), access(&grid.XeDepth, Mode::Write, UnorderedAccess)},
+                 {access(depth, Mode::Read, read), access(&grid.Normals, Mode::Read, read),
+                  access(&grid.XeDepth, Mode::Write, UnorderedAccess)},
                  {depth, &grid.Normals}, uavs);
         dispatch("XeGTAO main", p.XeMain, _width, _height,
                  {access(&grid.XeDepth, Mode::Read, read), access(&grid.Normals, Mode::Read, read),

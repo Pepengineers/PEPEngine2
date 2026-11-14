@@ -36,6 +36,7 @@ class MetaRenderPipeline final : public IRenderPipeline
         if (_executor) _executor->Drain();
         if (_crossAdapter) _crossAdapter->Stop();
         if (_waterTransfer) _waterTransfer->Stop();
+        if (_post) _post->ReleasePresentation();
     }
     void UpdateFrameSettings(RenderPipelineContext& c) override
     {

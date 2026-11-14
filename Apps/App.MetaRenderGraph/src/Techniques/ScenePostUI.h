@@ -27,12 +27,13 @@ public:
     bool AllowsFrameGeneration() const;
     void UpdateSettings();
     void PrepareMaterials();
+    void ReleasePresentation() { for (auto& slot : _slots) slot.CompositeOwner.reset(); }
     void Resize(); // Caller drains the executor and the presentation queue first.
     void Reset();
     void Append(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr,
         GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion,
         GDX12Texture* target, const std::function<void(GDX12CommandList*)>& finish);
-    void AppendPosters(Graph&, std::vector<ID3D12Resource*>&);
+    void AppendPosters(Graph&, std::vector<ID3D12Resource*>&, bool record = true);
     bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd); }
 private:
     Id Packet(Graph&, std::vector<ID3D12Resource*>&, const char*,

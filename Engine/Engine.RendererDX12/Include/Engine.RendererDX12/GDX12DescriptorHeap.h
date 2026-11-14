@@ -24,6 +24,7 @@ public:
     // Returns index of the first non-taken slot in the heap, starting from given index
     // maxRange == 0 means no range
     UINT GetAvailableIndex(UINT startIndex = 0, UINT maxRange = 0);
+    void UseTransientDescriptorTail() { _transientDescriptorTail = true; }
     D3D12_CPU_DESCRIPTOR_HANDLE GetCPUHandle(UINT index = 0) const;
     D3D12_GPU_DESCRIPTOR_HANDLE GetGPUHandle(UINT index = 0) const;
 
@@ -43,6 +44,7 @@ private:
 
     // Contains bool IsSlotOccupied for each slot in heap
     std::vector<bool> _occupanceRegistry;
+    bool _transientDescriptorTail = false;
 };
 
 // Don't forget to update these values in CBufferStructures.hlsl
