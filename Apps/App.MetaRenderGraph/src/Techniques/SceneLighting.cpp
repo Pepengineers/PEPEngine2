@@ -443,6 +443,9 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         cmd->DrawInstanced(3, 1, 0, 0);
     });
+    auto* displayHDR = _composition.OUT_Result.get();
+    if (_hdrContinuation)
+        displayHDR = _hdrContinuation(graph, bindings, &p._color, _reflections.Published(serial));
     // A diagnostic display of intermediate HDR only; U7 reconstruction, output
     // providers, frame generation and the full post chain remain untouched.
     if (!_displayRoot)
@@ -475,13 +478,13 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     }
     auto *displayRoot = _displayRoot.get();
     auto *displayPSO = _displayPipeline.Get();
-    const auto displayInput = _composition.OUT_Result->GetSRV()->GPUHandle;
+    const auto displayInput = displayHDR->GetSRV()->GPUHandle;
     const auto displayTarget = target->GetRTV()->CPUHandle;
     const auto viewport = target->GetViewport();
     const auto scissor = target->GetScissorRect();
     auto *nativeTarget = target->GetResource()->D3DResource.Get();
     work.Add(graph, "diagnostic intermediate HDR display",
-             {texture(_composition.OUT_Result.get(), Mode::Read, read),
+             {texture(displayHDR, Mode::Read, read),
               texture(target, Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET)},
              [=](auto *cmd) {
                  cmd->SetDescriptorHeaps(1, &heap);

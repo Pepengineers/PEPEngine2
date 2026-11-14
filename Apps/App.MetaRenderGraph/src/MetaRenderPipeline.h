@@ -3,6 +3,7 @@
 #include "Techniques/SceneGeometry.h"
 #include "Techniques/SceneEnvironment.h"
 #include "Techniques/SceneLighting.h"
+#include "Techniques/SceneWaterParticles.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
 class MetaRenderPipeline final : public IRenderPipeline
 {
@@ -13,13 +14,17 @@ class MetaRenderPipeline final : public IRenderPipeline
     void SetVerification(bool verify)
     {
         if (_verify != verify && _lighting)
+        {
             _lighting->Reset();
+            if (_waterParticles) _waterParticles->Reset();
+        }
         _verify = verify;
     }
     void ValidateQueued();
     void Initialize(RenderPipelineContext &) override;
     void ResetWorldHistory() override
     {
+        if (_waterParticles) _waterParticles->Reset();
         if (_environment)
             _environment->ResetClouds();
         if (_lighting)
@@ -63,6 +68,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     std::unique_ptr<Meta::SceneGeometry> _geometry;
     std::unique_ptr<Meta::SceneEnvironment> _environment;
     std::unique_ptr<Meta::SceneLighting> _lighting;
+    std::unique_ptr<Meta::SceneWaterParticles> _waterParticles;
     GDX12GPUCullingPass _sceneFlags;
     std::unique_ptr<Meta::Executor> _executor;
     Meta::Schedule _schedule;

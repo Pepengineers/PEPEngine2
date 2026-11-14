@@ -26,6 +26,9 @@ public:
     void Execute(GDX12CommandList* commands) override;
     void SetInstances(std::vector<GDX12FluidInstance> instances);
     void PrepareFrame();
+    void SetLocalExecution(bool enabled) { _localOnly = enabled; }
+    std::vector<GDX12Resource*> NativeResources() const;
+    GDX12Texture* NativeColor() const { return _rendering ? _color.get() : nullptr; }
     void ExecuteSimulation(GDX12CommandList* commands);
     std::vector<GDX12RenderGraph::BufferAccess> GetSimulationBufferAccesses() const;
     std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override;
@@ -66,6 +69,7 @@ private:
     std::unique_ptr<GDX12Texture> _filtered[2];
     std::unique_ptr<GDX12Texture> _depth, _motion, _geometry, _owner, _color;
     GDX12FluidControls _controls = { false, 0 };
+    bool _localOnly = false;
     bool _rendering = false;
     bool _simulating = false;
     bool _prepared = false;

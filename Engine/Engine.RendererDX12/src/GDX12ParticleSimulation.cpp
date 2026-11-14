@@ -87,7 +87,7 @@ std::vector<GDX12Resource*> GDX12ParticleSimulation::GetPoolResources() const
     return result;
 }
 
-void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common)
+void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common, bool localOnly)
 {
     resources->ParticleMotion = nullptr;
     const auto global = GetParticleSettings();
@@ -137,7 +137,7 @@ void GDX12ParticleSimulation::BeginFrame(GDX12DeviceResources* resources, Render
     state.ResetMotion = common.ResetHistory;
     std::vector<GDX12ParticleEmitter> remote;
     ComPtr<IDXGIAdapter4> adapter;
-    if (std::any_of(emitters.begin(), emitters.end(), CanOffloadParticleEmitter))
+    if (!localOnly && std::any_of(emitters.begin(), emitters.end(), CanOffloadParticleEmitter))
     {
         if (!state.AdapterResolved)
         {
@@ -350,4 +350,12 @@ void GDX12ParticleSimulation::Execute(GDX12CommandList* commands, GDX12DeviceRes
             pool.Alive[pool.ReadIndex ^ 1]->GetResource().GetNonPixelShaderResourceBarrier() });
         pool.ReadIndex ^= 1;
     }
+}
+
+std::vector<GDX12Resource*> GDX12ParticleSimulation::GetConstantResources(UINT slot) const
+{
+    std::vector<GDX12Resource*> result;
+    if (_state && _state->Active)
+        for (const auto& entry : _state->Pools) result.push_back(&entry.second->Constants.at(slot)->GetResource());
+    return result;
 }

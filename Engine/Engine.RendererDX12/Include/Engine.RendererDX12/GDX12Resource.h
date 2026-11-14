@@ -1,9 +1,13 @@
 #pragma once
+#include <vector>
+#include <utility>
 
 #include "Engine.RendererDX12/GDX12ResourceHandle.h"
 
 #include "Engine.RendererDX12/D3DHelpers.h"
 
+// A recording-local tracker redirects legacy barrier helpers without changing published state.
+class GDX12RecordingStates;
 class GDX12Resource
 {
 public:
@@ -44,4 +48,21 @@ public:
 private:
 	D3D12_RESOURCE_STATES _currentState;
     bool _concurrentRead = false;
+};
+
+// Opt-in, thread-local and strict: every physical resource must be declared by
+// the packet. Boundary states are restored before the list closes.
+class GDX12RecordingStates
+{
+public:
+    using Binding = std::pair<ID3D12Resource*, D3D12_RESOURCE_STATES>;
+    explicit GDX12RecordingStates(const std::vector<Binding>&);
+    ~GDX12RecordingStates();
+    GDX12RecordingStates(const GDX12RecordingStates&) = delete;
+    GDX12RecordingStates& operator=(const GDX12RecordingStates&) = delete;
+    void Finish(ID3D12GraphicsCommandList*);
+    static D3D12_RESOURCE_STATES* Find(ID3D12Resource*);
+private:
+    std::vector<Binding> _states, _boundary;
+    static thread_local GDX12RecordingStates* _active;
 };

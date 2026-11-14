@@ -117,9 +117,10 @@ class GDX12ParticleSimulation
 public:
     GDX12ParticleSimulation();
     ~GDX12ParticleSimulation();
-    void BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common);
+    void BeginFrame(GDX12DeviceResources* resources, RenderPipelineCommonData& common, bool localOnly = false);
     void InitializePools(GDX12CommandList* commands, GDX12DeviceResources* resources);
     std::vector<GDX12Resource*> GetPoolResources() const;
+    std::vector<GDX12Resource*> GetConstantResources(UINT slot) const;
     std::vector<GDX12Resource*> GetOffloadResources() const;
     GDX12Resource* GetImportedResource() const;
     GDX12Resource* GetOffloadInteractionResource() const;

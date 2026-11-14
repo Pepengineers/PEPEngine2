@@ -11,6 +11,7 @@
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Common/ConsoleVariables.h"
 #include <fstream>
+#include <exception>
 namespace
 {
 AutoConsoleVariable<bool> MetaClouds(L"Meta.Clouds.Enabled", false, L"Select the local MetaRenderGraph cloud source.",
@@ -23,12 +24,13 @@ void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
     _geometry = std::make_unique<Meta::SceneGeometry>(c);
     _environment = std::make_unique<Meta::SceneEnvironment>(c.Primary, c.Common);
     _lighting = std::make_unique<Meta::SceneLighting>(c.Primary, c.Common);
+    _waterParticles = std::make_unique<Meta::SceneWaterParticles>(c);
     _sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_GEOMETRY, true);
     _sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_MATERIALS, true);
     _bindings.PrimaryPasses = {&_sceneFlags};
     _executor = std::make_unique<Meta::Executor>(*c.Primary.Device,
                                                  static_cast<uint32_t>(c.Primary.FrameConstants.size()), 1024);
-    Log::Info("MetaRenderGraph", "U5 lighting/reflections DIRECT executor selected; legacy graph Execute disabled");
+    Log::Info("MetaRenderGraph", "U6 water/particles DIRECT executor selected; legacy graph Execute disabled");
 }
 void MetaRenderPipeline::BuildGraph(GDX12RenderGraph &, const RenderPipelineGraphInputs &)
 {
@@ -37,6 +39,7 @@ void MetaRenderPipeline::BuildGraph(GDX12RenderGraph &, const RenderPipelineGrap
 void MetaRenderPipeline::RebuildExecution(RenderPipelineContext &c)
 {
     _executor->Drain();
+    _waterParticles->Resize();
     _geometry->Resize(c.Common.WindowWidth, c.Common.WindowHeight);
     _environment->Resize();
 }
@@ -62,6 +65,12 @@ void MetaRenderPipeline::ValidateQueued()
 uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12CommandList *prefix,
                                           const std::function<void(GDX12CommandList *)> &finish)
 {
+    struct ResetOnFailure
+    {
+        Meta::SceneWaterParticles& Techniques;
+        int Exceptions = std::uncaught_exceptions();
+        ~ResetOnFailure() { if (std::uncaught_exceptions() > Exceptions) Techniques.Reset(); }
+    } resetOnFailure{*_waterParticles};
     const bool verify = _verify;
     const auto slot = c.Primary.CurrFrameConstantsIndex;
     _executor->Begin(slot);
@@ -84,10 +93,14 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
     const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
     _environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0);
     _lighting->Freeze(*_geometry, slot);
+    _waterParticles->Prepare(float(delta));
     auto *target = c.BackBuffer->GetCurrentBuffer();
     bool recordingSerial = verify;
     const auto append = [&](Meta::Graph &g, std::vector<ID3D12Resource *> &bindings) {
         _environment->Append(g, bindings);
+        _lighting->SetHDRContinuation([&](auto& graph, auto& resources, auto* hdr, auto* probes) {
+            return _waterParticles->Append(graph, resources, *_geometry, *_environment, hdr, probes, recordingSerial);
+        });
         _lighting->Append(g, bindings, *_geometry, *_environment, target, recordingSerial);
     };
     const auto earlyAO = [&](Meta::Graph &g, std::vector<ID3D12Resource *> &bindings) {
@@ -117,7 +130,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
             (Engine::Core::GetExecutableDirectory() / "Logs" / ("geometry-" + std::to_string(_frame))).string();
         const auto bindings = _geometry->PlannedResources(slot);
         const auto record = [&](Meta::Id op, uint32_t list, ID3D12GraphicsCommandList *cmd) {
-            if (!_environment->Record(op, cmd) && !_lighting->Record(op, cmd))
+            if (!_environment->Record(op, cmd) && !_lighting->Record(op, cmd) && !_waterParticles->Record(op, cmd))
                 _geometry->Record(slot, op, list, cmd, target->GetResource()->D3DResource.Get());
         };
         const auto serialCompletion = _executor->Execute(_schedule, bindings, record, prefix, nullptr, true);
@@ -154,7 +167,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
     const auto point = _executor->Execute(
         _schedule, _geometry->PlannedResources(slot),
         [&](Meta::Id op, uint32_t list, ID3D12GraphicsCommandList *cmd) {
-            if (!_environment->Record(op, cmd) && !_lighting->Record(op, cmd))
+            if (!_environment->Record(op, cmd) && !_lighting->Record(op, cmd) && !_waterParticles->Record(op, cmd))
                 _geometry->Record(slot, op, list, cmd, target->GetResource()->D3DResource.Get());
         },
         prefix, suffix);

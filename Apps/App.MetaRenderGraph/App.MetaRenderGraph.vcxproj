@@ -107,6 +107,12 @@
     <ClCompile Include="src\Techniques\SceneAO.cpp" />
     <ClCompile Include="src\Techniques\SceneReflections.cpp" />
     <ClCompile Include="src\Techniques\SceneLighting.cpp" />
+    <ClCompile Include="src\Techniques\SceneWaterParticles.cpp" />
+    <ClCompile Include="..\App\src\Rendering\Water\GDX12Fluid.cpp" />
+    <ClCompile Include="..\App\src\Rendering\Water\GDX12FluidPass.cpp" />
+    <ClCompile Include="..\App\src\Rendering\Water\GDX12WaterOffload.cpp" />
+    <ClCompile Include="..\App\src\Rendering\Water\BistroWaterRendering.cpp" />
+    <ClInclude Include="src\Techniques\SceneWaterParticles.h" />
     <ClCompile Include="src\Techniques\SceneShadows.cpp" />
     <ClCompile Include="src\Techniques\SceneGrass.cpp" />
     <ClCompile Include="tests\DirectExecutionGpuTests.cpp" />

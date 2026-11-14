@@ -9,6 +9,7 @@ class SceneGrass {
 public:
     explicit SceneGrass(RenderPipelineContext&);
     void Prepare(RenderPipelineContext&,float dt);
+    GDX12ParticleInteractionField InteractionField() const { return _gpu[_mode]->InteractionField(); }
     void Select(bool serial) { _mode=serial?0:1; }
     std::vector<ID3D12Resource*> Append(Graph&,UINT slot,const std::vector<ID3D12Resource*>& existing,GDX12Descriptor& materials,
         const std::vector<GeometryTarget>& targets,bool viewsOnly=false,
