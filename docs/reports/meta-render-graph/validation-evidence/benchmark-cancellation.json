@@ -1,0 +1,127 @@
+{
+  "utc": "2026-11-14T12:29:11.879602+00:00",
+  "reason": "User narrowed scope to minimum GPU-result correctness and explicitly stopped all further tests/builds/benchmarks/captures/profiling.",
+  "source_head": "df572e23be8a16f2fc9c1bd386e79d5661ddfaed",
+  "series": [
+    {
+      "label": "ordinary-native-queues-01-direct",
+      "status": "passed",
+      "evidence_state": "Build\\Verification\\meta-render-graph-u1-u8\\ordinary-native-queues-01-direct.json",
+      "use": "Historical complete partial-series evidence only; no A/B aggregate conclusion"
+    },
+    {
+      "label": "ordinary-native-queues-02-async",
+      "status": "passed",
+      "evidence_state": "Build\\Verification\\meta-render-graph-u1-u8\\ordinary-native-queues-02-async.json",
+      "use": "Historical complete partial-series evidence only; no A/B aggregate conclusion"
+    },
+    {
+      "label": "ordinary-native-queues-03-async",
+      "status": "cancelled",
+      "evidence_state": "Build\\Verification\\meta-render-graph-u1-u8\\ordinary-native-queues-03-async.json",
+      "use": "Historical complete partial-series evidence only; no A/B aggregate conclusion"
+    },
+    {
+      "label": "ordinary-native-queues-04-direct",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-native-queues-05-direct",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-native-queues-06-async",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-native-recording-01-serial",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-native-recording-02-parallel",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-native-recording-03-parallel",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-native-recording-04-serial",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-native-recording-05-serial",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-native-recording-06-parallel",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-native-long-async01",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-fsr-queues-01-direct",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-fsr-queues-02-async",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-fsr-queues-03-async",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-fsr-queues-04-direct",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-fsr-queues-05-direct",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-fsr-queues-06-async",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-fsr-recording-01-serial",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-fsr-recording-02-parallel",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-fsr-recording-03-parallel",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-fsr-recording-04-serial",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-fsr-recording-05-serial",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-fsr-recording-06-parallel",
+      "status": "cancelled-not-started"
+    },
+    {
+      "label": "ordinary-fsr-long-async01",
+      "status": "cancelled-not-started"
+    }
+  ],
+  "further_workloads": "prohibited by current user scope",
+  "benchmark_status": "Stopped incomplete; instrumentation and protocol are historical review material, not an accepted feature or performance result.",
+  "owned_processes_remaining": [],
+  "terminated_process_ids": [
+    4668,
+    18028,
+    14896,
+    19556
+  ],
+  "process_absence_verified_utc": "2026-11-14T12:29:41.534141+00:00"
+}

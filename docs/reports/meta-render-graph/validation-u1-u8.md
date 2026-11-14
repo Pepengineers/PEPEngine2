@@ -139,7 +139,7 @@ FSR protocols retain `fsr-workload.csv`: each frame has 80 actual rendered parti
 (64 additive, 8 weighted, 8 sorted alpha) and dt=1/60; no empty-workload pass. A decoded display
 PNG was inspected and contains the expected geometry, grass, water and particles.
 
-## Remaining review / measurements
+## Historical measurement plan (withdrawn by user)
 
 This is a synthetic supported-technique fixture, not the full production Bistro
 scene. No Bistro FPS, ordinary renderer A/B speedup or GPU-overlap claim is made.
@@ -187,3 +187,16 @@ each long replay). Jolt is not registered in this host and is not claimed tested
 `benchmark-protocol.json` freezes the executable/DLL/shader/config hashes, exact
 fresh-process order and120+300 /120+1800 counts before ordinary measurements.
 Performance results and a separate GPU timeline remain pending at this checkpoint.
+
+## User stop and revised scope
+
+The user explicitly stopped all further tests, builds, benchmark comparisons,
+long runs, timelines/profiling and additional matrices. Scope is now the already
+obtained minimal GPU-result correctness; the earlier performance requirements are
+withdrawn. The owned benchmark runner/process tree was terminated, logs preserved,
+and unfinished runs marked cancelled rather than PASS. See
+`validation-evidence/benchmark-cancellation.json` for the completed-prefix and
+cancelled/unstarted entries. There is no complete A/B series or performance claim.
+The benchmark instrumentation/protocol commit remains historical review material;
+it is not an accepted feature. No more workloads are authorized by this checkpoint.
+U9/U10 remain blocked pending independent review and a separate user instruction.
