@@ -69,7 +69,8 @@ struct WaterTransfer::Impl {
     };
     GDX12Device& Primary;
     GDX12DescriptorHeap& PrimaryHeap;
-    GDX12Device Secondary;
+    std::shared_ptr<SimulationDomain> Domain;
+    GDX12Device& Secondary;
     std::shared_ptr<QueueSubmission> Submit;
     std::unique_ptr<Executor> Import;
     std::unique_ptr<GDX12DescriptorHeap> Heap;
@@ -94,20 +95,9 @@ struct WaterTransfer::Impl {
     std::exception_ptr Failure;
     std::thread::id Owner = std::this_thread::get_id();
 
-    Impl(GDX12Device& primary, GDX12DescriptorHeap& primaryHeap, int adapter)
-        : Primary(primary), PrimaryHeap(primaryHeap) {
-        if (adapter < 0) throw std::invalid_argument("Meta.Water requires an explicit secondary adapter");
-        ComPtr<IDXGIFactory6> factory; ThrowIfFailed(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory)));
-        ComPtr<IDXGIAdapter1> a, b;
-        ThrowIfFailed(factory->EnumAdapterByLuid(primary.GetAdapterLuid(), IID_PPV_ARGS(&a)));
-        ThrowIfFailed(factory->EnumAdapters1(UINT(adapter), &b));
-        DXGI_ADAPTER_DESC1 da{}, db{}; ThrowIfFailed(a->GetDesc1(&da)); ThrowIfFailed(b->GetDesc1(&db));
-        if ((da.Flags | db.Flags) & DXGI_ADAPTER_FLAG_SOFTWARE ||
-            (da.AdapterLuid.HighPart == db.AdapterLuid.HighPart && da.AdapterLuid.LowPart == db.AdapterLuid.LowPart))
-            throw std::invalid_argument("Meta.Water requires two distinct hardware adapters");
-        ComPtr<IDXGIAdapter4> selected; ThrowIfFailed(b.As(&selected));
-        ThrowIfFailed(Secondary.Initialize(selected));
-        Submit = std::make_shared<QueueSubmission>(Primary, &Secondary);
+    Impl(std::shared_ptr<SimulationDomain> domain, GDX12DescriptorHeap& primaryHeap)
+        : Primary(domain->Submissions->Device(0)), PrimaryHeap(primaryHeap),
+          Domain(std::move(domain)), Secondary(Domain->Secondary), Submit(Domain->Submissions) {
         Import = std::make_unique<Executor>(Submit, 0, Slots, 6, 2);
         Heap = std::make_unique<GDX12DescriptorHeap>(&Secondary, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
             TextureResources_StartIndex + TextureResources_RangeLength, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
@@ -119,9 +109,7 @@ struct WaterTransfer::Impl {
         PackPSO = GDX12RenderHelpers::CreateComputePipeline(&Secondary, PackRoot.get(), APP_SHADERS_FOLDER "WaterTransfer.hlsl", "Pack");
         DisplayPSO = GDX12RenderHelpers::CreateComputePipeline(&Primary, DisplayRoot.get(), APP_SHADERS_FOLDER "WaterTransfer.hlsl", "AdvanceDisplay");
         RepeatPSO = GDX12RenderHelpers::CreateComputePipeline(&Primary, DisplayRoot.get(), APP_SHADERS_FOLDER "WaterTransfer.hlsl", "RepeatDisplay");
-        Log::Info("MetaRenderGraph", "Water domain primary LUID=", da.AdapterLuid.HighPart, ":", da.AdapterLuid.LowPart,
-            " secondary index=", adapter, " LUID=", db.AdapterLuid.HighPart, ":", db.AdapterLuid.LowPart,
-            " incarnation=", Submit->Incarnation());
+        Log::Info("MetaRenderGraph", "Water shared simulation domain incarnation=", Submit->Incarnation());
     }
     void CheckOwner() const {
         if (Owner != std::this_thread::get_id()) throw std::logic_error("water host requires primary owner thread");
@@ -399,7 +387,9 @@ struct WaterTransfer::Impl {
 };
 
 WaterTransfer::WaterTransfer(GDX12Device& primary, GDX12DescriptorHeap& heap, int adapter)
-    : _impl(std::make_unique<Impl>(primary, heap, adapter)) {}
+    : WaterTransfer(std::make_shared<SimulationDomain>(primary, adapter), heap) {}
+WaterTransfer::WaterTransfer(std::shared_ptr<SimulationDomain> domain, GDX12DescriptorHeap& heap)
+    : _impl(std::make_unique<Impl>(std::move(domain), heap)) {}
 WaterTransfer::~WaterTransfer() {
     try { Stop(); } catch (...) {
         _impl->Cancel.store(true); _impl->Wake.notify_all();

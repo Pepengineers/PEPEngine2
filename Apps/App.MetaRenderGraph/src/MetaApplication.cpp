@@ -8,6 +8,7 @@
 #include "Engine.Core/AssetManager.h"
 #include "Components/BistroGrassComponents.h"
 #include "Components/BistroInteractionSource.h"
+#include "Components/FluidRenderComponent.h"
 #include <d3d12sdklayers.h>
 #include <fstream>
 #include <stdexcept>
@@ -127,18 +128,58 @@ namespace
             for(int z=0;z<16;++z)for(int x=0;x<16;++x)patch.RootsCm.push_back({float(x*20-150),0,float(z*20-150)});
             world.GetECS().RegisterComponent<BistroInteractionSource>();
             auto interaction=world.GetECS().CreateEntity();_interaction=interaction.GetId();interaction.AddComponent<BistroInteractionSource>();
-            auto emitter = world.GetECS().CreateEntity();
-            emitter.AddComponent<TransformComponent>();
-            GDX12ParticleEmitterSettings particles;
-            particles.Seed = 13;
-            particles.MaxParticles = 256;
-            particles.SharedSimulation = true; // Authoring fixture retained; particle passes migrate in U6.
-            particles.Blend = ParticleBlend::Additive;
-            particles.EmissionRate = 0;
-            auto& component = emitter.AddComponent<ParticleEmitterComponent>();
-            component.SetSettings(particles);
-            component.Emit(64);
-            SetWindowTextW(GetWindow()->GetWindowHandle(), L"MetaRenderGraph U5 - lighting and reflections");
+            if (_smoke)
+            {
+                auto emitter = world.GetECS().CreateEntity();
+                emitter.AddComponent<TransformComponent>();
+                GDX12ParticleEmitterSettings particles;
+                particles.Seed = 13; particles.MaxParticles = 256;
+                particles.SharedSimulation = true; particles.Blend = ParticleBlend::Additive;
+                particles.EmissionRate = 0;
+                auto& component = emitter.AddComponent<ParticleEmitterComponent>();
+                component.SetSettings(particles); component.Emit(64);
+            }
+            else
+            {
+                // Ordinary scene content stays visible and active without a verification harness.
+                auto& source = world.GetECS().Get<BistroInteractionSource>(_interaction);
+                source.PositionRadius = {FixtureOrigin.x + 70, FixtureOrigin.y - 75, FixtureOrigin.z - 100, 65};
+                source.PreviousHeight = {FixtureOrigin.x + 70, FixtureOrigin.y - 75, FixtureOrigin.z - 100, 140};
+                for (UINT i = 0; i < 4; ++i)
+                {
+                    auto emitter = world.GetECS().CreateEntity();
+                    emitter.AddComponent<TransformComponent>(FixtureOrigin + Vector3{float(int(i) * 110 - 165), -40, -100});
+                    GDX12ParticleEmitterSettings particles;
+                    particles.Seed = 13 + i; particles.MaxParticles = 256;
+                    particles.EmissionRate = 45; particles.LifetimeMin = 2; particles.LifetimeMax = 3;
+                    particles.SpeedMin = 45; particles.SpeedMax = 75; particles.Acceleration = {0, -40, 0};
+                    particles.SizeStart = 7; particles.SizeEnd = 2;
+                    particles.SharedSimulation = i >= 2;
+                    particles.DepthCollision = (i & 1) != 0;
+                    particles.InteractionEnabled = i == 2;
+                    particles.Blend = i < 2 ? ParticleBlend::SortedAlpha : ParticleBlend::WeightedAlpha;
+                    particles.ColorStart = i < 2 ? Vector4(1, .3f, .1f, .8f) : Vector4(.1f, .7f, 1, .8f);
+                    auto& component = emitter.AddComponent<ParticleEmitterComponent>();
+                    component.SetSettings(particles); component.Emit(32);
+                }
+                auto water = world.GetECS().CreateEntity();
+                water.AddComponent<TransformComponent>(FixtureOrigin + Vector3{0, -50, -170});
+                auto& fluid = water.AddComponent<FluidRenderComponent>();
+                GDX12FluidSettings settings;
+                settings.ContainerHalfExtentCm = {55, 20, 35};
+                settings.ParticleRadiusCm = 2; settings.SmoothingRadiusCm = 6;
+                settings.MaxSubsteps = 3; settings.FilterRadiusPixels = 4;
+                settings.AccelerationCmPerSecond2 = {0, -120, 0};
+                fluid.SetSettings(settings);
+                std::vector<GDX12FluidParticle> seed;
+                for (int z = 0; z < 12; ++z)
+                    for (int y = 0; y < 6; ++y)
+                        for (int x = 0; x < 16; ++x)
+                            seed.push_back({Vector3{float(x * 4 - 30), float(y * 3 - 8), float(z * 4 - 22)},
+                                Vector3{x < 8 ? -18.f : 18.f, 0, 0}});
+                fluid.SetParticles(std::move(seed));
+            }
+            SetWindowTextW(GetWindow()->GetWindowHandle(), L"MetaRenderGraph - procedural water and particle scene");
             return true;
         }
         void Smoke()
