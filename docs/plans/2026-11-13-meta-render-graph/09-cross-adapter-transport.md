@@ -18,7 +18,7 @@ date: 2026-11-13
 
 Расширить Graph queue/device identity; добавить `Apps/App.MetaRenderGraph/src/Graph/CrossAdapterTransfer.*`, `PublicationSlots.*`, `ProducerLoop.*` только по фактической потребности. Не строить новый универсальный placement/quality runtime.
 
-Тесты: `Apps/App.MetaRenderGraph/tests/CrossAdapterPlanTests.cpp`, `CrossAdapterTransportGpuTests.cpp`; небольшой fixture shader в собственном каталоге. Ориентир low-level cross-adapter handles/fences: `Apps/App/src/Rendering/Water/GDX12WaterOffload.cpp`, существующие WaterOffloadGpuTests. Отчёт `docs/reports/meta-render-graph/09-cross-adapter-transport.md`.
+Пути fixtures как ориентиры (создание и расширение не требуются): `Apps/App.MetaRenderGraph/tests/CrossAdapterPlanTests.cpp`, `CrossAdapterTransportGpuTests.cpp`; небольшой fixture shader в собственном каталоге. Ориентир low-level cross-adapter handles/fences: `Apps/App/src/Rendering/Water/GDX12WaterOffload.cpp`, существующие WaterOffloadGpuTests. Отчёт `docs/reports/meta-render-graph/09-cross-adapter-transport.md`.
 
 ## Approach
 
@@ -29,16 +29,10 @@ date: 2026-11-13
 5. Independent loops создают свои inputs/recording jobs/submissions и не требуют общей frame barrier. В каждом цикле используются существующие slots; отсутствие свободного slot не разрешает overwrite или unbounded allocation. Producer может продолжить расчёт в собственных безопасных resources без обязательной публикации результата.
 6. Выполнить реальные CPU recording jobs для обеих карт параллельно, с отдельными contexts и общим механизмом очередей. Развести ожидание свободного ресурса/continuation и блокирование worker pool. Зафиксировать поведение producer failure и orderly stop, чтобы primary не остался навсегда ждать невыданный token.
 
-## Test Scenarios
+## Smoke-check
 
-- Производитель заполняет payload известной последовательностью, primary readback побитно совпадает для выбранного sequence через несколько оборотов всех слотов.
-- Primary быстрее secondary и наоборот: последний готовый результат корректен, нет частичной копии, overwrite или зависимости на frame index другой карты.
-- Primary Present временно не вызывается, secondary producer продолжает шаги; отсутствие потребления не портит опубликованные данные.
-- Strict и LatestCompleted различаются выбором версии, а не отключением fences. Заранее готовый результат не вызывает ненужный CPU wait.
-- Two-reader display resource возвращается в reuse только после обоих readers; cross-iteration зависимости не создают взаимного ожидания.
-- Нет второй карты / выбрана та же карта: явная диагностика конфигурации, без выдачи single-GPU fallback за успешный MGPU-тест.
-- Shutdown с заполненными slots и GPU in-flight завершается без use-after-free; packet error не публикует фиктивный successful result.
+Применяется [общий порядок проверки](00-meta-plan.md#verification-contract). Результат GPU-производителя второй карты доходит до потребителя основной карты. Достаточно обычного короткого запуска без явных ошибок; уже полученный результат можно использовать повторно без нового прогона.
 
 ## Acceptance and Handoff
 
-Две реальные карты, exact payload checks, debug layer и timeline с реальным COMPUTE/COPY/DIRECT исполнением. Записать adapters/LUIDs, bytes, publication sequences, waits/signals и source paths. Без такого оборудования результат — hardware validation pending, U9 не принят. Математика production solver здесь ещё не проверяется. Локальный коммит. Следующее задание: [U10](10-mgpu-water.md).
+Указать использованные адаптеры и путь публикации между картами. Кратко записать commit, выбранный режим и итог: работает / не работает / не запускалось, с причиной при наличии. Локальный коммит только своих изменений. Следующее задание: [U10](10-mgpu-water.md); переходить только в разрешённых пользователем пределах.

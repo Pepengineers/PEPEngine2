@@ -20,7 +20,7 @@ date: 2026-11-13
 
 Experimental particle adapters, shared publication/producer APIs U9, scene controls нового приложения. Переиспользовать актуальные `ParticleEmitterComponent.h`, `GDX12Particles.h`, `GDX12ParticleSimulation.cpp`, `GDX12ParticlesPass.cpp`, `GDX12ParticleOffload.*` и `ParticleTransfer.hlsl`, если они к этому моменту приняты; не плодить вторую отметку эмиттера с тем же смыслом.
 
-Тесты: `Apps/App.MetaRenderGraph/tests/ParticleOffloadGpuTests.cpp`, `MixedEmitterSceneTests.cpp`, `CombinedMgpuSceneTests.cpp`. Отчёт `docs/reports/meta-render-graph/11-mgpu-particles.md`.
+Пути fixtures как ориентиры (создание и расширение не требуются): `Apps/App.MetaRenderGraph/tests/ParticleOffloadGpuTests.cpp`, `MixedEmitterSceneTests.cpp`, `CombinedMgpuSceneTests.cpp`. Отчёт `docs/reports/meta-render-graph/11-mgpu-particles.md`.
 
 ## Approach
 
@@ -32,16 +32,10 @@ Experimental particle adapters, shared publication/producer APIs U9, scene contr
 6. При изменении DepthCollision/отметки завершить использование старого размещения и не выполнить шаг дважды. Сохранить существующий принятый контракт миграции/reset; если он отсутствует, явно описать reset на смене размещения, не отключать depth collision молча. Изменение состава требует новой generation метаданных и защиты старых результатов.
 7. Проверить работу совместно с водой без обязательного water+particles batch barrier. Не ставить основной frame за будущим secondary результатом, когда выбран LatestCompleted.
 
-## Test Scenarios
+## Smoke-check
 
-- 0/1/много отмеченных эмиттеров и смешанная сцена: каждый симулируется ровно на выбранном устройстве; DepthCollision=true никогда не выполняется secondary.
-- Оба интегратора, same-step/inputs/dt comparison, birth/death/burst/pause/reset и нужные interaction/box/volume inputs сохраняют модель.
-- Exact общий payload и metadata после многих переиспользований; import/export copy count не зависит от числа emitter records.
-- Пустая новая публикация убирает умершие частицы; late result не возвращает удалённый/reset emitter; history не связывает разные рождения в одном pool slot.
-- DIRECT/COMPUTE/secondary группы перемешаны по глубине, но прозрачность рисуется правильно; soft particles используют primary depth.
-- Вода и частицы прогрессируют при замедлении одной техники, основной рендер продолжает показывать готовые результаты; нет shared-fence deadlock.
-- Resize/shutdown с queued export/import и изменением отметки проходят debug layer на выбранной паре карт.
+Применяется [общий порядок проверки](00-meta-plan.md#verification-contract). Перенесённые частицы и вода рассчитываются на второй карте и отображаются в общей сцене. Достаточно обычного короткого запуска без явных ошибок; уже полученный результат можно использовать повторно без нового прогона.
 
 ## Acceptance and Handoff
 
-Совместный двухкарточный fixture и сцена с численным/байтовым/визуальным доказательством, queue timeline и списком placements. Отчёт явно учитывает bytes/copies/submissions, реальные steps и непроверенные режимы. Локальный коммит. Следующее задание: [U12](12-acceptance.md).
+Указать размещение эмиттеров и общий путь передачи particle payload. Кратко записать commit, выбранный режим и итог: работает / не работает / не запускалось, с причиной при наличии. Локальный коммит только своих изменений. Следующее задание: [U12](12-acceptance.md); переходить только в разрешённых пользователем пределах.
