@@ -44,7 +44,7 @@ void CS(uint3 id : SV_DispatchThreadID)
     if (instance.CastsShadows == 0) return;
     Material material = MaterialCache[instance.MaterialIndex];
     if (material.RenderLayer == 2 || material.ReflectionProbePreview != 0) return;
-    for (uint cascade = 0; cascade < 4; ++cascade)
+    for (uint cascade = 0; cascade < CBShadow.CascadeCount; ++cascade)
     {
         if (!Visible(instance, CBShadow.ViewProj[cascade])) continue;
         uint index;

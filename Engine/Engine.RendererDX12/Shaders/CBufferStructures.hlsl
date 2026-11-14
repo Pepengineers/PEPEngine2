@@ -82,6 +82,8 @@ struct ShadowCB
     float4x4 ViewProj[4];
     float4 SplitDepths;
     float4 TexelWorldSize;
+    uint CascadeCount;
+    uint3 Padding;
 };
 
 struct LocalLight

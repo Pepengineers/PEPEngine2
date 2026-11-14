@@ -28,8 +28,10 @@ struct GDX12ShadowConstants
     XMFLOAT4X4 ViewProj[4] = { Identity4x4(), Identity4x4(), Identity4x4(), Identity4x4() };
     XMFLOAT4 SplitDepths = {};
     XMFLOAT4 TexelWorldSize = {};
+    UINT CascadeCount = 4;
+    UINT _padding[3] = {};
 };
-static_assert(sizeof(GDX12ShadowConstants) == 288);
+static_assert(sizeof(GDX12ShadowConstants) == 304);
 
 struct GDX12MaterialConstants
 {

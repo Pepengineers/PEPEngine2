@@ -42,7 +42,7 @@ void SceneShadows::Freeze(UINT index,const std::array<D3D12_GPU_DESCRIPTOR_HANDL
     struct Input { GDX12LocalLightConstants Constants; UINT Resolution; bool Sun; };
     std::vector<Input> inputs;
     if((_resources.Lighting.SunShadowFlags&1) && _resources.ShadowQuality.SunResolution) {
-        for(UINT i=0;i<4;++i) { GDX12LocalLightConstants light; light.ShadowViewProj[0]=_resources.ShadowSettings.ViewProj[i]; inputs.push_back({light,_resources.ShadowQuality.SunResolution,true}); }
+        for(UINT i=0;i<_resources.ShadowSettings.CascadeCount;++i) { GDX12LocalLightConstants light; light.ShadowViewProj[0]=_resources.ShadowSettings.ViewProj[i]; inputs.push_back({light,_resources.ShadowQuality.SunResolution,true}); }
     }
     if(_resources.ShadowQuality.LocalResolution) for(const auto& light:_resources.LocalLights) {
         if(!(light.ShadowFlags&1)) continue;

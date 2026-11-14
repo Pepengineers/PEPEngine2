@@ -143,7 +143,8 @@ private:
             {
                 const auto& lighting = renderModule->GetLightingSettings();
                 const auto shadows = BuildShadowCascades(view.Invert(), FOV, renderModule->GetAspectRatio(),
-                    camera.NearPlane, camera.FarPlane, Vector3(lighting.LightDirection), nullptr, sunShadowResolution);
+                    camera.NearPlane, camera.FarPlane, Vector3(lighting.LightDirection), nullptr, sunShadowResolution,
+                    renderModule->GetShadowQuality().SunCascades);
                 renderModule->SubmitCameraShadows(shadows);
             }
 

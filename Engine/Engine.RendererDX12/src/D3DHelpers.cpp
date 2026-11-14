@@ -3,6 +3,8 @@
 #include <Engine.RendererDX12/D3DHelpers.h>
 #include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
+#include "Engine.Core/Logging/Logger.h"
+#include <mutex>
 
 namespace
 {
@@ -12,6 +14,23 @@ namespace
     AutoConsoleVariable<UINT> LocalShadowSize(L"Render.Shadows.Local.Resolution", LocalShadowResolution,
         L"Texels per point or spot shadow face: 0 Off, 128, 256, 384, 512 or 1024. Applies at the frame boundary.",
         EConsoleVariableFlags::Default, [](UINT value) { return value == 0 || IsLocalShadowResolution(value); });
+    AutoConsoleVariable<UINT> SunCascadeCount(L"Render.Shadows.Sun.CascadeCount", 4u,
+        L"Number of sun cascades, 1..4. Applies at the frame boundary.",
+        EConsoleVariableFlags::Default, [](UINT value) { return value >= 1 && value <= 4; });
+    AutoConsoleVariable<float> SunMaxDistance(L"Render.Shadows.Sun.MaxDistance", 6000.0f,
+        L"Maximum sun shadow distance in scene units (Bistro: centimetres), also limited by camera far plane.",
+        EConsoleVariableFlags::Default, [](float value) { return value >= 0 && value <= 1e9f; });
+    AutoConsoleVariable<bool> SunAutomaticSplits(L"Render.Shadows.Sun.AutomaticSplits", true,
+        L"Use the original logarithmic/linear cascade distribution. False uses normalized CascadeSplit1..3.");
+    AutoConsoleVariable<float> SunSplit1(L"Render.Shadows.Sun.CascadeSplit1", 0.067f,
+        L"First cascade boundary as a fraction of the shadow distance, 0..1 exclusive. Used with AutomaticSplits=false.",
+        EConsoleVariableFlags::Default, [](float value) { return value > 0 && value < 1; });
+    AutoConsoleVariable<float> SunSplit2(L"Render.Shadows.Sun.CascadeSplit2", 0.2f,
+        L"Second cascade boundary; requires three or four cascades and Split1 < Split2 < 1.",
+        EConsoleVariableFlags::Default, [](float value) { return value > 0 && value < 1; });
+    AutoConsoleVariable<float> SunSplit3(L"Render.Shadows.Sun.CascadeSplit3", 0.467f,
+        L"Third cascade boundary; requires four cascades and Split2 < Split3 < 1.",
+        EConsoleVariableFlags::Default, [](float value) { return value > 0 && value < 1; });
     AutoConsoleVariable<UINT> TextureAnisotropy(L"Render.Textures.Anisotropy", 8u,
         L"Anisotropic material filtering: 2, 4, 8 or 16. Restart required for static samplers.",
         EConsoleVariableFlags::ReadOnly, [](UINT value) { return value == 2 || value == 4 || value == 8 || value == 16; });
@@ -19,7 +38,35 @@ namespace
 
 GDX12ShadowQuality ReadShadowQuality()
 {
-    return { SunShadowSize.GetValue(), LocalShadowSize.GetValue() };
+    static std::mutex mutex;
+    std::scoped_lock lock(mutex);
+    GDX12ShadowQuality result{SunShadowSize.GetValue(), LocalShadowSize.GetValue()};
+    auto& cascades = result.SunCascades;
+    cascades.Count = SunCascadeCount.GetValue();
+    cascades.MaxDistance = SunMaxDistance.GetValue();
+    cascades.AutomaticSplits = SunAutomaticSplits.GetValue();
+    cascades.Splits = {SunSplit1.GetValue(), SunSplit2.GetValue(), SunSplit3.GetValue()};
+    static auto lastValid = [] { std::array<XMFLOAT3, 4> values; values.fill(GDX12SunCascadeSettings{}.Splits); return values; }();
+    static GDX12SunCascadeSettings lastRejected;
+    static bool warned = false;
+    if (!cascades.AutomaticSplits)
+    {
+        const float splits[] = {cascades.Splits.x, cascades.Splits.y, cascades.Splits.z};
+        bool valid = true;
+        float previous = 0;
+        for (UINT i = 0; i + 1 < cascades.Count; ++i) { valid &= splits[i] > previous && splits[i] < 1; previous = splits[i]; }
+        if (valid) { lastValid[cascades.Count - 1] = cascades.Splits; warned = false; }
+        else
+        {
+            if (!warned || !(lastRejected == cascades))
+                Log::Warning("Shadows", "Rejected unordered active CSM split boundaries; retaining the last valid splits for ", cascades.Count, " cascades");
+            lastRejected = cascades;
+            warned = true;
+            cascades.Splits = lastValid[cascades.Count - 1];
+        }
+    }
+    else warned = false;
+    return result;
 }
 
 DxException::DxException (const HRESULT hr, const std::wstring& functionName, const std::wstring& fileName, const int lineNumber)

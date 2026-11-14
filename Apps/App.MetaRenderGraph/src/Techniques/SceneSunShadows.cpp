@@ -76,7 +76,7 @@ void SceneSunShadows::Freeze(UINT slot, bool sceneChanged)
     _resources.ShadowSettings = BuildShadowCascades(_common.CameraView.Invert(),
         XMConvertToRadians(_common.ActiveCameraFOV), float(_common.DownscaledWidth) / _common.DownscaledHeight,
         _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane, Vector3(_resources.Lighting.LightDirection),
-        s.HasBounds ? &s.Bounds : nullptr, _resources.ShadowQuality.SunResolution);
+        s.HasBounds ? &s.Bounds : nullptr, _resources.ShadowQuality.SunResolution, _resources.ShadowQuality.SunCascades);
     const UINT flags = _resources.Lighting.SunShadowFlags;
     s.Update = (flags & 1u) && ((flags & 2u) || !s.Rendered || sceneChanged ||
         s.Resolution != _resources.ShadowQuality.SunResolution || s.Revision != _resources.Lighting.SunShadowRevision ||
@@ -175,7 +175,8 @@ void SceneSunShadows::Append(Graph& graph, std::vector<ID3D12Resource*>& binding
         culling.push_back({id, Mode::Write, UnorderedAccess});
         rendering.push_back({id, Mode::Read, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT});
     }
-    work.Add(graph, "sun cull four cascades", std::move(culling), [=](auto* cmd) {
+    const UINT cascadeCount = _resources.ShadowSettings.CascadeCount;
+    work.Add(graph, "sun cull " + std::to_string(cascadeCount) + " cascades", std::move(culling), [=](auto* cmd) {
         cmd->SetDescriptorHeaps(1, &heap);
         cmd->SetComputeRootSignature(compute->GetRootSignature().Get());
         cmd->SetPipelineState(cull);
@@ -190,7 +191,7 @@ void SceneSunShadows::Append(Graph& graph, std::vector<ID3D12Resource*>& binding
     auto* signature = _signature.Get();
     auto* counts = s.Counters->GetResource().D3DResource.Get();
     const auto textures = _resources.SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex);
-    work.Add(graph, "sun atlas four cascades ExecuteIndirect", std::move(rendering), [=](auto* cmd) {
+    work.Add(graph, "sun atlas " + std::to_string(cascadeCount) + " cascades ExecuteIndirect", std::move(rendering), [=](auto* cmd) {
         cmd->SetDescriptorHeaps(1, &heap);
         cmd->SetGraphicsRootSignature(graphics->GetRootSignature().Get());
         cmd->SetPipelineState(draw);
@@ -206,7 +207,7 @@ void SceneSunShadows::Append(Graph& graph, std::vector<ID3D12Resource*>& binding
         cmd->IASetIndexBuffer(&geometry.Indices);
         cmd->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
         cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
-        for (UINT cascade = 0; cascade < 4; ++cascade)
+        for (UINT cascade = 0; cascade < cascadeCount; ++cascade)
         {
             const auto region = SunShadowRegion(cascade, resolution);
             const D3D12_VIEWPORT viewport{float(region.X), float(region.Y), float(region.Width), float(region.Height), 0, 1};
