@@ -1,5 +1,6 @@
 #pragma once
 #include "../Graph/CrossAdapterTransfer.h"
+#include "../Graph/SimulationDomain.h"
 #include "Rendering/Water/GDX12FluidPass.h"
 
 namespace Meta {
@@ -8,6 +9,7 @@ namespace Meta {
 class WaterTransfer {
 public:
     WaterTransfer(GDX12Device&, GDX12DescriptorHeap&, int secondaryAdapter);
+    WaterTransfer(std::shared_ptr<SimulationDomain>, GDX12DescriptorHeap&);
     ~WaterTransfer();
     const std::shared_ptr<QueueSubmission>& Submissions() const;
     void Update(const std::vector<GDX12FluidInstance>&, bool reset);
