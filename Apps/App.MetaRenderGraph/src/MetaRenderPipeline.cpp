@@ -100,6 +100,7 @@ void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
         _crossAdapter->Start();
     } else _executor=std::make_unique<Meta::Executor>(*c.Primary.Device,frames,1024);
     Log::Info("MetaRenderGraph", "Queue packet executor selected; cross-adapter=",bool(_crossAdapter),"; water=",bool(_waterTransfer),"; particles=",bool(_particleTransfer),"; legacy graph Execute disabled");
+    if (_opaqueOnly) _lighting->SetWaterRetirement([this] { _executor->Drain(); });
 }
 void MetaRenderPipeline::BuildGraph(GDX12RenderGraph &, const RenderPipelineGraphInputs &)
 {
@@ -174,7 +175,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         _environment->Append(g, bindings);
         _lighting->SetHDRContinuation([&](auto& graph, auto& resources, auto* hdr, auto* probes) {
             if (_opaqueOnly) {
-                _post->AppendOpaque(graph, resources, hdr, _geometry->Depth(slot), _geometry->GBuffer(slot, 1),
+                _post->AppendOpaque(graph, resources, hdr, _lighting->PostDepth(), _lighting->PostMotion(),
                     _lighting->ParticleMotion(), target, finish);
                 return hdr;
             }

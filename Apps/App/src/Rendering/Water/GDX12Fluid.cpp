@@ -189,7 +189,11 @@ void GDX12FluidSolver::Initialize(GDX12Device* device)
     const D3D_SHADER_MACRO sortDefines[] = {{"WATER_SORT_TILE_SIZE", tileSize.c_str()}, {nullptr, nullptr}};
     _presort = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "PresortCS", sortDefines);
     _mergeTail = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "MergeTailCS", sortDefines);
-    _offsets = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "BuildOffsets");
+    D3D12_FEATURE_DATA_D3D12_OPTIONS1 options{};
+    const bool waves = SUCCEEDED(device->GetDevice()->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1,
+        &options, sizeof(options))) && options.WaveOps;
+    const D3D_SHADER_MACRO offsetsDefines[] = {{"FLUID_WAVE_OPS", waves ? "1" : "0"}, {nullptr, nullptr}};
+    _offsets = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "BuildOffsets", offsetsDefines);
     _densities = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Densities");
     _integrate = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Integrate");
     _root = std::move(root);

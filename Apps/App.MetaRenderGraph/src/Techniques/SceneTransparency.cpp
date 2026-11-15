@@ -1,53 +1,79 @@
 #include "SceneTransparency.h"
+#include "Common/GameTimer.h"
 
 namespace Meta
 {
 SceneTransparency::SceneTransparency(GDX12DeviceResources& resources, RenderPipelineCommonData& common)
-    : _resources(resources), _common(common), _frames(resources.FrameConstants.size()), _particles(resources, common)
+    : _resources(resources), _common(common), _frames(resources.FrameConstants.size()), _particles(resources, common),
+      _water(resources, common)
 {
-    for (auto& frame : _frames)
+    for (auto& frame : _frames) for (auto* phase : {&frame.All, &frame.Far, &frame.Near})
     {
-        frame.Draw.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-        frame.Draw.SetUnbatchedDraws(true);
-        frame.Draw.SetStaticIBLOnly(true);
-        frame.Compose.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
-        frame.Compose.SetApplyOpaqueAerialPerspective(false);
+        phase->Draw.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+        phase->Draw.SetUnbatchedDraws(true);
+        phase->Draw.SetStaticIBLOnly(true);
+        phase->Compose.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
+        phase->Compose.SetApplyOpaqueAerialPerspective(false);
     }
 }
 SceneTransparency::~SceneTransparency()
 {
-    for (auto& frame : _frames)
+    for (auto& frame : _frames) for (auto* phase : {&frame.All, &frame.Far, &frame.Near})
     {
-        frame.Compose.ClearDenendencies();
-        frame.Draw.ClearDenendencies();
+        phase->Compose.ClearDenendencies();
+        phase->Draw.ClearDenendencies();
     }
+}
+void SceneTransparency::PrepareWater(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+    SceneGeometry& geometry, UINT slot)
+{
+    _water.Prepare(_common.GameTimer ? _common.GameTimer->DeltaTime() : 0);
+    _water.AppendSurface(graph, bindings, geometry.Depth(slot), geometry.GBuffer(slot, 1));
 }
 GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings,
     SceneGeometry& geometry, UINT slot, GDX12Texture* hdr, GDX12Texture* sun,
     GDX12Texture* local, SceneEnvironment& environment)
 {
     _work.Commands.clear();
-    auto& scene = geometry._slots.at(slot);
     auto& frame = _frames.at(slot);
+    if (_water.Active())
+    {
+        auto* farHDR = AppendPhase(graph, bindings, geometry, slot, frame.Far, hdr, sun, local, environment, false);
+        auto* water = _water.Resolve(graph, bindings, farHDR, environment);
+        const auto resolved = Id(graph.Operations.size() - 1);
+        return AppendPhase(graph, bindings, geometry, slot, frame.Near, water, sun, local, environment, true, resolved);
+    }
+    return AppendPhase(graph, bindings, geometry, slot, frame.All, hdr, sun, local, environment, true);
+}
+GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+    SceneGeometry& geometry, UINT slot, Phase& phase, GDX12Texture* hdr, GDX12Texture* sun,
+    GDX12Texture* local, SceneEnvironment& environment, bool particles, Id predecessor)
+{
+    auto& scene = geometry._slots.at(slot);
     auto& constants = *_resources.FrameConstants.at(slot);
-    auto& draw = frame.Draw;
-    auto& compose = frame.Compose;
+    auto& draw = phase.Draw;
+    auto& compose = phase.Compose;
+    const bool partitioned = draw._partition != GDX12GeometryDepthPartition::All;
+    auto* rasterDepth = _water.Depth();
     draw.Setup(&_resources, &_common);
-    draw.SetInputs({scene.DepthView.get(), sun, environment.Output(0), environment.Output(1),
-        environment.Output(2), local});
-    if (!frame.Initialized) draw.Initialize();
+    std::vector<IRenderPassLink*> inputs{scene.DepthView.get(), sun, environment.Output(0), environment.Output(1),
+        environment.Output(2), local};
+    if (partitioned) inputs.push_back(rasterDepth);
+    draw.SetInputs(std::move(inputs));
+    if (!phase.Initialized) draw.Initialize();
     else if (draw.OUT_Accumulation->GetWidth() != hdr->GetWidth() ||
              draw.OUT_Accumulation->GetHeight() != hdr->GetHeight()) draw.Resize();
     auto* accum = draw.OUT_Accumulation.get();
     auto* reveal = draw.OUT_Revealage.get();
     compose.Setup(&_resources, &_common);
     compose.SetInputs({hdr, accum, reveal});
-    if (!frame.Initialized) compose.Initialize();
+    if (!phase.Initialized) compose.Initialize();
     else if (compose.OUT_Result->GetWidth() != hdr->GetWidth() ||
              compose.OUT_Result->GetHeight() != hdr->GetHeight()) compose.Resize();
-    frame.Initialized = true;
+    phase.Initialized = true;
     auto* output = compose.OUT_Result.get();
-    _particles.Prepare(graph, bindings, scene.DepthView.get(), accum, reveal, geometry.InteractionField());
+    if (particles)
+        _particles.Prepare(graph, bindings, scene.DepthView.get(), rasterDepth, accum, reveal, geometry.InteractionField());
     const auto resource = [&](ID3D12Resource* value) {
         return NativeWork::ResourceFor(graph, bindings, value, "mesh transparency resource");
     };
@@ -67,6 +93,7 @@ GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource
         {resource(constants.ShadowLights->GetResource().D3DResource.Get()), Mode::Read, read},
         texture(accum, Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET),
         texture(reveal, Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET)};
+    if (partitioned) accesses.push_back(texture(rasterDepth, Mode::Read, read));
     for (UINT i : {0u, 2u, 3u})
         accesses.push_back({resource(scene.Buffers[i].Data.Get()), Mode::Read, read});
     for (UINT i : {6u, 7u})
@@ -94,7 +121,11 @@ GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource
     const UINT draws = scene.Draws;
     auto* args = scene.Buffers[6].Data.Get();
     auto* count = scene.Buffers[7].Data.Get();
-    _work.Add(graph, "mesh transparency All clear/draw", std::move(accesses), [=](auto* cmd) {
+    const auto separator = rasterDepth->GetSRV()->GPUHandle;
+    const auto opaqueDepth = scene.DepthView->GetSRV()->GPUHandle;
+    const char* drawName = !partitioned ? "mesh transparency All clear/draw" : particles ?
+        "mesh transparency Near clear/draw" : "mesh transparency Far clear/draw";
+    _work.Add(graph, drawName, std::move(accesses), [=](auto* cmd) {
         const float zero[4]{}, one[4]{1, 1, 1, 1};
         cmd->ClearRenderTargetView(targets[0], zero, 0, nullptr);
         cmd->ClearRenderTargetView(targets[1], one, 0, nullptr);
@@ -106,6 +137,11 @@ GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource
         cmd->SetGraphicsRootConstantBufferView(root->GetBRootParamIndex(3), shadow);
         for (UINT i = 0; i < srvs.size(); ++i)
             cmd->SetGraphicsRootDescriptorTable(root->GetTRootParamIndex(i), srvs[i]);
+        if (partitioned)
+        {
+            cmd->SetGraphicsRootDescriptorTable(root->GetTRootParamIndex(14), separator);
+            cmd->SetGraphicsRootDescriptorTable(root->GetTRootParamIndex(15), opaqueDepth);
+        }
         cmd->SetGraphicsRootDescriptorTable(root->GetTRootParamIndex(16), textures);
         cmd->SetGraphicsRootShaderResourceView(root->GetGeometryRootParamIndex(), geom.Vertices.BufferLocation);
         cmd->RSSetViewports(1, &viewport);
@@ -115,14 +151,15 @@ GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource
         cmd->IASetVertexBuffers(0, 1, &geom.Vertices);
         cmd->IASetIndexBuffer(&geom.Indices);
         if (draws) cmd->ExecuteIndirect(signature, draws, args, 0, count, 0);
-    });
-    _particles.AppendWeighted(graph, bindings);
+    }, predecessor == Invalid ? std::vector<Id>{} : std::vector<Id>{predecessor});
+    if (particles) _particles.AppendWeighted(graph, bindings);
     auto* composeRoot = compose._compositionRS.get();
     auto* composePipeline = compose._compositionPSO.Get();
     const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 3> images{
         hdr->GetSRV()->GPUHandle, accum->GetSRV()->GPUHandle, reveal->GetSRV()->GPUHandle};
     const auto target = output->GetRTV()->CPUHandle;
-    _work.Add(graph, "mesh WBOIT resolve", {texture(hdr, Mode::Read, read), texture(accum, Mode::Read, read),
+    const char* resolveName = !partitioned ? "mesh WBOIT resolve" : particles ? "mesh Near WBOIT resolve" : "mesh Far WBOIT resolve";
+    _work.Add(graph, resolveName, {texture(hdr, Mode::Read, read), texture(accum, Mode::Read, read),
         texture(reveal, Mode::Read, read), texture(output, Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET)},
         [=](auto* cmd) {
             cmd->SetDescriptorHeaps(1, &heap);
@@ -136,7 +173,7 @@ GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource
             cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             cmd->DrawInstanced(3, 1, 0, 0);
         });
-    _particles.AppendComposite(graph, bindings, output);
+    if (particles) _particles.AppendComposite(graph, bindings, output);
     return output;
 }
 }

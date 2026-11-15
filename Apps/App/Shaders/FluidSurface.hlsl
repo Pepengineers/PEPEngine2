@@ -14,7 +14,12 @@ Texture2D<float> OpaqueDepth : register(t4);
 Texture2D<float2> OpaqueMotion : register(t5);
 Texture2D<float4> Background : register(t6);
 TextureCube<float4> Environment : register(t7);
+#ifndef FLUID_STATIC_IBL
+#define FLUID_STATIC_IBL 0
+#endif
+#if !FLUID_STATIC_IBL
 #include "ReflectionProbes.hlsli"
+#endif
 Texture2D<float4> Geometry : register(t11);
 Texture2D<float> WaterDepth : register(t12);
 Texture2D<uint> Owner : register(t13);
@@ -83,8 +88,9 @@ bool Intersect(SphereVertex input, out float front, out float back, out float3 r
     float b = dot(offset, ray);
     float c = dot(offset, offset) - Radius * Radius;
     float discriminant = b * b - c;
-    front = -b - sqrt(max(0, discriminant));
-    back = -b + sqrt(max(0, discriminant));
+    float root = sqrt(max(0, discriminant));
+    front = -b - root;
+    back = -b + root;
     float nearDistance = Camera.NearPlane / max(-mul(float4(ray, 0), Camera.View).z, 1e-6f);
     front = max(front, nearDistance);
     float opaque = OpaqueDepth[(uint2)input.Position.xy];
@@ -250,7 +256,11 @@ void ResolveWater(uint2 p : SV_DispatchThreadID)
     uint w, h, levels;
     Environment.GetDimensions(0, w, h, levels);
     float3 environment = Environment.SampleLevel(samLinearClamp, reflectionDirection, Roughness * (levels - 1)).rgb;
+#if FLUID_STATIC_IBL
+    float3 reflected = environment;
+#else
     float3 reflected = SampleReflectionRadiance(world, reflectionDirection, Roughness, environment);
+#endif
     float cosI = saturate(dot(-ray, normal));
     float cosT = sqrt(max(0, 1 - (1 - cosI * cosI) / (IOR * IOR)));
     float rs = (cosI - IOR * cosT) / max(cosI + IOR * cosT, 1e-6f);

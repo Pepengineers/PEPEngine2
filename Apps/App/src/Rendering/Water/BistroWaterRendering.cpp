@@ -34,7 +34,7 @@ void BistroWaterRendering::Unsubscribe(World& world)
     _worlds.erase(found);
 }
 
-std::vector<GDX12FluidInstance> BistroWaterRendering::CollectScene(float deltaSeconds)
+std::vector<GDX12FluidInstance> BistroWaterRendering::CollectScene(float deltaSeconds, bool advanceWhilePaused)
 {
     std::vector<GDX12FluidInstance> instances;
     for (const auto& subscription : _worlds)
@@ -49,7 +49,7 @@ std::vector<GDX12FluidInstance> BistroWaterRendering::CollectScene(float deltaSe
             instance.ContainerToWorld = Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
                 XMConvertToRadians(transform.Rotation.y), XMConvertToRadians(transform.Rotation.x),
                 XMConvertToRadians(transform.Rotation.z)) * Matrix::CreateTranslation(transform.Location);
-            instance.ClockScale = world.IsPaused() ? 0 : world.GetTimeScale();
+            instance.ClockScale = world.IsPaused() && !advanceWhilePaused ? 0 : world.GetTimeScale();
             instance.DeltaSeconds = deltaSeconds * instance.ClockScale;
             ValidateFluidInstance(instance);
             instances.push_back(std::move(instance));

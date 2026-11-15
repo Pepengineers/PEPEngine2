@@ -1,5 +1,8 @@
 // Muller SPH and reference predicted-position signed/near-pressure kernels.
 #include "FluidParameters.hlsli"
+#ifndef FLUID_WAVE_OPS
+#define FLUID_WAVE_OPS 0
+#endif
 cbuffer DispatchParameters : register(b0)
 {
     uint Count; uint Capacity; uint SortK; uint SortJ;
@@ -123,9 +126,33 @@ void MergeTailCS(uint group : SV_GroupID, uint lane : SV_GroupIndex)
 [numthreads(128, 1, 1)]
 void BuildOffsets(uint i : SV_DispatchThreadID)
 {
+#if FLUID_WAVE_OPS
+    uint key = 0xffffffffu;
+    if (i < Count) key = Sorted[i].x;
+    uint lane = WaveGetLaneIndex();
+    uint previousLane = lane > 0 ? lane - 1 : 0;
+    uint4 active = WaveActiveBallot(true);
+    bool previousActive = (active[previousLane >> 5] & (1u << (previousLane & 31))) != 0;
+    uint previousI = WaveReadLaneAt(i, previousLane);
+    uint previousKey = WaveReadLaneAt(key, previousLane);
     if (i >= Count) return;
-    if (i == 0) OffsetOut[Sorted[i].x] = i;
-    else if (Sorted[i - 1].x != Sorted[i].x) OffsetOut[Sorted[i].x] = i;
+    if (i == 0) OffsetOut[key] = i;
+    else
+    {
+        // Wave lane order need not match dispatch order.
+        bool adjacent = false;
+        if (lane > 0 && previousActive) adjacent = previousI == i - 1;
+        uint before;
+        [branch] if (adjacent) before = previousKey;
+        else before = Sorted[i - 1].x;
+        if (before != key) OffsetOut[key] = i;
+    }
+#else
+    if (i >= Count) return;
+    uint key = Sorted[i].x;
+    if (i == 0) OffsetOut[key] = i;
+    else if (Sorted[i - 1].x != key) OffsetOut[key] = i;
+#endif
 }
 [numthreads(128, 1, 1)]
 void Densities(uint i : SV_DispatchThreadID)
@@ -138,6 +165,8 @@ void Densities(uint i : SV_DispatchThreadID)
     float nearDensity = 0;
     float h2 = H * H;
     float coefficient = 315.0f / (64.0f * Pi * pow(H, 9));
+    float densityCoefficient = Mass * 15.0f / (2 * Pi * pow(H, 5));
+    float nearCoefficient = Mass * 15.0f / (Pi * pow(H, 6));
     for (int z = -1; z <= 1; ++z)
     for (int y = -1; y <= 1; ++y)
     for (int x = -1; x <= 1; ++x)
@@ -155,8 +184,8 @@ void Densities(uint i : SV_DispatchThreadID)
             if (NearStiffness > 0)
             {
                 float q = max(0, H - length(d));
-                density += Mass * 15.0f / (2 * Pi * pow(H, 5)) * q * q;
-                nearDensity += Mass * 15.0f / (Pi * pow(H, 6)) * q * q * q;
+                density += densityCoefficient * q * q;
+                nearDensity += nearCoefficient * q * q * q;
             }
             else
             {
@@ -172,7 +201,7 @@ void Collide(inout float3 position, inout float3 velocity)
     if (ReferenceUnits != 0)
     {
         // The reference model collides point centers, without a particle-radius margin or outward-velocity test.
-        for (uint axis = 0; axis < 3; ++axis)
+        [unroll] for (uint axis = 0; axis < 3; ++axis)
             if (abs(position[axis]) >= HalfExtent[axis])
             {
                 position[axis] = sign(position[axis]) * HalfExtent[axis];
@@ -185,7 +214,7 @@ void Collide(inout float3 position, inout float3 velocity)
     float3 margin = Radius * float3(length(WorldToContainer._11_21_31),
         length(WorldToContainer._12_22_32), length(WorldToContainer._13_23_33));
     float3 bound = max(HalfExtent - margin, 0);
-    for (uint axis = 0; axis < 3; ++axis)
+    [unroll] for (uint axis = 0; axis < 3; ++axis)
     {
         float side = local[axis] >= 0 ? 1 : -1;
         if (abs(local[axis]) <= bound[axis]) continue;
@@ -204,12 +233,14 @@ void Integrate(uint i : SV_DispatchThreadID)
     if (i >= Count) return;
     i = Sorted[i].y;
     FluidParticle p = Particles[i];
-    float rhoi = Density[i].x;
+    float2 densityI = Density[i];
+    float rhoi = densityI.x;
     float pressureI = Stiffness * (NearStiffness > 0 ? rhoi - RestDensity : max(0, rhoi - RestDensity));
     float3 acceleration = ExternalAcceleration(p.Position);
     float3 position = PredictedPosition(p);
     int3 origin = Cell(position);
     float gradientCoefficient = -45.0f / (Pi * pow(H, 6));
+    float densityDerivativeCoefficient = -15.0f / (Pi * pow(H, 5));
     uint neighborCount = 0;
     for (int z = -1; z <= 1; ++z)
     for (int y = -1; y <= 1; ++y)
@@ -233,18 +264,19 @@ void Integrate(uint i : SV_DispatchThreadID)
             float3 direction = ReferenceUnits != 0 ?
                 (distance > 0 ? difference / distance : float3(0,-1,0)) :
                 (distance > 1e-6f ? difference / distance : float3(i < j ? -1 : 1, 0, 0));
-            float rhoj = Density[j].x;
+            float2 densityJ = Density[j];
+            float rhoj = densityJ.x;
             float pressureJ = Stiffness * (NearStiffness > 0 ? rhoj - RestDensity : max(0, rhoj - RestDensity));
             float q = H - distance;
             float3 gradient = gradientCoefficient * q * q * direction;
             if (NearStiffness > 0)
             {
                 float sharedPressure = (pressureI + pressureJ) * 0.5f;
-                float sharedNearPressure = NearStiffness * (Density[i].y + Density[j].y) * 0.5f;
-                float densityDerivative = -15.0f / (Pi * pow(H, 5)) * q;
+                float sharedNearPressure = NearStiffness * (densityI.y + densityJ.y) * 0.5f;
+                float densityDerivative = densityDerivativeCoefficient * q;
                 float nearDerivative = gradientCoefficient * q * q;
                 acceleration -= Mass / rhoi * (sharedPressure * densityDerivative / rhoj +
-                    sharedNearPressure * nearDerivative / Density[j].y) * direction;
+                    sharedNearPressure * nearDerivative / densityJ.y) * direction;
             }
             else
                 acceleration -= Mass * (pressureI / (rhoi * rhoi) + pressureJ / (rhoj * rhoj)) * gradient;

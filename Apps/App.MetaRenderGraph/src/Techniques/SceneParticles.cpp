@@ -44,7 +44,8 @@ SceneParticles::SceneParticles(GDX12DeviceResources& resources, RenderPipelineCo
     if (!_resources.ParticleSimulation)
         _resources.ParticleSimulation = std::make_unique<GDX12ParticleSimulation>();
     _pass.SetLocalExecution(true);
-    _pass.SetReadOnlyDepthEnabled(true);
+    // Merged fluid depth is an SRV/UAV, so the raster PSO always uses shader depth rejection.
+    _pass.SetReadOnlyDepthEnabled(false);
     _pass.SetMotionOutputEnabled(false);
     _pass.Setup(&_resources, &_common);
 }
@@ -84,19 +85,20 @@ void SceneParticles::Packet(Graph& graph, const std::vector<ID3D12Resource*>& bi
     graph.Operations.at(operation).Target = Queue::Direct;
 }
 void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& bindings,
-    GDX12Texture* depth, GDX12Texture* accum, GDX12Texture* reveal, GDX12ParticleInteractionField interaction)
+    GDX12Texture* simulationDepth, GDX12Texture* rasterDepth, GDX12Texture* accum, GDX12Texture* reveal,
+    GDX12ParticleInteractionField interaction)
 {
     _work.Commands.clear();
     _drawReads.clear();
     _accum = accum;
     _reveal = reveal;
-    if (_width && (_width != depth->GetWidth() || _height != depth->GetHeight())) _pass.Resize();
-    _width = depth->GetWidth();
-    _height = depth->GetHeight();
+    if (_width && (_width != rasterDepth->GetWidth() || _height != rasterDepth->GetHeight())) _pass.Resize();
+    _width = rasterDepth->GetWidth();
+    _height = rasterDepth->GetHeight();
     auto* simulation = _resources.ParticleSimulation.get();
     simulation->SetInteractionField(interaction);
     simulation->BeginFrame(&_resources, _common, true);
-    _pass.SetInputs({depth, accum, reveal});
+    _pass.SetInputs({rasterDepth, accum, reveal});
     _pass.SetMotionOutputEnabled(GetMotionBlurSettings().Enabled ||
         (_common.Upscaler && (_common.Upscaler->GetFlags() & RENDER_PASS_FLAG_USE_JITTER)));
     _pass.Initialize();
@@ -120,11 +122,11 @@ void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& binding
         auto simulationAccess = initialization;
         AddResources(graph, bindings, simulationAccess, simulation->GetConstantResources(slot, &ids), Mode::Read);
         simulationAccess.push_back(camera);
-        if (group == 1) simulationAccess.push_back(ResourceAccess(graph, bindings, depth->GetResource(), Mode::Read));
+        if (group == 1) simulationAccess.push_back(ResourceAccess(graph, bindings, simulationDepth->GetResource(), Mode::Read));
         if (interaction.Resource) simulationAccess.push_back(ResourceAccess(graph, bindings, interaction.Resource, Mode::Read));
         Packet(graph, bindings, group == 0 ? "particle A simulate/death/spawn/burst/publish" : "particle B simulate/death/spawn/burst/publish",
-            std::move(simulationAccess), [this, simulation, depth, ids](auto* cmd) {
-                simulation->Execute(cmd, &_resources, _common, depth, &ids);
+            std::move(simulationAccess), [this, simulation, simulationDepth, ids](auto* cmd) {
+                simulation->Execute(cmd, &_resources, _common, simulationDepth, &ids);
             });
     }
     std::vector<Access> preparation{camera};
@@ -138,8 +140,7 @@ void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& binding
             std::move(accesses), [this, ids, group](auto* cmd) { _pass.PrepareRenderGroup(cmd, ids, group == 0, group == 1); });
     }
     _drawReads = {camera};
-    _drawReads.push_back(ResourceAccess(graph, bindings, depth->GetResource(), Mode::Read,
-        D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE));
+    _drawReads.push_back(ResourceAccess(graph, bindings, rasterDepth->GetResource(), Mode::Read));
     if (!_pass.NativeRasterAccesses(false).empty())
         for (const auto& emitter : _resources.ParticleEmitters)
             if (emitter.Texture)

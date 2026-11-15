@@ -2,6 +2,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Rendering/Water/GDX12FluidSolver.h"
 #include <map>
+#include <functional>
 
 class GDX12FluidSurfacePass final : public GDX12RenderPass
 {
@@ -27,6 +28,12 @@ public:
     void SetInstances(std::vector<GDX12FluidInstance> instances);
     void PrepareFrame();
     void SetLocalExecution(bool enabled) { _localOnly = enabled; }
+    void SetStaticIBL(bool enabled) { _staticIBL = enabled; }
+    void SetResourceRetirement(std::function<void()> retire) { _retire = std::move(retire); }
+    bool IsRendering() const { return _rendering; }
+    bool NeedsSimulation() const { return _rendering || _simulating; }
+    std::vector<GDX12RenderGraph::BufferAccess> NativeSurfaceAccesses() const;
+    std::vector<GDX12RenderGraph::BufferAccess> NativeResolveAccesses() const;
     // Opt-in recording-only display: caller owns seed/history and GPU lifetime.
     using ExternalDisplay = std::map<uint64_t, GDX12UploadBuffer<GDX12FluidSolver::Particle>*>;
     void SetExternalDisplay(ExternalDisplay display) { _externalOnly = true; _externalDisplay = std::move(display); }
@@ -59,6 +66,7 @@ private:
     void CreateTargets();
     void ReleaseTargets();
     void PrepareStates();
+    void RetireResources();
     void DrawSurface(GDX12CommandList* commands, const ParticleView& particles,
         D3D12_GPU_VIRTUAL_ADDRESS constants, UINT owner,
         const GDX12FluidSettings& settings);
@@ -74,6 +82,8 @@ private:
     std::unique_ptr<GDX12Texture> _depth, _motion, _geometry, _owner, _color;
     GDX12FluidControls _controls = { false, 0 };
     bool _localOnly = false;
+    bool _staticIBL = false;
+    std::function<void()> _retire;
     bool _externalOnly = false;
     ExternalDisplay _externalDisplay;
     bool _rendering = false;
