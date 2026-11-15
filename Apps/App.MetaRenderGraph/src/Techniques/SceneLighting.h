@@ -3,6 +3,7 @@
 #include "SceneReflections.h"
 #include "SceneSunShadows.h"
 #include "SceneLocalShadows.h"
+#include "SceneTransparency.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12SSSRPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
@@ -65,6 +66,7 @@ class SceneLighting
     std::unique_ptr<SceneReflections> _reflections;
     std::unique_ptr<SceneSunShadows> _sunShadows;
     std::unique_ptr<SceneLocalShadows> _localShadows;
+    std::unique_ptr<SceneTransparency> _transparency;
     bool _opaqueOnly = false;
     std::vector<Frame> _frames;
     GDX12DeferredLightingPass _deferred;

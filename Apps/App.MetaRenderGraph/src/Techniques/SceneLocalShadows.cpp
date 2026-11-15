@@ -235,7 +235,7 @@ void SceneLocalShadows::UpdateCasters(UINT slot)
         const auto current = ReadInput(slot, index);
         auto& old = _inputs.at(index);
         const auto included = [](const Input& input) {
-            return input.Command.InstanceCount && input.Material.RenderLayer != 2 && !input.Material.ReflectionProbePreview;
+            return input.Command.InstanceCount && !input.Material.ReflectionProbePreview;
         };
         // Insertion/removal changes BVH topology; edits to an existing object only refit its ancestors.
         if (included(current) != included(old))
@@ -276,7 +276,7 @@ void SceneLocalShadows::UpdateCasters(UINT slot)
         Invalidate(caster);
         caster.Bounds = BoundingBox(current.Instance.BoundingBoxCenter, current.Instance.BoundingBoxExtents);
         caster.Command = current.Command;
-        caster.CastsShadow = current.Instance.CastsShadows != 0;
+        caster.CastsShadow = current.Instance.CastsShadows != 0 && current.Material.RenderLayer != 2;
         caster.Masked = current.Material.RenderLayer == 1;
         Invalidate(caster);
         Refit(position);
@@ -301,9 +301,10 @@ void SceneLocalShadows::RebuildCasters(UINT slot)
         _transforms[instance.TransformIndex].push_back(i);
         _materials[instance.MaterialIndex].push_back(i);
         const auto& material = input.Material;
-        if (material.RenderLayer == 2 || material.ReflectionProbePreview) continue;
+        if (material.ReflectionProbePreview) continue;
+        // Blended bounds receive shadows, but never enter opaque/masked caster lists.
         _casters.push_back({BoundingBox(instance.BoundingBoxCenter, instance.BoundingBoxExtents), command,
-            instance.CastsShadows != 0, material.RenderLayer == 1, i});
+            instance.CastsShadows != 0 && material.RenderLayer != 2, material.RenderLayer == 1, i});
     }
     _leaves.resize(_casters.size());
     if (!_casters.empty()) BuildNode(0, UINT(_casters.size()));

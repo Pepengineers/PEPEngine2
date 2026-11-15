@@ -3,12 +3,13 @@
 Experimental executable using the Meta execution plan alongside production App.
 The ordinary launch now loads the original Bistro interior and exterior with
 static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored lights,
-static SkyBox/IBL, cascaded sun shadows, point/spot shadows, XeGTAO and HDR display transform. Alpha-tested
-cutouts use OpaquePass; blended materials are omitted. No SSR, reflection-probe, grass, water,
-particle, transparency, reconstruction, post-effect or screen-UI passes execute.
+static SkyBox/IBL, cascaded sun shadows, point/spot shadows, XeGTAO, mesh WBOIT
+transparency and HDR display transform. Alpha-tested cutouts use OpaquePass.
+No SSR, reflection-probe, grass, water, particle, reconstruction, post-effect
+or screen-UI passes execute.
 The world is paused to exclude simulation; the camera remains free.
 
-This adds AO to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+This adds mesh transparency to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
 The user checks the ordinary launch, measures CPU/GPU load and FPS, and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
@@ -58,6 +59,18 @@ two denoise passes inherited from Mid, two slices and two steps per half slice.
 The output is read by deferred lighting at `t14`, affecting diffuse IBL as in App.
 Early AO remains disabled in ordinary Bistro; other excluded techniques stay off.
 See the [AO stage report](../../docs/reports/2026-11-15-meta-bistro-ao.md).
+
+Mesh transparency uses one existing WBOIT `All` draw and one resolve after
+deferred lighting, with read-only opaque depth. Each frame slot owns accumulation,
+revealage and composed HDR; accumulation/revealage clear to 0/1 even when no
+transparent draw survives GPU culling. The unbatched indirect stream uses source
+instance IDs. Forward lighting uses the same published local-shadow slices and
+face masks as deferred lighting, plus sun shadows and static IBL, without opaque
+screen AO, local probes or aerial perspective. App's default shader path is unchanged.
+Look at the entrance door/window panes, menu glass, and wine bottles on outdoor
+tables or behind the interior bar. Authored opacity/textures remain unchanged.
+Blended bounds participate in local-shadow receiver selection; they do not cast
+opaque shadows. See the [transparency report](../../docs/reports/2026-11-15-meta-bistro-transparency.md).
 
 The ordinary sun path uses App's `ShadowPass.hlsl` and `CSM.hlsli`: one GPU
 culling dispatch for the active cascades, then one ExecuteIndirect draw per cascade directly
