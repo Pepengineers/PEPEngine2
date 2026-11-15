@@ -30,6 +30,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     }
     void ValidateQueued();
     bool OwnsScreenUI() const override { return true; }
+    bool AdvancesParticlesWhileWorldPaused() const override { return _opaqueOnly; }
     void PrepareMaterialBindings(RenderPipelineContext& c) override
     {
         _executor->Begin(c.Primary.CurrFrameConstantsIndex);
