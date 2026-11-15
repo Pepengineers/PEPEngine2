@@ -1,7 +1,7 @@
 App:
   Name: App.Editor
   Type: Editor
-  StartScene: Scenes/EditorScene.yaml
+  StartSceneAsset: "701ee4e9-4f40-4e5f-a395-5549ca087395"
 
   SystemsBanlist:
     - SplineFollowSystem

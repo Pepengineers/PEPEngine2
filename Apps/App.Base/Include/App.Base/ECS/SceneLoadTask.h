@@ -1,5 +1,6 @@
 ﻿#pragma once
 #include <chrono>
+#include <filesystem>
 #include <future>
 #include <mutex>
 #include <string>
@@ -14,7 +15,7 @@ class SceneManagerModule;
 class SceneLoadTask
 {
 public:
-    SceneLoadTask(std::string const& scenePath, AppConfig const& config, SceneManagerModule& sceneManagerModule, RenderModule& renderModule);
+    SceneLoadTask(const std::filesystem::path& scenePath, AppConfig const& config, SceneManagerModule& sceneManagerModule, RenderModule& renderModule);
     
     ~SceneLoadTask();
     
@@ -33,7 +34,7 @@ private:
     void SetStatus(float progress, std::string const& status);
     void Fail(const std::string& error);
     
-    std::string _scenePath;
+    std::filesystem::path _scenePath;
     AppConfig _config;
     
     SceneManagerModule* _sceneManagerModule = nullptr;

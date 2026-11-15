@@ -3,4 +3,4 @@ Scene:
 
   Worlds:
     - Name: MainWorld
-      Path: Worlds/BistroBenchmark.world
+      Asset: "733fb158-6799-4bf2-a2c3-174b35eb6101"

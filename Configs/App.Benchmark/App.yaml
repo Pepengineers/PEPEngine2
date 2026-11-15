@@ -1,7 +1,7 @@
 App:
   Name: App.Benchmark
   Type: Benchmark
-  StartScene: Scenes/BenchmarkScene.yaml
+  StartSceneAsset: "9d96a7c1-a665-4583-a0f9-7ee3c55b5b1e"
 
   SystemsBanlist:
     - FreeCameraSystem

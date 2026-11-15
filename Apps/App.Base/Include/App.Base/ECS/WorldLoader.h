@@ -17,7 +17,7 @@ using SceneLoadCancellationCallback = std::function<bool()>;
 class WorldLoader
 {
 public:
-    static std::unique_ptr<PreparedScene> PrepareScene(const std::string& scenePath, 
+    static std::unique_ptr<PreparedScene> PrepareScene(const std::filesystem::path& scenePath,
                                                         SceneLoadProgressCallback progressCallback, 
                                                         SceneLoadCancellationCallback cancellationCallback = {});
     

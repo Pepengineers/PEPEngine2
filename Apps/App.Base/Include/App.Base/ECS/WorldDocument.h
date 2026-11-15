@@ -4,6 +4,8 @@
 
 #include "AppConfig.h"
 
+class AssetCatalog;
+
 struct WorldTextureResource
 {
     std::string Id;
@@ -29,7 +31,6 @@ struct WorldDocument
     WorldDocument& operator=(const WorldDocument&) = delete;
     
     std::filesystem::path SourcePath;
-    std::string YamlText;
     ryml::Tree YamlTree;
     
     WorldConfig Config;
@@ -42,6 +43,4 @@ struct WorldDocument
     }
 };
 
-[[nodiscard]] WorldDocument ParseWorldDocument(const std::filesystem::path& path);
-[[nodiscard]] WorldMeshResource ParseMeshResource(ryml::NodeRef meshNode);
-[[nodiscard]] WorldTextureResource ParseTextureResource(ryml::NodeRef textureNode);
+[[nodiscard]] WorldDocument ParseWorldDocument(const std::filesystem::path& path, const AssetCatalog* catalog = nullptr);

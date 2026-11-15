@@ -1369,7 +1369,7 @@ WorldLoader::Committer::Committer(std::unique_ptr<Impl> impl)
 #pragma endregion
 
 
-std::unique_ptr<PreparedScene> WorldLoader::PrepareScene(const std::string& scenePath,
+std::unique_ptr<PreparedScene> WorldLoader::PrepareScene(const std::filesystem::path& scenePath,
     SceneLoadProgressCallback progressCallback,
     SceneLoadCancellationCallback cancellationCallback)
 {
@@ -1516,7 +1516,7 @@ std::unique_ptr<PreparedScene> WorldLoader::PrepareScene(const std::string& scen
             WorldTextureResource resource = std::move(texturesToPrepare[i]);
             
             reportWorldProgress(0.65f + 0.3 * static_cast<float>(i + 1) / static_cast<float>((std::max)(size_t{1}, textureCount)),
-                "Loading texture " + resource.SourcePath.filename().string());
+                "Loading texture " + resource.SourcePath.filename().u8string());
             
             resource.SourcePath = resource.SourcePath.lexically_normal();
             const std::wstring cacheKey = resource.SourcePath.generic_wstring();

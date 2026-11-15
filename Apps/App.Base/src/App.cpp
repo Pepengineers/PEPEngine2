@@ -151,13 +151,7 @@ bool App::Initialize()
         return false;
     }
 
-    Logger::Info("App::Initialize after LoadAppConfig.\nStartScene = {}", _AppConfig.StartScene);
-
-    if (_AppConfig.StartScene.empty())
-    {
-        Logger::Error("App::Initialize failed: App config StartScene is empty.");
-        return false;
-    }
+    Logger::Info("App::Initialize after LoadAppConfig.\nStartScene = {}", _AppConfig.StartScene.u8string());
 
     if (!InitWindowClass())
     {

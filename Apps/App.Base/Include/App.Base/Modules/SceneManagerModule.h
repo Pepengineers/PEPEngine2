@@ -37,7 +37,7 @@ public:
     void Initialize() override;
     void Uninitialize() override;
 
-    bool LoadScene(const std::string& scenePath, const AppConfig& appConfig);
+    bool LoadScene(const std::filesystem::path& scenePath, const AppConfig& appConfig);
 
     bool LoadWorld(const std::filesystem::path& path);
     bool UnloadWorld(size_t index);

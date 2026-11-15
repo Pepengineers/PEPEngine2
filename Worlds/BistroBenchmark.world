@@ -20,7 +20,7 @@ World:
   Resources:
     Meshes:
       - Id: BistroInteriorMesh
-        Source: Assets/Scenes/Amazon Lumberyard Bistro/Interior/interior.obj
+        Asset: "47f1124a-9d5d-4ad5-a56b-4fbbb0412615"
         SubmitToRenderer: true
         ImportMaterials: true
 
