@@ -16,8 +16,9 @@ HEAD/status и сохранить чужие правки. Это последн
 ATRIUM/TERRACE и не полноэкранный слой. Выбрать доступную для осмотра стену
 без z-fighting, записать transform и положение камеры в отчёт.
 
-Переиспользовать существующие параметры алгоритма Render.Clouds.Enabled/Quality
-и GDX12CloudParameters. Для отсутствующих controls добавить CVar/INI:
+Источник алгоритма по уточнению пользователя — **MGPU-Noise из MGPU DX12**,
+не GDX12CloudComponent/CloudNoise.hlsli из PEPEngine2. Сохранить параметры
+CloudGeneratorData донора. Для управления картиной добавить CVar/INI:
 `Meta.CloudPicture.Enabled`, `.Width`, `.Height`, `.Adapter`.
 Предлагаемые стартовые значения: true, 1024, 512, -1 (актуальный primary).
 Adapter >=0 — DXGI hardware adapter index по существующей enumeration проекта;
@@ -28,26 +29,49 @@ Adapter >=0 — DXGI hardware adapter index по существующей enumer
 При смене настроек во время работы сохранить последний валидный результат до
 готовности нового. Размеры картины в мире, окно, SR и UI quality не меняют её grid.
 
-## 1. Настоящий 2D producer
+## 1. Перенос 2D producer из MGPU-Noise
 
-Исходники: GDX12CloudComponent.h/.cpp, Clouds.hlsl, CloudNoise.hlsli,
-SceneEnvironment и завершённый world-space material path.
-Текущий GDX12CloudComponent создаёт cubemap 256×256×6 и dispatch(32,32,6),
-Clouds.hlsl использует один OutputSize и RWTexture2DArray. Поэтому недостаточно
-подключить его SRV как Texture2D или растянуть прежнюю грань на большой quad.
+Обязательные исходники в `D:\Project\Multi-GPU-Render-DX12`:
+- `MGPU-Noise/Shaders/CloudsNoiseCS.hlsl` — compute entry CS, RWTexture2D,
+  numthreads(32,32,1), hash/simplex noise, fbm и ridged noise;
+- `Common/CloudGenerator.h/.cpp` — CloudGeneratorData, ChangeTextureSize,
+  PrimeCompute/SecondCompute/PrimeCopy, параметры и resource bindings;
+- `MGPU-Noise/HybridNoiseApp.cpp` — InitRenderPaths, ComputeClouds, RenderScene
+  и выбор SRV в PopulateForwardPathCommands;
+- `MGPU-Noise/MGPU-Noise.vcxproj` — связь с Common и project-local shader.
 
-Добавить узкий 2D output/recording вариант: реальный Width×Height target,
-dispatch ceil(width/8)×ceil(height/8)×1 с bounds checks. Переиспользовать
-CloudDirectionDensity, noise, phase/seed, coverage/softness и цвета. Задать
-фиксированное направление/проекцию через UV картины с учётом aspect ratio:
-движение viewer камеры не перегенерирует облака в другой проекции. Сохранить
-старый cubemap API и поведение environment consumers.
+CloudGenerator компилирует `Shaders/CloudsNoiseCS.hlsl`. Project-local файл и
+`Shaders/Common/CloudsNoiseCS.hlsl` в корне репозитория различаются; источником
+задания является версия MGPU-Noise. NoiseDraw.hlsl — другой pixel-shader путь,
+не подмена нужного compute texture producer. Зафиксировать donor revision/hash
+использованного shader в отчёте; сохранить исходные attribution comments.
+
+Перенести арифметику, RotateMatrix, последовательность 7/8/8/7/7 noise loops,
+смешивание sky/cloud цвета и CloudGeneratorData в узкий Meta owner. Сохранить
+фактические constructor defaults: CloudScale=1.1, CloudSpeed=0.006,
+CloudDark=0.5, CloudLight=0.3, CloudCover=0.2, CloudAlpha=8, SkyTint=0.5,
+SkyColor1=(0.2,0.4,0.6,1), SkyColor2=(0.4,0.7,1,1),
+CloudColor=(1.1,1.1,0.9,1). В header CloudSpeed=0.03, но constructor его
+переопределяет; не принимать header value за runtime default. Управление
+разрешением/GPU не должно незаметно менять число octaves или качество алгоритма.
+
+Результат — реальная Width×Height texture, без cubemap и пересчёта шести граней.
+В donor ChangeTextureSize group counts округляются вниз, shader не проверяет
+границы, RenderTargetSize задаётся как (height,width) только в constructor.
+Для произвольного прямоугольного grid исправить integration: обновлять
+RenderTargetSize=(width,height) при resize, dispatch ceil(width/32)×ceil(height/32)×1
+и bounds check перед записью. Сохранить формулы UV/aspect shader и фиксированное
+изображение в UV картины: viewer камера не меняет projection шума.
+Не заменять алгоритм на CloudDirectionDensity из существующего environment.
 
 Показывать texture в обычном материале/поверхности, используя готовые способы
 binding из world-space этапа; не создавать новый UI renderer для облаков.
-Согласовать linear HDR формат producer с материалом: не подавать RGBA16F linear
-как sRGB offscreen UI без конверсии. Сохранить читаемое изображение без двойного
-освещения/tone mapping; выбранный material mode и цветовой контракт описать.
+Сверить format/view contract донора: CloudGenerator выбирает формат через
+GetSRGBFormat(R8G8B8A8_UNORM). Для Meta явно согласовать typed UAV format,
+SRV decoding и scene-linear material; sRGB UAV напрямую не использовать.
+Не считать результат автоматически RGBA16F linear как у прежнего cubemap.
+Сохранить цвета исходной картинки без двойной gamma/tone mapping; выбранный
+формат, нужную конверсию и material mode описать в отчёте.
 Картина проходит scene depth/DoF/MB/SR как геометрия, screen UI — отдельно.
 
 Meta.SceneEnvironment::SetClouds сейчас заменяет global sky/IBL; для картины
@@ -55,7 +79,8 @@ Meta.SceneEnvironment::SetClouds сейчас заменяет global sky/IBL; �
 картины не увеличивает environment revision, не перефильтровывает IBL/probes
 и не сбрасывает temporal SR каждый кадр. Время/parameters snapshot захватывается
 один раз на frame tick и работает при paused физическом мире; смена GPU не
-обнуляет phase. Disabled — без producer dispatch/transfer и чтения stale SRV;
+обнуляет TotalTime. Не инкрементировать его отдельно для обоих GPU, как при
+вызове двух donor Compute методов. Disabled — без producer dispatch/transfer и чтения stale SRV;
 безопасно скрыть только картину.
 
 ## 2. Local и cross-adapter пути
@@ -74,7 +99,9 @@ CrossAdapterTransfer сейчас является fixed buffer fixture (256 wor
 к его deterministic payload и не запускать fixture в обычном приложении.
 Не переписывать water/particle offload и не строить новый общий scheduler.
 
-Сверить существующие cross-adapter texture/copy helpers проекта и MGPU-IMGUI.
+Сверить CloudGenerator/GCrossAdapterResource и ComputeClouds/RenderScene из
+MGPU-Noise с существующими Meta transport primitives. Алгоритм и texture producer
+переносятся из донора; его benchmark/calibration loop и queue ownership заменяются Meta.
 Для portable transfer допустим shared row-major buffer с GetCopyableFootprints,
 CopyTextureRegion и правильными row pitch/offsets; shader читает локальную
 текстуру, не shared staging. Формат, размеры, generation и sequence входят
