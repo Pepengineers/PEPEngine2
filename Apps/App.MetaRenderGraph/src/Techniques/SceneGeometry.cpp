@@ -92,16 +92,18 @@ void SceneGeometry::Resize(UINT width,UINT height) {
         s.Dsv.InitAsDSV(s.Depth.Get(),&dsv,heap,s.Dsv.HeapIndex==UINT_MAX?heap->GetAvailableIndex():s.Dsv.HeapIndex);
         dsv.Flags=D3D12_DSV_FLAG_READ_ONLY_DEPTH;
         s.ReadDepth.InitAsDSV(s.Depth.Get(),&dsv,heap,s.ReadDepth.HeapIndex==UINT_MAX?heap->GetAvailableIndex():s.ReadDepth.HeapIndex);
-        UINT64 offset=0;
-        for(UINT i=0;i<6;++i) {
-            auto resource=i<5?s.Color[i]->GetResource()->D3DResource.Get():s.Depth.Get();
-            const auto shape=resource->GetDesc(); UINT64 size=0;
-            _resources.Device->GetDevice()->GetCopyableFootprints(&shape,0,1,0,&s.Footprints[i],nullptr,nullptr,&size);
-            s.Footprints[i].Offset=offset;
-            offset=(offset+size+511)&~UINT64(511);
+        if (!_opaqueOnly) {
+            UINT64 offset=0;
+            for(UINT i=0;i<6;++i) {
+                auto resource=i<5?s.Color[i]->GetResource()->D3DResource.Get():s.Depth.Get();
+                const auto shape=resource->GetDesc(); UINT64 size=0;
+                _resources.Device->GetDevice()->GetCopyableFootprints(&shape,0,1,0,&s.Footprints[i],nullptr,nullptr,&size);
+                s.Footprints[i].Offset=offset;
+                offset=(offset+size+511)&~UINT64(511);
+            }
+            s.ImageBytes=offset;
+            s.ImageReadback=_resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(offset),D3D12_RESOURCE_STATE_COPY_DEST);
         }
-        s.ImageBytes=offset;
-        s.ImageReadback=_resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(offset),D3D12_RESOURCE_STATE_COPY_DEST);
     }
 }
 void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork> skin) {
@@ -172,9 +174,11 @@ void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork>
         if(!s.Batcher)s.Batcher=std::make_unique<GDX12InstanceBatcher>(_resources.Device);
         s.Batcher->ReserveRecording(s.Draws,s.Batches,s.InstanceCount);
         if(!s.BatchCounter)s.BatchCounter=_resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,CD3DX12_RESOURCE_DESC::Buffer(4,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),D3D12_RESOURCE_STATE_COMMON);
-        const UINT64 bytes=4+UINT64(s.Draws)*sizeof(GDX12IndirectDrawArgs)+UINT64(s.InstanceCount)*4;
-        if(!s.BatchReadback || s.BatchReadback->GetDesc().Width!=bytes)s.BatchReadback=_resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(bytes),D3D12_RESOURCE_STATE_COPY_DEST);
-        if (!_opaqueOnly) s.InstanceSnapshot.assign(f.InstanceCache->GetCPUData(),f.InstanceCache->GetCPUData()+f.InstanceCache->GetElementCount());
+        if (!_opaqueOnly) {
+            const UINT64 bytes=4+UINT64(s.Draws)*sizeof(GDX12IndirectDrawArgs)+UINT64(s.InstanceCount)*4;
+            if(!s.BatchReadback || s.BatchReadback->GetDesc().Width!=bytes)s.BatchReadback=_resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(bytes),D3D12_RESOURCE_STATE_COPY_DEST);
+            s.InstanceSnapshot.assign(f.InstanceCache->GetCPUData(),f.InstanceCache->GetCPUData()+f.InstanceCache->GetElementCount());
+        }
     }
     s.SkinBindings.clear(); s.SkinDeclarations.clear(); s.SkinIds.clear();
     for(const auto& work:s.Skin) {
@@ -190,12 +194,14 @@ void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork>
         }
         s.SkinIds.push_back(ids);
     }
-    UINT64 bytes=0; for(UINT i=0;i<8;++i) { s.Offsets[i]=bytes; bytes+=s.Buffers[i].Bytes; }
-    s.FrameOffset=bytes;for(const auto& buffer:s.FrameBuffers)bytes+=buffer.Bytes;
-    s.SkinOffset=bytes; for(const auto& skin:s.Skin) bytes+=UINT64(skin.VertexCount)*sizeof(Vertex);
-    if(s.SceneBytes!=bytes) {
-        s.SceneBytes=bytes;
-        s.SceneReadback=_resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(bytes),D3D12_RESOURCE_STATE_COPY_DEST);
+    if (!_opaqueOnly) {
+        UINT64 bytes=0; for(UINT i=0;i<8;++i) { s.Offsets[i]=bytes; bytes+=s.Buffers[i].Bytes; }
+        s.FrameOffset=bytes;for(const auto& buffer:s.FrameBuffers)bytes+=buffer.Bytes;
+        s.SkinOffset=bytes; for(const auto& skin:s.Skin) bytes+=UINT64(skin.VertexCount)*sizeof(Vertex);
+        if(s.SceneBytes!=bytes) {
+            s.SceneBytes=bytes;
+            s.SceneReadback=_resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(bytes),D3D12_RESOURCE_STATE_COPY_DEST);
+        }
     }
 }
 Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechnique& append,const AppendTechnique& earlyAO,const AppendTechnique& prelude,bool singleDirect,bool diagnosticReadbacks) {
@@ -328,6 +334,23 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechn
     std::vector<Id> remap(g.Operations.size(),Invalid);for(Id i=0;i<order.size();++i)remap[order[i]]=i;
     Graph reordered;reordered.Resources=std::move(g.Resources);
     for(auto id:order){auto op=std::move(g.Operations[id]);for(auto& dep:op.Dependencies){dep=remap.at(dep);if(dep==Invalid)throw std::logic_error("Scene plan removed an explicit producer");}reordered.Operations.push_back(std::move(op));}
+    if (!diagnosticReadbacks) {
+        std::vector<Id> resourceIds(reordered.Resources.size(), Invalid);
+        std::vector<Resource> resources;
+        std::vector<ID3D12Resource*> bindings;
+        for (Id id = 0; id < reordered.Resources.size(); ++id) {
+            if (reordered.Resources[id].Memory == Heap::Readback) continue;
+            resourceIds[id] = Id(resources.size());
+            resources.push_back(std::move(reordered.Resources[id]));
+            bindings.push_back(s.PlannedBindings.at(id));
+        }
+        for (auto& operation : reordered.Operations) for (auto& access : operation.Accesses) {
+            access.Resource = resourceIds.at(access.Resource);
+            if (access.Resource == Invalid) throw std::logic_error("Ordinary scene retained a diagnostic readback access");
+        }
+        reordered.Resources = std::move(resources);
+        s.PlannedBindings = std::move(bindings);
+    }
     auto schedule=Compile(reordered,singleDirect);for(auto& packet:schedule.Packets)if(packet.Operation!=Invalid)packet.Operation=order.at(packet.Operation);return schedule;
 }
 void SceneGeometry::AppendGrassView(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, const GeometryTarget& target) {
