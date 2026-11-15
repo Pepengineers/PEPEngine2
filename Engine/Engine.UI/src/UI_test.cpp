@@ -200,13 +200,27 @@ namespace Engine::UI
             ImDrawData Data;
         };
 
-        struct DrawTexture
+        struct AtlasSnapshot
         {
-            UITextureId Id = UITextureId::Invalid;
             UINT Width = 0;
             UINT Height = 0;
             std::vector<unsigned char> Pixels;
         };
+        struct DrawTexture
+        {
+            UITextureId Id = UITextureId::Invalid;
+            std::shared_ptr<const AtlasSnapshot> Atlas;
+        };
+        struct AtlasCapture
+        {
+            const ImTextureData* Identity;
+            int UniqueID;
+            uint64_t Generation;
+            std::shared_ptr<const AtlasSnapshot> Snapshot;
+        };
+        std::vector<AtlasCapture> ScreenAtlasCaptures;
+        uint64_t ScreenAtlasGeneration = 0;
+        int ScreenAtlasFrame = -1;
 
         struct AtlasUpload
         {
@@ -215,7 +229,7 @@ namespace Engine::UI
             D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{};
         };
 
-        AtlasUpload PrepareAtlas(GDX12Device& device, const DrawTexture& source)
+        AtlasUpload PrepareAtlas(GDX12Device& device, const AtlasSnapshot& source)
         {
             AtlasUpload upload;
             const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(OffscreenFormat, source.Width, source.Height, 1, 1);
@@ -245,7 +259,7 @@ namespace Engine::UI
         std::vector<DrawTexture> Textures;
     };
 
-    std::shared_ptr<const DrawData> CaptureDrawData(const ImDrawData& source)
+    static std::shared_ptr<const DrawData> CaptureData(const ImDrawData& source, bool reuseScreenAtlases)
     {
         if (!source.Valid) throw std::invalid_argument("UI capture requires finalized ImGui draw data");
         if (!std::isfinite(source.DisplaySize.x) || !std::isfinite(source.DisplaySize.y) ||
@@ -254,6 +268,7 @@ namespace Engine::UI
         if (source.DisplaySize.x <= 0 || source.DisplaySize.y <= 0) return {};
 
         auto frame = std::make_shared<DrawData>(source);
+        std::vector<AtlasCapture> capturedAtlases;
         std::unordered_map<const ImTextureData*, ImTextureID> managed;
         std::unordered_map<ImTextureID, ImTextureID> external;
         for (auto* list : frame->Lists.Data.CmdLists)
@@ -280,8 +295,16 @@ namespace Engine::UI
                             tex->Width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
                             tex->Height > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION)
                             throw std::invalid_argument("UI capture requires live RGBA8 ImGui texture pixels");
-                        frame->Textures.push_back({UITextureId::Invalid, static_cast<UINT>(tex->Width),
-                            static_cast<UINT>(tex->Height), {tex->Pixels, tex->Pixels + tex->GetSizeInBytes()}});
+                        const auto cached = std::find_if(ScreenAtlasCaptures.begin(), ScreenAtlasCaptures.end(),
+                            [&](const auto& atlas) { return reuseScreenAtlases && atlas.Identity == tex &&
+                                atlas.UniqueID == tex->UniqueID && atlas.Generation == ScreenAtlasGeneration &&
+                                atlas.Snapshot->Width == tex->Width && atlas.Snapshot->Height == tex->Height; });
+                        const auto snapshot = cached != ScreenAtlasCaptures.end() ? cached->Snapshot :
+                            std::make_shared<const AtlasSnapshot>(AtlasSnapshot{static_cast<UINT>(tex->Width),
+                                static_cast<UINT>(tex->Height), {tex->Pixels, tex->Pixels + tex->GetSizeInBytes()}});
+                        frame->Textures.push_back({UITextureId::Invalid, snapshot});
+                        if (reuseScreenAtlases)
+                            capturedAtlases.push_back({tex, tex->UniqueID, ScreenAtlasGeneration, snapshot});
                     }
                     command.TexRef = ImTextureRef(entry->second);
                 }
@@ -295,7 +318,13 @@ namespace Engine::UI
                 }
             }
         }
+        if (reuseScreenAtlases) ScreenAtlasCaptures = std::move(capturedAtlases);
         return frame;
+    }
+
+    std::shared_ptr<const DrawData> CaptureDrawData(const ImDrawData& source)
+    {
+        return CaptureData(source, false);
     }
 
     struct OffscreenRenderer::Impl
@@ -304,7 +333,7 @@ namespace Engine::UI
 
         struct CachedAtlas
         {
-            DrawTexture Source;
+            std::shared_ptr<const AtlasSnapshot> Source;
             GDX12ResourceHandle Texture;
         };
 
@@ -431,8 +460,7 @@ namespace Engine::UI
             if (source.Id == UITextureId::Invalid)
             {
                 const auto cached = std::find_if(state.Atlases.begin(), state.Atlases.end(), [&](const auto& atlas) {
-                    return atlas->Source.Width == source.Width && atlas->Source.Height == source.Height &&
-                        atlas->Source.Pixels == source.Pixels;
+                    return atlas->Source == source.Atlas;
                 });
                 if (cached != state.Atlases.end())
                 {
@@ -442,10 +470,10 @@ namespace Engine::UI
                 }
                 else
                 {
-                    auto& upload = recording->Uploads.emplace_back(PrepareAtlas(state.Device, source));
+                    auto& upload = recording->Uploads.emplace_back(PrepareAtlas(state.Device, *source.Atlas));
                     resource = upload.Texture.Get();
                     if (state.ReuseImmutableAtlases)
-                        atlases.push_back(std::make_shared<Impl::CachedAtlas>(Impl::CachedAtlas{source, upload.Texture}));
+                        atlases.push_back(std::make_shared<Impl::CachedAtlas>(Impl::CachedAtlas{source.Atlas, upload.Texture}));
                 }
             }
             else
@@ -718,11 +746,19 @@ namespace Engine::UI
     std::shared_ptr<const DrawData> CaptureScreenFrame()
     {
         const auto* data = FinalizeScreenFrame();
-        return data && data->TotalVtxCount ? CaptureDrawData(*data) : nullptr;
+        if (!data) return {};
+        const int frame = ImGui::GetFrameCount();
+        // ImGui's dynamic atlas marks real pixel writes dirty, including pending WantCreate textures.
+        if (ScreenAtlasFrame != frame && !ImGui::GetIO().Fonts->TexIsBuilt) ++ScreenAtlasGeneration;
+        ScreenAtlasFrame = frame;
+        return data->TotalVtxCount ? CaptureData(*data, true) : nullptr;
     }
 
     void ShutdownUI()
     {
+        ScreenAtlasCaptures.clear();
+        ScreenAtlasGeneration = 0;
+        ScreenAtlasFrame = -1;
         if (!ImGui::GetCurrentContext()) return;
         if (ImGui::GetIO().BackendRendererUserData) ImGui_ImplDX12_Shutdown();
         if (ImGui::GetIO().BackendPlatformUserData) ImGui_ImplWin32_Shutdown();
