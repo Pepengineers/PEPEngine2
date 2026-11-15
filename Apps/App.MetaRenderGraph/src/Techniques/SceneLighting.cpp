@@ -179,6 +179,7 @@ bool SceneLighting::Record(Id id, ID3D12GraphicsCommandList *commands) const
 }
 void SceneLighting::Submitted(bool serial, uint64_t fence)
 {
+    if (_localShadows) _localShadows->Submitted(_slot);
     if (_reflections) _reflections->Submitted(serial, fence);
 }
 void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings, SceneGeometry &geometry,

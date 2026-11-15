@@ -15,6 +15,8 @@ float LocalVisibility(LocalLight light, float3 position, float3 normal, float nD
         else if (a.y >= a.z) face = offset.y >= 0 ? 2 : 3;
         else face = offset.z >= 0 ? 4 : 5;
     }
+    // Meta opts into a per-face mask; other paths retain their existing full maps.
+    if ((light.ShadowFlags & 4u) && (light._padding.z & (1u << face)) == 0u) return 1;
     float4 clip = mul(float4(biasedPosition, 1), light.ShadowViewProj[face]);
     if (clip.w <= 0) return 1;
     float3 projected = clip.xyz / clip.w;

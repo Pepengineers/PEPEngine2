@@ -48,9 +48,11 @@ SamplerState samAnisotropicWrap : register(s4);
 struct VertexOutput
 {
     float4 Position : SV_POSITION;
+#ifndef SHADOW_DEPTH_ONLY
     float2 UV : TEXCOORD0;
     nointerpolation uint MaterialIndex : TEXCOORD1;
     nointerpolation uint CastsShadows : TEXCOORD2;
+#endif
 };
 
 VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID : SV_VertexID, uint instanceID : SV_InstanceID)
@@ -69,12 +71,15 @@ VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID 
     VertexOutput output;
     float4 world = mul(float4(position, 1), Transforms[instance.TransformIndex].World);
     output.Position = mul(world, Lights[LightFaceIndex / 6].ShadowViewProj[LightFaceIndex % 6]);
+#ifndef SHADOW_DEPTH_ONLY
     output.UV = uv;
     output.MaterialIndex = instance.MaterialIndex;
     output.CastsShadows = instance.CastsShadows;
+#endif
     return output;
 }
 
+#ifndef SHADOW_DEPTH_ONLY
 void PS(VertexOutput input)
 {
     if (input.CastsShadows == 0) clip(-1.0f);
@@ -82,4 +87,5 @@ void PS(VertexOutput input)
     if (material.ReflectionProbePreview != 0) clip(-1.0f);
     if (material.RenderLayer == 1) clip(Textures[material.DiffuseIndex].Sample(samAnisotropicWrap, input.UV).a - 0.5f);
 }
+#endif
 #endif

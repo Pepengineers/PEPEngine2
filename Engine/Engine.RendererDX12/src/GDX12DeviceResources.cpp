@@ -180,6 +180,7 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
         {
             material->DirtyFlag = false;
             ++material->_revision;
+            ++MaterialRevision;
             material->_numPrimaryFramesDirty = NumFrameConstantVariable.GetValue();
         }
 
