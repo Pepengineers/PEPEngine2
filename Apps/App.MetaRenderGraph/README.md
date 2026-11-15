@@ -3,13 +3,13 @@
 Experimental executable using the Meta execution plan alongside production App.
 The ordinary launch now loads the original Bistro interior and exterior with
 static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored lights,
-static SkyBox/IBL, cascaded sun shadows and HDR display transform. Alpha-tested
-cutouts use OpaquePass; blended materials are omitted. No local-shadow, AO, SSR, reflection-probe, grass, water,
+static SkyBox/IBL, cascaded sun shadows, point/spot shadows and HDR display transform. Alpha-tested
+cutouts use OpaquePass; blended materials are omitted. No AO, SSR, reflection-probe, grass, water,
 particle, transparency, reconstruction, post-effect or screen-UI passes execute.
 The world is paused to exclude simulation; the camera remains free.
 
-This adds the sun-shadow stage of the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
-After the ordinary smoke, the user measures CPU/GPU load and FPS and chooses the
+This adds local shadows to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+The user checks the ordinary launch, measures CPU/GPU load and FPS, and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
 Controls match App: WASD movement, Q/E down/up, right mouse to look, Shift for
@@ -18,8 +18,8 @@ The initial camera is at the Bistro entrance, as in App. The startup viewport is
 1280x800; render resolution is native. The first frame's declared operations are
 written to `Logs/opaque-operations.txt` beside the executable. The first reused
 frame slot is recorded in `Logs/opaque-steady-operations.txt`; unchanged static
-scene buffers have no upload/copy packets there. Camera constants and light-grid
-inputs bind their existing frame-local upload resources directly.
+scene buffers have no upload/copy packets there. Camera and light-grid constants
+use frame-local upload resources; light data, masks and shadow commands use VRAM.
 
 The existing `--smoke` procedural diagnostic host remains separate. It is not the
 short ordinary smoke required for acceptance and is not run for this migration.
@@ -46,8 +46,9 @@ not the short ordinary smoke required by the current acceptance rules.
 The settings below also describe the retained procedural implementation. The
 ordinary opaque stage does not enable extra techniques through these switches;
 secondary-adapter opt-ins are rejected. Ordinary sun shadows use App's default
-2048 texels per cascade (4096x4096 depth atlas); local shadow resolution stays
-zero. `--smoke` restores its previous small diagnostic shadow sizes.
+2048 texels per cascade (4096x4096 depth atlas); local shadow resolution defaults
+to 256 texels per face (`Render.Shadows.Local.Resolution`, `0` disables local shadows).
+`--smoke` restores its previous small diagnostic shadow sizes.
 
 The ordinary sun path uses App's `ShadowPass.hlsl` and `CSM.hlsli`: one GPU
 culling dispatch for the active cascades, then one ExecuteIndirect draw per cascade directly
@@ -55,6 +56,15 @@ into the lighting atlas. There are no intermediate depth maps, packing kernels,
 probe shadow maps or readbacks. Scene buffers stay resident; caster bounds are
 reduced only when scene data changes. Atlas and visibility buffers belong to
 the frame slot, and lighting declares the atlas read in the Meta graph.
+
+Local shadows preserve the scene's authored `CastShadows` flags. CPU jobs select
+lights whose range bounds intersect the camera frustum, then traverse a shared
+caster BVH using light range and per-face frusta. Casters outside the camera
+remain eligible. A dependent job packs the per-face indirect draw lists and
+assigns depth-array slices; the BVH rebuilds only when scene data changes.
+One command upload feeds ExecuteIndirect directly into the depth array, using
+App's local-shadow shader, bias and filtering. Commands and maps belong to the
+frame slot. Maps redraw every frame; temporal shadow caching is deferred.
 
 The ordinary light grid is built by `LightGrid.hlsl` on the GPU. Its source SRV
 and mask UAV stay in VRAM; source uploads occur only when their revision or
@@ -147,6 +157,9 @@ scene content, not a new test harness.
 
 ## Current result and limits
 
+- CPU jobs for local shadows and their shader variants built in Release.
+  Runtime appearance and performance await the user's manual check; see the
+  [local-shadow report](../../docs/reports/2026-11-15-meta-local-shadow-jobs.md).
 - Sun shadows built in Release and displayed in the ordinary Bistro launch.
   Further runtime checks were stopped at the user's request; user acceptance
   is pending. See the [sun-shadow report](../../docs/reports/2026-11-15-meta-sun-shadows.md).
