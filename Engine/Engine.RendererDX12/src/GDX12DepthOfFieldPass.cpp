@@ -67,11 +67,27 @@ void GDX12DepthOfFieldPass::Execute(GDX12CommandList* commands)
     RecordCommands(commands);
 }
 
+bool GDX12DepthOfFieldPass::IsActive() const
+{
+    auto* color = _inputs[0]->GetTexture();
+    // The SDK's four bilateral mip levels require at least 8 half-resolution texels.
+    return GetDepthOfFieldSettings().Enabled && color->GetWidth() >= 16 && color->GetHeight() >= 16;
+}
+
 void GDX12DepthOfFieldPass::PrepareRecording()
 {
     const auto settings = GetDepthOfFieldSettings();
     auto* color = _inputs[0]->GetTexture();
-    if (!settings.Enabled || color->GetWidth() < 16 || color->GetHeight() < 16) return;
+    const bool enabled = IsActive();
+    if (_wasEnabled != enabled) _commonData->ResetUpscalerHistory = true;
+    _wasEnabled = enabled;
+    if (!enabled) return;
+    const auto& projection = _commonData->CameraViewToClip;
+    const auto coc = CalculateDepthOfFieldCoc(settings, XMConvertToRadians(_commonData->ActiveCameraFOV),
+        color->GetHeight(), projection._33, projection._34, projection._43);
+    if (_previousScale != coc.Scale || _previousBias != coc.Bias) _commonData->ResetUpscalerHistory = true;
+    _previousScale = coc.Scale;
+    _previousBias = coc.Bias;
     if (!_context || _context->Rings != settings.Rings || _context->CocLimit != settings.CocLimit ||
         _context->RingMerge != settings.RingMerge)
     {
@@ -108,10 +124,7 @@ void GDX12DepthOfFieldPass::RecordCommands(GDX12CommandList* commands)
     const auto settings = GetDepthOfFieldSettings();
     auto* color = _inputs[0]->GetTexture();
     auto* depth = _inputs[1]->GetTexture();
-    // The SDK's four bilateral mip levels require at least 8 half-resolution texels.
-    const bool enabled = settings.Enabled && color->GetWidth() >= 16 && color->GetHeight() >= 16;
-    if (_wasEnabled != enabled) _commonData->ResetUpscalerHistory = true;
-    _wasEnabled = enabled;
+    const bool enabled = IsActive();
     GDX12_SCOPED_EVENT(commands, "FidelityFX Depth of Field", Colors::Purple);
     if (!enabled)
     {
@@ -124,9 +137,6 @@ void GDX12DepthOfFieldPass::RecordCommands(GDX12CommandList* commands)
     const auto& projection = _commonData->CameraViewToClip;
     const auto coc = CalculateDepthOfFieldCoc(settings, XMConvertToRadians(_commonData->ActiveCameraFOV),
         color->GetHeight(), projection._33, projection._34, projection._43);
-    if (_previousScale != coc.Scale || _previousBias != coc.Bias) _commonData->ResetUpscalerHistory = true;
-    _previousScale = coc.Scale;
-    _previousBias = coc.Bias;
     commands->ResourceBarrier({ color->GetResource()->GetNonPixelShaderResourceBarrier(),
         depth->GetResource()->GetNonPixelShaderResourceBarrier(), _output.GetResource()->GetUnorderedAccessBarrier() });
     FfxDofDispatchDescription dispatch = {};

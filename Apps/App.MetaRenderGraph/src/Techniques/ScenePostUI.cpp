@@ -272,10 +272,25 @@ void ScenePostUI::AppendOpaque(Graph& graph, std::vector<ID3D12Resource*>& bindi
         hdr->GetHeight() != depth->GetHeight() || hdr->GetWidth() != motion->GetWidth() ||
         hdr->GetHeight() != motion->GetHeight())
         throw std::invalid_argument("Ordinary post requires matching HDR/depth/motion grids");
+    _dof.SetInputs({hdr, depth});
+    std::vector<Id> dependencies;
+    if (_dof.IsActive())
+    {
+        if (!_dof._output.IsInitialized()) _dof.Initialize();
+        else if (_resize || _dof._output.GetWidth() != hdr->GetWidth() ||
+            _dof._output.GetHeight() != hdr->GetHeight()) _dof.Resize();
+        _dof.PrepareRecording();
+        auto* dof = _dof.GetOutput(0)->GetTexture();
+        dependencies.push_back(Packet(graph, bindings, "DoF SDK DIRECT recording boundary",
+            {{hdr->GetResource(), Mode::Read}, {depth->GetResource(), Mode::Read}, {dof->GetResource(), Mode::Write}},
+            [this](auto* cmd) { _dof.RecordCommands(cmd); }));
+        hdr = dof;
+    }
+    else _dof.PrepareRecording(); // Notify temporal SR even when no DoF packet is needed.
     _blur.SetInputs({hdr, depth, motion});
     if (!_initialized) { _blur.Initialize(); _initialized = true; }
     else if (_resize) _blur.Resize();
-    const auto output = AppendReconstruction(graph, bindings, hdr, depth, motion, featureMotion, target);
+    const auto output = AppendReconstruction(graph, bindings, hdr, depth, motion, featureMotion, target, std::move(dependencies));
     AppendScreen(graph, bindings, target, finish, output);
 }
 void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bindings, bool record)

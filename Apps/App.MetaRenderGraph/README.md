@@ -4,14 +4,14 @@ Experimental executable using the Meta execution plan alongside production App.
 The ordinary launch now loads the original Bistro interior and exterior with
 static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored lights,
 SkyAtmosphere/IBL, cascaded sun shadows, point/spot shadows, XeGTAO, FidelityFX SSSR, mesh WBOIT
-transparency, Bistro grass/wind, GPU particles, animated people/foxes, SPH water, Motion Blur,
+transparency, Bistro grass/wind, GPU particles, animated people/foxes, SPH water, FidelityFX DoF, Motion Blur,
 reconstruction, HDR display transform and Engine.UI screen composition. Alpha-tested cutouts use OpaquePass.
-No reflection-probe, DoF, frame-generation
+No reflection-probe, frame-generation
 or world-space UI poster passes execute.
 The world is paused; grass/wind, particles, characters and water advance through explicit time paths.
 The camera remains free.
 
-This adds Bistro sky/atmosphere to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+This adds Bistro Depth of Field to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
 The user checks the ordinary launch, measures CPU/GPU load and FPS, and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
@@ -35,7 +35,7 @@ use frame-local upload resources; light data, masks and shadow commands use VRAM
 The existing `--smoke` procedural diagnostic host remains separate. It is not the
 short ordinary smoke required for acceptance and is not run for this migration.
 
-Ordinary post order is opaque particle-water → mesh/weighted transparency with aerial → additive HDR → Motion Blur and complete motion
+Ordinary post order is opaque particle-water → mesh/weighted transparency with aerial → additive HDR → DoF → Motion Blur and complete motion
 → reconstruction/native → display → screen UI → PRESENT. Startup requests App's
 XeSS/Default (Ultra Quality Plus) and Motion Blur Mid, shutter 0.5, max radius 40,
 quality-selected samples (27). Settings retains all existing provider/preset,
@@ -48,6 +48,24 @@ Native/NIS without blur skip motion preparation and particle motion; temporal SR
 keeps complete motion even without gather. Context/grid changes drain before
 resize and reset history. UI stays at window resolution, after postprocessing.
 See the [Motion Blur/SR report](../../docs/reports/2026-11-15-meta-bistro-motion-blur-upscalers.md).
+
+DoF uses App's FidelityFX pass and physical CoC model on the current render grid,
+with RGBA16F HDR and matching reverse-Z composition depth (including opaque water).
+Startup sets `Render.DOF.Enabled=true`, `.Quality=2` (Mid), `.FocusDistanceCm=500`,
+`.FNumber=2.8`, `.SensorHeightMm=24`, `.CocLimit=0`, `.Rings=0`, `.RingMerge=true`.
+Use F1 Settings to edit these existing CVars: focus distance selects the sharp plane
+in centimetres; lower f-number widens blur; quality 0/1/2/3/4 is Off/Low/Mid/High/Epic.
+Zero rings/CoC limit uses the quality preset (Mid: 5 rings, 0.05 limit).
+`Render.DOF.FixedCocLimit` keeps the existing fixed-0.05 rule; an explicit positive
+CoC limit takes precedence. No autofocus is added. Glass and translucent particles
+retain App's limitation: they do not supply their own full DoF depth.
+Disabled/Off or grids smaller than 16 in either dimension pass HDR straight through,
+without a DoF packet, dispatch or copy. SDK context/targets persist; resize/SR grid
+changes drain the owner before rebinding/resizing. Rings/limit/merge changes safely
+retire the SDK context; focus/aperture/FOV update CoC without recreating it.
+Enable/disable and CoC changes reset temporal SR history; unchanged focus parameters
+do not reset it each frame. The SDK FP32 HDR accumulation fix is preserved.
+See the [DoF report](../../docs/reports/2026-11-16-meta-bistro-dof.md).
 
 The original stone basin is at (-1297,65.3,-425) cm, yaw 135 degrees, beside the
 existing SparkRain emitter. Startup requests one basin and 100000 SPH particles,
