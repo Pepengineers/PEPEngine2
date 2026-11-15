@@ -46,8 +46,9 @@ class MetaRenderPipeline final : public IRenderPipeline
     }
     void UpdateFrameSettings(RenderPipelineContext& c) override
     {
-        if (_opaqueOnly) return;
         _post->UpdateSettings();
+        if (!(GetReconstructionSettings() == _post->Reconstruction().GetStatus().Requested) || _post->NeedsResize())
+            DrainExecution();
         if (_post->Reconstruction().ApplySettings()) c.Resize();
     }
     void Initialize(RenderPipelineContext &) override;

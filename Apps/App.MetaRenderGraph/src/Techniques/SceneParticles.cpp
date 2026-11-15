@@ -1,6 +1,7 @@
 #include "SceneParticles.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
+#include "Engine.RendererDX12/GDX12MotionBlurSettings.h"
 
 namespace Meta
 {
@@ -81,6 +82,8 @@ void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& binding
     simulation->SetInteractionField(interaction);
     simulation->BeginFrame(&_resources, _common, true);
     _pass.SetInputs({depth, accum, reveal});
+    _pass.SetMotionOutputEnabled(GetMotionBlurSettings().Enabled ||
+        (_common.Upscaler && (_common.Upscaler->GetFlags() & RENDER_PASS_FLAG_USE_JITTER)));
     _pass.Initialize();
     _pass.BeginFrame();
     const UINT slot = _resources.CurrFrameConstantsIndex;

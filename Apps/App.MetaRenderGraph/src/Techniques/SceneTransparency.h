@@ -15,6 +15,7 @@ public:
     GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot,
         GDX12Texture* hdr, GDX12Texture* sun, GDX12Texture* local, SceneEnvironment&);
     bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd) || _particles.Record(id, cmd); }
+    GDX12Texture* ParticleMotion() const { return _particles.MotionOutput(); }
 private:
     struct Frame
     {

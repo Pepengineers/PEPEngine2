@@ -22,8 +22,9 @@ public:
     ~ScenePostUI();
     GDX12ReconstructionPass& Reconstruction() { return _reconstruction; }
     std::vector<GDX12RenderPass*> Passes(bool opaqueOnly = false) {
-        return opaqueOnly ? std::vector<GDX12RenderPass*>{&_output} : std::vector<GDX12RenderPass*>{&_dof, &_blur, &_reconstruction, &_output};
+        return opaqueOnly ? std::vector<GDX12RenderPass*>{&_blur, &_reconstruction, &_output} : std::vector<GDX12RenderPass*>{&_dof, &_blur, &_reconstruction, &_output};
     }
+    bool NeedsResize() const;
     void BeginPlan() { _work.Commands.clear(); }
     void Submitted(UINT slot) { _exports.at(slot) = _pendingExports; }
     bool AllowsFrameGeneration() const;
@@ -36,10 +37,14 @@ public:
         GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion,
         GDX12Texture* target, const std::function<void(GDX12CommandList*)>& finish);
     void AppendOpaque(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr,
+        GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion,
         GDX12Texture* target, const std::function<void(GDX12CommandList*)>& finish);
     void AppendPosters(Graph&, std::vector<ID3D12Resource*>&, bool record = true);
     bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd); }
 private:
+    Id AppendReconstruction(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr,
+        GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion,
+        GDX12Texture* target, std::vector<Id> dependencies = {});
     void AppendScreen(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* target,
         const std::function<void(GDX12CommandList*)>& finish, Id dependency);
     Id Packet(Graph&, std::vector<ID3D12Resource*>&, const char*,
@@ -70,6 +75,6 @@ private:
     bool _collisionInitialized = false, _collisionActive = false;
 #endif
     std::array<GDX12ResourceHandle, 2> _pendingExports;
-    bool _initialized = false, _resize = false, _outputInitialized = false;
+    bool _ordinary = false, _initialized = false, _resize = false, _outputInitialized = false;
 };
 }

@@ -1090,6 +1090,9 @@ void RenderModule::BeginFrame()
     if (_uiInitialized)
     {
         Engine::UI::BeginFrame();
+        if (auto* reconstruction = _pipeline->GetBindings().Reconstruction)
+            Engine::UI::DrawReconstructionStatus(reconstruction->GetStatus(), _RPcommonData.DownscaledWidth,
+                _RPcommonData.DownscaledHeight, _RPcommonData.WindowWidth, _RPcommonData.WindowHeight);
 #ifdef _DEBUG
         _pipeline->DrawDebugControls(*this);
 #endif

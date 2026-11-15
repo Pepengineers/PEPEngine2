@@ -66,7 +66,7 @@ void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
     _sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_MATERIALS, true);
     _bindings.PrimaryPasses = _post->Passes(_opaqueOnly);
     _bindings.PrimaryPasses.push_back(&_sceneFlags);
-    _bindings.Reconstruction = _opaqueOnly ? nullptr : &_post->Reconstruction();
+    _bindings.Reconstruction = &_post->Reconstruction();
     _bindings.FrameGenerationInputs = !_opaqueOnly;
     if (_opaqueOnly && (MetaWater.GetValue() || MetaParticles.GetValue() || MetaCrossAdapter.GetValue()))
         throw std::invalid_argument("Opaque Bistro does not include secondary-adapter techniques");
@@ -173,7 +173,11 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         _post->BeginPlan();
         _environment->Append(g, bindings);
         _lighting->SetHDRContinuation([&](auto& graph, auto& resources, auto* hdr, auto* probes) {
-            if (_opaqueOnly) { _post->AppendOpaque(graph, resources, hdr, target, finish); return hdr; }
+            if (_opaqueOnly) {
+                _post->AppendOpaque(graph, resources, hdr, _geometry->Depth(slot), _geometry->GBuffer(slot, 1),
+                    _lighting->ParticleMotion(), target, finish);
+                return hdr;
+            }
             auto* finalHDR = _waterParticles->Append(graph, resources, *_geometry, *_environment, hdr, probes,
                 _lighting->ProbeRadiance(recordingSerial), recordingSerial);
             // Diagnostic A/B still compares the existing geometry/lighting readbacks.

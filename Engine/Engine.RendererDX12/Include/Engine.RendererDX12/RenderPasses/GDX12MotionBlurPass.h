@@ -20,10 +20,14 @@ public:
     }
 
     GDX12MotionBlurPass();
+    // Set before Initialize; explicit owners retire users before resizing, legacy execution retains its copy output.
+    void SetPassthroughWhenDisabled(bool enabled = true) { _passthroughWhenDisabled = enabled; }
+    bool NeedsTileResize() const;
     void Initialize() override;
     void Execute(GDX12CommandList* commands) override;
-    void PrepareRecording(); // Owner-only allocation/retirement before explicit recording.
+    void PrepareRecording(bool completeMotionRequired = true); // Owner-only, after required retirement.
     void RecordCommands(GDX12CommandList* commands);
+    void RecordCommands(GDX12CommandList* commands, GDX12Texture* featureMotion);
     void Resize() override;
     void ClearDenendencies() override;
 
@@ -35,4 +39,5 @@ private:
     ComPtr<ID3D12PipelineState> _prepare, _tiles, _neighbors, _gather;
     UINT _tileSize = 0;
     bool _wasEnabled = false;
+    bool _passthroughWhenDisabled = false, _prepareMotion = true, _preparedBlur = false;
 };

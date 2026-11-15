@@ -4,14 +4,14 @@ Experimental executable using the Meta execution plan alongside production App.
 The ordinary launch now loads the original Bistro interior and exterior with
 static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored lights,
 static SkyBox/IBL, cascaded sun shadows, point/spot shadows, XeGTAO, FidelityFX SSSR, mesh WBOIT
-transparency, Bistro grass/wind, GPU particles, animated people/foxes, HDR display
-transform and Engine.UI screen composition. Alpha-tested cutouts use OpaquePass.
-No reflection-probe, water, reconstruction, other post-effect
+transparency, Bistro grass/wind, GPU particles, animated people/foxes, Motion Blur,
+reconstruction, HDR display transform and Engine.UI screen composition. Alpha-tested cutouts use OpaquePass.
+No reflection-probe, water, DoF, frame-generation
 or world-space UI poster passes execute.
 The world is paused; grass/wind, particles and characters advance through explicit time paths.
 The camera remains free.
 
-This adds animation/skinning and screen UI to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+This adds Motion Blur and reconstruction to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
 The user checks the ordinary launch, measures CPU/GPU load and FPS, and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
@@ -23,10 +23,10 @@ Startup uses App's 10 people and 5 foxes, original clips/routes/materials/scales
 skinning enabled at Mid (30 Hz), no pose-rate or actor preset override. Route jobs
 complete before the render snapshot; physics remains paused. Skin palette uploads
 and deformation precede depth/GBuffer/shadow consumers. Screen raster/composition
-follows display once, at window resolution, without postprocessing or posters.
+follows reconstruction and display once, at window resolution, without posters.
 See the [animation/UI report](../../docs/reports/2026-11-15-meta-bistro-animation-ui.md).
 The initial camera is at the Bistro entrance, as in App. The startup viewport is
-1280x800; render resolution is native. The first frame's declared operations are
+1280x800; the render grid follows the effective reconstruction provider. The first frame's declared operations are
 written to `Logs/opaque-operations.txt` beside the executable. The first reused
 frame slot is recorded in `Logs/opaque-steady-operations.txt`; unchanged static
 scene buffers have no upload/copy packets there. Camera and light-grid constants
@@ -34,6 +34,20 @@ use frame-local upload resources; light data, masks and shadow commands use VRAM
 
 The existing `--smoke` procedural diagnostic host remains separate. It is not the
 short ordinary smoke required for acceptance and is not run for this migration.
+
+Ordinary post order is transparent/additive HDR → Motion Blur and complete motion
+→ reconstruction/native → display → screen UI → PRESENT. Startup requests App's
+XeSS/Default (Ultra Quality Plus) and Motion Blur Mid, shutter 0.5, max radius 40,
+quality-selected samples (27). Settings retains all existing provider/preset,
+blur and reconstruction restart controls. The Reconstruction window reports the
+requested/effective provider, fallback reason and render/output sizes; F1 toggles
+it with Settings. Native is passthrough without TAA; NIS is spatial; XeSS AA,
+FSR NativeAA and DLSS DLAA use the existing providers. SDK availability determines
+the explicit fallback. No provider matrix or performance claim is implied.
+Native/NIS without blur skip motion preparation and particle motion; temporal SR
+keeps complete motion even without gather. Context/grid changes drain before
+resize and reset history. UI stays at window resolution, after postprocessing.
+See the [Motion Blur/SR report](../../docs/reports/2026-11-15-meta-bistro-motion-blur-upscalers.md).
 
 ## Build and ordinary launch
 
@@ -114,8 +128,8 @@ Emitter pause and time scales remain effective while world pause is bypassed onl
 for this ordinary path. Colliding emitters read current mesh/grass opaque depth;
 fireflies read the current grass interaction field. Weighted particles append
 after the glass draw, before the single WBOIT resolve; global SortedAlpha/additive
-composition follows that resolve. Particle motion remains available for future
-consumers, without enabling Motion Blur/reconstruction.
+composition follows that resolve. Particle feature motion is enabled when blur or
+temporal reconstruction consumes it; history remains available when it is disabled.
 Look for the orange/blue fountains at the entrance, terrace embers, and fireflies
 in the original grass arch; dust/steam use App's `BistroBounds::Scene` layout
 volumes and confinement, while SparkRain retains its authored placement.
