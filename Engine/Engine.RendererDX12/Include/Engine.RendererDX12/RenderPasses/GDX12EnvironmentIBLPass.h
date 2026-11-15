@@ -6,6 +6,7 @@
 #include <array>
 #include <filesystem>
 #include <climits>
+#include <functional>
 namespace Meta { class SceneEnvironment; }
 
 // Outputs: diffuse irradiance, GGX radiance (8 mips when enabled), DFG, source cube.
@@ -30,6 +31,9 @@ public:
     void Invalidate();
     void ClearDenendencies() override;
     void SetCloudSource(GDX12CloudComponent* source);
+    // Meta retires all graph queues before descriptor/resource replacement;
+    // the legacy App retains its original DIRECT-queue retirement fallback.
+    void SetResourceRetirement(std::function<void()> retire) { _retire = std::move(retire); }
 private:
     friend class Meta::SceneEnvironment;
     void InitializeKernels();
@@ -48,6 +52,7 @@ private:
     void EnsureBRDF(GDX12CommandList* commands);
     void ResetEnvironmentHistory();
     void ReleaseAtmosphere();
+    void RetireResources();
     std::array<std::unique_ptr<GDX12Texture>, 4> _textures;
     std::array<std::unique_ptr<GDX12Texture>, 5> _luts;
     std::unique_ptr<GDX12Texture> _boxTexture;
@@ -69,4 +74,5 @@ private:
     uint64_t _cloudSourceRevision = 0, _cloudLightingRevision = 0;
     bool _cloudActive = false;
     SkyIBLSettings _resolvedIBL;
+    std::function<void()> _retire;
 };

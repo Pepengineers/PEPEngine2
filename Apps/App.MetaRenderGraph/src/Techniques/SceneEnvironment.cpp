@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <stdexcept>
 
 namespace Meta
@@ -92,7 +93,9 @@ void SceneEnvironment::Build()
     }
     bool changed = e._invalidated || cloudChanged || e._revision != state.Revision || e._quality != state.Quality ||
                    e._source != state.Source;
+    const bool discontinuity = changed;
     GDX12SkyConstants constants;
+    bool transmittanceChanged = false, multipleChanged = false, viewChanged = false, aerialChanged = false;
     constants.Mode.x = UINT(state.Source);
     SkyIBLSettings ibl;
     SkyAtmosphereSettings atmosphere;
@@ -109,7 +112,7 @@ void SceneEnvironment::Build()
         // DDS loading/upload is a separate packet below; no legacy queue submission.
         if (!clouds && (e._boxAsset != state.Box.Cubemap || !e._boxTexture->IsInitialized()))
         {
-            r.Device->GetCommandQueue()->Flush();
+            e.RetireResources();
             const auto path = state.Box.Cubemap.is_absolute()
                                   ? state.Box.Cubemap
                                   : std::filesystem::path(ASSETS_FOLDER) / state.Box.Cubemap;
@@ -180,6 +183,17 @@ void SceneEnvironment::Build()
     {
         atmosphere = ResolveSkyAtmosphereSettings(state.Atmosphere, state.Quality);
         ibl = atmosphere.IBL;
+        const UINT dimensions[5][3] = {
+            {atmosphere.TransmittanceWidth, atmosphere.TransmittanceHeight, 1},
+            {atmosphere.MultipleScatteringSize, atmosphere.MultipleScatteringSize, 1},
+            {atmosphere.SkyViewWidth, atmosphere.SkyViewHeight, 1},
+            {atmosphere.AerialWidth, atmosphere.AerialHeight, atmosphere.AerialDepth},
+            {atmosphere.AerialWidth, atmosphere.AerialHeight, atmosphere.AerialDepth}};
+        std::array<bool, 5> resized{};
+        for (UINT i = 0; i < resized.size(); ++i)
+            resized[i] = !e._luts[i]->IsInitialized() || e._luts[i]->GetWidth() != dimensions[i][0] ||
+                         e._luts[i]->GetHeight() != dimensions[i][1] ||
+                         e._luts[i]->GetResource()->D3DResource->GetDesc().DepthOrArraySize != dimensions[i][2];
         e.EnsureAtmosphere(atmosphere);
         const auto pack = [](const Vector3 &v, float w) { return XMFLOAT4(v.x, v.y, v.z, w); };
         constants.RayleighHeight = pack(atmosphere.RayleighScatteringPerKm, atmosphere.RayleighScaleHeightKm);
@@ -209,8 +223,53 @@ void SceneEnvironment::Build()
         auto capture = constants;
         capture.CameraPosition = pack((atmosphere.IBLCapturePositionCm - atmosphere.PlanetCenterCm) * .00001f, 0);
         r.FrameConstants[r.CurrFrameConstantsIndex]->SkyCB->CopyData(1, capture);
+
+        const auto differs = [](const auto &a, const auto &b) { return std::memcmp(&a, &b, sizeof(a)) != 0; };
+        GDX12SkyConstants medium;
+        medium.RayleighHeight = constants.RayleighHeight;
+        medium.MieScatteringHeight = constants.MieScatteringHeight;
+        medium.MieAbsorptionG = constants.MieAbsorptionG;
+        medium.MieAbsorptionG.w = 0; // extinction does not depend on phase anisotropy
+        medium.OzoneCenter = constants.OzoneCenter;
+        medium.GroundWidth.w = constants.GroundWidth.w;
+        medium.CenterRadius.w = constants.CenterRadius.w;
+        medium.Atmosphere.x = constants.Atmosphere.x;
+        medium.Samples.x = constants.Samples.x;
+        transmittanceChanged = !_atmosphereReady || resized[0] || differs(medium, _mediumConstants);
+        auto multiple = medium;
+        multiple.GroundWidth = constants.GroundWidth;
+        multiple.Samples.z = constants.Samples.z;
+        multiple.Samples.w = constants.Samples.w;
+        multipleChanged = !_atmosphereReady || resized[1] || transmittanceChanged || differs(multiple, _multipleConstants);
+        auto view = constants;
+        view.Box = {};
+        view.Mode.y = 0;
+        view.Atmosphere.y = view.Atmosphere.z = view.Atmosphere.w = 0;
+        auto captureKey = view;
+        captureKey.CameraPosition = capture.CameraPosition;
+        captureKey.Box.x = float(atmosphere.SkyViewWidth);
+        captureKey.Box.y = float(atmosphere.SkyViewHeight);
+        captureKey.Atmosphere.w = ibl.Intensity;
+        captureKey.Mode.z = ibl.FilterSamples;
+        captureKey.Mode.w = ibl.CubeResolution;
+        changed = !_atmosphereReady || e._invalidated || e._source != state.Source || multipleChanged || resized[2] ||
+                  differs(captureKey, _captureConstants);
+        viewChanged = !_atmosphereReady || multipleChanged || resized[2] || changed || differs(view, _viewConstants);
+        auto aerial = constants;
+        aerial.Atmosphere.z = aerial.Atmosphere.w = 0;
+        aerial.Samples.y = 0;
+        const auto viewProjection = _common.CameraView * _common.CameraProjection;
+        aerialChanged = !_atmosphereReady || multipleChanged || resized[3] || resized[4] ||
+                        differs(aerial, _aerialConstants) || differs(viewProjection, _aerialViewProjection);
+        _mediumConstants = medium;
+        _multipleConstants = multiple;
+        _captureConstants = captureKey;
+        _viewConstants = view;
+        _aerialConstants = aerial;
+        _aerialViewProjection = viewProjection;
+        _atmosphereReady = true;
+        e._resolvedIBL = ibl;
     }
-    const bool discontinuity = changed;
     changed |= lightingChanged;
     auto &frame = *r.FrameConstants[r.CurrFrameConstantsIndex];
     frame.SkyCB->CopyData(0, constants);
@@ -223,7 +282,7 @@ void SceneEnvironment::Build()
     }
     if (state.Source != SkySource::SkyBox && e._boxTexture->IsInitialized())
     {
-        r.Device->GetCommandQueue()->Flush();
+        e.RetireResources();
         e._boxTexture = std::make_unique<GDX12Texture>();
         e._boxAsset.clear();
     }
@@ -314,12 +373,14 @@ void SceneEnvironment::Build()
     if (state.Source == SkySource::SkyAtmosphere)
     {
         auto &l = e._luts;
-        if (changed)
-        {
+        if (transmittanceChanged)
             sky(0, 1, {access(l[0].get(), Mode::Write, UnorderedAccess)}, (l[0]->GetWidth() + 7) / 8,
                 (l[0]->GetHeight() + 7) / 8, 1, {}, {l[0]->GetUAV()});
+        if (multipleChanged)
             sky(1, 1, {access(l[0].get(), Mode::Read, Read), access(l[1].get(), Mode::Write, UnorderedAccess)},
                 (l[1]->GetWidth() + 7) / 8, (l[1]->GetHeight() + 7) / 8, 1, {l[0].get()}, {l[1]->GetUAV()});
+        if (changed)
+        {
             sky(2, 1,
                 {access(l[0].get(), Mode::Read, Read), access(l[1].get(), Mode::Read, Read),
                  access(l[2].get(), Mode::Write, UnorderedAccess)},
@@ -425,15 +486,19 @@ void SceneEnvironment::Build()
     if (state.Source == SkySource::SkyAtmosphere)
     {
         auto &l = e._luts;
-        sky(2, 0,
-            {access(l[0].get(), Mode::Read, Read), access(l[1].get(), Mode::Read, Read),
-             access(l[2].get(), Mode::Write, UnorderedAccess)},
-            (l[2]->GetWidth() + 7) / 8, (l[2]->GetHeight() + 7) / 8, 1, {l[0].get(), l[1].get()}, {l[2]->GetUAV()});
-        sky(3, 0,
-            {access(l[0].get(), Mode::Read, Read), access(l[1].get(), Mode::Read, Read),
-             access(l[3].get(), Mode::Write, UnorderedAccess), access(l[4].get(), Mode::Write, UnorderedAccess)},
-            (atmosphere.AerialWidth + 3) / 4, (atmosphere.AerialHeight + 3) / 4, (atmosphere.AerialDepth + 3) / 4,
-            {l[0].get(), l[1].get()}, {nullptr, l[3]->GetUAV(), l[4]->GetUAV()});
+        // The fixed capture temporarily uses SkyView; restore the camera view
+        // after capture before any visible-sky or lighting consumer reads it.
+        if (viewChanged)
+            sky(2, 0,
+                {access(l[0].get(), Mode::Read, Read), access(l[1].get(), Mode::Read, Read),
+                 access(l[2].get(), Mode::Write, UnorderedAccess)},
+                (l[2]->GetWidth() + 7) / 8, (l[2]->GetHeight() + 7) / 8, 1, {l[0].get(), l[1].get()}, {l[2]->GetUAV()});
+        if (aerialChanged)
+            sky(3, 0,
+                {access(l[0].get(), Mode::Read, Read), access(l[1].get(), Mode::Read, Read),
+                 access(l[3].get(), Mode::Write, UnorderedAccess), access(l[4].get(), Mode::Write, UnorderedAccess)},
+                (atmosphere.AerialWidth + 3) / 4, (atmosphere.AerialHeight + 3) / 4, (atmosphere.AerialDepth + 3) / 4,
+                {l[0].get(), l[1].get()}, {nullptr, l[3]->GetUAV(), l[4]->GetUAV()});
     }
     if (discontinuity)
         e.ResetEnvironmentHistory();

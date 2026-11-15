@@ -48,6 +48,7 @@ public:
     // instance ID and must not use the opaque compact-batch remap.
     void SetUnbatchedDraws(bool enabled) { _unbatchedDraws = enabled; }
     void SetStaticIBLOnly(bool enabled) { _staticIBLOnly = enabled; }
+    void SetAtmosphereEnabled(bool enabled) { _atmosphereEnabled = enabled; }
 	void Initialize() override
 	{
 		IN_DepthStencil = _inputs[0];
@@ -66,7 +67,8 @@ public:
 		// Shaders
 		auto& shaderCompiler = GDX12ShaderCompiler::GetInstance();
         const D3D_SHADER_MACRO defines[] = {{"TRANSPARENT_UNBATCHED", _unbatchedDraws ? "1" : "0"},
-            {"TRANSPARENT_STATIC_IBL_ONLY", _staticIBLOnly ? "1" : "0"}, {nullptr, nullptr}};
+            {"TRANSPARENT_STATIC_IBL_ONLY", _staticIBLOnly ? "1" : "0"},
+            {"TRANSPARENT_ATMOSPHERE", !_staticIBLOnly || _atmosphereEnabled ? "1" : "0"}, {nullptr, nullptr}};
 		_transparencyVS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", defines, "VS", "vs");
 		_transparencyPS = shaderCompiler.CompileShader(_resources->Device, SHADERS_FOLDER "TransparentPass.hlsl", defines, _partition == DepthPartition::Far ? "PSFar" :
             _partition == DepthPartition::Near ? "PSNear" : "PS", "ps");
@@ -295,5 +297,6 @@ private:
     GDX12WBOITTransparencyPass* _reuse;
     bool _unbatchedDraws = false;
     bool _staticIBLOnly = false;
+    bool _atmosphereEnabled = false;
     bool _rendered = false;
 };

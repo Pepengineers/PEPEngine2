@@ -3,7 +3,7 @@
 Experimental executable using the Meta execution plan alongside production App.
 The ordinary launch now loads the original Bistro interior and exterior with
 static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored lights,
-static SkyBox/IBL, cascaded sun shadows, point/spot shadows, XeGTAO, FidelityFX SSSR, mesh WBOIT
+SkyAtmosphere/IBL, cascaded sun shadows, point/spot shadows, XeGTAO, FidelityFX SSSR, mesh WBOIT
 transparency, Bistro grass/wind, GPU particles, animated people/foxes, SPH water, Motion Blur,
 reconstruction, HDR display transform and Engine.UI screen composition. Alpha-tested cutouts use OpaquePass.
 No reflection-probe, DoF, frame-generation
@@ -11,7 +11,7 @@ or world-space UI poster passes execute.
 The world is paused; grass/wind, particles, characters and water advance through explicit time paths.
 The camera remains free.
 
-This adds Bistro water to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+This adds Bistro sky/atmosphere to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
 The user checks the ordinary launch, measures CPU/GPU load and FPS, and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
@@ -35,7 +35,7 @@ use frame-local upload resources; light data, masks and shadow commands use VRAM
 The existing `--smoke` procedural diagnostic host remains separate. It is not the
 short ordinary smoke required for acceptance and is not run for this migration.
 
-Ordinary post order is water/far-near transparency/additive HDR → Motion Blur and complete motion
+Ordinary post order is opaque particle-water → mesh/weighted transparency with aerial → additive HDR → Motion Blur and complete motion
 → reconstruction/native → display → screen UI → PRESENT. Startup requests App's
 XeSS/Default (Ultra Quality Plus) and Motion Blur Mid, shutter 0.5, max radius 40,
 quality-selected samples (27). Settings retains all existing provider/preset,
@@ -55,12 +55,31 @@ HeightScale=2, ReferenceModel, original wave forcing/radius/filter, Fluid Mid,
 primary GPU DIRECT without offload. Seed size follows App's grid rounding and is
 logged on startup. The solver advances while world physics stays paused; component
 simulation/render controls and time scales remain effective. Surface uses the SR
-render grid and retains solver pools across screen resize. Opaque lighting/SSR
-stay opaque; far WBOIT feeds water optics, then near WBOIT/weighted particles,
-near resolve and global SortedAlpha/additive. Particle collisions read opaque
-depth, raster reads merged depth through shader rejection without depth writes.
-Water uses static IBL until the separate probes stage. See the
+render grid and retains solver pools across screen resize. Water currently draws
+opaque velocity-colored particles before mesh/weighted WBOIT; its depth and color
+receive aerial once in the opaque composition. Particle collisions read opaque
+depth; translucent particle raster retains App's depth rejection and ordering.
+The former far/water-optics/near path is not active. See the
 [water report](../../docs/reports/2026-11-16-meta-bistro-water.md).
+
+Ordinary startup selects `Meta.Sky.Source=2` (SkyAtmosphere); `1` selects the
+original SkyBox and `0` Off. Existing `Render.SkyAtmosphere.Enabled` and `.Quality`
+remain effective. Mid uses transmittance 256×64, multiple scattering 32×32,
+SkyView 256×128, aerial 32³ and a 256-face IBL cube. The original Sun entity's
+rotation drives atmosphere direction, the visible disk and shadow lighting.
+`Meta.Sky.SunCycle.Enabled=true` rotates this same Sun through sunrise → zenith →
+sunset in `Meta.Sky.SunCycle.PeriodSeconds=120`, then returns directly to sunrise,
+without a night segment. Disable it for manual light rotation; world physics stays paused.
+Atmosphere component settings retain control of the medium and solar illuminance.
+Ordinary Meta initializes the solar angular radius to 0.0116875 radians (2.5×
+the shared default), increasing the visible disk without changing illuminance.
+Transmittance/MS and fixed-position IBL are cached by their inputs; camera motion
+updates SkyView/aerial without refiltering IBL or resetting reflection history.
+Sun motion refreshes IBL as lighting changes, while preserving temporal history;
+the sunset-to-sunrise jump resets history once per cycle.
+Opaque/SSR stay unfogged until WBOIT resolves aerial once; glass applies its own
+aerial, and screen UI remains after postprocessing. Probes and global clouds stay
+disabled. See the [atmosphere report](../../docs/reports/2026-11-16-meta-bistro-sky-atmosphere.md).
 
 ## Build and ordinary launch
 

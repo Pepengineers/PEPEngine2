@@ -27,12 +27,17 @@ Texture2D<float> SceneDepth : register(t15);
 Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t16);
 SamplerComparisonState samShadow : register(s6);
 
-#if !TRANSPARENT_STATIC_IBL_ONLY
+#ifndef TRANSPARENT_ATMOSPHERE
+#define TRANSPARENT_ATMOSPHERE (!TRANSPARENT_STATIC_IBL_ONLY)
+#endif
+#if TRANSPARENT_ATMOSPHERE
 #define SKY_CB_REGISTER b4
 #define SKY_TRANSMITTANCE_REGISTER t11
 #define SKY_AERIAL_RADIANCE_REGISTER t12
 #define SKY_AERIAL_TRANSMITTANCE_REGISTER t13
 #include "SkyRendering.hlsli"
+#endif
+#if !TRANSPARENT_STATIC_IBL_ONLY
 #define LOCAL_REFLECTION_PROBES 1
 #include "ReflectionProbes.hlsli"
 #endif
@@ -112,7 +117,7 @@ PSOutput ShadeTransparency(VS_OUTPUT_PS_INPUT pin, uint partition)
     
     float weight = max(0.01f, alpha);
     float3 litColor = ShadePBR(material, color.rgb, pin.PosW, pin.Normal, pin.TexC);
-#if !TRANSPARENT_STATIC_IBL_ONLY
+#if TRANSPARENT_ATMOSPHERE
     litColor = ApplySkyAerialPerspective(litColor, pin.PosCS.xy / CBSky.Box.zw,
         length(pin.PosW - CBCamera.CameraLocation));
 #endif

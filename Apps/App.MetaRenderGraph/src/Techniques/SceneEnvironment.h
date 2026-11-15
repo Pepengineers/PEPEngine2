@@ -25,6 +25,7 @@ class SceneEnvironment
     void Append(Graph &, std::vector<ID3D12Resource *> &);
     bool Record(Id, ID3D12GraphicsCommandList *) const;
     void Submitted(uint64_t fence);
+    void SetRetirement(std::function<void()> retire) { _environment.SetResourceRetirement(std::move(retire)); }
     bool Ready() const;
     IRenderPassLink *Output(UINT index)
     {
@@ -54,5 +55,8 @@ class SceneEnvironment
     std::vector<std::pair<uint64_t, std::vector<Work>>> _retained;
     uint64_t _submitted = 0;
     bool _cloudSelected = false;
+    GDX12SkyConstants _mediumConstants{}, _multipleConstants{}, _captureConstants{}, _viewConstants{}, _aerialConstants{};
+    Matrix _aerialViewProjection = Matrix::Identity;
+    bool _atmosphereReady = false;
 };
 } // namespace Meta
