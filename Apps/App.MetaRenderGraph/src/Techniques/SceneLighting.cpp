@@ -76,11 +76,11 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
     frame.Width = scene.DepthView->GetWidth();
     frame.Height = scene.DepthView->GetHeight();
     auto *normals = scene.EarlyAO ? scene.PrepassNormals.get() : scene.Color[2].get();
+    if (!frame.AO)
+        frame.AO = std::make_unique<SceneAO>(_resources, _common, scene.DepthView.get(), normals);
+    frame.AO->Freeze(scene.DepthView.get(), normals, _aoTemporalIndex);
     if (!_opaqueOnly)
     {
-        if (!frame.AO)
-            frame.AO = std::make_unique<SceneAO>(_resources, _common, scene.DepthView.get(), normals);
-        frame.AO->Freeze(scene.DepthView.get(), normals, _aoTemporalIndex);
         // The existing CPU cache builder supplies static/dynamic probe decisions.
         // Its old GPU upload/Execute paths are not called by this executor.
         _resources.PrepareLocalShadowData();
@@ -226,15 +226,15 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     {
         geometry._shadows->AppendLighting(graph, bindings, _slot);
         _reflections->Append(graph, bindings, geometry, environment, _slot, serial);
-        if (!scene.EarlyAO)
-            AppendAO(graph, bindings);
     }
+    if (!scene.EarlyAO)
+        AppendAO(graph, bindings);
     _deferred.Setup(&_resources, &_common);
     _deferred.SetInputs({scene.Color[0].get(), scene.Color[2].get(), scene.Color[3].get(), scene.Color[4].get(),
                          scene.DepthView.get(), _sunShadows ? _sunShadows->Output(_slot) : geometry._shadows->LightingSun(_slot), environment.Output(0),
                          environment.Output(1), environment.Output(2), environment.Output(3),
                          _localShadows ? _localShadows->Output(_slot) : geometry._shadows->LightingLocal(_slot),
-                         _opaqueOnly ? scene.DepthView.get() : frame.AO->Output()});
+                         frame.AO->Output()});
     if (!_initialized)
     {
         _deferred.Initialize();
@@ -296,8 +296,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
              [hdr](auto *cmd) { cmd->DiscardResource(hdr, nullptr); });
     auto lighting = environment.Reads(graph, bindings);
     for (UINT i = 0; i < _deferred._inputs.size(); ++i)
-        if (!_opaqueOnly || i != 11)
-            lighting.push_back(texture(_deferred._inputs[i]->GetTexture(), Mode::Read, read));
+        lighting.push_back(texture(_deferred._inputs[i]->GetTexture(), Mode::Read, read));
     if (_reflections)
     {
         lighting.push_back(texture(_reflections->Published(serial), Mode::Read, read));
@@ -349,7 +348,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         for (UINT i = 0; i < 5; ++i)
             cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(i), cbvs[i]);
         for (UINT i = 0; i < 18; ++i)
-            if (!opaqueOnly || (i != 12 && i != 13 && i != 14))
+            if (!opaqueOnly || (i != 12 && i != 13))
                 cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(i), inputs[i]);
         cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), output);
         cmd->Dispatch((width + 7) / 8, (height + 7) / 8, 1);

@@ -3,12 +3,12 @@
 Experimental executable using the Meta execution plan alongside production App.
 The ordinary launch now loads the original Bistro interior and exterior with
 static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored lights,
-static SkyBox/IBL, cascaded sun shadows, point/spot shadows and HDR display transform. Alpha-tested
-cutouts use OpaquePass; blended materials are omitted. No AO, SSR, reflection-probe, grass, water,
+static SkyBox/IBL, cascaded sun shadows, point/spot shadows, XeGTAO and HDR display transform. Alpha-tested
+cutouts use OpaquePass; blended materials are omitted. No SSR, reflection-probe, grass, water,
 particle, transparency, reconstruction, post-effect or screen-UI passes execute.
 The world is paused to exclude simulation; the camera remains free.
 
-This adds local shadows to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+This adds AO to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
 The user checks the ordinary launch, measures CPU/GPU load and FPS, and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
@@ -49,6 +49,15 @@ secondary-adapter opt-ins are rejected. Ordinary sun shadows use App's default
 2048 texels per cascade (4096x4096 depth atlas); local shadow resolution defaults
 to 256 texels per face (`Render.Shadows.Local.Resolution`, `0` disables local shadows).
 `--smoke` restores its previous small diagnostic shadow sizes.
+
+Ordinary Bistro runs the existing slot-local `SceneAO`/`GDX12AmbientOcclusionPass`
+after GBuffer and before deferred lighting, using depth and GBuffer normals.
+Startup selects XeGTAO, Mid, Full, BeforeLighting: radius 50 cm, intensity 1,
+two denoise passes inherited from Mid, two slices and two steps per half slice.
+`Render.AO.Enabled=false` writes neutral visibility 1 without AO/denoise dispatches.
+The output is read by deferred lighting at `t14`, affecting diffuse IBL as in App.
+Early AO remains disabled in ordinary Bistro; other excluded techniques stay off.
+See the [AO stage report](../../docs/reports/2026-11-15-meta-bistro-ao.md).
 
 The ordinary sun path uses App's `ShadowPass.hlsl` and `CSM.hlsli`: one GPU
 culling dispatch for the active cascades, then one ExecuteIndirect draw per cascade directly
