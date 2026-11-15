@@ -108,8 +108,15 @@ SceneLocalShadows::SceneLocalShadows(GDX12DeviceResources& r, RenderPipelineComm
     ThrowIfFailed(r.Device->GetDevice()->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&_opaqueDraw)));
     for (auto& frame : _slots)
     {
-        frame.Cull.Owner = frame.ReceiversJob.Owner = this;
-        frame.Cull.Frame = frame.Pack.Frame = frame.ReceiversJob.Frame = &frame;
+        frame.Cull.Owner = this;
+        frame.Cull.Frame = frame.Pack.Frame = &frame;
+    }
+    r.IndirectCommandsCache->TrackElementChanges();
+    for (auto& frame : r.FrameConstants)
+    {
+        frame->InstanceCache->TrackElementChanges();
+        frame->TransformCache->TrackElementChanges();
+        frame->MaterialCache->TrackElementChanges();
     }
 }
 
@@ -119,13 +126,17 @@ SceneLocalShadows::~SceneLocalShadows()
         try { frame.Ready.Complete(); } catch (...) {}
 }
 
-UINT SceneLocalShadows::BuildNode(UINT first, UINT count)
+UINT SceneLocalShadows::BuildNode(UINT first, UINT count, UINT parent)
 {
     const UINT index = UINT(_nodes.size());
     _nodes.emplace_back();
     auto bounds = _casters[first].Bounds;
     for (UINT i = first + 1; i < first + count; ++i) BoundingBox::CreateMerged(bounds, bounds, _casters[i].Bounds);
-    if (count <= 32) _nodes[index] = {bounds, first, count};
+    if (count <= 32)
+    {
+        _nodes[index] = {bounds, first, count, 0, 0, parent};
+        for (UINT i = first; i < first + count; ++i) _leaves[i] = index;
+    }
     else
     {
         const auto& e = bounds.Extents;
@@ -136,8 +147,8 @@ UINT SceneLocalShadows::BuildNode(UINT first, UINT count)
         };
         std::nth_element(_casters.begin() + first, _casters.begin() + first + half, _casters.begin() + first + count,
             [&](const auto& a, const auto& b) { return coordinate(a) < coordinate(b); });
-        const UINT left = BuildNode(first, half), right = BuildNode(first + half, count - half);
-        _nodes[index] = {bounds, 0, 0, left, right};
+        const UINT left = BuildNode(first, half, index), right = BuildNode(first + half, count - half, index);
+        _nodes[index] = {bounds, 0, 0, left, right, parent};
     }
     return index;
 }
@@ -159,43 +170,150 @@ SceneLocalShadows::Input SceneLocalShadows::ReadInput(UINT slot, UINT commandInd
     return result;
 }
 
-bool SceneLocalShadows::SceneInputsChanged(UINT slot) const
+void SceneLocalShadows::Refit(UINT caster)
 {
-    if (_inputs.size() != _resources.IndirectCommandsCache->GetElementCount()) return true;
-    for (UINT i = 0; i < _inputs.size(); ++i)
+    for (UINT index = _leaves[caster]; index != UINT_MAX; index = _nodes[index].Parent)
     {
-        const auto current = ReadInput(slot, i);
-        const auto& old = _inputs[i];
-        if (std::memcmp(&current.Command, &old.Command, sizeof(current.Command)) ||
-            std::memcmp(&current.Instance, &old.Instance, sizeof(current.Instance)) ||
-            std::memcmp(&current.Material, &old.Material, sizeof(current.Material)) ||
-            std::memcmp(&current.World, &old.World, sizeof(current.World))) return true;
+        auto& node = _nodes[index];
+        if (node.Count)
+        {
+            node.Bounds = _casters[node.First].Bounds;
+            for (UINT i = node.First + 1; i < node.First + node.Count; ++i)
+                BoundingBox::CreateMerged(node.Bounds, node.Bounds, _casters[i].Bounds);
+        }
+        else BoundingBox::CreateMerged(node.Bounds, _nodes[node.Left].Bounds, _nodes[node.Right].Bounds);
     }
-    return false;
+}
+
+void SceneLocalShadows::Invalidate(const Caster& caster)
+{
+    if (!caster.CastsShadow) return;
+    for (auto& slot : _slots) for (auto& cache : slot.Cache)
+    {
+        if (!cache.HasLight || !LocalShadowRangeIntersects(cache.Light, caster.Bounds)) continue;
+        for (UINT face = 0; face < LocalShadowFaceCount(cache.Light); ++face)
+            if (GDX12LocalShadowFrustum(cache.Light.ShadowViewProj[face]).Intersects(caster.Bounds))
+            {
+                cache.ListsValid &= ~(1u << face);
+                cache.MapsValid &= ~(1u << face);
+            }
+    }
+}
+
+void SceneLocalShadows::UpdateCasters(UINT slot)
+{
+    auto& frame = *_resources.FrameConstants.at(slot);
+    auto changed = _resources.IndirectCommandsCache->ConsumeChangedElements();
+    const auto instances = frame.InstanceCache->ConsumeChangedElements();
+    const auto transforms = frame.TransformCache->ConsumeChangedElements();
+    const auto materials = frame.MaterialCache->ConsumeChangedElements();
+    if (!_treeReady || _inputs.size() != _resources.IndirectCommandsCache->GetElementCount() ||
+        _geometryRevision != _resources.GeometryRevision || _meshRevision != _resources.GeometryBuffer->GetMeshCacheRevision())
+    {
+        RebuildCasters(slot);
+        return;
+    }
+    // Resource rebinding is rare; no texture-registry scan on ordinary frames.
+    if (_textureRevision != _resources.TextureRevision)
+    {
+        for (auto& cachedSlot : _slots) for (auto& cache : cachedSlot.Cache) cache.MapsValid = 0;
+        _textureRevision = _resources.TextureRevision;
+        ++_sceneRevision;
+    }
+    const auto append = [&](const auto& indices, const auto& references) {
+        for (UINT index : indices)
+            if (const auto found = references.find(index); found != references.end())
+                changed.insert(changed.end(), found->second.begin(), found->second.end());
+    };
+    append(instances, _instances);
+    append(transforms, _transforms);
+    append(materials, _materials);
+    std::sort(changed.begin(), changed.end());
+    changed.erase(std::unique(changed.begin(), changed.end()), changed.end());
+    for (UINT index : changed)
+    {
+        const auto current = ReadInput(slot, index);
+        auto& old = _inputs.at(index);
+        const auto included = [](const Input& input) {
+            return input.Command.InstanceCount && input.Material.RenderLayer != 2 && !input.Material.ReflectionProbePreview;
+        };
+        // Insertion/removal changes BVH topology; edits to an existing object only refit its ancestors.
+        if (included(current) != included(old))
+        {
+            RebuildCasters(slot);
+            return;
+        }
+        const bool materialDirty = std::find(materials.begin(), materials.end(), current.Instance.MaterialIndex) != materials.end();
+        if (!materialDirty && std::memcmp(&current.Command, &old.Command, sizeof(current.Command)) == 0 &&
+            std::memcmp(&current.Instance, &old.Instance, sizeof(current.Instance)) == 0 &&
+            std::memcmp(&current.Material, &old.Material, sizeof(current.Material)) == 0 &&
+            std::memcmp(&current.World, &old.World, sizeof(current.World)) == 0) continue;
+        const auto rebind = [index](auto& references, UINT previous, UINT next) {
+            if (previous == next) return;
+            if (auto found = references.find(previous); found != references.end())
+            {
+                auto& commands = found->second;
+                commands.erase(std::remove(commands.begin(), commands.end(), index), commands.end());
+                if (commands.empty()) references.erase(found);
+            }
+            references[next].push_back(index);
+        };
+        rebind(_instances, old.Command.InstanceID, current.Command.InstanceID);
+        if (current.Command.InstanceCount && old.Command.InstanceCount)
+        {
+            rebind(_transforms, old.Instance.TransformIndex, current.Instance.TransformIndex);
+            rebind(_materials, old.Instance.MaterialIndex, current.Instance.MaterialIndex);
+        }
+        else if (current.Command.InstanceCount != old.Command.InstanceCount)
+        {
+            RebuildCasters(slot);
+            return;
+        }
+        old = current;
+        const UINT position = _positions[index];
+        if (position == UINT_MAX) continue;
+        auto& caster = _casters[position];
+        Invalidate(caster);
+        caster.Bounds = BoundingBox(current.Instance.BoundingBoxCenter, current.Instance.BoundingBoxExtents);
+        caster.Command = current.Command;
+        caster.CastsShadow = current.Instance.CastsShadows != 0;
+        caster.Masked = current.Material.RenderLayer == 1;
+        Invalidate(caster);
+        Refit(position);
+        ++_sceneRevision;
+    }
 }
 
 void SceneLocalShadows::RebuildCasters(UINT slot)
 {
     _casters.clear();
     _nodes.clear();
+    _instances.clear(); _transforms.clear(); _materials.clear();
     _inputs.resize(_resources.IndirectCommandsCache->GetElementCount());
+    _positions.assign(_inputs.size(), UINT_MAX);
     for (UINT i = 0; i < _resources.IndirectCommandsCache->GetElementCount(); ++i)
     {
         const auto& input = _inputs[i] = ReadInput(slot, i);
         const auto& command = input.Command;
+        _instances[command.InstanceID].push_back(i);
         if (!command.InstanceCount) continue;
         const auto& instance = input.Instance;
+        _transforms[instance.TransformIndex].push_back(i);
+        _materials[instance.MaterialIndex].push_back(i);
         const auto& material = input.Material;
         if (material.RenderLayer == 2 || material.ReflectionProbePreview) continue;
         _casters.push_back({BoundingBox(instance.BoundingBoxCenter, instance.BoundingBoxExtents), command,
-            instance.CastsShadows != 0, material.RenderLayer == 1});
+            instance.CastsShadows != 0, material.RenderLayer == 1, i});
     }
+    _leaves.resize(_casters.size());
     if (!_casters.empty()) BuildNode(0, UINT(_casters.size()));
+    for (UINT i = 0; i < _casters.size(); ++i) _positions[_casters[i].InputIndex] = i;
+    for (auto& frame : _slots) for (auto& cache : frame.Cache) cache.ListsValid = cache.MapsValid = 0;
     _treeReady = true;
     ++_sceneRevision;
     _geometryRevision = _resources.GeometryRevision;
     _meshRevision = _resources.GeometryBuffer->GetMeshCacheRevision();
-    _materialRevision = _resources.MaterialRevision;
+    _textureRevision = _resources.TextureRevision;
 }
 
 void SceneLocalShadows::Gather(UINT index, const GDX12LocalLightConstants& light,
@@ -236,9 +354,10 @@ UINT SceneLocalShadows::NeededFaces(UINT index, const GDX12LocalLightConstants& 
     // Include the largest normal offset used by LocalVisibility when selecting cube faces.
     const float margin = light.Range / frame.Resolution * 0.3f + 0.01f;
     for (UINT i = node.First; i < node.First + node.Count && needed != faceMask; ++i)
-        if (frame.Receivers[i] && LocalShadowRangeIntersects(light, *frame.Receivers[i]))
+        if (const auto visible = VisibleBounds(_casters[i].Bounds, frame.CameraPlanes, frame.CameraCorners);
+            visible && LocalShadowRangeIntersects(light, *visible))
         {
-            auto bounds = *frame.Receivers[i];
+            auto bounds = *visible;
             bounds.Extents = Vector3(bounds.Extents) + Vector3(margin, margin, margin);
             for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
                 if ((faceMask & ~needed & (1u << face)) && faces[face].Intersects(bounds)) needed |= 1u << face;
@@ -246,15 +365,12 @@ UINT SceneLocalShadows::NeededFaces(UINT index, const GDX12LocalLightConstants& 
     return needed;
 }
 
-void SceneLocalShadows::ReceiverJob::Execute(size_t index)
-{
-    Frame->Receivers[index] = VisibleBounds(Owner->_casters[index].Bounds, Frame->CameraPlanes, Frame->CameraCorners);
-}
-
 void SceneLocalShadows::CullJob::Execute(size_t index)
 {
     const auto& light = Frame->Lights[index];
     auto& output = Frame->Cache[index];
+    if (!Frame->SelectionChanged && !output.SelectionDirty && (output.Needed & ~output.ListsValid) == 0) return;
+    output.SelectionDirty = false;
     output.Needed = 0;
     if (!(light.ShadowFlags & 1u) || (light.Type != 1 && light.Type != 2) || Owner->_nodes.empty() ||
         !Owner->_resources.ShadowQuality.LocalResolution) return;
@@ -320,31 +436,10 @@ void SceneLocalShadows::PackJob::Execute(size_t)
     }
 }
 
-bool SceneLocalShadows::TextureBindingsChanged()
-{
-    bool changed = _textureResources.size() != _resources.Textures.size();
-    for (const auto& [name, texture] : _resources.Textures)
-    {
-        const auto old = _textureResources.find(name);
-        auto* resource = texture && texture->IsInitialized() ? texture->GetResource()->D3DResource.Get() : nullptr;
-        changed |= old == _textureResources.end() || old->second.Get() != resource;
-    }
-    if (changed)
-    {
-        _textureResources.clear();
-        for (const auto& [name, texture] : _resources.Textures)
-            _textureResources[name] = texture && texture->IsInitialized() ? texture->GetResource()->D3DResource.Get() : nullptr;
-    }
-    return changed;
-}
-
-void SceneLocalShadows::Freeze(UINT slot, bool sceneChanged)
+void SceneLocalShadows::Freeze(UINT slot)
 {
     if (!_common.Jobs) throw std::logic_error("Local shadow preparation requires JobSystem");
-    const bool texturesChanged = TextureBindingsChanged();
-    // TransformCache also contains the camera; only mesh-referenced world matrices invalidate maps.
-    if (!_treeReady || texturesChanged || _geometryRevision != _resources.GeometryRevision || _materialRevision != _resources.MaterialRevision ||
-        _meshRevision != _resources.GeometryBuffer->GetMeshCacheRevision() || (sceneChanged && SceneInputsChanged(slot))) RebuildCasters(slot);
+    UpdateCasters(slot);
     auto& frame = _slots.at(slot);
     frame.Lights = _resources.LocalLights;
     for (const auto& light : frame.Lights)
@@ -368,16 +463,24 @@ void SceneLocalShadows::Freeze(UINT slot, bool sceneChanged)
         source.ShadowFlags &= ~2u;
         source.ShadowFirstSlice = 0;
         auto& cached = frame.Cache[i];
-        if (frame.SceneRevision != _sceneRevision || ShouldRenderLocalShadow(source, cached.HasLight ? &cached.Light : nullptr))
+        if (ShouldRenderLocalShadow(source, cached.HasLight ? &cached.Light : nullptr) ||
+            (source.ShadowFlags & 1u) != (cached.Light.ShadowFlags & 1u))
+        {
             cached.ListsValid = cached.MapsValid = 0;
+            cached.SelectionDirty = true;
+        }
         cached.Light = source;
         cached.HasLight = true;
         if (source.ShadowFlags & 1u) slices += LocalShadowFaceCount(source);
     }
+    frame.SelectionChanged = !frame.Camera || frame.SceneRevision != _sceneRevision ||
+        frame.Resolution != (std::max)(1u, _resources.ShadowQuality.LocalResolution);
     frame.SceneRevision = _sceneRevision;
     PrepareAtlas(frame, (std::min)(slices, UINT(D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION)));
     XMFLOAT4X4 viewProjection;
     XMStoreFloat4x4(&viewProjection, XMMatrixTranspose(_common.CameraView * _common.CameraProjection));
+    frame.SelectionChanged |= std::memcmp(&frame.CameraMatrix, &viewProjection, sizeof(viewProjection)) != 0;
+    frame.CameraMatrix = viewProjection;
     frame.Camera.emplace(viewProjection);
     const auto matrix = XMLoadFloat4x4(&viewProjection);
     const XMVECTOR planes[] = {matrix.r[3] + matrix.r[0], matrix.r[3] - matrix.r[0], matrix.r[3] + matrix.r[1],
@@ -387,9 +490,7 @@ void SceneLocalShadows::Freeze(UINT slot, bool sceneChanged)
     for (UINT i = 0; i < 8; ++i)
         XMStoreFloat3(&frame.CameraCorners[i], XMVector3TransformCoord(
             XMVectorSet(i & 1 ? 1.f : -1.f, i & 2 ? 1.f : -1.f, i & 4 ? 1.f : 0.f, 1), inverse));
-    frame.Receivers.resize(_casters.size());
-    frame.Ready = frame.ReceiversJob.Schedule(*_common.Jobs, _casters.size());
-    frame.Ready = frame.Cull.Schedule(*_common.Jobs, frame.Lights.size(), 1, frame.Ready);
+    frame.Ready = frame.Cull.Schedule(*_common.Jobs, frame.Lights.size(), 1);
     frame.Ready = frame.Pack.Schedule(*_common.Jobs, 1, frame.Ready);
 }
 

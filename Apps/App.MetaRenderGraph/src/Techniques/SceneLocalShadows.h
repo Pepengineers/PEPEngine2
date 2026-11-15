@@ -14,9 +14,10 @@ class SceneLocalShadows
 public:
     SceneLocalShadows(GDX12DeviceResources&, RenderPipelineCommonData&);
     ~SceneLocalShadows();
-    void Freeze(UINT slot, bool sceneChanged);
+    void Freeze(UINT slot);
     void Complete(UINT slot);
     void Submitted(UINT slot);
+    uint64_t SceneRevision() const { return _sceneRevision; }
     GDX12UploadBuffer<GDX12LocalLightConstants>& LightSource(UINT slot) { return *_slots.at(slot).LightUpload; }
     void Append(Graph&, std::vector<ID3D12Resource*>&, UINT slot,
         const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4>& scene,
@@ -31,8 +32,8 @@ private:
         GDX12MaterialConstants Material;
         XMFLOAT4X4 World{};
     };
-    struct Caster { BoundingBox Bounds; GDX12IndirectDrawArgs Command; bool CastsShadow, Masked; };
-    struct Node { BoundingBox Bounds; UINT First = 0, Count = 0, Left = 0, Right = 0; };
+    struct Caster { BoundingBox Bounds; GDX12IndirectDrawArgs Command; bool CastsShadow, Masked; UINT InputIndex; };
+    struct Node { BoundingBox Bounds; UINT First = 0, Count = 0, Left = 0, Right = 0, Parent = UINT_MAX; };
     struct FaceCommands { std::vector<GDX12IndirectDrawArgs> Opaque, Masked; };
     struct LightCache
     {
@@ -40,15 +41,10 @@ private:
         std::array<FaceCommands, 6> Faces;
         UINT FirstSlice = UINT_MAX, Needed = 0, ListsValid = 0, MapsValid = 0;
         bool HasLight = false;
+        bool SelectionDirty = true;
     };
     struct View { UINT Light, Face, Slice, First, OpaqueCount, MaskedCount; };
     struct Slot;
-    struct ReceiverJob final : ParallelJob
-    {
-        SceneLocalShadows* Owner = nullptr;
-        Slot* Frame = nullptr;
-        void Execute(size_t index) override;
-    };
     struct CullJob final : ParallelJob
     {
         SceneLocalShadows* Owner = nullptr;
@@ -66,11 +62,11 @@ private:
         std::vector<LightCache> Cache;
         std::vector<View> Views;
         std::vector<GDX12IndirectDrawArgs> Packed;
-        std::vector<std::optional<BoundingBox>> Receivers;
         std::optional<GDX12LocalShadowFrustum> Camera;
+        XMFLOAT4X4 CameraMatrix{};
+        bool SelectionChanged = true;
         std::array<XMFLOAT4, 6> CameraPlanes;
         std::array<XMFLOAT3, 8> CameraCorners;
-        ReceiverJob ReceiversJob;
         CullJob Cull;
         PackJob Pack;
         JobHandle Ready;
@@ -82,15 +78,16 @@ private:
         uint64_t SceneRevision = 0;
         NativeWork Work;
     };
-    UINT BuildNode(UINT first, UINT count);
+    UINT BuildNode(UINT first, UINT count, UINT parent = UINT_MAX);
+    void Refit(UINT caster);
+    void Invalidate(const Caster&);
+    void UpdateCasters(UINT slot);
     void Gather(UINT node, const GDX12LocalLightConstants&, const std::array<GDX12LocalShadowFrustum, 6>&,
         UINT faceMask, LightCache&) const;
     UINT NeededFaces(UINT node, const GDX12LocalLightConstants&, const std::array<GDX12LocalShadowFrustum, 6>&,
         UINT faceMask, const Slot&) const;
     void RebuildCasters(UINT slot);
     Input ReadInput(UINT slot, UINT command) const;
-    bool SceneInputsChanged(UINT slot) const;
-    bool TextureBindingsChanged();
     void PrepareAtlas(Slot&, UINT slices);
     GDX12DeviceResources& _resources;
     RenderPipelineCommonData& _common;
@@ -98,9 +95,10 @@ private:
     std::vector<Caster> _casters;
     std::vector<Node> _nodes;
     std::vector<Input> _inputs;
-    std::unordered_map<std::string, ComPtr<ID3D12Resource>> _textureResources;
+    std::unordered_map<UINT, std::vector<UINT>> _instances, _transforms, _materials;
+    std::vector<UINT> _positions, _leaves;
     bool _treeReady = false;
-    uint64_t _sceneRevision = 0, _geometryRevision = 0, _meshRevision = 0, _materialRevision = 0;
+    uint64_t _sceneRevision = 0, _geometryRevision = 0, _meshRevision = 0, _textureRevision = 0;
     std::unique_ptr<GDX12RootSignature> _root;
     ComPtr<ID3D12PipelineState> _opaqueDraw, _maskedDraw;
     ComPtr<ID3D12CommandSignature> _signature;

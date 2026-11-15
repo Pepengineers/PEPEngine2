@@ -11,6 +11,7 @@
 #include <utility>
 #include <atomic>
 #include <stdexcept>
+#include <mutex>
 
 enum class EBufferType : std::uint8_t
 {
@@ -42,6 +43,27 @@ public:
     }
     uint64_t GetRevision() const { return _revision.load(std::memory_order_relaxed); }
     const T* GetCPUData() const { return _cpuData.data(); }
+    // Single owner consumes after upload jobs finish; writers may update disjoint elements in parallel.
+    void TrackElementChanges() { if (!_trackChanges) TrackChanges(); _trackElements = true; }
+    void MarkElementChanged(UINT index, UINT count = 1)
+    {
+        if (!_trackElements) return;
+        std::lock_guard lock(_changesMutex);
+        for (UINT i = 0; i < count; ++i) _changedElements.push_back(index + i);
+    }
+    std::vector<UINT> ConsumeChangedElements()
+    {
+        std::lock_guard lock(_changesMutex);
+        std::vector<UINT> result;
+        result.swap(_changedElements);
+        return result;
+    }
+    // Frame-local GPU snapshots inspect the journal before the scene owner consumes it.
+    std::vector<UINT> ChangedElements()
+    {
+        std::lock_guard lock(_changesMutex);
+        return _changedElements;
+    }
 
     void Resize(UINT newElementCount);
     UINT GetElementCount();
@@ -76,6 +98,9 @@ private:
     bool _trackChanges = false;
     std::vector<T> _cpuData;
     std::atomic<uint64_t> _revision{1};
+    bool _trackElements = false;
+    std::mutex _changesMutex;
+    std::vector<UINT> _changedElements;
 };
 
 template<typename T>
@@ -217,6 +242,7 @@ void GDX12UploadBuffer<T>::CopyData(UINT elementIndex, const T* data, UINT count
             if (std::memcmp(&_cpuData[elementIndex], data, sizeof(T) * count) == 0) return;
             std::memcpy(&_cpuData[elementIndex], data, sizeof(T) * count);
             _revision.fetch_add(1, std::memory_order_relaxed);
+            MarkElementChanged(elementIndex, count);
         }
         memcpy(&_mappedData[elementIndex * _elementByteSize], data, sizeof(T) * count);
     }

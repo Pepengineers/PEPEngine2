@@ -54,6 +54,7 @@ class SceneLighting
         UINT64 Bytes = 0;
         UINT Width = 0, Height = 0;
         uint64_t LightRevision = 0;
+        uint64_t ShadowSceneRevision = 0;
         GDX12ResourceHandle LightSource;
         bool UploadLights = false;
     };

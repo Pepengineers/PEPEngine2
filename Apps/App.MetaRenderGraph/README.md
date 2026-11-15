@@ -73,6 +73,15 @@ invalidates maps when GPU constants stay equal, allowing alpha-mask refreshes.
 In-place texture writers must mark the material dirty or explicitly invalidate
 the light. `EveryFrame` lights continue to refresh selected faces every frame.
 
+Scene inputs are updated from changed buffer-element journals, after ECS upload
+jobs finish. Reverse instance/transform/material references resolve only affected
+objects; camera transforms have no mesh references. Existing BVH leaves and their
+ancestors are refitted, and intersecting light faces are invalidated using both
+old and new caster bounds. Topology changes rebuild the BVH. Receiver selection
+traverses the BVH only when the camera, scene or light changes, without a separate
+whole-scene clipping job. Frame-local scene uploads copy changed ranges rather
+than taking a full CPU snapshot when only a camera transform changed.
+
 Only changed faces upload commands, clear and draw. Fully opaque casters use a
 depth-only PSO without a pixel shader; masked casters keep App's alpha-test PSO.
 Depth bias and filtering are unchanged. Map validity is published after frame
