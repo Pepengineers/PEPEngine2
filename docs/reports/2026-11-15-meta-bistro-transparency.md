@@ -91,3 +91,22 @@ and excluded from the commit; the executable includes those existing scene edits
 
 Executable: `D:/Project/PEPEngine2/Build/bin/x64/Release/App.MetaRenderGraph/App.MetaRenderGraph.exe`.
 No next technique is started before user acceptance.
+
+## Follow-up material review
+
+The user requested more visible drinking glasses, then reported the broader
+highlights looked better. Only `Paris_LiquorBottle_01_Glass1` was adjusted:
+opacity 0.25 -> 0.50 and shininess 5000 -> 100 (imported roughness approximately
+0.045 -> 0.14). The OBJ assigns this material to drinking glasses, including
+water, wine and beer glasses; window and bottle materials are separate.
+
+The user also reported black bands on the cotton placemats. Their separate
+`Paris_Table_cloth_01` material referenced a visually uniform `_ddna` map.
+A 64-pixel grid sample across the image returned one RGBA value, (53,53,199,255).
+The current RGB normal decoder treats this as a strongly tilted tangent normal,
+not a neutral normal. The material's `map_bump` reference was removed so it uses
+its geometric normal; diffuse and specular textures remain. This is a narrow
+material correction, without changes to AO, shadows or the shared normal decoder.
+The application was relaunched for visual review; disappearance of the reported
+bands still requires inspection at the affected table. No rebuild is needed for
+these MTL edits; the existing importer includes MTL timestamps in its cache key.

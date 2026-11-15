@@ -68,7 +68,8 @@ instance IDs. Forward lighting uses the same published local-shadow slices and
 face masks as deferred lighting, plus sun shadows and static IBL, without opaque
 screen AO, local probes or aerial perspective. App's default shader path is unchanged.
 Look at the entrance door/window panes, menu glass, and wine bottles on outdoor
-tables or behind the interior bar. Authored opacity/textures remain unchanged.
+tables or behind the interior bar. After visual review, drinking-glass opacity
+is 0.50 with shininess 100; other glass materials retain their authored settings.
 Blended bounds participate in local-shadow receiver selection; they do not cast
 opaque shadows. See the [transparency report](../../docs/reports/2026-11-15-meta-bistro-transparency.md).
 

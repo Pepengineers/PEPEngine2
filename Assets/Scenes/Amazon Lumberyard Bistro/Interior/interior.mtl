@@ -561,9 +561,9 @@ newmtl ToffeeJar_Metal
 	map_Ks ..\OtherTextures\Tiling\Metal_Chrome_01\Metal_Chrome_01_Spec.png
 
 newmtl Paris_LiquorBottle_01_Glass1
-	Ns 5000.000
+	Ns 100.000
 	Ni 1.200
-	d 0.250
+	d 0.500
 	Tf 0.030 0.05 0.04
 	illum 7
 	Ka 0 0 0
@@ -718,7 +718,6 @@ newmtl Paris_Table_cloth_01
 	map_Ka ..\PropTextures\Bistro\Paris_Cotton_Placemat_01\Paris_Cotton_Placemat_01_Diff.png
 	map_Kd ..\PropTextures\Bistro\Paris_Cotton_Placemat_01\Paris_Cotton_Placemat_01_Diff.png
 	map_Ks ..\PropTextures\Bistro\Paris_Cotton_Placemat_01\Paris_Cotton_Placemat_01_Spec.png
-	map_bump ..\PropTextures\Bistro\Paris_Cotton_Placemat_01\Paris_Cotton_Placemat_01_ddna.png
 
 
 newmtl Metal_Chrome1
