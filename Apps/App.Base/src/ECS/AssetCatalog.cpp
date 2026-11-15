@@ -164,7 +164,15 @@ AssetCatalog::AssetCatalog(const std::filesystem::path& projectRoot)
         sidecar += ".meta";
         if (!fs::exists(sidecar))
         {
-            CreateSidecar(sidecar);
+            try
+            {
+                CreateSidecar(sidecar);
+            }
+            catch (const fs::filesystem_error& error)
+            {
+                Logger::Warn("Could not create asset metadata '{}': {}", sidecar.u8string(), error.code().message());
+                continue;
+            }
         }
         registerAsset(asset, sidecar);
     }
