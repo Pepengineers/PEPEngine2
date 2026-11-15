@@ -4,18 +4,27 @@ Experimental executable using the Meta execution plan alongside production App.
 The ordinary launch now loads the original Bistro interior and exterior with
 static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored lights,
 static SkyBox/IBL, cascaded sun shadows, point/spot shadows, XeGTAO, FidelityFX SSSR, mesh WBOIT
-transparency, Bistro grass/wind, GPU particles and HDR display transform. Alpha-tested cutouts use OpaquePass.
+transparency, Bistro grass/wind, GPU particles, animated people/foxes, HDR display
+transform and Engine.UI screen composition. Alpha-tested cutouts use OpaquePass.
 No reflection-probe, water, reconstruction, other post-effect
-or screen-UI passes execute.
-The world is paused; grass/wind and particles advance through explicit time paths.
+or world-space UI poster passes execute.
+The world is paused; grass/wind, particles and characters advance through explicit time paths.
 The camera remains free.
 
-This adds particles to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+This adds animation/skinning and screen UI to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
 The user checks the ordinary launch, measures CPU/GPU load and FPS, and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
 Controls match App: WASD movement, Q/E down/up, right mouse to look, Shift for
 speed, mouse wheel to change speed. FPS and frame time appear in the title bar.
+F1 shows/hides the existing Engine.UI Settings panel in Release too. Its search
+and console-variable controls capture keyboard/mouse input before the free camera.
+Startup uses App's 10 people and 5 foxes, original clips/routes/materials/scales,
+skinning enabled at Mid (30 Hz), no pose-rate or actor preset override. Route jobs
+complete before the render snapshot; physics remains paused. Skin palette uploads
+and deformation precede depth/GBuffer/shadow consumers. Screen raster/composition
+follows display once, at window resolution, without postprocessing or posters.
+See the [animation/UI report](../../docs/reports/2026-11-15-meta-bistro-animation-ui.md).
 The initial camera is at the Bistro entrance, as in App. The startup viewport is
 1280x800; render resolution is native. The first frame's declared operations are
 written to `Logs/opaque-operations.txt` beside the executable. The first reused

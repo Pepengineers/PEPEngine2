@@ -82,7 +82,11 @@ VertexOutput VS(float3 position : POSITION, float2 uv : TEXCOORD, uint vertexID 
 #ifdef SHADOW_REPLICA_IA
     InstanceData instance = InstanceCache[InstanceID];
 #else
+#ifdef SHADOW_UNBATCHED
+    InstanceData instance = InstanceCache[InstanceID];
+#else
     InstanceData instance = InstanceCache[DrawInstance(InstanceID, instanceID, InstanceCache[InstanceID])];
+#endif
     if (instance.SkinOutputVertex != 0xffffffffu)
     {
         SkinVertex vertex = ReadSkinVertex(instance, vertexID);

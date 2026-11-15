@@ -28,7 +28,8 @@ SceneSunShadows::SceneSunShadows(GDX12DeviceResources& r, RenderPipelineCommonDa
     _cull = GDX12RenderHelpers::CreateComputePipeline(r.Device, _computeRoot.get(), SHADERS_FOLDER "ShadowPass.hlsl", "CS", defines);
     _clear = GDX12RenderHelpers::CreateComputePipeline(r.Device, _computeRoot.get(), SHADERS_FOLDER "ShadowPass.hlsl", "ClearCS", defines);
     auto& compiler = GDX12ShaderCompiler::GetInstance();
-    auto vs = compiler.CompileShader(r.Device, SHADERS_FOLDER "ShadowPass.hlsl", nullptr, "VS", "vs");
+    const D3D_SHADER_MACRO unbatched[] = {{"SHADOW_UNBATCHED", "1"}, {nullptr, nullptr}};
+    auto vs = compiler.CompileShader(r.Device, SHADERS_FOLDER "ShadowPass.hlsl", unbatched, "VS", "vs");
     auto ps = compiler.CompileShader(r.Device, SHADERS_FOLDER "ShadowPass.hlsl", nullptr, "PS", "ps");
     D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};
     p.pRootSignature = _graphicsRoot->GetRootSignature().Get();
@@ -50,10 +51,24 @@ SceneSunShadows::SceneSunShadows(GDX12DeviceResources& r, RenderPipelineCommonDa
     _signature = GDX12RenderHelpers::CreateIndexedDrawSignature(r.Device, _graphicsRoot.get());
 }
 
-void SceneSunShadows::Freeze(UINT slot, bool sceneChanged, const std::vector<GDX12RenderPrimitive>& grass)
+void SceneSunShadows::Freeze(UINT slot, bool castersRebuilt, const std::vector<BoundingBox>& changedCasters,
+    const std::vector<GDX12RenderPrimitive>& grass)
 {
+    for (auto& cached : _slots)
+    {
+        if (castersRebuilt) { cached.BoundsReady = false; cached.DirtyCascades = 0xf; }
+        for (const auto& bounds : changedCasters)
+        {
+            // Keep the fit conservative between topology rebuilds without rescanning static Bistro.
+            if (cached.HasBounds) BoundingBox::CreateMerged(cached.Bounds, cached.Bounds, bounds);
+            else { cached.Bounds = bounds; cached.HasBounds = true; }
+            for (UINT cascade = 0; cascade < cached.Settings.CascadeCount; ++cascade)
+                if (GDX12LocalShadowFrustum(cached.Settings.ViewProj[cascade]).Intersects(bounds))
+                    cached.DirtyCascades |= 1u << cascade;
+        }
+    }
     auto& s = _slots.at(slot);
-    if (sceneChanged || !s.BoundsReady)
+    if (!s.BoundsReady)
     {
         s.HasBounds = false;
         const auto& frame = *_resources.FrameConstants.at(slot);
@@ -91,9 +106,11 @@ void SceneSunShadows::Freeze(UINT slot, bool sceneChanged, const std::vector<GDX
         _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane, Vector3(_resources.Lighting.LightDirection),
         hasBounds ? &bounds : nullptr, _resources.ShadowQuality.SunResolution, _resources.ShadowQuality.SunCascades);
     const UINT flags = _resources.Lighting.SunShadowFlags;
-    s.Update = (flags & 1u) && ((flags & 2u) || !s.Rendered || sceneChanged || grassChanged ||
+    const bool fullUpdate = (flags & 2u) || !s.Rendered || grassChanged ||
         s.Resolution != _resources.ShadowQuality.SunResolution || s.Revision != _resources.Lighting.SunShadowRevision ||
-        std::memcmp(&s.Settings, &_resources.ShadowSettings, sizeof(s.Settings)) != 0);
+        std::memcmp(&s.Settings, &_resources.ShadowSettings, sizeof(s.Settings)) != 0;
+    const UINT cascades = (1u << _resources.ShadowSettings.CascadeCount) - 1;
+    s.Update = (flags & 1u) ? (fullUpdate ? cascades : s.DirtyCascades & cascades) : 0;
 }
 
 void SceneSunShadows::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot,
@@ -190,6 +207,7 @@ void SceneSunShadows::Append(Graph& graph, std::vector<ID3D12Resource*>& binding
         rendering.push_back({id, Mode::Read, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT});
     }
     const UINT cascadeCount = _resources.ShadowSettings.CascadeCount;
+    const UINT update = s.Update;
     work.Add(graph, "sun cull " + std::to_string(cascadeCount) + " cascades", std::move(culling), [=](auto* cmd) {
         cmd->SetDescriptorHeaps(1, &heap);
         cmd->SetComputeRootSignature(compute->GetRootSignature().Get());
@@ -220,12 +238,13 @@ void SceneSunShadows::Append(Graph& graph, std::vector<ID3D12Resource*>& binding
         cmd->IASetVertexBuffers(0, 1, &geometry.Vertices);
         cmd->IASetIndexBuffer(&geometry.Indices);
         cmd->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
-        cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
         for (UINT cascade = 0; cascade < cascadeCount; ++cascade)
         {
+            if (!(update & (1u << cascade))) continue;
             const auto region = SunShadowRegion(cascade, resolution);
             const D3D12_VIEWPORT viewport{float(region.X), float(region.Y), float(region.Width), float(region.Height), 0, 1};
             const D3D12_RECT rect{LONG(region.X), LONG(region.Y), LONG(region.X + region.Width), LONG(region.Y + region.Height)};
+            cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 1, &rect);
             cmd->RSSetViewports(1, &viewport);
             cmd->RSSetScissorRects(1, &rect);
             cmd->SetGraphicsRoot32BitConstant(0, 0, 0);
@@ -239,6 +258,7 @@ void SceneSunShadows::Append(Graph& graph, std::vector<ID3D12Resource*>& binding
         const Id cameraId = resource(camera.GetResource().D3DResource.Get(), "sun grass camera constants");
         for (UINT cascade = 0; cascade < cascadeCount; ++cascade)
         {
+            if (!(update & (1u << cascade))) continue;
             const auto region = SunShadowRegion(cascade, resolution);
             GeometryTarget target;
             target.View = {GDX12GeometryStage::Shadow, Matrix(_resources.ShadowSettings.ViewProj[cascade]).Transpose(),
@@ -259,5 +279,6 @@ void SceneSunShadows::Append(Graph& graph, std::vector<ID3D12Resource*>& binding
     s.Settings = _resources.ShadowSettings;
     s.Revision = _resources.Lighting.SunShadowRevision;
     s.Rendered = true;
+    s.DirtyCascades &= ~update;
 }
 }

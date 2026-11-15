@@ -89,16 +89,13 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
         _resources.PrepareLocalShadowData();
     }
     auto &constants = *_resources.FrameConstants.at(slot);
-    bool sceneChanged = std::any_of(scene.Buffers.begin(), scene.Buffers.begin() + 4,
-        [](const auto& buffer) { return buffer.Upload; });
     const auto grass = geometry.GrassPrimitives();
     if (_localShadows)
     {
         _localShadows->Freeze(slot, grass);
-        sceneChanged = frame.ShadowSceneRevision != _localShadows->SceneRevision();
-        frame.ShadowSceneRevision = _localShadows->SceneRevision();
     }
-    if (_sunShadows) _sunShadows->Freeze(slot, sceneChanged, grass);
+    if (_sunShadows) _sunShadows->Freeze(slot, _localShadows->CastersRebuilt(),
+        _localShadows->ChangedCasterBounds(), grass);
     constants.ShadowCB->CopyData(0, _resources.ShadowSettings);
     if (!constants.LocalLightCache->GetElementCount())
     {

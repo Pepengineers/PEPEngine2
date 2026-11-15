@@ -147,7 +147,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
     } resetOnFailure{_waterParticles.get()};
     const bool verify = _verify;
     const auto slot = c.Primary.CurrFrameConstantsIndex;
-    _geometry->Freeze(slot, c.Common.ActiveCameraCBufferIndex, _opaqueOnly ? std::vector<GDX12SkinningWork>{} : c.Runtime.FreezeSkeletalMeshes());
+    _geometry->Freeze(slot, c.Common.ActiveCameraCBufferIndex, c.Runtime.FreezeSkeletalMeshes());
     if (verify && !_environmentTestsRun)
     {
         RunEnvironmentGpuTests(c.Primary, c.Common);

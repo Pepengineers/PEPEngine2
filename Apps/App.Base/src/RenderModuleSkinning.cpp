@@ -348,7 +348,8 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
 {
     auto* frame = GetCurrentPrimaryFrameConstants();
     const bool edited = state.ComponentRevision != component._revision;
-    const double dt = world.IsPaused() ? 0 : static_cast<double>(_timer->DeltaTime()) * world.GetTimeScale();
+    const bool paused = world.IsPaused() && !_pipeline->AdvancesSkeletalMeshesWhileWorldPaused();
+    const double dt = paused ? 0 : static_cast<double>(_timer->DeltaTime()) * world.GetTimeScale();
     if (!std::isfinite(dt)) throw std::invalid_argument("Invalid skeletal world delta time");
     if (animate && !component._frozen)
     {
@@ -378,7 +379,7 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
         state.DeformationRevision = deformation;
     }
     const bool reset = previousPose.empty() || edited || !animate || component._frozen ||
-        world.IsPaused() || _RPcommonData.ResetHistory;
+        paused || _RPcommonData.ResetHistory;
     if (reset) previousPose = state.Pose;
     state.Dispatch = changed || state.NeedsSettle;
     // Only the frame displaying a new pose carries deformation velocity.
@@ -431,6 +432,8 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
         instance.BoundingBoxCenter = part.Bounds.Center;
         instance.BoundingBoxExtents = part.Bounds.Extents;
         frame->InstanceCache->CopyData(part.Instance, instance);
+        // Pose changes can leave the conservative box identical but still change cached shadows.
+        if (changed) frame->InstanceCache->MarkElementChanged(part.Instance);
     }
 }
 

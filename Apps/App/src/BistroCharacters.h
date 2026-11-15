@@ -44,7 +44,8 @@ namespace BistroCharacters
     public:
         explicit Scene(unsigned seed = std::random_device{}()) : _seed(seed) {}
 
-        void Update(World& world, float deltaSeconds, JobSystem& jobs, PhysicsModule* physics = nullptr)
+        void Update(World& world, float deltaSeconds, JobSystem& jobs, PhysicsModule* physics = nullptr,
+            bool advanceWhilePaused = false)
         {
             const bool spawning = !_initialized;
             auto& ecs = world.GetECS();
@@ -55,7 +56,7 @@ namespace BistroCharacters
                 Spawn(ecs, static_cast<size_t>(GetCount(true)), true);
                 _initialized = true;
             }
-            _stepSeconds = world.IsPaused() ? 0 : deltaSeconds * world.GetTimeScale();
+            _stepSeconds = world.IsPaused() && !advanceWhilePaused ? 0 : deltaSeconds * world.GetTimeScale();
             if (_groups.empty() || (!spawning && _stepSeconds <= 0)) return;
             _world = &world;
             _physics = physics;

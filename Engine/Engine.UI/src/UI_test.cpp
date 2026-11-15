@@ -13,6 +13,7 @@
 #include <imgui/misc/imgui_stdlib.h>
 #include <imgui/backends/imgui_impl_dx12.h>
 #include <imgui/backends/imgui_impl_win32.h>
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstring>
@@ -216,7 +217,6 @@ namespace Engine::UI
 
         AtlasUpload PrepareAtlas(GDX12Device& device, const DrawTexture& source)
         {
-            // shortcut: upload each captured atlas, cache immutable generations if profiling shows a cost.
             AtlasUpload upload;
             const auto desc = CD3DX12_RESOURCE_DESC::Tex2D(OffscreenFormat, source.Width, source.Height, 1, 1);
             upload.Texture = device.CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -302,6 +302,12 @@ namespace Engine::UI
     {
         static constexpr unsigned TexturesPerSlot = 64;
 
+        struct CachedAtlas
+        {
+            DrawTexture Source;
+            GDX12ResourceHandle Texture;
+        };
+
         struct Recording
         {
             std::shared_ptr<Impl> Renderer;
@@ -311,13 +317,13 @@ namespace Engine::UI
             std::vector<GDX12ResourceHandle> Textures;
         };
 
-        Impl(GDX12Device& device, unsigned slots)
+        Impl(GDX12Device& device, unsigned slots, bool reuseImmutableAtlases)
             : Device(device), Native(device.GetDevice()),
               OwnerThread(std::this_thread::get_id()),
               SrvHeap(&device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, slots * TexturesPerSlot,
                   D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE),
               RtvHeap(&device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, slots, D3D12_DESCRIPTOR_HEAP_FLAG_NONE),
-              Slots(slots)
+              Slots(slots), ReuseImmutableAtlases(reuseImmutableAtlases)
         {
             ThrowIfFailed(Native.As(&DeviceIdentity));
         }
@@ -364,16 +370,18 @@ namespace Engine::UI
         GDX12DescriptorHeap RtvHeap;
         ImGuiContext* Context = nullptr;
         std::vector<std::weak_ptr<Recording>> Slots;
+        bool ReuseImmutableAtlases;
+        std::vector<std::shared_ptr<const CachedAtlas>> Atlases;
         // Match the pinned backend's unsigned FrameIndex, including wraparound.
         UINT NextFrame = 0;
     };
 
-    OffscreenRenderer::OffscreenRenderer(GDX12Device& device, unsigned framesInFlight)
+    OffscreenRenderer::OffscreenRenderer(GDX12Device& device, unsigned framesInFlight, bool reuseImmutableAtlases)
     {
         if (!device.IsInitialized() || !device.GetDevice() || !device.GetCommandQueue() || !framesInFlight ||
             framesInFlight > D3D12_MAX_SHADER_VISIBLE_DESCRIPTOR_HEAP_SIZE_TIER_1 / Impl::TexturesPerSlot)
             throw std::invalid_argument("Offscreen UI requires a live device and a valid frame ring size");
-        _impl = std::make_shared<Impl>(device, framesInFlight);
+        _impl = std::make_shared<Impl>(device, framesInFlight, reuseImmutableAtlases);
         _impl->Initialize();
     }
 
@@ -414,6 +422,7 @@ namespace Engine::UI
                 throw std::invalid_argument("Offscreen UI texture IDs must be nonzero and unique");
 
         const UINT base = slot * Impl::TexturesPerSlot;
+        std::vector<std::shared_ptr<const Impl::CachedAtlas>> atlases;
         for (UINT index = 0; index < captured.Textures.size(); ++index)
         {
             const auto& source = captured.Textures[index];
@@ -421,8 +430,23 @@ namespace Engine::UI
             DXGI_FORMAT format = OffscreenFormat;
             if (source.Id == UITextureId::Invalid)
             {
-                auto& upload = recording->Uploads.emplace_back(PrepareAtlas(state.Device, source));
-                resource = upload.Texture.Get();
+                const auto cached = std::find_if(state.Atlases.begin(), state.Atlases.end(), [&](const auto& atlas) {
+                    return atlas->Source.Width == source.Width && atlas->Source.Height == source.Height &&
+                        atlas->Source.Pixels == source.Pixels;
+                });
+                if (cached != state.Atlases.end())
+                {
+                    atlases.push_back(*cached);
+                    resource = (*cached)->Texture.Get();
+                    recording->Textures.push_back((*cached)->Texture);
+                }
+                else
+                {
+                    auto& upload = recording->Uploads.emplace_back(PrepareAtlas(state.Device, source));
+                    resource = upload.Texture.Get();
+                    if (state.ReuseImmutableAtlases)
+                        atlases.push_back(std::make_shared<Impl::CachedAtlas>(Impl::CachedAtlas{source, upload.Texture}));
+                }
             }
             else
             {
@@ -480,6 +504,7 @@ namespace Engine::UI
         list->SetDescriptorHeaps(1, heaps);
         ImGui_ImplDX12_RenderDrawData(&playback.Data, list);
         commands.InvalidateCachedState();
+        if (state.ReuseImmutableAtlases) state.Atlases = std::move(atlases);
         state.Slots[slot] = recording;
         ++state.NextFrame;
         return recording;
@@ -592,8 +617,8 @@ namespace Engine::UI
         auto dockFlags = ImGuiDockNodeFlags_PassthruCentralNode | ImGuiDockNodeFlags_NoDockingOverCentralNode;
         if (!Visible) dockFlags |= ImGuiDockNodeFlags_KeepAliveOnly;
         ImGui::DockSpaceOverViewport(0, nullptr, dockFlags);
-        if (!SettingsSuspended) DrawSettings();
 #endif
+        if (!SettingsSuspended) DrawSettings();
     }
 
 #ifdef _DEBUG
@@ -693,7 +718,7 @@ namespace Engine::UI
     std::shared_ptr<const DrawData> CaptureScreenFrame()
     {
         const auto* data = FinalizeScreenFrame();
-        return data ? CaptureDrawData(*data) : nullptr;
+        return data && data->TotalVtxCount ? CaptureDrawData(*data) : nullptr;
     }
 
     void ShutdownUI()
@@ -712,9 +737,7 @@ namespace Engine::UI
     {
         if (!ImGui::GetCurrentContext()) return false;
         const bool handled = ImGui_ImplWin32_WndProcHandler(window, message, wParam, lParam) != 0;
-#if defined(_DEBUG)
         if (message == WM_KEYUP && wParam == VK_F1) { Visible = !Visible; return true; }
-#endif
         const auto& io = ImGui::GetIO();
         return handled || (Visible && ((message >= WM_MOUSEFIRST && message <= WM_MOUSELAST && io.WantCaptureMouse) ||
             (message >= WM_KEYFIRST && message <= WM_KEYLAST && io.WantCaptureKeyboard)));
@@ -723,5 +746,10 @@ namespace Engine::UI
     bool WantsKeyboardInput()
     {
         return ImGui::GetCurrentContext() && Visible && ImGui::GetIO().WantCaptureKeyboard;
+    }
+
+    bool WantsMouseInput()
+    {
+        return ImGui::GetCurrentContext() && Visible && ImGui::GetIO().WantCaptureMouse;
     }
 }

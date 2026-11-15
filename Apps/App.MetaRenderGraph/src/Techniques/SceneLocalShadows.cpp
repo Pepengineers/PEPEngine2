@@ -167,6 +167,8 @@ SceneLocalShadows::Input SceneLocalShadows::ReadInput(UINT slot, UINT commandInd
         throw std::out_of_range("Local shadow instance references missing scene data");
     result.Material = frame.MaterialCache->GetCPUData()[result.Instance.MaterialIndex];
     result.World = frame.TransformCache->GetCPUData()[result.Instance.TransformIndex].WorldMatrix;
+    if (const auto* primitive = _resources.GetMeshPrimitive(result.Command.InstanceID))
+        result.DeformationRevision = primitive->DeformationRevision;
     return result;
 }
 
@@ -188,6 +190,7 @@ void SceneLocalShadows::Refit(UINT caster)
 void SceneLocalShadows::Invalidate(const Caster& caster)
 {
     if (!caster.CastsShadow) return;
+    _changedCasterBounds.push_back(caster.Bounds);
     for (auto& slot : _slots) for (auto& cache : slot.Cache)
     {
         if (!cache.HasLight || !LocalShadowRangeIntersects(cache.Light, caster.Bounds)) continue;
@@ -232,6 +235,8 @@ void SceneLocalShadows::UpdateGrass(const std::vector<GDX12RenderPrimitive>& gra
 
 void SceneLocalShadows::UpdateCasters(UINT slot)
 {
+    _changedCasterBounds.clear();
+    _castersRebuilt = false;
     auto& frame = *_resources.FrameConstants.at(slot);
     auto changed = _resources.IndirectCommandsCache->ConsumeChangedElements();
     const auto instances = frame.InstanceCache->ConsumeChangedElements();
@@ -249,6 +254,7 @@ void SceneLocalShadows::UpdateCasters(UINT slot)
         for (auto& cachedSlot : _slots) for (auto& cache : cachedSlot.Cache) cache.MapsValid = 0;
         _textureRevision = _resources.TextureRevision;
         ++_sceneRevision;
+        _castersRebuilt = true;
     }
     const auto append = [&](const auto& indices, const auto& references) {
         for (UINT index : indices)
@@ -274,7 +280,8 @@ void SceneLocalShadows::UpdateCasters(UINT slot)
             return;
         }
         const bool materialDirty = std::find(materials.begin(), materials.end(), current.Instance.MaterialIndex) != materials.end();
-        if (!materialDirty && std::memcmp(&current.Command, &old.Command, sizeof(current.Command)) == 0 &&
+        if (!materialDirty && current.DeformationRevision == old.DeformationRevision &&
+            std::memcmp(&current.Command, &old.Command, sizeof(current.Command)) == 0 &&
             std::memcmp(&current.Instance, &old.Instance, sizeof(current.Instance)) == 0 &&
             std::memcmp(&current.Material, &old.Material, sizeof(current.Material)) == 0 &&
             std::memcmp(&current.World, &old.World, sizeof(current.World)) == 0) continue;
@@ -316,6 +323,7 @@ void SceneLocalShadows::UpdateCasters(UINT slot)
 
 void SceneLocalShadows::RebuildCasters(UINT slot)
 {
+    _castersRebuilt = true;
     _casters.clear();
     _nodes.clear();
     _instances.clear(); _transforms.clear(); _materials.clear();

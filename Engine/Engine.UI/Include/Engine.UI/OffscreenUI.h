@@ -31,7 +31,8 @@ namespace Engine::UI
     class OffscreenRenderer
     {
     public:
-        OffscreenRenderer(GDX12Device& device, unsigned framesInFlight);
+        // Atlas reuse requires successful recordings to be submitted in order without discarding uploads.
+        OffscreenRenderer(GDX12Device& device, unsigned framesInFlight, bool reuseImmutableAtlases = false);
         ~OffscreenRenderer();
         OffscreenRenderer(const OffscreenRenderer&) = delete;
         OffscreenRenderer& operator=(const OffscreenRenderer&) = delete;

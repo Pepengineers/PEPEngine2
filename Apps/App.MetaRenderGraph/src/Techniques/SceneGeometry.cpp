@@ -174,7 +174,7 @@ void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork>
         if(!s.BatchCounter)s.BatchCounter=_resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT,CD3DX12_RESOURCE_DESC::Buffer(4,D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS),D3D12_RESOURCE_STATE_COMMON);
         const UINT64 bytes=4+UINT64(s.Draws)*sizeof(GDX12IndirectDrawArgs)+UINT64(s.InstanceCount)*4;
         if(!s.BatchReadback || s.BatchReadback->GetDesc().Width!=bytes)s.BatchReadback=_resources.Device->CreateResource(D3D12_HEAP_TYPE_READBACK,CD3DX12_RESOURCE_DESC::Buffer(bytes),D3D12_RESOURCE_STATE_COPY_DEST);
-        s.InstanceSnapshot.assign(f.InstanceCache->GetCPUData(),f.InstanceCache->GetCPUData()+f.InstanceCache->GetElementCount());
+        if (!_opaqueOnly) s.InstanceSnapshot.assign(f.InstanceCache->GetCPUData(),f.InstanceCache->GetCPUData()+f.InstanceCache->GetElementCount());
     }
     s.SkinBindings.clear(); s.SkinDeclarations.clear(); s.SkinIds.clear();
     for(const auto& work:s.Skin) {

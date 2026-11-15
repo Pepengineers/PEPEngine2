@@ -31,4 +31,5 @@ namespace Engine::UI
     void ShutdownUI();
     bool HandleMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
     bool WantsKeyboardInput();
+    bool WantsMouseInput();
 }

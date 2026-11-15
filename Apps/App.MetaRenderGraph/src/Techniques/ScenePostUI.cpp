@@ -196,15 +196,21 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
         graph.Resources[id].Final = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
         exports[index] = std::move(resource);
     }
+    AppendScreen(graph, bindings, target, finish, fgId);
+}
+void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+    GDX12Texture* target, const std::function<void(GDX12CommandList*)>& finish, Id dependency)
+{
+    const auto resource = [](GDX12Texture* texture) { return texture->GetResource(); };
     auto& screen = _slots.at(_resources.CurrFrameConstantsIndex);
     screen.RasterOwner.reset(); screen.CompositeOwner.reset();
     screen.Draw = Engine::UI::CaptureScreenFrame();
-    Id screenId = fgId;
+    Id screenId = dependency;
     if (screen.Draw)
     {
         if (!_screen)
         {
-            _screen = std::make_unique<Engine::UI::OffscreenRenderer>(*_resources.Device, UINT(_slots.size()));
+            _screen = std::make_unique<Engine::UI::OffscreenRenderer>(*_resources.Device, UINT(_slots.size()), true);
             _composite = std::make_unique<Engine::UI::ScreenComposite>(*_resources.Device);
         }
         if (!screen.Target)
@@ -217,7 +223,7 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
             {{resource(screen.Target.get()), Mode::Write}}, [this, &screen](auto* cmd) {
                 screen.RasterOwner = _screen->TryRecord(*cmd, screen.Target->GetResource()->D3DResource, screen.Draw);
                 if (!screen.RasterOwner) throw std::logic_error("Screen UI backend slot is still in flight");
-            }, {fgId}, screen.Target.get());
+            }, {dependency}, screen.Target.get());
         screenId = Packet(graph, bindings, "Engine.UI screen composition", {{resource(screen.Target.get()), Mode::Read},
             {resource(target), Mode::ReadWrite}}, [this, &screen, target](auto* cmd) {
                 screen.CompositeOwner = _composite->Record(*cmd, screen.Target->GetResource()->D3DResource,
@@ -235,8 +241,7 @@ void ScenePostUI::AppendOpaque(Graph& graph, std::vector<ID3D12Resource*>& bindi
     const auto output = Packet(graph, bindings, "opaque HDR display transform",
         {{hdr->GetResource(), Mode::Read}, {target->GetResource(), Mode::Write}},
         [this](auto* cmd) { _output.Execute(cmd); }, {}, target);
-    Packet(graph, bindings, "frame end / PRESENT handoff", {{target->GetResource(), Mode::ReadWrite}},
-        finish, {output}, nullptr, D3D12_RESOURCE_STATE_PRESENT);
+    AppendScreen(graph, bindings, target, finish, output);
 }
 void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bindings, bool record)
 {
