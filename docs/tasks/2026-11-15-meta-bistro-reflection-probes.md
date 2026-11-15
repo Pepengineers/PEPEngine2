@@ -1,7 +1,8 @@
-# Следующий этап: локальные reflection probes Bistro
+# Локальные reflection probes Bistro
 
-**Следующий этап после Motion Blur/апскейлеров.** Начать после пользовательской
-приёмки текущего этапа. При подготовке этого задания реализация probes не начата.
+**Подготовленный этап probes.** По запросу 2026-11-16 перед ним добавлена
+[вода](2026-11-16-meta-bistro-water.md). Начать после пользовательской приёмки
+предыдущего этапа. При подготовке этого задания реализация probes не начата.
 Актуальная очередь находится в `docs/plans/2026-11-15-bistro-incremental-migration.md`.
 Основа при обновлении: `66dedd66`, включая `ba3b4f5d` Motion Blur/SR,
 `c94a5083` CPU fixes и анимацию/UI. Перед работой сверить HEAD/status.
@@ -23,7 +24,10 @@ BistroAdditionsTests.cpp и Temp/; их наличие перепроверит�
 частицы, people/foxes, Motion Blur, апскейлеры и экранный UI сохраняются с текущими
 budgets/quality/settings. Обычный старт сохраняет XeSS/Default; Native ради упрощения
 переноса не включать. Физический мир остаётся paused, explicit time paths работают.
-Вода, физика, атмосфера/облака, DoF, refraction, world-space posters, FG и offload
+Если вода уже перенесена, сохранить её SPH/surface/refraction/composition и
+подключить published probe radiance/metadata к существующему water Resolve
+как дополнительному потребителю. Саму воду в этом задании не реализовывать.
+Физика, атмосфера/облака, DoF, world-space posters, FG и offload
 остаются отложены. `_opaqueOnly` сейчас обозначает поэтапный Bistro-путь:
 переключать его целиком на полный диагностический pipeline нельзя.
 
@@ -139,7 +143,8 @@ Meta reads/dependencies и сохранить BRDF один раз. SSR оста
 Текущий TRANSPARENT_STATIC_IBL_ONLY одновременно выключает probes и atmosphere:
 просто убрать этот флаг недостаточно, иначе появятся несвязанные sky reads.
 Разделить необходимые shader capabilities минимальным изменением, сохранив
-default App behavior и static sky. Все три потребителя должны видеть согласованные
+default App behavior и static sky. Эти три потребителя и water Resolve, если вода
+уже перенесена, должны видеть согласованные
 metadata и cubemap publication. BRDF применяется один раз в существующем PBR;
 AO по-прежнему не умножает отражения/стекло.
 
@@ -147,7 +152,7 @@ AO по-прежнему не умножает отражения/стекло.
 history/revision механизмы. Не сбрасывать temporal history каждый неизменный frozen кадр.
 
 Ожидаемый кадр: необходимые capture/prefilter/publication работы → opaque
-lighting с probes → SSSR с согласованным fallback → mesh/particle composition
+lighting с probes → SSSR с согласованным fallback → mesh/water/particle composition
 → Motion Blur/reconstruction → display → screen UI → PRESENT.
 После готовности frozen probes обычное движение камеры требует sampling,
 а не повторного capture/prefilter/readback.
@@ -164,8 +169,8 @@ lighting с probes → SSSR с согласованным fallback → mesh/part
 
 В отчёте указать фактические count/settings и место в Bistro для осмотра,
 успешные capture/publication и обычную работу после них, изменения операций
-кадра, capture content по режимам, shadow coverage, publication/fences, три PBR
-потребителя, способ обновления CPU inputs и сохранения shadow cache. Различать
+кадра, capture content по режимам, shadow coverage, publication/fences, PBR
+потребителей, способ обновления CPU inputs и сохранения shadow cache. Различать
 прочитанный код, реально наблюдавшийся результат и непроверенные режимы.
 Не выдавать startup capture cost за steady-state FPS и не заявлять ускорение
 без замеров. Обновить README, подготовить локальный коммит только своих правок,
