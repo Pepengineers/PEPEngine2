@@ -45,6 +45,7 @@ private:
         GDX12ResourceHandle Source, Data, Origin;
         uint64_t Revision = 0;
         bool Upload = false;
+        std::vector<std::pair<UINT, UINT>> Ranges;
         UINT64 Bytes=0;
         GDX12Descriptor Srv, Uav;
     };

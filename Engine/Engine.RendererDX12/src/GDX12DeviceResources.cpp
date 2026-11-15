@@ -213,6 +213,8 @@ void GDX12DeviceResources::UpdateMaterialCB(std::unordered_map<std::string, std:
             materialConstants.RoughnessIndex = textureIndex(material->RoughnessMap);
             materialConstants.EmissiveIndex = textureIndex(material->Emissive);
             currMaterialCB->CopyData(material->_CBufferIndex, materialConstants);
+            // A dirty material can refresh alpha contents without changing its GPU constants.
+            currMaterialCB->MarkElementChanged(material->_CBufferIndex);
             numFramesDirty--;
         }
     }

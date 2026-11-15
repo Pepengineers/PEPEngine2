@@ -108,29 +108,47 @@ void SceneGeometry::Freeze(UINT index,UINT camera,std::vector<GDX12SkinningWork>
     auto& s=_slots.at(index); auto& f=*_resources.FrameConstants.at(index);s.EarlyAO=_common.AOAfterDepthPrepass;
     // CPU preparation is complete. These per-frame uploads cannot change until
     // the returned frame fence; workers only record copies of assigned ranges.
-    auto input=[&](Buffer& destination,auto& buffer) {
+    auto input=[&](Buffer& destination,auto& buffer, bool frameLocal = false) {
         BufferFor(destination,UINT64(buffer->GetElementCount())*buffer->GetElementSize(),buffer->GetElementSize(),true);
         const auto revision = buffer->GetRevision();
         destination.Upload = destination.Revision != revision ||
             destination.Origin.Get() != buffer->GetResource().D3DResource.Get();
         if (!destination.Upload) return;
+        const UINT stride = buffer->GetElementSize(), count = buffer->GetElementCount();
+        destination.Ranges.clear();
+        const bool resident = destination.Revision && destination.Origin.Get() == buffer->GetResource().D3DResource.Get();
+        // The global indirect buffer has several slot consumers; its journal cannot describe an older slot.
+        auto changed = frameLocal && resident ? buffer->ChangedElements() : std::vector<UINT>{};
+        if (changed.empty()) destination.Ranges.push_back({0, UINT(destination.Bytes / stride)});
+        else
+        {
+            std::sort(changed.begin(), changed.end());
+            for (UINT element : changed)
+            {
+                if (element >= count) throw std::out_of_range("Scene upload change exceeds buffer size");
+                if (!destination.Ranges.empty() && element <= destination.Ranges.back().second)
+                    destination.Ranges.back().second = (std::max)(destination.Ranges.back().second, element + 1);
+                else destination.Ranges.push_back({element, element + 1});
+            }
+        }
         void* data=nullptr; D3D12_RANGE noRead{};
         ThrowIfFailed(destination.Source->Map(0,&noRead,&data));
-        const UINT64 bytes=UINT64(buffer->GetElementCount())*buffer->GetElementSize();
-        std::memset(data,0,SIZE_T(destination.Bytes));
-        if(bytes) {
-            // Upload heaps are write-combined; snapshots must read the cached CPU mirror.
-            const auto* source = buffer->GetCPUData();
-            const UINT stride = buffer->GetElementSize();
-            if (stride == sizeof(*source)) std::memcpy(data, source, SIZE_T(bytes));
-            else for (UINT i = 0; i < buffer->GetElementCount(); ++i)
+        const auto* source = buffer->GetCPUData();
+        if (!resident) std::memset(data, 0, SIZE_T(destination.Bytes));
+        for (const auto& [begin, end] : destination.Ranges)
+        {
+            const UINT readableEnd = (std::min)(end, count);
+            if (begin >= readableEnd) continue;
+            auto* target = static_cast<BYTE*>(data) + UINT64(begin) * stride;
+            if (stride == sizeof(*source)) std::memcpy(target, source + begin, SIZE_T(readableEnd - begin) * stride);
+            else for (UINT i = begin; i < readableEnd; ++i)
                 std::memcpy(static_cast<BYTE*>(data) + UINT64(i) * stride, source + i, sizeof(*source));
         }
         destination.Source->Unmap(0,nullptr);
         destination.Revision = revision;
         destination.Origin = buffer->GetResource().D3DResource;
     };
-    input(s.Buffers[0],f.InstanceCache); input(s.Buffers[1],_resources.IndirectCommandsCache); input(s.Buffers[2],f.MaterialCache); input(s.Buffers[3],f.TransformCache);
+    input(s.Buffers[0],f.InstanceCache,true); input(s.Buffers[1],_resources.IndirectCommandsCache); input(s.Buffers[2],f.MaterialCache,true); input(s.Buffers[3],f.TransformCache,true);
     if (_opaqueOnly) {
         s.FrameBuffers[0].Data = f.MainCB->GetResource().D3DResource;
         s.FrameBuffers[0].Bytes = UINT64(f.MainCB->GetElementCount()) * f.MainCB->GetElementSize();
@@ -351,9 +369,12 @@ void SceneGeometry::Record(UINT index,Id op,UINT bucket,ID3D12GraphicsCommandLis
             if (!b[i].Upload) continue;
             const UINT stride=i==0?sizeof(GDX12InstanceData):i==1?sizeof(GDX12IndirectDrawArgs):i==2?sizeof(GDX12MaterialConstants):sizeof(GDX12TransformConstants);
             const UINT count=UINT(b[i].Bytes/stride),begin=count*bucket/4,end=count*(bucket+1)/4;
-            if (end > begin)
-                cmd->CopyBufferRegion(b[i].Data.Get(), UINT64(begin) * stride,
-                    b[i].Source.Get(), UINT64(begin) * stride, UINT64(end - begin) * stride);
+            for (const auto& range : b[i].Ranges)
+            {
+                const UINT first = (std::max)(begin, range.first), last = (std::min)(end, range.second);
+                if (last > first) cmd->CopyBufferRegion(b[i].Data.Get(), UINT64(first) * stride,
+                    b[i].Source.Get(), UINT64(first) * stride, UINT64(last - first) * stride);
+            }
         }
         if (!_opaqueOnly) for (UINT i = 0; i < 2; ++i) {
             const auto& buffer = s.FrameBuffers[i];

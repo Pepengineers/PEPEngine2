@@ -79,6 +79,7 @@ public:
     std::vector<GDX12RenderGraph::BufferAccess> GetGeometryBufferAccesses(GDX12GeometryStage stage) const;
     uint64_t GeometryRevision = 0;
     uint64_t MaterialRevision = 0;
+    uint64_t TextureRevision = 0;
     GDX12Device* Device;
     GDX12MainConstants Lighting;
     GDX12SkyState Sky;
