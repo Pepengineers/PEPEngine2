@@ -36,13 +36,7 @@ GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource
 {
     _work.Commands.clear();
     auto& frame = _frames.at(slot);
-    if (_water.Active())
-    {
-        auto* farHDR = AppendPhase(graph, bindings, geometry, slot, frame.Far, hdr, sun, local, environment, false);
-        auto* water = _water.Resolve(graph, bindings, farHDR, environment);
-        const auto resolved = Id(graph.Operations.size() - 1);
-        return AppendPhase(graph, bindings, geometry, slot, frame.Near, water, sun, local, environment, true, resolved);
-    }
+    _water.AppendDraw(graph, bindings, hdr, geometry._slots.at(slot).Dsv.CPUHandle);
     return AppendPhase(graph, bindings, geometry, slot, frame.All, hdr, sun, local, environment, true);
 }
 GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Resource*>& bindings,

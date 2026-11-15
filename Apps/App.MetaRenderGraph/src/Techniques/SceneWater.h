@@ -1,6 +1,5 @@
 #pragma once
 #include "NativeWork.h"
-#include "SceneEnvironment.h"
 #include "Rendering/Water/BistroWaterRendering.h"
 
 namespace Meta
@@ -13,8 +12,7 @@ public:
     void SetRetirement(std::function<void()> retire);
     void Prepare(float delta);
     void AppendSurface(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* opaqueDepth, GDX12Texture* opaqueMotion);
-    GDX12Texture* Resolve(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* background, SceneEnvironment&);
-    bool Active() const { return _surface.IsRendering(); }
+    void AppendDraw(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr, D3D12_CPU_DESCRIPTOR_HANDLE depth);
     GDX12Texture* Depth() const { return _depth; }
     GDX12Texture* Motion() const { return _motion; }
     bool Record(Id id, ID3D12GraphicsCommandList* commands) const { return _work.Record(id, commands); }

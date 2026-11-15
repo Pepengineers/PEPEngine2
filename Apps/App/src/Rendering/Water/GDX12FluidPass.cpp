@@ -68,6 +68,29 @@ void GDX12FluidSurfacePass::CreatePipelines()
     surface.NumSingleUAVSlots = 6;
     surface.StaticSamplers = GetStaticSamplers();
     _surfaceRoot = std::make_unique<GDX12RootSignature>(_resources->Device, surface);
+    if (_particleRendering)
+    {
+        auto& compiler = GDX12ShaderCompiler::GetInstance();
+        auto vs = compiler.CompileShader(_resources->Device, APP_SHADERS_FOLDER "FluidParticleDraw.hlsl", nullptr, "VS", "vs");
+        auto ps = compiler.CompileShader(_resources->Device, APP_SHADERS_FOLDER "FluidParticleDraw.hlsl", nullptr, "PS", "ps");
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC desc{};
+        desc.pRootSignature = _surfaceRoot->GetRootSignature().Get();
+        desc.VS = {vs->GetBufferPointer(), vs->GetBufferSize()};
+        desc.PS = {ps->GetBufferPointer(), ps->GetBufferSize()};
+        desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
+        desc.RasterizerState.CullMode = D3D12_CULL_MODE_NONE;
+        desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
+        desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
+        desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+        desc.SampleMask = UINT_MAX;
+        desc.SampleDesc.Count = 1;
+        desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        desc.NumRenderTargets = 1;
+        desc.RTVFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
+        desc.DSVFormat = DXGI_FORMAT_D32_FLOAT;
+        ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&_particleDraw)));
+        return;
+    }
     _initialize = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), APP_SHADERS_FOLDER "FluidSurface.hlsl", "InitializeSurface");
     _filter = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), APP_SHADERS_FOLDER "FluidSurface.hlsl", "NarrowRange");
     _merge = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), APP_SHADERS_FOLDER "FluidSurface.hlsl", "MergeSurface");
@@ -413,7 +436,7 @@ void GDX12FluidSurfacePass::PrepareFrame()
     }
     CreatePipelines();
     if (_localOnly && !_externalOnly) _solver.Initialize(_resources->Device);
-    if (rendering)
+    if (rendering && !_particleRendering)
     {
         CreateTargets();
         // Publish storage before the graph resolves dynamic writes; fallback depth is read-only.
@@ -525,10 +548,46 @@ void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
     }
 }
 
+void GDX12FluidSurfacePass::DrawParticles(GDX12CommandList* commands, GDX12Texture* hdr,
+    D3D12_CPU_DESCRIPTOR_HANDLE depth)
+{
+    if (!_rendering) return;
+    if (!_particleRendering || hdr->GetFormat() != DXGI_FORMAT_R16G16B16A16_FLOAT)
+        throw std::logic_error("Fluid particle draw requires particle mode and RGBA16F HDR");
+    commands->SetDescriptorHeaps({_resources->SRV_UAV_Heap.get()});
+    commands->SetGraphicsRootSignature(_surfaceRoot.get());
+    commands->SetPipelineState(_particleDraw);
+    commands->SetViewport(hdr->GetViewport());
+    commands->SetScissorRect(hdr->GetScissorRect());
+    commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+    const auto color = hdr->GetRTV()->CPUHandle;
+    commands->GetCommandList()->OMSetRenderTargets(1, &color, false, &depth);
+    auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
+    commands->SetGraphicsRootConstantBufferView(2, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
+    for (const auto& instance : _instances)
+    {
+        const auto found = _states.find(instance.Id);
+        const auto settings = ResolveFluidSettings(instance.Component.GetSettings(), _controls.Quality);
+        if (found == _states.end() || !settings.RenderEnabled) continue;
+        auto& state = *found->second;
+        auto parameters = MakeFluidParameters(instance.ContainerToWorld, settings);
+        if (settings.ReferenceModel) parameters.Radius *= std::cbrt(std::abs(instance.ContainerToWorld.Determinant()));
+        const UINT element = 2 * _resources->CurrFrameConstantsIndex + 1;
+        state.Constants->CopyData(element, parameters);
+        auto& particles = _externalOnly ? *_externalDisplay.at(instance.Id) :
+            state.Offload ? state.Offload->DisplayParticles() : *state.Solver.Particles[state.SolverHead.Current];
+        commands->SetGraphicsRootConstantBufferView(1, state.Constants->GetElementAddress(element));
+        commands->SetGraphicsSRV(0, particles.GetSRV()->GPUHandle);
+        commands->DrawInstanced(4, particles.GetElementCount(), 0, 0);
+        state.WasRendered = true;
+        state.PreviousContainer = instance.ContainerToWorld;
+    }
+}
+
 GDX12Texture* GDX12FluidSurfacePass::Resolve(GDX12CommandList* commands, GDX12Texture* background,
     GDX12Texture* environment, D3D12_GPU_DESCRIPTOR_HANDLE probeRadiance)
 {
-    if (!_rendering) return background;
+    if (!_rendering || _particleRendering) return background;
     if (background->GetFormat() != DXGI_FORMAT_R16G16B16A16_FLOAT ||
         background->GetWidth() != _color->GetWidth() || background->GetHeight() != _color->GetHeight())
         throw std::invalid_argument("Water resolve requires matching linear RGBA16F HDR");
@@ -609,6 +668,7 @@ void GDX12FluidSurfacePass::ClearDenendencies()
     _filter.Reset();
     _merge.Reset();
     _resolve.Reset();
+    _particleDraw.Reset();
     _depthLink.Target = _motionLink.Target = nullptr;
     _rendering = _simulating = _prepared = false;
 }
@@ -649,12 +709,15 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::NativeSurface
     using Mode = GDX12RenderGraph::Mode;
     std::vector<GDX12RenderGraph::BufferAccess> result;
     if (!_rendering) return result;
-    for (auto* texture : {_raw.get(), _eyeDepth.get(), _thickness.get(), _filtered[0].get(), _filtered[1].get(),
-        _depth.get(), _motion.get(), _geometry.get(), _owner.get()})
-        result.push_back({texture->GetResource(), Mode::ReadWrite, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
-    result.push_back({_scratchDepth->GetResource(), Mode::Write, D3D12_RESOURCE_STATE_COMMON});
-    for (auto* input : _inputs)
-        result.push_back({input->GetTexture()->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+    if (!_particleRendering)
+    {
+        for (auto* texture : {_raw.get(), _eyeDepth.get(), _thickness.get(), _filtered[0].get(), _filtered[1].get(),
+            _depth.get(), _motion.get(), _geometry.get(), _owner.get()})
+            result.push_back({texture->GetResource(), Mode::ReadWrite, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+        result.push_back({_scratchDepth->GetResource(), Mode::Write, D3D12_RESOURCE_STATE_COMMON});
+        for (auto* input : _inputs)
+            result.push_back({input->GetTexture()->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+    }
     result.push_back({&_resources->FrameConstants.at(_resources->CurrFrameConstantsIndex)->CameraCB->GetResource(),
         Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
     for (const auto& instance : _instances)
@@ -677,7 +740,7 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::NativeResolve
 {
     using Mode = GDX12RenderGraph::Mode;
     std::vector<GDX12RenderGraph::BufferAccess> result;
-    if (!_rendering) return result;
+    if (!_rendering || _particleRendering) return result;
     for (auto* texture : {_inputs[0]->GetTexture(), _depth.get(), _geometry.get(), _owner.get()})
         result.push_back({texture->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
     result.push_back({_color->GetResource(), Mode::Write, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
