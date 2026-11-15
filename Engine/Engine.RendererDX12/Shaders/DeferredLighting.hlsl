@@ -99,11 +99,7 @@ void CS(uint3 dispatch : SV_DispatchThreadID)
     s.F0 = f0.rgb; s.Baked = f0.a > 0.5f;
     s.Emissive = emissive.rgb;
     float3 v = SafeNormalize(CBCamera.CameraLocation - position);
-#if DEFERRED_OPAQUE_ONLY
-    float3 result = ShadeSunAndIBL(s, position, v);
-#else
     float3 result = ShadeSunAndIBL(s, position, v, AmbientOcclusion[pixel]);
-#endif
     if (s.Baked != 0)
     {
         SceneColor[pixel] = float4(result, 1);
