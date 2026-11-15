@@ -32,7 +32,7 @@ struct PreparedWorld
 
 struct PreparedScene
 {
-    std::string SourcePath;
+    std::filesystem::path SourcePath;
     SceneConfig Config;
     std::vector<PreparedWorld> Worlds;
 };

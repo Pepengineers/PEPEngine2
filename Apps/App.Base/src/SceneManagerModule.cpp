@@ -44,10 +44,10 @@ void SceneManagerModule::Uninitialize()
 }
 
 bool SceneManagerModule::LoadScene(
-    const std::string& scenePath,
+    const std::filesystem::path& scenePath,
     const AppConfig& appConfig)
 {
-    Logger::Info("SceneManagerModule::LoadScene path:\n{}", scenePath);
+    Logger::Info("SceneManagerModule::LoadScene path:\n{}", scenePath.u8string());
 
     Uninitialize();
 
@@ -67,7 +67,7 @@ bool SceneManagerModule::LoadScene(
 
     for (const SceneWorldConfig& sceneWorldConfig : sceneConfig.Worlds)
     {
-        Logger::Info("SceneManagerModule::LoadScene loading world yaml:\n{}", sceneWorldConfig.Path);
+        Logger::Info("SceneManagerModule::LoadScene loading world yaml:\n{}", sceneWorldConfig.Path.u8string());
 
         if (!LoadConfiguredWorld(sceneWorldConfig, appConfig))
         {
@@ -82,7 +82,7 @@ bool SceneManagerModule::LoadConfiguredWorld(
     const SceneWorldConfig& sceneWorldConfig,
     const AppConfig& appConfig)
 {
-    Logger::Info("LoadConfiguredWorld sceneWorldConfig.Path:\n{}", sceneWorldConfig.Path);
+    Logger::Info("LoadConfiguredWorld sceneWorldConfig.Path:\n{}", sceneWorldConfig.Path.u8string());
 
     WorldConfig worldConfig;
 
@@ -110,7 +110,7 @@ bool SceneManagerModule::LoadConfiguredWorld(
 
     if (!world->Load())
     {
-        Logger::Error("World::Load failed: {}", desc.WorldFilePath.string());
+        Logger::Error("World::Load failed: {}", desc.WorldFilePath.u8string());
         OnWorldDestroyed.Broadcast(*worldPtr);
         return false;
     }

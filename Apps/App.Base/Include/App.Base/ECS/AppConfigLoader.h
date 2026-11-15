@@ -3,12 +3,12 @@
 
 #include "App.Base/ECS/AppConfig.h"
 
-#include <string>
+class AssetCatalog;
 
 class AppConfigLoader
 {
 public:
-    static AppConfig LoadAppConfig(const std::string& path);
-    static SceneConfig LoadSceneConfig(const std::string& path);
-    static WorldConfig LoadWorldConfig(const std::string& path);
+    static AppConfig LoadAppConfig(const std::filesystem::path& path, const AssetCatalog* catalog = nullptr);
+    static SceneConfig LoadSceneConfig(const std::filesystem::path& path, const AssetCatalog* catalog = nullptr);
+    static WorldConfig LoadWorldConfig(const std::filesystem::path& path);
 };

@@ -1,99 +1,55 @@
-﻿#include "App.Base/ECS/WorldDocument.h"
+#include "App.Base/ECS/WorldDocument.h"
 
-#include <fstream>
-#include <sstream>
+#include <stdexcept>
 
+#include "App.Base/ECS/AssetCatalog.h"
 #include "App.Base/ECS/YamlReadUtils.h"
 
-namespace 
+namespace
 {
-    std::string ReadTextFile(const std::filesystem::path& path)
+    WorldTextureResource ParseTextureResource(ryml::NodeRef textureNode,
+        const std::filesystem::path& owner, const AssetCatalog* catalog)
     {
-        std::ifstream file(path, std::ios::binary);
-        if (!file.is_open())
+        WorldTextureResource resource;
+        resource.Id = AppYaml::ReadString(textureNode, "Id");
+        if (resource.Id.empty())
         {
-            throw std::runtime_error("Failed to open world file: " + path.string());
+            throw std::runtime_error(owner.u8string() + " has a texture resource without an Id");
         }
 
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-        return buffer.str();
-    }
-    
-    std::filesystem::path ResolveResourcePath(const std::filesystem::path& sourcePath)
-    {
-        if (sourcePath.empty())
+        if (textureNode.has_child("Required"))
         {
-            return {};
+            textureNode["Required"] >> resource.Required;
         }
-        
-        return std::filesystem::absolute(sourcePath).lexically_normal();
+        resource.SourcePath = AppYaml::ResolveAssetReference(textureNode, "Asset", "Source", owner, catalog, resource.Required);
+        return resource;
+    }
+
+    WorldMeshResource ParseMeshResource(ryml::NodeRef meshNode, const std::filesystem::path& owner, const AssetCatalog* catalog)
+    {
+        WorldMeshResource resource;
+        resource.Id = AppYaml::ReadString(meshNode, "Id");
+        if (resource.Id.empty())
+        {
+            throw std::runtime_error(owner.u8string() + " has a mesh resource without an Id");
+        }
+
+        if (meshNode.has_child("SubmitToRenderer"))
+        {
+            meshNode["SubmitToRenderer"] >> resource.SubmitToRenderer;
+        }
+
+        if (meshNode.has_child("ImportMaterials"))
+        {
+            meshNode["ImportMaterials"] >> resource.ImportMaterials;
+        }
+
+        resource.SourcePath = AppYaml::ResolveAssetReference(meshNode, "Asset", "Source", owner, catalog);
+        return resource;
     }
 }
 
-
-WorldTextureResource ParseTextureResource(ryml::NodeRef textureNode)
-{
-    if (!textureNode.has_child("Id") || !textureNode.has_child("Source"))
-    {
-        throw std::runtime_error("World texture resource requires Id and Source");
-    }
-    
-    WorldTextureResource resource;
-    
-    std::string source;
-    textureNode["Id"] >> resource.Id;
-    textureNode["Source"] >> source;
-    
-    if (resource.Id.empty() || source.empty())
-    {
-        throw std::runtime_error("World texture resource contains an empty Id or Source");
-    }
-    
-    if (textureNode.has_child("Required"))
-    {
-        textureNode["Required"] >> resource.Required;
-    }
-    
-    resource.SourcePath = ResolveResourcePath(source);
-    
-    return resource;
-}
-
-WorldMeshResource ParseMeshResource(ryml::NodeRef meshNode)
-{
-    if (!meshNode.has_child("Id") || !meshNode.has_child("Source"))
-    {
-        throw std::runtime_error("World mesh resource requires Id and Source");
-    }
-    
-    WorldMeshResource resource;
-    
-    std::string source;
-    meshNode["Id"] >> resource.Id;
-    meshNode["Source"] >> source;
-    
-    if (resource.Id.empty() || source.empty())
-    {
-        throw std::runtime_error("World mesh resource contains an empty Id or Source");
-    }
-    
-    if (meshNode.has_child("SubmitToRenderer"))
-    {
-        meshNode["SubmitToRenderer"] >> resource.SubmitToRenderer;
-    }
-    
-    if (meshNode.has_child("ImportMaterials"))
-    {
-        meshNode["ImportMaterials"] >> resource.ImportMaterials;
-    }
-    
-    resource.SourcePath = ResolveResourcePath(source);
-    
-    return resource;
-}
-
-WorldDocument ParseWorldDocument(const std::filesystem::path& path)
+WorldDocument ParseWorldDocument(const std::filesystem::path& path, const AssetCatalog* catalog)
 {
     if (path.empty())
     {
@@ -102,23 +58,12 @@ WorldDocument ParseWorldDocument(const std::filesystem::path& path)
     
     WorldDocument document;
     document.SourcePath = std::filesystem::absolute(path).lexically_normal();
-    document.YamlText = ReadTextFile(document.SourcePath);
-
-    const std::string pathText = document.SourcePath.string();
-
-    try
-    {
-        document.YamlTree = ryml::parse_in_arena(ryml::to_csubstr(pathText), ryml::to_csubstr(document.YamlText));
-    }
-    catch (const std::exception& exception)
-    {
-        throw std::runtime_error("Failed to parse world yaml '" + document.SourcePath.string() + "': " + exception.what());
-    }
+    document.YamlTree = AppYaml::LoadFile(document.SourcePath);
 
     ryml::NodeRef root = document.YamlTree.rootref();
-    if (!root.has_child("World"))
+    if (!root.is_map() || !root.has_child("World") || !root["World"].is_map())
     {
-        throw std::runtime_error("World yaml does not contain root node 'World': " + document.SourcePath.string());
+        throw std::runtime_error("World YAML requires a 'World' map: " + document.SourcePath.u8string());
     }
     
     ryml::NodeRef worldNode = root["World"];
@@ -148,7 +93,11 @@ WorldDocument ParseWorldDocument(const std::filesystem::path& path)
         {
             for (ryml::NodeRef textureNode : resourcesNode["Textures"].children())
             {
-                document.Textures.push_back(ParseTextureResource(textureNode));
+                auto resource = ParseTextureResource(textureNode, document.SourcePath, catalog);
+                if (!resource.SourcePath.empty())
+                {
+                    document.Textures.push_back(std::move(resource));
+                }
             }
         }
         
@@ -156,7 +105,7 @@ WorldDocument ParseWorldDocument(const std::filesystem::path& path)
         {
             for (ryml::NodeRef meshNode : resourcesNode["Meshes"].children())
             {
-                document.Meshes.push_back(ParseMeshResource(meshNode));
+                document.Meshes.push_back(ParseMeshResource(meshNode, document.SourcePath, catalog));
             }
         }
     }

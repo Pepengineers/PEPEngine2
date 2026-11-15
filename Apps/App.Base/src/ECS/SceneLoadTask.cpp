@@ -1,7 +1,7 @@
 ﻿#include "App.Base/ECS/SceneLoadTask.h"
 #include "App.Base/ECS/PreparedScene.h"
 
-SceneLoadTask::SceneLoadTask(std::string const& scenePath, AppConfig const& config,
+SceneLoadTask::SceneLoadTask(const std::filesystem::path& scenePath, AppConfig const& config,
     SceneManagerModule& sceneManagerModule, RenderModule& renderModule)
         : _scenePath(scenePath),
         _config(config),

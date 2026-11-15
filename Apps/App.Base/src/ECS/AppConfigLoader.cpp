@@ -1,62 +1,51 @@
 #include "App.Base/ECS/AppConfigLoader.h"
 
-#include <ryml.hpp>
-#include <ryml_std.hpp>
-
-#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
 
+#include "App.Base/ECS/AssetCatalog.h"
 #include "App.Base/ECS/WorldDocument.h"
 #include "App.Base/ECS/YamlReadUtils.h"
 
-namespace
+ryml::Tree AppYaml::LoadFile(const std::filesystem::path& path)
 {
-    std::string ReadTextFile(const std::string& path)
+    std::ifstream file(path, std::ios::binary);
+    const auto fileName = path.u8string();
+    if (!file)
     {
-        std::ifstream file(path, std::ios::binary);
-
-        if (!file.is_open())
-        {
-            throw std::runtime_error(
-                "Failed to open yaml file: " + path +
-                "\nCurrent working directory: " + std::filesystem::current_path().string());
-        }
-
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-
-        return buffer.str();
+        throw std::runtime_error("Failed to open YAML file: " + fileName);
     }
 
-    ryml::Tree ParseYamlTree(const std::string& path)
-    {
-        const std::string yamlText = ReadTextFile(path);
+    std::ostringstream buffer;
+    buffer << file.rdbuf();
+    const auto yaml = buffer.str();
 
-        try
-        {
-            return ryml::parse_in_arena(
-                ryml::to_csubstr(path),
-                ryml::to_csubstr(yamlText));
-        }
-        catch (const std::exception& exception)
-        {
-            throw std::runtime_error(
-                "Failed to parse yaml file: " + path +
-                "\nReason: " + exception.what());
-        }
+    auto callbacks = ryml::get_callbacks();
+    callbacks.set_error_parse([](ryml::csubstr message, const ryml::ErrorDataParse&, void*)
+    {
+        throw std::runtime_error(std::string(message.str, message.len));
+    });
+    ryml::Tree tree(callbacks);
+    try
+    {
+        ryml::parse_in_arena(ryml::to_csubstr(fileName), ryml::to_csubstr(yaml), &tree);
     }
+    catch (const std::exception& exception)
+    {
+        throw std::runtime_error("Failed to parse YAML file " + fileName + ": " + exception.what());
+    }
+    return tree;
 }
 
-AppConfig AppConfigLoader::LoadAppConfig(const std::string& path)
+AppConfig AppConfigLoader::LoadAppConfig(const std::filesystem::path& path, const AssetCatalog* catalog)
 {
-    ryml::Tree tree = ParseYamlTree(path);
+    ryml::Tree tree = AppYaml::LoadFile(path);
     ryml::NodeRef root = tree.rootref();
 
-    if (!AppYaml::HasChild(root, "App"))
+    if (!root.is_map() || !root.has_child("App") || !root["App"].is_map())
     {
-        throw std::runtime_error("App config does not contain root node 'App': " + path);
+        throw std::runtime_error("App config requires an 'App' map: " + path.u8string());
     }
 
     ryml::NodeRef appNode = root["App"];
@@ -64,7 +53,11 @@ AppConfig AppConfigLoader::LoadAppConfig(const std::string& path)
     AppConfig config;
     config.Name = AppYaml::ReadString(appNode, "Name");
     config.Type = AppYaml::ReadString(appNode, "Type");
-    config.StartScene = AppYaml::ReadString(appNode, "StartScene");
+    if (!catalog)
+    {
+        catalog = &AssetCatalog::Project();
+    }
+    config.StartScene = AppYaml::ResolveAssetReference(appNode, "StartSceneAsset", "StartScene", path, catalog);
 
     if (AppYaml::HasChild(appNode, "SystemsBanlist"))
     {
@@ -81,14 +74,14 @@ AppConfig AppConfigLoader::LoadAppConfig(const std::string& path)
     return config;
 }
 
-SceneConfig AppConfigLoader::LoadSceneConfig(const std::string& path)
+SceneConfig AppConfigLoader::LoadSceneConfig(const std::filesystem::path& path, const AssetCatalog* catalog)
 {
-    ryml::Tree tree = ParseYamlTree(path);
+    ryml::Tree tree = AppYaml::LoadFile(path);
     ryml::NodeRef root = tree.rootref();
 
-    if (!AppYaml::HasChild(root, "Scene"))
+    if (!root.is_map() || !root.has_child("Scene") || !root["Scene"].is_map())
     {
-        throw std::runtime_error("Scene config does not contain root node 'Scene': " + path);
+        throw std::runtime_error("Scene config requires a 'Scene' map: " + path.u8string());
     }
 
     ryml::NodeRef sceneNode = root["Scene"];
@@ -105,9 +98,7 @@ SceneConfig AppConfigLoader::LoadSceneConfig(const std::string& path)
             SceneWorldConfig worldConfig;
             worldConfig.Name = AppYaml::ReadString(worldNode, "Name");
 
-            std::filesystem::path worldPath = AppYaml::ReadString(worldNode, "Path");
-
-            worldConfig.Path = std::filesystem::absolute(worldPath).lexically_normal().string();
+            worldConfig.Path = AppYaml::ResolveAssetReference(worldNode, "Asset", "Path", path, catalog);
 
             config.Worlds.push_back(worldConfig);
         }
@@ -116,7 +107,7 @@ SceneConfig AppConfigLoader::LoadSceneConfig(const std::string& path)
     return config;
 }
 
-WorldConfig AppConfigLoader::LoadWorldConfig(const std::string& path)
+WorldConfig AppConfigLoader::LoadWorldConfig(const std::filesystem::path& path)
 {
     WorldDocument document = ParseWorldDocument(path);
     return std::move(document.Config);

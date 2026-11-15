@@ -157,7 +157,7 @@ namespace
 
 	std::string BuildTexturePathKey(const std::filesystem::path& texturePath)
 	{
-		std::string key = texturePath.lexically_normal().generic_string();
+		std::string key = texturePath.lexically_normal().generic_u8string();
 		std::transform(key.begin(), key.end(), key.begin(), [](const unsigned char character) { return static_cast<char>(std::tolower(character)); });
 		return key;
 	}
