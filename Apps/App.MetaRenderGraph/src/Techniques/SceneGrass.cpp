@@ -212,12 +212,6 @@ std::vector<ID3D12Resource*> SceneGrass::Append(Graph& g,UINT slot,const std::ve
             }
             hiZReady=true;
         }
-        if(!legacy) {
-            auto settings=output->Settings;
-            settings.Padding1=mainPair && hiZReady?target.Width:0;
-            settings.Lod.w=float(target.Height);
-            output->Constants->CopyData(output->ConstantIndex,settings);
-        }
         const auto& state=gpu._grass.at(output->Owner);
         auto* computeRoot=legacy?gpu._computeRoot.get():_geometryRoot.get();
         const auto root=computeRoot->GetRootSignature(); const auto clear=legacy?gpu._clearPSO:_clearGeometry,expand=legacy?gpu._expandPSO:_cullGeometry;
