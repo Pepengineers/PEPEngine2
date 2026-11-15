@@ -6,6 +6,7 @@
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12FrameGeneration.h"
+#include "Engine.RendererDX12/GDX12MotionBlurSettings.h"
 #include "Common/GameTimer.h"
 
 namespace Meta
@@ -17,10 +18,11 @@ AutoConsoleVariable<bool> CollisionView(L"Meta.Debug.Collisions", false, L"Displ
 }
 #endif
 ScenePostUI::ScenePostUI(RenderPipelineContext& c, bool opaqueOnly)
-    : _resources(c.Primary), _common(c.Common), _swapchain(c.BackBuffer), _slots(c.Primary.FrameConstants.size()), _exports(c.Primary.FrameConstants.size())
+    : _resources(c.Primary), _common(c.Common), _swapchain(c.BackBuffer), _slots(c.Primary.FrameConstants.size()), _exports(c.Primary.FrameConstants.size()), _ordinary(opaqueOnly)
 {
     _dof.Setup(&_resources, &_common);
     _blur.Setup(&_resources, &_common);
+    _blur.SetPassthroughWhenDisabled(opaqueOnly);
     _reconstruction.Setup(&_resources, &_common);
     _output.Setup(&_resources, &_common);
     if (opaqueOnly) return;
@@ -45,6 +47,10 @@ bool ScenePostUI::AllowsFrameGeneration() const
 #else
     return true;
 #endif
+}
+bool ScenePostUI::NeedsResize() const
+{
+    return _blur.NeedsTileResize();
 }
 void ScenePostUI::UpdateSettings()
 {
@@ -107,6 +113,7 @@ Id ScenePostUI::Packet(Graph& graph, std::vector<ID3D12Resource*>& bindings, con
         tracker.Finish(cmd);
     }, std::move(dependencies));
     graph.Operations[id].OwnerRecording = true;
+    graph.Operations[id].Target = Queue::Direct;
     return id;
 }
 void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr,
@@ -119,53 +126,25 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
         throw std::invalid_argument("Post inputs require one matching HDR/depth/motion render grid");
     _dof.SetInputs({hdr, depth});
     _blur.SetInputs({_dof.GetOutput(0), depth, motion});
-    _reconstruction.SetInputs({depth, _blur.GetOutput(1), _blur.GetOutput(0)});
     if (!_initialized)
     {
-        _dof.Initialize(); _blur.Initialize(); _reconstruction.Initialize();
+        _dof.Initialize(); _blur.Initialize();
         _initialized = true;
     }
     else
     {
         auto* output = _dof.GetOutput(0)->GetTexture();
         if (_resize || output->GetWidth() != hdr->GetWidth() || output->GetHeight() != hdr->GetHeight())
-        { _dof.Resize(); _blur.Resize(); _reconstruction.Resize(); }
-        else if (_reconstruction._needsInitialize) _reconstruction.Initialize();
+        { _dof.Resize(); _blur.Resize(); _resize = true; }
     }
-    _resize = false;
-    _output.SetInputs({_reconstruction.GetOutput(0), target});
-    if (!_outputInitialized) { _output.Initialize(); _outputInitialized = true; }
     _dof.PrepareRecording();
-    _blur.PrepareRecording();
     const auto resource = [](GDX12Texture* texture) { return texture->GetResource(); };
     auto* dof = _dof.GetOutput(0)->GetTexture();
-    auto* color = _blur.GetOutput(0)->GetTexture();
-    auto* completeMotion = _blur.GetOutput(1)->GetTexture();
-    auto* reconstructed = _reconstruction.GetOutput(0)->GetTexture();
-    auto& camera = _resources.FrameConstants[_resources.CurrFrameConstantsIndex]->CameraCB->GetResource();
     const auto dofId = Packet(graph, bindings, "DoF SDK DIRECT recording boundary",
         {{resource(hdr), Mode::Read}, {resource(depth), Mode::Read}, {resource(dof), Mode::Write}},
         [this](auto* cmd) { _dof.RecordCommands(cmd); });
-    std::vector<std::pair<GDX12Resource*, Mode>> blurResources{{resource(dof), Mode::Read},
-        {resource(depth), Mode::Read}, {resource(motion), Mode::Read}, {&camera, Mode::Read}};
-    for (auto* image : {_blur._color.get(), _blur._motion.get(), _blur._velocity.get(),
-                        _blur._tileMax.get(), _blur._neighborMax.get()})
-        blurResources.emplace_back(resource(image), Mode::ReadWrite);
-    if (featureMotion) blurResources.emplace_back(resource(featureMotion), Mode::Read);
-    const auto blurId = Packet(graph, bindings, "motion blur / water and particle feature motion", blurResources,
-        [this, featureMotion](auto* cmd) {
-            auto* previous = _resources.ParticleMotion;
-            _resources.ParticleMotion = featureMotion;
-            try { _blur.RecordCommands(cmd); }
-            catch (...) { _resources.ParticleMotion = previous; throw; }
-            _resources.ParticleMotion = previous;
-        }, {dofId});
-    const auto reconstructionId = Packet(graph, bindings, "native / reconstruction provider DIRECT SDK boundary",
-        {{resource(depth), Mode::Read}, {resource(completeMotion), Mode::Read},
-         {resource(color), Mode::Read}, {resource(reconstructed), Mode::ReadWrite}},
-        [this](auto* cmd) { _reconstruction.Execute(cmd); }, {blurId});
-    const auto outputId = Packet(graph, bindings, "output HDR display transform", {{resource(reconstructed), Mode::Read},
-        {resource(target), Mode::Write}}, [this](auto* cmd) { _output.Execute(cmd); }, {reconstructionId}, target);
+    const auto outputId = AppendReconstruction(graph, bindings, dof, depth, motion, featureMotion, target, {dofId});
+    auto* completeMotion = _blur.GetOutput(1)->GetTexture();
 #ifdef _DEBUG
     Id displayId = outputId;
     if (CollisionView.GetValue())
@@ -197,6 +176,58 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
         exports[index] = std::move(resource);
     }
     AppendScreen(graph, bindings, target, finish, fgId);
+}
+Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+    GDX12Texture* hdr, GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion,
+    GDX12Texture* target, std::vector<Id> dependencies)
+{
+    const auto resource = [](GDX12Texture* texture) { return texture->GetResource(); };
+    _blur.PrepareRecording(!_ordinary || (_reconstruction.GetFlags() & RENDER_PASS_FLAG_USE_JITTER));
+    auto* color = _blur.GetOutput(0)->GetTexture();
+    auto* completeMotion = _blur.GetOutput(1)->GetTexture();
+    _reconstruction.SetInputs({depth, completeMotion, color});
+    if (_reconstruction._needsInitialize) _reconstruction.Initialize();
+    else if (_resize) _reconstruction.Resize();
+    _reconstruction.LinkOutput();
+    _resize = false;
+    _output.SetInputs({_reconstruction.GetOutput(0), target});
+    if (!_outputInitialized) { _output.Initialize(); _outputInitialized = true; }
+
+    if (!_ordinary || _blur._prepareMotion)
+    {
+        auto& camera = _resources.FrameConstants[_resources.CurrFrameConstantsIndex]->CameraCB->GetResource();
+        std::vector<std::pair<GDX12Resource*, Mode>> accesses{{resource(hdr), Mode::Read},
+            {resource(depth), Mode::Read}, {resource(motion), Mode::Read}, {&camera, Mode::Read},
+            {resource(_blur._motion.get()), Mode::ReadWrite}, {resource(_blur._velocity.get()), Mode::ReadWrite}};
+        if (!_ordinary || _blur._preparedBlur)
+            for (auto* image : {_blur._color.get(), _blur._tileMax.get(), _blur._neighborMax.get()})
+                accesses.emplace_back(resource(image), Mode::ReadWrite);
+        if (featureMotion) accesses.emplace_back(resource(featureMotion), Mode::Read);
+        const auto blur = Packet(graph, bindings, "motion preparation / blur DIRECT boundary", std::move(accesses),
+            [this, featureMotion](auto* cmd) { _blur.RecordCommands(cmd, featureMotion); }, std::move(dependencies));
+        dependencies = {blur};
+    }
+    auto* reconstructed = _reconstruction.GetOutput(0)->GetTexture();
+    const bool native = _reconstruction.GetStatus().Effective == GDX12UpscalerProvider::Native;
+    if (!native)
+    {
+        std::vector<std::pair<GDX12Resource*, Mode>> accesses{{resource(color), Mode::Read},
+            {resource(reconstructed), Mode::ReadWrite}};
+        if (_reconstruction.GetFlags() & RENDER_PASS_FLAG_USE_JITTER)
+        {
+            accesses.emplace_back(resource(depth), Mode::Read);
+            accesses.emplace_back(resource(completeMotion), Mode::Read);
+        }
+        const auto reconstruction = Packet(graph, bindings, "reconstruction provider DIRECT SDK boundary",
+            std::move(accesses),
+            [this](auto* cmd) { _reconstruction.Execute(cmd); }, std::move(dependencies));
+        dependencies = {reconstruction};
+    }
+    return Packet(graph, bindings, "output HDR display transform", {{resource(reconstructed), Mode::Read},
+        {resource(target), Mode::Write}}, [this, native](auto* cmd) {
+            _output.Execute(cmd);
+            if (native) _reconstruction.Execute(cmd);
+        }, std::move(dependencies), target);
 }
 void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindings,
     GDX12Texture* target, const std::function<void(GDX12CommandList*)>& finish, Id dependency)
@@ -234,13 +265,17 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
         {screenId}, nullptr, D3D12_RESOURCE_STATE_PRESENT);
 }
 void ScenePostUI::AppendOpaque(Graph& graph, std::vector<ID3D12Resource*>& bindings,
-    GDX12Texture* hdr, GDX12Texture* target, const std::function<void(GDX12CommandList*)>& finish)
+    GDX12Texture* hdr, GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion,
+    GDX12Texture* target, const std::function<void(GDX12CommandList*)>& finish)
 {
-    _output.SetInputs({hdr, target});
-    if (!_outputInitialized) { _output.Initialize(); _outputInitialized = true; }
-    const auto output = Packet(graph, bindings, "opaque HDR display transform",
-        {{hdr->GetResource(), Mode::Read}, {target->GetResource(), Mode::Write}},
-        [this](auto* cmd) { _output.Execute(cmd); }, {}, target);
+    if (!hdr || !depth || !motion || !target || hdr->GetWidth() != depth->GetWidth() ||
+        hdr->GetHeight() != depth->GetHeight() || hdr->GetWidth() != motion->GetWidth() ||
+        hdr->GetHeight() != motion->GetHeight())
+        throw std::invalid_argument("Ordinary post requires matching HDR/depth/motion grids");
+    _blur.SetInputs({hdr, depth, motion});
+    if (!_initialized) { _blur.Initialize(); _initialized = true; }
+    else if (_resize) _blur.Resize();
+    const auto output = AppendReconstruction(graph, bindings, hdr, depth, motion, featureMotion, target);
     AppendScreen(graph, bindings, target, finish, output);
 }
 void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bindings, bool record)

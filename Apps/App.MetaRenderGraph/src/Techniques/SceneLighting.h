@@ -25,6 +25,7 @@ class SceneLighting
     void Submitted(bool serial, uint64_t fence);
     D3D12_GPU_DESCRIPTOR_HANDLE ProbeRadiance(bool serial) const { return _reflections->Radiance(serial); }
     void Reset();
+    GDX12Texture* ParticleMotion() const { return _transparency ? _transparency->ParticleMotion() : nullptr; }
     std::pair<size_t, size_t> Readiness() const
     {
         return _pendingReset || !_reflections ? std::pair<size_t, size_t>{} : _reflections->Readiness();

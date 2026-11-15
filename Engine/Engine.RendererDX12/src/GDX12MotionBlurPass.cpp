@@ -30,16 +30,20 @@ void GDX12MotionBlurPass::Initialize()
 
     for (auto* target : { _color.get(), _motion.get(), _velocity.get(), _tileMax.get(), _neighborMax.get() })
     {
+        if (_passthroughWhenDisabled) continue;
         const bool tile = target == _tileMax.get() || target == _neighborMax.get();
         GDX12RenderHelpers::InitializeComputeTexture(*target, *_resources,
             tile ? 1 : color->GetWidth(), tile ? 1 : color->GetHeight(),
             target == _color.get() ? DXGI_FORMAT_R16G16B16A16_FLOAT : DXGI_FORMAT_R16G16_FLOAT);
     }
-    _color->GetResource()->D3DResource->SetName(L"MotionBlur.Color");
-    _motion->GetResource()->D3DResource->SetName(L"MotionBlur.CompleteMotion");
-    _velocity->GetResource()->D3DResource->SetName(L"MotionBlur.Velocity");
-    _tileMax->GetResource()->D3DResource->SetName(L"MotionBlur.TileMax");
-    _neighborMax->GetResource()->D3DResource->SetName(L"MotionBlur.NeighborMax");
+    if (!_passthroughWhenDisabled)
+    {
+        _color->GetResource()->D3DResource->SetName(L"MotionBlur.Color");
+        _motion->GetResource()->D3DResource->SetName(L"MotionBlur.CompleteMotion");
+        _velocity->GetResource()->D3DResource->SetName(L"MotionBlur.Velocity");
+        _tileMax->GetResource()->D3DResource->SetName(L"MotionBlur.TileMax");
+        _neighborMax->GetResource()->D3DResource->SetName(L"MotionBlur.NeighborMax");
+    }
     GDX12RootSignatureDesc root;
     root.Constants = { 16 };
     root.NumSingleCBVSlots = 1;
@@ -54,12 +58,20 @@ void GDX12MotionBlurPass::Initialize()
 
 void GDX12MotionBlurPass::ResizeTiles(const UINT tileSize)
 {
-    const UINT width = (_color->GetWidth() + tileSize - 1) / tileSize;
-    const UINT height = (_color->GetHeight() + tileSize - 1) / tileSize;
+    auto* input = _inputs[0]->GetTexture();
+    const UINT width = (input->GetWidth() + tileSize - 1) / tileSize;
+    const UINT height = (input->GetHeight() + tileSize - 1) / tileSize;
+    if (!_tileMax->IsInitialized())
+    {
+        GDX12RenderHelpers::InitializeComputeTexture(*_tileMax, *_resources, width, height, DXGI_FORMAT_R16G16_FLOAT);
+        GDX12RenderHelpers::InitializeComputeTexture(*_neighborMax, *_resources, width, height, DXGI_FORMAT_R16G16_FLOAT);
+        _tileMax->GetResource()->D3DResource->SetName(L"MotionBlur.TileMax");
+        _neighborMax->GetResource()->D3DResource->SetName(L"MotionBlur.NeighborMax");
+    }
     if (_tileMax->GetWidth() != width || _tileMax->GetHeight() != height)
     {
         // Runtime radius changes can replace descriptors still used by earlier frames.
-        _resources->Device->GetCommandQueue()->Flush();
+        if (!_passthroughWhenDisabled) _resources->Device->GetCommandQueue()->Flush();
         _tileMax->Resize(width, height);
         _neighborMax->Resize(width, height);
     }
@@ -72,26 +84,75 @@ void GDX12MotionBlurPass::Execute(GDX12CommandList* commands)
     RecordCommands(commands);
 }
 
-void GDX12MotionBlurPass::PrepareRecording()
+bool GDX12MotionBlurPass::NeedsTileResize() const
+{
+    if (_inputs.empty() || !_inputs[0] || !_tileMax->IsInitialized()) return false;
+    const auto settings = GetMotionBlurSettings();
+    if (!settings.Enabled) return false;
+    auto* input = _inputs[0]->GetTexture();
+    const float scale = (std::max)(float(input->GetWidth()) / _commonData->WindowWidth,
+        float(input->GetHeight()) / _commonData->WindowHeight);
+    const UINT tileSize = (std::max)(8u, UINT(std::ceil(settings.MaxRadius * scale)));
+    return _tileMax->GetWidth() != (input->GetWidth() + tileSize - 1) / tileSize ||
+        _tileMax->GetHeight() != (input->GetHeight() + tileSize - 1) / tileSize;
+}
+
+void GDX12MotionBlurPass::PrepareRecording(bool completeMotionRequired)
 {
     const auto settings = GetMotionBlurSettings();
-    const float scale = (std::max)(float(_color->GetWidth()) / _commonData->WindowWidth,
-                                  float(_color->GetHeight()) / _commonData->WindowHeight);
+    auto* input = _inputs[0]->GetTexture();
+    const float scale = (std::max)(float(input->GetWidth()) / _commonData->WindowWidth,
+                                  float(input->GetHeight()) / _commonData->WindowHeight);
     const UINT tileSize = (std::max)(8u, UINT(std::ceil(settings.MaxRadius * scale)));
+    if (_passthroughWhenDisabled)
+    {
+        _commonData->ResetHistory |= settings.Enabled != _wasEnabled;
+        _preparedBlur = settings.Enabled && _wasEnabled && !_commonData->ResetHistory;
+        _prepareMotion = settings.Enabled || completeMotionRequired;
+        _wasEnabled = settings.Enabled;
+        const auto initialize = [&](GDX12Texture& target, DXGI_FORMAT format) {
+            if (!target.IsInitialized())
+            {
+                GDX12RenderHelpers::InitializeComputeTexture(target, *_resources,
+                    input->GetWidth(), input->GetHeight(), format);
+                target.GetResource()->D3DResource->SetName(&target == _color.get() ? L"MotionBlur.Color" :
+                    &target == _motion.get() ? L"MotionBlur.CompleteMotion" : L"MotionBlur.Velocity");
+            }
+        };
+        if (_prepareMotion)
+        {
+            initialize(*_motion, DXGI_FORMAT_R16G16_FLOAT);
+            initialize(*_velocity, DXGI_FORMAT_R16G16_FLOAT);
+        }
+        if (_preparedBlur)
+        {
+            initialize(*_color, DXGI_FORMAT_R16G16B16A16_FLOAT);
+            if (_tileSize != tileSize) ResizeTiles(tileSize);
+        }
+        _outputs[0] = _preparedBlur ? static_cast<IRenderPassLink*>(_color.get()) : _inputs[0];
+        _outputs[1] = _prepareMotion ? static_cast<IRenderPassLink*>(_motion.get()) : _inputs[2];
+        return;
+    }
     if (settings.Enabled && _wasEnabled && !_commonData->ResetHistory && _tileSize != tileSize)
         ResizeTiles(tileSize);
 }
 
 void GDX12MotionBlurPass::RecordCommands(GDX12CommandList* commands)
 {
+    RecordCommands(commands, _resources->ParticleMotion);
+}
+
+void GDX12MotionBlurPass::RecordCommands(GDX12CommandList* commands, GDX12Texture* featureMotion)
+{
+    if (_passthroughWhenDisabled && !_prepareMotion) return;
     const auto settings = GetMotionBlurSettings();
-    const UINT width = _color->GetWidth();
-    const UINT height = _color->GetHeight();
+    const UINT width = _inputs[0]->GetTexture()->GetWidth();
+    const UINT height = _inputs[0]->GetTexture()->GetHeight();
     const float scale = (std::max)(static_cast<float>(width) / _commonData->WindowWidth,
         static_cast<float>(height) / _commonData->WindowHeight);
     const UINT tileSize = (std::max)(8u, static_cast<UINT>(std::ceil(settings.MaxRadius * scale)));
-    _commonData->ResetHistory |= settings.Enabled != _wasEnabled;
-    const bool blur = settings.Enabled && _wasEnabled && !_commonData->ResetHistory;
+    if (!_passthroughWhenDisabled) _commonData->ResetHistory |= settings.Enabled != _wasEnabled;
+    const bool blur = _passthroughWhenDisabled ? _preparedBlur : settings.Enabled && _wasEnabled && !_commonData->ResetHistory;
     if (blur && _tileSize != tileSize) throw std::logic_error("Motion blur recording requires owner tile preparation");
     _wasEnabled = settings.Enabled;
     struct Parameters
@@ -103,7 +164,6 @@ void GDX12MotionBlurPass::RecordCommands(GDX12CommandList* commands)
         UINT FeatureMotion, Padding[3];
     };
     static_assert(sizeof(Parameters) == 16 * sizeof(UINT));
-    auto* featureMotion = _resources->ParticleMotion;
     if (featureMotion && (featureMotion->GetWidth() != width || featureMotion->GetHeight() != height))
         throw std::invalid_argument("Particle motion must match the motion blur input grid");
     const Parameters parameters = { width, height, tileSize, settings.Samples,
@@ -151,21 +211,20 @@ void GDX12MotionBlurPass::RecordCommands(GDX12CommandList* commands)
         commands->SetPipelineState(_gather.Get());
         commands->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
     }
-    else
+    else if (!_passthroughWhenDisabled)
     {
         commands->ResourceBarrier({ inputs[0]->GetResource()->GetCopySourceBarrier(),
             _color->GetResource()->GetCopyDestBarrier() });
         commands->CopyResource(_color->GetResource()->D3DResource.Get(), inputs[0]->GetResource()->D3DResource.Get());
     }
-    commands->ResourceBarrier({ _color->GetResource()->GetSRVBarrier() });
+    if (blur || !_passthroughWhenDisabled) commands->ResourceBarrier({ _color->GetResource()->GetSRVBarrier() });
 }
 
 void GDX12MotionBlurPass::Resize()
 {
     auto* input = _inputs[0]->GetTexture();
-    _color->Resize(input->GetWidth(), input->GetHeight());
-    _motion->Resize(input->GetWidth(), input->GetHeight());
-    _velocity->Resize(input->GetWidth(), input->GetHeight());
+    for (auto* target : { _color.get(), _motion.get(), _velocity.get() })
+        if (target->IsInitialized()) target->Resize(input->GetWidth(), input->GetHeight());
     _tileSize = 0;
     _wasEnabled = false;
 }

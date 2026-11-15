@@ -13,11 +13,14 @@
 class GDX12Device;
 class GDX12CommandList;
 class GDX12Texture;
+struct GDX12ReconstructionStatus;
 
 namespace Engine::UI
 {
     void Initialize(HWND window, GDX12Device* device, int framesInFlight, DXGI_FORMAT format);
     void BeginFrame();
+    void DrawReconstructionStatus(const GDX12ReconstructionStatus&, unsigned renderWidth, unsigned renderHeight,
+        unsigned outputWidth, unsigned outputHeight);
     void SuspendSettings(bool suspended);
     int DrawBistroQualityPanel(bool& open, std::string_view status, bool running, bool hasWinner,
         const char* const* techniques, const char* const* currentTiers, size_t techniqueCount, int& technique, int& tier);

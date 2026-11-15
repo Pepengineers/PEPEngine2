@@ -9,6 +9,7 @@
 #include "Engine.RendererDX12/GDX12Device.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
+#include "Engine.RendererDX12/GDX12Reconstruction.h"
 #include <imgui/imgui.h>
 #include <imgui/misc/imgui_stdlib.h>
 #include <imgui/backends/imgui_impl_dx12.h>
@@ -752,6 +753,27 @@ namespace Engine::UI
         if (ScreenAtlasFrame != frame && !ImGui::GetIO().Fonts->TexIsBuilt) ++ScreenAtlasGeneration;
         ScreenAtlasFrame = frame;
         return data->TotalVtxCount ? CaptureData(*data, true) : nullptr;
+    }
+
+    void DrawReconstructionStatus(const GDX12ReconstructionStatus& status, unsigned renderWidth, unsigned renderHeight,
+        unsigned outputWidth, unsigned outputHeight)
+    {
+        if (!FrameBegun || !Visible || SettingsSuspended) return;
+        ConsoleModule console;
+        const auto& provider = console.FindConsoleVariable(L"Render.Upscaler.Provider");
+        const auto& quality = console.FindConsoleVariable(L"Render.Upscaler.Quality");
+        ImGui::SetNextWindowPos(ImVec2(570, 16), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Reconstruction"))
+        {
+            const std::string requested(provider.GetEnumValueName(static_cast<int>(status.Requested.Provider)));
+            const std::string effective(provider.GetEnumValueName(static_cast<int>(status.Effective)));
+            const std::string preset(quality.GetEnumValueName(static_cast<int>(status.Requested.Quality)));
+            ImGui::Text("Requested: %s / %s", requested.c_str(), preset.c_str());
+            ImGui::Text("Effective: %s", effective.c_str());
+            ImGui::Text("Render: %ux%u | Output: %ux%u", renderWidth, renderHeight, outputWidth, outputHeight);
+            if (!status.FallbackReason.empty()) ImGui::TextWrapped("Fallback: %s", status.FallbackReason.c_str());
+        }
+        ImGui::End();
     }
 
     void ShutdownUI()
