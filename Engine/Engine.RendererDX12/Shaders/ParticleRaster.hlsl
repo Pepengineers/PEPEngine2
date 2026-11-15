@@ -89,7 +89,7 @@ float4 Shade(VertexOutput input)
 {
     ParticleDraw draw = Draws[input.DrawIndex];
     float scene = SceneDepth.Load(int3(uint2(input.Position.xy), 0));
-    if (scene > input.Position.z) discard; // RH reverse-Z, sampled depth only; no DSV is bound.
+    if (scene > input.Position.z) discard;
     float fade = 1;
     if (scene > 0 && draw.SoftDistance > 0)
     {
@@ -155,6 +155,7 @@ struct WeightedOutput
     float Revealage : SV_Target1;
 };
 
+[earlydepthstencil]
 WeightedOutput WeightedPS(VertexOutput input)
 {
     float4 color = Shade(input);
@@ -166,12 +167,14 @@ WeightedOutput WeightedPS(VertexOutput input)
     return result;
 }
 
+[earlydepthstencil]
 float4 ColorPS(VertexOutput input) : SV_Target0
 {
     float4 color = Shade(input);
     return float4(color.rgb * color.a, color.a);
 }
 
+[earlydepthstencil]
 float4 MotionPS(VertexOutput input) : SV_Target0
 {
     float alpha = Shade(input).a;

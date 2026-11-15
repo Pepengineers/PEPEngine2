@@ -14,18 +14,28 @@ State BoundaryState(ID3D12Resource* resource)
     return desc.Flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE ? State(D3D12_RESOURCE_STATE_COMMON) :
         State(D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 }
-Access ResourceAccess(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Resource* resource, Mode mode)
+Access ResourceAccess(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Resource* resource, Mode mode,
+    State state = State(-1))
 {
     auto* native = resource->D3DResource.Get();
     D3D12_HEAP_PROPERTIES heap{};
     ThrowIfFailed(native->GetHeapProperties(&heap, nullptr));
     return {NativeWork::ResourceFor(graph, bindings, native, "particle resource"),
-        heap.Type == D3D12_HEAP_TYPE_UPLOAD ? Mode::Read : mode, BoundaryState(native)};
+        heap.Type == D3D12_HEAP_TYPE_UPLOAD ? Mode::Read : mode,
+        heap.Type == D3D12_HEAP_TYPE_UPLOAD || state == State(-1) ? BoundaryState(native) : state};
 }
 void AddResources(Graph& graph, std::vector<ID3D12Resource*>& bindings, std::vector<Access>& accesses,
     const std::vector<GDX12Resource*>& resources, Mode mode)
 {
     for (auto* resource : resources) accesses.push_back(ResourceAccess(graph, bindings, resource, mode));
+}
+void AddAccesses(Graph& graph, std::vector<ID3D12Resource*>& bindings, std::vector<Access>& accesses,
+    const std::vector<GDX12RenderGraph::BufferAccess>& resources)
+{
+    for (const auto& resource : resources)
+        accesses.push_back(ResourceAccess(graph, bindings, resource.Resource,
+            resource.Usage == GDX12RenderGraph::Mode::Read ? Mode::Read :
+            resource.Usage == GDX12RenderGraph::Mode::Write ? Mode::Write : Mode::ReadWrite, resource.State));
 }
 }
 SceneParticles::SceneParticles(GDX12DeviceResources& resources, RenderPipelineCommonData& common)
@@ -34,6 +44,8 @@ SceneParticles::SceneParticles(GDX12DeviceResources& resources, RenderPipelineCo
     if (!_resources.ParticleSimulation)
         _resources.ParticleSimulation = std::make_unique<GDX12ParticleSimulation>();
     _pass.SetLocalExecution(true);
+    _pass.SetReadOnlyDepthEnabled(true);
+    _pass.SetMotionOutputEnabled(false);
     _pass.Setup(&_resources, &_common);
 }
 SceneParticles::~SceneParticles()
@@ -47,12 +59,15 @@ void SceneParticles::Packet(Graph& graph, const std::vector<ID3D12Resource*>& bi
     std::vector<Access> unique;
     for (auto access : accesses)
     {
-        access.Required = BoundaryState(bindings.at(access.Resource));
         const auto found = std::find_if(unique.begin(), unique.end(), [&](auto other) {
             return other.Resource == access.Resource;
         });
         if (found == unique.end()) unique.push_back(access);
-        else if (access.Usage != Mode::Read) found->Usage = Mode::ReadWrite;
+        else
+        {
+            if (found->Required != access.Required) throw std::logic_error("Conflicting particle resource states");
+            if (found->Usage != access.Usage) found->Usage = Mode::ReadWrite;
+        }
     }
     std::vector<GDX12RecordingStates::Binding> states;
     for (const auto& access : unique)
@@ -113,7 +128,7 @@ void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& binding
             });
     }
     std::vector<Access> preparation{camera};
-    AddResources(graph, bindings, preparation, _pass.NativeResources(), Mode::ReadWrite);
+    AddAccesses(graph, bindings, preparation, _pass.NativePreparationAccesses());
     for (size_t group = 0; group < groups.size(); ++group)
     {
         auto accesses = preparation;
@@ -122,10 +137,10 @@ void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& binding
         Packet(graph, bindings, group == 0 ? "particle A clear/cull" : "particle B append/global SortedAlpha radix",
             std::move(accesses), [this, ids, group](auto* cmd) { _pass.PrepareRenderGroup(cmd, ids, group == 0, group == 1); });
     }
-    _drawReads = std::move(preparation);
-    AddResources(graph, bindings, _drawReads, simulation->GetPoolResources(), Mode::Read);
-    _drawReads.push_back(ResourceAccess(graph, bindings, depth->GetResource(), Mode::Read));
-    if (_pass.MotionOutput())
+    _drawReads = {camera};
+    _drawReads.push_back(ResourceAccess(graph, bindings, depth->GetResource(), Mode::Read,
+        D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE));
+    if (!_pass.NativeRasterAccesses(false).empty())
         for (const auto& emitter : _resources.ParticleEmitters)
             if (emitter.Texture)
             {
@@ -140,15 +155,17 @@ void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& binding
 void SceneParticles::AppendWeighted(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
     auto accesses = _drawReads;
-    accesses.push_back(ResourceAccess(graph, bindings, _accum->GetResource(), Mode::ReadWrite));
-    accesses.push_back(ResourceAccess(graph, bindings, _reveal->GetResource(), Mode::ReadWrite));
-    Packet(graph, bindings, "particle weighted-alpha append/feature motion", std::move(accesses),
+    AddAccesses(graph, bindings, accesses, _pass.NativeRasterAccesses(true));
+    accesses.push_back(ResourceAccess(graph, bindings, _accum->GetResource(), Mode::ReadWrite, D3D12_RESOURCE_STATE_RENDER_TARGET));
+    accesses.push_back(ResourceAccess(graph, bindings, _reveal->GetResource(), Mode::ReadWrite, D3D12_RESOURCE_STATE_RENDER_TARGET));
+    Packet(graph, bindings, "particle weighted-alpha append", std::move(accesses),
         [this](auto* cmd) { _pass.DrawWeightedAndMotion(cmd); });
 }
 void SceneParticles::AppendComposite(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr)
 {
     auto accesses = _drawReads;
-    accesses.push_back(ResourceAccess(graph, bindings, hdr->GetResource(), Mode::ReadWrite));
+    AddAccesses(graph, bindings, accesses, _pass.NativeRasterAccesses(false));
+    accesses.push_back(ResourceAccess(graph, bindings, hdr->GetResource(), Mode::ReadWrite, D3D12_RESOURCE_STATE_RENDER_TARGET));
     Packet(graph, bindings, "global SortedAlpha/additive HDR particles", std::move(accesses),
         [this, hdr](auto* cmd) { _pass.Composite(cmd, hdr); });
 }
