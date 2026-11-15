@@ -581,6 +581,7 @@ void GDX12FluidSurfacePass::DrawParticles(GDX12CommandList* commands, GDX12Textu
         commands->DrawInstanced(4, particles.GetElementCount(), 0, 0);
         state.WasRendered = true;
         state.PreviousContainer = instance.ContainerToWorld;
+        state.SettingsRevision = instance.Component.GetSettingsRevision();
     }
 }
 
