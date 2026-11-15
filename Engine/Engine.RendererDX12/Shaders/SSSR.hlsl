@@ -21,9 +21,11 @@ RWTexture2D<float4> ColorOut : register(u2);
 Texture2D<float4> Fallback : register(t8);
 RWTexture2D<float4> FallbackOut : register(u3);
 SamplerState LinearClamp : register(s3);
+#if !SSSR_STATIC_IBL_ONLY
 #define samLinearClamp LinearClamp
 #include "ReflectionProbes.hlsli"
 #undef samLinearClamp
+#endif
 
 [numthreads(8, 8, 1)]
 void Prepare(uint3 id : SV_DispatchThreadID)
@@ -44,7 +46,9 @@ void Prepare(uint3 id : SV_DispatchThreadID)
         float3 view = normalize(CBCamera.CameraLocation - position);
         float3 direction = reflect(-view, normalize(normal.xyz));
         fallback = Environment.SampleLevel(LinearClamp, direction, roughness * 7).rgb;
+#if !SSSR_STATIC_IBL_ONLY
         fallback = SampleReflectionRadiance(position, direction, roughness, fallback);
+#endif
     }
     FallbackOut[id.xy] = float4(fallback, 1);
     // Supply alpha roughness explicitly: SDK 1.1.4 forwards this flag to the denoiser too.

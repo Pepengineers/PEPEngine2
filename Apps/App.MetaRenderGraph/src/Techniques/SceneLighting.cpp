@@ -23,6 +23,8 @@ void MatrixBytes(float *target, const Matrix &value)
 SceneLighting::SceneLighting(GDX12DeviceResources &r, RenderPipelineCommonData &c, bool opaqueOnly)
     : _resources(r), _common(c), _opaqueOnly(opaqueOnly), _frames(r.FrameConstants.size())
 {
+    if (opaqueOnly && r.FrameConstants.size() > FFX_MAX_QUEUED_FRAMES)
+        throw std::logic_error("SSSR queued-frame contract exceeded");
     if (!opaqueOnly) _reflections = std::make_unique<SceneReflections>(r, c);
     if (opaqueOnly) _sunShadows = std::make_unique<SceneSunShadows>(r, c);
     if (opaqueOnly)
@@ -355,13 +357,17 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), output);
         cmd->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
     });
-    if (_opaqueOnly)
-    {
+    const auto appendOrdinary = [&](GDX12Texture* opaqueHDR) {
         _initialized = true;
         if (!_hdrContinuation) throw std::logic_error("Opaque lighting requires a display continuation");
-        auto* hdr = _transparency->Append(graph, bindings, geometry, _slot, _deferred._color.get(),
+        auto* hdr = _transparency->Append(graph, bindings, geometry, _slot, opaqueHDR,
             _sunShadows->Output(_slot), _localShadows->Output(_slot), environment);
         _hdrContinuation(graph, bindings, hdr, nullptr);
+    };
+    if (_opaqueOnly && !_ssrSettings.Enabled)
+    {
+        _forceReset[_mode] = true;
+        appendOrdinary(_deferred._color.get());
         return;
     }
     auto &ssr = _ssr[_mode];
@@ -371,6 +377,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     if (!ssr)
     {
         ssr = std::make_unique<GDX12SSSRPass>();
+        ssr->SetStaticIBLOnly(_opaqueOnly);
         ssr->Setup(&_resources, &_common);
         ssr->SetInputs(ssrInputs);
         ssr->Initialize();
@@ -405,7 +412,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         const Matrix view = _common.CameraView, projection = _common.CameraProjection,
                      viewProjection = view * projection;
         const XMFLOAT2 jitter{_common.ActiveCameraJitterOffsetX, _common.ActiveCameraJitterOffsetY};
-        const auto history = _reflections->History(serial);
+        const auto history = _opaqueOnly ? _common.HistoryRevision : _reflections->History(serial);
         // Frame-local GBuffer addresses rotate with frame slots. They are not
         // history discontinuities. The SDK's private denoiser history persists
         // across those imports and is retired/recreated only on real resets.
@@ -418,7 +425,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
             p._previousViewProjection = viewProjection;
             p._previousJitter = jitter;
         }
-        if (_resources.FrameConstants.size() > FFX_MAX_QUEUED_FRAMES)
+        if (!_opaqueOnly && _resources.FrameConstants.size() > FFX_MAX_QUEUED_FRAMES)
             _resources.Device->GetCommandQueue()->Flush();
         GDX12SSSRPass::Constants parameters;
         parameters.JitterDeltaUV = {(p._previousJitter.x - jitter.x) / width,
@@ -434,23 +441,30 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
             srvs[i] = p._inputs[i]->GetTexture()->GetSRV()->GPUHandle;
         srvs[7] = p._radiance.GetSRV()->GPUHandle;
         srvs[8] = p._fallback.GetSRV()->GPUHandle;
-        srvs[9] = _reflections->Radiance(serial);
-        srvs[10] = constants.ReflectionProbes->GetSRV()->GPUHandle;
+        if (_reflections)
+        {
+            srvs[9] = _reflections->Radiance(serial);
+            srvs[10] = constants.ReflectionProbes->GetSRV()->GPUHandle;
+        }
+        const UINT srvCount = _opaqueOnly ? 9 : 11;
         const auto bind = [=](auto *cmd, bool resolvedInputs) {
             cmd->SetDescriptorHeaps(1, &heap);
             cmd->SetComputeRootSignature(ssrRoot->GetRootSignature().Get());
             cmd->SetComputeRootConstantBufferView(ssrRoot->GetBRootParamIndex(0), camera);
             cmd->SetComputeRootConstantBufferView(ssrRoot->GetBRootParamIndex(1), ssrCB);
-            for (UINT i = 0; i < 11; ++i)
+            for (UINT i = 0; i < srvCount; ++i)
                 if(resolvedInputs || (i!=7 && i!=8))
                     cmd->SetComputeRootDescriptorTable(ssrRoot->GetTRootParamIndex(i), srvs[i]);
         };
         std::vector<Access> ssrReads;
         for (auto *input : p._inputs)
             ssrReads.push_back(texture(input->GetTexture(), Mode::Read, read));
-        ssrReads.push_back(texture(_reflections->Published(serial), Mode::Read, read));
-        ssrReads.push_back({resource(&constants.ReflectionProbes->GetResource()), Mode::Read, read});
-        ssrReads.push_back({scene.FrameIds[1], Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
+        if (_reflections)
+        {
+            ssrReads.push_back(texture(_reflections->Published(serial), Mode::Read, read));
+            ssrReads.push_back({resource(&constants.ReflectionProbes->GetResource()), Mode::Read, read});
+        }
+        ssrReads.push_back({scene.FrameIds[1], Mode::Read, _opaqueOnly ? State(D3D12_RESOURCE_STATE_GENERIC_READ) : State(D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER)});
         ssrReads.push_back({resource(&p._constants->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
         auto prepareAccess = ssrReads;
         prepareAccess.push_back(texture(&p._roughness, Mode::Write, UnorderedAccess));
@@ -529,6 +543,11 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         p._environmentRevision = _resources.ReflectionEnvironmentRevision;
         p._previousSettings = settings;
         _forceReset[_mode] = false;
+    }
+    if (_opaqueOnly)
+    {
+        appendOrdinary(&p._color);
+        return;
     }
     _composition.Setup(&_resources, &_common);
     _composition.SetInputs({&p._color, &_neutralAccum, &_neutralReveal, scene.DepthView.get()});

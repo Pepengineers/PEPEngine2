@@ -61,10 +61,11 @@ void GDX12SSSRPass::Initialize()
     root.NumSingleUAVSlots = 4;
     root.StaticSamplers = GetStaticSamplers();
     _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
+    const D3D_SHADER_MACRO defines[] = {{"SSSR_STATIC_IBL_ONLY", _staticIBLOnly ? "1" : "0"}, {nullptr, nullptr}};
     for (auto [pipeline, entry] : { std::pair{ std::addressof(_prepare), "Prepare" }, { std::addressof(_resolve), "Resolve" } })
     {
         *pipeline = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(),
-            SHADERS_FOLDER "SSSR.hlsl", entry);
+            SHADERS_FOLDER "SSSR.hlsl", entry, defines);
     }
     _constants = std::make_unique<GDX12UploadBuffer<Constants>>(_resources->Device,
         static_cast<UINT>(_resources->FrameConstants.size()));
@@ -144,8 +145,11 @@ void GDX12SSSRPass::Execute(GDX12CommandList* commands)
         commands->SetComputeRootConstantBufferView(0,
             _resources->FrameConstants[slot]->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
         commands->SetComputeRootConstantBufferView(1, _constants->GetElementAddress(slot));
-        commands->SetComputeSRV(9, _resources->ReflectionRadianceSRV.GPUHandle);
-        commands->SetComputeSRV(10, _resources->FrameConstants[slot]->ReflectionProbes->GetSRV()->GPUHandle);
+        if (!_staticIBLOnly)
+        {
+            commands->SetComputeSRV(9, _resources->ReflectionRadianceSRV.GPUHandle);
+            commands->SetComputeSRV(10, _resources->FrameConstants[slot]->ReflectionProbes->GetSRV()->GPUHandle);
+        }
         for (UINT i = 0; i < _numInputs; ++i)
         {
             auto* texture = _inputs[i]->GetTexture();
