@@ -198,6 +198,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     auto &scene = geometry._slots.at(_slot);
     auto &frame = _frames.at(_slot);
     auto &constants = *_resources.FrameConstants[_slot];
+    if (_opaqueOnly) _transparency->PrepareWater(graph, bindings, geometry, _slot);
     const auto resource = [&](GDX12Resource *value) {
         return NativeWork::ResourceFor(graph, bindings, value->D3DResource.Get(), "lighting/SSR resource");
     };

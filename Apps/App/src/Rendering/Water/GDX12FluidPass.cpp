@@ -39,6 +39,12 @@ GDX12FluidSurfacePass::GDX12FluidSurfacePass()
 }
 GDX12FluidSurfacePass::~GDX12FluidSurfacePass() = default;
 
+void GDX12FluidSurfacePass::RetireResources()
+{
+    if (_retire) _retire();
+    else _resources->Device->GetCommandQueue()->Flush();
+}
+
 void GDX12FluidSurfacePass::Initialize()
 {
     static_assert(sizeof(GDX12FluidParameters) == 336);
@@ -65,7 +71,8 @@ void GDX12FluidSurfacePass::CreatePipelines()
     _initialize = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), APP_SHADERS_FOLDER "FluidSurface.hlsl", "InitializeSurface");
     _filter = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), APP_SHADERS_FOLDER "FluidSurface.hlsl", "NarrowRange");
     _merge = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), APP_SHADERS_FOLDER "FluidSurface.hlsl", "MergeSurface");
-    _resolve = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), APP_SHADERS_FOLDER "FluidSurface.hlsl", "ResolveWater");
+    const D3D_SHADER_MACRO resolveDefines[] = {{"FLUID_STATIC_IBL", _staticIBL ? "1" : "0"}, {nullptr, nullptr}};
+    _resolve = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _surfaceRoot.get(), APP_SHADERS_FOLDER "FluidSurface.hlsl", "ResolveWater", resolveDefines);
     auto& compiler = GDX12ShaderCompiler::GetInstance();
     auto vs = compiler.CompileShader(_resources->Device, APP_SHADERS_FOLDER "FluidSurface.hlsl", nullptr, "SphereVS", "vs");
     auto ps = compiler.CompileShader(_resources->Device, APP_SHADERS_FOLDER "FluidSurface.hlsl", nullptr, "SpherePS", "ps");
@@ -183,7 +190,7 @@ void GDX12FluidSurfacePass::PrepareStates()
             _commonData->ResetHistory |= state->WasRendered;
         }
     // Old buffers, seed uploads and descriptor slots may still be referenced by queued frames.
-    if (retire) _resources->Device->GetCommandQueue()->Flush();
+    if (retire) RetireResources();
     for (auto it = _states.begin(); it != _states.end();)
         if (!alive.count(it->first)) it = _states.erase(it);
         else ++it;
@@ -392,9 +399,10 @@ void GDX12FluidSurfacePass::PrepareFrame()
         previousControls.Quality != _controls.Quality;
     _commonData->ResetHistory |= changed;
     _rendering = rendering;
+    if (!rendering) for (auto& [id, state] : _states) state->WasRendered = false;
     if (!rendering && _depth)
     {
-        _resources->Device->GetCommandQueue()->Flush();
+        RetireResources();
         ReleaseTargets();
     }
     if (!rendering && !_simulating)
@@ -541,9 +549,12 @@ GDX12Texture* GDX12FluidSurfacePass::Resolve(GDX12CommandList* commands, GDX12Te
         SurfaceBindings(commands, constants, owner);
         commands->SetComputeSRV(6, background->GetSRV()->GPUHandle);
         commands->SetComputeSRV(7, environment->GetSRV()->GPUHandle);
-        commands->SetComputeSRV(9, probeRadiance.ptr ? probeRadiance : _resources->ReflectionRadianceSRV.GPUHandle);
         auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-        commands->SetComputeSRV(10, frame->ReflectionProbes->GetSRV()->GPUHandle);
+        if (!_staticIBL)
+        {
+            commands->SetComputeSRV(9, probeRadiance.ptr ? probeRadiance : _resources->ReflectionRadianceSRV.GPUHandle);
+            commands->SetComputeSRV(10, frame->ReflectionProbes->GetSRV()->GPUHandle);
+        }
         commands->SetComputeSRV(11, _geometry->GetSRV()->GPUHandle);
         commands->SetComputeSRV(12, _depth->GetSRV()->GPUHandle);
         commands->SetComputeSRV(13, _owner->GetSRV()->GPUHandle);
@@ -630,5 +641,53 @@ std::vector<GDX12Resource*> GDX12FluidSurfacePass::NativeResources() const
     for (auto access : GetSimulationBufferAccesses()) result.push_back(access.Resource);
     for (auto access : GetResolveBufferAccesses()) result.push_back(access.Resource);
     if (_externalOnly) for (const auto& [id, display] : _externalDisplay) result.push_back(&display->GetResource());
+    return result;
+}
+
+std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::NativeSurfaceAccesses() const
+{
+    using Mode = GDX12RenderGraph::Mode;
+    std::vector<GDX12RenderGraph::BufferAccess> result;
+    if (!_rendering) return result;
+    for (auto* texture : {_raw.get(), _eyeDepth.get(), _thickness.get(), _filtered[0].get(), _filtered[1].get(),
+        _depth.get(), _motion.get(), _geometry.get(), _owner.get()})
+        result.push_back({texture->GetResource(), Mode::ReadWrite, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+    result.push_back({_scratchDepth->GetResource(), Mode::Write, D3D12_RESOURCE_STATE_COMMON});
+    for (auto* input : _inputs)
+        result.push_back({input->GetTexture()->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+    result.push_back({&_resources->FrameConstants.at(_resources->CurrFrameConstantsIndex)->CameraCB->GetResource(),
+        Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
+    for (const auto& instance : _instances)
+    {
+        const auto found = _states.find(instance.Id);
+        if (!instance.Component.GetSettings().RenderEnabled || found == _states.end()) continue;
+        const auto& state = *found->second;
+        result.push_back({&state.Constants->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
+        if (_externalOnly) result.push_back({&_externalDisplay.at(instance.Id)->GetResource(), Mode::Read,
+            D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+        else if (state.Offload) result.push_back({&state.Offload->DisplayParticles().GetResource(), Mode::Read,
+            D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+        else for (const auto& particles : state.Solver.Particles)
+            result.push_back({&particles->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+    }
+    return result;
+}
+
+std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::NativeResolveAccesses() const
+{
+    using Mode = GDX12RenderGraph::Mode;
+    std::vector<GDX12RenderGraph::BufferAccess> result;
+    if (!_rendering) return result;
+    for (auto* texture : {_inputs[0]->GetTexture(), _depth.get(), _geometry.get(), _owner.get()})
+        result.push_back({texture->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+    result.push_back({_color->GetResource(), Mode::Write, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+    const auto& frame = _resources->FrameConstants.at(_resources->CurrFrameConstantsIndex);
+    result.push_back({&frame->CameraCB->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
+    if (!_staticIBL) result.push_back({&frame->ReflectionProbes->GetResource(), Mode::Read,
+        D3D12_RESOURCE_STATE_GENERIC_READ});
+    for (const auto& instance : _instances)
+        if (const auto found = _states.find(instance.Id);
+            instance.Component.GetSettings().RenderEnabled && found != _states.end())
+            result.push_back({&found->second->Constants->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
     return result;
 }

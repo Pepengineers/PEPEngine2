@@ -9,7 +9,7 @@ class SceneParticles
 public:
     SceneParticles(GDX12DeviceResources&, RenderPipelineCommonData&);
     ~SceneParticles();
-    void Prepare(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* depth,
+    void Prepare(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* simulationDepth, GDX12Texture* rasterDepth,
         GDX12Texture* accum, GDX12Texture* reveal, GDX12ParticleInteractionField);
     void AppendWeighted(Graph&, std::vector<ID3D12Resource*>&);
     void AppendComposite(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr);

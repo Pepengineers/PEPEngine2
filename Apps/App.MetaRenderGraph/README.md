@@ -4,14 +4,14 @@ Experimental executable using the Meta execution plan alongside production App.
 The ordinary launch now loads the original Bistro interior and exterior with
 static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored lights,
 static SkyBox/IBL, cascaded sun shadows, point/spot shadows, XeGTAO, FidelityFX SSSR, mesh WBOIT
-transparency, Bistro grass/wind, GPU particles, animated people/foxes, Motion Blur,
+transparency, Bistro grass/wind, GPU particles, animated people/foxes, SPH water, Motion Blur,
 reconstruction, HDR display transform and Engine.UI screen composition. Alpha-tested cutouts use OpaquePass.
-No reflection-probe, water, DoF, frame-generation
+No reflection-probe, DoF, frame-generation
 or world-space UI poster passes execute.
-The world is paused; grass/wind, particles and characters advance through explicit time paths.
+The world is paused; grass/wind, particles, characters and water advance through explicit time paths.
 The camera remains free.
 
-This adds Motion Blur and reconstruction to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+This adds Bistro water to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
 The user checks the ordinary launch, measures CPU/GPU load and FPS, and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
@@ -35,7 +35,7 @@ use frame-local upload resources; light data, masks and shadow commands use VRAM
 The existing `--smoke` procedural diagnostic host remains separate. It is not the
 short ordinary smoke required for acceptance and is not run for this migration.
 
-Ordinary post order is transparent/additive HDR → Motion Blur and complete motion
+Ordinary post order is water/far-near transparency/additive HDR → Motion Blur and complete motion
 → reconstruction/native → display → screen UI → PRESENT. Startup requests App's
 XeSS/Default (Ultra Quality Plus) and Motion Blur Mid, shutter 0.5, max radius 40,
 quality-selected samples (27). Settings retains all existing provider/preset,
@@ -48,6 +48,19 @@ Native/NIS without blur skip motion preparation and particle motion; temporal SR
 keeps complete motion even without gather. Context/grid changes drain before
 resize and reset history. UI stays at window resolution, after postprocessing.
 See the [Motion Blur/SR report](../../docs/reports/2026-11-15-meta-bistro-motion-blur-upscalers.md).
+
+The original stone basin is at (-1297,65.3,-425) cm, yaw 135 degrees, beside the
+existing SparkRain emitter. Startup requests one basin and 100000 SPH particles,
+HeightScale=2, ReferenceModel, original wave forcing/radius/filter, Fluid Mid,
+primary GPU DIRECT without offload. Seed size follows App's grid rounding and is
+logged on startup. The solver advances while world physics stays paused; component
+simulation/render controls and time scales remain effective. Surface uses the SR
+render grid and retains solver pools across screen resize. Opaque lighting/SSR
+stay opaque; far WBOIT feeds water optics, then near WBOIT/weighted particles,
+near resolve and global SortedAlpha/additive. Particle collisions read opaque
+depth, raster reads merged depth through shader rejection without depth writes.
+Water uses static IBL until the separate probes stage. See the
+[water report](../../docs/reports/2026-11-16-meta-bistro-water.md).
 
 ## Build and ordinary launch
 

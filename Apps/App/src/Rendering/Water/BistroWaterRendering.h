@@ -10,7 +10,7 @@ class BistroWaterRendering final
 public:
     explicit BistroWaterRendering(std::shared_ptr<SceneManagerModule> scenes);
     ~BistroWaterRendering();
-    std::vector<GDX12FluidInstance> CollectScene(float deltaSeconds);
+    std::vector<GDX12FluidInstance> CollectScene(float deltaSeconds, bool advanceWhilePaused = false);
 
     GDX12FluidSurfacePass Surface;
     GDX12FluidSimulationPass Simulation{ &Surface };

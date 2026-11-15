@@ -26,6 +26,9 @@ class SceneLighting
     D3D12_GPU_DESCRIPTOR_HANDLE ProbeRadiance(bool serial) const { return _reflections->Radiance(serial); }
     void Reset();
     GDX12Texture* ParticleMotion() const { return _transparency ? _transparency->ParticleMotion() : nullptr; }
+    GDX12Texture* PostDepth() const { return _transparency ? _transparency->Depth() : nullptr; }
+    GDX12Texture* PostMotion() const { return _transparency ? _transparency->Motion() : nullptr; }
+    void SetWaterRetirement(std::function<void()> retire) { if (_transparency) _transparency->SetWaterRetirement(std::move(retire)); }
     std::pair<size_t, size_t> Readiness() const
     {
         return _pendingReset || !_reflections ? std::pair<size_t, size_t>{} : _reflections->Readiness();

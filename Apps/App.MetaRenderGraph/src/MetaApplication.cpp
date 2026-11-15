@@ -11,6 +11,7 @@
 #include "BistroScene.h"
 #include "BistroBounds.h"
 #include "BistroCharacters.h"
+#include "BistroWater.h"
 #include "Components/BistroInteractionSource.h"
 #include "Components/FluidRenderComponent.h"
 #include <d3d12sdklayers.h>
@@ -73,12 +74,14 @@ namespace
         MetaRenderPipeline* _pipeline=nullptr;
         BistroGrass::Scene _bistroGrass;
         BistroCharacters::Scene _bistroCharacters;
+        BistroWater::Scene _bistroWater;
         std::unique_ptr<BistroBounds::Scene> _bistroBounds;
         void Update(const GameTimer& timer) override
         {
             if (!_smoke)
             {
                 auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+                _bistroWater.Update(world, timer.DeltaTime());
                 _bistroCharacters.Update(world, timer.DeltaTime(), GetJobs(), nullptr, true);
                 _bistroGrass.Update(world, timer.DeltaTime());
                 _bistroBounds->UpdateEmitters(world);
@@ -110,6 +113,11 @@ namespace
                 world.SetPaused(true);
                 _bistroGrass.Update(world, 0);
                 CreateBistroParticles(world);
+                _bistroWater.Update(world, 0);
+                world.GetECS().ForEach<FluidRenderComponent>([](Entity, const FluidRenderComponent& fluid) {
+                    Log::Info("MetaRenderGraph", "Bistro water target=", BistroWater::ParticleCount.GetValue(),
+                        "; seed particles=", fluid.GetParticles() ? fluid.GetParticles()->size() : 0);
+                });
                 _bistroCharacters.Update(world, 0, GetJobs(), nullptr, true);
                 _bistroBounds = std::make_unique<BistroBounds::Scene>(world);
                 _bistroBounds->UpdateEmitters(world);
