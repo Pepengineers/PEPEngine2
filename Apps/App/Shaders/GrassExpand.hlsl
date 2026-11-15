@@ -57,8 +57,7 @@ void ClearCS()
     for (uint i = 0; i < 8; ++i) Arguments[i] = 0;
     Arguments[1] = 1;
 }
-[numthreads(64, 1, 1)]
-void ExpandCS(uint3 id : SV_DispatchThreadID)
+void ExpandBlade(uint3 id, uint variant)
 {
     if (id.x >= Count) return;
     uint randomId = Hash(id.x ^ Seed);
@@ -70,14 +69,26 @@ void ExpandCS(uint3 id : SV_DispatchThreadID)
     float3 up = mul(float4(0, height, 0, 0), World).xyz;
     float3 previousUp = mul(float4(0, height, 0, 0), PreviousWorld).xyz;
     float3 extents = abs(up) * 0.5f + (abs(World[0].xyz) + abs(World[2].xyz)) * Shape.y + Shape.w + length(up);
+#if GRASS_BUILD_ONCE
+    uint halfSegments = max(1u, Segments / 2);
+    uint fullRibbons = Implementation == 1 ? 2 : 1;
+    uint fullVertices = (Segments + 1) * 2 * fullRibbons;
+    uint halfVertices = (halfSegments + 1) * 2 * fullRibbons;
+    uint segments = variant == 0 ? Segments : variant == 1 ? halfSegments : 1;
+    bool card = variant == 2;
+    bool previousCard = length(previousRootW - PreviousEye.xyz) > Lod.y;
+    bool reset = ResetHistory != 0 || card != previousCard;
+    uint ribbons = card ? 1 : fullRibbons;
+    uint vertexBase = id.x * (fullVertices + halfVertices + 4) +
+        (variant == 0 ? 0 : variant == 1 ? fullVertices : fullVertices + halfVertices);
+#else
     if (!ShadowBoxVisible(rootW + up * 0.5f, extents, ViewProjection)) return;
     float distance = length(rootW - EyeMaxDistance.xyz);
     // Shadow culling has no camera distance cutoff: off-camera casters stay present.
     if (Shadow == 0 && distance > EyeMaxDistance.w) return;
     uint segments = distance > Lod.y && Shadow == 0 ? 1 : (distance > Lod.x ? max(1u, Segments / 2) : Segments);
     bool card = distance > Lod.y && Shadow == 0;
-    float previousDistance = length(previousRootW - PreviousEye.xyz);
-    bool previousCard = previousDistance > Lod.y && Shadow == 0;
+    bool previousCard = length(previousRootW - PreviousEye.xyz) > Lod.y;
     bool reset = ResetHistory != 0 || card != previousCard;
     uint ribbons = card ? 1 : (Implementation == 1 ? 2 : 1);
     uint vertexCount = (segments + 1) * 2 * ribbons;
@@ -86,6 +97,7 @@ void ExpandCS(uint3 id : SV_DispatchThreadID)
     InterlockedAdd(Arguments[5], vertexCount, vertexBase);
     InterlockedAdd(Arguments[0], indexCount, indexBase);
     InterlockedAdd(Arguments[6], 1, ignored);
+#endif
     float3 bend = Bend(rootW, false);
     float3 previousBend = Bend(previousRootW, true);
     float4 contact = SampleInteraction(Trail, rootW.xz, InteractionArea, Padding0);
@@ -104,8 +116,11 @@ void ExpandCS(uint3 id : SV_DispatchThreadID)
     for (uint ribbon = 0; ribbon < ribbons; ++ribbon)
     {
         float a = angle + ribbon * 1.5707963f;
-        float3 side = mul(float4(cos(a) * Shape.y * 0.5f, 0, sin(a) * Shape.y * 0.5f, 0), World).xyz;
-        float3 previousSide = mul(float4(cos(a) * Shape.y * 0.5f, 0, sin(a) * Shape.y * 0.5f, 0), PreviousWorld).xyz;
+        float sine, cosine;
+        sincos(a, sine, cosine);
+        float4 localSide = float4(cosine * Shape.y * 0.5f, 0, sine * Shape.y * 0.5f, 0);
+        float3 side = mul(localSide, World).xyz;
+        float3 previousSide = mul(localSide, PreviousWorld).xyz;
         if (card)
         {
             float3 toEye = EyeMaxDistance.xyz - rootW;
@@ -133,6 +148,7 @@ void ExpandCS(uint3 id : SV_DispatchThreadID)
                 vertex.UV = float2(edge, 1 - t);
                 Vertices[start + segment * 2 + edge] = vertex;
             }
+#if !GRASS_BUILD_ONCE
             if (segment < segments)
             {
                 uint offset = indexBase + (ribbon * segments + segment) * 6;
@@ -144,6 +160,105 @@ void ExpandCS(uint3 id : SV_DispatchThreadID)
                 Indices[offset + 4] = v + 2;
                 Indices[offset + 5] = v + 3;
             }
+#endif
         }
     }
 }
+
+[numthreads(64, 1, 1)]
+void ExpandCS(uint3 id : SV_DispatchThreadID) { ExpandBlade(id, 0); }
+
+#if GRASS_BUILD_ONCE
+[numthreads(64, 1, 1)]
+void BuildCS(uint3 id : SV_DispatchThreadID)
+{
+    // Preserve the existing full, reduced and camera-card shapes; views select indices only.
+    [loop] for (uint variant = 0; variant < 3; ++variant) ExpandBlade(id, variant);
+}
+
+StructuredBuffer<float> GrassHiZ : register(t5);
+
+bool Occluded(float3 center, float3 extents)
+{
+    if (Padding1 == 0) return false;
+    float2 lo = 1, hi = 0;
+    float nearest = 0;
+    [unroll] for (uint corner = 0; corner < 8; ++corner)
+    {
+        float3 sign = float3((corner & 1) ? 1 : -1, (corner & 2) ? 1 : -1, (corner & 4) ? 1 : -1);
+        float4 clip = mul(float4(center + sign * extents, 1), ViewProjection);
+        if (clip.w <= 0 || clip.z < 0 || clip.z >= clip.w) return false;
+        float3 ndc = clip.xyz / clip.w;
+        float2 uv = ndc.xy * float2(0.5f, -0.5f) + 0.5f;
+        lo = min(lo, uv); hi = max(hi, uv); nearest = max(nearest, ndc.z);
+    }
+    uint2 baseSize = uint2(Padding1, (uint)Lod.w);
+    uint2 size = baseSize;
+    lo = saturate(lo - 1.0f / size); hi = saturate(hi + 1.0f / size);
+    uint level = (uint)ceil(log2(max(1.0f, max((hi.x - lo.x) * size.x, (hi.y - lo.y) * size.y))));
+    uint offset = 0, scale = 1;
+    for (uint mip = 0; mip < level && any(size > 1); ++mip)
+    {
+        offset += size.x * size.y;
+        size = (size + 1) / 2;
+        scale *= 2;
+    }
+    uint2 a = min(uint2(lo * baseSize / scale), size - 1), b = min(uint2(hi * baseSize / scale), size - 1);
+    float furthest = min(min(GrassHiZ[offset + a.y * size.x + a.x], GrassHiZ[offset + a.y * size.x + b.x]),
+        min(GrassHiZ[offset + b.y * size.x + a.x], GrassHiZ[offset + b.y * size.x + b.x]));
+    // Reverse-Z: only reject bounds entirely behind the furthest occluder.
+    return nearest + 0.00001f < furthest;
+}
+
+[numthreads(64, 1, 1)]
+void CullCS(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= Count) return;
+    uint randomId = Hash(id.x ^ Seed);
+    float3 root = PointSource != 0 ? Roots[id.x] :
+        float3((Random(randomId) * 2 - 1) * Patch.x, 0, (Random(randomId + 1) * 2 - 1) * Patch.y);
+    float height = max(0.01f, Shape.x * (1 + (Random(randomId + 2) * 2 - 1) * Shape.z));
+    float3 rootW = mul(float4(root, 1), World).xyz;
+    float3 up = mul(float4(0, height, 0, 0), World).xyz;
+    float3 extents = abs(up) * 0.5f + (abs(World[0].xyz) + abs(World[2].xyz)) * Shape.y;
+    float3 center = rootW + up * 0.5f;
+    if (!ShadowBoxVisible(center, extents, ViewProjection)) return;
+    float distance = length(rootW - EyeMaxDistance.xyz);
+    if (Shadow == 0 && (distance > EyeMaxDistance.w || Occluded(center, extents))) return;
+    bool card = distance > Lod.y && Shadow == 0;
+    uint halfSegments = max(1u, Segments / 2), fullRibbons = Implementation == 1 ? 2 : 1;
+    uint fullVertices = (Segments + 1) * 2 * fullRibbons, halfVertices = (halfSegments + 1) * 2 * fullRibbons;
+    uint segments = card ? 1 : distance > Lod.x ? halfSegments : Segments;
+    uint ribbons = card ? 1 : fullRibbons;
+    uint vertexBase = id.x * (fullVertices + halfVertices + 4) +
+        (card ? fullVertices + halfVertices : distance > Lod.x ? fullVertices : 0);
+    uint indexCount = segments * 6 * ribbons;
+    uint vertexCount = (segments + 1) * 2 * ribbons;
+    uint indexBase, ignored;
+#if GRASS_WAVE_OPS
+    uint prefix = WavePrefixSum(indexCount);
+    uint waveIndices = WaveActiveSum(indexCount);
+    uint waveVertices = WaveActiveSum(vertexCount);
+    uint waveBlades = WaveActiveCountBits(true);
+    if (WaveIsFirstLane())
+    {
+        InterlockedAdd(Arguments[0], waveIndices, indexBase);
+        InterlockedAdd(Arguments[5], waveVertices, ignored);
+        InterlockedAdd(Arguments[6], waveBlades, ignored);
+    }
+    indexBase = WaveReadLaneFirst(indexBase) + prefix;
+#else
+    InterlockedAdd(Arguments[0], indexCount, indexBase);
+    InterlockedAdd(Arguments[5], vertexCount, ignored);
+    InterlockedAdd(Arguments[6], 1, ignored);
+#endif
+    for (uint ribbon = 0; ribbon < ribbons; ++ribbon)
+        for (uint segment = 0; segment < segments; ++segment)
+        {
+            uint dst = indexBase + (ribbon * segments + segment) * 6;
+            uint v = vertexBase + (ribbon * (segments + 1) + segment) * 2;
+            Indices[dst] = v; Indices[dst + 1] = v + 2; Indices[dst + 2] = v + 1;
+            Indices[dst + 3] = v + 1; Indices[dst + 4] = v + 2; Indices[dst + 5] = v + 3;
+        }
+}
+#endif

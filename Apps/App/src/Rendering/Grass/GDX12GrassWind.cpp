@@ -73,7 +73,7 @@ UINT GrassBladeCount(const GDX12GrassSettings& s)
         static_cast<double>(s.RootsCm.size());
     return static_cast<UINT>((std::min)(count, static_cast<double>(s.MaxBlades)));
 }
-BoundingBox GrassLocalBounds(const GDX12GrassSettings& s)
+BoundingBox GrassLocalBounds(const GDX12GrassSettings& s, bool includeBend)
 {
     Vector3 low(-s.ExtentsCm.x, 0, -s.ExtentsCm.y), high(s.ExtentsCm.x, 0, s.ExtentsCm.y);
     if (!s.RootsCm.empty())
@@ -85,7 +85,7 @@ BoundingBox GrassLocalBounds(const GDX12GrassSettings& s)
             high = Vector3::Max(high, Vector3(root));
         }
     }
-    const float bend = s.MaxBendCm + s.WidthCm;
+    const float bend = (includeBend ? s.MaxBendCm : 0.0f) + s.WidthCm;
     low -= Vector3(bend, bend, bend);
     high += Vector3(bend, s.HeightCm * (1 + s.HeightVariation) + bend, bend);
     BoundingBox result;

@@ -10,6 +10,20 @@ namespace Meta {
 SceneGrass::SceneGrass(RenderPipelineContext& c, bool diagnostics):_resources(c.Primary),
     _scene(BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>(),c.Runtime), _diagnostics(diagnostics) {
     for(UINT mode=0;mode<2;++mode) if(diagnostics || mode==1) { _gpu[mode]=std::make_unique<GDX12GrassRenderer>(&_resources,105000); _frames[mode].resize(_resources.FrameConstants.size()); }
+    GDX12RootSignatureDesc geometry;
+    geometry.NumSingleCBVSlots=1;geometry.NumSingleSRVSlots=6;geometry.NumSingleUAVSlots=3;
+    geometry.VolatileSRVData=true;
+    _geometryRoot=std::make_unique<GDX12RootSignature>(_resources.Device,geometry);
+    D3D12_FEATURE_DATA_D3D12_OPTIONS1 options{};
+    const bool waves=SUCCEEDED(_resources.Device->GetDevice()->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1,&options,sizeof(options))) && options.WaveOps;
+    const D3D_SHADER_MACRO defines[]={{"GRASS_BUILD_ONCE","1"},{"GRASS_WAVE_OPS",waves?"1":"0"},{nullptr,nullptr}};
+    _buildGeometry=GDX12RenderHelpers::CreateComputePipeline(_resources.Device,_geometryRoot.get(),APP_SHADERS_FOLDER "GrassExpand.hlsl","BuildCS",defines);
+    _cullGeometry=GDX12RenderHelpers::CreateComputePipeline(_resources.Device,_geometryRoot.get(),APP_SHADERS_FOLDER "GrassExpand.hlsl","CullCS",defines);
+    _clearGeometry=GDX12RenderHelpers::CreateComputePipeline(_resources.Device,_geometryRoot.get(),APP_SHADERS_FOLDER "GrassExpand.hlsl","ClearCS",defines);
+    GDX12RootSignatureDesc hiz;
+    hiz.Constants={6};hiz.NumSingleSRVSlots=1;hiz.NumSingleUAVSlots=1;
+    _hiZRoot=std::make_unique<GDX12RootSignature>(_resources.Device,hiz);
+    _buildHiZ=GDX12RenderHelpers::CreateComputePipeline(_resources.Device,_hiZRoot.get(),APP_SHADERS_FOLDER "GrassHiZ.hlsl","CS");
 }
 void SceneGrass::Prepare(RenderPipelineContext& c,float dt) {
     _scene.CollectScene(dt, !_diagnostics);
@@ -74,6 +88,50 @@ std::vector<ID3D12Resource*> SceneGrass::Append(Graph& g,UINT slot,const std::ve
         add("grass wind stage "+std::to_string(job.Stage),accesses,[=](auto* cmd){cmd->SetDescriptorHeaps(1,&heap);cmd->SetComputeRootSignature(root.Get());cmd->SetPipelineState(pipeline.Get());cmd->SetComputeRootConstantBufferView(b,cb);cmd->SetComputeRootDescriptorTable(t,input);cmd->SetComputeRootDescriptorTable(t+1,pressure);cmd->SetComputeRootDescriptorTable(u,output);cmd->Dispatch(groups,groups,1);});
     }
     }
+    if(!recorded.HiZ) {
+        recorded.HiZ=std::make_unique<GDX12UploadBuffer<float>>(_resources.Device,1,EBufferType::Default,false);
+        recorded.HiZ->CreateSRV(_resources.SRV_UAV_Heap.get(),_resources.SRV_UAV_Heap->GetAvailableIndex(105000));
+        recorded.HiZ->CreateUAV(_resources.SRV_UAV_Heap.get(),_resources.SRV_UAV_Heap->GetAvailableIndex(105000));
+    }
+    if(!viewsOnly && !targets.empty()) {
+        recorded.Built.resize(gpu.PatchCount());
+        for(UINT patch=0;patch<gpu.PatchCount();++patch) {
+            gpu.PrepareView(targets.front().View,patch,&materials,false);
+            const auto* output=gpu.FindOutput(targets.front().View,patch);if(!output)continue;
+            const auto& source=gpu._grass.at(output->Owner).Source;
+            auto& built=recorded.Built[patch];
+            GrassLocalBounds(source,false).Transform(built.Bounds,source.World);
+            const UINT ribbons=source.Implementation==GDX12GrassImplementation::CrossedRibbons?2u:1u;
+            const UINT stride=(source.Segments+1)*2*ribbons+((std::max)(1u,source.Segments/2)+1)*2*ribbons+4;
+            const UINT64 count=UINT64(GrassBladeCount(source))*stride;
+            if(count>UINT_MAX/sizeof(GDX12GrassRenderer::Vertex))throw std::length_error("Built grass vertices exceed buffer size limit");
+            if(!built.Vertices || built.Vertices->GetElementCount()<count)
+                built.Vertices=gpu.Buffer<GDX12GrassRenderer::Vertex>(UINT(count),true,true);
+            const auto root=_geometryRoot->GetRootSignature();const auto pipeline=_buildGeometry;
+            const auto cb=output->Constants->GetElementAddress(output->ConstantIndex);
+            const auto roots=gpu._grass.at(output->Owner).Roots[slot]->GetSRV()->GPUHandle;
+            const auto wind=output->CurrentWind->GetSRV()->GPUHandle,previousWind=output->PreviousWind->GetSRV()->GPUHandle;
+            const auto trail=gpu._trail->GetSRV()->GPUHandle,previousTrail=gpu._previousTrail->GetSRV()->GPUHandle;
+            const auto vertices=built.Vertices->GetUAV()->GPUHandle;
+            const UINT b=_geometryRoot->GetBRootParamIndex(0),t=_geometryRoot->GetTRootParamIndex(0),u=_geometryRoot->GetURootParamIndex(0);
+            const UINT groups=(GrassBladeCount(source)+63)/64;
+            add("grass patch "+std::to_string(patch)+" build all LOD vertices",{
+                access(output->Constants,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ),
+                access(gpu._grass.at(output->Owner).Roots[slot].get(),Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+                access(output->CurrentWind,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+                access(output->PreviousWind,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+                access(gpu._trail.get(),Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+                access(gpu._previousTrail.get(),Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
+                access(built.Vertices.get(),Mode::Write,UnorderedAccess)},[=](auto* cmd){
+                    cmd->SetDescriptorHeaps(1,&heap);cmd->SetComputeRootSignature(root.Get());cmd->SetPipelineState(pipeline.Get());
+                    cmd->SetComputeRootConstantBufferView(b,cb);
+                    const D3D12_GPU_DESCRIPTOR_HANDLE inputs[]={roots,wind,previousWind,trail,previousTrail};
+                    for(UINT i=0;i<5;++i)cmd->SetComputeRootDescriptorTable(t+i,inputs[i]);
+                    cmd->SetComputeRootDescriptorTable(u,vertices);cmd->Dispatch(groups,1,1);
+                });
+        }
+    }
+    bool hiZReady=false;
     auto views=targets;
     if(!viewsOnly && _diagnostics) {
     constexpr UINT probeSize=128;
@@ -113,37 +171,71 @@ std::vector<ID3D12Resource*> SceneGrass::Append(Graph& g,UINT slot,const std::ve
       if(beforeView)beforeView(target,g,all);
       for(UINT patch=0;patch<gpu.PatchCount();++patch) {
         if((target.View.Key>>60)==3 && !gpu._grass.at(gpu._drawOrder.at(patch)).Source.CaptureReflections)continue;
-        gpu.PrepareView(target.View,patch,&materials); const auto* output=gpu.FindOutput(target.View,patch); if(!output) continue;
-        const bool mainPair=!viewsOnly && target.View.Key==1 &&
-            (target.View.Stage==GDX12GeometryStage::Depth || target.View.Stage==GDX12GeometryStage::DepthNormals || target.View.Stage==GDX12GeometryStage::GBuffer);
-        auto* vertices=gpu._vertices.get();auto* indices=gpu._indices.get();auto* arguments=gpu._arguments.get();
+        const bool legacy=(target.View.Key>>60)==3;
+        if(!legacy) {
+            XMFLOAT4X4 clip;XMStoreFloat4x4(&clip,target.View.ViewProjection.Transpose());
+            if(!LocalShadowFaceIntersects(clip,recorded.Built.at(patch).Bounds))continue;
+        }
+        gpu.PrepareView(target.View,patch,&materials,legacy); const auto* output=gpu.FindOutput(target.View,patch); if(!output) continue;
+        const bool mainPair=!viewsOnly && target.View.Key==1;
+        auto* vertices=legacy?gpu._vertices.get():recorded.Built.at(patch).Vertices.get();
+        auto* indices=gpu._indices.get();auto* arguments=gpu._arguments.get();
         if(mainPair && patch) {
             if(recorded.MainPatches.size()<gpu.PatchCount())recorded.MainPatches.resize(gpu.PatchCount());
             auto& buffers=recorded.MainPatches[patch];
-            if(!buffers.Vertices || buffers.Vertices->GetElementCount()<vertices->GetElementCount())
-                buffers.Vertices=gpu.Buffer<GDX12GrassRenderer::Vertex>(vertices->GetElementCount(),true,true);
             if(!buffers.Indices || buffers.Indices->GetElementCount()<indices->GetElementCount())
                 buffers.Indices=gpu.Buffer<UINT>(indices->GetElementCount(),false,true);
             if(!buffers.Arguments)buffers.Arguments=gpu.Buffer<UINT>(8,false,true);
-            vertices=buffers.Vertices.get();indices=buffers.Indices.get();arguments=buffers.Arguments.get();
+            indices=buffers.Indices.get();arguments=buffers.Arguments.get();
         }
         const bool reuse=mainPair && target.View.Stage==GDX12GeometryStage::GBuffer;
-        if(reuse && !mainExpanded[patch])throw std::logic_error("Grass GBuffer requires its matching depth expansion");
+        if(reuse && !mainExpanded[patch])throw std::logic_error("Grass GBuffer requires its matching depth culling");
+        if(mainPair && !hiZReady && target.View.SceneDepth) {
+            UINT64 total=0;for(UINT w=target.Width,h=target.Height;;w=(w+1)/2,h=(h+1)/2){total+=UINT64(w)*h;if(w==1 && h==1)break;}
+            if(total>UINT_MAX/sizeof(float))throw std::length_error("Grass HiZ exceeds buffer size limit");
+            recorded.HiZ->Resize(UINT(total));
+            const auto root=_hiZRoot->GetRootSignature();const auto pipeline=_buildHiZ;
+            const auto depth=target.View.SceneDepth->GetSRV()->GPUHandle,hiz=recorded.HiZ->GetUAV()->GPUHandle;
+            const UINT t=_hiZRoot->GetTRootParamIndex(0),u=_hiZRoot->GetURootParamIndex(0);
+            UINT sourceWidth=0,sourceHeight=0,sourceOffset=0,offset=0;
+            for(UINT w=target.Width,h=target.Height;;w=(w+1)/2,h=(h+1)/2) {
+                const std::array<UINT,6> constants={w,h,sourceWidth,sourceHeight,sourceOffset,offset};
+                add("grass opaque depth HiZ "+std::to_string(w)+"x"+std::to_string(h),{
+                    {target.Depth,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
+                    access(recorded.HiZ.get(),Mode::ReadWrite,UnorderedAccess)},[=](auto* cmd){
+                        cmd->SetDescriptorHeaps(1,&heap);cmd->SetComputeRootSignature(root.Get());cmd->SetPipelineState(pipeline.Get());
+                        cmd->SetComputeRoot32BitConstants(0,6,constants.data(),0);cmd->SetComputeRootDescriptorTable(t,depth);cmd->SetComputeRootDescriptorTable(u,hiz);
+                        cmd->Dispatch((w+7)/8,(h+7)/8,1);
+                    });
+                if(w==1 && h==1)break;
+                sourceWidth=w;sourceHeight=h;sourceOffset=offset;offset+=w*h;
+            }
+            hiZReady=true;
+        }
+        if(!legacy) {
+            auto settings=output->Settings;
+            settings.Padding1=mainPair && hiZReady?target.Width:0;
+            settings.Lod.w=float(target.Height);
+            output->Constants->CopyData(output->ConstantIndex,settings);
+        }
         const auto& state=gpu._grass.at(output->Owner);
-        const auto root=gpu._computeRoot->GetRootSignature(); const auto clear=gpu._clearPSO,expand=gpu._expandPSO;
+        auto* computeRoot=legacy?gpu._computeRoot.get():_geometryRoot.get();
+        const auto root=computeRoot->GetRootSignature(); const auto clear=legacy?gpu._clearPSO:_clearGeometry,expand=legacy?gpu._expandPSO:_cullGeometry;
         const auto cb=output->Constants->GetElementAddress(output->ConstantIndex);
         const std::array<D3D12_GPU_DESCRIPTOR_HANDLE,5> srvs={state.Roots[slot]->GetSRV()->GPUHandle,output->CurrentWind->GetSRV()->GPUHandle,output->PreviousWind->GetSRV()->GPUHandle,gpu._trail->GetSRV()->GPUHandle,gpu._previousTrail->GetSRV()->GPUHandle};
         const std::array<D3D12_GPU_DESCRIPTOR_HANDLE,3> uavs={vertices->GetUAV()->GPUHandle,indices->GetUAV()->GPUHandle,arguments->GetUAV()->GPUHandle};
-        const UINT b=gpu._computeRoot->GetBRootParamIndex(0),t=gpu._computeRoot->GetTRootParamIndex(0),u=gpu._computeRoot->GetURootParamIndex(0),groups=(GrassBladeCount(state.Source)+63)/64;
-        const auto bind=[=](ID3D12GraphicsCommandList* cmd){cmd->SetDescriptorHeaps(1,&heap);cmd->SetComputeRootSignature(root.Get());cmd->SetComputeRootConstantBufferView(b,cb);for(UINT i=0;i<5;++i)cmd->SetComputeRootDescriptorTable(t+i,srvs[i]);for(UINT i=0;i<3;++i)cmd->SetComputeRootDescriptorTable(u+i,uavs[i]);};
+        const UINT b=computeRoot->GetBRootParamIndex(0),t=computeRoot->GetTRootParamIndex(0),u=computeRoot->GetURootParamIndex(0),groups=(GrassBladeCount(state.Source)+63)/64;
+        const auto hizSrv=recorded.HiZ->GetSRV()->GPUHandle;
+        const auto bind=[=](ID3D12GraphicsCommandList* cmd){cmd->SetDescriptorHeaps(1,&heap);cmd->SetComputeRootSignature(root.Get());cmd->SetComputeRootConstantBufferView(b,cb);for(UINT i=0;i<5;++i)cmd->SetComputeRootDescriptorTable(t+i,srvs[i]);for(UINT i=0;i<3;++i)cmd->SetComputeRootDescriptorTable(u+i,uavs[i]);if(!legacy)cmd->SetComputeRootDescriptorTable(t+5,hizSrv);};
         std::vector<Access> accesses={access(output->Constants,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ),access(state.Roots[slot].get(),Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
             access(output->CurrentWind,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),access(output->PreviousWind,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
             access(gpu._trail.get(),Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),access(gpu._previousTrail.get(),Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
-            access(vertices,Mode::Write,UnorderedAccess),access(indices,Mode::Write,UnorderedAccess),access(arguments,Mode::ReadWrite,UnorderedAccess)};
+            access(vertices,legacy?Mode::Write:Mode::Read,legacy?State(UnorderedAccess):State(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)),access(indices,Mode::Write,UnorderedAccess),access(arguments,Mode::ReadWrite,UnorderedAccess)};
+        if(!legacy)accesses.push_back(access(recorded.HiZ.get(),Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
         const std::string name="grass view "+std::to_string(target.View.Key)+" patch "+std::to_string(patch);
         if(!reuse) {
             add(name+" clear arguments",accesses,[=](auto* cmd){bind(cmd);cmd->SetPipelineState(clear.Get());cmd->Dispatch(1,1,1);});
-            add(name+" expand",accesses,[=](auto* cmd){bind(cmd);cmd->SetPipelineState(expand.Get());cmd->Dispatch(groups,1,1);});
+            add(name+(legacy?" expand":" cull indices"),accesses,[=](auto* cmd){bind(cmd);cmd->SetPipelineState(expand.Get());cmd->Dispatch(groups,1,1);});
             if(mainPair)mainExpanded[patch]=true;
         }
         auto binding=output->Binding;auto batch=output->Batch;

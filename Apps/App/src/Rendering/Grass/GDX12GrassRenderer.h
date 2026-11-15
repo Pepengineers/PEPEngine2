@@ -31,7 +31,7 @@ public:
         const std::vector<BistroInteractionSource>& sources = {}, float deltaSeconds = 0);
     GDX12ParticleInteractionField InteractionField() const;
     void PrepareGPU(GDX12CommandList* commands);
-    void PrepareView(const GDX12GeometryContext& view, UINT patch, GDX12Descriptor* materialOverride = nullptr);
+    void PrepareView(const GDX12GeometryContext& view, UINT patch, GDX12Descriptor* materialOverride = nullptr, bool cullPatch = true);
     bool Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch);
     void GatherBatches(const GDX12GeometryContext& view, std::vector<GDX12RenderBatch>& batches) const;
     std::vector<GDX12RenderGraph::BufferAccess> PreparationAccesses() const;
@@ -115,6 +115,7 @@ private:
     };
     struct Output
     {
+        Parameters Settings;
         GDX12GeometryContext View;
         GDX12CaptureLighting Lighting;
         UINT Patch = 0;
