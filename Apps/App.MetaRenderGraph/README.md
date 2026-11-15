@@ -57,14 +57,27 @@ probe shadow maps or readbacks. Scene buffers stay resident; caster bounds are
 reduced only when scene data changes. Atlas and visibility buffers belong to
 the frame slot, and lighting declares the atlas read in the Meta graph.
 
-Local shadows preserve the scene's authored `CastShadows` flags. CPU jobs select
-lights whose range bounds intersect the camera frustum, then traverse a shared
-caster BVH using light range and per-face frusta. Casters outside the camera
-remain eligible. A dependent job packs the per-face indirect draw lists and
-assigns depth-array slices; the BVH rebuilds only when scene data changes.
-One command upload feeds ExecuteIndirect directly into the depth array, using
-App's local-shadow shader, bias and filtering. Commands and maps belong to the
-frame slot. Maps redraw every frame; temporal shadow caching is deferred.
+Local shadows preserve authored `CastShadows` and update-mode settings. CPU jobs
+clip receiver bounds to the camera frustum, then select light faces intersecting
+those visible bounds and the light range. This is conservative bounds culling,
+without depth/occlusion readback. Casters for selected faces are still gathered
+from the whole scene BVH, including objects outside the camera. The selection
+includes the normal-bias offset used by the lighting shader.
+
+Each frame slot caches per-face command lists and depth maps with stable slice
+assignments. Camera movement selects faces without invalidating existing maps;
+newly needed faces render before lighting. Mesh/instance/material changes,
+texture-resource rebinding, light generation/projection/revision changes and
+resolution changes invalidate the relevant cache. Material `DirtyFlag` also
+invalidates maps when GPU constants stay equal, allowing alpha-mask refreshes.
+In-place texture writers must mark the material dirty or explicitly invalidate
+the light. `EveryFrame` lights continue to refresh selected faces every frame.
+
+Only changed faces upload commands, clear and draw. Fully opaque casters use a
+depth-only PSO without a pixel shader; masked casters keep App's alpha-test PSO.
+Depth bias and filtering are unchanged. Map validity is published after frame
+submission. The array supports up to 2048 resident slices per slot; if residency
+fills, camera-irrelevant allocations are reclaimed and required maps refreshed.
 
 The ordinary light grid is built by `LightGrid.hlsl` on the GPU. Its source SRV
 and mask UAV stay in VRAM; source uploads occur only when their revision or
@@ -157,7 +170,10 @@ scene content, not a new test harness.
 
 ## Current result and limits
 
-- CPU jobs for local shadows and their shader variants built in Release.
+- Local shadows now add receiver/face selection, separate opaque depth-only
+  rendering and temporal map reuse; see the
+  [cache implementation report](../../docs/reports/2026-11-15-meta-local-shadow-cache.md).
+- The initial CPU jobs for local shadows and their shader variants built in Release.
   Runtime appearance and performance await the user's manual check; see the
   [local-shadow report](../../docs/reports/2026-11-15-meta-local-shadow-jobs.md).
 - Sun shadows built in Release and displayed in the ordinary Bistro launch.
