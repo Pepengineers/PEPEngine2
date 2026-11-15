@@ -15,6 +15,8 @@ class SceneGeometry {
 public:
     explicit SceneGeometry(RenderPipelineContext&, bool opaqueOnly = false);
     void PrepareGrass(RenderPipelineContext& c,float dt) { _grass->Prepare(c,dt); }
+    std::vector<GDX12RenderPrimitive> GrassPrimitives() const { return _grass->Primitives(); }
+    void AppendGrassView(Graph&, std::vector<ID3D12Resource*>&, UINT slot, const GeometryTarget&);
     GDX12ParticleInteractionField InteractionField() const { return _grass->InteractionField(); }
     void Select(bool serial) { if (_grass) _grass->Select(serial); }
     UINT SlotCount() const { return UINT(_slots.size()); }

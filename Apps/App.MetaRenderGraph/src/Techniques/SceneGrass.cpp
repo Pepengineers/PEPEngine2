@@ -7,14 +7,20 @@
 #include <fstream>
 
 namespace Meta {
-SceneGrass::SceneGrass(RenderPipelineContext& c):_resources(c.Primary),
-    _scene(BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>(),c.Runtime) {
-    for(UINT mode=0;mode<2;++mode) { _gpu[mode]=std::make_unique<GDX12GrassRenderer>(&_resources,105000); _frames[mode].resize(_resources.FrameConstants.size()); }
+SceneGrass::SceneGrass(RenderPipelineContext& c, bool diagnostics):_resources(c.Primary),
+    _scene(BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>(),c.Runtime), _diagnostics(diagnostics) {
+    for(UINT mode=0;mode<2;++mode) if(diagnostics || mode==1) { _gpu[mode]=std::make_unique<GDX12GrassRenderer>(&_resources,105000); _frames[mode].resize(_resources.FrameConstants.size()); }
 }
 void SceneGrass::Prepare(RenderPipelineContext& c,float dt) {
-    _scene.CollectScene(dt);
-    for(auto& gpu:_gpu) gpu->BeginFrame(c.Common,_scene._grass,_scene._wind,_scene._controls,_scene._sources,_scene._deltaSeconds);
+    _scene.CollectScene(dt, !_diagnostics);
+    for(auto& gpu:_gpu) if(gpu) gpu->BeginFrame(c.Common,_scene._grass,_scene._wind,_scene._controls,_scene._sources,_scene._deltaSeconds);
     _gpu[1]->PublishPrimitives(_resources.Primitives,&_scene);
+}
+std::vector<GDX12RenderPrimitive> SceneGrass::Primitives() const {
+    std::vector<GDX12RenderPrimitive> result;
+    for(auto id:_gpu[1]->_drawOrder)
+        if(const auto* primitive=_resources.Primitives.Get(_gpu[1]->_grass.at(id).Primitive)) result.push_back(*primitive);
+    return result;
 }
 const std::vector<ID3D12Resource*>& SceneGrass::Resources(UINT slot) const { return _frames[_mode].at(slot).Bindings; }
 std::vector<ID3D12Resource*> SceneGrass::Append(Graph& g,UINT slot,const std::vector<ID3D12Resource*>& existing,GDX12Descriptor& materials,const std::vector<GeometryTarget>& targets,bool viewsOnly,const std::function<void(const GeometryTarget&,Graph&,std::vector<ID3D12Resource*>&)>& beforeView) {
@@ -69,7 +75,7 @@ std::vector<ID3D12Resource*> SceneGrass::Append(Graph& g,UINT slot,const std::ve
     }
     }
     auto views=targets;
-    if(!viewsOnly) {
+    if(!viewsOnly && _diagnostics) {
     constexpr UINT probeSize=128;
     constexpr DXGI_FORMAT formats[]={DXGI_FORMAT_R8G8B8A8_UNORM,DXGI_FORMAT_R16G16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT,DXGI_FORMAT_R16G16B16A16_FLOAT};
     if(!recorded.ProbeCameras) recorded.ProbeCameras=std::make_unique<GDX12UploadBuffer<GDX12CameraConstants>>(_resources.Device,6);
@@ -133,13 +139,13 @@ std::vector<ID3D12Resource*> SceneGrass::Append(Graph& g,UINT slot,const std::ve
             cmd->SetDescriptorHeaps(1,&heap);cmd->SetGraphicsRootSignature(binding.Root->GetRootSignature().Get());cmd->SetPipelineState(binding.Pipeline.Get());
             for(const auto& cbv:binding.CBVs)cmd->SetGraphicsRootConstantBufferView(binding.Root->GetBRootParamIndex(cbv.first),cbv.second);
             for(const auto& srv:binding.SRVs)cmd->SetGraphicsRootDescriptorTable(binding.Root->GetTRootParamIndex(srv.first),srv.second);
-            D3D12_VIEWPORT vp{0,0,float(target.Width),float(target.Height),0,1};D3D12_RECT rect{0,0,LONG(target.Width),LONG(target.Height)};cmd->RSSetViewports(1,&vp);cmd->RSSetScissorRects(1,&rect);
+            D3D12_VIEWPORT vp{float(target.X),float(target.Y),float(target.Width),float(target.Height),0,1};D3D12_RECT rect{LONG(target.X),LONG(target.Y),LONG(target.X+target.Width),LONG(target.Y+target.Height)};cmd->RSSetViewports(1,&vp);cmd->RSSetScissorRects(1,&rect);
             cmd->OMSetRenderTargets(UINT(target.Rtvs.size()),target.Rtvs.data(),FALSE,&target.Dsv);cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);cmd->IASetIndexBuffer(&batch.IndexBuffer);
             cmd->ExecuteIndirect(batch.Draw.Signature,1,batch.Draw.Arguments,0,nullptr,0);
         });
     }
     }
-    if(viewsOnly)return all;
+    if(viewsOnly || !_diagnostics)return all;
     std::vector<ID3D12Resource*> fields={gpu._trail->GetResource().D3DResource.Get(),gpu._previousTrail->GetResource().D3DResource.Get(),gpu._presence->GetResource().D3DResource.Get()};
     for(const auto& [id,wind]:gpu._wind) for(const auto& velocity:wind.Velocity) fields.push_back(velocity->GetResource().D3DResource.Get());
     if(gpu._arguments) fields.push_back(gpu._arguments->GetResource().D3DResource.Get());

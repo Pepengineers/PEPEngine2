@@ -10,6 +10,7 @@ struct GeometryTarget {
     std::vector<Id> Colors;
     std::vector<D3D12_CPU_DESCRIPTOR_HANDLE> Rtvs;
     UINT Width=0,Height=0;
+    UINT X=0,Y=0;
     bool Clear=false;
     std::vector<Access> AdditionalReads;
 };

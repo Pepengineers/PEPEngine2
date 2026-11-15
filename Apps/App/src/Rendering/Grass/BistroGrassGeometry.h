@@ -13,7 +13,7 @@ class BistroGrassGeometry final : public IRenderGeometrySource
 public:
     BistroGrassGeometry(std::shared_ptr<SceneManagerModule> scenes, RenderModule& renderer);
     ~BistroGrassGeometry() override;
-    void CollectScene(float deltaSeconds);
+    void CollectScene(float deltaSeconds, bool advanceWhilePaused = false);
     void PrepareFrame(GDX12DeviceResources&, const RenderPipelineCommonData&);
     void PrepareGPU(GDX12CommandList* commands);
     void PrepareView(const GDX12GeometryContext&, UINT patch);

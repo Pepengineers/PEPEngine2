@@ -12,7 +12,7 @@ constexpr DXGI_FORMAT Formats[]={DXGI_FORMAT_R8G8B8A8_UNORM,DXGI_FORMAT_R16G16_F
 constexpr State ShaderRead=D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 }
 SceneGeometry::SceneGeometry(RenderPipelineContext& c, bool opaqueOnly):_resources(c.Primary),_slots(c.Primary.FrameConstants.size()),_common(c.Common),_opaqueOnly(opaqueOnly) {
-    auto& r=c.Primary; if (!opaqueOnly) _grass=std::make_unique<SceneGrass>(c);
+    auto& r=c.Primary; _grass=std::make_unique<SceneGrass>(c, !opaqueOnly);
     for (auto& frame : r.FrameConstants) {
         frame->MaterialCache->TrackChanges();
         if (!opaqueOnly) { frame->MainCB->TrackChanges(); frame->CameraCB->TrackChanges(); }
@@ -328,6 +328,9 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechn
     Graph reordered;reordered.Resources=std::move(g.Resources);
     for(auto id:order){auto op=std::move(g.Operations[id]);for(auto& dep:op.Dependencies){dep=remap.at(dep);if(dep==Invalid)throw std::logic_error("Scene plan removed an explicit producer");}reordered.Operations.push_back(std::move(op));}
     auto schedule=Compile(reordered,singleDirect);for(auto& packet:schedule.Packets)if(packet.Operation!=Invalid)packet.Operation=order.at(packet.Operation);return schedule;
+}
+void SceneGeometry::AppendGrassView(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot, const GeometryTarget& target) {
+    bindings=_grass->Append(graph,slot,bindings,_slots.at(slot).Buffers[2].Srv,{target},true);
 }
 std::vector<ID3D12Resource*> SceneGeometry::Resources(UINT index,ID3D12Resource* target,bool grass) const {
     const auto& s=_slots.at(index);if(grass && !s.PlannedBindings.empty())return s.PlannedBindings;
