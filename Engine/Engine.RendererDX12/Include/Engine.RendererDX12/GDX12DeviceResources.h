@@ -47,6 +47,10 @@ public:
     GDX12RenderPrimitiveRegistry Primitives;
     void BeginMeshPrimitiveUpdate();
     GDX12RenderPrimitiveHandle PublishMeshPrimitive(UINT instance, const GDX12RenderPrimitive& primitive);
+    const GDX12RenderPrimitive* GetMeshPrimitive(UINT instance) const
+    {
+        return instance < _meshPrimitives.size() ? Primitives.Get(_meshPrimitives[instance].Handle) : nullptr;
+    }
     bool RetainMeshPrimitive(UINT instance, GDX12RenderPrimitiveHandle handle)
     {
         if (instance >= _meshPrimitives.size()) return false;

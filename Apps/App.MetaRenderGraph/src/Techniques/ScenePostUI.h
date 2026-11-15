@@ -40,6 +40,8 @@ public:
     void AppendPosters(Graph&, std::vector<ID3D12Resource*>&, bool record = true);
     bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd); }
 private:
+    void AppendScreen(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* target,
+        const std::function<void(GDX12CommandList*)>& finish, Id dependency);
     Id Packet(Graph&, std::vector<ID3D12Resource*>&, const char*,
         std::vector<std::pair<GDX12Resource*, Mode>>, const std::function<void(GDX12CommandList*)>&,
         std::vector<Id> dependencies = {}, GDX12Texture* renderTarget = nullptr,

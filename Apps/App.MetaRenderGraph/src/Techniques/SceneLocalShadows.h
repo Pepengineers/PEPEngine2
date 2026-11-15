@@ -20,6 +20,8 @@ public:
     void Complete(UINT slot);
     void Submitted(UINT slot);
     uint64_t SceneRevision() const { return _sceneRevision; }
+    const std::vector<BoundingBox>& ChangedCasterBounds() const { return _changedCasterBounds; }
+    bool CastersRebuilt() const { return _castersRebuilt; }
     GDX12UploadBuffer<GDX12LocalLightConstants>& LightSource(UINT slot) { return *_slots.at(slot).LightUpload; }
     void Append(Graph&, std::vector<ID3D12Resource*>&, UINT slot,
         const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4>& scene,
@@ -34,6 +36,7 @@ private:
         GDX12InstanceData Instance{};
         GDX12MaterialConstants Material;
         XMFLOAT4X4 World{};
+        uint64_t DeformationRevision = 0;
     };
     struct Caster { BoundingBox Bounds; GDX12IndirectDrawArgs Command; bool CastsShadow, Masked; UINT InputIndex; };
     struct Node { BoundingBox Bounds; UINT First = 0, Count = 0, Left = 0, Right = 0, Parent = UINT_MAX; };
@@ -98,12 +101,13 @@ private:
     RenderPipelineCommonData& _common;
     std::vector<Slot> _slots;
     std::vector<Caster> _casters;
+    std::vector<BoundingBox> _changedCasterBounds;
     std::vector<Node> _nodes;
     std::vector<Input> _inputs;
     std::vector<GDX12RenderPrimitive> _grass;
     std::unordered_map<UINT, std::vector<UINT>> _instances, _transforms, _materials;
     std::vector<UINT> _positions, _leaves;
-    bool _treeReady = false;
+    bool _treeReady = false, _castersRebuilt = false;
     uint64_t _sceneRevision = 0, _geometryRevision = 0, _meshRevision = 0, _textureRevision = 0;
     uint64_t _grassReceiverRevision = 0;
     std::unique_ptr<GDX12RootSignature> _root;

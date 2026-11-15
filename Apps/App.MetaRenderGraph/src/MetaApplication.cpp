@@ -10,6 +10,7 @@
 #include "BistroGrass.h"
 #include "BistroScene.h"
 #include "BistroBounds.h"
+#include "BistroCharacters.h"
 #include "Components/BistroInteractionSource.h"
 #include "Components/FluidRenderComponent.h"
 #include <d3d12sdklayers.h>
@@ -71,12 +72,14 @@ namespace
         Entity _grass=InvalidEntity,_wind=InvalidEntity,_interaction=InvalidEntity;
         MetaRenderPipeline* _pipeline=nullptr;
         BistroGrass::Scene _bistroGrass;
+        BistroCharacters::Scene _bistroCharacters;
         std::unique_ptr<BistroBounds::Scene> _bistroBounds;
         void Update(const GameTimer& timer) override
         {
             if (!_smoke)
             {
                 auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+                _bistroCharacters.Update(world, timer.DeltaTime(), GetJobs(), nullptr, true);
                 _bistroGrass.Update(world, timer.DeltaTime());
                 _bistroBounds->UpdateEmitters(world);
                 BistroParticles::Update(world, true);
@@ -107,6 +110,7 @@ namespace
                 world.SetPaused(true);
                 _bistroGrass.Update(world, 0);
                 CreateBistroParticles(world);
+                _bistroCharacters.Update(world, 0, GetJobs(), nullptr, true);
                 _bistroBounds = std::make_unique<BistroBounds::Scene>(world);
                 _bistroBounds->UpdateEmitters(world);
                 BistroParticles::Update(world, true);
@@ -238,6 +242,7 @@ namespace
         void OnMouseDown(WPARAM, int x, int y) override
         {
             _lastMousePos = { x, y };
+            if (Engine::UI::WantsMouseInput()) return;
             SetCapture(GetWindow()->GetWindowHandle());
         }
 
@@ -248,7 +253,7 @@ namespace
 
         void OnMouseMove(WPARAM buttons, int x, int y) override
         {
-            if (!_smoke && (buttons & MK_RBUTTON))
+            if (!_smoke && !Engine::UI::WantsMouseInput() && (buttons & MK_RBUTTON))
             {
                 auto* world = Locator.GetModule<SceneManagerModule>()->GetWorld();
                 auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
@@ -261,6 +266,7 @@ namespace
 
         void OnMouseWheelMove(WPARAM rotation) override
         {
+            if (Engine::UI::WantsMouseInput()) return;
             _cameraSpeed = std::clamp(_cameraSpeed * (GET_WHEEL_DELTA_WPARAM(rotation) > 0 ? 1.25f : 0.8f), 0.1f, 10000.0f);
         }
 
