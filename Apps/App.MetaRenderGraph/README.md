@@ -4,13 +4,13 @@ Experimental executable using the Meta execution plan alongside production App.
 The ordinary launch now loads the original Bistro interior and exterior with
 static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored lights,
 static SkyBox/IBL, cascaded sun shadows, point/spot shadows, XeGTAO, FidelityFX SSSR, mesh WBOIT
-transparency, Bistro grass/wind and HDR display transform. Alpha-tested cutouts use OpaquePass.
-No reflection-probe, water, particle, reconstruction, other post-effect
+transparency, Bistro grass/wind, GPU particles and HDR display transform. Alpha-tested cutouts use OpaquePass.
+No reflection-probe, water, reconstruction, other post-effect
 or screen-UI passes execute.
-The world is paused; only grass/wind advance through an explicit time path.
+The world is paused; grass/wind and particles advance through explicit time paths.
 The camera remains free.
 
-This adds grass and wind to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+This adds particles to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
 The user checks the ordinary launch, measures CPU/GPU load and FPS, and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
@@ -97,6 +97,20 @@ are created; the interaction field is initialized to its neutral state.
 Ordinary grass uses DIRECT and omits diagnostic probe targets/readbacks.
 Local deformation refreshes affected maps while retaining cached static mesh
 lists. See the [grass/wind report](../../docs/reports/2026-11-15-meta-bistro-grass-wind.md).
+
+Particles reuse the eight existing `BistroParticles` effects and the primary GPU
+simulation/render passes. Startup requests 500000 particles (Count=-1,
+CountScale=2), Quality=2, with simulation and drawing enabled, async/offload off.
+Emitter pause and time scales remain effective while world pause is bypassed only
+for this ordinary path. Colliding emitters read current mesh/grass opaque depth;
+fireflies read the current grass interaction field. Weighted particles append
+after the glass draw, before the single WBOIT resolve; global SortedAlpha/additive
+composition follows that resolve. Particle motion remains available for future
+consumers, without enabling Motion Blur/reconstruction.
+Look for the orange/blue fountains at the entrance, terrace embers, and fireflies
+in the original grass arch; dust/steam use App's `BistroBounds::Scene` layout
+volumes and confinement, while SparkRain retains its authored placement.
+See the [particles report](../../docs/reports/2026-11-15-meta-bistro-particles.md).
 
 The ordinary sun path uses App's `ShadowPass.hlsl` and `CSM.hlsli`: one GPU
 culling dispatch for the active cascades, then one ExecuteIndirect draw per cascade directly

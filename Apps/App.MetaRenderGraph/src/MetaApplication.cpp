@@ -8,6 +8,8 @@
 #include "Engine.Core/AssetManager.h"
 #include "Components/BistroGrassComponents.h"
 #include "BistroGrass.h"
+#include "BistroScene.h"
+#include "BistroBounds.h"
 #include "Components/BistroInteractionSource.h"
 #include "Components/FluidRenderComponent.h"
 #include <d3d12sdklayers.h>
@@ -69,9 +71,16 @@ namespace
         Entity _grass=InvalidEntity,_wind=InvalidEntity,_interaction=InvalidEntity;
         MetaRenderPipeline* _pipeline=nullptr;
         BistroGrass::Scene _bistroGrass;
+        std::unique_ptr<BistroBounds::Scene> _bistroBounds;
         void Update(const GameTimer& timer) override
         {
-            if (!_smoke) _bistroGrass.Update(*Locator.GetModule<SceneManagerModule>()->GetWorld(), timer.DeltaTime());
+            if (!_smoke)
+            {
+                auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+                _bistroGrass.Update(world, timer.DeltaTime());
+                _bistroBounds->UpdateEmitters(world);
+                BistroParticles::Update(world, true);
+            }
             App::Update(timer);
         }
         bool AddModules() override
@@ -97,6 +106,10 @@ namespace
                 auto& world = *scenes->GetWorld();
                 world.SetPaused(true);
                 _bistroGrass.Update(world, 0);
+                CreateBistroParticles(world);
+                _bistroBounds = std::make_unique<BistroBounds::Scene>(world);
+                _bistroBounds->UpdateEmitters(world);
+                BistroParticles::Update(world, true);
                 auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
                 camera.Location = {-300, 200, 20};
                 camera.Rotation = {0, 117, 0};

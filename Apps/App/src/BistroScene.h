@@ -54,7 +54,7 @@ namespace BistroParticles
         bool LayoutVolume = false;
     };
 
-    inline void Update(World& world)
+    inline void Update(World& world, bool advanceWhilePaused = false)
     {
         const auto total = static_cast<uint64_t>(GetBudget());
         const auto simulation = Simulation.GetValue();
@@ -89,7 +89,7 @@ namespace BistroParticles
                     emitter.SetEnabled(count != 0);
                 }
                 // GPU spawn accepts only dead slots, keeping the requested live count without CPU readback.
-                if (count && !world.IsPaused() && !emitter.IsPaused()) emitter.Emit(count);
+                if (count && (!world.IsPaused() || advanceWhilePaused) && !emitter.IsPaused()) emitter.Emit(count);
             });
     }
 

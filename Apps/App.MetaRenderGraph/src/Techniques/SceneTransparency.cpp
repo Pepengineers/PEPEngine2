@@ -3,7 +3,7 @@
 namespace Meta
 {
 SceneTransparency::SceneTransparency(GDX12DeviceResources& resources, RenderPipelineCommonData& common)
-    : _resources(resources), _common(common), _frames(resources.FrameConstants.size())
+    : _resources(resources), _common(common), _frames(resources.FrameConstants.size()), _particles(resources, common)
 {
     for (auto& frame : _frames)
     {
@@ -47,6 +47,7 @@ GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource
              compose.OUT_Result->GetHeight() != hdr->GetHeight()) compose.Resize();
     frame.Initialized = true;
     auto* output = compose.OUT_Result.get();
+    _particles.Prepare(graph, bindings, scene.DepthView.get(), accum, reveal, geometry.InteractionField());
     const auto resource = [&](ID3D12Resource* value) {
         return NativeWork::ResourceFor(graph, bindings, value, "mesh transparency resource");
     };
@@ -115,6 +116,7 @@ GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource
         cmd->IASetIndexBuffer(&geom.Indices);
         if (draws) cmd->ExecuteIndirect(signature, draws, args, 0, count, 0);
     });
+    _particles.AppendWeighted(graph, bindings);
     auto* composeRoot = compose._compositionRS.get();
     auto* composePipeline = compose._compositionPSO.Get();
     const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 3> images{
@@ -134,6 +136,7 @@ GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource
             cmd->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             cmd->DrawInstanced(3, 1, 0, 0);
         });
+    _particles.AppendComposite(graph, bindings, output);
     return output;
 }
 }

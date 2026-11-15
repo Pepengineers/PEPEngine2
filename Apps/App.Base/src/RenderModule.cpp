@@ -972,7 +972,7 @@ void RenderModule::CollectParticleEmitters()
             emitter.Id = component.GetId();
             emitter.ResetRevision = component.GetResetRevision();
             emitter.BurstTotal = component.GetBurstTotal();
-            emitter.Paused = component.IsPaused() || world->IsPaused();
+            emitter.Paused = component.IsPaused() || (world->IsPaused() && !_pipeline->AdvancesParticlesWhileWorldPaused());
             emitter.DeltaTime = _timer->DeltaTime() * world->GetTimeScale();
             emitter.World = Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
                 XMConvertToRadians(transform.Rotation.y), XMConvertToRadians(transform.Rotation.x),

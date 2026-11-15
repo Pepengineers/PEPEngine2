@@ -53,6 +53,7 @@ public:
     virtual bool OwnsExecution() const { return false; }
     virtual bool OwnsScreenUI() const { return false; }
     virtual bool OwnsScenePreparation() const { return false; }
+    virtual bool AdvancesParticlesWhileWorldPaused() const { return false; }
     virtual void RebuildExecution(RenderPipelineContext&) {}
     virtual void DrainExecution() {}
     virtual uint64_t ExecuteFrame(RenderPipelineContext&, GDX12CommandList*,
