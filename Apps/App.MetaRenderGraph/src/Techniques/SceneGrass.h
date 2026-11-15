@@ -20,6 +20,11 @@ public:
     std::vector<uint8_t> Readback(UINT slot,const std::string& stem) const;
 private:
     struct RecordedFrame {
+        struct MainGeometry {
+            std::unique_ptr<GDX12UploadBuffer<GDX12GrassRenderer::Vertex>> Vertices;
+            std::unique_ptr<GDX12UploadBuffer<UINT>> Indices, Arguments;
+        };
+        std::vector<MainGeometry> MainPatches;
         struct Probe {
             GDX12ResourceHandle Depth;
             GDX12Descriptor Dsv, ReadDepth;
