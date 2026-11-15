@@ -29,6 +29,8 @@ public:
     void PrepareFrame();
     void SetLocalExecution(bool enabled) { _localOnly = enabled; }
     void SetStaticIBL(bool enabled) { _staticIBL = enabled; }
+    void SetParticleRendering(bool enabled) { _particleRendering = enabled; }
+    void DrawParticles(GDX12CommandList*, GDX12Texture* hdr, D3D12_CPU_DESCRIPTOR_HANDLE depth);
     void SetResourceRetirement(std::function<void()> retire) { _retire = std::move(retire); }
     bool IsRendering() const { return _rendering; }
     bool NeedsSimulation() const { return _rendering || _simulating; }
@@ -77,12 +79,14 @@ private:
     GDX12FluidSolver _solver;
     std::unique_ptr<GDX12RootSignature> _surfaceRoot;
     ComPtr<ID3D12PipelineState> _sphere, _thicknessDraw, _initialize, _filter, _merge, _resolve;
+    ComPtr<ID3D12PipelineState> _particleDraw;
     std::unique_ptr<GDX12Texture> _raw, _eyeDepth, _scratchDepth, _thickness;
     std::unique_ptr<GDX12Texture> _filtered[2];
     std::unique_ptr<GDX12Texture> _depth, _motion, _geometry, _owner, _color;
     GDX12FluidControls _controls = { false, 0 };
     bool _localOnly = false;
     bool _staticIBL = false;
+    bool _particleRendering = false;
     std::function<void()> _retire;
     bool _externalOnly = false;
     ExternalDisplay _externalDisplay;

@@ -11,6 +11,7 @@ SceneWater::SceneWater(GDX12DeviceResources& resources, RenderPipelineCommonData
 {
     _surface.SetLocalExecution(true);
     _surface.SetStaticIBL(true);
+    _surface.SetParticleRendering(true);
     _surface.Setup(&_resources, &_common);
 }
 SceneWater::~SceneWater() { _surface.ClearDenendencies(); }
@@ -80,20 +81,15 @@ void SceneWater::AppendSurface(Graph& graph, std::vector<ID3D12Resource*>& bindi
     if (_surface.NeedsSimulation())
         Packet(graph, bindings, "water seed / SPH hash-sort-density-integrate",
             _surface.GetSimulationBufferAccesses(), [this](auto* commands) { _surface.ExecuteSimulation(commands); });
-    if (_surface.IsRendering())
-        Packet(graph, bindings, "water surface / thickness / NarrowRange / merged depth-motion",
-            _surface.NativeSurfaceAccesses(), [this](auto* commands) { _surface.Execute(commands); });
 }
-GDX12Texture* SceneWater::Resolve(Graph& graph, std::vector<ID3D12Resource*>& bindings,
-    GDX12Texture* background, SceneEnvironment& environment)
+void SceneWater::AppendDraw(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+    GDX12Texture* hdr, D3D12_CPU_DESCRIPTOR_HANDLE depth)
 {
-    if (!_surface.IsRendering()) return background;
-    auto accesses = _surface.NativeResolveAccesses();
-    auto* radiance = environment.Output(1)->GetTexture();
-    accesses.push_back({background->GetResource(), GDX12RenderGraph::Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
-    accesses.push_back({radiance->GetResource(), GDX12RenderGraph::Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
-    Packet(graph, bindings, "water refraction / absorption / scattering / Fresnel static IBL",
-        accesses, [this, background, radiance](auto* commands) { _surface.Resolve(commands, background, radiance); });
-    return _surface.NativeColor();
+    if (!_surface.IsRendering()) return;
+    auto accesses = _surface.NativeSurfaceAccesses();
+    accesses.push_back({hdr->GetResource(), GDX12RenderGraph::Mode::ReadWrite, D3D12_RESOURCE_STATE_RENDER_TARGET});
+    accesses.push_back({_depth->GetResource(), GDX12RenderGraph::Mode::ReadWrite, D3D12_RESOURCE_STATE_DEPTH_WRITE});
+    Packet(graph, bindings, "water draw / MGPU unlit opaque particles", accesses,
+        [this, hdr, depth](auto* commands) { _surface.DrawParticles(commands, hdr, depth); });
 }
 }

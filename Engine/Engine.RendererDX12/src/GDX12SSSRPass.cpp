@@ -53,7 +53,7 @@ void GDX12SSSRPass::Initialize()
         { &_motion, DXGI_FORMAT_R16G16_FLOAT } })
     {
         GDX12RenderHelpers::InitializeComputeTexture(*texture, *_resources,
-            _inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight(), format);
+            _inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight(), format, texture == &_color);
     }
     GDX12RootSignatureDesc root;
     root.NumSingleCBVSlots = 2;
