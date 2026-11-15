@@ -36,3 +36,16 @@ no issues; `git diff --check` passed. No new tests, automatic
 runtime checks, captures or performance measurements were run, as requested.
 The ordinary application was launched for the user's visual and performance check;
 CPU-bound behavior, GPU utilization and runtime correctness remain unverified.
+
+## Follow-up: startup failure
+
+The first launch exited before the first frame with `0xc0000409`. Temporary
+terminate-stack logging located the failure in `LightUpdateSystem` obtaining
+`RenderModule`, before the local-shadow jobs ran. Some existing object files
+predated the CSM layout changes; their compiler read logs contained no header
+dependencies, so the incremental build had left incompatible objects in place.
+
+A complete Release Rebuild of the executable and dependencies passed and
+eliminated the startup failure without source changes. Temporary diagnostics
+were removed. The new process retained a responding window after loading;
+visual correctness and performance remain for the user to check.
