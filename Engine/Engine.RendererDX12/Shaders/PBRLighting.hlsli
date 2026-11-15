@@ -48,9 +48,7 @@ float3 ShadeLocalLight(PBRSurface s, float3 position, float3 v, LocalLight light
     // Bistro units are centimetres; intensity is expressed per square metre.
     float attenuation = rangeFade * rangeFade * cone * cone / max(distanceSquared * 0.0001f, 0.01f);
     float3 result = EvaluateBRDF(s, v, l) * light.Radiance * attenuation;
-#if !DEFERRED_OPAQUE_ONLY
     if (any(result > 0)) result *= LocalVisibility(light, position, s.Normal, saturate(dot(s.Normal, l)));
-#endif
     return result;
 }
 #endif

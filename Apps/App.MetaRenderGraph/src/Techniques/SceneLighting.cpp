@@ -27,7 +27,7 @@ SceneLighting::SceneLighting(GDX12DeviceResources &r, RenderPipelineCommonData &
     if (opaqueOnly) _sunShadows = std::make_unique<SceneSunShadows>(r, c);
     if (opaqueOnly)
     {
-        for (auto& frame : r.FrameConstants) frame->LocalLightCache->TrackChanges();
+        _localShadows = std::make_unique<SceneLocalShadows>(r, c);
         GDX12RootSignatureDesc root;
         root.Constants = {9};
         root.NumSingleCBVSlots = 2;
@@ -86,15 +86,19 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
         _resources.PrepareLocalShadowData();
     }
     auto &constants = *_resources.FrameConstants.at(slot);
-    if (_sunShadows) _sunShadows->Freeze(slot, std::any_of(scene.Buffers.begin(), scene.Buffers.begin() + 4,
-        [](const auto& buffer) { return buffer.Upload; }));
+    const bool sceneChanged = std::any_of(scene.Buffers.begin(), scene.Buffers.begin() + 4,
+        [](const auto& buffer) { return buffer.Upload; });
+    if (_localShadows) _localShadows->Freeze(slot, sceneChanged);
+    if (_sunShadows) _sunShadows->Freeze(slot, sceneChanged);
     constants.ShadowCB->CopyData(0, _resources.ShadowSettings);
     if (!constants.LocalLightCache->GetElementCount())
     {
         constants.LocalLightCache->Resize(1);
         constants.LocalLightCache->CopyData(0, GDX12LocalLightConstants{});
     }
-    const UINT count = constants.LocalLightCache->GetElementCount();
+    if (_localShadows) _localShadows->Complete(slot);
+    auto& lightSource = _localShadows ? _localShadows->LightSource(slot) : *constants.LocalLightCache;
+    const UINT count = lightSource.GetElementCount();
     if (!constants.ShadowLights)
     {
         constants.ShadowLights = std::make_unique<GDX12UploadBuffer<GDX12LocalLightConstants>>(
@@ -106,15 +110,11 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
         constants.ShadowLights->Resize(count);
     if (_opaqueOnly)
     {
-        auto& source = *constants.LocalLightCache;
+        auto& source = lightSource;
         frame.UploadLights = frame.LightRevision != source.GetRevision() ||
             frame.LightSource.Get() != source.GetResource().D3DResource.Get();
         if (frame.UploadLights)
         {
-            for (const auto& light : _resources.LocalLights)
-                if (!std::isfinite(light.Position.x) || !std::isfinite(light.Position.y) || !std::isfinite(light.Position.z) ||
-                    !std::isfinite(light.Range) || light.Range <= 0)
-                    throw std::invalid_argument("Invalid light grid sphere");
             frame.LightRevision = source.GetRevision();
             frame.LightSource = source.GetResource().D3DResource;
         }
@@ -173,6 +173,7 @@ void SceneLighting::AppendAO(Graph &graph, std::vector<ID3D12Resource *> &bindin
 bool SceneLighting::Record(Id id, ID3D12GraphicsCommandList *commands) const
 {
     return _work[_mode].Record(id, commands) || (_sunShadows && _sunShadows->Record(_slot, id, commands)) ||
+           (_localShadows && _localShadows->Record(_slot, id, commands)) ||
            (_reflections && _reflections->Record(id, commands)) ||
            (_frames.at(_slot).AO && _frames.at(_slot).AO->Record(id, commands));
 }
@@ -203,14 +204,18 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     auto* lights = constants.ShadowLights.get();
     if (!_opaqueOnly || frame.UploadLights)
     {
-        auto *lightSource = constants.LocalLightCache->GetResource().D3DResource.Get();
+        auto& source = _localShadows ? _localShadows->LightSource(_slot) : *constants.LocalLightCache;
+        auto *lightSource = source.GetResource().D3DResource.Get();
         auto *lightTarget = constants.ShadowLights->GetResource().D3DResource.Get();
-        const UINT64 lightBytes = UINT64(constants.LocalLightCache->GetElementCount()) * sizeof(GDX12LocalLightConstants);
+        const UINT64 lightBytes = UINT64(source.GetElementCount()) * sizeof(GDX12LocalLightConstants);
         work.Add(graph, "local-light snapshot upload",
-                 {{resource(&constants.LocalLightCache->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
+                 {{resource(&source.GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
                   {resource(&constants.ShadowLights->GetResource()), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
                  [=](auto *cmd) { cmd->CopyBufferRegion(lightTarget, 0, lightSource, 0, lightBytes); });
     }
+    if (_localShadows) _localShadows->Append(graph, bindings, _slot,
+        {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle,
+         scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle}, scene.Geometry, *constants.ShadowLights);
     if (!_opaqueOnly)
     {
         geometry._shadows->AppendLighting(graph, bindings, _slot);
@@ -222,7 +227,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     _deferred.SetInputs({scene.Color[0].get(), scene.Color[2].get(), scene.Color[3].get(), scene.Color[4].get(),
                          scene.DepthView.get(), _sunShadows ? _sunShadows->Output(_slot) : geometry._shadows->LightingSun(_slot), environment.Output(0),
                          environment.Output(1), environment.Output(2), environment.Output(3),
-                         _opaqueOnly ? scene.DepthView.get() : geometry._shadows->LightingLocal(_slot),
+                         _localShadows ? _localShadows->Output(_slot) : geometry._shadows->LightingLocal(_slot),
                          _opaqueOnly ? scene.DepthView.get() : frame.AO->Output()});
     if (!_initialized)
     {
@@ -285,7 +290,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
              [hdr](auto *cmd) { cmd->DiscardResource(hdr, nullptr); });
     auto lighting = environment.Reads(graph, bindings);
     for (UINT i = 0; i < _deferred._inputs.size(); ++i)
-        if (!_opaqueOnly || (i != 10 && i != 11))
+        if (!_opaqueOnly || i != 11)
             lighting.push_back(texture(_deferred._inputs[i]->GetTexture(), Mode::Read, read));
     if (_reflections)
     {
@@ -338,7 +343,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         for (UINT i = 0; i < 5; ++i)
             cmd->SetComputeRootConstantBufferView(root->GetBRootParamIndex(i), cbvs[i]);
         for (UINT i = 0; i < 18; ++i)
-            if (!opaqueOnly || (i != 10 && i != 12 && i != 13 && i != 14))
+            if (!opaqueOnly || (i != 12 && i != 13 && i != 14))
                 cmd->SetComputeRootDescriptorTable(root->GetTRootParamIndex(i), inputs[i]);
         cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), output);
         cmd->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
