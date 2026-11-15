@@ -61,7 +61,7 @@ GDX12WindSettings ResolveWindSettings(const GDX12WindSettings& author, int quali
 bool IsValidGrassSettings(const GDX12GrassSettings& settings);
 bool IsValidWindSettings(const GDX12WindSettings& settings);
 UINT GrassBladeCount(const GDX12GrassSettings& settings);
-BoundingBox GrassLocalBounds(const GDX12GrassSettings& settings);
+BoundingBox GrassLocalBounds(const GDX12GrassSettings& settings, bool includeBend = true);
 
 struct GDX12GrassInstance : GDX12GrassSettings
 {

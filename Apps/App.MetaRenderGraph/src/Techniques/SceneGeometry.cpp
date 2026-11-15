@@ -282,6 +282,7 @@ Schedule SceneGeometry::Plan(UINT index,ID3D12Resource* target,const AppendTechn
     depthTarget.View.Key=1;depthTarget.View.FrameSlot=index;depthTarget.View.DepthFormat=DXGI_FORMAT_D32_FLOAT;
     depthTarget.Depth=17;depthTarget.Dsv=s.Dsv.CPUHandle;depthTarget.Width=_width;depthTarget.Height=_height;
     depthTarget.Camera=s.FrameIds[1];
+    depthTarget.View.SceneDepth=s.DepthView.get();
     if(s.EarlyAO){depthTarget.Colors={s.PrepassId};depthTarget.Rtvs={s.PrepassNormals->GetRTV()->CPUHandle};depthTarget.View.ColorTargetCount=1;depthTarget.View.ColorFormats[0]=DXGI_FORMAT_R16G16B16A16_FLOAT;}
     auto gbufferTarget=depthTarget;gbufferTarget.View.Stage=GDX12GeometryStage::GBuffer;gbufferTarget.Dsv=s.ReadDepth.CPUHandle;
     gbufferTarget.View.ColorTargetCount=5;gbufferTarget.Colors.clear();gbufferTarget.Rtvs.clear();

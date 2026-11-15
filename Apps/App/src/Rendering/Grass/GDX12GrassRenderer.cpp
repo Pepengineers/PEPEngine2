@@ -527,7 +527,7 @@ GDX12GrassRenderer::Output* GDX12GrassRenderer::FindOutput(const GDX12GeometryCo
     return found == index.end() ? nullptr : found->second;
 }
 
-void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patch, GDX12Descriptor* materialOverride)
+void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patch, GDX12Descriptor* materialOverride, bool cullPatch)
 {
     auto& frame = CurrentFrame();
     frame.OutputIndex.erase({ view.Key, view.Stage, patch });
@@ -541,7 +541,7 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
         throw std::invalid_argument("Grass capture requires lighting and camera");
     XMFLOAT4X4 clip;
     XMStoreFloat4x4(&clip, view.ViewProjection.Transpose());
-    if (!LocalShadowFaceIntersects(clip, state.Bounds)) return;
+    if (cullPatch && !LocalShadowFaceIntersects(clip, state.Bounds)) return;
     Parameters p = {};
     XMStoreFloat4x4(&p.World, s.World.Transpose());
     XMStoreFloat4x4(&p.PreviousWorld, state.PreviousWorld.Transpose());
@@ -588,6 +588,7 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
     parameters->CopyData(element, p);
 
     auto output = std::make_unique<Output>();
+    output->Settings = p;
     output->View = view;
     if (view.CaptureLighting)
     {

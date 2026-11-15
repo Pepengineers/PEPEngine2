@@ -21,10 +21,15 @@ public:
 private:
     struct RecordedFrame {
         struct MainGeometry {
-            std::unique_ptr<GDX12UploadBuffer<GDX12GrassRenderer::Vertex>> Vertices;
             std::unique_ptr<GDX12UploadBuffer<UINT>> Indices, Arguments;
         };
         std::vector<MainGeometry> MainPatches;
+        struct BuiltPatch {
+            std::unique_ptr<GDX12UploadBuffer<GDX12GrassRenderer::Vertex>> Vertices;
+            BoundingBox Bounds;
+        };
+        std::vector<BuiltPatch> Built;
+        std::unique_ptr<GDX12UploadBuffer<float>> HiZ;
         struct Probe {
             GDX12ResourceHandle Depth;
             GDX12Descriptor Dsv, ReadDepth;
@@ -49,5 +54,7 @@ private:
     std::array<std::vector<RecordedFrame>,2> _frames;
     UINT _mode=1;
     bool _diagnostics = true;
+    std::unique_ptr<GDX12RootSignature> _geometryRoot, _hiZRoot;
+    ComPtr<ID3D12PipelineState> _buildGeometry, _cullGeometry, _clearGeometry, _buildHiZ;
 };
 }
