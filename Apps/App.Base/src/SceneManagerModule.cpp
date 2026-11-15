@@ -49,9 +49,9 @@ void SceneManagerModule::Initialize()
     {
         Log::Info("Scene", "Creating Bistro light fixtures");
         BenchmarkEngine::GetLocator().GetModule<RenderModule>()->ReserveTransformCapacity(
-            static_cast<UINT>(sizeof(BistroLightPlacements) / sizeof(BistroLightPlacements[0])) + 1);
+            2 * static_cast<UINT>(sizeof(BistroLightPlacements) / sizeof(BistroLightPlacements[0])) + 1);
         const auto create = [world](const char* name, Vector3 position, Vector3 direction,
-            LightType type, float range, float intensity)
+            LightType type, float range, float intensity, bool wideSpot = false)
         {
             direction.Normalize();
             const Vector3 rotation(XMConvertToDegrees(std::asin(-direction.y)), XMConvertToDegrees(std::atan2(direction.x, direction.z)), 0);
@@ -62,6 +62,12 @@ void SceneManagerModule::Initialize()
             light.Type = type;
             light.Range = range;
             light.Intensity = intensity;
+            if (wideSpot)
+            {
+                // shortcut: cones leave an equatorial gap; use dual-paraboloid shadows for full coverage.
+                light.InnerAngle = 85.0f;
+                light.OuterAngle = 89.0f;
+            }
             if (type == LightType::Directional)
             {
                 entity.AddComponent<SkyBoxComponent>();
@@ -72,8 +78,14 @@ void SceneManagerModule::Initialize()
         };
         create("Sun", Vector3::Zero, Vector3(0.35f, -1.0f, 0.25f), LightType::Directional, 0, 4.0f);
         for (const auto& fixture : BistroLightPlacements)
+        {
+            const bool pair = fixture.Kind == BistroFixtureKind::Point;
             create(fixture.Name, fixture.Position, fixture.Direction,
-                fixture.Kind == BistroFixtureKind::Point ? LightType::Point : LightType::Spot, fixture.Range, fixture.Intensity);
+                LightType::Spot, fixture.Range, fixture.Intensity, pair);
+            if (pair)
+                create(fixture.Name, fixture.Position, -fixture.Direction,
+                    LightType::Spot, fixture.Range, fixture.Intensity, true);
+        }
     }
     Log::Info("Scene", "Scene initialization complete: ", scenePath);
 }
