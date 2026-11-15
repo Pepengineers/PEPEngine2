@@ -21,6 +21,7 @@ public:
 
     GDX12SSSRPass();
     ~GDX12SSSRPass() override;
+    void SetStaticIBLOnly(bool enabled) { _staticIBLOnly = enabled; }
     void Initialize() override;
     void Execute(GDX12CommandList* commands) override;
     void Resize() override;
@@ -46,6 +47,7 @@ private:
     uint64_t _environmentRevision = UINT64_MAX;
     std::array<ID3D12Resource*, 7> _sources = {};
     GDX12SSRSettings _previousSettings = {};
+    bool _staticIBLOnly = false;
     void CreateContext();
     void DestroyContext();
 };

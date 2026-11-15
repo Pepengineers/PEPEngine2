@@ -3,13 +3,13 @@
 Experimental executable using the Meta execution plan alongside production App.
 The ordinary launch now loads the original Bistro interior and exterior with
 static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored lights,
-static SkyBox/IBL, cascaded sun shadows, point/spot shadows, XeGTAO, mesh WBOIT
+static SkyBox/IBL, cascaded sun shadows, point/spot shadows, XeGTAO, FidelityFX SSSR, mesh WBOIT
 transparency and HDR display transform. Alpha-tested cutouts use OpaquePass.
-No SSR, reflection-probe, grass, water, particle, reconstruction, post-effect
+No reflection-probe, grass, water, particle, reconstruction, other post-effect
 or screen-UI passes execute.
 The world is paused to exclude simulation; the camera remains free.
 
-This adds mesh transparency to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+This adds screen-space reflections to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
 The user checks the ordinary launch, measures CPU/GPU load and FPS, and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
@@ -72,6 +72,19 @@ tables or behind the interior bar. After visual review, drinking-glass opacity
 is 0.50 with shininess 100; other glass materials retain their authored settings.
 Blended bounds participate in local-shadow receiver selection; they do not cast
 opaque shadows. See the [transparency report](../../docs/reports/2026-11-15-meta-bistro-transparency.md).
+
+FidelityFX SSSR and its denoiser run after deferred lighting and before mesh
+transparency. Startup selects `Render.SSR.Enabled=true`, `Render.SSR.Quality=2`
+(Mid), with inherited App defaults. Misses use static IBL, without reflection
+probes. Resolve replaces the original specular IBL contribution once. Disabling
+SSR bypasses its packets and sends opaque HDR directly to transparency.
+The SDK history persists across frame-slot rotation; camera cuts, resize,
+settings/environment changes and re-enable reset it. The three frames in flight
+fit the bundled SDK's four-frame limit.
+Look at the metal bar/counter and other glossy opaque surfaces inside Bistro.
+Only opaque surfaces present in screen-space depth/color can appear in these
+reflections; glass retains static IBL and is not captured by SSR.
+See the [SSSR stage report](../../docs/reports/2026-11-15-meta-bistro-ssr.md).
 
 The ordinary sun path uses App's `ShadowPass.hlsl` and `CSM.hlsli`: one GPU
 culling dispatch for the active cascades, then one ExecuteIndirect draw per cascade directly
