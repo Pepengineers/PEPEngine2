@@ -114,7 +114,11 @@ void MetaRenderPipeline::RebuildExecution(RenderPipelineContext &c)
 }
 bool MetaRenderPipeline::PrepareFrame(RenderPipelineContext &c, GDX12CommandList *)
 {
-    if (_opaqueOnly) { c.Common.AOAfterDepthPrepass = false; return false; }
+    if (_opaqueOnly) {
+        c.Common.AOAfterDepthPrepass = false;
+        _geometry->PrepareGrass(c, c.Common.GameTimer->DeltaTime());
+        return false;
+    }
     c.Common.AOAfterDepthPrepass = GetAmbientOcclusionExecutionPoint() == 0 && GetAmbientOcclusionSettings().IsActive();
     _geometry->PrepareGrass(c, _verify ? 1.f / 60.f : c.Common.GameTimer->DeltaTime());
     c.PrepareScene().Complete();

@@ -91,13 +91,14 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
     auto &constants = *_resources.FrameConstants.at(slot);
     bool sceneChanged = std::any_of(scene.Buffers.begin(), scene.Buffers.begin() + 4,
         [](const auto& buffer) { return buffer.Upload; });
+    const auto grass = geometry.GrassPrimitives();
     if (_localShadows)
     {
-        _localShadows->Freeze(slot);
+        _localShadows->Freeze(slot, grass);
         sceneChanged = frame.ShadowSceneRevision != _localShadows->SceneRevision();
         frame.ShadowSceneRevision = _localShadows->SceneRevision();
     }
-    if (_sunShadows) _sunShadows->Freeze(slot, sceneChanged);
+    if (_sunShadows) _sunShadows->Freeze(slot, sceneChanged, grass);
     constants.ShadowCB->CopyData(0, _resources.ShadowSettings);
     if (!constants.LocalLightCache->GetElementCount())
     {
@@ -208,9 +209,12 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     };
     const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
     auto *heap = _resources.SRV_UAV_Heap->GetHeap().Get();
+    const auto appendGrass = [&](const GeometryTarget& view, Graph& g, std::vector<ID3D12Resource*>& resources) {
+        geometry.AppendGrassView(g, resources, _slot, view);
+    };
     if (_sunShadows) _sunShadows->Append(graph, bindings, _slot,
         {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle,
-         scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle}, scene.Draws, scene.Geometry);
+         scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle}, scene.Draws, scene.Geometry, appendGrass);
     auto* lights = constants.ShadowLights.get();
     if (!_opaqueOnly || frame.UploadLights)
     {
@@ -225,7 +229,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     }
     if (_localShadows) _localShadows->Append(graph, bindings, _slot,
         {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle,
-         scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle}, scene.Geometry, *constants.ShadowLights);
+         scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle}, scene.Geometry, *constants.ShadowLights, appendGrass);
     if (!_opaqueOnly)
     {
         geometry._shadows->AppendLighting(graph, bindings, _slot);

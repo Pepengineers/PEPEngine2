@@ -7,10 +7,11 @@
 namespace Meta {
 class SceneGrass {
 public:
-    explicit SceneGrass(RenderPipelineContext&);
+    explicit SceneGrass(RenderPipelineContext&, bool diagnostics = true);
     void Prepare(RenderPipelineContext&,float dt);
     GDX12ParticleInteractionField InteractionField() const { return _gpu[_mode]->InteractionField(); }
     void Select(bool serial) { _mode=serial?0:1; }
+    std::vector<GDX12RenderPrimitive> Primitives() const;
     std::vector<ID3D12Resource*> Append(Graph&,UINT slot,const std::vector<ID3D12Resource*>& existing,GDX12Descriptor& materials,
         const std::vector<GeometryTarget>& targets,bool viewsOnly=false,
         const std::function<void(const GeometryTarget&,Graph&,std::vector<ID3D12Resource*>&)>& beforeView={});
@@ -42,5 +43,6 @@ private:
     std::array<std::unique_ptr<GDX12GrassRenderer>,2> _gpu;
     std::array<std::vector<RecordedFrame>,2> _frames;
     UINT _mode=1;
+    bool _diagnostics = true;
 };
 }

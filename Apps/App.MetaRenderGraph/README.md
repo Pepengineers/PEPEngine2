@@ -4,12 +4,13 @@ Experimental executable using the Meta execution plan alongside production App.
 The ordinary launch now loads the original Bistro interior and exterior with
 static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored lights,
 static SkyBox/IBL, cascaded sun shadows, point/spot shadows, XeGTAO, FidelityFX SSSR, mesh WBOIT
-transparency and HDR display transform. Alpha-tested cutouts use OpaquePass.
-No reflection-probe, grass, water, particle, reconstruction, other post-effect
+transparency, Bistro grass/wind and HDR display transform. Alpha-tested cutouts use OpaquePass.
+No reflection-probe, water, particle, reconstruction, other post-effect
 or screen-UI passes execute.
-The world is paused to exclude simulation; the camera remains free.
+The world is paused; only grass/wind advance through an explicit time path.
+The camera remains free.
 
-This adds screen-space reflections to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+This adds grass and wind to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
 The user checks the ordinary launch, measures CPU/GPU load and FPS, and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
@@ -85,6 +86,17 @@ Look at the metal bar/counter and other glossy opaque surfaces inside Bistro.
 Only opaque surfaces present in screen-space depth/color can appear in these
 reflections; glass retains static IBL and is not captured by SSR.
 See the [SSSR stage report](../../docs/reports/2026-11-15-meta-bistro-ssr.md).
+
+Grass reuses `BistroGrass::Scene` and the App GPU wind/expansion/render kernels.
+The initial mode is one Ribbon patch with Analytic wind, both at Mid quality,
+at the original building_02 arch/tunnel (centre 1399.6, 23.3, 1369 cm, yaw 69 degrees).
+Grass writes depth/GBuffer/velocity and participates in sun/local shadows.
+Wind advances while the rest of the world is paused, retaining world/field time
+scales and the existing bounded wind step/reset rules. No interaction sources
+are created; the interaction field is initialized to its neutral state.
+Ordinary grass uses DIRECT and omits diagnostic probe targets/readbacks.
+Local deformation refreshes affected maps while retaining cached static mesh
+lists. See the [grass/wind report](../../docs/reports/2026-11-15-meta-bistro-grass-wind.md).
 
 The ordinary sun path uses App's `ShadowPass.hlsl` and `CSM.hlsli`: one GPU
 culling dispatch for the active cascades, then one ExecuteIndirect draw per cascade directly

@@ -48,7 +48,7 @@ void BistroGrassGeometry::Unsubscribe(World& world)
     _wind.clear();
 }
 
-void BistroGrassGeometry::CollectScene(float deltaSeconds)
+void BistroGrassGeometry::CollectScene(float deltaSeconds, bool advanceWhilePaused)
 {
     _grass.clear();
     _wind.clear();
@@ -58,7 +58,7 @@ void BistroGrassGeometry::CollectScene(float deltaSeconds)
     {
         auto& world = *_scenes->GetWorld(i);
         world.GetECS().RegisterComponent<BistroInteractionSource>();
-        _deltaSeconds = (std::max)(_deltaSeconds, world.IsPaused() ? 0.0f : deltaSeconds * world.GetTimeScale());
+        _deltaSeconds = (std::max)(_deltaSeconds, world.IsPaused() && !advanceWhilePaused ? 0.0f : deltaSeconds * world.GetTimeScale());
         world.GetECS().ForEach<BistroInteractionSource>([&](Entity, const BistroInteractionSource& source)
         { _sources.push_back(source); });
     }
@@ -104,7 +104,7 @@ void BistroGrassGeometry::CollectScene(float deltaSeconds)
                             snapshot.Id = field._renderOwner;
                             const auto& location = ecs.Get<TransformComponent>(component.WindEntity).Location;
                             snapshot.CenterCm = Vector2(location.x, location.z);
-                            snapshot.DeltaSeconds = field.Paused || world->IsPaused() ? 0 :
+                            snapshot.DeltaSeconds = field.Paused || (world->IsPaused() && !advanceWhilePaused) ? 0 :
                                 deltaSeconds * world->GetTimeScale();
                             _wind.push_back(std::move(snapshot));
                         }

@@ -200,6 +200,36 @@ void SceneLocalShadows::Invalidate(const Caster& caster)
     }
 }
 
+void SceneLocalShadows::InvalidateGrass(const GDX12RenderPrimitive& grass)
+{
+    if (!grass.Visible || !grass.CastsShadows || !grass.InstanceCount) return;
+    for (auto& slot : _slots) for (auto& cache : slot.Cache)
+    {
+        if (!cache.HasLight || !LocalShadowRangeIntersects(cache.Light, grass.Bounds)) continue;
+        for (UINT face = 0; face < LocalShadowFaceCount(cache.Light); ++face)
+            if (GDX12LocalShadowFrustum(cache.Light.ShadowViewProj[face]).Intersects(grass.Bounds))
+                cache.MapsValid &= ~(1u << face);
+    }
+}
+
+void SceneLocalShadows::UpdateGrass(const std::vector<GDX12RenderPrimitive>& grass)
+{
+    bool receiversChanged = _grass.size() != grass.size();
+    for (size_t i = 0; i < (std::max)(_grass.size(), grass.size()); ++i)
+    {
+        const auto* before = i < _grass.size() ? &_grass[i] : nullptr;
+        const auto* after = i < grass.size() ? &grass[i] : nullptr;
+        if (before && after && before->Revision() == after->Revision()) continue;
+        if (before) InvalidateGrass(*before);
+        if (after) InvalidateGrass(*after);
+        receiversChanged |= !before || !after || before->Visible != after->Visible ||
+            before->InstanceCount != after->InstanceCount ||
+            std::memcmp(&before->Bounds, &after->Bounds, sizeof(BoundingBox)) != 0;
+    }
+    _grass = grass;
+    if (receiversChanged) ++_grassReceiverRevision;
+}
+
 void SceneLocalShadows::UpdateCasters(UINT slot)
 {
     auto& frame = *_resources.FrameConstants.at(slot);
@@ -373,7 +403,7 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
     if (!Frame->SelectionChanged && !output.SelectionDirty && (output.Needed & ~output.ListsValid) == 0) return;
     output.SelectionDirty = false;
     output.Needed = 0;
-    if (!(light.ShadowFlags & 1u) || (light.Type != 1 && light.Type != 2) || Owner->_nodes.empty() ||
+    if (!(light.ShadowFlags & 1u) || (light.Type != 1 && light.Type != 2) ||
         !Owner->_resources.ShadowQuality.LocalResolution) return;
     const BoundingBox influence(light.Position, XMFLOAT3(light.Range, light.Range, light.Range));
     if (!Frame->Camera->Intersects(influence)) return;
@@ -381,7 +411,19 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
         GDX12LocalShadowFrustum(light.ShadowViewProj[0]), GDX12LocalShadowFrustum(light.ShadowViewProj[1]),
         GDX12LocalShadowFrustum(light.ShadowViewProj[2]), GDX12LocalShadowFrustum(light.ShadowViewProj[3]),
         GDX12LocalShadowFrustum(light.ShadowViewProj[4]), GDX12LocalShadowFrustum(light.ShadowViewProj[5])};
-    output.Needed = Owner->NeededFaces(0, light, faces, (1u << LocalShadowFaceCount(light)) - 1, *Frame);
+    const UINT allFaces = (1u << LocalShadowFaceCount(light)) - 1;
+    if (!Owner->_nodes.empty()) output.Needed = Owner->NeededFaces(0, light, faces, allFaces, *Frame);
+    const float margin = light.Range / Frame->Resolution * 0.3f + 0.01f;
+    for (const auto& grass : Owner->_grass)
+    {
+        if (!grass.Visible || !grass.InstanceCount) continue;
+        const auto visible = VisibleBounds(grass.Bounds, Frame->CameraPlanes, Frame->CameraCorners);
+        if (!visible || !LocalShadowRangeIntersects(light, *visible)) continue;
+        auto bounds = *visible;
+        bounds.Extents = Vector3(bounds.Extents) + Vector3(margin, margin, margin);
+        for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
+            if (faces[face].Intersects(bounds)) output.Needed |= 1u << face;
+    }
     const UINT missing = output.Needed & ~output.ListsValid;
     for (UINT face = 0; face < 6; ++face)
         if (missing & (1u << face))
@@ -389,7 +431,7 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
             output.Faces[face].Opaque.clear();
             output.Faces[face].Masked.clear();
         }
-    if (missing) Owner->Gather(0, light, faces, missing, output);
+    if (missing && !Owner->_nodes.empty()) Owner->Gather(0, light, faces, missing, output);
     output.ListsValid |= missing;
 }
 
@@ -437,10 +479,11 @@ void SceneLocalShadows::PackJob::Execute(size_t)
     }
 }
 
-void SceneLocalShadows::Freeze(UINT slot)
+void SceneLocalShadows::Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass)
 {
     if (!_common.Jobs) throw std::logic_error("Local shadow preparation requires JobSystem");
     UpdateCasters(slot);
+    UpdateGrass(grass);
     auto& frame = _slots.at(slot);
     frame.Lights = _resources.LocalLights;
     for (const auto& light : frame.Lights)
@@ -475,8 +518,10 @@ void SceneLocalShadows::Freeze(UINT slot)
         if (source.ShadowFlags & 1u) slices += LocalShadowFaceCount(source);
     }
     frame.SelectionChanged = !frame.Camera || frame.SceneRevision != _sceneRevision ||
+        frame.GrassReceiverRevision != _grassReceiverRevision ||
         frame.Resolution != (std::max)(1u, _resources.ShadowQuality.LocalResolution);
     frame.SceneRevision = _sceneRevision;
+    frame.GrassReceiverRevision = _grassReceiverRevision;
     PrepareAtlas(frame, (std::min)(slices, UINT(D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION)));
     XMFLOAT4X4 viewProjection;
     XMStoreFloat4x4(&viewProjection, XMMatrixTranspose(_common.CameraView * _common.CameraProjection));
@@ -585,7 +630,8 @@ void SceneLocalShadows::PrepareAtlas(Slot& frame, UINT requestedSlices)
 
 void SceneLocalShadows::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot,
     const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4>& scene, GDX12GeometryBuffer::RecordingBinding geometry,
-    GDX12UploadBuffer<GDX12LocalLightConstants>& lights)
+    GDX12UploadBuffer<GDX12LocalLightConstants>& lights,
+    const std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>& appendGrass)
 {
     auto& frame = _slots.at(slot);
     auto& work = frame.Work;
@@ -660,5 +706,26 @@ void SceneLocalShadows::Append(Graph& graph, std::vector<ID3D12Resource*>& bindi
             }
         }
     });
+    if (appendGrass)
+    {
+        auto& camera = *_resources.FrameConstants.at(slot)->CameraCB;
+        const Id cameraResource = resource(camera.GetResource().D3DResource.Get(), "local grass shadow camera");
+        for (UINT i = 0; i < views.size(); ++i)
+        {
+            const auto& view = views[i];
+            GeometryTarget grassTarget;
+            grassTarget.View = {GDX12GeometryStage::Shadow,
+                Matrix(frame.Lights[view.Light].ShadowViewProj[view.Face]).Transpose(),
+                _common.CameraView.Invert().Translation(), camera.GetElementAddress(_common.ActiveCameraCBufferIndex)};
+            grassTarget.View.Key = (2ull << 60) | (uint64_t(view.Light) * 6 + view.Face);
+            grassTarget.View.FrameSlot = slot;
+            grassTarget.View.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+            grassTarget.Depth = atlas;
+            grassTarget.Camera = cameraResource;
+            grassTarget.Dsv = dsvs[i];
+            grassTarget.Width = grassTarget.Height = resolution;
+            appendGrass(grassTarget, graph, bindings);
+        }
+    }
 }
 }

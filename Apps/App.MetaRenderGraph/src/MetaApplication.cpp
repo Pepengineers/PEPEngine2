@@ -7,6 +7,7 @@
 #include "Engine.Core/Logging/Logger.h"
 #include "Engine.Core/AssetManager.h"
 #include "Components/BistroGrassComponents.h"
+#include "BistroGrass.h"
 #include "Components/BistroInteractionSource.h"
 #include "Components/FluidRenderComponent.h"
 #include <d3d12sdklayers.h>
@@ -67,6 +68,12 @@ namespace
         Entity _animatedPeer=InvalidEntity;
         Entity _grass=InvalidEntity,_wind=InvalidEntity,_interaction=InvalidEntity;
         MetaRenderPipeline* _pipeline=nullptr;
+        BistroGrass::Scene _bistroGrass;
+        void Update(const GameTimer& timer) override
+        {
+            if (!_smoke) _bistroGrass.Update(*Locator.GetModule<SceneManagerModule>()->GetWorld(), timer.DeltaTime());
+            App::Update(timer);
+        }
         bool AddModules() override
         {
             auto pipeline=std::make_unique<MetaRenderPipeline>(_smoke, !_smoke);_pipeline=pipeline.get();
@@ -89,6 +96,7 @@ namespace
             {
                 auto& world = *scenes->GetWorld();
                 world.SetPaused(true);
+                _bistroGrass.Update(world, 0);
                 auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
                 camera.Location = {-300, 200, 20};
                 camera.Rotation = {0, 117, 0};

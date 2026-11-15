@@ -50,7 +50,7 @@ SceneSunShadows::SceneSunShadows(GDX12DeviceResources& r, RenderPipelineCommonDa
     _signature = GDX12RenderHelpers::CreateIndexedDrawSignature(r.Device, _graphicsRoot.get());
 }
 
-void SceneSunShadows::Freeze(UINT slot, bool sceneChanged)
+void SceneSunShadows::Freeze(UINT slot, bool sceneChanged, const std::vector<GDX12RenderPrimitive>& grass)
 {
     auto& s = _slots.at(slot);
     if (sceneChanged || !s.BoundsReady)
@@ -73,19 +73,33 @@ void SceneSunShadows::Freeze(UINT slot, bool sceneChanged)
         }
         s.BoundsReady = true;
     }
+    BoundingBox bounds = s.Bounds;
+    bool hasBounds = s.HasBounds;
+    uint64_t grassRevision = 14695981039346656037ull;
+    for (const auto& primitive : grass)
+    {
+        if (!primitive.Visible || !primitive.CastsShadows || !primitive.InstanceCount) continue;
+        if (hasBounds) BoundingBox::CreateMerged(bounds, bounds, primitive.Bounds);
+        else bounds = primitive.Bounds;
+        hasBounds = true;
+        grassRevision = (grassRevision ^ primitive.Revision()) * 1099511628211ull;
+    }
+    const bool grassChanged = grassRevision != s.GrassRevision;
+    s.GrassRevision = grassRevision;
     _resources.ShadowSettings = BuildShadowCascades(_common.CameraView.Invert(),
         XMConvertToRadians(_common.ActiveCameraFOV), float(_common.DownscaledWidth) / _common.DownscaledHeight,
         _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane, Vector3(_resources.Lighting.LightDirection),
-        s.HasBounds ? &s.Bounds : nullptr, _resources.ShadowQuality.SunResolution, _resources.ShadowQuality.SunCascades);
+        hasBounds ? &bounds : nullptr, _resources.ShadowQuality.SunResolution, _resources.ShadowQuality.SunCascades);
     const UINT flags = _resources.Lighting.SunShadowFlags;
-    s.Update = (flags & 1u) && ((flags & 2u) || !s.Rendered || sceneChanged ||
+    s.Update = (flags & 1u) && ((flags & 2u) || !s.Rendered || sceneChanged || grassChanged ||
         s.Resolution != _resources.ShadowQuality.SunResolution || s.Revision != _resources.Lighting.SunShadowRevision ||
         std::memcmp(&s.Settings, &_resources.ShadowSettings, sizeof(s.Settings)) != 0);
 }
 
 void SceneSunShadows::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot,
     const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4>& scene, UINT draws,
-    GDX12GeometryBuffer::RecordingBinding geometry)
+    GDX12GeometryBuffer::RecordingBinding geometry,
+    const std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>& appendGrass)
 {
     auto& s = _slots.at(slot);
     auto& work = s.Work;
@@ -219,6 +233,29 @@ void SceneSunShadows::Append(Graph& graph, std::vector<ID3D12Resource*>& binding
             if (draws) cmd->ExecuteIndirect(signature, draws, commands[cascade], 0, counts, cascade * sizeof(UINT));
         }
     });
+    if (appendGrass)
+    {
+        auto& camera = *_resources.FrameConstants.at(slot)->CameraCB;
+        const Id cameraId = resource(camera.GetResource().D3DResource.Get(), "sun grass camera constants");
+        for (UINT cascade = 0; cascade < cascadeCount; ++cascade)
+        {
+            const auto region = SunShadowRegion(cascade, resolution);
+            GeometryTarget target;
+            target.View = {GDX12GeometryStage::Shadow, Matrix(_resources.ShadowSettings.ViewProj[cascade]).Transpose(),
+                _common.CameraView.Invert().Translation(), camera.GetElementAddress(_common.ActiveCameraCBufferIndex)};
+            target.View.Key = (4ull << 60) | cascade;
+            target.View.FrameSlot = slot;
+            target.View.DepthFormat = DXGI_FORMAT_D32_FLOAT;
+            target.Depth = atlas;
+            target.Camera = cameraId;
+            target.Dsv = dsv;
+            target.X = region.X;
+            target.Y = region.Y;
+            target.Width = region.Width;
+            target.Height = region.Height;
+            appendGrass(target, graph, bindings);
+        }
+    }
     s.Settings = _resources.ShadowSettings;
     s.Revision = _resources.Lighting.SunShadowRevision;
     s.Rendered = true;

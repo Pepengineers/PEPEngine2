@@ -1,8 +1,10 @@
 #pragma once
 #include "NativeWork.h"
+#include "GeometryTarget.h"
 #include "Engine.Core/Jobs/JobSystem.h"
 #include "Engine.RendererDX12/GDX12DeviceResources.h"
 #include <optional>
+#include <functional>
 #include <unordered_map>
 
 class RenderPipelineCommonData;
@@ -14,14 +16,15 @@ class SceneLocalShadows
 public:
     SceneLocalShadows(GDX12DeviceResources&, RenderPipelineCommonData&);
     ~SceneLocalShadows();
-    void Freeze(UINT slot);
+    void Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass = {});
     void Complete(UINT slot);
     void Submitted(UINT slot);
     uint64_t SceneRevision() const { return _sceneRevision; }
     GDX12UploadBuffer<GDX12LocalLightConstants>& LightSource(UINT slot) { return *_slots.at(slot).LightUpload; }
     void Append(Graph&, std::vector<ID3D12Resource*>&, UINT slot,
         const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4>& scene,
-        GDX12GeometryBuffer::RecordingBinding geometry, GDX12UploadBuffer<GDX12LocalLightConstants>& lights);
+        GDX12GeometryBuffer::RecordingBinding geometry, GDX12UploadBuffer<GDX12LocalLightConstants>& lights,
+        const std::function<void(const GeometryTarget&, Graph&, std::vector<ID3D12Resource*>&)>& appendGrass = {});
     bool Record(UINT slot, Id id, ID3D12GraphicsCommandList* cmd) const { return _slots.at(slot).Work.Record(id, cmd); }
     GDX12Texture* Output(UINT slot) { return &_slots.at(slot).Atlas; }
 private:
@@ -75,12 +78,14 @@ private:
         GDX12Texture Atlas;
         std::vector<std::unique_ptr<GDX12Descriptor>> Dsvs;
         UINT Resolution = 0, Slices = 0, NextSlice = 0;
-        uint64_t SceneRevision = 0;
+        uint64_t SceneRevision = 0, GrassReceiverRevision = 0;
         NativeWork Work;
     };
     UINT BuildNode(UINT first, UINT count, UINT parent = UINT_MAX);
     void Refit(UINT caster);
     void Invalidate(const Caster&);
+    void InvalidateGrass(const GDX12RenderPrimitive&);
+    void UpdateGrass(const std::vector<GDX12RenderPrimitive>&);
     void UpdateCasters(UINT slot);
     void Gather(UINT node, const GDX12LocalLightConstants&, const std::array<GDX12LocalShadowFrustum, 6>&,
         UINT faceMask, LightCache&) const;
@@ -95,10 +100,12 @@ private:
     std::vector<Caster> _casters;
     std::vector<Node> _nodes;
     std::vector<Input> _inputs;
+    std::vector<GDX12RenderPrimitive> _grass;
     std::unordered_map<UINT, std::vector<UINT>> _instances, _transforms, _materials;
     std::vector<UINT> _positions, _leaves;
     bool _treeReady = false;
     uint64_t _sceneRevision = 0, _geometryRevision = 0, _meshRevision = 0, _textureRevision = 0;
+    uint64_t _grassReceiverRevision = 0;
     std::unique_ptr<GDX12RootSignature> _root;
     ComPtr<ID3D12PipelineState> _opaqueDraw, _maskedDraw;
     ComPtr<ID3D12CommandSignature> _signature;
