@@ -27,6 +27,7 @@ Texture2D<float> SceneDepth : register(t15);
 Texture2D Texture2DCache[TEXTURE2D_RANGE_LENGTH] : register(t16);
 SamplerComparisonState samShadow : register(s6);
 
+#if !TRANSPARENT_STATIC_IBL_ONLY
 #define SKY_CB_REGISTER b4
 #define SKY_TRANSMITTANCE_REGISTER t11
 #define SKY_AERIAL_RADIANCE_REGISTER t12
@@ -34,6 +35,7 @@ SamplerComparisonState samShadow : register(s6);
 #include "SkyRendering.hlsli"
 #define LOCAL_REFLECTION_PROBES 1
 #include "ReflectionProbes.hlsli"
+#endif
 #include "PBR.hlsli"
 
 struct VS_INPUT
@@ -57,7 +59,7 @@ VS_OUTPUT_PS_INPUT VS(VS_INPUT vin, uint vertexID : SV_VertexID, uint instanceID
 {
     VS_OUTPUT_PS_INPUT vout = (VS_OUTPUT_PS_INPUT) 0.0f;
 	
-#if defined(TRANSPARENT_UNBATCHED)
+#if TRANSPARENT_UNBATCHED
     // The transparent culling stream preserves one command per source instance.
     // SkinBatch may describe an opaque batch and is irrelevant to this stream.
     InstanceData instance = InstanceCache[CBIndirectConstants.InstanceID];
@@ -110,8 +112,10 @@ PSOutput ShadeTransparency(VS_OUTPUT_PS_INPUT pin, uint partition)
     
     float weight = max(0.01f, alpha);
     float3 litColor = ShadePBR(material, color.rgb, pin.PosW, pin.Normal, pin.TexC);
+#if !TRANSPARENT_STATIC_IBL_ONLY
     litColor = ApplySkyAerialPerspective(litColor, pin.PosCS.xy / CBSky.Box.zw,
         length(pin.PosW - CBCamera.CameraLocation));
+#endif
     output.AccumColor = float4(litColor * alpha, alpha) * weight;
     output.Revealage = alpha;
     

@@ -28,6 +28,7 @@ SceneLighting::SceneLighting(GDX12DeviceResources &r, RenderPipelineCommonData &
     if (opaqueOnly)
     {
         _localShadows = std::make_unique<SceneLocalShadows>(r, c);
+        _transparency = std::make_unique<SceneTransparency>(r, c);
         GDX12RootSignatureDesc root;
         root.Constants = {9};
         root.NumSingleCBVSlots = 2;
@@ -179,6 +180,7 @@ bool SceneLighting::Record(Id id, ID3D12GraphicsCommandList *commands) const
 {
     return _work[_mode].Record(id, commands) || (_sunShadows && _sunShadows->Record(_slot, id, commands)) ||
            (_localShadows && _localShadows->Record(_slot, id, commands)) ||
+           (_transparency && _transparency->Record(id, commands)) ||
            (_reflections && _reflections->Record(id, commands)) ||
            (_frames.at(_slot).AO && _frames.at(_slot).AO->Record(id, commands));
 }
@@ -357,7 +359,9 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     {
         _initialized = true;
         if (!_hdrContinuation) throw std::logic_error("Opaque lighting requires a display continuation");
-        _hdrContinuation(graph, bindings, _deferred._color.get(), nullptr);
+        auto* hdr = _transparency->Append(graph, bindings, geometry, _slot, _deferred._color.get(),
+            _sunShadows->Output(_slot), _localShadows->Output(_slot), environment);
+        _hdrContinuation(graph, bindings, hdr, nullptr);
         return;
     }
     auto &ssr = _ssr[_mode];

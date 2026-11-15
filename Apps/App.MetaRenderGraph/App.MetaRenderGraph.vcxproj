@@ -111,6 +111,7 @@
     <ClCompile Include="src\Techniques\SceneAO.cpp" />
     <ClCompile Include="src\Techniques\SceneReflections.cpp" />
     <ClCompile Include="src\Techniques\SceneLighting.cpp" />
+    <ClCompile Include="src\Techniques\SceneTransparency.cpp" />
     <ClCompile Include="src\Techniques\SceneWaterParticles.cpp" />
     <ClCompile Include="src\Techniques\WaterTransfer.cpp" />
     <ClCompile Include="src\Techniques\ParticleTransfer.cpp" />
@@ -141,6 +142,7 @@
     <ClInclude Include="src\Techniques\SceneAO.h" />
     <ClInclude Include="src\Techniques\SceneReflections.h" />
     <ClInclude Include="src\Techniques\SceneLighting.h" />
+    <ClInclude Include="src\Techniques\SceneTransparency.h" />
     <ClInclude Include="src\Techniques\ScenePostUI.h" />
     <ClInclude Include="..\App\src\Rendering\BistroCollisionPass.h" />
     <None Include="Shaders\ShadowAtlasCopy.hlsl" />

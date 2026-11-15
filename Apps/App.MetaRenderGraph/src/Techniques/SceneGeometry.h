@@ -39,6 +39,7 @@ public:
     std::vector<uint8_t> Readback(UINT slot, const std::string& stem) const; // after GPU completion
 private:
     friend class SceneWaterParticles;
+    friend class SceneTransparency;
     friend class SceneLighting;
     friend class SceneReflections;
     struct Buffer {
