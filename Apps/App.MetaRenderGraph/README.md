@@ -130,6 +130,10 @@ fireflies read the current grass interaction field. Weighted particles append
 after the glass draw, before the single WBOIT resolve; global SortedAlpha/additive
 composition follows that resolve. Particle feature motion is enabled when blur or
 temporal reconstruction consumes it; history remains available when it is disabled.
+Raster uses slot-local read-only opaque depth
+with reversed-Z early depth testing; soft fading is preserved. Visible particles
+reserve draw slots per wave (with a non-WaveOps fallback). Firefly vertices live
+in DEFAULT memory after one recorded upload.
 Look for the orange/blue fountains at the entrance, terrace embers, and fireflies
 in the original grass arch; dust/steam use App's `BistroBounds::Scene` layout
 volumes and confinement, while SparkRain retains its authored placement.

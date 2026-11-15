@@ -31,8 +31,21 @@ void CullParticle(Particle particle)
         size * margin.y / max(radius, 0.00001f) * RenderSize.y * 0.5f / max(clip.w, 0.00001f) < MinPixelSize) return;
     float4 color = lerp(ColorStart, ColorEnd, age);
     if (color.a <= 0) return;
-    uint drawIndex;
+    uint drawIndex, modeIndex;
+#if PARTICLE_WAVE_OPS
+    uint prefix = WavePrefixCountBits(true);
+    uint count = WaveActiveCountBits(true);
+    if (WaveIsFirstLane())
+    {
+        InterlockedAdd(Counts[0], count, drawIndex);
+        InterlockedAdd(Counts[Geometry == ParticleGeometryFirefly ? BlendMode + 4 : BlendMode + 1], count, modeIndex);
+    }
+    drawIndex = WaveReadLaneFirst(drawIndex) + prefix;
+    modeIndex = WaveReadLaneFirst(modeIndex) + prefix;
+#else
     InterlockedAdd(Counts[0], 1, drawIndex);
+    InterlockedAdd(Counts[Geometry == ParticleGeometryFirefly ? BlendMode + 4 : BlendMode + 1], 1, modeIndex);
+#endif
     ParticleDraw draw = (ParticleDraw)0;
     draw.Position = particle.Position;
     draw.Previous = particle.Previous;
@@ -53,8 +66,6 @@ void CullParticle(Particle particle)
     draw.EdgeSamples = EdgeSamples;
     draw.ViewDepth = -view.z;
     Draws[drawIndex] = draw;
-    uint modeIndex;
-    InterlockedAdd(Counts[Geometry == ParticleGeometryFirefly ? BlendMode + 4 : BlendMode + 1], 1, modeIndex);
     if (BlendMode == 2)
     {
         Keys[modeIndex] = ~asuint(max(0.0f, -view.z)); // Positive distance, far to near.

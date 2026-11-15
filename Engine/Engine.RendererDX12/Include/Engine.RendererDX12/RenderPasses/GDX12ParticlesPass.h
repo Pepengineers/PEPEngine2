@@ -89,7 +89,12 @@ public:
     void Initialize() override;
     void BeginFrame();
     void SetLocalExecution(bool enabled) { _localOnly = enabled; }
+    // Configure before BeginFrame; merged fluid depth is an SRV/UAV, not a DSV.
+    void SetReadOnlyDepthEnabled(bool enabled) { _readOnlyDepth = enabled; }
+    void SetMotionOutputEnabled(bool enabled) { _motionOutputEnabled = enabled; }
     std::vector<GDX12Resource*> NativeResources() const;
+    std::vector<GDX12RenderGraph::BufferAccess> NativePreparationAccesses() const;
+    std::vector<GDX12RenderGraph::BufferAccess> NativeRasterAccesses(bool includeMotion) const;
     GDX12Texture* MotionOutput() const;
     void PrepareRenderData(GDX12CommandList* commands);
     void PrepareRenderGroup(GDX12CommandList* commands, const std::vector<uint64_t>& emitterIds,
@@ -120,6 +125,8 @@ private:
     void PrepareRenderData(GDX12CommandList* commands, const std::vector<uint64_t>* emitterIds,
         bool clear, bool finalize);
     bool _localOnly = false;
+    bool _readOnlyDepth = false;
+    bool _motionOutputEnabled = true;
     struct State;
     std::unique_ptr<State> _state;
 };

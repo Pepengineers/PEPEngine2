@@ -8,12 +8,14 @@ using namespace ParticleResources;
 struct GDX12ParticlesPass::State
 {
     bool LocalOnly = false;
+    bool ReadOnlyDepth = false;
     UINT Capacity = 0;
     bool Sorted = false;
     bool Mesh = false;
     bool Active = false;
     bool WasEnabled = false;
     bool ResetMotion = true;
+    bool MotionEnabled = true;
     UINT ConstantCount = 0;
     std::vector<std::unique_ptr<Buffer<EmitterConstants>>> Constants;
     std::unique_ptr<GDX12RootSignature> Root, SortRoot;
@@ -21,6 +23,10 @@ struct GDX12ParticlesPass::State
     ComPtr<ID3D12PipelineState> Weighted, Additive, Alpha, Motion;
     ComPtr<ID3D12PipelineState> MeshWeighted, MeshAdditive, MeshMotion;
     std::unique_ptr<Buffer<GDX12ParticleMeshVertex>> FireflyVertices;
+    std::unique_ptr<Buffer<GDX12ParticleMeshVertex>> FireflyUpload;
+    bool MeshUploadPending = false;
+    std::vector<GDX12Descriptor> ReadDepth;
+    std::vector<ID3D12Resource*> DepthResources;
     ComPtr<ID3D12CommandSignature> DispatchSignature, DrawSignature;
     std::unique_ptr<Buffer<ParticleDraw>> Draws;
     std::unique_ptr<Buffer<UINT>> Counts, Indices, DrawArgs, SortParameters;
@@ -30,8 +36,14 @@ struct GDX12ParticlesPass::State
     void Initialize(GDX12DeviceResources* resources)
     {
         Root = CreateRoot(resources);
+        D3D12_FEATURE_DATA_D3D12_OPTIONS1 options{};
+        const bool waves = SUCCEEDED(resources->Device->GetDevice()->CheckFeatureSupport(
+            D3D12_FEATURE_D3D12_OPTIONS1, &options, sizeof(options))) && options.WaveOps;
+        const D3D_SHADER_MACRO defines[] = {{"PARTICLE_WAVE_OPS", waves ? "1" : "0"}, {nullptr, nullptr}};
         for (const auto* entry : { "Cull", "CullImported", "ClearDraws", "BuildDrawArgs" })
-            CompileCompute(resources, "ParticleRender.hlsl", entry, Root.get());
+            CompileCompute(resources, "ParticleRender.hlsl", entry, Root.get(), defines);
+        ReadDepth.resize(resources->FrameConstants.size());
+        DepthResources.resize(resources->FrameConstants.size());
 
         D3D12_INDIRECT_ARGUMENT_DESC argument = {};
         argument.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH;
@@ -69,7 +81,9 @@ struct GDX12ParticlesPass::State
             desc.RasterizerState = CD3DX12_RASTERIZER_DESC(D3D12_DEFAULT);
             desc.RasterizerState.CullMode = mesh ? D3D12_CULL_MODE_BACK : D3D12_CULL_MODE_NONE;
             desc.DepthStencilState = CD3DX12_DEPTH_STENCIL_DESC(D3D12_DEFAULT);
-            desc.DepthStencilState.DepthEnable = false;
+            desc.DepthStencilState.DepthEnable = ReadOnlyDepth;
+            desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+            desc.DSVFormat = ReadOnlyDepth ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_UNKNOWN;
             desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ZERO;
             desc.DepthStencilState.StencilEnable = false;
             desc.BlendState = CD3DX12_BLEND_DESC(D3D12_DEFAULT);
@@ -104,8 +118,11 @@ struct GDX12ParticlesPass::State
             if (LocalOnly)
             {
                 FireflyVertices = std::make_unique<Buffer<GDX12ParticleMeshVertex>>(resources->Device,
+                    FireflyParticleVertexCount, EBufferType::Default, false);
+                FireflyUpload = std::make_unique<Buffer<GDX12ParticleMeshVertex>>(resources->Device,
                     FireflyParticleVertexCount, EBufferType::Upload, false);
-                FireflyVertices->CopyData(0, GetFireflyParticleMesh().data(), FireflyParticleVertexCount);
+                FireflyUpload->CopyData(0, GetFireflyParticleMesh().data(), FireflyParticleVertexCount);
+                MeshUploadPending = true;
                 return;
             }
             FireflyVertices = std::make_unique<Buffer<GDX12ParticleMeshVertex>>(resources->Device, FireflyParticleVertexCount, EBufferType::Default, false);
@@ -123,10 +140,11 @@ struct GDX12ParticlesPass::State
         }
     }
 
-    void CompileCompute(GDX12DeviceResources* resources, const char* file, const char* entry, GDX12RootSignature* root)
+    void CompileCompute(GDX12DeviceResources* resources, const char* file, const char* entry, GDX12RootSignature* root,
+        const D3D_SHADER_MACRO* defines = nullptr)
     {
         const std::wstring path = std::wstring(SHADERS_FOLDER) + StringToWString(file);
-        Compute[entry] = GDX12RenderHelpers::CreateComputePipeline(resources->Device, root, path.c_str(), entry);
+        Compute[entry] = GDX12RenderHelpers::CreateComputePipeline(resources->Device, root, path.c_str(), entry, defines);
     }
 
     void InitializeSort(GDX12DeviceResources* resources)
@@ -289,11 +307,13 @@ void GDX12ParticlesPass::BeginFrame()
     {
         _state = std::make_unique<State>();
         _state->LocalOnly = _localOnly;
+        _state->ReadOnlyDepth = _readOnlyDepth;
         _state->Initialize(_resources);
     }
     auto& state = *_state;
     state.Active = true;
-    state.ResetMotion = snapshot.ResetMotion || !state.WasEnabled;
+    state.ResetMotion = snapshot.ResetMotion || !state.WasEnabled || state.MotionEnabled != _motionOutputEnabled;
+    state.MotionEnabled = _motionOutputEnabled;
     if (!state.WasEnabled) _commonData->ResetUpscalerHistory = true;
     state.WasEnabled = true;
     bool sorted = false, mesh = false;
@@ -321,7 +341,23 @@ void GDX12ParticlesPass::BeginFrame()
     auto* depth = _inputs[0]->GetTexture();
     const UINT width = depth->GetWidth();
     const UINT height = depth->GetHeight();
-    if (!state.MotionTexture)
+    const UINT slot = _resources->CurrFrameConstantsIndex;
+    auto* depthResource = depth->GetResource()->D3DResource.Get();
+    if (state.ReadOnlyDepth && state.DepthResources.at(slot) != depthResource)
+    {
+        if (!(depthResource->GetDesc().Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL))
+            throw std::logic_error("Particle hardware depth test requires a depth-stencil resource");
+        auto& view = state.ReadDepth.at(slot);
+        D3D12_DEPTH_STENCIL_VIEW_DESC desc{};
+        desc.Format = DXGI_FORMAT_D32_FLOAT;
+        desc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+        desc.Flags = D3D12_DSV_FLAG_READ_ONLY_DEPTH;
+        auto* heap = _resources->DSVHeap.get();
+        view.InitAsDSV(depthResource, &desc, heap,
+            view.HeapIndex == UINT_MAX ? heap->GetAvailableIndex() : view.HeapIndex);
+        state.DepthResources[slot] = depthResource;
+    }
+    if (state.MotionEnabled && !state.MotionTexture)
     {
         GDX12TextureDesc desc;
         desc.Width = width;
@@ -384,6 +420,16 @@ void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands,
     auto& state = *_state;
     auto& simulation = *_resources->ParticleSimulation->_state;
     auto* depth = _inputs[0]->GetTexture();
+    if (state.MeshUploadPending)
+    {
+        commands->ResourceBarrier({state.FireflyVertices->GetResource().GetCopyDestBarrier()});
+        commands->GetCommandList()->CopyBufferRegion(state.FireflyVertices->GetResource().D3DResource.Get(), 0,
+            state.FireflyUpload->GetResource().D3DResource.Get(), 0,
+            UINT64(FireflyParticleVertexCount) * sizeof(GDX12ParticleMeshVertex));
+        commands->ResourceBarrier({state.FireflyVertices->GetResource().GetGenericReadBarrier()});
+        state.MeshUploadPending = false;
+        // Retain the small staging buffer with the pass until all uses retire.
+    }
     GDX12_SCOPED_EVENT(commands, "GPU particles", Colors::Orange);
     commands->SetComputeRootSignature(state.Root.get());
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
@@ -467,12 +513,17 @@ void GDX12ParticlesPass::DrawWeightedAndMotion(GDX12CommandList* commands)
     auto* depth = _inputs[0]->GetTexture();
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
     commands->ResourceBarrier({ state.Draws->GetResource().GetSRVBarrier(), state.Indices->GetResource().GetSRVBarrier(),
-        state.Payloads[0]->GetResource().GetSRVBarrier(), depth->GetResource()->GetSRVBarrier(),
+        state.Payloads[0]->GetResource().GetSRVBarrier(), depth->GetResource()->GetTransitionBarrier(
+            state.ReadOnlyDepth ? D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE :
+                D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE),
         _inputs[1]->GetTexture()->GetResource()->GetRenderTargetBarrier(),
         _inputs[2]->GetTexture()->GetResource()->GetRenderTargetBarrier() });
     commands->SetViewport(depth->GetViewport());
     commands->SetScissorRect(depth->GetScissorRect());
-    commands->SetRenderTargets({ _inputs[1]->GetTexture(), _inputs[2]->GetTexture() }, nullptr);
+    const auto dsv = state.ReadDepth.at(_resources->CurrFrameConstantsIndex).CPUHandle;
+    const D3D12_CPU_DESCRIPTOR_HANDLE targets[] = {_inputs[1]->GetTexture()->GetRTV()->CPUHandle,
+        _inputs[2]->GetTexture()->GetRTV()->CPUHandle};
+    commands->GetCommandList()->OMSetRenderTargets(2, targets, FALSE, state.ReadOnlyDepth ? &dsv : nullptr);
     commands->SetGraphicsRootSignature(state.Root.get());
     commands->SetGraphicsSRV(3, depth->GetSRV()->GPUHandle);
     commands->SetPipelineState(state.Weighted);
@@ -482,8 +533,10 @@ void GDX12ParticlesPass::DrawWeightedAndMotion(GDX12CommandList* commands)
         commands->SetPipelineState(state.MeshWeighted);
         state.Draw(commands, _resources, _commonData, 3);
     }
+    if (!state.MotionEnabled) return;
     commands->ResourceBarrier({ state.MotionTexture->GetResource()->GetRenderTargetBarrier() });
-    commands->SetRenderTargets({ state.MotionTexture.get() }, nullptr);
+    const auto motionTarget = state.MotionTexture->GetRTV()->CPUHandle;
+    commands->GetCommandList()->OMSetRenderTargets(1, &motionTarget, FALSE, state.ReadOnlyDepth ? &dsv : nullptr);
     commands->ClearRenderTargetView(state.MotionTexture.get());
     commands->SetPipelineState(state.Motion);
     for (UINT mode = 0; mode < 3; ++mode) state.Draw(commands, _resources, _commonData, mode);
@@ -503,10 +556,14 @@ void GDX12ParticlesPass::Composite(GDX12CommandList* commands, GDX12Texture* hdr
     auto* depth = _inputs[0]->GetTexture();
     GDX12_SCOPED_EVENT(commands, "Sorted and additive HDR particles", Colors::Orange);
     commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-    commands->ResourceBarrier({ hdr->GetResource()->GetRenderTargetBarrier(), depth->GetResource()->GetSRVBarrier() });
+    commands->ResourceBarrier({ hdr->GetResource()->GetRenderTargetBarrier(), depth->GetResource()->GetTransitionBarrier(
+        state.ReadOnlyDepth ? D3D12_RESOURCE_STATE_DEPTH_READ | D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE :
+            D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE) });
     commands->SetViewport(hdr->GetViewport());
     commands->SetScissorRect(hdr->GetScissorRect());
-    commands->SetRenderTargets({ hdr }, nullptr);
+    const auto dsv = state.ReadDepth.at(_resources->CurrFrameConstantsIndex).CPUHandle;
+    const auto target = hdr->GetRTV()->CPUHandle;
+    commands->GetCommandList()->OMSetRenderTargets(1, &target, FALSE, state.ReadOnlyDepth ? &dsv : nullptr);
     commands->SetGraphicsRootSignature(state.Root.get());
     commands->SetGraphicsSRV(3, depth->GetSRV()->GPUHandle);
     if (state.Sorted)
@@ -529,6 +586,7 @@ void GDX12ParticlesPass::Resize()
     if (_state)
     {
         _state->MotionTexture.reset();
+        std::fill(_state->DepthResources.begin(), _state->DepthResources.end(), nullptr);
         _state->WasEnabled = false;
     }
 }
@@ -551,10 +609,46 @@ std::vector<GDX12Resource*> GDX12ParticlesPass::NativeResources() const
     result.push_back(&s.Draws->GetResource());
     result.push_back(&s.Constants.at(_resources->CurrFrameConstantsIndex)->GetResource());
     if (s.FireflyVertices) result.push_back(&s.FireflyVertices->GetResource());
-    if (s.MotionTexture) result.push_back(s.MotionTexture->GetResource());
+    if (s.MeshUploadPending) result.push_back(&s.FireflyUpload->GetResource());
+    if (s.MotionEnabled && s.MotionTexture) result.push_back(s.MotionTexture->GetResource());
+    return result;
+}
+std::vector<GDX12RenderGraph::BufferAccess> GDX12ParticlesPass::NativePreparationAccesses() const
+{
+    using Mode = GDX12RenderGraph::Mode;
+    std::vector<GDX12RenderGraph::BufferAccess> result;
+    if (!_state || !_state->Active) return result;
+    auto& s = *_state;
+    for (auto* buffer : {s.Counts.get(), s.Indices.get(), s.DrawArgs.get(), s.SortParameters.get(),
+        s.Keys[0].get(), s.Keys[1].get(), s.Payloads[0].get(), s.Payloads[1].get(), s.Sum.get(), s.Reduced.get()})
+        if (buffer) result.push_back({&buffer->GetResource(), Mode::ReadWrite, D3D12_RESOURCE_STATE_UNORDERED_ACCESS});
+    result.push_back({&s.Draws->GetResource(), Mode::ReadWrite, D3D12_RESOURCE_STATE_UNORDERED_ACCESS});
+    result.push_back({&s.Constants.at(_resources->CurrFrameConstantsIndex)->GetResource(), Mode::Read,
+        D3D12_RESOURCE_STATE_GENERIC_READ});
+    if (s.MeshUploadPending)
+    {
+        result.push_back({&s.FireflyVertices->GetResource(), Mode::Write, D3D12_RESOURCE_STATE_GENERIC_READ});
+        result.push_back({&s.FireflyUpload->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
+    }
+    return result;
+}
+std::vector<GDX12RenderGraph::BufferAccess> GDX12ParticlesPass::NativeRasterAccesses(bool includeMotion) const
+{
+    using Mode = GDX12RenderGraph::Mode;
+    std::vector<GDX12RenderGraph::BufferAccess> result;
+    if (!_state || !_state->Active) return result;
+    auto& s = *_state;
+    result.push_back({&s.Draws->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+    result.push_back({&s.Indices->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+    result.push_back({&s.Payloads[0]->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
+    result.push_back({&s.DrawArgs->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT});
+    if (s.Mesh) result.push_back({&s.FireflyVertices->GetResource(), Mode::Read,
+        D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
+    if (includeMotion && s.MotionEnabled) result.push_back({s.MotionTexture->GetResource(), Mode::Write,
+        D3D12_RESOURCE_STATE_RENDER_TARGET});
     return result;
 }
 GDX12Texture* GDX12ParticlesPass::MotionOutput() const
 {
-    return _state && _state->Active ? _state->MotionTexture.get() : nullptr;
+    return _state && _state->Active && _state->MotionEnabled ? _state->MotionTexture.get() : nullptr;
 }
