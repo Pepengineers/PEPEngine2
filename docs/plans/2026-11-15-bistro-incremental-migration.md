@@ -92,8 +92,10 @@ UI, presets и single/mGPU transfer; размещение в Bistro брать �
 Не переносить benchmark loop/ExitProcess sample. Сохранить анимацию canvas при
 paused сцене и явно задокументировать canvas resolution/quality controls.
 
-Картина облаков — отдельная анимированная процедурная текстура, вычисляемая
-существующим `GDX12CloudComponent`/Clouds.hlsl и отображаемая на стене. Она не
+Картина облаков — отдельная анимированная процедурная текстура из
+`D:\Project\Multi-GPU-Render-DX12\MGPU-Noise\Shaders\CloudsNoiseCS.hlsl`
+и `Common/CloudGenerator.*`, отображаемая на стене. Источник уточнён пользователем:
+перенести именно MGPU-Noise, а не cubemap-алгоритм GDX12CloudComponent из PEPEngine2. Она не
 подменяет global sky/IBL и не запускает облака одновременно поверх всей сцены.
 Разрешение текстуры (width/height) независимо от окна, SR, размеров картины и UI
 canvas; GPU вычисления выбирается явно через CVar/INI. Использовать существующие
