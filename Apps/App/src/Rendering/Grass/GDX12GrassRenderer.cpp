@@ -561,6 +561,11 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
     p.Material = s.MaterialIndex;
     p.Shadow = stage == Stage::Shadow;
     p.ResetHistory = state.ResetHistory;
+    if (view.Key == 1 && view.SceneDepth)
+    {
+        p.Padding1 = view.SceneDepth->GetWidth();
+        p.Lod.w = float(view.SceneDepth->GetHeight());
+    }
     FieldBuffer* currentWind = _neutralWind.get();
     FieldBuffer* previousWind = _neutralWind.get();
     const auto wind = _wind.find(s.WindId);
@@ -588,7 +593,6 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
     parameters->CopyData(element, p);
 
     auto output = std::make_unique<Output>();
-    output->Settings = p;
     output->View = view;
     if (view.CaptureLighting)
     {

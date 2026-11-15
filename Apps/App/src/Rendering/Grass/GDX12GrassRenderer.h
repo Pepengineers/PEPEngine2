@@ -115,7 +115,6 @@ private:
     };
     struct Output
     {
-        Parameters Settings;
         GDX12GeometryContext View;
         GDX12CaptureLighting Lighting;
         UINT Patch = 0;
