@@ -108,27 +108,50 @@ std::vector<ID3D12Resource*> SceneGrass::Append(Graph& g,UINT slot,const std::ve
         views.push_back(depth);views.push_back(gbuffer);
     }
     }
+    std::vector<bool> mainExpanded(gpu.PatchCount(),false);
     for(const auto& target:views) {
       if(beforeView)beforeView(target,g,all);
       for(UINT patch=0;patch<gpu.PatchCount();++patch) {
         if((target.View.Key>>60)==3 && !gpu._grass.at(gpu._drawOrder.at(patch)).Source.CaptureReflections)continue;
         gpu.PrepareView(target.View,patch,&materials); const auto* output=gpu.FindOutput(target.View,patch); if(!output) continue;
+        const bool mainPair=!viewsOnly && target.View.Key==1 &&
+            (target.View.Stage==GDX12GeometryStage::Depth || target.View.Stage==GDX12GeometryStage::DepthNormals || target.View.Stage==GDX12GeometryStage::GBuffer);
+        auto* vertices=gpu._vertices.get();auto* indices=gpu._indices.get();auto* arguments=gpu._arguments.get();
+        if(mainPair && patch) {
+            if(recorded.MainPatches.size()<gpu.PatchCount())recorded.MainPatches.resize(gpu.PatchCount());
+            auto& buffers=recorded.MainPatches[patch];
+            if(!buffers.Vertices || buffers.Vertices->GetElementCount()<vertices->GetElementCount())
+                buffers.Vertices=gpu.Buffer<GDX12GrassRenderer::Vertex>(vertices->GetElementCount(),true,true);
+            if(!buffers.Indices || buffers.Indices->GetElementCount()<indices->GetElementCount())
+                buffers.Indices=gpu.Buffer<UINT>(indices->GetElementCount(),false,true);
+            if(!buffers.Arguments)buffers.Arguments=gpu.Buffer<UINT>(8,false,true);
+            vertices=buffers.Vertices.get();indices=buffers.Indices.get();arguments=buffers.Arguments.get();
+        }
+        const bool reuse=mainPair && target.View.Stage==GDX12GeometryStage::GBuffer;
+        if(reuse && !mainExpanded[patch])throw std::logic_error("Grass GBuffer requires its matching depth expansion");
         const auto& state=gpu._grass.at(output->Owner);
         const auto root=gpu._computeRoot->GetRootSignature(); const auto clear=gpu._clearPSO,expand=gpu._expandPSO;
         const auto cb=output->Constants->GetElementAddress(output->ConstantIndex);
         const std::array<D3D12_GPU_DESCRIPTOR_HANDLE,5> srvs={state.Roots[slot]->GetSRV()->GPUHandle,output->CurrentWind->GetSRV()->GPUHandle,output->PreviousWind->GetSRV()->GPUHandle,gpu._trail->GetSRV()->GPUHandle,gpu._previousTrail->GetSRV()->GPUHandle};
-        const std::array<D3D12_GPU_DESCRIPTOR_HANDLE,3> uavs={gpu._vertices->GetUAV()->GPUHandle,gpu._indices->GetUAV()->GPUHandle,gpu._arguments->GetUAV()->GPUHandle};
+        const std::array<D3D12_GPU_DESCRIPTOR_HANDLE,3> uavs={vertices->GetUAV()->GPUHandle,indices->GetUAV()->GPUHandle,arguments->GetUAV()->GPUHandle};
         const UINT b=gpu._computeRoot->GetBRootParamIndex(0),t=gpu._computeRoot->GetTRootParamIndex(0),u=gpu._computeRoot->GetURootParamIndex(0),groups=(GrassBladeCount(state.Source)+63)/64;
         const auto bind=[=](ID3D12GraphicsCommandList* cmd){cmd->SetDescriptorHeaps(1,&heap);cmd->SetComputeRootSignature(root.Get());cmd->SetComputeRootConstantBufferView(b,cb);for(UINT i=0;i<5;++i)cmd->SetComputeRootDescriptorTable(t+i,srvs[i]);for(UINT i=0;i<3;++i)cmd->SetComputeRootDescriptorTable(u+i,uavs[i]);};
         std::vector<Access> accesses={access(output->Constants,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ),access(state.Roots[slot].get(),Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
             access(output->CurrentWind,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),access(output->PreviousWind,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
             access(gpu._trail.get(),Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),access(gpu._previousTrail.get(),Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
-            access(gpu._vertices.get(),Mode::Write,UnorderedAccess),access(gpu._indices.get(),Mode::Write,UnorderedAccess),access(gpu._arguments.get(),Mode::ReadWrite,UnorderedAccess)};
+            access(vertices,Mode::Write,UnorderedAccess),access(indices,Mode::Write,UnorderedAccess),access(arguments,Mode::ReadWrite,UnorderedAccess)};
         const std::string name="grass view "+std::to_string(target.View.Key)+" patch "+std::to_string(patch);
-        add(name+" clear arguments",accesses,[=](auto* cmd){bind(cmd);cmd->SetPipelineState(clear.Get());cmd->Dispatch(1,1,1);});
-        add(name+" expand",accesses,[=](auto* cmd){bind(cmd);cmd->SetPipelineState(expand.Get());cmd->Dispatch(groups,1,1);});
-        const auto binding=output->Binding; const auto batch=output->Batch;
-        std::vector<Access> draw={access(gpu._vertices.get(),Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),access(gpu._indices.get(),Mode::Read,D3D12_RESOURCE_STATE_INDEX_BUFFER),access(gpu._arguments.get(),Mode::Read,D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT),
+        if(!reuse) {
+            add(name+" clear arguments",accesses,[=](auto* cmd){bind(cmd);cmd->SetPipelineState(clear.Get());cmd->Dispatch(1,1,1);});
+            add(name+" expand",accesses,[=](auto* cmd){bind(cmd);cmd->SetPipelineState(expand.Get());cmd->Dispatch(groups,1,1);});
+            if(mainPair)mainExpanded[patch]=true;
+        }
+        auto binding=output->Binding;auto batch=output->Batch;
+        binding.SRVs.front().second=vertices->GetSRV()->GPUHandle;
+        batch.IndexBuffer.BufferLocation=indices->GetElementAddress(0);
+        batch.IndexBuffer.SizeInBytes=UINT(indices->GetElementCount()*sizeof(UINT));
+        batch.Draw.Arguments=arguments->GetResource().D3DResource.Get();
+        std::vector<Access> draw={access(vertices,Mode::Read,D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),access(indices,Mode::Read,D3D12_RESOURCE_STATE_INDEX_BUFFER),access(arguments,Mode::Read,D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT),
             access(output->Constants,Mode::Read,D3D12_RESOURCE_STATE_GENERIC_READ),{2,Mode::Read,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE|D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
             {target.Depth,target.View.Stage==GDX12GeometryStage::GBuffer?Mode::Read:Mode::Write,State(target.View.Stage==GDX12GeometryStage::GBuffer?D3D12_RESOURCE_STATE_DEPTH_READ:D3D12_RESOURCE_STATE_DEPTH_WRITE)}};
         draw.insert(draw.end(),target.AdditionalReads.begin(),target.AdditionalReads.end());
