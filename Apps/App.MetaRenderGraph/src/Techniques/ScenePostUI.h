@@ -21,8 +21,8 @@ public:
     explicit ScenePostUI(RenderPipelineContext&, bool opaqueOnly = false);
     ~ScenePostUI();
     GDX12ReconstructionPass& Reconstruction() { return _reconstruction; }
-    std::vector<GDX12RenderPass*> Passes(bool opaqueOnly = false) {
-        return opaqueOnly ? std::vector<GDX12RenderPass*>{&_blur, &_reconstruction, &_output} : std::vector<GDX12RenderPass*>{&_dof, &_blur, &_reconstruction, &_output};
+    std::vector<GDX12RenderPass*> Passes() {
+        return {&_dof, &_blur, &_reconstruction, &_output};
     }
     bool NeedsResize() const;
     void BeginPlan() { _work.Commands.clear(); }

@@ -19,6 +19,7 @@ public:
     // Input 0: linear RGBA16F HDR. Input 1: matching reverse-Z depth. Output 0: RGBA16F HDR.
     void Initialize() override;
     void Execute(GDX12CommandList* commands) override;
+    bool IsActive() const;
     void PrepareRecording(); // Owner-only allocation/retirement before explicit recording.
     void RecordCommands(GDX12CommandList* commands);
     void Resize() override;

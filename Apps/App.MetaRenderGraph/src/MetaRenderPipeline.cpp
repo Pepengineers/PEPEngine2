@@ -64,7 +64,7 @@ void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
     if (!_opaqueOnly) _waterParticles = std::make_unique<Meta::SceneWaterParticles>(c);
     _sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_GEOMETRY, true);
     _sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_MATERIALS, true);
-    _bindings.PrimaryPasses = _post->Passes(_opaqueOnly);
+    _bindings.PrimaryPasses = _post->Passes();
     _bindings.PrimaryPasses.push_back(&_sceneFlags);
     _bindings.Reconstruction = &_post->Reconstruction();
     _bindings.FrameGenerationInputs = !_opaqueOnly;
