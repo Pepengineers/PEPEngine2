@@ -101,6 +101,7 @@ void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
     } else _executor=std::make_unique<Meta::Executor>(*c.Primary.Device,frames,1024);
     Log::Info("MetaRenderGraph", "Queue packet executor selected; cross-adapter=",bool(_crossAdapter),"; water=",bool(_waterTransfer),"; particles=",bool(_particleTransfer),"; legacy graph Execute disabled");
     if (_opaqueOnly) _lighting->SetWaterRetirement([this] { _executor->Drain(); });
+    _environment->SetRetirement([this] { _executor->Drain(); });
 }
 void MetaRenderPipeline::BuildGraph(GDX12RenderGraph &, const RenderPipelineGraphInputs &)
 {
@@ -116,6 +117,8 @@ void MetaRenderPipeline::RebuildExecution(RenderPipelineContext &c)
 bool MetaRenderPipeline::PrepareFrame(RenderPipelineContext &c, GDX12CommandList *)
 {
     if (_opaqueOnly) {
+        // The Meta sun cache tracks atmosphere revisions and moving casters explicitly.
+        if (c.Primary.Sky.Source == SkySource::SkyAtmosphere) c.Primary.Lighting.SunShadowFlags &= ~2u;
         c.Common.AOAfterDepthPrepass = false;
         _geometry->PrepareGrass(c, c.Common.GameTimer->DeltaTime());
         return false;

@@ -18,6 +18,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <algorithm>
+#include <cmath>
 #include <WindowsX.h>
 #include "Engine.UI/UI_test.h"
 
@@ -29,6 +30,14 @@ void CheckReflectionGpuEvidence(const std::filesystem::path&);
 
 namespace
 {
+    AutoConsoleVariable<int> MetaSkySource(L"Meta.Sky.Source", 2,
+        L"Ordinary Bistro sky: 0 Off, 1 original SkyBox, 2 SkyAtmosphere",
+        EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 2; });
+    AutoConsoleVariable<bool> MetaSunCycle(L"Meta.Sky.SunCycle.Enabled", true,
+        L"Move the original Sun through a repeating daylight arc; disable for manual rotation");
+    AutoConsoleVariable<float> MetaSunCyclePeriod(L"Meta.Sky.SunCycle.PeriodSeconds", 120.f,
+        L"Seconds from sunrise through zenith to sunset; repeats without night",
+        EConsoleVariableFlags::Default, [](float value) { return std::isfinite(value) && value > 0; });
     const Vector3 FixtureOrigin{1399.6f,100,1369};
     void Require(bool value, const char* message)
     {
@@ -71,6 +80,8 @@ namespace
         Entity _animated=InvalidEntity;
         Entity _animatedPeer=InvalidEntity;
         Entity _grass=InvalidEntity,_wind=InvalidEntity,_interaction=InvalidEntity;
+        Entity _skyEntity=InvalidEntity;
+        double _sunCyclePhase = 0;
         MetaRenderPipeline* _pipeline=nullptr;
         BistroGrass::Scene _bistroGrass;
         BistroCharacters::Scene _bistroCharacters;
@@ -81,6 +92,7 @@ namespace
             if (!_smoke)
             {
                 auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+                UpdateSky(world, timer.DeltaTime());
                 _bistroWater.Update(world, timer.DeltaTime());
                 _bistroCharacters.Update(world, timer.DeltaTime(), GetJobs(), nullptr, true);
                 _bistroGrass.Update(world, timer.DeltaTime());
@@ -111,6 +123,18 @@ namespace
             {
                 auto& world = *scenes->GetWorld();
                 world.SetPaused(true);
+                _skyEntity = world.GetSkyEntity();
+                Require(world.GetECS().Has<SkyBoxComponent>(_skyEntity) &&
+                    world.GetECS().Has<LightComponent>(_skyEntity), "Bistro sky must use the existing Sun");
+                if (!world.GetECS().Has<SkyAtmosphereComponent>(_skyEntity))
+                {
+                    world.GetECS().Add<SkyAtmosphereComponent>(_skyEntity);
+                    auto& atmosphere = world.GetECS().Get<SkyAtmosphereComponent>(_skyEntity);
+                    auto settings = atmosphere.GetSettings();
+                    settings.SunAngularRadiusRadians *= 2.5f;
+                    atmosphere.SetSettings(settings);
+                }
+                UpdateSky(world);
                 _bistroGrass.Update(world, 0);
                 CreateBistroParticles(world);
                 _bistroWater.Update(world, 0);
@@ -244,6 +268,40 @@ namespace
             }
             SetWindowTextW(GetWindow()->GetWindowHandle(), L"MetaRenderGraph - procedural water and particle scene");
             return true;
+        }
+        void UpdateSky(World& world, float deltaTime = 0)
+        {
+            const auto source = static_cast<SkySource>(MetaSkySource.GetValue());
+            if (source == SkySource::SkyAtmosphere)
+            {
+                auto& transform = world.GetECS().Get<TransformComponent>(_skyEntity);
+                bool wrapped = false;
+                if (MetaSunCycle.GetValue())
+                {
+                    const double nextPhase = _sunCyclePhase + double(deltaTime) / MetaSunCyclePeriod.GetValue();
+                    wrapped = nextPhase >= 1.0;
+                    _sunCyclePhase = std::fmod(nextPhase, 1.0);
+                    transform.Rotation.x = float(_sunCyclePhase * 180.0);
+                    transform.Rotation.z = 0;
+                }
+                const auto rotation = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(transform.Rotation.y),
+                    XMConvertToRadians(transform.Rotation.x), XMConvertToRadians(transform.Rotation.z));
+                auto& atmosphere = world.GetECS().Get<SkyAtmosphereComponent>(_skyEntity);
+                auto settings = atmosphere.GetSettings();
+                const Vector3 directionToSun = rotation.Forward();
+                if (settings.DirectionToSun != directionToSun)
+                {
+                    settings.DirectionToSun = directionToSun;
+                    if (wrapped) atmosphere.SetSettings(settings);
+                    else atmosphere.UpdateSunDirection(directionToSun);
+                }
+            }
+            if (world.GetSkySource() == source &&
+                (source == SkySource::Off || world.GetSkyEntity() == _skyEntity)) return;
+            world.SetSkySource(source, _skyEntity);
+            Log::Info("MetaRenderGraph", "Ordinary sky source=", static_cast<unsigned>(source),
+                "; atmosphere quality=", GetSkyAtmosphereQuality(), "; daylight cycle=", MetaSunCycle.GetValue(),
+                "; daylight seconds=", MetaSunCyclePeriod.GetValue());
         }
         POINT _lastMousePos{};
         float _cameraSpeed = 500.f;

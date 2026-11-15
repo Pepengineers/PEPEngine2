@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cmath>
 #include <stdexcept>
+#include <algorithm>
 
 namespace
 {
@@ -151,7 +152,7 @@ void GDX12EnvironmentIBLPass::EnsureOutputs(bool enabled, UINT cubeSize)
 {
     const UINT mips = enabled ? 8 : 1;
     if (_prefilterMips == mips && _textures[3]->GetWidth() == cubeSize) return;
-    _resources->Device->GetCommandQueue()->Flush();
+    RetireResources();
     AllocateOutputs(enabled, cubeSize);
 }
 
@@ -215,13 +216,14 @@ void GDX12EnvironmentIBLPass::EnsureAtmosphere(const SkyAtmosphereSettings& s)
     const UINT sizes[5][3] = { { s.TransmittanceWidth, s.TransmittanceHeight, 1 },
         { s.MultipleScatteringSize, s.MultipleScatteringSize, 1 }, { s.SkyViewWidth, s.SkyViewHeight, 1 },
         { s.AerialWidth, s.AerialHeight, s.AerialDepth }, { s.AerialWidth, s.AerialHeight, s.AerialDepth } };
-    bool changed = false;
+    std::array<bool, 5> changed{};
     for (UINT i = 0; i < 5; ++i)
-        changed |= !_luts[i]->IsInitialized() || _luts[i]->GetWidth() != sizes[i][0] || _luts[i]->GetHeight() != sizes[i][1] ||
+        changed[i] = !_luts[i]->IsInitialized() || _luts[i]->GetWidth() != sizes[i][0] || _luts[i]->GetHeight() != sizes[i][1] ||
             _luts[i]->GetResource()->D3DResource->GetDesc().DepthOrArraySize != sizes[i][2];
-    if (!changed) return;
-    _resources->Device->GetCommandQueue()->Flush();
-    for (UINT i = 0; i < 5; ++i) CreateTexture(*_luts[i], sizes[i][0], sizes[i][1], sizes[i][2], 1, false);
+    if (std::none_of(changed.begin(), changed.end(), [](bool value) { return value; })) return;
+    RetireResources();
+    for (UINT i = 0; i < 5; ++i)
+        if (changed[i]) CreateTexture(*_luts[i], sizes[i][0], sizes[i][1], sizes[i][2], 1, false);
     PublishAtmosphereViews(true);
 }
 
@@ -340,9 +342,15 @@ void GDX12EnvironmentIBLPass::ResetEnvironmentHistory()
 void GDX12EnvironmentIBLPass::ReleaseAtmosphere()
 {
     if (!_luts[0]->IsInitialized()) return;
-    _resources->Device->GetCommandQueue()->Flush();
+    RetireResources();
     PublishAtmosphereViews(false);
     for (auto& lut : _luts) lut = std::make_unique<GDX12Texture>();
+}
+
+void GDX12EnvironmentIBLPass::RetireResources()
+{
+    if (_retire) _retire();
+    else _resources->Device->GetCommandQueue()->Flush();
 }
 
 void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)

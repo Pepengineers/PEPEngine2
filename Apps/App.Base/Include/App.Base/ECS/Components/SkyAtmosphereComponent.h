@@ -20,6 +20,14 @@ public:
         ++_revision;
     }
     uint64_t GetRevision() const { return _revision; }
+    // Continuous solar motion changes LUT inputs without invalidating temporal history.
+    void UpdateSunDirection(const Vector3& direction)
+    {
+        auto settings = _settings;
+        settings.DirectionToSun = direction;
+        ValidateSkySettings(settings);
+        _settings = settings;
+    }
 private:
     SkyAtmosphereSettings _settings;
     uint64_t _revision = 1;
