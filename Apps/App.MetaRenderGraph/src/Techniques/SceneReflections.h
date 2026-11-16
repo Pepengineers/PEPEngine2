@@ -15,7 +15,9 @@ class SceneReflections
         _settings = GetReflectionSettings();
         _historyBase = _common.HistoryRevision;
     }
-    void Append(Graph &, std::vector<ID3D12Resource *> &, SceneGeometry &, SceneEnvironment &, UINT slot, bool serial);
+    void Append(Graph &, std::vector<ID3D12Resource *> &, SceneGeometry &, SceneEnvironment &, UINT slot, bool serial,
+                GDX12Texture* localShadows = nullptr, GDX12Texture* staticLocalShadows = nullptr,
+                bool diagnosticReadbacks = true);
     bool Record(Id, ID3D12GraphicsCommandList *) const;
     void Submitted(bool serial, uint64_t fence);
     void Reset();

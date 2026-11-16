@@ -140,6 +140,8 @@ public:
     const GPUMesh* GetPrimaryGPUMesh(MeshHandle handle);
     GDX12UploadBuffer<GDX12IndirectDrawArgs>* GetPrimaryIndirectCommandsCache();
 
+    void PrepareReflectionScene();
+
     uint32_t GetPrimaryPipelineFlags();
     RenderPipelineCommonData* GetRenderPipelineCommonData();
     bool PrimaryPipelineHasFlag(uint32_t flag);
@@ -306,6 +308,14 @@ private:
     uint64_t _skyHash = 0;
     uint64_t _reflectionStaticHash = 0;
     uint64_t _reflectionDynamicHash = 0;
+    uint64_t _reflectionStaticGeometryHash = 0;
+    uint64_t _reflectionSnapshotWorld = UINT64_MAX, _reflectionSnapshotMesh = UINT64_MAX;
+    UINT _reflectionSnapshotInstances = UINT_MAX;
+    std::unordered_map<UINT, std::vector<UINT>> _reflectionTransformInstances, _reflectionMaterialInstances;
+    std::vector<const GDX12Material*> _reflectionMaterials;
+    std::vector<GDX12IndirectDrawArgs> _reflectionCommands;
+    uint64_t ReflectionStaticGeometryHash() const;
+    void CollectReflectionProbes();
     UINT _instanceCount = 0;
     UINT _transformCount = 0;
     UINT _cameraCount = 0;

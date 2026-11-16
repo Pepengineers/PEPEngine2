@@ -38,6 +38,7 @@ GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource
     _work.Commands.clear();
     auto& frame = _frames.at(slot);
     _water.AppendDraw(graph, bindings, hdr, geometry._slots.at(slot).Dsv.CPUHandle);
+    if (_opaqueContinuation) hdr = _opaqueContinuation(graph, bindings, hdr, _water.Depth(), _water.Motion());
     return AppendPhase(graph, bindings, geometry, slot, frame.All, hdr, sun, local, environment, true);
 }
 GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Resource*>& bindings,
@@ -49,9 +50,10 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
     auto& draw = phase.Draw;
     auto& compose = phase.Compose;
     const bool partitioned = draw._partition != GDX12GeometryDepthPartition::All;
-    auto* rasterDepth = _water.Depth();
+    auto* rasterDepth = Depth();
+    compose.SetApplyOpaqueAerialPerspective(!_opaqueContinuation && &phase != &_frames.at(slot).Near);
     draw.Setup(&_resources, &_common);
-    std::vector<IRenderPassLink*> inputs{scene.DepthView.get(), sun, environment.Output(0), environment.Output(1),
+    std::vector<IRenderPassLink*> inputs{rasterDepth, sun, environment.Output(0), environment.Output(1),
         environment.Output(2), local};
     if (partitioned) inputs.push_back(rasterDepth);
     draw.SetInputs(std::move(inputs));
@@ -78,7 +80,7 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
     const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
     const State depthRead = D3D12_RESOURCE_STATE_DEPTH_READ | read;
     auto accesses = environment.Reads(graph, bindings);
-    accesses.insert(accesses.end(), {texture(scene.DepthView.get(), Mode::Read, depthRead),
+    accesses.insert(accesses.end(), {texture(rasterDepth, Mode::Read, depthRead),
         texture(sun, Mode::Read, read), texture(local, Mode::Read, read),
         {scene.FrameIds[0], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
         {scene.FrameIds[1], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
@@ -111,7 +113,7 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
         _resources.SkyAerialRadianceSRV.GPUHandle, _resources.SkyAerialTransmittanceSRV.GPUHandle};
     const auto textures = _resources.SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex);
     const auto geom = scene.Geometry;
-    const auto depth = scene.ReadDepth.CPUHandle;
+    const auto depth = _dsv ? _dsv() : scene.ReadDepth.CPUHandle;
     const D3D12_VIEWPORT viewport = accum->GetViewport();
     const D3D12_RECT rect = accum->GetScissorRect();
     const std::array<D3D12_CPU_DESCRIPTOR_HANDLE, 2> targets{accum->GetRTV()->CPUHandle, reveal->GetRTV()->CPUHandle};

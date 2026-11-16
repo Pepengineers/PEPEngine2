@@ -6,11 +6,12 @@ static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored ligh
 SkyAtmosphere/IBL, cascaded sun shadows, point/spot shadows, XeGTAO, FidelityFX SSSR, mesh WBOIT
 transparency, Bistro grass/wind, GPU particles, animated people/foxes, SPH water, FidelityFX DoF, Motion Blur,
 reconstruction, HDR display transform, world-space UI posters and Engine.UI screen composition. Alpha-tested cutouts use OpaquePass.
-No reflection-probe or frame-generation passes execute.
+Cubemap captures feed separate unlit preview spheres; PBR/SSR retain static global IBL.
+Frame generation remains excluded.
 The world is paused; grass/wind, particles, characters and water advance through explicit time paths.
 The camera remains free.
 
-This adds the Bistro cloud picture to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+This adds the Bistro interior cubemap spheres to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
 The user checks the ordinary launch, measures CPU/GPU load and FPS, and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
@@ -25,7 +26,7 @@ and deformation precede depth/GBuffer/shadow consumers. Screen raster/compositio
 follows reconstruction and display once, at window resolution. World-space posters
 are scene geometry and receive ordinary scene postprocessing.
 See the [animation/UI report](../../docs/reports/2026-11-15-meta-bistro-animation-ui.md).
-The initial camera faces the interior painting wall at (600,230,-80) cm, yaw 70 degrees. The startup viewport is
+The initial camera views the interior tables and painting wall from (400,230,-370) cm, pitch 8/yaw 40 degrees. The startup viewport is
 1280x800; the render grid follows the effective reconstruction provider. The first frame's declared operations are
 written to `Logs/opaque-operations.txt` beside the executable. The first reused
 frame slot is recorded in `Logs/opaque-steady-operations.txt`; unchanged static
@@ -145,9 +146,9 @@ Transmittance/MS and fixed-position IBL are cached by their inputs; camera motio
 updates SkyView/aerial without refiltering IBL or resetting reflection history.
 Sun motion refreshes IBL as lighting changes, while preserving temporal history;
 the sunset-to-sunrise jump resets history once per cycle.
-Opaque/SSR stay unfogged until WBOIT resolves aerial once; glass applies its own
-aerial, and screen UI remains after postprocessing. Probes and global clouds stay
-disabled. See the [atmosphere report](../../docs/reports/2026-11-16-meta-bistro-sky-atmosphere.md).
+Opaque/SSR and water receive aerial perspective before unlit probe previews;
+WBOIT preserves that background, while glass applies its own aerial. Screen UI
+remains after postprocessing. Global clouds stay disabled. See the [atmosphere report](../../docs/reports/2026-11-16-meta-bistro-sky-atmosphere.md).
 
 ## Build and ordinary launch
 
@@ -395,3 +396,36 @@ Acceptance is a short ordinary launch: starts, GPU performs work, a result is
 displayed, no obvious error. Numeric precision, mode matrices, edge-case suites,
 profiling and repeated runs require a separate user request. In source-only mode,
 builds and application runs are not performed.
+
+## Interior cubemap preview spheres
+
+Ordinary Meta uses four unique seeded interior table anchors (App retains all 21
+terrace/interior anchors). Radius is 24 cm, capture/preview centre is 40 cm above
+the original tabletop. Anchors remain fixed when furniture later becomes dynamic.
+
+`App.ReflectionProbes.Count` accepts 0..10 in Meta; `Seed=1`, `ShowSpheres=true`,
+`ShowBounds=false`, `Resolution=128`, `PrefilterSamples=64`, `Implementation=2`.
+Increment `App.ReflectionProbes.Reset` to recreate anchors or `Recapture` to
+explicitly recapture. Changing count/seed resets placement; camera movement does
+not. `Render.Reflection.Enabled/Quality` retain their existing controls.
+
+Implementation 0 captures current opaque/masked geometry by face budget; 1 uses
+static color/depth plus depth-tested dynamic overlays; 2 captures static geometry
+once until explicit recapture or static topology/material/resource changes.
+Animated sunlight invalidates mode 1's static lighting cache, requiring repeated
+static bake work. Frozen ignores sunlight, camera and dynamic props.
+Transparency, particles and preview spheres are excluded from capture.
+
+The late preview runs after opaque lighting/SSR/water and before transparency,
+particles, DoF/MB/reconstruction/display. It samples the published cube directly
+without BRDF/AO/aerial or lighting again. Complete faces/mips publish through
+GPU-ordered copy/metadata packets and submitted fences; pending probes use neutral
+grey or their previous publication. Preview has separate depth/motion targets;
+particle collision keeps original opaque depth. Steady snapshot updates share
+non-destructive dirty journals with shadow preparation. Ordinary capture has no
+evidence/readback packets. See the [implementation report](../../docs/reports/2026-11-16-meta-bistro-probe-spheres.md).
+
+Release build and one successful ordinary visual smoke passed. Other modes and
+manual recapture are source-reviewed only. Final shutdown verification was stopped
+by the user with physical Escape after the DSV lifetime fix. Interior physics waits for the user's
+FPS/CPU/GPU acceptance of this stage.

@@ -123,6 +123,7 @@ bool MetaRenderPipeline::PrepareFrame(RenderPipelineContext &c, GDX12CommandList
         if (c.Primary.Sky.Source == SkySource::SkyAtmosphere) c.Primary.Lighting.SunShadowFlags &= ~2u;
         c.Common.AOAfterDepthPrepass = false;
         _geometry->PrepareGrass(c, c.Common.GameTimer->DeltaTime());
+        c.Runtime.PrepareReflectionScene();
         return false;
     }
     c.Common.AOAfterDepthPrepass = GetAmbientOcclusionExecutionPoint() == 0 && GetAmbientOcclusionSettings().IsActive();

@@ -12,6 +12,7 @@
 #include "BistroBounds.h"
 #include "BistroCharacters.h"
 #include "BistroWater.h"
+#include "BistroReflections.h"
 #include "Components/BistroInteractionSource.h"
 #include "Components/FluidRenderComponent.h"
 #include <d3d12sdklayers.h>
@@ -86,12 +87,14 @@ namespace
         BistroGrass::Scene _bistroGrass;
         BistroCharacters::Scene _bistroCharacters;
         BistroWater::Scene _bistroWater;
+        BistroReflections::Scene _bistroReflections{1, true};
         std::unique_ptr<BistroBounds::Scene> _bistroBounds;
         void Update(const GameTimer& timer) override
         {
             if (!_smoke)
             {
                 auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+                _bistroReflections.Update(world, timer.DeltaTime());
                 UpdateSky(world, timer.DeltaTime());
                 _bistroWater.Update(world, timer.DeltaTime());
                 _bistroCharacters.Update(world, timer.DeltaTime(), GetJobs(), nullptr, true);
@@ -100,6 +103,9 @@ namespace
                 BistroParticles::Update(world, true);
             }
             App::Update(timer);
+            if (!_smoke)
+                _bistroReflections.DrawBounds(*Locator.GetModule<SceneManagerModule>()->GetWorld(),
+                    *Locator.GetModule<RenderModule>());
         }
         bool AddModules() override
         {
@@ -134,6 +140,7 @@ namespace
                     settings.SunAngularRadiusRadians *= 2.5f;
                     atmosphere.SetSettings(settings);
                 }
+                _bistroReflections.Update(world, 0);
                 UpdateSky(world);
                 _bistroGrass.Update(world, 0);
                 CreateBistroParticles(world);
@@ -147,8 +154,8 @@ namespace
                 _bistroBounds->UpdateEmitters(world);
                 BistroParticles::Update(world, true);
                 auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
-                camera.Location = {600, 230, -80};
-                camera.Rotation = {0, 70, 0};
+                camera.Location = {400, 230, -370};
+                camera.Rotation = {8, 40, 0};
                 camera.DirtyFlag = true;
                 world.GetECS().Get<CameraComponent>(world.ActiveCamera).InvalidateHistory();
                 IndirectCommandBuildSystem commands;

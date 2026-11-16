@@ -14,9 +14,9 @@ namespace Meta
 class SceneLocalShadows
 {
 public:
-    SceneLocalShadows(GDX12DeviceResources&, RenderPipelineCommonData&);
+    SceneLocalShadows(GDX12DeviceResources&, RenderPipelineCommonData&, bool staticOnly = false);
     ~SceneLocalShadows();
-    void Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass = {});
+    void Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass = {}, bool allReceivers = false);
     void Complete(UINT slot);
     void Submitted(UINT slot);
     uint64_t SceneRevision() const { return _sceneRevision; }
@@ -71,7 +71,7 @@ private:
         std::vector<GDX12IndirectDrawArgs> Packed;
         std::optional<GDX12LocalShadowFrustum> Camera;
         XMFLOAT4X4 CameraMatrix{};
-        bool SelectionChanged = true;
+        bool SelectionChanged = true, AllReceivers = false;
         std::array<XMFLOAT4, 6> CameraPlanes;
         std::array<XMFLOAT3, 8> CameraCorners;
         CullJob Cull;
@@ -100,6 +100,7 @@ private:
     void PrepareAtlas(Slot&, UINT slices);
     GDX12DeviceResources& _resources;
     RenderPipelineCommonData& _common;
+    std::unique_ptr<GDX12DescriptorHeap> _dsvHeap;
     std::vector<Slot> _slots;
     std::vector<Caster> _casters;
     std::vector<BoundingBox> _changedCasterBounds;
@@ -110,6 +111,7 @@ private:
     std::unordered_map<UINT, std::vector<UINT>> _instances, _transforms, _materials;
     std::vector<UINT> _positions, _leaves;
     bool _treeReady = false, _castersRebuilt = false;
+    bool _staticOnly = false;
     uint64_t _sceneRevision = 0, _geometryRevision = 0, _meshRevision = 0, _textureRevision = 0;
     uint64_t _grassReceiverRevision = 0;
     std::unique_ptr<GDX12RootSignature> _root;

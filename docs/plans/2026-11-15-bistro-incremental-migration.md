@@ -84,10 +84,12 @@ transparency. Проверка прозрачности:
    Облака теперь выводятся через image-only UI в исходной картине C, с сохранением
    рамки; отдельной поверхности над входом больше нет. См. актуальный отчёт выше.
 
-10. Cubemap probes — новый контракт пользователя 2026-11-16:
+10. Cubemap probes — реализованы, ожидают пользовательской приёмки FPS/CPU/GPU:
     [unlit-сферы над случайными внутренними столами](../tasks/2026-11-16-meta-bistro-probe-spheres.md),
     после opaque lighting/SSR до прозрачности; без теней от сфер и без интеграции
     probes в PBR/SSR. Режимы dynamic, baked + dynamic overlay и frozen/manual.
+    [Отчёт и проверки](../reports/2026-11-16-meta-bistro-probe-spheres.md).
+    Release и короткий ordinary smoke пройдены; исходные anchors комнаты, seed=1.
 11. [Симуляция ограждённого интерьера по качеству](../tasks/2026-11-16-meta-bistro-interior-physics.md):
     Low стаканы → Medium +тарелки → High +приборы → Epic +мебель и остальные
     подвижные props. Исходные meshes, простые collision proxies, exterior статичен.

@@ -75,7 +75,8 @@ std::pair<size_t, size_t> SceneReflections::Readiness() const
     return {ready, p._probes.size()};
 }
 void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings, SceneGeometry &geometry,
-                              SceneEnvironment &environment, UINT slot, bool serial)
+                              SceneEnvironment &environment, UINT slot, bool serial, GDX12Texture* localShadows,
+                              GDX12Texture* staticLocalShadows, bool diagnosticReadbacks)
 {
     _mode = serial ? 0 : 1;
     auto &p = *_passes[_mode];
@@ -84,10 +85,14 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
     _publishing[_mode].clear();
     auto &scene = geometry._slots.at(slot);
     p._externalSettings = &_settings;
-    p._externalStaticShadows = geometry._shadows->LightingLocal(slot, true);
-    p._externalDynamicShadows = geometry._shadows->LightingLocal(slot);
+    if ((!localShadows || !staticLocalShadows) && !geometry._shadows)
+        throw std::invalid_argument("Ordinary probe capture requires explicit local shadow inputs");
+    if (!localShadows) localShadows = geometry._shadows->LightingLocal(slot);
+    if (!staticLocalShadows) staticLocalShadows = geometry._shadows->LightingLocal(slot, true);
+    p._externalStaticShadows = staticLocalShadows;
+    p._externalDynamicShadows = localShadows;
     p.SetInputs({environment.Output(0), environment.Output(1), environment.Output(2), environment.Output(3),
-                 geometry._shadows->LightingLocal(slot)});
+                 localShadows});
     const auto history = _common.HistoryRevision;
     const bool reset = _common.ResetHistory, upscalerReset = _common.ResetUpscalerHistory,
                requestReset = _common.RequestHistoryReset;
@@ -296,11 +301,11 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
             drawCommands = resources[1];
             visible = batch->VisibleInstancesAddress();
         }
-        view.Lighting.LocalShadows = geometry._shadows->LightingLocal(slot, view.Filter == p.StaticGeometry);
+        view.Lighting.LocalShadows = view.Filter == p.StaticGeometry ? staticLocalShadows : localShadows;
         view.Context.CameraConstants = camera;
         view.Context.CaptureLighting = shadow ? nullptr : &view.Lighting;
         auto reads = environment.Reads(graph, bindings);
-        reads.push_back({scene.FrameIds[0], Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER});
+        reads.push_back({scene.FrameIds[0], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
         reads.push_back({resource(&frame.Cameras->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
         reads.push_back({resource(&frame.Shadow->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
         reads.push_back({resource(&constants.SkyCB->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
@@ -503,6 +508,8 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
             cmd->CopyBufferRegion(target, 0, source, 0, UINT64(MaxReflectionProbes) * sizeof(GDX12ReflectionProbeData));
         },
         publicationOperations);
+    p._planPrepared = false;
+    if (!diagnosticReadbacks) return;
     auto &evidence = _evidence[_mode].at(slot);
     evidence.Images.clear();
     evidence.Captured = p._statistics.CapturedFaces;
@@ -554,7 +561,6 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
             cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
         }
     });
-    p._planPrepared = false;
 }
 std::vector<uint8_t> SceneReflections::Readback(UINT slot, const std::string &stem) const
 {
