@@ -16,6 +16,9 @@ RWStructuredBuffer<FluidParticle> Next : register(u0);
 RWStructuredBuffer<float2> DensityOut : register(u1);
 RWStructuredBuffer<uint2> SortOut : register(u2);
 RWStructuredBuffer<uint> OffsetOut : register(u3);
+struct Prediction { float3 Position; int3 Cell; };
+StructuredBuffer<Prediction> Predictions : register(t4);
+RWStructuredBuffer<Prediction> PredictionOut : register(u4);
 static const float Pi = 3.14159265359f;
 int3 Cell(float3 position) { return (int3)floor(position / H); }
 uint Key(int3 cell)
@@ -37,6 +40,10 @@ float3 PredictedPosition(FluidParticle particle)
 {
     return particle.Position + (particle.Velocity + ExternalAcceleration(particle.Position) * Dt) * PredictionSeconds;
 }
+Prediction Predict(uint i)
+{
+    return Predictions[i];
+}
 [numthreads(128, 1, 1)]
 void SavePrevious(uint i : SV_DispatchThreadID)
 {
@@ -49,7 +56,14 @@ void SavePrevious(uint i : SV_DispatchThreadID)
 void Hash(uint i : SV_DispatchThreadID)
 {
     if (i >= Capacity) return;
-    if (i < Count) SortOut[i] = uint2(Key(Cell(PredictedPosition(Particles[i]))), i);
+    if (i < Count)
+    {
+        Prediction prediction;
+        prediction.Position = PredictedPosition(Particles[i]);
+        prediction.Cell = Cell(prediction.Position);
+        PredictionOut[i] = prediction;
+        SortOut[i] = uint2(Key(prediction.Cell), i);
+    }
     else SortOut[i] = uint2(0xffffffffu, 0xffffffffu);
     OffsetOut[i] = Count;
 }
@@ -159,8 +173,9 @@ void Densities(uint i : SV_DispatchThreadID)
 {
     if (i >= Count) return;
     i = Sorted[i].y;
-    float3 position = PredictedPosition(Particles[i]);
-    int3 origin = Cell(position);
+    Prediction prediction = Predict(i);
+    float3 position = prediction.Position;
+    int3 origin = prediction.Cell;
     float density = 0;
     float nearDensity = 0;
     float h2 = H * H;
@@ -176,11 +191,10 @@ void Densities(uint i : SV_DispatchThreadID)
         for (uint n = Offsets[key]; n < Count; ++n)
         {
             if (Sorted[n].x != key) break;
-            FluidParticle neighbor = Particles[Sorted[n].y];
             // Bucket collisions are not cell identity; this also prevents duplicate visits.
-            float3 neighborPosition = PredictedPosition(neighbor);
-            if (any(Cell(neighborPosition) != cell)) continue;
-            float3 d = position - neighborPosition;
+            Prediction neighbor = Predict(Sorted[n].y);
+            if (any(neighbor.Cell != cell)) continue;
+            float3 d = position - neighbor.Position;
             if (NearStiffness > 0)
             {
                 float q = max(0, H - length(d));
@@ -237,8 +251,9 @@ void Integrate(uint i : SV_DispatchThreadID)
     float rhoi = densityI.x;
     float pressureI = Stiffness * (NearStiffness > 0 ? rhoi - RestDensity : max(0, rhoi - RestDensity));
     float3 acceleration = ExternalAcceleration(p.Position);
-    float3 position = PredictedPosition(p);
-    int3 origin = Cell(position);
+    Prediction prediction = Predict(i);
+    float3 position = prediction.Position;
+    int3 origin = prediction.Cell;
     float gradientCoefficient = -45.0f / (Pi * pow(H, 6));
     float densityDerivativeCoefficient = -15.0f / (Pi * pow(H, 5));
     uint neighborCount = 0;
@@ -253,10 +268,9 @@ void Integrate(uint i : SV_DispatchThreadID)
             if (Sorted[n].x != key) break;
             uint j = Sorted[n].y;
             if (j == i) continue;
-            FluidParticle neighbor = Particles[j];
-            float3 neighborPosition = PredictedPosition(neighbor);
-            if (any(Cell(neighborPosition) != cell)) continue;
-            float3 difference = position - neighborPosition;
+            Prediction neighbor = Predict(j);
+            if (any(neighbor.Cell != cell)) continue;
+            float3 difference = position - neighbor.Position;
             float distance = length(difference);
             if (ReferenceUnits != 0 ? distance > H : distance >= H) continue;
             ++neighborCount;
@@ -281,7 +295,7 @@ void Integrate(uint i : SV_DispatchThreadID)
             else
                 acceleration -= Mass * (pressureI / (rhoi * rhoi) + pressureJ / (rhoj * rhoj)) * gradient;
             float laplacian = -gradientCoefficient * q;
-            acceleration += Viscosity * Mass / rhoj * (neighbor.Velocity - p.Velocity) * laplacian;
+            acceleration += Viscosity * Mass / rhoj * (Particles[j].Velocity - p.Velocity) * laplacian;
         }
     }
     if (ReferenceUnits == 0) acceleration = Limited(acceleration, MaxAcceleration);

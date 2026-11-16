@@ -270,6 +270,7 @@ struct WaterTransfer::Impl {
                     add(item.Solver.Density->GetResource(), Mode::ReadWrite, solve, solveStates);
                     add(item.Solver.Keys->GetResource(), Mode::ReadWrite, solve, solveStates);
                     add(item.Solver.Offsets->GetResource(), Mode::ReadWrite, solve, solveStates);
+                    add(item.Solver.Predictions->GetResource(), Mode::ReadWrite, solve, solveStates);
                     add(item.Constants->GetResource(), Mode::Read, solve, solveStates, true);
                     add(item.Solver.SeedUpload->GetResource(), Mode::Read, solve, solveStates, true);
                     const auto current = (item.Head.Current + input.Inputs[i].Batch.Count) % 2;

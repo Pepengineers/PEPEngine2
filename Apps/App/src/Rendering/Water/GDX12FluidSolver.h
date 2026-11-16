@@ -28,12 +28,14 @@ class GDX12FluidSolver
 {
 public:
     struct Particle { XMFLOAT3 Position, Velocity, PreviousPosition; };
+    struct Prediction { XMFLOAT3 Position; XMINT3 Cell; };
     struct Buffers
     {
         std::unique_ptr<GDX12UploadBuffer<Particle>> Particles[2], SeedUpload;
         std::unique_ptr<GDX12UploadBuffer<XMFLOAT2>> Density;
         std::unique_ptr<GDX12UploadBuffer<XMUINT2>> Keys;
         std::unique_ptr<GDX12UploadBuffer<UINT>> Offsets;
+        std::unique_ptr<GDX12UploadBuffer<Prediction>> Predictions;
         UINT Count = 0, Capacity = 0;
     };
     struct Head

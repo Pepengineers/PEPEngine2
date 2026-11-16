@@ -179,8 +179,8 @@ void GDX12FluidSolver::Initialize(GDX12Device* device)
     desc.VolatileSRVData = true;
     desc.Constants = { 8 };
     desc.NumSingleCBVSlots = 1;
-    desc.NumSingleSRVSlots = 4;
-    desc.NumSingleUAVSlots = 4;
+    desc.NumSingleSRVSlots = 5;
+    desc.NumSingleUAVSlots = 5;
     auto root = std::make_unique<GDX12RootSignature>(device, desc);
     _save = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "SavePrevious");
     _hash = GDX12RenderHelpers::CreateComputePipeline(device, root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", "Hash");
@@ -203,6 +203,7 @@ GDX12FluidSolver::Buffers GDX12FluidSolver::CreateBuffers(GDX12Device* device, G
     const GDX12FluidInstance& instance)
 {
     static_assert(sizeof(Particle) == 36);
+    static_assert(sizeof(Prediction) == 24);
     ValidateFluidInstance(instance);
     const auto& seed = instance.Component.GetParticles();
     if (!device || !heap || !seed || seed->empty()) throw std::invalid_argument("Fluid solver requires device and seed");
@@ -214,6 +215,7 @@ GDX12FluidSolver::Buffers GDX12FluidSolver::CreateBuffers(GDX12Device* device, G
     buffers.Density = SolverBuffer<XMFLOAT2>(device, heap, buffers.Count);
     buffers.Keys = SolverBuffer<XMUINT2>(device, heap, buffers.Capacity);
     buffers.Offsets = SolverBuffer<UINT>(device, heap, buffers.Capacity);
+    buffers.Predictions = SolverBuffer<Prediction>(device, heap, buffers.Count);
     buffers.SeedUpload = std::make_unique<GDX12UploadBuffer<Particle>>(device, buffers.Count, EBufferType::Upload, false);
     const auto particles = MakeSeed(instance);
     buffers.SeedUpload->CopyData(0, particles.data(), buffers.Count);
@@ -280,6 +282,7 @@ GDX12FluidSolver::Head GDX12FluidSolver::Record(GDX12CommandList& commands, Buff
     auto& density = buffers.Density->GetResource();
     auto& keys = buffers.Keys->GetResource();
     auto& offsets = buffers.Offsets->GetResource();
+    auto& predictions = buffers.Predictions->GetResource();
     auto& current = *particles[head.Current];
     if (head.SeedPending)
     {
@@ -312,15 +315,18 @@ GDX12FluidSolver::Head GDX12FluidSolver::Record(GDX12CommandList& commands, Buff
         auto& input = *particles[head.Current];
         auto& output = *particles[1 - head.Current];
         commands.ResourceBarrier({input.GetTransitionBarrier(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE),
-            keys.GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS), offsets.GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
+            keys.GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS), offsets.GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+            predictions.GetUnorderedAccessBarrier()});
         commands.SetComputeSRV(0, buffers.Particles[head.Current]->GetSRV()->GPUHandle);
         commands.SetComputeUAV(2, buffers.Keys->GetUAV()->GPUHandle);
         commands.SetComputeUAV(3, buffers.Offsets->GetUAV()->GPUHandle);
+        commands.SetComputeUAV(4, buffers.Predictions->GetUAV()->GPUHandle);
         dispatch.K = dispatch.J = 0;
         setDispatch();
         commands.SetPipelineState(_hash);
         commands.Dispatch((buffers.Capacity + 127) / 128, 1, 1);
-        commands.ResourceBarrier({keys.GetUAVBarrier(), offsets.GetUAVBarrier()});
+        commands.ResourceBarrier({keys.GetUAVBarrier(), offsets.GetUAVBarrier(), predictions.GetNonPixelShaderResourceBarrier()});
+        commands.SetComputeSRV(4, buffers.Predictions->GetSRV()->GPUHandle);
         const UINT tileGroups = (buffers.Capacity + SortTileSize - 1) / SortTileSize;
         if (buffers.Capacity > 1)
         {

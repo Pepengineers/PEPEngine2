@@ -280,6 +280,7 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::GetSimulation
         accesses.push_back({ &state->Solver.Density->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
         accesses.push_back({ &state->Solver.Keys->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
         accesses.push_back({ &state->Solver.Offsets->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
+        accesses.push_back({ &state->Solver.Predictions->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
         if (state->SolverHead.SeedPending && state->Solver.SeedUpload) accesses.push_back({ &state->Solver.SeedUpload->GetResource(), GDX12RenderGraph::Mode::Read });
     }
     return accesses;
