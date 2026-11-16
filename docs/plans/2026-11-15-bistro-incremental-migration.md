@@ -64,8 +64,12 @@ transparency. Проверка прозрачности:
    [отчёт DoF](../reports/2026-11-16-meta-bistro-dof.md).
    Использовать актуальную глубину сцены, существующие параметры фокуса/качества,
    render grid выбранного SR; disabled должен сохранять прежний путь без лишней копии.
-8. World-space UI canvas — недостающая часть UI, добавлена пользователем 2026-11-16.
+8. World-space UI canvas — подключён к ordinary Meta 2026-11-16.
    [Задание на реализацию](../tasks/2026-11-16-meta-bistro-world-ui.md).
+   ATRIUM/TERRACE используют исходные surfaces, Engine.UI effects/raster на primary
+   DIRECT и материал opaque геометрии до DoF/MB/SR. Подготовка binding до material
+   uploads, lifetime по frame slot, reads только реальным color consumers.
+   [Реализация и фактическая проверка](../reports/2026-11-16-meta-bistro-world-ui.md).
    Поставлена перед облаками-картиной для переиспользования существующих поверхностей
    и привязки offscreen-текстуры к материалу. Это отдельная приёмка от screen UI.
 9. Облака как картина на стене — после DoF и world-space UI, отдельная приёмка.

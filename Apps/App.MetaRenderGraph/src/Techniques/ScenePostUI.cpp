@@ -25,9 +25,9 @@ ScenePostUI::ScenePostUI(RenderPipelineContext& c, bool opaqueOnly)
     _blur.SetPassthroughWhenDisabled(opaqueOnly);
     _reconstruction.Setup(&_resources, &_common);
     _output.Setup(&_resources, &_common);
-    if (opaqueOnly) return;
     _posters = std::make_unique<BistroUIPosters>(c.Runtime,
         BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>());
+    if (opaqueOnly) return;
 #ifdef _DEBUG
     _collision = std::make_unique<BistroCollisionPass>(*BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>());
     _collision->Setup(&_resources, &_common);
@@ -318,10 +318,10 @@ void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bind
                 {{effect->GetResource(), Mode::ReadWrite}, {target->GetResource(), Mode::Write}},
                 [pass](auto* cmd) { pass->Execute(cmd); }, {}, target);
         const auto targetId = NativeWork::ResourceFor(graph, bindings, target->GetResource()->D3DResource.Get(), "poster material");
-        // Conservative material read domain includes shadow/probe capture and
-        // transparent geometry; all are ordered after this frame's UI upload.
+        // Opaque posters are sampled by GBuffer/probe color shaders, not masked depth or glass.
         for (Id id = 0; id < consumers; ++id)
-            if (graph.Operations[id].Target == Queue::Direct)
+            if (graph.Operations[id].Name == "scene GBuffer ExecuteIndirect" ||
+                graph.Operations[id].Name == "probe HDR capture mesh/sky")
                 graph.Operations[id].Accesses.push_back({targetId, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
     }
 }

@@ -5,13 +5,12 @@ The ordinary launch now loads the original Bistro interior and exterior with
 static opaque materials: GPU culling, depth prepass, GBuffer, PBR, authored lights,
 SkyAtmosphere/IBL, cascaded sun shadows, point/spot shadows, XeGTAO, FidelityFX SSSR, mesh WBOIT
 transparency, Bistro grass/wind, GPU particles, animated people/foxes, SPH water, FidelityFX DoF, Motion Blur,
-reconstruction, HDR display transform and Engine.UI screen composition. Alpha-tested cutouts use OpaquePass.
-No reflection-probe, frame-generation
-or world-space UI poster passes execute.
+reconstruction, HDR display transform, world-space UI posters and Engine.UI screen composition. Alpha-tested cutouts use OpaquePass.
+No reflection-probe or frame-generation passes execute.
 The world is paused; grass/wind, particles, characters and water advance through explicit time paths.
 The camera remains free.
 
-This adds Bistro Depth of Field to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+This adds Bistro world-space UI to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
 The user checks the ordinary launch, measures CPU/GPU load and FPS, and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
@@ -23,7 +22,8 @@ Startup uses App's 10 people and 5 foxes, original clips/routes/materials/scales
 skinning enabled at Mid (30 Hz), no pose-rate or actor preset override. Route jobs
 complete before the render snapshot; physics remains paused. Skin palette uploads
 and deformation precede depth/GBuffer/shadow consumers. Screen raster/composition
-follows reconstruction and display once, at window resolution, without posters.
+follows reconstruction and display once, at window resolution. World-space posters
+are scene geometry and receive ordinary scene postprocessing.
 See the [animation/UI report](../../docs/reports/2026-11-15-meta-bistro-animation-ui.md).
 The initial camera is at the Bistro entrance, as in App. The startup viewport is
 1280x800; the render grid follows the effective reconstruction provider. The first frame's declared operations are
@@ -66,6 +66,27 @@ retire the SDK context; focus/aperture/FOV update CoC without recreating it.
 Enable/disable and CoC changes reset temporal SR history; unchanged focus parameters
 do not reset it each frame. The SDK FP32 HDR accumulation fix is preserved.
 See the [DoF report](../../docs/reports/2026-11-16-meta-bistro-dof.md).
+
+Two original Bistro world canvases now render on the primary GPU through the Meta
+executor: ATRIUM at (-214.84,177,-72.78) cm and TERRACE at (-174.89,177,5.63) cm,
+both 68×38.25 cm, yaw -63 degrees. Their opaque two-sided materials provide
+perspective, scene depth/occlusion and normal DoF/MB/SR treatment. The animated
+gradient, reserve-power bar, stars and separable box blur reuse BistroUIPosters
+and Engine.UI; animation advances while the world is paused. This adapts the
+MGPU-IMGUI offscreen UI principle; it does not enable UI offload or copy its HUD.
+Startup uses `Render.UI.Quality=0` (Low), `Render.UI.AsyncCompute=false`, local DIRECT.
+Quality 1 is Medium; these are workload presets, without distance LOD.
+
+| Canvas | Logical | Low raster / effects | Medium raster / effects |
+| --- | --- | --- | --- |
+| ATRIUM | 384×216 | 384×216 / 96×54 | 512×288 / 171×96 |
+| TERRACE | 480×270 | 480×270 / 120×68 | 640×360 / 214×120 |
+
+Low/Medium uses 20/40 stars and blur radius 2/5. RGBA8 canvas targets are independent
+of window/SR grids. Frame-slot preparation publishes material bindings before
+uploads; effects/raster precede actual GBuffer material reads. GPU targets,
+effect scratch and descriptors persist per canvas slot until its consumers finish.
+See the [world UI report](../../docs/reports/2026-11-16-meta-bistro-world-ui.md).
 
 The original stone basin is at (-1297,65.3,-425) cm, yaw 135 degrees, beside the
 existing SparkRain emitter. Startup requests one basin and 100000 SPH particles,
