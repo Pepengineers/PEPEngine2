@@ -2,6 +2,7 @@
 #include "Engine.RendererDX12/D3DHelpers.h"
 #include <cstdint>
 #include <string>
+#include "Common/EnumMetadata.h"
 
 class GDX12Device;
 class GDX12CommandList;
@@ -9,6 +10,11 @@ class GDX12Texture;
 class RenderPipelineCommonData;
 
 enum class GDX12FrameGenerationProvider : std::uint8_t { Off, AMD, NVIDIA, Intel, Count };
+PEP_ENUM_METADATA(GDX12FrameGenerationProvider,
+    PEP_DISPLAY_NAME(AMD, "FSR Frame Generation")
+    PEP_DISPLAY_NAME(NVIDIA, "DLSS Frame Generation")
+    PEP_DISPLAY_NAME(Intel, "XeFG")
+)
 GDX12FrameGenerationProvider GetFrameGenerationProvider();
 
 struct GDX12FrameGenerationStatus

@@ -71,7 +71,7 @@ void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
     _bindings.PrimaryPasses = _post->Passes();
     _bindings.PrimaryPasses.push_back(&_sceneFlags);
     _bindings.Reconstruction = &_post->Reconstruction();
-    _bindings.FrameGenerationInputs = !_opaqueOnly;
+    _bindings.FrameGenerationInputs = true;
     if (_opaqueOnly && (MetaWater.GetValue() || MetaParticles.GetValue() || MetaCrossAdapter.GetValue()))
         throw std::invalid_argument("Opaque Bistro does not include secondary-adapter techniques");
     const auto frames=static_cast<uint32_t>(c.Primary.FrameConstants.size());

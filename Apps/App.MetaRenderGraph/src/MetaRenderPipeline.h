@@ -79,7 +79,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     }
     bool AllowsFrameGeneration() const override
     {
-        return !_opaqueOnly && !_verify && _post && _post->AllowsFrameGeneration();
+        return !_verify && _post && _post->AllowsFrameGeneration();
     }
     bool PrepareFrame(RenderPipelineContext &, GDX12CommandList *) override;
     void BuildGraph(GDX12RenderGraph &, const RenderPipelineGraphInputs &) override;

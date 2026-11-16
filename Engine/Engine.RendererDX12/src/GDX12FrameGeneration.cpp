@@ -33,7 +33,7 @@
 namespace
 {
     AutoConsoleVariable<GDX12FrameGenerationProvider> Provider(L"Render.FrameGeneration.Provider", GDX12FrameGenerationProvider::Off,
-        L"0 Off, 1 AMD, 2 NVIDIA, 3 Intel; unavailable providers remain Off with a reason",
+        L"0 Off, 1 FSR Frame Generation, 2 DLSS Frame Generation, 3 XeFG; unavailable providers remain Off with a reason",
         EConsoleVariableFlags::Default);
 
     void CheckAMD(const ffxReturnCode_t result, const char* operation)
@@ -343,14 +343,8 @@ ComPtr<IDXGISwapChain4> GDX12FrameGeneration::CreateSwapChain(const HWND window,
             case GDX12FrameGenerationProvider::NVIDIA: p.CreateNvidia(); break;
             case GDX12FrameGenerationProvider::Off: break;
             }
-            if (chain)
-            {
-                auto hooked = GDX12StreamlineSDK::Get().CreateProxySwapChain(chain);
-                if (GDX12StreamlineSDK::Get().IsEnabled() && hooked.Get() == chain.Get())
-                    throw std::runtime_error("Streamline cannot hook this FG swapchain combination");
-                chain = std::move(hooked);
-            }
-            else chain = GDX12DeviceFactory::CreateSwapChain(p.Device, desc, window);
+            // Vendor FG proxies must receive Present themselves; upgrading them can unwrap their interpolation layer.
+            if (!chain) chain = GDX12DeviceFactory::CreateSwapChain(p.Device, desc, window);
             if (p.Status.Requested == GDX12FrameGenerationProvider::NVIDIA)
             {
                 p.NvidiaOptions(true);
@@ -569,6 +563,7 @@ void GDX12FrameGeneration::AfterPresent()
 {
     auto& p = *_impl;
     if (!p.ActiveFrame) return;
+    const bool firstGeneratedFrame = p.Status.GeneratedFrames == 0;
     try
     {
         p.Marker(sl::PCLMarker::ePresentEnd, XELL_PRESENT_END);
@@ -593,6 +588,10 @@ void GDX12FrameGeneration::AfterPresent()
         }
     }
     catch (const std::exception& e) { p.Fail(e.what()); p.Stop(); }
+    if (firstGeneratedFrame && p.Status.GeneratedFrames > 0)
+        Log::Info("FrameGeneration", "SDK confirmed interpolation: provider=", static_cast<unsigned>(p.Status.Effective),
+            ", generatedFrames=", p.Status.GeneratedFrames, ", frame=", p.Frame,
+            ", output=", p.Desc.Width, "x", p.Desc.Height);
     p.History = p.FrameHistory; p.ResetNext = false; p.ActiveFrame = false;
 }
 

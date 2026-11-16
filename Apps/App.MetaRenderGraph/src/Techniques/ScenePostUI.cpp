@@ -77,6 +77,7 @@ void ScenePostUI::Resize()
 {
     _reconstruction.QueryRenderTargetResolution();
     _pendingExports = {};
+    _publishedInputs.clear(); _pendingPublished.clear();
     _exports.clear();
     _exports.resize(_resources.FrameConstants.size());
     _resize = true;
@@ -96,9 +97,8 @@ Id ScenePostUI::Packet(Graph& graph, std::vector<ID3D12Resource*>& bindings, con
     {
         auto* native = resource->D3DResource.Get();
         const auto id = NativeWork::ResourceFor(graph, bindings, native, name);
-        for (const auto& slot : _exports)
-            for (const auto& image : slot)
-                if (image.Get() == native) graph.Resources[id].Initial = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        for (const auto& image : _publishedInputs)
+            if (image.Get() == native) graph.Resources[id].Initial = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
         const State state = renderTarget && native == renderTarget->GetResource()->D3DResource.Get()
             ? State(D3D12_RESOURCE_STATE_RENDER_TARGET)
             : native->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_BUFFER
@@ -146,7 +146,6 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
         {{resource(hdr), Mode::Read}, {resource(depth), Mode::Read}, {resource(dof), Mode::Write}},
         [this](auto* cmd) { _dof.RecordCommands(cmd); });
     const auto outputId = AppendReconstruction(graph, bindings, dof, depth, motion, featureMotion, target, {dofId});
-    auto* completeMotion = _blur.GetOutput(1)->GetTexture();
 #ifdef _DEBUG
     Id displayId = outputId;
     if (CollisionView.GetValue())
@@ -162,12 +161,22 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
 #else
     const Id displayId = outputId;
 #endif
+    const auto fgId = AppendFrameGeneration(graph, bindings, depth, displayId);
+    AppendScreen(graph, bindings, target, finish, fgId);
+}
+Id ScenePostUI::AppendFrameGeneration(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+    GDX12Texture* depth, Id dependency)
+{
+    if (_swapchain->GetFrameGeneration().GetStatus().Effective == GDX12FrameGenerationProvider::Off)
+        return dependency;
+    const auto resource = [](GDX12Texture* texture) { return texture->GetResource(); };
+    auto* completeMotion = _blur.GetOutput(1)->GetTexture();
     // Export exactly the states promised by the existing FG tagging API. No
     // terminal transition may invalidate eValidUntilPresent resources.
     const auto fgId = Packet(graph, bindings, "frame-generation prepare/tag DIRECT SDK boundary",
         {{resource(depth), Mode::Read}, {resource(completeMotion), Mode::Read}},
         [this, depth, completeMotion](auto* cmd) { _swapchain->GetFrameGeneration().Prepare(cmd, depth, completeMotion, _common); },
-        {displayId}, nullptr, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        {dependency}, nullptr, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
     auto& exports = _pendingExports;
     const std::array<GDX12Texture*, 2> retained{depth, completeMotion};
     for (size_t index = 0; index < retained.size(); ++index)
@@ -175,16 +184,20 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
         auto resource = retained[index]->GetResource()->D3DResource;
         const auto id = NativeWork::ResourceFor(graph, bindings, resource.Get(), "FG retained input");
         graph.Resources[id].Final = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+        if (std::none_of(_pendingPublished.begin(), _pendingPublished.end(),
+            [&](const auto& previous) { return previous.Get() == resource.Get(); }))
+            _pendingPublished.push_back(resource);
         exports[index] = std::move(resource);
     }
-    AppendScreen(graph, bindings, target, finish, fgId);
+    return fgId;
 }
 Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>& bindings,
     GDX12Texture* hdr, GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion,
     GDX12Texture* target, std::vector<Id> dependencies)
 {
     const auto resource = [](GDX12Texture* texture) { return texture->GetResource(); };
-    _blur.PrepareRecording(!_ordinary || (_reconstruction.GetFlags() & RENDER_PASS_FLAG_USE_JITTER));
+    _blur.PrepareRecording(!_ordinary || (_reconstruction.GetFlags() & RENDER_PASS_FLAG_USE_JITTER) ||
+        GetFrameGenerationProvider() != GDX12FrameGenerationProvider::Off);
     auto* color = _blur.GetOutput(0)->GetTexture();
     auto* completeMotion = _blur.GetOutput(1)->GetTexture();
     _reconstruction.SetInputs({depth, completeMotion, color});
@@ -310,20 +323,20 @@ void ScenePostUI::AppendOpaque(Graph& graph, std::vector<ID3D12Resource*>& bindi
     if (!_initialized) { _blur.Initialize(); _initialized = true; }
     else if (_resize) _blur.Resize();
     const auto output = AppendReconstruction(graph, bindings, hdr, depth, motion, featureMotion, target, std::move(dependencies));
-    AppendScreen(graph, bindings, target, finish, output);
+    const auto fg = AppendFrameGeneration(graph, bindings, depth, output);
+    AppendScreen(graph, bindings, target, finish, fg);
 }
 void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bindings, bool record)
 {
     for (Id id = 0; id < bindings.size(); ++id)
-        for (const auto& slot : _exports)
-            for (const auto& image : slot)
-                if (image.Get() == bindings[id])
-                {
-                    graph.Resources[id].Initial = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-                    // The diagnostic serial scene may omit post entirely. Keep
-                    // imported SDK state valid until the displayed plan uses it.
-                    graph.Resources[id].Final = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-                }
+        for (const auto& image : _publishedInputs)
+            if (image.Get() == bindings[id])
+            {
+                graph.Resources[id].Initial = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+                // The diagnostic serial scene may omit post entirely. Keep
+                // imported SDK state valid until the displayed plan uses it.
+                graph.Resources[id].Final = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+            }
     const Id consumers = Id(graph.Operations.size());
     for (size_t index = 0; index < BistroUIPosters::Count; ++index)
     {

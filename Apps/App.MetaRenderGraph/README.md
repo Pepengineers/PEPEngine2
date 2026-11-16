@@ -7,7 +7,13 @@ SkyAtmosphere/IBL, cascaded sun shadows, point/spot shadows, XeGTAO, FidelityFX 
 transparency, Bistro grass/wind, GPU particles, animated people/foxes, SPH water, FidelityFX DoF, Motion Blur,
 reconstruction, HDR display transform, world-space UI posters and Engine.UI screen composition. Alpha-tested cutouts use OpaquePass.
 Cubemap captures feed separate unlit preview spheres; PBR/SSR retain static global IBL.
-Frame generation remains excluded.
+Frame generation is opt-in: `Render.FrameGeneration.Provider=0` (default Off),
+`1` FSR Frame Generation, `2` DLSS Frame Generation, `3` XeFG. Ordinary Bistro
+reuses the renderer's SDK swapchains and DIRECT prepare/tag boundary; it retains
+composition depth and complete motion until Present. The SDK's first confirmed
+generated frame is logged, and unavailable providers report an explicit fallback.
+See the [frame-generation report](../../docs/reports/2026-11-17-meta-bistro-frame-generation.md)
+for actual hardware checks and limits. DLSS FG availability depends on hardware.
 Ordinary startup selects **Native TAA** (`Render.Upscaler.Provider=5`, quality 0):
 one native-resolution temporal resolve on primary DIRECT after DoF/motion preparation
 and before display/screen UI. Native (0) remains the unsmoothed comparison; SDK
@@ -345,7 +351,7 @@ Render.FrameGeneration.Provider = 0
 |---|---|
 | `Meta.Async.Queues` | `false`: single-DIRECT placement. `true`: selected local COMPUTE/COPY packets; currently the registered default. |
 | `Render.Upscaler.Provider` | `0`: Native. `2`: FSR. These are the current reconstruction scope. |
-| `Render.FrameGeneration.Provider` | Keep `0`; FG and other reconstruction providers are deferred. |
+| `Render.FrameGeneration.Provider` | `0` Off (default), `1` FSR FG, `2` DLSS FG, `3` XeFG. Independent of reconstruction provider. |
 | `Meta.Water.Enabled` | Opt in to the Meta secondary water solver; default `false`. |
 | `Meta.Water.SecondaryAdapter` | Explicit secondary DXGI hardware adapter index, distinct from the actual primary. Required when water transfer is enabled. |
 | `Meta.Water.Selection` | `0`: StrictPublication. `1`: LatestCompleted; default `1`. |
