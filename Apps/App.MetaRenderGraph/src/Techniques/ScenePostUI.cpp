@@ -7,6 +7,7 @@
 #include "Engine.RendererDX12/GDX12SwapChain.h"
 #include "Engine.RendererDX12/GDX12FrameGeneration.h"
 #include "Engine.RendererDX12/GDX12MotionBlurSettings.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12TAAPass.h"
 #include "Common/GameTimer.h"
 
 namespace Meta
@@ -189,6 +190,7 @@ Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>&
     _reconstruction.SetInputs({depth, completeMotion, color});
     if (_reconstruction._needsInitialize) _reconstruction.Initialize();
     else if (_resize) _reconstruction.Resize();
+    _reconstruction.PrepareRecording();
     _reconstruction.LinkOutput();
     _resize = false;
     _output.SetInputs({_reconstruction.GetOutput(0), target});
@@ -212,17 +214,33 @@ Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>&
     const bool native = _reconstruction.GetStatus().Effective == GDX12UpscalerProvider::Native;
     if (!native)
     {
-        std::vector<std::pair<GDX12Resource*, Mode>> accesses{{resource(color), Mode::Read},
-            {resource(reconstructed), Mode::ReadWrite}};
-        if (_reconstruction.GetFlags() & RENDER_PASS_FLAG_USE_JITTER)
+        auto* taa = _reconstruction.TAA();
+        if (taa)
         {
-            accesses.emplace_back(resource(depth), Mode::Read);
-            accesses.emplace_back(resource(completeMotion), Mode::Read);
+            const auto frame = taa->PreparedFrame();
+            std::vector<std::pair<GDX12Resource*, Mode>> accesses;
+            for (auto* input : frame.Reads) accesses.emplace_back(resource(input), Mode::Read);
+            accesses.emplace_back(resource(frame.Color), Mode::Write);
+            accesses.emplace_back(resource(frame.Depth), Mode::Write);
+            accesses.emplace_back(frame.Camera, Mode::Read);
+            const auto reconstruction = Packet(graph, bindings, "Native TAA resolve DIRECT boundary", std::move(accesses),
+                [taa, frame](auto* cmd) { taa->RecordCommands(cmd, frame); }, std::move(dependencies));
+            dependencies = {reconstruction};
         }
-        const auto reconstruction = Packet(graph, bindings, "reconstruction provider DIRECT SDK boundary",
-            std::move(accesses),
-            [this](auto* cmd) { _reconstruction.Execute(cmd); }, std::move(dependencies));
-        dependencies = {reconstruction};
+        else
+        {
+            std::vector<std::pair<GDX12Resource*, Mode>> accesses{{resource(color), Mode::Read},
+                {resource(reconstructed), Mode::ReadWrite}};
+            if (_reconstruction.GetFlags() & RENDER_PASS_FLAG_USE_JITTER)
+            {
+                accesses.emplace_back(resource(depth), Mode::Read);
+                accesses.emplace_back(resource(completeMotion), Mode::Read);
+            }
+            const auto reconstruction = Packet(graph, bindings, "reconstruction provider DIRECT SDK boundary",
+                std::move(accesses),
+                [this](auto* cmd) { _reconstruction.Execute(cmd); }, std::move(dependencies));
+            dependencies = {reconstruction};
+        }
     }
     return Packet(graph, bindings, "output HDR display transform", {{resource(reconstructed), Mode::Read},
         {resource(target), Mode::Write}}, [this, native](auto* cmd) {

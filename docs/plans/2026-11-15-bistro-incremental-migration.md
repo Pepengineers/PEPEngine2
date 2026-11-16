@@ -108,12 +108,15 @@ transparency. Проверка прозрачности:
 не исключается. SSR и все уже перенесённые техники сохраняются в последующих этапах.
 Итоговое сравнение App/Meta — отдельный этап после завершения согласованного переноса.
 
-### Следующий этап: собственный Native TAA
+### Собственный Native TAA
 
 2026-11-17 пользователь запросил [задание на TAA](../tasks/2026-11-17-meta-bistro-native-taa.md).
-Подготовлено, реализация не начата. Отдельный native-resolution reconstruction
-provider сохраняет Native passthrough и SDK providers; это новая техника,
-а не уже существующий в App TAA. После реализации — пользовательская приёмка.
+Реализован отдельный native-resolution reconstruction provider 5 через общий
+App/Meta wrapper, с последовательной ping-pong color/depth history и отправкой
+через существующую DIRECT-границу Meta Executor. Native passthrough и SDK providers
+сохранены; ordinary Meta выбирает Native TAA, quality 0. Состояние проверки и
+ограничения — в [отчёте](../reports/2026-11-17-meta-bistro-native-taa.md).
+Следующий шаг — пользовательская оценка картинки/FPS/CPU/GPU; FG не начат.
 
 ### World-space canvas и облака-картина
 
@@ -148,10 +151,10 @@ Primary GPU читает локальную текстуру напрямую; �
 текстуры в мире. Существующий Meta.SceneEnvironment::SetClouds выбирает clouds
 как источник environment — для картины этот путь напрямую не подходит.
 
-В этапе реконструкции переиспользуются существующие провайдеры Native, XeSS,
-FSR, DLSS и NIS и поддерживаемые ими presets. Native — passthrough без
-самостоятельного TAA. Native-resolution temporal AA предоставляют XeSS AA,
+В этапе реконструкции доступны Native, XeSS, FSR, DLSS, NIS и Native TAA
+с поддерживаемыми ими presets. Native — passthrough без сглаживания.
+Native-resolution temporal AA предоставляют новый Native TAA, XeSS AA,
 FSR NativeAA и DLSS DLAA; NIS выполняет пространственное масштабирование.
-Разработка собственного TAA этим планом не запрашивается. Наличие provider
+Собственный TAA добавлен по отдельному заданию от 2026-11-17. Наличие provider
 в App не означает, что его обычный Meta-путь уже перенесён или проверен;
 фактическая доступность SDK/адаптера определяется при соответствующем этапе.

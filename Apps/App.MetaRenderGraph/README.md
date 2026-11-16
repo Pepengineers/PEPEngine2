@@ -8,6 +8,14 @@ transparency, Bistro grass/wind, GPU particles, animated people/foxes, SPH water
 reconstruction, HDR display transform, world-space UI posters and Engine.UI screen composition. Alpha-tested cutouts use OpaquePass.
 Cubemap captures feed separate unlit preview spheres; PBR/SSR retain static global IBL.
 Frame generation remains excluded.
+Ordinary startup selects **Native TAA** (`Render.Upscaler.Provider=5`, quality 0):
+one native-resolution temporal resolve on primary DIRECT after DoF/motion preparation
+and before display/screen UI. Native (0) remains the unsmoothed comparison; SDK
+providers retain their existing modes. `Render.TAA.HistoryWeight=0.9` and
+`Render.TAA.VarianceGamma=1` are starting values, not tuned quality results.
+Change `Render.Reconstruction.Restart` to reset history. See the
+[TAA report](../../docs/reports/2026-11-17-meta-bistro-native-taa.md) for conventions,
+ownership, verification and transparency/bilinear-filter limitations.
 The world runs normal fixed-step physics. Grass/wind, particles, characters and water
 use their existing explicit paths once, respecting world pause/time scale.
 The camera remains free.
@@ -39,7 +47,7 @@ short ordinary smoke required for acceptance and is not run for this migration.
 
 Ordinary post order is opaque particle-water → mesh/weighted transparency with aerial → additive HDR → DoF → Motion Blur and complete motion
 → reconstruction/native → display → screen UI → PRESENT. Startup requests App's
-XeSS/Default (Ultra Quality Plus) and Motion Blur Mid, shutter 0.5, max radius 40,
+Native TAA/Default and Motion Blur Mid, shutter 0.5, max radius 40,
 quality-selected samples (27). Settings retains all existing provider/preset,
 blur and reconstruction restart controls. The Reconstruction window reports the
 requested/effective provider, fallback reason and render/output sizes; F1 toggles

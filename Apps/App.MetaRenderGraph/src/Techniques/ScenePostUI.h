@@ -26,7 +26,7 @@ public:
     }
     bool NeedsResize() const;
     void BeginPlan() { _work.Commands.clear(); }
-    void Submitted(UINT slot) { _exports.at(slot) = _pendingExports; }
+    void Submitted(UINT slot) { _exports.at(slot) = _pendingExports; _reconstruction.Submitted(); }
     bool AllowsFrameGeneration() const;
     void UpdateSettings();
     void PrepareMaterials(double animationSeconds, GDX12Texture* cloudImage);

@@ -3,18 +3,14 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 
 namespace Meta { class ScenePostUI; }
+class GDX12TAAPass;
 
 class GDX12ReconstructionPass final : public GDX12RenderPass
 {
 public:
-    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-    {
-        graph.SetName("Reconstruction");
-        graph.Read(SharedResource::Scene);
-        graph.ReadInputs(_inputs);
-        graph.Write(_outputs[0], "Reconstructed or native HDR", Lifetime::Dynamic);
-        graph.Fallback(_outputs[0], _inputs[2]);
-    }
+    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override;
+    void ImportHistory(GDX12RenderGraph& graph);
+    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override;
 
     GDX12ReconstructionPass();
     ~GDX12ReconstructionPass() override;
@@ -26,6 +22,10 @@ public:
     void QueryRenderTargetResolution() override;
     void ClearDenendencies() override;
     bool ApplySettings();
+    GDX12TAAPass* TAA() const;
+    void PrepareRecording();
+    void Submitted();
+    void CancelRecording();
     const GDX12ReconstructionStatus& GetStatus() const { return _status; }
 
 private:

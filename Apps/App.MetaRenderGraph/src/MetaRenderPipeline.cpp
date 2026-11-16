@@ -241,6 +241,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
             if (_cloudPicture) _cloudPicture->RetireFrame(_schedule, _executor->Completions(), true);
             return point;
         } catch(...) {
+            _post->Reconstruction().CancelRecording();
             if(_crossAdapter) try { _crossAdapter->RetireFrame(_schedule,_executor->Completions(),false); } catch(...) {}
             if (_waterTransfer) try { _waterTransfer->RetireFrame(_schedule, _executor->Completions(), false); } catch (...) {}
             if (_particleTransfer) try { _particleTransfer->RetireFrame(_schedule, _executor->Completions(), false); } catch (...) {}

@@ -24,6 +24,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\GDX12FrameGeneration.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Reconstruction.h" />
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12ReconstructionPass.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12TAAPass.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Sky.h" />
     <ClInclude Include="Include\Engine.RendererDX12\GDX12Particles.h" />
     <ClInclude Include="src\GDX12ParticleResources.h" />
@@ -99,6 +100,7 @@
     <ClCompile Include="src\GDX12LightGrid.cpp" />
     <ClCompile Include="src\GDX12Reconstruction.cpp" />
     <ClCompile Include="src\GDX12ReconstructionPass.cpp" />
+    <ClCompile Include="src\GDX12TAAPass.cpp" />
     <ClCompile Include="src\GDX12Sky.cpp" />
     <ClCompile Include="src\GDX12FrameGeneration.cpp" />
     <ClCompile Include="src\GDX12EnvironmentIBLPass.cpp" />
@@ -164,6 +166,7 @@
     <None Include="Shaders\CBufferStructures.hlsl" />
     <None Include="Shaders\CompositionPass.hlsl" />
     <None Include="Shaders\MotionBlur.hlsl" />
+    <None Include="Shaders\NativeTAA.hlsl" />
     <None Include="Shaders\Culling.hlsl" />
     <None Include="Shaders\CSM.hlsli" />
     <None Include="Shaders\SkyParameters.hlsli" />
