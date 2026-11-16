@@ -8,7 +8,8 @@ transparency, Bistro grass/wind, GPU particles, animated people/foxes, SPH water
 reconstruction, HDR display transform, world-space UI posters and Engine.UI screen composition. Alpha-tested cutouts use OpaquePass.
 Cubemap captures feed separate unlit preview spheres; PBR/SSR retain static global IBL.
 Frame generation remains excluded.
-The world is paused; grass/wind, particles, characters and water advance through explicit time paths.
+The world runs normal fixed-step physics. Grass/wind, particles, characters and water
+use their existing explicit paths once, respecting world pause/time scale.
 The camera remains free.
 
 This adds the Bistro interior cubemap spheres to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
@@ -21,7 +22,7 @@ F1 shows/hides the existing Engine.UI Settings panel in Release too. Its search
 and console-variable controls capture keyboard/mouse input before the free camera.
 Startup uses App's 10 people and 5 foxes, original clips/routes/materials/scales,
 skinning enabled at Mid (30 Hz), no pose-rate or actor preset override. Route jobs
-complete before the render snapshot; physics remains paused. Skin palette uploads
+complete before the render snapshot; physics uses the normal fixed-step accumulator. Skin palette uploads
 and deformation precede depth/GBuffer/shadow consumers. Screen raster/composition
 follows reconstruction and display once, at window resolution. World-space posters
 are scene geometry and receive ordinary scene postprocessing.
@@ -122,7 +123,7 @@ The original stone basin is at (-1297,65.3,-425) cm, yaw 135 degrees, beside the
 existing SparkRain emitter. Startup requests one basin and 100000 SPH particles,
 HeightScale=2, ReferenceModel, original wave forcing/radius/filter, Fluid Mid,
 primary GPU DIRECT without offload. Seed size follows App's grid rounding and is
-logged on startup. The solver advances while world physics stays paused; component
+logged on startup. The solver follows world pause/time scale alongside fixed-step prop physics; component
 simulation/render controls and time scales remain effective. Surface uses the SR
 render grid and retains solver pools across screen resize. Water currently draws
 opaque velocity-colored particles before mesh/weighted WBOIT; its depth and color
@@ -138,7 +139,7 @@ SkyView 256×128, aerial 32³ and a 256-face IBL cube. The original Sun entity's
 rotation drives atmosphere direction, the visible disk and shadow lighting.
 `Meta.Sky.SunCycle.Enabled=true` rotates this same Sun through sunrise → zenith →
 sunset in `Meta.Sky.SunCycle.PeriodSeconds=120`, then returns directly to sunrise,
-without a night segment. Disable it for manual light rotation; world physics stays paused.
+without a night segment. Disable it for manual light rotation; the ordinary world clock remains active.
 Atmosphere component settings retain control of the medium and solar illuminance.
 Ordinary Meta initializes the solar angular radius to 0.0116875 radians (2.5×
 the shared default), increasing the visible disk without changing illuminance.
@@ -429,3 +430,41 @@ Release build and one successful ordinary visual smoke passed. Other modes and
 manual recapture are source-reviewed only. Final shutdown verification was stopped
 by the user with physical Escape after the DSV lifetime fix. Interior physics waits for the user's
 FPS/CPU/GPU acceptance of this stage.
+
+## Categorized interior physics
+
+Ordinary Meta opts into `App.Physics.Categorized=true`, `Quality=1`,
+`SimulationEnabled=true`, `CountScale=1`. It reuses the original interior objects
+without copies. App retains its legacy fraction/count-scale behavior by default;
+applying a new Physics props preset explicitly opts into category selection.
+
+| Quality | Dynamic categories | Dynamic / wave participants | Static bodies |
+| --- | --- | ---: | ---: |
+| 0 Off | None | 0 | 976 |
+| 1 Low | Glasses | 256 | 720 |
+| 2 Medium | Low + plates | 339 | 637 |
+| 3 High | Medium + cutlery | 446 | 530 |
+| 4 Epic | High + remaining movable props | 974 | 2 |
+
+Static totals include the invisible room/counter and exterior walkway bodies.
+Architecture, lights/fans, pictures/UI, characters, spheres and exterior remain
+outside the dynamic categories. Inactive props stay visible with static proxies.
+Category mode ignores CountScale and ActiveTablewareFraction. Quality is latched
+when the world is created; F1 and the App quality panel show requested/effective
+quality and restart requirement. Changing it requires reloading Bistro/restarting
+Meta; other techniques are not changed by a physics preset.
+
+Shapes are cached analytical cylinder/capsule/box compounds from authored bounds
+and group axes, with simple furniture seats/backs/legs and rigid fabric proxies.
+No dynamic triangle mesh or decomposition runs in this mode. The existing rotated
+closed BuildRoom shell seals openings without blocking the free camera or changing
+rendered geometry. Dynamic objects retain ReflectionDynamic while sleeping.
+Existing 60 Hz stepping, catch-up limits, retained debt, wave seed/timing/speed cap
+and CCD are preserved. Preview probes stay at the original anchors.
+
+Release builds passed. The first ordinary launch confirmed category inventory but
+failed creating Paris_Flower_Pot_02A's PCA-derived collider. Invalid PCA output now
+falls back to an analytical AABB. Runtime after that source fix and the one-wave
+visual smoke remain NOT RUN because the user stopped Computer Use with Escape.
+See [implementation report](../../docs/reports/2026-11-17-meta-bistro-interior-physics.md)
+and [source inventory](../../docs/reports/2026-11-17-bistro-interior-inventory.md).

@@ -22,7 +22,7 @@ void SceneWater::SetRetirement(std::function<void()> retire)
 }
 void SceneWater::Prepare(float delta)
 {
-    _surface.SetInstances(_collector->CollectScene(delta, true));
+    _surface.SetInstances(_collector->CollectScene(delta));
 }
 void SceneWater::Packet(Graph& graph, std::vector<ID3D12Resource*>& bindings, const char* name,
     const std::vector<GDX12RenderGraph::BufferAccess>& resources, std::function<void(GDX12CommandList*)> record)

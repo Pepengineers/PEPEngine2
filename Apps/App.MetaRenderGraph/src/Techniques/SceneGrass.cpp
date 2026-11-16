@@ -26,7 +26,7 @@ SceneGrass::SceneGrass(RenderPipelineContext& c, bool diagnostics):_resources(c.
     _buildHiZ=GDX12RenderHelpers::CreateComputePipeline(_resources.Device,_hiZRoot.get(),APP_SHADERS_FOLDER "GrassHiZ.hlsl","CS");
 }
 void SceneGrass::Prepare(RenderPipelineContext& c,float dt) {
-    _scene.CollectScene(dt, !_diagnostics);
+    _scene.CollectScene(dt);
     for(auto& gpu:_gpu) if(gpu) gpu->BeginFrame(c.Common,_scene._grass,_scene._wind,_scene._controls,_scene._sources,_scene._deltaSeconds);
     _gpu[1]->PublishPrimitives(_resources.Primitives,&_scene);
 }

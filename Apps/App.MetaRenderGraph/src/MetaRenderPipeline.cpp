@@ -10,6 +10,7 @@
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Common/ConsoleVariables.h"
+#include "BistroScene.h"
 #include <fstream>
 #include <exception>
 namespace
@@ -58,6 +59,8 @@ void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
     // Slot-local AO and paired scene owners exceed the legacy transient range.
     c.Primary.SRV_UAV_Heap->UseTransientDescriptorTail();
     _post = std::make_unique<Meta::ScenePostUI>(c, _opaqueOnly);
+    if (_opaqueOnly)
+        ConfigureBistroProps(*BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>(), App::GetInstance()->GetJobs(), true);
     if (_opaqueOnly) _cloudPicture = std::make_unique<Meta::SceneCloudPicture>(c);
     _geometry = std::make_unique<Meta::SceneGeometry>(c, _opaqueOnly);
     _environment = std::make_unique<Meta::SceneEnvironment>(c.Primary, c.Common);
