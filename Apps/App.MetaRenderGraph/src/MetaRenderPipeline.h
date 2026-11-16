@@ -5,10 +5,12 @@
 #include "Techniques/SceneLighting.h"
 #include "Techniques/SceneWaterParticles.h"
 #include "Techniques/ScenePostUI.h"
+#include "Techniques/SceneCloudPicture.h"
 #include "Graph/CrossAdapterTransfer.h"
 #include "Techniques/WaterTransfer.h"
 #include "Techniques/ParticleTransfer.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12GPUCullingPass.h"
+#include "Common/GameTimer.h"
 class MetaRenderPipeline final : public IRenderPipeline
 {
   public:
@@ -35,10 +37,19 @@ class MetaRenderPipeline final : public IRenderPipeline
     void PrepareMaterialBindings(RenderPipelineContext& c) override
     {
         _executor->Begin(c.Primary.CurrFrameConstantsIndex);
+        if (_cloudPicture) {
+            if (_cloudPicture->UpdateSettings([this] { _executor->Drain(); _executor.reset(); })) {
+                _executor = std::make_unique<Meta::Executor>(_cloudPicture->Submissions(), 0,
+                    UINT(c.Primary.FrameConstants.size()), 1024);
+                _executor->Begin(c.Primary.CurrFrameConstantsIndex);
+            }
+            _cloudPicture->Prepare(c.Primary.CurrFrameConstantsIndex, c.Common.GameTimer->TotalTime());
+        }
         _post->PrepareMaterials();
     }
     void DrainExecution() override {
         if (_executor) _executor->Drain();
+        if (_cloudPicture) _cloudPicture->Drain();
         if (_crossAdapter) _crossAdapter->Stop();
         if (_waterTransfer) _waterTransfer->Stop();
         if (_particleTransfer) _particleTransfer->Stop();
@@ -100,6 +111,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     std::unique_ptr<Meta::SceneWaterParticles> _waterParticles;
     GDX12GPUCullingPass _sceneFlags;
     std::unique_ptr<Meta::ScenePostUI> _post;
+    std::unique_ptr<Meta::SceneCloudPicture> _cloudPicture;
     std::unique_ptr<Meta::CrossAdapterTransfer> _crossAdapter;
     std::shared_ptr<Meta::SimulationDomain> _simulationDomain;
     std::unique_ptr<Meta::WaterTransfer> _waterTransfer;

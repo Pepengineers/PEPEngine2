@@ -58,6 +58,7 @@ void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
     // Slot-local AO and paired scene owners exceed the legacy transient range.
     c.Primary.SRV_UAV_Heap->UseTransientDescriptorTail();
     _post = std::make_unique<Meta::ScenePostUI>(c, _opaqueOnly);
+    if (_opaqueOnly) _cloudPicture = std::make_unique<Meta::SceneCloudPicture>(c);
     _geometry = std::make_unique<Meta::SceneGeometry>(c, _opaqueOnly);
     _environment = std::make_unique<Meta::SceneEnvironment>(c.Primary, c.Common);
     _lighting = std::make_unique<Meta::SceneLighting>(c.Primary, c.Common, _opaqueOnly);
@@ -98,7 +99,8 @@ void MetaRenderPipeline::Initialize(RenderPipelineContext &c)
         _crossAdapter->SetSeed(uint32_t(MetaProducerSeed.GetValue()));
         _executor=std::make_unique<Meta::Executor>(_crossAdapter->Submissions(),0,frames,1024);
         _crossAdapter->Start();
-    } else _executor=std::make_unique<Meta::Executor>(*c.Primary.Device,frames,1024);
+    } else if (_cloudPicture) _executor = std::make_unique<Meta::Executor>(_cloudPicture->Submissions(), 0, frames, 1024);
+    else _executor=std::make_unique<Meta::Executor>(*c.Primary.Device,frames,1024);
     Log::Info("MetaRenderGraph", "Queue packet executor selected; cross-adapter=",bool(_crossAdapter),"; water=",bool(_waterTransfer),"; particles=",bool(_particleTransfer),"; legacy graph Execute disabled");
     if (_opaqueOnly) _lighting->SetWaterRetirement([this] { _executor->Drain(); });
     _environment->SetRetirement([this] { _executor->Drain(); });
@@ -205,6 +207,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
     };
     const auto prelude = [&](Meta::Graph& graph, std::vector<ID3D12Resource*>& resources) {
         _post->AppendPosters(graph, resources, !verify || recordingSerial);
+        if (_cloudPicture) _cloudPicture->Append(graph, resources);
     };
     const auto reserve = [&] {
         uint64_t lists = 0;
@@ -222,16 +225,22 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
             const auto particleWaits = _particleTransfer->Waits(_schedule);
             waits.insert(waits.end(), particleWaits.begin(), particleWaits.end());
         }
+        if (_cloudPicture) {
+            const auto cloudWaits = _cloudPicture->Waits(_schedule);
+            waits.insert(waits.end(), cloudWaits.begin(), cloudWaits.end());
+        }
         try {
             const auto point=_executor->Execute(_schedule,bindings,record,first,nullptr,serial,nullptr,trace,waits);
             if(_crossAdapter) _crossAdapter->RetireFrame(_schedule,_executor->Completions(),true);
             if (_waterTransfer) _waterTransfer->RetireFrame(_schedule, _executor->Completions(), true);
             if (_particleTransfer) _particleTransfer->RetireFrame(_schedule, _executor->Completions(), true);
+            if (_cloudPicture) _cloudPicture->RetireFrame(_schedule, _executor->Completions(), true);
             return point;
         } catch(...) {
             if(_crossAdapter) try { _crossAdapter->RetireFrame(_schedule,_executor->Completions(),false); } catch(...) {}
             if (_waterTransfer) try { _waterTransfer->RetireFrame(_schedule, _executor->Completions(), false); } catch (...) {}
             if (_particleTransfer) try { _particleTransfer->RetireFrame(_schedule, _executor->Completions(), false); } catch (...) {}
+            if (_cloudPicture) try { _cloudPicture->RetireFrame(_schedule, _executor->Completions(), false); } catch (...) {}
             throw;
         }
     };
@@ -292,6 +301,7 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         [&](Meta::Id op, uint32_t list, ID3D12GraphicsCommandList *cmd) {
             if (!(_crossAdapter && _crossAdapter->Record(op,cmd)) && !(_waterTransfer && _waterTransfer->Record(op,cmd)) &&
                 !(_particleTransfer && _particleTransfer->Record(op,cmd)) &&
+                !(_cloudPicture && _cloudPicture->Record(op,cmd)) &&
                 !_environment->Record(op, cmd) && !_lighting->Record(op, cmd) && !(_waterParticles && _waterParticles->Record(op, cmd)) && !_post->Record(op, cmd))
                 _geometry->Record(slot, op, list, cmd, target->GetResource()->D3DResource.Get());
         },

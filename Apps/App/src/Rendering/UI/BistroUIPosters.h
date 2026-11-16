@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Engine.RendererDX12/GDX12RenderGraph.h"
+#include "Engine.Core/AssetHandles.h"
 #include <cstddef>
 #include <memory>
 
@@ -12,6 +13,7 @@ class BistroUIPosters final
 {
 public:
     static constexpr std::size_t Count = 2;
+    static Engine::Core::MeshHandle CreateSurfaceMesh(RenderModule& render);
 
     BistroUIPosters(RenderModule& render, const std::shared_ptr<SceneManagerModule>& scenes);
     ~BistroUIPosters();

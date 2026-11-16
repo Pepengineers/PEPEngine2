@@ -138,6 +138,10 @@
     <ClCompile Include="tests\GrassGpuTests.cpp" />
     <ClCompile Include="src\MetaRenderPipeline.cpp" />
     <ClCompile Include="src\Techniques\ScenePostUI.cpp" />
+    <ClCompile Include="src\Techniques\SceneCloudPicture.cpp" />
+    <ClCompile Include="src\Techniques\CloudPictureTexture.cpp" />
+    <ClInclude Include="src\Techniques\SceneCloudPicture.h" />
+    <ClInclude Include="src\Techniques\CloudPictureTexture.h" />
     <ClCompile Include="..\App\src\Rendering\UI\BistroUIPosters.cpp" />
     <ClInclude Include="src\MetaApplication.h" />
     <ClInclude Include="src\Techniques\NativeWork.h" />
