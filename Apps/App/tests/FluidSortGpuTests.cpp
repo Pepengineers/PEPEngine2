@@ -53,7 +53,7 @@ public:
         Require(Queue != nullptr, "Requested queue unavailable");
         Heap = std::make_unique<GDX12DescriptorHeap>(&Device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 4096, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE);
         GDX12RootSignatureDesc desc;
-        desc.VolatileSRVData=true; desc.Constants={8}; desc.NumSingleCBVSlots=1; desc.NumSingleSRVSlots=4; desc.NumSingleUAVSlots=4;
+        desc.VolatileSRVData=true; desc.Constants={8}; desc.NumSingleCBVSlots=1; desc.NumSingleSRVSlots=5; desc.NumSingleUAVSlots=5;
         Root = std::make_unique<GDX12RootSignature>(&Device, desc);
         const auto compile = [&](const char* entry, const D3D_SHADER_MACRO* defines=nullptr) {
             return GDX12RenderHelpers::CreateComputePipeline(&Device, Root.get(), APP_SHADERS_FOLDER "FluidSolver.hlsl", entry, defines);
@@ -186,10 +186,12 @@ GDX12FluidSolver::Head RecordManual(Fixture& f, GDX12CommandList& c, Buffers& b,
     d.Dt=steps.Dt;
     for (UINT step=0;step<steps.Count;++step) {
         auto& input=b.Particles[head.Current]->GetResource(); auto& output=b.Particles[1-head.Current]->GetResource();
-        c.ResourceBarrier({input.GetNonPixelShaderResourceBarrier(),b.Keys->GetResource().GetUnorderedAccessBarrier(),b.Offsets->GetResource().GetUnorderedAccessBarrier()});
+        c.ResourceBarrier({input.GetNonPixelShaderResourceBarrier(),b.Keys->GetResource().GetUnorderedAccessBarrier(),b.Offsets->GetResource().GetUnorderedAccessBarrier(),b.Predictions->GetResource().GetUnorderedAccessBarrier()});
         c.SetComputeSRV(0,b.Particles[head.Current]->GetSRV()->GPUHandle); c.SetComputeUAV(2,b.Keys->GetUAV()->GPUHandle); c.SetComputeUAV(3,b.Offsets->GetUAV()->GPUHandle);
+        c.SetComputeUAV(4,b.Predictions->GetUAV()->GPUHandle);
         d.K=d.J=0; Fixture::Constants(c,d); c.SetPipelineState(f.Hash); c.Dispatch((b.Capacity+127)/128,1,1);
-        c.ResourceBarrier({b.Keys->GetResource().GetUAVBarrier(),b.Offsets->GetResource().GetUAVBarrier()});
+        c.ResourceBarrier({b.Keys->GetResource().GetUAVBarrier(),b.Offsets->GetResource().GetUAVBarrier(),b.Predictions->GetResource().GetNonPixelShaderResourceBarrier()});
+        c.SetComputeSRV(4,b.Predictions->GetSRV()->GPUHandle);
         f.RecordSort(c,b,d,variant);
         c.ResourceBarrier({b.Keys->GetResource().GetNonPixelShaderResourceBarrier()}); c.SetComputeSRV(2,b.Keys->GetSRV()->GPUHandle);
         Fixture::Constants(c,d); c.SetPipelineState(f.Offsets); c.Dispatch((b.Count+127)/128,1,1);
@@ -279,6 +281,8 @@ void Benchmark(Fixture& f, const std::string& output, UINT rounds) {
             c->SetComputeRootConstantBufferView(1,constants.GetElementAddress(0));
             c->SetComputeSRV(0,b.Particles[0]->GetSRV()->GPUHandle);
             c->SetComputeUAV(2,b.Keys->GetUAV()->GPUHandle); c->SetComputeUAV(3,b.Offsets->GetUAV()->GPUHandle);
+            c->ResourceBarrier({b.Predictions->GetResource().GetUnorderedAccessBarrier()});
+            c->SetComputeUAV(4,b.Predictions->GetUAV()->GPUHandle);
             Dispatch d{b.Count,b.Capacity}; d.Dt=.0001f; Fixture::Constants(*c,d);
             c->SetPipelineState(f.Hash); c->Dispatch((b.Capacity+127)/128,1,1);
             c->ResourceBarrier({b.Keys->GetResource().GetUAVBarrier(),b.Offsets->GetResource().GetUAVBarrier()}); f.Submit(c);
