@@ -37,15 +37,16 @@ class MetaRenderPipeline final : public IRenderPipeline
     void PrepareMaterialBindings(RenderPipelineContext& c) override
     {
         _executor->Begin(c.Primary.CurrFrameConstantsIndex);
+        _animationTime += (std::max)(0.0, double(c.Common.GameTimer->DeltaTime()));
         if (_cloudPicture) {
             if (_cloudPicture->UpdateSettings([this] { _executor->Drain(); _executor.reset(); })) {
                 _executor = std::make_unique<Meta::Executor>(_cloudPicture->Submissions(), 0,
                     UINT(c.Primary.FrameConstants.size()), 1024);
                 _executor->Begin(c.Primary.CurrFrameConstantsIndex);
             }
-            _cloudPicture->Prepare(c.Primary.CurrFrameConstantsIndex, c.Common.GameTimer->TotalTime());
+            _cloudPicture->Prepare(c.Primary.CurrFrameConstantsIndex, _animationTime);
         }
-        _post->PrepareMaterials();
+        _post->PrepareMaterials(_animationTime, _cloudPicture ? _cloudPicture->Image() : nullptr);
     }
     void DrainExecution() override {
         if (_executor) _executor->Drain();
@@ -119,6 +120,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     std::unique_ptr<Meta::Executor> _executor;
     Meta::Schedule _schedule;
     uint32_t _frame = 0;
+    double _animationTime = 0;
     bool _verify = false;
     bool _opaqueOnly = false;
     // The diagnostic host also reads queued frames after paired comparison ends.

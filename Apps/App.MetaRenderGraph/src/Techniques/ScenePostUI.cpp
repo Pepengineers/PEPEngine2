@@ -26,7 +26,7 @@ ScenePostUI::ScenePostUI(RenderPipelineContext& c, bool opaqueOnly)
     _reconstruction.Setup(&_resources, &_common);
     _output.Setup(&_resources, &_common);
     _posters = std::make_unique<BistroUIPosters>(c.Runtime,
-        BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>());
+        BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>(), opaqueOnly);
     if (opaqueOnly) return;
 #ifdef _DEBUG
     _collision = std::make_unique<BistroCollisionPass>(*BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>());
@@ -62,10 +62,11 @@ void ScenePostUI::UpdateSettings()
     }
 #endif
 }
-void ScenePostUI::PrepareMaterials()
+void ScenePostUI::PrepareMaterials(double animationSeconds, GDX12Texture* cloudImage)
 {
+    _posters->SetImageInput(cloudImage);
     _posters->PrepareFrame(_resources, _resources.CurrFrameConstantsIndex,
-        _common.GameTimer ? _common.GameTimer->TotalTime() : 0, true);
+        animationSeconds, true);
 }
 void ScenePostUI::Reset()
 {
@@ -312,11 +313,19 @@ void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bind
         if (images.empty()) continue;
         auto* effect = images[0]; auto* target = images[1];
         auto* pass = &_posters->RasterPass(index);
-        NativeWork::ResourceFor(graph, bindings, effect->GetResource()->D3DResource.Get(), "poster effects");
-        if (record)
-            Packet(graph, bindings, "world canvas effects / offscreen poster raster DIRECT boundary",
-                {{effect->GetResource(), Mode::ReadWrite}, {target->GetResource(), Mode::Write}},
-                [pass](auto* cmd) { pass->Execute(cmd); }, {}, target);
+        if (record) {
+            std::vector<std::pair<GDX12Resource*, Mode>> accesses{
+                {effect->GetResource(), index == 2 ? Mode::Read : Mode::ReadWrite},
+                {target->GetResource(), Mode::Write}};
+            auto* raster = target;
+            if (images.size() == 3) {
+                raster = images[2];
+                accesses.emplace_back(raster->GetResource(), Mode::ReadWrite);
+            }
+            const char* names[] = {"UI neon raster / Gaussian glow", "UI ASTRA raster / Gaussian slider", "UI cloud texture raster"};
+            Packet(graph, bindings, names[index], std::move(accesses),
+                [pass](auto* cmd) { pass->Execute(cmd); }, {}, raster);
+        }
         const auto targetId = NativeWork::ResourceFor(graph, bindings, target->GetResource()->D3DResource.Get(), "poster material");
         // Opaque posters are sampled by GBuffer/probe color shaders, not masked depth or glass.
         for (Id id = 0; id < consumers; ++id)

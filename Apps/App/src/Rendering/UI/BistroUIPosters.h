@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Engine.RendererDX12/GDX12RenderGraph.h"
-#include "Engine.Core/AssetHandles.h"
 #include <cstddef>
 #include <memory>
 
@@ -12,10 +11,9 @@ class SceneManagerModule;
 class BistroUIPosters final
 {
 public:
-    static constexpr std::size_t Count = 2;
-    static Engine::Core::MeshHandle CreateSurfaceMesh(RenderModule& render);
+    static constexpr std::size_t Count = 3;
 
-    BistroUIPosters(RenderModule& render, const std::shared_ptr<SceneManagerModule>& scenes);
+    BistroUIPosters(RenderModule& render, const std::shared_ptr<SceneManagerModule>& scenes, bool cloudCanvas = false);
     ~BistroUIPosters();
     BistroUIPosters(const BistroUIPosters&) = delete;
     BistroUIPosters& operator=(const BistroUIPosters&) = delete;
@@ -23,6 +21,7 @@ public:
     // Call after waiting the primary frame slot and before material uploads.
     // True requests recompiling the graph.
     bool PrepareFrame(GDX12DeviceResources& primary, UINT frameSlot, double animationSeconds, bool localDirect = false);
+    void SetImageInput(GDX12Texture* image);
 
     GDX12RenderPass& RasterPass(std::size_t index) const;
     IRenderPassLink& Output(std::size_t index) const;

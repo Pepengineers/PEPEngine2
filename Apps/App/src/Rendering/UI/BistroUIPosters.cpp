@@ -1,4 +1,5 @@
 #include "BistroUIPosters.h"
+#include "BistroPaintingSurfaces.h"
 #include "../../BistroUICanvases.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Modules/SceneManagerModule.h"
@@ -24,12 +25,9 @@ namespace
     AutoConsoleVariable<bool> AsyncCompute(L"Render.UI.AsyncCompute", false,
         L"Run local Bistro poster effects on the primary COMPUTE queue when available.");
 
-    const std::array<Vector3, BistroUIPosters::Count> Centres = {{
-        {-214.84f, 177, -72.78f}, {-174.89f, 177, 5.63f}
-    }};
-    constexpr const char* Names[] = {"BistroUIPosterAtrium", "BistroUIPosterTerrace"};
-    constexpr const char* RasterNames[] = {"UI Atrium Raster", "UI Terrace Raster"};
-    constexpr const char* EffectNames[] = {"UI Atrium Effects", "UI Terrace Effects"};
+    constexpr const char* Names[] = {"BistroUINeon", "BistroUIAstra", "BistroUIClouds"};
+    constexpr const char* RasterNames[] = {"UI Neon Raster", "UI ASTRA Raster", "UI Clouds Raster"};
+    constexpr const char* EffectNames[] = {"UI Neon Effects", "UI ASTRA Effects", "UI Clouds Image"};
 
     bool IsBistro(const World& world)
     {
@@ -41,43 +39,9 @@ namespace
 
 }
 
-Engine::Core::MeshHandle BistroUIPosters::CreateSurfaceMesh(RenderModule& render)
-{
-    using namespace Engine::Core;
-    auto& registry = AssetManager::GetInstance().Meshes();
-    const auto mesh = registry.Register(MeshAssetLocator{
-        std::filesystem::path(ASSETS_FOLDER) / "Models/BistroUIPoster.generated"});
-    auto* data = registry.GetMesh(mesh);
-    if (!data)
-    {
-        const Vector3 positions[] = {{-0.5f, 0.5f, 0}, {-0.5f, -0.5f, 0}, {0.5f, -0.5f, 0}, {0.5f, 0.5f, 0}};
-        const Vector2 uv[] = {{0, 0}, {0, 1}, {1, 1}, {1, 0}};
-        SubMesh quad;
-        for (const bool back : {false, true})
-            for (std::size_t i = 0; i < std::size(positions); ++i)
-            {
-                Vertex vertex;
-                vertex.Position = vertex.PreviousPosition = positions[i];
-                vertex.Normal = {0, 0, back ? -1.0f : 1.0f};
-                vertex.Tangent = {back ? -1.0f : 1.0f, 0, 0};
-                vertex.TexCoord = {back ? 1 - uv[i].x : uv[i].x, uv[i].y};
-                quad.Vertices.push_back(vertex);
-            }
-        quad.Indices = {0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6};
-        quad.Bounds = BoundingBox({0, 0, 0}, {0.5f, 0.5f, 0.002f});
-        const auto bounds = quad.Bounds;
-        std::vector<SubMesh> parts;
-        parts.push_back(std::move(quad));
-        data = registry.Cache(mesh, std::make_unique<Mesh>(std::move(parts), bounds,
-            std::vector<MeshMaterial>{MeshMaterial{}}));
-    }
-    render.SubmitMesh(data, mesh);
-    return mesh;
-}
-
 namespace
 {
-    std::unique_ptr<GDX12Texture> MakeMaterialTarget(GDX12DeviceResources& primary, CanvasSize size)
+    std::unique_ptr<GDX12Texture> MakeMaterialTarget(GDX12DeviceResources& primary, CanvasSize size, bool post = false)
     {
         auto target = std::make_unique<GDX12Texture>();
         GDX12TextureDesc desc;
@@ -91,11 +55,19 @@ namespace
         desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
         desc.SRVDesc.Texture2D.MipLevels = 1;
-        desc.CreateRTV = true;
-        desc.RTVHeap = primary.RTVHeap.get();
-        desc.RTVHeapIndex = desc.RTVHeap->GetAvailableIndex();
-        desc.RTVDesc.Format = OffscreenFormat;
-        desc.RTVDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+        desc.CreateUAV = post;
+        if (post) {
+            desc.UAVHeapIndex = desc.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
+            desc.UAVDesc.Format = OffscreenFormat;
+            desc.UAVDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+        }
+        desc.CreateRTV = !post;
+        if (!post) {
+            desc.RTVHeap = primary.RTVHeap.get();
+            desc.RTVHeapIndex = desc.RTVHeap->GetAvailableIndex();
+            desc.RTVDesc.Format = OffscreenFormat;
+            desc.RTVDesc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+        }
         desc.ClearValue = {0, 0, 0, 0};
         target->Initialize(desc);
         return target;
@@ -114,10 +86,12 @@ struct BistroUIPosters::Impl
 {
     struct Frame
     {
-        std::unique_ptr<GDX12Texture> Effect, Target;
+        std::unique_ptr<GDX12Texture> Effect, Target, Raw;
         std::shared_ptr<const CanvasFrame> Input;
         std::shared_ptr<CanvasEffects::Prepared> PreparedEffects;
-        std::shared_ptr<const void> EffectOwner, RasterOwner;
+        std::shared_ptr<CanvasEffects::PreparedPost> PreparedPost;
+        std::shared_ptr<const void> EffectOwner, RasterOwner, PostOwner;
+        bool Published = false;
     };
 
     struct Surface;
@@ -143,14 +117,14 @@ struct BistroUIPosters::Impl
         const std::size_t Index;
         GDX12Material* Material = nullptr;
         GPUTexture Binding;
-        TextureLink EffectLink, TargetLink;
+        TextureLink EffectLink, TargetLink, RawLink;
         Frame* Current = nullptr;
         bool SeparateEffects = false;
         Pass EffectPass, Raster;
     };
 
-    explicit Impl(RenderModule& render, const std::shared_ptr<SceneManagerModule>& scenes)
-        : Render(render), Scenes(scenes), Atrium(*this, 0), Terrace(*this, 1)
+    explicit Impl(RenderModule& render, const std::shared_ptr<SceneManagerModule>& scenes, bool cloudCanvas)
+        : Render(render), Scenes(scenes), Atrium(*this, 0), Terrace(*this, 1), Clouds(*this, 2), CloudCanvas(cloudCanvas)
     {
     }
 
@@ -166,7 +140,7 @@ struct BistroUIPosters::Impl
                 surface->Material->Diffuse = nullptr;
     }
 
-    std::array<Surface*, Count> Surfaces() { return {&Atrium, &Terrace}; }
+    std::array<Surface*, Count> Surfaces() { return {&Atrium, &Terrace, &Clouds}; }
 
     void Subscribe(const std::shared_ptr<Impl>& owner, SceneManagerModule& scenes)
     {
@@ -182,8 +156,8 @@ struct BistroUIPosters::Impl
                 const std::string& name, const StaticMeshRenderComponent& source)
             {
                 const bool handled = previous && previous(name, source);
-                if (name == "Exterior_exterior")
-                    if (const auto owner = weak.lock()) owner->Spawn(world);
+                if (!handled && name == "Interior_interior")
+                    if (const auto owner = weak.lock()) { owner->Spawn(world, source); return true; }
                 return handled;
             };
         });
@@ -195,46 +169,26 @@ struct BistroUIPosters::Impl
             if (auto* world = scenes.GetWorld(i); world && IsBistro(*world)) Worlds.try_emplace(world);
     }
 
-    void Spawn(World& world)
+    void Spawn(World& world, const StaticMeshRenderComponent& source)
     {
-        const auto found = Worlds.find(&world);
-        if (found == Worlds.end()) return;
-        auto& entities = found->second;
-        if (entities[0] != InvalidEntity && entities[1] != InvalidEntity) return;
-        if (!Mesh.IsValid()) Mesh = CreateSurfaceMesh(Render);
-        Render.ReserveTransformCapacity(Count);
-        Render.ReserveInstanceCapacity(Count);
-        auto& ecs = world.GetECS();
-        for (auto* surface : Surfaces())
-        {
-            const auto index = surface->Index;
-            if (entities[index] != InvalidEntity) continue;
-            if (!surface->Material)
-            {
-                surface->Material = Render.GetMaterialByName(Names[index]);
-                if (!surface->Material) surface->Material = Render.CreateMaterial(Names[index]);
-                if (!surface->Material) throw std::runtime_error("Cannot create Bistro poster material");
-                surface->Binding.Name = Names[index];
+        auto& entities = Worlds.at(&world);
+        std::array<GDX12Material*, Count> materials{};
+        for (auto* surface : Surfaces()) {
+            const auto i = surface->Index;
+            if (i == 2 && !CloudCanvas) continue;
+            if (!surface->Material) {
+                surface->Material = Render.GetMaterialByName(Names[i]);
+                if (!surface->Material) surface->Material = Render.CreateMaterial(Names[i]);
+                if (!surface->Material) throw std::runtime_error("Cannot create Bistro canvas material");
+                surface->Binding.Name = Names[i];
                 surface->Material->Diffuse = &surface->Binding;
                 surface->Material->Type = MaterialType::Opaque;
                 surface->Material->UseBakedLighting = true;
                 surface->Material->DirtyFlag = true;
             }
-            auto entity = ecs.CreateEntity();
-            try
-            {
-                entity.AddComponent<NameComponent>(Names[index]);
-                entity.AddComponent<TransformComponent>(Centres[index], Vector3(0, -63, 0), Vector3(68, 38.25f, 1));
-                auto& draw = entity.AddComponent<StaticMeshRenderComponent>(Mesh, std::vector<GDX12Material*>{surface->Material});
-                draw.ReflectionDynamic = true;
-                entities[index] = entity.GetId();
-            }
-            catch (...)
-            {
-                ecs.DestroyEntity(entity.GetId());
-                throw;
-            }
+            materials[i] = surface->Material;
         }
+        BistroPaintingSurfaces::Install(world, Render, source, materials, entities);
     }
 
     bool Prepare(GDX12DeviceResources& primary, UINT slot, double animationSeconds, bool localDirect)
@@ -246,8 +200,6 @@ struct BistroUIPosters::Impl
         if (primary.FrameConstants[slot]->FenceValue > completed)
             throw std::logic_error("Bistro poster slot is still in flight");
 
-        for (auto& [world, entities] : Worlds)
-            if (entities[0] == InvalidEntity || entities[1] == InvalidEntity) Spawn(*world);
         const bool visible = !Worlds.empty();
         bool rebuild = false;
         if (visible)
@@ -267,48 +219,72 @@ struct BistroUIPosters::Impl
             for (auto* surface : Surfaces())
             {
                 const auto i = surface->Index;
+                const bool image = i == 2;
+                if (!surface->Material || (image && (!CloudCanvas || !ImageInput))) {
+                    Slots.at(slot)[i].Published = false;
+                    surface->Current = nullptr;
+                    surface->TargetLink.Texture = surface->EffectLink.Texture = surface->RawLink.Texture = nullptr;
+                    continue;
+                }
                 const auto& input = inputs[i];
                 const auto profile = GetCanvasProfile(input->LogicalSize, input->Quality);
                 auto& frame = Slots.at(slot)[i];
-                std::unique_ptr<GDX12Texture> target, effect;
+                frame.EffectOwner.reset(); frame.RasterOwner.reset(); frame.PostOwner.reset();
+                bool changed = false;
                 if (!frame.Target || frame.Target->GetWidth() != profile.RasterSize.Width ||
-                    frame.Target->GetHeight() != profile.RasterSize.Height)
-                    target = MakeMaterialTarget(primary, profile.RasterSize);
-                if (!frame.Effect || frame.Effect->GetWidth() != profile.EffectsSize.Width ||
-                    frame.Effect->GetHeight() != profile.EffectsSize.Height)
-                {
-                    effect = std::make_unique<GDX12Texture>();
-                    GDX12RenderHelpers::InitializeComputeTexture(*effect, primary, profile.EffectsSize.Width,
-                        profile.EffectsSize.Height, OffscreenFormat, false);
+                    frame.Target->GetHeight() != profile.RasterSize.Height) {
+                    frame.Target = MakeMaterialTarget(primary, profile.RasterSize, !image);
+                    if (!image) frame.Raw = MakeMaterialTarget(primary, profile.RasterSize);
+                    changed = true;
                 }
-                auto prepared = effect ? Effects->Prepare(*input, effect->GetResource()->D3DResource) : frame.PreparedEffects;
-                frame.EffectOwner.reset();
-                frame.RasterOwner.reset();
-                if (target) frame.Target = std::move(target);
-                if (effect) frame.Effect = std::move(effect);
-                frame.PreparedEffects = std::move(prepared);
+                if (!image) {
+                    if (!frame.Effect || frame.Effect->GetWidth() != profile.EffectsSize.Width ||
+                        frame.Effect->GetHeight() != profile.EffectsSize.Height) {
+                        frame.Effect = std::make_unique<GDX12Texture>();
+                        GDX12RenderHelpers::InitializeComputeTexture(*frame.Effect, primary,
+                            profile.EffectsSize.Width, profile.EffectsSize.Height, OffscreenFormat, false);
+                        frame.PreparedEffects = Effects->Prepare(*input, frame.Effect->GetResource()->D3DResource);
+                    }
+                    if (changed) frame.PreparedPost = Effects->PreparePost(*input,
+                        frame.Raw->GetResource()->D3DResource, frame.Target->GetResource()->D3DResource);
+                }
                 frame.Input = input;
                 surface->Current = &frame;
                 surface->TargetLink.Texture = frame.Target.get();
-                surface->EffectLink.Texture = frame.Effect.get();
+                surface->RawLink.Texture = frame.Raw.get();
+                surface->EffectLink.Texture = image ? ImageInput : frame.Effect.get();
                 surface->Binding.PrimaryDeviceTexture = frame.Target.get();
-                surface->Material->DirtyFlag = true;
+                if (changed || !frame.Published) surface->Material->DirtyFlag = true;
+                frame.Published = true;
             }
         }
         const bool localAsync = !localDirect && AsyncCompute.GetValue();
         for (auto* surface : Surfaces())
         {
-            if (!visible)
-            {
+            if (!visible) {
                 surface->Current = nullptr;
-                surface->TargetLink.Texture = surface->EffectLink.Texture = nullptr;
-                if (surface->Binding.PrimaryDeviceTexture)
-                {
-                    surface->Binding.PrimaryDeviceTexture = nullptr;
-                    surface->Material->DirtyFlag = true;
+                surface->TargetLink.Texture = surface->EffectLink.Texture = surface->RawLink.Texture = nullptr;
+            }
+            const bool active = visible && surface->Current;
+            if (!active && surface->Binding.PrimaryDeviceTexture) {
+                surface->Binding.PrimaryDeviceTexture = nullptr;
+                surface->Material->DirtyFlag = true;
+            }
+            for (auto& [world, entities] : Worlds) {
+                const auto entity = entities[surface->Index];
+                if (entity == InvalidEntity) continue;
+                auto& draw = world->GetECS().Get<StaticMeshRenderComponent>(entity);
+                if (draw.Visible != active) {
+                    draw.Visible = active;
+                    auto* commands = primary.IndirectCommandsCache.get();
+                    for (const auto index : draw._CBufferIndices) {
+                        auto command = commands->GetCPUData()[index];
+                        command.InstanceCount = active ? 1 : 0;
+                        commands->CopyData(index, command);
+                    }
                 }
             }
-            const bool separate = visible && localAsync;
+            const bool separate = active && surface->Index != 2 && localAsync;
             rebuild |= surface->SeparateEffects != separate;
             surface->SeparateEffects = separate;
         }
@@ -319,9 +295,10 @@ struct BistroUIPosters::Impl
     std::weak_ptr<SceneManagerModule> Scenes;
     ListenerHandle WorldCreated = 0, WorldDestroyed = 0;
     std::map<World*, std::array<Entity, Count>> Worlds;
-    MeshHandle Mesh;
     BistroUICanvases::Posters Posters;
-    Surface Atrium, Terrace;
+    Surface Atrium, Terrace, Clouds;
+    bool CloudCanvas = false;
+    GDX12Texture* ImageInput = nullptr;
     std::array<std::unique_ptr<OffscreenRenderer>, Count> Raster;
     std::unique_ptr<CanvasEffects> Effects;
     std::vector<std::array<Frame, Count>> Slots;
@@ -330,35 +307,44 @@ struct BistroUIPosters::Impl
 void BistroUIPosters::Impl::Pass::RecordRenderGraph(GDX12RenderGraphBuilder& builder)
 {
     builder.SetName(Effects ? EffectNames[Poster.Index] : RasterNames[Poster.Index]);
-    if (Effects)
-    {
+    if (Effects) {
         builder.AsyncCompute();
         builder.Write(&Poster.EffectLink, EffectNames[Poster.Index], Lifetime::Dynamic, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         return;
     }
-    if (Poster.SeparateEffects) builder.Read(&Poster.EffectLink, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    builder.Write(&Poster.TargetLink, RasterNames[Poster.Index], Lifetime::Dynamic, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    if (Poster.Index == 2 || Poster.SeparateEffects)
+        builder.Read(&Poster.EffectLink, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+    if (Poster.Index != 2)
+        builder.Write(&Poster.RawLink, "UI raw raster", Lifetime::Dynamic, D3D12_RESOURCE_STATE_RENDER_TARGET);
+    builder.Write(&Poster.TargetLink, RasterNames[Poster.Index], Lifetime::Dynamic,
+        Poster.Index == 2 ? D3D12_RESOURCE_STATE_RENDER_TARGET : D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 }
 
 void BistroUIPosters::Impl::Pass::Execute(GDX12CommandList* commands)
 {
     auto* frame = Poster.Current;
     if (!frame) return;
-    auto* effect = frame->Effect->GetResource();
-    if (Effects)
-    {
+    const bool image = Poster.Index == 2;
+    auto* effect = Poster.EffectLink.Texture->GetResource();
+    if (Effects) {
         frame->EffectOwner = Owner.Effects->RecordPrepared(*commands, *frame->Input, frame->PreparedEffects);
         return;
     }
-    if (!Poster.SeparateEffects)
-    {
+    if (!image && !Poster.SeparateEffects) {
         commands->ResourceBarrier({effect->GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
         frame->EffectOwner = Owner.Effects->RecordPrepared(*commands, *frame->Input, frame->PreparedEffects);
         commands->ResourceBarrier({effect->GetPixelShaderResourceBarrier()});
     }
-    frame->RasterOwner = Owner.Raster[Poster.Index]->TryRecord(*commands, frame->Target->GetResource()->D3DResource,
+    auto* raster = image ? frame->Target.get() : frame->Raw.get();
+    commands->ResourceBarrier({raster->GetResource()->GetRenderTargetBarrier()});
+    frame->RasterOwner = Owner.Raster[Poster.Index]->TryRecord(*commands, raster->GetResource()->D3DResource,
         frame->Input->Draw, {{CanvasEffectTextureId, effect->D3DResource}});
-    if (!frame->RasterOwner) throw std::logic_error("Retired Bistro poster frame has no local raster slot");
+    if (!frame->RasterOwner) throw std::logic_error("Retired Bistro canvas frame has no local raster slot");
+    if (!image) {
+        commands->ResourceBarrier({raster->GetResource()->GetNonPixelShaderResourceBarrier(),
+            frame->Target->GetResource()->GetUnorderedAccessBarrier()});
+        frame->PostOwner = Owner.Effects->RecordPost(*commands, *frame->Input, frame->PreparedPost);
+    }
 }
 
 IRenderPassLink* BistroUIPosters::Impl::Pass::GetOutput(UINT index)
@@ -367,10 +353,10 @@ IRenderPassLink* BistroUIPosters::Impl::Pass::GetOutput(UINT index)
     return Effects ? &Poster.EffectLink : &Poster.TargetLink;
 }
 
-BistroUIPosters::BistroUIPosters(RenderModule& render, const std::shared_ptr<SceneManagerModule>& scenes)
+BistroUIPosters::BistroUIPosters(RenderModule& render, const std::shared_ptr<SceneManagerModule>& scenes, bool cloudCanvas)
 {
     if (!scenes) throw std::invalid_argument("Bistro posters require a scene manager");
-    _impl = std::make_shared<Impl>(render, scenes);
+    _impl = std::make_shared<Impl>(render, scenes, cloudCanvas);
     _impl->Subscribe(_impl, *scenes);
 }
 
@@ -394,13 +380,16 @@ IRenderPassLink& BistroUIPosters::Output(std::size_t index) const
 std::vector<GDX12Texture*> BistroUIPosters::NativeTargets(std::size_t index) const
 {
     auto* frame = _impl->Surfaces().at(index)->Current;
-    return frame ? std::vector<GDX12Texture*>{frame->Effect.get(), frame->Target.get()} : std::vector<GDX12Texture*>{};
+    if (!frame) return {};
+    if (index == 2) return {_impl->ImageInput, frame->Target.get()};
+    return {frame->Effect.get(), frame->Target.get(), frame->Raw.get()};
 }
 
 void BistroUIPosters::AddPasses(GDX12RenderGraph& graph) const
 {
     for (auto* surface : _impl->Surfaces())
     {
+        if (!surface->Current) continue;
         if (surface->SeparateEffects) graph.AddPass(surface->EffectPass);
         graph.AddPass(surface->Raster);
     }
@@ -409,10 +398,12 @@ void BistroUIPosters::AddPasses(GDX12RenderGraph& graph) const
 void BistroUIPosters::DeclareMaterialReads(GDX12RenderGraphBuilder& builder) const
 {
     for (auto* surface : _impl->Surfaces())
-        builder.Read(&surface->TargetLink, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
+        if (surface->Current) builder.Read(&surface->TargetLink, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 }
 
 bool BistroUIPosters::UsesAsyncCompute() const
 {
     return _impl->Atrium.SeparateEffects || _impl->Terrace.SeparateEffects;
 }
+
+void BistroUIPosters::SetImageInput(GDX12Texture* image) { _impl->ImageInput = image; }

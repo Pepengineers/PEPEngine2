@@ -147,8 +147,8 @@ namespace
                 _bistroBounds->UpdateEmitters(world);
                 BistroParticles::Update(world, true);
                 auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
-                camera.Location = {-300, 200, 20};
-                camera.Rotation = {0, 117, 0};
+                camera.Location = {600, 230, -80};
+                camera.Rotation = {0, 70, 0};
                 camera.DirtyFlag = true;
                 world.GetECS().Get<CameraComponent>(world.ActiveCamera).InvalidateHistory();
                 IndirectCommandBuildSystem commands;

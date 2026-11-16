@@ -25,7 +25,7 @@ and deformation precede depth/GBuffer/shadow consumers. Screen raster/compositio
 follows reconstruction and display once, at window resolution. World-space posters
 are scene geometry and receive ordinary scene postprocessing.
 See the [animation/UI report](../../docs/reports/2026-11-15-meta-bistro-animation-ui.md).
-The initial camera is at the Bistro entrance, as in App. The startup viewport is
+The initial camera faces the interior painting wall at (600,230,-80) cm, yaw 70 degrees. The startup viewport is
 1280x800; the render grid follows the effective reconstruction provider. The first frame's declared operations are
 written to `Logs/opaque-operations.txt` beside the executable. The first reused
 frame slot is recorded in `Logs/opaque-steady-operations.txt`; unchanged static
@@ -67,32 +67,28 @@ Enable/disable and CoC changes reset temporal SR history; unchanged focus parame
 do not reset it each frame. The SDK FP32 HDR accumulation fix is preserved.
 See the [DoF report](../../docs/reports/2026-11-16-meta-bistro-dof.md).
 
-Two original Bistro world canvases now render on the primary GPU through the Meta
-executor: ATRIUM at (-214.84,177,-72.78) cm and TERRACE at (-174.89,177,5.63) cm,
-both 68×38.25 cm, yaw -63 degrees. Their opaque two-sided materials provide
-perspective, scene depth/occlusion and normal DoF/MB/SR treatment. The animated
-gradient, reserve-power bar, stars and separable box blur reuse BistroUIPosters
-and Engine.UI; animation advances while the world is paused. This adapts the
-MGPU-IMGUI offscreen UI principle; it does not enable UI offload or copy its HUD.
-Startup uses `Render.UI.Quality=0` (Low), `Render.UI.AsyncCompute=false`, local DIRECT.
-Quality 1 is Medium; these are workload presets, without distance LOD.
+Three existing interior paintings now contain UI canvases. Their original metal
+frames remain; only painted canvas submeshes are replaced, at their original
+positions, with normalized full-surface UVs. No entrance billboards remain.
 
-| Canvas | Logical | Low raster / effects | Medium raster / effects |
-| --- | --- | --- | --- |
-| ATRIUM | 384×216 | 384×216 / 96×54 | 512×288 / 171×96 |
-| TERRACE | 480×270 | 480×270 / 120×68 | 640×360 / 214×120 |
+| Interior object | UI content | Logical / Low raster size |
+| --- | --- | --- |
+| Paris_Painting_B | Animated cyan/magenta NEON DISTRICT marquee, ticker, equalizer, Gaussian glow | 768x512 |
+| Paris_Painting_F | Layered ASTRA graffiti, moving 50%-width Gaussian blur band | 768x512 |
+| Paris_Painting_C | Image-only UI canvas sampling the independent MGPU-Noise producer | 1024x512 |
 
-Low/Medium uses 20/40 stars and blur radius 2/5. RGBA8 canvas targets are independent
-of window/SR grids. Frame-slot preparation publishes material bindings before
-uploads; effects/raster precede actual GBuffer material reads. GPU targets,
-effect scratch and descriptors persist per canvas slot until its consumers finish.
-See the [world UI report](../../docs/reports/2026-11-16-meta-bistro-world-ui.md).
+The neon reference is [Natalie Riccardi's Cyberpunk Bar Sign](https://sketchfab.com/3d-models/cyberpunk-bar-sign-5921cab512484fa780c34f418ddaa2d8).
+All lettering and animation are live ImGui draw data. Gaussian passes run after
+raster, affecting text as well as background. Scratch resources and font caches
+remain per-slot/per-surface. Startup keeps UI Low and local DIRECT; Medium retains
+the existing 4/3 raster scaling. World UI receives scene DoF/MB/SR; screen UI remains
+separate and sharp. [Current implementation and verification limits](../../docs/reports/2026-11-16-meta-bistro-framed-ui.md).
 
-An additional 100×50 cm picture above the entrance at (-194.86,230,-33.58) cm,
-yaw -63 degrees, shows the original MGPU-Noise 2D cloud shader. It is independent
-of global atmosphere/IBL, both UI canvases and window/SR resolution. Existing
-scene depth, DoF, MB and reconstruction apply; its animation also runs while
-world physics is paused. Source parameters and noise octaves are unchanged.
+Clouds are an image inside the third UI canvas, not a separate floating mesh.
+The MGPU-Noise producer runs before image raster, followed by material GBuffer.
+UI and clouds share one advancing render-tick time snapshot, independent of world
+physics pause. The cloud generation grid and adapter remain independent of UI,
+window and SR grids:
 
 ```ini
 Meta.CloudPicture.Enabled = true
@@ -111,10 +107,10 @@ The producer writes scene-linear RGBA8 UNORM (typed UAV and UNORM SRV): donor RG
 is decoded from sRGB once before storage, without an sRGB UAV or another SRV decode.
 The opaque baked-lighting material avoids relighting the picture.
 
-Primary production samples its local persistent texture directly. A different GPU
+Primary production supplies its local persistent texture directly to the image UI. A different GPU
 uses per-slot producer textures, a shared row-major footprint buffer and a local
 primary texture. StrictPublication uses the same tick snapshot; primary GPU waits
-on the issued secondary publication before importing, without a CPU wait for new
+on the issued secondary publication before importing and UI sampling, without a CPU wait for new
 cloud work. At 1024×512 each publication transfers 2,097,152 bytes (row pitch 4096),
 with three slots at startup. Old readers retire before slot reuse; grid/adapter
 replacement drains the old generation. No CPU image readback, offload heuristic
