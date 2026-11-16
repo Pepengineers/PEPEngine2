@@ -229,22 +229,39 @@ inline void CreateBistroParticles(World& world)
     BistroParticles::Create(world, atlas);
 }
 
-inline void ConfigureBistroProps(SceneManagerModule& scenes, JobSystem& jobs)
+inline void ConfigureBistroProps(SceneManagerModule& scenes, JobSystem& jobs, bool categorized = false)
 {
-    scenes.OnWorldCreated.AddListener([&jobs](World& world)
+    scenes.OnWorldDestroyed.AddListener([](World& world) {
+        world.BeforePhysicsStep = {};
+        world.SceneMeshFactory = {};
+    });
+    scenes.OnWorldCreated.AddListener([&jobs, categorized](World& world)
     {
+        const bool categoryMode = categorized || BistroPhysics::Categorized.GetValue();
+        const int quality = BistroPhysics::Quality.GetValue();
+        BistroPhysics::EffectiveCategorized = categoryMode;
+        const bool simulate = BistroPhysics::SimulationEnabled.GetValue();
+        BistroPhysics::EffectiveQuality = categoryMode ? (simulate ? quality : 0) : -1;
         auto waves = std::make_shared<BistroWaves::Controller>();
-        world.BeforePhysicsStep = [&world, waves](float dt)
-        { waves->Tick(world, *BenchmarkEngine::GetLocator().GetModule<PhysicsModule>(), dt); };
-        world.SceneMeshFactory = [&world, &jobs, waves, configured = false](const std::string& name, const StaticMeshRenderComponent& source) mutable
+        world.BeforePhysicsStep = [&world, waves, categoryMode](float dt)
+        {
+            const auto phase = waves->GetTimeline().GetPhase();
+            const auto cycle = waves->GetTimeline().StartedCycles();
+            waves->Tick(world, *BenchmarkEngine::GetLocator().GetModule<PhysicsModule>(), dt);
+            if (categoryMode && (phase != waves->GetTimeline().GetPhase() || cycle != waves->GetTimeline().StartedCycles()))
+                Log::Info("BistroPhysics", "wave cycle=", waves->GetTimeline().StartedCycles(),
+                    "; phase=", static_cast<int>(waves->GetTimeline().GetPhase()), "; participants=", waves->ParticipantCount());
+        };
+        auto previous = std::move(world.SceneMeshFactory);
+        world.SceneMeshFactory = [&world, &jobs, waves, categoryMode, quality, previous = std::move(previous), configured = false](const std::string& name, const StaticMeshRenderComponent& source) mutable
         {
             if (name != "Interior_interior" && name != "Exterior_exterior") return false;
             auto& physics = *BenchmarkEngine::GetLocator().GetModule<PhysicsModule>();
             if (!configured) { physics.ConfigureWorld(world, BistroPhysics::Settings()); configured = true; }
             auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
             const auto* mesh = render.GetPrimaryGPUMesh(source.MeshHandler);
-            const auto partition = PartitionBistroProps(*mesh->CPUMesh, name == "Interior_interior");
-            const auto count = BistroPhysics::GetCount(partition,
+            const auto partition = PartitionBistroProps(*mesh->CPUMesh, name == "Interior_interior", categoryMode);
+            const auto count = categoryMode ? partition.Props.size() : BistroPhysics::GetCount(partition,
                 BistroPhysics::SimulationEnabled.GetValue() ? BistroPhysics::CountScale.GetValue() : 1.0);
             render.ReserveTransformCapacity(static_cast<UINT>(count) + 9);
             size_t instances = partition.StaticSubMeshes.size();
@@ -252,8 +269,12 @@ inline void ConfigureBistroProps(SceneManagerModule& scenes, JobSystem& jobs)
             for (size_t i=0; i<count-partition.Props.size(); ++i)
                 instances += partition.Props[partition.Tableware[i%partition.Tableware.size()]].SubMeshIndices.size();
             render.ReserveInstanceCapacity(static_cast<UINT>(instances));
-            CreateBistroPropEntities(world, name, source, *mesh->CPUMesh, partition, jobs, &physics, waves.get());
-            if (name == "Interior_interior") CreateBistroParticles(world);
+            const std::function<bool(const StaticMeshRenderComponent&)> architecture = [&](const StaticMeshRenderComponent& statics) {
+                return previous && previous(name, statics);
+            };
+            CreateBistroPropEntities(world, name, source, *mesh->CPUMesh, partition, jobs, &physics, waves.get(),
+                categoryMode, quality, categoryMode ? architecture : std::function<bool(const StaticMeshRenderComponent&)>{});
+            if (name == "Interior_interior" && !categoryMode) CreateBistroParticles(world);
             return true;
         };
     });

@@ -55,6 +55,22 @@ namespace Engine::UI
             return true;
         }
 
+        void DrawPhysicsQuality(ConsoleModule& console)
+        {
+            constexpr const char* tiers[] = {"Off", "Low", "Medium", "High", "Epic"};
+            const auto requested = console.FindConsoleVariable(L"App.Physics.Quality").GetInt();
+            const auto effective = console.FindConsoleVariable(L"App.Physics.EffectiveQuality").GetInt();
+            ImGui::Text("Physics requested: %s; effective: %s", tiers[std::clamp(requested, 0, 4)],
+                effective < 0 ? "Legacy" : tiers[std::clamp(effective, 0, 4)]);
+            ImGui::TextWrapped("Low: glasses; Medium: +plates; High: +cutlery; Epic: +furniture and movable props.");
+            const bool categorized = console.FindConsoleVariable(L"App.Physics.Categorized").GetBool();
+            const bool effectiveCategorized = console.FindConsoleVariable(L"App.Physics.EffectiveCategorized").GetBool();
+            const int next = console.FindConsoleVariable(L"App.Physics.SimulationEnabled").GetBool() ? requested : 0;
+            if (categorized != effectiveCategorized || (categorized && next != effective))
+                ImGui::TextColored(ImVec4(1, .7f, .2f, 1), "Restart Bistro required");
+            ImGui::TextWrapped("Physics changes require restarting Bistro. Other techniques keep their settings.");
+        }
+
         void DrawSettings()
         {
             if (!Visible) return;
@@ -134,6 +150,7 @@ namespace Engine::UI
                         if (InvalidVariable == name)
                             ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1), "Invalid value or INI save failed; previous value retained. See tooltip and log.");
                         if (readOnly) { ImGui::SameLine(); ImGui::TextDisabled("(readonly)"); }
+                        if (name == "App.Physics.Quality") DrawPhysicsQuality(console);
                         ImGui::PopID();
                     }
                     for (const auto& [name, child] : group.Children)
@@ -624,6 +641,11 @@ namespace Engine::UI
                 ImGui::Separator();
                 ImGui::Combo("Technique", &technique, techniques, static_cast<int>(techniqueCount));
                 ImGui::Text("Current tier: %s", currentTiers[technique]);
+                if (std::string_view(techniques[technique]) == "Physics props")
+                {
+                    ConsoleModule console;
+                    DrawPhysicsQuality(console);
+                }
                 ImGui::Combo("Tier", &tier, tiers, static_cast<int>(std::size(tiers)));
                 if (ImGui::Button("Apply preset")) action = 6;
                 ImGui::SameLine();

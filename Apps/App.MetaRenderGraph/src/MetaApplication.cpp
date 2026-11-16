@@ -95,12 +95,13 @@ namespace
             {
                 auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
                 _bistroReflections.Update(world, timer.DeltaTime());
-                UpdateSky(world, timer.DeltaTime());
+                const float sceneDelta = world.IsPaused() ? 0.f : timer.DeltaTime() * world.GetTimeScale();
+                UpdateSky(world, sceneDelta);
                 _bistroWater.Update(world, timer.DeltaTime());
-                _bistroCharacters.Update(world, timer.DeltaTime(), GetJobs(), nullptr, true);
+                _bistroCharacters.Update(world, timer.DeltaTime(), GetJobs());
                 _bistroGrass.Update(world, timer.DeltaTime());
                 _bistroBounds->UpdateEmitters(world);
-                BistroParticles::Update(world, true);
+                BistroParticles::Update(world);
             }
             App::Update(timer);
             if (!_smoke)
@@ -128,7 +129,7 @@ namespace
             if (!_smoke)
             {
                 auto& world = *scenes->GetWorld();
-                world.SetPaused(true);
+                world.SetPaused(false);
                 _skyEntity = world.GetSkyEntity();
                 Require(world.GetECS().Has<SkyBoxComponent>(_skyEntity) &&
                     world.GetECS().Has<LightComponent>(_skyEntity), "Bistro sky must use the existing Sun");
@@ -149,10 +150,10 @@ namespace
                     Log::Info("MetaRenderGraph", "Bistro water target=", BistroWater::ParticleCount.GetValue(),
                         "; seed particles=", fluid.GetParticles() ? fluid.GetParticles()->size() : 0);
                 });
-                _bistroCharacters.Update(world, 0, GetJobs(), nullptr, true);
+                _bistroCharacters.Update(world, 0, GetJobs());
                 _bistroBounds = std::make_unique<BistroBounds::Scene>(world);
                 _bistroBounds->UpdateEmitters(world);
-                BistroParticles::Update(world, true);
+                BistroParticles::Update(world);
                 auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
                 camera.Location = {400, 230, -370};
                 camera.Rotation = {8, 40, 0};
@@ -160,7 +161,7 @@ namespace
                 world.GetECS().Get<CameraComponent>(world.ActiveCamera).InvalidateHistory();
                 IndirectCommandBuildSystem commands;
                 commands.Schedule(GetJobs(), world, 0).Complete();
-                Log::Info("MetaRenderGraph", "Loaded Bistro interior/exterior; static opaque, sun and CPU-culled local shadows; simulation paused");
+                Log::Info("MetaRenderGraph", "Loaded Bistro interior/exterior; fixed-step interior physics enabled; sun and local shadows");
                 return true;
             }
             Require(scenes->LoadWorld(Engine::Core::GetExecutableDirectory() / "Configs/SmokeWorld.yaml"), "Cannot create smoke world");

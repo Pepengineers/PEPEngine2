@@ -105,8 +105,8 @@ namespace BistroQuality
         {L"Render.Skinning.PoseRateHz", {"0", "15", "20", "30", "60"}}
     };
     inline constexpr Field Props[] = {
-        Enable(L"App.Physics.SimulationEnabled"), Constant(L"App.Physics.CountScale", "1"),
-        {L"App.Physics.ActiveTablewareFraction", {"0", "0.25", "0.5", "0.75", "1"}}
+        Constant(L"App.Physics.Categorized", "true"), Quality(L"App.Physics.Quality"),
+        Enable(L"App.Physics.SimulationEnabled"), Constant(L"App.Physics.CountScale", "1")
     };
     inline constexpr Field Sun[] = {{L"Render.Shadows.Sun.Resolution", {"0", "512", "1024", "2048", "4096"}}};
     inline constexpr Field Local[] = {{L"Render.Shadows.Local.Resolution", {"0", "128", "256", "384", "512"}}};

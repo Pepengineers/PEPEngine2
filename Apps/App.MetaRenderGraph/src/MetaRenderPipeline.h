@@ -32,8 +32,8 @@ class MetaRenderPipeline final : public IRenderPipeline
     }
     void ValidateQueued();
     bool OwnsScreenUI() const override { return true; }
-    bool AdvancesParticlesWhileWorldPaused() const override { return _opaqueOnly; }
-    bool AdvancesSkeletalMeshesWhileWorldPaused() const override { return _opaqueOnly; }
+    bool AdvancesParticlesWhileWorldPaused() const override { return false; }
+    bool AdvancesSkeletalMeshesWhileWorldPaused() const override { return false; }
     void PrepareMaterialBindings(RenderPipelineContext& c) override
     {
         _executor->Begin(c.Primary.CurrFrameConstantsIndex);
