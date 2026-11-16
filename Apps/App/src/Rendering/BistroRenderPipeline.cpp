@@ -319,6 +319,7 @@ void BistroRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipel
     graph.AddPass(p.Composition);
     graph.AddPass(p.DepthOfField);
     graph.AddPass(p.MotionBlur);
+    p.Reconstruction.ImportHistory(graph);
     graph.AddPass(p.Reconstruction);
     graph.AddPass(p.Output);
     graph.AddPass(p.FrameGeneration);

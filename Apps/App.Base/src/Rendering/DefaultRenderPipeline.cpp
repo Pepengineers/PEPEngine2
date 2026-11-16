@@ -79,6 +79,7 @@ void DefaultRenderPipeline::BuildGraph(GDX12RenderGraph& graph, const RenderPipe
     graph.AddPass(p.Composition);
     graph.AddPass(p.DepthOfField);
     graph.AddPass(p.MotionBlur);
+    p.Reconstruction.ImportHistory(graph);
     graph.AddPass(p.Reconstruction);
     graph.AddPass(p.Output);
     graph.AddPass(p.FrameGeneration);

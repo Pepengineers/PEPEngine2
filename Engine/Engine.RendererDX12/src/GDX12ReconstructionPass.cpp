@@ -3,6 +3,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12FSRUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DLSSUpscalePass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12NISUpscalePass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12TAAPass.h"
 #include "Engine.Core/Logging/Logger.h"
 #include <stdexcept>
 
@@ -14,6 +15,10 @@ namespace
         switch (s.Provider)
         {
         case GDX12UpscalerProvider::Native: return {};
+        case GDX12UpscalerProvider::TAA:
+            if (q != GDX12UpscalerQuality::Default && q != GDX12UpscalerQuality::NativeAA)
+                throw std::invalid_argument("Native TAA supports Default/NativeAA at output resolution only");
+            return std::make_unique<GDX12TAAPass>();
         case GDX12UpscalerProvider::XeSS:
         {
             const xess_quality_settings_t modes[] = { XESS_QUALITY_SETTING_ULTRA_QUALITY_PLUS,
@@ -59,6 +64,36 @@ GDX12ReconstructionPass::GDX12ReconstructionPass()
 }
 
 GDX12ReconstructionPass::~GDX12ReconstructionPass() { ClearDenendencies(); }
+
+void GDX12ReconstructionPass::ImportHistory(GDX12RenderGraph& graph)
+{
+    if (auto* taa = TAA())
+    {
+        for (auto& color : taa->ColorHistory()) graph.ImportLink("TAA color history", &color);
+        for (auto& depth : taa->DepthHistory()) graph.ImportLink("TAA depth history", &depth);
+    }
+}
+
+void GDX12ReconstructionPass::RecordRenderGraph(GDX12RenderGraphBuilder& graph)
+{
+    graph.SetName("Reconstruction");
+    graph.Read(SharedResource::Scene);
+    graph.ReadInputs(_inputs);
+    if (auto* taa = TAA())
+    {
+        for (auto& color : taa->ColorHistory()) graph.ReadWrite(&color);
+        for (auto& depth : taa->DepthHistory()) graph.ReadWrite(&depth);
+    }
+    graph.Write(_outputs[0], "Reconstructed or native HDR", Lifetime::Dynamic);
+    graph.Fallback(_outputs[0], _inputs[2]);
+}
+
+std::vector<GDX12RenderGraph::BufferAccess> GDX12ReconstructionPass::GetBufferAccesses() const
+{
+    if (auto* taa = TAA())
+        return {{taa->PreparedFrame().Camera, GDX12RenderGraph::Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}};
+    return {};
+}
 
 void GDX12ReconstructionPass::Setup(GDX12DeviceResources* resources, RenderPipelineCommonData* common)
 {
@@ -138,6 +173,26 @@ void GDX12ReconstructionPass::Execute(GDX12CommandList* commands)
     _commonData->ResetUpscalerHistory = false;
     _commonData->ResetHistory = false;
 }
+
+GDX12TAAPass* GDX12ReconstructionPass::TAA() const
+{
+    return _status.Effective == GDX12UpscalerProvider::TAA ? static_cast<GDX12TAAPass*>(_provider.get()) : nullptr;
+}
+
+void GDX12ReconstructionPass::PrepareRecording()
+{
+    if (auto* taa = TAA()) { taa->PrepareRecording(); LinkOutput(); }
+}
+
+void GDX12ReconstructionPass::Submitted()
+{
+    if (auto* taa = TAA())
+    {
+        taa->Submitted();
+        _commonData->ResetUpscalerHistory = _commonData->ResetHistory = false;
+    }
+}
+void GDX12ReconstructionPass::CancelRecording() { if (auto* taa = TAA()) taa->CancelRecording(); }
 
 void GDX12ReconstructionPass::QueryRenderTargetResolution()
 {

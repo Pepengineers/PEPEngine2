@@ -942,10 +942,20 @@ void RenderModule::OnRender()
         completion = _pipeline->ExecuteFrame(context, primarycmdList, finish);
     else
     {
-        primarycmdList = _primaryGraph->Execute(primarycmdList, compute);
-        finish(primarycmdList);
-        primarycmdQueue->ExecuteCommandList(primarycmdList);
-        completion = primarycmdList->FenceValue;
+        if (bindings.Reconstruction) bindings.Reconstruction->PrepareRecording();
+        try
+        {
+            primarycmdList = _primaryGraph->Execute(primarycmdList, compute);
+            finish(primarycmdList);
+            primarycmdQueue->ExecuteCommandList(primarycmdList);
+            completion = primarycmdList->FenceValue;
+            if (bindings.Reconstruction) bindings.Reconstruction->Submitted();
+        }
+        catch (...)
+        {
+            if (bindings.Reconstruction) bindings.Reconstruction->CancelRecording();
+            throw;
+        }
     }
     ++_frameSubmission;
     primaryCurrentFrameConsts->FenceValue = completion;

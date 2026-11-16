@@ -53,7 +53,7 @@ static void TestSettings()
         for (auto* invalid : { "-1", "nan", "inf", "18446744073709551616" })
             Require(!cvar.SetFromString(invalid), "Invalid setting accepted");
     }
-    Require(!console.FindConsoleVariable(L"Render.Upscaler.Provider").SetFromString("5"), "Invalid provider accepted");
+    Require(!console.FindConsoleVariable(L"Render.Upscaler.Provider").SetFromString("6"), "Invalid provider accepted");
     Require(!console.FindConsoleVariable(L"Render.Upscaler.Quality").SetFromString("8"), "Invalid preset accepted");
     Set(L"Render.Upscaler.Provider", 2);
     Set(L"Render.Upscaler.Quality", 3);
