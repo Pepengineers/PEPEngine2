@@ -209,25 +209,8 @@ void RenderModule::CollectReflectionScene()
                 group.Count = partCount;
             }
         });
-        ecs.ForEach<ReflectionProbeComponent>([&](Entity entity, ReflectionProbeComponent& component)
-        {
-            if (!component.Enabled || !ecs.Has<TransformComponent>(entity)) return;
-            const auto& transform = ecs.Get<TransformComponent>(entity);
-            GDX12ReflectionProbe probe;
-            probe.Id = ((_primaryResources.ReflectionWorldRevision * 65599 + worldIndex) << 32) | entity;
-            probe.Position = transform.Location + component.CaptureOffset;
-            probe.BoxMin = transform.Location - component.Extents;
-            probe.BoxMax = transform.Location + component.Extents;
-            probe.BlendDistance = component.BlendDistance;
-            probe.Intensity = component.Intensity;
-            probe.NearPlane = component.NearPlane;
-            probe.FarPlane = component.FarPlane;
-            static_cast<GDX12ReflectionCaptureSettings&>(probe) = component;
-            probe.Revision = component.Revision;
-            if (!IsValidReflectionProbe(probe)) throw std::invalid_argument("Invalid ReflectionProbeComponent");
-            resources.ReflectionProbes.push_back(probe);
-        });
     }
+    CollectReflectionProbes();
     {
         GDX12_SCOPED_CPU_EVENT("Snapshot primitive retirement");
         resources.EndMeshPrimitiveUpdate();
@@ -314,8 +297,12 @@ void RenderModule::CollectReflectionScene()
             Vector3(resources.Lighting.LightDirection), &bounds, resources.ShadowQuality.SunResolution,
             resources.ShadowQuality.SunCascades));
     }
-    std::sort(resources.ReflectionProbes.begin(), resources.ReflectionProbes.end(),
-        [](const auto& a, const auto& b) { return a.Id < b.Id; });
+    const auto geometryHash = ReflectionStaticGeometryHash();
+    if (_reflectionStaticGeometryHash != geometryHash)
+    {
+        ++resources.ReflectionStaticGeometryRevision;
+        _reflectionStaticGeometryHash = geometryHash;
+    }
     if (_reflectionStaticHash != staticHash)
     {
         ++resources.ReflectionStaticRevision;
@@ -332,4 +319,249 @@ void RenderModule::CollectReflectionScene()
         static_cast<unsigned long long>(publishedSubmeshes), static_cast<unsigned long long>(staticMeshCount),
         static_cast<unsigned>(rebuildStatic));
 #endif
+}
+
+void RenderModule::CollectReflectionProbes()
+{
+    auto& resources = _primaryResources;
+    resources.ReflectionProbes.clear();
+    auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
+    for (size_t worldIndex = 0; worldIndex < scenes->GetWorldCount(); ++worldIndex)
+    {
+        auto* world = scenes->GetWorld(worldIndex);
+        auto& ecs = world->GetECS();
+        ecs.ForEach<ReflectionProbeComponent>([&](Entity entity, ReflectionProbeComponent& component)
+        {
+            if (!component.Enabled || !ecs.Has<TransformComponent>(entity)) return;
+            const auto& transform = ecs.Get<TransformComponent>(entity);
+            GDX12ReflectionProbe probe;
+            probe.Id = ((_primaryResources.ReflectionWorldRevision * 65599 + worldIndex) << 32) | entity;
+            probe.Position = transform.Location + component.CaptureOffset;
+            probe.BoxMin = transform.Location - component.Extents;
+            probe.BoxMax = transform.Location + component.Extents;
+            probe.BlendDistance = component.BlendDistance;
+            probe.Intensity = component.Intensity;
+            probe.NearPlane = component.NearPlane;
+            probe.FarPlane = component.FarPlane;
+            static_cast<GDX12ReflectionCaptureSettings&>(probe) = component;
+            probe.Revision = component.Revision;
+            if (!IsValidReflectionProbe(probe)) throw std::invalid_argument("Invalid ReflectionProbeComponent");
+            resources.ReflectionProbes.push_back(probe);
+        });
+    }
+    std::sort(resources.ReflectionProbes.begin(), resources.ReflectionProbes.end(),
+        [](const auto& a, const auto& b) { return a.Id < b.Id; });
+}
+
+uint64_t RenderModule::ReflectionStaticGeometryHash() const
+{
+    uint64_t result = 14695981039346656037ull;
+    const auto hash = [&](const auto& value) {
+        const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
+        for (size_t i = 0; i < sizeof(value); ++i) result = (result ^ bytes[i]) * 1099511628211ull;
+    };
+    hash(_primaryResources.ReflectionWorldRevision);
+    _primaryResources.Primitives.ForEach([&](auto handle, const GDX12RenderPrimitive& primitive) {
+        if (primitive.Dynamic || !primitive.Visible ||
+            (!primitive.CapturedInReflections && !primitive.CastsShadows)) return;
+        hash(handle.Index); hash(handle.Generation);
+        hash(primitive.GeometryRevision); hash(primitive.MaterialRevision); hash(primitive.TransformRevision);
+        hash(primitive.MaterialIndex); hash(primitive.Bounds.Center); hash(primitive.Bounds.Extents);
+        hash(primitive.CapturedInReflections); hash(primitive.CastsShadows);
+    });
+    return result;
+}
+
+void RenderModule::PrepareReflectionScene()
+{
+    auto& resources = _primaryResources;
+    auto& frame = *resources.FrameConstants.at(resources.CurrFrameConstantsIndex);
+    const auto meshRevision = resources.GeometryBuffer->GetMeshCacheRevision();
+    const auto* instances = frame.InstanceCache->GetCPUData();
+    const auto* transforms = frame.TransformCache->GetCPUData();
+    const auto* commands = resources.IndirectCommandsCache->GetCPUData();
+    const auto hash = [](uint64_t& result, const auto& value) {
+        const auto* bytes = reinterpret_cast<const unsigned char*>(&value);
+        for (size_t i = 0; i < sizeof(value); ++i) result = (result ^ bytes[i]) * 1099511628211ull;
+    };
+    auto changed = resources.IndirectCommandsCache->ChangedElements();
+    const auto changedMaterials = frame.MaterialCache->ChangedElements();
+    const auto append = [&](const auto& indices, const auto& references) {
+        for (UINT index : indices)
+            if (const auto found = references.find(index); found != references.end())
+                changed.insert(changed.end(), found->second.begin(), found->second.end());
+    };
+    const auto changedInstances = frame.InstanceCache->ChangedElements();
+    changed.insert(changed.end(), changedInstances.begin(), changedInstances.end());
+    append(frame.TransformCache->ChangedElements(), _reflectionTransformInstances);
+    append(changedMaterials, _reflectionMaterialInstances);
+    std::sort(changed.begin(), changed.end());
+    changed.erase(std::unique(changed.begin(), changed.end()), changed.end());
+    bool topology = _reflectionSnapshotWorld != resources.ReflectionWorldRevision ||
+        _reflectionSnapshotMesh != meshRevision || _reflectionSnapshotInstances != _instanceCount;
+    for (UINT index : changed)
+    {
+        if (topology) break;
+        if (index >= _meshSnapshots.size() || !_meshSnapshots[index].Valid) continue;
+        if (index >= _reflectionCommands.size()) { topology = true; break; }
+        const auto& command = commands[index];
+        const auto& old = _reflectionCommands.at(index);
+        topology |= command.InstanceCount && (command.IndexCountPerInstance != old.IndexCountPerInstance ||
+            command.StartIndexLocation != old.StartIndexLocation || command.BaseVertexLocation != old.BaseVertexLocation ||
+            command.InstanceID != old.InstanceID);
+        topology |= instances[index].MaterialIndex >= _reflectionMaterials.size() ||
+            !_reflectionMaterials[instances[index].MaterialIndex];
+    }
+    if (topology)
+    {
+        CollectReflectionScene();
+        _reflectionSnapshotWorld = resources.ReflectionWorldRevision;
+        _reflectionSnapshotMesh = meshRevision;
+        _reflectionSnapshotInstances = _instanceCount;
+        _reflectionTransformInstances.clear();
+        _reflectionMaterialInstances.clear();
+        _reflectionMaterials.assign(frame.MaterialCache->GetElementCount(), nullptr);
+        for (const auto& [name, material] : _materials)
+            if (material->_CBufferIndex < _reflectionMaterials.size())
+                _reflectionMaterials[material->_CBufferIndex] = material.get();
+        _reflectionCommands.assign(commands, commands + resources.IndirectCommandsCache->GetElementCount());
+        for (UINT index = 0; index < _meshSnapshots.size(); ++index)
+        {
+            const auto& snapshot = _meshSnapshots[index];
+            if (!snapshot.Valid || !resources.GetMeshPrimitive(index)) continue;
+            _reflectionTransformInstances[snapshot.Instance.TransformIndex].push_back(index);
+            _reflectionMaterialInstances[snapshot.Instance.MaterialIndex].push_back(index);
+        }
+    }
+    else
+    {
+        // Destruction removes primitives directly; only a topology rebuild needs epoch retirement.
+        bool staticChanged = false;
+        for (UINT index : changed)
+        {
+            if (index >= _meshSnapshots.size() || !_meshSnapshots[index].Valid) continue;
+            auto& snapshot = _meshSnapshots[index];
+            auto* current = resources.GetMeshPrimitive(index);
+            if (!current)
+            {
+                staticChanged |= snapshot.Primitive.Visible && !snapshot.Primitive.Dynamic;
+                snapshot.Valid = false;
+                continue;
+            }
+            const auto& instance = instances[index];
+            const auto* material = _reflectionMaterials.at(instance.MaterialIndex);
+            const auto& world = transforms[instance.TransformIndex].WorldMatrix;
+            auto primitive = snapshot.Primitive;
+            primitive.Bounds = {instance.BoundingBoxCenter, instance.BoundingBoxExtents};
+            primitive.TransformIndex = instance.TransformIndex;
+            primitive.MaterialIndex = instance.MaterialIndex;
+            primitive.Visible = commands[index].InstanceCount != 0;
+            primitive.Dynamic = instance.ReflectionDynamic != 0;
+            primitive.CastsShadows = instance.CastsShadows && material->Type != MaterialType::Transparent &&
+                !material->ReflectionProbePreview;
+            primitive.CapturedInReflections = !material->ReflectionProbePreview;
+            primitive.MaterialRevision = 14695981039346656037ull;
+            hash(primitive.MaterialRevision, material); hash(primitive.MaterialRevision, material->_revision);
+            primitive.TransformRevision = 14695981039346656037ull;
+            hash(primitive.TransformRevision, world);
+            _reflectionCommands[index] = commands[index];
+            if (primitive.Revision() == snapshot.Primitive.Revision()) continue;
+            const auto rebind = [index](auto& references, UINT old, UINT next) {
+                if (old == next) return;
+                auto& previous = references[old];
+                previous.erase(std::remove(previous.begin(), previous.end(), index), previous.end());
+                references[next].push_back(index);
+            };
+            rebind(_reflectionTransformInstances, snapshot.Instance.TransformIndex, instance.TransformIndex);
+            rebind(_reflectionMaterialInstances, snapshot.Instance.MaterialIndex, instance.MaterialIndex);
+            staticChanged |= !snapshot.Primitive.Dynamic || !primitive.Dynamic;
+            snapshot.Primitive = primitive;
+            snapshot.Instance = instance;
+            snapshot.World = world;
+            snapshot.Material = material;
+            snapshot.MaterialRevision = material->_revision;
+            snapshot.PrimitiveHandle = resources.PublishMeshPrimitive(index, primitive);
+            snapshot.Signature = primitive.Revision();
+            hash(snapshot.Signature, snapshot.PrimitiveHandle.Index);
+            hash(snapshot.Signature, snapshot.PrimitiveHandle.Generation);
+        }
+        const auto membership = resources.Primitives.GetMembershipRevision();
+        if (staticChanged || membership != _snapshotPrimitiveMembershipRevision)
+        {
+            _staticMeshSnapshotHash = 14695981039346656037ull;
+            _staticMeshReflectionBounds = {};
+            _staticMeshCasterBounds = {};
+            _nonStaticMeshPrimitives.clear();
+            resources.StaticMeshShadowCasters.clear();
+            ++resources.StaticMeshShadowRevision;
+            resources.Primitives.ForEach([&](auto handle, const GDX12RenderPrimitive& primitive) {
+                if (primitive.Dynamic || primitive.Source)
+                {
+                    _nonStaticMeshPrimitives.push_back(handle);
+                    return;
+                }
+                if (!primitive.Visible || (!primitive.CastsShadows && !primitive.CapturedInReflections)) return;
+                auto signature = primitive.Revision();
+                hash(signature, handle.Index); hash(signature, handle.Generation);
+                hash(_staticMeshSnapshotHash, signature);
+                if (primitive.CastsShadows)
+                {
+                    resources.StaticMeshShadowCasters.push_back({primitive.Bounds, signature, false});
+                    _staticMeshCasterBounds.Add(primitive.Bounds);
+                }
+                else _staticMeshReflectionBounds.Add(primitive.Bounds);
+            });
+            _snapshotPrimitiveMembershipRevision = membership;
+            const auto geometryHash = ReflectionStaticGeometryHash();
+            if (geometryHash != _reflectionStaticGeometryHash)
+            {
+                _reflectionStaticGeometryHash = geometryHash;
+                ++resources.ReflectionStaticGeometryRevision;
+            }
+        }
+        CollectReflectionProbes();
+        uint64_t staticHash = 14695981039346656037ull, dynamicHash = staticHash;
+        hash(staticHash, resources.ReflectionEnvironmentRevision);
+        hash(staticHash, resources.Lighting.LightDirection); hash(staticHash, resources.Lighting.LightRadiance);
+        hash(staticHash, resources.Lighting.SunShadowFlags); hash(staticHash, resources.Lighting.SunShadowRevision);
+        hash(staticHash, resources.ShadowQuality.SunResolution);
+        hash(staticHash, resources.ShadowQuality.SunCascades.Count);
+        hash(staticHash, resources.ShadowQuality.SunCascades.MaxDistance);
+        hash(staticHash, resources.ShadowQuality.SunCascades.AutomaticSplits);
+        hash(staticHash, resources.ShadowQuality.SunCascades.Splits);
+        hash(staticHash, resources.ShadowQuality.LocalResolution);
+        for (const auto& light : resources.LocalLights) hash(staticHash, light);
+        hash(staticHash, _staticMeshSnapshotHash);
+        GDX12RenderBounds bounds = _staticMeshReflectionBounds;
+        bounds.Merge(_staticMeshCasterBounds);
+        if (!resources.LocalShadowCasters) resources.LocalShadowCasters.emplace();
+        resources.LocalShadowCasters->clear();
+        for (const auto handle : _nonStaticMeshPrimitives)
+        {
+            const auto* primitive = resources.Primitives.Get(handle);
+            if (!primitive || !primitive->Visible || (!primitive->CastsShadows && !primitive->CapturedInReflections)) continue;
+            auto signature = primitive->Revision();
+            hash(signature, handle.Index); hash(signature, handle.Generation);
+            hash(primitive->Dynamic ? dynamicHash : staticHash, signature);
+            bounds.Add(primitive->Bounds);
+            if (primitive->CastsShadows)
+                resources.LocalShadowCasters->push_back({primitive->Bounds, signature, primitive->Dynamic});
+        }
+        resources.ReflectionSceneBounds = bounds.Empty() ? BoundingBox{} : bounds.Get();
+        if (_reflectionStaticHash != staticHash)
+        {
+            _reflectionStaticHash = staticHash;
+            ++resources.ReflectionStaticRevision;
+        }
+        if (_reflectionDynamicHash != dynamicHash)
+        {
+            _reflectionDynamicHash = dynamicHash;
+            ++resources.ReflectionDynamicRevision;
+        }
+    }
+    // Local shadow trees use this as topology, not a hash of moving transforms.
+    uint64_t geometry = 14695981039346656037ull;
+    hash(geometry, resources.ReflectionWorldRevision); hash(geometry, meshRevision);
+    hash(geometry, _instanceCount); hash(geometry, resources.Primitives.GetMembershipRevision());
+    resources.GeometryRevision = geometry;
 }

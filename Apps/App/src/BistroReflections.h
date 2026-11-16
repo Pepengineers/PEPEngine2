@@ -12,6 +12,7 @@
 #include <numeric>
 #include <random>
 #include <vector>
+#include "Engine.Core/Logging/Logger.h"
 
 namespace BistroReflections
 {
@@ -54,15 +55,23 @@ namespace BistroReflections
         {{343.798f,124.219f,-164.417f},62.810f},
         {{638.546f,124.309f,-5.547f},62.810f}}};
     static_assert(Tables.size() <= MaxReflectionProbes);
+    inline bool InteriorSelection = false;
     inline AutoConsoleVariable<int> Count(L"App.ReflectionProbes.Count", 4,
-        L"Frozen static captures at seeded unique tables; 0 disables, maximum " +
+        L"Meta: 0..10 interior tables; App: 0..21 tables. Frozen static captures at seeded unique tables; 0 disables, maximum " +
         std::to_wstring(Tables.size()) + L" (the number of tables: 11 terrace + 10 interior)",
-        EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= static_cast<int>(Tables.size()); });
+        EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= (InteriorSelection ? 10 : static_cast<int>(Tables.size())); });
+
+    inline AutoConsoleVariable<UINT> Seed(L"App.ReflectionProbes.Seed", 1,
+        L"Ordinary Meta interior table selection seed");
+    inline AutoConsoleVariable<UINT> Reset(L"App.ReflectionProbes.Reset", 0,
+        L"Increment to reset ordinary Meta probe anchors");
+    inline AutoConsoleVariable<UINT> Recapture(L"App.ReflectionProbes.Recapture", 0,
+        L"Increment to explicitly recapture ordinary Meta frozen probes");
 
     class Scene
     {
     public:
-        explicit Scene(unsigned seed = std::random_device{}()) { ResetWorld(seed); }
+        explicit Scene(unsigned seed = std::random_device{}(), bool interiorOnly = false) : _interiorOnly(interiorOnly) { if (interiorOnly) InteriorSelection = true; ResetWorld(seed); }
 
         void ResetWorld(unsigned seed)
         {
@@ -75,13 +84,25 @@ namespace BistroReflections
         void Update(World& world, float)
         {
             auto& ecs = world.GetECS();
-            const size_t requested = static_cast<size_t>(Count.GetValue());
+            const size_t requested = static_cast<size_t>(_interiorOnly ? (std::min)(Count.GetValue(), 10) : Count.GetValue());
+            const bool resetAnchors = _interiorOnly && (_seed != Seed.GetValue() || _reset != Reset.GetValue() || _entities.size() != requested);
+            if (resetAnchors)
+            {
+                for (const auto entity : _entities) ecs.DestroyEntity(entity);
+                _seed = Seed.GetValue();
+                _reset = Reset.GetValue();
+                _entities.clear();
+                std::iota(_tableOrder.begin(), _tableOrder.begin() + 10, size_t{11});
+                std::mt19937 random(_seed ^ (unsigned(requested) * 0x9e3779b9u) ^ _reset);
+                std::shuffle(_tableOrder.begin(), _tableOrder.begin() + 10, random);
+            }
+            const bool recapture = _interiorOnly && _recapture != Recapture.GetValue();
             const bool visible = ShowSpheres.GetValue();
             const auto resolution = Resolution.GetValue();
             const auto samples = PrefilterSamples.GetValue();
             const auto implementation = Implementation.GetValue();
             if (_entities.size() == requested && _visible == visible &&
-                _resolution == resolution && _samples == samples && _implementation == implementation) return;
+                _resolution == resolution && _samples == samples && _implementation == implementation && !recapture && !resetAnchors) return;
             auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
             if (_entities.size() != requested)
             {
@@ -102,7 +123,7 @@ namespace BistroReflections
             {
                 const size_t index = _entities.size();
                 const auto& table = Tables[_tableOrder[index]];
-                const Vector3 position = table.Centre + Vector3(0, table.HalfSize - 5, 0);
+                const Vector3 position = table.Centre + Vector3(0, _interiorOnly ? 40.f : table.HalfSize - 5, 0);
                 auto entity = ecs.CreateEntity();
                 entity.AddComponent<NameComponent>("BistroReflection" + std::to_string(index));
                 entity.AddComponent<TransformComponent>(position);
@@ -113,6 +134,8 @@ namespace BistroReflections
                 probe.FacesPerFrame = 6;
                 probe.FarPlane = 15000;
                 _entities.push_back(entity.GetId());
+                if (_interiorOnly) Log::Info("BistroProbes", "seed=", _seed, "; table=", _tableOrder[index] + 1,
+                    "; origin=", position.x, ",", position.y, ",", position.z);
             }
             auto order = _entities;
             std::sort(order.begin(), order.end()); // Same entity order as the published cubemap array.
@@ -120,6 +143,7 @@ namespace BistroReflections
             {
                 const auto entity = _entities[index];
                 auto& probe = ecs.Get<ReflectionProbeComponent>(entity);
+                if (recapture) probe.Invalidate();
                 probe.Resolution = resolution;
                 probe.PrefilterSamples = samples;
                 probe.Implementation = implementation;
@@ -135,13 +159,14 @@ namespace BistroReflections
                 if (!ecs.Has<StaticMeshRenderComponent>(entity))
                 {
                     auto& transform = ecs.Get<TransformComponent>(entity);
-                    transform.Scale = Vector3(0.8f * probe.Extents.x);
+                    transform.Scale = Vector3(_interiorOnly ? 24.f : 0.8f * probe.Extents.x);
                     transform.DirtyFlag = true;
                     ecs.GetEntityHandle(entity).AddComponent<StaticMeshRenderComponent>(_mesh, std::vector<GDX12Material*>{material});
                 }
                 ecs.Get<StaticMeshRenderComponent>(entity).Visible = visible;
                 ecs.Get<StaticMeshRenderComponent>(entity).CastsShadows = false;
             }
+            _recapture = Recapture.GetValue();
             _visible = visible;
             _resolution = resolution;
             _samples = samples;
@@ -200,6 +225,8 @@ namespace BistroReflections
             BenchmarkEngine::GetLocator().GetModule<RenderModule>()->SubmitMesh(mesh, _mesh);
         }
 
+        bool _interiorOnly = false;
+        UINT _seed = UINT_MAX, _reset = UINT_MAX, _recapture = 0;
         std::vector<Entity> _entities;
         std::array<size_t, Tables.size()> _tableOrder;
         Engine::Core::MeshHandle _mesh;

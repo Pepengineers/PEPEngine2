@@ -280,6 +280,7 @@ void GDX12ReflectionProbePass::CreateCaptureTextures(UINT resolution)
     const UINT sunSize = (std::max)(1u, _resources->ShadowQuality.SunResolution / 2);
     if (!_sunShadow.IsInitialized() || _sunShadow.GetWidth() != sunSize)
     {
+        if (_sunShadow.IsInitialized()) _resources->Device->GetCommandQueue()->Flush();
         CreateTexture(_sunShadow, sunSize, 1, 1, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL, true);
         CreateFaceViews(_sunShadow, _sunDSV, true);
         _sunShadowNeedsClear = true;
@@ -672,6 +673,7 @@ void GDX12ReflectionProbePass::Prepare()
         CreatePublishedTexture(static_cast<UINT>(submitted.size()), maximumResolution);
     const bool invalidate = _staticRevision != _resources->ReflectionStaticRevision ||
         _environmentRevision != _resources->ReflectionEnvironmentRevision;
+    const bool staticGeometryChanged = _staticGeometryRevision != _resources->ReflectionStaticGeometryRevision;
     const bool shadowQualityChanged = !(_shadowQuality == _resources->ShadowQuality);
     if ((invalidate || shadowQualityChanged) && _staticLocalShadows) _staticLocalShadows->InvalidateCache();
     for (size_t i = 0; i < submitted.size(); ++i)
@@ -685,7 +687,13 @@ void GDX12ReflectionProbePass::Prepare()
             probe.RebakePending = false;
             probe.LastUpdate = 0;
         }
-        else if (invalidate && !(probe.Source.Implementation == 2 && probe.Ready && probe.LastUpdate))
+        else if (staticGeometryChanged && probe.Source.Implementation == 2)
+        {
+            probe.CapturedFaces = probe.BakedFaces = probe.NextFace = 0;
+            probe.RebakePending = false;
+            probe.LastUpdate = 0;
+        }
+        else if (staticGeometryChanged || (invalidate && probe.Source.Implementation != 2))
         {
             // Finish the current generation before rebaking so changing lighting cannot starve publication.
             if (probe.CapturedFaces) probe.RebakePending = true;
@@ -694,6 +702,7 @@ void GDX12ReflectionProbePass::Prepare()
         probe.Source = submitted[i];
     }
     _staticRevision = _resources->ReflectionStaticRevision;
+    _staticGeometryRevision = _resources->ReflectionStaticGeometryRevision;
     _environmentRevision = _resources->ReflectionEnvironmentRevision;
     _shadowQuality = _resources->ShadowQuality;
     if (!_enabled || _settings.Scheduled != settings.Scheduled) _scheduler.Reset();
@@ -728,6 +737,11 @@ void GDX12ReflectionProbePass::Prepare()
             _roundRobinProbe = (_roundRobinProbe + 1) % static_cast<UINT>(_probes.size());
         }
     }
+    // Scheduled priority may select an already frozen probe; only an explicit invalidation reopens it.
+    for (UINT index = 0; index < _probes.size(); ++index)
+        if (_probes[index].Source.Implementation == 2 && _probes[index].Ready &&
+            _probes[index].LastUpdate && !_probes[index].CapturedFaces)
+            work[index].Faces = 0;
     CreateCaptureTextures(maximumResolution);
     _views.resize(_probes.size() * 14);
     auto& frame = _frames[_resources->CurrFrameConstantsIndex];

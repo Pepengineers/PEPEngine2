@@ -120,6 +120,7 @@ private:
     GDX12ReflectionSettings _settings;
     GDX12ShadowQuality _shadowQuality;
     uint64_t _staticRevision = 0;
+    uint64_t _staticGeometryRevision = 0;
     uint64_t _environmentRevision = 0;
     uint64_t _frameNumber = 0;
     UINT _activeProbe = 0;

@@ -44,6 +44,7 @@ private:
     friend class SceneTransparency;
     friend class SceneLighting;
     friend class SceneReflections;
+    friend class SceneProbePreview;
     struct Buffer {
         GDX12ResourceHandle Source, Data, Origin;
         uint64_t Revision = 0;

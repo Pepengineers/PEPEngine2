@@ -25,11 +25,13 @@ SceneLighting::SceneLighting(GDX12DeviceResources &r, RenderPipelineCommonData &
 {
     if (opaqueOnly && r.FrameConstants.size() > FFX_MAX_QUEUED_FRAMES)
         throw std::logic_error("SSSR queued-frame contract exceeded");
-    if (!opaqueOnly) _reflections = std::make_unique<SceneReflections>(r, c);
+    _reflections = std::make_unique<SceneReflections>(r, c);
     if (opaqueOnly) _sunShadows = std::make_unique<SceneSunShadows>(r, c);
     if (opaqueOnly)
     {
         _localShadows = std::make_unique<SceneLocalShadows>(r, c);
+        _probeStaticShadows = std::make_unique<SceneLocalShadows>(r, c, true);
+        _probePreview = std::make_unique<SceneProbePreview>(r, c);
         _transparency = std::make_unique<SceneTransparency>(r, c);
         GDX12RootSignatureDesc root;
         root.Constants = {9};
@@ -92,7 +94,8 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
     const auto grass = geometry.GrassPrimitives();
     if (_localShadows)
     {
-        _localShadows->Freeze(slot, grass);
+        _probeStaticShadows->Freeze(slot, grass, true);
+        _localShadows->Freeze(slot, grass, true);
     }
     if (_sunShadows) _sunShadows->Freeze(slot, _localShadows->CastersRebuilt(),
         _localShadows->ChangedCasterBounds(), grass);
@@ -102,6 +105,7 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
         constants.LocalLightCache->Resize(1);
         constants.LocalLightCache->CopyData(0, GDX12LocalLightConstants{});
     }
+    if (_probeStaticShadows) _probeStaticShadows->Complete(slot);
     if (_localShadows) _localShadows->Complete(slot);
     auto& lightSource = _localShadows ? _localShadows->LightSource(slot) : *constants.LocalLightCache;
     const UINT count = lightSource.GetElementCount();
@@ -180,12 +184,15 @@ bool SceneLighting::Record(Id id, ID3D12GraphicsCommandList *commands) const
 {
     return _work[_mode].Record(id, commands) || (_sunShadows && _sunShadows->Record(_slot, id, commands)) ||
            (_localShadows && _localShadows->Record(_slot, id, commands)) ||
+           (_probeStaticShadows && _probeStaticShadows->Record(_slot, id, commands)) ||
+           (_probePreview && _probePreview->Record(id, commands)) ||
            (_transparency && _transparency->Record(id, commands)) ||
            (_reflections && _reflections->Record(id, commands)) ||
            (_frames.at(_slot).AO && _frames.at(_slot).AO->Record(id, commands));
 }
 void SceneLighting::Submitted(bool serial, uint64_t fence)
 {
+    if (_probeStaticShadows) _probeStaticShadows->Submitted(_slot);
     if (_localShadows) _localShadows->Submitted(_slot);
     if (_reflections) _reflections->Submitted(serial, fence);
 }
@@ -228,7 +235,16 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     if (_localShadows) _localShadows->Append(graph, bindings, _slot,
         {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle,
          scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle}, scene.Geometry, *constants.ShadowLights, appendGrass);
-    if (!_opaqueOnly)
+    if (_opaqueOnly)
+    {
+        _probeStaticShadows->Append(graph, bindings, _slot,
+            {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle,
+             scene.Buffers[2].Srv.GPUHandle, scene.Buffers[3].Srv.GPUHandle}, scene.Geometry,
+            *constants.ShadowLights, appendGrass);
+        _reflections->Append(graph, bindings, geometry, environment, _slot, serial,
+            _localShadows->Output(_slot), _probeStaticShadows->Output(_slot), false);
+    }
+    else
     {
         geometry._shadows->AppendLighting(graph, bindings, _slot);
         _reflections->Append(graph, bindings, geometry, environment, _slot, serial);
@@ -303,7 +319,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     auto lighting = environment.Reads(graph, bindings);
     for (UINT i = 0; i < _deferred._inputs.size(); ++i)
         lighting.push_back(texture(_deferred._inputs[i]->GetTexture(), Mode::Read, read));
-    if (_reflections)
+    if (!_opaqueOnly)
     {
         lighting.push_back(texture(_reflections->Published(serial), Mode::Read, read));
         lighting.push_back({resource(&constants.ReflectionProbes->GetResource()), Mode::Read, read});
@@ -336,7 +352,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     for (UINT i = 0; i < 12; ++i)
         inputs[i < 11 ? i : 14] = _deferred._inputs[i]->GetTexture()->GetSRV()->GPUHandle;
     inputs[11] = lights->GetSRV()->GPUHandle;
-    if (_reflections) inputs[12] = _reflections->Radiance(serial);
+    if (!_opaqueOnly) inputs[12] = _reflections->Radiance(serial);
     inputs[13] = constants.ReflectionProbes->GetSRV()->GPUHandle;
     inputs[15] = _resources.SkyTransmittanceSRV.GPUHandle;
     inputs[16] = _resources.SkyViewSRV.GPUHandle;
@@ -362,6 +378,10 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
     const auto appendOrdinary = [&](GDX12Texture* opaqueHDR) {
         _initialized = true;
         if (!_hdrContinuation) throw std::logic_error("Opaque lighting requires a display continuation");
+        _transparency->SetOpaqueContinuation([&](auto& g, auto& b, auto* hdr, auto* depth, auto* motion) {
+            _probePreview->Append(g, b, geometry, *_reflections, _slot, serial, hdr, depth, motion, environment);
+            return _probePreview->HDR();
+        }, [this] { return _probePreview->Depth(); }, [this] { return _probePreview->Motion(); }, [this] { return _probePreview->ReadDepth(); });
         auto* hdr = _transparency->Append(graph, bindings, geometry, _slot, opaqueHDR,
             _sunShadows->Output(_slot), _localShadows->Output(_slot), environment);
         _hdrContinuation(graph, bindings, hdr, nullptr);
@@ -443,7 +463,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
             srvs[i] = p._inputs[i]->GetTexture()->GetSRV()->GPUHandle;
         srvs[7] = p._radiance.GetSRV()->GPUHandle;
         srvs[8] = p._fallback.GetSRV()->GPUHandle;
-        if (_reflections)
+        if (!_opaqueOnly)
         {
             srvs[9] = _reflections->Radiance(serial);
             srvs[10] = constants.ReflectionProbes->GetSRV()->GPUHandle;
@@ -461,7 +481,7 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
         std::vector<Access> ssrReads;
         for (auto *input : p._inputs)
             ssrReads.push_back(texture(input->GetTexture(), Mode::Read, read));
-        if (_reflections)
+        if (!_opaqueOnly)
         {
             ssrReads.push_back(texture(_reflections->Published(serial), Mode::Read, read));
             ssrReads.push_back({resource(&constants.ReflectionProbes->GetResource()), Mode::Read, read});

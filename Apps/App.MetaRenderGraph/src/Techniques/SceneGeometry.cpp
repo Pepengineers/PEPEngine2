@@ -23,7 +23,8 @@ SceneGeometry::SceneGeometry(RenderPipelineContext& c, bool opaqueOnly):_resourc
     GDX12RootSignatureDesc d;
     d.NumSingleCBVSlots=1; d.NumSingleSRVSlots=3; d.NumSingleUAVSlots=4;
     _cullRoot=std::make_unique<GDX12RootSignature>(r.Device,d);
-    _cull=GDX12RenderHelpers::CreateComputePipeline(r.Device,_cullRoot.get(),SHADERS_FOLDER "Culling.hlsl","CS");
+    const D3D_SHADER_MACRO cullDefines[] = {{"LATE_PROBE_PREVIEW", opaqueOnly ? "1" : "0"}, {nullptr, nullptr}};
+    _cull=GDX12RenderHelpers::CreateComputePipeline(r.Device,_cullRoot.get(),SHADERS_FOLDER "Culling.hlsl","CS", cullDefines);
     d={}; d.NumSingleUAVSlots=2;
     _clearRoot=std::make_unique<GDX12RootSignature>(r.Device,d);
     _clear=GDX12RenderHelpers::CreateComputePipeline(r.Device,_clearRoot.get(),SHADERS_FOLDER "BufferClear.hlsl","CS");

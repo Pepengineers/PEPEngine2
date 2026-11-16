@@ -57,6 +57,9 @@ void CS(uint3 dispatchThreadID : SV_DispatchThreadID)
     {
         Material mat = MaterialCache[InstanceCache[instanceID].MaterialIndex];
         
+#if LATE_PROBE_PREVIEW
+        if (mat.ReflectionProbePreview != 0) return;
+#endif
         //opaque and masked
         if (mat.RenderLayer != 2 || mat.ReflectionProbePreview != 0)
         {

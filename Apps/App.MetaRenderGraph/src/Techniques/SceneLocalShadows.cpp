@@ -69,9 +69,11 @@ std::optional<BoundingBox> VisibleBounds(const BoundingBox& box, const std::arra
 }
 }
 
-SceneLocalShadows::SceneLocalShadows(GDX12DeviceResources& r, RenderPipelineCommonData& common)
-    : _resources(r), _common(common), _slots(r.FrameConstants.size())
+SceneLocalShadows::SceneLocalShadows(GDX12DeviceResources& r, RenderPipelineCommonData& common, bool staticOnly)
+    : _resources(r), _common(common), _slots(r.FrameConstants.size()), _staticOnly(staticOnly)
 {
+    _dsvHeap = std::make_unique<GDX12DescriptorHeap>(r.Device, D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
+        UINT(r.FrameConstants.size()) * D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION, D3D12_DESCRIPTOR_HEAP_FLAG_NONE);
     GDX12RootSignatureDesc root;
     root.Constants = {2};
     root.NumSingleSRVSlots = 4;
@@ -243,10 +245,10 @@ void SceneLocalShadows::UpdateCasters(UINT slot)
     _changedCasterBounds.clear();
     _castersRebuilt = false;
     auto& frame = *_resources.FrameConstants.at(slot);
-    auto changed = _resources.IndirectCommandsCache->ConsumeChangedElements();
-    const auto instances = frame.InstanceCache->ConsumeChangedElements();
-    const auto transforms = frame.TransformCache->ConsumeChangedElements();
-    const auto materials = frame.MaterialCache->ConsumeChangedElements();
+    auto changed = (_staticOnly ? _resources.IndirectCommandsCache->ChangedElements() : _resources.IndirectCommandsCache->ConsumeChangedElements());
+    const auto instances = (_staticOnly ? frame.InstanceCache->ChangedElements() : frame.InstanceCache->ConsumeChangedElements());
+    const auto transforms = (_staticOnly ? frame.TransformCache->ChangedElements() : frame.TransformCache->ConsumeChangedElements());
+    const auto materials = (_staticOnly ? frame.MaterialCache->ChangedElements() : frame.MaterialCache->ConsumeChangedElements());
     if (!_treeReady || _inputs.size() != _resources.IndirectCommandsCache->GetElementCount() ||
         _geometryRevision != _resources.GeometryRevision || _meshRevision != _resources.GeometryBuffer->GetMeshCacheRevision())
     {
@@ -284,6 +286,7 @@ void SceneLocalShadows::UpdateCasters(UINT slot)
             RebuildCasters(slot);
             return;
         }
+        if (_staticOnly && current.Dynamic) { old = current; continue; }
         const bool materialDirty = std::find(materials.begin(), materials.end(), current.Instance.MaterialIndex) != materials.end();
         if (!materialDirty && current.DeformationRevision == old.DeformationRevision &&
             std::memcmp(&current.Command, &old.Command, sizeof(current.Command)) == 0 &&
@@ -430,12 +433,13 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
     if (!(light.ShadowFlags & 1u) || (light.Type != 1 && light.Type != 2) ||
         !Owner->_resources.ShadowQuality.LocalResolution) return;
     const BoundingBox influence(light.Position, XMFLOAT3(light.Range, light.Range, light.Range));
-    if (!Frame->Camera->Intersects(influence)) return;
+    if (!Frame->AllReceivers && !Frame->Camera->Intersects(influence)) return;
     const std::array<GDX12LocalShadowFrustum, 6> faces = {
         GDX12LocalShadowFrustum(light.ShadowViewProj[0]), GDX12LocalShadowFrustum(light.ShadowViewProj[1]),
         GDX12LocalShadowFrustum(light.ShadowViewProj[2]), GDX12LocalShadowFrustum(light.ShadowViewProj[3]),
         GDX12LocalShadowFrustum(light.ShadowViewProj[4]), GDX12LocalShadowFrustum(light.ShadowViewProj[5])};
     const UINT allFaces = (1u << LocalShadowFaceCount(light)) - 1;
+    if (Frame->AllReceivers) output.Needed = allFaces;
     for (const UINT root : {Owner->_staticRoot, Owner->_dynamicRoot})
         if (root != UINT_MAX && output.Needed != allFaces)
             output.Needed |= Owner->NeededFaces(root, light, faces, allFaces & ~output.Needed, *Frame);
@@ -462,7 +466,7 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
         valid |= missing;
     };
     gather(Owner->_staticRoot, output.StaticListsValid, output.StaticFaces);
-    gather(Owner->_dynamicRoot, output.DynamicListsValid, output.DynamicFaces);
+    gather(Owner->_staticOnly ? UINT_MAX : Owner->_dynamicRoot, output.DynamicListsValid, output.DynamicFaces);
 }
 
 void SceneLocalShadows::PackJob::Execute(size_t)
@@ -514,7 +518,7 @@ void SceneLocalShadows::PackJob::Execute(size_t)
     }
 }
 
-void SceneLocalShadows::Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass)
+void SceneLocalShadows::Freeze(UINT slot, const std::vector<GDX12RenderPrimitive>& grass, bool allReceivers)
 {
     if (!_common.Jobs) throw std::logic_error("Local shadow preparation requires JobSystem");
     UpdateCasters(slot);
@@ -555,6 +559,8 @@ void SceneLocalShadows::Freeze(UINT slot, const std::vector<GDX12RenderPrimitive
     frame.SelectionChanged = !frame.Camera || frame.SceneRevision != _sceneRevision ||
         frame.GrassReceiverRevision != _grassReceiverRevision ||
         frame.Resolution != (std::max)(1u, _resources.ShadowQuality.LocalResolution);
+    frame.SelectionChanged |= frame.AllReceivers != allReceivers;
+    frame.AllReceivers = allReceivers;
     frame.SceneRevision = _sceneRevision;
     frame.GrassReceiverRevision = _grassReceiverRevision;
     PrepareAtlas(frame, (std::min)(slices, UINT(D3D12_REQ_TEXTURE2D_ARRAY_AXIS_DIMENSION)));
@@ -611,7 +617,7 @@ void SceneLocalShadows::Complete(UINT slot)
         dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
         dsv.Texture2DArray.FirstArraySlice = view.Slice;
         dsv.Texture2DArray.ArraySize = 1;
-        descriptor->InitAsDSV(frame.Atlas.GetResource()->D3DResource.Get(), &dsv, _resources.DSVHeap.get(), _resources.DSVHeap->GetAvailableIndex());
+        descriptor->InitAsDSV(frame.Atlas.GetResource()->D3DResource.Get(), &dsv, _dsvHeap.get(), _dsvHeap->GetAvailableIndex());
     }
 }
 
@@ -656,7 +662,7 @@ void SceneLocalShadows::PrepareAtlas(Slot& frame, UINT requestedSlices)
         dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
         dsv.Texture2DArray.FirstArraySlice = slice;
         dsv.Texture2DArray.ArraySize = 1;
-        auto* heap = _resources.DSVHeap.get();
+        auto* heap = _dsvHeap.get();
         view->InitAsDSV(texture.ExternalResource.Get(), &dsv, heap, view->HeapIndex == UINT_MAX ? heap->GetAvailableIndex() : view->HeapIndex);
     }
     frame.Resolution = resolution;

@@ -98,6 +98,7 @@ public:
     GDX12Descriptor ReflectionRadianceSRV;
     uint64_t ReflectionWorldRevision = 0;
     uint64_t ReflectionStaticRevision = 0;
+    uint64_t ReflectionStaticGeometryRevision = 0;
     uint64_t ReflectionDynamicRevision = 0;
     uint64_t ReflectionEnvironmentRevision = 0;
     BoundingBox ReflectionSceneBounds = { XMFLOAT3(0, 0, 0), XMFLOAT3(10000, 10000, 10000) };
