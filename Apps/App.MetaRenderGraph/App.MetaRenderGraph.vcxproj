@@ -143,6 +143,7 @@
     <ClInclude Include="src\Techniques\SceneCloudPicture.h" />
     <ClInclude Include="src\Techniques\CloudPictureTexture.h" />
     <ClCompile Include="..\App\src\Rendering\UI\BistroUIPosters.cpp" />
+    <ClInclude Include="..\App\src\Rendering\UI\BistroPaintingSurfaces.h" />
     <ClInclude Include="src\MetaApplication.h" />
     <ClInclude Include="src\Techniques\NativeWork.h" />
     <ClInclude Include="src\Techniques\SceneEnvironment.h" />

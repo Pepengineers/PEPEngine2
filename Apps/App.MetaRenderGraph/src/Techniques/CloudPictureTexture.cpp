@@ -226,6 +226,9 @@ void CloudPictureTexture::Prepare(UINT frameSlot, double totalTime) {
     p.CurrentSlot = frameSlot; p.Work.Commands.clear(); p.ImportOperation = Invalid;
     p.Parameters.TotalTime = float(totalTime);
     slot.Metadata = {p.Generation, ++p.Sequence, p.Width, p.Height, Format};
+    if (p.Sequence == 1 || p.Sequence == 61)
+        Log::Info("MetaRenderGraph", "CloudPicture frame publication sequence=", p.Sequence,
+            " renderTime=", totalTime, " remote=", p.Remote);
     if (!p.Remote) return;
     p.Producer->Begin(frameSlot);
     Graph graph; graph.Device = 1; graph.FrameBoundary = false; graph.TerminalQueue = Queue::Copy;

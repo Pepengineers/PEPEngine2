@@ -29,7 +29,7 @@ public:
     void Submitted(UINT slot) { _exports.at(slot) = _pendingExports; }
     bool AllowsFrameGeneration() const;
     void UpdateSettings();
-    void PrepareMaterials();
+    void PrepareMaterials(double animationSeconds, GDX12Texture* cloudImage);
     void ReleasePresentation() { for (auto& slot : _slots) slot.CompositeOwner.reset(); }
     void Resize(); // Caller drains the executor and the presentation queue first.
     void Reset();

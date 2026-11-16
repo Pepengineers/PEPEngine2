@@ -206,8 +206,8 @@ uint64_t MetaRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12Command
         _lighting->AppendAO(g, bindings);
     };
     const auto prelude = [&](Meta::Graph& graph, std::vector<ID3D12Resource*>& resources) {
-        _post->AppendPosters(graph, resources, !verify || recordingSerial);
         if (_cloudPicture) _cloudPicture->Append(graph, resources);
+        _post->AppendPosters(graph, resources, !verify || recordingSerial);
     };
     const auto reserve = [&] {
         uint64_t lists = 0;
