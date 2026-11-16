@@ -37,15 +37,16 @@ private:
         GDX12MaterialConstants Material;
         XMFLOAT4X4 World{};
         uint64_t DeformationRevision = 0;
+        bool Dynamic = false;
     };
-    struct Caster { BoundingBox Bounds; GDX12IndirectDrawArgs Command; bool CastsShadow, Masked; UINT InputIndex; };
+    struct Caster { BoundingBox Bounds; GDX12IndirectDrawArgs Command; bool CastsShadow, Masked; UINT InputIndex; bool Dynamic; };
     struct Node { BoundingBox Bounds; UINT First = 0, Count = 0, Left = 0, Right = 0, Parent = UINT_MAX; };
     struct FaceCommands { std::vector<GDX12IndirectDrawArgs> Opaque, Masked; };
     struct LightCache
     {
         GDX12LocalLightConstants Light;
-        std::array<FaceCommands, 6> Faces;
-        UINT FirstSlice = UINT_MAX, Needed = 0, ListsValid = 0, MapsValid = 0;
+        std::array<FaceCommands, 6> StaticFaces, DynamicFaces;
+        UINT FirstSlice = UINT_MAX, Needed = 0, StaticListsValid = 0, DynamicListsValid = 0, MapsValid = 0;
         bool HasLight = false;
         bool SelectionDirty = true;
     };
@@ -86,12 +87,12 @@ private:
     };
     UINT BuildNode(UINT first, UINT count, UINT parent = UINT_MAX);
     void Refit(UINT caster);
-    void Invalidate(const Caster&);
+    void Invalidate(const Caster&, bool listsChanged);
     void InvalidateGrass(const GDX12RenderPrimitive&);
     void UpdateGrass(const std::vector<GDX12RenderPrimitive>&);
     void UpdateCasters(UINT slot);
     void Gather(UINT node, const GDX12LocalLightConstants&, const std::array<GDX12LocalShadowFrustum, 6>&,
-        UINT faceMask, LightCache&) const;
+        UINT faceMask, std::array<FaceCommands, 6>&) const;
     UINT NeededFaces(UINT node, const GDX12LocalLightConstants&, const std::array<GDX12LocalShadowFrustum, 6>&,
         UINT faceMask, const Slot&) const;
     void RebuildCasters(UINT slot);
@@ -103,6 +104,7 @@ private:
     std::vector<Caster> _casters;
     std::vector<BoundingBox> _changedCasterBounds;
     std::vector<Node> _nodes;
+    UINT _staticRoot = UINT_MAX, _dynamicRoot = UINT_MAX;
     std::vector<Input> _inputs;
     std::vector<GDX12RenderPrimitive> _grass;
     std::unordered_map<UINT, std::vector<UINT>> _instances, _transforms, _materials;

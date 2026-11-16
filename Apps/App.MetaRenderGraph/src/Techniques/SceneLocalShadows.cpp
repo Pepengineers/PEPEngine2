@@ -167,8 +167,12 @@ SceneLocalShadows::Input SceneLocalShadows::ReadInput(UINT slot, UINT commandInd
         throw std::out_of_range("Local shadow instance references missing scene data");
     result.Material = frame.MaterialCache->GetCPUData()[result.Instance.MaterialIndex];
     result.World = frame.TransformCache->GetCPUData()[result.Instance.TransformIndex].WorldMatrix;
+    result.Dynamic = result.Instance.ReflectionDynamic != 0 || result.Instance.SkinOutputVertex != UINT_MAX;
     if (const auto* primitive = _resources.GetMeshPrimitive(result.Command.InstanceID))
+    {
         result.DeformationRevision = primitive->DeformationRevision;
+        result.Dynamic |= primitive->Dynamic;
+    }
     return result;
 }
 
@@ -187,7 +191,7 @@ void SceneLocalShadows::Refit(UINT caster)
     }
 }
 
-void SceneLocalShadows::Invalidate(const Caster& caster)
+void SceneLocalShadows::Invalidate(const Caster& caster, bool listsChanged)
 {
     if (!caster.CastsShadow) return;
     _changedCasterBounds.push_back(caster.Bounds);
@@ -197,7 +201,8 @@ void SceneLocalShadows::Invalidate(const Caster& caster)
         for (UINT face = 0; face < LocalShadowFaceCount(cache.Light); ++face)
             if (GDX12LocalShadowFrustum(cache.Light.ShadowViewProj[face]).Intersects(caster.Bounds))
             {
-                cache.ListsValid &= ~(1u << face);
+                if (listsChanged)
+                    (caster.Dynamic ? cache.DynamicListsValid : cache.StaticListsValid) &= ~(1u << face);
                 cache.MapsValid &= ~(1u << face);
             }
     }
@@ -273,8 +278,8 @@ void SceneLocalShadows::UpdateCasters(UINT slot)
         const auto included = [](const Input& input) {
             return input.Command.InstanceCount && !input.Material.ReflectionProbePreview;
         };
-        // Insertion/removal changes BVH topology; edits to an existing object only refit its ancestors.
-        if (included(current) != included(old))
+        // Membership or mobility changes rebuild the trees; ordinary bounds edits only refit ancestors.
+        if (included(current) != included(old) || current.Dynamic != old.Dynamic)
         {
             RebuildCasters(slot);
             return;
@@ -310,13 +315,19 @@ void SceneLocalShadows::UpdateCasters(UINT slot)
         const UINT position = _positions[index];
         if (position == UINT_MAX) continue;
         auto& caster = _casters[position];
-        Invalidate(caster);
-        caster.Bounds = BoundingBox(current.Instance.BoundingBoxCenter, current.Instance.BoundingBoxExtents);
+        const BoundingBox bounds(current.Instance.BoundingBoxCenter, current.Instance.BoundingBoxExtents);
+        const bool boundsChanged = std::memcmp(&caster.Bounds, &bounds, sizeof(bounds)) != 0;
+        const bool castsShadow = current.Instance.CastsShadows != 0 && current.Material.RenderLayer != 2;
+        const bool masked = current.Material.RenderLayer == 1;
+        const bool listsChanged = boundsChanged || caster.CastsShadow != castsShadow || caster.Masked != masked ||
+            std::memcmp(&caster.Command, &current.Command, sizeof(current.Command)) != 0;
+        Invalidate(caster, listsChanged);
+        caster.Bounds = bounds;
         caster.Command = current.Command;
-        caster.CastsShadow = current.Instance.CastsShadows != 0 && current.Material.RenderLayer != 2;
-        caster.Masked = current.Material.RenderLayer == 1;
-        Invalidate(caster);
-        Refit(position);
+        caster.CastsShadow = castsShadow;
+        caster.Masked = masked;
+        Invalidate(caster, listsChanged);
+        if (boundsChanged) Refit(position);
         ++_sceneRevision;
     }
 }
@@ -342,12 +353,16 @@ void SceneLocalShadows::RebuildCasters(UINT slot)
         if (material.ReflectionProbePreview) continue;
         // Blended bounds receive shadows, but never enter opaque/masked caster lists.
         _casters.push_back({BoundingBox(instance.BoundingBoxCenter, instance.BoundingBoxExtents), command,
-            instance.CastsShadows != 0 && material.RenderLayer != 2, material.RenderLayer == 1, i});
+            instance.CastsShadows != 0 && material.RenderLayer != 2, material.RenderLayer == 1, i, input.Dynamic});
     }
     _leaves.resize(_casters.size());
-    if (!_casters.empty()) BuildNode(0, UINT(_casters.size()));
+    const auto split = std::partition(_casters.begin(), _casters.end(), [](const Caster& caster) { return !caster.Dynamic; });
+    const UINT staticCount = UINT(split - _casters.begin());
+    _staticRoot = staticCount ? BuildNode(0, staticCount) : UINT_MAX;
+    _dynamicRoot = staticCount < _casters.size() ? BuildNode(staticCount, UINT(_casters.size()) - staticCount) : UINT_MAX;
     for (UINT i = 0; i < _casters.size(); ++i) _positions[_casters[i].InputIndex] = i;
-    for (auto& frame : _slots) for (auto& cache : frame.Cache) cache.ListsValid = cache.MapsValid = 0;
+    for (auto& frame : _slots) for (auto& cache : frame.Cache)
+        cache.StaticListsValid = cache.DynamicListsValid = cache.MapsValid = 0;
     _treeReady = true;
     ++_sceneRevision;
     _geometryRevision = _resources.GeometryRevision;
@@ -356,7 +371,7 @@ void SceneLocalShadows::RebuildCasters(UINT slot)
 }
 
 void SceneLocalShadows::Gather(UINT index, const GDX12LocalLightConstants& light,
-    const std::array<GDX12LocalShadowFrustum, 6>& faces, UINT faceMask, LightCache& output) const
+    const std::array<GDX12LocalShadowFrustum, 6>& faces, UINT faceMask, std::array<FaceCommands, 6>& output) const
 {
     const auto& node = _nodes[index];
     if (!LocalShadowRangeIntersects(light, node.Bounds)) return;
@@ -375,7 +390,7 @@ void SceneLocalShadows::Gather(UINT index, const GDX12LocalLightConstants& light
         if (!caster.CastsShadow || !LocalShadowRangeIntersects(light, caster.Bounds)) continue;
         for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
             if ((faceMask & (1u << face)) && faces[face].Intersects(caster.Bounds))
-                (caster.Masked ? output.Faces[face].Masked : output.Faces[face].Opaque).push_back(caster.Command);
+                (caster.Masked ? output[face].Masked : output[face].Opaque).push_back(caster.Command);
     }
 }
 
@@ -408,7 +423,8 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
 {
     const auto& light = Frame->Lights[index];
     auto& output = Frame->Cache[index];
-    if (!Frame->SelectionChanged && !output.SelectionDirty && (output.Needed & ~output.ListsValid) == 0) return;
+    if (!Frame->SelectionChanged && !output.SelectionDirty &&
+        (output.Needed & ~(output.StaticListsValid & output.DynamicListsValid)) == 0) return;
     output.SelectionDirty = false;
     output.Needed = 0;
     if (!(light.ShadowFlags & 1u) || (light.Type != 1 && light.Type != 2) ||
@@ -420,7 +436,9 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
         GDX12LocalShadowFrustum(light.ShadowViewProj[2]), GDX12LocalShadowFrustum(light.ShadowViewProj[3]),
         GDX12LocalShadowFrustum(light.ShadowViewProj[4]), GDX12LocalShadowFrustum(light.ShadowViewProj[5])};
     const UINT allFaces = (1u << LocalShadowFaceCount(light)) - 1;
-    if (!Owner->_nodes.empty()) output.Needed = Owner->NeededFaces(0, light, faces, allFaces, *Frame);
+    for (const UINT root : {Owner->_staticRoot, Owner->_dynamicRoot})
+        if (root != UINT_MAX && output.Needed != allFaces)
+            output.Needed |= Owner->NeededFaces(root, light, faces, allFaces & ~output.Needed, *Frame);
     const float margin = light.Range / Frame->Resolution * 0.3f + 0.01f;
     for (const auto& grass : Owner->_grass)
     {
@@ -432,15 +450,19 @@ void SceneLocalShadows::CullJob::Execute(size_t index)
         for (UINT face = 0; face < LocalShadowFaceCount(light); ++face)
             if (faces[face].Intersects(bounds)) output.Needed |= 1u << face;
     }
-    const UINT missing = output.Needed & ~output.ListsValid;
-    for (UINT face = 0; face < 6; ++face)
-        if (missing & (1u << face))
-        {
-            output.Faces[face].Opaque.clear();
-            output.Faces[face].Masked.clear();
-        }
-    if (missing && !Owner->_nodes.empty()) Owner->Gather(0, light, faces, missing, output);
-    output.ListsValid |= missing;
+    const auto gather = [&](UINT root, UINT& valid, auto& commands) {
+        const UINT missing = output.Needed & ~valid;
+        for (UINT face = 0; face < 6; ++face)
+            if (missing & (1u << face))
+            {
+                commands[face].Opaque.clear();
+                commands[face].Masked.clear();
+            }
+        if (missing && root != UINT_MAX) Owner->Gather(root, light, faces, missing, commands);
+        valid |= missing;
+    };
+    gather(Owner->_staticRoot, output.StaticListsValid, output.StaticFaces);
+    gather(Owner->_dynamicRoot, output.DynamicListsValid, output.DynamicFaces);
 }
 
 void SceneLocalShadows::PackJob::Execute(size_t)
@@ -476,13 +498,18 @@ void SceneLocalShadows::PackJob::Execute(size_t)
         for (UINT face = 0; face < faces; ++face)
         {
             if (!(update & (1u << face))) continue;
-            const auto& commands = cached.Faces[face];
-            if (Frame->Packed.size() + commands.Opaque.size() + commands.Masked.size() > UINT_MAX / sizeof(GDX12IndirectDrawArgs))
+            const auto& statics = cached.StaticFaces[face];
+            const auto& dynamics = cached.DynamicFaces[face];
+            const size_t opaqueCount = statics.Opaque.size() + dynamics.Opaque.size();
+            const size_t maskedCount = statics.Masked.size() + dynamics.Masked.size();
+            if (Frame->Packed.size() + opaqueCount + maskedCount > UINT_MAX / sizeof(GDX12IndirectDrawArgs))
                 throw std::length_error("Local shadow indirect buffer exceeds the buffer size limit");
             Frame->Views.push_back({lightIndex, face, cached.FirstSlice + face, UINT(Frame->Packed.size()),
-                UINT(commands.Opaque.size()), UINT(commands.Masked.size())});
-            Frame->Packed.insert(Frame->Packed.end(), commands.Opaque.begin(), commands.Opaque.end());
-            Frame->Packed.insert(Frame->Packed.end(), commands.Masked.begin(), commands.Masked.end());
+                UINT(opaqueCount), UINT(maskedCount)});
+            for (const auto* commands : {&statics, &dynamics})
+                Frame->Packed.insert(Frame->Packed.end(), commands->Opaque.begin(), commands->Opaque.end());
+            for (const auto* commands : {&statics, &dynamics})
+                Frame->Packed.insert(Frame->Packed.end(), commands->Masked.begin(), commands->Masked.end());
         }
     }
 }
@@ -518,7 +545,7 @@ void SceneLocalShadows::Freeze(UINT slot, const std::vector<GDX12RenderPrimitive
         if (ShouldRenderLocalShadow(source, cached.HasLight ? &cached.Light : nullptr) ||
             (source.ShadowFlags & 1u) != (cached.Light.ShadowFlags & 1u))
         {
-            cached.ListsValid = cached.MapsValid = 0;
+            cached.StaticListsValid = cached.DynamicListsValid = cached.MapsValid = 0;
             cached.SelectionDirty = true;
         }
         cached.Light = source;
