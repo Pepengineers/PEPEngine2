@@ -2,6 +2,7 @@
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.RendererDX12/GDX12MotionBlurSettings.h"
+#include "Engine.RendererDX12/GDX12FrameGeneration.h"
 
 namespace Meta
 {
@@ -100,6 +101,7 @@ void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& binding
     simulation->BeginFrame(&_resources, _common, true);
     _pass.SetInputs({rasterDepth, accum, reveal});
     _pass.SetMotionOutputEnabled(GetMotionBlurSettings().Enabled ||
+        GetFrameGenerationProvider() != GDX12FrameGenerationProvider::Off ||
         (_common.Upscaler && (_common.Upscaler->GetFlags() & RENDER_PASS_FLAG_USE_JITTER)));
     _pass.Initialize();
     _pass.BeginFrame();

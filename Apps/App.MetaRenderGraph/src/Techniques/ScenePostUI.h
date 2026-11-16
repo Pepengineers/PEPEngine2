@@ -25,8 +25,12 @@ public:
         return {&_dof, &_blur, &_reconstruction, &_output};
     }
     bool NeedsResize() const;
-    void BeginPlan() { _work.Commands.clear(); }
-    void Submitted(UINT slot) { _exports.at(slot) = _pendingExports; _reconstruction.Submitted(); }
+    void BeginPlan() { _work.Commands.clear(); _pendingExports = {}; _pendingPublished = _publishedInputs; }
+    void Submitted(UINT slot) {
+        _exports.at(slot) = _pendingExports;
+        _publishedInputs = _pendingPublished;
+        _reconstruction.Submitted();
+    }
     bool AllowsFrameGeneration() const;
     void UpdateSettings();
     void PrepareMaterials(double animationSeconds, GDX12Texture* cloudImage);
@@ -42,6 +46,7 @@ public:
     void AppendPosters(Graph&, std::vector<ID3D12Resource*>&, bool record = true);
     bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd); }
 private:
+    Id AppendFrameGeneration(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* depth, Id dependency);
     Id AppendReconstruction(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr,
         GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion,
         GDX12Texture* target, std::vector<Id> dependencies = {});
@@ -75,6 +80,7 @@ private:
     bool _collisionInitialized = false, _collisionActive = false;
 #endif
     std::array<GDX12ResourceHandle, 2> _pendingExports;
+    std::vector<GDX12ResourceHandle> _publishedInputs, _pendingPublished;
     bool _ordinary = false, _initialized = false, _resize = false, _outputInitialized = false;
 };
 }

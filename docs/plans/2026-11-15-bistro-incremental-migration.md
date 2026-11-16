@@ -116,7 +116,17 @@ App/Meta wrapper, с последовательной ping-pong color/depth hist
 через существующую DIRECT-границу Meta Executor. Native passthrough и SDK providers
 сохранены; ordinary Meta выбирает Native TAA, quality 0. Состояние проверки и
 ограничения — в [отчёте](../reports/2026-11-17-meta-bistro-native-taa.md).
-Следующий шаг — пользовательская оценка картинки/FPS/CPU/GPU; FG не начат.
+Пользователь проверил картинку и сообщил, что стало лучше; затем запросил FG.
+
+### Генерация кадров
+
+Ordinary Meta подключён к общим FSR FG и XeFG через существующий prepare/tag
+и SDK swapchains. Убрана внешняя Streamline-обёртка vendor FG swapchain,
+обходившая интерполяцию при Present. Оба SDK подтвердили генерацию кадров
+на RTX 3060 Laptop GPU, Native TAA, 1280×800; возврат в Off проверен.
+`Render.FrameGeneration.Provider=0` остаётся настройкой по умолчанию.
+DLSS FG не запускался. Ограничения UI и точные проверки —
+в [отчёте FG](../reports/2026-11-17-meta-bistro-frame-generation.md).
 
 ### World-space canvas и облака-картина
 
