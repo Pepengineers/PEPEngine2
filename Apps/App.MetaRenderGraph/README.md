@@ -97,6 +97,7 @@ Meta.CloudPicture.Enabled = true
 Meta.CloudPicture.Width = 1024
 Meta.CloudPicture.Height = 512
 Meta.CloudPicture.Adapter = -1
+Meta.CloudPicture.SpeedScale = 4
 ```
 
 `Adapter=-1` means the current primary. A nonnegative value is the DXGI
@@ -468,3 +469,16 @@ falls back to an analytical AABB. Runtime after that source fix and the one-wave
 visual smoke remain NOT RUN because the user stopped Computer Use with Escape.
 See [implementation report](../../docs/reports/2026-11-17-meta-bistro-interior-physics.md)
 and [source inventory](../../docs/reports/2026-11-17-bistro-interior-inventory.md).
+
+### Glass readability and picture speed
+
+User accepted the flying glassware on 2026-11-17. Categorized glassware now uses
+separate transparent materials: `App.Physics.GlassOpacity=0.85` (reload to apply)
+and a subtle cyan emissive tint. Original glass sizes, bodies and velocities are
+unchanged; bottle/window materials are not replaced.
+
+`Meta.CloudPicture.SpeedScale=4` multiplies the original MGPU-Noise speed 0.006
+by four (effective 0.024), for local and remote production alike. It is runtime
+writable without texture recreation; 1 restores the original animation speed.
+Release build passed for this adjustment; its final appearance was not visually
+checked in this run. Existing external conversion/PDB warnings remain.

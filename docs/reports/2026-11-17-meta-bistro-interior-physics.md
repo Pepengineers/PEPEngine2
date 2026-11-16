@@ -109,3 +109,11 @@ Executable: Build/bin/x64/Release/App.MetaRenderGraph/App.MetaRenderGraph.exe.
 Build log: Build/meta-bistro-interior-physics-build.log.
 Stop for the remaining Low-wave smoke and user FPS/CPU/GPU acceptance; no FG,
 general offload or final App/Meta comparison is started. Local commit only, no push.
+
+## Subsequent user acceptance
+
+2026-11-17: the user confirmed the glassware flies and the physics works. This
+supersedes the pending flight acceptance above. Requested follow-up improves
+visibility with separate glass materials (opacity 0.85 plus subtle cyan emission)
+and speeds the cloud picture up by four through Meta.CloudPicture.SpeedScale.
+These visual adjustments passed Release build; appearance was not checked again.
