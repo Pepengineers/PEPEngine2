@@ -3,6 +3,7 @@
 #include "Engine.Core/Types/MeshTypes.h"
 #include "App.Base/ECS/World.h"
 #include "App.Base/Modules/PhysicsModule.h"
+#include "App.Base/Modules/RenderModule.h"
 #include "Common/ConsoleVariables.h"
 #include "BistroWaves.h"
 #include "BistroStaticCollision.h"
@@ -147,6 +148,9 @@ namespace BistroPhysics
     inline constexpr uint32_t MaxBodies = 16384;
     inline AutoConsoleVariable<bool> Categorized(L"App.Physics.Categorized", false,
         L"Opt in to authored interior category physics; ignores CountScale/ActiveTablewareFraction. Reload world to apply.");
+    inline AutoConsoleVariable<float> GlassOpacity(L"App.Physics.GlassOpacity", .85f,
+        L"Opacity of categorized Bistro glassware, 0..1; reload Bistro to apply.",
+        EConsoleVariableFlags::Default, [](float value) { return std::isfinite(value) && value >= 0 && value <= 1; });
     inline AutoConsoleVariable<int> Quality(L"App.Physics.Quality", 1,
         L"Interior categories: 0 Off, 1 glasses, 2 +plates, 3 +cutlery, 4 all movable props. Reload world to apply.",
         EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= 4; });
@@ -414,7 +418,40 @@ inline void CreateBistroPropEntities(World& world, const std::string& sceneName,
         entity.AddComponent<NameComponent>(name);
         entity.AddComponent<TransformComponent>(offset);
         if (!indices.empty())
-            entity.AddComponent<StaticMeshRenderComponent>(source.MeshHandler, source.Materials, indices).ReflectionDynamic = motion == PhysicsMotionType::Dynamic;
+        {
+            auto materials = source.Materials;
+            if (categorized && ClassifyBistroProp(name) == BistroPropCategory::Glass)
+            {
+                auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+                for (const auto index : indices)
+                {
+                    const auto slot = mesh.GetSubMesh(index).MaterialIndex;
+                    const auto* original = source.Materials.at(slot);
+                    const auto materialName = "BistroVisibleGlass_" + original->Name;
+                    auto* glass = render.GetMaterialByName(materialName);
+                    if (!glass) glass = render.CreateMaterial(materialName);
+                    glass->Diffuse = original->Diffuse;
+                    glass->Normal = original->Normal;
+                    glass->Specular = original->Specular;
+                    glass->RoughnessMap = original->RoughnessMap;
+                    glass->Emissive = original->Emissive;
+                    glass->Displacement = original->Displacement;
+                    glass->HasNormalMap = original->HasNormalMap;
+                    glass->HasSpecularMap = original->HasSpecularMap;
+                    glass->HasRoughnessMap = original->HasRoughnessMap;
+                    glass->HasEmissiveMap = original->HasEmissiveMap;
+                    glass->Metallic = original->Metallic;
+                    glass->Roughness = original->Roughness;
+                    glass->SpecularColor = original->SpecularColor;
+                    glass->EmissiveColor = original->EmissiveColor + Vector3(.04f, .12f, .16f);
+                    glass->Opacity = BistroPhysics::GlassOpacity.GetValue();
+                    glass->Type = MaterialType::Transparent;
+                    glass->DirtyFlag = true;
+                    materials.at(slot) = glass;
+                }
+            }
+            entity.AddComponent<StaticMeshRenderComponent>(source.MeshHandler, materials, indices).ReflectionDynamic = motion == PhysicsMotionType::Dynamic;
+        }
         auto& body = entity.AddComponent<RigidBodyComponent>();
         body.MotionType = motion;
         body.ContinuousCollision = motion == PhysicsMotionType::Dynamic;

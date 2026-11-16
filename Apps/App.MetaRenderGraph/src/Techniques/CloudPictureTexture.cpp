@@ -1,5 +1,6 @@
 #include "CloudPictureTexture.h"
 #include "NativeWork.h"
+#include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
@@ -12,6 +13,9 @@
 
 namespace Meta {
 namespace {
+AutoConsoleVariable<float> SpeedScale(L"Meta.CloudPicture.SpeedScale", 4.f,
+    L"Cloud picture animation speed multiplier; 1 is the original MGPU-Noise speed.",
+    EConsoleVariableFlags::Default, [](float value) { return std::isfinite(value) && value >= 0 && value <= 100; });
 constexpr DXGI_FORMAT Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 std::atomic<uint64_t> Generations{0};
 struct CloudGeneratorData {
@@ -225,6 +229,7 @@ void CloudPictureTexture::Prepare(UINT frameSlot, double totalTime) {
     if (p.Sequence == UINT64_MAX) throw std::overflow_error("Cloud picture sequence exhausted");
     p.CurrentSlot = frameSlot; p.Work.Commands.clear(); p.ImportOperation = Invalid;
     p.Parameters.TotalTime = float(totalTime);
+    p.Parameters.CloudSpeed = 0.006f * SpeedScale.GetValue();
     slot.Metadata = {p.Generation, ++p.Sequence, p.Width, p.Height, Format};
     if (p.Sequence == 1 || p.Sequence == 61)
         Log::Info("MetaRenderGraph", "CloudPicture frame publication sequence=", p.Sequence,
