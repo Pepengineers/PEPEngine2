@@ -135,7 +135,7 @@ uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Reso
         const auto& p=schedule.Packets[i];
         if(!p.Lists || p.Lists>(std::numeric_limits<UINT>::max)()-2)
             throw std::invalid_argument("invalid packet list count");
-        counts[QueueIndex(p.Target)]+=size_t(p.Lists)+2;
+        counts[QueueIndex(p.Target)]+=size_t(p.Lists)+!p.Before.empty()+!p.After.empty();
         for(auto dep:p.Dependencies) if(dep>=i) throw std::invalid_argument("non-topological packet dependency");
         const auto validateBarriers=[&](const std::vector<Barrier>& barriers) {
             for(const auto& b:barriers) {
@@ -153,14 +153,10 @@ uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Reso
     // Freeze list/allocator identity before any recording callback can run.
     std::vector<List*> lists;
     for(size_t q=0;q<counts.size();++q) for(size_t i=0;i<counts[q];++i) lists.push_back(&slot.Lists[q][i]);
-    for(auto* list:lists) {
-        ThrowIfFailed(list->Allocator->Reset());
-        ThrowIfFailed(list->Commands->Reset(list->Allocator.Get(),nullptr));
-    }
     std::vector<std::vector<ID3D12CommandList*>> packets;
     std::vector<RecordingGroup> groups;
     std::vector<std::vector<std::function<void()>>> ownerRecords(schedule.Packets.size());
-    std::vector<uint8_t> closed(lists.size(),0);
+    std::vector<uint8_t> closed(lists.size(),1);
     std::array<size_t,3> offsets{0,counts[0],counts[0]+counts[1]}, used{};
     for(Id i=0;i<schedule.Packets.size();++i) {
         const auto& p=schedule.Packets[i];
@@ -169,6 +165,7 @@ uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Reso
         packets.emplace_back();
         const auto q=QueueIndex(p.Target);
         for(uint32_t j=0;j<p.Lists+2;++j) {
+            if((j==0 && p.Before.empty()) || (j==p.Lists+1 && p.After.empty())) continue;
             const auto index=offsets[q]+used[q]++;
             auto* cmd=lists[index]->Commands.Get();
             if(cmd->GetType()!=ListType(p.Target)) throw std::logic_error("packet/list queue mismatch");
@@ -176,6 +173,10 @@ uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Reso
             RecordingGroup leaf{"list "+std::to_string(i)+":"+std::to_string(j),{},[&,i,j,cmd,index] {
                 const auto& packet=schedule.Packets[i];
                 try {
+                    // Begin retired this slot; each task exclusively owns its allocator/list pair.
+                    ThrowIfFailed(lists[index]->Allocator->Reset());
+                    ThrowIfFailed(cmd->Reset(lists[index]->Allocator.Get(),nullptr));
+                    closed[index]=0;
                     const auto barriers=[&](const std::vector<Barrier>& bs) {
                         for(auto b:bs) {
                             auto native=b.Uav?CD3DX12_RESOURCE_BARRIER::UAV(resources.at(b.Resource)):
@@ -198,7 +199,8 @@ uint64_t Executor::Execute(const Schedule& schedule,const std::vector<ID3D12Reso
             if(j==0 || j==p.Lists+1) group.Children.push_back(std::move(leaf));
             else buckets.Children.push_back(std::move(leaf));
         }
-        group.Children.push_back(std::move(buckets)); groups.push_back(std::move(group));
+        if(!buckets.Children.empty()) group.Children.push_back(std::move(buckets));
+        groups.push_back(std::move(group));
     }
     Recorder recorder(_jobs,std::move(groups),serial,cancellation);
     bool submitted=false;
