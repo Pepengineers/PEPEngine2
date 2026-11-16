@@ -461,7 +461,9 @@ namespace Engine::UI
             if (source.Id == UITextureId::Invalid)
             {
                 const auto cached = std::find_if(state.Atlases.begin(), state.Atlases.end(), [&](const auto& atlas) {
-                    return atlas->Source == source.Atlas;
+                    return atlas->Source == source.Atlas ||
+                        (atlas->Source->Width == source.Atlas->Width && atlas->Source->Height == source.Atlas->Height &&
+                         atlas->Source->Pixels == source.Atlas->Pixels);
                 });
                 if (cached != state.Atlases.end())
                 {

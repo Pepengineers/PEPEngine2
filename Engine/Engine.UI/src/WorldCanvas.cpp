@@ -131,18 +131,6 @@ namespace Engine::UI
 
     struct CanvasEffects::Impl
     {
-        struct Recording
-        {
-            explicit Recording(std::shared_ptr<Impl> renderer)
-                : Renderer(std::move(renderer)), Descriptors(&Renderer->Device,
-                    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 6, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) {}
-
-            std::shared_ptr<Impl> Renderer;
-            GDX12DescriptorHeap Descriptors;
-            GDX12ResourceHandle Scratch[2];
-            GDX12ResourceHandle Output;
-        };
-
         explicit Impl(GDX12Device& device) : Device(device)
         {
             ThrowIfFailed(device.GetDevice().As(&Identity));
@@ -178,6 +166,18 @@ namespace Engine::UI
         ComPtr<ID3D12PipelineState> Gradient[2], Blur, Finish[2];
     };
 
+    struct CanvasEffects::Prepared
+    {
+        explicit Prepared(std::shared_ptr<Impl> renderer)
+            : Renderer(std::move(renderer)), Descriptors(&Renderer->Device,
+                D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 6, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE) {}
+
+        std::shared_ptr<Impl> Renderer;
+        GDX12DescriptorHeap Descriptors;
+        GDX12ResourceHandle Scratch[2];
+        GDX12ResourceHandle Output;
+    };
+
     CanvasEffects::CanvasEffects(GDX12Device& device)
     {
         if (!device.IsInitialized()) throw std::invalid_argument("Canvas effects require a live device");
@@ -189,15 +189,19 @@ namespace Engine::UI
     std::shared_ptr<const void> CanvasEffects::Record(GDX12CommandList& commands, const CanvasFrame& frame,
         GDX12ResourceHandle output) const
     {
+        return RecordPrepared(commands, frame, Prepare(frame, std::move(output)));
+    }
+
+    std::shared_ptr<CanvasEffects::Prepared> CanvasEffects::Prepare(const CanvasFrame& frame,
+        GDX12ResourceHandle output) const
+    {
         auto& state = *_impl;
         ComPtr<IUnknown> currentDevice;
         ThrowIfFailed(state.Device.GetDevice().As(&currentDevice));
         if (state.Identity != currentDevice)
             throw std::logic_error("Canvas effects belong to a retired device incarnation");
-        if ((commands.GetType() != D3D12_COMMAND_LIST_TYPE_DIRECT && commands.GetType() != D3D12_COMMAND_LIST_TYPE_COMPUTE) ||
-            !output || frame.Id == CanvasId::Invalid || !std::isfinite(frame.TimeSeconds) || frame.TimeSeconds < 0)
-            throw std::invalid_argument("Canvas effects require a live frame, UAV and DIRECT or COMPUTE list");
-        state.CheckDevice(*commands.GetCommandList().Get());
+        if (!output || frame.Id == CanvasId::Invalid || !std::isfinite(frame.TimeSeconds) || frame.TimeSeconds < 0)
+            throw std::invalid_argument("Canvas effects require a live frame and UAV");
         state.CheckDevice(*output.Get());
         const auto profile = GetCanvasProfile(frame.LogicalSize, frame.Quality);
         const auto grid = profile.EffectsSize;
@@ -208,7 +212,7 @@ namespace Engine::UI
             (desc.Flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE))
             throw std::invalid_argument("Canvas effect output must match the profile's RGBA8 UAV/SRV grid");
 
-        auto recording = std::make_shared<Impl::Recording>(_impl);
+        auto recording = std::make_shared<Prepared>(_impl);
         recording->Output = std::move(output);
         auto& heap = recording->Descriptors;
         auto& device = state.Device;
@@ -228,7 +232,28 @@ namespace Engine::UI
         }
         device.GetDevice()->CreateUnorderedAccessView(recording->Output.Get(), nullptr, nullptr, heap.GetCPUHandle(2));
         device.GetDevice()->CreateShaderResourceView(nullptr, &srv, heap.GetCPUHandle(5));
+        return recording;
+    }
 
+    std::shared_ptr<const void> CanvasEffects::RecordPrepared(GDX12CommandList& commands, const CanvasFrame& frame,
+        const std::shared_ptr<Prepared>& recording) const
+    {
+        auto& state = *_impl;
+        ComPtr<IUnknown> currentDevice;
+        ThrowIfFailed(state.Device.GetDevice().As(&currentDevice));
+        if (state.Identity != currentDevice)
+            throw std::logic_error("Canvas effects belong to a retired device incarnation");
+        if (!recording || recording->Renderer != _impl ||
+            (commands.GetType() != D3D12_COMMAND_LIST_TYPE_DIRECT && commands.GetType() != D3D12_COMMAND_LIST_TYPE_COMPUTE) ||
+            frame.Id == CanvasId::Invalid || !std::isfinite(frame.TimeSeconds) || frame.TimeSeconds < 0)
+            throw std::invalid_argument("Canvas effects require matching prepared resources and a live DIRECT or COMPUTE frame");
+        state.CheckDevice(*commands.GetCommandList().Get());
+        const auto profile = GetCanvasProfile(frame.LogicalSize, frame.Quality);
+        const auto grid = profile.EffectsSize;
+        const auto desc = recording->Output->GetDesc();
+        if (desc.Width != grid.Width || desc.Height != grid.Height)
+            throw std::invalid_argument("Prepared canvas effects must match the frame grid");
+        auto& heap = recording->Descriptors;
         const auto id = static_cast<std::uint64_t>(frame.Id);
         const EffectConstants constants{grid.Width, grid.Height, static_cast<UINT>(id ^ (id >> 32)), profile.Stars,
             static_cast<float>(std::fmod(frame.TimeSeconds, 240.0)), profile.BlurRadius};
@@ -253,6 +278,11 @@ namespace Engine::UI
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)});
         commands.SetComputeSRV(0, heap.GetGPUHandle(4));
         dispatch(state.Finish[variant], 2);
+        commands.ResourceBarrier({
+            CD3DX12_RESOURCE_BARRIER::Transition(recording->Scratch[0].Get(),
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS),
+            CD3DX12_RESOURCE_BARRIER::Transition(recording->Scratch[1].Get(),
+                D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
         return recording;
     }
 }

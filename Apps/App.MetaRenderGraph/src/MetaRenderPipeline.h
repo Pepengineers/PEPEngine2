@@ -35,7 +35,7 @@ class MetaRenderPipeline final : public IRenderPipeline
     void PrepareMaterialBindings(RenderPipelineContext& c) override
     {
         _executor->Begin(c.Primary.CurrFrameConstantsIndex);
-        if (!_opaqueOnly) _post->PrepareMaterials();
+        _post->PrepareMaterials();
     }
     void DrainExecution() override {
         if (_executor) _executor->Drain();

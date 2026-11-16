@@ -112,6 +112,7 @@ struct BistroUIPosters::Impl
     {
         std::unique_ptr<GDX12Texture> Effect, Target;
         std::shared_ptr<const CanvasFrame> Input;
+        std::shared_ptr<CanvasEffects::Prepared> PreparedEffects;
         std::shared_ptr<const void> EffectOwner, RasterOwner;
     };
 
@@ -247,10 +248,12 @@ struct BistroUIPosters::Impl
         bool rebuild = false;
         if (visible)
         {
-            if (!Raster)
+            if (!Raster[0])
             {
-                auto raster = std::make_unique<OffscreenRenderer>(*primary.Device,
-                    static_cast<unsigned>(Count * primary.FrameConstants.size()));
+                std::array<std::unique_ptr<OffscreenRenderer>, Count> raster;
+                for (auto& renderer : raster)
+                    renderer = std::make_unique<OffscreenRenderer>(*primary.Device,
+                        static_cast<unsigned>(primary.FrameConstants.size()), true);
                 auto effects = std::make_unique<CanvasEffects>(*primary.Device);
                 Slots.resize(primary.FrameConstants.size());
                 Raster = std::move(raster);
@@ -274,10 +277,12 @@ struct BistroUIPosters::Impl
                     GDX12RenderHelpers::InitializeComputeTexture(*effect, primary, profile.EffectsSize.Width,
                         profile.EffectsSize.Height, OffscreenFormat, false);
                 }
+                auto prepared = effect ? Effects->Prepare(*input, effect->GetResource()->D3DResource) : frame.PreparedEffects;
                 frame.EffectOwner.reset();
                 frame.RasterOwner.reset();
                 if (target) frame.Target = std::move(target);
                 if (effect) frame.Effect = std::move(effect);
+                frame.PreparedEffects = std::move(prepared);
                 frame.Input = input;
                 surface->Current = &frame;
                 surface->TargetLink.Texture = frame.Target.get();
@@ -313,7 +318,7 @@ struct BistroUIPosters::Impl
     MeshHandle Mesh;
     BistroUICanvases::Posters Posters;
     Surface Atrium, Terrace;
-    std::unique_ptr<OffscreenRenderer> Raster;
+    std::array<std::unique_ptr<OffscreenRenderer>, Count> Raster;
     std::unique_ptr<CanvasEffects> Effects;
     std::vector<std::array<Frame, Count>> Slots;
 };
@@ -338,16 +343,16 @@ void BistroUIPosters::Impl::Pass::Execute(GDX12CommandList* commands)
     auto* effect = frame->Effect->GetResource();
     if (Effects)
     {
-        frame->EffectOwner = Owner.Effects->Record(*commands, *frame->Input, effect->D3DResource);
+        frame->EffectOwner = Owner.Effects->RecordPrepared(*commands, *frame->Input, frame->PreparedEffects);
         return;
     }
     if (!Poster.SeparateEffects)
     {
         commands->ResourceBarrier({effect->GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
-        frame->EffectOwner = Owner.Effects->Record(*commands, *frame->Input, effect->D3DResource);
+        frame->EffectOwner = Owner.Effects->RecordPrepared(*commands, *frame->Input, frame->PreparedEffects);
         commands->ResourceBarrier({effect->GetPixelShaderResourceBarrier()});
     }
-    frame->RasterOwner = Owner.Raster->TryRecord(*commands, frame->Target->GetResource()->D3DResource,
+    frame->RasterOwner = Owner.Raster[Poster.Index]->TryRecord(*commands, frame->Target->GetResource()->D3DResource,
         frame->Input->Draw, {{CanvasEffectTextureId, effect->D3DResource}});
     if (!frame->RasterOwner) throw std::logic_error("Retired Bistro poster frame has no local raster slot");
 }

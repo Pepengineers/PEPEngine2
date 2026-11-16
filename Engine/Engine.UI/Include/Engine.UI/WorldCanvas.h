@@ -62,6 +62,12 @@ namespace Engine::UI
         CanvasEffects(const CanvasEffects&) = delete;
         CanvasEffects& operator=(const CanvasEffects&) = delete;
 
+        struct Prepared;
+        // Prepare on the owner; reuse only after all GPU users of the previous recording complete.
+        std::shared_ptr<Prepared> Prepare(const CanvasFrame& frame, GDX12ResourceHandle output) const;
+        [[nodiscard]] std::shared_ptr<const void> RecordPrepared(GDX12CommandList& commands, const CanvasFrame& frame,
+            const std::shared_ptr<Prepared>& prepared) const;
+
         // Output is in UAV state before and after this DIRECT or COMPUTE recording.
         // Retain the returned owner until queue completion or discard of the unsubmitted list.
         [[nodiscard]] std::shared_ptr<const void> Record(GDX12CommandList& commands, const CanvasFrame& frame,
