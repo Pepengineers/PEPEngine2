@@ -39,40 +39,44 @@ namespace
         return CompareStringOrdinal(name.c_str(), -1, L"Amazon Lumberyard Bistro", -1, TRUE) == CSTR_EQUAL;
     }
 
-    MeshHandle MakePosterMesh(RenderModule& render)
-    {
-        using namespace Engine::Core;
-        auto& registry = AssetManager::GetInstance().Meshes();
-        const auto mesh = registry.Register(MeshAssetLocator{
-            std::filesystem::path(ASSETS_FOLDER) / "Models/BistroUIPoster.generated"});
-        auto* data = registry.GetMesh(mesh);
-        if (!data)
-        {
-            const Vector3 positions[] = {{-0.5f, 0.5f, 0}, {-0.5f, -0.5f, 0}, {0.5f, -0.5f, 0}, {0.5f, 0.5f, 0}};
-            const Vector2 uv[] = {{0, 0}, {0, 1}, {1, 1}, {1, 0}};
-            SubMesh quad;
-            for (const bool back : {false, true})
-                for (std::size_t i = 0; i < std::size(positions); ++i)
-                {
-                    Vertex vertex;
-                    vertex.Position = vertex.PreviousPosition = positions[i];
-                    vertex.Normal = {0, 0, back ? -1.0f : 1.0f};
-                    vertex.Tangent = {back ? -1.0f : 1.0f, 0, 0};
-                    vertex.TexCoord = {back ? 1 - uv[i].x : uv[i].x, uv[i].y};
-                    quad.Vertices.push_back(vertex);
-                }
-            quad.Indices = {0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6};
-            quad.Bounds = BoundingBox({0, 0, 0}, {0.5f, 0.5f, 0.002f});
-            const auto bounds = quad.Bounds;
-            std::vector<SubMesh> parts;
-            parts.push_back(std::move(quad));
-            data = registry.Cache(mesh, std::make_unique<Mesh>(std::move(parts), bounds,
-                std::vector<MeshMaterial>{MeshMaterial{}}));
-        }
-        render.SubmitMesh(data, mesh);
-        return mesh;
-    }
+}
 
+Engine::Core::MeshHandle BistroUIPosters::CreateSurfaceMesh(RenderModule& render)
+{
+    using namespace Engine::Core;
+    auto& registry = AssetManager::GetInstance().Meshes();
+    const auto mesh = registry.Register(MeshAssetLocator{
+        std::filesystem::path(ASSETS_FOLDER) / "Models/BistroUIPoster.generated"});
+    auto* data = registry.GetMesh(mesh);
+    if (!data)
+    {
+        const Vector3 positions[] = {{-0.5f, 0.5f, 0}, {-0.5f, -0.5f, 0}, {0.5f, -0.5f, 0}, {0.5f, 0.5f, 0}};
+        const Vector2 uv[] = {{0, 0}, {0, 1}, {1, 1}, {1, 0}};
+        SubMesh quad;
+        for (const bool back : {false, true})
+            for (std::size_t i = 0; i < std::size(positions); ++i)
+            {
+                Vertex vertex;
+                vertex.Position = vertex.PreviousPosition = positions[i];
+                vertex.Normal = {0, 0, back ? -1.0f : 1.0f};
+                vertex.Tangent = {back ? -1.0f : 1.0f, 0, 0};
+                vertex.TexCoord = {back ? 1 - uv[i].x : uv[i].x, uv[i].y};
+                quad.Vertices.push_back(vertex);
+            }
+        quad.Indices = {0, 1, 2, 0, 2, 3, 4, 6, 5, 4, 7, 6};
+        quad.Bounds = BoundingBox({0, 0, 0}, {0.5f, 0.5f, 0.002f});
+        const auto bounds = quad.Bounds;
+        std::vector<SubMesh> parts;
+        parts.push_back(std::move(quad));
+        data = registry.Cache(mesh, std::make_unique<Mesh>(std::move(parts), bounds,
+            std::vector<MeshMaterial>{MeshMaterial{}}));
+    }
+    render.SubmitMesh(data, mesh);
+    return mesh;
+}
+
+namespace
+{
     std::unique_ptr<GDX12Texture> MakeMaterialTarget(GDX12DeviceResources& primary, CanvasSize size)
     {
         auto target = std::make_unique<GDX12Texture>();
@@ -197,7 +201,7 @@ struct BistroUIPosters::Impl
         if (found == Worlds.end()) return;
         auto& entities = found->second;
         if (entities[0] != InvalidEntity && entities[1] != InvalidEntity) return;
-        if (!Mesh.IsValid()) Mesh = MakePosterMesh(Render);
+        if (!Mesh.IsValid()) Mesh = CreateSurfaceMesh(Render);
         Render.ReserveTransformCapacity(Count);
         Render.ReserveInstanceCapacity(Count);
         auto& ecs = world.GetECS();

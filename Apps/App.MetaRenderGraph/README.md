@@ -10,7 +10,7 @@ No reflection-probe or frame-generation passes execute.
 The world is paused; grass/wind, particles, characters and water advance through explicit time paths.
 The camera remains free.
 
-This adds Bistro world-space UI to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
+This adds the Bistro cloud picture to the [incremental migration](../../docs/plans/2026-11-15-bistro-incremental-migration.md).
 The user checks the ordinary launch, measures CPU/GPU load and FPS, and chooses the
 next stage. Final architecture/performance comparison waits until migration ends.
 
@@ -87,6 +87,39 @@ of window/SR grids. Frame-slot preparation publishes material bindings before
 uploads; effects/raster precede actual GBuffer material reads. GPU targets,
 effect scratch and descriptors persist per canvas slot until its consumers finish.
 See the [world UI report](../../docs/reports/2026-11-16-meta-bistro-world-ui.md).
+
+An additional 100×50 cm picture above the entrance at (-194.86,230,-33.58) cm,
+yaw -63 degrees, shows the original MGPU-Noise 2D cloud shader. It is independent
+of global atmosphere/IBL, both UI canvases and window/SR resolution. Existing
+scene depth, DoF, MB and reconstruction apply; its animation also runs while
+world physics is paused. Source parameters and noise octaves are unchanged.
+
+```ini
+Meta.CloudPicture.Enabled = true
+Meta.CloudPicture.Width = 1024
+Meta.CloudPicture.Height = 512
+Meta.CloudPicture.Adapter = -1
+```
+
+`Adapter=-1` means the current primary. A nonnegative value is the DXGI
+EnumAdapters1 index; a matching primary LUID uses the same local path. Invalid
+indices/formats/grids are rejected, with runtime changes retaining the previous
+valid picture. Requested/effective adapter name/index/LUID, grid and transfer
+footprint are logged. Disable hides only the picture and skips production,
+transfer and material sampling. Runtime dimensions may differ from its world size.
+The producer writes scene-linear RGBA8 UNORM (typed UAV and UNORM SRV): donor RGB
+is decoded from sRGB once before storage, without an sRGB UAV or another SRV decode.
+The opaque baked-lighting material avoids relighting the picture.
+
+Primary production samples its local persistent texture directly. A different GPU
+uses per-slot producer textures, a shared row-major footprint buffer and a local
+primary texture. StrictPublication uses the same tick snapshot; primary GPU waits
+on the issued secondary publication before importing, without a CPU wait for new
+cloud work. At 1024×512 each publication transfers 2,097,152 bytes (row pitch 4096),
+with three slots at startup. Old readers retire before slot reuse; grid/adapter
+replacement drains the old generation. No CPU image readback, offload heuristic
+or speedup claim. `Meta.Clouds.Enabled` remains false. See the
+[cloud-picture report](../../docs/reports/2026-11-16-meta-bistro-cloud-picture.md).
 
 The original stone basin is at (-1297,65.3,-425) cm, yaw 135 degrees, beside the
 existing SparkRain emitter. Startup requests one basin and 100000 SPH particles,

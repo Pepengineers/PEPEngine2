@@ -155,6 +155,7 @@
     <None Include="Shaders\ParticleSort.hlsl" />
     <None Include="Shaders\AmbientOcclusion.hlsl" />
     <None Include="Shaders\CanvasEffects.hlsl" />
+    <None Include="Shaders\CloudPictureNoise.hlsl" />
     <None Include="Shaders\ToneMap.hlsl" />
     <None Include="Shaders\ReflectionCapture.hlsl" />
     <None Include="Shaders\ReflectionProbes.hlsli" />
