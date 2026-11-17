@@ -3,25 +3,25 @@
 #include "SceneEnvironment.h"
 #include "SceneGeometry.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ReflectionProbePass.h"
-namespace Meta
+namespace BistroRender
 {
 class SceneReflections
 {
   public:
-    SceneReflections(GDX12DeviceResources &, RenderPipelineCommonData &);
+    SceneReflections(GDX12DeviceResources&, RenderPipelineCommonData&);
     ~SceneReflections();
     void Freeze()
     {
         _settings = GetReflectionSettings();
         _historyBase = _common.HistoryRevision;
     }
-    void Append(Graph &, std::vector<ID3D12Resource *> &, SceneGeometry &, SceneEnvironment &, UINT slot,
+    void Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&, UINT slot,
                 GDX12Texture* localShadows = nullptr, GDX12Texture* staticLocalShadows = nullptr);
-    bool Record(Id, ID3D12GraphicsCommandList *) const;
+    bool Record(Id, ID3D12GraphicsCommandList*) const;
     void Submitted(uint64_t fence);
     void Reset();
     std::pair<size_t, size_t> Readiness() const;
-    GDX12Texture *Published()
+    GDX12Texture* Published()
     {
         return &_passes->_published;
     }
@@ -40,8 +40,8 @@ class SceneReflections
         uint64_t Fence = 0;
         bool Ready = false;
     };
-    GDX12DeviceResources &_resources;
-    RenderPipelineCommonData &_common;
+    GDX12DeviceResources& _resources;
+    RenderPipelineCommonData& _common;
     std::unique_ptr<GDX12ReflectionProbePass> _passes;
     NativeWork _work;
     std::vector<UINT> _publishing;
@@ -52,4 +52,4 @@ class SceneReflections
     GDX12ReflectionSettings _settings;
     uint64_t _historyBase = 0;
 };
-} // namespace Meta
+} // namespace BistroRender

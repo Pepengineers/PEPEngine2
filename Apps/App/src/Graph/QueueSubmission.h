@@ -1,5 +1,5 @@
 #pragma once
-#include "MetaGraph.h"
+#include "RenderGraph.h"
 #include "Engine.RendererDX12/GDX12Device.h"
 #include <array>
 #include <memory>
@@ -7,7 +7,7 @@
 #include <atomic>
 class GDX12CommandQueue;
 class GDX12CommandList;
-namespace Meta {
+namespace BistroRender {
 struct CompletionToken {
     Id Device = Invalid;
     Queue Target = Queue::Direct;
@@ -39,7 +39,7 @@ private:
     };
     void Check() const;
     const Timeline& Resolve(CompletionToken) const;
-    CompletionToken Submit(Id, Meta::Queue, const std::vector<ID3D12CommandList*>&,
+    CompletionToken Submit(Id, BistroRender::Queue, const std::vector<ID3D12CommandList*>&,
         const std::vector<CompletionToken>&, GDX12CommandList* external = nullptr);
     std::array<GDX12Device*,2> _devices{};
     std::array<ComPtr<ID3D12Device>,2> _identities;

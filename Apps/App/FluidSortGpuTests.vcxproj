@@ -4,7 +4,7 @@
   <ItemGroup>
     <ClCompile Remove="@(ClCompile)" />
     <ClCompile Include="tests\FluidSortGpuTests.cpp" />
-    <ClCompile Include="src\Rendering\Water\GDX12Fluid.cpp" />
+    <ClCompile Include="src\Techniques\Water\GDX12Fluid.cpp" />
   </ItemGroup>
   <ItemDefinitionGroup><Link><SubSystem>Console</SubSystem><AdditionalDependencies>d3d12.lib;dxgi.lib;d3dcompiler.lib;%(AdditionalDependencies)</AdditionalDependencies></Link></ItemDefinitionGroup>
 </Project>

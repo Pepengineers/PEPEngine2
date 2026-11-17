@@ -11,7 +11,7 @@
 #include "BistroScene.h"
 #include "BistroBounds.h"
 #include "BistroCharacters.h"
-#include "BistroWater.h"
+#include "Techniques/Water/BistroWater.h"
 #include "BistroReflections.h"
 #include "Components/BistroInteractionSource.h"
 #include "Components/FluidRenderComponent.h"
@@ -33,18 +33,18 @@ constexpr float CameraSpeedBoost = 4.0f;
 const Vector3 InitialCameraPosition{400, 230, -370};
 const Vector3 InitialCameraRotation{8, 40, 0};
 
-AutoConsoleVariable<int> MetaSkySource(L"Meta.Sky.Source", 2,
-                                       L"Ordinary Bistro sky: 0 Off, 1 original SkyBox, 2 SkyAtmosphere",
-                                       EConsoleVariableFlags::Default,
-                                       [](int value) { return value >= 0 && value <= 2; });
-AutoConsoleVariable<bool> MetaSunCycle(
-    L"Meta.Sky.SunCycle.Enabled", true,
+AutoConsoleVariable<int> BistroSkySource(L"App.Sky.Source", 2,
+                                         L"Ordinary Bistro sky: 0 Off, 1 original SkyBox, 2 SkyAtmosphere",
+                                         EConsoleVariableFlags::Default,
+                                         [](int value) { return value >= 0 && value <= 2; });
+AutoConsoleVariable<bool> BistroSunCycle(
+    L"App.Sky.SunCycle.Enabled", true,
     L"Move the original Sun through a repeating daylight arc; disable for manual rotation");
-AutoConsoleVariable<float> MetaSunCyclePeriod(L"Meta.Sky.SunCycle.PeriodSeconds", 120.f,
-                                              L"Seconds from sunrise through zenith to sunset; repeats without night",
-                                              EConsoleVariableFlags::Default,
-                                              [](float value) { return std::isfinite(value) && value > 0; });
-void Require(bool value, const char *message)
+AutoConsoleVariable<float> BistroSunCyclePeriod(L"App.Sky.SunCycle.PeriodSeconds", 120.f,
+                                                L"Seconds from sunrise through zenith to sunset; repeats without night",
+                                                EConsoleVariableFlags::Default,
+                                                [](float value) { return std::isfinite(value) && value > 0; });
+void Require(bool value, const char* message)
 {
 	if (!value)
 	{
@@ -63,8 +63,8 @@ void PrepareStartup()
 	ConsoleModule console;
 	console.Initialize();
 	Require(console.FindConsoleVariable(L"Render.PrimaryAdapter").GetInt() == 0, "Unexpected primary adapter");
-	Log::Info("Bistro", "SCENE EXECUTOR; primary=0; Meta.Async.Queues=",
-	          console.FindConsoleVariable(L"Meta.Async.Queues").GetBool());
+	Log::Info("Bistro", "SCENE EXECUTOR; primary=0; App.Async.Queues=",
+	          console.FindConsoleVariable(L"App.Async.Queues").GetBool());
 }
 
 class BistroApplication final : public App
@@ -76,7 +76,7 @@ class BistroApplication final : public App
 		Locator.RegisterModule(
 		    std::make_shared<RenderModule>(GetWindow(), &Timer, std::make_unique<BistroRenderPipeline>()));
 		const auto scene = std::filesystem::path(ASSETS_FOLDER) / "Scenes/Amazon Lumberyard Bistro";
-		for (const auto *part : {"Exterior/exterior.obj", "Interior/interior.obj"})
+		for (const auto* part : {"Exterior/exterior.obj", "Interior/interior.obj"})
 		{
 			Require(std::filesystem::is_regular_file(scene / part), "Missing Bistro scene part");
 		}
@@ -91,7 +91,7 @@ class BistroApplication final : public App
 		}
 		auto scenes = Locator.GetModule<SceneManagerModule>();
 
-		auto &world = *scenes->GetWorld();
+		auto& world = *scenes->GetWorld();
 		world.SetPaused(false);
 		InitializeSky(world);
 		_bistroReflections.Update(world, 0);
@@ -100,7 +100,7 @@ class BistroApplication final : public App
 		CreateBistroParticles(world);
 		_bistroWater.Update(world, 0);
 		world.GetECS().ForEach<FluidRenderComponent>(
-		    [](Entity, const FluidRenderComponent &fluid)
+		    [](Entity, const FluidRenderComponent& fluid)
 		    {
 			    Log::Info("Bistro", "Bistro water target=", BistroWater::ParticleCount.GetValue(),
 			              "; seed particles=", fluid.GetParticles() ? fluid.GetParticles()->size() : 0);
@@ -116,9 +116,9 @@ class BistroApplication final : public App
 		          "Loaded Bistro interior/exterior; fixed-step interior physics enabled; sun and local shadows");
 		return true;
 	}
-	void Update(const GameTimer &timer) override
+	void Update(const GameTimer& timer) override
 	{
-		auto &world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
+		auto& world = *Locator.GetModule<SceneManagerModule>()->GetWorld();
 		_bistroReflections.Update(world, timer.DeltaTime());
 		const float sceneDelta = world.IsPaused() ? 0.f : timer.DeltaTime() * world.GetTimeScale();
 		UpdateSky(world, sceneDelta);
@@ -141,7 +141,7 @@ class BistroApplication final : public App
 	std::unique_ptr<BistroBounds::Scene> _bistroBounds;
 	POINT _lastMousePos{};
 	float _cameraSpeed = 500.f;
-	void InitializeSky(World &world)
+	void InitializeSky(World& world)
 	{
 		_skyEntity = world.GetSkyEntity();
 		Require(world.GetECS().Has<SkyBoxComponent>(_skyEntity) && world.GetECS().Has<LightComponent>(_skyEntity),
@@ -149,32 +149,32 @@ class BistroApplication final : public App
 		if (!world.GetECS().Has<SkyAtmosphereComponent>(_skyEntity))
 		{
 			world.GetECS().Add<SkyAtmosphereComponent>(_skyEntity);
-			auto &atmosphere = world.GetECS().Get<SkyAtmosphereComponent>(_skyEntity);
+			auto& atmosphere = world.GetECS().Get<SkyAtmosphereComponent>(_skyEntity);
 			auto settings = atmosphere.GetSettings();
 			settings.SunAngularRadiusRadians *= SunDiskScale;
 			atmosphere.SetSettings(settings);
 		}
 	}
 
-	void InitializeCamera(World &world)
+	void InitializeCamera(World& world)
 	{
-		auto &camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
+		auto& camera = world.GetECS().Get<TransformComponent>(world.ActiveCamera);
 		camera.Location = InitialCameraPosition;
 		camera.Rotation = InitialCameraRotation;
 		camera.DirtyFlag = true;
 		world.GetECS().Get<CameraComponent>(world.ActiveCamera).InvalidateHistory();
 	}
 
-	void UpdateSky(World &world, float deltaTime = 0)
+	void UpdateSky(World& world, float deltaTime = 0)
 	{
-		const auto source = static_cast<SkySource>(MetaSkySource.GetValue());
+		const auto source = static_cast<SkySource>(BistroSkySource.GetValue());
 		if (source == SkySource::SkyAtmosphere)
 		{
-			auto &transform = world.GetECS().Get<TransformComponent>(_skyEntity);
+			auto& transform = world.GetECS().Get<TransformComponent>(_skyEntity);
 			bool wrapped = false;
-			if (MetaSunCycle.GetValue())
+			if (BistroSunCycle.GetValue())
 			{
-				const double nextPhase = _sunCyclePhase + double(deltaTime) / MetaSunCyclePeriod.GetValue();
+				const double nextPhase = _sunCyclePhase + double(deltaTime) / BistroSunCyclePeriod.GetValue();
 				wrapped = nextPhase >= 1.0;
 				_sunCyclePhase = std::fmod(nextPhase, 1.0);
 				transform.Rotation.x = float(_sunCyclePhase * 180.0);
@@ -183,7 +183,7 @@ class BistroApplication final : public App
 			const auto rotation = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(transform.Rotation.y),
 			                                                     XMConvertToRadians(transform.Rotation.x),
 			                                                     XMConvertToRadians(transform.Rotation.z));
-			auto &atmosphere = world.GetECS().Get<SkyAtmosphereComponent>(_skyEntity);
+			auto& atmosphere = world.GetECS().Get<SkyAtmosphereComponent>(_skyEntity);
 			auto settings = atmosphere.GetSettings();
 			const Vector3 directionToSun = rotation.Forward();
 			if (settings.DirectionToSun != directionToSun)
@@ -205,8 +205,8 @@ class BistroApplication final : public App
 		}
 		world.SetSkySource(source, _skyEntity);
 		Log::Info("Bistro", "Ordinary sky source=", static_cast<unsigned>(source),
-		          "; atmosphere quality=", GetSkyAtmosphereQuality(), "; daylight cycle=", MetaSunCycle.GetValue(),
-		          "; daylight seconds=", MetaSunCyclePeriod.GetValue());
+		          "; atmosphere quality=", GetSkyAtmosphereQuality(), "; daylight cycle=", BistroSunCycle.GetValue(),
+		          "; daylight seconds=", BistroSunCyclePeriod.GetValue());
 	}
 
 	void OnMouseDown(WPARAM, int x, int y) override
@@ -225,8 +225,8 @@ class BistroApplication final : public App
 	{
 		if (!Engine::UI::WantsMouseInput() && (buttons & MK_RBUTTON))
 		{
-			auto *world = Locator.GetModule<SceneManagerModule>()->GetWorld();
-			auto &camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
+			auto* world = Locator.GetModule<SceneManagerModule>()->GetWorld();
+			auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
 			camera.Rotation.x = std::clamp(camera.Rotation.x + (y - _lastMousePos.y) * MouseDegreesPerPixel,
 			                               -CameraPitchLimit, CameraPitchLimit);
 			camera.Rotation.y =
@@ -247,14 +247,14 @@ class BistroApplication final : public App
 		               MinCameraSpeed, MaxCameraSpeed);
 	}
 
-	void OnKeyboardInput(const GameTimer &timer) override
+	void OnKeyboardInput(const GameTimer& timer) override
 	{
 		if (bInactive || Engine::UI::WantsKeyboardInput())
 		{
 			return;
 		}
-		auto *world = Locator.GetModule<SceneManagerModule>()->GetWorld();
-		auto &camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
+		auto* world = Locator.GetModule<SceneManagerModule>()->GetWorld();
+		auto& camera = world->GetECS().Get<TransformComponent>(world->ActiveCamera);
 		const auto rotation = Matrix::CreateFromYawPitchRoll(XMConvertToRadians(camera.Rotation.y),
 		                                                     XMConvertToRadians(camera.Rotation.x), 0.0f);
 		Vector3 movement = Vector3::Zero;
@@ -303,11 +303,11 @@ int RunBistroApplication()
 		Require(app.Initialize(), "Application initialization failed");
 		return app.Run();
 	}
-	catch (const DxException &error)
+	catch (const DxException& error)
 	{
 		Log::Error("App", error.ToString());
 	}
-	catch (const std::exception &error)
+	catch (const std::exception& error)
 	{
 		Log::Error("App", error.what());
 	}

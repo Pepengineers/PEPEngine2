@@ -3,7 +3,7 @@
 #define FFX_CACAO_ENABLE_D3D12
 #include "../../../../External/External.Libraries/cacao/inc/ffx_cacao_impl.h"
 #include <cstring>
-namespace Meta
+namespace BistroRender
 {
 namespace
 {
@@ -12,7 +12,7 @@ void CheckCACAO(FFX_CACAO_Status result)
     if (result != FFX_CACAO_STATUS_OK)
         throw std::runtime_error("CACAO preparation/recording failed");
 }
-void Expand(Matrix &p, float x, float y)
+void Expand(Matrix& p, float x, float y)
 {
     p._11 *= x;
     p._22 *= y;
@@ -20,7 +20,7 @@ void Expand(Matrix &p, float x, float y)
     p._32 = y * p._32 - (1 - y);
 }
 } // namespace
-SceneAO::SceneAO(GDX12DeviceResources &r, RenderPipelineCommonData &c, GDX12Texture *depth, GDX12Texture *normals)
+SceneAO::SceneAO(GDX12DeviceResources& r, RenderPipelineCommonData& c, GDX12Texture* depth, GDX12Texture* normals)
     : _resources(r), _common(c)
 {
     _pass.Setup(&r, &c);
@@ -31,14 +31,14 @@ SceneAO::~SceneAO()
 {
     _pass.ClearDenendencies();
 }
-void SceneAO::Freeze(GDX12Texture *depth, GDX12Texture *normals, UINT &temporalIndex)
+void SceneAO::Freeze(GDX12Texture* depth, GDX12Texture* normals, UINT& temporalIndex)
 {
-    auto &p = _pass;
+    auto& p = _pass;
     p.SetInputs({depth, normals});
     if (p._output.GetWidth() != depth->GetWidth() || p._output.GetHeight() != depth->GetHeight())
         p.Resize();
     _settings = GetAmbientOcclusionSettings();
-    const auto &s = _settings;
+    const auto& s = _settings;
     if (!p._hasPrevious || std::memcmp(&p._previous, &s, sizeof(s)))
         _common.ResetUpscalerHistory = true;
     p._previous = s;
@@ -46,7 +46,7 @@ void SceneAO::Freeze(GDX12Texture *depth, GDX12Texture *normals, UINT &temporalI
     _half = s.Resolution == GDX12AOResolution::Half;
     _width = _half ? (depth->GetWidth() + 1) / 2 : depth->GetWidth();
     _height = _half ? (depth->GetHeight() + 1) / 2 : depth->GetHeight();
-    auto &grid = p._grids[_half];
+    auto& grid = p._grids[_half];
     if (!s.IsActive() || (_width == 1 && _height == 1))
         return;
     if (!grid.Normals.IsInitialized())
@@ -91,15 +91,15 @@ void SceneAO::Freeze(GDX12Texture *depth, GDX12Texture *normals, UINT &temporalI
     // owns imported textures and the entire dispatch is one exclusive packet.
     if (s.Implementation == 3)
     {
-        auto &inputDepth = _half ? grid.Depth : *depth;
+        auto& inputDepth = _half ? grid.Depth : *depth;
         const bool pad = (std::max)(_width, _height) < 16;
-        auto &cacaoDepth = pad ? grid.CacaoDepth : inputDepth;
-        auto &cacaoNormals = pad ? grid.CacaoNormals : grid.Normals;
-        auto &output = pad ? grid.CacaoVisibility : grid.Scratch[0];
+        auto& cacaoDepth = pad ? grid.CacaoDepth : inputDepth;
+        auto& cacaoNormals = pad ? grid.CacaoNormals : grid.Normals;
+        auto& output = pad ? grid.CacaoVisibility : grid.Scratch[0];
         if (!grid.Cacao)
         {
             grid.CacaoMemory.resize(FFX_CACAO_D3D12GetContextSize());
-            grid.Cacao = reinterpret_cast<FFX_CACAO_D3D12Context *>(grid.CacaoMemory.data());
+            grid.Cacao = reinterpret_cast<FFX_CACAO_D3D12Context*>(grid.CacaoMemory.data());
             CheckCACAO(FFX_CACAO_D3D12InitContext(grid.Cacao, _resources.Device->GetDevice().Get(),
                                                   UINT(_resources.FrameConstants.size())));
         }
@@ -138,27 +138,27 @@ void SceneAO::Freeze(GDX12Texture *depth, GDX12Texture *normals, UINT &temporalI
         CheckCACAO(FFX_CACAO_D3D12UpdateSettings(grid.Cacao, &settings));
     }
 }
-void SceneAO::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings)
+void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
     _work.Commands.clear();
-    auto &p = _pass;
-    auto &grid = p._grids[_half];
-    auto *fullDepth = p._inputs[0]->GetTexture();
-    auto *fullNormals = p._inputs[1]->GetTexture();
-    const auto id = [&](GDX12Resource *resource) {
+    auto& p = _pass;
+    auto& grid = p._grids[_half];
+    auto* fullDepth = p._inputs[0]->GetTexture();
+    auto* fullNormals = p._inputs[1]->GetTexture();
+    const auto id = [&](GDX12Resource* resource) {
         return NativeWork::ResourceFor(graph, bindings, resource->D3DResource.Get(), "AO resource");
     };
-    const auto access = [&](GDX12Texture *texture, Mode mode, State state) {
+    const auto access = [&](GDX12Texture* texture, Mode mode, State state) {
         return Access{id(texture->GetResource()), mode, state};
     };
     const UINT slot = _resources.CurrFrameConstantsIndex;
-    auto *root = p._root.get();
-    auto *heap = _resources.SRV_UAV_Heap->GetHeap().Get();
+    auto* root = p._root.get();
+    auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
     const auto camera = _resources.FrameConstants[slot]->CameraCB->GetElementAddress(_common.ActiveCameraCBufferIndex),
                constants = p._constants->GetElementAddress(slot), xe = p._xeConstants->GetElementAddress(slot);
-    const auto dispatch = [&](const std::string &name, UINT pipeline, UINT width, UINT height,
-                              std::vector<Access> accesses, std::array<GDX12Texture *, 7> srvs,
-                              std::array<GDX12Descriptor *, 10> uavs, UINT axis = 0, UINT final = 0,
+    const auto dispatch = [&](const std::string& name, UINT pipeline, UINT width, UINT height,
+                              std::vector<Access> accesses, std::array<GDX12Texture*, 7> srvs,
+                              std::array<GDX12Descriptor*, 10> uavs, UINT axis = 0, UINT final = 0,
                               float scale = 1.f) {
         accesses.push_back({id(&_resources.FrameConstants[slot]->CameraCB->GetResource()), Mode::Read,
                             D3D12_RESOURCE_STATE_GENERIC_READ});
@@ -172,8 +172,8 @@ void SceneAO::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings)
         for (UINT i = 0; i < 10; ++i)
             if (uavs[i])
                 writes[i] = uavs[i]->GPUHandle;
-        auto *pso = p._pipelines[pipeline].Get();
-        return _work.Add(graph, name, std::move(accesses), [=](auto *cmd) {
+        auto* pso = p._pipelines[pipeline].Get();
+        return _work.Add(graph, name, std::move(accesses), [=](auto* cmd) {
             cmd->SetDescriptorHeaps(1, &heap);
             cmd->SetComputeRootSignature(root->GetRootSignature().Get());
             cmd->SetPipelineState(pso);
@@ -202,7 +202,7 @@ void SceneAO::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings)
                  {access(&p._output, Mode::Write, UnorderedAccess)}, {}, {p._output.GetUAV()});
         return;
     }
-    auto *depth = _half ? &grid.Depth : fullDepth;
+    auto* depth = _half ? &grid.Depth : fullDepth;
     const State read = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
     std::vector<Access> prepare{access(fullDepth, Mode::Read, read), access(fullNormals, Mode::Read, read),
                                 access(&grid.Normals, Mode::Write, UnorderedAccess)};
@@ -212,14 +212,14 @@ void SceneAO::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings)
              {fullDepth, fullNormals},
              {nullptr, grid.Normals.GetUAV(), nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
               _half ? depth->GetUAV() : nullptr});
-    GDX12Texture *visibility = nullptr;
-    GDX12Texture *terms = nullptr;
+    GDX12Texture* visibility = nullptr;
+    GDX12Texture* terms = nullptr;
     float scale = 1.f;
     if (_settings.Implementation == 3)
     {
         const bool pad = (std::max)(_width, _height) < 16;
-        auto *inputDepth = pad ? &grid.CacaoDepth : depth;
-        auto *inputNormals = pad ? &grid.CacaoNormals : &grid.Normals;
+        auto* inputDepth = pad ? &grid.CacaoDepth : depth;
+        auto* inputNormals = pad ? &grid.CacaoNormals : &grid.Normals;
         visibility = pad ? &grid.CacaoVisibility : &grid.Scratch[0];
         if (pad)
             dispatch("CACAO pad small grid", p.PadCACAO, inputDepth->GetWidth(), inputDepth->GetHeight(),
@@ -237,12 +237,12 @@ void SceneAO::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings)
         proj.elements[3][2] *= .01f;
         for (UINT i = 0; i < 4; ++i)
             identity.elements[i][i] = 1;
-        auto *context = grid.Cacao;
-        auto *output = visibility->GetResource()->D3DResource.Get();
+        auto* context = grid.Cacao;
+        auto* output = visibility->GetResource()->D3DResource.Get();
         _work.Add(graph, "CACAO SDK dispatch (exclusive persistent context)",
                   {access(inputDepth, Mode::Read, read), access(inputNormals, Mode::Read, read),
                    access(visibility, Mode::Write, UnorderedAccess)},
-                  [context, proj, identity, output](auto *cmd) {
+                  [context, proj, identity, output](auto* cmd) {
                       CheckCACAO(FFX_CACAO_D3D12Draw(context, cmd, &proj, &identity));
                       const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
                           output, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
@@ -251,7 +251,7 @@ void SceneAO::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings)
     }
     else if (_settings.Implementation == 2)
     {
-        std::array<GDX12Descriptor *, 10> uavs{};
+        std::array<GDX12Descriptor*, 10> uavs{};
         for (UINT mip = 0; mip < 5; ++mip)
             uavs[2 + mip] = &grid.DepthUAVs[mip];
         dispatch("XeGTAO depth pyramid", p.XePrefilter, grid.XeDepth.GetWidth() / 2, grid.XeDepth.GetHeight() / 2,
@@ -302,7 +302,7 @@ void SceneAO::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings)
     }
     if (!terms)
         terms = &grid.XeTerms[0];
-    auto *resolved = _half ? &grid.Visibility : &p._output;
+    auto* resolved = _half ? &grid.Visibility : &p._output;
     std::vector<Access> resolve{access(depth, Mode::Read, read), access(&grid.Normals, Mode::Read, read),
                                 access(visibility, Mode::Read, read), access(resolved, Mode::Write, UnorderedAccess)};
     if (terms)
@@ -316,4 +316,4 @@ void SceneAO::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings)
                   access(fullNormals, Mode::Read, read), access(&p._output, Mode::Write, UnorderedAccess)},
                  {depth, &grid.Normals, resolved, nullptr, nullptr, fullDepth, fullNormals}, {p._output.GetUAV()});
 }
-} // namespace Meta
+} // namespace BistroRender

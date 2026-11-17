@@ -8,7 +8,7 @@
 #include "Engine.Core/AssetManager.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Common/ConsoleVariables.h"
-#include "BistroWaterLayout.h"
+#include "Techniques/Water/BistroWaterLayout.h"
 #include <array>
 #include <cmath>
 #include <random>
@@ -75,10 +75,10 @@ class Scene
 		}
 	}
 
-	void Update(World &world, float)
+	void Update(World& world, float)
 	{
 		RegisterBistroWaterComponents(world);
-		auto &ecs = world.GetECS();
+		auto& ecs = world.GetECS();
 		const size_t requested = static_cast<size_t>(Count.GetValue());
 		while (_basins.size() > requested)
 		{
@@ -91,7 +91,7 @@ class Scene
 			return;
 		}
 
-		auto &render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+		auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
 		if (!_mesh.IsValid())
 		{
 			CreateResources(render);
@@ -113,48 +113,49 @@ class Scene
 			water.AddComponent<NameComponent>("BistroWater" + std::to_string(index));
 			water.AddComponent<TransformComponent>(position + SimulationOffset(), Vector3(0, YawDegrees, 0),
 			                                       SimulationScale());
-			static_cast<GDX12FluidComponent &>(water.AddComponent<FluidRenderComponent>()) = _source;
+			static_cast<GDX12FluidComponent&>(water.AddComponent<FluidRenderComponent>()) = _source;
 			_basins.push_back({water.GetId(), basin.GetId()});
 		}
 		IndirectCommandBuildSystem{}.Tick(world, 0);
 	}
 
   private:
+	static void AppendBox(Engine::Core::SubMesh& part, Vector3 center, Vector3 extent)
+	{
+		const std::array<Vector3, 8> corners = {
+		    {{-1, -1, -1}, {1, -1, -1}, {1, 1, -1}, {-1, 1, -1}, {-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1}}};
+		constexpr UINT faces[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 4, 7, 3},
+		                              {1, 2, 6, 5}, {0, 1, 5, 4}, {3, 7, 6, 2}};
+		const Vector3 normals[] = {{0, 0, -1}, {0, 0, 1}, {-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}};
+		const Vector2 uvs[] = {{0, 0}, {0, 1}, {1, 1}, {1, 0}};
+		for (UINT face = 0; face < 6; ++face)
+		{
+			const UINT first = static_cast<UINT>(part.Vertices.size());
+			for (UINT corner = 0; corner < 4; ++corner)
+			{
+				Engine::Core::Vertex vertex;
+				vertex.Position = center + corners[faces[face][corner]] * extent;
+				vertex.PreviousPosition = vertex.Position;
+				vertex.Normal = normals[face];
+				vertex.TexCoord = uvs[corner];
+				part.Vertices.push_back(vertex);
+			}
+			for (UINT offset : {0u, 1u, 2u, 0u, 2u, 3u})
+			{
+				part.Indices.push_back(first + offset);
+			}
+		}
+	}
 	static std::unique_ptr<Engine::Core::Mesh> CreateBasinMesh()
 	{
 		Engine::Core::SubMesh part;
-		const auto box = [&](Vector3 center, Vector3 extent)
-		{
-			const std::array<Vector3, 8> corners = {
-			    {{-1, -1, -1}, {1, -1, -1}, {1, 1, -1}, {-1, 1, -1}, {-1, -1, 1}, {1, -1, 1}, {1, 1, 1}, {-1, 1, 1}}};
-			constexpr UINT faces[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 4, 7, 3},
-			                              {1, 2, 6, 5}, {0, 1, 5, 4}, {3, 7, 6, 2}};
-			const Vector3 normals[] = {{0, 0, -1}, {0, 0, 1}, {-1, 0, 0}, {1, 0, 0}, {0, -1, 0}, {0, 1, 0}};
-			const Vector2 uvs[] = {{0, 0}, {0, 1}, {1, 1}, {1, 0}};
-			for (UINT face = 0; face < 6; ++face)
-			{
-				const UINT first = static_cast<UINT>(part.Vertices.size());
-				for (UINT corner = 0; corner < 4; ++corner)
-				{
-					Engine::Core::Vertex vertex;
-					vertex.Position = center + corners[faces[face][corner]] * extent;
-					vertex.PreviousPosition = vertex.Position;
-					vertex.Normal = normals[face];
-					vertex.TexCoord = uvs[corner];
-					part.Vertices.push_back(vertex);
-				}
-				for (UINT offset : {0u, 1u, 2u, 0u, 2u, 3u})
-				{
-					part.Indices.push_back(first + offset);
-				}
-			}
-		};
-		box({0, -HalfExtent.y - 2, 0}, {HalfExtent.x + 8, 2, HalfExtent.z + 8});
-		box({-HalfExtent.x - 4, 0, 0}, {4, HalfExtent.y, HalfExtent.z + 8});
-		box({HalfExtent.x + 4, 0, 0}, {4, HalfExtent.y, HalfExtent.z + 8});
-		box({0, 0, -HalfExtent.z - 4}, {HalfExtent.x, HalfExtent.y, 4});
-		box({0, 0, HalfExtent.z + 4}, {HalfExtent.x, HalfExtent.y, 4});
-		part.Bounds = {{0, -2, 0}, {HalfExtent.x + 8, HalfExtent.y + 2, HalfExtent.z + 8}};
+		constexpr float HalfWall = 4, Wall = 2 * HalfWall, HalfFloor = 2;
+		AppendBox(part, {0, -HalfExtent.y - HalfFloor, 0}, {HalfExtent.x + Wall, HalfFloor, HalfExtent.z + Wall});
+		AppendBox(part, {-HalfExtent.x - HalfWall, 0, 0}, {HalfWall, HalfExtent.y, HalfExtent.z + Wall});
+		AppendBox(part, {HalfExtent.x + HalfWall, 0, 0}, {HalfWall, HalfExtent.y, HalfExtent.z + Wall});
+		AppendBox(part, {0, 0, -HalfExtent.z - HalfWall}, {HalfExtent.x, HalfExtent.y, HalfWall});
+		AppendBox(part, {0, 0, HalfExtent.z + HalfWall}, {HalfExtent.x, HalfExtent.y, HalfWall});
+		part.Bounds = {{0, -HalfFloor, 0}, {HalfExtent.x + Wall, HalfExtent.y + HalfFloor, HalfExtent.z + Wall}};
 		part.SourceNodeName = "BistroWaterBasin";
 		Engine::Core::MeshMaterial material;
 		material.Name = "BistroWaterStone";
@@ -165,16 +166,16 @@ class Scene
 		                                            std::vector<Engine::Core::MeshMaterial>{std::move(material)});
 	}
 
-	void CreateResources(RenderModule &render)
+	void CreateResources(RenderModule& render)
 	{
-		auto &meshes = Engine::Core::AssetManager::GetInstance().Meshes();
+		auto& meshes = Engine::Core::AssetManager::GetInstance().Meshes();
 		_mesh = meshes.Register(
 		    Engine::Core::MeshAssetLocator{std::filesystem::path(ASSETS_FOLDER) / "Models/BistroWaterBasin.generated"});
 		if (!_mesh.IsValid())
 		{
 			throw std::runtime_error("Cannot register Bistro water basin");
 		}
-		auto *mesh = meshes.GetMesh(_mesh);
+		auto* mesh = meshes.GetMesh(_mesh);
 		if (!mesh)
 		{
 			mesh = meshes.Cache(_mesh, CreateBasinMesh());
@@ -184,7 +185,7 @@ class Scene
 			throw std::runtime_error("Cannot create Bistro water basin mesh");
 		}
 		render.SubmitMesh(mesh, _mesh);
-		if (auto *material = render.GetMaterialByName("BistroWaterBasin_Material_0"))
+		if (auto* material = render.GetMaterialByName("BistroWaterBasin_Material_0"))
 		{
 			_materials = {material};
 		}
@@ -197,6 +198,30 @@ class Scene
 
   public:
 	static GDX12FluidComponent CreateFluidSource()
+	{
+		auto settings = MakeBasinSettings();
+		const UINT preset = PresetParticleCount.GetValue();
+		const UINT target = preset ? preset : static_cast<UINT>(ParticleCount.GetValue());
+		const auto initial = GridDimensions(target, SpawnSize(target, settings.ContainerHalfExtentCm));
+		auto size = SpawnSize(initial[0] * initial[1] * initial[2], settings.ContainerHalfExtentCm);
+		size.x = (std::min)(size.x, settings.ContainerHalfExtentCm.x);
+		const auto counts = GridDimensions(target, size);
+		const auto nx = counts[0] + (counts[0] & 1u), ny = counts[1], nz = counts[2];
+		if (preset && preset < ReferenceParticleCount)
+		{
+			// Preserve represented fluid mass and scale the kernel with average particle spacing.
+			settings.ParticleMassKg = float(ReferenceParticleCount) / static_cast<float>(nx * ny * nz);
+			settings.SmoothingRadiusCm *= std::cbrt(settings.ParticleMassKg);
+		}
+		GDX12FluidComponent source;
+		source.SetSettings(settings);
+		source.SetParticles(MakeMirroredParticles(settings, size, nx, ny, nz));
+		return source;
+	}
+
+  private:
+	static constexpr UINT ReferenceParticleCount = 100000;
+	static GDX12FluidSettings MakeBasinSettings()
 	{
 		GDX12FluidSettings settings;
 		// Keep solver numerical units; only the entity transform converts them to scene cm.
@@ -219,35 +244,29 @@ class Scene
 		settings.FilterRadiusPixels = FilterRadiusPixels.GetValue();
 		settings.AbsorptionPerCm = {0.02f, 0.006f, 0.0015f};
 		settings.ScatteringColor = {0.015f, 0.18f, 0.45f};
-		const auto spawnSize = [&](UINT count)
-		{
-			const float width = count <= 50000 ? 5 + 5 * std::log10(float(count) / 10000) / std::log10(5.0f)
-			                                   : 10 + 10 * std::log10(float(count) / 50000) / std::log10(2.0f);
-			return Vector3::Min(Vector3(std::clamp(width, 5.0f, 20.0f), 10, 20), settings.ContainerHalfExtentCm * 1.8f);
-		};
-		const UINT preset = PresetParticleCount.GetValue();
-		const UINT target = preset ? preset : static_cast<UINT>(ParticleCount.GetValue());
-		const auto grid = [target](Vector3 size)
-		{
-			const float scale = std::cbrt(float(target) / (size.x * size.y * size.z));
-			return std::array<UINT, 3>{(std::max)(1u, static_cast<UINT>(std::round(scale * size.x))),
-			                           (std::max)(1u, static_cast<UINT>(std::round(scale * size.y))),
-			                           (std::max)(1u, static_cast<UINT>(std::round(scale * size.z)))};
-		};
-		const auto initial = grid(spawnSize(target));
-		auto size = spawnSize(initial[0] * initial[1] * initial[2]);
-		size.x = (std::min)(size.x, settings.ContainerHalfExtentCm.x);
-		const auto counts = grid(size);
-		const auto nx = counts[0] + (counts[0] & 1u), ny = counts[1], nz = counts[2];
-		if (preset && preset < 100000)
-		{
-			// Preserve represented fluid mass and scale the kernel with average particle spacing.
-			settings.ParticleMassKg = 100000.0f / static_cast<float>(nx * ny * nz);
-			settings.SmoothingRadiusCm *= std::cbrt(settings.ParticleMassKg);
-		}
+		return settings;
+	}
+	static Vector3 SpawnSize(UINT count, const Vector3& halfExtent)
+	{
+		const float width = count <= 50000 ? 5 + 5 * std::log10(float(count) / 10000) / std::log10(5.0f)
+		                                   : 10 + 10 * std::log10(float(count) / 50000) / std::log10(2.0f);
+		return Vector3::Min(Vector3(std::clamp(width, 5.0f, 20.0f), 10, 20), halfExtent * 1.8f);
+	}
+	static std::array<UINT, 3> GridDimensions(UINT target, Vector3 size)
+	{
+		const float scale = std::cbrt(float(target) / (size.x * size.y * size.z));
+		return std::array<UINT, 3>{(std::max)(1u, static_cast<UINT>(std::round(scale * size.x))),
+		                           (std::max)(1u, static_cast<UINT>(std::round(scale * size.y))),
+		                           (std::max)(1u, static_cast<UINT>(std::round(scale * size.z)))};
+	}
+	static std::vector<GDX12FluidParticle> MakeMirroredParticles(const GDX12FluidSettings& settings, Vector3 size,
+	                                                             UINT nx, UINT ny, UINT nz)
+	{
 		constexpr float jitter = 0.1f;
 		const Vector3 center(0, settings.ContainerHalfExtentCm.y * 0.1f, 0);
-		std::mt19937 random(0xB15720u);
+		constexpr uint32_t BasinSeed = 0xB15720u;
+		std::mt19937 random(BasinSeed);
+		const float speed = WaveSpeed.GetValue();
 		std::uniform_real_distribution<float> offset(-jitter, jitter);
 		std::vector<GDX12FluidParticle> particles;
 		particles.reserve(nx * ny * nz);
@@ -257,24 +276,20 @@ class Scene
 			{
 				for (UINT z = 0; z < nz; ++z)
 				{
-					const Vector3 t(nx == 1 ? 0.5f : float(x) / (nx - 1), ny == 1 ? 0.5f : float(y) / (ny - 1),
+					const Vector3 t(float(x) / (nx - 1), ny == 1 ? 0.5f : float(y) / (ny - 1),
 					                nz == 1 ? 0.5f : float(z) / (nz - 1));
 					auto position =
 					    center + (t - Vector3(0.5f)) * size + Vector3(offset(random), offset(random), offset(random));
 					position.x = -std::abs(position.x);
-					particles.push_back({position, Vector3(-WaveSpeed.GetValue(), 0, 0)});
+					particles.push_back({position, Vector3(-speed, 0, 0)});
 					position.x = -position.x;
-					particles.push_back({position, Vector3(WaveSpeed.GetValue(), 0, 0)});
+					particles.push_back({position, Vector3(speed, 0, 0)});
 				}
 			}
 		}
-		GDX12FluidComponent source;
-		source.SetSettings(settings);
-		source.SetParticles(std::move(particles));
-		return source;
+		return particles;
 	}
 
-  private:
 	struct Basin
 	{
 		Entity Water;
@@ -282,7 +297,7 @@ class Scene
 	};
 	std::vector<Basin> _basins;
 	Engine::Core::MeshHandle _mesh;
-	std::vector<GDX12Material *> _materials;
+	std::vector<GDX12Material*> _materials;
 	GDX12FluidComponent _source;
 };
 } // namespace BistroWater

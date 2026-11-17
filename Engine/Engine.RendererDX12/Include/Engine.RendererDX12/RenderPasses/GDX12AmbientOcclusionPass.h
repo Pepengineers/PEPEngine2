@@ -4,7 +4,7 @@
 #include "Engine.RendererDX12/GDX12AmbientOcclusion.h"
 
 namespace XeGTAO { struct GTAOConstants; }
-namespace Meta { class SceneAO; }
+namespace BistroRender { class SceneAO; }
 struct FFX_CACAO_D3D12Context;
 
 class GDX12AmbientOcclusionPass final : public GDX12RenderPass
@@ -18,7 +18,7 @@ public:
     void ClearDenendencies() override;
 
 private:
-    friend class Meta::SceneAO;
+    friend class BistroRender::SceneAO;
     friend struct GDX12AOTestAccess;
 
     struct ShaderConstants

@@ -2,14 +2,14 @@
 #include "Engine.Core/Logging/Logger.h"
 #include "Common/ConsoleVariables.h"
 
-namespace Meta {
+namespace BistroRender {
 namespace {
-AutoConsoleVariable<bool> Enabled(L"Meta.CloudPicture.Enabled", true, L"Show the MGPU-Noise cloud picture in Bistro.");
-AutoConsoleVariable<int> Width(L"Meta.CloudPicture.Width", 1024, L"Cloud picture texture width, independent of window/SR.",
+AutoConsoleVariable<bool> Enabled(L"App.CloudPicture.Enabled", true, L"Show the MGPU-Noise cloud picture in Bistro.");
+AutoConsoleVariable<int> Width(L"App.CloudPicture.Width", 1024, L"Cloud picture texture width, independent of window/SR.",
     EConsoleVariableFlags::Default, [](int v) { return v > 0 && v <= D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION; });
-AutoConsoleVariable<int> Height(L"Meta.CloudPicture.Height", 512, L"Cloud picture texture height, independent of window/SR.",
+AutoConsoleVariable<int> Height(L"App.CloudPicture.Height", 512, L"Cloud picture texture height, independent of window/SR.",
     EConsoleVariableFlags::Default, [](int v) { return v > 0 && v <= D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION; });
-AutoConsoleVariable<int> Adapter(L"Meta.CloudPicture.Adapter", -1, L"-1 primary; otherwise explicit DXGI hardware adapter index.",
+AutoConsoleVariable<int> Adapter(L"App.CloudPicture.Adapter", -1, L"-1 primary; otherwise explicit DXGI hardware adapter index.",
     EConsoleVariableFlags::Default, [](int v) { return v >= -1; });
 struct Settings {
     bool Active;
@@ -46,7 +46,7 @@ bool SceneCloudPicture::UpdateSettings(const std::function<void()>& drain) {
     try {
         replacement = std::make_unique<CloudPictureTexture>(p.Resources, next.Width, next.Height, next.Adapter);
     } catch (const std::exception& error) {
-        Log::Error("MetaRenderGraph", "Cloud picture settings rejected; retaining last valid generation: ", error.what());
+        Log::Error("RenderGraph", "Cloud picture settings rejected; retaining last valid generation: ", error.what());
         return false;
     }
     drain();

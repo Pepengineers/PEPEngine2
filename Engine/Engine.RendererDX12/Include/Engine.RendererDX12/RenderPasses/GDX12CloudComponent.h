@@ -3,7 +3,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RootSignature.h"
 #include "Engine.RendererDX12/GDX12Texture.h"
-namespace Meta { class SceneEnvironment; }
+namespace BistroRender { class SceneEnvironment; }
 
 // Render-thread API. Zero octaves inherits quality; author fields are never rewritten.
 struct GDX12CloudParameters
@@ -51,7 +51,7 @@ public:
     void ClearDenendencies() override; // Caller retires submitted work first, as for other passes.
 
 private:
-    friend class Meta::SceneEnvironment;
+    friend class BistroRender::SceneEnvironment;
     void CreateResources();
     GDX12CloudParameters _parameters;
     std::unique_ptr<GDX12Texture> _texture;

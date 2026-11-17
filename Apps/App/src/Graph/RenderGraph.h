@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 #include <ostream>
-namespace Meta {
+namespace BistroRender {
 using Id = uint32_t;
 using State = uint32_t; // D3D12 legacy resource-state bits; CPU tests need no device.
 constexpr State UnorderedAccess = 0x8;

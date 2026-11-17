@@ -1,7 +1,7 @@
 #pragma once
-#include "Graph/MetaGraph.h"
+#include "Graph/RenderGraph.h"
 #include "Engine.RendererDX12/GDX12RenderGeometry.h"
-namespace Meta {
+namespace BistroRender {
 struct GeometryTarget {
     GDX12GeometryContext View;
     Id Depth=Invalid;

@@ -1,8 +1,8 @@
-#include "MetaGraph.h"
+#include "RenderGraph.h"
 #include <algorithm>
 #include <set>
 #include <stdexcept>
-namespace Meta {
+namespace BistroRender {
 namespace {
 constexpr State GenericRead = 0xac3;
 constexpr State CopyDest = 0x400;

@@ -11,11 +11,11 @@
 #include <limits>
 #include <stdexcept>
 
-namespace Meta
+namespace BistroRender
 {
 namespace
 {
-AutoConsoleVariable<float> SpeedScale(L"Meta.CloudPicture.SpeedScale", 4.f,
+AutoConsoleVariable<float> SpeedScale(L"App.CloudPicture.SpeedScale", 4.f,
                                       L"Cloud picture animation speed multiplier; 1 is the original MGPU-Noise speed.",
                                       EConsoleVariableFlags::Default,
                                       [](float value) { return std::isfinite(value) && value >= 0 && value <= 100; });
@@ -34,7 +34,7 @@ bool SameLuid(LUID a, LUID b)
 {
 	return a.HighPart == b.HighPart && a.LowPart == b.LowPart;
 }
-template <class T> ComPtr<T> Open(GDX12Device &owner, T *object, GDX12Device &other)
+template <class T> ComPtr<T> Open(GDX12Device& owner, T* object, GDX12Device& other)
 {
 	HANDLE handle = nullptr;
 	ThrowIfFailed(owner.GetDevice()->CreateSharedHandle(object, nullptr, GENERIC_ALL, nullptr, &handle));
@@ -44,7 +44,7 @@ template <class T> ComPtr<T> Open(GDX12Device &owner, T *object, GDX12Device &ot
 	ThrowIfFailed(hr);
 	return imported;
 }
-Id PacketFor(const Schedule &schedule, Id operation)
+Id PacketFor(const Schedule& schedule, Id operation)
 {
 	for (Id i = 0; i < schedule.Packets.size(); ++i)
 	{
@@ -55,7 +55,7 @@ Id PacketFor(const Schedule &schedule, Id operation)
 	}
 	throw std::logic_error("Cloud picture import missing from the primary plan");
 }
-void CheckFormat(GDX12Device &device, bool producer)
+void CheckFormat(GDX12Device& device, bool producer)
 {
 	D3D12_FEATURE_DATA_FORMAT_SUPPORT support{Format};
 	ThrowIfFailed(device.GetDevice()->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &support, sizeof(support)));
@@ -87,7 +87,7 @@ struct CloudPictureTexture::Impl
 		CompletionToken Ready;
 		std::array<CompletionToken, 3> Readers{};
 	};
-	GDX12DeviceResources &Primary;
+	GDX12DeviceResources& Primary;
 	GDX12Device Secondary;
 	std::shared_ptr<QueueSubmission> Submit;
 	std::unique_ptr<Executor> Producer;
@@ -103,7 +103,7 @@ struct CloudPictureTexture::Impl
 	Id ImportOperation = Invalid;
 	bool Remote = false;
 
-	Impl(GDX12DeviceResources &primary, UINT width, UINT height, int adapter)
+	Impl(GDX12DeviceResources& primary, UINT width, UINT height, int adapter)
 	    : Primary(primary), Slots(primary.FrameConstants.size()), Width(width), Height(height)
 	{
 		if (!primary.Device || Slots.empty() || !width || !height || width > D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION ||
@@ -168,7 +168,7 @@ struct CloudPictureTexture::Impl
 			ThrowIfFailed(selected.As(&hardware));
 			ThrowIfFailed(Secondary.Initialize(hardware));
 		}
-		auto &device = Remote ? Secondary : *primary.Device;
+		auto& device = Remote ? Secondary : *primary.Device;
 		CheckFormat(*primary.Device, !Remote);
 		CheckFormat(device, true);
 		Submit = std::make_shared<QueueSubmission>(*primary.Device, Remote ? &Secondary : nullptr);
@@ -223,7 +223,7 @@ struct CloudPictureTexture::Impl
 		}
 		for (UINT index = 0; index < Slots.size(); ++index)
 		{
-			auto &slot = Slots[index];
+			auto& slot = Slots[index];
 			slot.Display = std::make_unique<GDX12Texture>();
 			GDX12TextureDesc target;
 			target.Width = width;
@@ -271,15 +271,15 @@ struct CloudPictureTexture::Impl
 				Submit->ValidateResource(1, slot.SharedSecondary.Get());
 			}
 		}
-		Log::Info("MetaRenderGraph", "CloudPicture requested=", width, "x", height, " adapter=", adapter,
+		Log::Info("RenderGraph", "CloudPicture requested=", width, "x", height, " adapter=", adapter,
 		          "; effective=", width, "x", height, " adapter=", effective, " name=", device.GetDeviceFeatures().Name,
 		          " LUID=", desc.AdapterLuid.HighPart, ":", desc.AdapterLuid.LowPart, " generation=", Generation,
 		          " format=RGBA8_UNORM linear; strict=1 remote=", Remote, " rowPitch=", Footprint.Footprint.RowPitch,
 		          " transferBytes=", Remote ? TransferBytes : 0, " slots=", Slots.size());
 	}
-	void Dispatch(ID3D12GraphicsCommandList *cmd, const CloudGeneratorData &parameters, D3D12_GPU_DESCRIPTOR_HANDLE uav)
+	void Dispatch(ID3D12GraphicsCommandList* cmd, const CloudGeneratorData& parameters, D3D12_GPU_DESCRIPTOR_HANDLE uav)
 	{
-		auto *heap = Remote ? ProducerHeap->GetHeap().Get() : Primary.SRV_UAV_Heap->GetHeap().Get();
+		auto* heap = Remote ? ProducerHeap->GetHeap().Get() : Primary.SRV_UAV_Heap->GetHeap().Get();
 		cmd->SetDescriptorHeaps(1, &heap);
 		cmd->SetComputeRootSignature(Root->GetRootSignature().Get());
 		cmd->SetPipelineState(Pipeline.Get());
@@ -288,7 +288,7 @@ struct CloudPictureTexture::Impl
 		cmd->SetComputeRootDescriptorTable(Root->GetURootParamIndex(0), uav);
 		cmd->Dispatch((Width + 31) / 32, (Height + 31) / 32, 1);
 	}
-	void CheckPublication(const Slot &slot) const
+	void CheckPublication(const Slot& slot) const
 	{
 		if (slot.Metadata.Generation != Generation || !slot.Metadata.Sequence || slot.Metadata.Width != Width ||
 		    slot.Metadata.Height != Height || slot.Metadata.PixelFormat != Format || (Remote && !slot.Ready))
@@ -298,7 +298,7 @@ struct CloudPictureTexture::Impl
 	}
 	void Drain()
 	{
-		for (auto &slot : Slots)
+		for (auto& slot : Slots)
 		{
 			for (auto reader : slot.Readers)
 			{
@@ -315,7 +315,7 @@ struct CloudPictureTexture::Impl
 	}
 };
 
-CloudPictureTexture::CloudPictureTexture(GDX12DeviceResources &primary, UINT width, UINT height, int adapter)
+CloudPictureTexture::CloudPictureTexture(GDX12DeviceResources& primary, UINT width, UINT height, int adapter)
     : _impl(std::make_unique<Impl>(primary, width, height, adapter))
 {
 }
@@ -331,22 +331,22 @@ CloudPictureTexture::~CloudPictureTexture()
 		_impl.release();
 	}
 }
-const std::shared_ptr<QueueSubmission> &CloudPictureTexture::Submissions() const
+const std::shared_ptr<QueueSubmission>& CloudPictureTexture::Submissions() const
 {
 	return _impl->Submit;
 }
-GDX12Texture *CloudPictureTexture::Texture(UINT frameSlot) const
+GDX12Texture* CloudPictureTexture::Texture(UINT frameSlot) const
 {
 	return _impl->Slots.at(frameSlot).Display.get();
 }
 void CloudPictureTexture::Prepare(UINT frameSlot, double totalTime)
 {
-	auto &p = *_impl;
+	auto& p = *_impl;
 	if (!std::isfinite(totalTime) || totalTime < 0 || totalTime > (std::numeric_limits<float>::max)())
 	{
 		throw std::invalid_argument("Cloud picture requires finite nonnegative animation time");
 	}
-	auto &slot = p.Slots.at(frameSlot);
+	auto& slot = p.Slots.at(frameSlot);
 	for (auto reader : slot.Readers)
 	{
 		if (reader)
@@ -367,7 +367,7 @@ void CloudPictureTexture::Prepare(UINT frameSlot, double totalTime)
 	slot.Metadata = {p.Generation, ++p.Sequence, p.Width, p.Height, Format};
 	if (p.Sequence == 1 || p.Sequence == 61)
 	{
-		Log::Info("MetaRenderGraph", "CloudPicture frame publication sequence=", p.Sequence, " renderTime=", totalTime,
+		Log::Info("RenderGraph", "CloudPicture frame publication sequence=", p.Sequence, " renderTime=", totalTime,
 		          " remote=", p.Remote);
 	}
 	if (!p.Remote)
@@ -388,12 +388,12 @@ void CloudPictureTexture::Prepare(UINT frameSlot, double totalTime)
 	const auto schedule = Compile(graph);
 	const auto parameters = p.Parameters;
 	const auto uav = slot.Uav;
-	auto *produced = slot.Produced.Get();
-	auto *shared = slot.SharedSecondary.Get();
+	auto* produced = slot.Produced.Get();
+	auto* shared = slot.SharedSecondary.Get();
 	const auto footprint = p.Footprint;
 	p.Producer->Reserve(schedule);
 	p.Producer->Execute(schedule, {produced, shared},
-	                    [&p, parameters, uav, produced, shared, footprint](Id op, uint32_t, auto *cmd)
+	                    [&p, parameters, uav, produced, shared, footprint](Id op, uint32_t, auto* cmd)
 	                    {
 		                    if (op == 0)
 		                    {
@@ -409,14 +409,14 @@ void CloudPictureTexture::Prepare(UINT frameSlot, double totalTime)
 	p.CheckPublication(slot);
 	if (p.Sequence == 1)
 	{
-		Log::Info("MetaRenderGraph", "CloudPicture publication generation=", p.Generation, " sequence=", p.Sequence,
+		Log::Info("RenderGraph", "CloudPicture publication generation=", p.Generation, " sequence=", p.Sequence,
 		          " issued secondary token=", slot.Ready.Value, " snapshotTime=", totalTime);
 	}
 }
-void CloudPictureTexture::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings)
+void CloudPictureTexture::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
-	auto &p = *_impl;
-	auto &slot = p.Slots.at(p.CurrentSlot);
+	auto& p = *_impl;
+	auto& slot = p.Slots.at(p.CurrentSlot);
 	p.CheckPublication(slot);
 	const Id output = NativeWork::ResourceFor(graph, bindings, slot.Display->GetResource()->D3DResource.Get(),
 	                                          "cloud picture material texture");
@@ -425,19 +425,19 @@ void CloudPictureTexture::Append(Graph &graph, std::vector<ID3D12Resource *> &bi
 		const auto parameters = p.Parameters;
 		const auto uav = slot.Uav;
 		p.Work.Add(graph, "MGPU-Noise cloud picture local producer", {{output, Mode::Write, UnorderedAccess}},
-		           [&p, parameters, uav](auto *cmd) { p.Dispatch(cmd, parameters, uav); });
+		           [&p, parameters, uav](auto* cmd) { p.Dispatch(cmd, parameters, uav); });
 	}
 	else
 	{
 		const Id input =
 		    NativeWork::ResourceFor(graph, bindings, slot.SharedPrimary.Get(), "cloud picture shared import buffer");
-		auto *shared = slot.SharedPrimary.Get();
-		auto *display = slot.Display->GetResource()->D3DResource.Get();
+		auto* shared = slot.SharedPrimary.Get();
+		auto* display = slot.Display->GetResource()->D3DResource.Get();
 		const auto footprint = p.Footprint;
 		p.ImportOperation = p.Work.Add(graph, "cloud picture strict publication primary import",
 		                               {{input, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE},
 		                                {output, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
-		                               [shared, display, footprint](auto *cmd)
+		                               [shared, display, footprint](auto* cmd)
 		                               {
 			                               const CD3DX12_TEXTURE_COPY_LOCATION source(shared, footprint),
 			                                   target(display, 0u);
@@ -446,25 +446,25 @@ void CloudPictureTexture::Append(Graph &graph, std::vector<ID3D12Resource *> &bi
 		graph.Operations[p.ImportOperation].Target = Queue::Copy;
 	}
 }
-bool CloudPictureTexture::Record(Id id, ID3D12GraphicsCommandList *cmd)
+bool CloudPictureTexture::Record(Id id, ID3D12GraphicsCommandList* cmd)
 {
 	return _impl->Work.Record(id, cmd);
 }
-std::vector<PacketWait> CloudPictureTexture::Waits(const Schedule &schedule) const
+std::vector<PacketWait> CloudPictureTexture::Waits(const Schedule& schedule) const
 {
-	const auto &p = *_impl;
+	const auto& p = *_impl;
 	if (!p.Remote || p.ImportOperation == Invalid)
 	{
 		return {};
 	}
-	const auto &slot = p.Slots.at(p.CurrentSlot);
+	const auto& slot = p.Slots.at(p.CurrentSlot);
 	p.CheckPublication(slot);
 	return {{PacketFor(schedule, p.ImportOperation), slot.Ready}};
 }
-void CloudPictureTexture::RetireFrame(const Schedule &, const std::vector<CompletionToken> &completions, bool)
+void CloudPictureTexture::RetireFrame(const Schedule&, const std::vector<CompletionToken>& completions, bool)
 {
-	auto &p = *_impl;
-	auto &slot = p.Slots.at(p.CurrentSlot);
+	auto& p = *_impl;
+	auto& slot = p.Slots.at(p.CurrentSlot);
 	for (const auto token : completions)
 	{
 		if (token)
@@ -485,4 +485,4 @@ void CloudPictureTexture::Drain()
 {
 	_impl->Drain();
 }
-} // namespace Meta
+} // namespace BistroRender

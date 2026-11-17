@@ -1,6 +1,6 @@
 #include "SceneReflections.h"
 #include <cstring>
-namespace Meta
+namespace BistroRender
 {
 namespace
 {
@@ -15,22 +15,22 @@ UINT MipCount(UINT size)
     return count;
 }
 } // namespace
-SceneReflections::SceneReflections(GDX12DeviceResources &r, RenderPipelineCommonData &c) : _resources(r), _common(c)
+SceneReflections::SceneReflections(GDX12DeviceResources& r, RenderPipelineCommonData& c) : _resources(r), _common(c)
 {
 
     {
-        auto &p = _passes;
+        auto& p = _passes;
         p = std::make_unique<GDX12ReflectionProbePass>();
         p->Setup(&r, &c);
         p->Initialize();
         p->CreatePublishedTexture(1, 1);
         _black.D3DResource = r.Device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, CD3DX12_RESOURCE_DESC::Buffer(256),
                                                             D3D12_RESOURCE_STATE_GENERIC_READ);
-        void *data = nullptr;
+        void* data = nullptr;
         const D3D12_RANGE noRead{};
         ThrowIfFailed(_black.D3DResource->Map(0, &noRead, &data));
         std::memset(data, 0, 256);
-        static_cast<uint16_t *>(data)[3] = 0x3c00;
+        static_cast<uint16_t*>(data)[3] = 0x3c00;
         _black.D3DResource->Unmap(0, nullptr);
     }
 }
@@ -46,7 +46,7 @@ void SceneReflections::Reset()
         _publications.clear();
     }
 }
-bool SceneReflections::Record(Id id, ID3D12GraphicsCommandList *cmd) const
+bool SceneReflections::Record(Id id, ID3D12GraphicsCommandList* cmd) const
 {
     return _work.Record(id, cmd);
 }
@@ -59,26 +59,26 @@ void SceneReflections::Submitted(uint64_t fence)
 }
 std::pair<size_t, size_t> SceneReflections::Readiness() const
 {
-    const auto &p = *_passes;
+    const auto& p = *_passes;
     if (!p._enabled)
         return {};
     const auto done = _resources.Device->GetCommandQueue()->GetFence()->GetCompletedValue();
     if (done == UINT64_MAX)
         throw std::runtime_error("Probe completion fence reports device removal");
     size_t ready = 0;
-    for (const auto &publication : _publications)
+    for (const auto& publication : _publications)
         ready += publication.Ready || (publication.Fence && publication.Fence <= done);
     return {ready, p._probes.size()};
 }
-void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings, SceneGeometry &geometry,
-                              SceneEnvironment &environment, UINT slot, GDX12Texture* localShadows,
+void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
+                              SceneEnvironment& environment, UINT slot, GDX12Texture* localShadows,
                               GDX12Texture* staticLocalShadows)
 {
-    auto &p = *_passes;
-    auto &work = _work;
+    auto& p = *_passes;
+    auto& work = _work;
     work.Commands.clear();
     _publishing.clear();
-    auto &scene = geometry._slots.at(slot);
+    auto& scene = geometry._slots.at(slot);
     p._externalSettings = &_settings;
     if (!localShadows || !staticLocalShadows)
         throw std::invalid_argument("Ordinary probe capture requires explicit local shadow inputs");
@@ -114,13 +114,13 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
         view.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
         view.TextureCubeArray.NumCubes = p._published.GetResource()->D3DResource->GetDesc().DepthOrArraySize / 6;
         view.TextureCubeArray.MipLevels = p._publishedMips;
-        auto &descriptor = _radiance;
+        auto& descriptor = _radiance;
         descriptor.InitAsSRV(p._published.GetResource()->D3DResource.Get(), &view, _resources.SRV_UAV_Heap.get(),
-                             descriptor.HeapIndex == UINT_MAX ? _resources.SRV_UAV_Heap->GetAvailableIndex(105000)
+                             descriptor.HeapIndex == UINT_MAX ? _resources.SRV_UAV_Heap->GetAvailableIndex(SceneDescriptorStart)
                                                               : descriptor.HeapIndex);
     }
     std::vector<Id> publicationOperations;
-    auto &publications = _publications;
+    auto& publications = _publications;
     const auto done = _resources.Device->GetCommandQueue()->GetFence()->GetCompletedValue();
     if (replaced)
         publications.assign(p._probes.size(), {});
@@ -128,27 +128,27 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
         publications.resize(p._probes.size());
     for (UINT i = 0; i < publications.size(); ++i)
     {
-        auto &publication = publications[i];
+        auto& publication = publications[i];
         if (!p._probes[i].Ready)
             publication = {};
         else
             publication.Ready |= publication.Fence && publication.Fence <= done;
     }
-    const auto resource = [&](GDX12Resource *value) {
+    const auto resource = [&](GDX12Resource* value) {
         return NativeWork::ResourceFor(graph, bindings, value->D3DResource.Get(), "probe resource");
     };
-    const auto texture = [&](GDX12Texture *value, Mode mode, State state) {
+    const auto texture = [&](GDX12Texture* value, Mode mode, State state) {
         return Access{resource(value->GetResource()), mode, state};
     };
     const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
     if (!p._enabled && p._publishedNeedsTransition && p._publishedResolution == 1)
     {
-        auto *source = _black.D3DResource.Get();
-        auto *target = p._published.GetResource()->D3DResource.Get();
+        auto* source = _black.D3DResource.Get();
+        auto* target = p._published.GetResource()->D3DResource.Get();
         work.Add(graph, "initialize disabled probe fallback",
                  {{resource(&_black), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
                   texture(&p._published, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST)},
-                 [source, target](auto *cmd) {
+                 [source, target](auto* cmd) {
                      const D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp{0, {DXGI_FORMAT_R16G16B16A16_FLOAT, 1, 1, 1, 256}};
                      const CD3DX12_TEXTURE_COPY_LOCATION src(source, fp);
                      for (UINT face = 0; face < 6; ++face)
@@ -159,9 +159,9 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
                  });
     }
     p._publishedNeedsTransition = false;
-    auto &frame = p._frames.at(slot);
-    auto &constants = *_resources.FrameConstants[slot];
-    auto *heap = _resources.SRV_UAV_Heap->GetHeap().Get();
+    auto& frame = p._frames.at(slot);
+    auto& constants = *_resources.FrameConstants[slot];
+    auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
     const UINT count = scene.Draws;
     if (p._capturePlanned)
     {
@@ -170,7 +170,7 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
             frame.Commands = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(
                 _resources.Device, (std::max)(count, 1u), EBufferType::Default, false);
             frame.Commands->CreateUAV(_resources.SRV_UAV_Heap.get(),
-                                      _resources.SRV_UAV_Heap->GetAvailableIndex(105000));
+                                      _resources.SRV_UAV_Heap->GetAvailableIndex(SceneDescriptorStart));
         }
         if (scene.Batches)
         {
@@ -185,51 +185,51 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
             const auto dsv = p._sunDSV[0]->CPUHandle;
             work.Add(graph, "initialize probe sun-shadow fallback",
                      {texture(&p._sunShadow, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE)},
-                     [dsv](auto *cmd) { cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr); });
+                     [dsv](auto* cmd) { cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr); });
             p._sunShadowNeedsClear = false;
         }
     }
-    for (auto &view : p._views)
+    for (auto& view : p._views)
     {
         if (!view.Selected)
             continue;
         p.SelectProbe(view.Probe);
-        auto &state = p._probes[view.Probe];
+        auto& state = p._probes[view.Probe];
         const bool shadow = view.Context.Stage == GDX12GeometryStage::Shadow;
         const UINT face = view.Face, baseMip = p._publishedMips - p._mips, slice = face * p._publishedMips + baseMip;
         const auto camera = frame.Cameras->GetElementAddress(view.Probe * 6 + face),
                    shadowCB = frame.Shadow->GetElementAddress(0);
-        auto *color = view.Bake ? state.BakedColor.get() : state.Raw.get();
-        auto *depth = shadow ? &p._sunShadow : (view.Bake ? state.BakedDepth.get() : &p._depth);
+        auto* color = view.Bake ? state.BakedColor.get() : state.Raw.get();
+        auto* depth = shadow ? &p._sunShadow : (view.Bake ? state.BakedDepth.get() : &p._depth);
         const auto dsv =
             shadow ? p._sunDSV[0]->CPUHandle : (view.Bake ? state.BakedDSVs[face] : p._depthDSVs[slice])->CPUHandle;
         const auto rtv = shadow ? D3D12_CPU_DESCRIPTOR_HANDLE{}
                                 : (view.Bake ? state.BakedRTVs[face] : state.RawRTVs[slice])->CPUHandle;
         if (!shadow && !view.Bake && view.Filter == p.DynamicGeometry)
         {
-            auto *sourceColor = state.BakedColor->GetResource()->D3DResource.Get();
-            auto *sourceDepth = state.BakedDepth->GetResource()->D3DResource.Get();
-            auto *targetColor = color->GetResource()->D3DResource.Get();
-            auto *targetDepth = depth->GetResource()->D3DResource.Get();
+            auto* sourceColor = state.BakedColor->GetResource()->D3DResource.Get();
+            auto* sourceDepth = state.BakedDepth->GetResource()->D3DResource.Get();
+            auto* targetColor = color->GetResource()->D3DResource.Get();
+            auto* targetDepth = depth->GetResource()->D3DResource.Get();
             work.Add(graph, "probe reuse baked static receivers",
                      {texture(state.BakedColor.get(), Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE),
                       texture(state.BakedDepth.get(), Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE),
                       texture(color, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST),
                       texture(depth, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST)},
-                     [sourceColor, sourceDepth, targetColor, targetDepth, face, slice](auto *cmd) {
+                     [sourceColor, sourceDepth, targetColor, targetDepth, face, slice](auto* cmd) {
                          const CD3DX12_TEXTURE_COPY_LOCATION cs(sourceColor, face), cd(targetColor, slice),
                              ds(sourceDepth, face), dd(targetDepth, slice);
                          cmd->CopyTextureRegion(&cd, 0, 0, 0, &cs, nullptr);
                          cmd->CopyTextureRegion(&dd, 0, 0, 0, &ds, nullptr);
                      });
         }
-        auto *cullRoot = p._cullRoot.get();
+        auto* cullRoot = p._cullRoot.get();
         const auto commandUav = frame.Commands->GetUAV()->GPUHandle, counterUav = frame.Counter->GetUAV()->GPUHandle;
-        auto *clearPSO = p._clearPSO.Get();
-        auto *cullPSO = p._cullPSO.Get();
+        auto* clearPSO = p._clearPSO.Get();
+        auto* cullPSO = p._cullPSO.Get();
         const Id commands = resource(&frame.Commands->GetResource()), counter = resource(&frame.Counter->GetResource());
         work.Add(graph, "probe clear visible count",
-                 {{commands, Mode::Write, UnorderedAccess}, {counter, Mode::Write, UnorderedAccess}}, [=](auto *cmd) {
+                 {{commands, Mode::Write, UnorderedAccess}, {counter, Mode::Write, UnorderedAccess}}, [=](auto* cmd) {
                      cmd->SetDescriptorHeaps(1, &heap);
                      cmd->SetComputeRootSignature(cullRoot->GetRootSignature().Get());
                      cmd->SetComputeRootDescriptorTable(cullRoot->GetURootParamIndex(0), commandUav);
@@ -248,7 +248,7 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
                   {counter, Mode::ReadWrite, UnorderedAccess},
                   {resource(&frame.Cameras->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
                   {resource(&frame.Shadow->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}},
-                 [=](auto *cmd) {
+                 [=](auto* cmd) {
                      cmd->SetDescriptorHeaps(1, &heap);
                      cmd->SetComputeRootSignature(cullRoot->GetRootSignature().Get());
                      cmd->SetPipelineState(cullPSO);
@@ -263,25 +263,25 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
                      if (count)
                          cmd->Dispatch((count + 63) / 64, 1, 1);
                  });
-        ID3D12Resource *drawCommands = frame.Commands->GetResource().D3DResource.Get();
+        ID3D12Resource* drawCommands = frame.Commands->GetResource().D3DResource.Get();
         D3D12_GPU_VIRTUAL_ADDRESS visible = scene.Geometry.Vertices.BufferLocation;
         if (frame.Batches)
         {
-            auto *batch = frame.Batches.get();
+            auto* batch = frame.Batches.get();
             const auto resources = batch->RecordingResources();
             for (UINT stage = 0; stage < 3; ++stage)
             {
                 std::vector<Access> accesses{{0, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
                                              {commands, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
                                              {counter, Mode::ReadWrite, UnorderedAccess}};
-                for (auto *buffer : resources)
+                for (auto* buffer : resources)
                     accesses.push_back({NativeWork::ResourceFor(graph, bindings, buffer, "probe skeletal batch"),
                                         Mode::ReadWrite, UnorderedAccess});
                 const auto instanceAddress = scene.Buffers[0].Data->GetGPUVirtualAddress(),
                            inputAddress = frame.Commands->GetElementAddress(0),
                            counterAddress = frame.Counter->GetElementAddress(0);
                 const UINT batches = scene.Batches;
-                work.Add(graph, "probe skeletal batching " + std::to_string(stage), accesses, [=](auto *cmd) {
+                work.Add(graph, "probe skeletal batching " + std::to_string(stage), accesses, [=](auto* cmd) {
                     batch->RecordStage(cmd, stage, (std::max)(count, 1u), batches, instanceAddress, inputAddress,
                                        counterAddress);
                 });
@@ -320,10 +320,10 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
             draws.push_back({NativeWork::ResourceFor(graph, bindings, frame.Batches->RecordingResources()[2],
                                                      "probe visible instances"),
                              Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE});
-        auto *root = p._captureRoot.get();
-        auto *meshPSO = shadow ? p._shadowPSO.Get() : p._capturePSO.Get();
-        auto *skyPSO = p._skyPSO.Get();
-        auto *signature = p._signature.Get();
+        auto* root = p._captureRoot.get();
+        auto* meshPSO = shadow ? p._shadowPSO.Get() : p._capturePSO.Get();
+        auto* skyPSO = p._skyPSO.Get();
+        auto* signature = p._signature.Get();
         const UINT resolution = shadow ? p._sunShadow.GetWidth() : p._resolution;
         const auto main = scene.Main, sky = constants.SkyCB->GetElementAddress(0);
         const auto vb = scene.Geometry.Vertices;
@@ -340,9 +340,9 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
         srvs[9] = environment.Output(3)->GetTexture()->GetSRV()->GPUHandle;
         srvs[10] = _resources.SkyTransmittanceSRV.GPUHandle;
         srvs[11] = _resources.SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex);
-        auto *countBuffer = frame.Counter->GetResource().D3DResource.Get();
+        auto* countBuffer = frame.Counter->GetResource().D3DResource.Get();
         const bool clear = shadow || view.Filter != p.DynamicGeometry;
-        work.Add(graph, shadow ? "probe sun shadow mesh" : "probe HDR capture mesh/sky", draws, [=](auto *cmd) {
+        work.Add(graph, shadow ? "probe sun shadow mesh" : "probe HDR capture mesh/sky", draws, [=](auto* cmd) {
             cmd->SetDescriptorHeaps(1, &heap);
             cmd->SetGraphicsRootSignature(root->GetRootSignature().Get());
             cmd->SetGraphicsRootConstantBufferView(root->GetBRootParamIndex(1), main);
@@ -407,13 +407,13 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
     }
     for (UINT probe = 0; probe < p._probes.size(); ++probe)
     {
-        auto &state = p._probes[probe];
+        auto& state = p._probes[probe];
         if (state.CapturedFaces != 63)
             continue;
         p.SelectProbe(probe);
         const UINT base = p._publishedMips - p._mips, mips = p._mips;
-        auto *root = p._filterRoot.get();
-        auto *pipeline = p._filterPSO.Get();
+        auto* root = p._filterRoot.get();
+        auto* pipeline = p._filterPSO.Get();
         const auto input = state.RawMipSRVs[base]->GPUHandle;
         const UINT samples = state.Source.PrefilterSamples;
         for (UINT mip = 0; mip < mips; ++mip)
@@ -423,7 +423,7 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
             const auto output = p._filterUAVs[base + mip]->GPUHandle;
             work.Add(graph, "probe GGX prefilter mip " + std::to_string(mip),
                      {texture(state.Raw.get(), Mode::Read, read), texture(&p._filtered, Mode::Write, UnorderedAccess)},
-                     [=](auto *cmd) {
+                     [=](auto* cmd) {
                          cmd->SetDescriptorHeaps(1, &heap);
                          cmd->SetComputeRootSignature(root->GetRootSignature().Get());
                          cmd->SetPipelineState(pipeline);
@@ -439,14 +439,14 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
                          cmd->Dispatch((size + 7) / 8, (size + 7) / 8, 6);
                      });
         }
-        auto *source = p._filtered.GetResource()->D3DResource.Get();
-        auto *destination = p._published.GetResource()->D3DResource.Get();
+        auto* source = p._filtered.GetResource()->D3DResource.Get();
+        auto* destination = p._published.GetResource()->D3DResource.Get();
         const UINT publishedMips = p._publishedMips;
         publicationOperations.push_back(
             work.Add(graph, "probe publication copy",
                      {texture(&p._filtered, Mode::Read, D3D12_RESOURCE_STATE_COPY_SOURCE),
                       texture(&p._published, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST)},
-                     [=](auto *cmd) {
+                     [=](auto* cmd) {
                          for (UINT face = 0; face < 6; ++face)
                              for (UINT mip = 0; mip < mips; ++mip)
                              {
@@ -474,8 +474,8 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
         GDX12ReflectionProbeData data;
         if (p._enabled && i < p._probes.size() && p._probes[i].Ready)
         {
-            const auto &state = p._probes[i];
-            const auto &source = state.Published;
+            const auto& state = p._probes[i];
+            const auto& source = state.Published;
             data.Position = source.Position;
             data.BoxMin = source.BoxMin;
             data.BoxMax = source.BoxMax;
@@ -486,16 +486,16 @@ void SceneReflections::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
         }
         constants.ReflectionProbesUpload->CopyData(i, data);
     }
-    auto *source = constants.ReflectionProbesUpload->GetResource().D3DResource.Get();
-    auto *target = constants.ReflectionProbes->GetResource().D3DResource.Get();
+    auto* source = constants.ReflectionProbesUpload->GetResource().D3DResource.Get();
+    auto* target = constants.ReflectionProbes->GetResource().D3DResource.Get();
     work.Add(
         graph, "probe metadata upload (GPU ordered)",
         {{resource(&constants.ReflectionProbesUpload->GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
          {resource(&constants.ReflectionProbes->GetResource()), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
-        [source, target](auto *cmd) {
+        [source, target](auto* cmd) {
             cmd->CopyBufferRegion(target, 0, source, 0, UINT64(MaxReflectionProbes) * sizeof(GDX12ReflectionProbeData));
         },
         publicationOperations);
     p._planPrepared = false;
 }
-} // namespace Meta
+} // namespace BistroRender

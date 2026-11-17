@@ -1,13 +1,13 @@
 #include "SceneTransparency.h"
 #include "Common/GameTimer.h"
 
-namespace Meta
+namespace BistroRender
 {
-SceneTransparency::SceneTransparency(GDX12DeviceResources &resources, RenderPipelineCommonData &common)
+SceneTransparency::SceneTransparency(GDX12DeviceResources& resources, RenderPipelineCommonData& common)
     : _resources(resources), _common(common), _frames(resources.FrameConstants.size()), _particles(resources, common),
       _water(resources, common)
 {
-	for (auto &frame : _frames)
+	for (auto& frame : _frames)
 	{
 		frame.Draw.SetFlag(RENDER_PASS_FLAG_USE_DOWNSCALED_RESOLUTION, true);
 		frame.Draw.SetUnbatchedDraws(true);
@@ -19,24 +19,24 @@ SceneTransparency::SceneTransparency(GDX12DeviceResources &resources, RenderPipe
 }
 SceneTransparency::~SceneTransparency()
 {
-	for (auto &frame : _frames)
+	for (auto& frame : _frames)
 	{
 		frame.Compose.ClearDenendencies();
 		frame.Draw.ClearDenendencies();
 	}
 }
-void SceneTransparency::PrepareWater(Graph &graph, std::vector<ID3D12Resource *> &bindings, SceneGeometry &geometry,
+void SceneTransparency::PrepareWater(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
                                      UINT slot)
 {
 	_water.Prepare(_common.GameTimer ? _common.GameTimer->DeltaTime() : 0);
 	_water.AppendSurface(graph, bindings, geometry.Depth(slot), geometry.GBuffer(slot, 1));
 }
-GDX12Texture *SceneTransparency::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings, SceneGeometry &geometry,
-                                        UINT slot, GDX12Texture *hdr, GDX12Texture *sun, GDX12Texture *local,
-                                        SceneEnvironment &environment)
+GDX12Texture* SceneTransparency::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
+                                        UINT slot, GDX12Texture* hdr, GDX12Texture* sun, GDX12Texture* local,
+                                        SceneEnvironment& environment)
 {
 	_work.Commands.clear();
-	auto &frame = _frames.at(slot);
+	auto& frame = _frames.at(slot);
 	_water.AppendDraw(graph, bindings, hdr, geometry._slots.at(slot).Dsv.CPUHandle);
 	if (_opaqueContinuation)
 	{
@@ -44,19 +44,19 @@ GDX12Texture *SceneTransparency::Append(Graph &graph, std::vector<ID3D12Resource
 	}
 	return AppendPhase(graph, bindings, geometry, slot, frame, hdr, sun, local, environment);
 }
-GDX12Texture *SceneTransparency::AppendPhase(Graph &graph, std::vector<ID3D12Resource *> &bindings,
-                                             SceneGeometry &geometry, UINT slot, Frame &phase, GDX12Texture *hdr,
-                                             GDX12Texture *sun, GDX12Texture *local, SceneEnvironment &environment)
+GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+                                             SceneGeometry& geometry, UINT slot, Frame& phase, GDX12Texture* hdr,
+                                             GDX12Texture* sun, GDX12Texture* local, SceneEnvironment& environment)
 {
-	auto &scene = geometry._slots.at(slot);
-	auto &constants = *_resources.FrameConstants.at(slot);
-	auto &draw = phase.Draw;
-	auto &compose = phase.Compose;
-	auto *rasterDepth = Depth();
+	auto& scene = geometry._slots.at(slot);
+	auto& constants = *_resources.FrameConstants.at(slot);
+	auto& draw = phase.Draw;
+	auto& compose = phase.Compose;
+	auto* rasterDepth = Depth();
 	compose.SetApplyOpaqueAerialPerspective(!_opaqueContinuation);
 	draw.Setup(&_resources, &_common);
-	std::vector<IRenderPassLink *> inputs{rasterDepth,           sun,  environment.Output(0), environment.Output(1),
-	                                      environment.Output(2), local};
+	std::vector<IRenderPassLink*> inputs{rasterDepth,           sun,  environment.Output(0), environment.Output(1),
+	                                     environment.Output(2), local};
 	draw.SetInputs(std::move(inputs));
 	if (!phase.Initialized)
 	{
@@ -67,8 +67,8 @@ GDX12Texture *SceneTransparency::AppendPhase(Graph &graph, std::vector<ID3D12Res
 	{
 		draw.Resize();
 	}
-	auto *accum = draw.OUT_Accumulation.get();
-	auto *reveal = draw.OUT_Revealage.get();
+	auto* accum = draw.OUT_Accumulation.get();
+	auto* reveal = draw.OUT_Revealage.get();
 	compose.Setup(&_resources, &_common);
 	compose.SetInputs({hdr, accum, reveal, rasterDepth});
 	if (!phase.Initialized)
@@ -80,11 +80,11 @@ GDX12Texture *SceneTransparency::AppendPhase(Graph &graph, std::vector<ID3D12Res
 		compose.Resize();
 	}
 	phase.Initialized = true;
-	auto *output = compose.OUT_Result.get();
+	auto* output = compose.OUT_Result.get();
 	_particles.Prepare(graph, bindings, scene.DepthView.get(), rasterDepth, accum, reveal, geometry.InteractionField());
-	const auto resource = [&](ID3D12Resource *value)
+	const auto resource = [&](ID3D12Resource* value)
 	{ return NativeWork::ResourceFor(graph, bindings, value, "mesh transparency resource"); };
-	const auto texture = [&](GDX12Texture *value, Mode mode, State state)
+	const auto texture = [&](GDX12Texture* value, Mode mode, State state)
 	{ return Access{resource(value->GetResource()->D3DResource.Get()), mode, state}; };
 	const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
 	const State depthRead = D3D12_RESOURCE_STATE_DEPTH_READ | read;
@@ -113,10 +113,10 @@ GDX12Texture *SceneTransparency::AppendPhase(Graph &graph, std::vector<ID3D12Res
 	    {resource(scene.Geometry.VertexResource), Mode::Read,
 	     D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER | D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE});
 	accesses.push_back({resource(scene.Geometry.IndexResource), Mode::Read, D3D12_RESOURCE_STATE_INDEX_BUFFER});
-	auto *root = draw._transparencyRS.get();
-	auto *pipeline = draw._transparencyPSO.Get();
-	auto *signature = draw._transparencyCS.Get();
-	auto *heap = _resources.SRV_UAV_Heap->GetHeap().Get();
+	auto* root = draw._transparencyRS.get();
+	auto* pipeline = draw._transparencyPSO.Get();
+	auto* signature = draw._transparencyCS.Get();
+	auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
 	const auto main = scene.Main, camera = scene.Camera, shadow = constants.ShadowCB->GetElementAddress(0),
 	           sky = constants.SkyCB->GetElementAddress(0);
 	const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 9> srvs{scene.Buffers[2].Srv.GPUHandle,
@@ -138,10 +138,10 @@ GDX12Texture *SceneTransparency::AppendPhase(Graph &graph, std::vector<ID3D12Res
 	const D3D12_RECT rect = accum->GetScissorRect();
 	const std::array<D3D12_CPU_DESCRIPTOR_HANDLE, 2> targets{accum->GetRTV()->CPUHandle, reveal->GetRTV()->CPUHandle};
 	const UINT draws = scene.Draws;
-	auto *args = scene.Buffers[6].Data.Get();
-	auto *count = scene.Buffers[7].Data.Get();
+	auto* args = scene.Buffers[6].Data.Get();
+	auto* count = scene.Buffers[7].Data.Get();
 	_work.Add(graph, "mesh transparency All clear/draw", std::move(accesses),
-	          [=](auto *cmd)
+	          [=](auto* cmd)
 	          {
 		          const float zero[4]{}, one[4]{1, 1, 1, 1};
 		          cmd->ClearRenderTargetView(targets[0], zero, 0, nullptr);
@@ -176,8 +176,8 @@ GDX12Texture *SceneTransparency::AppendPhase(Graph &graph, std::vector<ID3D12Res
 		          }
 	          });
 	_particles.AppendWeighted(graph, bindings);
-	auto *composeRoot = compose._compositionRS.get();
-	auto *composePipeline = compose._compositionPSO.Get();
+	auto* composeRoot = compose._compositionRS.get();
+	auto* composePipeline = compose._compositionPSO.Get();
 	const std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 7> images{hdr->GetSRV()->GPUHandle,
 	                                                        accum->GetSRV()->GPUHandle,
 	                                                        reveal->GetSRV()->GPUHandle,
@@ -186,7 +186,7 @@ GDX12Texture *SceneTransparency::AppendPhase(Graph &graph, std::vector<ID3D12Res
 	                                                        atmosphere[1],
 	                                                        atmosphere[2]};
 	const auto target = output->GetRTV()->CPUHandle;
-	const char *resolveName = "mesh WBOIT resolve";
+	const char* resolveName = "mesh WBOIT resolve";
 	auto composition = environment.Reads(graph, bindings);
 	composition.insert(composition.end(), {texture(hdr, Mode::Read, read),
 	                                       texture(accum, Mode::Read, read),
@@ -197,7 +197,7 @@ GDX12Texture *SceneTransparency::AppendPhase(Graph &graph, std::vector<ID3D12Res
 	                                        D3D12_RESOURCE_STATE_GENERIC_READ},
 	                                       texture(output, Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET)});
 	_work.Add(graph, resolveName, std::move(composition),
-	          [=](auto *cmd)
+	          [=](auto* cmd)
 	          {
 		          cmd->SetDescriptorHeaps(1, &heap);
 		          cmd->SetGraphicsRootSignature(composeRoot->GetRootSignature().Get());
@@ -217,4 +217,4 @@ GDX12Texture *SceneTransparency::AppendPhase(Graph &graph, std::vector<ID3D12Res
 	_particles.AppendComposite(graph, bindings, output);
 	return output;
 }
-} // namespace Meta
+} // namespace BistroRender

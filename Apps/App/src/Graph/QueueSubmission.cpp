@@ -6,7 +6,7 @@
 #include <thread>
 #include <chrono>
 #include <climits>
-namespace Meta {
+namespace BistroRender {
 namespace {
 std::atomic<uint64_t> NextIncarnation{1};
 size_t Index(Queue queue) {
@@ -32,7 +32,7 @@ QueueSubmission::QueueSubmission(GDX12Device& primary,GDX12Device* secondary)
             ThrowIfFailed(Device(d).GetDevice()->CreateFence(0,
                 D3D12_FENCE_FLAG_SHARED | D3D12_FENCE_FLAG_SHARED_CROSS_ADAPTER,IID_PPV_ARGS(&t.Shared)));
             HANDLE handle=nullptr;
-            ThrowIfFailed(Device(d).GetDevice()->CreateSharedHandle(t.Shared.Get(),nullptr,GENERIC_ALL,nullptr,&handle));
+            ThrowIfFailed(Device(d).GetDevice()->CreateSharedHandle(t.Shared.Get(),nullptr,GENERIC_ALL,nullptr, &handle));
             const auto hr=Device(1-d).GetDevice()->OpenSharedHandle(handle,IID_PPV_ARGS(&t.Remote));
             CloseHandle(handle); ThrowIfFailed(hr);
         }
@@ -94,7 +94,7 @@ void QueueSubmission::ValidateResource(Id id,ID3D12Resource* resource) const {
     if(a.Get()!=b.Get() || !Equal(owner->GetAdapterLuid(),Device(id).GetAdapterLuid()))
         throw std::invalid_argument("resource bound to wrong physical device/incarnation");
 }
-CompletionToken QueueSubmission::Submit(Id device,Meta::Queue target,
+CompletionToken QueueSubmission::Submit(Id device,BistroRender::Queue target,
     const std::vector<ID3D12CommandList*>& lists,const std::vector<CompletionToken>& waits,GDX12CommandList* external) {
     std::lock_guard<std::mutex> lock(_mutex); Check();
     Device(device); auto& t=_queues.at(device).at(Index(target));

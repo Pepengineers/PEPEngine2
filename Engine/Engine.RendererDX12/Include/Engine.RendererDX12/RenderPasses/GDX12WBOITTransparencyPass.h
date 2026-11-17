@@ -4,7 +4,7 @@
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 
-namespace Meta { class SceneTransparency; }
+namespace BistroRender { class SceneTransparency; }
 
 class GDX12WBOITTransparencyPass : public GDX12RenderPass
 {
@@ -150,7 +150,7 @@ public:
 	}
 
 private:
-    friend class Meta::SceneTransparency;
+    friend class BistroRender::SceneTransparency;
     void UpdateReadOnlyDepth()
     {
         D3D12_DEPTH_STENCIL_VIEW_DESC desc = {};

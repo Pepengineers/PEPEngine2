@@ -7,7 +7,7 @@
 #include <map>
 
 class RenderModule;
-namespace Meta { class SceneGrass; }
+namespace BistroRender { class SceneGrass; }
 
 class BistroGrassGeometry final : public IRenderGeometrySource
 {
@@ -17,7 +17,7 @@ public:
     void CollectScene(float deltaSeconds, bool advanceWhilePaused = false);
 
 private:
-    friend class Meta::SceneGrass;
+    friend class BistroRender::SceneGrass;
     void Subscribe(World& world);
     void Unsubscribe(World& world);
     struct Subscriptions { ListenerHandle GrassCreated, GrassUpdated, WindCreated, WindUpdated; };

@@ -1,10 +1,10 @@
-#include "MetaGraphExecutor.h"
+#include "RenderGraphExecutor.h"
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
-namespace Meta
+namespace BistroRender
 {
 namespace
 {
@@ -57,7 +57,7 @@ bool BarrierStateAllowed(Queue queue, State state)
 	return queue == Queue::Direct || (state & ~(queue == Queue::Copy ? copy : compute)) == 0;
 }
 } // namespace
-Executor::Executor(GDX12Device &d, uint32_t slots, unsigned threads)
+Executor::Executor(GDX12Device& d, uint32_t slots, unsigned threads)
     : Executor(std::make_shared<QueueSubmission>(d), 0, slots, threads)
 {
 }
@@ -79,11 +79,11 @@ Executor::~Executor()
 	}
 	catch (...)
 	{
-		for (auto &s : _slots)
+		for (auto& s : _slots)
 		{
-			for (auto &lists : s.Lists)
+			for (auto& lists : s.Lists)
 			{
-				for (auto &l : lists)
+				for (auto& l : lists)
 				{
 					l.Commands.Detach();
 					l.Allocator.Detach();
@@ -107,7 +107,7 @@ void Executor::Begin(uint32_t index)
 {
 	Owner();
 	_submissions->CheckHealth();
-	auto &slot = _slots.at(index);
+	auto& slot = _slots.at(index);
 	if (_aborted)
 	{
 		throw std::logic_error("partial frame aborted; drain and recreate execution/resources");
@@ -131,7 +131,7 @@ bool Executor::TryBegin(uint32_t index)
 {
 	Owner();
 	_submissions->CheckHealth();
-	const auto &slot = _slots.at(index);
+	const auto& slot = _slots.at(index);
 	if (_aborted || slot.Poisoned)
 	{
 		throw std::logic_error("recording context aborted/quarantined");
@@ -155,7 +155,7 @@ void Executor::Drain()
 {
 	Owner();
 	_submissions->CheckHealth();
-	for (auto &slot : _slots)
+	for (auto& slot : _slots)
 	{
 		for (auto queue : {Queue::Direct, Queue::Compute, Queue::Copy})
 		{
@@ -165,7 +165,7 @@ void Executor::Drain()
 			}
 		}
 	}
-	for (auto &slot : _slots)
+	for (auto& slot : _slots)
 	{
 		if (slot.Poisoned)
 		{
@@ -173,10 +173,10 @@ void Executor::Drain()
 		}
 	}
 }
-void Executor::Reserve(const Schedule &schedule)
+void Executor::Reserve(const Schedule& schedule)
 {
 	std::array<size_t, 3> counts{};
-	for (const auto &packet : schedule.Packets)
+	for (const auto& packet : schedule.Packets)
 	{
 		if (!packet.Lists || packet.Lists > (std::numeric_limits<UINT>::max)() - 2)
 		{
@@ -191,7 +191,7 @@ void Executor::Reserve(const Schedule &schedule)
 	}
 	for (auto queue : {Queue::Direct, Queue::Compute, Queue::Copy})
 	{
-		auto &lists = _slots.at(_slot).Lists[QueueIndex(queue)];
+		auto& lists = _slots.at(_slot).Lists[QueueIndex(queue)];
 		while (lists.size() < counts[QueueIndex(queue)])
 		{
 			List list;
@@ -203,9 +203,9 @@ void Executor::Reserve(const Schedule &schedule)
 		}
 	}
 }
-uint64_t Executor::Execute(const Schedule &schedule, const std::vector<ID3D12Resource *> &resources,
-                           const Record &record, GDX12CommandList *prefix, GDX12CommandList *suffix,
-                           const std::atomic<bool> *cancellation, const std::vector<PacketWait> &waits)
+uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Resource*>& resources,
+                           const Record& record, GDX12CommandList* prefix, GDX12CommandList* suffix,
+                           const std::atomic<bool>* cancellation, const std::vector<PacketWait>& waits)
 {
 	Owner();
 	if (!_begun)
@@ -213,14 +213,14 @@ uint64_t Executor::Execute(const Schedule &schedule, const std::vector<ID3D12Res
 		throw std::logic_error("Begin required");
 	}
 	_begun = false;
-	auto &slot = _slots[_slot];
+	auto& slot = _slots[_slot];
 	_tokens.assign(schedule.Packets.size(), 0);
 	_completions.assign(schedule.Packets.size(), {});
 	if (schedule.Device != _deviceId)
 	{
 		throw std::invalid_argument("schedule belongs to another device context");
 	}
-	for (const auto &wait : waits)
+	for (const auto& wait : waits)
 	{
 		if (wait.Packet >= schedule.Packets.size())
 		{
@@ -257,7 +257,7 @@ uint64_t Executor::Execute(const Schedule &schedule, const std::vector<ID3D12Res
 	{
 		throw std::invalid_argument("missing terminal packet");
 	}
-	const auto &terminal = schedule.Packets.back();
+	const auto& terminal = schedule.Packets.back();
 	if (terminal.Target != schedule.TerminalQueue || terminal.Operation != Invalid ||
 	    (schedule.FrameBoundary && terminal.Target != Queue::Direct))
 	{
@@ -284,7 +284,7 @@ uint64_t Executor::Execute(const Schedule &schedule, const std::vector<ID3D12Res
 	std::array<size_t, 3> counts{};
 	for (Id i = 0; i < schedule.Packets.size(); ++i)
 	{
-		const auto &p = schedule.Packets[i];
+		const auto& p = schedule.Packets[i];
 		if (!p.Lists || p.Lists > (std::numeric_limits<UINT>::max)() - 2)
 		{
 			throw std::invalid_argument("invalid packet list count");
@@ -297,9 +297,9 @@ uint64_t Executor::Execute(const Schedule &schedule, const std::vector<ID3D12Res
 				throw std::invalid_argument("non-topological packet dependency");
 			}
 		}
-		const auto validateBarriers = [&](const std::vector<Barrier> &barriers)
+		const auto validateBarriers = [&](const std::vector<Barrier>& barriers)
 		{
-			for (const auto &b : barriers)
+			for (const auto& b : barriers)
 			{
 				if (b.Resource >= resources.size() || schedule.Memory[b.Resource] != Heap::Default)
 				{
@@ -323,7 +323,7 @@ uint64_t Executor::Execute(const Schedule &schedule, const std::vector<ID3D12Res
 		}
 	}
 	// Freeze list/allocator identity before any recording callback can run.
-	std::vector<List *> lists;
+	std::vector<List*> lists;
 	for (size_t q = 0; q < counts.size(); ++q)
 	{
 		for (size_t i = 0; i < counts[q]; ++i)
@@ -331,14 +331,14 @@ uint64_t Executor::Execute(const Schedule &schedule, const std::vector<ID3D12Res
 			lists.push_back(&slot.Lists[q][i]);
 		}
 	}
-	std::vector<std::vector<ID3D12CommandList *>> packets;
+	std::vector<std::vector<ID3D12CommandList*>> packets;
 	std::vector<RecordingGroup> groups;
 	std::vector<std::vector<std::function<void()>>> ownerRecords(schedule.Packets.size());
 	std::vector<uint8_t> closed(lists.size(), 1);
 	std::array<size_t, 3> offsets{0, counts[0], counts[0] + counts[1]}, used{};
 	for (Id i = 0; i < schedule.Packets.size(); ++i)
 	{
-		const auto &p = schedule.Packets[i];
+		const auto& p = schedule.Packets[i];
 		RecordingGroup group;
 		RecordingGroup buckets;
 		packets.emplace_back();
@@ -350,7 +350,7 @@ uint64_t Executor::Execute(const Schedule &schedule, const std::vector<ID3D12Res
 				continue;
 			}
 			const auto index = offsets[q] + used[q]++;
-			auto *cmd = lists[index]->Commands.Get();
+			auto* cmd = lists[index]->Commands.Get();
 			if (cmd->GetType() != ListType(p.Target))
 			{
 				throw std::logic_error("packet/list queue mismatch");
@@ -359,14 +359,14 @@ uint64_t Executor::Execute(const Schedule &schedule, const std::vector<ID3D12Res
 			RecordingGroup leaf{{},
 			                    [&, i, j, cmd, index]
 			                    {
-				                    const auto &packet = schedule.Packets[i];
+				                    const auto& packet = schedule.Packets[i];
 				                    try
 				                    {
 					                    // Begin retired this slot; each task exclusively owns its allocator/list pair.
 					                    ThrowIfFailed(lists[index]->Allocator->Reset());
 					                    ThrowIfFailed(cmd->Reset(lists[index]->Allocator.Get(), nullptr));
 					                    closed[index] = 0;
-					                    const auto barriers = [&](const std::vector<Barrier> &bs)
+					                    const auto barriers = [&](const std::vector<Barrier>& bs)
 					                    {
 						                    for (auto b : bs)
 						                    {
@@ -434,7 +434,7 @@ uint64_t Executor::Execute(const Schedule &schedule, const std::vector<ID3D12Res
 		for (Id i = 0; i < packets.size(); ++i)
 		{
 			recorder.Wait(i);
-			for (auto &ownerRecord : ownerRecords[i])
+			for (auto& ownerRecord : ownerRecords[i])
 			{
 				if (cancellation && cancellation->load())
 				{
@@ -476,7 +476,7 @@ uint64_t Executor::Execute(const Schedule &schedule, const std::vector<ID3D12Res
 				}
 				dependencies.push_back(_completions[dep]);
 			}
-			for (const auto &wait : waits)
+			for (const auto& wait : waits)
 			{
 				if (wait.Packet == i)
 				{
@@ -523,4 +523,4 @@ uint64_t Executor::Execute(const Schedule &schedule, const std::vector<ID3D12Res
 		throw;
 	}
 }
-} // namespace Meta
+} // namespace BistroRender
