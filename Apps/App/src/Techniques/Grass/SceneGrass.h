@@ -1,8 +1,8 @@
 #pragma once
-#include "Rendering/Grass/GDX12GrassRenderer.h"
-#include "GeometryTarget.h"
+#include "GDX12GrassRenderer.h"
+#include "Techniques/GeometryTarget.h"
 #include "App.Base/Rendering/IRenderPipeline.h"
-#include "Rendering/Grass/BistroGrassGeometry.h"
+#include "BistroGrassGeometry.h"
 #include <functional>
 
 namespace BistroRender

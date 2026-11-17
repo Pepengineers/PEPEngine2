@@ -7,7 +7,7 @@
 #include "Engine.Core/Logging/Logger.h"
 #include "Engine.Core/AssetManager.h"
 #include "Components/BistroGrassComponents.h"
-#include "BistroGrass.h"
+#include "Techniques/Grass/BistroGrass.h"
 #include "BistroScene.h"
 #include "BistroBounds.h"
 #include "BistroCharacters.h"

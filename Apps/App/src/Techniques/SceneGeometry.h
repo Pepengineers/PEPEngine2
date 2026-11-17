@@ -2,7 +2,7 @@
 #include "Graph/RenderGraphExecutor.h"
 #include "Engine.RendererDX12/GDX12DeviceResources.h"
 #include "Engine.RendererDX12/GDX12Skinning.h"
-#include "SceneGrass.h"
+#include "Techniques/Grass/SceneGrass.h"
 #include <array>
 
 namespace BistroRender

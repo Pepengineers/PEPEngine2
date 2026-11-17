@@ -1,4 +1,4 @@
-#include "Rendering/Grass/GDX12GrassWind.h"
+#include "GDX12GrassWind.h"
 #include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12Quality.h"
 #include <algorithm>

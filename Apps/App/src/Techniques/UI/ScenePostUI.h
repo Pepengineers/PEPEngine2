@@ -1,5 +1,5 @@
 #pragma once
-#include "NativeWork.h"
+#include "Techniques/NativeWork.h"
 #include "App.Base/Rendering/IRenderPipeline.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DepthOfFieldPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12MotionBlurPass.h"
@@ -7,7 +7,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12OutputToScreenPass.h"
 #include "Engine.UI/OffscreenUI.h"
 #include "Engine.UI/UIScreenComposite.h"
-#include "Rendering/UI/BistroUIPosters.h"
+#include "BistroUIPosters.h"
 #include <array>
 
 namespace BistroRender

@@ -1,6 +1,6 @@
 #include "BistroUIPosters.h"
 #include "BistroPaintingSurfaces.h"
-#include "../../BistroUICanvases.h"
+#include "BistroUICanvases.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Engine.UI/OffscreenUI.h"

@@ -1,7 +1,7 @@
 #pragma once
 #include "Engine.Core/ECS/Component.h"
 #include "Engine.Core/ECS/Entity.h"
-#include "Rendering/Grass/GDX12GrassWind.h"
+#include "Techniques/Grass/GDX12GrassWind.h"
 #include <stdexcept>
 
 class GDX12Material;

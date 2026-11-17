@@ -1,4 +1,4 @@
-#include "Rendering/Grass/GDX12GrassRenderer.h"
+#include "GDX12GrassRenderer.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"

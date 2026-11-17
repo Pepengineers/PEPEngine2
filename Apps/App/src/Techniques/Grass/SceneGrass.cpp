@@ -1,5 +1,5 @@
 #include "SceneGrass.h"
-#include "NativeWork.h"
+#include "Techniques/NativeWork.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"

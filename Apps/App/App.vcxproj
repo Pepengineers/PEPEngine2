@@ -94,9 +94,14 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\App.cpp" />
-    <ClCompile Include="src\Rendering\Grass\GDX12GrassRenderer.cpp" />
-    <ClCompile Include="src\Rendering\Grass\GDX12GrassWind.cpp" />
-    <ClCompile Include="src\Rendering\Grass\BistroGrassGeometry.cpp" />
+    <ClCompile Include="src\Techniques\Grass\GDX12GrassRenderer.cpp" />
+    <ClInclude Include="src\Techniques\Grass\BistroGrass.h" />
+    <ClInclude Include="src\Techniques\Grass\BistroGrassGeometry.h" />
+    <ClInclude Include="src\Techniques\Grass\GDX12GrassRenderer.h" />
+    <ClInclude Include="src\Techniques\Grass\GDX12GrassWind.h" />
+    <ClInclude Include="src\Techniques\Grass\SceneGrass.h" />
+    <ClCompile Include="src\Techniques\Grass\GDX12GrassWind.cpp" />
+    <ClCompile Include="src\Techniques\Grass\BistroGrassGeometry.cpp" />
     <ClCompile Include="src\BistroApplication.cpp" />
     <ClCompile Include="src\Graph\RenderGraphCompiler.cpp" />
     <ClCompile Include="src\Graph\RenderGraphExecutor.cpp" />
@@ -129,15 +134,17 @@
     <ClInclude Include="src\Techniques\Water\SceneWater.h" />
     <ClCompile Include="src\Techniques\SceneSunShadows.cpp" />
     <ClCompile Include="src\Techniques\SceneLocalShadows.cpp" />
-    <ClCompile Include="src\Techniques\SceneGrass.cpp" />
+    <ClCompile Include="src\Techniques\Grass\SceneGrass.cpp" />
     <ClCompile Include="src\Rendering\BistroRenderPipeline.cpp" />
-    <ClCompile Include="src\Techniques\ScenePostUI.cpp" />
+    <ClCompile Include="src\Techniques\UI\ScenePostUI.cpp" />
+    <ClInclude Include="src\Techniques\UI\BistroUICanvases.h" />
+    <ClInclude Include="src\Techniques\UI\BistroUIPosters.h" />
     <ClCompile Include="src\Techniques\SceneCloudPicture.cpp" />
     <ClCompile Include="src\Techniques\CloudPictureTexture.cpp" />
     <ClInclude Include="src\Techniques\SceneCloudPicture.h" />
     <ClInclude Include="src\Techniques\CloudPictureTexture.h" />
-    <ClCompile Include="src\Rendering\UI\BistroUIPosters.cpp" />
-    <ClInclude Include="src\Rendering\UI\BistroPaintingSurfaces.h" />
+    <ClCompile Include="src\Techniques\UI\BistroUIPosters.cpp" />
+    <ClInclude Include="src\Techniques\UI\BistroPaintingSurfaces.h" />
     <ClInclude Include="src\BistroApplication.h" />
     <ClInclude Include="src\Techniques\NativeWork.h" />
     <ClInclude Include="src\Techniques\SceneEnvironment.h" />
@@ -147,7 +154,7 @@
     <ClInclude Include="src\Techniques\SceneLighting.h" />
     <ClInclude Include="src\Techniques\SceneTransparency.h" />
     <ClInclude Include="src\Techniques\SceneParticles.h" />
-    <ClInclude Include="src\Techniques\ScenePostUI.h" />
+    <ClInclude Include="src\Techniques\UI\ScenePostUI.h" />
     <None Include="Configs\Startup.ini" />
   </ItemGroup>
   <ItemGroup>
