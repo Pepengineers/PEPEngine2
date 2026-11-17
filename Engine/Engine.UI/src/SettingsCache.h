@@ -25,7 +25,8 @@ namespace Engine::UI
             {
                 const auto* variable = variables[index];
                 const auto name = std::filesystem::path(variable->GetName()).u8string();
-                if (!filter.PassFilter(name.c_str())) continue;
+                const auto description = std::filesystem::path(variable->GetDescription()).u8string();
+                if (filter.IsActive() && !filter.PassFilter((name + " " + description).c_str())) continue;
                 auto* group = &_root;
                 size_t start = 0;
                 for (auto dot = name.find('.'); dot != std::string::npos; dot = name.find('.', start))
@@ -34,8 +35,7 @@ namespace Engine::UI
                     start = dot + 1;
                 }
                 if (!start) group = &_root.Children["General"];
-                group->Variables.push_back({ name, name.substr(start),
-                    std::filesystem::path(variable->GetDescription()).u8string(), index });
+                group->Variables.push_back({ name, name.substr(start), description, index });
             }
             _revision = revision;
             _filter = filter.InputBuf;
