@@ -66,10 +66,15 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	_environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0);
 	_lighting->Freeze(*_geometry, slot);
 	auto* target = c.BackBuffer->GetCurrentBuffer();
+	const bool singleDirect = !AsyncQueues.GetValue();
+	const bool earlyEnvironment = !singleDirect && _environment->AsyncComputeEnabled();
 	const auto append = [&](BistroRender::Graph& graph, std::vector<ID3D12Resource*>& resources)
 	{
 		_post->BeginPlan();
-		_environment->Append(graph, resources);
+		if (!earlyEnvironment)
+		{
+			_environment->Append(graph, resources);
+		}
 		_lighting->SetHDRContinuation(
 		    [&](auto& g, auto& bindings, auto* hdr)
 		    {
@@ -82,8 +87,12 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	{
 		_cloudPicture->Append(graph, resources);
 		_post->AppendPosters(graph, resources);
+		if (earlyEnvironment)
+		{
+			_environment->Append(graph, resources);
+		}
 	};
-	_schedule = _geometry->Plan(slot, append, prelude, !AsyncQueues.GetValue());
+	_schedule = _geometry->Plan(slot, append, prelude, singleDirect);
 	_executor->Reserve(_schedule);
 	const auto record = [&](BistroRender::Id op, uint32_t list, ID3D12GraphicsCommandList* commands)
 	{
