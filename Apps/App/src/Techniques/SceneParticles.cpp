@@ -1,4 +1,5 @@
 #include "SceneParticles.h"
+#include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.RendererDX12/GDX12MotionBlurSettings.h"
@@ -8,6 +9,10 @@ namespace BistroRender
 {
 namespace
 {
+AutoConsoleVariable<bool> AsyncSimulation(L"App.Async.Particles", false,
+                                          L"Run particle pool initialization and simulation on the local COMPUTE queue.",
+                                          EConsoleVariableFlags::Default);
+
 State BoundaryState(ID3D12Resource* resource)
 {
 	const auto desc = resource->GetDesc();
@@ -70,7 +75,8 @@ SceneParticles::~SceneParticles()
 	}
 }
 void SceneParticles::Packet(Graph& graph, const std::vector<ID3D12Resource*>& bindings, const char* name,
-                            std::vector<Access> accesses, std::function<void(GDX12CommandList*)> record)
+                            std::vector<Access> accesses, std::function<void(GDX12CommandList*)> record,
+                            Queue target)
 {
 	std::vector<Access> unique;
 	for (auto access : accesses)
@@ -94,7 +100,7 @@ void SceneParticles::Packet(Graph& graph, const std::vector<ID3D12Resource*>& bi
 		}
 	}
 	_work.AddOwned(graph, name, std::move(unique), bindings, std::move(record),
-	               "Particle packets cannot submit private signals");
+	               "Particle packets cannot submit private signals", {}, target);
 }
 void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* simulationDepth,
                              GDX12Texture* rasterDepth, GDX12Texture* accum, GDX12Texture* reveal,
@@ -128,6 +134,9 @@ void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& binding
 	const auto camera =
 	    ResourceAccess(graph, bindings, &_resources.FrameConstants.at(slot)->CameraCB->GetResource(), Mode::Read);
 	std::array<std::vector<Access>, 2> pools;
+	const bool async = AsyncSimulation.GetValue();
+	const Queue target = async ? Queue::Compute : Queue::Direct;
+	const State simulationRead = async ? State(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE) : State(-1);
 	for (size_t group = 0; group < groups.size(); ++group)
 	{
 		const auto ids = groups[group];
@@ -140,27 +149,33 @@ void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& binding
 		for (auto& access : initialization)
 		{
 			access.Usage = Mode::ReadWrite;
+			if (async)
+			{
+				access.Required = UnorderedAccess;
+			}
 		}
 		Packet(graph, bindings,
 		       group == 0 ? "particle A pool initialization/reset" : "particle B pool initialization/reset",
 		       initialization,
-		       [this, simulation, ids](auto* cmd) { simulation->InitializePools(cmd, &_resources, &ids); });
+		       [this, simulation, ids](auto* cmd) { simulation->InitializePools(cmd, &_resources, &ids); }, target);
 		auto simulationAccess = initialization;
 		AddResources(graph, bindings, simulationAccess, simulation->GetConstantResources(slot, &ids), Mode::Read);
 		simulationAccess.push_back(camera);
 		if (group == 1)
 		{
-			simulationAccess.push_back(ResourceAccess(graph, bindings, simulationDepth->GetResource(), Mode::Read));
+			simulationAccess.push_back(
+			    ResourceAccess(graph, bindings, simulationDepth->GetResource(), Mode::Read, simulationRead));
 		}
 		if (interaction.Resource)
 		{
-			simulationAccess.push_back(ResourceAccess(graph, bindings, interaction.Resource, Mode::Read));
+			simulationAccess.push_back(
+			    ResourceAccess(graph, bindings, interaction.Resource, Mode::Read, simulationRead));
 		}
 		Packet(graph, bindings,
 		       group == 0 ? "particle A simulate/death/spawn/burst/publish"
 		                  : "particle B simulate/death/spawn/burst/publish",
 		       std::move(simulationAccess), [this, simulation, simulationDepth, ids](auto* cmd)
-		       { simulation->Execute(cmd, &_resources, _common, simulationDepth, &ids); });
+		       { simulation->Execute(cmd, &_resources, _common, simulationDepth, &ids); }, target);
 	}
 	std::vector<Access> preparation{camera};
 	AddAccesses(graph, bindings, preparation, _pass.NativePreparationAccesses());
