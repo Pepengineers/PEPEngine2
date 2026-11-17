@@ -16,9 +16,15 @@ namespace
         {
         case GDX12UpscalerProvider::Native: return {};
         case GDX12UpscalerProvider::TAA:
-            if (q != GDX12UpscalerQuality::Default && q != GDX12UpscalerQuality::NativeAA)
-                throw std::invalid_argument("Native TAA supports Default/NativeAA at output resolution only");
-            return std::make_unique<GDX12TAAPass>();
+            switch (q)
+            {
+            case GDX12UpscalerQuality::Default:
+            case GDX12UpscalerQuality::NativeAA: return std::make_unique<GDX12TAAPass>();
+            case GDX12UpscalerQuality::Quality: return std::make_unique<GDX12TAAPass>(1.0f / 1.5f);
+            case GDX12UpscalerQuality::Balanced: return std::make_unique<GDX12TAAPass>(1.0f / 1.7f);
+            case GDX12UpscalerQuality::Performance: return std::make_unique<GDX12TAAPass>(0.5f);
+            default: throw std::invalid_argument("TAA supports Default, NativeAA, Quality, Balanced and Performance");
+            }
         case GDX12UpscalerProvider::XeSS:
         {
             const xess_quality_settings_t modes[] = { XESS_QUALITY_SETTING_ULTRA_QUALITY_PLUS,

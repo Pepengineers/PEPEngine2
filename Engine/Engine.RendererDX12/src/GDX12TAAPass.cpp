@@ -2,9 +2,10 @@
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
 #include "Engine.Core/Logging/Logger.h"
+#include <algorithm>
 #include <stdexcept>
 
-GDX12TAAPass::GDX12TAAPass()
+GDX12TAAPass::GDX12TAAPass(float renderScale) : _renderScale(renderScale)
 {
     _flags = RENDER_PASS_FLAG_UPSCALER | RENDER_PASS_FLAG_USE_JITTER | RENDER_PASS_FLAG_USE_CAMERAS;
     _numInputs = 3;
@@ -18,8 +19,9 @@ void GDX12TAAPass::Setup(GDX12DeviceResources* resources, RenderPipelineCommonDa
 }
 void GDX12TAAPass::QueryRenderTargetResolution()
 {
-    _commonData->DownscaledWidth = _commonData->WindowWidth;
-    _commonData->DownscaledHeight = _commonData->WindowHeight;
+    const auto scale = [this](UINT size) { return size ? (std::max)(1u, UINT(size * _renderScale)) : 0u; };
+    _commonData->DownscaledWidth = scale(_commonData->WindowWidth);
+    _commonData->DownscaledHeight = scale(_commonData->WindowHeight);
 }
 void GDX12TAAPass::Initialize()
 {
@@ -33,16 +35,20 @@ void GDX12TAAPass::Initialize()
         _depth[i].GetResource()->D3DResource->SetName(i ? L"TAA.Depth1" : L"TAA.Depth0");
     }
     GDX12RootSignatureDesc root;
-    static_assert(sizeof(Parameters) == 24 * sizeof(UINT));
-    root.Constants = {24};
+    static_assert(sizeof(Parameters) == 28 * sizeof(UINT));
+    root.Constants = {sizeof(Parameters) / sizeof(UINT)};
     root.NumSingleCBVSlots = 1;
     root.NumSingleSRVSlots = 5;
     root.NumSingleUAVSlots = 2;
     root.StaticSamplers = {CD3DX12_STATIC_SAMPLER_DESC(0, D3D12_FILTER_MIN_MAG_MIP_LINEAR,
         D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP, D3D12_TEXTURE_ADDRESS_MODE_CLAMP)};
     _root = std::make_unique<GDX12RootSignature>(_resources->Device, root);
-    _resolve = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(), SHADERS_FOLDER "NativeTAA.hlsl", "Resolve");
-    Log::Info("Reconstruction", "Effective Native TAA: render=output=", _commonData->WindowWidth, "x", _commonData->WindowHeight,
+    const bool upscale = _renderScale < 1.0f;
+    _resolve = GDX12RenderHelpers::CreateComputePipeline(_resources->Device, _root.get(),
+        SHADERS_FOLDER "NativeTAA.hlsl", upscale ? "ResolveUpscaled" : "Resolve");
+    Log::Info("Reconstruction", upscale ? "Effective TAAU: render=" : "Effective Native TAA: render=",
+        _commonData->DownscaledWidth, "x", _commonData->DownscaledHeight,
+        "; output=", _commonData->WindowWidth, "x", _commonData->WindowHeight,
         "; DIRECT compute resolve, sequential color/depth history");
     CancelRecording();
 }
@@ -61,9 +67,10 @@ void GDX12TAAPass::PrepareRecording()
     _frame.Constants.Width = _frame.Constants.Height = 0;
     if (!_commonData->WindowWidth || !_commonData->WindowHeight) return;
     const auto width = _commonData->WindowWidth, height = _commonData->WindowHeight;
+    const auto inputWidth = _commonData->DownscaledWidth, inputHeight = _commonData->DownscaledHeight;
     for (auto* input : _inputs)
-        if (input->GetTexture()->GetWidth() != width || input->GetTexture()->GetHeight() != height)
-            throw std::invalid_argument("Native TAA requires matching native-resolution inputs");
+        if (input->GetTexture()->GetWidth() != inputWidth || input->GetTexture()->GetHeight() != inputHeight)
+            throw std::invalid_argument("TAA requires color, depth and motion at render resolution");
     auto& frame = _frame;
     frame.Write = _write;
     frame.ViewProjection = _commonData->CameraView * _commonData->CameraViewToClip;
@@ -72,6 +79,9 @@ void GDX12TAAPass::PrepareRecording()
     XMStoreFloat4x4(&frame.Constants.PreviousViewProjection, XMMatrixTranspose(_previousViewProjection));
     frame.Constants.Width = width;
     frame.Constants.Height = height;
+    frame.Constants.InputWidth = inputWidth;
+    frame.Constants.InputHeight = inputHeight;
+    frame.Constants.InputJitterUV = {frame.Jitter.x / inputWidth, frame.Jitter.y / inputHeight};
     frame.Constants.Valid = _valid && _revision == frame.Revision &&
         !_commonData->ResetHistory && !_commonData->ResetUpscalerHistory && !_commonData->RequestHistoryReset;
     frame.Constants.HistoryWeight = GetTAAHistoryWeight();
@@ -91,10 +101,10 @@ void GDX12TAAPass::PrepareRecording()
 void GDX12TAAPass::RecordCommands(GDX12CommandList* commands, const Frame& frame) const
 {
     if (!frame.Constants.Width || !frame.Constants.Height) return;
-    GDX12_SCOPED_EVENT(commands, "Native TAA resolve", Colors::Cyan);
+    GDX12_SCOPED_EVENT(commands, _renderScale < 1.0f ? "TAAU resolve" : "Native TAA resolve", Colors::Cyan);
     commands->SetComputeRootSignature(_root.get());
     commands->SetDescriptorHeaps({_resources->SRV_UAV_Heap.get()});
-    commands->GetCommandList()->SetComputeRoot32BitConstants(0, 24, &frame.Constants, 0);
+    commands->GetCommandList()->SetComputeRoot32BitConstants(0, sizeof(Parameters) / sizeof(UINT), &frame.Constants, 0);
     commands->SetComputeRootConstantBufferView(1, frame.CameraAddress);
     for (UINT i = 0; i < frame.Reads.size(); ++i)
     {
