@@ -17,7 +17,7 @@ public:
     bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd); }
 private:
     void Packet(Graph&, const std::vector<ID3D12Resource*>&, const char*, std::vector<Access>,
-        std::function<void(GDX12CommandList*)>);
+        std::function<void(GDX12CommandList*)>, Queue target = Queue::Direct);
     GDX12DeviceResources& _resources;
     RenderPipelineCommonData& _common;
     GDX12ParticlesPass _pass;

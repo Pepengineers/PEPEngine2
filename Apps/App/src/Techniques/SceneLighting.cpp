@@ -1,4 +1,5 @@
 #include "SceneLighting.h"
+#include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <FidelityFX/host/ffx_sssr.h>
 #include <FidelityFX/host/backends/dx12/ffx_dx12.h>
@@ -9,6 +10,10 @@ namespace BistroRender
 {
 namespace
 {
+AutoConsoleVariable<bool> AsyncLightGrid(L"App.Async.LightGrid", false,
+                                        L"Build the light grid on the local COMPUTE queue.",
+                                        EConsoleVariableFlags::Default);
+
 constexpr UINT LightGridThreads = 64;
 constexpr UINT LightingTileSize = 8;
 constexpr UINT MaxDispatchGroups = D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION;
@@ -182,9 +187,12 @@ void SceneLighting::AppendGpuLightGrid(Graph& graph, std::vector<ID3D12Resource*
 	const auto gridCB = grid.Constants->GetElementAddress(0);
 	const auto srv = lights.GetSRV()->GPUHandle;
 	const auto uav = grid.Masks->GetUAV()->GPUHandle;
+	const bool async = AsyncLightGrid.GetValue();
+	const State lightRead = async ? State(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
+	                              : State(D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 	_work.Add(graph, "GPU light grid masks",
 	          {{masks, Mode::Write, UnorderedAccess},
-	           {sources, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
+	           {sources, Mode::Read, lightRead},
 	           {scene.FrameIds[1], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
 	           {constants, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}},
 	          [=](auto* cmd)
@@ -199,7 +207,7 @@ void SceneLighting::AppendGpuLightGrid(Graph& graph, std::vector<ID3D12Resource*
 		          cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(0), uav);
 		          cmd->Dispatch((std::min)(groups, MaxDispatchGroups),
 		                        (groups + MaxDispatchGroups - 1) / MaxDispatchGroups, 1);
-	          });
+	          }, {}, async ? Queue::Compute : Queue::Direct);
 }
 void SceneLighting::AppendAO(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
@@ -224,9 +232,9 @@ void SceneLighting::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings,
 	_work.Commands.clear();
 	_transparency->PrepareWater(graph, bindings, geometry, _slot);
 	AppendShadows(graph, bindings, geometry, environment);
-	AppendAO(graph, bindings);
 	PrepareDeferred(geometry, environment);
 	AppendGpuLightGrid(graph, bindings, geometry);
+	AppendAO(graph, bindings);
 	AppendDeferred(graph, bindings, geometry, environment);
 	AppendComposition(graph, bindings, geometry, environment, AppendSSR(graph, bindings, geometry, environment));
 }

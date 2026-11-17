@@ -90,16 +90,18 @@ struct NativeWork
 		return id;
 	}
 	Id Add(Graph& graph, std::string name, std::vector<Access> accesses,
-	       std::function<void(ID3D12GraphicsCommandList*)> record, std::vector<Id> dependencies = {})
+	       std::function<void(ID3D12GraphicsCommandList*)> record, std::vector<Id> dependencies = {},
+	       Queue target = Queue::Direct)
 	{
 		const Id id = Id(graph.Operations.size());
 		graph.Operations.push_back({std::move(name), std::move(accesses), std::move(dependencies)});
+		graph.Operations.back().Target = target;
 		Commands.emplace_back(id, std::move(record));
 		return id;
 	}
 	Id AddOwned(Graph& graph, std::string name, std::vector<Access> accesses,
 	            const std::vector<ID3D12Resource*>& bindings, std::function<void(GDX12CommandList*)> record,
-	            const char* signalError, std::vector<Id> dependencies = {})
+	            const char* signalError, std::vector<Id> dependencies = {}, Queue target = Queue::Direct)
 	{
 		std::vector<GDX12RecordingStates::Binding> states;
 		states.reserve(accesses.size());
@@ -120,9 +122,8 @@ struct NativeWork
 			    }
 			    tracker.Finish(commands);
 		    },
-		    std::move(dependencies));
+		    std::move(dependencies), target);
 		graph.Operations.at(operation).OwnerRecording = true;
-		graph.Operations.at(operation).Target = Queue::Direct;
 		return operation;
 	}
 	bool Record(Id id, ID3D12GraphicsCommandList* commands) const
