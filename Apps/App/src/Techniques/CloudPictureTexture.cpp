@@ -15,6 +15,9 @@ namespace BistroRender
 {
 namespace
 {
+AutoConsoleVariable<bool> AsyncCloudPicture(L"App.Async.CloudPicture", false,
+                                            L"Run local Cloud Picture generation on the COMPUTE queue.",
+                                            EConsoleVariableFlags::Default);
 AutoConsoleVariable<float> SpeedScale(L"App.CloudPicture.SpeedScale", 4.f,
                                       L"Cloud picture animation speed multiplier; 1 is the original MGPU-Noise speed.",
                                       EConsoleVariableFlags::Default,
@@ -425,7 +428,8 @@ void CloudPictureTexture::Append(Graph& graph, std::vector<ID3D12Resource*>& bin
 		const auto parameters = p.Parameters;
 		const auto uav = slot.Uav;
 		p.Work.Add(graph, "MGPU-Noise cloud picture local producer", {{output, Mode::Write, UnorderedAccess}},
-		           [&p, parameters, uav](auto* cmd) { p.Dispatch(cmd, parameters, uav); });
+		           [&p, parameters, uav](auto* cmd) { p.Dispatch(cmd, parameters, uav); }, {},
+		           AsyncCloudPicture.GetValue() ? Queue::Compute : Queue::Direct);
 	}
 	else
 	{
