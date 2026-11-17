@@ -1,4 +1,4 @@
-#include "Rendering/Grass/BistroGrassGeometry.h"
+#include "BistroGrassGeometry.h"
 #include "App.Base/Modules/RenderModule.h"
 
 BistroGrassGeometry::BistroGrassGeometry(std::shared_ptr<SceneManagerModule> scenes, RenderModule& renderer)

@@ -1,7 +1,7 @@
 #pragma once
 #include "Components/BistroInteractionSource.h"
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
-#include "Rendering/Grass/GDX12GrassWind.h"
+#include "GDX12GrassWind.h"
 #include "Components/BistroGrassComponents.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include <map>

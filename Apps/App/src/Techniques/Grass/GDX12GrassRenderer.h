@@ -1,6 +1,6 @@
 #pragma once
 #include <cstdint>
-#include "Rendering/Grass/GDX12GrassWind.h"
+#include "GDX12GrassWind.h"
 #include "Engine.RendererDX12/GDX12UploadBuffer.h"
 #include "Engine.RendererDX12/GDX12RootSignature.h"
 #include "Engine.RendererDX12/GDX12RenderGeometry.h"

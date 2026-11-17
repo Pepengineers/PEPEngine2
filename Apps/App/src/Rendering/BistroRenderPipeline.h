@@ -3,7 +3,7 @@
 #include "Techniques/SceneGeometry.h"
 #include "Techniques/SceneEnvironment.h"
 #include "Techniques/SceneLighting.h"
-#include "Techniques/ScenePostUI.h"
+#include "Techniques/UI/ScenePostUI.h"
 #include "Techniques/SceneCloudPicture.h"
 #include "Common/GameTimer.h"
 
