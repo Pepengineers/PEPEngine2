@@ -75,3 +75,4 @@ Engine/Engine.RendererDX12/Shaders/PDBs/
 !/.serena/project.yml
 
 *.tmp/
+/Temp/
