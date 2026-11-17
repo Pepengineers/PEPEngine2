@@ -2,7 +2,7 @@
 #include "NativeWork.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
 
-namespace Meta
+namespace BistroRender
 {
 class SceneParticles
 {

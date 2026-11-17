@@ -9,3 +9,6 @@ AllowShortIfStatementsOnASingleLine: Never
 AllowShortLoopsOnASingleLine: false
 InsertBraces: true
 SortIncludes: Never
+DerivePointerAlignment: false
+PointerAlignment: Left
+ReferenceAlignment: Left

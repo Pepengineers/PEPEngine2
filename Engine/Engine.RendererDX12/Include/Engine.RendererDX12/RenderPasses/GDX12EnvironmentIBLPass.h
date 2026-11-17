@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <climits>
 #include <functional>
-namespace Meta { class SceneEnvironment; }
+namespace BistroRender { class SceneEnvironment; }
 
 // Outputs: diffuse irradiance, GGX radiance (8 mips when enabled), DFG, source cube.
 class GDX12EnvironmentIBLPass final : public GDX12RenderPass
@@ -22,7 +22,7 @@ public:
     // Drain graph queues before replacing resources or descriptors.
     void SetResourceRetirement(std::function<void()> retire) { _retire = std::move(retire); }
 private:
-    friend class Meta::SceneEnvironment;
+    friend class BistroRender::SceneEnvironment;
     void InitializeKernels();
     void CreateTexture(GDX12Texture& texture, UINT width, UINT height, UINT depth, UINT mips, bool cube);
     void EnsureOutputs(bool enabled, UINT cubeSize);

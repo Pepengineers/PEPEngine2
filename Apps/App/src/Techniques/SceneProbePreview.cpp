@@ -3,7 +3,7 @@
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 
-namespace Meta
+namespace BistroRender
 {
 SceneProbePreview::SceneProbePreview(GDX12DeviceResources& resources, RenderPipelineCommonData& common)
     : _resources(resources), _common(common), _frames(resources.FrameConstants.size())
@@ -116,7 +116,7 @@ void SceneProbePreview::Append(Graph& graph, std::vector<ID3D12Resource*>& bindi
         view.Format = DXGI_FORMAT_R32_FLOAT;
         view.SRV_UAV_Heap = _resources.SRV_UAV_Heap.get();
         view.SRVHeapIndex = frame.Depth->IsInitialized() ? frame.Depth->GetSRV()->HeapIndex :
-            view.SRV_UAV_Heap->GetAvailableIndex(105000);
+            view.SRV_UAV_Heap->GetAvailableIndex(SceneDescriptorStart);
         view.SRVDesc.Format = DXGI_FORMAT_R32_FLOAT;
         view.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
         view.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;

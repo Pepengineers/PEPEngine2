@@ -4,7 +4,7 @@
 #include <functional>
 #include <memory>
 #include <vector>
-namespace Meta {
+namespace BistroRender {
 // Frozen trees: a group launches children and returns; its continuation is a
 // separate task queued by the last child. No worker waits for descendants.
 struct RecordingGroup {

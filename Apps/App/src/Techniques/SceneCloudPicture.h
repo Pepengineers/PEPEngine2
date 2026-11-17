@@ -3,7 +3,7 @@
 #include "App.Base/Rendering/IRenderPipeline.h"
 #include <functional>
 
-namespace Meta {
+namespace BistroRender {
 class SceneCloudPicture {
 public:
     explicit SceneCloudPicture(RenderPipelineContext&);

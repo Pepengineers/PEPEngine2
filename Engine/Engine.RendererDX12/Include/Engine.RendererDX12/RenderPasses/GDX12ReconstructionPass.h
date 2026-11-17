@@ -2,7 +2,7 @@
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 
-namespace Meta { class ScenePostUI; }
+namespace BistroRender { class ScenePostUI; }
 class GDX12TAAPass;
 
 class GDX12ReconstructionPass final : public GDX12RenderPass
@@ -26,7 +26,7 @@ public:
     const GDX12ReconstructionStatus& GetStatus() const { return _status; }
 
 private:
-    friend class Meta::ScenePostUI;
+    friend class BistroRender::ScenePostUI;
     struct StableOutputLink final : IRenderPassLink
     {
         IRenderPassLink* Target = nullptr;

@@ -98,13 +98,13 @@
     <ClCompile Include="src\Rendering\Grass\GDX12GrassWind.cpp" />
     <ClCompile Include="src\Rendering\Grass\BistroGrassGeometry.cpp" />
     <ClCompile Include="src\BistroApplication.cpp" />
-    <ClCompile Include="src\Graph\MetaGraphCompiler.cpp" />
-    <ClCompile Include="src\Graph\MetaGraphExecutor.cpp" />
+    <ClCompile Include="src\Graph\RenderGraphCompiler.cpp" />
+    <ClCompile Include="src\Graph\RenderGraphExecutor.cpp" />
     <ClCompile Include="src\Graph\QueueSubmission.cpp" />
 
     <ClInclude Include="src\Graph\QueueSubmission.h" />
 
-    <ClCompile Include="src\Graph\MetaGraphRecorder.cpp" />
+    <ClCompile Include="src\Graph\RenderGraphRecorder.cpp" />
     <ClCompile Include="src\Techniques\SceneGeometry.cpp" />
     <ClCompile Include="src\Techniques\SceneEnvironment.cpp" />
     <ClCompile Include="src\Techniques\SceneAO.cpp" />
@@ -113,13 +113,20 @@
     <ClCompile Include="src\Techniques\SceneLighting.cpp" />
     <ClCompile Include="src\Techniques\SceneTransparency.cpp" />
     <ClCompile Include="src\Techniques\SceneParticles.cpp" />
-    <ClCompile Include="src\Techniques\SceneWater.cpp" />
+    <ClCompile Include="src\Techniques\Water\SceneWater.cpp" />
 
-    <ClCompile Include="src\Rendering\Water\GDX12Fluid.cpp" />
-    <ClCompile Include="src\Rendering\Water\GDX12FluidPass.cpp" />
+    <ClCompile Include="src\Techniques\Water\GDX12Fluid.cpp" />
+    <ClCompile Include="src\Techniques\Water\GDX12FluidPass.cpp" />
 
-    <ClCompile Include="src\Rendering\Water\BistroWaterRendering.cpp" />
-    <ClInclude Include="src\Techniques\SceneWater.h" />
+    <ClCompile Include="src\Techniques\Water\BistroWaterRendering.cpp" />
+    <ClInclude Include="src\Techniques\ShadowGeometry.h" />
+    <ClInclude Include="src\Techniques\Water\BistroWater.h" />
+    <ClInclude Include="src\Techniques\Water\BistroWaterLayout.h" />
+    <ClInclude Include="src\Techniques\Water\BistroWaterRendering.h" />
+    <ClInclude Include="src\Techniques\Water\GDX12Fluid.h" />
+    <ClInclude Include="src\Techniques\Water\GDX12FluidPass.h" />
+    <ClInclude Include="src\Techniques\Water\GDX12FluidSolver.h" />
+    <ClInclude Include="src\Techniques\Water\SceneWater.h" />
     <ClCompile Include="src\Techniques\SceneSunShadows.cpp" />
     <ClCompile Include="src\Techniques\SceneLocalShadows.cpp" />
     <ClCompile Include="src\Techniques\SceneGrass.cpp" />

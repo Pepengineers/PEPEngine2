@@ -1,12 +1,13 @@
 #include "SceneGeometry.h"
 #include "NativeWork.h"
+#include "ShadowGeometry.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12ShaderCompiler.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include <algorithm>
 #include <fstream>
 
-namespace Meta
+namespace BistroRender
 {
 namespace
 {
@@ -17,8 +18,8 @@ constexpr UINT CounterBytes = sizeof(UINT);
 constexpr UINT EmptyGeometryBytes = 64;
 constexpr Id GBufferResourceBegin = 12;
 constexpr Id DepthResource = 17;
-constexpr Id VertexResource = 18;
-constexpr Id IndexResource = 19;
+constexpr Id VertexResource = SceneVertices;
+constexpr Id IndexResource = SceneIndices;
 constexpr Id SkinResourceBegin = 20;
 constexpr Id PaletteUploadOperation = 0;
 constexpr Id SkinningOperation = 1;
@@ -31,12 +32,12 @@ constexpr Id BatchingOperationCount = 4;
 constexpr State ShaderRead =
     D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 } // namespace
-SceneGeometry::SceneGeometry(RenderPipelineContext &c)
+SceneGeometry::SceneGeometry(RenderPipelineContext& c)
     : _resources(c.Primary), _slots(c.Primary.FrameConstants.size()), _common(c.Common)
 {
-	auto &r = c.Primary;
+	auto& r = c.Primary;
 	_grass = std::make_unique<SceneGrass>(c);
-	for (auto &frame : r.FrameConstants)
+	for (auto& frame : r.FrameConstants)
 	{
 		frame->MaterialCache->TrackChanges();
 	}
@@ -69,7 +70,7 @@ SceneGeometry::SceneGeometry(RenderPipelineContext &c)
 	d.StaticSamplers = GetStaticSamplers();
 	_drawRoot = std::make_unique<GDX12RootSignature>(r.Device, d);
 	_signature = GDX12RenderHelpers::CreateIndexedDrawSignature(r.Device, _drawRoot.get());
-	auto &compiler = GDX12ShaderCompiler::GetInstance();
+	auto& compiler = GDX12ShaderCompiler::GetInstance();
 	D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};
 	p.pRootSignature = _drawRoot->GetRootSignature().Get();
 	p.InputLayout = {r.InputLayouts.at("Default").data(), UINT(r.InputLayouts.at("Default").size())};
@@ -97,7 +98,7 @@ SceneGeometry::SceneGeometry(RenderPipelineContext &c)
 	std::copy(std::begin(Formats), std::end(Formats), p.RTVFormats);
 	ThrowIfFailed(r.Device->GetDevice()->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&_gbuffer)));
 }
-void SceneGeometry::BufferFor(Buffer &b, UINT64 bytes, UINT stride, bool upload)
+void SceneGeometry::BufferFor(Buffer& b, UINT64 bytes, UINT stride, bool upload)
 {
 	bytes = (std::max)(bytes, UINT64(stride));
 	if (b.Data && b.Bytes == bytes)
@@ -113,7 +114,7 @@ void SceneGeometry::BufferFor(Buffer &b, UINT64 bytes, UINT stride, bool upload)
 	}
 	auto desc = CD3DX12_RESOURCE_DESC::Buffer(bytes, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
 	b.Data = _resources.Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, desc, D3D12_RESOURCE_STATE_COMMON);
-	auto *heap = _resources.SRV_UAV_Heap.get();
+	auto* heap = _resources.SRV_UAV_Heap.get();
 	const auto srvIndex = b.Srv.HeapIndex == UINT_MAX ? heap->GetAvailableIndex(SceneDescriptorStart) : b.Srv.HeapIndex;
 	const auto uavIndex = b.Uav.HeapIndex == UINT_MAX ? heap->GetAvailableIndex(SceneDescriptorStart) : b.Uav.HeapIndex;
 	D3D12_SHADER_RESOURCE_VIEW_DESC srv{};
@@ -133,7 +134,7 @@ void SceneGeometry::Resize(UINT width, UINT height)
 {
 	_width = width;
 	_height = height;
-	for (auto &s : _slots)
+	for (auto& s : _slots)
 	{
 		s.PlannedBindings.clear();
 		for (UINT i = 0; i < 5; ++i)
@@ -172,7 +173,7 @@ void SceneGeometry::Resize(UINT width, UINT height)
 		depthView.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
 		depthView.SRVDesc.Texture2D.MipLevels = 1;
 		s.DepthView->Initialize(depthView);
-		auto *heap = _resources.DSVHeap.get();
+		auto* heap = _resources.DSVHeap.get();
 		D3D12_DEPTH_STENCIL_VIEW_DESC dsv{};
 		dsv.Format = DXGI_FORMAT_D32_FLOAT;
 		dsv.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
@@ -185,11 +186,11 @@ void SceneGeometry::Resize(UINT width, UINT height)
 }
 void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWork> skin)
 {
-	auto &s = _slots.at(index);
-	auto &f = *_resources.FrameConstants.at(index);
+	auto& s = _slots.at(index);
+	auto& f = *_resources.FrameConstants.at(index);
 	// CPU preparation is complete. These per-frame uploads cannot change until
 	// the returned frame fence; workers only record copies of assigned ranges.
-	auto input = [&](Buffer &destination, auto &buffer, bool frameLocal = false)
+	auto input = [&](Buffer& destination, auto& buffer, bool frameLocal = false)
 	{
 		BufferFor(destination, UINT64(buffer->GetElementCount()) * buffer->GetElementSize(), buffer->GetElementSize(),
 		          true);
@@ -229,22 +230,22 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 				}
 			}
 		}
-		void *data = nullptr;
+		void* data = nullptr;
 		D3D12_RANGE noRead{};
 		ThrowIfFailed(destination.Source->Map(0, &noRead, &data));
-		const auto *source = buffer->GetCPUData();
+		const auto* source = buffer->GetCPUData();
 		if (!resident)
 		{
 			std::memset(data, 0, SIZE_T(destination.Bytes));
 		}
-		for (const auto &[begin, end] : destination.Ranges)
+		for (const auto& [begin, end] : destination.Ranges)
 		{
 			const UINT readableEnd = (std::min)(end, count);
 			if (begin >= readableEnd)
 			{
 				continue;
 			}
-			auto *target = static_cast<BYTE *>(data) + UINT64(begin) * stride;
+			auto* target = static_cast<BYTE*>(data) + UINT64(begin) * stride;
 			if (stride == sizeof(*source))
 			{
 				std::memcpy(target, source + begin, SIZE_T(readableEnd - begin) * stride);
@@ -253,7 +254,7 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 			{
 				for (UINT i = begin; i < readableEnd; ++i)
 				{
-					std::memcpy(static_cast<BYTE *>(data) + UINT64(i) * stride, source + i, sizeof(*source));
+					std::memcpy(static_cast<BYTE*>(data) + UINT64(i) * stride, source + i, sizeof(*source));
 				}
 			}
 		}
@@ -261,10 +262,10 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 		destination.Revision = revision;
 		destination.Origin = buffer->GetResource().D3DResource;
 	};
-	input(s.Buffers[0], f.InstanceCache, true);
-	input(s.Buffers[1], _resources.IndirectCommandsCache);
-	input(s.Buffers[2], f.MaterialCache, true);
-	input(s.Buffers[3], f.TransformCache, true);
+	input(s.Buffers[SceneInstances], f.InstanceCache, true);
+	input(s.Buffers[SceneCommands], _resources.IndirectCommandsCache);
+	input(s.Buffers[SceneMaterials], f.MaterialCache, true);
+	input(s.Buffers[SceneTransforms], f.TransformCache, true);
 	{
 		s.FrameBuffers[0].Data = f.MainCB->GetResource().D3DResource;
 		s.FrameBuffers[0].Bytes = UINT64(f.MainCB->GetElementCount()) * f.MainCB->GetElementSize();
@@ -316,7 +317,7 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 	s.SkinBindings.clear();
 	s.SkinDeclarations.clear();
 	s.SkinIds.clear();
-	for (const auto &work : s.Skin)
+	for (const auto& work : s.Skin)
 	{
 		std::array<Id, 5> ids{};
 		for (UINT j = 0; j < 5; ++j)
@@ -338,10 +339,10 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 		s.SkinIds.push_back(ids);
 	}
 }
-Schedule SceneGeometry::Plan(UINT index, const AppendTechnique &append, const AppendTechnique &prelude,
+Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const AppendTechnique& prelude,
                              bool singleDirect)
 {
-	auto &s = _slots.at(index);
+	auto& s = _slots.at(index);
 	s.PlannedBindings.clear();
 	Graph g;
 	for (UINT i = 0; i < 8; ++i)
@@ -364,15 +365,15 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique &append, const Ap
 	Operation palettes{"skin palette uploads"}, skinning{"skin deformation"};
 	palettes.Target = Queue::Copy;
 	skinning.Target = Queue::Compute;
-	const auto add = [](Operation &op, Access access)
+	const auto add = [](Operation& op, Access access)
 	{
 		if (std::none_of(op.Accesses.begin(), op.Accesses.end(),
-		                 [&](const auto &a) { return a.Resource == access.Resource; }))
+		                 [&](const auto& a) { return a.Resource == access.Resource; }))
 		{
 			op.Accesses.push_back(access);
 		}
 	};
-	for (const auto &ids : s.SkinIds)
+	for (const auto& ids : s.SkinIds)
 	{
 		add(palettes, {ids[0], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
 		add(palettes, {ids[1], Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST});
@@ -411,7 +412,7 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique &append, const Ap
 		cull.Accesses.push_back({i, Mode::ReadWrite, UnorderedAccess});
 	}
 	cull.Target = Queue::Compute;
-	for (auto &a : cull.Accesses)
+	for (auto& a : cull.Accesses)
 	{
 		if (a.Usage == Mode::Read)
 		{
@@ -434,7 +435,7 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique &append, const Ap
 	auto draw = depth;
 	draw.Name = "scene GBuffer ExecuteIndirect";
 	draw.Accesses.back() = {DepthResource, Mode::Read, D3D12_RESOURCE_STATE_DEPTH_READ};
-	for (auto *operation : {&g.Operations.back(), &draw})
+	for (auto* operation : {&g.Operations.back(), &draw})
 	{
 		operation->Accesses.push_back(
 		    {VertexResource, Mode::Read,
@@ -455,7 +456,7 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique &append, const Ap
 		}
 		for (Id op : {DepthOperation, GBufferOperation})
 		{
-			auto &accesses = g.Operations[op].Accesses;
+			auto& accesses = g.Operations[op].Accesses;
 			accesses.erase(std::remove_if(accesses.begin(), accesses.end(),
 			                              [](auto a) { return a.Resource == 4 || a.Resource == 5; }),
 			               accesses.end());
@@ -556,7 +557,7 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique &append, const Ap
 	for (auto id : order)
 	{
 		auto op = std::move(g.Operations[id]);
-		for (auto &dep : op.Dependencies)
+		for (auto& dep : op.Dependencies)
 		{
 			dep = remap.at(dep);
 			if (dep == Invalid)
@@ -567,7 +568,7 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique &append, const Ap
 		reordered.Operations.push_back(std::move(op));
 	}
 	auto schedule = Compile(reordered, singleDirect);
-	for (auto &packet : schedule.Packets)
+	for (auto& packet : schedule.Packets)
 	{
 		if (packet.Operation != Invalid)
 		{
@@ -576,16 +577,16 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique &append, const Ap
 	}
 	return schedule;
 }
-void SceneGeometry::AppendGrassView(Graph &graph, std::vector<ID3D12Resource *> &bindings, UINT slot,
-                                    const GeometryTarget &target)
+void SceneGeometry::AppendGrassView(Graph& graph, std::vector<ID3D12Resource*>& bindings, UINT slot,
+                                    const GeometryTarget& target)
 {
 	_grass->Append(graph, slot, bindings, _slots.at(slot).Buffers[2].Srv, {target}, true);
 }
-std::vector<ID3D12Resource *> SceneGeometry::Resources(UINT index) const
+std::vector<ID3D12Resource*> SceneGeometry::Resources(UINT index) const
 {
-	const auto &s = _slots.at(index);
-	std::vector<ID3D12Resource *> result;
-	for (auto &b : s.Buffers)
+	const auto& s = _slots.at(index);
+	std::vector<ID3D12Resource*> result;
+	for (auto& b : s.Buffers)
 	{
 		result.push_back(b.Data.Get());
 	}
@@ -593,7 +594,7 @@ std::vector<ID3D12Resource *> SceneGeometry::Resources(UINT index) const
 	{
 		result.push_back(s.Buffers[i].Source.Get());
 	}
-	for (auto &c : s.Color)
+	for (auto& c : s.Color)
 	{
 		result.push_back(c->GetResource()->D3DResource.Get());
 	}
@@ -603,23 +604,23 @@ std::vector<ID3D12Resource *> SceneGeometry::Resources(UINT index) const
 	result.insert(result.end(), s.SkinBindings.begin(), s.SkinBindings.end());
 	if (s.Batches)
 	{
-		for (auto *resource : s.Batcher->RecordingResources())
+		for (auto* resource : s.Batcher->RecordingResources())
 		{
 			result.push_back(resource);
 		}
 		result.push_back(s.BatchCounter.Get());
 	}
-	for (const auto &buffer : s.FrameBuffers)
+	for (const auto& buffer : s.FrameBuffers)
 	{
 		result.push_back(buffer.Data.Get());
 	}
 
 	return result;
 }
-void SceneGeometry::Record(UINT index, Id op, UINT bucket, ID3D12GraphicsCommandList *cmd) const
+void SceneGeometry::Record(UINT index, Id op, UINT bucket, ID3D12GraphicsCommandList* cmd) const
 {
-	const auto &s = _slots.at(index);
-	const auto &b = s.Buffers;
+	const auto& s = _slots.at(index);
+	const auto& b = s.Buffers;
 	if (_grass && _grass->Record(index, op, cmd))
 	{
 		return;
@@ -644,7 +645,7 @@ void SceneGeometry::Record(UINT index, Id op, UINT bucket, ID3D12GraphicsCommand
 	}
 	if (op == PaletteUploadOperation)
 	{
-		for (const auto &skin : s.Skin)
+		for (const auto& skin : s.Skin)
 		{
 			cmd->CopyBufferRegion(skin.Resources[1], 0, skin.Resources[0], 0,
 			                      UINT64(skin.BoneCount) * sizeof(GDX12SkinPalette));
@@ -653,7 +654,7 @@ void SceneGeometry::Record(UINT index, Id op, UINT bucket, ID3D12GraphicsCommand
 	}
 	if (op == SkinningOperation)
 	{
-		for (const auto &skin : s.Skin)
+		for (const auto& skin : s.Skin)
 		{
 			skin.Record(cmd, s.Geometry.Vertices.BufferLocation);
 		}
@@ -665,7 +666,7 @@ void SceneGeometry::Record(UINT index, Id op, UINT bucket, ID3D12GraphicsCommand
 		RecordUploads(s, bucket, cmd);
 		return;
 	}
-	ID3D12DescriptorHeap *heap = _resources.SRV_UAV_Heap->GetHeap().Get();
+	ID3D12DescriptorHeap* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
 	cmd->SetDescriptorHeaps(1, &heap);
 	if (op == 1)
 	{
@@ -699,9 +700,9 @@ void SceneGeometry::Record(UINT index, Id op, UINT bucket, ID3D12GraphicsCommand
 	}
 }
 
-void SceneGeometry::RecordUploads(const Slot &slot, UINT bucket, ID3D12GraphicsCommandList *cmd) const
+void SceneGeometry::RecordUploads(const Slot& slot, UINT bucket, ID3D12GraphicsCommandList* cmd) const
 {
-	const auto &b = slot.Buffers;
+	const auto& b = slot.Buffers;
 	for (UINT i = 0; i < 4; ++i)
 	{
 		if (!b[i].Upload)
@@ -714,7 +715,7 @@ void SceneGeometry::RecordUploads(const Slot &slot, UINT bucket, ID3D12GraphicsC
 		                             : sizeof(GDX12TransformConstants);
 		const UINT count = UINT(b[i].Bytes / stride), begin = count * bucket / UploadBucketCount,
 		           end = count * (bucket + 1) / UploadBucketCount;
-		for (const auto &range : b[i].Ranges)
+		for (const auto& range : b[i].Ranges)
 		{
 			const UINT first = (std::max)(begin, range.first), last = (std::min)(end, range.second);
 			if (last > first)
@@ -725,9 +726,9 @@ void SceneGeometry::RecordUploads(const Slot &slot, UINT bucket, ID3D12GraphicsC
 		}
 	}
 }
-void SceneGeometry::RecordGeometry(const Slot &s, bool depth, ID3D12GraphicsCommandList *cmd) const
+void SceneGeometry::RecordGeometry(const Slot& s, bool depth, ID3D12GraphicsCommandList* cmd) const
 {
-	const auto &b = s.Buffers;
+	const auto& b = s.Buffers;
 	cmd->SetGraphicsRootSignature(_drawRoot->GetRootSignature().Get());
 	cmd->SetPipelineState(depth ? _depth.Get() : _gbuffer.Get());
 	cmd->SetGraphicsRootConstantBufferView(_drawRoot->GetBRootParamIndex(1), s.Main);
@@ -778,4 +779,4 @@ void SceneGeometry::RecordGeometry(const Slot &s, bool depth, ID3D12GraphicsComm
 		                     s.Batches ? s.BatchCounter.Get() : b[5].Data.Get(), 0);
 	}
 }
-} // namespace Meta
+} // namespace BistroRender

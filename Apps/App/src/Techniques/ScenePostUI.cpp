@@ -10,9 +10,9 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12TAAPass.h"
 #include "Common/GameTimer.h"
 
-namespace Meta
+namespace BistroRender
 {
-ScenePostUI::ScenePostUI(RenderPipelineContext &c)
+ScenePostUI::ScenePostUI(RenderPipelineContext& c)
     : _resources(c.Primary), _common(c.Common), _swapchain(c.BackBuffer), _slots(c.Primary.FrameConstants.size()),
       _exports(c.Primary.FrameConstants.size())
 {
@@ -35,7 +35,7 @@ bool ScenePostUI::NeedsResize() const
 {
 	return _blur.NeedsTileResize();
 }
-void ScenePostUI::PrepareMaterials(double animationSeconds, GDX12Texture *cloudImage)
+void ScenePostUI::PrepareMaterials(double animationSeconds, GDX12Texture* cloudImage)
 {
 	_posters->SetImageInput(cloudImage);
 	_posters->PrepareFrame(_resources, _resources.CurrFrameConstantsIndex, animationSeconds);
@@ -58,17 +58,17 @@ void ScenePostUI::Resize()
 	// Rebind new scene inputs before resizing the existing persistent passes.
 	Reset();
 }
-Id ScenePostUI::Packet(Graph &graph, std::vector<ID3D12Resource *> &bindings, const char *name,
-                       std::vector<std::pair<GDX12Resource *, Mode>> resources,
-                       const std::function<void(GDX12CommandList *)> &record, std::vector<Id> dependencies,
-                       GDX12Texture *renderTarget, State textureState)
+Id ScenePostUI::Packet(Graph& graph, std::vector<ID3D12Resource*>& bindings, const char* name,
+                       std::vector<std::pair<GDX12Resource*, Mode>> resources,
+                       const std::function<void(GDX12CommandList*)>& record, std::vector<Id> dependencies,
+                       GDX12Texture* renderTarget, State textureState)
 {
 	std::vector<Access> accesses;
 	for (auto [resource, mode] : resources)
 	{
-		auto *native = resource->D3DResource.Get();
+		auto* native = resource->D3DResource.Get();
 		const auto id = NativeWork::ResourceFor(graph, bindings, native, name);
-		for (const auto &image : _publishedInputs)
+		for (const auto& image : _publishedInputs)
 		{
 			if (image.Get() == native)
 			{
@@ -94,32 +94,32 @@ Id ScenePostUI::Packet(Graph &graph, std::vector<ID3D12Resource *> &bindings, co
 	                      "Post/UI cannot submit private queue signals", std::move(dependencies));
 }
 
-Id ScenePostUI::AppendFrameGeneration(Graph &graph, std::vector<ID3D12Resource *> &bindings, GDX12Texture *depth,
+Id ScenePostUI::AppendFrameGeneration(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* depth,
                                       Id dependency)
 {
 	if (_swapchain->GetFrameGeneration().GetStatus().Effective == GDX12FrameGenerationProvider::Off)
 	{
 		return dependency;
 	}
-	const auto resource = [](GDX12Texture *texture) { return texture->GetResource(); };
-	auto *completeMotion = _blur.GetOutput(1)->GetTexture();
+	const auto resource = [](GDX12Texture* texture) { return texture->GetResource(); };
+	auto* completeMotion = _blur.GetOutput(1)->GetTexture();
 	// Export exactly the states promised by the existing FG tagging API. No
 	// terminal transition may invalidate eValidUntilPresent resources.
 	const auto fgId = Packet(
 	    graph, bindings, "frame-generation prepare/tag DIRECT SDK boundary",
 	    {{resource(depth), Mode::Read}, {resource(completeMotion), Mode::Read}},
-	    [this, depth, completeMotion](auto *cmd)
+	    [this, depth, completeMotion](auto* cmd)
 	    { _swapchain->GetFrameGeneration().Prepare(cmd, depth, completeMotion, _common); }, {dependency}, nullptr,
 	    D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-	auto &exports = _pendingExports;
-	const std::array<GDX12Texture *, 2> retained{depth, completeMotion};
+	auto& exports = _pendingExports;
+	const std::array<GDX12Texture*, 2> retained{depth, completeMotion};
 	for (size_t index = 0; index < retained.size(); ++index)
 	{
 		auto resource = retained[index]->GetResource()->D3DResource;
 		const auto id = NativeWork::ResourceFor(graph, bindings, resource.Get(), "FG retained input");
 		graph.Resources[id].Final = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
 		if (std::none_of(_pendingPublished.begin(), _pendingPublished.end(),
-		                 [&](const auto &previous) { return previous.Get() == resource.Get(); }))
+		                 [&](const auto& previous) { return previous.Get() == resource.Get(); }))
 		{
 			_pendingPublished.push_back(resource);
 		}
@@ -127,15 +127,15 @@ Id ScenePostUI::AppendFrameGeneration(Graph &graph, std::vector<ID3D12Resource *
 	}
 	return fgId;
 }
-Id ScenePostUI::AppendReconstruction(Graph &graph, std::vector<ID3D12Resource *> &bindings, GDX12Texture *hdr,
-                                     GDX12Texture *depth, GDX12Texture *motion, GDX12Texture *featureMotion,
-                                     GDX12Texture *target, std::vector<Id> dependencies)
+Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr,
+                                     GDX12Texture* depth, GDX12Texture* motion, GDX12Texture* featureMotion,
+                                     GDX12Texture* target, std::vector<Id> dependencies)
 {
-	const auto resource = [](GDX12Texture *texture) { return texture->GetResource(); };
+	const auto resource = [](GDX12Texture* texture) { return texture->GetResource(); };
 	_blur.PrepareRecording((_reconstruction.GetFlags() & RENDER_PASS_FLAG_USE_JITTER) ||
 	                       GetFrameGenerationProvider() != GDX12FrameGenerationProvider::Off);
-	auto *color = _blur.GetOutput(0)->GetTexture();
-	auto *completeMotion = _blur.GetOutput(1)->GetTexture();
+	auto* color = _blur.GetOutput(0)->GetTexture();
+	auto* completeMotion = _blur.GetOutput(1)->GetTexture();
 	_reconstruction.SetInputs({depth, completeMotion, color});
 	if (_reconstruction._needsInitialize)
 	{
@@ -157,16 +157,16 @@ Id ScenePostUI::AppendReconstruction(Graph &graph, std::vector<ID3D12Resource *>
 
 	if (_blur._prepareMotion)
 	{
-		auto &camera = _resources.FrameConstants[_resources.CurrFrameConstantsIndex]->CameraCB->GetResource();
-		std::vector<std::pair<GDX12Resource *, Mode>> accesses{{resource(hdr), Mode::Read},
-		                                                       {resource(depth), Mode::Read},
-		                                                       {resource(motion), Mode::Read},
-		                                                       {&camera, Mode::Read},
-		                                                       {resource(_blur._motion.get()), Mode::ReadWrite},
-		                                                       {resource(_blur._velocity.get()), Mode::ReadWrite}};
+		auto& camera = _resources.FrameConstants[_resources.CurrFrameConstantsIndex]->CameraCB->GetResource();
+		std::vector<std::pair<GDX12Resource*, Mode>> accesses{{resource(hdr), Mode::Read},
+		                                                      {resource(depth), Mode::Read},
+		                                                      {resource(motion), Mode::Read},
+		                                                      {&camera, Mode::Read},
+		                                                      {resource(_blur._motion.get()), Mode::ReadWrite},
+		                                                      {resource(_blur._velocity.get()), Mode::ReadWrite}};
 		if (_blur._preparedBlur)
 		{
-			for (auto *image : {_blur._color.get(), _blur._tileMax.get(), _blur._neighborMax.get()})
+			for (auto* image : {_blur._color.get(), _blur._tileMax.get(), _blur._neighborMax.get()})
 			{
 				accesses.emplace_back(resource(image), Mode::ReadWrite);
 			}
@@ -177,19 +177,19 @@ Id ScenePostUI::AppendReconstruction(Graph &graph, std::vector<ID3D12Resource *>
 		}
 		const auto blur = Packet(
 		    graph, bindings, "motion preparation / blur DIRECT boundary", std::move(accesses),
-		    [this, featureMotion](auto *cmd) { _blur.RecordCommands(cmd, featureMotion); }, std::move(dependencies));
+		    [this, featureMotion](auto* cmd) { _blur.RecordCommands(cmd, featureMotion); }, std::move(dependencies));
 		dependencies = {blur};
 	}
-	auto *reconstructed = _reconstruction.GetOutput(0)->GetTexture();
+	auto* reconstructed = _reconstruction.GetOutput(0)->GetTexture();
 	const bool native = _reconstruction.GetStatus().Effective == GDX12UpscalerProvider::Native;
 	if (!native)
 	{
-		auto *taa = _reconstruction.TAA();
+		auto* taa = _reconstruction.TAA();
 		if (taa)
 		{
 			const auto frame = taa->PreparedFrame();
-			std::vector<std::pair<GDX12Resource *, Mode>> accesses;
-			for (auto *input : frame.Reads)
+			std::vector<std::pair<GDX12Resource*, Mode>> accesses;
+			for (auto* input : frame.Reads)
 			{
 				accesses.emplace_back(resource(input), Mode::Read);
 			}
@@ -198,13 +198,13 @@ Id ScenePostUI::AppendReconstruction(Graph &graph, std::vector<ID3D12Resource *>
 			accesses.emplace_back(frame.Camera, Mode::Read);
 			const auto reconstruction = Packet(
 			    graph, bindings, "Native TAA resolve DIRECT boundary", std::move(accesses),
-			    [taa, frame](auto *cmd) { taa->RecordCommands(cmd, frame); }, std::move(dependencies));
+			    [taa, frame](auto* cmd) { taa->RecordCommands(cmd, frame); }, std::move(dependencies));
 			dependencies = {reconstruction};
 		}
 		else
 		{
-			std::vector<std::pair<GDX12Resource *, Mode>> accesses{{resource(color), Mode::Read},
-			                                                       {resource(reconstructed), Mode::ReadWrite}};
+			std::vector<std::pair<GDX12Resource*, Mode>> accesses{{resource(color), Mode::Read},
+			                                                      {resource(reconstructed), Mode::ReadWrite}};
 			if (_reconstruction.GetFlags() & RENDER_PASS_FLAG_USE_JITTER)
 			{
 				accesses.emplace_back(resource(depth), Mode::Read);
@@ -212,14 +212,14 @@ Id ScenePostUI::AppendReconstruction(Graph &graph, std::vector<ID3D12Resource *>
 			}
 			const auto reconstruction = Packet(
 			    graph, bindings, "reconstruction provider DIRECT SDK boundary", std::move(accesses),
-			    [this](auto *cmd) { _reconstruction.Execute(cmd); }, std::move(dependencies));
+			    [this](auto* cmd) { _reconstruction.Execute(cmd); }, std::move(dependencies));
 			dependencies = {reconstruction};
 		}
 	}
 	return Packet(
 	    graph, bindings, "output HDR display transform",
 	    {{resource(reconstructed), Mode::Read}, {resource(target), Mode::Write}},
-	    [this, native](auto *cmd)
+	    [this, native](auto* cmd)
 	    {
 		    _output.Execute(cmd);
 		    if (native)
@@ -229,11 +229,11 @@ Id ScenePostUI::AppendReconstruction(Graph &graph, std::vector<ID3D12Resource *>
 	    },
 	    std::move(dependencies), target);
 }
-void ScenePostUI::AppendScreen(Graph &graph, std::vector<ID3D12Resource *> &bindings, GDX12Texture *target,
-                               const std::function<void(GDX12CommandList *)> &finish, Id dependency)
+void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* target,
+                               const std::function<void(GDX12CommandList*)>& finish, Id dependency)
 {
-	const auto resource = [](GDX12Texture *texture) { return texture->GetResource(); };
-	auto &screen = _slots.at(_resources.CurrFrameConstantsIndex);
+	const auto resource = [](GDX12Texture* texture) { return texture->GetResource(); };
+	auto& screen = _slots.at(_resources.CurrFrameConstantsIndex);
 	screen.RasterOwner.reset();
 	screen.CompositeOwner.reset();
 	screen.Draw = Engine::UI::CaptureScreenFrame();
@@ -254,7 +254,7 @@ void ScenePostUI::AppendScreen(Graph &graph, std::vector<ID3D12Resource *> &bind
 		const auto raster = Packet(
 		    graph, bindings, "Engine.UI explicit font upload / offscreen raster boundary",
 		    {{resource(screen.Target.get()), Mode::Write}},
-		    [this, &screen](auto *cmd)
+		    [this, &screen](auto* cmd)
 		    {
 			    screen.RasterOwner = _screen->TryRecord(*cmd, screen.Target->GetResource()->D3DResource, screen.Draw);
 			    if (!screen.RasterOwner)
@@ -266,7 +266,7 @@ void ScenePostUI::AppendScreen(Graph &graph, std::vector<ID3D12Resource *> &bind
 		screenId = Packet(
 		    graph, bindings, "Engine.UI screen composition",
 		    {{resource(screen.Target.get()), Mode::Read}, {resource(target), Mode::ReadWrite}},
-		    [this, &screen, target](auto *cmd)
+		    [this, &screen, target](auto* cmd)
 		    {
 			    screen.CompositeOwner = _composite->Record(*cmd, screen.Target->GetResource()->D3DResource,
 			                                               target->GetResource()->D3DResource);
@@ -276,9 +276,9 @@ void ScenePostUI::AppendScreen(Graph &graph, std::vector<ID3D12Resource *> &bind
 	Packet(graph, bindings, "frame end / PRESENT handoff", {{resource(target), Mode::ReadWrite}}, finish, {screenId},
 	       nullptr, D3D12_RESOURCE_STATE_PRESENT);
 }
-void ScenePostUI::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings, GDX12Texture *hdr, GDX12Texture *depth,
-                         GDX12Texture *motion, GDX12Texture *featureMotion, GDX12Texture *target,
-                         const std::function<void(GDX12CommandList *)> &finish)
+void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr, GDX12Texture* depth,
+                         GDX12Texture* motion, GDX12Texture* featureMotion, GDX12Texture* target,
+                         const std::function<void(GDX12CommandList*)>& finish)
 {
 	if (!hdr || !depth || !motion || !target || hdr->GetWidth() != depth->GetWidth() ||
 	    hdr->GetHeight() != depth->GetHeight() || hdr->GetWidth() != motion->GetWidth() ||
@@ -299,11 +299,11 @@ void ScenePostUI::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings, 
 			_dof.Resize();
 		}
 		_dof.PrepareRecording();
-		auto *dof = _dof.GetOutput(0)->GetTexture();
+		auto* dof = _dof.GetOutput(0)->GetTexture();
 		dependencies.push_back(Packet(
 		    graph, bindings, "DoF SDK DIRECT recording boundary",
 		    {{hdr->GetResource(), Mode::Read}, {depth->GetResource(), Mode::Read}, {dof->GetResource(), Mode::Write}},
-		    [this](auto *cmd) { _dof.RecordCommands(cmd); }));
+		    [this](auto* cmd) { _dof.RecordCommands(cmd); }));
 		hdr = dof;
 	}
 	else
@@ -325,11 +325,11 @@ void ScenePostUI::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings, 
 	const auto fg = AppendFrameGeneration(graph, bindings, depth, output);
 	AppendScreen(graph, bindings, target, finish, fg);
 }
-void ScenePostUI::AppendPosters(Graph &graph, std::vector<ID3D12Resource *> &bindings)
+void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
 	for (Id id = 0; id < bindings.size(); ++id)
 	{
-		for (const auto &image : _publishedInputs)
+		for (const auto& image : _publishedInputs)
 		{
 			if (image.Get() == bindings[id])
 			{
@@ -347,21 +347,21 @@ void ScenePostUI::AppendPosters(Graph &graph, std::vector<ID3D12Resource *> &bin
 		{
 			continue;
 		}
-		auto *effect = images[0];
-		auto *target = images[1];
-		auto *pass = &_posters->RasterPass(index);
-		std::vector<std::pair<GDX12Resource *, Mode>> accesses{
+		auto* effect = images[0];
+		auto* target = images[1];
+		auto* pass = &_posters->RasterPass(index);
+		std::vector<std::pair<GDX12Resource*, Mode>> accesses{
 		    {effect->GetResource(), index == 2 ? Mode::Read : Mode::ReadWrite}, {target->GetResource(), Mode::Write}};
-		auto *raster = target;
+		auto* raster = target;
 		if (images.size() == 3)
 		{
 			raster = images[2];
 			accesses.emplace_back(raster->GetResource(), Mode::ReadWrite);
 		}
-		const char *names[] = {"UI neon raster / Gaussian glow", "UI ASTRA raster / Gaussian slider",
+		const char* names[] = {"UI neon raster / Gaussian glow", "UI ASTRA raster / Gaussian slider",
 		                       "UI cloud texture raster"};
 		Packet(
-		    graph, bindings, names[index], std::move(accesses), [pass](auto *cmd) { pass->Execute(cmd); }, {}, raster);
+		    graph, bindings, names[index], std::move(accesses), [pass](auto* cmd) { pass->Execute(cmd); }, {}, raster);
 		const auto targetId =
 		    NativeWork::ResourceFor(graph, bindings, target->GetResource()->D3DResource.Get(), "poster material");
 		// Opaque posters are sampled by GBuffer/probe color shaders, not masked depth or glass.
@@ -376,4 +376,4 @@ void ScenePostUI::AppendPosters(Graph &graph, std::vector<ID3D12Resource *> &bin
 		}
 	}
 }
-} // namespace Meta
+} // namespace BistroRender

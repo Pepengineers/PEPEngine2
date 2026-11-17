@@ -1,11 +1,11 @@
-#include "MetaGraphRecorder.h"
+#include "RenderGraphRecorder.h"
 #include "../../../../External/External.Libraries/enkiTS/TaskScheduler.h"
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
-namespace Meta {
+namespace BistroRender {
 struct Recorder::Impl {
     struct Node;
     struct Task : enki::ITaskSet {

@@ -9,20 +9,20 @@
 
 namespace
 {
-AutoConsoleVariable<bool> AsyncQueues(L"Meta.Async.Queues", true,
+AutoConsoleVariable<bool> AsyncQueues(L"App.Async.Queues", true,
                                       L"Place explicit local work on COMPUTE/COPY; false uses DIRECT.",
                                       EConsoleVariableFlags::Default);
 }
 
-void BistroRenderPipeline::Initialize(RenderPipelineContext &c)
+void BistroRenderPipeline::Initialize(RenderPipelineContext& c)
 {
 	c.Primary.SRV_UAV_Heap->UseTransientDescriptorTail();
-	_post = std::make_unique<Meta::ScenePostUI>(c);
+	_post = std::make_unique<BistroRender::ScenePostUI>(c);
 	ConfigureBistroProps(*BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>(), App::GetInstance()->GetJobs());
-	_cloudPicture = std::make_unique<Meta::SceneCloudPicture>(c);
-	_geometry = std::make_unique<Meta::SceneGeometry>(c);
-	_environment = std::make_unique<Meta::SceneEnvironment>(c.Primary, c.Common);
-	_lighting = std::make_unique<Meta::SceneLighting>(c.Primary, c.Common);
+	_cloudPicture = std::make_unique<BistroRender::SceneCloudPicture>(c);
+	_geometry = std::make_unique<BistroRender::SceneGeometry>(c);
+	_environment = std::make_unique<BistroRender::SceneEnvironment>(c.Primary, c.Common);
+	_lighting = std::make_unique<BistroRender::SceneLighting>(c.Primary, c.Common);
 	_sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_CAMERAS, true);
 	_sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_INSTANCES, true);
 	_sceneFlags.SetFlag(RENDER_PASS_FLAG_USE_GEOMETRY, true);
@@ -30,21 +30,21 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext &c)
 	_bindings.PrimaryPasses = _post->Passes();
 	_bindings.PrimaryPasses.push_back(&_sceneFlags);
 	_bindings.Reconstruction = &_post->Reconstruction();
-	_executor =
-	    std::make_unique<Meta::Executor>(_cloudPicture->Submissions(), 0, UINT(c.Primary.FrameConstants.size()));
+	_executor = std::make_unique<BistroRender::Executor>(_cloudPicture->Submissions(), 0,
+	                                                     UINT(c.Primary.FrameConstants.size()));
 	_lighting->SetWaterRetirement([this] { _executor->Drain(); });
 	_environment->SetRetirement([this] { _executor->Drain(); });
 	Log::Info("Renderer", "Bistro packet renderer initialized; one rendering path");
 }
 
-void BistroRenderPipeline::RebuildExecution(RenderPipelineContext &c)
+void BistroRenderPipeline::RebuildExecution(RenderPipelineContext& c)
 {
 	_executor->Drain();
 	_geometry->Resize(c.Common.DownscaledWidth, c.Common.DownscaledHeight);
 	_environment->Resize();
 }
 
-void BistroRenderPipeline::PrepareFrame(RenderPipelineContext &c)
+void BistroRenderPipeline::PrepareFrame(RenderPipelineContext& c)
 {
 	if (c.Primary.Sky.Source == SkySource::SkyAtmosphere)
 	{
@@ -55,37 +55,37 @@ void BistroRenderPipeline::PrepareFrame(RenderPipelineContext &c)
 	c.Runtime.PrepareReflectionScene();
 }
 
-uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext &c, GDX12CommandList *prefix,
-                                            const std::function<void(GDX12CommandList *)> &finish)
+uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12CommandList* prefix,
+                                            const std::function<void(GDX12CommandList*)>& finish)
 {
 	const auto slot = c.Primary.CurrFrameConstantsIndex;
 	_geometry->Freeze(slot, c.Common.ActiveCameraCBufferIndex, c.Runtime.FreezeSkeletalMeshes());
 	const auto scenes = BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>();
-	const auto *world = scenes->GetWorld();
+	const auto* world = scenes->GetWorld();
 	const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
 	_environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0);
 	_lighting->Freeze(*_geometry, slot);
-	auto *target = c.BackBuffer->GetCurrentBuffer();
-	const auto append = [&](Meta::Graph &graph, std::vector<ID3D12Resource *> &resources)
+	auto* target = c.BackBuffer->GetCurrentBuffer();
+	const auto append = [&](BistroRender::Graph& graph, std::vector<ID3D12Resource*>& resources)
 	{
 		_post->BeginPlan();
 		_environment->Append(graph, resources);
 		_lighting->SetHDRContinuation(
-		    [&](auto &g, auto &bindings, auto *hdr)
+		    [&](auto& g, auto& bindings, auto* hdr)
 		    {
 			    _post->Append(g, bindings, hdr, _lighting->PostDepth(), _lighting->PostMotion(),
 			                  _lighting->ParticleMotion(), target, finish);
 		    });
 		_lighting->Append(graph, resources, *_geometry, *_environment);
 	};
-	const auto prelude = [&](Meta::Graph &graph, std::vector<ID3D12Resource *> &resources)
+	const auto prelude = [&](BistroRender::Graph& graph, std::vector<ID3D12Resource*>& resources)
 	{
 		_cloudPicture->Append(graph, resources);
 		_post->AppendPosters(graph, resources);
 	};
 	_schedule = _geometry->Plan(slot, append, prelude, !AsyncQueues.GetValue());
 	_executor->Reserve(_schedule);
-	const auto record = [&](Meta::Id op, uint32_t list, ID3D12GraphicsCommandList *commands)
+	const auto record = [&](BistroRender::Id op, uint32_t list, ID3D12GraphicsCommandList* commands)
 	{
 		if (!_cloudPicture->Record(op, commands) && !_environment->Record(op, commands) &&
 		    !_lighting->Record(op, commands) && !_post->Record(op, commands))

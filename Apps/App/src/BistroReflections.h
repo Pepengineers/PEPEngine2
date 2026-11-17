@@ -57,16 +57,16 @@ namespace BistroReflections
     static_assert(Tables.size() <= MaxReflectionProbes);
     inline bool InteriorSelection = false;
     inline AutoConsoleVariable<int> Count(L"App.ReflectionProbes.Count", 4,
-        L"Meta: 0..10 interior tables; App: 0..21 tables. Frozen static captures at seeded unique tables; 0 disables, maximum " +
+        L"Interior table probes. Frozen static captures at seeded unique tables; 0 disables, maximum " +
         std::to_wstring(Tables.size()) + L" (the number of tables: 11 terrace + 10 interior)",
         EConsoleVariableFlags::Default, [](int value) { return value >= 0 && value <= (InteriorSelection ? 10 : static_cast<int>(Tables.size())); });
 
     inline AutoConsoleVariable<UINT> Seed(L"App.ReflectionProbes.Seed", 1,
-        L"Ordinary Meta interior table selection seed");
+        L"Interior table selection seed");
     inline AutoConsoleVariable<UINT> Reset(L"App.ReflectionProbes.Reset", 0,
-        L"Increment to reset ordinary Meta probe anchors");
+        L"Increment to reset probe anchors");
     inline AutoConsoleVariable<UINT> Recapture(L"App.ReflectionProbes.Recapture", 0,
-        L"Increment to explicitly recapture ordinary Meta frozen probes");
+        L"Increment to explicitly recapture frozen probes");
 
     class Scene
     {

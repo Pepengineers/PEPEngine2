@@ -4,7 +4,7 @@
 #include "SceneReflections.h"
 #include <unordered_set>
 
-namespace Meta
+namespace BistroRender
 {
 class SceneProbePreview
 {

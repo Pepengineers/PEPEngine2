@@ -15,7 +15,7 @@ class GDX12CommandList;
 class GDX12DeviceResources;
 class RenderPipelineCommonData;
 class GDX12Texture;
-namespace Meta { class SceneGrass; }
+namespace BistroRender { class SceneGrass; }
 
 // Owned by Bistro. Simulation may use COMPUTE; expansion and draw use DIRECT.
 class GDX12GrassRenderer
@@ -36,7 +36,7 @@ public:
     void RemovePrimitives(GDX12RenderPrimitiveRegistry&);
 
 private:
-    friend class Meta::SceneGrass;
+    friend class BistroRender::SceneGrass;
     struct Vertex
     {
         XMFLOAT3 Position, PreviousPosition, Normal;

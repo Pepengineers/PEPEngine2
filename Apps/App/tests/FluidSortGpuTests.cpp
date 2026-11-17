@@ -1,5 +1,5 @@
 // Isolated production-kernel validation and GPU timestamps; no scene assets.
-#include "Rendering/Water/GDX12FluidSolver.h"
+#include "Techniques/Water/GDX12FluidSolver.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"

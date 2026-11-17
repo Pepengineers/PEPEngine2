@@ -2,7 +2,7 @@
 
 #include "BistroProps.h"
 #include "BistroArch.h"
-#include "BistroWaterLayout.h"
+#include "Techniques/Water/BistroWaterLayout.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "App.Base/Modules/RenderModule.h"
@@ -65,7 +65,7 @@ struct EffectComponent : ComponentTag
 	bool LayoutVolume = false;
 };
 
-inline void Update(World &world, bool advanceWhilePaused = false)
+inline void Update(World& world, bool advanceWhilePaused = false)
 {
 	const auto total = static_cast<uint64_t>(GetBudget());
 	const auto simulation = Simulation.GetValue();
@@ -74,10 +74,10 @@ inline void Update(World &world, bool advanceWhilePaused = false)
 	const bool bounded = VolumeEnabled.GetValue();
 	const Vector3 halfExtents(VolumeHalfExtentX.GetValue(), VolumeHalfExtentY.GetValue(), VolumeHalfExtentZ.GetValue());
 	world.GetECS().ForEach<EffectComponent, ParticleEmitterComponent>(
-	    [&](Entity, const EffectComponent &effect, ParticleEmitterComponent &emitter)
+	    [&](Entity, const EffectComponent& effect, ParticleEmitterComponent& emitter)
 	    {
 		    const UINT count = static_cast<UINT>(total * effect.BudgetEnd / 16 - total * effect.BudgetBegin / 16);
-		    const auto &current = emitter.GetSettings();
+		    const auto& current = emitter.GetSettings();
 		    auto settings = current;
 		    const bool useVolume = bounded || effect.LayoutVolume;
 		    const auto volumeExtents = effect.LayoutVolume ? effect.AuthoredExtents : halfExtents;
@@ -111,17 +111,17 @@ inline void Update(World &world, bool advanceWhilePaused = false)
 	    });
 }
 
-inline void Create(World &world, GPUTexture *atlas)
+inline void Create(World& world, GPUTexture* atlas)
 {
-	auto &ecs = world.GetECS();
+	auto& ecs = world.GetECS();
 	ecs.RegisterComponent<EffectComponent>();
 	UINT weightSum = 0;
-	const auto create = [&](const char *name, Vector3 position, UINT weight, GDX12ParticleEmitterSettings settings)
+	const auto create = [&](const char* name, Vector3 position, UINT weight, GDX12ParticleEmitterSettings settings)
 	{
 		auto entity = ecs.CreateEntity();
 		entity.AddComponent<NameComponent>(name);
 		entity.AddComponent<TransformComponent>(position);
-		auto &effect = entity.AddComponent<EffectComponent>();
+		auto& effect = entity.AddComponent<EffectComponent>();
 		effect.BudgetBegin = weightSum;
 		effect.BudgetEnd = weightSum += weight;
 		settings.Seed = weightSum * 7919;
@@ -292,16 +292,16 @@ inline void Create(World &world, GPUTexture *atlas)
 }
 } // namespace BistroParticles
 
-inline void CreateBistroParticles(World &world)
+inline void CreateBistroParticles(World& world)
 {
-	auto &render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
-	const auto *texture = Engine::Core::AssetManager::GetInstance().LoadTexture(
+	auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+	const auto* texture = Engine::Core::AssetManager::GetInstance().LoadTexture(
 	    std::filesystem::path(ASSETS_FOLDER) / "Textures/Particles/mgpu-fountain-atlas.png");
 	if (!texture)
 	{
 		throw std::runtime_error("Missing MGPU fountain atlas");
 	}
-	auto *atlas = render.GetTextureByName("BistroFountainAtlas");
+	auto* atlas = render.GetTextureByName("BistroFountainAtlas");
 	if (!atlas)
 	{
 		atlas = render.CreateTexture("BistroFountainAtlas", texture, Engine::Core::ETextureType::Color);
@@ -315,16 +315,16 @@ inline void CreateBistroParticles(World &world)
 	BistroParticles::Create(world, atlas);
 }
 
-inline void ConfigureBistroProps(SceneManagerModule &scenes, JobSystem &jobs)
+inline void ConfigureBistroProps(SceneManagerModule& scenes, JobSystem& jobs)
 {
 	scenes.OnWorldDestroyed.AddListener(
-	    [](World &world)
+	    [](World& world)
 	    {
 		    world.BeforePhysicsStep = {};
 		    world.SceneMeshFactory = {};
 	    });
 	scenes.OnWorldCreated.AddListener(
-	    [&jobs](World &world)
+	    [&jobs](World& world)
 	    {
 		    const int quality = BistroPhysics::Quality.GetValue();
 		    BistroPhysics::EffectiveCategorized = true;
@@ -346,31 +346,31 @@ inline void ConfigureBistroProps(SceneManagerModule &scenes, JobSystem &jobs)
 		    auto previous = std::move(world.SceneMeshFactory);
 		    world.SceneMeshFactory =
 		        [&world, &jobs, waves, quality, previous = std::move(previous),
-		         configured = false](const std::string &name, const StaticMeshRenderComponent &source) mutable
+		         configured = false](const std::string& name, const StaticMeshRenderComponent& source) mutable
 		    {
 			    if (name != "Interior_interior" && name != "Exterior_exterior")
 			    {
 				    return false;
 			    }
-			    auto &physics = *BenchmarkEngine::GetLocator().GetModule<PhysicsModule>();
+			    auto& physics = *BenchmarkEngine::GetLocator().GetModule<PhysicsModule>();
 			    if (!configured)
 			    {
 				    physics.ConfigureWorld(world, BistroPhysics::Settings());
 				    configured = true;
 			    }
-			    auto &render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
-			    const auto *mesh = render.GetPrimaryGPUMesh(source.MeshHandler);
+			    auto& render = *BenchmarkEngine::GetLocator().GetModule<RenderModule>();
+			    const auto* mesh = render.GetPrimaryGPUMesh(source.MeshHandler);
 			    const auto partition = PartitionBistroProps(*mesh->CPUMesh, name == "Interior_interior", true);
 			    const auto count = partition.Props.size();
 			    render.ReserveTransformCapacity(static_cast<UINT>(count) + 9);
 			    size_t instances = partition.StaticSubMeshes.size();
-			    for (const auto &prop : partition.Props)
+			    for (const auto& prop : partition.Props)
 			    {
 				    instances += prop.SubMeshIndices.size();
 			    }
 			    render.ReserveInstanceCapacity(static_cast<UINT>(instances));
-			    const std::function<bool(const StaticMeshRenderComponent &)> architecture =
-			        [&](const StaticMeshRenderComponent &statics) { return previous && previous(name, statics); };
+			    const std::function<bool(const StaticMeshRenderComponent&)> architecture =
+			        [&](const StaticMeshRenderComponent& statics) { return previous && previous(name, statics); };
 			    CreateBistroPropEntities(world, name, source, *mesh->CPUMesh, partition, jobs, &physics, waves.get(),
 			                             true, quality, architecture);
 			    return true;

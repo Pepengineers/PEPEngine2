@@ -1,5 +1,5 @@
 #pragma once
-#include "Graph/MetaGraph.h"
+#include "Graph/RenderGraph.h"
 #include "Engine.RendererDX12/GDX12Resource.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12DescriptorHeap.h"
@@ -7,16 +7,16 @@
 #include <functional>
 #include <stdexcept>
 
-namespace Meta
+namespace BistroRender
 {
 constexpr UINT SceneDescriptorStart = TextureCube_StartIndex + TextureCube_RangeLength;
 // Native work descriptions are completed on the owner before Executor::Execute.
 // All resources have a single physical binding, including aliases via texture views.
 struct NativeWork
 {
-	std::vector<std::pair<Id, std::function<void(ID3D12GraphicsCommandList *)>>> Commands;
-	static Id ResourceFor(Graph &graph, std::vector<ID3D12Resource *> &bindings, ID3D12Resource *resource,
-	                      const std::string &name)
+	std::vector<std::pair<Id, std::function<void(ID3D12GraphicsCommandList*)>>> Commands;
+	static Id ResourceFor(Graph& graph, std::vector<ID3D12Resource*>& bindings, ID3D12Resource* resource,
+	                      const std::string& name)
 	{
 		const auto found = std::find(bindings.begin(), bindings.end(), resource);
 		if (found != bindings.end())
@@ -45,10 +45,10 @@ struct NativeWork
 	}
 	// Renderer-owned assets are already published in SRV state by their upload
 	// path. Import that boundary without changing the wrapper or claiming COMMON.
-	static Id ImportReadOnlyTexture(Graph &graph, std::vector<ID3D12Resource *> &bindings, GDX12Resource &resource,
-	                                State published, const std::string &name)
+	static Id ImportReadOnlyTexture(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Resource& resource,
+	                                State published, const std::string& name)
 	{
-		auto *native = resource.D3DResource.Get();
+		auto* native = resource.D3DResource.Get();
 		if (!native || bindings.size() != graph.Resources.size() ||
 		    native->GetDesc().Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
 		    State(resource.GetCurrentState()) != published)
@@ -65,12 +65,12 @@ struct NativeWork
 		if (found != bindings.end())
 		{
 			const Id id = Id(found - bindings.begin());
-			const auto &declaration = graph.Resources.at(id);
+			const auto& declaration = graph.Resources.at(id);
 			if (declaration.Initial != published || declaration.Final != published || declaration.Decays)
 			{
 				throw std::logic_error("Conflicting published texture boundary");
 			}
-			for (const auto &operation : graph.Operations)
+			for (const auto& operation : graph.Operations)
 			{
 				for (auto access : operation.Accesses)
 				{
@@ -87,27 +87,27 @@ struct NativeWork
 		bindings.push_back(native);
 		return id;
 	}
-	Id Add(Graph &graph, std::string name, std::vector<Access> accesses,
-	       std::function<void(ID3D12GraphicsCommandList *)> record, std::vector<Id> dependencies = {})
+	Id Add(Graph& graph, std::string name, std::vector<Access> accesses,
+	       std::function<void(ID3D12GraphicsCommandList*)> record, std::vector<Id> dependencies = {})
 	{
 		const Id id = Id(graph.Operations.size());
 		graph.Operations.push_back({std::move(name), std::move(accesses), std::move(dependencies)});
 		Commands.emplace_back(id, std::move(record));
 		return id;
 	}
-	Id AddOwned(Graph &graph, std::string name, std::vector<Access> accesses,
-	            const std::vector<ID3D12Resource *> &bindings, std::function<void(GDX12CommandList *)> record,
-	            const char *signalError, std::vector<Id> dependencies = {})
+	Id AddOwned(Graph& graph, std::string name, std::vector<Access> accesses,
+	            const std::vector<ID3D12Resource*>& bindings, std::function<void(GDX12CommandList*)> record,
+	            const char* signalError, std::vector<Id> dependencies = {})
 	{
 		std::vector<GDX12RecordingStates::Binding> states;
 		states.reserve(accesses.size());
-		for (const auto &access : accesses)
+		for (const auto& access : accesses)
 		{
 			states.emplace_back(bindings.at(access.Resource), D3D12_RESOURCE_STATES(access.Required));
 		}
 		const Id operation = Add(
 		    graph, std::move(name), std::move(accesses),
-		    [states = std::move(states), record = std::move(record), signalError](auto *commands)
+		    [states = std::move(states), record = std::move(record), signalError](auto* commands)
 		    {
 			    GDX12RecordingStates tracker(states);
 			    GDX12CommandList borrowed(commands);
@@ -123,10 +123,10 @@ struct NativeWork
 		graph.Operations.at(operation).Target = Queue::Direct;
 		return operation;
 	}
-	bool Record(Id id, ID3D12GraphicsCommandList *commands) const
+	bool Record(Id id, ID3D12GraphicsCommandList* commands) const
 	{
 		const auto found = std::lower_bound(Commands.begin(), Commands.end(), id,
-		                                    [](const auto &entry, Id operation) { return entry.first < operation; });
+		                                    [](const auto& entry, Id operation) { return entry.first < operation; });
 		if (found == Commands.end() || found->first != id)
 		{
 			return false;
@@ -135,4 +135,4 @@ struct NativeWork
 		return true;
 	}
 };
-} // namespace Meta
+} // namespace BistroRender

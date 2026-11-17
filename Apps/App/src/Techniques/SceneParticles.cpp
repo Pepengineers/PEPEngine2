@@ -4,11 +4,11 @@
 #include "Engine.RendererDX12/GDX12MotionBlurSettings.h"
 #include "Engine.RendererDX12/GDX12FrameGeneration.h"
 
-namespace Meta
+namespace BistroRender
 {
 namespace
 {
-State BoundaryState(ID3D12Resource *resource)
+State BoundaryState(ID3D12Resource* resource)
 {
 	const auto desc = resource->GetDesc();
 	if (desc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER)
@@ -18,28 +18,28 @@ State BoundaryState(ID3D12Resource *resource)
 	return desc.Flags & D3D12_RESOURCE_FLAG_DENY_SHADER_RESOURCE ? State(D3D12_RESOURCE_STATE_COMMON)
 	                                                             : State(D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
 }
-Access ResourceAccess(Graph &graph, std::vector<ID3D12Resource *> &bindings, GDX12Resource *resource, Mode mode,
+Access ResourceAccess(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Resource* resource, Mode mode,
                       State state = State(-1))
 {
-	auto *native = resource->D3DResource.Get();
+	auto* native = resource->D3DResource.Get();
 	D3D12_HEAP_PROPERTIES heap{};
 	ThrowIfFailed(native->GetHeapProperties(&heap, nullptr));
 	return {NativeWork::ResourceFor(graph, bindings, native, "particle resource"),
 	        heap.Type == D3D12_HEAP_TYPE_UPLOAD ? Mode::Read : mode,
 	        heap.Type == D3D12_HEAP_TYPE_UPLOAD || state == State(-1) ? BoundaryState(native) : state};
 }
-void AddResources(Graph &graph, std::vector<ID3D12Resource *> &bindings, std::vector<Access> &accesses,
-                  const std::vector<GDX12Resource *> &resources, Mode mode)
+void AddResources(Graph& graph, std::vector<ID3D12Resource*>& bindings, std::vector<Access>& accesses,
+                  const std::vector<GDX12Resource*>& resources, Mode mode)
 {
-	for (auto *resource : resources)
+	for (auto* resource : resources)
 	{
 		accesses.push_back(ResourceAccess(graph, bindings, resource, mode));
 	}
 }
-void AddAccesses(Graph &graph, std::vector<ID3D12Resource *> &bindings, std::vector<Access> &accesses,
-                 const std::vector<GDX12ResourceAccess> &resources)
+void AddAccesses(Graph& graph, std::vector<ID3D12Resource*>& bindings, std::vector<Access>& accesses,
+                 const std::vector<GDX12ResourceAccess>& resources)
 {
-	for (const auto &resource : resources)
+	for (const auto& resource : resources)
 	{
 		accesses.push_back(ResourceAccess(graph, bindings, resource.Resource,
 		                                  resource.Usage == GDX12AccessMode::Read    ? Mode::Read
@@ -49,7 +49,7 @@ void AddAccesses(Graph &graph, std::vector<ID3D12Resource *> &bindings, std::vec
 	}
 }
 } // namespace
-SceneParticles::SceneParticles(GDX12DeviceResources &resources, RenderPipelineCommonData &common)
+SceneParticles::SceneParticles(GDX12DeviceResources& resources, RenderPipelineCommonData& common)
     : _resources(resources), _common(common)
 {
 	if (!_resources.ParticleSimulation)
@@ -69,8 +69,8 @@ SceneParticles::~SceneParticles()
 		_resources.ParticleSimulation->SetInteractionField({});
 	}
 }
-void SceneParticles::Packet(Graph &graph, const std::vector<ID3D12Resource *> &bindings, const char *name,
-                            std::vector<Access> accesses, std::function<void(GDX12CommandList *)> record)
+void SceneParticles::Packet(Graph& graph, const std::vector<ID3D12Resource*>& bindings, const char* name,
+                            std::vector<Access> accesses, std::function<void(GDX12CommandList*)> record)
 {
 	std::vector<Access> unique;
 	for (auto access : accesses)
@@ -94,10 +94,10 @@ void SceneParticles::Packet(Graph &graph, const std::vector<ID3D12Resource *> &b
 		}
 	}
 	_work.AddOwned(graph, name, std::move(unique), bindings, std::move(record),
-	               "Meta particles cannot submit private signals");
+	               "Particle packets cannot submit private signals");
 }
-void SceneParticles::Prepare(Graph &graph, std::vector<ID3D12Resource *> &bindings, GDX12Texture *simulationDepth,
-                             GDX12Texture *rasterDepth, GDX12Texture *accum, GDX12Texture *reveal,
+void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* simulationDepth,
+                             GDX12Texture* rasterDepth, GDX12Texture* accum, GDX12Texture* reveal,
                              GDX12ParticleInteractionField interaction)
 {
 	_work.Commands.clear();
@@ -110,7 +110,7 @@ void SceneParticles::Prepare(Graph &graph, std::vector<ID3D12Resource *> &bindin
 	}
 	_width = rasterDepth->GetWidth();
 	_height = rasterDepth->GetHeight();
-	auto *simulation = _resources.ParticleSimulation.get();
+	auto* simulation = _resources.ParticleSimulation.get();
 	simulation->SetInteractionField(interaction);
 	simulation->BeginFrame(&_resources, _common);
 	_pass.SetInputs({rasterDepth, accum, reveal});
@@ -121,7 +121,7 @@ void SceneParticles::Prepare(Graph &graph, std::vector<ID3D12Resource *> &bindin
 	_pass.BeginFrame();
 	const UINT slot = _resources.CurrFrameConstantsIndex;
 	std::array<std::vector<uint64_t>, 2> groups;
-	for (const auto &emitter : _resources.ParticleEmitters)
+	for (const auto& emitter : _resources.ParticleEmitters)
 	{
 		groups[emitter.DepthCollision ? 1 : 0].push_back(emitter.Id);
 	}
@@ -137,14 +137,14 @@ void SceneParticles::Prepare(Graph &graph, std::vector<ID3D12Resource *> &bindin
 			continue;
 		}
 		auto initialization = pools[group];
-		for (auto &access : initialization)
+		for (auto& access : initialization)
 		{
 			access.Usage = Mode::ReadWrite;
 		}
 		Packet(graph, bindings,
 		       group == 0 ? "particle A pool initialization/reset" : "particle B pool initialization/reset",
 		       initialization,
-		       [this, simulation, ids](auto *cmd) { simulation->InitializePools(cmd, &_resources, &ids); });
+		       [this, simulation, ids](auto* cmd) { simulation->InitializePools(cmd, &_resources, &ids); });
 		auto simulationAccess = initialization;
 		AddResources(graph, bindings, simulationAccess, simulation->GetConstantResources(slot, &ids), Mode::Read);
 		simulationAccess.push_back(camera);
@@ -159,7 +159,7 @@ void SceneParticles::Prepare(Graph &graph, std::vector<ID3D12Resource *> &bindin
 		Packet(graph, bindings,
 		       group == 0 ? "particle A simulate/death/spawn/burst/publish"
 		                  : "particle B simulate/death/spawn/burst/publish",
-		       std::move(simulationAccess), [this, simulation, simulationDepth, ids](auto *cmd)
+		       std::move(simulationAccess), [this, simulation, simulationDepth, ids](auto* cmd)
 		       { simulation->Execute(cmd, &_resources, _common, simulationDepth, &ids); });
 	}
 	std::vector<Access> preparation{camera};
@@ -171,17 +171,17 @@ void SceneParticles::Prepare(Graph &graph, std::vector<ID3D12Resource *> &bindin
 		const auto ids = groups[group];
 		Packet(graph, bindings, group == 0 ? "particle A clear/cull" : "particle B append/global SortedAlpha radix",
 		       std::move(accesses),
-		       [this, ids, group](auto *cmd) { _pass.PrepareRenderGroup(cmd, ids, group == 0, group == 1); });
+		       [this, ids, group](auto* cmd) { _pass.PrepareRenderGroup(cmd, ids, group == 0, group == 1); });
 	}
 	_drawReads = {camera};
 	_drawReads.push_back(ResourceAccess(graph, bindings, rasterDepth->GetResource(), Mode::Read));
 	if (!_pass.NativeRasterAccesses(false).empty())
 	{
-		for (const auto &emitter : _resources.ParticleEmitters)
+		for (const auto& emitter : _resources.ParticleEmitters)
 		{
 			if (emitter.Texture)
 			{
-				auto *atlas = emitter.Texture->PrimaryDeviceTexture;
+				auto* atlas = emitter.Texture->PrimaryDeviceTexture;
 				if (!atlas)
 				{
 					throw std::logic_error("Particle atlas has no primary texture");
@@ -194,7 +194,7 @@ void SceneParticles::Prepare(Graph &graph, std::vector<ID3D12Resource *> &bindin
 		}
 	}
 }
-void SceneParticles::AppendWeighted(Graph &graph, std::vector<ID3D12Resource *> &bindings)
+void SceneParticles::AppendWeighted(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
 	auto accesses = _drawReads;
 	AddAccesses(graph, bindings, accesses, _pass.NativeRasterAccesses(true));
@@ -203,15 +203,15 @@ void SceneParticles::AppendWeighted(Graph &graph, std::vector<ID3D12Resource *> 
 	accesses.push_back(
 	    ResourceAccess(graph, bindings, _reveal->GetResource(), Mode::ReadWrite, D3D12_RESOURCE_STATE_RENDER_TARGET));
 	Packet(graph, bindings, "particle weighted-alpha append", std::move(accesses),
-	       [this](auto *cmd) { _pass.DrawWeightedAndMotion(cmd); });
+	       [this](auto* cmd) { _pass.DrawWeightedAndMotion(cmd); });
 }
-void SceneParticles::AppendComposite(Graph &graph, std::vector<ID3D12Resource *> &bindings, GDX12Texture *hdr)
+void SceneParticles::AppendComposite(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr)
 {
 	auto accesses = _drawReads;
 	AddAccesses(graph, bindings, accesses, _pass.NativeRasterAccesses(false));
 	accesses.push_back(
 	    ResourceAccess(graph, bindings, hdr->GetResource(), Mode::ReadWrite, D3D12_RESOURCE_STATE_RENDER_TARGET));
 	Packet(graph, bindings, "global SortedAlpha/additive HDR particles", std::move(accesses),
-	       [this, hdr](auto *cmd) { _pass.Composite(cmd, hdr); });
+	       [this, hdr](auto* cmd) { _pass.Composite(cmd, hdr); });
 }
-} // namespace Meta
+} // namespace BistroRender

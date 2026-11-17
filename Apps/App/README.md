@@ -1,7 +1,7 @@
 # Bistro App
 
 `App.vcxproj` is the only application target in `PEPEngine2.sln`. It runs the
-Bistro renderer formerly hosted by App.MetaRenderGraph. App.Base, Engine.Core,
+Bistro renderer. App.Base, Engine.Core,
 Engine.RendererDX12, Engine.UI and External.Libraries remain shared libraries.
 
 Build `Apps/App/App.vcxproj` with Visual Studio 2026/v145, `Release|x64`, then run
@@ -17,19 +17,19 @@ and SDK integrations. The old default graph, duplicate pass recording and
 procedural diagnostic renderer have been removed.
 
 The scene retains the original interior/exterior, point and sun shadows,
-reflection probes, grass, fluid basin, particles, walking NPCs/foxes, physics,
+reflection probes, grass, the SPH particle basin in `src/Techniques/Water`, particles, walking NPCs/foxes, physics,
 offscreen UI canvases and screen UI. The cloud picture retains its secondary
 adapter transport. Retired experimental particle/water transports and the old
 Editor/Benchmark application targets are not part of this renderer.
 
-`Meta.Async.Queues=true` lets the graph place local work on COMPUTE/COPY;
+`App.Async.Queues=true` lets the graph place local work on COMPUTE/COPY;
 `false` uses DIRECT. Scheduling is controlled by the graph, with no separate
 legacy per-technique async switches.
 
 ## Startup and controls
 
 `Configs/Startup.ini` is copied beside the executable by the build. At each start
-it replaces `Config/Engine.ini`, matching the former ordinary Meta application.
+it replaces `Config/Engine.ini`.
 Edit the source Startup.ini to make startup settings persistent across builds.
 Native TAA (`Render.Upscaler.Provider=5`, quality 0) is the default.
 Frame generation defaults to Off (`Render.FrameGeneration.Provider=0`); FSR FG

@@ -6,13 +6,13 @@
 #include <cstring>
 #include <stdexcept>
 
-namespace Meta
+namespace BistroRender
 {
 namespace
 {
 constexpr State Read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
 }
-SceneEnvironment::SceneEnvironment(GDX12DeviceResources &r, RenderPipelineCommonData &c) : _resources(r), _common(c)
+SceneEnvironment::SceneEnvironment(GDX12DeviceResources& r, RenderPipelineCommonData& c) : _resources(r), _common(c)
 {
 	_environment.Setup(&r, &c);
 	_environment.Initialize();
@@ -24,7 +24,7 @@ SceneEnvironment::~SceneEnvironment()
 	_environment.ClearDenendencies();
 	_cloud.ClearDenendencies();
 }
-void SceneEnvironment::SetClouds(const GDX12CloudParameters &p)
+void SceneEnvironment::SetClouds(const GDX12CloudParameters& p)
 {
 	_cloud.SetParameters(p);
 	_cloudSelected = p.Enabled;
@@ -49,7 +49,7 @@ void SceneEnvironment::Freeze(double delta)
 {
 	const auto completed = _resources.Device->GetCommandQueue()->GetFence()->GetCompletedValue();
 	_retained.erase(std::remove_if(_retained.begin(), _retained.end(),
-	                               [completed](const auto &entry) { return entry.first <= completed; }),
+	                               [completed](const auto& entry) { return entry.first <= completed; }),
 	                _retained.end());
 	_cloud.Advance(_cloudSelected ? delta : 0);
 	_cloudInput = _cloud.CaptureInputs();
@@ -58,8 +58,8 @@ void SceneEnvironment::Freeze(double delta)
 }
 void SceneEnvironment::Build()
 {
-	auto &e = _environment;
-	auto &r = _resources;
+	auto& e = _environment;
+	auto& r = _resources;
 	auto state = r.Sky;
 	const bool clouds = _cloudSelected && _cloudInput.Enabled;
 	const bool cloudChanged =
@@ -103,7 +103,7 @@ void SceneEnvironment::Build()
 			const auto path = state.Box.Cubemap.is_absolute()
 			                      ? state.Box.Cubemap
 			                      : std::filesystem::path(ASSETS_FOLDER) / state.Box.Cubemap;
-			const auto *source = Engine::Core::AssetManager::GetInstance().LoadTexture(path);
+			const auto* source = Engine::Core::AssetManager::GetInstance().LoadTexture(path);
 			if (!source || !source->IsCubeMap() || source->GetArraySize() != 6 || !source->GetWidth() ||
 			    source->GetWidth() != source->GetHeight() || !source->GetMipLevels() ||
 			    source->GetSubresourceCount() != 6 * source->GetMipLevels())
@@ -138,29 +138,29 @@ void SceneEnvironment::Build()
 			auto upload = std::make_shared<GDX12Resource>();
 			upload->D3DResource = r.Device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, CD3DX12_RESOURCE_DESC::Buffer(bytes),
 			                                               D3D12_RESOURCE_STATE_GENERIC_READ);
-			void *mapped = nullptr;
+			void* mapped = nullptr;
 			const D3D12_RANGE noRead{};
 			ThrowIfFailed(upload->D3DResource->Map(0, &noRead, &mapped));
 			for (UINT i = 0; i < count; ++i)
 			{
-				const auto &data = source->GetSubresources()[i];
+				const auto& data = source->GetSubresources()[i];
 				if (data.RowPitch < rowBytes[i] || data.Data.size() < data.RowPitch * (rows[i] - 1) + rowBytes[i])
 				{
 					throw std::runtime_error("Incomplete environment subresource");
 				}
 				for (UINT row = 0; row < rows[i]; ++row)
 				{
-					std::memcpy(static_cast<std::byte *>(mapped) + footprints[i].Offset +
+					std::memcpy(static_cast<std::byte*>(mapped) + footprints[i].Offset +
 					                UINT64(row) * footprints[i].Footprint.RowPitch,
 					            data.Data.data() + UINT64(row) * data.RowPitch, SIZE_T(rowBytes[i]));
 				}
 			}
 			upload->D3DResource->Unmap(0, nullptr);
-			auto *target = e._boxTexture->GetResource();
+			auto* target = e._boxTexture->GetResource();
 			_work.push_back({"environment DDS upload",
 			                 {{upload.get(), {Invalid, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}},
 			                  {target, {Invalid, Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}}},
-			                 [upload, target, footprints](auto *cmd)
+			                 [upload, target, footprints](auto* cmd)
 			                 {
 				                 for (UINT i = 0; i < footprints.size(); ++i)
 				                 {
@@ -190,7 +190,7 @@ void SceneEnvironment::Build()
 			             e._luts[i]->GetResource()->D3DResource->GetDesc().DepthOrArraySize != dimensions[i][2];
 		}
 		e.EnsureAtmosphere(atmosphere);
-		const auto pack = [](const Vector3 &v, float w) { return XMFLOAT4(v.x, v.y, v.z, w); };
+		const auto pack = [](const Vector3& v, float w) { return XMFLOAT4(v.x, v.y, v.z, w); };
 		constants.RayleighHeight = pack(atmosphere.RayleighScatteringPerKm, atmosphere.RayleighScaleHeightKm);
 		constants.MieScatteringHeight = pack(atmosphere.MieScatteringPerKm, atmosphere.MieScaleHeightKm);
 		constants.MieAbsorptionG = pack(atmosphere.MieAbsorptionPerKm, atmosphere.MieAnisotropy);
@@ -221,7 +221,7 @@ void SceneEnvironment::Build()
 		capture.CameraPosition = pack((atmosphere.IBLCapturePositionCm - atmosphere.PlanetCenterCm) * .00001f, 0);
 		r.FrameConstants[r.CurrFrameConstantsIndex]->SkyCB->CopyData(1, capture);
 
-		const auto differs = [](const auto &a, const auto &b) { return std::memcmp(&a, &b, sizeof(a)) != 0; };
+		const auto differs = [](const auto& a, const auto& b) { return std::memcmp(&a, &b, sizeof(a)) != 0; };
 		GDX12SkyConstants medium;
 		medium.RayleighHeight = constants.RayleighHeight;
 		medium.MieScatteringHeight = constants.MieScatteringHeight;
@@ -269,7 +269,7 @@ void SceneEnvironment::Build()
 		e._resolvedIBL = ibl;
 	}
 	changed |= lightingChanged;
-	auto &frame = *r.FrameConstants[r.CurrFrameConstantsIndex];
+	auto& frame = *r.FrameConstants[r.CurrFrameConstantsIndex];
 	frame.SkyCB->CopyData(0, constants);
 	if (changed)
 	{
@@ -286,27 +286,27 @@ void SceneEnvironment::Build()
 		e._boxTexture = std::make_unique<GDX12Texture>();
 		e._boxAsset.clear();
 	}
-	auto *heap = r.SRV_UAV_Heap->GetHeap().Get();
-	const auto add = [&](const std::string &name, std::vector<std::pair<GDX12Resource *, Access>> accesses,
-	                     std::function<void(ID3D12GraphicsCommandList *)> record)
+	auto* heap = r.SRV_UAV_Heap->GetHeap().Get();
+	const auto add = [&](const std::string& name, std::vector<std::pair<GDX12Resource*, Access>> accesses,
+	                     std::function<void(ID3D12GraphicsCommandList*)> record)
 	{
-		_work.push_back({name, std::move(accesses), [heap, record](auto *cmd)
+		_work.push_back({name, std::move(accesses), [heap, record](auto* cmd)
 		                 {
 			                 cmd->SetDescriptorHeaps(1, &heap);
 			                 record(cmd);
 		                 }});
 	};
-	const auto access = [](GDX12Texture *t, Mode mode, State required)
-	{ return std::make_pair(static_cast<GDX12Resource *>(t->GetResource()), Access{Invalid, mode, required}); };
+	const auto access = [](GDX12Texture* t, Mode mode, State required)
+	{ return std::make_pair(static_cast<GDX12Resource*>(t->GetResource()), Access{Invalid, mode, required}); };
 	if (clouds && changed)
 	{
-		auto *texture = _cloud._texture.get();
+		auto* texture = _cloud._texture.get();
 		const auto input = _cloudInput;
-		auto *root = _cloud._root.get();
-		auto *pso = _cloud._pipeline.Get();
+		auto* root = _cloud._root.get();
+		auto* pso = _cloud._pipeline.Get();
 		const auto uav = texture->GetUAV()->GPUHandle;
 		add("local cloud source", {access(texture, Mode::Write, UnorderedAccess)},
-		    [input, root, pso, uav](auto *cmd)
+		    [input, root, pso, uav](auto* cmd)
 		    {
 			    struct Constants
 			    {
@@ -319,7 +319,7 @@ void SceneEnvironment::Build()
 				    Vector3 Cloud;
 				    UINT Seed;
 			    };
-			    const auto &p = input.Parameters;
+			    const auto& p = input.Parameters;
 			    const Constants c{256,
 			                      input.Octaves,
 			                      UINT(p.Implementation),
@@ -342,12 +342,12 @@ void SceneEnvironment::Build()
 			    cmd->Dispatch(32, 32, 6);
 		    });
 	}
-	const auto sky = [&](UINT pipeline, UINT constantsIndex, std::vector<std::pair<GDX12Resource *, Access>> accesses,
-	                     UINT x, UINT y, UINT z, std::array<GDX12Texture *, 4> srvs,
-	                     std::array<GDX12Descriptor *, 4> uavs)
+	const auto sky = [&](UINT pipeline, UINT constantsIndex, std::vector<std::pair<GDX12Resource*, Access>> accesses,
+	                     UINT x, UINT y, UINT z, std::array<GDX12Texture*, 4> srvs,
+	                     std::array<GDX12Descriptor*, 4> uavs)
 	{
-		auto *root = e._skyRoot.get();
-		auto *pso = e._skyPipelines[pipeline].Get();
+		auto* root = e._skyRoot.get();
+		auto* pso = e._skyPipelines[pipeline].Get();
 		const auto cb = frame.SkyCB->GetElementAddress(constantsIndex),
 		           camera = frame.CameraCB->GetElementAddress(_common.ActiveCameraCBufferIndex);
 		std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 4> reads{}, writes{};
@@ -362,7 +362,7 @@ void SceneEnvironment::Build()
 		accesses.push_back({&frame.SkyCB->GetResource(), {Invalid, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}});
 		accesses.push_back({&frame.CameraCB->GetResource(), {Invalid, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}});
 		add("atmosphere/source kernel " + std::to_string(pipeline), std::move(accesses),
-		    [root, pso, cb, camera, reads, writes, x, y, z](auto *cmd)
+		    [root, pso, cb, camera, reads, writes, x, y, z](auto* cmd)
 		    {
 			    cmd->SetComputeRootSignature(root->GetRootSignature().Get());
 			    cmd->SetPipelineState(pso);
@@ -381,7 +381,7 @@ void SceneEnvironment::Build()
 	};
 	if (state.Source == SkySource::SkyAtmosphere)
 	{
-		auto &l = e._luts;
+		auto& l = e._luts;
 		if (transmittanceChanged)
 		{
 			sky(0, 1, {access(l[0].get(), Mode::Write, UnorderedAccess)}, (l[0]->GetWidth() + 7) / 8,
@@ -404,9 +404,9 @@ void SceneEnvironment::Build()
 	{
 		for (UINT mip = 0; mip < e._sourceUAVs.size(); ++mip)
 		{
-			std::vector<std::pair<GDX12Resource *, Access>> accesses{
+			std::vector<std::pair<GDX12Resource*, Access>> accesses{
 			    access(e._textures[3].get(), Mode::Write, UnorderedAccess)};
-			std::array<GDX12Texture *, 4> inputs{};
+			std::array<GDX12Texture*, 4> inputs{};
 			if (state.Source == SkySource::SkyAtmosphere)
 			{
 				for (UINT i = 0; i < 3; ++i)
@@ -424,16 +424,16 @@ void SceneEnvironment::Build()
 			sky(4, state.Source == SkySource::SkyAtmosphere ? 1 : 0, std::move(accesses), (size + 7) / 8,
 			    (size + 7) / 8, 6, inputs, {nullptr, nullptr, nullptr, e._sourceUAVs[mip].get()});
 		}
-		const auto filter = [&](UINT pipeline, UINT size, float roughness, GDX12Descriptor *uav, GDX12Texture *target)
+		const auto filter = [&](UINT pipeline, UINT size, float roughness, GDX12Descriptor* uav, GDX12Texture* target)
 		{
-			auto *root = e._filterRoot.get();
-			auto *pso = e._filters[pipeline].Get();
+			auto* root = e._filterRoot.get();
+			auto* pso = e._filters[pipeline].Get();
 			const auto srv = e._textures[3]->GetSRV()->GPUHandle, output = uav->GPUHandle;
 			const UINT samples = ibl.FilterSamples;
 			const float intensity = ibl.Intensity;
 			add("environment filter " + std::to_string(pipeline) + " roughness " + std::to_string(roughness),
 			    {access(e._textures[3].get(), Mode::Read, Read), access(target, Mode::Write, UnorderedAccess)},
-			    [root, pso, srv, output, size, roughness, samples, intensity](auto *cmd)
+			    [root, pso, srv, output, size, roughness, samples, intensity](auto* cmd)
 			    {
 				    const struct
 				    {
@@ -466,12 +466,12 @@ void SceneEnvironment::Build()
 		}
 		for (UINT i : {0u, 1u, 3u})
 		{
-			auto *target = e._textures[i]->GetResource();
-			auto *source = e._disabledPixel->GetResource().D3DResource.Get();
+			auto* target = e._textures[i]->GetResource();
+			auto* source = e._disabledPixel->GetResource().D3DResource.Get();
 			add("disabled environment black " + std::to_string(i),
 			    {access(e._textures[i].get(), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST),
 			     {&e._disabledPixel->GetResource(), {Invalid, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}}},
-			    [target, source](auto *cmd)
+			    [target, source](auto* cmd)
 			    {
 				    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp{
 				        0, {DXGI_FORMAT_R16G16B16A16_FLOAT, 1, 1, 1, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT}};
@@ -486,12 +486,12 @@ void SceneEnvironment::Build()
 	}
 	if (!e._brdfReady)
 	{
-		auto *root = e._filterRoot.get();
-		auto *pso = e._filters[2].Get();
+		auto* root = e._filterRoot.get();
+		auto* pso = e._filters[2].Get();
 		const auto uav = e._textures[2]->GetUAV()->GPUHandle;
 		const UINT size = e._textures[2]->GetWidth();
 		add("environment BRDF integration", {access(e._textures[2].get(), Mode::Write, UnorderedAccess)},
-		    [root, pso, uav, size](auto *cmd)
+		    [root, pso, uav, size](auto* cmd)
 		    {
 			    const UINT c[4] = {size, 0, 0, 0};
 			    cmd->SetComputeRootSignature(root->GetRootSignature().Get());
@@ -504,7 +504,7 @@ void SceneEnvironment::Build()
 	}
 	if (state.Source == SkySource::SkyAtmosphere)
 	{
-		auto &l = e._luts;
+		auto& l = e._luts;
 		// The fixed capture temporarily uses SkyView; restore the camera view
 		// after capture before any visible-sky or lighting consumer reads it.
 		if (viewChanged)
@@ -532,19 +532,19 @@ void SceneEnvironment::Build()
 	e._source = state.Source;
 	e._invalidated = false;
 }
-void SceneEnvironment::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings)
+void SceneEnvironment::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
 	if (graph.Resources.size() != bindings.size())
 	{
 		throw std::logic_error("Environment binding mismatch");
 	}
 	_operations.clear();
-	for (const auto &work : _work)
+	for (const auto& work : _work)
 	{
 		Operation operation{work.Name};
 		for (auto [resource, access] : work.Accesses)
 		{
-			auto *native = resource->D3DResource.Get();
+			auto* native = resource->D3DResource.Get();
 			const auto found = std::find(bindings.begin(), bindings.end(), native);
 			access.Resource = Id(found - bindings.begin());
 			if (found == bindings.end())
@@ -567,7 +567,7 @@ void SceneEnvironment::Append(Graph &graph, std::vector<ID3D12Resource *> &bindi
 		graph.Operations.push_back(std::move(operation));
 	}
 }
-bool SceneEnvironment::Record(Id operation, ID3D12GraphicsCommandList *cmd) const
+bool SceneEnvironment::Record(Id operation, ID3D12GraphicsCommandList* cmd) const
 {
 	const auto found = std::lower_bound(_operations.begin(), _operations.end(), operation);
 	if (found == _operations.end() || *found != operation)
@@ -577,16 +577,16 @@ bool SceneEnvironment::Record(Id operation, ID3D12GraphicsCommandList *cmd) cons
 	_work[found - _operations.begin()].Record(cmd);
 	return true;
 }
-std::vector<Access> SceneEnvironment::Reads(Graph &graph, std::vector<ID3D12Resource *> &bindings) const
+std::vector<Access> SceneEnvironment::Reads(Graph& graph, std::vector<ID3D12Resource*>& bindings) const
 {
 	std::vector<Access> accesses;
-	for (const auto &texture : _environment._textures)
+	for (const auto& texture : _environment._textures)
 	{
 		accesses.push_back(
 		    {NativeWork::ResourceFor(graph, bindings, texture->GetResource()->D3DResource.Get(), "environment input"),
 		     Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
 	}
-	for (const auto &texture : _environment._luts)
+	for (const auto& texture : _environment._luts)
 	{
 		if (texture->IsInitialized())
 		{
@@ -598,4 +598,4 @@ std::vector<Access> SceneEnvironment::Reads(Graph &graph, std::vector<ID3D12Reso
 	return accesses;
 }
 
-} // namespace Meta
+} // namespace BistroRender

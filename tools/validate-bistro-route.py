@@ -64,7 +64,7 @@ def geometry():
             draw.line(points + points[:1], fill=1)
         masks.append(bitmap)
     # The added basin is absent from the original OBJ. Read its current layout.
-    water = (ROOT / 'Apps/App/src/BistroWaterLayout.h').read_text()
+    water = (ROOT / 'Apps/App/src/Techniques/Water/BistroWaterLayout.h').read_text()
     values = lambda name: np.array([float(x.rstrip('f')) for x in re.search(name + r'\(([^)]+)\)', water)[1].split(',')])
     center, half = values('Center')[[0, 2]], values('HalfExtent')[[0, 2]] + 8  # Basin wall thickness.
     yaw = math.radians(float(re.search(r'YawDegrees\s*=\s*([\d.]+)', water)[1]))

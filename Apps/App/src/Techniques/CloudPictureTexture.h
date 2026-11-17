@@ -1,8 +1,8 @@
 #pragma once
-#include "../Graph/MetaGraphExecutor.h"
+#include "../Graph/RenderGraphExecutor.h"
 #include "Engine.RendererDX12/GDX12DeviceResources.h"
 
-namespace Meta {
+namespace BistroRender {
 // One immutable grid/adapter generation; the scene owner drains before replacement.
 class CloudPictureTexture {
 public:

@@ -3,7 +3,7 @@
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <stdexcept>
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
-namespace Meta { class SceneLighting; class SceneTransparency; }
+namespace BistroRender { class SceneLighting; class SceneTransparency; }
 
 class GDX12WBOITCompositionPass : public GDX12RenderPass
 {
@@ -101,8 +101,8 @@ public:
 	}
 
 private:
-    friend class Meta::SceneLighting;
-    friend class Meta::SceneTransparency;
+    friend class BistroRender::SceneLighting;
+    friend class BistroRender::SceneTransparency;
     bool _applyOpaqueAerialPerspective = true;
     struct Link final : IRenderPassLink
     {

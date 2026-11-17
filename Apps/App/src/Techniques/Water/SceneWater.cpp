@@ -3,37 +3,28 @@
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 
-namespace Meta
+namespace BistroRender
 {
-SceneWater::SceneWater(GDX12DeviceResources &resources, RenderPipelineCommonData &common)
-    : _resources(resources), _common(common),
-      _collector(std::make_unique<BistroWaterRendering>(BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()))
+SceneWater::SceneWater(GDX12DeviceResources& resources, RenderPipelineCommonData& common)
+    : _collector(BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()), _surface(resources, common)
 {
-	_surface.SetStaticIBL(true);
-	_surface.SetParticleRendering(true);
-	_surface.Setup(&_resources, &_common);
-}
-SceneWater::~SceneWater()
-{
-	_surface.ClearDenendencies();
 }
 void SceneWater::SetRetirement(std::function<void()> retire)
 {
-	_retire = std::move(retire);
-	_surface.SetResourceRetirement(_retire);
+	_surface.SetResourceRetirement(std::move(retire));
 }
 void SceneWater::Prepare(float delta)
 {
-	_surface.SetInstances(_collector->CollectScene(delta));
+	_instances = _collector.CollectScene(delta);
 }
-void SceneWater::Packet(Graph &graph, std::vector<ID3D12Resource *> &bindings, const char *name,
-                        const std::vector<GDX12ResourceAccess> &resources,
-                        std::function<void(GDX12CommandList *)> record)
+void SceneWater::Packet(Graph& graph, std::vector<ID3D12Resource*>& bindings, const char* name,
+                        const std::vector<GDX12ResourceAccess>& resources,
+                        std::function<void(GDX12CommandList*)> record)
 {
 	std::vector<Access> accesses;
-	for (const auto &resource : resources)
+	for (const auto& resource : resources)
 	{
-		auto *native = resource.Resource->D3DResource.Get();
+		auto* native = resource.Resource->D3DResource.Get();
 		const Id id = NativeWork::ResourceFor(graph, bindings, native, name);
 		const bool upload = graph.Resources.at(id).Memory == Heap::Upload;
 		const auto mode = upload || resource.Usage == GDX12AccessMode::Read ? Mode::Read
@@ -66,34 +57,29 @@ void SceneWater::Packet(Graph &graph, std::vector<ID3D12Resource *> &bindings, c
 	_work.AddOwned(graph, name, std::move(accesses), bindings, std::move(record),
 	               "Water recording cannot submit private queue signals");
 }
-void SceneWater::AppendSurface(Graph &graph, std::vector<ID3D12Resource *> &bindings, GDX12Texture *opaqueDepth,
-                               GDX12Texture *opaqueMotion)
+void SceneWater::AppendSurface(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* opaqueDepth,
+                               GDX12Texture* opaqueMotion)
 {
-	if (!_retire)
+	if (!_surface.HasRetirement())
 	{
 		throw std::logic_error("Water requires executor-owned resource retirement");
 	}
 	_work.Commands.clear();
-	_surface.SetInputs({opaqueDepth, opaqueMotion});
-	_surface.Initialize();
-	const UINT width = opaqueDepth->GetWidth(), height = opaqueDepth->GetHeight();
-	if (_width && (_width != width || _height != height))
+	if (!opaqueDepth->GetWidth() || !opaqueDepth->GetHeight() || opaqueDepth->GetWidth() != opaqueMotion->GetWidth() ||
+	    opaqueDepth->GetHeight() != opaqueMotion->GetHeight() || opaqueMotion->GetFormat() != DXGI_FORMAT_R16G16_FLOAT)
 	{
-		_retire();
-		_surface.Resize();
+		throw std::invalid_argument("Fluid surface requires matching reverse-Z depth and RG16F motion grids");
 	}
-	_width = width;
-	_height = height;
-	_surface.PrepareFrame();
-	_depth = _surface.GetOutput(0)->GetTexture();
-	_motion = _surface.GetOutput(1)->GetTexture();
+	_depth = opaqueDepth;
+	_motion = opaqueMotion;
+	_surface.PrepareFrame(std::move(_instances));
 	if (_surface.NeedsSimulation())
 	{
 		Packet(graph, bindings, "water seed / SPH hash-sort-density-integrate", _surface.GetSimulationBufferAccesses(),
-		       [this](auto *commands) { _surface.ExecuteSimulation(commands); });
+		       [this](auto* commands) { _surface.ExecuteSimulation(commands); });
 	}
 }
-void SceneWater::AppendDraw(Graph &graph, std::vector<ID3D12Resource *> &bindings, GDX12Texture *hdr,
+void SceneWater::AppendDraw(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr,
                             D3D12_CPU_DESCRIPTOR_HANDLE depth)
 {
 	if (!_surface.IsRendering())
@@ -104,6 +90,6 @@ void SceneWater::AppendDraw(Graph &graph, std::vector<ID3D12Resource *> &binding
 	accesses.push_back({hdr->GetResource(), GDX12AccessMode::ReadWrite, D3D12_RESOURCE_STATE_RENDER_TARGET});
 	accesses.push_back({_depth->GetResource(), GDX12AccessMode::ReadWrite, D3D12_RESOURCE_STATE_DEPTH_WRITE});
 	Packet(graph, bindings, "water draw / MGPU unlit opaque particles", accesses,
-	       [this, hdr, depth](auto *commands) { _surface.DrawParticles(commands, hdr, depth); });
+	       [this, hdr, depth](auto* commands) { _surface.DrawParticles(commands, hdr, depth); });
 }
-} // namespace Meta
+} // namespace BistroRender

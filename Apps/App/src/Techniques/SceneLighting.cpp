@@ -5,19 +5,19 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-namespace Meta
+namespace BistroRender
 {
 namespace
 {
 constexpr UINT LightGridThreads = 64;
 constexpr UINT LightingTileSize = 8;
 constexpr UINT MaxDispatchGroups = D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION;
-FfxResource Import(GDX12Texture *texture, FfxResourceStates state = FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ)
+FfxResource Import(GDX12Texture* texture, FfxResourceStates state = FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ)
 {
-	auto *resource = texture->GetResource()->D3DResource.Get();
-	return ffxGetResourceDX12(resource, ffxGetResourceDescriptionDX12(resource), L"Meta SSSR", state);
+	auto* resource = texture->GetResource()->D3DResource.Get();
+	return ffxGetResourceDX12(resource, ffxGetResourceDescriptionDX12(resource), L"Bistro SSSR", state);
 }
-void MatrixBytes(float *target, const Matrix &value)
+void MatrixBytes(float* target, const Matrix& value)
 {
 	std::memcpy(target, &value, sizeof(value));
 }
@@ -39,7 +39,7 @@ std::vector<Access> UniqueLightingAccesses(std::vector<Access> accesses)
 	return result;
 }
 } // namespace
-SceneLighting::SceneLighting(GDX12DeviceResources &r, RenderPipelineCommonData &c)
+SceneLighting::SceneLighting(GDX12DeviceResources& r, RenderPipelineCommonData& c)
     : _resources(r), _common(c), _frames(r.FrameConstants.size())
 {
 	if (r.FrameConstants.size() > FFX_MAX_QUEUED_FRAMES)
@@ -85,7 +85,7 @@ void SceneLighting::Reset()
 {
 	_pendingReset = true;
 }
-void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
+void SceneLighting::Freeze(SceneGeometry& geometry, UINT slot)
 {
 	if (_pendingReset)
 	{
@@ -97,18 +97,18 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
 	_ssrSettings = GetSSRSettings();
 	_gridSettings = GetLightGridSettings();
 	_slot = slot;
-	auto &scene = geometry._slots.at(slot);
-	auto &frame = _frames.at(slot);
+	auto& scene = geometry._slots.at(slot);
+	auto& frame = _frames.at(slot);
 	frame.Width = scene.DepthView->GetWidth();
 	frame.Height = scene.DepthView->GetHeight();
-	auto *normals = scene.Color[2].get();
+	auto* normals = scene.Color[2].get();
 	if (!frame.AO)
 	{
 		frame.AO = std::make_unique<SceneAO>(_resources, _common, scene.DepthView.get(), normals);
 	}
 	frame.AO->Freeze(scene.DepthView.get(), normals, _aoTemporalIndex);
 
-	auto &constants = *_resources.FrameConstants.at(slot);
+	auto& constants = *_resources.FrameConstants.at(slot);
 	const auto grass = geometry.GrassPrimitives();
 	{
 		_probeStaticShadows->Freeze(slot, grass, true);
@@ -123,7 +123,7 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
 	}
 	_probeStaticShadows->Complete(slot);
 	_localShadows->Complete(slot);
-	auto &lightSource = _localShadows->LightSource(slot);
+	auto& lightSource = _localShadows->LightSource(slot);
 	const UINT count = lightSource.GetElementCount();
 	if (!constants.ShadowLights)
 	{
@@ -137,7 +137,7 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
 		constants.ShadowLights->Resize(count);
 	}
 	{
-		auto &source = lightSource;
+		auto& source = lightSource;
 		frame.UploadLights = frame.LightRevision != source.GetRevision() ||
 		                     frame.LightSource.Get() != source.GetResource().D3DResource.Get();
 		if (frame.UploadLights)
@@ -148,12 +148,12 @@ void SceneLighting::Freeze(SceneGeometry &geometry, UINT slot)
 	}
 }
 
-void SceneLighting::AppendGpuLightGrid(Graph &graph, std::vector<ID3D12Resource *> &bindings,
-                                       const SceneGeometry &geometry)
+void SceneLighting::AppendGpuLightGrid(Graph& graph, std::vector<ID3D12Resource*>& bindings,
+                                       const SceneGeometry& geometry)
 {
-	const auto &scene = geometry._slots.at(_slot);
-	const auto &frame = _frames.at(_slot);
-	auto &grid = _deferred._grids.at(_slot);
+	const auto& scene = geometry._slots.at(_slot);
+	const auto& frame = _frames.at(_slot);
+	auto& grid = _deferred._grids.at(_slot);
 	const auto layout = BuildLightGridConstants(
 	    _common.CameraProjection, _common.CameraView, _common.ActiveCameraNearPlane, _common.ActiveCameraFarPlane,
 	    frame.Width, frame.Height, _resources.LocalLights.size(), _gridSettings);
@@ -161,11 +161,11 @@ void SceneLighting::AppendGpuLightGrid(Graph &graph, std::vector<ID3D12Resource 
 	    UINT((std::max)(size_t(1), size_t(layout.Size.x) * layout.Size.y * layout.Size.z * layout.Size.w));
 	grid.Masks->Resize(words);
 	grid.Constants->CopyData(0, layout);
-	const auto resource = [&](GDX12Resource &value)
+	const auto resource = [&](GDX12Resource& value)
 	{ return NativeWork::ResourceFor(graph, bindings, value.D3DResource.Get(), "GPU light grid resource"); };
 	const Id masks = resource(grid.Masks->GetResource());
 	const Id constants = resource(grid.Constants->GetResource());
-	auto &lights = *_resources.FrameConstants.at(_slot)->ShadowLights;
+	auto& lights = *_resources.FrameConstants.at(_slot)->ShadowLights;
 	const Id sources = resource(lights.GetResource());
 	const UINT groups = layout.Size.w ? ((layout.Size.x * layout.Size.y + LightGridThreads - 1) / LightGridThreads) *
 	                                        layout.Size.z * layout.Size.w
@@ -175,9 +175,9 @@ void SceneLighting::AppendGpuLightGrid(Graph &graph, std::vector<ID3D12Resource 
 	                            _common.CameraProjection._31, _common.CameraProjection._32,
 	                            _common.ActiveCameraFarPlane};
 	std::memcpy(parameters.data() + 4, projection, sizeof(projection));
-	auto *root = _gridRoot.get();
-	auto *heap = _resources.SRV_UAV_Heap->GetHeap().Get();
-	auto *build = _gridBuild.Get();
+	auto* root = _gridRoot.get();
+	auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
+	auto* build = _gridBuild.Get();
 	const auto camera = scene.Camera;
 	const auto gridCB = grid.Constants->GetElementAddress(0);
 	const auto srv = lights.GetSRV()->GPUHandle;
@@ -187,7 +187,7 @@ void SceneLighting::AppendGpuLightGrid(Graph &graph, std::vector<ID3D12Resource 
 	           {sources, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE},
 	           {scene.FrameIds[1], Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
 	           {constants, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}},
-	          [=](auto *cmd)
+	          [=](auto* cmd)
 	          {
 		          cmd->SetDescriptorHeaps(1, &heap);
 		          cmd->SetComputeRootSignature(root->GetRootSignature().Get());
@@ -201,11 +201,11 @@ void SceneLighting::AppendGpuLightGrid(Graph &graph, std::vector<ID3D12Resource 
 		                        (groups + MaxDispatchGroups - 1) / MaxDispatchGroups, 1);
 	          });
 }
-void SceneLighting::AppendAO(Graph &graph, std::vector<ID3D12Resource *> &bindings)
+void SceneLighting::AppendAO(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
 	_frames.at(_slot).AO->Append(graph, bindings);
 }
-bool SceneLighting::Record(Id id, ID3D12GraphicsCommandList *commands) const
+bool SceneLighting::Record(Id id, ID3D12GraphicsCommandList* commands) const
 {
 	return _work.Record(id, commands) || (_sunShadows->Record(_slot, id, commands)) ||
 	       (_localShadows->Record(_slot, id, commands)) || (_probeStaticShadows->Record(_slot, id, commands)) ||
@@ -218,8 +218,8 @@ void SceneLighting::Submitted(uint64_t fence)
 	_localShadows->Submitted(_slot);
 	_reflections->Submitted(fence);
 }
-void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings, SceneGeometry &geometry,
-                           SceneEnvironment &environment)
+void SceneLighting::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
+                           SceneEnvironment& environment)
 {
 	_work.Commands.clear();
 	_transparency->PrepareWater(graph, bindings, geometry, _slot);
@@ -230,16 +230,16 @@ void SceneLighting::Append(Graph &graph, std::vector<ID3D12Resource *> &bindings
 	AppendDeferred(graph, bindings, geometry, environment);
 	AppendComposition(graph, bindings, geometry, environment, AppendSSR(graph, bindings, geometry, environment));
 }
-void SceneLighting::AppendShadows(Graph &graph, std::vector<ID3D12Resource *> &bindings, SceneGeometry &geometry,
-                                  SceneEnvironment &environment)
+void SceneLighting::AppendShadows(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
+                                  SceneEnvironment& environment)
 {
-	auto &scene = geometry._slots.at(_slot);
-	auto &frame = _frames.at(_slot);
-	auto &constants = *_resources.FrameConstants.at(_slot);
-	auto &work = _work;
-	const auto resource = [&](GDX12Resource *value)
+	auto& scene = geometry._slots.at(_slot);
+	auto& frame = _frames.at(_slot);
+	auto& constants = *_resources.FrameConstants.at(_slot);
+	auto& work = _work;
+	const auto resource = [&](GDX12Resource* value)
 	{ return NativeWork::ResourceFor(graph, bindings, value->D3DResource.Get(), "lighting/SSR resource"); };
-	const auto appendGrass = [&](const GeometryTarget &view, Graph &g, std::vector<ID3D12Resource *> &resources)
+	const auto appendGrass = [&](const GeometryTarget& view, Graph& g, std::vector<ID3D12Resource*>& resources)
 	{ geometry.AppendGrassView(g, resources, _slot, view); };
 	_sunShadows->Append(graph, bindings, _slot,
 	                    {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle, scene.Buffers[2].Srv.GPUHandle,
@@ -247,14 +247,14 @@ void SceneLighting::AppendShadows(Graph &graph, std::vector<ID3D12Resource *> &b
 	                    scene.Draws, scene.Geometry, appendGrass);
 	if (frame.UploadLights)
 	{
-		auto &source = _localShadows->LightSource(_slot);
-		auto *lightSource = source.GetResource().D3DResource.Get();
-		auto *lightTarget = constants.ShadowLights->GetResource().D3DResource.Get();
+		auto& source = _localShadows->LightSource(_slot);
+		auto* lightSource = source.GetResource().D3DResource.Get();
+		auto* lightTarget = constants.ShadowLights->GetResource().D3DResource.Get();
 		const UINT64 lightBytes = UINT64(source.GetElementCount()) * sizeof(GDX12LocalLightConstants);
 		work.Add(graph, "local-light snapshot upload",
 		         {{resource(&source.GetResource()), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ},
 		          {resource(&constants.ShadowLights->GetResource()), Mode::Write, D3D12_RESOURCE_STATE_COPY_DEST}},
-		         [=](auto *cmd) { cmd->CopyBufferRegion(lightTarget, 0, lightSource, 0, lightBytes); });
+		         [=](auto* cmd) { cmd->CopyBufferRegion(lightTarget, 0, lightSource, 0, lightBytes); });
 	}
 	_localShadows->Append(graph, bindings, _slot,
 	                      {scene.Buffers[0].Srv.GPUHandle, scene.Buffers[1].Srv.GPUHandle,
@@ -269,10 +269,10 @@ void SceneLighting::AppendShadows(Graph &graph, std::vector<ID3D12Resource *> &b
 		                     _probeStaticShadows->Output(_slot));
 	}
 }
-void SceneLighting::PrepareDeferred(SceneGeometry &geometry, SceneEnvironment &environment)
+void SceneLighting::PrepareDeferred(SceneGeometry& geometry, SceneEnvironment& environment)
 {
-	auto &scene = geometry._slots.at(_slot);
-	auto &frame = _frames.at(_slot);
+	auto& scene = geometry._slots.at(_slot);
+	auto& frame = _frames.at(_slot);
 	_deferred.Setup(&_resources, &_common);
 	_deferred.SetInputs({scene.Color[0].get(), scene.Color[2].get(), scene.Color[3].get(), scene.Color[4].get(),
 	                     scene.DepthView.get(), _sunShadows->Output(_slot), environment.Output(0),
@@ -281,7 +281,7 @@ void SceneLighting::PrepareDeferred(SceneGeometry &geometry, SceneEnvironment &e
 	if (!_initialized)
 	{
 		_deferred.Initialize();
-		for (auto &grid : _deferred._grids)
+		for (auto& grid : _deferred._grids)
 		{
 			grid.Masks->CreateUAV(_resources.SRV_UAV_Heap.get(),
 			                      _resources.SRV_UAV_Heap->GetAvailableIndex(SceneDescriptorStart));
@@ -297,27 +297,27 @@ void SceneLighting::PrepareDeferred(SceneGeometry &geometry, SceneEnvironment &e
 		_forceReset = true;
 	}
 }
-void SceneLighting::AppendDeferred(Graph &graph, std::vector<ID3D12Resource *> &bindings, SceneGeometry &geometry,
-                                   SceneEnvironment &environment)
+void SceneLighting::AppendDeferred(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
+                                   SceneEnvironment& environment)
 {
-	auto &scene = geometry._slots.at(_slot);
-	auto &frame = _frames.at(_slot);
-	auto &constants = *_resources.FrameConstants.at(_slot);
-	auto &work = _work;
-	const auto resource = [&](GDX12Resource *value)
+	auto& scene = geometry._slots.at(_slot);
+	auto& frame = _frames.at(_slot);
+	auto& constants = *_resources.FrameConstants.at(_slot);
+	auto& work = _work;
+	const auto resource = [&](GDX12Resource* value)
 	{ return NativeWork::ResourceFor(graph, bindings, value->D3DResource.Get(), "lighting/SSR resource"); };
-	const auto texture = [&](GDX12Texture *value, Mode mode, State state)
+	const auto texture = [&](GDX12Texture* value, Mode mode, State state)
 	{ return Access{resource(value->GetResource()), mode, state}; };
 	const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
-	auto *heap = _resources.SRV_UAV_Heap->GetHeap().Get();
-	auto *lights = constants.ShadowLights.get();
-	auto &grid = _deferred._grids.at(_slot);
-	auto *masks = grid.Masks.get();
+	auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
+	auto* lights = constants.ShadowLights.get();
+	auto& grid = _deferred._grids.at(_slot);
+	auto* masks = grid.Masks.get();
 	// Placed RT/UAV initialization has its own declared state and packet.
-	auto *hdr = _deferred._color->GetResource()->D3DResource.Get();
+	auto* hdr = _deferred._color->GetResource()->D3DResource.Get();
 	work.Add(graph, "initialize deferred HDR target",
 	         {texture(_deferred._color.get(), Mode::Write, D3D12_RESOURCE_STATE_RENDER_TARGET)},
-	         [hdr](auto *cmd) { cmd->DiscardResource(hdr, nullptr); });
+	         [hdr](auto* cmd) { cmd->DiscardResource(hdr, nullptr); });
 	auto lighting = environment.Reads(graph, bindings);
 	for (UINT i = 0; i < _deferred._inputs.size(); ++i)
 	{
@@ -334,8 +334,8 @@ void SceneLighting::AppendDeferred(Graph &graph, std::vector<ID3D12Resource *> &
 	lighting.push_back(texture(_deferred._color.get(), Mode::Write, UnorderedAccess));
 	// Environment outputs can occur in both the explicit pass inputs and LUT
 	// reads; normalize identical physical reads, rejecting state disagreements.
-	auto *root = _deferred._root.get();
-	auto *pipeline = _deferred._pipeline.Get();
+	auto* root = _deferred._root.get();
+	auto* pipeline = _deferred._pipeline.Get();
 	std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 18> inputs{};
 	for (UINT i = 0; i < 12; ++i)
 	{
@@ -353,7 +353,7 @@ void SceneLighting::AppendDeferred(Graph &graph, std::vector<ID3D12Resource *> &
 	const UINT width = frame.Width, height = frame.Height;
 
 	work.Add(graph, "clustered deferred lighting", UniqueLightingAccesses(lighting),
-	         [=](auto *cmd)
+	         [=](auto* cmd)
 	         {
 		         cmd->SetDescriptorHeaps(1, &heap);
 		         cmd->SetComputeRootSignature(root->GetRootSignature().Get());
@@ -374,28 +374,28 @@ void SceneLighting::AppendDeferred(Graph &graph, std::vector<ID3D12Resource *> &
 		                       (height + LightingTileSize - 1) / LightingTileSize, 1);
 	         });
 }
-GDX12Texture *SceneLighting::AppendSSR(Graph &graph, std::vector<ID3D12Resource *> &bindings, SceneGeometry &geometry,
-                                       SceneEnvironment &environment)
+GDX12Texture* SceneLighting::AppendSSR(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
+                                       SceneEnvironment& environment)
 {
 	if (!_ssrSettings.Enabled)
 	{
 		_forceReset = true;
 		return _deferred._color.get();
 	}
-	auto &scene = geometry._slots.at(_slot);
-	auto &frame = _frames.at(_slot);
-	auto &work = _work;
-	const auto resource = [&](GDX12Resource *value)
+	auto& scene = geometry._slots.at(_slot);
+	auto& frame = _frames.at(_slot);
+	auto& work = _work;
+	const auto resource = [&](GDX12Resource* value)
 	{ return NativeWork::ResourceFor(graph, bindings, value->D3DResource.Get(), "lighting/SSR resource"); };
-	const auto texture = [&](GDX12Texture *value, Mode mode, State state)
+	const auto texture = [&](GDX12Texture* value, Mode mode, State state)
 	{ return Access{resource(value->GetResource()), mode, state}; };
 	const State read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
-	auto *heap = _resources.SRV_UAV_Heap->GetHeap().Get();
+	auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
 	const UINT width = frame.Width, height = frame.Height;
-	auto &ssr = _ssr;
-	const std::vector<IRenderPassLink *> ssrInputs{_deferred._color.get(), scene.DepthView.get(), scene.Color[2].get(),
-	                                               scene.Color[3].get(),   scene.Color[1].get(),  environment.Output(1),
-	                                               environment.Output(2)};
+	auto& ssr = _ssr;
+	const std::vector<IRenderPassLink*> ssrInputs{_deferred._color.get(), scene.DepthView.get(), scene.Color[2].get(),
+	                                              scene.Color[3].get(),   scene.Color[1].get(),  environment.Output(1),
+	                                              environment.Output(2)};
 	if (!ssr)
 	{
 		ssr = std::make_unique<GDX12SSSRPass>();
@@ -413,7 +413,7 @@ GDX12Texture *SceneLighting::AppendSSR(Graph &graph, std::vector<ID3D12Resource 
 			_forceReset = true;
 		}
 	}
-	auto &p = *ssr;
+	auto& p = *ssr;
 	const auto settings = _ssrSettings;
 	const bool settingsChanged = settings != p._previousSettings;
 	if (settingsChanged)
@@ -439,9 +439,9 @@ GDX12Texture *SceneLighting::AppendSSR(Graph &graph, std::vector<ID3D12Resource 
 	parameters.JitterDeltaUV = {(p._previousJitter.x - jitter.x) / width, (p._previousJitter.y - jitter.y) / height};
 	parameters.RoughnessCutoff = settings.RoughnessCutoff;
 	p._constants->CopyData(_slot, parameters);
-	auto *ssrRoot = p._root.get();
-	auto *prepare = p._prepare.Get();
-	auto *resolve = p._resolve.Get();
+	auto* ssrRoot = p._root.get();
+	auto* prepare = p._prepare.Get();
+	auto* resolve = p._resolve.Get();
 	const auto camera = scene.Camera, ssrCB = p._constants->GetElementAddress(_slot);
 	std::array<D3D12_GPU_DESCRIPTOR_HANDLE, 9> srvs{};
 	for (UINT i = 0; i < 7; ++i)
@@ -451,7 +451,7 @@ GDX12Texture *SceneLighting::AppendSSR(Graph &graph, std::vector<ID3D12Resource 
 	srvs[7] = p._radiance.GetSRV()->GPUHandle;
 	srvs[8] = p._fallback.GetSRV()->GPUHandle;
 
-	const auto bind = [=](auto *cmd, bool resolvedInputs)
+	const auto bind = [=](auto* cmd, bool resolvedInputs)
 	{
 		cmd->SetDescriptorHeaps(1, &heap);
 		cmd->SetComputeRootSignature(ssrRoot->GetRootSignature().Get());
@@ -466,7 +466,7 @@ GDX12Texture *SceneLighting::AppendSSR(Graph &graph, std::vector<ID3D12Resource 
 		}
 	};
 	std::vector<Access> ssrReads;
-	for (auto *input : p._inputs)
+	for (auto* input : p._inputs)
 	{
 		ssrReads.push_back(texture(input->GetTexture(), Mode::Read, read));
 	}
@@ -480,7 +480,7 @@ GDX12Texture *SceneLighting::AppendSSR(Graph &graph, std::vector<ID3D12Resource 
 	const auto roughness = p._roughness.GetUAV()->GPUHandle, motion = p._motion.GetUAV()->GPUHandle,
 	           fallback = p._fallback.GetUAV()->GPUHandle;
 	work.Add(graph, "SSSR prepare roughness/motion/environment fallback", UniqueLightingAccesses(prepareAccess),
-	         [=](auto *cmd)
+	         [=](auto* cmd)
 	         {
 		         bind(cmd, false);
 		         cmd->SetPipelineState(prepare);
@@ -524,10 +524,10 @@ GDX12Texture *SceneLighting::AppendSSR(Graph &graph, std::vector<ID3D12Resource 
 	sdk.push_back(texture(&p._motion, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
 	sdk.push_back(texture(&p._fallback, Mode::Read, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
 	sdk.push_back(texture(&p._radiance, Mode::ReadWrite, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE));
-	auto *context = p._context.get();
+	auto* context = p._context.get();
 	const auto sdkOperation =
 	    work.Add(graph, "SSSR + denoiser (exclusive persistent SDK history)", UniqueLightingAccesses(sdk),
-	             [context, desc](auto *cmd) mutable
+	             [context, desc](auto* cmd) mutable
 	             {
 		             desc.commandList = ffxGetCommandListDX12(cmd);
 		             const auto result = ffxSssrContextDispatch(context, &desc);
@@ -546,7 +546,7 @@ GDX12Texture *SceneLighting::AppendSSR(Graph &graph, std::vector<ID3D12Resource 
 	resolveAccess.push_back(texture(&p._color, Mode::Write, UnorderedAccess));
 	const auto color = p._color.GetUAV()->GPUHandle;
 	work.Add(graph, "SSR specular composition", UniqueLightingAccesses(resolveAccess),
-	         [=](auto *cmd)
+	         [=](auto* cmd)
 	         {
 		         bind(cmd, true);
 		         cmd->SetPipelineState(resolve);
@@ -563,8 +563,8 @@ GDX12Texture *SceneLighting::AppendSSR(Graph &graph, std::vector<ID3D12Resource 
 
 	return &p._color;
 }
-void SceneLighting::AppendComposition(Graph &graph, std::vector<ID3D12Resource *> &bindings, SceneGeometry &geometry,
-                                      SceneEnvironment &environment, GDX12Texture *opaqueHDR)
+void SceneLighting::AppendComposition(Graph& graph, std::vector<ID3D12Resource*>& bindings, SceneGeometry& geometry,
+                                      SceneEnvironment& environment, GDX12Texture* opaqueHDR)
 {
 	_initialized = true;
 	if (!_hdrContinuation)
@@ -572,15 +572,15 @@ void SceneLighting::AppendComposition(Graph &graph, std::vector<ID3D12Resource *
 		throw std::logic_error("Opaque lighting requires a display continuation");
 	}
 	_transparency->SetOpaqueContinuation(
-	    [&](auto &g, auto &b, auto *hdr, auto *depth, auto *motion)
+	    [&](auto& g, auto& b, auto* hdr, auto* depth, auto* motion)
 	    {
 		    _probePreview->Append(g, b, geometry, *_reflections, _slot, hdr, depth, motion, environment);
 		    return _probePreview->HDR();
 	    },
 	    [this] { return _probePreview->Depth(); }, [this] { return _probePreview->Motion(); },
 	    [this] { return _probePreview->ReadDepth(); });
-	auto *hdr = _transparency->Append(graph, bindings, geometry, _slot, opaqueHDR, _sunShadows->Output(_slot),
+	auto* hdr = _transparency->Append(graph, bindings, geometry, _slot, opaqueHDR, _sunShadows->Output(_slot),
 	                                  _localShadows->Output(_slot), environment);
 	_hdrContinuation(graph, bindings, hdr);
 }
-} // namespace Meta
+} // namespace BistroRender

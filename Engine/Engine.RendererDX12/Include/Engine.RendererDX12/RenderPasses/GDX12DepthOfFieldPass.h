@@ -1,7 +1,7 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 
-namespace Meta { class ScenePostUI; }
+namespace BistroRender { class ScenePostUI; }
 
 class GDX12DepthOfFieldPass final : public GDX12RenderPass
 {
@@ -18,7 +18,7 @@ public:
     void ClearDenendencies() override;
 
 private:
-    friend class Meta::ScenePostUI;
+    friend class BistroRender::ScenePostUI;
     struct Context;
     void DestroyContext();
     std::unique_ptr<Context> _context;

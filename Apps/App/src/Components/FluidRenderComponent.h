@@ -1,6 +1,6 @@
 #pragma once
 #include "Engine.Core/ECS/Component.h"
-#include "Rendering/Water/GDX12Fluid.h"
+#include "Techniques/Water/GDX12Fluid.h"
 
 struct FluidRenderComponent : ComponentTag, GDX12FluidComponent
 {

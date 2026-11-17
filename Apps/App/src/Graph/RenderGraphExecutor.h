@@ -1,6 +1,6 @@
 #pragma once
-#include "MetaGraph.h"
-#include "MetaGraphRecorder.h"
+#include "RenderGraph.h"
+#include "RenderGraphRecorder.h"
 #include "QueueSubmission.h"
 #include "Engine.RendererDX12/GDX12Device.h"
 #include <functional>
@@ -9,7 +9,7 @@
 #include <thread>
 class GDX12CommandList;
 class GDX12CommandQueue;
-namespace Meta
+namespace BistroRender
 {
 // Each recording context has one Begin/Execute/drain owner; QueueSubmission
 // serializes native transactions for all device/loop contexts. Record callbacks run on
@@ -22,23 +22,23 @@ namespace Meta
 class Executor
 {
   public:
-	using Record = std::function<void(Id, uint32_t, ID3D12GraphicsCommandList *)>;
-	Executor(GDX12Device &, uint32_t slots, unsigned threads = 4);
+	using Record = std::function<void(Id, uint32_t, ID3D12GraphicsCommandList*)>;
+	Executor(GDX12Device&, uint32_t slots, unsigned threads = 4);
 	Executor(std::shared_ptr<QueueSubmission>, Id device, uint32_t slots, unsigned threads = 4);
 	~Executor();
 	void Begin(uint32_t slot);
 	bool TryBegin(uint32_t slot); // independent loops never CPU-wait for busy slots
 	// Explicit owner-only capacity growth after Begin retired the selected slot.
 	// Execute still rejects an unreserved plan; workers never allocate lists.
-	void Reserve(const Schedule &schedule);
-	uint64_t Execute(const Schedule &, const std::vector<ID3D12Resource *> &, const Record &,
-	                 GDX12CommandList *prefix = nullptr, GDX12CommandList *suffix = nullptr,
-	                 const std::atomic<bool> *cancellation = nullptr, const std::vector<PacketWait> &waits = {});
+	void Reserve(const Schedule& schedule);
+	uint64_t Execute(const Schedule&, const std::vector<ID3D12Resource*>&, const Record&,
+	                 GDX12CommandList* prefix = nullptr, GDX12CommandList* suffix = nullptr,
+	                 const std::atomic<bool>* cancellation = nullptr, const std::vector<PacketWait>& waits = {});
 	void Drain();
 	// Each value belongs to the queue selected by its packet, not one timeline.
-	const std::vector<uint64_t> &Tokens() const { return _tokens; }
-	const std::vector<CompletionToken> &Completions() const { return _completions; }
-	const std::shared_ptr<QueueSubmission> &Submissions() const { return _submissions; }
+	const std::vector<uint64_t>& Tokens() const { return _tokens; }
+	const std::vector<CompletionToken>& Completions() const { return _completions; }
+	const std::shared_ptr<QueueSubmission>& Submissions() const { return _submissions; }
 	uint64_t Retirement(uint32_t slot) const { return _slots.at(slot).Fences[0]; }
 
   private:
@@ -57,7 +57,7 @@ class Executor
 	CompletionToken Token(Queue q, uint64_t value) const;
 	std::shared_ptr<QueueSubmission> _submissions;
 	Id _deviceId;
-	GDX12Device &_device;
+	GDX12Device& _device;
 	JobSystem _jobs;
 	std::thread::id _owner = std::this_thread::get_id();
 	std::vector<Slot> _slots;
@@ -68,4 +68,4 @@ class Executor
 	bool _begun = false;
 	bool _aborted = false; // partial frame requires resource-state rebuild
 };
-} // namespace Meta
+} // namespace BistroRender

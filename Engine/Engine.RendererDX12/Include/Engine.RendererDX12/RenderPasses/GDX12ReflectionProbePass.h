@@ -5,7 +5,7 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include <array>
 #include <utility>
-namespace Meta { class SceneReflections; }
+namespace BistroRender { class SceneReflections; }
 
 class GDX12ReflectionProbePass final : public GDX12RenderPass
 {
@@ -27,7 +27,7 @@ public:
     std::pair<size_t, size_t> GetReadiness();
 
 private:
-    friend class Meta::SceneReflections;
+    friend class BistroRender::SceneReflections;
     enum Geometry : std::uint8_t { AllGeometry, StaticGeometry, DynamicGeometry };
 
     struct ProbeState

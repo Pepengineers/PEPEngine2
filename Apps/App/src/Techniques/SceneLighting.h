@@ -7,24 +7,24 @@
 #include "SceneProbePreview.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12DeferredLightingPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12SSSRPass.h"
-namespace Meta
+namespace BistroRender
 {
 class SceneLighting
 {
   public:
-	SceneLighting(GDX12DeviceResources &, RenderPipelineCommonData &);
+	SceneLighting(GDX12DeviceResources&, RenderPipelineCommonData&);
 	~SceneLighting();
-	void Freeze(SceneGeometry &, UINT slot);
-	void AppendAO(Graph &, std::vector<ID3D12Resource *> &);
-	void Append(Graph &, std::vector<ID3D12Resource *> &, SceneGeometry &, SceneEnvironment &);
-	using HDRContinuation = std::function<void(Graph &, std::vector<ID3D12Resource *> &, GDX12Texture *)>;
+	void Freeze(SceneGeometry&, UINT slot);
+	void AppendAO(Graph&, std::vector<ID3D12Resource*>&);
+	void Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
+	using HDRContinuation = std::function<void(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*)>;
 	void SetHDRContinuation(HDRContinuation continuation) { _hdrContinuation = std::move(continuation); }
-	bool Record(Id, ID3D12GraphicsCommandList *) const;
+	bool Record(Id, ID3D12GraphicsCommandList*) const;
 	void Submitted(uint64_t fence);
 	void Reset();
-	GDX12Texture *ParticleMotion() const { return _transparency->ParticleMotion(); }
-	GDX12Texture *PostDepth() const { return _transparency->Depth(); }
-	GDX12Texture *PostMotion() const { return _transparency->Motion(); }
+	GDX12Texture* ParticleMotion() const { return _transparency->ParticleMotion(); }
+	GDX12Texture* PostDepth() const { return _transparency->Depth(); }
+	GDX12Texture* PostMotion() const { return _transparency->Motion(); }
 	void SetWaterRetirement(std::function<void()> retire) { _transparency->SetWaterRetirement(std::move(retire)); }
 	std::pair<size_t, size_t> Readiness() const
 	{
@@ -40,16 +40,15 @@ class SceneLighting
 		GDX12ResourceHandle LightSource;
 		bool UploadLights = false;
 	};
-	void AppendGpuLightGrid(Graph &, std::vector<ID3D12Resource *> &, const SceneGeometry &);
-	void AppendShadows(Graph &, std::vector<ID3D12Resource *> &, SceneGeometry &, SceneEnvironment &);
-	void AppendDeferred(Graph &, std::vector<ID3D12Resource *> &, SceneGeometry &, SceneEnvironment &);
-	GDX12Texture *AppendSSR(Graph &, std::vector<ID3D12Resource *> &, SceneGeometry &, SceneEnvironment &);
-	void AppendComposition(Graph &, std::vector<ID3D12Resource *> &, SceneGeometry &, SceneEnvironment &,
-	                       GDX12Texture *);
-	void PrepareDeferred(SceneGeometry &, SceneEnvironment &);
+	void AppendGpuLightGrid(Graph&, std::vector<ID3D12Resource*>&, const SceneGeometry&);
+	void AppendShadows(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
+	void AppendDeferred(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
+	GDX12Texture* AppendSSR(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&);
+	void AppendComposition(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, SceneEnvironment&, GDX12Texture*);
+	void PrepareDeferred(SceneGeometry&, SceneEnvironment&);
 	HDRContinuation _hdrContinuation;
-	GDX12DeviceResources &_resources;
-	RenderPipelineCommonData &_common;
+	GDX12DeviceResources& _resources;
+	RenderPipelineCommonData& _common;
 	std::unique_ptr<SceneReflections> _reflections;
 	std::unique_ptr<SceneProbePreview> _probePreview;
 	std::unique_ptr<SceneLocalShadows> _probeStaticShadows;
@@ -71,4 +70,4 @@ class SceneLighting
 	GDX12LightGridSettings _gridSettings{};
 	UINT _aoTemporalIndex = 0;
 };
-} // namespace Meta
+} // namespace BistroRender
