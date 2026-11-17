@@ -8,9 +8,6 @@ class GDX12TAAPass;
 class GDX12ReconstructionPass final : public GDX12RenderPass
 {
 public:
-    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override;
-    void ImportHistory(GDX12RenderGraph& graph);
-    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override;
 
     GDX12ReconstructionPass();
     ~GDX12ReconstructionPass() override;

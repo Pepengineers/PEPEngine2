@@ -8,15 +8,6 @@ namespace Meta { class SceneLighting; }
 class GDX12DeferredLightingPass final : public GDX12RenderPass
 {
 public:
-    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-    {
-        graph.SetName("Clustered deferred lighting");
-        graph.Read(SharedResource::Scene);
-        graph.ReadInputs(_inputs, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
-        graph.Read(SharedResource::Environment);
-        graph.Read(SharedResource::ReflectionProbes);
-        graph.Write(_outputs[0], "Deferred HDR", Lifetime::Transient, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    }
 
     GDX12DeferredLightingPass()
     {
@@ -60,67 +51,15 @@ public:
             grid.Constants = std::make_unique<GDX12UploadBuffer<GDX12LightGridConstants>>(_resources->Device, 1);
         }
     }
-    void Prepare()
-    {
-        _gridSystem.Build(_grid, _commonData->CameraProjection, _commonData->CameraView,
-            _commonData->ActiveCameraNearPlane, _commonData->ActiveCameraFarPlane,
-            _color->GetWidth(), _color->GetHeight(), _resources->LocalLights, _commonData->Jobs);
-        auto& grid = _grids[_resources->CurrFrameConstantsIndex];
-        const UINT words = static_cast<UINT>(_grid.Masks.size());
-        grid.Upload->Resize(words);
-        grid.Masks->Resize(words);
-        grid.Upload->CopyData(0, _grid.Masks.data(), words);
-        grid.Constants->CopyData(0, _grid.Constants);
-        _prepared = true;
-    }
-    void Execute(GDX12CommandList* commands) override
-    {
-        if (!_prepared) throw std::logic_error("Prepare the CPU light grid before recording lighting");
-        // The hybrid UAV/RT target must be initialized before its first UAV use, including after graph aliasing.
-        commands->ResourceBarrier({_color->GetResource()->GetRenderTargetBarrier()});
-        commands->GetCommandList()->DiscardResource(_color->GetResource()->D3DResource.Get(), nullptr);
-        commands->ResourceBarrier({_color->GetResource()->GetUnorderedAccessBarrier()});
-        GDX12_SCOPED_EVENT(commands, "Clustered deferred lighting", Colors::Gold);
-        auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-        auto& grid = _grids[_resources->CurrFrameConstantsIndex];
-        const UINT words = static_cast<UINT>(_grid.Masks.size());
-        commands->ResourceBarrier({ grid.Masks->GetResource().GetCopyDestBarrier() });
-        commands->GetCommandList()->CopyBufferRegion(grid.Masks->GetResource().D3DResource.Get(), 0,
-            grid.Upload->GetResource().D3DResource.Get(), 0, UINT64(words) * sizeof(UINT));
-        commands->ResourceBarrier({ grid.Masks->GetResource().GetSRVBarrier() });
-        commands->SetComputeRootSignature(_root.get());
-        commands->SetPipelineState(_pipeline.Get());
-        commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-        commands->SetComputeRootConstantBufferView(0, frame->MainCB->GetElementAddress(0));
-        commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
-        commands->SetComputeRootConstantBufferView(2, frame->ShadowCB->GetElementAddress(0));
-        for (UINT i = 0; i < _numInputs; ++i)
-        {
-            auto* texture = _inputs[i]->GetTexture();
-            commands->SetComputeSRV(i < 11 ? i : 14, texture->GetSRV()->GPUHandle);
-        }
-        commands->SetComputeRootConstantBufferView(3, frame->SkyCB->GetElementAddress(0));
-        commands->SetComputeRootConstantBufferView(4, grid.Constants->GetElementAddress(0));
-        commands->SetComputeSRV(15, _resources->SkyTransmittanceSRV.GPUHandle);
-        commands->SetComputeSRV(16, _resources->SkyViewSRV.GPUHandle);
-        commands->SetComputeSRV(11, frame->ShadowLights->GetSRV()->GPUHandle);
-        commands->SetComputeSRV(12, _resources->ReflectionRadianceSRV.GPUHandle);
-        commands->SetComputeSRV(13, frame->ReflectionProbes->GetSRV()->GPUHandle);
-        commands->SetComputeSRV(17, grid.Masks->GetSRV()->GPUHandle);
-        commands->SetComputeUAV(0, _color->GetUAV()->GPUHandle);
-        commands->Dispatch((_color->GetWidth() + 7) / 8, (_color->GetHeight() + 7) / 8, 1);
-    }
-    void Resize() override { _prepared = false; _color->Resize(_inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight()); }
+    void Resize() override { _color->Resize(_inputs[0]->GetTexture()->GetWidth(), _inputs[0]->GetTexture()->GetHeight()); }
     void ClearDenendencies() override
     {
         GDX12RenderPass::ClearDenendencies();
-        _prepared = false;
         _color.reset(); _root.reset(); _pipeline.Reset(); _grids.clear();
     }
 private:
     friend class Meta::SceneLighting;
     bool _opaqueOnly = false;
-    bool _prepared = false;
     struct FrameGrid
     {
         std::unique_ptr<GDX12UploadBuffer<UINT>> Upload, Masks;

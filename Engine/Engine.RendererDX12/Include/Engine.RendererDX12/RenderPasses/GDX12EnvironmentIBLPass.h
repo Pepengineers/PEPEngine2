@@ -13,43 +13,22 @@ namespace Meta { class SceneEnvironment; }
 class GDX12EnvironmentIBLPass final : public GDX12RenderPass
 {
 public:
-    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-    {
-        graph.SetName("Environment");
-        graph.Read(SharedResource::Scene);
-        graph.ReadInputs(_inputs);
-        for (UINT i = 0; i < _outputs.size(); ++i)
-            graph.Write(_outputs[i], "Environment " + std::to_string(i), Lifetime::Dynamic);
-        graph.Write(SharedResource::Environment, "Atmosphere cache");
-        graph.HasSideEffects();
-    }
 
     GDX12EnvironmentIBLPass();
     void Initialize() override;
     void Resize() override;
-    void Execute(GDX12CommandList* commands) override;
     void Invalidate();
     void ClearDenendencies() override;
-    void SetCloudSource(GDX12CloudComponent* source);
-    // Meta retires all graph queues before descriptor/resource replacement;
-    // the legacy App retains its original DIRECT-queue retirement fallback.
+    // Drain graph queues before replacing resources or descriptors.
     void SetResourceRetirement(std::function<void()> retire) { _retire = std::move(retire); }
 private:
     friend class Meta::SceneEnvironment;
     void InitializeKernels();
-    void LoadEnvironment(const std::filesystem::path& asset);
     void CreateTexture(GDX12Texture& texture, UINT width, UINT height, UINT depth, UINT mips, bool cube);
     void EnsureOutputs(bool enabled, UINT cubeSize);
     void AllocateOutputs(bool enabled, UINT cubeSize);
     void EnsureAtmosphere(const SkyAtmosphereSettings& settings);
     void PublishAtmosphereViews(bool enabled);
-    void BindSky(GDX12CommandList* commands, UINT constantIndex);
-    void BindSkyConstants(GDX12CommandList* commands, D3D12_GPU_VIRTUAL_ADDRESS address);
-    void DispatchLUT(GDX12CommandList* commands, UINT pipeline, UINT index);
-    void RecordSourceCube(GDX12CommandList* commands);
-    void RecordDisabledOutputs(GDX12CommandList* commands);
-    void Filter(GDX12CommandList* commands, UINT samples, float intensity);
-    void EnsureBRDF(GDX12CommandList* commands);
     void ResetEnvironmentHistory();
     void ReleaseAtmosphere();
     void RetireResources();
@@ -70,7 +49,6 @@ private:
     SkySource _source = SkySource::Off;
     bool _invalidated = true;
     bool _brdfReady = false;
-    GDX12CloudComponent* _cloudSource = nullptr;
     uint64_t _cloudSourceRevision = 0, _cloudLightingRevision = 0;
     bool _cloudActive = false;
     SkyIBLSettings _resolvedIBL;

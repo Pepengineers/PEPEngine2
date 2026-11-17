@@ -24,6 +24,7 @@ class TestApp final : public App
 {
 public:
     TestApp() : App(GetModuleHandleW(nullptr)) {}
+    bool AddModules() override { return true; }
 };
 
 struct Fixtures

@@ -65,36 +65,6 @@ GDX12ReconstructionPass::GDX12ReconstructionPass()
 
 GDX12ReconstructionPass::~GDX12ReconstructionPass() { ClearDenendencies(); }
 
-void GDX12ReconstructionPass::ImportHistory(GDX12RenderGraph& graph)
-{
-    if (auto* taa = TAA())
-    {
-        for (auto& color : taa->ColorHistory()) graph.ImportLink("TAA color history", &color);
-        for (auto& depth : taa->DepthHistory()) graph.ImportLink("TAA depth history", &depth);
-    }
-}
-
-void GDX12ReconstructionPass::RecordRenderGraph(GDX12RenderGraphBuilder& graph)
-{
-    graph.SetName("Reconstruction");
-    graph.Read(SharedResource::Scene);
-    graph.ReadInputs(_inputs);
-    if (auto* taa = TAA())
-    {
-        for (auto& color : taa->ColorHistory()) graph.ReadWrite(&color);
-        for (auto& depth : taa->DepthHistory()) graph.ReadWrite(&depth);
-    }
-    graph.Write(_outputs[0], "Reconstructed or native HDR", Lifetime::Dynamic);
-    graph.Fallback(_outputs[0], _inputs[2]);
-}
-
-std::vector<GDX12RenderGraph::BufferAccess> GDX12ReconstructionPass::GetBufferAccesses() const
-{
-    if (auto* taa = TAA())
-        return {{taa->PreparedFrame().Camera, GDX12RenderGraph::Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ}};
-    return {};
-}
-
 void GDX12ReconstructionPass::Setup(GDX12DeviceResources* resources, RenderPipelineCommonData* common)
 {
     GDX12RenderPass::Setup(resources, common);

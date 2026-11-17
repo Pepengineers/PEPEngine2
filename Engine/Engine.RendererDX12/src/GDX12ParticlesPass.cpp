@@ -1,5 +1,5 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
-#include "GDX12ParticleOffload.h"
+#include "GDX12ParticleResources.h"
 #include <algorithm>
 #include <stdexcept>
 
@@ -7,7 +7,6 @@ using namespace ParticleResources;
 
 struct GDX12ParticlesPass::State
 {
-    bool LocalOnly = false;
     bool ReadOnlyDepth = false;
     UINT Capacity = 0;
     bool Sorted = false;
@@ -40,7 +39,7 @@ struct GDX12ParticlesPass::State
         const bool waves = SUCCEEDED(resources->Device->GetDevice()->CheckFeatureSupport(
             D3D12_FEATURE_D3D12_OPTIONS1, &options, sizeof(options))) && options.WaveOps;
         const D3D_SHADER_MACRO defines[] = {{"PARTICLE_WAVE_OPS", waves ? "1" : "0"}, {nullptr, nullptr}};
-        for (const auto* entry : { "Cull", "CullImported", "ClearDraws", "BuildDrawArgs" })
+        for (const auto* entry : { "Cull", "ClearDraws", "BuildDrawArgs" })
             CompileCompute(resources, "ParticleRender.hlsl", entry, Root.get(), defines);
         ReadDepth.resize(resources->FrameConstants.size());
         DepthResources.resize(resources->FrameConstants.size());
@@ -115,28 +114,12 @@ struct GDX12ParticlesPass::State
         }
         if (mesh)
         {
-            if (LocalOnly)
-            {
-                FireflyVertices = std::make_unique<Buffer<GDX12ParticleMeshVertex>>(resources->Device,
-                    FireflyParticleVertexCount, EBufferType::Default, false);
-                FireflyUpload = std::make_unique<Buffer<GDX12ParticleMeshVertex>>(resources->Device,
-                    FireflyParticleVertexCount, EBufferType::Upload, false);
-                FireflyUpload->CopyData(0, GetFireflyParticleMesh().data(), FireflyParticleVertexCount);
-                MeshUploadPending = true;
-                return;
-            }
-            FireflyVertices = std::make_unique<Buffer<GDX12ParticleMeshVertex>>(resources->Device, FireflyParticleVertexCount, EBufferType::Default, false);
-            Buffer<GDX12ParticleMeshVertex> upload(resources->Device, FireflyParticleVertexCount, EBufferType::Upload, false);
-            upload.CopyData(0, GetFireflyParticleMesh().data(), FireflyParticleVertexCount);
-            auto* queue = resources->Device->GetCommandQueue();
-            auto* commands = queue->GetCommandList();
-            commands->ResourceBarrier({FireflyVertices->GetResource().GetCopyDestBarrier()});
-            commands->GetCommandList()->CopyBufferRegion(FireflyVertices->GetResource().D3DResource.Get(), 0,
-                upload.GetResource().D3DResource.Get(), 0, UINT64(FireflyParticleVertexCount) * sizeof(GDX12ParticleMeshVertex));
-            commands->ResourceBarrier({FireflyVertices->GetResource().GetGenericReadBarrier()});
-            queue->ExecuteCommandList(commands);
-            // Lazy mesh initialization completes its upload before any color or motion draw.
-            queue->Flush();
+            FireflyVertices = std::make_unique<Buffer<GDX12ParticleMeshVertex>>(resources->Device,
+                FireflyParticleVertexCount, EBufferType::Default, false);
+            FireflyUpload = std::make_unique<Buffer<GDX12ParticleMeshVertex>>(resources->Device,
+                FireflyParticleVertexCount, EBufferType::Upload, false);
+            FireflyUpload->CopyData(0, GetFireflyParticleMesh().data(), FireflyParticleVertexCount);
+            MeshUploadPending = true;
         }
     }
 
@@ -306,7 +289,6 @@ void GDX12ParticlesPass::BeginFrame()
     if (!_state)
     {
         _state = std::make_unique<State>();
-        _state->LocalOnly = _localOnly;
         _state->ReadOnlyDepth = _readOnlyDepth;
         _state->Initialize(_resources);
     }
@@ -396,17 +378,6 @@ void GDX12ParticlesPass::BeginFrame()
     }
 }
 
-void GDX12ParticlesPass::Execute(GDX12CommandList* commands)
-{
-    PrepareRenderData(commands);
-    DrawWeightedAndMotion(commands);
-}
-
-void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands)
-{
-    PrepareRenderData(commands, nullptr, true, true);
-}
-
 void GDX12ParticlesPass::PrepareRenderGroup(GDX12CommandList* commands,
     const std::vector<uint64_t>& emitterIds, bool clear, bool finalize)
 {
@@ -461,36 +432,19 @@ void GDX12ParticlesPass::PrepareRenderData(GDX12CommandList* commands,
         const auto& emitter = simulation.Emitters[i];
         if (emitterIds && std::find(emitterIds->begin(), emitterIds->end(), emitter.Id) == emitterIds->end()) continue;
         commands->SetComputeRootConstantBufferView(2, state.Constants[_resources->CurrFrameConstantsIndex]->GetElementAddress(i));
-        UINT base = 0;
-        const auto external = simulation.ExternalOffsets.find(emitter.Id);
-        const bool externallySimulated = external != simulation.ExternalOffsets.end();
-        if (externallySimulated) base = external->second;
-        const bool imported = externallySimulated || (simulation.Offload && simulation.Offload->Find(emitter.Id, base));
-        const UINT parameters[] = {emitter.MaxParticles, base, state.Capacity, state.ResetMotion};
+        const UINT parameters[] = {emitter.MaxParticles, 0, state.Capacity, state.ResetMotion};
         commands->GetCommandList()->SetComputeRoot32BitConstants(0, 4, parameters, 0);
         if (emitter.Texture && !emitterIds)
             commands->ResourceBarrier({emitter.Texture->PrimaryDeviceTexture->GetResource()->GetSRVBarrier()});
-        if (imported)
-        {
-            auto* resource = externallySimulated ? simulation.ExternalDisplay : &simulation.Offload->Display().GetResource();
-            const auto srv = externallySimulated ? simulation.ExternalSRV : simulation.Offload->Display().GetSRV()->GPUHandle;
-            commands->ResourceBarrier({resource->GetNonPixelShaderResourceBarrier()});
-            commands->SetComputeSRV(0, srv);
-            commands->SetPipelineState(state.Compute.at("CullImported"));
-            commands->Dispatch((emitter.MaxParticles + 255) / 256, 1, 1);
-        }
-        else
-        {
-            auto& pool = *simulation.Pools.at(emitter.Id);
-            commands->ResourceBarrier({pool.Particles->GetResource().GetNonPixelShaderResourceBarrier(),
-                pool.Alive[pool.ReadIndex]->GetResource().GetNonPixelShaderResourceBarrier(),
-                pool.Counters->GetResource().GetNonPixelShaderResourceBarrier(), pool.Args->GetResource().GetIndirectArgsBarrier()});
-            commands->SetComputeSRV(0, pool.Particles->GetSRV()->GPUHandle);
-            commands->SetComputeSRV(1, pool.Alive[pool.ReadIndex]->GetSRV()->GPUHandle);
-            commands->SetComputeSRV(2, pool.Counters->GetSRV()->GPUHandle);
-            commands->SetPipelineState(state.Compute.at("Cull"));
-            commands->ExecuteIndirect(state.DispatchSignature.Get(), 1, pool.Args->GetResource().D3DResource.Get(), 24, nullptr);
-        }
+        auto& pool = *simulation.Pools.at(emitter.Id);
+        commands->ResourceBarrier({pool.Particles->GetResource().GetNonPixelShaderResourceBarrier(),
+            pool.Alive[pool.ReadIndex]->GetResource().GetNonPixelShaderResourceBarrier(),
+            pool.Counters->GetResource().GetNonPixelShaderResourceBarrier(), pool.Args->GetResource().GetIndirectArgsBarrier()});
+        commands->SetComputeSRV(0, pool.Particles->GetSRV()->GPUHandle);
+        commands->SetComputeSRV(1, pool.Alive[pool.ReadIndex]->GetSRV()->GPUHandle);
+        commands->SetComputeSRV(2, pool.Counters->GetSRV()->GPUHandle);
+        commands->SetPipelineState(state.Compute.at("Cull"));
+        commands->ExecuteIndirect(state.DispatchSignature.Get(), 1, pool.Args->GetResource().D3DResource.Get(), 24, nullptr);
         UAV(commands, *state.Counts);
         UAV(commands, *state.Draws);
         UAV(commands, *state.Indices);
@@ -613,10 +567,10 @@ std::vector<GDX12Resource*> GDX12ParticlesPass::NativeResources() const
     if (s.MotionEnabled && s.MotionTexture) result.push_back(s.MotionTexture->GetResource());
     return result;
 }
-std::vector<GDX12RenderGraph::BufferAccess> GDX12ParticlesPass::NativePreparationAccesses() const
+std::vector<GDX12ResourceAccess> GDX12ParticlesPass::NativePreparationAccesses() const
 {
-    using Mode = GDX12RenderGraph::Mode;
-    std::vector<GDX12RenderGraph::BufferAccess> result;
+    using Mode = GDX12AccessMode;
+    std::vector<GDX12ResourceAccess> result;
     if (!_state || !_state->Active) return result;
     auto& s = *_state;
     for (auto* buffer : {s.Counts.get(), s.Indices.get(), s.DrawArgs.get(), s.SortParameters.get(),
@@ -632,10 +586,10 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12ParticlesPass::NativePreparatio
     }
     return result;
 }
-std::vector<GDX12RenderGraph::BufferAccess> GDX12ParticlesPass::NativeRasterAccesses(bool includeMotion) const
+std::vector<GDX12ResourceAccess> GDX12ParticlesPass::NativeRasterAccesses(bool includeMotion) const
 {
-    using Mode = GDX12RenderGraph::Mode;
-    std::vector<GDX12RenderGraph::BufferAccess> result;
+    using Mode = GDX12AccessMode;
+    std::vector<GDX12ResourceAccess> result;
     if (!_state || !_state->Active) return result;
     auto& s = *_state;
     result.push_back({&s.Draws->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});

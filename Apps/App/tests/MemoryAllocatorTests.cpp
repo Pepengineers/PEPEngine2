@@ -21,6 +21,7 @@ class TestApp final : public App
 {
 public:
     TestApp() : App(GetModuleHandleW(nullptr)) {}
+    bool AddModules() override { return true; }
 };
 
 static D3D12MA::Statistics Statistics(GDX12Device& device)

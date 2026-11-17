@@ -1,9 +1,7 @@
 #pragma once
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Components/BistroWaterComponents.h"
-#include "Rendering/Water/GDX12FluidPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12WBOITCompositionPass.h"
+#include "Rendering/Water/GDX12Fluid.h"
 
 class BistroWaterRendering final
 {
@@ -12,11 +10,6 @@ public:
     ~BistroWaterRendering();
     std::vector<GDX12FluidInstance> CollectScene(float deltaSeconds, bool advanceWhilePaused = false);
 
-    GDX12FluidSurfacePass Surface;
-    GDX12FluidSimulationPass Simulation{ &Surface };
-    GDX12FluidResolvePass Resolve{ &Surface };
-    GDX12WBOITTransparencyPass Transparency{ GDX12WBOITTransparencyPass::DepthPartition::Far };
-    GDX12WBOITCompositionPass Composition;
 
 private:
     void Subscribe(World&);

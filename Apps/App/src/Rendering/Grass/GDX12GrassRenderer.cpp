@@ -187,7 +187,6 @@ void GDX12GrassRenderer::BeginFrame(const RenderPipelineCommonData& common,
     frame.RootUploads.clear();
     frame.Outputs.clear();
     frame.OutputIndex.clear();
-    _arenaOutput = nullptr;
     if (!_initialized) Initialize();
     if (!_presence)
     {
@@ -387,52 +386,6 @@ void GDX12GrassRenderer::WindDispatch(const UINT stage, const WindParameters& pa
     frame.WindJobs.push_back({ stage, parameters.Resolution, constants.get(), input, pressure, output });
 }
 
-void GDX12GrassRenderer::PrepareGPU(GDX12CommandList* commands)
-{
-    auto& frame = CurrentFrame();
-    for (const auto& [roots, upload] : frame.RootUploads)
-    {
-        commands->ResourceBarrier({ roots->GetResource().GetCopyDestBarrier() });
-        commands->GetCommandList()->CopyBufferRegion(roots->GetResource().D3DResource.Get(), 0,
-            upload->GetResource().D3DResource.Get(), 0, UINT64(roots->GetElementCount()) * sizeof(XMFLOAT3));
-        commands->ResourceBarrier({ roots->GetResource().GetNonPixelShaderResourceBarrier() });
-    }
-    commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-    commands->SetComputeRootSignature(_interactionRoot.get());
-    commands->SetPipelineState(_interactionPSO);
-    commands->SetComputeRootConstantBufferView(0, frame.InteractionConstants->GetElementAddress(0));
-    commands->SetComputeSRV(0, frame.Sources->GetSRV()->GPUHandle);
-    commands->ResourceBarrier({ _trail->GetResource().GetUnorderedAccessBarrier(),
-        _previousTrail->GetResource().GetUnorderedAccessBarrier(), _presence->GetResource().GetUnorderedAccessBarrier() });
-    commands->SetComputeUAV(0, _trail->GetUAV()->GPUHandle);
-    commands->SetComputeUAV(1, _previousTrail->GetUAV()->GPUHandle);
-    commands->SetComputeUAV(2, _presence->GetUAV()->GPUHandle);
-    commands->Dispatch((InteractionResolution + 7) / 8, (InteractionResolution + 7) / 8, 1);
-    commands->ResourceBarrier({ _trail->GetResource().GetUAVBarrier(), _previousTrail->GetResource().GetUAVBarrier(),
-        _presence->GetResource().GetUAVBarrier() });
-    for (const auto& job : frame.WindJobs)
-    {
-        commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-        commands->SetComputeRootSignature(_windRoot.get());
-        commands->SetComputeRootConstantBufferView(0, job.Constants->GetElementAddress(0));
-        commands->SetPipelineState(_windPSO.at(job.Stage));
-        if (job.Input)
-        {
-            commands->ResourceBarrier({ job.Input->GetResource().GetNonPixelShaderResourceBarrier() });
-            commands->SetComputeSRV(0, job.Input->GetSRV()->GPUHandle);
-        }
-        if (job.Pressure)
-        {
-            commands->ResourceBarrier({ job.Pressure->GetResource().GetNonPixelShaderResourceBarrier() });
-            commands->SetComputeSRV(1, job.Pressure->GetSRV()->GPUHandle);
-        }
-        commands->ResourceBarrier({ job.Output->GetResource().GetUnorderedAccessBarrier() });
-        commands->SetComputeUAV(0, job.Output->GetUAV()->GPUHandle);
-        commands->Dispatch((job.Resolution + 7) / 8, (job.Resolution + 7) / 8, 1);
-        commands->ResourceBarrier({ job.Output->GetResource().GetUAVBarrier() });
-    }
-}
-
 void GDX12GrassRenderer::UpdateWind(WindState& state, const bool reset)
 {
     const auto& s = state.Source;
@@ -497,12 +450,6 @@ void GDX12GrassRenderer::UpdateWind(WindState& state, const bool reset)
         }
         WindDispatch(4, p, state.Advected.get(), state.Pressure[read].get(), state.Velocity[0].get());
     }
-}
-
-bool GDX12GrassRenderer::HasCasters() const
-{
-    for (const auto id : _drawOrder) if (_grass.at(id).Source.CastShadows) return true;
-    return false;
 }
 
 GDX12GrassRenderer::Stage GDX12GrassRenderer::RenderStage(GDX12GeometryStage stage)
@@ -648,115 +595,14 @@ void GDX12GrassRenderer::PrepareView(const GDX12GeometryContext& view, UINT patc
     batch.Draw = { GDX12DrawKind::Indirect, {}, {}, _signature.Get(), _arguments->GetResource().D3DResource.Get(),
         0, nullptr, 0, 1, sizeof(D3D12_DRAW_INDEXED_ARGUMENTS) };
     batch.BufferAccesses = {
-        { &_vertices->GetResource(), GDX12RenderGraph::Mode::Read },
-        { &_indices->GetResource(), GDX12RenderGraph::Mode::Read },
-        { &_arguments->GetResource(), GDX12RenderGraph::Mode::Read },
-        { &parameters->GetResource(), GDX12RenderGraph::Mode::Read } };
-    if(constants->ShadowMaterials) batch.BufferAccesses.push_back({&constants->ShadowMaterials->GetResource(),GDX12RenderGraph::Mode::Read});
-    if(constants->ShadowLights) batch.BufferAccesses.push_back({&constants->ShadowLights->GetResource(),GDX12RenderGraph::Mode::Read});
+        { &_vertices->GetResource(), GDX12AccessMode::Read },
+        { &_indices->GetResource(), GDX12AccessMode::Read },
+        { &_arguments->GetResource(), GDX12AccessMode::Read },
+        { &parameters->GetResource(), GDX12AccessMode::Read } };
+    if(constants->ShadowMaterials) batch.BufferAccesses.push_back({&constants->ShadowMaterials->GetResource(),GDX12AccessMode::Read});
+    if(constants->ShadowLights) batch.BufferAccesses.push_back({&constants->ShadowLights->GetResource(),GDX12AccessMode::Read});
     frame.OutputIndex[{view.Key, view.Stage, patch}] = output.get();
     frame.Outputs.push_back(std::move(output));
-}
-
-bool GDX12GrassRenderer::Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch)
-{
-    GDX12_SCOPED_EVENT(commands, "Bistro grass expansion");
-    auto* output = FindOutput(view, patch);
-    if (!output) return false;
-    const auto& state = _grass.at(output->Owner);
-    const auto& s = state.Source;
-    commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-    commands->SetComputeRootSignature(_computeRoot.get());
-    commands->SetComputeRootConstantBufferView(0, output->Constants->GetElementAddress(output->ConstantIndex));
-    commands->ResourceBarrier({ _vertices->GetResource().GetUnorderedAccessBarrier(),
-        _indices->GetResource().GetUnorderedAccessBarrier(), _arguments->GetResource().GetUnorderedAccessBarrier(),
-        output->CurrentWind->GetResource().GetNonPixelShaderResourceBarrier(),
-        output->PreviousWind->GetResource().GetNonPixelShaderResourceBarrier() });
-    commands->SetComputeSRV(0, state.Roots[view.FrameSlot]->GetSRV()->GPUHandle);
-    commands->SetComputeSRV(1, output->CurrentWind->GetSRV()->GPUHandle);
-    commands->SetComputeSRV(2, output->PreviousWind->GetSRV()->GPUHandle);
-    commands->ResourceBarrier({ _trail->GetResource().GetNonPixelShaderResourceBarrier(),
-        _previousTrail->GetResource().GetNonPixelShaderResourceBarrier() });
-    commands->SetComputeSRV(3, _trail->GetSRV()->GPUHandle);
-    commands->SetComputeSRV(4, _previousTrail->GetSRV()->GPUHandle);
-    commands->SetComputeUAV(0, _vertices->GetUAV()->GPUHandle);
-    commands->SetComputeUAV(1, _indices->GetUAV()->GPUHandle);
-    commands->SetComputeUAV(2, _arguments->GetUAV()->GPUHandle);
-    commands->SetPipelineState(_clearPSO);
-    commands->Dispatch(1, 1, 1);
-    commands->ResourceBarrier({ _arguments->GetResource().GetUAVBarrier() });
-    commands->SetPipelineState(_expandPSO);
-    commands->Dispatch((GrassBladeCount(s) + 63) / 64, 1, 1);
-    commands->ResourceBarrier({ _vertices->GetResource().GetSRVBarrier(),
-        _indices->GetResource().GetGenericReadBarrier(), _arguments->GetResource().GetIndirectArgsBarrier() });
-    _arenaOutput = output;
-    return true;
-}
-
-void GDX12GrassRenderer::GatherBatches(const GDX12GeometryContext& view, std::vector<GDX12RenderBatch>& batches) const
-{
-    if (view.Filter == GDX12GeometryFilter::Static || view.Stage == GDX12GeometryStage::Transparency) return;
-    const auto count = static_cast<UINT>(_drawOrder.size());
-    const UINT end = view.BatchCount > count - (std::min)(view.BatchOffset, count) ? count : view.BatchOffset + view.BatchCount;
-    for (UINT patch = view.BatchOffset; patch < end; ++patch)
-    {
-        const auto* output = FindOutput(view, patch);
-        if (!output) continue;
-        if (_arenaOutput != output) throw std::logic_error("Consume a prepared geometry range before reusing its direct-queue arena");
-        batches.push_back(output->Batch);
-    }
-}
-
-std::vector<GDX12RenderGraph::BufferAccess> GDX12GrassRenderer::PreparationAccesses() const
-{
-    using Mode = GDX12RenderGraph::Mode;
-    std::vector<GDX12RenderGraph::BufferAccess> accesses;
-    const auto& frame = _frames.at(_resources->CurrFrameConstantsIndex);
-    for (const auto& [roots, upload] : frame.RootUploads)
-    {
-        accesses.push_back({ &roots->GetResource(), Mode::Write });
-        accesses.push_back({ &upload->GetResource(), Mode::Read });
-    }
-    accesses.push_back({ &frame.Sources->GetResource(), Mode::Read });
-    accesses.push_back({ &frame.InteractionConstants->GetResource(), Mode::Read });
-    accesses.push_back({ &_presence->GetResource(), Mode::Write });
-    accesses.push_back({ &_trail->GetResource(), Mode::ReadWrite });
-    accesses.push_back({ &_previousTrail->GetResource(), Mode::Write });
-    for (const auto& job : frame.WindJobs)
-    {
-        accesses.push_back({ &job.Constants->GetResource(), Mode::Read });
-        if (job.Input) accesses.push_back({ &job.Input->GetResource(), Mode::ReadWrite });
-        if (job.Pressure) accesses.push_back({ &job.Pressure->GetResource(), Mode::ReadWrite });
-        accesses.push_back({ &job.Output->GetResource(), Mode::ReadWrite });
-    }
-    return accesses;
-}
-
-std::vector<GDX12RenderGraph::BufferAccess> GDX12GrassRenderer::ExpansionAccesses(const GDX12GeometryContext& view, UINT patch) const
-{
-    using Mode = GDX12RenderGraph::Mode;
-    const auto* output = FindOutput(view, patch);
-    if (!output) return {};
-    return { { &_trail->GetResource(), Mode::Read }, { &_previousTrail->GetResource(), Mode::Read },
-        { &_grass.at(output->Owner).Roots[view.FrameSlot]->GetResource(), Mode::Read },
-        { &output->Constants->GetResource(), Mode::Read },
-        { &output->CurrentWind->GetResource(), Mode::Read }, { &output->PreviousWind->GetResource(), Mode::Read },
-        { &_vertices->GetResource(), Mode::Write }, { &_indices->GetResource(), Mode::Write }, { &_arguments->GetResource(), Mode::Write } };
-}
-
-std::vector<GDX12RenderGraph::BufferAccess> GDX12GrassRenderer::DrawAccesses() const
-{
-    using Mode = GDX12RenderGraph::Mode;
-    if (!_vertices) return {};
-    const auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-    std::vector<GDX12RenderGraph::BufferAccess> accesses = {
-        { &_vertices->GetResource(), Mode::Read }, { &_indices->GetResource(), Mode::Read }, { &_arguments->GetResource(), Mode::Read },
-        { &constants->ShadowMaterials->GetResource(), Mode::Read }, { &constants->ShadowLights->GetResource(), Mode::Read } };
-    const auto& frame = _frames.at(_resources->CurrFrameConstantsIndex);
-    const UINT blocks = (frame.DrawCursor + ParametersPerBuffer - 1) / ParametersPerBuffer;
-    for (UINT block = 0; block < blocks; ++block)
-        accesses.push_back({ &frame.DrawParameters[block]->GetResource(), Mode::Read });
-    return accesses;
 }
 
 void GDX12GrassRenderer::PublishPrimitives(GDX12RenderPrimitiveRegistry& registry, const IRenderGeometrySource* source)
@@ -797,19 +643,6 @@ void GDX12GrassRenderer::RemovePrimitives(GDX12RenderPrimitiveRegistry& registry
     for (auto handle : _removedPrimitives) registry.Remove(handle);
     _removedPrimitives.clear();
     _primitiveRegistry = nullptr;
-}
-
-uint64_t GDX12GrassRenderer::GeometryAllocationBytes() const
-{
-    uint64_t bytes = 0;
-    const auto add = [&](const auto& buffer)
-    {
-        if (!buffer) return;
-        const auto desc = buffer->GetResource().D3DResource->GetDesc();
-        bytes += _resources->Device->GetDevice()->GetResourceAllocationInfo(0, 1, &desc).SizeInBytes;
-    };
-    add(_vertices); add(_indices); add(_arguments);
-    return bytes;
 }
 
 GDX12ParticleInteractionField GDX12GrassRenderer::InteractionField() const

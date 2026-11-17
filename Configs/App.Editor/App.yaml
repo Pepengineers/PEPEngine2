@@ -1,8 +1,0 @@
-App:
-  Name: App.Editor
-  Type: Editor
-  StartScene: Scenes/EditorScene.yaml
-
-  SystemsBanlist:
-    - SplineFollowSystem
-    - LookAtTargetSystem

@@ -1,41 +1,5 @@
 #include "CBufferStructures.hlsl"
 
-#ifdef SHADOW_CULLING
-#include "ShadowFrustum.hlsli"
-cbuffer ViewConstants : register(b0) { uint LightIndex; uint FaceIndex; uint CommandCount; };
-StructuredBuffer<InstanceData> Instances : register(t0);
-StructuredBuffer<IndirectDrawArgs> InputCommands : register(t1);
-StructuredBuffer<Material> Materials : register(t2);
-StructuredBuffer<LocalLight> Lights : register(t3);
-RWStructuredBuffer<IndirectDrawArgs> VisibleCommands : register(u0);
-RWStructuredBuffer<uint> Counter : register(u1);
-
-[numthreads(1, 1, 1)]
-void ClearCS() { Counter[0] = 0; }
-
-[numthreads(64, 1, 1)]
-void CS(uint3 id : SV_DispatchThreadID)
-{
-    uint count, stride;
-    InputCommands.GetDimensions(count, stride);
-    if (id.x >= min(count, CommandCount)) return;
-    IndirectDrawArgs command = InputCommands[id.x];
-    if (command.InstanceCount == 0) return;
-    InstanceData instance = Instances[command.InstanceID];
-    if (instance.CastsShadows == 0) return;
-#if STATIC_ONLY
-    if (instance.ReflectionDynamic != 0) return;
-#else
-    if (instance.ReflectionDynamic == 0) return;
-#endif
-    Material material = Materials[instance.MaterialIndex];
-    if (material.RenderLayer == 2 || material.ReflectionProbePreview != 0) return;
-    if (!ShadowBoxVisible(instance.BoundingBoxCenter, instance.BoundingBoxExtents, Lights[LightIndex].ShadowViewProj[FaceIndex])) return;
-    uint index;
-    InterlockedAdd(Counter[0], 1, index);
-    VisibleCommands[index] = command;
-}
-#else
 #include "InstancedGeometry.hlsli"
 cbuffer DrawConstants : register(b0) { uint InstanceID; uint LightFaceIndex; };
 StructuredBuffer<Material> Materials : register(t0);
@@ -87,5 +51,4 @@ void PS(VertexOutput input)
     if (material.ReflectionProbePreview != 0) clip(-1.0f);
     if (material.RenderLayer == 1) clip(Textures[material.DiffuseIndex].Sample(samAnisotropicWrap, input.UV).a - 0.5f);
 }
-#endif
 #endif

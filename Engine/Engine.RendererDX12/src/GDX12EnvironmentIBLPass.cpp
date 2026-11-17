@@ -20,11 +20,6 @@ namespace
         return mips;
     }
 
-    bool SameIBL(const SkyIBLSettings& first, const SkyIBLSettings& second)
-    {
-        return first.CubeResolution == second.CubeResolution && first.FilterSamples == second.FilterSamples &&
-            first.Intensity == second.Intensity;
-    }
 }
 
 GDX12EnvironmentIBLPass::GDX12EnvironmentIBLPass()
@@ -94,14 +89,6 @@ void GDX12EnvironmentIBLPass::Invalidate()
 void GDX12EnvironmentIBLPass::Resize()
 {
     if (_cloudActive) _invalidated = true;
-}
-
-void GDX12EnvironmentIBLPass::SetCloudSource(GDX12CloudComponent* source)
-{
-    if (_cloudSource == source) return;
-    _cloudSource = source;
-    _cloudSourceRevision = _cloudLightingRevision = 0;
-    Invalidate();
 }
 
 void GDX12EnvironmentIBLPass::CreateTexture(GDX12Texture& texture, const UINT width, const UINT height, const UINT depth, const UINT mips, const bool cube)
@@ -227,110 +214,6 @@ void GDX12EnvironmentIBLPass::EnsureAtmosphere(const SkyAtmosphereSettings& s)
     PublishAtmosphereViews(true);
 }
 
-void GDX12EnvironmentIBLPass::BindSky(GDX12CommandList* commands, const UINT constantIndex)
-{
-    auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-    BindSkyConstants(commands, frame->SkyCB->GetElementAddress(constantIndex));
-    if (_commonData->ActiveCameraCBufferIndex != UINT_MAX)
-        commands->SetComputeRootConstantBufferView(1, frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex));
-}
-
-void GDX12EnvironmentIBLPass::BindSkyConstants(GDX12CommandList* commands, const D3D12_GPU_VIRTUAL_ADDRESS address)
-{
-    commands->SetComputeRootSignature(_skyRoot.get());
-    commands->SetComputeRootConstantBufferView(0, address);
-    commands->SetComputeSRV(0, _null2D.GPUHandle);
-    commands->SetComputeSRV(1, _null2D.GPUHandle);
-    commands->SetComputeSRV(2, _null2D.GPUHandle);
-    commands->SetComputeSRV(3, _nullCube.GPUHandle);
-}
-
-void GDX12EnvironmentIBLPass::DispatchLUT(GDX12CommandList* commands, const UINT pipeline, const UINT index)
-{
-    commands->SetPipelineState(_skyPipelines[pipeline]);
-    auto* texture = _luts[index].get();
-    commands->ResourceBarrier({ texture->GetResource()->GetUnorderedAccessBarrier() });
-    commands->SetComputeUAV(0, texture->GetUAV()->GPUHandle);
-    commands->Dispatch((texture->GetWidth() + 7) / 8, (texture->GetHeight() + 7) / 8, 1);
-    commands->ResourceBarrier({ texture->GetResource()->GetSRVBarrier() });
-}
-
-void GDX12EnvironmentIBLPass::RecordSourceCube(GDX12CommandList* commands)
-{
-    auto* resource = _textures[3]->GetResource();
-    commands->ResourceBarrier({ resource->GetUnorderedAccessBarrier() });
-    commands->SetPipelineState(_skyPipelines[4]);
-    for (UINT mip = 0; mip < _sourceUAVs.size(); ++mip)
-    {
-        const UINT size = (std::max)(1u, _textures[3]->GetWidth() >> mip);
-        commands->SetComputeUAV(3, _sourceUAVs[mip]->GPUHandle);
-        commands->Dispatch((size + 7) / 8, (size + 7) / 8, 6);
-    }
-    commands->ResourceBarrier({ commands->GetType() == D3D12_COMMAND_LIST_TYPE_COMPUTE ?
-        resource->GetNonPixelShaderResourceBarrier() : resource->GetSRVBarrier() });
-}
-
-void GDX12EnvironmentIBLPass::RecordDisabledOutputs(GDX12CommandList* commands)
-{
-    if (!_disabledPixel)
-    {
-        _disabledPixel = std::make_unique<GDX12UploadBuffer<std::array<uint16_t, 4>>>(_resources->Device, 1);
-        constexpr std::array<uint16_t, 4> opaqueBlack = { 0, 0, 0, 0x3c00 };
-        _disabledPixel->CopyData(0, opaqueBlack);
-    }
-    const D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint = {
-        0, { DXGI_FORMAT_R16G16B16A16_FLOAT, 1, 1, 1, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT }
-    };
-    const CD3DX12_TEXTURE_COPY_LOCATION source(_disabledPixel->GetResource().D3DResource.Get(), footprint);
-    for (const auto index : {0u, 1u, 3u})
-    {
-        auto* output = _textures[index]->GetResource();
-        commands->ResourceBarrier({ output->GetCopyDestBarrier() });
-        for (UINT face = 0; face < 6; ++face)
-        {
-            const CD3DX12_TEXTURE_COPY_LOCATION target(output->D3DResource.Get(), face);
-            commands->GetCommandList()->CopyTextureRegion(&target, 0, 0, 0, &source, nullptr);
-        }
-        commands->ResourceBarrier({ output->GetSRVBarrier() });
-    }
-}
-
-void GDX12EnvironmentIBLPass::Filter(GDX12CommandList* commands, const UINT samples, const float intensity)
-{
-    commands->SetComputeRootSignature(_filterRoot.get());
-    commands->SetComputeSRV(0, _textures[3]->GetSRV()->GPUHandle);
-    for (UINT i = 0; i < 2; ++i) commands->ResourceBarrier({ _textures[i]->GetResource()->GetUnorderedAccessBarrier() });
-    const auto dispatch = [&](const UINT pipeline, const UINT size, const float roughness, const D3D12_GPU_DESCRIPTOR_HANDLE uav)
-    {
-        struct { UINT Size; float Roughness; UINT Samples; float Intensity; } parameters = { size, roughness, samples, intensity };
-        commands->SetPipelineState(_filters[pipeline]);
-        commands->GetCommandList()->SetComputeRoot32BitConstants(0, 4, &parameters, 0);
-        commands->SetComputeUAV(0, uav);
-        commands->Dispatch((size + 7) / 8, (size + 7) / 8, 6);
-    };
-    dispatch(0, _textures[0]->GetWidth(), 0, _textures[0]->GetUAV()->GPUHandle);
-    for (UINT mip = 0; mip < _prefilterMips; ++mip)
-        dispatch(1, _textures[1]->GetWidth() >> mip, _prefilterMips > 1 ? mip / 7.0f : 0,
-            _prefilterUAVs[mip]->GPUHandle);
-    EnsureBRDF(commands);
-    for (UINT i = 0; i < 2; ++i) commands->ResourceBarrier({ _textures[i]->GetResource()->GetSRVBarrier() });
-}
-
-void GDX12EnvironmentIBLPass::EnsureBRDF(GDX12CommandList* commands)
-{
-    if (_brdfReady) return;
-    commands->SetComputeRootSignature(_filterRoot.get());
-    auto* texture = _textures[2].get();
-    commands->ResourceBarrier({ texture->GetResource()->GetUnorderedAccessBarrier() });
-    commands->SetPipelineState(_filters[2]);
-    const struct { UINT Size; float Roughness; UINT Samples; float Intensity; } parameters = { texture->GetWidth(), 0, 0, 0 };
-    commands->GetCommandList()->SetComputeRoot32BitConstants(0, 4, &parameters, 0);
-    commands->SetComputeUAV(1, texture->GetUAV()->GPUHandle);
-    commands->Dispatch((parameters.Size + 7) / 8, (parameters.Size + 7) / 8, 1);
-    commands->ResourceBarrier({ texture->GetResource()->GetSRVBarrier() });
-    _brdfReady = true;
-}
-
 void GDX12EnvironmentIBLPass::ResetEnvironmentHistory()
 {
     ++_resources->ReflectionEnvironmentRevision;
@@ -353,147 +236,6 @@ void GDX12EnvironmentIBLPass::RetireResources()
     else _resources->Device->GetCommandQueue()->Flush();
 }
 
-void GDX12EnvironmentIBLPass::Execute(GDX12CommandList* commands)
-{
-    auto state = _resources->Sky;
-    const bool cloudActive = _cloudSource && _cloudSource->IsActive();
-    bool cloudChanged = cloudActive != _cloudActive;
-    bool lightingChanged = false;
-    if (cloudActive)
-    {
-        _cloudSource->Setup(_resources, _commonData);
-        _cloudSource->Execute(commands);
-        cloudChanged |= _cloudSourceRevision != _cloudSource->GetSourceRevision();
-        lightingChanged = _cloudLightingRevision != _cloudSource->GetLightingRevision();
-        _cloudSourceRevision = _cloudSource->GetSourceRevision();
-        _cloudLightingRevision = _cloudSource->GetLightingRevision();
-        state.Source = SkySource::SkyBox;
-        state.Quality = _cloudSource->GetQuality();
-        state.Box.RadianceMultiplier = 1;
-        state.Box.RotationRadians = 0;
-    }
-    _cloudActive = cloudActive;
-    bool discontinuity = _invalidated || cloudChanged || _revision != state.Revision ||
-        _quality != state.Quality || _source != state.Source;
-    auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-    GDX12SkyConstants constants;
-    constants.Mode.x = static_cast<UINT>(state.Source);
-    SkyIBLSettings ibl;
-    SkyAtmosphereSettings atmosphere;
-    if (state.Source == SkySource::SkyBox)
-    {
-        ValidateSkySettings(state.Box);
-        ibl = cloudActive ? ResolveSkyIBLSettings(state.Box.IBL, state.Quality) :
-            ResolveSkyBoxIBLSettings(state.Box.IBL, state.Quality);
-        discontinuity |= !SameIBL(_resolvedIBL, ibl);
-        _resolvedIBL = ibl;
-        constants.Box = { state.Box.RadianceMultiplier, std::sin(state.Box.RotationRadians), std::cos(state.Box.RotationRadians), 0 };
-        if (!cloudActive && (_boxAsset != state.Box.Cubemap || !_boxTexture->IsInitialized()))
-        {
-            _resources->Device->GetCommandQueue()->Flush();
-            LoadEnvironment(state.Box.Cubemap);
-            _boxAsset = state.Box.Cubemap;
-        }
-    }
-    else if (state.Source == SkySource::SkyAtmosphere)
-    {
-        atmosphere = ResolveSkyAtmosphereSettings(state.Atmosphere, state.Quality);
-        ibl = atmosphere.IBL;
-        EnsureAtmosphere(atmosphere);
-        const auto pack = [](const Vector3& value, const float w) { return XMFLOAT4(value.x, value.y, value.z, w); };
-        constants.RayleighHeight = pack(atmosphere.RayleighScatteringPerKm, atmosphere.RayleighScaleHeightKm);
-        constants.MieScatteringHeight = pack(atmosphere.MieScatteringPerKm, atmosphere.MieScaleHeightKm);
-        constants.MieAbsorptionG = pack(atmosphere.MieAbsorptionPerKm, atmosphere.MieAnisotropy);
-        constants.OzoneCenter = pack(atmosphere.OzoneAbsorptionPerKm, atmosphere.OzoneCenterKm);
-        constants.GroundWidth = pack(atmosphere.GroundAlbedo, atmosphere.OzoneHalfWidthKm);
-        constants.CenterRadius = pack(atmosphere.PlanetCenterCm, atmosphere.PlanetRadiusKm);
-        constants.Atmosphere = { atmosphere.PlanetRadiusKm + atmosphere.AtmosphereHeightKm,
-            atmosphere.AerialDistanceKm, atmosphere.SunAngularRadiusRadians, ibl.Intensity };
-        constants.SunDirection = pack(atmosphere.DirectionToSun, 0);
-        constants.SunIlluminance = pack(atmosphere.SunIlluminanceLux * atmosphere.LuminanceScale, 0);
-        const Vector3 camera = _commonData->CameraView.Invert().Translation();
-        Vector3 relative = (camera - atmosphere.PlanetCenterCm) * 0.00001f;
-        if (relative.LengthSquared() < 1e-12f) throw std::invalid_argument("Atmosphere camera is at planet center");
-        if (relative.Length() < atmosphere.PlanetRadiusKm + 0.001f)
-        {
-            relative.Normalize();
-            relative *= atmosphere.PlanetRadiusKm + 0.001f;
-        }
-        constants.CameraPosition = pack(relative, 0);
-        constants.Samples = { atmosphere.TransmittanceSamples, atmosphere.SkySamples,
-            atmosphere.MultipleScatteringDirections, atmosphere.MultipleScatteringSamples };
-        constants.Mode.y = atmosphere.AerialSamples;
-        constants.Box.z = static_cast<float>(_commonData->DownscaledWidth ? _commonData->DownscaledWidth : _commonData->WindowWidth);
-        constants.Box.w = static_cast<float>(_commonData->DownscaledHeight ? _commonData->DownscaledHeight : _commonData->WindowHeight);
-        auto capture = constants;
-        capture.CameraPosition = pack((atmosphere.IBLCapturePositionCm - atmosphere.PlanetCenterCm) * 0.00001f, 0);
-        frame->SkyCB->CopyData(1, capture);
-    }
-    const bool changed = discontinuity || lightingChanged;
-    frame->SkyCB->CopyData(0, constants);
-    if (changed) EnsureOutputs(state.Source != SkySource::Off, state.Source == SkySource::Off ? 1 : ibl.CubeResolution);
-    if (changed && state.Source != SkySource::SkyAtmosphere) ReleaseAtmosphere();
-    if (state.Source != SkySource::SkyBox && _boxTexture->IsInitialized())
-    {
-        _resources->Device->GetCommandQueue()->Flush();
-        _boxTexture = std::make_unique<GDX12Texture>();
-        _boxAsset.clear();
-    }
-    if (!changed && state.Source != SkySource::SkyAtmosphere) return;
-    GDX12_SCOPED_EVENT(commands, "Sky source and atmosphere LUTs", Colors::CornflowerBlue);
-    commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-    if (state.Source != SkySource::Off) BindSky(commands, state.Source == SkySource::SkyAtmosphere ? 1 : 0);
-    if (state.Source == SkySource::SkyAtmosphere)
-    {
-        if (changed)
-        {
-            DispatchLUT(commands, 0, 0);
-            commands->SetComputeSRV(0, _luts[0]->GetSRV()->GPUHandle);
-            DispatchLUT(commands, 1, 1);
-        }
-        commands->SetComputeSRV(0, _luts[0]->GetSRV()->GPUHandle);
-        commands->SetComputeSRV(1, _luts[1]->GetSRV()->GPUHandle);
-        if (changed) DispatchLUT(commands, 2, 2);
-        commands->SetComputeSRV(2, _luts[2]->GetSRV()->GPUHandle);
-    }
-    else if (state.Source == SkySource::SkyBox)
-        commands->SetComputeSRV(3, (cloudActive ? _cloudSource->GetOutput(0)->GetTexture() : _boxTexture.get())->GetSRV()->GPUHandle);
-    if (changed)
-    {
-        if (state.Source == SkySource::Off)
-        {
-            RecordDisabledOutputs(commands);
-            EnsureBRDF(commands);
-        }
-        else
-        {
-            RecordSourceCube(commands);
-            Filter(commands, ibl.FilterSamples, ibl.Intensity);
-        }
-        if (discontinuity) ResetEnvironmentHistory();
-    }
-    if (state.Source == SkySource::SkyAtmosphere)
-    {
-        BindSky(commands, 0);
-        commands->SetComputeSRV(0, _luts[0]->GetSRV()->GPUHandle);
-        commands->SetComputeSRV(1, _luts[1]->GetSRV()->GPUHandle);
-        DispatchLUT(commands, 2, 2);
-        if (_commonData->ActiveCameraCBufferIndex != UINT_MAX)
-        {
-            commands->ResourceBarrier({ _luts[3]->GetResource()->GetUnorderedAccessBarrier(), _luts[4]->GetResource()->GetUnorderedAccessBarrier() });
-            commands->SetComputeUAV(1, _luts[3]->GetUAV()->GPUHandle);
-            commands->SetComputeUAV(2, _luts[4]->GetUAV()->GPUHandle);
-            commands->SetPipelineState(_skyPipelines[3]);
-            commands->Dispatch((atmosphere.AerialWidth + 3) / 4, (atmosphere.AerialHeight + 3) / 4, (atmosphere.AerialDepth + 3) / 4);
-            commands->ResourceBarrier({ _luts[3]->GetResource()->GetSRVBarrier(), _luts[4]->GetResource()->GetSRVBarrier() });
-        }
-    }
-    _revision = state.Revision;
-    _quality = state.Quality;
-    _source = state.Source;
-    _invalidated = false;
-}
-
 void GDX12EnvironmentIBLPass::ClearDenendencies()
 {
     GDX12RenderPass::ClearDenendencies();
@@ -502,79 +244,9 @@ void GDX12EnvironmentIBLPass::ClearDenendencies()
     for (auto& uav : _prefilterUAVs) uav.reset();
     for (auto& pipeline : _filters) pipeline.Reset();
     for (auto& pipeline : _skyPipelines) pipeline.Reset();
-    _cloudSource = nullptr;
     _sourceUAVs.clear();
     _boxTexture.reset();
     _disabledPixel.reset();
     _filterRoot.reset();
     _skyRoot.reset();
 }
-
-    void GDX12EnvironmentIBLPass::LoadEnvironment(const std::filesystem::path& asset)
-    {
-        const auto path = asset.is_absolute() ? asset : std::filesystem::path(ASSETS_FOLDER) / asset;
-        const auto* source = Engine::Core::AssetManager::GetInstance().LoadTexture(path);
-        if (!source || !source->IsCubeMap() || source->GetArraySize() != 6 ||
-            source->GetWidth() == 0 || source->GetWidth() != source->GetHeight() ||
-            source->GetMipLevels() == 0 || source->GetMipLevels() > D3D12_REQ_MIP_LEVELS ||
-            source->GetSubresourceCount() != 6u * source->GetMipLevels())
-            throw std::runtime_error("Environment IBL requires a complete DDS cubemap: " + path.string());
-
-        GDX12TextureDesc desc;
-        desc.Format = desc.SRVDesc.Format = FormatToSRGB(source->GetFormat());
-        desc.Semantic = ETextureSemantic::Color;
-        desc.Width = source->GetWidth();
-        desc.Height = source->GetHeight();
-        desc.SRV_UAV_Heap = _resources->SRV_UAV_Heap.get();
-        desc.SRVHeapIndex = _boxTexture->IsInitialized() ? _boxTexture->GetSRV()->HeapIndex :
-            desc.SRV_UAV_Heap->GetAvailableIndex(TextureResources_StartIndex, TextureResources_RangeLength);
-        desc.SRVDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        desc.SRVDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-        desc.SRVDesc.TextureCube.MipLevels = source->GetMipLevels();
-        const auto textureDesc = CD3DX12_RESOURCE_DESC::Tex2D(desc.Format, desc.Width, desc.Height,
-            6, static_cast<UINT16>(source->GetMipLevels()));
-        desc.ExternalResource = _resources->Device->CreateResource(D3D12_HEAP_TYPE_DEFAULT, textureDesc,
-            D3D12_RESOURCE_STATE_COMMON, nullptr);
-        _boxTexture->Initialize(desc);
-
-        const UINT count = static_cast<UINT>(source->GetSubresourceCount());
-        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints(count);
-        std::vector<UINT> rows(count);
-        std::vector<UINT64> rowBytes(count);
-        UINT64 uploadBytes = 0;
-        _resources->Device->GetDevice()->GetCopyableFootprints(&textureDesc, 0, count, 0,
-            footprints.data(), rows.data(), rowBytes.data(), &uploadBytes);
-        for (UINT i = 0; i < count; ++i)
-        {
-            const auto& data = source->GetSubresources()[i];
-            if (data.RowPitch < rowBytes[i] || data.Data.size() < data.RowPitch * (rows[i] - 1) + rowBytes[i])
-                throw std::runtime_error("Environment cubemap has incomplete subresource data: " + path.string());
-        }
-        const auto uploadDesc = CD3DX12_RESOURCE_DESC::Buffer(uploadBytes);
-        auto upload = _resources->Device->CreateResource(D3D12_HEAP_TYPE_UPLOAD, uploadDesc,
-            D3D12_RESOURCE_STATE_GENERIC_READ, nullptr);
-        void* mapped = nullptr;
-        const D3D12_RANGE noRead = { 0, 0 };
-        ThrowIfFailed(upload->Map(0, &noRead, &mapped));
-        for (UINT i = 0; i < count; ++i)
-        {
-            const auto& data = source->GetSubresources()[i];
-            auto* destination = static_cast<std::byte*>(mapped) + footprints[i].Offset;
-            for (UINT row = 0; row < rows[i]; ++row)
-                std::memcpy(destination + row * footprints[i].Footprint.RowPitch,
-                    data.Data.data() + row * data.RowPitch, static_cast<size_t>(rowBytes[i]));
-        }
-        upload->Unmap(0, nullptr);
-        auto* queue = _resources->Device->GetCommandQueue();
-        auto* commands = queue->GetCommandList();
-        commands->ResourceBarrier({ _boxTexture->GetResource()->GetCopyDestBarrier() });
-        for (UINT i = 0; i < count; ++i)
-        {
-            const CD3DX12_TEXTURE_COPY_LOCATION destination(desc.ExternalResource.Get(), i);
-            const CD3DX12_TEXTURE_COPY_LOCATION sourceLocation(upload.Get(), footprints[i]);
-            commands->GetCommandList()->CopyTextureRegion(&destination, 0, 0, 0, &sourceLocation, nullptr);
-        }
-        commands->ResourceBarrier({ _boxTexture->GetResource()->GetSRVBarrier() });
-        queue->ExecuteCommandList(commands);
-        queue->Flush();
-    }

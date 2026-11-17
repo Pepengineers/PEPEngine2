@@ -13,8 +13,6 @@ namespace
         L"Draw particles without changing simulation", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<bool> SimulationEnabled(L"Render.Particles.SimulationEnabled", true,
         L"Advance particles and spawn; false freezes simulation", EConsoleVariableFlags::Default);
-    static AutoConsoleVariable<bool> AsyncCompute(L"Render.Particles.AsyncCompute", false,
-        L"Run particle simulation on COMPUTE; DIRECT fallback when unavailable", EConsoleVariableFlags::Default);
     static AutoConsoleVariable<GDX12Quality> Quality(L"Render.Particles.Quality", GDX12Quality::Mid,
         L"GPU particles: 0 Off, 1 Low, 2 Mid, 3 High, 4 Epic", EConsoleVariableFlags::Default);
 
@@ -38,13 +36,10 @@ namespace
 GDX12ParticleSettings GetParticleSettings()
 {
     const int quality = Quality.GetInt();
-    return { Enabled.GetValue() && quality != 0, quality, DrawEnabled.GetValue(), SimulationEnabled.GetValue(), AsyncCompute.GetValue() };
+    return { Enabled.GetValue() && quality != 0, quality, DrawEnabled.GetValue(), SimulationEnabled.GetValue() };
 }
 
-bool CanOffloadParticleEmitter(const GDX12ParticleEmitterSettings& settings)
-{
-    return settings.SharedSimulation && !settings.DepthCollision;
-}
+
 
 bool IsValidParticleEmitterSettings(const GDX12ParticleEmitterSettings& s)
 {

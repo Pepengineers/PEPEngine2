@@ -1,30 +1,14 @@
 #pragma once
-#include "Engine.RendererDX12/GDX12InstanceBatcher.h"
 #include <cstdint>
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 
-namespace Meta { class SceneWaterParticles; class SceneTransparency; }
+namespace Meta { class SceneTransparency; }
 
 class GDX12WBOITTransparencyPass : public GDX12RenderPass
 {
 public:
-    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
-    { return _resources ? _resources->GetGeometryBufferAccesses(GDX12GeometryStage::Transparency) : std::vector<GDX12RenderGraph::BufferAccess>{}; }
-
-    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-    {
-        graph.SetName(_partition == DepthPartition::Near ? "Near transparency" :
-            _partition == DepthPartition::Far ? "Far transparency" : "Transparency");
-        graph.Read(SharedResource::Scene);
-        graph.ReadInputs(_inputs);
-        graph.Read(SharedResource::Visibility);
-        graph.Read(SharedResource::Environment);
-        graph.Read(SharedResource::ReflectionProbes);
-        graph.Write(_outputs[0], "Transparency accumulation");
-        graph.Write(_outputs[1], "Transparency revealage");
-    }
 
 	using DepthPartition = GDX12GeometryDepthPartition;
 
@@ -141,109 +125,6 @@ public:
 		ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&PSODesc1, IID_PPV_ARGS(&_transparencyPSO)));
 	}
 
-	// VisibilityBuffers will automatically be selected from CameraCBIndex
-	// It requires GPUCullingPass to be executed beforehand
-	bool Rendered() const { return _rendered; }
-
-	void Execute(GDX12CommandList* cmdList) override
-	{
-        _rendered = _partition != DepthPartition::Near ||
-            (_inputs.size() > 6 && _inputs[6]->GetTexture() != _inputs[0]->GetTexture()) ||
-            !_resources->ParticleEmitters.empty();
-        if (!_rendered) return;
-		auto& currentFrameConstants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-		auto& currentCameraVisBuffers = currentFrameConstants->CameraVisibilityCommands[_commonData->ActiveCameraCBufferIndex];
-		GDX12Texture* depthStencil = IN_DepthStencil->GetTexture();
-
-		GDX12_SCOPED_EVENT(cmdList, "Transparent Render Pass", Colors::Aqua);
-		cmdList->SetViewport(OUT_Accumulation->GetViewport());
-		cmdList->SetScissorRect(OUT_Accumulation->GetScissorRect());
-        GDX12GeometryContext view{ GDX12GeometryStage::Transparency,
-            _commonData->CameraView * _commonData->CameraProjection, _commonData->CameraView.Invert().Translation(),
-            currentFrameConstants->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex) };
-        view.Key = 1;
-        view.FrameSlot = _resources->CurrFrameConstantsIndex;
-        view.ColorTargetCount = 2;
-        view.DepthFormat = DXGI_FORMAT_D32_FLOAT;
-        view.ColorFormats[0] = OUT_Accumulation->GetFormat();
-        view.ColorFormats[1] = OUT_Revealage->GetFormat();
-        GDX12CaptureLighting lighting;
-        lighting.SunShadow = _inputs[1]->GetTexture();
-        lighting.Irradiance = _inputs[2]->GetTexture();
-        lighting.Prefiltered = _inputs[3]->GetTexture();
-        lighting.BRDF = _inputs[4]->GetTexture();
-        lighting.LocalShadows = _inputs[5]->GetTexture();
-        lighting.ShadowConstants = currentFrameConstants->ShadowCB->GetElementAddress(0);
-        view.CaptureLighting = &lighting;
-        GDX12GraphicsBindings binding;
-        binding.Stage = view.Stage;
-        binding.ColorTargetCount = view.ColorTargetCount;
-        binding.ColorFormats = view.ColorFormats;
-        binding.DepthFormat = DXGI_FORMAT_D32_FLOAT;
-        binding.IndirectSignature = _transparencyCS.Get();
-        binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
-		binding.Root = _transparencyRS.get();
-		const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
-		const auto geometrySlot = static_cast<UINT>(binding.Root->GetGeometryRootParamIndex());
-		binding.RootSRVs = { { geometrySlot, geometryAddress }, { geometrySlot + 1,
-		    currentCameraVisBuffers.TransparentBatches ? currentCameraVisBuffers.TransparentBatches->VisibleInstancesAddress() : geometryAddress } };
-		binding.Pipeline = _transparencyPSO;
-		binding.CBVs.push_back({ 1, currentFrameConstants->MainCB->GetElementAddress(0) });
-		binding.CBVs.push_back({ 3, currentFrameConstants->ShadowCB->GetElementAddress(0) });
-		binding.CBVs.push_back({ 2, currentFrameConstants->CameraCB->
-			GetElementAddress(_commonData->ActiveCameraCBufferIndex) });
-		binding.Heap = _resources->SRV_UAV_Heap.get();
-		binding.SRVs.push_back({ 0, currentFrameConstants->ShadowMaterials->GetSRV()->GPUHandle });
-		binding.SRVs.push_back({ 1, currentFrameConstants->ShadowTransforms->GetSRV()->GPUHandle });
-		binding.SRVs.push_back({ 2, currentFrameConstants->ShadowInstances->GetSRV()->GPUHandle });
-		for (UINT input = 1; input < 5; ++input)
-			binding.SRVs.push_back({ 2 + input, _inputs[input]->GetTexture()->GetSRV()->GPUHandle });
-		binding.SRVs.push_back({ 7, currentFrameConstants->ShadowLights->GetSRV()->GPUHandle });
-		binding.SRVs.push_back({ 8, _inputs[5]->GetTexture()->GetSRV()->GPUHandle });
-		binding.SRVs.push_back({ 9, _resources->ReflectionRadianceSRV.GPUHandle });
-		binding.SRVs.push_back({ 10, currentFrameConstants->ReflectionProbes->GetSRV()->GPUHandle });
-        binding.CBVs.push_back({ 4, currentFrameConstants->SkyCB->GetElementAddress(0) });
-        binding.SRVs.push_back({ 11, _resources->SkyTransmittanceSRV.GPUHandle });
-        binding.SRVs.push_back({ 12, _resources->SkyAerialRadianceSRV.GPUHandle });
-        binding.SRVs.push_back({ 13, _resources->SkyAerialTransmittanceSRV.GPUHandle });
-        binding.SRVs.push_back({ 16, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex) });
-        auto* separatorDepth = (_inputs.size() > 6 ? _inputs[6] : _inputs[0])->GetTexture();
-        view.SceneDepth = depthStencil;
-        view.PartitionDepth = separatorDepth;
-        view.DepthPartition = _partition;
-        constexpr auto depthReadState = D3D12_RESOURCE_STATE_DEPTH_READ |
-            D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
-        // A preceding compute pass can leave scene depth compute-only; graphics binding needs its pixel state.
-        cmdList->ResourceBarrier({ separatorDepth->GetResource()->GetSRVBarrier(),
-            CD3DX12_RESOURCE_BARRIER::Transition(depthStencil->GetResource()->D3DResource.Get(),
-                depthStencil->GetResource()->GetCurrentState(), depthReadState) });
-        depthStencil->GetResource()->GDX12Resource::SetCurrentState(depthReadState);
-		binding.SRVs.push_back({ 14, separatorDepth->GetSRV()->GPUHandle });
-        binding.SRVs.push_back({ 15, depthStencil->GetSRV()->GPUHandle });
-
-        const UINT meshCount = _resources->IndirectCommandsCache->GetElementCount();
-        if (meshCount)
-            cmdList->ResourceBarrier({ currentCameraVisBuffers.VisibleTransparentCommandsCache->GetResource().GetIndirectArgsBarrier(),
-                currentCameraVisBuffers.TransparentDrawCounter->GetResource().GetIndirectArgsBarrier() });
-        cmdList->ResourceBarrier({ OUT_Accumulation->GetResource()->GetRenderTargetBarrier(),
-            OUT_Revealage->GetResource()->GetRenderTargetBarrier() });
-		const D3D12_CPU_DESCRIPTOR_HANDLE renderTargets[] = { OUT_Accumulation->GetRTV()->CPUHandle, OUT_Revealage->GetRTV()->CPUHandle };
-        cmdList->GetCommandList()->OMSetRenderTargets(2, renderTargets, FALSE, &_readOnlyDepth->CPUHandle);
-		cmdList->ClearRenderTargetView(OUT_Accumulation.get());
-		cmdList->ClearRenderTargetView(OUT_Revealage.get());
-        GDX12RenderBatch mesh;
-        mesh.Binding = &binding;
-        mesh.Geometry = _resources->GeometryBuffer.get();
-        mesh.InstanceCount = meshCount;
-        mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _transparencyCS.Get(),
-            meshCount ? (currentCameraVisBuffers.TransparentBatches ? currentCameraVisBuffers.TransparentBatches->Commands() : *currentCameraVisBuffers.VisibleTransparentCommandsCache).GetResource().D3DResource.Get() : nullptr, 0,
-            meshCount ? currentCameraVisBuffers.TransparentDrawCounter->GetResource().D3DResource.Get() : nullptr, 0,
-            meshCount, sizeof(GDX12IndirectDrawArgs) };
-        _resources->EmitGeometry(cmdList, view, mesh);
-		cmdList->ResourceBarrier({ OUT_Accumulation->GetResource()->GetSRVBarrier(),
-		OUT_Revealage->GetResource()->GetSRVBarrier() });
-	}
-
 	void Resize() override
 	{
         UpdateReadOnlyDepth();
@@ -269,7 +150,6 @@ public:
 	}
 
 private:
-    friend class Meta::SceneWaterParticles;
     friend class Meta::SceneTransparency;
     void UpdateReadOnlyDepth()
     {
@@ -298,5 +178,4 @@ private:
     bool _unbatchedDraws = false;
     bool _staticIBLOnly = false;
     bool _atmosphereEnabled = false;
-    bool _rendered = false;
 };

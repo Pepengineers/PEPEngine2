@@ -1,24 +1,14 @@
 #include "Rendering/Water/GDX12FluidPass.h"
-#include "Rendering/Water/GDX12WaterOffload.h"
-#include "Engine.RendererDX12/GDX12DeviceFactory.h"
-#include "Common/ConsoleVariables.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <algorithm>
 #include <cmath>
 #include <set>
 #include <stdexcept>
 
-namespace
-{
-    AutoConsoleVariable<int> WaterAdapter(L"Render.Fluid.SecondaryAdapter", -1,
-        L"Water solver adapter in the renderer hardware list; -1 keeps single GPU. Startup only.", EConsoleVariableFlags::ReadOnly);
-}
-
 struct GDX12FluidSurfacePass::State
 {
     GDX12FluidSolver::Buffers Solver;
     GDX12FluidSolver::Head SolverHead;
-    std::unique_ptr<GDX12WaterOffload> Offload;
     std::unique_ptr<GDX12UploadBuffer<GDX12FluidParameters>> Constants;
     std::shared_ptr<const std::vector<GDX12FluidParticle>> Source;
     uint64_t Revision = 0;
@@ -229,82 +219,27 @@ void GDX12FluidSurfacePass::PrepareStates()
         replacement->Source = source;
         replacement->Revision = instance.Component.GetResetRevision();
         replacement->PreviousContainer = instance.ContainerToWorld;
-        const int adapter = _localOnly || _externalOnly ? -1 : WaterAdapter.GetValue();
-        if (_externalOnly)
-        {
-            const auto display = _externalDisplay.find(instance.Id);
-            if (display == _externalDisplay.end() || !display->second || display->second->GetElementCount() != source->size())
-                throw std::invalid_argument("External fluid display does not match its immutable seed");
-        }
-        else if (adapter >= 0)
-        {
-            const auto adapters = GDX12DeviceFactory::GetDeviceDescriptors();
-            if (static_cast<size_t>(adapter) >= adapters.size()) throw std::invalid_argument("Water secondary adapter index out of range");
-            auto resolved = instance;
-            resolved.Component.SetSettings(ResolveFluidSettings(author, _controls.Quality));
-            replacement->Offload = std::make_unique<GDX12WaterOffload>(_resources->Device,
-                _resources->SRV_UAV_Heap.get(), adapters[adapter].Adapter, resolved);
-            replacement->Offload->Start();
-        }
-        else replacement->Solver = GDX12FluidSolver::CreateBuffers(_resources->Device, _resources->SRV_UAV_Heap.get(), instance);
+        replacement->Solver = GDX12FluidSolver::CreateBuffers(_resources->Device, _resources->SRV_UAV_Heap.get(), instance);
         replacement->Constants = std::make_unique<GDX12UploadBuffer<GDX12FluidParameters>>(_resources->Device,
             2 * static_cast<UINT>(_resources->FrameConstants.size()));
         state = std::move(replacement);
     }
 }
 
-std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::GetResolveBufferAccesses() const
+std::vector<GDX12ResourceAccess> GDX12FluidSurfacePass::GetSimulationBufferAccesses() const
 {
-    std::vector<GDX12RenderGraph::BufferAccess> accesses;
-    for (const auto& [id, state] : _states)
-        accesses.push_back({ &state->Constants->GetResource(), GDX12RenderGraph::Mode::Read });
-    if (_resources && _resources->CurrFrameConstantsIndex < _resources->FrameConstants.size())
-    {
-        const auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-        if (frame->CameraCB) accesses.push_back({ &frame->CameraCB->GetResource(), GDX12RenderGraph::Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER });
-        if (frame->ReflectionProbes) accesses.push_back({ &frame->ReflectionProbes->GetResource(), GDX12RenderGraph::Mode::Read });
-    }
-    return accesses;
-}
-
-std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::GetSimulationBufferAccesses() const
-{
-    std::vector<GDX12RenderGraph::BufferAccess> accesses;
+    std::vector<GDX12ResourceAccess> accesses;
     for (const auto& [id, state] : _states)
     {
-        if (_externalOnly || state->Offload) continue;
         if (!state->Solver.Count) continue;
-        accesses.push_back({ &state->Constants->GetResource(), GDX12RenderGraph::Mode::Read });
+        accesses.push_back({ &state->Constants->GetResource(), GDX12AccessMode::Read });
         for (const auto& particles : state->Solver.Particles)
-            accesses.push_back({ &particles->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
-        accesses.push_back({ &state->Solver.Density->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
-        accesses.push_back({ &state->Solver.Keys->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
-        accesses.push_back({ &state->Solver.Offsets->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
-        accesses.push_back({ &state->Solver.Predictions->GetResource(), GDX12RenderGraph::Mode::ReadWrite });
-        if (state->SolverHead.SeedPending && state->Solver.SeedUpload) accesses.push_back({ &state->Solver.SeedUpload->GetResource(), GDX12RenderGraph::Mode::Read });
-    }
-    return accesses;
-}
-
-std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::GetBufferAccesses() const
-{
-    if (!_rendering) return {};
-    auto accesses = GetResolveBufferAccesses();
-    for (const auto& [id, state] : _states)
-    {
-        if (_externalOnly)
-        {
-            accesses.push_back({&_externalDisplay.at(id)->GetResource(), GDX12RenderGraph::Mode::Read});
-            continue;
-        }
-        if (state->Offload)
-        {
-            accesses.push_back({&state->Offload->DisplayParticles().GetResource(), GDX12RenderGraph::Mode::Read});
-            continue;
-        }
-        if (!state->Solver.Count) continue;
-        for (const auto& particles : state->Solver.Particles)
-            accesses.push_back({ &particles->GetResource(), GDX12RenderGraph::Mode::Read });
+            accesses.push_back({ &particles->GetResource(), GDX12AccessMode::ReadWrite });
+        accesses.push_back({ &state->Solver.Density->GetResource(), GDX12AccessMode::ReadWrite });
+        accesses.push_back({ &state->Solver.Keys->GetResource(), GDX12AccessMode::ReadWrite });
+        accesses.push_back({ &state->Solver.Offsets->GetResource(), GDX12AccessMode::ReadWrite });
+        accesses.push_back({ &state->Solver.Predictions->GetResource(), GDX12AccessMode::ReadWrite });
+        if (state->SolverHead.SeedPending && state->Solver.SeedUpload) accesses.push_back({ &state->Solver.SeedUpload->GetResource(), GDX12AccessMode::Read });
     }
     return accesses;
 }
@@ -392,21 +327,8 @@ void GDX12FluidSurfacePass::PrepareFrame()
     PrepareStates();
     // The frame-slot wait covers the final DIRECT fence and its COMPUTE join.
     for (auto& [id, state] : _states)
-        if (!state->Offload && !state->SolverHead.SeedPending && state->SeedFrameSlot == _resources->CurrFrameConstantsIndex)
+        if (!state->SolverHead.SeedPending && state->SeedFrameSlot == _resources->CurrFrameConstantsIndex)
             state->Solver.SeedUpload.reset();
-    for (const auto& instance : _instances)
-    {
-        const auto found = _states.find(instance.Id);
-        if (found == _states.end() || !found->second->Offload) continue;
-        auto input = instance;
-        auto settings = ResolveFluidSettings(instance.Component.GetSettings(), _controls.Quality);
-        settings.SimulationEnabled &= _controls.Enabled;
-        input.Component.SetSettings(settings);
-        auto& state = *found->second;
-        state.Offload->Update(input);
-        state.ResetThisFrame = !state.WasRendered;
-        state.Offload->UpdateDisplay();
-    }
     _depthLink.Target = _inputs[0]->GetTexture();
     _motionLink.Target = _inputs[1]->GetTexture();
     bool rendering = false;
@@ -436,7 +358,7 @@ void GDX12FluidSurfacePass::PrepareFrame()
         return;
     }
     CreatePipelines();
-    if (_localOnly && !_externalOnly) _solver.Initialize(_resources->Device);
+    _solver.Initialize(_resources->Device);
     if (rendering && !_particleRendering)
     {
         CreateTargets();
@@ -455,7 +377,6 @@ void GDX12FluidSurfacePass::SetInstances(std::vector<GDX12FluidInstance> instanc
 
 void GDX12FluidSurfacePass::ExecuteSimulation(GDX12CommandList* commands)
 {
-    if (_externalOnly) return;
     if (!_prepared) PrepareFrame();
     if (!_rendering && !_simulating) return;
     GDX12_SCOPED_EVENT(commands, "Fluid SPH simulation", Colors::Aqua);
@@ -465,7 +386,6 @@ void GDX12FluidSurfacePass::ExecuteSimulation(GDX12CommandList* commands)
         auto found = _states.find(instance.Id);
         if (found == _states.end()) continue;
         auto& state = *found->second;
-        if (state.Offload) continue;
         if (!state.Solver.Count) continue;
         const auto settings = ResolveFluidSettings(instance.Component.GetSettings(), _controls.Quality);
         if (!settings.RenderEnabled && !settings.SimulationEnabled) continue;
@@ -530,8 +450,7 @@ void GDX12FluidSurfacePass::Execute(GDX12CommandList* commands)
             }
             if (drawing)
             {
-                auto& particles = _externalOnly ? *_externalDisplay.at(instance.Id) :
-                    state.Offload ? state.Offload->DisplayParticles() : *state.Solver.Particles[state.SolverHead.Current];
+                auto& particles = *state.Solver.Particles[state.SolverHead.Current];
                 DrawSurface(commands, {particles.GetResource(), particles.GetSRV()->GPUHandle, particles.GetElementCount()},
                     constants, owner, settings);
             }
@@ -575,8 +494,7 @@ void GDX12FluidSurfacePass::DrawParticles(GDX12CommandList* commands, GDX12Textu
         if (settings.ReferenceModel) parameters.Radius *= std::cbrt(std::abs(instance.ContainerToWorld.Determinant()));
         const UINT element = 2 * _resources->CurrFrameConstantsIndex + 1;
         state.Constants->CopyData(element, parameters);
-        auto& particles = _externalOnly ? *_externalDisplay.at(instance.Id) :
-            state.Offload ? state.Offload->DisplayParticles() : *state.Solver.Particles[state.SolverHead.Current];
+        auto& particles = *state.Solver.Particles[state.SolverHead.Current];
         commands->SetGraphicsRootConstantBufferView(1, state.Constants->GetElementAddress(element));
         commands->SetGraphicsSRV(0, particles.GetSRV()->GPUHandle);
         commands->DrawInstanced(4, particles.GetElementCount(), 0, 0);
@@ -675,41 +593,10 @@ void GDX12FluidSurfacePass::ClearDenendencies()
     _rendering = _simulating = _prepared = false;
 }
 
-GDX12FluidResolvePass::GDX12FluidResolvePass(GDX12FluidSurfacePass* surface) : _surface(surface)
+std::vector<GDX12ResourceAccess> GDX12FluidSurfacePass::NativeSurfaceAccesses() const
 {
-    if (!surface) throw std::invalid_argument("Fluid resolve requires its surface pass");
-    _numInputs = 2;
-    _numOutputs = 1;
-    _outputs = { &_color };
-}
-void GDX12FluidResolvePass::Initialize() { PrepareFrame(); }
-void GDX12FluidResolvePass::PrepareFrame() { _color.Target = _inputs[0]->GetTexture(); }
-void GDX12FluidResolvePass::Execute(GDX12CommandList* commands)
-{
-    _color.Target = _surface->Resolve(commands, _inputs[0]->GetTexture(), _inputs[1]->GetTexture());
-}
-void GDX12FluidResolvePass::ClearDenendencies()
-{
-    GDX12RenderPass::ClearDenendencies();
-    _color.Target = nullptr;
-}
-
-std::vector<GDX12Resource*> GDX12FluidSurfacePass::NativeResources() const
-{
-    std::vector<GDX12Resource*> result;
-    const auto add = [&](GDX12Texture* texture) { if (texture) result.push_back(texture->GetResource()); };
-    for (auto* texture : {_raw.get(), _eyeDepth.get(), _scratchDepth.get(), _thickness.get(),
-        _filtered[0].get(), _filtered[1].get(), _depth.get(), _motion.get(), _geometry.get(), _owner.get(), _color.get()}) add(texture);
-    for (auto access : GetSimulationBufferAccesses()) result.push_back(access.Resource);
-    for (auto access : GetResolveBufferAccesses()) result.push_back(access.Resource);
-    if (_externalOnly) for (const auto& [id, display] : _externalDisplay) result.push_back(&display->GetResource());
-    return result;
-}
-
-std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::NativeSurfaceAccesses() const
-{
-    using Mode = GDX12RenderGraph::Mode;
-    std::vector<GDX12RenderGraph::BufferAccess> result;
+    using Mode = GDX12AccessMode;
+    std::vector<GDX12ResourceAccess> result;
     if (!_rendering) return result;
     if (!_particleRendering)
     {
@@ -728,31 +615,8 @@ std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::NativeSurface
         if (!instance.Component.GetSettings().RenderEnabled || found == _states.end()) continue;
         const auto& state = *found->second;
         result.push_back({&state.Constants->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
-        if (_externalOnly) result.push_back({&_externalDisplay.at(instance.Id)->GetResource(), Mode::Read,
-            D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
-        else if (state.Offload) result.push_back({&state.Offload->DisplayParticles().GetResource(), Mode::Read,
-            D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
-        else for (const auto& particles : state.Solver.Particles)
+        for (const auto& particles : state.Solver.Particles)
             result.push_back({&particles->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
     }
-    return result;
-}
-
-std::vector<GDX12RenderGraph::BufferAccess> GDX12FluidSurfacePass::NativeResolveAccesses() const
-{
-    using Mode = GDX12RenderGraph::Mode;
-    std::vector<GDX12RenderGraph::BufferAccess> result;
-    if (!_rendering || _particleRendering) return result;
-    for (auto* texture : {_inputs[0]->GetTexture(), _depth.get(), _geometry.get(), _owner.get()})
-        result.push_back({texture->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
-    result.push_back({_color->GetResource(), Mode::Write, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
-    const auto& frame = _resources->FrameConstants.at(_resources->CurrFrameConstantsIndex);
-    result.push_back({&frame->CameraCB->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
-    if (!_staticIBL) result.push_back({&frame->ReflectionProbes->GetResource(), Mode::Read,
-        D3D12_RESOURCE_STATE_GENERIC_READ});
-    for (const auto& instance : _instances)
-        if (const auto found = _states.find(instance.Id);
-            instance.Component.GetSettings().RenderEnabled && found != _states.end())
-            result.push_back({&found->second->Constants->GetResource(), Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
     return result;
 }

@@ -351,269 +351,6 @@ void GDX12ReflectionProbePass::CreateBakedTextures(ProbeState& probe)
     probe.BakedFaces = 0;
 }
 
-void GDX12ReflectionProbePass::Cull(GDX12CommandList* commands, const UINT camera, const Geometry geometry, const bool shadow)
-{
-    auto& frame = _frames[_resources->CurrFrameConstantsIndex];
-    auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-    const UINT count = _resources->IndirectCommandsCache->GetElementCount();
-    if (!frame.Commands || frame.Commands->GetElementCount() < count)
-    {
-        frame.Commands = std::make_unique<GDX12UploadBuffer<GDX12IndirectDrawArgs>>(_resources->Device,
-            (std::max)(count, 1u), EBufferType::Default, false);
-        frame.Commands->CreateUAV(_resources->SRV_UAV_Heap.get(), _resources->SRV_UAV_Heap->GetAvailableIndex(ConstantsResources));
-    }
-    commands->ResourceBarrier({ frame.Commands->GetResource().GetUnorderedAccessBarrier(), frame.Counter->GetResource().GetUnorderedAccessBarrier() });
-    commands->SetComputeRootSignature(_cullRoot.get());
-    commands->SetComputeUAV(0, frame.Commands->GetUAV()->GPUHandle);
-    commands->SetComputeUAV(1, frame.Counter->GetUAV()->GPUHandle);
-    commands->SetPipelineState(_clearPSO);
-    commands->Dispatch(1, 1, 1);
-    commands->ResourceBarrier({ frame.Counter->GetResource().GetUAVBarrier() });
-    commands->SetPipelineState(_cullPSO);
-    const UINT parameters[] = { static_cast<UINT>(geometry), shadow ? 1u : 0u };
-    commands->GetCommandList()->SetComputeRoot32BitConstants(0, 2, parameters, 0);
-    commands->SetComputeRootConstantBufferView(1, frame.Cameras->GetElementAddress(_activeProbe * 6 + camera));
-    commands->SetComputeRootConstantBufferView(2, frame.Shadow->GetElementAddress(0));
-    commands->SetComputeSRV(0, constants->ShadowInstances->GetSRV()->GPUHandle);
-    commands->SetComputeSRV(1, constants->ShadowTemplates->GetSRV()->GPUHandle);
-    commands->SetComputeSRV(2, constants->ShadowMaterials->GetSRV()->GPUHandle);
-    if (count) commands->Dispatch((count + 63) / 64, 1, 1);
-    if (_resources->SkeletalBatchCount)
-    {
-        if (!frame.Batches) frame.Batches = std::make_unique<GDX12InstanceBatcher>(_resources->Device);
-        frame.Batches->Build(commands, *constants->ShadowInstances, *frame.Commands, *frame.Counter,
-            _resources->SkeletalBatchCount, _resources->SkeletalInstanceCount);
-    }
-    else frame.Batches.reset();
-    commands->ResourceBarrier({ frame.Commands->GetResource().GetIndirectArgsBarrier(), frame.Counter->GetResource().GetIndirectArgsBarrier() });
-}
-
-GDX12GraphicsBindings GDX12ReflectionProbePass::CaptureBindings(const UINT face, GDX12Texture* localShadows)
-{
-    auto& frame = _frames[_resources->CurrFrameConstantsIndex];
-    auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-    GDX12GraphicsBindings binding;
-    binding.Root = _captureRoot.get();
-    const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
-    const auto geometrySlot = static_cast<UINT>(binding.Root->GetGeometryRootParamIndex());
-    binding.RootSRVs = { { geometrySlot, geometryAddress }, { geometrySlot + 1,
-        frame.Batches ? frame.Batches->VisibleInstancesAddress() : geometryAddress } };
-    binding.Pipeline = _capturePSO;
-    binding.IndirectSignature = _signature.Get();
-    binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
-    binding.Stage = GDX12GeometryStage::ReflectionCapture;
-    binding.ColorTargetCount = 1;
-    binding.ColorFormats[0] = DXGI_FORMAT_R16G16B16A16_FLOAT;
-    binding.DepthFormat = DXGI_FORMAT_D32_FLOAT;
-    binding.Heap = _resources->SRV_UAV_Heap.get();
-    binding.CBVs.push_back({ 1, constants->MainCB->GetElementAddress(0) });
-    binding.CBVs.push_back({ 2, frame.Cameras->GetElementAddress(_activeProbe * 6 + face) });
-    binding.CBVs.push_back({ 3, frame.Shadow->GetElementAddress(0) });
-    binding.SRVs.push_back({ 0, constants->ShadowMaterials->GetSRV()->GPUHandle });
-    binding.SRVs.push_back({ 1, constants->ShadowTransforms->GetSRV()->GPUHandle });
-    binding.SRVs.push_back({ 2, constants->ShadowInstances->GetSRV()->GPUHandle });
-    binding.SRVs.push_back({ 3, _sunShadow.GetSRV()->GPUHandle });
-    for (UINT i = 0; i < 3; ++i) binding.SRVs.push_back({ 4 + i, _inputs[i]->GetTexture()->GetSRV()->GPUHandle });
-    binding.SRVs.push_back({ 7, constants->ShadowLights->GetSRV()->GPUHandle });
-    binding.SRVs.push_back({ 8, localShadows->GetSRV()->GPUHandle });
-    binding.SRVs.push_back({ 9, _inputs[3]->GetTexture()->GetSRV()->GPUHandle });
-    binding.CBVs.push_back({ 4, _resources->FrameConstants[_resources->CurrFrameConstantsIndex]->SkyCB->GetElementAddress(0) });
-    binding.SRVs.push_back({ 10, _resources->SkyTransmittanceSRV.GPUHandle });
-    binding.SRVs.push_back({ 11, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex) });
-    return binding;
-}
-
-const GDX12GeometryContext* GDX12ReflectionProbePass::GetGeometryView(const UINT slot) const
-{
-    return _planPrepared && slot < _views.size() && _views[slot].Selected ? &_views[slot].Context : nullptr;
-}
-
-void GDX12ReflectionProbePass::BindGeometryViewTargets(GDX12CommandList* commands, const UINT slot)
-{
-    const auto* view = GetGeometryView(slot);
-    if (!view) return;
-    SelectProbe(_views[slot].Probe);
-    commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-    if (view->Stage == GDX12GeometryStage::Shadow)
-    {
-        commands->ResourceBarrier({ _sunShadow.GetResource()->GetDepthWriteBarrier() });
-        const auto dsv = _sunDSV[0]->CPUHandle;
-        commands->GetCommandList()->OMSetRenderTargets(0, nullptr, FALSE, &dsv);
-        commands->SetViewport(_sunShadow.GetViewport());
-        commands->SetScissorRect(_sunShadow.GetScissorRect());
-        return;
-    }
-    const auto& prepared = _views[slot];
-    auto& state = _probes[_activeProbe];
-    const UINT captureSlice = prepared.Face * _publishedMips + (_publishedMips - _mips);
-    auto& color = prepared.Bake ? *state.BakedColor : *state.Raw;
-    auto& depth = prepared.Bake ? *state.BakedDepth : _depth;
-    const auto rtv = (prepared.Bake ? state.BakedRTVs[prepared.Face] : state.RawRTVs[captureSlice])->CPUHandle;
-    const auto dsv = (prepared.Bake ? state.BakedDSVs[prepared.Face] : _depthDSVs[captureSlice])->CPUHandle;
-    commands->ResourceBarrier({ _sunShadow.GetResource()->GetSRVBarrier(),
-        color.GetResource()->GetRenderTargetBarrier(), depth.GetResource()->GetDepthWriteBarrier() });
-    commands->GetCommandList()->OMSetRenderTargets(1, &rtv, FALSE, &dsv);
-    commands->SetViewport({ 0, 0, static_cast<float>(_resolution), static_cast<float>(_resolution), 0, 1 });
-    commands->SetScissorRect({ 0, 0, static_cast<LONG>(_resolution), static_cast<LONG>(_resolution) });
-}
-
-void GDX12ReflectionProbePass::RenderShadow(GDX12CommandList* commands, const UINT slot)
-{
-    const auto& prepared = _views[slot];
-    Cull(commands, 0, prepared.Filter, true);
-    auto& constants = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-    auto& frame = _frames[_resources->CurrFrameConstantsIndex];
-    GDX12GraphicsBindings binding;
-    binding.Root = _captureRoot.get();
-    const auto geometryAddress = _resources->GeometryBuffer->GetVertexAddress();
-    const auto geometrySlot = static_cast<UINT>(binding.Root->GetGeometryRootParamIndex());
-    binding.RootSRVs = { { geometrySlot, geometryAddress }, { geometrySlot + 1,
-        frame.Batches ? frame.Batches->VisibleInstancesAddress() : geometryAddress } };
-    binding.IndirectSignature = _signature.Get();
-    binding.IndirectStride = sizeof(GDX12IndirectDrawArgs);
-    binding.Stage = GDX12GeometryStage::Shadow;
-    binding.DepthFormat = DXGI_FORMAT_D32_FLOAT;
-    binding.Heap = _resources->SRV_UAV_Heap.get();
-    binding.CBVs.push_back({ 3, frame.Shadow->GetElementAddress(0) });
-    binding.SRVs.push_back({ 0, constants->ShadowMaterials->GetSRV()->GPUHandle });
-    binding.SRVs.push_back({ 1, constants->ShadowTransforms->GetSRV()->GPUHandle });
-    binding.SRVs.push_back({ 2, constants->ShadowInstances->GetSRV()->GPUHandle });
-    binding.CBVs.push_back({ 4, constants->SkyCB->GetElementAddress(0) });
-    binding.SRVs.push_back({ 10, _resources->SkyTransmittanceSRV.GPUHandle });
-    binding.SRVs.push_back({ 11, _resources->SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex) });
-    binding.Pipeline = _shadowPSO;
-    BindGeometryViewTargets(commands, slot);
-    commands->GetCommandList()->ClearDepthStencilView(_sunDSV[0]->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
-    _sunShadowNeedsClear = false;
-    const UINT count = _resources->IndirectCommandsCache->GetElementCount();
-    auto view = prepared.Context;
-    view.IncludeApplicationGeometry = !_splitGeometry;
-    GDX12RenderBatch mesh;
-    mesh.Binding = &binding;
-    mesh.Geometry = _resources->GeometryBuffer.get();
-    mesh.InstanceCount = count;
-    mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _signature.Get(),
-        count ? (frame.Batches ? frame.Batches->Commands() : *frame.Commands).GetResource().D3DResource.Get() : nullptr, 0,
-        count ? frame.Counter->GetResource().D3DResource.Get() : nullptr, 0, count, sizeof(GDX12IndirectDrawArgs) };
-    _resources->EmitGeometry(commands, view, mesh);
-}
-
-void GDX12ReflectionProbePass::RenderFace(GDX12CommandList* commands, const UINT slot)
-{
-    const auto& prepared = _views[slot];
-    const UINT face = prepared.Face;
-    const auto geometry = prepared.Filter;
-    const bool bake = prepared.Bake;
-    auto& state = _probes[_activeProbe];
-    const UINT captureSlice = face * _publishedMips + (_publishedMips - _mips);
-    auto& color = bake ? *state.BakedColor : *state.Raw;
-    auto& depth = bake ? *state.BakedDepth : _depth;
-    const auto rtv = (bake ? state.BakedRTVs[face] : state.RawRTVs[captureSlice])->CPUHandle;
-    const auto dsv = (bake ? state.BakedDSVs[face] : _depthDSVs[captureSlice])->CPUHandle;
-    if (!bake && geometry == DynamicGeometry)
-    {
-        commands->ResourceBarrier({ state.BakedColor->GetResource()->GetCopySourceBarrier(),
-            state.BakedDepth->GetResource()->GetCopySourceBarrier(), color.GetResource()->GetCopyDestBarrier(), depth.GetResource()->GetCopyDestBarrier() });
-        const CD3DX12_TEXTURE_COPY_LOCATION colorSource(state.BakedColor->GetResource()->D3DResource.Get(), face);
-        const CD3DX12_TEXTURE_COPY_LOCATION depthSource(state.BakedDepth->GetResource()->D3DResource.Get(), face);
-        const CD3DX12_TEXTURE_COPY_LOCATION colorDestination(color.GetResource()->D3DResource.Get(), captureSlice);
-        const CD3DX12_TEXTURE_COPY_LOCATION depthDestination(depth.GetResource()->D3DResource.Get(), captureSlice);
-        commands->GetCommandList()->CopyTextureRegion(&colorDestination, 0, 0, 0, &colorSource, nullptr);
-        commands->GetCommandList()->CopyTextureRegion(&depthDestination, 0, 0, 0, &depthSource, nullptr);
-    }
-    Cull(commands, face, geometry, false);
-    auto binding = CaptureBindings(face, prepared.Lighting.LocalShadows);
-    BindGeometryViewTargets(commands, slot);
-    binding.Bind(commands);
-    commands->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    if (geometry != DynamicGeometry)
-    {
-        const float clear[] = { 0, 0, 0, 0 };
-        commands->GetCommandList()->ClearRenderTargetView(rtv, clear, 0, nullptr);
-        commands->GetCommandList()->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 0, 0, 0, nullptr);
-        commands->SetPipelineState(_skyPSO);
-        commands->DrawInstanced(3, 1, 0, 0);
-    }
-    auto& frame = _frames[_resources->CurrFrameConstantsIndex];
-    const UINT count = _resources->IndirectCommandsCache->GetElementCount();
-    auto view = prepared.Context;
-    view.IncludeApplicationGeometry = !_splitGeometry;
-    GDX12RenderBatch mesh;
-    mesh.Binding = &binding;
-    mesh.Geometry = _resources->GeometryBuffer.get();
-    mesh.InstanceCount = count;
-    mesh.Draw = { GDX12DrawKind::Indirect, {}, {}, _signature.Get(),
-        count ? (frame.Batches ? frame.Batches->Commands() : *frame.Commands).GetResource().D3DResource.Get() : nullptr, 0,
-        count ? frame.Counter->GetResource().D3DResource.Get() : nullptr, 0, count, sizeof(GDX12IndirectDrawArgs) };
-    _resources->EmitGeometry(commands, view, mesh);
-}
-
-void GDX12ReflectionProbePass::ExecuteGeometryView(GDX12CommandList* commands, const UINT slot)
-{
-    const auto* view = GetGeometryView(slot);
-    if (!view) return;
-    SelectProbe(_views[slot].Probe);
-    if (view->Stage == GDX12GeometryStage::Shadow) RenderShadow(commands, slot);
-    else RenderFace(commands, slot);
-}
-
-void GDX12ReflectionProbePass::FilterAndPublish(GDX12CommandList* commands, const UINT probe)
-{
-    SelectProbe(probe);
-    auto& state = _probes[probe];
-    commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-    commands->ResourceBarrier({ state.Raw->GetResource()->GetSRVBarrier(), _filtered.GetResource()->GetUnorderedAccessBarrier() });
-    commands->SetComputeRootSignature(_filterRoot.get());
-    commands->SetPipelineState(_filterPSO);
-    // shortcut: capture input has one mip, add input mips if small HDR emitters alias at the chosen sample budget.
-    commands->SetComputeSRV(0, state.RawMipSRVs[_publishedMips - _mips]->GPUHandle);
-    for (UINT mip = 0; mip < _mips; ++mip)
-    {
-        struct { UINT Size; float Roughness; UINT Samples; } parameters = {
-            _resolution >> mip, static_cast<float>(mip) / (_mips - 1), _probes[probe].Source.PrefilterSamples };
-        commands->GetCommandList()->SetComputeRoot32BitConstants(0, 3, &parameters, 0);
-        commands->SetComputeUAV(0, _filterUAVs[_publishedMips - _mips + mip]->GPUHandle);
-        commands->Dispatch((parameters.Size + 7) / 8, (parameters.Size + 7) / 8, 6);
-    }
-    commands->ResourceBarrier({ _filtered.GetResource()->GetCopySourceBarrier(), _published.GetResource()->GetCopyDestBarrier() });
-    for (UINT face = 0; face < 6; ++face)
-        for (UINT mip = 0; mip < _mips; ++mip)
-        {
-            const CD3DX12_TEXTURE_COPY_LOCATION source(_filtered.GetResource()->D3DResource.Get(), face * _publishedMips + (_publishedMips - _mips) + mip);
-            const CD3DX12_TEXTURE_COPY_LOCATION destination(_published.GetResource()->D3DResource.Get(), (probe * 6 + face) * _publishedMips + (_publishedMips - _mips) + mip);
-            commands->GetCommandList()->CopyTextureRegion(&destination, 0, 0, 0, &source, nullptr);
-        }
-    commands->ResourceBarrier({ _published.GetResource()->GetSRVBarrier() });
-    state.CapturedFaces = 0;
-    if (state.RebakePending) { state.BakedFaces = 0; state.RebakePending = false; }
-    state.Ready = true;
-    state.Published = state.Source;
-    state.LastUpdate = _frameNumber;
-    ++_statistics.PublishedProbes;
-}
-
-void GDX12ReflectionProbePass::WriteProbeData(GDX12CommandList* commands, const bool enabled)
-{
-    auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-    for (UINT i = 0; i < MaxReflectionProbes; ++i)
-    {
-        GDX12ReflectionProbeData data;
-        if (enabled && i < _probes.size() && _probes[i].Ready)
-        {
-            const auto& probe = _probes[i].Published;
-            data.Position = probe.Position;
-            data.BoxMin = probe.BoxMin;
-            data.BoxMax = probe.BoxMax;
-            data.BlendDistance = _probes[i].Source.BlendDistance;
-            data.Intensity = _probes[i].Source.Intensity;
-            data.MaxMip = static_cast<float>(_publishedMips - 1);
-            data.MinMip = static_cast<float>(_publishedMips - CubeMipCount(probe.Resolution));
-        }
-        frame->ReflectionProbesUpload->CopyData(i, data);
-    }
-    frame->UploadReflectionProbeData(commands);
-}
-
 std::pair<size_t, size_t> GDX12ReflectionProbePass::GetReadiness()
 {
     if (!_enabled) return {};
@@ -627,7 +364,7 @@ void GDX12ReflectionProbePass::Prepare()
     GDX12_SCOPED_CPU_EVENT("Reflection probe preparation");
     if (_planPrepared) return;
     _views.clear();
-    _capturePlanned = _staticShadowsPlanned = false;
+    _capturePlanned = false;
     ++_frameNumber;
     _statistics.CapturedFaces = _statistics.BakedFaces = _statistics.PublishedProbes = 0;
     const auto settings = _externalSettings ? *_externalSettings : GetReflectionSettings();
@@ -675,7 +412,6 @@ void GDX12ReflectionProbePass::Prepare()
         _environmentRevision != _resources->ReflectionEnvironmentRevision;
     const bool staticGeometryChanged = _staticGeometryRevision != _resources->ReflectionStaticGeometryRevision;
     const bool shadowQualityChanged = !(_shadowQuality == _resources->ShadowQuality);
-    if ((invalidate || shadowQualityChanged) && _staticLocalShadows) _staticLocalShadows->InvalidateCache();
     for (size_t i = 0; i < submitted.size(); ++i)
     {
         auto& probe = _probes[i];
@@ -760,7 +496,6 @@ void GDX12ReflectionProbePass::Prepare()
         _capturePlanned = true;
         const bool bake = state.Source.Implementation == 1 && state.BakedFaces != 63;
         const bool frozen = state.Source.Implementation == 2;
-        _staticShadowsPlanned |= bake || frozen;
         if (bake) CreateBakedTextures(state);
         const auto select = [&](UINT localSlot, Geometry geometry, bool shadow, UINT face, bool baked)
         {
@@ -807,71 +542,14 @@ void GDX12ReflectionProbePass::Prepare()
                 select(8 + face, frozen ? StaticGeometry : state.Source.Implementation == 1 ? DynamicGeometry : AllGeometry,
                     false, face, false);
     }
-    if (_staticShadowsPlanned && !_externalStaticShadows)
-    {
-        if (!_staticLocalShadows)
-        {
-            // shortcut: baked receivers retain static-only shadows, use dynamic capture for moving shadow reception.
-            _staticLocalShadows = std::make_unique<GDX12LocalShadowPass>(true);
-            _staticLocalShadows->Setup(_resources, _commonData);
-            _staticLocalShadows->Initialize();
-        }
-        _staticLocalShadows->Prepare();
-    }
     for (auto& view : _views)
         if (view.Selected && view.Context.Stage == GDX12GeometryStage::ReflectionCapture)
         {
             view.Lighting.LocalShadows = view.Filter == StaticGeometry ?
-                (_externalStaticShadows ? _externalStaticShadows : _staticLocalShadows->GetOutput(0)->GetTexture()) :
-                (_externalDynamicShadows ? _externalDynamicShadows : _inputs[4]->GetTexture());
+                _externalStaticShadows :
+                _externalDynamicShadows;
         }
     _planPrepared = true;
-}
-
-void GDX12ReflectionProbePass::BeginGeometry(GDX12CommandList* commands)
-{
-    // Standalone users may execute without the pipeline's CPU preparation phase.
-    Prepare();
-    if (_publishedNeedsTransition)
-    {
-        commands->ResourceBarrier({ _published.GetResource()->GetSRVBarrier() });
-        _publishedNeedsTransition = false;
-    }
-    if (!_capturePlanned) return;
-    commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-    if (_sunShadowNeedsClear)
-    {
-        commands->ResourceBarrier({ _sunShadow.GetResource()->GetDepthWriteBarrier() });
-        commands->GetCommandList()->ClearDepthStencilView(_sunDSV[0]->CPUHandle, D3D12_CLEAR_FLAG_DEPTH, 1, 0, 0, nullptr);
-        _sunShadowNeedsClear = false;
-    }
-    if (_staticShadowsPlanned && !_externalStaticShadows) _staticLocalShadows->Execute(commands);
-}
-
-void GDX12ReflectionProbePass::EndGeometry(GDX12CommandList* commands)
-{
-    for (const auto& view : _views)
-    {
-        if (!view.Selected || view.Context.Stage != GDX12GeometryStage::ReflectionCapture) continue;
-        auto& state = _probes[view.Probe];
-        if (view.Bake) { state.BakedFaces |= 1u << view.Face; ++_statistics.BakedFaces; }
-        else
-        {
-            state.CapturedFaces |= 1u << view.Face;
-            ++_statistics.CapturedFaces;
-        }
-    }
-    for (UINT index = 0; index < _probes.size(); ++index)
-    {
-        auto& state = _probes[index];
-        if (state.CapturedFaces == 63)
-        {
-            FilterAndPublish(commands, index);
-            if (!_settings.Scheduled) _roundRobinProbe = (index + 1) % static_cast<UINT>(_probes.size());
-        }
-    }
-    WriteProbeData(commands, _enabled);
-    _planPrepared = false;
 }
 
 void GDX12ReflectionProbePass::ResetHistory()
@@ -886,20 +564,17 @@ void GDX12ReflectionProbePass::ResetHistory()
     _scheduler.Reset();
     _roundRobinProbe = 0;
     _frameNumber = 0;
-    _planPrepared = _capturePlanned = _staticShadowsPlanned = false;
-    if (_staticLocalShadows) _staticLocalShadows->InvalidateCache();
+    _planPrepared = _capturePlanned = false;
 }
 
 void GDX12ReflectionProbePass::ClearDenendencies()
 {
     GDX12RenderPass::ClearDenendencies();
-    if (_staticLocalShadows) _staticLocalShadows->ClearDenendencies();
-    _staticLocalShadows.reset();
     _externalStaticShadows = _externalDynamicShadows = nullptr;
     _externalSettings = nullptr;
     _frames.clear();
     _probes.clear();
     _views.clear();
     _scheduler.Reset();
-    _planPrepared = _capturePlanned = _staticShadowsPlanned = false;
+    _planPrepared = _capturePlanned = false;
 }

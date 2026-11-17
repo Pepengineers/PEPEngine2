@@ -481,6 +481,7 @@ class PhysicsTestApp final : public App
 {
 public:
     PhysicsTestApp() : App(nullptr) {}
+    bool AddModules() override { return true; }
     using App::UpdatePhysics;
     void UseConfiguredSystems(bool enabled) { _AppConfig.StartScene = enabled ? "test" : ""; }
 };

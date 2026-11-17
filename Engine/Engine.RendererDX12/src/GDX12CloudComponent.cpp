@@ -124,44 +124,9 @@ GDX12CloudInputs GDX12CloudComponent::CaptureInputs()
         _parameters.Octaves ? _parameters.Octaves : presets[quality], enabled };
 }
 
-void GDX12CloudComponent::Execute(GDX12CommandList* commands)
-{
-    const auto input = CaptureInputs();
-    if (_renderedRevision == input.LightingRevision) return;
-    Record(commands, input);
-    _renderedRevision = input.LightingRevision;
-}
 
-void GDX12CloudComponent::Record(GDX12CommandList* commands, const GDX12CloudInputs& input)
-{
-    if (!_resources || !_texture) throw std::logic_error("Cloud source requires Setup before recording");
-    _renderedRevision = 0;
-    if (!_texture->IsInitialized()) CreateResources();
-    struct Constants
-    {
-        UINT Size, Octaves, Implementation, Enabled;
-        float Scale, Coverage, Softness, Padding;
-        Vector3 Horizon; float PhaseX;
-        Vector3 Zenith; float PhaseY;
-        Vector3 Cloud; UINT Seed;
-    };
-    static_assert(sizeof(Constants) == 20 * sizeof(UINT));
-    const auto& parameters = input.Parameters;
-    const Constants constants = { 256, input.Octaves, static_cast<UINT>(parameters.Implementation),
-        input.Enabled ? 1u : 0u, parameters.Scale, parameters.Coverage, parameters.Softness, 0,
-        parameters.HorizonColor, input.Phase.x, parameters.ZenithColor, input.Phase.y,
-        parameters.CloudColor, parameters.Seed };
-    GDX12_SCOPED_EVENT(commands, "Procedural 2D clouds", Colors::CornflowerBlue);
-    commands->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-    commands->SetComputeRootSignature(_root.get());
-    commands->SetPipelineState(_pipeline);
-    commands->GetCommandList()->SetComputeRoot32BitConstants(0, 20, &constants, 0);
-    commands->SetComputeUAV(0, _texture->GetUAV()->GPUHandle);
-    commands->ResourceBarrier({ _texture->GetResource()->GetUnorderedAccessBarrier() });
-    commands->Dispatch(32, 32, 6);
-    commands->ResourceBarrier({ commands->GetType() == D3D12_COMMAND_LIST_TYPE_COMPUTE ?
-        _texture->GetResource()->GetNonPixelShaderResourceBarrier() : _texture->GetResource()->GetSRVBarrier() });
-}
+
+
 
 void GDX12CloudComponent::ClearDenendencies()
 {
@@ -169,5 +134,4 @@ void GDX12CloudComponent::ClearDenendencies()
     _pipeline.Reset();
     _root.reset();
     _texture.reset();
-    _renderedRevision = 0;
 }

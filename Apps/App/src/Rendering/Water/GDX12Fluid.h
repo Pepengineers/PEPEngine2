@@ -52,7 +52,6 @@ struct GDX12FluidControls
 {
     bool Enabled;
     int Quality;
-    bool AsyncCompute = false;
 
 };
 GDX12FluidControls GetFluidControls();

@@ -2,34 +2,17 @@
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <stdexcept>
-#include "Engine.RendererDX12/RenderPasses/GDX12ParticlesPass.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12WBOITTransparencyPass.h"
-namespace Meta { class SceneLighting; class SceneWaterParticles; class SceneTransparency; }
+namespace Meta { class SceneLighting; class SceneTransparency; }
 
 class GDX12WBOITCompositionPass : public GDX12RenderPass
 {
 public:
-    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-    {
-        graph.SetName(_front ? "Conditional composition" : "Transparency composition");
-        graph.Read(SharedResource::Scene);
-        graph.ReadInputs(_inputs);
-        graph.Read(SharedResource::Environment);
-        if (_particles) graph.Read(SharedResource::Particles);
-        graph.Write(_outputs[0], "Composited HDR", Lifetime::Transient, GDX12RenderGraph::UnmanagedState, OUT_Result.get());
-        if (_front) graph.Fallback(_outputs[0], _inputs[0]);
-    }
 
-    void RefreshInputLinks()
-    {
-        IN_OpaqueScene = _inputs[0]; IN_TransparencyAccum = _inputs[1]; IN_Revealage = _inputs[2];
-    }
-    void SetParticles(GDX12ParticlesPass* particles) { _particles = particles; }
     void SetApplyOpaqueAerialPerspective(bool apply) { _applyOpaqueAerialPerspective = apply; }
-    void SetConditionalTransparency(GDX12WBOITTransparencyPass* transparency) { _front = transparency; }
 	GDX12WBOITCompositionPass(GDX12WBOITCompositionPass* reuse = nullptr,
         GDX12WBOITTransparencyPass* front = nullptr) : IN_OpaqueScene(nullptr), IN_TransparencyAccum(nullptr),
-		IN_Revealage(nullptr), _reuse(reuse), _front(front), _applyOpaqueAerialPerspective(front == nullptr)
+		IN_Revealage(nullptr), _reuse(reuse), _applyOpaqueAerialPerspective(front == nullptr)
 	{ 
 		_flags = RENDER_PASS_FLAG_NONE; 
 		_numInputs = 3;
@@ -95,54 +78,6 @@ public:
 		ThrowIfFailed(_resources->Device->GetDevice()->CreateGraphicsPipelineState(&PSODesc1, IID_PPV_ARGS(&_compositionPSO)));
 	}
 
-	void Execute(GDX12CommandList* cmdList) override
-	{
-        _link.Target = IN_OpaqueScene->GetTexture();
-        if (_front && !_front->Rendered()) return;
-        _link.Target = OUT_Result.get();
-		GDX12Texture* opaqueAccum = IN_OpaqueScene->GetTexture();
-		GDX12Texture* transparencyAccum = IN_TransparencyAccum->GetTexture();
-		GDX12Texture* transparencyRevealage = IN_Revealage->GetTexture();
-
-        {
-            GDX12_SCOPED_EVENT(cmdList, "Composition Render Pass", Colors::Bisque);
-            cmdList->SetViewport(OUT_Result->GetViewport());
-            cmdList->SetScissorRect(OUT_Result->GetScissorRect());
-            cmdList->SetGraphicsRootSignature(_compositionRS.get());
-            cmdList->SetPipelineState(_compositionPSO.Get());
-            cmdList->SetDescriptorHeaps({ _resources->SRV_UAV_Heap.get() });
-            cmdList->ResourceBarrier({ opaqueAccum->GetResource()->GetSRVBarrier(),
-            transparencyAccum->GetResource()->GetSRVBarrier(),
-            transparencyRevealage->GetResource()->GetSRVBarrier(),
-            OUT_Result->GetResource()->GetRenderTargetBarrier() });
-            cmdList->SetRenderTargets({ OUT_Result.get() }, nullptr);
-            cmdList->ClearRenderTargetView(OUT_Result.get());
-            auto& frame = _resources->FrameConstants[_resources->CurrFrameConstantsIndex];
-            const bool hasCamera = _commonData->ActiveCameraCBufferIndex < frame->CameraCB->GetElementCount();
-            if (_resources->Sky.Source == SkySource::SkyAtmosphere && (!hasCamera || _inputs.size() < 4))
-                throw std::invalid_argument("Aerial perspective composition requires active camera and opaque depth");
-            cmdList->SetGraphicsRootConstantBufferView(0, hasCamera ?
-                frame->CameraCB->GetElementAddress(_commonData->ActiveCameraCBufferIndex) : frame->SkyCB->GetElementAddress(0));
-            cmdList->SetGraphicsRootConstantBufferView(1, frame->SkyCB->GetElementAddress(0));
-            if (_inputs.size() > 3)
-            {
-                auto* depth = _inputs[3]->GetTexture();
-                cmdList->ResourceBarrier({ depth->GetResource()->GetSRVBarrier() });
-                cmdList->SetGraphicsSRV(3, depth->GetSRV()->GPUHandle);
-            }
-            else cmdList->SetGraphicsSRV(3, _resources->SkyTransmittanceSRV.GPUHandle);
-            cmdList->SetGraphicsSRV(4, _resources->SkyTransmittanceSRV.GPUHandle);
-            cmdList->SetGraphicsSRV(5, _resources->SkyAerialRadianceSRV.GPUHandle);
-            cmdList->SetGraphicsSRV(6, _resources->SkyAerialTransmittanceSRV.GPUHandle);
-            cmdList->SetGraphicsSRV(0, opaqueAccum->GetSRV()->GPUHandle);
-            cmdList->SetGraphicsSRV(1, transparencyAccum->GetSRV()->GPUHandle);
-            cmdList->SetGraphicsSRV(2, transparencyRevealage->GetSRV()->GPUHandle);
-            cmdList->GetCommandList()->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-            cmdList->GetCommandList()->DrawInstanced(3, 1, 0, 0);
-        }
-        if (_particles) _particles->Composite(cmdList, OUT_Result.get());
-	}
-
 	void Resize() override
 	{
         if (_reuse) return;
@@ -167,10 +102,8 @@ public:
 
 private:
     friend class Meta::SceneLighting;
-    friend class Meta::SceneWaterParticles;
     friend class Meta::SceneTransparency;
     bool _applyOpaqueAerialPerspective = true;
-    GDX12ParticlesPass* _particles = nullptr;
     struct Link final : IRenderPassLink
     {
         GDX12Texture* Target = nullptr;
@@ -178,7 +111,6 @@ private:
         bool IsInitialized() override { return Target && Target->IsInitialized(); }
     } _link;
     GDX12WBOITCompositionPass* _reuse;
-    GDX12WBOITTransparencyPass* _front;
 	ComPtr<ID3DBlob> _compositionVS;
 	ComPtr<ID3DBlob> _compositionPS;
 	std::unique_ptr<GDX12RootSignature> _compositionRS;

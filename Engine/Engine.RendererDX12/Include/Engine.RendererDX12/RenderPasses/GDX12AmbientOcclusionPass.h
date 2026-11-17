@@ -10,21 +10,10 @@ struct FFX_CACAO_D3D12Context;
 class GDX12AmbientOcclusionPass final : public GDX12RenderPass
 {
 public:
-    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-    {
-        graph.SetName("Ambient occlusion");
-        graph.AsyncCompute();
-        graph.Read(SharedResource::Scene);
-        graph.ReadInputs(_inputs, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        graph.Write(_outputs[0], "Ambient occlusion", Lifetime::Dynamic, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-    }
 
     GDX12AmbientOcclusionPass();
     ~GDX12AmbientOcclusionPass() override;
     void Initialize() override;
-    void Execute(GDX12CommandList* commands) override;
-    bool IsAsyncComputeEnabled() const override { return IsAmbientOcclusionAsyncComputeEnabled(); }
-    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override;
     void Resize() override;
     void ClearDenendencies() override;
 
@@ -57,10 +46,6 @@ private:
     void CreateTextures();
     void CreateGrid(WorkGrid& grid, UINT width, UINT height, bool half);
     void CreateTexture(GDX12Texture& texture, DXGI_FORMAT format, UINT width, UINT height, UINT mips = 1);
-    void Bind(GDX12CommandList* commands);
-    void Dispatch(GDX12CommandList* commands, Pipeline pipeline, UINT width, UINT height);
-    GDX12Texture& DrawCACAO(GDX12CommandList* commands, WorkGrid& grid, GDX12Texture& depth,
-        const GDX12AOSettings& settings, Matrix projection);
     void DestroyCACAO(WorkGrid& grid);
 
     GDX12Texture _output;
@@ -71,5 +56,4 @@ private:
     std::unique_ptr<GDX12UploadBuffer<XeGTAO::GTAOConstants>> _xeConstants;
     GDX12AOSettings _previous = {};
     bool _hasPrevious = false;
-    UINT _frameIndex = 0;
 };

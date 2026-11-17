@@ -30,19 +30,10 @@ public:
         std::vector<GDX12GrassInstance> grass, std::vector<GDX12WindInstance> wind, GDX12GrassWindControls controls,
         const std::vector<BistroInteractionSource>& sources = {}, float deltaSeconds = 0);
     GDX12ParticleInteractionField InteractionField() const;
-    void PrepareGPU(GDX12CommandList* commands);
     void PrepareView(const GDX12GeometryContext& view, UINT patch, GDX12Descriptor* materialOverride = nullptr, bool cullPatch = true);
-    bool Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch);
-    void GatherBatches(const GDX12GeometryContext& view, std::vector<GDX12RenderBatch>& batches) const;
-    std::vector<GDX12RenderGraph::BufferAccess> PreparationAccesses() const;
-    std::vector<GDX12RenderGraph::BufferAccess> ExpansionAccesses(const GDX12GeometryContext& view, UINT patch) const;
-    std::vector<GDX12RenderGraph::BufferAccess> DrawAccesses() const;
     UINT PatchCount() const { return static_cast<UINT>(_drawOrder.size()); }
     void PublishPrimitives(GDX12RenderPrimitiveRegistry&, const IRenderGeometrySource*);
     void RemovePrimitives(GDX12RenderPrimitiveRegistry&);
-    uint64_t GeometryAllocationBytes() const;
-    bool HasCasters() const;
-    const GDX12GrassWindControls& Controls() const { return _controls; }
 
 private:
     friend class Meta::SceneGrass;
@@ -178,7 +169,6 @@ private:
     Vector3 _previousEye = Vector3::Zero;
     Vector3 _eye = Vector3::Zero;
     bool _initialized = false;
-    const Output* _arenaOutput = nullptr;
     static constexpr UINT ParametersPerBuffer = 64;
     GDX12RenderPrimitiveRegistry* _primitiveRegistry = nullptr;
     std::vector<GDX12RenderPrimitiveHandle> _removedPrimitives;

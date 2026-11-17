@@ -293,8 +293,9 @@ int main(int argc, char** argv)
         const auto execute = [&]
         {
             resources.CurrFrameConstantsIndex = (resources.CurrFrameConstantsIndex + 1) % resources.FrameConstants.size();
+            pass.PrepareRecording();
             auto* commands = queue->GetCommandList();
-            pass.Execute(commands);
+            pass.RecordCommands(commands);
             queue->ExecuteCommandList(commands);
             queue->Flush();
             common.ResetHistory = false;
@@ -539,9 +540,10 @@ int main(int argc, char** argv)
                 double total = 0;
                 for (unsigned frame = 0; frame < 21; ++frame)
                 {
+                    pass.PrepareRecording();
                     auto* commands = queue->GetCommandList();
                     timer.Start(commands);
-                    pass.Execute(commands);
+                    pass.RecordCommands(commands);
                     timer.Stop(commands);
                     queue->ExecuteCommandList(commands);
                     timer.OnCommandListExecuted(commands->FenceValue);
@@ -563,16 +565,18 @@ int main(int argc, char** argv)
         xess.SetInputs({ &depth, pass.GetOutput(1), pass.GetOutput(0) });
         workload(common.DownscaledWidth, common.DownscaledHeight);
         xess.Initialize();
+        pass.PrepareRecording();
         auto* warmup = queue->GetCommandList();
-        pass.Execute(warmup);
+        pass.RecordCommands(warmup);
         xess.Execute(warmup);
         queue->ExecuteCommandList(warmup);
         queue->Flush();
         benchmark("before-XeSS");
         // Repeat a deterministic frame with reset to compare current-frame filter quality.
         common.ResetHistory = false;
+        pass.PrepareRecording();
         auto* commands = queue->GetCommandList();
-        pass.Execute(commands);
+        pass.RecordCommands(commands);
         common.ResetHistory = true;
         xess.Execute(commands);
         common.ResetHistory = false;
@@ -624,8 +628,9 @@ int main(int argc, char** argv)
                 common.ActiveCameraJitterOffsetX = jx;
                 common.ActiveCameraJitterOffsetY = jy;
                 common.ResetHistory = frame == 0;
+                pass.PrepareRecording();
                 auto* temporal = queue->GetCommandList();
-                pass.Execute(temporal);
+                pass.RecordCommands(temporal);
                 xess.Execute(temporal);
                 queue->ExecuteCommandList(temporal);
                 queue->Flush();
@@ -650,8 +655,9 @@ int main(int argc, char** argv)
         toneMap.Setup(&resources, &common);
         toneMap.SetInputs({ xess.GetOutput(0), &display });
         toneMap.Initialize();
+        pass.PrepareRecording();
         auto* finalFrame = queue->GetCommandList();
-        pass.Execute(finalFrame);
+        pass.RecordCommands(finalFrame);
         xess.Execute(finalFrame);
         toneMap.Execute(finalFrame);
         queue->ExecuteCommandList(finalFrame);
@@ -674,8 +680,9 @@ int main(int argc, char** argv)
             Set(L"Render.MotionBlur.Quality", frame % 2 ? "3" : "1");
             if (frame == 4) Set(L"Render.MotionBlur.MaxRadius", "1");
             if (frame == 6) Set(L"Render.MotionBlur.MaxRadius", "40");
+            pass.PrepareRecording();
             auto* queued = queue->GetCommandList();
-            pass.Execute(queued);
+            pass.RecordCommands(queued);
             queue->ExecuteCommandList(queued);
         }
         queue->Flush();

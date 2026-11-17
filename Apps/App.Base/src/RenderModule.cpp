@@ -19,24 +19,21 @@
 #include "Engine.Core/Logging/Logger.h"
 
 #include "Engine.RendererDX12/GDX12SwapChain.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12ReconstructionPass.h"
 #include "Engine.RendererDX12/GDX12StreamlineSDK.h"
 #include "Engine.RendererDX12/GDX12FrameGeneration.h"
 #include "Engine.RendererDX12/GDX12GPUTimer.h"
 #include "Engine.RendererDX12/GDX12ShadowCascades.h"
-#include "App.Base/Rendering/DefaultRenderPipeline.h"
 #include <limits>
 #include <cmath>
 #include "Common/ConsoleVariables.h"
 
-static AutoConsoleVariable<bool> GraphReuseTextures(L"Render.Graph.ReuseTextures", true,
-    L"Reuse compatible transient graph textures. Disable to compare output and memory.", EConsoleVariableFlags::Default);
 static AutoConsoleVariable<int> PrimaryAdapter(L"Render.PrimaryAdapter", 0,
     L"Primary adapter in the renderer hardware list. Startup only.", EConsoleVariableFlags::ReadOnly);
 RenderModule::GpuOwners::GpuOwners() = default;
 RenderModule::GpuOwners::~GpuOwners() = default;
 
-RenderModule::RenderModule(Window* window, GameTimer* timer)
-    : RenderModule(window, timer, std::make_unique<DefaultRenderPipeline>()) {}
+
 
 RenderModule::RenderModule(Window* window, GameTimer* timer, std::unique_ptr<IRenderPipeline> pipeline) :
     _timer(timer), _window(window),
@@ -52,13 +49,7 @@ RenderPipelineContext RenderModule::PipelineContext()
     return { *this, _primaryResources, _RPcommonData, _backBuffer.get() };
 }
 
-JobHandle RenderPipelineContext::PrepareScene()
-{
-    Runtime.CollectReflectionScene();
-    return Runtime._shadowVisibility.Schedule(*Common.Jobs, Primary.LocalLights,
-        *Primary.LocalShadowCasters, Primary.LocalShadowVisibility,
-        Primary.StaticMeshShadowCasters, Primary.StaticMeshShadowRevision);
-}
+
 
 void RenderPipelineContext::Resize() { Runtime.OnResize(); }
 
@@ -81,7 +72,6 @@ RenderModule::~RenderModule()
     }
     if (_uiInitialized) Engine::UI::ShutdownUI();
 
-    _primaryGraph.reset();
     _primaryResources.GeometrySources.clear();
     _pipeline.reset();
     _backBuffer.reset();
@@ -125,7 +115,6 @@ void RenderModule::Initialize()
     Log::Info("Renderer", "Configuring render passes and pipeline states");
     auto context = PipelineContext();
     _pipeline->Initialize(context);
-    if (!_pipeline->GetBindings().FrameGenerationInputs) _backBuffer->SetFrameGenerationSuspended(true);
     RefreshPipelineFlags();
     RebuildRenderGraph();
 
@@ -160,7 +149,7 @@ void RenderModule::QuarantineGpuOwners() noexcept
 void RenderModule::OnResize()
 {
     _RPcommonData.RequestHistoryReset = true;
-    if (_pipeline->OwnsExecution()) _pipeline->DrainExecution();
+    _pipeline->DrainExecution();
     _primaryDevice->GetCommandQueue()->Flush();
 
     uint16_t width, height;
@@ -170,12 +159,10 @@ void RenderModule::OnResize()
 
     _RPcommonData.WindowWidth = width;
     _RPcommonData.WindowHeight = height;
-    const bool rebuild = static_cast<bool>(_primaryGraph) || _pipeline->OwnsExecution();
-    _primaryGraph.reset();
     auto context = PipelineContext();
     _pipeline->Resize(context);
     RefreshPipelineFlags();
-    if (rebuild) RebuildRenderGraph();
+    RebuildRenderGraph();
 }
 
 bool RenderModule::OwnsMaterial(const GDX12Material* material) const
@@ -257,10 +244,8 @@ void RenderModule::WaitForUploads()
 
 void RenderModule::DrainFrameWork()
 {
-    if (_pipeline && _pipeline->OwnsExecution()) _pipeline->DrainExecution();
+    if (_pipeline) _pipeline->DrainExecution();
     WaitForUploads();
-    if (!_pipeline->OwnsExecution())
-        if (auto* compute = _primaryDevice->TryGetComputeQueue()) compute->Flush();
 }
 
 void RenderModule::ResetWorldHistory()
@@ -920,47 +905,15 @@ void RenderModule::OnRender()
     if (PrimaryPipelineHasFlag(RENDER_PASS_FLAG_USE_MATERIALS))
         _primaryResources.UpdateMaterialCB(_materials);
     CollectParticleEmitters();
-    auto primarycmdQueue = _primaryDevice->GetCommandQueue();
-    auto primarycmdList = primarycmdQueue->GetCommandList();
-    _primaryGPUTimer->Start(primarycmdList);
-    // Explicit owners freeze skin work and declare its resources in their plan.
-    // Legacy callers retain their existing pre-graph dispatch path.
-    if (!_pipeline->OwnsScenePreparation()) DispatchSkeletalMeshes(primarycmdList);
-    const bool rebuild = _pipeline->PrepareFrame(context, primarycmdList);
+    auto* commands = _primaryDevice->GetCommandQueue()->GetCommandList();
+    _primaryGPUTimer->Start(commands);
+    _pipeline->PrepareFrame(context);
     RefreshPipelineFlags();
-    if (rebuild || _graphReuseTextures != GraphReuseTextures.GetValue()) RebuildRenderGraph();
-
-    auto primaryCurrentFrameConsts = GetCurrentPrimaryFrameConstants();
-    const auto& bindings = _pipeline->GetBindings();
-    auto* compute = bindings.UseAsyncCompute ? _primaryDevice->TryGetComputeQueue() : nullptr;
-    uint64_t completion;
-    const auto finish = [&](GDX12CommandList* list) {
-        if (_uiInitialized && !_pipeline->OwnsScreenUI()) Engine::UI::Render(list, _backBuffer->GetCurrentBuffer());
-        _primaryGPUTimer->Stop(list);
-    };
-    if (_pipeline->OwnsExecution())
-        completion = _pipeline->ExecuteFrame(context, primarycmdList, finish);
-    else
-    {
-        if (bindings.Reconstruction) bindings.Reconstruction->PrepareRecording();
-        try
-        {
-            primarycmdList = _primaryGraph->Execute(primarycmdList, compute);
-            finish(primarycmdList);
-            primarycmdQueue->ExecuteCommandList(primarycmdList);
-            completion = primarycmdList->FenceValue;
-            if (bindings.Reconstruction) bindings.Reconstruction->Submitted();
-        }
-        catch (...)
-        {
-            if (bindings.Reconstruction) bindings.Reconstruction->CancelRecording();
-            throw;
-        }
-    }
+    const auto completion = _pipeline->ExecuteFrame(context, commands,
+        [&](GDX12CommandList* list) { _primaryGPUTimer->Stop(list); });
     ++_frameSubmission;
-    primaryCurrentFrameConsts->FenceValue = completion;
+    GetCurrentPrimaryFrameConstants()->FenceValue = completion;
     _primaryGPUTimer->OnCommandListExecuted(completion);
-
     _backBuffer->GetFrameGeneration().EndRendering();
     _backBuffer->Present();
 }
@@ -982,7 +935,7 @@ void RenderModule::CollectParticleEmitters()
             emitter.Id = component.GetId();
             emitter.ResetRevision = component.GetResetRevision();
             emitter.BurstTotal = component.GetBurstTotal();
-            emitter.Paused = component.IsPaused() || (world->IsPaused() && !_pipeline->AdvancesParticlesWhileWorldPaused());
+            emitter.Paused = component.IsPaused() || world->IsPaused();
             emitter.DeltaTime = _timer->DeltaTime() * world->GetTimeScale();
             emitter.World = Matrix::CreateScale(transform.Scale) * Matrix::CreateFromYawPitchRoll(
                 XMConvertToRadians(transform.Rotation.y), XMConvertToRadians(transform.Rotation.x),
@@ -1103,15 +1056,11 @@ void RenderModule::BeginFrame()
         if (auto* reconstruction = _pipeline->GetBindings().Reconstruction)
             Engine::UI::DrawReconstructionStatus(reconstruction->GetStatus(), _RPcommonData.DownscaledWidth,
                 _RPcommonData.DownscaledHeight, _RPcommonData.WindowWidth, _RPcommonData.WindowHeight);
-#ifdef _DEBUG
-        _pipeline->DrawDebugControls(*this);
-#endif
     }
     if (_backBuffer)
     {
-        if (_pipeline->GetBindings().FrameGenerationInputs)
-            _backBuffer->SetFrameGenerationSuspended(_renderingSuspended || !_pipeline->AllowsFrameGeneration());
-        if (_pipeline->OwnsExecution() && _backBuffer->NeedsPresentationReset()) _pipeline->DrainExecution();
+        _backBuffer->SetFrameGenerationSuspended(_renderingSuspended);
+        if (_backBuffer->NeedsPresentationReset()) _pipeline->DrainExecution();
         _backBuffer->BeginFrame(_RPcommonData);
     }
 }
@@ -1121,15 +1070,12 @@ void RenderModule::SetFrameGenerationSuspended(bool suspended)
     if (_renderingSuspended == suspended) return;
     _renderingSuspended = suspended;
     _RPcommonData.RequestHistoryReset = true;
-    if (_backBuffer && _pipeline->GetBindings().FrameGenerationInputs)
-        _backBuffer->SetFrameGenerationSuspended(suspended || !_pipeline->AllowsFrameGeneration());
+    if (_backBuffer) _backBuffer->SetFrameGenerationSuspended(suspended);
 }
 
 const GDX12FrameGenerationStatus& RenderModule::GetFrameGenerationStatus() const
 {
     if (!_backBuffer) throw std::logic_error("Render pipeline has not been initialized");
-    if (!_pipeline->GetBindings().FrameGenerationInputs)
-        throw std::logic_error("Render pipeline has no frame generation inputs");
     return _backBuffer->GetFrameGeneration().GetStatus();
 }
 
@@ -1154,28 +1100,12 @@ D3D12MA::Statistics RenderModule::GetMemoryStatistics() const
 void RenderModule::RebuildRenderGraph()
 {
     _primaryDevice->GetCommandQueue()->Flush();
-    _graphReuseTextures = GraphReuseTextures.GetValue();
-    if (_pipeline->OwnsExecution())
-    {
-        auto context = PipelineContext();
-        _pipeline->RebuildExecution(context);
-        _RPcommonData.RequestHistoryReset = true;
-        return;
-    }
-    auto graph = std::make_unique<GDX12RenderGraph>(_primaryDevice.get());
-    graph->ImportShared(GDX12RenderGraph::SharedResource::Scene, "Scene and frame buffers");
-    graph->ImportLink("Swapchain", _backBuffer.get());
-    _pipeline->BuildGraph(*graph, { _backBuffer.get() });
-    graph->Compile(_graphReuseTextures);
-    _primaryGraph = std::move(graph);
+    auto context = PipelineContext();
+    _pipeline->RebuildExecution(context);
     _RPcommonData.RequestHistoryReset = true;
 }
 
-const GDX12RenderGraph::Statistics& RenderModule::GetRenderGraphStatistics() const
-{
-    static const GDX12RenderGraph::Statistics empty{};
-    return _primaryGraph ? _primaryGraph->GetStatistics() : empty;
-}
+
 
 double RenderModule::GetGPUFrameTimeMS() const
 {
@@ -1184,6 +1114,5 @@ double RenderModule::GetGPUFrameTimeMS() const
 
 void RenderModule::WriteRenderGraph(std::ostream& output) const
 {
-    if (_pipeline->OwnsExecution()) _pipeline->WriteExecution(output);
-    else _primaryGraph->WriteDot(output);
+    _pipeline->WriteExecution(output);
 }
