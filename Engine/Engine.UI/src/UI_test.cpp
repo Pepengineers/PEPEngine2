@@ -15,7 +15,6 @@
 #include <imgui/backends/imgui_impl_dx12.h>
 #include <imgui/backends/imgui_impl_win32.h>
 #include <algorithm>
-#include <charconv>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>
@@ -33,27 +32,9 @@ namespace Engine::UI
         bool Visible = true;
         bool FrameBegun = false;
         bool ScreenFrameReady = false;
-        std::string InvalidVariable;
 #ifdef _DEBUG
         std::string LayoutPath;
 #endif
-
-        template <class T>
-        bool InputNumber(const char* label, ImGuiDataType type, std::string& value)
-        {
-            T number{};
-            const auto parsed = std::from_chars(value.data(), value.data() + value.size(), number);
-            if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size())
-                throw std::runtime_error("Cannot parse console variable for UI");
-            const char* format = std::is_floating_point_v<T> ? "%.9g" : nullptr;
-            if (!ImGui::InputScalar(label, type, &number, nullptr, nullptr, format))
-                return false;
-            char buffer[128];
-            const auto result = std::to_chars(buffer, buffer + sizeof(buffer), number);
-            if (result.ec != std::errc{}) throw std::runtime_error("Cannot format console variable from UI");
-            value.assign(buffer, result.ptr);
-            return true;
-        }
 
         void DrawPhysicsQuality(ConsoleModule& console)
         {
@@ -71,102 +52,155 @@ namespace Engine::UI
             ImGui::TextWrapped("Physics changes require restarting Bistro. Other techniques keep their settings.");
         }
 
+        struct SettingEditor
+        {
+            std::wstring Name;
+            std::string Draft, Current, Error;
+
+            void Select(const IConsoleVariable& variable)
+            {
+                Name = variable.GetName();
+                Draft = Current = variable.GetString();
+                Error.clear();
+            }
+
+            void Apply(IConsoleVariable& variable, std::string_view value)
+            {
+                if (!variable.IsValidString(value))
+                    Error = "Invalid value. Check the limits above.";
+                else if (!variable.SetConfigFromString(value))
+                    Error = "Could not save the value. See the engine log.";
+                else
+                    Select(variable);
+            }
+
+            void Draw(IConsoleVariable& variable)
+            {
+                const auto name = std::filesystem::path(Name).u8string();
+                const auto description = std::filesystem::path(variable.GetDescription()).u8string();
+                const auto active = variable.GetString();
+                if (Draft == Current) Draft = active;
+                Current = active;
+
+                ImGui::PushID(name.c_str());
+                ImGui::TextWrapped("%s", name.c_str());
+                if (!description.empty()) ImGui::TextWrapped("%s", description.c_str());
+                ImGui::Spacing();
+                if (variable.GetFlags() == EConsoleVariableFlags::ReadOnly)
+                {
+                    ImGui::TextDisabled("Locked during this run");
+                    ImGui::TextWrapped("Current value: %s", Current.c_str());
+                }
+                else if (variable.GetType() == EConsoleVariableType::Boolean)
+                {
+                    bool enabled = Current == "true";
+                    if (ImGui::Checkbox("Enabled", &enabled)) Apply(variable, enabled ? "true" : "false");
+                }
+                else if (variable.GetType() == EConsoleVariableType::Enumeration && variable.GetEnumCount() > 0)
+                {
+                    const int activeValue = variable.GetInt();
+                    const std::string preview(variable.GetEnumValueName(activeValue));
+                    ImGui::SetNextItemWidth(-1);
+                    if (ImGui::BeginCombo("##value", preview.c_str()))
+                    {
+                        const int first = variable.GetEnumFirstValue();
+                        for (int index = 0; index < variable.GetEnumCount(); ++index)
+                        {
+                            const int value = first + index;
+                            const std::string label(variable.GetEnumValueName(value));
+                            ImGui::PushID(value);
+                            if (ImGui::Selectable(label.c_str(), value == activeValue))
+                                Apply(variable, std::to_string(value));
+                            if (value == activeValue) ImGui::SetItemDefaultFocus();
+                            ImGui::PopID();
+                        }
+                        ImGui::EndCombo();
+                    }
+                }
+                else
+                {
+                    ImGui::SetNextItemWidth(-1);
+                    const auto format = variable.GetType() == EConsoleVariableType::FloatingPoint
+                        ? ImGuiInputTextFlags_CharsScientific : ImGuiInputTextFlags_CharsDecimal;
+                    const bool enter = ImGui::InputText("##value", &Draft,
+                        format | ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll);
+                    if (ImGui::IsItemEdited()) Error.clear();
+                    ImGui::BeginDisabled(Draft == Current);
+                    const bool apply = ImGui::Button("Apply");
+                    ImGui::SameLine();
+                    const bool reset = ImGui::Button("Revert edit");
+                    ImGui::EndDisabled();
+                    if (reset) Select(variable);
+                    else if ((enter || apply) && Draft != Current) Apply(variable, Draft);
+                }
+                if (!Error.empty())
+                    ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1), "%s", Error.c_str());
+                ImGui::PopID();
+            }
+        };
+
         void DrawSettings()
         {
             if (!Visible) return;
             ImGui::SetNextWindowPos(ImVec2(16, 16), ImGuiCond_FirstUseEver);
-            ImGui::SetNextWindowSize(ImVec2(540, 650), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(720, 580), ImGuiCond_FirstUseEver);
             if (ImGui::Begin("Settings (F1)", &Visible))
             {
-                ImGui::TextWrapped("Changes are saved to Config/Engine.ini automatically. Hover a setting for its description and limits.");
-                ImGui::TextWrapped("Readonly settings apply after restart. Other changes apply live. F1 hides/shows the debug panels.");
+                ImGui::TextWrapped("For changes across Bistro launches, edit Configs/Startup.ini.");
                 static ImGuiTextFilter filter;
                 filter.Draw("Search", -90);
                 static SettingsCache settings;
+                static SettingEditor editor;
                 ConsoleModule console;
                 uint64_t revision;
                 const auto variables = console.GetConsoleVariables({}, &revision);
                 settings.Update(variables, revision, filter);
+
                 const auto drawGroup = [&](auto&& self, const SettingsCache::Group& group) -> void
                 {
                     for (const auto& setting : group.Variables)
                     {
                         if (console.GetConsoleVariableRevision() != revision) break;
-                        auto* variable = variables.at(setting.VariableIndex);
-                        const auto& name = setting.Name;
-                        const auto& label = setting.Label;
-                        auto value = variable->GetConfigString();
-                        bool changed = false;
-                        const bool readOnly = variable->GetFlags() == EConsoleVariableFlags::ReadOnly;
-                        ImGui::PushID(name.c_str());
-                        ImGui::SetNextItemWidth(210);
-                        if (variable->GetType() == EConsoleVariableType::Boolean)
-                        {
-                            bool enabled = value == "true";
-                            changed = ImGui::Checkbox(label.c_str(), &enabled);
-                            value = enabled ? "1" : "0";
-                        }
-                        else if (variable->GetType() == EConsoleVariableType::Enumeration && variable->GetEnumCount() > 0)
-                        {
-                            const auto currentValue = std::stoi(value);
-                            const std::string preview(variable->GetEnumValueName(currentValue));
-                            if (ImGui::BeginCombo(label.c_str(), preview.c_str()))
-                            {
-                                for (int index = 0; index < variable->GetEnumCount(); ++index)
-                                {
-                                    const auto itemValue = variable->GetEnumFirstValue() + index;
-                                    const std::string item(variable->GetEnumValueName(itemValue));
-                                    const bool selected = itemValue == currentValue;
-                                    ImGui::PushID(itemValue);
-                                    if (ImGui::Selectable(item.c_str(), selected))
-                                    { value = std::to_string(itemValue); changed = true; }
-                                    if (selected) ImGui::SetItemDefaultFocus();
-                                    ImGui::PopID();
-                                }
-                                ImGui::EndCombo();
-                            }
-                        }
-                        else if (variable->GetType() == EConsoleVariableType::FloatingPoint)
-                            changed = InputNumber<double>(label.c_str(), ImGuiDataType_Double, value);
-                        else if (variable->GetType() == EConsoleVariableType::UnsignedInteger)
-                            changed = InputNumber<uint64_t>(label.c_str(), ImGuiDataType_U64, value);
-                        else if (variable->GetType() == EConsoleVariableType::Integer)
-                            changed = InputNumber<int64_t>(label.c_str(), ImGuiDataType_S64, value);
-                        else changed = ImGui::InputText(label.c_str(), &value, ImGuiInputTextFlags_EnterReturnsTrue);
-                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                        {
-                            ImGui::BeginTooltip();
-                            ImGui::TextUnformatted(name.c_str());
-                            ImGui::TextUnformatted(setting.Description.c_str());
-                            if (readOnly)
-                            {
-                                ImGui::TextUnformatted("Readonly: changes are saved now and apply only after restarting the application.");
-                                ImGui::Text("Active value: %s", variable->GetString().c_str());
-                            }
-                            ImGui::EndTooltip();
-                        }
-                        if (changed)
-                            InvalidVariable = variable->SetConfigFromString(value) ? std::string{} : name;
-                        if (InvalidVariable == name)
-                            ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1), "Invalid value or INI save failed; previous value retained. See tooltip and log.");
-                        if (readOnly) { ImGui::SameLine(); ImGui::TextDisabled("(readonly)"); }
-                        if (name == "App.Physics.Quality") DrawPhysicsQuality(console);
+                        auto& variable = *variables.at(setting.VariableIndex);
+                        ImGui::PushID(setting.Name.c_str());
+                        if (ImGui::Selectable(setting.Label.c_str(), variable.GetName() == editor.Name))
+                            editor.Select(variable);
+                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", setting.Name.c_str());
                         ImGui::PopID();
                     }
                     for (const auto& [name, child] : group.Children)
                     {
                         if (filter.IsActive()) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
-                        if (ImGui::TreeNodeEx(name.c_str(), ImGuiTreeNodeFlags_DefaultOpen |
-                            ImGuiTreeNodeFlags_Framed | ImGuiTreeNodeFlags_SpanAvailWidth))
+                        if (ImGui::TreeNodeEx(name.c_str(), ImGuiTreeNodeFlags_SpanAvailWidth))
                         {
                             self(self, child);
                             ImGui::TreePop();
                         }
                     }
                 };
-                ImGui::PushID(filter.IsActive() ? "FilteredSettings" : "SettingsTree");
-                drawGroup(drawGroup, settings.Root());
-                ImGui::PopID();
+                if (ImGui::BeginChild("Variables", ImVec2(ImGui::GetContentRegionAvail().x * 0.42f, 0),
+                    ImGuiChildFlags_Borders))
+                {
+                    ImGui::PushID(filter.IsActive() ? "FilteredSettings" : "SettingsTree");
+                    const auto& root = settings.Root();
+                    if (root.Children.empty() && root.Variables.empty()) ImGui::TextDisabled("No matching settings");
+                    drawGroup(drawGroup, root);
+                    ImGui::PopID();
+                }
+                ImGui::EndChild();
+                ImGui::SameLine();
+                if (ImGui::BeginChild("Editor", ImVec2(0, 0), ImGuiChildFlags_Borders))
+                {
+                    IConsoleVariable* variable = nullptr;
+                    if (!editor.Name.empty() && console.TryFindConsoleVariable(editor.Name, variable))
+                    {
+                        editor.Draw(*variable);
+                        if (editor.Name == L"App.Physics.Quality") DrawPhysicsQuality(console);
+                    }
+                    else
+                        ImGui::TextDisabled("Select a setting to edit");
+                }
+                ImGui::EndChild();
             }
             ImGui::End();
         }
@@ -581,7 +615,6 @@ namespace Engine::UI
         io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
         ImGui::StyleColorsDark();
         Visible = true;
-        InvalidVariable.clear();
         try
         {
             if (!ImGui_ImplWin32_Init(window)) throw std::runtime_error("Cannot initialize ImGui Win32 backend");
@@ -720,7 +753,9 @@ namespace Engine::UI
         ConsoleModule console;
         const auto& provider = console.FindConsoleVariable(L"Render.Upscaler.Provider");
         const auto& quality = console.FindConsoleVariable(L"Render.Upscaler.Quality");
-        ImGui::SetNextWindowPos(ImVec2(570, 16), ImGuiCond_FirstUseEver);
+        const auto* viewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(ImVec2(viewport->WorkPos.x + viewport->WorkSize.x - 16, viewport->WorkPos.y + 16),
+            ImGuiCond_FirstUseEver, ImVec2(1, 0));
         if (ImGui::Begin("Reconstruction"))
         {
             const std::string requested(provider.GetEnumValueName(static_cast<int>(status.Requested.Provider)));

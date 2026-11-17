@@ -15,8 +15,8 @@ namespace
         L"Frustum light grid logarithmic depth slices; restart required.", EConsoleVariableFlags::ReadOnly,
         [](const UINT value) { return value >= 1 && value <= 128; });
     AutoConsoleVariable<float> FarDepth(L"Render.Lighting.Cluster.FarDepthCm", 100000.0f,
-        L"Logarithmic grid depth in cm; the last slice also covers farther visible geometry. Restart required.",
-        EConsoleVariableFlags::ReadOnly,
+        L"Logarithmic grid depth in cm (1..1e9). The last slice also covers farther visible geometry.",
+        EConsoleVariableFlags::Default,
         [](const float value) { return std::isfinite(value) && value >= 1 && value <= 1e9f; });
 }
 
