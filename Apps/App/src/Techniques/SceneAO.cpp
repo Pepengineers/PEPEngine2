@@ -1,4 +1,5 @@
 #include "SceneAO.h"
+#include "Common/ConsoleVariables.h"
 #include "../../../../External/External.Libraries/XeGTAO/XeGTAO.h"
 #define FFX_CACAO_ENABLE_D3D12
 #include "../../../../External/External.Libraries/cacao/inc/ffx_cacao_impl.h"
@@ -7,6 +8,10 @@ namespace BistroRender
 {
 namespace
 {
+AutoConsoleVariable<bool> AsyncAO(L"App.Async.AO", false,
+                                  L"Run ambient occlusion passes on the local COMPUTE queue.",
+                                  EConsoleVariableFlags::Default);
+
 void CheckCACAO(FFX_CACAO_Status result)
 {
     if (result != FFX_CACAO_STATUS_OK)
@@ -153,6 +158,7 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
     };
     const UINT slot = _resources.CurrFrameConstantsIndex;
     auto* root = p._root.get();
+    const Queue target = AsyncAO.GetValue() ? Queue::Compute : Queue::Direct;
     auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
     const auto camera = _resources.FrameConstants[slot]->CameraCB->GetElementAddress(_common.ActiveCameraCBufferIndex),
                constants = p._constants->GetElementAddress(slot), xe = p._xeConstants->GetElementAddress(slot);
@@ -194,7 +200,7 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
                 if (writes[i].ptr)
                     cmd->SetComputeRootDescriptorTable(root->GetURootParamIndex(i), writes[i]);
             cmd->Dispatch((width + 7) / 8, (height + 7) / 8, 1);
-        });
+        }, {}, target);
     };
     if (!_settings.IsActive() || (_width == 1 && _height == 1))
     {
@@ -244,10 +250,12 @@ void SceneAO::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
                    access(visibility, Mode::Write, UnorderedAccess)},
                   [context, proj, identity, output](auto* cmd) {
                       CheckCACAO(FFX_CACAO_D3D12Draw(context, cmd, &proj, &identity));
+                      const auto outputState = cmd->GetType() == D3D12_COMMAND_LIST_TYPE_COMPUTE
+                          ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE : D3D12_RESOURCE_STATE_GENERIC_READ;
                       const auto barrier = CD3DX12_RESOURCE_BARRIER::Transition(
-                          output, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                          output, outputState, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                       cmd->ResourceBarrier(1, &barrier);
-                  });
+                  }, {}, target);
     }
     else if (_settings.Implementation == 2)
     {

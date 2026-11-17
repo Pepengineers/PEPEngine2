@@ -1,10 +1,18 @@
 #include "SceneWater.h"
+#include "Common/ConsoleVariables.h"
 #include "Engine.Core/BenchmarkEngine.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 
 namespace BistroRender
 {
+namespace
+{
+AutoConsoleVariable<bool> AsyncWater(L"App.Async.Water", false,
+                                     L"Run the SPH water simulation on the local COMPUTE queue.",
+                                     EConsoleVariableFlags::Default);
+}
+
 SceneWater::SceneWater(GDX12DeviceResources& resources, RenderPipelineCommonData& common)
     : _collector(BenchmarkEngine::GetLocator().GetModule<SceneManagerModule>()), _surface(resources, common)
 {
@@ -19,7 +27,7 @@ void SceneWater::Prepare(float delta)
 }
 void SceneWater::Packet(Graph& graph, std::vector<ID3D12Resource*>& bindings, const char* name,
                         const std::vector<GDX12ResourceAccess>& resources,
-                        std::function<void(GDX12CommandList*)> record)
+                        std::function<void(GDX12CommandList*)> record, Queue target)
 {
 	std::vector<Access> accesses;
 	for (const auto& resource : resources)
@@ -55,7 +63,7 @@ void SceneWater::Packet(Graph& graph, std::vector<ID3D12Resource*>& bindings, co
 		}
 	}
 	_work.AddOwned(graph, name, std::move(accesses), bindings, std::move(record),
-	               "Water recording cannot submit private queue signals");
+	               "Water recording cannot submit private queue signals", {}, target);
 }
 void SceneWater::AppendSurface(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* opaqueDepth,
                                GDX12Texture* opaqueMotion)
@@ -76,7 +84,8 @@ void SceneWater::AppendSurface(Graph& graph, std::vector<ID3D12Resource*>& bindi
 	if (_surface.NeedsSimulation())
 	{
 		Packet(graph, bindings, "water seed / SPH hash-sort-density-integrate", _surface.GetSimulationBufferAccesses(),
-		       [this](auto* commands) { _surface.ExecuteSimulation(commands); });
+		       [this](auto* commands) { _surface.ExecuteSimulation(commands); },
+		       AsyncWater.GetValue() ? Queue::Compute : Queue::Direct);
 	}
 }
 void SceneWater::AppendDraw(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* hdr,
