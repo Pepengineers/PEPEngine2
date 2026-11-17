@@ -9,6 +9,13 @@ class GDX12Texture;
 
 namespace GDX12RenderHelpers
 {
+    constexpr UINT MipCount(UINT size)
+    {
+        UINT count = 1;
+        for (; size > 1; size >>= 1) ++count;
+        return count;
+    }
+
     void InitializeRenderTarget(GDX12Texture& texture, GDX12DeviceResources& resources,
         UINT width, UINT height, DXGI_FORMAT format, XMFLOAT4 clear = { 0, 0, 0, 1 });
     void InitializeComputeTexture(GDX12Texture& texture, GDX12DeviceResources& resources,

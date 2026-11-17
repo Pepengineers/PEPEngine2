@@ -10,6 +10,8 @@
 namespace BistroRender
 {
 constexpr UINT SceneDescriptorStart = TextureCube_StartIndex + TextureCube_RangeLength;
+inline constexpr char GBufferOperationName[] = "scene GBuffer ExecuteIndirect";
+inline constexpr char ProbeColorOperationName[] = "probe HDR capture mesh/sky";
 // Native work descriptions are completed on the owner before Executor::Execute.
 // All resources have a single physical binding, including aliases via texture views.
 struct NativeWork

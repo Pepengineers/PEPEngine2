@@ -367,8 +367,7 @@ void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bind
 		// Opaque posters are sampled by GBuffer/probe color shaders, not masked depth or glass.
 		for (Id id = 0; id < consumers; ++id)
 		{
-			if (graph.Operations[id].Name == "scene GBuffer ExecuteIndirect" ||
-			    graph.Operations[id].Name == "probe HDR capture mesh/sky")
+			if (graph.Operations[id].Name == GBufferOperationName || graph.Operations[id].Name == ProbeColorOperationName)
 			{
 				graph.Operations[id].Accesses.push_back(
 				    {targetId, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
