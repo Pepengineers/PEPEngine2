@@ -22,6 +22,7 @@ class SceneEnvironment
         _environment.Resize();
     }
     void Append(Graph&, std::vector<ID3D12Resource*>&);
+    bool AsyncComputeEnabled() const;
     bool Record(Id, ID3D12GraphicsCommandList*) const;
     void Submitted(uint64_t fence);
     void SetRetirement(std::function<void()> retire) { _environment.SetResourceRetirement(std::move(retire)); }
@@ -38,6 +39,7 @@ class SceneEnvironment
         std::string Name;
         std::vector<std::pair<GDX12Resource*, Access>> Accesses;
         std::function<void(ID3D12GraphicsCommandList*)> Record;
+        bool Compute = false;
     };
     void Build();
     GDX12DeviceResources& _resources;

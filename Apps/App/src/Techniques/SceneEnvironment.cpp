@@ -1,4 +1,5 @@
 #include "SceneEnvironment.h"
+#include "Common/ConsoleVariables.h"
 #include "NativeWork.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <algorithm>
@@ -11,6 +12,9 @@ namespace BistroRender
 namespace
 {
 constexpr State Read = D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE;
+AutoConsoleVariable<bool> AsyncEnvironment(L"App.Async.Environment", false,
+                                           L"Run atmosphere, clouds and environment IBL kernels on the local COMPUTE queue.",
+                                           EConsoleVariableFlags::Default);
 }
 SceneEnvironment::SceneEnvironment(GDX12DeviceResources& r, RenderPipelineCommonData& c) : _resources(r), _common(c)
 {
@@ -288,13 +292,13 @@ void SceneEnvironment::Build()
 	}
 	auto* heap = r.SRV_UAV_Heap->GetHeap().Get();
 	const auto add = [&](const std::string& name, std::vector<std::pair<GDX12Resource*, Access>> accesses,
-	                     std::function<void(ID3D12GraphicsCommandList*)> record)
+	                     std::function<void(ID3D12GraphicsCommandList*)> record, bool compute = true)
 	{
 		_work.push_back({name, std::move(accesses), [heap, record](auto* cmd)
 		                 {
 			                 cmd->SetDescriptorHeaps(1, &heap);
 			                 record(cmd);
-		                 }});
+		                 }, compute});
 	};
 	const auto access = [](GDX12Texture* t, Mode mode, State required)
 	{ return std::make_pair(static_cast<GDX12Resource*>(t->GetResource()), Access{Invalid, mode, required}); };
@@ -481,7 +485,7 @@ void SceneEnvironment::Build()
 					    const CD3DX12_TEXTURE_COPY_LOCATION dst(target->D3DResource.Get(), face);
 					    cmd->CopyTextureRegion(&dst, 0, 0, 0, &src, nullptr);
 				    }
-			    });
+			    }, false);
 		}
 	}
 	if (!e._brdfReady)
@@ -532,6 +536,10 @@ void SceneEnvironment::Build()
 	e._source = state.Source;
 	e._invalidated = false;
 }
+bool SceneEnvironment::AsyncComputeEnabled() const
+{
+	return AsyncEnvironment.GetValue();
+}
 void SceneEnvironment::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
 	if (graph.Resources.size() != bindings.size())
@@ -539,11 +547,20 @@ void SceneEnvironment::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
 		throw std::logic_error("Environment binding mismatch");
 	}
 	_operations.clear();
+	const bool async = AsyncComputeEnabled();
 	for (const auto& work : _work)
 	{
 		Operation operation{work.Name};
+		if (async && work.Compute)
+		{
+			operation.Target = Queue::Compute;
+		}
 		for (auto [resource, access] : work.Accesses)
 		{
+			if (operation.Target == Queue::Compute && access.Required == Read)
+			{
+				access.Required = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+			}
 			auto* native = resource->D3DResource.Get();
 			const auto found = std::find(bindings.begin(), bindings.end(), native);
 			access.Resource = Id(found - bindings.begin());
