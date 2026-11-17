@@ -19,7 +19,7 @@ class SceneWater
 
   private:
 	void Packet(Graph&, std::vector<ID3D12Resource*>&, const char*, const std::vector<GDX12ResourceAccess>&,
-	            std::function<void(GDX12CommandList*)>);
+	            std::function<void(GDX12CommandList*)>, Queue target = Queue::Direct);
 	BistroWaterRendering _collector;
 	std::vector<GDX12FluidInstance> _instances;
 	GDX12FluidParticlePass _surface;
