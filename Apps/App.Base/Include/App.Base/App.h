@@ -97,7 +97,7 @@ protected:
     bool InitWindowClass();
     bool LoadStartScene();
     bool InitMainWindow();
-    bool AddModules() override;
+    bool AddModules() override = 0;
     void Update(const GameTimer& gameTimer) override;
 
     void UpdatePhysics(World& world, float dt);

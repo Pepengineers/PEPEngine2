@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <ClInclude Include="Include\Engine.RendererDX12\GDX12ResourceAccess.h" />
     <Filter Include="Source Files">
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
       <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
@@ -93,12 +94,6 @@
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12RenderPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12FrameGenerationPass.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GPUCullingPass.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12WBOITCompositionPass.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -107,9 +102,6 @@
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12DeferredLightingPass.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12LightGrid.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12OpaquePass.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\IRenderPassLink.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -249,11 +241,7 @@
     <ClCompile Include="..\..\External\External.Libraries\D3D12MemoryAllocator\src\D3D12MemAlloc.cpp"><Filter>Source Files</Filter></ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGraph.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGeometrySource.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12RenderGeometry.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GeometryViewPass.h"><Filter>Header Files</Filter></ClInclude>
-    <ClInclude Include="Include\Engine.RendererDX12\RenderPasses\GDX12GeometryBatchPass.h"><Filter>Header Files</Filter></ClInclude>
-    <ClCompile Include="src\GDX12RenderGraph.cpp"><Filter>Source Files</Filter></ClCompile>
   </ItemGroup>
 </Project>

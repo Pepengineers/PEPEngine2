@@ -130,6 +130,7 @@ class WaveTestApp final : public App
 {
 public:
     WaveTestApp() : App(nullptr) {}
+    bool AddModules() override { return true; }
     using App::UpdatePhysics;
     void UseConfiguredSystems(bool enabled) { _AppConfig.StartScene = enabled ? "test" : ""; }
 };

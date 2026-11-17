@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="src\App.cpp" />
+    <ClCompile Include="src\Rendering\Grass\GDX12GrassRenderer.cpp" />
+    <ClCompile Include="src\Rendering\Grass\GDX12GrassWind.cpp" />
+    <ClCompile Include="src\Rendering\Grass\BistroGrassGeometry.cpp" />
+    <ClCompile Include="src\BistroApplication.cpp" />
+    <ClCompile Include="src\Graph\MetaGraphCompiler.cpp" />
+    <ClCompile Include="src\Graph\MetaGraphExecutor.cpp" />
+    <ClCompile Include="src\Graph\QueueSubmission.cpp" />
+
+    <ClInclude Include="src\Graph\QueueSubmission.h" />
+
+    <ClCompile Include="src\Graph\MetaGraphRecorder.cpp" />
+    <ClCompile Include="src\Techniques\SceneGeometry.cpp" />
+    <ClCompile Include="src\Techniques\SceneEnvironment.cpp" />
+    <ClCompile Include="src\Techniques\SceneAO.cpp" />
+    <ClCompile Include="src\Techniques\SceneReflections.cpp" />
+    <ClCompile Include="src\Techniques\SceneProbePreview.cpp" />
+    <ClCompile Include="src\Techniques\SceneLighting.cpp" />
+    <ClCompile Include="src\Techniques\SceneTransparency.cpp" />
+    <ClCompile Include="src\Techniques\SceneParticles.cpp" />
+    <ClCompile Include="src\Techniques\SceneWater.cpp" />
+
+    <ClCompile Include="src\Rendering\Water\GDX12Fluid.cpp" />
+    <ClCompile Include="src\Rendering\Water\GDX12FluidPass.cpp" />
+
+    <ClCompile Include="src\Rendering\Water\BistroWaterRendering.cpp" />
+    <ClInclude Include="src\Techniques\SceneWater.h" />
+    <ClCompile Include="src\Techniques\SceneSunShadows.cpp" />
+    <ClCompile Include="src\Techniques\SceneLocalShadows.cpp" />
+    <ClCompile Include="src\Techniques\SceneGrass.cpp" />
+    <ClCompile Include="src\Rendering\BistroRenderPipeline.cpp" />
+    <ClCompile Include="src\Techniques\ScenePostUI.cpp" />
+    <ClCompile Include="src\Techniques\SceneCloudPicture.cpp" />
+    <ClCompile Include="src\Techniques\CloudPictureTexture.cpp" />
+    <ClInclude Include="src\Techniques\SceneCloudPicture.h" />
+    <ClInclude Include="src\Techniques\CloudPictureTexture.h" />
+    <ClCompile Include="src\Rendering\UI\BistroUIPosters.cpp" />
+    <ClInclude Include="src\Rendering\UI\BistroPaintingSurfaces.h" />
+    <ClInclude Include="src\BistroApplication.h" />
+    <ClInclude Include="src\Techniques\NativeWork.h" />
+    <ClInclude Include="src\Techniques\SceneEnvironment.h" />
+    <ClInclude Include="src\Techniques\SceneAO.h" />
+    <ClInclude Include="src\Techniques\SceneReflections.h" />
+    <ClInclude Include="src\Techniques\SceneProbePreview.h" />
+    <ClInclude Include="src\Techniques\SceneLighting.h" />
+    <ClInclude Include="src\Techniques\SceneTransparency.h" />
+    <ClInclude Include="src\Techniques\SceneParticles.h" />
+    <ClInclude Include="src\Techniques\ScenePostUI.h" />
+    <None Include="Configs\Startup.ini" />
+  </ItemGroup>
+</Project>

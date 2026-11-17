@@ -53,7 +53,6 @@ struct GDX12GrassWindControls
     int GrassQuality = 2;
     bool WindEnabled = true;
     int WindQuality = 2;
-    bool AsyncCompute = false;
 };
 GDX12GrassWindControls GetGrassWindControls();
 GDX12GrassSettings ResolveGrassSettings(const GDX12GrassSettings& author, int quality);

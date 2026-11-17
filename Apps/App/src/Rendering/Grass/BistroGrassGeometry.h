@@ -1,6 +1,7 @@
 #pragma once
+#include "Components/BistroInteractionSource.h"
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
-#include "Rendering/Grass/GDX12GrassRenderer.h"
+#include "Rendering/Grass/GDX12GrassWind.h"
 #include "Components/BistroGrassComponents.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include <map>
@@ -14,21 +15,9 @@ public:
     BistroGrassGeometry(std::shared_ptr<SceneManagerModule> scenes, RenderModule& renderer);
     ~BistroGrassGeometry() override;
     void CollectScene(float deltaSeconds, bool advanceWhilePaused = false);
-    void PrepareFrame(GDX12DeviceResources&, const RenderPipelineCommonData&);
-    void PrepareGPU(GDX12CommandList* commands);
-    void PrepareView(const GDX12GeometryContext&, UINT patch);
-    bool Expand(GDX12CommandList*, const GDX12GeometryContext&, UINT patch);
-    void GatherBatches(const GDX12GeometryContext&, std::vector<GDX12RenderBatch>&) const override;
-    std::vector<GDX12RenderGraph::BufferAccess> GetGeometryBufferAccesses(GDX12GeometryStage) const override;
-    std::vector<GDX12RenderGraph::BufferAccess> PreparationAccesses() const;
-    std::vector<GDX12RenderGraph::BufferAccess> ExpansionAccesses(const GDX12GeometryContext&, UINT patch) const;
-    GDX12ParticleInteractionField InteractionField() const { return _gpu ? _gpu->InteractionField() : GDX12ParticleInteractionField{}; }
-    UINT PatchCount() const { return _gpu ? _gpu->PatchCount() : 0; }
-    uint64_t GeometryAllocationBytes() const { return _gpu ? _gpu->GeometryAllocationBytes() : 0; }
 
 private:
     friend class Meta::SceneGrass;
-    friend class BistroRenderGraphTests;
     void Subscribe(World& world);
     void Unsubscribe(World& world);
     struct Subscriptions { ListenerHandle GrassCreated, GrassUpdated, WindCreated, WindUpdated; };
@@ -42,5 +31,4 @@ private:
     GDX12GrassWindControls _controls = {};
     std::vector<BistroInteractionSource> _sources;
     float _deltaSeconds = 0;
-    std::unique_ptr<GDX12GrassRenderer> _gpu;
 };

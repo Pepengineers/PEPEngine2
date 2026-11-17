@@ -78,12 +78,6 @@ void GDX12MotionBlurPass::ResizeTiles(const UINT tileSize)
     _tileSize = tileSize;
 }
 
-void GDX12MotionBlurPass::Execute(GDX12CommandList* commands)
-{
-    PrepareRecording();
-    RecordCommands(commands);
-}
-
 bool GDX12MotionBlurPass::NeedsTileResize() const
 {
     if (_inputs.empty() || !_inputs[0] || !_tileMax->IsInitialized()) return false;

@@ -116,32 +116,3 @@ void BistroGrassGeometry::CollectScene(float deltaSeconds, bool advanceWhilePaus
     }
     _controls = controls;
 }
-
-void BistroGrassGeometry::PrepareFrame(GDX12DeviceResources& resources, const RenderPipelineCommonData& common)
-{
-    if (!_gpu) _gpu = std::make_unique<GDX12GrassRenderer>(&resources);
-    if (!_gpu) return;
-    _gpu->BeginFrame(common, _grass, _wind, _controls, _sources, _deltaSeconds);
-    _gpu->PublishPrimitives(resources.Primitives, this);
-}
-
-void BistroGrassGeometry::PrepareGPU(GDX12CommandList* commands)
-{ if (_gpu) _gpu->PrepareGPU(commands); }
-
-void BistroGrassGeometry::PrepareView(const GDX12GeometryContext& view, UINT patch)
-{ if (_gpu) _gpu->PrepareView(view, patch); }
-
-bool BistroGrassGeometry::Expand(GDX12CommandList* commands, const GDX12GeometryContext& view, UINT patch)
-{ return _gpu && _gpu->Expand(commands, view, patch); }
-
-void BistroGrassGeometry::GatherBatches(const GDX12GeometryContext& view, std::vector<GDX12RenderBatch>& batches) const
-{ if (_gpu) _gpu->GatherBatches(view, batches); }
-
-std::vector<GDX12RenderGraph::BufferAccess> BistroGrassGeometry::GetGeometryBufferAccesses(GDX12GeometryStage) const
-{ return _gpu ? _gpu->DrawAccesses() : std::vector<GDX12RenderGraph::BufferAccess>{}; }
-
-std::vector<GDX12RenderGraph::BufferAccess> BistroGrassGeometry::PreparationAccesses() const
-{ return _gpu ? _gpu->PreparationAccesses() : std::vector<GDX12RenderGraph::BufferAccess>{}; }
-
-std::vector<GDX12RenderGraph::BufferAccess> BistroGrassGeometry::ExpansionAccesses(const GDX12GeometryContext& view, UINT patch) const
-{ return _gpu ? _gpu->ExpansionAccesses(view, patch) : std::vector<GDX12RenderGraph::BufferAccess>{}; }

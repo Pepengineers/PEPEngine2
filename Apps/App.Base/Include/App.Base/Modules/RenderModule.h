@@ -8,7 +8,7 @@
 #include "Engine.Core/ECS/Event.h"
 #include "Engine.RendererDX12/GDX12Skinning.h"
 #include "Engine.RendererDX12/GDX12Reconstruction.h"
-#include "Engine.RendererDX12/GDX12RenderGraph.h"
+#include "Engine.RendererDX12/GDX12ResourceAccess.h"
 #include "App.Base/Rendering/IRenderPipeline.h"
 #include "App.Base/Systems/ShadowVisibilitySystem.h"
 #include <map>
@@ -45,7 +45,6 @@ struct TransformCompGPUData
 class RenderModule final : public Module
 {
 public:
-    RenderModule(Window* window, GameTimer* timer);
     RenderModule(Window* window, GameTimer* timer, std::unique_ptr<IRenderPipeline> pipeline);
     ~RenderModule() override;
 
@@ -78,7 +77,6 @@ public:
     double GetPrimaryGPUTimeMS();
     GDX12GPUTimingTotals GetPrimaryGPUTimingTotals();
     double GetSkeletalPreparationTimeMS() const { return _skeletalPreparationTimeMS; }
-    const GDX12RenderGraph::Statistics& GetRenderGraphStatistics() const;
     double GetGPUFrameTimeMS() const;
     void WriteRenderGraph(std::ostream& output) const;
     void BeginTextureUploadBatch(std::uint64_t budgetBytes);
@@ -192,7 +190,6 @@ private:
     void PrepareSkeletalMeshes();
     void UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshRenderComponent& component,
         SkeletalState& state, const SceneAsset& scene, bool animate, double presetRate);
-    void DispatchSkeletalMeshes(GDX12CommandList* commands);
     void ReleaseSkeletalState(World& world, Entity entity);
     std::vector<UINT> _freeSkeletalInstances;
     bool _skeletalBatchDirty = true;
@@ -280,7 +277,6 @@ private:
         std::unique_ptr<GDX12Skinning> Skinning;
         std::unique_ptr<GDX12SwapChain> BackBuffer;
         std::unique_ptr<IRenderPipeline> Pipeline;
-        std::unique_ptr<GDX12RenderGraph> PrimaryGraph;
     };
     std::unique_ptr<GpuOwners> _gpu = std::make_unique<GpuOwners>();
     decltype(GpuOwners::Common)& _RPcommonData = _gpu->Common;
@@ -294,12 +290,10 @@ private:
     decltype(GpuOwners::Skinning)& _skinning = _gpu->Skinning;
     decltype(GpuOwners::BackBuffer)& _backBuffer = _gpu->BackBuffer;
     decltype(GpuOwners::Pipeline)& _pipeline = _gpu->Pipeline;
-    decltype(GpuOwners::PrimaryGraph)& _primaryGraph = _gpu->PrimaryGraph;
     std::uint64_t _frameSubmission = 0;
     bool _uiInitialized = false;
     bool _renderingSuspended = false;
     double _skeletalPreparationTimeMS = 0;
-    bool _graphReuseTextures = true;
 
     // Flags that are accumulated from every active RenderPass on the device
     // Defines which resources should be uploaded onto respective GPU

@@ -171,7 +171,7 @@ namespace ParticleResources
 
 struct GDX12ParticleSimulation::State
 {
-    explicit State(GDX12DeviceResources* resources, bool withoutDepth = false);
+    explicit State(GDX12DeviceResources* resources);
     bool Active = false;
     bool ResetMotion = false;
     UINT Capacity = 0;
@@ -180,12 +180,5 @@ struct GDX12ParticleSimulation::State
     std::unique_ptr<GDX12RootSignature> Root;
     std::unordered_map<std::string, ComPtr<ID3D12PipelineState>> Compute;
     ComPtr<ID3D12CommandSignature> DispatchSignature;
-    std::unique_ptr<class GDX12ParticleOffload> Offload;
-    bool AdapterResolved = false;
-    ComPtr<IDXGIAdapter4> Secondary;
-    std::unordered_set<uint64_t> Offloaded, DepthWarnings;
-    // Borrowed external render data; its graph owner supplies simulation and retirement.
-    GDX12Resource* ExternalDisplay = nullptr;
-    D3D12_GPU_DESCRIPTOR_HANDLE ExternalSRV{};
-    std::unordered_map<uint64_t, UINT> ExternalOffsets;
+
 };

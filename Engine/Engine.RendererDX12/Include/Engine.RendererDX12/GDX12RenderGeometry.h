@@ -1,7 +1,7 @@
 #pragma once
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12LocalLights.h"
-#include "Engine.RendererDX12/GDX12RenderGraph.h"
+#include "Engine.RendererDX12/GDX12ResourceAccess.h"
 #include <limits>
 #include <stdexcept>
 #include <algorithm>
@@ -270,7 +270,7 @@ struct GDX12RenderBatch
     D3D_PRIMITIVE_TOPOLOGY Topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
     UINT FirstInstance = 0;
     UINT InstanceCount = 0;
-    std::vector<GDX12RenderGraph::BufferAccess> BufferAccesses;
+    std::vector<GDX12ResourceAccess> BufferAccesses;
     GDX12DrawDescription Draw;
 };
 

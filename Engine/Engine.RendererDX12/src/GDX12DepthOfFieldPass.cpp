@@ -61,12 +61,6 @@ void GDX12DepthOfFieldPass::DestroyContext()
     _context.reset();
 }
 
-void GDX12DepthOfFieldPass::Execute(GDX12CommandList* commands)
-{
-    PrepareRecording();
-    RecordCommands(commands);
-}
-
 bool GDX12DepthOfFieldPass::IsActive() const
 {
     auto* color = _inputs[0]->GetTexture();

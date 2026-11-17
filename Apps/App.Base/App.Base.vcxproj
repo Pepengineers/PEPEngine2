@@ -94,11 +94,7 @@
       <Optimization>MaxSpeed</Optimization><InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks><SupportJustMyCode>false</SupportJustMyCode>
     </ClCompile>
-    <ClCompile Include="src\Rendering\CommonRenderPasses.cpp" />
-    <ClCompile Include="src\Rendering\DefaultRenderPipeline.cpp" />
     <ClInclude Include="Include\App.Base\Rendering\IRenderPipeline.h" />
-    <ClInclude Include="Include\App.Base\Rendering\CommonRenderPasses.h" />
-    <ClInclude Include="Include\App.Base\Rendering\DefaultRenderPipeline.h" />
     <ClCompile Include="src\RenderModuleSkinning.cpp" />
     <ClCompile Include="src\SceneManagerModule.cpp" />
     <ClCompile Include="src\SceneTraversal.cpp" />

@@ -2,44 +2,18 @@
 #include "Engine.RendererDX12/GDX12InstanceBatcher.h"
 #include "Engine.RendererDX12/GDX12RenderGeometrySource.h"
 #include <cstdint>
-#include "Engine.RendererDX12/RenderPasses/GDX12GeometryViewPass.h"
-#include "Engine.RendererDX12/RenderPasses/GDX12LocalShadowPass.h"
+#include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
 #include <array>
 #include <utility>
 namespace Meta { class SceneReflections; }
 
-class GDX12ReflectionProbePass final : public GDX12GeometryViewPass
+class GDX12ReflectionProbePass final : public GDX12RenderPass
 {
 public:
-    std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const override
-    {
-        if (!_resources) return {};
-        auto accesses = _resources->GetGeometryBufferAccesses(GDX12GeometryStage::ReflectionCapture);
-        const auto shadows = _resources->GetGeometryBufferAccesses(GDX12GeometryStage::Shadow);
-        accesses.insert(accesses.end(), shadows.begin(), shadows.end());
-        return accesses;
-    }
-
-    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-    {
-        graph.SetName("Reflection probes");
-        graph.Read(SharedResource::Scene);
-        graph.ReadInputs(_inputs);
-        graph.Read(SharedResource::Environment);
-        graph.Write(SharedResource::ReflectionProbes, "Reflection probe cache");
-        graph.HasSideEffects();
-    }
-
     GDX12ReflectionProbePass();
     void Initialize() override;
     void Prepare();
     void ResetHistory();
-    UINT GetGeometryViewCapacity() const override { return static_cast<UINT>(_views.size()); }
-    const GDX12GeometryContext* GetGeometryView(UINT slot) const override;
-    void BeginGeometry(GDX12CommandList* commands) override;
-    void ExecuteGeometryView(GDX12CommandList* commands, UINT slot) override;
-    void BindGeometryViewTargets(GDX12CommandList* commands, UINT slot) override;
-    void EndGeometry(GDX12CommandList* commands) override;
     void ClearDenendencies() override;
 
     struct Statistics
@@ -95,21 +69,13 @@ private:
     void CreateBakedTextures(ProbeState& probe);
     void CreateTexture(GDX12Texture& texture, UINT size, UINT slices, UINT mips, D3D12_RESOURCE_FLAGS flags, bool depth);
     void CreateFaceViews(GDX12Texture& texture, std::vector<std::unique_ptr<GDX12Descriptor>>& views, bool depth);
-    void Cull(GDX12CommandList* commands, UINT camera, Geometry geometry, bool shadow);
-    GDX12GraphicsBindings CaptureBindings(UINT face, GDX12Texture* localShadows);
-    void RenderShadow(GDX12CommandList* commands, UINT slot);
-    void RenderFace(GDX12CommandList* commands, UINT slot);
-    void FilterAndPublish(GDX12CommandList* commands, UINT probe);
-    void WriteProbeData(GDX12CommandList* commands, bool enabled);
 
     std::vector<ProbeState> _probes;
     std::vector<FrameData> _frames;
     std::unique_ptr<GDX12RootSignature> _captureRoot, _cullRoot, _filterRoot;
     ComPtr<ID3D12PipelineState> _capturePSO, _skyPSO, _shadowPSO, _cullPSO, _clearPSO, _filterPSO;
     ComPtr<ID3D12CommandSignature> _signature;
-    std::unique_ptr<GDX12LocalShadowPass> _staticLocalShadows;
-    // Optional external executor-owned capture shadows. Null retains the
-    // production pass's existing static cache and input ownership.
+    // Capture shadows are prepared by the scene graph before probe recording.
     GDX12Texture* _externalStaticShadows = nullptr;
     GDX12Texture* _externalDynamicShadows = nullptr;
     const GDX12ReflectionSettings* _externalSettings = nullptr;
@@ -135,6 +101,5 @@ private:
     GDX12ReflectionSchedule::Scheduler _scheduler;
     bool _planPrepared = false;
     bool _capturePlanned = false;
-    bool _staticShadowsPlanned = false;
     bool _publishedNeedsTransition = false;
 };

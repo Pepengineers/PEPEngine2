@@ -261,7 +261,7 @@ void GDX12DeviceResources::GatherGeometryBatches(const GDX12GeometryContext& vie
         {
             if (batches[i].Draw.Empty()) continue;
             for (const auto& access : batches[i].BufferAccesses)
-                if (!access.Resource || access.Usage != GDX12RenderGraph::Mode::Read ||
+                if (!access.Resource || access.Usage != GDX12AccessMode::Read ||
                     std::none_of(declared.begin(), declared.end(), [&](const auto& entry)
                         { return entry.Resource == access.Resource && entry.Usage == access.Usage; }))
                     throw std::invalid_argument("Render batch buffer read was not declared by its geometry source");
@@ -277,9 +277,9 @@ void GDX12DeviceResources::EmitGeometry(GDX12CommandList* commands, const GDX12G
     for (const auto& batch : batches) GDX12EmitRenderBatch(commands, view, batch);
 }
 
-std::vector<GDX12RenderGraph::BufferAccess> GDX12DeviceResources::GetGeometryBufferAccesses(GDX12GeometryStage stage) const
+std::vector<GDX12ResourceAccess> GDX12DeviceResources::GetGeometryBufferAccesses(GDX12GeometryStage stage) const
 {
-    std::vector<GDX12RenderGraph::BufferAccess> accesses;
+    std::vector<GDX12ResourceAccess> accesses;
     for (const auto* source : GeometrySources)
     {
         const auto sourceAccesses = source->GetGeometryBufferAccesses(stage);

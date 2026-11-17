@@ -4,12 +4,6 @@
 class GDX12OutputToScreenPass final : public GDX12RenderPass
 {
 public:
-    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-    {
-        graph.SetName("Tone map");
-        graph.Read(_inputs[0], D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
-        graph.Write(_inputs[1], "Swapchain", Lifetime::Dynamic, D3D12_RESOURCE_STATE_RENDER_TARGET);
-    }
 
     GDX12OutputToScreenPass() { _numInputs = 2; }
 

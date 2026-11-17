@@ -40,14 +40,12 @@ void DispatchArgs(uint offset, uint count)
     Args[offset + 2] = 1;
 }
 
-#ifndef PARTICLE_NO_DEPTH
 float3 DepthPosition(int2 pixel, float depth)
 {
     float2 ndc = (float2(pixel) + 0.5f) / RenderSize * float2(2, -2) + float2(-1, 1);
     float4 world = mul(float4(ndc, depth, 1), Camera.InvViewProj);
     return world.xyz / world.w;
 }
-#endif
 
 struct ParticleContact
 {
@@ -57,7 +55,6 @@ struct ParticleContact
 };
 
 // shortcut: only frontmost on-screen depth collides; use scene colliders when hidden/off-screen hits are required.
-#ifndef PARTICLE_NO_DEPTH
 bool FindDepthContact(float3 previous, float3 position, float3 velocity, out ParticleContact contact)
 {
     contact = (ParticleContact)0;
@@ -98,7 +95,6 @@ bool FindDepthContact(float3 previous, float3 position, float3 velocity, out Par
     }
     return false;
 }
-#endif
 
 // shortcut: expanded box corners are conservative; use sphere/box edge sweeps if corner clearance matters.
 bool FindBoxContact(float3 previous, float3 position, out ParticleContact contact)
@@ -167,9 +163,7 @@ void CollideScene(float3 previous, float step, inout float3 position, inout floa
     {
         ParticleContact contact = (ParticleContact)0;
         bool found = false;
-#ifndef PARTICLE_NO_DEPTH
         if (DepthCollision != 0) found = FindDepthContact(previous, position, velocity, contact);
-#endif
         if (CollisionBoxEnabled != 0)
         {
             ParticleContact box;

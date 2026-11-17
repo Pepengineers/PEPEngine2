@@ -11,7 +11,7 @@
 #include "Engine.RendererDX12/GDX12TextureResource.h"
 #include "Engine.RendererDX12/GDX12Descriptor.h"
 #include "Engine.RendererDX12/IRenderPassLink.h"
-#include "Engine.RendererDX12/GDX12RenderGraph.h"
+#include "Engine.RendererDX12/GDX12ResourceAccess.h"
 
 class GameTimer;
 class JobSystem;
@@ -46,10 +46,7 @@ public:
     };
     virtual void Resize() {};
     virtual void Execute(GDX12CommandList* cmdList) {};
-    virtual void RecordRenderGraph(GDX12RenderGraphBuilder& builder);
-    // Persistent buffers may be replaced during BeginFrame, so declare their physical accesses each frame.
-    virtual std::vector<GDX12RenderGraph::BufferAccess> GetBufferAccesses() const { return {}; }
-    virtual bool IsAsyncComputeEnabled() const { return true; }
+
     // Used by upscalers to determine downscaled render target size
     // And share it with all other passes
     virtual void QueryRenderTargetResolution() {};
@@ -72,7 +69,6 @@ public:
 
     void SetInputs(std::initializer_list<IRenderPassLink*> inputs) { SetInputs(std::vector<IRenderPassLink*>(inputs)); }
     virtual void SetInputs(std::vector<IRenderPassLink*> inputs);
-    static void InitializeAll(std::vector<GDX12RenderPass*> passes);
     // returns true if all inputs are initialized
     bool ValidateInputs()
     {
@@ -101,8 +97,7 @@ public:
     UINT GetNumOutputs() { return _numOutputs; }
 
 protected:
-    using SharedResource = GDX12RenderGraph::SharedResource;
-    using Lifetime = GDX12RenderGraph::Lifetime;
+
     // This will define which resources will be loaded onto respective GPU
     // For example: if no RenderPasses has USE_TEXTURES, then GPU texture upload
     // will be skipped entirely for this GPU

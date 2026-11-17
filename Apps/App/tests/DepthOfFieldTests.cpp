@@ -213,25 +213,27 @@ static void ValidateImage(const std::vector<uint16_t>& pixels)
         }
 }
 
-static std::vector<uint16_t> Run(GDX12Device& device, GDX12RenderPass& pass)
+static std::vector<uint16_t> Run(GDX12Device& device, GDX12DepthOfFieldPass& pass)
 {
     auto* queue = device.GetCommandQueue();
+    pass.PrepareRecording();
     auto* commands = queue->GetCommandList();
-    pass.Execute(commands);
+    pass.RecordCommands(commands);
     queue->ExecuteCommandList(commands);
     return Read(device, *pass.GetOutput(0)->GetTexture());
 }
 
-static double MeasurePass(GDX12Device& device, GDX12RenderPass& pass)
+static double MeasurePass(GDX12Device& device, GDX12DepthOfFieldPass& pass)
 {
     GDX12GPUTimer timer(&device);
     auto* queue = device.GetCommandQueue();
     std::vector<double> samples;
     for (unsigned frame = 0; frame < 24; ++frame)
     {
+        pass.PrepareRecording();
         auto* commands = queue->GetCommandList();
         timer.Start(commands);
-        pass.Execute(commands);
+        pass.RecordCommands(commands);
         timer.Stop(commands);
         queue->ExecuteCommandList(commands);
         timer.OnCommandListExecuted(commands->FenceValue);
@@ -294,9 +296,10 @@ static void TestGPU(GDX12Device& device, GDX12DeviceResources& resources, unsign
         for (unsigned frame = 0; frame < 16; ++frame)
         {
             resources.CurrFrameConstantsIndex = frame % static_cast<unsigned>(resources.FrameConstants.size());
+            dof.PrepareRecording();
             auto* commands = queue->GetCommandList();
             timer.Start(commands);
-            dof.Execute(commands);
+            dof.RecordCommands(commands);
             timer.Stop(commands);
             queue->ExecuteCommandList(commands);
             timer.OnCommandListExecuted(commands->FenceValue);
@@ -347,8 +350,9 @@ static void TestGPU(GDX12Device& device, GDX12DeviceResources& resources, unsign
         const unsigned slot = frame % bufferedFrames;
         if (fences[slot]) bufferedQueue->CPUWaitForFenceValue(fences[slot]);
         resources.CurrFrameConstantsIndex = slot;
+        dof.PrepareRecording();
         auto* commands = bufferedQueue->GetCommandList();
-        dof.Execute(commands);
+        dof.RecordCommands(commands);
         bufferedQueue->ExecuteCommandList(commands);
         fences[slot] = commands->FenceValue;
     }
@@ -450,8 +454,9 @@ static void TestXeSSGrid(GDX12Device& device, GDX12DeviceResources& resources)
     auto* queue = device.GetCommandQueue();
     for (unsigned frame = 0; frame < 12; ++frame)
     {
+        nativeDof.PrepareRecording();
         auto* commands = queue->GetCommandList();
-        nativeDof.Execute(commands);
+        nativeDof.RecordCommands(commands);
         Require(frame != 0 || common.ResetUpscalerHistory, "First DoF frame did not reset XeSS history");
         upscale.Execute(commands);
         Require(!common.ResetUpscalerHistory, "XeSS did not consume the history reset");
@@ -463,8 +468,9 @@ static void TestXeSSGrid(GDX12Device& device, GDX12DeviceResources& resources)
     SaveImage("Build/dof-before-xess.ppm", beforeUpscale, 640, 360);
     common.ResetUpscalerHistory = false;
     Set(L"Render.DOF.FocusDistanceCm", "250");
+    nativeDof.PrepareRecording();
     auto* commands = queue->GetCommandList();
-    nativeDof.Execute(commands);
+    nativeDof.RecordCommands(commands);
     Require(common.ResetUpscalerHistory, "Runtime focus change did not reset XeSS history");
     queue->ExecuteCommandList(commands);
     queue->Flush();
@@ -488,9 +494,10 @@ static void TestXeSSGrid(GDX12Device& device, GDX12DeviceResources& resources)
     outputDof.Initialize();
     for (unsigned frame = 0; frame < 12; ++frame)
     {
+        outputDof.PrepareRecording();
         commands = queue->GetCommandList();
         upscaleSharp.Execute(commands);
-        outputDof.Execute(commands);
+        outputDof.RecordCommands(commands);
         queue->ExecuteCommandList(commands);
         queue->Flush();
     }
@@ -529,9 +536,10 @@ static void TestXeSSGrid(GDX12Device& device, GDX12DeviceResources& resources)
     Upload(device, motion, zeroMotion.data(), 4);
     Upload(device, fullDepth, fullDepths.data(), 4);
     Require(common.ResetUpscalerHistory, "XeSS resize did not request history reset");
+    outputDof.PrepareRecording();
     commands = queue->GetCommandList();
     upscaleSharp.Execute(commands);
-    outputDof.Execute(commands);
+    outputDof.RecordCommands(commands);
     queue->ExecuteCommandList(commands);
     ValidateImage(Read(device, *outputDof.GetOutput(0)->GetTexture()));
     std::cout << "GPU: odd XeSS resize and context/history recreation passed.\n";

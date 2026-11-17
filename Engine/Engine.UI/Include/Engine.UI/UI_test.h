@@ -21,13 +21,6 @@ namespace Engine::UI
     void BeginFrame();
     void DrawReconstructionStatus(const GDX12ReconstructionStatus&, unsigned renderWidth, unsigned renderHeight,
         unsigned outputWidth, unsigned outputHeight);
-    void SuspendSettings(bool suspended);
-    int DrawBistroQualityPanel(bool& open, std::string_view status, bool running, bool hasWinner,
-        const char* const* techniques, const char* const* currentTiers, size_t techniqueCount, int& technique, int& tier);
-#ifdef _DEBUG
-    bool DebugControlsVisible();
-    bool DebugButton(const char* label, std::initializer_list<std::string_view> lines = {});
-#endif
     void DrawWorldBox(const DirectX::BoundingBox& box, const DirectX::XMFLOAT4X4& viewProjection,
         const char* label, unsigned int color);
     void Render(GDX12CommandList* commands, GDX12Texture* target);

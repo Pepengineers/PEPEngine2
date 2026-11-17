@@ -100,7 +100,6 @@ public:
     D3D12_SHADER_RESOURCE_VIEW_DESC ShaderViewDescription() const { return _desc.SRVDesc; }
 
 private:
-	friend class GDX12RenderGraph;
     bool CanShareGraphResource() const;
     bool CanShareGraphResource(const GDX12Texture& other) const;
     std::shared_ptr<GDX12TextureResource> CreateGraphResource() const;

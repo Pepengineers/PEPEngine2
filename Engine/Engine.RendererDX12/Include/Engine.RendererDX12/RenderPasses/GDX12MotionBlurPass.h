@@ -8,23 +8,12 @@ namespace Meta { class ScenePostUI; }
 class GDX12MotionBlurPass final : public GDX12RenderPass
 {
 public:
-    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-    {
-        graph.SetName("Motion blur");
-        graph.Read(SharedResource::Scene);
-        graph.ReadInputs(_inputs);
-        graph.Read(SharedResource::Particles);
-        graph.Write(_outputs[0], "Motion-blurred HDR");
-        // Frame generation can retain motion beyond this command list.
-        graph.Write(_outputs[1], "Complete motion", Lifetime::Persistent);
-    }
 
     GDX12MotionBlurPass();
-    // Set before Initialize; explicit owners retire users before resizing, legacy execution retains its copy output.
+    // Set before Initialize; the scene graph retires users before resizing.
     void SetPassthroughWhenDisabled(bool enabled = true) { _passthroughWhenDisabled = enabled; }
     bool NeedsTileResize() const;
     void Initialize() override;
-    void Execute(GDX12CommandList* commands) override;
     void PrepareRecording(bool completeMotionRequired = true); // Owner-only, after required retirement.
     void RecordCommands(GDX12CommandList* commands);
     void RecordCommands(GDX12CommandList* commands, GDX12Texture* featureMotion);

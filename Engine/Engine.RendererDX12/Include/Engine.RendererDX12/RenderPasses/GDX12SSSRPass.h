@@ -9,21 +9,11 @@ namespace Meta { class SceneLighting; }
 class GDX12SSSRPass final : public GDX12RenderPass
 {
 public:
-    void RecordRenderGraph(GDX12RenderGraphBuilder& graph) override
-    {
-        graph.SetName("Screen-space reflections");
-        graph.Read(SharedResource::Scene);
-        for (UINT i = 0; i < _inputs.size(); ++i)
-            graph.Read(_inputs[i], i == 1 ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE |
-                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE : GDX12RenderGraph::UnmanagedState);
-        graph.Write(_outputs[0], "SSR HDR");
-    }
 
     GDX12SSSRPass();
     ~GDX12SSSRPass() override;
     void SetStaticIBLOnly(bool enabled) { _staticIBLOnly = enabled; }
     void Initialize() override;
-    void Execute(GDX12CommandList* commands) override;
     void Resize() override;
     void ClearDenendencies() override;
 
@@ -45,7 +35,6 @@ private:
     XMFLOAT2 _previousJitter = {};
     uint64_t _historyRevision = UINT64_MAX;
     uint64_t _environmentRevision = UINT64_MAX;
-    std::array<ID3D12Resource*, 7> _sources = {};
     GDX12SSRSettings _previousSettings = {};
     bool _staticIBLOnly = false;
     void CreateContext();

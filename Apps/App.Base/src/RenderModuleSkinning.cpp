@@ -348,7 +348,7 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
 {
     auto* frame = GetCurrentPrimaryFrameConstants();
     const bool edited = state.ComponentRevision != component._revision;
-    const bool paused = world.IsPaused() && !_pipeline->AdvancesSkeletalMeshesWhileWorldPaused();
+    const bool paused = world.IsPaused();
     const double dt = paused ? 0 : static_cast<double>(_timer->DeltaTime()) * world.GetTimeScale();
     if (!std::isfinite(dt)) throw std::invalid_argument("Invalid skeletal world delta time");
     if (animate && !component._frozen)
@@ -437,18 +437,7 @@ void RenderModule::UpdateSkeletalPose(World& world, Entity entity, SkeletalMeshR
     }
 }
 
-void RenderModule::DispatchSkeletalMeshes(GDX12CommandList* commands)
-{
-    for (auto& entry : _skeletalStates)
-    {
-        auto& state = entry.second;
-        if (!state.Dispatch) continue;
-        for (auto& part : state.Parts)
-            _skinning->Dispatch(commands, *_primaryResources.GeometryBuffer, *part.GPU,
-                _primaryResources.CurrFrameConstantsIndex, part.Palette);
-    }
-    _primaryResources.GeometryBuffer->EndSkinning(commands);
-}
+
 
 std::vector<GDX12SkinningWork> RenderModule::FreezeSkeletalMeshes() {
     std::vector<GDX12SkinningWork> result;

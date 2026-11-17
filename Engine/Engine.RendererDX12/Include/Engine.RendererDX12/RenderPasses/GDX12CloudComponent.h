@@ -48,9 +48,6 @@ public:
     uint64_t GetSourceRevision() const { return _sourceRevision; }
     uint64_t GetLightingRevision() const { return _lightingRevision; }
     GDX12CloudInputs CaptureInputs();
-    // Only this recorder's private texture and descriptors are touched.
-    void Record(GDX12CommandList* commands, const GDX12CloudInputs& input);
-    void Execute(GDX12CommandList* commands) override;
     void ClearDenendencies() override; // Caller retires submitted work first, as for other passes.
 
 private:
@@ -65,7 +62,6 @@ private:
     double _simulationSeconds = 0;
     uint64_t _sourceRevision = 1;
     uint64_t _lightingRevision = 1;
-    uint64_t _renderedRevision = 0;
     int _quality = -1;
     bool _enabled = false;
 };

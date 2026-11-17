@@ -22,12 +22,8 @@ namespace
     using namespace Engine::UI;
     using Engine::Core::MeshHandle;
 
-    AutoConsoleVariable<bool> AsyncCompute(L"Render.UI.AsyncCompute", false,
-        L"Run local Bistro poster effects on the primary COMPUTE queue when available.");
 
     constexpr const char* Names[] = {"BistroUINeon", "BistroUIAstra", "BistroUIClouds"};
-    constexpr const char* RasterNames[] = {"UI Neon Raster", "UI ASTRA Raster", "UI Clouds Raster"};
-    constexpr const char* EffectNames[] = {"UI Neon Effects", "UI ASTRA Effects", "UI Clouds Image"};
 
     bool IsBistro(const World& world)
     {
@@ -98,29 +94,25 @@ struct BistroUIPosters::Impl
     class Pass final : public GDX12RenderPass
     {
     public:
-        Pass(Impl& owner, Surface& surface, bool effects) : Owner(owner), Poster(surface), Effects(effects)
+        Pass(Impl& owner, Surface& surface) : Owner(owner), Poster(surface)
         { _numOutputs = 1; }
-        void RecordRenderGraph(GDX12RenderGraphBuilder& builder) override;
         void Execute(GDX12CommandList* commands) override;
-        bool IsAsyncComputeEnabled() const override { return Effects && AsyncCompute.GetValue(); }
         IRenderPassLink* GetOutput(UINT index) override;
 
     private:
         Impl& Owner;
         Surface& Poster;
-        bool Effects;
     };
 
     struct Surface
     {
-        Surface(Impl& owner, std::size_t index) : Index(index), EffectPass(owner, *this, true), Raster(owner, *this, false) {}
+        Surface(Impl& owner, std::size_t index) : Index(index), Raster(owner, *this) {}
         const std::size_t Index;
         GDX12Material* Material = nullptr;
         GPUTexture Binding;
         TextureLink EffectLink, TargetLink, RawLink;
         Frame* Current = nullptr;
-        bool SeparateEffects = false;
-        Pass EffectPass, Raster;
+        Pass Raster;
     };
 
     explicit Impl(RenderModule& render, const std::shared_ptr<SceneManagerModule>& scenes, bool cloudCanvas)
@@ -191,7 +183,7 @@ struct BistroUIPosters::Impl
         BistroPaintingSurfaces::Install(world, Render, source, materials, entities);
     }
 
-    bool Prepare(GDX12DeviceResources& primary, UINT slot, double animationSeconds, bool localDirect)
+    bool Prepare(GDX12DeviceResources& primary, UINT slot, double animationSeconds)
     {
         if (slot != primary.CurrFrameConstantsIndex || slot >= primary.FrameConstants.size() || !primary.Device)
             throw std::invalid_argument("Bistro posters require the current primary frame slot");
@@ -258,7 +250,6 @@ struct BistroUIPosters::Impl
                 frame.Published = true;
             }
         }
-        const bool localAsync = !localDirect && AsyncCompute.GetValue();
         for (auto* surface : Surfaces())
         {
             if (!visible) {
@@ -284,9 +275,6 @@ struct BistroUIPosters::Impl
                     }
                 }
             }
-            const bool separate = active && surface->Index != 2 && localAsync;
-            rebuild |= surface->SeparateEffects != separate;
-            surface->SeparateEffects = separate;
         }
         return rebuild;
     }
@@ -304,21 +292,7 @@ struct BistroUIPosters::Impl
     std::vector<std::array<Frame, Count>> Slots;
 };
 
-void BistroUIPosters::Impl::Pass::RecordRenderGraph(GDX12RenderGraphBuilder& builder)
-{
-    builder.SetName(Effects ? EffectNames[Poster.Index] : RasterNames[Poster.Index]);
-    if (Effects) {
-        builder.AsyncCompute();
-        builder.Write(&Poster.EffectLink, EffectNames[Poster.Index], Lifetime::Dynamic, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        return;
-    }
-    if (Poster.Index == 2 || Poster.SeparateEffects)
-        builder.Read(&Poster.EffectLink, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-    if (Poster.Index != 2)
-        builder.Write(&Poster.RawLink, "UI raw raster", Lifetime::Dynamic, D3D12_RESOURCE_STATE_RENDER_TARGET);
-    builder.Write(&Poster.TargetLink, RasterNames[Poster.Index], Lifetime::Dynamic,
-        Poster.Index == 2 ? D3D12_RESOURCE_STATE_RENDER_TARGET : D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-}
+
 
 void BistroUIPosters::Impl::Pass::Execute(GDX12CommandList* commands)
 {
@@ -326,11 +300,7 @@ void BistroUIPosters::Impl::Pass::Execute(GDX12CommandList* commands)
     if (!frame) return;
     const bool image = Poster.Index == 2;
     auto* effect = Poster.EffectLink.Texture->GetResource();
-    if (Effects) {
-        frame->EffectOwner = Owner.Effects->RecordPrepared(*commands, *frame->Input, frame->PreparedEffects);
-        return;
-    }
-    if (!image && !Poster.SeparateEffects) {
+    if (!image) {
         commands->ResourceBarrier({effect->GetTransitionBarrier(D3D12_RESOURCE_STATE_UNORDERED_ACCESS)});
         frame->EffectOwner = Owner.Effects->RecordPrepared(*commands, *frame->Input, frame->PreparedEffects);
         commands->ResourceBarrier({effect->GetPixelShaderResourceBarrier()});
@@ -350,7 +320,7 @@ void BistroUIPosters::Impl::Pass::Execute(GDX12CommandList* commands)
 IRenderPassLink* BistroUIPosters::Impl::Pass::GetOutput(UINT index)
 {
     if (index != 0) return nullptr;
-    return Effects ? &Poster.EffectLink : &Poster.TargetLink;
+    return &Poster.TargetLink;
 }
 
 BistroUIPosters::BistroUIPosters(RenderModule& render, const std::shared_ptr<SceneManagerModule>& scenes, bool cloudCanvas)
@@ -362,9 +332,9 @@ BistroUIPosters::BistroUIPosters(RenderModule& render, const std::shared_ptr<Sce
 
 BistroUIPosters::~BistroUIPosters() = default;
 
-bool BistroUIPosters::PrepareFrame(GDX12DeviceResources& primary, UINT frameSlot, double animationSeconds, bool localDirect)
+bool BistroUIPosters::PrepareFrame(GDX12DeviceResources& primary, UINT frameSlot, double animationSeconds)
 {
-    return _impl->Prepare(primary, frameSlot, animationSeconds, localDirect);
+    return _impl->Prepare(primary, frameSlot, animationSeconds);
 }
 
 GDX12RenderPass& BistroUIPosters::RasterPass(std::size_t index) const
@@ -385,25 +355,9 @@ std::vector<GDX12Texture*> BistroUIPosters::NativeTargets(std::size_t index) con
     return {frame->Effect.get(), frame->Target.get(), frame->Raw.get()};
 }
 
-void BistroUIPosters::AddPasses(GDX12RenderGraph& graph) const
-{
-    for (auto* surface : _impl->Surfaces())
-    {
-        if (!surface->Current) continue;
-        if (surface->SeparateEffects) graph.AddPass(surface->EffectPass);
-        graph.AddPass(surface->Raster);
-    }
-}
 
-void BistroUIPosters::DeclareMaterialReads(GDX12RenderGraphBuilder& builder) const
-{
-    for (auto* surface : _impl->Surfaces())
-        if (surface->Current) builder.Read(&surface->TargetLink, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE);
-}
 
-bool BistroUIPosters::UsesAsyncCompute() const
-{
-    return _impl->Atrium.SeparateEffects || _impl->Terrace.SeparateEffects;
-}
+
+
 
 void BistroUIPosters::SetImageInput(GDX12Texture* image) { _impl->ImageInput = image; }

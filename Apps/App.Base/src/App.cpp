@@ -496,12 +496,7 @@ bool App::InitMainWindow()
     return _window->Initialize();
 }
 
-bool App::AddModules()
-{
-    Locator.RegisterModule(std::make_shared<RenderModule>(_window.get(), &Timer));
-    Locator.RegisterModule(std::make_shared<SceneManagerModule>());
-    return BenchmarkEngine::AddModules();
-}
+
 
 void App::Update(const GameTimer& gameTimer)
 {

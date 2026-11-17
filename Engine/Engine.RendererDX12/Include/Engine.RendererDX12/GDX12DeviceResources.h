@@ -14,7 +14,6 @@
 class GDX12Device;
 class GameTimer;
 class IRenderGeometrySource;
-class GDX12RenderGraphBuilder;
 struct GDX12GeometryContext;
 
 class GDX12DeviceResources
@@ -80,7 +79,7 @@ public:
     }
     void GatherGeometryBatches(const GDX12GeometryContext&, const GDX12RenderBatch& mesh, std::vector<GDX12RenderBatch>&) const;
     void EmitGeometry(GDX12CommandList*, const GDX12GeometryContext&, const GDX12RenderBatch& mesh);
-    std::vector<GDX12RenderGraph::BufferAccess> GetGeometryBufferAccesses(GDX12GeometryStage stage) const;
+    std::vector<GDX12ResourceAccess> GetGeometryBufferAccesses(GDX12GeometryStage stage) const;
     uint64_t GeometryRevision = 0;
     uint64_t MaterialRevision = 0;
     uint64_t TextureRevision = 0;
