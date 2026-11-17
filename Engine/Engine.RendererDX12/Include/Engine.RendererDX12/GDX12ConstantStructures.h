@@ -41,7 +41,7 @@ struct GDX12MaterialConstants
     UINT DiffuseIndex = 0;
     UINT NormalIndex = 0;
     UINT DisplacementIndex = 0;
-    UINT RenderLayer = 0; // 0 - opaque, 1 - masked, 2 - transparent
+    UINT RenderLayer = 0; // 0 - opaque, 1 - masked, 2 - transparent, 3 - world canvas
     UINT SpecularIndex = 0;
     UINT RoughnessIndex = 0;
     UINT EmissiveIndex = 0;

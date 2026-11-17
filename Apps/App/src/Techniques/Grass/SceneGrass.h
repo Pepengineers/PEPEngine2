@@ -15,7 +15,8 @@ class SceneGrass
 	GDX12ParticleInteractionField InteractionField() const { return _gpu->InteractionField(); }
 	std::vector<GDX12RenderPrimitive> Primitives() const;
 	void Append(Graph&, UINT slot, std::vector<ID3D12Resource*>& bindings, GDX12Descriptor& materials,
-	            const std::vector<GeometryTarget>& targets, bool viewsOnly = false);
+	            const std::vector<GeometryTarget>& targets, bool viewsOnly = false,
+	            const std::function<void()>& afterInteraction = {}, const std::function<void()>& afterDepth = {});
 	bool Record(UINT slot, Id, ID3D12GraphicsCommandList*) const;
 
   private:

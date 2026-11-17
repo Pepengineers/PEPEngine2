@@ -58,7 +58,8 @@ std::vector<GDX12RenderPrimitive> SceneGrass::Primitives() const
 	return result;
 }
 void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, GDX12Descriptor& materials,
-                        const std::vector<GeometryTarget>& targets, bool viewsOnly)
+                        const std::vector<GeometryTarget>& targets, bool viewsOnly,
+                        const std::function<void()>& afterInteraction, const std::function<void()>& afterDepth)
 {
 	auto& gpu = *_gpu;
 	auto& frame = gpu.CurrentFrame();
@@ -134,6 +135,10 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 				    }
 				    cmd->Dispatch(8, 8, 1);
 			    });
+		}
+		if (afterInteraction)
+		{
+			afterInteraction();
 		}
 		for (const auto& job : frame.WindJobs)
 		{
@@ -243,6 +248,10 @@ void SceneGrass::Append(Graph& g, UINT slot, std::vector<ID3D12Resource*>& all, 
 	std::vector<bool> mainExpanded(gpu.PatchCount(), false);
 	for (const auto& target : targets)
 	{
+		if (target.View.Stage == GDX12GeometryStage::GBuffer && afterDepth)
+		{
+			afterDepth();
+		}
 		XMFLOAT4X4 clip;
 		XMStoreFloat4x4(&clip, target.View.ViewProjection.Transpose());
 		for (UINT patch = 0; patch < gpu.PatchCount(); ++patch)

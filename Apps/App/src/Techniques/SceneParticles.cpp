@@ -102,11 +102,68 @@ void SceneParticles::Packet(Graph& graph, const std::vector<ID3D12Resource*>& bi
 	_work.AddOwned(graph, name, std::move(unique), bindings, std::move(record),
 	               "Particle packets cannot submit private signals", {}, target);
 }
-void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* simulationDepth,
-                             GDX12Texture* rasterDepth, GDX12Texture* accum, GDX12Texture* reveal,
-                             GDX12ParticleInteractionField interaction)
+void SceneParticles::BeginSimulation(GDX12ParticleInteractionField interaction)
 {
 	_work.Commands.clear();
+	_interaction = interaction;
+	auto* simulation = _resources.ParticleSimulation.get();
+	simulation->SetInteractionField(interaction);
+	simulation->BeginFrame(&_resources, _common);
+	for (auto& group : _groups)
+	{
+		group.clear();
+	}
+	for (const auto& emitter : _resources.ParticleEmitters)
+	{
+		const auto inputs = emitter.DepthCollision ? Inputs::Depth
+		                  : emitter.InteractionEnabled && interaction.Resource ? Inputs::Interaction : Inputs::Frame;
+		_groups[size_t(inputs)].push_back(emitter.Id);
+	}
+}
+void SceneParticles::AppendSimulation(Graph& graph, std::vector<ID3D12Resource*>& bindings, Inputs inputs,
+                                      GDX12Texture* depth)
+{
+	const auto& ids = _groups[size_t(inputs)];
+	auto* simulation = _resources.ParticleSimulation.get();
+	std::vector<Access> pools;
+	AddResources(graph, bindings, pools, simulation->GetPoolResources(&ids), Mode::ReadWrite);
+	if (pools.empty())
+	{
+		return;
+	}
+	const bool async = AsyncSimulation.GetValue();
+	const Queue target = async ? Queue::Compute : Queue::Direct;
+	const State simulationRead = async ? State(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE) : State(-1);
+	if (async)
+	{
+		for (auto& access : pools)
+		{
+			access.Required = UnorderedAccess;
+		}
+	}
+	const char* initialize[] = {"particle frame pool initialization/reset", "particle interaction pool initialization/reset",
+	                            "particle depth pool initialization/reset"};
+	const char* simulate[] = {"particle simulation from frame inputs", "particle simulation from interaction field",
+	                          "particle simulation from depth prepass"};
+	Packet(graph, bindings, initialize[size_t(inputs)], pools,
+	       [this, simulation, ids](auto* cmd) { simulation->InitializePools(cmd, &_resources, &ids); }, target);
+	const UINT slot = _resources.CurrFrameConstantsIndex;
+	AddResources(graph, bindings, pools, simulation->GetConstantResources(slot, &ids), Mode::Read);
+	pools.push_back(ResourceAccess(graph, bindings, &_resources.FrameConstants.at(slot)->CameraCB->GetResource(), Mode::Read));
+	if (inputs == Inputs::Depth)
+	{
+		pools.push_back(ResourceAccess(graph, bindings, depth->GetResource(), Mode::Read, simulationRead));
+	}
+	if (inputs != Inputs::Frame && _interaction.Resource)
+	{
+		pools.push_back(ResourceAccess(graph, bindings, _interaction.Resource, Mode::Read, simulationRead));
+	}
+	Packet(graph, bindings, simulate[size_t(inputs)], std::move(pools), [this, simulation, depth, ids](auto* cmd)
+	       { simulation->Execute(cmd, &_resources, _common, depth, &ids); }, target);
+}
+void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& bindings, GDX12Texture* rasterDepth,
+                             GDX12Texture* accum, GDX12Texture* reveal)
+{
 	_drawReads.clear();
 	_accum = accum;
 	_reveal = reveal;
@@ -117,8 +174,6 @@ void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& binding
 	_width = rasterDepth->GetWidth();
 	_height = rasterDepth->GetHeight();
 	auto* simulation = _resources.ParticleSimulation.get();
-	simulation->SetInteractionField(interaction);
-	simulation->BeginFrame(&_resources, _common);
 	_pass.SetInputs({rasterDepth, accum, reveal});
 	_pass.SetMotionOutputEnabled(GetMotionBlurSettings().Enabled ||
 	                             GetFrameGenerationProvider() != GDX12FrameGenerationProvider::Off ||
@@ -126,64 +181,19 @@ void SceneParticles::Prepare(Graph& graph, std::vector<ID3D12Resource*>& binding
 	_pass.Initialize();
 	_pass.BeginFrame();
 	const UINT slot = _resources.CurrFrameConstantsIndex;
-	std::array<std::vector<uint64_t>, 2> groups;
-	for (const auto& emitter : _resources.ParticleEmitters)
-	{
-		groups[emitter.DepthCollision ? 1 : 0].push_back(emitter.Id);
-	}
+	auto early = _groups[size_t(Inputs::Frame)];
+	const auto& interaction = _groups[size_t(Inputs::Interaction)];
+	early.insert(early.end(), interaction.begin(), interaction.end());
+	const std::array groups{std::move(early), _groups[size_t(Inputs::Depth)]};
 	const auto camera =
 	    ResourceAccess(graph, bindings, &_resources.FrameConstants.at(slot)->CameraCB->GetResource(), Mode::Read);
-	std::array<std::vector<Access>, 2> pools;
-	const bool async = AsyncSimulation.GetValue();
-	const Queue target = async ? Queue::Compute : Queue::Direct;
-	const State simulationRead = async ? State(D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE) : State(-1);
-	for (size_t group = 0; group < groups.size(); ++group)
-	{
-		const auto ids = groups[group];
-		AddResources(graph, bindings, pools[group], simulation->GetPoolResources(&ids), Mode::Read);
-		if (ids.empty())
-		{
-			continue;
-		}
-		auto initialization = pools[group];
-		for (auto& access : initialization)
-		{
-			access.Usage = Mode::ReadWrite;
-			if (async)
-			{
-				access.Required = UnorderedAccess;
-			}
-		}
-		Packet(graph, bindings,
-		       group == 0 ? "particle A pool initialization/reset" : "particle B pool initialization/reset",
-		       initialization,
-		       [this, simulation, ids](auto* cmd) { simulation->InitializePools(cmd, &_resources, &ids); }, target);
-		auto simulationAccess = initialization;
-		AddResources(graph, bindings, simulationAccess, simulation->GetConstantResources(slot, &ids), Mode::Read);
-		simulationAccess.push_back(camera);
-		if (group == 1)
-		{
-			simulationAccess.push_back(
-			    ResourceAccess(graph, bindings, simulationDepth->GetResource(), Mode::Read, simulationRead));
-		}
-		if (interaction.Resource)
-		{
-			simulationAccess.push_back(
-			    ResourceAccess(graph, bindings, interaction.Resource, Mode::Read, simulationRead));
-		}
-		Packet(graph, bindings,
-		       group == 0 ? "particle A simulate/death/spawn/burst/publish"
-		                  : "particle B simulate/death/spawn/burst/publish",
-		       std::move(simulationAccess), [this, simulation, simulationDepth, ids](auto* cmd)
-		       { simulation->Execute(cmd, &_resources, _common, simulationDepth, &ids); }, target);
-	}
 	std::vector<Access> preparation{camera};
 	AddAccesses(graph, bindings, preparation, _pass.NativePreparationAccesses());
 	for (size_t group = 0; group < groups.size(); ++group)
 	{
 		auto accesses = preparation;
-		accesses.insert(accesses.end(), pools[group].begin(), pools[group].end());
 		const auto ids = groups[group];
+		AddResources(graph, bindings, accesses, simulation->GetPoolResources(&ids), Mode::Read);
 		Packet(graph, bindings, group == 0 ? "particle A clear/cull" : "particle B append/global SortedAlpha radix",
 		       std::move(accesses),
 		       [this, ids, group](auto* cmd) { _pass.PrepareRenderGroup(cmd, ids, group == 0, group == 1); });

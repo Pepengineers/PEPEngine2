@@ -22,6 +22,7 @@ class SceneLighting
 	bool Record(Id, ID3D12GraphicsCommandList*) const;
 	void Submitted(uint64_t fence);
 	void Reset();
+	SceneParticles& Particles() { return _transparency->Particles(); }
 	GDX12Texture* ParticleMotion() const { return _transparency->ParticleMotion(); }
 	GDX12Texture* PostDepth() const { return _transparency->Depth(); }
 	GDX12Texture* PostMotion() const { return _transparency->Motion(); }
