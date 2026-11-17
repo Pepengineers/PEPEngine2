@@ -15,6 +15,7 @@ class SceneTransparency
 	~SceneTransparency();
 	void PrepareWater(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot);
 	void SetWaterRetirement(std::function<void()> retire) { _water.SetRetirement(std::move(retire)); }
+	SceneParticles& Particles() { return _particles; }
 	GDX12Texture* Append(Graph&, std::vector<ID3D12Resource*>&, SceneGeometry&, UINT slot, GDX12Texture* hdr,
 	                     GDX12Texture* sun, GDX12Texture* local, SceneEnvironment&);
 	using OpaqueContinuation = std::function<GDX12Texture*(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture*,

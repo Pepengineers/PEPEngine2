@@ -174,7 +174,7 @@ struct BistroUIPosters::Impl
                 if (!surface->Material) throw std::runtime_error("Cannot create Bistro canvas material");
                 surface->Binding.Name = Names[i];
                 surface->Material->Diffuse = &surface->Binding;
-                surface->Material->Type = MaterialType::Opaque;
+                surface->Material->Type = MaterialType::WorldCanvas;
                 surface->Material->UseBakedLighting = true;
                 surface->Material->DirtyFlag = true;
             }

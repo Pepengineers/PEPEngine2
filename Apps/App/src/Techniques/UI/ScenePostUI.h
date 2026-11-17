@@ -45,7 +45,7 @@ class ScenePostUI
 	void Append(Graph&, std::vector<ID3D12Resource*>&, GDX12Texture* hdr, GDX12Texture* depth, GDX12Texture* motion,
 	            GDX12Texture* featureMotion, GDX12Texture* target,
 	            const std::function<void(GDX12CommandList*)>& finish);
-	void AppendPosters(Graph&, std::vector<ID3D12Resource*>&);
+	std::vector<Access> AppendPosters(Graph&, std::vector<ID3D12Resource*>&);
 	bool Record(Id id, ID3D12GraphicsCommandList* cmd) const { return _work.Record(id, cmd); }
 
   private:
@@ -67,6 +67,8 @@ class ScenePostUI
 	GDX12DeviceResources& _resources;
 	RenderPipelineCommonData& _common;
 	GDX12SwapChain* _swapchain;
+	RenderModule& _render;
+	GDX12Texture* _hudAtlas = nullptr;
 	GDX12DepthOfFieldPass _dof;
 	GDX12MotionBlurPass _blur;
 	GDX12ReconstructionPass _reconstruction;

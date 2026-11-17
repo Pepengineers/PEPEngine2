@@ -40,6 +40,7 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="..\..\GlobalSettings.props" />
     <Import Project="..\..\MSBuild\Props\PEPEngine.Module.App.Base.Public.props" />
+    <Import Project="..\..\MSBuild\Props\PEPEngine.External.ImGui.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros">
     <LocalDebuggerWorkingDirectory>$(PEPRepoRoot)</LocalDebuggerWorkingDirectory>
@@ -128,6 +129,7 @@
     <ClCompile Include="src\Rendering\BistroRenderPipeline.cpp" />
     <ClCompile Include="src\Techniques\UI\ScenePostUI.cpp" />
     <ClInclude Include="src\Techniques\UI\BistroUICanvases.h" />
+    <ClInclude Include="src\Techniques\UI\BistroGameHUD.h" />
     <ClInclude Include="src\Techniques\UI\BistroUIPosters.h" />
     <ClCompile Include="src\Techniques\SceneCloudPicture.cpp" />
     <ClCompile Include="src\Techniques\CloudPictureTexture.cpp" />

@@ -53,7 +53,7 @@ SceneGeometry::SceneGeometry(RenderPipelineContext& c)
 	d.NumSingleSRVSlots = 3;
 	d.NumSingleUAVSlots = 4;
 	_cullRoot = std::make_unique<GDX12RootSignature>(r.Device, d);
-	const D3D_SHADER_MACRO cullDefines[] = {{"LATE_PROBE_PREVIEW", "1"}, {nullptr, nullptr}};
+	const D3D_SHADER_MACRO cullDefines[] = {{"LATE_SCENE_OVERLAYS", "1"}, {nullptr, nullptr}};
 	_cull = GDX12RenderHelpers::CreateComputePipeline(r.Device, _cullRoot.get(), SHADERS_FOLDER "Culling.hlsl", "CS",
 	                                                  cullDefines);
 	d = {};
@@ -97,6 +97,8 @@ SceneGeometry::SceneGeometry(RenderPipelineContext& c)
 	p.NumRenderTargets = 5;
 	std::copy(std::begin(Formats), std::end(Formats), p.RTVFormats);
 	ThrowIfFailed(r.Device->GetDevice()->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&_gbuffer)));
+	p.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
+	ThrowIfFailed(r.Device->GetDevice()->CreateGraphicsPipelineState(&p, IID_PPV_ARGS(&_worldCanvas)));
 }
 void SceneGeometry::BufferFor(Buffer& b, UINT64 bytes, UINT stride, bool upload)
 {
@@ -274,6 +276,20 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 	}
 	s.FrameStrides = {f.MainCB->GetElementSize(), f.CameraCB->GetElementSize()};
 	s.Draws = _resources.IndirectCommandsCache->GetElementCount();
+	s.CanvasDraws.clear();
+	s.CanvasOperation = Invalid;
+	const auto* draws = _resources.IndirectCommandsCache->GetCPUData();
+	const auto* instances = f.InstanceCache->GetCPUData();
+	const auto* materials = f.MaterialCache->GetCPUData();
+	for (UINT i = 0; i < s.Draws; ++i)
+	{
+		const auto& draw = draws[i];
+		if (draw.InstanceCount && materials[instances[draw.InstanceID].MaterialIndex].RenderLayer ==
+		                              UINT(MaterialType::WorldCanvas))
+		{
+			s.CanvasDraws.push_back(draw);
+		}
+	}
 	for (UINT i : {4u, 6u})
 	{
 		BufferFor(s.Buffers[i], UINT64((std::max)(s.Draws, 1u)) * sizeof(GDX12IndirectDrawArgs),
@@ -339,8 +355,37 @@ void SceneGeometry::Freeze(UINT index, UINT camera, std::vector<GDX12SkinningWor
 		s.SkinIds.push_back(ids);
 	}
 }
+void SceneGeometry::AppendWorldCanvases(Graph& graph, UINT index, std::vector<Access> textureReads)
+{
+	auto& s = _slots.at(index);
+	if (s.CanvasDraws.empty())
+	{
+		return;
+	}
+	Operation operation{"world-space canvases over G-buffer", std::move(textureReads)};
+	for (Id id : {SceneInstances, SceneMaterials, SceneTransforms})
+	{
+		operation.Accesses.push_back({id, Mode::Read, ShaderRead});
+	}
+	for (Id id : s.FrameIds)
+	{
+		operation.Accesses.push_back({id, Mode::Read, D3D12_RESOURCE_STATE_GENERIC_READ});
+	}
+	operation.Accesses.insert(operation.Accesses.end(),
+	    {{VertexResource, Mode::Read, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER |
+	                                  D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE},
+	     {IndexResource, Mode::Read, D3D12_RESOURCE_STATE_INDEX_BUFFER},
+	     {DepthResource, Mode::Read, D3D12_RESOURCE_STATE_DEPTH_READ}});
+	for (Id id = GBufferResourceBegin; id < DepthResource; ++id)
+	{
+		operation.Accesses.push_back({id, Mode::ReadWrite, D3D12_RESOURCE_STATE_RENDER_TARGET});
+	}
+	s.CanvasOperation = Id(graph.Operations.size());
+	graph.Operations.push_back(std::move(operation));
+}
 Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const AppendTechnique& prelude,
-                             bool singleDirect)
+                             bool singleDirect, const AppendTechnique& afterInteraction,
+                             const AppendTechnique& afterDepth)
 {
 	auto& s = _slots.at(index);
 	s.PlannedBindings.clear();
@@ -524,7 +569,26 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 	}
 	const std::vector<GeometryTarget> targets{depthTarget, gbufferTarget};
 	s.PlannedBindings = Resources(index);
-	_grass->Append(g, index, s.PlannedBindings, s.Buffers[2].Srv, targets);
+	const Id grassBegin = Id(g.Operations.size());
+	Id interactionEnd = grassBegin;
+	Id firstGrassGBuffer = Invalid;
+	_grass->Append(g, index, s.PlannedBindings, s.Buffers[2].Srv, targets, false,
+	    [&]
+	    {
+		    if (afterInteraction)
+		    {
+			    afterInteraction(g, s.PlannedBindings);
+			    interactionEnd = Id(g.Operations.size());
+		    }
+	    },
+	    [&]
+	    {
+		    if (afterDepth)
+		    {
+			    afterDepth(g, s.PlannedBindings);
+			    firstGrassGBuffer = Id(g.Operations.size());
+		    }
+	    });
 	if (append)
 	{
 		append(g, s.PlannedBindings);
@@ -539,8 +603,23 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 	{
 		order.push_back(id);
 	}
-	for (Id id = 0; id < preludeBegin; ++id)
+	// Interaction sources are frozen upload inputs, so the field and its particle consumers can start before scene depth.
+	for (Id id = grassBegin; id < interactionEnd; ++id)
 	{
+		order.push_back(id);
+	}
+	const Id sceneGBuffer = GBufferOperation + (s.Batches ? BatchingOperationCount : 0);
+	for (Id id = 0; id <= preludeBegin; ++id)
+	{
+		if (id == firstGrassGBuffer)
+		{
+			order.push_back(sceneGBuffer);
+		}
+		if (id == preludeBegin || (id >= grassBegin && id < interactionEnd) ||
+		    (id == sceneGBuffer && firstGrassGBuffer != Invalid))
+		{
+			continue;
+		}
 		if (g.Operations[id].Accesses.empty())
 		{
 			continue;
@@ -621,6 +700,13 @@ void SceneGeometry::Record(UINT index, Id op, UINT bucket, ID3D12GraphicsCommand
 {
 	const auto& s = _slots.at(index);
 	const auto& b = s.Buffers;
+	if (op == s.CanvasOperation)
+	{
+		auto* heap = _resources.SRV_UAV_Heap->GetHeap().Get();
+		cmd->SetDescriptorHeaps(1, &heap);
+		RecordGeometry(s, GeometryPass::WorldCanvas, cmd);
+		return;
+	}
 	if (_grass && _grass->Record(index, op, cmd))
 	{
 		return;
@@ -696,7 +782,7 @@ void SceneGeometry::Record(UINT index, Id op, UINT bucket, ID3D12GraphicsCommand
 	}
 	else if (op == 3 || op == 4)
 	{
-		RecordGeometry(s, op == 3, cmd);
+		RecordGeometry(s, op == 3 ? GeometryPass::Depth : GeometryPass::GBuffer, cmd);
 	}
 }
 
@@ -726,11 +812,12 @@ void SceneGeometry::RecordUploads(const Slot& slot, UINT bucket, ID3D12GraphicsC
 		}
 	}
 }
-void SceneGeometry::RecordGeometry(const Slot& s, bool depth, ID3D12GraphicsCommandList* cmd) const
+void SceneGeometry::RecordGeometry(const Slot& s, GeometryPass pass, ID3D12GraphicsCommandList* cmd) const
 {
 	const auto& b = s.Buffers;
+	const bool depth = pass == GeometryPass::Depth;
 	cmd->SetGraphicsRootSignature(_drawRoot->GetRootSignature().Get());
-	cmd->SetPipelineState(depth ? _depth.Get() : _gbuffer.Get());
+	cmd->SetPipelineState(depth ? _depth.Get() : pass == GeometryPass::GBuffer ? _gbuffer.Get() : _worldCanvas.Get());
 	cmd->SetGraphicsRootConstantBufferView(_drawRoot->GetBRootParamIndex(1), s.Main);
 	cmd->SetGraphicsRootConstantBufferView(_drawRoot->GetBRootParamIndex(2), s.Camera);
 	const UINT buffers[] = {2, 3, 0};
@@ -761,7 +848,7 @@ void SceneGeometry::RecordGeometry(const Slot& s, bool depth, ID3D12GraphicsComm
 	{
 		cmd->ClearDepthStencilView(dsv, D3D12_CLEAR_FLAG_DEPTH, 0, 0, 0, nullptr);
 	}
-	else
+	else if (pass == GeometryPass::GBuffer)
 	{
 		const float clear[4] = {};
 		for (auto handle : rt)
@@ -774,9 +861,21 @@ void SceneGeometry::RecordGeometry(const Slot& s, bool depth, ID3D12GraphicsComm
 	{
 		cmd->IASetVertexBuffers(0, 1, &s.Geometry.Vertices);
 		cmd->IASetIndexBuffer(&s.Geometry.Indices);
-		cmd->ExecuteIndirect(_signature.Get(), s.Draws,
-		                     s.Batches ? s.Batcher->RecordingResources()[1] : b[4].Data.Get(), 0,
-		                     s.Batches ? s.BatchCounter.Get() : b[5].Data.Get(), 0);
+		if (pass == GeometryPass::WorldCanvas)
+		{
+			for (const auto& draw : s.CanvasDraws)
+			{
+				cmd->SetGraphicsRoot32BitConstant(0, draw.InstanceID, 0);
+				cmd->DrawIndexedInstanced(draw.IndexCountPerInstance, draw.InstanceCount, draw.StartIndexLocation,
+				                          draw.BaseVertexLocation, draw.StartInstanceLocation);
+			}
+		}
+		else
+		{
+			cmd->ExecuteIndirect(_signature.Get(), s.Draws,
+			                     s.Batches ? s.Batcher->RecordingResources()[1] : b[4].Data.Get(), 0,
+			                     s.Batches ? s.BatchCounter.Get() : b[5].Data.Get(), 0);
+		}
 	}
 }
 } // namespace BistroRender

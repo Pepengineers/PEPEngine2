@@ -81,7 +81,7 @@ GDX12Texture* SceneTransparency::AppendPhase(Graph& graph, std::vector<ID3D12Res
 	}
 	phase.Initialized = true;
 	auto* output = compose.OUT_Result.get();
-	_particles.Prepare(graph, bindings, scene.DepthView.get(), rasterDepth, accum, reveal, geometry.InteractionField());
+	_particles.Prepare(graph, bindings, rasterDepth, accum, reveal);
 	const auto resource = [&](ID3D12Resource* value)
 	{ return NativeWork::ResourceFor(graph, bindings, value, "mesh transparency resource"); };
 	const auto texture = [&](GDX12Texture* value, Mode mode, State state)

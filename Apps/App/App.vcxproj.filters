@@ -46,6 +46,7 @@
     <ClCompile Include="src\Rendering\BistroRenderPipeline.cpp" />
     <ClCompile Include="src\Techniques\UI\ScenePostUI.cpp" />
     <ClInclude Include="src\Techniques\UI\BistroUICanvases.h" />
+    <ClInclude Include="src\Techniques\UI\BistroGameHUD.h" />
     <ClInclude Include="src\Techniques\UI\BistroUIPosters.h" />
     <ClCompile Include="src\Techniques\SceneCloudPicture.cpp" />
     <ClCompile Include="src\Techniques\CloudPictureTexture.cpp" />

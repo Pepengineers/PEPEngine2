@@ -65,6 +65,10 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const double delta = c.Common.GameTimer ? c.Common.GameTimer->DeltaTime() : 0;
 	_environment->Freeze(world && !world->IsPaused() ? delta * world->GetTimeScale() : 0);
 	_lighting->Freeze(*_geometry, slot);
+	auto& particles = _lighting->Particles();
+	using ParticleInputs = BistroRender::SceneParticles::Inputs;
+	auto* depth = _geometry->Depth(slot);
+	particles.BeginSimulation(_geometry->InteractionField());
 	auto* target = c.BackBuffer->GetCurrentBuffer();
 	const bool singleDirect = !AsyncQueues.GetValue();
 	const bool earlyEnvironment = !singleDirect && _environment->AsyncComputeEnabled();
@@ -75,6 +79,8 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 		{
 			_environment->Append(graph, resources);
 		}
+		const auto posters = _post->AppendPosters(graph, resources);
+		_geometry->AppendWorldCanvases(graph, slot, posters);
 		_lighting->SetHDRContinuation(
 		    [&](auto& g, auto& bindings, auto* hdr)
 		    {
@@ -82,17 +88,28 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 			                  _lighting->ParticleMotion(), target, finish);
 		    });
 		_lighting->Append(graph, resources, *_geometry, *_environment);
+		for (auto& op : graph.Operations)
+		{
+			if (op.Name == BistroRender::ProbeColorOperationName)
+			{
+				op.Accesses.insert(op.Accesses.end(), posters.begin(), posters.end());
+			}
+		}
 	};
 	const auto prelude = [&](BistroRender::Graph& graph, std::vector<ID3D12Resource*>& resources)
 	{
 		_cloudPicture->Append(graph, resources);
-		_post->AppendPosters(graph, resources);
+		particles.AppendSimulation(graph, resources, ParticleInputs::Frame, depth);
 		if (earlyEnvironment)
 		{
 			_environment->Append(graph, resources);
 		}
 	};
-	_schedule = _geometry->Plan(slot, append, prelude, singleDirect);
+	const auto afterInteraction = [&](auto& graph, auto& resources)
+	{ particles.AppendSimulation(graph, resources, ParticleInputs::Interaction, depth); };
+	const auto afterDepth = [&](auto& graph, auto& resources)
+	{ particles.AppendSimulation(graph, resources, ParticleInputs::Depth, depth); };
+	_schedule = _geometry->Plan(slot, append, prelude, singleDirect, afterInteraction, afterDepth);
 	_executor->Reserve(_schedule);
 	const auto record = [&](BistroRender::Id op, uint32_t list, ID3D12GraphicsCommandList* commands)
 	{

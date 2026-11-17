@@ -1,7 +1,9 @@
 #include "ScenePostUI.h"
+#include "BistroGameHUD.h"
 #include "App.Base/Modules/RenderModule.h"
 #include "App.Base/Modules/SceneManagerModule.h"
 #include "Engine.Core/BenchmarkEngine.h"
+#include "Engine.Core/AssetManager.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
 #include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include "Engine.RendererDX12/GDX12SwapChain.h"
@@ -9,11 +11,13 @@
 #include "Engine.RendererDX12/GDX12MotionBlurSettings.h"
 #include "Engine.RendererDX12/RenderPasses/GDX12TAAPass.h"
 #include "Common/GameTimer.h"
+#include <filesystem>
 
 namespace BistroRender
 {
 ScenePostUI::ScenePostUI(RenderPipelineContext& c)
-    : _resources(c.Primary), _common(c.Common), _swapchain(c.BackBuffer), _slots(c.Primary.FrameConstants.size()),
+    : _resources(c.Primary), _common(c.Common), _swapchain(c.BackBuffer), _render(c.Runtime),
+      _slots(c.Primary.FrameConstants.size()),
       _exports(c.Primary.FrameConstants.size())
 {
 	_dof.Setup(&_resources, &_common);
@@ -236,6 +240,24 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 	auto& screen = _slots.at(_resources.CurrFrameConstantsIndex);
 	screen.RasterOwner.reset();
 	screen.CompositeOwner.reset();
+	const bool hud = GameHUD::Enabled.GetValue() && ImGui::GetCurrentContext();
+	if (hud && !_hudAtlas)
+	{
+		auto* texture = _render.GetTextureByName("BistroDemoHUD");
+		if (!texture)
+		{
+			const auto* asset = Engine::Core::AssetManager::GetInstance().LoadTexture(
+			    std::filesystem::path(ASSETS_FOLDER) / "Textures/UI/BistroDemoHUD.png");
+			if (!asset)
+				throw std::runtime_error("Missing Bistro demo HUD atlas");
+			texture = _render.CreateTexture("BistroDemoHUD", asset, Engine::Core::ETextureType::Color);
+		}
+		if (!texture || !texture->PrimaryDeviceTexture)
+			throw std::runtime_error("Cannot create Bistro demo HUD atlas");
+		_hudAtlas = texture->PrimaryDeviceTexture;
+	}
+	if (hud)
+		GameHUD::Draw(_common.GameTimer ? _common.GameTimer->TotalTime() : 0.f);
 	screen.Draw = Engine::UI::CaptureScreenFrame();
 	Id screenId = dependency;
 	if (screen.Draw)
@@ -251,12 +273,23 @@ void ScenePostUI::AppendScreen(Graph& graph, std::vector<ID3D12Resource*>& bindi
 			GDX12RenderHelpers::InitializeRenderTarget(*screen.Target, _resources, _common.WindowWidth,
 			                                           _common.WindowHeight, Engine::UI::OffscreenFormat, {0, 0, 0, 0});
 		}
+		std::vector<std::pair<GDX12Resource*, Mode>> accesses{{resource(screen.Target.get()), Mode::Write}};
+		std::vector<Engine::UI::TextureBinding> hudTextures;
+		if (hud)
+		{
+			auto* atlas = resource(_hudAtlas);
+			NativeWork::ImportReadOnlyTexture(graph, bindings, *atlas, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE,
+			                                  "game HUD atlas");
+			accesses.emplace_back(atlas, Mode::Read);
+			hudTextures.push_back({GameHUD::Atlas, atlas->D3DResource, _hudAtlas->GetFormat()});
+		}
 		const auto raster = Packet(
 		    graph, bindings, "Engine.UI explicit font upload / offscreen raster boundary",
-		    {{resource(screen.Target.get()), Mode::Write}},
-		    [this, &screen](auto* cmd)
+		    std::move(accesses),
+		    [this, &screen, hudTextures = std::move(hudTextures)](auto* cmd)
 		    {
-			    screen.RasterOwner = _screen->TryRecord(*cmd, screen.Target->GetResource()->D3DResource, screen.Draw);
+			    screen.RasterOwner = _screen->TryRecord(*cmd, screen.Target->GetResource()->D3DResource, screen.Draw,
+			                                           hudTextures);
 			    if (!screen.RasterOwner)
 			    {
 				    throw std::logic_error("Screen UI backend slot is still in flight");
@@ -325,7 +358,7 @@ void ScenePostUI::Append(Graph& graph, std::vector<ID3D12Resource*>& bindings, G
 	const auto fg = AppendFrameGeneration(graph, bindings, depth, output);
 	AppendScreen(graph, bindings, target, finish, fg);
 }
-void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bindings)
+std::vector<Access> ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bindings)
 {
 	for (Id id = 0; id < bindings.size(); ++id)
 	{
@@ -339,7 +372,7 @@ void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bind
 			}
 		}
 	}
-	const Id consumers = Id(graph.Operations.size());
+	std::vector<Access> outputs;
 	for (size_t index = 0; index < BistroUIPosters::Count; ++index)
 	{
 		const auto images = _posters->NativeTargets(index);
@@ -364,15 +397,8 @@ void ScenePostUI::AppendPosters(Graph& graph, std::vector<ID3D12Resource*>& bind
 		    graph, bindings, names[index], std::move(accesses), [pass](auto* cmd) { pass->Execute(cmd); }, {}, raster);
 		const auto targetId =
 		    NativeWork::ResourceFor(graph, bindings, target->GetResource()->D3DResource.Get(), "poster material");
-		// Opaque posters are sampled by GBuffer/probe color shaders, not masked depth or glass.
-		for (Id id = 0; id < consumers; ++id)
-		{
-			if (graph.Operations[id].Name == GBufferOperationName || graph.Operations[id].Name == ProbeColorOperationName)
-			{
-				graph.Operations[id].Accesses.push_back(
-				    {targetId, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
-			}
-		}
+		outputs.push_back({targetId, Mode::Read, D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE});
 	}
+	return outputs;
 }
 } // namespace BistroRender

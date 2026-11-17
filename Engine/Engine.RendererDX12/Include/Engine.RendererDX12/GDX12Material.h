@@ -12,6 +12,7 @@ enum class MaterialType : std::uint8_t
 	Opaque = 0,
 	Masked = 1,
 	Transparent = 2,
+	WorldCanvas = 3,
 };
 
 struct GPUTexture
