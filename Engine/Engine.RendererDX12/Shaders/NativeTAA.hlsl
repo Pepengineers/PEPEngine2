@@ -29,6 +29,8 @@ cbuffer Parameters : register(b0)
     float VarianceGamma;
     float2 DepthJitterDeltaUV;
     float Padding;
+    uint2 InputSize;
+    float2 InputJitterUV;
 };
 ConstantBuffer<CameraCB> Camera : register(b1);
 Texture2D<float4> Color : register(t0);
@@ -45,17 +47,26 @@ float Luminance(float3 c) { return dot(c, float3(0.212671f, 0.715160f, 0.072169f
 float3 TM(float3 c) { return c / (1 + Luminance(c)); }
 float3 ITM(float3 c) { return c / max(1e-6f, 1 - Luminance(c)); }
 
-[numthreads(8, 8, 1)]
-void Resolve(uint2 p : SV_DispatchThreadID)
+void ResolvePixel(uint2 p, bool upscale)
 {
     if (any(p >= Size)) return;
     float2 uv = (float2(p) + 0.5f) / Size;
-    // GDK accumulates current subpixel samples at a fixed output pixel.
-    float4 current = Color[p];
+    uint2 inputSize = upscale ? InputSize : Size;
+    float2 inputUV = uv;
+    uint2 inputPixel = p;
+    if (upscale)
+    {
+        // Project the stable output sample into the current jittered render grid.
+        inputUV += InputJitterUV;
+        inputPixel = min(uint2(saturate(inputUV) * inputSize), inputSize - 1);
+    }
+    float4 current = upscale ? Color.SampleLevel(LinearClamp, inputUV, 0) : Color[p];
     current.rgb = SafeColor(current.rgb);
     current.a = isfinite(current.a) ? saturate(current.a) : 1;
-    float depth = Depth[p];
-    float4 world = mul(float4(uv * float2(2, -2) + float2(-1, 1), depth, 1), Camera.InvViewProj);
+    float depth = Depth[inputPixel];
+    // Depth and motion describe one surface. Unproject depth at its actual texel center.
+    float2 depthUV = upscale ? (float2(inputPixel) + 0.5f) / inputSize : uv;
+    float4 world = mul(float4(depthUV * float2(2, -2) + float2(-1, 1), depth, 1), Camera.InvViewProj);
     bool surface = isfinite(depth) && depth > 0 && all(isfinite(world)) && abs(world.w) > 1e-8f;
     float distance = 0;
     float4 previous = 0;
@@ -66,7 +77,7 @@ void Resolve(uint2 p : SV_DispatchThreadID)
         previous = mul(world, PreviousViewProjection);
     }
     ResultDepth[p] = surface && isfinite(distance) && distance > 0 ? distance : 0;
-    float2 motion = Motion[p]; // prevNDC-currentNDC, unjittered
+    float2 motion = Motion[inputPixel]; // prevNDC-currentNDC, unjittered
     float2 previousUV = uv + motion * float2(0.5f, -0.5f);
     float2 border = 0.5f / Size;
     bool valid = Valid != 0 && isfinite(depth) && (surface || depth == 0) && all(isfinite(motion)) &&
@@ -75,9 +86,9 @@ void Resolve(uint2 p : SV_DispatchThreadID)
     float3 history = current.rgb;
     [branch] if (valid)
     {
-        // MiniEngine offsets depth reprojection by jitter delta, not accumulated color.
-        float2 depthUV = previousUV + DepthJitterDeltaUV;
-        float4 oldDepths = HistoryDepth.Gather(LinearClamp, depthUV);
+        // TAAU stores depth on the stable output grid. Native TAA retains the jitter delta correction.
+        float2 historyDepthUV = upscale ? previousUV : previousUV + DepthJitterDeltaUV;
+        float4 oldDepths = HistoryDepth.Gather(LinearClamp, historyDepthUV);
         valid = false;
         [unroll] for (uint i = 0; i < 4; ++i)
         {
@@ -96,7 +107,7 @@ void Resolve(uint2 p : SV_DispatchThreadID)
                 [unroll] for (int y = -1; y <= 1; ++y)
                     [unroll] for (int x = -1; x <= 1; ++x)
                     {
-                        int2 q = clamp(int2(p) + int2(x, y), 0, int2(Size) - 1);
+                        int2 q = clamp(int2(inputPixel) + int2(x, y), 0, int2(inputSize) - 1);
                         float3 c = SafeColor(Color[q].rgb) / scale;
                         mean += c / 9;
                         moment += c * c / 9;
@@ -114,4 +125,16 @@ void Resolve(uint2 p : SV_DispatchThreadID)
     // MiniEngine blends HDR through its invertible luminance map to suppress bright-sample flicker.
     float3 resolved = weight > 0 ? ITM(lerp(TM(current.rgb), TM(history), weight)) : current.rgb;
     Result[p] = float4(SafeColor(resolved), current.a);
+}
+
+[numthreads(8, 8, 1)]
+void Resolve(uint2 p : SV_DispatchThreadID)
+{
+    ResolvePixel(p, false);
+}
+
+[numthreads(8, 8, 1)]
+void ResolveUpscaled(uint2 p : SV_DispatchThreadID)
+{
+    ResolvePixel(p, true);
 }

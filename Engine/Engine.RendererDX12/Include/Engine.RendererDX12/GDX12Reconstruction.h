@@ -4,7 +4,7 @@
 #include "Common/EnumMetadata.h"
 
 enum class GDX12UpscalerProvider : std::uint8_t { Native, XeSS, FSR, DLSS, NIS, TAA = 5, Count };
-PEP_ENUM_METADATA(GDX12UpscalerProvider, PEP_DISPLAY_NAME(TAA, "Native TAA"))
+PEP_ENUM_METADATA(GDX12UpscalerProvider, PEP_DISPLAY_NAME(TAA, "TAA / TAAU"))
 // Default keeps each SDK's preferred preset; XeSS defaults to Ultra Quality Plus.
 enum class GDX12UpscalerQuality : std::uint8_t { Default, NativeAA, Quality, Balanced, Performance, UltraPerformance, UltraQuality, UltraQualityPlus, Count };
 PEP_ENUM_METADATA(GDX12UpscalerQuality,

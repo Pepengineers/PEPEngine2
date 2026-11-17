@@ -197,7 +197,7 @@ Id ScenePostUI::AppendReconstruction(Graph& graph, std::vector<ID3D12Resource*>&
 			accesses.emplace_back(resource(frame.Depth), Mode::Write);
 			accesses.emplace_back(frame.Camera, Mode::Read);
 			const auto reconstruction = Packet(
-			    graph, bindings, "Native TAA resolve DIRECT boundary", std::move(accesses),
+			    graph, bindings, "TAA resolve DIRECT boundary", std::move(accesses),
 			    [taa, frame](auto* cmd) { taa->RecordCommands(cmd, frame); }, std::move(dependencies));
 			dependencies = {reconstruction};
 		}

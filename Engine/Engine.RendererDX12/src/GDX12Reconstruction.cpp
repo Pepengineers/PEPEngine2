@@ -5,7 +5,7 @@
 namespace
 {
     AutoConsoleVariable<GDX12UpscalerProvider> Provider(L"Render.Upscaler.Provider", GDX12UpscalerProvider::XeSS,
-        L"0 Native, 1 XeSS, 2 FSR, 3 DLSS, 4 NIS, 5 Native TAA", EConsoleVariableFlags::Default);
+        L"0 Native, 1 XeSS, 2 FSR, 3 DLSS, 4 NIS, 5 TAA / TAAU", EConsoleVariableFlags::Default);
     AutoConsoleVariable<GDX12UpscalerQuality> Quality(L"Render.Upscaler.Quality", GDX12UpscalerQuality::Default,
         L"0 SDK default, 1 NativeAA, 2 Quality, 3 Balanced, 4 Performance, 5 UltraPerformance, 6 UltraQuality, 7 UltraQualityPlus; unavailable presets fall back to native",
         EConsoleVariableFlags::Default);

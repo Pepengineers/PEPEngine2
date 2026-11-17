@@ -14,6 +14,8 @@ public:
         float HistoryWeight, VarianceGamma;
         XMFLOAT2 DepthJitterDeltaUV;
         float Padding = 0;
+        UINT InputWidth, InputHeight;
+        XMFLOAT2 InputJitterUV;
     };
     struct Frame
     {
@@ -28,7 +30,7 @@ public:
         uint64_t Revision = 0;
         UINT Write = 0;
     };
-    GDX12TAAPass();
+    explicit GDX12TAAPass(float renderScale = 1.0f);
     void Setup(GDX12DeviceResources*, RenderPipelineCommonData*) override;
     void QueryRenderTargetResolution() override;
     void Initialize() override;
@@ -42,6 +44,7 @@ public:
     std::array<GDX12Texture, 2>& ColorHistory() { return _color; }
     std::array<GDX12Texture, 2>& DepthHistory() { return _depth; }
 private:
+    const float _renderScale;
     std::array<GDX12Texture, 2> _color, _depth;
     std::unique_ptr<GDX12RootSignature> _root;
     ComPtr<ID3D12PipelineState> _resolve;
