@@ -7,13 +7,6 @@
 
 namespace
 {
-    UINT CubeMipCount(UINT resolution)
-    {
-        UINT count = 1;
-        for (; resolution > 1; resolution >>= 1) ++count;
-        return count;
-    }
-
     UINT64 AllocationBytes(GDX12Device* device, GDX12Texture* texture)
     {
         if (!texture || !texture->IsInitialized()) return 0;
@@ -247,7 +240,7 @@ void GDX12ReflectionProbePass::CreatePublishedTexture(UINT count, UINT resolutio
 {
     _resources->Device->GetCommandQueue()->Flush();
     _publishedResolution = resolution;
-    _publishedMips = CubeMipCount(resolution);
+    _publishedMips = GDX12RenderHelpers::MipCount(resolution);
     CreateTexture(_published, resolution, count * 6, _publishedMips, D3D12_RESOURCE_FLAG_NONE, false);
     _published.GetResource()->D3DResource->SetName(L"Reflection published radiance");
     _publishedNeedsTransition = true;
@@ -272,7 +265,7 @@ void GDX12ReflectionProbePass::SelectProbe(UINT probe)
 {
     _activeProbe = probe;
     _resolution = _probes[probe].Source.Resolution;
-    _mips = CubeMipCount(_resolution);
+    _mips = GDX12RenderHelpers::MipCount(_resolution);
 }
 
 void GDX12ReflectionProbePass::CreateCaptureTextures(UINT resolution)
@@ -285,7 +278,7 @@ void GDX12ReflectionProbePass::CreateCaptureTextures(UINT resolution)
         CreateFaceViews(_sunShadow, _sunDSV, true);
         _sunShadowNeedsClear = true;
     }
-    const UINT captureMips = CubeMipCount(resolution);
+    const UINT captureMips = GDX12RenderHelpers::MipCount(resolution);
     if (_captureTextureResolution != resolution)
     {
         _resources->Device->GetCommandQueue()->Flush();

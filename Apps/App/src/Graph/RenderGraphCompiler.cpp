@@ -22,7 +22,7 @@ void Depend(Packet& p, Id id) {
 }
 }
 Schedule Compile(const Graph& g, bool singleDirect) {
-    if(singleDirect) { auto direct=g; for(auto& op:direct.Operations) op.Target=Queue::Direct; return Compile(direct); }
+    const auto target = [singleDirect](const Operation& op) { return singleDirect ? Queue::Direct : op.Target; };
     const auto n=g.Operations.size();
     std::vector<std::set<Id>> deps(n);
     struct History { Id Writer=Invalid; std::set<Id> Readers; Id Last=Invalid; State Current; };
@@ -30,7 +30,9 @@ Schedule Compile(const Graph& g, bool singleDirect) {
     for(const auto& r:g.Resources) history.push_back({Invalid,{},Invalid,r.Initial});
     Id effect=Invalid;
     for(Id i=0;i<n;++i) {
-        const auto& op=g.Operations[i]; Name(op.Target);
+        const auto& op=g.Operations[i];
+        const auto queue=target(op);
+        Name(queue);
         if(!op.Lists) throw std::invalid_argument("packet requires at least one list");
         for(auto d:op.Dependencies) { if(d>=n) throw std::invalid_argument("unknown producer"); deps[i].insert(d); }
         if(op.SideEffect) { if(effect!=Invalid) deps[i].insert(effect); effect=i; }
@@ -38,7 +40,7 @@ Schedule Compile(const Graph& g, bool singleDirect) {
         for(auto a:op.Accesses) {
             if(a.Resource>=history.size() || !seen.insert(a.Resource).second) throw std::invalid_argument("unknown or duplicate resource access");
             const auto& r=g.Resources[a.Resource]; auto& h=history[a.Resource];
-            if(!Legal(op.Target,a.Required) && !(FixedUpload(r) && a.Usage==Mode::Read && a.Required==GenericRead))
+            if(!Legal(queue,a.Required) && !(FixedUpload(r) && a.Usage==Mode::Read && a.Required==GenericRead))
                 throw std::invalid_argument("queue cannot use declared resource state");
             if(r.Memory==Heap::Readback && (a.Required!=CopyDest || a.Usage!=Mode::Write))
                 throw std::invalid_argument("readback heap requires write-only COPY_DEST");
@@ -48,7 +50,7 @@ Schedule Compile(const Graph& g, bool singleDirect) {
             else h.Readers.insert(i);
             // Whole-subresource state ownership crosses queues only after all readers.
             // Immutable upload heaps never transition and may be read concurrently.
-            if(h.Last!=Invalid && !FixedUpload(r) && (h.Current!=a.Required || g.Operations[h.Last].Target!=op.Target)) {
+            if(h.Last!=Invalid && !FixedUpload(r) && (h.Current!=a.Required || target(g.Operations[h.Last])!=queue)) {
                 deps[i].insert(h.Last);
                 for(auto reader:h.Readers) if(reader!=i) deps[i].insert(reader);
             }
@@ -77,7 +79,8 @@ Schedule Compile(const Graph& g, bool singleDirect) {
         for(Id i=0;i<n;++i) if(remap[i]==Invalid && std::all_of(deps[i].begin(),deps[i].end(),[&](Id d){return remap[d]!=Invalid;})) {next=i;break;}
         if(next==Invalid) throw std::invalid_argument("dependency cycle");
         const auto& op=g.Operations[next];
-        Packet p{next,{},op.Accesses,{},{},op.Lists,op.OwnerRecording,op.Target};
+        const auto queue=target(op);
+        Packet p{next,{},op.Accesses,{},{},op.Lists,op.OwnerRecording,queue};
         for(auto d:deps[next]) Depend(p,remap[d]);
         for(auto a:op.Accesses) {
             auto& state=states[a.Resource]; const auto& r=g.Resources[a.Resource]; const Id prev=last[a.Resource];
@@ -104,7 +107,7 @@ Schedule Compile(const Graph& g, bool singleDirect) {
             last[a.Resource]=remap[next];
             // COPY texture accesses also decay. Release explicitly for ordinary
             // textures so subsequent queues always observe a known COMMON boundary.
-            if(op.Target==Queue::Copy && !g.Resources[a.Resource].Decays && g.Resources[a.Resource].Memory==Heap::Default && states[a.Resource]!=0) {
+            if(queue==Queue::Copy && !g.Resources[a.Resource].Decays && g.Resources[a.Resource].Memory==Heap::Default && states[a.Resource]!=0) {
                 out.Packets.back().After.push_back({a.Resource,states[a.Resource],0,false}); states[a.Resource]=0;
             }
             if(g.Resources[a.Resource].Decays) states[a.Resource]=0;

@@ -433,7 +433,7 @@ Schedule SceneGeometry::Plan(UINT index, const AppendTechnique& append, const Ap
 	depth.Accesses.push_back({DepthResource, Mode::Write, D3D12_RESOURCE_STATE_DEPTH_WRITE});
 	g.Operations.push_back(depth);
 	auto draw = depth;
-	draw.Name = "scene GBuffer ExecuteIndirect";
+	draw.Name = GBufferOperationName;
 	draw.Accesses.back() = {DepthResource, Mode::Read, D3D12_RESOURCE_STATE_DEPTH_READ};
 	for (auto* operation : {&g.Operations.back(), &draw})
 	{

@@ -1,20 +1,8 @@
 #include "SceneReflections.h"
+#include "Engine.RendererDX12/GDX12RenderHelpers.h"
 #include <cstring>
 namespace BistroRender
 {
-namespace
-{
-UINT MipCount(UINT size)
-{
-    UINT count = 1;
-    while (size > 1)
-    {
-        size >>= 1;
-        ++count;
-    }
-    return count;
-}
-} // namespace
 SceneReflections::SceneReflections(GDX12DeviceResources& r, RenderPipelineCommonData& c) : _resources(r), _common(c)
 {
 
@@ -342,7 +330,7 @@ void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
         srvs[11] = _resources.SRV_UAV_Heap->GetGPUHandle(Texture2D_StartIndex);
         auto* countBuffer = frame.Counter->GetResource().D3DResource.Get();
         const bool clear = shadow || view.Filter != p.DynamicGeometry;
-        work.Add(graph, shadow ? "probe sun shadow mesh" : "probe HDR capture mesh/sky", draws, [=](auto* cmd) {
+        work.Add(graph, shadow ? "probe sun shadow mesh" : ProbeColorOperationName, draws, [=](auto* cmd) {
             cmd->SetDescriptorHeaps(1, &heap);
             cmd->SetGraphicsRootSignature(root->GetRootSignature().Get());
             cmd->SetGraphicsRootConstantBufferView(root->GetBRootParamIndex(1), main);
@@ -482,7 +470,7 @@ void SceneReflections::Append(Graph& graph, std::vector<ID3D12Resource*>& bindin
             data.BlendDistance = state.Source.BlendDistance;
             data.Intensity = state.Source.Intensity;
             data.MaxMip = float(p._publishedMips - 1);
-            data.MinMip = float(p._publishedMips - MipCount(source.Resolution));
+            data.MinMip = float(p._publishedMips - GDX12RenderHelpers::MipCount(source.Resolution));
         }
         constants.ReflectionProbesUpload->CopyData(i, data);
     }

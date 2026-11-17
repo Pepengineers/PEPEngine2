@@ -9,17 +9,6 @@
 namespace
 {
     constexpr UINT DiffuseSize = 32, SpecularSize = 128, SpecularMips = 8;
-    UINT SourceMipCount(UINT size)
-    {
-        UINT mips = 1;
-        while (size > 1)
-        {
-            size >>= 1;
-            ++mips;
-        }
-        return mips;
-    }
-
 }
 
 GDX12EnvironmentIBLPass::GDX12EnvironmentIBLPass()
@@ -148,7 +137,7 @@ void GDX12EnvironmentIBLPass::AllocateOutputs(const bool enabled, const UINT cub
     const UINT mips = enabled ? SpecularMips : 1;
     CreateTexture(*_textures[0], enabled ? DiffuseSize : 1, enabled ? DiffuseSize : 1, 1, 1, true);
     CreateTexture(*_textures[1], enabled ? SpecularSize : 1, enabled ? SpecularSize : 1, 1, mips, true);
-    const UINT sourceMips = SourceMipCount(cubeSize);
+    const UINT sourceMips = GDX12RenderHelpers::MipCount(cubeSize);
     CreateTexture(*_textures[3], cubeSize, cubeSize, 1, sourceMips, true);
     _sourceUAVs.resize(sourceMips);
     for (UINT mip = 0; mip < sourceMips; ++mip)
