@@ -57,7 +57,7 @@ static void CheckParticleBudgets()
         const auto& settings = emitter.GetSettings();
         if (name.value == "BistroPlanterFireflies")
             Require(settings.Geometry == ParticleGeometry::Firefly && settings.SizeStart >= 10 &&
-                settings.Blend == ParticleBlend::WeightedAlpha, "Fireflies must use visible, volumetric mesh particles");
+                settings.Blend == ParticleBlend::Opaque, "Fireflies must use visible, opaque mesh particles");
         if (name.value == "BistroEntranceFountain") Require(settings.SizeStart >= 7.5f, "Fountain particles must be larger");
     });
     world.SetPaused(true);

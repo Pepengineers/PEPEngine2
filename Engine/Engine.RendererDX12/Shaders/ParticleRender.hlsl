@@ -24,13 +24,28 @@ void CullParticle(Particle particle)
     float3 view = mul(float4(particle.Position, 1), Camera.View).xyz;
     float4 clip = mul(float4(particle.Position, 1), Camera.ViewProj);
     float radius = size * 0.707107f * (Geometry == ParticleGeometryWaterDrop ? 2.5f : 1);
-    float2 margin = radius * float2(length(float3(Camera.ViewProj[0][0], Camera.ViewProj[1][0], Camera.ViewProj[2][0])),
-        length(float3(Camera.ViewProj[0][1], Camera.ViewProj[1][1], Camera.ViewProj[2][1])));
+    float3 clipX = float3(Camera.ViewProj[0][0], Camera.ViewProj[1][0], Camera.ViewProj[2][0]);
+    float3 clipY = float3(Camera.ViewProj[0][1], Camera.ViewProj[1][1], Camera.ViewProj[2][1]);
+    float2 margin = radius * float2(length(clipX), length(clipY));
+    bool opaque = BlendMode == ParticleBlendOpaque;
+    bool outsideSides = any(abs(clip.xy) > clip.w + margin);
+    if (opaque)
+    {
+        float3 clipW = float3(Camera.ViewProj[0][3], Camera.ViewProj[1][3], Camera.ViewProj[2][3]);
+        outsideSides = clip.w + clip.x < -radius * length(clipW + clipX) ||
+            clip.w - clip.x < -radius * length(clipW - clipX) ||
+            clip.w + clip.y < -radius * length(clipW + clipY) ||
+            clip.w - clip.y < -radius * length(clipW - clipY);
+    }
     if (-view.z + radius < Camera.NearPlane || -view.z - radius > min(Camera.FarPlane, MaxDistance) ||
-        any(abs(clip.xy) > clip.w + margin) || size <= 0 ||
+        outsideSides || size <= 0 ||
         size * margin.y / max(radius, 0.00001f) * RenderSize.y * 0.5f / max(clip.w, 0.00001f) < MinPixelSize) return;
     float4 color = lerp(ColorStart, ColorEnd, age);
-    if (color.a <= 0) return;
+    if (!opaque && color.a <= 0) return;
+    // Opaque and transparent draws are prepared separately and reuse the same indirect slots.
+    uint blend = opaque ? 0 : BlendMode;
+    bool mesh = Geometry == ParticleGeometryFirefly;
+    uint countIndex = blend + (mesh ? 4 : 1);
     uint drawIndex, modeIndex;
 #if PARTICLE_WAVE_OPS
     uint prefix = WavePrefixCountBits(true);
@@ -38,13 +53,13 @@ void CullParticle(Particle particle)
     if (WaveIsFirstLane())
     {
         InterlockedAdd(Counts[0], count, drawIndex);
-        InterlockedAdd(Counts[Geometry == ParticleGeometryFirefly ? BlendMode + 4 : BlendMode + 1], count, modeIndex);
+        InterlockedAdd(Counts[countIndex], count, modeIndex);
     }
     drawIndex = WaveReadLaneFirst(drawIndex) + prefix;
     modeIndex = WaveReadLaneFirst(modeIndex) + prefix;
 #else
     InterlockedAdd(Counts[0], 1, drawIndex);
-    InterlockedAdd(Counts[Geometry == ParticleGeometryFirefly ? BlendMode + 4 : BlendMode + 1], 1, modeIndex);
+    InterlockedAdd(Counts[countIndex], 1, modeIndex);
 #endif
     ParticleDraw draw = (ParticleDraw)0;
     draw.Position = particle.Position;
@@ -66,12 +81,12 @@ void CullParticle(Particle particle)
     draw.EdgeSamples = EdgeSamples;
     draw.ViewDepth = -view.z;
     Draws[drawIndex] = draw;
-    if (BlendMode == 2)
+    if (blend == 2)
     {
         Keys[modeIndex] = ~asuint(max(0.0f, -view.z)); // Positive distance, far to near.
         Payloads[modeIndex] = drawIndex;
     }
-    else Indices[(BlendMode + (Geometry == ParticleGeometryFirefly ? 2 : 0)) * TotalCapacity + modeIndex] = drawIndex;
+    else Indices[(blend + (mesh ? 2 : 0)) * TotalCapacity + modeIndex] = drawIndex;
 }
 
 [numthreads(256, 1, 1)]

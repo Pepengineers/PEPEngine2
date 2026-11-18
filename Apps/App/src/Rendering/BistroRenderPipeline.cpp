@@ -75,6 +75,7 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	const auto append = [&](BistroRender::Graph& graph, std::vector<ID3D12Resource*>& resources)
 	{
 		_post->BeginPlan();
+		particles.AppendOpaque(graph, resources, *_geometry, slot);
 		if (!earlyEnvironment)
 		{
 			_environment->Append(graph, resources);

@@ -203,9 +203,8 @@ inline void Create(World& world, GPUTexture* atlas)
 	settings.Wind = Vector3(8, 0, 0);
 	settings.Geometry = ParticleGeometry::Firefly;
 	settings.InteractionEnabled = true;
-	settings.Blend = ParticleBlend::WeightedAlpha;
-	settings.ColorStart = Vector4(1, 1, 1, 0.9f);
-	settings.ColorEnd = Vector4(1, 1, 1, 0);
+	settings.Blend = ParticleBlend::Opaque;
+	settings.ColorStart = settings.ColorEnd = Vector4(1, 1, 1, 1);
 	auto fireflies = create("BistroPlanterFireflies", BistroArch::SwarmBounds.Center, 2, settings);
 	fireflies.GetComponent<TransformComponent>().Rotation.y = BistroArch::YawDegrees;
 

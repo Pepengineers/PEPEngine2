@@ -31,6 +31,7 @@ class SceneGeometry
 	// Frame-slot inputs for future graph consumers; access declarations and the
 	// frame completion fence still govern their lifetime and readiness.
 	GDX12Texture* Depth(UINT slot) const { return _slots.at(slot).DepthView.get(); }
+	D3D12_CPU_DESCRIPTOR_HANDLE DepthDSV(UINT slot) const { return _slots.at(slot).Dsv.CPUHandle; }
 	GDX12Texture* GBuffer(UINT slot, UINT attachment) const { return _slots.at(slot).Color.at(attachment).get(); }
 	std::vector<ID3D12Resource*> Resources(UINT slot) const;
 	void Record(UINT slot, Id operation, UINT bucket, ID3D12GraphicsCommandList*) const;
