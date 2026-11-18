@@ -1,7 +1,8 @@
 #pragma once
 #include "Engine.RendererDX12/RenderPasses/GDX12RenderPass.h"
+#include <array>
 
-// Runs after transparent meshes; Composite runs after the existing WBOIT resolve.
+// Opaque particles write the G-buffer; transparent particles use WBOIT and HDR composition.
 class GDX12ParticlesPass final : public GDX12RenderPass
 {
 public:
@@ -9,7 +10,8 @@ public:
     GDX12ParticlesPass();
     ~GDX12ParticlesPass() override;
     void Initialize() override;
-    void BeginFrame();
+    void BeginFrame(GDX12Texture* depth);
+    bool InitializeOpaque(const std::array<GDX12Texture*, 5>& gbuffer);
     // Configure before BeginFrame; merged fluid depth is an SRV/UAV, not a DSV.
     void SetReadOnlyDepthEnabled(bool enabled) { _readOnlyDepth = enabled; }
     void SetMotionOutputEnabled(bool enabled) { _motionOutputEnabled = enabled; }
@@ -17,16 +19,15 @@ public:
     std::vector<GDX12ResourceAccess> NativePreparationAccesses() const;
     std::vector<GDX12ResourceAccess> NativeRasterAccesses(bool includeMotion) const;
     GDX12Texture* MotionOutput() const;
-    void PrepareRenderGroup(GDX12CommandList* commands, const std::vector<uint64_t>& emitterIds,
-        bool clear, bool finalize);
+    void PrepareRenderData(GDX12CommandList* commands, const std::vector<uint64_t>& emitterIds, bool opaque);
+    void DrawOpaque(GDX12CommandList* commands, GDX12Texture* depth, D3D12_CPU_DESCRIPTOR_HANDLE dsv,
+        const std::array<GDX12Texture*, 5>& gbuffer);
     void DrawWeightedAndMotion(GDX12CommandList* commands);
     void Composite(GDX12CommandList* commands, GDX12Texture* hdr);
     void Resize() override;
     void ClearDenendencies() override;
 
 private:
-    void PrepareRenderData(GDX12CommandList* commands, const std::vector<uint64_t>* emitterIds,
-        bool clear, bool finalize);
     bool _readOnlyDepth = false;
     bool _motionOutputEnabled = true;
     struct State;

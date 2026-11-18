@@ -38,6 +38,7 @@ struct ParticleDraw
 
 static const uint ParticleGeometryFirefly = 1;
 static const uint ParticleGeometryWaterDrop = 2;
+static const uint ParticleBlendOpaque = 3;
 
 cbuffer Parameters : register(b0)
 {

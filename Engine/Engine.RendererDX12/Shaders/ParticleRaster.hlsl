@@ -47,6 +47,7 @@ VertexOutput VS(uint vertex : SV_VertexID, uint instance : SV_InstanceID)
     result.Previous = mul(float4(previousWorld, 1), Camera.PrevViewProjNoJitter);
     result.UV = corner * float2(1, -1) + 0.5f;
     result.DrawIndex = index;
+    result.Normal = cross(right, up);
     result.ViewDepth = draw.ViewDepth;
     return result;
 }
@@ -85,18 +86,8 @@ VertexOutput MeshVS(MeshVertex vertex, uint instance : SV_InstanceID)
     return result;
 }
 
-float4 Shade(VertexOutput input)
+float4 SampleParticle(VertexOutput input, ParticleDraw draw)
 {
-    ParticleDraw draw = Draws[input.DrawIndex];
-    float scene = SceneDepth.Load(int3(uint2(input.Position.xy), 0));
-    if (scene > input.Position.z) discard;
-    float fade = 1;
-    if (scene > 0 && draw.SoftDistance > 0)
-    {
-        float distance = Camera.NearPlane * Camera.FarPlane /
-            (Camera.NearPlane + scene * (Camera.FarPlane - Camera.NearPlane));
-        fade = saturate((distance - input.ViewDepth) / draw.SoftDistance);
-    }
     float2 texel = float2(1.0f / draw.Columns, 1.0f / draw.Rows);
     float2 uv = (input.UV + float2(draw.Frame % draw.Columns, draw.Frame / draw.Columns)) * texel;
     float2 dx = ddx(uv);
@@ -116,12 +107,6 @@ float4 Shade(VertexOutput input)
         paint = lerp(paint, float3(.8f,.95f,1), smoothstep(.96f,.995f,light));
         // shortcut: alpha transmits the scene; add lens refraction if large close-up drops are needed.
         material = float4(paint, coverage * (.7f + .3f * fresnel));
-    }
-    else if (draw.Geometry == ParticleGeometryFirefly)
-    {
-        // A fixed key light shows the low-poly facets; the abdomen keeps its emissive radiance.
-        float light = 0.25f + 0.75f * saturate(dot(normalize(input.Normal), normalize(float3(0.4f, 0.8f, -0.3f))));
-        material = float4(input.Material.rgb * lerp(light, 1, input.Material.a), 1);
     }
     else if (draw.TextureIndex != 0xffffffffu)
     {
@@ -143,7 +128,30 @@ float4 Shade(VertexOutput input)
         float alpha = 1 - smoothstep(1 - max(fwidth(radius), 0.001f), 1, radius);
         material = float4(1, 1, 1, alpha);
     }
-    float4 color = material * draw.Color;
+    return material * draw.Color;
+}
+
+float4 Shade(VertexOutput input)
+{
+    ParticleDraw draw = Draws[input.DrawIndex];
+    float scene = SceneDepth.Load(int3(uint2(input.Position.xy), 0));
+    if (scene > input.Position.z) discard;
+    float fade = 1;
+    if (scene > 0 && draw.SoftDistance > 0)
+    {
+        float distance = Camera.NearPlane * Camera.FarPlane /
+            (Camera.NearPlane + scene * (Camera.FarPlane - Camera.NearPlane));
+        fade = saturate((distance - input.ViewDepth) / draw.SoftDistance);
+    }
+    float4 color;
+    if (draw.Geometry == ParticleGeometryFirefly)
+    {
+        // A fixed key light shows the low-poly facets; the abdomen keeps its emissive radiance.
+        float light = 0.25f + 0.75f * saturate(dot(normalize(input.Normal), normalize(float3(0.4f, 0.8f, -0.3f))));
+        color = float4(input.Material.rgb * lerp(light, 1, input.Material.a), 1) * draw.Color;
+    }
+    else
+        color = SampleParticle(input, draw);
     color.a = saturate(color.a * fade);
     if (color.a <= 0.00001f) discard;
     return color;
@@ -174,13 +182,40 @@ float4 ColorPS(VertexOutput input) : SV_Target0
     return float4(color.rgb * color.a, color.a);
 }
 
+float2 ParticleMotion(VertexOutput input)
+{
+    float2 motion = ResetMotion != 0 || input.Previous.w <= 0.00001f || input.Current.w <= 0.00001f ? 0 :
+        input.Previous.xy / input.Previous.w - input.Current.xy / input.Current.w;
+    return all(isfinite(motion)) ? motion : 0;
+}
+
 [earlydepthstencil]
 float4 MotionPS(VertexOutput input) : SV_Target0
 {
     float alpha = Shade(input).a;
-    float2 motion = ResetMotion != 0 || input.Previous.w <= 0.00001f || input.Current.w <= 0.00001f ? 0 :
-        input.Previous.xy / input.Previous.w - input.Current.xy / input.Current.w;
-    if (!all(isfinite(motion))) motion = 0;
     // Depth is normalized to the camera far plane to keep half-float accumulation finite.
-    return float4(motion, input.ViewDepth / Camera.FarPlane, 1) * alpha;
+    return float4(ParticleMotion(input), input.ViewDepth / Camera.FarPlane, 1) * alpha;
+}
+
+struct OpaqueOutput
+{
+    float4 AlbedoMetallic : SV_Target0;
+    float2 Velocity : SV_Target1;
+    float4 NormalRoughness : SV_Target2;
+    float4 F0Baked : SV_Target3;
+    float4 Emissive : SV_Target4;
+};
+
+OpaqueOutput OpaquePS(VertexOutput input)
+{
+    ParticleDraw draw = Draws[input.DrawIndex];
+    bool mesh = draw.Geometry == ParticleGeometryFirefly;
+    float3 color = mesh ? input.Material.rgb * draw.Color.rgb : SampleParticle(input, draw).rgb;
+    OpaqueOutput output;
+    output.AlbedoMetallic = float4(saturate(color), 0);
+    output.Velocity = ParticleMotion(input);
+    output.NormalRoughness = float4(normalize(input.Normal), 0.65f);
+    output.F0Baked = float4(0.04f, 0.04f, 0.04f, 1);
+    output.Emissive = float4(mesh ? color * input.Material.a : max(color - 1, 0), 0);
+    return output;
 }

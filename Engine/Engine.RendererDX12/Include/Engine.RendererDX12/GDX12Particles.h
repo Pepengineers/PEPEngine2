@@ -4,7 +4,7 @@
 #include "Engine.RendererDX12/GDX12Material.h"
 #include <array>
 
-enum class ParticleBlend : std::uint8_t { WeightedAlpha, Additive, SortedAlpha };
+enum class ParticleBlend : std::uint8_t { WeightedAlpha, Additive, SortedAlpha, Opaque };
 enum class ParticleShape : std::uint8_t { Point, Box, Sphere };
 enum class ParticleGeometry : std::uint8_t { Billboard, Firefly, WaterDrop };
 enum class ParticleSimulation : std::uint8_t { AnalyticDrag, SemiImplicitEuler, Count };
