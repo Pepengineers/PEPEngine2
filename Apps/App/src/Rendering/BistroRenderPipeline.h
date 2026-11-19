@@ -18,10 +18,6 @@ class BistroRenderPipeline final : public IRenderPipeline
 		{
 			_executor->Drain();
 		}
-		if (_cloudPicture)
-		{
-			_cloudPicture->Drain();
-		}
 		if (_post)
 		{
 			_post->ReleasePresentation();
@@ -76,8 +72,6 @@ class BistroRenderPipeline final : public IRenderPipeline
 	std::unique_ptr<BistroRender::SceneLighting> _lighting;
 	GDX12RenderPass _sceneFlags;
 	std::unique_ptr<BistroRender::ScenePostUI> _post;
-	std::shared_ptr<BistroRender::QueueSubmission> _submissions;
-	int _secondarySelection = -1;
 	std::unique_ptr<BistroRender::SceneCloudPicture> _cloudPicture;
 	std::unique_ptr<BistroRender::Executor> _executor;
 	BistroRender::Schedule _schedule;
