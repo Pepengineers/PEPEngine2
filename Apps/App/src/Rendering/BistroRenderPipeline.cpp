@@ -14,33 +14,6 @@ AutoConsoleVariable<bool> AsyncQueues(L"App.Async.Queues", true,
                                       L"Place explicit local work on COMPUTE/COPY; false uses DIRECT.",
                                       EConsoleVariableFlags::Default);
 
-std::unique_ptr<GDX12Device> OpenSecondary(GDX12Device& primary, int index)
-{
-	if (index < 0)
-	{
-		return {};
-	}
-	ComPtr<IDXGIFactory6> factory;
-	ThrowIfFailed(CreateDXGIFactory2(0, IID_PPV_ARGS(&factory)));
-	ComPtr<IDXGIAdapter1> adapter;
-	ThrowIfFailed(factory->EnumAdapters1(UINT(index), &adapter));
-	DXGI_ADAPTER_DESC1 desc{};
-	ThrowIfFailed(adapter->GetDesc1(&desc));
-	if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
-	{
-		throw std::invalid_argument("Bistro requires a hardware adapter");
-	}
-	const auto primaryLuid = primary.GetAdapterLuid();
-	if (desc.AdapterLuid.HighPart == primaryLuid.HighPart && desc.AdapterLuid.LowPart == primaryLuid.LowPart)
-	{
-		return {};
-	}
-	ComPtr<IDXGIAdapter4> hardware;
-	ThrowIfFailed(adapter.As(&hardware));
-	auto device = std::make_unique<GDX12Device>();
-	ThrowIfFailed(device->Initialize(hardware));
-	return device;
-}
 }
 
 void BistroRenderPipeline::Initialize(RenderPipelineContext& c)
@@ -59,9 +32,7 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c)
 	_bindings.PrimaryPasses = _post->Passes();
 	_bindings.PrimaryPasses.push_back(&_sceneFlags);
 	_bindings.Reconstruction = &_post->Reconstruction();
-	_submissions = std::make_shared<BistroRender::QueueSubmission>(*c.Primary.Device);
-	_executor = std::make_unique<BistroRender::Executor>(_submissions, 0,
-	                                                     UINT(c.Primary.FrameConstants.size()));
+	_executor = std::make_unique<BistroRender::Executor>(*c.Primary.Device, UINT(c.Primary.FrameConstants.size()));
 	_lighting->SetWaterRetirement([this] { _executor->Drain(); });
 	_environment->SetRetirement([this] { _executor->Drain(); });
 	Log::Info("Renderer", "Bistro packet renderer initialized; one rendering path");
@@ -69,30 +40,7 @@ void BistroRenderPipeline::Initialize(RenderPipelineContext& c)
 
 void BistroRenderPipeline::PrepareMaterialBindings(RenderPipelineContext& c)
 {
-	auto candidate = _submissions;
-	int selection = _secondarySelection;
-	const auto select = [&](int requested)
-	{
-		if (requested != _secondarySelection)
-		{
-			auto secondary = OpenSecondary(*c.Primary.Device, requested);
-			if (secondary || _submissions->HasSecondary())
-			{
-				candidate = std::make_shared<BistroRender::QueueSubmission>(*c.Primary.Device, std::move(secondary));
-			}
-			selection = requested;
-		}
-		return candidate;
-	};
-	if (_cloudPicture->UpdateSettings(select, [this] { _executor->Drain(); }))
-	{
-		_secondarySelection = selection;
-		if (candidate != _submissions)
-		{
-			_executor = std::make_unique<BistroRender::Executor>(candidate, 0, UINT(c.Primary.FrameConstants.size()));
-			_submissions = std::move(candidate);
-		}
-	}
+	_cloudPicture->UpdateSettings([this] { _executor->Drain(); });
 	const UINT slot = c.Primary.CurrFrameConstantsIndex;
 	_executor->Begin(slot);
 	_animationTime += (std::max)(0.0, double(c.Common.GameTimer->DeltaTime()));
@@ -214,20 +162,11 @@ uint64_t BistroRenderPipeline::ExecuteFrame(RenderPipelineContext& c, GDX12Comma
 	uint64_t completion;
 	try
 	{
-		completion = _executor->Execute(_schedule, _geometry->PlannedResources(slot), record, prefix, nullptr, nullptr,
-		                                _cloudPicture->Waits(_schedule));
-		_cloudPicture->RetireFrame(_schedule, _executor->Completions(), true);
+		completion = _executor->Execute(_schedule, _geometry->PlannedResources(slot), record, prefix);
 	}
 	catch (...)
 	{
 		_post->Reconstruction().CancelRecording();
-		try
-		{
-			_cloudPicture->RetireFrame(_schedule, _executor->Completions(), false);
-		}
-		catch (...)
-		{
-		}
 		throw;
 	}
 	_post->Submitted(slot);
