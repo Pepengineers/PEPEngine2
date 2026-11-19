@@ -5,7 +5,6 @@
 #include <tuple>
 #include <algorithm>
 #include <set>
-#include <sstream>
 
 namespace
 {
@@ -333,18 +332,21 @@ namespace
     // Compare complete placements lexicographically, including downstream aliases.
     struct PlacementCost
     {
-        uint64_t WithoutComputeImport = 0;
-        uint64_t NativeImports = 0;
-        uint64_t NativeExports = 0;
-        uint64_t Copies = 0;
+        // The first two preferences apply to each remote input. Multiple inputs may share a replica.
+        uint64_t InputsWithoutComputeImport = 0;
+        uint64_t InputsWithNativeImport = 0;
+        // Penalize a native export for texture routes where the queue policy permits ComputeCopy.
+        uint64_t NativeExportStages = 0;
+        // Count physical copies once per resource component, including downstream aliases.
+        uint64_t ComponentCopies = 0;
 
-        auto Rank() const { return std::make_tuple(WithoutComputeImport, NativeImports, NativeExports, Copies); }
+        auto Rank() const { return std::tie(InputsWithoutComputeImport, InputsWithNativeImport, NativeExportStages, ComponentCopies); }
         void Add(const PlacementCost& cost)
         {
-            WithoutComputeImport += cost.WithoutComputeImport;
-            NativeImports += cost.NativeImports;
-            NativeExports += cost.NativeExports;
-            Copies += cost.Copies;
+            InputsWithoutComputeImport += cost.InputsWithoutComputeImport;
+            InputsWithNativeImport += cost.InputsWithNativeImport;
+            NativeExportStages += cost.NativeExportStages;
+            ComponentCopies += cost.ComponentCopies;
         }
     };
 
@@ -355,8 +357,8 @@ namespace
     };
     using PlacementCandidates = std::map<std::pair<PinAddress, MemoryType>, PlacementCandidate>;
 
-    uint32_t CountTransportStages(uint32_t transferMask)
-    { return uint32_t(bool(transferMask & 1)) + uint32_t(bool(transferMask & 2)) + uint32_t(bool(transferMask & 4)); }
+    constexpr uint32_t ExportStage = 1;
+    constexpr uint32_t ReplicaStage(EDeviceRole role) { return 2u << role; }
 
     // Treat alias versions of an import as imported allocations for writable-access constraints.
     const ResourceDescription* FindImportedResource(const FrameGraphDefinition& graphDefinition, const FrameGraphCompileData& compileData,
@@ -372,7 +374,8 @@ namespace
     // Rank consumer bindings for one placement, including mutable alias descendants.
     void EvaluateResourcePlacement(const FrameGraphDefinition& graphDefinition,
         const FrameGraphCompileData& compileData, const std::vector<Connection>& graphConnections, const InputSources& inputSources,
-        const ResourceDescriptions& resourceDescriptions, PlacementCandidates& candidates, const PinAddress& sourceAddress, MemoryType storageType)
+        const ResourceDescriptions& resourceDescriptions, PlacementCandidates& candidates, const PinAddress& sourceAddress,
+        MemoryType storageType, TransferMethod nativeCopy)
     {
         const auto& nodeDefinition = graphDefinition.Nodes.at(sourceAddress.Node);
         const auto& portDescription = graphDefinition.GetPortDescription(sourceAddress);
@@ -426,15 +429,15 @@ namespace
                         consumerChoice.Cost.Add(alias->second.Cost);
                     }
                     if (!validChoice) { continue; }
-                    const bool needsReplica = NeedsFrameGraphLocalCopy(storageType, accessType, isRemote);
+                    const bool needsReplica = accessType == MemoryType::Local && (isRemote || storageType == MemoryType::Shared);
                     if (isRemote && !(canComputeImport && needsReplica))
                     {
-                        ++consumerChoice.Cost.WithoutComputeImport;
-                        if (needsReplica) { ++consumerChoice.Cost.NativeImports; }
+                        ++consumerChoice.Cost.InputsWithoutComputeImport;
+                        if (needsReplica) { ++consumerChoice.Cost.InputsWithNativeImport; }
                     }
                     uint32_t transferMask = choiceEntry.first;
-                    if (storageType == MemoryType::Local && (isRemote || accessType == MemoryType::Shared)) { transferMask |= 1; }
-                    if (needsReplica) { transferMask |= consumerDefinition.DeviceRole == DEVICE_ROLE_PRIMARY ? 2 : 4; }
+                    if (storageType == MemoryType::Local && (isRemote || accessType == MemoryType::Shared)) { transferMask |= ExportStage; }
+                    if (needsReplica) { transferMask |= ReplicaStage(consumerDefinition.DeviceRole); }
                     consumerChoice.Plan.Consumers.emplace(graphConnection.Target, accessType);
                     const auto previousChoice = nextChoices.find(transferMask);
                     if (previousChoice == nextChoices.end() || consumerChoice.Cost.Rank() < previousChoice->second.Cost.Rank())
@@ -451,15 +454,26 @@ namespace
         {
             auto& [mask, candidate] = *it;
             auto& plan = candidate.Plan;
-            plan.CopyCount = CountTransportStages(mask) * resourceComponents;
-            plan.Export = (mask & 1) != 0;
-            const bool remoteExport = plan.Export && hasRemoteConsumer;
-            plan.ComputeExport = remoteExport && canComputeExport;
-            const uint32_t remoteReplicaMask = receiver == DEVICE_ROLE_PRIMARY ? 2 : 4;
-            plan.ComputeImport = canComputeImport && (mask & remoteReplicaMask);
-            // One export serves all readers. A direct shared output needs no export.
-            if (allowCompute && remoteExport && !plan.ComputeExport) { ++candidate.Cost.NativeExports; }
-            candidate.Cost.Copies += plan.CopyCount;
+            const bool computeImport = (mask & ReplicaStage(receiver)) && canComputeImport;
+            if (mask & ExportStage)
+            {
+                plan.Export.Method = nativeCopy;
+                if (hasRemoteConsumer && canComputeExport) { plan.Export.Method = TransferMethod::ComputeCopy; }
+                // A native export paired with a shader import runs on DIRECT.
+                else if (computeImport) { plan.Export.Method = TransferMethod::DirectQueue; }
+                plan.Export.Scope = hasRemoteConsumer ? CopyScope::CrossGPU : CopyScope::Local;
+                plan.CopyCount += resourceComponents;
+                if (allowCompute && hasRemoteConsumer && !canComputeExport) { ++candidate.Cost.NativeExportStages; }
+            }
+            for (auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
+            {
+                if (!(mask & ReplicaStage(role))) { continue; }
+                auto& transfer = plan.Imports[role];
+                transfer.Method = role == receiver && computeImport ? TransferMethod::ComputeCopy : nativeCopy;
+                if (role == receiver) { transfer.Scope = plan.Export ? CopyScope::CrossGPUAfterExport : CopyScope::CrossGPU; }
+                plan.CopyCount += resourceComponents;
+            }
+            candidate.Cost.ComponentCopies += plan.CopyCount;
             if (candidate.Cost.Rank() < best->second.Cost.Rank()) { best = it; }
         }
         auto& plan = best->second.Plan;
@@ -470,16 +484,18 @@ namespace
         {
             const bool localBindingsOnly = storageType == MemoryType::Local &&
                 std::all_of(plan.Consumers.begin(), plan.Consumers.end(), [](const auto& consumer) { return consumer.second == MemoryType::Local; });
-            plan.BufferPayload = !plan.ComputeExport && !plan.ComputeImport &&
+            const bool computeExport = plan.Export.Method == TransferMethod::ComputeCopy;
+            const bool computeImport = plan.Imports[receiver].Method == TransferMethod::ComputeCopy;
+            plan.BufferPayload = !computeExport && !computeImport &&
                 (resourceDescription.IsDepth() || resourceDescription.Type != ResourceType::Texture2D || localBindingsOnly);
             auto& producerUsages = storageType == MemoryType::Shared ? plan.SharedTextureUsages : plan.LocalTextureUsages;
             producerUsages[nodeDefinition.DeviceRole] |= portDescription.Usages;
-            if (plan.ComputeExport)
+            if (computeExport)
             {
                 plan.LocalTextureUsages[nodeDefinition.DeviceRole] |= ResourceUsage::NonPixelShaderRead;
                 plan.SharedTextureUsages[nodeDefinition.DeviceRole] |= ResourceUsage::UnorderedAccess;
             }
-            if (plan.ComputeImport)
+            if (computeImport)
             {
                 plan.SharedTextureUsages[receiver] |= ResourceUsage::NonPixelShaderRead;
                 plan.LocalTextureUsages[receiver] |= ResourceUsage::UnorderedAccess;
@@ -501,6 +517,7 @@ namespace
     {
         // The cost of a later version must be known before ranking its source.
         PlacementCandidates candidates;
+        const auto nativeCopy = executionPlan.UseCopyQueue ? TransferMethod::CopyQueue : TransferMethod::DirectQueue;
         for (auto it = executionPlan.Order.rbegin(); it != executionPlan.Order.rend(); ++it)
         {
             for (const auto& [pin, output] : graphDefinition.Nodes.at(*it).Description.Outputs)
@@ -508,7 +525,7 @@ namespace
                 for (auto storage : {MemoryType::Local, MemoryType::Shared})
                 {
                     EvaluateResourcePlacement(graphDefinition, compileData, graphConnections, inputSources,
-                        resourceDescriptions, candidates, {*it, pin}, storage);
+                        resourceDescriptions, candidates, {*it, pin}, storage, nativeCopy);
                 }
             }
         }
@@ -587,62 +604,4 @@ FrameGraphPlan CompileFrameGraph(const FrameGraphDefinition& graphDefinition, co
     const auto resourceDescriptions = ResolveResourceDescriptions(graphDefinition, compileData, inputSources, executionPlan.Order);
     BuildResourcePlacementPlans(graphDefinition, compileData, graphConnections, inputSources, resourceDescriptions, executionPlan);
     return executionPlan;
-}
-
-std::string FrameGraphPlan::GetDebugReport(const FrameGraphDefinition& definition, const FrameGraphCompileData& compileData) const
-{
-    const auto isImported = [&](const NodeId& id)
-    {
-        const auto& outputs = definition.Nodes.at(id).Description.Outputs;
-        return std::any_of(outputs.begin(), outputs.end(), [&](const auto& output)
-        { return GetPortCompileData(compileData, {id, output.first}).Imported.has_value(); });
-    };
-
-    std::ostringstream out;
-    out << "[Execution plan | " << FrameSlotCount << " slots]\n";
-    for (const auto& id : Order)
-    {
-        if (isImported(id)) { continue; }
-        out << "  " << id << " | " << GetDeviceRoleName(definition.Nodes.at(id).DeviceRole);
-        auto dependencies = Dependencies.find(id);
-        if (dependencies != Dependencies.end())
-        {
-            const char* separator = " | after: ";
-            for (const auto& dependency : dependencies->second)
-            {
-                if (isImported(dependency)) { continue; }
-                out << separator << dependency;
-                separator = ", ";
-            }
-        }
-        out << '\n';
-    }
-    out << "\n[Resource placement]\n";
-    for (const auto& entry : Resources)
-    {
-        const auto& p = entry.second;
-        out << "  " << FormatPinAddress(entry.first) << " | " << GetMemoryTypeName(p.Storage)
-            << " | " << GetResourceTypeName(p.Description.Type);
-        if (p.Description.IsBuffer()) { out << " capacity=" << p.Description.Capacity; }
-        else
-        {
-            out << ' ' << GetTextureFormatName(p.Description.Format) << ' ' << p.Description.Width << 'x' << p.Description.Height;
-            if (p.Description.ArraySize > 1) { out << " layers=" << p.Description.ArraySize; }
-        }
-        out << " | usages=" << uint32_t(p.Description.Usages);
-        if (p.CopyCount) { out << " | copies=" << p.CopyCount; }
-        if (p.Export) { out << (p.ComputeExport ? " export via ComputeCopy (DIRECT)" : " export"); }
-        if (p.BufferPayload && (p.Export || p.Storage == MemoryType::Shared)) { out << " via footprint buffer"; }
-        if (p.Consumers.empty()) { out << " | unused"; }
-        out << '\n';
-        for (const auto& [target, access] : p.Consumers)
-        {
-            const bool remote = definition.Nodes.at(entry.first.Node).DeviceRole != definition.Nodes.at(target.Node).DeviceRole;
-            out << "    -> " << FormatPinAddress(target) << " | " << GetMemoryTypeName(access);
-            if (NeedsFrameGraphLocalCopy(p.Storage, access, remote))
-            { out << (p.ComputeImport && remote ? " replica via ComputeCopy (DIRECT)" : " replica"); }
-            out << '\n';
-        }
-    }
-    return out.str();
 }

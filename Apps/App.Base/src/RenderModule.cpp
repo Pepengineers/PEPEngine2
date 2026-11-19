@@ -95,8 +95,11 @@ void RenderModule::OnResize()
     _window->GetWindowSize(width, height);
 
     _renderingSuspended = !width || !height;
-    _frameGraph->WaitForGPUCompletion();
-    if (_renderingSuspended) { return; }
+    if (_renderingSuspended)
+    {
+        _frameGraph->WaitForGPUCompletion();
+        return;
+    }
 
     _frameGraph->ReleaseFrameSlotResourcesForResize();
     _backBuffer->Resize(width, height);

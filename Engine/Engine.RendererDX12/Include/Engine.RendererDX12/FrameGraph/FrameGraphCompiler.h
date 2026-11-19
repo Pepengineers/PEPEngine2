@@ -57,17 +57,41 @@ struct FrameGraphCompileData
     uint32_t FrameSlotCount = 3;
 };
 
-inline bool NeedsFrameGraphLocalCopy(MemoryType storage, MemoryType access, bool remote)
-{ return access == MemoryType::Local && (remote || storage == MemoryType::Shared); }
+enum class TransferMethod
+{
+    None,
+    DirectQueue,
+    CopyQueue,
+    // Requires shader access to cross-adapter ROW_MAJOR textures on the GPU executing the dispatch.
+    ComputeCopy
+};
+
+// Controls how a copy contributes to per-frame cross-GPU transfer metrics.
+enum class CopyScope
+{
+    // Omit this same-device copy from cross-GPU metrics.
+    Local,
+    // Record the copy time and count the transferred resource and its bytes.
+    CrossGPU,
+    // Record only the import time. The export already counted the resource and its bytes.
+    CrossGPUAfterExport
+};
+
+struct ResourceTransfer
+{
+    TransferMethod Method = TransferMethod::None;
+    CopyScope Scope = CopyScope::Local;
+    explicit operator bool() const { return Method != TransferMethod::None; }
+};
 
 struct ResourcePlan
 {
     ResourceDescription Description;
     MemoryType Storage = MemoryType::Local;
-    bool Export = false;
+    ResourceTransfer Export;
+    // Each device imports at most once for all consumers of this version of the resource.
+    std::array<ResourceTransfer, 2> Imports{};
     bool BufferPayload = false;
-    bool ComputeExport = false;
-    bool ComputeImport = false;
     std::array<ResourceUsage, 2> SharedTextureUsages{};
     std::array<ResourceUsage, 2> LocalTextureUsages{};
     PinAddress Alias;

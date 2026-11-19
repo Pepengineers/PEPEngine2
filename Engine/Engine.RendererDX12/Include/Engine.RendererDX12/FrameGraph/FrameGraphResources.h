@@ -31,6 +31,20 @@ struct FrameGraphSharedResources
     FrameGraphPhysicalResource& GetDeviceMapping(GDX12Device* device) const;
 };
 
+// Physical representations and readiness of one logical output in one frame slot.
+// Alias outputs can refer to the same local or shared allocation.
+struct FrameGraphMaterialization
+{
+    std::unique_ptr<FrameGraphPhysicalResource> LocalResource;
+    FrameGraphPhysicalResource* ProducerResource = nullptr;
+    FrameGraphSharedResources Shared;
+    FrameGraphSharedResources* SharedAllocationAlias = nullptr;
+    std::map<EDeviceRole, std::unique_ptr<FrameGraphPhysicalResource>> LocalCopies;
+    GDX12CompletionPoint ProducerReady;
+    GDX12CompletionPoint SharedReady;
+    std::array<GDX12CompletionPoint, 2> LocalCopyReady{};
+};
+
 std::unique_ptr<FrameGraphPhysicalResource> CreateFrameGraphNative(GDX12DeviceResources* owner, const ResourceDescription& description);
 std::unique_ptr<FrameGraphPhysicalResource> WrapFrameGraphImport(GDX12DeviceResources* owner, GDX12Texture* texture, const ResourceDescription& description);
 HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceResources* other,

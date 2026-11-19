@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraph.h" />
+    <ClInclude Include="src\FrameGraph\FrameGraphDiagnostics.h" />
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\ComputeCopyResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraphResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\PassContext.h" />
@@ -64,6 +65,7 @@
   <ItemGroup>
     <ClCompile Include="src\GDX12RenderPass.cpp" />
     <ClCompile Include="src\FrameGraph\FrameGraph.cpp" />
+    <ClCompile Include="src\FrameGraph\FrameGraphDiagnostics.cpp" />
     <ClCompile Include="src\FrameGraph\ComputeCopyResources.cpp" />
     <ClCompile Include="src\FrameGraph\FrameGraphResources.cpp" />
     <ClCompile Include="src\FrameGraph\PassDescription.cpp" />

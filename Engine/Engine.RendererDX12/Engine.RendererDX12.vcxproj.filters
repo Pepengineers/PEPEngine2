@@ -19,6 +19,7 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraph.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="src\FrameGraph\FrameGraphDiagnostics.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraphResources.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\ComputeCopyResources.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\PassContext.h"><Filter>Header Files</Filter></ClInclude>
@@ -26,6 +27,7 @@
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraphCompiler.h"><Filter>Header Files</Filter></ClInclude>
     <ClCompile Include="src\GDX12RenderPass.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\FrameGraph\FrameGraph.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\FrameGraph\FrameGraphDiagnostics.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\FrameGraph\FrameGraphResources.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\FrameGraph\ComputeCopyResources.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\FrameGraph\PassDescription.cpp"><Filter>Source Files</Filter></ClCompile>
