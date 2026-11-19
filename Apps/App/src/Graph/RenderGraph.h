@@ -50,6 +50,7 @@ struct Packet {
     uint32_t Lists;
     bool OwnerRecording = false;
     Queue Target = Queue::Direct;
+    std::string Name;
 };
 struct Schedule {
     std::vector<Packet> Packets;

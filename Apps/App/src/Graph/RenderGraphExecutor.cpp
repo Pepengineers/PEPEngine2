@@ -1,6 +1,10 @@
+#ifndef USE_PIX
+#define USE_PIX
+#endif
 #include "RenderGraphExecutor.h"
 #include "Engine.RendererDX12/GDX12CommandQueue.h"
 #include "Engine.RendererDX12/GDX12CommandList.h"
+#include <pix/pix3.h>
 #include <algorithm>
 #include <limits>
 #include <stdexcept>
@@ -366,29 +370,38 @@ uint64_t Executor::Execute(const Schedule& schedule, const std::vector<ID3D12Res
 					                    ThrowIfFailed(lists[index]->Allocator->Reset());
 					                    ThrowIfFailed(cmd->Reset(lists[index]->Allocator.Get(), nullptr));
 					                    closed[index] = 0;
-					                    const auto barriers = [&](const std::vector<Barrier>& bs)
+					                    const auto barriers = [&](const std::vector<Barrier>& bs, const char* phase)
 					                    {
+						                    if (bs.empty())
+						                    {
+							                    return;
+						                    }
+						                    PIXScopedEvent(cmd, PIX_COLOR(124, 143, 166), "%s / %s (%u)",
+						                                   packet.Name.c_str(), phase, static_cast<UINT>(bs.size()));
+						                    std::vector<D3D12_RESOURCE_BARRIER> native;
+						                    native.reserve(bs.size());
 						                    for (auto b : bs)
 						                    {
-							                    auto native =
+							                    native.push_back(
 							                        b.Uav ? CD3DX12_RESOURCE_BARRIER::UAV(resources.at(b.Resource))
 							                              : CD3DX12_RESOURCE_BARRIER::Transition(
 							                                    resources.at(b.Resource),
 							                                    static_cast<D3D12_RESOURCE_STATES>(b.Before),
-							                                    static_cast<D3D12_RESOURCE_STATES>(b.After));
-							                    cmd->ResourceBarrier(1, &native);
+							                                    static_cast<D3D12_RESOURCE_STATES>(b.After)));
 						                    }
+						                    cmd->ResourceBarrier(static_cast<UINT>(native.size()), native.data());
 					                    };
 					                    if (j == 0)
 					                    {
-						                    barriers(packet.Before);
+						                    barriers(packet.Before, "before barriers");
 					                    }
 					                    else if (j == packet.Lists + 1)
 					                    {
-						                    barriers(packet.After);
+						                    barriers(packet.After, "after barriers");
 					                    }
 					                    else if (packet.Operation != Invalid)
 					                    {
+						                    PIXScopedEvent(cmd, PIX_COLOR(57, 158, 117), "%s", packet.Name.c_str());
 						                    record(packet.Operation, j - 1, cmd);
 					                    }
 					                    const auto closeResult = cmd->Close();
