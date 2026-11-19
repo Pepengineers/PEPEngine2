@@ -28,11 +28,9 @@ class SceneLighting
 	GDX12Texture* ParticleMotion() const { return _transparency->ParticleMotion(); }
 	GDX12Texture* PostDepth() const { return _transparency->Depth(); }
 	GDX12Texture* PostMotion() const { return _transparency->Motion(); }
-#ifdef _DEBUG
 	GDX12Texture* AOTexture(UINT slot) const { return _frames.at(slot).AO->Output(); }
 	GDX12Texture* DeferredHDR() const { return _deferred._color.get(); }
 	GDX12Texture* SunShadow(UINT slot) const { return _sunShadows->Output(slot); }
-#endif
 	void SetWaterRetirement(std::function<void()> retire) { _transparency->SetWaterRetirement(std::move(retire)); }
 	std::pair<size_t, size_t> Readiness() const
 	{

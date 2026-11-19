@@ -91,7 +91,10 @@ void RenderModule::Initialize()
     if (!arguments) throw std::runtime_error("Cannot read renderer startup arguments");
     bool debugLayerRequested = false;
     for (int index = 1; index < argumentCount; ++index)
+    {
         if (std::wstring_view(arguments[index]) == L"-d3ddebug") debugLayerRequested = true;
+        else if (std::wstring_view(arguments[index]) == L"--debug-ui") Engine::UI::EnableDebugUI();
+    }
     LocalFree(arguments);
     if (debugLayerRequested)
     {

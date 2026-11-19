@@ -28,7 +28,6 @@ namespace Engine::UI
     bool HandleMessage(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
     bool WantsKeyboardInput();
     bool WantsMouseInput();
-#ifdef _DEBUG
+    void EnableDebugUI(); // Startup opt-in for non-Debug builds.
     bool DebugUIVisible();
-#endif
 }
