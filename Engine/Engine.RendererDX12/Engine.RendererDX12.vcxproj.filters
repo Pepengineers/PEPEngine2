@@ -20,12 +20,14 @@
     </ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraph.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraphResources.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\ComputeCopyResources.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\PassContext.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\PassDescription.h"><Filter>Header Files</Filter></ClInclude>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraphCompiler.h"><Filter>Header Files</Filter></ClInclude>
     <ClCompile Include="src\GDX12RenderPass.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\FrameGraph\FrameGraph.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\FrameGraph\FrameGraphResources.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="src\FrameGraph\ComputeCopyResources.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\FrameGraph\PassDescription.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClCompile Include="src\FrameGraph\FrameGraphCompiler.cpp"><Filter>Source Files</Filter></ClCompile>
     <ClInclude Include="Include\Engine.RendererDX12\GDX12DeviceFactory.h">
@@ -192,6 +194,7 @@
     <None Include="Shaders\CBufferStructures.hlsl" />
     <None Include="Shaders\CompositionPass.hlsl" />
     <None Include="Shaders\Culling.hlsl" />
+    <None Include="Shaders\ComputeCopy.hlsl" />
     <None Include="Shaders\FullScreenVS.hlsl" />
     <None Include="Shaders\OpaquePass.hlsl" />
     <None Include="Shaders\TransparentPass.hlsl" />

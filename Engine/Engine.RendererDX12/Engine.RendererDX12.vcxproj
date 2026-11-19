@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraph.h" />
+    <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\ComputeCopyResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\FrameGraphResources.h" />
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\PassContext.h" />
     <ClInclude Include="Include\Engine.RendererDX12\FrameGraph\PassDescription.h" />
@@ -63,6 +64,7 @@
   <ItemGroup>
     <ClCompile Include="src\GDX12RenderPass.cpp" />
     <ClCompile Include="src\FrameGraph\FrameGraph.cpp" />
+    <ClCompile Include="src\FrameGraph\ComputeCopyResources.cpp" />
     <ClCompile Include="src\FrameGraph\FrameGraphResources.cpp" />
     <ClCompile Include="src\FrameGraph\PassDescription.cpp" />
     <ClCompile Include="src\FrameGraph\FrameGraphCompiler.cpp" />
@@ -87,6 +89,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="Shaders\BufferClear.hlsl" />
+    <None Include="Shaders\ComputeCopy.hlsl" />
     <None Include="Shaders\CBufferStructures.hlsl" />
     <None Include="Shaders\CompositionPass.hlsl" />
     <None Include="Shaders\Culling.hlsl" />

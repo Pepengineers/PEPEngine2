@@ -3,7 +3,9 @@
 #include "Engine.RendererDX12/FrameGraph/PassDescription.h"
 #include "Engine.RendererDX12/GDX12Device.h"
 
+#include <array>
 #include <optional>
+#include <set>
 
 enum class TransportQueuePolicy { Auto, ForceDirect, ForceCopy };
 
@@ -48,6 +50,9 @@ struct FrameGraphCompileData
     UInt2 DisplaySize;
     UInt2 RenderSize;
     std::map<PinAddress, FrameGraphPortData> Ports;
+    std::array<std::set<DXGI_FORMAT>, 2> ComputeCopyFormats;
+    std::set<PinAddress> RejectedComputeExports;
+    std::set<PinAddress> RejectedComputeImports;
     TransportQueuePolicy QueuePolicy = TransportQueuePolicy::Auto;
     uint32_t FrameSlotCount = 3;
 };
@@ -61,6 +66,10 @@ struct ResourcePlan
     MemoryType Storage = MemoryType::Local;
     bool Export = false;
     bool BufferPayload = false;
+    bool ComputeExport = false;
+    bool ComputeImport = false;
+    std::array<ResourceUsage, 2> SharedTextureUsages{};
+    std::array<ResourceUsage, 2> LocalTextureUsages{};
     PinAddress Alias;
     std::map<PinAddress, MemoryType> Consumers;
     uint32_t CopyCount = 0;
@@ -76,6 +85,6 @@ struct FrameGraphPlan
     std::string GetDebugReport(const FrameGraphDefinition& definition, const FrameGraphCompileData& compileData) const;
 };
 
-// Validate topology, resolve resource descriptions and choose minimum-copy memory placements.
+// Validate topology, resolve descriptions and rank the available transport methods.
 // Return a CPU plan; the runtime allocates GPU resources and initializes passes separately.
 FrameGraphPlan CompileFrameGraph(const FrameGraphDefinition& graphDefinition, const FrameGraphCompileData& compileData);

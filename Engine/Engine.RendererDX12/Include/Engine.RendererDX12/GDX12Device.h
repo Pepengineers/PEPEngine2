@@ -14,6 +14,13 @@ struct DeviceSpecs
 	size_t SharedSystemMemory;    // in bytes
 	unsigned PCIeGeneration = 0;  // 0 when unavailable or not applicable
 	CD3DX12FeatureSupport Features;
+
+	void InitializeFeatures(ID3D12Device* device);
+	HRESULT GetFormatSupport(D3D12_FEATURE_DATA_FORMAT_SUPPORT& support) const;
+
+private:
+	// Populated on the render thread during resource and graph setup.
+	mutable std::unordered_map<DXGI_FORMAT, D3D12_FEATURE_DATA_FORMAT_SUPPORT> _formatSupport;
 };
 
 enum EDeviceRole

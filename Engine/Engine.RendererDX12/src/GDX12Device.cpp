@@ -103,13 +103,33 @@ HRESULT GDX12Device::Initialize(ComPtr<IDXGIAdapter4> adapter)
     return hr;
 }
 
+void DeviceSpecs::InitializeFeatures(ID3D12Device* device)
+{
+    _formatSupport.clear();
+    Features.Init(device);
+}
+
+HRESULT DeviceSpecs::GetFormatSupport(D3D12_FEATURE_DATA_FORMAT_SUPPORT& support) const
+{
+    const auto cached = _formatSupport.find(support.Format);
+    if (cached != _formatSupport.end())
+    {
+        support = cached->second;
+        return S_OK;
+    }
+
+    const HRESULT result = Features.FormatSupport(support.Format, support.Support1, support.Support2);
+    if (SUCCEEDED(result)) { _formatSupport.emplace(support.Format, support); }
+    return result;
+}
+
 void GDX12Device::CollectDeviceFeatures()
 {
     _rtvDescriptorSize = _device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
     _dsvDescriptorSize = _device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
     _cbvSrvUavDescriptorSize = _device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
 
-    _specs.Features.Init(_device.Get());
+    _specs.InitializeFeatures(_device.Get());
 
     DXGI_ADAPTER_DESC1 adapterDesc{};
     const HRESULT adapterResult = _adapter->GetDesc1(&adapterDesc);

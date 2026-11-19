@@ -1,5 +1,6 @@
 #include "Engine.RendererDX12/FrameGraph/FrameGraph.h"
 #include "Engine.RendererDX12/FrameGraph/FrameGraphResources.h"
+#include "Engine.RendererDX12/FrameGraph/ComputeCopyResources.h"
 #include "Engine.RendererDX12/GDX12GPUTimer.h"
 
 #include <algorithm>
@@ -194,7 +195,24 @@ struct CompiledFrameGraph::Runtime
         std::map<EDeviceRole, GDX12CompletionPoint> LocalCopyReady;
     };
 
-    enum class CopyScope { Local, CrossGPU, CrossGPUAfterExport };
+    // Controls how a copy contributes to per-frame cross-GPU transfer metrics.
+    enum class CopyScope
+    {
+        // Omit this same-device copy from cross-GPU metrics.
+        Local,
+        // Record the copy time and count the transferred resource and its bytes.
+        CrossGPU,
+        // Record only the import time. The export already counted the resource and its bytes.
+        CrossGPUAfterExport
+    };
+
+    enum class TransferMethod
+    {
+        DirectQueue,
+        CopyQueue,
+        // Requires shader access to cross-adapter ROW_MAJOR textures on the GPU executing the dispatch.
+        ComputeCopy
+    };
 
     struct CopySample
     {
@@ -259,6 +277,7 @@ struct CompiledFrameGraph::Runtime
     FrameGraphDefinition Definition;
     FrameGraphCompileData CompileData;
     FrameGraphPlan Plan;
+    std::array<ComputeCopyResources, 2> ComputeCopiers;
     std::map<NodeId, std::unique_ptr<GDX12RenderPass>> Passes;
     std::map<NodeId, std::unique_ptr<GDX12GPUTimer>> Timers;
     std::map<GDX12CommandQueue*, GDX12GPUTimer> FrameQueueTimers;
@@ -423,6 +442,9 @@ struct CompiledFrameGraph::Runtime
     void ResolveResourceRequirements()
     {
         CompileData.Ports.clear();
+        CompileData.ComputeCopyFormats = {};
+        CompileData.RejectedComputeExports.clear();
+        CompileData.RejectedComputeImports.clear();
         CompileData.RenderSize = CompileData.DisplaySize;
         for (const auto& node : Definition.Nodes)
         {
@@ -444,6 +466,29 @@ struct CompiledFrameGraph::Runtime
             auto& node = Definition.Nodes.at(entry.first);
             PassResourceRequirementsContext context(GetDeviceResources(node.DeviceRole), Common, node, CompileData);
             entry.second->ResolveResourceRequirements(context);
+        }
+        if (Secondary && CompileData.QueuePolicy != TransportQueuePolicy::ForceCopy)
+        {
+            // Every concrete texture format originates at an output or an external import.
+            std::set<DXGI_FORMAT> formats;
+            for (const auto& [id, node] : Definition.Nodes)
+            {
+                for (const auto& [pin, output] : node.Description.Outputs)
+                {
+                    if (output.Type != ResourceType::Texture2D) { continue; }
+                    const auto& imported = CompileData.Ports.at({id, pin}).Imported;
+                    if (imported) { formats.insert(imported->Format); }
+                    else { formats.insert(output.Formats.begin(), output.Formats.end()); }
+                }
+            }
+            for (auto* owner : {Primary, Secondary})
+            {
+                for (auto format : formats)
+                {
+                    if (ComputeCopyResources::SupportsFormat(owner->Device, format))
+                    { CompileData.ComputeCopyFormats[owner->Device->Role].insert(format); }
+                }
+            }
         }
         // SDK input requirements flow backwards through SameAs to the render size.
         std::optional<UInt2> renderSize;
@@ -524,8 +569,19 @@ struct CompiledFrameGraph::Runtime
                 for (auto& entry : plan.Resources)
                 {
                     if (entry.first.Node != *it || entry.second.Alias.Node.empty()) { continue; }
-                    auto original = Sources.at(entry.second.Alias);
-                    plan.Resources.at(original).Description.Usages |= entry.second.Description.Usages;
+                    auto& original = plan.Resources.at(Sources.at(entry.second.Alias));
+                    const auto& alias = entry.second;
+                    original.Description.Usages |= alias.Description.Usages;
+                    if (alias.Storage == MemoryType::Shared)
+                    {
+                        for (auto role : {DEVICE_ROLE_PRIMARY, DEVICE_ROLE_SECONDARY})
+                        { original.SharedTextureUsages[role] |= alias.SharedTextureUsages[role]; }
+                    }
+                    else
+                    {
+                        const auto role = Definition.Nodes.at(entry.first.Node).DeviceRole;
+                        original.LocalTextureUsages[role] |= alias.LocalTextureUsages[role];
+                    }
                 }
             }
             std::vector<FrameSlotResources> newFrameSlots(CompileData.FrameSlotCount);
@@ -536,30 +592,49 @@ struct CompiledFrameGraph::Runtime
                 {
                     const auto& resource = entry.second;
                     auto& material = frameResources.Resources[entry.first];
-                    if (!resource.Alias.Node.empty()) { continue; }
+                    const bool alias = !resource.Alias.Node.empty();
                     auto* owner = GetDeviceResources(Definition.Nodes.at(entry.first.Node).DeviceRole);
                     auto* other = owner == Primary ? Secondary : Primary;
                     if (Imports.count(entry.first.Node))
                     { material.LocalResource = WrapFrameGraphImport(owner, Imports.at(entry.first.Node)(), resource.Description); material.ProducerResource = material.LocalResource.get(); }
-                    else if (resource.Storage == MemoryType::Local)
-                    { material.LocalResource = CreateFrameGraphNative(owner, resource.Description); material.ProducerResource = material.LocalResource.get(); }
-                    if (resource.Storage == MemoryType::Shared || resource.Export)
+                    else if (!alias && resource.Storage == MemoryType::Local)
                     {
-                        const HRESULT result = TryCreateFrameGraphShared(owner, other ? other : owner, resource.Description, resource.BufferPayload, material.Shared);
+                        auto description = resource.Description;
+                        description.Usages |= resource.LocalTextureUsages[owner->Device->Role];
+                        material.LocalResource = CreateFrameGraphNative(owner, description);
+                        material.ProducerResource = material.LocalResource.get();
+                    }
+                    if ((!alias && resource.Storage == MemoryType::Shared) || resource.Export)
+                    {
+                        const HRESULT result = TryCreateFrameGraphShared(owner, other ? other : owner, resource, material.Shared);
                         if (FAILED(result))
                         {
+                            if (result != E_INVALIDARG && result != DXGI_ERROR_UNSUPPORTED) { ThrowIfFailed(result); }
                             // Reconsider only Auto choices; fixed memory requirements remain constraints.
                             bool narrowed = false;
                             const auto policy = Definition.Nodes.at(entry.first.Node).Description.Outputs.at(entry.first.Pin).RequestedMemory;
                             if (resource.Storage == MemoryType::Shared && policy == MemoryType::Auto
                                 && CompileData.Ports.at(entry.first).Capabilities.Shared)
                             { CompileData.Ports.at(entry.first).Capabilities.Shared = false; narrowed = true; }
-                            for (const auto& [target, binding] : resource.Consumers)
+                            if (!narrowed && resource.ComputeExport)
                             {
-                                const auto access = Definition.Nodes.at(target.Node).Description.Inputs.at(target.Pin).RequestedMemory;
-                                if (binding == MemoryType::Shared && access == MemoryType::Auto
-                                    && CompileData.Ports.at(target).Capabilities.Shared)
-                                { CompileData.Ports.at(target).Capabilities.Shared = false; narrowed = true; }
+                                // Retry without the shared UAV flag. Shader import may still work.
+                                narrowed = CompileData.RejectedComputeExports.insert(entry.first).second;
+                            }
+                            if (!narrowed && resource.ComputeImport)
+                            {
+                                // Try a direct shared read before falling back to a footprint buffer.
+                                narrowed = CompileData.RejectedComputeImports.insert(entry.first).second;
+                            }
+                            if (!narrowed)
+                            {
+                                for (const auto& [target, binding] : resource.Consumers)
+                                {
+                                    const auto access = Definition.GetPortDescription(target).RequestedMemory;
+                                    if (binding == MemoryType::Shared && access == MemoryType::Auto
+                                        && CompileData.Ports.at(target).Capabilities.Shared)
+                                    { CompileData.Ports.at(target).Capabilities.Shared = false; narrowed = true; }
+                                }
                             }
                             if (!narrowed) { ThrowIfFailed(result); }
                             Fallbacks.push_back(entry.first.Node + "." + entry.first.Pin + ": Auto excluded a shared candidate rejected by actual resource creation");
@@ -567,14 +642,34 @@ struct CompiledFrameGraph::Runtime
                             break;
                         }
                         if (resource.Storage == MemoryType::Shared) { material.ProducerResource = &material.Shared.GetDeviceMapping(owner->Device); }
+                        if (resource.ComputeExport) { ComputeCopiers[owner->Device->Role].Prepare(owner->Device, resource.Description.Format); }
                     }
                     // Multiple inputs on one GPU share a single local replica of this logical output.
                     for (const auto& [target, access] : resource.Consumers)
                     {
                         const auto& device = Definition.Nodes.at(target.Node).DeviceRole;
                         if (NeedsFrameGraphLocalCopy(resource.Storage, access, GetDeviceResources(device) != owner) && !material.LocalCopies.count(device))
-                        { material.LocalCopies.emplace(device, CreateFrameGraphNative(GetDeviceResources(device), resource.Description)); }
+                        {
+                            auto replica = resource.Description;
+                            const bool compute = resource.ComputeImport && GetDeviceResources(device) != owner;
+                            if (compute) { replica.Usages = resource.LocalTextureUsages[device]; }
+                            else { replica.Usages |= resource.LocalTextureUsages[device]; }
+                            try
+                            {
+                                material.LocalCopies.emplace(device, CreateFrameGraphNative(GetDeviceResources(device), replica));
+                            }
+                            catch (const DxException& error)
+                            {
+                                if (!compute || (error.ErrorCode != E_INVALIDARG && error.ErrorCode != DXGI_ERROR_UNSUPPORTED)) { throw; }
+                                CompileData.RejectedComputeImports.insert(entry.first);
+                                Fallbacks.push_back(entry.first.Node + "." + entry.first.Pin + ": local ComputeCopy UAV unavailable");
+                                retry = true;
+                                break;
+                            }
+                            if (compute) { ComputeCopiers[device].Prepare(GetDeviceResources(device)->Device, replica.Format); }
+                        }
                     }
+                    if (retry) { break; }
                 }
                 if (retry) { break; }
             }
@@ -639,9 +734,11 @@ struct CompiledFrameGraph::Runtime
 
     // Copy between two representations on one device; shared mappings carry data across adapters.
     GDX12CompletionPoint TransferResourceData(FrameGraphPhysicalResource& source, FrameGraphPhysicalResource& target,
-        const GDX12CompletionPoint& ready, bool useCopy, FrameSlotResources& frameResources,
+        const GDX12CompletionPoint& ready, TransferMethod method, FrameSlotResources& frameResources,
         const PinAddress& sourcePin, bool exporting, CopyScope scope)
     {
+        const bool useCopy = method == TransferMethod::CopyQueue;
+        const bool compute = method == TransferMethod::ComputeCopy;
         auto* device = source.DeviceResources->Device;
         auto* direct = device->GetCommandQueue();
         auto* queue = useCopy ? device->GetCopyCommandQueue() : direct;
@@ -660,17 +757,20 @@ struct CompiledFrameGraph::Runtime
         // Queue waits order GPU work without waiting for completion on the CPU.
         queue->GPUWait(dependency);
         auto* commands = GetFrameCommandList(queue, frameResources);
-        commands->BeginPixEvent((exporting ? "Export " : "Import ") + sourcePin.Node + "." + sourcePin.Pin, Colors::Orange);
+        std::string event = exporting ? "Export " : "Import ";
+        if (compute) { event += "ComputeCopy "; }
+        commands->BeginPixEvent(event + sourcePin.Node + "." + sourcePin.Pin, Colors::Orange);
         if (!useCopy)
         {
-            TransitionFrameGraphResource(commands, source, D3D12_RESOURCE_STATE_COPY_SOURCE);
-            TransitionFrameGraphResource(commands, target, D3D12_RESOURCE_STATE_COPY_DEST);
+            TransitionFrameGraphResource(commands, source, compute ? D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE : D3D12_RESOURCE_STATE_COPY_SOURCE);
+            TransitionFrameGraphResource(commands, target, compute ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS : D3D12_RESOURCE_STATE_COPY_DEST);
         }
         // Time the copy commands on their own queue. A busy readback slot must not delay transport.
         auto [timer, inserted] = TransportTimers[queue].try_emplace(std::make_pair(sourcePin, exporting));
         if (inserted) { timer->second.Initialize(device, queue, CompileData.FrameSlotCount); }
         const bool timed = timer->second.Start(commands, false);
-        auto statistics = CopyFrameGraphResource(commands, source, target);
+        auto statistics = compute ? ComputeCopiers[device->Role].Dispatch(commands, source, target)
+                                  : CopyFrameGraphResource(commands, source, target);
         if (timed) { timer->second.Stop(commands); }
         CopyBytes += statistics.Bytes; CopyCommands += statistics.Commands;
         // COPY uses implicit promotion from COMMON; resources decay back after its submission completes.
@@ -698,6 +798,7 @@ struct CompiledFrameGraph::Runtime
         auto source = Sources.at(target);
         auto& material = frameResources.Resources.at(source);
         const auto& resource = Plan.Resources.at(source);
+        const auto nativeCopy = Plan.UseCopyQueue ? TransferMethod::CopyQueue : TransferMethod::DirectQueue;
         const auto access = resource.Consumers.at(target);
         auto* owner = GetDeviceResources(Definition.Nodes.at(target.Node).DeviceRole);
         const bool remote = Definition.Nodes.at(source.Node).DeviceRole != Definition.Nodes.at(target.Node).DeviceRole;
@@ -708,14 +809,16 @@ struct CompiledFrameGraph::Runtime
         {
             if (resource.Export)
             {
-                if (!sharedSet.Producer)
-                { ThrowIfFailed(TryCreateFrameGraphShared(material.ProducerResource->DeviceResources, owner, resource.Description, resource.BufferPayload, sharedSet)); }
                 auto* shared = &sharedSet.GetDeviceMapping(material.ProducerResource->DeviceResources->Device);
                 const auto producerRole = Definition.Nodes.at(source.Node).DeviceRole;
                 const bool hasRemoteConsumer = std::any_of(resource.Consumers.begin(), resource.Consumers.end(), [&](const auto& consumer)
                 { return Definition.Nodes.at(consumer.first.Node).DeviceRole != producerRole; });
+                auto exportMethod = nativeCopy;
+                if (resource.ComputeExport) { exportMethod = TransferMethod::ComputeCopy; }
+                else if (resource.ComputeImport) { exportMethod = TransferMethod::DirectQueue; }
                 material.SharedReady = TransferResourceData(*material.ProducerResource, *shared, material.ProducerReady,
-                    Plan.UseCopyQueue, frameResources, source, true, hasRemoteConsumer ? CopyScope::CrossGPU : CopyScope::Local);
+                    exportMethod, frameResources, source, true,
+                    hasRemoteConsumer ? CopyScope::CrossGPU : CopyScope::Local);
             }
             else { material.SharedReady = material.ProducerReady; }
         }
@@ -724,12 +827,12 @@ struct CompiledFrameGraph::Runtime
         auto device = Definition.Nodes.at(target.Node).DeviceRole;
         if (!material.LocalCopyReady.count(device))
         {
-            if (!material.LocalCopies.count(device)) { material.LocalCopies[device] = CreateFrameGraphNative(owner, resource.Description); }
             auto scope = CopyScope::Local;
             // Count the resource once, even when transport uses both an export and an import.
             if (remote) { scope = resource.Export ? CopyScope::CrossGPUAfterExport : CopyScope::CrossGPU; }
+            const bool compute = remote && resource.ComputeImport;
             material.LocalCopyReady[device] = TransferResourceData(*shared, *material.LocalCopies.at(device), material.SharedReady,
-                Plan.UseCopyQueue, frameResources, source, false, scope);
+                compute ? TransferMethod::ComputeCopy : nativeCopy, frameResources, source, false, scope);
         }
         return {material.LocalCopies.at(device).get(), material.LocalCopyReady.at(device)};
     }
@@ -1049,7 +1152,7 @@ std::string CompiledFrameGraph::GetDebugReport() const
     {
         out << "\n[Cross-GPU copies]\n"
             << "  Planned per frame: " << _runtime->Plan.CopyCount
-            << " | Transport: " << (_runtime->Plan.UseCopyQueue ? "COPY" : "DIRECT") << '\n'
+            << " | Default copy queue: " << (_runtime->Plan.UseCopyQueue ? "COPY" : "DIRECT") << '\n'
             << "  Submitted so far: " << _runtime->CopyCommands << " commands, " << _runtime->CopyBytes << " bytes\n";
         if (const auto& timing = _runtime->LastCompletedFrameTiming)
         {

@@ -2,7 +2,7 @@
 
 #include <functional>
 #include <limits>
-#include <memory>
+#include <tuple>
 #include <algorithm>
 #include <set>
 #include <sstream>
@@ -330,133 +330,168 @@ namespace
         return memoryCapabilities;
     }
 
-    struct ResourcePlacementChoice
+    // Compare complete placements lexicographically, including downstream aliases.
+    struct PlacementCost
     {
-        PinAddress SourceAddress;
-        ResourcePlan PlacementPlan;
-        uint64_t TotalCopies = 0;
-        std::vector<const ResourcePlacementChoice*> AliasChoices;
+        uint64_t WithoutComputeImport = 0;
+        uint64_t NativeImports = 0;
+        uint64_t NativeExports = 0;
+        uint64_t Copies = 0;
+
+        auto Rank() const { return std::make_tuple(WithoutComputeImport, NativeImports, NativeExports, Copies); }
+        void Add(const PlacementCost& cost)
+        {
+            WithoutComputeImport += cost.WithoutComputeImport;
+            NativeImports += cost.NativeImports;
+            NativeExports += cost.NativeExports;
+            Copies += cost.Copies;
+        }
     };
-    // Export plus one local replica per GPU produces at most eight fan-out states.
-    struct ConsumerBindingChoice
+
+    struct PlacementCandidate
     {
-        std::map<PinAddress, MemoryType> ConsumerAccess;
-        std::vector<const ResourcePlacementChoice*> AliasChoices;
-        uint64_t AliasCopyCount = 0;
+        ResourcePlan Plan;
+        PlacementCost Cost;
     };
-    using PlacementChoices = std::map<std::pair<PinAddress, MemoryType>, std::unique_ptr<ResourcePlacementChoice>>;
+    using PlacementCandidates = std::map<std::pair<PinAddress, MemoryType>, PlacementCandidate>;
 
     uint32_t CountTransportStages(uint32_t transferMask)
     { return uint32_t(bool(transferMask & 1)) + uint32_t(bool(transferMask & 2)) + uint32_t(bool(transferMask & 4)); }
 
     // Treat alias versions of an import as imported allocations for writable-access constraints.
-    bool IsImportedResource(const FrameGraphDefinition& graphDefinition, const FrameGraphCompileData& compileData,
+    const ResourceDescription* FindImportedResource(const FrameGraphDefinition& graphDefinition, const FrameGraphCompileData& compileData,
         const InputSources& inputSources, const PinAddress& portAddress)
     {
-        if (GetPortCompileData(compileData, portAddress).Imported.has_value()) { return true; }
+        const auto& imported = GetPortCompileData(compileData, portAddress).Imported;
+        if (imported) { return &*imported; }
         const auto& portDescription = graphDefinition.GetPortDescription(portAddress);
-        return !portDescription.AliasInput.empty() && IsImportedResource(graphDefinition, compileData, inputSources, inputSources.at({portAddress.Node, portDescription.AliasInput}));
+        if (portDescription.AliasInput.empty()) { return nullptr; }
+        return FindImportedResource(graphDefinition, compileData, inputSources, inputSources.at({portAddress.Node, portDescription.AliasInput}));
     }
 
-    // Find the minimum-copy consumer bindings for one placement, including mutable alias descendants.
-    const ResourcePlacementChoice* SelectResourcePlacement(const FrameGraphDefinition& graphDefinition,
+    // Rank consumer bindings for one placement, including mutable alias descendants.
+    void EvaluateResourcePlacement(const FrameGraphDefinition& graphDefinition,
         const FrameGraphCompileData& compileData, const std::vector<Connection>& graphConnections, const InputSources& inputSources,
-        const ResourceDescriptions& resourceDescriptions, PlacementChoices& placementChoices, const PinAddress& sourceAddress, MemoryType storageType)
+        const ResourceDescriptions& resourceDescriptions, PlacementCandidates& candidates, const PinAddress& sourceAddress, MemoryType storageType)
     {
-        const auto placementKey = std::make_pair(sourceAddress, storageType);
-        if (placementChoices.count(placementKey)) { return placementChoices.at(placementKey).get(); }
-        auto& savedChoice = placementChoices[placementKey];
         const auto& nodeDefinition = graphDefinition.Nodes.at(sourceAddress.Node);
         const auto& portDescription = graphDefinition.GetPortDescription(sourceAddress);
         const auto requestedMemory = portDescription.RequestedMemory;
         const auto memoryCapabilities = GetResourceMemoryCapabilities(graphDefinition, compileData, resourceDescriptions, sourceAddress);
         if ((requestedMemory != MemoryType::Auto && requestedMemory != storageType)
             || !(storageType == MemoryType::Local ? memoryCapabilities.Local : memoryCapabilities.Shared)
-            || (GetPortCompileData(compileData, sourceAddress).Imported && storageType != MemoryType::Local)) { return nullptr; }
-        std::map<uint32_t, ConsumerBindingChoice> consumerChoices;
+            || (GetPortCompileData(compileData, sourceAddress).Imported && storageType != MemoryType::Local)) { return; }
+        // One best candidate per combination of export and per-device replicas.
+        std::map<uint32_t, PlacementCandidate> consumerChoices;
         consumerChoices[0];
         auto resourceDescription = resourceDescriptions.at(sourceAddress);
+        const auto receiver = nodeDefinition.DeviceRole == DEVICE_ROLE_PRIMARY ? DEVICE_ROLE_SECONDARY : DEVICE_ROLE_PRIMARY;
+        const auto* imported = FindImportedResource(graphDefinition, compileData, inputSources, sourceAddress);
+        const bool allowCompute = resourceDescription.Type == ResourceType::Texture2D && !resourceDescription.IsDepth()
+            && compileData.QueuePolicy != TransportQueuePolicy::ForceCopy;
+        const bool canComputeExport = allowCompute && compileData.ComputeCopyFormats[nodeDefinition.DeviceRole].count(resourceDescription.Format)
+            && !compileData.RejectedComputeExports.count(sourceAddress)
+            && (!imported || HasUsage(imported->Usages, ResourceUsage::GraphicsShaderRead));
+        const bool canComputeImport = allowCompute
+            && compileData.ComputeCopyFormats[receiver].count(resourceDescription.Format)
+            && !compileData.RejectedComputeImports.count(sourceAddress);
+        bool hasRemoteConsumer = false;
         for (const auto& graphConnection : graphConnections)
         {
             if (!(graphConnection.Source == sourceAddress)) { continue; }
             const auto& consumerDefinition = graphDefinition.Nodes.at(graphConnection.Target.Node);
+            const bool isRemote = consumerDefinition.DeviceRole != nodeDefinition.DeviceRole;
+            hasRemoteConsumer |= isRemote;
             const auto& passDescription = consumerDefinition.Description;
             const auto consumerCapabilities = GetResourceMemoryCapabilities(graphDefinition, compileData, resourceDescriptions, graphConnection.Target);
             const auto requestedAccess = passDescription.Inputs.at(graphConnection.Target.Pin).RequestedMemory;
-            std::map<uint32_t, ConsumerBindingChoice> nextChoices;
+            std::map<uint32_t, PlacementCandidate> nextChoices;
             for (const auto& choiceEntry : consumerChoices)
             {
                 for (auto accessType : {MemoryType::Local, MemoryType::Shared})
                 {
                     if ((requestedAccess != MemoryType::Auto && requestedAccess != accessType)
                         || !(accessType == MemoryType::Local ? consumerCapabilities.Local : consumerCapabilities.Shared)) { continue; }
-                    if (IsImportedResource(graphDefinition, compileData, inputSources, sourceAddress)
+                    if (imported
                         && graphDefinition.GetPortDescription(graphConnection.Target).Access != DataAccess::ReadOnly
                         && (consumerDefinition.DeviceRole != nodeDefinition.DeviceRole
-                            || storageType != (accessType == MemoryType::Local ? MemoryType::Local : MemoryType::Shared))) { continue; }
-                    ConsumerBindingChoice consumerChoice = choiceEntry.second;
+                            || storageType != accessType)) { continue; }
+                    auto consumerChoice = choiceEntry.second;
                     bool validChoice = true;
                     for (const auto& outputEntry : passDescription.Outputs)
                     {
                         if (outputEntry.second.AliasInput != graphConnection.Target.Pin) { continue; }
-                        auto aliasChoice = SelectResourcePlacement(graphDefinition, compileData, graphConnections,
-                            inputSources, resourceDescriptions, placementChoices, {consumerDefinition.Id, outputEntry.first},
-                            accessType == MemoryType::Local ? MemoryType::Local : MemoryType::Shared);
-                        if (!aliasChoice) { validChoice = false; break; }
-                        consumerChoice.AliasChoices.push_back(aliasChoice);
-                        consumerChoice.AliasCopyCount += aliasChoice->TotalCopies;
+                        const auto alias = candidates.find({{consumerDefinition.Id, outputEntry.first}, accessType});
+                        if (alias == candidates.end()) { validChoice = false; break; }
+                        consumerChoice.Cost.Add(alias->second.Cost);
                     }
                     if (!validChoice) { continue; }
-                    const bool isRemote = consumerDefinition.DeviceRole != nodeDefinition.DeviceRole;
                     const bool needsReplica = NeedsFrameGraphLocalCopy(storageType, accessType, isRemote);
+                    if (isRemote && !(canComputeImport && needsReplica))
+                    {
+                        ++consumerChoice.Cost.WithoutComputeImport;
+                        if (needsReplica) { ++consumerChoice.Cost.NativeImports; }
+                    }
                     uint32_t transferMask = choiceEntry.first;
                     if (storageType == MemoryType::Local && (isRemote || accessType == MemoryType::Shared)) { transferMask |= 1; }
                     if (needsReplica) { transferMask |= consumerDefinition.DeviceRole == DEVICE_ROLE_PRIMARY ? 2 : 4; }
-                    consumerChoice.ConsumerAccess.emplace(graphConnection.Target, accessType);
+                    consumerChoice.Plan.Consumers.emplace(graphConnection.Target, accessType);
                     const auto previousChoice = nextChoices.find(transferMask);
-                    if (previousChoice == nextChoices.end() || consumerChoice.AliasCopyCount < previousChoice->second.AliasCopyCount)
+                    if (previousChoice == nextChoices.end() || consumerChoice.Cost.Rank() < previousChoice->second.Cost.Rank())
                     { nextChoices[transferMask] = std::move(consumerChoice); }
                 }
             }
             consumerChoices = std::move(nextChoices);
-            if (consumerChoices.empty()) { return nullptr; }
+            if (consumerChoices.empty()) { return; }
             resourceDescription.Usages |= graphDefinition.GetPortDescription(graphConnection.Target).Usages;
         }
-        uint64_t minimumCopies = (std::numeric_limits<uint64_t>::max)();
         const uint32_t resourceComponents = resourceDescription.Type == ResourceType::DrawStream ? 2 : 1;
-        for (const auto& choiceEntry : consumerChoices)
+        auto best = consumerChoices.begin();
+        for (auto it = consumerChoices.begin(); it != consumerChoices.end(); ++it)
         {
-            const auto copyCount = CountTransportStages(choiceEntry.first) * resourceComponents;
-            const auto totalCopies = uint64_t(copyCount) + choiceEntry.second.AliasCopyCount;
-            if (totalCopies >= minimumCopies) { continue; }
-            minimumCopies = totalCopies;
-            savedChoice = std::make_unique<ResourcePlacementChoice>();
-            savedChoice->SourceAddress = sourceAddress;
-            auto& resourcePlan = savedChoice->PlacementPlan;
-            resourcePlan.Description = resourceDescription;
-            resourcePlan.Storage = storageType;
-            if (!portDescription.AliasInput.empty()) { resourcePlan.Alias = {nodeDefinition.Id, portDescription.AliasInput}; }
-            resourcePlan.Export = (choiceEntry.first & 1) != 0;
-            resourcePlan.BufferPayload = !resourceDescription.IsBuffer() && (resourceDescription.IsDepth() || resourceDescription.Type != ResourceType::Texture2D
-                || (storageType == MemoryType::Local && std::all_of(choiceEntry.second.ConsumerAccess.begin(), choiceEntry.second.ConsumerAccess.end(),
-                    [](const auto& consumerAccess) { return consumerAccess.second == MemoryType::Local; })));
-            resourcePlan.CopyCount = copyCount;
-            resourcePlan.Consumers = choiceEntry.second.ConsumerAccess;
-            savedChoice->TotalCopies = totalCopies;
-            savedChoice->AliasChoices = choiceEntry.second.AliasChoices;
+            auto& [mask, candidate] = *it;
+            auto& plan = candidate.Plan;
+            plan.CopyCount = CountTransportStages(mask) * resourceComponents;
+            plan.Export = (mask & 1) != 0;
+            const bool remoteExport = plan.Export && hasRemoteConsumer;
+            plan.ComputeExport = remoteExport && canComputeExport;
+            const uint32_t remoteReplicaMask = receiver == DEVICE_ROLE_PRIMARY ? 2 : 4;
+            plan.ComputeImport = canComputeImport && (mask & remoteReplicaMask);
+            // One export serves all readers. A direct shared output needs no export.
+            if (allowCompute && remoteExport && !plan.ComputeExport) { ++candidate.Cost.NativeExports; }
+            candidate.Cost.Copies += plan.CopyCount;
+            if (candidate.Cost.Rank() < best->second.Cost.Rank()) { best = it; }
         }
-        return savedChoice.get();
-    }
-
-    // Commit a selected placement and its alias plans once, accumulating the planned copy count.
-    void PublishResourcePlacement(const ResourcePlacementChoice* placementChoice, FrameGraphPlan& executionPlan)
-    {
-        if (!executionPlan.Resources.emplace(placementChoice->SourceAddress, placementChoice->PlacementPlan).second) { return; }
-        if (placementChoice->PlacementPlan.CopyCount > (std::numeric_limits<uint32_t>::max)() - executionPlan.CopyCount)
-        { throw std::invalid_argument("ERROR: FrameGraph transport copy count exceeds UINT32_MAX. Reduce the number of transported resource "
-            "components or cross-device connections."); }
-        executionPlan.CopyCount += placementChoice->PlacementPlan.CopyCount;
-        for (const auto& aliasChoice : placementChoice->AliasChoices) { PublishResourcePlacement(aliasChoice, executionPlan); }
+        auto& plan = best->second.Plan;
+        plan.Description = resourceDescription;
+        plan.Storage = storageType;
+        if (!portDescription.AliasInput.empty()) { plan.Alias = {nodeDefinition.Id, portDescription.AliasInput}; }
+        if (!resourceDescription.IsBuffer())
+        {
+            const bool localBindingsOnly = storageType == MemoryType::Local &&
+                std::all_of(plan.Consumers.begin(), plan.Consumers.end(), [](const auto& consumer) { return consumer.second == MemoryType::Local; });
+            plan.BufferPayload = !plan.ComputeExport && !plan.ComputeImport &&
+                (resourceDescription.IsDepth() || resourceDescription.Type != ResourceType::Texture2D || localBindingsOnly);
+            auto& producerUsages = storageType == MemoryType::Shared ? plan.SharedTextureUsages : plan.LocalTextureUsages;
+            producerUsages[nodeDefinition.DeviceRole] |= portDescription.Usages;
+            if (plan.ComputeExport)
+            {
+                plan.LocalTextureUsages[nodeDefinition.DeviceRole] |= ResourceUsage::NonPixelShaderRead;
+                plan.SharedTextureUsages[nodeDefinition.DeviceRole] |= ResourceUsage::UnorderedAccess;
+            }
+            if (plan.ComputeImport)
+            {
+                plan.SharedTextureUsages[receiver] |= ResourceUsage::NonPixelShaderRead;
+                plan.LocalTextureUsages[receiver] |= ResourceUsage::UnorderedAccess;
+            }
+            for (const auto& [target, access] : plan.Consumers)
+            {
+                const auto role = graphDefinition.Nodes.at(target.Node).DeviceRole;
+                auto& usages = access == MemoryType::Shared ? plan.SharedTextureUsages : plan.LocalTextureUsages;
+                usages[role] |= graphDefinition.GetPortDescription(target).Usages;
+            }
+        }
+        candidates.emplace(std::make_pair(sourceAddress, storageType), std::move(best->second));
     }
 
     // Compare Local and Shared candidates for each root output; preserve the Local tie-break.
@@ -464,21 +499,41 @@ namespace
         const std::vector<Connection>& graphConnections, const InputSources& inputSources,
         const ResourceDescriptions& resourceDescriptions, FrameGraphPlan& executionPlan)
     {
-        PlacementChoices placementChoices;
+        // The cost of a later version must be known before ranking its source.
+        PlacementCandidates candidates;
+        for (auto it = executionPlan.Order.rbegin(); it != executionPlan.Order.rend(); ++it)
+        {
+            for (const auto& [pin, output] : graphDefinition.Nodes.at(*it).Description.Outputs)
+            {
+                for (auto storage : {MemoryType::Local, MemoryType::Shared})
+                {
+                    EvaluateResourcePlacement(graphDefinition, compileData, graphConnections, inputSources,
+                        resourceDescriptions, candidates, {*it, pin}, storage);
+                }
+            }
+        }
+        // In execution order an alias can inherit its input's already selected binding.
         for (const auto& nodeId : executionPlan.Order)
         {
             const auto& nodeDefinition = graphDefinition.Nodes.at(nodeId);
             for (const auto& outputEntry : nodeDefinition.Description.Outputs)
             {
-                if (!outputEntry.second.AliasInput.empty()) { continue; }
                 const PinAddress sourceAddress{nodeId, outputEntry.first};
-                auto localChoice = SelectResourcePlacement(graphDefinition, compileData, graphConnections,
-                    inputSources, resourceDescriptions, placementChoices, sourceAddress, MemoryType::Local);
-                auto sharedChoice = SelectResourcePlacement(graphDefinition, compileData, graphConnections,
-                    inputSources, resourceDescriptions, placementChoices, sourceAddress, MemoryType::Shared);
-                // Iterating Local first gives the required stable producer tie-break.
-                auto selectedChoice = localChoice && (!sharedChoice || localChoice->TotalCopies <= sharedChoice->TotalCopies) ? localChoice : sharedChoice;
-                if (!selectedChoice)
+                auto selected = candidates.end();
+                if (!outputEntry.second.AliasInput.empty())
+                {
+                    const PinAddress input{nodeId, outputEntry.second.AliasInput};
+                    const auto& sourcePlan = executionPlan.Resources.at(inputSources.at(input));
+                    selected = candidates.find({sourceAddress, sourcePlan.Consumers.at(input)});
+                }
+                else
+                {
+                    selected = candidates.find({sourceAddress, MemoryType::Local});
+                    const auto shared = candidates.find({sourceAddress, MemoryType::Shared});
+                    if (shared != candidates.end() && (selected == candidates.end() || shared->second.Cost.Rank() < selected->second.Cost.Rank()))
+                    { selected = shared; }
+                }
+                if (selected == candidates.end())
                 {
                     std::string requestedPolicies = " requested storage=" + std::string(GetMemoryTypeName(outputEntry.second.RequestedMemory));
                     for (const auto& graphConnection : graphConnections)
@@ -492,7 +547,12 @@ namespace
                         + "; schema, SDK, hardware or alias constraint excludes requested access. Choose Local storage/access where "
                         "supported, remove conflicting alias requirements, or use adapters that support the requested shared route.");
                 }
-                PublishResourcePlacement(selectedChoice, executionPlan);
+                auto& plan = selected->second.Plan;
+                if (plan.CopyCount > (std::numeric_limits<uint32_t>::max)() - executionPlan.CopyCount)
+                { throw std::invalid_argument("ERROR: FrameGraph transport copy count exceeds UINT32_MAX. Reduce the number of transported resource "
+                    "components or cross-device connections."); }
+                executionPlan.CopyCount += plan.CopyCount;
+                executionPlan.Resources.emplace(sourceAddress, std::move(plan));
             }
         }
     }
@@ -571,7 +631,7 @@ std::string FrameGraphPlan::GetDebugReport(const FrameGraphDefinition& definitio
         }
         out << " | usages=" << uint32_t(p.Description.Usages);
         if (p.CopyCount) { out << " | copies=" << p.CopyCount; }
-        if (p.Export) { out << " export"; }
+        if (p.Export) { out << (p.ComputeExport ? " export via ComputeCopy (DIRECT)" : " export"); }
         if (p.BufferPayload && (p.Export || p.Storage == MemoryType::Shared)) { out << " via footprint buffer"; }
         if (p.Consumers.empty()) { out << " | unused"; }
         out << '\n';
@@ -579,7 +639,8 @@ std::string FrameGraphPlan::GetDebugReport(const FrameGraphDefinition& definitio
         {
             const bool remote = definition.Nodes.at(entry.first.Node).DeviceRole != definition.Nodes.at(target.Node).DeviceRole;
             out << "    -> " << FormatPinAddress(target) << " | " << GetMemoryTypeName(access);
-            if (NeedsFrameGraphLocalCopy(p.Storage, access, remote)) { out << " replica"; }
+            if (NeedsFrameGraphLocalCopy(p.Storage, access, remote))
+            { out << (p.ComputeImport && remote ? " replica via ComputeCopy (DIRECT)" : " replica"); }
             out << '\n';
         }
     }

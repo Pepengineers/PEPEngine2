@@ -36,13 +36,7 @@ void GDX12GPUTimer::Initialize(GDX12Device* device, GDX12CommandQueue* queue, UI
     if (!device || !queue) { return; }
 
     const bool copyQueue = queue->GetType() == D3D12_COMMAND_LIST_TYPE_COPY;
-    if (copyQueue)
-    {
-        D3D12_FEATURE_DATA_D3D12_OPTIONS3 options{};
-        if (FAILED(device->GetDevice()->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS3, &options, sizeof(options))) ||
-            !options.CopyQueueTimestampQueriesSupported)
-        { return; }
-    }
+    if (copyQueue && !device->GetDeviceFeatures().Features.CopyQueueTimestampQueriesSupported()) { return; }
 
     _commandQueue = queue;
     ThrowIfFailed(_commandQueue->GetCommandQueue()->GetTimestampFrequency(&_timestampFrequency));

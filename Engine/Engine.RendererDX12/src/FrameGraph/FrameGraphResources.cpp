@@ -345,10 +345,12 @@ FrameGraphPhysicalResource& FrameGraphSharedResources::GetDeviceMapping(GDX12Dev
 }
 
 HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceResources* other,
-    const ResourceDescription& description, bool bufferPayload, FrameGraphSharedResources& result)
+    const ResourcePlan& plan, FrameGraphSharedResources& result)
 {
     CheckOwner(producer);
     CheckOwner(other);
+    const auto& description = plan.Description;
+    const bool bufferPayload = plan.BufferPayload;
     FrameGraphSharedResources created;
     if (bufferPayload && description.IsBuffer()) { throw std::invalid_argument("ERROR: GPU buffer transport was configured with a texture-footprint payload. Transport GPU buffers directly "
         "without enabling a texture-footprint payload."); }
@@ -363,6 +365,11 @@ HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceRes
         Footprints(producer->Device, description, footprints, payloadBytes);
         ValidateFootprints(other->Device, description, footprints, payloadBytes);
     }
+    else if (!description.IsBuffer())
+    {
+        const auto native = NativeTextureDescription(description);
+        producer->Device->GetDevice()->GetCopyableFootprints(&native, 0, 1, 0, nullptr, nullptr, nullptr, &payloadBytes);
+    }
     created.Producer = std::make_unique<FrameGraphPhysicalResource>();
     created.Producer->DeviceResources = producer;
     if (other->Device != producer->Device)
@@ -375,6 +382,7 @@ HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceRes
         if (!mapping) { continue; }
         mapping->Description = description;
         mapping->Footprints = footprints;
+        mapping->TransferBytes = payloadBytes;
     }
     const size_t components = description.Type == ResourceType::DrawStream ? 2 : 1;
     for (size_t i = 0; i < components; ++i)
@@ -392,7 +400,10 @@ HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceRes
         }
         else
         {
-            desc = NativeTextureDescription(description);
+            // The native description must match on both GPUs. Only shared bindings require texture flags.
+            auto sharedDescription = description;
+            sharedDescription.Usages = plan.SharedTextureUsages[DEVICE_ROLE_PRIMARY] | plan.SharedTextureUsages[DEVICE_ROLE_SECONDARY];
+            desc = NativeTextureDescription(sharedDescription);
             desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
         }
         desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
@@ -413,7 +424,9 @@ HRESULT TryCreateFrameGraphShared(GDX12DeviceResources* producer, GDX12DeviceRes
             }
             else
             {
-                mapping->Texture = CreateTexture(mapping->DeviceResources, description, resource->D3DResource);
+                auto mappingDescription = description;
+                mappingDescription.Usages = plan.SharedTextureUsages[mapping->DeviceResources->Device->Role];
+                mapping->Texture = CreateTexture(mapping->DeviceResources, mappingDescription, resource->D3DResource);
             }
         }
         created.Allocations.push_back(std::move(allocation));
@@ -461,8 +474,12 @@ FrameGraphCopyStatistics CopyFrameGraphResource(GDX12CommandList* commands, Fram
         const auto dst = targetTexture->GetResource()->D3DResource;
         if (src.Get() == dst.Get()) { return result; }
         commands->CopyResource(dst.Get(), src.Get());
-        std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints;
-        Footprints(source.DeviceResources->Device, a, footprints, result.Bytes);
+        result.Bytes = source.TransferBytes ? source.TransferBytes : target.TransferBytes;
+        if (!result.Bytes)
+        {
+            std::vector<D3D12_PLACED_SUBRESOURCE_FOOTPRINT> footprints;
+            Footprints(source.DeviceResources->Device, a, footprints, result.Bytes);
+        }
         result.Commands = 1;
         return result;
     }
@@ -513,10 +530,9 @@ PortCapabilities QueryFrameGraphCapabilities(GDX12Device* device, const PortDesc
     PortCapabilities result{schema.AllowLocal, schema.AllowShared};
     const bool buffer = schema.Type == ResourceType::RawBuffer || schema.Type == ResourceType::StructuredBuffer || schema.Type == ResourceType::DrawStream;
     if (buffer) { return result; }
-    if (schema.IsDepth() || schema.Type != ResourceType::Texture2D) { result.Shared = false; }
-    D3D12_FEATURE_DATA_D3D12_OPTIONS options = {};
-    if (FAILED(device->GetDevice()->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS, &options, sizeof(options))) ||
-        !options.CrossAdapterRowMajorTextureSupported) { result.Shared = false; }
+    const auto& specs = device->GetDeviceFeatures();
+    if (schema.IsDepth() || schema.Type != ResourceType::Texture2D || !specs.Features.CrossAdapterRowMajorTextureSupported())
+    { result.Shared = false; }
     bool anySupportedFormat = schema.Formats.empty();
     for (auto format : schema.Formats)
     {
@@ -524,15 +540,16 @@ PortCapabilities QueryFrameGraphCapabilities(GDX12Device* device, const PortDesc
             !HasUsage(schema.Usages, ResourceUsage::DepthWrite) && !HasUsage(schema.Usages, ResourceUsage::DepthRead))
         { format = DXGI_FORMAT_R32_FLOAT; }
         D3D12_FEATURE_DATA_FORMAT_SUPPORT support = {format};
-        bool supported = SUCCEEDED(device->GetDevice()->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &support, sizeof(support)));
-        supported &= (support.Support1 & D3D12_FORMAT_SUPPORT1_TEXTURE2D) != 0;
+        if (FAILED(specs.GetFormatSupport(support))) { continue; }
+        bool supported = (support.Support1 & D3D12_FORMAT_SUPPORT1_TEXTURE2D) != 0;
         if (HasUsage(schema.Usages, ResourceUsage::RenderTarget)) { supported &= (support.Support1 & D3D12_FORMAT_SUPPORT1_RENDER_TARGET) != 0; }
         if (HasUsage(schema.Usages, ResourceUsage::DepthWrite) || HasUsage(schema.Usages, ResourceUsage::DepthRead))
         { supported &= (support.Support1 & D3D12_FORMAT_SUPPORT1_DEPTH_STENCIL) != 0; }
         if (HasUsage(schema.Usages, ResourceUsage::PixelShaderRead) || HasUsage(schema.Usages, ResourceUsage::NonPixelShaderRead))
         {
             D3D12_FEATURE_DATA_FORMAT_SUPPORT shader = {schema.IsDepth() ? DXGI_FORMAT_R32_FLOAT : format};
-            supported &= SUCCEEDED(device->GetDevice()->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &shader, sizeof(shader)));
+            if (shader.Format == format) { shader = support; }
+            else if (FAILED(specs.GetFormatSupport(shader))) { continue; }
             supported &= (shader.Support1 & (D3D12_FORMAT_SUPPORT1_SHADER_LOAD | D3D12_FORMAT_SUPPORT1_SHADER_SAMPLE)) != 0;
         }
         if (HasUsage(schema.Usages, ResourceUsage::UnorderedAccess))

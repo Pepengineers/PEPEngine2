@@ -178,7 +178,7 @@ void GDX12Texture::ValidateDescription()
                 "allocation format family.");
         }
         D3D12_FEATURE_DATA_FORMAT_SUPPORT support = { format };
-        ThrowIfFailed(_device->GetDevice()->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &support, sizeof(support)));
+        ThrowIfFailed(_device->GetDeviceFeatures().GetFormatSupport(support));
         if ((support.Support1 & required) != required ||
             (shaderRead && !(support.Support1 & (D3D12_FORMAT_SUPPORT1_SHADER_LOAD | D3D12_FORMAT_SUPPORT1_SHADER_SAMPLE))))
         {
